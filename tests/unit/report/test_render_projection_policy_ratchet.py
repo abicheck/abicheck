@@ -46,14 +46,19 @@ _POLICY_HEADS = frozenset(
         "reclassify",
         "severity",
         "report_summary",
+        "semver",
     }
 )
 #: Disposition-audit *compute* entry points (the renderer should read the
 #: document's ``disposition_audit`` instead of recomputing it).
 _DISPOSITION_COMPUTE = frozenset({"compute_disposition_audit", "add_disposition_audit"})
 
-#: Compute-half source module outside ``report/`` that the ratchet also covers.
-_SOURCE_MODULES = ("html_report.py",)
+#: Compute-half source modules outside ``report/`` that the ratchet also covers.
+#: ``reporter.py`` (the ``--stat`` and root-cause JSON path) and
+#: ``reporter_markdown.py`` (the Markdown compute functions) are source modules
+#: too: they may read a ``DiffResult`` and must take their kind sets, run
+#: summary and release recommendation from ``report/policy_facts.py``.
+_SOURCE_MODULES = ("html_report.py", "reporter.py", "reporter_markdown.py")
 
 _RECORDED_POLICY_IMPORTS: dict[str, frozenset[str]] = {
     "render_markdown_alternate.py": frozenset({"policy.evaluate"}),
@@ -63,10 +68,33 @@ _RECORDED_POLICY_IMPORTS: dict[str, frozenset[str]] = {
     # Legacy root modules still holding the HTML compute's registry lookups
     # (``kind_str``/``category``/``severity``) and ``compatibility_metrics``.
     "html_report.py": frozenset({"report_classifications", "report_summary"}),
+    # ``policy.severity`` here is the ``TYPE_CHECKING``-only ``SeverityConfig``
+    # annotation: a type, not a decision. Nothing else in the module reaches policy.
+    "reporter.py": frozenset({"policy.severity"}),
+    # ``policy.evaluate`` (``evaluate``), ``policy.classification``
+    # (``impact_for``/``evidence_status_for_result``), ``policy.reclassify``
+    # (``active_reclassify_rules``), ``policy.severity`` (``compute_exit_code``)
+    # and ``report_classifications`` (``ENVIRONMENT_DRIFT_KINDS``) are the
+    # decisions this module still makes itself. ``effective_kind_sets``,
+    # ``build_summary`` and ``recommend_release_for_report`` now resolve
+    # through ``report/policy_facts.py``.
+    "reporter_markdown.py": frozenset(
+        {
+            "policy.classification",
+            "policy.evaluate",
+            "policy.reclassify",
+            "policy.severity",
+            "report_classifications",
+        }
+    ),
 }
 _RECORDED_DISPOSITION_COMPUTE: dict[str, frozenset[str]] = {
     "render_markdown_alternate.py": frozenset({"compute_disposition_audit"}),
     "render_markdown_document.py": frozenset({"compute_disposition_audit"}),
+    # ``--stat`` and root-cause JSON still compute the disposition audit per call
+    # rather than reading it from a shared document.
+    "reporter.py": frozenset({"add_disposition_audit"}),
+    "reporter_markdown.py": frozenset({"compute_disposition_audit"}),
 }
 
 
