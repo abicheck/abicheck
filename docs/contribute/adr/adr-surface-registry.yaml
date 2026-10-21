@@ -411,6 +411,8 @@ adrs:
       - action: actions/check-target
       - action: actions/aggregate
       - cli: aggregate
+      - action: expected-archive-digest
+      - action: actions/resolve-baseline:expected-archive-digest
     missing: P2 of the lifecycle model is only partially implemented (see the ADR).
 
   - id: ADR-048

@@ -666,6 +666,20 @@ inputs:
       when the input is omitted, so an explicit '' is a real opt-out.
     required: false
     default: 'tag'
+  expected-archive-digest:
+    description: >
+      SHA-256 the downloaded baseline-set archive must have, as 'sha256:<hex>'
+      or bare hex. Checked against the archive's raw bytes before anything is
+      extracted, and a mismatch fails the run (it is not tolerated under
+      dry-run). Requires baseline-profile and baseline-target, because only
+      that selection fetches an archive. Pin the value the producer reported:
+      actions/stage-baseline's archive-sha256 output. The digest covers the
+      whole file, so a consistently repacked archive, one whose manifest was
+      rewritten to match, fails unless the pin was rewritten too. Omit (default)
+      to skip the check; the archive's digest is still reported in the
+      baseline-archive-digest output.
+    required: false
+    default: ''
 
   # ── Output & policy ─────────────────────────────────────────────────────────
   format:
@@ -1191,6 +1205,16 @@ outputs:
       The manifest profile of a baseline-set baseline. Empty for any other
       baseline source.
     value: ${{ steps.run-abicheck.outputs.baseline-profile }}
+  baseline-archive-digest:
+    description: >
+      'sha256:<hex>' of the baseline-set archive this run extracted, computed
+      from its raw bytes. Empty for any other baseline source.
+    value: ${{ steps.run-abicheck.outputs.baseline-archive-digest }}
+  baseline-archive-verified:
+    description: >
+      'true' when expected-archive-digest was set and matched the archive,
+      'false' when it was not set. Empty for any other baseline source.
+    value: ${{ steps.run-abicheck.outputs.baseline-archive-verified }}
 
 runs:
   using: 'composite'
@@ -1242,6 +1266,7 @@ runs:
         INPUT_BASELINE_ASSET_NAME_TEMPLATE: ${{ inputs.baseline-asset-name-template }}
         INPUT_BASELINE_GENERATION: ${{ inputs.baseline-generation }}
         INPUT_BASELINE_PROJECT_REF: ${{ inputs.baseline-project-ref }}
+        INPUT_EXPECTED_ARCHIVE_DIGEST: ${{ inputs.expected-archive-digest }}
         INPUT_ESTIMATE: ${{ inputs.estimate }}
         INPUT_AUDIT: ${{ inputs.audit }}
         # No-baseline capability-gap guard: compare's audit-only shape
@@ -1454,6 +1479,7 @@ runs:
         INPUT_BASELINE_ASSET_NAME_TEMPLATE: ${{ inputs.baseline-asset-name-template }}
         INPUT_BASELINE_GENERATION: ${{ inputs.baseline-generation }}
         INPUT_BASELINE_PROJECT_REF: ${{ inputs.baseline-project-ref }}
+        INPUT_EXPECTED_ARCHIVE_DIGEST: ${{ inputs.expected-archive-digest }}
         INPUT_ADD_JOB_SUMMARY: ${{ inputs.add-job-summary }}
         INPUT_DEBUG_INFO1: ${{ inputs.debug-info1 }}
         INPUT_DEBUG_INFO2: ${{ inputs.debug-info2 }}

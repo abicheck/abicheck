@@ -32,6 +32,8 @@ _fail_ambiguous() {
     echo "binary-paths={}"
     echo "member-snapshots-dir="
     echo "member-header-evidence=none"
+    echo "archive-digest="
+    echo "archive-digest-verified=false"
     echo "message=$message"
     echo "channel=$CHANNEL"
   } >> "${GITHUB_OUTPUT:-/dev/null}"
@@ -49,6 +51,7 @@ REQUIRED="${INPUT_REQUIRED:-true}"
 CANDIDATE_BUILD_OUTPUT="${INPUT_CANDIDATE_BUILD_OUTPUT:-}"
 EXPECTED_PROJECT_REF="${INPUT_EXPECTED_PROJECT_REF:-}"
 EXPECTED_BASELINE_GENERATION="${INPUT_EXPECTED_BASELINE_GENERATION:-}"
+EXPECTED_ARCHIVE_DIGEST="${INPUT_EXPECTED_ARCHIVE_DIGEST:-}"
 ALLOW_NEW_TARGET="${INPUT_ALLOW_NEW_TARGET:-false}"
 STAGE_MEMBER_SNAPSHOTS="${INPUT_STAGE_MEMBER_SNAPSHOTS:-false}"
 ACTION_PATH="${ACTION_PATH:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}"
@@ -80,6 +83,12 @@ case "$STAGE_MEMBER_SNAPSHOTS" in
   true | false) ;;
   *) _fail "stage-member-snapshots '$STAGE_MEMBER_SNAPSHOTS' is not recognized. Use 'true' or 'false'." ;;
 esac
+# expected-archive-digest pins the archive file's own bytes (sha256:<hex> or
+# bare hex). Validated here, not only inside the helper, so a malformed pin
+# fails as an input error even when baseline-path is not an archive at all.
+if [[ -n "$EXPECTED_ARCHIVE_DIGEST" ]] && ! [[ "$EXPECTED_ARCHIVE_DIGEST" =~ ^([Ss][Hh][Aa]256:)?[0-9A-Fa-f]{64}$ ]]; then
+  _fail "expected-archive-digest '$EXPECTED_ARCHIVE_DIGEST' is not a SHA-256 digest. Use 'sha256:<64 hex characters>' or the 64 hex characters alone."
+fi
 if [[ "$KIND" == "target" && -z "$TARGET" ]]; then
   _fail "target input is required when kind is 'target'."
 fi
@@ -98,7 +107,15 @@ fi
 # job per ADR-047 Section 10's storage-backend table), or extract it here if
 # it's an archive.
 _EXTRACT_DIR=""
+ARCHIVE_DIGEST=""
+ARCHIVE_VERIFIED="false"
 if [[ -d "$BASELINE_PATH" ]]; then
+  # A digest pins archive bytes. A directory has none to check, so pinning one
+  # is refused rather than silently ignored: the caller would believe the set
+  # was verified when nothing was.
+  if [[ -n "$EXPECTED_ARCHIVE_DIGEST" ]]; then
+    _fail "expected-archive-digest is set but baseline-path '$BASELINE_PATH' is a directory, not an archive -- the digest pins an archive file's bytes, so there is nothing here to verify. Stage the set as its .tar.zst/.tar.gz/.tar archive, or unset expected-archive-digest."
+  fi
   BASELINE_DIR="$BASELINE_PATH"
 elif [[ -f "$BASELINE_PATH" ]]; then
   _EXTRACT_DIR=$(mktemp -d)
@@ -116,132 +133,57 @@ elif [[ -f "$BASELINE_PATH" ]]; then
   # and macOS's bsdtar.
   _ARCHIVE_COPY="$_EXTRACT_DIR.archive-input"
   # Every failure branch below uses _fail_ambiguous, not _fail: baseline-path
-  # WAS a file that existed, so a staging/extraction/format failure here
-  # means the archive itself is truncated, corrupted, or unusable -- the
-  # same class of malformed-baseline-set failure the no-manifest/ambiguous-
-  # subdirectory and symlink checks below already report as ambiguous, not
-  # a bare runner/input failure a continue-on-error caller can't tell apart
-  # from an unrelated problem (Codex review, third round).
+  # WAS a file that existed, so a staging, digest, extraction or format failure
+  # here means the archive itself is truncated, corrupted, altered or unusable
+  # -- the same class of malformed-baseline-set failure the manifest-shape check
+  # below reports as ambiguous, not a bare runner/input failure a
+  # continue-on-error caller can't tell apart from an unrelated problem.
   cp "$BASELINE_PATH" "$_ARCHIVE_COPY" \
     || _fail_ambiguous "failed to stage $BASELINE_PATH for extraction -- the archive may be truncated or unreadable."
+  # The archive's encoding is chosen from its own suffix, the same mapping the
+  # root Action's baseline-set fallback and stage-baseline use.
   case "$BASELINE_PATH" in
-    *.tar.zst)
-      # GNU tar's --zstd filters through an external `zstd` binary this
-      # composite Action never installs (only setup-python + pip install
-      # abicheck) -- on a minimal/self-hosted runner without one, tar fails
-      # before resolution even though the archive itself is perfectly
-      # valid, misreporting a good baseline as corrupt (Codex review, fifth
-      # round). Delegate to abicheck.extract.packages.TarExtractor's own
-      # _safe_extract_zst_tar (already installed by the earlier "Install
-      # abicheck" step) instead of reimplementing the same zstd-vs-
-      # zstandard fallback here: it tries the Python 'zstandard' package
-      # first, falls back to a system zstd binary, and -- unlike a plain
-      # `tarfile.extractall()` on Python <3.12, which has no member-path
-      # validation at all before PEP 706's `filter="data"` -- validates
-      # every member (rejects `..`-escaping paths, symlink-target escapes,
-      # and device/FIFO entries) before extracting, on every supported
-      # Python version, not just 3.12+ (Codex review, sixth round: a
-      # naive Python-side zstd fallback on Python 3.10/3.11 without a
-      # system zstd binary could extract a `../`-escaping member outside
-      # $BASELINE_DIR before the symlink/manifest checks below even run).
-      # -I (isolated mode, supported since Python 3.10, below this project's
-      # floor): do not prepend the script's own directory / the current
-      # working directory to sys.path, and ignore PYTHONPATH/other PYTHON*
-      # env vars entirely. Without it, a malicious caller repository could
-      # plant its own abicheck/extract/packages.py in the checkout (or point
-      # PYTHONPATH at one) and have *that* file imported instead of the
-      # installed abicheck package -- python3 -c's implicit "prepend cwd"
-      # behavior is exactly the shadowing vector. (Safe-path mode, -P,
-      # would also close the cwd-prepend half, but is 3.11+ only and still
-      # honors PYTHONPATH -- -I is strictly stronger and portable to 3.10.)
-      python3 -I -c '
-import sys
-from pathlib import Path
-from abicheck.extract.packages import TarExtractor
-
-TarExtractor._safe_extract_zst_tar(Path(sys.argv[1]), Path(sys.argv[2]))
-' "$_ARCHIVE_COPY" "$BASELINE_DIR" \
-        || _fail_ambiguous "failed to extract $BASELINE_PATH (.tar.zst) -- the archive is truncated or corrupted, or this runner has neither a 'zstd' command-line tool nor the Python 'zstandard' package available (install one of them, e.g. 'apt-get install zstd' or 'pip install zstandard')."
-      ;;
-    *.tar.gz | *.tgz | *.tar)
-      # Delegate to TarExtractor._safe_extract instead of plain `tar -x`:
-      # bare tar has no member validation at all, so a malformed archive
-      # could plant a `..`-escaping path, a symlink escaping $BASELINE_DIR,
-      # or a device/FIFO entry on disk before the symlink/manifest checks
-      # below even run -- the same class of risk the .tar.zst branch above
-      # already closed by routing through this same extractor (Codex
-      # review). `tarfile.open`'s default mode auto-detects gzip vs. plain
-      # tar from the file itself, so one call handles both extensions.
-      # -I: see the .tar.zst branch above -- same workspace-shadowing risk,
-      # same fix.
-      python3 -I -c '
-import sys
-from pathlib import Path
-from abicheck.extract.packages import TarExtractor
-
-TarExtractor._safe_extract(Path(sys.argv[1]), Path(sys.argv[2]))
-' "$_ARCHIVE_COPY" "$BASELINE_DIR" \
-        || _fail_ambiguous "failed to extract $BASELINE_PATH -- the archive is truncated or corrupted, or contains a disallowed member (path traversal, a symlink escaping the extraction root, or a device/FIFO entry)."
-      ;;
+    *.tar.zst) _ARCHIVE_FORMAT="tar.zst" ;;
+    *.tar.gz | *.tgz) _ARCHIVE_FORMAT="tar.gz" ;;
+    *.tar) _ARCHIVE_FORMAT="tar" ;;
     *)
       rm -f "$_ARCHIVE_COPY" || true
       _fail_ambiguous "baseline-path '$BASELINE_PATH' is a file but not a recognized archive (.tar.zst/.tar.gz/.tgz/.tar)."
       ;;
   esac
-  rm -f "$_ARCHIVE_COPY" || true
-  echo "::endgroup::"
-  # Reject any symlink the archive planted: a crafted/compromised baseline
-  # archive could stage a symlink at the path a later resolved
-  # snapshot-path/binaries-dir entry would follow, reading (or, chained with
-  # a second archive, writing) outside $_EXTRACT_DIR -- a baseline-set has
-  # no legitimate reason to contain one, so reject the whole extraction
-  # rather than silently following it (CodeRabbit review). Uses
-  # _fail_ambiguous, not _fail: a symlink-containing archive is a malformed
-  # baseline-set, the same class of failure the manifest-shape check below
-  # reports as ambiguous, not a bare usage error -- a caller inspecting
-  # this Action's outputs (or running under continue-on-error) must see the
-  # same typed outcome/bootstrap/message shape for it (Codex review).
-  # Captured via command substitution, not piped into `grep -q`: under
-  # `set -o pipefail`, `grep -q` exits as soon as it sees the first match
-  # without draining find's remaining output, which can SIGPIPE find (exit
-  # 141) -- pipefail then reports the pipeline's exit status as find's 141
-  # (the rightmost *non-zero* exit among the pipeline's commands, since
-  # grep's own exit was 0), so `if find ... | grep -q .` evaluates FALSE
-  # and this guard never fires, letting a symlink-laden archive silently
-  # resolve (Codex review, fifth round -- reproduced with an archive
-  # containing hundreds of symlinks). Command substitution reads find's
-  # full output with no downstream reader racing to close the pipe early,
-  # so there's no SIGPIPE to misreport.
-  _SYMLINKS=$(find "$BASELINE_DIR" -type l)
-  if [[ -n "$_SYMLINKS" ]]; then
-    _fail_ambiguous "baseline-set archive $BASELINE_PATH contains a symlink, which is not supported -- baseline-set archives must contain only plain files/directories."
+  # One owner for the archive's trust decisions, in this order: verify the
+  # bytes against expected-archive-digest (when pinned) BEFORE any member is
+  # written, extract with TarExtractor's member validation, then reject every
+  # symlink the archive planted. abicheck/workflows/baseline_archive.py
+  # implements all three; the root Action calls the same entry point.
+  # -I: the Python isolation invariant this Action applies to every
+  # interpreter call against a caller-controlled workspace.
+  _PREPARE_ARGS=(--archive "$_ARCHIVE_COPY" --dest "$BASELINE_DIR" --format "$_ARCHIVE_FORMAT")
+  if [[ -n "$EXPECTED_ARCHIVE_DIGEST" ]]; then
+    _PREPARE_ARGS+=(--expected-digest "$EXPECTED_ARCHIVE_DIGEST")
   fi
-  # An archive may itself contain one nested directory (e.g. the
-  # profile-named dir the archive was built from) rather than manifest.json
-  # at its root -- if there's no manifest.json at the extraction root but
-  # there's exactly one subdirectory, descend into it.
+  set +e
+  _PREPARE_OUTPUT=$(python3 -I -m abicheck.frontends.action.cli prepare-baseline-set "${_PREPARE_ARGS[@]}")
+  _PREPARE_EXIT=$?
+  set -e
+  rm -f "$_ARCHIVE_COPY" || true
+  if [[ $_PREPARE_EXIT -ne 0 ]]; then
+    _PREPARE_MESSAGE=$(printf '%s\n' "$_PREPARE_OUTPUT" | sed -n 's/^message=//p')
+    _fail_ambiguous "${_PREPARE_MESSAGE:-failed to prepare baseline-set archive $BASELINE_PATH (exit $_PREPARE_EXIT).}"
+  fi
+  BASELINE_DIR=$(printf '%s\n' "$_PREPARE_OUTPUT" | sed -n 's/^manifest-root=//p')
+  ARCHIVE_DIGEST=$(printf '%s\n' "$_PREPARE_OUTPUT" | sed -n 's/^archive-digest=//p')
+  ARCHIVE_VERIFIED=$(printf '%s\n' "$_PREPARE_OUTPUT" | sed -n 's/^verified=//p')
+  echo "::endgroup::"
+  # An archive may itself contain one nested directory (e.g. the profile-named
+  # dir the archive was built from) rather than manifest.json at its root. The
+  # helper descends into that single subdirectory; anything still lacking a
+  # manifest is malformed, not "no baseline published yet" -- which is only the
+  # not_found outcome reached when baseline-path doesn't exist at all, below.
+  # Falling through would let a required: false caller treat a broken archive as
+  # an ordinary bootstrap (Codex review), so this has a typed ambiguous outcome.
   if [[ ! -f "$BASELINE_DIR/manifest.json" ]]; then
-    _SUBDIRS=()
-    while IFS= read -r -d '' d; do _SUBDIRS+=("$d"); done \
-      < <(find "$BASELINE_DIR" -mindepth 1 -maxdepth 1 -type d -print0)
-    if [[ ${#_SUBDIRS[@]} -eq 1 && -f "${_SUBDIRS[0]}/manifest.json" ]]; then
-      BASELINE_DIR="${_SUBDIRS[0]}"
-    else
-      # 0 or >1 candidates -- this archive was actually provided but is
-      # malformed/ambiguous, which is a different problem than "no baseline
-      # published yet" (the legitimate not_found/bootstrap case, only ever
-      # reached when baseline-path doesn't exist at all, below). Falling
-      # through here would leave $BASELINE_DIR at the extraction root (no
-      # manifest.json), and resolve_baseline.py would then report
-      # not_found -- silently letting a `required: false` caller treat a
-      # broken archive as an ordinary "nothing published yet" bootstrap
-      # instead of a real extraction failure (Codex review). Uses
-      # _fail_ambiguous, not _fail: this has a real resolution outcome
-      # (ambiguous), not merely a usage error, so it must carry the same
-      # typed outputs every other resolution failure does (Codex review,
-      # second round).
-      _fail_ambiguous "baseline-set archive $BASELINE_PATH does not contain a manifest.json at its root or in a single unambiguous subdirectory -- this archive is malformed, not simply an unpublished baseline."
-    fi
+    _fail_ambiguous "baseline-set archive $BASELINE_PATH does not contain a manifest.json at its root or in a single unambiguous subdirectory -- this archive is malformed, not simply an unpublished baseline."
   fi
 else
   # Neither a directory nor a file -- this is the not_found case, not a
@@ -327,6 +269,8 @@ echo "::endgroup::"
 {
   echo "$RESOLVE_STDOUT"
   echo "channel=$CHANNEL"
+  echo "archive-digest=$ARCHIVE_DIGEST"
+  echo "archive-digest-verified=$ARCHIVE_VERIFIED"
 } >> "${GITHUB_OUTPUT:-/dev/null}"
 
 OUTCOME=$(echo "$RESOLVE_STDOUT" | sed -n 's/^outcome=//p')

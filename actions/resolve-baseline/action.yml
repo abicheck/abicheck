@@ -125,6 +125,21 @@ inputs:
       package version directly.
     required: false
     default: ''
+  expected-archive-digest:
+    description: >
+      SHA-256 of the baseline-set archive file this check expects, as
+      'sha256:<hex>' or bare hex. Checked against the archive's raw bytes
+      before any member is extracted; a mismatch fails closed with outcome
+      ambiguous, and nothing from the archive is read. The digest covers the
+      whole file, so an archive whose manifest was rewritten to match still
+      fails unless this pin was rewritten too -- which is why a caller pins
+      the digest its producer reported (actions/stage-baseline's
+      archive-sha256 output) rather than one recomputed from the staged file.
+      Requires baseline-path to be an archive: pinning a directory is a
+      usage error, because there are no bytes to check. Omit (default) to
+      skip the check.
+    required: false
+    default: ''
   allow-new-target:
     description: >
       'false' (default) -- a target absent from an otherwise-resolved
@@ -217,6 +232,16 @@ outputs:
   message:
     description: 'Human-readable explanation of the outcome.'
     value: ${{ steps.resolve.outputs.message }}
+  archive-digest:
+    description: >
+      'sha256:<hex>' of the baseline-set archive that was extracted, computed
+      from its raw bytes. Empty when baseline-path was a directory or did not
+      exist. Recorded whether or not expected-archive-digest was set, so a
+      caller can pin the value it verified.
+    value: ${{ steps.resolve.outputs.archive-digest }}
+  archive-digest-verified:
+    description: "'true' when expected-archive-digest was set and the archive's bytes matched it, 'false' otherwise (not pinned, or no archive)."
+    value: ${{ steps.resolve.outputs.archive-digest-verified }}
 
 runs:
   using: 'composite'
@@ -245,6 +270,7 @@ runs:
         INPUT_CANDIDATE_BUILD_OUTPUT: ${{ inputs.candidate-build-output }}
         INPUT_EXPECTED_PROJECT_REF: ${{ inputs.expected-project-ref }}
         INPUT_EXPECTED_BASELINE_GENERATION: ${{ inputs.expected-baseline-generation }}
+        INPUT_EXPECTED_ARCHIVE_DIGEST: ${{ inputs.expected-archive-digest }}
         INPUT_ALLOW_NEW_TARGET: ${{ inputs.allow-new-target }}
         INPUT_STAGE_MEMBER_SNAPSHOTS: ${{ inputs.stage-member-snapshots }}
         ACTION_PATH: ${{ github.action_path }}

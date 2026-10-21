@@ -569,13 +569,15 @@ class TestBaselineSourceOutputsAndSummary:
         result = _run_bash_script(script, dict(os.environ))
         assert result.returncode == 0, result.stderr
         lines = result.stdout.splitlines()
-        assert len(lines) == 5, lines
+        assert len(lines) == 7, lines
         assert [line.split("=", 1)[0] for line in lines] == [
             "baseline-source",
             "baseline-asset-name",
             "baseline-project-ref",
             "baseline-generation",
             "baseline-profile",
+            "baseline-archive-digest",
+            "baseline-archive-verified",
         ]
         assert "extra=injected" not in lines
         assert lines[2] == "baseline-project-ref=v1 ::add-mask::secret extra=injected"

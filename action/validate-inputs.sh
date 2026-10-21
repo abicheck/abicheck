@@ -493,6 +493,24 @@ if [[ ( -n "$_BASELINE_PROFILE" || -n "$_BASELINE_TARGET" ) && -z "$_ABI_BASELIN
   _fail "baseline-profile/baseline-target are set but abi-baseline is not -- the release-contract baseline-set fallback is only reached while resolving abi-baseline (a release tag or 'latest-release'), so without it these inputs can never trigger a fetch."
 fi
 
+# A file path in abi-baseline is used directly and never consults a release-
+# contract baseline-set archive, so a profile/target selection beside it would be
+# silently discarded. Refused here and again in run.sh's own pairing check.
+if [[ -n "$_ABI_BASELINE" && -f "$_ABI_BASELINE" && ( -n "$_BASELINE_PROFILE" || -n "$_BASELINE_TARGET" ) ]]; then
+  _fail "abi-baseline is a file path ('$_ABI_BASELINE'), which is used directly, but baseline-profile/baseline-target are also set. Those select a release-contract baseline-set archive that a file path never consults, so the selection would be silently discarded. Pass the file path alone, or unset baseline-profile and baseline-target to fetch from the release."
+fi
+# expected-archive-digest pins a release-contract baseline-set archive, which only
+# baseline-profile and baseline-target select -- so the pin needs that selection.
+_EXPECTED_ARCHIVE_DIGEST="${INPUT_EXPECTED_ARCHIVE_DIGEST:-}"
+if [[ -n "$_EXPECTED_ARCHIVE_DIGEST" ]]; then
+  if ! [[ "$_EXPECTED_ARCHIVE_DIGEST" =~ ^([Ss][Hh][Aa]256:)?[0-9A-Fa-f]{64}$ ]]; then
+    _fail "expected-archive-digest '$_EXPECTED_ARCHIVE_DIGEST' is not a SHA-256 digest. Use 'sha256:<64 hex characters>' or the 64 hex characters alone."
+  fi
+  if [[ -z "$_BASELINE_PROFILE" || -z "$_BASELINE_TARGET" ]]; then
+    _fail "expected-archive-digest pins a release-contract baseline-set archive, which only baseline-profile and baseline-target select. Set both, or unset expected-archive-digest."
+  fi
+fi
+
 # public-header-dir: dump mode, and compare mode's audit-only (no-baseline)
 # shape only -- the CLI's own --public-header-dir flag exists on `dump`
 # only; a two-sided `compare` has no equivalent (its own -H already derives

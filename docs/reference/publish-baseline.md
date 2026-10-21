@@ -234,6 +234,14 @@ to `asset-name` — the archive is written to the current working
 directory). Read-only over its input: it never commits, pushes, or
 uploads the archive it produces.
 
+It also outputs `archive-sha256`: the lowercase hex SHA-256 of the archive's
+raw bytes, computed on the finished file. A consumer pins it as
+`expected-archive-digest` on the root Action (with `baseline-profile` and
+`baseline-target`) or on [`actions/resolve-baseline`](resolve-baseline.md), so
+an archive replaced or rewritten after publication is refused. The digest
+covers the whole file, so it changes when the archive is repacked, even when
+the manifest is rewritten to match.
+
 See [Storing Baselines](../use/baseline-storage.md) for the narrative
 picture of where a staged archive fits among abicheck's baseline-storage
 backends — this page documents `actions/stage-baseline` itself as a fact
