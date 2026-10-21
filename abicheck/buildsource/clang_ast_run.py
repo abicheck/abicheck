@@ -168,9 +168,8 @@ def dump_tu_ast(
                 stderr,
                 stage=STAGE_JSON,
                 error=str(exc),
-                json_extra_data=(
-                    isinstance(exc, json.JSONDecodeError) and exc.msg == "Extra data"
-                ),
+                # json.JSONDecodeError's message opens with its reason.
+                json_extra_data=str(exc).startswith("Extra data"),
             )
         # The JSON load itself can consume the rest of the budget on a huge AST.
         late = _check_deadline()
