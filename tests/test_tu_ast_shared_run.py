@@ -229,8 +229,10 @@ def test_l5_parsers_read_the_same_edges_under_both_argvs(tmp_path: Path) -> None
     assert len(units) == 2
     shared_edges: dict[str, list[Any]] = {p.name: [] for p in L5_AST_PASSES}
     allow_edges: dict[str, list[Any]] = {p.name: [] for p in L5_AST_PASSES}
+    commands: list[str] = []
     for cu in units:
         shared_cmd, shared, allow_cmd, allow = _dump_both_ways(cu)
+        commands.append(f"shared={shared_cmd}\nallowlisted={allow_cmd}")
         # Both configurations ran to a tree, and they are genuinely different.
         assert shared.ast is not None, shared.error
         assert allow.ast is not None, allow.error
@@ -256,7 +258,8 @@ def test_l5_parsers_read_the_same_edges_under_both_argvs(tmp_path: Path) -> None
             shared_edges[p.name]
         )
         raise AssertionError(
-            f"{p.name}: only shared={sorted(shared_only)} only allowlisted={sorted(allow_only)}"
+            f"{p.name}: only shared={sorted(shared_only)} "
+            f"only allowlisted={sorted(allow_only)}\n" + "\n".join(commands)
         )
 
 
