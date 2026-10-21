@@ -237,6 +237,10 @@ class ExitReason(StrEnum):
     #: reclassifies the addition itself (D6, "policy acceptance, never
     #: reclassification").
     ADDITIONS_REVIEW = "additions_review"
+    #: ADR-067 P1: a configured rule that matched nothing, under
+    #: ``unused_rules: block`` (``policy/unused_rules_gate.py``). Same ``0``/``1``
+    #: fold participant as ``ADDITIONS_REVIEW``; it never lowers a real ``2``/``4``.
+    UNUSED_RULES = "unused_rules"
 
 
 @dataclass(frozen=True)
@@ -386,6 +390,8 @@ class ExitDecision:
     #: :class:`ExitReason.ADDITIONS_REVIEW`. ``0`` for every run that supplied
     #: no acknowledgment records, or whose policy is ``allow``/``warn``.
     additions_review_contribution: int = 0
+    #: ADR-067 P1 ``unused_rules`` floor -- see :class:`ExitReason.UNUSED_RULES`.
+    unused_rules_contribution: int = 0
 
     def exit_without_analysis_assurance(self) -> int:
         """The code this decision would have had with no assurance axis.
@@ -448,6 +454,7 @@ class ExitDecision:
             ),
             "loadability_contribution": self.loadability_contribution,
             "additions_review_contribution": self.additions_review_contribution,
+            "unused_rules_contribution": self.unused_rules_contribution,
         }
 
     @classmethod
@@ -491,6 +498,7 @@ class ExitDecision:
             ),
             loadability_contribution=d.get("loadability_contribution", 0),
             additions_review_contribution=d.get("additions_review_contribution", 0),
+            unused_rules_contribution=d.get("unused_rules_contribution", 0),
         )
 
 
@@ -507,6 +515,7 @@ def resolve_exit_decision(
     no_comparison_completed_contribution: int = 0,
     loadability_contribution: int = 0,
     additions_review_contribution: int = 0,
+    unused_rules_contribution: int = 0,
     compatibility_reason: ExitReason = ExitReason.COMPATIBILITY_GATE,
 ) -> ExitDecision:
     """Fold the axis contributions below into one explainable decision.
@@ -580,6 +589,7 @@ def resolve_exit_decision(
         ExitReason.NO_COMPARISON_COMPLETED: no_comparison_completed_contribution,
         ExitReason.LOADABILITY: loadability_contribution,
         ExitReason.ADDITIONS_REVIEW: additions_review_contribution,
+        ExitReason.UNUSED_RULES: unused_rules_contribution,
     }
     code = max(contributions.values())
     if code == 0:
@@ -604,6 +614,7 @@ def resolve_exit_decision(
         no_comparison_completed_contribution=no_comparison_completed_contribution,
         loadability_contribution=loadability_contribution,
         additions_review_contribution=additions_review_contribution,
+        unused_rules_contribution=unused_rules_contribution,
     )
 
 
@@ -667,6 +678,7 @@ def resolve_compare_exit_decision(
     from .acknowledgment_gate import additions_review_exit_contribution
     from .contract_coverage_exit import coverage_exit_floor
     from .severity import compute_exit_code, legacy_exit_code
+    from .unused_rules_gate import unused_rules_exit_contribution
 
     coverage_contribution = coverage_exit_floor(result)
     assurance_contribution = analysis_assurance_exit_contribution(
@@ -707,6 +719,7 @@ def resolve_compare_exit_decision(
         contract_coverage_contribution=coverage_contribution,
         analysis_assurance_contribution=assurance_contribution,
         additions_review_contribution=additions_review_exit_contribution(result),
+        unused_rules_contribution=unused_rules_exit_contribution(result, today=today),
     )
 
 

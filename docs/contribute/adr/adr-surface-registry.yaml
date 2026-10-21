@@ -570,6 +570,7 @@ adrs:
     use_cases: [UC-WF-compare]
     surfaces:
       - cli: compare --suppress
+      - cli: compare --fail-on-unused-rules
       - report: compare_report.disposition_audit
     missing: S4 is not implemented.
 

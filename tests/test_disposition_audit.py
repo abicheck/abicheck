@@ -142,8 +142,9 @@ class TestHundredSuppressedRemovals:
     def test_the_rule_that_hid_them_is_named_with_its_reason(self, result) -> None:
         audit = compute_disposition_audit(result)
         assert len(audit.rules) == 1
-        rule, count = audit.rules[0]
-        assert count == 100
+        rule = audit.rules[0]
+        assert rule.matched_count == 100
+        assert rule.status == "active"
         assert rule.reason == "bulk internal churn"
         assert rule.label == "wildcard-waiver"
         assert rule.allow_public_break is True
@@ -170,8 +171,8 @@ class TestHundredSuppressedRemovals:
         )
         old, new = _snapshots(removed=100)
         result = compare(old, new, SuppressionList.load(path))
-        rule, count = compute_disposition_audit(result).rules[0]
-        assert count == 100
+        rule = compute_disposition_audit(result).rules[0]
+        assert rule.matched_count == 100
         assert rule.source_file == str(path)
 
     def test_every_projection_states_the_counts(self, result) -> None:
@@ -455,8 +456,13 @@ def test_distinct_rules_are_never_merged_in_the_rule_tally() -> None:
     )
     rules = compute_disposition_audit(result).rules
     assert len(rules) == 2, "two rules sharing label and reason are still two"
-    assert {count for _, count in rules} == {1, 3}
-    assert sum(count for _, count in rules) == 4
+    assert {row.matched_count for row in rules} == {1, 3}
+    assert sum(row.matched_count for row in rules) == 4
+    # Overlap: the first rule takes the shared finding, the second shadows it.
+    assert sorted((r.matched_count, r.shadowed_count) for r in rules) == [
+        (1, 0),
+        (3, 1),
+    ]
 
 
 def test_kept_findings_split_into_gating_and_non_gating() -> None:

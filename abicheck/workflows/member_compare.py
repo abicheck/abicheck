@@ -164,6 +164,29 @@ def record_release_resolved_config(result: Any, config: Any) -> None:
     result.evaluation_config = config
 
 
+def _unused_rule_keys_for_release(result: Any) -> dict[str, object]:
+    """ADR-067 P1: what a release fold needs to decide "unused in every member".
+
+    Always the member's effective ``unused_rules`` mode (a release folds to the
+    strictest one). The rule-key lists are stamped only under ``block``, the one
+    mode that reads them, so a run that never opted in gains no JSON keys.
+    """
+    from ..policy.disposition_close import ledger_for
+    from ..policy.disposition_rules import configured_rule_rows
+    from ..policy.rule_inventory import STATUS_UNUSED
+    from ..policy.unused_rules_gate import resolve_unused_rules_mode
+
+    mode = resolve_unused_rules_mode(result)
+    stamped: dict[str, object] = {"unused_rules_mode": mode}
+    if mode == "block":
+        rows = configured_rule_rows(result, ledger=ledger_for(result))
+        stamped["configured_rule_keys"] = [row.ref.key() for row in rows]
+        stamped["unused_rule_keys"] = [
+            row.ref.key() for row in rows if row.status == STATUS_UNUSED
+        ]
+    return stamped
+
+
 def member_exit_decision(
     result: DiffResult,
     severity_config: SeverityConfig | None,
@@ -220,6 +243,10 @@ def stamp_member_exit_contributions(
 
     stamp_member_assurance(entry, result, require_complete=require_complete_analysis)
     entry["additions_review_exit_contribution"] = decision.additions_review_contribution
+    # ADR-067 P1: per-member rule keys, so the release fold can decide "unused
+    # in every comparison" without re-reading each member's ledger.
+    entry["unused_rules_exit_contribution"] = decision.unused_rules_contribution
+    entry.update(_unused_rule_keys_for_release(result))
     if contract_evaluation:
         entry["contract_coverage_exit_contribution"] = (
             decision.contract_coverage_contribution

@@ -137,10 +137,17 @@ def _resolve_acknowledgments(
     had its chance (CodeRabbit review, PR #1137).
     """
     from .acknowledgment import AmbiguousAcknowledgmentError
+    from .rule_inventory import KIND_ACKNOWLEDGMENT, RuleRef
 
     evaluate = getattr(acknowledgments, "evaluate", None)
     if not callable(evaluate):
         return
+    # P1: the record's position in the loaded list is its join key (the audit's
+    # acknowledgment row). Identity, not equality: two records may compare equal
+    # and are still two entries.
+    listed = list(acknowledgments) if hasattr(acknowledgments, "__iter__") else []
+    position = {id(record): i for i, record in enumerate(listed)}
+    source = getattr(acknowledgments, "source_path", None)
     for index, (record, change) in enumerate(
         zip(ledger._records, ledger._anchors)  # noqa: SLF001
     ):
@@ -161,7 +168,14 @@ def _resolve_acknowledgments(
             continue
         record_id_fn = getattr(ack, "record_id", None)
         acknowledged_by = record_id_fn() if callable(record_id_fn) else str(ack)
-        ledger._records[index] = replace(record, acknowledged_by=acknowledged_by)  # noqa: SLF001
+        covered = RuleRef(
+            KIND_ACKNOWLEDGMENT,
+            None if source is None else str(source),
+            position.get(id(ack)),
+        )
+        ledger._records[index] = replace(  # noqa: SLF001
+            record, acknowledged_by=acknowledged_by, acknowledgment_rule=covered
+        )
 
 
 def _is_policy_overlay(change: object) -> bool:
@@ -625,15 +639,15 @@ def ledger_for(
 
 
 def reclassifications(ledger: DispositionLedger) -> tuple[tuple[str, int], ...]:
-    """ADR-067 C-S2: distinct reclassify rule ids with the number of changes
-    each moved, ordered by first appearance -- the same shape
-    :meth:`DispositionLedger.rules` reports for suppression, for the overlay
-    attribute a finding carries independently of its terminal disposition (a
-    reclassified finding stays visible; only its verdict class moved).
+    """ADR-067 C-S2: distinct reclassify display labels with the number of
+    changes each moved, ordered by first appearance.
 
-    A module function here rather than a :class:`DispositionLedger` method:
-    it derives purely from :attr:`DispositionLedger.records`, and that leaf
-    module is at the architecture gate's per-file line ceiling.
+    A **record-derived view** kept for the existing callers of the record
+    tally. It keys on the display label (``reclassified_by``), so two distinct
+    rules sharing a label collapse here, and a rule that moved nothing has no
+    entry. The audit does not use it: ``DispositionAudit.reclassifications`` is
+    built from :func:`~abicheck.policy.disposition_rules.configured_rule_rows`,
+    which keys on the configured rule and includes zero-count rules (P1).
     """
     ordered: list[str] = []
     tally: dict[str, int] = {}
@@ -661,12 +675,11 @@ def reclassified_total(ledger: DispositionLedger) -> int:
 
 def acknowledgments(ledger: DispositionLedger) -> tuple[tuple[str, int], ...]:
     """ADR-067 D5/C-S3: distinct acknowledgment record ids with the number of
-    findings each covered, ordered by first appearance -- the acknowledgment
-    counterpart of :func:`reclassifications` (and :meth:`DispositionLedger.
-    rules`'s rule tally for suppression), for the overlay attribute a finding
-    carries independently of its terminal disposition (an acknowledged
-    finding keeps its own disposition and verdict class; only the
-    acknowledgment overlay is new).
+    findings each covered, ordered by first appearance.
+
+    A record-derived view, like :func:`reclassifications`: it omits an
+    acknowledgment that covered nothing. The audit reads the configured rows
+    (:func:`~abicheck.policy.disposition_rules.configured_rule_rows`) instead.
     """
     ordered: list[str] = []
     tally: dict[str, int] = {}

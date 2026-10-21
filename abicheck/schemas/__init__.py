@@ -50,18 +50,6 @@ from .release_schema import RELEASE_SCHEMA_VERSION
 #: per-artifact lookups that use function-local imports (not this set),
 #: since some of those modules transitively import this package themselves
 #: and a module-level import here would turn that into a real import cycle.
-_ARTIFACT_NAMES = frozenset(
-    {
-        "snapshot",
-        "compare",
-        "audit",
-        "audit-set",
-        "aggregate",
-        "build-output",
-        "run-plan",
-        "release",
-    }
-)
 
 
 #: SemVer-style (MAJOR.MINOR) version of the compare-report JSON schema.
@@ -1092,7 +1080,23 @@ _ARTIFACT_NAMES = frozenset(
 #:        severity setting that made ``quality_issues`` an error: such a finding
 #:        no longer gates.
 #: 6.2 -- additive ``removed_instantiations`` (uncapped removed set) on internal-template leak findings; ``symbol_binding`` on missing-instantiation and leak findings (aggregate, ``weak`` only if all WEAK).
-REPORT_SCHEMA_VERSION = "6.2"
+#: 6.3 -- ADR-067 P1 (configured-rule inventory): ``disposition_audit.rules``,
+#:       ``reclassifications`` and ``acknowledgments`` now carry one row per
+#:       configured rule, zero-count rules included (previously only rules
+#:       that disposed of a finding). Each row gains ``status`` (active |
+#:       shadowed_only | not_evaluated | unused | expired), ``shadowed_count``,
+#:       ``selector_matched_count``, ``entry_index``, and -- for reclassify --
+#:       ``changed_count`` (= ``matched_count``, which keeps its meaning).
+#:       ``rule_id`` is the rule's new optional ``id:`` when set, else its
+#:       canonical identity (previously the label/reason prose for a reclassify
+#:       rule). ``disposition_audit.unused_rules_review`` and the additive
+#:       ``exit.unused_rules_contribution`` (the ``unused_rules`` gate, default
+#:       ``allow``) are new. ``suppression_audit.stale_rules`` is now a
+#:       projection of the same inventory and lists rule ids. Exit codes do
+#:       not move unless a policy opts into ``unused_rules: block``.
+REPORT_SCHEMA_VERSION = "6.3"
+
+from .artifact_versions import current_artifact_version  # noqa: E402
 
 # The directory/package release envelope's own version and version history
 # live in `release_schema.py` (see that module's docstring for why); the
@@ -1101,63 +1105,15 @@ REPORT_SCHEMA_VERSION = "6.2"
 
 
 def current(name: str) -> str | int:
-    """Return the current version abicheck emits for persisted artifact *name*.
+    """The current version abicheck emits for persisted artifact *name*.
 
-    One read-only lookup facade over the version constants each artifact's
-    own module already owns (ADR-055 D3) -- current-version discovery only.
-    *name* is one of ``"snapshot"``, ``"compare"``, ``"audit"``
-    (``compare --no-baseline``), ``"audit-set"`` (``compare --no-baseline
-    DIR``), ``"release"``, ``"aggregate"``,
-    ``"build-output"``, or ``"run-plan"``. ``"scan"`` was retired with the
-    ``scan`` command itself (ADR-068 Phase 6).
-
-    A doc generator can pull every current version number from here instead
-    of a human hand-copying one -- the exact failure mode that let
-    ``docs/use/python-api.md`` claim snapshots carried ``schema_version 8``
-    long after the real value reached 17.
+    See :func:`abicheck.schemas.artifact_versions.current_artifact_version`.
     """
-    if name not in _ARTIFACT_NAMES:
-        raise ValueError(
-            f"Unknown schema artifact {name!r}; expected one of "
-            f"{sorted(_ARTIFACT_NAMES)}"
-        )
-    if name == "audit":
-        from ..report.no_baseline_document import AUDIT_REPORT_SCHEMA_VERSION
-
-        return AUDIT_REPORT_SCHEMA_VERSION
-    if name == "audit-set":
-        from ..report.no_baseline_document import AUDIT_SET_REPORT_SCHEMA_VERSION
-
-        return AUDIT_SET_REPORT_SCHEMA_VERSION
-    if name == "snapshot":
-        from ..serialization import SCHEMA_VERSION
-
-        return SCHEMA_VERSION
-    if name == "compare":
-        return REPORT_SCHEMA_VERSION
-    if name == "release":
-        return RELEASE_SCHEMA_VERSION
-    if name == "aggregate":
-        from ..workflows.aggregate import AGGREGATE_SCHEMA_VERSION
-
-        return AGGREGATE_SCHEMA_VERSION
-    if name == "build-output":
-        from ..buildsource.build_output import BUILD_OUTPUT_SCHEMA
-
-        return BUILD_OUTPUT_SCHEMA
-    # The *highest* of the three conditional stamps, not the base
-    # RUN_PLAN_SCHEMA -- a run-plan.json declares one of
-    # RUN_PLAN_SCHEMA/`_GATE`/`_SKIPPED` depending on whether it carries a
-    # `gate` block or a `skipped` block, so there is no single fixed "the"
-    # version this artifact always emits. The highest version abicheck can
-    # produce is the truthful answer a doc generator needs to be prepared to
-    # parse, not a lower, conditionally-emitted one (Codex review; raised to
-    # v3 with plan slice 7r's `skipped` block, since a registry still saying
-    # v2 tells a consumer it need only support v2 against a build that can
-    # emit v3).
-    from ..buildsource.run_plan_schema import RUN_PLAN_SCHEMA_SKIPPED
-
-    return RUN_PLAN_SCHEMA_SKIPPED
+    return current_artifact_version(
+        name,
+        report_version=REPORT_SCHEMA_VERSION,
+        release_version=RELEASE_SCHEMA_VERSION,
+    )
 
 
 __all__ = [

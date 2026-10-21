@@ -675,7 +675,7 @@
         },
         "rules": {
           "type": "array",
-          "description": "Distinct rule provenances that produced a disposition, each with its `matched_count`.",
+          "description": "Schema 6.3 (ADR-067 P1): one row per configured suppression rule, zero-count rules included. `matched_count` is the findings the rule disposed of (first-match credit); `shadowed_count` the findings it also matched but an earlier rule claimed; `status` is one of active, shadowed_only, not_evaluated, unused, expired. `rule_id` is the rule's `id:` when set, else its canonical identity; `label` and `reason` are their own fields. `entry_index` is the rule's zero-based position in its file.",
           "items": {
             "type": "object",
             "additionalProperties": true
@@ -741,6 +741,14 @@
             "type": "object",
             "additionalProperties": true
           }
+        },
+        "unused_rules_review": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "description": "Schema 6.3 (ADR-067 P1): the `unused_rules` gate evaluated over `rules`, `reclassifications` and `acknowledgments`: the resolved policy (allow/warn/block), the configured rules with status `unused`, and the orthogonal 0/1 gate_contribution (non-zero only under block).",
+          "additionalProperties": true
         },
         "unacknowledged_additions_review": {
           "type": [
@@ -2086,7 +2094,9 @@
               "incomplete_scope",
               "no_comparison_completed",
               "evidence_contract_error",
-              "budget_overflow"
+              "budget_overflow",
+              "additions_review",
+              "unused_rules"
             ]
           },
           "description": "Every axis whose own contribution equals code -- \"clean\" alone when code is 0. \"incomplete_scope\"/\"no_comparison_completed\" (schema 2.50, ADR-065 S2) only ever appear on a directory/package release report. \"scoped_gate\" (schema < 3.0 only, kept in this enum for historical/persisted documents) used to replace \"compatibility_gate\" whenever --used-by/--required-symbol(s) scoping was in effect; as of schema 3.0 (workstream D-S1) this resolver never produces it -- \"compatibility_contribution\"/\"reasons\" always describe the full-library gate regardless of consumer scoping. \"promoted_crosscheck\" only ever appears on a scan --against report, and only when a maintainer-promoted --crosscheck KEY=error finding ties or determines code. \"evidence_contract_error\"/\"budget_overflow\" (schema 3.3, one-comparison-product.md P3) are shared by scan --against and native compare; neither is ever produced by a native compare report today (no CLI-reachable trigger yet), but the resolver's shared precedence rule can now name either when a caller's DiffResult sets evidence_contract_error/budget_overflow."
@@ -2161,6 +2171,11 @@
           "type": "integer",
           "enum": [0, 1],
           "description": "schema 5.13 (ADR-067 D6): the additions-review floor -- 1 when public additions are not covered by the run's acknowledgment records and the resolved acknowledgment.unacknowledged_additions is block, else 0. A 0/1 fold participant like contract_coverage_contribution: it raises a clean exit to 1 and never lowers a 2/4."
+        },
+        "unused_rules_contribution": {
+          "type": "integer",
+          "enum": [0, 1],
+          "description": "schema 6.3 (ADR-067 P1): the unused-rules floor -- 1 when the resolved `unused_rules` policy is `block` (or `--fail-on-unused-rules` is given) and at least one configured suppression, reclassify or acknowledgment rule has status `unused`, else 0. A 0/1 fold participant: it raises a clean exit to 1 and never lowers a 2/4."
         }
       },
       "$comment": "exit_decision.resolve_compare_exit_decision (and, on scan --against's promotion path, exit_decision.resolve_exit_decision) is what builds this object; cli._exit_with_severity_or_verdict resolves the identical ExitDecision for compare's own real process exit, so the two cannot disagree."
@@ -2230,6 +2245,10 @@
         },
         "policy.reclassify": {
           "type": "string"
+        },
+        "policy.unused_rules": {
+          "type": "string",
+          "description": "Schema 6.3 (ADR-067 P1): present only when the effective `unused_rules` mode is `warn` or `block` (or `--fail-on-unused-rules` was given). Not a required key; its absence means `allow`, so every default run's digest is unchanged."
         },
         "policy.frozen_namespaces": {
           "type": "string"

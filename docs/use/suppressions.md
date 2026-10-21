@@ -77,7 +77,8 @@ suppressions:
 | `reachability` | `unreachable-only` \| `any` \| `public-only` \| `proven-unreachable-only` | Gates whether this rule may match a change that is part of the effective public ABI — see below. Default depends on the selector shape. |
 | `allow_public_break` | bool | Required, for a **broad** rule (`namespace`/`source_location`), to suppress a change that is both public-reachable and classified `BREAKING`/`API_BREAK`. Not required for a narrow rule (`symbol`/`symbol_pattern`/`type_pattern`/`member_name`/`finding_id`) — naming one exact symbol (or finding) is already the deliberate, audited action. |
 | `allow_unknown_reachability` | bool | Only meaningful with `reachability: proven-unreachable-only` — permits the rule to also match a change whose reachability could not be positively proven or disproven (see below). |
-| `label` | string | Optional grouping tag |
+| `id` | string | Optional identifier, unique within the file (a repeat is an error). The audit's `rule_id` for this rule. Without it, `rule_id` is the rule's canonical identity. Never affects matching (ADR-067 P2). |
+| `label` | string | Optional grouping tag. Shown in the audit as its own field, never used as the identifier |
 | `expires` | date/datetime | Expiry date; expired rule is ignored |
 | `reason` | string | Human-readable rationale |
 

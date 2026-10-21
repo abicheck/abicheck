@@ -27,7 +27,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from .rule_identity import rule_identity as rule_identity_of
+from .rule_identity import rule_id_of
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from .suppression.rules import Suppression
@@ -53,6 +53,9 @@ class RuleProvenance:
     expires: str | None = None
     intent: str = "unspecified"
     allow_public_break: bool = False
+    #: Zero-based position of the rule in its document (P1). In equality, so
+    #: two byte-identical entries in one file stay two rules in every tally.
+    entry_index: int | None = None
 
     def to_dict(self) -> dict[str, object]:
         """JSON-safe mapping; ``None`` fields are emitted so the ledger's rows
@@ -65,11 +68,15 @@ class RuleProvenance:
             "expires": self.expires,
             "intent": self.intent,
             "allow_public_break": self.allow_public_break,
+            "entry_index": self.entry_index,
         }
 
 
 def rule_provenance(
-    rule: Suppression | None, *, source_file: str | None = None
+    rule: Suppression | None,
+    *,
+    source_file: str | None = None,
+    entry_index: int | None = None,
 ) -> RuleProvenance | None:
     """Project one suppression *rule* onto :class:`RuleProvenance`.
 
@@ -83,26 +90,12 @@ def rule_provenance(
     expires = getattr(rule, "expires", None)
     label = getattr(rule, "label", None)
     reason = getattr(rule, "reason", None)
-    rule_id = _rule_identity(rule) or label or reason
     return RuleProvenance(
-        rule_id=rule_id,
+        rule_id=rule_id_of(rule),
         source_file=source_file,
         reason=reason,
         label=label,
         expires=expires.isoformat() if expires is not None else None,
         allow_public_break=bool(getattr(rule, "allow_public_break", False)),
+        entry_index=entry_index,
     )
-
-
-def _rule_identity(rule: object) -> str | None:
-    """The rule's canonical selector-and-gate identity, when derivable.
-
-    Deliberately not the free-form ``label``/``reason`` prose: two rules
-    sharing a label must still be distinguishable in the audit. Delegates to
-    :func:`abicheck.policy.rule_identity.rule_identity`, the *same* derivation
-    ``SuppressionList.rule_identities`` uses -- this used to be a second,
-    hand-picked field list here, which omitted the gate fields and so merged a
-    public-only waiver and a proven-unreachable-only waiver sharing one
-    ``symbol_pattern`` into a single audit row (Codex review).
-    """
-    return rule_identity_of(rule)

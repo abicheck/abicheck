@@ -350,16 +350,32 @@ def add_suppression_audit(d: dict[str, Any], result: DiffResult) -> None:
     ``--audit-suppressions``) omits the key entirely, matching the
     pre-existing behavior exactly.
     """
+    from .policy.disposition_rules import configured_rule_rows
+    from .policy.rule_inventory import (
+        KIND_SUPPRESSION,
+        STATUS_SHADOWED_ONLY,
+        STATUS_UNUSED,
+    )
     from .policy.suppression.rules import SuppressionAudit
 
     audit = result.suppression_audit
     if not isinstance(audit, SuppressionAudit):
         return
+    # P1: stale_rules is a projection of the configured-rule inventory, the same
+    # one the disposition audit reads, so the two JSON blocks cannot disagree.
+    # A rule that disposed of nothing (unused, or only shadowed by an earlier
+    # rule) is stale; one whose detector did not run is not (not_evaluated).
+    from .policy.disposition_close import ledger_for
+
+    stale = [
+        row.rule_id
+        for row in configured_rule_rows(result, ledger=ledger_for(result))
+        if row.kind == KIND_SUPPRESSION
+        and row.status in (STATUS_UNUSED, STATUS_SHADOWED_ONLY)
+    ]
     d["suppression_audit"] = {
         "total_rules": audit.total_rules,
-        "stale_rules": [
-            suppression_rule_label(r, i) for i, r in enumerate(audit.stale_rules)
-        ],
+        "stale_rules": stale,
         "high_risk_matches": [
             {
                 "rule": suppression_rule_label(rule, i),

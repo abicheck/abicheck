@@ -109,6 +109,44 @@ def release_additions_review_contribution(
     )
 
 
+def release_unused_rules_contribution(
+    library_results: list[dict[str, object]],
+) -> int:
+    """ADR-067 P1: the ``unused_rules`` gate across a release's members.
+
+    A rule counts as unused for the *release* only when every member that
+    configures it left it unused (the "unused in every comparison" rule), so a
+    rule one leg exercises is never flagged because another leg did not. The
+    strictest member mode decides whether the gate is active at all.
+    """
+    from .unused_rules_gate import strictest_mode
+
+    def _keys(entry: dict[str, object], field: str) -> set[str]:
+        value = entry.get(field)
+        return {str(k) for k in value} if isinstance(value, list) else set()
+
+    modes = [
+        str(entry["unused_rules_mode"])
+        for entry in library_results
+        if isinstance(entry, dict) and entry.get("unused_rules_mode")
+    ]
+    if strictest_mode(modes) != "block":
+        return 0
+    carriers = [
+        entry
+        for entry in library_results
+        if isinstance(entry, dict) and "configured_rule_keys" in entry
+    ]
+    configured: set[str] = set()
+    for entry in carriers:
+        configured |= _keys(entry, "configured_rule_keys")
+    for key in configured:
+        holding = [e for e in carriers if key in _keys(e, "configured_rule_keys")]
+        if holding and all(key in _keys(e, "unused_rule_keys") for e in holding):
+            return 1
+    return 0
+
+
 def release_evidence_contract_contribution(
     library_results: list[dict[str, object]],
 ) -> int:
@@ -334,4 +372,5 @@ def resolve_release_exit_decision_for_report(
         additions_review_contribution=release_additions_review_contribution(
             library_results
         ),
+        unused_rules_contribution=release_unused_rules_contribution(library_results),
     )

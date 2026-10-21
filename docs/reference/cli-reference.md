@@ -34,8 +34,6 @@ Aggregate per-target ABI reports in REPORTS_DIR into one CI gate verdict.
 
 ## `compare`
 
-Compare two ABI surfaces and report changes.
-
 **Arguments**
 
 | Name | Required | Description |
@@ -88,6 +86,7 @@ Compare two ABI surfaces and report changes.
 | `--pack` | no | — | Select a pack manifest (repeatable). A pack is a small versioned YAML document (id/version/kind/assignments) carrying one reusable piece of configuration. 'kind: policy' assigns ChangeKind slugs to break/warn/risk/ignore, exactly as --policy's overrides do; 'kind: contract' assigns surface.internal\_namespaces and contract.unresolved (the latter needs --contract, which is what computes the coverage it configures); 'kind: gate' assigns gate.severity.<category> (gate.exit\_code\_scheme was removed along with --exit-code-scheme, CLI cleanup phase two PR G2 -- the one automatic gate algorithm is fully determined by whether a severity setting is in effect, so a pack asserting it is rejected at load time). Composition is D8's: an explicitly stated value (--policy, --severity-preset, or .abicheck.yml) always outranks a pack, and two selected packs assigning different values to the same field are a usage error unless something else already states it. A manifest assigning a field this build resolves but does not yet apply is rejected rather than silently recorded. On a directory/package (release) comparison, a 'kind: policy'/'kind: contract'/'kind: gate' pack's policy.overrides/surface.internal\_namespaces/contract.unresolved/gate.severity.<category> all apply to every library uniformly (folded into the release's own resolved GateOptions); contract.unresolved still needs --contract on that release comparison, same as everywhere else. |
 | `--use-cases` | no | — | An impact-use-cases.yaml manifest whose declared use cases this comparison's own findings are attributed to: for each use case, which changes its resolved entrypoints can be shown to reach. Needs a source graph on at least one side (dump --sources/--build-info, or the always-on header-only graph). Read-only -- an unattributed finding is an absence of proof, not proof the finding is harmless, so this never moves a verdict or an exit code. Validate a manifest on its own with `abicheck project validate`. |
 | `--performance-profile` | no | — | The memory/speed trade-off to run under; overrides .abicheck.yml's performance.profile. 'balanced' (default) is fastest; 'low-memory' resolves one side at a time, each in its own process on Linux, for the lowest peak memory. Never changes findings or the exit code. Choices: `balanced`, `low-memory`. |
+| `--fail-on-unused-rules` | no | `False` | Exit 1 when a configured suppression, reclassify or acknowledgment rule matched no finding in this run (ADR-067 P1). Same as `unused\_rules: block` in the policy file; it can only tighten, never relax it. |
 | `--verbose`, `-v` | no | `False` | Enable verbose/debug output. |
 | `--variant` | no | — | Which build variant to compare when an operand is a stored ProjectSnapshot package directory declaring more than one. Scope to one side with an 'old='/'new=' prefix, repeating the flag per side (e.g. --variant old=v1 --variant new=v2); a bare value applies to both. Defaults to the package's only variant when it declares exactly one; a usage error otherwise. No-op for a live directory/archive/single-file operand. |
 

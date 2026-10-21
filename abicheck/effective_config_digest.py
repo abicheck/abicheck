@@ -152,8 +152,16 @@ def _sha256_of(*parts: str) -> str:
 
 
 def effective_config_digest(fields: dict[str, str]) -> str:
-    """Hash *fields* (a dict produced by :func:`effective_config_fields`)."""
-    return _sha256_of(*[fields.get(key, "") for key in EFFECTIVE_CONFIG_FIELD_KEYS])
+    """Hash *fields* (a dict produced by :func:`effective_config_fields`).
+
+    ADR-067 P1's ``policy.unused_rules`` is not in the positional key set, so
+    no default run's digest moves. It is folded in only when present (a run that
+    set ``unused_rules`` to ``warn``/``block``, or passed the flag).
+    """
+    parts = [fields.get(key, "") for key in EFFECTIVE_CONFIG_FIELD_KEYS]
+    if "policy.unused_rules" in fields:
+        parts += ["policy.unused_rules", fields["policy.unused_rules"]]
+    return _sha256_of(*parts)
 
 
 def _overrides_str(overrides: Any) -> str:
@@ -357,6 +365,23 @@ def _rich_tier_explicit_scope_str(surface: Any, result: Any) -> str:
     )
 
 
+def _unused_rules_field(policy_file: Any) -> dict[str, str]:
+    """ADR-067 P1: ``policy.unused_rules``, present only when it is not ``allow``.
+
+    Emitted conditionally so every run that never opted in keeps its existing
+    digest. The CLI flag (``--fail-on-unused-rules``) is part of the resolved
+    configuration too, since it changes the exit code, so it is folded in here.
+    """
+    from .model.unused_rules_flag import fail_on_unused_rules_requested
+
+    mode = (
+        "block"
+        if fail_on_unused_rules_requested()
+        else (getattr(policy_file, "unused_rules", None) or "allow")
+    )
+    return {} if mode == "allow" else {"policy.unused_rules": str(mode)}
+
+
 def _reclassify_str(rules: Any) -> str:
     """Order-*preserving* encoding of the *active* (non-expired) subset of
     a ``PolicyFile.reclassify`` rule set (``ReclassifyRule.to_report_dict()``,
@@ -499,6 +524,7 @@ def effective_config_fields_from_full_config(
         "policy.base": _identity_str(getattr(policy, "base", None)),
         "policy.overrides": _overrides_str(getattr(policy, "overrides", {})),
         "policy.reclassify": _reclassify_str(getattr(policy_file, "reclassify", ())),
+        **_unused_rules_field(policy_file),
         "policy.frozen_namespaces": _namespaces_str(
             getattr(policy_file, "frozen_namespaces", ())
         ),
@@ -605,6 +631,7 @@ def effective_config_fields_from_diff_result(
         "policy.base": _builtin_policy_base_str(getattr(result, "policy", "")),
         "policy.overrides": _overrides_str(getattr(policy_file, "overrides", {})),
         "policy.reclassify": _reclassify_str(getattr(policy_file, "reclassify", ())),
+        **_unused_rules_field(policy_file),
         "policy.frozen_namespaces": _namespaces_str(
             getattr(policy_file, "frozen_namespaces", ())
         ),

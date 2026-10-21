@@ -178,7 +178,10 @@ Full matrix, including app/plugin-scoped comparisons (`compare --used-by`/
   removed before scoring, so they affect *all* downstream outputs: the
   verdict, the severity category counts, and therefore the exit code — under
   either scheme. Guard the waiver list itself with `suppression.strict: true`
-  (fail on unused/expired rules) and `suppression.require_justification: true`.
+  (fails on **expired** rules) and `suppression.require_justification: true`.
+  To fail on rules that match nothing, set the policy file's
+  `unused_rules: block` (or pass `--fail-on-unused-rules`); see
+  [the unused-rules axis](../reference/exit-codes.md#the-unused-rules-axis-adr-067-p1).
 - **Baselines → everything.** All of the above only gates what changed
   *relative to the baseline you chose*. Compare against the last release (not
   the previous commit) to catch cumulative drift; see

@@ -300,9 +300,25 @@ from .compare_routing import _RELEASE_FORMATS
     "resolves one side at a time, each in its own process on Linux, for "
     "the lowest peak memory. Never changes findings or the exit code.",
 )
+@click.option(
+    "--fail-on-unused-rules",
+    "fail_on_unused_rules",
+    is_flag=True,
+    default=False,
+    help="Exit 1 when a configured suppression, reclassify or acknowledgment rule "
+    "matched no finding in this run (ADR-067 P1). Same as `unused_rules: block` "
+    "in the policy file; it can only tighten, never relax it.",
+)
 @verbose_option
 @click.pass_context
 def compare_cmd(ctx: click.Context, /, **kwargs: Any) -> None:
+    from ....model.unused_rules_flag import fail_on_unused_rules
+
+    with fail_on_unused_rules(bool(kwargs.pop("fail_on_unused_rules", False))):
+        _compare_cmd(ctx, **kwargs)
+
+
+def _compare_cmd(ctx: click.Context, /, **kwargs: Any) -> None:
     """Compare two ABI surfaces and report changes.
 
     Each input (OLD, NEW) can be a .so shared library or a JSON snapshot from

@@ -599,6 +599,7 @@
     "ADR-067": {
       "disposition": "partial",
       "surfaces": [
+        "cli: compare --fail-on-unused-rules",
         "cli: compare --suppress",
         "report: compare_report.disposition_audit"
       ],
@@ -829,6 +830,7 @@
     "ADR-065 report: compare_report.run_outcome",
     "ADR-066 api: abicheck.workflows.history.build_longitudinal_history",
     "ADR-066 cli: project history --policy",
+    "ADR-067 cli: compare --fail-on-unused-rules",
     "ADR-067 report: compare_report.disposition_audit",
     "ADR-068 cli: compare --no-baseline",
     "ADR-070 action: extra-args",

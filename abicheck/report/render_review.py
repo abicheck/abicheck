@@ -357,20 +357,21 @@ def render_terminal_digest(digest: ReviewDigest) -> str:
     audit = digest.disposition_audit
     if audit is not None:
         counts = dict(audit.counts)
+        disposing = [rule for rule in audit.rules if rule.matched_count > 0]
         lines += [
             "",
             f"Audit: {audit.detected_total} detected; {audit.effective_total} gating; "
-            f"{counts.get('suppressed', 0)} suppressed by {len(audit.rules)} rules; "
+            f"{counts.get('suppressed', 0)} suppressed by {len(disposing)} rules; "
             f"{counts.get('out_of_contract', 0) + counts.get('unresolved_relevance', 0)} scope-excluded.",
         ]
-        for rule, matched in audit.rules[:MAX_REVIEW_DISPOSITION_RULES]:
+        for rule in disposing[:MAX_REVIEW_DISPOSITION_RULES]:
             lines.append(
-                f"  Suppression {rule.rule_id or 'rule'}: {matched} finding(s) — "
+                f"  Suppression {rule.rule_id or 'rule'}: {rule.matched_count} finding(s) — "
                 f"{compact(rule.reason or rule.label or 'no reason given', 180)}"
             )
-        if len(audit.rules) > MAX_REVIEW_DISPOSITION_RULES:
+        if len(disposing) > MAX_REVIEW_DISPOSITION_RULES:
             lines.append(
-                f"  ... {len(audit.rules) - MAX_REVIEW_DISPOSITION_RULES} more suppression rules omitted."
+                f"  ... {len(disposing) - MAX_REVIEW_DISPOSITION_RULES} more suppression rules omitted."
             )
     lines.append(
         "Details: add -o markdown=abi-report.md -o json=abi-report.json to this invocation."
