@@ -390,7 +390,7 @@ class TestCompareOldBundleFacts:
         since demonstrating a raise being honored end to end would need a
         real facts document with more containers than the real default
         (1,000,000) -- infeasible to build in a unit test."""
-        from abicheck.frontends.cli.commands.compare_bundle_facts_rejections import (
+        from abicheck.workflows.bundle_facts_stored_request import (
             resolve_max_json_object_nodes_cfg,
         )
 

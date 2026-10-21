@@ -17,7 +17,7 @@
 cleanup phase two, PR I).
 
 A small, standalone leaf module for one call -- the same reason
-``compare_bundle_facts_rejections.py``/``options/bundle_facts.py`` already
+``workflows/bundle_facts_stored_request.py``/``options/bundle_facts.py`` already
 live outside ``compare.py`` itself: that module sits at the architecture
 800-line production cap with no headroom for another inline block.
 :func:`resolve_bundle_compare_dispatch` is ``compare_cmd``'s entire bundle-
@@ -39,7 +39,7 @@ implementing it would take (the mirror image of the stored/live driver, with
 every OLD-side extraction option -- ``--header old=``/``--include old=``/
 ``--ast-frontend old=``/``--devel-pkg old=``/
 ``--bundle-facts-library-manifest`` -- newly meaningful and every NEW-side
-one of those newly rejected, which ``compare_bundle_facts_rejections.py``
+one of those newly rejected, which ``workflows/bundle_facts_stored_request.py``
 does not yet parameterize for).
 """
 
