@@ -969,10 +969,10 @@ class TestRunOutcomeSchemaValidation:
         from pathlib import Path
 
         from abicheck import reporter
-        from abicheck.analysis_assurance import compute_analysis_assurance
         from abicheck.change_registry_types import Verdict
         from abicheck.checker_types import DiffResult
         from abicheck.model import AbiSnapshot
+        from abicheck.policy.analysis_assurance import compute_analysis_assurance
 
         old = AbiSnapshot(library="libfoo", version="1.0")
         new = AbiSnapshot(library="libfoo", version="1.1")
@@ -1007,10 +1007,10 @@ class TestRunOutcomeSchemaValidation:
         from pathlib import Path
 
         from abicheck import reporter
-        from abicheck.analysis_assurance import compute_analysis_assurance
         from abicheck.change_registry_types import Verdict
         from abicheck.checker_types import DiffResult
         from abicheck.model import AbiSnapshot
+        from abicheck.policy.analysis_assurance import compute_analysis_assurance
 
         old = AbiSnapshot(library="libfoo", version="1.0")
         new = AbiSnapshot(library="libfoo", version="1.1")

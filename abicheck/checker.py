@@ -1388,8 +1388,8 @@ def compare(
     # P0.4 — computed last, from data the pipeline above already produced
     # (evidence tiers, comparability outcome, contract context, whatever
     # BuildSourcePack either side already carries). A pure rollup over the
-    # just-built `result`, never a new probe; see analysis_assurance.py's
-    # own module docstring for the full rationale and what is deferred.
+    # just-built `result`, never a new probe; see policy/analysis_assurance/__init__.py's
+    # module docstring for the full rationale and what is deferred.
     #
     # `checker.compare()` only ever sees each snapshot's own *embedded*
     # BuildSourcePack (`old.build_source`/`new.build_source`) — it has no

@@ -1268,7 +1268,7 @@ def forced_assurance(mismatch: ComparabilityMismatch | None) -> Literal["none"] 
     would misreport a bounded result as an override. Its reduction is
     carried by :func:`dimension_assurance`'s per-dimension breakdown, by
     ``coverage_warnings``, and by ``AnalysisAssurance.status`` reading
-    ``partial`` (``analysis_assurance_comparability.py``).
+    ``partial`` (``policy/analysis_assurance/_comparability.py``).
 
     Lives here rather than inline in ``checker.compare`` (Codex review,
     PR #1274): this is a fact about a ``ComparabilityMismatch``, which is

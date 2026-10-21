@@ -42,10 +42,6 @@ import itertools
 
 import pytest
 
-from abicheck.analysis_assurance import (
-    AnalysisAssurance,
-    _layout_unverified_detectors,
-)
 from abicheck.checker import compare
 from abicheck.comparability import check_contracts_comparable
 from abicheck.comparability_profile import _toolchain_identity_status
@@ -62,6 +58,10 @@ from abicheck.model import (
     FactStatus,
     Function,
     Visibility,
+)
+from abicheck.policy.analysis_assurance import AnalysisAssurance
+from abicheck.policy.analysis_assurance._layout import (
+    layout_unverified_detectors as _layout_unverified_detectors,
 )
 
 # The three toolchain-probe states named in the task catalog.

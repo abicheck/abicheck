@@ -191,6 +191,27 @@ class BuildSourceEntity:
         )
 
 
+#: Name prefixes of the source-side extractor families: the L4 source ABI
+#: (``source_abi:*``), the compile database (``compile_commands``) and the L5
+#: source graph (``source_graph*``). The analysis-assurance rollup treats a
+#: partial or failed record from these families as an incomplete source-side
+#: layer. Producers classify their records with
+#: :func:`is_source_side_extractor_name` and set
+#: :attr:`ExtractorRecord.source_side`; the policy layer reads the field, never
+#: the name.
+SOURCE_SIDE_EXTRACTOR_PREFIXES: tuple[str, ...] = (
+    "source_abi",
+    "compile_",
+    "source_graph",
+)
+
+
+def is_source_side_extractor_name(name: str) -> bool:
+    """Whether an extractor *name* belongs to a source-side family (see
+    :data:`SOURCE_SIDE_EXTRACTOR_PREFIXES`). Producer-side only."""
+    return name.startswith(SOURCE_SIDE_EXTRACTOR_PREFIXES)
+
+
 @dataclass
 class ExtractorRecord:
     """Provenance for one extractor run — the reproducibility ledger (D8, ADR-032 D10).
@@ -219,6 +240,16 @@ class ExtractorRecord:
     started_at: str = ""  # ISO 8601
     finished_at: str = ""  # ISO 8601
     diagnostics: list[str] = field(default_factory=list)
+    #: True when this extractor's facts are source-side (see
+    #: :data:`SOURCE_SIDE_EXTRACTOR_PREFIXES`). ``None`` means "classify from
+    #: the name at construction" (``__post_init__``), which is how every
+    #: producer gets the flag. Emitted only when True, so other records
+    #: serialize exactly as before.
+    source_side: bool | None = None
+
+    def __post_init__(self) -> None:
+        if self.source_side is None:
+            self.source_side = is_source_side_extractor_name(self.name)
 
     def to_dict(self) -> dict[str, Any]:
         out: dict[str, Any] = {
@@ -243,6 +274,8 @@ class ExtractorRecord:
             out["finished_at"] = self.finished_at
         if self.diagnostics:
             out["diagnostics"] = list(self.diagnostics)
+        if self.source_side:
+            out["source_side"] = True
         return out
 
     @classmethod
@@ -260,6 +293,9 @@ class ExtractorRecord:
             started_at=str(d.get("started_at", "")),
             finished_at=str(d.get("finished_at", "")),
             diagnostics=list(d.get("diagnostics", [])),
+            # Absent on records written before the field existed: left to
+            # __post_init__, which classifies them by the same name rule.
+            source_side=(bool(d["source_side"]) if "source_side" in d else None),
         )
 
 

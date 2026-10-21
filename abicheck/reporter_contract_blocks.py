@@ -91,7 +91,7 @@ def add_contract_context(
     :func:`add_annotations`, keeps both agreeing with an already-frozen
     ``ReportEnvelope`` (Codex review, fresh evidence).
     """
-    from .analysis_assurance import (
+    from .policy.analysis_assurance import (
         analysis_assurance_exit_contribution,
         analysis_assurance_report_dict,
     )

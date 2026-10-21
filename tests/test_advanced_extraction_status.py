@@ -32,7 +32,6 @@ from pathlib import Path
 
 import pytest
 
-from abicheck.analysis_assurance import _dwarf_context_status
 from abicheck.checker import compare
 from abicheck.dwarf_presence import cheap_dwarf_presence_metadata
 from abicheck.dwarf_unified import parse_dwarf
@@ -42,6 +41,7 @@ from abicheck.model.dwarf_facts import (
     AdvancedExtractionStatus,
     advanced_facts_collected,
 )
+from abicheck.policy.analysis_assurance._context import _dwarf_context_status
 from abicheck.serialization import snapshot_from_dict
 from abicheck.storage.snapshot_encode import snapshot_content_digest, snapshot_to_json
 

@@ -169,7 +169,7 @@ def to_stat_json(
     d["evidence_tiers"] = list(result.evidence_tiers)
     if result.coverage_warnings:
         d["coverage_warnings"] = list(result.coverage_warnings)
-    from .analysis_assurance import (
+    from .policy.analysis_assurance import (
         analysis_assurance_exit_contribution,
         analysis_assurance_report_dict,
     )

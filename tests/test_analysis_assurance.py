@@ -29,7 +29,12 @@ from pathlib import Path
 from click.testing import CliRunner
 
 from abicheck import checker
-from abicheck.analysis_assurance import (
+from abicheck.checker_policy import ChangeKind
+from abicheck.checker_types import DiffResult
+from abicheck.cli import main
+from abicheck.model import AbiSnapshot, Function, Visibility
+from abicheck.model.change import Change
+from abicheck.policy.analysis_assurance import (
     ANALYSIS_ASSURANCE_SCHEMA_VERSION,
     ASSURANCE_STATUS_VALUES,
     AnalysisAssurance,
@@ -39,11 +44,6 @@ from abicheck.analysis_assurance import (
     analysis_assurance_exit_contribution,
     compute_analysis_assurance,
 )
-from abicheck.checker_policy import ChangeKind
-from abicheck.checker_types import DiffResult
-from abicheck.cli import main
-from abicheck.model import AbiSnapshot, Function, Visibility
-from abicheck.model.change import Change
 from abicheck.serialization import snapshot_to_json
 
 
@@ -547,7 +547,7 @@ class TestComputeAnalysisAssurance:
         aa = result.analysis_assurance
         assert aa.status == "partial"
         assert aa.export_accounting.unaccounted == 1
-        from abicheck.analysis_assurance import (
+        from abicheck.policy.analysis_assurance import (
             analysis_assurance_exit_contribution,
         )
 
@@ -1899,7 +1899,7 @@ class TestDwarfChannelAsymmetry:
         assert any("dwarf_advanced channel" in n for n in aa.notes), aa.notes
 
     def test_unit_level_both_channels_flagged_independently(self) -> None:
-        from abicheck.analysis_assurance import _dwarf_context_status
+        from abicheck.policy.analysis_assurance._context import _dwarf_context_status
 
         old, new = self._cross_channel_pair()
         status, notes = _dwarf_context_status(old, new)

@@ -11,15 +11,11 @@
 # distributed under the License is distributed on an "AS IS" BASIS,
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
-# limitations under the License.
-
 """What a *bounded* (non-fatal) comparability mismatch contributes to the
 ``AnalysisAssurance`` rollup.
 
-Split out of ``analysis_assurance.py`` (at its ``architecture/debt.yaml``
-no-growth baseline) rather than added there, the same way
-``analysis_assurance_layout.py`` and
-``analysis_assurance_schema_staleness.py`` already own their own axis. This
+It is one axis of the ``analysis_assurance`` package, the same way ``_layout``
+and ``policy/analysis_assurance_schema_staleness.py`` each own theirs. This
 module is a real leaf: it reads one mapping off an already-computed result
 and depends on nothing.
 
@@ -33,8 +29,7 @@ through a refusal, so such a run reported ``status="complete"`` while the
 very same report said its ``declaration`` and ``layout`` dimensions were
 unverified. Two assurance fields of one document contradicting each other,
 and ``assurance.require_complete`` declining to gate a run that is by its
-own account not complete.
-"""
+own account not complete."""
 
 from __future__ import annotations
 

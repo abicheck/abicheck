@@ -229,8 +229,8 @@ def compare_stored_bundle_facts_pair(
     """
     from functools import partial
 
-    from ..analysis_assurance import compute_analysis_assurance
     from ..bundle_manifest import load_manifest
+    from ..policy.analysis_assurance import compute_analysis_assurance
     from ..policy.depth_projection import project_snapshot_to_depth
     from ..serialization import load_bundle_facts
     from ..storage.snapshot_encode import same_persisted_content

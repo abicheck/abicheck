@@ -29,7 +29,7 @@ short:
 * ``assurance`` -- the existing ``AnalysisAssurance`` concept ("how complete
   was the evidence"), stored untyped (``object | None``) for the same
   circular-import reason ``checker_types.DiffResult.analysis_assurance`` is
-  -- ``analysis_assurance.py`` is not a leaf this package may import from at
+  -- ``policy/analysis_assurance/`` is not a leaf this package may import from at
   module scope. Unwrap via :func:`analysis_assurance_dict` (mirrors
   ``analysis_assurance.analysis_assurance_report_dict``'s own narrowing).
 * ``gate`` -- :class:`PolicyGateDecision`, a **new, exit-code-free** ordered
@@ -752,7 +752,7 @@ def analysis_assurance_dict(assurance: object | None) -> dict[str, Any] | None:
     either shape depending on the writer, and this is the one place both are
     unwrapped to the same report-JSON shape.
     """
-    from ..analysis_assurance import AnalysisAssurance
+    from .analysis_assurance import AnalysisAssurance
 
     if isinstance(assurance, AnalysisAssurance):
         return assurance.to_dict()

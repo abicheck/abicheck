@@ -14,6 +14,7 @@
         "abicheck/buildsource/model.py",
         "abicheck/buildsource/pack.py",
         "abicheck/buildsource/source_abi.py",
+        "abicheck/buildsource/fact_set.py",
         "abicheck/model/evidence_depth_levels.py",
         "abicheck/bundle_manifest.py",
         "abicheck/change_registry.py",
@@ -255,9 +256,6 @@
         "compare"
       ],
       "legacy_paths": [
-        "abicheck/analysis_assurance.py",
-        "abicheck/analysis_assurance_comparability.py",
-        "abicheck/analysis_assurance_layout.py",
         "abicheck/buildsource/analysis_assurance_gate.py",
         "abicheck/compatibility_evaluation_config.py",
         "abicheck/compatibility_evaluation_packs.py",
@@ -549,9 +547,6 @@
     "__init__.py",
     "__main__.py",
     "_compiler_options.py",
-    "analysis_assurance.py",
-    "analysis_assurance_comparability.py",
-    "analysis_assurance_layout.py",
     "annotations.py",
     "binary_fingerprint.py",
     "binary_utils.py",
