@@ -60,10 +60,9 @@ from ..model.change_catalog.kinds import ChangeKind
 from ..model.graph_facts import GraphEdge
 from ..model.source_graph_coverage import HEADER_BODY_ATTR, HEADER_CALL_GRAPH_PASS
 from ..model.source_graph_query import is_public_dependency_node
+from .graph_risk_names import example_names
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
-
     from ..model.source_graph import SourceGraphSummary
 
 _CALLS = "DECL_CALLS_DECL"
@@ -77,9 +76,6 @@ _EXACT = "exact"
 
 #: The boundary a finding is attributed to. Header-only evidence, so not L5.
 _BOUNDARY = "[L2_HEADER_GRAPH]"
-
-#: How many example dependencies a description names per direction before "+N more".
-_EXAMPLE_LIMIT = 2
 
 
 def _header_pass_complete(graph: SourceGraphSummary) -> bool:
@@ -136,15 +132,6 @@ def _exact_reference(edge: GraphEdge) -> bool:
     return edge.resolved.get("resolution", edge.attrs.get("resolution")) == _EXACT
 
 
-def _names(targets: Sequence[str], labels: dict[str, str], prefix: str) -> str:
-    if not targets:
-        return ""
-    shown = ", ".join(labels.get(t, t) for t in targets[:_EXAMPLE_LIMIT])
-    more = len(targets) - _EXAMPLE_LIMIT
-    extra = f" (+{more} more)" if more > 0 else ""
-    return f" {prefix} {shown}{extra}."
-
-
 def consumer_compiled_dependency_findings(
     old: SourceGraphSummary, new: SourceGraphSummary
 ) -> list[Change]:
@@ -176,8 +163,8 @@ def consumer_compiled_dependency_findings(
             "This is header-only source-graph risk, not an artifact-proven ABI break: "
             "no consumer build evidence was consulted, so which consumers include "
             "this header is unknown."
-            + _names(sorted(after - before), labels, "Added:")
-            + _names(sorted(before - after), labels, "Removed:")
+            + example_names(sorted(after - before), labels, "Added:")
+            + example_names(sorted(before - after), labels, "Removed:")
         )
         findings.append(
             Change(
