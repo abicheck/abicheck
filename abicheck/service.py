@@ -46,13 +46,13 @@ from .workflows.service_requests import (
 # format's primary extraction is a ``workflows.dump.formats`` adapter. To
 # substitute an extractor, replace its entry in
 # ``workflows.dump.native.FORMAT_ADAPTERS`` rather than patching a private name.
-# run_compare_request/run_compare moved to service_compare_pipeline.py (CLI
+# run_compare_request/run_compare moved to workflows/compare/execute.py (CLI
 # cleanup phase two, PR B slice 1) to stay under the AI-readiness file-size
 # cap once run_compare gained pack_policy_overrides/pack_internal_namespaces
 # -- re-exported below, same pattern as resolve_compare_request/
 # classify_compare_pair already use.
 # ── Compare pipeline (ADR-055 D1): `run_compare_request`'s two phases live in
-# the leaf module ``service_compare_pipeline`` so the native ``compare`` CLI can
+# the ``workflows/compare/`` package so the native ``compare`` CLI can
 # run its ADR-049 configuration step (``workflows.compare_configuration``) between them and
 # still share this resolution instead of keeping a second copy. Re-exported here
 # so ``from abicheck.service import resolve_compare_request`` works.
@@ -89,14 +89,16 @@ from .frontends.render import (
     to_stat,
     to_stat_json,
 )
-from .service_compare_pipeline import (  # noqa: F401
-    ResolvedComparePair,
+from .workflows.compare.execute import (  # noqa: F401
     classify_compare_pair,
-    resolve_compare_request,
-    resolve_sides_sequentially,
     run_compare,
     run_compare_request,
 )
+from .workflows.compare.resolve import (  # noqa: F401
+    resolve_compare_request,
+    resolve_sides_sequentially,
+)
+from .workflows.compare_classify import ResolvedComparePair  # noqa: F401
 
 # ── Comparison: policy-parameterised (ADR-061 Phase 4). `compare_snapshots`/
 # `load_suppression_and_policy`/`_validate_contract_mode`/

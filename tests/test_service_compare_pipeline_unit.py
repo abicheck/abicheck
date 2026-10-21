@@ -1,4 +1,4 @@
-"""Unit tests for abicheck.service_compare_pipeline: run_compare, run_compare_request and the compare pipeline phases."""
+"""Unit tests for abicheck.workflows.compare: run_compare, run_compare_request and the compare pipeline phases."""
 
 from __future__ import annotations
 
@@ -11,10 +11,7 @@ from abicheck.comparability import compute_extraction_contract
 from abicheck.errors import ScopeMismatchError, SnapshotError, ValidationError
 from abicheck.model import AbiSnapshot, Function, Visibility
 from abicheck.serialization import load_snapshot, save_snapshot
-from abicheck.service_compare_pipeline import (
-    run_compare,
-    run_compare_request,
-)
+from abicheck.workflows.compare.execute import run_compare, run_compare_request
 from abicheck.workflows.compare_policy import (
     compare_snapshots,
 )
@@ -174,20 +171,22 @@ class TestCompareRequestAllowBuildQuery:
         )
 
     def _spy(self, monkeypatch):
-        import abicheck.service_compare_pipeline as pipeline
+        from abicheck.workflows.compare import (
+            resolve as compare_resolve,
+        )
 
         calls: list[dict] = []
-        original = pipeline._resolve_side_snapshot_impl
+        original = compare_resolve._resolve_side_snapshot_impl
 
         def _spied(side, evidence, **kwargs):
             calls.append(dict(kwargs))
             return original(side, evidence, **kwargs)
 
-        monkeypatch.setattr(pipeline, "_resolve_side_snapshot_impl", _spied)
+        monkeypatch.setattr(compare_resolve, "_resolve_side_snapshot_impl", _spied)
         return calls
 
     def test_default_is_false_and_forwards_none(self, tmp_path, monkeypatch):
-        from abicheck.service_compare_pipeline import run_compare_request
+        from abicheck.workflows.compare.execute import run_compare_request
 
         request = self._request(tmp_path)
         assert request.allow_build_query is False
@@ -199,7 +198,7 @@ class TestCompareRequestAllowBuildQuery:
         assert all(c["allow_build_query"] is None for c in calls)
 
     def test_true_reaches_the_resolution_primitive(self, tmp_path, monkeypatch):
-        from abicheck.service_compare_pipeline import run_compare_request
+        from abicheck.workflows.compare.execute import run_compare_request
 
         calls = self._spy(monkeypatch)
         run_compare_request(self._request(tmp_path, allow_build_query=True))
@@ -213,7 +212,7 @@ class TestCompareRequestAllowBuildQuery:
         `compare` path read it, so `allow_build_query` alone would have been
         an authorization with no config to act on.
         """
-        from abicheck.service_compare_pipeline import run_compare_request
+        from abicheck.workflows.compare.execute import run_compare_request
 
         cfg = tmp_path / ".abicheck.yml"
         cfg.write_text('build:\n  query: "true"\n', encoding="utf-8")
@@ -239,8 +238,8 @@ class TestCompareRequestAllowBuildQuery:
         is not a narrowing, because nothing on this path read `build_config`
         before the field existed.
         """
-        from abicheck.service_compare_pipeline import run_compare_request
         from abicheck.workflows.artifact.resolve import _gated_build_query_inputs
+        from abicheck.workflows.compare.execute import run_compare_request
 
         cfg = tmp_path / ".abicheck.yml"
         cfg.write_text('build:\n  query: "true"\n', encoding="utf-8")
@@ -478,7 +477,7 @@ class TestContractEvaluationThreading:
         # appended at the same time but later deleted outright (PR G2's
         # manual-override removal). public_header_dirs (PR #1138) is next,
         # then collapse_versioned_symbols (Codex review: the release
-        # fan-out's own gap -- see service_compare_pipeline.run_compare's
+        # fan-out's own gap -- see workflows.compare.execute.run_compare's
         # docstring), then project_policy_overrides (findings-analysis-fixes
         # batch, second review round, defect 4: the release fan-out's own
         # `.abicheck.yml` `policy.overrides` gap), same rule.
@@ -545,12 +544,12 @@ class TestContractEvaluationThreading:
 
     def test_get_type_hints_resolves_without_nameerror(self):
         """Codex review: `run_compare` moved from `service.py` into
-        `service_compare_pipeline.py` in this same PR, and `Path` was only
+        `workflows/compare/execute.py` in this same PR, and `Path` was only
         imported there under `TYPE_CHECKING` -- with `from __future__ import
         annotations` (PEP 563), `typing.get_type_hints(run_compare)` (a
         schema generator or docs tool introspecting this public function)
         raised `NameError: name 'Path' is not defined`. Fixed by importing
-        `pathlib.Path` unconditionally in `service_compare_pipeline.py`."""
+        `pathlib.Path` unconditionally in `workflows/compare/execute.py`."""
         import typing
 
         hints = typing.get_type_hints(run_compare)
@@ -950,7 +949,7 @@ class TestDebugFormatResolution:
 
 class TestComparePipelinePhases:
     """ADR-055 D1: ``run_compare_request`` is the composition of the two
-    phases in ``service_compare_pipeline``, and those phases are what the
+    phases in ``workflows.compare``, and those phases are what the
     native ``compare`` CLI now shares instead of its own resolution copy."""
 
     def _snap_file(self, tmp_path, name, version):

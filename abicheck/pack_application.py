@@ -353,7 +353,7 @@ def policy_file_with_packs(
     ``CompareRequest.pack_policy_overrides``/``pack_internal_namespaces``
     are the one contributor shape that mechanism cannot describe (no
     manifest path to read an identity from at all, by this field's own
-    design) -- see ``service_compare_pipeline.classify_compare_pair``'s own
+    design) -- see ``workflows.compare.execute.classify_compare_pair``'s own
     comment and ``workflows.compare_gate_receipt``'s docstring for how the
     receipt installer records that contribution honestly instead.
     """

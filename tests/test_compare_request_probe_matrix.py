@@ -18,7 +18,7 @@ from _family_f2_routes import _invoke, _probe_matrices, write_operands
 
 from abicheck.errors import ValidationError
 from abicheck.service import CompareRequest, InputSpec
-from abicheck.service_compare_pipeline import run_compare_request
+from abicheck.workflows.compare.execute import run_compare_request
 
 ONE_SIDED = "a build-configuration matrix needs both sides"
 

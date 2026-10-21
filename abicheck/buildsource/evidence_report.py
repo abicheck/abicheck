@@ -18,7 +18,7 @@ ADR-061 Phase 3. This is the engine owner of the ``compare`` build-source
 integration that used to live in ``cli_buildsource_helpers`` -- resolving each
 side's pack, diffing the L3/L4/L5 payloads, deriving the ADR-028 D7 coverage
 and capability report, and finalizing the ADR-033 D9 metrics. It was the last
-thing keeping ``service_compare_pipeline`` importing a ``cli_*`` module.
+thing keeping ``workflows.compare`` importing a ``cli_*`` module.
 
 **The module owns no output stream.** Every function that used to call
 ``click.echo`` now *renders* its report as ``list[str]`` and hands the lines to

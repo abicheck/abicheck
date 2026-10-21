@@ -244,7 +244,9 @@ class TestExclusionRulesAreThreadedToEveryReleaseConsumer:
         new must receive the identical set. An asymmetric pair is refused
         outright by the comparability gate, so writing them to one side
         only would not be a partial fix -- it would break every run."""
-        from abicheck import service_compare_pipeline as scp
+        from abicheck.workflows.compare import (
+            execute as compare_execute,
+        )
 
         captured: dict[str, Any] = {}
 
@@ -252,16 +254,16 @@ class TestExclusionRulesAreThreadedToEveryReleaseConsumer:
             captured["request"] = request
             return None
 
-        original = scp.run_compare_request
-        scp.run_compare_request = _capture  # type: ignore[assignment]
+        original = compare_execute.run_compare_request
+        compare_execute.run_compare_request = _capture  # type: ignore[assignment]
         try:
-            scp.run_compare(
+            compare_execute.run_compare(
                 Path("old.so"),
                 Path("new.so"),
                 exclude_headers=("a.h", "b.h"),
             )
         finally:
-            scp.run_compare_request = original  # type: ignore[assignment]
+            compare_execute.run_compare_request = original  # type: ignore[assignment]
         request = captured["request"]
         assert request.old.exclude_headers == ("a.h", "b.h")
         assert request.new.exclude_headers == ("a.h", "b.h")

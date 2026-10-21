@@ -35,7 +35,7 @@ ADR-055 D1 gave ``CompareRequest``/``InputSpec`` the CLI's whole
 ``compare`` feature set (``depth``, ``sources``/``build_info``,
 ``dump_manifest``, per-side ``CompileContext``, debug and dependency
 options), so the CLI builds one of these requests and resolves it through
-``service_compare_pipeline`` and classifies it through
+``workflows.compare`` and classifies it through
 ``workflows.compare_classify`` -- one resolution and one classification for
 every front end (D1's "Structural half" note).
 
@@ -169,7 +169,7 @@ class CompareRequest:
     # reasoning that keeps ``collapse_versioned_symbols``/
     # ``public_header_dirs`` as real fields here: both need a genuine
     # channel into the directory/package release fan-out's per-library
-    # ``compare_snapshots`` call (``service_compare_pipeline.run_compare`` /
+    # ``compare_snapshots`` call (``workflows.compare.execute.run_compare`` /
     # ``workflows.release_members.compare_member_pair``), which a config-
     # only value with no request field cannot reach.
     env_matrix: EnvironmentMatrix | None = None
@@ -280,7 +280,7 @@ class CompareRequest:
     # single-pair path never went through this typed request for that step,
     # calling ``compare_snapshots`` directly with an already pack-folded
     # ``PolicyFile`` object. Folded into the loaded ``PolicyFile`` by
-    # ``service_compare_pipeline.classify_compare_pair`` via
+    # ``workflows.compare.execute.classify_compare_pair`` via
     # ``pack_application.policy_file_with_packs`` — the exact same function
     # the single-pair CLI path already uses — so every caller that reaches
     # ``classify_compare_pair`` (which is every ``CompareRequest`` consumer,

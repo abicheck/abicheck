@@ -25,7 +25,7 @@ claims about it:
 * **Extraction occurs once per artifact.** :func:`resolve_side_snapshot` is the
   single entry point every front end reaches (``dump`` through
   ``service_dump_pipeline``, both ``compare`` sides through
-  ``service_compare_pipeline``, the retired ``scan``'s candidate through
+  ``workflows.compare``, the retired ``scan``'s candidate through
   ``scan_engine._build_new_snapshot``), and it calls ``service.resolve_input``
   exactly once. A front end that wanted a second opinion would have to call
   this again, not fork the logic.

@@ -250,7 +250,7 @@ class ResolvedExecutionContext:
         ``AnalysisPlan.requested_depth`` is not itself normalized (a
         typed-API caller can spell a valid depth case-insensitively, e.g.
         ``"HEADERS"``, the same way
-        :func:`~abicheck.service_compare_pipeline.classify_compare_pair`'s
+        :func:`~abicheck.workflows.compare.execute.classify_compare_pair`'s
         ``result.requested_depth = request.depth.lower()`` normalizes it for
         ``DiffResult`` before this context exists), and the ladder
         (:data:`~abicheck.evidence_depth.DEPTH_RANK`) is case-sensitive: an

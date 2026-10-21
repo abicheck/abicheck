@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Any
 
 from abicheck.service_compare_evidence import SideEvidence
-from abicheck.service_compare_pipeline import ResolvedComparePair
+from abicheck.workflows.compare_classify import ResolvedComparePair
 from abicheck.workflows.request_inputs import InputSpec
 from abicheck.workflows.service_requests import CompareRequest
 

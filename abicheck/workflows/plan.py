@@ -19,7 +19,7 @@ An unsatisfiable request (an evidence requirement no resolved
 collector/backend combination can produce) is rejected before extraction, with
 a named reason, instead of discovered as a silent no-op mid-run or not
 discovered at all. :func:`AnalysisPlanner.resolve` runs first inside
-:func:`abicheck.service_compare_pipeline.resolve_compare_request` and
+:func:`abicheck.workflows.compare.resolve.resolve_compare_request` and
 :func:`abicheck.workflows.dump.request.resolve_dump_request` — before either
 function touches a header-AST backend, a build-info adapter, or the
 filesystem beyond the small, already-in-hand request paths a check needs to

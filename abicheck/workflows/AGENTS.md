@@ -95,9 +95,9 @@ fails, and reports the cycle); the separate `engine-cli-boundary` gate
 still guards the root modules that have not moved yet. Both are live; neither is decorative.
 
 `service_input_resolution.py` is classified too, since `embed_build_source`
-moved to `buildsource/embed.py`. Only `service_compare_pipeline.py` is left:
-it still imports `prepare_embedded_build_source`/`attach_evidence_metrics`
-from `cli_buildsource`.
+moved to `buildsource/embed.py`. The typed compare pipeline is `workflows/compare/` (`resolve.py`, `execute.py`;
+formerly `service_compare_pipeline.py`). The CLI's config fold and gate still
+live in `cli_compare_helpers.py`.
 
 When you move an engine operation off the CLI layer, the error types are the
 contract, not an implementation detail. `buildsource/embed.py` raises
