@@ -56,13 +56,11 @@ class TestNewCanonicalPathIsUsable:
         assert abicheck.policy.__name__ == "abicheck.policy"
 
 
-class TestAnalysisAssuranceStaysFlat:
-    """`analysis_assurance.py` is the one `policy`-classified file this
-    migration deliberately left at its flat path (see the changelog
-    fragment for why) -- pin that it still resolves normally rather than
-    silently regressing to "missing"."""
+class TestAnalysisAssuranceLivesUnderPolicy:
+    """Analysis assurance moved to ``abicheck.policy.analysis_assurance``
+    with no flat re-export -- pin the new path and its exit contract."""
 
-    def test_analysis_assurance_still_resolves_at_the_flat_path(self) -> None:
+    def test_package_carries_the_exit_contract(self) -> None:
         from types import SimpleNamespace
 
         from abicheck.policy.analysis_assurance import (
@@ -77,7 +75,7 @@ class TestAnalysisAssuranceStaysFlat:
         complete = SimpleNamespace(
             analysis_assurance=AnalysisAssurance(status="complete")
         )
-        # The flat module still carries the flag's contract, not just a name.
+        # The package carries the flag's contract, not just a name.
         assert analysis_assurance_exit_contribution(
             incomplete, require_complete=True
         ) == (INCOMPLETE_ANALYSIS_EXIT_CONTRIBUTION)

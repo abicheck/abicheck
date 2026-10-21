@@ -10,7 +10,8 @@ reported" (that is `report/`). This layer's product invariant (the local consequ
 
 Most of that behavior still lives in flat root modules that
 `architecture/modules.yaml` lists as this layer's `legacy_paths`. Those stay
-where they are until a behavior-preserving vertical slice moves them;
+where they are until a behavior-preserving vertical slice moves them.
+
 The analysis-assurance block is the one package here that was migrated
 out of the flat root: `analysis_assurance/` owns it, with
 `compute_analysis_assurance` as its one public entry point and each axis as
