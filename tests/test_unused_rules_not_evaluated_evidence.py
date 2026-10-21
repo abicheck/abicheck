@@ -240,3 +240,37 @@ class TestReviewWarning:
 
         review = unused_rules_review(self._rows(), mode="warn")
         assert UnusedRulesReview.from_dict(review.to_dict()) == review
+
+
+class TestReleaseFoldMissingEvidence:
+    """A folded release row carries missing_evidence only when it folds to not_evaluated."""
+
+    def _member(self, ran: str):
+        (row,) = build_rule_rows(
+            [_rule("struct_size_changed")], {}, today=TODAY, ran_detectors=_RAN[ran]
+        )
+        return row
+
+    @pytest.mark.parametrize(
+        "order", [("elf+dwarf+headers", "elf-only"), ("elf-only", "elf+dwarf+headers")]
+    )
+    def test_unused_member_wins_and_drops_missing_evidence(
+        self, order: tuple[str, str]
+    ) -> None:
+        from abicheck.report.disposition_audit import fold_rule_rows
+
+        members = [[self._member(ran)] for ran in order]
+        statuses = {m[0].status for m in members}
+        assert statuses == {U, N}
+        (folded,) = fold_rule_rows(members)
+        assert folded.status == U
+        assert folded.missing_evidence is None
+
+    def test_all_not_evaluated_keeps_missing_evidence(self) -> None:
+        from abicheck.report.disposition_audit import fold_rule_rows
+
+        (folded,) = fold_rule_rows(
+            [[self._member("elf-only")], [self._member("elf-only")]]
+        )
+        assert folded.status == N
+        assert "dwarf" in (folded.missing_evidence or "")

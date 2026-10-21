@@ -569,7 +569,7 @@ ELF+headers, ELF+DWARF and ELF+DWARF+headers, and every rule shape was
 classified against the detectors that ran. No detector that ran was missing
 from `DETECTOR_KINDS`; the map was not too narrow for detectors. The gaps
 were elsewhere. (1) The kinds no registered detector emits (`NON_DETECTOR_KINDS`,
-about 130 of 417, among them `public_surface_shrank`, emitted on every run
+the kinds `policy/detector_kind_map.py` lists under `NON_DETECTOR_KINDS`, among them `public_surface_shrank`, emitted on every run
 with a removal) could never read `unused`: a stale rule on them was always
 `not_evaluated`, so `block` never fired for them. (2) Kinds only the DWARF
 detector emits (`struct_size_changed`, `struct_field_type_changed`) are

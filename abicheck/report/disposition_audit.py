@@ -333,6 +333,7 @@ def fold_rule_rows(
     for ref in order:
         group = grouped[ref]
         first = group[0]
+        status = fold_rule_status(row.status for row in group)
         folded.append(
             RuleAuditRow(
                 ref=ref,
@@ -340,14 +341,18 @@ def fold_rule_rows(
                 label=first.label,
                 reason=first.reason,
                 expires=first.expires,
-                status=fold_rule_status(row.status for row in group),
+                status=status,
                 matched_count=sum(row.matched_count for row in group),
                 shadowed_count=sum(row.shadowed_count for row in group),
                 selector_matched_count=sum(row.selector_matched_count for row in group),
                 intent=first.intent,
                 allow_public_break=first.allow_public_break,
-                missing_evidence=next(
-                    (r.missing_evidence for r in group if r.missing_evidence), None
+                missing_evidence=(
+                    next(
+                        (r.missing_evidence for r in group if r.missing_evidence), None
+                    )
+                    if status == "not_evaluated"
+                    else None
                 ),
             )
         )

@@ -120,7 +120,7 @@ asset_name="$(_substitute_literal "$asset_name" '{generation}' "${GENERATION:-}"
 case "${ATTEST:-false}" in
   true | false) ;;
   *)
-    echo "::error::attest '${ATTEST}' is not recognized. Use 'true' or 'false'."
+    echo "::error::attest is not recognized. Use 'true' or 'false'."
     exit 1
     ;;
 esac

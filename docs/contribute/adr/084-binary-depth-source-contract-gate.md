@@ -66,7 +66,7 @@ The gate reads only the declarations' observed facts, and the source pack's publ
 
 `std_reexport_removed` and `tag_type_renamed` no longer hard-code `public_reachable=True`. They set the reachability tags from `public_reachability(has_observed_source_contract_evidence(...))`: a proven claim (`PROVEN_REACHABLE`, `direct_public_symbol`) when the declaration is observed as contract, and `public_reachable=False` with `UNKNOWN` otherwise. Reachability is recorded as unknown rather than asserted.
 
-Two other detectors still assert reachability for BINARY_GATED kinds (`unspecified_return_now_named` at `diff_templates.py`, and `experimental_removed_without_replacement` via `subject_is_public` in `diff_namespaces.py`). Those are not changed here; the gate does not read their tags, so their verdict is correct, but their tags still overstate. See `known-gaps.md`.
+`unspecified_return_now_named` (`diff_templates.py`), `experimental_removed_without_replacement` (`diff_namespaces.py`) and `mandatory_template_param_added` also derive their tags from observed header or source evidence (`model/source_contract_evidence.ContractEvidenceByName`); a type's `PUBLIC_HEADER` origin counts as evidence for the experimental kind. `tests/test_binary_gated_reachability_tags.py` ratchets every BINARY_GATED producer against an export-derived claim.
 
 ### D5. The evidence label follows the demotion
 
@@ -103,6 +103,5 @@ Two other detectors still assert reachability for BINARY_GATED kinds (`unspecifi
 
 ## Not done
 
-- `unspecified_return_now_named` and `experimental_removed_without_replacement` still assert reachability from the export population. The verdict is correct because the gate ignores tags, but the tags overstate. Tracked in `known-gaps.md`.
 - The kABI and Python `.pyi` axes have their own evidence gates. This ADR does not build one for them.
 - **A demotion does not yet state a coverage gap.** `tests/test_family_f1_evidence_ablation.py` requires that a run whose verdict narrows because a fact became unknown report that narrowing (a lower confidence, a new coverage warning, or a changed assurance record). A demoted finding does not do so yet: the verdict narrows and the finding records its rule, but `DiffResult.coverage_warnings` gains nothing. The natural place for that warning is `checker.py`, which is at its no-growth ratchet, so it needs a responsibility move there rather than a raised baseline. See `known-gaps.md`.

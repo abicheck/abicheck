@@ -351,7 +351,9 @@ class RecordType:
     # any other producer, a non-specialization record, or a pre-v61 snapshot has
     # no PRESENT value. Only PRESENT(False) lets compare/template_instance_absence
     # treat a specialization the new header stops instantiating as not removed.
-    specialization_declared_fact: Fact[bool] | None = field(default=None, kw_only=True)
+    specialization_declared_fact: Fact[bool] | None = field(
+        default=None, kw_only=True, compare=False
+    )
 
     def __post_init__(
         self,
