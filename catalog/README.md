@@ -11,7 +11,7 @@ the same cases by rule, scenario kind, ecosystem, operation, evidence level,
 language, and verdict.
 
 <!-- BEGIN GENERATED: catalog-headline (keep counts in sync with examples/ground_truth.json) -->
-This directory contains **218 cases** (213 single-library + 5 multi-library bundle cases) demonstrating real-world ABI/API break scenarios. Most cases are a minimal, compilable C/C++ example with:
+This directory contains **220 cases** (215 single-library + 5 multi-library bundle cases) demonstrating real-world ABI/API break scenarios. Most cases are a minimal, compilable C/C++ example with:
 <!-- END GENERATED: catalog-headline -->
 
 - Paired `v1/` and `v2/` source + headers.
@@ -43,10 +43,10 @@ The catalog drives abicheck's benchmark and serves as an encyclopedia of ABI pit
 |---------|-------|-------------------------|------|
 | BREAKING | 113 | `BREAKING_KINDS` | 🔴 |
 | API_BREAK | 21 | `API_BREAK_KINDS` | 🟠 |
-| COMPATIBLE_WITH_RISK | 35 | `RISK_KINDS` | 🟡 |
+| COMPATIBLE_WITH_RISK | 36 | `RISK_KINDS` | 🟡 |
 | COMPATIBLE (addition) | 12 | `ADDITION_KINDS` | 🟢 |
 | COMPATIBLE (quality) | 21 | `QUALITY_KINDS` | 🟡 |
-| NO_CHANGE | 11 | — | ✅ |
+| NO_CHANGE | 12 | — | ✅ |
 | Bundle (multi-binary) | 5 | see [Multi-binary analysis](../docs/use/multi-binary.md) | 🔵 |
 <!-- END GENERATED: verdict-distribution -->
 
@@ -489,6 +489,8 @@ Expected non-pass buckets are already represented in `ground_truth.json`:
 | [216](cases/case216_overload_added_beside_initializer_list/README.md) | Overload Added Beside an `initializer_list` Overload | Addition | 🟢 COMPATIBLE |
 | [217](cases/case217_export_loss_weak_binding_demoted/README.md) | WEAK export loss demoted to a risk by a `binding: weak` rule | Breaking | 🔴 BREAKING |
 | [218](cases/case218_export_loss_strong_binding_stays_breaking/README.md) | a GLOBAL export loss stays BREAKING under a `binding: weak` rule | Breaking | 🔴 BREAKING |
+| [219](cases/case219_public_virtual_dispatch_set_changed/README.md) | Public Virtual Method's Override Set Changes | Risk | 🟡 COMPATIBLE_WITH_RISK |
+| [220](cases/case220_public_virtual_dispatch_set_reordered/README.md) | Public Virtual Method's Override Set Reordered | No Change | ✅ NO_CHANGE |
 <!-- END GENERATED: case-index -->
 
 ---

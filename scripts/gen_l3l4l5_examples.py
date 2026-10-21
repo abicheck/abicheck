@@ -73,7 +73,12 @@ from abicheck.buildsource.source_graph import (  # noqa: E402
     build_source_graph,
     mark_source_edges_extractor_coverage,
 )
-from abicheck.model.source_graph_coverage import PASS_EDGE_KINDS  # noqa: E402
+from abicheck.model.graph_facts import GraphFact  # noqa: E402
+from abicheck.model.source_graph_coverage import (  # noqa: E402
+    OVERRIDE_GRAPH_PASS,
+    PASS_EDGE_KINDS,
+    VIRTUAL_DISPATCH_GRAPH_PASS,
+)
 
 EXAMPLES = example_catalog.CASES_DIR
 
@@ -153,8 +158,21 @@ def _N(
     return GraphNode(id=nid, kind=kind, label=label, attrs=dict(attrs or {}))
 
 
-def _E(src: str, dst: str, kind: str) -> GraphEdge:
-    return GraphEdge(src=src, dst=dst, kind=kind)
+def _E(
+    src: str,
+    dst: str,
+    kind: str,
+    *,
+    attrs: dict[str, Any] | None = None,
+    resolved: dict[str, Any] | None = None,
+) -> GraphEdge:
+    return GraphEdge(
+        src=src,
+        dst=dst,
+        kind=kind,
+        attrs=dict(attrs or {}),
+        resolved=dict(resolved or {}),
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -738,6 +756,84 @@ def build_cases() -> dict[str, tuple[str, dict[str, Any], dict[str, Any]]]:
         "L5",
         l5k_old_graph.to_dict(),
         l5k_new_graph.to_dict(),
+    )
+
+    # ---- G29 Phase 6: PUBLIC_VIRTUAL_DISPATCH_SET_CHANGED -------------------
+    # Both cases share one shape: ``demo::render()`` calls the public virtual
+    # ``demo::Shape::area()`` (exported), whose possible override set is
+    # materialized as VIRTUAL_CALL_MAY_DISPATCH_TO edges by
+    # virtual_dispatch_graph.py. case219 gains an override (Square); case220 keeps
+    # the same override set and only lists its edges in the opposite order.
+    vd_base = [
+        _N("decl:demo::render", "source_decl", "demo::render()"),
+        _N("decl:demo::Shape::area", "source_decl", "demo::Shape::area()"),
+        _N("decl:demo::Circle::area", "source_decl", "demo::Circle::area()"),
+        _N("sym:_ZNK4demo5Shape4areaEv", "binary_symbol", "demo::Shape::area"),
+        _N("hdr:include/demo/shape.h", "header", "demo/shape.h"),
+    ]
+    vd_square = _N("decl:demo::Square::area", "source_decl", "demo::Square::area()")
+
+    def _vd_call(caller: str, base: str) -> GraphEdge:
+        # call_kind rides on a producer fact, as call_graph.py writes it; the
+        # edge's resolved attrs are folded from facts on load.
+        fact = GraphFact(producer="call_graph", attrs={"call_kind": "virtual"})
+        return GraphEdge(src=caller, dst=base, kind="DECL_CALLS_DECL", facts=[fact])
+
+    def _vd_override(override: str, base: str) -> GraphEdge:
+        return _E(override, base, "METHOD_POSSIBLE_OVERRIDE")
+
+    def _vd_dispatch(caller: str, target: str, base: str) -> GraphEdge:
+        return _E(
+            caller,
+            target,
+            "VIRTUAL_CALL_MAY_DISPATCH_TO",
+            attrs={"base_method": base, "resolution": "overapprox"},
+        )
+
+    vd_shape = "decl:demo::Shape::area"
+    vd_circle = "decl:demo::Circle::area"
+    vd_squ = "decl:demo::Square::area"
+    vd_render = "decl:demo::render"
+    vd_common = [
+        _E(
+            "decl:demo::Shape::area",
+            "sym:_ZNK4demo5Shape4areaEv",
+            "SOURCE_DECL_MAPS_TO_SYMBOL",
+        ),
+        _E("hdr:include/demo/shape.h", vd_shape, "SOURCE_DECLARES"),
+        _vd_call(vd_render, vd_shape),
+        _vd_override(vd_circle, vd_shape),
+    ]
+    # The override and virtual-dispatch passes must have run for the set to be
+    # trusted (source_graph_covers); the default flags predate them.
+    vd_passes = {
+        **dict.fromkeys(PASS_EDGE_KINDS, True),
+        OVERRIDE_GRAPH_PASS: True,
+        VIRTUAL_DISPATCH_GRAPH_PASS: True,
+    }
+    vd_old_edges = vd_common + [_vd_dispatch(vd_render, vd_circle, vd_shape)]
+    vd_new_edges = vd_old_edges + [
+        _vd_override(vd_squ, vd_shape),
+        _vd_dispatch(vd_render, vd_squ, vd_shape),
+    ]
+    cases["case219_public_virtual_dispatch_set_changed"] = (
+        "L5",
+        _graph(vd_base, vd_old_edges, extractor_passes=vd_passes),
+        _graph(vd_base + [vd_square], vd_new_edges, extractor_passes=vd_passes),
+    )
+
+    # case220: the same two overrides on both sides, listed in opposite order.
+    vd_both = vd_common + [
+        _vd_override(vd_squ, vd_shape),
+        _vd_dispatch(vd_render, vd_circle, vd_shape),
+        _vd_dispatch(vd_render, vd_squ, vd_shape),
+    ]
+    cases["case220_public_virtual_dispatch_set_reordered"] = (
+        "L5",
+        _graph(vd_base + [vd_square], vd_both, extractor_passes=vd_passes),
+        _graph(
+            vd_base + [vd_square], list(reversed(vd_both)), extractor_passes=vd_passes
+        ),
     )
 
     return cases
