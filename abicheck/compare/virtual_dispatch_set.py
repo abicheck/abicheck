@@ -52,6 +52,7 @@ from typing import TYPE_CHECKING
 
 from ..model.change import Change
 from ..model.change_catalog.kinds import ChangeKind
+from ..model.graph_identity import _normalize_if_decl_or_type
 from ..model.source_graph import EVIDENCE_TIER_L5
 from ..model.source_graph_coverage import (
     OVERRIDE_GRAPH_PASS,
@@ -97,10 +98,11 @@ def _dispatch_sets(graph: SourceGraphSummary) -> dict[str, frozenset[str]]:
     candidates: dict[str, set[str]] = {}
     for e in graph.edges:
         if e.kind == _DISPATCH:
-            # base_method is a raw attribute written at fold time: an identity
-            # alias recorded afterwards leaves it spelled the old way, so resolve
-            # it to the canonical id the endpoints already use.
-            base = graph.resolve_node_id(str(e.attrs.get("base_method", "")))
+            # base_method is a raw attribute written at fold time, so it can hold
+            # a legacy spelling or an identity alias recorded afterwards. Migrate
+            # and resolve it the way load-time endpoints already are.
+            raw = str(e.attrs.get("base_method", ""))
+            base = graph.resolve_node_id(_normalize_if_decl_or_type(raw)) if raw else ""
             candidates.setdefault(base, set()).add(e.dst)
     return {
         base: frozenset(candidates.get(base, ()))
