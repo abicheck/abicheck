@@ -1264,6 +1264,7 @@ runs:
         INPUT_INCLUDE_PRIVATE_DSO: ${{ inputs.include-private-dso }}
         INPUT_FAIL_ON_REMOVED_LIBRARY: ${{ inputs.fail-on-removed-library }}
         INPUT_ANALYSIS_ASSURANCE_COMPLETE: ${{ inputs.analysis-assurance-complete }}
+        INPUT_ACKNOWLEDGMENTS: ${{ inputs.acknowledgments }}
         INPUT_ABI_BASELINE: ${{ inputs.abi-baseline }}
         INPUT_BASELINE_PROFILE: ${{ inputs.baseline-profile }}
         INPUT_BASELINE_TARGET: ${{ inputs.baseline-target }}
@@ -1491,6 +1492,7 @@ runs:
         INPUT_INCLUDE_PRIVATE_DSO: ${{ inputs.include-private-dso }}
         INPUT_FAIL_ON_REMOVED_LIBRARY: ${{ inputs.fail-on-removed-library }}
         INPUT_ANALYSIS_ASSURANCE_COMPLETE: ${{ inputs.analysis-assurance-complete }}
+        INPUT_ACKNOWLEDGMENTS: ${{ inputs.acknowledgments }}
         INPUT_PR_COMMENT: ${{ inputs.pr-comment }}
         INPUT_PR_COMMENT_MODE: ${{ inputs.pr-comment-mode }}
         INPUT_PR_COMMENT_ON: ${{ inputs.pr-comment-on }}
