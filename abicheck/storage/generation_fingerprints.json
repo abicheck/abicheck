@@ -160,8 +160,8 @@
       "abicheck/bundle_resolution_reachability.py": "7d60ccf82fe98a12c7c81ac02d2c920492c8c20c52f0b13398195c4590615c08",
       "abicheck/compare/export_owner_resolution.py": "e9108cbdf0459cb8171f63ca328138558cfd032bff9124e4b9bd0fd5bf8553c8",
       "abicheck/debug_resolver.py": "cdcc4f72bd8fb5304fe030b3e1365da488ad009397e014ba56931a3f311cf1f3",
-      "abicheck/impact/use_case_reachability.py": "4882b891f0d2d298d200d8ff8ee74fbb3b48509813cb6fbc999e1a6628fb0326",
-      "abicheck/post_processing_reachability.py": "4932e6c5e2fad3b56e054081883bd41bffc7df5b168ab4d6284389c645670df1",
+      "abicheck/policy/use_case_reachability.py": "e21d1b32773ce42e458ec8dfe34d86c3a5c48732a829b4e985ec739cae594bc1",
+      "abicheck/post_processing_reachability.py": "85f3f8101ca6c8dcc5be45ff7551d11ed47701985c9b8e268adbb419f0ce1257",
       "abicheck/storage/native_identity_aliases.py": "061e634659b371f1688cfcd4845fdcbe6147b9c2cfddaa4285dd34c757ca80ef",
       "abicheck/type_reachability.py": "89d8db3c507a58004fd6b38ad4fee5ea6c9b40a9da97f34d8067ae440aa9e9bb",
       "abicheck/type_reachability_spelling.py": "4262f30db17f2a4c5ba2a4341b8eed9f1408e335825644845e10cb08838995cb",
@@ -169,8 +169,8 @@
       "abicheck/workflows/compare/resolve.py": "dc0381227c9e8dacaa39858d3f534ff45cbb3177f9b8645a8728c3f25c460793",
       "abicheck/workflows/elf_dependency_resolver.py": "18524281e550a7f25225441cd063de58ec33281e7bacf65fef98d1fefb101426"
     },
-    "fingerprint": "b67c0717ab797e7f7d6c14f789430b6399fa2412a0cd98f1bccbad1901aef43c",
+    "fingerprint": "6d50c6b3f9560af04ed2b3aee295541292b2c7695397c0f1d6cf9de88b291b21",
     "generation": 1,
-    "reason": "Moved impact/use_case_impact.py to impact/use_case_reachability.py (use-case entrypoint reachability, unchanged logic) and added it to the resolver scope; no recorded or derived fact changes."
+    "reason": "Moved the use-case explain from impact/use_case_reachability.py to policy/use_case_reachability.py with its injected explain port removed; the body is unchanged apart from importing the walk from compare/call_graph_walk.py. That walk (TraversalPolicy, CALL_GRAPH_TRAVERSAL_POLICY, consumer_compiled_reachability, reconstruct_path) moved verbatim out of internal_leak.py, with two helpers made public. The binary_symbol scheme split is an equivalent partition, not a behaviour change. MarkReachability and every reachability and graph derivation are byte-identical; no derived reachability fact changes, and the generation stays put."
   }
 }

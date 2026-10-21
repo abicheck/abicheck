@@ -21,9 +21,9 @@ after the comparison. Every refusal raises :class:`UseCaseAttributionError`,
 whose message is the text the CLI prints as its usage error (exit 64); this
 module never imports ``click``.
 
-The reachability port (:func:`abicheck.impact.use_case_reachability.explain_use_case_impact`)
-is passed in by the caller: this layer may not import the unclassified
-``impact`` package, and the composition root that does is the CLI.
+The reachability walk (:func:`abicheck.policy.use_case_reachability.explain_use_case_impact`)
+is policy-owned and called by ``build_use_case_impact`` directly, so this layer
+takes no injected port.
 """
 
 from __future__ import annotations
@@ -37,7 +37,6 @@ from ...policy.use_cases import load_use_case_manifest
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from ...policy.use_case_attribution import ExplainUseCases
     from ...policy.use_cases import UseCaseDefinition
 
 
@@ -63,8 +62,6 @@ def attach_use_case_impact(
     old: Any,
     new: Any,
     manifest: Path | None,
-    *,
-    explain: ExplainUseCases,
 ) -> None:
     """Attach ``compare --use-cases``'s attribution block to *result*.
 
@@ -93,7 +90,6 @@ def attach_use_case_impact(
         new,
         list(result.changes) + list(getattr(result, "scoped_only_changes", ()) or ()),
         manifest=str(manifest),
-        explain=explain,
     )
     if impact is None:
         raise UseCaseAttributionError(

@@ -1881,7 +1881,7 @@ class TestTraversalPolicy:
     walk, not just be accepted and ignored."""
 
     def test_call_graph_policy_allows_call_and_reference_edges(self) -> None:
-        from abicheck.internal_leak import CALL_GRAPH_TRAVERSAL_POLICY
+        from abicheck.compare.call_graph_walk import CALL_GRAPH_TRAVERSAL_POLICY
 
         assert CALL_GRAPH_TRAVERSAL_POLICY.allowed_edges == frozenset(
             {"DECL_CALLS_DECL", "DECL_REFERENCES_DECL"}
@@ -1889,9 +1889,9 @@ class TestTraversalPolicy:
 
     def test_minimum_confidence_excludes_low_confidence_edges(self) -> None:
         from abicheck.buildsource.source_graph import GraphEdge, SourceGraphSummary
-        from abicheck.internal_leak import (
+        from abicheck.compare.call_graph_walk import (
             TraversalPolicy,
-            _consumer_compiled_reachability,
+            consumer_compiled_reachability,
         )
         from abicheck.model.graph_facts import CONF_HIGH, CONF_REDUCED
 
@@ -1919,10 +1919,10 @@ class TestTraversalPolicy:
             stop_conditions=lambda node_id, node_by_id: False,
             minimum_confidence=CONF_HIGH,
         )
-        permissive_reach = _consumer_compiled_reachability(
+        permissive_reach = consumer_compiled_reachability(
             graph, permissive, ["decl://pub"], node_by_id
         )
-        strict_reach = _consumer_compiled_reachability(
+        strict_reach = consumer_compiled_reachability(
             graph, strict, ["decl://pub"], node_by_id
         )
         assert "decl://mid" in permissive_reach["decl://pub"][0]
@@ -1930,9 +1930,9 @@ class TestTraversalPolicy:
 
     def test_stop_conditions_halts_expansion_but_keeps_node_reachable(self) -> None:
         from abicheck.buildsource.source_graph import GraphEdge, SourceGraphSummary
-        from abicheck.internal_leak import (
+        from abicheck.compare.call_graph_walk import (
             TraversalPolicy,
-            _consumer_compiled_reachability,
+            consumer_compiled_reachability,
         )
 
         graph = SourceGraphSummary(
@@ -1951,7 +1951,7 @@ class TestTraversalPolicy:
             allowed_edges=frozenset({"DECL_CALLS_DECL"}),
             stop_conditions=lambda node_id, node_by_id: node_id == "decl://mid",
         )
-        reachable, _, _ = _consumer_compiled_reachability(
+        reachable, _, _ = consumer_compiled_reachability(
             graph, stop_at_mid, ["decl://pub"], node_by_id
         )["decl://pub"]
         assert "decl://mid" in reachable

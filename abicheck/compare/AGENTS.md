@@ -45,6 +45,10 @@ severity, or a CLI flag is in the wrong layer.
   moved here from `policy/`): whether consumers provably cannot see a type's
   layout. A model-only proof, and the confirming fact of the
   `internal_namespace` heuristic that `internal_leak.py` consults.
+- `call_graph_walk.py` — `TraversalPolicy`/`CALL_GRAPH_TRAVERSAL_POLICY`,
+  `consumer_compiled_reachability()` and `reconstruct_path()` (ADR-046 D5): the
+  restricted BFS over a `SourceGraphSummary` that the call-graph leak overlay,
+  the consumer graph and the use-case explain share. Model-only inputs.
 - `base_class_diff.py` — `diff_bases()` (ADR-063 Phase 5B): the
   `FactStatus`-aware `bases`/`virtual_bases` raw-change identification
   moved out of the legacy `diff_types.py` (Codex review, PR #1033) — new

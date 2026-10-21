@@ -23,7 +23,7 @@ result lives in :mod:`abicheck.workflows.compare.use_case_attribution`, and the
 JSON, text and Markdown projections in :mod:`abicheck.report.use_case_impact_render`.
 
 The attribution itself is
-:func:`~abicheck.policy.use_cases.explain_use_case_impact`; what lives here
+:func:`~abicheck.policy.use_case_reachability.explain_use_case_impact`; what lives here
 is the two-sided part around it -- resolving each side's own source graph,
 unioning the two attributions, and shaping the result a report reads.
 
@@ -50,17 +50,14 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
+from .use_case_reachability import explain_use_case_impact
+
 if TYPE_CHECKING:
-    from collections.abc import Callable, Iterable, Mapping, Sequence
+    from collections.abc import Sequence
 
     from ..model import AbiSnapshot
     from ..model.change import Change
     from .use_cases import UseCaseDefinition, UseCaseResolution
-
-    #: ``impact.use_case_reachability.explain_use_case_impact``'s shape (the port).
-    ExplainUseCases = Callable[
-        [list[UseCaseDefinition], Any, set[str]], Mapping[str, Iterable[str]]
-    ]
 
 
 @dataclass(frozen=True)
@@ -258,7 +255,6 @@ def build_use_case_impact(
     changes: Sequence[Change],
     *,
     manifest: str,
-    explain: ExplainUseCases,
 ) -> UseCaseImpact | None:
     """Attribute *changes* to *definitions*, or ``None`` with no source graph.
 
@@ -277,8 +273,8 @@ def build_use_case_impact(
         return None
 
     # Per use case, not per manifest entry -- see `_coalesce_definitions`.
-    # `explain` below is given the coalesced list too, so the
-    # attribution and the resolutions describe the same set.
+    # `explain_use_case_impact` below is given the coalesced list too, so
+    # the attribution and the resolutions describe the same set.
     definitions = _coalesce_definitions(definitions)
 
     resolutions = _merge_resolutions(
@@ -296,10 +292,14 @@ def build_use_case_impact(
     )
     symbols = {c.symbol for c in changes if c.symbol}
     mapping_old = (
-        explain(list(definitions), old_graph, symbols) if old_graph is not None else {}
+        explain_use_case_impact(list(definitions), old_graph, symbols)
+        if old_graph is not None
+        else {}
     )
     mapping_new = (
-        explain(list(definitions), new_graph, symbols) if new_graph is not None else {}
+        explain_use_case_impact(list(definitions), new_graph, symbols)
+        if new_graph is not None
+        else {}
     )
     named: dict[str, tuple[str, ...]] = {}
     for symbol in symbols:
