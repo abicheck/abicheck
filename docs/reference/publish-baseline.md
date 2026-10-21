@@ -281,7 +281,7 @@ current repository) covers its exact bytes. Set
 (`owner/repo/.github/workflows/<file>.yml`); otherwise any workflow in that
 repository can produce an accepted attestation. Both checks can be combined.
 `publish-baseline.yml` does not attest yet: it would need the two extra
-permissions on every caller (ADR-047 addendum, 2026-10-21).
+permissions on every caller of the reusable workflow.
 
 See [Storing Baselines](../use/baseline-storage.md) for the narrative
 picture of where a staged archive fits among abicheck's baseline-storage
