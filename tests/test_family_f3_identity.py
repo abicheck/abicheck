@@ -540,6 +540,7 @@ COVERAGE: dict[str, str] = {
     "abicheck.name_classification:canonicalize_type_name": "string probe x path transforms",
     "abicheck.model.graph_identity:checkout_stable_spelling": "string probe x path transforms",
     "abicheck.model.graph_identity:closure_location_free_identity": "string probe x path transforms",
+    "abicheck.model.graph_identity:decl_node_identity": "inverse of _decl_node_id over sibling node kinds (tests/test_template_export_loss_declaration_presence_unit.py)",
     "abicheck.model.graph_identity:closure_discriminator_free_identity": "string probe x path transforms; tests/test_closure_respelling.py property tests",
     "abicheck.model.graph_entity_identity:signature_key": "string probe x path transforms; mutant M1",
     "abicheck.model.graph_entity_identity:type_identity": "string probe x path transforms",
@@ -637,6 +638,9 @@ def test_covered_rows_are_really_registered_in_the_catalogue() -> None:
             # A capture-state gate, not a catalogue transform: exercised by the
             # G23 ELF legacy-baseline cases in tests/test_g23_elf_facts.py.
             "abicheck.compare.elf_capture_identity:both_captured_elf_identity",
+            # Decodes abicheck's own decl:// node id; its round trip against
+            # _decl_node_id is in tests/test_template_export_loss_declaration_presence_unit.py.
+            "abicheck.model.graph_identity:decl_node_identity",
         }
         | {
             f"abicheck.model.identity:entity_id_for_{k}"

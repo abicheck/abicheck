@@ -282,3 +282,29 @@ def test_export_table_only_old_record_keeps_the_elf_only_path() -> None:
         _snap([], elf=_elf(), graph=_graph(stem), version="2")
     )
     assert rule.changes_for(mangled, old_record, elf_only_mode=True) is None
+
+
+@pytest.mark.parametrize(
+    "identity",
+    ["ns::CSR::setArrays", "ns::Box<double>::set", "f", "a::b::c::d"],
+)
+def test_decl_node_identity_inverts_decl_node_id(identity: str) -> None:
+    from abicheck.model.graph_identity import _decl_node_id, decl_node_identity
+
+    assert decl_node_identity(_decl_node_id(identity)) == identity
+    assert decl_node_identity(_decl_node_id(identity) + "#sha256:abc") == identity
+
+
+@pytest.mark.parametrize(
+    "node_id",
+    [
+        "type://ns::CSR",
+        "template_decl://ns::CSR::setArrays",
+        "header://a.h",
+        "unresolved://decl/x",
+    ],
+)
+def test_decl_node_identity_rejects_other_node_kinds(node_id: str) -> None:
+    from abicheck.model.graph_identity import decl_node_identity
+
+    assert decl_node_identity(node_id) is None
