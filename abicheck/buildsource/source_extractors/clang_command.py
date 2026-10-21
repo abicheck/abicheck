@@ -253,7 +253,10 @@ def _clang_context_args(
     if needs_sycl_host_only(clang_bin, [*cmd, *extra]):
         extra = [*extra, "-fsycl-host-only"]
     cmd += extra
-    return cmd, msvc
+    # Both the AST-dump and the macro (``-E -dD``) argv carry this list, and a
+    # code-loading option runs a shared object in either, so the deny rule
+    # applies here, once, rather than in each builder.
+    return drop_code_loading_options(cmd), msvc
 
 
 #: Compile-unit languages that are C, not C++. A C unit dumps under plain
@@ -311,17 +314,15 @@ def build_clang_command(
     the L4 context, ABI-relevant flags included. A clang-cl/MSVC compile unit is
     driven through clang's ``cl`` driver mode.
 
-    What it never carries is code-loading option: ``-fplugin=`` and
+    What it never carries is a code-loading option: ``-fplugin=`` and
     ``-Xclang -load``/``-add-plugin`` run a shared object during option
-    processing, so no argv scan or ABI-flag prefix admits them. The regression
-    test in ``tests/test_tu_ast_argv.py`` pins that.
+    processing, so no argv scan or ABI-flag prefix admits them. The filter is
+    applied in :func:`_clang_context_args`, which this builder and the macro
+    builder share; ``test_shared_argv_never_admits_a_code_loading_option`` in
+    ``tests/test_tu_ast_shared_run.py`` pins both.
     """
     cmd, _msvc = _clang_context_args(compile_unit, compiler_binary, clang_bin=clang_bin)
-    return [
-        clang_bin,
-        *drop_code_loading_options(cmd),
-        *clang_ast_dump_tail(str(source)),
-    ]
+    return [clang_bin, *cmd, *clang_ast_dump_tail(str(source))]
 
 
 def build_clang_macro_command(

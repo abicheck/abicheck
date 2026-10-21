@@ -53,6 +53,7 @@ from abicheck.buildsource.source_extractors.base import SourceExtractionError
 from abicheck.buildsource.source_extractors.clang import ClangSourceExtractor
 from abicheck.buildsource.source_extractors.clang_command import (
     build_clang_command,
+    build_clang_macro_command,
     compile_unit_invocation,
 )
 from abicheck.buildsource.source_extractors.clang_dump_errors import ast_or_raise
@@ -417,11 +418,14 @@ def test_shared_argv_never_admits_a_code_loading_option(
         abi_relevant_flags=flags,
     )
     cmd = build_clang_command(cu, Path("p.cpp"), clang_bin="clang++")
+    macro = build_clang_macro_command(cu, Path("p.cpp"), clang_bin="clang++")
     # ``-Xclang`` itself is always in the fixed dump tail, so the forbidden
     # operands and flag names are checked, not the bare ``-Xclang`` token.
+    # The ``-E -dD`` macro argv shares the context, so it must drop them too.
     forbidden = {tok for form in _CODE_LOADING_FORMS for tok in form} - {"-Xclang"}
     for token in forbidden:
         assert token not in cmd, token
+        assert token not in macro, token
     # Every benign flag survives, each as often as the build recorded it.
     benign = {tok for form in _BENIGN_FORMS for tok in form}
     assert [t for t in cmd if t in benign] == [t for t in flags if t in benign]
@@ -710,3 +714,31 @@ def test_ast_or_raise_reports_a_json_failure_as_an_l4_failure() -> None:
     cu = CompileUnit(id="cu://x", source="x.cpp")
     with pytest.raises(SourceExtractionError, match="was not valid JSON"):
         ast_or_raise(cu, clang_ast_run.TuAstDump(None, 1, stage=STAGE_JSON))
+
+
+def test_standalone_pass_degrades_a_tu_without_a_command(tmp_path: Path) -> None:
+    """The standalone L5 run degrades one unbuildable TU, as the shared run does.
+
+    Before the guard in ``_run_unit`` the command error escaped the pool worker
+    and aborted every other TU's result.
+    """
+    build = _fixture_build(tmp_path)
+    bad = tmp_path / "src" / "bad.cpp"
+    bad.write_text("int bad_entry() { return 0; }\n")
+    build.compile_units.append(
+        CompileUnit(
+            id="cu://bad",
+            source=str(bad),
+            directory=str(tmp_path),
+            argv=["g++", "-std=c++17", "-fsycl-device-only", "-c", str(bad)],
+            language="CXX",
+            standard="c++17",
+            abi_relevant_flags=["-fsycl-device-only"],
+        )
+    )
+    outcomes = run_ast_passes(build, "clang")
+    # The good TUs still produced their edges; the bad one is its own diagnostic.
+    assert outcomes["call_graph"].result
+    assert any("bad.cpp" in d for d in outcomes["call_graph"].diagnostics), outcomes[
+        "call_graph"
+    ].diagnostics

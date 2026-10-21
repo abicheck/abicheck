@@ -75,6 +75,7 @@ from .inline_graph_fold import (
 from .l5_ast_run import AstPassOutcome, L5AstRun
 from .macro_graph import merge_decl_ranges, parse_tu_decl_ranges
 from .override_graph import merge_override_facts, parse_clang_ast_override_facts
+from .source_extractors.base import SourceExtractionError
 from .source_extractors.clang_command import ast_clang_binary
 from .template_graph import merge_template_instantiations, parse_clang_ast_templates
 from .type_graph import merge_type_edges
@@ -253,7 +254,12 @@ def _run_unit(
     clang_bin: str, passes: Sequence[AstPass], cu: CompileUnit
 ) -> tuple[CompileUnit, tuple[list[Any], list[list[str]]]]:
     """Dump *cu* once; every pass's result (``None`` = none) and diagnostics."""
-    dump = dump_compile_unit(cu, clang_bin=clang_bin, timeout=LOCAL_CAP_S)
+    try:
+        dump = dump_compile_unit(cu, clang_bin=clang_bin, timeout=LOCAL_CAP_S)
+    except SourceExtractionError as exc:
+        # No command for this TU: degrade it alone, as the shared run does, so
+        # one unbuildable unit does not abort the parallel run.
+        dump = TuAstDump(None, None, "", stage=STAGE_RUN, error=str(exc), raised=exc)
     unit = consume_tu_dump(dump, cu, passes)
     dump.release()
     return cu, unit
