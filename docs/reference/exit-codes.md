@@ -364,13 +364,14 @@ only tighten: it never relaxes a policy file's `block`.
   `unused`. It is a `0`/`1` axis folded with `max`, so it raises a clean `0`
   to `1` and never lowers a `2`, `4`, `7`, `8` or `16`.
 
-Only status `unused` triggers the gate. A rule reads `not_evaluated` instead
-when it matched nothing and a detector of the same comparison did not run: the
-audit cannot prove the rule was checked, so the gate stays silent.
-Detectors do not yet declare the kinds they produce, so any refused detector
-makes every unmatched rule `not_evaluated`. In practice `block` fires only on a
-comparison in which every detector ran. The `expired`, `shadowed_only` and
-`active` statuses never trigger it either.
+Only status `unused` triggers the gate. Status is decided per rule: a rule
+reads `not_evaluated` instead when it matched nothing and none of the detectors
+that can produce its change kinds ran, so the audit cannot prove the rule was
+checked. A rule that names no kind is a candidate for every detector. On an
+ELF-only comparison a stale symbol-kind rule therefore reads `unused` and
+`block` fires, while a stale rule scoped to a DWARF-only kind stays
+`not_evaluated` and does not. The `expired`, `shadowed_only` and `active`
+statuses never trigger it either.
 
 For a directory/package release the gate is evaluated over the union of its
 members: a rule is unused only when every member that configures it left it

@@ -27,6 +27,7 @@ from hypothesis import HealthCheck, given, settings, strategies as st
 
 from abicheck.checker import compare
 from abicheck.checker_policy import ChangeKind, Verdict
+from abicheck.detector_registry import registry
 from abicheck.model import AbiSnapshot, Function, Visibility
 from abicheck.policy.acknowledgment import AcknowledgmentList
 from abicheck.policy.disposition_close import ledger_for
@@ -113,25 +114,48 @@ def _oracle_suppression(
     return disposed, shadowed
 
 
+#: Every registered detector name, read from the live registry -- the producer
+#: set of a rule that names no change kind (it could match any kind).
+_ALL_DETECTORS: frozenset[str] = frozenset(registry.detector_names)
+#: The detectors that can emit ``func_removed`` on the scenarios' ELF-style
+#: symbols: the ``functions`` detector (every run has it, no evidence gate) and
+#: the PE and Mach-O symbol paths. Written here by hand from the source, not
+#: read from the generated map.
+_FUNC_REMOVED_PRODUCERS: frozenset[str] = frozenset({"functions", "pe", "macho"})
+
+
+def _producers(rule_kind: str | None) -> frozenset[str]:
+    """The oracle's candidate detectors for a rule that names *rule_kind*."""
+    return _ALL_DETECTORS if rule_kind is None else _FUNC_REMOVED_PRODUCERS
+
+
 def _oracle_status(
     disposed: int,
     shadowed: int,
     expires: date | None,
     *,
-    refused: bool,
+    producers: frozenset[str],
+    ran: frozenset[str],
     today: date,
 ) -> str:
+    """ADR-067 P1 addendum: a zero-match rule is ``unused`` iff one of the
+    detectors that can produce its kinds ran; otherwise ``not_evaluated``."""
     if disposed > 0:
         return STATUS_ACTIVE
     if shadowed > 0:
         return STATUS_SHADOWED_ONLY
     if expires is not None and today > expires:
         return STATUS_EXPIRED
-    return STATUS_NOT_EVALUATED if refused else STATUS_UNUSED
+    return STATUS_UNUSED if producers & ran else STATUS_NOT_EVALUATED
 
 
-def _detectors_refused(result: object) -> bool:
-    return any(d.not_evaluated for d in result.detector_results)  # type: ignore[attr-defined]
+def _ran(result: object) -> frozenset[str]:
+    """The detectors that ran, read straight off the result's own records."""
+    return frozenset(
+        d.name
+        for d in result.detector_results  # type: ignore[attr-defined]
+        if d.enabled and not d.not_evaluated
+    )
 
 
 # -- scenario builders -------------------------------------------------------
@@ -230,7 +254,7 @@ def test_every_configured_rule_has_one_row_matching_the_oracle(
     assert detected == sorted(symbols)
 
     disposed, shadowed = _oracle_suppression(rules, symbols, today)
-    refused = _detectors_refused(result)
+    ran = _ran(result)
     rows = audit.rules
     # I1: one row per configured rule, in file order, zero-count rows included.
     assert len(rows) == len(rules), label
@@ -239,12 +263,13 @@ def test_every_configured_rule_has_one_row_matching_the_oracle(
         # I2: counts equal the oracle's first-match credit and shadowing.
         assert row.matched_count == disposed[index], (label, index)
         assert row.shadowed_count == shadowed[index], (label, index)
-        # I3: the status the four-state rule dictates.
+        # I3: the status the per-rule four-state rule dictates.
         assert row.status == _oracle_status(
             disposed[index],
             shadowed[index],
             rules[index].expires,
-            refused=refused,
+            producers=_producers(rules[index].change_kind),
+            ran=ran,
             today=today,
         ), (label, index)
 
@@ -272,9 +297,39 @@ def test_an_unmatched_rule_is_unused_when_every_detector_ran() -> None:
 
 
 def _every_detector_ran(result: object) -> None:
-    """Model a run in which no detector's evidence gate refused: the state the
-    ``unused`` status is defined over."""
-    result.detector_results = []  # type: ignore[attr-defined]
+    """Model a run in which no detector's evidence gate refused: every
+    registered detector has an enabled, evaluated record. An empty list would
+    model "nothing was recorded", which reads ``not_evaluated``, not this."""
+    from abicheck.detectors import DetectorResult
+
+    result.detector_results = [  # type: ignore[attr-defined]
+        DetectorResult(name=name, changes_count=0) for name in registry.detector_names
+    ]
+
+
+def _every_detector_refused(result: object) -> None:
+    """Model a run in which every detector's evidence gate refused."""
+    from abicheck.detectors import DetectorResult
+
+    result.detector_results = [  # type: ignore[attr-defined]
+        DetectorResult(
+            name=name,
+            changes_count=0,
+            enabled=False,
+            coverage_gap="test: evidence absent",
+            not_evaluated=True,
+        )
+        for name in registry.detector_names
+    ]
+
+
+def _apply_ran_state(result: object, state: str) -> None:
+    """``as_compared`` keeps the comparison's own records; the other two force
+    every detector to ran or to refused."""
+    if state == "all_ran":
+        _every_detector_ran(result)
+    elif state == "all_refused":
+        _every_detector_refused(result)
 
 
 def test_an_unmatched_rule_is_not_evaluated_when_a_detector_did_not_run() -> None:
@@ -547,6 +602,12 @@ def _rule_sets(draw: st.DrawFn) -> list[Suppression]:
     return rules
 
 
+#: ``as_compared``: the comparison's own detector records. ``all_ran`` and
+#: ``all_refused`` force the two extremes, so both ``unused`` and
+#: ``not_evaluated`` are reached on every rule shape.
+_ran_state = st.sampled_from(["as_compared", "all_ran", "all_refused"])
+
+
 @pytest.mark.slow
 @settings(max_examples=60, deadline=None, suppress_health_check=[HealthCheck.too_slow])
 @given(
@@ -554,27 +615,27 @@ def _rule_sets(draw: st.DrawFn) -> list[Suppression]:
     removed=st.sets(st.sampled_from(NAMES)).map(
         lambda s: tuple(n for n in NAMES if n in s)
     ),
-    every_detector_ran=st.booleans(),
+    ran_state=_ran_state,
 )
 def test_generated_rule_sets_match_the_oracle(
-    rules: list[Suppression], removed: tuple[str, ...], every_detector_ran: bool
+    rules: list[Suppression], removed: tuple[str, ...], ran_state: str
 ) -> None:
     result, symbols = _scenario(removed, rules)
-    if every_detector_ran:  # reaches the ``unused`` branch, not only ``not_evaluated``
-        _every_detector_ran(result)
+    _apply_ran_state(result, ran_state)
     today = date.today()
     audit = compute_disposition_audit(result)
     disposed, shadowed = _oracle_suppression(rules, symbols, today)
-    refused = _detectors_refused(result)
+    ran = _ran(result)
     assert len(audit.rules) == len(rules)  # I1, zero rows and duplicates included
     for index, row in enumerate(audit.rules):
         assert row.matched_count == disposed[index]  # I2
         assert row.shadowed_count == shadowed[index]
-        assert row.status == _oracle_status(  # I3
+        assert row.status == _oracle_status(  # I3, per rule
             disposed[index],
             shadowed[index],
             rules[index].expires,
-            refused=refused,
+            producers=_producers(rules[index].change_kind),
+            ran=ran,
             today=today,
         )
     assert (
@@ -674,12 +735,12 @@ _rc_rule = st.tuples(
     removed=st.sets(st.sampled_from(NAMES)).map(
         lambda s: tuple(n for n in NAMES if n in s)
     ),
-    every_detector_ran=st.booleans(),
+    ran_state=_ran_state,
 )
 def test_generated_reclassify_rule_sets_match_the_oracle(
     rules: list[tuple[tuple[str, str], str, date | None, str | None]],
     removed: tuple[str, ...],
-    every_detector_ran: bool,
+    ran_state: str,
 ) -> None:
     with tempfile.TemporaryDirectory() as tmp:
         path = Path(tmp) / "policy.yml"
@@ -687,21 +748,22 @@ def test_generated_reclassify_rule_sets_match_the_oracle(
         policy = PolicyFile.load(path)
         old, new = _snapshots(removed)
         result = compare(old, new, policy_file=policy)
-    if every_detector_ran:
-        _every_detector_ran(result)
+    _apply_ran_state(result, ran_state)
     today = date.today()
     audit = compute_disposition_audit(result)
     hits, changed = _oracle_reclassify(rules, _removed_symbols(removed), today)
-    refused = _detectors_refused(result)
+    ran = _ran(result)
     assert len(audit.reclassifications) == len(rules)  # I1, zero rows included
     for index, row in enumerate(audit.reclassifications):
         assert row.selector_matched_count == hits[index]  # I4: selector hits
         assert row.matched_count == changed[index]  # I4: verdict changes
+        # These reclassify selectors name no kind, so every detector is a candidate.
         assert row.status == _oracle_status(
             changed[index],
             hits[index] - changed[index],
             rules[index][2],
-            refused=refused,
+            producers=_ALL_DETECTORS,
+            ran=ran,
             today=today,
         )
     assert audit.reclassified_total == sum(changed)
@@ -722,13 +784,21 @@ def test_an_acknowledgment_that_covers_nothing_still_has_a_row(tmp_path: Path) -
     old, new = _snapshots(("gone0",))
     result = compare(old, new, acknowledgments=AcknowledgmentList.load(acks))
     unused, expired = compute_disposition_audit(result).acknowledgments
-    # The DWARF detector is refused in this scenario, so an unmatched record is
-    # ``not_evaluated`` rather than ``unused`` (ADR-067 D3, the known limitation).
-    refused = _detectors_refused(result)
+    # The record names func_removed, so its candidates are the func_removed
+    # producers; the ``functions`` detector ran, so it is ``unused`` here. The
+    # DWARF detector being refused does not matter: it is not a candidate.
     today = date.today()
     assert unused.matched_count == 0
     assert "nope" in unused.rule_id
-    assert unused.status == _oracle_status(0, 0, None, refused=refused, today=today)
+    assert unused.status == _oracle_status(
+        0,
+        0,
+        None,
+        producers=_FUNC_REMOVED_PRODUCERS,
+        ran=_ran(result),
+        today=today,
+    )
+    assert unused.status == STATUS_UNUSED
     assert (expired.reason, expired.matched_count) == ("old waiver", 0)
     assert expired.status == STATUS_EXPIRED
 

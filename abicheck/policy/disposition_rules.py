@@ -176,15 +176,26 @@ def configured_rule_rows(
                 ConfiguredRule(ref=ref, rule_id=f"{ref.kind}#{ref.entry_index}")
             )
             known.add(ref)
-    detectors_refused = any(
-        getattr(det, "not_evaluated", False)
-        for det in getattr(result, "detector_results", None) or ()
-    )
     return build_rule_rows(
         configured,
         counts,
         today=today or date.today(),
-        detectors_refused=detectors_refused,
+        ran_detectors=ran_detectors(result),
+    )
+
+
+def ran_detectors(result: object) -> frozenset[str]:
+    """The names of the detectors that actually ran in *result*.
+
+    A detector recorded ``not_evaluated`` (its evidence gate refused it) did not
+    run, and a detector with no entry at all did not run either: only an
+    enabled, evaluated entry counts. A result with no detector list reports
+    nothing ran, so no rule can read ``unused`` from it.
+    """
+    return frozenset(
+        det.name
+        for det in getattr(result, "detector_results", None) or ()
+        if getattr(det, "enabled", True) and not getattr(det, "not_evaluated", False)
     )
 
 

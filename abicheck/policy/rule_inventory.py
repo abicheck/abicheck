@@ -37,8 +37,15 @@ covered findings for an acknowledgment. ``shadowed`` is every other finding
 the rule's selectors matched (overlap with an earlier rule, or a matching
 no-op reclassification). ``disposed + shadowed`` is the selector-hit count.
 
-A leaf: imports nothing but :mod:`rule_identity`, so the ledger, the closer,
-the report projection and the exit fold can all depend on it without a cycle.
+Status is decided per rule (ADR-067 P1 addendum, per-rule ``not_evaluated``):
+a zero-match rule is ``unused`` when at least one detector that *can produce
+one of the rule's change kinds* ran, and ``not_evaluated`` only when none of
+them did. The candidate detectors come from the generated map
+:data:`~abicheck.policy.detector_kind_map.DETECTOR_KINDS`.
+
+A leaf: imports only :mod:`rule_identity`, the generated detector map and the
+``ChangeKind`` enum (a ``model`` leaf), so the ledger, the closer, the report
+projection and the exit fold can all depend on it without a cycle.
 """
 
 from __future__ import annotations
@@ -49,6 +56,8 @@ from dataclasses import dataclass
 from datetime import date
 from typing import Any, cast
 
+from ..model.change_catalog.kinds import ChangeKind
+from .detector_kind_map import DETECTOR_KINDS
 from .rule_identity import rule_id_of
 
 KIND_SUPPRESSION = "suppression"
@@ -95,7 +104,12 @@ class RuleRef:
 
 @dataclass(frozen=True, slots=True)
 class ConfiguredRule:
-    """One rule a policy document declares, before any finding is disposed."""
+    """One rule a policy document declares, before any finding is disposed.
+
+    ``change_kinds`` is the rule's ``kind`` / ``change_kind`` selector as
+    ``ChangeKind`` values; ``None`` means the rule names no kind, so it could
+    match a finding of any kind.
+    """
 
     ref: RuleRef
     rule_id: str
@@ -104,6 +118,7 @@ class ConfiguredRule:
     expires: date | None = None
     intent: str = "unspecified"
     allow_public_break: bool = False
+    change_kinds: frozenset[str] | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -147,12 +162,43 @@ class RuleAuditRow:
         return self.ref.entry_index
 
 
+def _kind_selector(value: object) -> frozenset[str] | None:
+    """A rule's ``kind``/``change_kind`` selector as ``ChangeKind`` values.
+
+    ``None`` (no kind selector) stays ``None``: every kind. An unrecognised
+    spelling is kept verbatim, so no detector produces it and the rule reads
+    ``not_evaluated`` rather than being guessed at.
+    """
+    if value is None:
+        return None
+    text = str(value)
+    try:
+        return frozenset({ChangeKind(text).value})
+    except ValueError:
+        return frozenset({text})
+
+
+def candidate_detectors(change_kinds: frozenset[str] | None) -> frozenset[str]:
+    """The registered detectors that could produce any of *change_kinds*.
+
+    ``None`` means every kind, so the candidates are every detector that
+    produces at least one kind. A kind no detector produces (a pipeline step,
+    workflow or bundle path) has no candidates, and a rule scoped to it can
+    never read ``unused``.
+    """
+    if change_kinds is None:
+        return frozenset(name for name, kinds in DETECTOR_KINDS.items() if kinds)
+    return frozenset(
+        name for name, kinds in DETECTOR_KINDS.items() if kinds & change_kinds
+    )
+
+
 def rule_status(
     rule: ConfiguredRule,
     counts: RuleCounts,
     *,
     today: date,
-    detectors_refused: bool,
+    ran_detectors: frozenset[str],
 ) -> str:
     """The status of one configured rule (ADR-067 D3 / ADR-065 four-state rule).
 
@@ -163,11 +209,13 @@ def rule_status(
     2. ``shadowed_only`` -- its selectors matched findings, but an earlier rule
        (or a no-op reclassification) claimed every one of them;
     3. ``expired`` -- past its ``expires`` date (an expired rule never matches);
-    4. ``not_evaluated`` -- it matched nothing, and at least one detector of
-       this comparison did not run, so "nothing matched" is not proof the rule
-       was checked (ADR-067 D3: never ``unused`` when the evaluation was not
-       performed);
-    5. ``unused`` -- it matched nothing, and every detector ran.
+    4. ``unused`` -- it matched nothing, and at least one detector that could
+       produce one of its change kinds ran (:func:`candidate_detectors`);
+    5. ``not_evaluated`` -- it matched nothing, and none of those detectors ran,
+       so "nothing matched" is not proof the rule was checked (ADR-067 D3).
+
+    *ran_detectors* is the set of detector names that actually ran in this
+    comparison. A detector absent from it is treated as not having run.
     """
     if counts.disposed > 0:
         return STATUS_ACTIVE
@@ -175,9 +223,9 @@ def rule_status(
         return STATUS_SHADOWED_ONLY
     if rule.expires is not None and today > rule.expires:
         return STATUS_EXPIRED
-    if detectors_refused:
-        return STATUS_NOT_EVALUATED
-    return STATUS_UNUSED
+    if candidate_detectors(rule.change_kinds) & ran_detectors:
+        return STATUS_UNUSED
+    return STATUS_NOT_EVALUATED
 
 
 def build_rule_rows(
@@ -185,7 +233,7 @@ def build_rule_rows(
     counts: Mapping[RuleRef, RuleCounts],
     *,
     today: date,
-    detectors_refused: bool,
+    ran_detectors: frozenset[str],
 ) -> tuple[RuleAuditRow, ...]:
     """Exactly one :class:`RuleAuditRow` per configured rule, in input order.
 
@@ -211,9 +259,7 @@ def build_rule_rows(
                 label=rule.label,
                 reason=rule.reason,
                 expires=rule.expires,
-                status=rule_status(
-                    rule, c, today=today, detectors_refused=detectors_refused
-                ),
+                status=rule_status(rule, c, today=today, ran_detectors=ran_detectors),
                 matched_count=c.disposed,
                 shadowed_count=c.shadowed,
                 selector_matched_count=c.hits,
@@ -297,6 +343,7 @@ def suppression_rules(suppression: object) -> tuple[ConfiguredRule, ...]:
             reason=getattr(rule, "reason", None),
             expires=getattr(rule, "expires", None),
             allow_public_break=bool(getattr(rule, "allow_public_break", False)),
+            change_kinds=_kind_selector(getattr(rule, "change_kind", None)),
         )
         for index, rule in enumerate(getattr(suppression, "rules", ()) or ())
     )
@@ -315,6 +362,7 @@ def reclassify_rules(policy_file: object | None) -> tuple[ConfiguredRule, ...]:
             label=getattr(rule, "label", None),
             reason=getattr(rule, "reason", None),
             expires=getattr(rule, "expires", None),
+            change_kinds=_kind_selector(getattr(rule, "change_kind", None)),
         )
         for index, rule in enumerate(getattr(policy_file, "reclassify", ()) or ())
     )
@@ -336,6 +384,7 @@ def acknowledgment_rules(acknowledgments: object | None) -> tuple[ConfiguredRule
                 rule_id=record_id() if callable(record_id) else str(record),
                 reason=getattr(record, "reason", None) or None,
                 expires=getattr(record, "expires", None),
+                change_kinds=_kind_selector(getattr(record, "change_kind", None)),
             )
         )
     return tuple(out)

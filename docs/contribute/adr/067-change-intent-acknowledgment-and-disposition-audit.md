@@ -493,22 +493,33 @@ acknowledgment, the findings it covered. `shadowed_count` is every other finding
 the rule's selectors matched: one an earlier rule claimed, or a no-op
 reclassification. `selector_matched_count` is their sum.
 
-**Status.** Each row carries one of: `active` (disposed of at least one
-finding); `shadowed_only` (matched, disposed of none); `expired` (past its
-`expires` date, with nothing disposed of); `not_evaluated` (matched nothing,
-and a detector of the comparison did not run); `unused` (matched nothing, and
-every detector ran). The check runs in that order. `unused` is never reported
-for a comparison in which a detector did not run (D3's "absent is not
-removed"). Acknowledgment rows take the same statuses; ambiguous-match handling
-is unchanged.
+**Status (per rule, 2026-10-21).** Each row carries one of: `active`
+(disposed of at least one finding); `shadowed_only` (matched, disposed of
+none); `expired` (past its `expires` date, with nothing disposed of); `unused`
+(matched nothing, and at least one detector that can produce one of the rule's
+change kinds ran); `not_evaluated` (matched nothing, and none of those detectors
+ran). The check runs in that order. A rule's candidate detectors are those that
+can produce its `kind`/`change_kind` selector; a rule with no kind selector can
+match any kind, so every detector that produces a kind is a candidate. A kind
+that no registered detector produces leaves its rule `not_evaluated`. This keeps
+D3's "absent is not removed": a rule is never `unused` unless a check that could
+have matched it ran. Acknowledgment rows take the same statuses; ambiguous-match
+handling is unchanged.
 
-**Known limitation of `not_evaluated`.** Detectors do not declare the kinds they
-produce, so the audit cannot tell whether a refused detector could have matched
-an unmatched rule. Any refused detector therefore makes every unmatched rule
-`not_evaluated`. On a typical ELF-only comparison about twenty detectors are
-refused, so `unused` is reported only when every detector ran. Making the status
-precise needs each detector to declare the kinds it can emit. That is a
-follow-up and is not decided here.
+**Which detectors can produce a rule's kind (resolved 2026-10-21).** The status
+above was first decided globally: any refused detector made every unmatched
+rule `not_evaluated`, so `unused` was reported only when every detector ran.
+Detectors do not declare their kinds in the registry, so the mapping is derived
+once, from the source, into `abicheck/policy/detector_kind_map.py`
+(`scripts/gen_detector_kind_map.py`). For each registered detector it lists the
+`ChangeKind` values its function reaches through first-party calls and
+references, and it lists the kinds no detector reaches. `tests/test_detector_kind_map.py`
+fails on drift, on a missing detector or kind, and on any kind a detector emits
+on the controlled mutation catalogue that its entry does not credit. The map is
+an over-approximation where the walk cannot resolve a call, so it errs toward
+`unused`. A refused detector no longer affects a rule it cannot have checked.
+The ELF-only comparison that prompted this now reads a stale symbol-kind rule
+as `unused`, and a DWARF-only kind as `not_evaluated`.
 
 **The `unused_rules` gate (D6's pattern).** A top-level policy key
 `unused_rules: allow|warn|block` (default `allow`, so no existing run changes)
@@ -537,5 +548,10 @@ is its `id:` or canonical identity instead of its label or reason.
 The audit keys reclassify rows on the configured rule, not on that display
 string.
 
-**Still open.** The precise `not_evaluated` status above. The acknowledgment
-`breaks: gate|accept` policy is owned by its own change and is not decided here.
+**Still open.** A kind that a pipeline step (not a registered detector) emits,
+such as `inline_body_changed`, reads `not_evaluated` even when that step ran,
+because no detector run can be credited with it. Recording pipeline steps as
+producers would need the same per-step evaluation record, and is not decided
+here. The row's optional list of candidate detectors that did not run is not
+added to the JSON report. The acknowledgment `breaks: gate|accept` policy is
+owned by its own change and is not decided here.

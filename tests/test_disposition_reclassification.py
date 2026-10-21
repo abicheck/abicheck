@@ -41,6 +41,7 @@ from click.testing import CliRunner
 from abicheck.checker_policy import ChangeKind, Verdict
 from abicheck.checker_types import DiffResult
 from abicheck.cli import main
+from abicheck.detectors import DetectorResult
 from abicheck.model import AbiSnapshot, Function, Variable, Visibility
 from abicheck.model.change import Change
 from abicheck.policy.disposition_close import (
@@ -150,6 +151,11 @@ def test_an_unmatched_reclassify_rule_still_has_a_zero_row(tmp_path: Path) -> No
         new_version="2",
         library="l",
         policy_file=pf,
+        # The rule names func_removed, which the ``functions`` detector produces.
+        # It ran, so the zero-match rule is unused (ADR-067 P1 addendum). Without
+        # a detector record nothing is known to have run, and the rule reads
+        # not_evaluated instead.
+        detector_results=[DetectorResult(name="functions", changes_count=1)],
     )
     audit = compute_disposition_audit(diff)
     assert audit.reclassified_total == 0
