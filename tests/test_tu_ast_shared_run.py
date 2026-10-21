@@ -246,7 +246,27 @@ def test_l5_parsers_read_the_same_edges_under_both_argvs(tmp_path: Path) -> None
     assert any(r for r, _d in shared_edges["call_graph"] if r)
     assert any(r for r, _d in shared_edges["type_graph"] if r)
     for p in L5_AST_PASSES:
-        assert shared_edges[p.name] == allow_edges[p.name], p.name
+        if shared_edges[p.name] == allow_edges[p.name]:
+            continue
+        # Report the edges each side alone holds, not pytest's first-index diff.
+        shared_only = _edge_lines(shared_edges[p.name]) - _edge_lines(
+            allow_edges[p.name]
+        )
+        allow_only = _edge_lines(allow_edges[p.name]) - _edge_lines(
+            shared_edges[p.name]
+        )
+        raise AssertionError(
+            f"{p.name}: only shared={sorted(shared_only)} only allowlisted={sorted(allow_only)}"
+        )
+
+
+def _edge_lines(per_tu: list[Any]) -> set[str]:
+    """Every result and diagnostic of one pass, one string per item, across TUs."""
+    out: set[str] = set()
+    for results, diags in per_tu:
+        out.update(repr(r) for r in results)
+        out.update(repr(d) for d in diags)
+    return out
 
 
 @pytest.mark.integration
