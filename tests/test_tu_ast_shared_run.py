@@ -47,6 +47,8 @@ from abicheck.buildsource.l5_ast_pass import (
     plan_shared_l5_run,
     run_ast_passes,
 )
+from abicheck.buildsource.redaction import RedactionPolicy
+from abicheck.buildsource.source_extractors._argv import unredact_home
 from abicheck.buildsource.source_extractors.base import SourceExtractionError
 from abicheck.buildsource.source_extractors.clang import ClangSourceExtractor
 from abicheck.buildsource.source_extractors.clang_command import (
@@ -115,7 +117,9 @@ inline int sys_helper(int x) { return x + 1; }
 """
 
 
-def _fixture_build(root: Path) -> BuildEvidence:
+def _fixture_build(
+    root: Path, redaction: RedactionPolicy | None = None
+) -> BuildEvidence:
     """A two-TU project written under *root*, built from a real compile DB."""
     inc = root / "inc"
     sysdir = root / "sys"
@@ -165,7 +169,7 @@ def _fixture_build(root: Path) -> BuildEvidence:
     ]
     db = root / "compile_commands.json"
     db.write_text(json.dumps(entries))
-    return CompileDbAdapter(db).collect()
+    return CompileDbAdapter(db, redaction=redaction).collect()
 
 
 def _allowlisted_argv(cu: CompileUnit) -> list[str]:
@@ -202,17 +206,25 @@ def _allowlisted_dump_cmd(cu: CompileUnit, clang_bin: str) -> list[str]:
         "-ast-dump=json",
         *_allowlisted_argv(cu),
         "--",
-        cu.source,
+        str(Path(cu.source)),
     ]
 
 
 def _dump_both_ways(
     cu: CompileUnit,
 ) -> tuple[list[str], clang_ast_run.TuAstDump, list[str], clang_ast_run.TuAstDump]:
-    """One TU dumped under the shared argv and under the allowlisted argv."""
+    """One TU dumped under the shared argv and under the allowlisted argv.
+
+    Both commands are un-redacted token by token, as :func:`dump_compile_unit`
+    does: a compile DB redacts a home directory to ``~``, and an unexpanded
+    ``~`` include path is a missing header, not a different argv.
+    """
     _source, run_directory = compile_unit_invocation(cu)
-    shared_cmd = build_clang_command(cu, Path(cu.source), clang_bin="clang++")
-    allow_cmd = _allowlisted_dump_cmd(cu, "clang++")
+    shared_cmd = [
+        unredact_home(tok)
+        for tok in build_clang_command(cu, Path(cu.source), clang_bin="clang++")
+    ]
+    allow_cmd = [unredact_home(tok) for tok in _allowlisted_dump_cmd(cu, "clang++")]
     shared = clang_ast_run.dump_tu_ast(
         shared_cmd, cwd=run_directory, timeout=120, unit_label=cu.source
     )
@@ -223,10 +235,26 @@ def _dump_both_ways(
 
 
 @pytest.mark.integration
-def test_l5_parsers_read_the_same_edges_under_both_argvs(tmp_path: Path) -> None:
-    build = _fixture_build(tmp_path)
+@pytest.mark.parametrize("under_home", [False, True], ids=["plain", "home-redacted"])
+def test_l5_parsers_read_the_same_edges_under_both_argvs(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, under_home: bool
+) -> None:
+    # The compile DB redacts a home directory to ``~``. The plain variant turns
+    # that off, so it does not depend on where the temp directory lives (on
+    # Windows it is under the home directory). The redacted variant maps the
+    # fixture's directory to ``~`` and the dumps must expand it back.
+    if under_home:
+        monkeypatch.setenv("HOME", str(tmp_path))
+        monkeypatch.setenv("USERPROFILE", str(tmp_path))
+        redaction = RedactionPolicy(home_replacements={str(tmp_path): "~"})
+    else:
+        redaction = RedactionPolicy(redact_home=False)
+    build = _fixture_build(tmp_path, redaction)
     units = [cu for cu in build.compile_units if cu.source]
     assert len(units) == 2
+    # Both configurations ran: the redacted one really carries the ``~`` paths.
+    redacted = any(inc.startswith("~") for cu in units for inc in cu.include_paths)
+    assert redacted is under_home
     shared_edges: dict[str, list[Any]] = {p.name: [] for p in L5_AST_PASSES}
     allow_edges: dict[str, list[Any]] = {p.name: [] for p in L5_AST_PASSES}
     commands: list[str] = []
