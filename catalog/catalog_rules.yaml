@@ -379,6 +379,12 @@ rules:
   public-function-parameters-reordered:
     title: Public function parameters reordered
     definition: An exported function's parameter list is permuted, so arguments arrive in slots the callee does not read while the symbol still resolves.
+  public-virtual-dispatch-set-changed:
+    title: Public virtual method's possible dispatch set changed
+    definition: A stable public virtual method gains or loses an override that a virtual call through it may reach, so the same symbol can now land in different code. An over-approximated source-graph risk to review, not an ABI break.
+  public-virtual-dispatch-set-reordered:
+    title: Reordered override set is not a change
+    definition: A public virtual method's override set is the same but its dispatch edges are listed in another order; the comparison is over sets, so this produces no finding.
   public-function-private-parameter-type:
     title: Public function takes a private parameter type
     definition: A public function's signature names a type the public headers do not declare, so consumers cannot legally form the call.

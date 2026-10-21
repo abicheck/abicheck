@@ -12,7 +12,6 @@ used by the header-graph projection test), so the bug class is stated once.
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 from typing import Any
 
@@ -20,6 +19,7 @@ import pytest
 from _malformed_clang_ast import MISSHAPEN_ASTS
 
 from abicheck.buildsource.build_evidence import CompileUnit
+from abicheck.buildsource.clang_ast_run import TuAstDump
 from abicheck.buildsource.source_extractors.base import SourceExtractionError
 from abicheck.buildsource.source_extractors.clang import (
     ClangSourceExtractor,
@@ -87,15 +87,11 @@ def test_extract_records_a_misshapen_ast_as_a_failed_extraction(
     than a clean, empty L4 result.
     """
     monkeypatch.setattr(ClangSourceExtractor, "available", lambda self: True)
-
-    def run_ast_to_file(
-        self: ClangSourceExtractor, cmd: list[str], directory: str, source_label: str
-    ) -> tuple[Path, str, int]:
-        ast_path = tmp_path / "ast.json"
-        ast_path.write_text(json.dumps(ast))
-        return ast_path, "", 0
-
-    monkeypatch.setattr(ClangSourceExtractor, "_run_ast_to_file", run_ast_to_file)
+    monkeypatch.setattr(
+        ClangSourceExtractor,
+        "dump_for",
+        lambda self, cu: TuAstDump(ast, returncode=0),
+    )
     with pytest.raises(SourceExtractionError, match="clang AST is malformed"):
         ClangSourceExtractor().extract(
             _cu(directory=str(tmp_path)), public_header_roots=[PUBLIC_HEADER]
@@ -113,3 +109,49 @@ def test_a_well_formed_ast_still_yields_its_public_surface() -> None:
     )
     assert [f.qualified_name for f in tu.functions] == ["add"]
     assert tu.functions[0].mangled_name == "_Z3addii"
+
+
+@pytest.mark.parametrize(("label", "ast"), MISSHAPEN_ASTS)
+def test_the_l5_path_refuses_a_misshapen_tree_before_anything_walks_it(
+    monkeypatch: pytest.MonkeyPatch, label: str, ast: dict[str, Any]
+) -> None:
+    """On the shared L4/L5 dump the L5 gate runs before the location materializer.
+
+    The materializer walks every node's ``inner``, so on an L4 cache hit (no L4
+    reader has validated the tree yet) it would be the first reader of a corrupt
+    tree. A spy that fails the test if it ever sees the tree makes the ordering
+    observable. Each L5 family must read as not run for this TU.
+    """
+    import abicheck.buildsource.l5_ast_pass as l5
+
+    def materialize(root: object) -> object:
+        raise AssertionError(f"{label}: the materializer walked an unvalidated tree")
+
+    monkeypatch.setattr(l5, "materialize_locations", materialize)
+    results, diags = l5.consume_tu_dump(
+        TuAstDump(ast, returncode=0), _cu(), l5.L5_AST_PASSES
+    )
+    assert all(result is None for result in results), label
+    for own in diags:
+        assert any("clang AST is malformed" in d for d in own), label
+
+
+def test_the_l5_path_materializes_a_well_formed_tree() -> None:
+    """Control for the ordering test: a valid tree does reach the materializer.
+
+    Without it, a spy that is never called would make the refusal test above
+    pass for any gate, including one that never runs.
+    """
+    import abicheck.buildsource.l5_ast_pass as l5
+
+    seen: list[object] = []
+    real = l5.materialize_locations
+
+    def spy(root: Any) -> Any:
+        seen.append(root)
+        return real(root)
+
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(l5, "materialize_locations", spy)
+        l5.consume_tu_dump(TuAstDump(_valid_ast(), returncode=0), _cu(), [])
+    assert len(seen) == 1

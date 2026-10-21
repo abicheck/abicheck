@@ -25,7 +25,12 @@ def install_fake_l5(
     results: dict[str, Callable[[BuildEvidence], Any]] | None = None,
     diagnostics: dict[str, Callable[[BuildEvidence], list[str]]] | None = None,
 ) -> list[BuildEvidence]:
-    """Patch the L5 AST pass; return the list of targets it was run on."""
+    """Patch the L5 AST pass; return the list of targets it was run on.
+
+    The fake stands in for the standalone pass, so the L4 replay's shared run
+    (which dumps the L5 scope inside the L4 pool) is switched off here: with it
+    on, the L5 outcomes would come from real dumps and never reach the fake.
+    """
     results = results or {}
     diagnostics = diagnostics or {}
     unknown = (set(results) | set(diagnostics)) - {
@@ -47,6 +52,9 @@ def install_fake_l5(
             for p in l5_ast_pass.L5_AST_PASSES
         }
 
+    from abicheck.buildsource import source_replay_shared
+
     monkeypatch.setattr(l5_ast_pass, "_clang_available", lambda _binary: available)
     monkeypatch.setattr(l5_ast_pass, "run_ast_passes", fake_run)
+    monkeypatch.setattr(source_replay_shared, "shares_ast_dump", lambda _e: False)
     return seen

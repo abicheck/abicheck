@@ -48,8 +48,8 @@ import pytest
 from click.testing import CliRunner
 
 from abicheck.cli import main
-from abicheck.cli_compare_release_helpers import _resolve_release_headers
 from abicheck.model.sided_inputs import compose_sided_paths, resolve_per_side_inputs
+from abicheck.workflows.release_inputs import resolve_release_headers
 
 
 def _p(*names: str) -> list[Path]:
@@ -129,7 +129,7 @@ class TestResolveReleaseHeaders:
     def test_header_dir_used_when_no_per_side(self, tmp_path: Path) -> None:
         hd_old = tmp_path / "old-hdr"
         hd_new = tmp_path / "new-hdr"
-        old_h, new_h = _resolve_release_headers(
+        old_h, new_h = resolve_release_headers(
             (),
             (),
             (),
@@ -144,7 +144,7 @@ class TestResolveReleaseHeaders:
         extracted header tree, which stays available underneath."""
         oh = (tmp_path / "old.h",)
         hd_old = tmp_path / "old-hdr"
-        old_h, new_h = _resolve_release_headers(
+        old_h, new_h = resolve_release_headers(
             (),
             oh,
             (),
@@ -159,7 +159,7 @@ class TestResolveReleaseHeaders:
         shared = (tmp_path / "shared.h",)
         oh = (tmp_path / "old.h",)
         nh = (tmp_path / "new.h",)
-        old_h, new_h = _resolve_release_headers(shared, oh, nh, None, None)
+        old_h, new_h = resolve_release_headers(shared, oh, nh, None, None)
         assert old_h == [*oh, *shared]
         assert new_h == [*nh, *shared]
 

@@ -142,6 +142,8 @@ Every atomic, ecosystem-neutral compatibility rule the catalog demonstrates or r
 | [`public-struct-field-reorder`](public-struct-field-reorder.md) | [case198_public_struct_field_reorder](../case198_public_struct_field_reorder.md) | — | — | — |
 | [`public-struct-private-field-type`](public-struct-private-field-type.md) | [case187_public_struct_private_field_type](../case187_public_struct_private_field_type.md) | — | — | [case126_sycl_device_impl_ptr](../case126_sycl_device_impl_ptr.md) |
 | [`public-typedef-removed`](public-typedef-removed.md) | [case158_public_typedef_removed](../case158_public_typedef_removed.md) | — | — | [case109_flow_graph_policy_renames](../case109_flow_graph_policy_renames.md) |
+| [`public-virtual-dispatch-set-changed`](public-virtual-dispatch-set-changed.md) | [case219_public_virtual_dispatch_set_changed](../case219_public_virtual_dispatch_set_changed.md) | — | — | — |
+| [`public-virtual-dispatch-set-reordered`](public-virtual-dispatch-set-reordered.md) | [case220_public_virtual_dispatch_set_reordered](../case220_public_virtual_dispatch_set_reordered.md) | — | — | — |
 | [`pure-virtual-added`](pure-virtual-added.md) | [case23_pure_virtual_added](../case23_pure_virtual_added.md) | — | — | — |
 | [`python-kwarg-renamed`](python-kwarg-renamed.md) | [case163_python_kwarg_renamed](../case163_python_kwarg_renamed.md) | — | — | — |
 | [`ref-qualifier-added`](ref-qualifier-added.md) | [case166_ref_qualifier_added](../case166_ref_qualifier_added.md) | — | — | — |

@@ -50,20 +50,19 @@ shells out (integration-marked).
 
 from __future__ import annotations
 
-import json
-import os
-import re
 import shutil
 import subprocess
-import tempfile
 from pathlib import Path
 from typing import Any
 
-from ... import deadline
 from ...deadline import run_bounded
 from ...extract.compiler_driver import is_intel_sycl_driver
 from ...model.execution_cache import memoized, path_witness
 from ..build_evidence import CompileUnit
+from ..clang_ast_run import (
+    TuAstDump,
+    dump_compile_unit,
+)
 from ..header_graph_ast_projection import MalformedClangAstError, validate_ast_shape
 from ..model import LayerConfidence
 from ..source_abi import (
@@ -80,9 +79,10 @@ from ._argv import (
 from ._deadline_bound import run_bounded_for_extraction
 from .base import SourceExtractionError
 from .clang_command import (
-    build_clang_command,
     build_clang_macro_command,
+    compile_unit_invocation,
 )
+from .clang_dump_errors import _missing_generated_header_hint, ast_or_raise
 from .clang_macros import macros_from_preprocessor
 from .clang_node_predicates import (
     _SCOPE_NODE_KINDS,
@@ -263,38 +263,6 @@ def _clang_compiler_version(clang_bin: str) -> str:
 #: "file not found" names one of these, the real cause is "the target wasn't built".
 #: Matches both clang ("'X' file not found") and gcc ("X: No such file or
 #: directory") missing-include wording for a header-looking path.
-_GENERATED_HEADER_RE = re.compile(
-    r"fatal error:\s*['\"]?([^'\":\n]+\.(?:inc|def|h|hpp|hxx))['\"]?"
-    r"\s*(?:file not found|: No such file or directory)",
-    re.IGNORECASE,
-)
-_LIKELY_GENERATED_RE = re.compile(
-    r"\.(inc|def)$|config\.h$|\.pb\.h$|moc_|\.generated\.", re.I
-)
-
-
-def _missing_generated_header_hint(stderr: str) -> str:
-    """P19: turn a bare clang 'file not found' into an actionable build hint.
-
-    L4 replay parses each TU under its real flags, but a *configure-only* tree has
-    not produced its generated headers (TableGen ``*.inc``, ``config.h``, protobuf
-    ``*.pb.h``…), so clang fails with a generic include error. Detect that shape and
-    point the user at building the target first, rather than reporting an opaque
-    parse failure. Returns ``""`` when the stderr is not a missing-header failure.
-    """
-    m = _GENERATED_HEADER_RE.search(stderr or "")
-    if not m:
-        return ""
-    header = m.group(1)
-    generated = bool(_LIKELY_GENERATED_RE.search(header))
-    what = "generated header" if generated else "header"
-    return (
-        f"\n  hint: missing {what} '{header}'. L4 source replay needs the target's "
-        "generated headers to exist — build the target (or its codegen step) first, "
-        "then re-run; configure-only trees do not produce them."
-    )
-
-
 def source_abi_from_clang_ast(
     ast_root: dict[str, Any],
     compile_unit: CompileUnit,
@@ -858,16 +826,6 @@ def _emit_typedef(
     )
 
 
-def _recheck_deadline(source: str, when: str) -> None:
-    """Re-check the deadline mid-extraction; folds into SourceExtractionError."""
-    try:
-        deadline.check()
-    except deadline.DeadlineExceeded as exc:
-        raise SourceExtractionError(
-            f"scan deadline exceeded {when} for {source}"
-        ) from exc
-
-
 class ClangSourceExtractor:
     """Produce a :class:`SourceAbiTu` from one compile unit via clang (D3, phase 5).
 
@@ -919,84 +877,76 @@ class ClangSourceExtractor:
                 "clang. Install clang to enable source-only checks (macros, default "
                 "arguments, inline/template/constexpr bodies), or use --depth build."
             )
-        directory = unredact_home(compile_unit.directory)
-        source = Path(unredact_home(compile_unit.source))
-        if not source.is_absolute() and directory:
-            source = Path(directory) / source
-        # The EFFECTIVE directory the subprocess actually runs from -- distinct
-        # from `directory` above, which stays the raw, un-chdir'd compile-unit
-        # directory the `source`/compile-database `file` pair is genuinely
-        # anchored to (Codex review, Finding 10, fresh evidence). A leading
-        # `env -C DIR` prefix in `compile_unit.argv` means the real build's
-        # compiler process ran from `<directory>/DIR`, not bare `directory` --
-        # `replay_extra_flags()` (see its own docstring) carries raw, unmodified
-        # relative flag values (`-iquote ../include`) straight from
-        # `compile_unit.argv`, which only resolve correctly when THIS
-        # subprocess's own cwd matches that same effective directory.
-        run_directory = effective_directory(compile_unit.argv, directory) or directory
-
-        ast_cmd = build_clang_command(
+        return self.extract_from_dump(
             compile_unit,
-            source,
+            self.dump_for(compile_unit),
+            public_header_roots=public_header_roots,
+            target_id=target_id,
+        )
+
+    def dump_for(self, compile_unit: CompileUnit) -> TuAstDump:
+        """The one ``clang -ast-dump=json`` run of *compile_unit*.
+
+        The L5 AST passes read the same dump when both tiers run (see
+        :mod:`..clang_ast_run`), which is why it is a method of its own and not
+        folded into :meth:`extract_from_dump`.
+        """
+        return dump_compile_unit(
+            compile_unit,
             clang_bin=self.clang_bin,
             compiler_binary=self.compiler_binary,
+            timeout=self.timeout,
         )
-        # Spill the (potentially multi-GiB) JSON AST to a temp file rather than
-        # capturing it into a Python str. json.load still reads it back to parse, so
-        # one TU's parse peak is unchanged — the win is that N concurrent workers
-        # keep their AST payloads on disk (not heap) until each parses, so the
-        # GIL-serialized thread pool stops stacking N giant strings (the UXL OOM).
-        ast_path, ast_stderr, ast_rc = self._run_ast_to_file(
-            ast_cmd, run_directory, compile_unit.source
+
+    def extract_from_dump(
+        self,
+        compile_unit: CompileUnit,
+        dump: TuAstDump,
+        *,
+        public_header_roots: list[str],
+        target_id: str = "",
+    ) -> SourceAbiTu:
+        """Build the TU's whole L4 surface from its AST dump.
+
+        *dump* is consumed: its tree is released before the macro subprocess.
+        Raises :class:`SourceExtractionError` when the dump produced no usable
+        tree; the caller records that as partial coverage (ADR-028 D7).
+        """
+        tu = self.source_abi_from_dump(
+            compile_unit,
+            dump,
+            public_header_roots=public_header_roots,
+            target_id=target_id,
         )
-        try:
-            if ast_path.stat().st_size == 0:
-                raise SourceExtractionError(
-                    f"clang produced no AST for {compile_unit.source} "
-                    f"(exit {ast_rc}): {ast_stderr[:1000]}"
-                    + _missing_generated_header_hint(ast_stderr)
-                )
-            _recheck_deadline(compile_unit.source, "before loading AST")
-            try:
-                with open(ast_path, "rb") as fh:  # bytes: json detects encoding
-                    ast_root = json.load(fh)
-            except ValueError as exc:
-                # "Extra data" means a second top-level JSON value follows the
-                # first — some other flag not already collapsed to a single
-                # pass above (`_clang_context_args`'s `-fsycl-host-only`
-                # insertion) made this compile emit more than one document to
-                # the same stdout stream (e.g. an OpenMP/CUDA offload target
-                # flag, or a non-Intel SYCL-capable driver this codebase
-                # doesn't yet special-case) — name the likely cause here
-                # rather than a bare byte-offset, mirroring the identical hint
-                # `dumper_clang_errors._parse_clang_ast_result` gives the L2
-                # header-AST backend for the same failure shape.
-                hint = ""
-                if isinstance(exc, json.JSONDecodeError) and exc.msg == "Extra data":
-                    hint = (
-                        " -- this looks like more than one JSON document on "
-                        "stdout, which happens when a compiler flag makes "
-                        "clang run multiple -cc1 passes for one compile (e.g. "
-                        "an unpinned SYCL/OpenMP/CUDA offload flag); pin a "
-                        "single compilation pass (e.g. -fsycl-host-only) in "
-                        "the build's own recorded flags"
-                    )
-                raise SourceExtractionError(
-                    f"clang AST for {compile_unit.source} was not valid JSON: "
-                    f"{exc}{hint}"
-                ) from exc
-        finally:
-            ast_path.unlink(missing_ok=True)
-        # The JSON load can itself consume the budget (Codex review, round 4).
-        _recheck_deadline(compile_unit.source, "after loading AST")
+        dump.release()
+        return self.finish_source_abi(
+            compile_unit, tu, public_header_roots=public_header_roots
+        )
+
+    def source_abi_from_dump(
+        self,
+        compile_unit: CompileUnit,
+        dump: TuAstDump,
+        *,
+        public_header_roots: list[str],
+        target_id: str = "",
+    ) -> SourceAbiTu:
+        """The AST-derived half of the TU's L4 surface, read from the raw tree.
+
+        The tree must stay as the dump wrote it: L4 reads a node's file through
+        clang's sticky-file convention, and materialized locations change its
+        result. The caller releases *dump* once every reader is done, then calls
+        :meth:`finish_source_abi`.
+        """
+        ast_root = ast_or_raise(compile_unit, dump)
         # A non-zero exit with usable JSON means clang recovered from some errors;
         # record it as a diagnostic (partial coverage) rather than discarding the
         # dump (ADR-028 D7).
         diags: list[str] = []
-        if ast_rc != 0:
+        if dump.returncode != 0:
             diags.append(
-                f"clang exited {ast_rc} (recovered): {ast_stderr[:300]}"
-                + _missing_generated_header_hint(ast_stderr)
+                f"clang exited {dump.returncode} (recovered): {dump.stderr[:300]}"
+                + _missing_generated_header_hint(dump.stderr)
             )
         effective_public_roots = _equivalent_public_roots_for_unit(
             public_header_roots, compile_unit, compiler_binary=self.compiler_binary
@@ -1018,9 +968,20 @@ class ClangSourceExtractor:
         # below, which reads tu.diagnostics — silently reporting source_edges as
         # empty-confirmed instead of failed on a parser error (Codex review, P2).
         self._attach_source_edges(tu, ast_root, tu.diagnostics)
-        # Drop the large AST tree before the macro pass spawns another subprocess,
-        # so its memory is reclaimed and doesn't stack with the macro pass.
-        del ast_root
+        return tu
+
+    def finish_source_abi(
+        self,
+        compile_unit: CompileUnit,
+        tu: SourceAbiTu,
+        *,
+        public_header_roots: list[str],
+    ) -> SourceAbiTu:
+        """The macro pass and the coverage stamp, once the AST is released."""
+        source, run_directory = compile_unit_invocation(compile_unit)
+        effective_public_roots = _equivalent_public_roots_for_unit(
+            public_header_roots, compile_unit, compiler_binary=self.compiler_binary
+        )
         self._attach_macros(
             tu, compile_unit, source, run_directory, effective_public_roots
         )
@@ -1110,44 +1071,6 @@ class ClangSourceExtractor:
             text=True,
             cwd=directory or None,
         )
-
-    def _run_ast_to_file(
-        self, cmd: list[str], directory: str, source_label: str
-    ) -> tuple[Path, str, int]:
-        """Run clang with its JSON AST streamed to a temp file; return its path.
-
-        Returns ``(ast_file_path, stderr_text, returncode)``. The caller owns the
-        file and must delete it. Unlike :meth:`_run` (``capture_output``), clang's
-        large stdout is written **to disk**, not captured into a Python ``str``.
-        ``json.load`` still reads the file back to parse it, so a *single* TU's
-        parse peak is unchanged (~serialized bytes + tree); the wins are across
-        **concurrent** workers: payloads sit on disk — not the heap — until each
-        worker's turn, so the default thread pool (whose C ``json`` parse serializes
-        on the GIL) no longer stacks N giant AST strings in one address space the way
-        captured stdout did. It also drops the ``text=True`` decode copy (bytes
-        parse). ``stderr`` stays buffered (it is small). The temp file is removed on
-        timeout/failure here; on success the caller's ``finally`` removes it.
-        """
-        # See _run: run_bounded_for_extraction bounds this the same way.
-        cmd = [unredact_home(tok) for tok in cmd]
-        fd, name = tempfile.mkstemp(prefix="abicheck-l4-ast-", suffix=".json")
-        path = Path(name)
-        try:
-            with os.fdopen(fd, "wb") as out:
-                proc = run_bounded_for_extraction(
-                    cmd,
-                    timeout=self.timeout,
-                    tool_label="clang",
-                    unit_label=source_label,
-                    stdout=out,
-                    stderr=subprocess.PIPE,
-                    cwd=directory or None,
-                )
-            stderr = proc.stderr.decode("utf-8", "replace") if proc.stderr else ""
-            return path, stderr, proc.returncode
-        except BaseException:
-            path.unlink(missing_ok=True)
-            raise
 
     def _attach_macros(
         self,

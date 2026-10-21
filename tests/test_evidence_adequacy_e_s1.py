@@ -30,7 +30,7 @@ repo's own "a bug fix's regression test targets the bug *class*" convention
   comparability gate must never let a FAILED toolchain identity compare
   silently, regardless of whether the two sides' opaque profile fields
   happen to still agree.
-- ``analysis_assurance._layout_unverified_detectors``: a snapshot pair with
+- ``AnalysisAssurance.layout_unverified_detectors``: a snapshot pair with
   no DWARF/DWARF-advanced evidence on either side must report a genuine,
   non-empty "layout unverified" row -- never the same empty tuple a pair
   with real DWARF evidence gets.
@@ -59,9 +59,9 @@ from abicheck.model import (
     Function,
     Visibility,
 )
-from abicheck.policy.analysis_assurance import AnalysisAssurance
-from abicheck.policy.analysis_assurance._layout import (
-    layout_unverified_detectors as _layout_unverified_detectors,
+from abicheck.policy.analysis_assurance import (
+    AnalysisAssurance,
+    compute_analysis_assurance,
 )
 
 # The three toolchain-probe states named in the task catalog.
@@ -236,7 +236,7 @@ def _snapshot_for_dwarf_state(state: str) -> AbiSnapshot:
 
 
 class TestLayoutUnverifiedRows:
-    """``_layout_unverified_detectors`` over the full 2x2 DWARF-presence
+    """``layout_unverified_detectors`` over the full 2x2 DWARF-presence
     catalog: only "absent x absent" may ever report a non-empty row, and
     that row must never collapse silently into "checked, found nothing".
     """
@@ -249,7 +249,10 @@ class TestLayoutUnverifiedRows:
     ) -> None:
         old = _snapshot_for_dwarf_state(old_state)
         new = _snapshot_for_dwarf_state(new_state)
-        detectors = _layout_unverified_detectors(old, new)
+        result = compare(old, new, scope_to_public_surface=False)
+        detectors = compute_analysis_assurance(
+            result, old, new
+        ).layout_unverified_detectors
         both_absent = old_state == new_state == _DWARF_ABSENT
         if both_absent:
             assert detectors, "both sides lack DWARF -- must report a genuine row"

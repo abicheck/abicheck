@@ -49,6 +49,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from click.testing import CliRunner
 
@@ -60,6 +61,9 @@ from abicheck.policy.analysis_assurance import (
     compute_analysis_assurance,
 )
 from abicheck.serialization import save_snapshot, snapshot_to_json
+
+if TYPE_CHECKING:
+    from abicheck.buildsource.pack import BuildSourcePack
 
 
 def _fn(name: str, mangled: str) -> Function:
@@ -91,13 +95,25 @@ def _header_pair() -> tuple[AbiSnapshot, AbiSnapshot]:
     """A real, header-scoped, unchanged pair -- resolves a clean public
     surface, so ``scope_resolved`` is True and ``status`` should read
     ``"complete"`` with no gating flag involved. Mirrors
-    ``test_analysis_assurance._header_pair`` exactly.
+    ``tests/_analysis_assurance_support.header_pair`` exactly.
     """
     common = {"library": "libfoo.so.1", "from_headers": True}
     fns = [_fn("pub_a", "_Z5pub_av")]
     return (
         AbiSnapshot(version="1.0", functions=fns, **common),
         AbiSnapshot(version="2.0", functions=fns, **common),
+    )
+
+
+def _assurance_for_packs(
+    old_pack: BuildSourcePack | None, new_pack: BuildSourcePack | None
+) -> AnalysisAssurance:
+    """Roll up *old_pack*/*new_pack* through the public entry point on the
+    header-scoped pair, so the pack axis is the only one that can move."""
+    old, new = _header_pair()
+    result = checker.compare(old, new)
+    return compute_analysis_assurance(
+        result, old, new, old_pack=old_pack, new_pack=new_pack
     )
 
 
@@ -620,14 +636,11 @@ class TestGraphCompletenessPartialFamilyOverlap:
         assert aa.graph_completeness == "complete", aa
         assert aa.status == "complete", aa
 
-    def test_unit_level_isdisjoint_vs_inequality_direct(self, tmp_path: Path) -> None:
-        """Direct unit-level check of _graph_completeness itself, isolating
-        the predicate from the rest of the rollup."""
+    def test_isdisjoint_vs_inequality_direct(self, tmp_path: Path) -> None:
+        """The family-set predicate in isolation: only the pack axis is
+        populated, so the rest of the rollup stays clean."""
         from abicheck.buildsource.pack import BuildSourcePack
         from abicheck.buildsource.source_graph import SourceGraphSummary
-        from abicheck.policy.analysis_assurance._graph_completeness import (
-            _graph_completeness,
-        )
 
         old_pack = BuildSourcePack(
             root=tmp_path / "old",
@@ -639,9 +652,9 @@ class TestGraphCompletenessPartialFamilyOverlap:
             root=tmp_path / "new",
             source_graph=SourceGraphSummary(extractor_passes={"call_graph": True}),
         )
-        status, notes = _graph_completeness(old_pack, new_pack)
-        assert status == "unknown"
-        assert any("confirmed on only one side" in n for n in notes), notes
+        aa = _assurance_for_packs(old_pack, new_pack)
+        assert aa.graph_completeness == "unknown", aa
+        assert any("confirmed on only one side" in n for n in aa.notes), aa.notes
 
 
 class TestExportAccountingDoesNotDoubleCount:
@@ -789,9 +802,6 @@ class TestGraphCompletenessConditionallyApplicableFamily:
         from abicheck.buildsource.pack import BuildSourcePack
         from abicheck.buildsource.source_graph import SourceGraphSummary
         from abicheck.model.graph_facts import GraphNode
-        from abicheck.policy.analysis_assurance._graph_completeness import (
-            _graph_completeness,
-        )
 
         old_pack = BuildSourcePack(
             root=tmp_path / "old",
@@ -808,14 +818,14 @@ class TestGraphCompletenessConditionallyApplicableFamily:
                 nodes=[], extractor_passes={"call_graph": True}
             ),
         )
-        status, notes = _graph_completeness(old_pack, new_pack)
-        assert status == "complete", notes
+        aa = _assurance_for_packs(old_pack, new_pack)
+        assert aa.graph_completeness == "complete", aa.notes
 
     def test_archive_graph_correctly_inapplicable_end_to_end(
         self, tmp_path: Path
     ) -> None:
         """Same repro through the full ``checker.compare()`` rollup, not just
-        the unit-level ``_graph_completeness`` call."""
+        the pack-level rollup through ``compute_analysis_assurance``."""
         from abicheck.buildsource.source_graph import SourceGraphSummary
         from abicheck.model.graph_facts import GraphNode
 
@@ -852,9 +862,6 @@ class TestGraphCompletenessConditionallyApplicableFamily:
         from abicheck.buildsource.pack import BuildSourcePack
         from abicheck.buildsource.source_graph import SourceGraphSummary
         from abicheck.model.graph_facts import GraphNode
-        from abicheck.policy.analysis_assurance._graph_completeness import (
-            _graph_completeness,
-        )
 
         old_pack = BuildSourcePack(
             root=tmp_path / "old",
@@ -874,9 +881,9 @@ class TestGraphCompletenessConditionallyApplicableFamily:
                 extractor_passes={},
             ),
         )
-        status, notes = _graph_completeness(old_pack, new_pack)
-        assert status == "unknown", notes
-        assert any("archive_graph" in n for n in notes), notes
+        aa = _assurance_for_packs(old_pack, new_pack)
+        assert aa.graph_completeness == "unknown", aa.notes
+        assert any("archive_graph" in n for n in aa.notes), aa.notes
 
     def test_archive_graph_genuine_asymmetry_end_to_end(self, tmp_path: Path) -> None:
         """End-to-end companion to the genuine-asymmetry unit test above."""
@@ -919,9 +926,6 @@ class TestGraphCompletenessConditionallyApplicableFamily:
         node-presence signal that could ever exempt it."""
         from abicheck.buildsource.pack import BuildSourcePack
         from abicheck.buildsource.source_graph import SourceGraphSummary
-        from abicheck.policy.analysis_assurance._graph_completeness import (
-            _graph_completeness,
-        )
 
         old_pack = BuildSourcePack(
             root=tmp_path / "old",
@@ -931,9 +935,9 @@ class TestGraphCompletenessConditionallyApplicableFamily:
             root=tmp_path / "new",
             source_graph=SourceGraphSummary(extractor_passes={}),
         )
-        status, notes = _graph_completeness(old_pack, new_pack)
-        assert status == "unknown", notes
-        assert any("call_graph" in n for n in notes), notes
+        aa = _assurance_for_packs(old_pack, new_pack)
+        assert aa.graph_completeness == "unknown", aa.notes
+        assert any("call_graph" in n for n in aa.notes), aa.notes
 
 
 class TestSourceTreeMismatchFailure:
@@ -995,17 +999,13 @@ class TestSourceTreeMismatchFailure:
             "build_info_source_tree_mismatch" in n and "failed" in n for n in aa.notes
         ), aa.notes
 
-    def test_unit_level_manifest_scan_flags_unprefixed_failed_record(
-        self, tmp_path: Path
-    ) -> None:
-        from abicheck.policy.analysis_assurance._manifest_layers import (
-            _manifest_layer_incompleteness,
-        )
-
+    def test_manifest_scan_flags_unprefixed_failed_record(self, tmp_path: Path) -> None:
         pack = self._pack_with_mismatch(tmp_path, "pack")
-        incomplete, notes = _manifest_layer_incompleteness(pack, pack)
-        assert incomplete is True
-        assert any("build_info_source_tree_mismatch" in n for n in notes), notes
+        aa = _assurance_for_packs(pack, pack)
+        assert aa.status == "partial", aa
+        assert any(
+            "build_info_source_tree_mismatch" in n and "failed" in n for n in aa.notes
+        ), aa.notes
 
     def test_require_complete_analysis_exits_nonzero_for_source_tree_mismatch(
         self, tmp_path: Path
