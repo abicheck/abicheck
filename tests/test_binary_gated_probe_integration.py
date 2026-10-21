@@ -41,7 +41,13 @@ from abicheck.policy.binary_gated_contract import (
     OUT_OF_AXIS,
 )
 
-pytestmark = pytest.mark.integration
+pytestmark = [
+    pytest.mark.integration,
+    # REACHED_BINARY_ONLY records what an ELF + DWARF binary-only run produces.
+    # On macOS the DWARF stays in the object files unless dsymutil runs, so a
+    # binary-only Mach-O run reaches a different set; the table is ELF-specific.
+    pytest.mark.skipif(sys.platform != "linux", reason="ELF + DWARF probe table"),
+]
 
 _REPO = Path(__file__).resolve().parent.parent
 _CASES = _REPO / "catalog" / "cases"
