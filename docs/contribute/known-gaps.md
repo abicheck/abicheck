@@ -59,6 +59,12 @@ Each entry's status line says what is still open. A PARTIAL entry's write-up als
 
 ### False-clean risk
 
+#### A header-only default template-argument change reads `NO_CHANGE` at L2 on both backends (2026-10-21)
+
+**Status (2026-10-21): OPEN, deliberate — no detector change.** A default template argument changed on a template that nothing public names and nothing exports reads `NO_CHANGE` at L2. CastXML emits no record for an uninstantiated class template; clang has the default but does not record it. A clang-only detector was rejected because it would be a `BREAKING` verdict castxml cannot reproduce.
+
+`false-clean` — A default template argument changed on a header-only template reads `NO_CHANGE` on both backends, and the source-level consequence appears only as an L4 risk. [Full write-up](known-gaps/a-header-only-default-template-argument-change-reads-no-change-at-l2.md)
+
 #### A binary-gate demotion does not state a coverage gap (ADR-084)
 
 **Status (2026-10-21): FIXED.** A demotion now adds an `analysis_assurance.notes` entry naming each demoted claim (`policy/binary_gate_marker.binary_gate_assurance_notes`, called from `policy/analysis_assurance/_compute.py`), which is a changed analysis-assurance record in the sense `tests/test_family_f1_evidence_ablation.py` requires; the F1 cell `pimpl_inline_body_renamed` / `RecordType.source_header_fact` passes.
@@ -89,8 +95,8 @@ Each entry's status line says what is still open. A PARTIAL entry's write-up als
 
 - [`dumper_clang.py`'s `parse_types()` conflates a C/C++ tag-namespace identity with an ordinary-namespace typedef identity that happens to share the same spelling — pre-existing, not introduced by PR #719's own changes, but investigated and confirmed reachable in this pass (Codex review, investigated, not fixed)](known-gaps/dumper-clangpys-parse-types-conflates-a-cc-tag-namespace.md)  
   **Status (re-verified 2026-10-09 at `456989f`): OPEN.** The code moved to extract/headers/clang/records.py:145, where identity = "::".join([*entry.scope, name]) still uses the anon-typedef fallback name. Tag and ordinary namespaces are not distinguished, so `struct Foo; typedef struct{} Foo;` still collides.
-- [Qualified typedef twin exists but diff_types/surface still read bare-keyed AbiSnapshot.typedefs](known-gaps/qualified-typedef-twin-exists-but-diff-typessurface-still-read.md)  
-  **Status (re-verified 2026-10-09 at `456989f`): PARTIAL.** AbiSnapshot.typedefs_qualified now exists (model/snapshot.py:466; dumper_castxml_typedefs.py:105) and type_reachability reads it. diff_types.py typedef diffing and surface.py typedef-following are still not wired to it.
+- [Qualified typedef twin exists but the surface closure and surface graph still read bare-keyed AbiSnapshot.typedefs](known-gaps/qualified-typedef-twin-exists-but-diff-typessurface-still-read.md)  
+  **Status (re-verified 2026-10-21): PARTIAL, narrowed.** Typedef diffing in diff_types.py is wired: it reads `typedef_diff_maps`/`typedef_index_pair`, which prefer `typedefs_qualified` and fall back to the bare map for a pre-v25 side. Still open: the surface closure (policy/public_surface_closure.py) and the surface graph's typedef identities still key by bare alias, and the open design question is how an unqualified spelling in a signature resolves to a qualified typedef.
 
 #### The castxml L4 source-ABI extractor does not fold the resolved EMULATED compiler's identity into either `fact_set.compiler_version` or the D8 TU cache key — attempted once for the persisted half, and REVERTED after a follow-up review caught it as a real regression, not a fix (Codex review, PR #719, three follow-up rounds)
 

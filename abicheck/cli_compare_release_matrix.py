@@ -35,14 +35,6 @@ import click
 
 from .bundle import BundleDiffResult
 from .checker import DiffResult
-from .cli_compare_release_helpers import (  # noqa: F401
-    _debian_symbols_warning,
-    _discover_include_roots,
-    _exit_compare_release,
-    _match_release_keys,
-    _resolve_release_headers,
-    debian_symbols_release_conflict_lines as _debian_symbols_release_conflict_lines,
-)
 
 # Several names imported below are no longer used by this module: release
 # input resolution moved to `workflows.release_inputs` (see the re-export
@@ -54,6 +46,7 @@ from .frontends.cli.options.params import (
     DEFAULT_POLICY_PROFILE,
     _load_suppression_and_policy,
 )
+from .frontends.cli.release_exit import _exit_compare_release
 from .frontends.cli.release_report import render_release_summary
 from .frontends.cli.release_summary import (  # moved (ADR-065 S2), re-exported
     _write_release_summary_file as _write_release_summary_file,

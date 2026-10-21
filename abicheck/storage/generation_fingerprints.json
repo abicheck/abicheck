@@ -136,7 +136,7 @@
       "abicheck/extract/target_platform.py": "d2f2774c26bd12eb623a64883c2611782cac8f3d84da51248a969bd1f288e739",
       "abicheck/extract/target_platform_probe.py": "060c391c71dca8f863f3452de90731edcf67ac14c1b804fb91606eb8140b1ee7",
       "abicheck/extract/toolchain_identity.py": "a695a96ce37cc859a048d7cde13d2b28ca5b2509c0a800d238cb268248cf1d1f",
-      "abicheck/extract/tu_jobs.py": "d320440a203712cb628a1676ca0e919a853357907a32f1e08b60c9cb669c7b1e",
+      "abicheck/extract/tu_jobs.py": "6ed530395738f83bc46664a6ae9e91fa7286a2a6bb81e4fbb723447f6524b070",
       "abicheck/extract/unparseable_header_fallback.py": "f845b80782f38996a5a77175ebe559c1ecf82c2561cefe18f72794116d98be0f",
       "abicheck/extract/wheel_tags.py": "0a6eff34860223c9efb0fc2d62469804d50d59ae1825c726abafaf7c898789db",
       "abicheck/macho_metadata.py": "5fb0d218553c8e3f8911429074132849087fbc2f440bba6073fa7a5a43d7d7b1",
@@ -149,9 +149,9 @@
       "abicheck/symvers_metadata.py": "372737765cd132e6e87ed891dd465d2958e04debbef774e45212ceb3036871cb",
       "abicheck/type_metadata.py": "9997189de8dac522fd1db8be5ae491d811139503f83abaaded89038eb4aa9cdf"
     },
-    "fingerprint": "25f9399d42c14b46b406dbcd6a812e9afbecc963aaec161fe9bb8080913e8e2e",
+    "fingerprint": "bfc49c02bf17c38476b9bf85506c93c63055f16dc7e66f449cc4ec6a539c1776",
     "generation": 5,
-    "reason": "bumped to 5 for a semantic change"
+    "reason": "merge with main: main's tu_jobs.py worker-clamp refactor (no fact change) on top of this branch's generation 5 (castxml specialization_declared_fact)"
   },
   "resolver": {
     "files": {
