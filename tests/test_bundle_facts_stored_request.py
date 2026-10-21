@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
+from types import SimpleNamespace
 
 import click
 import pytest
@@ -22,6 +23,7 @@ from abicheck.workflows.bundle_facts_stored_request import (
     STORED_BUNDLE_FACTS_FORMATS,
     BundleFactsCompareError,
     BundleFactsCompareRequest,
+    resolve_max_json_object_nodes_cfg,
     validate_bundle_facts_request,
 )
 
@@ -221,3 +223,121 @@ def test_per_library_report_path_keeps_only_the_final_component(
     tmp_path: Path, library: str, expected_name: str
 ) -> None:
     assert per_library_report_path(tmp_path, library) == tmp_path / expected_name
+
+
+def _fake_config(**overrides: object) -> SimpleNamespace:
+    """A loaded build config with every field the rules read, all unset."""
+    fields: dict[str, object] = {
+        "release_dso_only": False,
+        "release_include_private_dso": False,
+        "gate_fail_on_removed_library": False,
+        "release_support_promise": None,
+        "assurance_require_complete": False,
+        "severity_preset": None,
+        "severity_abi_breaking": None,
+        "severity_potential_breaking": None,
+        "severity_quality_issues": None,
+        "severity_addition": None,
+        "scope_public": None,
+        "collapse_versioned_symbols": None,
+        "public_symbols": None,
+        "scope_show_redundant": None,
+        "contract_post_manifest": None,
+        "suppression_strict": None,
+        "suppression_require_justification": None,
+        "debug_format": None,
+        "debug_dwarf_only": None,
+        "debug_debuginfod": None,
+        "debug_debuginfod_url": None,
+        "debug_pdb_path": None,
+        "source_method": None,
+    }
+    fields.update(overrides)
+    return SimpleNamespace(**fields)
+
+
+@pytest.mark.parametrize(
+    ("config_overrides", "message"),
+    [
+        ({"gate_fail_on_removed_library": True}, "gate.fail_on_removed_library"),
+        ({"release_support_promise": "enforce"}, "release.support_promise"),
+        ({"suppression_strict": True}, "suppression:"),
+        ({"severity_preset": "default"}, "severity:"),
+        ({"debug_pdb_path": "x.pdb"}, "debug:"),
+        ({"source_method": "s1"}, "source:"),
+    ],
+)
+def test_each_config_block_rule_rejects_the_stored_operand(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    config_overrides: dict[str, object],
+    message: str,
+) -> None:
+    """Config-file settings with no channel into a stored comparison are
+    rejected the same way their explicit-flag twins are."""
+    from abicheck.workflows import bundle_facts_stored_request as mod
+
+    monkeypatch.setattr(
+        mod,
+        "load_request_config",
+        lambda _path: _fake_config(**config_overrides),
+    )
+    config = tmp_path / ".abicheck.yml"
+    config.write_text("")
+    with pytest.raises(BundleFactsCompareError, match=re.escape(message)) as exc:
+        validate_bundle_facts_request(_request(tmp_path, config_path=config))
+    assert exc.value.usage is True
+
+
+def test_a_clean_config_passes_every_config_rule(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from abicheck.workflows import bundle_facts_stored_request as mod
+
+    loaded = _fake_config()
+    monkeypatch.setattr(mod, "load_request_config", lambda _path: loaded)
+    config = tmp_path / ".abicheck.yml"
+    config.write_text("")
+    assert (
+        validate_bundle_facts_request(_request(tmp_path, config_path=config)) is loaded
+    )
+
+
+@pytest.mark.parametrize(
+    ("configured", "explicit", "expected"),
+    [
+        (None, False, None),
+        (50_000_000, True, 50_000_000),
+        (50_000_000, False, 1_000_000),
+        (500, False, 500),
+    ],
+)
+def test_the_decode_budget_is_only_raised_by_an_explicit_config(
+    configured: int | None, explicit: bool, expected: int | None
+) -> None:
+    assert (
+        resolve_max_json_object_nodes_cfg(
+            configured, config_explicit=explicit, default=1_000_000
+        )
+        == expected
+    )
+
+
+@pytest.mark.parametrize(
+    ("param_hint", "usage", "expected_type"),
+    [
+        ("--config", True, click.BadParameter),
+        (None, True, click.UsageError),
+        (None, False, click.ClickException),
+    ],
+)
+def test_a_workflow_error_maps_to_its_click_exit_kind(
+    param_hint: str | None, usage: bool, expected_type: type[Exception]
+) -> None:
+    from abicheck.frontends.cli.commands.compare_bundle_facts import _click_error
+
+    exc = _click_error(
+        BundleFactsCompareError("msg", usage=usage, param_hint=param_hint)
+    )
+    assert type(exc) is expected_type
+    assert "msg" in exc.format_message()
