@@ -130,7 +130,6 @@ def _fixture_build(root: Path) -> BuildEvidence:
                 "-fvisibility=hidden",
                 "-fno-exceptions",
                 "-fpack-struct",
-                "-fPIC",
                 "-O2",
                 "-g",
                 "-c",
@@ -225,10 +224,9 @@ def test_l5_parsers_read_the_same_edges_under_both_argvs(tmp_path: Path) -> None
         # Both configurations ran to a tree, and they are genuinely different.
         assert shared.ast is not None, shared.error
         assert allow.ast is not None, allow.error
+        # The argvs differ: the allowlisted one ends in a ``--`` separator.
         assert shared_cmd != allow_cmd
-        if "-fPIC" in cu.abi_relevant_flags:
-            # The one flag the shared argv adds over the allowlist, where recorded.
-            assert "-fPIC" in shared_cmd and "-fPIC" not in allow_cmd
+        assert "--" in allow_cmd and "--" not in shared_cmd
         shared_results, shared_diags = consume_tu_dump(shared, cu, L5_AST_PASSES)
         allow_results, allow_diags = consume_tu_dump(allow, cu, L5_AST_PASSES)
         for i, p in enumerate(L5_AST_PASSES):
@@ -245,11 +243,11 @@ def test_l5_parsers_read_the_same_edges_under_both_argvs(tmp_path: Path) -> None
 def test_l4_and_l5_share_one_dump_per_tu(tmp_path: Path, monkeypatch) -> None:
     build = _fixture_build(tmp_path)
     units = [cu for cu in build.compile_units if cu.source]
-    dumped: list[str] = []
+    dumped: list[Path] = []
     real_dump = clang_ast_run.dump_tu_ast
 
     def counting(cmd, **kwargs):
-        dumped.append(cmd[-1])
+        dumped.append(Path(cmd[-1]))
         return real_dump(cmd, **kwargs)
 
     monkeypatch.setattr(clang_ast_run, "dump_tu_ast", counting)
@@ -262,8 +260,9 @@ def test_l4_and_l5_share_one_dump_per_tu(tmp_path: Path, monkeypatch) -> None:
     # Both tiers ran: L4 produced declarations and L5 produced edges.
     assert surface.reachable_declarations, "L4 produced no declarations"
     assert run.outcomes["call_graph"].result
-    # One dump per TU, however many tiers read it.
-    assert sorted(dumped) == sorted(cu.source for cu in units)
+    # One dump per TU, however many tiers read it. Paths compare as Path: the
+    # dump spells a Windows path with backslashes, the compile DB with slashes.
+    assert sorted(dumped) == sorted(Path(cu.source) for cu in units)
 
 
 @pytest.mark.integration
@@ -272,11 +271,11 @@ def test_standalone_passes_dump_each_tu_again(tmp_path: Path, monkeypatch) -> No
     dumped by the L4 replay and again by the L5 passes."""
     build = _fixture_build(tmp_path)
     units = [cu for cu in build.compile_units if cu.source]
-    dumped: list[str] = []
+    dumped: list[Path] = []
     real_dump = clang_ast_run.dump_tu_ast
 
     def counting(cmd, **kwargs):
-        dumped.append(cmd[-1])
+        dumped.append(Path(cmd[-1]))
         return real_dump(cmd, **kwargs)
 
     monkeypatch.setattr(clang_ast_run, "dump_tu_ast", counting)
@@ -285,7 +284,7 @@ def test_standalone_passes_dump_each_tu_again(tmp_path: Path, monkeypatch) -> No
     )
     run_ast_passes(BuildEvidence(compile_units=units), "clang++")
     # extract() dumps its TU; the standalone pass then dumps every TU once more.
-    assert dumped.count(units[0].source) == 2
+    assert dumped.count(Path(units[0].source)) == 2
     assert len(dumped) == 1 + len(units)
 
 
