@@ -11,7 +11,7 @@ generated: false
 
 Index: [Known gaps](../known-gaps.md)
 
-**Status (re-verified 2026-10-09 at `456989f`): PARTIAL.** AbiSnapshot.typedefs_qualified now exists (model/snapshot.py:466; dumper_castxml_typedefs.py:105) and type_reachability reads it. diff_types.py typedef diffing and surface.py typedef-following are still not wired to it.
+**Status (re-verified 2026-10-21): PARTIAL, narrowed.** The diff side is wired, and the surface side is still open. See the update at the end of this page.
 
 `dumper_castxml.py`'s `parse_typedefs()` and
 `dumper_clang.py`'s `parse_typedefs()` both do the identical
@@ -95,3 +95,32 @@ tests on both header backends directly (`_CastxmlParser.
 parse_typedefs_qualified`/`_ClangAstParser.parse_typedefs_qualified`) and
 an end-to-end `type_reachability` regression proving the bare dict's lossy
 collision no longer hides a real `std::` field.
+
+**Update (re-verified 2026-10-21).** The diff side of the follow-up above is
+now wired and pinned. Typedef diffing moved out of `diff_types.py` into
+`compare/typedefs.py`, and `diff_types._diff_typedefs` reads it through
+`diff_helpers.typedef_diff_maps` and `compare.typedefs.typedef_index_pair`.
+Both prefer `typedefs_qualified` when each side trusts it, and fall back to
+the bare map when either side is a pre-v25 snapshot. Probing `compare()`
+directly, two same-named typedefs in sibling namespaces (`ns1::Alias`,
+`ns2::Alias`) report only the namespace that changed, with the qualified name
+in the description. A namespace move reports one `TYPEDEF_REMOVED` for the old
+qualified name, with no phantom pair. A pre-v25 old side still gets a real
+base-change finding. `tests/test_typedef_qualified_collision.py`'s
+`TestSameNamedTypedefsInSiblingNamespaces` pins these cases. Forcing the bare
+maps makes four of its tests fail.
+
+**Still open: the surface side.** The surface typedef-following now lives in
+`policy/public_surface_closure.py` (`_walk_type_closure` and
+`_walk_exact_type_closure`), not `surface.py`. Both look up
+`snap.declarations.typedefs.get(name)` by bare name, and the surface graph
+builds its typedef identities from the same bare-keyed map
+(`compare/surface_graph.py`, `model/graph_entity_identity.py`). Threading a
+qualified key through them needs a decision this page does not make: a
+signature or field spells a typedef as written, so an unqualified `value_type`
+inside `class A` has to resolve to `A::value_type`. The walk has no scope
+context to do that, and the surface graph's identity change touches every
+consumer of the graph. Until that is decided, a surface-side wrong target from
+a bare collision remains possible. Probing it needs header-origin
+classification, because without it every record counts as public and the bare
+lookup never changes the outcome.

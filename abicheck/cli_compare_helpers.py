@@ -323,8 +323,8 @@ def _preflight_manifests_and_audit(
     # Manifest validity, ahead of the --dry-run emit for the same reason as
     # the two guards above -- see the helper for what deliberately does *not*
     # move here.
-    from .cli_compare_receipt import validate_pack_manifests
     from .errors import PackManifestError as _PackManifestError
+    from .workflows.pack_resolution import validate_pack_manifests
 
     try:
         validate_pack_manifests(
@@ -384,16 +384,16 @@ def _resolve_evaluation_config(
     ``workflows.compare_configuration``; a gate pack's levels fold into
     *resolved_cfg*. Built from the raw CLI values, not merged locals (a
     pre-merged value would look CLI-stated)."""
-    from .cli_compare_receipt import cli_configuration_inputs, typed_parameter_names
     from .compatibility_evaluation_frontend import FrontEnd
     from .pack_application import apply_to_compare_config
+    from .workflows import compare_input_adapters as _adapters
     from .workflows.compare_configuration import (
         ConfigurationConflictError,
         ProjectPolicyOverridesError,
         resolve_compare_configuration,
     )
 
-    explicit, project = cli_configuration_inputs(
+    explicit, project = _adapters.cli_configuration_inputs(
         {
             "contract_mode": contract_mode,
             "policy": policy,
@@ -406,7 +406,7 @@ def _resolve_evaluation_config(
             "headers": headers,
         },
         # The stated settings: only this module holds the Click context.
-        typed={n for n in typed_parameter_names() if _param_from_cli(n)},
+        typed={n for n in _adapters.typed_parameter_names() if _param_from_cli(n)},
         project_cfg=project_cfg,
         project_path=cfg_path,
         # The overlay applies only from an explicitly named --config.

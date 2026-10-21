@@ -267,7 +267,7 @@ class TestReleaseNoPackStillResolvesProjectBackedConfig:
         return BuildConfig.from_dict({"policy": {"overrides": policy_overrides}})
 
     def test_no_pack_release_still_resolves_a_real_config(self) -> None:
-        from abicheck.cli_compare_receipt import resolve_release_pack_application
+        from abicheck.workflows.pack_resolution import resolve_release_pack_application
 
         params = {
             "contract_mode": None,
@@ -305,7 +305,7 @@ class TestReleaseNoPackStillResolvesProjectBackedConfig:
         """End to end through `_run_compare_pair`, the way a real release
         library comparison reaches it -- not just the resolver in
         isolation."""
-        from abicheck.cli_compare_receipt import resolve_release_pack_application
+        from abicheck.workflows.pack_resolution import resolve_release_pack_application
 
         params = {
             "contract_mode": None,

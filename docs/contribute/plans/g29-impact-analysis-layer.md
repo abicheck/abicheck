@@ -1812,6 +1812,8 @@ the existing `type_graph.py` walk.
 
 ### Phase 6 — New detectors, examples, FP gates
 
+**Status (2026-10-21):** `PUBLIC_VIRTUAL_DISPATCH_SET_CHANGED` is implemented (`compare/virtual_dispatch_set.py`; RISK, `COMPATIBLE_WITH_RISK`; coverage-gated on the call, override and virtual-dispatch passes; examples `case219`/`case220`, unit tests in `tests/test_virtual_dispatch_set_findings.py`). Its producer gap is recorded in [known gaps](../known-gaps/virtual-call-through-out-of-line-definition-is-classified-direct.md): a virtual call through an out-of-line definition is classified `direct`, so the detector cannot fire for those bases. The other seven table rows are unchanged by this item.
+
 Per the review, the goal is **not** a new `ChangeKind` per graph edge (the
 registry is already large) — raw contract change stays separate from
 impact/composition evidence. Minimal new user-facing set:

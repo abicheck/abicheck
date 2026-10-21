@@ -89,6 +89,10 @@ RESOLVER_SEMANTIC_FILES: tuple[str, ...] = (
 #: reason a reviewer can check against the file.
 RESOLVER_NON_SEMANTIC_FILES: dict[str, str] = {
     "abicheck/cli_resolve.py": "CLI argument resolution; reads no facts and derives none",
+    "abicheck/workflows/pack_resolution.py": (
+        "policy-pack configuration shaping for the compare front ends; "
+        "decides which pack fields apply, derives no snapshot fact or graph"
+    ),
     "abicheck/compatibility_evaluation_resolver.py": (
         "verdict resolution over results already derived (policy layer)"
     ),

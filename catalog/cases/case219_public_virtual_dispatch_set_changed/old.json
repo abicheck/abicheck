@@ -1,0 +1,233 @@
+{
+  "coverage": {},
+  "degraded_passes": {},
+  "edges": [
+    {
+      "attrs": {},
+      "confidence": "unknown",
+      "conflicts": [],
+      "dst": "sym:_ZNK4demo5Shape4areaEv",
+      "edge": "SOURCE_DECL_MAPS_TO_SYMBOL",
+      "facts": [
+        {
+          "attrs": {},
+          "confidence": "unknown",
+          "producer": ""
+        }
+      ],
+      "occurrences": [],
+      "provenance": "",
+      "resolved": {},
+      "src": "decl:demo::Shape::area"
+    },
+    {
+      "attrs": {},
+      "confidence": "unknown",
+      "conflicts": [],
+      "dst": "decl:demo::Shape::area",
+      "edge": "SOURCE_DECLARES",
+      "facts": [
+        {
+          "attrs": {},
+          "confidence": "unknown",
+          "producer": ""
+        }
+      ],
+      "occurrences": [],
+      "provenance": "",
+      "resolved": {},
+      "src": "hdr:include/demo/shape.h"
+    },
+    {
+      "attrs": {
+        "call_kind": "virtual"
+      },
+      "confidence": "unknown",
+      "conflicts": [],
+      "dst": "decl:demo::Shape::area",
+      "edge": "DECL_CALLS_DECL",
+      "facts": [
+        {
+          "attrs": {
+            "call_kind": "virtual"
+          },
+          "confidence": "unknown",
+          "producer": "call_graph"
+        }
+      ],
+      "occurrences": [],
+      "provenance": "call_graph",
+      "resolved": {
+        "call_kind": "virtual"
+      },
+      "src": "decl:demo::render"
+    },
+    {
+      "attrs": {},
+      "confidence": "unknown",
+      "conflicts": [],
+      "dst": "decl:demo::Shape::area",
+      "edge": "METHOD_POSSIBLE_OVERRIDE",
+      "facts": [
+        {
+          "attrs": {},
+          "confidence": "unknown",
+          "producer": ""
+        }
+      ],
+      "occurrences": [],
+      "provenance": "",
+      "resolved": {},
+      "src": "decl:demo::Circle::area"
+    },
+    {
+      "attrs": {
+        "base_method": "decl:demo::Shape::area",
+        "resolution": "overapprox"
+      },
+      "confidence": "unknown",
+      "conflicts": [],
+      "dst": "decl:demo::Circle::area",
+      "edge": "VIRTUAL_CALL_MAY_DISPATCH_TO",
+      "facts": [
+        {
+          "attrs": {
+            "base_method": "decl:demo::Shape::area",
+            "resolution": "overapprox"
+          },
+          "confidence": "unknown",
+          "producer": ""
+        }
+      ],
+      "occurrences": [],
+      "provenance": "",
+      "resolved": {
+        "base_method": "decl:demo::Shape::area",
+        "resolution": "overapprox"
+      },
+      "src": "decl:demo::render"
+    }
+  ],
+  "external_graph_refs": [],
+  "extractor_passes": {
+    "build_options": true,
+    "build_targets": true,
+    "call_graph": true,
+    "include_graph": true,
+    "override_graph": true,
+    "source_abi": true,
+    "type_graph": true,
+    "virtual_dispatch_graph": true
+  },
+  "graph_id": "sha256:654332533819d56c25485739a4737aa60c8ca52fc79d2320f4a49ad499d0bb53",
+  "indexes": {
+    "by_binary_symbol": {
+      "sym:_ZNK4demo5Shape4areaEv": [
+        "decl:demo::Shape::area"
+      ]
+    },
+    "by_file": {},
+    "by_source_decl": {
+      "decl:demo::Circle::area": [
+        "decl:demo::render"
+      ],
+      "decl:demo::Shape::area": [
+        "decl:demo::Circle::area",
+        "decl:demo::render",
+        "hdr:include/demo/shape.h",
+        "sym:_ZNK4demo5Shape4areaEv"
+      ]
+    },
+    "by_target": {}
+  },
+  "narrowed_passes": {},
+  "narrowed_scope": {},
+  "nodes": [
+    {
+      "attrs": {},
+      "confidence": "unknown",
+      "conflicts": [],
+      "facts": [
+        {
+          "attrs": {},
+          "confidence": "unknown",
+          "producer": ""
+        }
+      ],
+      "id": "decl:demo::render",
+      "kind": "source_decl",
+      "label": "demo::render()",
+      "provenance": "",
+      "resolved": {}
+    },
+    {
+      "attrs": {},
+      "confidence": "unknown",
+      "conflicts": [],
+      "facts": [
+        {
+          "attrs": {},
+          "confidence": "unknown",
+          "producer": ""
+        }
+      ],
+      "id": "decl:demo::Shape::area",
+      "kind": "source_decl",
+      "label": "demo::Shape::area()",
+      "provenance": "",
+      "resolved": {}
+    },
+    {
+      "attrs": {},
+      "confidence": "unknown",
+      "conflicts": [],
+      "facts": [
+        {
+          "attrs": {},
+          "confidence": "unknown",
+          "producer": ""
+        }
+      ],
+      "id": "decl:demo::Circle::area",
+      "kind": "source_decl",
+      "label": "demo::Circle::area()",
+      "provenance": "",
+      "resolved": {}
+    },
+    {
+      "attrs": {},
+      "confidence": "unknown",
+      "conflicts": [],
+      "facts": [
+        {
+          "attrs": {},
+          "confidence": "unknown",
+          "producer": ""
+        }
+      ],
+      "id": "sym:_ZNK4demo5Shape4areaEv",
+      "kind": "binary_symbol",
+      "label": "demo::Shape::area",
+      "provenance": "",
+      "resolved": {}
+    },
+    {
+      "attrs": {},
+      "confidence": "unknown",
+      "conflicts": [],
+      "facts": [
+        {
+          "attrs": {},
+          "confidence": "unknown",
+          "producer": ""
+        }
+      ],
+      "id": "hdr:include/demo/shape.h",
+      "kind": "header",
+      "label": "demo/shape.h",
+      "provenance": "",
+      "resolved": {}
+    }
+  ],
+  "schema_version": 3
+}

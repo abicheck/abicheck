@@ -20,7 +20,6 @@ Split out of :mod:`abicheck.extract.headers.manifest`, which runs the pool this 
 from __future__ import annotations
 
 import logging
-import os
 
 log = logging.getLogger("abicheck.extract.headers.manifest")
 
@@ -48,64 +47,28 @@ def _tu_jobs(n_units: int) -> int:
     manifest dump and an L4 source replay are independent processes that
     may run concurrently (e.g. ``compare --dump-manifest`` alongside a
     separate ``--sources`` scan) and should be tunable independently.
-    Shares :mod:`abicheck.process_resources`'s RAM-probing/ceiling
-    primitives with the L4 pool rather than reimplementing them.
+    The sizing rule itself is :func:`abicheck.process_resources.bounded_jobs`,
+    shared with the L4 and L5 call-graph pools; this function supplies only
+    its own env vars, RAM budget and RAM probe.
     """
-    # Bound at call time, so a patch of the module's attributes applies.
-    from ..process_resources import (
-        available_mem_gib,
-        job_mem_budget_gib,
-        jobs_ceiling,
-        mem_cap,
+    from ..process_resources import bounded_jobs
+
+    return bounded_jobs(
+        n_units,
+        jobs_env_var="ABICHECK_TU_JOBS",
+        mem_budget_env_var="ABICHECK_TU_JOB_MEM_GIB",
+        mem_budget_default_gib=_TU_JOB_MEM_BUDGET_GIB,
+        ram_cap=_tu_mem_cap,
+        log=log,
+        what="manifest-dump workers",
+        ram_hint="split the manifest into fewer translation units",
     )
 
-    budget = job_mem_budget_gib("ABICHECK_TU_JOB_MEM_GIB", _TU_JOB_MEM_BUDGET_GIB)
-    cap = mem_cap(budget)
-    env = os.environ.get("ABICHECK_TU_JOBS")
-    if env:
-        try:
-            requested = max(1, int(env))
-        except ValueError:
-            log.warning(
-                "ABICHECK_TU_JOBS=%r is not a valid integer; falling back to 1 "
-                "(serial) worker.",
-                env,
-            )
-            return 1
-        ceiling = jobs_ceiling()
-        if requested > ceiling:
-            log.warning(
-                "ABICHECK_TU_JOBS=%d exceeds the oversubscription ceiling (%d "
-                "for %d CPUs); clamping to %d",
-                requested,
-                ceiling,
-                os.cpu_count() or 1,
-                ceiling,
-            )
-            requested = ceiling
-        if cap is not None and requested > cap:
-            log.warning(
-                "ABICHECK_TU_JOBS=%d may not fit in available memory (~%.1f GiB "
-                "at ~%.1f GiB/worker); clamping to %d to avoid an OOM-killed "
-                "manifest dump. Tune ABICHECK_TU_JOB_MEM_GIB, or split the "
-                "manifest into fewer translation units.",
-                requested,
-                available_mem_gib() or 0.0,
-                budget,
-                cap,
-            )
-            return cap
-        return requested
-    auto = max(1, min(n_units, os.cpu_count() or 1, 8))
-    if cap is not None and cap < auto:
-        log.info(
-            "Per-TU manifest-dump workers reduced %d -> %d to fit available "
-            "memory (~%.1f GiB at ~%.1f GiB/worker); set ABICHECK_TU_JOBS / "
-            "ABICHECK_TU_JOB_MEM_GIB to override.",
-            auto,
-            cap,
-            available_mem_gib() or 0.0,
-            budget,
-        )
-        return cap
-    return auto
+
+def _tu_mem_cap() -> int | None:
+    """Max per-TU workers that fit in available RAM, or ``None`` when unknown."""
+    from ..process_resources import job_mem_budget_gib, mem_cap
+
+    return mem_cap(
+        job_mem_budget_gib("ABICHECK_TU_JOB_MEM_GIB", _TU_JOB_MEM_BUDGET_GIB)
+    )

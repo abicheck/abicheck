@@ -25,7 +25,6 @@ from __future__ import annotations
 from collections.abc import Sequence
 from typing import TYPE_CHECKING, Any
 
-from .policy.evaluate import effective_kind_sets
 from .report.change_operation import (
     ACTION_TOKEN_OPERATIONS as ACTION_TOKEN_OPERATIONS,
     ELEMENT_TOKEN_ENTITIES as ELEMENT_TOKEN_ENTITIES,
@@ -36,6 +35,7 @@ from .report.kind_rollup import roll_up_large_kinds
 from .report.not_evaluated_section import (
     compute_not_evaluated as compute_not_evaluated,
 )
+from .report.policy_facts import kind_sets_for, release_recommendation_for, summary_for
 from .report.view import (
     apply_show_only,
     finding_id,
@@ -82,8 +82,6 @@ from .report.render_markdown import (
     _format_change_md_oneline as _format_change_md_oneline,
 )
 from .report.use_case_impact_render import use_cases_by_finding_for
-from .report_summary import build_summary
-from .semver import recommend_release_for_report
 
 _VERDICT_EMOJI = {
     Verdict.NO_CHANGE: "✅",
@@ -123,7 +121,7 @@ def to_stat(
     from .report.document import ReportDocument
     from .report.render_text import render_stat_document
 
-    summary = build_summary(result)
+    summary = summary_for(result)
     d: dict[str, object] = {
         "verdict_label": _VERDICT_LABEL[result.verdict],
         "summary": {
@@ -154,7 +152,7 @@ def to_stat(
             result.changes,
             severity_config,
             policy=result.policy,
-            kind_sets=effective_kind_sets(result),
+            kind_sets=kind_sets_for(result),
             policy_file=result.policy_file,
         )
         d["severity"] = {"exit_code": exit_code}
@@ -250,7 +248,7 @@ def release_matrix_changes_for_view(
         matrix_result.changes,
         show_only,
         policy=matrix_result.policy or "strict_abi",
-        kind_sets=effective_kind_sets(matrix_result),
+        kind_sets=kind_sets_for(matrix_result),
         policy_file=matrix_result.policy_file,
     )
 
@@ -303,7 +301,7 @@ def compute_impact_table(
         findings = build_report_findings(
             changes,
             policy=result.policy,
-            kind_sets=effective_kind_sets(result),
+            kind_sets=kind_sets_for(result),
             policy_file=result.policy_file,
         )
     direct_removals = sum(
@@ -1033,7 +1031,7 @@ def _severity_merge_effect(
     """
     from .policy.severity import compute_exit_code
 
-    eff_sets = effective_kind_sets(result)
+    eff_sets = kind_sets_for(result)
     exit_code = compute_exit_code(
         result.changes,
         severity_config,
@@ -1087,7 +1085,7 @@ def compute_review_digest(
     from .report.finding import report_findings_for
 
     findings = findings if findings is not None else report_findings_for(result)
-    summary = build_summary(result, findings=findings)
+    summary = summary_for(result, findings=findings)
     v = result.verdict
     emoji = _VERDICT_EMOJI.get(v, "?")
     label = _VERDICT_LABEL.get(v, v.value)
@@ -1116,7 +1114,7 @@ def compute_review_digest(
     scoped = result.scope_to_public_surface
     additions_label = "Public additions" if scoped else "Additions"
 
-    rec = recommend_release_for_report(result)
+    rec = release_recommendation_for(result)
 
     # Top impacted symbols (breaking + API), capped for readability. Filters
     # by each change's *effective* verdict (policy.evaluate.effective_verdict)
@@ -1339,7 +1337,7 @@ _BUMP_EMOJI = {"major": "🔴", "minor": "🟢", "patch": "🟢", "none": "✅"}
 
 def compute_recommendation_section(result: DiffResult) -> _rmd.RecommendationSection:
     """The structured intermediate for :func:`~abicheck.report.render_markdown.render_recommendation_section`."""
-    rec = recommend_release_for_report(result)
+    rec = release_recommendation_for(result)
     return _rmd.RecommendationSection(
         bump_emoji=_BUMP_EMOJI.get(rec.bump.value, ""),
         bump_upper=rec.bump.value.upper(),

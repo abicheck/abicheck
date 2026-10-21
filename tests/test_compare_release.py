@@ -1455,58 +1455,58 @@ class TestDebianSymbolsWarning:
     participate in a package compare, not just be extracted and ignored."""
 
     def test_none_when_either_side_missing(self, tmp_path: Path) -> None:
-        from abicheck.cli_compare_release_helpers import _debian_symbols_warning
+        from abicheck.workflows.release_inputs import debian_symbols_warning
 
         symbols = tmp_path / "symbols"
         symbols.write_text("libfoo.so.1 libfoo1 #MINVER#\n _foo@Base 1.0\n")
-        assert _debian_symbols_warning(None, None) is None
-        assert _debian_symbols_warning(symbols, None) is None
-        assert _debian_symbols_warning(None, symbols) is None
+        assert debian_symbols_warning(None, None) is None
+        assert debian_symbols_warning(symbols, None) is None
+        assert debian_symbols_warning(None, symbols) is None
 
     def test_none_when_contracts_identical(self, tmp_path: Path) -> None:
-        from abicheck.cli_compare_release_helpers import _debian_symbols_warning
+        from abicheck.workflows.release_inputs import debian_symbols_warning
 
         text = "libfoo.so.1 libfoo1 #MINVER#\n _foo@Base 1.0\n"
         old = tmp_path / "old_symbols"
         new = tmp_path / "new_symbols"
         old.write_text(text)
         new.write_text(text)
-        assert _debian_symbols_warning(old, new) is None
+        assert debian_symbols_warning(old, new) is None
 
     def test_reports_removed_and_added_symbols(self, tmp_path: Path) -> None:
-        from abicheck.cli_compare_release_helpers import _debian_symbols_warning
+        from abicheck.workflows.release_inputs import debian_symbols_warning
 
         old = tmp_path / "old_symbols"
         new = tmp_path / "new_symbols"
         old.write_text("libfoo.so.1 libfoo1 #MINVER#\n _foo@Base 1.0\n _bar@Base 1.0\n")
         new.write_text("libfoo.so.1 libfoo1 #MINVER#\n _foo@Base 1.0\n _baz@Base 1.0\n")
-        note = _debian_symbols_warning(old, new)
+        note = debian_symbols_warning(old, new)
         assert note is not None
         assert "Debian symbols contract changed" in note
         assert "_bar@Base" in note
         assert "_baz@Base" in note
 
     def test_reports_version_regression(self, tmp_path: Path) -> None:
-        from abicheck.cli_compare_release_helpers import _debian_symbols_warning
+        from abicheck.workflows.release_inputs import debian_symbols_warning
 
         old = tmp_path / "old_symbols"
         new = tmp_path / "new_symbols"
         old.write_text("libfoo.so.1 libfoo1 #MINVER#\n _foo@Base 2.0\n")
         new.write_text("libfoo.so.1 libfoo1 #MINVER#\n _foo@Base 1.0\n")
-        note = _debian_symbols_warning(old, new)
+        note = debian_symbols_warning(old, new)
         assert note is not None
         assert "_foo" in note
         assert "2.0 -> 1.0" in note
 
     def test_unparseable_file_reported_not_raised(self, tmp_path: Path) -> None:
-        from abicheck.cli_compare_release_helpers import _debian_symbols_warning
+        from abicheck.workflows.release_inputs import debian_symbols_warning
 
         old = tmp_path / "old_symbols"
         new = tmp_path / "new_symbols"
         old.write_text("libfoo.so.1 libfoo1 #MINVER#\n _foo@Base 1.0\n")
         # Missing entirely -- load_symbols_file must raise OSError, not crash
         # the whole release compare.
-        note = _debian_symbols_warning(old, new)
+        note = debian_symbols_warning(old, new)
         assert note is not None
         assert "could not be parsed" in note
 

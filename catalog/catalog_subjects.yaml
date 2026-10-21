@@ -378,3 +378,5 @@ subjects:
       - case174_secondary_vtable_group_changed
       - case185_inherited_override_reuses_slot
       - case203_class_gained_vtable_pointer
+      - case219_public_virtual_dispatch_set_changed
+      - case220_public_virtual_dispatch_set_reordered
