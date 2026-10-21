@@ -57,9 +57,6 @@ Next, unranked (the `--no-baseline` one-sided-detector gap, the target-platform 
 
 Each entry's status line says what is still open. A PARTIAL entry's write-up also describes the half that is already fixed; the status line is authoritative where they disagree.
 
-### The ADR-062 extractor fingerprint axis does not cover `abicheck/buildsource/` (2026-10-21)
-**Status (2026-10-21): OPEN.** `EXTRACTOR_GENERATION` is fingerprinted over 146 files, none under `abicheck/buildsource/`, so the L4 and L5 extractors' semantic changes are not recorded by the generation mechanism. Per-TU L4 cache keys still change with any code edit (`abicheck/buildsource/source_replay.py`, `compute_tu_cache_key`, folds in `abicheck_code_fingerprint()`), so stale entries do not hit after a change. Closing this means adding `buildsource/` to the extractor scope in `abicheck/storage/generation_scope.py` and re-recording with `scripts/record_generation_fingerprints.py --bump`.
-
 ### False-clean risk
 
 #### A header-only default template-argument change reads `NO_CHANGE` at L2 on both backends (2026-10-21)

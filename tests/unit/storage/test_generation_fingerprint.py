@@ -50,7 +50,7 @@ def _fix_hint(axis: str) -> str:
     )
 
 
-@pytest.mark.parametrize("axis", ["extractor", "resolver"])
+@pytest.mark.parametrize("axis", ["extractor", "resolver", "source"])
 def test_recorded_fingerprint_matches_the_scoped_source(axis: str) -> None:
     """A scoped edit without a re-record fails with the changed files named."""
     recorded = _recorded()[axis]
@@ -69,7 +69,7 @@ def test_recorded_fingerprint_matches_the_scoped_source(axis: str) -> None:
     )
 
 
-@pytest.mark.parametrize("axis", ["extractor", "resolver"])
+@pytest.mark.parametrize("axis", ["extractor", "resolver", "source"])
 def test_recorded_generation_is_the_constant_in_versioning(axis: str) -> None:
     """The recorded generation equals the versioning constant."""
     constant = getattr(versioning, f"{axis.upper()}_GENERATION")
@@ -120,6 +120,45 @@ def test_extractor_scope_covers_every_extract_module() -> None:
     assert set(on_disk) <= set(files), sorted(set(on_disk) - set(files))
 
 
+def test_source_scope_covers_every_source_extractor_module() -> None:
+    """Every L4 backend module is in the source scope, so a new one cannot be missed."""
+    files = set(scope.scope_files("source"))
+    on_disk = {
+        p.relative_to(REPO_ROOT).as_posix()
+        for p in (REPO_ROOT / scope.SOURCE_EXTRACTOR_DIR).rglob("*.py")
+        if "__pycache__" not in p.parts
+    }
+    assert on_disk, "source_extractors/ has no modules; the scope path is wrong"
+    # The resolver axis owns its listed modules, so they are the one exception.
+    owned_by_resolver = on_disk & set(scope.RESOLVER_SEMANTIC_FILES)
+    assert on_disk - owned_by_resolver <= files, sorted(
+        (on_disk - owned_by_resolver) - files
+    )
+    assert owned_by_resolver == {"abicheck/buildsource/source_extractors/resolver.py"}
+
+
+def test_source_scope_names_only_existing_files() -> None:
+    """A listed L4/L5 producer that was renamed or deleted is a scope error."""
+    for path in scope.SOURCE_TIER_FILES:
+        assert (REPO_ROOT / path).is_file(), f"listed but missing: {path}"
+    assert len(set(scope.SOURCE_TIER_FILES)) == len(scope.SOURCE_TIER_FILES)
+
+
+def test_source_axis_is_disjoint_from_extractor_and_resolver() -> None:
+    """An L4/L5 edit must not move the extractor axis, and the reverse.
+
+    Otherwise a source-tier change would drift every stored L2 package on the
+    extractor axis, which is the false drift ADR-062 D2's source amendment
+    exists to prevent.
+    """
+    source = set(scope.scope_files("source"))
+    extractor = set(scope.scope_files("extractor"))
+    resolver = set(scope.scope_files("resolver"))
+    assert not source & extractor, sorted(source & extractor)
+    assert not source & resolver, sorted(source & resolver)
+    assert not any(p.startswith("abicheck/buildsource/") for p in extractor)
+
+
 def test_fingerprint_moves_for_any_scoped_edit_and_not_for_an_unscoped_one() -> None:
     """Oracle: a sha256 over path + content, computed here directly."""
     axis_files = scope.scope_files("resolver")
@@ -146,7 +185,7 @@ def test_fingerprint_moves_for_any_scoped_edit_and_not_for_an_unscoped_one() -> 
 def test_record_file_is_present_and_well_formed() -> None:
     """Each record carries its fields, a consistent fingerprint and repo-relative paths."""
     data = _recorded()
-    for axis in ("extractor", "resolver"):
+    for axis in ("extractor", "resolver", "source"):
         entry = data[axis]
         assert set(entry) >= {"generation", "fingerprint", "files", "reason"}
         assert entry["fingerprint"] == scope.fingerprint(entry["files"])
