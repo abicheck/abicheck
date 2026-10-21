@@ -55,6 +55,7 @@ from .fact_schema_versions import (
     _MIN_SCHEMA_VERSION_FOR_PARAM_KIND_FACT,
     _MIN_SCHEMA_VERSION_FOR_RECORDTYPE_CASE_B_FACTS,
     _MIN_SCHEMA_VERSION_FOR_SNAPSHOT_CASE_B_FACTS,
+    _MIN_SCHEMA_VERSION_FOR_SPECIALIZATION_FACT as _MIN_SPEC_FACT,
     _MIN_SCHEMA_VERSION_FOR_SURFACE_FACTS,
     _MIN_SCHEMA_VERSION_FOR_TYPE_IDENTITY_FACTS,
     _MIN_SCHEMA_VERSION_FOR_TYPEFIELD_CV_FACTS,
@@ -97,6 +98,7 @@ _TYPE_FACT_KEYS = (
     "qualified_name_fact",
     "source_header_fact",
     "deprecated_fact",
+    "specialization_declared_fact",
 )
 
 # ADR-063 Phase 5 (eighth batch): TypeField's own case-(a) *_fact siblings.
@@ -371,6 +373,12 @@ def decode_record_facts(t: dict[str, Any], schema_version: int) -> dict[str, Any
         "deprecated_fact": decode_fact_with_legacy_presence(
             t, "deprecated", schema_version, _MIN_SCHEMA_VERSION_FOR_DEPRECATION_FACTS
         ),
+        # Absent reads as unset at every version, so a round trip stays equal.
+        "specialization_declared_fact": decode_fact(
+            t.get("specialization_declared_fact"), schema_version, _MIN_SPEC_FACT
+        )
+        if t.get("specialization_declared_fact")
+        else None,
     }
 
 

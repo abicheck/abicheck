@@ -3,7 +3,7 @@
 
 Backward-compatible at the symbol level but with behavioral risk.
 
-_36 case(s)._ [← back to all examples](../index.md)
+_37 case(s)._ [← back to all examples](../index.md)
 
 | Case | Title | Verdict | Category |
 |------|-------|---------|----------|
@@ -43,3 +43,4 @@ _36 case(s)._ [← back to all examples](../index.md)
 | [case196_header_graph_move_reconciled](../case196_header_graph_move_reconciled.md) | Declaration Reconciled as Moved Across a Compound Edit | 🟡 COMPATIBLE_WITH_RISK | Risk |
 | [case197_header_graph_identity_reconciled](../case197_header_graph_identity_reconciled.md) | Declaration Reconciled as Identity-Reconciled (Header Unchanged) | 🟡 COMPATIBLE_WITH_RISK | Risk |
 | [case207_pointer_parameter_gained_restrict](../case207_pointer_parameter_gained_restrict.md) | Pointer Parameter Gained `restrict` | 🟡 COMPATIBLE_WITH_RISK | Risk |
+| [case219_public_virtual_dispatch_set_changed](../case219_public_virtual_dispatch_set_changed.md) | Public Virtual Method's Override Set Changes | 🟡 COMPATIBLE_WITH_RISK | Risk |

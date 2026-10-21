@@ -58,6 +58,7 @@ if TYPE_CHECKING:  # pragma: no cover - typing only
 
 __all__ = [
     "BINARY_SIDE_CONTRACT_PRODUCERS",
+    "ContractEvidenceByName",
     "PUBLIC_SOURCE_VISIBILITIES",
     "has_observed_source_contract_evidence",
     "observed_source_contract_names",
@@ -168,6 +169,38 @@ def has_observed_source_contract_evidence(
         and located.status is FactStatus.PRESENT
         and bool(located.value)
     )
+
+
+class ContractEvidenceByName:
+    """Per name: whether any declaration filed under it has observed
+    header/source contract evidence (:func:`has_observed_source_contract_evidence`).
+
+    A detector indexes every declaration but tags reachability only for the
+    names it reports, so the question is asked lazily, once per reported name,
+    rather than of every indexed declaration. :meth:`confirm` records a name
+    another signal already proved public.
+    """
+
+    __slots__ = ("_answers", "_decls")
+
+    def __init__(self) -> None:
+        self._decls: dict[str, list[tuple[Any, bool]]] = {}
+        self._answers: dict[str, bool] = {}
+
+    def add(self, name: str, decl: Any, *, header_parsed: bool) -> None:
+        self._decls.setdefault(name, []).append((decl, header_parsed))
+
+    def confirm(self, name: str) -> None:
+        self._answers[name] = True
+
+    def has(self, name: str) -> bool:
+        answer = self._answers.get(name)
+        if answer is None:
+            answer = self._answers[name] = any(
+                has_observed_source_contract_evidence(decl, header_parsed=parsed)
+                for decl, parsed in self._decls.get(name, ())
+            )
+        return answer
 
 
 def reachability_of(

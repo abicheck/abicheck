@@ -114,6 +114,16 @@ _substitute_literal() {
 }
 asset_name="$(_substitute_literal "$asset_template" '{profile}' "${PROFILE:-}")"
 asset_name="$(_substitute_literal "$asset_name" '{generation}' "${GENERATION:-}")"
+# attest is consumed by the next composite step (attest-build-provenance); it is
+# validated here so a typo fails before an archive is written, not by being
+# read as "not 'true'" and silently skipping the attestation.
+case "${ATTEST:-false}" in
+  true | false) ;;
+  *)
+    echo "::error::attest is not recognized. Use 'true' or 'false'."
+    exit 1
+    ;;
+esac
 
 # Reject a newline/carriage-return in the resolved name BEFORE creating any
 # archive or writing to $GITHUB_OUTPUT -- profile/asset-name-template can

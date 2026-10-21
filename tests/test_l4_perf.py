@@ -9,6 +9,7 @@ the per-pass dependency-digest memo contract. All pure/fast — no clang.
 from __future__ import annotations
 
 import logging
+import os
 import pickle
 import time
 from functools import partial
@@ -16,7 +17,8 @@ from pathlib import Path
 
 import pytest
 
-from abicheck.buildsource import source_replay as sr
+from abicheck import process_resources
+from abicheck.buildsource import source_replay as sr, source_replay_pool as sp
 from abicheck.buildsource.build_evidence import BuildEvidence, CompileUnit
 from abicheck.buildsource.source_abi import SourceAbiTu
 from abicheck.buildsource.source_extractors.base import SourceExtractionError
@@ -37,12 +39,12 @@ def test_l4_jobs_explicit_request_clamped_to_ceiling(
     monkeypatch, caplog, cpus: int, requested: int
 ) -> None:
     monkeypatch.setenv("ABICHECK_L4_JOBS", str(requested))
-    monkeypatch.setattr(sr.os, "cpu_count", lambda: cpus)
-    monkeypatch.setattr(sr.process_resources.os, "cpu_count", lambda: cpus)
-    monkeypatch.setattr(sr, "_l4_available_mem_gib", lambda: None)  # isolate CPU clamp
+    monkeypatch.setattr(os, "cpu_count", lambda: cpus)
+    monkeypatch.setattr(process_resources.os, "cpu_count", lambda: cpus)
+    monkeypatch.setattr(sp, "_l4_available_mem_gib", lambda: None)  # isolate CPU clamp
     oracle_ceiling = max(8, 2 * cpus)
     with caplog.at_level(logging.WARNING):
-        jobs = sr._l4_jobs(100)
+        jobs = sp._l4_jobs(100)
     assert jobs == min(requested, oracle_ceiling)
     warned = any("oversubscription" in r.message for r in caplog.records)
     assert warned == (requested > oracle_ceiling)
@@ -50,20 +52,20 @@ def test_l4_jobs_explicit_request_clamped_to_ceiling(
 
 def test_l4_jobs_explicit_within_ceiling_is_honoured(monkeypatch) -> None:
     monkeypatch.setenv("ABICHECK_L4_JOBS", "1")
-    assert sr._l4_jobs(100) == 1  # the determinism-forcing serial override
+    assert sp._l4_jobs(100) == 1  # the determinism-forcing serial override
 
 
 def test_l4_jobs_invalid_env_falls_back_serial(monkeypatch) -> None:
     monkeypatch.setenv("ABICHECK_L4_JOBS", "not-a-number")
-    assert sr._l4_jobs(100) == 1
+    assert sp._l4_jobs(100) == 1
 
 
 def test_l4_jobs_auto_capped_at_cpu_and_eight(monkeypatch) -> None:
     monkeypatch.delenv("ABICHECK_L4_JOBS", raising=False)
-    monkeypatch.setattr(sr.os, "cpu_count", lambda: 4)
-    monkeypatch.setattr(sr, "_l4_available_mem_gib", lambda: None)  # isolate CPU clamp
-    assert sr._l4_jobs(1000) == 4  # min(units, cpu, 8)
-    assert sr._l4_jobs(2) == 2
+    monkeypatch.setattr(os, "cpu_count", lambda: 4)
+    monkeypatch.setattr(sp, "_l4_available_mem_gib", lambda: None)  # isolate CPU clamp
+    assert sp._l4_jobs(1000) == 4  # min(units, cpu, 8)
+    assert sp._l4_jobs(2) == 2
 
 
 # ── memory clamp (#3: OOM guard for template-heavy L4) ────────────────────────
@@ -72,9 +74,9 @@ def test_l4_jobs_auto_capped_by_available_memory(monkeypatch) -> None:
     # concurrent multi-GiB clang ASTs can't OOM-kill the replay (the UXL s5/s6 OOM).
     monkeypatch.delenv("ABICHECK_L4_JOBS", raising=False)
     monkeypatch.delenv("ABICHECK_L4_JOB_MEM_GIB", raising=False)
-    monkeypatch.setattr(sr.os, "cpu_count", lambda: 8)
-    monkeypatch.setattr(sr, "_l4_available_mem_gib", lambda: 6.0)  # 6 GiB / 3.0 = 2
-    assert sr._l4_jobs(1000) == 2  # CPU cap 8 reduced to the memory cap 2
+    monkeypatch.setattr(os, "cpu_count", lambda: 8)
+    monkeypatch.setattr(sp, "_l4_available_mem_gib", lambda: 6.0)  # 6 GiB / 3.0 = 2
+    assert sp._l4_jobs(1000) == 2  # CPU cap 8 reduced to the memory cap 2
 
 
 def test_l4_jobs_explicit_clamped_by_memory(monkeypatch, caplog) -> None:
@@ -82,9 +84,9 @@ def test_l4_jobs_explicit_clamped_by_memory(monkeypatch, caplog) -> None:
     # oversubscription ceiling — correctness (no OOM) over literal obedience.
     monkeypatch.setenv("ABICHECK_L4_JOBS", "8")
     monkeypatch.delenv("ABICHECK_L4_JOB_MEM_GIB", raising=False)
-    monkeypatch.setattr(sr, "_l4_available_mem_gib", lambda: 6.0)  # cap = 2
+    monkeypatch.setattr(sp, "_l4_available_mem_gib", lambda: 6.0)  # cap = 2
     with caplog.at_level(logging.WARNING):
-        jobs = sr._l4_jobs(100)
+        jobs = sp._l4_jobs(100)
     assert jobs == 2
     assert any("OOM" in r.message for r in caplog.records)
 
@@ -92,18 +94,18 @@ def test_l4_jobs_explicit_clamped_by_memory(monkeypatch, caplog) -> None:
 def test_l4_job_mem_budget_env_tunes_the_cap(monkeypatch) -> None:
     # A smaller per-worker budget raises the cap (escape hatch for big-RAM/swap hosts).
     monkeypatch.delenv("ABICHECK_L4_JOBS", raising=False)
-    monkeypatch.setattr(sr.os, "cpu_count", lambda: 8)
-    monkeypatch.setattr(sr, "_l4_available_mem_gib", lambda: 6.0)
+    monkeypatch.setattr(os, "cpu_count", lambda: 8)
+    monkeypatch.setattr(sp, "_l4_available_mem_gib", lambda: 6.0)
     monkeypatch.setenv("ABICHECK_L4_JOB_MEM_GIB", "1.0")  # 6 / 1.0 = 6
-    assert sr._l4_jobs(1000) == 6
+    assert sp._l4_jobs(1000) == 6
 
 
 def test_l4_jobs_no_meminfo_falls_back_to_cpu_cap(monkeypatch) -> None:
     # When RAM can't be read (non-Linux / sandbox), the memory clamp is skipped.
     monkeypatch.delenv("ABICHECK_L4_JOBS", raising=False)
-    monkeypatch.setattr(sr.os, "cpu_count", lambda: 4)
-    monkeypatch.setattr(sr, "_l4_available_mem_gib", lambda: None)
-    assert sr._l4_jobs(1000) == 4
+    monkeypatch.setattr(os, "cpu_count", lambda: 4)
+    monkeypatch.setattr(sp, "_l4_available_mem_gib", lambda: None)
+    assert sp._l4_jobs(1000) == 4
 
 
 # ── memory-probe internals ──────────────────────────────────────────────────
@@ -116,13 +118,13 @@ def test_l4_jobs_no_meminfo_falls_back_to_cpu_cap(monkeypatch) -> None:
 
 def test_l4_job_mem_budget_invalid_env_falls_back_to_default(monkeypatch) -> None:
     monkeypatch.setenv("ABICHECK_L4_JOB_MEM_GIB", "not-a-float")
-    assert sr._l4_job_mem_budget_gib() == sr._L4_JOB_MEM_BUDGET_GIB
+    assert sp._l4_job_mem_budget_gib() == sp._L4_JOB_MEM_BUDGET_GIB
 
 
 # ── executor selector (#1: GIL-bound AST work) ────────────────────────────────
 def test_l4_executor_defaults_to_threads(monkeypatch) -> None:
     monkeypatch.delenv("ABICHECK_L4_EXECUTOR", raising=False)
-    assert sr._l4_use_process_pool() is False
+    assert sp._l4_use_process_pool() is False
 
 
 @pytest.mark.parametrize(
@@ -131,7 +133,7 @@ def test_l4_executor_defaults_to_threads(monkeypatch) -> None:
 )
 def test_l4_executor_env(monkeypatch, value: str, expected: bool) -> None:
     monkeypatch.setenv("ABICHECK_L4_EXECUTOR", value)
-    assert sr._l4_use_process_pool() is expected
+    assert sp._l4_use_process_pool() is expected
 
 
 # ── picklable extract worker (#1: process-pool requirement) ───────────────────

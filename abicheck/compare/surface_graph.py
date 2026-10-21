@@ -88,6 +88,7 @@ from .ownership_relations import (
     OwnershipRelations,
     ownership_relations,
 )
+from .typedef_spelling_keys import TypedefSpellingIndex, typedef_spelling_index
 
 if TYPE_CHECKING:
     from ..model.fact import Fact
@@ -224,6 +225,9 @@ class ReferencedIdentifiers(NamedTuple):
     #: ``id(entity object) -> node id`` for every function/variable/record/
     #: enum of the snapshot this was computed from.
     node_ids: dict[int, str]
+    #: Spelling -> typedef key lookup for the same snapshot, built once here so
+    #: every closure walk shares it (see ``typedef_spelling_keys``).
+    typedef_spellings: TypedefSpellingIndex
 
     def node_id(self, entity: object) -> str:
         """The node id of *entity* -- one of the snapshot's own
@@ -316,7 +320,11 @@ def referenced_identifiers_by_node(snap: AbiSnapshot) -> ReferencedIdentifiers:
         node_id for node_id, count in contributor_counts.items() if count > 1
     )
     return ReferencedIdentifiers(
-        by_node=by_node, collided_nodes=collided, ids=ids, node_ids=node_ids
+        by_node=by_node,
+        collided_nodes=collided,
+        ids=ids,
+        node_ids=node_ids,
+        typedef_spellings=typedef_spelling_index(snap),
     )
 
 

@@ -717,13 +717,13 @@ class TestOnlyAppliedFieldsAreAccepted:
         hold on the second one, or the empty revision is what configures the
         run while the first read approved a different document.
         """
-        from abicheck.cli_compare_receipt import validate_pack_manifests
         from abicheck.compatibility_evaluation_frontend import (
             ExplicitCompatibilityInputs,
             FrontEnd,
             resolve_compatibility_evaluation_config,
         )
         from abicheck.errors import PackManifestError
+        from abicheck.workflows.pack_resolution import validate_pack_manifests
 
         pack = _pack(
             tmp_path,
@@ -785,9 +785,9 @@ class TestOnlyAppliedFieldsAreAccepted:
         than rejected (Codex review). Simulated by rewriting the manifest at
         the moment the early check returns.
         """
-        import abicheck.cli_compare_receipt as receipt
+        import abicheck.workflows.pack_resolution as packs
 
-        real = receipt.validate_pack_manifests
+        real = packs.validate_pack_manifests
 
         def _validate_then_swap(pack_paths, **kwargs):
             real(pack_paths, **kwargs)
@@ -797,7 +797,7 @@ class TestOnlyAppliedFieldsAreAccepted:
                 encoding="utf-8",
             )
 
-        monkeypatch.setattr(receipt, "validate_pack_manifests", _validate_then_swap)
+        monkeypatch.setattr(packs, "validate_pack_manifests", _validate_then_swap)
         result = _compare(CliRunner(), pair, "--pack", str(ignore_removals))
         assert result.exit_code == 64, result.output
         assert "contract.overlays" in result.output
@@ -1024,9 +1024,9 @@ class TestOnlyAppliedFieldsAreAccepted:
         `test_release_evaluation_config.py`'s own
         `TestReleaseNoPackStillResolvesProjectBackedConfig`)."""
         from abicheck.cli_compare_receipt import (
-            resolve_release_pack_application,
             resolve_release_pack_application_from_ctx,
         )
+        from abicheck.workflows.pack_resolution import resolve_release_pack_application
 
         params = {
             "contract_mode": None,

@@ -13,7 +13,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Unit tests for ``_extract_if_package`` (release operand preparation).
+"""Unit tests for ``extract_if_package`` (release operand preparation).
 
 Split out of ``test_compare_release.py``, which is at its recorded
 ``architecture/debt.yaml`` no-growth baseline: package extraction is its own
@@ -28,8 +28,8 @@ from __future__ import annotations
 from pathlib import Path
 from unittest.mock import MagicMock
 
-from abicheck.cli_compare_release_helpers import _extract_if_package
 from abicheck.extract.packages import ExtractResult
+from abicheck.workflows.release_inputs import extract_if_package
 
 
 def _make_mock_extractor(
@@ -43,7 +43,7 @@ def _make_mock_extractor(
 
 
 class TestExtractIfPackage:
-    """Unit tests for _extract_if_package covering the directory-input bug fix."""
+    """Unit tests for extract_if_package covering the directory-input bug fix."""
 
     def _make_temp_dir(self, tmp_path: Path) -> Path:
         """Simple make_temp_dir stub that returns a subdirectory."""
@@ -58,7 +58,7 @@ class TestExtractIfPackage:
         lib_dir = tmp_path / "lib"
         lib_dir.mkdir()
 
-        lib_out, debug_out, header_out, _symbols_out, _whole = _extract_if_package(
+        lib_out, debug_out, header_out, _symbols_out, _whole = extract_if_package(
             input_path=lib_dir,
             debug_pkg=None,
             devel_pkg=None,
@@ -94,7 +94,7 @@ class TestExtractIfPackage:
             lib_dir=extracted_debug, debug_dir=extracted_debug
         )
 
-        lib_out, debug_out, header_out, _symbols_out, _whole = _extract_if_package(
+        lib_out, debug_out, header_out, _symbols_out, _whole = extract_if_package(
             input_path=lib_dir,
             debug_pkg=dbg_pkg,
             devel_pkg=None,
@@ -130,7 +130,7 @@ class TestExtractIfPackage:
             lib_dir=extracted_headers, header_dir=extracted_headers
         )
 
-        lib_out, debug_out, header_out, _symbols_out, _whole = _extract_if_package(
+        lib_out, debug_out, header_out, _symbols_out, _whole = extract_if_package(
             input_path=lib_dir,
             debug_pkg=None,
             devel_pkg=dev_pkg,
@@ -178,7 +178,7 @@ class TestExtractIfPackage:
                 return dev_extractor
             return None
 
-        lib_out, debug_out, header_out, _symbols_out, _whole = _extract_if_package(
+        lib_out, debug_out, header_out, _symbols_out, _whole = extract_if_package(
             input_path=lib_dir,
             debug_pkg=dbg_pkg,
             devel_pkg=dev_pkg,
@@ -213,7 +213,7 @@ class TestExtractIfPackage:
         # debug_dir=None in ExtractResult: fallback must use lib_dir
         dbg_extractor = _make_mock_extractor(lib_dir=extracted, debug_dir=None)
 
-        lib_out, debug_out, header_out, _symbols_out, _whole = _extract_if_package(
+        lib_out, debug_out, header_out, _symbols_out, _whole = extract_if_package(
             input_path=lib_dir,
             debug_pkg=dbg_pkg,
             devel_pkg=None,
@@ -262,7 +262,7 @@ class TestExtractIfPackage:
                 return dbg_extractor
             return None
 
-        lib_out, debug_out, header_out, _symbols_out, _whole = _extract_if_package(
+        lib_out, debug_out, header_out, _symbols_out, _whole = extract_if_package(
             input_path=pkg,
             debug_pkg=dbg_pkg,
             devel_pkg=None,

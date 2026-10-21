@@ -39,9 +39,15 @@ no-op reclassification). ``disposed + shadowed`` is the selector-hit count.
 
 Status is decided per rule (ADR-067 P1 addendum, per-rule ``not_evaluated``):
 a zero-match rule is ``unused`` when at least one detector that *can produce
-one of the rule's change kinds* ran, and ``not_evaluated`` only when none of
-them did. The candidate detectors come from the generated map
-:data:`~abicheck.policy.detector_kind_map.DETECTOR_KINDS`.
+one of the rule's change kinds* ran, or when the run observed a change of one
+of those kinds at all (whatever later disposed of it), and ``not_evaluated``
+only when neither holds. The candidate detectors come from the generated map
+:data:`~abicheck.policy.detector_kind_map.DETECTOR_KINDS`; the observed-kind
+proof covers the kinds no registered detector emits (``NON_DETECTOR_KINDS``:
+a pipeline step produces them), which the map alone could never mark
+evaluated (ADR-067 P1 addendum 2). A ``not_evaluated`` row carries
+``missing_evidence``: which producer did not run, and why when the detector
+recorded a reason.
 
 A leaf: imports only :mod:`rule_identity`, the generated detector map and the
 ``ChangeKind`` enum (a ``model`` leaf), so the ledger, the closer, the report
@@ -148,6 +154,10 @@ class RuleAuditRow:
     selector_matched_count: int
     intent: str = "unspecified"
     allow_public_break: bool = False
+    #: For a ``not_evaluated`` row: the evidence whose absence kept the rule
+    #: from being checked (the candidate detectors that did not run, with
+    #: their gate reasons). ``None`` for every other status.
+    missing_evidence: str | None = None
 
     @property
     def kind(self) -> str:
@@ -199,6 +209,7 @@ def rule_status(
     *,
     today: date,
     ran_detectors: frozenset[str],
+    observed_kinds: frozenset[str] = frozenset(),
 ) -> str:
     """The status of one configured rule (ADR-067 D3 / ADR-065 four-state rule).
 
@@ -210,12 +221,16 @@ def rule_status(
        (or a no-op reclassification) claimed every one of them;
     3. ``expired`` -- past its ``expires`` date (an expired rule never matches);
     4. ``unused`` -- it matched nothing, and at least one detector that could
-       produce one of its change kinds ran (:func:`candidate_detectors`);
-    5. ``not_evaluated`` -- it matched nothing, and none of those detectors ran,
-       so "nothing matched" is not proof the rule was checked (ADR-067 D3).
+       produce one of its change kinds ran (:func:`candidate_detectors`), or
+       a change of one of its kinds was observed in this run (its producer
+       demonstrably ran, so the rule was checked against real findings);
+    5. ``not_evaluated`` -- it matched nothing, and neither holds, so "nothing
+       matched" is not proof the rule was checked (ADR-067 D3).
 
     *ran_detectors* is the set of detector names that actually ran in this
     comparison. A detector absent from it is treated as not having run.
+    *observed_kinds* is every ``ChangeKind`` value the run recorded, before
+    any disposition (suppressed, out-of-scope and redundant changes included).
     """
     if counts.disposed > 0:
         return STATUS_ACTIVE
@@ -225,7 +240,44 @@ def rule_status(
         return STATUS_EXPIRED
     if candidate_detectors(rule.change_kinds) & ran_detectors:
         return STATUS_UNUSED
+    if rule.change_kinds is not None and rule.change_kinds & observed_kinds:
+        return STATUS_UNUSED
     return STATUS_NOT_EVALUATED
+
+
+def missing_evidence(
+    rule: ConfiguredRule,
+    *,
+    ran_detectors: frozenset[str],
+    detector_gaps: Mapping[str, str | None],
+) -> str:
+    """Why a ``not_evaluated`` rule was not checked, naming the missing producer.
+
+    Lists the candidate detectors (:func:`candidate_detectors`) that did not
+    run, each with the reason its evidence gate recorded (``coverage_gap``)
+    when there is one. A rule whose kinds no registered detector emits names
+    those kinds instead: their producer is a pipeline step (build, source,
+    bundle or surface evidence) that recorded no change of them in this run.
+    """
+    kinds = sorted(rule.change_kinds or ())
+    missing = sorted(candidate_detectors(rule.change_kinds) - ran_detectors)
+    if missing:
+        parts = []
+        for name in missing:
+            gap = detector_gaps.get(name)
+            parts.append(f"{name} ({gap})" if gap else name)
+        return (
+            "detector(s) that produce "
+            + (", ".join(kinds) if kinds else "any kind")
+            + " did not run: "
+            + "; ".join(parts)
+        )
+    return (
+        "no registered detector produces "
+        + ", ".join(kinds)
+        + "; its producer (a build, source, bundle or surface evidence step) "
+        "recorded no change of that kind in this run"
+    )
 
 
 def build_rule_rows(
@@ -234,6 +286,8 @@ def build_rule_rows(
     *,
     today: date,
     ran_detectors: frozenset[str],
+    observed_kinds: frozenset[str] = frozenset(),
+    detector_gaps: Mapping[str, str | None] | None = None,
 ) -> tuple[RuleAuditRow, ...]:
     """Exactly one :class:`RuleAuditRow` per configured rule, in input order.
 
@@ -252,6 +306,13 @@ def build_rule_rows(
     rows: list[RuleAuditRow] = []
     for rule in rules:
         c = counts.get(rule.ref, RuleCounts())
+        status = rule_status(
+            rule,
+            c,
+            today=today,
+            ran_detectors=ran_detectors,
+            observed_kinds=observed_kinds,
+        )
         rows.append(
             RuleAuditRow(
                 ref=rule.ref,
@@ -259,12 +320,21 @@ def build_rule_rows(
                 label=rule.label,
                 reason=rule.reason,
                 expires=rule.expires,
-                status=rule_status(rule, c, today=today, ran_detectors=ran_detectors),
+                status=status,
                 matched_count=c.disposed,
                 shadowed_count=c.shadowed,
                 selector_matched_count=c.hits,
                 intent=rule.intent,
                 allow_public_break=rule.allow_public_break,
+                missing_evidence=(
+                    missing_evidence(
+                        rule,
+                        ran_detectors=ran_detectors,
+                        detector_gaps=detector_gaps or {},
+                    )
+                    if status == STATUS_NOT_EVALUATED
+                    else None
+                ),
             )
         )
     return tuple(rows)

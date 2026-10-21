@@ -151,13 +151,13 @@ class TestCanonicalResolverIsWhatRuns:
         classified, so the receipt must record them -- a missing forward
         resolved as "not stated" while the snapshots used them. A ``-H`` file
         is not a root and records nothing."""
-        import abicheck.cli_compare_receipt as receipt
+        import abicheck.workflows.compare_input_adapters as adapters
 
         inc = tmp_path / "inc"
         inc.mkdir()
         (inc / "a.h").write_text("int api_a(void);\n", encoding="utf-8")
         seen: dict = {}
-        real = receipt.cli_configuration_inputs
+        real = adapters.cli_configuration_inputs
 
         def _spy(params: dict, **kwargs: Any) -> Any:
             seen.update(params)
@@ -166,7 +166,7 @@ class TestCanonicalResolverIsWhatRuns:
         import pytest as _pytest
 
         with _pytest.MonkeyPatch.context() as mp:
-            mp.setattr(receipt, "cli_configuration_inputs", _spy)
+            mp.setattr(adapters, "cli_configuration_inputs", _spy)
             # Two stored snapshots: `-H` is ignored, so nothing was classified
             # under it and the receipt must not claim it as a root.
             old_p, new_p = _write_pair(tmp_path)
@@ -559,10 +559,8 @@ class TestOverlayProvenanceEdges:
         )
 
     def _resolved(self):
-        from abicheck.cli_compare_receipt import (
-            COMPARE_CONFIG_PARAMS,
-            resolve_cli_config,
-        )
+        from abicheck.cli_compare_receipt import resolve_cli_config
+        from abicheck.workflows.compare_input_adapters import COMPARE_CONFIG_PARAMS
 
         # Every declared key, since `resolve_cli_config` rejects a partial
         # mapping outright -- an absent one would resolve as "not stated".
@@ -666,27 +664,27 @@ class TestWiringContract:
     def test_typed_parameter_names_mirrors_the_resolver_constant(self):
         """A second copy of "which options have an ambiguous default" is a
         second thing to keep in sync; this asserts there is only one."""
-        from abicheck.cli_compare_receipt import typed_parameter_names
         from abicheck.compatibility_evaluation_frontend import (
             DEFAULTED_COMPARE_PARAMETERS,
         )
+        from abicheck.workflows.compare_input_adapters import typed_parameter_names
 
         assert set(typed_parameter_names()) == set(DEFAULTED_COMPARE_PARAMETERS)
 
     def test_compare_forwards_every_declared_config_param(self, tmp_path, monkeypatch):
         """A key the caller forgets resolves silently to "not stated", which
         reads exactly like a user who did not pass the flag."""
-        import abicheck.cli_compare_receipt as receipt
-        from abicheck.cli_compare_receipt import COMPARE_CONFIG_PARAMS
+        import abicheck.workflows.compare_input_adapters as adapters
+        from abicheck.workflows.compare_input_adapters import COMPARE_CONFIG_PARAMS
 
         seen: dict = {}
-        real = receipt.cli_configuration_inputs
+        real = adapters.cli_configuration_inputs
 
         def _spy(params: dict, **kwargs: Any) -> Any:
             seen.update(params)
             return real(params, **kwargs)
 
-        monkeypatch.setattr(receipt, "cli_configuration_inputs", _spy)
+        monkeypatch.setattr(adapters, "cli_configuration_inputs", _spy)
         old_p, new_p = _write_pair(tmp_path)
         CliRunner().invoke(main, ["compare", str(old_p), str(new_p), "-o", "json=-"])
         assert set(seen) == set(COMPARE_CONFIG_PARAMS)
@@ -725,10 +723,8 @@ class TestWiringContract:
         as "not stated", which reads exactly like a flag the user never
         passed (CodeRabbit review — the contract was documented, not
         enforced)."""
-        from abicheck.cli_compare_receipt import (
-            COMPARE_CONFIG_PARAMS,
-            resolve_cli_config,
-        )
+        from abicheck.cli_compare_receipt import resolve_cli_config
+        from abicheck.workflows.compare_input_adapters import COMPARE_CONFIG_PARAMS
 
         params = dict.fromkeys(COMPARE_CONFIG_PARAMS)
         del params["policy"]

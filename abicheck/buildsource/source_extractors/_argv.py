@@ -40,6 +40,10 @@ from ...header_utils import (
     match_gnu_forced_include,
     match_msvc_forced_include,
 )
+from ..abi_flags import (
+    is_split_operand_abi_flag_survivor,
+    split_operand_survivor,
+)
 from ..build_evidence import CompileUnit
 from ._argv_shortopts import (
     fold_chdir_into_operands as _fold_chdir_into_operands,
@@ -237,209 +241,6 @@ _ENV_SPLIT_STRING_LONG = "--split-string"
 #: filter -- see that predicate's own docstring.
 STRUCTURED_TOOLCHAIN_FLAG_PREFIXES = ("--sysroot", "-isysroot", "--target", "-target")
 
-#: ABI-relevant flags whose value is a *separate*, following argv token
-#: rather than a combined ``=``/immediate-suffix spelling -- confirmed
-#: against a real ``clang -cc1 --help``: ``-target-abi <value>``,
-#: ``-target-cpu <value>``, ``-target-feature <value>``,
-#: ``-target-linker-version <value>`` are all two-token forms (unlike
-#: ``-target-sdk-version=<value>``, already combined). Each shares the
-#: ``-target`` prefix already matched by
-#: ``adapters.base.ABI_RELEVANT_FLAG_PREFIXES``, so without special handling
-#: there a naive prefix match captures only the flag token itself and
-#: silently discards its operand -- a real, information-losing bug (P2
-#: review, ``discussion_r3787772666``): two compile units disagreeing only on
-#: e.g. ``-target-abi aapcs`` vs. ``-target-abi aapcs16`` read as identical
-#: once the operand was dropped, and any caller replaying the bare,
-#: valueless survivor got a syntactically incomplete command.
-#:
-#: Deliberately **not** extended to the bare ``-target``/``--sysroot``/
-#: ``-isysroot`` split forms those same three prefixes also match: unlike
-#: the four flags here, each of those already has its own dedicated
-#: structured ``CompileUnit`` field (``target_triple``/``sysroot``) derived
-#: by a separate, correct parse of the same argv (``build_context.py``), so
-#: their raw split-form survivor carries no additional information.
-#:
-#: Normalized to one internal ``<flag>=<value>`` token, not two separate
-#: list entries -- ``-target-abi=<value>`` is not real clang syntax (unlike
-#: ``-D<KEY>=<VALUE>``, which genuinely is both split- and combined-form
-#: valid), it is a purely-internal, round-trippable encoding produced by
-#: ``adapters.base.extract_abi_relevant_flags`` and decoded back into real
-#: argv token(s), for every consumer, by :func:`split_operand_survivor`
-#: below.
-#:
-#: **Every one of these four is a cc1-only flag, and a normal Clang** *driver*
-#: **invocation never passes one bare -- each is individually wrapped in its
-#: own ``-Xclang``, not just written after a single leading ``-Xclang``**
-#: (P2 review, ``discussion_r3788073752``, fresh evidence): confirmed with the
-#: installed CLI that ``clang -cc1 --help`` documents ``-target-abi <value>``,
-#: while ``clang -target-abi aapcs`` is rejected outright ("unknown argument
-#: '-target-abi'; did you mean '-Xclang -target-abi'"), and the real,
-#: supported spelling is ``-Xclang -target-abi -Xclang aapcs`` -- each token
-#: individually prefixed. **Both real argv shapes now normalize to the SAME
-#: internal ``<flag>=<value>`` encoding** (P2 review, "Canonicalize
-#: equivalent cc1 survivor spellings", fresh evidence): an earlier revision
-#: had ``extract_abi_relevant_flags`` distinguish the wrapped shape with a
-#: leading ``-Xclang `` marker (see :data:`_XCLANG_WRAPPED_ABI_FLAG_MARKER`)
-#: so :func:`split_operand_survivor` could tell which of the two real argv
-#: shapes (``["-target-abi", "<value>"]`` vs. ``["-Xclang", "-target-abi",
-#: "-Xclang", "<value>"]``) to reconstruct at replay time -- but
-#: :func:`split_operand_survivor` reconstructs the identical
-#: ``-Xclang``-wrapped output for either encoding regardless (see its own
-#: docstring), so the distinction bought nothing at decode time while
-#: actively breaking two consumers that compare/key on this raw string
-#: *without* decoding it first (``header_compile_context.
-#: _EffectiveContextSignature``, :func:`~abicheck.buildsource.adapters.adapter_shared.
-#: derive_build_options`) -- two semantically-equivalent units captured via
-#: different argv shapes compared unequal for those. The marker is still
-#: recognized on *decode* (:data:`_XCLANG_WRAPPED_ABI_FLAG_MARKER`,
-#: :func:`split_operand_survivor`, :func:`is_split_operand_abi_flag_survivor`)
-#: purely for backward compatibility with evidence packs persisted by an
-#: earlier revision that did emit it; the producer never emits it now.
-#:
-#: Lives here rather than in ``adapters.base`` -- where it is *produced*, by
-#: ``extract_abi_relevant_flags`` -- because :func:`_carry_abi_relevant_flags`
-#: below (the L4 source-replay decode path, P2 review "Decode normalized cc1
-#: flags in every replay path") needs it too, and ``adapters.base`` already
-#: imports :func:`strip_launchers` from this module at its own top level
-#: (:func:`~abicheck.buildsource.adapters.adapter_shared._executable_token_positions`)
-#: -- a reverse ``_argv -> adapters.base`` import would be a genuine import
-#: cycle (the ai-readiness ``import-cycle-growth`` gate walks the full AST,
-#: function-local imports included, so a deferred import does not avoid it
-#: either). Keeping the encoding's constants and decode function in this
-#: leaf, tool-independent module -- which both replay paths already depend
-#: on -- keeps the dependency a one-way DAG: ``adapters.base`` imports from
-#: here, never the reverse. ``adapters.base`` re-exports this under its own
-#: (legacy, private) ``_SPLIT_OPERAND_ABI_FLAGS`` name for any existing
-#: reader of that spelling.
-SPLIT_OPERAND_ABI_FLAGS = frozenset(
-    {
-        "-target-abi",
-        "-target-cpu",
-        "-target-feature",
-        "-target-linker-version",
-    }
-)
-
-#: The literal marker an earlier revision of
-#: ``adapters.base.extract_abi_relevant_flags`` used to prepend to a
-#: ``-Xclang``-wrapped split-operand flag's internal encoding, before both
-#: capture forms were canonicalized onto one identical encoding (see
-#: :data:`SPLIT_OPERAND_ABI_FLAGS`'s own docstring, "Canonicalize
-#: equivalent cc1 survivor spellings"). The producer never emits it now;
-#: kept here purely so :func:`split_operand_survivor`/
-#: :func:`is_split_operand_abi_flag_survivor` still decode it correctly if
-#: it appears in an evidence pack persisted by an earlier revision.
-_XCLANG_WRAPPED_ABI_FLAG_MARKER = "-Xclang "
-
-
-def split_operand_survivor(flag: str) -> list[str]:
-    """Expand one ``cu.abi_relevant_flags`` survivor into its literal argv token(s).
-
-    ``adapters.base.extract_abi_relevant_flags`` normalizes a genuinely
-    split two-token flag (``-target-abi <value>`` and its siblings in
-    :data:`SPLIT_OPERAND_ABI_FLAGS`) into one internal ``<flag>=<value>``
-    token -- see that set's own docstring for why this is a purely-internal
-    encoding rather than real clang syntax (unlike ``-D<KEY>=<VALUE>``, which
-    is valid either way). This is the one place that encoding is
-    reconstructed into the real, separate argv tokens (``["-target-abi",
-    "<value>"]``) a real compiler invocation needs -- every other flag is
-    returned unchanged as a single-element list.
-
-    A cc1-only split-operand flag is, in real usage, always individually
-    wrapped in ``-Xclang`` on both sides (``-Xclang -target-abi -Xclang
-    aapcs``, never the bare two-token form -- confirmed against a real
-    ``clang -cc1 --help``/driver error). ``extract_abi_relevant_flags``
-    normalizes that wrapped shape onto the SAME canonical
-    ``<flag>=<value>`` encoding as the bare capture; an earlier revision
-    marked it with a leading ``-Xclang `` prefix (see
-    :data:`_XCLANG_WRAPPED_ABI_FLAG_MARKER`, still decoded here for
-    backward compatibility only). Either encoding is reconstructed into the
-    full four-token ``["-Xclang", "<flag>", "-Xclang", "<value>"]`` form --
-    a bare, unwrapped ``-target-abi aapcs`` is not valid
-    on a normal ``clang`` driver invocation (rejected with "unknown
-    argument"), so replaying the wrapped survivor without its ``-Xclang``
-    forwarding would produce an invalid command.
-
-    **Shared, not per-consumer** (P2 review, "Decode normalized cc1 flags in
-    every replay path", fresh evidence): this decode was originally
-    L2-header-path-specific, living only in ``header_compile_context.
-    _split_operand_survivor``. The identical normalized encoding also flows
-    through L4 source replay (:func:`replay_extra_flags` /
-    :func:`_carry_abi_relevant_flags` below), which used to read the raw
-    ``abi_relevant_flags`` survivors verbatim -- so a TU whose real build
-    recorded a ``-Xclang``-wrapped ``-target-abi`` reached L4 replay as one
-    malformed argv token (``-Xclang -target-abi=aapcs``, not four real
-    tokens), and the bare-encoding sibling was separately dropped outright by
-    :data:`STRUCTURED_TOOLCHAIN_FLAG_PREFIXES` (it starts with ``-target``,
-    the same structured-field prefix that filter drops as redundant for the
-    *unrelated*, already-structured ``-target``/``--sysroot``/``-isysroot``
-    survivors). This single implementation is what both the L2
-    (``header_compile_context._split_operand_survivor``, a thin re-export)
-    and L4 (:func:`_carry_abi_relevant_flags`) consumers now share, instead
-    of drifting independently.
-
-    **Both the bare and the ``-Xclang``-wrapped internal encodings decode to
-    the SAME ``-Xclang``-wrapped output (P2 review, "Forward bare cc1 flags
-    through the replay driver", fresh evidence).** The two internal
-    encodings this function decodes record two different *original capture*
-    shapes -- the bare form (``<flag>=<value>``) is what
-    ``adapters.base.extract_abi_relevant_flags`` recorded for a direct
-    ``clang -cc1 -target-abi aapcs`` invocation (``-cc1`` mode accepts these
-    flags bare, no ``-Xclang`` wrapping needed), while the ``-Xclang
-    <flag>=<value>`` form is what it recorded when the *original* command
-    was already an ordinary-driver invocation forwarding the flag via
-    ``-Xclang`` on both sides. But every consumer of this function's return
-    value (:func:`~abicheck.buildsource.header_compile_context._context_flags`
-    for L2, :func:`_carry_abi_relevant_flags` below for L4) replays through
-    an **ordinary Clang driver, never ``-cc1`` directly** -- confirmed
-    empirically: installed ``clang -cc1 --help`` documents bare
-    ``-target-abi <value>``, but ``clang -target-abi aapcs`` (the ordinary
-    driver) rejects it outright ("unknown argument '-target-abi'; did you
-    mean '-Xclang -target-abi'"), requiring the ``-Xclang``-wrapped
-    four-token form regardless of which shape the flag was originally
-    captured in. Reconstructing the bare two-token form for the
-    bare-encoding branch (the previous behavior) therefore produced a
-    command that fails against the replay driver even though the *decode*
-    itself was correct -- the reconstructed shape simply doesn't match the
-    shape the replay driver accepts. Both branches now converge on the same
-    ``-Xclang``-wrapped output, computed from whichever encoding matched
-    (the ``-Xclang `` marker is stripped first, if present, before parsing
-    ``name``/``value``, so the two branches share one reconstruction).
-    """
-    remainder = flag.removeprefix(_XCLANG_WRAPPED_ABI_FLAG_MARKER)
-    name, sep, value = remainder.partition("=")
-    if sep and name in SPLIT_OPERAND_ABI_FLAGS:
-        return ["-Xclang", name, "-Xclang", value]
-    return [flag]
-
-
-def is_split_operand_abi_flag_survivor(flag: str) -> bool:
-    """True when *flag* is one of :data:`SPLIT_OPERAND_ABI_FLAGS`'s own
-    normalized survivor encodings (P2 review, ``discussion_r3788...``
-    follow-up, fresh evidence).
-
-    ``adapters.base.extract_abi_relevant_flags`` normalizes a genuinely
-    split two-token flag like ``-target-abi <value>`` (and its
-    ``-Xclang``-wrapped real-world spelling, ``-Xclang -target-abi -Xclang
-    <value>``) into one internal ``<flag>=<value>``/``-Xclang
-    <flag>=<value>`` token -- see :data:`SPLIT_OPERAND_ABI_FLAGS`'s own
-    docstring for the full reasoning. Every one of these four flags
-    (``-target-abi``/``-target-cpu``/``-target-feature``/
-    ``-target-linker-version``) shares the ``-target`` prefix
-    ``adapters.base._TOOLCHAIN_PATH_FLAG_PREFIXES`` matches to drop a raw
-    ``-target``/``--sysroot``/``-isysroot`` survivor as fully redundant with
-    the structured ``target_triple``/``sysroot`` fields -- but unlike those,
-    none of these four is represented by any structured ``CompileUnit``
-    field at all, so dropping one silently discards real, independent
-    ABI-relevant information (a real regression this predicate exists to
-    prevent -- see ``adapters.base._add_generic_flag_option``'s own call
-    site, and :func:`_carry_abi_relevant_flags` below for the L4 sibling).
-    """
-    candidate = flag.removeprefix(_XCLANG_WRAPPED_ABI_FLAG_MARKER)
-    name, sep, _value = candidate.partition("=")
-    return sep != "" and name in SPLIT_OPERAND_ABI_FLAGS
-
-
 #: The forced-include option vocabulary and its two matchers now live in
 #: ``abicheck.header_utils`` (the leaf that already owns this codebase's
 #: include-flag vocabulary, and which both this module and
@@ -449,6 +250,7 @@ def is_split_operand_abi_flag_survivor(flag: str) -> bool:
 #: so the call sites below read unchanged.
 _match_gnu_forced_include = match_gnu_forced_include
 _match_msvc_forced_include = match_msvc_forced_include
+
 #: GNU include-search options that take a directory operand and are NOT
 #: normalized into the structured ``include_paths``/``system_include_paths``
 #: buckets (those cover ``-I``/``-isystem`` only). Dropping them makes the

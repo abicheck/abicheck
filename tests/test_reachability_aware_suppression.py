@@ -1546,34 +1546,9 @@ class TestLateDetectorSyntheticFindings:
     construction doesn't set public_reachable, a broad suppression rule
     silently hides it with no diagnostic, since it defaults to False."""
 
-    def test_experimental_removed_without_replacement_survives_broad_suppression(
-        self,
-    ) -> None:
-        old = _snap(functions=[_public_fn("lib::experimental::foo", "int")])
-        new = _snap(functions=[])
-        suppression = SuppressionList(
-            [Suppression(namespace="lib::experimental::*", reason="experimental churn")]
-        )
-        ctx = _dispose([], old, new, suppression)
-        found = [
-            c
-            for c in ctx.kept
-            if c.kind == ChangeKind.EXPERIMENTAL_REMOVED_WITHOUT_REPLACEMENT
-        ]
-        assert len(found) == 1
-        assert found[0].public_reachable is True
-        assert found[0] not in ctx.suppressed
-        # Codex review (fresh evidence): DetectNamespacePatterns now routes
-        # its late findings through the same evaluate()-based helper
-        # ApplySuppression uses, so the matched-but-withheld broad rule
-        # produces the same diagnostic here too.
-        diag = [
-            c
-            for c in ctx.kept
-            if c.kind == ChangeKind.SUPPRESSION_WOULD_HIDE_PUBLIC_BREAK
-        ]
-        assert len(diag) == 1
-        assert "lib::experimental::foo" in diag[0].symbol
+    # The EXPERIMENTAL_REMOVED_WITHOUT_REPLACEMENT case lives in
+    # test_binary_gated_reachability_tags.py: since ADR-084 its tag needs
+    # header evidence, which that file owns.
 
     def test_cpo_kind_changed_survives_broad_suppression(self) -> None:
         """Codex review: DetectTemplatePatterns's CPO_KIND_CHANGED (a

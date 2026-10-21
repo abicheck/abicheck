@@ -3,7 +3,7 @@
 
 A change to a class's virtual-method set, order, or inheritance reshapes its vtable, VTT, or dispatch thunks -- silent misdispatch or a crash, not a link error.
 
-_13 case(s)._ [← back to all subjects](index.md)
+_15 case(s)._ [← back to all subjects](index.md)
 
 ## Cases
 
@@ -22,3 +22,5 @@ _13 case(s)._ [← back to all subjects](index.md)
 | [case174_secondary_vtable_group_changed](../case174_secondary_vtable_group_changed.md) | Secondary Vtable Group Changed | 🔴 BREAKING | Breaking |
 | [case185_inherited_override_reuses_slot](../case185_inherited_override_reuses_slot.md) | Inherited override reuses the base's vtable slot | 🟢 COMPATIBLE | Addition (Compatible) |
 | [case203_class_gained_vtable_pointer](../case203_class_gained_vtable_pointer.md) | Class Gained a Vtable Pointer | 🔴 BREAKING | Breaking |
+| [case219_public_virtual_dispatch_set_changed](../case219_public_virtual_dispatch_set_changed.md) | Public Virtual Method's Override Set Changes | 🟡 COMPATIBLE_WITH_RISK | Risk |
+| [case220_public_virtual_dispatch_set_reordered](../case220_public_virtual_dispatch_set_reordered.md) | Public Virtual Method's Override Set Reordered | ✅ NO_CHANGE | No Change |
