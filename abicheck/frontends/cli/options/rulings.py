@@ -330,12 +330,6 @@ COMPARE_OPTION_RULINGS: dict[str, OptionRuling] = {
         "so it is trusted to supply records, which a discovered .abicheck.yml "
         "is not."
     ),
-    "--fail-on-unused-rules": _keep(
-        "A per-run operand that only tightens: it escalates the policy file's "
-        "unused_rules setting to block for this invocation and can never relax "
-        "it. The durable spelling is unused_rules: block in the policy document; "
-        "the flag exists so a CI job can fail an unused rule without editing it."
-    ),
     "--suppress": _keep(
         "Names this run's suppression document -- the same document-operand "
         "class as --policy, and the supported route for a finding a user "

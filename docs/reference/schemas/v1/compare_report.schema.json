@@ -2175,7 +2175,7 @@
         "unused_rules_contribution": {
           "type": "integer",
           "enum": [0, 1],
-          "description": "schema 6.3 (ADR-067 P1): the unused-rules floor -- 1 when the resolved `unused_rules` policy is `block` (or `--fail-on-unused-rules` is given) and at least one configured suppression, reclassify or acknowledgment rule has status `unused`, else 0. A 0/1 fold participant: it raises a clean exit to 1 and never lowers a 2/4."
+          "description": "schema 6.3 (ADR-067 P1): the unused-rules floor -- 1 when the resolved `unused_rules` policy is `block` and at least one configured suppression, reclassify or acknowledgment rule has status `unused`, else 0. A 0/1 fold participant: it raises a clean exit to 1 and never lowers a 2/4."
         }
       },
       "$comment": "exit_decision.resolve_compare_exit_decision (and, on scan --against's promotion path, exit_decision.resolve_exit_decision) is what builds this object; cli._exit_with_severity_or_verdict resolves the identical ExitDecision for compare's own real process exit, so the two cannot disagree."
@@ -2248,7 +2248,7 @@
         },
         "policy.unused_rules": {
           "type": "string",
-          "description": "Schema 6.3 (ADR-067 P1): present only when the effective `unused_rules` mode is `warn` or `block` (or `--fail-on-unused-rules` was given). Not a required key; its absence means `allow`, so every default run's digest is unchanged."
+          "description": "Schema 6.3 (ADR-067 P1): present only when the effective `unused_rules` mode is `warn` or `block`. Not a required key; its absence means `allow`, so every default run's digest is unchanged."
         },
         "policy.frozen_namespaces": {
           "type": "string"

@@ -352,9 +352,8 @@ deferred-option followup) -- see `docs/reference/github-action-inputs.md`.
 
 A policy file's top-level `unused_rules:` key (`allow`, `warn` or `block`;
 default `allow`) decides whether a configured suppression, `reclassify:` or
-acknowledgment rule that matched no finding fails the run. `compare` also takes
-`--fail-on-unused-rules`, which is `block` for that one invocation. The flag can
-only tighten: it never relaxes a policy file's `block`.
+acknowledgment rule that matched no finding fails the run. The policy key is the
+only way to set the gate: there is no command-line flag.
 
 - `allow` (default): nothing changes. The audit still lists every such rule,
   with status `unused`.
@@ -374,9 +373,12 @@ ELF-only comparison a stale symbol-kind rule therefore reads `unused` and
 statuses never trigger it either.
 
 For a directory/package release the gate is evaluated over the union of its
-members: a rule is unused only when every member that configures it left it
-unused, so a rule one library exercises is never flagged by another that does
-not. The strictest member mode applies.
+members. A member could evaluate a rule when the rule's status there is anything
+but `not_evaluated`. The release counts the rule as unused only when every member
+that could evaluate it left it unused, and at least one member could. A member
+that could not evaluate it is ignored, so a rule one library exercises is never
+flagged by another that could not check it. The release audit row folds the same
+way, so the gate and the row agree. The strictest member mode applies.
 
 The contribution appears as `exit.unused_rules_contribution` (`0` or `1`) and
 as the `unused_rules` reason. `disposition_audit.unused_rules_review` lists the

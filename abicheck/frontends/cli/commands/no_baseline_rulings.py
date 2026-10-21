@@ -220,11 +220,6 @@ _UNSUPPORTED_OPTIONS: dict[str, tuple[str, str]] = {
         "an acknowledgment accepts a change a comparison observed; a no-baseline "
         "audit compares nothing, so there is no change to accept",
     ),
-    "fail_on_unused_rules": (
-        "--fail-on-unused-rules",
-        "an unused rule is one that matched no change of a comparison; a "
-        "no-baseline audit compares nothing, so no rule can be tested",
-    ),
     "used_by_apps": (
         "--used-by",
         "consumer scoping answers 'does this change break a consumer', which "

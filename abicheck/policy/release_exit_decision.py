@@ -114,9 +114,12 @@ def release_unused_rules_contribution(
 ) -> int:
     """ADR-067 P1: the ``unused_rules`` gate across a release's members.
 
-    A rule counts as unused for the *release* only when every member that
-    configures it left it unused (the "unused in every comparison" rule), so a
-    rule one leg exercises is never flagged because another leg did not. The
+    A rule is unused for the *release* when every member that could evaluate it
+    left it unused, and at least one member could. A member could evaluate a
+    rule when its status is anything but ``not_evaluated`` (its
+    ``evaluable_rule_keys``); a member that could not evaluate it is ignored.
+    This is the rule :func:`~abicheck.report.disposition_audit.fold_rule_status`
+    applies to the release audit row, so the gate and the row always agree. The
     strictest member mode decides whether the gate is active at all.
     """
     from .unused_rules_gate import strictest_mode
@@ -137,12 +140,20 @@ def release_unused_rules_contribution(
         for entry in library_results
         if isinstance(entry, dict) and "configured_rule_keys" in entry
     ]
+
+    def _evaluable(entry: dict[str, object]) -> set[str]:
+        # A member written before this key existed: every configured rule
+        # counts as evaluable, which is the old all-members rule.
+        if "evaluable_rule_keys" in entry:
+            return _keys(entry, "evaluable_rule_keys")
+        return _keys(entry, "configured_rule_keys")
+
     configured: set[str] = set()
     for entry in carriers:
         configured |= _keys(entry, "configured_rule_keys")
     for key in configured:
-        holding = [e for e in carriers if key in _keys(e, "configured_rule_keys")]
-        if holding and all(key in _keys(e, "unused_rule_keys") for e in holding):
+        evaluating = [e for e in carriers if key in _evaluable(e)]
+        if evaluating and all(key in _keys(e, "unused_rule_keys") for e in evaluating):
             return 1
     return 0
 

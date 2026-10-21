@@ -507,6 +507,50 @@ def test_release_fold_ignores_members_that_could_not_evaluate(
     assert fold_rule_status(member_statuses) == released
 
 
+_FOLD_TABLE: tuple[tuple[tuple[str, ...], str], ...] = (
+    ((STATUS_UNUSED, STATUS_NOT_EVALUATED), STATUS_UNUSED),
+    ((STATUS_NOT_EVALUATED, STATUS_NOT_EVALUATED), STATUS_NOT_EVALUATED),
+    ((STATUS_ACTIVE, STATUS_NOT_EVALUATED), STATUS_ACTIVE),
+    ((STATUS_UNUSED, STATUS_ACTIVE), STATUS_ACTIVE),
+    ((STATUS_UNUSED, STATUS_UNUSED), STATUS_UNUSED),
+    ((STATUS_UNUSED, STATUS_SHADOWED_ONLY), STATUS_SHADOWED_ONLY),
+    ((STATUS_UNUSED, STATUS_EXPIRED), STATUS_EXPIRED),
+    ((STATUS_EXPIRED, STATUS_NOT_EVALUATED), STATUS_EXPIRED),
+    ((STATUS_SHADOWED_ONLY, STATUS_NOT_EVALUATED), STATUS_SHADOWED_ONLY),
+)
+
+
+@pytest.mark.parametrize(("member_statuses", "released"), _FOLD_TABLE)
+def test_release_gate_and_release_row_agree_on_every_member_mix(
+    member_statuses: tuple[str, ...], released: str
+) -> None:
+    """The exit contribution and the folded audit row read the same members.
+
+    Each member is stamped the way ``member_compare`` stamps it: a configured
+    rule, its evaluable key unless ``not_evaluated``, its unused key when
+    ``unused``. The gate contributes ``1`` exactly when the row folds to
+    ``unused``.
+    """
+    from abicheck.policy.release_exit_decision import release_unused_rules_contribution
+
+    key = "suppression|shared.yml|0"
+    members = []
+    for status in member_statuses:
+        entry: dict[str, object] = {
+            "unused_rules_mode": "block",
+            "configured_rule_keys": [key],
+            "evaluable_rule_keys": [] if status == STATUS_NOT_EVALUATED else [key],
+            "unused_rule_keys": [key] if status == STATUS_UNUSED else [],
+        }
+        members.append(entry)
+    contribution = release_unused_rules_contribution(members)
+    assert contribution == (1 if released == STATUS_UNUSED else 0)
+    assert fold_rule_status(member_statuses) == released
+    assert contribution == (
+        1 if fold_rule_status(member_statuses) == STATUS_UNUSED else 0
+    )
+
+
 def test_release_fold_rows_read_an_unevaluated_member_as_no_evidence() -> None:
     """One library could evaluate the rule and left it unused; the other
     refused the detector that produces it. The release row is unused, and the
@@ -585,19 +629,18 @@ def test_the_exit_fold_never_lowers_a_real_failure() -> None:
     assert clean.reasons == (ExitReason.UNUSED_RULES,)
 
 
-def test_the_cli_flag_escalates_allow_to_block_and_never_relaxes() -> None:
-    from abicheck.model.unused_rules_flag import fail_on_unused_rules
+def test_the_policy_key_alone_sets_the_mode() -> None:
+    """The gate is set only by ``unused_rules:`` in the policy document; the
+    former ``--fail-on-unused-rules`` flag is gone, so no run escalates."""
     from abicheck.policy.unused_rules_gate import resolve_unused_rules_mode
 
-    result = _gated("allow", [_rule(("symbol", _NOPE))])
-    assert resolve_unused_rules_mode(result) == "allow"
-    with fail_on_unused_rules(True):
-        assert resolve_unused_rules_mode(result) == "block"
-    with fail_on_unused_rules(False):
-        assert resolve_unused_rules_mode(result) == "allow"
-    blocked = _gated("block", [_rule(("symbol", _NOPE))])
-    with fail_on_unused_rules(False):
-        assert resolve_unused_rules_mode(blocked) == "block"
+    rules = [_rule(("symbol", _NOPE))]
+    assert resolve_unused_rules_mode(_gated("allow", rules)) == "allow"
+    assert resolve_unused_rules_mode(_gated("warn", rules)) == "warn"
+    assert resolve_unused_rules_mode(_gated("block", rules)) == "block"
+    # No policy document at all: nothing to escalate, so the mode is allow.
+    no_policy, _ = _scenario((), rules)
+    assert resolve_unused_rules_mode(no_policy) == "allow"
 
 
 def test_the_release_fold_counts_a_rule_unused_only_when_every_member_left_it_unused() -> (

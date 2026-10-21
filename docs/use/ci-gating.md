@@ -180,7 +180,7 @@ Full matrix, including app/plugin-scoped comparisons (`compare --used-by`/
   either scheme. Guard the waiver list itself with `suppression.strict: true`
   (fails on **expired** rules) and `suppression.require_justification: true`.
   To fail on rules that match nothing, set the policy file's
-  `unused_rules: block` (or pass `--fail-on-unused-rules`); see
+  `unused_rules: block`; see
   [the unused-rules axis](../reference/exit-codes.md#the-unused-rules-axis).
 - **Baselines → everything.** All of the above only gates what changed
   *relative to the baseline you chose*. Compare against the last release (not

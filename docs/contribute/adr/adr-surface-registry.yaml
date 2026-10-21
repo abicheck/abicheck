@@ -572,7 +572,6 @@ adrs:
     use_cases: [UC-WF-compare]
     surfaces:
       - cli: compare --suppress
-      - cli: compare --fail-on-unused-rules
       - cli: compare --acknowledgments
       - action: acknowledgments
       - report: compare_report.disposition_audit

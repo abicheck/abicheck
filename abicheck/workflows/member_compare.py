@@ -173,7 +173,7 @@ def _unused_rule_keys_for_release(result: Any) -> dict[str, object]:
     """
     from ..policy.disposition_close import ledger_for
     from ..policy.disposition_rules import configured_rule_rows
-    from ..policy.rule_inventory import STATUS_UNUSED
+    from ..policy.rule_inventory import STATUS_NOT_EVALUATED, STATUS_UNUSED
     from ..policy.unused_rules_gate import resolve_unused_rules_mode
 
     mode = resolve_unused_rules_mode(result)
@@ -183,6 +183,10 @@ def _unused_rule_keys_for_release(result: Any) -> dict[str, object]:
     if mode == "block":
         rows = configured_rule_rows(result, ledger=ledger_for(result))
         stamped["configured_rule_keys"] = [row.ref.key() for row in rows]
+        # A member that could evaluate a rule (any status but not_evaluated).
+        stamped["evaluable_rule_keys"] = [
+            row.ref.key() for row in rows if row.status != STATUS_NOT_EVALUATED
+        ]
         stamped["unused_rule_keys"] = [
             row.ref.key() for row in rows if row.status == STATUS_UNUSED
         ]

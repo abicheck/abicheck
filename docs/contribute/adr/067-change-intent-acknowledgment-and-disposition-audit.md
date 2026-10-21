@@ -523,16 +523,19 @@ as `unused`, and a DWARF-only kind as `not_evaluated`.
 
 **The `unused_rules` gate (D6's pattern).** A top-level policy key
 `unused_rules: allow|warn|block` (default `allow`, so no existing run changes)
-and the CLI flag `--fail-on-unused-rules`, which is `block` for one invocation
-and can only tighten. `block` contributes `1` when at least one configured rule
-has status `unused`. It is a fourth `0`/`1` exit axis folded with `max`
+and no command-line flag (the former `--fail-on-unused-rules` was removed; the
+policy key is the only setting). `block` contributes `1` when at least one
+configured rule has status `unused`. It is a fourth `0`/`1` exit axis folded with `max`
 (`ExitDecision.unused_rules_contribution`, reason `unused_rules`), so it never
 lowers a `2`, `4`, `7`, `8` or `16`, and it never changes what was observed
 (`abicheck/policy/unused_rules_gate.py`). Only the `unused` status triggers it.
 A scalar `compare` evaluates its own rules. For a directory or package release
-the gate is evaluated over the union of members: a rule is unused only when
-every member that configures it left it unused, and the strictest member mode
-applies.
+the gate is evaluated over the union of members: a member could evaluate a rule
+when its status is anything but `not_evaluated`. A rule is unused for the release
+only when every member that could evaluate it left it unused, and at least one
+could. A member that could not evaluate it is ignored. The release audit row
+folds with the same rule (`fold_rule_status`), so the gate and the row agree. The
+strictest member mode applies.
 
 **Schema.** Report schema 6.3 (`abicheck/schemas/__init__.py`): the row fields
 above, `disposition_audit.unused_rules_review` and

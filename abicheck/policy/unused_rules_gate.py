@@ -28,8 +28,6 @@ gate (:mod:`abicheck.policy.acknowledgment_gate`, ADR-067 D6):
   rule has status ``unused``. Folded into the exit code with ``max()``, so it
   can raise a clean ``0`` to ``1`` and can never lower ``2``/``4``/...
 
-``--fail-on-unused-rules`` on the CLI is ``block`` (it can only tighten).
-
 Only status ``unused`` triggers. ``not_evaluated`` (a detector did not run),
 ``expired``, ``shadowed_only`` and ``active`` never do: each of those states
 says something other than "this rule was checked and matched nothing".
@@ -41,7 +39,6 @@ from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
-from ..model.unused_rules_flag import fail_on_unused_rules_requested
 from .rule_inventory import UNUSED_TRIGGER_STATUS, RuleAuditRow
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
@@ -60,14 +57,7 @@ def strictest_mode(modes: Iterable[str]) -> str:
 
 
 def effective_unused_rules_mode(policy_file: object | None) -> str:
-    """The mode a policy document sets, escalated by the CLI flag.
-
-    ``--fail-on-unused-rules`` (see :mod:`abicheck.model.unused_rules_flag`)
-    forces ``block``. It only tightens: the flag never relaxes a policy file's
-    ``block``.
-    """
-    if fail_on_unused_rules_requested():
-        return "block"
+    """The mode the policy document sets (``allow`` when it sets none)."""
     return str(getattr(policy_file, "unused_rules", None) or "allow")
 
 
@@ -75,7 +65,7 @@ def unused_rules_digest_field(policy_file: object | None) -> dict[str, str]:
     """``policy.unused_rules`` for the effective-config digest.
 
     Present only when the mode is not ``allow``, so every run that never opted
-    in keeps its digest. The CLI flag counts too: it changes the exit code.
+    in keeps its digest.
     """
     mode = effective_unused_rules_mode(policy_file)
     return {} if mode == "allow" else {"policy.unused_rules": mode}

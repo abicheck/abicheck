@@ -129,11 +129,34 @@ def test_the_dwarf_rule_beside_the_symbol_rule_is_not_evaluated_and_the_gate_is_
     assert [row["entry_index"] for row in unused] == [0]
 
 
-def test_the_command_line_flag_blocks_the_symbol_rule_without_a_policy_key(
+def test_without_the_policy_key_the_stale_rule_is_reported_but_never_blocks(
     tmp_path: Path,
 ) -> None:
+    """The gate is the policy key alone: ``allow`` (the default) lists the row
+    as unused and leaves the exit code where it was."""
     old, new = _build(tmp_path)
     policy = _policy(tmp_path, _SYMBOL_RULE, block=False)
-    code, report = _run(tmp_path, old, new, policy, "--fail-on-unused-rules")
-    assert code == 1
+    code, report = _run(tmp_path, old, new, policy)
+    assert code == 0
     assert _rows_by_index(report)[0]["status"] == "unused"
+
+
+def test_the_removed_fail_on_unused_rules_flag_is_rejected(tmp_path: Path) -> None:
+    old, new = _build(tmp_path)
+    policy = _policy(tmp_path, _SYMBOL_RULE, block=False)
+    out = tmp_path / "report.json"
+    result = CliRunner().invoke(
+        main,
+        [
+            "compare",
+            str(old),
+            str(new),
+            "--policy",
+            str(policy),
+            "--fail-on-unused-rules",
+            "-o",
+            f"json={out}",
+        ],
+    )
+    assert result.exit_code != 0
+    assert not out.exists()
