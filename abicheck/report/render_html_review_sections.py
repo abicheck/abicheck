@@ -4,7 +4,7 @@
 """HTML projections for the versioning-policy and consumer-impact sections.
 
 Both take the JSON-shaped mapping the compute half already produced
-(``PolicyAcceptance.to_dict()`` and ``UseCaseImpact.to_dict()``, the same
+(``PolicyAcceptance.to_dict()`` and ``use_case_impact_to_dict()``, the same
 values the JSON report carries) and only format it. ``None`` renders
 nothing: a section the run never evaluated is absent, not empty.
 """

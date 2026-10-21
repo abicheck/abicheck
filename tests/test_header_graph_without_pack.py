@@ -265,13 +265,13 @@ class TestSurfaceGraphFollowsL5Scope:
 @pytest.mark.parametrize("shape", _GRAPH_SHAPES)
 class TestConsumersReadBothShapesAlike:
     """The consumers that reached the graph *off* the pack rather than through
-    `resolve_l5_source_graph` -- `--use-cases` (`impact.use_case_impact`) and
+    `resolve_l5_source_graph` -- `--use-cases` (`report.use_case_impact_render`) and
     analysis assurance -- must see the same graph and coverage from either
     shape. The first version of this change missed both, and only the
     composite Action's `--use-cases` job caught it."""
 
     def test_use_case_impact_finds_the_graph(self, shape: dict) -> None:
-        from abicheck.impact.use_case_impact import _source_graph
+        from abicheck.policy.use_case_attribution import _source_graph
 
         old = _source_graph(_retired_shape(_graph(**shape)))
         new = _source_graph(_current_shape(_graph(**shape)))

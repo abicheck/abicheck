@@ -58,7 +58,6 @@ from .checker import (
     LibraryMetadata,
     Verdict,
 )
-from .impact.use_case_impact import use_cases_by_finding_for as use_cases_by_finding_for
 from .model.change_catalog.kinds import HasKind
 from .model.contract_finding_relevance import is_evaluated
 from .model.evidence_status import EvidenceStatus
@@ -82,6 +81,7 @@ from .report.render_markdown import (
     _format_change_md as _format_change_md,
     _format_change_md_oneline as _format_change_md_oneline,
 )
+from .report.use_case_impact_render import use_cases_by_finding_for
 from .report_summary import build_summary
 from .semver import recommend_release_for_report
 
