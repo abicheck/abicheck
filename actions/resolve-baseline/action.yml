@@ -156,6 +156,34 @@ inputs:
       resolve_bundle's own docstring).
     required: false
     default: 'false'
+  verify-baseline-attestation:
+    description: >
+      'false' (default) -- no provenance check beyond expected-archive-digest.
+      'true' -- before anything is extracted, run `gh attestation verify` on
+      the baseline-set archive and fail closed (outcome ambiguous) unless a
+      GitHub artifact attestation from baseline-attestation-repo (and, when
+      set, baseline-attestation-signer-workflow) covers its exact bytes. The
+      producer creates that attestation with actions/stage-baseline's
+      attest: true. Needs the GitHub CLI on the runner (a missing gh fails
+      the step) and a token able to read attestations (GH_TOKEN /
+      github.token). Requires baseline-path to be an archive.
+    required: false
+    default: 'false'
+  baseline-attestation-repo:
+    description: >
+      owner/repo whose workflow must have attested the archive. Defaults to
+      the current repository. Only valid with verify-baseline-attestation: true.
+    required: false
+    default: ''
+  baseline-attestation-signer-workflow:
+    description: >
+      Optional workflow that must have signed the attestation, as
+      'owner/repo/.github/workflows/<file>.yml' (passed to gh attestation
+      verify --signer-workflow). Recommended: without it any workflow in
+      baseline-attestation-repo can produce an accepted attestation. Only
+      valid with verify-baseline-attestation: true.
+    required: false
+    default: ''
   stage-member-snapshots:
     description: >
       'false' (default) -- unchanged behavior. 'true' (kind: bundle only,
@@ -239,6 +267,9 @@ outputs:
       exist. Recorded whether or not expected-archive-digest was set, so a
       caller can pin the value it verified.
     value: ${{ steps.resolve.outputs.archive-digest }}
+  archive-attestation-verified:
+    description: "'true' when verify-baseline-attestation was 'true' and gh attestation verify accepted the archive, 'false' otherwise."
+    value: ${{ steps.resolve.outputs.archive-attestation-verified }}
   archive-digest-verified:
     description: "'true' when expected-archive-digest was set and the archive's bytes matched it, 'false' otherwise (not pinned, or no archive)."
     value: ${{ steps.resolve.outputs.archive-digest-verified }}
@@ -273,5 +304,9 @@ runs:
         INPUT_EXPECTED_ARCHIVE_DIGEST: ${{ inputs.expected-archive-digest }}
         INPUT_ALLOW_NEW_TARGET: ${{ inputs.allow-new-target }}
         INPUT_STAGE_MEMBER_SNAPSHOTS: ${{ inputs.stage-member-snapshots }}
+        INPUT_VERIFY_BASELINE_ATTESTATION: ${{ inputs.verify-baseline-attestation }}
+        INPUT_BASELINE_ATTESTATION_REPO: ${{ inputs.baseline-attestation-repo }}
+        INPUT_BASELINE_ATTESTATION_SIGNER_WORKFLOW: ${{ inputs.baseline-attestation-signer-workflow }}
+        GH_TOKEN: ${{ github.token }}
         ACTION_PATH: ${{ github.action_path }}
       run: bash "${{ github.action_path }}/run.sh"

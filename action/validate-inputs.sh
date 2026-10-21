@@ -536,6 +536,28 @@ if [[ -n "$_EXPECTED_ARCHIVE_DIGEST" ]]; then
   fi
 fi
 
+# verify-baseline-attestation (opt-in): `gh attestation verify` on the
+# downloaded baseline-set archive before extraction. Only a baseline-profile +
+# baseline-target selection fetches an archive, and the repo/signer inputs only
+# mean something when verification is on -- otherwise refused, never ignored.
+_VERIFY_ATTESTATION="${INPUT_VERIFY_BASELINE_ATTESTATION:-false}"
+case "$_VERIFY_ATTESTATION" in
+  true | false) ;;
+  *) _fail "verify-baseline-attestation '$_VERIFY_ATTESTATION' is not recognized. Use 'true' or 'false'." ;;
+esac
+if [[ "$_VERIFY_ATTESTATION" == "false" && ( -n "${INPUT_BASELINE_ATTESTATION_REPO:-}" || -n "${INPUT_BASELINE_ATTESTATION_SIGNER_WORKFLOW:-}" ) ]]; then
+  _fail "baseline-attestation-repo/baseline-attestation-signer-workflow are set but verify-baseline-attestation is 'false', so nothing would be verified. Set verify-baseline-attestation: true, or unset them."
+fi
+if [[ -n "${INPUT_BASELINE_ATTESTATION_REPO:-}" ]] && ! [[ "$INPUT_BASELINE_ATTESTATION_REPO" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]]; then
+  _fail "baseline-attestation-repo '$INPUT_BASELINE_ATTESTATION_REPO' is not an owner/repo name."
+fi
+if [[ -n "${INPUT_BASELINE_ATTESTATION_SIGNER_WORKFLOW:-}" ]] && ! [[ "$INPUT_BASELINE_ATTESTATION_SIGNER_WORKFLOW" =~ ^[^[:space:]]+/\.github/workflows/[^[:space:]/]+$ ]]; then
+  _fail "baseline-attestation-signer-workflow '$INPUT_BASELINE_ATTESTATION_SIGNER_WORKFLOW' is not a workflow path. Use 'owner/repo/.github/workflows/<file>.yml'."
+fi
+if [[ "$_VERIFY_ATTESTATION" == "true" && ( -z "${INPUT_BASELINE_PROFILE:-}" || -z "${INPUT_BASELINE_TARGET:-}" ) ]]; then
+  _fail "verify-baseline-attestation checks a release-contract baseline-set archive, which only baseline-profile and baseline-target select. Set both, or set verify-baseline-attestation: false."
+fi
+
 # public-header-dir: dump mode, and compare mode's audit-only (no-baseline)
 # shape only -- the CLI's own --public-header-dir flag exists on `dump`
 # only; a two-sided `compare` has no equivalent (its own -H already derives
