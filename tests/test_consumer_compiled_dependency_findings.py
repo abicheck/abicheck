@@ -211,8 +211,17 @@ def test_unresolved_reference_skips_its_body_but_not_the_others() -> None:
 
 
 def test_exact_reference_is_compared_like_a_call() -> None:
+    # The reference alone introduces SATURATE: no call edge to it exists.
     old = _graph([MUL])
-    new = _graph([MUL, SATURATE])
+    new = _graph([MUL])
+    new.nodes.append(
+        GraphNode(
+            id=SATURATE,
+            kind="source_decl",
+            label="demo::saturate()",
+            attrs={"visibility": "private_header"},
+        )
+    )
     new.edges.append(_reference(BODY, SATURATE, "exact"))
 
     findings = consumer_compiled_dependency_findings(old, new)
@@ -224,5 +233,30 @@ def test_reference_without_a_resolver_verdict_is_not_trusted() -> None:
     old = _graph([MUL])
     new = _graph([MUL])
     new.edges.append(_reference(BODY, SATURATE, None))
+
+    assert consumer_compiled_dependency_findings(old, new) == []
+
+
+def test_unresolvable_call_skips_its_body() -> None:
+    # A call through a function-pointer parameter has the parameter name as its
+    # destination; a rename changes that name, so the body cannot be compared.
+    old = _graph([MUL])
+    new = _graph([MUL])
+    old.edges.append(
+        GraphEdge(
+            src=BODY,
+            dst="param_a",
+            kind="DECL_CALLS_DECL",
+            attrs={"resolution": "unknown"},
+        )
+    )
+    new.edges.append(
+        GraphEdge(
+            src=BODY,
+            dst="param_b",
+            kind="DECL_CALLS_DECL",
+            attrs={"resolution": "unknown"},
+        )
+    )
 
     assert consumer_compiled_dependency_findings(old, new) == []

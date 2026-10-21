@@ -74,6 +74,10 @@ _DEPENDENCY_KINDS = frozenset({_CALLS, _REFERENCES})
 #: buildsource).
 _EXACT = "exact"
 
+#: The resolution an unresolvable call carries; mirrors
+#: ``buildsource.call_graph.RESOLUTION_UNKNOWN``.
+_UNKNOWN_CALL = "unknown"
+
 #: The boundary a finding is attributed to. Header-only evidence, so not L5.
 _BOUNDARY = "[L2_HEADER_GRAPH]"
 
@@ -110,7 +114,7 @@ def _compiled_dependencies(graph: SourceGraphSummary) -> dict[str, frozenset[str
         if e.kind not in _DEPENDENCY_KINDS:
             continue
         src = graph.resolve_node_id(e.src)
-        if e.kind == _REFERENCES and not _exact_reference(e):
+        if not _trusted_edge(e):
             uncertain.add(src)
             continue
         dependencies.setdefault(src, set()).add(graph.resolve_node_id(e.dst))
@@ -122,14 +126,19 @@ def _compiled_dependencies(graph: SourceGraphSummary) -> dict[str, frozenset[str
     }
 
 
-def _exact_reference(edge: GraphEdge) -> bool:
-    """Whether a ``DECL_REFERENCES_DECL`` edge names its target exactly.
+def _trusted_edge(edge: GraphEdge) -> bool:
+    """Whether a dependency edge names its target well enough to compare.
 
-    The value is the header reference resolver's verdict, written as the
-    ``resolution`` attribute (``"exact"`` for a resolved declaration). A missing
-    verdict is not exact: the edge cannot prove its endpoint's identity.
+    A reference must be resolved exactly: the resolver's verdict is written as
+    the ``resolution`` attribute, and a missing verdict is not exact. A call is
+    trusted unless the call graph could not resolve it at all (``"unknown"``,
+    e.g. a call through a function-pointer parameter, whose destination is the
+    parameter name and so changes with a rename).
     """
-    return edge.resolved.get("resolution", edge.attrs.get("resolution")) == _EXACT
+    resolution = edge.resolved.get("resolution", edge.attrs.get("resolution"))
+    if edge.kind == _REFERENCES:
+        return resolution == _EXACT
+    return resolution != _UNKNOWN_CALL
 
 
 def consumer_compiled_dependency_findings(
