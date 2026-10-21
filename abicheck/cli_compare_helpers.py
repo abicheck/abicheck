@@ -29,6 +29,7 @@ a direct ``checker.compare`` call (cli-contract, ADR-037 D10.1).
 from __future__ import annotations
 
 import math
+from contextlib import contextmanager
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -44,7 +45,6 @@ from .cli_compare_options import (
     _NormalizedCompareOptions,
     _param_from_cli,
     _reject_bundle_facts_out_for_single_pair,
-    _reject_debug_format_for_non_elf,
     _resolve_debug_roots,
     _warn_force_public_ignored,
     echo_coverage_warnings,
@@ -118,12 +118,21 @@ from .workflows.compare_configuration import (
     resolve_force_public_scope,
 )
 from .workflows.header_exclusion_audit import unmatched_exclusion_warning
+from .workflows.operand_rules import (
+    DebugFormatNotElfError,
+    ManifestOperandError,
+    reject_debug_format_for_non_elf,
+    reject_manifest_header_conflicts,
+    reject_manifest_non_elf,
+)
 from .workflows.ownership_request import project_ownership_scope
 from .workflows.public_header_boundary import (
     project_config_public_header_dirs,
 )
 
 if TYPE_CHECKING:
+    from collections.abc import Iterator
+
     from .model.consumer_spec import ConsumerAppInput
     from .workflows.compare_configuration import ResolvedCompareConfig
     from .workflows.extraction import DumpManifest
@@ -362,42 +371,23 @@ def _resolve_required_symbol_policy(
     return "plugin_abi", "--required-symbol", None, None
 
 
-def _reject_manifest_header_conflicts(
-    old_manifest_obj: Any,
-    new_manifest_obj: Any,
-    old_h: Any,
-    new_h: Any,
-) -> None:
-    """``--dump-manifest <side>=`` and that side's ``-H`` are mutually exclusive."""
-    for manifest, side_headers, side in (
-        (old_manifest_obj, old_h, "old"),
-        (new_manifest_obj, new_h, "new"),
-    ):
-        if manifest is not None and side_headers:
-            raise click.UsageError(
-                f"--dump-manifest {side}=... and a header for the {side} side "
-                "(-H/--header) are mutually exclusive -- declare the "
-                f"{side} side's public surface in the manifest's own base "
-                "profile instead."
-            )
+@contextmanager
+def _operand_rule_errors() -> Iterator[None]:
+    """Word a refused operand combination the way ``compare`` words its flags.
 
-
-def _reject_manifest_non_elf(
-    old_manifest_obj: Any,
-    new_manifest_obj: Any,
-    old_fmt: str | None,
-    new_fmt: str | None,
-) -> None:
-    """``--dump-manifest`` extraction is wired for ELF only (ADR-050 D3)."""
-    for manifest, fmt, side in (
-        (old_manifest_obj, old_fmt, "old"),
-        (new_manifest_obj, new_fmt, "new"),
-    ):
-        if manifest is not None and fmt != "elf":
-            raise click.UsageError(
-                f"--dump-manifest {side}=... requires the {side} input to be an "
-                f"ELF binary; got {fmt or 'a non-binary input'}."
-            )
+    The rules are decided in :mod:`abicheck.workflows.operand_rules`; this only
+    renders the typed refusal as the usage error (or ``.abicheck.yml`` key
+    message) this command has always printed.
+    """
+    try:
+        yield
+    except DebugFormatNotElfError as exc:
+        raise click.BadParameter(
+            f"debug.format: {exc.debug_format} (.abicheck.yml) is only supported "
+            f"for ELF binaries, but the {exc.side} input is {exc.binary_fmt.upper()}."
+        ) from exc
+    except ManifestOperandError as exc:
+        raise click.UsageError(str(exc)) from exc
 
 
 def _resolve_evaluation_config(
@@ -1398,7 +1388,10 @@ def run_compare(
         old_includes_only,
         new_includes_only,
     )
-    _reject_manifest_header_conflicts(old_manifest_obj, new_manifest_obj, old_h, new_h)
+    with _operand_rule_errors():
+        reject_manifest_header_conflicts(
+            old_manifest_obj, new_manifest_obj, old_h, new_h
+        )
     if config_includes:
         old_inc = list(old_inc) + list(config_includes)
         new_inc = list(new_inc) + list(config_includes)
@@ -1420,8 +1413,9 @@ def run_compare(
     # did not, and that alias table no longer exists.)
     old_input, old_fmt = cli_resolve._normalize_binary_input(old_input)
     new_input, new_fmt = cli_resolve._normalize_binary_input(new_input)
-    _reject_manifest_non_elf(old_manifest_obj, new_manifest_obj, old_fmt, new_fmt)
-    _reject_debug_format_for_non_elf(effective_debug_format, old_fmt, new_fmt)
+    with _operand_rule_errors():
+        reject_manifest_non_elf(old_manifest_obj, new_manifest_obj, old_fmt, new_fmt)
+        reject_debug_format_for_non_elf(effective_debug_format, old_fmt, new_fmt)
     _warn_ignored_flags(
         old_fmt is not None,
         new_fmt is not None,
