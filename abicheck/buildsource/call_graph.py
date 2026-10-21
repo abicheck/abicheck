@@ -37,7 +37,6 @@ This module is split so the hard part stays testable:
 from __future__ import annotations
 
 import logging
-import os
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Any
@@ -1105,28 +1104,22 @@ def _call_graph_jobs(n_units: int) -> int:
     """
     if n_units <= 1:
         return max(0, n_units)
-    cpu = os.cpu_count() or 1
-    cap = max(8, cpu * 2)
-    raw = os.environ.get("ABICHECK_CALL_GRAPH_JOBS", "").strip()
-    if raw:
-        try:
-            requested = int(raw)
-        except ValueError:
-            return 1
-        jobs = max(1, min(n_units, requested, cap))
-    else:
-        jobs = max(1, min(n_units, cpu, 8))
-    mem_cap = _call_graph_mem_cap()
-    if mem_cap is not None and mem_cap < jobs:
-        _log.info(
-            "L5 call-graph workers reduced %d -> %d to fit available memory; "
-            "set ABICHECK_CALL_GRAPH_JOBS / ABICHECK_L4_JOB_MEM_GIB to override, "
-            "or seed/scope the scan (--since/--changed-path) to fewer TUs.",
-            jobs,
-            mem_cap,
-        )
-        return mem_cap
-    return jobs
+    from ..process_resources import bounded_jobs
+    from .source_replay import _L4_JOB_MEM_BUDGET_GIB
+
+    jobs = bounded_jobs(
+        n_units,
+        jobs_env_var="ABICHECK_CALL_GRAPH_JOBS",
+        mem_budget_env_var="ABICHECK_L4_JOB_MEM_GIB",
+        mem_budget_default_gib=_L4_JOB_MEM_BUDGET_GIB,
+        ram_cap=_call_graph_mem_cap,
+        log=_log,
+        what="L5 call-graph workers",
+        ram_hint="seed/scope the scan (--since/--changed-path) to fewer TUs",
+    )
+    # An explicit override is also bounded by the unit count: a pool never
+    # gets more workers than it has units to run.
+    return min(n_units, jobs)
 
 
 def merge_call_edges(per_unit: Iterable[Iterable[CallEdge]]) -> list[CallEdge]:

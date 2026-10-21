@@ -69,7 +69,7 @@
     },
     {
       "path": "abicheck/buildsource/call_graph.py",
-      "baseline_lines": 1144,
+      "baseline_lines": 1137,
       "target": "extract/build-or-source",
       "rule": "no_growth",
       "disposition": "migrate",
@@ -267,7 +267,7 @@
     },
     {
       "path": "abicheck/buildsource/source_replay.py",
-      "baseline_lines": 1236,
+      "baseline_lines": 1204,
       "target": "extract/build-or-source",
       "rule": "no_growth",
       "disposition": "migrate",
