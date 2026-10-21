@@ -28,7 +28,7 @@ from abicheck.model import AbiSnapshot, Function, RecordType, Visibility
 from abicheck.model.change import Change
 from abicheck.model.change_catalog.kinds import ChangeKind
 from abicheck.model.change_catalog.registry import Verdict
-from abicheck.model.evidence_status import ReachabilityState
+from abicheck.model.evidence_status import EvidenceStatus, ReachabilityState
 from abicheck.model.fact import Fact
 from abicheck.model.source_contract_evidence import (
     has_observed_source_contract_evidence,
@@ -42,6 +42,7 @@ from abicheck.policy.binary_gated_contract import (
     OUT_OF_AXIS_REASONS,
     demote_unproven_binary_api_breaks,
 )
+from abicheck.policy.classification import evidence_status_for_result
 
 SUBJECT = "lib::subject"
 SUBJECT_MANGLED = "_ZN3lib7subjectEv"
@@ -228,6 +229,26 @@ def test_unbacked_subject_is_demoted_even_when_another_declaration_is_backed() -
     assert finding.effective_verdict == Verdict.COMPATIBLE_WITH_RISK
 
 
+def test_a_header_observed_contract_without_an_export_keeps_the_api_break() -> None:
+    """The converse of the export-only case: an observed (a) needs no export."""
+    unexported = Function(
+        name=SUBJECT,
+        mangled=SUBJECT_MANGLED,
+        return_type="void",
+        params=[],
+        visibility=Visibility.PUBLIC,
+        declared_in_headers_fact=Fact.present(True, producer="castxml"),
+        binary_exported_fact=Fact.present(False, producer="elf"),
+    )
+    old = _snapshot(unexported, from_headers=True)
+    new = _snapshot(unexported, from_headers=True)
+
+    result = compare(old, new, extra_changes=[_claim(ChangeKind.TYPE_REMOVED)])
+
+    assert _finding(result, ChangeKind.TYPE_REMOVED).effective_verdict is None
+    assert result.verdict == Verdict.API_BREAK
+
+
 def test_an_unresolved_subject_in_a_header_run_is_not_demoted() -> None:
     """A spelling the index cannot match is not proof that nothing was observed.
 
@@ -248,6 +269,60 @@ def test_an_unresolved_subject_in_a_header_run_is_not_demoted() -> None:
     finding = _finding(result, ChangeKind.MANDATORY_TEMPLATE_PARAM_ADDED)
     assert finding.effective_verdict is None
     assert result.verdict == Verdict.API_BREAK
+
+
+def _export_only_function(name: str, mangled: str) -> Function:
+    """Exported in the binary, and nothing else: no header or contract fact."""
+    return Function(
+        name=name,
+        mangled=mangled,
+        return_type="void",
+        params=[],
+        visibility=Visibility.PUBLIC,
+        binary_exported_fact=Fact.present(True, producer="elf"),
+    )
+
+
+@pytest.mark.parametrize("kind", _BINARY_GATED_SORTED, ids=lambda k: k.value)
+def test_a_binary_export_alone_does_not_keep_an_api_break(kind: ChangeKind) -> None:
+    """The export table says a consumer can link; it does not say the name was promised.
+
+    This pins the distinction ``is_abi_visible`` blurs: an exported symbol
+    with no (a) or (b) header observation must not satisfy the gate.
+    """
+    old = _snapshot(_export_only_function(SUBJECT, SUBJECT_MANGLED), from_headers=False)
+    new = _snapshot(_export_only_function(SUBJECT, SUBJECT_MANGLED), from_headers=False)
+
+    result = compare(old, new, extra_changes=[_claim(kind)])
+
+    assert _finding(result, kind).effective_verdict == Verdict.COMPATIBLE_WITH_RISK
+    assert result.verdict != Verdict.API_BREAK
+
+
+@pytest.mark.parametrize("kind", _BINARY_GATED_SORTED, ids=lambda k: k.value)
+def test_a_demoted_finding_reads_as_contextual_risk(kind: ChangeKind) -> None:
+    """The evidence label must not restate a source-contract claim the run could not back."""
+    old = _snapshot(_binary_only_function(SUBJECT, SUBJECT_MANGLED), from_headers=False)
+    new = _snapshot(_binary_only_function(SUBJECT, SUBJECT_MANGLED), from_headers=False)
+
+    result = compare(old, new, extra_changes=[_claim(kind)])
+
+    finding = _finding(result, kind)
+    assert evidence_status_for_result(finding) is EvidenceStatus.CONTEXTUAL_RISK
+
+
+def test_a_header_backed_api_break_keeps_its_source_contract_label() -> None:
+    old = _snapshot(
+        _header_backed_function(SUBJECT, SUBJECT_MANGLED), from_headers=True
+    )
+    new = _snapshot(
+        _header_backed_function(SUBJECT, SUBJECT_MANGLED), from_headers=True
+    )
+
+    result = compare(old, new, extra_changes=[_claim(ChangeKind.TYPE_REMOVED)])
+
+    finding = _finding(result, ChangeKind.TYPE_REMOVED)
+    assert evidence_status_for_result(finding) is EvidenceStatus.SOURCE_CONTRACT
 
 
 def test_a_non_binary_kind_is_never_demoted() -> None:
@@ -417,12 +492,10 @@ def test_a_binary_only_template_arity_change_is_not_api_break() -> None:
 
 
 def test_a_binary_only_private_type_removal_is_not_api_break() -> None:
-    from abicheck.model.entities import RecordType as _RecordType
-
     old = AbiSnapshot(
         library="libdemo.so",
         version="1",
-        types=[_RecordType(name="lib::Helper", kind="class")],
+        types=[RecordType(name="lib::Helper", kind="class")],
         from_headers=False,
     )
     new = AbiSnapshot(library="libdemo.so", version="2", from_headers=False)

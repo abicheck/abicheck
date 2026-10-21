@@ -67,6 +67,7 @@ from ..model.evidence_status import (
     is_cross_source_persistent,
 )
 from ..model.execution_cache import memoized
+from .binary_gated_contract import is_binary_gate_demoted
 
 # ---------------------------------------------------------------------------
 # Classification sets — DERIVED from change_registry.py (single source of truth)
@@ -676,8 +677,12 @@ def evidence_status_for_result(
       of evidence quality — checking it there would misdowngrade every
       genuine PE/Mach-O removal.
 
-    Both gaps downgrade to :attr:`EvidenceStatus.UNATTRIBUTED`; every other
-    kind/tier/finding combination is unchanged from
+    Both gaps downgrade to :attr:`EvidenceStatus.UNATTRIBUTED`. A third,
+    ADR-084: a finding the binary-depth gate demoted to
+    ``COMPATIBLE_WITH_RISK`` (no observed header or source evidence for its
+    source-level claim) reads :attr:`EvidenceStatus.CONTEXTUAL_RISK`, not
+    ``SOURCE_CONTRACT``, so the label does not restate a claim the run could
+    not back. Every other kind/tier/finding combination is unchanged from
     :func:`evidence_status_for_change`.
 
     *evidence_tiers* defaults to ``()`` — the "unknown" case
@@ -686,6 +691,8 @@ def evidence_status_for_result(
     ``DiffResult.evidence_tiers`` through gets the exact same result as
     calling :func:`evidence_status_for_change` directly.
     """
+    if is_binary_gate_demoted(change):
+        return EvidenceStatus.CONTEXTUAL_RISK
     status = evidence_status_for_change(change)
     if status is not EvidenceStatus.ARTIFACT_PROVEN:
         return status

@@ -71,6 +71,7 @@ __all__ = [
     "OUT_OF_AXIS",
     "binary_gate_rule_provenance",
     "demote_unproven_binary_api_breaks",
+    "is_binary_gate_demoted",
 ]
 
 #: The rule id a demoted finding carries (``modulation_rule`` and the ADR-067
@@ -265,6 +266,11 @@ def demote_unproven_binary_api_breaks(
     return demoted
 
 
+def is_binary_gate_demoted(change: object) -> bool:
+    """Whether this gate demoted *change* (read off its rule id, not its verdict)."""
+    return getattr(change, "modulation_rule", None) == BINARY_GATE_RULE_ID
+
+
 def binary_gate_rule_provenance(change: object) -> RuleProvenance | None:
     """The ADR-067 rule a gate-demoted *change* rests on, or ``None``.
 
@@ -272,7 +278,7 @@ def binary_gate_rule_provenance(change: object) -> RuleProvenance | None:
     the rule and reason for every demotion the report shows as
     ``COMPATIBLE_WITH_RISK``.
     """
-    if getattr(change, "modulation_rule", None) != BINARY_GATE_RULE_ID:
+    if not is_binary_gate_demoted(change):
         return None
     return RuleProvenance(
         rule_id=BINARY_GATE_RULE_ID,

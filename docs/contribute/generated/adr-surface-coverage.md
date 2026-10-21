@@ -6,7 +6,7 @@ Which public surface reaches each ADR, which use cases it serves, and whether a 
 
 | Disposition | ADRs |
 |---|---|
-| surfaced | 45 |
+| surfaced | 46 |
 | partial | 14 |
 | gap | 6 |
 | internal | 20 |
@@ -96,6 +96,7 @@ Which public surface reaches each ADR, which use cases it serves, and whether a 
 | [ADR-077](../adr/077-exposure-modes-and-change-sensitive-propagation.md) | gap | — | — | Proposed, not yet implemented; no exposure-mode or sensitivity surface exists. |
 | [ADR-081](../adr/081-inline-fact-reliability-and-producer-generation.md) | partial | — | — | Implemented for the stale-load gate (inline family, detector decline, coverage via the assurance status). Not surfaced as a CLI or report option of its own. Conversion of Function.is_inline to a Fact[bool] is deferred (case (a) baseline). |
 | [ADR-083](../adr/083-closure-respelling-and-persistent-export-observations.md) | gap | — | — | Proposed, not yet implemented; D1 and D2 would change verdicts, exit codes and the cross-source report surface, pending acceptance. |
+| [ADR-084](../adr/084-binary-depth-source-contract-gate.md) | surfaced | UC-WF-compare | `report: compare_report.disposition_audit` | — |
 | [ADR-078](../adr/078-informational-severity-category.md) | surfaced | UC-WF-compare | `cli: compare --severity-preset`<br>`report: compare_report.summary`<br>`report: compare_report.severity` | — |
 | [ADR-079](../adr/079-partial-export-table-read-in-the-stored-snapshot.md) | gap | — | — | Proposed, not yet implemented; no per-platform export_read snapshot field exists. |
 | [ADR-080](../adr/080-persisting-the-advanced-dwarf-extraction-status.md) | gap | — | — | Proposed, not yet implemented; the advanced-DWARF extraction status is in memory only and is not persisted. |
@@ -228,6 +229,7 @@ Which public surface reaches each ADR, which use cases it serves, and whether a 
 - ADR-074 cli: dump --define
 - ADR-078 report: compare_report.severity
 - ADR-078 report: compare_report.summary
+- ADR-084 report: compare_report.disposition_audit
 
 ## cli+api+action use cases without a shared scenario family
 
