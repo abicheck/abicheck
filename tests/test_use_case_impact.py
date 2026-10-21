@@ -37,13 +37,23 @@ from abicheck.buildsource.source_graph import (
 )
 from abicheck.checker_policy import ChangeKind
 from abicheck.cli import main
-from abicheck.impact.use_case_impact import (
+from abicheck.impact.use_case_reachability import explain_use_case_impact
+from abicheck.model import AbiSnapshot
+from abicheck.model.change import Change
+from abicheck.policy.use_case_attribution import (
     UseCaseImpact,
     build_use_case_impact,
 )
-from abicheck.impact.use_cases import UseCaseDefinition, UseCaseResolution
-from abicheck.model import AbiSnapshot
-from abicheck.model.change import Change
+from abicheck.policy.use_cases import UseCaseDefinition, UseCaseResolution
+from abicheck.report.use_case_impact_render import (
+    render_use_case_impact_lines,
+    use_case_impact_to_dict,
+)
+
+
+def _build_impact(*args, **kwargs):
+    """``build_use_case_impact`` with the reachability port the CLI injects."""
+    return build_use_case_impact(*args, explain=explain_use_case_impact, **kwargs)
 
 
 def _graph(*entries: str) -> SourceGraphSummary:
@@ -98,7 +108,7 @@ class TestNoGraphAtAll:
         # None rather than an empty block: an emitted block would read as "no
         # use case is affected" for a run that never looked.
         assert (
-            build_use_case_impact(
+            _build_impact(
                 [UseCaseDefinition(use_case="uc", entrypoints=("train",))],
                 _snapshot(None, "1"),
                 _snapshot(None, "2"),
@@ -113,7 +123,7 @@ class TestAttributionUnionsBothSides:
     def test_a_new_side_only_symbol_is_still_attributed(self) -> None:
         """A symbol added on NEW never existed in OLD's graph, so attributing
         against OLD alone would read every addition as unattributed."""
-        impact = build_use_case_impact(
+        impact = _build_impact(
             [UseCaseDefinition(use_case="uc", entrypoints=("train", "predict"))],
             _snapshot(_graph("train"), "1"),
             _snapshot(_graph("train", "predict"), "2"),
@@ -131,7 +141,7 @@ class TestAttributionUnionsBothSides:
         assert impact.unattributed_changes == 0
 
     def test_a_symbol_no_entrypoint_reaches_is_counted_unattributed(self) -> None:
-        impact = build_use_case_impact(
+        impact = _build_impact(
             [UseCaseDefinition(use_case="uc", entrypoints=("train",))],
             _snapshot(_graph("train"), "1"),
             _snapshot(_graph("train"), "2"),
@@ -161,7 +171,7 @@ class TestResolutionsUnionBothSides:
         return only
 
     def test_a_new_side_only_entrypoint_is_not_reported_unresolved(self) -> None:
-        impact = build_use_case_impact(
+        impact = _build_impact(
             self._DEFS,
             _snapshot(_graph("train"), "1"),
             _snapshot(_graph("train", "predict"), "2"),
@@ -179,7 +189,7 @@ class TestResolutionsUnionBothSides:
 
     def test_an_old_side_only_entrypoint_is_not_reported_unresolved(self) -> None:
         # The mirror case: a removed entrypoint resolves only against OLD.
-        impact = build_use_case_impact(
+        impact = _build_impact(
             self._DEFS,
             _snapshot(_graph("train", "predict"), "1"),
             _snapshot(_graph("train"), "2"),
@@ -193,7 +203,7 @@ class TestResolutionsUnionBothSides:
     def test_only_the_new_side_has_a_graph(self) -> None:
         # The degenerate shape of the same bug: an OLD-only resolution left
         # `use_cases` empty while `by_use_case` was populated.
-        impact = build_use_case_impact(
+        impact = _build_impact(
             self._DEFS,
             _snapshot(None, "1"),
             _snapshot(_graph("train"), "2"),
@@ -209,7 +219,7 @@ class TestResolutionsUnionBothSides:
         # The mirror of the case above, and the one `_merge_resolutions`
         # short-circuits on: with no NEW-side resolutions there is nothing to
         # union, so OLD's answer stands rather than being discarded.
-        impact = build_use_case_impact(
+        impact = _build_impact(
             self._DEFS,
             _snapshot(_graph("train"), "1"),
             _snapshot(None, "2"),
@@ -222,7 +232,7 @@ class TestResolutionsUnionBothSides:
         assert impact is not None and impact.by_use_case["uc"]
 
     def test_an_entrypoint_neither_side_resolves_stays_unresolved(self) -> None:
-        impact = build_use_case_impact(
+        impact = _build_impact(
             [UseCaseDefinition(use_case="uc", entrypoints=("train", "ghost"))],
             _snapshot(_graph("train"), "1"),
             _snapshot(_graph("train"), "2"),
@@ -241,7 +251,7 @@ class TestResolutionsUnionBothSides:
                 use_case="uc", entrypoints=("zeta", "alpha", "ghost", "mid")
             )
         ]
-        impact = build_use_case_impact(
+        impact = _build_impact(
             defs,
             _snapshot(_graph("alpha"), "1"),
             _snapshot(_graph("zeta", "mid"), "2"),
@@ -255,7 +265,7 @@ class TestResolutionsUnionBothSides:
 
 class TestReportShape:
     def test_to_dict_carries_both_halves(self) -> None:
-        impact = build_use_case_impact(
+        impact = _build_impact(
             [UseCaseDefinition(use_case="uc", entrypoints=("train",), tests=("t1",))],
             _snapshot(_graph("train"), "1"),
             _snapshot(_graph("train"), "2"),
@@ -263,7 +273,7 @@ class TestReportShape:
             manifest="uc.yaml",
         )
         assert impact is not None
-        d = impact.to_dict()
+        d = use_case_impact_to_dict(impact)
         assert d["manifest"] == "uc.yaml"
         assert d["use_case_count"] == 1
         assert d["total_changes"] == 1
@@ -516,7 +526,7 @@ class TestStatKeepsItsSummaryOnlyShape:
             changes=[_change("train")],
             verdict=Verdict.BREAKING,
         )
-        result.use_case_impact = build_use_case_impact(
+        result.use_case_impact = _build_impact(
             [UseCaseDefinition(use_case="uc", entrypoints=("train",))],
             _snapshot(_graph("train"), "1"),
             _snapshot(_graph("train"), "2"),
@@ -536,7 +546,7 @@ class TestRestrictedToTheDisplayedFindings:
 
     def _impact(self, changes: list[Change]) -> UseCaseImpact:
         graph = _graph("train", "predict")
-        impact = build_use_case_impact(
+        impact = _build_impact(
             self._DEFS,
             _snapshot(graph, "1"),
             _snapshot(graph, "2"),
@@ -616,7 +626,7 @@ class TestOneRowPerUseCaseNotPerManifestEntry:
 
     def _impact(self, definitions: list[UseCaseDefinition]) -> UseCaseImpact:
         graph = _graph("train", "predict")
-        impact = build_use_case_impact(
+        impact = _build_impact(
             definitions,
             _snapshot(graph, "1"),
             _snapshot(graph, "2"),
@@ -660,8 +670,6 @@ class TestOneRowPerUseCaseNotPerManifestEntry:
         assert [r.use_case for r in impact.resolutions] == ["training", "serving"]
 
     def test_the_rendered_section_does_not_repeat_the_use_case(self) -> None:
-        from abicheck.impact.use_case_impact import render_use_case_impact_lines
-
         lines = render_use_case_impact_lines(self._impact(self._SPLIT))
         assert sum(1 for line in lines if "training:" in line) == 1, lines
 

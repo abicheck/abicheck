@@ -1084,7 +1084,7 @@ RETIRED_SURFACES: tuple[tuple[str, tuple[str, ...], frozenset[str]], ...] = (
         " plans/dead-code-and-single-owner.md Stage C: abicheck.product_baseline"
         " (directory/package `compare` plus --bundle-facts-out cover a whole"
         " product), bundle_side_input's live/stored resolution layer,"
-        " bundle_multibuild, and impact.use_cases' graph build/join",
+        " bundle_multibuild, and policy.use_cases' graph build/join",
         (
             "pack_product_baseline",
             "unpack_product_baseline",
