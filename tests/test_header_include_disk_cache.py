@@ -9,6 +9,7 @@ unexpected one fails the test.
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
@@ -247,3 +248,137 @@ def test_a_new_file_in_the_includers_directory_invalidates_the_entry(
 
 def _extract_in(headers: list[Path], includes: list[str]):
     return ClangHeaderIncludeExtractor().extract([str(h) for h in headers], includes)
+
+
+# -- edge branches: each one is a cache miss or a skipped write, never an error ---
+
+_ORIGINAL_INCLUDE_CACHE_DIR = disk.include_cache_dir
+
+
+def test_the_default_cache_dir_is_the_include_backend_under_xdg_cache(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "xdg"))
+    assert _ORIGINAL_INCLUDE_CACHE_DIR() == tmp_path / "xdg" / "abi_check" / "include"
+
+
+def test_an_unreadable_path_has_no_digest(tmp_path: Path) -> None:
+    assert disk.file_digest(str(tmp_path / "missing.h")) is None
+    assert disk.file_digest(str(tmp_path)) is None  # a directory, not a file
+
+
+def test_a_missing_directory_is_witnessed_as_missing(tmp_path: Path) -> None:
+    assert disk._dir_mtime(str(tmp_path / "absent")) == disk._MISSING_DIR
+
+
+def test_witness_skips_a_root_on_another_drive(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # On Windows a root on another drive makes commonpath raise; such a root
+    # cannot contain the file, so only the includer's own directory is witnessed.
+    def _other_drive(*_args: object) -> str:
+        raise ValueError("Paths don't have the same drive")
+
+    monkeypatch.setattr(disk.os.path, "commonpath", _other_drive)
+    witnessed = disk.include_witness_dirs(
+        [str(tmp_path / "sub" / "pub.h")], [str(tmp_path / "root")]
+    )
+    assert witnessed == [str(tmp_path / "sub")]
+
+
+@pytest.mark.parametrize(
+    "doc",
+    [
+        "not json",
+        {
+            "schema": "some-other-schema/9",
+            "key": "KEY",
+            "includes": [],
+            "files": [],
+            "dirs": [],
+        },
+        {"schema": disk.INCLUDE_CACHE_SCHEMA, "key": "KEY", "files": [], "dirs": []},
+    ],
+    ids=["unparseable", "foreign-schema", "missing-includes"],
+)
+def test_a_damaged_or_foreign_entry_is_a_miss(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, doc: object
+) -> None:
+    root = tmp_path / "cache"
+    root.mkdir()
+    monkeypatch.setattr(disk, "include_cache_dir", lambda: root)
+    text = doc if isinstance(doc, str) else json.dumps(doc).replace("KEY", "k1")
+    (root / "k1.json").write_text(text)
+    assert disk.load_cached_includes("k1") is None
+
+
+def test_a_closure_with_an_unreadable_file_is_not_stored(
+    tmp_path: Path, cache_root: Path
+) -> None:
+    disk.store_cached_includes("k2", [str(tmp_path / "gone.h")], [str(tmp_path)])
+    assert not (cache_root / "k2.json").exists()
+
+
+def test_a_failed_entry_write_does_not_fail_the_pass(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    header = tmp_path / "h.h"
+    header.write_text("void f();\n")
+    blocker = tmp_path / "not-a-dir"
+    blocker.write_text("")  # a file where the cache directory should be
+    monkeypatch.setattr(disk, "include_cache_dir", lambda: blocker)
+    # Must not raise: the cache is an optimisation, never a dependency.
+    disk.store_cached_includes("k3", [str(header)], [str(tmp_path)])
+    assert disk.load_cached_includes("k3") is None
+
+
+def test_an_unreadable_header_is_probed_and_never_cached(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, cache_root: Path
+) -> None:
+    from abicheck.buildsource.build_evidence import CompileUnit
+
+    missing = tmp_path / "gone.h"
+    unit = CompileUnit(
+        id=header_node_id(str(missing)),
+        source=str(missing),
+        argv=["-I" + str(tmp_path), str(missing)],
+        language="CXX",
+    )
+    monkeypatch.setattr(ig.shutil, "which", lambda _b: "/usr/bin/clang++")
+    runner = (
+        StrictProcessRunner()
+        .expect(argv_contains=[str(missing)], returns=proc(stdout=f"gone.o: {missing}"))
+        .install(monkeypatch, igw.deadline, "run_bounded")
+    )
+
+    found, diags = disk.cached_include_pass(
+        [str(missing)],
+        [unit],
+        clang_bin="clang++",
+        language="CXX",
+        search_dirs=[str(tmp_path)],
+    )
+
+    assert diags == []
+    assert found == {header_node_id(str(missing)): [str(missing)]}
+    assert list(cache_root.iterdir()) == []
+    runner.assert_exhausted()
+    runner.assert_call_count(1)
+
+
+def test_a_header_whose_own_path_cannot_be_resolved_keeps_its_closure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from pathlib import Path as _Path
+
+    from abicheck.buildsource.header_graph import _without_self
+
+    def _cannot_resolve(self: _Path, *_args: object, **_kwargs: object) -> _Path:
+        raise OSError("resolve failed")
+
+    monkeypatch.setattr(_Path, "resolve", _cannot_resolve)
+    header = str(tmp_path / "h.h")
+    other = str(tmp_path / "o.h")
+    # Neither side can be resolved, so no entry is recognised as the header's
+    # own and the closure is kept whole.
+    assert _without_self(header, [header, other]) == [header, other]
