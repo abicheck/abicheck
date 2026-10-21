@@ -206,3 +206,116 @@ def compatibility_config_from_compare_request(
         ),
         project=project,
     )
+
+
+#: The ``compare`` kwargs that feed the compatibility configuration. Named
+#: here so the caller forwards exactly the mapping
+#: ``compare_cli_inputs`` reads, and an option renamed on one side fails
+#: loudly on the other rather than resolving to "not stated".
+COMPARE_CONFIG_PARAMS: tuple[str, ...] = (
+    "contract_mode",
+    "policy",
+    "policy_file_path",
+    "suppress",
+    "require_justification",
+    "severity_preset",
+    "pack_paths",
+    # ADR-075 D7: the -H roots the snapshots were classified under.
+    "headers",
+)
+
+
+def typed_parameter_names() -> tuple[str, ...]:
+    """The parameters the caller must answer "was this typed?" for.
+
+    Read off the resolver's own
+    :data:`~abicheck.compatibility_evaluation_frontend.DEFAULTED_COMPARE_PARAMETERS`
+    rather than restated here: those are exactly the options whose click
+    default (``--policy strict_abi``) is
+    indistinguishable from a value the user chose, and a second copy of that
+    list is a second thing to keep in sync. Every other option already
+    spells "not given" as ``None``/``()``.
+    """
+    from ..compatibility_evaluation_frontend import DEFAULTED_COMPARE_PARAMETERS
+
+    return tuple(sorted(DEFAULTED_COMPARE_PARAMETERS))
+
+
+def _suppression_source(suppression: Any, path: Any) -> Any:
+    """The already-loaded ``--suppress`` list, as a resolver input.
+
+    Built from the list the run really used rather than re-reading *path*
+    (a second read could pair one content's digest with another's rules,
+    the trap :meth:`SuppressionSource.from_file` documents). A list with no
+    ``source_sha256`` still selected a source, so it is reported as one --
+    the same absent-vs-empty rule ``contract_context.
+    suppression_config_for`` follows."""
+    if suppression is None:
+        return None
+    return SuppressionSource(
+        path=str(path) if path is not None else None,
+        sha256=getattr(suppression, "source_sha256", None) or "",
+        rules=tuple(suppression.rule_identities()),
+    )
+
+
+def cli_configuration_inputs(
+    params: Mapping[str, Any],
+    *,
+    typed: Collection[str],
+    project_cfg: Any,
+    project_path: Path | None,
+    policy_file: Any = None,
+    suppression: Any = None,
+    suppress_path: Path | None = None,
+    policy_option: str | None = None,
+    policy_path: Path | None = None,
+    policy_sha256: str | None = None,
+    project_sha256: str | None = None,
+    symbols_list: Any = None,
+    project_overlays_applied: bool = False,
+) -> tuple[Any, Any]:
+    """This invocation's ``(explicit, project)`` resolver inputs.
+
+    *typed* names the parameters the user really typed (the CLI answers that
+    from Click's ``ParameterSource`` at its own call site and hands it over as
+    data -- the same stated-settings set a typed caller puts in
+    ``CompareRequest.stated_settings``).
+    *policy_option* names the flag that selected ``policy`` when it was not
+    ``--policy`` -- ``--required-symbol``, whose contract switches an
+    untouched ``--policy`` to ``plugin_abi``, with *policy_path*/
+    *policy_sha256* identifying the ``@FILE`` form's list file when used.
+    *project_sha256* is the digest of the ``.abicheck.yml`` bytes
+    *project_cfg* was parsed from, naming a revision, not only a path.
+    *project_overlays_applied*: this route applies the config's
+    ``contract.overlays`` (a single-pair compare under an explicit
+    ``--config``), so the receipt states them at ``project_config`` tier.
+    """
+    # The declared contract, enforced rather than only documented: every one
+    # of these keys is read below, and a caller that renamed or dropped one
+    # would have it resolve silently to "not stated" -- indistinguishable
+    # from a user who did not pass the flag (CodeRabbit review).
+    missing = [name for name in COMPARE_CONFIG_PARAMS if name not in params]
+    if missing:
+        raise KeyError(
+            f"compare config params missing {missing}; every name in "
+            "COMPARE_CONFIG_PARAMS must be forwarded, since an absent one "
+            "resolves as unstated rather than failing"
+        )
+    explicit = compare_cli_inputs(
+        params,
+        explicit_parameters=typed,
+        policy_file=policy_file,
+        suppression=_suppression_source(suppression, suppress_path),
+        policy_base_option=policy_option,
+        policy_base_path=str(policy_path) if policy_path is not None else None,
+        policy_base_sha256=policy_sha256,
+        public_symbols_list=symbols_list,
+    )
+    project = ProjectCompatibilityInputs.from_build_config(
+        project_cfg,
+        path=project_path,
+        sha256=project_sha256,
+        overlays_applied=project_overlays_applied,
+    )
+    return explicit, project
