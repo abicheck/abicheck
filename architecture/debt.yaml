@@ -1906,7 +1906,7 @@
     },
     {
       "path": "tests/test_source_extractors_clang.py",
-      "baseline_lines": 3486,
+      "baseline_lines": 3484,
       "target": "tests/unit-or-contract ownership matching production migration",
       "rule": "no_growth",
       "disposition": "migrate",
