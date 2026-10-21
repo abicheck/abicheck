@@ -568,7 +568,9 @@ def ledger_for(
     if isinstance(existing, DispositionLedger):
         if severity_config is not None:
             return existing.with_gate(result, severity_config, today=today)
-        return _with_refreshed_overlays(existing, result, today=today)
+        if getattr(getattr(result, "policy_file", None), "reclassify", None):
+            return _with_refreshed_overlays(existing, result, today=today)
+        return existing
     return finalize_ledger(DispositionLedger(), result, severity_config, today=today)
 
 
