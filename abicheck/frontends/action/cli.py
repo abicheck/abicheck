@@ -36,6 +36,11 @@ from pathlib import Path
 
 import click
 
+from ...workflows.baseline_archive import (
+    ARCHIVE_FORMATS,
+    BaselineArchiveError,
+    prepare_baseline_set,
+)
 from .cli_base import EXIT_REFUSED, _read_json, _write_json, action_cli
 from .report_publication import (
     DEFAULT_MAX_COMMENT_BYTES,
@@ -498,6 +503,67 @@ def flatten_pages_cmd(raw: Path, out: Path) -> None:
         else:
             pages.append(value)
     out.write_text(json.dumps(pages), encoding="utf-8")
+
+
+# ---------------------------------------------------------------------------
+# `prepare-baseline-set` -- verify a baseline-set archive, then extract it.
+# The one entry point the root Action (action/run.sh) and actions/resolve-
+# baseline call for their archive step; the verify-before-extract order and the
+# refusal vocabulary live in abicheck/workflows/baseline_archive.py.
+# ---------------------------------------------------------------------------
+
+
+@action_cli.command("prepare-baseline-set")
+@click.option(
+    "--archive",
+    required=True,
+    type=click.Path(dir_okay=False, path_type=Path),
+    help="The baseline-set archive file to verify and extract.",
+)
+@click.option(
+    "--dest",
+    required=True,
+    type=click.Path(file_okay=False, path_type=Path),
+    help="An existing, empty directory to extract into.",
+)
+@click.option(
+    "--format",
+    "archive_format",
+    required=True,
+    type=click.Choice(list(ARCHIVE_FORMATS)),
+    help="The archive's encoding, chosen by its own filename suffix.",
+)
+@click.option(
+    "--expected-digest",
+    default="",
+    help="SHA-256 the archive must have ('sha256:<hex>' or bare hex). Empty skips the check.",
+)
+def prepare_baseline_set_cmd(
+    archive: Path, dest: Path, archive_format: str, expected_digest: str
+) -> None:
+    """Verify a baseline-set archive's bytes, then extract it.
+
+    Prints ``manifest-root=``, ``archive-digest=sha256:<hex>`` and
+    ``verified=true|false`` on success. On refusal prints ``error-code=`` and a
+    single-line ``message=`` and exits 1 (malformed), 3 (digest mismatch) or
+    64 (usage).
+    """
+    ctx = click.get_current_context()
+    try:
+        prepared = prepare_baseline_set(
+            archive,
+            dest,
+            archive_format=archive_format,
+            expected_digest=expected_digest or None,
+        )
+    except BaselineArchiveError as error:
+        # One line per field: the Action reads these back as key=value records.
+        click.echo(f"error-code={error.code}")
+        click.echo("message=" + " ".join(error.message.splitlines()))
+        ctx.exit(error.exit_status)
+    click.echo(f"manifest-root={prepared.manifest_root}")
+    click.echo(f"archive-digest={prepared.archive_digest}")
+    click.echo(f"verified={'true' if prepared.verified else 'false'}")
 
 
 # Sibling command module, imported for its registration side effect -- it

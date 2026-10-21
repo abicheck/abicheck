@@ -327,4 +327,40 @@ esac
 # same class as the earlier `rm -f "$asset_name.tmp-payload"` fix).
 mv "$_staging_dir/archive" "./$asset_name"
 
+# SHA-256 of the archive's raw bytes, emitted so a consumer can pin it: a
+# consumer's expected-archive-digest (root action.yml, resolve-baseline)
+# compares against exactly these bytes, so the digest is computed on the
+# final file, after the move, not on the staging copy. This Action installs
+# no abicheck, so the digest is computed with a system tool, never with a
+# Python package this step cannot rely on.
+_sha256_of_file() {
+  local file="$1" digest=""
+  if command -v sha256sum >/dev/null 2>&1; then
+    digest="$(sha256sum "$file")"
+  elif command -v shasum >/dev/null 2>&1; then
+    digest="$(shasum -a 256 "$file")"
+  else
+    local py
+    py="$(command -v python3 || command -v python || true)"
+    if [[ -z "$py" ]]; then
+      echo "::error::neither sha256sum, shasum nor a Python interpreter is available on PATH -- cannot compute the archive digest for $asset_name." >&2
+      return 1
+    fi
+    digest="$("$py" -I -c 'import hashlib, sys
+h = hashlib.sha256()
+with open(sys.argv[1], "rb") as fh:
+    for chunk in iter(lambda: fh.read(1 << 20), b""):
+        h.update(chunk)
+print(h.hexdigest())' "$file")"
+  fi
+  digest="${digest%% *}"
+  if [[ ! "$digest" =~ ^[0-9a-f]{64}$ ]]; then
+    echo "::error::could not compute a SHA-256 digest for $asset_name (got '$digest')." >&2
+    return 1
+  fi
+  printf '%s' "$digest"
+}
+archive_sha256="$(_sha256_of_file "./$asset_name")" || exit 1
+
 echo "asset-name=$asset_name" >> "$GITHUB_OUTPUT"
+echo "archive-sha256=$archive_sha256" >> "$GITHUB_OUTPUT"

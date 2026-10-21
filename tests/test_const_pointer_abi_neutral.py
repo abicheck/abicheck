@@ -366,7 +366,8 @@ def test_top_level_field_const_is_not_neutralised():
     r = compare(old, new)
     assert ChangeKind.FIELD_BECAME_CONST in _kinds(r)
     assert ChangeKind.TYPE_FIELD_TYPE_CHANGED not in _kinds(r)
-    assert r.verdict == Verdict.API_BREAK
+    # No header observation: ADR-084 demotes this source-level claim.
+    assert r.verdict == Verdict.COMPATIBLE_WITH_RISK
 
 
 # ── top-level by-value param/return cv IS neutralised (unlike fields) ─────────

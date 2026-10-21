@@ -86,7 +86,11 @@ from .diff_templates import (  # noqa: F401
     _looks_like_template_instantiation,
     detect_missing_instantiations,
 )
-from .model import AccessLevel, resolved_fact_value
+from .model import (
+    AccessLevel,
+    resolved_fact_value,
+    source_contract_evidence as _contract,
+)
 from .model.change import Change
 from .model.change_catalog.kinds import ChangeKind
 from .model.evidence_status import ReachabilityState
@@ -493,6 +497,7 @@ def _find_tag_rename_for_removed(
     candidates: list[RecordType],
     only_removed: set[str],
     only_added: set[str],
+    header_parsed: bool,
 ) -> Change | None:
     """Try to match *removed* to one of the *candidates* added types via symbol evidence.
 
@@ -519,16 +524,9 @@ def _find_tag_rename_for_removed(
                 f"new name)"
             ),
             affected_symbols=removed_with_token,
-            # ADR-044: only_removed/only_added (and thus removed_with_token/
-            # added_with_token above) are scoped to _PUBLIC_VIS before this
-            # function is ever called — the finding fires only when actual
-            # public-surface mangled symbols embed the tag's leaf name, so
-            # its mere existence already proves public reachability, the
-            # same reliable signal the other Visibility.PUBLIC-filtered
-            # late-detector findings have.
-            public_reachable=True,
-            reachability_state=ReachabilityState.PROVEN_REACHABLE,
-            reachability_kind="direct_public_symbol",
+            **_contract.reachability_of(
+                removed, header_parsed=header_parsed
+            ),  # ADR-084
         )
     return None
 
@@ -603,7 +601,9 @@ def detect_tag_type_renamed(
         candidates = added_by_ns.get(ns, [])
         if not candidates:
             continue
-        ch = _find_tag_rename_for_removed(removed, candidates, only_removed, only_added)
+        ch = _find_tag_rename_for_removed(
+            removed, candidates, only_removed, only_added, bool(old.from_headers)
+        )
         if ch is not None:
             findings.append(ch)
     return findings

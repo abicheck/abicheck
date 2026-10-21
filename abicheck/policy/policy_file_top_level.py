@@ -39,6 +39,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from ..errors import PolicyError
 from ..policy_file_versioning import _reject_unknown_keys
 
 #: Every top-level key a ``--policy`` YAML document may carry. Kept as one
@@ -66,6 +67,7 @@ KNOWN_POLICY_FILE_KEYS = frozenset(
         "evidence_policy",
         "versioning",
         "acknowledgment",
+        "unused_rules",
     }
 )
 
@@ -109,3 +111,21 @@ def parse_base_policy(raw: dict[str, Any]) -> str:
             f"Valid values: {sorted(VALID_BASE_POLICIES)}"
         )
     return base_policy
+
+
+#: ADR-067 P1: the three ``unused_rules:`` settings, in increasing strictness
+#: (a release folds its members to the strictest one any of them states).
+UNUSED_RULES_MODES: tuple[str, ...] = ("allow", "warn", "block")
+_MODE_RANK = {mode: rank for rank, mode in enumerate(UNUSED_RULES_MODES)}
+
+
+def parse_unused_rules(raw: object, path: object) -> str:
+    """Validate the top-level ``unused_rules:`` value (``None`` means ``allow``)."""
+    if raw is None:
+        return "allow"
+    if not isinstance(raw, str) or raw not in _MODE_RANK:
+        raise PolicyError(
+            f"unused_rules in {path}: must be one of "
+            f"{', '.join(UNUSED_RULES_MODES)}; got {raw!r}"
+        )
+    return raw

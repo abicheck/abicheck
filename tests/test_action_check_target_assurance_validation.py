@@ -162,7 +162,9 @@ class TestValidateInputsAnalysisAssuranceCompleteEnumValidation:
         )
         assert result.returncode == 0, result.stderr
 
-    def test_omitted_defaults_to_false_and_still_passes(self, tmp_path: Path) -> None:
+    def test_omitted_inherits_the_config_and_still_passes(self, tmp_path: Path) -> None:
+        """Unset is the inherit state, not a value: no declared default, and the
+        overlay step is skipped for it (see the parity test module)."""
         result = _run(
             VALIDATE_SH,
             {**_BASE_IDENTITY, "INPUT_BASELINE_PATH": "./b"},

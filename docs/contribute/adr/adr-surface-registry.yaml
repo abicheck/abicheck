@@ -411,6 +411,8 @@ adrs:
       - action: actions/check-target
       - action: actions/aggregate
       - cli: aggregate
+      - action: expected-archive-digest
+      - action: actions/resolve-baseline:expected-archive-digest
     missing: P2 of the lifecycle model is only partially implemented (see the ADR).
 
   - id: ADR-048
@@ -570,8 +572,10 @@ adrs:
     use_cases: [UC-WF-compare]
     surfaces:
       - cli: compare --suppress
+      - cli: compare --acknowledgments
+      - action: acknowledgments
       - report: compare_report.disposition_audit
-    missing: S4 is not implemented.
+    missing: S4 is not implemented. The configured-rule inventory (every rule, including unused and expired acknowledgments, gets a disposition_audit row) and the unused_rules gate are implemented under ADR-067 P1.
 
   - id: ADR-068
     file: 068-one-comparison-product-and-scan-retirement.md
@@ -599,7 +603,7 @@ adrs:
     disposition: surfaced
     use_cases: [UC-WF-compare]
     surfaces:
-      - action: require-complete-analysis
+      - action: analysis-assurance-complete
       - report: compare_report.analysis_assurance
 
   - id: ADR-072
@@ -659,6 +663,13 @@ adrs:
     use_cases: []
     surfaces: []
     missing: Proposed, not yet implemented; D1 and D2 would change verdicts, exit codes and the cross-source report surface, pending acceptance.
+
+  - id: ADR-084
+    file: 084-binary-depth-source-contract-gate.md
+    disposition: surfaced
+    use_cases: [UC-WF-compare]
+    surfaces:
+      - report: compare_report.disposition_audit
 
   - id: ADR-078
     file: 078-informational-severity-category.md

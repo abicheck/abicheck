@@ -97,6 +97,7 @@ from .frontends.cli.options.params import _load_suppression_and_policy
 from .frontends.cli.ownership_config import project_ownership_request
 from .frontends.cli.project_config import (
     compare_settings_usage_errors,
+    fold_project_policy_overrides_for_cli,
     resolve_project_compare_config,
 )
 from .frontends.cli.runtime import (
@@ -801,6 +802,7 @@ def run_compare(
     fmt: str,
     output: Path | None,
     suppress: Path | None,
+    acknowledgments: Path | None = None,
     policy: str,
     policy_file_path: Path | None,
     severity_preset: str | None,
@@ -1242,7 +1244,10 @@ def run_compare(
                     project_cfg, cfg_path
                 ),
                 **release_acknowledgment_inputs(
-                    project_cfg, cfg_path, config_explicit=config is not None
+                    project_cfg,
+                    cfg_path,
+                    config_explicit=config is not None,
+                    override_path=acknowledgments,
                 ),
                 headers=headers,
                 includes=directory_includes,
@@ -1573,24 +1578,7 @@ def run_compare(
     )
     # ADR-068 §3 #23 / ADR-049 D7: `.abicheck.yml`'s `policy.overrides` at
     # PROJECT_CONFIG tier, after the pack fold above (the typed API's order).
-    from .workflows.compare_configuration import (
-        CompareConfigurationError,
-        fold_project_policy_overrides,
-        project_policy_overrides,
-    )
-
-    try:
-        project_fold = fold_project_policy_overrides(
-            pf,
-            project_policy_overrides(project_cfg, cfg_path),
-            base_policy=policy,
-            project_path=cfg_path,
-        )
-    except CompareConfigurationError as e:
-        raise click.BadParameter(str(e), param_hint="--policy") from e
-    pf = project_fold.policy_file
-    for w in project_fold.warnings:  # round 9/10
-        click.echo(f"Warning: {w}", err=True)
+    pf = fold_project_policy_overrides_for_cli(pf, project_cfg, cfg_path, policy)
 
     # An out-of-band --old/new-build-info/--sources pack overrides the
     # snapshot's embedded payload per layer (`resolve_side_pack`). Attached
@@ -1616,7 +1604,11 @@ def run_compare(
     # ADR-067 D5/D6: `.abicheck.yml`'s `acknowledgment:` block (records only
     # from an explicit --config; see acknowledgment_config.py).
     acks = compare_acknowledgments_for(
-        project_cfg, cfg_path, pf, config_explicit=config is not None
+        project_cfg,
+        cfg_path,
+        pf,
+        config_explicit=config is not None,
+        override_path=acknowledgments,
     )
 
     # ADR-068 D4 (the correctness fix this phase exists for): pattern-verdict

@@ -112,14 +112,14 @@ class TestVersionStampedTypedefInChecker:
         new = _snap({}, version="2.0")
         result = compare(old, new)
         assert ChangeKind.TYPEDEF_REMOVED in {c.kind for c in result.changes}
-        assert result.verdict == Verdict.API_BREAK
+        assert result.verdict == Verdict.COMPATIBLE_WITH_RISK
 
     def test_regular_typedef_removal_unchanged_by_fix(self) -> None:
         """Non-version-stamped typedefs continue to be reported (API_BREAK)."""
         old = _snap({"callback_t": "void(*)(void*)"}, version="1.0")
         new = _snap({}, version="2.0")
         result = compare(old, new)
-        assert result.verdict == Verdict.API_BREAK
+        assert result.verdict == Verdict.COMPATIBLE_WITH_RISK
 
     def test_multiple_version_sentinels_all_downgraded(self) -> None:
         """Multiple version-stamped typedefs removed at once — all are COMPATIBLE."""
@@ -170,7 +170,7 @@ class TestVersionStampedTypedefInChecker:
         assert ChangeKind.TYPEDEF_VERSION_SENTINEL in kinds
         # The real typedef removal is still reported, as a source break
         assert ChangeKind.TYPEDEF_REMOVED in kinds
-        assert result.verdict == Verdict.API_BREAK
+        assert result.verdict == Verdict.COMPATIBLE_WITH_RISK
 
     def test_sentinel_without_successor_is_typedef_removed(self) -> None:
         """Version-stamped typedef removed with NO successor → still TYPEDEF_REMOVED."""

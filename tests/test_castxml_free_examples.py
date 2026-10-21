@@ -186,6 +186,20 @@ def test_castxml_free_verdict_matches_ground_truth(
     result = compare(snap1, snap2, scope_to_public_surface=scope)
     got = result.verdict.value.upper()
 
+    if expected == "API_BREAK" and got == "COMPATIBLE_WITH_RISK":
+        # ADR-084: no header or source producer ran, so the canonical source-level
+        # claim is demoted, and each API_BREAK-kind finding records the rule.
+        from abicheck.change_registry import API_BREAK_KINDS
+        from abicheck.policy.binary_gated_contract import BINARY_GATE_RULE_ID
+
+        claims = [c for c in result.changes if c.kind in API_BREAK_KINDS]
+        assert claims, f"{case_name}: no source-level finding survived to the result"
+        assert all(c.modulation_rule == BINARY_GATE_RULE_ID for c in claims), (
+            f"{case_name}: source-level claims without the gate rule: "
+            + ", ".join(c.kind.value for c in claims)
+        )
+        return
+
     if got != expected:
         rank = {f"L{i}": i for i in range(6)}
         if rank.get(str(entry.get("min_evidence", "L0")), 0) > 1:

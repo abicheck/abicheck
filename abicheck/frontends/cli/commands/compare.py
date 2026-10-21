@@ -184,6 +184,15 @@ from .compare_routing import _RELEASE_FORMATS
     "tuning, suppression policy); CLI flags override it.",
 )
 @click.option(
+    "--acknowledgments",
+    "acknowledgments",
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+    default=None,
+    help="Acknowledgment records (YAML) for this run: intentional, "
+    "reviewed changes, each named by finding_id, or by symbol with change_kind. "
+    "Overrides .abicheck.yml's acknowledgment.file.",
+)
+@click.option(
     "--follow-deps",
     is_flag=True,
     default=False,
@@ -386,6 +395,10 @@ def compare_cmd(ctx: click.Context, /, **kwargs: Any) -> None:
       abicheck compare libfoo.so.1 libfoo.so.2 -H include/foo.h --policy sdk_vendor
       abicheck compare old.json new.json --suppress suppressions.yaml
     """
+    _compare_cmd(ctx, **kwargs)
+
+
+def _compare_cmd(ctx: click.Context, /, **kwargs: Any) -> None:
     # Options are parsed by the click wrapper above; the full compare flow lives
     # in cli_compare_helpers.run_compare (size-split from cli.py to keep this
     # module under the AI-readiness file-size cap). Click collects every declared

@@ -245,8 +245,8 @@ def compute_summary_table(
             f" [intent: {rule.intent}"
             f"{f', expires {rule.expires}' if rule.expires else ''}"
             f"{f', from {rule.source_file}' if rule.source_file else ''}]"
-            f" — {count} finding(s)"
-            for rule, count in getattr(audit, "rules", ())
+            f" — {rule.matched_count} finding(s)"
+            for rule in getattr(audit, "rules", ())
         ),
         not_evaluated_detectors=tuple(
             det.name for det in getattr(audit, "not_evaluated_detectors", ())

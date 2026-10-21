@@ -16,6 +16,7 @@ import pytest
 
 from abicheck.checker import ChangeKind, Verdict, compare
 from abicheck.model import AbiSnapshot, Function, Visibility
+from abicheck.model.fact import Fact
 from abicheck.model.snapshot_reliability import FACT_FAMILIES
 from abicheck.policy.analysis_assurance_schema_staleness import schema_staleness_status
 from abicheck.serialization import snapshot_from_dict
@@ -69,13 +70,30 @@ def test_stale_side_declines_become_inline(producer: str, stale_side: str) -> No
 
 @pytest.mark.parametrize("producer", ["clang", "castxml"])
 def test_real_change_with_both_sides_reliable_is_reported(producer: str) -> None:
+    # A header parse declares the function, so it carries the (a) fact a real
+    # dump records. Without it the change has no source-contract observation.
+    declared = Fact.present(True, producer=producer)
     old = _snap(
-        functions=[_func("compute", "_Z7computei", is_inline=False)],
+        functions=[
+            _func(
+                "compute",
+                "_Z7computei",
+                is_inline=False,
+                declared_in_headers_fact=declared,
+            )
+        ],
         ast_producer=producer,
         from_headers=True,
     )
     new = _snap(
-        functions=[_func("compute", "_Z7computei", is_inline=True)],
+        functions=[
+            _func(
+                "compute",
+                "_Z7computei",
+                is_inline=True,
+                declared_in_headers_fact=declared,
+            )
+        ],
         ast_producer=producer,
         from_headers=True,
     )

@@ -98,6 +98,8 @@ import hashlib
 import json
 from typing import TYPE_CHECKING, Any
 
+from .policy.unused_rules_gate import unused_rules_digest_field
+
 if TYPE_CHECKING:
     from .policy.effective_gate import EffectiveGate
     from .policy.severity import SeverityConfig
@@ -152,8 +154,15 @@ def _sha256_of(*parts: str) -> str:
 
 
 def effective_config_digest(fields: dict[str, str]) -> str:
-    """Hash *fields* (a dict produced by :func:`effective_config_fields`)."""
-    return _sha256_of(*[fields.get(key, "") for key in EFFECTIVE_CONFIG_FIELD_KEYS])
+    """Hash *fields* (a dict produced by :func:`effective_config_fields`).
+
+    ``policy.unused_rules`` is folded in only when present, so default digests
+    do not move (ADR-067 P1).
+    """
+    parts = [fields.get(key, "") for key in EFFECTIVE_CONFIG_FIELD_KEYS]
+    if "policy.unused_rules" in fields:
+        parts += ["policy.unused_rules", fields["policy.unused_rules"]]
+    return _sha256_of(*parts)
 
 
 def _overrides_str(overrides: Any) -> str:
@@ -499,6 +508,7 @@ def effective_config_fields_from_full_config(
         "policy.base": _identity_str(getattr(policy, "base", None)),
         "policy.overrides": _overrides_str(getattr(policy, "overrides", {})),
         "policy.reclassify": _reclassify_str(getattr(policy_file, "reclassify", ())),
+        **unused_rules_digest_field(policy_file),
         "policy.frozen_namespaces": _namespaces_str(
             getattr(policy_file, "frozen_namespaces", ())
         ),
@@ -605,6 +615,7 @@ def effective_config_fields_from_diff_result(
         "policy.base": _builtin_policy_base_str(getattr(result, "policy", "")),
         "policy.overrides": _overrides_str(getattr(policy_file, "overrides", {})),
         "policy.reclassify": _reclassify_str(getattr(policy_file, "reclassify", ())),
+        **unused_rules_digest_field(policy_file),
         "policy.frozen_namespaces": _namespaces_str(
             getattr(policy_file, "frozen_namespaces", ())
         ),

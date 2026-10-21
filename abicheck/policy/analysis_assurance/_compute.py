@@ -32,6 +32,7 @@ from ..analysis_assurance_l0_context import l0_context_status as _l0_context_sta
 from ..analysis_assurance_schema_staleness import (
     schema_staleness_status as _schema_staleness_status,
 )
+from ..binary_gate_marker import binary_gate_assurance_notes
 from ._comparability import (
     NOT_COMPARABLE_NOTE,
     bounded_comparability_notes,
@@ -207,6 +208,7 @@ def compute_analysis_assurance(
     )
     notes.extend(manifest_notes)
     notes.extend(declined_comparison_notes(result.detector_results))
+    notes.extend(binary_gate_assurance_notes(result.changes))
 
     if (export_accounting.unaccounted or 0) > 0:
         notes.append(

@@ -49,6 +49,7 @@ from ...post_processing import (
 )
 from ...post_processing_reachability import MarkReachability
 from ..export_existence_fold import FoldExportHygieneIntoExistence
+from .binary_gate import DemoteUnprovenBinaryApiBreaks
 from .pipeline import DispositionPipeline
 from .suppression import ApplySuppression
 
@@ -117,5 +118,11 @@ DEFAULT_PIPELINE = DispositionPipeline(
         # Runs last so it can tag both raw findings and the synthetic
         # overlays added by DetectInternalLeaks / DetectCppPatterns.
         EscalateFrozenNamespaceViolations(),
+        # ADR-084: the last word on source-level (API_BREAK) claims. It must
+        # follow every detector, because DetectTemplatePatterns and the other
+        # late detectors create findings (MANDATORY_TEMPLATE_PARAM_ADDED,
+        # TAG_TYPE_RENAMED, ...) after ApplySuppression. It only overrides the
+        # verdict category; it never drops a finding.
+        DemoteUnprovenBinaryApiBreaks(),
     ]
 )

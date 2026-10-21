@@ -214,7 +214,7 @@ class TestJsonReport:
         payload = json.loads(result.stdout)
         audit = payload["suppression_audit"]
         assert audit["total_rules"] == 1
-        assert audit["stale_rules"] == ["workaround (symbol=never_matches_anything)"]
+        assert audit["stale_rules"] == ["symbol='never_matches_anything'"]
         assert audit["high_risk_matches"] == []
 
     @_requires_jsonschema
@@ -286,7 +286,7 @@ class TestJsonReport:
         payload = json.loads(result.stdout)
         audit = payload["suppression_audit"]
         assert audit["total_rules"] == 2
-        assert audit["stale_rules"] == ["symbol=never_matches_anything"]
+        assert audit["stale_rules"] == ["symbol='never_matches_anything'"]
 
     def test_label_includes_every_conjunctive_selector_not_just_the_first(
         self, tmp_path
@@ -327,9 +327,12 @@ class TestJsonReport:
         assert len(set(audit["stale_rules"])) == 2, (
             "two distinct rules must not render as the same label"
         )
-        for label in audit["stale_rules"]:
-            assert "symbol=never_matches_anything" in label
-            assert "change_kind=" in label
+        assert sorted(
+            label.rsplit("change_kind=", 1)[1] for label in audit["stale_rules"]
+        ) == [
+            "'func_removed'",
+            "'var_removed'",
+        ]
 
     def test_shared_reason_still_disambiguated_by_selectors(self, tmp_path):
         # Regression (Codex review, fresh evidence, third round on the same
@@ -368,7 +371,7 @@ class TestJsonReport:
             "two rules sharing a reason must still render distinct labels"
         )
         for label in audit["stale_rules"]:
-            assert label.startswith("shared grouping tag (symbol=")
+            assert label.startswith("symbol=")
 
     def test_label_includes_reachability_gates(self, tmp_path):
         # Regression (Codex review, fresh evidence): two rules sharing every
@@ -626,7 +629,7 @@ class TestJsonReport:
         payload = json.loads(result.stdout)
         audit = payload["suppression_audit"]
         assert audit["total_rules"] == 1
-        assert audit["stale_rules"] == ["workaround (symbol=never_matches_anything)"]
+        assert audit["stale_rules"] == ["symbol='never_matches_anything'"]
 
 
 class TestMarkdownReport:

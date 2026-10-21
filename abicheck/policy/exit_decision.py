@@ -121,6 +121,7 @@ if TYPE_CHECKING:
     from datetime import date
 
     from ..checker_types import DiffResult
+    from ..model.change import Change
     from ..model.change_catalog.registry import Verdict
     from .effective_gate import EffectiveGate
 
@@ -237,6 +238,10 @@ class ExitReason(StrEnum):
     #: reclassifies the addition itself (D6, "policy acceptance, never
     #: reclassification").
     ADDITIONS_REVIEW = "additions_review"
+    #: ADR-067 P1: a configured rule that matched nothing, under
+    #: ``unused_rules: block`` (``policy/unused_rules_gate.py``). Same ``0``/``1``
+    #: fold participant as ``ADDITIONS_REVIEW``; it never lowers a real ``2``/``4``.
+    UNUSED_RULES = "unused_rules"
 
 
 @dataclass(frozen=True)
@@ -386,6 +391,8 @@ class ExitDecision:
     #: :class:`ExitReason.ADDITIONS_REVIEW`. ``0`` for every run that supplied
     #: no acknowledgment records, or whose policy is ``allow``/``warn``.
     additions_review_contribution: int = 0
+    #: ADR-067 P1 ``unused_rules`` floor -- see :class:`ExitReason.UNUSED_RULES`.
+    unused_rules_contribution: int = 0
 
     def exit_without_analysis_assurance(self) -> int:
         """The code this decision would have had with no assurance axis.
@@ -448,6 +455,7 @@ class ExitDecision:
             ),
             "loadability_contribution": self.loadability_contribution,
             "additions_review_contribution": self.additions_review_contribution,
+            "unused_rules_contribution": self.unused_rules_contribution,
         }
 
     @classmethod
@@ -491,6 +499,7 @@ class ExitDecision:
             ),
             loadability_contribution=d.get("loadability_contribution", 0),
             additions_review_contribution=d.get("additions_review_contribution", 0),
+            unused_rules_contribution=d.get("unused_rules_contribution", 0),
         )
 
 
@@ -507,6 +516,7 @@ def resolve_exit_decision(
     no_comparison_completed_contribution: int = 0,
     loadability_contribution: int = 0,
     additions_review_contribution: int = 0,
+    unused_rules_contribution: int = 0,
     compatibility_reason: ExitReason = ExitReason.COMPATIBILITY_GATE,
 ) -> ExitDecision:
     """Fold the axis contributions below into one explainable decision.
@@ -580,6 +590,7 @@ def resolve_exit_decision(
         ExitReason.NO_COMPARISON_COMPLETED: no_comparison_completed_contribution,
         ExitReason.LOADABILITY: loadability_contribution,
         ExitReason.ADDITIONS_REVIEW: additions_review_contribution,
+        ExitReason.UNUSED_RULES: unused_rules_contribution,
     }
     code = max(contributions.values())
     if code == 0:
@@ -604,6 +615,7 @@ def resolve_exit_decision(
         no_comparison_completed_contribution=no_comparison_completed_contribution,
         loadability_contribution=loadability_contribution,
         additions_review_contribution=additions_review_contribution,
+        unused_rules_contribution=unused_rules_contribution,
     )
 
 
@@ -663,15 +675,22 @@ def resolve_compare_exit_decision(
     forwarded to :func:`~.severity.compute_exit_code`, keeps this agreeing
     with an already-frozen ``ReportEnvelope`` (Codex review, fresh evidence).
     """
+    from .acknowledgment_breaks import accepted_break_ids, gate_population
     from .acknowledgment_gate import additions_review_exit_contribution
     from .analysis_assurance import analysis_assurance_exit_contribution
     from .contract_coverage_exit import coverage_exit_floor
     from .severity import compute_exit_code, legacy_exit_code
+    from .unused_rules_gate import unused_rules_exit_contribution
 
     coverage_contribution = coverage_exit_floor(result)
     assurance_contribution = analysis_assurance_exit_contribution(
         result, require_complete=gate.require_complete_analysis
     )
+    # ADR-067 `acknowledgment.breaks: accept`: an acknowledged break the run
+    # accepted is not in the population the compatibility exit is decided
+    # over. Every run that did not opt in takes the pre-existing branches
+    # below, unchanged.
+    accepted = bool(accepted_break_ids(result))
 
     # *gate* is the one resolved gate object (duplication-and-convergence
     # P0): its severity is `None` exactly when the legacy scheme is in
@@ -679,19 +698,19 @@ def resolve_compare_exit_decision(
     # in disagreement.
     if gate.severity is not None:
         compatibility_contribution = compute_exit_code(
-            result.changes,
+            gate_population(result),
             gate.severity,
             policy=result.policy,
             kind_sets=effective_kind_sets(result),
             policy_file=result.policy_file,
             today=today,
         )
-    elif today is None:
+    elif not accepted and today is None:
         # No caller passed a captured date -- every pre-existing invocation
         # (the real CLI process exit runs synchronously right after
         # `compare()`) keeps reading the cached verdict exactly as before.
         compatibility_contribution = legacy_exit_code(result.verdict)
-    else:
+    elif not accepted:
         # Codex review, fresh evidence: `result.verdict` was frozen at
         # `compare()` time. A render happening later under a captured
         # `today` (an already-frozen `ReportEnvelope`) must agree with the
@@ -702,15 +721,28 @@ def resolve_compare_exit_decision(
         compatibility_contribution = legacy_exit_code(
             _worst_effective_verdict(result, today)
         )
+    else:
+        # `result.verdict` still counts the accepted break (the verdict is a
+        # fact about the comparison), so the legacy fold re-derives the worst
+        # verdict over what the gate still scores.
+        compatibility_contribution = legacy_exit_code(
+            _worst_effective_verdict(result, today, changes=gate_population(result))
+        )
     return resolve_exit_decision(
         compatibility_contribution=compatibility_contribution,
         contract_coverage_contribution=coverage_contribution,
         analysis_assurance_contribution=assurance_contribution,
         additions_review_contribution=additions_review_exit_contribution(result),
+        unused_rules_contribution=unused_rules_exit_contribution(result, today=today),
     )
 
 
-def _worst_effective_verdict(result: DiffResult, today: date) -> Verdict:
+def _worst_effective_verdict(
+    result: DiffResult,
+    today: date | None,
+    *,
+    changes: list[Change] | None = None,
+) -> Verdict:
     """The legacy scheme's own worst-finding verdict, re-derived under
     *today* instead of trusted from ``result.verdict``.
 
@@ -719,15 +751,15 @@ def _worst_effective_verdict(result: DiffResult, today: date) -> Verdict:
     uses -- taking the worst per-finding ``effective_verdict_for_change``
     the same way ``checker_policy.compute_verdict`` folds a raw kind-set
     category, just per-finding-resolved and today-aware rather than a bare
-    kind lookup. Only called when *today* is given (this function's own
-    caller keeps the cached ``result.verdict`` otherwise), so no
-    pre-existing caller's answer changes.
+    kind lookup. Called with a *today* by the captured-date path, and with
+    *changes* (the gate population, ADR-067 ``breaks: accept``) by the
+    accepted-break path; the pre-existing callers' answers do not change.
     """
     from ..model.change_catalog.registry import Verdict
     from .reclassify import effective_verdict_for_change
     from .severity import gate_eligible_changes
 
-    eligible = gate_eligible_changes(result.changes)
+    eligible = gate_eligible_changes(result.changes if changes is None else changes)
     if not eligible:
         return Verdict.NO_CHANGE
     verdicts = {

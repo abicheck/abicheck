@@ -601,7 +601,7 @@ class TestTheReleaseIdentityIsReadFromItsMembers:
         assert "observed_member_exclusion_identities(" not in cli
         render = inspect.getsource(cli_compare_release._render_release_outcome)
         assert "project_release_library_results(" in render
-        assert cli.index("outcome = _execute_release_compare(") < cli.index(
+        assert cli.index("outcome = execute_release_compare_checked(") < cli.index(
             "_render_release_outcome(\n                outcome,"
         ), (
             "the observed-member capture must run before the DiffResults "

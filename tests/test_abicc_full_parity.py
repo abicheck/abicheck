@@ -36,6 +36,7 @@ from abicheck.model import (
     Variable,
     Visibility,
 )
+from abicheck.model.fact import Fact
 
 
 def _snap(**kwargs: object) -> AbiSnapshot:
@@ -192,8 +193,14 @@ class TestTypeKindChanged:
 
     def test_struct_to_class(self) -> None:
         """struct→class is a source-level kind change, not breaking."""
-        old = _snap(types=[RecordType(name="Foo", kind="struct")])
-        new = _snap(types=[RecordType(name="Foo", kind="class")])
+        # Located in a parsed header: the record's source observation (ADR-084).
+        located = Fact.present("foo.h")
+        old = _snap(
+            types=[RecordType(name="Foo", kind="struct", source_header_fact=located)]
+        )
+        new = _snap(
+            types=[RecordType(name="Foo", kind="class", source_header_fact=located)]
+        )
         result = compare(old, new)
         assert ChangeKind.SOURCE_LEVEL_KIND_CHANGED in _kinds(result)
         assert ChangeKind.TYPE_KIND_CHANGED not in _kinds(result)
@@ -888,13 +895,30 @@ class TestVarAccessChanged:
 
     def test_var_access_narrowed_is_source_break(self) -> None:
         """Narrowing access is a source-level break."""
+        declared = Fact.present(True, producer="castxml")
         old = _snap(
             ast_producer="castxml",
-            variables=[_var("data", "_data", "int", access=AccessLevel.PUBLIC)],
+            variables=[
+                _var(
+                    "data",
+                    "_data",
+                    "int",
+                    access=AccessLevel.PUBLIC,
+                    declared_in_headers_fact=declared,
+                )
+            ],
         )
         new = _snap(
             ast_producer="castxml",
-            variables=[_var("data", "_data", "int", access=AccessLevel.PRIVATE)],
+            variables=[
+                _var(
+                    "data",
+                    "_data",
+                    "int",
+                    access=AccessLevel.PRIVATE,
+                    declared_in_headers_fact=declared,
+                )
+            ],
         )
         result = compare(old, new)
         assert result.verdict == Verdict.API_BREAK
