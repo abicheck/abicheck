@@ -133,11 +133,17 @@ def _store(snap, binary, headers, includes, version, lang, *, extra=""):
 def identity(monkeypatch: pytest.MonkeyPatch):
     """Set the code identity every consumer sees (each imported it by name)."""
     import abicheck.buildsource.build_cache as build_cache
+    import abicheck.buildsource.header_include_disk_cache as include_disk_cache
     import abicheck.buildsource.source_replay as source_replay
     from abicheck.workflows.dump.cache import key as dump_cache_key
 
     def set_to(value: str) -> None:
-        for mod in (dump_cache_key, build_cache, source_replay):
+        for mod in (
+            dump_cache_key,
+            build_cache,
+            source_replay,
+            include_disk_cache,
+        ):
             monkeypatch.setattr(mod, "abicheck_code_fingerprint", lambda v=value: v)
 
     return set_to
@@ -192,6 +198,29 @@ class TestCachesMissAcrossCodeIdentity:
         assert a and b and a != b
         assert compute_build_cache_key(db, "generic") == a
 
+    def test_header_include_disk_cache_key(self, tmp_path: Path, identity) -> None:
+        from abicheck.buildsource.header_include_disk_cache import include_cache_key
+
+        header = tmp_path / "pub.h"
+        header.write_text("void f();\n")
+
+        def key() -> str:
+            return include_cache_key(
+                clang_identity="clang-A",
+                language="CXX",
+                header=str(header),
+                header_digest="0" * 64,
+                argv=["clang++", "-M", str(header)],
+            )
+
+        identity("code-A")
+        a = key()
+        identity("code-B")
+        b = key()
+        identity("code-A")
+        assert a != b
+        assert key() == a
+
     def test_source_abi_tu_cache_key(self, tmp_path: Path, identity) -> None:
         from abicheck.buildsource.build_evidence import CompileUnit
         from abicheck.buildsource.source_replay import compute_tu_cache_key
@@ -233,6 +262,7 @@ DISK_CACHE_CLASSIFICATION = {
     "abicheck.snapshot_cache.disk": "code-identity",
     "abicheck.buildsource.build_cache.disk": "code-identity",
     "abicheck.buildsource.source_replay.disk": "code-identity",
+    "abicheck.buildsource.header_include_disk": "code-identity",
     "abicheck.storage.header_ast_cache.ast_disk": (
         "external-tool output: keyed by the exact aggregate header and command "
         "line abicheck generates, plus the source of the modules that shape a "
@@ -243,6 +273,7 @@ _PROVED = {
     "abicheck.snapshot_cache.disk": "test_snapshot_cache",
     "abicheck.buildsource.build_cache.disk": "test_build_evidence_cache_key",
     "abicheck.buildsource.source_replay.disk": "test_source_abi_tu_cache_key",
+    "abicheck.buildsource.header_include_disk": "test_header_include_disk_cache_key",
 }
 
 
