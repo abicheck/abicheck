@@ -3,7 +3,7 @@
 
 Cases exercising an old-vs-new comparison — `abicheck compare`, the default operation.
 
-_208 case(s)._ [← back to all examples](../index.md)
+_210 case(s)._ [← back to all examples](../index.md)
 
 | Case | Title | Verdict | Category |
 |------|-------|---------|----------|
@@ -215,3 +215,5 @@ _208 case(s)._ [← back to all examples](../index.md)
 | [case216_overload_added_beside_initializer_list](../case216_overload_added_beside_initializer_list.md) | Overload Added Beside an `initializer_list` Overload | 🟢 COMPATIBLE | Addition (Compatible) |
 | [case217_export_loss_weak_binding_demoted](../case217_export_loss_weak_binding_demoted.md) | WEAK export loss demoted to a risk by a `binding: weak` rule | 🔴 BREAKING | Breaking |
 | [case218_export_loss_strong_binding_stays_breaking](../case218_export_loss_strong_binding_stays_breaking.md) | a GLOBAL export loss stays BREAKING under a `binding: weak` rule | 🔴 BREAKING | Breaking |
+| [case219_public_virtual_dispatch_set_changed](../case219_public_virtual_dispatch_set_changed.md) | Public Virtual Method's Override Set Changes | 🟡 COMPATIBLE_WITH_RISK | Risk |
+| [case220_public_virtual_dispatch_set_reordered](../case220_public_virtual_dispatch_set_reordered.md) | Public Virtual Method's Override Set Reordered | ✅ NO_CHANGE | No Change |

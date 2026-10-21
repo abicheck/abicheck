@@ -3,7 +3,7 @@
 
 Identical ABI/API — sanity-check baselines.
 
-_11 case(s)._ [← back to all examples](../index.md)
+_12 case(s)._ [← back to all examples](../index.md)
 
 | Case | Title | Verdict | Category |
 |------|-------|---------|----------|
@@ -18,3 +18,4 @@ _11 case(s)._ [← back to all examples](../index.md)
 | [case208_restrict_added_to_definition_only](../case208_restrict_added_to_definition_only.md) | `restrict` Added to the Definition Only | ✅ NO_CHANGE | No Change |
 | [case210_calling_convention_respelled_via_macro](../case210_calling_convention_respelled_via_macro.md) | Calling Convention Respelled via a Macro | ✅ NO_CHANGE | No Change |
 | [case214_calling_convention_macro_redefined_after_use](../case214_calling_convention_macro_redefined_after_use.md) | Convention Macro Redefined After Use (Negative Control) | ✅ NO_CHANGE | No Change |
+| [case220_public_virtual_dispatch_set_reordered](../case220_public_virtual_dispatch_set_reordered.md) | Public Virtual Method's Override Set Reordered | ✅ NO_CHANGE | No Change |

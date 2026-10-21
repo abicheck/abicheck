@@ -528,6 +528,7 @@ NON_DETECTOR_KINDS: frozenset[str] = frozenset(
         "public_to_internal_dependency",
         "public_typedef_removed",
         "public_typedef_target_changed",
+        "public_virtual_dispatch_set_changed",
         "rtti_for_internal_type",
         "rtti_mode_changed",
         "runtime_symbol_provider_changed",

@@ -635,12 +635,13 @@ def diff_embedded_build_source(
             old_graph.schema_version, new_graph.schema_version
         )
     if old_graph is not None and new_graph is not None and graph_not_compared is None:
+        from ..compare.virtual_dispatch_set import virtual_dispatch_set_findings
         from .source_graph_findings import diff_source_graph_findings
 
-        # ``_src`` (the L4 surface diff, if both sides had one) lets the graph
-        # diff correlate a public entry's own body/type_hash change with it
-        # newly reaching an internal dependency (ADR-041 P0 roadmap item 2).
+        # ``_src`` (the L4 surface diff, if both sides had one) lets the graph diff
+        # correlate a public entry's body/type_hash change with a new internal dep (ADR-041 P0).
         _gr = diff_source_graph_findings(old_graph, new_graph, source_diff_changes=_src)
+        _gr += virtual_dispatch_set_findings(old_graph, new_graph)
         tag_evidence_category(_gr, "source_only")
         apply_evidence_policy(_gr, "graph_risk", policy_file)
         changes.extend(_gr)
