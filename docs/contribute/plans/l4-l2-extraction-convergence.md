@@ -177,7 +177,7 @@ unparsable override is 1). Each caller keeps its own `ABICHECK_*_JOBS`
 override, its per-worker RAM budget variables and constant, and its RAM probe
 seam, so its thin wrapper is what tests patch. The call-graph wrapper keeps its
 `n_units <= 1` short-circuit and its unit-count cap on explicit overrides.
-`tests/test_bounded_jobs_equivalence.py` pins 57 rows against a hand-derived
+`tests/test_bounded_jobs_equivalence.py` pins 61 rows against a hand-derived
 oracle; the same table passes on the pre-convergence code. Log messages were
 unified, and two edge cases changed (see the changelog fragment).
 
