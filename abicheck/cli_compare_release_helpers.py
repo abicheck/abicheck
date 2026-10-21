@@ -13,99 +13,27 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Pure helpers for the ``compare-release`` command.
+"""CLI-only guards for the ``compare-release`` command.
 
-The CLI-only checks that guard a release run's outputs
-(``--bundle-facts-out`` collisions) and the Click translation of package
-extraction. The bundle stage and the ``--bundle-facts-out`` capture moved to
-:mod:`abicheck.workflows.release_bundle` with the release compare owner.
+Two checks reject a ``--bundle-facts-out`` path that would collide with an
+export the same run writes, and one tears down the temp directories a run
+allocated. Everything else a release run decides is owned elsewhere: the
+compare owner (:mod:`abicheck.workflows.release_compare`), input resolution
+(:mod:`abicheck.workflows.release_inputs`), ADR-064's gate resolution
+(:mod:`abicheck.policy.release_gate_options`), and the release report
+(:mod:`abicheck.report.release_document`, rendered by
+:mod:`abicheck.report.render_release_report`).
 
 Leaf module: it must not import from :mod:`abicheck.cli` or
-:mod:`abicheck.cli_compare_release`. The release report itself is no longer
-formatted here: :mod:`abicheck.report.release_document` builds the one
-release report and :mod:`abicheck.report.render_release_report` renders
-every format from it, reached through
-:func:`abicheck.frontends.cli.release_report.render_release_summary`.
-
-``GateOptions``/``resolve_release_gate_options``/``apply_release_gate_pack``/
-``_resolve_release_severity_config`` (ADR-064's release-fan-out gate
-resolution) live in :mod:`abicheck.policy.release_gate_options` instead --
-this package's own home for deciding gate/severity effect
-(``abicheck/policy/AGENTS.md``), and also outside the file-size no-growth
-budget this module is at. This (a ``frontends``-classified module) reaches
-them through :mod:`abicheck.workflows.gate`'s facade rather than importing
-``policy`` directly (``frontends -> policy`` is forbidden), and re-exports
-them here so every pre-existing import of them from this module keeps
-working.
+:mod:`abicheck.cli_compare_release`. It re-exports nothing; a name that moved
+is imported from its owner.
 """
 
 from __future__ import annotations
 
-from collections.abc import Callable
 from pathlib import Path
-from typing import TYPE_CHECKING
 
 import click
-
-from .frontends.cli.release_exit import _exit_compare_release as _exit_compare_release
-from .workflows.gate import (
-    GateOptions as GateOptions,  # re-exported, ADR-064
-    _resolve_release_severity_config as _resolve_release_severity_config,  # re-exported, ADR-064
-    apply_release_gate_pack as apply_release_gate_pack,  # re-exported, ADR-064
-    resolve_release_gate_options as resolve_release_gate_options,  # re-exported, ADR-064
-)
-from .workflows.package_claim_conflicts import (
-    # E-S3 case 3: does a package's declared contract match its own
-    # contained binary. Needs `elf_metadata` (`extract`, forbidden directly
-    # from `frontends`), so the real logic lives in `workflows`.
-    debian_symbols_release_conflict_lines as debian_symbols_release_conflict_lines,  # re-exported, E-S3
-)
-
-if TYPE_CHECKING:
-    from .workflows.extraction import PackageExtractor
-
-
-#: Four pure helpers that raise nothing moved to ``workflows.
-#: release_inputs`` alongside the rest of release input resolution (ADR-061
-#: gap D) and are re-exported here under their original private names --
-#: there is no Click translation to do for a function that cannot fail.
-from .workflows import release_inputs as _release_inputs  # noqa: E402
-
-# Plain assignments, not `from ... import x as _x`: under mypy's
-# `no_implicit_reexport` a renaming import is not an explicit re-export, and
-# `cli_compare_release.py` imports these names from here.
-_debian_symbols_warning = _release_inputs.debian_symbols_warning
-_discover_include_roots = _release_inputs.discover_include_roots
-_match_release_keys = _release_inputs.match_release_keys
-_resolve_release_headers = _release_inputs.resolve_release_headers
-
-
-def _extract_if_package(
-    input_path: Path,
-    debug_pkg: Path | None,
-    devel_pkg: Path | None,
-    make_temp_dir: Callable[[str], Path],
-    is_package: Callable[[Path], bool],
-    detect_extractor: Callable[[Path], PackageExtractor | None],
-) -> tuple[Path, Path | None, Path | None, Path | None, bool]:
-    """The Click-translating wrapper over :func:`abicheck.workflows.
-    release_inputs.extract_if_package` -- see that module's docstring for
-    why the extraction itself is engine-side now. Same messages, same exit
-    code."""
-    from .errors import ReleaseOperandContentError
-    from .workflows.release_inputs import extract_if_package
-
-    try:
-        return extract_if_package(
-            input_path,
-            debug_pkg,
-            devel_pkg,
-            make_temp_dir,
-            is_package,
-            detect_extractor,
-        )
-    except ReleaseOperandContentError as exc:
-        raise click.ClickException(str(exc)) from exc
 
 
 def reject_bundle_facts_out_collision(

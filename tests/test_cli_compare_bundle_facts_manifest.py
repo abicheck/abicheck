@@ -494,14 +494,14 @@ class TestBundleFactsLibraryManifest:
         promises pure L0/L1 evidence with no header AST at all.
 
         Simulates a package/devel-pkg extraction that discovers a
-        ``header_dir`` by monkeypatching ``_extract_if_package`` (the exact
-        primitive ``dispatch()`` calls) rather than building a real archive
-        fixture -- this is the one thing that varies from the plain
-        already-extracted-directory case ``_extract_if_package``'s own
+        ``header_dir`` by monkeypatching ``extract_if_package`` where the
+        bundle-facts compare calls it (rather than building a real archive
+        fixture) -- this is the one thing that varies from the plain
+        already-extracted-directory case ``extract_if_package``'s own
         docstring describes.
         """
         import abicheck.bundle_side_input as bundle_side_input_mod
-        import abicheck.cli_compare_release_helpers as cli_compare_release_helpers_mod
+        import abicheck.workflows.bundle_facts_stored_compare as stored_compare_mod
 
         old_dir = tmp_path / "old"
         new_dir = tmp_path / "new"
@@ -518,7 +518,8 @@ class TestBundleFactsLibraryManifest:
         header_dir.mkdir()
         (header_dir / "libreal.h").write_text("int add(int a, int b);\n")
 
-        real_extract_if_package = cli_compare_release_helpers_mod._extract_if_package
+        real_extract_if_package = stored_compare_mod.extract_if_package
+        extract_calls: list[Path] = []
 
         def _fake_extract_if_package(
             input_path,
@@ -528,6 +529,7 @@ class TestBundleFactsLibraryManifest:
             is_package,
             detect_extractor,
         ):
+            extract_calls.append(input_path)
             lib_dir, debug_dir, _header_dir, symbols_file, whole = (
                 real_extract_if_package(
                     input_path,
@@ -541,8 +543,8 @@ class TestBundleFactsLibraryManifest:
             return lib_dir, debug_dir, header_dir, symbols_file, whole
 
         monkeypatch.setattr(
-            cli_compare_release_helpers_mod,
-            "_extract_if_package",
+            stored_compare_mod,
+            "extract_if_package",
             _fake_extract_if_package,
         )
 
@@ -569,6 +571,10 @@ class TestBundleFactsLibraryManifest:
         )
 
         assert code == 0, out
+        # A patch on a name nothing calls passes vacuously: the extraction the
+        # fake stands in for must have run, or the headers assertion below
+        # proves nothing about it.
+        assert extract_calls, "the bundle-facts compare never extracted NEW_INPUT"
         assert captured["headers"] is None
 
     def test_duplicate_library_key_is_rejected(self, tmp_path: Path) -> None:

@@ -5070,5 +5070,47 @@
   "subjects": [
    "elf-export-and-linker-metadata"
   ]
+ },
+ "case219_public_virtual_dispatch_set_changed": {
+  "entity": "rule",
+  "scenario_kind": null,
+  "operation": "compare",
+  "ecosystem": "generic",
+  "topics": [
+   "source"
+  ],
+  "languages": [],
+  "scope": "single-library",
+  "artifact_shape": "fixture-pair",
+  "validation_owner": "evidence-cases",
+  "related_rules": [],
+  "rule_slug": "public-virtual-dispatch-set-changed",
+  "variant_of": null,
+  "relation_type": null,
+  "relation_axis": null,
+  "subjects": [
+   "vtable-and-virtual-dispatch"
+  ]
+ },
+ "case220_public_virtual_dispatch_set_reordered": {
+  "entity": "rule",
+  "scenario_kind": null,
+  "operation": "compare",
+  "ecosystem": "generic",
+  "topics": [
+   "controls"
+  ],
+  "languages": [],
+  "scope": "single-library",
+  "artifact_shape": "fixture-pair",
+  "validation_owner": "evidence-cases",
+  "related_rules": [],
+  "rule_slug": "public-virtual-dispatch-set-reordered",
+  "variant_of": null,
+  "relation_type": null,
+  "relation_axis": null,
+  "subjects": [
+   "vtable-and-virtual-dispatch"
+  ]
  }
 }

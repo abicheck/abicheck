@@ -81,6 +81,17 @@ SOURCE_ENTRIES: list[ChangeKindMeta] = [
         operation=_OP.MODIFIED,
     ),
     _E(
+        "public_virtual_dispatch_set_changed",
+        _R,
+        impact="The set of override implementations a virtual call through a "
+        "stable public virtual method may reach changed between versions (per "
+        "the approximate source-graph dispatch join). A call through the same "
+        "symbol can now land in different code; a source-graph risk to review, "
+        "never on its own an artifact-proven ABI break.",
+        entity=_ENT.SOURCE,
+        operation=_OP.MODIFIED,
+    ),
+    _E(
         "concept_tightened",
         _A,
         impact="A public C++20 concept became more constrained; consumer templates or calls that satisfied the old constraint may no longer compile against the new headers.",
