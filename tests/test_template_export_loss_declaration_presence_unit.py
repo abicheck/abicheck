@@ -29,13 +29,14 @@ from abicheck.buildsource.source_graph import GraphNode, SourceGraphSummary
 from abicheck.buildsource.template_graph_fold import NODE_SOURCE_DECL
 from abicheck.compare.template_instance_absence import (
     TemplateInstanceAbsence,
-    primary_stem,
+    _primary_stem_of,
 )
 from abicheck.diff_symbols import _diff_functions
 from abicheck.elf_metadata import ElfMetadata, ElfSymbol
 from abicheck.model import AbiSnapshot
 from abicheck.model.declarations import Function, Visibility
 from abicheck.model.elf_facts import SymbolBinding, SymbolType
+from abicheck.model.export_entity_name import entity_name_components
 
 _DECLARATION_REMOVAL_KINDS = {"func_removed", "inline_function_removed"}
 _EXPORT_KINDS = {"func_visibility_changed", "func_removed_elf_only"}
@@ -162,7 +163,7 @@ def _detect(
     ],
 )
 def test_primary_stem_names_the_declared_template(mangled: str, stem: str) -> None:
-    assert primary_stem(mangled) == stem
+    assert _primary_stem_of(entity_name_components(mangled)) == stem
 
 
 @pytest.mark.parametrize(
@@ -177,7 +178,7 @@ def test_primary_stem_names_the_declared_template(mangled: str, stem: str) -> No
 def test_primary_stem_makes_no_claim_outside_named_template_members(
     mangled: str,
 ) -> None:
-    assert primary_stem(mangled) is None
+    assert _primary_stem_of(entity_name_components(mangled)) is None
 
 
 @pytest.mark.parametrize("kind", list(_KINDS))

@@ -97,22 +97,17 @@ if TYPE_CHECKING:
     from ..model import AbiSnapshot
     from ..model.export_entity_name import EntityName
 
-__all__ = ["TemplateInstanceAbsence", "member_owner", "primary_stem"]
+__all__ = ["TemplateInstanceAbsence", "member_owner"]
 
 
-def primary_stem(mangled: str) -> str | None:
-    """The header spelling of the template *mangled* instantiates.
+def _primary_stem_of(parsed: EntityName | None) -> str | None:
+    """The header spelling of the template a parsed name instantiates.
 
-    ``_ZN2ns3BoxIdE3setEd`` -> ``ns::Box::set``. ``None`` unless *mangled* is an
+    ``_ZN2ns3BoxIdE3setEd`` -> ``ns::Box::set``. ``None`` unless the name is an
     Itanium name with at least one template-argument list and every scope
     component a plain identifier: a constructor, operator or substitution has no
     header spelling this module can match, so it makes no claim.
     """
-    return _primary_stem_of(entity_name_components(mangled))
-
-
-def _primary_stem_of(parsed: EntityName | None) -> str | None:
-    """:func:`primary_stem` over an already-parsed name."""
     if parsed is None or not parsed.template_positions:
         return None
     if has_synthetic_component(parsed):
