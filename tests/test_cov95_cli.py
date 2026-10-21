@@ -97,8 +97,8 @@ def _severity_config(tmp_path: Path, **levels: str) -> Path:
 
 
 def _gate(preset, abi=None, potential=None, quality=None, addition=None):
-    """Build a :class:`~abicheck.cli_compare_release_helpers.GateOptions` the
-    way :func:`~abicheck.cli_compare_release_helpers.resolve_release_gate_options`
+    """Build a :class:`~abicheck.policy.release_gate_options.GateOptions` the
+    way :func:`~abicheck.policy.release_gate_options.resolve_release_gate_options`
     would (minus pack folding, irrelevant to these unit tests). There is no
     ``scheme`` parameter: ``GateOptions.exit_code_scheme`` is a derived
     property, not a settable field (duplication-and-convergence-assessment
