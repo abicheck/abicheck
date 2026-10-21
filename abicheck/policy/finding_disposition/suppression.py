@@ -97,6 +97,9 @@ def dispose_by_suppression(
     kept: list[Change] = []
     suppressed: list[Change] = []
     diagnostics: list[Change] = []
+    # One coverage record per rule, not per change: keyed by rule identity,
+    # in first-match order, so a broad rule hiding 50 changes reads as one.
+    uncovered: dict[int, tuple[Suppression, list[Change]]] = {}
     for change in changes:
         outcome = suppression.evaluate(change)
         if outcome.suppressed:
@@ -111,7 +114,7 @@ def dispose_by_suppression(
             suppressed.append(change)
             rule = outcome.matched_rule
             if rule is not None and rule.suppresses_without_graph_coverage(change):
-                diagnostics.append(_graph_coverage_diagnostic(change, rule))
+                uncovered.setdefault(id(rule), (rule, []))[1].append(change)
             continue
         kept.append(change)
         if outcome.withheld_rule is not None:
@@ -120,6 +123,9 @@ def dispose_by_suppression(
             diagnostics.append(
                 _unknown_reachability_diagnostic(change, outcome.withheld_unknown_rule)
             )
+    diagnostics.extend(
+        _graph_coverage_diagnostic(rule, hidden) for rule, hidden in uncovered.values()
+    )
     return SuppressionDisposition(
         kept=kept, suppressed=suppressed, diagnostics=diagnostics
     )
@@ -245,29 +251,29 @@ def _rule_selector(rule: Suppression) -> str:
     )
 
 
-def _graph_coverage_diagnostic(change: Change, rule: Suppression) -> Change:
-    """Build the ``GRAPH_COVERAGE_INSUFFICIENT_FOR_SUPPRESSION`` diagnostic.
+def _graph_coverage_diagnostic(rule: Suppression, hidden: list[Change]) -> Change:
+    """Build the per-rule ``GRAPH_COVERAGE_INSUFFICIENT_FOR_SUPPRESSION`` record.
 
     impact-analysis-layer P0 follow-up (the ``unreachable-only`` decision).
-    *rule* suppressed *change* through its default ``unreachable-only`` gate,
-    but ``Change.reachability_state`` is ``UNKNOWN``: graph coverage never
-    cleared the change, so the suppression rests on absence of evidence. The
-    suppression itself is unchanged; this only makes it visible.
+    *rule* hid every change in *hidden* through its default ``unreachable-only``
+    gate while ``Change.reachability_state`` was ``UNKNOWN``. The record is
+    informational: it carries the count and the suppressed change ids, and
+    never changes a verdict or exit code.
     """
+    from ...compare.finding_identity import report_canonical_finding_id
     from ...model.change import Change
     from ...model.change_catalog.kinds import ChangeKind
 
+    ids = ", ".join(report_canonical_finding_id(c) for c in hidden)
     return Change(
         kind=ChangeKind.GRAPH_COVERAGE_INSUFFICIENT_FOR_SUPPRESSION,
-        symbol=change.symbol,
+        symbol=_rule_selector(rule),
         description=(
-            f"Suppression rule {_rule_selector(rule)!r} suppressed "
-            f"{change.symbol!r} ({change.kind.value}) without graph coverage: "
-            "its reachability was never established (unknown, not proven "
-            "unreachable), and the default reachability: unreachable-only gate "
-            "treats that as not public. Add `reachability: "
-            "proven-unreachable-only` to this rule to withhold matches until "
-            "graph coverage proves them unreachable."
+            f"{len(hidden)} suppressed by rule {_rule_selector(rule)!r} without "
+            "graph coverage: their reachability was never established (unknown, "
+            "not proven unreachable), and reachability: unreachable-only treats "
+            "that as not public. Suppressed change ids: "
+            f"{ids}. Add `reachability: proven-unreachable-only` to this rule to "
+            "withhold matches until graph coverage proves them unreachable."
         ),
-        caused_by_type=change.symbol,
     )

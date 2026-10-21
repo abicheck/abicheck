@@ -161,7 +161,7 @@ class TestCase193OrdinaryExportedFnCallNotReachable:
             example_catalog.case_dir(self.CASE) / "suppress.yaml"
         )
         result = compare(old, new, suppression=suppression)
-        assert result.verdict == Verdict.COMPATIBLE_WITH_RISK
+        assert result.verdict == Verdict.COMPATIBLE
         assert [c.kind for c in result.changes] == [
             ChangeKind.GRAPH_COVERAGE_INSUFFICIENT_FOR_SUPPRESSION
         ]

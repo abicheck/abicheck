@@ -1825,7 +1825,7 @@ impact/composition evidence. Minimal new user-facing set:
 | `PUBLIC_VIRTUAL_DISPATCH_SET_CHANGED` | `RISK`, correlated with existing vtable findings |
 | `PUBLIC_MACRO_CONTRACT_CHANGED` | `API_BREAK` or behavioral `RISK` |
 | `PUBLIC_CALLBACK_TARGET_CHANGED` | `RISK`; break only with proven signature/symbol mismatch |
-| `GRAPH_COVERAGE_INSUFFICIENT_FOR_SUPPRESSION` | risk/advisory diagnostic for a suppression that hid a change graph coverage never analysed. Shipped for the `unreachable-only` gate only; see the decision below |
+| `GRAPH_COVERAGE_INSUFFICIENT_FOR_SUPPRESSION` | informational audit record, one per rule, for suppressions that hid changes graph coverage never analysed. Shipped for the `unreachable-only` gate only; see the decision below |
 | `CONSUMER_IMPACT_PATH_CONFIRMED` | impact overlay on an existing raw break, not a new raw break |
 | `USE_CASE_IMPACT_CONFIRMED` | report-level impact, not a new ABI `ChangeKind` |
 
@@ -1911,16 +1911,16 @@ semantics unchanged.** Existing policy files keep working, and the gate still
 keys on the boolean. Instead, the disposition makes the hidden change visible.
 When `unreachable-only` suppresses a change whose `reachability_state` is
 `UNKNOWN` (never established, not proven `False`), the report records a
-`GRAPH_COVERAGE_INSUFFICIENT_FOR_SUPPRESSION` diagnostic (risk, advisory,
-L1) that names the rule and the suppressed symbol. Each such change gets its
-own diagnostic, so the report reads as "N suppressed by rule X without graph
-coverage". A suppression proven unreachable records nothing new, and a change
-that is not suppressed is unaffected. Two consequences:
+`GRAPH_COVERAGE_INSUFFICIENT_FOR_SUPPRESSION` informational audit record
+(`COMPATIBLE`, L1). It is aggregated to one record per rule, carrying the
+count and the suppressed change ids, rendered as "N suppressed by rule X
+without graph coverage". A suppression proven unreachable records nothing new,
+and a change that is not suppressed is unaffected. Two consequences:
 
-- The diagnostic's classification matches `SUPPRESSION_REACHABILITY_UNKNOWN`
-  (RISK, `COMPATIBLE_WITH_RISK`). The exit code is unchanged. The rendered
-  verdict string of an affected run moves from `COMPATIBLE` to
-  `COMPATIBLE_WITH_RISK`, and that move is intended.
+- The record never changes the verdict or the exit code. A binary-only run
+  with a default `unreachable-only` rule stays `COMPATIBLE`. A run whose only
+  changes were suppressed reads `COMPATIBLE` rather than `NO_CHANGE` through the
+  Python API, because the informational record is now a change.
 - It renders in the same formats as the sibling diagnostic (JSON, Markdown,
   HTML, SARIF). Neither is shown in JUnit.
 

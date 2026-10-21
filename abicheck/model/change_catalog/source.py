@@ -716,20 +716,6 @@ SOURCE_ENTRIES: list[ChangeKindMeta] = [
         operation=_OP.MODIFIED,
     ),
     _E(
-        "graph_coverage_insufficient_for_suppression",
-        _R,
-        impact="A suppression rule using the default `unreachable-only` gate "
-        "hid this change, but graph coverage never established whether it is "
-        "reachable from the public ABI surface: its reachability is unknown, "
-        "not proven unreachable. The suppression therefore rests on absence "
-        "of evidence. The change is still recorded as suppressed; this finding "
-        "names the rule that hid it. Add `reachability: proven-unreachable-only` "
-        "to that rule to withhold matches until graph coverage proves them "
-        "unreachable. Advisory: it does not change the exit code.",
-        entity=_ENT.ANALYSIS,
-        operation=_OP.MODIFIED,
-    ),
-    _E(
         "suppression_would_hide_public_break",
         _R,
         impact="A namespace/source_location suppression rule matched this change, "
