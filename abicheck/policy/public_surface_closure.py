@@ -129,7 +129,6 @@ from .public_surface_index import (
     _record_origin,
     _symbol_keys,
 )
-from .typedef_spelling_keys import typedef_keys_for_spelling
 
 if TYPE_CHECKING:
     from ..model.declarations import Function, Variable
@@ -453,7 +452,7 @@ def _walk_type_closure(
         # Follow typedef targets. A spelling may name several qualified
         # typedefs (two classes' ``value_type``): follow every one, the same
         # anti-hiding rule the record/enum tail below applies.
-        for key in typedef_keys_for_spelling(snap, name):
+        for key in refs.typedef_spellings.keys_for(name):
             surface.public_typedefs.update((name, key))
             for ident in _typedef_target_identifiers(refs, snap, key):
                 if ident not in seen:
@@ -548,7 +547,7 @@ def _walk_exact_type_closure(
         if name in seen:
             continue
         seen.add(name)
-        keys = typedef_keys_for_spelling(snap, name)
+        keys = refs.typedef_spellings.keys_for(name)
         if len(keys) == 1:
             # A unique typedef is exact: reaching this name at all (which, by
             # this walk's invariant, only happens via an already-all-exact

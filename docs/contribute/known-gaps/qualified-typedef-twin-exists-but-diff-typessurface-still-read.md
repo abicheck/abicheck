@@ -11,7 +11,7 @@ generated: false
 
 Index: [Known gaps](../known-gaps.md)
 
-**Status (2026-10-21, branch `fix/surface-qualified-typedefs`): PARTIAL, narrowed.** `AbiSnapshot.typedefs_qualified` exists (model/snapshot.py:466) and is read by `type_reachability.py` (`_merged_typedefs`) and, as of this pass, by the public-surface closure (`policy/public_surface_closure.py`, `typedef_keys_for_spelling` (`policy/typedef_spelling_keys.py`); see the closing section). Still bare-keyed: `diff_types.py` typedef diffing, and the graph identity table in `model/graph_entity_identity.py`/`compare/surface_graph.py` (see the closing section for the exact remainder).
+**Status (2026-10-21, branch `fix/surface-qualified-typedefs`): PARTIAL, narrowed.** `AbiSnapshot.typedefs_qualified` exists (model/snapshot.py:466) and is read by `type_reachability.py` (`_merged_typedefs`) and, as of this pass, by the public-surface closure (`policy/public_surface_closure.py`, `TypedefSpellingIndex` (`compare/typedef_spelling_keys.py`, built once per resolve on `ReferencedIdentifiers`); see the closing section). Still bare-keyed: `diff_types.py` typedef diffing, and the graph identity table in `model/graph_entity_identity.py`/`compare/surface_graph.py` (see the closing section for the exact remainder).
 
 `dumper_castxml.py`'s `parse_typedefs()` and
 `dumper_clang.py`'s `parse_typedefs()` both do the identical
