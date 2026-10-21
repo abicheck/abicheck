@@ -14,6 +14,14 @@ on any change in either direction:
 The import list is what changes when a renderer starts deciding, so it is
 the thing to assert on; the rendered text is identical either way.
 
+The same ratchet covers ``html_report.py``, the HTML compute half that every
+``render_html*`` projection is fed from. It is a *source* module, not a
+renderer, so it may read a ``DiffResult``; what it may not do is reach policy
+on its own. Its policy-touching facts (impact text, active reclassify rules,
+effective kind sets, the disposition audit and the versioning acceptance) now
+resolve through ``report/`` owners. What remains is recorded below and shrinks
+as those two legacy root modules move into ``report/``.
+
 Recorded debt (tracked by ``report/AGENTS.md``'s "Prohibited
 responsibilities"): both Markdown projections import ``effective_kind_sets``
 and call ``compute_disposition_audit`` as a fallback for direct callers that
@@ -31,17 +39,30 @@ import abicheck.report as report_package
 
 #: Top-level packages a renderer must not reach for decisions.
 _POLICY_HEADS = frozenset(
-    {"policy", "checker_policy", "report_classifications", "reclassify", "severity"}
+    {
+        "policy",
+        "checker_policy",
+        "report_classifications",
+        "reclassify",
+        "severity",
+        "report_summary",
+    }
 )
 #: Disposition-audit *compute* entry points (the renderer should read the
 #: document's ``disposition_audit`` instead of recomputing it).
 _DISPOSITION_COMPUTE = frozenset({"compute_disposition_audit", "add_disposition_audit"})
+
+#: Compute-half source module outside ``report/`` that the ratchet also covers.
+_SOURCE_MODULES = ("html_report.py",)
 
 _RECORDED_POLICY_IMPORTS: dict[str, frozenset[str]] = {
     "render_markdown_alternate.py": frozenset({"policy.evaluate"}),
     "render_markdown_document.py": frozenset(
         {"policy.evaluate", "policy.classification"}
     ),
+    # Legacy root modules still holding the HTML compute's registry lookups
+    # (``kind_str``/``category``/``severity``) and ``compatibility_metrics``.
+    "html_report.py": frozenset({"report_classifications", "report_summary"}),
 }
 _RECORDED_DISPOSITION_COMPUTE: dict[str, frozenset[str]] = {
     "render_markdown_alternate.py": frozenset({"compute_disposition_audit"}),
@@ -55,11 +76,17 @@ def _render_modules() -> list[Path]:
     return sorted(package_dir.glob("render_*.py"))
 
 
+def _ratchet_modules() -> list[Path]:
+    package_dir = Path(next(iter(report_package.__path__)))
+    source_dir = package_dir.parent
+    return [*_render_modules(), *(source_dir / name for name in _SOURCE_MODULES)]
+
+
 def _observed() -> tuple[dict[str, frozenset[str]], dict[str, frozenset[str]]]:
-    """Every import in every render module, module-level or function-local."""
+    """Every import in every ratcheted module, module-level or function-local."""
     policy: dict[str, frozenset[str]] = {}
     disposition: dict[str, frozenset[str]] = {}
-    for path in _render_modules():
+    for path in _ratchet_modules():
         tree = ast.parse(path.read_text(encoding="utf-8"))
         reached: set[str] = set()
         compute: set[str] = set()
@@ -102,8 +129,9 @@ def test_render_modules_call_disposition_compute_only_as_recorded() -> None:
 
 
 def test_render_html_modules_stay_policy_free() -> None:
-    """HTML is already clean; it must never be added to the allowlist."""
+    """The HTML render modules are already clean; they must never be added to
+    the allowlist. ``html_report.py`` is a source module, asserted above."""
     policy, disposition = _observed()
-    html_modules = [name for name in policy if "html" in name]
-    assert html_modules == []
-    assert [name for name in disposition if "html" in name] == []
+    html_renderers = [name for name in policy if name.startswith("render_html")]
+    assert html_renderers == []
+    assert [name for name in disposition if name.startswith("render_html")] == []
