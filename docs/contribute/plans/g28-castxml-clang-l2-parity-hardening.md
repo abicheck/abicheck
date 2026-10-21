@@ -441,9 +441,20 @@ Findings:
    `tests/test_default_template_arg_l2_matrix.py` pins every cell of this
    table, so a change to any backend's answer fails there first.
 
-Phase 5 therefore closes as "investigated, no detector change". Reopen it
-only if a consumer needs shape B reported as a break, which would need a
-decision on the verdict for a header-only change first.
+Phase 5's investigation is complete, and it leaves no detector change in
+place today. The verdict question it raised is decided in
+[ADR-085](../adr/085-template-parameter-default-arguments.md) (Proposed):
+
+- the snapshot records template-parameter defaults as an availability-carrying
+  fact (schema v61; castxml and pre-v61 snapshots read as UNKNOWN);
+- a header-only default change is a new `API_BREAK` kind, and
+  `DEFAULT_TEMPLATE_ARG_CHANGED` keeps `BREAKING` for exported-instantiation
+  evidence (shape A);
+- castxml reports the shape-B case as an explicit coverage gap, not
+  `NO_CHANGE`.
+
+Once ADR-085 is accepted, the shape-B `NO_CHANGE` answer in the table above
+is superseded. The implementation slices are listed in the ADR.
 
 ---
 

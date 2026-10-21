@@ -11,7 +11,7 @@ the same cases by rule, scenario kind, ecosystem, operation, evidence level,
 language, and verdict.
 
 <!-- BEGIN GENERATED: catalog-headline (keep counts in sync with examples/ground_truth.json) -->
-This directory contains **218 cases** (213 single-library + 5 multi-library bundle cases) demonstrating real-world ABI/API break scenarios. Most cases are a minimal, compilable C/C++ example with:
+This directory contains **220 cases** (215 single-library + 5 multi-library bundle cases) demonstrating real-world ABI/API break scenarios. Most cases are a minimal, compilable C/C++ example with:
 <!-- END GENERATED: catalog-headline -->
 
 - Paired `v1/` and `v2/` source + headers.
@@ -43,10 +43,10 @@ The catalog drives abicheck's benchmark and serves as an encyclopedia of ABI pit
 |---------|-------|-------------------------|------|
 | BREAKING | 113 | `BREAKING_KINDS` | 🔴 |
 | API_BREAK | 21 | `API_BREAK_KINDS` | 🟠 |
-| COMPATIBLE_WITH_RISK | 35 | `RISK_KINDS` | 🟡 |
+| COMPATIBLE_WITH_RISK | 36 | `RISK_KINDS` | 🟡 |
 | COMPATIBLE (addition) | 12 | `ADDITION_KINDS` | 🟢 |
 | COMPATIBLE (quality) | 21 | `QUALITY_KINDS` | 🟡 |
-| NO_CHANGE | 11 | — | ✅ |
+| NO_CHANGE | 12 | — | ✅ |
 | Bundle (multi-binary) | 5 | see [Multi-binary analysis](../docs/use/multi-binary.md) | 🔵 |
 <!-- END GENERATED: verdict-distribution -->
 
@@ -97,11 +97,11 @@ Commands below use `PYTHONPATH=.`.
 | Check | Command | Executed where | Scope | Result | Status |
 |---|---|---|---:|---|---|
 | Build/autodiscovery | `python -m pytest tests/test_example_autodiscovery.py -v --tb=short -m integration` | CI Linux, gcc/clang | 209 integration items | gcc: 149 passed / 55 skipped / 5 xfailed; clang: 149 passed / 54 skipped / 6 xfailed | Green default single-library build lane. `case115_bit_int_width_changed` needs a `_BitInt`-capable CastXML-bundled Clang; a sandbox with an older bundled Clang (unrelated to the fix in this catalog) sees it fail there instead of building — see `docs/contribute/examples-validation-runbook.md` |
-| Full example proof matrix | `skills-src/evaluation/validation/scripts/collect_full_example_matrix.py` over CI artifacts + dedicated bundle/G20/L3-L5/BTF proofs | CI aggregation | 218 catalog cases | 218/218 COVERED; 218 direct; 0 FAILED / 0 UNRESOLVED | Canonical full-catalog status; a lane-local `SKIP` is accepted only when a dedicated proof covers that case |
-| Default/debug verdicts | `ABICHECK_TRUSTED_SOURCE_SMOKE_RUN=1 PYTHONPATH=. python tests/validate_examples.py --toolchain {gcc,clang} --json` | CI Linux, gcc/clang | 218 catalog cases | gcc: 176 PASS / 3 XFAIL / 39 SKIP; clang: 175 PASS / 4 XFAIL / 1 NOT_APPLICABLE / 38 SKIP | Green default/debug verdict lane. Without the env var, 7 `source_smoke: {mode: run}` cases SKIP instead of running. Under clang `case180_symbol_binding_lost_unique` is `NOT_APPLICABLE`: clang never emits `STB_GNU_UNIQUE`, so its v1/v2 are the same transition-free pair, and the lane checks the `NO_CHANGE` that pair warrants (`not_applicable_expected`) instead of excusing a miss as XFAIL |
-| Runtime smoke | `PYTHONPATH=. python skills-src/evaluation/validation/scripts/run_example_runtime_smoke.py --json` | Linux proof run | 218 catalog cases | 98 DEMONSTRATED / 79 NO_RUNTIME_SIGNAL / 41 SKIP | Passing; no BUILD_ERROR. The runner now compares each app's baseline exit code against a per-case `runtime_baseline_exit` in `ground_truth.json` (default 0) instead of hardcoding zero, so apps that deliberately return a computed value (e.g. case111's `ets(42).local()` returning `42`) are no longer misread as a broken baseline. No case shows a signal against its own baseline library (`BASELINE_SIGNAL`), so every DEMONSTRATED is a v2-only effect — see "Known validation gaps" below for case06's rewrite |
-| Release headers | `ABICHECK_TRUSTED_SOURCE_SMOKE_RUN=1 python tests/validate_examples.py --artifact-variant release-headers --json` | CI Linux artifact | 218 catalog cases | 176 PASS / 3 XFAIL / 39 SKIP | Informational; the false-risk regression on `case61_var_added` (`exported_object_alignment_reduced`) is fixed — CastXML now resolves a variable's natural type alignment as declared-alignment corroboration even without an explicit `alignas` override. Without the env var, the same 7 cases SKIP instead |
-| Stripped headers | `ABICHECK_TRUSTED_SOURCE_SMOKE_RUN=1 python tests/validate_examples.py --artifact-variant stripped-headers --json` | CI Linux artifact | 218 catalog cases | 172 PASS / 4 FAIL / 3 XFAIL / 39 SKIP | Informational; reduced-evidence signal-loss backlog (below). Without the env var, the same 7 cases SKIP instead |
+| Full example proof matrix | `skills-src/evaluation/validation/scripts/collect_full_example_matrix.py` over CI artifacts + dedicated bundle/G20/L3-L5/BTF proofs | CI aggregation | 220 catalog cases | 220/220 COVERED; 220 direct; 0 FAILED / 0 UNRESOLVED | Canonical full-catalog status; a lane-local `SKIP` is accepted only when a dedicated proof covers that case |
+| Default/debug verdicts | `ABICHECK_TRUSTED_SOURCE_SMOKE_RUN=1 PYTHONPATH=. python tests/validate_examples.py --toolchain {gcc,clang} --json` | CI Linux, gcc/clang | 220 catalog cases | gcc: 176 PASS / 3 XFAIL / 41 SKIP; clang: 175 PASS / 4 XFAIL / 1 NOT_APPLICABLE / 40 SKIP | Green default/debug verdict lane. Without the env var, 7 `source_smoke: {mode: run}` cases SKIP instead of running. Under clang `case180_symbol_binding_lost_unique` is `NOT_APPLICABLE`: clang never emits `STB_GNU_UNIQUE`, so its v1/v2 are the same transition-free pair, and the lane checks the `NO_CHANGE` that pair warrants (`not_applicable_expected`) instead of excusing a miss as XFAIL |
+| Runtime smoke | `PYTHONPATH=. python skills-src/evaluation/validation/scripts/run_example_runtime_smoke.py --json` | Linux proof run | 220 catalog cases | 98 DEMONSTRATED / 79 NO_RUNTIME_SIGNAL / 43 SKIP | Passing; no BUILD_ERROR. The runner now compares each app's baseline exit code against a per-case `runtime_baseline_exit` in `ground_truth.json` (default 0) instead of hardcoding zero, so apps that deliberately return a computed value (e.g. case111's `ets(42).local()` returning `42`) are no longer misread as a broken baseline. No case shows a signal against its own baseline library (`BASELINE_SIGNAL`), so every DEMONSTRATED is a v2-only effect — see "Known validation gaps" below for case06's rewrite |
+| Release headers | `ABICHECK_TRUSTED_SOURCE_SMOKE_RUN=1 python tests/validate_examples.py --artifact-variant release-headers --json` | CI Linux artifact | 220 catalog cases | 176 PASS / 3 XFAIL / 41 SKIP | Informational; the false-risk regression on `case61_var_added` (`exported_object_alignment_reduced`) is fixed — CastXML now resolves a variable's natural type alignment as declared-alignment corroboration even without an explicit `alignas` override. Without the env var, the same 7 cases SKIP instead |
+| Stripped headers | `ABICHECK_TRUSTED_SOURCE_SMOKE_RUN=1 python tests/validate_examples.py --artifact-variant stripped-headers --json` | CI Linux artifact | 220 catalog cases | 172 PASS / 4 FAIL / 3 XFAIL / 41 SKIP | Informational; reduced-evidence signal-loss backlog (below). Without the env var, the same 7 cases SKIP instead |
 | Build/source proof | `ABICHECK_TRUSTED_SOURCE_SMOKE_RUN=1 python tests/validate_examples.py case01 case04 case98 case105 case122 case129 case130 case131 case132 case133 --artifact-variant build-source --json` | CI Linux artifact | 10 representative cases | 10 PASS | Required release proof; includes L3 C++ floor and L4 concept/template regressions. Not full L3-L5 catalog coverage — see "Known validation gaps" |
 
 Counts above are from the most recent full catalog run this table was refreshed against; re-run
@@ -489,6 +489,8 @@ Expected non-pass buckets are already represented in `ground_truth.json`:
 | [216](cases/case216_overload_added_beside_initializer_list/README.md) | Overload Added Beside an `initializer_list` Overload | Addition | 🟢 COMPATIBLE |
 | [217](cases/case217_export_loss_weak_binding_demoted/README.md) | WEAK export loss demoted to a risk by a `binding: weak` rule | Breaking | 🔴 BREAKING |
 | [218](cases/case218_export_loss_strong_binding_stays_breaking/README.md) | a GLOBAL export loss stays BREAKING under a `binding: weak` rule | Breaking | 🔴 BREAKING |
+| [219](cases/case219_public_virtual_dispatch_set_changed/README.md) | Public Virtual Method's Override Set Changes | Risk | 🟡 COMPATIBLE_WITH_RISK |
+| [220](cases/case220_public_virtual_dispatch_set_reordered/README.md) | Public Virtual Method's Override Set Reordered | No Change | ✅ NO_CHANGE |
 <!-- END GENERATED: case-index -->
 
 ---

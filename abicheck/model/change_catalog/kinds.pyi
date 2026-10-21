@@ -304,6 +304,7 @@ class ChangeKind(StrEnum):
     SOURCE_TO_BINARY_MAPPING_CHANGED = 'source_to_binary_mapping_changed'
     GENERATED_HEADER_REACHES_PUBLIC_API = 'generated_header_reaches_public_api'
     CALL_GRAPH_PUBLIC_ENTRY_REACHABILITY_CHANGED = 'call_graph_public_entry_reachability_changed'
+    PUBLIC_VIRTUAL_DISPATCH_SET_CHANGED = 'public_virtual_dispatch_set_changed'
     INCLUDE_GRAPH_PUBLIC_HEADER_DRIFT = 'include_graph_public_header_drift'
     BUILD_OPTION_REACHES_PUBLIC_SYMBOL = 'build_option_reaches_public_symbol'
     PUBLIC_API_INTERNAL_DEPENDENCY_ADDED = 'public_api_internal_dependency_added'

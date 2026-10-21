@@ -11,7 +11,7 @@ generated: false
 
 Index: [Known gaps](../known-gaps.md)
 
-**Status (re-verified 2026-10-21): PARTIAL, narrowed.** The diff side is wired, and the surface side is still open. See the update at the end of this page.
+**Status (2026-10-21, branch `fix/surface-qualified-typedefs`): PARTIAL, narrowed.** The diff side is wired (see the update at the end of this page). The public-surface closure is wired by this branch (`policy/public_surface_closure.py`, closing section). Still bare-keyed: the graph identity table in `model/graph_entity_identity.py`/`compare/surface_graph.py`, and the remaining qualified-spelling tail candidate.
 
 `dumper_castxml.py`'s `parse_typedefs()` and
 `dumper_clang.py`'s `parse_typedefs()` both do the identical
@@ -110,17 +110,43 @@ base-change finding. `tests/test_typedef_qualified_collision.py`'s
 `TestSameNamedTypedefsInSiblingNamespaces` pins these cases. Forcing the bare
 maps makes four of its tests fail.
 
-**Still open: the surface side.** The surface typedef-following now lives in
-`policy/public_surface_closure.py` (`_walk_type_closure` and
-`_walk_exact_type_closure`), not `surface.py`. Both look up
-`snap.declarations.typedefs.get(name)` by bare name, and the surface graph
-builds its typedef identities from the same bare-keyed map
-(`compare/surface_graph.py`, `model/graph_entity_identity.py`). Threading a
-qualified key through them needs a decision this page does not make: a
-signature or field spells a typedef as written, so an unqualified `value_type`
-inside `class A` has to resolve to `A::value_type`. The walk has no scope
-context to do that, and the surface graph's identity change touches every
-consumer of the graph. Until that is decided, a surface-side wrong target from
-a bare collision remains possible. Probing it needs header-origin
-classification, because without it every record counts as public and the bare
-lookup never changes the outcome.
+**Surface closure wired (2026-10-21, branch `fix/surface-qualified-typedefs`).**
+`policy/public_surface_closure.py`'s two typedef walks no longer look a spelling
+up by its bare key alone. A spelling resolves through `typedefs_qualified` via
+`TypedefSpellingIndex` (`compare/typedef_spelling_keys.py`), built once per
+resolve on `ReferencedIdentifiers`: a bare spelling matches every qualified
+typedef whose `::`-tail equals it, and a qualified spelling matches its exact
+key. This answers main's open question for the closure: an unqualified
+`value_type` is treated as ambiguous across every colliding tail, not resolved
+by scope, so every match is followed (anti-hiding). Exactness:
+
+- **Unique match** -- followed, its target's identifiers walked, and the
+  spelling and resolved qualified key recorded in `exact_type_identities`.
+- **Several matches** -- every match followed and marked public, as the record
+  and enum tails already do. Nothing reached through the fork is exact and
+  nothing is expanded by the exact walk.
+- **No qualified match, or a pre-v25 snapshot** -- the bare dict decides, as before.
+
+Verified end to end: a field-type change in the class only the colliding
+`Foo::value_type` alias reaches was `NO_CHANGE` before and is `BREAKING`
+(`type_field_type_changed`) after. Covered by
+`tests/test_public_surface_qualified_typedefs.py`, which the
+`policy.public_surface_reachability` regression class seeds.
+
+**Narrowed remainder (not closed here):**
+
+1. **Qualified spellings are not exact-only in the closure.** The identifier
+   tokenizer (`model/type_identifiers.py`) emits a `::`-qualified token's bare
+   tail as a candidate spelling as well. A qualified reference such as
+   `Foo::value_type` therefore also reaches the bare-tail sibling
+   `Bar::value_type` through the anti-hiding walk, and a unique tail can mark a
+   deeper key exact. Records already behave this way for `Inner`-style tails.
+   Making qualified spellings exact-only needs the walk to carry the originating
+   token's form (provenance), a broader change.
+2. **Graph identity table is still bare-keyed.** `model/graph_entity_identity.
+   snapshot_identities` builds `SnapshotIdentities.typedefs` from
+   `declarations.typedefs` only, and `compare/surface_graph.py` reads that bare
+   table. `graph_entity_identity` uses `typedefs_qualified` only for ctor/dtor
+   linker-name resolution. A qualified typedef therefore has no graph node.
+   Changing node identity changes persisted graph content, so it needs its own
+   schema decision and is left open.

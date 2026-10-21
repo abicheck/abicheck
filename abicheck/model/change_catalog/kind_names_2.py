@@ -536,6 +536,11 @@ KIND_NAMES_2: tuple[tuple[str, str, str | None], ...] = (
         "impl reachable from an exported entry changed → COMPATIBLE (quality)",
     ),
     (
+        "PUBLIC_VIRTUAL_DISPATCH_SET_CHANGED",
+        "public_virtual_dispatch_set_changed",
+        "possible override target set of a public virtual method changed → RISK",
+    ),
+    (
         "INCLUDE_GRAPH_PUBLIC_HEADER_DRIFT",
         "include_graph_public_header_drift",
         "the include closure of a public header changed → RISK",

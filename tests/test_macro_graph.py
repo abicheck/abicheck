@@ -27,6 +27,7 @@ import shutil
 
 import pytest
 
+from abicheck.buildsource.clang_ast_run import TuAstDump
 from abicheck.buildsource.macro_graph import (
     ConditionalRegion,
     DeclRange,
@@ -950,12 +951,18 @@ def test_parse_tu_decl_ranges_resolves_relative_file_against_own_cwd(
     Windows, where ``os.path.join``/``normpath`` (which the implementation
     itself correctly uses, since a real join must produce a path the host OS
     can actually open) produce backslash separators instead."""
-    import abicheck.buildsource.call_graph as call_graph_mod
     import abicheck.buildsource.macro_graph as macro_graph_mod
     from abicheck.buildsource.build_evidence import CompileUnit
+    from abicheck.buildsource.source_extractors import (
+        clang_command as clang_command_mod,
+    )
 
     out_dir = tmp_path / "build" / "out"
-    monkeypatch.setattr(call_graph_mod, "_replay_cwd", lambda cu: str(out_dir))
+    monkeypatch.setattr(
+        clang_command_mod,
+        "compile_unit_invocation",
+        lambda cu: (cu.source, str(out_dir)),
+    )
     monkeypatch.setattr(
         macro_graph_mod,
         "parse_clang_ast_decl_ranges",
@@ -975,13 +982,19 @@ def test_parse_tu_decl_ranges_resolves_relative_file_against_own_cwd(
 def test_parse_tu_decl_ranges_leaves_absolute_file_untouched(
     monkeypatch, tmp_path
 ) -> None:
-    import abicheck.buildsource.call_graph as call_graph_mod
     import abicheck.buildsource.macro_graph as macro_graph_mod
     from abicheck.buildsource.build_evidence import CompileUnit
+    from abicheck.buildsource.source_extractors import (
+        clang_command as clang_command_mod,
+    )
 
     out_dir = tmp_path / "build" / "out"
     abs_file = str(tmp_path / "abs" / "a.h")
-    monkeypatch.setattr(call_graph_mod, "_replay_cwd", lambda cu: str(out_dir))
+    monkeypatch.setattr(
+        clang_command_mod,
+        "compile_unit_invocation",
+        lambda cu: (cu.source, str(out_dir)),
+    )
     monkeypatch.setattr(
         macro_graph_mod,
         "parse_clang_ast_decl_ranges",
@@ -1019,7 +1032,9 @@ def test_run_ast_passes_degrades_on_malformed_line_value(monkeypatch) -> None:
             }
         ],
     }
-    monkeypatch.setattr(l5, "run_clang_ast_dump", lambda *a, **k: malformed_ast)
+    monkeypatch.setattr(
+        l5, "dump_compile_unit", lambda *a, **k: TuAstDump(malformed_ast, 0, "")
+    )
     build = BuildEvidence(
         compile_units=[CompileUnit(id="cu://a", source="a.c", input_files=["a.c"])]
     )
@@ -1056,7 +1071,7 @@ def test_run_ast_passes_dedups_exact_duplicate_span_across_units(
     from abicheck.buildsource.build_evidence import BuildEvidence, CompileUnit
 
     same = DeclRange("Widget", "t.h", 2, 2)
-    monkeypatch.setattr(l5, "run_clang_ast_dump", lambda *a, **k: {})
+    monkeypatch.setattr(l5, "dump_compile_unit", lambda *a, **k: TuAstDump({}, 0, ""))
     real = _macro_pass()[0]
     fake_pass = l5.AstPass(real.name, lambda _ast, _cu: [same], real.merge)
     build = BuildEvidence(

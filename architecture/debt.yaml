@@ -14,7 +14,7 @@
     },
     {
       "path": "abicheck/buildsource/adapters/adapter_shared.py",
-      "baseline_lines": 1234,
+      "baseline_lines": 1112,
       "target": "extract/build-or-source",
       "rule": "no_growth",
       "disposition": "migrate",
@@ -69,7 +69,7 @@
     },
     {
       "path": "abicheck/buildsource/call_graph.py",
-      "baseline_lines": 1137,
+      "baseline_lines": 986,
       "target": "extract/build-or-source",
       "rule": "no_growth",
       "disposition": "migrate",
@@ -223,7 +223,7 @@
     },
     {
       "path": "abicheck/buildsource/source_extractors/_argv.py",
-      "baseline_lines": 1689,
+      "baseline_lines": 1491,
       "target": "extract/build-or-source",
       "rule": "no_growth",
       "disposition": "migrate",
@@ -234,7 +234,7 @@
     },
     {
       "path": "abicheck/buildsource/source_extractors/clang.py",
-      "baseline_lines": 1221,
+      "baseline_lines": 1144,
       "target": "extract/build-or-source",
       "rule": "no_growth",
       "disposition": "migrate",
@@ -267,7 +267,7 @@
     },
     {
       "path": "abicheck/buildsource/source_replay.py",
-      "baseline_lines": 1204,
+      "baseline_lines": 1120,
       "target": "extract/build-or-source",
       "rule": "no_growth",
       "disposition": "migrate",
@@ -839,7 +839,7 @@
     },
     {
       "path": "abicheck/reporter_markdown.py",
-      "baseline_lines": 1352,
+      "baseline_lines": 1350,
       "target": "report",
       "rule": "no_growth",
       "disposition": "migrate",
@@ -1136,7 +1136,7 @@
     },
     {
       "path": "tests/test_build_source_cli.py",
-      "baseline_lines": 3780,
+      "baseline_lines": 3768,
       "target": "tests/unit-or-contract ownership matching production migration",
       "rule": "no_growth",
       "disposition": "migrate",
@@ -1191,7 +1191,7 @@
     },
     {
       "path": "tests/test_call_graph.py",
-      "baseline_lines": 1908,
+      "baseline_lines": 1903,
       "target": "tests/unit-or-contract ownership matching production migration",
       "rule": "no_growth",
       "disposition": "migrate",
@@ -1895,7 +1895,7 @@
     },
     {
       "path": "tests/test_source_extractors_clang.py",
-      "baseline_lines": 3486,
+      "baseline_lines": 3484,
       "target": "tests/unit-or-contract ownership matching production migration",
       "rule": "no_growth",
       "disposition": "migrate",
