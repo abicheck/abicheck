@@ -35,6 +35,7 @@ from ..model.change import Change
 from ..model.change_catalog.kinds import ChangeKind
 from ..model.name_heuristics import NameHeuristicEffect, register_name_heuristic
 from ..model.qualified_name_split import split_top_level_scopes
+from .spelling_pattern import WORD_TOKEN_RE
 
 # Change kinds that represent root type/enum changes (for redundancy filtering).
 ROOT_TYPE_CHANGE_KINDS: frozenset[ChangeKind] = frozenset(
@@ -228,7 +229,7 @@ def _compile_root_patterns(root_types: dict[str, Change]) -> dict[str, re.Patter
     return {name: _root_pattern(name) for name in root_types}
 
 
-_WORD_RUN = re.compile(r"[A-Za-z0-9_]+")
+_WORD_RUN = WORD_TOKEN_RE
 
 
 class _RootIndex:

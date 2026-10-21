@@ -450,7 +450,11 @@ def sample(event: str, /, **attrs: Any) -> None:
     Returns immediately -- one boolean test, no probing -- when tracing is
     off, which is the default.
     """
-    if not memory_trace_enabled():
+    # Inlined `memory_trace_enabled()`: these run at every stage mark, and
+    # the latch is read once per process (see `_resolve`).
+    if not _resolved:
+        _resolve()
+    if _path is None:
         return
     tree_rss, tree_pss, procs = _tree_memory()
     cg_current, cg_peak = _cgroup_memory()
@@ -501,7 +505,11 @@ def counts(event: str, /, **values: Any) -> None:
     member evidence. Pairing these with :func:`sample` is what makes a peak
     attributable instead of merely observed.
     """
-    if not memory_trace_enabled():
+    # Inlined `memory_trace_enabled()`: these run at every stage mark, and
+    # the latch is read once per process (see `_resolve`).
+    if not _resolved:
+        _resolve()
+    if _path is None:
         return
     _write(
         {
@@ -527,7 +535,11 @@ def mark(name: str, /, **attrs: Any) -> None:
 
     Off by default and one boolean test when off, like everything else here.
     """
-    if not memory_trace_enabled():
+    # Inlined `memory_trace_enabled()`: these run at every stage mark, and
+    # the latch is read once per process (see `_resolve`).
+    if not _resolved:
+        _resolve()
+    if _path is None:
         return
     sample(name, **attrs)
     _reset_tracemalloc_peak()
@@ -554,7 +566,9 @@ def phase(name: str, /, **attrs: Any) -> Iterator[None]:
     The exit sample is emitted on the exception path too, so a run that
     dies mid-phase still shows where it was.
     """
-    if not memory_trace_enabled():
+    if not _resolved:
+        _resolve()
+    if _path is None:
         yield
         return
     sample(f"{name}:enter", **attrs)
@@ -619,7 +633,11 @@ def record_release_member(library: str, retention: Mapping[str, Any]) -> None:
     there would be a `frontends -> storage` edge ADR-061 forbids; and this
     is instrumentation, which is this module's job and not the fan-out's.
     """
-    if not memory_trace_enabled():
+    # Inlined `memory_trace_enabled()`: these run at every stage mark, and
+    # the latch is read once per process (see `_resolve`).
+    if not _resolved:
+        _resolve()
+    if _path is None:
         return
     counts("release.member.retained", library=library, **dict(retention))
     sample("release.member.retained", library=library)

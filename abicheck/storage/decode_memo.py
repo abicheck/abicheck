@@ -33,14 +33,23 @@ from enum import Enum
 from typing import Any, TypeVar
 
 from ..model import Fact
+from ..model.execution_cache import MemoryCache
+
+__all__ = ["enum_decoder", "memo_fact"]
 
 _E = TypeVar("_E", bound=Enum)
 
 #: Bound on the fact memo. Distinct shapes are few (a 100 MB snapshot holds
 #: ~280k serialized facts in ~13k shapes, most of them one-off strings), so
 #: this only caps memory on a pathological document.
+#: An LRU bound, so a long-lived process decoding many documents keeps the
+#: recently-seen shapes and never grows past it; registered with
+#: ``execution_cache`` so reference mode bypasses it and stats report it.
 _FACT_MEMO_LIMIT = 16384
-_FACT_MEMO: dict[tuple[Any, ...], Fact[Any]] = {}
+_FACT_MEMO: MemoryCache[Fact[Any]] = MemoryCache(
+    "storage.decode_memo.fact", max_entries=_FACT_MEMO_LIMIT, field="fact_shape"
+)
+_FACT_MEMO_READ = _FACT_MEMO.reader()
 _FACT_KEYS = frozenset({"status", "value", "diagnostics", "producer"})
 #: Immutable scalars only: a list/dict value is per-fact mutable state the
 #: decode hands over as-is, so it is never shared; a float is excluded
@@ -89,11 +98,10 @@ def memo_fact(
                 tuple(diagnostics) if diagnostics else (),
                 producer,
             )
-            fact = _FACT_MEMO.get(key)
+            fact: Fact[Any] | None = _FACT_MEMO_READ(key)
             if fact is None:
                 fact = build(raw)
-                if len(_FACT_MEMO) < _FACT_MEMO_LIMIT:
-                    _FACT_MEMO[key] = fact
+                _FACT_MEMO.put(key, fact)
             return fact
     return build(raw)
 

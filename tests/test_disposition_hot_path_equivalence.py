@@ -10,7 +10,7 @@ replaced answered.
   of once per gate. Oracle: the rule's own public ``matches`` /
   ``would_withhold`` / ``would_withhold_unknown_reachability`` composed the
   way ``evaluate`` documents.
-* ``template_surface._per_declaration`` -- identity derived once per
+* ``execution_cache.per_object`` (template_surface) -- identity derived once per
   declaration, same values.
 * ``selectors._ns_forms`` -- the cached namespace forms equal the uncached
   derivation.
@@ -24,10 +24,10 @@ import pytest
 from hypothesis import given, settings, strategies as st
 
 from abicheck.compare.finding_redundancy import _RootIndex, match_root_type
-from abicheck.compare.template_surface import _per_declaration
 from abicheck.model.change import Change
 from abicheck.model.change_catalog.kinds import ChangeKind
 from abicheck.model.evidence_status import ReachabilityState
+from abicheck.model.execution_cache import per_object as _per_declaration
 from abicheck.policy.selectors import _ns_forms, _strip_template_args
 from abicheck.policy.suppression.rules import Suppression, SuppressionList
 

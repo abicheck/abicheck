@@ -82,11 +82,11 @@ import re
 import time
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
-from functools import lru_cache
 from typing import Protocol
 
 from ..model.change_catalog.kinds import ChangeKind
 from ..model.elf_facts import SymbolBinding
+from ..model.execution_cache import memoized
 from .selectors_namespace_glob import (
     _compile_glob,
     _compile_namespace_glob,
@@ -282,7 +282,7 @@ def _ns_match(pat: _SegmentGlobMatcher, name: str | None) -> bool:
     return any(pat.matches_any_ancestor(form) for form in _ns_forms(name))
 
 
-@lru_cache(maxsize=1024)
+@memoized(maxsize=1024)
 def _ns_forms(name: str) -> tuple[str, ...]:
     """*name*, and its demangled form when Itanium-mangled, each with template
     arguments stripped -- what :func:`_ns_match` walks.

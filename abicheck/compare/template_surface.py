@@ -42,7 +42,7 @@ from ..model import Function
 from ..model.change import RemovedInstantiation
 from ..model.comparison_memo import comparison_memo_active, comparison_memoized
 from ..model.elf_facts import SymbolBinding
-from ..model.execution_cache import memoized
+from ..model.execution_cache import memoized, per_object
 from ..model.graph_identity import _normalize_graph_identity
 from ..model.surface_facts import in_public_surface, is_abi_visible
 from .surface_reconcile import (
@@ -367,7 +367,7 @@ def _reconciled_cpo_surfaces(
     # *identity*, which re-derives the qualified name each time (~4 keyings
     # per declaration). It is a pure function of the declaration, so derive
     # it once per declaration for this pair.
-    identity = _per_declaration(identity)
+    identity = per_object(identity)
     cross_old_funcs, cross_new_vars = _reconcile(
         old_funcs,
         new_vars,
@@ -397,25 +397,6 @@ def _reconciled_cpo_surfaces(
         ),
     )
     return (cross_old_funcs, cross_old_vars, cross_new_funcs, cross_new_vars)
-
-
-def _per_declaration(identity: Callable[[Any], str]) -> Callable[[Any], str]:
-    """*identity*, computed once per declaration object.
-
-    Keyed by ``id``; the declaration is held beside its key so a recycled
-    ``id`` can never be served another declaration's identity.
-    """
-    seen: dict[int, tuple[Any, str]] = {}
-
-    def _identity(decl: Any) -> str:
-        hit = seen.get(id(decl))
-        if hit is not None and hit[0] is decl:
-            return hit[1]
-        value = identity(decl)
-        seen[id(decl)] = (decl, value)
-        return value
-
-    return _identity
 
 
 def _needs_demangle(name: str, mangled: str) -> bool:
