@@ -364,7 +364,7 @@ _ANALYSIS_BUG_CLASSES: tuple[BugClass, ...] = (
             "TestBatchShapedChangeIgnoresTheSample), and order-invariance "
             "for unordered inputs."
         ),
-        fixed_by=(753, 759, 879, 905, 1125),
+        fixed_by=(753, 759, 879, 905, 1125, 1693),
         seed_tests=(
             "tests/test_cross_tier_dedup_unhashable_value.py",
             "tests/test_finding_identity_properties.py",
@@ -386,6 +386,10 @@ _ANALYSIS_BUG_CLASSES: tuple[BugClass, ...] = (
             # depending on run; pinned under permuted edges/inputs and
             # several PYTHONHASHSEED values.
             "tests/test_graph_reconcile_order_invariance.py",
+            # Renamed-dependency findings were emitted in set-iteration order,
+            # so their order depended on PYTHONHASHSEED; pinned by running the
+            # same comparison under two seeds and requiring identical output.
+            "tests/test_graph_dependency_renames.py",
         ),
         # Phase 5's own two originally-tracked gaps here (a compare()-level
         # collision test, and an adversarial generator over the shapes
