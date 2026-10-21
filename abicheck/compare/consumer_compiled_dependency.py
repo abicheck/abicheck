@@ -57,6 +57,7 @@ from typing import TYPE_CHECKING
 
 from ..model.change import Change
 from ..model.change_catalog.kinds import ChangeKind
+from ..model.graph_facts import GraphEdge
 from ..model.source_graph_coverage import HEADER_BODY_ATTR, HEADER_CALL_GRAPH_PASS
 from ..model.source_graph_query import is_public_dependency_node
 
@@ -65,7 +66,14 @@ if TYPE_CHECKING:
 
     from ..model.source_graph import SourceGraphSummary
 
-_DEPENDENCY_KINDS = frozenset({"DECL_CALLS_DECL", "DECL_REFERENCES_DECL"})
+_CALLS = "DECL_CALLS_DECL"
+_REFERENCES = "DECL_REFERENCES_DECL"
+_DEPENDENCY_KINDS = frozenset({_CALLS, _REFERENCES})
+
+#: The resolver verdict an exactly-resolved reference carries; mirrors
+#: ``buildsource.type_graph_index.RESOLUTION_REF_EXACT`` (compare/ cannot import
+#: buildsource).
+_EXACT = "exact"
 
 #: The boundary a finding is attributed to. Header-only evidence, so not L5.
 _BOUNDARY = "[L2_HEADER_GRAPH]"
@@ -98,15 +106,34 @@ def _compiled_dependencies(graph: SourceGraphSummary) -> dict[str, frozenset[str
     exported = {e.src for e in graph.edges if e.kind == "SOURCE_DECL_MAPS_TO_SYMBOL"}
     header_bodies = {n.id for n in graph.nodes if n.attrs.get(HEADER_BODY_ATTR) is True}
     dependencies: dict[str, set[str]] = {}
+    # A body with a reference whose target was not resolved exactly cannot be
+    # compared: its endpoint may be a bare name on one side and a declaration id
+    # on the other, which would read an unchanged reference as added and removed.
+    uncertain: set[str] = set()
     for e in graph.edges:
-        if e.kind in _DEPENDENCY_KINDS:
-            src = graph.resolve_node_id(e.src)
-            dependencies.setdefault(src, set()).add(graph.resolve_node_id(e.dst))
+        if e.kind not in _DEPENDENCY_KINDS:
+            continue
+        src = graph.resolve_node_id(e.src)
+        if e.kind == _REFERENCES and not _exact_reference(e):
+            uncertain.add(src)
+            continue
+        dependencies.setdefault(src, set()).add(graph.resolve_node_id(e.dst))
     return {
         body: frozenset(dependencies.get(body, ()))
         for body in header_bodies
-        if is_public_dependency_node(body, node_by_id, exported)
+        if body not in uncertain
+        and is_public_dependency_node(body, node_by_id, exported)
     }
+
+
+def _exact_reference(edge: GraphEdge) -> bool:
+    """Whether a ``DECL_REFERENCES_DECL`` edge names its target exactly.
+
+    The value is the header reference resolver's verdict, written as the
+    ``resolution`` attribute (``"exact"`` for a resolved declaration). A missing
+    verdict is not exact: the edge cannot prove its endpoint's identity.
+    """
+    return edge.resolved.get("resolution", edge.attrs.get("resolution")) == _EXACT
 
 
 def _names(targets: Sequence[str], labels: dict[str, str], prefix: str) -> str:

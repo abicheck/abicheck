@@ -95,7 +95,7 @@ SOURCE_ENTRIES: list[ChangeKindMeta] = [
         "public_consumer_compiled_dependency_changed",
         _R,
         impact="A public inline or template body compiled into every consumer's code changed its dependencies; consumers must recompile. Header-graph risk, never a proven break: no consumer build evidence exists.",
-        entity=_ENT.SOURCE,
+        entity=_ENT.FUNCTION,
         operation=_OP.MODIFIED,
     ),
     _E(

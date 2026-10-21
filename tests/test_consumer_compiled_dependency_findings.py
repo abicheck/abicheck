@@ -193,3 +193,36 @@ def test_finding_is_risk_never_a_break() -> None:
     assert kind not in API_BREAK_KINDS
     assert kind not in BREAKING_KINDS
     assert findings[0].source_location == "[L2_HEADER_GRAPH]"
+
+
+def _reference(src: str, dst: str, resolution: str | None) -> GraphEdge:
+    attrs = {} if resolution is None else {"resolution": resolution}
+    return GraphEdge(src=src, dst=dst, kind="DECL_REFERENCES_DECL", attrs=attrs)
+
+
+def test_unresolved_reference_skips_its_body_but_not_the_others() -> None:
+    # The same unchanged reference is a bare name on one side and a declaration
+    # id on the other; comparing it would read a non-change as add plus remove.
+    unresolved_old = _graph([MUL])
+    unresolved_new = _graph([MUL])
+    unresolved_old.edges.append(_reference(BODY, "bare_name", "unresolved"))
+    unresolved_new.edges.append(_reference(BODY, MUL, "unresolved"))
+    assert consumer_compiled_dependency_findings(unresolved_old, unresolved_new) == []
+
+
+def test_exact_reference_is_compared_like_a_call() -> None:
+    old = _graph([MUL])
+    new = _graph([MUL, SATURATE])
+    new.edges.append(_reference(BODY, SATURATE, "exact"))
+
+    findings = consumer_compiled_dependency_findings(old, new)
+
+    assert _kinds(findings) == [ChangeKind.PUBLIC_CONSUMER_COMPILED_DEPENDENCY_CHANGED]
+
+
+def test_reference_without_a_resolver_verdict_is_not_trusted() -> None:
+    old = _graph([MUL])
+    new = _graph([MUL])
+    new.edges.append(_reference(BODY, SATURATE, None))
+
+    assert consumer_compiled_dependency_findings(old, new) == []
