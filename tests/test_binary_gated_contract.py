@@ -15,6 +15,7 @@ Three layers are pinned here:
 
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 
 import pytest
@@ -633,6 +634,11 @@ def test_an_exported_function_removal_stays_breaking() -> None:
 
 
 @pytest.mark.integration
+@pytest.mark.skipif(
+    sys.platform != "linux",
+    reason="ELF fixture: the binary-only side needs DWARF inside the .so, which "
+    "macOS keeps in the object files (no dsymutil) and Windows does not produce",
+)
 def test_castxml_records_carry_the_header_observation(tmp_path: Path) -> None:
     """The header-backed path the predicate is written against, end to end.
 
