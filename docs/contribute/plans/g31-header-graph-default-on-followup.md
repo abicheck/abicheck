@@ -2032,6 +2032,57 @@ each new fact family from Phase C's schema audit, at least one case per new
 `ChangeKind` above, and a header-only-vs-build-integrated collector-upgrade
 case exercising the reconciliation path end-to-end.
 
+**Public-dependency rename — decided and shipped (2026-10-21).** The three
+illustrative kinds above were narrowed to what the evidence supports:
+
+- `PUBLIC_API_INTERNAL_TYPE_RENAMED` — **added**, `COMPATIBLE_WITH_RISK`
+  (internal target, not ABI). When a public entry's dependency target is the
+  renamed spelling of a node the same entry already reached in the old graph
+  (ADR-048 reconciliation resolves it as `declaration_renamed`/
+  `declaration_identity_reconciled`), it is reported **once**, in place of the
+  `PUBLIC_API_INTERNAL_DEPENDENCY_ADDED` add and the separate
+  `declaration_renamed` for the same pair. The match evidence is carried in the
+  new finding's description, so the rename is recorded, not dropped. Gating
+  uses the reconciler's own resolved outcome (`RENAMED`/`RECONCILED`) plus the
+  old side's reach from that same entry. Match tier is deliberately not the
+  gate: the real rename fixture resolves through `structural_context`, and
+  rejecting that tier would reject case194's own rename. Missing or weak
+  identity evidence (`RECONCILED_UNRESOLVED`, coordinates-only, ambiguous,
+  or no pair) falls back to today's findings; nothing is fabricated.
+- `PUBLIC_API_INTERNAL_DEPENDENCY_MOVED` — **not added as a kind.** A move with
+  no rename keeps `PUBLIC_API_INTERNAL_DEPENDENCY_ADDED`, and its description
+  names the move (`Reconciled as a move (same qualified name, different declaring
+  file)`). A compound rename+move is reported as the rename, with the move noted.
+- `PUBLIC_API_IMPACT_PROOF_PATH_CHANGED` — **not added.** A proof path is a
+  report-diagnostic, not a compatibility fact; a changed path under a stable
+  finding is a follow-up for the report layer, not a `ChangeKind`.
+
+Code placement follows the no-growth architecture debt: the rename disposition
+lives in `buildsource/dependency_renames.py`, and the dependency-closure and
+proof-path helpers moved out of `source_graph_findings.py` into
+`buildsource/dependency_paths.py` (imported back under their existing names).
+`source_graph_findings.py` drops from its recorded 1762-line baseline to 1666.
+The declaration-level reconciliation findings moved into `dependency_renames.py`
+with the consumed renames filtered out.
+
+**Behaviour change, recorded.** case194's expected findings change from
+`public_api_internal_dependency_added` + `declaration_renamed` to
+`public_api_internal_type_renamed` alone. Its ground-truth description and
+README say so. Verified: case221 (new) keeps one rename finding and one unrelated
+`public_api_internal_dependency_added` finding, so the rename does not absorb an
+unrelated addition at a different structural position.
+
+**Tests:** `tests/test_graph_dependency_renames.py` — a rename is detected once;
+an unrelated add and removal stay separate (an add is reported, the removal is
+recorded as a true removal); a move with no rename adds no kind and its
+description names the move; ambiguous candidates fall back to today's findings;
+a consumed rename requires the old side reached from the same entry.
+
+**Examples shipped:** one case, `case221_public_api_internal_type_renamed`
+(the plan's "~16 cases" budget is not met). It is the only new fixture because
+the rename shape is already covered by cases 194/195/196/197; the other planned
+cases would need their own shapes and are not started.
+
 **Full documentation rewrite — done.** All three bullets below shipped as
 `docs/reference/header-backend-capabilities.md`:
 - A backend capability matrix (CastXML vs. direct-clang vs. hybrid, which

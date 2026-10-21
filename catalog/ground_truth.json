@@ -3854,11 +3854,10 @@
    "api_break": false,
    "bad_practice": true,
    "category": "risk",
-   "description": "A public struct (demo::Config) private field-type target (demo::detail::RawConfig) is renamed to demo::detail::RawConfigV2 in the same declaring file, in the derived L5 source graph. G31 Phase B's canonical-identity/graph-reconciliation step (ADR-048) recognizes the two as the same declaration via unique structural context (both sit at the identical, unique TYPE_HAS_FIELD_TYPE:field position from demo::Config), and reports one declaration_renamed finding instead of leaving a reader to infer it from an unrelated add+remove node pair. The public_api_internal_dependency_added risk finding still fires independently on its own evidence (raw node-id reachability), since reconciliation only explains/localizes -- it never suppresses an existing finding (ADR-028 D3).",
+   "description": "A public struct (demo::Config) private field-type target (demo::detail::RawConfig) is renamed to demo::detail::RawConfigV2 in the same declaring file, in the derived L5 source graph. G31 Phase B's canonical-identity/graph-reconciliation step (ADR-048) recognizes the two as the same declaration via unique structural context (both sit at the identical, unique TYPE_HAS_FIELD_TYPE:field position from demo::Config). Because demo::Config already reached that target before the rename, G31 Phase D reports one public_api_internal_type_renamed finding in place of the add+remove pair: the public_api_internal_dependency_added finding and the reconciliation's declaration_renamed for the same pair are not emitted separately, so the rename is reported once. No artifact-proven finding is affected (ADR-028 D3).",
    "expected": "COMPATIBLE_WITH_RISK",
    "expected_kinds": [
-    "declaration_renamed",
-    "public_api_internal_dependency_added"
+    "public_api_internal_type_renamed"
    ],
    "fixtures": [
     "old.json",
@@ -4378,6 +4377,26 @@
     "public_virtual_dispatch_set_changed"
    ],
    "expected_kinds": [],
+   "fixtures": [
+    "old.json",
+    "new.json"
+   ],
+   "min_evidence": "L5",
+   "platforms": [
+    "linux"
+   ]
+  },
+  "case221_public_api_internal_type_renamed": {
+   "abi_break": false,
+   "api_break": false,
+   "bad_practice": true,
+   "category": "risk",
+   "description": "Two public structs in one release. demo::Config's private field target demo::detail::RawConfig is renamed to RawConfigV2 in the same header: reported once as public_api_internal_type_renamed, with no declaration_renamed for that pair. demo::Other gains an unrelated private field demo::detail::Unrelated in the same release. That add must stay a public_api_internal_dependency_added finding -- the rename does not absorb an addition at a different structural position. Negative control for the rename's consumption rule: one rename finding plus one add finding, never fewer.",
+   "expected": "COMPATIBLE_WITH_RISK",
+   "expected_kinds": [
+    "public_api_internal_dependency_added",
+    "public_api_internal_type_renamed"
+   ],
    "fixtures": [
     "old.json",
     "new.json"

@@ -788,7 +788,7 @@ def diff_graph_reconciliation_findings(
     ``test_reconciliation_never_deletes_or_downgrades_artifact_finding``.
 
     *old_graph*/*new_graph* (optional; the real production caller,
-    ``source_graph_findings._reconciliation_findings``, always supplies
+    ``dependency_renames.reconciliation_findings``, always supplies
     them) gate a pair's RISK verdict impact on public reachability (Codex
     review, fresh evidence): a rename/move reconciled entirely within
     private, never-publicly-reached declarations must not turn an

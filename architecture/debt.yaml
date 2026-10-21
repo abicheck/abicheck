@@ -245,7 +245,7 @@
     },
     {
       "path": "abicheck/buildsource/source_graph_findings.py",
-      "baseline_lines": 1762,
+      "baseline_lines": 1666,
       "target": "extract/build-or-source",
       "rule": "no_growth",
       "disposition": "migrate",
