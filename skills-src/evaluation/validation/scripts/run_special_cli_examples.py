@@ -134,6 +134,12 @@ EVIDENCE_CASES: dict[str, EvidenceSpec] = {
     "case197_header_graph_identity_reconciled": EvidenceSpec(
         "graph/source_graph_summary.json", "--sources"
     ),
+    "case219_public_virtual_dispatch_set_changed": EvidenceSpec(
+        "graph/source_graph_summary.json", "--sources"
+    ),
+    "case220_public_virtual_dispatch_set_reordered": EvidenceSpec(
+        "graph/source_graph_summary.json", "--sources"
+    ),
 }
 
 PYTHON_CASE = "case163_python_kwarg_renamed"
@@ -435,9 +441,7 @@ def _run_audit_case(
     return result
 
 
-def _provider_assertion_errors(
-    entry: dict[str, Any], findings: list[Any]
-) -> list[str]:
+def _provider_assertion_errors(entry: dict[str, Any], findings: list[Any]) -> list[str]:
     """Check ground truth's ``provider_assertions`` against the report.
 
     Each finding of a cross-source check carries the evidence providers that

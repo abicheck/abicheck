@@ -402,6 +402,60 @@ concepts/`explicit`/ctor-mangled-names slice; scope template-default
 normalization as a small follow-up investigation once G4's extractor
 exists, rather than a separate phase with its own new module.
 
+**Investigation result (2026-10-21).** Measured with real headers through
+the public `abicheck dump --depth headers` / `abicheck compare` workflow, on
+both header backends (`compile.frontend: castxml` and `clang`), using a
+`Box<T, U = T>` → `Box<T, U = int>` default change. The fixtures are
+`catalog/cases/case87_default_template_arg_changed` (shape A) and two
+inline headers (shapes B and C). The L4 column is the source-graph replay
+(`--depth source --sources`), run once with the castxml frontend.
+
+| Shape | What the library exposes | castxml L2 | clang L2 | L4 (source replay) |
+|---|---|---|---|---|
+| **A.** Default-substituted instantiation is exported (`template class descriptor<float>;`, case87) | `descriptor<float, minkowski_distance<float>>` symbols | `BREAKING`, `default_template_arg_changed` ×6 (+ `func_removed`, `instantiation_missing_from_binary`) | `BREAKING`, `default_template_arg_changed` ×4 (+ `func_removed`, `instantiation_missing_from_binary`) | not measured cleanly |
+| **C.** Default-substituted type reaches a public signature (`void take(const Box<char>&)`) | `take` mangled against `Box<char, char>` vs `Box<char, int>` | `BREAKING`, `func_removed` + `func_added` — **no** `default_template_arg_changed` label | `BREAKING`, `func_removed` + `func_added` — **no** `default_template_arg_changed` label | not measured cleanly |
+| **B.** Header-only: nothing public names `Box`, nothing exported depends on the default | no symbol, no public signature | `NO_CHANGE`. CastXML emits **no record at all** for an uninstantiated class template | `NO_CHANGE`. The clang AST has the template pattern and `TemplateTypeParmDecl.defaultArg`, but abicheck's clang dumper does not record the default | `public_dependency_role_changed` (risk, `default_template_arg` → `field`), not `default_template_arg_changed` |
+
+Findings:
+
+1. **The ABI break is caught at L2 on both backends in shapes A and C.** Only
+   the *attribution* differs. Shape A is labelled by the instantiation pairing
+   in `diff_cpp_patterns.detect_default_template_arg_changed`. Shape C is
+   reported as a removed and an added mangled function with no default label.
+   This is correct for the verdict and only loses the explanation.
+2. **Shape B is the only L2 miss, and it has no ABI effect to report.** No
+   exported symbol and no public signature depends on the default, so a
+   consumer's own instantiation compiles against the new default as ordinary
+   source-level behavior. `NO_CHANGE` is the correct ABI answer; the
+   source-level consequence is what L4 surfaces, as a risk.
+3. **Clang exposes the default; CastXML cannot.** A clang-only detector for
+   shape B was considered and **not added**. It would return a `BREAKING`
+   verdict for a header-only edit that the castxml backend cannot reproduce,
+   so the same input would decide differently by `compile.frontend`. That is
+   the producer-dependent verdict the parity gate exists to prevent, and it
+   would be a verdict with no binary evidence behind it.
+4. **Recorded instead of faked.** The shape-B gap, and the clang default that
+   is available but unrecorded, are in
+   [known-gaps](../known-gaps.md) and the Known gaps section of
+   [header-backend-capabilities](../../reference/header-backend-capabilities.md).
+   `tests/test_default_template_arg_l2_matrix.py` pins every cell of this
+   table, so a change to any backend's answer fails there first.
+
+Phase 5's investigation is complete, and it leaves no detector change in
+place today. The verdict question it raised is decided in
+[ADR-085](../adr/085-template-parameter-default-arguments.md) (Proposed):
+
+- the snapshot records template-parameter defaults as an availability-carrying
+  fact (schema v61; castxml and pre-v61 snapshots read as UNKNOWN);
+- a header-only default change is a new `API_BREAK` kind, and
+  `DEFAULT_TEMPLATE_ARG_CHANGED` keeps `BREAKING` for exported-instantiation
+  evidence (shape A);
+- castxml reports the shape-B case as an explicit coverage gap, not
+  `NO_CHANGE`.
+
+Once ADR-085 is accepted, the shape-B `NO_CHANGE` answer in the table above
+is superseded. The implementation slices are listed in the ADR.
+
 ---
 
 ## Cross-references

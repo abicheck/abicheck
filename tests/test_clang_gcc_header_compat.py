@@ -58,8 +58,13 @@ class TestEveryAstBuilderCarriesTheShim:
         # A define on a -E -dM/-dD pass would be recorded as the TU's own macro.
         assert not set(CLANG_GCC_HEADER_COMPAT_DEFINES) & set(macro_cmd)
 
-    def test_l5_run_clang_ast_dump(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_shared_ast_dump_carries_the_compat_defines(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         from abicheck.buildsource import clang_ast_run
+        from abicheck.buildsource.source_extractors.clang_command import (
+            build_clang_command,
+        )
 
         seen: list[list[str]] = []
 
@@ -68,16 +73,12 @@ class TestEveryAstBuilderCarriesTheShim:
             raise OSError("stop")
 
         monkeypatch.setattr(clang_ast_run.deadline, "run_bounded", fake_run)
-        diags: list[str] = []
-        assert (
-            clang_ast_run.run_clang_ast_dump(
-                "clang", ["a.c"], cwd=None, diagnostics=diags
-            )
-            is None
-        )
+        cmd = build_clang_command(_unit(), Path("a.c"))
+        dump = clang_ast_run.dump_tu_ast(cmd, cwd=None, timeout=5, unit_label="a.c")
+        assert dump.ast is None
+        assert dump.stage == clang_ast_run.STAGE_RUN
         assert len(seen) == 1
         assert set(CLANG_GCC_HEADER_COMPAT_DEFINES) <= set(seen[0])
-        assert diags
 
 
 _GCC_OMP = sorted(glob.glob("/usr/lib/gcc/*/*/include/omp.h"))
