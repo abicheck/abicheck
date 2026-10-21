@@ -28,11 +28,11 @@ from ...evidence_depth import (
 from ...model import AbiSnapshot
 from ...model.evidence_status import EvidenceTier
 from ..analysis_assurance_declined import declined_comparison_notes
-from ..binary_gate_marker import binary_gate_assurance_notes
 from ..analysis_assurance_l0_context import l0_context_status as _l0_context_status
 from ..analysis_assurance_schema_staleness import (
     schema_staleness_status as _schema_staleness_status,
 )
+from ..binary_gate_marker import binary_gate_assurance_notes
 from ._comparability import (
     NOT_COMPARABLE_NOTE,
     bounded_comparability_notes,
