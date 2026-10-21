@@ -761,7 +761,7 @@ inputs:
     required: false
   acknowledgments:
     description: >
-      Path to a YAML acknowledgment-records file (ADR-067) for this run: changes
+      Path to a YAML acknowledgment-records file for this run: changes
       a team reviewed and accepted, each named by `finding_id`, or by `symbol`
       with `change_kind`. Forwarded as `compare --acknowledgments`, which
       overrides `.abicheck.yml`'s `acknowledgment.file`. Compare mode only. The

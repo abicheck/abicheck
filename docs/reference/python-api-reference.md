@@ -465,6 +465,7 @@ Compare two ABI inputs and return the classified diff result.
 | `exclude_headers` | `tuple[str, ...]` | `()` |
 | `acknowledgments_path` | `Path \| None` | `None` |
 | `acknowledgment_unacknowledged_additions` | `str \| None` | `None` |
+| `acknowledgment_breaks` | `str \| None` | `None` |
 
 **Returns:** `CompareResult`
 

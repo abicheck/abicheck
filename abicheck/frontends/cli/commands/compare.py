@@ -188,7 +188,7 @@ from .compare_routing import _RELEASE_FORMATS
     "acknowledgments",
     type=click.Path(exists=True, dir_okay=False, path_type=Path),
     default=None,
-    help="Acknowledgment records (YAML, ADR-067) for this run: intentional, "
+    help="Acknowledgment records (YAML) for this run: intentional, "
     "reviewed changes, each named by finding_id, or by symbol with change_kind. "
     "Overrides .abicheck.yml's acknowledgment.file.",
 )
