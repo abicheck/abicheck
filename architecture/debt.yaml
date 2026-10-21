@@ -806,7 +806,7 @@
     },
     {
       "path": "abicheck/policy/disposition_ledger.py",
-      "baseline_lines": 872,
+      "baseline_lines": 835,
       "target": "policy",
       "rule": "no_growth",
       "disposition": "migrate",
@@ -817,7 +817,7 @@
     },
     {
       "path": "abicheck/policy_file.py",
-      "baseline_lines": 1051,
+      "baseline_lines": 914,
       "target": "policy (done; classified, remaining debt is line count only)",
       "rule": "no_growth",
       "disposition": "migrate",
@@ -883,7 +883,7 @@
     },
     {
       "path": "abicheck/schemas/__init__.py",
-      "baseline_lines": 1171,
+      "baseline_lines": 1127,
       "target": "see ADR-061 ownership map",
       "rule": "no_growth",
       "disposition": "migrate",
@@ -927,7 +927,7 @@
     },
     {
       "path": "abicheck/policy/suppression/rules.py",
-      "baseline_lines": 1018,
+      "baseline_lines": 999,
       "target": "policy (done; classified, remaining debt is line count only)",
       "rule": "no_growth",
       "disposition": "migrate",

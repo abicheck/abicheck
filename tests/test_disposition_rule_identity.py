@@ -72,6 +72,9 @@ def test_every_matching_relevant_field_separates_two_rules() -> None:
         "binding": "weak",
         "finding_id": "0123456789abcdef",
         "expires": date(2030, 1, 1),
+        # P2: a user id is part of the rule's content, so it separates rules
+        # too -- it is what the audit reports as the rule_id when it is set.
+        "id": "waiver-1",
     }
     baseline = Suppression(member_name="base", reason="shared prose")
     base_identity = rule_identity(baseline)
@@ -111,7 +114,7 @@ def test_the_audit_and_the_receipt_derive_one_identity() -> None:
     receipt (`SuppressionList.rule_identities`) and the ADR-067 audit must
     answer the same string for the same rule, or two parts of one report
     disagree about which rule fired."""
-    from abicheck.policy.rule_provenance import _rule_identity
+    from abicheck.policy.rule_provenance import rule_provenance
 
     rules = [
         Suppression(symbol_pattern=".*", label="same", reason="r"),
@@ -126,5 +129,22 @@ def test_the_audit_and_the_receipt_derive_one_identity() -> None:
         ),
     ]
     receipt = SuppressionList(rules).rule_identities()
-    assert list(receipt) == [_rule_identity(r) for r in rules]
+    # For an id-less rule the audit's rule_id *is* the canonical identity.
+    assert list(receipt) == [rule_provenance(r).rule_id for r in rules]
     assert len(set(receipt)) == 3, "three distinct rules, three identities"
+
+
+def test_a_user_id_becomes_the_audit_rule_id_and_labels_stay_fields() -> None:
+    """P2 round trip: ``id`` -> ``rule_id``; ``label``/``reason`` keep their own
+    fields, and two rules that share a label and reason are still two rules."""
+    from abicheck.policy.rule_provenance import rule_provenance
+
+    named = Suppression(symbol_pattern=".*", label="grp", reason="prose", id="R1")
+    twin = Suppression(symbol_pattern=".*", label="grp", reason="prose")
+    prov = rule_provenance(named)
+    assert prov is not None
+    assert prov.rule_id == "R1"
+    assert prov.label == "grp"
+    assert prov.reason == "prose"
+    assert rule_provenance(twin).rule_id != "grp"
+    assert rule_provenance(twin).rule_id != "prose"

@@ -566,24 +566,46 @@ def ledger_for(
     """
     existing = getattr(result, "disposition_ledger", None)
     if isinstance(existing, DispositionLedger):
-        return (
-            existing
-            if severity_config is None
-            else existing.with_gate(result, severity_config, today=today)
-        )
+        if severity_config is not None:
+            return existing.with_gate(result, severity_config, today=today)
+        if getattr(getattr(result, "policy_file", None), "reclassify", None):
+            return _with_refreshed_overlays(existing, result, today=today)
+        return existing
     return finalize_ledger(DispositionLedger(), result, severity_config, today=today)
 
 
-def reclassifications(ledger: DispositionLedger) -> tuple[tuple[str, int], ...]:
-    """ADR-067 C-S2: distinct reclassify rule ids with the number of changes
-    each moved, ordered by first appearance -- the same shape
-    :meth:`DispositionLedger.rules` reports for suppression, for the overlay
-    attribute a finding carries independently of its terminal disposition (a
-    reclassified finding stays visible; only its verdict class moved).
+def _with_refreshed_overlays(
+    ledger: DispositionLedger, result: DiffResult, *, today: date | None
+) -> DispositionLedger:
+    """A copy of *ledger* whose dated overlays are answered at *today*.
 
-    A module function here rather than a :class:`DispositionLedger` method:
-    it derives purely from :attr:`DispositionLedger.records`, and that leaf
-    module is at the architecture gate's per-file line ceiling.
+    The comparison stamped its reclassify and verdict-class overlays at its own
+    date. A rule that has expired since then must not stay ``active`` in the
+    audit, so the overlays are re-resolved, as :meth:`DispositionLedger.with_gate`
+    does on the severity path. Only the record list is replaced, so the copy
+    never mutates the ledger the comparison handed back.
+    """
+    from copy import copy
+
+    from .disposition_gate import _reset_dated_overlays
+
+    refreshed = copy(ledger)
+    refreshed._records = _reset_dated_overlays(list(ledger._records))  # noqa: SLF001
+    refreshed.resolve_reclassifications(result, today=today)
+    refreshed.resolve_verdict_classes(result, today=today)
+    return refreshed
+
+
+def reclassifications(ledger: DispositionLedger) -> tuple[tuple[str, int], ...]:
+    """ADR-067 C-S2: distinct reclassify display labels with the number of
+    changes each moved, ordered by first appearance.
+
+    A **record-derived view** kept for the existing callers of the record
+    tally. It keys on the display label (``reclassified_by``), so two distinct
+    rules sharing a label collapse here, and a rule that moved nothing has no
+    entry. The audit does not use it: ``DispositionAudit.reclassifications`` is
+    built from :func:`~abicheck.policy.disposition_rules.configured_rule_rows`,
+    which keys on the configured rule and includes zero-count rules (P1).
     """
     ordered: list[str] = []
     tally: dict[str, int] = {}
@@ -611,12 +633,11 @@ def reclassified_total(ledger: DispositionLedger) -> int:
 
 def acknowledgments(ledger: DispositionLedger) -> tuple[tuple[str, int], ...]:
     """ADR-067 D5/C-S3: distinct acknowledgment record ids with the number of
-    findings each covered, ordered by first appearance -- the acknowledgment
-    counterpart of :func:`reclassifications` (and :meth:`DispositionLedger.
-    rules`'s rule tally for suppression), for the overlay attribute a finding
-    carries independently of its terminal disposition (an acknowledged
-    finding keeps its own disposition and verdict class; only the
-    acknowledgment overlay is new).
+    findings each covered, ordered by first appearance.
+
+    A record-derived view, like :func:`reclassifications`: it omits an
+    acknowledgment that covered nothing. The audit reads the configured rows
+    (:func:`~abicheck.policy.disposition_rules.configured_rule_rows`) instead.
     """
     ordered: list[str] = []
     tally: dict[str, int] = {}

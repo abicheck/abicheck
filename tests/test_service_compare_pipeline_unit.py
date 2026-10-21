@@ -506,7 +506,7 @@ class TestContractEvaluationThreading:
             # and typed API, appended last by the same rule.
             "acknowledgments_path",
             "acknowledgment_unacknowledged_additions",
-            # ADR-067 breaks: gate|accept, appended last by the same rule.
+            # ADR-067 D5 `breaks: gate|accept`, appended last by the same rule.
             "acknowledgment_breaks",
         ]
 

@@ -453,3 +453,89 @@ preserving the audit row; a policy widened in a PR; a baseline overwritten;
 report/CLI/API/Action parity. Properties: policy and view changes never
 mutate the raw fact/change set; audit counts conserve normalized changes
 and never count matched rules as separate removals.
+
+## Addendum (2026-10-20): configured-rule inventory and the unused-rules gate
+
+*Amends D3 and adds a gate. The decisions above are not edited in place.*
+
+**Problem.** Every audit aggregate was a projection of the disposition
+*records*, so a rule that disposed of no finding was absent from
+`disposition_audit`: a zero-match suppression, a `reclassify:` rule that
+matched nothing, an acknowledgment that covered nothing. A rule whose selectors
+matched a finding an earlier rule had already claimed was also absent. "Record
+before disposing" held for findings but not for the rules configured to act on
+them.
+
+**Rule id (D3).** A rule's `rule_id` is its optional `id:` when the document
+states one, and otherwise its canonical rule identity
+(`abicheck/policy/rule_identity.py`). `label` is a grouping tag and `reason` is
+prose: both are reported as their own fields and are never the identifier.
+`id:` is accepted in both the suppression and the `reclassify:` grammars, must
+be a non-empty string, and must be unique within its document; a repeat is a
+`PolicyError`. `id:` never affects matching. Two byte-identical entries are two
+rules, and each row carries `entry_index`, its zero-based position in the file.
+A `reclassify:` rule's identity no longer embeds an enum repr (its `to_verdict`
+is covered by `to`).
+
+**Configured rules are recorded (D3's "may" becomes "must" for configured
+rules).** Every configured suppression, reclassify and acknowledgment rule has
+exactly one audit row, zero-count rows included, in the JSON
+`disposition_audit.rules`, `reclassifications` and `acknowledgments`
+(`abicheck/policy/rule_inventory.py`, `abicheck/policy/disposition_rules.py`).
+The rows are the one source for the human views, the `suppression_audit`
+stale list and the gate, so they cannot disagree. Human views collapse
+zero-count rows to one line; the JSON keeps every row.
+
+**Counting.** `matched_count` keeps its meaning: findings the rule *disposed
+of*. For a suppression, first-match credit. For a reclassify rule, the
+verdict-changing decider, which the JSON also names `changed_count`. For an
+acknowledgment, the findings it covered. `shadowed_count` is every other finding
+the rule's selectors matched: one an earlier rule claimed, or a no-op
+reclassification. `selector_matched_count` is their sum.
+
+**Status.** Each row carries one of: `active` (disposed of at least one
+finding); `shadowed_only` (matched, disposed of none); `expired` (past its
+`expires` date, with nothing disposed of); `not_evaluated` (matched nothing,
+and a detector of the comparison did not run); `unused` (matched nothing, and
+every detector ran). The check runs in that order. `unused` is never reported
+for a comparison in which a detector did not run (D3's "absent is not
+removed"). Acknowledgment rows take the same statuses; ambiguous-match handling
+is unchanged.
+
+**Known limitation of `not_evaluated`.** Detectors do not declare the kinds they
+produce, so the audit cannot tell whether a refused detector could have matched
+an unmatched rule. Any refused detector therefore makes every unmatched rule
+`not_evaluated`. On a typical ELF-only comparison about twenty detectors are
+refused, so `unused` is reported only when every detector ran. Making the status
+precise needs each detector to declare the kinds it can emit. That is a
+follow-up and is not decided here.
+
+**The `unused_rules` gate (D6's pattern).** A top-level policy key
+`unused_rules: allow|warn|block` (default `allow`, so no existing run changes)
+and the CLI flag `--fail-on-unused-rules`, which is `block` for one invocation
+and can only tighten. `block` contributes `1` when at least one configured rule
+has status `unused`. It is a fourth `0`/`1` exit axis folded with `max`
+(`ExitDecision.unused_rules_contribution`, reason `unused_rules`), so it never
+lowers a `2`, `4`, `7`, `8` or `16`, and it never changes what was observed
+(`abicheck/policy/unused_rules_gate.py`). Only the `unused` status triggers it.
+A scalar `compare` evaluates its own rules. For a directory or package release
+the gate is evaluated over the union of members: a rule is unused only when
+every member that configures it left it unused, and the strictest member mode
+applies.
+
+**Schema.** Report schema 6.3 (`abicheck/schemas/__init__.py`): the row fields
+above, `disposition_audit.unused_rules_review` and
+`exit.unused_rules_contribution`. `suppression_audit.stale_rules` is now a
+projection of the same inventory and lists rule ids. Two changes are not purely
+additive and are in the changelog: a configured rule with no finding now appears
+in `rules`, `reclassifications` and `acknowledgments`, so a consumer that assumed
+non-empty rows must tolerate zero-count rows; and a reclassify rule's `rule_id`
+is its `id:` or canonical identity instead of its label or reason.
+
+**Reclassification's per-finding display label is unchanged.** The
+`reclassified_by` field on a finding keeps its label-or-reason-or-verdict value.
+The audit keys reclassify rows on the configured rule, not on that display
+string.
+
+**Still open.** The precise `not_evaluated` status above. The acknowledgment
+`breaks: gate|accept` policy is owned by its own change and is not decided here.

@@ -148,6 +148,7 @@ _SAMPLES: dict[str, Any] = {
     "acknowledgments_path": Path("a.yml"),
     "acknowledgment_breaks": "accept",
     "acknowledgment_unacknowledged_additions": "warn",
+    "acknowledgment_breaks": "accept",
 }
 
 

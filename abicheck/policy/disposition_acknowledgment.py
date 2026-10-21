@@ -82,10 +82,16 @@ def resolve_acknowledgments(
     had its chance (CodeRabbit review, PR #1137).
     """
     from .acknowledgment import AmbiguousAcknowledgmentError
+    from .rule_inventory import KIND_ACKNOWLEDGMENT, RuleRef
 
     evaluate = getattr(acknowledgments, "evaluate", None)
     if not callable(evaluate):
         return
+    # P1: the record's position in the loaded list is its join key for the
+    # disposition audit's acknowledgment row. Identity, not equality.
+    listed = list(acknowledgments) if hasattr(acknowledgments, "__iter__") else []
+    position = {id(record): i for i, record in enumerate(listed)}
+    source = getattr(acknowledgments, "source_path", None)
     scope = {
         "component": component,
         "baseline": baseline,
@@ -111,6 +117,11 @@ def resolve_acknowledgments(
             continue
         record_id_fn = getattr(ack, "record_id", None)
         acknowledged_by = record_id_fn() if callable(record_id_fn) else str(ack)
+        covered = RuleRef(
+            KIND_ACKNOWLEDGMENT,
+            None if source is None else str(source),
+            position.get(id(ack)),
+        )
         # ADR-067 D5 `breaks: accept`: an acknowledged break that gated the run
         # is recorded as its own non-gating disposition, under the
         # acknowledgment application point. Its verdict class is stamped (the
@@ -129,10 +140,11 @@ def resolve_acknowledgments(
                 disposition=Disposition.NON_GATING,
                 application_point=ACCEPTED_BREAK_APPLICATION_POINT,
                 verdict_class=verdict,
+                acknowledgment_rule=covered,
             )
         else:
             ledger._records[index] = replace(  # noqa: SLF001
-                record, acknowledged_by=acknowledged_by
+                record, acknowledged_by=acknowledged_by, acknowledgment_rule=covered
             )
 
 

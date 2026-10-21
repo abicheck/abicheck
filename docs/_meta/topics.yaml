@@ -489,6 +489,9 @@ topics:
     fact_sources:
       - abicheck/policy/disposition_ledger.py
       - abicheck/policy/disposition_close.py
+      - abicheck/policy/disposition_rules.py
+      - abicheck/policy/rule_inventory.py
+      - abicheck/policy/unused_rules_gate.py
       - abicheck/report/disposition_audit.py
       - abicheck/workflows/disposition.py
       - abicheck/schemas/compare_report.schema.json

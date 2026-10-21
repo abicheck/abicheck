@@ -53,6 +53,27 @@ from abicheck.policy_file import PolicyFile
 from abicheck.report.disposition_audit import compute_disposition_audit
 
 
+def _ack_row(rule_id: str, *, matched: int, status: str = "active") -> object:
+    """A configured acknowledgment's audit row (ADR-067 P1: one row per rule)."""
+    from abicheck.policy.rule_inventory import (
+        KIND_ACKNOWLEDGMENT,
+        RuleAuditRow,
+        RuleRef,
+    )
+
+    return RuleAuditRow(
+        ref=RuleRef(KIND_ACKNOWLEDGMENT, "acks.yml", 0),
+        rule_id=rule_id,
+        label=None,
+        reason=None,
+        expires=None,
+        status=status,
+        matched_count=matched,
+        shadowed_count=0,
+        selector_matched_count=matched,
+    )
+
+
 def _snapshot(version: str, functions: list[Function]) -> AbiSnapshot:
     return AbiSnapshot(
         version=version,
@@ -1026,7 +1047,7 @@ def test_render_disposition_audit_note_and_lines_cover_acknowledgment_state() ->
         rules=(),
         not_evaluated_detectors=(),
         acknowledged_total=1,
-        acknowledgments=(("*::*::*::foo", 1),),
+        acknowledgments=(_ack_row("*::*::*::foo", matched=1),),
         unacknowledged_additions_review={
             "policy": "warn",
             "unacknowledged": [
@@ -1090,7 +1111,7 @@ def test_fold_disposition_audits_tallies_acknowledgments_across_members() -> Non
         rules=(),
         not_evaluated_detectors=(),
         acknowledged_total=1,
-        acknowledgments=(("*::*::*::foo", 1),),
+        acknowledgments=(_ack_row("*::*::*::foo", matched=1),),
     )
     member_b = DispositionAudit(
         detected_total=1,
@@ -1099,11 +1120,13 @@ def test_fold_disposition_audits_tallies_acknowledgments_across_members() -> Non
         rules=(),
         not_evaluated_detectors=(),
         acknowledged_total=1,
-        acknowledgments=(("*::*::*::foo", 1),),
+        acknowledgments=(_ack_row("*::*::*::foo", matched=1),),
     )
     folded = fold_disposition_audits([member_a, member_b])
     assert folded.acknowledged_total == 2
-    assert folded.acknowledgments == (("*::*::*::foo", 2),)
+    assert [(row.rule_id, row.matched_count) for row in folded.acknowledgments] == [
+        ("*::*::*::foo", 2)
+    ]
 
 
 def test_fold_disposition_audits_reports_none_when_no_member_evaluated() -> None:

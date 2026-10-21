@@ -348,6 +348,39 @@ The composite GitHub Action's own dedicated `require-complete-analysis`
 input is retired alongside the CLI flag it forwarded to (rulings.py
 deferred-option followup) -- see `docs/reference/github-action-inputs.md`.
 
+## The unused-rules axis
+
+A policy file's top-level `unused_rules:` key (`allow`, `warn` or `block`;
+default `allow`) decides whether a configured suppression, `reclassify:` or
+acknowledgment rule that matched no finding fails the run. `compare` also takes
+`--fail-on-unused-rules`, which is `block` for that one invocation. The flag can
+only tighten: it never relaxes a policy file's `block`.
+
+- `allow` (default): nothing changes. The audit still lists every such rule,
+  with status `unused`.
+- `warn`: the same, and the report names the unused rules as a review item.
+  The exit code does not move.
+- `block`: contributes `1` when at least one configured rule has status
+  `unused`. It is a `0`/`1` axis folded with `max`, so it raises a clean `0`
+  to `1` and never lowers a `2`, `4`, `7`, `8` or `16`.
+
+Only status `unused` triggers the gate. A rule reads `not_evaluated` instead
+when it matched nothing and a detector of the same comparison did not run: the
+audit cannot prove the rule was checked, so the gate stays silent.
+Detectors do not yet declare the kinds they produce, so any refused detector
+makes every unmatched rule `not_evaluated`. In practice `block` fires only on a
+comparison in which every detector ran. The `expired`, `shadowed_only` and
+`active` statuses never trigger it either.
+
+For a directory/package release the gate is evaluated over the union of its
+members: a rule is unused only when every member that configures it left it
+unused, so a rule one library exercises is never flagged by another that does
+not. The strictest member mode applies.
+
+The contribution appears as `exit.unused_rules_contribution` (`0` or `1`) and
+as the `unused_rules` reason. `disposition_audit.unused_rules_review` lists the
+rules that are unused.
+
 ## The `exit` report field (CLI cleanup phase two, PR G1 / PR E)
 
 Every real-verdict `compare -o json=...` report (`full`/`leaf`/`root-cause`
@@ -968,6 +1001,7 @@ one of those.
 | `API_BREAK` | `2` | `0`–`2`* | `2` / `0`–`2`*‡ | — | — |
 | `BREAKING` / `FAIL` | `4` | `0`–`4`* | `4` / `0`–`4`*‡ | — | `4` |
 | `--budget` overflow | — | — | `5` | — | — |
+| Configured rule unused (`unused_rules: block`) | `1` floor | `1` floor | — | — | — |
 | Missing dependencies/symbols | — | — | — | `1` | — |
 | Load failure | — | — | — | — | `4` |
 | Invalid invocation / tool error | `64`† | `64`† | `64`† | `64`† | `64`† |

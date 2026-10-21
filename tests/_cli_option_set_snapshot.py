@@ -112,6 +112,7 @@ OPTION_SET_SNAPSHOT: dict[str, tuple[str, ...]] = {
         "--severity-preset",
         "--since",
         "--sources",
+        "--fail-on-unused-rules",
         "--suppress",
         "--use-cases",
         "--used-by",

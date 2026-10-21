@@ -189,6 +189,8 @@ RECLASSIFY_KNOWN_KEYS: frozenset[str] = frozenset(
         "reason",
         "label",
         "expires",
+        #: P2: optional, file-unique user identifier (duplicate = PolicyError).
+        "id",
     }
 )
 
@@ -250,6 +252,9 @@ class ReclassifyRule:
     #: `expires` (Codex review, fresh evidence: this rule form otherwise
     #: fell out of sync with `Suppression`'s selector grammar).
     binding: str | None = None
+    #: P2: optional user-chosen identifier, unique within its document. The
+    #: audit's ``rule_id`` when set; otherwise the canonical rule identity.
+    id: str | None = None
     #: Built at construction time and reused for every :meth:`matches` call
     #: rather than re-validated/re-compiled per call — mirrors how
     #: :class:`~abicheck.policy.suppression.rules.Suppression` itself eagerly compiles its
@@ -403,6 +408,8 @@ class ReclassifyRule:
             out["reason"] = self.reason
         if self.label:
             out["label"] = self.label
+        if self.id is not None:
+            out["id"] = self.id
         if self.expires is not None:
             out["expires"] = self.expires.isoformat()
         return out

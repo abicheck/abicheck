@@ -27,6 +27,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import StrEnum
 
+from .rule_inventory import RuleRef
 from .rule_provenance import RuleProvenance
 
 #: Application points of the consumer-scoping producers. A finding recorded
@@ -149,6 +150,20 @@ class DispositionRecord:
     #: diagnostic), and an audit that dropped the record entirely could not
     #: represent that real gate contribution.
     policy_overlay: bool = False
+    #: P1 (ADR-067 D3): suppression rules that matched this finding but were
+    #: not the first match -- shadowed by an earlier rule. Joined to the
+    #: configured-rule inventory by :class:`~abicheck.policy.rule_inventory.RuleRef`.
+    shadowed_refs: tuple[RuleRef, ...] = ()
+    #: P1: the reclassify rule that *moved* this finding's verdict (the decider),
+    #: or ``None`` when no rule changed it. ``reclassified_by`` stays the display
+    #: label; this is the join key the audit counts.
+    reclassify_rule: RuleRef | None = None
+    #: P1: every reclassify rule whose selectors matched, the decider included.
+    #: ``reclassify_hits`` minus the decider is what that rule shadowed or left
+    #: as a no-op.
+    reclassify_hits: tuple[RuleRef, ...] = ()
+    #: P1: the acknowledgment record that covered this finding, joined by ref.
+    acknowledgment_rule: RuleRef | None = None
 
     def to_dict(self) -> dict[str, object]:
         entry: dict[str, object] = {

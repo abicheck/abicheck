@@ -83,7 +83,7 @@ Which public surface reaches each ADR, which use cases it serves, and whether a 
 | [ADR-064](../adr/064-canonical-gate-algorithm-and-exit-decision.md) | surfaced | UC-WF-compare | `cli: compare --severity-preset`<br>`report: compare_report.exit`<br>`action: severity-preset` | — |
 | [ADR-065](../adr/065-comparison-scope-selection-and-completeness.md) | surfaced | UC-WF-compare | `cli: compare --select --select-required --dry-run`<br>`report: compare_report.comparison_scope`<br>`report: compare_report.run_outcome` | — |
 | [ADR-066](../adr/066-longitudinal-history-and-versioning-policy.md) | partial | UC-CHANGE-semver-recommendation | `cli: project history --policy`<br>`api: abicheck.workflows.history.build_longitudinal_history` | Proposed; only S1 and S2 are implemented. |
-| [ADR-067](../adr/067-change-intent-acknowledgment-and-disposition-audit.md) | partial | UC-WF-compare | `cli: compare --suppress`<br>`cli: compare --acknowledgments`<br>`action: acknowledgments`<br>`report: compare_report.disposition_audit` | S4 is not implemented; the unused/expired acknowledgment rows in disposition_audit are the audit workstream's, not yet landed. |
+| [ADR-067](../adr/067-change-intent-acknowledgment-and-disposition-audit.md) | partial | UC-WF-compare | `cli: compare --suppress`<br>`cli: compare --fail-on-unused-rules`<br>`cli: compare --acknowledgments`<br>`action: acknowledgments`<br>`report: compare_report.disposition_audit` | S4 is not implemented. The configured-rule inventory (every rule, including unused and expired acknowledgments, gets a disposition_audit row) and the unused_rules gate are implemented under ADR-067 P1. |
 | [ADR-068](../adr/068-one-comparison-product-and-scan-retirement.md) | surfaced | UC-WF-compare, UC-WF-cli-contract | `cli: compare --no-baseline` | — |
 | [ADR-069](../adr/069-name-shape-is-not-contract-membership.md) | internal | — | — | Product rule applied inside policy/; no switch or field of its own. |
 | [ADR-070](../adr/070-action-layer-does-not-encode-cli-semantics.md) | partial | — | `action: extra-args` | Only D3 is implemented; D1, D2 and D4 remain. |
@@ -217,6 +217,7 @@ Which public surface reaches each ADR, which use cases it serves, and whether a 
 - ADR-065 report: compare_report.run_outcome
 - ADR-066 api: abicheck.workflows.history.build_longitudinal_history
 - ADR-066 cli: project history --policy
+- ADR-067 cli: compare --fail-on-unused-rules
 - ADR-067 report: compare_report.disposition_audit
 - ADR-068 cli: compare --no-baseline
 - ADR-070 action: extra-args

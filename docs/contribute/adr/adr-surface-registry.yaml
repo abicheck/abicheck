@@ -572,10 +572,11 @@ adrs:
     use_cases: [UC-WF-compare]
     surfaces:
       - cli: compare --suppress
+      - cli: compare --fail-on-unused-rules
       - cli: compare --acknowledgments
       - action: acknowledgments
       - report: compare_report.disposition_audit
-    missing: S4 is not implemented; the unused/expired acknowledgment rows in disposition_audit are the audit workstream's, not yet landed.
+    missing: S4 is not implemented. The configured-rule inventory (every rule, including unused and expired acknowledgments, gets a disposition_audit row) and the unused_rules gate are implemented under ADR-067 P1.
 
   - id: ADR-068
     file: 068-one-comparison-product-and-scan-retirement.md

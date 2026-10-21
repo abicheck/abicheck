@@ -84,6 +84,28 @@ are identical" are different statements about a run, and the audit keeps them
 apart. `not_evaluated` is a reporting distinction only: it never changes a
 verdict, an exit code, or the run's reported confidence.
 
+## Configured rules and their status
+
+Every configured suppression, `reclassify:` and acknowledgment rule has one row
+in the audit, including a rule that matched nothing. Each row says how the rule
+fared, so "this waiver does nothing any more" is visible rather than silent:
+
+| Field | Meaning |
+|---|---|
+| `status` | `active` (disposed of at least one finding), `shadowed_only` (matched findings, but an earlier rule claimed them all), `expired` (past its `expires` date), `not_evaluated` (matched nothing, and a detector of this run did not run), `unused` (matched nothing, and every detector ran). |
+| `matched_count` | Findings the rule disposed of. For a reclassify rule, the findings whose verdict it changed (also `changed_count`). |
+| `shadowed_count` | Findings the rule also matched but an earlier rule claimed, or a no-op reclassification. |
+| `selector_matched_count` | `matched_count` plus `shadowed_count`. |
+| `rule_id` | The rule's `id:` when it has one, else its canonical identity. `label` and `reason` are their own fields. |
+| `entry_index` | The rule's position in its file, so two identical entries stay two rows. |
+
+`unused` is never reported for a run in which a detector did not run: the audit
+cannot prove the rule was checked. Detectors do not yet declare the kinds they
+produce, so on most runs of an ELF-only library the unmatched rules read
+`not_evaluated`. See the
+[unused-rules axis](../reference/exit-codes.md#the-unused-rules-axis)
+for the `unused_rules: block` gate that reacts to `unused` only.
+
 ## What it means for suppression
 
 A suppression records that a finding was *withheld*; it is not evidence the

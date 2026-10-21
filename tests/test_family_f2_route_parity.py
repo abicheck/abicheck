@@ -98,6 +98,9 @@ _UC = "uncovered"
 
 CLICK_ROUTING: dict[str, tuple[str, Any]] = {
     "policy": ("covered", ("policy_sdk_vendor", "policy_file")),
+    # Escalates the policy file's unused_rules to block; the typed API reaches
+    # the same setting through policy_file.
+    "fail_on_unused_rules": ("covered", ("policy_file",)),
     "suppress": ("covered", ("suppress", "suppress_strict")),
     "acknowledgments": (
         _UC,
@@ -321,6 +324,7 @@ DEFAULT_MAP: dict[str, tuple[str, str]] = {
 #: Click dests with no request/input counterpart whose default could be
 #: compared, each with the reason.
 DEFAULT_UNMAPPED: dict[str, str] = {
+    "fail_on_unused_rules": "presentation escalation carried by a context variable, no request field",
     "help": "Click help flag",
     "help_all": "Click help flag",
     "old_input": "required operand, no default",

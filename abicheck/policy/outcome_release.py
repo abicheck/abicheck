@@ -102,6 +102,9 @@ _NON_OPERATIONAL_CONTRIBUTIONS: frozenset[str] = frozenset(
         # ADR-067 D6: a policy-acceptance floor (unacknowledged additions
         # under `block`), never a broken run.
         "additions_review_contribution",
+        # ADR-067 P1: a policy-acceptance floor (an unused configured rule under
+        # `unused_rules: block`), never a broken run.
+        "unused_rules_contribution",
     }
 )
 
