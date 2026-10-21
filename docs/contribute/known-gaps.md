@@ -61,7 +61,7 @@ Each entry's status line says what is still open. A PARTIAL entry's write-up als
 
 #### A binary-gate demotion does not state a coverage gap (ADR-084)
 
-**Status (2026-10-21): OPEN.** When the ADR-084 gate demotes a binary-only source-level claim, the verdict narrows and the finding records its rule, but the run's coverage warnings do not change. `tests/test_family_f1_evidence_ablation.py` requires that a verdict which narrows from broken to clean because a fact became unknown carry a stated gap: lower confidence, a new coverage warning, a changed analysis-assurance record, or a higher contract-coverage floor. The demotion currently gives none of these. The fix is a coverage warning naming the unbacked claim, appended where `DiffResult.coverage_warnings` is assembled in `checker.py`. That file is at its no-growth ratchet (1407 lines), so adding it needs a responsibility moved out of `checker.py` first, not a raised baseline. The F1 cell `pimpl_inline_body_renamed` / `RecordType.source_header_fact` is the one that fails.
+**Status (2026-10-21): FIXED.** A demotion now adds an `analysis_assurance.notes` entry naming each demoted claim (`policy/binary_gate_marker.binary_gate_assurance_notes`, called from `policy/analysis_assurance/_compute.py`), which is a changed analysis-assurance record in the sense `tests/test_family_f1_evidence_ablation.py` requires; the F1 cell `pimpl_inline_body_renamed` / `RecordType.source_header_fact` passes.
 
 #### A refused clang AST still leaves the header type pass collected (2026-10-17)
 
