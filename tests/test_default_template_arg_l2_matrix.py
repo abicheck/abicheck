@@ -224,7 +224,7 @@ def test_clang_ast_exposes_template_default_argument(
     Pins the producer-side fact that makes a clang-only extraction possible
     later, so the header-capability note stays accurate.
     """
-    _require_tools("clang")
+    _require_tools("clang++")
     old_h, _ = header_pair
     ast = subprocess.run(
         [
