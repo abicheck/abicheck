@@ -185,6 +185,15 @@ why, with the same shape as `suppression_would_hide_public_break` below. Set
 absence-of-evidence risk explicitly once you've manually confirmed it's
 safe.
 
+The default `unreachable-only` gate (used by broad rules unless you set
+`reachability` yourself) does not require graph coverage to prove a change
+unreachable. If it hides a change whose reachability was never established,
+the report adds a `graph_coverage_insufficient_for_suppression` finding naming
+the rule and the change. The suppression still applies, and the finding is
+advisory: it does not change the exit code, though the rendered verdict reads
+`COMPATIBLE_WITH_RISK`. To require proof instead, set
+`reachability: proven-unreachable-only` on the rule.
+
 Independently of `reachability`, a **broad** rule (`namespace`/
 `entity_namespace`/`cause_namespace`/`source_location`) that would suppress a
 change that is **both** public-reachable **and** classified `BREAKING`/

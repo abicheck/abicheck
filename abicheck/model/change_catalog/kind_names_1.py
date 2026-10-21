@@ -289,6 +289,11 @@ KIND_NAMES_1: tuple[tuple[str, str, str | None], ...] = (
         "suppression_reachability_unknown",
         "a suppression rule using reachability: proven-unreachable-only matched but was withheld because graph coverage could not prove the change unreachable (impact-analysis-layer P0); advisory",
     ),
+    (
+        "GRAPH_COVERAGE_INSUFFICIENT_FOR_SUPPRESSION",
+        "graph_coverage_insufficient_for_suppression",
+        "a suppression rule using the default unreachable-only gate suppressed a change whose reachability graph coverage never established (unknown, not proven unreachable); advisory",
+    ),
     ("STRUCT_SIZE_CHANGED", "struct_size_changed", "sizeof(T) changed"),
     ("STRUCT_FIELD_OFFSET_CHANGED", "struct_field_offset_changed", "field moved"),
     ("STRUCT_FIELD_REMOVED", "struct_field_removed", "field deleted"),

@@ -447,8 +447,11 @@ class TestSuppressionNamespaceSelector:
             [Suppression(namespace="**::detail::r1::*", reason="legacy churn")],
         )
         r = compare(old, new, suppression=suppression)
-        # The finding is suppressed → verdict is NO_CHANGE.
-        assert r.verdict == Verdict.NO_CHANGE
+        # The finding is suppressed, but the default unreachable-only gate
+        # has no graph coverage behind it, so the disposition keeps the
+        # advisory graph_coverage_insufficient_for_suppression finding and
+        # the verdict reads COMPATIBLE_WITH_RISK (exit code unaffected).
+        assert r.verdict == Verdict.COMPATIBLE_WITH_RISK
 
     def test_namespace_matches_deep_descendants(self) -> None:
         """A glob like ``**::detail::r1`` must match arbitrarily nested
@@ -480,7 +483,8 @@ class TestSuppressionNamespaceSelector:
 
     def test_extern_c_namespace_suppression_end_to_end(self) -> None:
         """Compare() with an extern "C" symbol in a frozen namespace and a
-        ``namespace:`` suppression matching it ⇒ verdict NO_CHANGE. This
+        ``namespace:`` suppression matching it ⇒ verdict COMPATIBLE_WITH_RISK
+        (the advisory graph-coverage finding; no breaking change). This
         exercises the full enrichment → suppression pipeline."""
         old_fn = Function(
             name="mylib::detail::r1::dispatch",
@@ -504,7 +508,7 @@ class TestSuppressionNamespaceSelector:
             [Suppression(namespace="**::detail::r1::*", reason="legacy churn")],
         )
         r = compare(old, new, suppression=suppression)
-        assert r.verdict == Verdict.NO_CHANGE
+        assert r.verdict == Verdict.COMPATIBLE_WITH_RISK
 
     def test_extern_c_namespace_suppression_rejects_one_sided_spoof(self) -> None:
         """A new-side namespace alone must not suppress an existing global export.

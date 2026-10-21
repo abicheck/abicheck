@@ -484,6 +484,7 @@ NON_DETECTOR_KINDS: frozenset[str] = frozenset(
         "generated_file_dependency_unstable",
         "generated_header_changed",
         "generated_header_reaches_public_api",
+        "graph_coverage_insufficient_for_suppression",
         "handle_type_changed",
         "header_build_context_mismatch",
         "header_parse_context_drift",
