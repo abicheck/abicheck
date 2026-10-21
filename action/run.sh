@@ -3264,6 +3264,23 @@ for asset in data.get("assets") or []:
   # digest mismatch (exit 3) and a usage error (exit 64) are fatal even under
   # --dry-run: a dry run that carried on would compare against no baseline for a
   # release whose archive changed. Other failures keep the dry-run-tolerant path.
+  # Opt-in provenance check (verify-baseline-attestation), on the downloaded
+  # bytes and before any member is written. Fatal even under --dry-run, like a
+  # digest mismatch: the caller asked for proof of origin and did not get it.
+  if [[ "${INPUT_VERIFY_BASELINE_ATTESTATION:-false}" == "true" ]]; then
+    local attest_repo="${INPUT_BASELINE_ATTESTATION_REPO:-${GITHUB_REPOSITORY:-}}"
+    if [[ -z "$attest_repo" ]]; then
+      _error_annotation "verify-baseline-attestation is 'true' but neither baseline-attestation-repo nor GITHUB_REPOSITORY names the repository that attested the archive."
+      exit 1
+    fi
+    local attest_output="" attest_exit=0
+    attest_output=$(bash "$(dirname "${BASH_SOURCE[0]}")/verify-baseline-attestation.sh" "$archive_path" "$attest_repo" "${INPUT_BASELINE_ATTESTATION_SIGNER_WORKFLOW:-}") || attest_exit=$?
+    if [[ $attest_exit -ne 0 ]]; then
+      _error_annotation "$(printf '%s\n' "$attest_output" | sed -n 's/^message=//p')"
+      exit 1
+    fi
+    echo "Baseline-set archive '$asset_name' attestation verified (repo $attest_repo)."
+  fi
   local prepare_args=(--archive "$archive_path" --dest "$extracted_dir" --format "$archive_format")
   if [[ -n "${INPUT_EXPECTED_ARCHIVE_DIGEST:-}" ]]; then
     prepare_args+=(--expected-digest "$INPUT_EXPECTED_ARCHIVE_DIGEST")
@@ -3409,6 +3426,10 @@ if [[ -n "$ABI_BASELINE" && -f "$ABI_BASELINE" && ( -n "${INPUT_BASELINE_PROFILE
   _error_annotation "abi-baseline is a file path ('$ABI_BASELINE'), which is used directly, but baseline-profile/baseline-target are also set. Those select a release-contract baseline-set archive that a file path never consults, so the selection would be silently discarded. Pass the file path alone, or unset baseline-profile and baseline-target to fetch from the release."
   exit 1
 fi
+_attestation_input_error() {
+  _error_annotation "$1"
+  exit 1
+}
 # expected-archive-digest pins a release-contract baseline-set archive, which only
 # baseline-profile and baseline-target select. Without that selection there is
 # no archive to verify, so the pin is refused rather than silently unused.
@@ -3421,6 +3442,28 @@ if [[ -n "${INPUT_EXPECTED_ARCHIVE_DIGEST:-}" ]]; then
     _error_annotation "expected-archive-digest pins a release-contract baseline-set archive, which only baseline-profile and baseline-target select. Set both, or unset expected-archive-digest."
     exit 1
   fi
+fi
+
+# verify-baseline-attestation (opt-in): `gh attestation verify` on the
+# downloaded baseline-set archive before extraction. Only a baseline-profile +
+# baseline-target selection fetches an archive, and the repo/signer inputs only
+# mean something when verification is on -- otherwise refused, never ignored.
+_VERIFY_ATTESTATION="${INPUT_VERIFY_BASELINE_ATTESTATION:-false}"
+case "$_VERIFY_ATTESTATION" in
+  true | false) ;;
+  *) _attestation_input_error "verify-baseline-attestation '$_VERIFY_ATTESTATION' is not recognized. Use 'true' or 'false'." ;;
+esac
+if [[ "$_VERIFY_ATTESTATION" == "false" && ( -n "${INPUT_BASELINE_ATTESTATION_REPO:-}" || -n "${INPUT_BASELINE_ATTESTATION_SIGNER_WORKFLOW:-}" ) ]]; then
+  _attestation_input_error "baseline-attestation-repo/baseline-attestation-signer-workflow are set but verify-baseline-attestation is 'false', so nothing would be verified. Set verify-baseline-attestation: true, or unset them."
+fi
+if [[ -n "${INPUT_BASELINE_ATTESTATION_REPO:-}" ]] && ! [[ "$INPUT_BASELINE_ATTESTATION_REPO" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]]; then
+  _attestation_input_error "baseline-attestation-repo '$INPUT_BASELINE_ATTESTATION_REPO' is not an owner/repo name."
+fi
+if [[ -n "${INPUT_BASELINE_ATTESTATION_SIGNER_WORKFLOW:-}" ]] && ! [[ "$INPUT_BASELINE_ATTESTATION_SIGNER_WORKFLOW" =~ ^[^[:space:]]+/\.github/workflows/[^[:space:]/]+$ ]]; then
+  _attestation_input_error "baseline-attestation-signer-workflow '$INPUT_BASELINE_ATTESTATION_SIGNER_WORKFLOW' is not a workflow path. Use 'owner/repo/.github/workflows/<file>.yml'."
+fi
+if [[ "$_VERIFY_ATTESTATION" == "true" && ( -z "${INPUT_BASELINE_PROFILE:-}" || -z "${INPUT_BASELINE_TARGET:-}" ) ]]; then
+  _attestation_input_error "verify-baseline-attestation checks a release-contract baseline-set archive, which only baseline-profile and baseline-target select. Set both, or set verify-baseline-attestation: false."
 fi
 # Same "entirely digits, or empty" check actions/baseline/run.sh applies to
 # its own baseline-generation input -- [0-9]* alone is not anchored to

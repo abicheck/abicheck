@@ -193,7 +193,7 @@ class DiffResult(ReportSideFacts):
     analysis_assurance: object | None = None
     # ``compare --use-cases MANIFEST``'s attribution of this comparison's own
     # findings to the declared use cases whose entrypoints reach them
-    # (``impact.use_case_impact.UseCaseImpact``). ``None`` for every run that
+    # (``policy.use_case_attribution.UseCaseImpact``). ``None`` for every run that
     # did not pass the flag. Typed ``object`` for the same circular-import
     # reason as the two blocks above -- the builder imports ``Change`` from
     # this module. Read-only report data: it never reaches the verdict, the

@@ -38,10 +38,10 @@ Invariants, for the mangled symbol each kind names:
 2. ``func_visibility_changed`` names it exactly when readelf shows the export
    changed, and then the verdict is BREAKING: an export loss is never demoted.
 
-Not covered here, and kept with their existing kinds (see
-``docs/contribute/known-gaps.md``): the synthetic implicit constructors and the
-``operator=`` of a class-template specialization, and the ``type_removed`` row
-for the specialization. None of them is a mangled symbol the matrix names.
+The class-template section at the end extends the same invariants to the
+specialization itself (no ``type_removed``) and every one of its members,
+including the synthetic implicit constructors/destructor, ``operator=`` and a
+static data member (``var_visibility_changed`` for an export loss).
 
 Symbol-binding note: a template instance is WEAK in the old build, so the
 ``to_hidden`` transition is ``-fvisibility=hidden`` for those kinds. The GLOBAL
@@ -369,3 +369,186 @@ def test_plain_function_dropped_from_header_stays_a_removal(tmp_path: Path) -> N
     kinds = {c["kind"] for c in report["changes"] if c.get("symbol") == symbol}
     assert "func_removed" in kinds, sorted(kinds)
     assert report["verdict"] == "BREAKING"
+
+
+# ── Class-template specializations ─────────────────────────────────────────
+#
+# The same question one level up: a class-template specialization the new
+# header stops instantiating. Its record, its implicit constructors/destructor/
+# operator=, its inline methods and its static data member all drop out of the
+# new castxml enumeration while the primary template stays declared. Oracles:
+# readelf (FUNC and OBJECT exports, so the static data member is judged too)
+# and the header text each scenario writes. Every member of ``Box<double>`` is
+# found by its spelling, mangled (``3BoxIdE``) or synthetic (``Box<double>``).
+
+_CT_PRIMARY = (
+    "template <typename T> struct Box {\n"
+    "  T v;\n"
+    "  static int count;\n"
+    "  void set(T x) { v = x; }\n"
+    "};\n"
+    "template <typename T> int Box<T>::count = 0;\n"
+)
+_CT_EXPLICIT = (
+    "template <> struct Box<double> {\n"
+    "  double v;\n"
+    "  static int count;\n"
+    "  void set(double x) { v = x; }\n"
+    "};\n"
+)
+_CT_BODY = (
+    "{ Box<double> b; b.set(1.0); Box<double> c(b); c = b; Box<double>::count++; }"
+)
+_CT_SPEC = "Box<double>"
+
+#: scenario -> (old header decls, new header decls, new header instantiates,
+#: the old library defines the explicit specialization's static member)
+_CT_SCENARIOS: dict[str, tuple[str, str, bool, bool]] = {
+    "newinst": (_CT_PRIMARY, _CT_PRIMARY, True, False),
+    "noinst": (_CT_PRIMARY, _CT_PRIMARY, False, False),
+    "explicit_specialization_removed": (
+        _CT_PRIMARY + _CT_EXPLICIT,
+        _CT_PRIMARY,
+        False,
+        True,
+    ),
+    "template_removed": (_CT_PRIMARY, "", False, False),
+}
+_CT_REMOVAL_KINDS = {
+    "type_removed",
+    "func_removed",
+    "inline_function_removed",
+    "var_removed",
+}
+_CT_EXPORT_KIND = {
+    "FUNC": "func_visibility_changed",
+    "OBJECT": "var_visibility_changed",
+}
+
+
+def _exported_symbols(so: Path) -> dict[str, str]:
+    """Defined dynamic FUNC/OBJECT symbols, name -> type (readelf oracle)."""
+    out = subprocess.run(
+        ["readelf", "--dyn-syms", "-W", str(so)],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout
+    table: dict[str, str] = {}
+    for line in out.splitlines():
+        parts = line.split()
+        if len(parts) >= 8 and parts[0].endswith(":") and parts[3] in _CT_EXPORT_KIND:
+            if parts[6] != "UND":
+                table[parts[7]] = parts[3]
+    return table
+
+
+def _is_box_double_member(symbol: str) -> bool:
+    return "3BoxIdE" in symbol or _CT_SPEC in symbol
+
+
+def _class_template_cell(
+    tmp_path: Path, scenario: str, transition: str
+) -> tuple[dict, dict[str, str], dict[str, str]]:
+    old_decl, new_decl, new_uses, explicit_static = _CT_SCENARIOS[scenario]
+    flags, new_keeps_code = _TRANSITIONS[transition]
+    old_dir, new_dir = tmp_path / "old", tmp_path / "new"
+    old_dir.mkdir()
+    new_dir.mkdir()
+    use = f"inline void use_k() {_CT_BODY}\n"
+    old_static = "int Box<double>::count = 0;\n" if explicit_static else ""
+    old_so = _build(
+        old_dir,
+        f"#pragma once\nnamespace ns {{\n{old_decl}{use}}}\n",
+        f'#include "m.h"\nnamespace ns {{\n{old_static}'
+        f"void lib_entry() {_CT_BODY}\n}}\n",
+        [],
+    )
+    keeps = new_keeps_code and bool(new_decl)
+    new_so = _build(
+        new_dir,
+        f"#pragma once\nnamespace ns {{\n{new_decl}{use if new_uses else ''}}}\n",
+        '#include "m.h"\nnamespace ns {\n'
+        + (f"void lib_entry() {_CT_BODY}\n" if keeps else "void lib_entry() {}\n")
+        + "}\n",
+        flags,
+    )
+    old_exports, new_exports = _exported_symbols(old_so), _exported_symbols(new_so)
+    # Non-vacuity: the old build exports the specialization's method and its
+    # static data member, so the export oracle has something to judge.
+    assert {"_ZN2ns3BoxIdE3setEd", "_ZN2ns3BoxIdE5countE"} <= set(old_exports)
+    report = _compare(tmp_path, old_so, new_so, old_dir / "m.h", new_dir / "m.h")
+    return report, old_exports, new_exports
+
+
+def _box_findings(report: dict) -> dict[str, set[str]]:
+    found: dict[str, set[str]] = {}
+    for change in report["changes"]:
+        symbol = change.get("symbol") or ""
+        if _is_box_double_member(symbol):
+            found.setdefault(symbol, set()).add(change["kind"])
+    return found
+
+
+@pytest.mark.parametrize("transition", list(_TRANSITIONS))
+@pytest.mark.parametrize("scenario", ["newinst", "noinst"])
+def test_class_template_specialization_the_header_stops_instantiating(
+    tmp_path: Path, scenario: str, transition: str
+) -> None:
+    """The primary template is still declared: neither the specialization nor
+    any of its members (method, static data member, implicit special members)
+    is a removal, and each export is judged by readelf."""
+    report, old_exports, new_exports = _class_template_cell(
+        tmp_path, scenario, transition
+    )
+    found = _box_findings(report)
+    for symbol, kinds in found.items():
+        assert not kinds & _CT_REMOVAL_KINDS, (symbol, sorted(kinds))
+    for symbol, sym_type in old_exports.items():
+        if not _is_box_double_member(symbol):
+            continue
+        lost = symbol not in new_exports
+        kinds = found.get(symbol, set())
+        assert (_CT_EXPORT_KIND[sym_type] in kinds) is lost, (symbol, sorted(kinds))
+        if lost:
+            assert report["verdict"] == "BREAKING", report["verdict"]
+
+
+@pytest.mark.parametrize("transition", list(_TRANSITIONS))
+@pytest.mark.parametrize(
+    "scenario", ["explicit_specialization_removed", "template_removed"]
+)
+def test_class_template_specialization_real_removal_stays(
+    tmp_path: Path, scenario: str, transition: str
+) -> None:
+    """Controls: a deleted explicit specialization and a removed class template
+    are declarations the new header no longer has, so ``type_removed`` stays."""
+    report, _, _ = _class_template_cell(tmp_path, scenario, transition)
+    found = _box_findings(report)
+    assert "type_removed" in found.get(_CT_SPEC, set()), report["changes"]
+    assert report["verdict"] == "BREAKING"
+
+
+def test_non_template_class_removed_from_header_stays_a_removal(
+    tmp_path: Path,
+) -> None:
+    """Control: a plain class has no primary template that keeps it declared."""
+    old_dir, new_dir = tmp_path / "old", tmp_path / "new"
+    old_dir.mkdir()
+    new_dir.mkdir()
+    old_so = _build(
+        old_dir,
+        "#pragma once\nnamespace ns {\nstruct Plain { int v; };\n"
+        "inline int use_k() { Plain p{1}; return p.v; }\n}\n",
+        '#include "m.h"\nnamespace ns { int lib_entry() { return use_k(); } }\n',
+        [],
+    )
+    new_so = _build(
+        new_dir,
+        "#pragma once\nnamespace ns {\n}\n",
+        '#include "m.h"\nnamespace ns { int lib_entry() { return 1; } }\n',
+        [],
+    )
+    report = _compare(tmp_path, old_so, new_so, old_dir / "m.h", new_dir / "m.h")
+    removed = {c["symbol"] for c in report["changes"] if c["kind"] == "type_removed"}
+    assert "Plain" in removed, report["changes"]

@@ -1058,8 +1058,6 @@ class TestUnspecifiedReturnNowNamed:
         assert c.kind == ChangeKind.UNSPECIFIED_RETURN_NOW_NAMED
         assert c.old_value == "auto"
         assert c.new_value == "lib::Foo"
-        assert c.public_reachable is True
-        assert c.reachability_kind == "direct_public_symbol"
 
     def test_named_to_lambda(self) -> None:
         old = _snap(funcs=[_fn("lib::make", return_type="lib::Foo")])

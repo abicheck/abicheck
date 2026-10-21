@@ -557,4 +557,54 @@ because no detector run can be credited with it. Recording pipeline steps as
 producers would need the same per-step evaluation record, and is not decided
 here. The row's optional list of candidate detectors that did not run is not
 added to the JSON report. The acknowledgment `breaks: gate|accept` policy is
-owned by its own change and is not decided here.
+owned by its own change and is not decided here. *(Partly superseded by
+addendum 2 below.)*
+
+## Addendum 2 (2026-10-21): observed kinds, and `not_evaluated` as a warning
+
+*Amends the per-rule status and the `unused_rules` gate above.*
+
+**Investigation.** Real gcc-built C comparisons were run ELF-only,
+ELF+headers, ELF+DWARF and ELF+DWARF+headers, and every rule shape was
+classified against the detectors that ran. No detector that ran was missing
+from `DETECTOR_KINDS`; the map was not too narrow for detectors. The gaps
+were elsewhere. (1) The kinds no registered detector emits (`NON_DETECTOR_KINDS`,
+the kinds `policy/detector_kind_map.py` lists under `NON_DETECTOR_KINDS`, among them `public_surface_shrank`, emitted on every run
+with a removal) could never read `unused`: a stale rule on them was always
+`not_evaluated`, so `block` never fired for them. (2) Kinds only the DWARF
+detector emits (`struct_size_changed`, `struct_field_type_changed`) are
+correctly `not_evaluated` without DWARF, but nothing told the user so: under
+`warn`/`block` such a rule was silent.
+
+**Observed kinds are proof of evaluation.** A zero-match rule is also `unused`
+when the run *recorded* a change of one of its kinds, in any disposition
+(`changes`, `suppressed_changes`, `redundant_changes`,
+`out_of_surface_changes`, `reconciled_changes`;
+`policy/disposition_rules.observed_kinds`). The producer of that kind
+demonstrably ran, and the rule was checked against real findings of its kind
+and matched none. This is sound for detector and pipeline kinds alike and
+needs no per-step evaluation record. A pipeline kind that the run did *not*
+record still reads `not_evaluated`: a step that ran and found nothing is
+still indistinguishable from one that did not run, which stays open.
+
+**`missing_evidence`.** Every `not_evaluated` row carries `missing_evidence`
+(JSON rows and the release fold): the candidate detectors that did not run,
+each with its evidence gate's `coverage_gap`, or, for a pipeline kind, that no
+registered detector produces it and its producer recorded no change of it.
+
+**`not_evaluated` is a warning, not a gate (minimal design).** Under
+`unused_rules: warn` and `block`, `unused_rules_review.not_evaluated` lists
+every `not_evaluated` rule with its `missing_evidence`, and the Markdown audit
+renders it as a warning. Under `allow` (the default) nothing changes. It never
+contributes to `gate_contribution`: missing evidence narrows a conclusion and
+never manufactures a failure (ADR-063), and a user who needs the evidence
+present already has `require-complete-analysis` / the analysis-assurance
+gate. A separate `unused_rules_not_evaluated: block` opt-in was considered and
+not added: it would add a policy key, a digest field and a release-fold rule
+for a case the assurance gate already owns. It stays a maintainer decision.
+
+**Schema.** Additive inside `disposition_audit` (both objects allow
+additional properties): `missing_evidence` on `not_evaluated` rows and
+`unused_rules_review.not_evaluated` when the mode is not `allow`. No exit code
+changes: a rule that moves from `not_evaluated` to `unused` under `block` can
+newly raise a clean `0` to `1`, which is the gate's documented meaning.
