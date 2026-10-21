@@ -509,7 +509,7 @@
     },
     {
       "path": "abicheck/diff_namespaces.py",
-      "baseline_lines": 1252,
+      "baseline_lines": 1240,
       "target": "compare",
       "rule": "no_growth",
       "disposition": "migrate",
@@ -564,7 +564,7 @@
     },
     {
       "path": "abicheck/diff_templates.py",
-      "baseline_lines": 1460,
+      "baseline_lines": 1458,
       "target": "compare",
       "rule": "no_growth",
       "disposition": "migrate",
@@ -1411,7 +1411,7 @@
     },
     {
       "path": "tests/test_diff_namespaces.py",
-      "baseline_lines": 1648,
+      "baseline_lines": 1640,
       "target": "tests/unit-or-contract ownership matching production migration",
       "rule": "no_growth",
       "disposition": "migrate",
@@ -1774,7 +1774,7 @@
     },
     {
       "path": "tests/test_reachability_aware_suppression.py",
-      "baseline_lines": 1792,
+      "baseline_lines": 1767,
       "target": "tests/unit-or-contract ownership matching production migration",
       "rule": "no_growth",
       "disposition": "migrate",
