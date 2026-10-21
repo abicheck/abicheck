@@ -4347,6 +4347,45 @@
     ],
     "policy": "policy.yaml",
     "policy_expected": "BREAKING"
+  },
+  "case219_public_virtual_dispatch_set_changed": {
+   "abi_break": false,
+   "api_break": false,
+   "bad_practice": false,
+   "category": "risk",
+   "description": "A stable public virtual method, demo::Shape::area(), keeps its symbol, signature and call site, but its possible override set changes between v1 and v2: demo::Square::area() joins demo::Circle::area() as a target a call through the base may dispatch to. Over-approximated from the source graph (a possible-target-set change, not a proven runtime one), so it is a risk to review and never an ABI break on its own; the shipped binary's exports and vtable layout are unchanged by this finding.",
+   "expected": "COMPATIBLE_WITH_RISK",
+   "expected_kinds": [
+    "public_virtual_dispatch_set_changed"
+   ],
+   "fixtures": [
+    "old.json",
+    "new.json"
+   ],
+   "min_evidence": "L5",
+   "platforms": [
+    "linux"
+   ]
+  },
+  "case220_public_virtual_dispatch_set_reordered": {
+   "abi_break": false,
+   "api_break": false,
+   "bad_practice": false,
+   "category": "no_change",
+   "description": "The same two override candidates of a public virtual method, demo::Shape::area(), appear in both source graphs; only the order of their dispatch edges differs. The dispatch target set is compared as a set, so a reordered but unchanged override set produces no finding and the verdict stays NO_CHANGE.",
+   "expected": "NO_CHANGE",
+   "expected_absent_kinds": [
+    "public_virtual_dispatch_set_changed"
+   ],
+   "expected_kinds": [],
+   "fixtures": [
+    "old.json",
+    "new.json"
+   ],
+   "min_evidence": "L5",
+   "platforms": [
+    "linux"
+   ]
   }
  },
  "version": "4",

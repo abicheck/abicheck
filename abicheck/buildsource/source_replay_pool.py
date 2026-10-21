@@ -120,48 +120,16 @@ def _l4_jobs(n_units: int) -> int:
     that (set ``ABICHECK_L4_JOB_MEM_GIB`` to tune, or seed/scope the scan to fewer
     TUs); like the oversubscription ceiling, a clamp is logged, never silent.
     """
-    mem_cap = _l4_mem_cap()
-    env = os.environ.get("ABICHECK_L4_JOBS")
-    if env:
-        try:
-            requested = max(1, int(env))
-        except ValueError:
-            return 1
-        ceiling = _l4_jobs_ceiling()
-        if requested > ceiling:
-            _log.warning(
-                "ABICHECK_L4_JOBS=%d exceeds the oversubscription ceiling (%d "
-                "for %d CPUs); clamping to %d",
-                requested,
-                ceiling,
-                os.cpu_count() or 1,
-                ceiling,
-            )
-            requested = ceiling
-        if mem_cap is not None and requested > mem_cap:
-            _log.warning(
-                "ABICHECK_L4_JOBS=%d may not fit in available memory (~%.1f GiB at "
-                "~%.1f GiB/worker); clamping to %d to avoid an OOM-killed L4 replay. "
-                "Tune ABICHECK_L4_JOB_MEM_GIB, or seed/scope the scan to fewer TUs.",
-                requested,
-                _l4_available_mem_gib() or 0.0,
-                _l4_job_mem_budget_gib(),
-                mem_cap,
-            )
-            return mem_cap
-        return requested
-    auto = max(1, min(n_units, os.cpu_count() or 1, 8))
-    if mem_cap is not None and mem_cap < auto:
-        _log.info(
-            "L4 workers reduced %d -> %d to fit available memory (~%.1f GiB at "
-            "~%.1f GiB/worker); set ABICHECK_L4_JOBS / ABICHECK_L4_JOB_MEM_GIB to override.",
-            auto,
-            mem_cap,
-            _l4_available_mem_gib() or 0.0,
-            _l4_job_mem_budget_gib(),
-        )
-        return mem_cap
-    return auto
+    return process_resources.bounded_jobs(
+        n_units,
+        jobs_env_var="ABICHECK_L4_JOBS",
+        mem_budget_env_var="ABICHECK_L4_JOB_MEM_GIB",
+        mem_budget_default_gib=_L4_JOB_MEM_BUDGET_GIB,
+        ram_cap=_l4_mem_cap,
+        log=_log,
+        what="L4 workers",
+        ram_hint="seed/scope the scan to fewer TUs",
+    )
 
 
 def _l4_use_process_pool() -> bool:

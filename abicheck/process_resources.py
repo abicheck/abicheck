@@ -40,6 +40,7 @@ caller and test keeps working unchanged.
 
 from __future__ import annotations
 
+import logging
 import os
 from collections.abc import Callable
 from concurrent.futures import Executor, Future, ThreadPoolExecutor
@@ -238,6 +239,98 @@ def mem_cap(budget_gib: float) -> int | None:
     if avail is None:
         return None
     return max(1, int(avail / budget_gib))
+
+
+#: Auto worker count for a pool of heavyweight child processes, before the
+#: memory clamp: one worker per unit, capped at the CPU count and this.
+AUTO_JOBS_CAP = 8
+
+
+def bounded_jobs(
+    n_units: int,
+    *,
+    jobs_env_var: str,
+    mem_budget_env_var: str,
+    mem_budget_default_gib: float,
+    ram_cap: Callable[[], int | None],
+    log: logging.Logger,
+    what: str,
+    ram_hint: str,
+) -> int:
+    """Worker count for a pool of *n_units* child-process units (>= 1).
+
+    The one sizing rule every per-unit pool in abicheck applies (clang or
+    castxml per translation unit):
+
+    * ``jobs_env_var`` set to an integer is an explicit override. It is
+      clamped to :func:`jobs_ceiling`, then to *ram_cap*; ``1`` forces serial.
+      An unparsable value falls back to ``1`` rather than being guessed at.
+    * Unset, the auto count is ``min(n_units, cpu_count, AUTO_JOBS_CAP)``,
+      reduced to *ram_cap* when that is lower.
+
+    *ram_cap* is the caller's own RAM probe (``None`` when RAM can't be read),
+    passed in rather than computed here so each caller keeps its own seam for
+    tests. *mem_budget_env_var* / *mem_budget_default_gib* name the per-worker
+    RAM budget and only feed the log messages; the caller's *ram_cap* already
+    applies it. *what* names the pool in messages, *ram_hint* says how to shrink
+    the scan when memory is the limit. Every clamp is logged, never silent.
+    """
+    budget = job_mem_budget_gib(mem_budget_env_var, mem_budget_default_gib)
+    cap = ram_cap()
+    env = os.environ.get(jobs_env_var, "").strip()
+    if env:
+        try:
+            requested = max(1, int(env))
+        except ValueError:
+            log.warning(
+                "%s=%r is not a valid integer; falling back to 1 (serial) worker.",
+                jobs_env_var,
+                env,
+            )
+            return 1
+        ceiling = jobs_ceiling()
+        if requested > ceiling:
+            log.warning(
+                "%s=%d exceeds the oversubscription ceiling (%d for %d CPUs); "
+                "clamping to %d",
+                jobs_env_var,
+                requested,
+                ceiling,
+                os.cpu_count() or 1,
+                ceiling,
+            )
+            requested = ceiling
+        if cap is not None and requested > cap:
+            log.warning(
+                "%s=%d may not fit in available memory (~%.1f GiB at ~%.1f "
+                "GiB/worker); clamping to %d to avoid OOM-killing the %s. "
+                "Tune %s, or %s.",
+                jobs_env_var,
+                requested,
+                available_mem_gib() or 0.0,
+                budget,
+                cap,
+                what,
+                mem_budget_env_var,
+                ram_hint,
+            )
+            return cap
+        return requested
+    auto = max(1, min(n_units, os.cpu_count() or 1, AUTO_JOBS_CAP))
+    if cap is not None and cap < auto:
+        log.info(
+            "%s reduced %d -> %d to fit available memory (~%.1f GiB at ~%.1f "
+            "GiB/worker); set %s / %s to override.",
+            what,
+            auto,
+            cap,
+            available_mem_gib() or 0.0,
+            budget,
+            jobs_env_var,
+            mem_budget_env_var,
+        )
+        return cap
+    return auto
 
 
 # ---------------------------------------------------------------------------

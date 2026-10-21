@@ -200,12 +200,28 @@ invocation + tool identity + input digests) that the header-AST cache and
 shared invocation key a shared store would just be two key schemes in one
 directory.
 
-### Phase 7 — one worker-sizing and executor policy
+### Phase 7 — one worker-sizing and executor policy (sizing implemented; executor default open)
 
 `_tu_jobs`, `_l4_jobs` and `_call_graph_jobs` apply the same RAM-per-worker
 and CPU clamps three times. Converge on one function in `process_resources`,
 and decide the thread-vs-process default from measurement (see "Measurements"
 below) rather than keeping `ABICHECK_L4_EXECUTOR` an opt-in forever.
+
+**Status — sizing half implemented.** `process_resources.bounded_jobs` is the
+one sizing rule (explicit override clamped to the oversubscription ceiling then
+to the RAM cap; auto `min(units, cpus, 8)` reduced to the RAM cap; an
+unparsable override is 1). Each caller keeps its own `ABICHECK_*_JOBS`
+override, its per-worker RAM budget variables and constant, and its RAM probe
+seam, so its thin wrapper is what tests patch. The call-graph wrapper keeps its
+`n_units <= 1` short-circuit and its unit-count cap on explicit overrides.
+`tests/test_bounded_jobs_equivalence.py` pins 61 rows against a hand-derived
+oracle; the same table passes on the pre-convergence code. Log messages were
+unified, and two edge cases changed (see the changelog fragment).
+
+**Still open — the executor default.** `ABICHECK_L4_EXECUTOR` remains opt-in
+(`thread` default). Choosing `process` as the default still needs the
+measurement in "Measurements" on the PVXS fixture; it was deliberately not
+changed in this phase.
 
 ### Phase 8 — diffing: assess before merging
 

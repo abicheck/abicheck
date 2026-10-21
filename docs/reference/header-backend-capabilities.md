@@ -358,6 +358,10 @@ Each of these is a documented consequence of the matrix, not a bug awaiting a
 quick patch. They are listed here so a reader can tell "abicheck cannot see
 this" apart from "abicheck saw no change".
 
+- **Default template arguments on uninstantiated templates.** A header-only
+  change to a template default reads `NO_CHANGE` on both backends, because
+  CastXML emits no record for an uninstantiated class template. See
+  [known-gaps](../contribute/known-gaps/a-header-only-default-template-argument-change-reads-no-change-at-l2.md).
 - **Secondary vtable placement under multiple inheritance.** Both backends
   apply the same `0`-if-polymorphic heuristic for `vptr_offset_bits`, so a
   secondary base's own vtable pointer at a non-zero offset is invisible to

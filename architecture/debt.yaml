@@ -69,7 +69,7 @@
     },
     {
       "path": "abicheck/buildsource/call_graph.py",
-      "baseline_lines": 993,
+      "baseline_lines": 986,
       "target": "extract/build-or-source",
       "rule": "no_growth",
       "disposition": "migrate",
@@ -1065,17 +1065,6 @@
       "disposition": "migrate",
       "category": "legacy_oversized_test_module",
       "owner": "tests",
-      "rationale": "Existing test module predates ADR-061 and will split by behavior or contract axis with its production migration.",
-      "review_by": "2026-11-30"
-    },
-    {
-      "path": "tests/test_analysis_assurance.py",
-      "baseline_lines": 1954,
-      "target": "tests/unit-or-contract ownership matching production migration",
-      "rule": "no_growth",
-      "disposition": "migrate",
-      "category": "legacy_oversized_test_module",
-      "owner": "policy",
       "rationale": "Existing test module predates ADR-061 and will split by behavior or contract axis with its production migration.",
       "review_by": "2026-11-30"
     },

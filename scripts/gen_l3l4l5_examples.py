@@ -51,6 +51,7 @@ sys.path.insert(0, str(_REPO))
 if str(Path(__file__).resolve().parent) not in sys.path:
     sys.path.insert(0, str(Path(__file__).resolve().parent))
 import example_catalog  # noqa: E402
+from gen_l3l4l5_dispatch_cases import dispatch_cases  # noqa: E402
 
 from abicheck.buildsource.adapters.adapter_shared import (
     derive_build_options,  # noqa: E402
@@ -153,8 +154,8 @@ def _N(
     return GraphNode(id=nid, kind=kind, label=label, attrs=dict(attrs or {}))
 
 
-def _E(src: str, dst: str, kind: str) -> GraphEdge:
-    return GraphEdge(src=src, dst=dst, kind=kind)
+def _E(src: str, dst: str, kind: str, **attrs: Any) -> GraphEdge:
+    return GraphEdge(src=src, dst=dst, kind=kind, **attrs)
 
 
 # ---------------------------------------------------------------------------
@@ -739,6 +740,9 @@ def build_cases() -> dict[str, tuple[str, dict[str, Any], dict[str, Any]]]:
         l5k_old_graph.to_dict(),
         l5k_new_graph.to_dict(),
     )
+
+    # G29 Phase 6 pairs live beside this file (keeps it under its line cap).
+    cases.update(dispatch_cases(_graph, _N, _E))
 
     return cases
 
