@@ -64,7 +64,6 @@ from .diff_helpers import make_change
 from .diff_templates import _strip_param_signature
 from .model.change import Change
 from .model.change_catalog.kinds import ChangeKind
-from .model.evidence_status import ReachabilityState
 from .model.execution_cache import memoized
 from .model.name_heuristics import (
     NameHeuristicEffect,
@@ -72,10 +71,14 @@ from .model.name_heuristics import (
     register_name_heuristic,
     register_severity_raising_heuristic,
 )
+from .model.source_contract_evidence import (
+    ContractEvidenceByName,
+    public_reachability,
+)
 from .model.surface_facts import in_source_declaration_index
 
 if TYPE_CHECKING:
-    from .model import AbiSnapshot, RecordType, ScopeOrigin
+    from .model import AbiSnapshot, Function, RecordType, ScopeOrigin
 
 # ---------------------------------------------------------------------------
 # Defaults
@@ -200,6 +203,10 @@ class _IndexItem(NamedTuple):
     #: evidence (types). Only consulted by the promotion check
     #: (:func:`_unique_promotion_target`), never by the paired index.
     signature: tuple[str, ...] | None = None
+    #: The declaration and its snapshot's ``from_headers``, for the ADR-084
+    #: evidence question asked only of a reported subject (``_findings_for``).
+    decl: Function | RecordType | None = None
+    header_parsed: bool = False
 
 
 # A singleton's key is (its own raw ``stripped``, ``leaf``); a genuinely
@@ -513,6 +520,7 @@ def _func_index_items(
     ``model/surface_facts.py``.
     """
     demangled = _batch_demangle_public(snap)
+    from_hdr = bool(snap.from_headers)
     out: list[_IndexItem] = []
     for f in snap.declarations.functions:
         if not in_source_declaration_index(f):
@@ -584,7 +592,7 @@ def _func_index_items(
             else None
         )
         signature = tuple(p.type for p in f.params)
-        out.append(_IndexItem(qname, stripped, leaf, identity, signature))
+        out.append(_IndexItem(qname, stripped, leaf, identity, signature, f, from_hdr))
     return out
 
 
@@ -626,6 +634,7 @@ def _type_index_items(
     of scope here, same as the analogous gap for constants.
     """
     out: list[_IndexItem] = []
+    from_hdr = bool(snap.from_headers)
     for t in snap.declarations.types:
         qname = t.name
         segs = _segments(qname)
@@ -633,7 +642,9 @@ def _type_index_items(
             continue
         leaf = segs[-1]
         stripped, _ = _strip_experimental(qname, experimental_namespaces)
-        out.append(_IndexItem(qname, stripped, leaf, None))
+        out.append(
+            _IndexItem(qname, stripped, leaf, None, decl=t, header_parsed=from_hdr)
+        )
     return out
 
 
@@ -930,37 +941,25 @@ def _emit_experimental_change(
     *,
     old_origins: dict[str, ScopeOrigin] | None,
     new_origins: dict[str, ScopeOrigin] | None,
+    old_evidence: ContractEvidenceByName | None = None,
+    new_evidence: ContractEvidenceByName | None = None,
 ) -> Change:
     """Build the ``Change`` record for one classified event.
 
-    ADR-044 D1 (Codex review): the function-sourced path (``kind_label ==
-    "declaration"``, ``old_origins``/``new_origins`` both ``None``) is only
-    ever built from ``_func_index_items``, which indexes public
-    functions only — so unlike the reverted "any non-internal-namespaced
-    subject" heuristic (which had to guess at a raw symbol's visibility with
-    no reliable signal), a function finding's mere existence already proves
-    its subject is public, and is tagged directly at construction time,
-    mirroring ``internal_leak._build_leak_change``/``diff_templates._leak_change``
-    — these run via ``DetectNamespacePatterns``, *after* ``MarkReachability``,
-    so nothing else would ever tag them.
-
-    The type-sourced path (``kind_label == "type"``, origins dicts provided)
-    has no ``Visibility`` field to fall back on — ``RecordType`` carries
-    none (unlike ``Function``/``Variable``) — but it *does* carry ``origin``
-    (ADR-024's ``ScopeOrigin``, opt-in via a public-header
-    set): a type explicitly scoped to the public-header
-    set (``ScopeOrigin.PUBLIC_HEADER``) is a reliable public-reachability
-    signal Codex review pointed out was overlooked. Without that opt-in flag
-    every type's origin is ``ScopeOrigin.UNKNOWN``, so this degrades to the
-    prior untagged behavior automatically for the common case.
+    Reachability (ADR-084): the subject is tagged proven public only when a
+    header or source producer observed it (*old_evidence*/*new_evidence*
+    answer for its qname) or, for a type, its ``origin`` is the supplied
+    public-header set. Export presence proves linkability, not a contract;
+    without either signal reachability is ``UNKNOWN``.
     """
     from .model import ScopeOrigin
 
     old_q = old_exp[0]
     if event == "graduated":
         new_q = new_stable[0]
-        subject_is_public = (
-            new_origins is None or new_origins.get(new_q) == ScopeOrigin.PUBLIC_HEADER
+        subject_is_public = (new_evidence is not None and new_evidence.has(new_q)) or (
+            new_origins is not None
+            and new_origins.get(new_q) == ScopeOrigin.PUBLIC_HEADER
         )
         return make_change(
             ChangeKind.EXPERIMENTAL_GRADUATED,
@@ -974,16 +973,10 @@ def _emit_experimental_change(
             entity_discriminator=_ENTITY_FOR_KIND_LABEL.get(kind_label),
             old=old_q,
             new=new_q,
-            public_reachable=subject_is_public,
-            reachability_state=(
-                ReachabilityState.PROVEN_REACHABLE
-                if subject_is_public
-                else ReachabilityState.UNKNOWN
-            ),
-            reachability_kind="direct_public_symbol" if subject_is_public else None,
+            **public_reachability(subject_is_public),
         )
-    subject_is_public = (
-        old_origins is None or old_origins.get(old_q) == ScopeOrigin.PUBLIC_HEADER
+    subject_is_public = (old_evidence is not None and old_evidence.has(old_q)) or (
+        old_origins is not None and old_origins.get(old_q) == ScopeOrigin.PUBLIC_HEADER
     )
     return make_change(
         ChangeKind.EXPERIMENTAL_REMOVED_WITHOUT_REPLACEMENT,
@@ -993,13 +986,7 @@ def _emit_experimental_change(
         entity_discriminator=_ENTITY_FOR_KIND_LABEL.get(kind_label),
         old=old_q,
         new_value=None,
-        public_reachable=subject_is_public,
-        reachability_state=(
-            ReachabilityState.PROVEN_REACHABLE
-            if subject_is_public
-            else ReachabilityState.UNKNOWN
-        ),
-        reachability_kind="direct_public_symbol" if subject_is_public else None,
+        **public_reachability(subject_is_public),
     )
 
 
@@ -1017,8 +1004,7 @@ def _findings_for(
     """Walk old/new indices, emitting one finding per classified event.
 
     *old_origins*/*new_origins* are ``None`` for the function-sourced path
-    (always reliably public) or a ``{qualified_name: ScopeOrigin}`` map for
-    the type-sourced path (public only when ``ScopeOrigin.PUBLIC_HEADER``).
+    or a ``{qualified_name: ScopeOrigin}`` map for the type-sourced path.
 
     *old_items*/*new_items* are the flat (pre-pairing) ``_IndexItem`` lists
     the caller built ``old_index``/``new_index`` from, used only for the
@@ -1029,6 +1015,10 @@ def _findings_for(
     """
     # Built once per call: every removed experimental item's promotion check
     # reads the same two declaration sets.
+    old_evidence, new_evidence = ContractEvidenceByName(), ContractEvidenceByName()
+    for evidence, items in ((old_evidence, old_items), (new_evidence, new_items)):
+        for i in items or ():
+            evidence.add(i.qname, i.decl, header_parsed=i.header_parsed)
     old_decls = _signature_decls(old_items or [])
     new_decls = _signature_decls(new_items or [])
     # Grouped by RAW (stripped, leaf) key, not by qname: two overloads can
@@ -1154,6 +1144,8 @@ def _findings_for(
                 kind_label,
                 old_origins=old_origins,
                 new_origins=new_origins,
+                old_evidence=old_evidence,
+                new_evidence=new_evidence,
             )
         )
     return out

@@ -228,6 +228,7 @@ implementation, not two that can silently drift apart.
 | `asset-name-template` | `abicheck-baseline-{profile}.tar.zst` | Archive filename; `{profile}` is replaced with the `profile` input, and `{generation}` (optional) with the `generation` input. The extension selects the encoding — `.tar.zst` (zstd), `.tar.gz`/`.tgz` (gzip), or `.tar` (uncompressed); anything else is a hard usage error. |
 | `profile` | `''` | Substituted for `{profile}`. |
 | `generation` | `''` | Substituted for `{generation}` — a no-op unless `asset-name-template` references the placeholder. |
+| `attest` | `'false'` | `'true'` also creates a GitHub artifact attestation (SLSA build provenance, `actions/attest-build-provenance` pinned by SHA) for the archive and outputs its `attestation-url`. The calling job needs `id-token: write` and `attestations: write`. |
 
 Outputs `asset-name` (the resolved filename) and `archive-path` (identical
 to `asset-name` — the archive is written to the current working
@@ -241,6 +242,46 @@ raw bytes, computed on the finished file. A consumer pins it as
 an archive replaced or rewritten after publication is refused. The digest
 covers the whole file, so it changes when the archive is repacked, even when
 the manifest is rewritten to match.
+
+### Pinning the digest, and attesting the archive
+
+A digest only protects a consumer when it is stored somewhere the party who
+could replace the archive cannot also change. Recommended places, strongest
+first:
+
+1. **Committed in the consumer repository** — for example a
+   `.github/abicheck-baseline.sha256` file, or a literal in the workflow,
+   changed only through a reviewed pull request when a new baseline is
+   published.
+2. **A repository or environment variable** (`vars.ABICHECK_BASELINE_SHA256`),
+   which only repository administrators can edit.
+
+Do not pin a value read from the same release, cache or artifact store the
+archive comes from: whoever can replace the archive can replace that value
+too.
+
+```yaml
+- uses: napetrov/abicheck@<sha>
+  with:
+    abi-baseline: v1.2.0
+    baseline-profile: linux-x86_64
+    baseline-target: libfoo
+    expected-archive-digest: ${{ vars.ABICHECK_BASELINE_SHA256 }}
+```
+
+When a pinned digest is impractical (a baseline refreshed on every release),
+attest the archive instead. The publishing job sets `attest: true` on
+`actions/stage-baseline` (with `id-token: write` and `attestations: write`),
+and the consumer sets `verify-baseline-attestation: true` on the root Action
+or on [`actions/resolve-baseline`](resolve-baseline.md). Before anything is
+extracted, the consumer runs `gh attestation verify` on the archive and fails
+closed unless an attestation from `baseline-attestation-repo` (default: the
+current repository) covers its exact bytes. Set
+`baseline-attestation-signer-workflow` to the publishing workflow
+(`owner/repo/.github/workflows/<file>.yml`); otherwise any workflow in that
+repository can produce an accepted attestation. Both checks can be combined.
+`publish-baseline.yml` does not attest yet: it would need the two extra
+permissions on every caller of the reusable workflow.
 
 See [Storing Baselines](../use/baseline-storage.md) for the narrative
 picture of where a staged archive fits among abicheck's baseline-storage

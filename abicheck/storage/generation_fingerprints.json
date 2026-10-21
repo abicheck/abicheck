@@ -78,8 +78,9 @@
       "abicheck/extract/headers/castxml/preprocessed_text.py": "b9875461c46c807aa6a84a87310fade6df599a05c390a437f30c29f0e37c47fb",
       "abicheck/extract/headers/castxml/probe.py": "ed1d074c4a25510e020e428b22277df84659c91951178aee3731d39f4385a200",
       "abicheck/extract/headers/castxml/record_traits.py": "6d836b2a2da27a0f12611f9c8dec681a8922ad2c5853f801ec9a94972654cdf1",
-      "abicheck/extract/headers/castxml/records.py": "512f4f43df7980e6c1bd3e55727533751201470d08de83fc771c3847568f89eb",
+      "abicheck/extract/headers/castxml/records.py": "9093c5648bbe60334f4f3cbdd13e6e7d0eece582cbff9ef8a16aeb8096473cd6",
       "abicheck/extract/headers/castxml/scope.py": "41cecc8dd996c10a58c022e5dca4003cce9d7775adf674b339cc199fb59297c7",
+      "abicheck/extract/headers/castxml/specialization.py": "466a015164ac2f0fad1793cc3d19504d1eca3da3ac1414a3bbec036d04a65ca4",
       "abicheck/extract/headers/castxml/type_resolution.py": "f04ab4d89dad8719405198d8742aac64fa17613b562916519e372bc59b9cefb2",
       "abicheck/extract/headers/castxml/typedef_parsing.py": "332587638d5d4b7caebbc20fa44b69c314771fffa5839a15dec59eaba3caaf93",
       "abicheck/extract/headers/clang/__init__.py": "538add12f3ff39e1c1b39e6f5def93b50a584b78b30c4e7e59058207222757d0",
@@ -148,9 +149,9 @@
       "abicheck/symvers_metadata.py": "372737765cd132e6e87ed891dd465d2958e04debbef774e45212ceb3036871cb",
       "abicheck/type_metadata.py": "9997189de8dac522fd1db8be5ae491d811139503f83abaaded89038eb4aa9cdf"
     },
-    "fingerprint": "8351bd53ded2d1a40270d56fb68d4b4b3962e5a1de2a79d715bccaaf785e012b",
-    "generation": 4,
-    "reason": "tu_jobs.py now delegates its worker-count clamp to process_resources.bounded_jobs; worker counts and every extracted fact are unchanged (oracle-tested), so the extractor generation stays put"
+    "fingerprint": "bfc49c02bf17c38476b9bf85506c93c63055f16dc7e66f449cc4ec6a539c1776",
+    "generation": 5,
+    "reason": "merge with main: main's tu_jobs.py worker-clamp refactor (no fact change) on top of this branch's generation 5 (castxml specialization_declared_fact)"
   },
   "resolver": {
     "files": {

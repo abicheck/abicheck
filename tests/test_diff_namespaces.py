@@ -230,7 +230,6 @@ class TestExperimentalGraduated:
         assert c.kind == ChangeKind.EXPERIMENTAL_GRADUATED
         assert c.symbol == "ns::sort"
         assert "graduated" in c.description.lower()
-        assert c.public_reachable is True
 
     def test_type_graduated_with_alias_kept(self) -> None:
         old = _snap(types=[_rec("ns::experimental::queue")])
@@ -486,14 +485,7 @@ class TestExperimentalRemovedWithoutReplacement:
         c = changes[0]
         assert c.kind == ChangeKind.EXPERIMENTAL_REMOVED_WITHOUT_REPLACEMENT
         assert c.symbol == "ns::experimental::bar"
-        # ADR-044 D1 (Codex review): _func_index_items only ever
-        # indexes Visibility.PUBLIC functions, so this finding's mere
-        # existence already proves its subject is public — tagged directly
-        # so a broad namespace: "ns::experimental::*" suppression rule
-        # doesn't silently hide it (this detector runs after
-        # ApplySuppression, so nothing else would ever tag it).
-        assert c.public_reachable is True
-        assert c.reachability_kind == "direct_public_symbol"
+        # Reachability tags (ADR-084): test_binary_gated_reachability_tags.py.
 
     def test_silent_type_removal(self) -> None:
         old = _snap(types=[_rec("ns::experimental::queue")])

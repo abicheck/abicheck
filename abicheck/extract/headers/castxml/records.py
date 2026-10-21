@@ -71,6 +71,7 @@ from .names import (
 )
 from .record_traits import trivially_copyable
 from .scope import scope_path
+from .specialization import specialization_declared
 from .type_resolution import (
     qualified_type_name,
     resolve_cv_restrict,
@@ -213,6 +214,10 @@ def build_record_type(
         qualified_name=qualified_name,
         qualified_name_fact=Fact.present(qualified_name),
         is_final=is_final,
+        # Implicit instantiation vs. own class-head (specialization.py).
+        specialization_declared_fact=specialization_declared(
+            ctx, el, el.get("name", "")
+        ),
         is_trivially_copyable=trivially,
         # ADR-063 Phase 5: Fact[bool | None] sibling of is_final -- see the
         # local variable's own comment above for why this is always a real,
