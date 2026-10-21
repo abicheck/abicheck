@@ -50,6 +50,9 @@ from abicheck.buildsource.source_graph import (  # noqa: E402
     SourceGraphSummary,
     diff_source_graph_findings,
 )
+from abicheck.compare.consumer_compiled_dependency import (  # noqa: E402
+    consumer_compiled_dependency_findings,
+)
 from abicheck.compare.virtual_dispatch_set import (  # noqa: E402
     virtual_dispatch_set_findings,
 )
@@ -93,6 +96,11 @@ def _emitted_kinds(case_name: str) -> list[str]:
         changes = diff_source_graph_findings(old_graph, new_graph) + (
             virtual_dispatch_set_findings(old_graph, new_graph)
         )
+    elif tier == "L2":
+        # The header-graph tier evidence_report.py runs for a header-only graph.
+        changes = consumer_compiled_dependency_findings(
+            SourceGraphSummary.from_dict(old), SourceGraphSummary.from_dict(new)
+        )
     else:  # pragma: no cover - guards a mis-tagged fixture
         raise AssertionError(f"{case_name}: unexpected min_evidence {tier!r}")
     return [c.kind.value for c in changes]
@@ -101,7 +109,7 @@ def _emitted_kinds(case_name: str) -> list[str]:
 def test_corpus_is_non_empty() -> None:
     # Guards against the discovery query silently matching nothing (which would
     # turn every parametrized assertion below into a vacuous pass).
-    assert len(_CASES) == 17, f"expected the 17 L3/L4/L5 cases, found {_CASES}"
+    assert len(_CASES) == 18, f"expected the 18 L2/L3/L4/L5 cases, found {_CASES}"
 
 
 @pytest.mark.parametrize("case_name", _CASES)

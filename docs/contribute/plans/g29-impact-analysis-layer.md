@@ -1812,6 +1812,8 @@ the existing `type_graph.py` walk.
 
 ### Phase 6 — New detectors, examples, FP gates
 
+**Status (2026-10-21):** `PUBLIC_CONSUMER_COMPILED_DEPENDENCY_CHANGED` is implemented in its header-graph tier only (`compare/consumer_compiled_dependency.py`; RISK, `COMPATIBLE_WITH_RISK`; emitted when the header-only call pass completed on both sides and a public header-written inline or template body's calls/references changed; example `case221`, unit tests in `tests/test_consumer_compiled_dependency_findings.py`). The `BREAKING` tier, which needs consumer build evidence (`consumer_object` / `CONSUMER_COMPILED_FROM_HEADER`, ADR-057), is not implemented: no consumer-evidence source exists, and consumer usage is never inferred from symbol names. Macro-compiled dependencies stay with the L5 macro graph and are not covered by this tier. The table row below keeps `API_BREAK` as the plan's upper bound; this tier emits only `RISK`, because a header-only dependency change cannot show that any consumer recompile breaks.
+
 **Status (2026-10-21):** `PUBLIC_VIRTUAL_DISPATCH_SET_CHANGED` is implemented (`compare/virtual_dispatch_set.py`; RISK, `COMPATIBLE_WITH_RISK`; coverage-gated on the call, override and virtual-dispatch passes; examples `case219`/`case220`, unit tests in `tests/test_virtual_dispatch_set_findings.py`). Its producer gap is recorded in [known gaps](../known-gaps/virtual-call-through-out-of-line-definition-is-classified-direct.md): a virtual call through an out-of-line definition is classified `direct`, so the detector cannot fire for those bases. The other seven table rows are unchanged by this item.
 
 Per the review, the goal is **not** a new `ChangeKind` per graph edge (the

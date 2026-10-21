@@ -3,7 +3,7 @@
 
 Cases exercising an old-vs-new comparison — `abicheck compare`, the default operation.
 
-_210 case(s)._ [← back to all examples](../index.md)
+_211 case(s)._ [← back to all examples](../index.md)
 
 | Case | Title | Verdict | Category |
 |------|-------|---------|----------|
@@ -217,3 +217,4 @@ _210 case(s)._ [← back to all examples](../index.md)
 | [case218_export_loss_strong_binding_stays_breaking](../case218_export_loss_strong_binding_stays_breaking.md) | a GLOBAL export loss stays BREAKING under a `binding: weak` rule | 🔴 BREAKING | Breaking |
 | [case219_public_virtual_dispatch_set_changed](../case219_public_virtual_dispatch_set_changed.md) | Public Virtual Method's Override Set Changes | 🟡 COMPATIBLE_WITH_RISK | Risk |
 | [case220_public_virtual_dispatch_set_reordered](../case220_public_virtual_dispatch_set_reordered.md) | Public Virtual Method's Override Set Reordered | ✅ NO_CHANGE | No Change |
+| [case221_public_consumer_compiled_dependency_changed](../case221_public_consumer_compiled_dependency_changed.md) | Public Inline Body's Compiled-In Dependency Changes | 🟡 COMPATIBLE_WITH_RISK | Risk |

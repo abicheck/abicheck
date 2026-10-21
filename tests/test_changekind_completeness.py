@@ -124,6 +124,8 @@ ASSERTED_CHANGE_KINDS: set[ChangeKind] = {
     ChangeKind.PUBLIC_TYPEDEF_REMOVED,
     # ADR-038 C.8 fact-set/coverage — tests/test_fact_set.py.
     ChangeKind.SOURCE_FACT_COVERAGE_INCOMPLETE,
+    # G29 Phase 6 consumer-compiled dependency (header-graph tier) — tests/test_consumer_compiled_dependency_findings.py.
+    ChangeKind.PUBLIC_CONSUMER_COMPILED_DEPENDENCY_CHANGED,
     # G29 Phase 6 virtual-dispatch set — tests/test_virtual_dispatch_set_findings.py.
     ChangeKind.PUBLIC_VIRTUAL_DISPATCH_SET_CHANGED,
     # Source graph (ADR-031 D6) — exercised in tests/test_source_graph.py.

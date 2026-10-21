@@ -92,6 +92,13 @@ SOURCE_ENTRIES: list[ChangeKindMeta] = [
         operation=_OP.MODIFIED,
     ),
     _E(
+        "public_consumer_compiled_dependency_changed",
+        _R,
+        impact="A public inline or template body compiled into every consumer's code changed its dependencies; consumers must recompile. Header-graph risk, never a proven break: no consumer build evidence exists.",
+        entity=_ENT.SOURCE,
+        operation=_OP.MODIFIED,
+    ),
+    _E(
         "concept_tightened",
         _A,
         impact="A public C++20 concept became more constrained; consumer templates or calls that satisfied the old constraint may no longer compile against the new headers.",

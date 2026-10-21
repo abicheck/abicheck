@@ -5112,5 +5112,26 @@
   "subjects": [
    "vtable-and-virtual-dispatch"
   ]
+ },
+ "case221_public_consumer_compiled_dependency_changed": {
+  "entity": "rule",
+  "scenario_kind": null,
+  "operation": "compare",
+  "ecosystem": "generic",
+  "topics": [
+   "source"
+  ],
+  "languages": [],
+  "scope": "single-library",
+  "artifact_shape": "fixture-pair",
+  "validation_owner": "evidence-cases",
+  "related_rules": [],
+  "rule_slug": "public-consumer-compiled-dependency-changed",
+  "variant_of": null,
+  "relation_type": null,
+  "relation_axis": null,
+  "subjects": [
+   "inline-function-and-odr-boundary-changes"
+  ]
  }
 }

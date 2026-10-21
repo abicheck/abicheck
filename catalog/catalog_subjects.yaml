@@ -186,6 +186,7 @@ subjects:
       - case47_inline_to_outlined
       - case89_inline_accessor_renamed_pimpl_member
       - case157_inline_function_removed
+      - case221_public_consumer_compiled_dependency_changed
 
   internal-dependency-reachability:
     title: "Public API depends on an internal declaration"

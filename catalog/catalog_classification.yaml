@@ -165,6 +165,7 @@ rules:
   - case218_export_loss_strong_binding_stays_breaking
   - case219_public_virtual_dispatch_set_changed
   - case220_public_virtual_dispatch_set_reordered
+  - case221_public_consumer_compiled_dependency_changed
   - case19_enum_member_removed
   - case20_enum_member_value_changed
   - case21_method_became_static

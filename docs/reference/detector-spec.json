@@ -1,6 +1,6 @@
 {
   "description": "Formal detector specification matrix (generated).",
-  "count": 418,
+  "count": 419,
   "detectors": [
     {
       "kind": "abi_relevant_build_flag_changed",
@@ -2071,6 +2071,15 @@
       "min_evidence": "L5",
       "doc_slug": "public_api_internal_dependency_added",
       "examples": "case160_public_api_internal_dep_added,case187_public_struct_private_field_type,case188_public_class_private_base_class,case189_public_function_private_parameter_type,case190_public_inline_function_references_internal_constant,case191_header_only_graph_field_type,case194_header_graph_rename_reconciled,case195_header_graph_ambiguous_rename_not_reconciled,case196_header_graph_move_reconciled,case197_header_graph_identity_reconciled"
+    },
+    {
+      "kind": "public_consumer_compiled_dependency_changed",
+      "category": "risk",
+      "default_verdict": "COMPATIBLE_WITH_RISK",
+      "severity": "warning",
+      "min_evidence": "L2",
+      "doc_slug": "public_consumer_compiled_dependency_changed",
+      "examples": "case221_public_consumer_compiled_dependency_changed"
     },
     {
       "kind": "public_dependency_role_changed",
