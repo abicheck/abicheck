@@ -485,7 +485,7 @@ from .release_schema import RELEASE_SCHEMA_VERSION
 #:       root-target keys (same "renumber, don't reuse" convention as the
 #:       2.32/2.36 entries above).
 #: 2.39 — new top-level ``use_case_impact`` object, present only under
-#:       ``compare --use-cases MANIFEST`` (``impact/use_case_impact.py``):
+#:       ``compare --use-cases MANIFEST`` (``policy/use_case_attribution.py``):
 #:       the manifest's declared use cases, each one's resolved and
 #:       unresolved entrypoints, and this comparison's own findings
 #:       attributed to the use cases whose entrypoints can be *shown* to

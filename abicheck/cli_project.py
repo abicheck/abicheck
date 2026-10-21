@@ -302,19 +302,18 @@ def _validate_build_output(directory: Path) -> tuple[bool, dict[str, object], st
 
 def _validate_use_case_manifest(manifest: Path) -> tuple[bool, dict[str, object], str]:
     """Validate an impact-use-cases.yaml manifest's own structure."""
-    from .errors import UseCaseManifestError
-    from .impact.use_cases import load_use_case_manifest
+    from .workflows.compare.use_case_attribution import (
+        UseCaseAttributionError,
+        read_use_case_manifest,
+    )
 
     try:
-        definitions = load_use_case_manifest(manifest)
-    except (UseCaseManifestError, OSError) as exc:
-        # OSError alongside the manifest-specific error (Codex review, fresh
-        # evidence): load_use_case_manifest() deliberately leaves a missing/
-        # unreadable MANIFEST unwrapped (its own docstring) — Click's
-        # exists=True check only guarantees the path was there at argument
-        # parsing time, not at the read a moment later (permissions change,
-        # the file disappearing), so an unhandled OSError here would exit 1
-        # with a bare traceback instead of the documented usage-error path.
+        definitions = read_use_case_manifest(manifest)
+    except UseCaseAttributionError as exc:
+        # The typed read catches OSError beside the manifest error (Codex
+        # review, fresh evidence): Click's exists=True only guarantees the path
+        # was there at argument parsing time, so an unhandled read error here
+        # would exit 1 with a bare traceback instead of the usage-error path.
         raise click.UsageError(str(exc)) from exc
 
     payload = {
