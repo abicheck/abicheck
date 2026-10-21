@@ -95,6 +95,7 @@ from .public_surface import observed_exports
 
 if TYPE_CHECKING:
     from ..model import AbiSnapshot
+    from ..model.export_entity_name import EntityName
 
 __all__ = ["TemplateInstanceAbsence", "member_owner", "primary_stem"]
 
@@ -107,7 +108,11 @@ def primary_stem(mangled: str) -> str | None:
     component a plain identifier: a constructor, operator or substitution has no
     header spelling this module can match, so it makes no claim.
     """
-    parsed = entity_name_components(mangled)
+    return _primary_stem_of(entity_name_components(mangled))
+
+
+def _primary_stem_of(parsed: EntityName | None) -> str | None:
+    """:func:`primary_stem` over an already-parsed name."""
     if parsed is None or not parsed.template_positions:
         return None
     if has_synthetic_component(parsed):
@@ -151,9 +156,28 @@ def member_owner(symbol: str) -> str | None:
     recover the arguments). Anything else -- a free function, a member of a
     non-template class, a name the demangler cannot read -- makes no claim.
     """
-    owner = synthetic_ctor_dtor_scope(symbol)
+    return _member_owner_of(symbol, *_spellings(symbol))
+
+
+def _spellings(symbol: str) -> tuple[EntityName | None, str | None]:
+    """*symbol*'s parsed Itanium name and, only when it has none, its castxml
+    synthetic constructor/destructor scope.
+
+    The two are exclusive: :func:`entity_name_components` reads only a
+    ``_Z`` name, and a synthetic key starts with ``__abicheck_ctor__`` or
+    ``~``. Reading the parse first lets a caller that needs both rules share
+    one read of *symbol*.
+    """
+    parsed = entity_name_components(symbol)
+    return parsed, (synthetic_ctor_dtor_scope(symbol) if parsed is None else None)
+
+
+def _member_owner_of(
+    symbol: str, parsed: EntityName | None, scope: str | None
+) -> str | None:
+    """:func:`member_owner` over :func:`_spellings`' answer for *symbol*."""
+    owner = scope
     if owner is None:
-        parsed = entity_name_components(symbol)
         if parsed is None or not parsed.nested or len(parsed.components) < 2:
             return None
         if len(parsed.components) - 2 not in parsed.template_positions:
@@ -275,12 +299,13 @@ class TemplateInstanceAbsence:
         """
         if elf_only_mode and is_export_table_only_record(f_old):
             return None
-        owner = member_owner(mangled)
+        parsed, scope = _spellings(mangled)  # read once, shared by both rules
+        owner = _member_owner_of(mangled, parsed, scope)
         if owner is not None and owner in self._vanished_specializations():
-            if synthetic_ctor_dtor_scope(mangled) is not None:
+            if scope is not None:
                 return []  # a synthetic constructor/destructor key: no symbol
             return self._judged(mangled, f_old, FUNCTION_SYMBOL_TYPES)
-        stem = primary_stem(mangled)
+        stem = _primary_stem_of(parsed)
         if stem is None or self._declared_primaries().get(stem, 0) != 1:
             return None
         return self._judged(mangled, f_old, FUNCTION_SYMBOL_TYPES)

@@ -76,6 +76,7 @@ from .model.execution_cache import memoized
 from .model.graph_identity import _normalize_graph_identity
 from .model.name_heuristics import LazyFactInput
 from .model.source_contract_evidence import (
+    ContractEvidenceByName,
     has_observed_source_contract_evidence,
     public_reachability,
 )
@@ -980,7 +981,7 @@ def detect_mandatory_template_param_added(
 
     def _arities(
         snap: AbiSnapshot, funcs: list[Function]
-    ) -> tuple[dict[str, set[int]], dict[str, bool], dict[str, set[str]]]:
+    ) -> tuple[dict[str, set[int]], ContractEvidenceByName, dict[str, set[str]]]:
         out: dict[str, set[int]] = defaultdict(set)
         # Which kind of declaration contributed each stem's observations.
         # This detector deliberately pools function templates and class
@@ -995,7 +996,7 @@ def detect_mandatory_template_param_added(
         # Without that flag every type's origin is ScopeOrigin.UNKNOWN, so
         # this degrades to "public only if a public function contributed"
         # automatically for the common case.
-        is_public: dict[str, bool] = defaultdict(bool)
+        is_public = ContractEvidenceByName()  # judged only for a reported stem
         name_of, hdr = qualified_name_lookup(snap), bool(snap.from_headers)
         for f in funcs:
             qname = name_of(f)
@@ -1006,9 +1007,7 @@ def detect_mandatory_template_param_added(
             if arity is not None:
                 out[stem].add(arity)
                 # ADR-084: an export-only function proves no public contract.
-                is_public[stem] |= has_observed_source_contract_evidence(
-                    f, header_parsed=hdr
-                )
+                is_public.add(stem, f, header_parsed=hdr)
                 sources[stem].add("function")
         # Types are also indexed.
         for t in snap.declarations.types:
@@ -1020,7 +1019,7 @@ def detect_mandatory_template_param_added(
                 out[stem].add(arity)
                 sources[stem].add("type")
                 if t.origin == ScopeOrigin.PUBLIC_HEADER:
-                    is_public[stem] = True
+                    is_public.confirm(stem)
         return out, is_public, sources
 
     reconciled_old, reconciled_new = reconciled_public_functions(old, new)
@@ -1035,7 +1034,7 @@ def detect_mandatory_template_param_added(
             continue
         # ADR-044 D1 / ADR-084: tagged public only when a contributing
         # observation had header/source evidence (see _arities above).
-        subject_is_public = old_public.get(stem, False) or new_public.get(stem, False)
+        subject_is_public = old_public.has(stem) or new_public.has(stem)
         # The entity this finding is about, when the evidence says so
         # unambiguously. A stem observed only as a class template is a type
         # finding and belongs under `--view show=types`; one observed only
@@ -1105,17 +1104,11 @@ def detect_unspecified_return_now_named(
 
     def _index(
         snap: AbiSnapshot, funcs: list[Function]
-    ) -> dict[tuple[str, tuple[str, ...]], tuple[str, bool]]:
+    ) -> dict[tuple[str, tuple[str, ...]], Function]:
         name_of = qualified_name_lookup(snap)
-        header_parsed = bool(snap.from_headers)
-        out: dict[tuple[str, tuple[str, ...]], tuple[str, bool]] = {}
+        out: dict[tuple[str, tuple[str, ...]], Function] = {}
         for f in funcs:
-            qname = name_of(f)
-            key = (qname, tuple(p.type for p in f.params))
-            evidence = has_observed_source_contract_evidence(
-                f, header_parsed=header_parsed
-            )
-            out[key] = (f.return_type, evidence)
+            out[(name_of(f), tuple(p.type for p in f.params))] = f
         return out
 
     old_idx, new_idx = (
@@ -1127,8 +1120,8 @@ def detect_unspecified_return_now_named(
 
     changes: list[Change] = []
     for key in sorted(set(old_idx) & set(new_idx)):
-        old_rt, old_evidence = old_idx[key]
-        new_rt, new_evidence = new_idx[key]
+        old_f, new_f = old_idx[key], new_idx[key]
+        old_rt, new_rt = old_f.return_type, new_f.return_type
         old_unspec = _return_is_unspecified(old_rt)
         new_unspec = _return_is_unspecified(new_rt)
         if old_unspec == new_unspec:
@@ -1157,7 +1150,15 @@ def detect_unspecified_return_now_named(
                 new_value=new_rt,
                 # ADR-084: export-only functions prove linkability, not a
                 # contract; proven reachability needs header/source evidence.
-                **public_reachability(old_evidence or new_evidence),
+                # Judged only for an emitted finding, not for every pair.
+                **public_reachability(
+                    has_observed_source_contract_evidence(
+                        old_f, header_parsed=bool(old.from_headers)
+                    )
+                    or has_observed_source_contract_evidence(
+                        new_f, header_parsed=bool(new.from_headers)
+                    )
+                ),
             )
         )
 

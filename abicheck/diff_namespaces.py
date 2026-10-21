@@ -72,13 +72,13 @@ from .model.name_heuristics import (
     register_severity_raising_heuristic,
 )
 from .model.source_contract_evidence import (
-    has_observed_source_contract_evidence,
+    ContractEvidenceByName,
     public_reachability,
 )
 from .model.surface_facts import in_source_declaration_index
 
 if TYPE_CHECKING:
-    from .model import AbiSnapshot, RecordType, ScopeOrigin
+    from .model import AbiSnapshot, Function, RecordType, ScopeOrigin
 
 # ---------------------------------------------------------------------------
 # Defaults
@@ -203,8 +203,10 @@ class _IndexItem(NamedTuple):
     #: evidence (types). Only consulted by the promotion check
     #: (:func:`_unique_promotion_target`), never by the paired index.
     signature: tuple[str, ...] | None = None
-    #: A header/source producer observed it as contract (ADR-084).
-    source_evidence: bool = False
+    #: The declaration and its snapshot's ``from_headers``, for the ADR-084
+    #: evidence question asked only of a reported subject (``_findings_for``).
+    decl: Function | RecordType | None = None
+    header_parsed: bool = False
 
 
 # A singleton's key is (its own raw ``stripped``, ``leaf``); a genuinely
@@ -590,8 +592,7 @@ def _func_index_items(
             else None
         )
         signature = tuple(p.type for p in f.params)
-        evidence = has_observed_source_contract_evidence(f, header_parsed=from_hdr)
-        out.append(_IndexItem(qname, stripped, leaf, identity, signature, evidence))
+        out.append(_IndexItem(qname, stripped, leaf, identity, signature, f, from_hdr))
     return out
 
 
@@ -641,8 +642,9 @@ def _type_index_items(
             continue
         leaf = segs[-1]
         stripped, _ = _strip_experimental(qname, experimental_namespaces)
-        evidence = has_observed_source_contract_evidence(t, header_parsed=from_hdr)
-        out.append(_IndexItem(qname, stripped, leaf, None, source_evidence=evidence))
+        out.append(
+            _IndexItem(qname, stripped, leaf, None, decl=t, header_parsed=from_hdr)
+        )
     return out
 
 
@@ -939,14 +941,14 @@ def _emit_experimental_change(
     *,
     old_origins: dict[str, ScopeOrigin] | None,
     new_origins: dict[str, ScopeOrigin] | None,
-    old_evidence: frozenset[str] = frozenset(),
-    new_evidence: frozenset[str] = frozenset(),
+    old_evidence: ContractEvidenceByName | None = None,
+    new_evidence: ContractEvidenceByName | None = None,
 ) -> Change:
     """Build the ``Change`` record for one classified event.
 
     Reachability (ADR-084): the subject is tagged proven public only when a
-    header or source producer observed it (its qname is in *old_evidence*/
-    *new_evidence*) or, for a type, its ``origin`` is the supplied
+    header or source producer observed it (*old_evidence*/*new_evidence*
+    answer for its qname) or, for a type, its ``origin`` is the supplied
     public-header set. Export presence proves linkability, not a contract;
     without either signal reachability is ``UNKNOWN``.
     """
@@ -955,7 +957,7 @@ def _emit_experimental_change(
     old_q = old_exp[0]
     if event == "graduated":
         new_q = new_stable[0]
-        subject_is_public = new_q in new_evidence or (
+        subject_is_public = (new_evidence is not None and new_evidence.has(new_q)) or (
             new_origins is not None
             and new_origins.get(new_q) == ScopeOrigin.PUBLIC_HEADER
         )
@@ -973,7 +975,7 @@ def _emit_experimental_change(
             new=new_q,
             **public_reachability(subject_is_public),
         )
-    subject_is_public = old_q in old_evidence or (
+    subject_is_public = (old_evidence is not None and old_evidence.has(old_q)) or (
         old_origins is not None and old_origins.get(old_q) == ScopeOrigin.PUBLIC_HEADER
     )
     return make_change(
@@ -1013,8 +1015,10 @@ def _findings_for(
     """
     # Built once per call: every removed experimental item's promotion check
     # reads the same two declaration sets.
-    old_evidence = frozenset(i.qname for i in old_items or [] if i.source_evidence)
-    new_evidence = frozenset(i.qname for i in new_items or [] if i.source_evidence)
+    old_evidence, new_evidence = ContractEvidenceByName(), ContractEvidenceByName()
+    for evidence, items in ((old_evidence, old_items), (new_evidence, new_items)):
+        for i in items or ():
+            evidence.add(i.qname, i.decl, header_parsed=i.header_parsed)
     old_decls = _signature_decls(old_items or [])
     new_decls = _signature_decls(new_items or [])
     # Grouped by RAW (stripped, leaf) key, not by qname: two overloads can
