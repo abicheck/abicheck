@@ -188,6 +188,7 @@ FAMILIES: dict[str, Family] = {
 
 _F1 = (
     "detector.selector_axis_unstamped",
+    "detector.removal_from_header_enumeration",
     "evidence.unread_producer_read_as_confirmed_absence",
     "evidence.container_presence_read_as_evidence_content",
     "evidence.silent_degradation_to_clean_verdict",

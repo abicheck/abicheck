@@ -137,6 +137,11 @@ _DECLARATION_PROJECTION = (
 )
 
 UNCOVERED: dict[str, str] = {
+    "RecordType.specialization_declared_fact": (
+        "read only by compare/template_instance_absence, whose own unit test "
+        "(test_class_template_specialization_absence_unit.py) ablates every "
+        "status: only PRESENT(False) changes a finding"
+    ),
     "CanonicalEntity.access": _DECLARATION_PROJECTION,
     "CanonicalEntity.contract_attributes": _DECLARATION_PROJECTION,
     "CanonicalEntity.declared_alignment_bits": _DECLARATION_PROJECTION,

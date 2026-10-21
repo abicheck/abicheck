@@ -43,10 +43,25 @@ makes no claim -- not a template instance, no declared primary or an ambiguous
 one, an unknown export table, or an ELF-only old record -- and the caller falls
 back to the existing removal path.
 
-Known limit: a class-template instantiation's implicit constructors, destructors
-and operators carry no mangled name a header spelling can be matched against,
-and ``type_removed`` for the specialization is raised by the type detector.
-Those rows keep their existing kinds (see ``docs/contribute/known-gaps.md``).
+The same holds one level up, for a class-template specialization the new
+header stops instantiating (:meth:`TemplateInstanceAbsence.specialization_vanished`).
+When the old record was instantiated from its primary template
+(``RecordType.specialization_declared_fact`` is ``PRESENT(False)``), the primary class template
+is still declared in the new header graph (a ``type://<template>`` node), and
+the new snapshot has no record of that specialization, then:
+
+* the specialization itself is not ``type_removed`` -- the type is still
+  nameable and its definition still comes from the same declaration;
+* each of its members -- implicit constructors, destructor and ``operator=``,
+  inline methods, static data members -- is judged by the export table exactly
+  as above (a synthetic constructor/destructor key, which names no symbol,
+  yields no finding), with ``var_visibility_changed`` for a static data member
+  whose export the new binary dropped.
+
+An explicit or partial specialization (``PRESENT(True)``), an
+undetermined one (not collected: another producer, an older snapshot), a template
+the new header no longer declares, and a non-template class all keep the
+existing removal path.
 """
 
 from __future__ import annotations
@@ -54,14 +69,17 @@ from __future__ import annotations
 from collections import Counter
 from typing import TYPE_CHECKING
 
+from ..demangle import demangle
 from ..diff_helpers import make_change
-from ..elf_symbol_filter import FUNCTION_SYMBOL_TYPES
-from ..model import Function
+from ..elf_symbol_filter import FUNCTION_SYMBOL_TYPES, VARIABLE_SYMBOL_TYPES
+from ..model import Function, RecordType, Variable
+from ..model.availability import FactStatus
 from ..model.change import Change
 from ..model.change_catalog.kinds import ChangeKind
 from ..model.edge_coverage import EdgeAnswer
 from ..model.export_entity_name import entity_name_components, has_synthetic_component
 from ..model.graph_identity import decl_node_identity
+from ..model.qualified_name_split import split_top_level_scopes
 from ..model.surface_facts import (
     is_binary_exported,
     is_export_confirmed_absent,
@@ -69,14 +87,16 @@ from ..model.surface_facts import (
     surface_fact_summary,
     visibility_label,
 )
+from .edge_query import ObservedExportTable
+from .finding_identity.ctor_dtor import (
+    _synthetic_ctor_dtor_scope as synthetic_ctor_dtor_scope,
+)
 from .public_surface import observed_exports
 
 if TYPE_CHECKING:
     from ..model import AbiSnapshot
 
-__all__ = ["TemplateInstanceAbsence", "primary_stem"]
-
-#: Node-id prefix of a declaration in the header graph (``decl://<qname>#sha``).
+__all__ = ["TemplateInstanceAbsence", "member_owner", "primary_stem"]
 
 
 def primary_stem(mangled: str) -> str | None:
@@ -95,27 +115,154 @@ def primary_stem(mangled: str) -> str | None:
     return "::".join(parsed.components)
 
 
-class TemplateInstanceAbsence:
-    """The new side's facts a template-absence decision reads, for one comparison.
+def _top_level_index(text: str, char: str) -> int:
+    """Index of the first *char* outside ``<>``/``()`` nesting, or ``-1``."""
+    depth = 0
+    for i, ch in enumerate(text):
+        if ch == char and depth == 0:
+            return i
+        if ch in "<(":
+            depth += 1
+        elif ch in ">)":
+            depth = max(depth - 1, 0)
+    return -1
 
-    The export table is the new snapshot's function table as an I4 answer, so a
-    name is only "absent" when the table was actually read. The header graph's
-    declarations are read lazily, once, and only if a removal candidate needs
-    them.
+
+def _scope_of(qualified: str) -> str | None:
+    """``ns::Box<double>::set`` -> ``ns::Box<double>``; ``None`` when the name
+    has no enclosing scope."""
+    scopes = split_top_level_scopes(qualified)
+    return "::".join(scopes[:-1]) if len(scopes) > 1 else None
+
+
+def _spelling_key(name: str) -> str:
+    """Whitespace-insensitive key: castxml writes ``Box<int *>``, the
+    demangler ``Box<int*>``."""
+    return "".join(name.split())
+
+
+def member_owner(symbol: str) -> str | None:
+    """The class-template specialization *symbol* is a member of, as a
+    whitespace-free qualified spelling (``ns::Box<double>``), or ``None``.
+
+    Reads the three spellings a member record carries: a synthetic constructor
+    key, a synthetic destructor key (``~ns::Box<double>``), and an Itanium name
+    whose enclosing component carries a template-argument list (demangled to
+    recover the arguments). Anything else -- a free function, a member of a
+    non-template class, a name the demangler cannot read -- makes no claim.
+    """
+    owner = synthetic_ctor_dtor_scope(symbol)
+    if owner is None:
+        parsed = entity_name_components(symbol)
+        if parsed is None or not parsed.nested or len(parsed.components) < 2:
+            return None
+        if len(parsed.components) - 2 not in parsed.template_positions:
+            return None
+        text = demangle(symbol)
+        if text is None:
+            return None
+        cut = _top_level_index(text, "(")
+        owner = _scope_of(text[:cut] if cut >= 0 else text)
+    if owner is None or _template_of(_spelling_key(owner)) is None:
+        return None
+    return _spelling_key(owner)
+
+
+def _instantiated_from_primary(record: RecordType) -> bool:
+    """Whether the old producer proved *record* an implicit instantiation of
+    its primary template, the one shape this rule may treat as not removed."""
+    fact = record.specialization_declared_fact
+    return (
+        fact is not None and fact.status is FactStatus.PRESENT and fact.value is False
+    )
+
+
+def _specialization_spelling(record: RecordType) -> str:
+    return _spelling_key(record.qualified_name or record.name)
+
+
+def _template_of(spelling: str) -> str | None:
+    """``ns::Box<double>`` -> ``ns::Box``, only when one argument list closes
+    the name (a nested template's specialization makes no claim)."""
+    cut = spelling.find("<")
+    if (
+        cut <= 0
+        or _top_level_index(spelling[cut + 1 :], ">") != len(spelling) - cut - 2
+    ):
+        return None
+    return spelling[:cut]
+
+
+class TemplateInstanceAbsence:
+    """The facts a template-absence decision reads, for one comparison.
+
+    Each export table is the new snapshot's function or variable table as an I4
+    answer, so a name is only "absent" when the table was actually read. The
+    header graph's declarations and the vanished specializations are read
+    lazily, once, and only if a removal candidate needs them. *old* is needed
+    only by the class-template specialization rule; without it that rule makes
+    no claim.
     """
 
-    def __init__(self, new: AbiSnapshot) -> None:
+    def __init__(self, new: AbiSnapshot, old: AbiSnapshot | None = None) -> None:
         self._new = new
-        self._new_exports = observed_exports(new, FUNCTION_SYMBOL_TYPES)
+        self._old = old
+        self._exports: dict[frozenset[str], ObservedExportTable] = {}
+        self._node_ids: set[str] | None = None
         self._declared: Counter[str] | None = None
+        self._vanished: frozenset[str] | None = None
+
+    def _export_table(self, types: frozenset[str]) -> ObservedExportTable:
+        table = self._exports.get(types)
+        if table is None:
+            table = self._exports[types] = observed_exports(self._new, types)
+        return table
+
+    def _graph_node_ids(self) -> set[str]:
+        if self._node_ids is None:
+            graph = getattr(self._new, "surface_graph", None)
+            self._node_ids = (
+                {node.id for node in graph.nodes} if graph is not None else set()
+            )
+        return self._node_ids
 
     def _declared_primaries(self) -> Counter[str]:
         if self._declared is None:
-            graph = getattr(self._new, "surface_graph", None)
-            node_ids = {node.id for node in graph.nodes} if graph is not None else set()
-            identities = (decl_node_identity(node_id) for node_id in node_ids)
+            identities = (decl_node_identity(i) for i in self._graph_node_ids())
             self._declared = Counter(i for i in identities if i is not None)
         return self._declared
+
+    def _vanished_specializations(self) -> frozenset[str]:
+        """Old specializations instantiated from a primary class template the
+        new header graph still declares, which the new snapshot does not
+        enumerate."""
+        if self._vanished is None:
+            vanished: set[str] = set()
+            if self._old is not None:
+                still_enumerated = {
+                    _specialization_spelling(t) for t in self._new.declarations.types
+                }
+                for record in self._old.declarations.types:
+                    if not _instantiated_from_primary(record):
+                        continue
+                    spelling = _specialization_spelling(record)
+                    template = _template_of(spelling)
+                    if (
+                        template is not None
+                        and spelling not in still_enumerated
+                        and f"type://{template}" in self._graph_node_ids()
+                    ):
+                        vanished.add(spelling)
+            self._vanished = frozenset(vanished)
+        return self._vanished
+
+    def specialization_vanished(self, record: RecordType) -> bool:
+        """Whether *record*, an old type the new side does not match, is a
+        specialization the new header merely stopped instantiating, and so not
+        a removed type."""
+        if not _instantiated_from_primary(record):
+            return False
+        return _specialization_spelling(record) in self._vanished_specializations()
 
     def changes_for(
         self, mangled: str, f_old: Function, elf_only_mode: bool
@@ -128,32 +275,56 @@ class TemplateInstanceAbsence:
         """
         if elf_only_mode and is_export_table_only_record(f_old):
             return None
+        owner = member_owner(mangled)
+        if owner is not None and owner in self._vanished_specializations():
+            if synthetic_ctor_dtor_scope(mangled) is not None:
+                return []  # a synthetic constructor/destructor key: no symbol
+            return self._judged(mangled, f_old, FUNCTION_SYMBOL_TYPES)
         stem = primary_stem(mangled)
         if stem is None or self._declared_primaries().get(stem, 0) != 1:
             return None
-        answer = self._new_exports.answer(mangled)
+        return self._judged(mangled, f_old, FUNCTION_SYMBOL_TYPES)
+
+    def variable_changes_for(
+        self, mangled: str, v_old: Variable
+    ) -> list[Change] | None:
+        """The findings for *v_old*, an old variable with no new peer, or
+        ``None`` when this rule makes no claim: only a static data member of a
+        vanished specialization is judged here."""
+        owner = member_owner(mangled)
+        if owner is None or owner not in self._vanished_specializations():
+            return None
+        return self._judged(mangled, v_old, VARIABLE_SYMBOL_TYPES)
+
+    def _judged(
+        self, mangled: str, old: Function | Variable, types: frozenset[str]
+    ) -> list[Change] | None:
+        answer = self._export_table(types).answer(mangled)
         if answer is EdgeAnswer.PRESENT:
             return []
         if answer is not EdgeAnswer.PROVEN_ABSENT:
             return None
-        if is_binary_exported(f_old):
-            return [_export_lost(mangled, f_old)]
-        if is_export_confirmed_absent(f_old):
+        if is_binary_exported(old):
+            return [_export_lost(mangled, old)]
+        if is_export_confirmed_absent(old):
             return []
         return None
 
 
-def _export_lost(mangled: str, f_old: Function) -> Change:
-    """``func_visibility_changed`` for an export the new binary dropped while
-    its declaration remained. The facts are the old side's, with the new side's
-    export fact replaced by the confirmed absence the table proved."""
+def _export_lost(mangled: str, old: Function | Variable) -> Change:
+    """``func_visibility_changed`` (``var_visibility_changed`` for a variable)
+    for an export the new binary dropped while its declaration remained. The
+    facts are the old side's, with the new side's export fact replaced by the
+    confirmed absence the table proved."""
     return make_change(
-        ChangeKind.FUNC_VISIBILITY_CHANGED,
+        ChangeKind.FUNC_VISIBILITY_CHANGED
+        if isinstance(old, Function)
+        else ChangeKind.VAR_VISIBILITY_CHANGED,
         symbol=mangled,
-        name=f_old.name,
-        old_value=visibility_label(f_old),
+        name=old.name,
+        old_value=visibility_label(old),
         new_value="hidden",
-        symbol_binding=f_old.elf_binding.value if f_old.elf_binding else None,
-        entity_id=f_old.entity_id,
-        surface_facts={**surface_fact_summary(f_old), "binary_exported": "false"},
+        symbol_binding=old.elf_binding.value if old.elf_binding else None,
+        entity_id=old.entity_id,
+        surface_facts={**surface_fact_summary(old), "binary_exported": "false"},
     )
