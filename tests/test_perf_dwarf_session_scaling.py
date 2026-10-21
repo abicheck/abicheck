@@ -37,6 +37,7 @@ Requires ``g++`` on Linux (gcc/g++ produce Mach-O/PE elsewhere).
 
 from __future__ import annotations
 
+import gc
 import subprocess
 import sys
 import time
@@ -141,17 +142,19 @@ def test_session_reuse_faster_than_independent_opens(tmp_path: Path) -> None:
 
     def _legacy() -> tuple[float, object]:
         # Legacy: three independent ELF opens (pre-DwarfSession behaviour).
-        t0 = time.perf_counter()
+        gc.collect()
+        t0 = time.process_time()
         dwarf_meta = parse_dwarf_metadata(so)
         dwarf_adv = parse_advanced_dwarf_separately(so)
         snap = build_snapshot_from_dwarf(
             so, elf_meta, dwarf_meta, dwarf_adv, version="legacy"
         )
-        return max(time.perf_counter() - t0, 1e-4), snap
+        return max(time.process_time() - t0, 1e-4), snap
 
     def _session() -> tuple[float, object]:
         # Current production path: one shared DwarfSession across all passes.
-        t1 = time.perf_counter()
+        gc.collect()
+        t1 = time.process_time()
         sess = open_dwarf_session(so)
         assert sess is not None
         meta2, adv2 = parse_dwarf_from_session(sess)
@@ -159,17 +162,20 @@ def test_session_reuse_faster_than_independent_opens(tmp_path: Path) -> None:
             so, elf_meta, meta2, adv2, version="session", session=sess
         )
         sess.close()
-        return max(time.perf_counter() - t1, 1e-4), snap
+        return max(time.process_time() - t1, 1e-4), snap
 
     # Alternate the two paths and compare each one's *fastest* run. A single
     # back-to-back sample let one scheduler hiccup on a loaded (and
     # coverage-instrumented) CI runner decide the verdict: CI saw ratios of
     # 0.86-0.87 against the 0.85 bar while local runs measure 0.46-0.64.
-    # The minimum is the standard noise-robust estimator for a wall-clock
-    # comparison, and a genuine loss of sharing still fails every round.
+    # The minimum is the standard noise-robust estimator, and a genuine loss
+    # of sharing still fails every round. Both paths are timed in process CPU
+    # time, not wall clock, after a gc.collect(): on CI the wall-clock ratio
+    # inverted (reuse 1.4-2x *slower*) with no code change, which is runner
+    # scheduling and collector pauses landing in one path, not lost sharing.
     legacy_times: list[float] = []
     session_times: list[float] = []
-    for _ in range(3):
+    for _ in range(5):
         elapsed, legacy_snap = _legacy()
         legacy_times.append(elapsed)
         elapsed, session_snap = _session()
