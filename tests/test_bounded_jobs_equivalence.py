@@ -24,7 +24,6 @@ from __future__ import annotations
 
 import pytest
 
-from abicheck import process_resources
 from abicheck.buildsource.call_graph import _call_graph_jobs
 from abicheck.buildsource.source_replay import _l4_jobs
 from abicheck.extract.tu_jobs import _tu_jobs
@@ -109,10 +108,7 @@ ORACLE = [
 @pytest.mark.parametrize(
     ("caller", "n_units", "cpus", "avail_gib", "env", "expected"),
     ORACLE,
-    ids=[
-        f"{c}-n{n}-cpu{cpu}-ram{ram}-env{env}"
-        for c, n, cpu, ram, env, _ in ORACLE
-    ],
+    ids=[f"{c}-n{n}-cpu{cpu}-ram{ram}-env{env}" for c, n, cpu, ram, env, _ in ORACLE],
 )
 def test_pool_sizing_matches_oracle(
     monkeypatch,
@@ -123,10 +119,18 @@ def test_pool_sizing_matches_oracle(
     env: str | None,
     expected: int,
 ) -> None:
+    # Another test can re-import abicheck.process_resources after collection,
+    # leaving two module objects: each caller reads the one it bound (the L4
+    # and call-graph pools via source_replay, the manifest pool at call time),
+    # so the RAM probe is patched on every one of them.
+    from abicheck import process_resources
+    from abicheck.buildsource import source_replay
+
     for var in (*_ENV_VARS.values(), *_MEM_BUDGET_VARS):
         monkeypatch.delenv(var, raising=False)
     if env is not None:
         monkeypatch.setenv(_ENV_VARS[caller], env)
     monkeypatch.setattr(process_resources.os, "cpu_count", lambda: cpus)
-    monkeypatch.setattr(process_resources, "available_mem_gib", lambda: avail_gib)
+    for module in {process_resources, source_replay.process_resources}:
+        monkeypatch.setattr(module, "available_mem_gib", lambda: avail_gib)
     assert _CALLERS[caller](n_units) == expected
