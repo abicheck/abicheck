@@ -4,7 +4,12 @@ from dataclasses import replace
 
 import pytest
 
-from abicheck.policy.disposition_ledger import RuleProvenance
+from abicheck.policy.rule_inventory import (
+    KIND_SUPPRESSION,
+    STATUS_ACTIVE,
+    RuleAuditRow,
+    RuleRef,
+)
 from abicheck.pr_comment_base import CommentModel
 from abicheck.pr_comment_sections import _suppression_note as suppression_note
 from abicheck.report.disposition_audit import DispositionAudit
@@ -19,6 +24,21 @@ from abicheck.report.render_review import (
     render_review_digest,
     render_terminal_digest,
 )
+
+
+def _suppression_row(rule_id: str, matched: int) -> RuleAuditRow:
+    """A configured suppression rule's audit row that disposed of *matched*."""
+    return RuleAuditRow(
+        ref=RuleRef(KIND_SUPPRESSION, None, None),
+        rule_id=rule_id,
+        label=None,
+        reason="accepted",
+        expires=None,
+        status=STATUS_ACTIVE,
+        matched_count=matched,
+        shadowed_count=0,
+        selector_matched_count=matched,
+    )
 
 
 def test_direct_severity_digest_reports_the_computed_gate() -> None:
@@ -131,10 +151,7 @@ def _digest(**updates: object) -> ReviewDigest:
             12,
             2,
             (("suppressed", 10),),
-            tuple(
-                (RuleProvenance(rule_id=f"r{i}", reason="accepted"), i + 1)
-                for i in range(6)
-            ),
+            tuple(_suppression_row(f"r{i}", i + 1) for i in range(6)),
             (),
         ),
         quality_issues_count=1,

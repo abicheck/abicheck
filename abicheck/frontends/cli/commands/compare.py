@@ -188,7 +188,7 @@ from .compare_routing import _RELEASE_FORMATS
     "acknowledgments",
     type=click.Path(exists=True, dir_okay=False, path_type=Path),
     default=None,
-    help="Acknowledgment records (YAML, ADR-067) for this run: intentional, "
+    help="Acknowledgment records (YAML) for this run: intentional, "
     "reviewed changes, each named by finding_id, or by symbol with change_kind. "
     "Overrides .abicheck.yml's acknowledgment.file.",
 )
@@ -315,19 +315,12 @@ from .compare_routing import _RELEASE_FORMATS
     is_flag=True,
     default=False,
     help="Exit 1 when a configured suppression, reclassify or acknowledgment rule "
-    "matched no finding in this run (ADR-067 P1). Same as `unused_rules: block` "
+    "matched no finding in this run. Same as `unused_rules: block` "
     "in the policy file; it can only tighten, never relax it.",
 )
 @verbose_option
 @click.pass_context
 def compare_cmd(ctx: click.Context, /, **kwargs: Any) -> None:
-    from ....model.unused_rules_flag import fail_on_unused_rules
-
-    with fail_on_unused_rules(bool(kwargs.pop("fail_on_unused_rules", False))):
-        _compare_cmd(ctx, **kwargs)
-
-
-def _compare_cmd(ctx: click.Context, /, **kwargs: Any) -> None:
     """Compare two ABI surfaces and report changes.
 
     Each input (OLD, NEW) can be a .so shared library or a JSON snapshot from
@@ -411,6 +404,13 @@ def _compare_cmd(ctx: click.Context, /, **kwargs: Any) -> None:
       abicheck compare libfoo.so.1 libfoo.so.2 -H include/foo.h --policy sdk_vendor
       abicheck compare old.json new.json --suppress suppressions.yaml
     """
+    from ....model.unused_rules_flag import fail_on_unused_rules
+
+    with fail_on_unused_rules(bool(kwargs.pop("fail_on_unused_rules", False))):
+        _compare_cmd(ctx, **kwargs)
+
+
+def _compare_cmd(ctx: click.Context, /, **kwargs: Any) -> None:
     # Options are parsed by the click wrapper above; the full compare flow lives
     # in cli_compare_helpers.run_compare (size-split from cli.py to keep this
     # module under the AI-readiness file-size cap). Click collects every declared

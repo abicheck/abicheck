@@ -167,9 +167,9 @@ def record_release_resolved_config(result: Any, config: Any) -> None:
 def _unused_rule_keys_for_release(result: Any) -> dict[str, object]:
     """ADR-067 P1: what a release fold needs to decide "unused in every member".
 
-    Always the member's effective ``unused_rules`` mode (a release folds to the
-    strictest one). The rule-key lists are stamped only under ``block``, the one
-    mode that reads them, so a run that never opted in gains no JSON keys.
+    The member's effective ``unused_rules`` mode (a release folds to the
+    strictest one) and, under ``block`` only, the rule-key lists the fold
+    reads. A run that never opted in (mode ``allow``) gains no JSON keys.
     """
     from ..policy.disposition_close import ledger_for
     from ..policy.disposition_rules import configured_rule_rows
@@ -177,7 +177,9 @@ def _unused_rule_keys_for_release(result: Any) -> dict[str, object]:
     from ..policy.unused_rules_gate import resolve_unused_rules_mode
 
     mode = resolve_unused_rules_mode(result)
-    stamped: dict[str, object] = {"unused_rules_mode": mode}
+    stamped: dict[str, object] = {}
+    if mode != "allow":
+        stamped["unused_rules_mode"] = mode
     if mode == "block":
         rows = configured_rule_rows(result, ledger=ledger_for(result))
         stamped["configured_rule_keys"] = [row.ref.key() for row in rows]

@@ -181,7 +181,7 @@ Full matrix, including app/plugin-scoped comparisons (`compare --used-by`/
   (fails on **expired** rules) and `suppression.require_justification: true`.
   To fail on rules that match nothing, set the policy file's
   `unused_rules: block` (or pass `--fail-on-unused-rules`); see
-  [the unused-rules axis](../reference/exit-codes.md#the-unused-rules-axis-adr-067-p1).
+  [the unused-rules axis](../reference/exit-codes.md#the-unused-rules-axis).
 - **Baselines → everything.** All of the above only gates what changed
   *relative to the baseline you chose*. Compare against the last release (not
   the previous commit) to catch cumulative drift; see

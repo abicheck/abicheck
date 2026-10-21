@@ -566,12 +566,32 @@ def ledger_for(
     """
     existing = getattr(result, "disposition_ledger", None)
     if isinstance(existing, DispositionLedger):
-        return (
-            existing
-            if severity_config is None
-            else existing.with_gate(result, severity_config, today=today)
-        )
+        if severity_config is not None:
+            return existing.with_gate(result, severity_config, today=today)
+        return _with_refreshed_overlays(existing, result, today=today)
     return finalize_ledger(DispositionLedger(), result, severity_config, today=today)
+
+
+def _with_refreshed_overlays(
+    ledger: DispositionLedger, result: DiffResult, *, today: date | None
+) -> DispositionLedger:
+    """A copy of *ledger* whose dated overlays are answered at *today*.
+
+    The comparison stamped its reclassify and verdict-class overlays at its own
+    date. A rule that has expired since then must not stay ``active`` in the
+    audit, so the overlays are re-resolved, as :meth:`DispositionLedger.with_gate`
+    does on the severity path. Only the record list is replaced, so the copy
+    never mutates the ledger the comparison handed back.
+    """
+    from copy import copy
+
+    from .disposition_gate import _reset_dated_overlays
+
+    refreshed = copy(ledger)
+    refreshed._records = _reset_dated_overlays(list(ledger._records))  # noqa: SLF001
+    refreshed.resolve_reclassifications(result, today=today)
+    refreshed.resolve_verdict_classes(result, today=today)
+    return refreshed
 
 
 def reclassifications(ledger: DispositionLedger) -> tuple[tuple[str, int], ...]:

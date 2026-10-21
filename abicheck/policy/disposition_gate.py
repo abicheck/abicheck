@@ -138,18 +138,22 @@ def _kept_disposition(
 
 
 def _reset_dated_overlays(records: list[DispositionRecord]) -> list[DispositionRecord]:
-    """Clear ``reclassified_by``/``verdict_class`` so a stale value resolved
+    """Clear the reclassify and verdict-class overlays so a stale value resolved
     at an earlier ``today`` isn't mistaken for already-answered (Codex
     review, fresh evidence): :meth:`DispositionLedger.with_gate` calls this
     before re-running ``resolve_reclassifications``/``resolve_verdict_classes``
     on a ``checker.compare()``-built ledger, whose overlays were resolved at
     comparison time and go stale once a dated ``reclassify:`` rule's match
-    crosses this render's own ``today``.
+    crosses this render's own ``today``. The P1 stamps (``reclassify_rule``,
+    ``reclassify_hits``) are overlays too: left behind, they would keep an
+    expired rule as ``active`` in the audit while ``reclassified_by`` is clear.
     """
     return [
         replace(
             r,
             reclassified_by=None,
+            reclassify_rule=None,
+            reclassify_hits=(),
             verdict_class=None
             if r.disposition is Disposition.SUPPRESSED
             else r.verdict_class,

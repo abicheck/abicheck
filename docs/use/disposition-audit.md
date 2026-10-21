@@ -103,7 +103,7 @@ fared, so "this waiver does nothing any more" is visible rather than silent:
 cannot prove the rule was checked. Detectors do not yet declare the kinds they
 produce, so on most runs of an ELF-only library the unmatched rules read
 `not_evaluated`. See the
-[unused-rules axis](../reference/exit-codes.md#the-unused-rules-axis-adr-067-p1)
+[unused-rules axis](../reference/exit-codes.md#the-unused-rules-axis)
 for the `unused_rules: block` gate that reacts to `unused` only.
 
 ## What it means for suppression

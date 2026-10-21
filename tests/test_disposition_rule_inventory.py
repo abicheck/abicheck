@@ -731,3 +731,31 @@ def test_an_acknowledgment_that_covers_nothing_still_has_a_row(tmp_path: Path) -
     assert unused.status == _oracle_status(0, 0, None, refused=refused, today=today)
     assert (expired.reason, expired.matched_count) == ("old waiver", 0)
     assert expired.status == STATUS_EXPIRED
+
+
+def test_a_rule_that_expires_before_rendering_reads_expired_not_active(
+    tmp_path: Path,
+) -> None:
+    """The compare-time stamp is refreshed at render time (ADR-067 P1).
+
+    The rule matches at comparison time, so the ledger carries its stamp. It
+    has expired by the time the audit is rendered, so it must read ``expired``
+    with nothing disposed of, not ``active`` while the totals say zero.
+    """
+    from datetime import timedelta
+
+    policy = tmp_path / "policy.yml"
+    policy.write_text(
+        "reclassify:\n"
+        f"  - symbol: {_symbol('gone0')}\n"
+        "    to: ignore\n"
+        f"    expires: {date.today().isoformat()}\n",
+        encoding="utf-8",
+    )
+    old, new = _snapshots(("gone0",))
+    result = compare(old, new, policy_file=PolicyFile.load(policy))
+    later = date.today() + timedelta(days=2)
+    audit = compute_disposition_audit(result, today=later)
+    (row,) = audit.reclassifications
+    assert (row.status, row.matched_count) == (STATUS_EXPIRED, 0)
+    assert audit.reclassified_total == 0

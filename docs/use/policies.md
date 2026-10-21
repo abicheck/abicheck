@@ -207,7 +207,7 @@ want to see).
 - An optional `id:` names the rule in the audit. It must be unique within the
   file (a repeat is an error). Without one, the audit identifies the rule by its
   canonical identity, and `label`/`reason` are shown as their own fields
-  (ADR-067 P2).
+  .
 - The audit lists every configured `reclassify:` rule, including one that
   matched nothing. `matched_count` counts the findings whose verdict the rule
   changed; `selector_matched_count` also counts findings it matched without
@@ -229,7 +229,7 @@ policy file decides whether a configured suppression, `reclassify:` or
 acknowledgment rule that matched no finding fails the run. `block` contributes
 `1` to the exit code; `warn` only lists the rules. Only the `unused` status
 triggers it. The full rules, including when a rule reads `not_evaluated`
-instead, are in [the unused-rules axis](../reference/exit-codes.md#the-unused-rules-axis-adr-067-p1).
+instead, are in [the unused-rules axis](../reference/exit-codes.md#the-unused-rules-axis).
 
 ### Evidence-aware controls (`evidence_policy`)
 

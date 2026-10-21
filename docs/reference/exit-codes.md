@@ -348,7 +348,7 @@ The composite GitHub Action's own dedicated `require-complete-analysis`
 input is retired alongside the CLI flag it forwarded to (rulings.py
 deferred-option followup) -- see `docs/reference/github-action-inputs.md`.
 
-## The unused-rules axis (ADR-067 P1)
+## The unused-rules axis
 
 A policy file's top-level `unused_rules:` key (`allow`, `warn` or `block`;
 default `allow`) decides whether a configured suppression, `reclassify:` or
@@ -366,7 +366,7 @@ only tighten: it never relaxes a policy file's `block`.
 
 Only status `unused` triggers the gate. A rule reads `not_evaluated` instead
 when it matched nothing and a detector of the same comparison did not run: the
-audit cannot prove the rule was checked, so the gate stays silent (ADR-067 D3).
+audit cannot prove the rule was checked, so the gate stays silent.
 Detectors do not yet declare the kinds they produce, so any refused detector
 makes every unmatched rule `not_evaluated`. In practice `block` fires only on a
 comparison in which every detector ran. The `expired`, `shadowed_only` and
@@ -1001,7 +1001,7 @@ one of those.
 | `API_BREAK` | `2` | `0`–`2`* | `2` / `0`–`2`*‡ | — | — |
 | `BREAKING` / `FAIL` | `4` | `0`–`4`* | `4` / `0`–`4`*‡ | — | `4` |
 | `--budget` overflow | — | — | `5` | — | — |
-| Configured rule unused (`unused_rules: block`, ADR-067 P1) | `1` floor | `1` floor | — | — | — |
+| Configured rule unused (`unused_rules: block`) | `1` floor | `1` floor | — | — | — |
 | Missing dependencies/symbols | — | — | — | `1` | — |
 | Load failure | — | — | — | — | `4` |
 | Invalid invocation / tool error | `64`† | `64`† | `64`† | `64`† | `64`† |
