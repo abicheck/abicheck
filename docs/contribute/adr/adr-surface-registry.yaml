@@ -671,6 +671,13 @@ adrs:
     surfaces:
       - report: compare_report.disposition_audit
 
+  - id: ADR-085
+    file: 085-template-parameter-default-arguments.md
+    disposition: gap
+    use_cases: []
+    surfaces: []
+    missing: Proposed, not accepted or implemented; no template-parameter default fact, TEMPLATE_PARAM_DEFAULT_CHANGED kind, or castxml coverage gap exists.
+
   - id: ADR-078
     file: 078-informational-severity-category.md
     disposition: surfaced

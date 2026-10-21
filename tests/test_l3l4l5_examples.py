@@ -50,6 +50,9 @@ from abicheck.buildsource.source_graph import (  # noqa: E402
     SourceGraphSummary,
     diff_source_graph_findings,
 )
+from abicheck.compare.virtual_dispatch_set import (  # noqa: E402
+    virtual_dispatch_set_findings,
+)
 
 _EXAMPLES = example_catalog.CASES_DIR
 _GT = example_catalog.load_ground_truth()["verdicts"]
@@ -81,8 +84,14 @@ def _emitted_kinds(case_name: str) -> list[str]:
             SourceAbiSurface.from_dict(old), SourceAbiSurface.from_dict(new)
         )
     elif tier == "L5":
-        changes = diff_source_graph_findings(
-            SourceGraphSummary.from_dict(old), SourceGraphSummary.from_dict(new)
+        # The graph risk path evidence_report.py runs: the source-graph findings
+        # plus the virtual-dispatch-set comparison.
+        old_graph, new_graph = (
+            SourceGraphSummary.from_dict(old),
+            SourceGraphSummary.from_dict(new),
+        )
+        changes = diff_source_graph_findings(old_graph, new_graph) + (
+            virtual_dispatch_set_findings(old_graph, new_graph)
         )
     else:  # pragma: no cover - guards a mis-tagged fixture
         raise AssertionError(f"{case_name}: unexpected min_evidence {tier!r}")
@@ -92,15 +101,18 @@ def _emitted_kinds(case_name: str) -> list[str]:
 def test_corpus_is_non_empty() -> None:
     # Guards against the discovery query silently matching nothing (which would
     # turn every parametrized assertion below into a vacuous pass).
-    assert len(_CASES) == 15, f"expected the 15 L3/L4/L5 cases, found {_CASES}"
+    assert len(_CASES) == 17, f"expected the 17 L3/L4/L5 cases, found {_CASES}"
 
 
 @pytest.mark.parametrize("case_name", _CASES)
 def test_case_emits_expected_kinds(case_name: str) -> None:
     info = _GT[case_name]
     want = set(info["expected_kinds"])
-    assert want, f"{case_name}: no expected_kinds declared"
     got = set(_emitted_kinds(case_name))
+    if not want:
+        # A negative twin (NO_CHANGE): nothing at all may be emitted.
+        assert not got, f"{case_name}: expected no kinds, got {sorted(got)}"
+        return
     missing = want - got
     assert not missing, (
         f"{case_name}: expected kinds not emitted: {sorted(missing)}; got {sorted(got)}"

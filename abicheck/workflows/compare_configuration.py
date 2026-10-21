@@ -227,7 +227,7 @@ def resolve_release_pack_application(
     ``policy.overrides`` and the stated gate still reach each member's
     receipt. Each front end supplies only its *explicit*/*project* inputs:
     the CLI's from the flags the user typed
-    (``cli_compare_receipt.resolve_release_pack_application``), a typed
+    (``workflows.pack_resolution.resolve_release_pack_application``), a typed
     caller's from its ``ReleaseCompareOptions`` (``release_compare``).
 
     Raises :class:`ConfigurationConflictError` or

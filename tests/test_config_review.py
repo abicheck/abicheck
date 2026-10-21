@@ -755,8 +755,8 @@ class TestCompareReleaseExitFloors:
 
 
 def _gate(preset, abi=None, potential=None, quality=None, addition=None):
-    """Build a :class:`~abicheck.cli_compare_release_helpers.GateOptions` the
-    way :func:`~abicheck.cli_compare_release_helpers.resolve_release_gate_options`
+    """Build a :class:`~abicheck.policy.release_gate_options.GateOptions` the
+    way :func:`~abicheck.policy.release_gate_options.resolve_release_gate_options`
     would (minus pack folding, irrelevant to these unit tests). There is no
     ``scheme`` parameter: ``GateOptions.exit_code_scheme`` is a derived
     property, not a settable field (duplication-and-convergence-assessment
@@ -765,7 +765,7 @@ def _gate(preset, abi=None, potential=None, quality=None, addition=None):
     ADR-064's rewrite, ``release_severity_exit_code``/
     ``fold_release_global_severity`` take the resolved object, not the six
     raw preset/category/scheme strings directly."""
-    from abicheck.cli_compare_release_helpers import (
+    from abicheck.policy.release_gate_options import (
         GateOptions,
         _resolve_release_severity_config,
     )

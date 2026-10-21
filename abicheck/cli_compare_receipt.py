@@ -60,123 +60,6 @@ if TYPE_CHECKING:
     from .pack_application import PackApplication
     from .workflows.gate import SeverityConfig
 
-#: The ``compare`` kwargs that feed the compatibility configuration. Named
-#: here so the caller forwards exactly the mapping
-#: ``compare_cli_inputs`` reads, and an option renamed on one side fails
-#: loudly on the other rather than resolving to "not stated".
-COMPARE_CONFIG_PARAMS: tuple[str, ...] = (
-    "contract_mode",
-    "policy",
-    "policy_file_path",
-    "suppress",
-    "require_justification",
-    "severity_preset",
-    "pack_paths",
-    # ADR-075 D7: the -H roots the snapshots were classified under.
-    "headers",
-)
-
-
-def typed_parameter_names() -> tuple[str, ...]:
-    """The parameters the caller must answer "was this typed?" for.
-
-    Read off the resolver's own
-    :data:`~abicheck.compatibility_evaluation_frontend.DEFAULTED_COMPARE_PARAMETERS`
-    rather than restated here: those are exactly the options whose click
-    default (``--policy strict_abi``) is
-    indistinguishable from a value the user chose, and a second copy of that
-    list is a second thing to keep in sync. Every other option already
-    spells "not given" as ``None``/``()``.
-    """
-    from .compatibility_evaluation_frontend import DEFAULTED_COMPARE_PARAMETERS
-
-    return tuple(sorted(DEFAULTED_COMPARE_PARAMETERS))
-
-
-def _suppression_source(suppression: Any, path: Any) -> Any:
-    """The already-loaded ``--suppress`` list, as a resolver input.
-
-    Built from the list the run really used rather than re-reading *path*
-    (a second read could pair one content's digest with another's rules,
-    the trap :meth:`SuppressionSource.from_file` documents). A list with no
-    ``source_sha256`` still selected a source, so it is reported as one --
-    the same absent-vs-empty rule ``contract_context.
-    suppression_config_for`` follows."""
-    if suppression is None:
-        return None
-    from .workflows.compare_input_sources import SuppressionSource
-
-    return SuppressionSource(
-        path=str(path) if path is not None else None,
-        sha256=getattr(suppression, "source_sha256", None) or "",
-        rules=tuple(suppression.rule_identities()),
-    )
-
-
-def cli_configuration_inputs(
-    params: Mapping[str, Any],
-    *,
-    typed: Collection[str],
-    project_cfg: Any,
-    project_path: Path | None,
-    policy_file: Any = None,
-    suppression: Any = None,
-    suppress_path: Path | None = None,
-    policy_option: str | None = None,
-    policy_path: Path | None = None,
-    policy_sha256: str | None = None,
-    project_sha256: str | None = None,
-    symbols_list: Any = None,
-    project_overlays_applied: bool = False,
-) -> tuple[Any, Any]:
-    """This invocation's ``(explicit, project)`` resolver inputs.
-
-    *typed* names the parameters the user really typed (the CLI answers that
-    from Click's ``ParameterSource`` at its own call site and hands it over as
-    data -- the same stated-settings set a typed caller puts in
-    ``CompareRequest.stated_settings``).
-    *policy_option* names the flag that selected ``policy`` when it was not
-    ``--policy`` -- ``--required-symbol``, whose contract switches an
-    untouched ``--policy`` to ``plugin_abi``, with *policy_path*/
-    *policy_sha256* identifying the ``@FILE`` form's list file when used.
-    *project_sha256* is the digest of the ``.abicheck.yml`` bytes
-    *project_cfg* was parsed from, naming a revision, not only a path.
-    *project_overlays_applied*: this route applies the config's
-    ``contract.overlays`` (a single-pair compare under an explicit
-    ``--config``), so the receipt states them at ``project_config`` tier.
-    """
-    from .compatibility_evaluation_frontend import ProjectCompatibilityInputs
-    from .workflows.compare_input_adapters import compare_cli_inputs
-
-    # The declared contract, enforced rather than only documented: every one
-    # of these keys is read below, and a caller that renamed or dropped one
-    # would have it resolve silently to "not stated" -- indistinguishable
-    # from a user who did not pass the flag (CodeRabbit review).
-    missing = [name for name in COMPARE_CONFIG_PARAMS if name not in params]
-    if missing:
-        raise KeyError(
-            f"compare config params missing {missing}; every name in "
-            "COMPARE_CONFIG_PARAMS must be forwarded, since an absent one "
-            "resolves as unstated rather than failing"
-        )
-    explicit = compare_cli_inputs(
-        params,
-        explicit_parameters=typed,
-        policy_file=policy_file,
-        suppression=_suppression_source(suppression, suppress_path),
-        policy_base_option=policy_option,
-        policy_base_path=str(policy_path) if policy_path is not None else None,
-        policy_base_sha256=policy_sha256,
-        public_symbols_list=symbols_list,
-    )
-    project = ProjectCompatibilityInputs.from_build_config(
-        project_cfg,
-        path=project_path,
-        sha256=project_sha256,
-        overlays_applied=project_overlays_applied,
-    )
-    return explicit, project
-
 
 def resolve_cli_config(params: Mapping[str, Any], **kwargs: Any) -> Any:
     """Resolve one :class:`CompatibilityEvaluationConfig` for this invocation.
@@ -190,6 +73,7 @@ def resolve_cli_config(params: Mapping[str, Any], **kwargs: Any) -> Any:
         FrontEnd,
         resolve_compatibility_evaluation_config,
     )
+    from .workflows.compare_input_adapters import cli_configuration_inputs
 
     explicit, project = cli_configuration_inputs(params, **kwargs)
     return resolve_compatibility_evaluation_config(
@@ -218,176 +102,6 @@ def dry_run_scheme_label(resolved_cfg: Any, pack_paths: Collection[Any]) -> str:
     scheme = getattr(resolved_cfg, "exit_code_scheme", None)
     label = "legacy (0/2/4)" if scheme == "legacy" else (scheme or "legacy (0/2/4)")
     return f"{label}; a selected --pack may adjust it" if pack_paths else label
-
-
-def _shadowed_inert_fields(policy_file_path: Any) -> frozenset[str]:
-    """Which `INERT_PACK_VALUES` fields a `--policy-file` already states.
-
-    Loaded here rather than proxied on "a path was given": a file setting
-    only `base_policy` shadows nothing, and treating it as shadowing skipped
-    a rejection the real run then made (Codex review). The predicate is the
-    resolver's own, so this cannot disagree with `pinned_contract`.
-
-    A file that fails to load yields "nothing shadowed" rather than raising:
-    the real run loads it properly a moment later and reports that failure
-    with its own `--policy-file` framing. This is also the only place that
-    reads it early, and it runs only when `--pack` is selected, so no
-    pre-existing invocation changes.
-
-    Only the three failures `PolicyFile.load` documents are swallowed. A
-    blanket `except Exception` here would also absorb whatever the *caller's*
-    own `PackManifestError` handling is meant to see, and would hide a real
-    defect in the loader behind a silently-empty answer (CodeRabbit review).
-    """
-    if policy_file_path is None:
-        return frozenset()
-    from .compatibility_evaluation_wiring import policy_file_pins_internal_namespaces
-    from .workflows.policy_file import PolicyFile
-
-    try:
-        loaded = PolicyFile.load(policy_file_path)
-    except (ValueError, OSError, ImportError):
-        return frozenset()
-    if policy_file_pins_internal_namespaces(loaded):
-        return frozenset({"surface.internal_namespaces"})
-    return frozenset()
-
-
-def validate_pack_manifests(
-    pack_paths: Collection[Any],
-    *,
-    policy_file_path: Any = None,
-    contract_evaluation: bool = True,
-) -> None:
-    """Reject an unusable ``--pack`` manifest before anything else runs.
-
-    Called ahead of ``compare``'s ``--dry-run`` emit, where that command
-    already validates every other flag combination: a dry run must not report
-    "ok" for an invocation the identical real run rejects with exit 64. The
-    full pack *resolution* cannot move that early -- it needs the
-    ``--policy-file`` the command loads much later -- but manifest validity
-    is a property of the manifests alone, so a malformed document, an unknown
-    ``kind``/``ChangeKind`` slug, an unroutable field, or an assignment this
-    build resolves but does not apply is answerable here (Codex and
-    CodeRabbit review, both reproduced).
-
-    Pack-vs-pack *conflict* detection deliberately stays behind: D8 exempts a
-    field another layer already states, so the answer depends on layers not
-    resolved yet. Checking it here would make a dry run *stricter* than the
-    real run -- the same divergence in the other direction.
-
-    Reads the manifests a second time (the resolver loads its own). That is
-    inherent to validating before resolution rather than an oversight: the
-    two answer different questions, and the resolver's own "one read per
-    resolution" rule is about not splitting *one* resolution's identities
-    across two reads, which this does not do.
-
-    Raises :class:`~abicheck.errors.PackManifestError`; the caller maps it to
-    a usage error.
-    """
-    if not pack_paths:
-        return
-    from .pack_application import check_pack_fields_applied
-
-    check_pack_fields_applied(
-        list(pack_paths),
-        shadowed_fields=_shadowed_inert_fields(policy_file_path),
-        contract_evaluation=contract_evaluation,
-    )
-
-
-def resolve_release_pack_application(
-    params: Mapping[str, Any],
-    *,
-    contract_evaluation: bool = False,
-    **kwargs: Any,
-) -> Any:
-    """Resolve ``--pack`` contributions for the directory/package release fan-out.
-
-    Returns a :class:`~abicheck.pack_application.PackApplication` -- never
-    ``None`` (finding 1, round 4): with no ``--pack`` this is still where a
-    project-backed ``.abicheck.yml`` ``policy.overrides`` reaches a real
-    ``resolved_config`` (:func:`record_release_resolved_config`), via an
-    *inert* application. ``policy_overrides``/``internal_namespaces`` thread
-    into each library's own ``CompareRequest`` fields the same way, folded
-    per library by :func:`~abicheck.workflows.compare.execute.classify_compare_pair`.
-
-    Distinct from the single-pair ``workflows.compare_configuration.
-    resolve_compare_configuration``, which folds the packs into *one*
-    ``PolicyFile`` -- fits a single-pair
-    ``compare``'s single ambient policy file, but the release fan-out
-    reloads its own ``PolicyFile`` fresh per library, so this returns the
-    pack's *contribution* for the caller to fold in once per library.
-
-    **Accepts a ``kind: gate`` pack (CLI cleanup phase two, "PR B" slice 2).**
-    Folds ``PackApplication``'s ``severity_levels`` (no ``exit_code_scheme``
-    any more -- PR G2 deleted the manual selector) into the release fan-out's
-    own resolved :class:`~abicheck.policy.release_gate_options.GateOptions`
-    (``resolve_release_gate_options``, ADR-064) via ``cli_compare_release_
-    helpers.apply_release_gate_pack`` -- which shares the *one*
-    :func:`~abicheck.policy.gate_pack_fold.fold_gate_pack_severity` with
-    :func:`~abicheck.pack_application.apply_to_compare_config` instead of
-    mirroring its logic. ``scan --against`` accepts a ``kind: gate`` pack
-    too (a later "PR B" slice): unlike the release fan-out, it already has a
-    real ``ResolvedCompareConfig`` to fold into directly via
-    ``apply_to_compare_config`` -- as the retired
-    ``cli_scan._resolve_scan_evaluation_config`` did.
-
-    **No longer rejects a pack asserting ``contract.unresolved`` (Track 2 7B
-    residual, closed).** An earlier revision rejected it unconditionally --
-    not merely when ``contract_evaluation`` is false, the way
-    :func:`~abicheck.pack_application.check_resolved_config_applies_packs`'s
-    own ``CONTRACT_EVALUATION_ONLY_FIELDS`` check does for the single-pair
-    path -- while leaving *why* an open question for a future slice
-    (ADR-063 Track 4's 7B ledger entry). Re-reading that question against the
-    plumbing settles it: ``service.run_compare`` already creates a
-    per-library ``PersistedContractContext`` when this release invocation
-    passed ``--contract``, and :func:`record_release_resolved_config` (this
-    module) already merges *this* function's resolved config -- pack
-    contribution included -- into that context via
-    ``contract_context.with_resolved_config``, read back by
-    ``contract_coverage_exit._accepts_unresolved``. So a pack-asserted
-    ``contract.unresolved=warn`` reaches the same consumer, through the same
-    merge, that a single-pair ``compare --pack`` already goes through --
-    there is no release-specific consumer or semantics to get wrong, and no
-    per-library-vs-release-wide hazard the way there could be for a field
-    with library-specific *content* (a symbol list, a namespace):
-    ``contract.unresolved=warn`` changes nothing about evidence, labels, or
-    ``GateDecision`` for any library (ADR-049 Section 6.2) -- only the
-    orthogonal contract-coverage exit-floor contribution
-    (``policy.contract_coverage_exit.coverage_exit_for_context``), the same
-    uniform accept-incomplete-assurance decision ``policy.overrides``/
-    ``surface.internal_namespaces`` already apply release-wide. A library's
-    own ``contract_coverage_failures`` ledger stays untouched either way, so
-    nothing is hidden; only the exit code's willingness to fail on that gap
-    is. So this now applies the same ``contract_evaluation`` gate the
-    single-pair path uses: a pack asserting ``contract.unresolved`` without
-    ``--contract`` is still rejected as decorative, and with ``--contract``
-    it is accepted and threaded through like every other pack field.
-
-    Raises :class:`~abicheck.workflows.compare_configuration.
-    ConfigurationConflictError` (a D7 same-tier conflict, a D8 pack conflict,
-    an inapplicable, gate-only, or unresolved-only pack) or
-    ``ProjectPolicyOverridesError``; mapping those onto exit 64 is the
-    caller's job.
-    """
-    # Runs regardless of `pack_paths` (finding 1) -- see docstring above.
-    # This function supplies the CLI's inputs only; the resolution itself is
-    # the one the typed release route shares.
-    from .compatibility_evaluation_frontend import FrontEnd
-    from .workflows.compare_configuration import (
-        resolve_release_pack_application as _resolve_release_configuration,
-    )
-
-    explicit, project = cli_configuration_inputs(params, **kwargs)
-    return _resolve_release_configuration(
-        explicit,
-        front_end=FrontEnd.CLI,
-        project=project,
-        policy_file=kwargs.get("policy_file"),
-        base_policy=params.get("policy") or DEFAULT_POLICY_PROFILE,
-        contract_evaluation=contract_evaluation,
-    )
 
 
 def resolve_release_pack_application_from_ctx(
@@ -424,19 +138,15 @@ def resolve_release_pack_application_from_ctx(
     import yaml
 
     from .errors import PackManifestError
-    from .workflows.policy_file import PolicyFile
+    from .workflows.compare_input_adapters import typed_parameter_names
+    from .workflows.pack_resolution import (
+        preread_policy_file,
+        resolve_release_pack_application,
+    )
 
-    # A best-effort read purely to answer "does the real --policy-file
-    # already state this ChangeKind override" (D8 precedence, mirroring
-    # `_shadowed_inert_fields`'s identical reasoning): a broken file is not
-    # reported here -- the real per-library load a moment later (inside
-    # `compare_release_cmd`) reports it with its own framing.
-    loaded_policy_file = None
-    if policy_file_path is not None:
-        try:
-            loaded_policy_file = PolicyFile.load(policy_file_path)
-        except (ValueError, OSError, ImportError, yaml.YAMLError):
-            loaded_policy_file = None
+    # The pre-read itself (and why a broken file is not reported here) lives
+    # with the resolution it feeds: `workflows.pack_resolution`.
+    loaded_policy_file = preread_policy_file(policy_file_path)
     typed = {
         name
         for name in typed_parameter_names()

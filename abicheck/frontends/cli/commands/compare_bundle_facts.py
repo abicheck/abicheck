@@ -327,7 +327,7 @@ def dispatch(
     *compile_context* is resolved by the caller (``compare_cmd``), not here:
     this leaf module is kept out of ``cli_options``'s own import graph.
     """
-    from ....cli_compare_release_helpers import _exit_compare_release
+    from ..release_exit import _exit_compare_release
     from ..runtime import _safe_write_output
 
     request = _request_from_kwargs(

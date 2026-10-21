@@ -399,20 +399,22 @@ class TestTheAssuranceRollupReadsComplete:
         assert [n for n in with_addition if n not in without] == []
 
     def test_the_note_machinery_is_not_vacuous(self, tmp_path):
-        """Guard on the two tests above: `bounded_comparability_notes` must
-        still produce the note it is there to produce, or their absence
-        assertions would pass against a rollup that can no longer report
-        anything."""
-        from abicheck.policy.analysis_assurance._comparability import (
-            bounded_comparability_notes,
-        )
+        """Guard on the two tests above: a bounded comparability mismatch
+        must still reach the assurance notes through the public rollup, or
+        their absence assertions would pass against a rollup that can no
+        longer report anything."""
+        from abicheck.checker import compare
+        from abicheck.policy.analysis_assurance import compute_analysis_assurance
 
-        assert any(
-            "reduced assurance" in n
-            for n in bounded_comparability_notes(
-                {"declaration": "unverified", "symbol": "trusted"}
-            )
-        )
+        old = _snap(tmp_path / "old", _OLD_HEADERS, "1.3")
+        new = _snap(tmp_path / "new", _OLD_HEADERS, "1.4")
+        result = compare(old, new)
+        result.comparability_assurance = {
+            "declaration": "unverified",
+            "symbol": "trusted",
+        }
+        notes = compute_analysis_assurance(result, old, new).notes
+        assert any("reduced assurance" in n for n in notes), notes
 
 
 # ---------------------------------------------------------------------------

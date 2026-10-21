@@ -57,7 +57,16 @@ Next, unranked (the `--no-baseline` one-sided-detector gap, the target-platform 
 
 Each entry's status line says what is still open. A PARTIAL entry's write-up also describes the half that is already fixed; the status line is authoritative where they disagree.
 
+### The ADR-062 extractor fingerprint axis does not cover `abicheck/buildsource/` (2026-10-21)
+**Status (2026-10-21): OPEN.** `EXTRACTOR_GENERATION` is fingerprinted over 146 files, none under `abicheck/buildsource/`, so the L4 and L5 extractors' semantic changes are not recorded by the generation mechanism. Per-TU L4 cache keys still change with any code edit (`abicheck/buildsource/source_replay.py`, `compute_tu_cache_key`, folds in `abicheck_code_fingerprint()`), so stale entries do not hit after a change. Closing this means adding `buildsource/` to the extractor scope in `abicheck/storage/generation_scope.py` and re-recording with `scripts/record_generation_fingerprints.py --bump`.
+
 ### False-clean risk
+
+#### A header-only default template-argument change reads `NO_CHANGE` at L2 on both backends (2026-10-21)
+
+**Status (2026-10-21): OPEN, deliberate — no detector change.** A default template argument changed on a template that nothing public names and nothing exports reads `NO_CHANGE` at L2. CastXML emits no record for an uninstantiated class template; clang has the default but does not record it. A clang-only detector was rejected because it would be a `BREAKING` verdict castxml cannot reproduce.
+
+`false-clean` — A default template argument changed on a header-only template reads `NO_CHANGE` on both backends, and the source-level consequence appears only as an L4 risk. [Full write-up](known-gaps/a-header-only-default-template-argument-change-reads-no-change-at-l2.md)
 
 #### A binary-gate demotion does not state a coverage gap (ADR-084)
 
@@ -83,14 +92,18 @@ Each entry's status line says what is still open. A PARTIAL entry's write-up als
 **Status (updated 2026-10-14): PARTIAL, narrowed.** The header pass now marks each declaration whose body it parsed in full (`header_body` node attribute), and `PUBLIC_API_INTERNAL_DEPENDENCY_ADDED` judges call/reference edges per body seen on both sides. Still open: the edge-query coverage records (`pass_coverage_records`) still give a header pass the blanket `HEADER_INLINE_BODIES` unit, and `CALL_GRAPH_PUBLIC_ENTRY_REACHABILITY_CHANGED` still needs whole-project call coverage on both sides.  
 `false-clean` — Edge queries and the call-reachability finding still decline body-dependent edges from a header-only pass, even for a body seen on both sides. [Full write-up](known-gaps/header-body-coverage-is-not-per-body.md)
 
+#### A virtual call through an out-of-line definition is classified as direct (2026-10-21)
+
+**Status (2026-10-21): OPEN.** `call_graph.py` reads a callee's `virtual` flag from the resolved node, and an out-of-line definition carries no flag, so the call is recorded `direct`/`exact` and no `VIRTUAL_CALL_MAY_DISPATCH_TO` edge is produced. The dispatch-set detector cannot fire for such bases. `false-clean` — The call reads as exact when its targets can change. [Full write-up](known-gaps/virtual-call-through-out-of-line-definition-is-classified-direct.md)
+
 #### Type identity: typedef and tag names keyed by bare spelling
 
 `false-clean` — Two entries on one shape: a typedef's identity is its bare spelling, so a tag-namespace record and a same-spelled typedef collide in the clang parser, and typedef diffing still reads the bare-keyed `AbiSnapshot.typedefs` instead of the qualified twin.
 
 - [`dumper_clang.py`'s `parse_types()` conflates a C/C++ tag-namespace identity with an ordinary-namespace typedef identity that happens to share the same spelling — pre-existing, not introduced by PR #719's own changes, but investigated and confirmed reachable in this pass (Codex review, investigated, not fixed)](known-gaps/dumper-clangpys-parse-types-conflates-a-cc-tag-namespace.md)  
   **Status (re-verified 2026-10-09 at `456989f`): OPEN.** The code moved to extract/headers/clang/records.py:145, where identity = "::".join([*entry.scope, name]) still uses the anon-typedef fallback name. Tag and ordinary namespaces are not distinguished, so `struct Foo; typedef struct{} Foo;` still collides.
-- [Qualified typedef twin exists but diff_types/surface still read bare-keyed AbiSnapshot.typedefs](known-gaps/qualified-typedef-twin-exists-but-diff-typessurface-still-read.md)  
-  **Status (re-verified 2026-10-09 at `456989f`): PARTIAL.** AbiSnapshot.typedefs_qualified now exists (model/snapshot.py:466; dumper_castxml_typedefs.py:105) and type_reachability reads it. diff_types.py typedef diffing and surface.py typedef-following are still not wired to it.
+- [Qualified typedef twin exists but the surface graph identity table still reads bare-keyed AbiSnapshot.typedefs](known-gaps/qualified-typedef-twin-exists-but-diff-typessurface-still-read.md)  
+  **Status (2026-10-21): PARTIAL, narrowed.** Typedef diffing in diff_types.py is wired (prefers `typedefs_qualified`, falls back to the bare map for pre-v25). The public-surface closure is wired by branch `fix/surface-qualified-typedefs`. Still bare-keyed: the surface graph's typedef identities (`model/graph_entity_identity.py`, `compare/surface_graph.py`) and a qualified-spelling tail candidate; the page lists the exact remainder.
 
 #### The castxml L4 source-ABI extractor does not fold the resolved EMULATED compiler's identity into either `fact_set.compiler_version` or the D8 TU cache key — attempted once for the persisted half, and REVERTED after a follow-up review caught it as a real regression, not a fix (Codex review, PR #719, three follow-up rounds)
 

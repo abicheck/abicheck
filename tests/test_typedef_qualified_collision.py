@@ -168,3 +168,76 @@ class TestTypedefQualifiedCollision:
         new = _snap(typedefs={"Size": "unsigned long"}, typedefs_qualified={})
         r = compare(old, new)
         assert ChangeKind.TYPEDEF_BASE_CHANGED in {c.kind for c in r.changes}
+
+
+class TestSameNamedTypedefsInSiblingNamespaces:
+    """Same-spelled typedefs in sibling namespaces are matched by qualified
+    name on the diff path (``typedef_diff_maps`` / ``typedef_index_pair``),
+    so a change to one never leaks onto the other, and a namespace move is a
+    removal of the old qualified name, not a phantom pair.
+    """
+
+    _BARE_OLD = {"Alias": "int"}
+    _QUAL_OLD = {"ns1::Alias": "int", "ns2::Alias": "int"}
+
+    def test_change_in_one_namespace_is_reported_once_against_that_namespace(self):
+        old = _snap(typedefs=self._BARE_OLD, typedefs_qualified=self._QUAL_OLD)
+        new = _snap(
+            typedefs={"Alias": "long"},
+            typedefs_qualified={"ns1::Alias": "int", "ns2::Alias": "long"},
+        )
+        r = compare(old, new)
+        changed = [c for c in r.changes if c.kind == ChangeKind.TYPEDEF_BASE_CHANGED]
+        assert len(changed) == 1
+        assert changed[0].symbol == "Alias"
+        assert "ns2::Alias" in changed[0].description
+        assert "ns1::Alias" not in changed[0].description
+        assert changed[0].old_value == "int"
+        assert changed[0].new_value == "long"
+
+    def test_unchanged_sibling_namespaces_produce_no_typedef_findings(self):
+        old = _snap(typedefs=self._BARE_OLD, typedefs_qualified=self._QUAL_OLD)
+        new = _snap(typedefs=self._BARE_OLD, typedefs_qualified=dict(self._QUAL_OLD))
+        r = compare(old, new)
+        assert not [c for c in r.changes if c.kind.value.startswith("typedef_")]
+
+    def test_moved_typedef_is_one_removal_of_the_old_qualified_name(self):
+        """``ns1::Alias`` moved to ``ns2::Alias`` with the same underlying
+        type: the old qualified name is genuinely gone (one removal, named
+        ``ns1::Alias``), and the new ``ns2::Alias`` is an addition. No
+        base-changed finding and no removal naming ``ns2``."""
+        old = _snap(
+            typedefs={"Alias": "int"},
+            typedefs_qualified={"ns1::Alias": "int", "other": "char"},
+        )
+        new = _snap(
+            typedefs={"Alias": "int"},
+            typedefs_qualified={"ns2::Alias": "int", "other": "char"},
+        )
+        r = compare(old, new)
+        typedef_changes = [c for c in r.changes if c.kind.value.startswith("typedef_")]
+        assert [c.kind for c in typedef_changes] == [ChangeKind.TYPEDEF_REMOVED]
+        assert "ns1::Alias" in typedef_changes[0].description
+        assert "ns2" not in typedef_changes[0].description
+
+    def test_old_snapshot_without_qualified_field_falls_back_to_bare_keys(self):
+        """A stored pre-v25 snapshot carries only the bare ``typedefs`` map.
+        ``typedef_side_trusts_qualified`` is False for it, so the comparison
+        runs on bare keys and still detects a real base change."""
+        old = _snap(typedefs={"Alias": "int"}, typedefs_qualified={})
+        new = _snap(
+            typedefs={"Alias": "long"},
+            typedefs_qualified={"ns2::Alias": "long"},
+        )
+        r = compare(old, new)
+        changed = [c for c in r.changes if c.kind == ChangeKind.TYPEDEF_BASE_CHANGED]
+        assert len(changed) == 1
+        assert changed[0].symbol == "Alias"
+        assert changed[0].old_value == "int"
+        assert changed[0].new_value == "long"
+
+    def test_old_snapshot_without_qualified_field_unchanged_is_clean(self):
+        old = _snap(typedefs={"Alias": "int"}, typedefs_qualified={})
+        new = _snap(typedefs={"Alias": "int"}, typedefs_qualified={"ns2::Alias": "int"})
+        r = compare(old, new)
+        assert not [c for c in r.changes if c.kind.value.startswith("typedef_")]

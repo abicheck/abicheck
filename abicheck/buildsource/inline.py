@@ -69,6 +69,7 @@ from .build_config import (
     load_build_config as load_build_config,
 )
 from .build_evidence import BuildEvidence, comdat_scan_requested, l3_coverage_fields
+from .l5_ast_pass import plan_shared_l5_run
 from .model import (
     CoverageStatus,
     DataLayer,
@@ -82,6 +83,7 @@ from .redaction import DEFAULT_REDACTION
 
 if TYPE_CHECKING:
     from ..model.source_graph import SourceGraphSummary
+    from .l5_ast_run import L5AstRun
     from .source_abi import SourceAbiSurface
     from .source_extractors import SourceAbiExtractor
 
@@ -240,6 +242,14 @@ def collect_inline_pack(
 
         surface = None
         call_graph_units: list[Any] | None = None
+        l5_run: L5AstRun | None = None
+        # Fold a call graph (DECL_CALLS_DECL edges) into the L5 graph whenever L4 also
+        # ran — i.e. a semantic source mode (source-*/graph-summary/graph-full), not
+        # the structural-only graph-build (L3+L5, no L4). This is what makes the
+        # decl-dependency cross-checks (public_to_internal_dependency, ADR-035 D4)
+        # reachable from `scan --source-method s5`/`--depth graph`; best-effort and
+        # gated on clang++ availability (ADR-035 D4 reviewer wiring request).
+        with_call_graph = "L5" in layers and "L4" in layers
         if "L4" in layers:
             # A 'changed' scope with no PR diff would select zero TUs and embed an
             # empty L4 surface (Codex review), so fall back to a non-empty scope that
@@ -262,7 +272,7 @@ def collect_inline_pack(
             if l4_cache_dir is None:
                 env_dir = os.environ.get("ABICHECK_L4_CACHE_DIR")
                 l4_cache_dir = Path(env_dir) if env_dir else None
-            surface, l4_selected_units = _run_inline_source_abi(
+            surface, l4_selected_units, l5_run = _run_inline_source_abi(
                 sources,
                 merged,
                 extractors,
@@ -273,6 +283,7 @@ def collect_inline_pack(
                 source_abi_cache_dir=l4_cache_dir,
                 changed_paths=changed_paths,
                 public_header_roots=public_header_roots,
+                l5_wanted=with_call_graph,
             )
             # Gap-1: on an unseeded headers-only replay, scope the L5 call-graph
             # pass to the *same* TU set L4 used instead of the whole compile DB.
@@ -289,13 +300,6 @@ def collect_inline_pack(
                 and l4_selected_units
             ):
                 call_graph_units = l4_selected_units
-        # Fold a call graph (DECL_CALLS_DECL edges) into the L5 graph whenever L4 also
-        # ran — i.e. a semantic source mode (source-*/graph-summary/graph-full), not
-        # the structural-only graph-build (L3+L5, no L4). This is what makes the
-        # decl-dependency cross-checks (public_to_internal_dependency, ADR-035 D4)
-        # reachable from `scan --source-method s5`/`--depth graph`; best-effort and
-        # gated on clang++ availability (ADR-035 D4 reviewer wiring request).
-        with_call_graph = "L5" in layers and "L4" in layers
         graph = (
             _build_inline_graph(
                 merged,
@@ -305,6 +309,7 @@ def collect_inline_pack(
                 extractors=extractors,
                 changed_paths=changed_paths,
                 call_graph_units=call_graph_units,
+                prepared_l5=l5_run,
             )
             if "L5" in layers
             else None
@@ -996,12 +1001,12 @@ def _run_inline_source_abi(
     source_abi_cache_dir: Path | None = None,
     changed_paths: tuple[str, ...] = (),
     public_header_roots: tuple[str, ...] = (),
-) -> tuple[SourceAbiSurface | None, list[Any]]:
-    """Run L4 replay over a source tree; ``(None, [])`` when no source tree given.
+    l5_wanted: bool = False,
+) -> tuple[SourceAbiSurface | None, list[Any], L5AstRun | None]:
+    """Run L4 replay over a source tree; ``(None, [], None)`` when no source tree given.
 
-    Returns ``(surface, selected_units)`` — the L4 surface plus the exact
-    compile-unit set the replay scope selected, so the L5 call-graph pass can match
-    that scope on an unseeded run (Gap-1 fix) instead of re-parsing all TUs.
+    Returns ``(surface, selected_units, l5_run)``: the L4 surface, the scope's
+    compile units, and the L5 run its dump served (``None`` unless *l5_wanted*).
 
     Requires L3 compile units to replay against (ADR-030 D5). A missing source
     extractor (clang/castxml) yields a partial surface and a clear note rather
@@ -1019,7 +1024,7 @@ def _run_inline_source_abi(
     backends had (Codex review).
     """
     if sources is None:
-        return None, []
+        return None, [], None
     from .build_cache import SOURCE_ABI_DISK_CACHE
     from .source_abi import SourceAbiSurface
     from .source_replay import (
@@ -1041,7 +1046,7 @@ def _run_inline_source_abi(
                 ),
             )
         )
-        return None, []
+        return None, [], None
 
     if not merged.compile_units:
         # No L3 to replay against: source ABI replay needs compile commands to
@@ -1058,7 +1063,7 @@ def _run_inline_source_abi(
                 ),
             )
         )
-        return None, []
+        return None, [], None
 
     impl, tool_name = _make_source_extractor(extractor, clang_bin)
     if not impl.available():
@@ -1069,7 +1074,7 @@ def _run_inline_source_abi(
                 detail=f"{tool_name} not found in PATH; source-only checks disabled",
             )
         )
-        return SourceAbiSurface(), []
+        return SourceAbiSurface(), [], None
 
     roots = sorted(set(public_header_roots_for(merged)) | set(public_header_roots))
     include_map = _include_map_for_replay(
@@ -1103,6 +1108,9 @@ def _run_inline_source_abi(
         if source_abi_cache_dir and SOURCE_ABI_DISK_CACHE.permits()
         else None
     )
+    l5_run = plan_shared_l5_run(
+        impl, l5_wanted, merged, clang_bin, changed_paths, selected_units, scope
+    )
     started = time.monotonic()
     surface, diagnostics = run_source_replay(
         merged,
@@ -1113,6 +1121,7 @@ def _run_inline_source_abi(
         exported_symbols=exported_symbols,
         cache=cache,
         include_map=include_map,
+        l5_run=l5_run,
     )
     elapsed = time.monotonic() - started
     if surface is not None:
@@ -1150,7 +1159,7 @@ def _run_inline_source_abi(
             ),
         )
     )
-    return surface, selected_units
+    return surface, selected_units, l5_run
 
 
 #: How many failed TU names ride the coverage record; the exact count stays in
@@ -1240,6 +1249,7 @@ def _build_inline_graph(
     extractors: list[ExtractorRecord] | None = None,
     changed_paths: tuple[str, ...] = (),
     call_graph_units: list[Any] | None = None,
+    prepared_l5: L5AstRun | None = None,
 ) -> SourceGraphSummary | None:
     """Fold L3 + optional L4 into the compact L5 source graph (always when L3).
 
@@ -1268,18 +1278,7 @@ def _build_inline_graph(
     if with_call_graph:
         from .l5_ast_pass import fold_semantic_graphs
 
-        # NOTE: this always runs the replay passes even when `surface`'s
-        # source_edges are already confirmed complete (build_source_graph()
-        # above already folded those in via fold_source_edges) -- an earlier
-        # revision skipped the replay in that case, but the raw source_edges
-        # wire format carries only bare endpoint identities, not the
-        # dst_file/project-file provenance fold_call_graph/fold_type_graph
-        # attach via `project_files` (`defined_in_project`). Without that
-        # provenance, `crosscheck.public_to_internal_dependency` cannot
-        # classify an unannotated callee/referenced node as internal, so a
-        # public-to-internal dependency addition would silently go
-        # undetected (Codex review). The replay stays unconditional until
-        # source_edges carries equivalent provenance end-to-end.
+        # Replays even when source_edges are complete; see fold_semantic_graphs.
         fold_semantic_graphs(
             graph,
             merged,
@@ -1287,6 +1286,7 @@ def _build_inline_graph(
             extractors,
             changed_paths,
             scoped_units=call_graph_units,
+            run=prepared_l5,
         )
     from .inline_graph_fold import fold_archive_graph
 
