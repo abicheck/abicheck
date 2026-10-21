@@ -35,7 +35,17 @@ from .report.kind_rollup import roll_up_large_kinds
 from .report.not_evaluated_section import (
     compute_not_evaluated as compute_not_evaluated,
 )
-from .report.policy_facts import kind_sets_for, release_recommendation_for, summary_for
+from .report.policy_facts import (
+    ENVIRONMENT_DRIFT_KINDS,
+    classification_for,
+    evidence_status_of,
+    gate_exit_code_for,
+    impact_text_for,
+    kind_sets_for,
+    reclassify_rules_in_effect,
+    release_recommendation_for,
+    summary_for,
+)
 from .report.view import (
     apply_show_only,
     finding_id,
@@ -62,7 +72,6 @@ from .impact.use_case_impact import use_cases_by_finding_for as use_cases_by_fin
 from .model.change_catalog.kinds import HasKind
 from .model.contract_finding_relevance import is_evaluated
 from .model.evidence_status import EvidenceStatus
-from .policy.classification import evidence_status_for_result, impact_for
 from .report import (
     contract_conflicts_markdown as _ccm,
     render_markdown as _rmd,
@@ -146,15 +155,7 @@ def to_stat(
     if (_dig := getattr(result, "env_matrix_source_sha256", None)) is not None:
         d["env_matrix_source_sha256"] = _dig
     if severity_config is not None:
-        from .policy.severity import compute_exit_code
-
-        exit_code = compute_exit_code(
-            result.changes,
-            severity_config,
-            policy=result.policy,
-            kind_sets=kind_sets_for(result),
-            policy_file=result.policy_file,
-        )
+        exit_code = gate_exit_code_for(result, severity_config)
         d["severity"] = {"exit_code": exit_code}
     return render_stat_document(ReportDocument.from_mapping(d))
 
@@ -487,9 +488,9 @@ def compute_root_cause_section(
         evidence_status = (
             EvidenceStatus.CONSUMER_PROVEN
             if finding_id(c) in scoped_only_ids
-            else evidence_status_for_result(c, evidence_tiers)
+            else evidence_status_of(c, evidence_tiers)
         )
-        return impact_for(kind, evidence_status)
+        return impact_text_for(kind, evidence_status)
 
     for key, root_display, group_changes in groups:
         order.append(key)
@@ -979,8 +980,6 @@ def compute_environment_drift(
     a source change or by a rebuild?" — without duplicating the per-finding
     details already listed in the severity sections above.
     """
-    from .report_classifications import ENVIRONMENT_DRIFT_KINDS
-
     drift = [c for c in changes if c.kind.value in ENVIRONMENT_DRIFT_KINDS]
     if not drift:
         return None
@@ -1029,16 +1028,7 @@ def _severity_merge_effect(
     gate SARIF's/HTML's gate blocks do, rather than a second, independent
     ``compute_exit_code`` call that happens to agree.
     """
-    from .policy.severity import compute_exit_code
-
-    eff_sets = kind_sets_for(result)
-    exit_code = compute_exit_code(
-        result.changes,
-        severity_config,
-        policy=result.policy,
-        kind_sets=eff_sets,
-        policy_file=result.policy_file,
-    )
+    exit_code = gate_exit_code_for(result, severity_config)
     return _merge_effect_from_exit_code(exit_code), exit_code
 
 
@@ -1210,9 +1200,7 @@ def compute_headline_table(
     count that reconciles them rather than an apparent contradiction. The
     row is absent for every run that did not opt in, where it is always 0.
     """
-    from .policy.evaluate import evaluate
-
-    classified = evaluate(result)
+    classified = classification_for(result)
     return _rmd.HeadlineTable(
         library=result.library,
         old_version=result.old_version,
@@ -1308,9 +1296,7 @@ def compute_policy_section(
         # through active_reclassify_rules so an expired rule -- which
         # ReclassifyRule.matches() would already refuse to apply -- isn't
         # disclosed as though it were still in effect.
-        from .policy.reclassify import active_reclassify_rules
-
-        active = active_reclassify_rules(result.policy_file.reclassify, today)
+        active = reclassify_rules_in_effect(result.policy_file.reclassify, today)
         if active:
             # CodeRabbit review: code-span-wrap describe()'s raw selector
             # text (e.g. `_ZN6oneapi3dal.*`) -- unescaped, `_`/`*` read as
