@@ -28,6 +28,12 @@ jobs:
           lang: c
           build-config: .abicheck.yml
           output-file: libzpack.abicheck.json
-      - run: gh release upload "$TAG" libzpack.abicheck.json --clobber
+      - name: Attach snapshot to the release (write-once)
+        run: |
+          if gh release view "$TAG" --json assets -q '.assets[].name' | grep -Fxq libzpack.abicheck.json; then
+            echo "::error::libzpack.abicheck.json already exists on $TAG; baselines are write-once" >&2
+            exit 1
+          fi
+          gh release upload "$TAG" libzpack.abicheck.json
         env:
           GH_TOKEN: ${{ github.token }}

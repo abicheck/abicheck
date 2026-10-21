@@ -132,6 +132,7 @@ from typing import Any, TypeVar, cast
 from ..model.change_catalog.kinds import ChangeKind, HasKind
 from ..model.execution_cache import MemoryCache, request_key
 from ..model.policy_file_protocol import ReclassifyRuleProtocol
+from .binary_gate_marker import is_binary_gate_demoted
 from .classification import Verdict, effective_category, policy_kind_sets
 from .release_outcome import compatibility_rank
 from .selectors import SelectorSet
@@ -189,6 +190,8 @@ RECLASSIFY_KNOWN_KEYS: frozenset[str] = frozenset(
         "reason",
         "label",
         "expires",
+        #: P2: optional, file-unique user identifier (duplicate = PolicyError).
+        "id",
     }
 )
 
@@ -250,6 +253,9 @@ class ReclassifyRule:
     #: `expires` (Codex review, fresh evidence: this rule form otherwise
     #: fell out of sync with `Suppression`'s selector grammar).
     binding: str | None = None
+    #: P2: optional user-chosen identifier, unique within its document. The
+    #: audit's ``rule_id`` when set; otherwise the canonical rule identity.
+    id: str | None = None
     #: Built at construction time and reused for every :meth:`matches` call
     #: rather than re-validated/re-compiled per call — mirrors how
     #: :class:`~abicheck.policy.suppression.rules.Suppression` itself eagerly compiles its
@@ -403,6 +409,8 @@ class ReclassifyRule:
             out["reason"] = self.reason
         if self.label:
             out["label"] = self.label
+        if self.id is not None:
+            out["id"] = self.id
         if self.expires is not None:
             out["expires"] = self.expires.isoformat()
         return out
@@ -600,7 +608,8 @@ def effective_verdict_for_change(
     )
 
     eff = getattr(change, "effective_verdict", None)
-    if isinstance(eff, Verdict):
+    gated = is_binary_gate_demoted(change)
+    if isinstance(eff, Verdict) and not gated:
         raw_v = _raw_verdict_for_kind(kind, base_sets)
         if _has_frozen_namespace_violation(change) and compatibility_rank(
             eff
@@ -608,6 +617,29 @@ def effective_verdict_for_change(
             return raw_v
         return eff
 
+    # ADR-084: a binary-gate demotion is a cap, not an override. The policy
+    # decides the verdict first (a named policy's relaxation or a policy-file
+    # escalation still applies), and the gate only lowers an API_BREAK that
+    # the policy left standing.
+    verdict = _policy_chain_verdict(change, base_sets, policy_file, today)
+    if gated and verdict is Verdict.API_BREAK:
+        return Verdict.COMPATIBLE_WITH_RISK
+    return verdict
+
+
+def _policy_chain_verdict(
+    change: HasKind,
+    base_sets: KindSets,
+    policy_file: object | None,
+    today: date | None,
+) -> Verdict:
+    """The policy's own verdict for *change*, ignoring any per-finding override.
+
+    The reclassify rules, then the kind-global overrides, then the base
+    policy's kind sets -- the order :func:`effective_verdict_for_change`
+    has always applied after its per-finding override check.
+    """
+    kind = change.kind
     # A: selector-scoped reclassification (the rules above) -- consulted
     # ahead of the kind-global `overrides` below, mirroring
     # PolicyFile._resolve_change_verdict's own priority order exactly, so

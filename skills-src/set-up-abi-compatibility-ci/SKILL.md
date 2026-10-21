@@ -3,7 +3,7 @@ name: set-up-abi-compatibility-ci
 description: Set up automated ABI compatibility checking for a C/C++ shared library in a GitHub repository's GitHub Actions CI. Use when asked to add, enable, integrate, or configure ABI checking or a breaking-change gate in GitHub Actions, to onboard a native library project onto continuous compatibility checking, to make pull requests fail when they break the library's ABI, or to repair an existing ABI-checking workflow that never catches anything, always fails, or compares against the wrong baseline. Inspects the repository's build, headers, libraries, and release process, chooses a baseline strategy, and writes a working, pinned, least-privilege workflow with a staged rollout.
 license: Apache-2.0
 metadata:
-  abicheck-version-range: ">=0.6.0,<0.7.0"
+  abicheck-version-range: ">=0.6.0,<0.8.0"
   layer: A
   source: skills-src/set-up-abi-compatibility-ci/SKILL.md
 ---
@@ -62,6 +62,7 @@ the evaluated scope.
 | Situation | Strategy | Read |
 |---|---|---|
 | Tagged/GitHub Releases, compatibility promised with what shipped | **Release snapshot**: release workflow dumps `<lib>.abicheck.json`, attaches it; PRs use `abi-baseline: latest-release` | [template A](references/template-release-baseline.md) |
+| Releases, several libraries or contract profiles already built per profile | **Baseline set**: the reusable `publish-baseline.yml` publishes one archive per profile; PRs use `baseline-profile` + `baseline-target` | [template A, baseline-set variant](references/template-release-baseline.md#baseline-set-variant-one-archive-per-contract-profile) |
 | No releases, or a zero-infrastructure start | **Merge-base build**: PR job also builds the base commit; each side with its own headers | [template B](references/template-merge-base.md) |
 | Snapshot already committed / wanted | **Committed snapshot** + refresh rule | [template C](references/template-committed-snapshot.md) |
 
@@ -107,6 +108,9 @@ decides. Both sides must be built identically
   pinned runner image (`ubuntu-24.04`).
 - Exact library path (no globs), public header directory, correct `lang`.
 - Snapshot names end in `.abicheck.json`, one per library.
+- Release baselines are write-once: the upload never passes an overwrite flag, and no
+  workflow deletes an existing asset. Re-baselining is a deliberate manual
+  asset deletion, a new tag, or a new baseline generation.
 - `concurrency:` cancelling superseded runs; no top-level `paths:` filter on
   a check that will become required.
 - Its own file (`abi-check.yml`, plus `abi-baseline.yml` for strategy A).

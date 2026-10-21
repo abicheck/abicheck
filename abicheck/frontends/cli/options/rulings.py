@@ -323,6 +323,13 @@ COMPARE_OPTION_RULINGS: dict[str, OptionRuling] = {
         "document itself is a stable project artifact, because which "
         "document applies to this invocation is the per-run choice."
     ),
+    "--acknowledgments": _keep(
+        "Names this run's acknowledgment records (ADR-067 D5) -- the same "
+        "document-operand class as --suppress and --policy: which reviewed "
+        "records apply is a per-run choice. It is an explicit operator input, "
+        "so it is trusted to supply records, which a discovered .abicheck.yml "
+        "is not."
+    ),
     "--suppress": _keep(
         "Names this run's suppression document -- the same document-operand "
         "class as --policy, and the supported route for a finding a user "

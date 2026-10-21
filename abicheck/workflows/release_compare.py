@@ -126,6 +126,7 @@ class ReleaseCompareOptions:
     exclude_headers: tuple[str, ...] = ()
     acknowledgments_path: Path | None = None
     acknowledgment_unacknowledged_additions: str | None = None
+    acknowledgment_breaks: str | None = None
     #: ADR-065 D1/S3: the support-promise contract (``off`` emits nothing).
     support_promise: str = "off"
     manifest_path: Path | None = None
@@ -355,6 +356,7 @@ def execute_release_compare(
                 exclude_headers=o.exclude_headers,
                 acknowledgments_path=o.acknowledgments_path,
                 acknowledgment_unacknowledged_additions=o.acknowledgment_unacknowledged_additions,
+                acknowledgment_breaks=o.acknowledgment_breaks,
             ),
             old_map=old_map,
             new_map=new_map,

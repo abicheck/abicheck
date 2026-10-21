@@ -129,6 +129,7 @@ def test_a_report_already_on_the_current_schema_is_left_alone() -> None:
         "contract_coverage_contribution": 0,
         "analysis_assurance_contribution": 0,
         "crosscheck_promotion_contribution": 0,
+        "unused_rules_contribution": 0,
         **dict.fromkeys(_ADR_064_EXIT_FIELDS, 0),
     }
     report = {

@@ -1600,6 +1600,21 @@ PYEOF
 # caller bug, not a user input to accommodate -- that case still fails
 # loud rather than silently producing a two---config command line.
 add_release_topology_config_flags() {
+  # $1 (optional): "scalar" for the single-pair and audit-only compare shapes.
+  # Those have no directory/package fan-out, so the only key that applies to
+  # them is assurance.require_complete (analysis-assurance-complete); the
+  # release-only inputs are neither read nor written for them. Omitted (or any
+  # other value) is the directory/package release shape, which writes every
+  # key this function knows about. Both shapes overlay the same --config file,
+  # so the assurance override reaches the CLI whichever branch the operand took.
+  local _scope="${1:-release}"
+  local _dso_only="" _include_private_dso="" _fail_on_removed_library=""
+  if [[ "$_scope" != "scalar" ]]; then
+    _dso_only="${INPUT_DSO_ONLY:-}"
+    _include_private_dso="${INPUT_INCLUDE_PRIVATE_DSO:-}"
+    _fail_on_removed_library="${INPUT_FAIL_ON_REMOVED_LIBRARY:-}"
+  fi
+  local _analysis_assurance_complete="${INPUT_ANALYSIS_ASSURANCE_COMPLETE:-}"
   # dso-only/include-private-dso/fail-on-removed-library deliberately carry
   # no declared default in action.yml (Codex review, fresh evidence): an
   # explicit `false` from the workflow must be able to override a
@@ -1611,9 +1626,10 @@ add_release_topology_config_flags() {
   # unreachable. So this guard -- and the overlay-generation below -- keys
   # off whether each input was actually GIVEN (non-empty string) at all,
   # never off its truthiness.
-  if [[ -z "${INPUT_DSO_ONLY:-}" \
-        && -z "${INPUT_INCLUDE_PRIVATE_DSO:-}" \
-        && -z "${INPUT_FAIL_ON_REMOVED_LIBRARY:-}" ]]; then
+  if [[ -z "$_dso_only" \
+        && -z "$_include_private_dso" \
+        && -z "$_fail_on_removed_library" \
+        && -z "$_analysis_assurance_complete" ]]; then
     return 0
   fi
   local _config_idx=-1 _i
@@ -1689,9 +1705,10 @@ add_release_topology_config_flags() {
   fi
   local _release_overlay_json
   _release_overlay_json=$(cd "$_PY_SAFE_DIR" \
-  && ABICHECK_RELEASE_DSO_ONLY="${INPUT_DSO_ONLY:-}" \
-  ABICHECK_RELEASE_INCLUDE_PRIVATE_DSO="${INPUT_INCLUDE_PRIVATE_DSO:-}" \
-  ABICHECK_GATE_FAIL_ON_REMOVED_LIBRARY="${INPUT_FAIL_ON_REMOVED_LIBRARY:-}" \
+  && ABICHECK_RELEASE_DSO_ONLY="$_dso_only" \
+  ABICHECK_RELEASE_INCLUDE_PRIVATE_DSO="$_include_private_dso" \
+  ABICHECK_GATE_FAIL_ON_REMOVED_LIBRARY="$_fail_on_removed_library" \
+  ABICHECK_ASSURANCE_REQUIRE_COMPLETE="$_analysis_assurance_complete" \
   PYTHONPATH= "$_PY_BIN" - <<'PYEOF'
 # Synthesizes a minimal .abicheck.yml `release:`/`gate:` block (as JSON, a
 # valid YAML subset abicheck's own yaml.safe_load parses identically) from
@@ -1727,6 +1744,14 @@ if release_blk:
 _fail_on_removed = os.environ.get("ABICHECK_GATE_FAIL_ON_REMOVED_LIBRARY", "")
 if _fail_on_removed:
     doc["gate"] = {"fail_on_removed_library": _fail_on_removed == "true"}
+# analysis-assurance-complete: the tri-state per-job override of
+# assurance.require_complete. Same rule as every key above: written only when
+# given, so "omitted" leaves the base config's own value standing, and an
+# explicit "false" overrides a discovered "true" (the one direction the old
+# one-way input could never reach).
+_assurance_complete = os.environ.get("ABICHECK_ASSURANCE_REQUIRE_COMPLETE", "")
+if _assurance_complete:
+    doc["assurance"] = {"require_complete": _assurance_complete == "true"}
 json.dump(doc, sys.stdout)
 PYEOF
   )
@@ -2913,6 +2938,10 @@ BASELINE_SOURCE_ASSET=""
 BASELINE_SET_PROJECT_REF=""
 BASELINE_SET_GENERATION=""
 BASELINE_SET_PROFILE=""
+# baseline-set only: sha256:<hex> of the archive bytes that were extracted, and
+# whether expected-archive-digest was set and matched them.
+BASELINE_ARCHIVE_DIGEST=""
+BASELINE_ARCHIVE_VERIFIED=""
 
 # A manifest value is publisher-controlled text. A newline in it would end
 # its $GITHUB_OUTPUT record early and smuggle in extra `name=value` outputs
@@ -2942,6 +2971,8 @@ _emit_baseline_source_outputs() {
   echo "baseline-project-ref=$(_baseline_source_field "${BASELINE_SET_PROJECT_REF:-}")"
   echo "baseline-generation=$(_baseline_source_field "${BASELINE_SET_GENERATION:-}")"
   echo "baseline-profile=$(_baseline_source_field "${BASELINE_SET_PROFILE:-}")"
+  echo "baseline-archive-digest=$(_baseline_source_field "${BASELINE_ARCHIVE_DIGEST:-}")"
+  echo "baseline-archive-verified=$(_baseline_source_field "${BASELINE_ARCHIVE_VERIFIED:-}")"
 }
 
 # "### Baseline source" step-summary block. Prints nothing when this run
@@ -2960,6 +2991,7 @@ _write_baseline_source_summary() {
     echo "| Project ref | \`$(_baseline_source_cell "$BASELINE_SET_PROJECT_REF")\` |"
     echo "| Baseline generation | \`$(_baseline_source_cell "${BASELINE_SET_GENERATION:-none}")\` |"
     echo "| Profile | \`$(_baseline_source_cell "$BASELINE_SET_PROFILE")\` |"
+    echo "| Archive digest | \`$(_baseline_source_cell "$BASELINE_ARCHIVE_DIGEST")\` ($(if [[ "$BASELINE_ARCHIVE_VERIFIED" == "true" ]]; then echo "verified against expected-archive-digest"; else echo "not pinned"; fi)) |"
   fi
 }
 
@@ -3213,67 +3245,44 @@ for asset in data.get("assets") or []:
 
   local extracted_dir="$BASELINE_DIR/baseline-set-extracted"
   mkdir -p "$extracted_dir"
-  # Delegates to abicheck.extract.packages.TarExtractor's own safe extraction (member
-  # validation: rejects path traversal, symlink escapes, device/FIFO
-  # entries) -- the same extractor actions/resolve-baseline/run.sh uses for
-  # an identically-shaped baseline-set archive, rather than reimplementing
-  # extraction safety here.
+  # The archive's encoding comes from the resolved asset name's own suffix --
+  # the same mapping actions/resolve-baseline and actions/stage-baseline use.
+  local archive_format=""
   case "$asset_name" in
-    *.tar.zst)
-      (cd "$_PY_SAFE_DIR" && PYTHONPATH= "$_PY_BIN" -c '
-import sys
-from pathlib import Path
-from abicheck.extract.packages import TarExtractor
-
-TarExtractor._safe_extract_zst_tar(Path(sys.argv[1]), Path(sys.argv[2]))
-' "$archive_path" "$extracted_dir") \
-        || { _baseline_unavailable "failed to extract baseline-set archive '$asset_name' (.tar.zst) -- it is truncated or corrupted, or this runner has neither a 'zstd' command-line tool nor the Python 'zstandard' package available."; return 1; }
-      ;;
-    *.tar.gz | *.tgz | *.tar)
-      (cd "$_PY_SAFE_DIR" && PYTHONPATH= "$_PY_BIN" -c '
-import sys
-from pathlib import Path
-from abicheck.extract.packages import TarExtractor
-
-TarExtractor._safe_extract(Path(sys.argv[1]), Path(sys.argv[2]))
-' "$archive_path" "$extracted_dir") \
-        || { _baseline_unavailable "failed to extract baseline-set archive '$asset_name' -- it is truncated or corrupted, or contains a disallowed member (path traversal, a symlink escaping the extraction root, or a device/FIFO entry)."; return 1; }
-      ;;
+    *.tar.zst) archive_format="tar.zst" ;;
+    *.tar.gz | *.tgz) archive_format="tar.gz" ;;
+    *.tar) archive_format="tar" ;;
     *)
       _baseline_unavailable "baseline-set archive '$asset_name' is not a recognized archive format (.tar.zst/.tar.gz/.tgz/.tar)."
       return 1
       ;;
   esac
-
-  # Reject any symlink the archive planted -- TarExtractor's own member
-  # validation only rejects a symlink escaping the extraction root, not one
-  # that stays inside it, but actions/resolve-baseline/run.sh (the canonical
-  # baseline-set consumer) rejects ANY symlink at all, since a baseline-set
-  # has no legitimate reason to contain one. Without this, the same archive
-  # could be silently accepted here (root Action fallback) while
-  # check-target/resolve-baseline would reject it as ambiguous -- two
-  # consumers of the identical unified baseline-set protocol disagreeing on
-  # whether the same archive is usable (Codex review). Command substitution,
-  # not piped into `grep -q`, for the same SIGPIPE/pipefail-misreport reason
-  # documented at resolve-baseline/run.sh's own identical check.
-  _symlinks=$(find "$extracted_dir" -type l)
-  if [[ -n "$_symlinks" ]]; then
-    _baseline_unavailable "baseline-set archive '$asset_name' contains a symlink, which is not supported -- baseline-set archives must contain only plain files/directories."
+  # Verify, extract and symlink-check in one owner, abicheck/buildsource/
+  # baseline_archive.py (abicheck/workflows/), which actions/resolve-baseline also calls. The digest is
+  # checked against the downloaded bytes BEFORE a single member is written, so a
+  # pinned archive that was altered or repacked never reaches extraction. A
+  # digest mismatch (exit 3) and a usage error (exit 64) are fatal even under
+  # --dry-run: a dry run that carried on would compare against no baseline for a
+  # release whose archive changed. Other failures keep the dry-run-tolerant path.
+  local prepare_args=(--archive "$archive_path" --dest "$extracted_dir" --format "$archive_format")
+  if [[ -n "${INPUT_EXPECTED_ARCHIVE_DIGEST:-}" ]]; then
+    prepare_args+=(--expected-digest "$INPUT_EXPECTED_ARCHIVE_DIGEST")
+  fi
+  local prepare_output="" prepare_exit=0 prepare_message=""
+  prepare_output=$(cd "$_PY_SAFE_DIR" && "$_PY_BIN" -I -m abicheck.frontends.action.cli prepare-baseline-set "${prepare_args[@]}") || prepare_exit=$?
+  prepare_message=$(printf '%s\n' "$prepare_output" | sed -n 's/^message=//p')
+  if [[ $prepare_exit -eq 3 || $prepare_exit -eq 64 ]]; then
+    _error_annotation "${prepare_message:-baseline-set archive '$asset_name' was refused.}"
+    exit 1
+  fi
+  if [[ $prepare_exit -ne 0 ]]; then
+    _baseline_unavailable "${prepare_message:-failed to extract baseline-set archive '$asset_name' (exit $prepare_exit).}"
     return 1
   fi
-
-  # An archive may contain one nested directory (the profile-named dir it
-  # was built from) rather than manifest.json at its root -- mirrors
-  # actions/resolve-baseline/run.sh's identical single-subdirectory descent.
-  local manifest_root="$extracted_dir"
-  if [[ ! -f "$manifest_root/manifest.json" ]]; then
-    local subdirs=()
-    while IFS= read -r -d '' d; do subdirs+=("$d"); done \
-      < <(find "$extracted_dir" -mindepth 1 -maxdepth 1 -type d -print0)
-    if [[ ${#subdirs[@]} -eq 1 && -f "${subdirs[0]}/manifest.json" ]]; then
-      manifest_root="${subdirs[0]}"
-    fi
-  fi
+  local manifest_root prepared_archive_digest prepared_archive_verified
+  manifest_root=$(printf '%s\n' "$prepare_output" | sed -n 's/^manifest-root=//p')
+  prepared_archive_digest=$(printf '%s\n' "$prepare_output" | sed -n 's/^archive-digest=//p')
+  prepared_archive_verified=$(printf '%s\n' "$prepare_output" | sed -n 's/^verified=//p')
 
   # Expected manifest project_ref, from baseline-project-ref. Resolved before
   # the python call so an unresolvable expectation fails as its own typed
@@ -3339,6 +3348,8 @@ print("profile=" + _one_line(manifest.get("profile")))
     BASELINE_FILE="$resolve_snapshot"
     BASELINE_SOURCE="baseline-set"
     BASELINE_SOURCE_ASSET="$asset_name"
+    BASELINE_ARCHIVE_DIGEST="$prepared_archive_digest"
+    BASELINE_ARCHIVE_VERIFIED="$prepared_archive_verified"
     BASELINE_SET_PROJECT_REF=$(printf '%s\n' "$resolve_output" | sed -n 's/^project_ref=//p')
     BASELINE_SET_GENERATION=$(printf '%s\n' "$resolve_output" | sed -n 's/^generation=//p')
     BASELINE_SET_PROFILE=$(printf '%s\n' "$resolve_output" | sed -n 's/^profile=//p')
@@ -3388,6 +3399,28 @@ fi
 if [[ ( -n "${INPUT_BASELINE_PROFILE:-}" || -n "${INPUT_BASELINE_TARGET:-}" ) && -z "$ABI_BASELINE" ]]; then
   echo "::error::baseline-profile/baseline-target are set but abi-baseline is not -- the release-contract baseline-set fallback is only reached while resolving abi-baseline (a release tag or 'latest-release'), so without it these inputs can never trigger a fetch."
   exit 1
+fi
+# A file path in abi-baseline is used directly and never consults a
+# release-contract baseline-set archive, so a profile/target selection beside it
+# has nothing to select from. The fetch block below would take its direct-path
+# branch and drop the selection without a word, so refuse here (no silent
+# discard). Mirrors action/validate-inputs.sh's identical check.
+if [[ -n "$ABI_BASELINE" && -f "$ABI_BASELINE" && ( -n "${INPUT_BASELINE_PROFILE:-}" || -n "${INPUT_BASELINE_TARGET:-}" ) ]]; then
+  _error_annotation "abi-baseline is a file path ('$ABI_BASELINE'), which is used directly, but baseline-profile/baseline-target are also set. Those select a release-contract baseline-set archive that a file path never consults, so the selection would be silently discarded. Pass the file path alone, or unset baseline-profile and baseline-target to fetch from the release."
+  exit 1
+fi
+# expected-archive-digest pins a release-contract baseline-set archive, which only
+# baseline-profile and baseline-target select. Without that selection there is
+# no archive to verify, so the pin is refused rather than silently unused.
+if [[ -n "${INPUT_EXPECTED_ARCHIVE_DIGEST:-}" ]]; then
+  if ! [[ "$INPUT_EXPECTED_ARCHIVE_DIGEST" =~ ^([Ss][Hh][Aa]256:)?[0-9A-Fa-f]{64}$ ]]; then
+    _error_annotation "expected-archive-digest '$INPUT_EXPECTED_ARCHIVE_DIGEST' is not a SHA-256 digest. Use 'sha256:<64 hex characters>' or the 64 hex characters alone."
+    exit 1
+  fi
+  if [[ -z "${INPUT_BASELINE_PROFILE:-}" || -z "${INPUT_BASELINE_TARGET:-}" ]]; then
+    _error_annotation "expected-archive-digest pins a release-contract baseline-set archive, which only baseline-profile and baseline-target select. Set both, or unset expected-archive-digest."
+    exit 1
+  fi
 fi
 # Same "entirely digits, or empty" check actions/baseline/run.sh applies to
 # its own baseline-generation input -- [0-9]* alone is not anchored to
@@ -3956,6 +3989,10 @@ elif [[ "$MODE" == "compare" ]]; then
   # exactly as the removed `--policy-file` flag did.
   add_single_flag "--policy" "${INPUT_POLICY_FILE:-${INPUT_POLICY:-}}"
   add_single_flag "--suppress" "${INPUT_SUPPRESS:-}"
+  # ADR-067 D5: this run's acknowledgment records. Operator-named, like
+  # `suppress`, so the CLI trusts it to supply records (a discovered
+  # .abicheck.yml is not; see add_compile_context_flags' overlay strip).
+  add_single_flag "--acknowledgments" "${INPUT_ACKNOWLEDGMENTS:-}"
 
   # Severity configuration. Audit-only: --severity-preset is ALSO the
   # ADR-068 2026-09-10 amendment's audit-gate opt-in (`compare --no-baseline`
@@ -4024,6 +4061,13 @@ elif [[ "$MODE" == "compare" ]]; then
     # (one-comparison-product.md §4.1, ADR-068 D5) -- extraction cleanup is
     # now unconditional, so there is no Action input for it any more.
     add_release_topology_config_flags
+  else
+    # Single-pair and audit-only compare: no fan-out, so the only overlay key
+    # that applies is assurance.require_complete (see the function's own
+    # scope comment). Previously only the directory/package shape reached the
+    # overlay at all, which left a job no way to override the config on a
+    # single-library run.
+    add_release_topology_config_flags scalar
   fi
 
 elif [[ "$MODE" == "deps-tree" ]]; then
@@ -4128,7 +4172,7 @@ if [[ -n "${INPUT_EXTRA_ARGS:-}" ]]; then
   # account. Caught here, once, right before the append that would create
   # the collision.
   if _cmd_has_config_flag && _extra_args_has_config_flag; then
-    echo "::error::extra-args passes its own --config, which conflicts with the --config this Action already synthesized from a dso-only/fail-on-removed-library/include-private-dso/compile-context input (both cannot be honored -- Click keeps only the last one, silently dropping the other). Use the 'build-config' input instead of 'extra-args: --config ...' when combining a synthesized setting with a project config file; it merges with, rather than replaces, the synthesized overlay."
+    echo "::error::extra-args passes its own --config, which conflicts with the --config this Action already synthesized from a dso-only/fail-on-removed-library/include-private-dso/analysis-assurance-complete/compile-context input (both cannot be honored -- Click keeps only the last one, silently dropping the other). Use the 'build-config' input instead of 'extra-args: --config ...' when combining a synthesized setting with a project config file; it merges with, rather than replaces, the synthesized overlay."
     exit 1
   fi
   # A flag `compare` genuinely lacks -- `--pattern-verdicts` included --

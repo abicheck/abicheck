@@ -45,6 +45,9 @@ from typing import Any
 import yaml
 
 HERE = Path(__file__).resolve().parent
+sys.path.insert(0, str(HERE))
+from workflow_rules import cli_pin, overwrites_release_asset, parse_cli  # noqa: E402
+
 SCENARIOS = HERE / "scenarios.yaml"
 
 ABICHECK_USES = re.compile(r"^abicheck/abicheck@(?P<ref>\S+)$")
@@ -166,49 +169,6 @@ class Workflow:
 
 
 _CLI_CALL = re.compile(r"(?:^|[\s;&|(])abicheck\s+(compare|dump)\b")
-_SIDE = re.compile(r"^(old|new)=")
-
-
-def _parse_cli(mode: str, argv: list[str]) -> dict[str, Any]:
-    """Map one `abicheck compare|dump` argv onto the Action's input names,
-    so every check judges a CLI call and an Action step by the same rule."""
-    inputs: dict[str, Any] = {"mode": mode}
-    positional: list[str] = []
-    headers: dict[str, list[str]] = {"header": [], "old-header": [], "new-header": []}
-    i = 0
-    while i < len(argv):
-        arg = argv[i]
-        if arg in ("&&", "||", ";", "|") or arg.startswith(("#", ">")):
-            break
-        value = None
-        if "=" in arg and arg.startswith("--"):
-            arg, value = arg.split("=", 1)
-        if arg in ("-H", "--header", "-o", "--output", "--config", "-I", "--include", "--version",
-                   "--policy", "--suppress", "--severity-preset", "--depth", "--contract",
-                   "--used-by", "--sources", "--build-info", "--debug-info"):
-            if value is None:
-                i += 1
-                value = argv[i] if i < len(argv) else ""
-            if arg in ("-H", "--header"):
-                side = _SIDE.match(value)
-                key = f"{side.group(1)}-header" if side else "header"
-                headers[key].append(_SIDE.sub("", value))
-            elif arg in ("-o", "--output"):
-                inputs["output-file"] = value.split("=", 1)[-1] if re.match(r"^[a-z]+=", value) else value
-        elif not arg.startswith("-"):
-            positional.append(arg)
-        i += 1
-    for key, vals in headers.items():
-        if vals:
-            inputs[key] = " ".join(vals)
-    if mode == "compare":
-        if len(positional) >= 2:
-            inputs["old-library"], inputs["new-library"] = positional[0], positional[1]
-        elif positional:
-            inputs["new-library"] = positional[0]
-    elif positional:
-        inputs["new-library"] = positional[0]
-    return inputs
 
 
 def cli_steps(raw: dict[str, Any], job: Job) -> list[Step]:
@@ -225,25 +185,9 @@ def cli_steps(raw: dict[str, Any], job: Job) -> list[Step]:
             argv = shlex.split(rest, comments=True)
         except ValueError:
             argv = rest.split()
-        inputs = _parse_cli(match.group(1), argv)
+        inputs = parse_cli(match.group(1), argv)
         out.append(Step({"_cli": True, "uses": "", "with": inputs, "run": run}, job))
     return out
-
-
-_PIP_PIN = re.compile(r"(pip3?|pipx|uv pip|uv tool)\s+install[^\n]*?\babicheck(?P<spec>[=<>~!]=?[\w.]+)?")
-
-
-def cli_pin(text: str) -> str | None:
-    """`==X.Y.Z` when the workflow installs an exact abicheck, `""` when it
-    installs an unpinned one, `None` when it installs none this way."""
-    found = None
-    for m in _PIP_PIN.finditer(text):
-        spec = m.group("spec") or ""
-        if spec.startswith("==") and re.match(r"^==\d+\.\d+\.\d+$", spec):
-            found = found if found == "" else spec
-        else:
-            found = ""
-    return found
 
 
 def load_workflows(workspace: Path) -> list[Workflow]:
@@ -605,6 +549,11 @@ def _baseline_release(ctx: Context) -> tuple[bool, str]:
     )
     if not uploads:
         return False, "snapshot dumped on release but never attached to it"
+    if any(overwrites_release_asset(j.workflow.text) for j in jobs):
+        return False, (
+            "release asset upload overwrites or deletes an existing baseline "
+            "(--clobber / delete-asset): a release baseline is write-once"
+        )
     consumers = []
     for s in ctx.pr_compare_steps():
         if "abi-baseline" in s.inputs or re.search(

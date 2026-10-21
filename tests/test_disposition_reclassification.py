@@ -41,6 +41,7 @@ from click.testing import CliRunner
 from abicheck.checker_policy import ChangeKind, Verdict
 from abicheck.checker_types import DiffResult
 from abicheck.cli import main
+from abicheck.detectors import DetectorResult
 from abicheck.model import AbiSnapshot, Function, Variable, Visibility
 from abicheck.model.change import Change
 from abicheck.policy.disposition_close import (
@@ -86,7 +87,17 @@ def test_a_reclassified_finding_is_recorded_without_moving_the_counts(
     assert reclassified_total(ledger) == 1
     assert reclassifications(ledger) == (("COMDAT-inline demotions", 1),)
     assert audit.reclassified_total == 1
-    assert audit.reclassifications == (("COMDAT-inline demotions", 1),)
+    # P1: one row per configured rule, keyed by the rule itself. Its display
+    # label stays the reason it was written with; its id is the canonical
+    # identity, not that prose.
+    (row,) = audit.reclassifications
+    assert row.reason == "COMDAT-inline demotions"
+    assert row.label is None
+    assert row.matched_count == 1
+    assert row.selector_matched_count == 1
+    assert row.shadowed_count == 0
+    assert row.status == "active"
+    assert "symbol='foo'" in row.rule_id
     # Never added into `counts`/`detected_total` -- conservation still holds
     # over the *disposition* axis alone.
     assert audit.detected_total == 1
@@ -125,7 +136,13 @@ def test_reclassification_and_suppression_compose(tmp_path: Path) -> None:
     assert dict(audit.counts)["gating"] == 0
 
 
-def test_no_reclassify_rule_leaves_the_overlay_absent(tmp_path: Path) -> None:
+def test_an_unmatched_reclassify_rule_still_has_a_zero_row(tmp_path: Path) -> None:
+    """P1 (ADR-067 D3): a configured rule that matched nothing is still a row.
+
+    The rule below is configured and does not match the finding; the audit
+    must say so (zero matches, status ``unused``) rather than leave the rule
+    out, which is what a record-derived tally did.
+    """
     pf = _policy_file(tmp_path, symbol="bar", reason="unrelated")
     change = Change(kind=ChangeKind.FUNC_REMOVED, symbol="foo", description="x")
     diff = DiffResult(
@@ -134,10 +151,19 @@ def test_no_reclassify_rule_leaves_the_overlay_absent(tmp_path: Path) -> None:
         new_version="2",
         library="l",
         policy_file=pf,
+        # The rule names func_removed, which the ``functions`` detector produces.
+        # It ran, so the zero-match rule is unused (ADR-067 P1 addendum). Without
+        # a detector record nothing is known to have run, and the rule reads
+        # not_evaluated instead.
+        detector_results=[DetectorResult(name="functions", changes_count=1)],
     )
     audit = compute_disposition_audit(diff)
     assert audit.reclassified_total == 0
-    assert audit.reclassifications == ()
+    (row,) = audit.reclassifications
+    assert row.matched_count == 0
+    assert row.selector_matched_count == 0
+    assert row.status == "unused"
+    assert row.reason == "unrelated"
 
 
 @pytest.mark.parametrize("verdict", [Verdict.COMPATIBLE_WITH_RISK, Verdict.COMPATIBLE])

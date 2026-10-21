@@ -69,7 +69,6 @@ import contextvars
 import hashlib
 import threading
 from dataclasses import dataclass, field
-from datetime import date, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -87,8 +86,10 @@ from .policy.policy_file_namespaces import (
 )
 from .policy.policy_file_top_level import (
     parse_base_policy as _parse_base_policy,
+    parse_unused_rules,
     reject_unknown_top_level_keys,
 )
+from .policy.reclassify_loader import parse_reclassify
 from .policy.versioning_policy import (
     VersioningPolicy,
     built_in_default_versioning_policy,
@@ -283,150 +284,6 @@ def _parse_overrides(overrides_raw: Any, path: Path) -> dict[ChangeKind, Verdict
     return overrides
 
 
-def _parse_reclassify_expires(raw: Any, path: Path, index: int) -> date | None:
-    """Parse one ``reclassify[i].expires`` value (ISO 8601 string, or a
-    YAML-native date/datetime PyYAML already decoded).
-
-    Checks ``datetime`` before ``date`` (Codex review): a ``datetime`` is
-    itself a ``date`` subclass, so an unquoted YAML timestamp like
-    ``2026-08-12T00:00:00`` -- which PyYAML decodes as a ``datetime``, not a
-    ``date`` -- would otherwise pass the ``isinstance(raw, date)`` branch
-    unnormalized and later crash ``Suppression.is_expired()``'s ``date.today()
-    > self.expires`` comparison (``TypeError``: can't compare ``date`` and
-    ``datetime``). Normalized to ``.date()`` here, mirroring
-    ``policy/suppression/rules.py``'s ``_parse_expires`` handling of the identical case.
-    """
-    if raw is None:
-        return None
-    if isinstance(raw, datetime):
-        return raw.date()
-    if isinstance(raw, date):
-        return raw
-    if isinstance(raw, str):
-        try:
-            return date.fromisoformat(raw)
-        except ValueError as e:
-            raise PolicyError(
-                f"reclassify[{index}].expires in {path}: invalid date {raw!r} "
-                "(expected ISO 8601, e.g. 2026-06-01)"
-            ) from e
-    raise PolicyError(
-        f"reclassify[{index}].expires in {path}: must be a date, got "
-        + type(raw).__name__
-    )
-
-
-#: reclassify[i] keys whose value must be a string when present -- every
-#: selector plus the free-text `reason`/`label` fields. `kind`/`to`/`expires`
-#: have their own dedicated, differently-shaped validation below and are
-#: deliberately not in this set.
-_RECLASSIFY_STRING_FIELDS: tuple[str, ...] = (
-    "symbol",
-    "symbol_pattern",
-    "type_pattern",
-    "member_name",
-    "namespace",
-    "entity_namespace",
-    "cause_namespace",
-    "source_location",
-    "binding",
-    "reason",
-    "label",
-)
-
-
-def _require_reclassify_string_field(
-    entry: dict[str, Any], key: str, index: int, path: Path
-) -> str | None:
-    """Validate one optional string-valued ``reclassify[i]`` field.
-
-    Codex review: a non-string value here (e.g. a bare YAML ``42``) either
-    crashes with an uncaught ``TypeError`` deep inside ``re.compile``/
-    ``fnmatch.translate`` (``symbol_pattern``/``type_pattern``/every
-    ``namespace`` variant) or loads silently and simply never matches
-    (``symbol``, compared via ``==`` against the always-string
-    ``change.symbol``) -- neither is the hard, up-front ``PolicyError`` this
-    module's other selector validation already gives every other bad value.
-    """
-    val = entry.get(key)
-    if val is None or isinstance(val, str):
-        return val
-    raise PolicyError(
-        f"reclassify[{index}].{key} in {path}: must be a string, got "
-        + type(val).__name__
-    )
-
-
-def _parse_reclassify(raw: Any, path: Path) -> list[ReclassifyRule]:
-    """Validate and parse the ``reclassify:`` block (A: selector-scoped
-    reclassification) into a list of :class:`ReclassifyRule`.
-
-    Unlike ``overrides:`` (keyed by ``ChangeKind`` alone), each entry here
-    carries the same selector grammar :mod:`abicheck.policy.suppression.rules` already
-    implements, plus a required ``to:`` severity -- see
-    ``abicheck/policy/reclassify.py``'s module docstring.
-    """
-    from .policy.reclassify import RECLASSIFY_KNOWN_KEYS, ReclassifyRule
-
-    if not isinstance(raw, list):
-        raise PolicyError(
-            "'reclassify' must be a YAML list of rules, got " + type(raw).__name__
-        )
-
-    rules: list[ReclassifyRule] = []
-    for i, entry in enumerate(raw):
-        if not isinstance(entry, dict):
-            raise PolicyError(
-                f"reclassify[{i}] in {path}: must be a YAML mapping, got "
-                + type(entry).__name__
-            )
-        unknown = set(entry) - RECLASSIFY_KNOWN_KEYS
-        if unknown:
-            raise PolicyError(
-                f"reclassify[{i}] in {path}: unknown key(s) {sorted(unknown)}. "
-                f"Valid keys: {sorted(RECLASSIFY_KNOWN_KEYS)}"
-            )
-        if "to" not in entry:
-            raise PolicyError(f"reclassify[{i}] in {path}: missing required 'to' field")
-        to_raw = entry["to"]
-        to_verdict = parse_severity_value(to_raw)
-        if to_verdict is None:
-            raise PolicyError(
-                f"reclassify[{i}] in {path}: invalid 'to' value {to_raw!r}. "
-                "Valid values: break, warn, risk, ignore"
-            )
-        kind = entry.get("kind")
-        if kind is not None and not isinstance(kind, str):
-            raise PolicyError(f"reclassify[{i}].kind in {path}: must be a string")
-        string_fields = {
-            key: _require_reclassify_string_field(entry, key, i, path)
-            for key in _RECLASSIFY_STRING_FIELDS
-        }
-
-        try:
-            rule = ReclassifyRule(
-                to_verdict=to_verdict,
-                to=str(to_raw),
-                symbol=string_fields["symbol"],
-                symbol_pattern=string_fields["symbol_pattern"],
-                type_pattern=string_fields["type_pattern"],
-                member_name=string_fields["member_name"],
-                namespace=string_fields["namespace"],
-                entity_namespace=string_fields["entity_namespace"],
-                cause_namespace=string_fields["cause_namespace"],
-                source_location=string_fields["source_location"],
-                binding=string_fields["binding"],
-                change_kind=kind,
-                reason=string_fields["reason"],
-                label=string_fields["label"],
-                expires=_parse_reclassify_expires(entry.get("expires"), path, i),
-            )
-        except ValueError as e:
-            raise PolicyError(f"reclassify[{i}] in {path}: {e}") from e
-        rules.append(rule)
-    return rules
-
-
 def _parse_frozen_namespaces(frozen_raw: Any) -> list[str]:
     """Validate and parse the ``frozen_namespaces`` list of glob patterns."""
     if not isinstance(frozen_raw, list):
@@ -587,6 +444,9 @@ class PolicyFile:
     # existing positional call keeps binding to the exact fields it always
     # did.
     reclassify: list[ReclassifyRule] = field(default_factory=list, kw_only=True)
+    # ADR-067 P1 -- ``unused_rules: allow|warn|block`` (policy/unused_rules_gate.py).
+    # ``allow`` is the default, so an existing policy file changes nothing.
+    unused_rules: str = field(default="allow", kw_only=True)
     source_path: Path | None = None
     #: sha256 of the exact raw bytes :meth:`load` read, when it loaded this
     #: document from a file. Captured at parse time on purpose: a consumer
@@ -702,7 +562,9 @@ class PolicyFile:
 
         base_policy = _parse_base_policy(raw)
         overrides = _parse_overrides(raw.get("overrides", {}), path)
-        reclassify = _parse_reclassify(raw.get("reclassify", []), path)
+        reclassify = parse_reclassify(
+            raw.get("reclassify", []), path, parse_severity=parse_severity_value
+        )
         frozen_namespaces = _parse_frozen_namespaces(raw.get("frozen_namespaces", []))
         internal_namespaces = parse_internal_namespaces(
             raw.get("internal_namespaces", [])
@@ -730,6 +592,7 @@ class PolicyFile:
             base_policy=base_policy,
             overrides=overrides,
             reclassify=reclassify,
+            unused_rules=parse_unused_rules(raw.get("unused_rules"), path),
             source_path=path,
             source_sha256=digest,
             frozen_namespaces=frozen_namespaces,

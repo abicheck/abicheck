@@ -323,23 +323,23 @@ inputs:
     default: 'false'
   analysis-assurance-complete:
     description: >
-      Set to 'true' when this cell declared `checks[].analysis.assurance:
-      complete` (RunPlanCheck.analysis_assurance, validated at run-plan
-      generation time by project_targets.py's analysis_assurance_gate.py,
-      which still accepts only 'complete'). This is the config-overlay
-      replacement `require-complete-analysis` above's own docstring used
-      to name as a tracked gap: since neither a CLI flag nor an Action
-      input can carry `assurance.require_complete` any more (see that
-      input's docstring), this Action instead merges an
-      `assurance: {require_complete: true}` fragment into whichever
-      build-config the internal analysis step would otherwise read
-      (`build-config`, possibly none) -- the same config-only mechanism a
-      project author's own `.abicheck.yml` line would produce, so a
-      declared 'complete' cell is enforced the identical way. check-project.yml
-      is the intended caller (it already validates and carries
-      `checks[].analysis.assurance` on the run-plan); a direct check-target
-      caller may also set this explicitly. Ignored (no overlay generated)
-      when not exactly 'true'. Supported for `kind: bundle` too:
+      Tri-state per-job override of `.abicheck.yml`'s
+      `assurance.require_complete`, mirroring the root Action's own
+      `analysis-assurance-complete` input. 'true' is what a cell that declared
+      `checks[].analysis.assurance: complete` (RunPlanCheck.analysis_assurance,
+      validated at run-plan generation time by project_targets.py's
+      analysis_assurance_gate.py, which still accepts only 'complete') forwards:
+      this Action merges an `assurance: {require_complete: true}` fragment into
+      whichever build-config the internal analysis step would otherwise read
+      (`build-config`, possibly none), the same config-only mechanism a project
+      author's own `.abicheck.yml` line would produce. 'false' merges
+      `require_complete: false` instead, lifting a floor the discovered or
+      build-config `.abicheck.yml` sets. Unset (the default, and what
+      check-project.yml forwards for a cell that declared no assurance) inherits
+      the config and generates no overlay. check-project.yml is the intended
+      caller; a direct check-target caller may also set this explicitly. Any
+      value other than '', 'true' or 'false' is refused by validate-inputs.sh.
+      Supported for `kind: bundle` too:
       the release fan-out the internal `compare` runs for a bundle
       folds every compared member's own `analysis_assurance` with `max` into
       the same exit axis a single-library check uses, so a one-member bundle
@@ -347,7 +347,6 @@ inputs:
       short floors the whole bundle. It used to be rejected outright for a
       bundle (`validate-inputs.sh`), a guard that has since been retired.
     required: false
-    default: 'false'
   extra-args:
     description: 'Additional CLI arguments passed directly to the internal abicheck invocation.'
     required: false
@@ -682,11 +681,16 @@ runs:
     # so it does not need that same adjacency guarantee.
     - name: Generate assurance-overlay config
       id: assurance_overlay
-      if: inputs.analysis-assurance-complete == 'true'
+      if: inputs.analysis-assurance-complete != ''
       continue-on-error: true
       shell: bash
       env:
         BASE_CONFIG: ${{ inputs.build-config }}
+        # The caller's tri-state value ('true' or 'false'; the step is skipped
+        # for ''). Read by the python below, which writes it verbatim as
+        # assurance.require_complete -- 'false' included, so the step can lift a
+        # floor the discovered config sets.
+        ANALYSIS_ASSURANCE_COMPLETE: ${{ inputs.analysis-assurance-complete }}
         # Codex review (P1), fresh evidence, PR #1222: needed so this step
         # can detect a caller's own `extra-args: --config <path>` (used
         # instead of the `build-config` input) and fold it into the
@@ -1764,9 +1768,11 @@ runs:
             # in the object graph is at risk of this same aliasing hazard.
             assurance = dict(assurance)
         # Additive over whatever the base config already declared under
-        # assurance: -- only require_complete is forced to true, exactly the
-        # one field this overlay exists to set.
-        assurance["require_complete"] = True
+        # assurance: -- only require_complete is set, to the caller's own
+        # 'true' or 'false', exactly the one field this overlay exists to set.
+        assurance["require_complete"] = (
+            os.environ.get("ANALYSIS_ASSURANCE_COMPLETE", "") == "true"
+        )
         data["assurance"] = assurance
         with open(os.environ["ABICHECK_OUT_PATH"], "w", encoding="utf-8") as fh:
             yaml.safe_dump(data, fh, sort_keys=False)
@@ -1853,7 +1859,7 @@ runs:
         build-info: ${{ steps.consumer_context.outcome == 'success' && '' || ((inputs.evidence-producer == 'wrapper' || inputs.evidence-producer == 'clang-plugin') && inputs.evidence-pack-path || inputs.build-info) }}
         compile-db: ${{ steps.consumer_context.outcome == 'success' && '' || inputs.compile-db }}
         # "Generate assurance-overlay config" above (this step is skipped
-        # entirely when analysis-assurance-complete != 'true', in which case
+        # entirely when analysis-assurance-complete is unset (''), in which case
         # its own outcome reads 'skipped' and this falls back to the plain
         # build-config input unchanged).
         build-config: ${{ steps.assurance_overlay.outcome == 'success' && steps.assurance_overlay.outputs.config-path || inputs.build-config }}
@@ -1870,7 +1876,7 @@ runs:
         # gone too, so there is nothing left to forward here.
         #
         # "Generate assurance-overlay config" above (this step is skipped
-        # entirely when analysis-assurance-complete != 'true', in which case
+        # entirely when analysis-assurance-complete is unset (''), in which case
         # its own outcome reads 'skipped' and this falls back to the plain
         # extra-args input unchanged) may have consumed a caller's own
         # `extra-args: --config <path>` into the `build-config` overlay

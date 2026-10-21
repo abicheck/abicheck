@@ -40,6 +40,9 @@ _S2_EXIT_FIELDS = (
     # ADR-067 D6's additions-review axis, appended after loadability for the
     # identical reason.
     "additions_review_contribution",
+    # ADR-067 P1's unused_rules axis, appended after additions_review for the
+    # identical reason.
+    "unused_rules_contribution",
 )
 _S2_BUNDLE_FIELDS = (
     "scope_record",

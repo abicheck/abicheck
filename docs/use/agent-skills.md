@@ -22,18 +22,15 @@ Someone who has never heard of abicheck can ask "will this change break
 existing consumers?" and get a workflow that reaches for abicheck as its
 deterministic verification engine.
 
-> **Requires unreleased abicheck 0.6.x to run.** You can install this skill
-> (copying a directory works regardless of your abicheck version)
-> against the latest published release, **{{ latest_published_version }}**
-> — but it checks
-> the installed abicheck version against its own declared range —
-> `>=0.6.0,<0.7.0` — and refuses to run
-> rather than fail partway through, since several commands/options it
-> drives postdate 0.5.0 (see "Prerequisites" below). The check runs
+> **Requires abicheck 0.6.0 or later, below 0.8.0, to run.** The skills
+> check the installed abicheck version against their own declared range —
+> `>=0.6.0,<0.8.0` — and refuse to run
+> rather than fail partway through, since several commands/options they
+> drive postdate 0.5.0 (see "Prerequisites" below). The check runs
 > `abicheck --version` — the executable actually on `PATH` when the skill
 > runs, not a source checkout's `pyproject.toml` (the two can differ, e.g.
-> a 0.6.x checkout with a separately installed 0.5.0 package). If that
-> version isn't inside the `0.6.x` range, the installed skill will decline
+> a 0.7.x checkout with a separately installed 0.5.0 package). If that
+> version isn't inside the range, the installed skill will decline
 > to execute.
 
 **Status (2026-09-29): preview, installable with `npx skills add abicheck/abicheck`.**
@@ -148,7 +145,7 @@ protocol server or other setup beyond installing the skill itself. (abicheck has
 Each skill declares, in its frontmatter, the abicheck version range it
 requires — the releases that actually provide the CLI surface it drives — and
 checks the installed version before doing anything else rather than degrading
-silently. The current portfolio targets **0.6.x**: several commands and
+silently. The current portfolio targets **0.6.x and 0.7.x**: several commands and
 options these workflows depend on (`aggregate`, `project plan`,
 `--view root-cause`, `--diagnostic-comparison`,
 `--contract`) postdate the 0.5.0 release, so an older installation

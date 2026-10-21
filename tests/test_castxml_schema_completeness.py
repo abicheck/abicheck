@@ -102,7 +102,8 @@ class TestTypeAbstractChanged:
         t_new = RecordType(name="Shape", kind="class", size_bits=64, is_abstract=True)
         r = compare(_snap(types=[t_old]), _snap(types=[t_new]))
         assert ChangeKind.TYPE_BECAME_ABSTRACT in _kinds(r)
-        assert r.verdict == Verdict.API_BREAK
+        # No header observation: ADR-084 demotes this source-level claim.
+        assert r.verdict == Verdict.COMPATIBLE_WITH_RISK
 
     def test_lost_abstract(self):
         t_old = RecordType(name="Shape", kind="class", size_bits=64, is_abstract=True)
@@ -128,7 +129,8 @@ class TestEnumScopedChanged:
         e_new = EnumType(name="Color", members=[EnumMember("Red", 0)], is_scoped=True)
         r = compare(_snap(enums=[e_old]), _snap(enums=[e_new]))
         assert ChangeKind.ENUM_BECAME_SCOPED in _kinds(r)
-        assert r.verdict == Verdict.API_BREAK
+        # No header observation: ADR-084 demotes this source-level claim.
+        assert r.verdict == Verdict.COMPATIBLE_WITH_RISK
 
     def test_lost_scoped(self):
         e_old = EnumType(name="Color", members=[EnumMember("Red", 0)], is_scoped=True)
