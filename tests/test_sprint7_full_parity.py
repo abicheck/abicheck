@@ -95,8 +95,8 @@ class TestEnumMemberRenamed:
         )
         result = compare(old, new)
         assert ChangeKind.ENUM_MEMBER_RENAMED in _kinds(result)
-        # Also triggers ENUM_MEMBER_REMOVED for old name → BREAKING verdict
-        assert result.verdict in (Verdict.BREAKING, Verdict.API_BREAK)
+        # No header observation: ADR-084 demotes this source-level claim.
+        assert result.verdict == Verdict.COMPATIBLE_WITH_RISK
 
     def test_no_rename_when_value_also_changes(self) -> None:
         """If the value also changes, it's ENUM_MEMBER_REMOVED + ADDED, not a rename."""
@@ -404,7 +404,8 @@ class TestFieldQualifierVerdicts:
             ]
         )
         result = compare(old, new)
-        assert result.verdict == Verdict.API_BREAK
+        # No header observation: ADR-084 demotes this source-level claim.
+        assert result.verdict == Verdict.COMPATIBLE_WITH_RISK
 
     def test_field_volatile_change_is_risk(self) -> None:
         # Access semantics change; nothing fails to compile or link.
@@ -470,8 +471,8 @@ class TestFieldRenamed:
         result = compare(old, new)
         renames = [c for c in result.changes if c.kind == ChangeKind.FIELD_RENAMED]
         assert len(renames) == 2
-        # Also triggers TYPE_FIELD_REMOVED for old names → BREAKING verdict
-        assert result.verdict in (Verdict.BREAKING, Verdict.API_BREAK)
+        # With no header the renames are source-level claims ADR-084 demotes.
+        assert result.verdict == Verdict.COMPATIBLE_WITH_RISK
 
     def test_field_renamed_not_triggered_for_type_change(self) -> None:
         """Different type at same offset is TYPE_FIELD_TYPE_CHANGED, not rename."""
@@ -725,7 +726,8 @@ class TestMethodAccessChanged:
         )
         result = compare(old, new)
         assert ChangeKind.METHOD_ACCESS_CHANGED in _kinds(result)
-        assert result.verdict == Verdict.API_BREAK
+        # No header observation: ADR-084 demotes this source-level claim.
+        assert result.verdict == Verdict.COMPATIBLE_WITH_RISK
 
     def test_method_became_protected(self) -> None:
         old = _snap(
@@ -787,7 +789,8 @@ class TestFieldAccessChanged:
         )
         result = compare(old, new)
         assert ChangeKind.FIELD_ACCESS_CHANGED in _kinds(result)
-        assert result.verdict == Verdict.API_BREAK
+        # No header observation: ADR-084 demotes this source-level claim.
+        assert result.verdict == Verdict.COMPATIBLE_WITH_RISK
 
     def test_field_access_unchanged(self) -> None:
         old = _snap(

@@ -47,7 +47,11 @@ def _pair(break_it: bool) -> tuple[AbiSnapshot, AbiSnapshot]:
 
 
 def _records(path: Path, acknowledged: bool) -> Path:
-    body = '  - symbol: "g"\n    reason: "Planned"\n' if acknowledged else ""
+    body = (
+        '  - symbol: "g"\n    change_kind: func_added\n    reason: "Planned"\n'
+        if acknowledged
+        else ""
+    )
     path.write_text("version: 1\nacknowledgments:\n" + body)
     return path
 

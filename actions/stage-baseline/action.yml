@@ -74,6 +74,15 @@ outputs:
   archive-path:
     description: 'Path to the archive this Action wrote, relative to the workspace (same as asset-name -- the archive is written to the current working directory).'
     value: ${{ steps.package.outputs.asset-name }}
+  archive-sha256:
+    description: >
+      Lowercase hex SHA-256 of the archive's raw bytes (no 'sha256:' prefix).
+      Pass it, prefixed with 'sha256:' or bare, as expected-archive-digest to
+      the root Action's baseline-set fallback or to actions/resolve-baseline
+      to refuse any archive whose bytes differ from the ones staged here. The
+      digest covers the whole archive file, so a consistently repacked archive
+      (one whose manifest was rewritten to match) changes it too.
+    value: ${{ steps.package.outputs.archive-sha256 }}
 
 runs:
   using: 'composite'

@@ -33,10 +33,12 @@ from __future__ import annotations
 import importlib.util
 import re
 import sys
+from collections.abc import Iterable, Iterator, Mapping
 from pathlib import Path
 
 import _yaml_fast
 import pytest
+import yaml
 
 REPO = Path(__file__).resolve().parent.parent
 SRC = REPO / "skills-src"
@@ -252,3 +254,280 @@ def test_shared_fragments_carry_the_docs_contract_front_matter():
         if fm.get("lifecycle") != "active":
             missing.append(f"{fragment.name}: lifecycle must be 'active'")
     assert missing == []
+
+
+# --------------------------------------------------------------------------
+# Release pins, the declared range, `with:` inputs and baseline overwrites.
+#
+# The 0.7.0 drift got past every gate above: the range's upper bound was never
+# checked, the release a skill pins was never compared with its range, `with:`
+# keys were never read against the Action, and a template taught a `--clobber`
+# upload. Each check below has a negative control that proves it fires.
+# --------------------------------------------------------------------------
+
+#: An abicheck release pin: `abicheck/abicheck@v0.7.0`, a sub-path Action or
+#: reusable workflow, or a commit-SHA placeholder whose trailing `# v0.6.0`
+#: comment names the release it resolves to.
+_RELEASE_PIN_RE = re.compile(
+    r"abicheck/abicheck(?:/(?P<path>[\w./-]+?))?@"
+    r"(?:v(?P<tag>\d+\.\d+\.\d+)\b|(?P<ref>[^\s#]+))"
+    r"(?:[ \t]*#[ \t]*v(?P<comment>\d+\.\d+\.\d+)\b)?"
+)
+
+_DATED_RELEASE_RE = re.compile(
+    r"^## \[(\d+\.\d+\.\d+)\] (?:—|–|-) (\d{4}-\d{2}-\d{2})\s*$", re.MULTILINE
+)
+
+#: A release-asset write that replaces or removes a published baseline, matched
+#: as a command: an overwrite flag on a `gh release upload` line, or a
+#: `gh release delete-asset` that starts a command (not one inside an `echo`).
+_OVERWRITE_RE = re.compile(
+    r"gh release upload\b[^\n]*--clobber\b|^\s*(?:-\s*)?(?:run:\s*)?gh release delete-asset\b",
+    re.MULTILINE,
+)
+
+#: Path (as `_display` renders it) -> reason, for an overwrite a skill or user
+#: doc may teach. Empty by design: a release baseline is write-once everywhere
+#: the skills and the `docs/use` pages show it.
+OVERWRITE_ALLOWLIST: dict[str, str] = {}
+
+
+def _display(path: Path) -> str:
+    try:
+        return path.relative_to(REPO).as_posix()
+    except ValueError:
+        return path.name
+
+
+def _in_range(version: str, raw_range: str) -> bool:
+    match = _VERSION_RANGE_RE.match(raw_range)
+    assert match is not None, f"unparseable range {raw_range!r}"
+    minimum, maximum = (_version_tuple(group) for group in match.groups())
+    return minimum <= _version_tuple(version) < maximum
+
+
+def _release_pins(text: str) -> list[tuple[int, str, str]]:
+    """(line number, release the pin names, the pin as written)."""
+    pins = []
+    for lineno, line in enumerate(text.splitlines(), 1):
+        for match in _RELEASE_PIN_RE.finditer(line):
+            release = match.group("tag") or match.group("comment")
+            if release:
+                pins.append((lineno, release, match.group(0)))
+    return pins
+
+
+def _pins_outside_range(root: Path, raw_range: str) -> list[str]:
+    offenders = []
+    for path in sorted(root.rglob("*.md")):
+        for lineno, release, pin in _release_pins(path.read_text(encoding="utf-8")):
+            if not _in_range(release, raw_range):
+                offenders.append(
+                    f"{_display(path)}:{lineno}: {pin!r} names {release}, "
+                    f"outside {raw_range}"
+                )
+    return offenders
+
+
+def _newest_dated_release(changelog: str) -> str:
+    """Highest-dated released version. Undated `not yet released` headings are
+    not releases, so the answer is about released history, never the tree."""
+    dated = _DATED_RELEASE_RE.findall(changelog)
+    assert dated, "CHANGELOG.md has no dated release heading"
+    return max(dated, key=lambda entry: entry[1])[0]
+
+
+def _release_steps(node: object) -> Iterator[tuple[str, Mapping[str, object]]]:
+    """(`uses:` value, `with:` mapping) for every step calling abicheck."""
+    if isinstance(node, dict):
+        uses = node.get("uses")
+        if isinstance(uses, str) and "abicheck/abicheck" in uses:
+            with_block = node.get("with")
+            yield uses, with_block if isinstance(with_block, dict) else {}
+        for value in node.values():
+            yield from _release_steps(value)
+    elif isinstance(node, list):
+        for value in node:
+            yield from _release_steps(value)
+
+
+def _action_inputs(uses: str) -> set[str] | None:
+    """Inputs the Action or reusable workflow named by `uses:` declares, read
+    from this repository at HEAD. None when no such file exists."""
+    match = re.match(r"abicheck/abicheck(?:/(?P<path>[^@]+))?@", uses)
+    assert match is not None
+    path = match.group("path") or ""
+    if path.startswith(".github/workflows/"):
+        workflow = _yaml_fast.safe_load((REPO / path).read_text(encoding="utf-8"))
+        on_block = workflow.get("on") or workflow.get(True) or {}
+        call = on_block.get("workflow_call") or {}
+        return set(call.get("inputs") or {})
+    action = REPO / path / "action.yml" if path else REPO / "action.yml"
+    if not action.is_file():
+        return None
+    declared = _yaml_fast.safe_load(action.read_text(encoding="utf-8")) or {}
+    return set(declared.get("inputs") or {})
+
+
+def _unknown_with_keys(path: Path) -> list[str]:
+    """`with:` keys a release-pinned step passes that the pinned Action does
+    not declare, plus any fenced YAML block that does not parse (its keys
+    could not be checked at all)."""
+    offenders = []
+    text = path.read_text(encoding="utf-8")
+    for block in re.findall(r"^```yaml\n(.*?)^```", text, re.DOTALL | re.MULTILINE):
+        try:
+            document = _yaml_fast.safe_load(block)
+        except yaml.YAMLError as error:
+            offenders.append(f"{_display(path)}: unparseable yaml block ({error})")
+            continue
+        for uses, with_block in _release_steps(document):
+            inputs = _action_inputs(uses)
+            if inputs is None:
+                offenders.append(f"{_display(path)}: {uses} names no action.yml")
+                continue
+            for key in with_block:
+                if key not in inputs:
+                    offenders.append(
+                        f"{_display(path)}: {uses} passes with: {key!r}, "
+                        "which is not an input of that Action"
+                    )
+    return offenders
+
+
+def _baseline_write_surfaces() -> list[Path]:
+    paths = [
+        p
+        for p in SRC.rglob("*")
+        if p.is_file() and p.suffix in {".md", ".yml", ".yaml"}
+    ]
+    paths += sorted((REPO / "docs" / "use").glob("*.md"))
+    return sorted(paths)
+
+
+def _overwrite_offenders(
+    paths: Iterable[Path], allowlist: Mapping[str, str]
+) -> list[str]:
+    offenders = []
+    for path in paths:
+        if _display(path) in allowlist:
+            continue
+        text = path.read_text(encoding="utf-8")
+        for match in _OVERWRITE_RE.finditer(text):
+            lineno = text.count("\n", 0, match.start()) + 1
+            offenders.append(f"{_display(path)}:{lineno}: {match.group(0).strip()!r}")
+    return offenders
+
+
+@pytest.mark.parametrize("skill_dir", SKILL_DIRS, ids=lambda d: d.name)
+def test_every_pinned_abicheck_release_is_inside_the_skill_version_range(
+    skill_dir: Path,
+):
+    """A pin names the release the workflow will run, so it must satisfy the
+    range its skill declares. A pin outside the range sends a user to a release
+    the skill's own preflight then refuses."""
+    raw = _front_matter(skill_dir / "SKILL.md")["metadata"]["abicheck-version-range"]
+    assert _pins_outside_range(skill_dir, raw) == []
+
+
+def test_pin_check_fires_on_the_range_defect_it_was_written_for():
+    """Negative control on the real tree: the set-up skill pins v0.7.0 in its
+    own workflows, so the pre-fix `<0.7.0` range must be reported."""
+    set_up = next(d for d in SKILL_DIRS if d.name == "set-up-abi-compatibility-ci")
+    offenders = _pins_outside_range(set_up, ">=0.6.0,<0.7.0")
+    assert offenders and all("v0.7.0" in line for line in offenders)
+
+
+def test_pin_check_reads_both_tag_pins_and_sha_comment_pins(tmp_path: Path):
+    (tmp_path / "SKILL.md").write_text(
+        "- uses: abicheck/abicheck@v0.7.0\n"
+        "- uses: abicheck/abicheck@<sha>  # v0.8.0\n"
+        "- uses: abicheck/abicheck@v0.6.0\n",
+        encoding="utf-8",
+    )
+    offenders = _pins_outside_range(tmp_path, ">=0.6.0,<0.7.0")
+    assert len(offenders) == 2
+    assert "names 0.7.0" in offenders[0] and "names 0.8.0" in offenders[1]
+
+
+@pytest.mark.parametrize("skill_dir", SKILL_DIRS, ids=lambda d: d.name)
+def test_declared_range_contains_the_newest_dated_changelog_release(skill_dir: Path):
+    """The range must admit the newest dated release, and its exclusive upper
+    bound must sit above it. Derived from the changelog's dated headings, not
+    the working tree, so it cannot be calibrated to an unreleased version."""
+    newest = _newest_dated_release((REPO / "CHANGELOG.md").read_text(encoding="utf-8"))
+    raw = _front_matter(skill_dir / "SKILL.md")["metadata"]["abicheck-version-range"]
+    assert _in_range(newest, raw), (
+        f"{skill_dir.name} declares {raw}, which excludes the newest dated "
+        f"release {newest}"
+    )
+
+
+def test_changelog_check_fires_when_a_release_is_dated_past_the_range():
+    dated = "## [0.7.0] — 2026-10-13\n\n## [0.6.0] — 2026-09-13\n"
+    newest = _newest_dated_release(dated)
+    assert newest == "0.7.0"
+    assert not _in_range(newest, ">=0.6.0,<0.7.0")
+    assert _in_range(newest, ">=0.6.0,<0.8.0")
+
+
+def test_changelog_check_ignores_undated_headings():
+    undated = "## [0.7.0] — not yet released\n\n## [0.6.0] — 2026-09-13\n"
+    assert _newest_dated_release(undated) == "0.6.0"
+
+
+@pytest.mark.parametrize("skill_dir", SKILL_DIRS, ids=lambda d: d.name)
+def test_every_with_key_on_an_abicheck_step_is_an_input_of_the_action_it_calls(
+    skill_dir: Path,
+):
+    offenders: list[str] = []
+    for path in sorted(skill_dir.rglob("*.md")):
+        offenders += _unknown_with_keys(path)
+    assert offenders == []
+
+
+def test_with_key_check_fires_on_an_undeclared_input(tmp_path: Path):
+    path = tmp_path / "SKILL.md"
+    path.write_text(
+        "```yaml\n"
+        "- uses: abicheck/abicheck@v0.7.0\n"
+        "  with:\n"
+        "    abi-baseline: latest-release\n"
+        "    not-an-input: x\n"
+        "```\n",
+        encoding="utf-8",
+    )
+    offenders = _unknown_with_keys(path)
+    assert len(offenders) == 1 and "'not-an-input'" in offenders[0]
+
+
+def test_with_key_check_fires_on_a_yaml_block_it_cannot_read(tmp_path: Path):
+    path = tmp_path / "SKILL.md"
+    path.write_text("```yaml\n- uses: [unclosed\n```\n", encoding="utf-8")
+    offenders = _unknown_with_keys(path)
+    assert len(offenders) == 1 and "unparseable yaml block" in offenders[0]
+
+
+def test_no_skill_or_user_doc_teaches_overwriting_a_release_baseline():
+    assert _overwrite_offenders(_baseline_write_surfaces(), OVERWRITE_ALLOWLIST) == []
+
+
+def test_overwrite_check_fires_on_clobber_and_delete_and_honours_the_allowlist(
+    tmp_path: Path,
+):
+    clobber = tmp_path / "abi-baseline.yml"
+    clobber.write_text(
+        '      - run: gh release upload "$TAG" libfoo.abicheck.json --clobber\n',
+        encoding="utf-8",
+    )
+    delete = tmp_path / "republish.md"
+    delete.write_text(
+        "```bash\ngh release delete-asset v1 libfoo.abicheck.json --yes\n```\n",
+        encoding="utf-8",
+    )
+    surfaces = [clobber, delete]
+    offenders = _overwrite_offenders(surfaces, {})
+    assert len(offenders) == 2
+    assert "--clobber" in offenders[0] and "delete-asset" in offenders[1]
+    allowed = {"abi-baseline.yml": "reason", "republish.md": "reason"}
+    assert _overwrite_offenders(surfaces, allowed) == []

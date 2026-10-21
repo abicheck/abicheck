@@ -38,6 +38,16 @@ VALID_UNACKNOWLEDGED_ADDITIONS_ACTIONS: frozenset[str] = frozenset(
     {"allow", "warn", "block"}
 )
 
+#: ADR-067 D5 break-acknowledgment gate. ``gate`` (the default, and what every
+#: run did before this setting existed) keeps an acknowledged break's gate
+#: contribution: the record is an overlay attribute and the exit code is what
+#: the break alone decides. ``accept`` lets an acknowledged break stop
+#: contributing to the exit code, recorded as its own disposition, while the
+#: verdict and the release recommendation keep reading it as a break.
+AcknowledgmentBreaksAction = Literal["gate", "accept"]
+
+VALID_ACKNOWLEDGMENT_BREAKS_ACTIONS: frozenset[str] = frozenset({"gate", "accept"})
+
 
 @dataclass(frozen=True)
 class AcknowledgmentPolicy:
@@ -53,8 +63,18 @@ class AcknowledgmentPolicy:
     """
 
     unacknowledged_additions: UnacknowledgedAdditionsAction = "allow"
+    breaks: AcknowledgmentBreaksAction = "gate"
 
     def __post_init__(self) -> None:
+        if (
+            not isinstance(self.breaks, str)
+            or self.breaks not in VALID_ACKNOWLEDGMENT_BREAKS_ACTIONS
+        ):
+            raise ValueError(
+                "acknowledgment breaks must be one of "
+                f"{sorted(VALID_ACKNOWLEDGMENT_BREAKS_ACTIONS)}, got "
+                f"{self.breaks!r}"
+            )
         # A `Literal` annotation is not enforced at runtime (Codex review):
         # a caller constructing this directly (rather than through
         # `policy_file_acknowledgment.parse_acknowledgment_policy`, which

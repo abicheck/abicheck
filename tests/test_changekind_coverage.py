@@ -187,7 +187,8 @@ class TestTypeRemoved:
         # source that names it, not already-built binaries.
         t = RecordType(name="Handle", kind="struct")
         r = compare(_snap(types=[t]), _snap("2.0", types=[]))
-        assert r.verdict == Verdict.API_BREAK
+        # No header observation: ADR-084 demotes this source-level claim.
+        assert r.verdict == Verdict.COMPATIBLE_WITH_RISK
         assert any(c.kind == ChangeKind.TYPE_REMOVED for c in r.changes), (
             "Expected TYPE_REMOVED in changes"
         )
@@ -222,7 +223,8 @@ class TestTypeAdded:
         old_t = RecordType(name="OldHandle", kind="struct")
         new_t = RecordType(name="NewHandle", kind="struct")
         r = compare(_snap(types=[old_t]), _snap("2.0", types=[new_t]))
-        assert r.verdict == Verdict.API_BREAK
+        # No header observation: ADR-084 demotes this source-level claim.
+        assert r.verdict == Verdict.COMPATIBLE_WITH_RISK
         kinds = {c.kind for c in r.changes}
         assert ChangeKind.TYPE_REMOVED in kinds
         assert ChangeKind.TYPE_ADDED in kinds
@@ -414,7 +416,8 @@ class TestTypedefRemoved:
         old = _snap(typedefs={"size_type": "unsigned long"})
         new = _snap("2.0", typedefs={})
         r = compare(old, new)
-        assert r.verdict == Verdict.API_BREAK
+        # No header observation: ADR-084 demotes this source-level claim.
+        assert r.verdict == Verdict.COMPATIBLE_WITH_RISK
         assert any(c.kind == ChangeKind.TYPEDEF_REMOVED for c in r.changes), (
             "Expected TYPEDEF_REMOVED in changes"
         )

@@ -111,13 +111,13 @@ class TestAnalysisAssuranceCompleteConfigOverlay:
     def test_check_target_action_declares_the_new_input(self) -> None:
         data = _load(CHECK_TARGET_ACTION)
         assert "analysis-assurance-complete" in data["inputs"]
-        assert data["inputs"]["analysis-assurance-complete"]["default"] == "false"
+        assert "default" not in data["inputs"]["analysis-assurance-complete"]
 
     def test_check_target_action_has_overlay_generation_step(self) -> None:
         data = _load(CHECK_TARGET_ACTION)
         steps = data["runs"]["steps"]
         overlay_step = next(s for s in steps if s.get("id") == "assurance_overlay")
-        assert overlay_step["if"] == "inputs.analysis-assurance-complete == 'true'"
+        assert overlay_step["if"] == "inputs.analysis-assurance-complete != ''"
         # Never allowed to silently swallow a real failure (e.g. a
         # build-config that doesn't parse to a YAML mapping) -- it must run
         # with continue-on-error so the always-run finalize step still

@@ -348,6 +348,42 @@ The composite GitHub Action's own dedicated `require-complete-analysis`
 input is retired alongside the CLI flag it forwarded to (rulings.py
 deferred-option followup) -- see `docs/reference/github-action-inputs.md`.
 
+## The unused-rules axis
+
+A policy file's top-level `unused_rules:` key (`allow`, `warn` or `block`;
+default `allow`) decides whether a configured suppression, `reclassify:` or
+acknowledgment rule that matched no finding fails the run. The policy key is the
+only way to set the gate: there is no command-line flag.
+
+- `allow` (default): nothing changes. The audit still lists every such rule,
+  with status `unused`.
+- `warn`: the same, and the report names the unused rules as a review item.
+  The exit code does not move.
+- `block`: contributes `1` when at least one configured rule has status
+  `unused`. It is a `0`/`1` axis folded with `max`, so it raises a clean `0`
+  to `1` and never lowers a `2`, `4`, `7`, `8` or `16`.
+
+Only status `unused` triggers the gate. Status is decided per rule: a rule
+reads `not_evaluated` instead when it matched nothing and none of the detectors
+that can produce its change kinds ran, so the audit cannot prove the rule was
+checked. A rule that names no kind is a candidate for every detector. On an
+ELF-only comparison a stale symbol-kind rule therefore reads `unused` and
+`block` fires, while a stale rule scoped to a DWARF-only kind stays
+`not_evaluated` and does not. The `expired`, `shadowed_only` and `active`
+statuses never trigger it either.
+
+For a directory/package release the gate is evaluated over the union of its
+members. A member could evaluate a rule when the rule's status there is anything
+but `not_evaluated`. The release counts the rule as unused only when every member
+that could evaluate it left it unused, and at least one member could. A member
+that could not evaluate it is ignored, so a rule one library exercises is never
+flagged by another that could not check it. The release audit row folds the same
+way, so the gate and the row agree. The strictest member mode applies.
+
+The contribution appears as `exit.unused_rules_contribution` (`0` or `1`) and
+as the `unused_rules` reason. `disposition_audit.unused_rules_review` lists the
+rules that are unused.
+
 ## The `exit` report field (CLI cleanup phase two, PR G1 / PR E)
 
 Every real-verdict `compare -o json=...` report (`full`/`leaf`/`root-cause`
@@ -968,6 +1004,7 @@ one of those.
 | `API_BREAK` | `2` | `0`–`2`* | `2` / `0`–`2`*‡ | — | — |
 | `BREAKING` / `FAIL` | `4` | `0`–`4`* | `4` / `0`–`4`*‡ | — | `4` |
 | `--budget` overflow | — | — | `5` | — | — |
+| Configured rule unused (`unused_rules: block`) | `1` floor | `1` floor | — | — | — |
 | Missing dependencies/symbols | — | — | — | `1` | — |
 | Load failure | — | — | — | — | `4` |
 | Invalid invocation / tool error | `64`† | `64`† | `64`† | `64`† | `64`† |

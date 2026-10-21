@@ -205,6 +205,7 @@ def run_compare(
     exclude_headers: tuple[str, ...] = _declared_default(InputSpec, "exclude_headers"),
     acknowledgments_path: Path | None = None,
     acknowledgment_unacknowledged_additions: str | None = None,
+    acknowledgment_breaks: str | None = None,
 ) -> CompareResult:
     """Compare two ABI inputs and return the classified diff result.
 
@@ -368,5 +369,6 @@ def run_compare(
         env_matrix=env_matrix,
         acknowledgments_path=acknowledgments_path,
         acknowledgment_unacknowledged_additions=acknowledgment_unacknowledged_additions,
+        acknowledgment_breaks=acknowledgment_breaks,
     )
     return run_compare_request(request)

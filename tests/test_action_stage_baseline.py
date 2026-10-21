@@ -28,7 +28,9 @@ discipline ``test_action_resolve_baseline.py`` uses for its sibling.
 
 from __future__ import annotations
 
+import hashlib
 import os
+import re
 import subprocess
 import tarfile
 from pathlib import Path
@@ -722,3 +724,62 @@ class TestStageBaseline:
         result, outputs = _run_action({"BASELINE_PATH": str(baseline_dir)}, tmp_path)
         assert result.returncode == 0, result.stdout + result.stderr
         assert outputs["asset-name"] == "abicheck-baseline-.tar.zst"
+
+
+@pytest.mark.skipif(
+    not (ACTION_DIR / "action.yml").is_file(), reason="stage-baseline Action not found"
+)
+class TestArchiveSha256Output:
+    """The producer's archive-sha256 output is the consumer's pin: it must be the
+    SHA-256 of the file this step wrote, byte for byte, in every encoding."""
+
+    @pytest.mark.parametrize(
+        ("template", "expected_name", "open_mode"),
+        [
+            ("set-{profile}.tar.gz", "set-p1.tar.gz", "r:gz"),
+            ("set-{profile}.tar", "set-p1.tar", "r:"),
+        ],
+    )
+    def test_output_matches_the_sha256_of_the_written_archive(
+        self,
+        tmp_path: Path,
+        template: str,
+        expected_name: str,
+        open_mode: str,
+    ) -> None:
+        baseline_dir = _make_baseline_dir(tmp_path)
+        result, outputs = _run_action(
+            {
+                "BASELINE_PATH": str(baseline_dir),
+                "ASSET_NAME_TEMPLATE": template,
+                "PROFILE": "p1",
+            },
+            tmp_path,
+        )
+        assert result.returncode == 0, result.stdout + result.stderr
+        archive_path = tmp_path / expected_name
+        expected = hashlib.sha256(archive_path.read_bytes()).hexdigest()
+        # Bare lowercase hex, the form a consumer accepts with or without its
+        # 'sha256:' prefix.
+        assert outputs["archive-sha256"] == expected
+        assert re.fullmatch(r"[0-9a-f]{64}", outputs["archive-sha256"])
+
+    def test_digest_changes_when_the_archive_is_repacked(self, tmp_path: Path) -> None:
+        # The property a pin relies on: a consistent repack of the same set (one
+        # snapshot byte changed, manifest left matching) yields a different
+        # archive-sha256, so an old pin refuses it.
+        first_dir = tmp_path / "first"
+        second_dir = tmp_path / "second"
+        first_dir.mkdir()
+        second_dir.mkdir()
+        baseline_a = _make_baseline_dir(first_dir)
+        baseline_b = _make_baseline_dir(second_dir)
+        (baseline_b / "libfoo.abicheck.json").write_text("{ }", encoding="utf-8")
+        template = {"ASSET_NAME_TEMPLATE": "set-{profile}.tar.gz", "PROFILE": "p1"}
+        _, outputs_a = _run_action(
+            {"BASELINE_PATH": str(baseline_a), **template}, first_dir
+        )
+        _, outputs_b = _run_action(
+            {"BASELINE_PATH": str(baseline_b), **template}, second_dir
+        )
+        assert outputs_a["archive-sha256"] != outputs_b["archive-sha256"]

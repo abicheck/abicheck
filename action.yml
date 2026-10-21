@@ -109,6 +109,21 @@ inputs:
     description: 'Exit 8 when a library present in old is proven removed in new -- NEW must have a proven-complete declared inventory: either a stored ProjectSnapshot package whose capture asserted inventory_complete, or a package archive (e.g. .rpm/.deb) whose own readable member table this run extracted and could enumerate in full; a live directory, or an archive whose member table could not be read in full, is an unproven inventory and an unmatched library there is an incomplete scope instead, governed by the scope.on_incomplete key in .abicheck.yml. compare mode, directory/package operands only. Deliberately no declared default -- see dso-only''s own description for why.'
     required: false
 
+  analysis-assurance-complete:
+    description: >
+      Per-job override of `.abicheck.yml`'s `assurance.require_complete` for
+      this invocation. Unset (the default) inherits the config unchanged.
+      'true' requires complete analysis evidence (an incomplete run exits 1)
+      even when the config does not say so; 'false' lifts that floor for this
+      run even when the discovered or build-config `.abicheck.yml` sets
+      `assurance.require_complete: true`. mode: compare only (single-pair,
+      audit-only and directory/package operands alike). Written as an
+      `assurance:` overlay into the same --config document the
+      release-topology inputs use. Deliberately no declared default -- see
+      dso-only's own description for why: an omitted input must stay
+      distinguishable from an explicit 'false'.
+    required: false
+
   # ── Header inputs ───────────────────────────────────────────────────────────
   header:
     description: >
@@ -666,6 +681,20 @@ inputs:
       when the input is omitted, so an explicit '' is a real opt-out.
     required: false
     default: 'tag'
+  expected-archive-digest:
+    description: >
+      SHA-256 the downloaded baseline-set archive must have, as 'sha256:<hex>'
+      or bare hex. Checked against the archive's raw bytes before anything is
+      extracted, and a mismatch fails the run (it is not tolerated under
+      dry-run). Requires baseline-profile and baseline-target, because only
+      that selection fetches an archive. Pin the value the producer reported:
+      actions/stage-baseline's archive-sha256 output. The digest covers the
+      whole file, so a consistently repacked archive, one whose manifest was
+      rewritten to match, fails unless the pin was rewritten too. Omit (default)
+      to skip the check; the archive's digest is still reported in the
+      baseline-archive-digest output.
+    required: false
+    default: ''
 
   # ── Output & policy ─────────────────────────────────────────────────────────
   format:
@@ -729,6 +758,18 @@ inputs:
     required: false
   suppress:
     description: 'Path to a YAML suppression file to filter known/intentional changes.'
+    required: false
+  acknowledgments:
+    description: >
+      Path to a YAML acknowledgment-records file for this run: changes
+      a team reviewed and accepted, each named by `finding_id`, or by `symbol`
+      with `change_kind`. Forwarded as `compare --acknowledgments`, which
+      overrides `.abicheck.yml`'s `acknowledgment.file`. Compare mode only. The
+      file is read from the checked-out tree, which a pull request can edit:
+      on `pull_request`, call the `protect-acknowledgments` reusable workflow
+      so a change to this file needs a label. Whether an accepted break leaves
+      the exit code is `acknowledgment.breaks`, which only a `build-config`
+      you named can set (a discovered `.abicheck.yml` cannot loosen the gate).
     required: false
   verbose:
     description: 'Enable verbose/debug output from abicheck.'
@@ -1191,6 +1232,16 @@ outputs:
       The manifest profile of a baseline-set baseline. Empty for any other
       baseline source.
     value: ${{ steps.run-abicheck.outputs.baseline-profile }}
+  baseline-archive-digest:
+    description: >
+      'sha256:<hex>' of the baseline-set archive this run extracted, computed
+      from its raw bytes. Empty for any other baseline source.
+    value: ${{ steps.run-abicheck.outputs.baseline-archive-digest }}
+  baseline-archive-verified:
+    description: >
+      'true' when expected-archive-digest was set and matched the archive,
+      'false' when it was not set. Empty for any other baseline source.
+    value: ${{ steps.run-abicheck.outputs.baseline-archive-verified }}
 
 runs:
   using: 'composite'
@@ -1236,12 +1287,15 @@ runs:
         INPUT_DSO_ONLY: ${{ inputs.dso-only }}
         INPUT_INCLUDE_PRIVATE_DSO: ${{ inputs.include-private-dso }}
         INPUT_FAIL_ON_REMOVED_LIBRARY: ${{ inputs.fail-on-removed-library }}
+        INPUT_ANALYSIS_ASSURANCE_COMPLETE: ${{ inputs.analysis-assurance-complete }}
+        INPUT_ACKNOWLEDGMENTS: ${{ inputs.acknowledgments }}
         INPUT_ABI_BASELINE: ${{ inputs.abi-baseline }}
         INPUT_BASELINE_PROFILE: ${{ inputs.baseline-profile }}
         INPUT_BASELINE_TARGET: ${{ inputs.baseline-target }}
         INPUT_BASELINE_ASSET_NAME_TEMPLATE: ${{ inputs.baseline-asset-name-template }}
         INPUT_BASELINE_GENERATION: ${{ inputs.baseline-generation }}
         INPUT_BASELINE_PROJECT_REF: ${{ inputs.baseline-project-ref }}
+        INPUT_EXPECTED_ARCHIVE_DIGEST: ${{ inputs.expected-archive-digest }}
         INPUT_ESTIMATE: ${{ inputs.estimate }}
         INPUT_AUDIT: ${{ inputs.audit }}
         # No-baseline capability-gap guard: compare's audit-only shape
@@ -1454,6 +1508,7 @@ runs:
         INPUT_BASELINE_ASSET_NAME_TEMPLATE: ${{ inputs.baseline-asset-name-template }}
         INPUT_BASELINE_GENERATION: ${{ inputs.baseline-generation }}
         INPUT_BASELINE_PROJECT_REF: ${{ inputs.baseline-project-ref }}
+        INPUT_EXPECTED_ARCHIVE_DIGEST: ${{ inputs.expected-archive-digest }}
         INPUT_ADD_JOB_SUMMARY: ${{ inputs.add-job-summary }}
         INPUT_DEBUG_INFO1: ${{ inputs.debug-info1 }}
         INPUT_DEBUG_INFO2: ${{ inputs.debug-info2 }}
@@ -1462,6 +1517,8 @@ runs:
         INPUT_DSO_ONLY: ${{ inputs.dso-only }}
         INPUT_INCLUDE_PRIVATE_DSO: ${{ inputs.include-private-dso }}
         INPUT_FAIL_ON_REMOVED_LIBRARY: ${{ inputs.fail-on-removed-library }}
+        INPUT_ANALYSIS_ASSURANCE_COMPLETE: ${{ inputs.analysis-assurance-complete }}
+        INPUT_ACKNOWLEDGMENTS: ${{ inputs.acknowledgments }}
         INPUT_PR_COMMENT: ${{ inputs.pr-comment }}
         INPUT_PR_COMMENT_MODE: ${{ inputs.pr-comment-mode }}
         INPUT_PR_COMMENT_ON: ${{ inputs.pr-comment-on }}

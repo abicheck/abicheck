@@ -32,13 +32,14 @@ policy, report, or CLI code without acquiring a new cross-layer edge.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Any
 
 from ..model.acknowledgment_policy import AcknowledgmentPolicy
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from ..checker_types import DiffResult
+    from ..model import AbiSnapshot
     from ..model.change import Change
     from .acknowledgment import AcknowledgmentList
 
@@ -200,23 +201,81 @@ def additions_review_exit_contribution(result: DiffResult) -> int:
     return int(getattr(review, "gate_contribution", 0) or 0)
 
 
-def effective_acknowledgment_policy(
-    policy_file: object, configured_action: str | None
+def effective_compare_ack_policy(
+    acknowledgment_policy: AcknowledgmentPolicy | None,
+    policy_file: object,
+    acknowledgment_breaks: str | None,
 ) -> AcknowledgmentPolicy | None:
-    """The run's D6 gate policy, or ``None`` when nothing states one.
+    """The gate policy one ``checker.compare`` call runs under.
+
+    An explicit *acknowledgment_policy* outranks the ``--policy`` document's own
+    block (ADR-049 D7); *acknowledgment_breaks*, when given, replaces its
+    ``breaks`` (ADR-067 D5). ``None`` when nothing states a policy.
+    """
+    policy = acknowledgment_policy or getattr(
+        policy_file, "acknowledgment_policy", None
+    )
+    if acknowledgment_breaks is None:
+        return policy
+    return replace(
+        policy or AcknowledgmentPolicy(),
+        breaks=acknowledgment_breaks,  # type: ignore[arg-type]
+    )
+
+
+def acknowledged_breaks_of(policy: AcknowledgmentPolicy | None) -> str:
+    """The ``breaks`` value the ledger close applies (``gate`` when unstated)."""
+    return policy.breaks if policy is not None else "gate"
+
+
+def attach_additions_review(
+    result: DiffResult,
+    acknowledgments: AcknowledgmentList | None,
+    policy: AcknowledgmentPolicy | None,
+    *,
+    old: AbiSnapshot | None,
+    new: AbiSnapshot,
+) -> None:
+    """ADR-067 D6: record the additions-review result on *result*.
+
+    A no-op when the run supplied no acknowledgment records, so every
+    pre-existing caller's result is untouched.
+    """
+    if acknowledgments is None:
+        return
+    result.unacknowledged_additions_review = (
+        evaluate_unacknowledged_additions_for_result(
+            result,
+            acknowledgments,
+            policy,
+            component=(old.library if old is not None else new.library),
+            baseline=(old.version if old is not None else None),
+            release_label=new.version,
+        )
+    )
+
+
+def effective_acknowledgment_policy(
+    policy_file: object,
+    configured_action: str | None,
+    configured_breaks: str | None = None,
+) -> AcknowledgmentPolicy | None:
+    """The run's ADR-067 D5/D6 gate policy, or ``None`` when nothing states one.
 
     ADR-049 D7's tiers: a ``--policy`` file that states its own
     ``acknowledgment:`` block outranks ``.abicheck.yml``'s
-    ``acknowledgment.unacknowledged_additions`` (*configured_action*). ``None``
-    -- neither states it -- keeps the review from running at all, which is
-    every pre-existing invocation.
+    ``acknowledgment`` settings (*configured_action* for
+    ``unacknowledged_additions``, *configured_breaks* for ``breaks``) as one
+    whole block. ``None`` -- neither tier states anything -- keeps the review
+    from running at all, which is every pre-existing invocation.
     """
     if getattr(policy_file, "acknowledgment_policy_stated", False):
         stated = getattr(policy_file, "acknowledgment_policy", None)
         if isinstance(stated, AcknowledgmentPolicy):
             return stated
-    if configured_action is None:
+    if configured_action is None and configured_breaks is None:
         return None
     return AcknowledgmentPolicy(
-        unacknowledged_additions=configured_action  # type: ignore[arg-type]
+        unacknowledged_additions=configured_action or "allow",  # type: ignore[arg-type]
+        breaks=configured_breaks or "gate",  # type: ignore[arg-type]
     )

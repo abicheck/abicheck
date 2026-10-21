@@ -77,6 +77,7 @@ from typing import TYPE_CHECKING
 
 import yaml
 
+from ..errors import PolicyError
 from .selectors import SelectorSet
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
@@ -196,10 +197,22 @@ class Acknowledgment:
                 "explicit, reviewable context, not a bare rule"
             )
         if self.finding_id is None and self.symbol is None:
-            raise ValueError(
+            raise PolicyError(
                 "Acknowledgment must have 'finding_id' or 'symbol' — a bounded, "
                 "specific match. A broad selector (pattern/namespace/"
                 "source_location) is a suppression, not an acknowledgment."
+            )
+        if self.symbol is not None and self.change_kind is None:
+            # G2: a symbol names every change on that symbol. Accepting a
+            # break by name alone also accepts a sibling change of another
+            # kind on the same symbol (a return-type change and a parameter
+            # change, say), which the author never reviewed. `finding_id`
+            # needs no kind -- it already identifies one finding.
+            raise PolicyError(
+                f"Acknowledgment for symbol {self.symbol!r} must also name a "
+                "'change_kind' (e.g. func_removed). A symbol-only record "
+                "accepts every change on that symbol, including ones the "
+                "author never reviewed; use 'finding_id' to name one finding."
             )
         # `finding_id`/`symbol`/`change_kind` are exactly the bounded subset
         # of SelectorSet's grammar this record type permits — see the module
@@ -263,7 +276,12 @@ class Acknowledgment:
         a re-load of the same document (it derives from the record's own
         content, not its position in the file).
         """
-        subject = self.finding_id or self.symbol or ""
+        # A symbol-keyed record is distinct per kind (G2): two records naming
+        # one symbol with different change kinds must not share an id.
+        if self.finding_id is not None:
+            subject = self.finding_id
+        else:
+            subject = f"{self.symbol}[{self.change_kind}]"
         return "::".join(
             [
                 self.component or "*",
@@ -388,10 +406,42 @@ class AcknowledgmentList:
                     expires=expires,
                 )
             except ValueError as e:
-                raise ValueError(f"Acknowledgment entry {i}: {e}") from e
+                raise PolicyError(f"Acknowledgment entry {i}: {e}") from e
             records.append(record)
 
         return cls(records, source_sha256=digest, source_path=str(path))
+
+    def scope_warnings(self, today: date | None = None) -> list[str]:
+        """Review warnings this list owes the operator, one line each.
+
+        * A record naming no ``component``, ``baseline`` or ``candidate``
+          matches the same finding in every release it is ever compared
+          under. That is legal, and it is the shape a standing acceptance
+          takes, so it is reported rather than refused.
+        * An expired record never matches (the finding re-surfaces and gates
+          as usual); the warning says so, because a silently lapsed record is
+          how a team discovers a break gating a release it thought accepted.
+        """
+        warnings: list[str] = []
+        for record in self._acknowledgments:
+            where = record.record_id()
+            if (
+                record.component is None
+                and record.baseline is None
+                and record.candidate is None
+            ):
+                warnings.append(
+                    f"acknowledgment {where} names no component, baseline or "
+                    "candidate, so it matches that finding in every release; "
+                    "scope it to a release, or give it an 'expires' date"
+                )
+            if record.is_expired(today):
+                warnings.append(
+                    f"acknowledgment {where} expired on "
+                    f"{record.expires.isoformat() if record.expires else '?'}; "
+                    "its finding is no longer acknowledged and gates as usual"
+                )
+        return warnings
 
     def evaluate(
         self,

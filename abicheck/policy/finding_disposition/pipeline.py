@@ -271,11 +271,17 @@ class DispositionPipeline:
         *absent_baseline* is the OLD-side stand-in when *old* is ``None``
         (see ``PipelineContext.baseline_or_empty``).
         """
+        ledger = ledger if ledger is not None else DispositionLedger()
+        # P1 (ADR-067 D3): declare the loaded suppression rules as this run's
+        # inventory before any step runs, so a rule that never matches still
+        # gets an audit row. Registered here, not per application point: a
+        # rule set no step reaches must still be enumerated.
+        ledger.register_suppression((rules or DispositionRules()).suppression)
         ctx = PipelineContext.from_rules(
             old,
             new,
             rules or DispositionRules(),
-            ledger=ledger if ledger is not None else DispositionLedger(),
+            ledger=ledger,
             absent_baseline=absent_baseline,
         )
         # A step with ``establishes_kept_alias`` (``FilterRedundant``) sets

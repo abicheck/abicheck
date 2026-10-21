@@ -81,6 +81,7 @@ def _dominant_decision(
     incomplete_scope_contribution: int = 0,
     no_comparison_completed_contribution: int = 0,
     additions_review_contribution: int = 0,
+    unused_rules_contribution: int = 0,
 ) -> ExitDecision:
     """One of ADR-064's four axes overrides whatever the ordinary
     gate/coverage/assurance fold would otherwise have decided.
@@ -142,6 +143,7 @@ def _dominant_decision(
         "incomplete_scope_contribution": incomplete_scope_contribution,
         "no_comparison_completed_contribution": no_comparison_completed_contribution,
         "additions_review_contribution": additions_review_contribution,
+        "unused_rules_contribution": unused_rules_contribution,
     }
     # A field that is *also* the dominant axis is not a preserved value: it
     # is set to `code` below. Generic, where this was a hand-written special
@@ -396,6 +398,7 @@ def resolve_release_exit_decision(
     incomplete_scope_contribution: int = 0,
     no_comparison_completed_contribution: int = 0,
     additions_review_contribution: int = 0,
+    unused_rules_contribution: int = 0,
 ) -> ExitDecision:
     """ADR-064's precedence for a directory/package release comparison,
     reproducing `cli_compare_release_helpers._exit_compare_release` exactly
@@ -555,6 +558,7 @@ def resolve_release_exit_decision(
             incomplete_scope_contribution=incomplete_scope_contribution,
             no_comparison_completed_contribution=no_comparison_completed_contribution,
             additions_review_contribution=additions_review_contribution,
+            unused_rules_contribution=unused_rules_contribution,
         )
 
     if evidence_contract_error_contribution:
@@ -609,6 +613,7 @@ def resolve_release_exit_decision(
                 incomplete_scope_contribution=incomplete_scope_contribution,
                 no_comparison_completed_contribution=no_comparison_completed_contribution,
                 additions_review_contribution=additions_review_contribution,
+                unused_rules_contribution=unused_rules_contribution,
             )
         return resolve_evidence_over_ordinary(
             code=evidence_contract_error_contribution,
@@ -620,6 +625,7 @@ def resolve_release_exit_decision(
                 incomplete_scope_contribution=incomplete_scope_contribution,
                 no_comparison_completed_contribution=no_comparison_completed_contribution,
                 additions_review_contribution=additions_review_contribution,
+                unused_rules_contribution=unused_rules_contribution,
             ),
         )
 
@@ -644,6 +650,7 @@ def resolve_release_exit_decision(
                 incomplete_scope_contribution=incomplete_scope_contribution,
                 no_comparison_completed_contribution=no_comparison_completed_contribution,
                 additions_review_contribution=additions_review_contribution,
+                unused_rules_contribution=unused_rules_contribution,
             )
         return resolve_exit_decision(
             compatibility_contribution=verdict_or_severity_contribution,
@@ -653,6 +660,7 @@ def resolve_release_exit_decision(
             incomplete_scope_contribution=incomplete_scope_contribution,
             no_comparison_completed_contribution=no_comparison_completed_contribution,
             additions_review_contribution=additions_review_contribution,
+            unused_rules_contribution=unused_rules_contribution,
         )
 
     # Legacy scheme: a nonzero fold of the verdict/severity and operational-
@@ -667,6 +675,7 @@ def resolve_release_exit_decision(
             incomplete_scope_contribution=incomplete_scope_contribution,
             no_comparison_completed_contribution=no_comparison_completed_contribution,
             additions_review_contribution=additions_review_contribution,
+            unused_rules_contribution=unused_rules_contribution,
         )
     if removed_required_library:
         # Both axes are 0 here by construction (the branch above already
@@ -680,6 +689,7 @@ def resolve_release_exit_decision(
             incomplete_scope_contribution=incomplete_scope_contribution,
             no_comparison_completed_contribution=no_comparison_completed_contribution,
             additions_review_contribution=additions_review_contribution,
+            unused_rules_contribution=unused_rules_contribution,
         )
     return resolve_exit_decision(
         compatibility_contribution=0,
@@ -688,6 +698,7 @@ def resolve_release_exit_decision(
         incomplete_scope_contribution=incomplete_scope_contribution,
         no_comparison_completed_contribution=no_comparison_completed_contribution,
         additions_review_contribution=additions_review_contribution,
+        unused_rules_contribution=unused_rules_contribution,
     )
 
 

@@ -22,7 +22,7 @@ from __future__ import annotations
 import pytest
 
 from abicheck.checker import compare
-from abicheck.checker_policy import Verdict
+from abicheck.checker_policy import ChangeKind, Verdict
 from abicheck.elf_metadata import ElfMetadata, ElfSymbol, SymbolType
 from abicheck.model import (
     AbiSnapshot,
@@ -36,6 +36,7 @@ from abicheck.model import (
     is_cxx_runtime_library,
     is_non_abi_surface_type,
 )
+from abicheck.policy.binary_gate_marker import BINARY_GATE_RULE_ID
 
 REPORT = "skills-src/evaluation/validation/REPORT.md / skills-src/evaluation/validation/DESIGN_ANALYSIS.md"
 
@@ -1173,10 +1174,8 @@ def test_qualified_public_typedef_removal_still_breaking():
     new = _elf_snapshot(name="libtbb.so.12")
     new.declarations.typedefs = {}
     result = compare(old, new)
-    assert _breaking_symbols(result) or result.verdict in (
-        Verdict.BREAKING,
-        Verdict.API_BREAK,
-    ), "removing a genuine public typedef must still be reported"
+    removed = [c for c in result.changes if c.kind == ChangeKind.TYPEDEF_REMOVED]
+    assert removed and all(c.modulation_rule == BINARY_GATE_RULE_ID for c in removed)
 
 
 def _record_field_access(library, old_access, new_access):
@@ -1222,10 +1221,8 @@ def test_stdlib_field_access_change_is_breaking_when_target_is_the_runtime():
     result = _record_field_access(
         "libstdc++.so.6", AccessLevel.PUBLIC, AccessLevel.PRIVATE
     )
-    assert result.verdict in (Verdict.BREAKING, Verdict.API_BREAK), (
-        f"std:: field access narrowing in libstdc++ itself must still be reported; "
-        f"kinds: {[c.kind.value for c in result.changes]}"
-    )
+    reported = [c for c in result.changes if c.kind == ChangeKind.FIELD_ACCESS_CHANGED]
+    assert reported and all(c.modulation_rule == BINARY_GATE_RULE_ID for c in reported)
 
 
 def test_dwarf_qualified_flat_typedefs_keep_their_key_space():

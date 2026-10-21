@@ -64,10 +64,11 @@ def add_disposition_audit_properties(
     _prop("abicheck.effective_total", str(audit.effective_total))
     for name, count in audit.counts:
         _prop(f"abicheck.disposition.{name}", str(count))
-    for rule, count in audit.rules:
+    for rule in audit.rules:
         _prop(
             f"abicheck.disposition_rule.{rule.rule_id or 'rule'}",
-            f"{count} finding(s); reason={rule.reason or 'none'}; "
+            f"{rule.matched_count} finding(s); status={rule.status}; "
+            f"reason={rule.reason or 'none'}; "
             f"intent={rule.intent}; source={rule.source_file or 'inline'}",
         )
     if audit.policy_overlays:  # findings the gate scores that are not detections

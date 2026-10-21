@@ -45,11 +45,44 @@ from either module.
 from __future__ import annotations
 
 import dataclasses
+import enum
 
 #: Excluded from every identity: prose that changes what a *reviewer* reads,
 #: never what the rule *matches*. The receipt's source digest already records
 #: that it changed.
 _PROSE_FIELDS = frozenset({"reason"})
+
+#: Excluded because a canonical field already states it: a reclassify rule's
+#: ``to_verdict`` is the enum form of its ``to`` spelling, which is kept (and
+#: reads as text), so including both would only put an enum repr in the id.
+_DERIVED_FIELDS = frozenset({"to_verdict"})
+
+
+def _render(value: object) -> str:
+    """``repr`` for a plain value; an enum member's *value*, so the identity
+    never embeds an enum's class-qualified repr."""
+    if isinstance(value, enum.Enum):
+        return repr(value.value)
+    return repr(value)
+
+
+def rule_id_of(rule: object) -> str:
+    """The audit's ``rule_id`` for *rule* (ADR-067 D3, P2).
+
+    The user's own ``id:`` when the rule states one, else the canonical
+    :func:`rule_identity` -- never the free-form ``label``/``reason`` prose,
+    which two distinct rules can share (``label`` is a grouping tag and
+    ``reason`` is prose; both are surfaced as their own fields). ``label`` and
+    ``reason`` are a last resort only for a duck-typed stand-in with neither a
+    dataclass identity nor an ``id``.
+    """
+    user_id = getattr(rule, "id", None)
+    if isinstance(user_id, str) and user_id:
+        return user_id
+    identity = rule_identity(rule)
+    if identity is not None:
+        return identity
+    return str(getattr(rule, "label", None) or getattr(rule, "reason", None) or "rule")
 
 
 def rule_identity(rule: object) -> str | None:
@@ -71,10 +104,11 @@ def rule_identity(rule: object) -> str | None:
     if not dataclasses.is_dataclass(rule) or isinstance(rule, type):
         return None
     parts = [
-        f"{f.name}={getattr(rule, f.name)!r}"
+        f"{f.name}={_render(getattr(rule, f.name))}"
         for f in dataclasses.fields(rule)
         if f.init
         and f.name not in _PROSE_FIELDS
+        and f.name not in _DERIVED_FIELDS
         and getattr(rule, f.name) not in (None, False)
     ]
     return "|".join(parts) if parts else None

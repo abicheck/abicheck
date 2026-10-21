@@ -1087,10 +1087,10 @@ class TestStdReexportRemoved:
         assert c.kind == ChangeKind.STD_REEXPORT_REMOVED
         assert c.symbol == "lib::execution::par"
         assert "std::execution::par" in c.description
-        # ADR-044 D1 (Codex review): only ever emitted for a Visibility.PUBLIC
-        # function, so tagged directly at construction time.
-        assert c.public_reachable is True
-        assert c.reachability_kind == "direct_public_symbol"
+        # ADR-084: the re-export is not observed in a header, so reachability is
+        # recorded as unknown rather than asserted from the export population.
+        assert c.public_reachable is False
+        assert c.reachability_kind is None
 
     def test_reexport_kept_does_not_fire(self) -> None:
         import abicheck.demangle as dm

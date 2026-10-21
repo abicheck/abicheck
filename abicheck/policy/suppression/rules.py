@@ -46,6 +46,7 @@ from ...model.evidence_status import ReachabilityState
 from ..classification import Verdict
 from ..rule_identity import rule_identity
 from ..selectors import SelectorSet
+from .audit import SuppressionAudit as SuppressionAudit
 from .yaml_scalars import parse_finding_id, raw_finding_ids_by_index
 
 # Keys allowed in a suppression entry — unknown keys are rejected
@@ -68,6 +69,8 @@ _KNOWN_ENTRY_KEYS: frozenset[str] = frozenset(
         "allow_public_break",
         "allow_unknown_reachability",
         "finding_id",
+        #: P2: optional, file-unique user identifier (duplicate = PolicyError).
+        "id",
     }
 )
 
@@ -243,6 +246,11 @@ class Suppression:
     :attr:`allow_public_break`'s gate, since it already names one specific
     finding. Combinable with other selectors (AND semantics), though
     redundant — the id already encodes kind and identity."""
+    id: str | None = field(default=None, kw_only=True)
+    """P2 (ADR-067 D3): optional user-chosen identifier, unique within its
+    document. The audit's ``rule_id`` when set; otherwise the canonical
+    :func:`~abicheck.policy.rule_identity.rule_identity`. Never affects
+    matching."""
     #: Constructed in :meth:`__post_init__` from this class's own selector
     #: fields and delegated to for all selector validation/matching (ADR-063
     #: D10 — see the module docstring). Typed ``SelectorSet`` directly (not
@@ -564,6 +572,30 @@ def _parse_allow_unknown_reachability(raw: object, entry_index: int) -> bool:
     )
 
 
+def _parse_entry_id(raw: object, entry_index: int, seen: dict[str, int]) -> str | None:
+    """P2: validate one suppression entry's optional ``id:``; reject a repeat.
+
+    *seen* maps each id already declared earlier in the same document to its
+    entry index. A duplicate is a hard error: two rules sharing an id would be
+    indistinguishable in every audit row.
+    """
+    from ...errors import PolicyError
+
+    if raw is None:
+        return None
+    if not isinstance(raw, str) or not raw.strip():
+        raise PolicyError(
+            f"Suppression entry {entry_index}: 'id' must be a non-empty string, got {raw!r}"
+        )
+    if raw in seen:
+        raise PolicyError(
+            f"Suppression entry {entry_index}: duplicate id {raw!r} (already used by "
+            f"suppression entry {seen[raw]}); ids must be unique per file"
+        )
+    seen[raw] = entry_index
+    return raw
+
+
 @dataclass
 class SuppressionOutcome:
     """Result of :meth:`SuppressionList.evaluate` for one change (ADR-044 D4).
@@ -643,7 +675,7 @@ class SuppressionList:
         except OSError as e:
             raise OSError(f"Cannot read suppression file {path}: {e}") from e
         digest = hashlib.sha256(raw_bytes).hexdigest()
-        text = raw_bytes.decode("utf-8")
+        text = raw_bytes.decode()
 
         try:
             data = yaml.safe_load(text)
@@ -673,6 +705,7 @@ class SuppressionList:
             raise ValueError("'suppressions' must be a list")
 
         suppressions: list[Suppression] = []
+        seen_ids: dict[str, int] = {}
         for i, item in enumerate(raw_suppressions):
             if not isinstance(item, dict):
                 raise ValueError(f"Suppression entry {i} must be a mapping")
@@ -683,6 +716,7 @@ class SuppressionList:
                     f"Suppression entry {i} has unknown key(s): {sorted(unknown)}. "
                     f"Allowed keys: {sorted(_KNOWN_ENTRY_KEYS)}"
                 )
+            user_id = _parse_entry_id(item.get("id"), i, seen_ids)
             # Parse expires date
             expires = _parse_expires(item.get("expires"), i)
             allow_public_break = _parse_allow_public_break(
@@ -712,6 +746,7 @@ class SuppressionList:
                     allow_public_break=allow_public_break,
                     allow_unknown_reachability=allow_unknown_reachability,
                     expires=expires,
+                    id=user_id,
                 )
             except ValueError as e:
                 raise ValueError(f"Suppression entry {i}: {e}") from e
@@ -725,6 +760,11 @@ class SuppressionList:
             suppressions.append(sup)
 
         return cls(suppressions, source_sha256=digest, source_path=str(path))
+
+    @property
+    def rules(self) -> tuple[Suppression, ...]:
+        """The loaded rules, in file order, read-only (ADR-067 D3, P1 inventory)."""
+        return tuple(self._suppressions)
 
     def is_suppressed(self, change: Change, today: date | None = None) -> bool:
         """Return True if any active (non-expired) suppression rule matches the given change."""
@@ -957,62 +997,3 @@ class SuppressionList:
 
     def __repr__(self) -> str:
         return f"SuppressionList({len(self._suppressions)} rules)"
-
-
-@dataclass
-class SuppressionAudit:
-    """Result of auditing suppression rules against detected changes."""
-
-    stale_rules: list[Suppression]
-    """Rules that matched zero changes (likely stale or misconfigured)."""
-    high_risk_matches: list[tuple[Suppression, Change]]
-    """Suppressions that matched BREAKING changes (high risk — should require reason)."""
-    expired_rules: list[Suppression]
-    """Rules past their expiry date."""
-    near_expiry_rules: list[Suppression]
-    """Rules expiring within the near-expiry window."""
-    match_counts: dict[int, int]
-    """Per-rule match count (rule index → number of matched changes)."""
-    total_rules: int
-    """Total number of suppression rules."""
-
-    @property
-    def has_issues(self) -> bool:
-        """True if the audit found any issues worth reporting."""
-        return bool(
-            self.stale_rules
-            or self.high_risk_matches
-            or self.expired_rules
-            or self.near_expiry_rules
-        )
-
-    def summary(self) -> str:
-        """Human-readable audit summary."""
-        lines = [f"Suppression audit: {self.total_rules} rules"]
-        if self.stale_rules:
-            # Codex review, fresh evidence: this used to also print up to 5
-            # per-rule detail lines here, naming each stale rule by only its
-            # first populated selector -- two rules sharing that first
-            # selector (e.g. the same `symbol` but a different `change_kind`)
-            # rendered identically, misdirecting a reader to the wrong rule.
-            # A stable, fully-disambiguated identifier needs every matching
-            # selector (see cli_compare_fold._suppression_rule_label), which
-            # this module has no reason to duplicate -- callers that want
-            # per-rule detail (e.g. compare --audit-suppressions's markdown/
-            # JSON output) list stale_rules themselves; this summary only
-            # reports the count, matching the expired/near-expiry buckets
-            # below.
-            lines.append(f"  ⚠ {len(self.stale_rules)} stale rule(s) matched nothing")
-        if self.high_risk_matches:
-            lines.append(
-                f"  ⚠ {len(self.high_risk_matches)} suppression(s) matched BREAKING changes"
-            )
-            for _sup, change in self.high_risk_matches[:5]:
-                lines.append(f"    - {change.kind.value}: {change.symbol}")
-        if self.expired_rules:
-            lines.append(f"  ⚠ {len(self.expired_rules)} expired rule(s)")
-        if self.near_expiry_rules:
-            lines.append(f"  ℹ {len(self.near_expiry_rules)} rule(s) expiring soon")
-        if not self.has_issues:
-            lines.append("  ✓ No issues found")
-        return "\n".join(lines)

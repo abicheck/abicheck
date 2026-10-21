@@ -56,7 +56,8 @@ class TestHiddenFriendDetector:
         assert ChangeKind.HIDDEN_FRIEND_REMOVED in API_BREAK_KINDS
         # No spurious FUNC_REMOVED because visibility was HIDDEN.
         assert not any(c.kind == ChangeKind.FUNC_REMOVED for c in r.changes)
-        assert r.verdict == Verdict.API_BREAK
+        # No header observation: ADR-084 demotes this source-level claim.
+        assert r.verdict == Verdict.COMPATIBLE_WITH_RISK
 
     def test_added_hidden_friend_is_compatible_addition(self) -> None:
         old = _snap("1.0", [])

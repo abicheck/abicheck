@@ -248,7 +248,7 @@ class TestF19OutputFormatInvariance:
         facts = _canonical_facts(json.loads(result.stdout))
         assert facts["suppression_audit"] is not None
         assert facts["suppression_audit"]["stale_rules"] == [
-            "workaround (symbol=never_matches_anything)"
+            "symbol='never_matches_anything'"
         ]
 
     def test_write_is_repeatable_and_does_not_change_the_primary_result(

@@ -163,9 +163,10 @@ def test_exit_2_api_break_enum_renamed(tmp_path: Path) -> None:
     _write_snap(old_path, old)
     _write_snap(new_path, new)
 
+    # No header observation for the renamed member: ADR-084 demotes the break.
     result = runner.invoke(main, ["compare", str(old_path), str(new_path)])
-    assert result.exit_code == 2, (
-        f"Expected exit 2 (API_BREAK), got {result.exit_code}\n{result.output}"
+    assert result.exit_code == 0, (
+        f"demoted API_BREAK should exit 0, got {result.exit_code}\n{result.output}"
     )
 
 

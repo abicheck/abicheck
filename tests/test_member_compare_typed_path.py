@@ -149,6 +149,7 @@ _SAMPLES: dict[str, Any] = {
     "exclude_headers": ("d/*",),
     "acknowledgments_path": Path("a.yml"),
     "acknowledgment_unacknowledged_additions": "warn",
+    "acknowledgment_breaks": "accept",
 }
 
 

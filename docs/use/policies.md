@@ -204,6 +204,14 @@ want to see).
   over both — see [ci-gating.md](ci-gating.md) for the full classification
   order.
 - At least one selector is required, same as a suppression rule.
+- An optional `id:` names the rule in the audit. It must be unique within the
+  file (a repeat is an error). Without one, the audit identifies the rule by its
+  canonical identity, and `label`/`reason` are shown as their own fields
+  .
+- The audit lists every configured `reclassify:` rule, including one that
+  matched nothing. `matched_count` counts the findings whose verdict the rule
+  changed; `selector_matched_count` also counts findings it matched without
+  changing the verdict (a no-op, or a rule shadowed by an earlier one).
 - Active `reclassify:` rules are listed in the standard JSON report's
   `policy_reclassify` key, alongside `policy_overrides`, so a reclassified
   finding's report always carries a trace of the policy that steered it
@@ -213,6 +221,15 @@ want to see).
   the deciding rule's `label`/`reason`/`to` (`report_schema_version` 2.31+) —
   consumers like the PR-comment renderer use this to disclose the
   reclassification per-finding, not just as part of the active rule list.
+
+### Unused rules (`unused_rules`)
+
+`unused_rules: allow | warn | block` (default `allow`) at the top level of the
+policy file decides whether a configured suppression, `reclassify:` or
+acknowledgment rule that matched no finding fails the run. `block` contributes
+`1` to the exit code; `warn` only lists the rules. Only the `unused` status
+triggers it. The full rules, including when a rule reads `not_evaluated`
+instead, are in [the unused-rules axis](../reference/exit-codes.md#the-unused-rules-axis).
 
 ### Evidence-aware controls (`evidence_policy`)
 
