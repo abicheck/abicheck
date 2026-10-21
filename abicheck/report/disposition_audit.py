@@ -421,6 +421,24 @@ def add_disposition_audit(
     ).to_dict()
 
 
+def disposition_audit_reusing_document(
+    result: DiffResult,
+    severity_config: object | None,
+    report_document: ReportDocument | None,
+) -> DispositionAudit:
+    """The typed counterpart of :func:`disposition_audit_dict_reusing_document`:
+    the audit a shared ``ReportDocument`` already holds, reconstructed, or an
+    independent :func:`compute_disposition_audit` for a caller with no
+    document. Same ledger either way, so a direct caller and an envelope
+    render cannot disagree about what was disposed.
+    """
+    if report_document is None:
+        return compute_disposition_audit(result, severity_config)
+    return DispositionAudit.from_dict(
+        cast("Mapping[str, Any]", report_document.to_mapping()["disposition_audit"])
+    )
+
+
 def disposition_audit_dict_reusing_document(
     result: DiffResult,
     severity_config: object | None,
