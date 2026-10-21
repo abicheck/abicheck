@@ -29,6 +29,7 @@ from abicheck.policy.analysis_assurance import (
     ANALYSIS_ASSURANCE_SCHEMA_VERSION,
     ASSURANCE_STATUS_VALUES,
 )
+from abicheck.serialization import snapshot_to_json
 from tests._analysis_assurance_support import (
     assurance_config_args,
     breaking_pair,
@@ -124,10 +125,13 @@ class TestAnalysisAssuranceCliIntegration:
         ``tests/test_one_comparison_product_parity.py``; this only pins
         that the rejection is gone.
         """
+        old, new = header_pair()
         old_dir = tmp_path / "old"
         new_dir = tmp_path / "new"
         old_dir.mkdir()
         new_dir.mkdir()
+        (old_dir / "libfoo.json").write_text(snapshot_to_json(old), encoding="utf-8")
+        (new_dir / "libfoo.json").write_text(snapshot_to_json(new), encoding="utf-8")
         res = CliRunner().invoke(
             main,
             ["compare", str(old_dir), str(new_dir), *assurance_config_args(tmp_path)],
@@ -135,8 +139,7 @@ class TestAnalysisAssuranceCliIntegration:
         assert res.exception is None or isinstance(res.exception, SystemExit), (
             res.output
         )
-        assert "assurance.require_complete is not supported" not in res.output
-        assert "no single analysis_assurance" not in res.output
+        assert res.exit_code == 0, res.output
 
 
 # ``scan --against --require-complete-analysis``'s own CLI-integration
