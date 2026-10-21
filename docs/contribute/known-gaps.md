@@ -59,6 +59,12 @@ Each entry's status line says what is still open. A PARTIAL entry's write-up als
 
 ### False-clean risk
 
+#### A header-only default template-argument change reads `NO_CHANGE` at L2 on both backends (2026-10-21)
+
+**Status (2026-10-21): OPEN, deliberate — no detector change.** A default template argument changed on a template that nothing public names and nothing exports reads `NO_CHANGE` at L2. CastXML emits no record for an uninstantiated class template; clang has the default but does not record it. A clang-only detector was rejected because it would be a `BREAKING` verdict castxml cannot reproduce.
+
+`false-clean` — A default template argument changed on a header-only template reads `NO_CHANGE` on both backends, and the source-level consequence appears only as an L4 risk. [Full write-up](known-gaps/a-header-only-default-template-argument-change-reads-no-change-at-l2.md)
+
 #### A binary-gate demotion does not state a coverage gap (ADR-084)
 
 **Status (2026-10-21): OPEN.** When the ADR-084 gate demotes a binary-only source-level claim, the verdict narrows and the finding records its rule, but the run's coverage warnings do not change. `tests/test_family_f1_evidence_ablation.py` requires that a verdict which narrows from broken to clean because a fact became unknown carry a stated gap: lower confidence, a new coverage warning, a changed analysis-assurance record, or a higher contract-coverage floor. The demotion currently gives none of these. The fix is a coverage warning naming the unbacked claim, appended where `DiffResult.coverage_warnings` is assembled in `checker.py`. That file is at its no-growth ratchet (1407 lines), so adding it needs a responsibility moved out of `checker.py` first, not a raised baseline. The F1 cell `pimpl_inline_body_renamed` / `RecordType.source_header_fact` is the one that fails.
