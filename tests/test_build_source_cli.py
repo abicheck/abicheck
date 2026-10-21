@@ -3101,21 +3101,9 @@ def test_inline_source_changed_falls_back_to_headers_only_scope(tmp_path, monkey
 
     captured = {}
 
-    def _spy(
-        sources,
-        merged,
-        extractors,
-        *,
-        extractor,
-        scope,
-        clang_bin,
-        exported_symbols=(),
-        source_abi_cache_dir=None,
-        changed_paths=(),
-        public_header_roots=(),
-    ):
+    def _spy(sources, merged, extractors, *, scope, **kw):
         captured["scope"] = scope
-        return None, []
+        return None, [], None
 
     monkeypatch.setattr(inline, "_run_inline_source_abi", _spy)
     tree = tmp_path / "src"
@@ -3173,7 +3161,7 @@ def test_inline_unseeded_call_graph_uses_l4_selection(tmp_path, monkeypatch):
 
     def _spy(sources, merged, extractors, **kw):
         # L4 selected only a.cpp (a headers-only subset of the two-unit DB).
-        return SourceAbiSurface(), [CompileUnit(id="cu://a.cpp", source="a.cpp")]
+        return SourceAbiSurface(), [CompileUnit(id="cu://a.cpp", source="a.cpp")], None
 
     monkeypatch.setattr(inline, "_run_inline_source_abi", _spy)
     seen: list[str] = []
@@ -3196,7 +3184,7 @@ def test_inline_unseeded_call_graph_stays_broad_when_l4_selects_nothing(
     import abicheck.buildsource.inline as inline
 
     def _spy(sources, merged, extractors, **kw):
-        return None, []  # L4 could not select any units
+        return None, [], None  # L4 could not select any units
 
     monkeypatch.setattr(inline, "_run_inline_source_abi", _spy)
     seen: list[str] = []
