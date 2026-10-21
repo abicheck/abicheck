@@ -22,6 +22,8 @@ The arithmetic behind every expected value:
 
 from __future__ import annotations
 
+import logging
+
 import pytest
 
 from abicheck.buildsource.call_graph import _call_graph_jobs
@@ -134,3 +136,55 @@ def test_pool_sizing_matches_oracle(
     for module in {process_resources, source_replay.process_resources}:
         monkeypatch.setattr(module, "available_mem_gib", lambda: avail_gib)
     assert _CALLERS[caller](n_units) == expected
+
+
+_LOG = logging.getLogger("tests.bounded_jobs")
+
+
+@pytest.mark.parametrize(
+    ("env", "cpus", "ram_cap", "n_units", "expected", "level", "fragment"),
+    [
+        # explicit override, unparsable -> serial, warned
+        ("abc", 4, None, 100, 1, logging.WARNING, "not a valid integer"),
+        # explicit above the oversubscription ceiling (max(8, 2*4) = 8)
+        ("64", 4, None, 100, 8, logging.WARNING, "oversubscription ceiling"),
+        # explicit above the RAM cap -> cap, warned for OOM
+        ("5", 8, 2, 100, 2, logging.WARNING, "OOM-killing"),
+        # auto reduced by RAM -> cap, info-logged
+        (None, 8, 2, 1000, 2, logging.INFO, "reduced 8 -> 2"),
+        # explicit within every bound -> honoured, silent
+        ("3", 8, 100, 100, 3, None, None),
+        # whitespace-only override counts as unset -> auto (min(n, cpu, 8))
+        ("   ", 4, None, 100, 4, None, None),
+    ],
+)
+def test_bounded_jobs_branches(
+    monkeypatch, caplog, env, cpus, ram_cap, n_units, expected, level, fragment
+) -> None:
+    from abicheck import process_resources
+
+    monkeypatch.delenv("X_JOBS", raising=False)
+    monkeypatch.delenv("X_MEM", raising=False)
+    if env is not None:
+        monkeypatch.setenv("X_JOBS", env)
+    monkeypatch.setattr(process_resources.os, "cpu_count", lambda: cpus)
+    monkeypatch.setattr(process_resources, "available_mem_gib", lambda: 6.0)
+    with caplog.at_level(logging.INFO, logger=_LOG.name):
+        jobs = process_resources.bounded_jobs(
+            n_units,
+            jobs_env_var="X_JOBS",
+            mem_budget_env_var="X_MEM",
+            mem_budget_default_gib=3.0,
+            ram_cap=lambda: ram_cap,
+            log=_LOG,
+            what="test workers",
+            ram_hint="fewer units",
+        )
+    assert jobs == expected
+    records = [r for r in caplog.records if r.name == _LOG.name]
+    if fragment is None:
+        assert records == []
+    else:
+        assert len(records) == 1
+        assert records[0].levelno == level
+        assert fragment in records[0].getMessage()
