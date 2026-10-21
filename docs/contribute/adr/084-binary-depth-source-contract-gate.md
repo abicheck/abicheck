@@ -27,7 +27,7 @@ The export-removal kinds (`func_removed`, `var_removed`, `func_removed_elf_only`
 
 A bucket is a *claim about producibility*, and the bias is deliberate. Over-including a kind in `BINARY_GATED` costs nothing when the kind is in fact header-only: a header-backed run keeps `API_BREAK` (D3), and a binary-only run could not have produced it. Under-including a binary-producible kind would leave the bug in place. The test `test_buckets_cover_every_api_break_kind` fails when a new API_BREAK kind is added without a bucket.
 
-Membership in `BINARY_GATED` was set by reading the producers, not by probing each DWARF-level kind. Only the five kinds the probes reached (`mandatory_template_param_added`, `inline_function_removed`, `type_removed`, `experimental_removed_without_replacement`, `unspecified_return_now_named`) are verified at binary depth. The others are classified on the same reading, and the gate behaves identically for all of them. A probe that finds a kind is in fact header-only only tightens that kind's bucket.
+Membership in `BINARY_GATED` was first set by reading the producers. `tests/test_binary_gated_probe_integration.py` (2026-10-21) now probes it on real gcc `-g` libraries for every DWARF-level kind and the header-gated `param_default_value_removed`, `constant_changed` and `constant_removed` rows. No `HEADER_OR_SOURCE_GATED` kind is produced binary-only. Eight `BINARY_GATED` kinds are reached from DWARF alone and are demoted. The others are reached only with headers, because DWARF does not carry the fact their detector reads (`final`, `explicit`, `mutable`, pure-virtual, enum scoping, pointee qualifiers). They stay in `BINARY_GATED`: one fixture cannot prove that no binary-only input produces a kind, and the over-inclusion costs nothing.
 
 ### D2. Observed source-contract evidence is a fact about a declaration, not about the binary
 
@@ -98,11 +98,11 @@ Two other detectors still assert reachability for BINARY_GATED kinds (`unspecifi
 - **Predicate.** A header parse, a non-binary contract judgement and a located record are evidence; a DWARF export, a legacy `PUBLIC` visibility and a record without a header location are not.
 - **Detectors.** The two hard-coded sites now report unknown reachability without evidence and proven reachability with it.
 - **Real pipeline (`integration`).** A castxml-dumped header-backed type removal is kept; the same library dumped binary-only is demoted.
+- **Bucket probes (`integration`, `tests/test_binary_gated_probe_integration.py`).** A per-kind fixture table compares real old/new libraries binary-only and with headers. Every binary-only `API_BREAK` kind must be in `BINARY_GATED` and end at `COMPATIBLE_WITH_RISK`; a header-gated kind must be absent binary-only. Unprobed kinds carry a reason in a shrink-only table.
 - **Control.** An exported function removal stays `BREAKING`.
 
 ## Not done
 
 - `unspecified_return_now_named` and `experimental_removed_without_replacement` still assert reachability from the export population. The verdict is correct because the gate ignores tags, but the tags overstate. Tracked in `known-gaps.md`.
-- The DWARF-level bucket members are classified by reading the producers, not probed one by one (D1).
 - The kABI and Python `.pyi` axes have their own evidence gates. This ADR does not build one for them.
 - **A demotion does not yet state a coverage gap.** `tests/test_family_f1_evidence_ablation.py` requires that a run whose verdict narrows because a fact became unknown report that narrowing (a lower confidence, a new coverage warning, or a changed assurance record). A demoted finding does not do so yet: the verdict narrows and the finding records its rule, but `DiffResult.coverage_warnings` gains nothing. The natural place for that warning is `checker.py`, which is at its no-growth ratchet, so it needs a responsibility move there rather than a raised baseline. See `known-gaps.md`.
