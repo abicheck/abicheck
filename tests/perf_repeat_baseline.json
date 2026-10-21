@@ -269,6 +269,7 @@
     "abicheck/name_classification.py(is_cxx_runtime_library)": 1344,
     "abicheck/name_classification.py(is_local_rtti_symbol)": 40,
     "abicheck/name_classification.py(is_non_abi_surface_type)": 1157,
+    "abicheck/policy/binary_gate_marker.py(is_binary_gate_demoted)": 2268,
     "abicheck/policy/captured_type_identities.py(present_identities)": 2388,
     "abicheck/policy/classification.py(apply_policy_file_overrides)": 28,
     "abicheck/policy/classification.py(effective_category)": 756,
@@ -294,5 +295,5 @@
   },
   "mode": "default",
   "n": 40,
-  "total": 245107
+  "total": 247375
 }
