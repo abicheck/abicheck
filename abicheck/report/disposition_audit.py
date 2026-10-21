@@ -290,20 +290,23 @@ def fold_rule_status(statuses: Iterable[str]) -> str:
     """One status for a rule that several members of a release each report.
 
     Strongest evidence first: a rule that disposed of anything in *any* member
-    is ``active``; one that only shadowed findings is ``shadowed_only``; it is
-    ``unused`` only when every member that carries it says so (the release
-    gate's "unused in every comparison" rule). Otherwise ``expired`` or
-    ``not_evaluated`` -- never ``unused``, which would claim a check happened
-    that did not.
+    is ``active``; one that only shadowed findings is ``shadowed_only``. A
+    member whose status is ``not_evaluated`` could not evaluate the rule, so it
+    is ignored here. The rule is ``unused`` when every member that could
+    evaluate it left it unused (the release gate's "unused in every comparison
+    where it was evaluable" rule). It is ``not_evaluated`` only when no member
+    could evaluate it. ``expired`` keeps its place among the evaluable
+    statuses. Never ``unused`` when no member actually ran a check.
     """
     seen = set(statuses)
     if STATUS_ACTIVE in seen:
         return STATUS_ACTIVE
     if STATUS_SHADOWED_ONLY in seen:
         return STATUS_SHADOWED_ONLY
-    if seen == {STATUS_UNUSED}:
+    evaluable = seen - {STATUS_NOT_EVALUATED}
+    if evaluable == {STATUS_UNUSED}:
         return STATUS_UNUSED
-    if STATUS_EXPIRED in seen:
+    if STATUS_EXPIRED in evaluable:
         return STATUS_EXPIRED
     return STATUS_NOT_EVALUATED
 

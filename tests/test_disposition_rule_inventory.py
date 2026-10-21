@@ -39,12 +39,16 @@ from abicheck.policy.rule_inventory import (
     STATUS_NOT_EVALUATED,
     STATUS_SHADOWED_ONLY,
     STATUS_UNUSED,
+    RuleAuditRow,
+    RuleRef,
 )
 from abicheck.policy.suppression.rules import Suppression, SuppressionList
 from abicheck.policy_file import PolicyFile
 from abicheck.report.disposition_audit import (
     compute_disposition_audit,
     fold_disposition_audits,
+    fold_rule_rows,
+    fold_rule_status,
 )
 
 PAST = date(2000, 1, 1)
@@ -478,6 +482,53 @@ def test_fold_keeps_one_row_per_rule_and_conserves_counts() -> None:
             first.rules[index].matched_count + second.rules[index].matched_count
         )
     assert sum(dict(folded.counts).values()) == folded.detected_total
+
+
+@pytest.mark.parametrize(
+    ("member_statuses", "released"),
+    [
+        # A member that could not evaluate the rule is ignored, so the release
+        # is unused when every member that could evaluate it left it unused.
+        ((STATUS_UNUSED, STATUS_NOT_EVALUATED), STATUS_UNUSED),
+        ((STATUS_NOT_EVALUATED, STATUS_NOT_EVALUATED), STATUS_NOT_EVALUATED),
+        ((STATUS_ACTIVE, STATUS_NOT_EVALUATED), STATUS_ACTIVE),
+        # Every evaluating member must agree before the release reads unused.
+        ((STATUS_UNUSED, STATUS_ACTIVE), STATUS_ACTIVE),
+        ((STATUS_UNUSED, STATUS_UNUSED), STATUS_UNUSED),
+        ((STATUS_UNUSED, STATUS_SHADOWED_ONLY), STATUS_SHADOWED_ONLY),
+        ((STATUS_UNUSED, STATUS_EXPIRED), STATUS_EXPIRED),
+        ((STATUS_EXPIRED, STATUS_NOT_EVALUATED), STATUS_EXPIRED),
+        ((STATUS_SHADOWED_ONLY, STATUS_NOT_EVALUATED), STATUS_SHADOWED_ONLY),
+    ],
+)
+def test_release_fold_ignores_members_that_could_not_evaluate(
+    member_statuses: tuple[str, ...], released: str
+) -> None:
+    assert fold_rule_status(member_statuses) == released
+
+
+def test_release_fold_rows_read_an_unevaluated_member_as_no_evidence() -> None:
+    """One library could evaluate the rule and left it unused; the other
+    refused the detector that produces it. The release row is unused, and the
+    counts still sum across members."""
+    ref = RuleRef("suppression", "shared.yml", 0)
+
+    def row(status: str) -> RuleAuditRow:
+        return RuleAuditRow(
+            ref=ref,
+            rule_id="shared",
+            label=None,
+            reason=None,
+            expires=None,
+            status=status,
+            matched_count=0,
+            shadowed_count=0,
+            selector_matched_count=0,
+        )
+
+    (folded,) = fold_rule_rows([[row(STATUS_UNUSED)], [row(STATUS_NOT_EVALUATED)]])
+    assert folded.status == STATUS_UNUSED
+    assert folded.ref == ref
 
 
 # -- I7: the unused_rules gate ------------------------------------------------
