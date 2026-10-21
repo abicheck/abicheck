@@ -92,12 +92,14 @@ _CASE87 = (
 
 
 def _require_tools(*tools: str) -> None:
+    """Skip the calling test unless every named executable is on PATH."""
     for tool in tools:
         if shutil.which(tool) is None:
             pytest.skip(f"{tool} not installed")
 
 
 def _run_abicheck(*args: str) -> subprocess.CompletedProcess[str]:
+    """Run ``python -m abicheck`` with *args* and capture its output."""
     return subprocess.run(
         [sys.executable, "-m", "abicheck", *args],
         capture_output=True,
@@ -107,12 +109,14 @@ def _run_abicheck(*args: str) -> subprocess.CompletedProcess[str]:
 
 
 def _write_config(tmp: Path, backend: str) -> Path:
+    """Write a ``.abicheck.yml`` that pins *backend* as the header frontend."""
     cfg = tmp / f"{backend}.yml"
     cfg.write_text(f"compile:\n  frontend: {backend}\n  lang: c++\n")
     return cfg
 
 
 def _dump_header(tmp: Path, header: Path, backend: str, tag: str) -> Path:
+    """Dump *header* alone at ``--depth headers`` and return the snapshot path."""
     out = tmp / f"{tag}_{backend}.json"
     result = _run_abicheck(
         "dump",
@@ -130,6 +134,7 @@ def _dump_header(tmp: Path, header: Path, backend: str, tag: str) -> Path:
 
 
 def _compare_kinds(old: Path, new: Path, tmp: Path, backend: str) -> dict[str, Any]:
+    """Compare two snapshots and return the parsed JSON report."""
     out = tmp / f"cmp_{backend}.json"
     _run_abicheck("compare", str(old), str(new), "-o", f"json={out}")
     report = json.loads(out.read_text())
@@ -137,11 +142,13 @@ def _compare_kinds(old: Path, new: Path, tmp: Path, backend: str) -> dict[str, A
 
 
 def _kinds(report: dict[str, Any]) -> set[str]:
+    """Return the set of change kinds in a parsed report."""
     return {c["kind"] for c in report.get("changes", [])}
 
 
 @pytest.fixture()
 def header_pair(tmp_path: Path) -> tuple[Path, Path]:
+    """Old and new headers with a header-only default change."""
     old = tmp_path / "old.h"
     new = tmp_path / "new.h"
     old.write_text(_BOX_HEADER.format(default=_ONLY_OLD, api=_ONLY_API))
@@ -151,6 +158,7 @@ def header_pair(tmp_path: Path) -> tuple[Path, Path]:
 
 @pytest.fixture()
 def public_api_pair(tmp_path: Path) -> tuple[Path, Path]:
+    """Old and new headers where the default-substituted type is in a public signature."""
     old = tmp_path / "old_api.h"
     new = tmp_path / "new_api.h"
     old.write_text(_BOX_HEADER.format(default=_ONLY_OLD, api=_API))
