@@ -146,7 +146,6 @@ _SAMPLES: dict[str, Any] = {
     "env_matrix": EnvironmentMatrix(),
     "exclude_headers": ("d/*",),
     "acknowledgments_path": Path("a.yml"),
-    "acknowledgment_breaks": "accept",
     "acknowledgment_unacknowledged_additions": "warn",
     "acknowledgment_breaks": "accept",
 }
