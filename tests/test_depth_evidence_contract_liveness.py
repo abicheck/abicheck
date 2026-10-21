@@ -114,7 +114,7 @@ def test_a_linker_script_operand_is_live_on_the_typed_api(
         made.append(so if operand == "binary" else script)
 
     from abicheck.service import CompareRequest, InputSpec
-    from abicheck.service_compare_pipeline import run_compare_request
+    from abicheck.workflows.compare.execute import run_compare_request
 
     request = CompareRequest(
         old=InputSpec.of(made[0]), new=InputSpec.of(made[1]), depth="build"

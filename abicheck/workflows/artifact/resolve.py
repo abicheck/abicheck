@@ -27,7 +27,7 @@ resolver looks authoritative while being connected to nothing, which is worse
 than two implementations kept in sync by hand.
 
 Everything here was ``abicheck/service_input_resolution.py``'s, which in turn
-held it for ``service_compare_pipeline``. It kept moving inward because the
+held it for ``workflows.compare``. It kept moving inward because the
 rule it encodes is genuinely per-*input*: a change to how one artifact resolves
 must land on ``dump`` and on both ``compare`` sides at once. Pair-shaped decisions stayed behind in the pair workflow -- the
 pair-wide C++20 dialect override exists because two sides must agree on a

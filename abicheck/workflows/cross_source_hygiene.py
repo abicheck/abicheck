@@ -33,7 +33,7 @@ _origin_resolvable``/an attached L4/L5 fact), unchanged. What that slice
 added was *how a `compare()`-produced snapshot gets a resolvable origin at
 all* without ``scan --public-header-dir``: a ``-H``/``--header`` *directory*
 argument already fed ``provenance.apply_provenance`` before that PR
-(unchanged -- ``service_compare_pipeline._public_header_sets`` already
+(unchanged -- ``workflows.compare.resolve._public_header_sets`` already
 splits ``-H`` into files/directories via ``header_utils.
 split_public_header_inputs`` and folds any directory into the provenance
 set; note this is a pre-existing, narrower rule than ``scan

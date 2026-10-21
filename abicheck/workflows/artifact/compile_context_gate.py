@@ -18,7 +18,7 @@ compile_contexts``.
 
 Split out of :mod:`abicheck.workflows.artifact.execute` (Codex review, PR
 #1047, fresh evidence) rather than grown further there: both
-``execute.py`` and ``service_compare_pipeline.py`` were already at or past
+``execute.py`` and the compare pipeline (``workflows/compare/``) were already at or past
 the 800-line production cap, and this gate is a genuinely separable,
 dependency-light concern -- the one place that decides whether a resolved
 ``CompileContext`` is safe to record, and the two-sided helper built on top
@@ -69,7 +69,7 @@ def side_effective_compile_context(
     onto ``ResolvedExecutionContext.compile_contexts``, else `None`.
 
     Shared by ``service_dump_pipeline.execute_dump_request`` and
-    ``service_compare_pipeline.resolve_compare_request`` (Codex review,
+    ``workflows.compare.resolve.resolve_compare_request`` (Codex review,
     PR #1037; lifted out of the dump path's own inline conditional once the
     compare path needed the identical gate). Only when a header-AST parse
     actually ran *this invocation* (``snapshot.from_headers``), the binary

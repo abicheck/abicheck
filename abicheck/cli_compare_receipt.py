@@ -310,7 +310,7 @@ def resolve_release_pack_application(
     ``resolved_config`` (:func:`record_release_resolved_config`), via an
     *inert* application. ``policy_overrides``/``internal_namespaces`` thread
     into each library's own ``CompareRequest`` fields the same way, folded
-    per library by :func:`~abicheck.service_compare_pipeline.classify_compare_pair`.
+    per library by :func:`~abicheck.workflows.compare.execute.classify_compare_pair`.
 
     Distinct from the single-pair ``workflows.compare_configuration.
     resolve_compare_configuration``, which folds the packs into *one*

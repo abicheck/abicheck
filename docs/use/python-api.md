@@ -11,7 +11,8 @@ depends_on:
   - abicheck/workflows/request_inputs.py
   - abicheck/model/header_ast_frontends.py
   - abicheck/workflows/dump/request.py
-  - abicheck/service_compare_pipeline.py
+  - abicheck/workflows/compare/resolve.py
+  - abicheck/workflows/compare/execute.py
   - abicheck/dry_run_estimate.py
   - abicheck/deadline.py
   - abicheck/policy/depth_evidence_contract.py

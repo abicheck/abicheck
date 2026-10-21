@@ -183,7 +183,7 @@ PERFORMANCE_BUG_CLASSES: tuple[BugClass, ...] = (
                     "themselves from the same host probe but hold no shared "
                     "gate at all, so two of *those* running concurrently "
                     "still oversubscribe — the pre-existing hazard "
-                    "`service_compare_pipeline.resolve_sides_sequentially` "
+                    "`workflows.compare.resolve.resolve_sides_sequentially` "
                     "documents rather than bounds."
                 ),
                 reference="docs/contribute/plans/bug-class-regression-testing.md",

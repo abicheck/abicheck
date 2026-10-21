@@ -346,7 +346,7 @@ def compare_release_against_bundle_facts(
     # One request-local AST acquisition table for the whole BundleFacts ->
     # live fan-out, opened here in the workflow rather than in a CLI
     # adapter so a typed/Python-API caller gets the identical reuse (the
-    # same placement `service_compare_pipeline.resolve_compare_request`
+    # same placement `workflows.compare.resolve.resolve_compare_request`
     # already uses for scalar `compare`). Members of one release routinely
     # share a public header set and compile context, so without this each
     # member re-acquires -- and re-decodes, and re-normalizes -- the exact

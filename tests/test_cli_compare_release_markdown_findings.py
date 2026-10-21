@@ -136,7 +136,7 @@ class TestReleaseMarkdownCarriesSymbolNames:
         new_dir = tmp_path / "new"
         old_dir.mkdir()
         new_dir.mkdir()
-        # 15 removed functions -> more than _MAX_RELEASE_FINDINGS_PER_LIBRARY (10).
+        # 15 removed functions -> more than MAX_RELEASE_FINDINGS_PER_LIBRARY (10).
         old_funcs = [
             Function(
                 name=f"foo{i}",
@@ -162,7 +162,7 @@ class TestReleaseMarkdownCarriesSymbolNames:
         # below proves that advice is true rather than merely stated. Codex
         # review, PR #1016 had banned exactly this wording, correctly at the
         # time: the release JSON then carried the identical
-        # `_MAX_RELEASE_FINDINGS_PER_LIBRARY`-capped projection, so a reader
+        # `MAX_RELEASE_FINDINGS_PER_LIBRARY`-capped projection, so a reader
         # following it met the same truncated list again. The cap is a
         # render-time presentation choice now, and since plan slice 7m a
         # machine export can no longer be truncated at all.

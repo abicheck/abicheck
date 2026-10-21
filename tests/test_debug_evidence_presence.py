@@ -334,7 +334,7 @@ def test_compare_json_layer_coverage_matches_actual_debug_info(
     library with no ``.debug_info``. Every other test in this module stops at
     ``intrinsic_coverage()``, which is one projection short of that: it cannot
     catch a regression in how the row is carried through
-    ``service_compare_pipeline`` -> ``reporter``, and it is not the artifact a
+    ``workflows.compare`` -> ``reporter``, and it is not the artifact a
     user reads. This runs the real CLI and asserts on the real report.
 
     Parametrized both ways so "always not_collected" fails, and the ground

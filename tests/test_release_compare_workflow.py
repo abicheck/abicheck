@@ -13,7 +13,7 @@ call it the way a typed-API caller would -- ``ReleaseCompareRequest`` ->
 The invariant (root ``AGENTS.md``, "one model, any cardinality"): a member's
 result equals the scalar comparison of its own pair, for every member of a
 release of any size. The oracle is the typed scalar pipeline
-(``service_compare_pipeline.run_compare_request``) over the member's two
+(``workflows.compare.execute.run_compare_request``) over the member's two
 files, not anything the release machinery computes, and the comparison is
 over the complete rendered member report (``to_json``) with the F2 route
 oracle's normalization -- so a setting a member silently dropped shows up as
@@ -39,7 +39,7 @@ from _family_f2_routes import (
 from abicheck.reporter import to_json
 from abicheck.serialization import snapshot_to_json
 from abicheck.service import CompareRequest, InputSpec
-from abicheck.service_compare_pipeline import run_compare_request
+from abicheck.workflows.compare.execute import run_compare_request
 from abicheck.workflows.release_compare import (
     ReleaseCompareOptions,
     ReleaseCompareOutcome,

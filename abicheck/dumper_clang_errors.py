@@ -505,7 +505,7 @@ def _streaming_prune_enabled() -> bool:
     # walks the raw AST dict directly for call-graph edges -- receives THIS
     # exact tree rather than re-reading the (unpruned) cache file. The memo
     # check above cannot cover that: the two scopes are opened independently
-    # (`service_compare_pipeline` opens an acquisition scope around a whole
+    # (`workflows.compare` opens an acquisition scope around a whole
     # comparison, while `ast_memoize_scope()` is per primary dump), so a parse
     # can be shared without being memoized.
     if ast_acquisition_active():

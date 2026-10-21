@@ -15,7 +15,7 @@
 
 """``_attach_header_graph``, split out of ``service.py`` purely to stay under
 the AI-readiness 2000-line hard cap -- the identical reason `service_render.py`/
-`dry_run_estimate.py`/`service_compare_pipeline.py`/`service_dump_pipeline.py`
+`dry_run_estimate.py`/`workflows/compare/`/`service_dump_pipeline.py`
 already moved out of that file (see ``service.py``'s own tail-of-file re-export
 block for the established precedent this follows). No behavior change: same
 function body, same signature.

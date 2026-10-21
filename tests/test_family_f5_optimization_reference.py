@@ -189,7 +189,7 @@ COVERAGE: dict[str, str] = {
     # ---- pools (reference = ABICHECK_REFERENCE_MODE=1: every pool runs inline) ----
     "abicheck.process_resources::pool::BudgetedExecutor.__init__->ThreadPoolExecutor": "release.threads",
     "abicheck.workflows.keyed_thread_pool::pool::run_keyed_in_threads->BudgetedExecutor": "release.threads",
-    "abicheck.service_compare_pipeline::pool::resolve_compare_request->BudgetedExecutor": "binary.sides",
+    "abicheck.workflows.compare.resolve::pool::resolve_compare_request->BudgetedExecutor": "binary.sides",
     "abicheck.buildsource.include_graph_workers::pool::_shared_pool->BudgetedExecutor": _NEEDS_L5,
     "abicheck.buildsource.include_graph_workers::pool::_shared_pool->BudgetedExecutor#2": _NEEDS_L5,
     "abicheck.buildsource.pattern_facts::pool::find_pattern_facts->ProcessPoolExecutor": "UNCOVERED: process pool for large L4 pattern scans (threshold-gated); build-source path only",
@@ -639,7 +639,7 @@ def test_binary_parallel_sides_match_sequential(
     reference."""
     from abicheck.reporter import to_json
     from abicheck.service import CompareRequest, InputSpec
-    from abicheck.service_compare_pipeline import run_compare_request
+    from abicheck.workflows.compare.execute import run_compare_request
 
     results = {}
     for flag in ("1", "0"):

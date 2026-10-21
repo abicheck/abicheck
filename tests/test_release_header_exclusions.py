@@ -244,7 +244,9 @@ class TestExclusionRulesAreThreadedToEveryReleaseConsumer:
         new must receive the identical set. An asymmetric pair is refused
         outright by the comparability gate, so writing them to one side
         only would not be a partial fix -- it would break every run."""
-        from abicheck import service_compare_pipeline as scp
+        from abicheck.workflows.compare import (
+            execute as compare_execute,
+        )
 
         captured: dict[str, Any] = {}
 
@@ -252,16 +254,16 @@ class TestExclusionRulesAreThreadedToEveryReleaseConsumer:
             captured["request"] = request
             return None
 
-        original = scp.run_compare_request
-        scp.run_compare_request = _capture  # type: ignore[assignment]
+        original = compare_execute.run_compare_request
+        compare_execute.run_compare_request = _capture  # type: ignore[assignment]
         try:
-            scp.run_compare(
+            compare_execute.run_compare(
                 Path("old.so"),
                 Path("new.so"),
                 exclude_headers=("a.h", "b.h"),
             )
         finally:
-            scp.run_compare_request = original  # type: ignore[assignment]
+            compare_execute.run_compare_request = original  # type: ignore[assignment]
         request = captured["request"]
         assert request.old.exclude_headers == ("a.h", "b.h")
         assert request.new.exclude_headers == ("a.h", "b.h")
@@ -577,7 +579,7 @@ class TestTheReleaseIdentityIsReadFromItsMembers:
     def test_the_capture_precedes_the_strip(self) -> None:
         """An ordering guard, because the evidence is destroyed in place.
 
-        ``_strip_diff_results_and_adjust_verdict`` removes the very
+        ``project_release_library_results`` removes the very
         ``_diff_result`` the capture reads, so a capture that drifted below
         it would silently observe nothing at all and fall back to the
         request -- restoring the defect with every unit test still passing.
@@ -592,13 +594,13 @@ class TestTheReleaseIdentityIsReadFromItsMembers:
         workflow = inspect.getsource(release_compare)
         assert "observed_member_exclusion_identities(" in workflow
         assert "strip_internal_keys" not in workflow
-        assert "_strip_diff_results_and_adjust_verdict(" not in workflow
+        assert "project_release_library_results(" not in workflow
         # ...and the strip is the renderer's, which runs on the outcome the
         # workflow already returned (the capture inside it).
         cli = inspect.getsource(cli_compare_release)
         assert "observed_member_exclusion_identities(" not in cli
         render = inspect.getsource(cli_compare_release._render_release_outcome)
-        assert "_strip_diff_results_and_adjust_verdict(" in render
+        assert "project_release_library_results(" in render
         assert cli.index("outcome = execute_release_compare_checked(") < cli.index(
             "_render_release_outcome(\n                outcome,"
         ), (

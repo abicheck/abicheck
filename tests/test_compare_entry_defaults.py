@@ -22,8 +22,11 @@ from pathlib import Path
 import pytest
 from _family_f2_routes import CORPUS
 
-from abicheck import checker, service_compare_pipeline
-from abicheck.service_compare_pipeline import run_compare
+from abicheck import checker
+from abicheck.workflows.compare import (
+    execute as compare_execute,
+)
+from abicheck.workflows.compare.execute import run_compare
 from abicheck.workflows.compare_policy import compare_snapshots
 from abicheck.workflows.history import HistoryEntry, build_longitudinal_history
 from abicheck.workflows.request_inputs import InputSpec
@@ -68,7 +71,7 @@ def test_run_compare_builds_the_default_request(
         captured.append(request)
         return None
 
-    monkeypatch.setattr(service_compare_pipeline, "run_compare_request", _capture)
+    monkeypatch.setattr(compare_execute, "run_compare_request", _capture)
     old, new = Path("old.so"), Path("new.so")
     run_compare(old, new)
     assert captured == [

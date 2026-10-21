@@ -207,7 +207,7 @@ def test_resolve_compare_snapshots_resolves_old_and_new_sequentially(
     the same reading and jointly overcommit.
 
     ADR-055 D1 moved the resolution itself into the shared
-    ``service_compare_pipeline``, which *can* resolve concurrently — so the
+    ``workflows.compare``, which *can* resolve concurrently — so the
     guard is now two things, and this asserts the CLI half. The CLI passes
     ``allow_parallel=False``, which is unconditional and covers a plain
     (manifest-free) compare like the one below; the shared
@@ -955,7 +955,7 @@ class TestCompareCliSharesServiceResolution:
 
         def _spy(request, **kwargs):
             seen.append((request, kwargs))
-            from abicheck.service_compare_pipeline import ResolvedComparePair
+            from abicheck.workflows.compare_classify import ResolvedComparePair
 
             # The CLI reads only the two snapshots off the pair; the evidence
             # fields belong to the classification phase it runs on its own.

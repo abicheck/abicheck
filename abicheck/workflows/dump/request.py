@@ -26,7 +26,7 @@ arguments where ``abicheck dump`` accepts thirty.
 :func:`run_dump_request` is those steps, over the same per-input primitives
 ``compare`` resolves through (:mod:`abicheck.workflows.artifact`). It is
 the ``dump``-shaped sibling of
-:func:`abicheck.service_compare_pipeline.resolve_compare_request`, not a second
+:func:`abicheck.workflows.compare.resolve.resolve_compare_request`, not a second
 implementation of it.
 
 **Not** in scope, deliberately: the CLI's presentation and provenance layer —
@@ -184,7 +184,7 @@ def _reject_unsupported_frontends(
 ) -> None:
     """Reject the frontend/evidence combinations that have no extractor.
 
-    The single-input twin of ``service_compare_pipeline._reject_unsupported_frontends``:
+    The single-input twin of ``workflows.compare.resolve._reject_unsupported_frontends``:
     ``android`` and ``hybrid`` have no real ``embed_build_source`` extractor, so
     a raw source tree needing real extraction under either is a usage error
     rather than a silently weaker snapshot.
@@ -395,7 +395,7 @@ def execute_dump_request(
     them instead. Kept as its own keyword rather than folded into *options*
     -- it is a plain logging callback, not resolution semantics, and every
     other Tier-2 entry point in this pipeline (``run_dump_request``,
-    :func:`~abicheck.service_compare_pipeline.resolve_compare_request`)
+    :func:`~abicheck.workflows.compare.resolve.resolve_compare_request`)
     already takes ``notify`` the same way.
 
     *options* (ADR-063 Track T4, "Dump request contract"; see

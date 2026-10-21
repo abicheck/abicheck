@@ -199,7 +199,7 @@ def release_old_snapshot_pairs(
     is still stashed on each member entry; this recovers it, as a plain read
     over the entries the primary pass already produced.
 
-    Must be called before ``_strip_diff_results_and_adjust_verdict`` clears
+    Must be called before ``project_release_library_results`` clears
     those entries. Returns only the members that actually have both halves;
     ``write_bundle_facts_out`` back-fills every other key from ``old_map``,
     which is what already covers a member whose compare failed.

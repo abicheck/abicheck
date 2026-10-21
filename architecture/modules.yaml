@@ -320,7 +320,6 @@
         "abicheck/l0_export_delta.py",
         "abicheck/post_manifest.py",
         "abicheck/service_compare_evidence.py",
-        "abicheck/service_compare_pipeline.py",
         "abicheck/dumper.py",
         "abicheck/probe_harness.py",
         "abicheck/header_only_dump.py",
@@ -443,7 +442,6 @@
     ],
     "service_": [
       "service_compare_evidence.py",
-      "service_compare_pipeline.py",
       "workflows/dump/native.py",
       "service_header_graph_attach.py",
       "dry_run_estimate.py"
@@ -740,7 +738,6 @@
     "serialization.py",
     "service.py",
     "service_compare_evidence.py",
-    "service_compare_pipeline.py",
     "workflows/dump/native.py",
     "service_header_graph_attach.py",
     "dry_run_estimate.py",

@@ -908,7 +908,8 @@ class TestTheCanonicalOwnerIsClassifiedNotJustTheFacade:
         )
         # Vacuity floor only: ADR-061 moves keep shrinking the root
         # `service_*` family into workflows/ (covered by its own pattern).
-        assert len(modules) >= 4, modules
+        # Floor 4 -> 3 when service_compare_pipeline.py moved to workflows/compare/.
+        assert len(modules) >= 3, modules
         unclassified = [
             m for m in modules if not classify.changed_files_are_perf_sensitive([m])
         ]
@@ -917,6 +918,8 @@ class TestTheCanonicalOwnerIsClassifiedNotJustTheFacade:
     @pytest.mark.parametrize(
         "path",
         [
+            "abicheck/workflows/compare/resolve.py",
+            "abicheck/workflows/compare/execute.py",
             "abicheck/workflows/dump/request.py",
             "abicheck/workflows/dump/header_scoped.py",
             "abicheck/workflows/dump/elf_fallback.py",

@@ -19,7 +19,7 @@ A raw source checkout or build directory (not a prebuilt pack) is collected
 inline, by extracting its side's binary at the run's collect mode -- what
 ``abicheck dump --sources S --build-info B`` does. ``compare`` used to do it
 by running a nested ``dump`` command and comparing the temporary snapshot it
-wrote. Now the shared resolution (``service_compare_pipeline.
+wrote. Now the shared resolution (``workflows.compare.
 resolve_compare_request``) collects the side itself, and this module states
 the front-end decisions that ``dump`` command used to make for it, on the
 side's ``InputSpec``:

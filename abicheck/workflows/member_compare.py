@@ -19,7 +19,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from ..service_compare_pipeline import run_compare_request
+from .compare.execute import run_compare_request
 from .release_member_request import ReleaseMemberCompareRequest, member_compare_request
 
 if TYPE_CHECKING:

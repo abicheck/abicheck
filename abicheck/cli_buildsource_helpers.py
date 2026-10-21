@@ -130,7 +130,7 @@ def diff_embedded_build_source(
 
     Supplies the stderr sink the engine deliberately does not own; a caller
     that wants no output calls the engine directly with no sink (as
-    ``service_compare_pipeline`` does). See that function for the behaviour.
+    ``workflows.compare`` does). See that function for the behaviour.
     """
     from .buildsource.evidence_report import diff_embedded_build_source as _diff
 

@@ -251,7 +251,7 @@ def compare_snapshots(
     *new_public_entity_ids* -- ``compare()`` itself never resolves this
     (``policy/`` -> ``compare/`` stays a one-way edge), so this Tier-2
     chokepoint is where it happens for every caller that reaches ``compare()``
-    through here, ``service_compare_pipeline.classify_compare_pair`` included.
+    through here, ``workflows.compare.execute.classify_compare_pair`` included.
 
     The migrated cross-source stage (ADR-068 D3/D4/D5, see
     :func:`~abicheck.checker.compare`'s own ``cross_source_checks``
