@@ -1147,7 +1147,7 @@
     },
     {
       "path": "tests/test_build_source_cli.py",
-      "baseline_lines": 3780,
+      "baseline_lines": 3768,
       "target": "tests/unit-or-contract ownership matching production migration",
       "rule": "no_growth",
       "disposition": "migrate",

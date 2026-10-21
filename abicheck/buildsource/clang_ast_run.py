@@ -203,7 +203,7 @@ def dump_compile_unit(
     cmd = build_clang_command(
         compile_unit,
         source,
-        clang_bin=ast_clang_binary(clang_bin),
+        clang_bin=ast_clang_binary(clang_bin, compile_unit.language),
         compiler_binary=compiler_binary,
     )
     return dump_tu_ast(

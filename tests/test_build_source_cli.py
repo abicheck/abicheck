@@ -3101,20 +3101,7 @@ def test_inline_source_changed_falls_back_to_headers_only_scope(tmp_path, monkey
 
     captured = {}
 
-    def _spy(
-        sources,
-        merged,
-        extractors,
-        *,
-        extractor,
-        scope,
-        clang_bin,
-        exported_symbols=(),
-        source_abi_cache_dir=None,
-        changed_paths=(),
-        public_header_roots=(),
-        l5_wanted=False,
-    ):
+    def _spy(sources, merged, extractors, *, scope, **kw):
         captured["scope"] = scope
         return None, [], None
 

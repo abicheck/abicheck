@@ -32,6 +32,7 @@ from functools import partial
 from typing import Any
 
 from .build_evidence import CompileUnit
+from .clang_ast_run import STAGE_RUN, TuAstDump
 from .l5_ast_run import L5AstRun
 from .source_abi import SourceAbiTu
 from .source_extractors.base import SourceExtractionError
@@ -67,9 +68,18 @@ def shared_tu_work(
     Module-level so it pickles for the process pool. L4 reads the raw tree
     first; the L5 hook then materializes it in place; the tree is released
     before the macro subprocess, which is the last step.
+
+    A failure of this TU -- its command cannot be built, or L4 cannot read it
+    -- stays this TU's diagnostic. It must not raise out of the pool, which
+    would discard every other TU's result (the per-TU L4 contract).
     """
     cu, want_l4, want_l5 = item
-    dump = extractor.dump_for(cu)
+    try:
+        dump = extractor.dump_for(cu)
+    except SourceExtractionError as exc:
+        # No command, so no dump: every reader sees the same run failure a
+        # TU whose invocation failed would, with the reason as its text.
+        dump = TuAstDump(None, None, "", stage=STAGE_RUN, error=str(exc), raised=exc)
     tu: SourceAbiTu | None = None
     l4_error: str | None = None
     if want_l4:
@@ -80,7 +90,11 @@ def shared_tu_work(
     l5 = consume(dump, cu) if want_l5 else None
     dump.release()
     if tu is not None:
-        tu = extractor.finish_source_abi(cu, tu, public_header_roots=roots)
+        try:
+            tu = extractor.finish_source_abi(cu, tu, public_header_roots=roots)
+        except SourceExtractionError as exc:
+            tu = None
+            l4_error = f"{cu.source or cu.id}: {exc}"
     return (tu, l4_error), l5
 
 

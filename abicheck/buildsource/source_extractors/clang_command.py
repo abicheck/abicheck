@@ -256,18 +256,27 @@ def _clang_context_args(
     return cmd, msvc
 
 
-def ast_clang_binary(clang_bin: str) -> str:
-    """The binary every clang AST dump runs under (L4 replay and L5 passes alike).
+#: Compile-unit languages that are C, not C++. A C unit dumps under plain
+#: ``clang``, the driver L4 always used for it: ``clang++`` changes the driver's
+#: own defaults, and L4 output for a C unit must not depend on that.
+_C_LANGUAGES = frozenset({"c", "objc"})
+
+
+def ast_clang_binary(clang_bin: str, language: str = "") -> str:
+    """The binary an AST dump of a *language* unit runs under.
 
     The L5 passes always dumped under the C++ driver (``clang++``) while L4 used
-    plain ``clang``. One dump now serves both tiers, so the choice is made here:
-    the default ``clang`` runs as ``clang++`` when that is on ``PATH``. The two
-    drivers give byte-identical L4 surfaces and identical L5 edges on the same
-    translation units (checked over the catalog's C++ cases). An explicit
-    ``--clang`` binary, or a ``clang`` with no ``clang++`` beside it, runs as
-    given.
+    plain ``clang``. One dump now serves both tiers, so the choice is made here.
+    The default ``clang`` runs as ``clang++`` for a C++ unit when that is on
+    ``PATH``; a C unit stays on ``clang`` so its L4 output is what it always was.
+    An explicit ``--clang`` binary, or a ``clang`` with no ``clang++`` beside it,
+    runs as given.
     """
-    if clang_bin == "clang" and shutil.which("clang++") is not None:
+    if clang_bin != "clang":
+        return clang_bin
+    if language.lower() in _C_LANGUAGES:
+        return clang_bin
+    if shutil.which("clang++") is not None:
         return "clang++"
     return clang_bin
 

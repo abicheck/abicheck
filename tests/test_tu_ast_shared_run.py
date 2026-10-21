@@ -397,3 +397,100 @@ def test_union_argv_is_the_l4_context_plus_the_dump_tail() -> None:
     assert "-ast-dump=json" in cmd
     assert cmd[-1] == "/p/q.cpp"
     assert set(CLANG_GCC_HEADER_COMPAT_DEFINES) <= set(cmd)
+
+
+_C_SOURCE = """\
+#include <stdint.h>
+typedef struct point { int32_t x; int32_t y; } point_t;
+int add_points(point_t a, point_t b) { return a.x + b.x + a.y + b.y; }
+static int helper(int v) { return v * 2; }
+int scale(int v) { return helper(v) + (int)sizeof(point_t); }
+"""
+
+
+@pytest.mark.integration
+def test_c_unit_extracts_exactly_as_under_the_pre_change_driver(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """A C unit's L4 surface must not depend on the driver choice.
+
+    Before this change L4 dumped every unit under plain ``clang``. The pinned
+    behaviour: forcing that driver (what the old code always ran) gives the same
+    ``SourceAbiTu`` as the default path, for a C translation unit.
+    """
+    from abicheck.buildsource import clang_ast_run
+
+    src = tmp_path / "src" / "c.c"
+    src.parent.mkdir()
+    src.write_text(_C_SOURCE)
+    cu = CompileUnit(
+        id="cu://c",
+        source=str(src),
+        directory=str(tmp_path),
+        argv=["cc", "-std=c11", "-c", str(src), "-o", "c.o"],
+        language="C",
+        standard="c11",
+    )
+    roots = [str(src.parent)]
+    default = ClangSourceExtractor(clang_bin="clang").extract(
+        cu, public_header_roots=roots
+    )
+    monkeypatch.setattr(clang_ast_run, "ast_clang_binary", lambda b, _lang="": b)
+    pre_change = ClangSourceExtractor(clang_bin="clang").extract(
+        cu, public_header_roots=roots
+    )
+    assert default.to_dict() == pre_change.to_dict()
+    assert default.functions, "the C fixture produced no declarations"
+
+
+def test_c_units_keep_plain_clang_and_c_plus_plus_units_take_clang_plus_plus(
+    monkeypatch,
+) -> None:
+    from abicheck.buildsource.source_extractors import clang_command
+
+    monkeypatch.setattr(clang_command.shutil, "which", lambda b: f"/usr/bin/{b}")
+    assert clang_command.ast_clang_binary("clang", "C") == "clang"
+    assert clang_command.ast_clang_binary("clang", "OBJC") == "clang"
+    assert clang_command.ast_clang_binary("clang", "CXX") == "clang++"
+    assert clang_command.ast_clang_binary("clang", "") == "clang++"
+    # An explicit binary is never rewritten, whatever the language.
+    assert clang_command.ast_clang_binary("/opt/clang-18", "CXX") == "/opt/clang-18"
+
+
+@pytest.mark.integration
+def test_one_bad_tu_is_its_own_diagnostic_not_a_pool_failure(tmp_path: Path) -> None:
+    """A TU whose dump cannot even be commanded degrades alone.
+
+    The recorded flags pin a SYCL pass a stock clang cannot honour, so the
+    command for that TU cannot be built. Before the per-TU guard this raised
+    out of the worker and discarded every other TU's result.
+    """
+    build = _fixture_build(tmp_path)
+    bad = tmp_path / "src" / "bad.cpp"
+    bad.write_text("int bad_entry() { return 0; }\n")
+    build.compile_units.append(
+        CompileUnit(
+            id="cu://bad",
+            source=str(bad),
+            directory=str(tmp_path),
+            argv=["g++", "-std=c++17", "-fsycl-device-only", "-c", str(bad)],
+            language="CXX",
+            standard="c++17",
+            abi_relevant_flags=["-fsycl-device-only"],
+        )
+    )
+    roots = [str(tmp_path / "inc")]
+    run = plan_l5_run(build, "clang")
+    surface, diagnostics = run_source_replay(
+        build,
+        ClangSourceExtractor(clang_bin="clang"),
+        scope="target",
+        public_header_roots=roots,
+        l5_run=run,
+    )
+    # The good TUs still produced their surface and their edges.
+    assert surface.reachable_declarations, "the good TUs produced no declarations"
+    assert run.outcomes["call_graph"].result
+    # The bad TU is named in its own L4 diagnostic, and only there.
+    assert any("bad.cpp" in d for d in diagnostics), diagnostics
+    assert not any("c.c" in d or "a.cpp" in d for d in diagnostics), diagnostics
