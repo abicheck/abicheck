@@ -689,10 +689,6 @@ _ANALYSIS_BUG_CLASSES: tuple[BugClass, ...] = (
             # the readers treat a wrong-typed container as empty. Refused at
             # the projection and the L5 fold, recorded as a failure.
             "tests/test_header_graph_projection_cache.py",
-            # The same header-AST failure read the header type pass as complete:
-            # its flat fallback stamped `header_type_graph` collected from the
-            # snapshot's declarations, with the AST-only type edges never read.
-            "tests/test_header_graph_ast_failure_coverage.py",
             "tests/test_field_added_unknown_polymorphism.py",  # vtables unseen (PDB UNSUPPORTED/FAILED/empty PARTIAL) read as non-polymorphic -> appended field COMPATIBLE
         ),
         # Only the two consumer-scoping seeds reach a public surface: their integration tests drive `abicheck compare --used-by` end to end.

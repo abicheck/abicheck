@@ -175,3 +175,75 @@ def test_reference_mode_bypasses_the_disk_cache(
     runner.assert_exhausted()
     runner.assert_call_count(2)
     assert not cache_root.exists() or not any(cache_root.iterdir())
+
+
+def test_a_file_shadowing_an_earlier_search_root_invalidates_the_entry(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, cache_root: Path
+) -> None:
+    # -I a -I b: the entry resolves detail/impl.h under b. A new a/detail/impl.h
+    # changes a/detail's contents, not a's mtime, so only a witness on the
+    # candidate directory a/detail can notice it.
+    pub = tmp_path / "pub.h"
+    pub.write_text('#include "detail/impl.h"\n')
+    root_a = tmp_path / "a"
+    root_b = tmp_path / "b"
+    (root_b / "detail").mkdir(parents=True)
+    # a/detail already exists, so a later impl.h changes only a/detail's own
+    # contents and mtime, not a's.
+    (root_a / "detail").mkdir(parents=True)
+    (root_a / "detail" / "other.h").write_text("struct O {};\n")
+    b_impl = root_b / "detail" / "impl.h"
+    b_impl.write_text("struct B {};\n")
+    a_impl = root_a / "detail" / "impl.h"
+    runner = (
+        StrictProcessRunner()
+        .expect(argv_contains=[str(pub)], returns=_probe(pub, b_impl))
+        .expect(argv_contains=[str(pub)], returns=_probe(pub, a_impl))
+    ).install(monkeypatch, igw.deadline, "run_bounded")
+
+    first, _ = _extract_in([pub], [str(root_a), str(root_b)])
+    assert first == {header_node_id(str(pub)): [str(b_impl)]}
+
+    a_impl.write_text("struct A {};\n")
+    clear_include_memo()
+    second, _ = _extract_in([pub], [str(root_a), str(root_b)])
+
+    assert second == {header_node_id(str(pub)): [str(a_impl)]}
+    runner.assert_exhausted()
+    runner.assert_call_count(2)
+
+
+def test_a_new_file_in_the_includers_directory_invalidates_the_entry(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, cache_root: Path
+) -> None:
+    # A quoted #include searches the including file's own directory first, so
+    # a sub/impl.h created after caching must win over root/impl.h.
+    sub = tmp_path / "sub"
+    root = tmp_path / "root"
+    sub.mkdir()
+    root.mkdir()
+    pub = sub / "pub.h"
+    pub.write_text('#include "impl.h"\n')
+    root_impl = root / "impl.h"
+    root_impl.write_text("struct R {};\n")
+    local_impl = sub / "impl.h"
+    runner = (
+        StrictProcessRunner()
+        .expect(argv_contains=[str(pub)], returns=_probe(pub, root_impl))
+        .expect(argv_contains=[str(pub)], returns=_probe(pub, local_impl))
+    ).install(monkeypatch, igw.deadline, "run_bounded")
+
+    first, _ = _extract_in([pub], [str(root)])
+    assert first == {header_node_id(str(pub)): [str(root_impl)]}
+
+    local_impl.write_text("struct L {};\n")
+    clear_include_memo()
+    second, _ = _extract_in([pub], [str(root)])
+
+    assert second == {header_node_id(str(pub)): [str(local_impl)]}
+    runner.assert_exhausted()
+    runner.assert_call_count(2)
+
+
+def _extract_in(headers: list[Path], includes: list[str]):
+    return ClangHeaderIncludeExtractor().extract([str(h) for h in headers], includes)

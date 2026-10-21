@@ -34,10 +34,12 @@ header's ``clang -M`` result:
 
 A key match alone is not enough: the stored include closure names other
 files, and a changed *included* header changes the result without changing
-the key. So an entry also carries a witness -- the content digest of every
-file it reports, and the mtime of every include search directory (a new file
-that shadows an older one changes its directory's mtime, the same freshness
-signal the in-process memo uses). A witness mismatch is a miss.
+the key. So an entry also carries a witness: the content digest of every
+file it reports, and the mtime of each directory a new file could shadow a
+reported one from (:func:`include_witness_dirs`). A witness mismatch is a
+miss. The compiler's built-in system directories are not witnessed (their
+search list is not visible without an extra compiler call); a header added
+there that shadows a reported system header is the one residual case.
 
 A result carrying diagnostics is never stored: a partial run may be
 transient, and serving it again would pin the header as failed after the
@@ -110,6 +112,50 @@ def file_digest(path: str) -> str | None:
     return digest.hexdigest()
 
 
+#: Environment variables the compiler reads extra include directories from.
+#: They are searched after the ``-I``/``-isystem`` roots, so they change a
+#: result as much as a flag does and are keyed and witnessed the same way.
+_ENV_INCLUDE_VARS = ("CPATH", "C_INCLUDE_PATH", "CPLUS_INCLUDE_PATH")
+
+
+def environment_include_dirs() -> list[str]:
+    """The directories ``_ENV_INCLUDE_VARS`` add to the search order."""
+    dirs: list[str] = []
+    for var in _ENV_INCLUDE_VARS:
+        dirs.extend(d for d in os.environ.get(var, "").split(os.pathsep) if d)
+    return dirs
+
+
+def include_witness_dirs(files: Sequence[str], roots: Sequence[str]) -> list[str]:
+    """Directories whose mtime must not move for an entry's closure to hold.
+
+    A new file can change a reported closure in two ways, and each one lands
+    in a directory that is witnessed here:
+
+    * a quoted ``#include`` searches the includer's own directory first, and
+      every includer is in the closure, so the directory of each reported
+      file is witnessed;
+    * a file under an earlier search root can shadow a reported one, so for
+      each reported file found under some root, its relative directory is
+      witnessed under *every* root (a superset of "the roots before it").
+    """
+    abs_roots = [os.path.abspath(r) for r in roots]
+    dirs: dict[str, None] = {}
+    for f in files:
+        abs_file = os.path.abspath(f)
+        dirs[os.path.dirname(abs_file)] = None
+        for root in abs_roots:
+            try:
+                if os.path.commonpath([abs_file, root]) != root:
+                    continue
+            except ValueError:  # different drive: cannot lie under this root
+                continue
+            rel_dir = os.path.dirname(os.path.relpath(abs_file, root))
+            for candidate in abs_roots:
+                dirs[os.path.normpath(os.path.join(candidate, rel_dir))] = None
+    return list(dirs)
+
+
 def _dir_mtime(path: str) -> int:
     try:
         return os.stat(path).st_mtime_ns
@@ -124,8 +170,13 @@ def include_cache_key(
     header: str,
     header_digest: str,
     argv: Sequence[str],
+    environment: str,
 ) -> str:
-    """The entry key for one header's ``clang -M`` result."""
+    """The entry key for one header's ``clang -M`` result.
+
+    *environment* is the value of every ``_ENV_INCLUDE_VARS`` variable, joined:
+    the compiler reads them with no trace in *argv*.
+    """
     h = hashlib.sha256()
     parts = (
         INCLUDE_CACHE_SCHEMA,
@@ -135,6 +186,7 @@ def include_cache_key(
         header,
         header_digest,
         "\0".join(argv),
+        environment,
     )
     for part in parts:
         h.update(part.encode())
@@ -176,13 +228,14 @@ def load_cached_includes(key: str) -> list[str] | None:
 
 
 def store_cached_includes(
-    key: str, includes: Sequence[str], search_dirs: Sequence[str]
+    key: str, includes: Sequence[str], roots: Sequence[str]
 ) -> None:
     """Persist *includes* for *key* with a witness over its closure.
 
-    Silently skipped when a reported file cannot be read: an entry with no
-    witness for one of its files could never be validated, so it is never
-    trusted.
+    *roots* is the full search order (``-I``/``-isystem``, forced and deferred
+    roots, the environment's include paths). Silently skipped when a reported
+    file cannot be read: an entry with no witness for one of its files could
+    never be validated, so it is never trusted.
     """
     files: list[list[str]] = []
     for path in includes:
@@ -195,7 +248,7 @@ def store_cached_includes(
         "key": key,
         "includes": list(includes),
         "files": files,
-        "dirs": [[d, _dir_mtime(d)] for d in dict.fromkeys(search_dirs)],
+        "dirs": [[d, _dir_mtime(d)] for d in include_witness_dirs(includes, roots)],
     }
     try:
         _entry_path(key).write_text(json.dumps(doc, separators=(",", ":")))
@@ -224,6 +277,8 @@ def cached_include_pass(
     from .include_graph import ClangIncludeExtractor
 
     clang_identity = _tool_identity(clang_bin)
+    roots = [*search_dirs, *environment_include_dirs()]
+    environment = "\0".join(os.environ.get(v, "") for v in _ENV_INCLUDE_VARS)
     found: dict[str, list[str]] = {}
     misses: list[tuple[str, str | None, CompileUnit]] = []
     for header, unit in zip(headers, compile_units, strict=True):
@@ -237,6 +292,7 @@ def cached_include_pass(
             header=header,
             header_digest=digest,
             argv=unit.argv,
+            environment=environment,
         )
         hit = INCLUDE_DISK_CACHE.lookup(partial(load_cached_includes, key))
         if hit is None:
@@ -259,6 +315,6 @@ def cached_include_pass(
             # stored, so a header whose probe failed is retried next time.
             if miss_key is not None and not diagnostics:
                 INCLUDE_DISK_CACHE.store(
-                    partial(store_cached_includes, miss_key, paths, search_dirs)
+                    partial(store_cached_includes, miss_key, paths, roots)
                 )
     return found, diagnostics

@@ -211,6 +211,7 @@ class TestCachesMissAcrossCodeIdentity:
                 header=str(header),
                 header_digest="0" * 64,
                 argv=["clang++", "-M", str(header)],
+                environment="",
             )
 
         identity("code-A")
