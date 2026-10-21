@@ -20,6 +20,7 @@ import pytest
 from abicheck.checker import compare
 from abicheck.checker_policy import ChangeKind, ReachabilityState
 from abicheck.compare.internal_namespaces import name_segments as _name_segments
+from abicheck.impact.engine import assess_change
 from abicheck.internal_leak import (
     _build_suffix_index,
     _candidate_type_names_indirect as _cti,
@@ -41,6 +42,7 @@ from abicheck.model import (
     Visibility,
 )
 from abicheck.model.change import Change
+from abicheck.post_processing_reachability import cache_impact_assessments
 
 # ---------------------------------------------------------------------------
 # is_internal_type / segment helpers
@@ -1757,13 +1759,10 @@ class TestBuildLeakChangePreferredPath:
 
 
 class TestBuildChangeAttachesImpactAssessment:
-    """ADR-052 D2 follow-up (G29 Phase 3, scoped implementation):
-    _build_leak_change/_build_call_graph_leak_change construct their own
-    ImpactAssessment directly rather than leaving assess_change to derive
-    one later on demand."""
+    """ADR-052 D2 follow-up: the leak builders leave ImpactAssessment unset,
+    and the pipeline step caches it via cache_impact_assessments."""
 
     def test_leak_change_carries_impact_assessment(self) -> None:
-        from abicheck.impact.engine import assess_change
         from abicheck.internal_leak import _build_leak_change
 
         change = _build_leak_change(
@@ -1779,6 +1778,7 @@ class TestBuildChangeAttachesImpactAssessment:
             _snap(),
             embedded_by_value=True,
         )
+        cache_impact_assessments([change])
         assert change.impact_assessment is not None
         assert change.impact_assessment.public_reachable is True
         assert (
@@ -1791,7 +1791,6 @@ class TestBuildChangeAttachesImpactAssessment:
         assert assess_change(change) == change.impact_assessment
 
     def test_call_graph_leak_change_carries_impact_assessment(self) -> None:
-        from abicheck.impact.engine import assess_change
         from abicheck.internal_leak import _build_call_graph_leak_change
 
         change = _build_call_graph_leak_change(
@@ -1805,6 +1804,7 @@ class TestBuildChangeAttachesImpactAssessment:
             ],
             ["pub_entry -> ns::detail::helper"],
         )
+        cache_impact_assessments([change])
         assert change.impact_assessment is not None
         assert change.impact_assessment.public_reachable is True
         assert (

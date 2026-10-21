@@ -34,6 +34,8 @@ from .model.change_catalog.kinds import ChangeKind
 from .model.evidence_status import ReachabilityState
 
 if TYPE_CHECKING:
+    from collections.abc import Iterable
+
     from .model import AbiSnapshot
     from .model.change import Change
     from .policy.finding_disposition.run_state import PipelineContext
@@ -92,6 +94,22 @@ _PUBLIC_SOURCE_ABI_KINDS = frozenset(
         ChangeKind.SOURCE_TO_BINARY_MAPPING_CHANGED,
     }
 )
+
+
+def cache_impact_assessments(changes: Iterable[Change]) -> None:
+    """Cache each change's ``ImpactAssessment`` from its finalized fields.
+
+    ADR-052 D2 follow-up. The leak detectors in ``internal_leak.py`` build
+    their findings with the reachability fields already final, but they may
+    not import ``policy`` to derive the assessment, so the caller does it
+    here. Call this on a detector's output before anything later (the
+    late-finding merge, suppression) touches the change, so the cached view
+    is the one construction-time derivation would have produced.
+    """
+    from .impact.engine import assess_change
+
+    for c in changes:
+        c.impact_assessment = assess_change(c)
 
 
 class MarkReachability:

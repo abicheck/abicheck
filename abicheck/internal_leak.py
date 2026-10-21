@@ -53,7 +53,7 @@ from .compare.internal_namespaces import (
     name_segments,
     strip_template_args as _strip_template_args,
 )
-from .impact.engine import assess_change
+from .compare.layout_visibility import layout_proven_invisible
 from .model.change import Change
 from .model.change_catalog.kinds import ChangeKind
 from .model.evidence_status import ReachabilityState
@@ -69,7 +69,6 @@ from .model.name_heuristics import (
     register_name_heuristic,
     register_severity_raising_heuristic,
 )
-from .policy.layout_visibility import layout_proven_invisible
 
 if TYPE_CHECKING:
     from .model import AbiSnapshot, RecordType
@@ -344,7 +343,7 @@ INTERNAL_NAMESPACE = register_name_heuristic(
     matcher=_internal_subject,
     helpers=(is_internal_type, name_segments, _typename_is_internal),
     confirmed_by=StructuralFact(
-        "policy.layout_visibility.layout_proven_invisible", _layout_proven_invisible
+        "compare.layout_visibility.layout_proven_invisible", _layout_proven_invisible
     ),
     vocabularies=(_INTERNAL_VOCABULARY,),
     patterns=(TEMPLATE_ARG_RE,),
@@ -941,7 +940,7 @@ def compute_call_graph_leak_paths(
     for why an ordinary out-of-line exported function does not qualify),
     returning a mapping ``lookup_key -> list of formatted proof-path
     strings`` (one per public entry that reaches it, edge-kind-annotated via
-    :func:`~abicheck.buildsource.source_graph_compare.format_dependency_path`,
+    :func:`~abicheck.model.source_graph_query.format_dependency_path`,
     e.g. ``"pub() --[DECL_CALLS_DECL]--> detail::helper()"``). A path that
     only exists because it crossed a virtual/function-pointer call
     (``CALL_GRAPH_TRAVERSAL_POLICY.effect_transitions``, ADR-046 D5) is
@@ -988,9 +987,10 @@ def compute_call_graph_leak_paths(
     if graph is None or not graph.nodes:
         return {}
 
-    from abicheck.model.source_graph_query import is_consumer_compiled_public_entry
-
-    from .buildsource.source_graph_compare import format_dependency_path
+    from abicheck.model.source_graph_query import (
+        format_dependency_path,
+        is_consumer_compiled_public_entry,
+    )
 
     if not any(
         e.kind in CALL_GRAPH_TRAVERSAL_POLICY.allowed_edges for e in graph.edges
@@ -1262,16 +1262,6 @@ def _build_leak_change(
         else "pointer_or_signature",
         reachability_proof_path=path_strs[0] if path_strs else None,
     )
-    # ADR-052 D2 follow-up (G29 Phase 3, scoped implementation): construct
-    # this finding's own ImpactAssessment directly rather than leaving
-    # impact.engine.assess_change to derive it later. Safe to cache here --
-    # nothing downstream in post_processing.DEFAULT_PIPELINE (DetectInternalLeaks
-    # runs after MarkReachability, the only step that mutates these
-    # reachability/evidence fields) touches them again after this point.
-    # assess_change() itself performs the derivation, guaranteeing this is
-    # byte-identical to what an on-demand call would have produced -- not a
-    # second, independently-maintained computation.
-    change.impact_assessment = assess_change(change)
     return change
 
 
@@ -1349,7 +1339,7 @@ def detect_internal_leaks(
         # finding (a by-value member, or a just-embedded type, carries the layout).
         # The leniency needs a structural fact, not the namespace's name: the
         # layout must be proven invisible to consumers (see
-        # policy.layout_visibility). Unknown visibility keeps the finding.
+        # compare.layout_visibility). Unknown visibility keeps the finding.
         value_prop = any(_path_is_value_propagating(p) for p in side_paths)
         all_indirect = bool(side_paths) and all(
             _path_has_indirection(p) for p in side_paths
@@ -1444,8 +1434,6 @@ def _build_call_graph_leak_change(
         reachability_kind="symbol_availability",
         reachability_proof_path=proof_path,
     )
-    # ADR-052 D2 follow-up — see _build_leak_change's identical comment above.
-    change.impact_assessment = assess_change(change)
     return change
 
 

@@ -397,6 +397,11 @@ Do not re-attempt token-claiming. A header's export tokens cannot tell whether i
 **Status (re-verified 2026-10-09 at `456989f`): PARTIAL.** The compat/* modules named in the entry are gone (compat front end removed). Several named nested modules still exist with no architecture/*.yaml mention, e.g. buildsource/build_evidence.py, build_output.py, evidence_policy.py, fact_set.py, merge_support.py, source_graph.py and impact/use_case_impact.py (0 hits).  
 `hygiene` — Several nested `buildsource/` and `impact/` modules (e.g. `build_evidence.py`, `fact_set.py`, `impact/use_case_impact.py`) have no ADR-061 disposition in `architecture/*.yaml`. [Full write-up](known-gaps/adr-061-gap-f-nested-buildsourceimpact-modules-still-carry-no.md)
 
+#### `internal_leak.py` is decoupled from buildsource, impact and policy, but still sits unclassified at the repository root (ADR-061 migration, 2026-10-21)
+
+**Status (2026-10-21): PARTIAL.** The recorded blocker was buildsource decoupling. That is lifted: the module imports only `model` and `compare`-classified code, so `check_architecture.py` accepts it as a `compare` module. It is still a root module at 1571 lines, above the 800-line production cap. Its physical move and split are the remaining step, and they repoint its production and test importers, the `policy/name_heuristics` owner list and the use-case baseline keys. #1683 (open) adds `impact/use_case_reachability.py`, which can move to its owner only after this one does, so its `explain` port stays until then.
+`hygiene` — `abicheck/internal_leak.py` is an unclassified root module that holds compare-owned leak detection. Until it moves, `compare/` does not own the internal-namespace leak rule as a single module, and the `explain` port `policy/use_case_attribution.build_use_case_impact` takes cannot go away.
+
 #### A stored-`BundleFacts` baseline's narrower format set is not pre-checked by the Action
 
 **Status (re-verified 2026-10-09 at `456989f`): OPEN.** action/validate-inputs.sh:327-338 still checks only the release allowlist (json|markdown|junit|oneline|html) and has no stored-BundleFacts narrowing. No --probe-formats capability exists.  
