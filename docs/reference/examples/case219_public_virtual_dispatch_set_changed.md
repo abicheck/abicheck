@@ -47,6 +47,14 @@ only when the call, override and virtual-dispatch passes ran to completion on
 both sides. A reordered set, or a side whose passes were narrowed or degraded,
 produces no finding (see case 220 for the reordered twin).
 
+## Why this is a risk, not a break
+
+The override set is an over-approximation of a runtime decision: the source graph lists every override a virtual call through `Shape::area()` *may* reach, not the one a given call takes. A changed set therefore says the possible behavior behind a stable symbol moved. It does not prove that any consumer's call now lands in different code, so the finding is `COMPATIBLE_WITH_RISK` and never gates the exit code on its own.
+
+## What the detector does not claim
+
+It makes no clean-compatibility claim when the evidence is incomplete. A side whose call, override or virtual-dispatch pass was narrowed or degraded produces no finding, and that silence means the set was not established, not that it is unchanged.
+
 ---
 
 ## Source files

@@ -247,7 +247,7 @@ One row per `ChangeKind` (418 total). Columns fuse the verdict partition (`check
 | `public_to_internal_dependency` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L5 | `public_to_internal_dependency` | [case181](examples/case181_xcheck_public_to_internal_dependency.md) |
 | `public_typedef_removed` | api_break | `API_BREAK` | `warning` | L4 | `public_typedef_removed` | [case158](examples/case158_public_typedef_removed.md) |
 | `public_typedef_target_changed` | api_break | `API_BREAK` | `warning` | unspecified | `public_typedef_target_changed` | — |
-| `public_virtual_dispatch_set_changed` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L5 | `public_virtual_dispatch_set_changed` | — |
+| `public_virtual_dispatch_set_changed` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L5 | `public_virtual_dispatch_set_changed` | [case219](examples/case219_public_virtual_dispatch_set_changed.md) |
 | `python_abi3_dropped` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L0 | `python_abi3_dropped` | — |
 | `python_abi3_floor_raised` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L0 | `python_abi3_floor_raised` | — |
 | `python_api_callable_kind_changed` | api_break | `API_BREAK` | `warning` | L2 | `python_api_callable_kind_changed` | — |

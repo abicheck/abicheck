@@ -83,6 +83,10 @@ Each entry's status line says what is still open. A PARTIAL entry's write-up als
 **Status (updated 2026-10-14): PARTIAL, narrowed.** The header pass now marks each declaration whose body it parsed in full (`header_body` node attribute), and `PUBLIC_API_INTERNAL_DEPENDENCY_ADDED` judges call/reference edges per body seen on both sides. Still open: the edge-query coverage records (`pass_coverage_records`) still give a header pass the blanket `HEADER_INLINE_BODIES` unit, and `CALL_GRAPH_PUBLIC_ENTRY_REACHABILITY_CHANGED` still needs whole-project call coverage on both sides.  
 `false-clean` — Edge queries and the call-reachability finding still decline body-dependent edges from a header-only pass, even for a body seen on both sides. [Full write-up](known-gaps/header-body-coverage-is-not-per-body.md)
 
+#### A virtual call through an out-of-line definition is classified as direct (2026-10-21)
+
+**Status (2026-10-21): OPEN.** `call_graph.py` reads a callee's `virtual` flag from the resolved node, and an out-of-line definition carries no flag, so the call is recorded `direct`/`exact` and no `VIRTUAL_CALL_MAY_DISPATCH_TO` edge is produced. The dispatch-set detector cannot fire for such bases. `false-clean` — The call reads as exact when its targets can change. [Full write-up](known-gaps/virtual-call-through-out-of-line-definition-is-classified-direct.md)
+
 #### Type identity: typedef and tag names keyed by bare spelling
 
 `false-clean` — Two entries on one shape: a typedef's identity is its bare spelling, so a tag-namespace record and a same-spelled typedef collide in the clang parser, and typedef diffing still reads the bare-keyed `AbiSnapshot.typedefs` instead of the qualified twin.

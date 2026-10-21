@@ -38,6 +38,14 @@ in dispatch behavior.
 |---|---|
 | dispatch edges `render → Circle::area`, `render → Square::area` | the same two edges, listed in reverse order |
 
+## Why this is not a change
+
+The comparison treats a dispatch target set as a set. Reordering the same edges changes the order the graph dump lists them in, not which implementations a virtual call may reach, so the detector must stay silent here. This is what keeps a graph-dump ordering difference from being reported as a dispatch change.
+
+## What is still unverified
+
+The guarantee covers this fixture pair. It does not show that a real producer always emits its edges in a stable order; that is a property of the producer, not of this case.
+
 ---
 
 ## Source files
