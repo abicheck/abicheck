@@ -459,10 +459,8 @@ def test_distinct_rules_are_never_merged_in_the_rule_tally() -> None:
     assert {row.matched_count for row in rules} == {1, 3}
     assert sum(row.matched_count for row in rules) == 4
     # Overlap: the first rule takes the shared finding, the second shadows it.
-    assert sorted((r.matched_count, r.shadowed_count) for r in rules) == [
-        (1, 0),
-        (3, 1),
-    ]
+    pairs = sorted((r.matched_count, r.shadowed_count) for r in rules)
+    assert pairs == [(1, 0), (3, 1)]
 
 
 def test_kept_findings_split_into_gating_and_non_gating() -> None:
