@@ -453,11 +453,11 @@ class Suppression:
         (ADR-044 D2). Use :meth:`would_withhold` to detect the "selectors
         matched but a gate withheld it" case for diagnostics.
         """
-        if not self._selector_match(change, today):
-            return False
-        return self._passes_reachability_gate(
-            change
-        ) and self._passes_public_break_gate(change)
+        return self._selector_match(change, today) and self._applies(change)
+
+    def _applies(self, change: Change) -> bool:  # matches(), selectors known to match
+        reachable_ok = self._passes_reachability_gate(change)
+        return reachable_ok and self._passes_public_break_gate(change)
 
     def would_withhold(self, change: Change, today: date | None = None) -> bool:
         """True if this rule's selectors match *change*, *change* is a
@@ -479,14 +479,12 @@ class Suppression:
         ever bypasses the reachability gate for a ``BREAKING``/``API_BREAK``
         change — see :meth:`_passes_reachability_gate`).
         """
-        if not self._selector_match(change, today):
-            return False
-        if not (
-            change.public_reachable
-            and (change.kind in BREAKING_KINDS or change.kind in API_BREAK_KINDS)
-        ):
-            return False
-        return not self._passes_public_break_gate(change)
+        return self._selector_match(change, today) and self._withholds_break(change)
+
+    def _withholds_break(self, change: Change) -> bool:  # would_withhold(), matched
+        breaking = change.kind in BREAKING_KINDS or change.kind in API_BREAK_KINDS
+        withheld = bool(change.public_reachable and breaking)
+        return withheld and not self._passes_public_break_gate(change)
 
     def would_withhold_unknown_reachability(
         self, change: Change, today: date | None = None
@@ -504,13 +502,14 @@ class Suppression:
         ``Change.public_reachable``) for backward compatibility, so a rule
         using that default can never trigger this diagnostic.
         """
-        if self._resolved_reachability != "proven-unreachable-only":
-            return False
-        if not self._selector_match(change, today):
-            return False
-        if change.reachability_state != ReachabilityState.UNKNOWN:
-            return False
-        return not self.allow_unknown_reachability
+        return self._unknown_withheld(change) and self._selector_match(change, today)
+
+    def _unknown_withheld(self, change: Change) -> bool:  # ...but selector-free
+        return (
+            self._resolved_reachability == "proven-unreachable-only"
+            and change.reachability_state == ReachabilityState.UNKNOWN
+            and not self.allow_unknown_reachability
+        )
 
 
 def _parse_expires(expires_raw: object, entry_index: int) -> date | None:
@@ -812,13 +811,14 @@ class SuppressionList:
         withheld_rule: Suppression | None = None
         withheld_unknown_rule: Suppression | None = None
         for s in self._suppressions:
-            if s.matches(change, today=today):
+            # The selector test matches()/would_withhold*() each repeat, once.
+            if not s._selector_match(change, today):
+                continue
+            if s._applies(change):
                 return SuppressionOutcome(suppressed=True, matched_rule=s)
-            if withheld_rule is None and s.would_withhold(change, today=today):
+            if withheld_rule is None and s._withholds_break(change):
                 withheld_rule = s
-            if withheld_unknown_rule is None and s.would_withhold_unknown_reachability(
-                change, today=today
-            ):
+            if withheld_unknown_rule is None and s._unknown_withheld(change):
                 withheld_unknown_rule = s
         return SuppressionOutcome(
             suppressed=False,

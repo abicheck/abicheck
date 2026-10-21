@@ -82,6 +82,7 @@ import re
 import time
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
+from functools import lru_cache
 from typing import Protocol
 
 from ..model.change_catalog.kinds import ChangeKind
@@ -278,6 +279,18 @@ def _ns_match(pat: _SegmentGlobMatcher, name: str | None) -> bool:
     """
     if not name:
         return False
+    return any(pat.matches_any_ancestor(form) for form in _ns_forms(name))
+
+
+@lru_cache(maxsize=1024)
+def _ns_forms(name: str) -> tuple[str, ...]:
+    """*name*, and its demangled form when Itanium-mangled, each with template
+    arguments stripped -- what :func:`_ns_match` walks.
+
+    A pure function of *name*; cached because a suppression list asks every
+    namespace rule about the same finding's names in turn, and re-derived
+    the demangling and the template-argument strip once per rule.
+    """
     from ..demangle import demangle as _dm
 
     forms: list[str] = [name]
@@ -285,7 +298,7 @@ def _ns_match(pat: _SegmentGlobMatcher, name: str | None) -> bool:
         dm = _dm(name)
         if dm:
             forms.append(dm)
-    return any(pat.matches_any_ancestor(_strip_template_args(form)) for form in forms)
+    return tuple(_strip_template_args(form) for form in forms)
 
 
 def _matches_source_location(
