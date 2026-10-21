@@ -8,7 +8,7 @@ Which public surface reaches each ADR, which use cases it serves, and whether a 
 |---|---|
 | surfaced | 46 |
 | partial | 14 |
-| gap | 6 |
+| gap | 7 |
 | internal | 20 |
 
 ## ADRs
@@ -63,7 +63,7 @@ Which public surface reaches each ADR, which use cases it serves, and whether a 
 | [ADR-044](../adr/044-reachability-aware-suppression.md) | surfaced | — | `cli: compare --suppress`<br>`report: compare_report.suppression_audit` | — |
 | [ADR-045](../adr/045-identity-based-old-new-entity-matching.md) | internal | — | — | Old/new matching inside compare/; observable only as fewer remove+add pairs. |
 | [ADR-046](../adr/046-source-graph-identity-v2-and-evidence-merge.md) | internal | — | — | Source-graph identity and merge inside extract/; no switch or field of its own. |
-| [ADR-047](../adr/047-github-actions-integration-model.md) | partial | UC-WF-baseline | `action: actions/baseline`<br>`action: actions/check-target`<br>`action: actions/aggregate`<br>`cli: aggregate`<br>`action: expected-archive-digest`<br>`action: actions/resolve-baseline:expected-archive-digest` | P2 of the lifecycle model is only partially implemented (see the ADR). |
+| [ADR-047](../adr/047-github-actions-integration-model.md) | partial | UC-WF-baseline | `action: actions/baseline`<br>`action: actions/check-target`<br>`action: actions/aggregate`<br>`cli: aggregate`<br>`action: expected-archive-digest`<br>`action: actions/resolve-baseline:expected-archive-digest`<br>`action: verify-baseline-attestation`<br>`action: actions/resolve-baseline:verify-baseline-attestation`<br>`action: actions/stage-baseline:attest` | P2 of the lifecycle model is only partially implemented (see the ADR). |
 | [ADR-048](../adr/048-canonical-entity-identity-and-graph-reconciliation.md) | internal | — | — | Canonical entity identity in model/; no user-addressable surface. |
 | [ADR-049](../adr/049-contract-relevance-and-compatibility-configuration.md) | surfaced | UC-WF-compare | `cli: compare --contract`<br>`api: abicheck.workflows.service_requests.CompareRequest.pack_paths`<br>`api: abicheck.workflows.service_requests.CompareRequest.stated_settings`<br>`report: compare_report.contract_coverage`<br>`report: compare_report.contract_context` | — |
 | [ADR-050](../adr/050-comparability-contract-and-multi-tu-manifest.md) | surfaced | — | `cli: compare --dump-manifest`<br>`report: compare_report.comparability_assurance` | — |
@@ -97,6 +97,7 @@ Which public surface reaches each ADR, which use cases it serves, and whether a 
 | [ADR-081](../adr/081-inline-fact-reliability-and-producer-generation.md) | partial | — | — | Implemented for the stale-load gate (inline family, detector decline, coverage via the assurance status). Not surfaced as a CLI or report option of its own. Conversion of Function.is_inline to a Fact[bool] is deferred (case (a) baseline). |
 | [ADR-083](../adr/083-closure-respelling-and-persistent-export-observations.md) | gap | — | — | Proposed, not yet implemented; D1 and D2 would change verdicts, exit codes and the cross-source report surface, pending acceptance. |
 | [ADR-084](../adr/084-binary-depth-source-contract-gate.md) | surfaced | UC-WF-compare | `report: compare_report.disposition_audit` | — |
+| [ADR-085](../adr/085-template-parameter-default-arguments.md) | gap | — | — | Proposed, not accepted or implemented; no template-parameter default fact, TEMPLATE_PARAM_DEFAULT_CHANGED kind, or castxml coverage gap exists. |
 | [ADR-078](../adr/078-informational-severity-category.md) | surfaced | UC-WF-compare | `cli: compare --severity-preset`<br>`report: compare_report.summary`<br>`report: compare_report.severity` | — |
 | [ADR-079](../adr/079-partial-export-table-read-in-the-stored-snapshot.md) | gap | — | — | Proposed, not yet implemented; no per-platform export_read snapshot field exists. |
 | [ADR-080](../adr/080-persisting-the-advanced-dwarf-extraction-status.md) | gap | — | — | Proposed, not yet implemented; the advanced-DWARF extraction status is in memory only and is not persisted. |
@@ -190,7 +191,10 @@ Which public surface reaches each ADR, which use cases it serves, and whether a 
 - ADR-047 action: actions/baseline
 - ADR-047 action: actions/check-target
 - ADR-047 action: actions/resolve-baseline:expected-archive-digest
+- ADR-047 action: actions/resolve-baseline:verify-baseline-attestation
+- ADR-047 action: actions/stage-baseline:attest
 - ADR-047 action: expected-archive-digest
+- ADR-047 action: verify-baseline-attestation
 - ADR-047 cli: aggregate
 - ADR-049 api: abicheck.workflows.service_requests.CompareRequest.pack_paths
 - ADR-049 api: abicheck.workflows.service_requests.CompareRequest.stated_settings

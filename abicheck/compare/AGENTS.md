@@ -69,7 +69,12 @@ severity, or a CLI flag is in the wrong layer.
   enumerates): when the primary template is still declared once in the new
   header graph, the outcome is `func_visibility_changed` or nothing, never a
   declaration removal. Called from `diff_symbols._match_old_function`, the
-  last step before `_check_removed_function`. Limits and rejected variants:
+  last step before `_check_removed_function`. The same owner decides a
+  class-template specialization the new header stops instantiating
+  (`specialization_vanished`, read by `diff_types._diff_types` instead of
+  `type_removed`) and its members (implicit special members, methods, and,
+  through `diff_symbols_variables.removed_variable`, static data members).
+  Limits and rejected variants:
   `docs/contribute/known-gaps/class-template-specialization-members-a-new-header-stops-enumerating.md`.
 
 ## Conventions

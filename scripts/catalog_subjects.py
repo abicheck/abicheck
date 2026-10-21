@@ -67,7 +67,7 @@ class _DuplicateKeyCheckingLoader(yaml.SafeLoader):
     copy-paste) would otherwise silently drop the first entry's `cases` --
     exactly the kind of silent misclassification this whole module exists to
     close. Mirrors `catalog_classification.py`'s (and
-    `abicheck/impact/use_cases.py`'s) identical `_DuplicateKeyCheckingLoader`
+    `abicheck/policy/use_cases.py`'s) identical `_DuplicateKeyCheckingLoader`
     -- same name, same technique -- scoped to this loader class alone, not a
     process-wide `yaml` monkeypatch.
 

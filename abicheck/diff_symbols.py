@@ -121,8 +121,8 @@ from .diff_symbols_variables import (
     _check_variable,
     _is_access_narrowing,
     _var_added,
-    _var_removed,
     addition_evidence,
+    removed_variable,
     variable_type_index_for,
 )
 from .elf_symbol_filter import (
@@ -531,7 +531,7 @@ def _diff_functions(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     is_llp64 = "pe" in (getattr(old, "platform", None), getattr(new, "platform", None))
     changes: list[Change] = []
     # Once per comparison: see compare/template_instance_absence.py.
-    template_absence = TemplateInstanceAbsence(new)
+    template_absence = TemplateInstanceAbsence(new, old)
     old_map, _reconciled_new_functions = reconciled_function_surfaces(old, new)
     # ADR-049 Phase 2: the new side's matching index. A ``Mapping`` over the
     # same keys ``public_functions`` returns -- so every loop below is
@@ -787,7 +787,7 @@ def _diff_variables(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     return diff_by_key(
         SymbolIdentityIndex.for_variables(old_vars),
         new_vars_index,
-        on_removed=_var_removed,
+        on_removed=removed_variable(TemplateInstanceAbsence(new, old)),
         on_added=_var_added,
         on_common=lambda m, o, n: _check_variable(
             m,

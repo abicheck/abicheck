@@ -18,16 +18,19 @@ the per-TU argv builders that turn a ``CompileUnit`` into a ``clang``
 
 from __future__ import annotations
 
+import shutil
 from pathlib import Path
 
 from ..._compiler_options import clang_ast_dump_tail
 from ...extract.compiler_driver import is_intel_sycl_driver, needs_sycl_host_only
+from ..abi_flags import drop_code_loading_options
 from ..build_evidence import CompileUnit
 from ._argv import (
     effective_directory,
     is_msvc_mode,
     pick_compiler_binary,
     replay_extra_flags,
+    unredact_home,
 )
 from ._argv_shortopts import rebase_structured_path as _rebase_structured_path
 from .base import SourceExtractionError
@@ -250,7 +253,51 @@ def _clang_context_args(
     if needs_sycl_host_only(clang_bin, [*cmd, *extra]):
         extra = [*extra, "-fsycl-host-only"]
     cmd += extra
-    return cmd, msvc
+    # Both the AST-dump and the macro (``-E -dD``) argv carry this list, and a
+    # code-loading option runs a shared object in either, so the deny rule
+    # applies here, once, rather than in each builder.
+    return drop_code_loading_options(cmd), msvc
+
+
+#: Compile-unit languages that are C, not C++. A C unit dumps under plain
+#: ``clang``, the driver L4 always used for it: ``clang++`` changes the driver's
+#: own defaults, and L4 output for a C unit must not depend on that.
+_C_LANGUAGES = frozenset({"c", "objc"})
+
+
+def ast_clang_binary(clang_bin: str, language: str = "") -> str:
+    """The binary an AST dump of a *language* unit runs under.
+
+    The L5 passes always dumped under the C++ driver (``clang++``) while L4 used
+    plain ``clang``. One dump now serves both tiers, so the choice is made here.
+    The default ``clang`` runs as ``clang++`` for a C++ unit when that is on
+    ``PATH``; a C unit stays on ``clang`` so its L4 output is what it always was.
+    An explicit ``--clang`` binary, or a ``clang`` with no ``clang++`` beside it,
+    runs as given.
+    """
+    if clang_bin != "clang":
+        return clang_bin
+    if language.lower() in _C_LANGUAGES:
+        return clang_bin
+    if shutil.which("clang++") is not None:
+        return "clang++"
+    return clang_bin
+
+
+def compile_unit_invocation(compile_unit: CompileUnit) -> tuple[Path, str]:
+    """The source path and the directory a replay of *compile_unit* runs from.
+
+    The directory is the EFFECTIVE one: a leading ``env -C DIR`` in the recorded
+    argv means the real compiler ran from ``<directory>/DIR``, and the replayed
+    flags' relative operands (``-iquote ../include``) resolve against that. Both
+    the L4 and L5 readers replay from it, so they parse the same TU.
+    """
+    directory = unredact_home(compile_unit.directory)
+    source = Path(unredact_home(compile_unit.source))
+    if not source.is_absolute() and directory:
+        source = Path(directory) / source
+    run_directory = effective_directory(compile_unit.argv, directory) or directory
+    return source, run_directory
 
 
 def build_clang_command(
@@ -262,7 +309,17 @@ def build_clang_command(
 ) -> list[str]:
     """Build the ``clang -ast-dump=json`` argv for a compile unit's context (D2).
 
-    A clang-cl/MSVC compile unit is driven through clang's ``cl`` driver mode.
+    The one AST-dump argv: L4 replay and the L5 AST passes both run it (see
+    :mod:`..clang_ast_run`). It is the union of the flags either tier needs --
+    the L4 context, ABI-relevant flags included. A clang-cl/MSVC compile unit is
+    driven through clang's ``cl`` driver mode.
+
+    What it never carries is a code-loading option: ``-fplugin=`` and
+    ``-Xclang -load``/``-add-plugin`` run a shared object during option
+    processing, so no argv scan or ABI-flag prefix admits them. The filter is
+    applied in :func:`_clang_context_args`, which this builder and the macro
+    builder share; ``test_shared_argv_never_admits_a_code_loading_option`` in
+    ``tests/test_tu_ast_shared_run.py`` pins both.
     """
     cmd, _msvc = _clang_context_args(compile_unit, compiler_binary, clang_bin=clang_bin)
     return [clang_bin, *cmd, *clang_ast_dump_tail(str(source))]

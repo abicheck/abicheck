@@ -127,17 +127,17 @@ def test_pool_sizing_matches_oracle(
 ) -> None:
     # Another test can re-import abicheck.process_resources after collection,
     # leaving two module objects: each caller reads the one it bound (the L4
-    # and call-graph pools via source_replay, the manifest pool at call time),
+    # and call-graph pools via source_replay_pool, the manifest pool at call time),
     # so the RAM probe is patched on every one of them.
     from abicheck import process_resources
-    from abicheck.buildsource import source_replay
+    from abicheck.buildsource import source_replay_pool
 
     for var in (*_ENV_VARS.values(), *_MEM_BUDGET_VARS):
         monkeypatch.delenv(var, raising=False)
     if env is not None:
         monkeypatch.setenv(_ENV_VARS[caller], env)
     monkeypatch.setattr(process_resources.os, "cpu_count", lambda: cpus)
-    for module in {process_resources, source_replay.process_resources}:
+    for module in {process_resources, source_replay_pool.process_resources}:
         monkeypatch.setattr(module, "available_mem_gib", lambda: avail_gib)
     assert _CALLERS[caller](n_units) == expected
 

@@ -7,11 +7,11 @@ lifecycle: active
 generated: false
 ---
 
-# Class-template specialization members a new header stops enumerating (partly fixed)
+# Class-template specialization a new header stops enumerating (mostly fixed)
 
 Index: [Known gaps](../known-gaps.md)
 
-**Status (2026-10-20): PARTIAL.** A template instance whose primary template is still declared exactly once in the new header graph is no longer reported as `func_removed` or `inline_function_removed` for its mangled symbol. The export change is reported as `func_visibility_changed` (BREAKING), and nothing is reported when the new binary still exports the symbol or the old one never did (`compare/template_instance_absence.py`, called from `diff_symbols._match_old_function`). Still open: the implicit members of a class-template specialization that the new header no longer instantiates, and the specialization's own `type_removed`.
+**Status (2026-10-21): MOSTLY FIXED.** A template instance whose primary template is still declared in the new header graph is no longer reported as removed. That now covers a class-template specialization the new header stops instantiating too: the specialization reports no `type_removed`, and its implicit constructors, destructor and `operator=`, its inline methods and its static data members report no `inline_function_removed`, `func_removed` or `var_removed`. An export the new binary dropped is `func_visibility_changed` or `var_visibility_changed` (BREAKING); nothing is reported when the new binary still exports the symbol or the old one never did (`compare/template_instance_absence.py`, called from `diff_symbols` and `diff_types`). Still open: an old snapshot that does not record whether the specialization was instantiated from its primary template (clang header backend, pre-v61 snapshot) keeps the old rows.
 
 ## Why the removal was wrong
 
@@ -35,12 +35,28 @@ The rule does not apply when the primary is undeclared or declared more than onc
 
 Verified by `tests/test_template_export_loss_declaration_presence.py` (38 integration tests: 36 matrix cells built with g++ and castxml and judged by `readelf` and the header text, plus 2 controls) and `tests/test_template_export_loss_declaration_presence_unit.py` (the same invariants on constructed snapshots). With the rule disabled, the integration run fails nine cells, the exact no-instantiation template cells.
 
+## Class-template specializations (fixed 2026-10-21)
+
+castxml emits an implicit instantiation and an explicit specialization of `Box<double>` with the same attributes, so the record alone cannot say whether deleting it from the new enumeration deleted a declaration. The location can: an implicit instantiation points at the primary template's class-head (`struct Box {`), an explicit or partial specialization at its own (`struct Box<double> {`). The castxml extractor reads the declaring line and records `RecordType.specialization_declared_fact` (schema v61, `extract/headers/castxml/specialization.py`): `PRESENT(False)` for an instantiation, `PRESENT(True)` for a declared specialization, `NOT_COLLECTED` when the line cannot be read or a macro produces the declaration.
+
+For an old specialization recorded `PRESENT(False)`, whose primary class template is still declared in the new header graph (a `type://<template>` node), and which the new snapshot does not enumerate:
+
+| Row | Finding |
+|---|---|
+| the specialization record | none (no `type_removed`) |
+| a synthetic constructor/destructor key (`__abicheck_ctor__ns::Box<double>(…)`, `~ns::Box<double>`) | none: it names no symbol |
+| a mangled member (`operator=`, a method, a static data member) | the export-table table above, with `var_visibility_changed` for a variable |
+
+The member's owner is read from its spelling: the synthetic keys carry it, and a mangled member is demangled when its enclosing component carries a template-argument list. Spellings are compared without whitespace (`Box<int *>` against `Box<int*>`); a mismatch makes no claim.
+
+Kept as removals: a deleted explicit or partial specialization (`PRESENT(True)`), a removed class template, a non-template class, a member of a nested template's specialization (`Outer<int>::Inner`), and any record whose origin was not proven.
+
+Verified by `tests/test_template_export_loss_declaration_presence.py` (class-template cells: {header still instantiates, stops instantiating} x three export transitions, judged on every `Box<double>` member by `readelf` FUNC/OBJECT exports, plus explicit-specialization-removed and template-removed controls and a removed non-template class) and `tests/test_class_template_specialization_absence_unit.py` (the full truth table of the three facts, the owner parser against independently built spellings, the detectors on constructed snapshots, and the extractor's line reading). With the rule disabled, the integration run fails exactly the three stops-instantiating cells.
+
 ## What remains
 
-1. **Implicit members of a class-template specialization.** A specialization the new header stops instantiating keeps its implicit constructors, destructor and `operator=` as `inline_function_removed` (API_BREAK). The constructors and destructor are synthetic keys (`__abicheck_ctor__ns::Box<double>()`, `~ns::Box<double>`) with no mangled name. The `operator=` has a mangled name whose stem is `ns::Box::{op:aS}`, which has no header spelling this rule matches. Closing this needs the class template's own declaration as the owner, and an operator-name map from the Itanium codes.
-2. **`type_removed` for the specialization.** The type detector reports `Box<double>` as removed. That is the same root cause one level up, in the type owners (`diff_types*`), not in `diff_symbols.py`.
-
-The integration matrix asserts only the mangled symbol, so both rows stay visible in the raw report until a fix lands; a fix for them should add its own assertion.
+1. **Old snapshots without the origin fact.** The clang header backend does not record `specialization_declared_fact`, and a snapshot written before schema v61 has none, so a specialization they hold keeps `type_removed` and its members keep their removal kinds. Re-dumping the old side with castxml closes it.
+2. **A class-head the line reading cannot see.** A specialization or primary template whose class-head a macro produces reads `NOT_COLLECTED`, which keeps the removal path: a residual false positive, never a hidden removal.
 
 ## Tried and rejected
 

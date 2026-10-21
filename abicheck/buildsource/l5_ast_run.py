@@ -21,6 +21,7 @@ can name these types without importing ``l5_ast_pass``, which imports it.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
@@ -59,6 +60,11 @@ class L5AstRun:
     narrowed: bool
     scope_key: frozenset[str]
     outcomes: dict[str, AstPassOutcome] = field(default_factory=dict)
+    #: The shared L4/L5 run's hooks (set by ``l5_ast_pass.plan_l5_run``): read
+    #: one TU's AST dump into per-family results, and fold those -- in TU
+    #: input order -- into ``outcomes``. ``None`` outside a shared run.
+    consume: Callable[[Any, Any], tuple[list[Any], list[list[str]]]] | None = None
+    fold: Callable[..., dict[str, AstPassOutcome]] | None = None
 
     @property
     def clang_available(self) -> bool:

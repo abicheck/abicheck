@@ -410,6 +410,29 @@ TYPE_FACTS: list[FactDefinition] = [
         ),
     ),
     _E(
+        owner="RecordType",
+        field="specialization_declared",
+        value_type="bool",
+        producing_backends=("castxml",),
+        persisted=True,
+        identity_relevant=False,
+        comparable=False,
+        suppressible=False,
+        reportable=False,
+        lifecycle=FactLifecycle.CONSUMED,
+        consumed_by=(
+            "abicheck.compare.template_instance_absence:_instantiated_from_primary",
+        ),
+        notes=(
+            "Schema v61, no legacy sibling: for a class-template specialization "
+            "record, True when the header's own class-head declares it (explicit "
+            "or partial specialization), False when it was instantiated from the "
+            "primary template -- read by castxml from the declaring header line. "
+            "Only PRESENT(False) lets a specialization the new header stops "
+            "instantiating count as not removed; anything else keeps type_removed."
+        ),
+    ),
+    _E(
         owner="EnumType",
         field="deprecated",
         value_type="str | None",

@@ -40,6 +40,15 @@ def iso_date(value: date | None) -> str | None:
     return value.isoformat() if value is not None else None
 
 
+def _missing_evidence_json(row: RuleAuditRow) -> dict[str, object]:
+    """``missing_evidence`` (ADR-067 P1 addendum 2), on ``not_evaluated`` rows only."""
+    return (
+        {}
+        if row.missing_evidence is None
+        else {"missing_evidence": row.missing_evidence}
+    )
+
+
 def suppression_row_json(row: RuleAuditRow) -> dict[str, object]:
     """A suppression row, as JSON. Keeps the pre-P1 keys, adds the P1 ones."""
     return {
@@ -55,6 +64,7 @@ def suppression_row_json(row: RuleAuditRow) -> dict[str, object]:
         "matched_count": row.matched_count,
         "shadowed_count": row.shadowed_count,
         "selector_matched_count": row.selector_matched_count,
+        **_missing_evidence_json(row),
     }
 
 
@@ -73,6 +83,7 @@ def reclassify_row_json(row: RuleAuditRow) -> dict[str, object]:
         "changed_count": row.matched_count,
         "shadowed_count": row.shadowed_count,
         "selector_matched_count": row.selector_matched_count,
+        **_missing_evidence_json(row),
     }
 
 
@@ -85,6 +96,7 @@ def acknowledgment_row_json(row: RuleAuditRow) -> dict[str, object]:
         "expires": iso_date(row.expires),
         "status": row.status,
         "matched_count": row.matched_count,
+        **_missing_evidence_json(row),
     }
 
 
@@ -111,4 +123,7 @@ def row_from_json(kind: str, entry: Mapping[str, Any]) -> RuleAuditRow:
         selector_matched_count=int(entry.get("selector_matched_count", matched) or 0),
         intent=str(entry.get("intent") or "unspecified"),
         allow_public_break=bool(entry.get("allow_public_break", False)),
+        missing_evidence=(
+            str(entry["missing_evidence"]) if entry.get("missing_evidence") else None
+        ),
     )

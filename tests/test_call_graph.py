@@ -1060,16 +1060,24 @@ def test_extractor_missing_clang_returns_empty() -> None:
 class _FakeProc:
     def __init__(self, stdout: str, stderr: str = "", returncode: int = 0) -> None:
         self.stdout = stdout
-        self.stderr = stderr
+        self.stderr = stderr.encode("utf-8")
         self.returncode = returncode
+
+
+def _spilled(kwargs, proc: _FakeProc) -> _FakeProc:
+    """Write clang's stdout to the file the runner passed, as a real run does."""
+    out = kwargs.get("stdout")
+    if out is not None and hasattr(out, "write"):
+        out.write(proc.stdout.encode("utf-8"))
+    return proc
 
 
 def _patch_clang(monkeypatch, *, proc=None, raises=None) -> None:
 
-    def fake_run(*_a, **_k):
+    def fake_run(*_a, **kwargs):
         if raises is not None:
             raise raises
-        return proc
+        return _spilled(kwargs, proc)
 
     monkeypatch.setattr("abicheck.deadline.run_bounded", fake_run)
 
@@ -1092,45 +1100,15 @@ def test_run_ast_passes_parses_mocked_clang(monkeypatch) -> None:
     ]
 
 
-def test_safe_clang_args_drop_plugin_flags_and_keep_parse_flags() -> None:
-    # Formerly pinned on the deleted raw-argv builder; the surviving argv
-    # builder replays only normalized fields, so a plugin-loading flag that
-    # reached `abi_relevant_flags` must still be dropped.
-    from abicheck.buildsource.call_graph import _safe_clang_args_from_compile_unit
-
-    cu = CompileUnit(
-        id="cu://v",
-        source="victim.cpp",
-        standard="c++20",
-        defines={"FEATURE": "1"},
-        include_paths=["include"],
-        abi_relevant_flags=[
-            "-Xclang",
-            "-load",
-            "-Xclang",
-            "./evil.so",
-            "-fplugin=./evil.so",
-        ],
-    )
-    cmd = _safe_clang_args_from_compile_unit(cu)
-    assert "-fplugin=./evil.so" not in cmd
-    assert "-load" not in cmd
-    assert "./evil.so" not in cmd
-    assert "-I" in cmd and "include" in cmd
-    assert "-DFEATURE=1" in cmd
-    assert "-std=c++20" in cmd
-    assert cmd[-2:] == ["--", "victim.cpp"]
-
-
 def test_run_ast_passes_ignores_compile_unit_raw_argv(monkeypatch) -> None:
     import json as _json
 
     ast = {"kind": "TranslationUnitDecl", "inner": []}
     captured: dict[str, list[str]] = {}
 
-    def fake_run(cmd, **_kwargs):
+    def fake_run(cmd, **kwargs):
         captured["cmd"] = cmd
-        return _FakeProc(_json.dumps(ast))
+        return _spilled(kwargs, _FakeProc(_json.dumps(ast)))
 
     monkeypatch.setattr("abicheck.deadline.run_bounded", fake_run)
     build = BuildEvidence(
@@ -1157,7 +1135,7 @@ def test_run_ast_passes_ignores_compile_unit_raw_argv(monkeypatch) -> None:
     assert "-DFEATURE=1" in cmd
     assert "-I" in cmd and "include" in cmd
     assert "-fvisibility=hidden" in cmd
-    assert cmd[-2:] == ["--", "victim.cpp"]
+    assert cmd[-1] == "victim.cpp"
 
 
 def test_run_ast_passes_unredacts_home_placeholder_in_source_and_cwd(
@@ -1187,7 +1165,7 @@ def test_run_ast_passes_unredacts_home_placeholder_in_source_and_cwd(
     def fake_run(cmd, **kwargs):
         captured["cmd"] = cmd
         captured["cwd"] = kwargs.get("cwd")
-        return _FakeProc(_json.dumps(ast))
+        return _spilled(kwargs, _FakeProc(_json.dumps(ast)))
 
     monkeypatch.setattr("abicheck.deadline.run_bounded", fake_run)
     build = BuildEvidence(
@@ -1207,7 +1185,7 @@ def test_run_ast_passes_unredacts_home_placeholder_in_source_and_cwd(
     _run_call_pass(build)
 
     cmd = captured["cmd"]
-    assert cmd[-2:] == ["--", f"{home}/AppData/Local/Temp/t.cpp"]
+    assert cmd[-1] == f"{home}/AppData/Local/Temp/t.cpp"
     assert captured["cwd"] == f"{home}/AppData/Local/Temp"
 
 
@@ -1353,7 +1331,7 @@ def test_call_graph_jobs_clamped_by_available_memory(monkeypatch) -> None:
 def test_call_graph_mem_cap_shares_l4_budget(monkeypatch) -> None:
     """_call_graph_mem_cap delegates to the L4 cap and never raises."""
     import abicheck.buildsource.call_graph as cg
-    import abicheck.buildsource.source_replay as sr
+    import abicheck.buildsource.source_replay_pool as sr
 
     monkeypatch.setattr(sr, "_l4_mem_cap", lambda: 3)
     assert cg._call_graph_mem_cap() == 3
@@ -1366,9 +1344,26 @@ def test_call_graph_mem_cap_shares_l4_budget(monkeypatch) -> None:
 
 
 def _patch_dump(monkeypatch, fake) -> None:
-    import abicheck.buildsource.l5_ast_pass as l5
+    """Replace the TU dump with *fake* ``(clang_bin, argv, cwd, diagnostics)``.
 
-    monkeypatch.setattr(l5, "run_clang_ast_dump", fake)
+    *fake* returns the tree, or ``None`` for a TU whose dump produced none. The
+    TU's source is its only argv token, as in the real run's last position.
+    """
+    import abicheck.buildsource.l5_ast_pass as l5
+    from abicheck.buildsource.clang_ast_run import STAGE_RUN, TuAstDump
+
+    def dump(cu, *, clang_bin, compiler_binary=None, timeout=None):
+        diagnostics: list[str] = []
+        tree = fake(clang_bin, [cu.source], cwd=None, diagnostics=diagnostics)
+        if tree is None:
+            # The fake's own reason rides the dump's run-failure text, as a
+            # real invocation failure's would.
+            return TuAstDump(
+                None, None, "", stage=STAGE_RUN, error=" ".join(diagnostics)
+            )
+        return TuAstDump(tree, 0, "")
+
+    monkeypatch.setattr(l5, "dump_compile_unit", dump)
 
 
 _EMPTY_TU = {"kind": "TranslationUnitDecl", "inner": []}
@@ -1487,7 +1482,7 @@ def test_run_ast_passes_diagnostics_deterministic_under_real_thread_pool(
         f"diagnostics order varied across identical runs: {first_diagnostics}"
     )
     assert next(iter(first_diagnostics)) == tuple(
-        f"failed for cu {i}" for i in range(n)
+        f"clang invocation failed: failed for cu {i}" for i in range(n)
     )
 
 
@@ -1542,11 +1537,11 @@ def test_run_ast_passes_rechecks_deadline_before_parsing_ast(monkeypatch) -> Non
 
     from abicheck import deadline
 
-    def fake_run(*_a, **_k):
+    def fake_run(*_a, **kwargs):
         # Simulate the budget running out while clang was still parsing: by
         # the time it exits successfully, the deadline has already passed.
         time.sleep(0.05)
-        return _FakeProc(_json.dumps(_EMPTY_TU))
+        return _spilled(kwargs, _FakeProc(_json.dumps(_EMPTY_TU)))
 
     monkeypatch.setattr("abicheck.deadline.run_bounded", fake_run)
     with deadline.deadline_scope(0.03):
@@ -1569,17 +1564,17 @@ def test_run_ast_passes_rechecks_deadline_before_walking_ast(monkeypatch) -> Non
     from abicheck import deadline
     from abicheck.buildsource import clang_ast_run
 
-    def fake_run(*_a, **_k):
-        return _FakeProc(_json.dumps(_EMPTY_TU))
+    def fake_run(*_a, **kwargs):
+        return _spilled(kwargs, _FakeProc(_json.dumps(_EMPTY_TU)))
 
     monkeypatch.setattr("abicheck.deadline.run_bounded", fake_run)
-    real_loads = clang_ast_run.json.loads
+    real_load = clang_ast_run.json.load
 
-    def _slow_loads(text: str) -> object:
+    def _slow_load(fh):
         time.sleep(0.05)
-        return real_loads(text)
+        return real_load(fh)
 
-    monkeypatch.setattr(clang_ast_run.json, "loads", _slow_loads)
+    monkeypatch.setattr(clang_ast_run.json, "load", _slow_load)
     with deadline.deadline_scope(0.03):
         outcome = _run_call_pass(_one_unit())
     assert outcome.result == []

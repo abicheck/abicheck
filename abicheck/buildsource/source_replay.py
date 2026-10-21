@@ -50,9 +50,10 @@ from collections.abc import Iterable, Mapping, Sequence
 from functools import partial
 from pathlib import Path
 
-from .. import deadline, process_resources
+from .. import deadline
 from ..storage.code_identity import abicheck_code_fingerprint
 from .build_evidence import BuildEvidence, CompileUnit, Target
+from .l5_ast_run import L5AstRun
 from .source_abi import SOURCE_ABI_VERSION, SourceAbiSurface, SourceAbiTu
 from .source_extractors._argv import (
     is_msvc_mode,
@@ -61,7 +62,12 @@ from .source_extractors._argv import (
 )
 from .source_extractors.base import SourceAbiExtractor, SourceExtractionError
 from .source_link import link_source_abi
-from .source_replay_pool import _extract_cache_misses
+from .source_replay_pool import (
+    _extract_cache_misses,
+    _l4_jobs,
+    _l4_use_process_pool,
+)
+from .source_replay_shared import run_shared_dumps, shares_ast_dump
 
 _log = logging.getLogger(__name__)
 
@@ -850,6 +856,7 @@ def run_source_replay(
     public_header_roots: Sequence[str] | None = None,
     cache: SourceAbiCache | None = None,
     include_map: Mapping[str, Iterable[str]] | None = None,
+    l5_run: L5AstRun | None = None,
 ) -> tuple[SourceAbiSurface, list[str]]:
     """Run source ABI replay over a build tree and return the linked surface.
 
@@ -861,6 +868,12 @@ def run_source_replay(
 
     An empty selection (e.g. ``scope='off'`` or a ``changed`` scope with no
     matching paths) yields an empty surface and no diagnostics.
+
+    With *l5_run* (a :func:`~.l5_ast_pass.plan_l5_run` scope) and an extractor
+    that reads a shared AST dump (:func:`~.source_replay_shared.shares_ast_dump`), the L5 AST passes
+    run in this same pass: a TU that both tiers read is dumped once, and
+    ``l5_run.outcomes`` is filled from it. Without that, the caller runs the L5
+    passes itself.
     """
     roots = (
         list(public_header_roots)
@@ -891,13 +904,24 @@ def run_source_replay(
     )
     cache_elapsed = time.monotonic() - cache_started
 
-    jobs = _l4_jobs(len(misses))
-    miss_units = [units[i] for i in misses]
-    worker = partial(_extract_one, extractor, list(roots or []))
     extract_started = time.monotonic()
-    extracted = _extract_cache_misses(
-        worker, miss_units, jobs, use_process_pool=_l4_use_process_pool()
-    )
+    if l5_run is not None and shares_ast_dump(extractor):
+        jobs, extracted = run_shared_dumps(
+            extractor,
+            roots,
+            units,
+            misses,
+            l5_run,
+            jobs_for=_l4_jobs,
+            use_process_pool=_l4_use_process_pool(),
+        )
+    else:
+        jobs = _l4_jobs(len(misses))
+        miss_units = [units[i] for i in misses]
+        worker = partial(_extract_one, extractor, list(roots or []))
+        extracted = _extract_cache_misses(
+            worker, miss_units, jobs, use_process_pool=_l4_use_process_pool()
+        )
     extract_elapsed = time.monotonic() - extract_started
 
     tus, diagnostics = _assemble_replay_results(
@@ -1047,114 +1071,6 @@ def _record_replay_coverage(
             "headers-only had no include graph/public-header target ownership; "
             "selected every compile unit"
         )
-
-
-#: Hard ceiling on the L4 worker count. Each worker drives a heavyweight clang
-#: process (one TU, single-threaded); past ~2× the CPU count the processes only
-#: contend for cores and the L3/L5/serialization serial fraction dominates anyway
-#: (skills-src/evaluation/field/SCALING.md saw jobs=8 on 4 CPUs *regress*). The explicit
-#: ``ABICHECK_L4_JOBS`` override is clamped to this so a stray ``=64`` can't
-#: thrash the host — a warning is logged when it is.
-#:
-#: Delegates to :mod:`abicheck.process_resources` (G32 Phase E) — the same
-#: leaf module :mod:`abicheck.extract.headers.manifest`'s per-TU pool sizes itself
-#: from, so the two pools share one RAM-probing/ceiling implementation
-#: rather than two independently-maintained copies.
-def _l4_jobs_ceiling() -> int:
-    return process_resources.jobs_ceiling()
-
-
-#: Rough peak resident memory budget per concurrent L4 worker (GiB). A heavily
-#: templated C++ TU's ``clang -ast-dump=json`` output — and its in-Python parse —
-#: can reach several GiB, so the *default* worker count is sized to available RAM
-#: as well as CPU count: a low-memory host oversubscribing giant ASTs into one
-#: process is how the UXL oneTBB/oneDNN ``s5``/``s6`` replay got OOM-killed (the
-#: kernel SIGKILLs the whole replay → ``exit -9``, all L4 work lost). Tunable via
-#: ``ABICHECK_L4_JOB_MEM_GIB``; the cap is skipped when RAM can't be read.
-_L4_JOB_MEM_BUDGET_GIB = 3.0
-
-# G32 Phase E: the RAM-probing internals (meminfo/cgroup parsing) live in
-# abicheck.process_resources now — see this module's own "RAM-aware worker
-# sizing" note above the ThreadPoolExecutor split. This module keeps thin
-# ABICHECK_L4_*-named wrappers (unchanged log messages) rather than calling
-# process_resources directly everywhere, so ABICHECK_L4_JOBS/
-# ABICHECK_L4_JOB_MEM_GIB callers and their own dedicated policy tests
-# (test_l4_perf.py) are unaffected; the low-level probe tests themselves
-# moved to test_process_resources.py, which targets process_resources
-# directly (a refactor test, not new coverage).
-
-
-def _l4_available_mem_gib() -> float | None:
-    """Best-effort available RAM in GiB, honouring cgroup limits in containers.
-
-    Returns the *smaller* of host ``MemAvailable`` and the cgroup memory headroom
-    so a process confined to a small cgroup on a large host still sizes its L4
-    worker count to what it is actually allowed to use. ``None`` when neither
-    source is readable (non-Linux / sandbox), which skips the memory clamp.
-    """
-    return process_resources.available_mem_gib()
-
-
-def _l4_job_mem_budget_gib() -> float:
-    """Per-worker RAM budget (GiB) for the L4 memory cap.
-
-    ``ABICHECK_L4_JOB_MEM_GIB`` overrides the :data:`_L4_JOB_MEM_BUDGET_GIB`
-    default (floored at 0.25 GiB); an unparsable value falls back to the default.
-    """
-    return process_resources.job_mem_budget_gib(
-        "ABICHECK_L4_JOB_MEM_GIB", _L4_JOB_MEM_BUDGET_GIB
-    )
-
-
-def _l4_mem_cap() -> int | None:
-    """Max L4 workers that fit in available RAM, or ``None`` when RAM can't be read."""
-    avail = _l4_available_mem_gib()
-    if avail is None:
-        return None
-    return max(1, int(avail / _l4_job_mem_budget_gib()))
-
-
-def _l4_jobs(n_units: int) -> int:
-    """Worker count for parallel L4 extraction (P06).
-
-    ``ABICHECK_L4_JOBS`` overrides (set ``1`` to force serial — used by tests to
-    prove determinism). Otherwise auto: one worker per cache-miss TU, capped at
-    the CPU count and 8 (clang is heavy; more workers mostly add contention).
-
-    Both the auto default and an explicit override are additionally capped by
-    *available memory* (``_l4_mem_cap``): a single template-heavy TU's clang JSON
-    AST can be multiple GiB, so N concurrent workers in one process can exhaust a
-    low-memory host and get the whole replay OOM-killed. The memory clamp prevents
-    that (set ``ABICHECK_L4_JOB_MEM_GIB`` to tune, or seed/scope the scan to fewer
-    TUs); like the oversubscription ceiling, a clamp is logged, never silent.
-    """
-    return process_resources.bounded_jobs(
-        n_units,
-        jobs_env_var="ABICHECK_L4_JOBS",
-        mem_budget_env_var="ABICHECK_L4_JOB_MEM_GIB",
-        mem_budget_default_gib=_L4_JOB_MEM_BUDGET_GIB,
-        ram_cap=_l4_mem_cap,
-        log=_log,
-        what="L4 workers",
-        ram_hint="seed/scope the scan to fewer TUs",
-    )
-
-
-def _l4_use_process_pool() -> bool:
-    """Whether to run the L4 extract phase in a process pool rather than threads.
-
-    After clang returns, the extractor parses clang's (large) JSON AST dump and
-    builds structural fingerprints — pure-Python, **GIL-bound** work. A thread
-    pool therefore parallelizes only the clang subprocess wait, not that
-    post-processing, so the AST work serializes on the GIL (part of the Amdahl
-    serial fraction in skills-src/evaluation/field/SCALING.md). A *process* pool parallelizes both, at
-    the cost of pickling each ``SourceAbiTu`` back and per-process spawn.
-
-    Opt-in via ``ABICHECK_L4_EXECUTOR=process`` (default ``thread``) so the
-    measured win can be validated (``skills-src/evaluation/field/scaling.py``) before it becomes the
-    default; an unrecognized value falls back to threads.
-    """
-    return os.environ.get("ABICHECK_L4_EXECUTOR", "thread").strip().lower() == "process"
 
 
 def _extract_one(

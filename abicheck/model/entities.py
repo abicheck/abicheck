@@ -343,6 +343,17 @@ class RecordType:
     source_header_fact: Fact[str | None] | None = field(default=None, kw_only=True)
     # ADR-063 Phase 5 (ninth batch) -- case (a), see the field's own comment.
     deprecated_fact: Fact[str | None] | None = field(default=None, kw_only=True)
+    # Schema v61, no legacy sibling: for a class-template specialization record
+    # (``Box<double>``), PRESENT(True) when the header's own class-head declares
+    # it (an explicit or partial specialization), PRESENT(False) when it was
+    # instantiated from the primary template's declaration. castxml reads it
+    # from the declaring header line (extract/headers/castxml/specialization.py);
+    # any other producer, a non-specialization record, or a pre-v61 snapshot has
+    # no PRESENT value. Only PRESENT(False) lets compare/template_instance_absence
+    # treat a specialization the new header stops instantiating as not removed.
+    specialization_declared_fact: Fact[bool] | None = field(
+        default=None, kw_only=True, compare=False
+    )
 
     def __post_init__(
         self,
