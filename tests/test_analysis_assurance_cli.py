@@ -82,6 +82,9 @@ class TestAnalysisAssuranceCliIntegration:
             "-o",
             "json=-",
         )
+        assert res.exception is None or isinstance(res.exception, SystemExit), (
+            res.output
+        )
         assert res.exit_code == 1, res.output
         # The floor diagnostic is echoed to stderr (see
         # test_the_floor_diagnostic_is_echoed_to_stderr's sibling in
@@ -94,6 +97,9 @@ class TestAnalysisAssuranceCliIntegration:
         self, tmp_path: Path
     ) -> None:
         res = compare_cli(tmp_path, elf_only_pair(), "--require-complete-analysis")
+        assert res.exception is None or isinstance(res.exception, SystemExit), (
+            res.output
+        )
         assert res.exit_code == 1, res.output
 
     def test_flag_never_lowers_a_real_abi_break_end_to_end(
@@ -125,6 +131,9 @@ class TestAnalysisAssuranceCliIntegration:
         res = CliRunner().invoke(
             main,
             ["compare", str(old_dir), str(new_dir), *assurance_config_args(tmp_path)],
+        )
+        assert res.exception is None or isinstance(res.exception, SystemExit), (
+            res.output
         )
         assert "assurance.require_complete is not supported" not in res.output
         assert "no single analysis_assurance" not in res.output
@@ -176,6 +185,9 @@ class TestScopedExitFloorAppliedBeforeRendering:
         # process even though the *scoped* verdict itself is compatible (the
         # ELF-only fixture's incompleteness is what --require-complete-analysis
         # is catching, not a real ABI break).
+        assert res.exception is None or isinstance(res.exception, SystemExit), (
+            res.output
+        )
         assert res.exit_code == 1, res.output
         out = res.stdout
         doc = json.loads(out[out.index("{") :])
@@ -204,6 +216,9 @@ class TestScopedExitFloorAppliedBeforeRendering:
                 *assurance_config_args(tmp_path),
             ],
         )
+        assert res.exception is None or isinstance(res.exception, SystemExit), (
+            res.output
+        )
         assert res.exit_code == 1, res.output
         assert 'name="abicheck.gate_exit_code" value="0"' in res.stdout
         assert 'name="abicheck.scoped_exit_code" value="0"' in res.stdout
@@ -225,6 +240,9 @@ class TestScopedExitFloorAppliedBeforeRendering:
                 "_Z5pub_av",
                 *assurance_config_args(tmp_path),
             ],
+        )
+        assert res.exception is None or isinstance(res.exception, SystemExit), (
+            res.output
         )
         assert res.exit_code == 1, res.output
         assert "Analysis assurance incomplete" in res.output

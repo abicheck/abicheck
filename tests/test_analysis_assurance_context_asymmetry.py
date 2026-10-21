@@ -77,6 +77,9 @@ class TestHeaderContextAsymmetry:
             "--require-complete-analysis",
             scoped=False,
         )
+        assert res.exception is None or isinstance(res.exception, SystemExit), (
+            res.output
+        )
         assert res.exit_code != 0, res.output
 
 
@@ -149,6 +152,9 @@ class TestDwarfContextAsymmetry:
             (old, new),
             "--require-complete-analysis",
             scoped=False,
+        )
+        assert res.exception is None or isinstance(res.exception, SystemExit), (
+            res.output
         )
         assert res.exit_code != 0, res.output
 
@@ -226,6 +232,9 @@ class TestL0ContextAsymmetry:
             (old, new),
             "--require-complete-analysis",
             scoped=False,
+        )
+        assert res.exception is None or isinstance(res.exception, SystemExit), (
+            res.output
         )
         assert res.exit_code != 0, res.output
 
@@ -373,5 +382,8 @@ class TestDwarfChannelAsymmetry:
             tmp_path,
             (old, new),
             *assurance_config_args(tmp_path, scoped=False),
+        )
+        assert res.exception is None or isinstance(res.exception, SystemExit), (
+            res.output
         )
         assert res.exit_code != 0, res.output

@@ -211,6 +211,9 @@ class TestAnalysisAssuranceOutOfBandPack:
         )
         # This is the whole point of --require-complete-analysis: a partial
         # out-of-band pack must not be able to exit 0.
+        assert res.exception is None or isinstance(res.exception, SystemExit), (
+            res.output
+        )
         assert res.exit_code != 0, res.output
 
     def test_out_of_band_pack_beats_absent_embedded_snapshot_directly(self) -> None:
@@ -316,6 +319,9 @@ class TestAnalysisAssurancePartialManifestLayer:
                 str(new_p),
                 *assurance_config_args(tmp_path),
             ],
+        )
+        assert res.exception is None or isinstance(res.exception, SystemExit), (
+            res.output
         )
         assert res.exit_code != 0, res.output
 
@@ -427,6 +433,7 @@ class TestExportAccountingBothSides:
                     "symbols_without_decl": ["a"],
                     "decls_without_symbol": [],
                 },
+                coverage={"compile_units_selected": 1, "compile_units_parsed": 1},
             ),
         )
         new.build_source = BuildSourcePack(
@@ -437,6 +444,7 @@ class TestExportAccountingBothSides:
                     "public_header_declarations": [],
                     "forced_public": [],
                 },
+                coverage={"compile_units_selected": 1, "compile_units_parsed": 1},
             ),
         )
         old_p, new_p = write_snapshot_pair(tmp_path, old, new)
@@ -448,5 +456,8 @@ class TestExportAccountingBothSides:
                 str(new_p),
                 *assurance_config_args(tmp_path),
             ],
+        )
+        assert res.exception is None or isinstance(res.exception, SystemExit), (
+            res.output
         )
         assert res.exit_code != 0, res.output
