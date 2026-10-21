@@ -413,6 +413,9 @@ adrs:
       - cli: aggregate
       - action: expected-archive-digest
       - action: actions/resolve-baseline:expected-archive-digest
+      - action: verify-baseline-attestation
+      - action: actions/resolve-baseline:verify-baseline-attestation
+      - action: actions/stage-baseline:attest
     missing: P2 of the lifecycle model is only partially implemented (see the ADR).
 
   - id: ADR-048
@@ -670,6 +673,13 @@ adrs:
     use_cases: [UC-WF-compare]
     surfaces:
       - report: compare_report.disposition_audit
+
+  - id: ADR-085
+    file: 085-template-parameter-default-arguments.md
+    disposition: gap
+    use_cases: []
+    surfaces: []
+    missing: Proposed, not accepted or implemented; no template-parameter default fact, TEMPLATE_PARAM_DEFAULT_CHANGED kind, or castxml coverage gap exists.
 
   - id: ADR-078
     file: 078-informational-severity-category.md

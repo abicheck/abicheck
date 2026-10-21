@@ -78,7 +78,7 @@ CONSUMER_EDGE_KINDS: frozenset[str] = frozenset(
 #: The use-case half of the graph vocabulary (G29 Phase 4 slice 2, ADR-057
 #: amendment) — ``source_graph.NODE_KINDS``/``EDGE_KINDS`` union these in the
 #: same way ``CONSUMER_NODE_KINDS``/``CONSUMER_EDGE_KINDS`` above are unioned
-#: in, and ``abicheck.impact.use_cases`` re-exports them. They live in this
+#: in, and ``abicheck.policy.use_cases`` re-exports them. They live in this
 #: leaf module rather than beside the rest of the vocabulary because
 #: ``source_graph.py`` is at its 2000-line hard cap.
 #:
@@ -94,7 +94,7 @@ CONSUMER_EDGE_KINDS: frozenset[str] = frozenset(
 #: ``USE_CASE_USES_ENTRY``/``TEST_COVERS_USE_CASE`` were written by a
 #: manifest-to-graph join that no command ever called, so it was removed
 #: (``docs/contribute/plans/dead-code-and-single-owner.md`` Stage C);
-#: use-case impact is answered by ``impact.use_cases.explain_use_case_impact``
+#: use-case impact is answered by ``policy.use_cases.explain_use_case_impact``
 #: over the plain library graph instead. ``TRACE_OBSERVED_ENTRY``/
 #: ``TRACE_OBSERVED_EDGE`` follow the same "registered so a hand-built
 #: or newer graph naming one is never rejected, but no normalized data source

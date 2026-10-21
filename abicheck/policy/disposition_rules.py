@@ -181,6 +181,8 @@ def configured_rule_rows(
         counts,
         today=today or date.today(),
         ran_detectors=ran_detectors(result),
+        observed_kinds=observed_kinds(result),
+        detector_gaps=detector_gaps(result),
     )
 
 
@@ -197,6 +199,38 @@ def ran_detectors(result: object) -> frozenset[str]:
         for det in getattr(result, "detector_results", None) or ()
         if getattr(det, "enabled", True) and not getattr(det, "not_evaluated", False)
     )
+
+
+#: Every ``DiffResult`` list a recorded change can sit on after policy acted:
+#: a change disposed of by suppression, scoping, deduplication or
+#: reconciliation was still *observed*, so it still proves its producer ran.
+_OBSERVED_CHANGE_LISTS = (
+    "changes",
+    "suppressed_changes",
+    "redundant_changes",
+    "out_of_surface_changes",
+    "reconciled_changes",
+)
+
+
+def observed_kinds(result: object) -> frozenset[str]:
+    """Every ``ChangeKind`` value *result* recorded, before any disposition."""
+    kinds: set[str] = set()
+    for attr in _OBSERVED_CHANGE_LISTS:
+        for change in getattr(result, attr, None) or ():
+            kind = getattr(change, "kind", None)
+            value = getattr(kind, "value", kind)
+            if isinstance(value, str):
+                kinds.add(value)
+    return frozenset(kinds)
+
+
+def detector_gaps(result: object) -> dict[str, str | None]:
+    """Detector name -> the evidence-gate reason it recorded (``coverage_gap``)."""
+    return {
+        str(det.name): getattr(det, "coverage_gap", None)
+        for det in getattr(result, "detector_results", None) or ()
+    }
 
 
 __all__ = [

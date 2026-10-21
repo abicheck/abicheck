@@ -141,3 +141,10 @@ _MIN_SCHEMA_VERSION_FOR_SURFACE_FACTS = 46
 # or above this a missing key reads as ``NOT_COLLECTED`` (the clang JSON
 # backend, DWARF); below it as ``None`` (the document predates the field).
 _MIN_SCHEMA_VERSION_FOR_TYPE_IDENTITY_FACTS = 54
+
+# Schema v61: ``RecordType.specialization_declared_fact`` -- whether a
+# class-template specialization record was declared by its own class-head or
+# instantiated from the primary template. Written only when captured (castxml);
+# a missing key reads as ``None`` at every version (unset, as in memory), which
+# keeps the existing removal path (compare/template_instance_absence.py).
+_MIN_SCHEMA_VERSION_FOR_SPECIALIZATION_FACT = 61

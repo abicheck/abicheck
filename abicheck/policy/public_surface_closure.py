@@ -141,6 +141,22 @@ __all__ = [
 ]
 
 
+def _typedef_target_identifiers(
+    refs: ReferencedIdentifiers, snap: AbiSnapshot, key: str
+) -> set[str]:
+    """Type identifiers the typedef *key* references in its target.
+
+    A key the bare ``typedefs`` dict also carries reads the precomputed
+    ``refs`` entry for its node, exactly as before. A qualified-only key has
+    no identity-table node (``ids.typedefs`` is bare-keyed), so its target is
+    tokenized with the same ``type_identifiers`` function
+    ``referenced_identifiers_by_node`` applies to every typedef node.
+    """
+    if key in refs.ids.typedefs:
+        return _referenced_identifiers(refs, refs.typedef_node_id(key))
+    return set(_type_identifiers(snap.declarations.typedefs_qualified[key]))
+
+
 def _referenced_identifiers(refs: ReferencedIdentifiers, node_id: str) -> set[str]:
     """The precomputed union of type-identifier strings that the
     declaration/type/typedef at *node_id* references -- read from a
@@ -433,11 +449,12 @@ def _walk_type_closure(
         seen.add(name)
         if name in surface.all_types:
             surface.public_types.add(name)
-        # Follow typedef targets.
-        target = snap.declarations.typedefs.get(name)
-        if target:
-            surface.public_typedefs.add(name)
-            for ident in _referenced_identifiers(refs, refs.typedef_node_id(name)):
+        # Follow typedef targets. A spelling may name several qualified
+        # typedefs (two classes' ``value_type``): follow every one, the same
+        # anti-hiding rule the record/enum tail below applies.
+        for key in refs.typedef_spellings.keys_for(name):
+            surface.public_typedefs.update((name, key))
+            for ident in _typedef_target_identifiers(refs, snap, key):
                 if ident not in seen:
                     queue.append(ident)
         # A short/qualified enum alias (``Mode``) reached from a public signature
@@ -530,17 +547,18 @@ def _walk_exact_type_closure(
         if name in seen:
             continue
         seen.add(name)
-        target = snap.declarations.typedefs.get(name)
-        if target:
-            # A typedef alias is a 1:1 mapping -- there is no ambiguity
-            # concept for it the way a bare record/enum tail can collide, so
-            # reaching *this* name at all (which, by this walk's own
-            # invariant, only ever happens via an already-all-exact chain)
-            # makes the alias name itself exact too.
-            surface.exact_type_identities.add(name)
-            for ident in _referenced_identifiers(refs, refs.typedef_node_id(name)):
+        keys = refs.typedef_spellings.keys_for(name)
+        if len(keys) == 1:
+            # A unique typedef is exact: reaching this name at all (which, by
+            # this walk's invariant, only happens via an already-all-exact
+            # chain) makes both the spelling and its resolved qualified key
+            # exact.
+            surface.exact_type_identities.update((name, keys[0]))
+            for ident in _typedef_target_identifiers(refs, snap, keys[0]):
                 if ident not in seen:
                     queue.append(ident)
+        # More than one key is an ambiguous fork: record nothing as exact and
+        # expand nothing, matching the record/enum ambiguity handling below.
         en_nodes = enum_by_name.get(name, ())
         rec_nodes = record_by_name.get(name, [])
         if len(en_nodes) + len(rec_nodes) != 1:

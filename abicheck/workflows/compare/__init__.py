@@ -16,4 +16,6 @@
 
 Modules: :mod:`.resolve` (request -> resolved pair) and :mod:`.execute`
 (pair -> :class:`CompareResult`, plus the ``run_compare`` keyword shim).
+:mod:`.configuration` holds the config-fold decisions the CLI passes values
+into, and :mod:`.use_case_attribution` the typed ``--use-cases`` read and attach.
 """

@@ -323,7 +323,7 @@ topics:
     fact_sources:
       - abicheck/impact/assessment.py
       - abicheck/impact/engine.py
-      - abicheck/impact/use_cases.py
+      - abicheck/policy/use_cases.py
       - abicheck/cli_project.py
       - abicheck/buildsource/graph_impact.py
       - abicheck/model/graph_facts.py

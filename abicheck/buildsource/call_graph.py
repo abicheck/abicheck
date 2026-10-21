@@ -28,8 +28,9 @@ This module is split so the hard part stays testable:
 - :func:`merge_call_edges` folds every TU's edges; the live clang run that
   feeds the parser is ``l5_ast_pass`` (one dump per TU shared by every L5
   graph family, integration-only; a missing compiler degrades gracefully,
-  exactly like the L4 source extractors). This module still owns the replay
-  argv (``_safe_clang_args_from_compile_unit``) and worker sizing it uses.
+  exactly like the L4 source extractors). The replay argv is the one
+  :func:`~abicheck.buildsource.source_extractors.clang_command.build_clang_command`
+  builds, shared with L4. This module still owns the worker sizing it uses.
 - :func:`augment_graph_with_calls` folds the resulting edges into a
   :class:`~abicheck.model.source_graph.SourceGraphSummary`.
 """
@@ -78,7 +79,7 @@ __all__ = ["_file_in_project", "project_source_files"]
 
 if TYPE_CHECKING:
     from ..model.source_graph import SourceGraphSummary
-    from .build_evidence import BuildEvidence, CompileUnit as BuildEvidenceCompileUnit
+    from .build_evidence import BuildEvidence
 
 _log = logging.getLogger(__name__)
 
@@ -105,41 +106,6 @@ _POINTER_DECL_KINDS = frozenset(
 _SCOPE_DECL_KINDS = frozenset(
     {"NamespaceDecl", "CXXRecordDecl", "RecordDecl", "ClassTemplateSpecializationDecl"}
 )
-
-#: ABI/API-affecting flags safe to replay into clang for AST parsing.  This is
-#: intentionally narrower than the original compile command: flags such as
-#: ``-Xclang -load`` and ``-fplugin=`` can execute arbitrary shared libraries
-#: during compiler option processing, so live call-graph extraction rebuilds a
-#: parse-only command from normalized build evidence instead of appending raw
-#: compile database argv.
-_SAFE_REPLAY_FLAG_PREFIXES: tuple[str, ...] = (
-    "-fvisibility",
-    "-fvisibility-inlines-hidden",
-    "-fpack-struct",
-    "/Zp",
-    "-fshort-enums",
-    "-fshort-wchar",
-    "-fabi-version",
-    "-fno-rtti",
-    "-frtti",
-    "-fno-exceptions",
-    "-fexceptions",
-    "-flto",
-    "-fno-lto",
-    "-fwhole-program-vtables",
-    "-mabi=",
-    "-m32",
-    "-m64",
-    "/arch:",
-)
-
-_LANGUAGE_TO_CLANG_X: dict[str, str] = {
-    "C": "c",
-    "CXX": "c++",
-    "OBJC": "objective-c",
-    "OBJCXX": "objective-c++",
-    "CUDA": "cuda",
-}
 
 
 @dataclass(frozen=True)
@@ -953,135 +919,18 @@ def augment_graph_with_calls(
     return added
 
 
-def _append_once(out: list[str], seen: set[tuple[str, ...]], *tokens: str) -> None:
-    """Append *tokens* if the exact token tuple has not already been emitted."""
-    if not all(tokens):
-        return
-    key = tuple(tokens)
-    if key in seen:
-        return
-    seen.add(key)
-    out.extend(tokens)
-
-
-def _safe_replay_flags_from_context(
-    *,
-    language: str = "",
-    standard: str = "",
-    target_triple: str = "",
-    sysroot: str | None = None,
-    defines: Mapping[str, str | None] | None = None,
-    undefines: list[str] | set[str] | None = None,
-    include_paths: list[str] | None = None,
-    system_include_paths: list[str] | None = None,
-    abi_relevant_flags: list[str] | None = None,
-) -> list[str]:
-    """Build the allowlisted clang flags needed for parse-only AST replay.
-
-    The inputs are normalized build-evidence fields, not the raw compile argv.
-    Only preprocessor, include, language/target, and ABI-affecting parse flags
-    are replayed.  Option families capable of loading code or causing compiler
-    side effects are deliberately not represented here.
-    """
-    out: list[str] = []
-    seen: set[tuple[str, ...]] = set()
-    clang_language = _LANGUAGE_TO_CLANG_X.get(language)
-    if clang_language:
-        _append_once(out, seen, "-x", clang_language)
-    if standard:
-        _append_once(out, seen, f"-std={standard}")
-    if target_triple:
-        _append_once(out, seen, f"--target={target_triple}")
-    if sysroot:
-        _append_once(out, seen, f"--sysroot={sysroot}")
-    for name, value in sorted((defines or {}).items()):
-        define = f"-D{name}={value}" if value not in (None, "") else f"-D{name}"
-        _append_once(out, seen, define)
-    for name in sorted(undefines or []):
-        _append_once(out, seen, f"-U{name}")
-    for inc in include_paths or []:
-        _append_once(out, seen, "-I", inc)
-    for inc in system_include_paths or []:
-        _append_once(out, seen, "-isystem", inc)
-    for flag in abi_relevant_flags or []:
-        if flag.startswith(_SAFE_REPLAY_FLAG_PREFIXES):
-            _append_once(out, seen, flag)
-    return out
-
-
-def _safe_clang_args_from_compile_unit(cu: BuildEvidenceCompileUnit) -> list[str]:
-    """Return safe clang AST-replay args for one normalized compile unit.
-
-    Every field on a normalized :class:`BuildEvidenceCompileUnit` (``source``,
-    ``sysroot``, ``include_paths``, ...) is persisted with its home-directory
-    prefix redacted to ``~`` (ADR-032 D7, ``adapters/compile_db.py``'s
-    ``RedactionPolicy``). ``subprocess`` never expands ``~`` (no shell), so
-    handing a redacted path straight to a real ``clang`` invocation makes it
-    fail to find the file — every TU degrades uniformly, not just one, since
-    the source positional itself is always redacted the same way. Confirmed on
-    real Windows CI: this pass's own test fixture puts its temp source under
-    the runner's home directory (``C:\\Users\\...\\AppData\\Local\\Temp\\...``),
-    which redaction rewrites to ``~\\AppData\\...`` — degrading
-    call/type/template graph collection uniformly while the sibling
-    ``include_graph`` pass (which already un-redacts its own argv, see
-    ``include_graph.ClangIncludeExtractor.extract_from_build``) succeeded.
-    Un-redact every token here, the same pattern already used by
-    ``include_graph.py``/``preprocessor_facts.py``/``archive_graph.py``, so
-    every clang-backed L5 pass replays a real, resolvable path.
-
-    This blanket-expands every token, ``-D``/``-U`` macro values included,
-    not just path-shaped operands (Codex review) — a rare user-authored
-    literal macro value that itself starts with ``~`` (e.g. ``-DROOT=~/x``
-    meaning the literal two-character string, never a path the compiler
-    should expand) would be corrupted the same way. This is not a new
-    tradeoff introduced here: ``source_extractors/castxml.py``'s own
-    ``extract()`` already blanket-expands its *entire* built command line
-    the identical way, with this exact scenario already investigated and
-    accepted there (see its docstring, from an earlier Codex review #335)
-    as the necessary cost of correctly replaying the far more common case —
-    a genuinely redacted home-path macro (e.g. ``-DCFG=~/build/cfg.h``
-    consumed by ``#include CFG``) that must expand or replay parses a
-    different TU / fails to find the header entirely. This call site keeps
-    the same accepted tradeoff for consistency rather than inventing a
-    narrower, path-only expansion this module alone would apply."""
-    from .source_extractors._argv import unredact_home
-
-    flags = _safe_replay_flags_from_context(
-        language=cu.language,
-        standard=cu.standard,
-        target_triple=cu.target_triple,
-        sysroot=cu.sysroot,
-        defines=cu.defines,
-        undefines=cu.undefines,
-        include_paths=cu.include_paths,
-        system_include_paths=cu.system_include_paths,
-        abi_relevant_flags=cu.abi_relevant_flags,
-    )
-    return [*(unredact_home(a) for a in flags), "--", unredact_home(cu.source)]
-
-
-def _replay_cwd(cu: BuildEvidenceCompileUnit) -> str | None:
-    """Un-redact a compile unit's own ``directory`` for use as a real subprocess
-    ``cwd`` -- shared by all three clang-backed L5 extractors
-    (:mod:`call_graph`/:mod:`type_graph`/:mod:`template_graph`) for the same
-    reason :func:`_safe_clang_args_from_compile_unit` un-redacts its argv."""
-    from .source_extractors._argv import unredact_home
-
-    return unredact_home(cu.directory) if cu.directory else None
-
-
 def _call_graph_mem_cap() -> int | None:
     """Max call-graph workers that fit in available RAM, or ``None`` when unknown.
 
     The L5 call-graph pass shells out to the *same* heavy ``clang -ast-dump=json``
     per TU as the L4 replay, so it shares the L4 per-worker RAM budget and
-    cgroup-aware available-memory probe (``source_replay._l4_mem_cap``). Imported
+    cgroup-aware available-memory probe (``source_replay_pool._l4_mem_cap``). Imported
     lazily so a failure there (non-Linux / sandbox) just skips the clamp rather
     than breaking the call-graph pass. ``ABICHECK_L4_JOB_MEM_GIB`` tunes the
     shared budget.
     """
     try:
-        from .source_replay import _l4_mem_cap
+        from .source_replay_pool import _l4_mem_cap
 
         return _l4_mem_cap()
     except Exception:  # defensive: a RAM-probe failure must never break L5 (tested)
@@ -1092,7 +941,7 @@ def _call_graph_jobs(n_units: int) -> int:
     """Bounded worker count for the best-effort L5 clang call-graph pass.
 
     Capped by *available RAM* as well as CPU, mirroring the L4 replay
-    (``source_replay._l4_jobs``): the pass runs the same multi-GiB
+    (``source_replay_pool._l4_jobs``): the pass runs the same multi-GiB
     ``clang -ast-dump=json`` per TU, so N concurrent template-heavy ASTs in one
     process can exhaust a low-memory host and get the pass OOM-killed — the exact
     failure the L4 memory clamp was added to prevent (the UXL oneTBB/oneDNN OOM).
@@ -1105,7 +954,7 @@ def _call_graph_jobs(n_units: int) -> int:
     if n_units <= 1:
         return max(0, n_units)
     from ..process_resources import bounded_jobs
-    from .source_replay import _L4_JOB_MEM_BUDGET_GIB
+    from .source_replay_pool import _L4_JOB_MEM_BUDGET_GIB
 
     jobs = bounded_jobs(
         n_units,

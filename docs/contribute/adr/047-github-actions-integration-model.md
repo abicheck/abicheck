@@ -1555,6 +1555,28 @@ sixth `resolve-baseline` outcome to add to the table above.
   the task calls out.
 - Report `candidate_digest`/`baseline_digest` fields (§7) let a consumer
   detect a stale artifact from a previous run before trusting the verdict.
+- **Baseline-set archive provenance (addendum, 2026-10-21).** The
+  `expected-archive-digest` pin binds an archive's bytes, but only protects a
+  consumer when the pin lives where the archive's publisher-side attacker
+  cannot write: committed in the consumer repository or in a repository
+  variable, never read from the store the archive came from
+  (`docs/reference/publish-baseline.md`). As an opt-in second path,
+  `actions/stage-baseline` takes `attest: true` and creates a GitHub artifact
+  attestation (`actions/attest-build-provenance`, SHA-pinned), and the root
+  Action and `actions/resolve-baseline` take `verify-baseline-attestation:
+  true` with `baseline-attestation-repo` (default: the current repository)
+  and `baseline-attestation-signer-workflow`. Both consumers call one helper,
+  `action/verify-baseline-attestation.sh`, which runs `gh attestation verify`
+  on the archive's bytes before extraction and before the digest check.
+  Every failure is closed: a refused attestation, an unknown signer, and a
+  runner without `gh` all fail the step (the root Action even under
+  dry-run; `resolve-baseline` with outcome `ambiguous`). The repo/signer
+  inputs without verification, verification of a directory, and (root
+  Action) verification without `baseline-profile`/`baseline-target` are
+  usage errors, not silently ignored settings. Defaults are unchanged.
+  `publish-baseline.yml` does not attest: it would raise every caller's
+  required permissions (`id-token: write`, `attestations: write`), so that
+  stays a maintainer decision.
 
 ---
 

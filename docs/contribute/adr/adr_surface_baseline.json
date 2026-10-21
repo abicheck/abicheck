@@ -436,7 +436,10 @@
         "action: actions/baseline",
         "action: actions/check-target",
         "action: actions/resolve-baseline:expected-archive-digest",
+        "action: actions/resolve-baseline:verify-baseline-attestation",
+        "action: actions/stage-baseline:attest",
         "action: expected-archive-digest",
+        "action: verify-baseline-attestation",
         "cli: aggregate"
       ],
       "use_cases": [
@@ -816,7 +819,10 @@
     "ADR-047 action: actions/baseline",
     "ADR-047 action: actions/check-target",
     "ADR-047 action: actions/resolve-baseline:expected-archive-digest",
+    "ADR-047 action: actions/resolve-baseline:verify-baseline-attestation",
+    "ADR-047 action: actions/stage-baseline:attest",
     "ADR-047 action: expected-archive-digest",
+    "ADR-047 action: verify-baseline-attestation",
     "ADR-047 cli: aggregate",
     "ADR-049 api: abicheck.workflows.service_requests.CompareRequest.pack_paths",
     "ADR-049 api: abicheck.workflows.service_requests.CompareRequest.stated_settings",

@@ -80,7 +80,7 @@ COMPARISON_CONTRACT_VERSION = 1
 #: every package this build writes and passed by every reader, so a package
 #: produced under different extraction semantics is reported, never refused.
 #: Bump it when what an extractor records for the same input changes.
-EXTRACTOR_GENERATION = 4
+EXTRACTOR_GENERATION = 5
 
 #: This build's resolution semantics generation (ADR-062 D2): provider
 #: selection, alias normalization, symbol-version handling, reachability.

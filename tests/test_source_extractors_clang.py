@@ -27,6 +27,7 @@ from pathlib import Path
 
 import pytest
 
+from abicheck import deadline
 from abicheck.buildsource.build_evidence import CompileUnit
 from abicheck.buildsource.source_abi import SourceAbiTu
 from abicheck.buildsource.source_diff import diff_source_abi
@@ -2716,11 +2717,10 @@ def _emit_ast(kw, payload: str, rc: int = 0, err: str = ""):  # type: ignore[no-
 
 
 def _patch_run(monkeypatch, handler) -> ClangSourceExtractor:  # type: ignore[no-untyped-def]
-    from abicheck.buildsource.source_extractors import clang as clang_mod
 
     extractor = ClangSourceExtractor()
     monkeypatch.setattr(extractor, "available", lambda: True)
-    monkeypatch.setattr(clang_mod.deadline, "run_bounded", handler)
+    monkeypatch.setattr(deadline, "run_bounded", handler)
     return extractor
 
 
@@ -3027,7 +3027,7 @@ def test_extract_stamps_intel_llvm_compiler_family(monkeypatch) -> None:  # type
 
     extractor = ClangSourceExtractor(clang_bin="icpx")
     monkeypatch.setattr(extractor, "available", lambda: True)
-    monkeypatch.setattr(clang_mod.deadline, "run_bounded", handler)
+    monkeypatch.setattr(deadline, "run_bounded", handler)
     monkeypatch.setattr(clang_mod, "run_bounded", handler)
     tu = extractor.extract(
         _cu(source="foo.cpp"), public_header_roots=["include/foo.h"], target_id="t"
@@ -3176,19 +3176,19 @@ def test_extract_rechecks_deadline_after_loading_ast(monkeypatch) -> None:  # ty
     import time
 
     from abicheck import deadline
-    from abicheck.buildsource.source_extractors import clang as clang_mod
+    from abicheck.buildsource import clang_ast_run
 
     def handler(cmd, **kw):  # type: ignore[no-untyped-def]
         return _emit_ast(kw, json.dumps(_ast()))
 
     extractor = _patch_run(monkeypatch, handler)
-    real_json_load = clang_mod.json.load
+    real_json_load = clang_ast_run.json.load
 
     def _slow_load(fh):
         time.sleep(0.05)
         return real_json_load(fh)
 
-    monkeypatch.setattr(clang_mod.json, "load", _slow_load)
+    monkeypatch.setattr(clang_ast_run.json, "load", _slow_load)
     with deadline.deadline_scope(0.03):
         with pytest.raises(SourceExtractionError, match="deadline exceeded"):
             extractor.extract(_cu(), public_header_roots=["include/foo.h"])
@@ -3214,28 +3214,29 @@ def test_extract_two_document_json_raises_actionable_hint(monkeypatch) -> None: 
         extractor.extract(_cu(), public_header_roots=["include/foo.h"])
 
 
-def test_run_ast_to_file_unlinks_temp_on_unexpected_error(
-    monkeypatch, tmp_path
-) -> None:  # type: ignore[no-untyped-def]
-    # An unexpected error mid-run must not leak the AST spill temp file (the
-    # except-BaseException cleanup path).
-    from abicheck.buildsource.source_extractors import clang as clang_mod
+def test_dump_tu_ast_unlinks_temp_on_unexpected_error(monkeypatch, tmp_path) -> None:  # type: ignore[no-untyped-def]
+    # A failed invocation must not leak the AST spill temp file (the finally
+    # path), and the failure is recorded on the dump rather than propagated
+    # (the L5 passes degrade on it; L4 re-raises the recorded exception).
+    from abicheck.buildsource import clang_ast_run
 
     spill = tmp_path / "ast.json"
     fd = os.open(str(spill), os.O_RDWR | os.O_CREAT)
-    monkeypatch.setattr(clang_mod.tempfile, "mkstemp", lambda **kw: (fd, str(spill)))
+    monkeypatch.setattr(
+        clang_ast_run.tempfile, "mkstemp", lambda **kw: (fd, str(spill))
+    )
 
     def _boom(cmd, **kw):  # type: ignore[no-untyped-def]
         raise OSError("disk full")
 
-    monkeypatch.setattr(clang_mod.deadline, "run_bounded", _boom)
-    extractor = ClangSourceExtractor()
-    with pytest.raises(OSError, match="disk full"):
-        extractor._run_ast_to_file(["clang"], "", "x.cpp")
+    monkeypatch.setattr(clang_ast_run.deadline, "run_bounded", _boom)
+    dump = clang_ast_run.dump_tu_ast(["clang"], cwd=None, timeout=5, unit_label="x.cpp")
+    assert dump.stage == clang_ast_run.STAGE_RUN
+    assert isinstance(dump.raised, OSError)
     assert not spill.exists()  # cleaned up on error
 
 
-def test_run_ast_to_file_bounded_by_local_cap_not_full_scan_budget(monkeypatch) -> None:
+def test_dump_tu_ast_bounded_by_local_cap_not_full_scan_budget(monkeypatch) -> None:
     """Codex review (PR #591), round 7: deadline.run_bounded() honors an
     active outer deadline verbatim (not min(timeout, left)), so a bare
     timeout=self.timeout on the L4 AST-dump call alone did nothing once a
@@ -3246,7 +3247,6 @@ def test_run_ast_to_file_bounded_by_local_cap_not_full_scan_budget(monkeypatch) 
     ContextVar deadline observed inside run_bounded is capped at the local
     timeout, not the much larger outer scan budget."""
     from abicheck import deadline
-    from abicheck.buildsource.source_extractors import clang as clang_mod
 
     seen_remaining: list[float | None] = []
 
@@ -3254,11 +3254,15 @@ def test_run_ast_to_file_bounded_by_local_cap_not_full_scan_budget(monkeypatch) 
         seen_remaining.append(deadline.remaining())
         raise deadline.DeadlineExceeded(-1.0)
 
-    monkeypatch.setattr(clang_mod.deadline, "run_bounded", fake_run_bounded)
-    extractor = ClangSourceExtractor(timeout=10)
+    monkeypatch.setattr(deadline, "run_bounded", fake_run_bounded)
+    from abicheck.buildsource import clang_ast_run
+
     with deadline.deadline_scope(1800.0):  # a generous 30-minute --budget
-        with pytest.raises(SourceExtractionError):
-            extractor._run_ast_to_file(["clang"], "", "x.cpp")
+        dump = clang_ast_run.dump_tu_ast(
+            ["clang"], cwd=None, timeout=10, unit_label="x.cpp"
+        )
+    assert dump.stage == clang_ast_run.STAGE_RUN
+    assert isinstance(dump.raised, SourceExtractionError)
 
     assert seen_remaining
     # Bound by the extractor's own ~10s local cap, not the 1800s scan budget.
@@ -3269,7 +3273,6 @@ def test_run_bounded_by_local_cap_not_full_scan_budget(monkeypatch) -> None:
     """Same round-7 fix as test_run_ast_to_file_bounded_by_local_cap_not_full_scan_budget,
     for the macro-pass _run() call site."""
     from abicheck import deadline
-    from abicheck.buildsource.source_extractors import clang as clang_mod
 
     seen_remaining: list[float | None] = []
 
@@ -3277,7 +3280,7 @@ def test_run_bounded_by_local_cap_not_full_scan_budget(monkeypatch) -> None:
         seen_remaining.append(deadline.remaining())
         raise deadline.DeadlineExceeded(-1.0)
 
-    monkeypatch.setattr(clang_mod.deadline, "run_bounded", fake_run_bounded)
+    monkeypatch.setattr(deadline, "run_bounded", fake_run_bounded)
     extractor = ClangSourceExtractor(timeout=10)
     with deadline.deadline_scope(1800.0):  # a generous 30-minute --budget
         with pytest.raises(SourceExtractionError):
@@ -3323,8 +3326,6 @@ def test_extract_parses_fake_clang_json(tmp_path: Path, monkeypatch) -> None:  #
     # Mock clang so the extract() success path runs without the tool installed.
     import json
 
-    from abicheck.buildsource.source_extractors import clang as clang_mod
-
     extractor = ClangSourceExtractor()
     monkeypatch.setattr(extractor, "available", lambda: True)
     captured: dict[str, object] = {}
@@ -3337,7 +3338,7 @@ def test_extract_parses_fake_clang_json(tmp_path: Path, monkeypatch) -> None:  #
             return _Result(0, "", "")
         return _Result(0, "")  # macro pass (capture_output)
 
-    monkeypatch.setattr(clang_mod.deadline, "run_bounded", _fake_run)
+    monkeypatch.setattr(deadline, "run_bounded", _fake_run)
     cu = _cu(source="src/foo.cpp", directory=str(tmp_path))
     tu = extractor.extract(
         cu, public_header_roots=["include/foo.h"], target_id="target://x"
@@ -3352,8 +3353,6 @@ def test_extract_populates_source_edges_and_coverage(
     # source_edges (P1 #17-18) is derived from the same AST dict extract()
     # already parsed -- no second clang invocation, no separate mock needed.
     import json
-
-    from abicheck.buildsource.source_extractors import clang as clang_mod
 
     ast = {
         "kind": "TranslationUnitDecl",
@@ -3384,7 +3383,7 @@ def test_extract_populates_source_edges_and_coverage(
             return _Result(0, "", "")
         return _Result(0, "")
 
-    monkeypatch.setattr(clang_mod.deadline, "run_bounded", _fake_run)
+    monkeypatch.setattr(deadline, "run_bounded", _fake_run)
     cu = _cu(source="src/foo.cpp", directory=str(tmp_path))
     tu = extractor.extract(
         cu, public_header_roots=["include/foo.h"], target_id="target://x"
@@ -3422,7 +3421,7 @@ def test_extract_source_edges_failure_reaches_tu_diagnostics_and_coverage(
             return _Result(0, "", "")
         return _Result(0, "")
 
-    monkeypatch.setattr(clang_mod.deadline, "run_bounded", _fake_run)
+    monkeypatch.setattr(deadline, "run_bounded", _fake_run)
     cu = _cu(source="src/foo.cpp", directory=str(tmp_path))
     tu = extractor.extract(
         cu, public_header_roots=["include/foo.h"], target_id="target://x"
@@ -3432,7 +3431,6 @@ def test_extract_source_edges_failure_reaches_tu_diagnostics_and_coverage(
 
 
 def test_extract_raises_on_empty_clang_output(monkeypatch) -> None:  # type: ignore[no-untyped-def]
-    from abicheck.buildsource.source_extractors import clang as clang_mod
 
     extractor = ClangSourceExtractor()
     monkeypatch.setattr(extractor, "available", lambda: True)
@@ -3442,7 +3440,7 @@ def test_extract_raises_on_empty_clang_output(monkeypatch) -> None:  # type: ign
         # stderr is bytes (real subprocess PIPE without text=True).
         return _Result(1, "", b"fatal error: 'foo.h' file not found")
 
-    monkeypatch.setattr(clang_mod.deadline, "run_bounded", _fake_run)
+    monkeypatch.setattr(deadline, "run_bounded", _fake_run)
     with pytest.raises(SourceExtractionError, match="no AST"):
         extractor.extract(_cu(), public_header_roots=["include/foo.h"])
 

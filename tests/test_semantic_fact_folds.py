@@ -41,6 +41,7 @@ from abicheck.buildsource.callback_graph import (
     merge_callback_edges,
     parse_clang_ast_callbacks,
 )
+from abicheck.buildsource.clang_ast_run import TuAstDump
 from abicheck.buildsource.header_graph import build_header_only_graph
 from abicheck.buildsource.header_graph_ast_projection import (
     HeaderGraphAstProjection,
@@ -160,7 +161,9 @@ def _l5_route(monkeypatch: pytest.MonkeyPatch) -> SourceGraphSummary:
 
     # Each TU's dump is replaced by the capture, as `clang_ast_run` hands it
     # over: materialized.
-    monkeypatch.setattr(l5_ast_pass, "run_clang_ast_dump", lambda *_a, **_k: _tree())
+    monkeypatch.setattr(
+        l5_ast_pass, "dump_compile_unit", lambda *_a, **_k: TuAstDump(_tree(), 0, "")
+    )
     monkeypatch.setattr(l5_ast_pass, "_clang_available", lambda _b: True)
     monkeypatch.setattr(inline_graph_fold, "fold_include_graph", lambda *_a, **_k: None)
     graph = SourceGraphSummary()

@@ -46,6 +46,7 @@ from abicheck.buildsource import (
     type_graph_walk,
 )
 from abicheck.buildsource.build_evidence import BuildEvidence, CompileUnit
+from abicheck.buildsource.clang_ast_run import TuAstDump
 from abicheck.buildsource.header_graph_ast_projection import project_header_graph_ast
 from abicheck.buildsource.override_graph import (
     parse_clang_ast_overrides,
@@ -322,13 +323,11 @@ def test_the_l5_runner_walks_each_tu_once_for_all_type_graph_readers(
     ]
     by_source = {cu.source: ast for cu, ast in zip(units, asts, strict=True)}
 
-    def fake_dump(
-        clang_bin: str, argv: list[str], *, cwd: Any, diagnostics: list
-    ) -> dict:
-        return by_source[argv[-1]]
+    def fake_dump(cu: Any, **_kwargs: Any) -> TuAstDump:
+        return TuAstDump(by_source[cu.source], 0, "")
 
     with pytest.MonkeyPatch.context() as mp:
-        mp.setattr(l5_ast_pass, "run_clang_ast_dump", fake_dump)
+        mp.setattr(l5_ast_pass, "dump_compile_unit", fake_dump)
         mp.setattr(l5_ast_pass, "_call_graph_jobs", lambda n: 1)
         spy = _WalkSpy(mp)
         outcomes = l5_ast_pass.run_ast_passes(

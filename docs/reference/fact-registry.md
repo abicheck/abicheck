@@ -65,6 +65,7 @@ Phase 5 section for the design this page's data comes from.
 | `RecordType.ownership` | `EntityOwnership` | castxml, clang | persisted | ✅ | — | — | — | ✅ |
 | `RecordType.qualified_name` | `str \| None` | castxml, clang | persisted | ✅ | ✅ | ✅ | — | ✅ |
 | `RecordType.source_header` | `str \| None` | castxml, clang, dwarf, pdb | persisted | ✅ | — | ✅ | — | ✅ |
+| `RecordType.specialization_declared` | `bool` | castxml | consumed | ✅ | — | — | — | — |
 | `RecordType.virtual_bases` | `list[str]` | castxml, clang, dwarf | consumed | ✅ | — | ✅ | — | ✅ |
 | `RecordType.vptr_offset_bits` | `int \| None` | castxml, clang, dwarf | consumed | ✅ | — | ✅ | — | ✅ |
 | `RecordType.vtable` | `list[str]` | castxml, clang, dwarf | consumed | ✅ | — | ✅ | — | ✅ |

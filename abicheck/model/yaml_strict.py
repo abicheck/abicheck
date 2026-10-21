@@ -22,7 +22,7 @@ all. Every hard-load-error manifest format in this repository closes that
 gap the same standard way — a ``yaml.SafeLoader`` subclass overriding
 ``construct_mapping`` — and three independent copies of that override had
 accumulated (``dump_manifest.py``, ``compatibility_evaluation_packs.py``,
-``impact/use_cases.py``). They had already *diverged*: only two of the three
+``policy/use_cases.py``). They had already *diverged*: only two of the three
 checked key hashability, so a sequence-keyed mapping (``? [a, b]\\n: 1``)
 raised a raw ``TypeError`` out of one of them instead of that module's
 documented error type, and each translated PyYAML's own implicit-resolver

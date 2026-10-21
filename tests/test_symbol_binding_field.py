@@ -24,7 +24,8 @@ from pathlib import Path
 import pytest
 
 from abicheck.checker_policy import ChangeKind
-from abicheck.diff_symbols import _check_removed_function, _var_removed
+from abicheck.diff_symbols import _check_removed_function
+from abicheck.diff_symbols_variables import _var_removed
 from abicheck.elf_metadata import ElfMetadata, ElfSymbol, SymbolBinding
 from abicheck.extract.elf_symbol_classify import _populate_elf_visibility
 from abicheck.model import AbiSnapshot, FactStatus, Function, Variable
