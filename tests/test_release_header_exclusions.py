@@ -579,7 +579,7 @@ class TestTheReleaseIdentityIsReadFromItsMembers:
     def test_the_capture_precedes_the_strip(self) -> None:
         """An ordering guard, because the evidence is destroyed in place.
 
-        ``_strip_diff_results_and_adjust_verdict`` removes the very
+        ``project_release_library_results`` removes the very
         ``_diff_result`` the capture reads, so a capture that drifted below
         it would silently observe nothing at all and fall back to the
         request -- restoring the defect with every unit test still passing.
@@ -594,13 +594,13 @@ class TestTheReleaseIdentityIsReadFromItsMembers:
         workflow = inspect.getsource(release_compare)
         assert "observed_member_exclusion_identities(" in workflow
         assert "strip_internal_keys" not in workflow
-        assert "_strip_diff_results_and_adjust_verdict(" not in workflow
+        assert "project_release_library_results(" not in workflow
         # ...and the strip is the renderer's, which runs on the outcome the
         # workflow already returned (the capture inside it).
         cli = inspect.getsource(cli_compare_release)
         assert "observed_member_exclusion_identities(" not in cli
         render = inspect.getsource(cli_compare_release._render_release_outcome)
-        assert "_strip_diff_results_and_adjust_verdict(" in render
+        assert "project_release_library_results(" in render
         assert cli.index("outcome = _execute_release_compare(") < cli.index(
             "_render_release_outcome(\n                outcome,"
         ), (

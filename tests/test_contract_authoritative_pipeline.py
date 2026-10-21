@@ -572,7 +572,7 @@ class TestReleaseFanoutKeepsWhatItDoesNotScore:
     follow-up: "Preserve not-evaluated findings in release summaries").
 
     Without a severity configuration in effect, `cli_compare_release_
-    matrix._release_display_buckets`'s legacy branch walked ``diff.
+    matrix.release_display_buckets`'s legacy branch walked ``diff.
     breaking``/``diff.source_breaks``/``diff.risk``/``diff.compatible`` --
     all four route through ``DiffResult._evaluated_changes()``, which under
     ``--contract`` excludes a finding contract evaluation left

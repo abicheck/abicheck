@@ -444,7 +444,7 @@ def release_md_library_findings(
 
     R2 (CLI-audit): the ``## Libraries`` table is counts only; this reads
     ``entry["findings"]`` -- the projection
-    ``cli_compare_release_matrix._release_finding_dicts`` builds before each
+    ``report.release_findings.release_finding_dicts`` builds before each
     library's ``DiffResult`` is discarded for memory -- and notes a truncated
     list rather than presenting it as complete. *display_cap* is the
     presentation cap (``report.release_display_limits``): a human summary may

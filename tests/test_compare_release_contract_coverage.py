@@ -35,15 +35,13 @@ from pathlib import Path
 import pytest
 
 from abicheck.bundle_models import BundleSignatureEvidence
-from abicheck.cli_compare_release_matrix import (
-    _finalize_release_output,
-    _strip_diff_results_and_adjust_verdict,
-)
+from abicheck.cli_compare_release_matrix import _finalize_release_output
 from abicheck.frontends.cli.release_report import render_release_summary
 from abicheck.model.symbol_inventory import (
     SymbolInventory,
     build_symbol_inventory,
 )
+from abicheck.report.release_findings import project_release_library_results
 from abicheck.report.release_member_entry import ReleaseMemberEntryProjection
 from abicheck.workflows.release_members import (
     ReleaseMemberContext,
@@ -470,7 +468,7 @@ def test_strip_diff_results_builds_annotations_only_when_requested() -> None:
         return {"library": "libfoo.so", "verdict": "BREAKING", "_diff_result": result}
 
     markdown_entries = [_entry()]
-    _strip_diff_results_and_adjust_verdict(
+    project_release_library_results(
         markdown_entries,
         [],
         "BREAKING",
@@ -479,7 +477,7 @@ def test_strip_diff_results_builds_annotations_only_when_requested() -> None:
     assert "annotations" not in markdown_entries[0]
 
     json_entries = [_entry()]
-    _strip_diff_results_and_adjust_verdict(
+    project_release_library_results(
         json_entries,
         [],
         "BREAKING",

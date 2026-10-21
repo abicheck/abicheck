@@ -892,16 +892,11 @@ class TestReleaseFindingsDisplayCap:
         Phase 7l's standing constraint that a demoted flag lands in
         `.abicheck.yml`, never in an undocumented variable. Asserted by
         setting it and observing that nothing reads it."""
-        from abicheck.cli_compare_release_matrix import (
-            _MAX_RELEASE_FINDINGS_PER_LIBRARY,
-        )
-
         monkeypatch.setenv("ABICHECK_MAX_RELEASE_FINDINGS_PER_LIBRARY", "999")
         from abicheck.report.release_display_limits import (
             MAX_RELEASE_FINDINGS_PER_LIBRARY,
         )
 
-        assert MAX_RELEASE_FINDINGS_PER_LIBRARY == _MAX_RELEASE_FINDINGS_PER_LIBRARY
         assert MAX_RELEASE_FINDINGS_PER_LIBRARY != 999
 
 
