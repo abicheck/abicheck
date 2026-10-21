@@ -221,3 +221,63 @@ def test_consumption_requires_the_old_side_reached_from_the_same_entry() -> None
         )
         == {}
     )
+
+
+def test_several_renames_emit_in_the_same_order_under_any_hash_seed() -> None:
+    # Two public entries each rename a private field target. The consumed-pair
+    # iteration used to follow set order, so the finding order depended on the
+    # string-hash seed. Run the same diff under two seeds and compare the output.
+    script = """
+import json
+from abicheck.buildsource.source_graph import GraphEdge, GraphNode, SourceGraphSummary
+from abicheck.buildsource.source_graph_findings import diff_source_graph_findings
+
+def rec(name, f):
+    return GraphNode(id=f"type:{name}", kind="record_type", label=name,
+        attrs={"qualified_name": name, "def_file": f, "visibility": "private_header"})
+
+def pub(name, h):
+    return (GraphNode(id=f"type:{name}", kind="record_type", label=name,
+        attrs={"qualified_name": name, "visibility": "public_header"}),
+        GraphNode(id=f"hdr:{h}", kind="header", label=h))
+
+def build(renamed):
+    nodes, edges = [], []
+    for name in ("demo::A", "demo::B", "demo::C", "demo::D"):
+        p, hdr = pub(name, name.lower() + ".h")
+        nodes += [p, hdr]
+        edges.append(GraphEdge(src=hdr.id, dst=p.id, kind="SOURCE_DECLARES"))
+    for owner, old, new in (("demo::A", "demo::detail::OldA", "demo::detail::NewA"),
+                            ("demo::B", "demo::detail::OldB", "demo::detail::NewB")):
+        target = new if renamed else old
+        nodes.append(rec(target, "detail.h"))
+        edges.append(GraphEdge(src=f"type:{owner}", dst=f"type:{target}",
+            kind="TYPE_HAS_FIELD_TYPE", attrs={"role": "field"}))
+    return SourceGraphSummary(nodes=nodes, edges=edges).finalize()
+
+findings = diff_source_graph_findings(build(False), build(True))
+print(json.dumps([[c.kind.value, c.symbol, c.old_value, c.new_value] for c in findings]))
+"""
+    import json
+    import os
+    import subprocess
+    import sys
+
+    outputs = []
+    for seed in ("1", "2"):
+        env = {**os.environ, "PYTHONHASHSEED": seed}
+        proc = subprocess.run(
+            [sys.executable, "-c", script],
+            capture_output=True,
+            text=True,
+            env=env,
+            check=True,
+        )
+        outputs.append(proc.stdout)
+    assert outputs[0] == outputs[1]
+    renamed = [
+        row
+        for row in json.loads(outputs[0])
+        if row[0] == "public_api_internal_type_renamed"
+    ]
+    assert len(renamed) == 2

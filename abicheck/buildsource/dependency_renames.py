@@ -89,7 +89,7 @@ def renamed_dependency_targets(
     new dependency and stays an ADDED finding.
     """
     consumed: dict[tuple[str, str], ReconciledPair] = {}
-    for entry, target in newly_reached:
+    for entry, target in sorted(newly_reached):
         pair = renamed_by_new_id.get(target)
         if pair is None:
             continue
