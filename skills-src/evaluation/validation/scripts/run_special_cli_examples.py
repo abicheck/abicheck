@@ -441,9 +441,7 @@ def _run_audit_case(
     return result
 
 
-def _provider_assertion_errors(
-    entry: dict[str, Any], findings: list[Any]
-) -> list[str]:
+def _provider_assertion_errors(entry: dict[str, Any], findings: list[Any]) -> list[str]:
     """Check ground truth's ``provider_assertions`` against the report.
 
     Each finding of a cross-source check carries the evidence providers that
