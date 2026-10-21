@@ -19,7 +19,6 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, cast
 
-from .policy.evaluate import effective_kind_sets
 from .report.change_json import (
     change_to_dict,
     prewarm_change_demangling,
@@ -53,7 +52,6 @@ if TYPE_CHECKING:
     from .policy.severity import SeverityConfig
 from . import reporter_contract_blocks as _reporter_contract_blocks
 from .checker import Change, DiffResult
-from .policy.gate_decision import gate_decision_for_result
 from .report.change_inventory import render_change_inventory_json
 from .report.dispatch_markdown import (
     _to_markdown_root_cause as _to_markdown_root_cause,
@@ -64,6 +62,7 @@ from .report.disposition_audit import add_disposition_audit as _add_disposition_
 from .report.finding_evolution_section import (
     add_finding_evolution as _add_finding_evolution,
 )
+from .report.policy_facts import policy_facts_for, stat_facts_for
 from .report.render_json import render_json
 from .report.surface_changes import add_surface_changes as _add_surface_changes
 from .report.view import (
@@ -72,7 +71,6 @@ from .report.view import (
     group_changes_by_root_cause,
     root_cause_id_for_key,
 )
-from .report_summary import build_summary
 from .reporter_contract_blocks import add_contract_context as _add_contract_context
 
 # Markdown rendering is a leaf; names stay importable here for compatibility.
@@ -98,7 +96,6 @@ from .reporter_markdown import (
 )
 from .root_cause_evidence import root_cause_group_evidence, scoped_only_evidence_lookup
 from .schemas import REPORT_SCHEMA_VERSION
-from .semver import recommend_release_for_report
 
 
 def to_stat_json(
@@ -122,7 +119,12 @@ def to_stat_json(
     *show_only*/*contract_evaluation* feed only the scoped-gate fold at the
     tail of ``render_json_with_side_facts`` -- no ``changes`` array here to filter.
     """
-    summary = build_summary(result)
+    facts = stat_facts_for(
+        result,
+        severity_config,
+        require_complete_analysis=require_complete_analysis,
+    )
+    summary = facts.summary
     effective_policy = result.policy or "strict_abi"
     d: dict[str, object] = {
         "report_schema_version": REPORT_SCHEMA_VERSION,
@@ -149,7 +151,7 @@ def to_stat_json(
     _add_disposition_audit(d, result, severity_config)
     _add_finding_evolution(d, result)
     add_check_identity(d, result)
-    gate = gate_decision_for_result(result, severity_config)
+    gate = facts.policy.gate
     if gate is not None:
         assert severity_config is not None  # gate is None otherwise
         d["severity"] = build_severity_json(
@@ -157,10 +159,10 @@ def to_stat_json(
             severity_config,
             gate=gate,
             policy=result.policy,
-            kind_sets=effective_kind_sets(result),
+            kind_sets=facts.policy.kind_sets,
             policy_file=result.policy_file,
         )
-    d["release_recommendation"] = recommend_release_for_report(result).to_dict()
+    d["release_recommendation"] = facts.release_recommendation.to_dict()
     if result.redundant_count > 0:
         d["redundant_count"] = result.redundant_count
     # Confidence & evidence metadata
@@ -169,19 +171,11 @@ def to_stat_json(
     d["evidence_tiers"] = list(result.evidence_tiers)
     if result.coverage_warnings:
         d["coverage_warnings"] = list(result.coverage_warnings)
-    from .policy.analysis_assurance import (
-        analysis_assurance_exit_contribution,
-        analysis_assurance_report_dict,
-    )
-
-    if (block := analysis_assurance_report_dict(result)) is not None:
+    if facts.assurance is not None:
+        block, exit_contribution = facts.assurance
         d["analysis_assurance"] = block
         # Same persistence `add_contract_context` does for the full JSON path, which `--stat` bypasses entirely (Codex review).
-        d["analysis_assurance_exit_contribution"] = (
-            analysis_assurance_exit_contribution(
-                result, require_complete=require_complete_analysis
-            )
-        )
+        d["analysis_assurance_exit_contribution"] = exit_contribution
     from .reporter_contract_blocks import add_effective_config_digest
 
     add_effective_config_digest(
@@ -236,18 +230,19 @@ def _to_json_root_cause(
     # `prewarm_change_demangling`'s own docstring for why one per-projection
     # call is not enough.
     prewarm_change_demangling(result)
+    policy_facts = policy_facts_for(result, severity_config)
+    eff_sets = policy_facts.kind_sets
     changes = list(result.changes)
     if show_only:
         changes = display_changes(
             changes,
             show_only,
             policy=result.policy,
-            kind_sets=effective_kind_sets(result),
+            kind_sets=eff_sets,
             policy_file=result.policy_file,
             today=None,
         )
     effective_policy = result.policy or "strict_abi"
-    eff_sets = effective_kind_sets(result)
 
     # G29 Phase 3 slice 3 follow-up (Codex review): the scoped-gate
     # (--used-by/--required-symbol) fold-in in cli_compare_fold.py appends
@@ -306,7 +301,7 @@ def _to_json_root_cause(
     d["policy"] = effective_policy
     if show_only:
         add_show_only_filter(d, result, changes, show_only)
-    gate = gate_decision_for_result(result, severity_config)
+    gate = policy_facts.gate
     if gate is not None:
         assert severity_config is not None  # gate is None otherwise
         d["severity"] = build_severity_json(
