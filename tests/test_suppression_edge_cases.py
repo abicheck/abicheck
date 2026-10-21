@@ -565,6 +565,7 @@ class TestNamespaceGlobstarSemantics:
         # span by its own last declared segment before attempting the full
         # regex match, turning "try every span with a regex" into "skip
         # every span whose last name segment doesn't literally equal 'z'".
+        import gc
         import time
 
         s = Suppression(
@@ -577,18 +578,29 @@ class TestNamespaceGlobstarSemantics:
         # regression grows ~8x per doubling of the name, the fixed matcher
         # ~4x (measured). A fixed 3s budget also failed under instrumented
         # runs (mutmut's traced baseline slowed this ~66x) with no change
-        # in complexity, while a ratio is the same on any machine. The best
-        # of a few runs per size keeps scheduler noise out of the ratio.
+        # in complexity, while a ratio is the same on any machine.
+        #
+        # The ratio is only as stable as its inputs. CI runners flaked this
+        # at 8.4x against a 6.0x limit (0.009s -> 0.079s) on two unrelated
+        # PRs: a ~10ms sample is dominated by scheduler preemption and GC
+        # pauses that wall-clock time counts and CPU time does not. So each
+        # size is measured as the minimum of several runs of process CPU
+        # time, with a collection beforehand so a pause from an earlier
+        # allocation cannot land inside the timed call. Min, not median, is
+        # right here: noise only ever adds time, so the fastest run is the
+        # closest to the matcher's true cost. Sizes are large enough that a
+        # sample is tens of milliseconds, not a few.
         def best_time(segments: int) -> float:
             name = "::".join(["a"] * segments + ["y"])
             times = []
-            for _ in range(3):
-                t0 = time.perf_counter()
+            for _ in range(5):
+                gc.collect()
+                t0 = time.process_time()
                 assert s.matches(self._change(name)) is False
-                times.append(time.perf_counter() - t0)
+                times.append(time.process_time() - t0)
             return min(times)
 
-        small, large = best_time(600), best_time(1200)
+        small, large = best_time(800), best_time(1600)
         assert large / small < 6.0, (
             f"doubling the name grew the match time {large / small:.1f}x "
             f"({small:.3f}s -> {large:.3f}s) — super-quadratic, not "
