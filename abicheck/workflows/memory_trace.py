@@ -459,6 +459,11 @@ def sample(event: str, /, **attrs: Any) -> None:
         "t": round(time.monotonic() - _start, 6),
         "pid": os.getpid(),
         "thread": threading.current_thread().name,
+        # CPU clocks, so consecutive marks/phases on one thread attribute CPU
+        # to a stage, not only wall time (thread CPU excludes the other
+        # threads of a parallel release; process CPU includes them).
+        "thread_cpu_s": round(time.thread_time(), 6),
+        "process_cpu_s": round(time.process_time(), 6),
         "parent_rss_bytes": _self_rss_bytes(),
         "parent_rss_peak_bytes": _self_rss_peak_bytes(),
         "tree_rss_bytes": tree_rss,

@@ -202,6 +202,9 @@ def compare_release_member(key: str, ctx: ReleaseMemberContext) -> dict[str, obj
             ctx.pack_application,
             notice=reporter.notice,
         )
+        # Stage marks (off by default): dump/compare inside the pair carry
+        # their own; these split the member's release-side bookkeeping.
+        memory_trace.mark("release.member.compare:done", key=key)
         result = compare_result.diff
         entry: dict[str, object] = {
             "library": old_path.name,
@@ -216,6 +219,7 @@ def compare_release_member(key: str, ctx: ReleaseMemberContext) -> dict[str, obj
                 scoped=request.scope_to_public_surface,
             ),
         )
+        memory_trace.mark("release.member.project:done", key=key)
         entry["_diff_result"] = result
         # Which of this member's type findings its own exports reach; read by
         # the shared-finding fold and `dispose_release_unreached_types`.
@@ -259,7 +263,9 @@ def compare_release_member(key: str, ctx: ReleaseMemberContext) -> dict[str, obj
             # #235), aggregated into the release-level scope block.
             entry["scope_resolved"] = result.scope_resolved
             entry["filtered_internal_count"] = result.out_of_surface_count
+        memory_trace.mark("release.member.attribute:done", key=key)
         reporter.persist(entry, result)
+        memory_trace.mark("release.member.persist:done", key=key)
         return entry
     except Exception as exc:
         failure = classify_member_failure(exc, library=old_path.name)
