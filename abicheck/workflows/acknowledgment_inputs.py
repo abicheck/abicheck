@@ -50,10 +50,15 @@ class CompareAcknowledgments:
     is, ``records`` is an *empty* list: every public addition is then
     unacknowledged, which is what a ``warn``/``block`` gate with nothing
     acknowledged means.
+
+    ``warnings`` are the review lines the loaded records owe the operator
+    (:meth:`AcknowledgmentList.scope_warnings`); the caller decides how to
+    show them -- the CLI on stderr, the typed API through logging.
     """
 
     records: AcknowledgmentList | None = None
     policy: AcknowledgmentPolicy | None = None
+    warnings: tuple[str, ...] = ()
 
 
 def load_acknowledgment_records(path: Path) -> AcknowledgmentList:
@@ -69,13 +74,24 @@ def resolve_compare_acknowledgments(
     *,
     policy_file: object,
     configured_action: str | None,
+    configured_breaks: str | None = None,
 ) -> CompareAcknowledgments:
     """The run's records and gate policy (ADR-049 D7: a ``--policy`` file's
-    stated ``acknowledgment:`` block outranks *configured_action*)."""
-    policy = effective_acknowledgment_policy(policy_file, configured_action)
+    stated ``acknowledgment:`` block outranks the configured settings).
+
+    *configured_action* is ``unacknowledged_additions``; *configured_breaks* is
+    ADR-067 D5's ``breaks`` (``gate`` | ``accept``). Every surface -- the CLI's
+    ``--acknowledgments`` / ``.abicheck.yml``, the typed ``CompareRequest``,
+    the Action's ``acknowledgments`` input -- reaches this one resolver, so
+    they cannot disagree about what a set of inputs means.
+    """
+    policy = effective_acknowledgment_policy(
+        policy_file, configured_action, configured_breaks
+    )
     records = (
         load_acknowledgment_records(records_path) if records_path is not None else None
     )
     if records is None and policy is not None:
         records = AcknowledgmentList([])
-    return CompareAcknowledgments(records=records, policy=policy)
+    warnings = tuple(records.scope_warnings()) if records is not None else ()
+    return CompareAcknowledgments(records=records, policy=policy, warnings=warnings)

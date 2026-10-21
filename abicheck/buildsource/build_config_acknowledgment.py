@@ -21,6 +21,7 @@ stable project properties, so they live in ``.abicheck.yml``::
     acknowledgment:
       file: abi/acknowledgments.yml      # ADR-067 D5 records
       unacknowledged_additions: block    # allow (default) | warn | block
+      breaks: gate                       # gate (default) | accept
 
 A relative ``file`` resolves against the project root
 (``config_paths.project_root_for_config``), like ``compile.include_dirs``.
@@ -37,7 +38,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from ..model.acknowledgment_policy import VALID_UNACKNOWLEDGED_ADDITIONS_ACTIONS
+from ..model.acknowledgment_policy import (
+    VALID_ACKNOWLEDGMENT_BREAKS_ACTIONS,
+    VALID_UNACKNOWLEDGED_ADDITIONS_ACTIONS,
+)
 
 __all__ = [
     "ACKNOWLEDGMENT_KEY",
@@ -48,7 +52,7 @@ __all__ = [
 ]
 
 ACKNOWLEDGMENT_KEY = "acknowledgment"
-_KEYS = frozenset({"file", "unacknowledged_additions"})
+_KEYS = frozenset({"file", "unacknowledged_additions", "breaks"})
 
 
 @dataclass(frozen=True)
@@ -57,6 +61,7 @@ class AcknowledgmentConfig:
 
     file: str | None = None
     unacknowledged_additions: str | None = None
+    breaks: str | None = None
 
 
 def acknowledgment_findings(value: object) -> list[str]:
@@ -84,6 +89,14 @@ def acknowledgment_findings(value: object) -> list[str]:
             f"acknowledgment.unacknowledged_additions must be one of "
             f"{sorted(VALID_UNACKNOWLEDGED_ADDITIONS_ACTIONS)}, got {action!r}"
         )
+    breaks = value.get("breaks")
+    if breaks is not None and (
+        not isinstance(breaks, str) or breaks not in VALID_ACKNOWLEDGMENT_BREAKS_ACTIONS
+    ):
+        findings.append(
+            f"acknowledgment.breaks must be one of "
+            f"{sorted(VALID_ACKNOWLEDGMENT_BREAKS_ACTIONS)}, got {breaks!r}"
+        )
     return findings
 
 
@@ -98,6 +111,7 @@ def parse_acknowledgment_config(top: dict[str, object]) -> AcknowledgmentConfig 
         return None
     path = block.get("file")
     action = block.get("unacknowledged_additions")
+    breaks = block.get("breaks")
     cfg = AcknowledgmentConfig(
         file=path if isinstance(path, str) and path.strip() else None,
         unacknowledged_additions=(
@@ -106,8 +120,15 @@ def parse_acknowledgment_config(top: dict[str, object]) -> AcknowledgmentConfig 
             and action in VALID_UNACKNOWLEDGED_ADDITIONS_ACTIONS
             else None
         ),
+        breaks=(
+            breaks
+            if isinstance(breaks, str) and breaks in VALID_ACKNOWLEDGMENT_BREAKS_ACTIONS
+            else None
+        ),
     )
-    return cfg if (cfg.file or cfg.unacknowledged_additions) else None
+    if cfg.file or cfg.unacknowledged_additions or cfg.breaks:
+        return cfg
+    return None
 
 
 def acknowledgment_block(cfg: Any) -> dict[str, Any]:
@@ -120,4 +141,6 @@ def acknowledgment_block(cfg: Any) -> dict[str, Any]:
         out["file"] = ack.file
     if ack.unacknowledged_additions is not None:
         out["unacknowledged_additions"] = ack.unacknowledged_additions
+    if ack.breaks is not None:
+        out["breaks"] = ack.breaks
     return out

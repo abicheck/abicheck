@@ -44,6 +44,7 @@ A fully-specified comparison request — the single input to ``run_compare``.
 | `project_policy_overrides` | `tuple[tuple[ChangeKind, Verdict], ...] \| None` | `None` |
 | `acknowledgments_path` | `Path \| None` | `None` |
 | `acknowledgment_unacknowledged_additions` | `str \| None` | `None` |
+| `acknowledgment_breaks` | `str \| None` | `None` |
 | `strict_suppressions` | `bool` | `False` |
 | `require_justification` | `bool` | `False` |
 | `old_probe_matrix` | `Path \| None` | `None` |

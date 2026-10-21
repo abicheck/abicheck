@@ -344,20 +344,23 @@ findings, never hide one). A stored-bundle-facts baseline rejects the
 
 ### `acknowledgment:`
 
-Acknowledgment records and the additions-review gate. `file:` names the
-records document (a relative path resolves against the project root) and
-`unacknowledged_additions:` is `allow` (default), `warn` or `block`.
+Acknowledgment records and the gates over them. `file:` names the records
+document (a relative path resolves against the project root; `--acknowledgments`
+overrides it). `unacknowledged_additions:` is `allow` (default), `warn` or
+`block`. `breaks:` is `gate` (default) or `accept`: whether an acknowledged
+break stops contributing to the exit code.
 
 ```yaml
 acknowledgment:
   file: abi/acknowledgments.yml
   unacknowledged_additions: block
+  breaks: gate
 ```
 
-`file` applies only from a config named with `--config`; a discovered value
-is noted and not loaded. `unacknowledged_additions` applies from any config.
-A `--policy` document stating its own `acknowledgment:` block wins over this
-one. See [Change acknowledgment](../use/acknowledgments.md).
+`file` and `breaks` apply only from a config named with `--config`; a discovered
+value is noted and not applied. `unacknowledged_additions` applies from any
+config. A `--policy` document stating its own `acknowledgment:` block wins over
+this one, as one whole block. See [Change acknowledgment](../use/acknowledgments.md).
 
 ### `suppression:`
 

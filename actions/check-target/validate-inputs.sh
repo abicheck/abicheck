@@ -47,7 +47,7 @@ EVIDENCE_PRODUCER="${INPUT_EVIDENCE_PRODUCER:-}"
 CONSUMER_BINARY="${INPUT_CONSUMER_BINARY:-}"
 CONTRACT_FILE="${INPUT_CONTRACT_FILE:-}"
 ALLOW_NEW_TARGET="${INPUT_ALLOW_NEW_TARGET:-false}"
-ANALYSIS_ASSURANCE_COMPLETE="${INPUT_ANALYSIS_ASSURANCE_COMPLETE:-false}"
+ANALYSIS_ASSURANCE_COMPLETE="${INPUT_ANALYSIS_ASSURANCE_COMPLETE:-}"
 
 # ── Required-input checks run before the enum/case validations below, so an
 # empty required input (name, profile, baseline-channel, requested-depth)
@@ -187,16 +187,15 @@ case "$ALLOW_NEW_TARGET" in
   *) _fail "allow-new-target '$ALLOW_NEW_TARGET' is not recognized. Use 'true' or 'false'." ;;
 esac
 case "$ANALYSIS_ASSURANCE_COMPLETE" in
-  true | false) ;;
-  # action.yml's own "Generate assurance-overlay config" step guards on the
-  # exact lowercase string comparison `inputs.analysis-assurance-complete ==
-  # 'true'` -- any other value (a stray 'True', 'yes', or a typo) silently
-  # reads as false there, SKIPPING that step entirely rather than failing,
-  # so a caller who clearly intended to enable the assurance floor instead
-  # gets a normal, unenforced analysis run with no diagnostic at all (Codex
-  # review). Same "not recognized" enum-validation pattern as
-  # allow-new-target immediately above.
-  *) _fail "analysis-assurance-complete '$ANALYSIS_ASSURANCE_COMPLETE' is not recognized. Use 'true' or 'false'." ;;
+  '' | true | false) ;;
+  # action.yml's "Generate assurance-overlay config" step runs for any
+  # non-empty value and writes it through as assurance.require_complete. Only
+  # the exact lowercase 'true'/'false' is a deliberate setting, so any other
+  # value (a stray 'True', 'yes', or a typo) is refused here rather than
+  # reaching the step, where it would silently read as false (Codex review).
+  # Same "not recognized" enum-validation pattern as allow-new-target
+  # immediately above.
+  *) _fail "analysis-assurance-complete '$ANALYSIS_ASSURANCE_COMPLETE' is not recognized. Use 'true' or 'false', or leave it unset to inherit .abicheck.yml." ;;
 esac
 if [[ "$TARGET_KIND" == "app-consumer" && -z "$CONSUMER_BINARY" ]]; then
   _fail "consumer-binary is required when target-kind is 'app-consumer'."

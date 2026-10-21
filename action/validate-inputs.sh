@@ -414,6 +414,20 @@ for _i in "${!_bool_input_names[@]}"; do
   fi
 done
 
+# analysis-assurance-complete: a tri-state, per-job override of
+# assurance.require_complete (action.yml's own description has the full
+# account). Unset inherits the config; 'true' and 'false' both overlay it, in
+# either direction. Any other value is refused outright, rather than reading
+# as "inherit" the way an unrecognized value would. compare mode only: that is
+# the only shape whose exit code carries the assurance floor.
+case "${INPUT_ANALYSIS_ASSURANCE_COMPLETE:-}" in
+  '' | true | false) ;;
+  *) _fail "analysis-assurance-complete '${INPUT_ANALYSIS_ASSURANCE_COMPLETE}' is not recognized. Use 'true' or 'false' to override assurance.require_complete for this run, or leave it unset to inherit .abicheck.yml." ;;
+esac
+if [[ -n "${INPUT_ANALYSIS_ASSURANCE_COMPLETE:-}" && "$MODE" != "compare" ]]; then
+  _warn "analysis-assurance-complete is set but has no effect: it only applies to mode: compare (mode is '$MODE')."
+fi
+
 # used-by/required-symbol/required-symbols: compare mode only
 # (ADR-043 scoped-comparison contracts). --used-by and --required-symbol/
 # --required-symbols are mutually exclusive on the CLI itself, but that
@@ -437,6 +451,17 @@ for _i in "${!_scoped_input_names[@]}"; do
     _warn "${_scoped_input_names[$_i]} is set but has no effect: it only applies to mode: compare (mode is '$MODE')."
   fi
 done
+
+# ADR-067 D5: `acknowledgments` is compare-only. Under another mode it changes
+# nothing (warn), and a records file that does not exist must fail here, before
+# the Python install, rather than as a CLI usage error after it.
+if [[ -n "${INPUT_ACKNOWLEDGMENTS:-}" ]]; then
+  if [[ "$MODE" != "compare" ]]; then
+    _warn "acknowledgments is set but has no effect: it only applies to mode: compare (mode is '$MODE')."
+  elif [[ ! -f "$INPUT_ACKNOWLEDGMENTS" ]]; then
+    _fail "acknowledgments file not found: '$INPUT_ACKNOWLEDGMENTS' -- the records file must exist in the checked-out tree (a missing or misspelled path would otherwise fail only after the Python install)."
+  fi
+fi
 
 # abi-baseline: compare mode (used as old-library, including the audit-only
 # shape's own "have I got a baseline" check) only.
@@ -491,6 +516,24 @@ fi
 # instead (Codex review).
 if [[ ( -n "$_BASELINE_PROFILE" || -n "$_BASELINE_TARGET" ) && -z "$_ABI_BASELINE" ]]; then
   _fail "baseline-profile/baseline-target are set but abi-baseline is not -- the release-contract baseline-set fallback is only reached while resolving abi-baseline (a release tag or 'latest-release'), so without it these inputs can never trigger a fetch."
+fi
+
+# A file path in abi-baseline is used directly and never consults a release-
+# contract baseline-set archive, so a profile/target selection beside it would be
+# silently discarded. Refused here and again in run.sh's own pairing check.
+if [[ -n "$_ABI_BASELINE" && -f "$_ABI_BASELINE" && ( -n "$_BASELINE_PROFILE" || -n "$_BASELINE_TARGET" ) ]]; then
+  _fail "abi-baseline is a file path ('$_ABI_BASELINE'), which is used directly, but baseline-profile/baseline-target are also set. Those select a release-contract baseline-set archive that a file path never consults, so the selection would be silently discarded. Pass the file path alone, or unset baseline-profile and baseline-target to fetch from the release."
+fi
+# expected-archive-digest pins a release-contract baseline-set archive, which only
+# baseline-profile and baseline-target select -- so the pin needs that selection.
+_EXPECTED_ARCHIVE_DIGEST="${INPUT_EXPECTED_ARCHIVE_DIGEST:-}"
+if [[ -n "$_EXPECTED_ARCHIVE_DIGEST" ]]; then
+  if ! [[ "$_EXPECTED_ARCHIVE_DIGEST" =~ ^([Ss][Hh][Aa]256:)?[0-9A-Fa-f]{64}$ ]]; then
+    _fail "expected-archive-digest '$_EXPECTED_ARCHIVE_DIGEST' is not a SHA-256 digest. Use 'sha256:<64 hex characters>' or the 64 hex characters alone."
+  fi
+  if [[ -z "$_BASELINE_PROFILE" || -z "$_BASELINE_TARGET" ]]; then
+    _fail "expected-archive-digest pins a release-contract baseline-set archive, which only baseline-profile and baseline-target select. Set both, or unset expected-archive-digest."
+  fi
 fi
 
 # public-header-dir: dump mode, and compare mode's audit-only (no-baseline)

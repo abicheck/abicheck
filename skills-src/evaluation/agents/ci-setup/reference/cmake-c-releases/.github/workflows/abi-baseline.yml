@@ -30,6 +30,12 @@ jobs:
           lang: c
           new-version: ${{ env.TAG }}
           output-file: libgeom.abicheck.json
-      - run: gh release upload "$TAG" libgeom.abicheck.json --clobber
+      - name: Attach snapshot to the release (write-once)
+        run: |
+          if gh release view "$TAG" --json assets -q '.assets[].name' | grep -Fxq libgeom.abicheck.json; then
+            echo "::error::libgeom.abicheck.json already exists on $TAG; baselines are write-once" >&2
+            exit 1
+          fi
+          gh release upload "$TAG" libgeom.abicheck.json
         env:
           GH_TOKEN: ${{ github.token }}

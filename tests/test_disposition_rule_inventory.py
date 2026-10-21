@@ -17,8 +17,10 @@ and its first match in file order wins. Nothing calls ``Suppression.matches``,
 from __future__ import annotations
 
 import re
+import tempfile
 from collections.abc import Sequence
 from datetime import date
+from pathlib import Path
 
 import pytest
 from hypothesis import HealthCheck, given, settings, strategies as st
@@ -26,6 +28,7 @@ from hypothesis import HealthCheck, given, settings, strategies as st
 from abicheck.checker import compare
 from abicheck.checker_policy import ChangeKind, Verdict
 from abicheck.model import AbiSnapshot, Function, Visibility
+from abicheck.policy.acknowledgment import AcknowledgmentList
 from abicheck.policy.disposition_close import ledger_for
 from abicheck.policy.disposition_rules import configured_rule_rows
 from abicheck.policy.reclassify import ReclassifyRule
@@ -551,11 +554,14 @@ def _rule_sets(draw: st.DrawFn) -> list[Suppression]:
     removed=st.sets(st.sampled_from(NAMES)).map(
         lambda s: tuple(n for n in NAMES if n in s)
     ),
+    every_detector_ran=st.booleans(),
 )
 def test_generated_rule_sets_match_the_oracle(
-    rules: list[Suppression], removed: tuple[str, ...]
+    rules: list[Suppression], removed: tuple[str, ...], every_detector_ran: bool
 ) -> None:
     result, symbols = _scenario(removed, rules)
+    if every_detector_ran:  # reaches the ``unused`` branch, not only ``not_evaluated``
+        _every_detector_ran(result)
     today = date.today()
     audit = compute_disposition_audit(result)
     disposed, shadowed = _oracle_suppression(rules, symbols, today)
@@ -582,3 +588,146 @@ def test_configured_rule_rows_reads_the_same_rows_the_audit_reports() -> None:
     result, _ = _scenario(NAMES, (_rule(("symbol", _NOPE)),))
     rows = configured_rule_rows(result, ledger=ledger_for(result))
     assert rows == compute_disposition_audit(result).rules
+
+
+# -- I4: reclassify selector hits and verdict changes ------------------------
+
+#: Every finding is a ``func_removed``, BREAKING by default, so ``to: ignore``
+#: moves it and ``to: break`` matches it without moving it (a no-op).
+_RECLASSIFY_SELECTORS: tuple[tuple[str, str], ...] = (
+    ("symbol", _symbol("gone0")),
+    ("symbol", _NOPE),
+    ("pattern", r"_ZN2ns5gone.*"),
+    ("pattern", r"_ZN2ns5gon[e1].*"),
+)
+
+
+def _reclassify_yaml(
+    rules: Sequence[tuple[tuple[str, str], str, date | None, str | None]],
+) -> str:
+    if not rules:
+        return "reclassify: []\n"
+    lines = ["reclassify:"]
+    for (field, value), to, expires, label in rules:
+        key = "symbol" if field == "symbol" else "symbol_pattern"
+        lines.append(f"  - {key}: {_yaml_str(value)}")
+        lines.append(f"    to: {to}")
+        if expires is not None:
+            lines.append(f"    expires: {expires.isoformat()}")
+        if label is not None:
+            lines.append(f"    label: {label}")
+    return "\n".join(lines) + "\n"
+
+
+def _yaml_str(value: str) -> str:
+    return '"' + value.replace("\\", "\\\\").replace('"', '\\"') + '"'
+
+
+def _reclassify_matches(
+    selector: tuple[str, str], expires: date | None, symbol: str, today: date
+) -> bool:
+    if expires is not None and today > expires:
+        return False
+    field, value = selector
+    if field == "symbol":
+        return symbol == value
+    return re.fullmatch(value, symbol) is not None
+
+
+def _oracle_reclassify(
+    rules: Sequence[tuple[tuple[str, str], str, date | None, str | None]],
+    symbols: Sequence[str],
+    today: date,
+) -> tuple[list[int], list[int]]:
+    """Per-rule (selector hits, verdict changes) under first-match-wins.
+
+    Only the first matching rule decides, and it changes the verdict only when
+    its target is ``ignore``: the finding's base verdict is BREAKING.
+    """
+    hits = [0] * len(rules)
+    changed = [0] * len(rules)
+    for symbol in symbols:
+        matched = [
+            i
+            for i, (selector, _to, expires, _label) in enumerate(rules)
+            if _reclassify_matches(selector, expires, symbol, today)
+        ]
+        for i in matched:
+            hits[i] += 1
+        if matched and rules[matched[0]][1] == "ignore":
+            changed[matched[0]] += 1
+    return hits, changed
+
+
+_rc_rule = st.tuples(
+    st.sampled_from(_RECLASSIFY_SELECTORS),
+    st.sampled_from(["ignore", "break"]),
+    st.sampled_from([None, PAST, FUTURE]),
+    st.sampled_from([None, "a", "b"]),
+)
+
+
+@pytest.mark.slow
+@settings(max_examples=60, deadline=None, suppress_health_check=[HealthCheck.too_slow])
+@given(
+    rules=st.lists(_rc_rule, min_size=0, max_size=4),
+    removed=st.sets(st.sampled_from(NAMES)).map(
+        lambda s: tuple(n for n in NAMES if n in s)
+    ),
+    every_detector_ran=st.booleans(),
+)
+def test_generated_reclassify_rule_sets_match_the_oracle(
+    rules: list[tuple[tuple[str, str], str, date | None, str | None]],
+    removed: tuple[str, ...],
+    every_detector_ran: bool,
+) -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        path = Path(tmp) / "policy.yml"
+        path.write_text(_reclassify_yaml(rules), encoding="utf-8")
+        policy = PolicyFile.load(path)
+        old, new = _snapshots(removed)
+        result = compare(old, new, policy_file=policy)
+    if every_detector_ran:
+        _every_detector_ran(result)
+    today = date.today()
+    audit = compute_disposition_audit(result)
+    hits, changed = _oracle_reclassify(rules, _removed_symbols(removed), today)
+    refused = _detectors_refused(result)
+    assert len(audit.reclassifications) == len(rules)  # I1, zero rows included
+    for index, row in enumerate(audit.reclassifications):
+        assert row.selector_matched_count == hits[index]  # I4: selector hits
+        assert row.matched_count == changed[index]  # I4: verdict changes
+        assert row.status == _oracle_status(
+            changed[index],
+            hits[index] - changed[index],
+            rules[index][2],
+            refused=refused,
+            today=today,
+        )
+    assert audit.reclassified_total == sum(changed)
+
+
+# -- acknowledgments: one row per configured record, zero-count included -----
+
+
+def test_an_acknowledgment_that_covers_nothing_still_has_a_row(tmp_path: Path) -> None:
+    acks = tmp_path / "acks.yml"
+    acks.write_text(
+        "version: 1\nacknowledgments:\n"
+        "  - symbol: nope\n    change_kind: func_removed\n    reason: planned\n"
+        f"  - symbol: {_symbol('gone0')}\n    change_kind: func_removed\n"
+        "    reason: old waiver\n    expires: 2000-01-01\n",
+        encoding="utf-8",
+    )
+    old, new = _snapshots(("gone0",))
+    result = compare(old, new, acknowledgments=AcknowledgmentList.load(acks))
+    unused, expired = compute_disposition_audit(result).acknowledgments
+    # The DWARF detector is refused in this scenario, so an unmatched record is
+    # ``not_evaluated`` rather than ``unused`` (ADR-067 D3, the known limitation).
+    refused = _detectors_refused(result)
+    today = date.today()
+    assert unused.matched_count == 0
+    assert "nope" in unused.rule_id
+    assert unused.status == _oracle_status(0, 0, None, refused=refused, today=today)
+    assert (expired.reason, expired.matched_count) == ("old waiver", 0)
+    assert expired.status == STATUS_EXPIRED

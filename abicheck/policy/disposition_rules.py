@@ -36,7 +36,7 @@ from __future__ import annotations
 
 from dataclasses import replace
 from datetime import date
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, Protocol
 
 from .rule_inventory import (
     KIND_RECLASSIFY,
@@ -52,7 +52,24 @@ from .rule_inventory import (
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from ..checker_types import DiffResult
-    from .disposition_ledger import DispositionLedger
+
+
+class _LedgerLike(Protocol):
+    """The closed ledger's surface this module reads.
+
+    A structural type rather than an import of ``DispositionLedger``: the ledger
+    module imports this one (at call time), so importing it back would be a
+    cycle the architecture gate rejects.
+    """
+
+    _records: list[Any]
+    _anchors: list[Any]
+
+    @property
+    def records(self) -> Any: ...
+
+    @property
+    def suppression_inventories(self) -> Any: ...
 
 
 def _reclassify_ref(policy_file: object, index: int) -> RuleRef:
@@ -61,7 +78,7 @@ def _reclassify_ref(policy_file: object, index: int) -> RuleRef:
 
 
 def stamp_reclassifications(
-    ledger: DispositionLedger, result: DiffResult, *, today: date | None = None
+    ledger: _LedgerLike, result: DiffResult, *, today: date | None = None
 ) -> None:
     """Stamp every record with the ``reclassify:`` rules that touched it (P1).
 
@@ -110,7 +127,7 @@ def stamp_reclassifications(
 
 
 def configured_rule_inventory(
-    ledger: DispositionLedger, result: object
+    ledger: _LedgerLike, result: object
 ) -> tuple[ConfiguredRule, ...]:
     """Every rule this comparison was configured with, across all three kinds.
 
@@ -134,7 +151,7 @@ def configured_rule_inventory(
 def configured_rule_rows(
     result: DiffResult,
     *,
-    ledger: DispositionLedger,
+    ledger: _LedgerLike,
     today: date | None = None,
 ) -> tuple[RuleAuditRow, ...]:
     """One :class:`RuleAuditRow` per configured rule of *result* (ADR-067 D3).

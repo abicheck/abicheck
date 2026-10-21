@@ -289,6 +289,32 @@ def strip_untrusted_execution_keys(base: dict[str, object]) -> dict[str, object]
                 file=sys.stderr,
             )
 
+    # ADR-067 D5/G5: the acknowledgment records file and the `breaks` policy
+    # are trusted only from an operator's explicit --config, exactly as the
+    # CLI's own `acknowledgment_config.py` trust rule states. This overlay is
+    # always handed to the CLI as an explicit --config, so leaving either key
+    # here would launder a pull-request-planted records file (which can accept
+    # its own additions, and under `breaks: accept` its own breaks) into that
+    # trusted status. `unacknowledged_additions` only tightens, so it stays.
+    acknowledgment = base.get("acknowledgment")
+    if isinstance(acknowledgment, dict) and (
+        "file" in acknowledgment or "breaks" in acknowledgment
+    ):
+        dropped = sorted(k for k in ("file", "breaks") if k in acknowledgment)
+        base["acknowledgment"] = {
+            k: v for k, v in acknowledgment.items() if k not in ("file", "breaks")
+        }
+        print(
+            "::warning::the discovered .abicheck.yml's "
+            f"acknowledgment.{'/'.join(dropped)} "
+            f"{'was' if len(dropped) == 1 else 'were'} dropped from this "
+            "synthesized --config overlay -- an auto-discovered config is "
+            "never trusted to supply acknowledgment records or loosen their "
+            "gate (a pull request can edit it); pass the records with the "
+            "acknowledgments input, or name a reviewed build-config to opt in.",
+            file=sys.stderr,
+        )
+
     resource_limits = base.get("resource_limits")
     if isinstance(resource_limits, dict):
         configured_nodes = resource_limits.get("max_bundle_facts_decode_nodes")
@@ -341,9 +367,11 @@ def rebase_relative_config_paths(
     fresh overlay path elsewhere on disk (typically under
     ``$RUNNER_TEMP``).
 
-    Two such fields today: ``compile.include_dirs`` and
-    ``contract.overlays.post_manifest`` (one-comparison-product Phase 9c),
-    found by grepping every ``buildsource/build_config.py`` field for a
+    Three such fields today: ``compile.include_dirs``,
+    ``contract.overlays.post_manifest`` (one-comparison-product Phase 9c) and
+    ``acknowledgment.file`` (ADR-067 D5, resolved against the project root
+    the same way ``compare`` resolves it), found by grepping every
+    ``buildsource/build_config.py`` field for a
     ``project_root_for_config`` consumer -- ``build.compile_db`` is a glob
     resolved against the ``--sources`` root instead, never the config
     file's own location, so it is unaffected by relocation and is handled
@@ -385,6 +413,16 @@ def rebase_relative_config_paths(
         if "post_manifest" in overlays:
             overlays = {**overlays, "post_manifest": _abs(overlays["post_manifest"])}
             base["contract"] = {**contract, "overlays": overlays}
+
+    # ADR-067 D5: `acknowledgment.file` resolves against the config's project
+    # root (`frontends/cli/acknowledgment_config.py`'s `_records_path`), so a
+    # relocated overlay must carry the absolute path, not a scratch-relative one.
+    acknowledgment = base.get("acknowledgment")
+    if isinstance(acknowledgment, dict) and isinstance(acknowledgment.get("file"), str):
+        base["acknowledgment"] = {
+            **acknowledgment,
+            "file": _abs(acknowledgment["file"]),
+        }
     return base
 
 

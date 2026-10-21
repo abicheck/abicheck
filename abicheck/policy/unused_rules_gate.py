@@ -59,8 +59,8 @@ def strictest_mode(modes: Iterable[str]) -> str:
     return max(modes, key=lambda m: _MODE_RANK.get(m, 0), default="allow")
 
 
-def resolve_unused_rules_mode(result: object) -> str:
-    """The run's effective mode: the policy document's, escalated by the CLI flag.
+def effective_unused_rules_mode(policy_file: object | None) -> str:
+    """The mode a policy document sets, escalated by the CLI flag.
 
     ``--fail-on-unused-rules`` (see :mod:`abicheck.model.unused_rules_flag`)
     forces ``block``. It only tightens: the flag never relaxes a policy file's
@@ -68,8 +68,22 @@ def resolve_unused_rules_mode(result: object) -> str:
     """
     if fail_on_unused_rules_requested():
         return "block"
-    policy_file = getattr(result, "policy_file", None)
     return str(getattr(policy_file, "unused_rules", None) or "allow")
+
+
+def unused_rules_digest_field(policy_file: object | None) -> dict[str, str]:
+    """``policy.unused_rules`` for the effective-config digest.
+
+    Present only when the mode is not ``allow``, so every run that never opted
+    in keeps its digest. The CLI flag counts too: it changes the exit code.
+    """
+    mode = effective_unused_rules_mode(policy_file)
+    return {} if mode == "allow" else {"policy.unused_rules": mode}
+
+
+def resolve_unused_rules_mode(result: object) -> str:
+    """The effective mode of *result*'s own policy document (see above)."""
+    return effective_unused_rules_mode(getattr(result, "policy_file", None))
 
 
 @dataclass(frozen=True)

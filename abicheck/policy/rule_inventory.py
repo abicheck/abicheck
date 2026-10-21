@@ -339,5 +339,3 @@ def acknowledgment_rules(acknowledgments: object | None) -> tuple[ConfiguredRule
             )
         )
     return tuple(out)
-
-

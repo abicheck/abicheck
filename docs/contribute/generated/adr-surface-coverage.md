@@ -63,7 +63,7 @@ Which public surface reaches each ADR, which use cases it serves, and whether a 
 | [ADR-044](../adr/044-reachability-aware-suppression.md) | surfaced | — | `cli: compare --suppress`<br>`report: compare_report.suppression_audit` | — |
 | [ADR-045](../adr/045-identity-based-old-new-entity-matching.md) | internal | — | — | Old/new matching inside compare/; observable only as fewer remove+add pairs. |
 | [ADR-046](../adr/046-source-graph-identity-v2-and-evidence-merge.md) | internal | — | — | Source-graph identity and merge inside extract/; no switch or field of its own. |
-| [ADR-047](../adr/047-github-actions-integration-model.md) | partial | UC-WF-baseline | `action: actions/baseline`<br>`action: actions/check-target`<br>`action: actions/aggregate`<br>`cli: aggregate` | P2 of the lifecycle model is only partially implemented (see the ADR). |
+| [ADR-047](../adr/047-github-actions-integration-model.md) | partial | UC-WF-baseline | `action: actions/baseline`<br>`action: actions/check-target`<br>`action: actions/aggregate`<br>`cli: aggregate`<br>`action: expected-archive-digest`<br>`action: actions/resolve-baseline:expected-archive-digest` | P2 of the lifecycle model is only partially implemented (see the ADR). |
 | [ADR-048](../adr/048-canonical-entity-identity-and-graph-reconciliation.md) | internal | — | — | Canonical entity identity in model/; no user-addressable surface. |
 | [ADR-049](../adr/049-contract-relevance-and-compatibility-configuration.md) | surfaced | UC-WF-compare | `cli: compare --contract`<br>`api: abicheck.workflows.service_requests.CompareRequest.pack_paths`<br>`api: abicheck.workflows.service_requests.CompareRequest.stated_settings`<br>`report: compare_report.contract_coverage`<br>`report: compare_report.contract_context` | — |
 | [ADR-050](../adr/050-comparability-contract-and-multi-tu-manifest.md) | surfaced | — | `cli: compare --dump-manifest`<br>`report: compare_report.comparability_assurance` | — |
@@ -83,11 +83,11 @@ Which public surface reaches each ADR, which use cases it serves, and whether a 
 | [ADR-064](../adr/064-canonical-gate-algorithm-and-exit-decision.md) | surfaced | UC-WF-compare | `cli: compare --severity-preset`<br>`report: compare_report.exit`<br>`action: severity-preset` | — |
 | [ADR-065](../adr/065-comparison-scope-selection-and-completeness.md) | surfaced | UC-WF-compare | `cli: compare --select --select-required --dry-run`<br>`report: compare_report.comparison_scope`<br>`report: compare_report.run_outcome` | — |
 | [ADR-066](../adr/066-longitudinal-history-and-versioning-policy.md) | partial | UC-CHANGE-semver-recommendation | `cli: project history --policy`<br>`api: abicheck.workflows.history.build_longitudinal_history` | Proposed; only S1 and S2 are implemented. |
-| [ADR-067](../adr/067-change-intent-acknowledgment-and-disposition-audit.md) | partial | UC-WF-compare | `cli: compare --suppress`<br>`cli: compare --fail-on-unused-rules`<br>`report: compare_report.disposition_audit` | S4 is not implemented. |
+| [ADR-067](../adr/067-change-intent-acknowledgment-and-disposition-audit.md) | partial | UC-WF-compare | `cli: compare --suppress`<br>`cli: compare --fail-on-unused-rules`<br>`cli: compare --acknowledgments`<br>`action: acknowledgments`<br>`report: compare_report.disposition_audit` | S4 is not implemented. The configured-rule inventory (every rule, including unused and expired acknowledgments, gets a disposition_audit row) and the unused_rules gate are implemented under ADR-067 P1. |
 | [ADR-068](../adr/068-one-comparison-product-and-scan-retirement.md) | surfaced | UC-WF-compare, UC-WF-cli-contract | `cli: compare --no-baseline` | — |
 | [ADR-069](../adr/069-name-shape-is-not-contract-membership.md) | internal | — | — | Product rule applied inside policy/; no switch or field of its own. |
 | [ADR-070](../adr/070-action-layer-does-not-encode-cli-semantics.md) | partial | — | `action: extra-args` | Only D3 is implemented; D1, D2 and D4 remain. |
-| [ADR-071](../adr/071-release-analysis-assurance-fold.md) | surfaced | UC-WF-compare | `action: require-complete-analysis`<br>`report: compare_report.analysis_assurance` | — |
+| [ADR-071](../adr/071-release-analysis-assurance-fold.md) | surfaced | UC-WF-compare | `action: analysis-assurance-complete`<br>`report: compare_report.analysis_assurance` | — |
 | [ADR-072](../adr/072-pr-comment-reporting-fidelity.md) | surfaced | UC-REP-markdown-html | `action: pr-comment-detail`<br>`report: format:review` | — |
 | [ADR-073](../adr/073-report-only-publication-and-the-trusted-reporter-boundary.md) | surfaced | — | `action: actions/report`<br>`action: actions/verify-source-run` | — |
 | [ADR-074](../adr/074-logical-macro-definitions-on-the-cli.md) | surfaced | UC-TC-header-scope-robustness | `cli: compare --define`<br>`cli: dump --define` | — |
@@ -188,6 +188,8 @@ Which public surface reaches each ADR, which use cases it serves, and whether a 
 - ADR-047 action: actions/aggregate
 - ADR-047 action: actions/baseline
 - ADR-047 action: actions/check-target
+- ADR-047 action: actions/resolve-baseline:expected-archive-digest
+- ADR-047 action: expected-archive-digest
 - ADR-047 cli: aggregate
 - ADR-049 api: abicheck.workflows.service_requests.CompareRequest.pack_paths
 - ADR-049 api: abicheck.workflows.service_requests.CompareRequest.stated_settings
@@ -219,7 +221,7 @@ Which public surface reaches each ADR, which use cases it serves, and whether a 
 - ADR-067 report: compare_report.disposition_audit
 - ADR-068 cli: compare --no-baseline
 - ADR-070 action: extra-args
-- ADR-071 action: require-complete-analysis
+- ADR-071 action: analysis-assurance-complete
 - ADR-071 report: compare_report.analysis_assurance
 - ADR-072 action: pr-comment-detail
 - ADR-072 report: format:review

@@ -391,6 +391,15 @@ def _decl_node_id(identity: str) -> str:
     return f"decl://{_normalize_graph_identity(identity)}"
 
 
+def decl_node_identity(node_id: str) -> str | None:
+    """The declaration identity a ``decl://`` node id encodes (the inverse of
+    :func:`_decl_node_id`, without the ``#sha256:...`` discriminator), or
+    ``None`` for any other node kind."""
+    if not node_id.startswith("decl://"):
+        return None
+    return node_id[len("decl://") :].split("#", 1)[0]
+
+
 def _type_node_id(identity: str) -> str:
     if identity.startswith(_UNRESOLVED_PREFIX):
         return identity

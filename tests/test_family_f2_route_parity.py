@@ -99,6 +99,10 @@ _UC = "uncovered"
 CLICK_ROUTING: dict[str, tuple[str, Any]] = {
     "policy": ("covered", ("policy_sdk_vendor", "policy_file")),
     "suppress": ("covered", ("suppress", "suppress_strict")),
+    "acknowledgments": (
+        _UC,
+        "--acknowledgments is an operator-named records file; CLI/release/API parity is test_acknowledgment_cli_surfaces.py",
+    ),
     "severity_preset": ("covered", ("severity_strict",)),
     "diagnostic_comparison": ("covered", ("diagnostic_comparison",)),
     "contract_mode": ("covered", ("contract_exports",)),
@@ -224,6 +228,10 @@ REQUEST_ROUTING: dict[str, tuple[str, Any]] = {
         _UC,
         ".abicheck.yml acknowledgment.file (explicit --config only); CLI/release/API parity is test_acknowledgment_release_and_api.py",
     ),
+    "acknowledgment_breaks": (
+        _UC,
+        ".abicheck.yml acknowledgment.breaks (explicit --config or a --policy block); CLI/release/API parity is test_acknowledgment_breaks.py",
+    ),
     "acknowledgment_unacknowledged_additions": (
         _UC,
         ".abicheck.yml acknowledgment.unacknowledged_additions; CLI/release/API parity is test_acknowledgment_release_and_api.py",
@@ -286,6 +294,7 @@ CONFIG_DEFAULT_MAP: dict[str, tuple[tuple[str, str], Callable[[], Any]]] = {
 DEFAULT_MAP: dict[str, tuple[str, str]] = {
     "policy": ("CompareRequest", "policy"),
     "suppress": ("CompareRequest", "suppress"),
+    "acknowledgments": ("CompareRequest", "acknowledgments_path"),
     "severity_preset": ("CompareRequest", "severity_preset"),
     "diagnostic_comparison": ("CompareRequest", "diagnostic_comparison"),
     "contract_mode": ("CompareRequest", "contract_mode"),

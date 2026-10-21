@@ -251,7 +251,6 @@ def compute_summary_table(
             f"{f', from {rule.source_file}' if rule.source_file else ''}]"
             f" — {rule.matched_count} finding(s)"
             for rule in getattr(audit, "rules", ())
-            if rule.matched_count > 0
         ),
         not_evaluated_detectors=tuple(
             det.name for det in getattr(audit, "not_evaluated_detectors", ())

@@ -184,6 +184,15 @@ from .compare_routing import _RELEASE_FORMATS
     "tuning, suppression policy); CLI flags override it.",
 )
 @click.option(
+    "--acknowledgments",
+    "acknowledgments",
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+    default=None,
+    help="Acknowledgment records (YAML, ADR-067) for this run: intentional, "
+    "reviewed changes, each named by finding_id, or by symbol with change_kind. "
+    "Overrides .abicheck.yml's acknowledgment.file.",
+)
+@click.option(
     "--follow-deps",
     is_flag=True,
     default=False,

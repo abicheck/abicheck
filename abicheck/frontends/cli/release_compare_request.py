@@ -41,6 +41,7 @@ from ...errors import (
     ReleaseOperandContentError,
     ReleaseOperandUsageError,
 )
+from ...workflows.release_compare import execute_release_compare
 from ...workflows.release_request import (
     ReleaseComparePlan as ReleaseComparePlan,
     ReleaseCompareRequest as ReleaseCompareRequest,
@@ -52,8 +53,15 @@ if TYPE_CHECKING:
     from collections.abc import Callable
     from pathlib import Path
 
+    from ...workflows.release_compare import (
+        ReleaseCompareOptions,
+        ReleaseCompareOutcome,
+    )
+    from .release_member_reporter import CliReleaseReporter
+
 __all__ = [
     "ReleaseComparePlan",
+    "execute_release_compare_checked",
     "ReleaseCompareRequest",
     "cleanup_release_compare_plan",
     "resolve_release_compare_plan",
@@ -105,4 +113,23 @@ def resolve_release_compare_plan(
     except ReleaseOperandUsageError as exc:
         raise click.UsageError(str(exc)) from exc
     except (ReleaseOperandContentError, AmbiguousLibraryMatchError) as exc:
+        raise click.ClickException(str(exc)) from exc
+
+
+def execute_release_compare_checked(
+    plan: ReleaseComparePlan,
+    options: ReleaseCompareOptions,
+    *,
+    reporter: CliReleaseReporter,
+) -> ReleaseCompareOutcome:
+    """:func:`abicheck.workflows.release_compare.execute_release_compare`,
+    with its typed operand errors (a bad ``--manifest``, an undecodable
+    embedded manifest, an unwritable ``--bundle-facts-out``, a one-sided
+    probe matrix) turned into the ``click`` types -- and so the exit codes
+    and messages -- this command always produced."""
+    try:
+        return execute_release_compare(plan, options, reporter=reporter)
+    except ReleaseOperandUsageError as exc:
+        raise click.UsageError(str(exc)) from exc
+    except ReleaseOperandContentError as exc:
         raise click.ClickException(str(exc)) from exc

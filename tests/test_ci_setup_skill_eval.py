@@ -352,7 +352,7 @@ def test_hand_rolled_release_dump_is_recognised_but_apt_castxml_is_not(tmp_path:
                 "      - run: |\n"
                 "          abicheck dump build/libgeom.so -H include \\\n"
                 "            -o libgeom.abicheck.json\n"
-                '      - run: gh release upload "$TAG" libgeom.abicheck.json --clobber\n'
+                '      - run: gh release upload "$TAG" libgeom.abicheck.json\n'
                 "        env:\n          GH_TOKEN: ${{ github.token }}\n"
             )
         ),
@@ -361,6 +361,36 @@ def test_hand_rolled_release_dump_is_recognised_but_apt_castxml_is_not(tmp_path:
     assert "baseline_release" not in failed
     assert "release_bootstrap" not in failed
     assert "toolchain_via_action" in failed
+
+
+@pytest.mark.parametrize(
+    "old, new",
+    [
+        (
+            '          gh release upload "$TAG" libgeom.abicheck.json\n',
+            '          gh release upload "$TAG" libgeom.abicheck.json --clobber\n',
+        ),
+        (
+            '          gh release upload "$TAG" libgeom.abicheck.json\n',
+            '          gh release delete-asset "$TAG" libgeom.abicheck.json --yes\n'
+            '          gh release upload "$TAG" libgeom.abicheck.json\n',
+        ),
+    ],
+    ids=["clobber-upload", "delete-asset-before-upload"],
+)
+def test_overwriting_a_release_baseline_fails_baseline_release(
+    tmp_path: Path, old: str, new: str
+):
+    """A release baseline is write-once: an upload with --clobber, or a run that
+    deletes the asset first, lets a re-run silently replace the snapshot that
+    consumers already resolved. The grader must fail it even though the
+    snapshot is attached and consumed, which is all `baseline_release` checked
+    before."""
+    work = _workspace(tmp_path, "cmake-c-releases")
+    _edit(work, "abi-baseline.yml", _sub(old, new))
+    assert "baseline_release" in _failed(
+        grader.grade(work, "cmake-c-releases", "", CORPUS)
+    )
 
 
 CLI_TAG_REBUILD = """name: abi

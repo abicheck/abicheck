@@ -1006,7 +1006,11 @@ jobs:
           # an assurance.require_complete: true fragment into whatever
           # build-config the internal analysis step reads, the same effect a
           # project author's own .abicheck.yml line would have.
-          analysis-assurance-complete: ${{ matrix.analysis_assurance == 'complete' && 'true' || 'false' }}
+          # An undeclared cell forwards '' (inherit .abicheck.yml), never
+          # 'false': 'false' is now an explicit override that lifts a config
+          # assurance.require_complete: true, so forwarding it for a cell that
+          # declared nothing would silently drop the project's own floor.
+          analysis-assurance-complete: ${{ matrix.analysis_assurance == 'complete' && 'true' || '' }}
           project: ${{ inputs.project != '' && inputs.project || github.repository }}
           head-sha: ${{ inputs.head-sha != '' && inputs.head-sha || github.sha }}
           base-ref: ${{ inputs.base-ref }}

@@ -75,10 +75,16 @@ jobs:
           output-file: libfoo-${{ github.ref_name }}.abicheck.json
 
       - name: Upload baseline to release
-        run: gh release upload ${{ github.ref_name }} libfoo-*.abicheck.json --clobber
+        run: gh release upload ${{ github.ref_name }} libfoo-*.abicheck.json
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 ```
+
+The upload deliberately omits `--clobber`. A GitHub Release refuses a second
+asset with the same name, so re-running this workflow for a published tag fails
+instead of silently replacing the baseline that consumers already resolved.
+To re-baseline a tag, delete the asset on purpose (`gh release delete-asset
+<tag> <asset-name>`) and re-run, or publish under a new tag.
 
 **PR workflow** (compares against latest release baseline):
 
@@ -124,7 +130,7 @@ To pin to a specific release:
 abicheck dump libfoo.so -H include/foo.h \
   --version 2.0.0 --provenance git-tag=v2.0.0 \
   -o libfoo-2.0.0.abicheck.json
-gh release upload v2.0.0 libfoo-2.0.0.abicheck.json --clobber
+gh release upload v2.0.0 libfoo-2.0.0.abicheck.json
 ```
 
 ### `abi-baseline` also understands a release-contract baseline-set archive

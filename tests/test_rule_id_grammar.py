@@ -158,3 +158,73 @@ def test_the_verdict_a_reclassify_id_names_is_unchanged_by_the_id(
     b = compare(old, new, policy_file=PolicyFile.load(_write(tmp_path, "b.yml", named)))
     assert a.verdict == b.verdict
     assert [c.kind for c in a.changes] == [c.kind for c in b.changes]
+
+
+#: What each key that either grammar accepts means to the audit (P2). A key
+#: accepted by a grammar but absent here, or classified here but no longer
+#: accepted, fails the test: a new key cannot reach the audit unclassified.
+_KEY_CLASSES: dict[str, str] = {
+    "id": "identity",
+    "label": "grouping",
+    "reason": "prose",
+    "expires": "expiry",
+    "to": "target",
+    "kind": "selector",
+    "change_kind": "selector",
+    "symbol": "selector",
+    "symbol_pattern": "selector",
+    "type_pattern": "selector",
+    "member_name": "selector",
+    "namespace": "selector",
+    "entity_namespace": "selector",
+    "cause_namespace": "selector",
+    "source_location": "selector",
+    "binding": "selector",
+    "finding_id": "selector",
+    "reachability": "selector",
+    "allow_public_break": "gate",
+    "allow_unknown_reachability": "gate",
+}
+
+
+def test_every_accepted_key_is_classified_for_the_audit() -> None:
+    from abicheck.policy.reclassify import RECLASSIFY_KNOWN_KEYS
+    from abicheck.policy.suppression.rules import _KNOWN_ENTRY_KEYS
+
+    accepted = set(RECLASSIFY_KNOWN_KEYS) | set(_KNOWN_ENTRY_KEYS)
+    assert accepted - set(_KEY_CLASSES) == set()
+    assert set(_KEY_CLASSES) - accepted == set()
+
+
+def test_only_id_names_the_rule_in_the_audit() -> None:
+    assert {key for key, cls in _KEY_CLASSES.items() if cls == "identity"} == {"id"}
+
+
+def test_an_id_on_a_policy_file_is_accepted_by_the_cli(tmp_path: Path) -> None:
+    from click.testing import CliRunner
+
+    from abicheck.cli import main
+    from abicheck.serialization import save_snapshot
+
+    old, new = _snapshots()
+    save_snapshot(old, tmp_path / "old.json")
+    save_snapshot(new, tmp_path / "new.json")
+    policy = _write(
+        tmp_path,
+        "policy.yml",
+        "reclassify:\n"
+        "  - id: demote-gone0\n    kind: func_removed\n    symbol: " + _MANGLED + "\n"
+        "    to: ignore\n",
+    )
+    res = CliRunner().invoke(
+        main,
+        [
+            "compare",
+            str(tmp_path / "old.json"),
+            str(tmp_path / "new.json"),
+            "--policy",
+            str(policy),
+        ],
+    )
+    # Exit 64 was the pre-P2 answer ("unknown key 'id'"); the rule is now valid.
+    assert res.exit_code == 0, res.output

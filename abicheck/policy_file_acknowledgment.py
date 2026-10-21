@@ -31,13 +31,15 @@ from typing import Any, cast
 
 from .errors import PolicyError
 from .model.acknowledgment_policy import (
+    VALID_ACKNOWLEDGMENT_BREAKS_ACTIONS,
     VALID_UNACKNOWLEDGED_ADDITIONS_ACTIONS,
+    AcknowledgmentBreaksAction,
     AcknowledgmentPolicy,
     UnacknowledgedAdditionsAction,
     built_in_default_acknowledgment_policy,
 )
 
-_ACKNOWLEDGMENT_KNOWN_KEYS = frozenset({"unacknowledged_additions"})
+_ACKNOWLEDGMENT_KNOWN_KEYS = frozenset({"unacknowledged_additions", "breaks"})
 
 
 def parse_acknowledgment_policy(raw: Any, path: Path) -> AcknowledgmentPolicy:
@@ -76,6 +78,13 @@ def parse_acknowledgment_policy(raw: Any, path: Path) -> AcknowledgmentPolicy:
             f"value {action!r}. Valid values: "
             f"{sorted(VALID_UNACKNOWLEDGED_ADDITIONS_ACTIONS)}"
         )
+    breaks = raw.get("breaks", default.breaks)
+    if not isinstance(breaks, str) or breaks not in VALID_ACKNOWLEDGMENT_BREAKS_ACTIONS:
+        raise PolicyError(
+            f"acknowledgment.breaks in {path}: invalid value {breaks!r}. "
+            f"Valid values: {sorted(VALID_ACKNOWLEDGMENT_BREAKS_ACTIONS)}"
+        )
     return AcknowledgmentPolicy(
-        unacknowledged_additions=cast("UnacknowledgedAdditionsAction", action)
+        unacknowledged_additions=cast("UnacknowledgedAdditionsAction", action),
+        breaks=cast("AcknowledgmentBreaksAction", breaks),
     )
