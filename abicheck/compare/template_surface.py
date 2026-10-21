@@ -362,6 +362,12 @@ def _reconciled_cpo_surfaces(
 ) -> tuple[list[Function], list[Variable], list[Function], list[Variable]]:
     old_funcs, new_funcs = reconciled_public_functions(old, new)
     old_vars, new_vars = reconciled_public_variables(old, new)
+    # Both cross-kind passes key every declaration of both sides -- the
+    # public lists, the full lists and the alias index -- through the same
+    # *identity*, which re-derives the qualified name each time (~4 keyings
+    # per declaration). It is a pure function of the declaration, so derive
+    # it once per declaration for this pair.
+    identity = _per_declaration(identity)
     cross_old_funcs, cross_new_vars = _reconcile(
         old_funcs,
         new_vars,
@@ -391,6 +397,25 @@ def _reconciled_cpo_surfaces(
         ),
     )
     return (cross_old_funcs, cross_old_vars, cross_new_funcs, cross_new_vars)
+
+
+def _per_declaration(identity: Callable[[Any], str]) -> Callable[[Any], str]:
+    """*identity*, computed once per declaration object.
+
+    Keyed by ``id``; the declaration is held beside its key so a recycled
+    ``id`` can never be served another declaration's identity.
+    """
+    seen: dict[int, tuple[Any, str]] = {}
+
+    def _identity(decl: Any) -> str:
+        hit = seen.get(id(decl))
+        if hit is not None and hit[0] is decl:
+            return hit[1]
+        value = identity(decl)
+        seen[id(decl)] = (decl, value)
+        return value
+
+    return _identity
 
 
 def _needs_demangle(name: str, mangled: str) -> bool:
