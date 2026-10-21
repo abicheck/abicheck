@@ -49,7 +49,7 @@
       "abicheck/extract/elf_symbol_fastpath.py": "9731dd43e2a99edd25f70a77c3c1fa02612d0de537cc73a98ea90b79167b1c21",
       "abicheck/extract/elf_symbol_tables.py": "20aad46c8363b26b371f367dae054f96c92773551b1adec67628348613f4401f",
       "abicheck/extract/elf_symbol_versions.py": "b2aa29df27ed51b9cbe3f6b94e9c99e391036216621fa35cb72dc922ecf39786",
-      "abicheck/extract/env_flags.py": "99a67fc204d3333b16e9314010c1a1d0804ffb00d271fcc63aa7925b57c24ac7",
+      "abicheck/extract/env_flags.py": "6a1343268cdfcd4b2ccaf91008d96b611973bf5cab04467c2585f012e1f5466c",
       "abicheck/extract/export_symbol_identity.py": "2146bd67207411943258124a24271542c8b9767344c1b404aaa9133c0358ff00",
       "abicheck/extract/export_table_read.py": "7783c3baba176ef8b47cb99361f389984bb1797c37ba5d9120866359f60c3601",
       "abicheck/extract/flat_map_dependency_scope.py": "77659ce966d856c4b9008cdc6cf88250a3f50314fdf04140712f4e3797894648",
@@ -149,9 +149,9 @@
       "abicheck/symvers_metadata.py": "372737765cd132e6e87ed891dd465d2958e04debbef774e45212ceb3036871cb",
       "abicheck/type_metadata.py": "9997189de8dac522fd1db8be5ae491d811139503f83abaaded89038eb4aa9cdf"
     },
-    "fingerprint": "bfc49c02bf17c38476b9bf85506c93c63055f16dc7e66f449cc4ec6a539c1776",
+    "fingerprint": "f17b75e6ceca9b885fa80203899001a453d6de05d674bf703dfcb3d8f98106ac",
     "generation": 5,
-    "reason": "merge with main: main's tu_jobs.py worker-clamp refactor (no fact change) on top of this branch's generation 5 (castxml specialization_declared_fact)"
+    "reason": "registered the ABICHECK_MEMBER_PROCESSES boolean knob, read only by the release member dispatch; no extraction semantics change"
   },
   "resolver": {
     "files": {

@@ -111,6 +111,10 @@ class TestParallelFanOutDedupPropagation:
             _fake_compare_one_library,
         )
 
+        # caplog observes this process; the thread fan-out keeps every
+        # worker's warning here (the process path is in
+        # test_release_member_processes.py).
+        monkeypatch.setenv("ABICHECK_MEMBER_PROCESSES", "0")
         ctx = self._member_context(tmp_path, pf)
         with caplog.at_level(logging.WARNING, logger="abicheck.service"):
             results = _compare_release_parallel(["a", "b"], ctx, max_workers=4)

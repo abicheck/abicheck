@@ -541,6 +541,9 @@ def _threads_run(
     spy = GrantSpy()
     with monkeypatch.context() as mp:
         mp.setenv("ABICHECK_MAX_THREADS", threads)
+        # The thread budget is what this varies: keep members on the thread
+        # fan-out whose pools the spy counts (a GIL build would fork them).
+        mp.setenv("ABICHECK_MEMBER_PROCESSES", "0")
         mp.setattr(os, "cpu_count", lambda: 8)
         spy.install(mp)
         return _run(str(old), str(new)), spy.grants

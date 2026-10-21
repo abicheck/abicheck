@@ -795,7 +795,7 @@
     },
     {
       "path": "abicheck/policy_file.py",
-      "baseline_lines": 914,
+      "baseline_lines": 913,
       "target": "policy (done; classified, remaining debt is line count only)",
       "rule": "no_growth",
       "disposition": "migrate",
