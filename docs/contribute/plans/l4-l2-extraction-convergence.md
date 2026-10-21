@@ -1,6 +1,6 @@
 # L2/L4/L5 extraction convergence — one parse per TU, one owner per primitive
 
-**Status:** Proposed; Phases 1 and 2 implemented (the first two PRs).
+**Status:** Proposed; Phases 1 and 2 implemented (the first two PRs); Phase 3 first slice implemented (the model and four clang/castxml consumers; see Phase 3 for the remaining slices).
 **Parent plans:** [Duplication & convergence assessment](duplication-and-convergence-assessment.md)
 (its P1 "Compiler invocation handling needs one typed model" owns Phase 3
 here — this plan does not restate that design), [One Semantic Pipeline](one-semantic-pipeline.md)
@@ -172,6 +172,47 @@ From this plan's side the acceptance criterion is concrete: `_argv.py`,
 argv all consume the one parsed invocation, and `_argv.py` shrinks to the
 backend-specific rendering it genuinely owns (clang-cl driver mode,
 castxml emulation).
+
+**Status — first slice implemented.** `call_graph._safe_replay_flags_from_context`
+is no longer a consumer: Phase 2 deleted it, so it is not in this slice's
+acceptance. The model is `source_extractors/compile_invocation.py`:
+`parse_compile_invocation()` reads a `CompileUnit` once into a frozen
+`CompilerInvocation` (source, driver, forced language, standard, replay
+directory, defines, rebased include dirs, sysroot, target, and the replayed
+`CarriedFlag`s). Each `CarriedFlag` records whether the structured argv
+suppresses it, which is the rule `replayed_tokens()` applies. The
+replayed-flag scanner moved out of `_argv.py` into the model, and
+`_argv.replay_extra_flags` is deleted (`_argv.py`: 1491 → 1293 lines).
+
+Consumers now on the model: the L4/L5 AST-dump and macro argv
+(`clang_command`), the castxml replay argv (`castxml`), the public-root
+include probe (`clang_public_roots`), and the replay cache key
+(`source_replay`).
+
+Verified by a differential golden: `tests/test_compile_invocation_differential.py`
+renders the clang and castxml argv for 16 units of a real compile database
+(gcc, clang, clang-cl, icpx, `-I`/`-isystem`/`-iquote`/`-idirafter`, `-D`/`-U`,
+`-include`, `-std` conflicts, `-x`, a response file, `env -C`, `env -i`,
+sysroot/target, a code-loading option, SYCL) against the output recorded at
+the pre-change commit. A mutation of the dedup rule fails it.
+
+**Remaining slices**, each a separate PR:
+
+1. **L2 header clang argv.** `extract/headers/ast_config.py:_build_clang_header_command`
+   still builds its own argv from `header_compile_context`'s derived flags.
+   Route it through the model (the same dedup rule, the same rebase) and add
+   its rows to the golden.
+2. **Typed include search for the public roots.** `clang_public_roots` still
+   re-scans the replayed tokens for `-iquote`/`-I` operands. Carry the
+   include-search entries as typed fields on the model and delete the rescan.
+3. **Launcher and `env` parsing into the model.** `strip_launchers`,
+   `pick_compiler_binary` and the `env` fold still live in `_argv.py` and are
+   called from the model. Move the fold into `parse_compile_invocation`, so
+   `_argv.py` keeps only the backend rendering the plan names.
+4. **`SourceOperand` and `CompileAction`.** The parent plan's per-source
+   `language`/`effective_output`/`action` and `link_inputs` are not in this
+   slice. They need a multi-source corpus (`gcc -c a.c b.c`, `-x` switching
+   between sources) before the model can carry them honestly.
 
 ### Phase 4 — one clang AST → declaration/type parser
 

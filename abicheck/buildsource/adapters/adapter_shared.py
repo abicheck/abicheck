@@ -202,7 +202,7 @@ _NON_ABI_LTO_TUNING_PREFIXES: tuple[str, ...] = (
 #: path", fresh evidence): the decode was originally L2-header-path-specific
 #: (``header_compile_context._split_operand_survivor``), living in this
 #: module. The identical encoding also flows through L4 source replay
-#: (``source_extractors._argv.replay_extra_flags``/
+#: (``source_extractors.compile_invocation.replayed_tokens``/
 #: ``_carry_abi_relevant_flags``), which read the raw ``abi_relevant_flags``
 #: survivors verbatim and could not decode them without importing this
 #: predicate/set from here -- but this module already imports
