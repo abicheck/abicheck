@@ -435,6 +435,8 @@
         "action: actions/aggregate",
         "action: actions/baseline",
         "action: actions/check-target",
+        "action: actions/resolve-baseline:expected-archive-digest",
+        "action: expected-archive-digest",
         "cli: aggregate"
       ],
       "use_cases": [
@@ -802,6 +804,8 @@
     "ADR-047 action: actions/aggregate",
     "ADR-047 action: actions/baseline",
     "ADR-047 action: actions/check-target",
+    "ADR-047 action: actions/resolve-baseline:expected-archive-digest",
+    "ADR-047 action: expected-archive-digest",
     "ADR-047 cli: aggregate",
     "ADR-049 api: abicheck.workflows.service_requests.CompareRequest.pack_paths",
     "ADR-049 api: abicheck.workflows.service_requests.CompareRequest.stated_settings",

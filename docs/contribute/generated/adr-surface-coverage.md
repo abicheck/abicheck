@@ -63,7 +63,7 @@ Which public surface reaches each ADR, which use cases it serves, and whether a 
 | [ADR-044](../adr/044-reachability-aware-suppression.md) | surfaced | — | `cli: compare --suppress`<br>`report: compare_report.suppression_audit` | — |
 | [ADR-045](../adr/045-identity-based-old-new-entity-matching.md) | internal | — | — | Old/new matching inside compare/; observable only as fewer remove+add pairs. |
 | [ADR-046](../adr/046-source-graph-identity-v2-and-evidence-merge.md) | internal | — | — | Source-graph identity and merge inside extract/; no switch or field of its own. |
-| [ADR-047](../adr/047-github-actions-integration-model.md) | partial | UC-WF-baseline | `action: actions/baseline`<br>`action: actions/check-target`<br>`action: actions/aggregate`<br>`cli: aggregate` | P2 of the lifecycle model is only partially implemented (see the ADR). |
+| [ADR-047](../adr/047-github-actions-integration-model.md) | partial | UC-WF-baseline | `action: actions/baseline`<br>`action: actions/check-target`<br>`action: actions/aggregate`<br>`cli: aggregate`<br>`action: expected-archive-digest`<br>`action: actions/resolve-baseline:expected-archive-digest` | P2 of the lifecycle model is only partially implemented (see the ADR). |
 | [ADR-048](../adr/048-canonical-entity-identity-and-graph-reconciliation.md) | internal | — | — | Canonical entity identity in model/; no user-addressable surface. |
 | [ADR-049](../adr/049-contract-relevance-and-compatibility-configuration.md) | surfaced | UC-WF-compare | `cli: compare --contract`<br>`api: abicheck.workflows.service_requests.CompareRequest.pack_paths`<br>`api: abicheck.workflows.service_requests.CompareRequest.stated_settings`<br>`report: compare_report.contract_coverage`<br>`report: compare_report.contract_context` | — |
 | [ADR-050](../adr/050-comparability-contract-and-multi-tu-manifest.md) | surfaced | — | `cli: compare --dump-manifest`<br>`report: compare_report.comparability_assurance` | — |
@@ -188,6 +188,8 @@ Which public surface reaches each ADR, which use cases it serves, and whether a 
 - ADR-047 action: actions/aggregate
 - ADR-047 action: actions/baseline
 - ADR-047 action: actions/check-target
+- ADR-047 action: actions/resolve-baseline:expected-archive-digest
+- ADR-047 action: expected-archive-digest
 - ADR-047 cli: aggregate
 - ADR-049 api: abicheck.workflows.service_requests.CompareRequest.pack_paths
 - ADR-049 api: abicheck.workflows.service_requests.CompareRequest.stated_settings
