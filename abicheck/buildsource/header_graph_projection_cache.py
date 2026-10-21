@@ -71,7 +71,10 @@ from ..storage.acyclic_json import loads_acyclic
 from ..storage.code_identity import abicheck_code_fingerprint
 from .call_graph import CallEdge
 from .callback_graph import CallbackEdge
-from .header_graph_ast_projection import HeaderGraphAstProjection
+from .header_graph_ast_projection import (
+    HeaderGraphAstProjection,
+    current_bisection_memo,
+)
 from .override_graph import OverrideEdge
 from .semantic_fact_folds import SemanticFacts
 from .template_graph import TemplateArgUse, TemplateInstantiation
@@ -253,17 +256,8 @@ def _discard_sidecar(path: Path) -> None:
         pass
 
 
-def load_cached_projection(ast_cache_path: Path) -> HeaderGraphAstProjection | None:
-    """The projection stored beside *ast_cache_path*, or ``None``.
-
-    Never raises, for the same reason :func:`store_cached_projection` does
-    not: every outcome here is either a projection or a re-parse, and a
-    re-parse is what the run would have done without this cache at all.
-
-    An unreadable or untrusted entry is discarded rather than kept, so a
-    corrupt sidecar costs one re-parse instead of every future one.
-    """
-    path = projection_sidecar_path(ast_cache_path)
+def _read_sidecar(path: Path) -> HeaderGraphAstProjection | None:
+    """Read and decode one sidecar from disk; the uncached primitive."""
     try:
         blob = path.read_text(encoding="utf-8")
     except _CACHE_IO_ERRORS:
@@ -273,6 +267,25 @@ def load_cached_projection(ast_cache_path: Path) -> HeaderGraphAstProjection | N
     if projection is None:
         _discard_sidecar(path)
     return projection
+
+
+def load_cached_projection(ast_cache_path: Path) -> HeaderGraphAstProjection | None:
+    """The projection stored beside *ast_cache_path*, or ``None``.
+
+    Never raises, for the same reason :func:`store_cached_projection` does
+    not: every outcome here is either a projection or a re-parse, and a
+    re-parse is what the run would have done without this cache at all.
+
+    An unreadable or untrusted entry is discarded rather than kept, so a
+    corrupt sidecar costs one re-parse instead of every future one.
+
+    Inside a bisection scope (one release/compare request) a successful load
+    is shared by every library that asks for the same sidecar, so a 28-member
+    release reads each sidecar once instead of once per member. Outside a
+    scope, or in reference mode, every call reads the disk as before.
+    """
+    path = projection_sidecar_path(ast_cache_path)
+    return current_bisection_memo().load_projection(path, lambda: _read_sidecar(path))
 
 
 def store_cached_projection(
