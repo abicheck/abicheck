@@ -14,6 +14,7 @@ from __future__ import annotations
 import json
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -21,7 +22,12 @@ from click.testing import CliRunner
 
 from abicheck.cli import main
 
-pytestmark = pytest.mark.integration
+pytestmark = [
+    pytest.mark.integration,
+    # The fixture is an ELF ``.so``: on Mach-O/PE the ELF detector that produces
+    # ``symbol_size_changed`` never runs, so ``not_evaluated`` is the correct status there.
+    pytest.mark.skipif(sys.platform != "linux", reason="ELF-only fixture"),
+]
 
 _SOURCE = "int keep(void) { return 3; }\nint also(int a) { return a + 1; }\n"
 
