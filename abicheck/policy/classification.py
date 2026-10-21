@@ -712,7 +712,7 @@ def evidence_status_for_result(
     # below only applies when this run's own evidence_tiers says "elf" was
     # actually examined. Without this guard, every genuine PE/Mach-O
     # BREAKING_KINDS removal would be misdowngraded to UNATTRIBUTED.
-    kind = getattr(change, "kind", None)
+    kind = change.kind
     if (
         "elf" in evidence_tiers
         and kind in _ELF_BINDING_STAMPED_KINDS

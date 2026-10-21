@@ -675,7 +675,7 @@ class SuppressionList:
         except OSError as e:
             raise OSError(f"Cannot read suppression file {path}: {e}") from e
         digest = hashlib.sha256(raw_bytes).hexdigest()
-        text = raw_bytes.decode("utf-8")
+        text = raw_bytes.decode()
 
         try:
             data = yaml.safe_load(text)

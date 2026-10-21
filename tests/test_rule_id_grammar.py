@@ -228,3 +228,142 @@ def test_an_id_on_a_policy_file_is_accepted_by_the_cli(tmp_path: Path) -> None:
     )
     # Exit 64 was the pre-P2 answer ("unknown key 'id'"); the rule is now valid.
     assert res.exit_code == 0, res.output
+
+
+# --- SuppressionList.load: exact diagnostics and per-entry indices ---------
+# Each error names the offending entry by its 0-based index; the entries
+# below sit at index 1 (or 2) so an index silently replaced by ``None`` or
+# by another entry's shows up in the message.
+
+_GOOD = "  - symbol: keep\n    reason: r\n"
+
+
+def _load_error(tmp_path: Path, body: str) -> str:
+    path = _write(tmp_path, "s.yml", "version: 1\nsuppressions:\n" + body)
+    with pytest.raises(ValueError) as excinfo:
+        SuppressionList.load(path)
+    return str(excinfo.value)
+
+
+@pytest.mark.parametrize(
+    ("raw_id", "shown"),
+    [("5", "5"), ("''", "''"), ("'   '", "'   '"), ("[a]", "['a']"), ("true", "True")],
+)
+def test_a_non_string_or_blank_suppression_id_is_rejected(
+    tmp_path: Path, raw_id: str, shown: str
+) -> None:
+    path = _write(
+        tmp_path,
+        "s.yml",
+        "version: 1\nsuppressions:\n" + _GOOD + f"  - id: {raw_id}\n    symbol: x\n",
+    )
+    with pytest.raises(PolicyError) as excinfo:
+        SuppressionList.load(path)
+    assert str(excinfo.value) == (
+        f"Suppression entry 1: 'id' must be a non-empty string, got {shown}"
+    )
+
+
+def test_a_duplicate_suppression_id_names_both_entry_indices(tmp_path: Path) -> None:
+    message = _load_error(
+        tmp_path,
+        _GOOD + "  - id: dup\n    symbol: a\n  - id: dup\n    symbol: b\n",
+    )
+    assert message == (
+        "Suppression entry 2: duplicate id 'dup' (already used by "
+        "suppression entry 1); ids must be unique per file"
+    )
+
+
+def test_suppression_ids_are_kept_per_rule(tmp_path: Path) -> None:
+    path = _write(
+        tmp_path,
+        "s.yml",
+        "version: 1\nsuppressions:\n"
+        "  - symbol: a\n  - id: one\n    symbol: b\n  - id: two\n    symbol: c\n",
+    )
+    assert [rule.id for rule in SuppressionList.load(path).rules] == [
+        None,
+        "one",
+        "two",
+    ]
+
+
+@pytest.mark.parametrize(
+    ("entry", "expected_prefix"),
+    [
+        ("    expires: not-a-date\n", "Suppression entry 1: invalid 'expires' date "),
+        (
+            "    allow_public_break: maybe\n",
+            "Suppression entry 1: 'allow_public_break' must be a boolean "
+            "(true/false), got 'maybe'",
+        ),
+        (
+            "    allow_unknown_reachability: maybe\n",
+            "Suppression entry 1: 'allow_unknown_reachability' must be "
+            "a boolean (true/false), got 'maybe'",
+        ),
+        ("    finding_id: [a, b]\n", "Suppression entry 1: finding_id "),
+        ("    finding_id: {a: b}\n", "Suppression entry 1: finding_id "),
+    ],
+)
+def test_a_bad_entry_field_names_its_own_entry_index(
+    tmp_path: Path, entry: str, expected_prefix: str
+) -> None:
+    message = _load_error(tmp_path, _GOOD + "  - symbol: x\n" + entry)
+    assert message.startswith(expected_prefix), message
+
+
+def test_a_non_mapping_document_is_rejected_with_the_exact_message(
+    tmp_path: Path,
+) -> None:
+    path = _write(tmp_path, "s.yml", "- a\n- b\n")
+    with pytest.raises(ValueError) as excinfo:
+        SuppressionList.load(path)
+    assert str(excinfo.value) == "Suppression file must be a YAML mapping"
+
+
+def test_a_non_list_suppressions_key_is_rejected_with_the_exact_message(
+    tmp_path: Path,
+) -> None:
+    path = _write(tmp_path, "s.yml", "version: 1\nsuppressions: {a: b}\n")
+    with pytest.raises(ValueError) as excinfo:
+        SuppressionList.load(path)
+    assert str(excinfo.value) == "'suppressions' must be a list"
+
+
+def test_a_missing_justification_is_rejected_with_the_exact_message(
+    tmp_path: Path,
+) -> None:
+    path = _write(
+        tmp_path, "s.yml", "version: 1\nsuppressions:\n" + _GOOD + "  - symbol: x\n"
+    )
+    with pytest.raises(ValueError) as excinfo:
+        SuppressionList.load(path, require_justification=True)
+    assert str(excinfo.value) == (
+        "Suppression rule 1 has no 'reason' field. "
+        "All suppression rules must include a justification "
+        "when suppression.require_justification is set in "
+        ".abicheck.yml."
+    )
+
+
+def test_an_unreadable_file_names_its_path(tmp_path: Path) -> None:
+    missing = tmp_path / "absent.yml"
+    with pytest.raises(OSError) as excinfo:
+        SuppressionList.load(missing)
+    assert str(excinfo.value).startswith(f"Cannot read suppression file {missing}: ")
+
+
+@pytest.mark.parametrize(
+    "text", ["version: 1\n", "version: 1\nsuppressions:\n  - symbol: a\n"]
+)
+def test_the_loaded_list_records_its_source_path_and_digest(
+    tmp_path: Path, text: str
+) -> None:
+    import hashlib
+
+    path = _write(tmp_path, "s.yml", text)
+    loaded = SuppressionList.load(path)
+    assert loaded.source_path == str(path)
+    assert loaded.source_sha256 == hashlib.sha256(text.encode()).hexdigest()
