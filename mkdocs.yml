@@ -312,6 +312,7 @@ nav:
       - Performance findings: contribute/perf-findings.md
       - Memory: contribute/memory.md
       - Known Gaps & Reverted Fixes: contribute/known-gaps.md
+      - Report Schema Version History: contribute/report-schema-history.md
     - Roadmap & Status:
       - Vision: contribute/vision.md
       - Goals: contribute/goals.md

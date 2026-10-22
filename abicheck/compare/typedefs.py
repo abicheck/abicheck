@@ -70,6 +70,12 @@ from ..model.semantic_ir_legacy_adapter import (
     render_display_name_or_leaf,
     semantic_ir_covers_kind,
 )
+from .constants import (
+    _attribute_residuals,
+    _group_safe_disambiguator,
+    _residual_disambiguator,
+    _residual_entity_id,
+)
 from .naming_conventions import (
     TYPEDEF_VERSION_STAMP,
     _has_version_family_successor as _has_version_family_successor,
@@ -127,55 +133,6 @@ def _underlying(index: SemanticIRIndex, occurrence_id: OccurrenceId) -> str:
         assert isinstance(value, str)
         return value
     return _UNRESOLVED_TYPE_SENTINEL
-
-
-def _collision_safe_disambiguator(occurrence_id: OccurrenceId) -> str | None:
-    """Mirrors ``compare.constants._collision_safe_disambiguator`` exactly
-    (Codex review, PR #1078, 20th round)."""
-    disambiguator = producer_occurrence_disambiguator(occurrence_id)
-    if disambiguator:
-        return disambiguator
-    entity_id = producer_entity_id(occurrence_id.entity_id)
-    return None if entity_id is None else str(entity_id.key)
-
-
-def _group_safe_disambiguator(
-    occurrence_id: OccurrenceId, group_size: int
-) -> str | None:
-    """Mirrors ``compare.constants._group_safe_disambiguator`` exactly
-    (22nd round)."""
-    if group_size <= 1:
-        return producer_occurrence_disambiguator(occurrence_id)
-    return _collision_safe_disambiguator(occurrence_id)
-
-
-#: Mirrors ``compare.constants._Residual`` exactly.
-_Residual = tuple["OccurrenceId | None", "str | None"]
-
-
-def _residual_entity_id(occurrence_id: OccurrenceId | None) -> EntityId | None:
-    """``None`` for an ambiguous residual (:func:`_attribute_residuals`)."""
-    if occurrence_id is None:
-        return None
-    return producer_entity_id(occurrence_id.entity_id)
-
-
-def _residual_disambiguator(
-    occurrence_id: OccurrenceId | None, synthetic: str | None = None
-) -> str | None:
-    """Mirrors ``compare.constants._residual_disambiguator`` exactly."""
-    if occurrence_id is not None:
-        return _collision_safe_disambiguator(occurrence_id)
-    return synthetic
-
-
-def _attribute_residuals(
-    ids_for_value: list[OccurrenceId], excess: int
-) -> list[_Residual]:
-    """Mirrors ``compare.constants._attribute_residuals`` exactly."""
-    if excess == len(ids_for_value):
-        return [(i, None) for i in ids_for_value]
-    return [(None, f"ambiguous:{i}") for i in range(excess)]
 
 
 def _aliases(index: SemanticIRIndex) -> dict[str, list[OccurrenceId]]:

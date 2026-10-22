@@ -100,10 +100,15 @@ def test_the_owner_parse_equals_each_family_parser_and_its_own_merge() -> None:
         [parse_clang_ast_templates(tree)]
     )
     assert facts.callbacks == merge_callback_edges([parse_clang_ast_callbacks(tree)])
-    # Not vacuous: the capture holds every family, both template kinds, and
-    # a class declaring its own virtual destructor.
+    # Not vacuous: the capture holds every family, both template kinds, a
+    # declared partial-specialization pattern, and a class declaring its own
+    # virtual destructor.
     assert facts.overrides[0] and facts.callbacks
-    assert {t.kind for t in facts.templates} == {"record", "function"}
+    assert {t.kind for t in facts.templates} == {
+        "record",
+        "function",
+        "partial_pattern",
+    }
     assert any(t.template_signature for t in facts.templates if t.kind == "record")
     assert "sf::Base" in parse_clang_ast_virtual_destructor_owners(tree)
 

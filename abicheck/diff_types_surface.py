@@ -36,7 +36,13 @@ from __future__ import annotations
 
 import re
 
-from .model import AbiSnapshot, RecordType, is_non_abi_surface_type
+from .compare.type_map_pair import TypeMap
+from .model import (
+    AbiSnapshot,
+    RecordType,
+    is_non_abi_surface_type,
+    stdlib_namespaces_excluded,
+)
 from .model.name_heuristics import NameHeuristicEffect, register_name_heuristic
 from .name_classification import STDLIB_TYPE_NAMESPACE_PREFIXES
 from .type_reachability import directly_referenced_stdlib_types
@@ -109,3 +115,26 @@ def _directly_referenced(old: AbiSnapshot, new: AbiSnapshot) -> frozenset[str]:
     public surface (status-review item 3) -- union of both sides so a type
     used directly in only one of old/new still lifts the filter for it."""
     return directly_referenced_stdlib_types(old) | directly_referenced_stdlib_types(new)
+
+
+def surface_type_maps(
+    old: AbiSnapshot, new: AbiSnapshot, *, records_only: bool = False
+) -> tuple[TypeMap[RecordType], TypeMap[RecordType]]:
+    """Old and new type maps of the ABI-surface types (unions dropped when
+    *records_only*), with the shared stdlib exclusion applied to both sides."""
+    from .diff_helpers import build_type_map
+
+    excl = stdlib_namespaces_excluded(old, new)
+    directly_referenced = _directly_referenced(old, new)
+
+    def side(snap: AbiSnapshot) -> TypeMap[RecordType]:
+        return build_type_map(
+            t
+            for t in snap.declarations.types
+            if not (records_only and t.is_union)
+            and _is_abi_surface_type(
+                t, exclude_stdlib=excl, directly_referenced=directly_referenced
+            )
+        )
+
+    return side(old), side(new)

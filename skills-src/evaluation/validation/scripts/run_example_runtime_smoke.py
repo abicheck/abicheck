@@ -12,6 +12,7 @@ libv1?".
 from __future__ import annotations
 
 import argparse
+import contextlib
 import hashlib
 import json
 import os
@@ -115,10 +116,8 @@ def _disable_aslr_preexec() -> object | None:
     def _preexec() -> None:
         # Best-effort: an unprivileged personality() call should always
         # succeed, but never let this hook itself break the run.
-        try:
+        with contextlib.suppress(Exception):
             personality(ADDR_NO_RANDOMIZE)
-        except Exception:
-            pass
 
     return _preexec
 

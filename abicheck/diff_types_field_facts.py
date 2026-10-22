@@ -44,8 +44,7 @@ from .diff_helpers import (
 )
 from .diff_types_surface import (
     RESERVED_FIELD,
-    _directly_referenced,
-    _is_abi_surface_type,
+    surface_type_maps,
 )
 from .fact_provenance import field_fact_key
 from .model import (
@@ -267,24 +266,7 @@ def _diff_field_qualifiers(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     if not (family_reliable(old, "header_cv") and family_reliable(new, "header_cv")):
         return []
     changes: list[Change] = []
-    excl = _exclude_stdlib_namespaces(old, new)
-    directly_referenced = _directly_referenced(old, new)
-    old_map = _build_type_map(
-        t
-        for t in old.declarations.types
-        if not t.is_union
-        and _is_abi_surface_type(
-            t, exclude_stdlib=excl, directly_referenced=directly_referenced
-        )
-    )
-    new_map = _build_type_map(
-        t
-        for t in new.declarations.types
-        if not t.is_union
-        and _is_abi_surface_type(
-            t, exclude_stdlib=excl, directly_referenced=directly_referenced
-        )
-    )
+    old_map, new_map = surface_type_maps(old, new, records_only=True)
 
     for t_old in old_map.values():
         t_new = _lookup_matched_type(old_map, new_map, t_old)
@@ -362,22 +344,7 @@ def _diff_field_default_initializer(old: AbiSnapshot, new: AbiSnapshot) -> list[
     if not both_header_aware(old, new):
         return []
     changes: list[Change] = []
-    excl = _exclude_stdlib_namespaces(old, new)
-    directly_referenced = _directly_referenced(old, new)
-    old_map = _build_type_map(
-        t
-        for t in old.declarations.types
-        if _is_abi_surface_type(
-            t, exclude_stdlib=excl, directly_referenced=directly_referenced
-        )
-    )
-    new_map = _build_type_map(
-        t
-        for t in new.declarations.types
-        if _is_abi_surface_type(
-            t, exclude_stdlib=excl, directly_referenced=directly_referenced
-        )
-    )
+    old_map, new_map = surface_type_maps(old, new)
 
     for t_old in old_map.values():
         t_new = _lookup_matched_type(old_map, new_map, t_old)
@@ -507,22 +474,7 @@ def _diff_field_deprecated(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     gap" convention.
     """
     changes: list[Change] = []
-    excl = _exclude_stdlib_namespaces(old, new)
-    directly_referenced = _directly_referenced(old, new)
-    old_map = _build_type_map(
-        t
-        for t in old.declarations.types
-        if _is_abi_surface_type(
-            t, exclude_stdlib=excl, directly_referenced=directly_referenced
-        )
-    )
-    new_map = _build_type_map(
-        t
-        for t in new.declarations.types
-        if _is_abi_surface_type(
-            t, exclude_stdlib=excl, directly_referenced=directly_referenced
-        )
-    )
+    old_map, new_map = surface_type_maps(old, new)
 
     for t_old in old_map.values():
         t_new = _lookup_matched_type(old_map, new_map, t_old)
@@ -578,22 +530,7 @@ def _diff_type_deprecated(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     ``--ast-frontend hybrid`` snapshot, G28 Phase 3).
     """
     changes: list[Change] = []
-    excl = _exclude_stdlib_namespaces(old, new)
-    directly_referenced = _directly_referenced(old, new)
-    old_map = _build_type_map(
-        t
-        for t in old.declarations.types
-        if _is_abi_surface_type(
-            t, exclude_stdlib=excl, directly_referenced=directly_referenced
-        )
-    )
-    new_map = _build_type_map(
-        t
-        for t in new.declarations.types
-        if _is_abi_surface_type(
-            t, exclude_stdlib=excl, directly_referenced=directly_referenced
-        )
-    )
+    old_map, new_map = surface_type_maps(old, new)
 
     for t_old in old_map.values():
         t_new = _lookup_matched_type(old_map, new_map, t_old)
@@ -686,24 +623,7 @@ def _diff_enum_deprecated(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
 def _diff_field_renames(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     """Detect field renames: same offset+type, different name."""
     changes: list[Change] = []
-    excl = _exclude_stdlib_namespaces(old, new)
-    directly_referenced = _directly_referenced(old, new)
-    old_map = _build_type_map(
-        t
-        for t in old.declarations.types
-        if not t.is_union
-        and _is_abi_surface_type(
-            t, exclude_stdlib=excl, directly_referenced=directly_referenced
-        )
-    )
-    new_map = _build_type_map(
-        t
-        for t in new.declarations.types
-        if not t.is_union
-        and _is_abi_surface_type(
-            t, exclude_stdlib=excl, directly_referenced=directly_referenced
-        )
-    )
+    old_map, new_map = surface_type_maps(old, new, records_only=True)
 
     for t_old in old_map.values():
         t_new = _lookup_matched_type(old_map, new_map, t_old)

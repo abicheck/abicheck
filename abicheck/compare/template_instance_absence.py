@@ -45,10 +45,9 @@ back to the existing removal path.
 
 The same holds one level up, for a class-template specialization the new
 header stops instantiating (:meth:`TemplateInstanceAbsence.specialization_vanished`).
-When the old record was instantiated from its primary template
-(``RecordType.specialization_declared_fact`` is ``PRESENT(False)``), the primary class template
-is still declared in the new header graph (a ``type://<template>`` node), and
-the new snapshot has no record of that specialization, then:
+When the old record is proven an instantiation of a pattern, the new header
+graph still declares that pattern, and the new snapshot has no record of that
+specialization, then:
 
 * the specialization itself is not ``type_removed`` -- the type is still
   nameable and its definition still comes from the same declaration;
@@ -58,10 +57,22 @@ the new snapshot has no record of that specialization, then:
   yields no finding), with ``var_visibility_changed`` for a static data member
   whose export the new binary dropped.
 
-An explicit or partial specialization (``PRESENT(True)``), an
-undetermined one (not collected: another producer, an older snapshot), a template
-the new header no longer declares, and a non-template class all keep the
-existing removal path.
+Two producers can prove the origin (:func:`_proven_origin`); either suffices,
+and one that contradicts the other voids the proof:
+
+* castxml's declaring-line reading (``RecordType.specialization_declared_fact``
+  ``PRESENT(False)``): instantiated from the primary template, still declared
+  when the new graph has a ``type://<template>`` node;
+* the clang template graph (``instantiated_from`` on the old
+  ``template_instantiation`` node, read from the AST's structure, so a
+  macro-produced class-head is covered): from the primary, as above, or from
+  a partial specialization, still declared when the new graph has the same
+  ``template_decl://<template>#<signature>`` node.
+
+An explicit specialization, an explicit instantiation, an undetermined origin
+(neither producer proved it: an older snapshot, a contradiction), a pattern
+the new header no longer declares (a deleted partial specialization, a removed
+template), and a non-template class all keep the existing removal path.
 """
 
 from __future__ import annotations
@@ -187,13 +198,62 @@ def _member_owner_of(
     return _spelling_key(owner)
 
 
-def _instantiated_from_primary(record: RecordType) -> bool:
-    """Whether the old producer proved *record* an implicit instantiation of
-    its primary template, the one shape this rule may treat as not removed."""
+def _declared_by_own_head(record: RecordType) -> bool | None:
+    """The castxml line reading (``specialization_declared_fact``): ``True``
+    for a specialization's own class-head, ``False`` for the primary
+    template's, ``None`` when undetermined."""
     fact = record.specialization_declared_fact
-    return (
-        fact is not None and fact.status is FactStatus.PRESENT and fact.value is False
-    )
+    if fact is None or fact.status is not FactStatus.PRESENT:
+        return None
+    return bool(fact.value)
+
+
+#: ``(origin, pattern node id)`` an old graph proves for an instantiation.
+_GraphOrigin = tuple[str, str]
+
+
+def _graph_origins(snapshot: AbiSnapshot) -> dict[str, _GraphOrigin]:
+    """Whitespace-free specialization spelling -> the pattern the clang
+    template graph proved it instantiated from (``instantiated_from`` on its
+    ``template_instantiation`` node, ``buildsource/template_class_origin.py``)
+    and the ``template_decl`` node it instantiates. A spelling two nodes
+    disagree on, or whose node has several patterns, is left out."""
+    graph = getattr(snapshot, "surface_graph", None)
+    if graph is None:
+        return {}
+    labels: dict[str, tuple[str, str]] = {}
+    for node in graph.nodes:
+        origin = (node.attrs or {}).get("instantiated_from")
+        if node.kind == "template_instantiation" and isinstance(origin, str):
+            labels[node.id] = (_spelling_key(node.label), origin)
+    patterns: dict[str, set[str]] = {}
+    for edge in graph.edges:
+        if edge.kind == "DECL_INSTANTIATES_TEMPLATE" and edge.src in labels:
+            patterns.setdefault(edge.src, set()).add(edge.dst)
+    found: dict[str, set[_GraphOrigin]] = {}
+    for node_id, (spelling, origin) in labels.items():
+        dsts = patterns.get(node_id, set())
+        if len(dsts) == 1:
+            found.setdefault(spelling, set()).add((origin, next(iter(dsts))))
+    return {k: next(iter(v)) for k, v in found.items() if len(v) == 1}
+
+
+def _proven_origin(
+    record: RecordType, graph: _GraphOrigin | None
+) -> _GraphOrigin | None:
+    """The pattern *record* was proven instantiated from, from the castxml
+    line reading and the clang template graph together: ``("primary", "")``,
+    ``("partial", <template_decl node id>)``, or ``None``. Either producer
+    may prove it alone; a producer that contradicts the other voids it."""
+    head = _declared_by_own_head(record)
+    origin = graph[0] if graph is not None else ""
+    if origin == "primary" and head is not True:
+        return ("primary", "")
+    if origin == "partial" and head is not False:
+        return graph
+    if head is False and origin == "":
+        return ("primary", "")
+    return None
 
 
 def _specialization_spelling(record: RecordType) -> str:
@@ -252,25 +312,30 @@ class TemplateInstanceAbsence:
         return self._declared
 
     def _vanished_specializations(self) -> frozenset[str]:
-        """Old specializations instantiated from a primary class template the
-        new header graph still declares, which the new snapshot does not
-        enumerate."""
+        """Old specializations proven instantiated from a pattern the new
+        header graph still declares -- the primary class template (a
+        ``type://<template>`` node) or the same partial specialization (its
+        ``template_decl://<template>#<signature>`` node) -- which the new
+        snapshot does not enumerate."""
         if self._vanished is None:
             vanished: set[str] = set()
             if self._old is not None:
                 still_enumerated = {
                     _specialization_spelling(t) for t in self._new.declarations.types
                 }
+                origins = _graph_origins(self._old)
                 for record in self._old.declarations.types:
-                    if not _instantiated_from_primary(record):
-                        continue
                     spelling = _specialization_spelling(record)
                     template = _template_of(spelling)
-                    if (
-                        template is not None
-                        and spelling not in still_enumerated
-                        and f"type://{template}" in self._graph_node_ids()
-                    ):
+                    if template is None or spelling in still_enumerated:
+                        continue
+                    proven = _proven_origin(record, origins.get(spelling))
+                    if proven is None:
+                        continue
+                    pattern = (
+                        f"type://{template}" if proven[0] == "primary" else proven[1]
+                    )
+                    if pattern in self._graph_node_ids():
                         vanished.add(spelling)
             self._vanished = frozenset(vanished)
         return self._vanished
@@ -279,8 +344,6 @@ class TemplateInstanceAbsence:
         """Whether *record*, an old type the new side does not match, is a
         specialization the new header merely stopped instantiating, and so not
         a removed type."""
-        if not _instantiated_from_primary(record):
-            return False
         return _specialization_spelling(record) in self._vanished_specializations()
 
     def changes_for(

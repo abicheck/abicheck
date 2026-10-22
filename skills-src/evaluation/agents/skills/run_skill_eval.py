@@ -41,6 +41,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from graders.dimensions import grade_run  # noqa: E402
 from graders.efficiency import run_efficiency  # noqa: E402
 
+# Shared with the runner so the grader and the batch check agree on which
+# model field wins (see that module's docstrings).
+from runners.claude_code import _model_label, _models_compatible  # noqa: E402
+
 PACK = Path(__file__).resolve().parent / "skill-eval-pack.json"
 
 SKILLS_SRC = Path(__file__).resolve().parents[4] / "skills-src"
@@ -57,55 +61,6 @@ def evaluated_skills() -> frozenset[str]:
     skills' aggregates.
     """
     return frozenset(p.name for p in SKILLS_SRC.iterdir() if (p / "SKILL.md").is_file())
-
-
-def _model_label(row: dict) -> str | None:
-    """Mirrors runners/claude_code.py's own `_model_label`.
-
-    Resolved name first — real evidence of what the CLI actually ran, and
-    the only thing that would catch an alias like `sonnet` silently
-    resolving to a different version between two runs — falling back to
-    the requested `--model` argument only when no resolved name was
-    captured (a timeout, which never reaches the CLI's init event; see
-    that module's `TimeoutExpired` handler).
-    """
-    model = row.get("model")
-    if isinstance(model, str):
-        return model
-    requested = row.get("requested_model")
-    return requested if isinstance(requested, str) else None
-
-
-def _models_compatible(a: dict, b: dict) -> bool:
-    """Mirrors runners/claude_code.py's own `_models_compatible` exactly.
-
-    Kept as an incremental pairwise check here too, not folded into flat
-    per-field sets: a row can carry *both* a resolved name and a requested
-    identity (a completed, pinned run), and a set keyed by "resolved if
-    present, else requested" would silently drop that row's resolved
-    identity from consideration in a comparison that should have used it.
-    See that module's docstring for the full reasoning, including why a
-    requested alias is compared only when *neither* row has a resolved
-    name — Claude Code documents an alias like `sonnet` as pointing at
-    "the latest" model, a moving target, so it is trusted only when it is
-    the single best evidence available on both sides.
-    """
-    a_model, b_model = a.get("model"), b.get("model")
-    if isinstance(a_model, str) and isinstance(b_model, str):
-        return a_model == b_model
-    a_requested, b_requested = a.get("requested_model"), b.get("requested_model")
-    if (
-        not isinstance(a_model, str)
-        and not isinstance(b_model, str)
-        and isinstance(a_requested, str)
-        and isinstance(b_requested, str)
-    ):
-        return a_requested == b_requested
-    a_has_identity = isinstance(a_model, str) or isinstance(a_requested, str)
-    b_has_identity = isinstance(b_model, str) or isinstance(b_requested, str)
-    if a_has_identity and b_has_identity:
-        return False
-    return True
 
 
 def _pct(part: int, whole: int) -> str:

@@ -362,6 +362,35 @@ def _qualname_at(pos: tuple[int, int], spans: _QualnameSpans) -> str:
     return best if best is not None else "<module>"
 
 
+def _def_time_subtrees(
+    node: ast.FunctionDef | ast.AsyncFunctionDef | ast.Lambda,
+) -> list[ast.AST]:
+    args = node.args
+    # `kw_defaults` pairs positionally with `kwonlyargs`, `None` for a
+    # keyword-only parameter with no default at all -- filtered before
+    # re-dispatching (as `_default_and_annotation_scope_overrides()` does).
+    subtrees: list[ast.AST] = [
+        *args.defaults,
+        *(d for d in args.kw_defaults if d is not None),
+    ]
+    for arg in (
+        *args.posonlyargs,
+        *args.args,
+        *args.kwonlyargs,
+        *((args.vararg,) if args.vararg else ()),
+        *((args.kwarg,) if args.kwarg else ()),
+    ):
+        if arg.annotation is not None:
+            subtrees.append(arg.annotation)
+    returns = getattr(node, "returns", None)
+    if returns is not None:
+        subtrees.append(returns)
+    decorator_list = getattr(node, "decorator_list", None)
+    if decorator_list:
+        subtrees.extend(decorator_list)
+    return subtrees
+
+
 @_memoize_per_tree
 def _lexical_function_parents(tree: ast.Module) -> dict[str, str]:
     """Map each function's qualname to its nearest *enclosing function's*
@@ -408,36 +437,6 @@ def _lexical_function_parents(tree: ast.Module) -> dict[str, str]:
     """
     parents: dict[str, str] = {}
 
-    def def_time_subtrees(
-        node: ast.FunctionDef | ast.AsyncFunctionDef | ast.Lambda,
-    ) -> list[ast.AST]:
-        args = node.args
-        # `kw_defaults` pairs positionally with `kwonlyargs`, `None` for a
-        # keyword-only parameter with no default at all -- a real,
-        # ordinary element of this list, not a bug, so it must be filtered
-        # before re-dispatching (matching `_default_and_annotation_scope_
-        # overrides()`'s own identical `if subtree is None: continue`).
-        subtrees: list[ast.AST] = [
-            *args.defaults,
-            *(d for d in args.kw_defaults if d is not None),
-        ]
-        for arg in (
-            *args.posonlyargs,
-            *args.args,
-            *args.kwonlyargs,
-            *((args.vararg,) if args.vararg else ()),
-            *((args.kwarg,) if args.kwarg else ()),
-        ):
-            if arg.annotation is not None:
-                subtrees.append(arg.annotation)
-        returns = getattr(node, "returns", None)
-        if returns is not None:
-            subtrees.append(returns)
-        decorator_list = getattr(node, "decorator_list", None)
-        if decorator_list:
-            subtrees.extend(decorator_list)
-        return subtrees
-
     def dispatch(child: ast.AST, prefix: str, nearest_func: str) -> None:
         if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef)):
             # `#<lineno>` disambiguator, matching `_enclosing_
@@ -450,7 +449,7 @@ def _lexical_function_parents(tree: ast.Module) -> dict[str, str]:
             # other's already-processed entry.
             qualname = f"{prefix}{child.name}#{child.lineno}"
             parents[qualname] = nearest_func
-            for subtree in def_time_subtrees(child):
+            for subtree in _def_time_subtrees(child):
                 dispatch(subtree, qualname + ".", nearest_func)
             for stmt in child.body:
                 dispatch(stmt, qualname + ".", qualname)
@@ -465,7 +464,7 @@ def _lexical_function_parents(tree: ast.Module) -> dict[str, str]:
             # docstring) not for its own default values.
             qualname = f"{prefix}<lambda>#{child.lineno}:{child.col_offset}"
             parents[qualname] = nearest_func
-            for subtree in def_time_subtrees(child):
+            for subtree in _def_time_subtrees(child):
                 dispatch(subtree, qualname + ".", nearest_func)
             dispatch(child.body, qualname + ".", qualname)
         elif isinstance(
@@ -602,55 +601,24 @@ def _def_containing_qualnames(tree: ast.Module) -> dict[tuple[int, int], str]:
     parameter `fact` then incorrectly appeared to shadow the lambda's
     `x=fact` default, silently missing the misuse. Fixed the same way
     `_lexical_function_parents` was: split the dispatch so a def-time
-    subtree (`def_time_subtrees()`, an identical helper, duplicated here
-    rather than shared -- see this module's own docstring for why a
-    scoping helper is not shared across these two functions) is
+    subtree (the shared `_def_time_subtrees()`) is
     re-visited with the *old* `scope_qualname`, while only the real body
     executes under the new one.
     """
     containing: dict[tuple[int, int], str] = {}
 
-    def def_time_subtrees(
-        node: ast.FunctionDef | ast.AsyncFunctionDef | ast.Lambda,
-    ) -> list[ast.AST]:
-        args = node.args
-        # `kw_defaults` pairs positionally with `kwonlyargs`, `None` for a
-        # keyword-only parameter with no default at all -- a real,
-        # ordinary element of this list, matching `_lexical_function_
-        # parents`'s own identical filter.
-        subtrees: list[ast.AST] = [
-            *args.defaults,
-            *(d for d in args.kw_defaults if d is not None),
-        ]
-        for arg in (
-            *args.posonlyargs,
-            *args.args,
-            *args.kwonlyargs,
-            *((args.vararg,) if args.vararg else ()),
-            *((args.kwarg,) if args.kwarg else ()),
-        ):
-            if arg.annotation is not None:
-                subtrees.append(arg.annotation)
-        returns = getattr(node, "returns", None)
-        if returns is not None:
-            subtrees.append(returns)
-        decorator_list = getattr(node, "decorator_list", None)
-        if decorator_list:
-            subtrees.extend(decorator_list)
-        return subtrees
-
     def dispatch(child: ast.AST, prefix: str, scope_qualname: str) -> None:
         if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef)):
             qualname = f"{prefix}{child.name}#{child.lineno}"
             containing[child.lineno, child.col_offset] = scope_qualname
-            for subtree in def_time_subtrees(child):
+            for subtree in _def_time_subtrees(child):
                 dispatch(subtree, qualname + ".", scope_qualname)
             for stmt in child.body:
                 dispatch(stmt, qualname + ".", qualname)
         elif isinstance(child, ast.Lambda):
             qualname = f"{prefix}<lambda>#{child.lineno}:{child.col_offset}"
             containing[child.lineno, child.col_offset] = scope_qualname
-            for subtree in def_time_subtrees(child):
+            for subtree in _def_time_subtrees(child):
                 dispatch(subtree, qualname + ".", scope_qualname)
             dispatch(child.body, qualname + ".", qualname)
         elif isinstance(

@@ -33,7 +33,6 @@ Usage:
 from __future__ import annotations
 
 import argparse
-import re
 import sys
 from pathlib import Path
 
@@ -41,6 +40,7 @@ REPO_DIR = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_DIR / "scripts"))
 sys.path.insert(0, str(REPO_DIR))
 
+from generated_section import splice_generated  # noqa: E402
 from platform_capabilities import (  # type: ignore[import-not-found]  # noqa: E402
     PLATFORM_CAPABILITY_MATRIX,
     FormatMatrix,
@@ -87,14 +87,7 @@ def render() -> str:
 
 
 def _splice(text: str, inner: str) -> str:
-    begin = re.search(rf"<!-- BEGIN GENERATED: {_MARKER} -->\n", text)
-    end = re.search(rf"\n<!-- END GENERATED: {_MARKER} -->", text)
-    if not begin or not end or begin.end() > end.start():
-        raise ValueError(
-            f"{OUT_PATH.relative_to(REPO_DIR)}: missing/misordered sentinels "
-            f"for {_MARKER!r}"
-        )
-    return text[: begin.end()] + inner + text[end.start() :]
+    return splice_generated(text, _MARKER, inner, OUT_PATH.relative_to(REPO_DIR))
 
 
 def main(argv: list[str] | None = None) -> int:

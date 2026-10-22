@@ -204,6 +204,7 @@ from dataclasses import dataclass, replace
 from typing import Any
 
 from ..model.name_decoration import itanium_structors
+from .template_class_origin import PARTIAL_PATTERN_KIND, ClassOriginIndex
 from .template_graph_value_decls import (
     arg_label_spelling,
     disambiguated_specialization_qname,
@@ -339,13 +340,14 @@ class TemplateInstantiation:
     genuinely distinct declared patterns (Codex review, fresh evidence).
     """
 
-    kind: str  # _RECORD_KIND or _FUNCTION_KIND
+    kind: str  # _RECORD_KIND, _FUNCTION_KIND or PARTIAL_PATTERN_KIND
     template_qname: str
     label: str
     args: tuple[TemplateArgUse, ...] = ()
     emitted_symbols: tuple[str, ...] = ()
     file: str = ""
     template_signature: str = ""
+    instantiated_from: str = ""  # proven pattern (template_class_origin) or ""
 
 
 def _node_file(node: dict[str, Any]) -> str:
@@ -1396,14 +1398,9 @@ def _walk_class_templates(
             # argument spelling can't be trusted as a unique identity.
             if _class_template_has_auto_nttp(node):
                 qname_has_auto_nttp.add(qname)
-        # Stop here: a ClassTemplateDecl's own pattern CXXRecordDecl child
-        # would open a scope for its own members if recursed into
-        # generically. A template nested inside a template pattern is
-        # therefore not registered either -- the same "member function
-        # template nested in a class template instantiation" gap this
-        # module's docstring already names as unhandled (Codex review: an
-        # earlier revision of this comment claimed recursion into nested
-        # templates that the code never actually performs).
+        # Stop: recursing would open a scope for the pattern's members, so a
+        # template nested in a template pattern is not registered (the gap
+        # the module docstring names).
         return
 
     if kind in _SCOPE_DECL_KINDS:
@@ -1467,6 +1464,7 @@ class TemplateParse:
         self.qname_to_member_locs: dict[str, dict[tuple[str, str], int]] = {}
         self.qname_has_auto_nttp: set[str] = set()
         self.out: list[TemplateInstantiation] = []
+        self.origins = ClassOriginIndex(_partial_specialization_pattern_signature)
         self._functions: list[TemplateInstantiation] = []
         self._partials: list[tuple[str, int, str]] = []
         self._partial_sigs: dict[tuple[str, int], str] | None = None
@@ -1512,6 +1510,7 @@ class TemplateParse:
             self.qname_to_member_locs,
             self.qname_has_auto_nttp,
         )
+        self.origins.walk(node)
 
     def walk_functions(self, node: dict[str, Any]) -> None:
         """Third walk: function-template instantiations. Call
@@ -1535,8 +1534,13 @@ class TemplateParse:
         self._functions = []
 
     def result(self) -> list[TemplateInstantiation]:
-        """Class instantiations first, then function ones, in walk order."""
-        return [*self.out, *self._functions]
+        """Class instantiations first, then function ones, in walk order,
+        then every declared partial specialization pattern."""
+        patterns = [
+            TemplateInstantiation(PARTIAL_PATTERN_KIND, q, f"{q}<{sig}>", template_signature=sig)
+            for q, sig in self.origins.declared_partials()
+        ]  # fmt: skip
+        return [*self.out, *self._functions, *patterns]
 
     def _class_instantiations(self) -> list[TemplateInstantiation]:
         # _walk_class_templates only *registers* class-template membership
@@ -1554,16 +1558,10 @@ class TemplateParse:
                 ambiguous_value_args=template_qname in self.qname_has_auto_nttp,
             )
             if args is None:
-                # An opaque argument (e.g. a template-template argument -- see
-                # _is_opaque_template_argument) means this instantiation's own
-                # identity can't be trusted -- two genuinely distinct
-                # instantiations differing only in that argument (Use<A> vs.
-                # Use<B>) would otherwise collide onto one shared label/node,
-                # merging their real, distinct emitted-symbol/type-dependency
-                # edges (Codex review, empirically confirmed against real clang
-                # AST output: clang's -ast-dump=json serializes zero
-                # identifying information for a template-template argument).
-                # Skip rather than record a wrong identity.
+                # An opaque argument (a template-template argument, see
+                # _is_opaque_template_argument) leaves no trustworthy identity:
+                # Use<A> and Use<B> would collide onto one node (clang's JSON
+                # carries nothing identifying for it). Skip rather than guess.
                 continue
             resolved_args = _resolve_arg_targets(
                 args,
@@ -1584,7 +1582,9 @@ class TemplateParse:
                     args=resolved_args,
                     emitted_symbols=_member_symbols(full),
                     file=self.id_to_file.get(spec_id, ""),
-                    template_signature=self.id_to_partial_signature.get(spec_id, ""),
+                    **self.origins.instantiation_fields(
+                        spec_id, self.id_to_partial_signature.get(spec_id, "")
+                    ),
                 )
             )
         return out
@@ -1730,8 +1730,7 @@ def _merge_template_instantiations(
     first would silently drop the richer resolution. Likewise
     ``emitted_symbols``: one TU may only reach a subset of the instantiated
     members actually used project-wide (a member only called from a
-    different TU), and ``file``, the same first-non-empty-wins fallback
-    ``type_graph.py`` uses for ``dst_file``.
+    different TU), and ``file`` (first non-empty wins, as ``dst_file``).
     """
     if len(existing.args) == len(new.args):
         merged_args = tuple(
@@ -1741,10 +1740,9 @@ def _merge_template_instantiations(
             for old_arg, new_arg in zip(existing.args, new.args)
         )
     else:
-        # Argument count mismatch shouldn't occur for a genuinely identical
-        # (kind, template_qname, label) key, but degrade to the first-seen
-        # value rather than guess at a pairing (ADR-028 D3).
+        # Cannot occur for one key; keep the first-seen args (ADR-028 D3).
         merged_args = existing.args
+    origin = existing.instantiated_from
     merged_symbols = existing.emitted_symbols + tuple(
         s for s in new.emitted_symbols if s not in existing.emitted_symbols
     )
@@ -1753,6 +1751,8 @@ def _merge_template_instantiations(
         args=merged_args,
         emitted_symbols=merged_symbols,
         file=existing.file or new.file,
+        # Two TUs proving different patterns prove neither.
+        instantiated_from=origin if origin == new.instantiated_from else "",
     )
 
 

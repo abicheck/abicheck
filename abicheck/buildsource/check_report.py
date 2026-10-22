@@ -745,6 +745,51 @@ def build_operational_error_report(
     return report
 
 
+def _advisory_pass_report(
+    *,
+    state: str,
+    reason: str,
+    flag: str,
+    verdict: str,
+    lifecycle: TargetLifecycle,
+    name: str,
+    profile_id: str,
+    baseline_channel: str,
+    requested_depth: str,
+    resolve_message: str,
+    explicit_id: str | None,
+    **envelope: str | None,
+) -> dict[str, Any]:
+    """The shared shape of the bootstrap and new-target advisory passes.
+
+    ``compatibility_verdict`` is omitted, not null -- same reasoning as
+    :func:`build_operational_error_report`: neither pass ever produced a
+    compatibility result to report.
+    """
+    check_id = build_check_id(
+        name, profile_id, baseline_channel, requested_depth, explicit_id=explicit_id
+    )
+    report: dict[str, Any] = {
+        "report_schema_version": REPORT_SCHEMA_VERSION,
+        "check_id": check_id,
+        "target_id": check_id,
+        "target": name,
+        "profile_id": profile_id,
+        "baseline_channel": baseline_channel,
+        "requested_depth": requested_depth,
+        "check_evidence_coverage": {"state": state, "reasons": [reason]},
+        flag: True,
+        "policy_gate_decision": "pass",
+        "operational_errors": [],
+        "publication": {"state": "skipped", "channels": []},
+        "verdict": verdict,
+        "message": resolve_message,
+        "run_outcome": synthetic_run_outcome(lifecycle=lifecycle),
+    }
+    _apply_optional_envelope_fields(report, **envelope)
+    return report
+
+
 def build_bootstrap_report(
     *,
     name: str,
@@ -760,41 +805,14 @@ def build_bootstrap_report(
     explicit_id: str | None = None,
 ) -> dict[str, Any]:
     """Synthesize the "no baseline published yet" advisory pass (§6)."""
-    check_id = build_check_id(
-        name, profile_id, baseline_channel, requested_depth, explicit_id=explicit_id
+    return _advisory_pass_report(
+        state="bootstrap",
+        reason="no_baseline_published_yet",
+        flag="baseline_bootstrap",
+        verdict=BOOTSTRAP_VERDICT,
+        lifecycle=TargetLifecycle.BOOTSTRAP,
+        **locals(),  # every keyword argument, forwarded unchanged
     )
-    report: dict[str, Any] = {
-        "report_schema_version": REPORT_SCHEMA_VERSION,
-        "check_id": check_id,
-        "target_id": check_id,
-        "target": name,
-        "profile_id": profile_id,
-        "baseline_channel": baseline_channel,
-        "requested_depth": requested_depth,
-        "check_evidence_coverage": {
-            "state": "bootstrap",
-            "reasons": ["no_baseline_published_yet"],
-        },
-        "baseline_bootstrap": True,
-        # compatibility_verdict omitted, not null -- same reasoning as
-        # build_operational_error_report above: a bootstrap pass never
-        # produced a compatibility result either.
-        "policy_gate_decision": "pass",
-        "operational_errors": [],
-        "publication": {"state": "skipped", "channels": []},
-        "verdict": BOOTSTRAP_VERDICT,
-        "message": resolve_message,
-        "run_outcome": synthetic_run_outcome(lifecycle=TargetLifecycle.BOOTSTRAP),
-    }
-    _apply_optional_envelope_fields(
-        report,
-        project=project,
-        head_sha=head_sha,
-        base_ref=base_ref,
-        tool_version=tool_version,
-        action_version=action_version,
-    )
-    return report
 
 
 def build_new_target_report(
@@ -819,41 +837,14 @@ def build_new_target_report(
     ``BOOTSTRAP_VERDICT``: the baseline-set itself resolved cleanly here, it
     simply carries no artifact for this particular target yet.
     """
-    check_id = build_check_id(
-        name, profile_id, baseline_channel, requested_depth, explicit_id=explicit_id
+    return _advisory_pass_report(
+        state="new_target",
+        reason="target_not_in_baseline_set",
+        flag="baseline_new_target",
+        verdict=NEW_TARGET_VERDICT,
+        lifecycle=TargetLifecycle.NEW_TARGET,
+        **locals(),  # every keyword argument, forwarded unchanged
     )
-    report: dict[str, Any] = {
-        "report_schema_version": REPORT_SCHEMA_VERSION,
-        "check_id": check_id,
-        "target_id": check_id,
-        "target": name,
-        "profile_id": profile_id,
-        "baseline_channel": baseline_channel,
-        "requested_depth": requested_depth,
-        "check_evidence_coverage": {
-            "state": "new_target",
-            "reasons": ["target_not_in_baseline_set"],
-        },
-        "baseline_new_target": True,
-        # compatibility_verdict omitted, not null -- same reasoning as
-        # build_bootstrap_report above: this check never produced a
-        # compatibility result to report.
-        "policy_gate_decision": "pass",
-        "operational_errors": [],
-        "publication": {"state": "skipped", "channels": []},
-        "verdict": NEW_TARGET_VERDICT,
-        "message": resolve_message,
-        "run_outcome": synthetic_run_outcome(lifecycle=TargetLifecycle.NEW_TARGET),
-    }
-    _apply_optional_envelope_fields(
-        report,
-        project=project,
-        head_sha=head_sha,
-        base_ref=base_ref,
-        tool_version=tool_version,
-        action_version=action_version,
-    )
-    return report
 
 
 def final_exit_code(

@@ -870,7 +870,7 @@ class TestImpactAssessmentRootCause:
         assert len(ids) == 1
         for a in assessments:
             assert a["root_cause_display"] == "ns::internal::helper"
-            # impact_group_id is currently always an alias of root_cause_id.
+            # Equal whenever both are set (test_impact_group_id_correlator.py).
             assert a["impact_group_id"] == a["root_cause_id"]
 
     def test_independent_findings_sharing_a_symbol_stay_separate(self):

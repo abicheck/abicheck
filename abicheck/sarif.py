@@ -61,10 +61,7 @@ from abicheck.report.view import (
     show_only_matches_severity_label,
 )
 from abicheck.report_model import VERDICT_TO_SARIF_LEVEL as _VERDICT_TO_SARIF_LEVEL
-from abicheck.reporter_markdown import (
-    root_cause_evidence_lookup_for_changes,
-    root_cause_lookup_for_changes,
-)
+from abicheck.root_cause_evidence import impact_assessment_lookups
 
 from .policy.evaluate import effective_kind_sets, effective_verdict
 
@@ -370,6 +367,7 @@ def _result_for(
     root_cause: tuple[str, str] | None = None,
     impact_root_cause: tuple[str, str] | None = None,
     impact_root_cause_evidence: dict[str, object] | None = None,
+    impact_group_id: str | None = None,
     finding: ReportFinding | None = None,
     today: date | None = None,
 ) -> dict[str, Any]:
@@ -399,6 +397,10 @@ def _result_for(
     :func:`~abicheck.reporter_markdown.root_cause_evidence_lookup_for_changes`
     — feeds ``impactAssessment.root_cause_evidence``, unconditionally (any
     *report_mode*), mirroring *impact_root_cause* above.
+
+    *impact_group_id* (G29 Phase 6 follow-up) is *change*'s correlator group
+    id (see :func:`~abicheck.root_cause_evidence.impact_assessment_lookups`).
+    ``None`` falls back to *impact_root_cause*'s id.
 
     *relevant_ids*, when not ``None``, means a ``--used-by``/``--required-symbol``
     consumer was supplied: ``properties.relevantToConsumerScope`` records
@@ -458,6 +460,7 @@ def _result_for(
         change,
         root_cause=impact_root_cause,
         root_cause_evidence=impact_root_cause_evidence,
+        impact_group_id=impact_group_id,
     )
     properties["reachabilityState"] = assessment.reachability_state.value
     if assessment.has_signal():
@@ -858,13 +861,8 @@ def to_sarif(
     # reporter.py's JSON output. Spans `changes` and `scoped_only_changes`
     # together so a scoped-only change's caused_by_type can still correlate
     # with a regular change, same as referenced_causes above.
-    _impact_rc_lookup = root_cause_lookup_for_changes(changes + scoped_only_changes)
-    # G29 Phase 6 follow-up: RootCauseCorrelator's own evidence-ranked
-    # groups, over the same combined change set -- mirrors reporter.py's
-    # JSON wiring so a finding's impactAssessment.root_cause_evidence agrees
-    # across formats.
-    _impact_rc_evidence = root_cause_evidence_lookup_for_changes(
-        changes + scoped_only_changes
+    _impact_rc_lookup, _impact_rc_evidence, _impact_ig_lookup = (
+        impact_assessment_lookups(changes + scoped_only_changes)
     )
 
     def _root_cause_for(
@@ -921,6 +919,7 @@ def to_sarif(
                 ),
                 impact_root_cause=_impact_rc_lookup.get(finding_id(change)),
                 impact_root_cause_evidence=_impact_rc_evidence.get(finding_id(change)),
+                impact_group_id=_impact_ig_lookup.get(finding_id(change)),
                 finding=finding_by_id.get(id(change)),
                 today=_resolved_today,
             )
@@ -990,6 +989,7 @@ def to_sarif(
                 ),
                 impact_root_cause=_impact_rc_lookup.get(finding_id(change)),
                 impact_root_cause_evidence=_impact_rc_evidence.get(finding_id(change)),
+                impact_group_id=_impact_ig_lookup.get(finding_id(change)),
                 finding=finding_by_id.get(id(change)),
                 today=_resolved_today,
             )

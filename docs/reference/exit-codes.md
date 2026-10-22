@@ -389,7 +389,7 @@ rules that are unused.
 Every real-verdict `compare -o json=...` report (`full`/`leaf`/`root-cause`
 modes) carries a top-level `exit` object (introduced at report schema 2.41;
 schema 2.42 added its `crosscheck_promotion_contribution` field — see
-`abicheck/schemas/__init__.py`'s `REPORT_SCHEMA_VERSION` docstring for that
+the [report schema version history](../contribute/report-schema-history.md) for that
 and later additive fields, e.g. `annotations` at 2.43) stating the
 already-resolved decision behind the axes above as one explainable
 value, rather than requiring a reader to separately combine
