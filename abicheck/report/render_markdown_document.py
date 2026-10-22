@@ -191,6 +191,11 @@ def _row_use_cases_suffix(row: Mapping[str, Any]) -> str:
 
 def _render_change_row_oneline(row: Mapping[str, Any]) -> str:
     line = f"- **{row['kind']}**: {row['description']}"
+    # The folded review groups no longer list every symbol, so a row whose
+    # description omits its symbol must name it here.
+    symbol = row.get("symbol")
+    if symbol and symbol not in row["description"]:
+        line += f" — `{symbol}`"
     correlated = row.get("correlated_change_kind")
     if correlated:
         line += f"\n  > See also: `{correlated}` finding for the same symbol"

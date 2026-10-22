@@ -61,7 +61,7 @@
 > your target environment before deploying.
 
 - **symbol_version_required_added**: New symbol version requirement: GLIBC_2.34 (from libc.so.6)
-- **runtime_floor_raised**: Runtime floor raised for libc.so.6: GLIBC_2.5 → GLIBC_2.34 (required by: (no import evidence captured))
+- **runtime_floor_raised**: Runtime floor raised for libc.so.6: GLIBC_2.5 → GLIBC_2.34 (required by: (no import evidence captured)) — `libc.so.6:GLIBC`
 
 ## 🛠️ Environment & Toolchain Drift
 
