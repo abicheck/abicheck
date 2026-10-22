@@ -42,7 +42,7 @@ from typing import TYPE_CHECKING, Any
 
 from ..model.symbol_ownership import symbol_origin
 from .change_operation import entity_for_change, operation_for_kind
-from .surface_changes import PUBLIC_SURFACE_ENTITIES, SurfaceChangeEntry
+from .surface_changes import PUBLIC_SURFACE_ENTITIES
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from ..checker_types import DiffResult
@@ -59,14 +59,8 @@ __all__ = [
 MAX_PUBLIC_API_ITEMS = 50
 
 
-def split_public_internal(
-    entries: Sequence[SurfaceChangeEntry],
-) -> tuple[list[str], int]:
+def split_public_internal(symbols: Sequence[str]) -> tuple[list[str], int]:
     """Return the sorted, de-duplicated public symbols and the internal count."""
-    return _split_symbols([entry.symbol for entry in entries])
-
-
-def _split_symbols(symbols: Sequence[str]) -> tuple[list[str], int]:
     public: set[str] = set()
     internal = 0
     for symbol in symbols:
@@ -103,8 +97,8 @@ def member_public_api(result: DiffResult) -> dict[str, object]:
             removed_syms.append(change.symbol)
         else:
             modifications += 1
-    added, added_internal = _split_symbols(added_syms)
-    removed, removed_internal = _split_symbols(removed_syms)
+    added, added_internal = split_public_internal(added_syms)
+    removed, removed_internal = split_public_internal(removed_syms)
     return {
         "surface_removals": len(removed_syms),
         "surface_modifications": modifications,

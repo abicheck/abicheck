@@ -12,14 +12,6 @@ from abicheck.report.release_public_api import (
     split_public_internal,
 )
 from abicheck.report.render_release_markdown import _release_md_libraries_table
-from abicheck.report.surface_changes import SurfaceChangeEntry
-
-
-def _e(sym: str) -> SurfaceChangeEntry:
-    return SurfaceChangeEntry(
-        "func_added", sym, "", "COMPATIBLE", "c", None, None, None
-    )
-
 
 PUBLIC = ["foo_init", "_ZN3lib3runEv", "_ZN3svs7consumeERKNS_6detail5TokenE"]
 INTERNAL = ["_ZN3lib6detail4implEv", "_ZN3lib8internal3fooEv", "_ZTIN3lib3FooE"]
@@ -36,7 +28,7 @@ INTERNAL = ["_ZN3lib6detail4implEv", "_ZN3lib8internal3fooEv", "_ZTIN3lib3FooE"]
     ],
 )
 def test_split_partitions_every_symbol(symbols, public, internal):
-    got_public, got_internal = split_public_internal([_e(s) for s in symbols])
+    got_public, got_internal = split_public_internal(symbols)
     assert got_public == public
     assert got_internal == internal
     # Oracle: every input is either listed or counted -- nothing vanishes.
