@@ -5152,7 +5152,7 @@
   "relation_type": null,
   "relation_axis": null,
   "subjects": [
-   "inline-function-and-odr-boundary-changes"
+   "template-and-generic-programming-issues"
   ]
  },
  "case224_header_only_template_default_added": {
@@ -5175,7 +5175,7 @@
   "relation_type": null,
   "relation_axis": null,
   "subjects": [
-   "inline-function-and-odr-boundary-changes"
+   "template-and-generic-programming-issues"
   ]
  },
  "case225_header_only_template_default_removed": {
@@ -5198,7 +5198,7 @@
   "relation_type": null,
   "relation_axis": null,
   "subjects": [
-   "inline-function-and-odr-boundary-changes"
+   "template-and-generic-programming-issues"
   ]
  },
  "case226_header_only_template_default_unchanged": {
@@ -5221,7 +5221,7 @@
   "relation_type": null,
   "relation_axis": null,
   "subjects": [
-   "inline-function-and-odr-boundary-changes"
+   "template-and-generic-programming-issues"
   ]
  },
  "case227_nested_namespace_template_default_changed": {
@@ -5244,7 +5244,7 @@
   "relation_type": null,
   "relation_axis": null,
   "subjects": [
-   "inline-function-and-odr-boundary-changes"
+   "template-and-generic-programming-issues"
   ]
  },
  "case228_nontype_template_param_default_changed": {
@@ -5267,7 +5267,7 @@
   "relation_type": null,
   "relation_axis": null,
   "subjects": [
-   "inline-function-and-odr-boundary-changes"
+   "template-and-generic-programming-issues"
   ]
  },
  "case229_exported_template_default_changed": {
@@ -5290,7 +5290,7 @@
   "relation_type": null,
   "relation_axis": null,
   "subjects": [
-   "inline-function-and-odr-boundary-changes"
+   "template-and-generic-programming-issues"
   ]
  },
  "case221_public_api_internal_type_renamed": {

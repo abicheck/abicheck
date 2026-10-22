@@ -11,7 +11,7 @@
 | **Detected `ChangeKind`s** | `default_template_arg_changed` |
 | **Source files** | `catalog/cases/case229_exported_template_default_changed/` |
 | **Rule family** | [`exported-template-default-changed`](by-rule/exported-template-default-changed.md) |
-| **Subject** | [Inline-function and ODR-boundary changes](by-subject/inline-function-and-odr-boundary-changes.md) |
+| **Subject** | [Template and generic-programming issues](by-subject/template-and-generic-programming-issues.md) |
 
 **Category:** Template ABI | **Verdict:** 🔴 BREAKING
 
@@ -82,4 +82,4 @@ explicitly named alias instead, as in case87.
 - `v2.cpp`
 - `v2.h`
 
-_See also: [Compatibility Catalog](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Exported template default changed](by-rule/exported-template-default-changed.md) · [Subject: Inline-function and ODR-boundary changes](by-subject/inline-function-and-odr-boundary-changes.md)._
+_See also: [Compatibility Catalog](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Exported template default changed](by-rule/exported-template-default-changed.md) · [Subject: Template and generic-programming issues](by-subject/template-and-generic-programming-issues.md)._

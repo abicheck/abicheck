@@ -3,7 +3,7 @@
 
 _Canonical rule slug:_ `header-only-template-default-added`. [← back to all rules](index.md)
 
-> A default argument is added to a header-only class template parameter that had none, so existing spellings that omitted the argument now select a different type.
+> A default argument is added to a header-only class template parameter that had none. New uses may now omit the argument, while existing explicit-argument uses remain valid.
 
 ## Canonical demonstration
 

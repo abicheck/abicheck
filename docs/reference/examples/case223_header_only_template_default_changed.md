@@ -11,7 +11,7 @@
 | **Detected `ChangeKind`s** | `public_dependency_role_changed` |
 | **Source files** | `catalog/cases/case223_header_only_template_default_changed/` |
 | **Rule family** | [`header-only-template-default-changed`](by-rule/header-only-template-default-changed.md) |
-| **Subject** | [Inline-function and ODR-boundary changes](by-subject/inline-function-and-odr-boundary-changes.md) |
+| **Subject** | [Template and generic-programming issues](by-subject/template-and-generic-programming-issues.md) |
 
 **Category:** Template ABI | **Verdict:** 🟡 COMPATIBLE_WITH_RISK (castxml) / 🟠 API_BREAK (clang)
 
@@ -23,8 +23,8 @@ it, so no symbol changes. A consumer that writes `mylib::Box<char>` compiles
 unchanged against v1 but substitutes `Box<char, char>` there and `Box<char, int>`
 against v2. The change is a source-level consequence, not a binary break.
 
-Both backends reach the same ground truth, `COMPATIBLE_WITH_RISK`, on the
-default castxml lane. That lane's one finding is the source-replay risk
+On the default castxml lane the run reports `COMPATIBLE_WITH_RISK`. The clang
+backend reports `API_BREAK` for the same header change. That lane's one finding is the source-replay risk
 `public_dependency_role_changed`, because the old default referenced `T`. The
 header-level kind `template_param_default_changed` belongs to the clang backend
 (ADR-085 D2). castxml records no template-parameter defaults (D3), so its run
@@ -111,4 +111,4 @@ and leave `Box`'s default unchanged.
 - `v2.cpp`
 - `v2.h`
 
-_See also: [Compatibility Catalog](index.md) · [All COMPATIBLE_WITH_RISK cases](by-verdict/compatible-risk.md) · [Category: Risk](by-category/risk.md) · [Rule: Header-only template default changed](by-rule/header-only-template-default-changed.md) · [Subject: Inline-function and ODR-boundary changes](by-subject/inline-function-and-odr-boundary-changes.md)._
+_See also: [Compatibility Catalog](index.md) · [All COMPATIBLE_WITH_RISK cases](by-verdict/compatible-risk.md) · [Category: Risk](by-category/risk.md) · [Rule: Header-only template default changed](by-rule/header-only-template-default-changed.md) · [Subject: Template and generic-programming issues](by-subject/template-and-generic-programming-issues.md)._

@@ -11,7 +11,7 @@
 | **Detected `ChangeKind`s** | — |
 | **Source files** | `catalog/cases/case228_nontype_template_param_default_changed/` |
 | **Rule family** | [`nontype-template-param-default-changed`](by-rule/nontype-template-param-default-changed.md) |
-| **Subject** | [Inline-function and ODR-boundary changes](by-subject/inline-function-and-odr-boundary-changes.md) |
+| **Subject** | [Template and generic-programming issues](by-subject/template-and-generic-programming-issues.md) |
 
 **Category:** Template ABI | **Verdict:** 🟢 NO_CHANGE (both backends, both with a gap)
 
@@ -86,4 +86,4 @@ alias with the new size.
 - `v2.cpp`
 - `v2.h`
 
-_See also: [Compatibility Catalog](index.md) · [All NO_CHANGE cases](by-verdict/no-change.md) · [Category: No Change](by-category/no_change.md) · [Rule: Non-type template parameter default changed](by-rule/nontype-template-param-default-changed.md) · [Subject: Inline-function and ODR-boundary changes](by-subject/inline-function-and-odr-boundary-changes.md)._
+_See also: [Compatibility Catalog](index.md) · [All NO_CHANGE cases](by-verdict/no-change.md) · [Category: No Change](by-category/no_change.md) · [Rule: Non-type template parameter default changed](by-rule/nontype-template-param-default-changed.md) · [Subject: Template and generic-programming issues](by-subject/template-and-generic-programming-issues.md)._

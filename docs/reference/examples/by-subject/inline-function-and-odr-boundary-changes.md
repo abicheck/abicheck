@@ -3,7 +3,7 @@
 
 A function moves across the inline/out-of-line boundary, or an inline accessor's body changes what it references -- symbols appear, disappear, or silently reference something else, all without an explicit ABI-breaking declaration.
 
-_12 case(s)._ [← back to all subjects](index.md)
+_5 case(s)._ [← back to all subjects](index.md)
 
 ## Cases
 
@@ -14,10 +14,3 @@ _12 case(s)._ [← back to all subjects](index.md)
 | [case89_inline_accessor_renamed_pimpl_member](../case89_inline_accessor_renamed_pimpl_member.md) | Inline Accessor References Renamed Pimpl Member | 🔴 BREAKING | Breaking |
 | [case157_inline_function_removed](../case157_inline_function_removed.md) | Inline Function Removed | 🟠 API_BREAK | API Break |
 | [case222_public_consumer_compiled_dependency_changed](../case222_public_consumer_compiled_dependency_changed.md) | Public Inline Body's Compiled-In Dependency Changes | 🟡 COMPATIBLE_WITH_RISK | Risk |
-| [case223_header_only_template_default_changed](../case223_header_only_template_default_changed.md) | Header-Only Template Default Changed | 🟡 COMPATIBLE_WITH_RISK | Risk |
-| [case224_header_only_template_default_added](../case224_header_only_template_default_added.md) | Header-Only Template Default Added | ✅ NO_CHANGE | No Change |
-| [case225_header_only_template_default_removed](../case225_header_only_template_default_removed.md) | Header-Only Template Default Removed | ✅ NO_CHANGE | No Change |
-| [case226_header_only_template_default_unchanged](../case226_header_only_template_default_unchanged.md) | Header-Only Template Default Unchanged | ✅ NO_CHANGE | No Change |
-| [case227_nested_namespace_template_default_changed](../case227_nested_namespace_template_default_changed.md) | Nested-Namespace Template Default Changed | 🟡 COMPATIBLE_WITH_RISK | Risk |
-| [case228_nontype_template_param_default_changed](../case228_nontype_template_param_default_changed.md) | Non-Type Template Parameter Default Changed | ✅ NO_CHANGE | No Change |
-| [case229_exported_template_default_changed](../case229_exported_template_default_changed.md) | Exported Template Default Changed | 🔴 BREAKING | Breaking |

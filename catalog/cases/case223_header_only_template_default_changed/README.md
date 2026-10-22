@@ -10,8 +10,8 @@ it, so no symbol changes. A consumer that writes `mylib::Box<char>` compiles
 unchanged against v1 but substitutes `Box<char, char>` there and `Box<char, int>`
 against v2. The change is a source-level consequence, not a binary break.
 
-Both backends reach the same ground truth, `COMPATIBLE_WITH_RISK`, on the
-default castxml lane. That lane's one finding is the source-replay risk
+On the default castxml lane the run reports `COMPATIBLE_WITH_RISK`. The clang
+backend reports `API_BREAK` for the same header change. That lane's one finding is the source-replay risk
 `public_dependency_role_changed`, because the old default referenced `T`. The
 header-level kind `template_param_default_changed` belongs to the clang backend
 (ADR-085 D2). castxml records no template-parameter defaults (D3), so its run

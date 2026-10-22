@@ -11,7 +11,7 @@
 | **Detected `ChangeKind`s** | — |
 | **Source files** | `catalog/cases/case225_header_only_template_default_removed/` |
 | **Rule family** | [`header-only-template-default-removed`](by-rule/header-only-template-default-removed.md) |
-| **Subject** | [Inline-function and ODR-boundary changes](by-subject/inline-function-and-odr-boundary-changes.md) |
+| **Subject** | [Template and generic-programming issues](by-subject/template-and-generic-programming-issues.md) |
 
 **Category:** Template ABI | **Verdict:** 🟢 NO_CHANGE (castxml) / 🟠 API_BREAK (clang)
 
@@ -86,4 +86,4 @@ alias.
 - `v2.cpp`
 - `v2.h`
 
-_See also: [Compatibility Catalog](index.md) · [All NO_CHANGE cases](by-verdict/no-change.md) · [Category: No Change](by-category/no_change.md) · [Rule: Header-only template default removed](by-rule/header-only-template-default-removed.md) · [Subject: Inline-function and ODR-boundary changes](by-subject/inline-function-and-odr-boundary-changes.md)._
+_See also: [Compatibility Catalog](index.md) · [All NO_CHANGE cases](by-verdict/no-change.md) · [Category: No Change](by-category/no_change.md) · [Rule: Header-only template default removed](by-rule/header-only-template-default-removed.md) · [Subject: Template and generic-programming issues](by-subject/template-and-generic-programming-issues.md)._

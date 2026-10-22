@@ -11,7 +11,7 @@
 | **Detected `ChangeKind`s** | `public_dependency_role_changed` |
 | **Source files** | `catalog/cases/case227_nested_namespace_template_default_changed/` |
 | **Rule family** | [`nested-namespace-template-default-changed`](by-rule/nested-namespace-template-default-changed.md) |
-| **Subject** | [Inline-function and ODR-boundary changes](by-subject/inline-function-and-odr-boundary-changes.md) |
+| **Subject** | [Template and generic-programming issues](by-subject/template-and-generic-programming-issues.md) |
 
 **Category:** Template ABI | **Verdict:** 🟡 COMPATIBLE_WITH_RISK (castxml) / 🟠 API_BREAK (clang)
 
@@ -87,4 +87,4 @@ As in case223: add an alias rather than change the default in place.
 - `v2.cpp`
 - `v2.h`
 
-_See also: [Compatibility Catalog](index.md) · [All COMPATIBLE_WITH_RISK cases](by-verdict/compatible-risk.md) · [Category: Risk](by-category/risk.md) · [Rule: Nested-namespace template default changed](by-rule/nested-namespace-template-default-changed.md) · [Subject: Inline-function and ODR-boundary changes](by-subject/inline-function-and-odr-boundary-changes.md)._
+_See also: [Compatibility Catalog](index.md) · [All COMPATIBLE_WITH_RISK cases](by-verdict/compatible-risk.md) · [Category: Risk](by-category/risk.md) · [Rule: Nested-namespace template default changed](by-rule/nested-namespace-template-default-changed.md) · [Subject: Template and generic-programming issues](by-subject/template-and-generic-programming-issues.md)._
