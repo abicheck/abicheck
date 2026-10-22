@@ -75,6 +75,7 @@
     "abicheck/compare/surface_reconcile.py(_alias_resolver.<locals>._resolve)": 424,
     "abicheck/compare/surface_reconcile.py(_drop_elf_memos)": 14,
     "abicheck/compare/surface_reconcile.py(cached_reconciliation)": 372,
+    "abicheck/compare/template_param_defaults.py(_pattern_records)": 4,
     "abicheck/compare/template_surface.py(_cached)": 154,
     "abicheck/compare/template_surface.py(_needs_demangle)": 7060,
     "abicheck/compare/template_surface.py(alias_identity)": 330,
@@ -229,7 +230,7 @@
     "abicheck/model/signature_normalization.py(_strip_cv_tokens_outside_nesting)": 35,
     "abicheck/model/signature_normalization.py(canonicalize_function_signature_param_type)": 563,
     "abicheck/model/snapshot.py(AbiSnapshot.canonical_ir)": 488,
-    "abicheck/model/snapshot.py(AbiSnapshot.declarations)": 4428,
+    "abicheck/model/snapshot.py(AbiSnapshot.declarations)": 4436,
     "abicheck/model/snapshot.py(AbiSnapshot.function_map)": 196,
     "abicheck/model/snapshot.py(AbiSnapshot.index)": 196,
     "abicheck/model/snapshot.py(AbiSnapshot.variable_map)": 28,
@@ -295,5 +296,5 @@
   },
   "mode": "default",
   "n": 40,
-  "total": 247861
+  "total": 247873
 }
