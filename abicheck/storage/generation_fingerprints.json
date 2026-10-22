@@ -60,7 +60,7 @@
       "abicheck/extract/header_order_witness.py": "6a1cfce946826fa540a0601ebeefa02a8973ba6e8cd5d8287f6c1e7badc3d53a",
       "abicheck/extract/header_scan_memo.py": "56f79b5316354b938b08a5f29779c3aaf40481892d947784ec2adb48ab5e83fb",
       "abicheck/extract/headers/__init__.py": "70af0d3a16882783444077004b7a434a295505579fbbca219ce103f72074ad03",
-      "abicheck/extract/headers/ast_config.py": "bc9a5af63004129c078abdec768ce0596ec878ecb3cd845b90911e833e500bc1",
+      "abicheck/extract/headers/ast_config.py": "708e6f189d9f24510a544e22655d668733dd1b565e4ec747c11b3fb29d466749",
       "abicheck/extract/headers/ast_config_cpp20_chains.py": "ceeadbcb1d8e2eaac5eb325a3fb7c668614ce605bc04bb03835fcc4957e53c97",
       "abicheck/extract/headers/backend_plan.py": "1f02babf0ead52a65e4fa08dff8ce5b2a9d60feb1d02d22e7db30ee050cf8717",
       "abicheck/extract/headers/backend_protocol.py": "144cbe76456b6bceaf56f0edd0f3398f171178a222c8b968d53f8a17ee05a21b",
@@ -106,6 +106,7 @@
       "abicheck/extract/headers/clang/template_param_indexes.py": "d73116e7e4bf662dd4c5b00d653a8a1fd1ece26818806f8ec5f08ec417b104fa",
       "abicheck/extract/headers/clang/templates.py": "21aa38d283c3b7bd036d68cec6e655fb9be9ae84fba3e6da8d01d3b6c442105c",
       "abicheck/extract/headers/clang/vtable.py": "bc235100ce9c5cb9ec8af93ea5bafe1abf0ea29249087a2b5f073ef5293257ff",
+      "abicheck/extract/headers/clang_header_argv.py": "c198bd32d8fc6c5e59d6fd30f809544291a4a5381614f2fcbb281765da6626b7",
       "abicheck/extract/headers/compile_provenance.py": "1453703111a2abf28799b446e125c34906fd3220faca27db49220f625cc99d75",
       "abicheck/extract/headers/manifest.py": "b44a66dc760b0fd39e671876615d1e846433b2d76cb050be39749c5740c942bf",
       "abicheck/extract/headers/scope_segments.py": "d413edec257eb1334c829263770b66dc2eda3d263c765f699eac9f7e3ace9e65",
@@ -152,9 +153,9 @@
       "abicheck/symvers_metadata.py": "372737765cd132e6e87ed891dd465d2958e04debbef774e45212ceb3036871cb",
       "abicheck/type_metadata.py": "9997189de8dac522fd1db8be5ae491d811139503f83abaaded89038eb4aa9cdf"
     },
-    "fingerprint": "0e2d10fbc023a3fb3d6ba4890f9cbcd422dfedb426fc2edda5165617f862f683",
+    "fingerprint": "792015a29d85ee96df9d5180b38eb440aba503f8bb3409f4a8db0feb2ca976c9",
     "generation": 10,
-    "reason": "origin_lib now attributes std template local statics to the C++ runtime (ElfSymbol.origin_lib); extractor semantics changed"
+    "reason": "Merge of main into the header-argv PR: the extractor-scope edit is still only the verbatim move of the header argv into extract/headers/clang_header_argv.py; the rendered argv stays byte-identical to the pre-change golden, so no generation bump"
   },
   "resolver": {
     "files": {
