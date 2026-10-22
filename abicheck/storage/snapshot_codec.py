@@ -595,6 +595,41 @@ def save_snapshot(
     write_snapshot(snap, path, compression=compression)
 
 
+def write_snapshot_compact(
+    snap: AbiSnapshot,
+    path: str | Path,
+    *,
+    compression: str = "zstd",
+    zstd_level: int | None = None,
+) -> SnapshotWriteResult:
+    """Save *snap* to *path* as compact (no-whitespace) JSON, streamed.
+
+    For a machine-only file nobody reads by eye -- the private snapshot cache
+    entry -- indentation is pure overhead: compact entries are ~15%
+    smaller (2.12 vs 2.48 MiB on an MKL entry) than :func:`write_snapshot`'s
+    indented output; the encode itself is a small part of a write, which is
+    dominated by building the sectioned document. Like :func:`write_snapshot` it streams
+    (:func:`~.json_stream.iter_json_compact` into
+    ``write_snapshot_text_stream``), so neither the whole text nor its bytes
+    is held. Key order is the sectioned encoder's, so the decoded snapshot
+    and its content digest are unchanged. User-facing snapshot files keep
+    :func:`write_snapshot`'s indented output.
+    """
+    from ..snapshot_io import SnapshotCompression
+    from .acyclic_json import gc_paused
+    from .json_stream import iter_json_compact
+    from .snapshot_encode import sectioned_document_for_write
+    from .snapshot_stream_write import write_snapshot_text_stream
+
+    with gc_paused():
+        return write_snapshot_text_stream(
+            iter_json_compact(sectioned_document_for_write(snap)),
+            path,
+            compression=SnapshotCompression(compression),
+            zstd_level=zstd_level,
+        )
+
+
 def write_snapshot(
     snap: AbiSnapshot,
     path: str | Path,

@@ -590,6 +590,7 @@ class HeaderGraphBisectionMemo:
         self._lock = threading.Lock()
         self._key_locks: dict[Hashable, threading.Lock] = {}
         self._outcomes: dict[Hashable, tuple[tuple[Path, ...], str]] = {}
+        self._projections: dict[Hashable, HeaderGraphAstProjection] = {}
 
     @contextmanager
     def slot(self, key: Hashable) -> Iterator[None]:
@@ -597,6 +598,32 @@ class HeaderGraphBisectionMemo:
             key_lock = self._key_locks.setdefault(key, threading.Lock())
         with key_lock:
             yield
+
+    def load_projection(
+        self,
+        key: Hashable,
+        load: Callable[[], HeaderGraphAstProjection | None],
+    ) -> HeaderGraphAstProjection | None:
+        """The projection stored under *key*, loading it at most once per scope.
+
+        Only a *successful* load is kept: a ``None`` (a miss) is returned to
+        the caller and never memoized, so a later sibling can still see an
+        entry that another library stored in the meantime. The per-key slot
+        makes concurrent callers wait for the first load instead of reading
+        the same sidecar in parallel. The returned object is shared between
+        callers, so it is treated as read-only: every consumer reads its
+        fields and none rebinds or mutates them.
+        """
+        with self.slot(("projection", key)):
+            with self._lock:
+                hit = self._projections.get(key)
+            if hit is not None:
+                return hit
+            loaded = load()
+            if loaded is not None:
+                with self._lock:
+                    self._projections[key] = loaded
+            return loaded
 
     def get(self, key: Hashable) -> tuple[tuple[Path, ...], str] | None:
         with self._lock:

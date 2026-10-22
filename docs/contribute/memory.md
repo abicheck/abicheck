@@ -49,6 +49,18 @@ side's full snapshot that member left resident and why, and a
 That last pairing is the point: a peak is only *attributable* if the trace
 says what was being held when it was taken.
 
+Every sample also carries `thread_cpu_s` and `process_cpu_s`
+(`time.thread_time()`/`time.process_time()`), so the same marks attribute
+CPU: a stage's thread CPU is the difference between the two samples that
+bound it on one `thread`. The stage marks are `dump.prologue:done`,
+`dump.elf.symbols:done`, `dump.debug.metadata:done`, the
+`dump.dwarf_snapshot` phase and `dump.binary:done` (binary and debug
+extraction); `compare.prologue:done`, `compare.detectors:done`,
+`compare.dispose:done`, `compare.assemble:done`, `compare.ledger:done` and
+`compare.rollup:done` (one `compare()`); `release.member.compare:done`,
+`.project:done`, `.attribute:done` and `.persist:done` (per-member
+orchestration); and the `report.render`/`report.release_render` phases.
+
 ## The benchmark harness
 
 `scripts/bench_release_memory.py` builds a **real compiled** two-sided C++

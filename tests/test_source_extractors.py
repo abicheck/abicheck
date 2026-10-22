@@ -317,7 +317,7 @@ def test_build_command_decodes_split_operand_abi_flag_survivor() -> None:
     # genuinely split two-token cc1 flag (`-target-abi aapcs`) into one
     # internal `-target-abi=aapcs` survivor token in
     # CompileUnit.abi_relevant_flags. The L4 replay path
-    # (source_extractors._argv.replay_extra_flags /
+    # (source_extractors.compile_invocation.replayed_tokens /
     # _carry_abi_relevant_flags, reached here via build_castxml_command)
     # must decode it back into its real, separate argv tokens -- not append
     # the internal encoding as one malformed token that castxml would
@@ -400,7 +400,7 @@ def test_extract_runs_in_env_chdir_effective_directory(
     ``argv`` must actually run this subprocess from
     ``<directory>/build``, not bare ``directory`` -- otherwise a raw,
     unmodified relative flag (``-iquote ../include``) that
-    ``replay_extra_flags()`` carries straight from ``compile_unit.argv``
+    ``replayed_tokens()`` carries straight from ``compile_unit.argv``
     resolves against the wrong directory."""
     from abicheck.buildsource.source_extractors import castxml as castxml_mod
 

@@ -1,0 +1,82 @@
+[
+  {
+    "directory": "/work/proj",
+    "file": "src/gcc_cxx.cpp",
+    "arguments": ["g++", "-std=c++17", "-fPIC", "-DFOO=1", "-DBARE", "-UBAZ", "-Iinclude", "-isystem", "/usr/include/x", "-include", "config.h", "-c", "src/gcc_cxx.cpp", "-o", "gcc_cxx.o"]
+  },
+  {
+    "directory": "/work/proj",
+    "file": "src/gcc_c.c",
+    "arguments": ["gcc", "-std=c11", "-Iinc", "-D", "X=2", "-iquote", "quoted", "-idirafter", "after", "-c", "src/gcc_c.c", "-o", "gcc_c.o"]
+  },
+  {
+    "directory": "/work/proj",
+    "file": "src/clang_cxx.cpp",
+    "arguments": ["clang++", "-std=c++20", "-stdlib=libc++", "--target=x86_64-linux-gnu", "--sysroot=/sdk", "-Iinc", "-fvisibility=hidden", "-fno-exceptions", "-fabi-version=13", "-c", "src/clang_cxx.cpp", "-o", "clang_cxx.o"]
+  },
+  {
+    "directory": "/work/proj",
+    "file": "src/clang_c.c",
+    "arguments": ["clang", "-std=gnu11", "-m32", "-isysroot", "/opt/sdk", "-target", "i386-linux-gnu", "-DNDEBUG", "-c", "src/clang_c.c", "-o", "clang_c.o"]
+  },
+  {
+    "directory": "/work/win",
+    "file": "src/win.cpp",
+    "arguments": ["clang-cl", "/std:c++17", "/DWIN=1", "/UDEBUG", "/Iinc", "/isystem", "/work/sdk/include", "/FIcfg.h", "/c", "src/win.cpp", "/Fowin.obj"]
+  },
+  {
+    "directory": "/work/rel",
+    "file": "../src/env_chdir.cpp",
+    "arguments": ["env", "-C", "build", "clang++", "-std=c++14", "-I../include", "-iquote", "q", "-c", "../src/env_chdir.cpp", "-o", "env_chdir.o"]
+  },
+  {
+    "directory": "/work/rel",
+    "file": "src/forced_joined.cpp",
+    "arguments": ["g++", "-std=c++17", "-I", "rel_inc", "-iquotequoted", "-include", "pre.h", "-includepre2.h", "-c", "src/forced_joined.cpp", "-o", "fj.o"]
+  },
+  {
+    "directory": "/work/proj",
+    "file": "src/forced_lang.c",
+    "arguments": ["gcc", "-x", "c++", "-std=gnu++17", "-c", "src/forced_lang.c", "-o", "forced_lang.o"]
+  },
+  {
+    "directory": "/work/proj",
+    "file": "src/conflicting_std.cpp",
+    "arguments": ["g++", "-std=gnu++17", "-std=c++20", "-fexceptions", "-fno-exceptions", "-fexceptions", "-c", "src/conflicting_std.cpp", "-o", "cs.o"]
+  },
+  {
+    "directory": "/work/proj",
+    "file": "src/plugin.cpp",
+    "arguments": ["clang++", "-fplugin=evil.so", "-Xclang", "-load", "-Xclang", "evil2.so", "-Iinc", "-c", "src/plugin.cpp", "-o", "plugin.o"]
+  },
+  {
+    "directory": "/work/proj",
+    "file": "src/rsp.cpp",
+    "arguments": ["g++", "@flags.rsp", "-c", "src/rsp.cpp", "-o", "rsp.o"]
+  },
+  {
+    "directory": "/work/proj",
+    "file": "src/sycl_intel.cpp",
+    "arguments": ["icpx", "-fsycl", "-fsycl-host-only", "-std=c++17", "-c", "src/sycl_intel.cpp", "-o", "sycl_intel.o"]
+  },
+  {
+    "directory": "/work/proj",
+    "file": "src/sycl_stock.cpp",
+    "arguments": ["clang++", "-fsycl", "-fsycl-device-only", "-std=c++17", "-c", "src/sycl_stock.cpp", "-o", "sycl_stock.o"]
+  },
+  {
+    "directory": "/work/proj",
+    "file": "src/sycl_bare.cpp",
+    "arguments": ["icpx", "-fsycl", "-std=c++17", "-c", "src/sycl_bare.cpp", "-o", "sycl_bare.o"]
+  },
+  {
+    "directory": "/work/proj",
+    "file": "src/no_driver_flags.cpp",
+    "arguments": ["-Iinc", "-DX", "-c", "src/no_driver_flags.cpp", "-o", "ndf.o"]
+  },
+  {
+    "directory": "/work/proj",
+    "file": "src/env_clear.cpp",
+    "arguments": ["env", "-i", "PATH=/usr/bin", "/usr/bin/clang++", "-std=c++17", "-I", "inc2", "-c", "src/env_clear.cpp", "-o", "ec.o"]
+  }
+]
