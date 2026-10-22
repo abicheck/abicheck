@@ -83,6 +83,7 @@ reproducing.
 
 from __future__ import annotations
 
+import re
 from collections.abc import Mapping
 from typing import Any
 
@@ -188,8 +189,19 @@ def _row_use_cases_suffix(row: Mapping[str, Any]) -> str:
     return f"\n  > Affects use cases: {', '.join(names)}" if names else ""
 
 
+def _row_symbol_suffix(row: Mapping[str, Any]) -> str:
+    """Name the row's symbol when its description omits it: the folded
+    review groups list only example names, so the row is the one place
+    every finding's symbol still appears."""
+    symbol = row.get("symbol")
+    if symbol and symbol not in row["description"]:
+        return f" — `{symbol}`"
+    return ""
+
+
 def _render_change_row_oneline(row: Mapping[str, Any]) -> str:
     line = f"- **{row['kind']}**: {row['description']}"
+    line += _row_symbol_suffix(row)
     correlated = row.get("correlated_change_kind")
     if correlated:
         line += f"\n  > See also: `{correlated}` finding for the same symbol"
@@ -207,6 +219,7 @@ def _render_change_row(row: Mapping[str, Any]) -> str:
     elif new_val is not None:
         old_new = f" (`{new_val}`)"
     line = f"- **{row['kind']}**: {row['description']}{old_new}"
+    line += _row_symbol_suffix(row)
     loc = row.get("source_location")
     if loc:
         line += f" — `{loc}`"
@@ -290,22 +303,161 @@ def _render_surface_changes_from_mapping(d: Any) -> list[str]:
     return render_surface_changes_section(SurfaceChangeSection.from_dict(d))
 
 
+# Review-group caps for the Markdown view. The JSON ``review_groups`` block
+# keeps every group with its members and exact symbols; these only bound the
+# prose. Without them a ``std::`` surface yields one group per symbol, each
+# with multi-KB demangled names: 1000 symbols was a 650 KB section.
+_REVIEW_LINE_LIMIT = 1000  # no rendered line is longer than this
+_REVIEW_NAME_LIMIT = 160  # one demangled name, as shown
+_REVIEW_EXAMPLE_LIMIT = 5  # example names listed per family
+_REVIEW_FAMILY_LIMIT = 50  # families rendered before "... and N more"
+
+
+def _clip(text: str, limit: int = _REVIEW_LINE_LIMIT) -> str:
+    return text if len(text) <= limit else text[: limit - 1] + "…"
+
+
+def _review_namespace_root(display_name: str) -> str:
+    """The namespace a review group's name lives under (``std`` for
+    ``std::__cxx11::basic_string<...>::f(...)``), ignoring template arguments
+    and parameter lists so ``foo<std::string>`` is not read as ``foo<std``."""
+    if display_name.startswith("_Z"):
+        return "(undemangled)"
+    base = re.split(r"[<(]", display_name, maxsplit=1)[0]
+    if "::" not in base:
+        return "(global)"
+    return base.split("::", 1)[0] or "(global)"
+
+
+def _review_group_families(
+    groups: list[Mapping[str, Any]],
+) -> list[tuple[tuple[str, str], dict[str, Any]]]:
+    """Collapse groups that share a namespace root and an observed transition.
+
+    Consequence and action are not part of the key: for ordinary findings the
+    consequence is that finding's own description, which names the symbol, so
+    keying on it would leave every symbol in its own family again. They are
+    shown only when every member of the family agrees; otherwise the family
+    says so and points at the JSON. Each family keeps counts and a few example
+    names; nothing is dropped, only folded."""
+    families: dict[tuple[str, str], dict[str, Any]] = {}
+    for group in groups:
+        name = str(group.get("display_name", "?"))
+        key = (
+            _review_namespace_root(name),
+            str(group.get("transition", "unknown transition")),
+        )
+        consequence = str(group.get("consequence", "see member findings"))
+        action = str(group.get("action", "review member findings"))
+        family = families.setdefault(
+            key,
+            {
+                "groups": 0,
+                "gating": 0,
+                "members": 0,
+                "examples": [],
+                "consequence": consequence,
+                "action": action,
+                "uniform": True,
+            },
+        )
+        family["uniform"] = (
+            family["uniform"]
+            and consequence == family["consequence"]
+            and action == family["action"]
+        )
+        family["groups"] += 1
+        family["gating"] += int(group.get("gating_findings", 0) or 0)
+        family["members"] += len(group.get("member_finding_ids", []) or [])
+        if len(family["examples"]) < _REVIEW_EXAMPLE_LIMIT:
+            family["examples"].append(name)
+        if family["groups"] == 1:
+            family["first"] = group
+    return sorted(families.items(), key=lambda item: (-item[1]["gating"], item[0]))
+
+
+def _capped_list(items: Any) -> str:
+    shown = [str(item) for item in list(items or [])]
+    text = ", ".join(
+        f"`{_clip(item, _REVIEW_NAME_LIMIT)}`" for item in shown[:_REVIEW_EXAMPLE_LIMIT]
+    )
+    if len(shown) > _REVIEW_EXAMPLE_LIMIT:
+        text += f" … and {len(shown) - _REVIEW_EXAMPLE_LIMIT} more"
+    return text
+
+
 def _render_review_groups_from_mapping(value: Any) -> list[str]:
+    """Related review groups, family-collapsed and capped (see the constants
+    above). The bound comes from the folding, not from the verdict: a family
+    keeps counts and a few names whatever the run's verdict, so a NO_CHANGE
+    run stays small without dropping the only line that names a change."""
     if not isinstance(value, list) or not value:
         return []
-    lines = ["", "## Related review groups", ""]
-    for index, group in enumerate(value, 1):
-        if not isinstance(group, Mapping):
+    groups = [group for group in value if isinstance(group, Mapping)]
+    if not groups:
+        return []
+    families = _review_group_families(groups)
+    gating = sum(int(group.get("gating_findings", 0) or 0) for group in groups)
+    family_word = "family" if len(families) == 1 else "families"
+    summary = (
+        f"{len(groups)} review group(s) across {len(families)} {family_word}; "
+        f"{gating} gating finding(s). Per-group members and exact symbols are "
+        "in the JSON `review_groups`."
+    )
+    lines = ["", "## Related review groups", "", summary, ""]
+    for index, ((root, transition), family) in enumerate(
+        families[:_REVIEW_FAMILY_LIMIT], 1
+    ):
+        if family["groups"] == 1:
+            # A lone group keeps its own name and member lines, as before, so a
+            # small report reads the same; only a family of several is folded.
+            group = family["first"]
+            lines += [
+                _clip(
+                    f"### {index}. `{_clip(str(group.get('display_name', '?')), _REVIEW_NAME_LIMIT)}`"
+                ),
+                "",
+                _clip(f"- **Observed:** {transition}"),
+                _clip(f"- **Implication:** {family['consequence']}"),
+                _clip(f"- **Action:** {family['action']}"),
+                f"- **Gate contribution:** {family['gating']} finding(s)",
+                _clip(
+                    f"- **Members:** {_capped_list(group.get('member_finding_ids'))}"
+                ),
+                _clip(
+                    f"- **Exact symbols:** {_capped_list(group.get('exact_symbols'))}"
+                ),
+                "",
+            ]
             continue
+        examples = ", ".join(
+            f"`{_clip(name, _REVIEW_NAME_LIMIT)}`" for name in family["examples"]
+        )
+        more = family["groups"] - len(family["examples"])
+        if more > 0:
+            examples += f" … and {more} more"
+        if family["uniform"]:
+            consequence, action = family["consequence"], family["action"]
+        else:
+            consequence = action = "varies by member; see the JSON `review_groups`"
         lines += [
-            f"### {index}. `{group.get('display_name', '?')}`",
+            _clip(
+                f"### {index}. `{_clip(root, _REVIEW_NAME_LIMIT)}` "
+                f"({family['groups']} group(s), {family['members']} member finding(s))"
+            ),
             "",
-            f"- **Observed:** {group.get('transition', 'unknown transition')}",
-            f"- **Implication:** {group.get('consequence', 'see member findings')}",
-            f"- **Action:** {group.get('action', 'review member findings')}",
-            f"- **Gate contribution:** {group.get('gating_findings', 0)} finding(s)",
-            f"- **Members:** {', '.join(f'`{item}`' for item in group.get('member_finding_ids', []))}",
-            f"- **Exact symbols:** {', '.join(f'`{item}`' for item in group.get('exact_symbols', []))}",
+            _clip(f"- **Observed:** {transition}"),
+            _clip(f"- **Implication:** {consequence}"),
+            _clip(f"- **Action:** {action}"),
+            f"- **Gate contribution:** {family['gating']} finding(s)",
+            _clip(f"- **Examples:** {examples}"),
+            "",
+        ]
+    hidden = len(families) - _REVIEW_FAMILY_LIMIT
+    if hidden > 0:
+        lines += [
+            f"… and {hidden} more famil{'y' if hidden == 1 else 'ies'} omitted; "
+            "see the JSON `review_groups`.",
             "",
         ]
     return lines

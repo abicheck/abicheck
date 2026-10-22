@@ -216,3 +216,46 @@ def has_foreign_template_argument(name: str) -> bool:
             continue
         return False
     return found and not stack
+
+
+def _strip_local_entity(name: str) -> str | None:
+    """*name* without its trailing ``E<len><entity>`` local-name entity.
+
+    A function-local ``_ZZ<encoding>E<entity>`` object ends in the entity
+    (``E1x``); the scanner above models a bare encoding, so the entity is
+    removed first. The split point is the last ``E`` whose length-prefixed
+    tail is exactly one identifier of the stated length. ``None`` if none fits.
+    """
+    for k in range(len(name) - 2, 0, -1):
+        if name[k] != "E" or not name[k + 1].isdigit():
+            continue
+        j = k + 1
+        while j < len(name) and name[j].isdigit():
+            j += 1
+        length = int(name[k + 1 : j])
+        if length > 0 and j + length == len(name):
+            return name[:k]
+    return None
+
+
+def has_foreign_template_argument_in_local_name(name: str) -> bool:
+    """True when a function-local ``_ZZ``/``_ZGVZ`` *name* belongs to a std
+    template instantiated over a non-runtime type (``std::vector<MyType>``).
+
+    ``_ZZ<encoding>E<entity>`` (a local static) and ``_ZGVZ...`` (its guard)
+    carry the enclosing function's encoding, which decides whose template
+    instantiation this is. The encoding is re-read as the nested name it is,
+    with the local entity removed, and given to
+    :func:`has_foreign_template_argument`. Any other shape answers ``False``
+    ("no evidence"), like the scanner it delegates to.
+    """
+    if name.startswith("_ZZ"):
+        body = name[3:]
+    elif name.startswith("_ZGVZ"):
+        body = name[5:]
+    else:
+        return False
+    encoding = _strip_local_entity(body)
+    if encoding is None:
+        return False
+    return has_foreign_template_argument("_Z" + encoding)

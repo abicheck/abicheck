@@ -436,15 +436,38 @@ def _fingerprints_from_elf(snap: AbiSnapshot) -> dict[str, FunctionFingerprint]:
     return result
 
 
-@registry.detector(
-    "fingerprint_renames",
-    requires_support=lambda o, n: (
-        o.elf is not None
-        and n.elf is not None
-        and (o.elf_only_mode or n.elf_only_mode),
-        "requires ELF metadata in elf_only_mode",
-    ),
-)
+def _fingerprint_renames_support(
+    old: AbiSnapshot, new: AbiSnapshot
+) -> tuple[bool, str | None]:
+    """Support gate for ``fingerprint_renames`` (ADR-067 D3).
+
+    Two preconditions, each refused with its own reason so the coverage line
+    names the one that actually failed:
+
+    - real ELF symbol-table facts on *both* sides (``.elf``), and
+    - at least one side dumped in ``elf_only_mode`` (stripped, symbol-only).
+
+    The second is the one a field report hit: two ELF ``.so`` files dumped
+    with headers or debug info have real ``.elf`` on both sides, so the old
+    message ("requires ELF metadata in elf_only_mode") blamed a precondition
+    that was met and hid the one that was not.
+    """
+    if old.elf is None or new.elf is None:
+        missing = [
+            side for side, snap in (("old", old), ("new", new)) if snap.elf is None
+        ]
+        where = "both sides" if len(missing) == 2 else f"the {missing[0]} side"
+        return False, f"missing ELF metadata on {where}"
+    if not (old.elf_only_mode or new.elf_only_mode):
+        return False, (
+            "neither side was dumped in elf_only_mode (both carry headers or "
+            "debug info); fingerprint rename matching runs only on stripped, "
+            "symbol-only dumps"
+        )
+    return True, None
+
+
+@registry.detector("fingerprint_renames", requires_support=_fingerprint_renames_support)
 def _diff_fingerprint_renames(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     """Detect likely function renames using binary fingerprint matching.
 

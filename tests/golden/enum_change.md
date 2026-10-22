@@ -18,7 +18,7 @@
 | Evidence tier | `header_aware` |
 | Evidence tiers | `header` |
 | Coverage gap | Detector 'elf_layout' disabled: missing ELF metadata on one side |
-| Coverage gap | Detector 'fingerprint_renames' disabled: requires ELF metadata in elf_only_mode |
+| Coverage gap | Detector 'fingerprint_renames' disabled: missing ELF metadata on both sides |
 | Coverage gap | Detector 'kabi' disabled: missing Module.symvers (kABI) metadata |
 | Coverage gap | Detector 'long_double' disabled: missing ELF metadata on one side |
 | Coverage gap | Detector 'elf' disabled: missing ELF metadata |
@@ -35,7 +35,7 @@
 | Coverage gap | Detector 'python_api' disabled: missing Python API surface (no .pyi stub recovered) |
 | Coverage gap | Detector 'sycl' disabled: missing SYCL metadata |
 | Coverage gap | Detector 'unnamed_types' disabled: missing ELF metadata on one side |
-| Coverage gap | Detector 'vtable_layout' disabled: missing DWARF/header type metadata (inheritance) |
+| Coverage gap | Detector 'vtable_layout' disabled: missing DWARF/header type metadata on one side (inheritance) |
 | Coverage gap | Detector 'advanced_dwarf' disabled: missing DWARF advanced metadata |
 | Coverage gap | No binary metadata available; verdict is based on header analysis only |
 
@@ -86,6 +86,8 @@
 
 
 ## Related review groups
+
+1 review group(s) across 1 family; 1 gating finding(s). Per-group members and exact symbols are in the JSON `review_groups`.
 
 ### 1. `Color::GREEN`
 

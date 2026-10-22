@@ -166,6 +166,34 @@ def _determine_evidence_tier(
     return EvidenceTier.ELF_ONLY
 
 
+def header_computes_layout(snap: AbiSnapshot | None) -> bool:
+    """Whether *snap*'s header-derived surface carries record layout that the
+    header frontend itself computed (size, alignment, field offsets).
+
+    CastXML runs a real layout pass, and the header-derived records it emits
+    carry it. A bare clang ``-ast-dump=json`` parse does not (its records keep
+    ``size_bits`` unset), so any other frontend, including a hybrid whose
+    clang-only records are unsized, counts only when some declared record
+    carries a size -- which is what the optional layout companion leaves behind.
+    """
+    if snap is None or not getattr(snap, "from_headers", False):
+        return False
+    if snap.ast_producer == "castxml":
+        return True
+    return any(t.size_bits is not None for t in snap.declarations.types)
+
+
+def side_has_layout_evidence(snap: AbiSnapshot | None) -> bool:
+    """Whether one compared side carries record-layout evidence at all: DWARF
+    layout (basic or advanced) or a header frontend that computes layout."""
+    from .model.debug_evidence import debug_info_evidence
+
+    if snap is None:
+        return False
+    debug = debug_info_evidence(snap)
+    return debug.basic or debug.advanced or header_computes_layout(snap)
+
+
 def _determine_confidence_level(
     has_elf: bool,
     has_dwarf: bool,
@@ -174,13 +202,33 @@ def _determine_confidence_level(
     has_headers: bool,
     detector_results: list[DetectorResult],
     warnings: list[str],
+    *,
+    has_layout_evidence: bool = False,
 ) -> Confidence:
     """Compute the confidence level based on available evidence and detector state.
+
+    ``has_layout_evidence`` is true only when *every* compared side carries
+    record-layout evidence (:func:`side_has_layout_evidence`). HIGH claims
+    the layout-level comparison was made, so a header-plus-binary comparison
+    reaches HIGH only with that evidence on both sides. Without it, a struct
+    size or offset change is invisible and the verdict is capped at MEDIUM.
+    The default ``False`` is the conservative answer: callers that cannot
+    state layout evidence do not get HIGH.
 
     Appends appropriate warnings to *warnings* as a side effect.
     """
     if has_headers and (has_elf or has_dwarf or has_pe or has_macho):
-        confidence = Confidence.HIGH
+        if has_layout_evidence:
+            confidence = Confidence.HIGH
+        else:
+            confidence = Confidence.MEDIUM
+            warnings.append(
+                "Header analysis without record layout on every compared side: "
+                "no DWARF layout and no header frontend that computes it (the "
+                "clang frontend parses declarations but not struct layout, unless "
+                "the layout companion ran), so struct size, alignment and field "
+                "offset changes cannot be established; confidence capped at MEDIUM"
+            )
     elif has_headers:
         confidence = Confidence.MEDIUM
         if not has_elf and not has_pe and not has_macho:
@@ -282,8 +330,11 @@ def compute_confidence(
     - "macho": Mach-O metadata present
 
     Confidence:
-    - "high": headers + at least one binary metadata source (ELF/DWARF/PE/Mach-O)
-    - "medium": headers only, or binary-only with ELF+DWARF
+    - "high": headers + at least one binary metadata source (ELF/DWARF/PE/Mach-O),
+      AND record-layout evidence on every compared side (DWARF layout, or a
+      header frontend that computes layout -- see :func:`header_computes_layout`)
+    - "medium": headers without layout evidence on every side, or binary-only
+      with ELF+DWARF
     - "low": binary-only without DWARF, or very limited data
     """
     tiers, has_elf, has_dwarf, has_dwarf_adv, has_pe, has_macho, has_headers = (
@@ -306,6 +357,12 @@ def compute_confidence(
     warnings.extend(extraction_scope_notes(old, new))  # ADR-075 D3
     warnings.extend(snapshot_load_notices(old, new))  # ADR-062 D2
 
+    # Layout evidence must cover every compared side: a layout change is only
+    # established when both sides' layouts are known. A baseline-less audit
+    # (old is None) judges the candidate alone.
+    sides = (new,) if old is None else (old, new)
+    has_layout_evidence = all(side_has_layout_evidence(s) for s in sides)
+
     confidence = _determine_confidence_level(
         has_elf,
         has_dwarf,
@@ -314,6 +371,7 @@ def compute_confidence(
         has_headers,
         detector_results,
         warnings,
+        has_layout_evidence=has_layout_evidence,
     )
 
     return tiers, confidence, warnings, evidence_tier

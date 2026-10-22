@@ -1118,7 +1118,7 @@ class TestNotEvaluatedDoesNotChangeConfidence:
     """
 
     @staticmethod
-    def _levels(name, *, has_dwarf):
+    def _levels(name, *, has_dwarf, has_layout_evidence=True):
         from abicheck.confidence import _determine_confidence_level
         from abicheck.detectors import DetectorResult
 
@@ -1142,6 +1142,7 @@ class TestNotEvaluatedDoesNotChangeConfidence:
                     has_headers=True,
                     detector_results=results,
                     warnings=[],
+                    has_layout_evidence=has_layout_evidence,
                 )
             )
         return levels
@@ -1158,12 +1159,13 @@ class TestNotEvaluatedDoesNotChangeConfidence:
                     f"being recorded as not_evaluated ({ran} -> {skipped})"
                 )
 
-    def test_headers_plus_binary_stay_high_without_any_dwarf(self):
-        """The documented rule the regression violated, stated directly:
-        headers plus at least one binary metadata source is HIGH, and no
-        detector's support gate may lower it."""
+    def test_headers_plus_binary_with_layout_stay_high_without_any_dwarf(self):
+        """Headers plus a binary are HIGH when a header frontend computes the
+        layout (no DWARF needed), and no detector's support gate may lower it.
+        Without that layout evidence the level is capped at MEDIUM -- see
+        ``TestHighRequiresLayoutEvidence``."""
         for name in ("dwarf", "elf", "symbols"):
-            for level in self._levels(name, has_dwarf=False):
+            for level in self._levels(name, has_dwarf=False, has_layout_evidence=True):
                 assert level == Confidence.HIGH
 
     def test_a_detector_disabled_for_another_reason_still_degrades(self):
