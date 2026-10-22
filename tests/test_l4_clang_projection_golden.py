@@ -107,7 +107,7 @@ def test_golden_header_pins_the_pre_change_producer() -> None:
     # The golden is the pre-change side: the producer must still be 0.13 here.
     # A bump to 0.14 is the b2 change and must regenerate this file first.
     assert CLANG_EXTRACTOR_VERSION == "0.13"
-    assert header["tu_count"] == len(rows) == 253
+    assert header["tu_count"] == len(rows) == 274
 
 
 @pytest.mark.integration
@@ -149,7 +149,7 @@ def test_pinned_set_matches_the_measured_projection_equivalence() -> None:
         )
 
     assert failures == [], "golden TUs that failed to dump: " + ", ".join(failures)
-    assert len(comparisons) == 253
+    assert len(comparisons) == 274
 
     measured = {
         (r.kind, r.field)
