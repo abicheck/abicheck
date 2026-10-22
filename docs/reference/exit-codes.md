@@ -197,7 +197,7 @@ below fires. Every finding carries its evolution state, which
 with a `declared_absent` OLD is always `persistent` or `not_evaluated`,
 never `introduced`.
 
-Four orthogonal axes still apply exactly as they would for a two-sided
+Five orthogonal axes still apply exactly as they would for a two-sided
 run, folded with the same `max` discipline:
 
 | Axis | Contributes | When |
@@ -206,6 +206,7 @@ run, folded with the same `max` discipline:
 | Analysis assurance | `1` | `.abicheck.yml`'s `assurance.require_complete: true` and `analysis_assurance.status` is not `complete`. On a directory/package (release) `compare`, `max` over every compared member's own contribution |
 | Contract coverage | `1` | `--contract` and the selected domain's required evidence is incomplete |
 | Evidence contract | `7` | `--depth build`/`--depth source` pinned, but this run's live extraction did not reach it |
+| Unused rules | `1` | the policy file's `unused_rules: block` and a configured suppression/`reclassify:` rule matched no finding (see [the unused-rules axis](#the-unused-rules-axis)). On a directory/package audit, folded over the members like a release |
 
 The contract-coverage row was inert until 2026-09-09 — `--contract` was
 parsed and documented on this path but never forwarded, so the ledger it
@@ -372,7 +373,10 @@ ELF-only comparison a stale symbol-kind rule therefore reads `unused` and
 `not_evaluated` and does not. The `expired`, `shadowed_only` and `active`
 statuses never trigger it either.
 
-For a directory/package release the gate is evaluated over the union of its
+`compare --no-baseline` folds the same axis, as `exit_axes.unused_rules`
+(until 2026-10-22 its report listed the unused rule while the exit code
+stayed `0`). For a directory/package release, or a directory/package
+`compare --no-baseline` audit, the gate is evaluated over the union of its
 members. A member could evaluate a rule when the rule's status there is anything
 but `not_evaluated`. The release counts the rule as unused only when every member
 that could evaluate it left it unused, and at least one member could. A member
