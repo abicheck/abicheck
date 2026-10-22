@@ -47,6 +47,7 @@ One row per script: name, first sentence of its purpose, trigger. **Read the ful
 | `findings_report.py` | The shared `Findings` error/warning collector both gate scripts report through. | imported (by `check_ai_readiness.py`, `check_docs_contract.py`). |
 | `check_fp_rate.py` | False-positive/false-negative gate for public-surface scoping (ADR-024 §7). | CI (`ai-readiness`). Mirrored in `tests/test_fp_rate_gate.py`. |
 | `check_tier_accuracy.py` | Per-evidence-tier accuracy gate — *what each level buys*. | CI (`ai-readiness`, + step-summary artifact). |
+| `measure_l4_clang_projection.py` | Plan `l4-l2-extraction-convergence` Phase 4 measurement spike: dumps each catalog C++ TU once through the current L4 clang path and through `dumper_clang._ClangAstParser` projected by `base.entity_from_*`, and compares them per `(kind, field)` (the candidate set for ADR-063's `REVISION_COMPARABLE_FIELDS`). Read-only; changes no L4 output. | manual; evidence for the plan's Phase 4 status note. |
 | `measure_contract_shadow.py` | ADR-049 Phase 3's shadow contract-evaluator measurement **and** gate. | Manual / CI step summary. |
 | `contract_platform_corpus.py` | ADR-049 Phase 6's platform/shape corpus for the measurement above: hand-built snapshot pairs carrying real ELF `.dynsym` / PE export-directory / Mach-O export-trie shapes, plus the stripped … | imported (by `measure_contract_shadow.py`). |
 | `gen_skill_eval_pack.py` | Builds `skills-src/evaluation/agents/skills/skill-eval-pack.json`. | `verify.py --only skill-eval-pack` (CI `ai-readiness` job). |
