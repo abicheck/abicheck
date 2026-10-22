@@ -311,6 +311,13 @@ current emitter, which is unchanged.
 
 ### Performance
 
+#### Dependency scoping after a cache round-trip
+
+`perf` — Scoping a snapshot reloaded from the dump cache keeps typedefs that scoping the fresh extraction drops.
+
+- [Re-scoping a cache-reloaded snapshot keeps typedefs that scoping the fresh extraction drops](known-gaps/rescoping-a-cache-reloaded-snapshot-keeps-typedefs-a-fresh-scope-drops.md)  
+  **Status (2026-10-22): OPEN.** Warm `resolve_input` runs now reproduce cold output (finished-tier misses re-extract); the round-trip asymmetry itself is unfixed.
+
 #### Bundle and multi-library memory
 
 `perf` — Three retention costs on the multi-library path: `read_bundle_facts_package` holds raw JSON and decoded snapshots together, every member snapshot stores its own copy of the shared header evidence, and `--bundle-facts-out` pins OLD snapshots per member.
