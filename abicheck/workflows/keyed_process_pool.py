@@ -143,8 +143,13 @@ def run_keyed_in_processes(
                 running[recv] = (key, proc, cost)
             for recv in wait_ready(list(running)):
                 key, proc, cost = running.pop(recv)
-                results_by_key[key], ast_bytes = _settle(recv, proc, key, on_error)
-                _release(cost, ast_bytes)
+                ast_bytes = 0
+                try:
+                    results_by_key[key], ast_bytes = _settle(recv, proc, key, on_error)
+                finally:
+                    # Released even when `on_error` raises: this member has
+                    # already left `running`, so the cleanup below skips it.
+                    _release(cost, ast_bytes)
     finally:
         # Only reached with children still running when this frame is left by
         # an exception (an `on_error` that raised, KeyboardInterrupt): stop

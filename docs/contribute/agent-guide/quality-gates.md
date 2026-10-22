@@ -488,6 +488,30 @@ is complete out of the box. Prefer `pip install -e ".[dev]"` above when pixi
 isn't available in your environment (add `,docs,dist` for full parity).
 
 
+## Reading CodeFactor findings on a PR
+
+CodeFactor's check run links to `https://www.codefactor.io/repository/github/abicheck/abicheck/pull/<N>`.
+The page is public, but CodeFactor answers 403 to curl's default User-Agent.
+That 403 comes from CodeFactor, not the agent proxy, so do not reconfigure the
+environment. Send a browser User-Agent instead. The findings are embedded in
+the page as JSON in `app.value('model', {...})`, under `Issues.List` (an empty
+list means no new issues):
+
+```bash
+UA='Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Safari/537.36'
+curl -sS -A "$UA" https://www.codefactor.io/repository/github/abicheck/abicheck/pull/<N> -o pr.html
+python3 -I - pr.html <<'PY'
+import json, sys
+t = open(sys.argv[1]).read()
+i = t.index("app.value('model', ") + len("app.value('model', ")
+model, _ = json.JSONDecoder().raw_decode(t, i)
+print(json.dumps(model["Issues"]["List"], indent=1))
+PY
+```
+
+Issues fixed by the PR are listed at `.../pull/fixed/<N>` (`FixedIssuesUrl`).
+
+
 ## Known mypy issues
 
 CI runs `mypy abicheck/` as a required gate. The baseline is currently **0 errors** — the previously-documented 26 errors were all `unused-ignore` / `no-any-return` / `misc` warnings on third-party calls (pyelftools, click). They are suppressed in `pyproject.toml` via per-module `disable_error_code` overrides, which keeps the file portable across mypy releases without churning the underlying `# type: ignore` comments.
