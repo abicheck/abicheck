@@ -22,7 +22,7 @@ dependency-free logic over ``model``'s own data (:class:`~abicheck.model.
 graph_facts.GraphNode`, :class:`~abicheck.model.source_graph.
 SourceGraphSummary`) needed by ``extract`` (``buildsource/poi.py``'s
 changed-path public-impact walk) as well as by ``compare``/``policy``
-callers (``cross_source_checks.py``, ``graph_reconcile.py``, ``internal_leak.py``,
+callers (``cross_source_checks.py``, ``graph_reconcile.py``, ``compare/internal_leak.py``,
 ``impact/*``, ``surface.py``, ``post_processing_reachability.py``) --
 ``extract`` may not import ``compare``, but every layer may import
 ``model``. ``buildsource/source_graph_query.py`` re-exports every name here

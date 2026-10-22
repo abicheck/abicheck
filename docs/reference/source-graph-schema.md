@@ -8,7 +8,7 @@ depends_on:
   - abicheck/model/graph_facts.py
   - abicheck/impact/consumer_graph.py
   - abicheck/buildsource/source_graph.py
-  - abicheck/internal_leak.py
+  - abicheck/compare/internal_leak.py
   - abicheck/buildsource/graph_impact.py
   - abicheck/buildsource/entity_resolver.py
 lifecycle: active
@@ -95,7 +95,7 @@ promise that today's packs carry per-call-site data.
 
 ## `TraversalPolicy`
 
-`abicheck/internal_leak.py`'s `TraversalPolicy` formalizes a graph walk's
+`abicheck/compare/internal_leak.py`'s `TraversalPolicy` formalizes a graph walk's
 rules into one reusable object, instead of re-deriving the same edge-kind
 set and stop check inline per walk:
 

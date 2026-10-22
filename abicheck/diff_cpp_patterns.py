@@ -781,7 +781,7 @@ def _find_public_pimpl_holders(
 ) -> set[str]:
     """Return names of *public* record types that hold a pimpl pointing
     at *internal_type_name*."""
-    from .internal_leak import INTERNAL_NAMESPACE
+    from .compare.internal_leak_names import INTERNAL_NAMESPACE
 
     found: set[str] = set()
     leaf = _last_segment(internal_type_name)

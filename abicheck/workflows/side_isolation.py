@@ -174,16 +174,20 @@ def run_cold_isolated(
     isolation is the ``low-memory`` profile, whose contract is that no side's
     resolution -- a cache or stored-snapshot load included -- leaves its
     allocations in this process, so every side forks."""
-    warm: list[_T | None] = (
-        resolve_cached_in_process(fns) if concurrent else [None] * len(fns)
-    )
     from ..deadline import check as check_deadline
+    from .cache_probe import probed_miss_scope
 
-    # The warm loads above ran outside any worker's deadline re-check.
-    check_deadline()
-    cold = [wrap(fn) for fn, res in zip(fns, warm, strict=True) if res is None]
-    forked = iter(run_isolated(cold, concurrent=concurrent) if cold else [])
-    return [res if res is not None else next(forked) for res in warm]
+    # The probe's misses ride into the children (fork copies the scope), so
+    # a cold side does not look the same key up a second time.
+    with probed_miss_scope():
+        warm: list[_T | None] = (
+            resolve_cached_in_process(fns) if concurrent else [None] * len(fns)
+        )
+        # The warm loads above ran outside any worker's deadline re-check.
+        check_deadline()
+        cold = [wrap(fn) for fn, res in zip(fns, warm, strict=True) if res is None]
+        forked = iter(run_isolated(cold, concurrent=concurrent) if cold else [])
+        return [res if res is not None else next(forked) for res in warm]
 
 
 def run_isolated(fns: Sequence[Callable[[], _T]], *, concurrent: bool) -> list[_T]:

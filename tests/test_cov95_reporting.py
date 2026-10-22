@@ -18,7 +18,7 @@ Targets uncovered branches in:
 
 * ``abicheck.reporter``
 * ``abicheck.post_processing``
-* ``abicheck.internal_leak``
+* ``abicheck.compare.internal_leak``
 * ``abicheck.stack_report``
 
 All tests are pure-Python (no compiler / external tools), deterministic, and
@@ -114,7 +114,10 @@ def _grouped_findings(doc: dict) -> list[dict]:
 def _privatize(*snaps: AbiSnapshot) -> None:
     """Stamp every internal-namespace record as defined in a private header:
     the structural proof pointer-only leniency requires (decision 2A)."""
-    from abicheck.internal_leak import DEFAULT_INTERNAL_NAMESPACES, is_internal_type
+    from abicheck.compare.internal_namespaces import (
+        DEFAULT_INTERNAL_NAMESPACES,
+        is_internal_type,
+    )
     from abicheck.model.vocabulary import ScopeOrigin
 
     for snap in snaps:
@@ -210,9 +213,7 @@ class TestReporterStat:
 class TestReporterChangeToDict:
     def test_change_to_dict_without_kind_sets_uses_policy(self) -> None:
         # Lines 721-722 + kind_to_severity 48-57: no kind_sets path.
-        from abicheck.report.change_json import (
-            change_to_dict,
-        )
+        from abicheck.report.change_json import change_to_dict
 
         c = _change(
             ChangeKind.FUNC_REMOVED,
@@ -231,9 +232,7 @@ class TestReporterChangeToDict:
 
     def test_change_to_dict_severities_all_branches(self) -> None:
         # kind_to_severity api_break / risk / compatible branches (51-57).
-        from abicheck.report.change_json import (
-            change_to_dict,
-        )
+        from abicheck.report.change_json import change_to_dict
 
         sev = {
             ChangeKind.METHOD_ACCESS_CHANGED: "api_break",
@@ -246,9 +245,7 @@ class TestReporterChangeToDict:
 
     def test_change_to_dict_no_kind(self) -> None:
         # Line 724: object without a kind attribute → "unknown".
-        from abicheck.report.change_json import (
-            change_to_dict,
-        )
+        from abicheck.report.change_json import change_to_dict
 
         class _Bare:
             symbol = "x"
@@ -261,9 +258,7 @@ class TestReporterChangeToDict:
     def test_change_to_dict_surfaces_correlated_change_kind(self) -> None:
         # ADR-041 P0 roadmap item 2: a structured, machine-readable sibling
         # to the description-prose correlation source_graph_findings emits.
-        from abicheck.report.change_json import (
-            change_to_dict,
-        )
+        from abicheck.report.change_json import change_to_dict
 
         c = _change(
             ChangeKind.PUBLIC_API_INTERNAL_DEPENDENCY_ADDED,
@@ -274,9 +269,7 @@ class TestReporterChangeToDict:
         assert d["correlated_change_kind"] == "inline_body_changed"
 
     def test_change_to_dict_omits_correlated_change_kind_when_unset(self) -> None:
-        from abicheck.report.change_json import (
-            change_to_dict,
-        )
+        from abicheck.report.change_json import change_to_dict
 
         d = change_to_dict(
             _change(ChangeKind.PUBLIC_API_INTERNAL_DEPENDENCY_ADDED, "demo::compute"),
@@ -288,9 +281,7 @@ class TestReporterChangeToDict:
         # ADR-044 P1 item 4: structured reachability evidence, previously
         # description-prose-only (inside the suppression_would_hide_public_break
         # diagnostic).
-        from abicheck.report.change_json import (
-            change_to_dict,
-        )
+        from abicheck.report.change_json import change_to_dict
 
         c = _change(
             ChangeKind.FUNC_REMOVED,
@@ -307,9 +298,7 @@ class TestReporterChangeToDict:
         )
 
     def test_change_to_dict_omits_reachability_fields_when_unset(self) -> None:
-        from abicheck.report.change_json import (
-            change_to_dict,
-        )
+        from abicheck.report.change_json import change_to_dict
 
         d = change_to_dict(
             _change(ChangeKind.PUBLIC_API_INTERNAL_DEPENDENCY_ADDED, "demo::compute"),
@@ -837,14 +826,14 @@ class TestPipelineFallbackKept:
 
 
 # ===========================================================================
-# internal_leak.py
+# compare/internal_leak.py
 # ===========================================================================
 
 
 class TestInternalLeakReachability:
     def test_seed_from_function_skips_empty_types(self) -> None:
         # Line 312: empty return/param types are skipped in seeding.
-        from abicheck.internal_leak import compute_leak_paths
+        from abicheck.compare.internal_leak_paths import compute_leak_paths
 
         snap = _snap(functions=[_public_fn("foo", "", [("a", "")])])
         # No internal types reachable, but the empty-type skip branch runs.
@@ -852,7 +841,7 @@ class TestInternalLeakReachability:
 
     def test_seed_from_variables(self) -> None:
         # Lines 325-327: variable-typed seeding reaches an internal type.
-        from abicheck.internal_leak import compute_leak_paths
+        from abicheck.compare.internal_leak_paths import compute_leak_paths
 
         snap = _snap(
             variables=[Variable(name="g", mangled="g", type="ns::detail::Cfg")],
@@ -862,7 +851,7 @@ class TestInternalLeakReachability:
 
     def test_virtual_base_path(self) -> None:
         # Lines 375-376: virtual bases are enqueued and reached.
-        from abicheck.internal_leak import compute_leak_paths
+        from abicheck.compare.internal_leak_paths import compute_leak_paths
 
         snap = _snap(
             functions=[_public_fn("make", "Public*", [])],
@@ -880,7 +869,7 @@ class TestInternalLeakReachability:
 
     def test_value_embedded_field_detected_in_leak_description(self) -> None:
         # Lines 504-513 + 536: value-embedding heuristic in detect_internal_leaks.
-        from abicheck.internal_leak import detect_internal_leaks
+        from abicheck.compare.internal_leak import detect_internal_leaks
 
         old = _snap(
             functions=[_public_fn("make", "Public*", [])],
@@ -914,7 +903,7 @@ class TestInternalLeakReachability:
         # Line 394: an empty typename in the queue is skipped.
         import collections
 
-        from abicheck.internal_leak import _bfs_collect_paths
+        from abicheck.compare.internal_leak_paths import _bfs_collect_paths
 
         queue: collections.deque[tuple[str, list[str]]] = collections.deque()
         queue.append(("", []))
@@ -925,7 +914,7 @@ class TestInternalLeakReachability:
     def test_path_value_embedding_from_markers(self) -> None:
         # Per-hop model: a field edge with no `indirect:` marker is by-value, so
         # the path is value-propagating; an `indirect:` marker flips it.
-        from abicheck.internal_leak import _path_is_value_propagating
+        from abicheck.compare.internal_leak_paths import _path_is_value_propagating
 
         assert (
             _path_is_value_propagating(["Public", "field:impl_", "ns::detail::Impl"])
@@ -944,7 +933,7 @@ class TestInternalLeakReachability:
         # holder — the leak must NOT fire (surface scoping demotes it as private
         # internal churn). Identity/vtable changes behind a pointer still fire
         # (test_pointer_field_severity_hint in test_internal_leak.py).
-        from abicheck.internal_leak import detect_internal_leaks
+        from abicheck.compare.internal_leak import detect_internal_leaks
 
         old = _snap(
             functions=[_public_fn("make", "Public*", [])],

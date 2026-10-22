@@ -33,6 +33,7 @@ from __future__ import annotations
 import json
 import os
 import sys
+import threading
 from pathlib import Path
 
 import pytest
@@ -726,6 +727,7 @@ class TestStageCpuAttribution:
         assert second["thread_cpu_s"] - first["thread_cpu_s"] >= 0.05
         assert second["process_cpu_s"] - first["process_cpu_s"] >= 0.05
         assert first["thread"] == second["thread"]
+        assert first["thread_id"] == second["thread_id"] == threading.get_native_id()
 
     def test_compare_marks_each_stage_in_pipeline_order(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path

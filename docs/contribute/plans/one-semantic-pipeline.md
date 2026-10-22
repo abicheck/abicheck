@@ -2007,10 +2007,10 @@ directly today and were missing from a first draft of this file list —
 each retains the exact unavailable-vs-empty ambiguity this phase exists
 to close until it is migrated too.
 
-**`internal_leak.py::_enqueue_record_children()` is a fourth such reader,
+**`compare/internal_leak.py::_enqueue_record_children()` is a fourth such reader,
 and a first draft of this paragraph's own closing sentence — "the AI-
 readiness gate... checks every module under `diff_*.py`" — is exactly
-why it was missed: `internal_leak.py` is not a `diff_*.py` module at
+why it was missed: `compare/internal_leak.py` is not a `diff_*.py` module at
 all, so a gate scoped to that glob would silently never see it.**
 `_enqueue_record_children()` walks `rec.bases` (and, on the following
 line, `rec.virtual_bases`) directly to decide whether
@@ -2021,7 +2021,7 @@ if `bases_fact` is `Fact.not_collected()` but the legacy field was
 normalized to `[]` for backward compatibility, this walk sees no bases at
 all, can miss the one public-inheritance path that makes the leak real,
 and silently suppresses or demotes the finding. Fixed two ways, not one:
-`internal_leak.py` is added to this phase's migration file list alongside
+`compare/internal_leak.py` is added to this phase's migration file list alongside
 the `diff_*.py` modules above, and the AI-readiness gate's module scope
 widens from "every module under `diff_*.py`" to an explicit allowlist of
 every module this phase identifies as a semantic reader of the three
@@ -2036,7 +2036,7 @@ reproduced across two more passes — and a review round correctly found
 the prose narrating each pass separately had drifted into inconsistent
 counts ("four more"/"five more" mixing module counts with call-site
 counts) and inconsistent per-reader field lists (an earlier mention of
-`internal_leak.py`/`surface_graph.py` named only `bases`, while both
+`compare/internal_leak.py`/`surface_graph.py` named only `bases`, while both
 actually read `virtual_bases` too, just on a separate line rather than
 in one combined expression) and miscategorized two genuinely `diff_*.py`
 modules as "outside" that scope. Replaced with one explicit table,
@@ -2049,7 +2049,7 @@ third time in prose:**
 | `diff_time64.py` | `_fold_record_tokens()` | `bases`, `virtual_bases` | **yes** |
 | `diff_stdlib_impl.py` | `_public_by_value_type_closure()` | `bases`, `virtual_bases` | **yes** |
 | `surface_graph.py` | `_build_type_refs()` | `bases`, `virtual_bases` (separate lines) | no |
-| `internal_leak.py` | `_enqueue_record_children()` | `bases`, `virtual_bases` (separate lines) | no |
+| `compare/internal_leak.py` | `_enqueue_record_children()` | `bases`, `virtual_bases` (separate lines) | no |
 | `export_surface.py` | line 1167's unresolved-type scan | `bases`, `virtual_bases` | no |
 | `surface.py` | two public-closure walks (lines 632, 782) | `bases`, `virtual_bases` | no |
 | `type_reachability.py` | stdlib-reference text scan (lines 873-874) | `bases`, `virtual_bases` | no |
@@ -2104,7 +2104,7 @@ together) — not a new mechanism, the same one with a second field name.
 Every one of the nine readers named above reads `bases`/
 `virtual_bases` together in one loop body (`contract_evidence_collect.py`,
 `diff_time64.py`, `diff_stdlib_impl.py`, `diff_cxx_rules`'s base-walk
-helpers, `internal_leak.py`, `export_surface.py`, both `surface.py`
+helpers, `compare/internal_leak.py`, `export_surface.py`, both `surface.py`
 walks, `type_reachability.py`, `dumper_scoping.py`) and migrates both
 fields in the same pass, not
 `bases` now and `virtual_bases` in a still-later phase — the provenance
@@ -2245,7 +2245,7 @@ widening to "only inside a detector module" silently abandoned the
 repository-wide scope the reader-migration check above (lines 668–682)
 already commits to, which is exactly the contradiction review caught:
 `surface.py`/`export_surface.py`/`dumper_scoping.py`/`contract_evidence_
-collect.py`/`internal_leak.py`/`type_reachability.py` are real,
+collect.py`/`compare/internal_leak.py`/`type_reachability.py` are real,
 documented semantic readers of `bases`/`vtable`/`virtual_bases`/
 `is_va_list` — the whole reason they're on this phase's own migration
 list and initial known-failures baseline — but none of them is a
@@ -7196,7 +7196,7 @@ respectively, with headroom under the cap.
 no-growth ledger, not the AI-readiness `file-size` cap above -- needed a
 different fix, not a module split.** Six already-`no_growth`-tracked files
 (`contract_evidence_collect.py`/`dumper_scoping.py`/`export_surface.py`/
-`internal_leak.py`/`surface.py`/`type_reachability.py`) each grew 2-9 lines
+`compare/internal_leak.py`/`surface.py`/`type_reachability.py`) each grew 2-9 lines
 past their frozen adoption baseline purely from the two-line
 `bases = resolved_fact_value(...)` / `virtual_bases = resolved_fact_value
 (...)` local-variable pattern this migration otherwise uses everywhere --
@@ -12532,7 +12532,7 @@ sibling:
   `model.graph_facts`/`graph_identity`/`graph_vocabulary` directly." **Not
   the "five named readers" the very next, separate row lists** (Codex
   review on PR #958, catching a conflation in an earlier revision of this
-  same correction) — those five (`internal_leak.py`, `buildsource/
+  same correction) — those five (`compare/internal_leak.py`, `buildsource/
   crosscheck.py`, `buildsource/evidence_report.py`, `evidence_depth.py`,
   `cli_graph.py`) are that other row's own `BuildSourcePack.source_graph`
   →`AbiSnapshot.surface_graph` migration, a different attribute path on a
@@ -12552,7 +12552,7 @@ sibling:
   `buildsource/graph_impact.py`, `buildsource/macro_graph.py`,
   `buildsource/template_graph.py`, `buildsource/type_graph.py`,
   `buildsource/virtual_dispatch_graph.py`, `impact/consumer_graph.py`,
-  `impact/use_cases.py`, and `internal_leak.py` (also one of the *other*
+  `impact/use_cases.py`, and `compare/internal_leak.py` (also one of the *other*
   row's five, since one module can need both migrations independently).
 - **A third, pre-existing graph-shaped module already answers a
   public-surface question independently, and a first draft of this phase
@@ -13237,7 +13237,7 @@ sibling:
   existing readers, not on a type-contract decision a planning document can
   make in the abstract. Second: moving the L5 graph's attachment point off
   `BuildSourcePack.source_graph` has real existing readers —
-  `internal_leak.py`, `buildsource/cross_source_checks.py`, `buildsource/
+  `compare/internal_leak.py`, `buildsource/cross_source_checks.py`, `buildsource/
   evidence_report.py`, `evidence_depth.py`, and `cli_graph.py` among them —
   each would observe
   no graph at all the moment the L5 builder stops writing to the old
@@ -13325,7 +13325,7 @@ sibling:
   triggering `resolve_public_surface()`'s own designed fallback correctly;
   `build_source.source_graph` is decoded from its own nested key exactly as
   it always was, unaffected, so the five pre-existing L5 readers
-  (`internal_leak.py`/`cross_source_checks.py`/`evidence_report.py`/
+  (`compare/internal_leak.py`/`cross_source_checks.py`/`evidence_report.py`/
   `evidence_depth.py`/`cli_graph.py`) see the identical graph they always
   did. The "one object, two attribute paths" guarantee is therefore scoped
   to what this phase's own assembly step actually produces — a freshly
@@ -17509,7 +17509,7 @@ not new design.
   every caller reads them from `model/graph.py` instead of the re-export
   shim. **A second, separate row for the same phase**: `BuildSourcePack.
   source_graph`'s own live-alias mechanism is removed once the five named
-  readers (`internal_leak.py`, `buildsource/cross_source_checks.py`, `buildsource/
+  readers (`compare/internal_leak.py`, `buildsource/cross_source_checks.py`, `buildsource/
   evidence_report.py`, `evidence_depth.py`, `cli_graph.py`) are migrated to
   read `AbiSnapshot.surface_graph` directly — a review round correctly
   found the alias's own Phase 3 text named this migration as "real, scoped,
@@ -17528,7 +17528,7 @@ not new design.
 
   **Five-reader migration landed, with a security correction to the
   preference order this row's own text originally specified (PR #1216
-  review).** All five named readers (`internal_leak.py`,
+  review).** All five named readers (`compare/internal_leak.py`,
   `buildsource/cross_source_checks.py`'s two call sites,
   `buildsource/evidence_report.py`, `evidence_depth.py`, `cli_graph.py`) now
   read `graph = (snap.build_source.source_graph if snap.build_source else
@@ -17603,7 +17603,7 @@ not new design.
   **Fourth review round: two more corrections, plus a real root-cause fix
   this time rather than another per-call-site patch.** (1) The
   coverage-row-aware guard above had only been applied to
-  `_side_source_graph`/`_l5_payload_empty` -- `internal_leak.py`'s
+  `_side_source_graph`/`_l5_payload_empty` -- `compare/internal_leak.py`'s
   `compute_call_graph_leak_paths` and `cross_source_checks.py`'s two checks
   (`_check_private_header_leak`, `_check_public_to_internal_dependency`)
   still used the unguarded `build_source.source_graph or surface_graph`
@@ -17636,9 +17636,9 @@ not new design.
   a genuine `SourceGraphSummary` for the fallback uniformly (an
   `isinstance` check, not a blind cast), accepting a small, deliberate loss
   of typed-API flexibility for `cross_source_checks.py`'s/
-  `internal_leak.py`'s own narrower needs (protocol members only) in
+  `compare/internal_leak.py`'s own narrower needs (protocol members only) in
   exchange for one call-site-independent, uniformly-safe contract.
-  Regression tests added: `internal_leak.py`/`cross_source_checks.py` both
+  Regression tests added: `compare/internal_leak.py`/`cross_source_checks.py` both
   now have a depth-exclusion test alongside their existing
   "prefers-the-richer-graph" one, `_mark_layers_not_collected` has a direct
   unit test for the missing-row-insertion fix, and

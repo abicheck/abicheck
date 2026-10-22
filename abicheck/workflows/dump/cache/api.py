@@ -24,7 +24,7 @@ from typing import TYPE_CHECKING
 
 from ....buildsource.source_inputs import extraction_read_source_inputs
 from ....extract.binary_identity import stamp_binary_identity
-from ...cache_probe import refuse_dump_while_probing
+from ...cache_probe import refuse_dump_while_probing, take_probed_miss
 from .finished import FINISHED_SUBDIR, take_pending
 from .key import (
     _cache_key,
@@ -393,18 +393,20 @@ def cached_run_dump(
             _stamp_cache_hit(done, path)
             finisher.applied = True
             return done
+    # A probe that just missed this key (the parent, before forking this
+    # side) already paid the lookup; reading again would miss again.
+    probed_miss = bool(initial_key) and take_probed_miss(initial_key)
     # With a finisher, a finished-tier miss re-extracts instead of finishing
     # the raw entry: re-scoping a cache-reloaded snapshot can differ from
     # scoping the fresh extraction (docs/contribute/known-gaps/rescoping-a-
     # cache-reloaded-snapshot-...), and the finished tier must hold the cold
     # result. One extra extraction per operand, once; every later run hits.
-    cached = (
-        _lookup_key(initial_key, path) if initial_key and finisher is None else None
-    )
+    use_raw = bool(initial_key) and not probed_miss and finisher is None
+    cached = _lookup_key(initial_key, path) if use_raw else None
     if cached is not None:
         _stamp_cache_hit(cached, path)
         return _finish_and_store(cached, finisher, finished_key, req)
-    refuse_dump_while_probing()
+    refuse_dump_while_probing(initial_key)
     snap = _dump_uncached()
     # Re-derive after the dump: a tool that appeared or changed mid-run must
     # miss, not store under the key it was looked up with.

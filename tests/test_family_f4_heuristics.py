@@ -28,7 +28,7 @@ harness stays the oracle.
 
 **Inventory** (``_family_f4_inventory``): an AST scan of the decision
 modules (``compare/``, ``policy/``, ``diff_*``, ``detectors*``,
-``checker*``, ``classify*`` and the flat-root ``internal_leak*``) for regex,
+``checker*``, ``classify*``) for regex,
 affix, fnmatch and name-vocabulary sites, keyed
 ``module::qualname::kind:pattern``. Each key must resolve to a registered
 heuristic (``_family_f4_resolve``) or carry an exemption row in
@@ -57,9 +57,9 @@ from _family_f4_raise_scan import raise_violations, raising_declarations_reached
 from _family_f4_registry import COVERED, EXEMPTION_REASONS, HEURISTICS
 from _family_f4_resolve import resolve_site
 
+import abicheck.compare.internal_leak_names as internal_leak_mod
 import abicheck.diff_namespaces as diff_namespaces_mod
 import abicheck.diff_serialization as diff_serialization_mod
-import abicheck.internal_leak as internal_leak_mod
 from abicheck.compare.enum_sentinel import ENUM_SENTINEL
 from abicheck.model.name_heuristics import (
     LazyFactInput,

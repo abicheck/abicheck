@@ -206,7 +206,7 @@ def select_preferred_graph_path(
 ) -> list[GraphEdge]:
     """Pick the strongest candidate proof path among *paths* (ADR-046 D6).
 
-    Unlike :func:`~abicheck.internal_leak.select_preferred_path`'s plain
+    Unlike :func:`~abicheck.compare.internal_leak_paths.select_preferred_path`'s plain
     ``list[str]`` layout-walk paths, a structured ``list[GraphEdge]`` path
     carries per-edge confidence, fact-producer count (ADR-046 D2), and —
     via each hop's node ``visibility`` attr — public/private surface
@@ -220,7 +220,7 @@ def select_preferred_graph_path(
     the residual case this collapses into) is still left for a future slice.
 
     Ties within a tier keep the shortest path (fewest hops), matching
-    :func:`~abicheck.internal_leak.select_preferred_path`'s own tie-break.
+    :func:`~abicheck.compare.internal_leak_paths.select_preferred_path`'s own tie-break.
     Returns ``[]`` for an empty *paths* list; a single-candidate list is
     returned unchanged with no tier computation (the common case today, same
     as before this function existed).
@@ -270,7 +270,7 @@ def attach_impact_metadata(
     *alternative_paths* (ADR-046 D6, G29 Phase 2 follow-up): the runner-up
     candidates *path* was preferred over, when the caller had more than one
     (e.g. via :func:`select_preferred_graph_path`). Capped at 3, matching
-    :func:`~abicheck.internal_leak._build_leak_change`'s own "+N more paths"
+    :func:`~abicheck.compare.internal_leak._build_leak_change`'s own "+N more paths"
     cap — ``change.impact_discarded_path_count`` records how many more were
     dropped beyond that cap.
     """

@@ -70,6 +70,7 @@ __all__ = [
     "compare_members_in_processes",
     "member_processes_apply",
     "member_processes_enabled",
+    "member_processes_possible",
 ]
 
 #: ``workflows.release_members.ReleaseMemberContext`` -- not imported, even
@@ -85,17 +86,18 @@ def member_processes_enabled() -> bool:
     return env_flag("ABICHECK_MEMBER_PROCESSES")
 
 
-def member_processes_apply(pool_size: int) -> bool:
-    """Whether a release fan-out of *pool_size* workers runs in processes."""
+def member_processes_possible() -> bool:
+    """Whether a pooled release fan-out would run in processes -- what the
+    worker plan sizes for (processes are not capped by the GIL)."""
     from ..process_resources import gil_enabled
     from .side_isolation import fork_is_safe
 
-    return (
-        pool_size > 1
-        and member_processes_enabled()
-        and gil_enabled()
-        and fork_is_safe()
-    )
+    return member_processes_enabled() and gil_enabled() and fork_is_safe()
+
+
+def member_processes_apply(pool_size: int) -> bool:
+    """Whether a release fan-out of *pool_size* workers runs in processes."""
+    return pool_size > 1 and member_processes_possible()
 
 
 class _BufferedTextReporter:

@@ -44,7 +44,14 @@ severity, or a CLI flag is in the wrong layer.
 - `layout_visibility.py` — `layout_proven_invisible()` (ADR-061 decision 2A,
   moved here from `policy/`): whether consumers provably cannot see a type's
   layout. A model-only proof, and the confirming fact of the
-  `internal_namespace` heuristic that `internal_leak.py` consults.
+  `internal_namespace` heuristic that `compare/internal_leak.py` consults.
+- `internal_leak.py` / `internal_leak_paths.py` / `internal_leak_graph.py` /
+  `internal_leak_names.py` — the internal-namespace leak rule (moved from the
+  root `internal_leak.py`, no re-export). `internal_leak.py` holds the
+  detectors (`detect_internal_leaks`, `detect_call_graph_leaks`,
+  `detect_leak_findings`); `internal_leak_paths.py` the layout and type-graph
+  walk; `internal_leak_graph.py` the call-graph walk; `internal_leak_names.py`
+  subject classification and the two name heuristics.
 - `call_graph_walk.py` — `TraversalPolicy`/`CALL_GRAPH_TRAVERSAL_POLICY`,
   `consumer_compiled_reachability()` and `reconstruct_path()` (ADR-046 D5): the
   restricted BFS over a `SourceGraphSummary` that the call-graph leak overlay,

@@ -31,14 +31,14 @@ from __future__ import annotations
 import pytest
 
 from abicheck.checker_policy import ChangeKind
-from abicheck.dwarf_metadata import DwarfMetadata, FieldInfo, StructLayout
-from abicheck.internal_leak import (
-    _build_qualified_index,
+from abicheck.compare.internal_leak import detect_internal_leaks
+from abicheck.compare.internal_leak_names import _build_qualified_index
+from abicheck.compare.internal_leak_paths import (
     _build_type_map,
     _seed_queue_from_public_types,
     compute_leak_paths,
-    detect_internal_leaks,
 )
+from abicheck.dwarf_metadata import DwarfMetadata, FieldInfo, StructLayout
 from abicheck.model import (
     AbiSnapshot,
     Function,
@@ -106,7 +106,10 @@ def _struct_layout(
 def _privatize(*snaps: AbiSnapshot) -> None:
     """Stamp every internal-namespace record as defined in a private header:
     the structural proof pointer-only leniency requires (decision 2A)."""
-    from abicheck.internal_leak import DEFAULT_INTERNAL_NAMESPACES, is_internal_type
+    from abicheck.compare.internal_namespaces import (
+        DEFAULT_INTERNAL_NAMESPACES,
+        is_internal_type,
+    )
     from abicheck.model.vocabulary import ScopeOrigin
 
     for snap in snaps:

@@ -236,9 +236,9 @@ def _validate_selectors(
         )
 
 
-# Matches abicheck/internal_leak.py's own `_TEMPLATE_ARG_RE`/
+# Matches abicheck/compare/internal_leak.py's own `_TEMPLATE_ARG_RE`/
 # `_strip_template_args` exactly, but is not imported from there:
-# internal_leak.py pulls in `checker_types.py`/`buildsource/*` transitively,
+# compare/internal_leak.py pulls in `checker_types.py`/`buildsource/*` transitively,
 # and this module's own zero-dependency leaf contract (ADR-063 D10 — see the
 # module docstring) forbids that edge. Ten lines of self-contained regex
 # logic is a cheaper, more honest duplication than an import that would
