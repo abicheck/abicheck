@@ -302,29 +302,41 @@ def copy_of_canonical_form(value: Any) -> Any:
     return value
 
 
+#: Exact leaf types that are their own canonical form (``float`` is not:
+#: `_canonical_number` rewrites some of them).
+_SELF_CANONICAL_LEAVES: frozenset[type] = frozenset({str, int, bool, type(None)})
+
+
 def _is_canonical_container(value: Any) -> bool:
     if type(value) is dict:
+        # Inline scan: cheaper than C-level helpers for the small dicts that
+        # dominate a document. A dict cannot repeat a key, so strictly
+        # ascending is "equal to its own sort".
         previous: str | None = None
-        for key, item in value.items():
+        for key in value:
             if type(key) is not str or (previous is not None and not previous < key):
                 return False
             previous = key
-            item_type = type(item)
-            if (
-                item_type is str
-                or item_type is int
-                or item_type is bool
-                or item is None
-            ):
-                continue
-            if not _is_canonical_value(item):
-                return False
+        items: Any = value.values()
+    else:
+        items = value
+    leaves = _SELF_CANONICAL_LEAVES
+    if leaves.issuperset(map(type, items)):
         return True
-    for item in value:
+    for item in items:
         item_type = type(item)
-        if item_type is str or item_type is int or item_type is bool or item is None:
+        if item_type in leaves:
             continue
-        if not _is_canonical_value(item):
+        if item_type is dict or item_type is list:
+            if not _is_canonical_container(item):
+                return False
+        elif item_type is float:
+            # `_canonical_number` rewrites zero and integral floats to `int`
+            # and rejects non-finite ones, so only a finite, non-integral
+            # float is its own canonical form.
+            if not (math.isfinite(item) and not item.is_integer()):
+                return False
+        else:
             return False
     return True
 
@@ -334,11 +346,8 @@ def _is_canonical_value(value: Any) -> bool:
     if value_type is dict or value_type is list:
         return _is_canonical_container(value)
     if value_type is float:
-        # `_canonical_number` rewrites zero and integral floats to `int` and
-        # rejects non-finite ones, so only a finite, non-integral float is
-        # its own canonical form.
         return math.isfinite(value) and not value.is_integer()
-    return value_type is str or value_type is int or value_type is bool or value is None
+    return value_type in _SELF_CANONICAL_LEAVES
 
 
 def is_canonical_tree(value: Any) -> bool:
@@ -377,7 +386,7 @@ def canonical_form_shared(value: Any) -> Any:
     walk where `canonical_form` rebuilt the whole document.
     """
     value_type = type(value)
-    if value_type is str or value_type is int or value_type is bool or value is None:
+    if value_type in _SELF_CANONICAL_LEAVES:
         return value
     if value_type is dict:
         previous: str | None = None
@@ -390,9 +399,15 @@ def canonical_form_shared(value: Any) -> Any:
             previous = key
         if not ordered:
             return {k: canonical_form_shared(value[k]) for k in sorted(value)}
+        leaves = _SELF_CANONICAL_LEAVES
+        # All-leaf dicts (fact dicts, most small records) are decided by one
+        # C-level type scan.
+        if leaves.issuperset(map(type, value.values())):
+            return value
         rebuilt: dict[str, Any] | None = None
         for key, item in value.items():
-            new_item = canonical_form_shared(item)
+            # A self-canonical leaf is returned unchanged, so it needs no call.
+            new_item = item if type(item) in leaves else canonical_form_shared(item)
             if rebuilt is None and new_item is not item:
                 rebuilt = {}
                 for done_key, done_item in value.items():
@@ -403,9 +418,12 @@ def canonical_form_shared(value: Any) -> Any:
                 rebuilt[key] = new_item
         return value if rebuilt is None else rebuilt
     if value_type is list:
+        leaves = _SELF_CANONICAL_LEAVES
+        if leaves.issuperset(map(type, value)):
+            return value
         new_list: list[Any] | None = None
         for index, item in enumerate(value):
-            new_item = canonical_form_shared(item)
+            new_item = item if type(item) in leaves else canonical_form_shared(item)
             if new_list is None and new_item is not item:
                 new_list = list(value[:index])
             if new_list is not None:
