@@ -577,13 +577,17 @@ def test_reference_mode_runs_every_pool_inline_and_matches_threads_8(
     with monkeypatch.context() as mp:
         mp.delenv("ABICHECK_MAX_THREADS", raising=False)
         mp.setenv(REFERENCE_MODE_ENV_VAR, "1")
+        # Members stay in this process, as in the pooled run: a forked member
+        # would build its pools in a child the spy cannot see.
+        mp.setenv("ABICHECK_MEMBER_PROCESSES", "0")
         mp.setattr(os, "cpu_count", lambda: 8)
         spy.install(mp)
         reference = _run(str(old), str(new))
     assert parallel_grants and max(parallel_grants) > 1, parallel_grants
     # The pooled run borrowed >1 thread; the reference run borrowed none --
-    # no pool at all on the sequential member path, and any pool created on
-    # the way (a nested one) was granted zero threads and ran inline.
+    # any pool created on the way was granted zero threads and ran inline.
+    # The reference run must have built a pool the spy saw, or ``all`` is vacuous.
+    assert spy.grants, "reference run built no observable pool"
     assert all(g == 0 for g in spy.grants), spy.grants
     _assert_same(parallel, reference, "release.reference_mode")
 
