@@ -15,8 +15,7 @@ from abicheck import report_classifications, report_summary as _report_summary_m
 from abicheck.checker import Change, ChangeKind, DiffResult
 from abicheck.contract_relevance_types import ContractRelevance
 from abicheck.policy.classification import evidence_status_for_result, impact_for
-from abicheck.policy.evaluate import effective_kind_sets, evaluate
-from abicheck.policy.severity import SeverityConfig, compute_exit_code
+from abicheck.policy.evaluate import evaluate
 from abicheck.report.markdown_compute import _not_evaluated_mapping
 from abicheck.report.not_evaluated_section import compute_not_evaluated
 from abicheck.report.policy_facts import (
@@ -24,7 +23,6 @@ from abicheck.report.policy_facts import (
     classification_for,
     compatibility_metrics,
     evidence_status_of,
-    gate_exit_code_for,
     impact_text_for,
     reclassify_rules_in_effect,
 )
@@ -80,22 +78,6 @@ def test_reclassify_rules_in_effect_drops_only_expired_rules() -> None:
     active = reclassify_rules_in_effect([live, stale], date(2026, 1, 1))
 
     assert active == [live]
-
-
-def test_gate_exit_code_for_scores_the_run_under_the_given_severity() -> None:
-    result = _result(_removed("f"))
-    config = SeverityConfig()
-
-    exit_code = gate_exit_code_for(result, config)
-
-    assert exit_code == compute_exit_code(
-        result.changes,
-        config,
-        policy=result.policy,
-        kind_sets=effective_kind_sets(result),
-        policy_file=result.policy_file,
-    )
-    assert exit_code > 0
 
 
 def test_reexports_are_the_owners_objects() -> None:

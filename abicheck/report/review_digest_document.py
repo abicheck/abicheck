@@ -42,7 +42,7 @@ import abicheck.reporter_markdown as _reporter_markdown_module
 
 from .disposition_audit import DispositionAudit
 from .document import ReportDocument
-from .envelope import ReportEnvelope, resolved_document
+from .envelope import ReportEnvelope
 from .render_review import (
     ImpactedSymbol,
     ReviewDigest,
@@ -68,46 +68,23 @@ def _reporter_markdown() -> Any:
 def build_review_digest_document(
     result: Any,
     *,
-    severity_config: Any = None,
-    envelope: ReportEnvelope | None = None,
+    envelope: ReportEnvelope,
 ) -> ReportDocument:
     """The ``-o review=...`` digest as a ``ReportDocument``.
 
-    *severity_config* is forwarded to :func:`~abicheck.reporter_markdown.
-    compute_review_digest` unchanged -- see that function's own docstring
-    for what it drives (the merge-effect phrase).
-
-    *envelope* (ADR-061 gap C), when given, is the completed
-    ``ReportEnvelope`` this render projects. Its shared ``report_mode="full"``
-    document supplies ``disposition_audit`` verbatim instead of a second
-    ``compute_disposition_audit`` over the same ledger (calling it twice
-    cannot disagree, but building through the one shared choke point is the
-    point). A direct caller with no envelope builds it itself. The envelope
-    also carries the
-    already-resolved per-finding verdicts the digest's "impacted symbols"
-    list used to re-resolve through its own ``report_findings_for`` call --
-    the same canonical primitive, but a second resolution of a decision this
-    render had already made -- and its already-resolved ``GateDecision``,
-    which the merge-effect phrase now projects instead of a second
-    ``compute_exit_code`` call of its own (CodeRabbit review).
+    *envelope* is the completed ``ReportEnvelope`` this render projects
+    (ADR-061 gap C). Its shared ``report_mode="full"`` document supplies the
+    disposition audit, review groups, result counts and exit code, and the
+    envelope itself supplies the gate and per-finding verdicts; see
+    :func:`~abicheck.reporter_markdown.compute_review_digest` for what each
+    one drives.
     """
-    shared_document = resolved_document(envelope)
-    shared_disposition_audit = (
-        DispositionAudit.from_dict(
-            cast("Mapping[str, Any]", shared_document.to_mapping()["disposition_audit"])
-        )
-        if shared_document is not None
-        else None
-    )
-    shared_mapping = shared_document.to_mapping() if shared_document is not None else {}
+    shared_mapping = envelope.document.to_mapping()
     exit_value = shared_mapping.get("exit")
     exit_code = exit_value.get("code") if isinstance(exit_value, dict) else None
     digest = _reporter_markdown().compute_review_digest(
         result,
-        severity_config=severity_config,
-        disposition_audit=shared_disposition_audit,
-        findings=None if envelope is None else envelope.findings,
-        gate=None if envelope is None else envelope.gate,
+        envelope=envelope,
         review_groups=cast("Any", shared_mapping.get("review_groups")),
         result_counts=cast("Any", shared_mapping.get("result_counts")),
         gate_exit_code=cast("Any", exit_code),
