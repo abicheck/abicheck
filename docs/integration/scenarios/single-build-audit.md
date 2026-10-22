@@ -110,6 +110,33 @@ exception is stale. The `-H` set is the public contract: a declaration
 reached only through `#include` from a header outside it is still reported,
 but its description says the library may not owe that export.
 
+#### The whole include directory
+
+`-H` takes the whole include directory, so you need not list headers one by
+one. A vendor tree often also ships headers that cannot share one
+translation unit with the rest, or that belong to other packages. Leave
+them out with `--exclude-header`. Excluded headers are never parsed, and the report
+records which were left out. For Intel MKL installed from conda-forge,
+whose `include/` also holds FFTW2/FFTW3 wrappers that redefine each other's
+typedefs, plus the hwloc and ICU headers of other packages:
+
+```bash
+abicheck compare --no-baseline lib/libmkl_rt.so.3 \
+    -H include/ \
+    --exclude-header 'fftw/*' --exclude-header '*mkl_cdft*' \
+    --exclude-header '*blacs*' --exclude-header '*scalapack*' \
+    --exclude-header 'hwloc/*' --exclude-header 'unicode/*' \
+    --policy declared-exported-policy.yml --severity-preset default \
+    --suppress declared-exported-exceptions.yml
+```
+
+The first four patterns are required: without them the parse fails, and
+the error names `--exclude-header` and the headers involved. The `hwloc/*`
+and `unicode/*` patterns are optional, but they keep findings about other
+packages out of the report. They also keep the run fast. Headers that fail
+on their own are dropped automatically, but each one costs extra parses to
+isolate.
+
 #### One job per build variant
 
 Run the gate once per variant the product ships (lp64/ilp64, threading
@@ -170,31 +197,6 @@ three differences:
 Only archives whose members are all ELF objects for one target are read.
 Thin archives, Mach-O or COFF/`.lib` members, and LLVM-bitcode members are
 refused with a reason. Two-sided `compare` and `dump` still reject archives.
-
-`-H` takes the whole include directory, so you need not list headers one by
-one. A vendor tree often also ships headers that cannot share one
-translation unit with the rest, or that belong to other packages. Leave
-them out with `--exclude-header`. Excluded headers are never parsed, and the report
-records which were left out. For Intel MKL installed from conda-forge,
-whose `include/` also holds FFTW2/FFTW3 wrappers that redefine each other's
-typedefs, plus the hwloc and ICU headers of other packages:
-
-```bash
-abicheck compare --no-baseline lib/libmkl_rt.so.3 \
-    -H include/ --public-header-dir include/ \
-    --exclude-header 'fftw/*' --exclude-header '*mkl_cdft*' \
-    --exclude-header '*blacs*' --exclude-header '*scalapack*' \
-    --exclude-header 'hwloc/*' --exclude-header 'unicode/*' \
-    --policy declared-exported-policy.yml --severity-preset default \
-    --suppress declared-exported-exceptions.yml
-```
-
-The first four patterns are required: without them the parse fails, and
-the error names `--exclude-header` and the headers involved. The `hwloc/*`
-and `unicode/*` patterns are optional, but they keep findings about other
-packages out of the report. They also keep the run fast. Headers that fail
-on their own are dropped automatically, but each one costs extra parses to
-isolate.
 
 ## The Action: `mode: compare`, no baseline
 
