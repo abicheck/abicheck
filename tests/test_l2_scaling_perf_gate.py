@@ -136,33 +136,60 @@ class TestGate:
     def test_exponent_over_budget_fails(self):
         pts = _points((1, 3, 5, 9), lambda n: 1.0 + 0.2 * (n - 1) ** 2)
         exponent, failures = gate_mod.gate(
-            "libraries", pts, max_exponent=1.5, max_rss_mb=1024
+            "libraries", pts, max_exponent=1.5, max_memory_mb=1024
         )
         assert exponent == pytest.approx(2.0)
         assert any("exceeds budget" in f for f in failures)
 
     def test_linear_within_budget_passes(self):
         pts = _points((1, 3, 5, 9), lambda n: 1.0 + 0.2 * (n - 1))
-        _, failures = gate_mod.gate("libraries", pts, max_exponent=1.5, max_rss_mb=1024)
+        _, failures = gate_mod.gate(
+            "libraries", pts, max_exponent=1.5, max_memory_mb=1024
+        )
         assert failures == []
 
     def test_unfittable_sweep_fails(self):
         pts = _points((1, 3, 5, 9), lambda n: 1.0)
-        _, failures = gate_mod.gate("headers", pts, max_exponent=1.5, max_rss_mb=1024)
+        _, failures = gate_mod.gate(
+            "headers", pts, max_exponent=1.5, max_memory_mb=1024
+        )
         assert failures and "cannot fit" in failures[0]
 
-    def test_rss_ceiling_is_enforced_per_point(self):
+    def test_rss_sum_is_the_fallback_only_without_pss(self):
         pts = _points((1, 3, 5, 9), lambda n: 1.0 + 0.2 * (n - 1))
         pts[2].peak_rss_mb = 2000.0
-        _, failures = gate_mod.gate("libraries", pts, max_exponent=1.5, max_rss_mb=1024)
+        _, failures = gate_mod.gate(
+            "libraries", pts, max_exponent=1.5, max_memory_mb=1024
+        )
         assert failures == [
-            "libraries n=5: peak process-tree RSS 2000 MB exceeds 1024 MB"
+            "libraries n=5: peak process-tree RSS (PSS unavailable) 2000 MB "
+            "exceeds 1024 MB"
+        ]
+
+    def test_pss_is_gated_and_a_cow_inflated_rss_sum_is_not(self):
+        pts = _points((1, 3, 5, 9), lambda n: 1.0 + 0.2 * (n - 1))
+        for p in pts:
+            p.peak_rss_mb, p.peak_pss_mb = 1250.0, 600.0
+        _, failures = gate_mod.gate(
+            "libraries", pts, max_exponent=1.5, max_memory_mb=1024
+        )
+        assert failures == []
+
+    @pytest.mark.parametrize("pss", [1024.5, 1100.0, 4096.0])
+    def test_pss_over_ceiling_fails(self, pss):
+        pts = _points((1, 3, 5, 9), lambda n: 1.0 + 0.2 * (n - 1))
+        pts[3].peak_rss_mb, pts[3].peak_pss_mb = 900.0, pss
+        _, failures = gate_mod.gate(
+            "libraries", pts, max_exponent=1.5, max_memory_mb=1024
+        )
+        assert failures == [
+            f"libraries n=9: peak process-tree PSS {pss:.0f} MB exceeds 1024 MB"
         ]
 
     def test_correctness_problem_fails_even_when_fast(self):
         pts = _points((1, 3, 5, 9), lambda n: 1.0 + 0.2 * (n - 1))
         pts[1].problems.append("compared 2 libraries, expected 3")
-        _, failures = gate_mod.gate("libraries", pts, max_exponent=9, max_rss_mb=1e9)
+        _, failures = gate_mod.gate("libraries", pts, max_exponent=9, max_memory_mb=1e9)
         assert failures == ["libraries n=3: compared 2 libraries, expected 3"]
 
 
@@ -244,3 +271,57 @@ def test_pr_perf_job_runs_the_scaling_gate():
     job = workflow.split("  l2-cli-perf:", 1)[1].split("\n  l2-cli-extended:", 1)[0]
     assert "scripts/check_l2_scaling_perf.py" in job
     assert "--require-toolchain" in job.split("check_l2_scaling_perf.py", 1)[1]
+
+
+_LINUX_PSS = sys.platform == "linux" and Path("/proc/self/smaps_rollup").is_file()
+
+
+@pytest.mark.skipif(not _LINUX_PSS, reason="needs /proc/<pid>/smaps_rollup")
+@pytest.mark.parametrize(("children", "dirty"), [(3, False), (3, True), (1, True)])
+def test_pss_sampler_counts_shared_cow_pages_once(children, dirty):
+    """Real forks: oracle is the known allocation, not the sampler.
+
+    A parent touches ``MB`` of private memory and forks *children* that either
+    leave it shared (copy-on-write) or rewrite it (a real copy each). The RSS
+    sum sees ``(children + 1) * MB`` either way; the PSS sum must see ~``MB``
+    for shared pages and ~``(children + 1) * MB`` for copied ones -- so the
+    gated metric drops the COW overcount yet still catches real duplication.
+    """
+    import textwrap
+
+    pss_mod = _load("perf_tree_pss")
+    receipt = _load("perf_receipt")
+    mb = 96
+    code = textwrap.dedent(f"""
+        import os, time
+        buf = bytearray({mb} * 1024 * 1024)
+        for i in range(0, len(buf), 4096): buf[i] = 1
+        kids = []
+        for _ in range({children}):
+            pid = os.fork()
+            if pid == 0:
+                if {dirty}:
+                    for i in range(0, len(buf), 4096): buf[i] = 2
+                time.sleep(1.5)
+                os._exit(0)
+            kids.append(pid)
+        for pid in kids: os.waitpid(pid, 0)
+    """)
+    samplers = []
+
+    def factory(interval):
+        samplers.append(pss_mod.TreePssSampler(interval))
+        return samplers[-1]
+
+    run = receipt.run_measured([sys.executable, "-c", code], sample_rss=factory)
+    assert run.exit_code == 0, run.stderr
+    sampler = samplers[0]
+    assert sampler.pss_unavailable_reason is None
+    rss_mb = sampler.peak / 2**20
+    pss_mb = sampler.peak_pss / 2**20
+    procs = children + 1
+    assert rss_mb >= procs * mb * 0.9
+    if dirty:
+        assert pss_mb >= procs * mb * 0.85
+    else:
+        assert mb * 0.9 <= pss_mb <= mb * 1.6
