@@ -61,6 +61,7 @@ __all__ = [
     "EXTRACTOR_GENERATION",
     "GENERATION_DRIFT_NOTICE_MARKER",
     "RESOLVER_GENERATION",
+    "SOURCE_GENERATION",
     "reader_generation_compatibility",
     "ProducerIdentity",
     "ReaderCompatibility",
@@ -87,6 +88,14 @@ EXTRACTOR_GENERATION = 5
 #: Bump it when a graph derived from the same stored facts would change.
 RESOLVER_GENERATION = 2
 
+#: This build's source-tier semantics generation (ADR-062 D2 amendment): what
+#: the L4 source extractors and the L5 graph passes record for the same build
+#: tree. A separate axis from ``EXTRACTOR_GENERATION``, so an L4/L5 change does
+#: not drift an L2 (binary plus headers) package. Stamped only on a package
+#: that carries source-tier facts. Bump it when what those extractors or passes
+#: record for the same input changes.
+SOURCE_GENERATION = 3
+
 #: Substring every generation-drift notice carries, so a consumer can filter
 #: ``coverage_warnings`` for it.
 GENERATION_DRIFT_NOTICE_MARKER = "produced under different"
@@ -95,14 +104,20 @@ GENERATION_DRIFT_NOTICE_MARKER = "produced under different"
 #: drift.
 UNSTATED_GENERATION = 0
 
-#: ``(extractor_generation, resolver_generation)`` of the build that
-#: produced a package's facts.
-FactGenerations = tuple[int, int]
+#: ``(extractor_generation, resolver_generation, source_generation)`` of the
+#: build that produced a package's facts.
+FactGenerations = tuple[int, int, int]
 
 
-def this_build_generations() -> FactGenerations:
-    """The pair for facts this build extracts itself (read at call time)."""
-    return EXTRACTOR_GENERATION, RESOLVER_GENERATION
+def this_build_generations(*, carries_source_facts: bool = False) -> FactGenerations:
+    """The triple for facts this build extracts itself (read at call time).
+
+    The source axis is stamped only when the package carries source-tier (L4/L5)
+    facts. A package of binary-and-header facts alone leaves it unstated, so a
+    change to the source extractors cannot drift an L2 snapshot (ADR-062 D2).
+    """
+    source = SOURCE_GENERATION if carries_source_facts else UNSTATED_GENERATION
+    return EXTRACTOR_GENERATION, RESOLVER_GENERATION, source
 
 
 #: A version axis the package did not state, or stated unusably. Distinct from
@@ -342,6 +357,10 @@ class StorageVersions:
     #: Import provenance for an adapted legacy snapshot; 0/"" when native.
     source_schema_version: int = 0
     source_producer_generation: str = ""
+    #: Source-tier (L4/L5) semantics epoch, ADR-062 D2 amendment. Stated only
+    #: by a package that carries source-tier facts; 0 otherwise. Declared last so
+    #: that no existing positional argument changes its meaning.
+    source_generation: int = 0
 
     @classmethod
     def written_by_this_build(
@@ -362,12 +381,17 @@ class StorageVersions:
         older document carries without saying which build extracted them.
         Stamping this build's generations on imported facts would make the
         drift report silently claim they were extracted today."""
-        extractor, resolver = generations or (UNSTATED_GENERATION, UNSTATED_GENERATION)
+        extractor, resolver, source = generations or (
+            UNSTATED_GENERATION,
+            UNSTATED_GENERATION,
+            UNSTATED_GENERATION,
+        )
         return cls(
             section_schema_versions=section_schema_versions,
             source_schema_version=source_schema_version,
             extractor_generation=extractor,
             resolver_generation=resolver,
+            source_generation=source,
         )
 
     def __post_init__(self) -> None:
@@ -405,6 +429,7 @@ class StorageVersions:
             ("normalization_recipe", _stated_text),
             ("extractor_generation", _stated_count),
             ("resolver_generation", _stated_count),
+            ("source_generation", _stated_count),
             ("source_schema_version", _stated_count),
             ("source_producer_generation", _stated_text),
         ):
@@ -476,7 +501,11 @@ class StorageVersions:
         producer = self.producer.to_dict()
         if producer:
             out["producer"] = producer
-        for name in ("extractor_generation", "resolver_generation"):
+        for name in (
+            "extractor_generation",
+            "resolver_generation",
+            "source_generation",
+        ):
             count = _stated_count(getattr(self, name))
             if count:
                 out[name] = count
@@ -530,6 +559,7 @@ class StorageVersions:
             producer=ProducerIdentity.from_dict(data.get("producer", {})),
             extractor_generation=_stated_count(data.get("extractor_generation")),
             resolver_generation=_stated_count(data.get("resolver_generation")),
+            source_generation=_stated_count(data.get("source_generation")),
             # Absence is recorded as UNSTATED, never synthesized as this
             # reader's own version. Defaulting to `COMPARISON_CONTRACT_VERSION`
             # made a malformed or pre-versioned package claim to share this
@@ -573,6 +603,7 @@ def check_reader_compatibility(
     *,
     reader_extractor_generation: int | None = None,
     reader_resolver_generation: int | None = None,
+    reader_source_generation: int | None = None,
 ) -> ReaderCompatibility:
     """Decide whether this build may read a package, per ADR-062 D2.
 
@@ -680,6 +711,11 @@ def check_reader_compatibility(
                 reader_resolver_generation,
                 _stated_count(versions.resolver_generation),
             ),
+            (
+                "source",
+                reader_source_generation,
+                _stated_count(versions.source_generation),
+            ),
         )
         # A package that never recorded a generation (`0`, a legacy writer)
         # is unknown, not drifted: claiming a difference would be a guess.
@@ -715,4 +751,5 @@ def reader_generation_compatibility(versions: StorageVersions) -> ReaderCompatib
         versions,
         reader_extractor_generation=EXTRACTOR_GENERATION,
         reader_resolver_generation=RESOLVER_GENERATION,
+        reader_source_generation=SOURCE_GENERATION,
     )

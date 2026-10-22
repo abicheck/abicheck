@@ -208,7 +208,7 @@ def _import_baseline(generations):  # type: ignore[no-untyped-def]
 
 
 @pytest.mark.parametrize("importer", [_import_v1, _import_bundle, _import_baseline])
-@pytest.mark.parametrize("source", [None, (3, 7), "this_build"])
+@pytest.mark.parametrize("source", [None, (3, 7, 0), "this_build"])
 def test_importers_stamp_the_producers_generations_not_this_builds(
     reader_at_five: None, importer, source
 ) -> None:  # type: ignore[no-untyped-def]
@@ -216,10 +216,12 @@ def test_importers_stamp_the_producers_generations_not_this_builds(
         versioning.this_build_generations() if source == "this_build" else source
     )
     versions = importer(generations).versions
-    expected = {None: (0, 0), (3, 7): (3, 7), "this_build": (READER, READER)}[
-        source if source is None or source == "this_build" else (3, 7)
-    ]
+    expected = {
+        None: (0, 0),
+        (3, 7, 0): (3, 7),
+        "this_build": (READER, READER),
+    }[source if source is None or source == "this_build" else (3, 7, 0)]
     assert (versions.extractor_generation, versions.resolver_generation) == expected
     # Unknown provenance is never reported as drift against this build.
     drift = versioning.reader_generation_compatibility(versions).semantics_differ
-    assert drift is (source == (3, 7))
+    assert drift is (source == (3, 7, 0))

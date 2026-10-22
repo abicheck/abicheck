@@ -55,6 +55,7 @@ _FACT_KEYS = frozenset({"status", "value", "diagnostics", "producer"})
 #: decode hands over as-is, so it is never shared; a float is excluded
 #: because ``-0.0 == 0.0`` would merge two distinct values.
 _SCALAR_TYPES = frozenset({type(None), bool, int, str})
+_STR_ONLY = frozenset({str})
 
 
 def memo_fact(
@@ -85,7 +86,9 @@ def memo_fact(
                 diagnostics is None
                 or (
                     type(diagnostics) is list
-                    and all(type(item) is str for item in diagnostics)
+                    and (
+                        not diagnostics or _STR_ONLY.issuperset(map(type, diagnostics))
+                    )
                 )
             )
         ):
