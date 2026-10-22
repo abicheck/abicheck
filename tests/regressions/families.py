@@ -171,6 +171,21 @@ FAMILIES: dict[str, Family] = {
             ),
         ),
         Family(
+            key="F11",
+            title="Measurement judges what it claims to measure",
+            invariant=(
+                "A budget or gate on a sampled quantity judges the quantity its name "
+                "and documentation claim: a process tree's footprint is the sum of "
+                "proportional set sizes, not a sum of resident sizes that counts "
+                "shared pages once per process."
+            ),
+            harness_tests=(),
+            planned_reason=(
+                "One class so far; revisit when a second class has a budget read off "
+                "the wrong sampled quantity and the two share one mechanism."
+            ),
+        ),
+        Family(
             key="OTHER",
             title="CI, tooling, storage and trust-boundary surfaces",
             invariant=(
@@ -352,6 +367,7 @@ _F9 = (
     "concurrency.per_thread_state_in_inherited_context",
 )
 _F10 = ("concurrency.abandoned_child_outlives_failed_owner",)
+_F11 = ("measurement.forked_tree_rss_overstates_memory",)
 
 #: id -> reason it belongs to no shared family.
 OTHER_REASONS: dict[str, str] = {
@@ -393,6 +409,7 @@ for _key, _ids in (
     ("F8", _F8),
     ("F9", _F9),
     ("F10", _F10),
+    ("F11", _F11),
     ("OTHER", tuple(OTHER_REASONS)),
 ):
     for _id in _ids:
