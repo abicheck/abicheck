@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright The abicheck Authors
+
 """Consumer-compiled call-graph reachability walk (ADR-046 D5).
 
 The graph-only traversal behind the call-graph leak overlay and the
