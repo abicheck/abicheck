@@ -4995,6 +4995,19 @@ _additions_gated() {
   [[ "$_contribution" == "1" ]]
 }
 
+# The unused-rules review axis (`unused_rules: block` in a policy file): a
+# configured suppression/reclassify rule matched nothing. Two-sided compare
+# reports it as `exit.unused_rules_contribution` (and
+# `disposition_audit.unused_rules_review.gate_contribution`); the audit-only
+# shape as `exit_axes.unused_rules`. Structured report only, like the
+# sibling axes: a report without the key cannot say, which is "not gated".
+_unused_rules_gated() {
+  local _src _contribution
+  _src=$(_json_report_src)
+  _contribution=$(_report_query "$_src" unused_rules_contribution)
+  [[ "$_contribution" == "1" ]]
+}
+
 # Informational sibling (Codex review): the report recorded an incomplete
 # scope, gating or accepted under `--on-incomplete-scope warn`. Read from the
 # structured report only, like `_scope_gated`, and never a failure signal --
@@ -5694,7 +5707,7 @@ else
       if [[ "$_exit1_validity" != "ok" ]]; then
         VERDICT="ERROR"
         _error_annotation "abicheck exited 1 without a readable JSON result (report: ${_exit1_validity:-none located}), so no severity, coverage, assurance or scope gate can be attributed -- the invocation failed before producing one. See the command's own error output above."
-      elif _coverage_gated || _assurance_gated || _scope_gated || _additions_gated; then
+      elif _coverage_gated || _assurance_gated || _scope_gated || _additions_gated || _unused_rules_gated; then
         # `compare` shares exit 1 between up to four independent axes
         # (severity policy, ADR-049 contract coverage, P0.4 analysis
         # assurance), so the report's pre-fold `severity.exit_code` is
@@ -5712,6 +5725,9 @@ else
             if _scope_gated; then
               echo "::warning::abicheck also reports an incompletely checked comparison scope; see comparison_scope in the JSON report."
             fi
+            if _unused_rules_gated; then
+              echo "::warning::abicheck also reports policy rules that matched nothing under unused_rules: block; see disposition_audit.unused_rules_review in the JSON report."
+            fi
           elif _scope_gated; then
             # ADR-065 S2's completeness axis alone: an unchecked selected
             # member under --on-incomplete-scope block, or a run that
@@ -5723,6 +5739,9 @@ else
             if _assurance_gated; then
               echo "::warning::abicheck also reports incomplete analysis assurance under assurance.require_complete; see analysis_assurance in the JSON report."
             fi
+            if _unused_rules_gated; then
+              echo "::warning::abicheck also reports policy rules that matched nothing under unused_rules: block; see disposition_audit.unused_rules_review in the JSON report."
+            fi
           elif _assurance_gated; then
             # P0.4's orthogonal analysis-assurance axis alone (no
             # contract-coverage gap this run) -- same "not a break, not a
@@ -5732,13 +5751,25 @@ else
             if _additions_gated; then
               echo "::warning::abicheck also reports public additions not covered by an acknowledgment record; see disposition_audit.unacknowledged_additions_review in the JSON report."
             fi
-          else
+            if _unused_rules_gated; then
+              echo "::warning::abicheck also reports policy rules that matched nothing under unused_rules: block; see disposition_audit.unused_rules_review in the JSON report."
+            fi
+          elif _additions_gated; then
             # ADR-067 D6's additions-review axis alone: public additions no
             # acknowledgment record covers, under
             # acknowledgment.unacknowledged_additions: block. Policy
             # acceptance, not a break -- the additions keep their verdict.
             VERDICT="ADDITIONS_UNACKNOWLEDGED"
             echo "::warning::abicheck found public additions that no acknowledgment record covers, under acknowledgment.unacknowledged_additions: block (exit code 1). This is NOT an ABI/API break and NOT a severity-policy failure — the compatibility verdict is unchanged; see disposition_audit.unacknowledged_additions_review in the JSON report."
+            if _unused_rules_gated; then
+              echo "::warning::abicheck also reports policy rules that matched nothing under unused_rules: block; see disposition_audit.unused_rules_review in the JSON report."
+            fi
+          else
+            # The unused-rules review axis alone: a configured
+            # suppression/reclassify rule matched nothing under
+            # unused_rules: block. A policy-hygiene gate, not a break.
+            VERDICT="RULES_UNUSED"
+            echo "::warning::abicheck found configured policy rules (suppression/reclassify) that matched nothing, under unused_rules: block (exit code 1). This is NOT an ABI/API break and NOT a severity-policy failure — the compatibility verdict is unchanged; see disposition_audit.unused_rules_review in the JSON report."
           fi
         else
           # Either severity gated too, or there is no readable JSON report
@@ -5756,6 +5787,9 @@ else
           fi
           if _additions_gated; then
             echo "::warning::abicheck also reports public additions not covered by an acknowledgment record; see disposition_audit.unacknowledged_additions_review in the JSON report."
+          fi
+          if _unused_rules_gated; then
+            echo "::warning::abicheck also reports policy rules that matched nothing under unused_rules: block; see disposition_audit.unused_rules_review in the JSON report."
           fi
         fi
       elif [[ "${_NO_BASELINE:-false}" == "true" ]]; then
@@ -6124,6 +6158,10 @@ if [[ "${INPUT_ADD_JOB_SUMMARY:-true}" == "true" && "$MODE" != "dump" ]]; then
       ADDITIONS_UNACKNOWLEDGED)
         # ADR-067 D6's additions-review axis (exit code 1).
         echo "> **Verdict: ADDITIONS_UNACKNOWLEDGED** ⚠️ — Public additions are not covered by an acknowledgment record, and \`acknowledgment.unacknowledged_additions\` is \`block\`. This is **not** an ABI/API break and **not** a severity-policy failure — the additions keep their verdict. Acknowledge them in the records file \`acknowledgment.file\` names, or relax the setting to \`warn\`; see \`disposition_audit.unacknowledged_additions_review\` in the JSON report."
+        ;;
+      RULES_UNUSED)
+        # The unused-rules review axis (exit code 1, `unused_rules: block`).
+        echo "> **Verdict: RULES_UNUSED** ⚠️ — A configured suppression/reclassify rule matched nothing, and the policy file sets \`unused_rules: block\`. This is **not** an ABI/API break and **not** a severity-policy failure — the compatibility verdict is unchanged. Remove or fix the stale rule, or relax the setting to \`warn\`; see \`disposition_audit.unused_rules_review\` in the JSON report."
         ;;
       PASS)
         echo "> **Verdict: PASS** — Binary loads and no harmful ABI changes detected."
@@ -6800,6 +6838,13 @@ else
   # choice and no fail-on-* input governs it.
   if _additions_gated; then
     echo "::error::abicheck found public additions that no acknowledgment record covers, under acknowledgment.unacknowledged_additions: block; see disposition_audit.unacknowledged_additions_review in the JSON report."
+    FINAL_EXIT=1
+  fi
+
+  # The unused-rules review axis, unconditional for the same reason:
+  # `unused_rules: block` is the project's own choice.
+  if _unused_rules_gated; then
+    echo "::error::abicheck found configured policy rules that matched nothing, under unused_rules: block; see disposition_audit.unused_rules_review in the JSON report."
     FINAL_EXIT=1
   fi
 fi

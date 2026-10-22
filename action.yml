@@ -1027,7 +1027,13 @@ outputs:
       `acknowledgment.file` it names -- the additions-review axis,
       orthogonal to the compatibility verdict: the additions keep their
       verdict; fails the step unconditionally, since no fail-on-* input
-      governs it), ANALYSIS_INCOMPLETE (with `.abicheck.yml`'s
+      governs it), RULES_UNUSED (both compare shapes: a policy file's
+      `unused_rules: block`, when a configured suppression/reclassify rule
+      matched nothing -- read from the report's
+      `exit.unused_rules_contribution`, or `exit_axes.unused_rules` on the
+      audit-only shape; orthogonal to the compatibility verdict; fails the
+      step unconditionally, since no fail-on-* input governs it),
+      ANALYSIS_INCOMPLETE (with `.abicheck.yml`'s
       `assurance.require_complete: true`, when
       analysis_assurance.status is not "complete" -- P0.4's orthogonal
       assurance axis, which likewise leaves the compatibility verdict
@@ -1194,14 +1200,20 @@ outputs:
       report's pre-fold severity.exit_code /
       contract_coverage_exit_contribution / analysis_assurance.status /
       the exit block's incomplete_scope_contribution and
-      no_comparison_completed_contribution),
+      no_comparison_completed_contribution; also unacknowledged public
+      additions under acknowledgment.unacknowledged_additions: block
+      (exit.additions_review_contribution) and configured policy rules that
+      matched nothing under unused_rules: block
+      (exit.unused_rules_contribution)),
       2 (API break),
       4 (ABI break), 8 (library proven removed; directory/package operands
       with fail-on-removed-library set and a proven-complete NEW
       inventory).
       compare, audit-only shape (old-library/abi-baseline both omitted):
       0 (compatible/advisory, or DRY_RUN under dry-run: true -- see the
-      verdict output's own description), 1 (incomplete contract coverage, or
+      verdict output's own description), 1 (configured policy rules that
+      matched nothing under unused_rules: block, exit_axes.unused_rules;
+      incomplete contract coverage, or
       incomplete analysis assurance with
       `.abicheck.yml`'s `assurance.require_complete: true` -- unlike the
       two-sided shape,
@@ -1212,9 +1224,9 @@ outputs:
       with no sources/build-info given previews a blocker the real run
       would hit at exit 7 -- the dry-run preview itself reports VERDICT
       ERROR at exit 1 rather than 7, since no analysis actually ran to
-      collect that evidence contract in the first place. These three are
-      exit 1's only causes on this shape; the first two are told apart the
-      same way, one level down under diff),
+      collect that evidence contract in the first place. These four are
+      exit 1's only causes on this shape; coverage and assurance are told
+      apart the same way, one level down under diff),
       3 (AUDIT_GATE -- the audit-gate axis;
       see the verdict output's own description above),
       7 (evidence-contract error, VERDICT=EVIDENCE_CONTRACT_ERROR

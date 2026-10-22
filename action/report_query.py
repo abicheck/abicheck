@@ -715,18 +715,15 @@ def answer(report: dict[str, Any], query: str, arg: str = "") -> str | None:
                 }
             )
         )
-    if query == "additions_review_contribution":
-        # ADR-067 D6: the additions-review floor, carried on the root `exit`
-        # block from report schema 5.13. A report without the key has no
-        # such axis to answer from, so this is CannotTell (""), never a `0`
-        # that would read as "did not fire".
-        # Only a real integer 0/1 is an answer: a string, bool or float -- or a
-        # value carrying a newline into $GITHUB_OUTPUT -- is "cannot tell".
-        block = _either("exit", {})
-        value = block.get("additions_review_contribution") if isinstance(block, dict) else None
-        if type(value) is not int or value not in (0, 1):
-            return ""
-        return str(value)
+    if query in ("additions_review_contribution", "unused_rules_contribution"):
+        # ADR-067 floors on the root `exit` block (additions: schema 5.13); the
+        # audit shape folds unused rules into `exit_axes.unused_rules`. Only an
+        # integer 0/1 answers; anything else, or no key, is "" (cannot tell).
+        block, axes = _either("exit", {}), report.get("exit_axes")
+        value = block.get(query) if isinstance(block, dict) else None
+        if query == "unused_rules_contribution" and isinstance(axes, dict):
+            value = axes.get("unused_rules")
+        return str(value) if type(value) is int and value in (0, 1) else ""
     if query == "scope_contribution":
         # ADR-065 S2 (D6/D7): the completeness axis's two 0/1 fold
         # participants, carried on a directory/package release report's
