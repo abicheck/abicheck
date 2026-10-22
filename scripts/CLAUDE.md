@@ -104,6 +104,8 @@ One row per script: name, first sentence of its purpose, trigger. **Read the ful
 | `gen_g20_fixtures.py` | Single source of truth for the committed G20 snapshot fixtures (`catalog/cases/case143–151`, ADR-035 / plan `g20-source-scan-example-catalog`). | manual |
 | `fixture_sync.py` | The write-or-`--check` driver the committed-snapshot generators share: the walk over `{case: {filename: builder}}`, serialization, byte-comparison, drift reporting, exit code. | imported (by `gen_g20_fixtures.py`, `gen_reachability_examples.py`). |
 | `gen_l3l4l5_examples.py` | Single source of truth for the L3/L4/L5 build/source-only example fixtures. | manual |
+| `gen_l3l4l5_dispatch_cases.py` | G29 Phase 6 L5 fixture pairs for `PUBLIC_VIRTUAL_DISPATCH_SET_CHANGED` (imported by `gen_l3l4l5_examples.py`). | imported |
+| `gen_l3l4l5_consumer_cases.py` | G29 Phase 6 header-graph fixture pair for `PUBLIC_CONSUMER_COMPILED_DEPENDENCY_CHANGED` (imported by `gen_l3l4l5_examples.py`). | imported |
 | `gen_reachability_examples.py` | Generates the committed snapshot fixtures for the reachability-aware-suppression example cases (192–193): the headline scenario end to end, and its deliberate counter-example. | manual |
 | `benchmark_comparison.py` | Benchmarks abicheck vs ABICC / libabigail across the `examples/` catalog. | manual |
 | `generate_benchmark_report.py` | Wraps `benchmark_comparison.py` into one reproducible report: JSON + Markdown envelope (git commit, ground-truth sha256, tool versions, case list, per-lane accuracy/FP/FN/unsupported-error-timeout … | manual |

@@ -519,6 +519,7 @@ NON_DETECTOR_KINDS: frozenset[str] = frozenset(
         "public_api_exposes_stl_by_value",
         "public_api_internal_dependency_added",
         "public_api_internal_type_renamed",
+        "public_consumer_compiled_dependency_changed",
         "public_dependency_role_changed",
         "public_dependency_role_unknown",
         "public_macro_removed",

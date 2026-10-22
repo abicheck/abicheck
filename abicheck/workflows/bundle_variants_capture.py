@@ -325,7 +325,18 @@ def _write_package(
         for _spec, _snaps, paths in captures
         for p in paths.values()
     )
-    generations = this_build_generations() if fresh else None
+    # The source axis is stated only when a dumped snapshot carries source-tier
+    # (L4/L5) facts, so an L2-only package never drifts on an L4/L5 change.
+    carries_source_facts = any(
+        snap.build_source is not None
+        for _spec, snapshots, _paths in captures
+        for snap in snapshots.values()
+    )
+    generations = (
+        this_build_generations(carries_source_facts=carries_source_facts)
+        if fresh
+        else None
+    )
     variant_refs: list[VariantRef] = []
     artifact_refs: list[ArtifactRef] = []
     section_versions: dict[str, int] = {
