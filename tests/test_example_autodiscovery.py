@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import os
 import platform
+import re
 import shutil
 import subprocess
 import sys
@@ -355,10 +356,45 @@ def _subprocess_failure_detail(
     `cmake --build` failures each report "cmake build failed for caseXXX:"
     with nothing after the colon, hiding the actual error. Concatenates both
     streams — stdout first, since that's where the real error usually is on
-    Windows — each truncated to *limit* characters.
+    Windows — each reduced to at most *limit* characters by
+    :func:`_condense_stream`.
     """
-    parts = [s[:limit] for s in (r.stdout, r.stderr) if s]
+    parts = [_condense_stream(s, limit) for s in (r.stdout, r.stderr) if s]
     return "\n".join(parts) if parts else "(no output captured)"
+
+
+_DIAGNOSTIC_LINE = re.compile(
+    r"\berror\b|\bfatal\b|: error [A-Z]+\d+|error MSB\d+|\bLNK\d{4}\b",
+    re.IGNORECASE,
+)
+
+
+def _condense_stream(text: str, limit: int) -> str:
+    """Return *text* if it fits in *limit*, else its diagnostic lines and tail.
+
+    Build logs put the cause at the end (MSBuild prints its banner,
+    "Checking Build System" and per-file progress first, then
+    ``error C…``/``LNK…``/``error MSB…`` lines). Keeping the head, as an
+    earlier version did, cut a Windows ``cmake --build`` failure off right
+    after "Creating library …" and hid the error. Lines matching
+    :data:`_DIAGNOSTIC_LINE` come first (each clipped to *limit*), then the
+    remaining budget is filled from the end of the stream.
+    """
+    if len(text) <= limit:
+        return text
+    marker = f"[... {len(text)} chars, showing error lines and tail ...]"
+    diag: list[str] = []
+    used = 0
+    for line in text.splitlines():
+        if _DIAGNOSTIC_LINE.search(line):
+            line = line.strip()[:limit]
+            if used + len(line) + 1 > limit:
+                break
+            diag.append(line)
+            used += len(line) + 1
+    budget = max(limit - used, 0)
+    tail = text[-budget:] if budget else ""
+    return "\n".join([marker, *diag, tail]).rstrip()
 
 
 def _compile_shared(src: Path, out: Path) -> None:
@@ -584,10 +620,48 @@ def test_subprocess_failure_detail_no_output_is_explicit() -> None:
     assert _subprocess_failure_detail(_completed()) == "(no output captured)"
 
 
-def test_subprocess_failure_detail_truncates_each_stream_independently() -> None:
+def test_subprocess_failure_detail_bounds_each_stream_independently() -> None:
     r = _completed(stdout="A" * 2000, stderr="B" * 2000)
     detail = _subprocess_failure_detail(r, limit=100)
-    assert detail == ("A" * 100) + "\n" + ("B" * 100)
+    a_part, b_part = detail.split("\n[...")
+    assert a_part.count("A") == 100 and "B" not in a_part
+    assert b_part.count("B") == 100 and "A" not in b_part
+
+
+def test_subprocess_failure_detail_short_output_is_verbatim() -> None:
+    r = _completed(stdout="line one\nline two")
+    assert _subprocess_failure_detail(r, limit=600) == "line one\nline two"
+
+
+_MSBUILD_PREAMBLE = (
+    "MSBuild version 18.11.1 for .NET Framework\n\n"
+    "  1>Checking Build System\n"
+    "  Building Custom Rule D:/a/catalog/cases/caseX/CMakeLists.txt\n"
+    "  v1.c\n  Auto build dll exports\n"
+    "     Creating library C:/"
+    + "x" * 400
+    + "/v1.lib and object v1.exp\n"
+    + "  progress line\n" * 40
+)
+
+
+@pytest.mark.parametrize(
+    "error_line",
+    [
+        "v2.c(12): error C2065: 'x': undeclared identifier",
+        "LINK : fatal error LNK1104: cannot open file 'v2.dll'",
+        "C:/vs/Microsoft.CppCommon.targets(254,5): error MSB8066: Custom build exited with code 1.",
+        "v1.c:3:10: fatal error: v1.h: No such file or directory",
+    ],
+)
+def test_subprocess_failure_detail_keeps_late_error_line(error_line: str) -> None:
+    """The real CI shape: a long MSBuild preamble, then the error near the
+    end. A head-truncated diagnostic ended at "Creating library ..." and
+    dropped the error; the condensed one must keep the error line whole."""
+    stdout = _MSBUILD_PREAMBLE + error_line + "\n" + "  trailing summary\n" * 3
+    detail = _subprocess_failure_detail(_completed(stdout=stdout), limit=600)
+    assert error_line in detail
+    assert len(detail) <= 600 + 100  # limit plus the truncation marker
 
 
 # ---------------------------------------------------------------------------

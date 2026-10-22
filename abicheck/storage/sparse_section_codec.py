@@ -582,7 +582,8 @@ class DebugSection(_SparseSectionMixin):
     ) - frozenset(REQUIRED_FIELDS)
     #: Each mapped to `AbiSnapshot`'s own declared type: `.from_headers`/
     #: `.parsed_with_build_context` and the eight `*_facts_reliable` flags
-    #: are plain `bool`; `.ast_toolchain_supported` is `bool | None`;
+    #: are plain `bool`; `.ast_toolchain_supported` and
+    #: `.template_default_header_scan` are `bool | None`;
     #: `.ast_producer`/`.ast_fallback_reason`/`.frontend_context_kind`/
     #: `.ast_resolved_standard`/`.ast_cplusplus_macro`/`.ast_sysroot` are
     #: `str | None`; `.ast_toolchain`/`.fact_provenance` are
@@ -598,6 +599,7 @@ class DebugSection(_SparseSectionMixin):
         "ast_toolchain": _MAPPING,
         "ast_fallback_reason": _STR_OR_NONE,
         "ast_toolchain_supported": _BOOL_OR_NONE,
+        "template_default_header_scan": _BOOL_OR_NONE,
         "ast_toolchain_unsupported_reasons": _LIST,
         "frontend_context_kind": _STR_OR_NONE,
         "ast_resolved_standard": _STR_OR_NONE,

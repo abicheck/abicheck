@@ -166,18 +166,77 @@ def public_api_pair(tmp_path: Path) -> tuple[Path, Path]:
     return old, new
 
 
-@pytest.mark.parametrize("backend", BACKENDS)
-def test_header_only_default_change_is_no_l2_change(
-    tmp_path: Path, header_pair: tuple[Path, Path], backend: str
+HEADER_KIND = "template_param_default_changed"
+_CASTXML_GAP = "template-parameter defaults (castxml cannot record them)"
+
+
+def test_header_only_default_change_is_api_break_on_clang(
+    tmp_path: Path, header_pair: tuple[Path, Path]
 ) -> None:
-    """No public surface and no export depends on Box's default: no ABI effect."""
-    _require_tools(backend)
+    """ADR-085 D2: clang records the defaults, so the header-only change is API_BREAK.
+
+    No export or public signature depends on Box's default, so it is not a
+    BREAKING finding, and it is not the exported-instantiation kind.
+    """
+    _require_tools("clang")
     old_h, new_h = header_pair
-    old = _dump_header(tmp_path, old_h, backend, "old")
-    new = _dump_header(tmp_path, new_h, backend, "new")
-    report = _compare_kinds(old, new, tmp_path, backend)
-    assert report["verdict"] == "NO_CHANGE"
+    old = _dump_header(tmp_path, old_h, "clang", "old")
+    new = _dump_header(tmp_path, new_h, "clang", "new")
+    report = _compare_kinds(old, new, tmp_path, "clang")
+    assert report["verdict"] == "API_BREAK"
+    assert _kinds(report) == {HEADER_KIND}
     assert DEFAULT_KIND not in _kinds(report)
+
+
+def test_header_only_default_change_is_a_castxml_assurance_gap(
+    tmp_path: Path, header_pair: tuple[Path, Path]
+) -> None:
+    """ADR-085 D3: castxml cannot record the default, so the run says so.
+
+    castxml's compare verdict stays NO_CHANGE (it cannot see the change), but
+    the header scan finds the template default on both sides, so the analysis
+    is partial with an explicit gap note, not a silent clean comparison.
+    """
+    _require_tools("castxml")
+    old_h, new_h = header_pair
+    old = _dump_header(tmp_path, old_h, "castxml", "old")
+    new = _dump_header(tmp_path, new_h, "castxml", "new")
+    report = _compare_kinds(old, new, tmp_path, "castxml")
+    assert report["verdict"] == "NO_CHANGE"
+    assert HEADER_KIND not in _kinds(report)
+    assurance = report["analysis_assurance"]
+    assert assurance["status"] == "partial"
+    gap = [n for n in assurance["notes"] if n.startswith(_CASTXML_GAP)]
+    assert len(gap) == 2  # one per side
+
+
+@pytest.mark.integration
+def test_clang_reports_and_castxml_names_the_same_header_change(
+    tmp_path: Path, header_pair: tuple[Path, Path]
+) -> None:
+    """Cross-backend parity (ADR-085 test plan): the same header pair is not
+    a silent clean on either backend. clang reports the kind; castxml reports
+    the explicit gap instead."""
+    _require_tools("castxml", "clang")
+    old_h, new_h = header_pair
+    clang = _compare_kinds(
+        _dump_header(tmp_path, old_h, "clang", "old"),
+        _dump_header(tmp_path, new_h, "clang", "new"),
+        tmp_path,
+        "clang",
+    )
+    castxml = _compare_kinds(
+        _dump_header(tmp_path, old_h, "castxml", "old"),
+        _dump_header(tmp_path, new_h, "castxml", "new"),
+        tmp_path,
+        "castxml",
+    )
+    assert HEADER_KIND in _kinds(clang)
+    assert HEADER_KIND not in _kinds(castxml)
+    assert castxml["analysis_assurance"]["status"] == "partial"
+    assert not any(
+        n.startswith(_CASTXML_GAP) for n in clang["analysis_assurance"]["notes"]
+    )
 
 
 def test_castxml_cannot_expose_uninstantiated_template_defaults(
@@ -219,10 +278,10 @@ def test_castxml_cannot_expose_uninstantiated_template_defaults(
 def test_clang_ast_exposes_template_default_argument(
     tmp_path: Path, header_pair: tuple[Path, Path]
 ) -> None:
-    """The clang AST carries the default; abicheck's clang dumper does not record it.
+    """The clang AST carries the default, and abicheck's clang dumper records it.
 
-    Pins the producer-side fact that makes a clang-only extraction possible
-    later, so the header-capability note stays accurate.
+    Pins the producer-side fact the clang backend's recording (ADR-085 D1) is
+    built on, so a change in the AST shape fails here first.
     """
     _require_tools("clang++")
     old_h, _ = header_pair
@@ -259,6 +318,38 @@ def test_clang_ast_exposes_template_default_argument(
     assert "defaultArg" in u_param
 
 
+@pytest.mark.integration
+def test_pre_v62_clang_document_is_unassessed_not_a_clean_pass(
+    tmp_path: Path, header_pair: tuple[Path, Path]
+) -> None:
+    """ADR-085 D1: a clang document without the defaults fact (the shape a
+    pre-v62 writer produced) cannot show the header-only change, so the run is
+    partial with the not-recorded gap, never a clean NO_CHANGE.
+
+    The old side is a real clang dump whose fact is removed, which is the
+    document a pre-v62 writer would have produced for the same header.
+    """
+    from abicheck.serialization import snapshot_from_dict, snapshot_to_json
+
+    _require_tools("clang")
+    old_h, new_h = header_pair
+    old_path = _dump_header(tmp_path, old_h, "clang", "old")
+    new = _dump_header(tmp_path, new_h, "clang", "new")
+    old = snapshot_from_dict(json.loads(old_path.read_text()))
+    for rec in old.declarations.types:
+        rec.template_param_defaults_fact = None
+    pre_v62 = tmp_path / "old_pre_v62.json"
+    pre_v62.write_text(snapshot_to_json(old), encoding="utf-8")
+    report = _compare_kinds(pre_v62, new, tmp_path, "clang")
+    assert HEADER_KIND not in _kinds(report)
+    assurance = report["analysis_assurance"]
+    assert assurance["status"] == "partial"
+    assert any(
+        "old snapshot" in n and "not recorded by this snapshot" in n
+        for n in assurance["notes"]
+    )
+
+
 @pytest.mark.parametrize("backend", BACKENDS)
 def test_default_substituted_into_public_signature_breaks_at_l2(
     tmp_path: Path, public_api_pair: tuple[Path, Path], backend: str
@@ -275,6 +366,9 @@ def test_default_substituted_into_public_signature_breaks_at_l2(
     # Known attribution gap (Phase 5): the mangled-signature change is caught,
     # but the default-argument cause is not named at L2 for this shape.
     assert DEFAULT_KIND not in kinds
+    # ADR-085 shape C: the reported signature change already is the break, so
+    # the header-level default finding for Box is not counted a second time.
+    assert HEADER_KIND not in kinds
 
 
 @pytest.mark.parametrize("backend", BACKENDS)
@@ -324,3 +418,6 @@ def test_instantiated_default_change_is_attributed_at_l2(
     report = _compare_kinds(dumps["v1"], dumps["v2"], tmp_path, backend)
     assert report["verdict"] == "BREAKING"
     assert DEFAULT_KIND in _kinds(report)
+    # ADR-085 D2 shape-A suppression: the exported instantiation already carries
+    # the change, so the header-level kind is not counted a second time.
+    assert HEADER_KIND not in _kinds(report)

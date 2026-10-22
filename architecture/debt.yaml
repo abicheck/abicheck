@@ -476,7 +476,7 @@
     },
     {
       "path": "abicheck/diff_cpp_patterns.py",
-      "baseline_lines": 1205,
+      "baseline_lines": 1038,
       "target": "compare",
       "rule": "no_growth",
       "disposition": "migrate",
@@ -608,18 +608,7 @@
     },
     {
       "path": "abicheck/dumper_clang.py",
-      "baseline_lines": 1430,
-      "target": "see ADR-061 ownership map",
-      "rule": "no_growth",
-      "disposition": "migrate",
-      "category": "legacy_oversized_module",
-      "owner": "extract",
-      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice.",
-      "review_by": "2026-11-30"
-    },
-    {
-      "path": "abicheck/extract/headers/toolchain.py",
-      "baseline_lines": 801,
+      "baseline_lines": 1427,
       "target": "see ADR-061 ownership map",
       "rule": "no_growth",
       "disposition": "migrate",

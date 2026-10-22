@@ -71,7 +71,9 @@ Each entry's status line says what is still open. A PARTIAL entry's write-up als
 
 The entries below come from the Phase 4 measurement spike
 (`scripts/measure_l4_clang_projection.py`, 253 catalog TUs, 2026-10-22; numbers
-in the plan's "Status — Phase 4 measurement spike" note). They are gaps in
+in the plan's "Status — Phase 4 measurement spike" and "Status — Phase 4 golden and
+pinned set" notes; the b1 golden test reproduces the same counts, and none of the
+statuses below changed). They are gaps in
 `dumper_clang._ClangAstParser`'s output as an L4 projection source, not in L4's
 current emitter, which is unchanged.
 
@@ -97,11 +99,11 @@ current emitter, which is unchanged.
 **Status (2026-10-22): PARTIAL.** A `_ZTV`/`_ZTI`/`_ZTS`/`_ZTT` export is confirmed by its owning class when the class's exact path is declared (`policy/class_metadata_identity.py`), including when the header omits an inline namespace the mangling keeps, via the class's own mangled virtual slots. Still open: a template-specialization owner (`_ZTVN3api3BoxIiEE`) is never confirmed, because the path does not spell its arguments and a primary template's declaration is not evidence about a specialization; and a class whose only virtual member is its destructor has no mangled slot to prove it, so it is confirmed only when its header spelling matches the mangled path exactly. Both stay `UNKNOWN_UNRESOLVED`: reported and not gating.
 `false-clean` — the removal of such a class's vtable or typeinfo reads `NOT_EVALUATED` under `--contract public` and does not gate the verdict.
 
-#### A header-only default template-argument change reads `NO_CHANGE` at L2 on both backends (2026-10-21)
+#### A header-only default template-argument change reads `NO_CHANGE` at L2 on castxml (2026-10-21)
 
-**Status (2026-10-21): OPEN, deliberate — no detector change.** A default template argument changed on a template that nothing public names and nothing exports reads `NO_CHANGE` at L2. CastXML emits no record for an uninstantiated class template; clang has the default but does not record it. A clang-only detector was rejected because it would be a `BREAKING` verdict castxml cannot reproduce.
+**Status (2026-10-22): PARTIAL — clang closed, castxml open.** ADR-085 is accepted. Clang records the default (schema v62) and reports a header-only default change as `API_BREAK` (`template_param_default_changed`). A castxml run still reads `NO_CHANGE` on this shape, because castxml emits no record for an uninstantiated class template. The castxml coverage gap (ADR-085 D3, header-text scan) is not implemented yet.
 
-`false-clean` — A default template argument changed on a header-only template reads `NO_CHANGE` on both backends, and the source-level consequence appears only as an L4 risk. [Full write-up](known-gaps/a-header-only-default-template-argument-change-reads-no-change-at-l2.md)
+`false-clean` — A default template argument changed on a header-only template reads `NO_CHANGE` on castxml (clang reports `API_BREAK`), and the source-level consequence appears only as an L4 risk on castxml. [Full write-up](known-gaps/a-header-only-default-template-argument-change-reads-no-change-at-l2.md)
 
 #### A binary-gate demotion does not state a coverage gap (ADR-084)
 

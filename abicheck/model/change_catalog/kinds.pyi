@@ -135,6 +135,7 @@ class ChangeKind(StrEnum):
     ENUM_MEMBER_RENAMED = 'enum_member_renamed'
     PARAM_DEFAULT_VALUE_CHANGED = 'param_default_value_changed'
     PARAM_DEFAULT_VALUE_REMOVED = 'param_default_value_removed'
+    TEMPLATE_PARAM_DEFAULT_CHANGED = 'template_param_default_changed'
     FIELD_RENAMED = 'field_renamed'
     PARAM_RENAMED = 'param_renamed'
     FIELD_BECAME_CONST = 'field_became_const'
