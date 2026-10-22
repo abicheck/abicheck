@@ -91,7 +91,7 @@ def _all_uses(data: dict[str, Any]) -> list[str]:
 class TestBothFilesParseAsValidWorkflowYaml:
     def test_publish_baseline_parses(self) -> None:
         data = _load(PUBLISH_BASELINE)
-        assert set(data["jobs"]) == {"discover", "no-profiles", "publish"}
+        assert set(data["jobs"]) == {"discover", "no-profiles", "publish", "attest"}
 
     def test_update_main_baseline_parses(self) -> None:
         data = _load(UPDATE_MAIN_BASELINE)
@@ -877,3 +877,64 @@ class TestBaselinePublishE2eFixture:
         assert checkout_uses and all(
             u == f"actions/checkout@{_CHECKOUT_V6_SHA}" for u in checkout_uses
         )
+
+
+class TestPublishBaselineAttestOptIn:
+    """`attest` is opt-in and never raises a non-attesting caller's grant.
+
+    GitHub validates a called workflow's job permissions against the
+    caller's grant at load time, before `if:` is evaluated, so no job may
+    declare `id-token`/`attestations` at all -- otherwise every existing
+    caller (which grants neither) would fail even with attest: false.
+    """
+
+    ELEVATED = {"id-token", "attestations"}
+
+    def _wf(self) -> dict[str, Any]:
+        return _load(PUBLISH_BASELINE)
+
+    def _call(self) -> dict[str, Any]:
+        data = self._wf()
+        return data.get("on", data.get(True))["workflow_call"]
+
+    def test_attest_input_is_boolean_default_false(self) -> None:
+        spec = self._call()["inputs"]["attest"]
+        assert spec["type"] == "boolean"
+        assert spec["default"] is False
+
+    def test_attestation_url_output_comes_from_attest_job(self) -> None:
+        out = self._call()["outputs"]["attestation-url"]["value"]
+        assert out == "${{ jobs.attest.outputs.attestation-url }}"
+        job = self._wf()["jobs"]["attest"]
+        assert (
+            "steps.attest.outputs.attestation-url" in job["outputs"]["attestation-url"]
+        )
+
+    @pytest.mark.parametrize("job", ["discover", "no-profiles", "publish", "attest"])
+    def test_no_job_declares_attestation_scopes(self, job: str) -> None:
+        granted = dict(self._wf()["jobs"][job].get("permissions") or {})
+        assert not self.ELEVATED & set(granted), granted
+
+    def test_attest_job_inherits_caller_grant_and_is_gated(self) -> None:
+        job = self._wf()["jobs"]["attest"]
+        assert "permissions" not in job
+        assert "inputs.attest" in job["if"]
+        assert "publish" in job["needs"]
+
+    def test_attest_step_is_sha_pinned_same_as_stage_baseline(self) -> None:
+        stage = (
+            WORKFLOWS_DIR.parents[1] / "actions/stage-baseline/action.yml"
+        ).read_text(encoding="utf-8")
+        steps = self._wf()["jobs"]["attest"]["steps"]
+        uses = [s["uses"] for s in steps if s.get("id") == "attest"]
+        assert len(uses) == 1
+        assert uses[0].startswith("actions/attest-build-provenance@")
+        assert uses[0] in stage
+
+    def test_publish_job_records_subjects_only_when_attesting(self) -> None:
+        steps = self._wf()["jobs"]["publish"]["steps"]
+        rec = [s for s in steps if "attestation" in s.get("name", "")]
+        assert len(rec) == 2
+        assert all(s["if"] == "inputs.attest" for s in rec)
+        pkg = next(s for s in steps if s.get("id") == "package")
+        assert "attest" not in pkg["with"]

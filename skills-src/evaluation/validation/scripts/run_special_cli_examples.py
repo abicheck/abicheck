@@ -140,7 +140,7 @@ EVIDENCE_CASES: dict[str, EvidenceSpec] = {
     "case220_public_virtual_dispatch_set_reordered": EvidenceSpec(
         "graph/source_graph_summary.json", "--sources"
     ),
-    "case221_public_consumer_compiled_dependency_changed": EvidenceSpec(
+    "case222_public_consumer_compiled_dependency_changed": EvidenceSpec(
         "graph/source_graph_summary.json", "--sources"
     ),
 }

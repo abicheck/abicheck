@@ -34,6 +34,7 @@ scenarios:
   case195_header_graph_ambiguous_rename_not_reconciled: {scenario_kind: capability, ecosystem: generic}
   case196_header_graph_move_reconciled: {scenario_kind: capability, ecosystem: generic}
   case197_header_graph_identity_reconciled: {scenario_kind: capability, ecosystem: generic}
+  case221_public_api_internal_type_renamed: {scenario_kind: capability, ecosystem: generic}
   case78_task_arena_attach_tag: {scenario_kind: case-study, ecosystem: onetbb}
   case82_sycl_overload_set_removed: {scenario_kind: case-study, ecosystem: sycl}
   case84_bundle_soname_skew: {scenario_kind: project-topology, ecosystem: generic}
@@ -165,7 +166,7 @@ rules:
   - case218_export_loss_strong_binding_stays_breaking
   - case219_public_virtual_dispatch_set_changed
   - case220_public_virtual_dispatch_set_reordered
-  - case221_public_consumer_compiled_dependency_changed
+  - case222_public_consumer_compiled_dependency_changed
   - case19_enum_member_removed
   - case20_enum_member_value_changed
   - case21_method_became_static

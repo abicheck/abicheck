@@ -188,20 +188,23 @@ def consume_tu_dump(
     dump_diags = dump_diagnostics(dump)
     ast = dump.ast
     if ast is not None:
+        # The passes read every node's `inner` as a list of objects, and a
+        # wrong-typed one reads as an empty TU rather than failing: the pass
+        # would then report "ran, found nothing" for a tree it could not read.
+        # Refuse the tree before anything walks it, the materializer included:
+        # on an L4 cache hit no L4 reader has validated it yet.
+        try:
+            validate_ast_shape(ast)
+        except MalformedClangAstError as exc:
+            dump_diags.append(f"clang AST is malformed: {exc}")
+            ast = None
+    if ast is not None:
         # Explicit locations, as every L2 header tree has them (`dumper_clang_
         # errors`): a reader tracking clang's sticky file from the nodes it
         # visits drifts, and the L5 passes must read the same tree the L2 pass
         # reads to derive the same facts (`semantic_fact_folds`). In place: the
         # L4 reader reads this tree before the L5 passes do, from the raw form.
         ast = materialize_locations(ast)
-        # The passes read every node's `inner` as a list of objects, and a
-        # wrong-typed one reads as an empty TU rather than failing: the pass
-        # would then report "ran, found nothing" for a tree it could not read.
-        try:
-            validate_ast_shape(ast)
-        except MalformedClangAstError as exc:
-            dump_diags.append(f"clang AST is malformed: {exc}")
-            ast = None
     results: list[Any] = []
     diagnostics: list[list[str]] = []
     # One TU's passes share its type graph: the type_graph pass and both

@@ -28,17 +28,11 @@ here.
 
 from __future__ import annotations
 
-import tempfile
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import click
 
-from .cli_compare_release_helpers import (
-    _cleanup_temp_dirs,
-    reject_bundle_facts_out_collision,
-    reject_bundle_facts_out_dir_collision,
-)
 from .cli_compare_release_matrix import (
     _finalize_release_output,
     _validate_suppression_early,
@@ -54,15 +48,16 @@ from .cli_options import (
 from .errors import (
     SnapshotError,
 )
-from .frontends.cli.release_compare_request import execute_release_compare_checked
+from .frontends.cli.release_compare_request import (
+    execute_release_compare_checked,
+    reject_bundle_facts_out_collision,
+    reject_bundle_facts_out_dir_collision,
+)
 from .frontends.cli.release_member_reporter import CliReleaseReporter
 from .frontends.cli.release_report import render_release_summary
 from .frontends.cli.runtime import _setup_verbosity, _write_or_echo
 from .model.release_selection import ReleaseSelection
-from .report.comparison_scope import comparison_scope_terms
-from .report.release_assurance_section import release_assurance_terms
-from .report.release_findings import project_release_library_results
-from .report.release_public_surface_section import assemble_release_public_surface
+from .report.release_outcome_projection import project_release_outcome
 from .workflows.release_compare import (
     ReleaseCompareOptions,
     ReleaseCompareOutcome,
@@ -527,69 +522,62 @@ def compare_release_cmd(
     )
     secondary_formats = {f for f, _ in secondary_writes}
 
-    _temp_dir_paths: list[str] = []
-
-    def _make_temp_dir(prefix: str) -> Path:
-        path = tempfile.mkdtemp(prefix=prefix)
-        _temp_dir_paths.append(path)
-        return Path(path)
-
     # One warning-dedup scope for the whole run (early validation, every
     # member, the release-level stages): a risky override warns once.
     from .workflows.policy_file import dedup_validate_overrides_warnings
 
     with dedup_validate_overrides_warnings():
+        _validate_suppression_early(
+            suppress,
+            policy,
+            policy_file_path,
+            strict_suppressions,
+            require_justification,
+        )
+        # The plan (`workflows.release_request`), through the CLI boundary
+        # translating its typed errors; imported here so a test can patch
+        # that boundary's own binding.
+        from .frontends.cli.release_compare_request import (
+            ReleaseCompareRequest,
+            resolve_release_compare_plan,
+        )
+
+        request = ReleaseCompareRequest(
+            old_dir=old_dir,
+            new_dir=new_dir,
+            debug_info1=debug_info1,
+            debug_info2=debug_info2,
+            devel_pkg1=devel_pkg1,
+            devel_pkg2=devel_pkg2,
+            include_private_dso=include_private_dso,
+            dso_only=dso_only,
+            headers=headers,
+            old_headers_only=old_headers_only,
+            new_headers_only=new_headers_only,
+            includes=includes,
+            old_includes_only=old_includes_only,
+            new_includes_only=new_includes_only,
+            config_includes=config_includes,
+            old_variant=old_variant,
+            new_variant=new_variant,
+            release_selection=release_selection,
+            pack_application=pack_application,
+            severity_preset=severity_preset,
+            severity_abi_breaking=severity_abi_breaking,
+            severity_potential_breaking=severity_potential_breaking,
+            severity_quality_issues=severity_quality_issues,
+            severity_addition=severity_addition,
+            on_incomplete_scope=on_incomplete_scope,
+            fail_on_removed_library=fail_on_removed,
+        )
         try:
-            _validate_suppression_early(
-                suppress,
-                policy,
-                policy_file_path,
-                strict_suppressions,
-                require_justification,
-            )
-            # The plan (`workflows.release_request`), through the CLI boundary
-            # translating its typed errors; imported here so a test can patch
-            # that boundary's own binding.
-            from .frontends.cli.release_compare_request import (
-                ReleaseCompareRequest,
-                resolve_release_compare_plan,
-            )
+            plan = resolve_release_compare_plan(request)
+        except SnapshotError as exc:  # a damaged composition/marker (fail closed)
+            raise click.UsageError(str(exc)) from exc
 
-            request = ReleaseCompareRequest(
-                old_dir=old_dir,
-                new_dir=new_dir,
-                debug_info1=debug_info1,
-                debug_info2=debug_info2,
-                devel_pkg1=devel_pkg1,
-                devel_pkg2=devel_pkg2,
-                include_private_dso=include_private_dso,
-                dso_only=dso_only,
-                headers=headers,
-                old_headers_only=old_headers_only,
-                new_headers_only=new_headers_only,
-                includes=includes,
-                old_includes_only=old_includes_only,
-                new_includes_only=new_includes_only,
-                config_includes=config_includes,
-                old_variant=old_variant,
-                new_variant=new_variant,
-                release_selection=release_selection,
-                pack_application=pack_application,
-                severity_preset=severity_preset,
-                severity_abi_breaking=severity_abi_breaking,
-                severity_potential_breaking=severity_potential_breaking,
-                severity_quality_issues=severity_quality_issues,
-                severity_addition=severity_addition,
-                on_incomplete_scope=on_incomplete_scope,
-                fail_on_removed_library=fail_on_removed,
-            )
-            try:
-                plan = resolve_release_compare_plan(
-                    request, make_temp_dir=_make_temp_dir
-                )
-            except SnapshotError as exc:  # a damaged composition/marker (fail closed)
-                raise click.UsageError(str(exc)) from exc
-
+        # The plan owns the temporary directories resolution allocated, for the
+        # rest of the run: a failure in execution or rendering removes them too.
+        with plan:
             if fmt != "json":
                 for msg in plan.warnings:
                     click.echo(msg, err=True)
@@ -661,8 +649,6 @@ def compare_release_cmd(
                 old_dir=old_dir,
                 new_dir=new_dir,
             )
-        finally:
-            _cleanup_temp_dirs(_temp_dir_paths)
 
 
 def _render_release_outcome(
@@ -692,29 +678,16 @@ def _render_release_outcome(
     secondary_formats = {f for f, _ in secondary_writes}
     library_results = outcome.library_results
     severity_config = outcome.severity_config
-    scope_terms = comparison_scope_terms(outcome.scope_decision)
-    assurance_terms = release_assurance_terms(outcome.assurance_decision)
-    # The last point each member's live DiffResult exists: project the
-    # findings every renderer reads, then strip every private key. The
-    # verdict already carries the proven-removed floor, so this is a no-op
-    # on it.
-    worst_verdict = project_release_library_results(
-        library_results,
-        outcome.removed_keys,
-        outcome.worst_verdict,
-        severity_config,
-        needs_annotations=(fmt == "json" or "json" in secondary_formats),
+    # The report composition -- the findings every renderer reads, the
+    # public-surface section, the scope and assurance terms -- is owned by
+    # `report.release_outcome_projection`; this function only writes it out.
+    projection = project_release_outcome(
+        outcome,
+        formats={fmt, *secondary_formats},
         show_only=show_only,
         show_impact=show_impact,
     )
-    # "One product fact, reported once": fold findings several members
-    # reported identically out of the per-library tables and assemble the
-    # release public-surface section every format reads.
-    public_surface = assemble_release_public_surface(
-        outcome.surface_stage,
-        library_results,
-        type_attribution=outcome.type_attribution,
-    )
+    worst_verdict = projection.worst_verdict
     common: dict[str, Any] = {
         "bundle_result": outcome.bundle_result,
         "matrix_result": outcome.matrix_result,
@@ -727,13 +700,13 @@ def _render_release_outcome(
         "suppress": suppress,
         "pack_application": pack_application,
         "scope_public_headers": scope_public_headers,
-        "scope_terms": scope_terms,
-        "assurance_terms": assurance_terms,
+        "scope_terms": projection.scope_terms,
+        "assurance_terms": projection.assurance_terms,
         "show_only": show_only,
         "env_matrix_source_sha256": outcome.env_matrix_source_sha256,
         "require_complete_analysis": require_complete_analysis,
         "excluded_header_patterns": outcome.excluded_header_patterns,
-        "public_surface": public_surface,
+        "public_surface": projection.public_surface,
     }
     for secondary_fmt, secondary_output in secondary_writes:
         # `-o` is repeatable: every artifact renders the same computed

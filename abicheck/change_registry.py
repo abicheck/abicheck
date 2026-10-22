@@ -54,6 +54,7 @@ from .model.change_catalog.registry import (  # noqa: F401
     Verdict as Verdict,
 )
 from .model.change_catalog.source import SOURCE_ENTRIES
+from .model.change_catalog.source_graph_risk import SOURCE_GRAPH_RISK_ENTRIES
 from .model.change_catalog.symbols import SYMBOLS_ENTRIES
 from .model.change_catalog.types import TYPES_ENTRIES
 
@@ -67,6 +68,7 @@ REGISTRY = ChangeKindRegistry(
         *PLATFORM_ENTRIES,
         *BUILD_ENTRIES,
         *SOURCE_ENTRIES,
+        *SOURCE_GRAPH_RISK_ENTRIES,
         *DISPOSITION_ENTRIES,
     ]
 )

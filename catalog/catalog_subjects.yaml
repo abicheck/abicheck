@@ -186,7 +186,7 @@ subjects:
       - case47_inline_to_outlined
       - case89_inline_accessor_renamed_pimpl_member
       - case157_inline_function_removed
-      - case221_public_consumer_compiled_dependency_changed
+      - case222_public_consumer_compiled_dependency_changed
 
   internal-dependency-reachability:
     title: "Public API depends on an internal declaration"
@@ -208,6 +208,7 @@ subjects:
       - case195_header_graph_ambiguous_rename_not_reconciled
       - case196_header_graph_move_reconciled
       - case197_header_graph_identity_reconciled
+      - case221_public_api_internal_type_renamed
 
   leaked-internal-types:
     title: "Leaked internal types"

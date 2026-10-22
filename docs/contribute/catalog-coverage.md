@@ -2,7 +2,7 @@
 
 # Catalog coverage by dimension
 
-Phase 6 of the examples/catalog split (retired plan record; see [plans/index.md](plans/index.md)): the calibration catalog under `examples/` is 221 `caseNN_*` fixtures, but not 221 independent ABI/API concepts -- several are variants of the same rule, or scenarios composing rules already counted elsewhere. This page reports the catalog along five independent dimensions instead of one flat case count, so "three demonstrations of one rule" reads as "1 rule, 3 cases (1 canonical + 2 variants)" rather than "3 ABI concepts". Regenerate with `python scripts/gen_catalog_coverage_report.py` after any `ground_truth.json`, `catalog/taxonomy.json`, or `catalog/catalog_classification.yaml` change.
+Phase 6 of the examples/catalog split (retired plan record; see [plans/index.md](plans/index.md)): the calibration catalog under `examples/` is 222 `caseNN_*` fixtures, but not 222 independent ABI/API concepts -- several are variants of the same rule, or scenarios composing rules already counted elsewhere. This page reports the catalog along five independent dimensions instead of one flat case count, so "three demonstrations of one rule" reads as "1 rule, 3 cases (1 canonical + 2 variants)" rather than "3 ABI concepts". Regenerate with `python scripts/gen_catalog_coverage_report.py` after any `ground_truth.json`, `catalog/taxonomy.json`, or `catalog/catalog_classification.yaml` change.
 
 ## Rule coverage
 
@@ -37,7 +37,7 @@ Every rule named below is defined in `catalog/catalog_rules.yaml`, the canonical
 | `header-build-context-mismatch` | `case148_xcheck_header_build_mismatch` |
 | `internal-declaration-identity-reconciled` | `case197_header_graph_identity_reconciled` |
 | `internal-declaration-moved-reconciled` | `case196_header_graph_move_reconciled` |
-| `internal-declaration-renamed-reconciled` | `case194_header_graph_rename_reconciled` |
+| `internal-declaration-renamed-reconciled` | `case194_header_graph_rename_reconciled`, `case221_public_api_internal_type_renamed` |
 | `internal-symbol-required-by-public-api` | `case192_call_graph_break_survives_suppression` |
 | `odr-type-variant` | `case149_xcheck_odr_variant` |
 | `overload-set-removed` | `case82_sycl_overload_set_removed` |
@@ -49,11 +49,11 @@ Every rule named below is defined in `catalog/catalog_rules.yaml`, the canonical
 
 ## Scenario coverage
 
-**30 scenario-entity cases** composing one or more rules into a realistic problem (an ecosystem case study, a multi-library project topology, or a capability/evidence demonstration) -- see each case's own `related_rules`.
+**31 scenario-entity cases** composing one or more rules into a realistic problem (an ecosystem case study, a multi-library project topology, or a capability/evidence demonstration) -- see each case's own `related_rules`.
 
 | Scenario kind | Cases |
 |---|---|
-| `capability` | 12 |
+| `capability` | 13 |
 | `case-study` | 13 |
 | `project-topology` | 5 |
 
@@ -63,7 +63,7 @@ Every case, rule or scenario, tagged with the real-world ecosystem it models (`g
 
 | Ecosystem | Cases |
 |---|---|
-| `generic` | 208 |
+| `generic` | 209 |
 | `linux-kernel` | 3 |
 | `onemkl` | 1 |
 | `onetbb` | 7 |

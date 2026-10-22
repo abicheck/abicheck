@@ -3,7 +3,7 @@
 
 Cases that ship a committed snapshot or evidence fixture rather than compilable sources — the language is the one the fixture models, not one this catalog can read off a file extension.
 
-_34 case(s)._ [← back to all examples](../index.md)
+_35 case(s)._ [← back to all examples](../index.md)
 
 | Case | Title | Verdict | Category |
 |------|-------|---------|----------|
@@ -40,4 +40,5 @@ _34 case(s)._ [← back to all examples](../index.md)
 | [case197_header_graph_identity_reconciled](../case197_header_graph_identity_reconciled.md) | Declaration Reconciled as Identity-Reconciled (Header Unchanged) | 🟡 COMPATIBLE_WITH_RISK | Risk |
 | [case219_public_virtual_dispatch_set_changed](../case219_public_virtual_dispatch_set_changed.md) | Public Virtual Method's Override Set Changes | 🟡 COMPATIBLE_WITH_RISK | Risk |
 | [case220_public_virtual_dispatch_set_reordered](../case220_public_virtual_dispatch_set_reordered.md) | Public Virtual Method's Override Set Reordered | ✅ NO_CHANGE | No Change |
-| [case221_public_consumer_compiled_dependency_changed](../case221_public_consumer_compiled_dependency_changed.md) | Public Inline Body's Compiled-In Dependency Changes | 🟡 COMPATIBLE_WITH_RISK | Risk |
+| [case221_public_api_internal_type_renamed](../case221_public_api_internal_type_renamed.md) | Public Dependency Target Renamed Alongside an Unrelated Addition | 🟡 COMPATIBLE_WITH_RISK | Risk |
+| [case222_public_consumer_compiled_dependency_changed](../case222_public_consumer_compiled_dependency_changed.md) | Public Inline Body's Compiled-In Dependency Changes | 🟡 COMPATIBLE_WITH_RISK | Risk |

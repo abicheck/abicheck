@@ -89,7 +89,7 @@ def consumer_cases(
         edge(scale, mul, "DECL_CALLS_DECL"),
         edge(scale, saturate, "DECL_CALLS_DECL"),
     ]
-    cases["case221_public_consumer_compiled_dependency_changed"] = (
+    cases["case222_public_consumer_compiled_dependency_changed"] = (
         "L2",
         graph(base, old_edges, extractor_passes=passes),
         graph(base + [sat], new_edges, extractor_passes=passes),

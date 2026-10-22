@@ -150,6 +150,8 @@ ASSERTED_CHANGE_KINDS: set[ChangeKind] = {
     ChangeKind.DECLARATION_COORDINATES_SHIFTED,
     ChangeKind.DECLARATION_IDENTITY_RECONCILED_UNRESOLVED,
     ChangeKind.DECLARATION_IDENTITY_UNCHANGED,
+    # G31 Phase D public-dependency rename (ADR-048) — tests/test_graph_dependency_renames.py.
+    ChangeKind.PUBLIC_API_INTERNAL_TYPE_RENAMED,
     # Intra-version cross-source validation (tests/test_cross_source_checks.py).
     ChangeKind.EXPORTED_NOT_PUBLIC,
     ChangeKind.PUBLIC_NOT_EXPORTED,

@@ -15,7 +15,7 @@
 """``PUBLIC_CONSUMER_COMPILED_DEPENDENCY_CHANGED`` (G29 Phase 6, header-graph
 tier): the positive shape, the negative twins that must stay silent, and every
 way the header-only evidence can be missing. The committed fixture pair
-(case221) exercises the same detector end to end; these tests pin the edge
+(case222) exercises the same detector end to end; these tests pin the edge
 cases the fixture does not.
 
 No consumer build evidence exists, so no test here asserts which consumer

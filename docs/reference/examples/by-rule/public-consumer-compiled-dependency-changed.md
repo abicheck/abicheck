@@ -7,5 +7,5 @@ _Canonical rule slug:_ `public-consumer-compiled-dependency-changed`. [← back 
 
 ## Canonical demonstration
 
-- [case221_public_consumer_compiled_dependency_changed](../case221_public_consumer_compiled_dependency_changed.md) — Public Inline Body's Compiled-In Dependency Changes (🟡 COMPATIBLE_WITH_RISK)
+- [case222_public_consumer_compiled_dependency_changed](../case222_public_consumer_compiled_dependency_changed.md) — Public Inline Body's Compiled-In Dependency Changes (🟡 COMPATIBLE_WITH_RISK)
 

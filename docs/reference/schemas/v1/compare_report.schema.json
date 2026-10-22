@@ -757,6 +757,31 @@
           ],
           "description": "Schema 3.10 (ADR-067 D6): the additions-review gate's own evaluated result (policy allow/warn/block, the unacknowledged public additions found, and the orthogonal 0/1 gate_contribution), or null when this run never supplied an acknowledgment document to evaluate against.",
           "additionalProperties": true
+        },
+        "accepted_breaks": {
+          "type": "array",
+          "description": "Schema 6.4 (ADR-067 D5): one entry per acknowledged break that acknowledgment.breaks: accept made non-gating (disposition non_gating, application point acknowledgment). The verdict is unchanged; empty when nothing was accepted.",
+          "items": {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string"
+              },
+              "symbol": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "verdict_class": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            },
+            "additionalProperties": true
+          }
         }
       }
     },

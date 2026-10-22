@@ -208,6 +208,48 @@ class TestTempDirTracking:
         cleanup_release_compare_plan(plan)
         assert not any(p.exists() for p in created)
 
+    @pytest.mark.parametrize("fails_later", [False, True])
+    def test_entering_the_plan_removes_its_directories_on_every_exit(
+        self, tmp_path: Path, fails_later: bool
+    ) -> None:
+        """The plan owns its temp directories for a ``with`` block's whole
+        lifetime: a failure after resolution (an execution or render error)
+        removes them too, not only a normal exit. Before the plan owned this,
+        only the CLI's own ``finally`` covered that case, so a Python caller
+        reaching the same run had nothing that did."""
+        old_dir, new_dir = tmp_path / "old", tmp_path / "new"
+        old_dir.mkdir()
+        new_dir.mkdir()
+        _write_snap(old_dir / "libfoo.json", _snap())
+        _write_snap(new_dir / "libfoo.json", _snap())
+
+        created: list[Path] = []
+
+        def _fake_resolve_release_package_side(
+            side_dir, variant_id, make_temp_dir, *, side
+        ):
+            created.append(make_temp_dir(f"abicheck_relpkg_{side}_"))
+            return None
+
+        with patch(
+            "abicheck.workflows.release_inputs.resolve_release_package_side",
+            side_effect=_fake_resolve_release_package_side,
+        ):
+            plan = resolve_release_compare_plan(
+                ReleaseCompareRequest(old_dir=old_dir, new_dir=new_dir)
+            )
+
+        assert created
+        assert all(p.is_dir() for p in created)
+        if fails_later:
+            with pytest.raises(RuntimeError, match="render failed"):
+                with plan:
+                    raise RuntimeError("render failed")
+        else:
+            with plan:
+                pass
+        assert not any(p.exists() for p in created)
+
     def test_cleanup_is_a_no_op_on_an_empty_plan(self, tmp_path: Path) -> None:
         from abicheck.frontends.cli.release_compare_request import (
             cleanup_release_compare_plan,

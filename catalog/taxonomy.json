@@ -5113,7 +5113,7 @@
    "vtable-and-virtual-dispatch"
   ]
  },
- "case221_public_consumer_compiled_dependency_changed": {
+ "case222_public_consumer_compiled_dependency_changed": {
   "entity": "rule",
   "scenario_kind": null,
   "operation": "compare",
@@ -5132,6 +5132,30 @@
   "relation_axis": null,
   "subjects": [
    "inline-function-and-odr-boundary-changes"
+  ]
+ },
+ "case221_public_api_internal_type_renamed": {
+  "entity": "scenario",
+  "scenario_kind": "capability",
+  "operation": "compare",
+  "ecosystem": "generic",
+  "topics": [
+   "source"
+  ],
+  "languages": [],
+  "scope": "single-library",
+  "artifact_shape": "fixture-pair",
+  "validation_owner": "evidence-cases",
+  "related_rules": [
+   "internal-declaration-renamed-reconciled",
+   "public-api-gains-internal-dependency"
+  ],
+  "rule_slug": null,
+  "variant_of": null,
+  "relation_type": null,
+  "relation_axis": null,
+  "subjects": [
+   "internal-dependency-reachability"
   ]
  }
 }
