@@ -370,11 +370,14 @@ GIL_MEMBER_PARALLELISM = 2
 #: Level-1 default when members run in forked processes
 #: (``workflows.release_member_processes``), as a ceiling on the CPU count.
 #: Each child has its own interpreter, so the GIL argument above does not
-#: apply; memory admission is what bounds the pool. Measured on a 28-member
-#: ``--depth headers`` release, warm snapshot cache: pool 2 868 s, pool 6
-#: 346 s (2.5x) for +1.8% CPU seconds and no growth in per-child RSS
-#: (~3.5-4 GiB). Identical report digests.
-PROCESS_MEMBER_PARALLELISM = 6
+#: apply; memory admission is what bounds the pool, and the release plan
+#: never asks for more workers than there are members. Measured on a
+#: 28-member ``--depth headers`` release, warm snapshot cache: pool 2 868 s,
+#: pool 6 346 s (2.5x) for +1.8% CPU seconds and no growth in per-child RSS
+#: (~3.5-4 GiB). Pools above 6 are not yet measured; 16 is a ceiling for
+#: many-core hosts, not a target -- per-child RSS times the pool must still
+#: fit, which the admission gate checks at ``--depth headers``.
+PROCESS_MEMBER_PARALLELISM = 16
 
 #: Level-1 default on a free-threaded interpreter, as a ceiling on the CPU
 #: count. Not the CPU count itself: members share caches, the include memo

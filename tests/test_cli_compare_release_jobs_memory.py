@@ -172,6 +172,26 @@ class TestReleaseWorkerLimitCause:
         expected = (6, "processes") if processes else (2, "gil")
         assert (plan.initial_jobs, plan.limited_by) == expected
 
+    @pytest.mark.parametrize("members", [1, 2, 3, 5, 6, 7, 28])
+    def test_auto_pool_never_exceeds_the_member_count(
+        self, monkeypatch, members: int
+    ) -> None:
+        # Oracle: the work bounds the pool -- two members never get six
+        # workers -- and only an auto-sized pool is clamped by it.
+        monkeypatch.setattr("os.cpu_count", lambda: 64)
+        monkeypatch.setattr(process_resources, "available_mem_gib", lambda: None)
+        monkeypatch.setattr(process_resources, "python_parallelism", lambda **_: 6)
+        monkeypatch.delenv("ABICHECK_RELEASE_JOB_MEM_GIB", raising=False)
+        plan = release_jobs.plan_release_workers(0, depth="headers", members=members)
+        assert plan.initial_jobs == min(members, 6)
+        assert plan.pool_size <= members
+        if members < 6:
+            assert plan.limited_by == "members"
+        explicit = release_jobs.plan_release_workers(
+            8, depth="headers", members=members
+        )
+        assert explicit.initial_jobs == 8
+
     def test_memory_bound_pool_below_the_interpreter_is_attributed_to_memory(
         self, monkeypatch
     ) -> None:

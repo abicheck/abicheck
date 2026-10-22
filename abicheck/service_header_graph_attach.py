@@ -319,7 +319,25 @@ def acquire_header_graph_ast(
     Split out of :func:`_attach_header_graph` so it can start before the
     primary dump finishes (``prefetch_header_graph_ast``): its inputs are the
     headers and compile context, never the snapshot it is later attached to.
+
+    *projection_lock* holds the cross-process lock on the projection sidecar
+    from its first lookup until it is stored, so a forked sibling over the
+    same AST waits and reads the sidecar instead of re-streaming the AST.
     """
+    with ExitStack() as projection_lock:
+        return _acquire_header_graph_ast(
+            headers, includes, lang, compile, resolved_lang_mode, projection_lock
+        )
+
+
+def _acquire_header_graph_ast(
+    headers: list[Path],
+    includes: list[Path],
+    lang: str | None,
+    compile: CompileContext | None,
+    resolved_lang_mode: str | None,
+    projection_lock: ExitStack,
+) -> HeaderGraphAst:
     from .buildsource.header_graph_ast_projection import (
         HeaderGraphAstProjection,
         MemoizedParseFailure,
@@ -335,12 +353,14 @@ def acquire_header_graph_ast(
     )
     from .buildsource.header_graph_projection_cache import (
         load_cached_projection,
+        projection_sidecar_path,
         store_cached_projection,
     )
     from .extract.headers.clang.backend import clang_header_dump
     from .extract.headers.clang.streaming import suppress_streaming_prune
     from .extract.headers.toolchain import _resolve_force_cpp
     from .extract.unparseable_header_fallback import attribute_failing_headers
+    from .storage.cross_process_lock import single_flight
     from .storage.derived_ast import DerivedAstArtifact, derived_ast_scope
 
     # Everything either projection path may raise on an AST that is readable
@@ -428,6 +448,7 @@ def acquire_header_graph_ast(
     # of the two happened, and storing unconditionally would rewrite an
     # identical sidecar on every warm run.
     streamed_paths: list[Path] = []
+    projection_locked: list[bool] = []
 
     def _projection_for(
         ast_path: Path, *, tree_in_hand: bool = False
@@ -447,6 +468,14 @@ def acquire_header_graph_ast(
         unreadable document, a truncated one, a shape the scanner does not
         recognise.
         """
+        if not projection_locked and ast_path == derived_projection.cache_path:
+            # The cache entry is offered first, cold or warm: lock its
+            # sidecar before reading it, held until it is stored
+            # (`storage.cross_process_lock`).
+            projection_locked.append(True)
+            projection_lock.enter_context(
+                single_flight(f"projection:{projection_sidecar_path(ast_path)}")
+            )
         cached = load_cached_projection(ast_path)
         if cached is not None or tree_in_hand:
             # With the tree already parsed (the clang-frontend memo handoff),

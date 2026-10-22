@@ -54,7 +54,7 @@ class TestPythonParallelism:
         assert got <= process_resources.FREE_THREADED_MEMBER_PARALLELISM
         assert got == min(cpus, process_resources.FREE_THREADED_MEMBER_PARALLELISM)
 
-    @pytest.mark.parametrize("cpus", [1, 2, 4, 6, 8, 64, 224])
+    @pytest.mark.parametrize("cpus", [1, 2, 4, 6, 8, 16, 17, 64, 224])
     def test_forked_members_are_not_capped_by_the_gil(
         self, monkeypatch: pytest.MonkeyPatch, cpus: int
     ) -> None:
@@ -64,7 +64,7 @@ class TestPythonParallelism:
         monkeypatch.setattr(process_resources.os, "cpu_count", lambda: cpus)
         monkeypatch.setattr(process_resources, "gil_enabled", lambda: True)
         got = process_resources.python_parallelism(processes=True)
-        assert got == min(cpus, 6)
+        assert got == min(cpus, 16)
         assert process_resources.python_parallelism() == 2
 
     @pytest.mark.parametrize("gil", [True, False])
