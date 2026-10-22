@@ -106,6 +106,7 @@ def assess_change(
     suppressed: bool = False,
     root_cause: tuple[str, str] | None = None,
     root_cause_evidence: dict[str, object] | None = None,
+    impact_group_id: str | None = None,
 ) -> ImpactAssessment:
     """Derive an ``ImpactAssessment`` from *change*'s existing fields.
 
@@ -140,6 +141,14 @@ def assess_change(
     root_cause_evidence` unset, same as any caller with no correlator
     context to offer.
 
+    *impact_group_id* (G29 Phase 6 follow-up), when given, is the
+    ``RootCauseCorrelator`` group id of *change*'s correlator group, resolved
+    by the caller via
+    :func:`~abicheck.root_cause_evidence.impact_group_lookup_for_changes`. It
+    is ``None`` when *change* is in no multi-piece correlator group, and then
+    ``impact_group_id`` falls back to ``root_cause_id`` (the "nothing
+    correlates" case, where the two are the same identity).
+
     ``Change.impact_assessment`` (ADR-052 D2 follow-up, scoped
     implementation), when a producer set it directly, supplies this
     assessment's *evidence* fields (``reachability_state``/
@@ -169,6 +178,11 @@ def assess_change(
     root_cause_id, root_cause_display = (
         root_cause if root_cause is not None else (None, None)
     )
+    # A correlator group id wins; otherwise the group is the report-level
+    # root cause itself ("nothing correlates": the two ids coincide).
+    resolved_impact_group_id = (
+        impact_group_id if impact_group_id is not None else root_cause_id
+    )
     cached = getattr(change, "impact_assessment", None)
     if cached is not None:
         return ImpactAssessment(
@@ -182,7 +196,7 @@ def assess_change(
             correlated_change_kind=cached.correlated_change_kind,
             root_cause_id=root_cause_id,
             root_cause_display=root_cause_display,
-            impact_group_id=root_cause_id,
+            impact_group_id=resolved_impact_group_id,
             root_cause_evidence=root_cause_evidence,
         )
     return ImpactAssessment(
@@ -198,6 +212,6 @@ def assess_change(
         correlated_change_kind=getattr(change, "correlated_change_kind", None),
         root_cause_id=root_cause_id,
         root_cause_display=root_cause_display,
-        impact_group_id=root_cause_id,
+        impact_group_id=resolved_impact_group_id,
         root_cause_evidence=root_cause_evidence,
     )
