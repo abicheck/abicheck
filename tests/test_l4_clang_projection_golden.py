@@ -159,3 +159,33 @@ def test_pinned_set_matches_the_measured_projection_equivalence() -> None:
     assert measured == set(EXPECTED_PINNED), (
         f"measured pinned set {sorted(measured)} != expected {sorted(EXPECTED_PINNED)}"
     )
+
+
+@pytest.mark.parametrize(
+    "script", ["gen_l4_clang_golden", "measure_l4_clang_projection"]
+)
+def test_script_import_leaves_sys_path_unchanged(script: str) -> None:
+    """Loading a golden-tool script must not mutate the process's import path.
+
+    Oracle: the ``sys.path`` list itself, snapshotted before and after a fresh
+    load of the script file, not the shared loader's own behaviour.
+    """
+    import importlib.util
+    import sys
+
+    from _l4_clang_golden_support import SCRIPTS
+
+    before = list(sys.path)
+    spec = importlib.util.spec_from_file_location(
+        f"_probe_{script}", SCRIPTS / f"{script}.py"
+    )
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    # Dataclasses look their module up in sys.modules while being built.
+    probe = f"_probe_{script}"
+    sys.modules[probe] = module
+    try:
+        spec.loader.exec_module(module)
+    finally:
+        del sys.modules[probe]
+    assert sys.path == before, f"importing {script}.py changed sys.path"
