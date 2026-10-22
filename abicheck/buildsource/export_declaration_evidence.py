@@ -407,7 +407,8 @@ def textual_declaration_hint(
         if leaf_re is None:
             leaf_re = _leaf_declaration_re(leaf)
         for line, cond in h.lines:
-            if not leaf_re.search(line):
+            # Substring prefilter: the pattern cannot match a line lacking *leaf*.
+            if leaf not in line or not leaf_re.search(line):
                 continue
             if h.excluded:
                 return DeclarationHint("excluded_header", h.path, cond)

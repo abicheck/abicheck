@@ -302,6 +302,9 @@ def has_unresolved_component(raw_type: str) -> bool:
     two do not spuriously push a bracket level that a later, real ``)``
     would then incorrectly pop instead of the paren it actually closes.
     """
+    if _UNRESOLVED_TYPE_SENTINEL not in raw_type:
+        # Only a sentinel character can make the walk below answer True.
+        return False
     stack: list[str] = []
     i = 0
     n = len(raw_type)
