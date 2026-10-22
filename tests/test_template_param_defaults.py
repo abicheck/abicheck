@@ -448,3 +448,30 @@ def test_pipeline_without_a_ledger_still_suppresses_the_finding() -> None:
     # No function reports Box, so the header finding is kept, not suppressed.
     findings = detect_template_default_changes(old, ctx, [removed])
     assert [f.kind for f in findings] == [ChangeKind.TEMPLATE_PARAM_DEFAULT_CHANGED]
+
+
+def test_all_type_params_skips_a_non_dict_child_and_keeps_scanning() -> None:
+    from abicheck.extract.headers.clang.template_param_indexes import _all_type_params
+
+    # A malformed JSON child is skipped, not taken as the end of the list.
+    assert (
+        _all_type_params({"inner": ["junk", {"kind": "TemplateTypeParmDecl"}]}) is True
+    )
+
+
+def test_a_repeated_removed_instance_is_reported_once() -> None:
+    from abicheck.compare.template_param_defaults import (
+        detect_default_template_arg_changed,
+    )
+    from abicheck.model.declarations import Function
+
+    def _instance(mangled: str) -> Function:
+        return Function(name="compute", mangled=mangled, return_type="void", params=[])
+
+    old_fn = "_ZN2ns10descriptorIfNS_18minkowski_distanceIfEEE7computeEv"
+    new_fn = "_ZN2ns10descriptorIfNS_18euclidean_distanceIfEEE7computeEv"
+    old = AbiSnapshot(
+        library="lib", version="1.0", functions=[_instance(old_fn), _instance(old_fn)]
+    )
+    new = AbiSnapshot(library="lib", version="1.0", functions=[_instance(new_fn)])
+    assert len(detect_default_template_arg_changed(old, new)) == 1
