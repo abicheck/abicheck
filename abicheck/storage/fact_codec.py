@@ -699,11 +699,11 @@ def decode_param_facts(p: dict[str, Any], schema_version: int) -> dict[str, Any]
     if raw_kind := p.get("kind_fact"):  # memoized, ParamKind rebuild folded in
         kind_fact: Fact[Any] | None = memo_fact(raw_kind, _build_kind_fact, ("kind",))
     else:
+        # No serialized fact: decode can only yield "not collected" (or None
+        # for a legacy-only document), never a value to rebuild as ParamKind.
         kind_fact = decode_fact_with_legacy_presence(
             p, "kind", schema_version, _MIN_SCHEMA_VERSION_FOR_PARAM_KIND_FACT
         )
-        if kind_fact is not None and kind_fact.value is not None:
-            kind_fact = replace(kind_fact, value=ParamKind(kind_fact.value))
     return {
         "is_va_list_fact": decode_fact(p.get("is_va_list_fact"), schema_version),
         "is_restrict_fact": decode_fact_with_legacy_presence(
