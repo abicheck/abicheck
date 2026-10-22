@@ -269,6 +269,15 @@ def test_positional_row_leaves_unrelated_spellings_and_none_untouched() -> None:
         "std::vector<<param 0>>",
     ]
     assert _positional_row((None, "T"), None) == [None, "T"]
+    # A dependent member of a parameter is still that parameter (T::value_type),
+    # so a pure rename of the parameter is not a default change.
+    assert _positional_row((None, "typename T::value_type"), ("T", "U")) == [
+        None,
+        "typename <param 0>::value_type",
+    ]
+    assert _positional_row(
+        (None, "typename T::value_type"), ("T", "U")
+    ) == _positional_row((None, "typename A::value_type"), ("A", "B"))
 
 
 def test_type_defaults_index_keeps_only_all_type_templates() -> None:

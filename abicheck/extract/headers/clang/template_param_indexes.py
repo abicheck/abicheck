@@ -163,7 +163,7 @@ def _positional_row(
     own = {name: i for i, name in enumerate(names or ()) if name}
     if not own:
         return list(row)
-    pattern = re.compile(r"(?<![\w:])(" + "|".join(map(re.escape, own)) + r")(?![\w:])")
+    pattern = re.compile(r"(?<![\w:])(" + "|".join(map(re.escape, own)) + r")(?!\w)")
     return [
         None
         if spelled is None
