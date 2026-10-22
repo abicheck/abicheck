@@ -946,6 +946,17 @@ inputs:
       head SHA is shown in the comment.
     required: false
     default: 'update'
+  pr-comment-key:
+    description: >
+      Optional key that gives this job its own sticky comment, for workflows
+      that run the Action in several parallel jobs (matrix, per-library) on
+      the same pull request. Folded into the hidden marker
+      ('<!-- abicheck-sticky-report:<key> -->'); 'update' mode finds and edits
+      only the comment carrying the same key. Empty (default) keeps the
+      single unkeyed comment exactly as before. Characters outside
+      [A-Za-z0-9._-] become '-' (max 64 characters).
+    required: false
+    default: ''
   pr-comment-on:
     description: >
       When to comment: 'changes' (default) comments when the run produced
@@ -1557,6 +1568,7 @@ runs:
         INPUT_ACKNOWLEDGMENTS: ${{ inputs.acknowledgments }}
         INPUT_PR_COMMENT: ${{ inputs.pr-comment }}
         INPUT_PR_COMMENT_MODE: ${{ inputs.pr-comment-mode }}
+        INPUT_PR_COMMENT_KEY: ${{ inputs.pr-comment-key }}
         INPUT_PR_COMMENT_ON: ${{ inputs.pr-comment-on }}
         INPUT_PR_COMMENT_DETAIL: ${{ inputs.pr-comment-detail }}
         INPUT_PR_COMMENT_REPORT_ARTIFACT_URL: ${{ inputs.pr-comment-report-artifact-url }}

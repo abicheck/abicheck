@@ -37,6 +37,7 @@ several ``tests/test_pr_comment*.py`` modules).
 
 from __future__ import annotations
 
+import re
 from collections import OrderedDict
 from datetime import UTC, datetime
 
@@ -77,6 +78,8 @@ from .report.pr_comment_headline import (
 
 __all__ = [
     "MARKER",
+    "sanitize_comment_key",
+    "sticky_marker",
     "DETAIL_LEVELS",
     "GITHUB_COMMENT_LIMIT",
     "render_comment",
@@ -85,6 +88,31 @@ __all__ = [
 
 # Hidden marker used to find-and-update the sticky comment across runs.
 MARKER = "<!-- abicheck-sticky-report -->"
+
+# `pr-comment-key` (issue #1708): parallel jobs on one PR each keep their own
+# sticky comment. The key is folded into the marker; only `[A-Za-z0-9._-]`
+# survive (anything else becomes `-`), so a key can never close the HTML
+# comment (`-->`) or break the Action's jq lookup string. `action/run.sh`
+# applies the identical rule in `_sanitize_pr_comment_key`.
+_COMMENT_KEY_MAX = 64
+_COMMENT_KEY_UNSAFE = re.compile(rb"[^A-Za-z0-9._-]")
+
+
+def sanitize_comment_key(key: str | None) -> str:
+    """Return the marker-safe form of a ``pr-comment-key`` ('' = default).
+
+    Works per UTF-8 *byte* (a non-ASCII character becomes one ``-`` per
+    byte) so it matches ``run.sh``'s ``LC_ALL=C tr`` byte-for-byte.
+    """
+    raw = (key or "").strip(" \t\n\r\v\f").encode("utf-8")
+    return _COMMENT_KEY_UNSAFE.sub(b"-", raw)[:_COMMENT_KEY_MAX].decode("ascii")
+
+
+def sticky_marker(key: str | None = None) -> str:
+    """Hidden marker for the sticky comment of *key* (default: :data:`MARKER`)."""
+    safe = sanitize_comment_key(key)
+    return f"<!-- abicheck-sticky-report:{safe} -->" if safe else MARKER
+
 
 DETAIL_LEVELS = ("summary", "standard", "full")
 
@@ -673,8 +701,10 @@ def render_comment(
     timestamp: datetime | None = None,
     report_url: str | None = None,
     report_artifact_url: str | None = None,
+    comment_key: str | None = None,
 ) -> str:
-    """Render the full sticky-comment markdown body (including :data:`MARKER`).
+    """Render the full sticky-comment markdown body (including :data:`MARKER`,
+    or the keyed :func:`sticky_marker` when *comment_key* is non-empty).
 
     The body is kept under GitHub's 65,536-character comment limit by
     *section-aware* shortening: the per-section row budget is tightened
@@ -702,5 +732,13 @@ def render_comment(
             report_artifact_url=report_artifact_url,
         )
         if len(body) <= _BODY_BUDGET:
-            return body
-    return _truncate_to_budget(body, report_url, report_artifact_url, _BODY_BUDGET)
+            return _apply_marker(body, comment_key)
+    return _apply_marker(
+        _truncate_to_budget(body, report_url, report_artifact_url, _BODY_BUDGET),
+        comment_key,
+    )
+
+
+def _apply_marker(body: str, comment_key: str | None) -> str:
+    marker = sticky_marker(comment_key)
+    return body if marker == MARKER else body.replace(MARKER, marker, 1)

@@ -6425,6 +6425,7 @@ runpy.run_module("abicheck.cli_pr_comment", run_name="__main__")
     ${run_url:+--report-url "$run_url"} \
     ${INPUT_PR_COMMENT_REPORT_ARTIFACT_URL:+--report-artifact-url "$INPUT_PR_COMMENT_REPORT_ARTIFACT_URL"} \
     ${GITHUB_WORKSPACE:+--path-prefix "$GITHUB_WORKSPACE"} \
+    ${INPUT_PR_COMMENT_KEY:+--comment-key "$INPUT_PR_COMMENT_KEY"} \
     ${PR_GATE_ARGS[@]+"${PR_GATE_ARGS[@]}"} \
     ${subject_args[@]+"${subject_args[@]}"} \
     -o "$PR_BODY") || true
@@ -6445,7 +6446,28 @@ runpy.run_module("abicheck.cli_pr_comment", run_name="__main__")
 }
 
 # Hidden marker the renderer embeds; used to find OUR sticky comment.
-PR_COMMENT_MARKER="<!-- abicheck-sticky-report -->"
+# `pr-comment-key` (issue #1708) folds a per-job key into it so parallel jobs
+# keep separate comments. Sanitization mirrors
+# abicheck/pr_comment_render.py:sanitize_comment_key exactly (trim, then every
+# byte outside [A-Za-z0-9._-] -> '-', max 64), so the lookup matches the
+# rendered body and a key can never inject `-->` or a jq quote.
+_sanitize_pr_comment_key() {
+  local k="$1"
+  k="${k#"${k%%[![:space:]]*}"}"
+  k="${k%"${k##*[![:space:]]}"}"
+  k=$(printf '%s' "$k" | LC_ALL=C tr -c 'A-Za-z0-9._-' '-')
+  printf '%s' "${k:0:64}"
+}
+_pr_comment_marker() {
+  local k
+  k=$(_sanitize_pr_comment_key "${1:-}")
+  if [[ -n "$k" ]]; then
+    printf '<!-- abicheck-sticky-report:%s -->' "$k"
+  else
+    printf '%s' "<!-- abicheck-sticky-report -->"
+  fi
+}
+PR_COMMENT_MARKER="$(_pr_comment_marker "${INPUT_PR_COMMENT_KEY:-}")"
 
 _create_pr_comment() {
   # Create a fresh comment from a body file via the REST API (jq builds the
