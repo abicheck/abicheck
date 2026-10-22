@@ -38,16 +38,14 @@ from .compare.public_surface import reconciled_variable_surfaces
 from .compare.template_surface import reconciled_abi_visible_functions
 from .detector_registry import registry
 from .diff_helpers import (
-    build_type_map as _build_type_map,
     lookup_matched_type as _lookup_matched_type,
     make_change,
 )
 from .diff_types_surface import (
     RESERVED_FIELD,
-    _directly_referenced,
-    _is_abi_surface_type,
+    surface_type_maps,
 )
-from .model import AbiSnapshot, Function, TypeField, stdlib_namespaces_excluded
+from .model import AbiSnapshot, Function, TypeField
 from .model.change import Change
 from .model.change_catalog.kinds import ChangeKind
 
@@ -94,22 +92,7 @@ def _diff_var_values(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
 def _diff_type_kind_changes(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     """Detect struct↔union kind changes (ABICC: StructToUnion / DataType_Type)."""
     changes: list[Change] = []
-    excl = stdlib_namespaces_excluded(old, new)
-    directly_referenced = _directly_referenced(old, new)
-    old_map = _build_type_map(
-        t
-        for t in old.declarations.types
-        if _is_abi_surface_type(
-            t, exclude_stdlib=excl, directly_referenced=directly_referenced
-        )
-    )
-    new_map = _build_type_map(
-        t
-        for t in new.declarations.types
-        if _is_abi_surface_type(
-            t, exclude_stdlib=excl, directly_referenced=directly_referenced
-        )
-    )
+    old_map, new_map = surface_type_maps(old, new)
 
     for t_old in old_map.values():
         t_new = _lookup_matched_type(old_map, new_map, t_old)
@@ -148,24 +131,7 @@ def _diff_reserved_fields(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     both offset AND type match to avoid false positives (M5 fix).
     """
     changes: list[Change] = []
-    excl = stdlib_namespaces_excluded(old, new)
-    directly_referenced = _directly_referenced(old, new)
-    old_map = _build_type_map(
-        t
-        for t in old.declarations.types
-        if not t.is_union
-        and _is_abi_surface_type(
-            t, exclude_stdlib=excl, directly_referenced=directly_referenced
-        )
-    )
-    new_map = _build_type_map(
-        t
-        for t in new.declarations.types
-        if not t.is_union
-        and _is_abi_surface_type(
-            t, exclude_stdlib=excl, directly_referenced=directly_referenced
-        )
-    )
+    old_map, new_map = surface_type_maps(old, new, records_only=True)
 
     for t_old in old_map.values():
         t_new = _lookup_matched_type(old_map, new_map, t_old)

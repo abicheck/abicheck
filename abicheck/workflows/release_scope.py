@@ -77,6 +77,7 @@ from ..model.scope_acquisition import (
     SideInventory,
 )
 from ..model.snapshot import AbiSnapshot
+from .release_member_reasons import _proven_absence_reason, _unproduced_or_failed
 
 __all__ = [
     "DIRECT_PAIR_KEY",
@@ -430,30 +431,12 @@ def build_release_scope_record(
                 "explicitly, so this run is a current-artifact comparison"
                 + (f"; OLD acquisition also failed: {failure}" if failure else ""),
             )
-        elif key in old_unproduced or key in new_unproduced:
-            state, reason = (
-                AcquisitionState.EXPECTED_NOT_PRODUCED,
-                "; ".join(
-                    f"{side}: {why}"
-                    for side, why in (
-                        ("OLD", old_unproduced.get(key)),
-                        ("NEW", new_unproduced.get(key)),
-                    )
-                    if why is not None
-                ),
+        elif (
+            reported := _unproduced_or_failed(
+                key, old_unproduced, new_unproduced, old_failed, new_failed
             )
-        elif key in old_failed or key in new_failed:
-            state, reason = (
-                AcquisitionState.FAILED,
-                "; ".join(
-                    f"{side}: {why}"
-                    for side, why in (
-                        ("OLD", old_failed.get(key)),
-                        ("NEW", new_failed.get(key)),
-                    )
-                    if why is not None
-                ),
-            )
+        ) is not None:
+            state, reason = reported
         elif key in matched:
             state, reason = _state_for_result(results_by_name.get(old_map[key].name))
         elif old_present:
@@ -469,13 +452,9 @@ def build_release_scope_record(
                 "complete, so this is unmatched, not added",
             )
         if state is AcquisitionState.NOT_SUPPLIED:
-            lacking = evidence.new if old_present else evidence.old
-            if lacking.completeness is InventoryCompleteness.PROVEN:
-                side = "NEW" if old_present else "OLD"
-                reason = (
-                    f"no counterpart on {side}, whose inventory is proven complete "
-                    f"({lacking.provenance})"
-                )
+            reason = _proven_absence_reason(
+                reason, old_present, evidence.old, evidence.new
+            )
         members.append(
             MemberAcquisition(
                 member=key,

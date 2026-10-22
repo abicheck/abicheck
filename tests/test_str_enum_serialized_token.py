@@ -15,18 +15,25 @@ import enum
 import importlib
 import json
 import pkgutil
+import types
 
 import pytest
 
 import abicheck
 
 
+def _import_or_none(name: str) -> types.ModuleType | None:
+    try:
+        return importlib.import_module(name)
+    except Exception:  # optional-dependency modules
+        return None
+
+
 def _str_enums() -> list[type[enum.Enum]]:
     found: dict[str, type[enum.Enum]] = {}
     for info in pkgutil.walk_packages(abicheck.__path__, "abicheck."):
-        try:
-            module = importlib.import_module(info.name)
-        except Exception:  # optional-dependency modules
+        module = _import_or_none(info.name)
+        if module is None:
             continue
         for obj in vars(module).values():
             if (

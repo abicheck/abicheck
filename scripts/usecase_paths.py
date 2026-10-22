@@ -599,8 +599,8 @@ def unit_coverage_by_function(data_file: Path, root: Path = ROOT) -> dict[str, f
         try:
             _, statements, _, missing, _ = cov.analysis2(measured)
             spans = function_spans(path.read_text(encoding="utf-8"))
-        except Exception:  # noqa: BLE001 - a stale file is skipped, not fatal
-            continue
+        except (OSError, SyntaxError, ValueError, coverage.CoverageException):
+            continue  # a stale file is skipped, not fatal
         owner = line_owner_map(spans)
         total: dict[str, int] = defaultdict(int)
         hit: dict[str, int] = defaultdict(int)
