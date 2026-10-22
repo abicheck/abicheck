@@ -549,7 +549,7 @@
       "severity": "error",
       "min_evidence": "L2",
       "doc_slug": "default_template_arg_changed",
-      "examples": "case87_default_template_arg_changed"
+      "examples": "case229_exported_template_default_changed,case87_default_template_arg_changed"
     },
     {
       "kind": "dt_relr_introduced",
@@ -2106,7 +2106,7 @@
       "severity": "warning",
       "min_evidence": "L5",
       "doc_slug": "public_dependency_role_changed",
-      "examples": ""
+      "examples": "case223_header_only_template_default_changed,case227_nested_namespace_template_default_changed"
     },
     {
       "kind": "public_dependency_role_unknown",
