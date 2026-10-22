@@ -140,6 +140,9 @@ EVIDENCE_CASES: dict[str, EvidenceSpec] = {
     "case220_public_virtual_dispatch_set_reordered": EvidenceSpec(
         "graph/source_graph_summary.json", "--sources"
     ),
+    "case221_public_api_internal_type_renamed": EvidenceSpec(
+        "graph/source_graph_summary.json", "--sources"
+    ),
 }
 
 PYTHON_CASE = "case163_python_kwarg_renamed"
