@@ -454,12 +454,8 @@ def build_contract_stage(
         # never computes them, so compute independently here (mirroring
         # that step's own call) rather than leave contract evaluation
         # entirely unresolvable for those runs.
-        surf_old = (
-            PublicSurfaceQuery.resolve_public_domain(old)
-            if old is not None
-            else PublicSurface()
-        )
-        surf_new = PublicSurfaceQuery.resolve_public_domain(new)
+        surf_old = pp_ctx.public_surface_of(old) if old is not None else PublicSurface()
+        surf_new = pp_ctx.public_surface_of(new)
 
     # ADR-049 D7 precedence: an explicit `--contract` (EXPLICIT_CLI) outranks
     # the legacy `--scope-public-headers`/`--no-scope-public-headers` alias

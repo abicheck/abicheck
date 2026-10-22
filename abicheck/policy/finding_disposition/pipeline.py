@@ -43,6 +43,7 @@ from .suppression import dispose_by_suppression
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from ...model import AbiSnapshot
     from ...model.change import Change
+    from ..public_surface_query import ComparisonPublicSurfaces
 
 
 class PipelineStep(Protocol):
@@ -261,6 +262,7 @@ class DispositionPipeline:
         *,
         ledger: DispositionLedger | None = None,
         absent_baseline: AbiSnapshot | None = None,
+        public_surfaces: ComparisonPublicSurfaces | None = None,
     ) -> PipelineContext:
         """Run every step over *changes* under *rules*.
 
@@ -269,7 +271,8 @@ class DispositionPipeline:
         findings); otherwise the run creates one. Either way the returned
         context's ``disposition_ledger`` accounts for every input finding.
         *absent_baseline* is the OLD-side stand-in when *old* is ``None``
-        (see ``PipelineContext.baseline_or_empty``).
+        (see ``PipelineContext.baseline_or_empty``). *public_surfaces* is
+        the comparison's shared per-snapshot surface resolutions.
         """
         ledger = ledger if ledger is not None else DispositionLedger()
         # P1 (ADR-067 D3): declare the loaded suppression rules as this run's
@@ -283,6 +286,7 @@ class DispositionPipeline:
             rules or DispositionRules(),
             ledger=ledger,
             absent_baseline=absent_baseline,
+            public_surfaces=public_surfaces,
         )
         # A step with ``establishes_kept_alias`` (``FilterRedundant``) sets
         # ``ctx.kept = kept`` — an *aliasing* contract, not a snapshot: every
