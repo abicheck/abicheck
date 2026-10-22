@@ -48,6 +48,9 @@ def stamp_member_counts(entry: dict[str, object], result: DiffResult) -> None:
     entry["compatible_additions"] = summary.compatible_additions
     entry["quality_issues"] = summary.quality_issues
     entry["informational"] = summary.informational
+    from .release_public_api import stamp_member_public_api
+
+    stamp_member_public_api(entry, result)
 
 
 class ReleaseMemberEntryProjection(SilentReleaseReporter):
