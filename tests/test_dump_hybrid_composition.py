@@ -99,3 +99,12 @@ def test_hybrid_never_re_enters_the_orchestrator(
     requests = _hybrid_dump(tmp_path, "elf")
     assert len(requests) == 2
     assert calls == ["hybrid"]
+
+
+@pytest.fixture(autouse=True)
+def _castxml_preflight_off(monkeypatch):
+    """These tests stub the parse itself; castxml need not be on PATH (#1710)."""
+    monkeypatch.setattr(
+        "abicheck.workflows.header_frontend_preflight.require_castxml_if_needed",
+        lambda *a, **k: None,
+    )
