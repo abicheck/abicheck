@@ -194,7 +194,7 @@ class ReleaseComparePlan:
     #: Every temporary directory this resolution allocated (package/debug-
     #: package/devel-package extraction, stored-package-variant unpacking),
     #: regardless of whether the caller supplied its own ``make_temp_dir``
-    #: or relied on the default one -- see :func:`cleanup_release_compare_plan`.
+    #: or relied on the default one. The plan owns them: see ``__enter__``.
     temp_dirs: tuple[Path, ...] = ()
 
     @property
@@ -202,16 +202,28 @@ class ReleaseComparePlan:
         degraded_matched = self.degraded.matched if self.degraded is not None else {}
         return [k for k in self.scope.matched_keys if k not in degraded_matched]
 
+    def __enter__(self) -> ReleaseComparePlan:
+        """Own :attr:`temp_dirs` for the ``with`` block's whole lifetime.
+
+        Enter the plan immediately after resolution, so a failure in
+        execution or rendering removes the extracted directories exactly as
+        a failure in resolution already does. Resolution itself cleans up
+        after a failure it raises, before any plan exists to enter."""
+        return self
+
+    def __exit__(self, *_exc_info: object) -> None:
+        cleanup_release_compare_plan(self)
+
 
 def cleanup_release_compare_plan(plan: ReleaseComparePlan) -> None:
     """Remove every directory :func:`resolve_release_compare_plan` allocated
-    for *plan* (``plan.temp_dirs``) -- the direct-call counterpart of
-    ``compare_release_cmd``'s own tracked ``_make_temp_dir``/
-    ``_cleanup_temp_dirs`` pair (Codex review, PR #1215: a direct caller that
-    lets a package/debug-package/devel-package/stored-package operand use
-    the default ``make_temp_dir`` factory would otherwise leak the extracted
-    directories for the process's lifetime, since nothing else ever removes
-    them). A no-op, per entry, when a directory is already gone."""
+    for *plan* (``plan.temp_dirs``). Callers normally reach this through
+    ``with plan:``; it stays public for a caller that holds a plan it did not
+    enter (Codex review, PR #1215: a direct caller that lets a package/
+    debug-package/devel-package/stored-package operand use the default
+    ``make_temp_dir`` factory would otherwise leak the extracted directories
+    for the process's lifetime). A no-op, per entry, when a directory is
+    already gone."""
     import shutil
 
     for path in plan.temp_dirs:
@@ -233,12 +245,8 @@ def resolve_release_compare_plan(
     *make_temp_dir* defaults to a plain ``tempfile.mkdtemp``-backed factory
     when omitted; every directory either factory creates -- the caller's own
     or the default -- is recorded on the returned plan's ``temp_dirs``
-    (Codex review, PR #1215), so a direct caller can pass the plan to
-    :func:`cleanup_release_compare_plan` when done with it.
-    ``compare_release_cmd`` passes its own tracked factory and keeps
-    removing them in its own ``finally`` block exactly as before this
-    function existed; ``plan.temp_dirs`` duplicating that tracking for the
-    CLI path is harmless since the CLI never reads it.
+    (Codex review, PR #1215). The returned plan owns them: enter it with
+    ``with plan:`` for the run's lifetime.
     """
 
     def _do_extract(

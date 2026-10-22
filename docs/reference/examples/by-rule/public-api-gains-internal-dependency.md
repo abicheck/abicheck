@@ -22,4 +22,5 @@ _The same rule demonstrated under a different condition._
 - [case195_header_graph_ambiguous_rename_not_reconciled](../case195_header_graph_ambiguous_rename_not_reconciled.md) — Ambiguous Simultaneous Rename, Correctly Not Reconciled
 - [case196_header_graph_move_reconciled](../case196_header_graph_move_reconciled.md) — Declaration Reconciled as Moved Across a Compound Edit
 - [case197_header_graph_identity_reconciled](../case197_header_graph_identity_reconciled.md) — Declaration Reconciled as Identity-Reconciled (Header Unchanged)
+- [case221_public_api_internal_type_renamed](../case221_public_api_internal_type_renamed.md) — Public Dependency Target Renamed Alongside an Unrelated Addition
 

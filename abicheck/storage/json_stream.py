@@ -55,7 +55,7 @@ from collections.abc import Callable, Iterator, Sequence
 from dataclasses import dataclass
 from typing import Any
 
-__all__ = ["LazyItems", "iter_json_indented"]
+__all__ = ["LazyItems", "iter_json_compact", "iter_json_indented"]
 
 
 @dataclass(frozen=True)
@@ -298,3 +298,40 @@ def join_json_indented(obj: Any, *, indent: int = 2) -> str:
     drift from it.
     """
     return "".join(iter_json_indented(obj, indent=indent))
+
+
+_COMPACT_SEPARATORS = (",", ":")
+
+
+def iter_json_compact(obj: Any, *, depth: int = 2) -> Iterator[str]:
+    """Yield ``json.dumps(obj, separators=(",", ":"))`` one fragment at a time.
+
+    Byte-identical to that one-shot call: containers in the top *depth*
+    levels are opened by hand and each child below them is one C-encoded
+    ``json.dumps``, so the peak holds one such child's text rather than the
+    whole document's. Compact output has no indentation to re-pad, which is
+    what keeps this much simpler than :func:`iter_json_indented`.
+    """
+    kind = type(obj)
+    if depth <= 0 or kind not in (dict, list) or not obj:
+        yield json.dumps(obj, separators=_COMPACT_SEPARATORS)
+        return
+    if kind is dict:
+        yield "{"
+        for i, (key, value) in enumerate(obj.items()):
+            # json's own key coercion (True -> "true", 1 -> "1"), not str().
+            name = (
+                json.dumps(key) + ":"
+                if type(key) is str
+                else json.dumps({key: 0}, separators=_COMPACT_SEPARATORS)[1:-2]
+            )
+            yield ("," if i else "") + name
+            yield from iter_json_compact(value, depth=depth - 1)
+        yield "}"
+    else:
+        yield "["
+        for i, value in enumerate(obj):
+            if i:
+                yield ","
+            yield from iter_json_compact(value, depth=depth - 1)
+        yield "]"

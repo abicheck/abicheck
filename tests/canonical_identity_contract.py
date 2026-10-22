@@ -419,6 +419,7 @@ UNVERIFIED = frozenset(
         "struct_return_convention_changed",
         "suppression_reachability_unknown",
         "suppression_would_hide_public_break",
+        "graph_coverage_insufficient_for_suppression",
         # ADR-065 S3. Verified, and deliberately spelling-sensitive rather
         # than a backlog entry: these two carry a *completeness receipt* in
         # old_value/new_value (which side's inventory proved the absence, and

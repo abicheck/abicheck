@@ -56,12 +56,11 @@ from ...cli_compare_options import (
 from ...cli_resolve import (
     _reject_evidence_flags_for_set_inputs,
 )
-from ...model.consumer_requirements import LibraryExportsUnreadableError
-from ...model.consumer_spec import ConsumerUnreadableError
 from ...workflows.consumer_scope_gate import (
-    _apply_required_symbol_scoping,
-    _apply_used_by_scoping,
-    resolve_scoping_libs,
+    UsedByConsumerError,
+    UsedByEvidenceError,
+    UsedByLibraryError,
+    apply_scoped_gating,
 )
 
 if TYPE_CHECKING:
@@ -124,34 +123,6 @@ def _render_output(
     )
 
 
-def _require_used_by_binary_evidence(
-    old_lib: Any,
-    new_lib: Any,
-    old_input: Path,
-    new_input: Path,
-) -> None:
-    """Reject a ``--used-by`` run whose OLD/NEW side carries no binary evidence.
-
-    A real library path always qualifies; a JSON snapshot qualifies only when it
-    carries an ``elf``/``pe``/``macho`` block (i.e. it is a ``dump`` of a real
-    library, not a headers-only one) -- that is what supplies the SONAME/export
-    table/version list/PE ordinal table the scoping needs.
-    """
-    for lib, path, label in (
-        (old_lib, old_input, "OLD"),
-        (new_lib, new_input, "NEW"),
-    ):
-        has_binary_evidence = isinstance(lib, Path) or any(
-            getattr(lib, field, None) is not None for field in ("elf", "pe", "macho")
-        )
-        if not has_binary_evidence:
-            raise click.UsageError(
-                f"--used-by requires OLD/NEW to be real library binaries, or "
-                f"JSON snapshots carrying binary evidence (a `dump` of a real "
-                f"library, not headers-only); {label} ({path}) is neither."
-            )
-
-
 def _apply_scoped_gating(
     result: Any,
     old: Any,
@@ -166,54 +137,37 @@ def _apply_scoped_gating(
     severity: Any,
     suppression: Any,
 ) -> int | None:
-    """Apply whichever ADR-043 scoped gate this run selected, if any.
+    """CLI adapter for :func:`~abicheck.workflows.consumer_scope_gate.apply_scoped_gating`.
 
-    ``--used-by`` and ``--required-symbol`` are mutually exclusive (rejected
-    earlier), so at most one applies. *severity* is the run's
-    ``EffectiveGate.severity`` (``None`` under the legacy scheme). Returns the scoped exit code, or ``None``
-    when the run is unscoped and the full-library verdict gates instead.
+    Runs the workflow gate and renders its typed refusals as the click errors
+    (and so the exit codes) the ``--used-by`` flags have always produced.
     """
-    if used_by_apps:
-        try:
-            old_lib, new_lib = resolve_scoping_libs(
-                used_by_old_input, used_by_new_input, old, new
-            )
-            _require_used_by_binary_evidence(
-                old_lib, new_lib, used_by_old_input, used_by_new_input
-            )
-            return _apply_used_by_scoping(
-                result,
-                used_by_apps,
-                used_by_old_input,
-                used_by_new_input,
-                old,
-                new,
-                policy,
-                pf,
-                severity=severity,
-                suppression=suppression,
-            )
-        except ConsumerUnreadableError as exc:
-            # A REQUIRED consumer that cannot be read is an input error (an
-            # ADVISORY one never raises -- it comes back `unreadable=True`):
-            # exit 1 with one line instead of a Python traceback.
-            raise click.ClickException(f"--used-by consumer: {exc}") from exc
-        except LibraryExportsUnreadableError as exc:
-            # An OLD/NEW library whose export table was not read cannot scope
-            # any consumer: refuse rather than report a verdict nobody checked.
-            raise click.ClickException(f"--used-by library: {exc}") from exc
-    if required_symbols:
-        return _apply_required_symbol_scoping(
+    try:
+        return apply_scoped_gating(
             result,
-            required_symbols,
             old,
             new,
             policy,
             pf,
+            used_by_apps=used_by_apps,
+            required_symbols=required_symbols,
+            used_by_old_input=used_by_old_input,
+            used_by_new_input=used_by_new_input,
             severity=severity,
             suppression=suppression,
         )
-    return None
+    except UsedByEvidenceError as exc:
+        raise click.UsageError(
+            f"--used-by requires OLD/NEW to be real library binaries, or "
+            f"JSON snapshots carrying binary evidence (a `dump` of a real "
+            f"library, not headers-only); {exc.label} ({exc.path}) is neither."
+        ) from exc
+    except UsedByConsumerError as exc:
+        # A REQUIRED consumer that cannot be read: exit 1 with one line
+        # instead of a Python traceback.
+        raise click.ClickException(f"--used-by consumer: {exc.cause}") from exc
+    except UsedByLibraryError as exc:
+        raise click.ClickException(f"--used-by library: {exc.cause}") from exc
 
 
 def _render_compare_report(

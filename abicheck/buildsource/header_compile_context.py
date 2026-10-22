@@ -852,7 +852,7 @@ def _standard_conflicts_with_forced_language(
 #: host ``clang``, never necessarily the build's compiler, so replaying a
 #: ``.pch`` is a hard parse failure far more often than it is a fidelity win.
 #: L4 replay, which *does* use the real compiler, still carries it
-#: (``_argv.replay_extra_flags``).
+#: (``compile_invocation.replayed_tokens``).
 #:
 #: ``/FU`` — MSVC's forced ``#using`` of a managed (C++/CLI) assembly. It
 #: names no C/C++ header and has no GNU-driver equivalent to render as, so
@@ -991,7 +991,7 @@ def _forced_include_flags(
     :func:`~abicheck.header_utils.forced_include_operands`, **not**
     from ``cu.abi_relevant_flags``: routing forced includes through that list
     instead would double-emit them on every L4 replay command, since
-    ``_argv.replay_extra_flags`` both carries ``abi_relevant_flags`` and
+    ``compile_invocation.replayed_tokens`` both carries ``abi_relevant_flags`` and
     independently re-scans raw argv for the same tokens. See
     ``ABI_RELEVANT_FLAG_PREFIXES``'s own comment for the full accounting.
 

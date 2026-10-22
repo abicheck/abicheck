@@ -56,7 +56,10 @@ from ..storage.acyclic_json import gc_paused
 
 __all__ = [
     "concurrent_children_apply",
+    "fork_child",
+    "fork_is_safe",
     "isolation_supported",
+    "reap_child",
     "resolve_cached_in_process",
     "run_cold_isolated",
     "run_isolated",
@@ -69,6 +72,14 @@ _T = TypeVar("_T")
 def isolation_supported() -> bool:
     """Whether side resolution can run in forked children on this platform."""
     return sys.platform.startswith("linux")
+
+
+def fork_is_safe() -> bool:
+    """Whether this process may fork a worker child right now: the platform
+    supports isolation and no other thread runs. Forking a multi-threaded
+    process can leave a child waiting on a lock no thread of its own will
+    ever release, so every fork in this package is gated on this."""
+    return isolation_supported() and threading.active_count() == 1
 
 
 def concurrent_children_apply(
@@ -93,7 +104,7 @@ def concurrent_children_apply(
         and isolation_supported()
         and old_fmt is not None
         and new_fmt is not None
-        and threading.active_count() == 1
+        and fork_is_safe()
     )
 
 
@@ -191,23 +202,59 @@ def run_isolated(fns: Sequence[Callable[[], _T]], *, concurrent: bool) -> list[_
     return _run_children(ctx, list(fns))
 
 
-def _run_children(ctx: Any, fns: list[Callable[[], _T]]) -> list[_T]:
-    started: list[tuple[Any, Any]] = []
-    results: list[_T] = []
-    error: BaseException | None = None
-    # Move everything the parent holds into the permanent generation before
-    # forking, so a child's collections never traverse (and copy-on-write
-    # fault in) the inherited heap -- the fork-safety step the gc docs name.
+def fork_child(
+    ctx: Any, fn: Callable[[], Any], *, daemon: bool = True
+) -> tuple[Any, Any]:
+    """Fork one daemon child that runs *fn* and sends ``("ok", value)`` or
+    ``("err", exc)`` back; return ``(process, receive end)``.
+
+    The one fork primitive this package's process fan-outs share (the side
+    children here, ``workflows.keyed_process_pool``'s release members).
+    Everything the parent holds is moved into the permanent generation
+    first, so a child's collections never traverse (and copy-on-write fault
+    in) the inherited heap -- the fork-safety step the gc docs name. The
+    caller reaps the child with :func:`reap_child`. *daemon* ``False`` is
+    for a child that forks children of its own (``multiprocessing`` forbids
+    a daemonic process to): such a caller must reap it on every path itself.
+    """
     gc.freeze()
     try:
-        for fn in fns:
-            recv, send = ctx.Pipe(duplex=False)
-            proc = ctx.Process(target=_child, args=(send, fn), daemon=True)
-            proc.start()
-            send.close()
-            started.append((proc, recv))
+        recv, send = ctx.Pipe(duplex=False)
+        proc = ctx.Process(target=_child, args=(send, fn), daemon=daemon)
+        proc.start()
+        send.close()
     finally:
         gc.unfreeze()
+    return proc, recv
+
+
+def _with_ast_sizes(fn: Callable[[], _T]) -> Callable[[], tuple[_T, int]]:
+    """*fn*, also returning the header-AST bytes its dumps reported, so the
+    parent can re-report them to an enclosing ``observe_ast_sizes`` sink (a
+    release member's memory admission learns from them)."""
+    from ..storage.ast_size_observer import observe_ast_sizes
+
+    def run() -> tuple[_T, int]:
+        seen = [0]
+
+        def _sink(nbytes: int) -> None:
+            seen[0] += nbytes
+
+        with observe_ast_sizes(_sink):
+            value = fn()
+        return value, seen[0]
+
+    return run
+
+
+def _run_children(ctx: Any, fns: list[Callable[[], _T]]) -> list[_T]:
+    from ..storage.ast_size_observer import report_ast_size
+
+    started: list[tuple[Any, Any]] = [
+        fork_child(ctx, _with_ast_sizes(fn)) for fn in fns
+    ]
+    results: list[_T] = []
+    error: BaseException | None = None
     try:
         for proc, recv in started:
             if error is not None:
@@ -228,6 +275,8 @@ def _run_children(ctx: Any, fns: list[Callable[[], _T]]) -> list[_T]:
                     SnapshotError(f"side resolution result transfer failed: {exc!r}"),
                 )
             if status == "ok":
+                value, ast_bytes = value
+                report_ast_size(ast_bytes)
                 results.append(value)
             elif status == "err":
                 error = value
@@ -249,7 +298,7 @@ def _run_children(ctx: Any, fns: list[Callable[[], _T]]) -> list[_T]:
         for _proc, recv in started:
             recv.close()
         for proc, _recv in started:
-            _reap(proc, escalate=abandoned)
+            reap_child(proc, escalate=abandoned)
     if error is not None:
         raise error
     return results
@@ -259,7 +308,7 @@ def _run_children(ctx: Any, fns: list[Callable[[], _T]]) -> list[_T]:
 _TERMINATE_GRACE_SECONDS = 5.0
 
 
-def _reap(proc: Any, *, escalate: bool) -> None:
+def reap_child(proc: Any, *, escalate: bool) -> None:
     """Join *proc*; for an abandoned child, never wait on SIGTERM alone.
 
     A forked child inherits the parent's signal dispositions, including the

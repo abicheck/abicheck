@@ -4,7 +4,7 @@
   "scenarios"
  ],
  "revision": "375a1acf4bfa928476befd10191ad68dd15b359b",
- "count": 7113,
+ "count": 7109,
  "unreached": [
   "abicheck/_compiler_options.py::_forwarded_driver_mode_override",
   "abicheck/_compiler_options.py::_opaque_option_source_tokens",
@@ -1818,10 +1818,6 @@
   "abicheck/cli_compare_release.py::_execute_release_compare",
   "abicheck/cli_compare_release.py::_render_release_outcome",
   "abicheck/cli_compare_release.py::compare_release_cmd",
-  "abicheck/cli_compare_release.py::compare_release_cmd.<locals>._make_temp_dir",
-  "abicheck/cli_compare_release_helpers.py::_cleanup_temp_dirs",
-  "abicheck/cli_compare_release_helpers.py::reject_bundle_facts_out_collision",
-  "abicheck/cli_compare_release_helpers.py::reject_bundle_facts_out_dir_collision",
   "abicheck/cli_compare_release_matrix.py::_finalize_release_output",
   "abicheck/cli_compare_release_matrix.py::_release_change_kind_str",
   "abicheck/cli_compare_release_matrix.py::_release_display_buckets",

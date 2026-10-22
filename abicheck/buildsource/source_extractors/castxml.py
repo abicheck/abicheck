@@ -49,14 +49,13 @@ from ._argv import (
     effective_directory,
     is_msvc_mode,
     pick_compiler_binary,
-    replay_extra_flags,
     resolve_read_files,
     split_public_roots,
     unredact_home,
 )
-from ._argv_shortopts import rebase_structured_path
 from ._deadline_bound import run_bounded_for_extraction
 from .base import SourceExtractionError, assemble_source_tu
+from .compile_invocation import parse_compile_invocation, replayed_tokens
 
 #: castxml extractor schema/behaviour version, recorded in the dump provenance
 #: and folded into ``source_replay.compute_tu_cache_key``'s per-TU cache key
@@ -68,9 +67,9 @@ from .base import SourceExtractionError, assemble_source_tu
 #: snapshot -- the same parser started extracting ``EnumType.underlying_type``
 #: for real (previously always the dataclass default ``"int"``), so an
 #: upgrading user's warm per-TU cache would keep replaying the old default
-#: without this bump. 0.3 (Codex review): ``_argv._carry_abi_relevant_flags``
+#: without this bump. 0.3 (Codex review): ``compile_invocation._carry_abi_relevant_flags``
 #: (shared with the clang extractor via ``build_castxml_command``'s own
-#: ``_replay_extra_flags`` call) no longer dedups a repeated flag WITHIN
+#: ``_replayed_tokens`` call) no longer dedups a repeated flag WITHIN
 #: ``abi_relevant_flags`` itself -- a real, layered build config recording a
 #: toggle-style flag pair more than once (e.g. ``-fexceptions
 #: -fno-exceptions -fexceptions``) previously had every repeat past the
@@ -92,7 +91,6 @@ CASTXML_EXTRACTOR_VERSION = "0.4"
 #: and tests keep working.
 _unredact_home = unredact_home
 _compiler_binary = pick_compiler_binary
-_replay_extra_flags = replay_extra_flags
 
 _CASTXML_VERSION_RE = re.compile(r"castxml version\s+(\S+)", re.IGNORECASE)
 #: castxml's own internal frontend is ALWAYS its bundled Clang (a
@@ -277,8 +275,9 @@ def build_castxml_command(
     baked into the argv; ``-I/work/include`` is still ``-I/work/include``
     regardless of which directory castxml is launched from.
     """
-    cc_bin = pick_compiler_binary(compile_unit, compiler_binary)
-    cc_id = "msvc" if is_msvc_mode(cc_bin) else "gnu"
+    invocation = parse_compile_invocation(compile_unit, compiler_binary)
+    cc_bin = invocation.compiler
+    cc_id = "msvc" if invocation.msvc else "gnu"
 
     # The compile unit's own arguments, as castxml's parser sees them. The
     # emulated compiler gets the subset that changes its predefined macros
@@ -287,40 +286,19 @@ def build_castxml_command(
     # not the macro/include query, and the two disagree.
     cmd: list[str] = []
     cmd += _std_flag(compile_unit.standard, cc_id)
-    for key, value in compile_unit.defines.items():
+    for key, value in invocation.defines:
         cmd.append(f"-D{key}={value}" if value else f"-D{key}")
-    for undef in compile_unit.undefines:
+    for undef in invocation.undefines:
         cmd.append(f"-U{undef}")
-    run_directory = effective_directory(compile_unit.argv, compile_unit.directory)
-    include_explicit = compile_unit.explicit_or_unknown(system=False)
-    system_include_explicit = compile_unit.explicit_or_unknown(system=True)
-    for inc, is_explicit in zip(compile_unit.include_paths, include_explicit):
-        cmd += [
-            "-I",
-            rebase_structured_path(
-                inc,
-                compile_unit.directory,
-                run_directory,
-                explicit_absolute=is_explicit,
-            ),
-        ]
-    for inc, is_explicit in zip(
-        compile_unit.system_include_paths, system_include_explicit
-    ):
-        cmd += [
-            "-isystem",
-            rebase_structured_path(
-                inc,
-                compile_unit.directory,
-                run_directory,
-                explicit_absolute=is_explicit,
-            ),
-        ]
-    if compile_unit.sysroot:
-        cmd.append(f"--sysroot={compile_unit.sysroot}")
-    if compile_unit.target_triple and cc_id != "msvc":
-        cmd.append(f"--target={compile_unit.target_triple}")
-    cmd += _replay_extra_flags(compile_unit, cmd, cc_id)
+    for inc in invocation.include_dirs:
+        cmd += ["-I", inc]
+    for inc in invocation.system_include_dirs:
+        cmd += ["-isystem", inc]
+    if invocation.sysroot:
+        cmd.append(f"--sysroot={invocation.sysroot}")
+    if invocation.target_triple and cc_id != "msvc":
+        cmd.append(f"--target={invocation.target_triple}")
+    cmd += replayed_tokens(invocation, cmd)
     cmd = castxml_parser_arguments(cmd)
     # A C unit needs castxml's C emulation: in `--castxml-cc-gnu` mode castxml
     # injects the emulated compiler's C++ `-std=gnu++NN`, which its parser
@@ -447,7 +425,7 @@ class CastxmlSourceExtractor:
             # `env -C DIR`/`--chdir` prefix recorded in `compile_unit.argv`
             # (Codex review, Finding 10, fresh evidence): real `env -C`
             # genuinely chdirs the whole invoked process before it execs
-            # the compiler, so `replay_extra_flags()`'s own raw,
+            # the compiler, so `replayed_tokens()`'s own raw,
             # unmodified `-iquote ../include`-style survivors (scanned
             # straight from `compile_unit.argv` -- see that function's own
             # docstring) only resolve correctly when THIS subprocess's cwd

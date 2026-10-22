@@ -112,7 +112,11 @@ from .frontends.render import ONELINE_FORMAT, resolve_demangle_for_format
 from .model.sided_inputs import resolve_per_side_inputs
 from .report.report_modes import normalize_report_mode
 from .serialization import run_scoped_digest_cache
-from .workflows.compare.configuration import resolve_required_symbol_policy
+from .workflows.compare.configuration import (
+    fold_compare_collect_inputs,
+    resolve_required_symbol_policy,
+    split_compile_context_frontend,
+)
 from .workflows.compare.use_case_attribution import (
     UseCaseAttributionError,
     attach_use_case_impact,
@@ -161,21 +165,28 @@ def _normalize_compare_options(
     old_build_info: Path | None = None,
     new_build_info: Path | None = None,
 ) -> _NormalizedCompareOptions:
-    """Fold the compare option flags into their resolved, dispatch-ready values."""
+    """Fold the compare option flags into dispatch-ready values.
+
+    The semantic collect fold is ``fold_compare_collect_inputs``; the flag
+    spellings (debug format, demangle, report mode) resolve here.
+    """
     # Fold the --depth dial into the internal collect mode (ADR-037 D5), the
     # same way `dump` does; when omitted, infer it from --sources/--build-info
     # (or config source.method) rather than defaulting to "off" (P1 fix).
     with compare_settings_usage_errors():
-        collect_mode, _ = resolve_compare_collect_mode(
-            depth,
-            resolved_cfg.source_method,
-            old_sources,
-            new_sources,
-            old_build_info,
-            new_build_info,
+        collect_mode, headers, old_headers_only, new_headers_only = (
+            fold_compare_collect_inputs(
+                depth=depth,
+                source_method=resolved_cfg.source_method,
+                headers=headers,
+                old_headers_only=old_headers_only,
+                new_headers_only=new_headers_only,
+                old_sources=old_sources,
+                new_sources=new_sources,
+                old_build_info=old_build_info,
+                new_build_info=new_build_info,
+            )
         )
-    if depth == "binary":
-        headers, old_headers_only, new_headers_only = (), (), ()
 
     # An explicit "auto" returns to auto-detection (None); any other value is
     # passed through verbatim.
@@ -296,44 +307,28 @@ def _preflight_manifests_and_audit(
 ) -> tuple[DumpManifest | None, DumpManifest | None]:
     """Load the dump manifests and reject what a dry run must not report "ok".
 
-    Everything here runs *ahead* of the ``--dry-run`` emit deliberately: a
-    dry run reporting success for an invocation the real run rejects would be
-    worse than useless. Returns the two loaded manifest objects (``None`` for
-    a side given none).
-
-    ADR-049 D8 pack-vs-pack conflict detection is deliberately *not* part of
-    this — see ``validate_pack_manifests`` for which layers it needs that are
-    not resolved this early.
+    The loading and validation are in ``workflows.compare.manifests``; this
+    renders their typed refusals as the usage errors ``compare`` prints.
     """
-    old_manifest_obj: DumpManifest | None = None
-    new_manifest_obj: DumpManifest | None = None
-    if old_dump_manifest is not None or new_dump_manifest is not None:
-        from .errors import ManifestValidationError
-        from .workflows.extraction import load_manifest
-
-        try:
-            if old_dump_manifest is not None:
-                old_manifest_obj = load_manifest(old_dump_manifest)
-            if new_dump_manifest is not None:
-                new_manifest_obj = load_manifest(new_dump_manifest)
-        except ManifestValidationError as exc:
-            raise click.UsageError(str(exc)) from exc
-
-    # Manifest validity, ahead of the --dry-run emit for the same reason as
-    # the two guards above -- see the helper for what deliberately does *not*
-    # move here.
-    from .errors import PackManifestError as _PackManifestError
-    from .workflows.pack_resolution import validate_pack_manifests
+    from .errors import ManifestValidationError, PackManifestError
+    from .workflows.compare.manifests import (
+        load_compare_dump_manifests,
+        validate_compare_pack_manifests,
+    )
 
     try:
-        validate_pack_manifests(
+        manifests = load_compare_dump_manifests(old_dump_manifest, new_dump_manifest)
+    except ManifestValidationError as exc:
+        raise click.UsageError(str(exc)) from exc
+    try:
+        validate_compare_pack_manifests(
             pack_paths,
             policy_file_path=policy_file_path,
             contract_evaluation=contract_evaluation,
         )
-    except _PackManifestError as exc:
+    except PackManifestError as exc:
         raise click.UsageError(str(exc)) from exc
-    return old_manifest_obj, new_manifest_obj
+    return manifests
 
 
 @contextmanager
@@ -379,62 +374,52 @@ def _resolve_evaluation_config(
     policy_selected_path: Path | None,
     policy_selected_sha: str | None,
 ) -> tuple[Any, PolicyFile | None, Any]:
-    """``(evaluation_config, policy_file, resolved_cfg)`` via the typed API's
-    ``workflows.compare_configuration``; a gate pack's levels fold into
-    *resolved_cfg*. Built from the raw CLI values, not merged locals (a
-    pre-merged value would look CLI-stated)."""
-    from .compatibility_evaluation_frontend import FrontEnd
-    from .pack_application import apply_to_compare_config
+    """Adapt the CLI inputs to ``workflows.compare.configuration`` and render refusals.
+
+    The raw flag values (not merged locals, which would look CLI-stated) and
+    the Click-typed set are the CLI's; the fold itself is in the workflow.
+    """
     from .workflows import compare_input_adapters as _adapters
+    from .workflows.compare.configuration import resolve_evaluation_configuration
     from .workflows.compare_configuration import (
         ConfigurationConflictError,
         ProjectPolicyOverridesError,
-        resolve_compare_configuration,
     )
 
-    explicit, project = _adapters.cli_configuration_inputs(
-        {
-            "contract_mode": contract_mode,
-            "policy": policy,
-            "policy_file_path": policy_file_path,
-            "suppress": suppress,
-            "require_justification": require_justification,
-            "severity_preset": severity_preset,
-            "pack_paths": pack_paths,
-            # The roots each side was classified under (ADR-075 D7).
-            "headers": headers,
-        },
-        # The stated settings: only this module holds the Click context.
-        typed={n for n in _adapters.typed_parameter_names() if _param_from_cli(n)},
-        project_cfg=project_cfg,
-        project_path=cfg_path,
-        # The overlay applies only from an explicitly named --config.
-        project_overlays_applied=config_explicit,
-        policy_file=policy_file,  # already loaded: one read per digest
-        suppression=suppression,
-        suppress_path=suppress,
-        policy_option=policy_selected_by,
-        policy_path=policy_selected_path,
-        policy_sha256=policy_selected_sha,
-        project_sha256=cfg_sha,
-        symbols_list=symbols_list,
-    )
     try:
-        configuration = resolve_compare_configuration(
-            explicit,
-            front_end=FrontEnd.CLI,
-            project=project,
+        return resolve_evaluation_configuration(
+            {
+                "contract_mode": contract_mode,
+                "policy": policy,
+                "policy_file_path": policy_file_path,
+                "suppress": suppress,
+                "require_justification": require_justification,
+                "severity_preset": severity_preset,
+                "pack_paths": pack_paths,
+                # The roots each side was classified under (ADR-075 D7).
+                "headers": headers,
+            },
+            # The stated settings: only this module holds the Click context.
+            typed={n for n in _adapters.typed_parameter_names() if _param_from_cli(n)},
+            resolved_cfg=resolved_cfg,
+            project_cfg=project_cfg,
+            cfg_path=cfg_path,
+            cfg_sha=cfg_sha,
+            config_explicit=config_explicit,
+            policy=policy,
             policy_file=policy_file,
-            base_policy=policy,
+            suppression=suppression,
+            suppress=suppress,
+            symbols_list=symbols_list,
             contract_evaluation=contract_evaluation,
+            policy_selected_by=policy_selected_by,
+            policy_selected_path=policy_selected_path,
+            policy_selected_sha=policy_selected_sha,
         )
     except ConfigurationConflictError as exc:
         raise click.UsageError(str(exc)) from exc
     except ProjectPolicyOverridesError as exc:
         raise click.BadParameter(str(exc), param_hint="--policy") from exc
-    if (application := configuration.pack_application) is not None:
-        resolved_cfg = apply_to_compare_config(resolved_cfg, application)
-    return configuration.evaluation_config, configuration.policy_file, resolved_cfg
 
 
 def _attach_use_case_impact(
@@ -1308,8 +1293,9 @@ def run_compare(
     # frontend on the threaded context so run_dump's `compile.frontend` does NOT
     # outrank that per-side header_backend (it only carries the --gcc-*/--sysroot/
     # --nostdinc knobs for both sides).
-    header_backend = compile_context.frontend
-    side_compile_context = dataclasses.replace(compile_context, frontend="auto")
+    header_backend, side_compile_context = split_compile_context_frontend(
+        compile_context
+    )
 
     old_h, new_h, old_inc, new_inc = resolve_per_side_inputs(
         headers,

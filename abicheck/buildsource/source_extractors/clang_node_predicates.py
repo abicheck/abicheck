@@ -55,7 +55,7 @@ from .clang_public_roots import _file_segments, _matches_exact_public_header
 #: explicit pin either way) is left carried through as-is, matching the L2
 #: header-AST backend's own established "accepted approximation" for that
 #: shape (see ``needs_sycl_host_only``'s own docstring). 0.12:
-#: ``_argv._carry_abi_relevant_flags`` (shared by castxml/clang) no longer
+#: ``compile_invocation._carry_abi_relevant_flags`` (shared by castxml/clang) no longer
 #: dedups a repeated flag WITHIN ``abi_relevant_flags`` itself -- a real,
 #: layered build config can legitimately record the same toggle-style flag
 #: more than once (e.g. ``-fno-sycl -fsycl -fno-sycl``), and the old dedup

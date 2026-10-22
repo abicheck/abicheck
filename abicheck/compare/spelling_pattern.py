@@ -48,6 +48,7 @@ from .spelling_match_cache import (
 
 __all__ = [
     "BOUNDARY_CHARS",
+    "WORD_TOKEN_RE",
     "compile_spelling_pattern",
     "finditer_allow_nested",
     "spellings_possible_in",
@@ -59,7 +60,9 @@ __all__ = [
 BOUNDARY_CHARS = "_:"
 
 
-_WORD_TOKEN_RE = re.compile(r"[A-Za-z0-9_]+")
+#: One maximal C identifier-character run; the tokenizer behind both this
+#: module's pre-screen and ``finding_redundancy``'s root-type index.
+WORD_TOKEN_RE = re.compile(r"[A-Za-z0-9_]+")
 
 
 def spellings_possible_in(
@@ -85,11 +88,11 @@ def spellings_possible_in(
     """
     present: set[str] = set()
     for haystack in haystacks:
-        present.update(_WORD_TOKEN_RE.findall(haystack))
+        present.update(WORD_TOKEN_RE.findall(haystack))
     return {
         spelling
         for spelling in spellings
-        if all(token in present for token in _WORD_TOKEN_RE.findall(spelling))
+        if all(token in present for token in WORD_TOKEN_RE.findall(spelling))
     }
 
 

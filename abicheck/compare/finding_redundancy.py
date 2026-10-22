@@ -29,11 +29,13 @@ raw changes relate is ``compare/``'s job).
 from __future__ import annotations
 
 import re
+from collections.abc import Iterable
 
 from ..model.change import Change
 from ..model.change_catalog.kinds import ChangeKind
 from ..model.name_heuristics import NameHeuristicEffect, register_name_heuristic
 from ..model.qualified_name_split import split_top_level_scopes
+from .spelling_pattern import WORD_TOKEN_RE
 
 # Change kinds that represent root type/enum changes (for redundancy filtering).
 ROOT_TYPE_CHANGE_KINDS: frozenset[ChangeKind] = frozenset(
@@ -227,10 +229,68 @@ def _compile_root_patterns(root_types: dict[str, Change]) -> dict[str, re.Patter
     return {name: _root_pattern(name) for name in root_types}
 
 
+_WORD_RUN = WORD_TOKEN_RE
+
+
+class _RootIndex:
+    """Which root type names a finding's spellings *can* mention.
+
+    :func:`match_root_type` asks, root by root in ``root_types`` order,
+    whether the root's word-bounded name occurs in the finding's spellings:
+    roots x findings regex searches, plus one compile per root. A word-bounded
+    occurrence of a name that starts with a word character makes the name's
+    first word run (``[A-Za-z0-9_]+``) a *maximal* word run of the searched
+    text -- the lookbehind bounds its start, and either the name's own next
+    character or the lookahead bounds its end. So only roots whose first run
+    is among the text's runs (or whose name starts with a non-word character,
+    which this cannot pre-screen) are searched, still in ``root_types``
+    order, and each pattern is compiled on first use. The answer is the one
+    the exhaustive scan gives.
+    """
+
+    __slots__ = ("_order", "_by_run", "_unscreened", "_patterns")
+
+    def __init__(self, root_types: dict[str, Change]) -> None:
+        self._order: dict[str, int] = {}
+        self._by_run: dict[str, list[str]] = {}
+        self._unscreened: list[str] = []
+        self._patterns: dict[str, re.Pattern[str]] = {}
+        for position, name in enumerate(root_types):
+            self._order[name] = position
+            run = _WORD_RUN.match(name)
+            if run is None:
+                self._unscreened.append(name)
+            else:
+                self._by_run.setdefault(run.group(), []).append(name)
+
+    def pattern(self, name: str) -> re.Pattern[str]:
+        pat = self._patterns.get(name)
+        if pat is None:
+            pat = self._patterns[name] = _root_pattern(name)
+        return pat
+
+    def candidates(
+        self, c: Change, root_types: dict[str, Change], exclude: str | None
+    ) -> list[str]:
+        """The roots of *root_types* (minus *exclude*) *c* may name, in order."""
+        found = set(self._unscreened)
+        for text in (c.old_value, c.new_value, c.description):
+            if text:
+                for run in _WORD_RUN.findall(text):
+                    names = self._by_run.get(run)
+                    if names is not None:
+                        found.update(names)
+        order = self._order
+        return sorted(
+            (n for n in found if n != exclude and n in root_types),
+            key=order.__getitem__,
+        )
+
+
 def _classify_root_pass(
     changes: list[Change],
     root_types: dict[str, Change],
-    compiled_patterns: dict[str, re.Pattern[str]],
+    root_index: _RootIndex,
     kept: list[Change],
     redundant: list[Change],
 ) -> None:
@@ -244,9 +304,8 @@ def _classify_root_pass(
             continue
         if c.kind in _DERIVED_CHANGE_KINDS:
             type_name = root_type_name(c)
-            other_roots = {k: v for k, v in root_types.items() if k != type_name}
             matched_root = ROOT_TYPE_REFERENCE.apply(
-                c, root_types=other_roots, compiled_patterns=compiled_patterns
+                c, root_types=root_types, root_index=root_index, exclude=type_name
             )
             if matched_root is not None:
                 _mark_as_redundant(c, matched_root, root_types, redundant)
@@ -262,7 +321,7 @@ def _classify_root_pass(
 def _classify_derived_pass(
     changes: list[Change],
     root_types: dict[str, Change],
-    compiled_patterns: dict[str, re.Pattern[str]],
+    root_index: _RootIndex,
     kept: list[Change],
     redundant: list[Change],
 ) -> None:
@@ -275,7 +334,7 @@ def _classify_derived_pass(
             continue
         # Check if this change references a (kept) root type
         matched_root = ROOT_TYPE_REFERENCE.apply(
-            c, root_types=root_types, compiled_patterns=compiled_patterns
+            c, root_types=root_types, root_index=root_index
         )
         if matched_root is not None:
             _mark_as_redundant(c, matched_root, root_types, redundant)
@@ -293,19 +352,19 @@ def split_redundant(changes: list[Change]) -> tuple[list[Change], list[Change]]:
     if not root_types:
         return changes, []
 
-    # Pre-compile word-boundary regex patterns for all root type names once,
-    # instead of recompiling per (match_root_type call * root type) pair.
-    compiled_patterns = _compile_root_patterns(root_types)
+    # One index over the root names: each finding searches only the roots
+    # its spellings can mention, compiling each pattern once, on first use.
+    root_index = _RootIndex(root_types)
 
     kept: list[Change] = []
     redundant: list[Change] = []
 
     # First pass: classify root type changes (some may be redundant
     # if they reference another root type — nested type propagation).
-    _classify_root_pass(changes, root_types, compiled_patterns, kept, redundant)
+    _classify_root_pass(changes, root_types, root_index, kept, redundant)
 
     # Second pass: classify non-root changes
-    _classify_derived_pass(changes, root_types, compiled_patterns, kept, redundant)
+    _classify_derived_pass(changes, root_types, root_index, kept, redundant)
 
     return kept, redundant
 
@@ -314,6 +373,9 @@ def match_root_type(
     c: Change,
     root_types: dict[str, Change],
     compiled_patterns: dict[str, re.Pattern[str]] | None = None,
+    *,
+    root_index: _RootIndex | None = None,
+    exclude: str | None = None,
 ) -> str | None:
     """Check if a derived change references a known root type.
 
@@ -337,12 +399,26 @@ def match_root_type(
     "after"), that one value is still sufficient, matching prior behavior.
 
     When *compiled_patterns* is provided, uses pre-compiled regex objects
-    instead of recompiling per call (performance optimisation).
+    instead of recompiling per call (performance optimisation). With
+    *root_index* (built over a superset of *root_types*), only the roots the
+    finding's spellings can name are searched -- see :class:`_RootIndex`.
+    *exclude* names one root of *root_types* to skip.
     """
-    if compiled_patterns is None:
-        compiled_patterns = _compile_root_patterns(root_types)
-    for type_name in root_types:
-        pat = compiled_patterns.get(type_name) or _root_pattern(type_name)
+    names: Iterable[str]
+    if root_index is not None:
+        names = root_index.candidates(c, root_types, exclude)
+        pattern_of = root_index.pattern
+    else:
+        if compiled_patterns is None:
+            compiled_patterns = _compile_root_patterns(root_types)
+        patterns = compiled_patterns
+        names = (n for n in root_types if n != exclude)
+
+        def pattern_of(name: str) -> re.Pattern[str]:
+            return patterns.get(name) or _root_pattern(name)
+
+    for type_name in names:
+        pat = pattern_of(type_name)
         if c.old_value and c.new_value:
             if pat.search(c.old_value) and pat.search(c.new_value):
                 return type_name

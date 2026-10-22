@@ -39,6 +39,7 @@ from ...extract.headers.toolchain import _safe_mtime, _safe_size
 from ...extract.semantic_normalizer import normalize_header_ast
 from ...model import AbiSnapshot, RecordType
 from ...model.semantic_ir import SemanticIR
+from .. import memory_trace
 from ..snapshot_factory import new_snapshot
 
 if TYPE_CHECKING:
@@ -148,15 +149,16 @@ def _try_dwarf_snapshot(
             stacklevel=3,
         )
 
-    snap = build_snapshot_from_dwarf(
-        so_path,
-        elf_meta,
-        dwarf_meta,
-        dwarf_adv,
-        version=version,
-        language_profile=profile_hint,
-        session=session,
-    )
+    with memory_trace.phase("dump.dwarf_snapshot"):
+        snap = build_snapshot_from_dwarf(
+            so_path,
+            elf_meta,
+            dwarf_meta,
+            dwarf_adv,
+            version=version,
+            language_profile=profile_hint,
+            session=session,
+        )
     # If DWARF produced functions (or was explicitly forced), use it.
     if snap.declarations.functions or snap.declarations.variables or dwarf_only:
         if not headers and not dwarf_only:

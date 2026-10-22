@@ -32,7 +32,6 @@ override an artifact-proven break.
 
 from __future__ import annotations
 
-from collections import deque
 from collections.abc import Mapping
 from typing import TYPE_CHECKING
 
@@ -41,11 +40,9 @@ from abicheck.model.source_graph_query import (
     PUBLIC_VISIBILITIES,
     decl_declaring_files,
     is_internal_dependency_node,
-    is_public_dependency_node,
 )
 
 from ..compare.edge_query import source_graph_covers
-from ..model.graph_facts import GraphEdge
 from ..model.source_graph import EVIDENCE_TIER_L5, SourceGraphSummary
 from ..model.source_graph_coverage import (
     CALL_GRAPH_PASS,
@@ -58,9 +55,12 @@ from ..model.source_graph_coverage import (
     trusted_kinds,
 )
 from ..model.source_graph_query import format_dependency_path, kind_map, label_map
+from . import dependency_renames
+from .dependency_paths import _dependency_path, _dependency_reachability
 
 if TYPE_CHECKING:
     from ..model.change import Change
+    from .graph_reconcile import GraphReconciliation, ReconciledPair
 
 
 # ── Phase 5: graph-derived secondary risk findings (ADR-031 D6) ─────────────
@@ -161,114 +161,6 @@ def _public_entry_call_reachability(
             stack.extend(calls.get(node, []))
         out[entry] = frozenset(seen)
     return out
-
-
-def _dependency_reachability(
-    graph: SourceGraphSummary, edge_kinds: frozenset[str]
-) -> dict[str, frozenset[str]]:
-    """For each public entry (exported decl or public type), what it reaches.
-
-    Generalizes :func:`_public_entry_call_reachability` from ``DECL_CALLS_DECL``
-    alone to *edge_kinds* (normally :data:`DEPENDENCY_EDGE_KINDS`, or the
-    old/new-common subset a version diff must restrict to — see
-    :func:`_common_dependency_edge_kinds`): a public struct's private base class
-    (``TYPE_INHERITS``) or private field type (``TYPE_HAS_FIELD_TYPE``), a
-    function's private parameter type (``DECL_HAS_TYPE``), and a body reading a
-    private constant (``DECL_REFERENCES_DECL``) are exactly the "not a call at
-    all" risks ADR-041 opens with — a call-only closure never sees them.
-
-    Entries are every node :func:`is_public_dependency_node` accepts: a decl
-    backing an exported symbol (``SOURCE_DECL_MAPS_TO_SYMBOL``), *or* any
-    decl/type node with public-header visibility — not exported-symbol-backed
-    decls alone (tenth Codex review). A public inline/template/constexpr
-    function or a public variable declared in a public header commonly has no
-    exported binary symbol of its own (inlined at every call site, or never
-    emitted standalone), so restricting entries to
-    ``SOURCE_DECL_MAPS_TO_SYMBOL`` missed exactly the ADR's own headline
-    example — ``inline int f() { return detail::SECRET; }`` — whenever ``f``
-    isn't separately exported. ``cross_source_checks.py``'s intra-version check already
-    treats a ``visibility="public_header"`` decl as public
-    (``is_public_dependency_node``, shared since the fourth review); this
-    closure now uses the identical rule, so a public type is no longer a
-    special case (:func:`_public_types` is unused here now — public-header
-    visibility already covers it).
-    Returns ``{}`` when *edge_kinds* is empty or the graph carries none of them,
-    so callers can skip the comparison entirely.
-    """
-    adjacency: dict[str, list[str]] = {}
-    for e in graph.edges:
-        if e.kind in edge_kinds:
-            adjacency.setdefault(e.src, []).append(e.dst)
-    if not adjacency:
-        return {}
-    exported_decls = {
-        e.src for e in graph.edges if e.kind == "SOURCE_DECL_MAPS_TO_SYMBOL"
-    }
-    node_by_id = {n.id: n for n in graph.nodes}
-    entries = {
-        n.id
-        for n in graph.nodes
-        if is_public_dependency_node(n.id, node_by_id, exported_decls)
-    }
-    out: dict[str, frozenset[str]] = {}
-    for entry in entries:
-        seen: set[str] = set()
-        stack = list(adjacency.get(entry, []))
-        while stack:
-            node = stack.pop()
-            if node in seen:
-                continue
-            seen.add(node)
-            stack.extend(adjacency.get(node, []))
-        out[entry] = frozenset(seen)
-    return out
-
-
-def _dependency_path(
-    graph: SourceGraphSummary, edge_kinds: frozenset[str], entry: str, target: str
-) -> list[GraphEdge] | None:
-    """One concrete shortest edge chain from *entry* to *target* over *edge_kinds*.
-
-    ADR-041 P0 roadmap item 3 ("graph explain proof path"): a reachability
-    fact (:func:`_dependency_reachability` already proved *target* is
-    reachable from *entry*) is a bare assertion until a reader can see *how* —
-    the actual edge-by-edge chain, not just an endpoint list. BFS over the
-    same *edge_kinds* adjacency, tracking one predecessor edge per node so the
-    chain can be reconstructed once *target* is reached (shortest, not every
-    path — one witness is enough to explain a finding). Returns ``[]`` when
-    *entry* == *target*, or ``None`` if no such path exists (defensive; should
-    not happen for a (entry, target) pair sourced from
-    :func:`_dependency_reachability`'s own output).
-    """
-    if entry == target:
-        return []
-    adjacency: dict[str, list[GraphEdge]] = {}
-    for e in graph.edges:
-        if e.kind in edge_kinds:
-            adjacency.setdefault(e.src, []).append(e)
-    visited = {entry}
-    queue: deque[str] = deque([entry])
-    came_from: dict[str, GraphEdge] = {}
-    while queue:
-        node = queue.popleft()
-        if node == target:
-            break
-        for e in adjacency.get(node, []):
-            if e.dst in visited:
-                continue
-            visited.add(e.dst)
-            came_from[e.dst] = e
-            queue.append(e.dst)
-    if target not in came_from:
-        return None
-    path: list[GraphEdge] = []
-    cur = target
-    while cur != entry:
-        e = came_from[cur]
-        path.append(e)
-        cur = e.src
-    path.reverse()
-    return path
 
 
 #: Dependency edge kinds grouped by the single extractor pass that emits them
@@ -1366,8 +1258,9 @@ def _internal_dependency_findings(
     new: SourceGraphSummary,
     new_labels: dict[str, str],
     boundary: str,
-    source_diff_changes: list[Change] | None = None,
-) -> list[Change]:
+    source_diff_changes: list[Change] | None,
+    reconciliation: GraphReconciliation,
+) -> tuple[list[Change], frozenset[str]]:
     """A public entry that newly reaches an internal declaration/type.
 
     "Reaches" spans the ADR-041 P0 dependency-edge family
@@ -1413,6 +1306,10 @@ def _internal_dependency_findings(
         _drop_untrusted_role_edges(new, untrusted_roles),
         common_kinds,
     )
+    renamed_by_new, moved_by_new = dependency_renames.index_reconciled_targets(
+        reconciliation
+    )
+    renamed: dict[tuple[str, str], ReconciledPair] = {}
     if _has_internal_reach_coverage(
         old_closure, common_kinds
     ) and _has_internal_reach_coverage(new_closure, common_kinds):
@@ -1431,6 +1328,22 @@ def _internal_dependency_findings(
             for entry, target in new_internal
             if target not in old_reach.get(entry, frozenset())
         }
+        # G31 Phase D: a newly reached target that reconciliation resolved as
+        # the renamed spelling of one this entry already reached is one
+        # dependency, reported once as PUBLIC_API_INTERNAL_TYPE_RENAMED.
+        renamed = dependency_renames.renamed_dependency_targets(
+            newly_internal, old_reach, renamed_by_new
+        )
+        newly_internal = {p for p in newly_internal if p not in renamed}
+        findings += dependency_renames.renamed_dependency_changes(
+            renamed,
+            new_labels,
+            boundary,
+            new,
+            lambda entry, target: _dependency_path(
+                new_closure, common_kinds, entry, target
+            ),
+        )
     else:
         newly_internal = set()
     reached_by_entry: dict[str, list[str]] = {}
@@ -1476,7 +1389,10 @@ def _internal_dependency_findings(
                 "before (via a call, reference, or field/base/parameter type). "
                 "The public surface has taken on an undeclared dependency; a "
                 "change to that internal entity becomes a hidden risk. "
-                "Source-graph evidence to review." + proof + correlation
+                "Source-graph evidence to review."
+                + proof
+                + correlation
+                + dependency_renames.move_note(raw_targets, moved_by_new)
             ),
             old_value="no internal dependency",
             new_value=f"reaches {len(targets)} internal decl(s)/type(s)",
@@ -1512,7 +1428,7 @@ def _internal_dependency_findings(
                 alternative_paths=alternative_paths,
             )
         findings.append(change)
-    return findings
+    return findings, frozenset(target for _, target in renamed)
 
 
 def _target_dependency_findings(
@@ -1732,31 +1648,19 @@ def diff_source_graph_findings(
         old, new, old_labels, new_labels, boundary
     )
     findings += _build_option_reach_findings(old, new, new_labels, boundary)
-    findings += _internal_dependency_findings(
-        old, new, new_labels, boundary, source_diff_changes
+    from .graph_reconcile import reconcile_graph_diff
+
+    reconciliation = reconcile_graph_diff(old, new)
+    dependency_findings, renamed_new_ids = _internal_dependency_findings(
+        old, new, new_labels, boundary, source_diff_changes, reconciliation
     )
+    findings += dependency_findings
     findings += _target_dependency_findings(old, new, new_labels, boundary)
     findings += _symbol_owner_findings(old, new, old_labels, new_labels, boundary)
-    findings += _reconciliation_findings(old, new)
+    findings += dependency_renames.reconciliation_findings(
+        reconciliation, old, new, renamed_new_ids
+    )
     from ..policy.source_graph_role_findings import role_change_findings
 
     findings += role_change_findings(old, new, _untrusted_dependency_roles(old, new))
     return findings
-
-
-def _reconciliation_findings(
-    old: SourceGraphSummary, new: SourceGraphSummary
-) -> list[Change]:
-    """G31 Phase B (ADR-048): rename/move/identity-reconciliation findings.
-
-    Pure enrichment on top of the structural diff already computed above —
-    never touches any other finding this function returns. See
-    ``buildsource.graph_reconcile`` for the matching algorithm.
-    """
-    from .graph_reconcile import (
-        diff_graph_reconciliation_findings,
-        reconcile_graph_diff,
-    )
-
-    reconciliation = reconcile_graph_diff(old, new)
-    return diff_graph_reconciliation_findings(reconciliation, old, new)

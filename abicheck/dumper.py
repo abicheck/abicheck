@@ -149,6 +149,7 @@ from .storage.ast_cache_location import reference_scratch_scoped
 from .storage.header_ast_cache import (
     _cache_path as _cache_path,
 )
+from .workflows import memory_trace
 from .workflows.dump.elf_fallback import (
     # DWARF/symbol-only fallback snapshot builders live in the sibling module
     # (dumper.py is at the file-size cap); re-exported here so
@@ -548,6 +549,7 @@ def dump(
         if dump_manifest is not None
         else public_header_dirs
     )
+    memory_trace.mark("dump.prologue:done")  # stage marks: off by default
     snapshot = handler.builder(
         so_path,
         headers,
@@ -569,20 +571,16 @@ def dump(
         frontend_context=frontend_context,
         **extra,
     )
+    memory_trace.mark("dump.binary:done")
 
-    # Note: from_headers (the HEADER_AWARE evidence-tier signal) is set by the
-    # format-specific builders (_dump_elf / _dump_pe / _dump_macho) at the point
-    # castxml actually parses headers, so every entry point — including the CLI
-    # and service native-binary paths that call those builders directly (e.g.
-    # service._try_header_scoped_dump), bypassing this function — records it
-    # correctly. DWARF-only and symbols-only builds leave it False.
+    # Note: from_headers (the HEADER_AWARE evidence tier) is set by the format
+    # builders (_dump_elf/_dump_pe/_dump_macho) where castxml parses headers, so
+    # entry points calling those builders directly (service._try_header_scoped_dump)
+    # record it too. DWARF-only and symbols-only builds leave it False.
     #
-    # scope_header_dirs is folded into the CONTRACT's public_header_dirs only
-    # -- never into apply_provenance's call below -- so a bare `-H <dir>`
-    # gains the same scope-comparability identity `compare`'s own `--header
-    # <dir>` already has, without silently opting a `dump`-only invocation
-    # into declaration-provenance tagging (ADR-015 stays opt-in via the
-    # separate public-header inputs, unchanged).
+    # scope_header_dirs folds into the CONTRACT's public_header_dirs only (never
+    # apply_provenance's call below): a bare `-H <dir>` gains `compare --header`'s
+    # scope-comparability identity without opting a `dump` into ADR-015 tagging.
     _attach_extraction_contract(
         snapshot,
         headers=list(dump_manifest.roots) if dump_manifest is not None else headers,
@@ -591,9 +589,8 @@ def dump(
         gcc_option_tokens=gcc_option_tokens,
         lang=lang,
         public_headers=effective_public_headers,
-        # Union, duplicates and all -- compute_extraction_contract's own
-        # _normalize() already folds through a set before sorting, so
-        # pre-deduping here would only be redundant work (code review).
+        # Union, duplicates and all: compute_extraction_contract's _normalize()
+        # already dedups before sorting (code review).
         public_header_dirs=[
             *(effective_public_header_dirs or []),
             *(scope_header_dirs or []),
@@ -687,6 +684,7 @@ def _dump_elf(
     from .elf_metadata import parse_elf_metadata
 
     elf_meta = parse_elf_metadata(so_path)
+    memory_trace.mark("dump.elf.symbols:done")
     (
         exported_dynamic,
         exported_dynamic_funcs,
@@ -716,6 +714,7 @@ def _dump_elf(
                 _format_out=_dwarf_format_out,
                 dwarf_source=debug_info_path,
             )
+        memory_trace.mark("dump.debug.metadata:done")
         resolved_debug_format = (
             _dwarf_format_out[0] if _dwarf_format_out else debug_format
         )
