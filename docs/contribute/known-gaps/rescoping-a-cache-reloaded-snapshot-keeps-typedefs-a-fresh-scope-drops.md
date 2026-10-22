@@ -1,0 +1,25 @@
+---
+doc_type: contributor
+audience:
+  - contributor
+level: advanced
+lifecycle: active
+generated: false
+---
+
+# Re-scoping a cache-reloaded snapshot keeps typedefs that scoping the fresh extraction drops
+
+Index: [Known gaps](../known-gaps.md)
+
+**Status (2026-10-22): OPEN.** Found while adding the finished-snapshot dump-cache tier (PR #1726).
+
+`scope_snapshot_excluding_dependencies` applied to a snapshot reloaded from the raw dump cache is not
+equal to the same call on the freshly extracted snapshot: on `libssl.so.3` with `-H openssl/ssl.h`
+the reloaded side keeps typedefs such as `ASN1_ENCODING` (and their `semantic_ir` / typedef-id
+entries) that the fresh side drops. So before #1726 a warm run could differ from a cold one.
+
+The finished tier stores the cold result, so warm hits now reproduce cold output. The asymmetry
+itself remains: (1) a cache populated before #1726 back-fills its finished entry from the raw entry,
+keeping the old warm-path output until the cache is cleared; (2) any other caller that scopes a
+deserialized snapshot still sees it. Root cause (which state the serialization round-trip loses or
+adds that scoping reads) is not yet identified.
