@@ -101,7 +101,12 @@ DEFAULT_TIMEOUT_SECONDS = 600.0
 #: receiving the union set (docs/contribute/known-gaps.md, "Multi-library L2
 #: compare scales quadratically with library count").
 DEFAULT_MAX_EXPONENT: dict[str, float] = {"headers": 1.4, "libraries": 1.7}
-DEFAULT_MAX_RSS_MB = 1024.0
+#: Ceiling on any point's peak process-tree memory, in MB. It gates the tree's
+#: PSS (see ``perf_receipt.RssSample``); the name predates that and is kept so
+#: the ``--max-rss-mb`` flag does not change. Measured PSS at n=10 libraries was
+#: 255-315 MB across the runs in the PR, so 512 leaves about 1.6x headroom. The
+#: old 1024 MB was set against fork-inflated RSS and would be about 3x looser.
+DEFAULT_MAX_RSS_MB = 512.0
 #: Below this marginal cost (seconds) the largest point is indistinguishable from
 #: the floor, and any exponent fitted through it is noise.
 MIN_MARGINAL_SECONDS = 0.25
@@ -120,6 +125,9 @@ class Point:
     n: int
     walls: list[float] = field(default_factory=list)
     peak_rss_mb: float | None = None
+    #: The gated memory figure: the tree's PSS (see ``RssSample``). ``None``
+    #: when PSS was unreadable, in which case the gate falls back to RSS.
+    peak_pss_mb: float | None = None
     problems: list[str] = field(default_factory=list)
 
     @property
@@ -219,6 +227,7 @@ def measure_point(
     fixture = fixtures.build(_spec(axis, n), work / "fixture")
     argv = build_argv(axis, fixture, work)
     rss: list[float] = []
+    pss: list[float] = []
     for index in range(repeat):
         cache = work / f"cache-{index}"
         cache.mkdir(parents=True, exist_ok=True)
@@ -239,12 +248,15 @@ def measure_point(
         point.walls.append(run.wall_seconds)
         if run.rss is not None and run.rss.sampled_peak_tree_bytes:
             rss.append(run.rss.sampled_peak_tree_bytes / (1024 * 1024))
+        if run.rss is not None and run.rss.sampled_peak_tree_pss_bytes:
+            pss.append(run.rss.sampled_peak_tree_pss_bytes / (1024 * 1024))
         # Validate every repetition: a fallback on one run is still a fallback.
         point.problems += [
             f"run {index}: {p}" for p in validate(axis, n, work / "report.json")
         ]
         shutil.rmtree(cache, ignore_errors=True)
     point.peak_rss_mb = max(rss) if rss else None
+    point.peak_pss_mb = max(pss) if pss else None
     return point
 
 
@@ -305,9 +317,15 @@ def gate(
             "units (see docs/contribute/performance.md, 'L2 scaling gate')"
         )
     for p in points:
-        if p.peak_rss_mb is not None and p.peak_rss_mb > max_rss_mb:
+        # PSS is the gated figure: RSS summed over a forked tree counts each
+        # child's inherited copy-on-write pages again (see ``RssSample``).
+        # RSS is the fallback only when PSS could not be read, so the ceiling
+        # still applies rather than passing unmeasured.
+        gated_mb = p.peak_pss_mb if p.peak_pss_mb is not None else p.peak_rss_mb
+        if gated_mb is not None and gated_mb > max_rss_mb:
+            metric = "PSS" if p.peak_pss_mb is not None else "RSS"
             failures.append(
-                f"{axis} n={p.n}: peak process-tree RSS {p.peak_rss_mb:.0f} MB "
+                f"{axis} n={p.n}: peak process-tree {metric} {gated_mb:.0f} MB "
                 f"exceeds {max_rss_mb:.0f} MB"
             )
     return exponent, failures
@@ -365,7 +383,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--max-rss-mb",
         type=finite_positive_float_arg,
         default=DEFAULT_MAX_RSS_MB,
-        help="Ceiling on any point's peak process-tree RSS (MB).",
+        help="Ceiling on any point's peak process-tree PSS (MB); RSS where PSS is unreadable.",
     )
     p.add_argument(
         "--timeout",
@@ -389,7 +407,15 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
 def _print(results: dict[str, Any], *, markdown: bool) -> None:
     sep = " | " if markdown else "  "
-    header = ["axis", "n", "median s", "peak RSS MB", "exponent", "budget"]
+    header = [
+        "axis",
+        "n",
+        "median s",
+        "peak RSS MB",
+        "peak PSS MB",
+        "exponent",
+        "budget",
+    ]
     if markdown:
         print("| " + sep.join(header) + " |")
         print("|" + "---|" * len(header))
@@ -404,6 +430,7 @@ def _print(results: dict[str, Any], *, markdown: bool) -> None:
                 str(p["n"]),
                 f"{median:.3f}",
                 f"{p['peak_rss_mb']:.0f}" if p["peak_rss_mb"] else "n/a",
+                f"{p['peak_pss_mb']:.0f}" if p["peak_pss_mb"] else "n/a",
                 f"{exp:.2f}" if exp is not None else "n/a",
                 f"{data['max_exponent']:.2f}",
             ]
@@ -412,6 +439,10 @@ def _print(results: dict[str, Any], *, markdown: bool) -> None:
                 if markdown
                 else sep.join(f"{c:>12}" for c in row)
             )
+    for axis, data in results["axes"].items():
+        for p in data["points"]:
+            if p["peak_pss_mb"] is None and p["peak_rss_mb"] is not None:
+                print(f"NOTE: {axis} n={p['n']}: PSS unreadable, gated on RSS")
     for failure in results["failures"]:
         print(f"FAIL: {failure}")
 
