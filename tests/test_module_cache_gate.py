@@ -68,7 +68,7 @@ ALLOWLIST: dict[str, str] = {
     "abicheck/model/plain_copy.py::_CLASS_INFO": _PURE_CLASS_FACTS,
     "abicheck/model/semantic_ir.py::_FIELD_NAMES": _PURE_CLASS_FACTS,
     "abicheck/storage/snapshot_encode.py::_FIELD_NAMES": _PURE_CLASS_FACTS,
-    "abicheck/storage/snapshot_encode.py::_SORTED_FIELD_NAMES": _PURE_CLASS_FACTS,
+    "abicheck/storage/snapshot_encode.py::_SORTED_ENCODERS": _PURE_CLASS_FACTS,
     "abicheck/qualified_name_segments_walk.py::_COLLECT_PLAN": _PURE_CLASS_FACTS,
     "abicheck/qualified_name_segments_walk.py::_FLAG_PLAN": _PURE_CLASS_FACTS,
     "abicheck/qualified_name_segments_walk.py::_NODE_KIND": _PURE_CLASS_FACTS,

@@ -579,7 +579,20 @@ def test_reference_mode_runs_every_pool_inline_and_matches_threads_8(
         mp.setenv(REFERENCE_MODE_ENV_VAR, "1")
         mp.setattr(os, "cpu_count", lambda: 8)
         spy.install(mp)
+        # The forked member path borrows no thread in this process, so a
+        # reference run that forked would also show zero grants: record it.
+        from abicheck.workflows import release_member_processes as rmp
+
+        forked: list[int] = []
+        real_fork = rmp.compare_members_in_processes
+
+        def _record_fork(*args: Any, **kwargs: Any) -> Any:
+            forked.append(1)
+            return real_fork(*args, **kwargs)
+
+        mp.setattr(rmp, "compare_members_in_processes", _record_fork)
         reference = _run(str(old), str(new))
+    assert not forked, "reference mode forked member processes"
     assert parallel_grants and max(parallel_grants) > 1, parallel_grants
     # The pooled run borrowed >1 thread; the reference run borrowed none --
     # no pool at all on the sequential member path, and any pool created on
