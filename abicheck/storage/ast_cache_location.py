@@ -42,7 +42,12 @@ from typing import Any, TypeVar
 from ..model.execution_cache_scoped import DiskCache
 from . import ast_cache_budget
 
-__all__ = ["AST_DISK_CACHE", "ast_cache_entry_path", "reference_scratch_scoped"]
+__all__ = [
+    "AST_DISK_CACHE",
+    "ast_cache_entry_path",
+    "backend_cache_dir",
+    "reference_scratch_scoped",
+]
 
 log = logging.getLogger(__name__)
 
@@ -111,6 +116,18 @@ def ast_cache_entry_path(key: str, backend: str = "castxml") -> Path:
         root.mkdir(parents=True, exist_ok=True)
         scratch = Path(tempfile.mkdtemp(prefix=f"{backend}-", dir=root))
         return scratch / f"{key}.{ext}"
+    cache_dir = backend_cache_dir(backend)
+    ast_cache_budget.note_use(cache_dir, entry := cache_dir / f"{key}.{ext}")
+    return entry
+
+
+def backend_cache_dir(backend: str) -> Path:
+    """The created on-disk directory for *backend*'s entries.
+
+    Shared by the header-AST cache and the header include-pass cache
+    (``abicheck.buildsource.header_include_disk_cache``), so each keeps its
+    own sub-directory under the one abicheck cache root.
+    """
     if sys.platform == "win32":
         local = os.environ.get("LOCALAPPDATA")
         cache_dir = (
@@ -134,5 +151,4 @@ def ast_cache_entry_path(key: str, backend: str = "castxml") -> Path:
         )
         fallback.mkdir(parents=True, exist_ok=True)
         cache_dir = fallback
-    ast_cache_budget.note_use(cache_dir, entry := cache_dir / f"{key}.{ext}")
-    return entry
+    return cache_dir

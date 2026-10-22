@@ -76,11 +76,10 @@
     "abicheck/compare/surface_reconcile.py(_drop_elf_memos)": 14,
     "abicheck/compare/surface_reconcile.py(cached_reconciliation)": 372,
     "abicheck/compare/template_surface.py(_cached)": 154,
-    "abicheck/compare/template_surface.py(_needs_demangle)": 7060,
+    "abicheck/compare/template_surface.py(_needs_demangle)": 5044,
     "abicheck/compare/template_surface.py(alias_identity)": 330,
-    "abicheck/compare/template_surface.py(cpo_identity)": 2016,
     "abicheck/compare/template_surface.py(public_functions)": 28,
-    "abicheck/compare/template_surface.py(qualified_declaration_name)": 3596,
+    "abicheck/compare/template_surface.py(qualified_declaration_name)": 1580,
     "abicheck/compare/template_surface.py(qualified_name_lookup)": 168,
     "abicheck/compare/template_surface.py(qualified_name_lookup.<locals>.lookup)": 3414,
     "abicheck/compare/template_surface.py(qualified_name_table)": 168,
@@ -96,8 +95,8 @@
     "abicheck/compare/typedef_spelling_keys.py(TypedefSpellingIndex.keys_for)": 116,
     "abicheck/deadline.py(_registration_window_depth)": 13,
     "abicheck/deadline.py(remaining)": 13,
-    "abicheck/demangle.py(_is_itanium_mangled)": 9523,
-    "abicheck/demangle.py(demangle_one_batched)": 2966,
+    "abicheck/demangle.py(_is_itanium_mangled)": 7907,
+    "abicheck/demangle.py(demangle_one_batched)": 1350,
     "abicheck/demangle.py(strip_signature)": 308,
     "abicheck/diff_atomic.py(_has_atomic)": 1004,
     "abicheck/diff_bit_int.py(_bit_int_width)": 1004,
@@ -295,5 +294,5 @@
   },
   "mode": "default",
   "n": 40,
-  "total": 247735
+  "total": 238455
 }

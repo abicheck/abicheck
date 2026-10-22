@@ -51,6 +51,7 @@ sys.path.insert(0, str(_REPO))
 if str(Path(__file__).resolve().parent) not in sys.path:
     sys.path.insert(0, str(Path(__file__).resolve().parent))
 import example_catalog  # noqa: E402
+from gen_l3l4l5_dependency_rename_cases import dependency_rename_cases  # noqa: E402
 from gen_l3l4l5_dispatch_cases import dispatch_cases  # noqa: E402
 
 from abicheck.buildsource.adapters.adapter_shared import (
@@ -743,6 +744,7 @@ def build_cases() -> dict[str, tuple[str, dict[str, Any], dict[str, Any]]]:
 
     # G29 Phase 6 pairs live beside this file (keeps it under its line cap).
     cases.update(dispatch_cases(_graph, _N, _E))
+    cases.update(dependency_rename_cases(_graph, _N, _E))
 
     return cases
 

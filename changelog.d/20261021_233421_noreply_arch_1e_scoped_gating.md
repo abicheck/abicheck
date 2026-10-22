@@ -1,0 +1,3 @@
+### Changed
+
+- **The `--used-by` / `--required-symbol` gate's dispatch and refusals moved out of the CLI** — `workflows.consumer_scope_gate.apply_scoped_gating` now chooses which ADR-043 pass runs and raises typed `ScopedGateError` subclasses (`UsedByEvidenceError`, `UsedByConsumerError`, `UsedByLibraryError`) for refused inputs. The CLI renders those as the same `UsageError` (exit 64) and `ClickException` (exit 1) messages as before, with identical text. The CLI-only `_require_used_by_binary_evidence` helper is removed; its check is now `require_used_by_binary_evidence` in the workflow module.

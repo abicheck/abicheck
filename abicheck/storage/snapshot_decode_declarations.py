@@ -41,6 +41,7 @@ from ..model import (
     Variable,
     Visibility,
 )
+from .decode_memo import enum_decoder
 from .entity_id_codec import decode_entity_ids, decode_sidecar_entity_ids
 from .fact_codec import (
     decode_enum_facts,
@@ -50,6 +51,14 @@ from .fact_codec import (
     decode_record_facts,
     decode_variable_facts,
 )
+
+# One dict lookup per row instead of `Enum.__call__` (see `decode_memo`).
+_ParamKind = enum_decoder(ParamKind)
+_Visibility = enum_decoder(Visibility)
+_AccessLevel = enum_decoder(AccessLevel)
+_ElfVisibility = enum_decoder(ElfVisibility)
+_SymbolBinding = enum_decoder(SymbolBinding)
+_ScopeOrigin = enum_decoder(ScopeOrigin)
 
 
 def _interned(value: Any) -> Any:
@@ -64,7 +73,7 @@ def _scope_origin_or_unknown(raw: Any) -> ScopeOrigin:
     A hand-edited or newer-schema snapshot may carry an origin string this
     build does not recognize; that must not abort the whole load."""
     try:
-        return ScopeOrigin(raw if raw is not None else "unknown")
+        return _ScopeOrigin(raw if raw is not None else "unknown")
     except ValueError:
         return ScopeOrigin.UNKNOWN
 
@@ -117,7 +126,7 @@ def decode_declarations(d: dict[str, Any], schema_version: int) -> DecodedDeclar
                 Param(
                     name=p.get("name", ""),
                     type=p.get("type", ""),
-                    kind=ParamKind(p.get("kind", "value")),
+                    kind=_ParamKind(p.get("kind", "value")),
                     default=p.get("default", None),
                     pointer_depth=p.get("pointer_depth", 0),
                     is_restrict=p.get("is_restrict", False),
@@ -126,7 +135,7 @@ def decode_declarations(d: dict[str, Any], schema_version: int) -> DecodedDeclar
                 )
                 for p in f.get("params", [])
             ],
-            visibility=Visibility(f.get("visibility", "public")),
+            visibility=_Visibility(f.get("visibility", "public")),
             is_virtual=f.get("is_virtual", False),
             is_noexcept=f.get("is_noexcept", False),
             vtable_index=f.get("vtable_index"),
@@ -144,15 +153,15 @@ def decode_declarations(d: dict[str, Any], schema_version: int) -> DecodedDeclar
             deleted_from_dwarf=f.get("deleted_from_dwarf", False),
             is_inline=f.get("is_inline", False),
             is_extern_c=f.get("is_extern_c", False),
-            access=AccessLevel(f.get("access", "public")),
+            access=_AccessLevel(f.get("access", "public")),
             return_pointer_depth=f.get("return_pointer_depth", 0),
-            elf_visibility=ElfVisibility(f["elf_visibility"])
+            elf_visibility=_ElfVisibility(f["elf_visibility"])
             if f.get("elf_visibility")
             else None,
             # Missing on an older snapshot (predates this field) → None,
             # same "not captured" default every other ELF-derived fact here
             # uses.
-            elf_binding=SymbolBinding(f["elf_binding"])
+            elf_binding=_SymbolBinding(f["elf_binding"])
             if f.get("elf_binding")
             else None,
             ref_qualifier=f.get("ref_qualifier", ""),
@@ -189,19 +198,19 @@ def decode_declarations(d: dict[str, Any], schema_version: int) -> DecodedDeclar
             name=v["name"],
             mangled=v["mangled"],
             type=v["type"],
-            visibility=Visibility(v.get("visibility", "public")),
+            visibility=_Visibility(v.get("visibility", "public")),
             source_location=v.get("source_location"),
             is_const=v.get("is_const", False),
             value=v.get("value"),
-            access=AccessLevel(v.get("access", "public")),
-            elf_visibility=ElfVisibility(v["elf_visibility"])
+            access=_AccessLevel(v.get("access", "public")),
+            elf_visibility=_ElfVisibility(v["elf_visibility"])
             if v.get("elf_visibility")
             else None,
             source_header=_interned(v.get("source_header")),
             origin=_scope_origin_or_unknown(v.get("origin")),
             alignment_bits=v.get("alignment_bits"),
             deprecated=v.get("deprecated"),
-            elf_binding=SymbolBinding(v["elf_binding"])
+            elf_binding=_SymbolBinding(v["elf_binding"])
             if v.get("elf_binding")
             else None,
             # Missing on a pre-v43 snapshot (predates this field) → False,
@@ -229,7 +238,7 @@ def decode_declarations(d: dict[str, Any], schema_version: int) -> DecodedDeclar
                     is_const=f.get("is_const", False),
                     is_volatile=f.get("is_volatile", False),
                     is_mutable=f.get("is_mutable", False),
-                    access=AccessLevel(f.get("access", "public")),
+                    access=_AccessLevel(f.get("access", "public")),
                     default=f.get("default"),
                     deprecated=f.get("deprecated"),
                     **decode_field_facts(f, schema_version),

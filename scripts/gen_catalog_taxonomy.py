@@ -245,6 +245,10 @@ RELATED_RULES: dict[str, list[str]] = {
         "internal-declaration-renamed-reconciled",
         "public-api-gains-internal-dependency",
     ],
+    "case221_public_api_internal_type_renamed": [
+        "internal-declaration-renamed-reconciled",
+        "public-api-gains-internal-dependency",
+    ],
     "case195_header_graph_ambiguous_rename_not_reconciled": [
         "public-api-gains-internal-dependency"
     ],

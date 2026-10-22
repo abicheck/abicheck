@@ -41,6 +41,7 @@ from ...report.release_assurance_section import (
 )
 from ...report.release_document import ReleaseEvaluation, build_release_report
 from ...report.render_release_report import render_release_text
+from ...workflows import memory_trace
 from ...workflows.gate import (
     resolve_release_assurance_decision,
     resolve_scope_decision,
@@ -60,6 +61,7 @@ __all__ = ["render_release_summary"]
 _RECEIPT_FORMATS = frozenset({"json", "html"})
 
 
+@memory_trace.phase("report.release_render")  # stage timing; off by default
 def render_release_summary(
     fmt: str,
     worst_verdict: str,

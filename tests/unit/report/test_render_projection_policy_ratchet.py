@@ -14,20 +14,15 @@ on any change in either direction:
 The import list is what changes when a renderer starts deciding, so it is
 the thing to assert on; the rendered text is identical either way.
 
-The same ratchet covers ``html_report.py``, the HTML compute half that every
-``render_html*`` projection is fed from. It is a *source* module, not a
-renderer, so it may read a ``DiffResult``; what it may not do is reach policy
-on its own. Its policy-touching facts (impact text, active reclassify rules,
-effective kind sets, the disposition audit and the versioning acceptance) now
-resolve through ``report/`` owners. What remains is recorded below and shrinks
-as those two legacy root modules move into ``report/``.
-
-Recorded debt (tracked by ``report/AGENTS.md``'s "Prohibited
-responsibilities"): both Markdown projections import ``effective_kind_sets``
-and call ``compute_disposition_audit`` as a fallback for direct callers that
-pass no envelope, and ``render_markdown_document`` resolves
-``evidence_status_for_result``/``impact_for`` inside its row builder. These
-are compute-side functions that still live in render modules.
+The same ratchet covers the compute half modules (``html_report.py``,
+``reporter.py``, ``reporter_markdown.py`` and ``report/markdown_compute.py``).
+They are *source* modules, not renderers, so they may read a ``DiffResult``;
+their kind sets, impact text, reclassify rules, exit codes and classification
+resolve through ``report/policy_facts.py``. What remains recorded below is
+the decision that still lives in the compute half and is not yet routed:
+the severity categorisation in ``reporter_markdown.py``, the disposition-audit
+fallbacks for direct callers that pass no envelope, and the type-only
+``policy.severity`` annotations.
 """
 
 from __future__ import annotations
@@ -53,47 +48,44 @@ _POLICY_HEADS = frozenset(
 #: document's ``disposition_audit`` instead of recomputing it).
 _DISPOSITION_COMPUTE = frozenset({"compute_disposition_audit", "add_disposition_audit"})
 
-#: Compute-half source modules outside ``report/`` that the ratchet also covers.
-#: ``reporter.py`` (the ``--stat`` and root-cause JSON path) and
-#: ``reporter_markdown.py`` (the Markdown compute functions) are source modules
-#: too: they may read a ``DiffResult`` and must take their kind sets, run
-#: summary and release recommendation from ``report/policy_facts.py``.
-_SOURCE_MODULES = ("html_report.py", "reporter.py", "reporter_markdown.py")
+#: Compute-half source modules the ratchet also covers. ``reporter.py`` (the
+#: ``--stat`` and root-cause JSON path), ``reporter_markdown.py`` (the Markdown
+#: compute functions) and ``html_report.py`` (the HTML compute half) are source
+#: modules outside ``report/``: they may read a ``DiffResult`` and take their
+#: kind sets, run summary, release recommendation and decisions from
+#: ``report/policy_facts.py``. ``report/markdown_compute.py`` is the compute
+#: half of both Markdown projections: the render modules consume its document,
+#: so the decisions it still makes are recorded here rather than inside them.
+_SOURCE_MODULES = (
+    "html_report.py",
+    "reporter.py",
+    "reporter_markdown.py",
+    "report/markdown_compute.py",
+)
 
 _RECORDED_POLICY_IMPORTS: dict[str, frozenset[str]] = {
-    "render_markdown_alternate.py": frozenset({"policy.evaluate"}),
-    "render_markdown_document.py": frozenset(
-        {"policy.evaluate", "policy.classification"}
-    ),
-    # Legacy root modules still holding the HTML compute's registry lookups
-    # (``kind_str``/``category``/``severity``) and ``compatibility_metrics``.
-    "html_report.py": frozenset({"report_classifications", "report_summary"}),
     # ``policy.severity`` here is the ``TYPE_CHECKING``-only ``SeverityConfig``
     # annotation: a type, not a decision. Nothing else in the module reaches policy.
     "reporter.py": frozenset({"policy.severity"}),
-    # ``policy.evaluate`` (``evaluate``), ``policy.classification``
-    # (``impact_for``/``evidence_status_for_result``), ``policy.reclassify``
-    # (``active_reclassify_rules``), ``policy.severity`` (``compute_exit_code``)
-    # and ``report_classifications`` (``ENVIRONMENT_DRIFT_KINDS``) are the
-    # decisions this module still makes itself. ``effective_kind_sets``,
-    # ``build_summary`` and ``recommend_release_for_report`` now resolve
-    # through ``report/policy_facts.py``.
-    "reporter_markdown.py": frozenset(
-        {
-            "policy.classification",
-            "policy.evaluate",
-            "policy.reclassify",
-            "policy.severity",
-            "report_classifications",
-        }
-    ),
+    # Two runtime decisions remain here, not in a renderer: the severity
+    # categorisation behind ``compute_severity_sections`` (``policy.severity``'s
+    # ``categorize_changes``/``gate_eligible_changes``) and the ``ADDITION_KINDS``
+    # / ``INFORMATIONAL_KINDS`` sets of the compatible-quality list. The rest of
+    # the module reaches policy through ``report/policy_facts.py`` (the
+    # ``GateDecision``/``KindSets``/``SeverityConfig`` names are annotations).
+    "reporter_markdown.py": frozenset({"policy.classification", "policy.severity"}),
 }
 _RECORDED_DISPOSITION_COMPUTE: dict[str, frozenset[str]] = {
-    "render_markdown_alternate.py": frozenset({"compute_disposition_audit"}),
-    "render_markdown_document.py": frozenset({"compute_disposition_audit"}),
+    # The alternate-mode views (``--report-mode leaf``/``root-cause``) take no
+    # envelope, so their preamble and root-cause builders compute the audit
+    # directly. The full-mode builder reuses the envelope's document through
+    # ``disposition_audit_dict_reusing_document``.
+    "markdown_compute.py": frozenset({"compute_disposition_audit"}),
     # ``--stat`` and root-cause JSON still compute the disposition audit per call
-    # rather than reading it from a shared document.
+    # rather than reading it from a shared document (no envelope reaches them).
     "reporter.py": frozenset({"add_disposition_audit"}),
+    # Direct-caller fallbacks for the one-line view and the review digest; the
+    # envelope-driven paths pass the audit in.
     "reporter_markdown.py": frozenset({"compute_disposition_audit"}),
 }
 

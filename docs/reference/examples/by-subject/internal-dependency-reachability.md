@@ -3,7 +3,7 @@
 
 A public declaration's own contract secretly depends on a private/internal declaration -- reachable only through the L5 source-graph evidence tier, including how the detector reconciles a dependency that was merely renamed or moved rather than truly removed.
 
-_15 case(s)._ [← back to all subjects](index.md)
+_16 case(s)._ [← back to all subjects](index.md)
 
 ## The pattern
 
@@ -28,3 +28,4 @@ This is the L5 source-graph evidence tier's own subject: a public declaration's 
 | [case195_header_graph_ambiguous_rename_not_reconciled](../case195_header_graph_ambiguous_rename_not_reconciled.md) | Ambiguous Simultaneous Rename, Correctly Not Reconciled | 🟡 COMPATIBLE_WITH_RISK | Risk |
 | [case196_header_graph_move_reconciled](../case196_header_graph_move_reconciled.md) | Declaration Reconciled as Moved Across a Compound Edit | 🟡 COMPATIBLE_WITH_RISK | Risk |
 | [case197_header_graph_identity_reconciled](../case197_header_graph_identity_reconciled.md) | Declaration Reconciled as Identity-Reconciled (Header Unchanged) | 🟡 COMPATIBLE_WITH_RISK | Risk |
+| [case221_public_api_internal_type_renamed](../case221_public_api_internal_type_renamed.md) | Public Dependency Target Renamed Alongside an Unrelated Addition | 🟡 COMPATIBLE_WITH_RISK | Risk |

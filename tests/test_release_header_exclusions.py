@@ -595,12 +595,15 @@ class TestTheReleaseIdentityIsReadFromItsMembers:
         assert "observed_member_exclusion_identities(" in workflow
         assert "strip_internal_keys" not in workflow
         assert "project_release_library_results(" not in workflow
-        # ...and the strip is the renderer's, which runs on the outcome the
-        # workflow already returned (the capture inside it).
+        # ...and the strip is the report projection's, which runs on the
+        # outcome the workflow already returned (the capture inside it).
         cli = inspect.getsource(cli_compare_release)
         assert "observed_member_exclusion_identities(" not in cli
-        render = inspect.getsource(cli_compare_release._render_release_outcome)
-        assert "project_release_library_results(" in render
+        assert "project_release_library_results(" not in cli
+        from abicheck.report import release_outcome_projection
+
+        projection = inspect.getsource(release_outcome_projection)
+        assert "project_release_library_results(" in projection
         assert cli.index("outcome = execute_release_compare_checked(") < cli.index(
             "_render_release_outcome(\n                outcome,"
         ), (

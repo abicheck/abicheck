@@ -111,6 +111,37 @@ class MemoryAdmission:
         """The cost of a member whose dumps reported *ast_bytes* in total."""
         return self._floor + PEAK_PER_AST_BYTE * ast_bytes / _GIB
 
+    def try_reserve(self) -> float | None:
+        """Charge one admission now if it fits, else ``None`` -- never blocks.
+
+        The non-blocking half of :meth:`admit` for a caller that runs each
+        member in a child process and so cannot wait on this condition from
+        the thread that also retires finished members. The same rule:
+        always admitted when nothing is in flight. Pair every reservation
+        with :meth:`release`.
+        """
+        with self._cond:
+            cost = self._estimate()
+            if (
+                self._committable is not None
+                and self._in_flight
+                and self._committed + cost > self._committable
+            ):
+                return None
+            self._committed += cost
+            self._in_flight += 1
+            return cost
+
+    def release(self, cost: float, ast_bytes: int) -> None:
+        """Retire a :meth:`try_reserve` reservation of *cost*, learning from
+        the *ast_bytes* the member's dumps reported (``0``: nothing seen)."""
+        with self._cond:
+            self._committed -= cost
+            self._in_flight -= 1
+            if ast_bytes:
+                self._learned = max(self._learned or 0.0, self.cost_of(ast_bytes))
+            self._cond.notify_all()
+
     @contextmanager
     def admit(self) -> Iterator[None]:
         """Block until this member fits, run it, then learn from it."""
@@ -136,10 +167,4 @@ class MemoryAdmission:
             with observe_ast_sizes(_sink):
                 yield
         finally:
-            with self._cond:
-                self._committed -= cost
-                self._in_flight -= 1
-                if observed[0]:
-                    measured = self.cost_of(observed[0])
-                    self._learned = max(self._learned or 0.0, measured)
-                self._cond.notify_all()
+            self.release(cost, observed[0])

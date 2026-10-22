@@ -263,6 +263,19 @@ def _isolate_snapshot_cache(tmp_path_factory: pytest.TempPathFactory, monkeypatc
         )
     )
     monkeypatch.setattr(dump_cache_store, "_CACHE_DIR", cache_dir)
+    # The header include-pass cache (`clang -M` per header) is redirected the
+    # same way, so a test's entries never reach the real user cache either.
+    from abicheck.buildsource import header_include_disk_cache
+
+    include_dir = Path(
+        tempfile.mkdtemp(
+            prefix="include_cache-",
+            dir=_snapshot_cache_bucket(tmp_path_factory),
+        )
+    )
+    monkeypatch.setattr(
+        header_include_disk_cache, "include_cache_dir", lambda: include_dir
+    )
 
 
 @pytest.fixture(autouse=True)

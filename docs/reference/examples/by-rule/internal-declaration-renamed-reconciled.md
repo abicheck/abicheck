@@ -12,4 +12,5 @@ _No single-library case demonstrates this rule alone yet — referenced only by 
 ## Used by scenarios
 
 - [case194_header_graph_rename_reconciled](../case194_header_graph_rename_reconciled.md) — Internal Dependency Target Renamed, Safely Reconciled
+- [case221_public_api_internal_type_renamed](../case221_public_api_internal_type_renamed.md) — Public Dependency Target Renamed Alongside an Unrelated Addition
 

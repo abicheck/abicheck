@@ -37,7 +37,10 @@ What the interface guarantees, so callers need not:
 * **Nothing silently vanishes (ADR-044 D4).** A withheld rule always yields
   its ``SUPPRESSION_WOULD_HIDE_PUBLIC_BREAK`` /
   ``SUPPRESSION_REACHABILITY_UNKNOWN`` diagnostic, returned separately so a
-  caller that deduplicates findings can leave diagnostics alone.
+  caller that deduplicates findings can leave diagnostics alone. A suppressed
+  change whose reachability graph coverage never established yields a
+  ``GRAPH_COVERAGE_INSUFFICIENT_FOR_SUPPRESSION`` diagnostic alongside it, so
+  the report names the rule that hid it without coverage.
 * **Order is preserved.** ``kept`` and ``suppressed`` keep input order.
 """
 
@@ -65,7 +68,9 @@ class SuppressionDisposition:
     #: Findings a rule suppressed, in input order, each stamped with
     #: ``suppression_rule`` and already recorded in the ledger.
     suppressed: list[Change] = field(default_factory=list)
-    #: ADR-044 D4 diagnostics for rules whose match was withheld.
+    #: Diagnostics about the suppression itself: ADR-044 D4 withheld-rule
+    #: diagnostics, and ``GRAPH_COVERAGE_INSUFFICIENT_FOR_SUPPRESSION`` for a
+    #: suppressed change that graph coverage never established as unreachable.
     diagnostics: list[Change] = field(default_factory=list)
 
     @property
@@ -92,6 +97,9 @@ def dispose_by_suppression(
     kept: list[Change] = []
     suppressed: list[Change] = []
     diagnostics: list[Change] = []
+    # One coverage record per rule, not per change: keyed by rule identity,
+    # in first-match order, so a broad rule hiding 50 changes reads as one.
+    uncovered: dict[int, tuple[Suppression, list[Change]]] = {}
     for change in changes:
         outcome = suppression.evaluate(change)
         if outcome.suppressed:
@@ -104,6 +112,9 @@ def dispose_by_suppression(
                 suppression=suppression,
             )
             suppressed.append(change)
+            rule = outcome.matched_rule
+            if rule is not None and rule.suppresses_without_graph_coverage(change):
+                uncovered.setdefault(id(rule), (rule, []))[1].append(change)
             continue
         kept.append(change)
         if outcome.withheld_rule is not None:
@@ -112,6 +123,9 @@ def dispose_by_suppression(
             diagnostics.append(
                 _unknown_reachability_diagnostic(change, outcome.withheld_unknown_rule)
             )
+    diagnostics.extend(
+        _graph_coverage_diagnostic(rule, hidden) for rule, hidden in uncovered.values()
+    )
     return SuppressionDisposition(
         kept=kept, suppressed=suppressed, diagnostics=diagnostics
     )
@@ -200,7 +214,25 @@ def _unknown_reachability_diagnostic(change: Change, rule: Suppression) -> Chang
     from ...model.change import Change
     from ...model.change_catalog.kinds import ChangeKind
 
-    selector = (
+    selector = _rule_selector(rule)
+    return Change(
+        kind=ChangeKind.SUPPRESSION_REACHABILITY_UNKNOWN,
+        symbol=change.symbol,
+        description=(
+            f"Suppression rule {selector!r} matched {change.symbol!r} "
+            f"({change.kind.value}) but was not applied: graph coverage was "
+            "insufficient to prove the change unreachable from the public ABI "
+            "surface (reachability: proven-unreachable-only). Add "
+            "`allow_unknown_reachability: true` to this rule to suppress it "
+            "anyway once you have manually confirmed it is safe."
+        ),
+        caused_by_type=change.symbol,
+    )
+
+
+def _rule_selector(rule: Suppression) -> str:
+    """The human-facing selector a diagnostic quotes for *rule*."""
+    return (
         rule.symbol
         or rule.symbol_pattern
         or rule.type_pattern
@@ -217,16 +249,31 @@ def _unknown_reachability_diagnostic(change: Change, rule: Suppression) -> Chang
         or rule.source_location
         or "?"
     )
+
+
+def _graph_coverage_diagnostic(rule: Suppression, hidden: list[Change]) -> Change:
+    """Build the per-rule ``GRAPH_COVERAGE_INSUFFICIENT_FOR_SUPPRESSION`` record.
+
+    impact-analysis-layer P0 follow-up (the ``unreachable-only`` decision).
+    *rule* hid every change in *hidden* through its default ``unreachable-only``
+    gate while ``Change.reachability_state`` was ``UNKNOWN``. The record is
+    informational: it carries the count and the suppressed change ids, and
+    never changes a verdict or exit code.
+    """
+    from ...compare.finding_identity import report_canonical_finding_id
+    from ...model.change import Change
+    from ...model.change_catalog.kinds import ChangeKind
+
+    ids = ", ".join(report_canonical_finding_id(c) for c in hidden)
     return Change(
-        kind=ChangeKind.SUPPRESSION_REACHABILITY_UNKNOWN,
-        symbol=change.symbol,
+        kind=ChangeKind.GRAPH_COVERAGE_INSUFFICIENT_FOR_SUPPRESSION,
+        symbol=_rule_selector(rule),
         description=(
-            f"Suppression rule {selector!r} matched {change.symbol!r} "
-            f"({change.kind.value}) but was not applied: graph coverage was "
-            "insufficient to prove the change unreachable from the public ABI "
-            "surface (reachability: proven-unreachable-only). Add "
-            "`allow_unknown_reachability: true` to this rule to suppress it "
-            "anyway once you have manually confirmed it is safe."
+            f"{len(hidden)} suppressed by rule {_rule_selector(rule)!r} without "
+            "graph coverage: their reachability was never established (unknown, "
+            "not proven unreachable), and reachability: unreachable-only treats "
+            "that as not public. Suppressed change ids: "
+            f"{ids}. Add `reachability: proven-unreachable-only` to this rule to "
+            "withhold matches until graph coverage proves them unreachable."
         ),
-        caused_by_type=change.symbol,
     )

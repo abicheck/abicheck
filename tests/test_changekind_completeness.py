@@ -49,6 +49,8 @@ ASSERTED_CHANGE_KINDS: set[ChangeKind] = {
     ChangeKind.SUPPRESSION_WOULD_HIDE_PUBLIC_BREAK,
     # exercised by tests/test_reachability_state.py (impact-analysis-layer P0)
     ChangeKind.SUPPRESSION_REACHABILITY_UNKNOWN,
+    # exercised by tests/test_graph_coverage_suppression.py (unreachable-only gate)
+    ChangeKind.GRAPH_COVERAGE_INSUFFICIENT_FOR_SUPPRESSION,
     # exercised by tests/test_internal_leak.py and
     # tests/test_reachability_aware_suppression.py (ADR-044 P1 items 1-2)
     ChangeKind.INTERNAL_SYMBOL_REQUIRED_BY_PUBLIC_API,
@@ -146,6 +148,8 @@ ASSERTED_CHANGE_KINDS: set[ChangeKind] = {
     ChangeKind.DECLARATION_COORDINATES_SHIFTED,
     ChangeKind.DECLARATION_IDENTITY_RECONCILED_UNRESOLVED,
     ChangeKind.DECLARATION_IDENTITY_UNCHANGED,
+    # G31 Phase D public-dependency rename (ADR-048) — tests/test_graph_dependency_renames.py.
+    ChangeKind.PUBLIC_API_INTERNAL_TYPE_RENAMED,
     # Intra-version cross-source validation (tests/test_cross_source_checks.py).
     ChangeKind.EXPORTED_NOT_PUBLIC,
     ChangeKind.PUBLIC_NOT_EXPORTED,

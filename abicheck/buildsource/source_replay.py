@@ -55,12 +55,8 @@ from ..storage.code_identity import abicheck_code_fingerprint
 from .build_evidence import BuildEvidence, CompileUnit, Target
 from .l5_ast_run import L5AstRun
 from .source_abi import SOURCE_ABI_VERSION, SourceAbiSurface, SourceAbiTu
-from .source_extractors._argv import (
-    is_msvc_mode,
-    pick_compiler_binary,
-    replay_extra_flags,
-)
 from .source_extractors.base import SourceAbiExtractor, SourceExtractionError
+from .source_extractors.compile_invocation import replayed_tokens_for
 from .source_link import link_source_abi
 from .source_replay_pool import (
     _extract_cache_misses,
@@ -692,19 +688,17 @@ def _replay_flags_for_key(
 ) -> list[str]:
     """The exact replay flags an extractor would carry from argv, for the cache key.
 
-    Mirrors :func:`source_extractors._argv.replay_extra_flags` so the key folds in
+    Mirrors the replayed tokens of :func:`source_extractors.compile_invocation.parse_compile_invocation` so the key folds in
     forced-include / include-search options that change the parsed TU but are not
     captured by the structured ``CompileUnit`` fields (Codex review #339, P2).
     *compiler_override* must be the same override the extractor actually resolves
     mode from (e.g. ``ClangSourceExtractor.compiler_binary``) -- an override that
-    switches a GNU-argv TU into CL mode changes which flags ``replay_extra_flags``
+    switches a GNU-argv TU into CL mode changes which flags the replay
     carries (``/FI``/``/I`` vs ``-include``/``-iquote``), so keying on the
     compile unit's own un-overridden argv alone can collide two TUs that replay
     under genuinely different forced-include flags (Codex review, sixth round).
     """
-    cc_bin = pick_compiler_binary(compile_unit, compiler_override)
-    cc_id = "msvc" if is_msvc_mode(cc_bin) else "gnu"
-    return replay_extra_flags(compile_unit, [], cc_id)
+    return replayed_tokens_for(compile_unit, compiler_override)
 
 
 class SourceAbiCache:

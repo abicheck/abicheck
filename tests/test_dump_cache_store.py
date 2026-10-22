@@ -107,6 +107,29 @@ def test_a_stored_entry_round_trips_as_a_warm_hit(
     assert hit.library == "libstore.so.1"
 
 
+def test_a_cache_entry_is_compact_json_and_round_trips_its_digest(
+    cache_dir: Path, tmp_path: Path
+) -> None:
+    from abicheck.snapshot_io import read_snapshot_text
+    from abicheck.storage.snapshot_encode import snapshot_content_digest
+
+    snap = _snap()
+    binary = tmp_path / "lib.so"
+    binary.write_bytes(b"\x7fELF")
+    entry = cache_dir / ("c" * 32 + ".json.zst")
+    store._write_entry(snap, "c" * 32, binary)
+    assert entry.exists()
+
+    text = read_snapshot_text(entry)
+    assert "\n  " not in text, "cache entries must be compact, not indented"
+    assert "\n" not in text.strip()
+
+    hit = store._read_entry("c" * 32, binary)
+    assert hit is not None
+    assert hit == snap
+    assert snapshot_content_digest(hit) == snapshot_content_digest(snap)
+
+
 def test_a_miss_returns_none(cache_dir: Path, tmp_path: Path) -> None:
     assert store._lookup_key("m" * 32, tmp_path / "lib.so") is None
 
@@ -149,12 +172,12 @@ def test_storing_over_a_legacy_entry_removes_the_legacy_file(
 def test_a_failed_write_never_reaches_the_caller(
     cache_dir: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    import abicheck.serialization as serialization
+    import abicheck.storage.snapshot_codec as snapshot_codec
 
     def boom(*args: object, **kwargs: object) -> None:
         raise OSError("disk full")
 
-    monkeypatch.setattr(serialization, "write_snapshot", boom)
+    monkeypatch.setattr(snapshot_codec, "write_snapshot_compact", boom)
     # Caching is an optimisation over a dump that already succeeded.
     store._store_key(_snap(), "f" * 32, tmp_path / "lib.so")
     assert not (cache_dir / ("f" * 32 + ".json.zst")).exists()

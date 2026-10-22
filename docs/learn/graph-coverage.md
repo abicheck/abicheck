@@ -93,6 +93,12 @@ unknown reachability](../use/suppressions.md#proven-vs-unknown-reachability)
 for the rule syntax and the `suppression_reachability_unknown` diagnostic it
 produces when coverage isn't good enough to prove a match.
 
+The default `unreachable-only` gate can also hide a change that coverage never
+examined. Its suppression still applies, but the report records a
+`graph_coverage_insufficient_for_suppression` finding for it, so the
+absence-of-evidence suppression stays visible. See
+[Suppressions](../use/suppressions.md) for the rule syntax.
+
 ## Typed absence across every relationship
 
 The same rule applies beyond the L5 graph. Every relationship abicheck

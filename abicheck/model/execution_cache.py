@@ -752,3 +752,27 @@ class memoized_property(Generic[_T]):  # noqa: N801 - mirrors cached_property
         cache[self._slot] = value
         self.stats.stores += 1
         return value
+
+
+def per_object(fn: Callable[[Any], _T]) -> Callable[[Any], _T]:
+    """*fn*, computed once per argument object for the returned callable's
+    lifetime (the caller's scope -- one comparison pair, say).
+
+    Keyed by ``id``; the object is held beside its key so a recycled ``id``
+    is never served another object's value. For a pure function of an
+    unhashable object asked about repeatedly in one pass. Reference mode
+    computes every call.
+    """
+    seen: dict[int, tuple[Any, _T]] = {}
+
+    def once(obj: Any) -> _T:
+        if reference_mode():
+            return fn(obj)
+        hit = seen.get(id(obj))
+        if hit is not None and hit[0] is obj:
+            return hit[1]
+        value = fn(obj)
+        seen[id(obj)] = (obj, value)
+        return value
+
+    return once

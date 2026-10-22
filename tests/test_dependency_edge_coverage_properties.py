@@ -37,6 +37,7 @@ from __future__ import annotations
 import pytest
 from hypothesis import given, settings, strategies as st
 
+from abicheck.buildsource.graph_reconcile import GraphReconciliation
 from abicheck.buildsource.header_graph_ast_projection import (
     HEADER_TYPE_GRAPH_PASS,
 )
@@ -232,7 +233,9 @@ def test_identical_edges_never_read_as_new_dependency(
         degraded_passes={"type_graph": True} if new_degraded else {},
     )
 
-    findings = _internal_dependency_findings(old, new, {}, "boundary")
+    findings, _ = _internal_dependency_findings(
+        old, new, {}, "boundary", None, GraphReconciliation()
+    )
     assert findings == [], (
         f"kind={kind} old=(full={old_full},header={old_header},"
         f"narrowed={old_narrowed},degraded={old_degraded}) "

@@ -518,6 +518,27 @@ def seed_ast_graph(
     _mark_role_coverage(graph.extractor_passes, HEADER_TYPE_GRAPH_PASS)
 
 
+def degrade_header_type_pass(graph: SourceGraphSummary) -> None:
+    """Withdraw the header type pass's collected stamp after its AST failed.
+
+    The flat fallback stamps ``header_type_graph`` as collected from the
+    snapshot's own declarations, and a partial parse stamps it with its role
+    keys. Neither read the AST-only type edges (parameter and variable
+    ``DECL_HAS_TYPE``, ``DECL_REFERENCES_DECL``), so the family must read as
+    not collected, with its role coverage unstamped and the pass degraded.
+    """
+    from ..model.source_graph_coverage import ROLE_COVERAGE_MATRIX
+    from .inline_graph_fold import _role_coverage_key
+
+    graph.extractor_passes.pop(HEADER_TYPE_GRAPH_PASS, None)
+    for edge_kind, roles in ROLE_COVERAGE_MATRIX.items():
+        for role in roles:
+            graph.extractor_passes.pop(
+                _role_coverage_key(HEADER_TYPE_GRAPH_PASS, edge_kind, role), None
+            )
+    graph.degraded_passes[HEADER_TYPE_GRAPH_PASS] = True
+
+
 def _mark_seen_bodies(graph: SourceGraphSummary, bodies: frozenset[str]) -> None:
     """Record per-declaration body coverage (ADR-077 D5) on each already
     seeded ``decl://`` node whose body this header parse saw in full. A
@@ -569,6 +590,7 @@ class HeaderGraphBisectionMemo:
         self._lock = threading.Lock()
         self._key_locks: dict[Hashable, threading.Lock] = {}
         self._outcomes: dict[Hashable, tuple[tuple[Path, ...], str]] = {}
+        self._projections: dict[Hashable, HeaderGraphAstProjection] = {}
 
     @contextmanager
     def slot(self, key: Hashable) -> Iterator[None]:
@@ -576,6 +598,32 @@ class HeaderGraphBisectionMemo:
             key_lock = self._key_locks.setdefault(key, threading.Lock())
         with key_lock:
             yield
+
+    def load_projection(
+        self,
+        key: Hashable,
+        load: Callable[[], HeaderGraphAstProjection | None],
+    ) -> HeaderGraphAstProjection | None:
+        """The projection stored under *key*, loading it at most once per scope.
+
+        Only a *successful* load is kept: a ``None`` (a miss) is returned to
+        the caller and never memoized, so a later sibling can still see an
+        entry that another library stored in the meantime. The per-key slot
+        makes concurrent callers wait for the first load instead of reading
+        the same sidecar in parallel. The returned object is shared between
+        callers, so it is treated as read-only: every consumer reads its
+        fields and none rebinds or mutates them.
+        """
+        with self.slot(("projection", key)):
+            with self._lock:
+                hit = self._projections.get(key)
+            if hit is not None:
+                return hit
+            loaded = load()
+            if loaded is not None:
+                with self._lock:
+                    self._projections[key] = loaded
+            return loaded
 
     def get(self, key: Hashable) -> tuple[tuple[Path, ...], str] | None:
         with self._lock:

@@ -35,15 +35,7 @@ import shlex
 import shutil
 from collections.abc import Sequence
 
-from ...header_utils import (
-    is_msvc_driver_stem,
-    match_gnu_forced_include,
-    match_msvc_forced_include,
-)
-from ..abi_flags import (
-    is_split_operand_abi_flag_survivor,
-    split_operand_survivor,
-)
+from ...header_utils import is_msvc_driver_stem
 from ..build_evidence import CompileUnit
 from ._argv_shortopts import (
     fold_chdir_into_operands as _fold_chdir_into_operands,
@@ -240,25 +232,6 @@ _ENV_SPLIT_STRING_LONG = "--split-string"
 #: :func:`is_split_operand_abi_flag_survivor` first and exempts it from this
 #: filter -- see that predicate's own docstring.
 STRUCTURED_TOOLCHAIN_FLAG_PREFIXES = ("--sysroot", "-isysroot", "--target", "-target")
-
-#: The forced-include option vocabulary and its two matchers now live in
-#: ``abicheck.header_utils`` (the leaf that already owns this codebase's
-#: include-flag vocabulary, and which both this module and
-#: ``buildsource.header_compile_context`` already sit above), so the L4 replay
-#: path here and the L2 header-parse path there recognize exactly the same
-#: spellings from one implementation. Re-bound to the historical private names
-#: so the call sites below read unchanged.
-_match_gnu_forced_include = match_gnu_forced_include
-_match_msvc_forced_include = match_msvc_forced_include
-
-#: GNU include-search options that take a directory operand and are NOT
-#: normalized into the structured ``include_paths``/``system_include_paths``
-#: buckets (those cover ``-I``/``-isystem`` only). Dropping them makes the
-#: extractor search a different set of directories than the real compile (Codex
-#: review #335). Both the separate (``-iquote dir``) and joined (``-iquote/dir``)
-#: spellings are carried through.
-#: (https://gcc.gnu.org/onlinedocs/gcc/Directory-Options.html)
-_GNU_INCLUDE_SEARCH_OPTS = frozenset({"-iquote", "-idirafter"})
 
 
 def unredact_home(value: str) -> str:
@@ -785,7 +758,7 @@ def effective_directory(argv: list[str], directory: str | None) -> str | None:
     ``source_extractors.clang.ClangSourceExtractor``) never consumed that
     correction at all: both still spawn their subprocess with
     ``cwd=compile_unit.directory`` (the raw, un-chdir'd directory)
-    unchanged, and ``replay_extra_flags()``'s own ``-iquote``/``-I``/etc.
+    unchanged, and ``replayed_tokens()``'s own ``-iquote``/``-I``/etc.
     scan (:func:`_scan_argv_for_extra_flags`) deliberately reads
     ``compile_unit.argv`` VERBATIM -- so those RAW relative flag values,
     unmodified, get handed to a subprocess running from the WRONG
@@ -1318,174 +1291,3 @@ def is_msvc_mode(cc_bin: str) -> bool:
     # that function is this test, relocated. Only the basename derivation
     # stays local, since the adapter's is backslash-aware and this one is not.
     return is_msvc_driver_stem(basename(cc_bin).lower())
-
-
-def _carry_abi_relevant_flags(
-    abi_relevant_flags: list[str], seen: set[str], out: list[str], cc_id: str
-) -> None:
-    """Append ``abi_relevant_flags`` not already in ``seen`` to ``out``.
-
-    Skips flags whose prefix matches a structured toolchain option (sysroot,
-    target, isysroot) because those are already emitted from the structured
-    fields and the split spelling would dangle if re-appended.
-
-    A ``-target-abi``/``-target-cpu``/``-target-feature``/
-    ``-target-linker-version`` survivor -- bare (``-target-abi=aapcs``) or
-    ``-Xclang``-wrapped (``-Xclang -target-abi=aapcs``) -- is
-    ``adapters.base.extract_abi_relevant_flags``'s own purely-internal,
-    round-trippable encoding of a genuinely split two-token (or
-    ``-Xclang``-wrapped four-token) cc1 flag; it is not real argv syntax on
-    its own. This L4 replay path used to append it unchanged (P2 review,
-    "Decode normalized cc1 flags in every replay path", fresh evidence):
-    Clang then received one malformed token instead of the required literal
-    tokens, and the bare spelling was separately dropped outright by the
-    ``STRUCTURED_TOOLCHAIN_FLAG_PREFIXES`` check below (it shares the
-    ``-target`` prefix that filter drops as redundant for the *unrelated*,
-    already-structured ``target_triple``/``sysroot`` survivors -- but none of
-    these four flags has a structured field of its own). Decoded first, via
-    the same :func:`~abicheck.buildsource.adapters.adapter_shared.split_operand_survivor`
-    the L2 header-compile-context replay path already used, so both replay
-    paths reconstruct the identical, real argv token(s) from one shared
-    implementation.
-
-    *seen* is checked but never updated by this loop (Codex review, fresh
-    evidence): an earlier revision added each carried flag to *seen* as it
-    went, which silently dropped every REPEAT of an already-carried literal
-    token. That is wrong for a toggle-style flag pair sharing one spelling
-    across BOTH states (``-fsycl``/``-fno-sycl``, ``-fexceptions``/
-    ``-fno-exceptions``, …): a real, layered build config can legitimately
-    record the identical flag more than once
-    (``extract_abi_relevant_flags`` preserves every occurrence, in order,
-    with no dedup of its own), and only the LAST occurrence decides the
-    real compiler's effective state. Deduping WITHIN this carry-through
-    collapsed a sequence like ``-fno-sycl -fsycl -fno-sycl`` down to
-    ``-fno-sycl -fsycl`` (dropping the second, decisive ``-fno-sycl`` as a
-    "duplicate" of the first) — silently reversing the real effective
-    state from disabled to enabled. Checking only the CALLER's initial
-    *seen* (flags already emitted from the structured fields) still avoids
-    re-emitting those, which is this function's only documented purpose;
-    every occurrence of a flag genuinely repeated within
-    ``abi_relevant_flags`` itself is now carried through faithfully, in
-    the real build's own order and multiplicity, so last-flag-wins
-    scanning downstream (e.g. ``abicheck.extract.compiler_driver.needs_sycl_host_only``) sees
-    the same sequence the real compiler did.
-    """
-    i = 0
-    while i < len(abi_relevant_flags):
-        flag = abi_relevant_flags[i]
-        forced: list[str] = []
-        new_i, _option, operand = _match_gnu_forced_include(
-            flag, abi_relevant_flags, i, forced
-        )
-        if new_i == i and cc_id == "msvc":
-            new_i, _option, operand = _match_msvc_forced_include(
-                flag, abi_relevant_flags, i, forced
-            )
-        if new_i != i:
-            # Build packs are untrusted evidence. A forced-include operand
-            # that is a response file would be expanded by the new compiler
-            # process L4 starts, so discard the complete option/operand pair.
-            if operand and not operand.startswith(("-", "@")):
-                for carried in forced:
-                    if carried not in seen:
-                        out.append(carried)
-            i = new_i
-            continue
-        if is_split_operand_abi_flag_survivor(flag):
-            out.extend(split_operand_survivor(flag))
-            i += 1
-            continue
-        if flag.startswith(STRUCTURED_TOOLCHAIN_FLAG_PREFIXES):
-            i += 1
-            continue
-        # A bare response-file token is also compiler syntax, even when it
-        # is not paired with a recognized forced-include option.
-        if not flag.startswith("@") and flag not in seen:
-            out.append(flag)
-        i += 1
-
-
-def _match_gnu_include_search(tok: str, argv: list[str], i: int, out: list[str]) -> int:
-    """Try to match a GNU include-search token (``-iquote``/``-idirafter``).
-
-    Returns the new ``i`` after consumption, or the original ``i`` if no match.
-    Both the separate (``-iquote dir``) and joined (``-iquotedir``) spellings are
-    handled. Returns the original index when the token does not match either form.
-    """
-    if tok in _GNU_INCLUDE_SEARCH_OPTS and i + 1 < len(argv):
-        out += [tok, argv[i + 1]]  # -iquote / -idirafter <dir> (separate)
-        return i + 2
-    if tok not in _GNU_INCLUDE_SEARCH_OPTS and any(
-        tok.startswith(opt) and len(tok) > len(opt) for opt in _GNU_INCLUDE_SEARCH_OPTS
-    ):
-        out.append(tok)  # -iquotedir / -idirafter/dir (joined)
-        return i + 1
-    return i
-
-
-def _match_msvc_include_search(
-    tok: str, argv: list[str], i: int, out: list[str]
-) -> int:
-    """Try to match an MSVC ``/I`` include-search token (MSVC mode only).
-
-    Returns the new ``i`` after consumption, or the original ``i`` if no match.
-    Both the separate (``/I dir``) and joined (``/Idir``) spellings are handled.
-    """
-    if tok == "/I" and i + 1 < len(argv):
-        out += [tok, argv[i + 1]]  # MSVC /I dir (separate operand)
-        return i + 2
-    if len(tok) > 2 and tok.startswith("/I"):
-        out.append(tok)  # MSVC /Idir (joined)
-        return i + 1
-    return i
-
-
-def _scan_argv_for_extra_flags(argv: list[str], cc_id: str, out: list[str]) -> None:
-    """Walk ``argv`` and append forced-include / include-search tokens to ``out``.
-
-    Handles GNU and (when ``cc_id == "msvc"``) MSVC option families.  Each
-    option family is tried in priority order; the first match consumes the
-    token(s) and advances the index.
-    """
-    i = 0
-    while i < len(argv):
-        tok = argv[i]
-        # The two forced-include matchers are shared with the L2 header-parse
-        # path (header_utils) and return (new_i, option, operand); only the
-        # index matters here, since replay hands `out`'s verbatim tokens
-        # straight back to the real compiler.
-        forced: list[str] = []
-        new_i, _opt, operand = _match_gnu_forced_include(tok, argv, i, forced)
-        if new_i != i and operand and not operand.startswith(("-", "@")):
-            out.extend(forced)
-        if new_i == i:
-            new_i = _match_gnu_include_search(tok, argv, i, out)
-        if new_i == i and cc_id == "msvc":
-            new_i = _match_msvc_include_search(tok, argv, i, out)
-        if new_i == i and cc_id == "msvc":
-            forced = []
-            new_i, _opt, operand = _match_msvc_forced_include(tok, argv, i, forced)
-            if new_i != i and operand and not operand.startswith(("-", "@")):
-                out.extend(forced)
-        i = new_i if new_i != i else i + 1
-
-
-def replay_extra_flags(
-    compile_unit: CompileUnit, already: list[str], cc_id: str
-) -> list[str]:
-    """Carry through ABI/parse-relevant options not in the structured fields.
-
-    ``abi_relevant_flags`` (e.g. ``-fms-extensions``, ``-fabi-version``,
-    ``-fvisibility``, ``-m32``), forced-include options, and unnormalized
-    include-search options (GNU ``-iquote``/``-idirafter``, MSVC ``/I``) from
-    ``argv`` change the parsed translation unit / header search; dropping them
-    makes the extractor parse a different TU than the real build (ADR-030 D2).
-    De-duplicated against the flags already emitted from the structured fields.
-    MSVC ``/FI`` forced includes and ``/I`` search dirs are carried only in MSVC
-    mode so a GNU ``-F``/``-I``-family flag is never mistaken for one.
-    """
-    seen = set(already)
-    out: list[str] = []
-    _carry_abi_relevant_flags(compile_unit.abi_relevant_flags, seen, out, cc_id)
-    _scan_argv_for_extra_flags(compile_unit.argv, cc_id, out)
-    return out
