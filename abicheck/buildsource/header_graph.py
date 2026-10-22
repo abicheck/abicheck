@@ -580,6 +580,32 @@ def build_header_only_graph(
     return graph.finalize()
 
 
+def _without_self(header: str, paths: list[str]) -> list[str]:
+    """Drop *header* from its own ``clang -M`` depfile.
+
+    ``clang -M`` lists the source itself as the first prerequisite
+    (``foo.o: foo.h bar.h ...``), and here the "source" is the header itself,
+    which would otherwise create a `header X includes header X` self-loop once
+    folded. Path-resolve both sides so a relative vs. absolute spelling
+    mismatch still filters correctly.
+    """
+    from pathlib import Path
+
+    try:
+        self_resolved = Path(header).resolve()
+    except OSError:
+        self_resolved = Path(header)
+    kept = []
+    for p in paths:
+        try:
+            if Path(p).resolve() == self_resolved:
+                continue
+        except OSError:
+            pass
+        kept.append(p)
+    return kept
+
+
 @dataclass
 class ClangHeaderIncludeExtractor:
     """Per-header include-closure extractor via ``clang -M`` (integration-only).
@@ -681,6 +707,7 @@ class ClangHeaderIncludeExtractor:
                 nostdinc=nostdinc,
                 gcc_options=gcc_options,
                 gcc_option_tokens=gcc_option_tokens,
+                search_dirs=search_dirs,
             ),
         )
 
@@ -694,10 +721,11 @@ class ClangHeaderIncludeExtractor:
         nostdinc: bool,
         gcc_options: str | None,
         gcc_option_tokens: tuple[str, ...],
+        search_dirs: list[str],
     ) -> tuple[dict[str, list[str]], list[str]]:
         from .._compiler_options import split_gcc_options
-        from .build_evidence import BuildEvidence, CompileUnit
-        from .include_graph import ClangIncludeExtractor
+        from .build_evidence import CompileUnit
+        from .header_include_disk_cache import cached_include_pass
 
         extra_tokens = split_gcc_options(gcc_options) if gcc_options else []
         toolchain_tokens: list[str] = []
@@ -720,36 +748,19 @@ class ClangHeaderIncludeExtractor:
             )
             for h in headers
         ]
-        extractor = ClangIncludeExtractor(clang_bin=self.clang_bin)
-        include_map = extractor.extract_from_build(
-            BuildEvidence(compile_units=compile_units)
-        )
-        # `clang -M`'s depfile lists the source itself as the first
-        # prerequisite (`foo.o: foo.h bar.h ...`) — here the "source" is the
-        # header itself, which would otherwise create a `header X includes
-        # header X` self-loop once folded (the header's own node id doubles
-        # as both the synthetic compile unit id and its own include target).
-        # Path-resolve both sides so a relative vs. absolute spelling
-        # mismatch still filters correctly.
-        from pathlib import Path
 
+        # A header whose entry is fresh on disk needs no probe; the rest run as
+        # one batch, exactly as before the cache existed.
+        include_map, diagnostics = cached_include_pass(
+            headers,
+            compile_units,
+            clang_bin=self.clang_bin,
+            language=language,
+            search_dirs=search_dirs,
+        )
         filtered: dict[str, list[str]] = {}
         for h in headers:
-            paths = include_map.get(header_node_id(h), [])
-            if not paths:
-                continue
-            try:
-                self_resolved = Path(h).resolve()
-            except OSError:
-                self_resolved = Path(h)
-            kept = []
-            for p in paths:
-                try:
-                    if Path(p).resolve() == self_resolved:
-                        continue
-                except OSError:
-                    pass
-                kept.append(p)
-            if kept:
-                filtered[header_node_id(h)] = kept
-        return filtered, list(extractor.diagnostics)
+            paths = _without_self(h, include_map.get(header_node_id(h), []))
+            if paths:
+                filtered[header_node_id(h)] = paths
+        return filtered, diagnostics
