@@ -104,6 +104,7 @@ _POLICY_OVERLAY_KINDS = frozenset(
     {
         "suppression_would_hide_public_break",
         "suppression_reachability_unknown",
+        "graph_coverage_insufficient_for_suppression",
     }
 )
 

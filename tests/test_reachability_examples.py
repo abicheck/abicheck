@@ -133,7 +133,7 @@ class TestCase193OrdinaryExportedFnCallNotReachable:
         an unrelated rule is used here (rather than case193's own matching
         suppress.yaml) so func_removed survives to inspect its tag directly;
         the matching-suppression path is covered separately by
-        test_broad_suppression_applies_cleanly_no_diagnostic below. The graph
+        test_broad_suppression_keeps_only_the_coverage_diagnostic below. The graph
         stays quiet on the common case (case193) while it stays loud on the
         rare one (case192)."""
         from abicheck.policy.suppression.rules import Suppression
@@ -150,11 +150,19 @@ class TestCase193OrdinaryExportedFnCallNotReachable:
             for c in result.changes
         )
 
-    def test_broad_suppression_applies_cleanly_no_diagnostic(self, snapshots) -> None:
+    def test_broad_suppression_keeps_only_the_coverage_diagnostic(
+        self, snapshots
+    ) -> None:
+        """The broad rule hides the removal. The graph never clears it, so the
+        default unreachable-only gate records the advisory coverage finding and
+        nothing breaking."""
         old, new = snapshots
         suppression = SuppressionList.load(
             example_catalog.case_dir(self.CASE) / "suppress.yaml"
         )
         result = compare(old, new, suppression=suppression)
-        assert result.verdict == Verdict.NO_CHANGE
-        assert result.changes == []
+        assert result.verdict == Verdict.COMPATIBLE
+        assert [c.kind for c in result.changes] == [
+            ChangeKind.GRAPH_COVERAGE_INSUFFICIENT_FOR_SUPPRESSION
+        ]
+        assert [c.kind for c in result.suppressed_changes] == [ChangeKind.FUNC_REMOVED]

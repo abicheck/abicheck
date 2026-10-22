@@ -154,6 +154,7 @@ One row per `ChangeKind` (419 total). Columns fuse the verdict partition (`check
 | `generated_header_changed` | risk | `COMPATIBLE_WITH_RISK` | `warning` | unspecified | `generated_header_changed` | — |
 | `generated_header_reaches_public_api` | risk | `COMPATIBLE_WITH_RISK` | `warning` | unspecified | `generated_header_reaches_public_api` | — |
 | `glibcxx_dual_abi_flip_detected` | quality | `COMPATIBLE` | `warning` | L0 | `glibcxx_dual_abi_flip_detected` | [case104](examples/case104_glibcxx_dual_abi_flip.md) |
+| `graph_coverage_insufficient_for_suppression` | quality | `COMPATIBLE` | `warning` | L1 | `graph_coverage_insufficient_for_suppression` | — |
 | `handle_type_changed` | breaking | `BREAKING` | `error` | unspecified | `handle_type_changed` | — |
 | `hash_style_removed` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L0 | `hash_style_removed` | — |
 | `header_binary_context_mismatch` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L2 | `header_binary_context_mismatch` | — |

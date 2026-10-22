@@ -1827,7 +1827,7 @@ impact/composition evidence. Minimal new user-facing set:
 | `PUBLIC_VIRTUAL_DISPATCH_SET_CHANGED` | `RISK`, correlated with existing vtable findings |
 | `PUBLIC_MACRO_CONTRACT_CHANGED` | `API_BREAK` or behavioral `RISK` |
 | `PUBLIC_CALLBACK_TARGET_CHANGED` | `RISK`; break only with proven signature/symbol mismatch |
-| `GRAPH_COVERAGE_INSUFFICIENT_FOR_SUPPRESSION` | quality/coverage diagnostic (the Phase 1 `SUPPRESSION_REACHABILITY_UNKNOWN` already covers the suppression-specific case this generalizes) |
+| `GRAPH_COVERAGE_INSUFFICIENT_FOR_SUPPRESSION` | informational audit record, one per rule, for suppressions that hid changes graph coverage never analysed. Shipped for the `unreachable-only` gate only; see the decision below |
 | `CONSUMER_IMPACT_PATH_CONFIRMED` | impact overlay on an existing raw break, not a new raw break |
 | `USE_CASE_IMPACT_CONFIRMED` | report-level impact, not a new ABI `ChangeKind` |
 
@@ -1896,36 +1896,45 @@ case, and nothing about that asymmetry is visible from either grouping's
 own code without deliberately tracing a bare-symbol, no-`caused_by_type`
 input through both.
 
-**A related, adjacent gap was found (not fixed) while scoping
-`GRAPH_COVERAGE_INSUFFICIENT_FOR_SUPPRESSION`'s "generalizes
-`SUPPRESSION_REACHABILITY_UNKNOWN`" description above, and is worth
-recording before anyone else picks that item up.** `Suppression.
-_passes_reachability_gate` (`policy/suppression/rules.py`) has *two* reachability modes
-whose behavior on a graph-coverage gap differs, and only one of them has a
-diagnostic today. `reachability: "proven-unreachable-only"` treats
-`Change.reachability_state == UNKNOWN` as a **withheld match** unless
-`allow_unknown_reachability: true` — this is exactly what
-`SUPPRESSION_REACHABILITY_UNKNOWN` reports. `reachability:
-"unreachable-only"` (a different, valid value) instead gates on
-`not change.public_reachable` — and `Change.public_reachable` defaults to
-`False` the same way whether it was *proven* `False` or simply never
-examined (`UNKNOWN` reachability with insufficient graph coverage), so a
-`reachability: "unreachable-only"` rule can **silently succeed** at
-suppressing a change graph coverage never actually cleared, with no
-diagnostic at all — a real gap, structurally similar to the one
-`SUPPRESSION_REACHABILITY_UNKNOWN` closed for the other mode, but on the
-*opposite* failure direction (this one risks a false negative — silently
-accepting a suppression that should have been withheld — rather than a
-false positive). A single `GRAPH_COVERAGE_INSUFFICIENT_FOR_SUPPRESSION`
-`ChangeKind` that literally "generalizes" the existing case (by simply
-reusing its detection path under a new name) would not close this gap; closing
-it for real needs either extending `unreachable-only`'s own gate to
-distinguish proven-`False` from `UNKNOWN` (a semantic change to a suppression
-mode real policy files already rely on — needs its own compatibility
-analysis, not a drive-by) or a second, independently-designed diagnostic
-covering this mode specifically. Not attempted here — flagged rather than
-guessed at, per this file's own "known gaps over risky reactive patches"
-convention.
+**A related gap, and the decision taken on it.** `Suppression._passes_reachability_gate`
+(`policy/suppression/rules.py`) has two reachability modes whose behavior on a
+graph-coverage gap differs. `reachability: "proven-unreachable-only"` treats
+`Change.reachability_state == UNKNOWN` as a withheld match unless
+`allow_unknown_reachability: true`, and reports that as
+`SUPPRESSION_REACHABILITY_UNKNOWN`. `reachability: "unreachable-only"` (the
+default for broad rules) gates on `not change.public_reachable`. That boolean
+is `False` both when the walk proved a change unreachable and when no walk
+ever examined it, so an `unreachable-only` rule could suppress a change graph
+coverage never cleared, with no diagnostic. This is a false-negative risk: a
+suppression accepted on absence of evidence, not a false positive.
+
+**Decision (user-approved, option b): keep `unreachable-only`'s suppression
+semantics unchanged.** Existing policy files keep working, and the gate still
+keys on the boolean. Instead, the disposition makes the hidden change visible.
+When `unreachable-only` suppresses a change whose `reachability_state` is
+`UNKNOWN` (never established, not proven `False`), the report records a
+`GRAPH_COVERAGE_INSUFFICIENT_FOR_SUPPRESSION` informational audit record
+(`COMPATIBLE`, L1). It is aggregated to one record per rule, carrying the
+count and the suppressed change ids, rendered as "N suppressed by rule X
+without graph coverage". A suppression proven unreachable records nothing new,
+and a change that is not suppressed is unaffected. Two consequences:
+
+- The record never changes the verdict or the exit code. A binary-only run
+  with a default `unreachable-only` rule stays `COMPATIBLE`. A run whose only
+  changes were suppressed reads `COMPATIBLE` rather than `NO_CHANGE` through the
+  Python API, because the informational record is now a change.
+- It renders in the same formats as the sibling diagnostic (JSON, Markdown,
+  HTML, SARIF). Neither is shown in JUnit.
+
+Changing `unreachable-only`'s own gate to distinguish proven-`False` from
+`UNKNOWN` (so the match is withheld, as `proven-unreachable-only` does) is a
+change to a suppression mode real policy files rely on. It stays a **future
+ADR-044 amendment**, with its own compatibility analysis, and is not part of
+this change. Coverage: `tests/test_graph_coverage_suppression.py` (the
+disposition matrix, the unchanged `proven-unreachable-only` mode, and a CLI
+run comparing exit codes). The proven-unreachable branch is exercised at the
+disposition level only, because reaching a PROVEN_UNREACHABLE verdict through
+the CLI needs a trusted L5 call graph.
 
 **Two more of the eight, investigated (not implemented) in this same pass —
 both turn out to be a scoping question first, not an extraction gap:**

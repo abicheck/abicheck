@@ -1320,3 +1320,162 @@ before this note carries `PRESENT(True)` for the weaker tiers and reads as
 `tests/test_binary_exported_fact_export_join.py` (generated dynamic,
 non-default-versioned, `.symtab`-only, literal `foo@@V`, bare-name and
 demangled-variant worlds against a ground-truth oracle).
+
+## Amendment (2026-10-21, Proposed): L4 clang payload comparability
+
+**Amendment status:** Proposed. This records the decision that Phase 4 of the
+[L2/L4/L5 extraction convergence plan](../plans/l4-l2-extraction-convergence.md)
+needs before its code lands: how a stored pre-change L4 surface (ADR-038 C.8
+`fact_set`) is compared with a surface produced after the clang payload
+changes. Accepting it changes no behavior by itself; it binds the Phase 4
+implementation.
+
+### Context
+
+Phase 4 runs L2's `dumper_clang._ClangAstParser` over the clang AST and
+projects the result through `source_extractors/base.py`'s `entity_from_*`,
+the path castxml already uses. For clang-produced surfaces this changes the
+`SourceEntity` payload that `buildsource/source_abi.py` persists per TU. Two
+existing facts make a plain version bump unsafe:
+
+- **Identity is derived from the payload.** `SourceEntity.identity()` keys on
+  `mangled_name` when present, and otherwise on a hash that folds in the
+  type-level signature. A projection that fills or spells either field
+  differently makes an unchanged declaration look removed on one side and added
+  on the other: a fabricated break.
+- **C.8's suppressions do not cover this path.** Across a producer-version
+  change, C.8 already suppresses opaque body/template hashes, structured content
+  and source-edge reconciliation. It does not suppress existence checks or
+  `value`-based findings such as `default_argument_changed`.
+
+Each clang TU is stamped `producer_version = CLANG_EXTRACTOR_VERSION`
+(`buildsource/source_extractors/clang.py`, currently `"0.13"`). Phase 4 bumps
+it to `"0.14"`. `fact_set.name` and `fact_set.version` stay as they are: the
+mandatory family list does not change, and C.8 bumps `fact_set.version` only
+for that list.
+
+### Decisions
+
+**A1. A payload-revision mismatch is a named condition.** A comparison whose
+two sides carry the same `fact_set` name and version but different clang
+`producer_version` is a *payload-revision mismatch*. It is detected from the
+existing `producer_version_mismatch` issue (`buildsource/fact_set.py`) and
+handled by A2–A4. C.8's existing rules are unchanged.
+
+**A2. Re-extract the old side when its inputs exist.** The old side is
+re-extracted with the new extractor and compared new-to-new when both hold:
+
+- the old side's source tree at the recorded revision is available, and
+- its compile commands are available, directly or through the build pack that
+  L3 resolves to them.
+
+Re-extraction uses the Phase 3 compile-invocation model; this is why Phase 4
+implementation waits for Phase 3. The re-extracted surface is an in-memory
+comparison input and the stored baseline is never rewritten. If re-extraction
+is not fully complete (any mandatory family `partial` or `failed`), it is not
+used for that pair and the pair takes A3 as a whole. Stored and re-extracted
+families are never mixed in one comparison.
+
+**A3. Otherwise compare only the intersection.** The intersection is the set
+of facts that both sides' payloads carry with the same meaning. It has three
+layers, and anything outside them is not compared.
+
+1. *Family.* A mandatory family participates only when both sides report
+   `complete` or `empty-confirmed`. Any other state, including `unsupported`,
+   excludes it.
+2. *Identity.* Removal and addition are decided only for identity keys built
+   from pinned fields (below). An entity whose key depends on an unpinned field
+   is neither removed nor added.
+3. *Value.* `value`, `signature_hash`, `type_hash` and every opaque hash are
+   compared only where the field is pinned. Opaque body and template hashes are
+   never pinned across a revision; C.8 rule 3 already requires that.
+
+The pinned set, `REVISION_COMPARABLE_FIELDS`, is the set of `(kind, field)`
+pairs for which the Phase 4 equivalence test (test 1 below) shows that the old
+and new projections produce equal values on every TU of the catalog corpus.
+The default is *excluded*. The candidate set is `kind`, `qualified_name`,
+`mangled_name` (function, variable, record, enum, typedef), `visibility` and
+`api_relevant`; Phase 4 keeps only the candidates the test confirms and records
+the dropped ones in the test's expected table. Corpus equality is evidence, not
+proof, so a field that differs on any TU is dropped for the whole revision pair.
+
+Macros, source edges and read-file facts are not projected through L2 (they
+come from `macros_from_preprocessor` and `clang_source_edges`), so their
+payload should be unchanged. They are admitted to the intersection by the same
+pinned-field test, not by assumption.
+
+**A4. Lowered assurance uses the existing channels and never reads as clean.**
+A revision-mismatched pair that takes A3:
+
+- emits `SOURCE_FACT_COVERAGE_INCOMPLETE` (RISK, `_diff_fact_coverage` in
+  `buildsource/source_diff.py`) with the payload-revision reason and the list
+  of families and field classes that were not compared. No new `ChangeKind` is
+  added;
+- reads `unknown`, not `comparable`, on the fact-set axis of
+  `policy/analysis_assurance/_fact_set.py`;
+- keeps each excluded fact visible as *not compared, reason: payload revision*
+  in the result, as the record-before-disposing rule requires. An empty
+  intersection reports zero compared facts, never a clean pass.
+
+A3 never produces a removal or addition for an excluded key, a "no change"
+claim for an excluded field, or a `BREAKING` verdict derived only from an
+excluded field. Findings from the intersection are still emitted, and L4
+evidence still does not delete an artifact-proven break (ADR-028 D3).
+
+**A5. The pinned set is measured, not argued.** Membership in
+`REVISION_COMPARABLE_FIELDS` is decided by test 1. A later projection change
+that moves a pinned field off equality fails that test and needs a new
+amendment or a deliberate revision bump.
+
+### Test plan
+
+These tests land with Phase 4 and run in the fast suite unless marked
+`integration`.
+
+1. **Projection equivalence (pins the set).** For each of the 253 catalog TUs,
+   compare the 0.13 payload with the 0.14 payload for each candidate
+   `(kind, field)`. The 0.13 side is a golden generated once from the pre-change
+   code and checked in before the switch. The expected pinned set is written
+   from `catalog/ground_truth.json` declarations, not from the projection helper.
+   Marked `integration` (needs castxml and clang).
+2. **Property test on the comparison.** Hypothesis generates old/new payload
+   sets that differ in excluded fields only. The oracle is A3's set definition,
+   written independently in the test. It asserts: no removal or addition for a
+   key that contains an excluded field; no value finding for an excluded field;
+   `SOURCE_FACT_COVERAGE_INCOMPLETE` present whenever an excluded fact exists;
+   assurance `unknown`.
+3. **Fabricated-break regression.** A fixture whose only old/new difference is
+   an unpinned projection difference (a constructor whose `mangled_name` is
+   empty on one side and equal to its name on the other). It must produce zero
+   added, removed or breaking findings, and the coverage finding. Removing the
+   intersection filter must make this test fail; record that mutation result in
+   the PR.
+4. **Re-extraction path.** With source and compile commands present, the result
+   equals a fresh new-to-new comparison finding for finding. With an injected
+   partial diagnostic in re-extraction, the pair falls back to A3 as a whole,
+   and the reason is stated.
+5. **Cache invalidation.** An entry written under `CLANG_EXTRACTOR_VERSION =
+   "0.13"` is not served under `"0.14"`. Extend the existing pattern in
+   `tests/test_source_replay.py` (around line 628).
+6. **Zero comparisons and assurance.** A revision-mismatched pair whose
+   intersection is empty reports zero compared facts, not a clean result, and
+   the fact-set axis reads `unknown`.
+7. **User-facing validation.** Run `dump --depth source` on a catalog case with
+   the new extractor, then `compare` it against a stored 0.13 surface built from
+   the pre-change tree, through the CLI and not only the internal detector. Check
+   the rendered report for the lowered-assurance line and the compared-facts
+   count, both with re-extraction available and unavailable.
+8. **Gates.** `python scripts/verify.py --profile pr`, plus
+   `python scripts/check_architecture.py`, and `scripts/check_adr_surfaces.py`
+   if the PR adds a cited surface.
+
+Sequencing: Phase 3 lands first. This amendment's own PR is documentation only.
+
+### Out of scope
+
+- Phase 5 (`SourceEntity.identity` moving to `EntityId`) changes the identity
+  key itself and needs its own revision rule. A3's identity layer is written
+  against the Phase 4 key and is re-decided when Phase 5 lands.
+- Loosening C.8's existing suppressions or the rules in
+  `check_fact_set_compatibility`. This amendment adds a layer above them.
+- A new `ChangeKind`, CLI flag, or schema field.

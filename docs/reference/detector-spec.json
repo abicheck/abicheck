@@ -1335,6 +1335,15 @@
       "examples": "case104_glibcxx_dual_abi_flip"
     },
     {
+      "kind": "graph_coverage_insufficient_for_suppression",
+      "category": "quality",
+      "default_verdict": "COMPATIBLE",
+      "severity": "warning",
+      "min_evidence": "L1",
+      "doc_slug": "graph_coverage_insufficient_for_suppression",
+      "examples": ""
+    },
+    {
       "kind": "handle_type_changed",
       "category": "breaking",
       "default_verdict": "BREAKING",
