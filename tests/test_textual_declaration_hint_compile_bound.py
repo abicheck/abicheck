@@ -36,6 +36,7 @@ from abicheck.buildsource.export_declaration_evidence import (
     DeclarationHint,
     ExportDeclarationEvidence,
     _HeaderText,
+    _identifier_line_index,
     textual_declaration_hint,
 )
 
@@ -77,6 +78,13 @@ def _oracle(leaf: str, headers: tuple[_HeaderText, ...]) -> DeclarationHint | No
     return conditional
 
 
+def _header(
+    path: str, excluded: bool, lines: list[tuple[str, str | None]]
+) -> _HeaderText:
+    index = _identifier_line_index(lines)
+    return _HeaderText(path, excluded, lines, frozenset(index), index)
+
+
 def _headers(rng: random.Random) -> tuple[_HeaderText, ...]:
     out = []
     for n in range(rng.randint(1, 4)):
@@ -84,8 +92,7 @@ def _headers(rng: random.Random) -> tuple[_HeaderText, ...]:
         for _ in range(rng.randint(0, 6)):
             leaf = rng.choice(_LEAVES)
             lines.append((f"int {leaf}{rng.choice(_TAILS)}", rng.choice(_CONDS)))
-        idents = frozenset(re.findall(r"[A-Za-z_]\w*", " ".join(t for t, _ in lines)))
-        out.append(_HeaderText(f"h{n}.h", rng.random() < 0.3, lines, idents))
+        out.append(_header(f"h{n}.h", rng.random() < 0.3, lines))
     return tuple(out)
 
 
@@ -102,9 +109,7 @@ def test_compiles_only_for_leaves_a_header_names(
     n_symbols: int, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     named = [f"named{i}" for i in range(5)]
-    header = _HeaderText(
-        "a.h", True, [(f"void {n}(int);", None) for n in named], frozenset(named)
-    )
+    header = _header("a.h", True, [(f"void {n}(int);", None) for n in named])
     ev = ExportDeclarationEvidence(headers=(header,))
     calls: list[str] = []
     real = re.compile

@@ -27,6 +27,7 @@ from abicheck.buildsource.export_declaration_evidence import (
     DeclarationHint,
     ExportDeclarationEvidence,
     _HeaderText,
+    _identifier_line_index,
     textual_declaration_hint,
 )
 from abicheck.diff_templates import (
@@ -124,7 +125,10 @@ def _header(path, excluded, lines):
     idents = frozenset(
         tok for text, _ in lines for tok in re.findall(r"[A-Za-z_]\w*", text)
     )
-    return _HeaderText(path=path, excluded=excluded, lines=lines, identifiers=idents)
+    index = _identifier_line_index(lines)
+    return _HeaderText(
+        path=path, excluded=excluded, lines=lines, identifiers=idents, line_index=index
+    )
 
 
 _EVIDENCES = [
