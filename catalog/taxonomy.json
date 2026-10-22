@@ -5118,9 +5118,7 @@
   "scenario_kind": null,
   "operation": "compare",
   "ecosystem": "generic",
-  "topics": [
-   "source"
-  ],
+  "topics": [],
   "languages": [],
   "scope": "single-library",
   "artifact_shape": "fixture-pair",
