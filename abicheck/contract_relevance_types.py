@@ -283,6 +283,14 @@ CONTRACT_REASON_CODES: MappingProxyType[str, str] = MappingProxyType(
             "An exact declaration's contract semantics close membership for "
             "this entity, and no stronger/equal provider could override it."
         ),
+        "toolchain_runtime_origin": (
+            "The symbol is emitted by the C++ runtime or toolchain (a std::, "
+            "__gnu_cxx:: or __cxxabiv1:: internal, a function-local static or "
+            "guard variable of a standard template, a libgcc/libc helper), not "
+            "by the library under test: it is outside the contract, reported "
+            "with this reason, and does not gate. A symbol the caller declared "
+            "public explicitly keeps gating."
+        ),
         "closed_domain_no_commitment": (
             "The declared evidence domain was searched completely and no "
             "commitment or authoritative exclusion was found."
