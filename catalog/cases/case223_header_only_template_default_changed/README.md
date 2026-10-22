@@ -1,0 +1,88 @@
+# Case 223: Header-Only Template Default Changed
+
+**Category:** Template ABI | **Verdict:** 🟡 COMPATIBLE_WITH_RISK (castxml) / 🟠 API_BREAK (clang)
+
+## Verdict and consumer impact
+
+`mylib::Box<T, U = T>` is a header-only class template. Its default for `U`
+changes from `T` to `int`. Nothing exports `Box`, and no public signature names
+it, so no symbol changes. A consumer that writes `mylib::Box<char>` compiles
+unchanged against v1 but substitutes `Box<char, char>` there and `Box<char, int>`
+against v2. The change is a source-level consequence, not a binary break.
+
+Both backends reach the same ground truth, `COMPATIBLE_WITH_RISK`, on the
+default castxml lane. That lane's one finding is the source-replay risk
+`public_dependency_role_changed`, because the old default referenced `T`. The
+header-level kind `template_param_default_changed` belongs to the clang backend
+(ADR-085 D2). castxml records no template-parameter defaults (D3), so its run
+reports the assurance gap instead of a clean result.
+
+## Old/new diff
+
+## Old/new diff
+
+| v1.h | v2.h |
+|------|------|
+| `template <typename T, typename U = T> struct Box;` | `template <typename T, typename U = int> struct Box;` |
+
+## abicheck command
+
+```bash
+cat > .abicheck.yml <<'EOF'
+compile:
+  frontend: castxml
+  lang: c++
+EOF
+abicheck dump -H v1.h --config .abicheck.yml --depth headers -o old.json
+abicheck dump -H v2.h --config .abicheck.yml --depth headers -o new.json
+abicheck compare old.json new.json
+```
+
+Switch `frontend: clang` to see the clang result above.
+
+## Expected abicheck finding
+
+castxml (default):
+
+```text
+Verdict: COMPATIBLE_WITH_RISK
+- public_dependency_role_changed: Public entry 'mylib::Box' still depends on
+  'T' (TYPE_HAS_FIELD_TYPE) but its role changed: default_template_arg, field -> field.
+  Source-graph evidence to prioritize review.
+Assurance: partial
+  gap: template-parameter defaults (castxml cannot record them)
+  Warning: public-header scoping could not resolve the public surface; compatibility
+  is UNCONFIRMED (manual review required).
+```
+
+clang:
+
+```text
+Verdict: API_BREAK
+- template_param_default_changed: class template Box has a different
+  default for parameter 1 (T -> int)
+```
+
+## Minimum evidence
+
+`min_evidence: L2`. The default lives in the public header, so the header
+backend is the only evidence source. `castxml` cannot record it. `clang` can.
+
+## Why abicheck catches it
+
+The clang dumper records `TemplateTypeParmDecl.defaultArg` for class templates
+(ADR-085 D1/slice 2). `compare/template_param_defaults.py` pairs the pattern by
+qualified name and compares the recorded defaults. castxml writes no record for
+an uninstantiated template, so its snapshot stays UNKNOWN and the template-default
+scan reports the gap.
+
+## Runtime failure demonstration
+
+None. Nothing is exported, so no binary changes. The break is at the source
+level, and a consumer rebuilds.
+
+## Safe redesign
+
+Do not change a default in a public header without a deprecation window. Add a
+new template alias, for example `template <typename T> using BoxInt = Box<T, int>;`,
+and leave `Box`'s default unchanged.

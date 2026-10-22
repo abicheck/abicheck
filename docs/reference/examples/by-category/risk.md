@@ -3,7 +3,7 @@
 
 Listed in `RISK_KINDS` — symbol-compatible but behaviorally risky.
 
-_38 case(s)._ [← back to all examples](../index.md)
+_40 case(s)._ [← back to all examples](../index.md)
 
 | Case | Title | Verdict | Category |
 |------|-------|---------|----------|
@@ -45,3 +45,5 @@ _38 case(s)._ [← back to all examples](../index.md)
 | [case219_public_virtual_dispatch_set_changed](../case219_public_virtual_dispatch_set_changed.md) | Public Virtual Method's Override Set Changes | 🟡 COMPATIBLE_WITH_RISK | Risk |
 | [case221_public_api_internal_type_renamed](../case221_public_api_internal_type_renamed.md) | Public Dependency Target Renamed Alongside an Unrelated Addition | 🟡 COMPATIBLE_WITH_RISK | Risk |
 | [case222_public_consumer_compiled_dependency_changed](../case222_public_consumer_compiled_dependency_changed.md) | Public Inline Body's Compiled-In Dependency Changes | 🟡 COMPATIBLE_WITH_RISK | Risk |
+| [case223_header_only_template_default_changed](../case223_header_only_template_default_changed.md) | Header-Only Template Default Changed | 🟡 COMPATIBLE_WITH_RISK | Risk |
+| [case227_nested_namespace_template_default_changed](../case227_nested_namespace_template_default_changed.md) | Nested-Namespace Template Default Changed | 🟡 COMPATIBLE_WITH_RISK | Risk |

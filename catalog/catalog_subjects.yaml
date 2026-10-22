@@ -185,6 +185,13 @@ subjects:
       - case16_inline_to_non_inline
       - case47_inline_to_outlined
       - case89_inline_accessor_renamed_pimpl_member
+      - case223_header_only_template_default_changed
+      - case224_header_only_template_default_added
+      - case225_header_only_template_default_removed
+      - case226_header_only_template_default_unchanged
+      - case227_nested_namespace_template_default_changed
+      - case228_nontype_template_param_default_changed
+      - case229_exported_template_default_changed
       - case157_inline_function_removed
       - case222_public_consumer_compiled_dependency_changed
 

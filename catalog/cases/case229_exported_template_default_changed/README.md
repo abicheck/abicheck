@@ -1,0 +1,59 @@
+# Case 229: Exported Template Default Changed
+
+**Category:** Template ABI | **Verdict:** 🔴 BREAKING
+
+## Verdict and consumer impact
+
+The library exports the instantiation `Box<int>`, which carries the default
+`U = T`. The default becomes `U = long`, so the default-substituted instantiation
+`Box<int, int>` disappears and `Box<int, long>` appears. This is the shape-A case
+(ADR-085 A). A consumer built against v1 cannot find the old symbol. The verdict
+is `BREAKING`, with `default_template_arg_changed` as the explanation.
+
+This case checks that the header-level kind does not also fire. The exported
+instantiation already covers the template, so the header-level relation is
+recorded as `DEDUPLICATED`, and `template_param_default_changed` is absent from
+the output.
+
+## Old/new diff
+
+| v1.h | v2.h |
+|------|------|
+| `template <typename T, typename U = T> class Box;` | `template <typename T, typename U = long> class Box;` |
+
+## abicheck command
+
+```bash
+g++ -shared -fPIC -g -std=c++17 -I. v1.cpp -o libfoo_v1.so
+g++ -shared -fPIC -g -std=c++17 -I. v2.cpp -o libfoo_v2.so
+abicheck compare libfoo_v1.so libfoo_v2.so -H old=v1.h -H new=v2.h
+```
+
+## Expected abicheck finding
+
+```text
+Verdict: BREAKING
+- default_template_arg_changed: Box<int, int> -> Box<int, long>
+- func_removed / instantiation_missing_from_binary: Box<int, int> symbols
+```
+
+## Minimum evidence
+
+`min_evidence: L2`, so the exported symbols and the public header are both
+present.
+
+## Why abicheck catches it
+
+`detect_default_template_arg_changed` finds the exported instantiation. Its
+callable stem covers the header-level relation, so the relation is suppressed
+and recorded as `DEDUPLICATED` (`policy/template_default_changes.py`).
+
+## Runtime failure demonstration
+
+Build the old library and a consumer against v1, then swap in v2. The consumer
+fails to resolve the `Box<int, int>` symbol.
+
+## Safe redesign
+
+Never change the default of a template whose instantiations ship. Add an
+explicitly named alias instead, as in case87.

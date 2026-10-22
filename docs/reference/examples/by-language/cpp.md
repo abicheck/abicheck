@@ -3,7 +3,7 @@
 
 Cases whose committed fixtures include C++ sources.
 
-_93 case(s)._ [← back to all examples](../index.md)
+_100 case(s)._ [← back to all examples](../index.md)
 
 | Case | Title | Verdict | Category |
 |------|-------|---------|----------|
@@ -100,3 +100,10 @@ _93 case(s)._ [← back to all examples](../index.md)
 | [case216_overload_added_beside_initializer_list](../case216_overload_added_beside_initializer_list.md) | Overload Added Beside an `initializer_list` Overload | 🟢 COMPATIBLE | Addition (Compatible) |
 | [case217_export_loss_weak_binding_demoted](../case217_export_loss_weak_binding_demoted.md) | WEAK export loss demoted to a risk by a `binding: weak` rule | 🔴 BREAKING | Breaking |
 | [case218_export_loss_strong_binding_stays_breaking](../case218_export_loss_strong_binding_stays_breaking.md) | a GLOBAL export loss stays BREAKING under a `binding: weak` rule | 🔴 BREAKING | Breaking |
+| [case223_header_only_template_default_changed](../case223_header_only_template_default_changed.md) | Header-Only Template Default Changed | 🟡 COMPATIBLE_WITH_RISK | Risk |
+| [case224_header_only_template_default_added](../case224_header_only_template_default_added.md) | Header-Only Template Default Added | ✅ NO_CHANGE | No Change |
+| [case225_header_only_template_default_removed](../case225_header_only_template_default_removed.md) | Header-Only Template Default Removed | ✅ NO_CHANGE | No Change |
+| [case226_header_only_template_default_unchanged](../case226_header_only_template_default_unchanged.md) | Header-Only Template Default Unchanged | ✅ NO_CHANGE | No Change |
+| [case227_nested_namespace_template_default_changed](../case227_nested_namespace_template_default_changed.md) | Nested-Namespace Template Default Changed | 🟡 COMPATIBLE_WITH_RISK | Risk |
+| [case228_nontype_template_param_default_changed](../case228_nontype_template_param_default_changed.md) | Non-Type Template Parameter Default Changed | ✅ NO_CHANGE | No Change |
+| [case229_exported_template_default_changed](../case229_exported_template_default_changed.md) | Exported Template Default Changed | 🔴 BREAKING | Breaking |

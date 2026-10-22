@@ -5132,6 +5132,167 @@
    "inline-function-and-odr-boundary-changes"
   ]
  },
+ "case223_header_only_template_default_changed": {
+  "entity": "rule",
+  "scenario_kind": null,
+  "operation": "compare",
+  "ecosystem": "generic",
+  "topics": [
+   "source"
+  ],
+  "languages": [
+   "cpp"
+  ],
+  "scope": "single-library",
+  "artifact_shape": "compiled-pair",
+  "validation_owner": "compiler-pair",
+  "related_rules": [],
+  "rule_slug": "header-only-template-default-changed",
+  "variant_of": null,
+  "relation_type": null,
+  "relation_axis": null,
+  "subjects": [
+   "inline-function-and-odr-boundary-changes"
+  ]
+ },
+ "case224_header_only_template_default_added": {
+  "entity": "rule",
+  "scenario_kind": null,
+  "operation": "compare",
+  "ecosystem": "generic",
+  "topics": [
+   "controls"
+  ],
+  "languages": [
+   "cpp"
+  ],
+  "scope": "single-library",
+  "artifact_shape": "compiled-pair",
+  "validation_owner": "compiler-pair",
+  "related_rules": [],
+  "rule_slug": "header-only-template-default-added",
+  "variant_of": null,
+  "relation_type": null,
+  "relation_axis": null,
+  "subjects": [
+   "inline-function-and-odr-boundary-changes"
+  ]
+ },
+ "case225_header_only_template_default_removed": {
+  "entity": "rule",
+  "scenario_kind": null,
+  "operation": "compare",
+  "ecosystem": "generic",
+  "topics": [
+   "controls"
+  ],
+  "languages": [
+   "cpp"
+  ],
+  "scope": "single-library",
+  "artifact_shape": "compiled-pair",
+  "validation_owner": "compiler-pair",
+  "related_rules": [],
+  "rule_slug": "header-only-template-default-removed",
+  "variant_of": null,
+  "relation_type": null,
+  "relation_axis": null,
+  "subjects": [
+   "inline-function-and-odr-boundary-changes"
+  ]
+ },
+ "case226_header_only_template_default_unchanged": {
+  "entity": "rule",
+  "scenario_kind": null,
+  "operation": "compare",
+  "ecosystem": "generic",
+  "topics": [
+   "controls"
+  ],
+  "languages": [
+   "cpp"
+  ],
+  "scope": "single-library",
+  "artifact_shape": "compiled-pair",
+  "validation_owner": "compiler-pair",
+  "related_rules": [],
+  "rule_slug": "header-only-template-default-unchanged",
+  "variant_of": null,
+  "relation_type": null,
+  "relation_axis": null,
+  "subjects": [
+   "inline-function-and-odr-boundary-changes"
+  ]
+ },
+ "case227_nested_namespace_template_default_changed": {
+  "entity": "rule",
+  "scenario_kind": null,
+  "operation": "compare",
+  "ecosystem": "generic",
+  "topics": [
+   "source"
+  ],
+  "languages": [
+   "cpp"
+  ],
+  "scope": "single-library",
+  "artifact_shape": "compiled-pair",
+  "validation_owner": "compiler-pair",
+  "related_rules": [],
+  "rule_slug": "nested-namespace-template-default-changed",
+  "variant_of": null,
+  "relation_type": null,
+  "relation_axis": null,
+  "subjects": [
+   "inline-function-and-odr-boundary-changes"
+  ]
+ },
+ "case228_nontype_template_param_default_changed": {
+  "entity": "rule",
+  "scenario_kind": null,
+  "operation": "compare",
+  "ecosystem": "generic",
+  "topics": [
+   "controls"
+  ],
+  "languages": [
+   "cpp"
+  ],
+  "scope": "single-library",
+  "artifact_shape": "compiled-pair",
+  "validation_owner": "compiler-pair",
+  "related_rules": [],
+  "rule_slug": "nontype-template-param-default-changed",
+  "variant_of": null,
+  "relation_type": null,
+  "relation_axis": null,
+  "subjects": [
+   "inline-function-and-odr-boundary-changes"
+  ]
+ },
+ "case229_exported_template_default_changed": {
+  "entity": "rule",
+  "scenario_kind": null,
+  "operation": "compare",
+  "ecosystem": "generic",
+  "topics": [
+   "types"
+  ],
+  "languages": [
+   "cpp"
+  ],
+  "scope": "single-library",
+  "artifact_shape": "compiled-pair",
+  "validation_owner": "compiler-pair",
+  "related_rules": [],
+  "rule_slug": "exported-template-default-changed",
+  "variant_of": null,
+  "relation_type": null,
+  "relation_axis": null,
+  "subjects": [
+   "inline-function-and-odr-boundary-changes"
+  ]
+ },
  "case221_public_api_internal_type_renamed": {
   "entity": "scenario",
   "scenario_kind": "capability",

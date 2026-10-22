@@ -160,6 +160,27 @@ rules:
   default-template-arg-changed:
     title: Default template argument changed
     definition: A template's default argument changes, so the same written specialization now names a different, differently-mangled instantiation.
+  header-only-template-default-changed:
+    title: Header-only template default changed
+    definition: A class template's default argument changes in a public header that nothing exports or names. The change is recorded as template_param_default_changed (API_BREAK) on clang; castxml cannot record the default, so it reports a template-default assurance gap and a source-replay risk instead.
+  header-only-template-default-added:
+    title: Header-only template default added
+    definition: A default argument is added to a header-only class template parameter that had none, so existing spellings that omitted the argument now select a different type.
+  header-only-template-default-removed:
+    title: Header-only template default removed
+    definition: A default argument is removed from a header-only class template parameter, so consumer spellings that relied on it stop compiling. Recorded on clang; a castxml gap on the default lane.
+  header-only-template-default-unchanged:
+    title: Header-only template default unchanged
+    definition: A header-only class template keeps the same default argument on both sides. The template-default detector must emit nothing; this is the negative control for the header-only rules.
+  nested-namespace-template-default-changed:
+    title: Nested-namespace template default changed
+    definition: A header-only default argument change for a class template in a nested namespace. The qualified-name pairing must match the pattern under its nested scope.
+  nontype-template-param-default-changed:
+    title: Non-type template parameter default changed
+    definition: A non-type template parameter's default changes. The recorder covers type parameters only, so the change is an explicit assurance gap on both backends rather than a verdict.
+  exported-template-default-changed:
+    title: Exported template default changed
+    definition: A default template argument changes for a template whose instantiation the library exports. The default-substituted symbol changes (BREAKING, default_template_arg_changed), and the header-level kind is recorded as DEDUPLICATED rather than reported twice.
   deprecation-documented-without-attribute:
     title: Deprecation announced only in a comment
     definition: A declaration is described as deprecated in header prose with no deprecation attribute, so the preprocessor discards the announcement and no consumer's build ever sees it.
