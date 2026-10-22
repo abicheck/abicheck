@@ -3,39 +3,32 @@
 Plan ``l4-l2-extraction-convergence`` Phase 4, ADR-063 amendment "L4 clang
 payload comparability" (test plan item 1). The current-side (``producer_version``
 ``"0.13"``) surface of each catalog C++ TU is read from
-``tests/golden/l4_clang/surface_0_13.jsonl``, which was generated from the
-pre-change emitter by ``scripts/gen_l4_clang_golden.py``. The projection side is
-computed here, live, with the spike's configuration
-(``scripts/measure_l4_clang_projection.py``). Per TU the two sides are compared
-per ``(kind, field)``; a field whose status is ``equal`` on every TU with
-evidence is pinned.
+``tests/golden/l4_clang/surface_0_13.jsonl``, generated from the pre-change
+emitter by ``scripts/gen_l4_clang_golden.py``. The projection side is computed
+here, live, with the spike's configuration (``scripts/measure_l4_clang_projection.py``).
 
 The expected pinned set is the literal ``EXPECTED_PINNED`` below. It is not
 computed from the projection helper. If the measured set disagrees, the test
 fails: do not edit the literal to match the code.
 
-Marked ``integration``: needs clang. Skips when clang is absent.
+The golden's clang version is recorded in its header. The two tests that depend
+on clang output skip, with the reason named, when the live clang differs, so a
+different toolchain is never reported as drift or as a measurement.
 """
 
 from __future__ import annotations
 
-import importlib.util
-import json
-import sys
 from pathlib import Path
 
 import pytest
-
-REPO_ROOT = Path(__file__).resolve().parent.parent
-GOLDEN = REPO_ROOT / "tests" / "golden" / "l4_clang" / "surface_0_13.jsonl"
-TOOL = REPO_ROOT / "scripts" / "measure_l4_clang_projection.py"
+from _l4_clang_golden_support import GOLDEN, REPO_ROOT, G, M, golden_header_and_rows
 
 #: Pinned ``(kind, field)`` pairs: status ``equal`` with at least two paired
-#: entities. Written by hand from the amendment's candidate set and the
-#: measurement's ``equal`` rows (ADR-063 A3: a field that differs on any TU is
-#: dropped). ``typedef.visibility`` and ``typedef.api_relevant`` are equal by
-#: construction (``base.entity_from_typedef`` hard-codes them), not by evidence;
-#: they are listed because the rule admits them, and the status note says so.
+#: entities. Written by hand from the amendment's candidate set and the rule A3
+#: (a field that differs on any TU is dropped). ``typedef.visibility`` and
+#: ``typedef.api_relevant`` are equal by construction (``base.entity_from_typedef``
+#: hard-codes them), not by evidence; the rule admits them, and the plan's status
+#: note says so.
 EXPECTED_PINNED: frozenset[tuple[str, str]] = frozenset(
     {
         ("typedef", "qualified_name"),
@@ -50,22 +43,19 @@ EXPECTED_PINNED: frozenset[tuple[str, str]] = frozenset(
 MIN_PAIRED = 2
 
 
-def _load_tool():
-    spec = importlib.util.spec_from_file_location("measure_l4_clang_projection", TOOL)
-    assert spec is not None and spec.loader is not None
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[spec.name] = module
-    spec.loader.exec_module(module)
-    return module
+def _require_golden_clang() -> None:
+    """Skip unless the live clang is the one the golden was generated with."""
+    from abicheck.buildsource.source_extractors.clang import ClangSourceExtractor
 
-
-M = _load_tool()
-
-
-def _golden_rows() -> tuple[dict, list[dict]]:
-    lines = GOLDEN.read_text(encoding="utf-8").splitlines()
-    header = json.loads(lines[0])
-    return header, [json.loads(line) for line in lines[1:]]
+    if not ClangSourceExtractor().available():
+        pytest.skip("clang not installed")
+    header, _ = golden_header_and_rows()
+    live = G.live_clang_version()
+    if live != header["clang_version"]:
+        pytest.skip(
+            f"golden was generated with {header['clang_version']!r}; "
+            f"live clang is {live!r}, so the golden is not comparable here"
+        )
 
 
 def _current_views(row: dict) -> list:
@@ -79,21 +69,11 @@ def _current_views(row: dict) -> list:
 
 def _projected_views(cpp: Path, extractor) -> list:
     """The spike's projection configuration, applied to one TU's AST."""
-    from abicheck.buildsource.build_evidence import CompileUnit
     from abicheck.buildsource.source_extractors import base
     from abicheck.dumper_clang import _ClangAstParser
 
     case_dir = cpp.parent
-    roots = [str(case_dir)]
-    cu = CompileUnit(
-        id=f"cu://{case_dir.name}/{cpp.name}",
-        source=str(cpp),
-        directory=str(case_dir),
-        language="CXX",
-        standard="c++17",
-        argv=["c++", "-std=c++17", "-fPIC", "-fvisibility=hidden", "-c", str(cpp)],
-    )
-    dump = extractor.dump_for(cu)
+    dump = extractor.dump_for(G.compile_unit_for(cpp))
     try:
         assert dump.ast is not None, f"clang AST dump failed for {cpp}"
         parser = _ClangAstParser(
@@ -101,7 +81,7 @@ def _projected_views(cpp: Path, extractor) -> list:
             set(),
             set(),
             public_header_paths=[],
-            public_dir_paths=roots,
+            public_dir_paths=[str(case_dir)],
             target_triple=None,
             no_binary_evidence=True,
             is_cxx=True,
@@ -122,7 +102,7 @@ def _projected_views(cpp: Path, extractor) -> list:
 def test_golden_header_pins_the_pre_change_producer() -> None:
     from abicheck.buildsource.source_extractors.clang import CLANG_EXTRACTOR_VERSION
 
-    header, rows = _golden_rows()
+    header, rows = golden_header_and_rows()
     assert header["producer_version"] == "0.13"
     # The golden is the pre-change side: the producer must still be 0.13 here.
     # A bump to 0.14 is the b2 change and must regenerate this file first.
@@ -131,21 +111,37 @@ def test_golden_header_pins_the_pre_change_producer() -> None:
 
 
 @pytest.mark.integration
+@pytest.mark.slow
+def test_golden_is_the_output_of_its_generator() -> None:
+    """Regenerating from this checkout reproduces the checked-in bytes exactly."""
+    _require_golden_clang()
+    from abicheck.buildsource.source_extractors.clang import (
+        CLANG_EXTRACTOR_VERSION,
+    )
+
+    assert CLANG_EXTRACTOR_VERSION == "0.13"
+    regenerated = G.build_golden_text(M.corpus_cases(REPO_ROOT / "catalog" / "cases"))
+    assert regenerated == GOLDEN.read_text(encoding="utf-8"), (
+        "golden is stale: run scripts/gen_l4_clang_golden.py and review the diff"
+    )
+
+
+@pytest.mark.integration
+@pytest.mark.slow
 def test_pinned_set_matches_the_measured_projection_equivalence() -> None:
     from abicheck.buildsource.source_extractors.clang import ClangSourceExtractor
 
+    _require_golden_clang()
     extractor = ClangSourceExtractor()
-    if not extractor.available():
-        pytest.skip("clang not installed")
-    _, rows = _golden_rows()
+    _, rows = golden_header_and_rows()
 
     comparisons = []
     failures = []
     for row in rows:
-        cpp = REPO_ROOT / "catalog" / "cases" / row["tu"]
         if "error" in row:
             failures.append(row["tu"])
             continue
+        cpp = REPO_ROOT / row["compile_unit"]["source"]
         comparisons.append(
             M.compare_views(
                 row["tu"], _current_views(row), _projected_views(cpp, extractor)

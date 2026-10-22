@@ -66,11 +66,33 @@ def compile_unit_for(cpp: Path) -> Any:
     )
 
 
-def _clang_version(clang_bin: str) -> str:
+def live_clang_version(clang_bin: str = "clang") -> str:
+    """The first line of ``clang --version``, as the header records it."""
     out = subprocess.run(
         [clang_bin, "--version"], capture_output=True, text=True, check=True
     ).stdout
     return out.splitlines()[0].strip()
+
+
+def _repo_relative(path: str) -> str:
+    """A checkout-independent spelling of a path inside the repository."""
+    return Path(path).resolve().relative_to(REPO).as_posix()
+
+
+def portable_compile_unit(cu: Any) -> dict[str, Any]:
+    """The compile unit as the golden stores it: repository-relative paths only.
+
+    The dump itself runs on absolute paths; only the recorded form is portable,
+    so the golden is byte-identical in any checkout.
+    """
+    argv = [_repo_relative(a) if Path(a).is_absolute() else a for a in cu.argv]
+    return {
+        "source": _repo_relative(cu.source),
+        "directory": _repo_relative(cu.directory),
+        "language": cu.language,
+        "standard": cu.standard,
+        "argv": argv,
+    }
 
 
 def golden_tu(cpp: Path, extractor: Any) -> dict[str, Any]:
@@ -111,13 +133,7 @@ def golden_tu(cpp: Path, extractor: Any) -> dict[str, Any]:
         )
     return {
         "tu": case,
-        "compile_unit": {
-            "source": cu.source,
-            "directory": cu.directory,
-            "language": cu.language,
-            "standard": cu.standard,
-            "argv": list(cu.argv),
-        },
+        "compile_unit": portable_compile_unit(cu),
         "entities": entities,
     }
 
@@ -134,7 +150,7 @@ def build_golden_text(cases: list[Path], clang_bin: str = "clang") -> str:
     header = {
         "record": "header",
         "producer_version": CLANG_EXTRACTOR_VERSION,
-        "clang_version": _clang_version(clang_bin),
+        "clang_version": live_clang_version(clang_bin),
         "corpus": "catalog/cases/*/*.cpp",
         "tu_count": len(cases),
         "candidate_fields": {k: list(v) for k, v in CANDIDATE_FIELDS.items()},

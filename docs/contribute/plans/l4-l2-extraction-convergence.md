@@ -347,8 +347,13 @@ the producer switch. It changes no L4 code path or output, leaves
   (`--check` regenerates in memory and fails on any difference). The header
   records clang `Ubuntu clang version 18.1.3 (1ubuntu1)`. Regenerating on a
   different clang may change the file; regenerate in a deliberate commit.
-- **Measurement test.** `tests/test_l4_clang_projection_golden.py` (`integration`,
-  skips without clang). It reads the current side from the golden, computes the
+- **Golden drift test.** `test_golden_is_the_output_of_its_generator` regenerates
+  the golden in-process and asserts it equals the checked-in file. The golden stores
+  repository-relative paths only, so it is identical in any checkout (checked from a
+  copy at another path).
+- **Measurement test.** `tests/test_l4_clang_projection_golden.py` (`integration` and
+  `slow`; skips without clang, and skips when the live clang differs from the version
+  in the golden header). It reads the current side from the golden, computes the
   projection side live with the spike's configuration, compares per TU and per
   `(kind, field)`, and asserts the measured pinned set equals the literal
   `EXPECTED_PINNED`. The literal is written by hand from the amendment's candidate
@@ -407,20 +412,25 @@ Presence (not a field, from the same run): current side 2600 functions, projecte
 68629, of which 66953 are out of scope and excluded from pairing. The
 projected-only out-of-scope set is the public-surface problem below.
 
-**What remains for b2** (a separate PR, after this one merges):
-1. The projection: `CLANG_EXTRACTOR_VERSION` `"0.13"` to `"0.14"`, and the
-   projected side built in production code, not the spike.
-2. The public-surface filter before projecting. Without it the projection carries
-   66953 out-of-scope declarations (for example `fclose`, `__uflow`, `asprintf`);
-   the golden shows the current side is scoped to the case directory.
-3. The gaps that block the dropped fields, recorded under
-   [Clang projection](../known-gaps.md#clang-projection-adr-063-phase-4-prerequisites):
-   origin unset, bare member and namespace names, unmangled `distance`, and hash
-   and default-argument spelling.
-4. The guard that makes `REVISION_COMPARABLE_FIELDS` a runtime rule, and the
-   decision on whether the two equal-by-construction typedef fields are kept.
-5. Re-run this measurement and the golden test after the bump; the expected set
-   in `tests/test_l4_clang_projection_golden.py` changes in that PR, not before.
+**What remains for b2** (a separate PR, after this one merges), in order:
+1. The projected side in production code, with the public-surface filter applied
+   before projecting. Without the filter the projection carries 66953
+   out-of-scope declarations (for example `fclose`, `__uflow`, `asprintf`); the
+   golden shows the current side is scoped to the case directory. The gaps that
+   block the dropped fields are closed here or the fields stay excluded:
+   [Clang projection](../known-gaps.md#clang-projection-adr-063-phase-4-prerequisites)
+   (origin unset, bare member and namespace names, unmangled `distance`, hash and
+   default-argument spelling).
+2. The ADR-063 amendment's A1–A4 guard: the payload-revision mismatch
+   condition, the intersection rule that uses `REVISION_COMPARABLE_FIELDS`, and
+   the `SOURCE_FACT_COVERAGE_INCOMPLETE` / `unknown` assurance reporting. The
+   decision on whether the two equal-by-construction typedef fields are kept is
+   made here.
+3. The `CLANG_EXTRACTOR_VERSION` bump from `"0.13"` to `"0.14"`, last, once 1 and 2
+   are in place. Re-run this measurement and the golden test in that PR; the
+   expected set in `tests/test_l4_clang_projection_golden.py` changes there, not
+   before.
+
 
 ### Phase 5 — one entity identity
 
