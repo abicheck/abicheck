@@ -95,6 +95,7 @@ _NEEDS_L5 = "UNCOVERED: L3-L5 build-source graph extraction (needs a compile dat
 COVERAGE: dict[str, str] = {
     # ---- memoized functions ----
     "abicheck.storage.code_identity::memoized::abicheck_code_fingerprint": B,
+    "abicheck.buildsource.export_declaration_evidence::memoized::_leaf_declaration_re": "UNCOVERED: pure compile of a regex from a symbol leaf; no cell runs cross-source export accounting with headers. Its equivalence is pinned by tests/test_textual_declaration_hint_compile_bound.py (character-scan oracle)",
     "abicheck.policy.selectors::memoized::_ns_forms": "UNCOVERED: pure function of a symbol name (demangle + template-argument strip); no cell runs a namespace suppression rule. Its equivalence is pinned by tests/test_disposition_hot_path_equivalence.py",
     "abicheck.model.semantic_ir_function_signature::memoized::_shared_present": B,
     "abicheck.storage.code_identity::memoized::abicheck_modules_fingerprint": H,

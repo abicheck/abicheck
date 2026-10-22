@@ -49,7 +49,6 @@ caller's existing behavior unchanged.
 
 from __future__ import annotations
 
-import functools
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -57,6 +56,7 @@ from typing import TYPE_CHECKING
 
 from ..extract.header_exclusions import header_matches_exclusion
 from ..header_conditionals import _include_guard_macro, _strip_comments
+from ..model.execution_cache import memoized
 from ..model.export_entity_name import (
     PublicTemplateScopes,
     entity_name_components,
@@ -368,7 +368,7 @@ def _leaf_and_scope(symbol: str) -> tuple[str, str | None] | None:
     return None
 
 
-@functools.lru_cache(maxsize=4096)
+@memoized(maxsize=4096)
 def _leaf_declaration_re(leaf: str) -> re.Pattern[str]:
     """*leaf* as a declared name: followed by ``(``, ``[``, ``;``, ``=`` or ``,``.
 
