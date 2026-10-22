@@ -184,6 +184,7 @@ COVERAGE: dict[str, str] = {
     # ---- disk caches ----
     "abicheck.workflows.dump.cache.store::disk_cache::SNAPSHOT_DISK_CACHE": B,
     "abicheck.storage.ast_cache_location::disk_cache::AST_DISK_CACHE": H,
+    "abicheck.buildsource.header_include_disk_cache::disk_cache::INCLUDE_DISK_CACHE": H,
     "abicheck.buildsource.build_cache::disk_cache::BUILD_EVIDENCE_DISK_CACHE": _NEEDS_L5,
     "abicheck.buildsource.build_cache::disk_cache::SOURCE_ABI_DISK_CACHE": _NEEDS_L5,
     # ---- pools (reference = ABICHECK_REFERENCE_MODE=1: every pool runs inline) ----

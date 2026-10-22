@@ -412,8 +412,13 @@ class TestSuppressionParity:
             ]
         )
         result = compare(old, new, suppression=sl)
-        # internal_fn removal should be suppressed
-        active_symbols = {c.symbol for c in result.changes}
+        # internal_fn removal should be suppressed. Its advisory graph-coverage
+        # finding names the same symbol, so ignore that one kind here.
+        active_symbols = {
+            c.symbol
+            for c in result.changes
+            if c.kind is not ChangeKind.GRAPH_COVERAGE_INSUFFICIENT_FOR_SUPPRESSION
+        }
         assert "_internal_fn" not in active_symbols
 
     def test_suppress_with_expiry(self, tmp_path: Path) -> None:

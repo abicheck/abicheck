@@ -182,7 +182,13 @@ template fingerprints, macros, source edges) as a layer over it. This changes
 the L4 `SourceEntity` payload for clang-produced surfaces, so it needs a
 `CLANG_EXTRACTOR_VERSION` bump (cache invalidation) and a stated
 comparability rule for a stored pre-change L4 surface (the `fact_set`
-mechanism, ADR-038 C.8) — decided in an ADR-063 amendment before code.
+mechanism, ADR-038 C.8) — decided in the
+[ADR-063 amendment "L4 clang payload comparability"](../adr/063-one-semantic-pipeline.md#amendment-2026-10-21-proposed-l4-clang-payload-comparability)
+(Proposed) before code. That amendment fixes the rule: re-extract the old side
+when its sources and compile commands are available; otherwise compare only
+the facts both payloads carry, and report the lowered assurance through
+`SOURCE_FACT_COVERAGE_INCOMPLETE`. Phase 4 implementation waits for Phase 3,
+because re-extraction uses the one compile-invocation model.
 
 ### Phase 5 — one entity identity
 
