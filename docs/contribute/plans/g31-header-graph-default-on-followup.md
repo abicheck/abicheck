@@ -129,7 +129,7 @@ it) with confidence instead of best-effort name matching.
 - Canonical entity identity keyed on Itanium/MSVC mangled name where
   available, falling back to a qualified-name + kind + arity key when a
   header-only pass has no mangling to offer (mirrors the existing fallback
-  already used ad hoc in `internal_leak.py`'s trigger matching — see
+  already used ad hoc in `compare/internal_leak.py`'s trigger matching — see
   ADR-044's "leak triggers were a category error" post-merge note — but
   generalized into one shared resolution path instead of a per-consumer
   workaround).

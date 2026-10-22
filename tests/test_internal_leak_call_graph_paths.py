@@ -20,7 +20,7 @@
 from __future__ import annotations
 
 from abicheck.checker_policy import ChangeKind
-from abicheck.internal_leak import _build_call_graph_leak_change
+from abicheck.compare.internal_leak_graph import _build_call_graph_leak_change
 from abicheck.model.change import Change
 
 

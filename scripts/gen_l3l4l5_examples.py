@@ -536,7 +536,7 @@ def build_cases() -> dict[str, tuple[str, dict[str, Any], dict[str, Any]]]:
     # are compiled into the LIBRARY's binary only, never into any
     # consumer's (see is_consumer_compiled_public_entry's docstring and its
     # real callers -- post_processing_reachability.MarkReachability,
-    # internal_leak.py's leak-path walk), so seeding this scenario from a
+    # compare/internal_leak.py's leak-path walk), so seeding this scenario from a
     # non-consumer-compiled caller risked cataloging a production false
     # positive as canonical ground truth. An inline caller's body IS
     # compiled into every consumer TU that includes the header, so its

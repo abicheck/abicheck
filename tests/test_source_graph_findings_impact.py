@@ -22,13 +22,13 @@ topic-scoped sibling test file rather than growing an already-large one.
 
 ``diff_source_graph_findings()``'s ten ``Change(...)`` construction sites
 (across its nine per-family helpers) do **not** eagerly cache
-``impact_assessment`` the way ``internal_leak.py``/``appcompat.py``'s
+``impact_assessment`` the way ``compare/internal_leak.py``/``appcompat.py``'s
 builders do (Slice 8/9) -- the pipeline-ordering audit in
 ``source_graph_findings.py``'s own comments (see ``_mapping_drift_findings``)
 found ``post_processing.MarkReachability`` runs *downstream* of these
 builders (their output is merged into ``checker.compare()``'s ``changes``
 before ``_run_post_processing``/``dispose_findings()``, unlike
-``internal_leak.py``'s builders, which are themselves a *later* pipeline
+``compare/internal_leak.py``'s builders, which are themselves a *later* pipeline
 step), so caching at construction time would freeze a stale, unset default.
 ``MarkReachability`` itself now caches the assessment once it finalizes
 those fields (``post_processing_reachability.py``), so these findings still

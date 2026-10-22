@@ -1041,18 +1041,17 @@ class DetectInternalLeaks:
         if ctx.old is None:
             return changes
 
+        from .compare.internal_leak import detect_leak_findings
         from .compare.internal_namespaces import DEFAULT_INTERNAL_NAMESPACES
-        from .internal_leak import detect_call_graph_leaks, detect_internal_leaks
         from .post_processing_reachability import cache_impact_assessments
 
         namespaces = (
             self._namespaces or ctx.internal_namespaces or DEFAULT_INTERNAL_NAMESPACES
         )
-        extra = detect_internal_leaks(changes, ctx.old, ctx.new, namespaces)
-        # ADR-044 P1 items 1-2: the call-graph analogue, for a triggering
+        # Layout walk plus the ADR-044 P1 call-graph overlay, for a triggering
         # change with no layout/type-graph evidence at all (see
         # MarkReachability's own call-graph fallback, same namespaces).
-        extra = extra + detect_call_graph_leaks(changes, ctx.old, ctx.new, namespaces)
+        extra = detect_leak_findings(changes, ctx.old, ctx.new, namespaces)
         cache_impact_assessments(extra)
         if not extra:
             return changes
@@ -1098,12 +1097,12 @@ class DemoteUnreachableInternalChurn:
         if ctx.old is None:
             return changes
 
-        from .compare.internal_namespaces import DEFAULT_INTERNAL_NAMESPACES
-        from .internal_leak import (
+        from .compare.internal_leak import LEAK_TRIGGERING_KINDS
+        from .compare.internal_leak_names import (
             INTERNAL_NAMESPACE,
-            LEAK_TRIGGERING_KINDS,
             _root_type_name_for_change,
         )
+        from .compare.internal_namespaces import DEFAULT_INTERNAL_NAMESPACES
         from .model.change_catalog.kinds import ChangeKind
         from .surface import REASON_PRIVATE_INTERNAL_UNREACHABLE
 

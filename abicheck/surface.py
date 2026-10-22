@@ -89,7 +89,7 @@ NEVER_FILTER_KIND_NAMES: frozenset[str] = frozenset(
         # Same "public entity newly reaches an internal one" shape as the two
         # leak kinds above, but produced by the separate L5 source-graph pass
         # (source_graph_findings._internal_dependency_findings) rather than
-        # internal_leak.py. ``symbol`` is the *public* entity's own qualified
+        # compare/internal_leak.py. ``symbol`` is the *public* entity's own qualified
         # name (e.g. "demo::Public" or "demo::configure") -- a type or a
         # function/variable that legitimately IS on the public surface, but
         # the type-vs-symbol split above still runs it through
@@ -1005,8 +1005,8 @@ def _classify_type_level(
     # from unreferenced public-header types). Deferring to it guarantees a real
     # leak is never silently dropped here; a genuinely-unreachable internal type
     # is simply left for normal handling.
+    from .compare.internal_leak_names import INTERNAL_NAMESPACE
     from .compare.internal_namespaces import DEFAULT_INTERNAL_NAMESPACES
-    from .internal_leak import INTERNAL_NAMESPACE
 
     if any(
         INTERNAL_NAMESPACE.matches(c, internal_namespaces=DEFAULT_INTERNAL_NAMESPACES)

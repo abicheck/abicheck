@@ -100,7 +100,7 @@ _PUBLIC_SOURCE_ABI_KINDS = frozenset(
 def cache_impact_assessments(changes: Iterable[Change]) -> None:
     """Cache each change's ``ImpactAssessment`` from its finalized fields.
 
-    ADR-052 D2 follow-up. The leak detectors in ``internal_leak.py`` build
+    ADR-052 D2 follow-up. The leak detectors in ``compare/internal_leak.py`` build
     their findings with the reachability fields already final, but they may
     not import ``policy`` to derive the assessment, so the caller does it
     here. Call this on a detector's output before anything later (the
@@ -230,7 +230,7 @@ class MarkReachability:
             step finalizes its reachability/evidence fields.
 
             Verified safe, not assumed, per the same discipline Slice 8/9 used
-            for ``internal_leak.py``/``appcompat.py``: this is the *only* place
+            for ``compare/internal_leak.py``/``appcompat.py``: this is the *only* place
             in the codebase that mutates ``public_reachable``/
             ``reachability_state``/``reachability_kind``/
             ``reachability_proof_path`` on an already-constructed ``Change``
@@ -271,7 +271,7 @@ class MarkReachability:
             this step: those builders run *before* ``_run_post_processing``
             (their output is merged into ``checker.compare``'s ``changes``
             list as ``extra_changes``, ahead of the whole pipeline -- unlike
-            ``internal_leak.py``'s builders, which are themselves a
+            ``compare/internal_leak.py``'s builders, which are themselves a
             *later* pipeline step), so caching directly at their own
             construction time would capture default/unset evidence fields
             this step hasn't tagged yet -- see the comment at each of those
@@ -279,18 +279,20 @@ class MarkReachability:
             """
             c.impact_assessment = assess_change(c)
 
-        from .compare.internal_namespaces import DEFAULT_INTERNAL_NAMESPACES
-        from .internal_leak import (
-            IDENTITY_VTABLE_KINDS,
+        from .compare.internal_leak import IDENTITY_VTABLE_KINDS
+        from .compare.internal_leak_graph import compute_call_graph_leak_paths
+        from .compare.internal_leak_names import (
             INTERNAL_NAMESPACE,
+            _root_type_name_for_change,
+        )
+        from .compare.internal_leak_paths import (
             _format_path,
             _path_has_indirection,
             _path_is_value_propagating,
-            _root_type_name_for_change,
-            compute_call_graph_leak_paths,
             compute_leak_paths,
             select_preferred_path,
         )
+        from .compare.internal_namespaces import DEFAULT_INTERNAL_NAMESPACES
         from .model import ScopeOrigin
 
         def _public_header_names(snap: AbiSnapshot) -> set[str]:

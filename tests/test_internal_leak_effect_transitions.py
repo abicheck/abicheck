@@ -224,7 +224,7 @@ class TestEffectTransitions:
 
     def test_compute_call_graph_leak_paths_flags_overapprox_path(self) -> None:
         from abicheck.buildsource.source_graph import GraphEdge
-        from abicheck.internal_leak import compute_call_graph_leak_paths
+        from abicheck.compare.internal_leak_graph import compute_call_graph_leak_paths
 
         snap = _graph_snap(
             [

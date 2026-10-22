@@ -14,7 +14,7 @@
 # limitations under the License.
 
 """ADR-063 Phase 10: the five ``BuildSourcePack.source_graph`` live-alias
-readers (``internal_leak.py``, ``buildsource/cross_source_checks.py``,
+readers (``compare/internal_leak.py``, ``buildsource/cross_source_checks.py``,
 ``buildsource/evidence_report.py``, ``evidence_depth.py``, ``cli_graph.py``)
 now read the L5 evidence graph from ``AbiSnapshot`` directly rather than only
 through the legacy ``build_source.source_graph`` nested field, so a snapshot
@@ -172,7 +172,7 @@ def test_resolve_l5_source_graph_rejects_a_non_concrete_surface_graph() -> None:
 
 
 def test_internal_leak_call_graph_leak_paths_unchanged_by_migration() -> None:
-    from abicheck.internal_leak import compute_call_graph_leak_paths
+    from abicheck.compare.internal_leak_graph import compute_call_graph_leak_paths
 
     graph = SourceGraphSummary(
         nodes=[
@@ -196,7 +196,7 @@ def test_internal_leak_prefers_the_richer_build_source_graph() -> None:
     ``surface_graph`` with none of the real call-graph edges must never hide
     a leak path that only ``build_source.source_graph`` (the richer, real
     L3-L5 evidence) carries."""
-    from abicheck.internal_leak import compute_call_graph_leak_paths
+    from abicheck.compare.internal_leak_graph import compute_call_graph_leak_paths
 
     richer = SourceGraphSummary(
         nodes=[
@@ -218,7 +218,7 @@ def test_internal_leak_honors_a_depth_projected_l5_exclusion() -> None:
     projection-aware coverage guard as ``_side_source_graph`` -- a ``--depth build`` comparison's retained,
     header-only ``surface_graph`` must not resurrect a leak path the
     excluded, richer L5 graph would have shown."""
-    from abicheck.internal_leak import compute_call_graph_leak_paths
+    from abicheck.compare.internal_leak_graph import compute_call_graph_leak_paths
 
     retained = SourceGraphSummary(
         nodes=[

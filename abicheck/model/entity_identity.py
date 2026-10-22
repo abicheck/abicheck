@@ -42,7 +42,7 @@ Preference order (most to least specific):
 Mangled-name derivation/validation reuses :mod:`abicheck.demangle` (never a
 second demangling implementation). The source-relative/qualified-name
 fallback chain generalizes the ad hoc ``{dname, qualified_name, ...}``
-lookup-key pattern ``internal_leak.py`` used before this module existed (see
+lookup-key pattern ``compare/internal_leak.py`` used before this module existed (see
 :func:`candidate_lookup_keys`) and the namespace-qualified ``TypeMap``
 mechanism ADR-045 already generalized for flat old/new type matching
 (``diff_helpers.py``) — this module is the L5-graph-node analogue of that
@@ -290,7 +290,7 @@ def candidate_lookup_keys(primary: str | None, *extra: str | None) -> set[str]:
     declaration identity.
 
     Generalizes the ad hoc ``{dname, *(t.qualified_name for t in ...)}``
-    pattern ``internal_leak.py``'s call-graph-leak-path lookup used before
+    pattern ``compare/internal_leak.py``'s call-graph-leak-path lookup used before
     this module existed, into one shared helper other L5-graph consumers can
     call instead of hand-rolling their own candidate-key set (G31 Phase B
     B1 scope: "generalize into one shared resolution path").

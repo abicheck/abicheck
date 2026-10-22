@@ -156,7 +156,7 @@ EXEMPT_FUNCTIONS: frozenset[str] = frozenset()
 #: `buildsource/header_graph.py`, `buildsource/source_extractors/base.py`,
 #: `idioms.py`, `contract_evidence_collect.py`, `diff_time64.py`,
 #: `diff_stdlib_impl.py`, `diff_cpp_patterns.py`, `dumper_scoping.py`,
-#: `export_surface.py`, `internal_leak.py`, `surface.py`, `surface_graph.py`,
+#: `export_surface.py`, `compare/internal_leak.py`, `surface.py`, `surface_graph.py`,
 #: `type_reachability.py`, and the two decision functions living inside
 #: otherwise-exempt producer modules --
 #: `dwarf_snapshot._DwarfSnapshotBuilder._filter_types_by_reachability` and

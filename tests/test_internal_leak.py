@@ -19,19 +19,27 @@ import pytest
 
 from abicheck.checker import compare
 from abicheck.checker_policy import ChangeKind, ReachabilityState
-from abicheck.compare.internal_namespaces import name_segments as _name_segments
-from abicheck.impact.engine import assess_change
-from abicheck.internal_leak import (
-    _build_suffix_index,
-    _candidate_type_names_indirect as _cti,
-    _resolve_type_name,
-    _split_top_level_commas,
-    _strip_template_args,
-    compute_leak_paths,
+from abicheck.compare.internal_leak import (
+    detect_call_graph_leaks,
     detect_internal_leaks,
-    is_internal_type,
-    select_preferred_path,
 )
+from abicheck.compare.internal_leak_graph import compute_call_graph_leak_paths
+from abicheck.compare.internal_leak_names import (
+    _candidate_type_names_indirect as _cti,
+    _split_top_level_commas,
+    _strip_signature_params,
+)
+from abicheck.compare.internal_leak_paths import (
+    _build_suffix_index,
+    _resolve_type_name,
+    compute_leak_paths,
+)
+from abicheck.compare.internal_namespaces import (
+    is_internal_type,
+    name_segments as _name_segments,
+    strip_template_args as _strip_template_args,
+)
+from abicheck.impact.engine import assess_change
 from abicheck.model import (
     AbiSnapshot,
     Function,
@@ -73,7 +81,6 @@ class TestNameSegments:
 
 class TestStripSignatureParams:
     def test_strips_params(self) -> None:
-        from abicheck.internal_leak import _strip_signature_params
 
         assert _strip_signature_params("ns::api::foo(ns::detail::T*)") == "ns::api::foo"
 
@@ -81,17 +88,14 @@ class TestStripSignatureParams:
         """A function-pointer parameter type has its own nested parens
         (e.g. "void (*)(int)") -- must not be mistaken for the function's
         own parameter-list opening."""
-        from abicheck.internal_leak import _strip_signature_params
 
         assert _strip_signature_params("ns::api::bar(void (*)(int))") == "ns::api::bar"
 
     def test_no_parens_returned_unchanged(self) -> None:
-        from abicheck.internal_leak import _strip_signature_params
 
         assert _strip_signature_params("ns::detail::helper") == "ns::detail::helper"
 
     def test_empty_string(self) -> None:
-        from abicheck.internal_leak import _strip_signature_params
 
         assert _strip_signature_params("") == ""
 
@@ -251,7 +255,7 @@ class TestResolveTypeNameSuffixIndex:
         # inside the loop, or the per-call scan returned), this count would be
         # != 1. This is the deterministic complement to the scale test below —
         # it catches the exact regression that unit tests missed originally.
-        import abicheck.internal_leak as il
+        import abicheck.compare.internal_leak_paths as il
 
         calls = {"n": 0}
         real = il._build_suffix_index
@@ -499,6 +503,9 @@ class TestDetectInternalLeaks:
         assert "Public" in leak.description
         # And the leak kind being reported
         assert "type_size_changed" in leak.description
+        # The cached assessment must carry the public reachability.
+        cache_impact_assessments(leaks)
+        assert leak.impact_assessment.public_reachable is True
 
     def test_internal_type_not_reachable_no_leak(self) -> None:
         # detail::Hidden changes but is not in the public reachability graph.
@@ -1070,14 +1077,12 @@ def _graph_snap(nodes: list, edges: list) -> AbiSnapshot:
 
 class TestComputeCallGraphLeakPaths:
     def test_no_build_source_returns_empty(self) -> None:
-        from abicheck.internal_leak import compute_call_graph_leak_paths
 
         assert compute_call_graph_leak_paths(_snap()) == {}
 
     def test_no_relevant_edges_returns_empty(self) -> None:
         from abicheck.buildsource.pack import BuildSourcePack
         from abicheck.buildsource.source_graph import GraphEdge, SourceGraphSummary
-        from abicheck.internal_leak import compute_call_graph_leak_paths
 
         graph = SourceGraphSummary(
             nodes=[_decl_node("decl://pub", "pubFn", "public_header")],
@@ -1092,7 +1097,6 @@ class TestComputeCallGraphLeakPaths:
 
     def test_public_entry_calling_internal_decl_is_a_leak_path(self) -> None:
         from abicheck.buildsource.source_graph import GraphEdge
-        from abicheck.internal_leak import compute_call_graph_leak_paths
 
         snap = _graph_snap(
             [
@@ -1115,7 +1119,6 @@ class TestComputeCallGraphLeakPaths:
         signal for "not inline, not a template") must exclude it from the
         walk's entry set entirely."""
         from abicheck.buildsource.source_graph import GraphEdge, GraphNode
-        from abicheck.internal_leak import compute_call_graph_leak_paths
 
         snap = _graph_snap(
             [
@@ -1139,7 +1142,6 @@ class TestComputeCallGraphLeakPaths:
         method/template entry) still seeds the walk, same as before this
         signal existed -- this ADR's own headline scenario."""
         from abicheck.buildsource.source_graph import GraphEdge, GraphNode
-        from abicheck.internal_leak import compute_call_graph_leak_paths
 
         snap = _graph_snap(
             [
@@ -1175,7 +1177,6 @@ class TestComputeCallGraphLeakPaths:
         its own consumer_compiled_body, so helper()'s removal would have
         been (wrongly) reported reachable through wrap()."""
         from abicheck.buildsource.source_graph import GraphEdge, GraphNode
-        from abicheck.internal_leak import compute_call_graph_leak_paths
 
         snap = _graph_snap(
             [
@@ -1230,7 +1231,6 @@ class TestComputeCallGraphLeakPaths:
         exact over-reach the previous fix closed for the explicit-False
         shape."""
         from abicheck.buildsource.source_graph import GraphEdge, GraphNode
-        from abicheck.internal_leak import compute_call_graph_leak_paths
 
         snap = _graph_snap(
             [
@@ -1282,7 +1282,6 @@ class TestComputeCallGraphLeakPaths:
         an internal helper() must stop expanding at helper_a() for the same
         reason as the call_graph fallback shape."""
         from abicheck.buildsource.source_graph import GraphEdge, GraphNode
-        from abicheck.internal_leak import compute_call_graph_leak_paths
 
         snap = _graph_snap(
             [
@@ -1318,7 +1317,6 @@ class TestComputeCallGraphLeakPaths:
 
     def test_reference_edge_also_counts(self) -> None:
         from abicheck.buildsource.source_graph import GraphEdge
-        from abicheck.internal_leak import compute_call_graph_leak_paths
 
         snap = _graph_snap(
             [
@@ -1336,7 +1334,6 @@ class TestComputeCallGraphLeakPaths:
 
     def test_non_internal_target_not_recorded(self) -> None:
         from abicheck.buildsource.source_graph import GraphEdge
-        from abicheck.internal_leak import compute_call_graph_leak_paths
 
         snap = _graph_snap(
             [
@@ -1349,7 +1346,6 @@ class TestComputeCallGraphLeakPaths:
 
     def test_no_public_entry_returns_empty(self) -> None:
         from abicheck.buildsource.source_graph import GraphEdge
-        from abicheck.internal_leak import compute_call_graph_leak_paths
 
         snap = _graph_snap(
             [
@@ -1362,7 +1358,6 @@ class TestComputeCallGraphLeakPaths:
 
     def test_custom_namespaces_recognizes_convention(self) -> None:
         from abicheck.buildsource.source_graph import GraphEdge
-        from abicheck.internal_leak import compute_call_graph_leak_paths
 
         snap = _graph_snap(
             [
@@ -1383,7 +1378,6 @@ class TestComputeCallGraphLeakPaths:
         same binary_symbol:// identity localize_symbol() already uses) must
         also produce a lookup key."""
         from abicheck.buildsource.source_graph import GraphEdge
-        from abicheck.internal_leak import compute_call_graph_leak_paths
 
         snap = _graph_snap(
             [
@@ -1416,7 +1410,6 @@ class TestComputeCallGraphLeakPaths:
         fully inlined, no linkage) gets no mangled key — there is no
         FUNC_REMOVED-shaped Change that could ever look one up anyway."""
         from abicheck.buildsource.source_graph import GraphEdge
-        from abicheck.internal_leak import compute_call_graph_leak_paths
 
         snap = _graph_snap(
             [
@@ -1439,7 +1432,6 @@ class TestComputeCallGraphLeakPaths:
         FUNC_REMOVED's Change.symbol directly)."""
         import abicheck.demangle as demangle_mod
         from abicheck.buildsource.source_graph import GraphEdge
-        from abicheck.internal_leak import compute_call_graph_leak_paths
 
         mangled = "_ZN2ns6detail6helperEv"
         monkeypatch.setattr(demangle_mod, "demangle", lambda s: "ns::detail::helper()")
@@ -1462,7 +1454,6 @@ class TestComputeCallGraphLeakPaths:
         as internal, not a blanket "keep everything mangled" allowance."""
         import abicheck.demangle as demangle_mod
         from abicheck.buildsource.source_graph import GraphEdge
-        from abicheck.internal_leak import compute_call_graph_leak_paths
 
         mangled = "_ZN2ns9PublicFooEv"
         monkeypatch.setattr(demangle_mod, "demangle", lambda s: "ns::PublicFoo()")
@@ -1489,7 +1480,6 @@ class TestComputeCallGraphLeakPaths:
         must be stripped before classification."""
         import abicheck.demangle as demangle_mod
         from abicheck.buildsource.source_graph import GraphEdge
-        from abicheck.internal_leak import compute_call_graph_leak_paths
 
         mangled = "_ZN2ns3api3fooEPNS_6detail1TE"
         monkeypatch.setattr(
@@ -1511,7 +1501,6 @@ class TestComputeCallGraphLeakPaths:
         qualified name a real Change.symbol/qualified_name would ever carry.
         The hash-stripped name must also be a lookup key."""
         from abicheck.buildsource.source_graph import GraphEdge
-        from abicheck.internal_leak import compute_call_graph_leak_paths
 
         label = "ns::detail::c_helper#sha256:abcdef1234567890"
         snap = _graph_snap(
@@ -1529,7 +1518,6 @@ class TestComputeCallGraphLeakPaths:
 class TestDetectCallGraphLeaks:
     def test_func_removed_on_internal_decl_reachable_via_call_graph(self) -> None:
         from abicheck.buildsource.source_graph import GraphEdge
-        from abicheck.internal_leak import detect_call_graph_leaks
 
         old = _graph_snap(
             [
@@ -1564,7 +1552,6 @@ class TestDetectCallGraphLeaks:
         SOURCE_DECL_MAPS_TO_SYMBOL edge, not only when a test hand-picks a
         matching label/symbol pair."""
         from abicheck.buildsource.source_graph import GraphEdge
-        from abicheck.internal_leak import detect_call_graph_leaks
 
         mangled = "_ZN2ns6detail19train_ops_dispatcherEv"
         old = _graph_snap(
@@ -1596,7 +1583,6 @@ class TestDetectCallGraphLeaks:
 
     def test_no_op_without_triggering_change(self) -> None:
         from abicheck.buildsource.source_graph import GraphEdge
-        from abicheck.internal_leak import detect_call_graph_leaks
 
         old = _graph_snap(
             [
@@ -1613,7 +1599,6 @@ class TestDetectCallGraphLeaks:
         overlay finding — the authority rule (only an already artifact-proven
         BREAKING change may be explained/correlated, never manufactured)."""
         from abicheck.buildsource.source_graph import GraphEdge
-        from abicheck.internal_leak import detect_call_graph_leaks
 
         old = _graph_snap(
             [
@@ -1645,7 +1630,6 @@ class TestDetectCallGraphLeaks:
         BREAKING_KINDS may trigger, even with real call-graph evidence."""
         from abicheck.buildsource.source_graph import GraphEdge
         from abicheck.checker_policy import BREAKING_KINDS
-        from abicheck.internal_leak import detect_call_graph_leaks
 
         old = _graph_snap(
             [
@@ -1671,7 +1655,6 @@ class TestDetectCallGraphLeaks:
         from Function.name, independent of graph provenance) must serve as
         a fallback lookup key against the label-keyed result."""
         from abicheck.buildsource.source_graph import GraphEdge
-        from abicheck.internal_leak import detect_call_graph_leaks
 
         mangled = "_ZN2ns6detail6helperEv"
         # No SOURCE_DECL_MAPS_TO_SYMBOL edge at all -- the header-graph shape.
@@ -1696,7 +1679,6 @@ class TestDetectCallGraphLeaks:
         assert overlay.public_reachable is True
 
     def test_no_call_graph_evidence_no_overlay(self) -> None:
-        from abicheck.internal_leak import detect_call_graph_leaks
 
         triggering = Change(
             kind=ChangeKind.FUNC_REMOVED,
@@ -1714,7 +1696,8 @@ class TestBuildLeakChangePreferredPath:
     this, the leak detector's own synthetic Change builder."""
 
     def test_reachability_proof_path_prefers_value_propagating(self) -> None:
-        from abicheck.internal_leak import _build_leak_change, _format_path
+        from abicheck.compare.internal_leak import _build_leak_change
+        from abicheck.compare.internal_leak_paths import _format_path
 
         indirect_short = ["Public", "indirect:ptr", "Internal"]
         value_longer = ["Public", "field:x", "Mid", "field:y", "Internal"]
@@ -1734,7 +1717,7 @@ class TestBuildLeakChangePreferredPath:
         assert change.reachability_proof_path == _format_path(value_longer)
 
     def test_more_paths_count_still_reflects_the_full_collection(self) -> None:
-        from abicheck.internal_leak import _build_leak_change
+        from abicheck.compare.internal_leak import _build_leak_change
 
         paths = [
             ["Public", "field:x", "Internal"],
@@ -1763,7 +1746,7 @@ class TestBuildChangeAttachesImpactAssessment:
     and the pipeline step caches it via cache_impact_assessments."""
 
     def test_leak_change_carries_impact_assessment(self) -> None:
-        from abicheck.internal_leak import _build_leak_change
+        from abicheck.compare.internal_leak import _build_leak_change
 
         change = _build_leak_change(
             "ns::detail::Internal",
@@ -1791,7 +1774,7 @@ class TestBuildChangeAttachesImpactAssessment:
         assert assess_change(change) == change.impact_assessment
 
     def test_call_graph_leak_change_carries_impact_assessment(self) -> None:
-        from abicheck.internal_leak import _build_call_graph_leak_change
+        from abicheck.compare.internal_leak_graph import _build_call_graph_leak_change
 
         change = _build_call_graph_leak_change(
             "ns::detail::helper",
@@ -1819,8 +1802,8 @@ class TestBuildChangeAttachesImpactAssessment:
         through a later pipeline stage that mutates unrelated flat fields
         (e.g. suppression) -- assess_change recomputes decision fresh, so
         the evidence half must not silently go stale alongside it."""
+        from abicheck.compare.internal_leak import _build_leak_change
         from abicheck.impact.engine import assess_change
-        from abicheck.internal_leak import _build_leak_change
 
         change = _build_leak_change(
             "ns::detail::Internal",
@@ -1841,37 +1824,6 @@ class TestBuildChangeAttachesImpactAssessment:
         assert assessment.decision.state == "suppressed"
         assert assessment.decision.suppression_rule == "workaround-123"
         assert assessment.public_reachable is True  # evidence still intact
-
-
-class TestSelectPreferredPath:
-    """ADR-046 D6 (partial): prefer a value-propagating path over a shorter
-    indirect-only one instead of plain ``min(paths, key=len)``."""
-
-    def test_prefers_value_propagating_over_shorter_indirect(self) -> None:
-        indirect_short = ["Public", "indirect:ptr", "Internal"]
-        value_longer = ["Public", "field:x", "Mid", "field:y", "Internal"]
-        assert select_preferred_path([indirect_short, value_longer]) == value_longer
-
-    def test_shortest_wins_within_the_same_tier(self) -> None:
-        short = ["Public", "field:x", "Internal"]
-        long_ = ["Public", "field:x", "Mid", "field:y", "Internal"]
-        assert select_preferred_path([long_, short]) == short
-
-    def test_pointer_or_signature_beats_pure_indirect(self) -> None:
-        # Neither value-propagating nor indirection-marked (e.g. a bare
-        # signature-seed path) ranks above an indirect-marked one.
-        plain = ["Public", "signature", "Internal"]
-        indirect = ["Public", "indirect:ptr", "Internal"]
-        assert select_preferred_path([indirect, plain]) == plain
-
-    def test_single_path_returned_unchanged(self) -> None:
-        only = ["Public", "field:x", "Internal"]
-        assert select_preferred_path([only]) == only
-
-
-# ---------------------------------------------------------------------------
-# TraversalPolicy (ADR-046 D5, partial)
-# ---------------------------------------------------------------------------
 
 
 class TestTraversalPolicy:
@@ -1961,7 +1913,6 @@ class TestTraversalPolicy:
         """End-to-end: the public entry point still routes through
         CALL_GRAPH_TRAVERSAL_POLICY, not a re-derived edge set."""
         from abicheck.buildsource.source_graph import GraphEdge
-        from abicheck.internal_leak import compute_call_graph_leak_paths
 
         snap = _graph_snap(
             [

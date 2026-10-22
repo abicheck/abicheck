@@ -1022,7 +1022,7 @@ class TestDigestedItems:
         assert not isinstance(surface.internal_namespaces, DigestedItems)
 
     def test_internal_namespaces_order_does_not_affect_equality(self):
-        # internal_leak.py consumes these set-wise (is_internal_type builds
+        # compare/internal_leak.py consumes these set-wise (is_internal_type builds
         # set(internal_namespaces)) -- two equivalent selections in
         # different orders must compare equal (D7's equivalent-input
         # equality guarantee), same as overlays/packs.
