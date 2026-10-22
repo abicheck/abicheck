@@ -189,13 +189,19 @@ def _row_use_cases_suffix(row: Mapping[str, Any]) -> str:
     return f"\n  > Affects use cases: {', '.join(names)}" if names else ""
 
 
-def _render_change_row_oneline(row: Mapping[str, Any]) -> str:
-    line = f"- **{row['kind']}**: {row['description']}"
-    # The folded review groups no longer list every symbol, so a row whose
-    # description omits its symbol must name it here.
+def _row_symbol_suffix(row: Mapping[str, Any]) -> str:
+    """Name the row's symbol when its description omits it: the folded
+    review groups list only example names, so the row is the one place
+    every finding's symbol still appears."""
     symbol = row.get("symbol")
     if symbol and symbol not in row["description"]:
-        line += f" — `{symbol}`"
+        return f" — `{symbol}`"
+    return ""
+
+
+def _render_change_row_oneline(row: Mapping[str, Any]) -> str:
+    line = f"- **{row['kind']}**: {row['description']}"
+    line += _row_symbol_suffix(row)
     correlated = row.get("correlated_change_kind")
     if correlated:
         line += f"\n  > See also: `{correlated}` finding for the same symbol"
@@ -213,6 +219,7 @@ def _render_change_row(row: Mapping[str, Any]) -> str:
     elif new_val is not None:
         old_new = f" (`{new_val}`)"
     line = f"- **{row['kind']}**: {row['description']}{old_new}"
+    line += _row_symbol_suffix(row)
     loc = row.get("source_location")
     if loc:
         line += f" — `{loc}`"

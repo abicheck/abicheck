@@ -66,7 +66,7 @@
 
 ## ❌ Breaking Changes
 
-- **func_removed**: Public function removed: helper (`helper`)
+- **func_removed**: Public function removed: helper (`helper`) — `_Z6helperi`
   > Old binaries call a symbol that no longer exists; dynamic linker will refuse to load or crash at call site. (Evidence note: this run's available evidence does not fully confirm this specific finding -- treat the consequence above as plausible, not confirmed.)
 
 

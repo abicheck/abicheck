@@ -66,7 +66,7 @@
 
 ## ✅ Additions
 
-- **func_added**: New public function: helper (`helper`)
+- **func_added**: New public function: helper (`helper`) — `_Z6helperi`
   > New function available; existing binaries are unaffected.
 
 
