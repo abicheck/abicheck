@@ -263,6 +263,7 @@ suppression:
 | `add-job-summary` | `true` | Write summary to Job Summary panel (ignored for dump mode) |
 | `pr-comment` | `true` | Post a sticky ABI report comment on the PR (compare mode, including directory/package comparisons and the audit-only shape). No-op outside `pull_request` / `pull_request_target` events. |
 | `pr-comment-mode` | `update` | `update` keeps one comment and edits it in place; `new` posts a fresh comment each run |
+| `pr-comment-key` | `''` | Per-job sticky-comment key for parallel jobs on one PR (e.g. `${{ matrix.lib }}`): each key keeps and updates its own comment. Empty keeps the single default comment. Characters outside `[A-Za-z0-9._-]` become `-` |
 | `pr-comment-on` | `changes` | When to comment: `changes`, `always`, or `never` — see [What the default comments on](#what-the-default-comments-on) |
 | `pr-comment-detail` | `standard` | Comment detail: `summary`, `standard`, or `full` |
 | `pr-comment-report-artifact-url` | — | Direct URL of an uploaded full-report artifact, shown as **Download full report**; leave unset unless the upload succeeded |

@@ -71,7 +71,11 @@ def _release_md_libraries_table(
     ``change_inventory`` block and the oneline's hygiene clause carry, from
     the same fold, so the three renders of one release cannot disagree.
 
-    The table's own columns are deliberately **unchanged**: ``Breaking``/
+    ``Removed``/``Changed`` (#1706) are the member's surface removal and
+    modification counts (``report.release_public_api``); ``—`` for an entry
+    projected before they existed.
+
+    The pre-existing columns are deliberately **unchanged**: ``Breaking``/
     ``Source``/``Risk``/``Additions`` have always been each member's
     inclusive finding counts, and a consumer reading them (or diffing two
     releases' tables) is entitled to that meaning. The split is stated
@@ -81,15 +85,16 @@ def _release_md_libraries_table(
         "",
         "## Libraries",
         "",
-        "| Library | Verdict | Breaking | Source | Risk | Additions |",
-        "|---|---|---|---|---|---|",
+        "| Library | Verdict | Breaking | Source | Risk | Additions | Removed | Changed |",
+        "|---|---|---|---|---|---|---|---|",
     ]
     for lib in library_results:
         em = emoji.get(str(lib["verdict"]), "?")
         lines.append(
             f"| `{lib['library']}` | {em} `{lib['verdict']}` "
             f"| {lib.get('breaking', '—')} | {lib.get('source_breaks', '—')} "
-            f"| {lib.get('risk_changes', '—')} | {lib.get('compatible_additions', '—')} |"
+            f"| {lib.get('risk_changes', '—')} | {lib.get('compatible_additions', '—')} "
+            f"| {lib.get('surface_removals', '—')} | {lib.get('surface_modifications', '—')} |"
         )
     change_inventory = (
         release_inventory_counters(all_library_results)

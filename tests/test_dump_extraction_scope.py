@@ -154,3 +154,12 @@ class TestCliHybridLegsKeepTheFullSurface:
         assert result.dependency_scope == (
             "full" if include_dependencies else "filtered"
         )
+
+
+@pytest.fixture(autouse=True)
+def _castxml_preflight_off(monkeypatch):
+    """These tests stub the parse itself; castxml need not be on PATH (#1710)."""
+    monkeypatch.setattr(
+        "abicheck.workflows.header_frontend_preflight.require_castxml_if_needed",
+        lambda *a, **k: None,
+    )

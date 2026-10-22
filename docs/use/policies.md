@@ -136,6 +136,7 @@ guidance, not invented heuristics.
 | `mach_o_dylib` | Apple Dynamic Library Design Guidelines | Pins `compat_version_changed` to `break` (dyld load check); dropped install-name dependency → `risk` |
 | `rust_c_ffi` | Rust Reference / Cargo SemVer (no stable Rust ABI) | Keeps the C-FFI surface (`repr(C)`/`extern "C"`) strict but demotes C++-object-model kinds to `risk` — they can't occur on a real C-FFI boundary. See [Rust Libraries](rust-libraries.md) for what is supported. |
 | `gnome_parallel_install` | GNOME/GTK parallel-install evolution | Enforces both directions of SONAME discipline: pins `soname_bump_recommended` to `break` (broke ABI without bumping), and surfaces `soname_bump_unnecessary` as `risk` (bumped the major for nothing, fragmenting parallel-installed consumers) |
+| `append_only_dispatch_tables` | Append-only dispatch tables: Level Zero, Vulkan loader/layer, OpenCL ICD | Selector-scoped `reclassify:` rules that accept a trailing member append and the size growth it causes on matching table types; removal, reorder/insertion and retype stay `break`. See [Append-only dispatch tables](#append-only-dispatch-tables) |
 
 > **Why most profiles are thin:** the default `strict_abi` already classifies the hard
 > native cases (symbol removal, layout, vtables, mangling, calling convention) correctly,
@@ -143,6 +144,64 @@ guidance, not invented heuristics.
 > genuine per-ecosystem divergences. Managed-runtime ecosystems (Java class-file linkage,
 > .NET assembly metadata) and source-only ecosystems (Go, non-FFI Rust) need dedicated
 > format frontends rather than a policy file.
+
+### Append-only dispatch tables
+
+Some C APIs version a struct of function pointers by appending members at the
+end and never touching existing ones: Level Zero's `ze_*_dditable_t`
+(and `zet_`/`zes_`/`zer_`/`zel_` siblings), the Vulkan loader's
+`VkLayerDispatchTable`/`VkLayerInstanceDispatchTable`, and the OpenCL ICD
+`cl_icd_dispatch`. Under `strict_abi`, a new entry reads as
+`type_size_changed` + `type_field_added[_compatible]`, a `BREAKING` verdict.
+The opt-in `append_only_dispatch_tables` profile reclassifies those two kinds
+to `ignore` **only for type names matching its `type_pattern`**:
+
+```bash
+# Level Zero loader / driver
+abicheck compare libze_loader.so.1.old libze_loader.so.1 --policy append_only_dispatch_tables
+# Vulkan layer built against vk_layer_dispatch_table.h
+abicheck compare libVkLayer_foo.so.old libVkLayer_foo.so --policy append_only_dispatch_tables
+```
+
+| Edit to a matching table | Under the profile |
+|---|---|
+| Append one or more members at the end | `COMPATIBLE` |
+| Remove a member | `BREAKING` (`type_field_removed`) |
+| Reorder, or insert anywhere but the tail | `BREAKING` (`type_field_offset_changed`) |
+| Change an existing member's type | `BREAKING` (`type_field_type_changed`) |
+| Any edit to a type whose name does not match | unchanged (`strict_abi`) |
+
+The findings are reclassified, not suppressed: each one stays in the report,
+the JSON `change.reclassified_by` names the rule's label and reason, and
+`disposition_audit.reclassifications` counts every rule's matches. The
+`type_field_added_compatible` rule usually reads `shadowed_only` there, because
+that kind is already compatible by default.
+
+For your own append-only types, copy the profile's `reclassify:` block into a
+policy file and change `type_pattern` (a full-match regular expression over
+the type name):
+
+```yaml
+base_policy: strict_abi
+reclassify:
+  - kind: type_field_added
+    type_pattern: "mylib_[a-z_]+_vtbl_t"
+    to: ignore
+    reason: "append-only dispatch table"
+  - kind: type_field_added_compatible
+    type_pattern: "mylib_[a-z_]+_vtbl_t"
+    to: ignore
+    reason: "append-only dispatch table"
+  - kind: type_size_changed
+    type_pattern: "mylib_[a-z_]+_vtbl_t"
+    to: ignore
+    reason: "append-only dispatch table"
+```
+
+Limit: the rules key on the type name, not on which end grew. A matching
+type whose size changes with no member finding at all (only padding or
+explicit alignment changed) also reads as compatible; an alignment change
+itself (`type_alignment_changed`) still breaks.
 
 ## Custom Policy Files (`--policy`)
 
