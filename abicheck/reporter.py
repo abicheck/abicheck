@@ -50,6 +50,7 @@ from .report.json_sections import (
 
 if TYPE_CHECKING:
     from .policy.severity import SeverityConfig
+    from .report.envelope import ReportEnvelope
 from . import reporter_contract_blocks as _reporter_contract_blocks
 from .checker import Change, DiffResult
 from .report.change_inventory import render_change_inventory_json
@@ -58,7 +59,9 @@ from .report.dispatch_markdown import (
     to_markdown as to_markdown,
     to_review_digest as to_review_digest,
 )
-from .report.disposition_audit import add_disposition_audit as _add_disposition_audit
+from .report.disposition_audit import (
+    disposition_audit_dict_reusing_document,
+)
 from .report.finding_evolution_section import (
     add_finding_evolution as _add_finding_evolution,
 )
@@ -98,6 +101,23 @@ from .root_cause_evidence import root_cause_group_evidence, scoped_only_evidence
 from .schemas import REPORT_SCHEMA_VERSION
 
 
+def _attach_disposition_audit(
+    d: dict[str, object],
+    result: DiffResult,
+    severity_config: SeverityConfig | None,
+    envelope: ReportEnvelope | None,
+) -> None:
+    """Attach the ADR-067 ``disposition_audit`` block, reusing the envelope's.
+
+    With an *envelope*, its shared document already holds the audit for this
+    evaluation, so it is read from there rather than recomputed from the
+    ledger. A direct caller with no envelope computes it once here.
+    """
+    d["disposition_audit"] = disposition_audit_dict_reusing_document(
+        result, severity_config, None if envelope is None else envelope.document
+    )
+
+
 def to_stat_json(
     result: DiffResult,
     indent: int = 2,
@@ -106,6 +126,7 @@ def to_stat_json(
     require_complete_analysis: bool = False,
     show_only: str | None = None,
     contract_evaluation: bool = False,
+    envelope: ReportEnvelope | None = None,
 ) -> str:
     """JSON output for --stat mode: summary only, no changes array.
 
@@ -148,7 +169,7 @@ def to_stat_json(
     }
     # ADR-067 D3: a compact view may collapse detail; it may not omit the
     # raw-versus-effective counts.
-    _add_disposition_audit(d, result, severity_config)
+    _attach_disposition_audit(d, result, severity_config, envelope)
     _add_finding_evolution(d, result)
     add_check_identity(d, result)
     gate = facts.policy.gate
@@ -209,6 +230,7 @@ def _to_json_root_cause(
     severity_config: SeverityConfig | None = None,
     require_complete_analysis: bool = False,
     contract_evaluation: bool = False,
+    envelope: ReportEnvelope | None = None,
 ) -> str:
     """``--report-mode root-cause`` JSON output (G29 Phase 3, ADR-052 slice 3).
 
@@ -324,7 +346,7 @@ def _to_json_root_cause(
     if result.pattern_modulations:
         d["pattern_modulations"] = result.pattern_modulations
     add_suppression(d, result)
-    _add_disposition_audit(d, result, severity_config)
+    _attach_disposition_audit(d, result, severity_config, envelope)
     _add_surface_changes(d, result, changes)
     _add_finding_evolution(d, result)
     add_surface_scope(d, result)
@@ -442,6 +464,7 @@ def to_json(
     severity_config: SeverityConfig | None = None,
     require_complete_analysis: bool = False,
     contract_evaluation: bool = False,  # ADR-061 P2 item 5
+    envelope: ReportEnvelope | None = None,
 ) -> str:
     # A `stat` parameter used to short-circuit to `to_stat_json` here. Call
     # `to_stat_json` directly for the summary-only document; this function
@@ -461,15 +484,22 @@ def to_json(
             severity_config=severity_config,
             require_complete_analysis=require_complete_analysis,
             contract_evaluation=contract_evaluation,
+            envelope=envelope,
         )
 
-    doc = build_report_document(
-        result,
-        show_only=show_only,
-        show_impact=show_impact,
-        severity_config=severity_config,
-        require_complete_analysis=require_complete_analysis,
-        contract_evaluation=contract_evaluation,
+    # An envelope's shared document already is this full report; its options
+    # (show_only, show_impact, ...) were applied when the envelope was built.
+    doc = (
+        envelope.document
+        if envelope is not None
+        else build_report_document(
+            result,
+            show_only=show_only,
+            show_impact=show_impact,
+            severity_config=severity_config,
+            require_complete_analysis=require_complete_analysis,
+            contract_evaluation=contract_evaluation,
+        )
     )
     return render_json(doc)
 

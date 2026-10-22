@@ -543,7 +543,7 @@ One-line summary for CI gates.
 |---|---|---|
 | `result` | `DiffResult` | *(required)* |
 | *(keyword-only below)* | | |
-| `severity_config` | `SeverityConfig \| None` | `None` |
+| `envelope` | `ReportEnvelope` | *(required)* |
 
 **Returns:** `str`
 
@@ -560,5 +560,6 @@ JSON output for --stat mode: summary only, no changes array.
 | `require_complete_analysis` | `bool` | `False` |
 | `show_only` | `str \| None` | `None` |
 | `contract_evaluation` | `bool` | `False` |
+| `envelope` | `ReportEnvelope \| None` | `None` |
 
 **Returns:** `str`

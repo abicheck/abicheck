@@ -2,6 +2,7 @@ from abicheck.checker import Change, ChangeKind, DiffResult, Verdict
 from abicheck.checker_policy import policy_for
 from abicheck.policy.evaluate import evaluate
 from abicheck.report_summary import build_summary, compatibility_metrics
+from tests._report_test_helpers import compute_review
 
 
 def test_policy_registry_has_doc_slug_and_severity() -> None:
@@ -241,7 +242,6 @@ def test_review_digest_additions_count_excludes_quality_issues() -> None:
     finding) rendered "Additions: 2" / "Quality issues: 1" -- overlapping
     rows that still summed to more real additions than actually occurred.
     """
-    from abicheck.reporter_markdown import compute_review_digest
 
     result = DiffResult(
         old_version="1.0",
@@ -258,7 +258,7 @@ def test_review_digest_additions_count_excludes_quality_issues() -> None:
         ],
         verdict=Verdict.COMPATIBLE,
     )
-    digest = compute_review_digest(result)
+    digest = compute_review(result)
     assert digest.additions_count == 1
     assert digest.quality_issues_count == 1
     assert digest.informational_count == 1

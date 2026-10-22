@@ -22,7 +22,7 @@ so it stays a leaf; ``reporter`` re-exports these names for backward compat.
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from typing import TYPE_CHECKING, Any
 
 from .report.change_operation import (
@@ -39,7 +39,6 @@ from .report.policy_facts import (
     ENVIRONMENT_DRIFT_KINDS,
     classification_for,
     evidence_status_of,
-    gate_exit_code_for,
     impact_text_for,
     kind_sets_for,
     reclassify_rules_in_effect,
@@ -59,7 +58,8 @@ if TYPE_CHECKING:
     from datetime import date
 
     from .bundle_models import BundleDiffResult
-    from .policy.severity import GateDecision, KindSets, SeverityConfig
+    from .policy.severity import SeverityConfig
+    from .report.envelope import ReportEnvelope
     from .report.finding import ReportFinding
 
 from .checker import (
@@ -68,7 +68,6 @@ from .checker import (
     LibraryMetadata,
     Verdict,
 )
-from .model.change_catalog.kinds import HasKind
 from .model.contract_finding_relevance import is_evaluated
 from .model.evidence_status import EvidenceStatus
 from .report import (
@@ -81,8 +80,7 @@ from .report.cross_source_evolution import (
     cross_source_evolution_md_suffix as _cross_source_evolution_md_suffix,
 )
 from .report.disposition_audit import (
-    DispositionAudit,
-    compute_disposition_audit,
+    disposition_audit_reusing_document,
     render_disposition_audit_note,
 )
 from .report.render_markdown import (
@@ -114,17 +112,16 @@ _VERDICT_LABEL = {
 # ---------------------------------------------------------------------------
 
 
-def to_stat(
-    result: DiffResult, *, severity_config: SeverityConfig | None = None
-) -> str:
+def to_stat(result: DiffResult, *, envelope: ReportEnvelope) -> str:
     """One-line summary for CI gates.
 
-    *severity_config*, when given, appends a ``gate: PASS|FAIL`` suffix
-    reflecting the actual severity-aware exit code — without it, ``--stat``
-    output has historically bypassed severity handling entirely (it
-    short-circuits in ``service.render_output`` before format dispatch), so
-    the verdict label alone could misreport whether the run actually blocks
-    CI once severity configuration is in play.
+    *envelope* is the completed evaluation this line projects (ADR-061 gap C).
+    When it carries a severity gate, the line appends a ``gate: PASS|FAIL``
+    suffix reflecting the actual severity-aware exit code -- without it,
+    ``--stat`` output has historically bypassed severity handling entirely,
+    so the verdict label alone could misreport whether the run actually
+    blocks CI. The disposition note is read from the envelope's shared
+    document, not recomputed from the ledger.
     """
     from .report.change_inventory import render_change_inventory_json
     from .report.document import ReportDocument
@@ -148,15 +145,16 @@ def to_stat(
         # counts -- a fully-suppressed comparison must not read as "no
         # changes".
         "disposition_audit_note": render_disposition_audit_note(
-            compute_disposition_audit(result, severity_config)
+            disposition_audit_reusing_document(
+                result, envelope.severity_config, envelope.document
+            )
         ),
     }
     # Codex review: oneline/`--stat` lacked the deployment digest.
     if (_dig := getattr(result, "env_matrix_source_sha256", None)) is not None:
         d["env_matrix_source_sha256"] = _dig
-    if severity_config is not None:
-        exit_code = gate_exit_code_for(result, severity_config)
-        d["severity"] = {"exit_code": exit_code}
+    if envelope.gate is not None:
+        d["severity"] = {"exit_code": envelope.gate.exit_code}
     return render_stat_document(ReportDocument.from_mapping(d))
 
 
@@ -654,110 +652,58 @@ def _section_severity_label(
 
 
 def compute_severity_summary(
-    changes: list[Change],
     severity_config: SeverityConfig,
     *,
-    all_changes: list[Change] | None = None,
-    policy: str | None = None,
-    kind_sets: KindSets | None = None,
-    policy_file: object | None = None,
+    counts: Mapping[str, int],
+    exit_counts: Mapping[str, int],
     scoped_counts: dict[str, int] | None = None,
     scoped_blocking_categories: tuple[str, ...] | None = None,
-    today: date | None = None,
 ) -> _rmd.SeveritySummary:
     """Build the severity configuration summary table's structured intermediate.
 
-    *changes* are the (possibly ``--show-only``-filtered) changes used for
-    the displayed ``Count`` column. *all_changes*, when provided, is the
-    unfiltered set used for the ``Exit Impact`` column so that filtering the
-    display doesn't make this table claim "no exit impact" for a category
-    that still fails the actual (unfiltered) severity gate.
+    *counts* are the per-category totals over the (possibly ``--show-only``-
+    filtered) changes shown in the ``Count`` column; *exit_counts* are the
+    per-category totals over the set the gate scores (ADR-049 D1), which
+    drives the ``Exit Impact`` column so filtering the display cannot make
+    this table claim "no exit impact" for a category that still fails the
+    real gate. Both are keyed by :class:`~abicheck.policy.severity.IssueCategory`
+    value and are resolved by the caller from the completed envelope's
+    findings -- this function classifies nothing itself.
 
     *scoped_counts*/*scoped_blocking_categories* (Codex review), when given
     (from ``result.scoped_severity_counts``/``scoped_blocking_categories``
     on a ``--used-by``/``--required-symbol`` run), override both columns
     with the scoped gate's own numbers -- otherwise this table always
-    reflects the full-library ``changes``, so a scoped run whose only
-    gating issue is a scoped-only change or missing-contract label (neither
-    of which is in ``result.changes``) would show every category at 0 and
-    "no exit impact" while the report elsewhere names a real, blocking
-    finding. *today*: an envelope's own ``resolved_today`` (ADR-061 gap C,
-    Codex, fresh evidence).
+    reflects the full-library changes, so a scoped run whose only gating
+    issue is a scoped-only change or missing-contract label (neither of which
+    is in ``result.changes``) would show every category at 0 and "no exit
+    impact" while the report elsewhere names a real, blocking finding.
     """
-    from .policy.severity import (
-        SeverityLevel,
-        categorize_changes,
-        gate_eligible_changes,
-    )
+    from .policy.severity import SeverityLevel
 
-    categorized = categorize_changes(
-        changes,
-        policy=policy,
-        kind_sets=kind_sets,
-        policy_file=policy_file,
-        today=today,
-    )
-    # ADR-049 D1: the `Count` column above is factual over what is
-    # displayed, but `Exit Impact` is a claim about the *gate* -- so it has
-    # to be classified over the same set `severity.compute_exit_code` scores.
-    # Without this, a comparison whose only finding is a proven-out-of-contract
-    # TYPE_SIZE_CHANGED rendered "causes non-zero exit" beside an exit code of
-    # 0 and a NO_CHANGE verdict (Codex review, fresh evidence).
-    exit_categorized = (
-        categorize_changes(
-            gate_eligible_changes(all_changes),
-            policy=policy,
-            kind_sets=kind_sets,
-            policy_file=policy_file,
-            today=today,
-        )
-        if all_changes is not None
-        else categorized
-    )
-
-    _CATEGORY_INFO: list[tuple[str, str, list[HasKind], list[HasKind]]] = [
-        (
-            "ABI/API Incompatibilities",
-            "abi_breaking",
-            categorized.abi_breaking,
-            exit_categorized.abi_breaking,
-        ),
-        (
-            "Potential Incompatibilities",
-            "potential_breaking",
-            categorized.potential_breaking,
-            exit_categorized.potential_breaking,
-        ),
-        (
-            "Quality Issues",
-            "quality_issues",
-            categorized.quality_issues,
-            exit_categorized.quality_issues,
-        ),
-        (
-            "Additions",
-            "addition",
-            categorized.addition,
-            exit_categorized.addition,
-        ),
+    _CATEGORY_INFO: list[tuple[str, str]] = [
+        ("ABI/API Incompatibilities", "abi_breaking"),
+        ("Potential Incompatibilities", "potential_breaking"),
+        ("Quality Issues", "quality_issues"),
+        ("Additions", "addition"),
     ]
 
     rows: list[_rmd.SeverityRow] = []
-    for label, attr, cat_changes, exit_cat_changes in _CATEGORY_INFO:
+    for label, attr in _CATEGORY_INFO:
         level = getattr(severity_config, attr, SeverityLevel.INFO)
         level_val = level.value if hasattr(level, "value") else str(level)
         emoji = _SEVERITY_EMOJI.get(level_val, "")
         count = (
             scoped_counts.get(attr, 0)
             if scoped_counts is not None
-            else len(cat_changes)
+            else counts.get(attr, 0)
         )
         impact = (
             "causes non-zero exit"
             if (
                 attr in scoped_blocking_categories
                 if scoped_blocking_categories is not None
-                else level_val == "error" and len(exit_cat_changes) > 0
+                else level_val == "error" and exit_counts.get(attr, 0) > 0
             )
             else "no exit impact"
         )
@@ -775,7 +721,7 @@ def compute_severity_summary(
     info_count = (
         scoped_counts.get("informational", 0)
         if scoped_counts is not None
-        else len(categorized.informational)
+        else counts.get("informational", 0)
     )
     if info_count:
         rows.append(
@@ -1008,81 +954,39 @@ def _merge_effect_from_exit_code(exit_code: int) -> str:
     return "blocked by severity policy — review required before merge"
 
 
-def _severity_merge_effect(
-    result: DiffResult, severity_config: SeverityConfig
-) -> tuple[str, int]:
-    """Merge-effect phrase reflecting the actual severity-aware gate.
-
-    Compatibility (``result.verdict``) and the CI gate are independent
-    decisions once a severity configuration is in play — e.g. an ``addition``
-    finding configured as ``error`` blocks the build even though the verdict
-    is ``COMPATIBLE``, and an ``abi_breaking`` finding configured below
-    ``error`` does not. The hard-coded ``_VERDICT_MERGE_EFFECT`` phrases would
-    misreport both cases, so this asks the severity gate directly instead of
-    inferring "safe to merge" from the verdict alone.
-
-    Only called for a direct caller with no already-resolved
-    :class:`~abicheck.policy.severity.GateDecision` -- an envelope-driven
-    render passes one to :func:`compute_review_digest` instead (ADR-061 gap
-    C; CodeRabbit review) so this digest's merge-effect phrase reads the same
-    gate SARIF's/HTML's gate blocks do, rather than a second, independent
-    ``compute_exit_code`` call that happens to agree.
-    """
-    exit_code = gate_exit_code_for(result, severity_config)
-    return _merge_effect_from_exit_code(exit_code), exit_code
-
-
 def compute_review_digest(
     result: DiffResult,
     *,
-    severity_config: SeverityConfig | None = None,
-    disposition_audit: DispositionAudit | None = None,
-    findings: Sequence[ReportFinding] | None = None,
-    gate: GateDecision | None = None,
+    envelope: ReportEnvelope,
     review_groups: Sequence[dict[str, object]] | None = None,
     result_counts: dict[str, int] | None = None,
     gate_exit_code: int | None = None,
 ) -> _review.ReviewDigest:
     """The structured intermediate for :func:`to_review_digest`.
 
-    *severity_config*, when given, drives the merge-effect phrase from the
-    actual severity-aware CI gate instead of the raw compatibility verdict —
-    compatibility and "blocks CI" are independent decisions once severity
-    configuration is in play (see :func:`_severity_merge_effect`).
+    *envelope* is the completed evaluation this digest projects (ADR-061 gap
+    C). It supplies every decision the digest states: the merge-effect
+    phrase reads its :class:`~abicheck.policy.severity.GateDecision` (or the
+    raw verdict when no severity gate is configured), the disposition counts
+    come from its shared document, and the impacted-symbols list reads its
+    already-resolved per-finding verdicts. Nothing is re-resolved here.
 
-    *gate*, when given, is the already-resolved
-    :class:`~abicheck.policy.severity.GateDecision` the merge-effect phrase
-    reads instead of a second, independent ``compute_exit_code`` call --
-    the ADR-061 gap C caller (``report/render_markdown_document.
-    build_review_digest_document``) passes the ``ReportEnvelope``'s own gate
-    (CodeRabbit review), the same decision SARIF's/HTML's gate blocks
-    project. A direct caller with no envelope (``severity_config`` given,
-    ``gate`` not) keeps the prior behaviour via :func:`_severity_merge_effect`.
-
-    *disposition_audit*, when given, is used verbatim instead of resolving a
-    fresh one from *result*/*severity_config* -- the ADR-061 gap C caller
-    (``report/render_markdown_document.build_review_digest_document``) passes
-    the one already computed by ``report/build.build_report_document``'s
-    single shared call, rather than this function re-deriving an identical
-    value from the same ledger a second time.
-
-    *findings* is the same reuse for the per-change verdicts the impacted-
-    symbols list below rests on: the ADR-061 gap C caller passes the
-    ``ReportEnvelope``'s already-resolved set instead of leaving this
-    function to call ``report_findings_for`` a second time for the same
-    render.
+    *review_groups*, *result_counts* and *gate_exit_code* are the
+    shared-document values the caller already read off the same envelope;
+    *gate_exit_code* is used only when no severity gate is configured.
     """
-    from .report.finding import report_findings_for
-
-    findings = findings if findings is not None else report_findings_for(result)
+    # The envelope's own snapshot of the result: every finding it holds was
+    # resolved against these change objects (build_report_envelope snapshots
+    # its input), so the digest reads them rather than the caller's ``result``.
+    result = envelope.result
+    findings = envelope.findings
+    gate = envelope.gate
     summary = summary_for(result, findings=findings)
     v = result.verdict
     emoji = _VERDICT_EMOJI.get(v, "?")
     label = _VERDICT_LABEL.get(v, v.value)
     if gate is not None:
         effect = _merge_effect_from_exit_code(gate.exit_code)
-    elif severity_config is not None:
-        effect, gate_exit_code = _severity_merge_effect(result, severity_config)
     else:
         effect = _VERDICT_MERGE_EFFECT.get(v, "")
 
@@ -1164,10 +1068,8 @@ def compute_review_digest(
             )
             for c in impacted
         ),
-        disposition_audit=(
-            disposition_audit
-            if disposition_audit is not None
-            else compute_disposition_audit(result, severity_config)
+        disposition_audit=disposition_audit_reusing_document(
+            result, envelope.severity_config, envelope.document
         ),
         surface_changes=compute_surface_changes(result, findings),
         env_matrix_source_sha256=result.env_matrix_source_sha256,
