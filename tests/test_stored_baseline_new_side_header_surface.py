@@ -14,8 +14,15 @@ The invariant, stated across both drivers (live/live and stored/live), both
 of which side declares an unexported symbol: each side's
 ``missing_from_bundle`` set equals that side's declared-minus-exported set,
 computed here from the fixture definition, not from abicheck. Marked
-``integration``: it needs gcc and castxml, because the defect lived in the
-CLI-to-extraction wiring a hand-built snapshot cannot reach.
+``integration``: it needs castxml plus a toolchain, because the defect lived
+in the CLI-to-extraction wiring a hand-built snapshot cannot reach.
+
+Run for each binary format the host can emit: ELF via gcc on Linux, and PE
+via ``clang --target=x86_64-pc-windows-msvc`` + ``lld-link`` on any host.
+The PE leg is the Windows CI failure reproduced on Linux: the stored/live
+driver discovered NEW's members with an ELF-only walk, so a directory of
+PE libraries supplied no member, NEW's surface came back unresolved and
+``missing_from_bundle`` read empty while live/live was correct.
 """
 
 from __future__ import annotations
@@ -23,6 +30,7 @@ from __future__ import annotations
 import json
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -44,13 +52,47 @@ _SCENARIOS = {
 }
 
 
-def _require_toolchain() -> None:
-    for tool in ("gcc", "castxml"):
+#: Tools each binary format's fixture build needs.
+_TOOLCHAINS = {"elf": ("gcc", "castxml"), "pe": ("clang", "lld-link", "castxml")}
+
+
+def _require_toolchain(fmt: str) -> None:
+    if fmt == "elf" and not sys.platform.startswith("linux"):
+        pytest.skip("gcc emits ELF only on Linux")
+    for tool in _TOOLCHAINS[fmt]:
         if shutil.which(tool) is None:
-            pytest.skip(f"{tool} is required for this fixture")
+            pytest.skip(f"{tool} is required for the {fmt} fixture")
 
 
-def _build_side(root: Path, gaps: tuple[str, ...]) -> Path:
+def _link(fmt: str, src: Path, out: Path, exported: tuple[str, ...]) -> None:
+    if fmt == "elf":
+        cmds = [["gcc", "-shared", "-fPIC", "-o", str(out), str(src)]]
+    else:
+        obj = src.with_suffix(".obj")
+        cmds = [
+            [
+                "clang",
+                "--target=x86_64-pc-windows-msvc",
+                "-c",
+                str(src),
+                "-o",
+                str(obj),
+            ],
+            [
+                "lld-link",
+                "/dll",
+                "/noentry",
+                "/nodefaultlib",
+                *(f"/export:{n}" for n in exported),
+                f"/out:{out}",
+                str(obj),
+            ],
+        ]
+    for cmd in cmds:
+        subprocess.run(cmd, check=True, capture_output=True)
+
+
+def _build_side(root: Path, gaps: tuple[str, ...], fmt: str) -> Path:
     root = root.resolve()
     (root / "include").mkdir(parents=True)
     (root / "lib").mkdir()
@@ -64,18 +106,8 @@ def _build_side(root: Path, gaps: tuple[str, ...]) -> Path:
             "".join(f"int {n}(void) {{ return 1; }}\n" for n in exported),
             encoding="utf-8",
         )
-        subprocess.run(
-            [
-                "gcc",
-                "-shared",
-                "-fPIC",
-                "-o",
-                str(root / "lib" / f"lib{lib}.so"),
-                str(src),
-            ],
-            check=True,
-            capture_output=True,
-        )
+        # Named `.so` on both formats, as mingw gcc on Windows CI named them.
+        _link(fmt, src, root / "lib" / f"lib{lib}.so", exported)
     return root
 
 
@@ -99,15 +131,16 @@ def _missing(report: dict, side: str) -> set[str]:
     return {entry["symbol"] for entry in sides[side]["missing_from_bundle"]}
 
 
+@pytest.mark.parametrize("fmt", sorted(_TOOLCHAINS))
 @pytest.mark.parametrize("form", ["dir", "files"])
 @pytest.mark.parametrize("scenario", sorted(_SCENARIOS))
 def test_both_drivers_reconcile_each_sides_own_headers(
-    tmp_path: Path, scenario: str, form: str
+    tmp_path: Path, scenario: str, form: str, fmt: str
 ) -> None:
-    _require_toolchain()
+    _require_toolchain(fmt)
     old_gaps, new_gaps = _SCENARIOS[scenario]
-    old = _build_side(tmp_path / "old", old_gaps)
-    new = _build_side(tmp_path / "new", new_gaps)
+    old = _build_side(tmp_path / "old", old_gaps, fmt)
+    new = _build_side(tmp_path / "new", new_gaps, fmt)
     facts = tmp_path / "old.abicheck-bundle.json"
 
     live = _run(
@@ -129,7 +162,9 @@ def test_both_drivers_reconcile_each_sides_own_headers(
 
     for name, report in (("live/live", live), ("stored/live", stored)):
         sides = report["public_surface_reconciliation"]["sides"]
-        assert sides["new"].get("resolvable", True), (name, sides["new"])
+        # Every member was compared, so NEW's surface is never unresolved.
+        assert report["comparison_scope"]["counts"]["available"] == 2, name
+        assert sides["new"]["surface_resolvable"], (name, sides["new"])
         assert _missing(report, "new") == set(new_gaps), name
         # OLD-side behaviour is unchanged by the fix.
         assert _missing(report, "old") == set(old_gaps), name
