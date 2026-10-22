@@ -386,10 +386,6 @@ _ANALYSIS_BUG_CLASSES: tuple[BugClass, ...] = (
             # depending on run; pinned under permuted edges/inputs and
             # several PYTHONHASHSEED values.
             "tests/test_graph_reconcile_order_invariance.py",
-            # Renamed-dependency findings were emitted in set-iteration order,
-            # so their order depended on PYTHONHASHSEED; pinned by running the
-            # same comparison under two seeds and requiring identical output.
-            "tests/test_graph_dependency_renames.py",
         ),
         # Phase 5's own two originally-tracked gaps here (a compare()-level
         # collision test, and an adversarial generator over the shapes
