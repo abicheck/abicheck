@@ -41,7 +41,9 @@ def _entry(axis: str, generation: int, reason: str) -> dict[str, object]:
 def main(argv: list[str] | None = None) -> int:
     """Re-record one axis after a bump or a reviewed no-semantic-change; returns the exit code."""
     parser = argparse.ArgumentParser(description=__doc__.split("\n", 1)[0])
-    parser.add_argument("--axis", required=True, choices=["extractor", "resolver"])
+    parser.add_argument(
+        "--axis", required=True, choices=["extractor", "resolver", "source"]
+    )
     mode = parser.add_mutually_exclusive_group(required=True)
     mode.add_argument("--bump", action="store_true")
     mode.add_argument("--no-semantic-change", action="store_true")

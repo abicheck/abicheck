@@ -20,7 +20,7 @@ branch-specific reference behind a trigger-worded pointer).
 abicheck helps library and package maintainers understand and validate
 API/ABI evolution: it compares two versions of a native library (ELF, PE/COFF,
 Mach-O, plus optional debug info, headers, build data and sources — evidence
-levels L0–L5), classifies every change into one of 420 `ChangeKind`s
+levels L0–L5), classifies every change into one of 421 `ChangeKind`s
 (`BREAKING_KINDS`, `API_BREAK_KINDS`, `COMPATIBLE_KINDS`, `RISK_KINDS`), and
 gates CI on the result while reporting what the evidence could not establish.
 Pure Python, 3.11+. Product direction: [`vision.md`](vision.md); this file owns
@@ -212,7 +212,7 @@ Follow the pointer whose trigger matches your task:
 |------|---------------|
 | [`docs/contribute/agent-guide/module-map.md`](docs/contribute/agent-guide/module-map.md) | locating the module that owns a behavior, or touching the pipeline (model → extract → compare → policy → report), contract evaluation, release/multi-member comparison, snapshots/storage, or the service API |
 | `abicheck/<layer>/AGENTS.md` | editing code inside that layer (`model`, `extract`, `compare`, `policy`, `workflows`, `storage`, `report`, `frontends`) |
-| [`docs/contribute/agent-guide/quality-gates.md`](docs/contribute/agent-guide/quality-gates.md) | an `ai-readiness`/coverage/mutation/FP-rate gate failed, or you are writing tests for a bug fix, a matrix, a differential comparison or a reusable primitive |
+| [`docs/contribute/agent-guide/quality-gates.md`](docs/contribute/agent-guide/quality-gates.md) | an `ai-readiness`/coverage/mutation/FP-rate gate failed, you need a PR's CodeFactor findings, or you are writing tests for a bug fix, a matrix, a differential comparison or a reusable primitive |
 | [`docs/contribute/agent-guide/performance.md`](docs/contribute/agent-guide/performance.md) | touching a hot path, a call-count/cost-budget/`perf-antipatterns` gate failed, or a user reports "slow" |
 | [`docs/contribute/agent-guide/cli-and-exit-codes.md`](docs/contribute/agent-guide/cli-and-exit-codes.md) | adding a CLI command or flag, changing an exit code, or editing a file over its size cap (`architecture/modules.yaml`) |
 | [`docs/contribute/agent-guide/decision-principles.md`](docs/contribute/agent-guide/decision-principles.md) | filling the PR template's "Bug class / General invariant" rows |
@@ -227,7 +227,7 @@ Follow the pointer whose trigger matches your task:
 
 - `AbiSnapshot` (`model/snapshot.py`) — serializable snapshot of a library's ABI surface
 - `DiffResult` (`checker_types.py`) — comparison result: changes, verdict, context
-- `ChangeKind` (`model/change_catalog/kinds.py`, re-exported by `checker_policy.py`) — the 420 change types
+- `ChangeKind` (`model/change_catalog/kinds.py`, re-exported by `checker_policy.py`) — the 421 change types
 - `Verdict` (`checker.py`) — overall result (compatible/source_break/breaking)
 
 ## Adding a new ChangeKind
