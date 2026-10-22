@@ -167,6 +167,7 @@ def public_api_pair(tmp_path: Path) -> tuple[Path, Path]:
 
 
 HEADER_KIND = "template_param_default_changed"
+_CASTXML_GAP = "template-parameter defaults (castxml cannot record them)"
 
 
 def test_header_only_default_change_is_api_break_on_clang(
@@ -187,15 +188,14 @@ def test_header_only_default_change_is_api_break_on_clang(
     assert DEFAULT_KIND not in _kinds(report)
 
 
-def test_header_only_default_change_is_not_recorded_by_castxml(
+def test_header_only_default_change_is_a_castxml_assurance_gap(
     tmp_path: Path, header_pair: tuple[Path, Path]
 ) -> None:
-    """Documented residual of ADR-085 D3: castxml emits no pattern record.
+    """ADR-085 D3: castxml cannot record the default, so the run says so.
 
-    castxml cannot record the default, so this shape reads NO_CHANGE with no
-    new kind. D3's castxml coverage gap needs a header-text scan that is not
-    implemented yet (see the known-gaps entry). This test pins the current
-    behaviour so the residual is visible; update it when the scan lands.
+    castxml's compare verdict stays NO_CHANGE (it cannot see the change), but
+    the header scan finds the template default on both sides, so the analysis
+    is partial with an explicit gap note, not a silent clean comparison.
     """
     _require_tools("castxml")
     old_h, new_h = header_pair
@@ -204,6 +204,39 @@ def test_header_only_default_change_is_not_recorded_by_castxml(
     report = _compare_kinds(old, new, tmp_path, "castxml")
     assert report["verdict"] == "NO_CHANGE"
     assert HEADER_KIND not in _kinds(report)
+    assurance = report["analysis_assurance"]
+    assert assurance["status"] == "partial"
+    gap = [n for n in assurance["notes"] if n.startswith(_CASTXML_GAP)]
+    assert len(gap) == 2  # one per side
+
+
+@pytest.mark.integration
+def test_clang_reports_and_castxml_names_the_same_header_change(
+    tmp_path: Path, header_pair: tuple[Path, Path]
+) -> None:
+    """Cross-backend parity (ADR-085 test plan): the same header pair is not
+    a silent clean on either backend. clang reports the kind; castxml reports
+    the explicit gap instead."""
+    _require_tools("castxml", "clang")
+    old_h, new_h = header_pair
+    clang = _compare_kinds(
+        _dump_header(tmp_path, old_h, "clang", "old"),
+        _dump_header(tmp_path, new_h, "clang", "new"),
+        tmp_path,
+        "clang",
+    )
+    castxml = _compare_kinds(
+        _dump_header(tmp_path, old_h, "castxml", "old"),
+        _dump_header(tmp_path, new_h, "castxml", "new"),
+        tmp_path,
+        "castxml",
+    )
+    assert HEADER_KIND in _kinds(clang)
+    assert HEADER_KIND not in _kinds(castxml)
+    assert castxml["analysis_assurance"]["status"] == "partial"
+    assert not any(
+        n.startswith(_CASTXML_GAP) for n in clang["analysis_assurance"]["notes"]
+    )
 
 
 def test_castxml_cannot_expose_uninstantiated_template_defaults(

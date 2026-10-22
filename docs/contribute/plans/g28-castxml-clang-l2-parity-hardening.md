@@ -452,9 +452,10 @@ decided in [ADR-085](../adr/085-template-parameter-default-arguments.md)
 - a header-only default change is the new `API_BREAK` kind
   `template_param_default_changed`, and `DEFAULT_TEMPLATE_ARG_CHANGED` keeps
   `BREAKING` for exported-instantiation evidence (shape A). Landed;
-- planned: the castxml header-text scan will report the shape-B case as an
-  explicit coverage gap, not `NO_CHANGE`. **Not landed.** Until the scan lands,
-  castxml still reads `NO_CHANGE` for shape B.
+- landed: the castxml header-text scan reports the shape-B case as an explicit
+  coverage gap (`template_default_header_scan`, schema v63, ADR-085 D3). The
+  castxml verdict still reads `NO_CHANGE` for shape B; the run reads `partial`.
+  Whether the verdict should change is open (ADR-085 Remaining item 1).
 
 The shape-B `NO_CHANGE` answer in the table above is superseded on clang
 (`API_BREAK`). It stands on castxml until the scan lands. The remaining items

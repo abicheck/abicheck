@@ -65,6 +65,15 @@ def _is_nested_in(qualified: str, parent: str) -> bool:
     return len(parts) > len(owner) and parts[: len(owner)] == owner
 
 
+def _castxml_header_note(label: str) -> str:
+    return (
+        f"template-parameter defaults (castxml cannot record them): the public "
+        f"headers of the {label} snapshot declare class-template parameter "
+        "defaults that castxml does not record, so a default-argument change in "
+        "them is not assessed"
+    )
+
+
 def _side_note(label: str, snap: AbiSnapshot, count: int) -> str:
     if snap.ast_producer == "castxml":
         reason = "castxml cannot record them"
@@ -86,12 +95,16 @@ def template_default_gap(
     """``(gap, notes)`` for the template-defaults axis of the rollup.
 
     *gap* is True when either side has at least one class-template pattern
-    without recorded defaults. *notes* names each such side. A snapshot with
-    no class-template pattern contributes nothing.
+    without recorded defaults, or is a castxml run whose headers declare a
+    template parameter default castxml does not record (ADR-085 D3). *notes*
+    names each such side. A snapshot with neither contributes nothing.
     """
     notes: list[str] = []
     for label, snap in (("old", old), ("new", new)):
         if snap is None:
+            continue
+        if snap.ast_producer == "castxml" and snap.template_default_header_scan:
+            notes.append(_castxml_header_note(label))
             continue
         count = _unrecorded_pattern_count(snap)
         if count:

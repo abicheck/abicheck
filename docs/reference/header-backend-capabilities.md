@@ -364,7 +364,9 @@ this" apart from "abicheck saw no change".
   backend, a header-only change to a class template's type-parameter default
   is `API_BREAK` (`template_param_default_changed`). On castxml it still
   reads `NO_CHANGE`, because CastXML emits no record for an uninstantiated class
-  template. castxml's coverage gap is not implemented yet. See
+  template. A castxml run whose public headers declare such a default reports
+  the coverage gap `template-parameter defaults (castxml cannot record them)`
+  and reads `partial`. See
   [known-gaps](../contribute/known-gaps/a-header-only-default-template-argument-change-reads-no-change-at-l2.md).
 - **Secondary vtable placement under multiple inheritance.** Both backends
   apply the same `0`-if-polymorphic heuristic for `vptr_offset_bits`, so a

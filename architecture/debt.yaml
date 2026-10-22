@@ -629,17 +629,6 @@
       "review_by": "2026-11-30"
     },
     {
-      "path": "abicheck/extract/headers/toolchain.py",
-      "baseline_lines": 801,
-      "target": "see ADR-061 ownership map",
-      "rule": "no_growth",
-      "disposition": "migrate",
-      "category": "legacy_oversized_module",
-      "owner": "extract",
-      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice.",
-      "review_by": "2026-11-30"
-    },
-    {
       "path": "abicheck/dwarf_advanced.py",
       "baseline_lines": 1172,
       "target": "see ADR-061 ownership map",

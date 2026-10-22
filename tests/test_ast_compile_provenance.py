@@ -171,6 +171,8 @@ class TestAstCompileProvenance:
             "ast_cplusplus_macro": None,
             "ast_compile_args": (),
             "ast_sysroot": None,
+            # No toolchain was given, so no producer is known and no scan ran.
+            "template_default_header_scan": None,
         }
 
     def test_secret_looking_define_is_redacted(self):

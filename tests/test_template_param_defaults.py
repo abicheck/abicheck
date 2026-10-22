@@ -182,7 +182,7 @@ def test_v62_record_without_the_key_reads_not_collected() -> None:
     # producer did not record it), never "no defaults".
     snap = _snap(_box(None), producer="castxml")
     doc = snapshot_to_dict(snap)
-    assert doc["schema_version"] == 62
+    assert doc["schema_version"] >= 62
     (rec,) = snapshot_from_dict(doc).declarations.types
     assert rec.template_param_defaults_fact is not None
     assert rec.template_param_defaults_fact.status is FactStatus.NOT_COLLECTED

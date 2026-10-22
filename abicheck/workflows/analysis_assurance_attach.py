@@ -53,6 +53,7 @@ def attach_analysis_assurance(
     """
     from ..evidence_depth import embedded_evidence_pack
     from ..policy.analysis_assurance import compute_analysis_assurance
+    from ..policy.analysis_assurance._template_defaults import template_default_gap
     from ..storage.snapshot_encode import same_persisted_content
 
     result.analysis_assurance = compute_analysis_assurance(
@@ -66,6 +67,9 @@ def attach_analysis_assurance(
             partial(same_persisted_content, old, new) if old is not None else None
         ),
     )
+    # ADR-085 D3: the same template-default gap the rollup reports is a coverage
+    # gap, so the coverage-gap rows of every report show it.
+    result.coverage_warnings.extend(template_default_gap(old, new)[1])
 
 
 def attach_evidence_depths(
