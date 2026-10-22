@@ -4419,7 +4419,7 @@
    "expected_kinds": [
     "public_dependency_role_changed"
    ],
-   "min_evidence": "L2",
+   "min_evidence": "L5",
    "platforms": [
     "linux",
     "macos",
@@ -4497,7 +4497,7 @@
    "expected_kinds": [
     "public_dependency_role_changed"
    ],
-   "min_evidence": "L2",
+   "min_evidence": "L5",
    "platforms": [
     "linux",
     "macos",

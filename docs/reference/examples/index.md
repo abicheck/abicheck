@@ -94,10 +94,10 @@ The weakest evidence source that reaches this case's verdict — see [Evidence a
 |----------|-------|---------------|
 | [L0 — binary only](by-evidence/l0.md) | 70 | Detectable from the shipped binary's symbol table alone. |
 | [L1 — + debug info](by-evidence/l1.md) | 77 | Needs debug information on top of the binary. |
-| [L2 — + headers](by-evidence/l2.md) | 48 | Needs the public headers parsed alongside the binary. |
+| [L2 — + headers](by-evidence/l2.md) | 46 | Needs the public headers parsed alongside the binary. |
 | [L3 — + build evidence](by-evidence/l3.md) | 11 | Needs the build's own configuration and flags. |
 | [L4 — + source replay](by-evidence/l4.md) | 6 | Needs the sources replayed through a source-level ABI extraction. |
-| [L5 — + source graph](by-evidence/l5.md) | 17 | Needs the derived semantic source graph. |
+| [L5 — + source graph](by-evidence/l5.md) | 19 | Needs the derived semantic source graph. |
 | [Not currently detectable](by-evidence/none.md) | 0 | No evidence tier currently reaches this case's canonical verdict — a known detector gap, kept in the catalog as calibration. |
 
 ## Browse by language
