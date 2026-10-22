@@ -323,7 +323,7 @@ topics:
     fact_sources:
       - abicheck/impact/assessment.py
       - abicheck/impact/engine.py
-      - abicheck/impact/use_cases.py
+      - abicheck/policy/use_cases.py
       - abicheck/cli_project.py
       - abicheck/buildsource/graph_impact.py
       - abicheck/model/graph_facts.py
@@ -570,7 +570,6 @@ topics:
       - abicheck/report/not_comparable.py
       - abicheck/buildsource/check_report_run_outcome.py
       - abicheck/workflows/aggregate/report_gate.py
-      - abicheck/cli_compare_release_helpers.py
       - abicheck/cli_compare_release_matrix.py
       - abicheck/schemas/compare_report.schema.json
     allowed_summaries:

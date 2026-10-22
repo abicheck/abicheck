@@ -734,12 +734,12 @@ def test_cache_key_changes_with_extractor_compiler_override(tmp_path: Path) -> N
 
 def test_cache_key_uses_compiler_override_for_replay_flag_mode(tmp_path: Path) -> None:
     """A --compiler override that switches a GNU-argv compile unit into CL
-    mode changes which flags replay_extra_flags() recognizes (/FI vs
+    mode changes which flags replayed_tokens() recognizes (/FI vs
     -include), and the cache key must follow that mode -- not the compile
     unit's own un-overridden argv (Codex review, sixth round)."""
     src = tmp_path / "a.cpp"
     src.write_text("int a;\n")
-    # /FI-style tokens: invisible to GNU-mode replay_extra_flags (it only
+    # /FI-style tokens: invisible to GNU-mode replayed_tokens (it only
     # recognizes -include/-imacros), so without the override both keys
     # collide -- reproducing the bug this test guards against.
     cu_a = _cu("cu://x", str(src), argv=["g++", "/FIa.h", "-c", "a.cpp"])

@@ -30,13 +30,13 @@ from abicheck.buildsource.source_graph import (
     SourceGraphSummary,
 )
 from abicheck.errors import UseCaseManifestError
-from abicheck.impact.use_cases import (
+from abicheck.impact.use_case_reachability import explain_use_case_impact
+from abicheck.policy.use_cases import (
     USE_CASE_EDGE_KINDS,
     USE_CASE_NODE_KINDS,
     UseCaseDefinition,
     UseCaseResolution,
     _public_entry_index,
-    explain_use_case_impact,
     load_use_case_manifest,
     parse_use_case_manifest,
     resolve_use_case_entrypoints,

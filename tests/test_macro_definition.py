@@ -419,7 +419,11 @@ class TestFrontendSpellingMatrix:
         from abicheck.buildsource.source_extractors.clang_command import (
             _clang_context_args,
         )
+        from abicheck.buildsource.source_extractors.compile_invocation import (
+            parse_compile_invocation,
+        )
 
-        args, _msvc = _clang_context_args(self._unit(compiler), None)
+        invocation = parse_compile_invocation(self._unit(compiler), None)
+        args, _msvc = _clang_context_args(invocation, clang_bin="clang")
         assert f"{prefix}FEATURE_API" in args
         assert f"{prefix}MODE=2" in args

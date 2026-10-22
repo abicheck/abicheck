@@ -160,7 +160,8 @@
       "abicheck/bundle_resolution_reachability.py": "7d60ccf82fe98a12c7c81ac02d2c920492c8c20c52f0b13398195c4590615c08",
       "abicheck/compare/export_owner_resolution.py": "e9108cbdf0459cb8171f63ca328138558cfd032bff9124e4b9bd0fd5bf8553c8",
       "abicheck/debug_resolver.py": "cdcc4f72bd8fb5304fe030b3e1365da488ad009397e014ba56931a3f311cf1f3",
-      "abicheck/post_processing_reachability.py": "4932e6c5e2fad3b56e054081883bd41bffc7df5b168ab4d6284389c645670df1",
+      "abicheck/impact/use_case_reachability.py": "4882b891f0d2d298d200d8ff8ee74fbb3b48509813cb6fbc999e1a6628fb0326",
+      "abicheck/post_processing_reachability.py": "7dac33964797c4b0b40c123a6363e78162402c4e77ef81d38827dbab9d30e48e",
       "abicheck/storage/native_identity_aliases.py": "061e634659b371f1688cfcd4845fdcbe6147b9c2cfddaa4285dd34c757ca80ef",
       "abicheck/type_reachability.py": "89d8db3c507a58004fd6b38ad4fee5ea6c9b40a9da97f34d8067ae440aa9e9bb",
       "abicheck/type_reachability_spelling.py": "4262f30db17f2a4c5ba2a4341b8eed9f1408e335825644845e10cb08838995cb",
@@ -168,8 +169,8 @@
       "abicheck/workflows/compare/resolve.py": "dc0381227c9e8dacaa39858d3f534ff45cbb3177f9b8645a8728c3f25c460793",
       "abicheck/workflows/elf_dependency_resolver.py": "18524281e550a7f25225441cd063de58ec33281e7bacf65fef98d1fefb101426"
     },
-    "fingerprint": "7fb00aec886050155f8a39a502a8dd22e208bdc1b181bba7d01b0d2fcacb9523",
-    "generation": 1,
-    "reason": "Moved the debug-format refusal (old and new side, same wording, same order) from service_compare_evidence into workflows/operand_rules.py; resolve.py now imports it directly. Nothing derived from stored facts changes, so RESOLVER_GENERATION stays at 1."
+    "fingerprint": "22d1b29fc580f7fd0e389ea9d4ea7e17b55d54f905e5e30db05c198a13dbf8cd",
+    "generation": 2,
+    "reason": "Merge of main: #1683 relocated the use-case reachability code behind workflows/compare with no change to what the resolver derives; re-recording the fingerprint over the merged tree."
   }
 }

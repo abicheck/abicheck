@@ -109,9 +109,20 @@ from .frontends.cli.runtime import (
     _write_or_echo,
 )
 from .frontends.render import ONELINE_FORMAT, resolve_demangle_for_format
+from .impact.use_case_reachability import explain_use_case_impact
 from .model.sided_inputs import resolve_per_side_inputs
 from .report.report_modes import normalize_report_mode
 from .serialization import run_scoped_digest_cache
+from .workflows.compare.configuration import (
+    fold_compare_collect_inputs,
+    resolve_required_symbol_policy,
+    split_compile_context_frontend,
+)
+from .workflows.compare.use_case_attribution import (
+    UseCaseAttributionError,
+    attach_use_case_impact,
+    read_use_case_manifest,
+)
 from .workflows.compare_configuration import (
     _pair_wide_dialect_override,
     load_required_symbols,
@@ -155,21 +166,28 @@ def _normalize_compare_options(
     old_build_info: Path | None = None,
     new_build_info: Path | None = None,
 ) -> _NormalizedCompareOptions:
-    """Fold the compare option flags into their resolved, dispatch-ready values."""
+    """Fold the compare option flags into dispatch-ready values.
+
+    The semantic collect fold is ``fold_compare_collect_inputs``; the flag
+    spellings (debug format, demangle, report mode) resolve here.
+    """
     # Fold the --depth dial into the internal collect mode (ADR-037 D5), the
     # same way `dump` does; when omitted, infer it from --sources/--build-info
     # (or config source.method) rather than defaulting to "off" (P1 fix).
     with compare_settings_usage_errors():
-        collect_mode, _ = resolve_compare_collect_mode(
-            depth,
-            resolved_cfg.source_method,
-            old_sources,
-            new_sources,
-            old_build_info,
-            new_build_info,
+        collect_mode, headers, old_headers_only, new_headers_only = (
+            fold_compare_collect_inputs(
+                depth=depth,
+                source_method=resolved_cfg.source_method,
+                headers=headers,
+                old_headers_only=old_headers_only,
+                new_headers_only=new_headers_only,
+                old_sources=old_sources,
+                new_sources=new_sources,
+                old_build_info=old_build_info,
+                new_build_info=new_build_info,
+            )
         )
-    if depth == "binary":
-        headers, old_headers_only, new_headers_only = (), (), ()
 
     # An explicit "auto" returns to auto-detection (None); any other value is
     # passed through verbatim.
@@ -290,86 +308,28 @@ def _preflight_manifests_and_audit(
 ) -> tuple[DumpManifest | None, DumpManifest | None]:
     """Load the dump manifests and reject what a dry run must not report "ok".
 
-    Everything here runs *ahead* of the ``--dry-run`` emit deliberately: a
-    dry run reporting success for an invocation the real run rejects would be
-    worse than useless. Returns the two loaded manifest objects (``None`` for
-    a side given none).
-
-    ADR-049 D8 pack-vs-pack conflict detection is deliberately *not* part of
-    this — see ``validate_pack_manifests`` for which layers it needs that are
-    not resolved this early.
+    The loading and validation are in ``workflows.compare.manifests``; this
+    renders their typed refusals as the usage errors ``compare`` prints.
     """
-    old_manifest_obj: DumpManifest | None = None
-    new_manifest_obj: DumpManifest | None = None
-    if old_dump_manifest is not None or new_dump_manifest is not None:
-        from .errors import ManifestValidationError
-        from .workflows.extraction import load_manifest
-
-        try:
-            if old_dump_manifest is not None:
-                old_manifest_obj = load_manifest(old_dump_manifest)
-            if new_dump_manifest is not None:
-                new_manifest_obj = load_manifest(new_dump_manifest)
-        except ManifestValidationError as exc:
-            raise click.UsageError(str(exc)) from exc
-
-    # Manifest validity, ahead of the --dry-run emit for the same reason as
-    # the two guards above -- see the helper for what deliberately does *not*
-    # move here.
-    from .errors import PackManifestError as _PackManifestError
-    from .workflows.pack_resolution import validate_pack_manifests
+    from .errors import ManifestValidationError, PackManifestError
+    from .workflows.compare.manifests import (
+        load_compare_dump_manifests,
+        validate_compare_pack_manifests,
+    )
 
     try:
-        validate_pack_manifests(
+        manifests = load_compare_dump_manifests(old_dump_manifest, new_dump_manifest)
+    except ManifestValidationError as exc:
+        raise click.UsageError(str(exc)) from exc
+    try:
+        validate_compare_pack_manifests(
             pack_paths,
             policy_file_path=policy_file_path,
             contract_evaluation=contract_evaluation,
         )
-    except _PackManifestError as exc:
+    except PackManifestError as exc:
         raise click.UsageError(str(exc)) from exc
-    return old_manifest_obj, new_manifest_obj
-
-
-def _resolve_required_symbol_policy(
-    ctx: click.Context,
-    policy: str,
-    required_symbols: tuple[str, ...],
-    required_symbols_from_file: tuple[str, ...],
-    required_symbols_path: str | None,
-    required_symbols_sha: str | None,
-) -> tuple[str, str | None, Path | None, str | None]:
-    """Pick ``policy`` for a ``--required-symbol`` contract, and say what picked it.
-
-    Required-symbol contracts default to the plugin-oriented policy unless the
-    user explicitly picked one -- an explicit ``--policy`` always wins (ADR-043).
-    Recorded, not just applied: the ADR-049 receipt has to name whatever really
-    selected ``policy.base``, and this value was chosen by a typed
-    ``--required-symbol`` rather than by ``--policy`` or a built-in default
-    (Codex review, fresh evidence -- the receipt claimed ``strict_abi`` for a run
-    that used ``plugin_abi``).
-
-    Which spelling actually *contributed* decides what the receipt names -- not
-    merely which was passed. ADR-068 D5 / plan Phase 7h folded the old, separate
-    ``--required-symbols FILE`` flag into ``--required-symbol @FILE``, so both
-    forms now share one option name for the receipt -- but a file that parsed
-    to nothing still selected nothing (Codex review, two rounds, generalized):
-    the ``@FILE`` form wins the receipt's path/digest only when it actually
-    contributed a symbol.
-
-    Returns ``(policy, selected_by, selected_path, selected_sha)``.
-    """
-    if not required_symbols or (
-        ctx.get_parameter_source("policy") == click.core.ParameterSource.COMMANDLINE
-    ):
-        return policy, None, None, None
-    if required_symbols_from_file:
-        return (
-            "plugin_abi",
-            "--required-symbol",
-            Path(required_symbols_path) if required_symbols_path else None,
-            required_symbols_sha,
-        )
-    return "plugin_abi", "--required-symbol", None, None
+    return manifests
 
 
 @contextmanager
@@ -415,114 +375,68 @@ def _resolve_evaluation_config(
     policy_selected_path: Path | None,
     policy_selected_sha: str | None,
 ) -> tuple[Any, PolicyFile | None, Any]:
-    """``(evaluation_config, policy_file, resolved_cfg)`` via the typed API's
-    ``workflows.compare_configuration``; a gate pack's levels fold into
-    *resolved_cfg*. Built from the raw CLI values, not merged locals (a
-    pre-merged value would look CLI-stated)."""
-    from .compatibility_evaluation_frontend import FrontEnd
-    from .pack_application import apply_to_compare_config
+    """Adapt the CLI inputs to ``workflows.compare.configuration`` and render refusals.
+
+    The raw flag values (not merged locals, which would look CLI-stated) and
+    the Click-typed set are the CLI's; the fold itself is in the workflow.
+    """
     from .workflows import compare_input_adapters as _adapters
+    from .workflows.compare.configuration import resolve_evaluation_configuration
     from .workflows.compare_configuration import (
         ConfigurationConflictError,
         ProjectPolicyOverridesError,
-        resolve_compare_configuration,
     )
 
-    explicit, project = _adapters.cli_configuration_inputs(
-        {
-            "contract_mode": contract_mode,
-            "policy": policy,
-            "policy_file_path": policy_file_path,
-            "suppress": suppress,
-            "require_justification": require_justification,
-            "severity_preset": severity_preset,
-            "pack_paths": pack_paths,
-            # The roots each side was classified under (ADR-075 D7).
-            "headers": headers,
-        },
-        # The stated settings: only this module holds the Click context.
-        typed={n for n in _adapters.typed_parameter_names() if _param_from_cli(n)},
-        project_cfg=project_cfg,
-        project_path=cfg_path,
-        # The overlay applies only from an explicitly named --config.
-        project_overlays_applied=config_explicit,
-        policy_file=policy_file,  # already loaded: one read per digest
-        suppression=suppression,
-        suppress_path=suppress,
-        policy_option=policy_selected_by,
-        policy_path=policy_selected_path,
-        policy_sha256=policy_selected_sha,
-        project_sha256=cfg_sha,
-        symbols_list=symbols_list,
-    )
     try:
-        configuration = resolve_compare_configuration(
-            explicit,
-            front_end=FrontEnd.CLI,
-            project=project,
+        return resolve_evaluation_configuration(
+            {
+                "contract_mode": contract_mode,
+                "policy": policy,
+                "policy_file_path": policy_file_path,
+                "suppress": suppress,
+                "require_justification": require_justification,
+                "severity_preset": severity_preset,
+                "pack_paths": pack_paths,
+                # The roots each side was classified under (ADR-075 D7).
+                "headers": headers,
+            },
+            # The stated settings: only this module holds the Click context.
+            typed={n for n in _adapters.typed_parameter_names() if _param_from_cli(n)},
+            resolved_cfg=resolved_cfg,
+            project_cfg=project_cfg,
+            cfg_path=cfg_path,
+            cfg_sha=cfg_sha,
+            config_explicit=config_explicit,
+            policy=policy,
             policy_file=policy_file,
-            base_policy=policy,
+            suppression=suppression,
+            suppress=suppress,
+            symbols_list=symbols_list,
             contract_evaluation=contract_evaluation,
+            policy_selected_by=policy_selected_by,
+            policy_selected_path=policy_selected_path,
+            policy_selected_sha=policy_selected_sha,
         )
     except ConfigurationConflictError as exc:
         raise click.UsageError(str(exc)) from exc
     except ProjectPolicyOverridesError as exc:
         raise click.BadParameter(str(exc), param_hint="--policy") from exc
-    if (application := configuration.pack_application) is not None:
-        resolved_cfg = apply_to_compare_config(resolved_cfg, application)
-    return configuration.evaluation_config, configuration.policy_file, resolved_cfg
 
 
 def _attach_use_case_impact(
     result: Any, old: Any, new: Any, manifest: Path | None
 ) -> None:
-    """Attach ``compare --use-cases``'s attribution block to *result*.
+    """Attach ``compare --use-cases``'s block; a refusal is a usage error (exit 64).
 
-    A no-op without the flag. A malformed manifest, and a pair with no
-    source graph on either side to resolve entrypoints against, are usage
-    errors (exit 64) rather than a silently missing section -- the user
-    asked for an attribution the run cannot produce, and an absent block
-    would read as "no use case is affected".
+    The typed workflow owns the manifest load and the attribution (see
+    :func:`abicheck.workflows.compare.use_case_attribution.attach_use_case_impact`).
     """
-    if manifest is None:
-        return
-    from .errors import UseCaseManifestError
-    from .impact.use_case_impact import build_use_case_impact
-    from .impact.use_cases import load_use_case_manifest
-
     try:
-        definitions = load_use_case_manifest(manifest)
-    except (UseCaseManifestError, OSError) as exc:
-        # OSError alongside the manifest-specific error: Click's exists=True
-        # only proves the path was there at parse time, not at the read a
-        # moment later, and an unhandled OSError would exit 1 with a bare
-        # traceback instead of the documented usage-error path.
-        raise click.UsageError(str(exc)) from exc
-
-    # Scoped-only findings included, for the same reason
-    # `_attach_suppression_audit` below includes them: this runs *after*
-    # --used-by/--required-symbol scoping, which synthesizes fresh Change
-    # objects onto `scoped_only_changes` (e.g. PE_ORDINAL_RETARGETED) that
-    # `_fold_scoped_compat_into_text` then appends to the rendered report's
-    # own findings list. Attributing only `result.changes` left
-    # `total_changes` smaller than the list beside it, with the synthesized
-    # findings neither attributed to a use case nor counted as unattributed
-    # (Codex review).
-    impact = build_use_case_impact(
-        definitions,
-        old,
-        new,
-        list(result.changes) + list(getattr(result, "scoped_only_changes", ()) or ()),
-        manifest=str(manifest),
-    )
-    if impact is None:
-        raise click.UsageError(
-            f"--use-cases {manifest} needs a source graph to resolve "
-            "entrypoints against, and neither side carries one (dump with "
-            "--sources/--build-info, or ensure the always-on header-only "
-            "graph attached)."
+        attach_use_case_impact(
+            result, old, new, manifest, explain=explain_use_case_impact
         )
-    result.use_case_impact = impact
+    except UseCaseAttributionError as exc:
+        raise click.UsageError(str(exc)) from exc
 
 
 def _report_compare_result(
@@ -912,13 +826,16 @@ def run_compare(
             "an explicit required-symbol contract, not both."
         )
     policy, policy_selected_by, policy_selected_path, policy_selected_sha = (
-        _resolve_required_symbol_policy(
-            ctx,
+        resolve_required_symbol_policy(
             policy,
-            required_symbols,
-            required_symbols_from_file,
-            required_symbols_path,
-            required_symbols_sha,
+            required_symbols=required_symbols,
+            policy_from_commandline=(
+                ctx.get_parameter_source("policy")
+                == click.core.ParameterSource.COMMANDLINE
+            ),
+            required_symbols_from_file=required_symbols_from_file,
+            required_symbols_path=required_symbols_path,
+            required_symbols_sha=required_symbols_sha,
         )
     )
     # ADR-037 D4: load the project config and merge CLI flags over it
@@ -1095,12 +1012,9 @@ def run_compare(
     # would make the dry run's answer depend on which operand shape it was
     # given. Manifest validity has no such asymmetry.
     if use_cases_manifest is not None:
-        from .errors import UseCaseManifestError
-        from .impact.use_cases import load_use_case_manifest
-
         try:
-            load_use_case_manifest(use_cases_manifest)
-        except (UseCaseManifestError, OSError) as exc:
+            read_use_case_manifest(use_cases_manifest)
+        except UseCaseAttributionError as exc:
             raise click.UsageError(str(exc)) from exc
 
     # Parsed after the directory/package rejection above (not before, like an
@@ -1382,8 +1296,9 @@ def run_compare(
     # frontend on the threaded context so run_dump's `compile.frontend` does NOT
     # outrank that per-side header_backend (it only carries the --gcc-*/--sysroot/
     # --nostdinc knobs for both sides).
-    header_backend = compile_context.frontend
-    side_compile_context = dataclasses.replace(compile_context, frontend="auto")
+    header_backend, side_compile_context = split_compile_context_frontend(
+        compile_context
+    )
 
     old_h, new_h, old_inc, new_inc = resolve_per_side_inputs(
         headers,

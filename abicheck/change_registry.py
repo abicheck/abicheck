@@ -43,6 +43,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from .model.change_catalog.build import BUILD_ENTRIES
+from .model.change_catalog.disposition import DISPOSITION_ENTRIES
 from .model.change_catalog.kinds import ChangeKind
 from .model.change_catalog.platform import PLATFORM_ENTRIES
 from .model.change_catalog.registry import (  # noqa: F401
@@ -66,6 +67,7 @@ REGISTRY = ChangeKindRegistry(
         *PLATFORM_ENTRIES,
         *BUILD_ENTRIES,
         *SOURCE_ENTRIES,
+        *DISPOSITION_ENTRIES,
     ]
 )
 

@@ -25,15 +25,13 @@ from ..._compiler_options import clang_ast_dump_tail
 from ...extract.compiler_driver import is_intel_sycl_driver, needs_sycl_host_only
 from ..abi_flags import drop_code_loading_options
 from ..build_evidence import CompileUnit
-from ._argv import (
-    effective_directory,
-    is_msvc_mode,
-    pick_compiler_binary,
-    replay_extra_flags,
-    unredact_home,
-)
-from ._argv_shortopts import rebase_structured_path as _rebase_structured_path
+from ._argv import effective_directory, unredact_home
 from .base import SourceExtractionError
+from .compile_invocation import (
+    CompilerInvocation,
+    parse_compile_invocation,
+    replayed_tokens,
+)
 
 #: clang extractor schema/behaviour version, recorded in the dump provenance and
 #: folded into the per-TU cache key (ADR-030 D8). Bump on ANY recipe change so a
@@ -56,7 +54,7 @@ from .base import SourceExtractionError
 #: explicit pin either way) is left carried through as-is, matching the L2
 #: header-AST backend's own established "accepted approximation" for that
 #: shape (see ``needs_sycl_host_only``'s own docstring). 0.12:
-#: ``_argv._carry_abi_relevant_flags`` (shared by castxml/clang) no longer
+#: ``compile_invocation._carry_abi_relevant_flags`` (shared by castxml/clang) no longer
 #: dedups a repeated flag WITHIN ``abi_relevant_flags`` itself -- a real,
 #: layered build config can legitimately record the same toggle-style flag
 #: more than once (e.g. ``-fno-sycl -fsycl -fno-sycl``), and the old dedup
@@ -82,133 +80,61 @@ def _std_flag(standard: str, msvc: bool) -> list[str]:
 
 
 def _clang_context_args(
-    compile_unit: CompileUnit, compiler_binary: str | None, *, clang_bin: str = "clang"
+    invocation: CompilerInvocation, *, clang_bin: str
 ) -> tuple[list[str], bool]:
     """The shared compile-context argv prefix (no mode tail / source) and msvc flag.
 
-    Mirrors the compile unit's language standard, defines/undefines, include and
-    system-include paths, sysroot, target triple, and ABI-relevant flags, so both
-    the AST pass and the macro pass parse the same TU the real build compiled.
+    Renders the parsed *invocation* (see :mod:`.compile_invocation`): the
+    language standard, defines/undefines, include and system-include paths,
+    sysroot, target triple, and the replayed ABI-relevant flags, so both the AST
+    pass and the macro pass parse the same TU the real build compiled. A
+    clang-cl/MSVC invocation is driven through clang's ``cl`` driver mode.
 
-    A real build's own recorded ``-fsycl`` (carried through via
-    ``replay_extra_flags``'s ``ABI_RELEVANT_FLAG_PREFIXES``) makes Intel's
-    oneAPI DPC++/C++ driver (icx/icpx/dpcpp[-cl]) run *two* separate ``-cc1``
-    passes for one compile — a SYCL device-side pass and a host-side pass,
-    each writing a complete document to the same stdout stream back-to-back
-    with no separator, which breaks both the AST pass's single-document JSON
-    reader and the macro pass's single-stream text reader. Mirrors the fix
-    already shipped for the L2 header-AST backend
-    (``dumper_ast_config._build_clang_header_command`` /
-    ``abicheck.extract.compiler_driver.needs_sycl_host_only``): append ``-fsycl-host-only`` here
-    too, collapsing the compile back to the single host-side pass that
-    actually links into the scanned binary — the device pass describes
-    SPIR-V kernel code that never becomes part of the host ``.so``'s
-    exported symbols, so L4 replay has no use for it either way. A no-op for
-    any non-Intel driver, or when the caller's own flags already pin a
-    single pass (``-fsycl-host-only``/``-fsycl-device-only``) or explicitly
-    disable SYCL (``-fno-sycl`` last-flag-wins) — see
+    A real build's own recorded ``-fsycl`` (carried through as a replayed
+    token) makes Intel's oneAPI DPC++/C++ driver (icx/icpx/dpcpp[-cl]) run *two*
+    separate ``-cc1`` passes for one compile -- a SYCL device-side pass and a
+    host-side pass, each writing a complete document to the same stdout stream,
+    which breaks both the AST pass's single-document JSON reader and the macro
+    pass's single-stream text reader. Append ``-fsycl-host-only`` to collapse
+    the compile back to the single host-side pass that links into the scanned
+    binary. A no-op for any non-Intel driver, or when the caller's own flags
+    already pin a single pass or explicitly disable SYCL; see
     ``needs_sycl_host_only``'s own docstring for the full precedence.
 
-    The host-only decision is gated on *clang_bin* — the binary this command
-    will actually be run with — not on ``pick_compiler_binary``'s *emulated*
-    compiler below (``cc_bin``, used only for flag-shape decisions like
-    ``msvc``/language-standard translation). Without ``--compiler``/an
-    explicit ``compiler_binary`` override, ``cc_bin`` falls back to the real
-    build's own recorded ``argv[0]`` (e.g. ``icpx``) purely to emulate its
-    accepted flag shape, while *clang_bin* stays the generic default
-    (``"clang"``) that is genuinely invoked. Gating on ``cc_bin`` instead
-    would append ``-fsycl-host-only`` to a stock clang invocation whenever a
-    SYCL TU's real build happened to use an Intel driver — stock clang
-    hard-rejects the flag ("unknown argument"), turning every such TU into a
-    failed/partial L4 extraction instead of the single ordinary pass stock
-    clang already parses a bare ``-fsycl`` as (Codex review).
+    The host-only decision is gated on *clang_bin* -- the binary this command
+    will actually be run with -- not on the invocation's emulated compiler.
+    Gating on the emulated one would append ``-fsycl-host-only`` to a stock
+    clang invocation whenever a SYCL TU's real build used an Intel driver, and
+    stock clang hard-rejects that flag.
     """
-    cc_bin = pick_compiler_binary(compile_unit, compiler_binary)
-    msvc = is_msvc_mode(cc_bin)
-    cc_id = "msvc" if msvc else "gnu"
-
+    msvc = invocation.msvc
     cmd: list[str] = []
     if msvc:
         cmd.append("--driver-mode=cl")
     # Force the language so a header replayed directly still parses as C/C++.
-    lang = "c++" if compile_unit.language.lower() in ("cxx", "c++", "cpp") else "c"
     if not msvc:
-        cmd += ["-x", lang]
-    cmd += _std_flag(compile_unit.standard, msvc)
+        cmd += ["-x", invocation.language]
+    cmd += _std_flag(invocation.standard, msvc)
     define_opt = "/D" if msvc else "-D"
     undef_opt = "/U" if msvc else "-U"
-    for key, value in compile_unit.defines.items():
+    for key, value in invocation.defines:
         cmd.append(f"{define_opt}{key}={value}" if value else f"{define_opt}{key}")
-    for undef in compile_unit.undefines:
+    for undef in invocation.undefines:
         cmd.append(f"{undef_opt}{undef}")
     inc_opt = "/I" if msvc else "-I"
-    # Round 29 follow-up (Codex review, "Apply env chdir before resolving
-    # structured include paths", fresh evidence): `CompileUnit.include_paths`/
-    # `system_include_paths` are already STRUCTURED, absolute paths, resolved
-    # by the producing adapter against the compile unit's own recorded
-    # `directory` -- before any leading `env -C DIR` prefix in `argv` is
-    # considered. `extract()`'s own `run_directory` (the effective directory
-    # the real compiler process ran from) already accounts for that -- but
-    # only for the REPLAY subprocess's own cwd, and `replay_extra_flags()`'s
-    # raw, unresolved flag values, not for these two already-absolute
-    # structured fields. So `env -C build clang -Iinclude ...` recorded in
-    # `directory=/work` resolves `include_paths` to `/work/include` at
-    # adapter-construction time, and this function -- without the rebase
-    # below -- would still emit `-I /work/include`, even though the real
-    # compiler searched `/work/build/include`. Rebase each structured path
-    # from its old base (`compile_unit.directory`) onto the real effective
-    # one, via a literal string-prefix substitution (not a lexical
-    # posixpath/ntpath join+normalize like `join_path_token` elsewhere in
-    # this PR series) -- each path here was itself already constructed by
-    # simply joining the SAME `compile_unit.directory` string onto a
-    # relative operand, so undoing that exact prefix and re-joining the
-    # effective directory in its place reproduces precisely what the
-    # adapter would have produced had it known the effective directory to
-    # begin with, without needing to guess the join grammar a second time.
-    # A path outside `compile_unit.directory` entirely (e.g. an absolute
-    # `-Isysroot/include` operand the real build recorded verbatim) has no
-    # matching prefix and is therefore left unchanged, exactly as it must
-    # be -- it was never relative to the pre-chdir directory in the first
-    # place.
-    run_directory = effective_directory(compile_unit.argv, compile_unit.directory)
-    # Round 31 Finding 1 (Codex review, fresh evidence): provenance is
-    # tracked per LIST POSITION, not by value -- two occurrences that
-    # normalize to the identical final string (one relative-then-joined,
-    # one genuinely explicit) must not collapse onto one shared answer.
-    # `explicit_or_unknown()` also degrades a legacy/absent-field pack to
-    # "do not rebase" rather than "derived" (round 31 Finding 3).
-    include_explicit = compile_unit.explicit_or_unknown(system=False)
-    system_include_explicit = compile_unit.explicit_or_unknown(system=True)
-    for inc, is_explicit in zip(compile_unit.include_paths, include_explicit):
-        cmd += [
-            inc_opt,
-            _rebase_structured_path(
-                inc,
-                compile_unit.directory,
-                run_directory,
-                explicit_absolute=is_explicit,
-            ),
-        ]
-    for inc, is_explicit in zip(
-        compile_unit.system_include_paths, system_include_explicit
-    ):
-        rebased = _rebase_structured_path(
-            inc,
-            compile_unit.directory,
-            run_directory,
-            explicit_absolute=is_explicit,
-        )
-        cmd += ["/I", rebased] if msvc else ["-isystem", rebased]
-    if compile_unit.sysroot and not msvc:
-        cmd.append(f"--sysroot={compile_unit.sysroot}")
-    if compile_unit.target_triple and not msvc:
-        cmd.append(f"--target={compile_unit.target_triple}")
-    extra = replay_extra_flags(compile_unit, cmd, cc_id)
-    if compile_unit.standard:
+    for inc in invocation.include_dirs:
+        cmd += [inc_opt, inc]
+    for inc in invocation.system_include_dirs:
+        cmd += ["/I", inc] if msvc else ["-isystem", inc]
+    if invocation.sysroot and not msvc:
+        cmd.append(f"--sysroot={invocation.sysroot}")
+    if invocation.target_triple and not msvc:
+        cmd.append(f"--target={invocation.target_triple}")
+    extra = replayed_tokens(invocation, cmd)
+    if invocation.standard:
         # ``standard`` is normalized from the *effective* (last) dialect flag.
-        # Do not replay an earlier conflicting -std=/std: token from
-        # abi_relevant_flags after it, or clang would silently parse the TU at
-        # the wrong language level (e.g. CMake's gnu++17 then c++20 pair).
+        # Do not replay an earlier conflicting -std=/std: token after it, or
+        # clang would silently parse the TU at the wrong language level.
         extra = [
             flag
             for flag in extra
@@ -216,30 +142,14 @@ def _clang_context_args(
             and not flag.lower().startswith(("/std:", "-std:"))
         ]
     if not is_intel_sycl_driver(clang_bin):
-        # A real build's own recorded -fsycl-host-only/-fsycl-device-only
-        # (carried through above via replay_extra_flags's abi_relevant_flags/
-        # argv scan) each pin a SPECIFIC SYCL compilation pass -- and stock
-        # clang cannot honor either: it hard-rejects both as "unknown
-        # argument", AND (confirmed empirically against a real clang 18
-        # install) its own bare -fsycl with NEITHER selector compiles as
-        # DEVICE context by default (defines __SYCL_DEVICE_ONLY__), not
-        # host. So dropping -fsycl-device-only and falling through to a
-        # bare -fsycl "coincidentally" matches its recorded pass -- but
-        # dropping -fsycl-host-only does NOT: it silently flips an
-        # explicitly HOST-pinned TU into a device-context compile (Codex
-        # review; an earlier revision of this fix got exactly this
-        # asymmetry wrong, treating the two selectors as interchangeable).
-        # Both therefore degrade this one TU explicitly (a clear message,
-        # not the raw "unknown argument") rather than ever stamping source
-        # facts for a DIFFERENT compilation context than the one actually
-        # recorded. A bare, unselected -fsycl (no explicit pin either way)
-        # is deliberately left alone -- carried through as-is, matching the
-        # L2 header-AST backend's own established accepted approximation
-        # for that ambiguous shape (see this function's own docstring).
+        # Stock clang hard-rejects a recorded -fsycl-host-only/-fsycl-device-only
+        # ("unknown argument"), and its bare -fsycl compiles as DEVICE context by
+        # default. Dropping -fsycl-host-only would silently flip a host-pinned TU
+        # into device code, so both selectors degrade this one TU explicitly.
         pinned = {"-fsycl-host-only", "-fsycl-device-only"} & set(extra)
         if pinned:
             raise SourceExtractionError(
-                f"compile unit {compile_unit.source!r} was recorded with "
+                f"compile unit {invocation.source!r} was recorded with "
                 f"{sorted(pinned)!r} (an Intel-only SYCL pass-selector "
                 "flag), but the binary this command will actually run "
                 f"with ({clang_bin!r}) is not an Intel oneAPI DPC++/C++ "
@@ -321,7 +231,8 @@ def build_clang_command(
     builder share; ``test_shared_argv_never_admits_a_code_loading_option`` in
     ``tests/test_tu_ast_shared_run.py`` pins both.
     """
-    cmd, _msvc = _clang_context_args(compile_unit, compiler_binary, clang_bin=clang_bin)
+    invocation = parse_compile_invocation(compile_unit, compiler_binary)
+    cmd, _msvc = _clang_context_args(invocation, clang_bin=clang_bin)
     return [clang_bin, *cmd, *clang_ast_dump_tail(str(source))]
 
 
@@ -339,7 +250,8 @@ def build_clang_macro_command(
     ``public_macro_value_changed`` to ever fire (Codex review #339, P2). Same
     compile context as the AST pass so the macro set matches the real build.
     """
-    cmd, msvc = _clang_context_args(compile_unit, compiler_binary, clang_bin=clang_bin)
+    invocation = parse_compile_invocation(compile_unit, compiler_binary)
+    cmd, msvc = _clang_context_args(invocation, clang_bin=clang_bin)
     # cl-driver mode ignores -dD; clang-cl's `/d1PP` is the documented "retain
     # macro definitions in /E mode" flag, so a Windows/clang-cl build still emits
     # #define directives for macros_from_preprocessor (Codex review #339, P2). We

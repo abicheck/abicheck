@@ -485,7 +485,7 @@ from .release_schema import RELEASE_SCHEMA_VERSION
 #:       root-target keys (same "renumber, don't reuse" convention as the
 #:       2.32/2.36 entries above).
 #: 2.39 — new top-level ``use_case_impact`` object, present only under
-#:       ``compare --use-cases MANIFEST`` (``impact/use_case_impact.py``):
+#:       ``compare --use-cases MANIFEST`` (``policy/use_case_attribution.py``):
 #:       the manifest's declared use cases, each one's resolved and
 #:       unresolved entrypoints, and this comparison's own findings
 #:       attributed to the use cases whose entrypoints can be *shown* to
@@ -1102,7 +1102,7 @@ from .release_schema import RELEASE_SCHEMA_VERSION
 #:       ``allow``) are new. ``suppression_audit.stale_rules`` is now a
 #:       projection of the same inventory and lists rule ids. Exit codes do
 #:       not move unless a policy opts into ``unused_rules: block``.
-REPORT_SCHEMA_VERSION = "6.3"
+REPORT_SCHEMA_VERSION = "6.4"  # 6.4 -- additive disposition_audit.accepted_breaks (ADR-067 D5 breaks: accept).
 
 from .artifact_versions import current_artifact_version  # noqa: E402
 

@@ -14,7 +14,7 @@
 
 """Contract tests for :mod:`abicheck.model.yaml_strict`, the one strict
 manifest loader ``dump_manifest``/``compatibility_evaluation_packs``/
-``impact.use_cases``/``bundle_facts_library_overrides`` share.
+``policy.use_cases``/``bundle_facts_library_overrides`` share.
 
 Written as *invariants over generated documents* rather than a handful of
 fixed strings, per AGENTS.md's "Primitive-level property tests" rule: this

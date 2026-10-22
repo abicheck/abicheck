@@ -395,6 +395,7 @@ _EQUIVALENT_CHANGE_CATEGORIES = {
 _TYPE_BEARING_DISCRIMINATOR_KINDS = frozenset(
     {
         "func_return_changed",
+        "public_api_internal_type_renamed",
         "var_type_changed",
         "type_field_type_changed",
         "struct_field_type_changed",

@@ -52,7 +52,7 @@ class _DuplicateKeyCheckingLoader(yaml.SafeLoader):
     plausibly from a copy-paste) would otherwise reclassify the case with no
     signal at all -- exactly the silent-misclassification failure mode this
     whole module exists to close. Mirrors
-    `abicheck/impact/use_cases.py`'s identical `_DuplicateKeyCheckingLoader`
+    `abicheck/policy/use_cases.py`'s identical `_DuplicateKeyCheckingLoader`
     (same name, same technique) -- scoped to this loader class alone, not a
     process-wide `yaml` monkeypatch, so it affects nothing outside this
     module.

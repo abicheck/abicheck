@@ -13,13 +13,19 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Attribute a real comparison's findings to a use-case manifest.
 
-``compare --use-cases MANIFEST``'s engine. The attribution itself is
-:func:`~abicheck.impact.use_cases.explain_use_case_impact`; what lives here
+"""Attribute a real comparison's findings to a use-case manifest (policy).
+
+The computation behind ``compare --use-cases MANIFEST``: which declared use
+cases reach which of this comparison's findings. :func:`build_use_case_impact`
+is the decision; the typed workflow that loads the manifest and attaches its
+result lives in :mod:`abicheck.workflows.compare.use_case_attribution`, and the
+JSON, text and Markdown projections in :mod:`abicheck.report.use_case_impact_render`.
+
+The attribution itself is
+:func:`~abicheck.policy.use_cases.explain_use_case_impact`; what lives here
 is the two-sided part around it -- resolving each side's own source graph,
-unioning the two attributions, and shaping the result into the report block
-``reporter``/``cli_compare_render`` emit.
+unioning the two attributions, and shaping the result a report reads.
 
 Two-sided by construction, which is why this is a comparison-time concern
 and not a manifest-validation one: a symbol *added* on the NEW side never
@@ -45,11 +51,16 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Callable, Iterable, Mapping, Sequence
 
     from ..model import AbiSnapshot
     from ..model.change import Change
     from .use_cases import UseCaseDefinition, UseCaseResolution
+
+    #: ``impact.use_case_reachability.explain_use_case_impact``'s shape (the port).
+    ExplainUseCases = Callable[
+        [list[UseCaseDefinition], Any, set[str]], Mapping[str, Iterable[str]]
+    ]
 
 
 @dataclass(frozen=True)
@@ -70,13 +81,6 @@ class UseCaseChange:
     symbol: str
     kind: str
     finding_id: str = ""
-
-    def to_dict(self) -> dict[str, str]:
-        return {
-            "symbol": self.symbol,
-            "kind": self.kind,
-            "finding_id": self.finding_id,
-        }
 
 
 @dataclass(frozen=True)
@@ -152,27 +156,6 @@ class UseCaseImpact:
             for entry in entries:
                 inverse.setdefault(entry.finding_id, set()).add(name)
         return {fid: tuple(sorted(names)) for fid, names in inverse.items()}
-
-    def to_dict(self) -> dict[str, Any]:
-        return {
-            "manifest": self.manifest,
-            "use_case_count": self.use_case_count,
-            "total_changes": self.total_changes,
-            "unattributed_changes": self.unattributed_changes,
-            "use_cases": [
-                {
-                    "use_case": r.use_case,
-                    "resolved_entrypoints": list(r.resolved_entrypoints),
-                    "unresolved_entrypoints": list(r.unresolved_entrypoints),
-                    "tests": list(r.tests),
-                }
-                for r in self.resolutions
-            ],
-            "by_use_case": {
-                name: [c.to_dict() for c in changes]
-                for name, changes in self.by_use_case.items()
-            },
-        }
 
 
 def _source_graph(snapshot: AbiSnapshot | None) -> Any:
@@ -275,6 +258,7 @@ def build_use_case_impact(
     changes: Sequence[Change],
     *,
     manifest: str,
+    explain: ExplainUseCases,
 ) -> UseCaseImpact | None:
     """Attribute *changes* to *definitions*, or ``None`` with no source graph.
 
@@ -285,7 +269,7 @@ def build_use_case_impact(
     as fits its surface.
     """
     from ..compare.finding_identity import report_finding_id
-    from .use_cases import explain_use_case_impact, resolve_use_case_entrypoints
+    from .use_cases import resolve_use_case_entrypoints
 
     old_graph = _source_graph(old_snapshot)
     new_graph = _source_graph(new_snapshot)
@@ -293,7 +277,7 @@ def build_use_case_impact(
         return None
 
     # Per use case, not per manifest entry -- see `_coalesce_definitions`.
-    # `explain_use_case_impact` below is given the coalesced list too, so the
+    # `explain` below is given the coalesced list too, so the
     # attribution and the resolutions describe the same set.
     definitions = _coalesce_definitions(definitions)
 
@@ -312,14 +296,10 @@ def build_use_case_impact(
     )
     symbols = {c.symbol for c in changes if c.symbol}
     mapping_old = (
-        explain_use_case_impact(list(definitions), old_graph, symbols)
-        if old_graph is not None
-        else {}
+        explain(list(definitions), old_graph, symbols) if old_graph is not None else {}
     )
     mapping_new = (
-        explain_use_case_impact(list(definitions), new_graph, symbols)
-        if new_graph is not None
-        else {}
+        explain(list(definitions), new_graph, symbols) if new_graph is not None else {}
     )
     named: dict[str, tuple[str, ...]] = {}
     for symbol in symbols:
@@ -350,87 +330,3 @@ def build_use_case_impact(
         resolutions=resolutions,
         by_use_case={k: tuple(v) for k, v in by_use_case.items()},
     )
-
-
-def render_use_case_impact_lines(impact: UseCaseImpact) -> list[str]:
-    """The human-facing section for a text/markdown report."""
-    lines = ["", f"Use-case impact ({impact.manifest}):"]
-    for resolution in impact.resolutions:
-        changes = impact.by_use_case.get(resolution.use_case, ())
-        lines.append(f"  {resolution.use_case}: {len(changes)} change(s)")
-        for change in changes:
-            lines.append(f"    - {change.symbol} ({change.kind})")
-        if resolution.unresolved_entrypoints:
-            lines.append(
-                "    unresolved entrypoints: "
-                + ", ".join(resolution.unresolved_entrypoints)
-            )
-    lines.append(
-        f"  {impact.unattributed_changes} of {impact.total_changes} change(s) "
-        "reached by no declared entrypoint (absence of proof, not proof of "
-        "absence)."
-    )
-    return lines
-
-
-def add_use_case_impact(
-    d: dict[str, Any], result: Any, displayed: Sequence[Change] | None = None
-) -> None:
-    """Emit ``compare --use-cases``'s block into a JSON report dict.
-
-    Lives here rather than in ``reporter.py`` for the ordinary reason that
-    module's helpers keep moving out: it is at the 2000-line hard cap.
-
-    Omitted entirely without the flag rather than emitted empty: an empty
-    block would read as "no use case is affected" for a run that never
-    resolved a manifest.
-
-    *displayed*, when given, is the change list this report actually shows
-    (``--show-only`` already applied); the block is projected onto it so it
-    cannot name a finding the reader cannot see. ``None`` means "everything
-    is displayed" and emits the block unchanged -- distinct from an empty
-    list, which really is a report showing nothing.
-    """
-    impact = getattr(result, "use_case_impact", None)
-    if isinstance(impact, UseCaseImpact):
-        if displayed is not None:
-            impact = impact.restricted_to(displayed)
-        d["use_case_impact"] = impact.to_dict()
-        annotate_affected_use_cases(d.get("changes"), impact)
-
-
-def annotate_affected_use_cases(entries: object, impact: UseCaseImpact) -> None:
-    """Stamp ``affected_use_cases`` on each already-built change entry.
-
-    Joined on the entry's own ``finding_id`` -- the key ``by_use_case``
-    rows already carry -- so the per-finding field is the report-level
-    block read the other way round, never a second attribution. An entry no
-    use case reaches reads ``[]`` ("attribution ran, reached by none"); the
-    key is absent only when ``--use-cases`` was not given at all, which is
-    what keeps every pre-existing report byte-identical. Root-cause mode's
-    ``findings`` lists hold the same dict objects as ``changes``, so they
-    pick the field up without a second pass.
-    """
-    if not isinstance(entries, list):
-        return
-    inverse = impact.use_cases_by_finding()
-    for entry in entries:
-        if isinstance(entry, dict) and "finding_id" in entry:
-            entry["affected_use_cases"] = list(
-                inverse.get(str(entry["finding_id"]), ())
-            )
-
-
-def use_cases_by_finding_for(result: Any) -> dict[str, tuple[str, ...]] | None:
-    """*result*'s per-finding attribution, or ``None`` when none ran.
-
-    The renderer-side reader (Markdown rows, review digest): the same
-    inverse of ``by_use_case`` the JSON ``affected_use_cases`` field is
-    built from. Not projected through ``--show-only`` because it does not
-    need to be: projection only drops findings, and a displayed finding's
-    own attribution is identical before and after it.
-    """
-    impact = getattr(result, "use_case_impact", None)
-    if not isinstance(impact, UseCaseImpact):
-        return None
-    return impact.use_cases_by_finding()

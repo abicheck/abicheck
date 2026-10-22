@@ -289,6 +289,11 @@ KIND_NAMES_1: tuple[tuple[str, str, str | None], ...] = (
         "suppression_reachability_unknown",
         "a suppression rule using reachability: proven-unreachable-only matched but was withheld because graph coverage could not prove the change unreachable (impact-analysis-layer P0); advisory",
     ),
+    (
+        "GRAPH_COVERAGE_INSUFFICIENT_FOR_SUPPRESSION",
+        "graph_coverage_insufficient_for_suppression",
+        "a suppression rule using the default unreachable-only gate suppressed changes whose reachability graph coverage never established (unknown, not proven unreachable); informational audit record",
+    ),
     ("STRUCT_SIZE_CHANGED", "struct_size_changed", "sizeof(T) changed"),
     ("STRUCT_FIELD_OFFSET_CHANGED", "struct_field_offset_changed", "field moved"),
     ("STRUCT_FIELD_REMOVED", "struct_field_removed", "field deleted"),
@@ -552,5 +557,10 @@ KIND_NAMES_1: tuple[tuple[str, str, str | None], ...] = (
         "VAR_REMOVED_ELF_ONLY",
         "var_removed_elf_only",
         "exported ELF-only data symbol removed -> binary break",
+    ),
+    (
+        "PUBLIC_API_INTERNAL_TYPE_RENAMED",
+        "public_api_internal_type_renamed",
+        "G31 Phase D: a public entry's internal dependency target was renamed; ADR-048 reconciliation resolved old and new as the same declaration, so one finding replaces the add+remove pair -> COMPATIBLE_WITH_RISK (internal target, not ABI)",
     ),
 )

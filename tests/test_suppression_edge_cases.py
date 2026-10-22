@@ -565,7 +565,7 @@ class TestNamespaceGlobstarSemantics:
         # span by its own last declared segment before attempting the full
         # regex match, turning "try every span with a regex" into "skip
         # every span whose last name segment doesn't literally equal 'z'".
-        import time
+        import sys
 
         s = Suppression(
             namespace="**::a*::**::a*::**::a*::z",
@@ -573,26 +573,67 @@ class TestNamespaceGlobstarSemantics:
             reason="x",
         )
 
-        # Asserted as a growth rate, not a wall-clock budget: the cubic
-        # regression grows ~8x per doubling of the name, the fixed matcher
-        # ~4x (measured). A fixed 3s budget also failed under instrumented
-        # runs (mutmut's traced baseline slowed this ~66x) with no change
-        # in complexity, while a ratio is the same on any machine. The best
-        # of a few runs per size keeps scheduler noise out of the ratio.
-        def best_time(segments: int) -> float:
-            name = "::".join(["a"] * segments + ["y"])
-            times = []
-            for _ in range(3):
-                t0 = time.perf_counter()
-                assert s.matches(self._change(name)) is False
-                times.append(time.perf_counter() - t0)
-            return min(times)
+        # Deterministic, not wall-clock: the matcher's work is counted, so
+        # the verdict is the same on every machine and under any load. Two
+        # counts are taken over one call at each size, with no change to
+        # production code:
+        #   - bytecode line events inside `_match_run`, the candidate-span
+        #     loop. The fixed matcher does quadratic Python work here
+        #     (about 3.9x per doubling); a super-quadratic regression grows
+        #     faster.
+        #   - calls to `fullmatch`, the regex work per candidate span. The
+        #     fixed matcher makes about one call per start position (about
+        #     2x per doubling). The pre-optimization exhaustive search made
+        #     one per (start, end) pair (about 4x), the regression this
+        #     guards.
+        # Each bound sits between the measured fixed-matcher growth and the
+        # growth it must catch. Only the matcher's own work is counted: the
+        # hooks see `_match_run` frames and `fullmatch` calls, nothing else.
+        from abicheck.policy import selectors_namespace_glob
 
-        small, large = best_time(600), best_time(1200)
-        assert large / small < 6.0, (
-            f"doubling the name grew the match time {large / small:.1f}x "
-            f"({small:.3f}s -> {large:.3f}s) — super-quadratic, not "
-            "backtracking-safe"
+        match_run_code = selectors_namespace_glob._match_run.__code__
+
+        def matcher_work(segments: int) -> tuple[int, int]:
+            change = self._change("::".join(["a"] * segments + ["y"]))
+            lines = calls = 0
+
+            def line_hook(frame, event, arg):
+                nonlocal lines
+                if event == "line":
+                    lines += 1
+                return line_hook
+
+            def call_hook(frame, event, arg):
+                nonlocal calls
+                if event == "c_call" and getattr(arg, "__name__", "") == "fullmatch":
+                    calls += 1
+
+            def trace(frame, event, arg):
+                return line_hook if frame.f_code is match_run_code else None
+
+            # Restore whatever hooks were installed before (coverage tracing
+            # in CI), not None, so this measurement does not switch them off.
+            saved_trace, saved_profile = sys.gettrace(), sys.getprofile()
+            sys.settrace(trace)
+            sys.setprofile(call_hook)
+            try:
+                assert s.matches(change) is False
+            finally:
+                sys.settrace(saved_trace)
+                sys.setprofile(saved_profile)
+            return lines, calls
+
+        small_lines, small_calls = matcher_work(400)
+        large_lines, large_calls = matcher_work(800)
+        assert large_lines / small_lines < 5.0, (
+            f"doubling the name grew the matcher's loop work "
+            f"{large_lines / small_lines:.2f}x ({small_lines} -> {large_lines} "
+            "line events) — super-quadratic, not backtracking-safe"
+        )
+        assert large_calls / small_calls < 3.0, (
+            f"doubling the name grew the regex calls "
+            f"{large_calls / small_calls:.2f}x ({small_calls} -> {large_calls}) "
+            "— one regex per (start, end) pair, not one per start"
         )
 
         # Correctness: a genuinely matching long name still matches, and

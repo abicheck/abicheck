@@ -120,7 +120,7 @@ no report field — it fills in fields the schema already had.
 use cases, or a coverage summary. The consumer *graph* exists (above), but as
 evidence a finding is enriched from — not as its own
 `affected_consumers`/`affected_use_cases` fields. Declared use cases
-(an optional `impact-use-cases.yaml` manifest, `abicheck.impact.use_cases`)
+(an optional `impact-use-cases.yaml` manifest, `abicheck.policy.use_cases`)
 are reported by `compare --use-cases` as their own `use_case_impact`
 section rather than as a per-finding field — see
 [Use-Case Impact](../contribute/use-case-impact.md).

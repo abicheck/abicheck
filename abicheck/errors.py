@@ -422,7 +422,7 @@ class PlanningError(AbicheckError, ValueError):
 
 
 class UseCaseManifestError(AbicheckError, ValueError):
-    """Raised by :func:`abicheck.impact.use_cases.load_use_case_manifest` for
+    """Raised by :func:`abicheck.policy.use_cases.load_use_case_manifest` for
     a structurally malformed ``impact-use-cases.yaml`` document (G29 Phase 4
     slice 2, ADR-057 amendment): not a YAML list at the top level, an entry
     that isn't a mapping, or an entry with a missing/blank ``use_case`` name.

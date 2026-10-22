@@ -64,6 +64,7 @@ from .report.finding import (
     impact_text_for,
     kind_sets_for_result,
 )
+from .report.policy_facts import category, compatibility_metrics, kind_str, severity
 from .report.redundancy_reasons import redundancy_reason_text
 from .report.render_html import (
     ChangeRow,
@@ -81,12 +82,6 @@ from .report.render_html import (
 )
 from .report.render_html_document import render_html_document
 from .report.versioning_policy_section import compute_versioning_policy
-from .report_classifications import (
-    category,
-    kind_str,
-    severity,
-)
-from .report_summary import compatibility_metrics
 
 if TYPE_CHECKING:
     from datetime import date
@@ -769,19 +764,10 @@ def _surface_changes(
 def compute_use_case_impact(
     result: object, displayed: list[object] | None
 ) -> dict[str, object] | None:
-    """``compare --use-cases``'s attribution, projected onto what is shown.
+    """``compare --use-cases``'s attribution, projected onto what is shown."""
+    from .report.use_case_impact_render import use_case_impact_block
 
-    *displayed* is the ``--show-only`` filtered list, or ``None`` when every
-    finding is displayed -- the same projection the JSON block applies.
-    """
-    from .impact.use_case_impact import UseCaseImpact
-
-    impact = getattr(result, "use_case_impact", None)
-    if not isinstance(impact, UseCaseImpact):
-        return None
-    if displayed is not None:
-        impact = impact.restricted_to(displayed)  # type: ignore[arg-type]
-    return impact.to_dict()
+    return use_case_impact_block(result, displayed)  # type: ignore[return-value]
 
 
 def compute_not_evaluated_section(

@@ -31,14 +31,14 @@ promotes the manifest to graph facts and joins them onto the library's own
 
 This is [G29 Phase 4 slice 2](../contribute/plans/g29-impact-analysis-layer.md),
 amending [ADR-057](../contribute/adr/057-consumer-graph-and-impact-join.md).
-`abicheck.impact.use_cases` parses the manifest, builds/joins the graph
+`abicheck.policy.use_cases` parses the manifest, builds/joins the graph
 facts, and (`explain_use_case_impact`) answers which declared use case(s)
 reach a given changed symbol. Two CLI surfaces use it:
 `abicheck project validate <manifest>` checks the manifest's own
 structure, and `abicheck compare --use-cases <manifest> OLD NEW` resolves
 each use case's entrypoints against the comparison's own snapshots and
 reports which of its findings each use case reaches
-(`impact/use_case_impact.py`). Each finding in the JSON report also
+(`policy/use_case_attribution.py`, rendered by `report/use_case_impact_render.py`). Each finding in the JSON report also
 carries its own `affected_use_cases` list (report schema 5.10) — the same
 attribution read per finding. There is still no `USE_CASE_IMPACT_CONFIRMED`
 finding kind — see "What this does not cover yet" below.
@@ -184,7 +184,7 @@ no use cases declared, not an error.
 ## Entrypoint mapping and test association
 
 ```python
-from abicheck.impact.use_cases import (
+from abicheck.policy.use_cases import (
     load_use_case_manifest,
     resolve_use_case_entrypoints,
 )

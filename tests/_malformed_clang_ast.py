@@ -88,6 +88,19 @@ MISSHAPEN_ASTS = [
         },
     ),
     (
+        "a grandchild's inner is null",
+        {
+            "kind": "TranslationUnitDecl",
+            "inner": [
+                {
+                    "kind": "NamespaceDecl",
+                    "name": "n",
+                    "inner": [{"kind": "FunctionDecl", "name": "f", "inner": None}],
+                }
+            ],
+        },
+    ),
+    (
         "a child is a bare string",
         {
             "kind": "TranslationUnitDecl",

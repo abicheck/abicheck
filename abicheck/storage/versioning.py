@@ -85,7 +85,7 @@ EXTRACTOR_GENERATION = 5
 #: This build's resolution semantics generation (ADR-062 D2): provider
 #: selection, alias normalization, symbol-version handling, reachability.
 #: Bump it when a graph derived from the same stored facts would change.
-RESOLVER_GENERATION = 1
+RESOLVER_GENERATION = 2
 
 #: Substring every generation-drift notice carries, so a consumer can filter
 #: ``coverage_warnings`` for it.

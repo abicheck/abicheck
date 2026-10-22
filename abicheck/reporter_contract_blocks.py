@@ -27,9 +27,9 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from .impact.use_case_impact import add_use_case_impact
 from .report.document import ReportDocument
 from .report.render_json import render_json
+from .report.use_case_impact_render import add_use_case_impact
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
