@@ -109,6 +109,7 @@ class ChangeKind(StrEnum):
     VERSIONED_SYMBOL_SCHEME_DETECTED = 'versioned_symbol_scheme_detected'
     SUPPRESSION_WOULD_HIDE_PUBLIC_BREAK = 'suppression_would_hide_public_break'
     SUPPRESSION_REACHABILITY_UNKNOWN = 'suppression_reachability_unknown'
+    GRAPH_COVERAGE_INSUFFICIENT_FOR_SUPPRESSION = 'graph_coverage_insufficient_for_suppression'
     STRUCT_SIZE_CHANGED = 'struct_size_changed'
     STRUCT_FIELD_OFFSET_CHANGED = 'struct_field_offset_changed'
     STRUCT_FIELD_REMOVED = 'struct_field_removed'

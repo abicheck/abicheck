@@ -64,6 +64,7 @@ from .report.finding import (
     impact_text_for,
     kind_sets_for_result,
 )
+from .report.policy_facts import category, compatibility_metrics, kind_str, severity
 from .report.redundancy_reasons import redundancy_reason_text
 from .report.render_html import (
     ChangeRow,
@@ -81,12 +82,6 @@ from .report.render_html import (
 )
 from .report.render_html_document import render_html_document
 from .report.versioning_policy_section import compute_versioning_policy
-from .report_classifications import (
-    category,
-    kind_str,
-    severity,
-)
-from .report_summary import compatibility_metrics
 
 if TYPE_CHECKING:
     from datetime import date

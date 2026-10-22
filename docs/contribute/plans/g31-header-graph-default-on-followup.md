@@ -87,8 +87,8 @@ same already-hashed inputs, and the full snapshot (including
 `_HEADER_GRAPH_INCLUDES_ENABLED` (module constants), `_attach_header_graph`
 (the actual attach step, unchanged in behavior, now always invoked with
 `True`/`True` except through the internal `_skip_header_graph_attach` knob
-used by the buildsource-embed recursion — see the
-`# TODO(header-graph-phase-D)` comment there), `run_dump`. `abicheck/cli_options.py`
+used by the buildsource-embed recursion — see `_attach_header_graph`'s
+comments), `run_dump`. `abicheck/cli_options.py`
 used to re-export `header_graph_options` (the shared, hidden decorator) and
 `warn_deprecated_header_graph_flags` (the deprecation-note helper both
 `compare` and `dump` called) — both removed outright by CLI cleanup H1.
@@ -98,16 +98,14 @@ structurally never reach the graph-attach step, unchanged by Phase A other
 than no longer needing a `UsageError` for an explicit flag that no longer
 exists).
 
-**Not fixed in this pass** (tracked as the `# TODO(header-graph-phase-D)`
-comment in `service.py`): `header_graph_includes`'s per-header `clang -M`
-pass has no caching of its own independent of the whole-snapshot cache. A
-whole-snapshot cache *hit* restores the previously-computed `build_source`
-(including the include-graph edges) without rerunning anything — the pass
-only actually executes on a cache *miss* or for an uncacheable call shape
-(see `service_dump_cache._dump_is_cacheable`). On a miss, though, it
-re-runs unconditionally and fails soft (degrades to not_collected/partial
-coverage) when clang is unavailable, with no cheaper incremental path of
-its own. See Phase C's sequencing note.
+**Fixed (Phase D).** The per-header `clang -M` include pass is now disk-cached
+(`abicheck/buildsource/header_include_disk_cache.py`). Each header's entry is keyed
+on its content digest, the clang binary identity, the language, the exact argv and
+the code fingerprint, and carries a witness over every file its closure reports
+plus each include search directory's mtime, so a warm run issues no probe and a
+changed header or included file invalidates only its own entry. A whole-snapshot
+cache hit still restores the graph without running anything; the per-header cache
+covers the miss path. Partial runs are never stored.
 
 ## Phase B (done) — Unify graph/public-surface vocabulary + canonical entity identity
 
