@@ -53,6 +53,14 @@ from abicheck.serialization import (
         ),
         ("template <template <class> class TT = X> struct R;", True),
         ("template<int N, bool B = (N >= 2)> struct S;", True),
+        # Parentheses before the top-level ``=`` do not end the list.
+        ("template <int (*F)(int), class X = int> struct S;", True),
+        # A ``=`` inside parentheses is not a top-level default.
+        ("template <int (*F)(int = 3)> struct S;", False),
+        # An unterminated list never closes, so it declares no default.
+        ("template <class T", False),
+        # ``==`` at the top level is a comparison, not a default.
+        ("template <int N == 2> struct S;", False),
     ],
 )
 def test_scan_finds_a_top_level_default_argument(text: str, declares: bool) -> None:
