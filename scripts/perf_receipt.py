@@ -73,7 +73,7 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
-from perf_proc_tree import _descendants, _proc_pss_bytes, _proc_rss_bytes
+from perf_proc_tree import descendants, proc_pss_bytes, proc_rss_bytes
 
 try:  # pragma: no cover - platform-dependent
     import resource
@@ -552,6 +552,8 @@ class RssSample:
     sampled_peak_tree_pss_bytes: int | None = None
 
 
+#: Samples the tree's RSS and PSS each interval. ``sampled_peak_tree_pss_bytes``
+#: is the figure the L2 scaling gate budgets; the RSS sum overstates a forked tree.
 class TreeRssSampler:
     """Samples a subprocess tree's concurrent RSS from the parent process.
 
@@ -586,17 +588,17 @@ class TreeRssSampler:
 
         def loop() -> None:
             while not self._stop.is_set():
-                pids = _descendants(root_pid)
+                pids = descendants(root_pid)
                 total = 0
                 pss_total = 0
                 pss_complete = True
                 live = 0
                 for pid in pids:
-                    rss = _proc_rss_bytes(pid)
+                    rss = proc_rss_bytes(pid)
                     if rss is not None:
                         total += rss
                         live += 1
-                    pss = _proc_pss_bytes(pid)
+                    pss = proc_pss_bytes(pid)
                     if pss is None:
                         pss_complete = False
                     else:

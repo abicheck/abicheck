@@ -28,7 +28,7 @@ import os
 from pathlib import Path
 
 
-def _proc_rss_bytes(pid: int) -> int | None:
+def proc_rss_bytes(pid: int) -> int | None:
     try:
         fields = Path(f"/proc/{pid}/statm").read_text(encoding="utf-8").split()
         return int(fields[1]) * os.sysconf("SC_PAGE_SIZE")
@@ -36,7 +36,7 @@ def _proc_rss_bytes(pid: int) -> int | None:
         return None
 
 
-def _proc_pss_bytes(pid: int) -> int | None:
+def proc_pss_bytes(pid: int) -> int | None:
     """*pid*'s proportional set size from ``smaps_rollup``, or ``None``."""
     try:
         text = Path(f"/proc/{pid}/smaps_rollup").read_text(encoding="utf-8")
@@ -51,7 +51,7 @@ def _proc_pss_bytes(pid: int) -> int | None:
     return None
 
 
-def _descendants(root: int) -> list[int]:
+def descendants(root: int) -> list[int]:
     """*root* plus every live descendant, via one ``/proc`` scan.
 
     Builds the parent map from ``/proc/<pid>/stat`` and walks down from *root*,

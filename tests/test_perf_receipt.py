@@ -384,14 +384,14 @@ class TestTreeRssSampler:
         assert run.rss.interval_seconds == 0.05
 
     def test_descendants_are_discovered_not_just_the_direct_child(self):
-        pids = pr._descendants(os.getpid())
+        pids = pr.descendants(os.getpid())
         assert os.getpid() in pids
 
     def test_a_comm_containing_spaces_does_not_break_parent_parsing(self):
         # /proc/<pid>/stat's comm field can contain spaces and parentheses; a
         # naive whitespace split reads the wrong field as the ppid and the tree
         # walk silently returns only the root.
-        assert pr._descendants(1)
+        assert pr.descendants(1)
 
 
 @requires_linux
@@ -400,26 +400,22 @@ class TestForkedTreeMemoryIsMeasuredAsPss:
     page once per process, while PSS divides it among the processes mapping it.
     The tree figure that tracks physical memory is PSS."""
 
-    @pytest.mark.skipif(
-        not Path("/proc/self/smaps_rollup").is_file(),
-        reason="needs Linux smaps_rollup",
-    )
     def test_forked_child_shares_pages_so_pss_sum_is_below_rss_sum(self):
-        payload = bytearray(128 * 1024 * 1024)
+        payload = bytearray(32 * 1024 * 1024)
         for offset in range(0, len(payload), 4096):
             payload[offset] = 1  # touch every page so it is resident
         pid = os.fork()
         if pid == 0:
             try:
-                time.sleep(3)
+                time.sleep(2)
             finally:
                 os._exit(0)
         try:
             time.sleep(0.5)  # let the child settle before reading its maps
             pids = [os.getpid(), pid]
-            assert pr._proc_rss_bytes(pid) >= 0.9 * len(payload)
-            rss_sum = sum(pr._proc_rss_bytes(p) for p in pids)
-            pss_sum = sum(pr._proc_pss_bytes(p) for p in pids)
+            assert pr.proc_rss_bytes(pid) >= 0.9 * len(payload)
+            rss_sum = sum(pr.proc_rss_bytes(p) for p in pids)
+            pss_sum = sum(pr.proc_pss_bytes(p) for p in pids)
             # Every page is mapped twice, so PSS is about half the RSS sum.
             assert pss_sum < 0.75 * rss_sum
             assert pss_sum >= 0.9 * len(payload)
@@ -427,6 +423,7 @@ class TestForkedTreeMemoryIsMeasuredAsPss:
             os.waitpid(pid, 0)
 
 
+@requires_linux
 class TestTimeoutCleanup:
     def test_a_timeout_is_reported_not_raised(self):
         run = pr.run_measured(

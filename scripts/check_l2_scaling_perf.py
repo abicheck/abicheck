@@ -101,7 +101,12 @@ DEFAULT_TIMEOUT_SECONDS = 600.0
 #: receiving the union set (docs/contribute/known-gaps.md, "Multi-library L2
 #: compare scales quadratically with library count").
 DEFAULT_MAX_EXPONENT: dict[str, float] = {"headers": 1.4, "libraries": 1.7}
-DEFAULT_MAX_RSS_MB = 1024.0
+#: Ceiling on any point's peak process-tree memory, in MB. It gates the tree's
+#: PSS (see ``perf_receipt.RssSample``); the name predates that and is kept so
+#: the ``--max-rss-mb`` flag does not change. Measured PSS at n=10 libraries was
+#: 255-315 MB across the runs in the PR, so 512 leaves about 1.6x headroom. The
+#: old 1024 MB was set against fork-inflated RSS and would be about 3x looser.
+DEFAULT_MAX_RSS_MB = 512.0
 #: Below this marginal cost (seconds) the largest point is indistinguishable from
 #: the floor, and any exponent fitted through it is noise.
 MIN_MARGINAL_SECONDS = 0.25
@@ -378,7 +383,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--max-rss-mb",
         type=finite_positive_float_arg,
         default=DEFAULT_MAX_RSS_MB,
-        help="Ceiling on any point's peak process-tree RSS (MB).",
+        help="Ceiling on any point's peak process-tree PSS (MB); RSS where PSS is unreadable.",
     )
     p.add_argument(
         "--timeout",
@@ -434,6 +439,10 @@ def _print(results: dict[str, Any], *, markdown: bool) -> None:
                 if markdown
                 else sep.join(f"{c:>12}" for c in row)
             )
+    for axis, data in results["axes"].items():
+        for p in data["points"]:
+            if p["peak_pss_mb"] is None and p["peak_rss_mb"] is not None:
+                print(f"NOTE: {axis} n={p['n']}: PSS unreadable, gated on RSS")
     for failure in results["failures"]:
         print(f"FAIL: {failure}")
 
