@@ -364,7 +364,7 @@ _ANALYSIS_BUG_CLASSES: tuple[BugClass, ...] = (
             "TestBatchShapedChangeIgnoresTheSample), and order-invariance "
             "for unordered inputs."
         ),
-        fixed_by=(753, 759, 879, 905, 1125),
+        fixed_by=(753, 759, 879, 905, 1125, 1693),
         seed_tests=(
             "tests/test_cross_tier_dedup_unhashable_value.py",
             "tests/test_finding_identity_properties.py",

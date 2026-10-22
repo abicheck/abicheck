@@ -558,4 +558,9 @@ KIND_NAMES_1: tuple[tuple[str, str, str | None], ...] = (
         "var_removed_elf_only",
         "exported ELF-only data symbol removed -> binary break",
     ),
+    (
+        "PUBLIC_API_INTERNAL_TYPE_RENAMED",
+        "public_api_internal_type_renamed",
+        "G31 Phase D: a public entry's internal dependency target was renamed; ADR-048 reconciliation resolved old and new as the same declaration, so one finding replaces the add+remove pair -> COMPATIBLE_WITH_RISK (internal target, not ABI)",
+    ),
 )

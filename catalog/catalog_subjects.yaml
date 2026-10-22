@@ -207,6 +207,7 @@ subjects:
       - case195_header_graph_ambiguous_rename_not_reconciled
       - case196_header_graph_move_reconciled
       - case197_header_graph_identity_reconciled
+      - case221_public_api_internal_type_renamed
 
   leaked-internal-types:
     title: "Leaked internal types"

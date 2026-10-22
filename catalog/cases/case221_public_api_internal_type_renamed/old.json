@@ -1,0 +1,202 @@
+{
+  "coverage": {},
+  "degraded_passes": {},
+  "edges": [
+    {
+      "attrs": {},
+      "confidence": "unknown",
+      "conflicts": [],
+      "dst": "type:demo::Config",
+      "edge": "SOURCE_DECLARES",
+      "facts": [
+        {
+          "attrs": {},
+          "confidence": "unknown",
+          "producer": ""
+        }
+      ],
+      "occurrences": [],
+      "provenance": "",
+      "resolved": {},
+      "src": "hdr:include/demo/config.h"
+    },
+    {
+      "attrs": {},
+      "confidence": "unknown",
+      "conflicts": [],
+      "dst": "type:demo::Other",
+      "edge": "SOURCE_DECLARES",
+      "facts": [
+        {
+          "attrs": {},
+          "confidence": "unknown",
+          "producer": ""
+        }
+      ],
+      "occurrences": [],
+      "provenance": "",
+      "resolved": {},
+      "src": "hdr:include/demo/other.h"
+    },
+    {
+      "attrs": {
+        "role": "field"
+      },
+      "confidence": "unknown",
+      "conflicts": [],
+      "dst": "type:demo::detail::RawConfig",
+      "edge": "TYPE_HAS_FIELD_TYPE",
+      "facts": [
+        {
+          "attrs": {
+            "role": "field"
+          },
+          "confidence": "unknown",
+          "producer": ""
+        }
+      ],
+      "occurrences": [],
+      "provenance": "",
+      "resolved": {
+        "role": "field"
+      },
+      "src": "type:demo::Config"
+    }
+  ],
+  "external_graph_refs": [],
+  "extractor_passes": {
+    "build_options": true,
+    "build_targets": true,
+    "call_graph": true,
+    "include_graph": true,
+    "source_abi": true,
+    "type_graph": true
+  },
+  "graph_id": "sha256:04799cd094c6b0fb679a067d260f9e76da654d560e2d26a211c363e803461130",
+  "indexes": {
+    "by_binary_symbol": {},
+    "by_file": {},
+    "by_source_decl": {},
+    "by_target": {}
+  },
+  "narrowed_passes": {},
+  "narrowed_scope": {},
+  "nodes": [
+    {
+      "attrs": {
+        "qualified_name": "demo::Config",
+        "visibility": "public_header"
+      },
+      "confidence": "unknown",
+      "conflicts": [],
+      "facts": [
+        {
+          "attrs": {
+            "qualified_name": "demo::Config",
+            "visibility": "public_header"
+          },
+          "confidence": "unknown",
+          "producer": ""
+        }
+      ],
+      "id": "type:demo::Config",
+      "kind": "record_type",
+      "label": "demo::Config",
+      "provenance": "",
+      "resolved": {
+        "qualified_name": "demo::Config",
+        "visibility": "public_header"
+      }
+    },
+    {
+      "attrs": {},
+      "confidence": "unknown",
+      "conflicts": [],
+      "facts": [
+        {
+          "attrs": {},
+          "confidence": "unknown",
+          "producer": ""
+        }
+      ],
+      "id": "hdr:include/demo/config.h",
+      "kind": "header",
+      "label": "include/demo/config.h",
+      "provenance": "",
+      "resolved": {}
+    },
+    {
+      "attrs": {
+        "qualified_name": "demo::Other",
+        "visibility": "public_header"
+      },
+      "confidence": "unknown",
+      "conflicts": [],
+      "facts": [
+        {
+          "attrs": {
+            "qualified_name": "demo::Other",
+            "visibility": "public_header"
+          },
+          "confidence": "unknown",
+          "producer": ""
+        }
+      ],
+      "id": "type:demo::Other",
+      "kind": "record_type",
+      "label": "demo::Other",
+      "provenance": "",
+      "resolved": {
+        "qualified_name": "demo::Other",
+        "visibility": "public_header"
+      }
+    },
+    {
+      "attrs": {},
+      "confidence": "unknown",
+      "conflicts": [],
+      "facts": [
+        {
+          "attrs": {},
+          "confidence": "unknown",
+          "producer": ""
+        }
+      ],
+      "id": "hdr:include/demo/other.h",
+      "kind": "header",
+      "label": "include/demo/other.h",
+      "provenance": "",
+      "resolved": {}
+    },
+    {
+      "attrs": {
+        "def_file": "include/demo/detail.h",
+        "qualified_name": "demo::detail::RawConfig",
+        "visibility": "private_header"
+      },
+      "confidence": "unknown",
+      "conflicts": [],
+      "facts": [
+        {
+          "attrs": {
+            "def_file": "include/demo/detail.h",
+            "qualified_name": "demo::detail::RawConfig",
+            "visibility": "private_header"
+          },
+          "confidence": "unknown",
+          "producer": ""
+        }
+      ],
+      "id": "type:demo::detail::RawConfig",
+      "kind": "record_type",
+      "label": "demo::detail::RawConfig",
+      "provenance": "",
+      "resolved": {
+        "def_file": "include/demo/detail.h",
+        "qualified_name": "demo::detail::RawConfig",
+        "visibility": "private_header"
+      }
+    }
+  ],
+  "schema_version": 3
+}
