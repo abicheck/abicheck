@@ -54,6 +54,7 @@ Lives in ``model/`` because every layer must be able to reach it and
 
 from __future__ import annotations
 
+import contextlib
 import functools
 import inspect
 import os
@@ -310,9 +311,8 @@ class MemoryCache(Generic[_V]):
                     self._in_flight[key] = future
                     self.stats.misses += 1
                     break
-            # The owner failed with an Exception: retry (a loop, not
-            # recursion). A BaseException still propagates via result().
-            if not isinstance(pending.exception(), Exception):
+            # The owner failed: retry (a loop, not recursion).
+            with contextlib.suppress(Exception):
                 return self._out(pending.result())
         try:
             value = self._compute_and_store(key, compute, witness, witness_of, keep)
