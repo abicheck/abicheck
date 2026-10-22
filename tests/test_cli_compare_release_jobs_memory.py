@@ -192,6 +192,24 @@ class TestReleaseWorkerLimitCause:
         )
         assert explicit.initial_jobs == 8
 
+    @pytest.mark.parametrize("members", [2, 3, 8, 64])
+    def test_member_cap_also_bounds_a_memory_clamped_pool(
+        self, monkeypatch, members: int
+    ) -> None:
+        # Memory admits 1 at a time but the gate keeps the unclamped pool
+        # (64) to admit more later; that pool must still not exceed the work.
+        monkeypatch.setattr("os.cpu_count", lambda: 64)
+        monkeypatch.setattr(process_resources, "python_parallelism", lambda **_: 64)
+        monkeypatch.setattr(process_resources, "available_mem_gib", lambda: 12.0)
+        monkeypatch.setattr(
+            release_jobs, "release_jobs_mem_cap", lambda depth=None, **kw: 1
+        )
+        monkeypatch.delenv("ABICHECK_RELEASE_JOB_MEM_GIB", raising=False)
+        plan = release_jobs.plan_release_workers(0, depth="headers", members=members)
+        assert plan.initial_jobs == 1
+        assert plan.pool_size <= members
+        assert plan.limited_by == "memory"
+
     def test_memory_bound_pool_below_the_interpreter_is_attributed_to_memory(
         self, monkeypatch
     ) -> None:

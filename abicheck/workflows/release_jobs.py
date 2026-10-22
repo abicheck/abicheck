@@ -371,9 +371,11 @@ def plan_release_workers(
                 "processes" if processes else "gil"
             )  # the interpreter binds before memory does
         effective, pool = min(effective, parallel), min(pool, parallel)
-        if members is not None and 0 < members < effective:
-            limited_by = "members"  # less work than workers: the work binds
-            effective, pool = members, min(pool, members)
+        if members is not None and members > 0:
+            if members < effective:
+                limited_by = "members"  # less work than workers: the work binds
+            # The pool too: a memory clamp can leave it above *effective*.
+            effective, pool = min(effective, members), min(pool, members)
     # The process-wide thread budget bounds every pool, an explicit *jobs*
     # included. Applying it here, rather than only when the pool borrows its
     # threads, keeps the plan honest: a budget of 1 selects the sequential
