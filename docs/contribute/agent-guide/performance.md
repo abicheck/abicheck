@@ -36,7 +36,10 @@ Manual-only investigation tools (never gates):
   `docs/contribute/memory.md` / `ABICHECK_MEMORY_TRACE`. A cold compare of
   two live binaries resolves each side in a forked child, and an in-process
   profiler sees only the parent: profile with `ABICHECK_SIDE_PROCESSES=0`
-  (serial sides, one process), or `py-spy record --subprocesses`. py-spy
+  (serial sides, one process), or `py-spy record --subprocesses`. A parallel
+  release on a GIL build likewise compares each member in a forked child
+  (`workflows/release_member_processes.py`); `ABICHECK_MEMBER_PROCESSES=0`
+  keeps members on threads of the parent. py-spy
   cannot read CPython 3.15 yet; there `python -m profiling.sampling` works
   but does not follow forks, exits 0 whatever abicheck returned, and on a
   free-threaded build reports enough sample errors that its proportions are

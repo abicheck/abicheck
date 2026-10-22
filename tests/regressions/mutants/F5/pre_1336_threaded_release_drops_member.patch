@@ -1,11 +1,21 @@
 --- a/abicheck/workflows/release_members.py
 +++ b/abicheck/workflows/release_members.py
-@@ -520,8 +520,10 @@
-         ctx.reporter.notice(notice)
-         return entry
+@@ -520,9 +520,11 @@
+         member_processes_apply,
+     )
  
 +    from ..process_resources import max_threads
 +
+     if member_processes_apply(max_workers):
+         return compare_members_in_processes(
+-            compare_keys,
++            compare_keys if max_threads() == 1 else compare_keys[:-1],
+             ctx,
+             compare_release_member,
+             max_workers=max_workers,
+@@ -530,7 +532,7 @@
+             on_error=_on_error,
+         )
      return run_keyed_in_threads(
 -        compare_keys,
 +        compare_keys if max_threads() == 1 else compare_keys[:-1],

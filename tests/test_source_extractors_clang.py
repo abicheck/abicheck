@@ -43,6 +43,9 @@ from abicheck.buildsource.source_extractors.clang import (
     _equivalent_public_roots_for_unit,
     _path_suffixes,
 )
+from abicheck.buildsource.source_extractors.compile_invocation import (
+    replayed_tokens_for,
+)
 from abicheck.buildsource.source_link import link_source_abi
 
 
@@ -666,7 +669,7 @@ def test_build_command_carries_abi_flags_and_unwraps_launcher() -> None:
     assert "ccache" not in cmd
 
 
-def test_replay_extra_flags_preserves_repeated_toggle_flags_in_order() -> None:
+def test_replayed_tokens_preserves_repeated_toggle_flags_in_order() -> None:
     """A layered build config can legitimately record the SAME literal flag
     more than once (e.g. a base default followed by a target-specific
     override, followed by a later reset) -- ``extract_abi_relevant_flags``
@@ -678,23 +681,22 @@ def test_replay_extra_flags_preserves_repeated_toggle_flags_in_order() -> None:
     disabled to enabled (Codex review). Every occurrence must now survive,
     in the original order, so downstream last-flag-wins scanning sees
     exactly what the real compiler saw."""
-    from abicheck.buildsource.source_extractors._argv import replay_extra_flags
 
     cu = _cu(
         argv=["icpx", "-fno-sycl", "-fsycl", "-fno-sycl", "-c", "foo.cpp"],
         abi_relevant_flags=["-fno-sycl", "-fsycl", "-fno-sycl"],
     )
-    extra = replay_extra_flags(cu, [], "gnu")
+    extra = replayed_tokens_for(cu, compiler_binary="g++")
     assert extra == ["-fno-sycl", "-fsycl", "-fno-sycl"]
 
 
-def test_replay_extra_flags_decodes_split_operand_abi_flag_survivor() -> None:
+def test_replayed_tokens_decodes_split_operand_abi_flag_survivor() -> None:
     """Codex review finding ("Decode normalized cc1 flags in every replay
     path"): ``adapters.base.extract_abi_relevant_flags`` normalizes a
     genuinely split two-token cc1 flag (``-target-abi aapcs``) into one
     internal ``-target-abi=aapcs`` survivor token in
     ``CompileUnit.abi_relevant_flags``. Before this fix,
-    ``replay_extra_flags``/``_carry_abi_relevant_flags`` read that survivor
+    ``replayed_tokens``/``_carry_abi_relevant_flags`` read that survivor
     unchanged: the bare form was silently DROPPED entirely by the
     ``STRUCTURED_TOOLCHAIN_FLAG_PREFIXES`` filter (it starts with
     ``-target``, the same prefix that filter drops as redundant for the
@@ -704,20 +706,19 @@ def test_replay_extra_flags_decodes_split_operand_abi_flag_survivor() -> None:
     **Reconstructed as ``-Xclang``-wrapped, not the bare two-token form**
     (P2 review, "Forward bare cc1 flags through the replay driver", fresh
     evidence): this bare internal encoding is what a direct ``clang -cc1
-    -target-abi aapcs`` capture produces, but ``replay_extra_flags`` always
+    -target-abi aapcs`` capture produces, but ``replayed_tokens`` always
     drives an ordinary Clang *driver*, never ``-cc1`` directly -- and an
     ordinary driver rejects bare ``-target-abi aapcs`` outright ("unknown
     argument '-target-abi'; did you mean '-Xclang -target-abi'"), requiring
     the ``-Xclang``-wrapped four-token form regardless of the original
     capture shape."""
-    from abicheck.buildsource.source_extractors._argv import replay_extra_flags
 
     cu = _cu(abi_relevant_flags=["-target-abi=aapcs"])
-    extra = replay_extra_flags(cu, [], "gnu")
+    extra = replayed_tokens_for(cu, compiler_binary="g++")
     assert extra == ["-Xclang", "-target-abi", "-Xclang", "aapcs"]
 
 
-def test_replay_extra_flags_decodes_xclang_wrapped_split_operand_abi_flag_survivor() -> (
+def test_replayed_tokens_decodes_xclang_wrapped_split_operand_abi_flag_survivor() -> (
     None
 ):
     """Companion case: the LEGACY ``-Xclang -target-abi=aapcs`` marker
@@ -736,10 +737,9 @@ def test_replay_extra_flags_decodes_xclang_wrapped_split_operand_abi_flag_surviv
     bare ``-target-abi=aapcs`` form above); this test only pins
     backward-compatible decoding of the old marker, in case it survives in
     an evidence pack persisted by an earlier revision."""
-    from abicheck.buildsource.source_extractors._argv import replay_extra_flags
 
     cu = _cu(abi_relevant_flags=["-Xclang -target-abi=aapcs"])
-    extra = replay_extra_flags(cu, [], "gnu")
+    extra = replayed_tokens_for(cu, compiler_binary="g++")
     assert extra == ["-Xclang", "-target-abi", "-Xclang", "aapcs"]
 
 
@@ -1083,7 +1083,7 @@ class TestSyclHostOnlyGatedOnInvokedBinary:
     def test_property_host_only_insertion_reflects_true_last_flag_wins_state(
         self,
     ) -> None:
-        """Generalizes ``test_replay_extra_flags_preserves_repeated_toggle_
+        """Generalizes ``test_replayed_tokens_preserves_repeated_toggle_
         flags_in_order``/``test_build_command_respects_final_disabled_sycl_
         toggle_despite_earlier_enable`` above: for ANY sequence of
         ``-fsycl``/``-fno-sycl`` toggles -- including repeats, exactly what

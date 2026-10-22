@@ -34,12 +34,8 @@ import posixpath
 from pathlib import Path, PurePosixPath
 
 from ..build_evidence import CompileUnit
-from ._argv import (
-    is_msvc_mode,
-    pick_compiler_binary,
-    replay_extra_flags,
-    unredact_home,
-)
+from ._argv import unredact_home
+from .compile_invocation import parse_compile_invocation, replayed_tokens
 
 _PUBLIC_ROOT_SAMPLE_LIMIT = 128
 _PUBLIC_ROOT_WHOLE_DIR_MIN_MATCHES = 2
@@ -136,9 +132,9 @@ def _compile_unit_include_roots(
         (raw, _compile_unit_include_dir(raw, compile_unit))
         for raw in compile_unit.system_include_paths
     )
-    cc_bin = pick_compiler_binary(compile_unit, compiler_binary)
-    cc_id = "msvc" if is_msvc_mode(cc_bin) else "gnu"
-    replay_flags = replay_extra_flags(compile_unit, [], cc_id)
+    invocation = parse_compile_invocation(compile_unit, compiler_binary)
+    cc_id = "msvc" if invocation.msvc else "gnu"
+    replay_flags = replayed_tokens(invocation)
     i = 0
     while i < len(replay_flags):
         tok = replay_flags[i]

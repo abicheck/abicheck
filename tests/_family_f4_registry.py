@@ -335,7 +335,7 @@ HEURISTICS: dict[str, str] = {
     "abicheck.policy.outcome::<module>::re:'^(0(\\\\.[0-9]+)*|1(\\\\.0+)?)$'": "own_format",
     "abicheck.policy.selectors::<module>::re:'<[^<>]*>'": "spelling",
     "abicheck.policy.selectors::_matches_source_location::re:':\\\\d+(?::\\\\d+)?$'": "user_rule",
-    "abicheck.policy.selectors::_ns_match::affix.startswith:'_Z'": "grammar",
+    "abicheck.policy.selectors::_ns_forms::affix.startswith:'_Z'": "grammar",
     "abicheck.policy.selectors_namespace_glob::<module>::re:'^\\\\(\\\\?s:(.*)\\\\)\\\\\\\\[Zz]$'": "user_rule",
     "abicheck.policy.selectors_namespace_glob::_SegmentGlobMatcher.__init__::re:'(?s:' + combined + ')\\\\Z'": "user_rule",
     "abicheck.policy.selectors_namespace_glob::_SegmentGlobMatcher.__init__::re:_translate_namespace_glob(pattern)": "user_rule",

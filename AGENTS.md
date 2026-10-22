@@ -212,7 +212,7 @@ Follow the pointer whose trigger matches your task:
 |------|---------------|
 | [`docs/contribute/agent-guide/module-map.md`](docs/contribute/agent-guide/module-map.md) | locating the module that owns a behavior, or touching the pipeline (model → extract → compare → policy → report), contract evaluation, release/multi-member comparison, snapshots/storage, or the service API |
 | `abicheck/<layer>/AGENTS.md` | editing code inside that layer (`model`, `extract`, `compare`, `policy`, `workflows`, `storage`, `report`, `frontends`) |
-| [`docs/contribute/agent-guide/quality-gates.md`](docs/contribute/agent-guide/quality-gates.md) | an `ai-readiness`/coverage/mutation/FP-rate gate failed, or you are writing tests for a bug fix, a matrix, a differential comparison or a reusable primitive |
+| [`docs/contribute/agent-guide/quality-gates.md`](docs/contribute/agent-guide/quality-gates.md) | an `ai-readiness`/coverage/mutation/FP-rate gate failed, you need a PR's CodeFactor findings, or you are writing tests for a bug fix, a matrix, a differential comparison or a reusable primitive |
 | [`docs/contribute/agent-guide/performance.md`](docs/contribute/agent-guide/performance.md) | touching a hot path, a call-count/cost-budget/`perf-antipatterns` gate failed, or a user reports "slow" |
 | [`docs/contribute/agent-guide/cli-and-exit-codes.md`](docs/contribute/agent-guide/cli-and-exit-codes.md) | adding a CLI command or flag, changing an exit code, or editing a file over its size cap (`architecture/modules.yaml`) |
 | [`docs/contribute/agent-guide/decision-principles.md`](docs/contribute/agent-guide/decision-principles.md) | filling the PR template's "Bug class / General invariant" rows |

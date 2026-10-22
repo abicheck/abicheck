@@ -402,6 +402,9 @@ class TestInstrumentedParallelReleaseMatchesStored:
             return snap
 
         monkeypatch.setattr(native, "_attach_header_graph", attach)
+        # The census hook is a worker-*thread* hazard; a forked member child
+        # is single-threaded and its `censuses` appends would not reach here.
+        monkeypatch.setenv("ABICHECK_MEMBER_PROCESSES", "0")
         monkeypatch.setenv("ABICHECK_RELEASE_JOB_MEM_GIB", "1")
         # Level-1 member cap (`process_resources.python_parallelism`) would
         # otherwise hold a GIL build at 2 members whatever the resolver says.
@@ -668,3 +671,52 @@ class TestFanOutExceptionBoundaryInSitu:
         assert failed["verdict"] == "ERROR"
         assert failed["error_type"] == "KeyError"
         assert "const dense&" in str(failed["error"])
+
+
+@pytest.mark.integration
+class TestProcessFanOutMatchesThreads:
+    """The forked-process member fan-out (GIL builds) renders the same bytes
+    as the thread fan-out, cold, on real compiled members."""
+
+    def test_process_and_thread_fan_out_render_identical_reports(
+        self,
+        release: tuple[Path, Path, Path],
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        import abicheck.workflows.release_member_processes as rmp  # noqa: PLC0415
+        from abicheck.workflows import side_isolation  # noqa: PLC0415
+        from tests.test_compare_release import _invoke_combined  # noqa: PLC0415
+
+        old_dir, new_dir, headers = release
+        monkeypatch.setenv("ABICHECK_RELEASE_JOB_MEM_GIB", "1")
+        monkeypatch.setenv("ABICHECK_MEMBER_JOBS", "4")
+        # A test runner may hold helper threads; the children here run only
+        # abicheck code, so fork regardless to exercise the path.
+        monkeypatch.setattr(side_isolation, "fork_is_safe", lambda: True)
+        real = rmp.compare_members_in_processes
+        forked: list[int] = []
+
+        def spy(*args, **kwargs):  # type: ignore[no-untyped-def]
+            forked.append(len(args[0]))
+            return real(*args, **kwargs)
+
+        monkeypatch.setattr(rmp, "compare_members_in_processes", spy)
+        rendered = {}
+        for mode in ("1", "0"):
+            monkeypatch.setenv("ABICHECK_MEMBER_PROCESSES", mode)
+            # Cold each time: a warm snapshot cache would let the second
+            # configuration skip the extraction the first one ran.
+            monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / f"cache{mode}"))
+            forked.clear()
+            out = {f: tmp_path / f"{mode}.{f}" for f in ("json", "md")}
+            code, combined = _invoke_combined(
+                "compare", str(old_dir), str(new_dir),
+                "-H", str(headers / "common.h"),
+                "-o", f"json={out['json']}", "-o", f"markdown={out['md']}",
+            )  # fmt: skip
+            assert forked == ([len(_MEMBERS)] if mode == "1" else []), mode
+            assert "Error comparing" not in combined, combined
+            rendered[mode] = (code, out["json"].read_text(), out["md"].read_text())
+        assert rendered["1"][0] == 4
+        assert rendered["1"] == rendered["0"]
