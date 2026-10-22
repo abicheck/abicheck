@@ -69,10 +69,11 @@ import subprocess
 import sys
 import threading
 import time
-from collections.abc import Callable
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
+
+from perf_proc_tree import descendants, proc_pss_bytes, proc_rss_bytes
 
 try:  # pragma: no cover - platform-dependent
     import resource
@@ -542,49 +543,17 @@ class RssSample:
     ru_maxrss_bytes: int | None
     ru_maxrss_scope: str | None = None
     unavailable_reason: str | None = None
+    #: The largest simultaneous tree sum of proportional set size (PSS), or
+    #: ``None`` when PSS was not readable for every live process at any sample.
+    #: PSS divides each shared page among the processes mapping it, so the sum
+    #: is the tree's physical footprint: the figure to gate a memory budget on
+    #: when the tree forks. ``sampled_peak_tree_bytes`` counts a forked child's
+    #: inherited copy-on-write pages once per child and overstates that.
+    sampled_peak_tree_pss_bytes: int | None = None
 
 
-def _proc_rss_bytes(pid: int) -> int | None:
-    try:
-        fields = Path(f"/proc/{pid}/statm").read_text(encoding="utf-8").split()
-        return int(fields[1]) * os.sysconf("SC_PAGE_SIZE")
-    except (OSError, IndexError, ValueError):
-        return None
-
-
-def _descendants(root: int) -> list[int]:
-    """*root* plus every live descendant, via one ``/proc`` scan.
-
-    Builds the parent map from ``/proc/<pid>/stat`` and walks down from *root*,
-    rather than reading ``children`` files recursively: one pass is cheaper, and
-    it cannot partially observe a tree that is changing under it.
-    """
-    parents: dict[int, int] = {}
-    try:
-        entries = os.listdir("/proc")
-    except OSError:
-        return [root]
-    for name in entries:
-        if not name.isdigit():
-            continue
-        try:
-            stat = Path(f"/proc/{name}/stat").read_text(encoding="utf-8")
-            # The comm field may itself contain spaces and parentheses, so
-            # split after the LAST ')' rather than on whitespace.
-            ppid = int(stat[stat.rindex(")") + 1 :].split()[1])
-        except (OSError, ValueError, IndexError):
-            continue
-        parents[int(name)] = ppid
-    tree = [root]
-    frontier = [root]
-    while frontier:
-        current = frontier.pop()
-        kids = [pid for pid, ppid in parents.items() if ppid == current]
-        tree.extend(kids)
-        frontier.extend(kids)
-    return tree
-
-
+#: Samples the tree's RSS and PSS each interval. ``sampled_peak_tree_pss_bytes``
+#: is the figure the L2 scaling gate budgets; the RSS sum overstates a forked tree.
 class TreeRssSampler:
     """Samples a subprocess tree's concurrent RSS from the parent process.
 
@@ -606,6 +575,7 @@ class TreeRssSampler:
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
         self.peak = 0
+        self.pss_peak = 0
         self.samples = 0
         self.max_processes = 0
         self.unavailable_reason: str | None = None
@@ -618,17 +588,26 @@ class TreeRssSampler:
 
         def loop() -> None:
             while not self._stop.is_set():
-                pids = _descendants(root_pid)
+                pids = descendants(root_pid)
                 total = 0
+                pss_total = 0
+                pss_complete = True
                 live = 0
                 for pid in pids:
-                    rss = _proc_rss_bytes(pid)
+                    rss = proc_rss_bytes(pid)
                     if rss is not None:
                         total += rss
                         live += 1
+                    pss = proc_pss_bytes(pid)
+                    if pss is None:
+                        pss_complete = False
+                    else:
+                        pss_total += pss
                 if live:
                     self.samples += 1
                     self.peak = max(self.peak, total)
+                    if pss_complete:
+                        self.pss_peak = max(self.pss_peak, pss_total)
                     self.max_processes = max(self.max_processes, live)
                 self._stop.wait(self.interval)
 
@@ -655,6 +634,7 @@ class TreeRssSampler:
             ru_maxrss_scope=ru_maxrss_scope,
             unavailable_reason=self.unavailable_reason
             or (None if self.samples else "process exited before the first sample"),
+            sampled_peak_tree_pss_bytes=self.pss_peak or None,
         )
 
 
@@ -764,7 +744,7 @@ def run_measured(
     cwd: Path | None = None,
     env: dict[str, str] | None = None,
     timeout: float = 600.0,
-    sample_rss: bool | Callable[[float], TreeRssSampler] = False,
+    sample_rss: bool = False,
     rss_interval: float = 0.02,
 ) -> CommandRun:
     """Run *argv* as a subprocess, timing and observing it.
@@ -776,19 +756,20 @@ def run_measured(
     would report a number no user experiences. Fixture construction, artifact
     download and dependency installation happen outside, before this call.
 
-    CPU time is read from ``RUSAGE_CHILDREN`` deltas, labelled
-    ``cpu_scope="waited_children_delta"``: the counter is cumulative over all
-    reaped children, so the delta is right only because nothing else is reaped
+    CPU time is read from ``RUSAGE_CHILDREN`` deltas and labelled
+    ``cpu_scope="waited_children_delta"`` rather than presented as this
+    command's CPU: the counter is cumulative over all of the harness's reaped
+    children, so the delta is correct only because nothing else is reaped
     concurrently. Naming the scope is what keeps a later caller from
     parallelising the harness and silently turning the field into nonsense.
 
     On timeout the whole process *group* is terminated, then killed -- not just
     the direct child. A castxml grandchild outliving its parent would otherwise
     keep running, skewing every subsequent measurement on the same host, and
-    the RSS sampler would misattribute it. Callable *sample_rss*: a factory.
+    the RSS sampler would keep attributing it to a tree that had already been
+    abandoned.
     """
-    factory = sample_rss if callable(sample_rss) else TreeRssSampler
-    sampler = factory(rss_interval) if sample_rss else None
+    sampler = TreeRssSampler(rss_interval) if sample_rss else None
     # None, not zero, where `resource` is unavailable: a CPU figure of 0.0 would
     # read as a real measurement of a process that used no CPU.
     before = (
