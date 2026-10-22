@@ -76,6 +76,7 @@ explicitly named alias instead, as in case87.
 ## Source files
 
 - `CMakeLists.txt`
+- `app.cpp`
 - `v1.cpp`
 - `v1.h`
 - `v2.cpp`

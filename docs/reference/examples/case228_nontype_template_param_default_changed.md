@@ -80,6 +80,7 @@ alias with the new size.
 ## Source files
 
 - `CMakeLists.txt`
+- `app.cpp`
 - `v1.cpp`
 - `v1.h`
 - `v2.cpp`

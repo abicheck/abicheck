@@ -81,6 +81,7 @@ put the new default on a new alias.
 ## Source files
 
 - `CMakeLists.txt`
+- `app.cpp`
 - `v1.cpp`
 - `v1.h`
 - `v2.cpp`
