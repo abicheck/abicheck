@@ -45,6 +45,7 @@ if TYPE_CHECKING:  # pragma: no cover - typing only
     from ...model import AbiSnapshot
     from ...model.change import Change
     from ..disposition_ledger import DispositionLedger
+    from ..public_surface_query import ComparisonPublicSurfaces
 
 
 def dispose_findings(
@@ -55,6 +56,7 @@ def dispose_findings(
     *,
     ledger: DispositionLedger | None = None,
     absent_baseline: AbiSnapshot | None = None,
+    public_surfaces: ComparisonPublicSurfaces | None = None,
 ) -> PipelineContext:
     """Dispose of *changes* (``old`` -> ``new``) under *rules*, audited.
 
@@ -74,6 +76,7 @@ def dispose_findings(
         rules,
         ledger=ledger,
         absent_baseline=absent_baseline,
+        public_surfaces=public_surfaces,
     )
 
 

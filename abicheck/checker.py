@@ -154,7 +154,9 @@ if TYPE_CHECKING:
     from .model.identity import EntityId  # noqa: F401
     from .policy.acknowledgment import AcknowledgmentList
     from .policy.finding_disposition import PipelineContext
+    from .policy.public_surface_query import ComparisonPublicSurfaces
     from .policy.suppression.rules import SuppressionList
+    from .surface import PublicSurface
 
 __all__ = [
     "ChangeKind",
@@ -275,6 +277,7 @@ def _apply_surface_metrics(
     old_public_entity_ids: frozenset[EntityId] | None = None,
     new_public_entity_ids: frozenset[EntityId] | None = None,
     ledger: DispositionLedger | None = None,
+    public_surfaces: ComparisonPublicSurfaces | None = None,
 ) -> tuple[list[Change], Verdict]:
     """Compute aggregate surface-metric findings (ADR-027 A1/D1.2) and return
     the updated *kept* list and (possibly recomputed) *verdict*.
@@ -303,10 +306,10 @@ def _apply_surface_metrics(
                 new_public_entity_ids=new_public_entity_ids,
                 old_public_type_names=None
                 if old_public_entity_ids is not None
-                else PublicSurfaceQuery.public_type_names(old),
+                else PublicSurfaceQuery.public_type_names(old, public_surfaces),
                 new_public_type_names=None
                 if new_public_entity_ids is not None
-                else PublicSurfaceQuery.public_type_names(new),
+                else PublicSurfaceQuery.public_type_names(new, public_surfaces),
             )
         ),
         suppression,
@@ -570,19 +573,19 @@ def _compute_scope_confidence(
     scope_to_public_surface: bool,
     pp_ctx: PipelineContext,
 ) -> tuple[str, list[str]]:
-    """Compute structured surface-scope confidence (ADR-024 §D5.3).
-
-    Reuses the surfaces already computed by FilterNonPublicSurface to avoid
-    repeating the type-closure walk.
-    """
+    """Structured surface-scope confidence (ADR-024 §D5.3), reusing the
+    comparison's already-resolved public surfaces."""
     from .surface import surface_scope_confidence
+
+    def resolve(snap: AbiSnapshot) -> PublicSurface | None:
+        return pp_ctx.public_surface_of(snap) if scope_to_public_surface else None
 
     return surface_scope_confidence(
         old,
         new,
         scope_enabled=scope_to_public_surface,
-        surf_old=pp_ctx.surf_old,
-        surf_new=pp_ctx.surf_new,
+        surf_old=pp_ctx.surf_old or resolve(old),
+        surf_new=pp_ctx.surf_new or resolve(new),
         demoted=pp_ctx.out_of_surface,
     )
 
@@ -727,14 +730,9 @@ def _env_matrix_contract_changes(
     # which an absent ELF answers "no"); the wheel checks take the raw value,
     # since a non-ELF input has no wheel-portability claim to check at all.
     # Filtered per check, not once over the concatenation (Codex review):
-    # _filter_suppressed_changes appends the SUPPRESSION_WOULD_HIDE_PUBLIC_BREAK
-    # / unknown-reachability diagnostics it raises to the END of its own return
-    # value, so one combined call would move every check's diagnostics past
-    # every other check's findings -- turning the report's
-    # [floor, floor-diagnostic, musl, musl-diagnostic, ...] into
-    # [floor, musl, ..., floor-diagnostic, musl-diagnostic, ...]. DiffResult
-    # .changes preserves list order and the reporters render it, so that is an
-    # observable output change, not an internal detail.
+    # _filter_suppressed_changes appends its diagnostics to the END of its
+    # return value, so one combined call would move every check's diagnostics
+    # past every other check's findings -- an observable report-order change.
     produced: list[Change] = []
     for check_changes in (
         check_platform_baseline_floor(new_elf or ElfMetadata(), floors),
@@ -783,6 +781,7 @@ def compare(
     contract_mode: str | None = None,
     old_public_entity_ids: frozenset[EntityId] | None = None,
     new_public_entity_ids: frozenset[EntityId] | None = None,
+    public_surfaces: ComparisonPublicSurfaces | None = None,
     cross_source_checks: bool = True,
     pattern_preprocessor_scan: bool = True,
     old_source_licence: SourceReadLicence | None = None,
@@ -901,6 +900,9 @@ def compare(
         old_public_entity_ids: ADR-063 Phase 3 (D5) -- *old*'s resolved
             public-surface ``EntityId`` set; *new_public_entity_ids* is
             *new*'s (never swap). ``None`` (default) preserves prior behavior.
+        public_surfaces: this comparison's per-snapshot public-surface
+            resolutions, shared with every consumer below so each side is
+            resolved at most once; ``None`` starts a fresh one.
         cross_source_checks: ADR-068 D3/D4/D5. Runs the migrated
             cross-source check(s) (``workflows.cross_source_hygiene``) on
             *old*/*new*, merging the evolution-stated result into
@@ -1027,6 +1029,7 @@ def compare(
         ),
         ledger=ledger,
         absent_baseline=absent_baseline(new.library) if old is None else None,
+        public_surfaces=public_surfaces,
     )
     memory_trace.mark("compare.dispose:done")
     kept = pp_ctx.kept
@@ -1076,15 +1079,10 @@ def compare(
         c for c in redundant if not (c.caused_by_type or "").startswith("rename:")
     ]
 
-    # ADR-039 — build-context reconciliation. Opt-in: when enabled and the
-    # snapshots carry build-time defines, move context-free header-parse
-    # artifacts (a conditional field's phantom add/remove the build proves never
-    # changed) out of the verdict into an audit bucket. Runs *before* the SONAME
-    # policy so a phantom breaking finding cannot trigger a stale
-    # ``soname_bump_recommended`` that would survive reconciliation and turn the
-    # advertised NO_CHANGE into COMPATIBLE + a spurious bump advisory (Codex
-    # review #498). Authority-rule-safe: it only clears a finding the build
-    # defines prove is a non-change (see diff_reconcile).
+    # ADR-039 — opt-in build-context reconciliation: move header-parse
+    # artifacts the build defines prove never changed into an audit bucket.
+    # Runs *before* the SONAME policy so a phantom break cannot leave a stale
+    # ``soname_bump_recommended`` advisory (Codex review #498).
     reconciled: list[Change] = []
     if reconcile_build_context and old is not None:
         kept, reconciled = reconcile_build_context_findings(kept, old, new)
@@ -1154,9 +1152,7 @@ def compare(
     # label in the reporter is distinct from true display-dedup redundant changes.
     # redundant_count reflects only the display-dedup set; opaque_filtered is additive.
     redundant_for_report = redundant + opaque_filtered
-    true_redundant_count = len(
-        redundant
-    )  # dedup-only (not opaque); used for report label
+    true_redundant_count = len(redundant)  # dedup-only (not opaque); report label
 
     # Compute evidence tiers and confidence from detector results.
     evidence_tiers, confidence, coverage_warnings, evidence_tier = _compute_confidence(
@@ -1165,11 +1161,9 @@ def compare(
         new,
     )
 
-    # ADR-024 §D5.3: structured confidence in the surface resolution itself.
-    # Reuse the surfaces FilterNonPublicSurface already computed (when scoping
-    # ran) to avoid repeating the type-closure walk. Confidence is a
-    # header-provenance notion, so it stays gated on the header flag — a POST
-    # manifest surface is an explicit contract and does not depend on it.
+    # ADR-024 §D5.3: structured confidence in the surface resolution itself,
+    # gated on the header flag (a POST manifest surface is an explicit
+    # contract and does not depend on header provenance).
     scope_confidence, scope_notes = _compute_scope_confidence(
         old if old is not None else new, new, scope_to_public_surface, pp_ctx
     )
@@ -1206,6 +1200,7 @@ def compare(
                 old_public_entity_ids=old_public_entity_ids,
                 new_public_entity_ids=new_public_entity_ids,
                 ledger=ledger,
+                public_surfaces=pp_ctx.public_surfaces,
             )
 
         # ADR-027 A4: pattern-aware verdict modulation. Runs after post-processing
