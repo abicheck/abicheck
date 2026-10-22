@@ -30,7 +30,7 @@ entry point every ``dump``/``scan``/``compare`` resolver actually calls
    ``TestReplayStillEmitsForcedIncludesExactlyOnce`` is the load-bearing
    negative half: it pins why the fix that ``ABI_RELEVANT_FLAG_PREFIXES``'s
    own comment used to propose — capture forced includes into
-   ``CompileUnit.abi_relevant_flags`` — is wrong. ``replay_extra_flags``
+   ``CompileUnit.abi_relevant_flags`` — is wrong. ``replayed_tokens``
    both carries that list *and* independently re-scans raw argv for the same
    tokens, so L4 replay would have emitted every forced include twice.
 
@@ -52,6 +52,9 @@ import pytest
 
 from abicheck.buildsource.build_evidence import BuildEvidence, CompileUnit
 from abicheck.buildsource.header_compile_context import resolve_header_compile_context
+from abicheck.buildsource.source_extractors.compile_invocation import (
+    replayed_tokens_for,
+)
 from abicheck.errors import HeaderCompileContextAmbiguousError
 from abicheck.header_utils import (
     _DASH_I_DIVIDER,
@@ -197,7 +200,7 @@ class TestForcedIncludeRecognizer:
 class TestReplayStillEmitsForcedIncludesExactlyOnce:
     """Why forced includes deliberately never enter ``abi_relevant_flags``.
 
-    ``replay_extra_flags`` carries ``abi_relevant_flags`` through *and*
+    ``replayed_tokens`` carries ``abi_relevant_flags`` through *and*
     independently re-scans raw ``argv`` for forced-include tokens, without
     consulting the ``seen`` set the first pass builds. Capturing a forced
     include into that list — the fix ``ABI_RELEVANT_FLAG_PREFIXES``'s comment
@@ -207,10 +210,12 @@ class TestReplayStillEmitsForcedIncludesExactlyOnce:
     """
 
     def test_argv_sourced_forced_include_is_emitted_once(self) -> None:
-        from abicheck.buildsource.source_extractors._argv import replay_extra_flags
+        from abicheck.buildsource.source_extractors.compile_invocation import (
+            replayed_tokens_for,
+        )
 
         cu = _cu(argv=["c++", "-include", "cfg.h", "-c", "a.cpp"])
-        assert replay_extra_flags(cu, [], "gnu").count("-include") == 1
+        assert replayed_tokens_for(cu, compiler_binary="g++").count("-include") == 1
 
     def test_forced_includes_are_absent_from_abi_relevant_flags(self) -> None:
         from abicheck.buildsource.adapters.adapter_shared import (
@@ -232,10 +237,14 @@ class TestReplayStillEmitsForcedIncludesExactlyOnce:
     def test_response_file_forced_includes_from_build_pack_are_not_replayed(
         self, abi_relevant_flags: list[str], cc_id: str
     ) -> None:
-        from abicheck.buildsource.source_extractors._argv import replay_extra_flags
 
         cu = _cu(abi_relevant_flags=abi_relevant_flags)
-        assert replay_extra_flags(cu, [], cc_id) == []
+        assert (
+            replayed_tokens_for(
+                cu, compiler_binary="clang-cl" if cc_id == "msvc" else "g++"
+            )
+            == []
+        )
 
     @pytest.mark.parametrize(
         ("argv", "cc_id"),
@@ -249,19 +258,25 @@ class TestReplayStillEmitsForcedIncludesExactlyOnce:
     def test_response_file_forced_includes_from_raw_argv_are_not_replayed(
         self, argv: list[str], cc_id: str
     ) -> None:
-        from abicheck.buildsource.source_extractors._argv import replay_extra_flags
 
-        assert replay_extra_flags(_cu(argv=argv), [], cc_id) == []
+        assert (
+            replayed_tokens_for(
+                _cu(argv=argv), compiler_binary="clang-cl" if cc_id == "msvc" else "g++"
+            )
+            == []
+        )
 
     def test_bare_response_file_from_build_pack_is_not_forwarded_to_l2_or_l4(
         self,
     ) -> None:
         from abicheck.buildsource.header_compile_context import _context_flags
-        from abicheck.buildsource.source_extractors._argv import replay_extra_flags
+        from abicheck.buildsource.source_extractors.compile_invocation import (
+            replayed_tokens_for,
+        )
 
         cu = _cu(abi_relevant_flags=["-fPIC", "@evil.rsp"])
         assert _context_flags(cu) == ["-fPIC"]
-        assert replay_extra_flags(cu, [], "gnu") == ["-fPIC"]
+        assert replayed_tokens_for(cu, compiler_binary="g++") == ["-fPIC"]
 
 
 # ---------------------------------------------------------------------------

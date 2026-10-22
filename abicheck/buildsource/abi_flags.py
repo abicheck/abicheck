@@ -42,7 +42,7 @@ from __future__ import annotations
 #: (``matched_unit_count > 0``, ``parsed_with_build_context`` stamped) while
 #: still parsing without it. But routing the fix through *this* list would
 #: have broken L4 replay, which already handles forced includes correctly and
-#: by a different route: ``source_extractors._argv.replay_extra_flags``
+#: by a different route: ``source_extractors.compile_invocation.replayed_tokens``
 #: carries ``abi_relevant_flags`` through
 #: (``_carry_abi_relevant_flags``) **and**, separately and unconditionally,
 #: re-scans the unit's raw ``argv`` for forced-include/include-search tokens
@@ -132,7 +132,7 @@ ABI_RELEVANT_FLAG_PREFIXES: tuple[str, ...] = (
     # this, a resolved --compiler override that now actually invokes icpx/
     # dpcpp for L4 replay (previously always a bare "clang") would replay a
     # SYCL TU as plain C++, silently missing built-in SYCL state (Codex
-    # review). Only the flag's *presence*, carried via replay_extra_flags(),
+    # review). Only the flag's *presence*, carried via replayed_tokens(),
     # not a from-scratch reconstruction of the real build's host/device
     # multi-pass invocation -- see the "Known gaps" entry in AGENTS.md.
     # "-fno-sycl" is a separate, non-prefix-matching spelling (it does not
@@ -274,7 +274,7 @@ def split_operand_survivor(flag: str) -> list[str]:
     every replay path", fresh evidence): this decode was originally
     L2-header-path-specific, living only in ``header_compile_context.
     _split_operand_survivor``. The identical normalized encoding also flows
-    through L4 source replay (:func:`replay_extra_flags` /
+    through L4 source replay (:func:`replayed_tokens` /
     :func:`_carry_abi_relevant_flags` below), which used to read the raw
     ``abi_relevant_flags`` survivors verbatim -- so a TU whose real build
     recorded a ``-Xclang``-wrapped ``-target-abi`` reached L4 replay as one

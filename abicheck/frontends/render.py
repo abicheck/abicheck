@@ -38,6 +38,7 @@ from ..reporter import (
     to_stat as to_stat,  # re-exported; see service.py's own note
     to_stat_json as to_stat_json,  # likewise
 )
+from ..workflows import memory_trace
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -66,6 +67,7 @@ if TYPE_CHECKING:
 ONELINE_FORMAT = "oneline"
 
 
+@memory_trace.phase("report.render")  # stage timing; off by default
 def render_output(
     fmt: str,
     result: DiffResult,

@@ -42,7 +42,7 @@ from ..model import Function
 from ..model.change import RemovedInstantiation
 from ..model.comparison_memo import comparison_memo_active, comparison_memoized
 from ..model.elf_facts import SymbolBinding
-from ..model.execution_cache import memoized
+from ..model.execution_cache import memoized, per_object
 from ..model.graph_identity import _normalize_graph_identity
 from ..model.surface_facts import in_public_surface, is_abi_visible
 from .surface_reconcile import (
@@ -362,6 +362,12 @@ def _reconciled_cpo_surfaces(
 ) -> tuple[list[Function], list[Variable], list[Function], list[Variable]]:
     old_funcs, new_funcs = reconciled_public_functions(old, new)
     old_vars, new_vars = reconciled_public_variables(old, new)
+    # Both cross-kind passes key every declaration of both sides -- the
+    # public lists, the full lists and the alias index -- through the same
+    # *identity*, which re-derives the qualified name each time (~4 keyings
+    # per declaration). It is a pure function of the declaration, so derive
+    # it once per declaration for this pair.
+    identity = per_object(identity)
     cross_old_funcs, cross_new_vars = _reconcile(
         old_funcs,
         new_vars,

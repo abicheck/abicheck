@@ -3,7 +3,7 @@
     "files": {
       "abicheck/btf_metadata.py": "614321e6140b32e7518deb3991dc9b9421107688c952542808ec4da88a17dc73",
       "abicheck/ctf_metadata.py": "42d3f588c6c4567c2a9d43a3ef5b886a753c37dd5357a4199d81d7ffc60d2109",
-      "abicheck/dumper.py": "75afb7ebf255a37b2e6f15ac3309f607c6138488d3c38c23d8564e5b168d5ae8",
+      "abicheck/dumper.py": "c8bbb5f77c4e8d976f3af508602ef62a3fd39c85750060fa16d403f52264577c",
       "abicheck/dwarf_advanced.py": "91cfc7f410a37e7d7ba3ec922ff2944b81253fde3dcfdb806be032087822b339",
       "abicheck/dwarf_metadata.py": "9b9c938fcfdee9e498ef007023c040d914cc8fbc4e6971ef06768463ff69002e",
       "abicheck/dwarf_presence.py": "7e73580ec7a02fdf24e3815cb89e42aa6fe00e46e8cda6b7fe9d547f06ac3f06",
@@ -49,7 +49,7 @@
       "abicheck/extract/elf_symbol_fastpath.py": "9731dd43e2a99edd25f70a77c3c1fa02612d0de537cc73a98ea90b79167b1c21",
       "abicheck/extract/elf_symbol_tables.py": "20aad46c8363b26b371f367dae054f96c92773551b1adec67628348613f4401f",
       "abicheck/extract/elf_symbol_versions.py": "b2aa29df27ed51b9cbe3f6b94e9c99e391036216621fa35cb72dc922ecf39786",
-      "abicheck/extract/env_flags.py": "99a67fc204d3333b16e9314010c1a1d0804ffb00d271fcc63aa7925b57c24ac7",
+      "abicheck/extract/env_flags.py": "6a1343268cdfcd4b2ccaf91008d96b611973bf5cab04467c2585f012e1f5466c",
       "abicheck/extract/export_symbol_identity.py": "2146bd67207411943258124a24271542c8b9767344c1b404aaa9133c0358ff00",
       "abicheck/extract/export_table_read.py": "7783c3baba176ef8b47cb99361f389984bb1797c37ba5d9120866359f60c3601",
       "abicheck/extract/flat_map_dependency_scope.py": "77659ce966d856c4b9008cdc6cf88250a3f50314fdf04140712f4e3797894648",
@@ -149,9 +149,9 @@
       "abicheck/symvers_metadata.py": "372737765cd132e6e87ed891dd465d2958e04debbef774e45212ceb3036871cb",
       "abicheck/type_metadata.py": "9997189de8dac522fd1db8be5ae491d811139503f83abaaded89038eb4aa9cdf"
     },
-    "fingerprint": "bfc49c02bf17c38476b9bf85506c93c63055f16dc7e66f449cc4ec6a539c1776",
+    "fingerprint": "2983b1afa088023133cd32afe31adb187fcf8c30ea7ffc8802e51a5c588eef38",
     "generation": 5,
-    "reason": "merge with main: main's tu_jobs.py worker-clamp refactor (no fact change) on top of this branch's generation 5 (castxml specialization_declared_fact)"
+    "reason": "memory-trace stage marks only"
   },
   "resolver": {
     "files": {
@@ -172,5 +172,50 @@
     "fingerprint": "22d1b29fc580f7fd0e389ea9d4ea7e17b55d54f905e5e30db05c198a13dbf8cd",
     "generation": 2,
     "reason": "Merge of main: #1683 relocated the use-case reachability code behind workflows/compare with no change to what the resolver derives; re-recording the fingerprint over the merged tree."
+  },
+  "source": {
+    "files": {
+      "abicheck/buildsource/call_graph.py": "13d5620926991986b1f02456e80cfa9e5d831d13840833df0d6350e86c0e1e06",
+      "abicheck/buildsource/clang_ast_run.py": "6843af8b3adff08e8a8bba93a09437f0edfef8704c21e553ebed45d8d2ebc1a5",
+      "abicheck/buildsource/include_graph.py": "ef58148778e358df83199de6c509cd25633464a1458a306ce5b48c2254d9a768",
+      "abicheck/buildsource/include_graph_workers.py": "efd233af0f27f8c50f29eb467e88fe42cb907246de22285a78f8552981d0c027",
+      "abicheck/buildsource/inline_graph_fold.py": "8a4072d004dd1cd2ea21703b28e31b6f77fde1c30eb0dcd7044f8cb70c7d9986",
+      "abicheck/buildsource/l5_ast_pass.py": "e1a68183451903b956a749109847cfa40b6f8df96cc52ddf9408b6e047ec5264",
+      "abicheck/buildsource/l5_ast_run.py": "819d2e615617945d0bdb2319765a757a5edbb18fc5b5373e949e83ee2e113e12",
+      "abicheck/buildsource/macro_graph.py": "fa410a488ba4986365705ffb34e3201c643a946b2c31383442c7c740a169b8cf",
+      "abicheck/buildsource/override_graph.py": "0503453212b0604119db1ecf845b629a4e9f790566258855eeddf417f8cb21a7",
+      "abicheck/buildsource/semantic_fact_folds.py": "38f3a5be0b70d62ab840a4bfcd8352abaeeabdfe7553e400c1dca8cdee71c070",
+      "abicheck/buildsource/source_abi.py": "eddec617eb412f2c27ab395c533a5d367b06f2e68c3ee2d981aa6dc37f4dfe4f",
+      "abicheck/buildsource/source_extractors/__init__.py": "e9e5ede124cabdf4ec712339609cc91450a8e5fcb261dfb9f49a4de60c0d45c2",
+      "abicheck/buildsource/source_extractors/_argv.py": "8cb852dbf0ffd02394e6f6ec7479a8f2c9372a3999728f980e5cb2f5700e9bfd",
+      "abicheck/buildsource/source_extractors/_argv_shortopts.py": "91f82c52eb97ade36878250f90d098e4c8925ec0454732717be7f7cc0c4da41f",
+      "abicheck/buildsource/source_extractors/_deadline_bound.py": "791f66d1a6aed37a2237e5093f3940d480d11ba183460b6807953f6243be9fea",
+      "abicheck/buildsource/source_extractors/android.py": "61dbcff2cb35c7d2ad1bb4a7e441acc43ec0791e1905ef7e4eb65a202ceaeb7b",
+      "abicheck/buildsource/source_extractors/base.py": "6e58567edf53d8883f749828e0ab12be61ed2a3a18369023e6e5ba38d5e3c1ce",
+      "abicheck/buildsource/source_extractors/castxml.py": "58292a8fa7cbcb079ec19b15b96960269ff1fe7c72a1657adddaf485e74e8ecc",
+      "abicheck/buildsource/source_extractors/clang.py": "a4a4662c712a384482eb564c54d5e5dd219621b15480a54d2cdbb4f03fc1dab3",
+      "abicheck/buildsource/source_extractors/clang_command.py": "a4f5a0b46a23dc92b89a2f83acc8822448107be822add463e407ae951fa718cf",
+      "abicheck/buildsource/source_extractors/clang_dump_errors.py": "ddb47a07d6258b83da0986248ece68fc6e737eb25dc7d90a141d4e1833dc1dd7",
+      "abicheck/buildsource/source_extractors/clang_macros.py": "a1970f60666e573bda375ea9017705b0ad9d43838524d617b0f4ee60a009bbe3",
+      "abicheck/buildsource/source_extractors/clang_node_predicates.py": "1e9556dab627cac4da137bf0f34b858f6e76b194f932aeb92ffe4ba8f07bb7bf",
+      "abicheck/buildsource/source_extractors/clang_nodes.py": "9463fbac6fe36203c29f20ab3203791e3b558f21f4ebf66ee732f39aaf912c9b",
+      "abicheck/buildsource/source_extractors/clang_public_roots.py": "26b787aca87c1549b821f4f420be1960b48317e9bdefd2e946b3b2903238e214",
+      "abicheck/buildsource/source_extractors/clang_source_edges.py": "c9b8c3daacd02c4913b486a6ac658b435744243ed4433f14792588f67ef800e9",
+      "abicheck/buildsource/source_extractors/compile_invocation.py": "8af29f22859f7e8fd81d5abd2266e017acc31ff539db9e42bd873ae544f9dccf",
+      "abicheck/buildsource/source_graph.py": "a374d3f54b1d83b8c0d5b4d0b8dd0deb2ab5f696236f79f8974358a8907e05bd",
+      "abicheck/buildsource/source_graph_build_source_abi.py": "abc43bd1d6845f2af8ae1ad868e5455962452d64838f6c0abedc281e244090ff",
+      "abicheck/buildsource/source_link.py": "b7cabfd63c78673ccc2593d4f558069472dfa6bcb2d792a2b216f3d04230b338",
+      "abicheck/buildsource/source_replay.py": "f1c76b8fbe787135f6ff68ee3b3aa306f6259caf4bea069d4eeb2b440cd16992",
+      "abicheck/buildsource/source_replay_pool.py": "9073d72dfb693fac045dc94dd8d03fb9ad3a6f653ddca15c712609a77302ece2",
+      "abicheck/buildsource/source_replay_shared.py": "695ad69596ebb3f5d268bd80c7e4de7a2c6929d0f088955f967a5a70e849d3cd",
+      "abicheck/buildsource/template_graph.py": "773f084c435cbcd213f9e3e16c000a3787f2d43ea264e595278ebaa9961308e7",
+      "abicheck/buildsource/template_graph_fold.py": "3e276ed9e4ebfe5cc41a2587f15662a79a986b4d361979c75143dbc7d220cdab",
+      "abicheck/buildsource/template_graph_value_decls.py": "d50b5cd979744d4ecb4ae2ad859faf99689d6af50d0e0d0a24d867f99a83931c",
+      "abicheck/buildsource/type_graph.py": "a028a875057cd0cbf2930a431bfa1e579f7b770e0d124cbcfe715724e89d12e5",
+      "abicheck/buildsource/type_graph_index.py": "7375f7baec7ceb3dd4a52a489b89e5a3571750dffca7490d1c5870301d55202d"
+    },
+    "fingerprint": "37d8cc8044a5f7dcfff913018a7dd707f80d464854d55f409b0ea7aa7e950b0e",
+    "generation": 3,
+    "reason": "bumped to 3: main rewrote the clang argv builder around a parsed CompilerInvocation (compile_invocation.py) and moved the shared argv helpers; the emitted L4/L5 flags may change for the same build, so the axis is bumped conservatively rather than recorded as a reviewed no-semantic-change"
   }
 }

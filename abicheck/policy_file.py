@@ -869,22 +869,21 @@ def dedup_validate_overrides_warnings() -> Iterator[None]:
     `scan --against`, or a direct Python API `run_compare` call, none of
     which ever enter this scope.
 
-    Only dedupes within one OS process: a `ContextVar` set here is not
-    automatically visible to a *different* process, so a caller that forks
-    or spawns a subprocess to do its per-library work would need to
-    propagate this scope itself (nothing in this codebase currently does).
-    `compare-release`'s own parallel fan-out uses a `ThreadPoolExecutor`
-    (real OS threads, not separate processes) precisely so this scope
-    *can* reach it -- see `workflows.release_members._compare_parallel`'s
-    own docstring for how it explicitly propagates a `contextvars.Context`
-    copy into each worker thread, since `ThreadPoolExecutor` does not do
-    that automatically either.
+    Per OS process: a forked child's additions die with it, so the release
+    process fan-out primes the scope in the parent first
+    (`workflows.release_member_processes`); its thread path copies the
+    `contextvars.Context` into each worker (`workflows.keyed_thread_pool`).
     """
     token = _warning_dedup_var.set(set())
     try:
         yield
     finally:
         _warning_dedup_var.reset(token)
+
+
+def dedup_scope_active() -> bool:
+    """Whether a :func:`dedup_validate_overrides_warnings` scope is active."""
+    return _warning_dedup_var.get() is not None
 
 
 def pending_validate_overrides_warnings(pf: PolicyFile) -> list[str]:

@@ -776,6 +776,8 @@ inputs rather than `DiffResult` mutations applied after classification.
 
 ### P1 — Compiler invocation handling needs one typed model
 
+**Status — first slice implemented.** `source_extractors/compile_invocation.py` is the parsed model (`parse_compile_invocation` / `CompilerInvocation`); the clang AST-dump and macro argv, the castxml replay argv, the public-root probe and the replay cache key consume it. The remaining slices (L2 header argv, typed include search, launcher/`env` parsing, `SourceOperand`/`CompileAction`) are listed in [L2/L4/L5 extraction convergence](l4-l2-extraction-convergence.md) Phase 3. The design below is unchanged.
+
 Recent fixes (referenced in this repository's git history and in
 AGENTS.md's compiler-invocation and toolchain-profile entries) centralized
 launcher stripping, environment-prefix handling, driver recognition,

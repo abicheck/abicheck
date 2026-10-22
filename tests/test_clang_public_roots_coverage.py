@@ -114,7 +114,7 @@ def test_include_roots_msvc_flag_ignored_in_gnu_mode() -> None:
 
     raws = [raw for raw, _ in m._compile_unit_include_roots(cu)]
 
-    # replay_extra_flags only carries /I in MSVC mode, so nothing is added here.
+    # replayed_tokens only carries /I in MSVC mode, so nothing is added here.
     assert "should-not-parse" not in raws
 
 
