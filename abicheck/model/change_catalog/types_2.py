@@ -584,8 +584,8 @@ TYPES_ENTRIES_2: list[ChangeKindMeta] = [
         "this is not a BREAKING ABI event; a consumer's own `Box<char>` names a "
         "different type and fails to compile or silently changes meaning. "
         "Reported only when both sides record the defaults (clang header "
-        "backend); castxml cannot record them and reports a coverage gap "
-        "instead (ADR-085 D2/D3).",
+        "backend). castxml cannot record them, so a castxml run does not "
+        "report this change.",
         description_template="Class template '{name}' default template argument changed ({detail}). No exported instantiation carries it; consumer source that names the template with the default may now refer to a different type.",
         entity=_ENT.TYPE,
         operation=_OP.MODIFIED,

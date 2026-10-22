@@ -452,7 +452,7 @@ TYPE_FACTS: list[FactDefinition] = [
             "for a parameter with no default), read from the merged all-type "
             "index. Only PRESENT feeds the header-level default-change kind; a "
             "castxml or pre-v62 side is UNKNOWN and never compares equal to a "
-            "recorded side (ADR-085 D1)."
+            "recorded side."
         ),
     ),
     _E(

@@ -1136,6 +1136,20 @@ FACT_ROWS: tuple[FactRow, ...] = (
     ),
     FactRow(
         "RecordType",
+        "template_param_defaults_fact",
+        _NONE,
+        _PARTIAL,
+        note=(
+            "Schema v62. clang records each type parameter's spelled default for "
+            "a class-template pattern whose parameters are all type parameters "
+            "(`extract/headers/clang/template_param_indexes.py`); a template with "
+            "a non-type or template-template parameter stays NOT_COLLECTED. "
+            "castxml emits no pattern record for an uninstantiated template, so "
+            "it never sets this."
+        ),
+    ),
+    FactRow(
+        "RecordType",
         "entity_id",
         _FULL,
         _FULL,
