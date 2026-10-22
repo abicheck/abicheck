@@ -107,9 +107,11 @@ class CompilerInvocation:
     carried: tuple[CarriedFlag, ...]
     #: Include-search operands recovered from :attr:`carried` that the structured
     #: buckets do not hold: ``-iquote``/``-idirafter`` (both spellings) and, in
-    #: MSVC mode, ``/I``/``-I``. Kept in replay order and in the operand's recorded
-    #: spelling, not rebased, so a probe resolves them against the compile unit's
-    #: ``directory`` exactly as it does :attr:`~..build_evidence.CompileUnit.include_paths`.
+    #: MSVC mode, any ``/I`` or ``-I`` token the argv scanner carried (the scanner
+    #: carries only ``/I`` today, so a bare ``-I`` argv operand is not included).
+    #: Kept in replay order and in the operand's recorded spelling, not rebased,
+    #: so a probe resolves them against the compile unit's ``directory`` exactly
+    #: as it does :attr:`~..build_evidence.CompileUnit.include_paths`.
     replayed_include_dirs: tuple[str, ...] = ()
 
 

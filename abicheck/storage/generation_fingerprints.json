@@ -203,7 +203,7 @@
       "abicheck/buildsource/source_extractors/clang_nodes.py": "9463fbac6fe36203c29f20ab3203791e3b558f21f4ebf66ee732f39aaf912c9b",
       "abicheck/buildsource/source_extractors/clang_public_roots.py": "c1752f2798886c97716c2361c2fe772defa2b6170104b8486871ecbc7beb3ba3",
       "abicheck/buildsource/source_extractors/clang_source_edges.py": "c9b8c3daacd02c4913b486a6ac658b435744243ed4433f14792588f67ef800e9",
-      "abicheck/buildsource/source_extractors/compile_invocation.py": "b5bcf162889c9575bee7a117c78ddd014038e9461a00d847085edb1804ad5d05",
+      "abicheck/buildsource/source_extractors/compile_invocation.py": "e7c5891901fa149f970458b18839654e0e7a4133c048ce483abc16de91bba263",
       "abicheck/buildsource/source_graph.py": "28cb2b485ffcf276e9c751b99261cc2d3f4ab2ad440612ddb3111bc307372652",
       "abicheck/buildsource/source_graph_build_source_abi.py": "abc43bd1d6845f2af8ae1ad868e5455962452d64838f6c0abedc281e244090ff",
       "abicheck/buildsource/source_link.py": "b7cabfd63c78673ccc2593d4f558069472dfa6bcb2d792a2b216f3d04230b338",
@@ -217,8 +217,8 @@
       "abicheck/buildsource/type_graph.py": "a028a875057cd0cbf2930a431bfa1e579f7b770e0d124cbcfe715724e89d12e5",
       "abicheck/buildsource/type_graph_index.py": "7375f7baec7ceb3dd4a52a489b89e5a3571750dffca7490d1c5870301d55202d"
     },
-    "fingerprint": "d0e35d4f1a3c7ba4b0f94c965d2b38b14742d97f0c38b15c9c9615424727671d",
+    "fingerprint": "3e672d6b5a5224e43d545b47f1d8eaaaec5b75e4bcefd7e11c93e459686413b4",
     "generation": 4,
-    "reason": "Typed include-search operands are carried on CompilerInvocation and read by clang_public_roots; the probe's resolved roots are unchanged (checked against the old rescan on every unit of the differential corpus), so no SOURCE_GENERATION bump."
+    "reason": "Docstring-only edit to CompilerInvocation.replayed_include_dirs; no code or derived output changes."
   }
 }
