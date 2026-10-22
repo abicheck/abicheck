@@ -168,7 +168,8 @@ suppressions:
 # ---------------------------------------------------------------------------
 # case193: the deliberate counter-example -- an ordinary, out-of-line exported
 # function's internal call is *not* public-reachable, so the same broad
-# suppression rule applies cleanly with no diagnostic at all.
+# suppression rule still hides it, and the graph never clears it, so the
+# default gate records only the informational graph_coverage_insufficient_for_suppression.
 # ---------------------------------------------------------------------------
 
 _CASE193_MANGLED = "_ZN4demo6detail11log_contextEv"

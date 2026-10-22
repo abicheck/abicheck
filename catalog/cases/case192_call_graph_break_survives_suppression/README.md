@@ -135,6 +135,7 @@ reachability-aware suppression engine, so neither can distinguish this case
 from an ordinary internal-symbol removal, let alone refuse a suppression
 rule based on proven call-graph reachability. Contrast with
 [case193](../case193_ordinary_exported_fn_call_not_reachable/README.md),
-where the identical suppression rule applies cleanly with no diagnostic at
-all, because the calling function there is not one a consumer's own binary
-compiles.
+where the identical suppression rule still hides the removal, because the
+calling function there is not one a consumer's own binary compiles. The graph
+never clears that removal, so the default gate also records a
+`graph_coverage_insufficient_for_suppression` informational record for it.

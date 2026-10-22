@@ -39,6 +39,7 @@ from abicheck.policy.suppression.rules import Suppression, SuppressionList
 _DIAGNOSTIC_KINDS = {
     ChangeKind.SUPPRESSION_WOULD_HIDE_PUBLIC_BREAK,
     ChangeKind.SUPPRESSION_REACHABILITY_UNKNOWN,
+    ChangeKind.GRAPH_COVERAGE_INSUFFICIENT_FOR_SUPPRESSION,
 }
 
 #: Rule shapes that, against the findings below, cover all three outcomes:
