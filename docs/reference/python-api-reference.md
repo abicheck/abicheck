@@ -543,7 +543,7 @@ One-line summary for CI gates.
 |---|---|---|
 | `result` | `DiffResult` | *(required)* |
 | *(keyword-only below)* | | |
-| `severity_config` | `SeverityConfig \| None` | `None` |
+| `envelope` | `ReportEnvelope` | *(required)* |
 
 **Returns:** `str`
 

@@ -839,7 +839,7 @@
     },
     {
       "path": "abicheck/reporter_markdown.py",
-      "baseline_lines": 1336,
+      "baseline_lines": 1234,
       "target": "report",
       "rule": "no_growth",
       "disposition": "migrate",
@@ -1202,7 +1202,7 @@
     },
     {
       "path": "tests/test_checker_reporter_branches.py",
-      "baseline_lines": 1694,
+      "baseline_lines": 1665,
       "target": "tests/unit-or-contract ownership matching production migration",
       "rule": "no_growth",
       "disposition": "migrate",
@@ -1312,7 +1312,7 @@
     },
     {
       "path": "tests/test_contract_authoritative_pipeline.py",
-      "baseline_lines": 1574,
+      "baseline_lines": 1573,
       "target": "tests/unit-or-contract ownership matching production migration",
       "rule": "no_growth",
       "disposition": "migrate",
@@ -1796,7 +1796,7 @@
     },
     {
       "path": "tests/test_reporter.py",
-      "baseline_lines": 1778,
+      "baseline_lines": 1769,
       "target": "tests/unit-or-contract ownership matching production migration",
       "rule": "no_growth",
       "disposition": "migrate",

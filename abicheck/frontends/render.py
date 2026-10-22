@@ -126,10 +126,10 @@ def render_output(
     returned a summary instead of raising :class:`ValidationError`. Call the
     function or format you want.
 
-    ADR-061 gap C / duplication-and-convergence Phase 4: apart from the two
-    ``--stat``/``oneline`` short-circuits below (a summary-only document with
-    no shared-document counterpart -- see ``report/envelope.py``'s own scope
-    note), this function decides nothing per format. It builds **one**
+    ADR-061 gap C / duplication-and-convergence Phase 4: this function decides
+    nothing per format. The one-line summary is a projection of the same
+    envelope as every other format (its gate and disposition note are read
+    from it). It builds **one**
     :class:`~abicheck.report.envelope.ReportEnvelope` -- the shared document
     (compatibility, assurance, scope, dispositions, the consumer-scoped gate
     facts and the persisted exit decision), the severity ``GateDecision``, and
@@ -145,10 +145,8 @@ def render_output(
     # ``--stat``'s summary and got a report rather than a ValidationError
     # (CodeRabbit review, PR #1284).
     report_mode, show_impact = _normalize_report_mode(report_mode, show_impact)
-    if fmt == ONELINE_FORMAT:
-        return to_stat(result, severity_config=severity_config)
-
-    _reject_unsupported_format(fmt)
+    if fmt != ONELINE_FORMAT:
+        _reject_unsupported_format(fmt)
     # Plan slice 7o (Codex review, PR #1284): `None` -- the default -- means
     # "resolve it from the format", which is what makes automatic demangling
     # true for this public entry point and not only for the CLI in front of
@@ -172,12 +170,14 @@ def render_output(
         ),
         severity_config=severity_config,
     )
+    if fmt == ONELINE_FORMAT:
+        return to_stat(result, envelope=envelope)
     return render_envelope(fmt, envelope)
 
 
 #: The formats :func:`render_envelope` projects. ``oneline``/``--stat`` is not
-#: here: it short-circuits above, being a summary-only document rather than a
-#: projection of the shared one (``report/envelope.py``'s scope note).
+#: here: it is projected by ``reporter.to_stat`` from the same envelope, since
+#: its summary is a separate document rather than a rendering of the shared one.
 _SUPPORTED_FORMATS = frozenset(
     {"json", "sarif", "html", "junit", "markdown", "md", "review", "terminal"}
 )
@@ -387,11 +387,7 @@ def _project_review(envelope: ReportEnvelope) -> str:
     """The compact review digest (unconditional-recommendation Markdown)."""
     from ..reporter import to_review_digest
 
-    text = to_review_digest(
-        envelope.result,
-        severity_config=envelope.severity_config,
-        envelope=envelope,
-    )
+    text = to_review_digest(envelope.result, envelope=envelope)
     # Pre-existing gap, surfaced by the cross-projection test rather than by
     # this PR: of the three human projections only Markdown appended the
     # dependency section, so `-o review=... --follow-deps` had always
@@ -410,11 +406,7 @@ def _project_terminal(envelope: ReportEnvelope) -> str:
         render_terminal_digest_document,
     )
 
-    document = build_review_digest_document(
-        envelope.result,
-        severity_config=envelope.severity_config,
-        envelope=envelope,
-    )
+    document = build_review_digest_document(envelope.result, envelope=envelope)
     text = render_terminal_digest_document(document)
     # `--follow-deps` is an explicitly requested analysis, so producing
     # nothing for it in the output an ordinary `compare` prints would read

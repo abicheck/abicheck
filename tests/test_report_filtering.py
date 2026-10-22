@@ -23,7 +23,8 @@ from abicheck.compare.finding_redundancy import (
 from abicheck.diff_filtering import _filter_reserved_field_renames
 from abicheck.policy.evaluate import effective_kind_sets
 from abicheck.report.view import ShowOnlyFilter, apply_show_only
-from abicheck.reporter import to_json, to_markdown, to_stat, to_stat_json
+from abicheck.reporter import to_json, to_markdown, to_stat_json
+from tests._report_test_helpers import stat_line
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -573,7 +574,7 @@ class TestStatMode:
                 Change(ChangeKind.FUNC_ADDED, "bar", "added"),
             ],
         )
-        text = to_stat(result)
+        text = stat_line(result)
         assert "BREAKING" in text
         assert "1 breaking" in text
         assert "1 compatible" in text
@@ -596,14 +597,14 @@ class TestStatMode:
             changes=[Change(ChangeKind.TYPE_SIZE_CHANGED, "T", "size")],
             redundant_changes=[Change(ChangeKind.FUNC_PARAMS_CHANGED, "f", "changed")],
         )
-        text = to_stat(result)
+        text = stat_line(result)
         assert "1 redundant hidden" in text
 
     def test_stat_via_to_markdown(self):
         result = _make_result(
             changes=[Change(ChangeKind.FUNC_REMOVED, "foo", "removed")],
         )
-        text = to_stat(result)
+        text = stat_line(result)
         assert "BREAKING" in text
         assert "total" in text
 

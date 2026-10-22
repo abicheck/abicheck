@@ -125,6 +125,8 @@ def _members(d: Mapping[str, Any]) -> str:
                     "source_breaks",
                     "risk_changes",
                     "compatible_additions",
+                    "surface_removals",
+                    "surface_modifications",
                     "quality_issues",
                     "informational",
                 )
@@ -133,7 +135,7 @@ def _members(d: Mapping[str, Any]) -> str:
         )
     body = (
         "<table class='changes'><thead><tr><th>Member</th><th>Verdict</th><th>Breaking</th>"
-        "<th>Source breaks</th><th>Risk</th><th>Additions</th><th>Quality</th><th>Informational</th></tr></thead>"
+        "<th>Source breaks</th><th>Risk</th><th>Additions</th><th>Removed</th><th>Changed</th><th>Quality</th><th>Informational</th></tr></thead>"
         f"<tbody>{''.join(rows)}</tbody></table>"
         if rows
         else "<p class='rel-note'>No member reached a completed comparison.</p>"

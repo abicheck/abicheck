@@ -2334,23 +2334,37 @@ _extra_args_has_export() {
   [[ -n "$(_extra_args_exports)" ]]
 }
 
-# Every export the real invocation carries.
+# Whether this script's own `-o FORMAT=DESTINATION` export must still be
+# injected beside the caller's `extra-args` exports. $1 is our destination
+# (`-` for stdout).
 #
-# Plan slice 7m: the `format:`/`output-file:` inputs are a convenience for
-# stating *one* export; `extra-args -o` is the escape hatch that states the
-# whole set. When the caller reaches for it, this script injects none of its
-# own -- `-o` is repeatable and two exports to one destination is a usage
-# error rather than a silent last-wins override, so appending ours to theirs
-# would either duplicate a destination they named or force a stdout report
-# they did not ask for. That also reproduces what the retired
-# `extra-args` format/output override did: the caller's value is the
-# effective one.
+# Issue #1714: this used to answer "only when extra-args names no export at
+# all", so `extra-args: -o json=x.json` silently dropped the Action's own
+# report -- the one the step summary, PR comment and `report-path` read.
+# `-o` is repeatable, so both are injected; the only real conflict is two
+# exports to one destination (a CLI usage error), and there the caller's
+# explicit export wins.
+_own_export_needed() {
+  local _own_dest="${1:--}" _fmt _dest
+  while IFS=$'\t' read -r _fmt _dest; do
+    [[ -n "$_fmt" ]] || continue
+    [[ "$_dest" == "$_own_dest" ]] && return 1
+  done <<<"$(_extra_args_exports)"
+  return 0
+}
+
+# Every export the real invocation carries: this script's own (unless the
+# caller's `extra-args` claims the same destination, see
+# `_own_export_needed`) followed by every caller document export.
 #
-# A caller who wants both a stdout report and a file says so in their own
-# set (`-o json=- -o json=b.json`), which is one operand more explicit and
-# one mechanism fewer than the two flags it replaces.
+# Directory exports (a destination ending in `/`, or an existing directory)
+# are the per-component fan-out and are skipped: they are not a document
+# this script can read (Codex review, P1 -- `reports/` as the primary report
+# published REPORT_UNREADABLE). A directory destination never equals ours,
+# so a caller naming only directory exports still gets our own document
+# export as the primary report.
 _effective_exports() {
-  if ! _extra_args_has_export; then
+  if _own_export_needed "${OUTPUT_FILE:--}"; then
     printf '%s\t%s\n' "${FORMAT:-markdown}" "${OUTPUT_FILE:--}"
   fi
   # Documents only. A destination ending in `/` is a *directory* export --
@@ -2381,9 +2395,6 @@ _effective_exports() {
     [[ -d "$_dest" ]] && continue
     _documents+="$_fmt"$'\t'"$_dest"$'\n'
   done <<<"$(_extra_args_exports)"
-  if _extra_args_has_export && [[ -z "$_documents" ]]; then
-    _documents="markdown"$'\t'"-"$'\n'
-  fi
   printf '%s' "$_documents"
 }
 
@@ -2572,6 +2583,29 @@ _effective_output_file() {
 # how a valid secondary once masked an unusable stdout report
 # (Codex/CodeRabbit review); this predicate is what keeps that closed under
 # a grammar where both are ordinary at once.
+# The file the `report-path` output publishes, as FORMAT<TAB>PATH (empty
+# when the run writes no report file at all).
+#
+# Issue #1714: this script's own export now rides beside the caller's
+# `extra-args` exports (`_own_export_needed`), so when our own export goes to
+# a file that file is the Action's report -- e.g. `format: sarif`'s default
+# `abicheck-results.sarif`, which the upload-sarif step gates on, even when
+# the caller adds `-o json=-`. When ours goes to stdout (or a caller export
+# claims its destination), the first caller *file* export is published, as
+# it was when caller exports replaced ours.
+_report_path_export() {
+  if [[ -n "${OUTPUT_FILE:-}" ]] && _own_export_needed "$OUTPUT_FILE"; then
+    printf '%s\t%s' "${FORMAT:-}" "$OUTPUT_FILE"
+    return 0
+  fi
+  local _fmt _dest
+  while IFS=$'\t' read -r _fmt _dest; do
+    [[ -n "$_fmt" && "$_dest" != "-" ]] || continue
+    printf '%s\t%s' "$_fmt" "$_dest"
+    return 0
+  done <<<"$(_effective_exports)"
+}
+
 _report_goes_to_stdout() {
   local _fmt _dest
   while IFS=$'\t' read -r _fmt _dest; do
@@ -3977,7 +4011,14 @@ elif [[ "$MODE" == "compare" ]]; then
     # mismatched content to CodeQL. Leaving `OUTPUT_FILE` unset here when
     # the effective format isn't sarif means the upload step instead finds
     # no file at all, a loud failure rather than a silent one.
-    if [[ "${_EFFECTIVE_FORMAT:-$FORMAT}" == "sarif" && -z "$OUTPUT_FILE" ]]; then
+    #
+    # Issue #1714: this script's own `$FORMAT` export is now injected beside
+    # the caller's (`_own_export_needed`), so the default names *our own*
+    # export's file and is keyed on the nominal `$FORMAT` that export
+    # renders: `format: sarif` really writes SARIF to it even when
+    # `extra-args` adds `-o json=-`, and a caller-only `-o sarif=-` under
+    # `format: markdown` gets no sarif filename attached to our markdown.
+    if [[ "$FORMAT" == "sarif" && -z "$OUTPUT_FILE" ]]; then
       OUTPUT_FILE="abicheck-results.sarif"
     fi
     # Plan slice 7m: one export request, so one flag -- the format and its
@@ -3986,7 +4027,7 @@ elif [[ "$MODE" == "compare" ]]; then
     # export of its own: `-o` is repeatable and two exports to one
     # destination is a usage error, not a last-wins override, so a caller
     # who states their own export set owns it whole.
-    if ! _extra_args_has_export; then
+    if _own_export_needed "${OUTPUT_FILE:--}"; then
       CMD+=(-o "$FORMAT=${OUTPUT_FILE:--}")
     fi
 
@@ -4134,12 +4175,12 @@ elif [[ "$MODE" == "deps-tree" ]]; then
     CMD+=(--dry-run)
     # A dry run writes no report, so its only export is stdout -- and only
     # when the caller named none of their own (plan slice 7m).
-    if ! _extra_args_has_export; then
+    if _own_export_needed "-"; then
       CMD+=(-o "$FORMAT=-")
     fi
   else
     OUTPUT_FILE="${INPUT_OUTPUT_FILE:-}"
-    if ! _extra_args_has_export; then
+    if _own_export_needed "${OUTPUT_FILE:--}"; then
       CMD+=(-o "$FORMAT=${OUTPUT_FILE:--}")
     fi
     # The structured report the verdict dispatch reads (ADR-063 T8): exit 1
@@ -4175,12 +4216,12 @@ elif [[ "$MODE" == "deps-compare" ]]; then
     CMD+=(--dry-run)
     # A dry run writes no report, so its only export is stdout -- and only
     # when the caller named none of their own (plan slice 7m).
-    if ! _extra_args_has_export; then
+    if _own_export_needed "-"; then
       CMD+=(-o "$FORMAT=-")
     fi
   else
     OUTPUT_FILE="${INPUT_OUTPUT_FILE:-}"
-    if ! _extra_args_has_export; then
+    if _own_export_needed "${OUTPUT_FILE:--}"; then
       CMD+=(-o "$FORMAT=${OUTPUT_FILE:--}")
     fi
     # The structured report the verdict dispatch reads (ADR-063 T8): exit 1
@@ -4245,6 +4286,10 @@ _EFFECTIVE_FORMAT="$(_effective_format)"
 # the pre-run fingerprint bookkeeping and the destination inventory both use the
 # path `abicheck` will actually write, not the superseded input value.
 _EFFECTIVE_OUTPUT_FILE="$(_effective_output_file)"
+# The `report-path` output's file and its format (see `_report_path_export`).
+_REPORT_PATH_EXPORT="$(_report_path_export)"
+_REPORT_PATH_FILE="${_REPORT_PATH_EXPORT#*$'\t'}"
+_REPORT_PATH_FORMAT="${_REPORT_PATH_EXPORT%%$'\t'*}"
 
 _group_start "abicheck $MODE"
 printf '%s\n' "Command: $(_sanitize_annotation "${CMD[*]}")"
@@ -4338,6 +4383,10 @@ else:
 _output_file_pre_fp=""
 if [[ -n "${_EFFECTIVE_OUTPUT_FILE:-}" ]]; then
   _output_file_pre_fp="$(_file_fingerprint "$_EFFECTIVE_OUTPUT_FILE")"
+fi
+_report_path_pre_fp=""
+if [[ -n "${_REPORT_PATH_FILE:-}" ]]; then
+  _report_path_pre_fp="$(_file_fingerprint "$_REPORT_PATH_FILE")"
 fi
 _extra_write_json_path="$(_extra_args_write_json_path || true)"
 _extra_write_json_pre_fp=""
@@ -5823,7 +5872,7 @@ echo "abicheck verdict: $VERDICT (exit code $ABICHECK_EXIT)"
 # avoid for the upload it explains (Codex review, PR #998, fresh evidence).
 _SARIF_UPLOAD_FORMAT_MISMATCH=0
 if [[ "${FORMAT:-}" == "sarif" && "${INPUT_UPLOAD_SARIF:-false}" == "true" \
-   && "${_EFFECTIVE_FORMAT:-$FORMAT}" != "sarif" ]]; then
+   && "${_REPORT_PATH_FORMAT-${_EFFECTIVE_FORMAT:-$FORMAT}}" != "sarif" ]]; then
   _SARIF_UPLOAD_FORMAT_MISMATCH=1
   echo "::warning title=abicheck upload-sarif::format: sarif and upload-sarif: true were requested, but extra-args' own exports replaced it with a non-sarif format, so the real output is not SARIF. Skipping the SARIF upload (report-path withheld) rather than uploading mismatched content."
 fi
@@ -5867,12 +5916,24 @@ fi
   # "no freshness claim" when that bookkeeping never ran -- the same rule
   # `_json_report_src` applies, for the same snippet-extraction tests.
   # `${x-default}`, not `${x:-default}` -- see `_caller_json_destinations`.
-  _REPORT_PATH_OUT="${_EFFECTIVE_OUTPUT_FILE-${OUTPUT_FILE:-}}"
+  #
+  # Issue #1714: `_REPORT_PATH_FILE` (`_report_path_export`) when set -- the
+  # Action's own report file now that it rides beside caller exports -- with
+  # its own pre-run fingerprint.
+  if [[ -n "${_REPORT_PATH_FILE+x}" ]]; then
+    _REPORT_PATH_OUT="$_REPORT_PATH_FILE"
+    _report_out_pre_fp_set="${_report_path_pre_fp+x}"
+    _report_out_pre_fp="${_report_path_pre_fp:-}"
+  else
+    _REPORT_PATH_OUT="${_EFFECTIVE_OUTPUT_FILE-${OUTPUT_FILE:-}}"
+    _report_out_pre_fp_set="${_output_file_pre_fp+x}"
+    _report_out_pre_fp="${_output_file_pre_fp:-}"
+  fi
   if [[ "$_SARIF_UPLOAD_FORMAT_MISMATCH" == "1" ]]; then
     echo "report-path="
   elif [[ -n "$_REPORT_PATH_OUT" && -f "$_REPORT_PATH_OUT" ]] \
-       && { [[ -z "${_output_file_pre_fp+x}" ]] \
-            || [[ "$(_file_fingerprint "$_REPORT_PATH_OUT")" != "$_output_file_pre_fp" ]]; }; then
+       && { [[ -z "$_report_out_pre_fp_set" ]] \
+            || [[ "$(_file_fingerprint "$_REPORT_PATH_OUT")" != "$_report_out_pre_fp" ]]; }; then
     echo "report-path=$_REPORT_PATH_OUT"
   else
     echo "report-path="
@@ -6425,6 +6486,7 @@ runpy.run_module("abicheck.cli_pr_comment", run_name="__main__")
     ${run_url:+--report-url "$run_url"} \
     ${INPUT_PR_COMMENT_REPORT_ARTIFACT_URL:+--report-artifact-url "$INPUT_PR_COMMENT_REPORT_ARTIFACT_URL"} \
     ${GITHUB_WORKSPACE:+--path-prefix "$GITHUB_WORKSPACE"} \
+    ${INPUT_PR_COMMENT_KEY:+--comment-key "$INPUT_PR_COMMENT_KEY"} \
     ${PR_GATE_ARGS[@]+"${PR_GATE_ARGS[@]}"} \
     ${subject_args[@]+"${subject_args[@]}"} \
     -o "$PR_BODY") || true
@@ -6445,7 +6507,28 @@ runpy.run_module("abicheck.cli_pr_comment", run_name="__main__")
 }
 
 # Hidden marker the renderer embeds; used to find OUR sticky comment.
-PR_COMMENT_MARKER="<!-- abicheck-sticky-report -->"
+# `pr-comment-key` (issue #1708) folds a per-job key into it so parallel jobs
+# keep separate comments. Sanitization mirrors
+# abicheck/pr_comment_render.py:sanitize_comment_key exactly (trim, then every
+# byte outside [A-Za-z0-9._-] -> '-', max 64), so the lookup matches the
+# rendered body and a key can never inject `-->` or a jq quote.
+_sanitize_pr_comment_key() {
+  local k="$1"
+  k="${k#"${k%%[![:space:]]*}"}"
+  k="${k%"${k##*[![:space:]]}"}"
+  k=$(printf '%s' "$k" | LC_ALL=C tr -c 'A-Za-z0-9._-' '-')
+  printf '%s' "${k:0:64}"
+}
+_pr_comment_marker() {
+  local k
+  k=$(_sanitize_pr_comment_key "${1:-}")
+  if [[ -n "$k" ]]; then
+    printf '<!-- abicheck-sticky-report:%s -->' "$k"
+  else
+    printf '%s' "<!-- abicheck-sticky-report -->"
+  fi
+}
+PR_COMMENT_MARKER="$(_pr_comment_marker "${INPUT_PR_COMMENT_KEY:-}")"
 
 _create_pr_comment() {
   # Create a fresh comment from a body file via the REST API (jq builds the

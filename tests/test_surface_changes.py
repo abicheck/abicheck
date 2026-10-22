@@ -43,6 +43,7 @@ from abicheck.report.surface_changes import (
     render_surface_changes_lines,
     render_surface_changes_section,
 )
+from tests._report_test_helpers import review_digest, review_document
 
 
 def _snapshots() -> tuple[AbiSnapshot, AbiSnapshot]:
@@ -216,13 +217,12 @@ def test_review_digest_and_full_markdown_itemize_every_group() -> None:
     from abicheck.report.dispatch_markdown import (
         _to_markdown_root_cause,
         to_markdown,
-        to_review_digest,
     )
 
     old, new = _snapshots()
     result = compare(old, new)
 
-    digest = to_review_digest(result)
+    digest = review_digest(result)
     assert "## Surface changes" not in digest  # digest has no section heading
     assert "**Review:**" in digest
     assert "brand_new" in digest and "gone" in digest
@@ -277,9 +277,7 @@ def test_review_digest_document_round_trips_without_a_surface_changes_key() -> N
     old, new = _snapshots()
     result = compare(old, new)
 
-    from abicheck.report.render_markdown_document import build_review_digest_document
-
-    doc = build_review_digest_document(result)
+    doc = review_document(result)
     mapping = doc.to_mapping()
     del mapping["surface_changes"]
     pre_39_doc = ReportDocument.from_mapping(mapping)

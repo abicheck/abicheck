@@ -80,6 +80,13 @@ from .frontends.cli.runtime import _write_or_echo
     "rendered here is a promise that the artifact exists.",
 )
 @click.option(
+    "--comment-key",
+    default="",
+    help="Key folded into the sticky-comment marker so parallel jobs on one "
+    "PR keep separate comments (the Action's pr-comment-key). Empty keeps the "
+    "default marker; characters outside [A-Za-z0-9._-] become '-'.",
+)
+@click.option(
     "--path-prefix",
     default="",
     help="Absolute checkout root to strip from rendered source locations "
@@ -119,6 +126,7 @@ def pr_comment_cmd(
     run_label: str | None,
     report_url: str | None,
     report_artifact_url: str | None,
+    comment_key: str,
     path_prefix: str,
     gate_api_break: bool,
     gate_breaking: bool,
@@ -203,6 +211,7 @@ def pr_comment_cmd(
         run_label=run_label,
         report_url=report_url,
         report_artifact_url=report_artifact_url,
+        comment_key=comment_key,
     )
     _write_or_echo(output, body)
 
