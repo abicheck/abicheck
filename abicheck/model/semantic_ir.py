@@ -100,6 +100,39 @@ def canonical_cv_qualification(spellings: Iterable[str]) -> tuple[str, ...]:
     return tuple(q for q in CV_QUALIFIER_ORDER if q in seen)
 
 
+#: The ``CanonicalEntity`` fields the function-signature cohort
+#: (``semantic_ir_function_signature``, which re-exports it) owns, in
+#: declaration order. Defined here because that module imports this one.
+SIGNATURE_FIELDS = (
+    "return_type_spelling",
+    "parameter_type_spellings",
+    "parameter_kinds",
+    "ref_qualifier",
+    "is_variadic",
+    # The function-qualifier cohort (same projection formula).
+    "is_extern_c",
+    "is_noexcept",
+    "is_virtual",
+    "is_explicit",
+    "is_hidden_friend",
+    "hidden_friend_owner",
+    "contract_attributes",
+    "exception_spec",
+    "vtable_index",
+    "is_override",
+    "is_inline",
+    "is_deleted",
+    "deleted_from_dwarf",
+    # The parameter cohort.
+    "parameter_names",
+    "parameter_defaults",
+    "parameter_pointer_depths",
+    "parameter_restrict",
+    "parameter_va_list",
+    "return_pointer_depth",
+)
+
+
 _FIELD_NAMES: dict[type, tuple[str, ...]] = {}
 
 #: The comparison-time projection facts (function signature, qualifier,
@@ -107,38 +140,10 @@ _FIELD_NAMES: dict[type, tuple[str, ...]] = {}
 #: comparison time and never persisted (``storage/semantic_ir_codec``), so
 #: nothing that must agree between a fresh and a reloaded IR -- the
 #: :meth:`SemanticIR.canonical_entities` ranking -- may count them. Equal to
-#: ``SIGNATURE_FIELDS`` + ``DECLARATION_FIELDS`` (asserted by a test; spelled
-#: here because those modules import this one).
+#: ``SIGNATURE_FIELDS`` + ``DECLARATION_FIELDS`` (asserted by a test; the
+#: latter spelled here because its module imports this one).
 PROJECTION_FIELD_NAMES = frozenset(
-    {
-        "return_type_spelling",
-        "parameter_type_spellings",
-        "parameter_kinds",
-        "ref_qualifier",
-        "is_variadic",
-        "is_extern_c",
-        "is_noexcept",
-        "is_virtual",
-        "is_explicit",
-        "is_hidden_friend",
-        "hidden_friend_owner",
-        "contract_attributes",
-        "exception_spec",
-        "vtable_index",
-        "is_override",
-        "is_inline",
-        "is_deleted",
-        "deleted_from_dwarf",
-        "parameter_names",
-        "parameter_defaults",
-        "parameter_pointer_depths",
-        "parameter_restrict",
-        "parameter_va_list",
-        "return_pointer_depth",
-        "deprecated",
-        "access",
-        "declared_alignment_bits",
-    }
+    {*SIGNATURE_FIELDS, "deprecated", "access", "declared_alignment_bits"}
 )
 
 #: Every ``CanonicalEntity`` fact's default: the one shared ``NOT_COLLECTED``
