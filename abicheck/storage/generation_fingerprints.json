@@ -153,7 +153,7 @@
     },
     "fingerprint": "ee97828f9dbde8604ddaa749ee4dbe4ee3f69cb76ec795155b96d21f74a11451",
     "generation": 9,
-    "reason": "merged origin/main (#1710): the castxml not-found message moved to a shared constant, so the extractor sources changed without changing extraction; the generation-9 semantics are unchanged"
+    "reason": "ADR-085 in this PR: generation 6 = clang records the class-template parameter defaults fact (template_param_defaults_fact, schema v62); 7 = those defaults are spelled positionally so a pure parameter rename is not a change; 8 = dependent members of a parameter (T::value_type) are positional too; 9 = castxml runs scan the public headers for a template default and record template_default_header_scan (schema v63). Main was at 5, so 5 -> 9 is these four semantic changes made on this branch, not bumps accumulated across rebases. The current record also covers the move of _ast_compile_provenance to compile_provenance.py and main's #1710 constant move, neither of which changes extraction."
   },
   "resolver": {
     "files": {

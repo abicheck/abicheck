@@ -318,6 +318,38 @@ def test_clang_ast_exposes_template_default_argument(
     assert "defaultArg" in u_param
 
 
+@pytest.mark.integration
+def test_pre_v62_clang_document_is_unassessed_not_a_clean_pass(
+    tmp_path: Path, header_pair: tuple[Path, Path]
+) -> None:
+    """ADR-085 D1: a clang document without the defaults fact (the shape a
+    pre-v62 writer produced) cannot show the header-only change, so the run is
+    partial with the not-recorded gap, never a clean NO_CHANGE.
+
+    The old side is a real clang dump whose fact is removed, which is the
+    document a pre-v62 writer would have produced for the same header.
+    """
+    from abicheck.serialization import snapshot_from_dict, snapshot_to_json
+
+    _require_tools("clang")
+    old_h, new_h = header_pair
+    old_path = _dump_header(tmp_path, old_h, "clang", "old")
+    new = _dump_header(tmp_path, new_h, "clang", "new")
+    old = snapshot_from_dict(json.loads(old_path.read_text()))
+    for rec in old.declarations.types:
+        rec.template_param_defaults_fact = None
+    pre_v62 = tmp_path / "old_pre_v62.json"
+    pre_v62.write_text(snapshot_to_json(old), encoding="utf-8")
+    report = _compare_kinds(pre_v62, new, tmp_path, "clang")
+    assert HEADER_KIND not in _kinds(report)
+    assurance = report["analysis_assurance"]
+    assert assurance["status"] == "partial"
+    assert any(
+        "old snapshot" in n and "not recorded by this snapshot" in n
+        for n in assurance["notes"]
+    )
+
+
 @pytest.mark.parametrize("backend", BACKENDS)
 def test_default_substituted_into_public_signature_breaks_at_l2(
     tmp_path: Path, public_api_pair: tuple[Path, Path], backend: str

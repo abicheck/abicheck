@@ -15,7 +15,7 @@
 """ADR-085 pipeline entry: the exported-instantiation and header-level default
 template-argument detectors, run as one step.
 
-Lives in ``policy/`` because it records a suppressed relation in the disposition
+Lives in ``policy/`` because it records a covered relation in the disposition
 ledger, which ``compare/`` may not import (ADR-061 dependency direction).
 """
 
@@ -97,7 +97,7 @@ def detect_template_default_changes(
 
     A header-level relation that shape A (an exported instantiation) or shape
     C (a reported function signature) already covers is recorded in the
-    disposition ledger as ``SUPPRESSED`` rather than dropped, so the raw total
+    disposition ledger as ``DEDUPLICATED`` rather than dropped, so the raw total
     still counts it (ADR-067 "record before disposing").
     """
     new = ctx.new
