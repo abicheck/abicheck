@@ -217,3 +217,37 @@ def test_digest_is_the_same_for_any_checkout_line_endings(
     lf = raw.replace(b"\r\n", b"\n")
     expected = hashlib.sha256(lf).hexdigest()
     assert scope.file_digests(["mod.py"]) == {"mod.py": expected}
+
+
+def test_unknown_generation_axis_is_refused() -> None:
+    """An axis name that is not one of the three is an error, not an empty scope."""
+    with pytest.raises(ValueError, match="unknown generation axis 'bogus'"):
+        scope.scope_files("bogus")
+
+
+def test_a_missing_scoped_file_is_recorded_as_missing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A deleted or renamed scoped module is a recorded change, not a dropped file."""
+    monkeypatch.setattr(scope, "REPO_ROOT", tmp_path)
+    (tmp_path / "present.py").write_bytes(b"x = 1\n")
+    digests = scope.file_digests(["present.py", "gone.py"])
+    assert digests["gone.py"] == "MISSING"
+    assert digests["present.py"] == hashlib.sha256(b"x = 1\n").hexdigest()
+
+
+def test_load_record_is_empty_before_the_first_recording(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(scope, "RECORD_PATH", tmp_path / "generation_fingerprints.json")
+    assert scope.load_record() == {}
+
+
+def test_write_record_round_trips_through_load_record(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    path = tmp_path / "generation_fingerprints.json"
+    monkeypatch.setattr(scope, "RECORD_PATH", path)
+    scope.write_record({"source": {"generation": 1}})
+    assert scope.load_record() == {"source": {"generation": 1}}
+    assert path.read_text(encoding="utf-8").endswith("\n")
