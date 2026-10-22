@@ -24,12 +24,18 @@ from __future__ import annotations
 #: serving a stale snapshot computed by an older, behaviorally-different
 #: abicheck version.
 #:
+#: v37: ``ElfSymbol.origin_lib`` now attributes the C++ runtime's function-local
+#: statics and guard variables (``_ZZNSt...``, ``_ZGVZNSt...``) to libstdc++/libc++,
+#: which the prefix table used to leave native (``None``). The contract gate and
+#: the symbol-hygiene audit read this field, so a warm entry would keep the stale
+#: native attribution. Bumped to force re-extraction.
+#:
 #: v36: ``ElfMetadata.unambiguous_symbol`` now leaves ``Function``/``Variable``
 #: ``elf_binding``/``elf_visibility`` unset when symbol-versioned aliases of one
 #: bare name disagree, where the old last-entry-wins map set them. A warm cache
 #: entry would keep replaying the last-alias values, so the bump forces
 #: re-extraction (the same precedent as v16 for ``elf_binding``).
-SNAPSHOT_CACHE_VERSION: str = "36"
+SNAPSHOT_CACHE_VERSION: str = "37"
 # v35: header-derived snapshots now carry public_header_identifiers (schema
 # v55, extract/public_header_identifiers.py). The key also folds in the
 # snapshot schema version from this version on, so the next schema bump

@@ -165,10 +165,10 @@
     "abicheck/model/contract_finding_relevance.py(contract_relevance_of)": 756,
     "abicheck/model/contract_finding_relevance.py(evaluation_status_of)": 756,
     "abicheck/model/contract_finding_relevance.py(is_evaluated)": 756,
-    "abicheck/model/debug_evidence.py(debug_info_evidence)": 216,
+    "abicheck/model/debug_evidence.py(debug_info_evidence)": 235,
     "abicheck/model/declarator_qualifiers.py(_split_at_trailing_param_list)": 35,
     "abicheck/model/dwarf_facts.py(advanced_facts_collected)": 154,
-    "abicheck/model/dwarf_facts.py(debug_info_present)": 642,
+    "abicheck/model/dwarf_facts.py(debug_info_present)": 680,
     "abicheck/model/edge_coverage.py(CoverageRecord.covered_units)": 934,
     "abicheck/model/entity_identity.py(source_relative_identity)": 774,
     "abicheck/model/evidence_status.py(is_cross_source_resolved)": 756,
@@ -181,7 +181,7 @@
     "abicheck/model/extraction_scope.py(_both_from_headers)": 14,
     "abicheck/model/extraction_scope.py(compare_extraction_scopes)": 13,
     "abicheck/model/fact.py(Fact._make)": 854,
-    "abicheck/model/fact.py(Fact.is_present)": 5626,
+    "abicheck/model/fact.py(Fact.is_present)": 5694,
     "abicheck/model/fact.py(Fact.not_collected)": 1264,
     "abicheck/model/fact.py(Fact.partial)": 79,
     "abicheck/model/fact.py(Fact.present)": 775,
@@ -233,7 +233,7 @@
     "abicheck/model/signature_normalization.py(_strip_cv_tokens_outside_nesting)": 35,
     "abicheck/model/signature_normalization.py(canonicalize_function_signature_param_type)": 563,
     "abicheck/model/snapshot.py(AbiSnapshot.canonical_ir)": 488,
-    "abicheck/model/snapshot.py(AbiSnapshot.declarations)": 4492,
+    "abicheck/model/snapshot.py(AbiSnapshot.declarations)": 4557,
     "abicheck/model/snapshot.py(AbiSnapshot.function_map)": 196,
     "abicheck/model/snapshot.py(AbiSnapshot.index)": 196,
     "abicheck/model/snapshot.py(AbiSnapshot.variable_map)": 28,
@@ -301,5 +301,5 @@
   },
   "mode": "default",
   "n": 40,
-  "total": 239418
+  "total": 239608
 }

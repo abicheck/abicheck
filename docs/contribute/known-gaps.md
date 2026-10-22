@@ -57,6 +57,16 @@ Next, unranked (the `--no-baseline` one-sided-detector gap, the target-platform 
 
 Each entry's status line says what is still open. A PARTIAL entry's write-up also describes the half that is already fixed; the status line is authoritative where they disagree.
 
+### Report and detector coverage
+
+#### A large export shrink with no declared surface emits no finding in header mode (2026-10-22)
+
+**Status (2026-10-22): OPEN, deliberate follow-up — product decision needed.** `abi_surface_explosion` is growth-only now; a header-mode shrink of undeclared exports has no finding. [Full write-up](known-gaps/a-large-export-shrink-with-no-declared-surface-emits-nothing.md)
+
+#### The Markdown "Additions" section is one row per finding, so it grows linearly (2026-10-22)
+
+**Status (2026-10-22): OPEN.** The review-group section is bounded; the per-finding Additions rows are not. [Full write-up](known-gaps/the-additions-markdown-section-is-one-row-per-finding.md)
+
 ### Clang projection (ADR-063 Phase 4 prerequisites)
 
 The entries below come from the Phase 4 measurement spike
@@ -83,6 +93,11 @@ current emitter, which is unchanged.
 **Status (2026-10-22): OPEN.** `signature_hash` differs on 1374 of 1531 paired functions, record `type_hash` on 290 of 290, and typedef `type_hash` on 22 of 22. The inputs differ (L4 hashes its own `_signature(node)` string, `base.py` hashes `return(params)`), so the hashes cannot show the underlying types are equal. The default-argument `value` differs on 18 pairs: L4 spells `p0=sha256:…` and the projection spells `max_threads=expr:…`. A pinned set cannot include these fields until both producers use one canonical spelling.
 
 ### False-clean risk
+
+#### A removed class-metadata export of a templated or destructor-only class is not confirmed by its header (2026-10-22)
+
+**Status (2026-10-22): PARTIAL.** A `_ZTV`/`_ZTI`/`_ZTS`/`_ZTT` export is confirmed by its owning class when the class's exact path is declared (`policy/class_metadata_identity.py`), including when the header omits an inline namespace the mangling keeps, via the class's own mangled virtual slots. Still open: a template-specialization owner (`_ZTVN3api3BoxIiEE`) is never confirmed, because the path does not spell its arguments and a primary template's declaration is not evidence about a specialization; and a class whose only virtual member is its destructor has no mangled slot to prove it, so it is confirmed only when its header spelling matches the mangled path exactly. Both stay `UNKNOWN_UNRESOLVED`: reported and not gating.
+`false-clean` — the removal of such a class's vtable or typeinfo reads `NOT_EVALUATED` under `--contract public` and does not gate the verdict.
 
 #### A header-only default template-argument change reads `NO_CHANGE` at L2 on castxml (2026-10-21)
 

@@ -474,7 +474,7 @@ These changes are safe: they add new capabilities or carry diagnostic informatio
 | Kind | Description |
 |------|-------------|
 | `glibcxx_dual_abi_flip_detected` | Mass symbol churn matches a libstdc++ dual ABI toggle (`_GLIBCXX_USE_CXX11_ABI`). Individual removed/added symbols are likely caused by this single root cause rather than intentional API changes — the underlying per-symbol findings are reported separately. |
-| `abi_surface_explosion` | The public ABI surface grew or shrank dramatically (e.g. a lost `-fvisibility=hidden` flag). This is a configuration/packaging signal, not a per-symbol break, but may indicate an unintended visibility regression. |
+| `abi_surface_explosion` | The public ABI surface grew dramatically (e.g. a lost `-fvisibility=hidden` flag). This is a configuration/packaging signal, not a per-symbol break, but may indicate an unintended visibility regression. A large shrink is not reported under this kind; each removed export is already its own finding. |
 
 ### Surface-metric drift
 

@@ -48,9 +48,11 @@ PLATFORM_ENTRIES_1: list[ChangeKindMeta] = [
     _E(
         "abi_surface_explosion",
         _C,
-        impact="Public ABI surface grew or shrank dramatically (e.g. lost "
+        impact="Public ABI surface grew dramatically (e.g. lost "
         "-fvisibility=hidden). This is a configuration/packaging signal, not "
-        "a per-symbol break, but may indicate an unintended visibility regression.",
+        "a per-symbol break, but may indicate an unintended visibility regression. "
+        "A large shrink is not reported under this kind; each removed export is "
+        "already its own finding.",
         description_template="ABI surface {detail} dramatically: {old} → {new} exported symbols ({name}); check -fvisibility=hidden and version scripts",
         entity=_ENT.ANALYSIS,
         operation=_OP.MODIFIED,

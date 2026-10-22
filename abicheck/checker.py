@@ -111,7 +111,6 @@ from .diff_unnamed_types import (  # noqa: F401 — triggers detector registrati
     _diff_unnamed_types,
 )
 from .diff_versioning import (  # noqa: F401 — re-export for testing
-    check_soname_bump_policy,
     detect_version_node_changes,
     detect_version_script_missing,
 )
@@ -141,6 +140,7 @@ from .policy.policy_file_namespaces import (
     experimental_namespaces as _experimental_namespaces,
     internal_namespaces as _internal_namespaces,
 )
+from .policy.soname_bump_policy import check_soname_bump_policy
 from .policy_file import PolicyFile
 from .workflows import memory_trace
 from .workflows.comparison_input_receipt import comparison_input_receipt
