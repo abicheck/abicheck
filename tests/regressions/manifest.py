@@ -685,10 +685,10 @@ _ANALYSIS_BUG_CLASSES: tuple[BugClass, ...] = (
             "tests/unit/extract/test_library_export_read_failures.py",
             # A clang AST whose `inner` is a number, string, mapping or null
             # (or holds non-object children) read as "call graph ran, found
-            # nothing" -- every pass collected, no degraded marker -- because
-            # the readers treat a wrong-typed container as empty. Refused at
-            # the projection and the L5 fold, recorded as a failure.
+            # nothing": the readers treat a wrong-typed container as empty.
+            # Refused as a failure at the projection, the L5 fold and the L4 extractor.
             "tests/test_header_graph_projection_cache.py",
+            "tests/test_source_extractors_clang_ast_shape.py",
             "tests/test_field_added_unknown_polymorphism.py",  # vtables unseen (PDB UNSUPPORTED/FAILED/empty PARTIAL) read as non-polymorphic -> appended field COMPATIBLE
         ),
         # Only the two consumer-scoping seeds reach a public surface: their integration tests drive `abicheck compare --used-by` end to end.

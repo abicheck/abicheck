@@ -63,6 +63,7 @@ from ..clang_ast_run import (
     TuAstDump,
     dump_compile_unit,
 )
+from ..header_graph_ast_projection import MalformedClangAstError, validate_ast_shape
 from ..model import LayerConfidence
 from ..source_abi import (
     SourceAbiTu,
@@ -98,6 +99,7 @@ from .clang_node_predicates import (
     _location,
 )
 from .clang_nodes import (
+    _collect_files,
     _default_arg_repr,
     _entity_names,
     _entity_ownership,
@@ -274,7 +276,15 @@ def source_abi_from_clang_ast(
     Pure: any producer of the clang AST JSON (the extractor below, or a fixture
     in a test) reuses this. Emits only public-surface entities so the linker does
     not have to filter private/system decls.
+
+    Raises :class:`SourceExtractionError` on a tree whose container shapes the
+    readers below cannot trust: they would otherwise read it as a complete,
+    empty surface (ADR-028 D3).
     """
+    try:
+        validate_ast_shape(ast_root)
+    except MalformedClangAstError as exc:
+        raise SourceExtractionError(f"clang AST is malformed: {exc}") from exc
     ctx = _ClassifyContext(public_header_roots)
     tu = SourceAbiTu(
         tu_id=compile_unit.id,
@@ -312,29 +322,6 @@ def source_abi_from_clang_ast(
         or compile_unit.directory,
     )
     return tu
-
-
-def _collect_files(node: Any, files: set[str] | None = None) -> set[str]:
-    """Every distinct file path referenced anywhere in the clang AST.
-
-    clang's ``file`` field is sticky (omitted when unchanged from the prior node
-    in source order), so each file it parsed is named at least once at its first
-    contributing node; the set of explicit mentions is the read-file set.
-    """
-    if files is None:
-        files = set()
-    if isinstance(node, dict):
-        loc = node.get("loc")
-        if isinstance(loc, dict):
-            for key in ("file", "expansionLoc", "spellingLoc", "includedFrom"):
-                val = loc.get(key)
-                if isinstance(val, str) and val:
-                    files.add(val)
-                elif isinstance(val, dict) and isinstance(val.get("file"), str):
-                    files.add(val["file"])
-        for child in node.get("inner", []):
-            _collect_files(child, files)
-    return files
 
 
 def _emit_node(
