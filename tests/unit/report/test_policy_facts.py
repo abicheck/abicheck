@@ -27,8 +27,8 @@ from abicheck.report.policy_facts import (
 )
 from abicheck.report_summary import build_summary
 from abicheck.reporter import to_json, to_stat_json
-from abicheck.reporter_markdown import to_stat
 from abicheck.semver import recommend_release_for_report
+from tests._report_test_helpers import stat_line
 
 
 def _result() -> DiffResult:
@@ -164,10 +164,10 @@ class TestRootCauseJsonPath:
 
 class TestMarkdownStatPath:
     def test_plain_stat_line_has_no_gate_suffix(self) -> None:
-        assert to_stat(_result()) == "NO_CHANGE: no changes (0 total)"
+        assert stat_line(_result()) == "NO_CHANGE: no changes (0 total)"
 
     def test_stat_line_with_severity_config_reports_the_gate(self) -> None:
         assert (
-            to_stat(_result(), severity_config=_config())
+            stat_line(_result(), severity_config=_config())
             == "NO_CHANGE: no changes (0 total) [gate: PASS]"
         )

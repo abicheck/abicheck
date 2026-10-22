@@ -1,7 +1,7 @@
 ## ABI review — `libfoo.so` 1.0 → 2.0
 
 **Verdict:** ✅ `NO_CHANGE` — no ABI/API change — safe to merge
-**Policy:** `strict_abi` · **Gate:** not configured
+**Policy:** `strict_abi` · **Gate:** PASS (exit 0)
 
 > ⚠️ No binary metadata available; verdict is based on header analysis only
 
@@ -14,6 +14,12 @@
 | ⚠️ Risk findings | 0 |
 | ✅ Public additions | 0 |
 | 🔒 Filtered (internal/private) | 0 |
+
+**Count populations:** 0 detected; 0 retained (0 gating, 0 non-gating); 0 review group(s).
+
+**Public surface:** 0 additions, 0 removals, 0 modifications. Runtime/dependency: 0 finding(s).
+
+**Header/binary consistency:** 0 introduced, 0 resolved, 0 persistent, 0 not evaluated.
 
 **Disposition audit:**
 

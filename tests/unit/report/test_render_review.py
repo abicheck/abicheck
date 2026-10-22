@@ -24,6 +24,7 @@ from abicheck.report.render_review import (
     render_review_digest,
     render_terminal_digest,
 )
+from tests._report_test_helpers import review_digest
 
 
 def _suppression_row(rule_id: str, matched: int) -> RuleAuditRow:
@@ -46,7 +47,6 @@ def test_direct_severity_digest_reports_the_computed_gate() -> None:
     from abicheck.checker_types import DiffResult
     from abicheck.model.change import Change
     from abicheck.policy.severity import resolve_severity_config
-    from abicheck.reporter import to_review_digest
 
     result = DiffResult(
         "1",
@@ -57,10 +57,8 @@ def test_direct_severity_digest_reports_the_computed_gate() -> None:
     )
     blocking = resolve_severity_config("default")
     nonblocking = resolve_severity_config("default", abi_breaking="info")
-    assert "**Gate:** FAIL (exit 4)" in to_review_digest(
-        result, severity_config=blocking
-    )
-    assert "**Gate:** PASS (exit 0)" in to_review_digest(
+    assert "**Gate:** FAIL (exit 4)" in review_digest(result, severity_config=blocking)
+    assert "**Gate:** PASS (exit 0)" in review_digest(
         result, severity_config=nonblocking
     )
 

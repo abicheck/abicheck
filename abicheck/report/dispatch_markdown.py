@@ -72,9 +72,10 @@ def to_markdown(
 ) -> str:
     """See :func:`~abicheck.report.render_markdown_document.
     build_markdown_document`'s own docstring for *envelope* (ADR-061 gap C)
-    -- forwarded unchanged to the full-mode (``report_mode="full"``) document
-    build only; ``--stat`` and the ``root-cause`` alternate view ignore it,
-    since those stay their own separate documents."""
+    -- forwarded to the full-mode (``report_mode="full"``) document build and
+    to the ``leaf``/``root-cause`` alternate views, which reuse its
+    disposition audit and severity counts. Those views remain their own
+    separate documents."""
 
     # Every public rendering entry point shares one report-mode check
     # (report_modes.py) -- see its docstring for why enforcing the ``leaf``
@@ -104,6 +105,7 @@ def to_markdown(
         show_recommendation=show_recommendation,
         severity_config=severity_config,
         contract_evaluation=contract_evaluation,
+        envelope=envelope,
     )
     if alternate is not None:
         return _out(alternate)
@@ -138,6 +140,7 @@ def _markdown_alternate_rendering(
     show_recommendation: bool,
     severity_config: Any,
     contract_evaluation: bool,
+    envelope: ReportEnvelope | None = None,
 ) -> str | None:
     """Render one of the non-default markdown views, or ``None`` for the default.
 
@@ -159,6 +162,7 @@ def _markdown_alternate_rendering(
             show_impact=show_impact,
             severity_config=severity_config,
             contract_evaluation=contract_evaluation,
+            envelope=envelope,
         )
     return None
 
@@ -171,6 +175,7 @@ def _to_markdown_root_cause(
     *,
     severity_config: SeverityConfig | None = None,
     contract_evaluation: bool = False,
+    envelope: ReportEnvelope | None = None,
 ) -> str:
     """``--report-mode root-cause`` markdown rendering (G29 Phase 3 slice 4, ADR-052).
 
@@ -194,6 +199,7 @@ def _to_markdown_root_cause(
             show_impact=show_impact,
             severity_config=severity_config,
             contract_evaluation=contract_evaluation,
+            envelope=envelope,
         )
     )
 
@@ -201,8 +207,7 @@ def _to_markdown_root_cause(
 def to_review_digest(
     result: DiffResult,
     *,
-    severity_config: SeverityConfig | None = None,
-    envelope: ReportEnvelope | None = None,
+    envelope: ReportEnvelope,
 ) -> str:
     """Compact GitHub-facing review digest (Markdown).
 
@@ -217,11 +222,11 @@ def to_review_digest(
     ``report/render_markdown_document.py`` — the same fact/formatting split
     JSON/SARIF/JUnit/``--stat``/HTML already use.
 
-    *envelope* (ADR-061 gap C) is the completed ``ReportEnvelope`` this
-    render projects -- see ``build_review_digest_document``'s own docstring
-    for what its shared document is reused for. It also supplies the
-    digest's per-finding verdicts, so its "impacted symbols" list reads the
-    same resolution every other format does instead of making its own.
+    *envelope* is the completed ``ReportEnvelope`` this render projects (ADR-061
+    gap C). Every decision the digest states is read from it: the merge
+    effect from its gate, the disposition counts from its shared document,
+    and the "impacted symbols" list from its per-finding verdicts. No
+    caller-free fallback re-resolves any of them.
     """
     from .render_markdown_document import (
         build_review_digest_document,
@@ -231,7 +236,6 @@ def to_review_digest(
     return render_review_digest_document(
         build_review_digest_document(
             result,
-            severity_config=severity_config,
             envelope=envelope,
         )
     )

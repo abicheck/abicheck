@@ -51,6 +51,10 @@ from ..name_classification import is_local_rtti_symbol
 from . import export_transition as _export_transition
 from .edge_query import ObservedExportTable, observed_export_table
 from .finding_identity import SymbolIdentityIndex
+from .implicit_member_surface import (
+    drop_orphan_implicit_members,
+    is_unexported_implicit_member,
+)
 from .surface_reconcile import (
     RECONCILED_FUNCTIONS,
     RECONCILED_VARIABLES,
@@ -153,6 +157,22 @@ def public_functions(snap: AbiSnapshot) -> dict[str, Function]:
     }
 
 
+def impact_candidate_functions(snap: AbiSnapshot) -> dict[str, Function]:
+    """:func:`public_functions` minus unexported compiler-generated members.
+
+    The population a type change's ``affected_symbols`` is drawn from: an
+    implicit special member nothing exports is synthesized inside each
+    consumer, so it is not a library symbol a consumer is affected through
+    -- and for a castxml dump its key is an internal placeholder
+    (``__abicheck_ctor__T()``) that must never reach a report (#1713).
+    """
+    return {
+        k: f
+        for k, f in public_functions(snap).items()
+        if not is_unexported_implicit_member(f)
+    }
+
+
 def _full_map_alias_resolver(
     full_map: dict[str, Function],
 ) -> Callable[[str, Function], Function | None]:
@@ -218,6 +238,9 @@ def reconciled_function_surfaces(
         resolve_in_old=_full_map_alias_resolver(old.function_map),
         resolve_in_new=_full_map_alias_resolver(new.function_map),
     )
+    # Implicit members of a record only one side declares are entailed by
+    # that record's TYPE_ADDED/TYPE_REMOVED, not API findings (#1713).
+    result = drop_orphan_implicit_members(*result, old, new)
     return store_reconciliation(old, new, RECONCILED_FUNCTIONS, result)
 
 

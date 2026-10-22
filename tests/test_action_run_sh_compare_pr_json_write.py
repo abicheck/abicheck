@@ -169,7 +169,9 @@ class TestCompareDoesNotInjectALosingWrite:
         # asserts the opposite: there, only one `--write` is supported at
         # all, so a non-json one still suppresses.
         argv = _compare_argv(tmp_path, {"INPUT_EXTRA_ARGS": "-o markdown=mine.md"})
-        assert argv.split().count("-o") == 2, argv
+        # Issue #1714: the Action's own `markdown=-` export rides beside it.
+        assert argv.split().count("-o") == 3, argv
+        assert "markdown=-" in argv.split(), argv
         assert "mine.md" in argv, argv
         assert "abicheck-pr-json" in argv, argv
 
@@ -438,18 +440,19 @@ class TestSarifDefaultOutputFileUsesEffectiveFormat:
     silently uploading the wrong content.
     """
 
-    def test_sarif_overridden_away_gets_no_default_output_file(
+    def test_sarif_beside_a_caller_export_keeps_its_own_sarif_file(
         self, tmp_path: Path
     ) -> None:
+        # Issue #1714: a caller export no longer replaces the Action's own,
+        # so `format: sarif` still writes genuine SARIF to its default file
+        # beside the caller's stdout JSON -- the mismatch this class guarded
+        # against (non-SARIF content in the SARIF-named file) cannot arise.
         argv = _compare_argv(
             tmp_path,
             {"INPUT_FORMAT": "sarif", "INPUT_EXTRA_ARGS": "-o json=-"},
         )
-        assert "abicheck-results.sarif" not in argv, argv
-        # The caller's own export set is the whole set, so the only `-o` in
-        # argv is theirs -- plus, when the effective format is not json, the
-        # internal PR-comment sidecar, which is not this default.
-        assert "json=-" in argv, argv
+        assert "sarif=abicheck-results.sarif" in argv.split(), argv
+        assert "json=-" in argv.split(), argv
 
     def test_plain_sarif_still_gets_the_default_output_file(
         self, tmp_path: Path
@@ -606,16 +609,12 @@ class TestSarifUploadReportPathWithheldOnEffectiveFormatMismatch:
                 "INPUT_FORMAT": "sarif",
                 "INPUT_UPLOAD_SARIF": "true",
                 "INPUT_OUTPUT_FILE": str(explicit),
-                "INPUT_EXTRA_ARGS": "-o json=-",
+                # Issue #1714: the only way a caller export now displaces the
+                # Action's own is by claiming its exact destination.
+                "INPUT_EXTRA_ARGS": f"-o json={explicit}",
             },
         )
-        # Plan slice 7m: the caller's own export set replaces this Action's,
-        # so the `output-file` input names no destination at all here and
-        # nothing is written to it. That is a *stronger* version of the
-        # property this test pins -- there is no mismatched SARIF-named file
-        # for the upload step to take, and `report-path` is withheld either
-        # way, which is what the upload step's own `if:` gates on.
-        assert not explicit.exists(), "the superseded input path was written"
+        assert explicit.exists(), "the caller's json export was not written"
         assert "report-path=\n" in out or out.rstrip().endswith("report-path="), out
         # The warning must reach the log, not the environment file (Codex
         # review, PR #998, fresh evidence: an earlier revision echoed it
@@ -638,7 +637,7 @@ class TestSarifUploadReportPathWithheldOnEffectiveFormatMismatch:
             {
                 "INPUT_FORMAT": "sarif",
                 "INPUT_UPLOAD_SARIF": "true",
-                "INPUT_EXTRA_ARGS": "-o json=-",
+                "INPUT_EXTRA_ARGS": "-o json=abicheck-results.sarif",
             },
         )
         assert "report-path=\n" in out or out.rstrip().endswith("report-path="), out
@@ -671,6 +670,7 @@ class TestSarifUploadReportPathWithheldOnEffectiveFormatMismatch:
             tmp_path,
             {
                 "INPUT_FORMAT": "sarif",
+                "INPUT_OUTPUT_FILE": str(explicit),
                 "INPUT_EXTRA_ARGS": f"-o json={explicit}",
             },
         )

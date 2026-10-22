@@ -66,7 +66,7 @@
       "disposition": "migrate",
       "target_layer": "compare",
       "slice": "compare's internal-namespace-leak detector, alongside its sibling diff_* detectors.",
-      "rationale": "This module's own body imports several extract-classified buildsource modules (entity_identity.py, graph_facts.py, source_graph_findings.py, source_graph_query.py) plus two still-unclassified siblings (checker_policy.py, impact/engine.py) directly. Trial classification into `compare` measured 4 new compare -> extract violations. Needs real decoupling of its buildsource reads (through a model-shared graph value, or a workflows composition point) before reclassification, not just a debt entry.",
+      "rationale": "Decoupled (2026-10-21): the module no longer imports buildsource, impact or policy. The L5 formatter and graph label/kind maps are model-owned (`model/source_graph_query.py`), the ImpactAssessment cache is `post_processing_reachability.cache_impact_assessments`, and `layout_visibility` moved to `compare/`. A trial classification into `compare` now reports no direction violation. What remains is the physical move and a split below the 800-line cap, which also repoints its importers and the use-case baseline keys.",
       "owner": "legacy-root",
       "review_by": "2026-12-15"
     },

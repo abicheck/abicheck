@@ -57,6 +57,29 @@ Next, unranked (the `--no-baseline` one-sided-detector gap, the target-platform 
 
 Each entry's status line says what is still open. A PARTIAL entry's write-up also describes the half that is already fixed; the status line is authoritative where they disagree.
 
+### Clang projection (ADR-063 Phase 4 prerequisites)
+
+The entries below come from the Phase 4 measurement spike
+(`scripts/measure_l4_clang_projection.py`, 253 catalog TUs, 2026-10-22; numbers
+in the plan's "Status — Phase 4 measurement spike" note). They are gaps in
+`dumper_clang._ClangAstParser`'s output as an L4 projection source, not in L4's
+current emitter, which is unchanged.
+
+#### The clang parser leaves `origin` unset, so a projected entity's visibility and `api_relevant` are not derived (2026-10-22)
+**Status (2026-10-22): OPEN.** `_ClangAstParser.parse_functions` and `parse_types` leave `Function.origin` and `RecordType.origin` at `UNKNOWN`, with `source_header` and `source_location` unset (checked on a corpus TU), so `base.entity_from_*` maps every projected entity to `visibility="unknown"` and, for functions and records, `api_relevant=False`. On the 253-TU corpus, `visibility` and `api_relevant` differ on 1531 of 1531 paired functions and 290 of 290 paired records. The fix belongs in the parser's origin classification (the same provenance matcher `_decl_is_public` uses), before a projection can carry these fields.
+
+#### The clang projection walks every declaration, including system headers, so its output is not the public surface (2026-10-22)
+**Status (2026-10-22): OPEN.** `_ClangAstParser.parse_functions()` returns 68629 functions across the 253 TUs, against 2600 on the current L4 surface (66953 projected names are not on the current side, e.g. `fclose`, `__uflow`, `asprintf`). The castxml path scopes its output by declaration provenance; the clang parser does not scope at the `parse_*` boundary. Phase 4 must apply the public-surface predicate before projecting or it projects system declarations into the surface.
+
+#### Clang-projected member and namespace names are bare, so `qualified_name` differs from the current L4 name (2026-10-22)
+**Status (2026-10-22): OPEN.** A member function is projected as `execute` where L4 emits `Processor::execute`; a namespaced record as `task_arena` where L4 emits `mylib::task_arena`; an enum likewise. `parse_typedefs_qualified` exists, but no qualified form is provided for functions, records or enums. On the corpus, `qualified_name` differs on 1045 of 1531 paired functions (205 TUs), 130 of 290 records (75 TUs) and 5 of 5 enums. A qualified name must be built from the declaration scope before a projection can use it as an identity input.
+
+#### A C++ declaration with no clang `mangledName` falls back to its bare name and loses its mangled identity in the projection (2026-10-22)
+**Status (2026-10-22): OPEN; cause not traced.** For `distance(Point, Point)` in `case69_trivial_to_nontrivial` (`v1.cpp` and `v2.cpp`) clang's AST carries no usable `mangledName`, so `Function.mangled` falls back to the bare name `distance`. `base.entity_from_function` then blanks `mangled_name`, and `SourceEntity.identity()` keys the declaration on `qualified#signature_hash` where L4 keys it on `_Z8distance5PointS_`. This is the fabricated-identity case ADR-063 A1 names. Pairing-free counters show 502 projected function entities with a blank mangled name against 404 on the current side, so the blanking is wider than these two; the cause of the 404 and 502 split has not been traced.
+
+#### Hash fields and the default-argument string are spelled differently by the two producers, so cross-producer equality is not a semantic check (2026-10-22)
+**Status (2026-10-22): OPEN.** `signature_hash` differs on 1374 of 1531 paired functions, record `type_hash` on 290 of 290, and typedef `type_hash` on 22 of 22. The inputs differ (L4 hashes its own `_signature(node)` string, `base.py` hashes `return(params)`), so the hashes cannot show the underlying types are equal. The default-argument `value` differs on 18 pairs: L4 spells `p0=sha256:…` and the projection spells `max_threads=expr:…`. A pinned set cannot include these fields until both producers use one canonical spelling.
+
 ### False-clean risk
 
 #### A header-only default template-argument change reads `NO_CHANGE` at L2 on castxml (2026-10-21)
@@ -387,6 +410,11 @@ Do not re-attempt token-claiming. A header's export tokens cannot tell whether i
 
 **Status (re-verified 2026-10-09 at `456989f`): PARTIAL.** The compat/* modules named in the entry are gone (compat front end removed). Several named nested modules still exist with no architecture/*.yaml mention, e.g. buildsource/build_evidence.py, build_output.py, evidence_policy.py, fact_set.py, merge_support.py, source_graph.py and impact/use_case_impact.py (0 hits).  
 `hygiene` — Several nested `buildsource/` and `impact/` modules (e.g. `build_evidence.py`, `fact_set.py`, `impact/use_case_impact.py`) have no ADR-061 disposition in `architecture/*.yaml`. [Full write-up](known-gaps/adr-061-gap-f-nested-buildsourceimpact-modules-still-carry-no.md)
+
+#### `internal_leak.py` is decoupled from buildsource, impact and policy, but still sits unclassified at the repository root (ADR-061 migration, 2026-10-21)
+
+**Status (2026-10-21): PARTIAL.** The recorded blocker was buildsource decoupling, and that is lifted. The module imports only `model` and `compare`-classified code, so `check_architecture.py` accepts it as a `compare` module. Its call-graph walk now lives in `compare/call_graph_walk.py`, and the use-case explain moved to `policy/use_case_reachability.py` with its `explain` port removed (#1683 merged). It is still a root module at 1362 lines, above the 800-line production cap. Its physical move and split are the remaining step, and they repoint its production and test importers, the `policy/name_heuristics` owner list and its use-case baseline keys.
+`hygiene` — `abicheck/internal_leak.py` is an unclassified root module that still holds compare-owned leak detection (the BFS, the layout and type-graph walk, and the call-graph overlay). Until it moves, `compare/` does not own the internal-namespace leak rule as a single module.
 
 #### A stored-`BundleFacts` baseline's narrower format set is not pre-checked by the Action
 
