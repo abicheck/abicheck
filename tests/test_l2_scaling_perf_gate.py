@@ -159,6 +159,26 @@ class TestGate:
             "libraries n=5: peak process-tree RSS 2000 MB exceeds 1024 MB"
         ]
 
+    def test_ceiling_judges_pss_not_forked_rss(self):
+        # A forked release counts each child's inherited pages again in RSS, so
+        # RSS can read ~3x the physical footprint. A point whose PSS is within
+        # the ceiling passes however large its RSS sum reads.
+        pts = _points((1, 3, 5, 9), lambda n: 1.0 + 0.2 * (n - 1))
+        for p in pts:
+            p.peak_rss_mb = 2000.0
+            p.peak_pss_mb = 300.0
+        _, failures = gate_mod.gate("libraries", pts, max_exponent=1.5, max_rss_mb=1024)
+        assert failures == []
+
+    def test_pss_over_ceiling_fails_under_pss_name(self):
+        pts = _points((1, 3, 5, 9), lambda n: 1.0 + 0.2 * (n - 1))
+        pts[2].peak_rss_mb = 1500.0
+        pts[2].peak_pss_mb = 1500.0
+        _, failures = gate_mod.gate("libraries", pts, max_exponent=1.5, max_rss_mb=1024)
+        assert failures == [
+            "libraries n=5: peak process-tree PSS 1500 MB exceeds 1024 MB"
+        ]
+
     def test_correctness_problem_fails_even_when_fast(self):
         pts = _points((1, 3, 5, 9), lambda n: 1.0 + 0.2 * (n - 1))
         pts[1].problems.append("compared 2 libraries, expected 3")

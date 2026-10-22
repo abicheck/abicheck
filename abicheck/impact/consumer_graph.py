@@ -321,20 +321,19 @@ def explain_required_symbols(
     it. Reusing the one policy also means a proof path shown here can never
     contradict one shown by the internal-leak findings for the same graph.
     """
-    # Function-local: internal_leak imports impact.engine, so a module-level
-    # import here would put abicheck.impact and abicheck.internal_leak in one
-    # import cycle (root CLAUDE.md's "What NOT to do" — prefer a
-    # function-local import over extending IMPORT_CYCLE_ALLOWLIST).
+    # Function-local: keeps the buildsource graph helpers below off this
+    # module's import-time graph. The call-graph walk itself lives in
+    # compare.call_graph_walk, which imports only model.
     from abicheck.model.source_graph_query import (
         PUBLIC_VISIBILITIES,
         is_consumer_compiled_public_entry,
     )
 
     from ..buildsource.graph_impact import select_preferred_graph_path
-    from ..internal_leak import (
+    from ..compare.call_graph_walk import (
         CALL_GRAPH_TRAVERSAL_POLICY,
-        _consumer_compiled_reachability,
-        _reconstruct_path,
+        consumer_compiled_reachability,
+        reconstruct_path,
     )
 
     wanted = {symbol_node_id(s): s for s in symbols}
@@ -412,7 +411,7 @@ def explain_required_symbols(
             # Nothing to walk from; this symbol is simply unexplainable.
             continue
         if not walked:
-            reachability = _consumer_compiled_reachability(
+            reachability = consumer_compiled_reachability(
                 graph, CALL_GRAPH_TRAVERSAL_POLICY, entries, node_by_id
             )
             walked = True
@@ -428,14 +427,14 @@ def explain_required_symbols(
                 entry, (frozenset(), {}, frozenset())
             )
             for decl in sorted(decl_ids & seen):
-                # Neither of _reconstruct_path's two empty answers can occur
+                # Neither of reconstruct_path's two empty answers can occur
                 # here — it returns [] only for entry == decl (excluded
                 # above) and None only for an unreachable target (excluded by
                 # `decl in seen`) — so the result is asserted rather than
                 # skipped over: a silent `continue` would turn a future
                 # change to either invariant into a missing explanation
                 # instead of a failure.
-                path = _reconstruct_path(came_from, entry, decl)
+                path = reconstruct_path(came_from, entry, decl)
                 assert path, f"{entry} reached {decl} but has no path to it"
                 candidates.append((entry, [*path, mapping_by_decl[decl]]))
         if not candidates:

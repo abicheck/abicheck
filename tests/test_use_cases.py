@@ -30,7 +30,7 @@ from abicheck.buildsource.source_graph import (
     SourceGraphSummary,
 )
 from abicheck.errors import UseCaseManifestError
-from abicheck.impact.use_case_reachability import explain_use_case_impact
+from abicheck.policy.use_case_reachability import explain_use_case_impact
 from abicheck.policy.use_cases import (
     USE_CASE_EDGE_KINDS,
     USE_CASE_NODE_KINDS,

@@ -545,3 +545,45 @@ therefore gated behind D13's opt-in.
 - [ADR-061](061-responsibility-package-architecture.md) — the `storage` layer this package occupies
 - [G38](../plans/g38-bundle-facts-model-and-multibuild-comparability.md) — bundle facts and multibuild pairing
 - [Storage format v2 plan](../plans/storage-format-v2.md) — phasing, acceptance criteria, validation corpus
+
+## Amendment (2026-10-21): the source tier has its own generation axis
+
+D2's extractor axis covers `abicheck/extract/**` and the root parse-stage
+modules. The L4 source extractors and the L5 graph producers under
+`abicheck/buildsource/` were in neither generation axis, so a change to their
+semantics moved no stated generation and no stored package reported drift.
+Folding them into `EXTRACTOR_GENERATION` was rejected: it would drift every L2
+(binary-plus-headers) package on an L4/L5 edit, which is false drift.
+
+The source tier is therefore a third axis, with the same mechanism as the other
+two:
+
+- **Constant.** `SOURCE_GENERATION` in `storage/versioning.py` is this build's
+  source-tier semantics epoch.
+- **Scope.** `abicheck/buildsource/source_extractors/` (every module, derived
+  from the tree) plus the explicit `SOURCE_TIER_FILES` in
+  `storage/generation_scope.py`: the L4 replay and link producers and the L5
+  graph producers and folds. Comparison and finding modules (`source_diff`,
+  `source_graph_compare`, `source_graph_findings`, `cross_source_checks*`) are
+  out, because they decide verdicts from recorded facts rather than deciding
+  what is recorded. `source_extractors/resolver.py` decides provider selection,
+  so it stays on the resolver axis. The three scopes are disjoint, which a
+  test enforces.
+- **Stamping.** `StorageVersions.source_generation` is stated only by a package
+  that carries source-tier (L4/L5) facts. `this_build_generations` takes
+  `carries_source_facts` for this. A package without them omits the key and
+  stays unstated, so its serialized bytes do not change and it never drifts.
+  Packages written before this amendment state no source generation.
+- **Drift.** A stated source generation that differs from this build's is
+  reported as `semantics_differ`, the same as the extractor and resolver axes.
+  It is never a refusal: the source tier is a derived-answer caveat under
+  ADR-028 D3. `FactGenerations` widens from a pair to
+  `(extractor, resolver, source)`.
+- **Record.** `storage/generation_fingerprints.json` gains a `source` entry,
+  recorded with `scripts/record_generation_fingerprints.py --axis source`. The
+  extractor and resolver entries are unchanged.
+
+The extractor axis's own scope and generation do not change, so this amendment
+moves no existing stored package's generation. The residual limit is the same
+as for every axis: a fingerprint cannot tell a refactor from a semantic change,
+so `--no-semantic-change --reason` is a reviewed claim.

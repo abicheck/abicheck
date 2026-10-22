@@ -17,11 +17,17 @@ Scope is deliberately narrow so unrelated edits never fail CI:
 * **Extractor**: ``abicheck/extract/**`` plus the root-level parse-stage
   modules the root ``CLAUDE.md`` names (``*_metadata.py``, ``dwarf_*.py``,
   ``pdb_*.py``, ``dumper.py``). Renderers, CLI wiring, policy and tests are out.
+  The source tier (``abicheck/buildsource/``) is not in this axis.
 * **Resolver**: an explicit list of the modules that decide provider
   selection, alias normalization, symbol-version handling and reachability.
   Every other module whose name says ``resol``/``reachab``/``alias``/
   ``provider`` must appear in :data:`RESOLVER_NON_SEMANTIC_FILES` with a
   reason, so a new resolver cannot be left out silently.
+* **Source** (ADR-062 D2 amendment): ``abicheck/buildsource/source_extractors/``
+  (the L4 backends) plus the explicit :data:`SOURCE_TIER_FILES` (the L4
+  replay/link and L5 graph producers). It is its own axis, so an L4/L5 edit
+  does not drift an L2 package on the extractor axis, and a package records a
+  source generation only when it carries source-tier facts.
 
 What it cannot prove: a refactor and a semantic change inside the scope look
 the same to a hash. The re-record step is therefore an explicit, reviewed
@@ -44,6 +50,8 @@ __all__ = [
     "RESOLVER_NAME_WORDS",
     "RESOLVER_NON_SEMANTIC_FILES",
     "RESOLVER_SEMANTIC_FILES",
+    "SOURCE_EXTRACTOR_DIR",
+    "SOURCE_TIER_FILES",
     "file_digests",
     "fingerprint",
     "scope_files",
@@ -77,12 +85,50 @@ RESOLVER_SEMANTIC_FILES: tuple[str, ...] = (
     "abicheck/type_reachability.py",
     "abicheck/type_reachability_spelling.py",
     "abicheck/type_reachability_stdlib_spellings.py",
-    "abicheck/impact/use_case_reachability.py",
+    "abicheck/policy/use_case_reachability.py",
     "abicheck/buildsource/source_extractors/resolver.py",
     "abicheck/buildsource/providers.py",
     "abicheck/compare/export_owner_resolution.py",
     "abicheck/storage/native_identity_aliases.py",
     "abicheck/workflows/compare/resolve.py",
+)
+
+#: The directory whose every module is in the source-tier scope: the L4 source
+#: extractors (ADR-030 D3). Derived from the tree, so a new backend is in scope
+#: without a list edit.
+SOURCE_EXTRACTOR_DIR = "abicheck/buildsource/source_extractors"
+
+#: The L4 replay/link producers and the L5 graph producers and folds that decide
+#: what the source tier records for a build tree (ADR-062 D2 amendment). These
+#: are the modules a change to ``SOURCE_GENERATION`` must cover. Comparison and
+#: finding modules (``source_diff``, ``source_graph_compare``,
+#: ``source_graph_findings``, ``cross_source_checks*``) decide verdicts from
+#: recorded facts, not what is recorded, so they are out of scope.
+SOURCE_TIER_FILES: tuple[str, ...] = (
+    # L4: replay and per-TU/per-library surface
+    "abicheck/buildsource/source_abi.py",
+    "abicheck/buildsource/source_link.py",
+    "abicheck/buildsource/source_replay.py",
+    "abicheck/buildsource/source_replay_shared.py",
+    "abicheck/buildsource/source_replay_pool.py",
+    "abicheck/buildsource/clang_ast_run.py",
+    # L5: the shared clang AST pass and the graph families it folds
+    "abicheck/buildsource/l5_ast_pass.py",
+    "abicheck/buildsource/l5_ast_run.py",
+    "abicheck/buildsource/inline_graph_fold.py",
+    "abicheck/buildsource/semantic_fact_folds.py",
+    "abicheck/buildsource/call_graph.py",
+    "abicheck/buildsource/template_graph.py",
+    "abicheck/buildsource/template_graph_fold.py",
+    "abicheck/buildsource/template_graph_value_decls.py",
+    "abicheck/buildsource/macro_graph.py",
+    "abicheck/buildsource/override_graph.py",
+    "abicheck/buildsource/type_graph.py",
+    "abicheck/buildsource/type_graph_index.py",
+    "abicheck/buildsource/include_graph.py",
+    "abicheck/buildsource/include_graph_workers.py",
+    "abicheck/buildsource/source_graph.py",
+    "abicheck/buildsource/source_graph_build_source_abi.py",
 )
 
 #: Resolver-named modules that do not decide resolver semantics, each with the
@@ -141,17 +187,42 @@ def _extractor_files() -> tuple[str, ...]:
     )
 
 
+def _source_files() -> tuple[str, ...]:
+    """Every source-tier file, repo-relative and sorted.
+
+    The ``source_extractors/`` directory is derived from the tree, so a new
+    backend is in scope without a list edit. :data:`SOURCE_TIER_FILES` is
+    explicit.
+    """
+    found: set[str] = set(SOURCE_TIER_FILES)
+    found.update(
+        _rel(p)
+        for p in (REPO_ROOT / SOURCE_EXTRACTOR_DIR).rglob("*.py")
+        if p.is_file() and "__pycache__" not in p.parts
+    )
+    # A module that decides resolver semantics keeps its one owner: the
+    # resolver axis. ``source_extractors/resolver.py`` is such a module.
+    found.difference_update(RESOLVER_SEMANTIC_FILES)
+    return tuple(sorted(found))
+
+
 def scope_files(axis: str) -> tuple[str, ...]:
     """The repo-relative source files that define *axis*'s semantics, sorted.
 
-    ``axis`` is ``"extractor"`` or ``"resolver"``. The extractor set is derived
-    from the tree, so a new ``extract/`` module is in scope without a list edit.
-    The resolver set is the explicit :data:`RESOLVER_SEMANTIC_FILES`.
+    ``axis`` is ``"extractor"``, ``"resolver"`` or ``"source"``. The extractor
+    set is derived from the tree, so a new ``extract/`` module is in scope
+    without a list edit. The resolver set is the explicit
+    :data:`RESOLVER_SEMANTIC_FILES`. The source set is
+    :func:`_source_files`. The three sets are disjoint, so an L4/L5 edit does
+    not move the extractor axis and an extractor edit does not move the source
+    axis.
     """
     if axis == "extractor":
         return _extractor_files()
     if axis == "resolver":
         return tuple(sorted(RESOLVER_SEMANTIC_FILES))
+    if axis == "source":
+        return _source_files()
     raise ValueError(f"unknown generation axis {axis!r}")
 
 
