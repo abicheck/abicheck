@@ -141,9 +141,9 @@ def test_raising_on_error_stops_running_children_and_returns_budget():
         )
     assert time.monotonic() - start < 25  # children were terminated
     assert not multiprocessing.active_children()
-    # The still-running members' reservations came back (the raising
-    # member's own was popped before its on_error raised).
-    assert admission._in_flight <= 1
+    # Every reservation came back, including the raising member's own,
+    # which had already left `running` when its on_error raised.
+    assert admission._in_flight == 0
 
 
 # --- release_member_processes, with the process fan-out run on threads ---
