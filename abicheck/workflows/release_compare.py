@@ -108,7 +108,7 @@ class ReleaseCompareOptions:
     new_version: str = ""
     lang: str = "c++"
     lang_explicit: bool = False
-    suppress: Path | None = None
+    suppress: Path | tuple[Path, ...] | None = None
     policy: str = "strict_abi"
     policy_file_path: Path | None = None
     scope_public_headers: bool = True
@@ -183,7 +183,7 @@ def collect_matrix_result(
     policy: str,
     worst_verdict: str,
     *,
-    suppress: Path | None = None,
+    suppress: Path | tuple[Path, ...] | None = None,
     policy_file_path: Path | None = None,
     old_version: str = "",
     new_version: str = "",

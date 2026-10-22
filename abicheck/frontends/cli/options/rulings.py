@@ -331,8 +331,8 @@ COMPARE_OPTION_RULINGS: dict[str, OptionRuling] = {
         "is not."
     ),
     "--suppress": _keep(
-        "Names this run's suppression document -- the same document-operand "
-        "class as --policy, and the supported route for a finding a user "
+        "Names this run's suppression documents (repeatable, merged in order) "
+        "-- the same document-operand class as --policy, and the route for a finding a user "
         "wants gone (which is what lets D5 reject analysis-disabling "
         "flags outright)."
     ),

@@ -132,7 +132,7 @@ def resolve_evaluation_configuration(
     policy: str,
     policy_file: PolicyFile | None,
     suppression: Any,
-    suppress: Path | None,
+    suppress: Path | tuple[Path, ...] | None,
     symbols_list: Any,
     contract_evaluation: bool,
     policy_selected_by: str | None,

@@ -252,8 +252,10 @@ def _suppression_source(suppression: Any, path: Any) -> Any:
     suppression_config_for`` follows."""
     if suppression is None:
         return None
+    from ..policy.suppression.merge import suppress_label
+
     return SuppressionSource(
-        path=str(path) if path is not None else None,
+        path=suppress_label(path) if path is not None else None,
         sha256=getattr(suppression, "source_sha256", None) or "",
         rules=tuple(suppression.rule_identities()),
     )
@@ -267,7 +269,7 @@ def cli_configuration_inputs(
     project_path: Path | None,
     policy_file: Any = None,
     suppression: Any = None,
-    suppress_path: Path | None = None,
+    suppress_path: Path | tuple[Path, ...] | None = None,
     policy_option: str | None = None,
     policy_path: Path | None = None,
     policy_sha256: str | None = None,

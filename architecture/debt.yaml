@@ -751,7 +751,7 @@
     },
     {
       "path": "abicheck/policy/disposition_ledger.py",
-      "baseline_lines": 835,
+      "baseline_lines": 824,
       "target": "policy",
       "rule": "no_growth",
       "disposition": "migrate",

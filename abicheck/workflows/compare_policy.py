@@ -66,6 +66,7 @@ if TYPE_CHECKING:
     from ..model.acknowledgment_policy import AcknowledgmentPolicy
     from ..model.change import Change
     from ..policy.acknowledgment import AcknowledgmentList
+    from ..policy.suppression.merge import SuppressPaths
     from ..policy.suppression.rules import SuppressionList
     from ..policy_file import PolicyFile
 
@@ -83,7 +84,7 @@ dedup_policy_override_warnings = _dedup_validate_overrides_warnings
 
 
 def load_suppression_and_policy(
-    suppress: Path | None,
+    suppress: SuppressPaths | None,
     policy: str = "strict_abi",
     policy_file_path: Path | None = None,
     *,
@@ -99,21 +100,21 @@ def load_suppression_and_policy(
     Raises:
         ValidationError: If the suppression or policy file is invalid.
     """
+    from ..policy.suppression.merge import load_suppression_files
     from ..policy.suppression.rules import SuppressionList as _SuppressionList
     from ..policy_file import PolicyFile as _PolicyFile
 
     suppression: _SuppressionList | None = None
     if suppress is not None:
         try:
-            suppression = _SuppressionList.load(
+            suppression = load_suppression_files(
                 suppress, require_justification=require_justification
             )
         except (ValueError, OSError) as e:
             raise ValidationError(f"Invalid suppression file: {e}") from e
-        if strict_suppressions:
-            expired = suppression.check_expired_strict()
-            if expired:
-                raise ValidationError(expired_suppressions_message(expired, suppress))
+        expired_message = strict_expiry_message(suppression, strict_suppressions)
+        if expired_message:
+            raise ValidationError(expired_message)
 
     pf: _PolicyFile | None = None
     if policy_file_path is not None:
@@ -142,6 +143,24 @@ def load_suppression_and_policy(
         for warning in _pending_validate_overrides_warnings(pf):
             _logger.warning("%s", warning)
     return suppression, pf
+
+
+def strict_expiry_message(suppression: Any, strict: bool) -> str | None:
+    """The strict-suppressions error for *suppression*, or ``None``.
+
+    One message block per ``--suppress`` file holding an expired rule, each
+    naming that file and the rule's position in it, so a run merging several
+    files never blames the wrong one.
+    """
+    from ..policy.suppression.merge import expired_by_file
+
+    if not strict or suppression is None:
+        return None
+    blocks = [
+        expired_suppressions_message(rules, Path(source or "<suppressions>"))
+        for source, rules in expired_by_file(suppression)
+    ]
+    return "\n".join(blocks) or None
 
 
 def expired_suppressions_message(expired: list[tuple[int, Any]], path: Path) -> str:

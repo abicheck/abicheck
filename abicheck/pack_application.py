@@ -445,7 +445,7 @@ def preflight_validate_project_policy_overrides(
 
 
 def resolve_bundle_policy_file(
-    suppress: Path | None,
+    suppress: Path | tuple[Path, ...] | None,
     policy: str,
     policy_file_path: Path | None,
     application: PackApplication | None,
