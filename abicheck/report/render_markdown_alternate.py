@@ -62,13 +62,10 @@ has no dedicated golden suite but is covered by
 from __future__ import annotations
 
 from collections.abc import Mapping
-from dataclasses import asdict
 from typing import Any
 
-from ..policy.evaluate import effective_kind_sets
 from .disposition_audit import (
     DispositionAudit,
-    compute_disposition_audit,
     render_disposition_audit_section,
 )
 from .document import ReportDocument
@@ -94,74 +91,17 @@ from .render_markdown import (
 )
 from .render_markdown_document import (
     _impact_table_from_mapping,
-    _opt_asdict,
-    _reporter_markdown,
-    _resolve_displayed_changes,
     _suppression_note_from_mapping,
-)
-from .section_notes import (
-    compute_out_of_surface_note,
-    compute_redundancy_note,
-    compute_suppression_note,
 )
 from .surface_changes import (
     SurfaceChangeSection,
-    compute_surface_changes,
     render_surface_changes_section,
 )
-from .view import render_show_only_cli_hint, resolve_scoped_gate_findings
+from .view import render_show_only_cli_hint
 
 # ---------------------------------------------------------------------------
 # Shared preamble (--report-mode leaf / root-cause)
 # ---------------------------------------------------------------------------
-
-
-def _view_preamble_mapping(
-    result: Any,
-    view_label: str,
-    *,
-    show_only: str | None,
-    show_recommendation: bool,
-    severity_config: Any = None,
-) -> tuple[dict[str, Any], list[Any]]:
-    """JSON-safe fields for the opening block ``--report-mode leaf``/
-    ``root-cause`` share (title/verdict table, coverage-warning banner,
-    optional recommendation section, ``--show-only`` filter note) plus the
-    (possibly filtered) changes to render -- the compute half of
-    ``reporter_markdown._view_preamble``'s split. See
-    :func:`_render_view_preamble` for the render half."""
-    rm = _reporter_markdown()
-
-    changes, show_only_note = _resolve_displayed_changes(result, show_only)
-
-    d: dict[str, Any] = {
-        "library": result.library,
-        "view_label": view_label,
-        "old_version": result.old_version,
-        "new_version": result.new_version,
-        "verdict_emoji": rm._VERDICT_EMOJI[result.verdict],
-        "verdict_label": rm._VERDICT_LABEL[result.verdict],
-        "coverage_warnings": (
-            list(result.coverage_warnings) if result.coverage_warnings else []
-        ),
-        "recommendation": (
-            asdict(rm.compute_recommendation_section(result))
-            if show_recommendation
-            else None
-        ),
-        "show_only_note": show_only_note,
-        # ADR-067 D3: both alternate modes carry the same counts the full
-        # view and the digest do -- computed here, in the one preamble the
-        # two share, rather than twice at their own call sites.
-        "disposition_audit": compute_disposition_audit(
-            result, severity_config
-        ).to_dict(),
-        # Same "what changed / review actions" section the full view and
-        # the digest carry (workstream G S1) -- one preamble, both alternate
-        # modes.
-        "surface_changes": compute_surface_changes(result, changes=changes).to_dict(),
-    }
-    return d, changes
 
 
 def _render_view_preamble(d: Mapping[str, Any]) -> list[str]:
@@ -229,106 +169,6 @@ def _root_cause_section_from_mapping(
             for g in d["groups"]
         )
     )
-
-
-def build_root_cause_document(
-    result: Any,
-    *,
-    show_only: str | None = None,
-    show_recommendation: bool = False,
-    show_impact: bool = False,
-    severity_config: Any = None,
-    contract_evaluation: bool = False,
-) -> ReportDocument:
-    """``--report-mode root-cause`` (G29 Phase 3 slice 4, ADR-052) as a
-    ``ReportDocument``. See this module's own docstring for scope --
-    ``compute_root_cause_section``'s own ``RootCauseSectionData`` is already
-    JSON-safe (every finding is pre-formatted to a plain string at compute
-    time), so this fold needs no new row type of its own."""
-    rm = _reporter_markdown()
-    preamble, changes = _view_preamble_mapping(
-        result,
-        "root-cause view",
-        show_only=show_only,
-        show_recommendation=show_recommendation,
-        severity_config=severity_config,
-    )
-
-    # G29 Phase 3 slice 3 follow-up: merge --used-by/--required-symbol
-    # scoped-only findings into the same root-cause groups (see
-    # reporter_markdown._to_markdown_root_cause's own note) -- resolved
-    # before the severity table so a scoped run whose only gating issue is
-    # one of these can pass the scoped counts below.
-    scoped_only, missing_labels, blocks, missing_kind = resolve_scoped_gate_findings(
-        result, severity_config, show_only
-    )
-
-    root_cause_section = rm.compute_root_cause_section(
-        changes,
-        scoped_only,
-        missing_labels,
-        blocks,
-        missing_kind,
-        contract_evaluation=contract_evaluation,
-        evidence_tiers=result.evidence_tiers,
-    )
-    has_root_cause_entries = root_cause_section is not None
-
-    d: dict[str, Any] = {
-        **preamble,
-        "report_mode": "root-cause",
-        # This builder assembles its own document rather than reusing
-        # `build_report_document`'s, so a field carried there is not carried
-        # here for free -- which is why `--view root-cause` rendered an
-        # accepted result naming neither the rule that demoted its findings
-        # nor the reason (Codex review, PR #1284). Same key and same rows as
-        # the full document, so the two projections cannot disagree.
-        "pattern_modulations": list(getattr(result, "pattern_modulations", ()) or ()),
-        "severity_summary": (
-            asdict(
-                rm.compute_severity_summary(
-                    changes,
-                    severity_config,
-                    all_changes=list(result.changes),
-                    policy=result.policy,
-                    kind_sets=effective_kind_sets(result),
-                    policy_file=result.policy_file,
-                    scoped_counts=getattr(result, "scoped_severity_counts", None),
-                    scoped_blocking_categories=getattr(
-                        result, "scoped_blocking_categories", None
-                    ),
-                )
-            )
-            if severity_config is not None
-            else None
-        ),
-        "root_cause": (
-            asdict(root_cause_section) if root_cause_section is not None else None
-        ),
-        # Codex review (see reporter_markdown._to_markdown_root_cause's own
-        # note): a scoped-only change or missing-contract label can be the
-        # *only* displayed finding, so gating the empty message purely on
-        # `changes` would produce a contradictory report.
-        "empty_message": (
-            None
-            if (changes or has_root_cause_entries)
-            else (
-                "_No changes match the current filter._"
-                if (show_only and result.changes)
-                else "_No ABI changes detected._"
-            )
-        ),
-        "redundancy_note": _opt_asdict(compute_redundancy_note(result)),
-        "suppression_note": _opt_asdict(compute_suppression_note(result)),
-        "out_of_surface_note": _opt_asdict(compute_out_of_surface_note(result)),
-        "show_impact": show_impact,
-        "impact_table": (
-            _opt_asdict(rm.compute_impact_table(result, displayed_changes=changes))
-            if show_impact
-            else None
-        ),
-    }
-    return ReportDocument.from_mapping(d)
 
 
 def render_root_cause_document(doc: ReportDocument) -> str:

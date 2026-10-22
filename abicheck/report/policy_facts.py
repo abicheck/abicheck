@@ -35,15 +35,31 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
-from ..policy.evaluate import effective_kind_sets
+from ..policy.classification import evidence_status_for_result, impact_for
+from ..policy.evaluate import effective_kind_sets, evaluate
 from ..policy.gate_decision import gate_decision_for_result
-from ..report_summary import build_summary
+from ..policy.reclassify import active_reclassify_rules
+from ..policy.severity import compute_exit_code
+from ..report_classifications import (
+    ENVIRONMENT_DRIFT_KINDS as ENVIRONMENT_DRIFT_KINDS,
+    category as category,
+    kind_str as kind_str,
+    severity as severity,
+)
+from ..report_summary import (
+    build_summary,
+    compatibility_metrics as compatibility_metrics,
+)
 from ..semver import recommend_release_for_report
 
 if TYPE_CHECKING:
     from datetime import date
 
     from ..checker import DiffResult
+    from ..model.change_catalog.kinds import ChangeKind, HasKind
+    from ..model.evidence_status import EvidenceStatus
+    from ..model.policy_file_protocol import ReclassifyRuleProtocol
+    from ..policy.evaluate import ClassifiedDiff
     from ..policy.severity import GateDecision, KindSets, SeverityConfig
     from ..report_summary import ReportSummary
     from ..semver import ReleaseRecommendation
@@ -136,4 +152,39 @@ def stat_facts_for(
         summary=summary_for(result),
         release_recommendation=release_recommendation_for(result),
         assurance=assurance,
+    )
+
+
+def classification_for(result: DiffResult) -> ClassifiedDiff:
+    """The run's findings classified under its own ``policy``/``policy_file``."""
+    return evaluate(result)
+
+
+def evidence_status_of(
+    change: HasKind, evidence_tiers: Sequence[str] = ()
+) -> EvidenceStatus | None:
+    """The evidence status one change carries, given the run's evidence tiers."""
+    return evidence_status_for_result(change, evidence_tiers)
+
+
+def impact_text_for(kind: ChangeKind, evidence_status: EvidenceStatus | None) -> str:
+    """The impact sentence for *kind*, with the evidence caveat *evidence_status* implies."""
+    return impact_for(kind, evidence_status)
+
+
+def reclassify_rules_in_effect(
+    rules: Sequence[ReclassifyRuleProtocol], today: date | None
+) -> list[ReclassifyRuleProtocol]:
+    """The reclassify rules not yet past their ``expires`` date on *today*."""
+    return active_reclassify_rules(rules, today)
+
+
+def gate_exit_code_for(result: DiffResult, severity_config: SeverityConfig) -> int:
+    """The exit code *result* scores to under *severity_config*, on its own policy."""
+    return compute_exit_code(
+        result.changes,
+        severity_config,
+        policy=result.policy,
+        kind_sets=effective_kind_sets(result),
+        policy_file=result.policy_file,
     )

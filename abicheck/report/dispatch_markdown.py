@@ -113,10 +113,8 @@ def to_markdown(
     # -- the same fact/formatting split JSON/SARIF/JUnit/--stat/HTML already
     # use. `demangle` is applied inside the document renderer itself (the
     # document's own "demangle" field), not by this function's `_out`.
-    from .render_markdown_document import (
-        build_markdown_document,
-        render_markdown_document,
-    )
+    from .markdown_compute import build_markdown_document
+    from .render_markdown_document import render_markdown_document
 
     return render_markdown_document(
         build_markdown_document(
@@ -185,10 +183,8 @@ def _to_markdown_root_cause(
     via ``report/render_markdown_alternate.py``, the same fact/formatting
     split JSON/SARIF/JUnit/``--stat``/HTML/full-mode markdown already use.
     """
-    from .render_markdown_alternate import (
-        build_root_cause_document,
-        render_root_cause_document,
-    )
+    from .markdown_compute import build_root_cause_document
+    from .render_markdown_alternate import render_root_cause_document
 
     return render_root_cause_document(
         build_root_cause_document(
