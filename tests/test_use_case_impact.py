@@ -37,7 +37,6 @@ from abicheck.buildsource.source_graph import (
 )
 from abicheck.checker_policy import ChangeKind
 from abicheck.cli import main
-from abicheck.impact.use_case_reachability import explain_use_case_impact
 from abicheck.model import AbiSnapshot
 from abicheck.model.change import Change
 from abicheck.policy.use_case_attribution import (
@@ -53,7 +52,7 @@ from abicheck.report.use_case_impact_render import (
 
 def _build_impact(*args, **kwargs):
     """``build_use_case_impact`` with the reachability port the CLI injects."""
-    return build_use_case_impact(*args, explain=explain_use_case_impact, **kwargs)
+    return build_use_case_impact(*args, **kwargs)
 
 
 def _graph(*entries: str) -> SourceGraphSummary:

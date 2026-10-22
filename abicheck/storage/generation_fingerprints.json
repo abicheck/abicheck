@@ -65,7 +65,7 @@
       "abicheck/extract/headers/backend_plan.py": "1f02babf0ead52a65e4fa08dff8ce5b2a9d60feb1d02d22e7db30ee050cf8717",
       "abicheck/extract/headers/backend_protocol.py": "144cbe76456b6bceaf56f0edd0f3398f171178a222c8b968d53f8a17ee05a21b",
       "abicheck/extract/headers/castxml/__init__.py": "cebb319d35840200904dde9fe4ad16489124b02327a50d8351b086844ee19943",
-      "abicheck/extract/headers/castxml/backend.py": "dd487123cba18e0fb2ab56d18c02cc578c5757183692e2d9c4b28207780ddd72",
+      "abicheck/extract/headers/castxml/backend.py": "cb141b93be83e1351f30626349653559af38a3fccf08a593a9d7268e2dffef14",
       "abicheck/extract/headers/castxml/calling_convention.py": "ab4cd4474d11eb0da2216b29393e9daf1dbcf94226204237fd4c0381adacbcbb",
       "abicheck/extract/headers/castxml/context.py": "8178e769a346b11e94a963a6b6f4e89dd0c06ffdee8cb6d80fc2e519c5c3c504",
       "abicheck/extract/headers/castxml/dumper.py": "55aba9e4b4bf6c88810d2dfe3ceae405479d060022549500c4690c0e742da35e",
@@ -150,9 +150,9 @@
       "abicheck/symvers_metadata.py": "372737765cd132e6e87ed891dd465d2958e04debbef774e45212ceb3036871cb",
       "abicheck/type_metadata.py": "9997189de8dac522fd1db8be5ae491d811139503f83abaaded89038eb4aa9cdf"
     },
-    "fingerprint": "501b838917ff4164c6bf2c1b2ea5c00e52564b7201b3fde464662c78d6cda43d",
+    "fingerprint": "5f4972c35e1c8c0c68717acf8d587b56a83e7ba4710f8620da706db2b88e968e",
     "generation": 6,
-    "reason": "origin_lib now attributes std template local statics to the C++ runtime (ElfSymbol.origin_lib); extractor semantics changed"
+    "reason": "origin_lib now attributes std template local statics to the C++ runtime (generation 6); castxml not-found message hoisted into a shared constant (#1710) is extraction-neutral"
   },
   "resolver": {
     "files": {

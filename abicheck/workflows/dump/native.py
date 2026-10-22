@@ -216,6 +216,19 @@ def _run_dump_uncached(
 
     from ...extract.header_ast_backend import _resolve_header_backend
 
+    # Issue #1710: a missing castxml fails here, before any extraction. ELF
+    # only: PE/Mach-O header scoping degrades to export-table mode instead.
+    _parses = (_headers or dump_manifest is not None) and binary_fmt == "elf"
+    if _parses and not (dwarf_only or symbols_only):
+        from ..header_frontend_preflight import require_castxml_if_needed
+
+        require_castxml_if_needed(
+            eff_backend,
+            lang=lang,
+            gcc_path=getattr(compile, "gcc_path", None),
+            gcc_prefix=getattr(compile, "gcc_prefix", None),
+        )
+
     request = NativeExtractRequest(
         path=path,
         version=version,

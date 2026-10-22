@@ -797,7 +797,23 @@ class TestEffectiveFormat:
         assert self._value("text", "-o markdown=- -o json=a.json") == "markdown"
 
     def test_with_no_stdout_export_the_first_is_the_primary(self) -> None:
-        assert self._value("text", "-o junit=a.xml -o json=b.json") == "junit"
+        # Issue #1714: the Action's own export rides first, so with it on a
+        # file too the first export is the Action's own.
+        assert (
+            _run_value(
+                "FORMAT=text OUTPUT_FILE=own.txt "
+                "INPUT_EXTRA_ARGS='-o junit=a.xml -o json=b.json' _effective_format"
+            )
+            == "text"
+        )
+        # And a caller export claiming our destination takes our place.
+        assert (
+            _run_value(
+                "FORMAT=text OUTPUT_FILE=a.xml "
+                "INPUT_EXTRA_ARGS='-o junit=a.xml -o json=b.json' _effective_format"
+            )
+            == "junit"
+        )
 
     def test_format_after_a_newline(self) -> None:
         # Same YAML-literal-block splitting concern as
@@ -820,7 +836,8 @@ class TestEffectiveFormat:
         one as unreadable -- so a successful comparison published
         REPORT_UNREADABLE (Codex review, P1).
         """
-        assert self._value("text", "-o json=reports/") == "markdown"
+        # Issue #1714: the Action's own `text=-` export is the document.
+        assert self._value("text", "-o json=reports/") == "text"
         assert (
             _run_value(
                 "FORMAT=text OUTPUT_FILE= INPUT_EXTRA_ARGS='-o json=reports/' "
@@ -832,14 +849,22 @@ class TestEffectiveFormat:
     def test_a_directory_export_beside_a_document_leaves_the_document_primary(
         self,
     ) -> None:
-        assert self._value("text", "-o json=reports/ -o junit=a.xml") == "junit"
+        # The Action's own document export goes first (issue #1714).
         assert (
             _run_value(
-                "FORMAT=text OUTPUT_FILE= "
+                "FORMAT=text OUTPUT_FILE=own.txt "
                 "INPUT_EXTRA_ARGS='-o json=reports/ -o junit=a.xml' "
                 "_effective_output_file"
             )
-            == "a.xml"
+            == "own.txt"
+        )
+        assert (
+            _run_value(
+                "FORMAT=text OUTPUT_FILE=a.xml "
+                "INPUT_EXTRA_ARGS='-o json=reports/ -o junit=a.xml' "
+                "_effective_format"
+            )
+            == "junit"
         )
 
     def test_does_not_false_positive_on_a_substring(self) -> None:

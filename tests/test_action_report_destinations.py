@@ -233,6 +233,11 @@ class TestEveryRequestedDestinationIsJudgedOnItsOwn:
             blob = tmp_path / f"blob{index}.bin"
             blob.write_text(text, encoding="utf-8")
             lines.append(f'cp "{blob}" "{dest}"')
+        # Issue #1714: the Action's own `json=-` export rides beside the
+        # caller's, so a faithful abicheck also prints a report to stdout.
+        good = tmp_path / "stdout.json"
+        good.write_text(_GOOD_REPORT, encoding="utf-8")
+        lines.append(f'cat "{good}"')
         lines.append("exit 0")
         stub = bindir / "abicheck"
         stub.write_text("\n".join(lines) + "\n", encoding="utf-8")
@@ -533,7 +538,10 @@ class TestAnExtraArgsOutputOverrideIsHonoured:
         )
         stub = bindir / "abicheck"
         stub.write_text(
-            f'#!/usr/bin/env bash\ncp "{blob}" "{dest}"\nexit 0\n', encoding="utf-8"
+            # Issue #1714: the Action's own `json=-` export now rides beside
+            # the caller's, so a faithful abicheck prints it to stdout too.
+            f'#!/usr/bin/env bash\ncp "{blob}" "{dest}"\ncat "{blob}"\nexit 0\n',
+            encoding="utf-8",
         )
         stub.chmod(0o755)
         return bindir
@@ -570,18 +578,19 @@ class TestAnExtraArgsOutputOverrideIsHonoured:
         assert outputs.get("verdict") != "REPORT_UNREADABLE", (spelling, outputs)
         assert outputs.get("verdict") == "BREAKING", (spelling, outputs)
 
-    def test_an_override_supersedes_the_output_file_input(self, tmp_path: Path) -> None:
-        # Both given: the real report lands at the override, and the superseded
-        # input path is never written. Validating the latter would fail a
-        # working run; reading it would publish a verdict from nothing.
-        superseded = tmp_path / "input_path.json"
+    def test_the_output_file_input_is_still_required_beside_a_caller_export(
+        self, tmp_path: Path
+    ) -> None:
+        # Issue #1714: a caller export no longer supersedes the Action's own
+        # `output-file`; both are requested, so a run that writes only the
+        # caller's leaves a requested destination missing -- REPORT_UNREADABLE.
+        own = tmp_path / "input_path.json"
         dest = tmp_path / "override.json"
         bindir = self._stub(tmp_path, dest, verdict="API_BREAK")
         outputs = _run_action(
-            tmp_path, self._env(tmp_path, f"--output json={dest}", superseded), bindir
+            tmp_path, self._env(tmp_path, f"--output json={dest}", own), bindir
         )
-        assert outputs.get("verdict") == "API_BREAK", outputs
-        assert not superseded.exists(), "the stub should not have written it"
+        assert outputs.get("verdict") == "REPORT_UNREADABLE", outputs
 
     def test_a_genuinely_missing_override_is_still_caught(self, tmp_path: Path) -> None:
         # Narrowness control: resolving the effective path must not turn into
@@ -762,6 +771,8 @@ class TestTheAssuranceAxisIsCheckedPerDestination:
             "#!/usr/bin/env bash\n"
             f'cp "{tmp_path / "p.json"}" "{tmp_path / "primary.json"}"\n'
             f'cp "{tmp_path / "s.json"}" "{tmp_path / "secondary.json"}"\n'
+            # Issue #1714: the Action's own `json=-` rides beside these.
+            f'cat "{tmp_path / "p.json"}"\n'
             "exit 0\n",
             encoding="utf-8",
         )
@@ -832,7 +843,10 @@ class TestAnAttachedShortOutputOptionIsHonoured:
         )
         stub = bindir / "abicheck"
         stub.write_text(
-            f'#!/usr/bin/env bash\ncp "{blob}" "{dest}"\nexit 0\n', encoding="utf-8"
+            # Issue #1714: the Action's own `json=-` export now rides beside
+            # the caller's, so a faithful abicheck prints it to stdout too.
+            f'#!/usr/bin/env bash\ncp "{blob}" "{dest}"\ncat "{blob}"\nexit 0\n',
+            encoding="utf-8",
         )
         stub.chmod(0o755)
         return bindir
@@ -926,7 +940,10 @@ class TestReportPathPublishesTheEffectiveDestination:
         )
         stub = bindir / "abicheck"
         stub.write_text(
-            f'#!/usr/bin/env bash\ncp "{blob}" "{dest}"\nexit 0\n', encoding="utf-8"
+            # Issue #1714: the Action's own `json=-` export now rides beside
+            # the caller's, so a faithful abicheck prints it to stdout too.
+            f'#!/usr/bin/env bash\ncp "{blob}" "{dest}"\ncat "{blob}"\nexit 0\n',
+            encoding="utf-8",
         )
         stub.chmod(0o755)
         return bindir
@@ -954,7 +971,9 @@ class TestReportPathPublishesTheEffectiveDestination:
         outputs = _run_action(
             tmp_path, self._env(tmp_path, f"--output json={dest}", superseded), bindir
         )
-        assert outputs.get("report-path") == str(dest), outputs
+        # Issue #1714: `output-file` is the Action's own (still requested)
+        # export now, so it is the report-path candidate -- but this run never
+        # rewrote it, and a stale file is never published.
         assert outputs.get("report-path") != str(superseded), outputs
 
     def test_a_stale_output_file_is_not_published(self, tmp_path: Path) -> None:
@@ -1033,7 +1052,10 @@ class TestEveryOutputSpellingNamesTheDestination:
         )
         stub = bindir / "abicheck"
         stub.write_text(
-            f'#!/usr/bin/env bash\ncp "{blob}" "{dest}"\nexit 0\n', encoding="utf-8"
+            # Issue #1714: the Action's own `json=-` export now rides beside
+            # the caller's, so a faithful abicheck prints it to stdout too.
+            f'#!/usr/bin/env bash\ncp "{blob}" "{dest}"\ncat "{blob}"\nexit 0\n',
+            encoding="utf-8",
         )
         stub.chmod(0o755)
         return bindir

@@ -146,7 +146,14 @@ def test_two_in_process_passes_survive_like_mutmut_runs_them(
         text=True,
         encoding="utf-8",
         errors="replace",
-        env={**os.environ, "PYTHONIOENCODING": "utf-8"},
+        env={
+            **os.environ,
+            "PYTHONIOENCODING": "utf-8",
+            # The copied conftest imports `tests.*` helpers.
+            "PYTHONPATH": os.pathsep.join(
+                p for p in (str(REPO_ROOT), os.environ.get("PYTHONPATH", "")) if p
+            ),
+        },
         timeout=120,
     )
     assert proc.returncode == 0, proc.stdout[-3000:] + proc.stderr[-2000:]
@@ -187,7 +194,7 @@ def test_nested_sessions_never_prune_the_outer_runs_temp_tree(
     env = {
         **os.environ,
         "PYTHONPATH": os.pathsep.join(
-            [str(plugin_dir), os.environ.get("PYTHONPATH", "")]
+            [str(plugin_dir), str(REPO_ROOT), os.environ.get("PYTHONPATH", "")]
         ),
         "PYTEST_DEBUG_TEMPROOT": str(temproot),
         "PYTHONIOENCODING": "utf-8",
