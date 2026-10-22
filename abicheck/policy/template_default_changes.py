@@ -21,7 +21,6 @@ ledger, which ``compare/`` may not import (ADR-061 dependency direction).
 
 from __future__ import annotations
 
-import re
 from typing import TYPE_CHECKING
 
 from ..compare.template_param_defaults import (
@@ -64,12 +63,26 @@ def _templates_named_by_reported_functions(
             if fn.mangled in reported:
                 spellings.append(fn.return_type)
                 spellings.extend(param.type for param in fn.params)
-    named: set[str] = set()
-    for key in keys:
-        leaf = re.compile(r"(?<![\w:])" + re.escape(key.rsplit("::", 1)[-1]) + r"\s*<")
-        if any(leaf.search(text) for text in spellings):
-            named.add(key)
-    return named
+    return {key for key in keys if _spells_template(spellings, key)}
+
+
+def _spells_template(texts: list[str], key: str) -> bool:
+    """Whether a spelled type in *texts* names the template *key*.
+
+    The leaf name must begin an identifier (no word character or ``:`` before
+    it), and an opening ``<`` must follow it, after optional whitespace. So
+    ``Box<char>`` matches and ``FlatBox<char>`` or ``ns2::Box<int>`` do not.
+    """
+    leaf = key.rsplit("::", 1)[-1]
+    for text in texts:
+        at = text.find(leaf)
+        while at != -1:
+            before = text[at - 1] if at else ""
+            tail = text[at + len(leaf) :].lstrip()
+            if not (before.isalnum() or before in "_:") and tail[:1] == "<":
+                return True
+            at = text.find(leaf, at + 1)
+    return False
 
 
 def detect_template_default_changes(

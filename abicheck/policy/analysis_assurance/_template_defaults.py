@@ -51,12 +51,18 @@ def _unrecorded_pattern_count(snap: AbiSnapshot) -> int:
     count = 0
     for rec in patterns:
         qualified = rec.qualified_name or rec.name
-        if any(qualified.startswith(parent + "::") for parent in names):
+        if any(_is_nested_in(qualified, parent) for parent in names):
             continue
         fact = rec.template_param_defaults_fact
         if fact is None or fact.status is not FactStatus.PRESENT:
             count += 1
     return count
+
+
+def _is_nested_in(qualified: str, parent: str) -> bool:
+    """Whether *qualified* is a member of *parent*, on ``::`` boundaries."""
+    parts, owner = qualified.split("::"), parent.split("::")
+    return len(parts) > len(owner) and parts[: len(owner)] == owner
 
 
 def _side_note(label: str, snap: AbiSnapshot, count: int) -> str:
