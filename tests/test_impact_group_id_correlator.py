@@ -297,3 +297,31 @@ class TestPropertyAgainstOracle:
                     assert group == root
                 else:
                     assert group == expected
+
+
+class TestScopedFoldInCarriesImpactGroup:
+    """A ``--used-by`` run folds scoped-only findings into ``changes`` after the
+    document is built (``apply_scoped_gate``). That fold must stamp the same
+    group id the correlator gives the pair, not only the lookup helpers."""
+
+    def test_folded_scoped_only_entry_carries_its_group_id(self) -> None:
+        func = Change(ChangeKind.FUNC_REMOVED, "pub_helper", "removed")
+        consumer = Change(
+            ChangeKind.CONSUMER_REQUIRED_SYMBOL_REMOVED, "pub_helper", "consumer needs"
+        )
+        result = _result([func], scoped=(consumer,))
+        # Stamping used_by is what makes apply_scoped_gate run the fold-in.
+        result.used_by = ()
+        entries = {
+            e["symbol"]: e for e in json.loads(reporter.to_json(result))["changes"]
+        }
+        expected = _sha16("pub_helper")
+        assert entries["pub_helper"]["impact_assessment"]["impact_group_id"] == expected
+        folded = [
+            e
+            for e in json.loads(reporter.to_json(result))["changes"]
+            if e["kind"] == ChangeKind.CONSUMER_REQUIRED_SYMBOL_REMOVED.value
+        ]
+        assert len(folded) == 1
+        assert folded[0]["impact_assessment"]["impact_group_id"] == expected
+        assert "root_cause_id" not in folded[0]["impact_assessment"]
