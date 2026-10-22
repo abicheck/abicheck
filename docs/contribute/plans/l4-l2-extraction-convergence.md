@@ -1,6 +1,6 @@
 # L2/L4/L5 extraction convergence — one parse per TU, one owner per primitive
 
-**Status:** Proposed; Phases 1 and 2 implemented (the first two PRs); Phase 3 first slice implemented (the model and four clang/castxml consumers; see Phase 3 for the remaining slices).
+**Status:** Proposed; Phases 1 and 2 implemented (the first two PRs); Phase 3 first slice implemented (the model and four clang/castxml consumers), and remaining slice 1 (the L2 header clang argv) implemented; slices 2–4 remain (see Phase 3).
 **Parent plans:** [Duplication & convergence assessment](duplication-and-convergence-assessment.md)
 (its P1 "Compiler invocation handling needs one typed model" owns Phase 3
 here — this plan does not restate that design), [One Semantic Pipeline](one-semantic-pipeline.md)
@@ -198,10 +198,21 @@ the pre-change commit. A mutation of the dedup rule fails it.
 
 **Remaining slices**, each a separate PR:
 
-1. **L2 header clang argv.** `extract/headers/ast_config.py:_build_clang_header_command`
-   still builds its own argv from `header_compile_context`'s derived flags.
-   Route it through the model (the same dedup rule, the same rebase) and add
-   its rows to the golden.
+1. **L2 header clang argv — implemented.** `_build_clang_header_command` is now a
+   thin wrapper over `extract/headers/clang_header_argv.py`'s
+   `HeaderCompileContext` and `render_clang_header_argv`, which
+   `dumper_ast_config`'s re-export and the clang header backends reach through
+   the same wrapper. Two decisions differ from the first draft of this slice.
+   The renderer lives in `extract/`, not `buildsource/source_extractors/
+   compile_invocation.py`: `extract` may import only `model` and `storage`
+   (`architecture/modules.yaml`), and the header path has no `CompileUnit` for
+   the model to parse. The header keeps its path-class include dedup
+   (`drop_include_tokens_duplicating_paths`), not the token-identity rule
+   `replayed_tokens` applies, because the two rules differ on purpose and the
+   header inputs are already resolved, so there is no rebase to share. The
+   golden (`clang_header_argv_golden.json`, 11 cases) was recorded at the
+   pre-change commit and is asserted unchanged by
+   `tests/test_compile_invocation_differential.py`.
 2. **Typed include search for the public roots.** `clang_public_roots` still
    re-scans the replayed tokens for `-iquote`/`-I` operands. Carry the
    include-search entries as typed fields on the model and delete the rescan.
