@@ -187,6 +187,16 @@ PATTERN_VERDICTS: dict[str, bool] = {
 # Python compare() API, which does NOT run the build-evidence diff — only the CLI
 # path does — so these are validated by tests/validate_examples.py and skipped
 # here rather than producing a spurious "no change" verdict.
+# source_graph: cases whose expected COMPATIBLE_WITH_RISK comes from the
+# source-graph detector (public_dependency_role_changed). That detector runs only
+# when the case's source tree is supplied, which plain dump+compare here does
+# not do. These are validated by tests/validate_examples.py and skipped here.
+SOURCE_GRAPH_CASES: frozenset[str] = frozenset(
+    {
+        "case223_header_only_template_default_changed",
+        "case227_nested_namespace_template_default_changed",
+    }
+)
 BUILD_INFO_CASES: set[str] = {
     k for k, v in _gt_data["verdicts"].items() if v.get("build_info")
 }
@@ -870,6 +880,12 @@ def test_example_pipeline(
             f"{case_name}: L3 build-info case — exercised by "
             "test_example_build_evidence (the Python compare() API used here "
             "does not run the build-evidence diff; the CLI path does)"
+        )
+
+    if case_name in SOURCE_GRAPH_CASES:
+        pytest.skip(
+            f"{case_name}: source-graph risk — exercised by validate_examples.py "
+            "(which supplies the source tree); plain dump+compare cannot observe it"
         )
 
     if case_name in SOURCE_SMOKE_CASES:
