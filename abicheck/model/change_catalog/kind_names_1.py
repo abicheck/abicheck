@@ -395,6 +395,11 @@ KIND_NAMES_1: tuple[tuple[str, str, str | None], ...] = (
         "param_default_value_removed",
         "default arg removed → API_BREAK",
     ),
+    (
+        "TEMPLATE_PARAM_DEFAULT_CHANGED",
+        "template_param_default_changed",
+        "class-template parameter default spelling changed (header-only, no exported instantiation) → API_BREAK",
+    ),
     ("FIELD_RENAMED", "field_renamed", "same offset+type, different name"),
     ("PARAM_RENAMED", "param_renamed", "parameter name changed"),
     ("FIELD_BECAME_CONST", "field_became_const", "Field qualifier changes"),

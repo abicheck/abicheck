@@ -408,6 +408,7 @@ ASSERTED_CHANGE_KINDS: set[ChangeKind] = {
     ChangeKind.BUNDLE_SONAME_SKEW,
     ChangeKind.TAG_TYPE_RENAMED,
     ChangeKind.DEFAULT_TEMPLATE_ARG_CHANGED,
+    ChangeKind.TEMPLATE_PARAM_DEFAULT_CHANGED,
     ChangeKind.INLINE_BODY_REFERENCES_RENAMED_MEMBER,
     # Bundle / multi-library findings (ADR-023).
     # Exercised in tests/test_bundle.py.

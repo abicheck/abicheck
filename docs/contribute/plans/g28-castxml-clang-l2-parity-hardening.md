@@ -441,20 +441,24 @@ Findings:
    `tests/test_default_template_arg_l2_matrix.py` pins every cell of this
    table, so a change to any backend's answer fails there first.
 
-Phase 5's investigation is complete, and it leaves no detector change in
-place today. The verdict question it raised is decided in
-[ADR-085](../adr/085-template-parameter-default-arguments.md) (Proposed):
+Phase 5's investigation is complete. The verdict question it raised is
+decided in [ADR-085](../adr/085-template-parameter-default-arguments.md)
+(Accepted 2026-10-21), and that ADR's implementation is partly landed
+(2026-10-22):
 
 - the snapshot records template-parameter defaults as an availability-carrying
-  fact (schema v61; castxml and pre-v61 snapshots read as UNKNOWN);
-- a header-only default change is a new `API_BREAK` kind, and
-  `DEFAULT_TEMPLATE_ARG_CHANGED` keeps `BREAKING` for exported-instantiation
-  evidence (shape A);
+  fact (schema v62; castxml and pre-v62 snapshots read as UNKNOWN). Landed on
+  the clang backend, for type-parameter templates;
+- a header-only default change is the new `API_BREAK` kind
+  `template_param_default_changed`, and `DEFAULT_TEMPLATE_ARG_CHANGED` keeps
+  `BREAKING` for exported-instantiation evidence (shape A). Landed;
 - castxml reports the shape-B case as an explicit coverage gap, not
-  `NO_CHANGE`.
+  `NO_CHANGE`. **Not landed:** the castxml header-text scan that would produce
+  it. Until then castxml still reads `NO_CHANGE` for shape B.
 
-Once ADR-085 is accepted, the shape-B `NO_CHANGE` answer in the table above
-is superseded. The implementation slices are listed in the ADR.
+The shape-B `NO_CHANGE` answer in the table above is superseded on clang
+(`API_BREAK`). It stands on castxml until the scan lands. The remaining items
+are listed in the ADR's *Implementation status* section.
 
 ---
 

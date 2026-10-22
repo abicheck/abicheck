@@ -38,10 +38,12 @@ from dataclasses import dataclass
 from types import MappingProxyType
 from typing import Any
 
+from .template_decl_walk import ClassTemplateDecls
 from .templates import (
     _index_template_param_defaults,
     _index_template_param_kinds,
     _index_template_param_names,
+    _register_all,
     class_template_decls,
 )
 
@@ -95,6 +97,48 @@ class TemplateParamIndexes:
     kinds: TemplateParamIndex
     defaults: TemplateParamIndex
     names: TemplateParamIndex
+    # ``defaults`` restricted to templates whose parameters are all type
+    # parameters (ADR-085 D1): the only rows the default-fact producer trusts.
+    type_defaults: TemplateParamIndex
+
+
+def _all_type_params(class_template_decl: dict[str, Any]) -> bool:
+    """Whether a ``ClassTemplateDecl``'s parameter list is non-empty and every
+    parameter is a TYPE parameter (ADR-085 D1).
+
+    A non-type or template-template parameter's default is not recorded by
+    :func:`_template_param_defaults` (it reads as ``None``), so a template with
+    one cannot be told apart from one whose defaults are simply absent. The
+    default-fact producer therefore records only the all-type case.
+    """
+    kinds: list[str] = []
+    for child in class_template_decl.get("inner", []) or []:
+        if not isinstance(child, dict):
+            continue
+        kind = child.get("kind")
+        if kind in (
+            "TemplateTypeParmDecl",
+            "NonTypeTemplateParmDecl",
+            "TemplateTemplateParmDecl",
+        ):
+            kinds.append(str(kind))
+        else:
+            break
+    return bool(kinds) and all(k == "TemplateTypeParmDecl" for k in kinds)
+
+
+def _index_all_type_template_params(
+    root: dict[str, Any], decls: ClassTemplateDecls | None = None
+) -> dict[str, list[str | None]]:
+    """``qualified template name -> ["type"]`` for every template whose
+    parameters are all type parameters (see :func:`_all_type_params`), and
+    ``[None]`` otherwise. A conflicting redeclaration is dropped as ambiguous,
+    like every other index here, so the key is absent rather than trusted.
+    """
+    return _register_all(
+        decls if decls is not None else class_template_decls(root),
+        lambda _qualname, node: ["type"] if _all_type_params(node) else [None],
+    )
 
 
 def _freeze_template_param_index(
@@ -122,10 +166,17 @@ def build_template_param_indexes(root: dict[str, Any]) -> TemplateParamIndexes:
     # over the collected declarations (see `class_template_decls`).
     decls = class_template_decls(root)
     names = _index_template_param_names(root, decls)
+    defaults = _index_template_param_defaults(root, names, decls)
+    all_type = _index_all_type_template_params(root, decls)
     return TemplateParamIndexes(
         kinds=_freeze_template_param_index(_index_template_param_kinds(root, decls)),
-        defaults=_freeze_template_param_index(
-            _index_template_param_defaults(root, names, decls)
-        ),
+        defaults=_freeze_template_param_index(defaults),
         names=_freeze_template_param_index(names),
+        type_defaults=_freeze_template_param_index(
+            {
+                qualname: row
+                for qualname, row in defaults.items()
+                if all_type.get(qualname) == ["type"]
+            }
+        ),
     )

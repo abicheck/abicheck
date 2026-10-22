@@ -62,11 +62,11 @@ Each entry's status line says what is still open. A PARTIAL entry's write-up als
 
 ### False-clean risk
 
-#### A header-only default template-argument change reads `NO_CHANGE` at L2 on both backends (2026-10-21)
+#### A header-only default template-argument change reads `NO_CHANGE` at L2 on castxml (2026-10-21)
 
-**Status (2026-10-21): OPEN, deliberate — no detector change.** A default template argument changed on a template that nothing public names and nothing exports reads `NO_CHANGE` at L2. CastXML emits no record for an uninstantiated class template; clang has the default but does not record it. A clang-only detector was rejected because it would be a `BREAKING` verdict castxml cannot reproduce.
+**Status (2026-10-22): PARTIAL — clang closed, castxml open.** ADR-085 is accepted. Clang records the default (schema v62) and reports a header-only default change as `API_BREAK` (`template_param_default_changed`). A castxml run still reads `NO_CHANGE` on this shape, because castxml emits no record for an uninstantiated class template. The castxml coverage gap (ADR-085 D3, header-text scan) is not implemented yet.
 
-`false-clean` — A default template argument changed on a header-only template reads `NO_CHANGE` on both backends, and the source-level consequence appears only as an L4 risk. [Full write-up](known-gaps/a-header-only-default-template-argument-change-reads-no-change-at-l2.md)
+`false-clean` — A default template argument changed on a header-only template reads `NO_CHANGE` on castxml (clang reports `API_BREAK`), and the source-level consequence appears only as an L4 risk on castxml. [Full write-up](known-gaps/a-header-only-default-template-argument-change-reads-no-change-at-l2.md)
 
 #### A binary-gate demotion does not state a coverage gap (ADR-084)
 

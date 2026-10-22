@@ -36,7 +36,7 @@ named sections.
 
 ```json
 {
-  "schema_version": 61,
+  "schema_version": 62,
   "sections": {
     "binary":       {"section_kind": "binary",       "section_schema_version": 1, "payload": {"...": "..."}},
     "declarations": {"section_kind": "declarations", "section_schema_version": 1, "payload": {"...": "..."}},
@@ -61,7 +61,7 @@ maps are verbatim; each `payload` is elided.)*
 
 | Key | Meaning |
 |---|---|
-| `schema_version` | The **document's** version — one integer, currently **`61`**. Top-level so a loader can read it without parsing the rest. |
+| `schema_version` | The **document's** version — one integer, currently **`62`**. Top-level so a loader can read it without parsing the rest. |
 | `sections` | The nine named sections. Each carries its own `section_kind`, `section_schema_version` and `payload`. |
 | `section_schema_versions` | A flat map of the same per-section versions, so a reader can check them without walking `sections`. |
 
@@ -123,7 +123,7 @@ abicheck, rather than round-tripped.
 ## Schema version history
 
 `schema_version` is a single integer, not `MAJOR.MINOR`.
-The current value is **`61`**. See
+The current value is **`62`**. See
 `abicheck/storage/snapshot_schema_versions.py`'s `SCHEMA_VERSION` for the
 authoritative, up-to-date value and the full per-version comment.
 
@@ -341,6 +341,8 @@ for", never "none". The debug-type join (`compare/debug_type_join.py`)
 reports a conflicted name as ambiguous rather than trusting the first
 definition.
 
+(v62) `types[].template_param_defaults_fact` — a `Fact[tuple[str | None, ...]]` on a class-template pattern: the spelled default of each type parameter in declaration order, `null` for a parameter with no default. Recorded by the clang header backend only (ADR-085 D1). A pre-v62 document, and every castxml snapshot, has no such key and reads as not recorded, never as "no defaults".
+
 (v61) `types[].specialization_declared_fact` — a `Fact[bool]`: for a class-template specialization record, `present` with value `true` when the header's own class-head declares it (an explicit or partial specialization), `present` with `false` when it was instantiated from the primary template. castxml reads it from the declaring header line. Written only when determined, so every other record encodes exactly as v60; a missing key reads as unset, and a specialization the new header stops instantiating then keeps its `type_removed` row.
 
 (v60) `Function.is_inline_fact` — the persisted `Fact[bool]` sibling of `Function.is_inline`, written for every declaration a producer captured. A pre-v60 document has no such key and decodes through the legacy presence bridge, so its trust is still governed by the v53 `inline` threshold. A pre-v60 reader would silently drop the sibling, hence the bump.
@@ -493,7 +495,7 @@ model rather than against either physical layout. Optional keys are omitted or `
 
 | Key | Type | Meaning |
 |-----|------|---------|
-| `schema_version` | int | Snapshot format version (currently `61`). |
+| `schema_version` | int | Snapshot format version (currently `62`). |
 | `library` | string | Library identity, e.g. `libfoo.so.1`. |
 | `version` | string | Library version string, e.g. `1.2.3`. |
 | `source_path` | string \| null | Original path the snapshot was taken from. |
@@ -652,7 +654,7 @@ files:
 | | Snapshot (`dump`) | Comparison report (`compare -o json=-`) |
 |-|-------------------|---------------------------------------------|
 | **Version field** | `schema_version` | `report_schema_version` |
-| **Type** | integer (currently `61`) | string `MAJOR.MINOR` (e.g. `1.0`) |
+| **Type** | integer (currently `62`) | string `MAJOR.MINOR` (e.g. `1.0`) |
 | **Describes** | one library's ABI surface | the diff between two snapshots |
 
 A snapshot has no `report_schema_version`, and a report has no

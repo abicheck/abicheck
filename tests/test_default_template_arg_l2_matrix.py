@@ -166,18 +166,44 @@ def public_api_pair(tmp_path: Path) -> tuple[Path, Path]:
     return old, new
 
 
-@pytest.mark.parametrize("backend", BACKENDS)
-def test_header_only_default_change_is_no_l2_change(
-    tmp_path: Path, header_pair: tuple[Path, Path], backend: str
+HEADER_KIND = "template_param_default_changed"
+
+
+def test_header_only_default_change_is_api_break_on_clang(
+    tmp_path: Path, header_pair: tuple[Path, Path]
 ) -> None:
-    """No public surface and no export depends on Box's default: no ABI effect."""
-    _require_tools(backend)
+    """ADR-085 D2: clang records the defaults, so the header-only change is API_BREAK.
+
+    No export or public signature depends on Box's default, so it is not a
+    BREAKING finding, and it is not the exported-instantiation kind.
+    """
+    _require_tools("clang")
     old_h, new_h = header_pair
-    old = _dump_header(tmp_path, old_h, backend, "old")
-    new = _dump_header(tmp_path, new_h, backend, "new")
-    report = _compare_kinds(old, new, tmp_path, backend)
-    assert report["verdict"] == "NO_CHANGE"
+    old = _dump_header(tmp_path, old_h, "clang", "old")
+    new = _dump_header(tmp_path, new_h, "clang", "new")
+    report = _compare_kinds(old, new, tmp_path, "clang")
+    assert report["verdict"] == "API_BREAK"
+    assert _kinds(report) == {HEADER_KIND}
     assert DEFAULT_KIND not in _kinds(report)
+
+
+def test_header_only_default_change_is_not_recorded_by_castxml(
+    tmp_path: Path, header_pair: tuple[Path, Path]
+) -> None:
+    """Documented residual of ADR-085 D3: castxml emits no pattern record.
+
+    castxml cannot record the default, so this shape reads NO_CHANGE with no
+    new kind. D3's castxml coverage gap needs a header-text scan that is not
+    implemented yet (see the known-gaps entry). This test pins the current
+    behaviour so the residual is visible; update it when the scan lands.
+    """
+    _require_tools("castxml")
+    old_h, new_h = header_pair
+    old = _dump_header(tmp_path, old_h, "castxml", "old")
+    new = _dump_header(tmp_path, new_h, "castxml", "new")
+    report = _compare_kinds(old, new, tmp_path, "castxml")
+    assert report["verdict"] == "NO_CHANGE"
+    assert HEADER_KIND not in _kinds(report)
 
 
 def test_castxml_cannot_expose_uninstantiated_template_defaults(
@@ -324,3 +350,6 @@ def test_instantiated_default_change_is_attributed_at_l2(
     report = _compare_kinds(dumps["v1"], dumps["v2"], tmp_path, backend)
     assert report["verdict"] == "BREAKING"
     assert DEFAULT_KIND in _kinds(report)
+    # ADR-085 D2 shape-A suppression: the exported instantiation already carries
+    # the change, so the header-level kind is not counted a second time.
+    assert HEADER_KIND not in _kinds(report)

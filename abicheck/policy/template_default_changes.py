@@ -1,0 +1,73 @@
+# Copyright 2026 Nikolay Petrov
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+"""ADR-085 pipeline entry: the exported-instantiation and header-level default
+template-argument detectors, run as one step.
+
+Lives in ``policy/`` because it records a suppressed relation in the disposition
+ledger, which ``compare/`` may not import (ADR-061 dependency direction).
+"""
+
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
+from ..compare.template_param_defaults import (
+    detect_default_template_arg_changed,
+    detect_template_param_default_changed,
+)
+from ..compare.template_surface import (
+    qualified_name_lookup,
+    strip_template_args as _callable_stem,
+)
+from .disposition_ledger import Disposition
+
+if TYPE_CHECKING:
+    from ..model.change import Change
+    from ..model.snapshot import AbiSnapshot
+    from .finding_disposition.run_state import PipelineContext
+
+
+def detect_template_default_changes(
+    old: AbiSnapshot, ctx: PipelineContext
+) -> list[Change]:
+    """The pipeline entry for ADR-085: the exported-instantiation detector
+    (``DEFAULT_TEMPLATE_ARG_CHANGED``, shape A) plus the header-level one
+    (``TEMPLATE_PARAM_DEFAULT_CHANGED``, shape B).
+
+    A header-level relation that shape A already covers is recorded in
+    *ledger* as ``SUPPRESSED`` rather than dropped, so the raw total still
+    counts it (ADR-067 "record before disposing").
+    """
+    new = ctx.new
+    ledger = ctx.disposition_ledger
+    default_template_findings = detect_default_template_arg_changed(old, new)
+    covered_symbols = {c.symbol for c in default_template_findings}
+    old_name_of = qualified_name_lookup(old)
+    instantiation_stems = {
+        _callable_stem(old_name_of(fn))
+        for fn in old.declarations.functions
+        if fn.mangled in covered_symbols
+    }
+    header_findings, suppressed = detect_template_param_default_changed(
+        old, new, instantiation_stems=instantiation_stems
+    )
+    if ledger is not None:
+        for change in suppressed:
+            ledger.record(
+                change,
+                Disposition.SUPPRESSED,
+                application_point="detect_cpp_patterns.template_param_default",
+            )
+    return [*default_template_findings, *header_findings]

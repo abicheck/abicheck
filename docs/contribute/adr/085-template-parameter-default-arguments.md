@@ -107,6 +107,56 @@ Each slice is independently reviewable and is not started until this ADR is acce
 4. **Assurance gap for castxml.** The UNKNOWN-on-either-side coverage/assurance gap, its rendering in the report, and the header-backend capability reference (`docs/reference/header-backend-capabilities.md`, Known gaps section) updated to the new behaviour.
 5. **Closure.** Update the known-gaps entry to closed, the G28 Phase 5 plan, the ADR index status, the surface registry, and a changelog fragment.
 
+## Implementation status (2026-10-22)
+
+Landed on `feat/adr-085-template-default-args`. Deviations from the text above
+are recorded here rather than edited into the decision.
+
+- **Schema version is 62, not 61.** `SCHEMA_VERSION` was already 61: the
+  `RecordType.specialization_declared_fact` change (ADR-063 follow-up, #1684)
+  took it. The new field is v62, with its history note in
+  `storage/snapshot_schema_versions.py` and its availability constant in
+  `storage/fact_schema_versions.py`.
+- **Slice 1 (model and schema): landed.** `RecordType.template_param_defaults_fact`,
+  codec in `storage/fact_codec.py` with its validator in
+  `storage/fact_payload_validation.py`, encode-drop in `storage/snapshot_encode.py`,
+  registry entry in `model/fact_registry_entries_types.py`.
+- **Slice 2 (clang records defaults): landed, for type-parameter templates only.**
+  The clang walk reads `TemplateTypeParmDecl.defaultArg` through the merged
+  defaults index. A template with any non-type or template-template parameter
+  is not recorded (UNKNOWN), because its default spelling is not read. This is
+  a conservative limit, not a decision, and it is listed under *Remaining*.
+- **Slice 3 (kind and detector): landed.** `TEMPLATE_PARAM_DEFAULT_CHANGED`
+  (`API_BREAK`, `HEADER_OR_SOURCE_GATED`, `UNVERIFIED` identity bucket beside its
+  shape-A sibling). Detector in `compare/template_param_defaults.py`; the
+  pipeline entry in `policy/template_default_changes.py` records each shape-A
+  suppression in the disposition ledger as `SUPPRESSED`.
+- **Slice 4 (castxml assurance gap): partial.** The rollup in
+  `policy/analysis_assurance/_template_defaults.py` reports a gap for any
+  class-template pattern whose defaults are not recorded. That covers pre-v62
+  snapshots and non-type-parameter templates on clang. It does **not** cover the
+  case the ADR is mainly about: castxml emits no pattern record for an
+  uninstantiated template, so the rollup has nothing to see.
+- **Slice 5 (closure): partial.** The known-gap entry is PARTIAL, not closed. The
+  G28 Phase 5 section reflects the same state.
+
+## Remaining
+
+1. **castxml header-text scan (D3, the shape-B gap).** Detect a class template
+   with a defaulted type parameter in the public header text, record it in the
+   header toolchain metadata, and feed it to the rollup as a castxml coverage
+   gap naming `template-parameter defaults (castxml cannot record them)`. Until
+   this lands, a castxml header-only default change still reads `NO_CHANGE`
+   silently. This is the main open item. The verdict decision is also open: the
+   rollup marks the run `partial`, but the compare verdict stays `NO_CHANGE`,
+   while the ADR's D3 wording says "does not produce NO_CHANGE". Confirm which
+   is meant before implementing.
+2. **Parity test.** The test plan's parametrised cross-backend parity cannot
+   exist until castxml records or reports the fact. Add it with item 1.
+3. **Non-type and template-template parameters.** Record their defaults so such
+   a template is not UNKNOWN.
+4. **Function-template defaults.** Same D1 contract; a separate slice, as above.
+
 ## Not done
 
 - Function-template default arguments (same D1 contract, separate slice).

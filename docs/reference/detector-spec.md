@@ -2,7 +2,7 @@
 
 # Detector specification matrix
 
-One row per `ChangeKind` (420 total). Columns fuse the verdict partition (`checker_policy`), default policy (`policy_for`), the weakest evidence layer at which the kind becomes detectable (`scripts/evidence_tiers`), and the example case(s) that demonstrate the kind (`catalog/ground_truth.json`). The **Examples** column is capped at 4 links per kind; the full mapping is in `detector-spec.json`.
+One row per `ChangeKind` (421 total). Columns fuse the verdict partition (`checker_policy`), default policy (`policy_for`), the weakest evidence layer at which the kind becomes detectable (`scripts/evidence_tiers`), and the example case(s) that demonstrate the kind (`catalog/ground_truth.json`). The **Examples** column is capped at 4 links per kind; the full mapping is in `detector-spec.json`.
 
 | ChangeKind | Category | Default verdict | Severity | Min evidence | Doc slug | Examples |
 |---|---|---|---|---|---|---|
@@ -348,6 +348,7 @@ One row per `ChangeKind` (420 total). Columns fuse the verdict partition (`check
 | `tail_padding_reuse_changed` | risk | `COMPATIBLE_WITH_RISK` | `warning` | unspecified | `tail_padding_reuse_changed` | — |
 | `target_dependency_added` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L5 | `target_dependency_added` | [case161](examples/case161_target_dependency_added.md) |
 | `template_body_changed` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L4 | `template_body_changed` | [case122](examples/case122_template_signature_uninstantiated.md) |
+| `template_param_default_changed` | api_break | `API_BREAK` | `warning` | L2 | `template_param_default_changed` | — |
 | `template_param_type_changed` | breaking | `BREAKING` | `error` | unspecified | `template_param_type_changed` | — |
 | `template_return_type_changed` | breaking | `BREAKING` | `error` | unspecified | `template_return_type_changed` | — |
 | `text_relocation_introduced` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L0 | `text_relocation_introduced` | — |

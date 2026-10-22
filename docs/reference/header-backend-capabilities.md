@@ -359,9 +359,11 @@ Each of these is a documented consequence of the matrix, not a bug awaiting a
 quick patch. They are listed here so a reader can tell "abicheck cannot see
 this" apart from "abicheck saw no change".
 
-- **Default template arguments on uninstantiated templates.** A header-only
-  change to a template default reads `NO_CHANGE` on both backends, because
-  CastXML emits no record for an uninstantiated class template. See
+- **Default template arguments on uninstantiated templates.** On the clang
+  backend, a header-only change to a class template's type-parameter default
+  is `API_BREAK` (`template_param_default_changed`, ADR-085). On castxml it still
+  reads `NO_CHANGE`, because CastXML emits no record for an uninstantiated class
+  template. castxml's coverage gap (ADR-085 D3) is not implemented yet. See
   [known-gaps](../contribute/known-gaps/a-header-only-default-template-argument-change-reads-no-change-at-l2.md).
 - **Secondary vtable placement under multiple inheritance.** Both backends
   apply the same `0`-if-polymorphic heuristic for `vptr_offset_bits`, so a

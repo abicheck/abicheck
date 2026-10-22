@@ -43,6 +43,10 @@ from .fact_backfill import (
     apply_legacy_fact_backfill as apply_legacy_fact_backfill,
     evidenced_producers as evidenced_producers,
 )
+from .fact_payload_validation import (
+    validated_identities,
+    validated_template_param_defaults,
+)
 from .fact_schema_versions import (
     _FACT_FIELDS_SCHEMA_VERSION,
     _MIN_SCHEMA_VERSION_FOR_DEPRECATION_FACTS,
@@ -57,6 +61,7 @@ from .fact_schema_versions import (
     _MIN_SCHEMA_VERSION_FOR_SNAPSHOT_CASE_B_FACTS,
     _MIN_SCHEMA_VERSION_FOR_SPECIALIZATION_FACT as _MIN_SPEC_FACT,
     _MIN_SCHEMA_VERSION_FOR_SURFACE_FACTS,
+    _MIN_SCHEMA_VERSION_FOR_TEMPLATE_PARAM_DEFAULTS,
     _MIN_SCHEMA_VERSION_FOR_TYPE_IDENTITY_FACTS,
     _MIN_SCHEMA_VERSION_FOR_TYPEFIELD_CV_FACTS,
     _MIN_SCHEMA_VERSION_FOR_TYPEFIELD_VALUE_FACTS,
@@ -99,6 +104,7 @@ _TYPE_FACT_KEYS = (
     "source_header_fact",
     "deprecated_fact",
     "specialization_declared_fact",
+    "template_param_defaults_fact",
 )
 
 # ADR-063 Phase 5 (eighth batch): TypeField's own case-(a) *_fact siblings.
@@ -379,6 +385,13 @@ def decode_record_facts(t: dict[str, Any], schema_version: int) -> dict[str, Any
         )
         if t.get("specialization_declared_fact")
         else None,
+        "template_param_defaults_fact": validated_template_param_defaults(
+            decode_fact(
+                t.get("template_param_defaults_fact"),
+                schema_version,
+                _MIN_SCHEMA_VERSION_FOR_TEMPLATE_PARAM_DEFAULTS,
+            )
+        ),
     }
 
 
@@ -774,26 +787,3 @@ def decode_field_facts(fld: dict[str, Any], schema_version: int) -> dict[str, An
             )
         ),
     }
-
-
-def validated_identities(fact: Fact[Any] | None) -> Fact[Any] | None:
-    """Schema v54's per-slot resolved type identities, after
-    :func:`decode_fact` (whose missing-key rule applies: ``None`` below v54,
-    ``NOT_COLLECTED`` at or above it, where only castxml writes the key).
-
-    The value arrives as a JSON list and is rebuilt into the tuple the model
-    holds; a value that is not a list of non-empty strings is a malformed
-    document and reads as ``NOT_COLLECTED`` -- never trusted, since the fact
-    only ever *adds* confirmation and dropping it is the safe side.
-    """
-    if fact is None or fact.value is None:
-        return fact
-    value = fact.value
-    if not isinstance(value, list) or not all(
-        isinstance(item, str) and item for item in value
-    ):
-        return Fact.not_collected()
-    # Through `Fact._make`, not `dataclasses.replace`: most slots name no
-    # record (`int`, `void`), and `_make` serves that `present(())` from its
-    # shared table instead of allocating one fact per slot on every load.
-    return Fact._make(fact.status, tuple(value), fact.diagnostics, fact.producer)

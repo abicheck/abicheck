@@ -77,7 +77,7 @@ record-only helpers, the same treatment ``functions.py``'s own
 from __future__ import annotations
 
 import re
-from collections.abc import Callable
+from collections.abc import Callable, Mapping, Sequence
 from typing import Any
 
 from ....model import Fact, RecordType, TypeField
@@ -125,6 +125,7 @@ def parse_types(
     base_lookup_index: dict[str, dict[str, Any]],
     evaluate_bitfield_int: IntEvaluator,
     field_default_value: FieldDefaultValueEvaluator,
+    template_param_defaults: Mapping[str, Sequence[str | None]] | None = None,
 ) -> list[RecordType]:
     anon_names = _anon_typedef_names(typedefs)
     best: dict[str, tuple[_Decl, str]] = {}
@@ -161,9 +162,11 @@ def parse_types(
             )
         ):
             best[identity] = (entry, name)
-    return [
-        _build_record(
-            (rec := best[identity])[0],
+    out: list[RecordType] = []
+    for identity in order:
+        rec = best[identity]
+        record = _build_record(
+            rec[0],
             base_lookup_index,
             evaluate_bitfield_int,
             field_default_value,
@@ -172,8 +175,15 @@ def parse_types(
             dep_msg=deprecated.get(identity),
             override_kind=reduce_opaque_kind_set(opaque_kind_sets.get(identity)),
         )
-        for identity in order
-    ]
+        # ADR-085 D1: a class-template pattern carries its parameters' spelled
+        # defaults, read from the merged, all-type-gated index. Only a pattern
+        # with a row gets the fact; every other record stays UNKNOWN.
+        if record.is_template_pattern and template_param_defaults is not None:
+            row = template_param_defaults.get(identity)
+            if row is not None:
+                record.template_param_defaults_fact = Fact.present(tuple(row))
+        out.append(record)
+    return out
 
 
 def _anon_typedef_names(typedefs: list[_Decl]) -> dict[str, str]:
