@@ -852,7 +852,7 @@ class DetectCppPatterns:
         new_findings.extend(isa_findings)
 
         new_findings.extend(detect_tag_type_renamed(old, ctx.new))
-        new_findings.extend(detect_template_default_changes(old, ctx))
+        new_findings.extend(detect_template_default_changes(old, ctx, changes))
         from .compare.internal_namespaces import DEFAULT_INTERNAL_NAMESPACES
 
         new_findings.extend(

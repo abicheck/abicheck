@@ -175,3 +175,14 @@ def test_pre_v62_clang_side_is_a_gap_not_a_clean_pass() -> None:
     (note,) = notes
     assert "old snapshot" in note
     assert "predates schema v62" in note
+
+
+def test_v62_record_without_the_key_reads_not_collected() -> None:
+    # ADR-085 D1: at v62 and above an absent key means NOT_COLLECTED (the
+    # producer did not record it), never "no defaults".
+    snap = _snap(_box(None), producer="castxml")
+    doc = snapshot_to_dict(snap)
+    assert doc["schema_version"] == 62
+    (rec,) = snapshot_from_dict(doc).declarations.types
+    assert rec.template_param_defaults_fact is not None
+    assert rec.template_param_defaults_fact.status is FactStatus.NOT_COLLECTED

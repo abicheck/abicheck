@@ -24,6 +24,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from ..compare.template_param_defaults import (
+    _pattern_records,
     detect_default_template_arg_changed,
     detect_template_param_default_changed,
 )
@@ -31,6 +32,7 @@ from ..compare.template_surface import (
     qualified_name_lookup,
     strip_template_args as _callable_stem,
 )
+from ..model.change_catalog.kinds import ChangeKind
 from .disposition_ledger import Disposition
 
 if TYPE_CHECKING:
@@ -39,16 +41,46 @@ if TYPE_CHECKING:
     from .finding_disposition.run_state import PipelineContext
 
 
+_FUNCTION_CHANGE_KINDS = frozenset({ChangeKind.FUNC_REMOVED, ChangeKind.FUNC_ADDED})
+
+
+def _templates_named_by_reported_functions(
+    old: AbiSnapshot, new: AbiSnapshot, changes: list[Change]
+) -> set[str]:
+    """Class-template keys spelled in the signature of a reported function.
+
+    A removed or added function whose parameter or return type names
+    ``Box<...>`` already reports the break (shape C), so the header-level
+    finding for ``Box`` would be a second count of it.
+    """
+    reported = {c.symbol for c in changes if c.kind in _FUNCTION_CHANGE_KINDS}
+    if not reported:
+        return set()
+    keys = set(_pattern_records(old)) | set(_pattern_records(new))
+    spellings: list[str] = []
+    for snap in (old, new):
+        for fn in snap.declarations.functions:
+            if fn.mangled in reported:
+                spellings.append(fn.return_type)
+                spellings.extend(param.type for param in fn.params)
+    return {
+        key
+        for key in keys
+        if any(f"{key.rsplit('::', 1)[-1]}<" in text for text in spellings)
+    }
+
+
 def detect_template_default_changes(
-    old: AbiSnapshot, ctx: PipelineContext
+    old: AbiSnapshot, ctx: PipelineContext, changes: list[Change]
 ) -> list[Change]:
     """The pipeline entry for ADR-085: the exported-instantiation detector
     (``DEFAULT_TEMPLATE_ARG_CHANGED``, shape A) plus the header-level one
     (``TEMPLATE_PARAM_DEFAULT_CHANGED``, shape B).
 
-    A header-level relation that shape A already covers is recorded in
-    *ledger* as ``SUPPRESSED`` rather than dropped, so the raw total still
-    counts it (ADR-067 "record before disposing").
+    A header-level relation that shape A (an exported instantiation) or shape
+    C (a reported function signature) already covers is recorded in the
+    disposition ledger as ``SUPPRESSED`` rather than dropped, so the raw total
+    still counts it (ADR-067 "record before disposing").
     """
     new = ctx.new
     ledger = ctx.disposition_ledger
@@ -61,13 +93,16 @@ def detect_template_default_changes(
         if fn.mangled in covered_symbols
     }
     header_findings, suppressed = detect_template_param_default_changed(
-        old, new, instantiation_stems=instantiation_stems
+        old,
+        new,
+        instantiation_stems=instantiation_stems,
+        reported_templates=_templates_named_by_reported_functions(old, new, changes),
     )
     if ledger is not None:
         for change in suppressed:
             ledger.record(
                 change,
                 Disposition.SUPPRESSED,
-                application_point="detect_cpp_patterns.template_param_default",
+                application_point="detect_template_default_changes",
             )
     return [*default_template_findings, *header_findings]

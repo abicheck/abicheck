@@ -151,7 +151,7 @@
     },
     "fingerprint": "9984421f8658c0ef61e65da49f1df11a3b17523116b0f6229ee275d26d67c45d",
     "generation": 6,
-    "reason": "clang records.py now passes the ADR-085 defaults fact into the RecordType constructor instead of assigning it after construction; the recorded fact and the generation are unchanged"
+    "reason": "Generation 6 already accounts for the clang template-parameter defaults fact (ADR-085 D1). This edit only moves that fact into the RecordType constructor in records.py; the fact recorded per declaration is unchanged."
   },
   "resolver": {
     "files": {

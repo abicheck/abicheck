@@ -70,6 +70,7 @@ def detect_template_param_default_changed(
     new: AbiSnapshot,
     *,
     instantiation_stems: Collection[str] = (),
+    reported_templates: Collection[str] = (),
 ) -> tuple[list[Change], list[Change]]:
     """ADR-085 D2: a header-level change to a class template's default argument.
 
@@ -80,7 +81,9 @@ def detect_template_param_default_changed(
     reports as ``DEFAULT_TEMPLATE_ARG_CHANGED`` (BREAKING, shape A) is not a
     second finding: it is returned in the second list instead, so the caller
     can record it as suppressed. *instantiation_stems* are the callable stems
-    of those ``DEFAULT_TEMPLATE_ARG_CHANGED`` findings.
+    of those ``DEFAULT_TEMPLATE_ARG_CHANGED`` findings. *reported_templates* are
+    the template keys a function-level finding already names through its
+    signature (shape C: ``take(const Box<char>&)``); they are suppressed too.
 
     Returns ``(findings, suppressed)``.
     """
@@ -114,7 +117,9 @@ def detect_template_param_default_changed(
             new_value=repr(after),
             **_contract.reachability_of(new_rec, header_parsed=True),
         )
-        covered = any(_is_in_scope(stem, key) for stem in instantiation_stems)
+        covered = key in reported_templates or any(
+            _is_in_scope(stem, key) for stem in instantiation_stems
+        )
         (suppressed if covered else findings).append(change)
     return findings, suppressed
 

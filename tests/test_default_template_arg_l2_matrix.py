@@ -245,10 +245,10 @@ def test_castxml_cannot_expose_uninstantiated_template_defaults(
 def test_clang_ast_exposes_template_default_argument(
     tmp_path: Path, header_pair: tuple[Path, Path]
 ) -> None:
-    """The clang AST carries the default; abicheck's clang dumper does not record it.
+    """The clang AST carries the default, and abicheck's clang dumper records it.
 
-    Pins the producer-side fact that makes a clang-only extraction possible
-    later, so the header-capability note stays accurate.
+    Pins the producer-side fact the clang backend's recording (ADR-085 D1) is
+    built on, so a change in the AST shape fails here first.
     """
     _require_tools("clang++")
     old_h, _ = header_pair
@@ -301,6 +301,9 @@ def test_default_substituted_into_public_signature_breaks_at_l2(
     # Known attribution gap (Phase 5): the mangled-signature change is caught,
     # but the default-argument cause is not named at L2 for this shape.
     assert DEFAULT_KIND not in kinds
+    # ADR-085 shape C: the reported signature change already is the break, so
+    # the header-level default finding for Box is not counted a second time.
+    assert HEADER_KIND not in kinds
 
 
 @pytest.mark.parametrize("backend", BACKENDS)
