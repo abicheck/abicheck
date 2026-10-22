@@ -29,6 +29,21 @@ from pathlib import Path
 from perf_receipt import TreeRssSampler, _descendants, _proc_rss_bytes
 
 
+def _is_exited_zombie(pid: int) -> bool:
+    """True for a process that has exited but is not yet reaped.
+
+    A zombie keeps its ``statm`` but has no address space, so ``smaps_rollup``
+    carries no ``Pss:`` figure. It holds no pages to sum, so it is not an
+    unreadable live process.
+    """
+    try:
+        text = Path(f"/proc/{pid}/stat").read_text(encoding="utf-8")
+    except OSError:
+        return False
+    state = text.rsplit(")", 1)[-1].split()
+    return bool(state) and state[0] in {"Z", "X"}
+
+
 def proc_pss_bytes(pid: int) -> int | None:
     """``Pss:`` from ``/proc/<pid>/smaps_rollup`` in bytes, or ``None``."""
     try:
@@ -79,9 +94,11 @@ class TreePssSampler(TreeRssSampler):
                     rss = _proc_rss_bytes(pid)
                     if rss is None:
                         continue
+                    pss = proc_pss_bytes(pid)
+                    if pss is None and _is_exited_zombie(pid):
+                        continue
                     rss_total += rss
                     live += 1
-                    pss = proc_pss_bytes(pid)
                     if pss is not None:
                         pss_total += pss
                         pss_live += 1
