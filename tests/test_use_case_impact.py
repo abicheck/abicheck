@@ -769,7 +769,7 @@ class TestScopedOnlyFindingsAreAttributed:
         return res
 
     def _attach(self, tmp_path: Path, changes, scoped_only):  # type: ignore[no-untyped-def]
-        from abicheck.cli_compare_helpers import _attach_use_case_impact
+        from abicheck.frontends.cli.compare_result import _attach_use_case_impact
 
         manifest = tmp_path / "uc.yaml"
         manifest.write_text(_VALID_MANIFEST, encoding="utf-8")

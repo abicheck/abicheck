@@ -56,7 +56,7 @@ Nothing here shells out, re-parses a binary, or re-runs an extractor.
   (both sides lacking a compile database, say) silently read
   ``requested_depth=None``/``depth_satisfied=None`` and could still report
   ``status="complete"``. Fixed first at the one front end that knows the
-  user's real, explicit ``--depth`` request: ``cli_compare_helpers.
+  user's real, explicit ``--depth`` request: ``frontends.cli.compare_result.
   _report_compare_result`` copies its own Click-validated ``--depth``
   string onto ``DiffResult.requested_depth`` before recomputing this block
   (never an *inferred* depth from bare ``--sources``/``--build-info`` or

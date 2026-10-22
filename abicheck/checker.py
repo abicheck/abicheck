@@ -1396,7 +1396,7 @@ def compare(
     # (`old/new.build_source`), never an out-of-band `--old/new-build-info`/
     # `--old/new-sources` pack the CLI resolved (`_resolve_side_pack`); a
     # caller holding one recomputes with it explicitly (P1 review; see
-    # `cli_compare_helpers._report_compare_result`).
+    # `frontends/cli/compare_result.py (_report_compare_result)`).
     from .workflows.analysis_assurance_attach import attach_analysis_assurance
 
     result.edge_coverage = edge_coverage_report(old, new)  # I4, before the rollup
