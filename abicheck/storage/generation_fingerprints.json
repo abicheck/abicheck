@@ -152,7 +152,7 @@
     },
     "fingerprint": "5f4972c35e1c8c0c68717acf8d587b56a83e7ba4710f8620da706db2b88e968e",
     "generation": 6,
-    "reason": "origin_lib now attributes std template local statics to the C++ runtime (generation 6); castxml not-found message hoisted into a shared constant (#1710) is extraction-neutral"
+    "reason": "origin_lib now attributes std template local statics to the C++ runtime (ElfSymbol.origin_lib); extractor semantics changed"
   },
   "resolver": {
     "files": {
@@ -161,8 +161,8 @@
       "abicheck/bundle_resolution_reachability.py": "7d60ccf82fe98a12c7c81ac02d2c920492c8c20c52f0b13398195c4590615c08",
       "abicheck/compare/export_owner_resolution.py": "e9108cbdf0459cb8171f63ca328138558cfd032bff9124e4b9bd0fd5bf8553c8",
       "abicheck/debug_resolver.py": "cdcc4f72bd8fb5304fe030b3e1365da488ad009397e014ba56931a3f311cf1f3",
-      "abicheck/impact/use_case_reachability.py": "4882b891f0d2d298d200d8ff8ee74fbb3b48509813cb6fbc999e1a6628fb0326",
-      "abicheck/post_processing_reachability.py": "7dac33964797c4b0b40c123a6363e78162402c4e77ef81d38827dbab9d30e48e",
+      "abicheck/policy/use_case_reachability.py": "e21d1b32773ce42e458ec8dfe34d86c3a5c48732a829b4e985ec739cae594bc1",
+      "abicheck/post_processing_reachability.py": "db854ea4f3ab52d2d4fe80473fecab870ba4f923eb9b9c650dc3029fd59febac",
       "abicheck/storage/native_identity_aliases.py": "061e634659b371f1688cfcd4845fdcbe6147b9c2cfddaa4285dd34c757ca80ef",
       "abicheck/type_reachability.py": "89d8db3c507a58004fd6b38ad4fee5ea6c9b40a9da97f34d8067ae440aa9e9bb",
       "abicheck/type_reachability_spelling.py": "4262f30db17f2a4c5ba2a4341b8eed9f1408e335825644845e10cb08838995cb",
@@ -170,9 +170,9 @@
       "abicheck/workflows/compare/resolve.py": "dc0381227c9e8dacaa39858d3f534ff45cbb3177f9b8645a8728c3f25c460793",
       "abicheck/workflows/elf_dependency_resolver.py": "18524281e550a7f25225441cd063de58ec33281e7bacf65fef98d1fefb101426"
     },
-    "fingerprint": "22d1b29fc580f7fd0e389ea9d4ea7e17b55d54f905e5e30db05c198a13dbf8cd",
+    "fingerprint": "0e3e7a630d84c9dee6922a88273b2010525b800942f11cc49182f08093de12dd",
     "generation": 2,
-    "reason": "Merge of main: #1683 relocated the use-case reachability code behind workflows/compare with no change to what the resolver derives; re-recording the fingerprint over the merged tree."
+    "reason": "Merge of main into the internal_leak migration: use-case explain lives in policy/use_case_reachability.py and the call-graph walk in compare/call_graph_walk.py (moved verbatim); no derived reachability fact changes."
   },
   "source": {
     "files": {
