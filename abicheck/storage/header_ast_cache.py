@@ -25,6 +25,7 @@ from .acyclic_json import gc_paused
 from .ast_cache_location import AST_DISK_CACHE, ast_cache_entry_path
 from .ast_size_observer import mark_ast_intake, report_ast_size
 from .castxml_xml import parse_castxml_xml
+from .cross_process_lock import produce_ast_once_across_processes
 from .derived_ast import offer_derived_ast_source
 from .json_compact import open_cached_entry
 
@@ -412,7 +413,7 @@ class AstAcquisitionScope:
             deadline.check()
             return cast("_T", result)
         try:
-            result = producer()
+            result = produce_ast_once_across_processes(backend, key, producer, group)
         except BaseException as exc:
             # Unregister before waking waiters: set_exception wakes them, and
             # one that retries (the ProcessCancelled branch above) must find no

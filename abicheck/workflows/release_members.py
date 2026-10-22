@@ -438,7 +438,12 @@ def compare_release_members(
 
     reporter = ctx.reporter
     old_h, new_h = ctx.request.old_headers, ctx.request.new_headers
-    plan = plan_release_workers(jobs, depth=depth, header_roots=bool(old_h or new_h))
+    plan = plan_release_workers(
+        jobs,
+        depth=depth,
+        header_roots=bool(old_h or new_h),
+        members=len(compare_keys),
+    )
     # Only a memory clamp is a degradation the operator can act on, so only it
     # is announced. The interpreter's member cap is the designed default on
     # every run and stays silent; a memory note there would name the wrong

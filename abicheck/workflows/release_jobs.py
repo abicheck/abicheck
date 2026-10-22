@@ -295,6 +295,8 @@ class ReleaseWorkerPlan:
     admission: MemoryAdmission
     #: What set ``initial_jobs``: ``"memory"`` (the RAM cap, with
     #: *clamped_from* set), ``"gil"`` (the interpreter's member parallelism),
+    #: ``"processes"`` (the forked-member ceiling), ``"members"`` (fewer
+    #: members than workers), ``"threads"`` (the process-wide thread budget),
     #: or ``None`` (the CPU count, an explicit *jobs*, or a cap that did not
     #: bind). The memory notice fires only for ``"memory"``, so a run the
     #: interpreter limits is never told it was memory-bound.
@@ -302,7 +304,11 @@ class ReleaseWorkerPlan:
 
 
 def plan_release_workers(
-    jobs: int, *, depth: str | None = None, header_roots: bool = False
+    jobs: int,
+    *,
+    depth: str | None = None,
+    header_roots: bool = False,
+    members: int | None = None,
 ) -> ReleaseWorkerPlan:
     """Size the fan-out, and build the AST-size-costed admission gate.
 
@@ -310,6 +316,9 @@ def plan_release_workers(
     explicit *jobs* (never clamped), a host whose memory cannot be probed,
     any depth but ``headers``, and an operator-set ``ABICHECK_RELEASE_JOB_MEM_GIB``: a stated budget
     is an instruction, so it is not replaced by a measurement.
+
+    *members*, when given, bounds the auto-sized pool: two members never
+    get eight workers. An explicit *jobs* is not clamped by it.
     """
     import os
 
@@ -353,10 +362,20 @@ def plan_release_workers(
         # member of a 28-member release started at t~0, and the run held 28
         # working sets resident for ~0% speedup under the GIL. An explicit
         # *jobs* is an instruction and is not capped here.
-        parallel = python_parallelism()
+        from .release_member_processes import member_processes_possible
+
+        processes = member_processes_possible()
+        parallel = python_parallelism(processes=processes)
         if parallel < effective:
-            limited_by = "gil"  # the interpreter binds before memory does
+            limited_by = (
+                "processes" if processes else "gil"
+            )  # the interpreter binds before memory does
         effective, pool = min(effective, parallel), min(pool, parallel)
+        if members is not None and members > 0:
+            if members < effective:
+                limited_by = "members"  # less work than workers: the work binds
+            # The pool too: a memory clamp can leave it above *effective*.
+            effective, pool = min(effective, members), min(pool, members)
     # The process-wide thread budget bounds every pool, an explicit *jobs*
     # included. Applying it here, rather than only when the pool borrows its
     # threads, keeps the plan honest: a budget of 1 selects the sequential

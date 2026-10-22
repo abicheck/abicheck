@@ -24,7 +24,7 @@ from typing import TYPE_CHECKING
 
 from ....buildsource.source_inputs import extraction_read_source_inputs
 from ....extract.binary_identity import stamp_binary_identity
-from ...cache_probe import refuse_dump_while_probing
+from ...cache_probe import refuse_dump_while_probing, take_probed_miss
 from .key import (
     _cache_key,
     _dump_cache_extra_key,
@@ -381,7 +381,10 @@ def cached_run_dump(
     # An uncacheable shape derives the empty key: no lookup, no store, and no
     # key-side tool execution (the gate in _cache_key_for runs first).
     initial_key = _cache_key_for(req)
-    cached = _lookup_key(initial_key, path) if initial_key else None
+    # A probe that just missed this key (the parent, before forking this
+    # side) already paid the lookup; reading again would miss again.
+    probed_miss = bool(initial_key) and take_probed_miss(initial_key)
+    cached = _lookup_key(initial_key, path) if initial_key and not probed_miss else None
     if cached is not None:
         # A cache hit stands in for the live extraction it replaces, so it needs
         # the source-read licence stamped here: `run_dump` grants it (see
@@ -394,7 +397,7 @@ def cached_run_dump(
         if extraction_read_source_inputs(cached):
             cached.live_source_evidence = True
         return cached
-    refuse_dump_while_probing()
+    refuse_dump_while_probing(initial_key)
     snap = _dump_uncached()
     # Re-derive after the dump: a tool that appeared or changed mid-run must
     # miss, not store under the key it was looked up with.

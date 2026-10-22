@@ -463,6 +463,10 @@ def sample(event: str, /, **attrs: Any) -> None:
         "t": round(time.monotonic() - _start, 6),
         "pid": os.getpid(),
         "thread": threading.current_thread().name,
+        # The OS thread, which `thread_cpu_s` belongs to. Pool workers'
+        # names are reused by new OS threads whose `thread_time()` restarts
+        # at 0, so pairing samples by name invents CPU; pair by this.
+        "thread_id": threading.get_native_id(),
         # CPU clocks, so consecutive marks/phases on one thread attribute CPU
         # to a stage, not only wall time (thread CPU excludes the other
         # threads of a parallel release; process CPU includes them).
