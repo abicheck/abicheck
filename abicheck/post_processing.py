@@ -1042,10 +1042,8 @@ class DetectInternalLeaks:
             return changes
 
         from .compare.internal_namespaces import DEFAULT_INTERNAL_NAMESPACES
-        from .internal_leak import (
-            detect_call_graph_leaks,
-            detect_internal_leaks,
-        )
+        from .internal_leak import detect_call_graph_leaks, detect_internal_leaks
+        from .post_processing_reachability import cache_impact_assessments
 
         namespaces = (
             self._namespaces or ctx.internal_namespaces or DEFAULT_INTERNAL_NAMESPACES
@@ -1055,6 +1053,7 @@ class DetectInternalLeaks:
         # change with no layout/type-graph evidence at all (see
         # MarkReachability's own call-graph fallback, same namespaces).
         extra = extra + detect_call_graph_leaks(changes, ctx.old, ctx.new, namespaces)
+        cache_impact_assessments(extra)
         if not extra:
             return changes
         # Synthetic leak findings must respect user suppression rules too.

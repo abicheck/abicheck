@@ -85,7 +85,7 @@ RESOLVER_SEMANTIC_FILES: tuple[str, ...] = (
     "abicheck/type_reachability.py",
     "abicheck/type_reachability_spelling.py",
     "abicheck/type_reachability_stdlib_spellings.py",
-    "abicheck/impact/use_case_reachability.py",
+    "abicheck/policy/use_case_reachability.py",
     "abicheck/buildsource/source_extractors/resolver.py",
     "abicheck/buildsource/providers.py",
     "abicheck/compare/export_owner_resolution.py",

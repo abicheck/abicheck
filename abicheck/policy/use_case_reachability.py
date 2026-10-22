@@ -15,11 +15,11 @@
 
 """Use-case reachability: which public symbols each use case's entrypoints reach.
 
-The one piece of ``compare --use-cases`` attribution that still reads the
-legacy ``internal_leak`` call graph. It stays outside the classified layers
-until that module migrates: a classified layer may not import it, so
-:func:`abicheck.policy.use_case_attribution.build_use_case_impact` takes this
-function as its ``explain`` port, and the CLI composition root injects it.
+The call-graph half of ``compare --use-cases`` attribution. It resolves a
+manifest's entrypoints through :mod:`.use_cases` and walks the library graph
+with the compare-owned :mod:`abicheck.compare.call_graph_walk`.
+:func:`abicheck.policy.use_case_attribution.build_use_case_impact` calls it
+directly.
 """
 
 from __future__ import annotations
@@ -27,10 +27,20 @@ from __future__ import annotations
 from collections.abc import Iterable
 from typing import TYPE_CHECKING
 
-from ..policy.use_cases import UseCaseDefinition, _public_entry_index
+from ..compare.call_graph_walk import (
+    CALL_GRAPH_TRAVERSAL_POLICY,
+    consumer_compiled_reachability,
+)
+from .use_cases import UseCaseDefinition, _public_entry_index
 
 if TYPE_CHECKING:
     from ..model.source_graph import SourceGraphSummary
+
+
+def _strip_binary_symbol(node_id: str) -> str:
+    """*node_id* without its ``binary_symbol://`` scheme; any other id unchanged."""
+    scheme, sep, rest = node_id.partition("://")
+    return rest if sep and scheme == "binary_symbol" else node_id
 
 
 def explain_use_case_impact(
@@ -80,11 +90,6 @@ def explain_use_case_impact(
         return {}
 
     from abicheck.model.source_graph_query import is_consumer_compiled_public_entry
-
-    from ..internal_leak import (
-        CALL_GRAPH_TRAVERSAL_POLICY,
-        _consumer_compiled_reachability,
-    )
 
     entry_index = _public_entry_index(library_graph)
     # Merge (not overwrite) across repeated `use_case` entries (Codex
@@ -138,7 +143,7 @@ def explain_use_case_impact(
         if edge.kind != "SOURCE_DECL_MAPS_TO_SYMBOL":
             continue
         symbol_to_decls.setdefault(edge.dst, set()).add(edge.src)
-        name = edge.dst.removeprefix("binary_symbol://")
+        name = _strip_binary_symbol(edge.dst)
         if name in wanted:
             decl_to_symbols.setdefault(edge.src, set()).add(name)
 
@@ -159,7 +164,7 @@ def explain_use_case_impact(
         }
     )
     reachability = (
-        _consumer_compiled_reachability(
+        consumer_compiled_reachability(
             library_graph, CALL_GRAPH_TRAVERSAL_POLICY, walk_roots, node_by_id
         )
         if walk_roots
@@ -178,8 +183,8 @@ def explain_use_case_impact(
             # evidence): a use case that named foo@V1 specifically must not
             # also pick up a foo@V2-only change just because they share one
             # declaration.
-            if entry.startswith("binary_symbol://"):
-                exact_symbol = entry.removeprefix("binary_symbol://")
+            scheme, sep, exact_symbol = entry.partition("://")
+            if sep and scheme == "binary_symbol":
                 if exact_symbol in wanted:
                     result.setdefault(exact_symbol, set()).add(use_case)
             else:
