@@ -130,7 +130,7 @@ def to_stat(result: DiffResult, *, envelope: ReportEnvelope) -> str:
     # The envelope's own snapshot is authoritative for every result-derived
     # field, so a caller's ``result`` cannot be mixed with the envelope's audit.
     result = envelope.result
-    summary = summary_for(result)
+    summary = summary_for(result, findings=envelope.findings)
     d: dict[str, object] = {
         "verdict_label": _VERDICT_LABEL[result.verdict],
         "summary": {

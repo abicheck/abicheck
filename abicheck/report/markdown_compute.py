@@ -522,7 +522,11 @@ def _view_preamble_mapping(
         # Same "what changed / review actions" section the full view and
         # the digest carry (workstream G S1) -- one preamble, both alternate
         # modes.
-        "surface_changes": compute_surface_changes(result, changes=changes).to_dict(),
+        "surface_changes": compute_surface_changes(
+            result,
+            None if envelope is None else envelope.findings_for(changes),
+            changes=changes,
+        ).to_dict(),
     }
     return d, changes
 
