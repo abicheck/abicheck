@@ -28,6 +28,7 @@ import datetime
 import enum
 import hashlib
 import json
+import operator
 import pathlib
 from dataclasses import fields as dataclass_fields, is_dataclass
 from typing import Any
@@ -176,21 +177,6 @@ def _encode_value(obj: Any) -> Any:
     return copy.deepcopy(obj)
 
 
-#: ``type -> its persisted field names in sorted order``, the
-#: write-path counterpart of :data:`_FIELD_NAMES`.
-_SORTED_FIELD_NAMES: dict[type, tuple[str, ...] | None] = {}
-
-
-def _sorted_field_names(cls: type) -> tuple[str, ...] | None:
-    try:
-        return _SORTED_FIELD_NAMES[cls]
-    except KeyError:
-        names = _dataclass_field_names(cls)
-        ordered = tuple(sorted(names)) if names is not None else None
-        _SORTED_FIELD_NAMES[cls] = ordered
-        return ordered
-
-
 def _encode_value_sorted(obj: Any) -> Any:
     """:func:`_encode_value` in the shape the storage layer canonicalizes to:
     a dataclass's fields in sorted key order and a plain tuple as a list.
@@ -202,34 +188,108 @@ def _encode_value_sorted(obj: Any) -> Any:
     lets that step reuse the tree (`canonical.canonical_form_shared`) where
     it used to rebuild nearly every dict of it. Plain ``dict`` values keep
     their own key order -- the canonicalizer sorts the few that need it.
+
+    Dispatches on the exact type through :data:`_SORTED_ENCODERS`, a
+    per-class encoder chosen once by :func:`_sorted_encoder_for`: every
+    branch of the former ``isinstance`` chain depended on the class alone,
+    so the choice is the same for every instance and need not be re-made
+    per value (it was ~6M times on an MKL snapshot).
     """
-    cls = type(obj)
-    if cls in _IMMUTABLE_LEAF_TYPES:
-        return obj
-    names = _sorted_field_names(cls)
-    if names is not None:
+    return _sorted_encoder(type(obj))(obj)
+
+
+def _identity(obj: Any) -> Any:
+    return obj
+
+
+def _sorted_list(obj: Any) -> Any:
+    return sorted(obj)
+
+
+def _sorted_sequence(obj: Any) -> list[Any]:
+    # A sequence of immutable leaves (most of them: names, ids, offsets) is
+    # copied by one C-level ``list()`` once a C-level type scan proves it.
+    if _LEAF.issuperset(map(type, obj)):
+        return list(obj)
+    get = _SORTED_ENCODERS.get
+    return [
+        v if type(v) in _LEAF else (get(type(v)) or _sorted_encoder(type(v)))(v)
+        for v in obj
+    ]
+
+
+def _sorted_mapping(obj: Any) -> dict[Any, Any]:
+    get = _SORTED_ENCODERS.get
+    return {
+        k: v if type(v) in _LEAF else (get(type(v)) or _sorted_encoder(type(v)))(v)
+        for k, v in obj.items()
+    }
+
+
+def _sorted_namedtuple(obj: Any) -> Any:
+    return type(obj)(*[_encode_value_sorted(v) for v in obj])
+
+
+def _sorted_dataclass_encoder(names: tuple[str, ...]) -> Any:
+    get = _SORTED_ENCODERS.get
+    if len(names) == 1:
+        (only,) = names
+
+        def encode_one(obj: Any) -> dict[str, Any]:
+            v = getattr(obj, only)
+            return {
+                only: v
+                if type(v) in _LEAF
+                else (get(type(v)) or _sorted_encoder(type(v)))(v)
+            }
+
+        return encode_one
+    if not names:
+        return lambda obj: {}
+    getter = operator.attrgetter(*names)
+
+    def encode(obj: Any) -> dict[str, Any]:
         return {
             name: v
-            if type(v := getattr(obj, name)) in _LEAF
-            else _encode_value_sorted(v)
-            for name in names
+            if type(v) in _LEAF
+            else (get(type(v)) or _sorted_encoder(type(v)))(v)
+            for name, v in zip(names, getter(obj))
         }
-    if isinstance(obj, enum.Enum):
-        return obj
-    if isinstance(obj, (set, frozenset)):
-        return sorted(obj)
-    if isinstance(obj, dict):
-        return {
-            k: v if type(v) in _LEAF else _encode_value_sorted(v)
-            for k, v in obj.items()
-        }
-    if isinstance(obj, tuple):
-        if hasattr(obj, "_fields"):
-            return type(obj)(*[_encode_value_sorted(v) for v in obj])
-        return [v if type(v) in _LEAF else _encode_value_sorted(v) for v in obj]
-    if isinstance(obj, list):
-        return [v if type(v) in _LEAF else _encode_value_sorted(v) for v in obj]
-    return copy.deepcopy(obj)
+
+    return encode
+
+
+def _sorted_encoder_for(cls: type) -> Any:
+    """The encoder :func:`_encode_value_sorted` applies to every *cls*
+    instance -- the former per-value ``isinstance`` chain, decided once."""
+    if cls in _IMMUTABLE_LEAF_TYPES:
+        return _identity
+    names = _dataclass_field_names(cls)
+    if names is not None:
+        return _sorted_dataclass_encoder(tuple(sorted(names)))
+    if issubclass(cls, enum.Enum):
+        return _identity
+    if issubclass(cls, (set, frozenset)):
+        return _sorted_list
+    if issubclass(cls, dict):
+        return _sorted_mapping
+    if issubclass(cls, tuple):
+        return _sorted_namedtuple if hasattr(cls, "_fields") else _sorted_sequence
+    if issubclass(cls, list):
+        return _sorted_sequence
+    return copy.deepcopy
+
+
+#: ``type -> the encoder for its instances``: pure per-class facts, like
+#: :data:`_FIELD_NAMES`, filled on first sight of each class.
+_SORTED_ENCODERS: dict[type, Any] = {}
+
+
+def _sorted_encoder(cls: type) -> Any:
+    encoder = _SORTED_ENCODERS.get(cls)
+    if encoder is None:
+        encoder = _SORTED_ENCODERS[cls] = _sorted_encoder_for(cls)
+    return encoder
 
 
 def _encode_dataclass_skipping(

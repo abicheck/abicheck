@@ -53,13 +53,15 @@ def _store_with(
 ) -> tuple[InMemoryObjectStore, object]:
     """Write a bundle whose ``axis`` generation is *stated* (None: unrecorded)."""
     store = InMemoryObjectStore()
-    generations = (WRITER, WRITER)
+    # The source axis is left unstated (0): these cases exercise the
+    # extractor and resolver axes only.
+    generations = (WRITER, WRITER, 0)
     if stated is None:
-        generations = (0, 0)
+        generations = (0, 0, 0)
     elif axis == "resolver":
-        generations = (WRITER, stated)
+        generations = (WRITER, stated, 0)
     else:
-        generations = (stated, WRITER)
+        generations = (stated, WRITER, 0)
     manifest = write_bundle_facts_package(
         _facts(ret), store=store, generations=generations
     )
