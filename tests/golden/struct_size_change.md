@@ -18,7 +18,7 @@
 | Evidence tier | `header_aware` |
 | Evidence tiers | `header` |
 | Coverage gap | Detector 'elf_layout' disabled: missing ELF metadata on one side |
-| Coverage gap | Detector 'fingerprint_renames' disabled: requires ELF metadata in elf_only_mode |
+| Coverage gap | Detector 'fingerprint_renames' disabled: missing ELF metadata on both sides |
 | Coverage gap | Detector 'kabi' disabled: missing Module.symvers (kABI) metadata |
 | Coverage gap | Detector 'long_double' disabled: missing ELF metadata on one side |
 | Coverage gap | Detector 'elf' disabled: missing ELF metadata |
@@ -90,6 +90,8 @@
 
 
 ## Related review groups
+
+2 review group(s) across 2 families; 1 gating finding(s). Per-group members and exact symbols are in the JSON `review_groups`.
 
 ### 1. `Point`
 

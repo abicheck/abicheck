@@ -7,7 +7,7 @@
 | **Verdict** | ❌ `BREAKING` |
 
 > ⚠️ Detector 'elf_layout' disabled: missing ELF metadata on one side
-> ⚠️ Detector 'fingerprint_renames' disabled: requires ELF metadata in elf_only_mode
+> ⚠️ Detector 'fingerprint_renames' disabled: missing ELF metadata on both sides
 > ⚠️ Detector 'kabi' disabled: missing Module.symvers (kABI) metadata
 > ⚠️ Detector 'long_double' disabled: missing ELF metadata on one side
 > ⚠️ Detector 'elf' disabled: missing ELF metadata

@@ -286,14 +286,18 @@ def test_zero_findings_plus_actionable_diagnostic_still_posts() -> None:
 #: is that the production list is not the "material limitations" list it
 #: looks like.
 _ROUTINE_DISABLED = [
-    ("fingerprint_renames", "requires ELF metadata in elf_only_mode"),
+    (
+        "fingerprint_renames",
+        "neither side was dumped in elf_only_mode (both carry headers or debug "
+        "info); fingerprint rename matching runs only on stripped, symbol-only dumps",
+    ),
     ("kabi", "missing Module.symvers (kABI) metadata"),
     ("pe", "missing PE metadata"),
     ("macho", "missing Mach-O metadata"),
     ("python_ext", "missing CPython extension metadata"),
     ("python_api", "missing Python API surface (no .pyi stub recovered)"),
     ("sycl", "missing SYCL metadata"),
-    ("vtable_layout", "missing DWARF/header type metadata (inheritance)"),
+    ("vtable_layout", "missing DWARF/header type metadata on one side (inheritance)"),
 ]
 
 

@@ -655,10 +655,10 @@ class TestAbiSurface:
         r = compare(_snap(elf=self._make_elf(100)), _snap(elf=self._make_elf(250)))
         assert _has_kind(r, ChangeKind.ABI_SURFACE_EXPLOSION)
 
-    def test_surface_halved(self):
-        """<0.5x shrinkage with 50+ delta → detected."""
+    def test_surface_halved_is_not_an_explosion(self):
+        """A large shrink is not an explosion (matrix: test_abi_surface_direction)."""
         r = compare(_snap(elf=self._make_elf(200)), _snap(elf=self._make_elf(50)))
-        assert _has_kind(r, ChangeKind.ABI_SURFACE_EXPLOSION)
+        assert not _has_kind(r, ChangeKind.ABI_SURFACE_EXPLOSION)
 
     def test_small_growth_not_detected(self):
         """Growth below 2x → not detected."""

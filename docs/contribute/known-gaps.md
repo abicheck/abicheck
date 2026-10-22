@@ -57,6 +57,16 @@ Next, unranked (the `--no-baseline` one-sided-detector gap, the target-platform 
 
 Each entry's status line says what is still open. A PARTIAL entry's write-up also describes the half that is already fixed; the status line is authoritative where they disagree.
 
+### Report and detector coverage
+
+#### A large export shrink with no declared surface emits no finding in header mode (2026-10-22)
+
+**Status (2026-10-22): OPEN, deliberate follow-up — product decision needed.** `abi_surface_explosion` is growth-only now; a header-mode shrink of undeclared exports has no finding. [Full write-up](known-gaps/a-large-export-shrink-with-no-declared-surface-emits-nothing.md)
+
+#### The Markdown "Additions" section is one row per finding, so it grows linearly (2026-10-22)
+
+**Status (2026-10-22): OPEN.** The review-group section is bounded; the per-finding Additions rows are not. [Full write-up](known-gaps/the-additions-markdown-section-is-one-row-per-finding.md)
+
 ### False-clean risk
 
 #### A header-only default template-argument change reads `NO_CHANGE` at L2 on both backends (2026-10-21)

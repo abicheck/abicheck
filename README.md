@@ -94,7 +94,7 @@ Checks enabled for this scan (and why others are not):
 | Confidence | HIGH |
 | Evidence tier | `header_aware` |
 | Evidence tiers | `elf`, `dwarf`, `dwarf_advanced`, `header` |
-| Coverage gap | Detector 'fingerprint_renames' disabled: requires ELF metadata in elf_only_mode |
+| Coverage gap | Detector 'fingerprint_renames' disabled: neither side was dumped in elf_only_mode (both carry headers or debug info); fingerprint rename matching runs only on stripped, symbol-only dumps |
 | Coverage gap | Detector 'kabi' disabled: missing Module.symvers (kABI) metadata |
 | Coverage gap | Detector 'dwarf_layout_coherence' disabled: neither snapshot has a DWARF-vs-header-AST layout coherence mismatch |
 | Coverage gap | Detector 'pe' disabled: missing PE metadata |

@@ -1357,10 +1357,11 @@ def _diff_vtable_identity(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
 
 @registry.detector("abi_surface", requires_support=_has_elf_on_both_sides)
 def _diff_abi_surface(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
-    """Detect dramatic ABI surface growth or shrinkage.
+    """Detect dramatic ABI surface growth only; a shrink is not an explosion.
 
-    A large increase in exported symbols may indicate a lost -fvisibility=hidden.
-    A large decrease may indicate an overly aggressive version script.
+    A large increase may indicate a lost -fvisibility=hidden. A shrink is not
+    reported here; removed exports are classified per symbol by the functions
+    detectors.
     """
     from .model.elf_facts import ElfMetadata
 
@@ -1374,18 +1375,17 @@ def _diff_abi_surface(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     if old_count < 10:
         return changes  # too few symbols to judge
 
-    ratio = new_count / old_count if old_count > 0 else 0
+    ratio = new_count / old_count
     delta = new_count - old_count
 
-    # Thresholds: >2x growth or <0.5x shrinkage with at least 50 symbol delta
-    if abs(delta) >= 50 and (ratio > 2.0 or ratio < 0.5):
-        direction = "grew" if delta > 0 else "shrank"
+    # Growth only: more than 2x and at least 50 added exports.
+    if delta >= 50 and ratio > 2.0:
         changes.append(
             make_change(
                 ChangeKind.ABI_SURFACE_EXPLOSION,
                 symbol="__abi_surface",
                 name=f"{ratio:.1f}x",
-                detail=direction,
+                detail="grew",
                 old=str(old_count),
                 new=str(new_count),
             )
