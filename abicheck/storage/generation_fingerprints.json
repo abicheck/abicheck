@@ -208,14 +208,15 @@
       "abicheck/buildsource/source_replay.py": "f1c76b8fbe787135f6ff68ee3b3aa306f6259caf4bea069d4eeb2b440cd16992",
       "abicheck/buildsource/source_replay_pool.py": "9073d72dfb693fac045dc94dd8d03fb9ad3a6f653ddca15c712609a77302ece2",
       "abicheck/buildsource/source_replay_shared.py": "695ad69596ebb3f5d268bd80c7e4de7a2c6929d0f088955f967a5a70e849d3cd",
-      "abicheck/buildsource/template_graph.py": "773f084c435cbcd213f9e3e16c000a3787f2d43ea264e595278ebaa9961308e7",
-      "abicheck/buildsource/template_graph_fold.py": "3e276ed9e4ebfe5cc41a2587f15662a79a986b4d361979c75143dbc7d220cdab",
+      "abicheck/buildsource/template_class_origin.py": "29c4d8511dff9be7ee58072f1f7526cd6a298f64c9bb60e0271892226a39f508",
+      "abicheck/buildsource/template_graph.py": "57c5248820c2ade147850c9cb92a281087213b6d3b7420620ecbbdeef6a26756",
+      "abicheck/buildsource/template_graph_fold.py": "630006aa35ad1a6dc2e3797b662e857aee790e94acee759331478993f5ffad03",
       "abicheck/buildsource/template_graph_value_decls.py": "d50b5cd979744d4ecb4ae2ad859faf99689d6af50d0e0d0a24d867f99a83931c",
       "abicheck/buildsource/type_graph.py": "a028a875057cd0cbf2930a431bfa1e579f7b770e0d124cbcfe715724e89d12e5",
       "abicheck/buildsource/type_graph_index.py": "7375f7baec7ceb3dd4a52a489b89e5a3571750dffca7490d1c5870301d55202d"
     },
-    "fingerprint": "37d8cc8044a5f7dcfff913018a7dd707f80d464854d55f409b0ea7aa7e950b0e",
-    "generation": 3,
-    "reason": "bumped to 3: main rewrote the clang argv builder around a parsed CompilerInvocation (compile_invocation.py) and moved the shared argv helpers; the emitted L4/L5 flags may change for the same build, so the axis is bumped conservatively rather than recorded as a reviewed no-semantic-change"
+    "fingerprint": "cb603d56a18c3efa6bd8465f75968d750bcb0db82b5ce345b30ace3184e9b2da",
+    "generation": 4,
+    "reason": "bumped to 4 for a semantic change"
   }
 }

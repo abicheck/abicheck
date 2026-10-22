@@ -8,7 +8,10 @@
   `template_instantiation` node. Every declared partial specialization keeps
   a `template_decl` node, so a comparison can tell that the pattern is still
   declared. A deleted or replaced partial specialization, a deleted explicit
-  specialization and a removed template still report `type_removed`.
+  specialization and a removed template still report `type_removed`. What the
+  graph records changed, so `EXTRACTOR_GENERATION` moves to 6 and
+  `SOURCE_GENERATION` to 4, with `template_class_origin.py` added to the
+  source tier's scope.
 - **A deleted explicit specialization written on the same line as its primary
   template's class-head is reported as removed again.** castxml's
   declaring-line reading took the first class-head on the line and read the
