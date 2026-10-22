@@ -39,8 +39,9 @@ _DATA = Path(__file__).parent / "data" / "compile_invocation"
 _CORPUS = _DATA / "compile_commands.json"
 _GOLDEN = _DATA / "clang_argv_golden.json"
 
-#: The two AST-dump drivers a unit is replayed under: the default ``clang`` and
-#: an explicit ``clang++``. Both reach ``clang_command`` with the same
+#: The three AST-dump drivers a unit is replayed under: the default ``clang``,
+#: an explicit ``clang++``, and ``icpx`` (Intel's SYCL driver, which exercises
+#: the host-only append). All reach ``clang_command`` with the same
 #: ``compiler_binary=None``, so only the driver token differs.
 _CLANG_BINS = ("clang", "clang++", "icpx")
 
