@@ -1153,8 +1153,8 @@ outputs:
       PR-controlled build script the run's own evidence collection spawns).
       Whether a JSON report also exists for this Action to read
       (auto-injected `-o json=...` sidecar, extra-args naming one, or
-      `format: json`; an extra-args export set replaces this Action's own,
-      detected via `_effective_format`) still decides only
+      `format: json`; extra-args exports are added beside this Action's
+      own, replacing it only when they name the same destination) still decides only
       whether the sticky PR comment and JSON-consuming outputs have
       structured detail to show, not whether this verdict/exit-code
       publish at all), or ERROR.
