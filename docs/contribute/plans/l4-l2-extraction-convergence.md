@@ -1,6 +1,6 @@
 # L2/L4/L5 extraction convergence — one parse per TU, one owner per primitive
 
-**Status:** Proposed; Phases 1 and 2 implemented (the first two PRs); Phase 3 first slice implemented (the model and four clang/castxml consumers; see Phase 3 for the remaining slices).
+**Status:** Proposed; Phases 1 and 2 implemented (the first two PRs); Phase 3 first slice implemented (the model and four clang/castxml consumers); Phase 3 slice 2 implemented (typed include-search operands on `CompilerInvocation`, `clang_public_roots` rescan deleted; see Phase 3 for the remaining slices).
 **Parent plans:** [Duplication & convergence assessment](duplication-and-convergence-assessment.md)
 (its P1 "Compiler invocation handling needs one typed model" owns Phase 3
 here — this plan does not restate that design), [One Semantic Pipeline](one-semantic-pipeline.md)
@@ -202,9 +202,13 @@ the pre-change commit. A mutation of the dedup rule fails it.
    still builds its own argv from `header_compile_context`'s derived flags.
    Route it through the model (the same dedup rule, the same rebase) and add
    its rows to the golden.
-2. **Typed include search for the public roots.** `clang_public_roots` still
-   re-scans the replayed tokens for `-iquote`/`-I` operands. Carry the
-   include-search entries as typed fields on the model and delete the rescan.
+2. **Typed include search for the public roots.** *Implemented.*
+   `CompilerInvocation.replayed_include_dirs` carries the `-iquote`/`-idirafter`
+   operands (and MSVC `/I`/`-I`) parsed once from the replayed tokens, in the
+   recorded spelling; `clang_public_roots` reads it and its rescan is deleted.
+   The `-I`/`-isystem` structured buckets stay on `CompileUnit`: the probe reads
+   them unrebased, and rebasing them onto the effective directory would change
+   `env -C` output, which is a separate decision.
 3. **Launcher and `env` parsing into the model.** `strip_launchers`,
    `pick_compiler_binary` and the `env` fold still live in `_argv.py` and are
    called from the model. Move the fold into `parse_compile_invocation`, so
