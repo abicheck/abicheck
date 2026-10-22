@@ -301,6 +301,10 @@ current emitter, which is unchanged.
 - [Multi-library compare memory: --bundle-facts-out still pins OLD snapshots per member](known-gaps/multi-library-compare-memory-bundle-facts-out-still-pins-old.md)  
   **Status (re-verified 2026-10-09 at `456989f`): PARTIAL.** Closed: JUnit uses SymbolInventory, compressed baseline streaming, and the attrs aliasing. Still open: OLD-side retention for --bundle-facts-out (no spooling handle). Graph sharing and Fact pooling were rejected as negative results, and the surface_graph ordering question is unverified.
 
+#### Forked release members lose the in-process dump caches
+
+**Status (2026-10-22): OPEN.** Measured on a 28-member `--depth headers` release: with members in forked processes, a cold `dump.binary` costs 528.6 s for 56 dumps against 216.7 s on threads (2.4x per dump), because each child starts without the parent's request-scoped dump caches. Children also re-streamed 4 projections from a 250 MB AST that a single-process run served from the sidecar (`clang_ast` 166.5 s vs 5.9 s). This conflicts with the projection memo. A warm snapshot cache hides both costs. A related small cost: on a cache miss the parent and then the child each run `dump.cache.lookup` (112 lookups against 56). The fix direction is to resolve the lookup once in the parent and pass the result to the child, and to warm the shared header acquisition before the fork.
+
 #### Interpreter startup dominates a small-input CLI run
 
 **Status (re-verified 2026-10-09 at `456989f`): OPEN.** Measurement only. The entry says import cost was never investigated, and no lazy-import work is recorded; the Click registration-by-import pattern is unchanged. unverified: wall time was not re-measured.  

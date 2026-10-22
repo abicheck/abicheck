@@ -25,6 +25,8 @@ mirroring ``buildsource/source_replay.py``'s identical L4 pattern) -- an
 
 from __future__ import annotations
 
+import pytest
+
 import abicheck.process_resources as process_resources
 from abicheck.frontends.cli.release_member_reporter import CliReleaseReporter
 from abicheck.workflows import release_jobs, release_members as release_pairwise
@@ -139,16 +141,42 @@ class TestReleaseWorkerLimitCause:
     def test_interpreter_bound_pool_is_attributed_to_gil(self, monkeypatch) -> None:
         monkeypatch.setattr("os.cpu_count", lambda: 64)
         monkeypatch.setattr(process_resources, "available_mem_gib", lambda: None)
-        monkeypatch.setattr(process_resources, "python_parallelism", lambda: 2)
+        monkeypatch.setattr(process_resources, "python_parallelism", lambda **_: 2)
+        monkeypatch.setattr(
+            "abicheck.workflows.release_member_processes.member_processes_possible",
+            lambda: False,
+        )
         monkeypatch.delenv("ABICHECK_RELEASE_JOB_MEM_GIB", raising=False)
         plan = release_jobs.plan_release_workers(0, depth="headers")
         assert (plan.initial_jobs, plan.limited_by) == (2, "gil")
+
+    @pytest.mark.parametrize("processes", [True, False])
+    def test_forked_fan_out_is_sized_without_the_gil_cap(
+        self, monkeypatch, processes: bool
+    ) -> None:
+        # The plan asks for the process ceiling exactly when members will
+        # fork; the thread fan-out keeps the GIL cap.
+        monkeypatch.setattr("os.cpu_count", lambda: 64)
+        monkeypatch.setattr(process_resources, "available_mem_gib", lambda: None)
+        monkeypatch.setattr(
+            process_resources,
+            "python_parallelism",
+            lambda *, processes=False: 6 if processes else 2,
+        )
+        monkeypatch.setattr(
+            "abicheck.workflows.release_member_processes.member_processes_possible",
+            lambda: processes,
+        )
+        monkeypatch.delenv("ABICHECK_RELEASE_JOB_MEM_GIB", raising=False)
+        plan = release_jobs.plan_release_workers(0, depth="headers")
+        expected = (6, "processes") if processes else (2, "gil")
+        assert (plan.initial_jobs, plan.limited_by) == expected
 
     def test_memory_bound_pool_below_the_interpreter_is_attributed_to_memory(
         self, monkeypatch
     ) -> None:
         monkeypatch.setattr("os.cpu_count", lambda: 64)
-        monkeypatch.setattr(process_resources, "python_parallelism", lambda: 4)
+        monkeypatch.setattr(process_resources, "python_parallelism", lambda **_: 4)
         monkeypatch.setattr(
             release_jobs, "release_jobs_mem_cap", lambda depth=None, **kw: 1
         )
@@ -164,7 +192,7 @@ class TestReleaseWorkerLimitCause:
         self, monkeypatch
     ) -> None:
         monkeypatch.setattr("os.cpu_count", lambda: 64)
-        monkeypatch.setattr(process_resources, "python_parallelism", lambda: 10)
+        monkeypatch.setattr(process_resources, "python_parallelism", lambda **_: 10)
         monkeypatch.setattr(
             release_jobs, "release_jobs_mem_cap", lambda depth=None, **kw: 8
         )
@@ -177,7 +205,7 @@ class TestReleaseWorkerLimitCause:
         self, monkeypatch, capsys
     ) -> None:
         monkeypatch.setattr("os.cpu_count", lambda: 64)
-        monkeypatch.setattr(process_resources, "python_parallelism", lambda: 2)
+        monkeypatch.setattr(process_resources, "python_parallelism", lambda **_: 2)
         monkeypatch.setattr(
             release_jobs, "release_jobs_mem_cap", lambda depth=None, **kw: 100
         )

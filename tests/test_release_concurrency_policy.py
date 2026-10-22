@@ -54,6 +54,19 @@ class TestPythonParallelism:
         assert got <= process_resources.FREE_THREADED_MEMBER_PARALLELISM
         assert got == min(cpus, process_resources.FREE_THREADED_MEMBER_PARALLELISM)
 
+    @pytest.mark.parametrize("cpus", [1, 2, 4, 6, 8, 64, 224])
+    def test_forked_members_are_not_capped_by_the_gil(
+        self, monkeypatch: pytest.MonkeyPatch, cpus: int
+    ) -> None:
+        # Oracle: forked children share no GIL, so the pool is bounded by
+        # CPUs and the measured process ceiling, never by the thread cap of 2.
+        monkeypatch.delenv(process_resources.MEMBER_JOBS_ENV_VAR, raising=False)
+        monkeypatch.setattr(process_resources.os, "cpu_count", lambda: cpus)
+        monkeypatch.setattr(process_resources, "gil_enabled", lambda: True)
+        got = process_resources.python_parallelism(processes=True)
+        assert got == min(cpus, 6)
+        assert process_resources.python_parallelism() == 2
+
     @pytest.mark.parametrize("gil", [True, False])
     @pytest.mark.parametrize("raw", ["1", "3", "100000"])
     def test_env_override_wins_and_is_clamped(
@@ -110,7 +123,7 @@ def test_plan_never_exceeds_parallelism_or_memory(
         monkeypatch.setattr("os.cpu_count", lambda c=cpus: c)
         monkeypatch.setattr(process_resources, "available_mem_gib", lambda a=avail: a)
         monkeypatch.setattr(
-            process_resources, "python_parallelism", lambda p=parallel: p
+            process_resources, "python_parallelism", lambda p=parallel, **_: p
         )
         plan = release_jobs.plan_release_workers(0, depth=depth, header_roots=True)
         budget = release_jobs.release_job_mem_budget_gib(depth, header_roots=True)
@@ -150,7 +163,7 @@ def test_plan_never_exceeds_the_process_thread_budget(
         monkeypatch.setattr("os.cpu_count", lambda c=cpus: c)
         monkeypatch.setattr(process_resources, "available_mem_gib", lambda a=avail: a)
         monkeypatch.setattr(
-            process_resources, "python_parallelism", lambda p=parallel: p
+            process_resources, "python_parallelism", lambda p=parallel, **_: p
         )
         monkeypatch.delenv(process_resources.MAX_THREADS_ENV_VAR, raising=False)
         free = release_jobs.plan_release_workers(jobs, depth=depth, header_roots=True)

@@ -95,7 +95,7 @@ def test_low_memory_really_engages_the_clamp_note(
 ) -> None:
     """Non-vacuity: the hazard the pin removes is real, so without the pin a
     host under pressure would put the note into ``result.output``."""
-    monkeypatch.setattr(process_resources, "python_parallelism", lambda: 4)
+    monkeypatch.setattr(process_resources, "python_parallelism", lambda **_: 4)
     monkeypatch.setattr(process_resources, "available_mem_gib", lambda: 0.05)
     monkeypatch.delenv("ABICHECK_RELEASE_JOB_MEM_GIB", raising=False)
     result = _run(*_release_dirs(tmp_path))

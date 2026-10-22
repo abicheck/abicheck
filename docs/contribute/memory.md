@@ -52,7 +52,9 @@ says what was being held when it was taken.
 Every sample also carries `thread_cpu_s` and `process_cpu_s`
 (`time.thread_time()`/`time.process_time()`), so the same marks attribute
 CPU: a stage's thread CPU is the difference between the two samples that
-bound it on one `thread`. The stage marks are `dump.prologue:done`,
+bound it on one `thread_id` (the OS thread; pool worker *names* are
+reused by new threads whose CPU clock restarts at 0, so pairing by
+`thread` name invents CPU). The stage marks are `dump.prologue:done`,
 `dump.elf.symbols:done`, `dump.debug.metadata:done`, the
 `dump.dwarf_snapshot` phase and `dump.binary:done` (binary and debug
 extraction); `compare.prologue:done`, `compare.detectors:done`,

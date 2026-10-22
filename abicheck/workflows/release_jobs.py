@@ -295,6 +295,7 @@ class ReleaseWorkerPlan:
     admission: MemoryAdmission
     #: What set ``initial_jobs``: ``"memory"`` (the RAM cap, with
     #: *clamped_from* set), ``"gil"`` (the interpreter's member parallelism),
+    #: ``"processes"`` (the forked-member ceiling),
     #: or ``None`` (the CPU count, an explicit *jobs*, or a cap that did not
     #: bind). The memory notice fires only for ``"memory"``, so a run the
     #: interpreter limits is never told it was memory-bound.
@@ -353,9 +354,14 @@ def plan_release_workers(
         # member of a 28-member release started at t~0, and the run held 28
         # working sets resident for ~0% speedup under the GIL. An explicit
         # *jobs* is an instruction and is not capped here.
-        parallel = python_parallelism()
+        from .release_member_processes import member_processes_possible
+
+        processes = member_processes_possible()
+        parallel = python_parallelism(processes=processes)
         if parallel < effective:
-            limited_by = "gil"  # the interpreter binds before memory does
+            limited_by = (
+                "processes" if processes else "gil"
+            )  # the interpreter binds before memory does
         effective, pool = min(effective, parallel), min(pool, parallel)
     # The process-wide thread budget bounds every pool, an explicit *jobs*
     # included. Applying it here, rather than only when the pool borrows its

@@ -359,17 +359,22 @@ def bounded_jobs(
 #: value is ignored. The one knob for this level -- add to it, not beside it.
 MEMBER_JOBS_ENV_VAR = "ABICHECK_MEMBER_JOBS"
 
-#: Level-1 default while the GIL is enabled. Not 1: while one member's Python
-#: holds the GIL, another member's clang child (``-M`` probe, AST dump) still
-#: runs, so a second member overlaps the child-process phases for the cost of
-#: one extra working set. Beyond two, measured wall time was flat and resident
-#: memory grew linearly (28 concurrent members vs. batches: ~10x peak RSS for
-#: no speedup). Open question (``docs/contribute/known-gaps.md``): with a warm
-#: snapshot cache there are no clang children to overlap, and a 28-member
-#: release measured j=1 29:45 / 3.99 GiB against j=2 30:48 / 9.44 GiB with
-#: identical findings; the cold j=1-vs-2 A/B that would justify lowering this
-#: has not been run.
+#: Level-1 default while the GIL is enabled and members run on *threads*
+#: (``ABICHECK_MEMBER_PROCESSES=0``, no ``fork``). Not 1: while one member's
+#: Python holds the GIL, another member's clang child still runs. Beyond two,
+#: wall time was flat and resident memory grew linearly. It does not bind the
+#: forked-process fan-out, which has no shared GIL: see
+#: :data:`PROCESS_MEMBER_PARALLELISM`.
 GIL_MEMBER_PARALLELISM = 2
+
+#: Level-1 default when members run in forked processes
+#: (``workflows.release_member_processes``), as a ceiling on the CPU count.
+#: Each child has its own interpreter, so the GIL argument above does not
+#: apply; memory admission is what bounds the pool. Measured on a 28-member
+#: ``--depth headers`` release, warm snapshot cache: pool 2 868 s, pool 6
+#: 346 s (2.5x) for +1.8% CPU seconds and no growth in per-child RSS
+#: (~3.5-4 GiB). Identical report digests.
+PROCESS_MEMBER_PARALLELISM = 6
 
 #: Level-1 default on a free-threaded interpreter, as a ceiling on the CPU
 #: count. Not the CPU count itself: members share caches, the include memo
@@ -397,12 +402,14 @@ def gil_enabled() -> bool:
     return True if probe is None else bool(probe())
 
 
-def python_parallelism() -> int:
+def python_parallelism(*, processes: bool = False) -> int:
     """How many Python-heavy units may run at once (>= 1).
 
     ``ABICHECK_MEMBER_JOBS`` when set to a positive integer (clamped to
     :func:`jobs_ceiling`, like every other override); otherwise
-    :data:`GIL_MEMBER_PARALLELISM` under the GIL and, on a free-threaded
+    :data:`GIL_MEMBER_PARALLELISM` under the GIL (the CPU count capped at
+    :data:`PROCESS_MEMBER_PARALLELISM` when *processes*: members then run in
+    forked children, which share no GIL) and, on a free-threaded
     interpreter, the CPU count capped at
     :data:`FREE_THREADED_MEMBER_PARALLELISM`. Memory is *not* considered here -- the caller's
     memory admission is what bounds a level-1 pool by RAM; this bounds it by
@@ -421,6 +428,8 @@ def python_parallelism() -> int:
         if requested > 0:
             return max(1, min(requested, jobs_ceiling()))
     if gil_enabled():
+        if processes:
+            return max(1, min(os.cpu_count() or 1, PROCESS_MEMBER_PARALLELISM))
         return GIL_MEMBER_PARALLELISM
     return max(1, min(os.cpu_count() or 1, FREE_THREADED_MEMBER_PARALLELISM))
 
