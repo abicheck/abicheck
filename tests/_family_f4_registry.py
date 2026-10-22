@@ -169,7 +169,6 @@ EXEMPTION_REASONS: dict[str, str] = {
 #: exemption category (maintained by hand -- the completeness test says what
 #: to add or drop).
 HEURISTICS: dict[str, str] = {
-    "abicheck.compare.template_param_defaults::detect_template_param_default_changed::affix.startswith:key + '::'": "spelling",
     "abicheck.diff_bit_int::<module>::re:'\\\\b_BitInt\\\\s*(?:\\\\(\\\\s*(\\\\d+)\\\\s*\\\\)|\\\\[\\\\s*(\\\\d+)-bit storage\\\\s*\\...": "spelling",
     "abicheck.checker::compare::affix.startswith:'rename:'": "own_format",
     "abicheck.model.change::<module>::re:'^[A-Za-z0-9][A-Za-z0-9._-]*@[A-Za-z0-9][A-Za-z0-9._-]*#[A-Za-z0-9][A...": "own_format",

@@ -341,7 +341,7 @@ for", never "none". The debug-type join (`compare/debug_type_join.py`)
 reports a conflicted name as ambiguous rather than trusting the first
 definition.
 
-(v62) `types[].template_param_defaults_fact` — a `Fact[tuple[str | None, ...]]` on a class-template pattern: the spelled default of each type parameter in declaration order, `null` for a parameter with no default. Recorded by the clang header backend only (ADR-085 D1). A pre-v62 document, and every castxml snapshot, has no such key and reads as not recorded, never as "no defaults".
+(v62) `types[].template_param_defaults_fact` — a `Fact[tuple[str | None, ...]]` on a class-template pattern: the spelled default of each type parameter in declaration order, `null` for a parameter with no default. Recorded by the clang header backend only. A pre-v62 document, and every castxml snapshot, has no such key and reads as not recorded, never as "no defaults".
 
 (v61) `types[].specialization_declared_fact` — a `Fact[bool]`: for a class-template specialization record, `present` with value `true` when the header's own class-head declares it (an explicit or partial specialization), `present` with `false` when it was instantiated from the primary template. castxml reads it from the declaring header line. Written only when determined, so every other record encodes exactly as v60; a missing key reads as unset, and a specialization the new header stops instantiating then keeps its `type_removed` row.
 

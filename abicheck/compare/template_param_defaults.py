@@ -114,9 +114,7 @@ def detect_template_param_default_changed(
             new_value=repr(after),
             **_contract.reachability_of(new_rec, header_parsed=True),
         )
-        covered = any(
-            stem == key or stem.startswith(key + "::") for stem in instantiation_stems
-        )
+        covered = any(_is_in_scope(stem, key) for stem in instantiation_stems)
         (suppressed if covered else findings).append(change)
     return findings, suppressed
 
@@ -286,3 +284,14 @@ def detect_default_template_arg_changed(
             )
             break  # one pairing per removed symbol
     return findings
+
+
+def _is_in_scope(stem: str, key: str) -> bool:
+    """Whether the callable *stem* is *key* itself or a member of it.
+
+    Compared segment by segment on ``::`` boundaries, so ``ns::Box`` does not
+    match ``ns::BoxExtra``.
+    """
+    stem_parts = stem.split("::")
+    key_parts = key.split("::")
+    return stem_parts[: len(key_parts)] == key_parts

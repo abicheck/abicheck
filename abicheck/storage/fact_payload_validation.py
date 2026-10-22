@@ -26,6 +26,8 @@ from typing import Any
 
 from ..model.fact import Fact
 
+__all__ = ["validated_identities", "validated_template_param_defaults"]
+
 
 def validated_identities(fact: Fact[Any] | None) -> Fact[Any] | None:
     """Schema v54's per-slot resolved type identities, after

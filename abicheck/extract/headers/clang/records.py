@@ -165,24 +165,27 @@ def parse_types(
     out: list[RecordType] = []
     for identity in order:
         rec = best[identity]
-        record = _build_record(
-            rec[0],
-            base_lookup_index,
-            evaluate_bitfield_int,
-            field_default_value,
-            override_name=rec[1],
-            is_opaque=not is_record_definition(rec[0].node),
-            dep_msg=deprecated.get(identity),
-            override_kind=reduce_opaque_kind_set(opaque_kind_sets.get(identity)),
-        )
         # ADR-085 D1: a class-template pattern carries its parameters' spelled
         # defaults, read from the merged, all-type-gated index. Only a pattern
         # with a row gets the fact; every other record stays UNKNOWN.
-        if record.is_template_pattern and template_param_defaults is not None:
-            row = template_param_defaults.get(identity)
-            if row is not None:
-                record.template_param_defaults_fact = Fact.present(tuple(row))
-        out.append(record)
+        row = (
+            template_param_defaults.get(identity)
+            if template_param_defaults is not None
+            else None
+        )
+        out.append(
+            _build_record(
+                rec[0],
+                base_lookup_index,
+                evaluate_bitfield_int,
+                field_default_value,
+                override_name=rec[1],
+                is_opaque=not is_record_definition(rec[0].node),
+                dep_msg=deprecated.get(identity),
+                override_kind=reduce_opaque_kind_set(opaque_kind_sets.get(identity)),
+                template_param_defaults=row if rec[0].in_template else None,
+            )
+        )
     return out
 
 
@@ -209,6 +212,7 @@ def _build_record(
     is_opaque: bool = False,
     dep_msg: str | None = None,
     override_kind: str | None = None,
+    template_param_defaults: Sequence[str | None] | None = None,
 ) -> RecordType:
     node = entry.node
     kind = override_kind if is_opaque and override_kind else record_kind(node)
@@ -329,6 +333,13 @@ def _build_record(
         is_standard_layout=is_standard_layout,
         is_trivially_copyable=is_trivially_copyable,
         is_template_pattern=entry.in_template,
+        # ADR-085 D1: the spelled defaults when the caller resolved them (a
+        # class-template pattern with all type parameters), else not recorded.
+        template_param_defaults_fact=(
+            Fact.present(tuple(template_param_defaults))
+            if template_param_defaults is not None
+            else None
+        ),
         # True only when *every* field came from the anonymous-aggregate
         # flatten, not merely "at least one did" (Codex review): a mixed
         # record like `struct Foo { union { int i; }; int tag; };` would

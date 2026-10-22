@@ -97,7 +97,7 @@
       "abicheck/extract/headers/clang/macro_qualifier.py": "f6b4d8d39639759ec555345358771937b77b7b490dae2a25ab99e077cd5d5728",
       "abicheck/extract/headers/clang/param_kind.py": "865d7fbacfcab6b98418a7320ba50cc5f7a82a3438d01e9868f2f37d5404ad99",
       "abicheck/extract/headers/clang/qualifiers.py": "34ed3ec2f0a0fad21c86d8e7b3708653c18670e955e39d1fb3d2c647a764cc67",
-      "abicheck/extract/headers/clang/records.py": "0ab7b591e82ae4a3293e991e491a8ac579bb71d23d3e3f2cac38f438a92a900f",
+      "abicheck/extract/headers/clang/records.py": "6df97472cd7b57fe4083f4698f86c002162005d1a18789b1de4813c988e4ade7",
       "abicheck/extract/headers/clang/restrict_spelling.py": "309efe53d934303354ef102e0b223363a099c164b2000727e4f591998afa2ec7",
       "abicheck/extract/headers/clang/return_type.py": "3b758adeb133ea1544b4de420bb7d6cc19a6ac5f6f16b27f3c81e963b22940bc",
       "abicheck/extract/headers/clang/scope.py": "5b7bf471b1e95184c97da44aed88c8f4b29b36f77699a44255c33a889ea3a4b3",
@@ -149,9 +149,9 @@
       "abicheck/symvers_metadata.py": "372737765cd132e6e87ed891dd465d2958e04debbef774e45212ceb3036871cb",
       "abicheck/type_metadata.py": "9997189de8dac522fd1db8be5ae491d811139503f83abaaded89038eb4aa9cdf"
     },
-    "fingerprint": "440900eb57972e4eb72b7f7f1e13de4be46e3c9693d3870fe65864268253c99d",
+    "fingerprint": "9984421f8658c0ef61e65da49f1df11a3b17523116b0f6229ee275d26d67c45d",
     "generation": 6,
-    "reason": "bumped to 6 for a semantic change"
+    "reason": "clang records.py now passes the ADR-085 defaults fact into the RecordType constructor instead of assigning it after construction; the recorded fact and the generation are unchanged"
   },
   "resolver": {
     "files": {
