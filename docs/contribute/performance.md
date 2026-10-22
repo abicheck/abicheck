@@ -400,8 +400,12 @@ order.
 
 `sampled_peak_tree_bytes` is the largest *simultaneous* sum of RSS across the
 measured process and every descendant alive at one sampling instant, taken from
-a parent-side sampler at a recorded interval. It is deliberately **not** called
-a peak:
+a parent-side sampler at a recorded interval. A forked child maps its parent's
+pages, so that sum counts shared pages once per process and overstates physical
+use. `sampled_peak_tree_pss_bytes` is the same sample over proportional set size
+(`smaps_rollup`), which divides each shared page among its mappers and sums to
+the tree's physical footprint. The L2 scaling gate budgets PSS for that reason.
+The RSS figure is deliberately **not** called a peak:
 
 - a spike shorter than the sampling interval is missed entirely;
 - pages shared between processes are counted once per process, so it can also
@@ -530,7 +534,9 @@ sweeps two axes through the real CLI and gates how cost **grows**:
 | `headers` | `compare --depth headers`, one library | 1 / 4 / 12 / 30 headers | 1.4 | 0.95 (1.3 s → 2.6 s) |
 | `libraries` | directory `compare` (release fan-out), 2 headers each | 1 / 3 / 6 / 10 libraries | 1.7 | 1.39 (1.2 s → 8.6 s); 1.64 (→ 11.5 s) before the fixes below |
 
-Peak process-tree RSS is gated at 1024 MB per point (observed ≤ 365 MB).
+Peak process-tree PSS (`sampled_peak_tree_pss_bytes`, falling back to RSS only
+when PSS is unreadable) is gated at 1024 MB per point. Members fork as processes,
+so summed RSS reads roughly 3x the PSS footprint on the library axis.
 The whole gate takes about 75 s at `--repeat 3`.
 
 The gated number is the **marginal** exponent: the slope of
