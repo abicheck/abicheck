@@ -61,7 +61,9 @@ Each entry's status line says what is still open. A PARTIAL entry's write-up als
 
 The entries below come from the Phase 4 measurement spike
 (`scripts/measure_l4_clang_projection.py`, 253 catalog TUs, 2026-10-22; numbers
-in the plan's "Status — Phase 4 measurement spike" note). They are gaps in
+in the plan's "Status — Phase 4 measurement spike" and "Status — Phase 4 golden and
+pinned set" notes; the b1 golden test reproduces the same counts, and none of the
+statuses below changed). They are gaps in
 `dumper_clang._ClangAstParser`'s output as an L4 projection source, not in L4's
 current emitter, which is unchanged.
 
