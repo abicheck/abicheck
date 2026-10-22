@@ -54,7 +54,7 @@
       "abicheck/extract/export_table_read.py": "7783c3baba176ef8b47cb99361f389984bb1797c37ba5d9120866359f60c3601",
       "abicheck/extract/flat_map_dependency_scope.py": "77659ce966d856c4b9008cdc6cf88250a3f50314fdf04140712f4e3797894648",
       "abicheck/extract/header_ast_backend.py": "1f5b15c126b139c49b702b69a4f626ed7d30f8294e15ad116d61387e96d31f16",
-      "abicheck/extract/header_ast_cache_producers.py": "9fdd20b55d57ae059e2d10136f11ad02149acf1eeffe9439b54c1fa67ea1e035",
+      "abicheck/extract/header_ast_cache_producers.py": "b20f72d82c73d0f82a91bf53b32edf673a043aae5f68eec9c38d6d7ad9c7b63a",
       "abicheck/extract/header_ast_fields.py": "436f6feaed4da7566a551fa44d3e102d28964fecc57a22821111d7f63c6f5840",
       "abicheck/extract/header_exclusions.py": "254ca6e4ccf7366b9db516183d6814cb865c279845abe7d05051ac2f72bf0884",
       "abicheck/extract/header_order_witness.py": "6a1cfce946826fa540a0601ebeefa02a8973ba6e8cd5d8287f6c1e7badc3d53a",
@@ -153,9 +153,9 @@
       "abicheck/symvers_metadata.py": "372737765cd132e6e87ed891dd465d2958e04debbef774e45212ceb3036871cb",
       "abicheck/type_metadata.py": "9997189de8dac522fd1db8be5ae491d811139503f83abaaded89038eb4aa9cdf"
     },
-    "fingerprint": "792015a29d85ee96df9d5180b38eb440aba503f8bb3409f4a8db0feb2ca976c9",
+    "fingerprint": "c4700d24d671d22f72f54d3b319a986539641f27a83815da88412f9e59e3ed4c",
     "generation": 10,
-    "reason": "Merge of main into the header-argv PR: the extractor-scope edit is still only the verbatim move of the header argv into extract/headers/clang_header_argv.py; the rendered argv stays byte-identical to the pre-change golden, so no generation bump"
+    "reason": "Adds a NON_SHAPING_MODULES classification entry for clang_header_argv (the body of the keyed header argv builder, already covered by the invocation digest). No extraction output or cache key changes; the CLANG_AST_OUTPUT_MODULES fingerprint is untouched."
   },
   "resolver": {
     "files": {
