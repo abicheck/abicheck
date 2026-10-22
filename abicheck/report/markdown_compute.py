@@ -491,7 +491,11 @@ def _view_preamble_mapping(
     :func:`_render_view_preamble` for the render half."""
     rm = _reporter_markdown()
 
-    changes, show_only_note = _resolve_displayed_changes(result, show_only)
+    changes, show_only_note = _resolve_displayed_changes(
+        result,
+        show_only,
+        today=None if envelope is None else envelope.resolved_today,
+    )
 
     d: dict[str, Any] = {
         "library": result.library,

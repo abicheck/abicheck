@@ -127,6 +127,9 @@ def to_stat(result: DiffResult, *, envelope: ReportEnvelope) -> str:
     from .report.document import ReportDocument
     from .report.render_text import render_stat_document
 
+    # The envelope's own snapshot is authoritative for every result-derived
+    # field, so a caller's ``result`` cannot be mixed with the envelope's audit.
+    result = envelope.result
     summary = summary_for(result)
     d: dict[str, object] = {
         "verdict_label": _VERDICT_LABEL[result.verdict],

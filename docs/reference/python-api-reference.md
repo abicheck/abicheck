@@ -560,6 +560,5 @@ JSON output for --stat mode: summary only, no changes array.
 | `require_complete_analysis` | `bool` | `False` |
 | `show_only` | `str \| None` | `None` |
 | `contract_evaluation` | `bool` | `False` |
-| `envelope` | `ReportEnvelope \| None` | `None` |
 
 **Returns:** `str`

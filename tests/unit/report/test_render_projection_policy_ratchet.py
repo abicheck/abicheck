@@ -81,12 +81,11 @@ _RECORDED_POLICY_IMPORTS: dict[str, frozenset[str]] = {
     "markdown_compute.py": frozenset({"policy.severity"}),
 }
 _RECORDED_DISPOSITION_COMPUTE: dict[str, frozenset[str]] = {
-    # No report renderer computes the disposition audit any more. Every
-    # projection reads the one audit its envelope's shared ``ReportDocument``
-    # holds (``disposition_audit_reusing_document`` /
-    # ``disposition_audit_dict_reusing_document``); the direct-caller fallback
-    # for a call with no envelope lives in ``report/disposition_audit.py``,
-    # which is not a render module.
+    # The envelope-driven renders (every ``render_*`` module, the one-line
+    # ``to_stat`` and the review digest) read the audit their envelope's shared
+    # ``ReportDocument`` holds. ``reporter.py``'s JSON helpers (``to_stat_json``,
+    # root-cause JSON) take no envelope and compute it once for a direct caller.
+    "reporter.py": frozenset({"add_disposition_audit"}),
 }
 
 
