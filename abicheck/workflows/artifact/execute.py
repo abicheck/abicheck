@@ -129,6 +129,7 @@ def resolve_side_snapshot(
     debug_format: str | None = None,
     include_labels: dict[Path, str] | None = None,
     notify: Callable[[str], None] | None = None,
+    static_archive: bool = False,
 ) -> AbiSnapshot:
     """Resolve one :class:`InputSpec` into an :class:`AbiSnapshot`.
 
@@ -162,6 +163,7 @@ def resolve_side_snapshot(
         debug_format=debug_format,
         include_labels=include_labels,
         notify=notify,
+        static_archive=static_archive,
     ).snapshot
 
 
@@ -191,6 +193,7 @@ def _resolve_side_snapshot_impl(
     source_frontend_from_folded_context: bool = False,
     compile_db_tokens: tuple[str, ...] = (),
     compile_db_matched: bool = False,
+    static_archive: bool = False,
 ) -> SideResolution:
     """The real implementation behind :func:`resolve_side_snapshot`.
 
@@ -378,6 +381,8 @@ def _resolve_side_snapshot_impl(
                         )
                     )
                 ),
+                # ADR-086: only the no-baseline audit lets an archive through.
+                static_archive=static_archive,
             )
         finally:
             _artifact_plan.run_cleanups()

@@ -124,7 +124,7 @@ pre-scan runs. On a large tree, scope that pre-scan with `--since <ref>` /
 
 | Shape | Symptom | What to do |
 |-------|---------|------------|
-| **Static-only** (e.g. oneCCL on conda-forge ships `libccl.a`, no `.so`) | abicheck rejects the `.a`: "static/import library archive … not analysed" | extract members (`ar x lib.a`) and compare the resulting objects, or compare a shared library built from them |
+| **Static-only** (e.g. oneCCL on conda-forge ships `libccl.a`, no `.so`) | `compare` rejects the `.a`: "static/import library archive" | audit declared-vs-defined with `compare --no-baseline lib.a -H include/`; for a comparison, extract members (`ar x lib.a`) and compare the resulting objects, or compare a shared library built from them |
 | **Headers in a third package** | `-H` dir has no headers | fetch the `*-include` package (see [§1](#1-the-pieces-live-in-different-packages)) |
 | **Stripped release `.so`, no DWARF** | header-aware L2 still works; DWARF cross-checks skip | pass `-H` headers (recommended anyway) |
 

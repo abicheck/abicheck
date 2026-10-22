@@ -100,18 +100,76 @@ suppressions:
 
 ```bash
 abicheck compare --no-baseline build/libfoo.so \
-    -H include/ --public-header-dir include/ \
+    -H include/foo.h -H include/foo_types.h -I include/ \
     --policy declared-exported-policy.yml --severity-preset default \
     --suppress declared-exported-exceptions.yml
 ```
 
 Exit `3` means a declared symbol is not exported, and exit `1` means an
-exception is stale. Run one job per build variant (lp64/ilp64, threading
-layer), passing the variant's own `-D` defines so the headers declare what
-that variant ships. Name the public header directory with
-`--public-header-dir`: a declaration reached only through `#include` from
-outside the `-H` set is still reported, but its description says the
-library may not owe that export.
+exception is stale. The `-H` set is the public contract: a declaration
+reached only through `#include` from a header outside it is still reported,
+but its description says the library may not owe that export.
+
+#### One job per build variant
+
+Run the gate once per variant the product ships (lp64/ilp64, threading
+layer, shared/static), with the variant's own `-D` defines so the headers
+declare what that variant ships. `--suppress` is repeatable: pass the
+exceptions every variant shares and the variant's own file, and each rule
+keeps its file in `disposition_audit.rules`. A rule is checked for staleness
+in every job that loads it, so put a rule in the shared file only when every
+variant needs it.
+
+```yaml
+# .github/workflows/declared-exported.yml (excerpt)
+strategy:
+  matrix:
+    include:
+      - {variant: lp64,         lib: lib/libfoo_lp64.so,  defines: ""}
+      - {variant: ilp64,        lib: lib/libfoo_ilp64.so, defines: "-D FOO_ILP64"}
+      - {variant: ilp64-static, lib: lib/libfoo_ilp64.a,  defines: "-D FOO_ILP64"}
+steps:
+  - run: >
+      abicheck compare --no-baseline ${{ matrix.lib }}
+      -H include/foo.h -I include/ ${{ matrix.defines }}
+      --policy declared-exported-policy.yml --severity-preset default
+      --suppress exceptions/common.yml
+      --suppress exceptions/${{ matrix.variant }}.yml
+```
+
+### A static archive as the operand
+
+`compare --no-baseline` also accepts an ELF static archive
+([ADR-086](../../contribute/adr/086-static-archive-no-baseline-export-audit.md)),
+for products that ship `libfoo.a` (for example lp64/ilp64 variants) beside or
+instead of a shared library:
+
+```bash
+abicheck compare --no-baseline lib/intel64/libfoo_lp64.a -H include/
+abicheck compare --no-baseline lib/intel64/libfoo_ilp64.a -H include/
+```
+
+The archive's own symbol index (what `ar s`/`ranlib` writes, and what the
+linker reads) is its export table: every global or weak symbol some member
+defines, C++ names mangled. `public_not_exported` then reports each public
+declaration no member defines, and `exported_not_public` each defined symbol
+no public header declares. The run is the same audit as for a `.so`, with
+three differences:
+
+- `-H/--header` is required; without a declared surface there is nothing
+  to audit.
+- An archive with **no symbol index** (`ar S`, or a tool that omits it) is a
+  usage error (exit `64`) telling you to run `ranlib libfoo.a`. It is never
+  read as an archive that defines nothing.
+- An archive has no dynamic section, so SONAME, `DT_NEEDED`, symbol
+  versioning and visibility are not collected: `unversioned_exported_symbol`
+  reports `not_collected`, and the run carries a coverage warning that says
+  so. A hidden-visibility symbol is still listed, because a static link can
+  resolve it.
+
+Only archives whose members are all ELF objects for one target are read.
+Thin archives, Mach-O or COFF/`.lib` members, and LLVM-bitcode members are
+refused with a reason. Two-sided `compare` and `dump` still reject archives.
 
 ## The Action: `mode: compare`, no baseline
 

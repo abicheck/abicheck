@@ -538,6 +538,12 @@ class AbiSnapshot:
     load_notices: tuple[str, ...] = field(
         default=(), repr=False, compare=False, kw_only=True
     )
+    # Runtime-only, like `live_source_evidence`: True when the export table
+    # (`elf`) was read from a static archive's own symbol index (ADR-086),
+    # not from a linked image -- so the dynamic-section facts (SONAME,
+    # versioning, visibility, DT_NEEDED) were never observable. Never
+    # serialized (`storage/snapshot_encode.py` drops it).
+    static_archive: bool = field(default=False, repr=False, compare=False, kw_only=True)
 
     # Indexes (built lazily)
     _func_by_mangled: dict[str, Function] | None = field(

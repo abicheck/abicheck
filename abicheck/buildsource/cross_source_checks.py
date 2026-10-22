@@ -161,6 +161,7 @@ from .cross_source_checks_base import (  # noqa: E402
     _change,
     _CheckOutput,
     _exported_symbol_names,
+    not_collected_reason,
 )
 
 # The two evidence-coherence checks (AC-008/AC-009) live in their own module
@@ -265,10 +266,8 @@ def run_crosschecks(
         CHECK_SOURCE_SURFACE_DSO_MISMATCH: _check_source_surface_dso_mismatch,
     }
     for name in ALL_CHECKS:
-        if name not in cfg.enabled:
-            result.coverage.append(
-                _coverage_row(name, "not_collected", "disabled by configuration")
-            )
+        if not_run := not_collected_reason(name, snapshot, cfg.enabled):
+            result.coverage.append(_coverage_row(name, "not_collected", not_run))
             continue
         out = runners[name](snapshot, cfg)
         capped = (
