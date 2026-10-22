@@ -4386,6 +4386,25 @@
     "linux"
    ]
   },
+  "case222_public_consumer_compiled_dependency_changed": {
+   "abi_break": false,
+   "api_break": false,
+   "bad_practice": false,
+   "category": "risk",
+   "description": "A public inline function, demo::scale(int), is written in the public header include/demo/scale.h, so its body is compiled into every consumer translation unit that includes the header. In v1 it calls the internal demo::detail::mul(); in v2 it also calls demo::detail::saturate(), a new private dependency. Nothing is exported and no symbol changes, so the only evidence is the body's own dependency set in the header-only (L2) semantic graph: the header call pass parses every header-written body in full, and it saw the complete set on both sides. Consumers must recompile to pick up the new body, so the change is reported as COMPATIBLE_WITH_RISK. No consumer build evidence is available, so the case never claims which consumers include the header, and an absent consumer never reads as an unused dependency.",
+   "expected": "COMPATIBLE_WITH_RISK",
+   "expected_kinds": [
+    "public_consumer_compiled_dependency_changed"
+   ],
+   "fixtures": [
+    "old.json",
+    "new.json"
+   ],
+   "min_evidence": "L2",
+   "platforms": [
+    "linux"
+   ]
+  },
   "case221_public_api_internal_type_renamed": {
    "abi_break": false,
    "api_break": false,

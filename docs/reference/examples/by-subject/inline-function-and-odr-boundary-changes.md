@@ -3,7 +3,7 @@
 
 A function moves across the inline/out-of-line boundary, or an inline accessor's body changes what it references -- symbols appear, disappear, or silently reference something else, all without an explicit ABI-breaking declaration.
 
-_4 case(s)._ [← back to all subjects](index.md)
+_5 case(s)._ [← back to all subjects](index.md)
 
 ## Cases
 
@@ -13,3 +13,4 @@ _4 case(s)._ [← back to all subjects](index.md)
 | [case47_inline_to_outlined](../case47_inline_to_outlined.md) | Inline Method Moved Out-of-Line | 🟢 COMPATIBLE | Addition (Compatible) |
 | [case89_inline_accessor_renamed_pimpl_member](../case89_inline_accessor_renamed_pimpl_member.md) | Inline Accessor References Renamed Pimpl Member | 🔴 BREAKING | Breaking |
 | [case157_inline_function_removed](../case157_inline_function_removed.md) | Inline Function Removed | 🟠 API_BREAK | API Break |
+| [case222_public_consumer_compiled_dependency_changed](../case222_public_consumer_compiled_dependency_changed.md) | Public Inline Body's Compiled-In Dependency Changes | 🟡 COMPATIBLE_WITH_RISK | Risk |

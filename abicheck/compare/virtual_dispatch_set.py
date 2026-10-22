@@ -60,10 +60,9 @@ from ..model.source_graph_coverage import (
 )
 from ..model.source_graph_query import is_public_dependency_node
 from .edge_query import source_graph_covers
+from .graph_risk_names import example_names
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
-
     from ..model.source_graph import SourceGraphSummary
 
 _CALLS = "DECL_CALLS_DECL"
@@ -75,9 +74,6 @@ _DISPATCH = "VIRTUAL_CALL_MAY_DISPATCH_TO"
 #: the pass flags directly: a flagged pass that was neither narrowed nor
 #: degraded. A header-only pass is deliberately not accepted.
 _DISPATCH_PASSES: tuple[str, ...] = (OVERRIDE_GRAPH_PASS, VIRTUAL_DISPATCH_GRAPH_PASS)
-
-#: How many example targets a description names per direction before "+N more".
-_EXAMPLE_LIMIT = 2
 
 
 def _dispatch_sets(graph: SourceGraphSummary) -> dict[str, frozenset[str]]:
@@ -109,15 +105,6 @@ def _dispatch_sets(graph: SourceGraphSummary) -> dict[str, frozenset[str]]:
         for base in virtual_bases
         if is_public_dependency_node(base, node_by_id, exported)
     }
-
-
-def _names(targets: Sequence[str], labels: dict[str, str], prefix: str) -> str:
-    if not targets:
-        return ""
-    shown = ", ".join(labels.get(t, t) for t in targets[:_EXAMPLE_LIMIT])
-    more = len(targets) - _EXAMPLE_LIMIT
-    extra = f" (+{more} more)" if more > 0 else ""
-    return f" {prefix} {shown}{extra}."
 
 
 def _complete(graph: SourceGraphSummary) -> bool:
@@ -161,8 +148,8 @@ def virtual_dispatch_set_findings(
             "approximate). A call through this stable public virtual may now reach "
             "a different implementation. Source-graph risk to review; not an "
             "artifact-proven ABI break."
-            + _names(sorted(after - before), labels, "Added:")
-            + _names(sorted(before - after), labels, "Removed:")
+            + example_names(sorted(after - before), labels, "Added:")
+            + example_names(sorted(before - after), labels, "Removed:")
         )
         findings.append(
             Change(
