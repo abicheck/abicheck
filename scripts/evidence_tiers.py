@@ -459,6 +459,7 @@ EVIDENCE_TIER_BY_KIND: dict[str, str] = {
     "public_api_internal_dependency_added": "L5",
     "public_api_internal_type_renamed": "L5",
     "public_virtual_dispatch_set_changed": "L5",
+    "public_consumer_compiled_dependency_changed": "L2",
     "public_dependency_role_changed": "L5",
     "public_dependency_role_unknown": "L5",
     "target_dependency_added": "L5",

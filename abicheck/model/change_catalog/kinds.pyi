@@ -178,6 +178,7 @@ class ChangeKind(StrEnum):
     DECLARATION_IDENTITY_RECONCILED_UNRESOLVED = 'declaration_identity_reconciled_unresolved'
     PUBLIC_DEPENDENCY_ROLE_CHANGED = 'public_dependency_role_changed'
     PUBLIC_DEPENDENCY_ROLE_UNKNOWN = 'public_dependency_role_unknown'
+    PUBLIC_CONSUMER_COMPILED_DEPENDENCY_CHANGED = 'public_consumer_compiled_dependency_changed'
     VAR_REMOVED_ELF_ONLY = 'var_removed_elf_only'
     PUBLIC_API_INTERNAL_TYPE_RENAMED = 'public_api_internal_type_renamed'
     FUNC_BECAME_INLINE = 'func_became_inline'

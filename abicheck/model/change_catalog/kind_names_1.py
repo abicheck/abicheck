@@ -559,6 +559,11 @@ KIND_NAMES_1: tuple[tuple[str, str, str | None], ...] = (
         "ADR-077 D4: one side's L5 graph carries no role data for a public entry's dependency (stored before roles were stamped), so a role change can be neither confirmed nor ruled out → COMPATIBLE (coverage note)",
     ),
     (
+        "PUBLIC_CONSUMER_COMPILED_DEPENDENCY_CHANGED",
+        "public_consumer_compiled_dependency_changed",
+        "dependency of a public inline/template body compiled into consumers changed (header-graph tier) → RISK",
+    ),
+    (
         "VAR_REMOVED_ELF_ONLY",
         "var_removed_elf_only",
         "exported ELF-only data symbol removed -> binary break",

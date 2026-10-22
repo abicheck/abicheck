@@ -360,6 +360,7 @@ UNVERIFIED = frozenset(
         "public_to_internal_dependency",
         "public_typedef_removed",
         "public_typedef_target_changed",
+        "public_consumer_compiled_dependency_changed",
         "public_virtual_dispatch_set_changed",
         "python_abi3_dropped",
         "python_abi3_floor_raised",

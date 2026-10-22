@@ -2091,6 +2091,15 @@
       "examples": "case194_header_graph_rename_reconciled,case221_public_api_internal_type_renamed"
     },
     {
+      "kind": "public_consumer_compiled_dependency_changed",
+      "category": "risk",
+      "default_verdict": "COMPATIBLE_WITH_RISK",
+      "severity": "warning",
+      "min_evidence": "L2",
+      "doc_slug": "public_consumer_compiled_dependency_changed",
+      "examples": "case222_public_consumer_compiled_dependency_changed"
+    },
+    {
       "kind": "public_dependency_role_changed",
       "category": "risk",
       "default_verdict": "COMPATIBLE_WITH_RISK",
