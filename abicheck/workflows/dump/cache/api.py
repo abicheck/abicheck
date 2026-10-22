@@ -393,7 +393,14 @@ def cached_run_dump(
             _stamp_cache_hit(done, path)
             finisher.applied = True
             return done
-    cached = _lookup_key(initial_key, path) if initial_key else None
+    # With a finisher, a finished-tier miss re-extracts instead of finishing
+    # the raw entry: re-scoping a cache-reloaded snapshot can differ from
+    # scoping the fresh extraction (docs/contribute/known-gaps/rescoping-a-
+    # cache-reloaded-snapshot-...), and the finished tier must hold the cold
+    # result. One extra extraction per operand, once; every later run hits.
+    cached = (
+        _lookup_key(initial_key, path) if initial_key and finisher is None else None
+    )
     if cached is not None:
         _stamp_cache_hit(cached, path)
         return _finish_and_store(cached, finisher, finished_key, req)

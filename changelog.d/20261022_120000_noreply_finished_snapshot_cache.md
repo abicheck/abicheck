@@ -10,4 +10,6 @@
   raw entry's key plus every finishing input (exclude patterns and the ones
   that matched, `-H`/public-header roots as resolved on disk, the ownership
   request, the project ownership rules, the working directory). A hit returns
-  the same serialized snapshot an uncached run computes.
+  the same serialized snapshot an uncached run computes. A finished-tier miss
+  re-extracts rather than re-finishing a raw entry, so the first run against
+  a cache populated by an older abicheck pays one extraction per operand.

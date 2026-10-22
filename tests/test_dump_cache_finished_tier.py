@@ -166,30 +166,42 @@ def test_finished_hit_matches_uncached_recompute_across_configs(
             assert (_canon(snap), _runtime(snap)) == ref[name], f"warm {name}"
 
 
-def test_raw_hit_without_finished_entry_finishes_and_backfills(
+def test_raw_only_cache_reextracts_once_then_hits_the_finished_tier(
     built: tuple[Path, Path, Path], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A cache warmed before the finished tier existed (raw entry only) still
-    returns the recompute, and stores the finished entry for the next run."""
+    """A raw-only cache (warmed before the finished tier, or under other
+    finishing inputs) is not re-scoped: re-scoping a cache-reloaded snapshot
+    may differ from the cold result. The first run re-extracts and stores the
+    cold result; the next is a finished-tier hit with no recompute."""
     so, inc, sub = built
     cfg = _configs(inc, sub)["excl_priv"]
     monkeypatch.setattr(cache_store, "_CACHE_DIR", tmp_path / "c")
     with monkeypatch.context() as mp:
         mp.setattr(cache_api, "take_pending", lambda: None)
-        expected = _canon(_resolve(so, cfg))  # raw entry only
+        _resolve(so, cfg)  # raw entry only
     assert not (tmp_path / "c" / "finished").exists()
-    calls: list[int] = []
-    real = dependency_scope.scope_snapshot_excluding_dependencies
+    with monkeypatch.context() as mp:
+        mp.setattr(cache_store, "_CACHE_DIR", tmp_path / "ref")
+        mp.setenv(REFERENCE_MODE_ENV_VAR, "1")
+        mp.setattr(cache_api, "take_pending", lambda: None)
+        expected = _canon(_resolve(so, cfg))  # cold, uncached oracle
+    dumps: list[int] = []
+    real_dump = input_resolution.run_dump
 
-    def _counting(*a: Any, **k: Any) -> Any:
-        calls.append(1)
-        return real(*a, **k)
+    def _counting_dump(*a: Any, **k: Any) -> Any:
+        dumps.append(1)
+        return real_dump(*a, **k)
 
     with monkeypatch.context() as mp:
-        mp.setattr(dependency_scope, "scope_snapshot_excluding_dependencies", _counting)
+        mp.setattr(input_resolution, "run_dump", _counting_dump)
+        assert _canon(_resolve(so, cfg)) == expected
+        assert dumps, "a finished-tier miss must re-extract, not re-scope the raw entry"
+    assert list((tmp_path / "c" / "finished").glob("*.json.zst"))
+    with monkeypatch.context() as mp:
+        mp.setattr(
+            dependency_scope,
+            "scope_snapshot_excluding_dependencies",
+            lambda *a, **k: 1 / 0,
+        )
         mp.setattr(input_resolution, "run_dump", lambda *a, **k: 1 / 0)
         assert _canon(_resolve(so, cfg)) == expected
-        assert calls, "raw hit must still finish"
-        calls.clear()
-        assert _canon(_resolve(so, cfg)) == expected
-        assert not calls, "second run must be a finished-tier hit"
