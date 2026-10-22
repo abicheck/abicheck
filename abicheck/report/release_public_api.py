@@ -41,7 +41,8 @@ from collections.abc import Mapping, Sequence
 from typing import TYPE_CHECKING, Any
 
 from ..model.symbol_ownership import symbol_origin
-from .surface_changes import SurfaceChangeEntry, compute_surface_changes
+from .change_operation import entity_for_change, operation_for_kind
+from .surface_changes import PUBLIC_SURFACE_ENTITIES, SurfaceChangeEntry
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from ..checker_types import DiffResult
@@ -62,24 +63,51 @@ def split_public_internal(
     entries: Sequence[SurfaceChangeEntry],
 ) -> tuple[list[str], int]:
     """Return the sorted, de-duplicated public symbols and the internal count."""
+    return _split_symbols([entry.symbol for entry in entries])
+
+
+def _split_symbols(symbols: Sequence[str]) -> tuple[list[str], int]:
     public: set[str] = set()
     internal = 0
-    for entry in entries:
-        if symbol_origin(entry.symbol) == "public":
-            public.add(entry.symbol)
+    for symbol in symbols:
+        if symbol_origin(symbol) == "public":
+            public.add(symbol)
         else:
             internal += 1
     return sorted(public), internal
 
 
 def member_public_api(result: DiffResult) -> dict[str, object]:
-    """The counts and ``public_api`` block for one member's *result*."""
-    section = compute_surface_changes(result)
-    added, added_internal = split_public_internal(section.additions)
-    removed, removed_internal = split_public_internal(section.removals)
+    """The counts and ``public_api`` block for one member's *result*.
+
+    Applies :func:`~abicheck.report.surface_changes.compute_surface_changes`'s
+    exact grouping (public-surface entity, then catalog operation) directly
+    over ``result.changes``. The grouping reads only the change's kind and
+    entity -- never its resolved verdict/category -- so building a full
+    ``ReportFinding``/``SurfaceChangeEntry`` per change (policy resolution for
+    every change of every member) was pure overhead on the release path,
+    where it dominated peak RSS at many members.
+    """
+    added_syms: list[str] = []
+    removed_syms: list[str] = []
+    modifications = 0
+    for change in result.changes:
+        kind = change.kind
+        kind_value = kind.value if hasattr(kind, "value") else str(kind)
+        if entity_for_change(change, kind_value) not in PUBLIC_SURFACE_ENTITIES:
+            continue
+        operation = operation_for_kind(kind_value)
+        if operation == "added":
+            added_syms.append(change.symbol)
+        elif operation == "removed":
+            removed_syms.append(change.symbol)
+        else:
+            modifications += 1
+    added, added_internal = _split_symbols(added_syms)
+    removed, removed_internal = _split_symbols(removed_syms)
     return {
-        "surface_removals": len(section.removals),
-        "surface_modifications": len(section.modifications),
+        "surface_removals": len(removed_syms),
+        "surface_modifications": modifications,
         "public_api": {
             "added": added,
             "removed": removed,
