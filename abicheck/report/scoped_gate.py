@@ -268,6 +268,7 @@ def _fold_findings_into_changes(
     """
     from ..model.evidence_status import EvidenceStatus, ReachabilityState
     from ..reporter_markdown import root_cause_evidence_lookup_for_changes
+    from ..root_cause_evidence import impact_group_lookup_for_changes
     from .view import apply_show_only
 
     _add_entries_to_root_causes = helpers.add_entries_to_root_causes
@@ -300,6 +301,7 @@ def _fold_findings_into_changes(
             policy_file=result.policy_file,
         )
     rc_evidence = root_cause_evidence_lookup_for_changes(primary_changes + scoped_only)
+    ig_lookup = impact_group_lookup_for_changes(primary_changes + scoped_only)
     # Workstream D-S1: every full-diff finding's own `gate_contribution`
     # (ADR-049 D1 -- the number that actually gates the *global*
     # compatibility axis under `--contract`) is left exactly as computed for
@@ -353,6 +355,7 @@ def _fold_findings_into_changes(
             # deliberately complete, unlike this per-finding field.
             root_cause=root_cause_for_change(c, referenced_causes=referenced_causes),
             root_cause_evidence=rc_evidence.get(_finding_id(c)),
+            impact_group_id=ig_lookup.get(_finding_id(c)),
             today=today,
         )
         changes_list.append(entry)

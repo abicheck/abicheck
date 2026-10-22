@@ -1164,3 +1164,12 @@ def test_dump_write_and_resolution_routes_replay_l4_alike(
         source_replay_extractor(None, header_backend), "clang"
     )
     assert type(written) is type(resolved)
+
+
+@pytest.fixture(autouse=True)
+def _castxml_preflight_off(monkeypatch):
+    """These tests stub the parse itself; castxml need not be on PATH (#1710)."""
+    monkeypatch.setattr(
+        "abicheck.workflows.header_frontend_preflight.require_castxml_if_needed",
+        lambda *a, **k: None,
+    )

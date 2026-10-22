@@ -57,6 +57,29 @@ Next, unranked (the `--no-baseline` one-sided-detector gap, the target-platform 
 
 Each entry's status line says what is still open. A PARTIAL entry's write-up also describes the half that is already fixed; the status line is authoritative where they disagree.
 
+### Clang projection (ADR-063 Phase 4 prerequisites)
+
+The entries below come from the Phase 4 measurement spike
+(`scripts/measure_l4_clang_projection.py`, 253 catalog TUs, 2026-10-22; numbers
+in the plan's "Status — Phase 4 measurement spike" note). They are gaps in
+`dumper_clang._ClangAstParser`'s output as an L4 projection source, not in L4's
+current emitter, which is unchanged.
+
+#### The clang parser leaves `origin` unset, so a projected entity's visibility and `api_relevant` are not derived (2026-10-22)
+**Status (2026-10-22): OPEN.** `_ClangAstParser.parse_functions` and `parse_types` leave `Function.origin` and `RecordType.origin` at `UNKNOWN`, with `source_header` and `source_location` unset (checked on a corpus TU), so `base.entity_from_*` maps every projected entity to `visibility="unknown"` and, for functions and records, `api_relevant=False`. On the 253-TU corpus, `visibility` and `api_relevant` differ on 1531 of 1531 paired functions and 290 of 290 paired records. The fix belongs in the parser's origin classification (the same provenance matcher `_decl_is_public` uses), before a projection can carry these fields.
+
+#### The clang projection walks every declaration, including system headers, so its output is not the public surface (2026-10-22)
+**Status (2026-10-22): OPEN.** `_ClangAstParser.parse_functions()` returns 68629 functions across the 253 TUs, against 2600 on the current L4 surface (66953 projected names are not on the current side, e.g. `fclose`, `__uflow`, `asprintf`). The castxml path scopes its output by declaration provenance; the clang parser does not scope at the `parse_*` boundary. Phase 4 must apply the public-surface predicate before projecting or it projects system declarations into the surface.
+
+#### Clang-projected member and namespace names are bare, so `qualified_name` differs from the current L4 name (2026-10-22)
+**Status (2026-10-22): OPEN.** A member function is projected as `execute` where L4 emits `Processor::execute`; a namespaced record as `task_arena` where L4 emits `mylib::task_arena`; an enum likewise. `parse_typedefs_qualified` exists, but no qualified form is provided for functions, records or enums. On the corpus, `qualified_name` differs on 1045 of 1531 paired functions (205 TUs), 130 of 290 records (75 TUs) and 5 of 5 enums. A qualified name must be built from the declaration scope before a projection can use it as an identity input.
+
+#### A C++ declaration with no clang `mangledName` falls back to its bare name and loses its mangled identity in the projection (2026-10-22)
+**Status (2026-10-22): OPEN; cause not traced.** For `distance(Point, Point)` in `case69_trivial_to_nontrivial` (`v1.cpp` and `v2.cpp`) clang's AST carries no usable `mangledName`, so `Function.mangled` falls back to the bare name `distance`. `base.entity_from_function` then blanks `mangled_name`, and `SourceEntity.identity()` keys the declaration on `qualified#signature_hash` where L4 keys it on `_Z8distance5PointS_`. This is the fabricated-identity case ADR-063 A1 names. Pairing-free counters show 502 projected function entities with a blank mangled name against 404 on the current side, so the blanking is wider than these two; the cause of the 404 and 502 split has not been traced.
+
+#### Hash fields and the default-argument string are spelled differently by the two producers, so cross-producer equality is not a semantic check (2026-10-22)
+**Status (2026-10-22): OPEN.** `signature_hash` differs on 1374 of 1531 paired functions, record `type_hash` on 290 of 290, and typedef `type_hash` on 22 of 22. The inputs differ (L4 hashes its own `_signature(node)` string, `base.py` hashes `return(params)`), so the hashes cannot show the underlying types are equal. The default-argument `value` differs on 18 pairs: L4 spells `p0=sha256:…` and the projection spells `max_threads=expr:…`. A pinned set cannot include these fields until both producers use one canonical spelling.
+
 ### False-clean risk
 
 #### A header-only default template-argument change reads `NO_CHANGE` at L2 on both backends (2026-10-21)
@@ -235,10 +258,14 @@ Each entry's status line says what is still open. A PARTIAL entry's write-up als
 **Status (re-verified 2026-10-09 at `456989f`): OPEN.** This is a pointer stub to export-loss-ownership-root-cause.md. It still lists two open items: is_inline is used as a proxy, and there is no Itanium type decoder for specialization owners. Not re-verified in code beyond that.  
 `false-positive` — Export-loss ownership still uses `is_inline` as a proxy for an inline copy and has no Itanium decoder for template-specialization owners; see `export-loss-ownership-root-cause.md`. [Full write-up](known-gaps/export-loss-ownership-inline-copy-proxy-and-template.md)
 
-#### Class-template specialization a new header stops enumerating keeps `type_removed` when its origin is unproven (mostly fixed)
+#### Class-template specialization a new header stops enumerating keeps `type_removed` when its origin is unproven (narrowed)
 
-**Status (2026-10-21): MOSTLY FIXED.** A template instance, and now a class-template specialization the new header stops instantiating, is no longer reported as removed while its primary template is still declared: no `type_removed` for the specialization, no `inline_function_removed`/`func_removed`/`var_removed` for its implicit special members, methods or static data members; an export the new binary dropped is `func_visibility_changed`/`var_visibility_changed` (`compare/template_instance_absence.py`). Still open: the rule needs the old record's instantiation origin (`RecordType.specialization_declared_fact`, schema v61), which only castxml records, so an old snapshot from the clang header backend or from before v61 keeps the old rows.  
-`false-positive` — A class-template specialization the new header stops instantiating still reports `type_removed` and its members' removals when the old snapshot does not record whether the specialization was instantiated from the primary template (clang header backend, pre-v61 snapshot). [Full write-up](known-gaps/class-template-specialization-members-a-new-header-stops-enumerating.md)
+**Status (2026-10-21): NARROWED.** A class-template specialization the new header stops instantiating is no longer reported as removed while the pattern it was instantiated from is still declared. That pattern is either the primary template or a partial specialization. Its members are judged by the new export table (`compare/template_instance_absence.py`). The origin comes from castxml's declaring line or from the clang header graph's AST structure (`buildsource/template_class_origin.py`), which also covers a macro-produced class-head and a partial specialization. Still open, each as a residual false positive:
+- an old snapshot with neither origin record;
+- a dump made without clang;
+- a dropped explicit instantiation (`template struct Box<double>;`).
+
+`false-positive` — Such a specialization still reports `type_removed` and its members' removals when no producer proved its origin: an old snapshot from before this change and schema v61, a dump without clang (macro-produced class-head, partial specialization), or an explicit instantiation the new header drops. [Full write-up](known-gaps/class-template-specialization-members-a-new-header-stops-enumerating.md)
 
 #### MinGW toolchain headers are not classified as dependencies (2026-09-23)
 
@@ -337,6 +364,11 @@ Do not re-attempt token-claiming. A header's export tokens cannot tell whether i
 `perf` — The clang JSON tree is walked at least eight times in Python, snapshots are pickled across the side boundary, and populating the snapshot cache costs ~30 % wall on a 28-member release. [Full write-up](known-gaps/python-level-ast-walks-side-boundary-and-cache-costs.md)
 
 ### Hygiene
+
+#### `--required-symbol @FILE` read errors are checked on the CLI route only
+
+**Status (recorded 2026-10-22): OPEN.** An unreadable `@FILE` is refused as a typed `CompareSettingsError` (exit 64, path named) by `workflows/compare_configuration.load_required_symbols`, pinned on the CLI and the typed function in `tests/test_compare_settings_cli_translation.py`. No bug-class harness covers it: the typed `CompareRequest` API does not accept `@FILE` required symbols, so there is no second route to compare against, and family F2's route-parity matrix has nothing to attach to.
+`hygiene` — A harness cell becomes meaningful only if `@FILE` resolution is exposed on a second route; until then the CLI test is the guard. [Full write-up](known-gaps/required-symbol-file-read-errors-are-checked-on-the-cli-route-only.md)
 
 #### Release report: live and stored operands render different documents
 
@@ -460,7 +492,7 @@ Approaches that were tried, measured or reviewed and did not help. Their value i
 | Approach | Measured result | Evidence caveat | Write-up |
 |---|---|---|---|
 | Demote a vanished weak/vague-linkage export (`Function.is_inline`, then COMDAT membership) | Both proved a fact about the library's build, not that consumers own a copy; `extern template` breaks the second. Reverted twice. | — | [Linkage-blind removal — attempted twice, reverted twice. The evidence keeps proving something adjacent to the invariant](known-gaps/linkage-blind-removal-attempted-twice-reverted-twice-the.md) |
-| Treat a symbol the new binary still exports as not removed, with no declaration gate | Silences a plain function the header dropped while the binary still exports it (`ns::bar`), a real API removal that reports `func_removed` today. The gate on the primary template's declaration is what keeps it. | — | [Class-template specialization a new header stops enumerating (mostly fixed)](known-gaps/class-template-specialization-members-a-new-header-stops-enumerating.md) |
+| Treat a symbol the new binary still exports as not removed, with no declaration gate | Silences a plain function the header dropped while the binary still exports it (`ns::bar`), a real API removal that reports `func_removed` today. The gate on the primary template's declaration is what keeps it. | — | [Class-template specialization a new header stops enumerating (narrowed)](known-gaps/class-template-specialization-members-a-new-header-stops-enumerating.md) |
 | Demote stdlib closure instantiations as "unnameable" | Source nameability is not ABI compatibility; the fix was also dead code for its ELF-only case. Reverted. | — | [A third instance of the same shape (code-review report item 3): demoting a stdlib closure instantiation as "unnameable" — attempted, reverted](known-gaps/a-third-instance-of-the-same-shape-code-review-report-item-3.md) |
 | Per-finding evidence-provider downgrade for header-only layout findings | The suspected misattribution does not occur on either header backend; no fix applied. | Premise did not reproduce | [Evidence-provider model — investigated, found not to reproduce as described; no fix applied](known-gaps/evidence-provider-model-investigated-found-not-to-reproduce-as.md) |
 | L2 performance bottlenecks found by the full-CLI harness | Frame for the measurement-only perf rows below (`scripts/check_l2_cli_perf.py`). | — | [L2 performance bottlenecks found by the full-CLI harness (measured, not fixed)](known-gaps/l2-performance-bottlenecks-found-by-the-full-cli-harness.md) |

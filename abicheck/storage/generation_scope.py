@@ -118,6 +118,7 @@ SOURCE_TIER_FILES: tuple[str, ...] = (
     "abicheck/buildsource/inline_graph_fold.py",
     "abicheck/buildsource/semantic_fact_folds.py",
     "abicheck/buildsource/call_graph.py",
+    "abicheck/buildsource/template_class_origin.py",
     "abicheck/buildsource/template_graph.py",
     "abicheck/buildsource/template_graph_fold.py",
     "abicheck/buildsource/template_graph_value_decls.py",

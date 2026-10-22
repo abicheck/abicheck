@@ -212,7 +212,7 @@ class TestCompareRequestValidate:
         # The typed API reaches the identical deadline_scope(request.budget_s)
         # call `run_compare_request` enters with no CLI in between, so it
         # needs the same math.isfinite floor the CLI's own --budget parser
-        # (_parse_budget) already applies -- an infinite deadline never trips
+        # (parse_budget_seconds) already applies -- an infinite deadline never trips
         # deadline.check()'s `left <= 0` test, and nan never compares true
         # either way, so both would otherwise silently disable the guard.
         req = CompareRequest(

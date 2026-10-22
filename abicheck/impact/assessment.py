@@ -204,12 +204,19 @@ class ImpactAssessment:
     ``caused_by_type``) — the trivial self-referencing
     ``f"finding:{finding_id}"`` case — so a plain, uncorrelated finding's
     ``impact_assessment`` doesn't balloon with a rootCauseId that names
-    nothing but itself. ``impact_group_id`` is currently always identical to
-    ``root_cause_id`` — a placeholder alias, not yet a distinct concept
-    (a genuine divergence would need bucketing several distinct root causes
-    that share one broader consumer-visible event under one group while
-    keeping their own individual root-cause identities, which no producer
-    does yet); see ADR-052's "Deliberately not implemented" section.
+    nothing but itself.
+
+    ``impact_group_id`` (G29 Phase 6 follow-up) is the
+    ``RootCauseCorrelator`` group this finding belongs to
+    (:func:`~abicheck.impact.correlation.correlate_root_causes`) when it is a
+    member of one of that composer's multi-piece groups, and falls back to
+    ``root_cause_id`` otherwise. The correlator groups by ``caused_by_type``
+    else ``symbol`` with no "referenced by another finding" guard, so a
+    bare-symbol pair with no ``caused_by_type`` (a ``--used-by`` consumer's
+    ``CONSUMER_REQUIRED_SYMBOL_REMOVED`` beside the shared ``FUNC_REMOVED``)
+    shares an ``impact_group_id`` while its ``root_cause_id`` stays ``None``
+    — that presence difference is the divergence. Both ids hash the same key,
+    so whenever both are set they are equal.
 
     ``root_cause_evidence`` (G29 Phase 6 follow-up) is this finding's own
     entry from :func:`~abicheck.impact.correlation.correlate_root_causes`,
@@ -256,6 +263,7 @@ class ImpactAssessment:
             or self.correlated_change_kind is not None
             or self.evidence_category is not None
             or self.root_cause_id is not None
+            or self.impact_group_id is not None
             or self.root_cause_evidence is not None
         )
 
@@ -277,6 +285,7 @@ class ImpactAssessment:
         if self.root_cause_id is not None:
             d["root_cause_id"] = self.root_cause_id
             d["root_cause_display"] = self.root_cause_display
+        if self.impact_group_id is not None:
             d["impact_group_id"] = self.impact_group_id
         if self.root_cause_evidence is not None:
             d["root_cause_evidence"] = dict(self.root_cause_evidence)

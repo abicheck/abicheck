@@ -166,3 +166,48 @@ def test_resolver_module_does_not_import_click() -> None:
         if isinstance(node, ast.ImportFrom) and node.level == 0
     }
     assert "click" not in imported
+
+
+@pytest.mark.parametrize("failure", ["missing", "directory", "unreadable"])
+def test_required_symbol_file_read_failure_is_a_usage_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, failure: str
+) -> None:
+    """An unusable ``@FILE`` is a typed refusal and exit 64, never a traceback.
+
+    ``missing`` and ``directory`` are the existence checks; ``unreadable`` is
+    a file that exists but whose bytes cannot be read (permissions, EIO). It
+    is simulated by patching the read for that one path, because a root test
+    process reads a ``chmod 000`` file without error.
+    """
+    monkeypatch.chdir(tmp_path)
+    target = tmp_path / "syms.txt"
+    if failure == "directory":
+        target.mkdir()
+    elif failure == "unreadable":
+        target.write_text("foo\n", encoding="utf-8")
+        real_read_bytes = Path.read_bytes
+
+        def denied(self: Path) -> bytes:
+            if self == target:
+                raise PermissionError(13, "Permission denied")
+            return real_read_bytes(self)
+
+        monkeypatch.setattr(Path, "read_bytes", denied)
+    arg = f"@{target}"
+    with pytest.raises(cc.CompareSettingsError) as excinfo:
+        cc.load_required_symbols((arg,))
+    message = str(excinfo.value)
+    assert str(target) in message
+    assert {
+        "missing": "no such file",
+        "directory": "is a directory",
+        "unreadable": "cannot read file (Permission denied)",
+    }[failure] in message
+
+    old, new = _snapshots(tmp_path)
+    result = CliRunner().invoke(
+        main, ["compare", str(old), str(new), "--required-symbol", arg]
+    )
+    assert result.exit_code == 64, result.output
+    assert isinstance(result.exception, SystemExit), repr(result.exception)
+    assert " ".join(message.split()) in " ".join(result.output.split())

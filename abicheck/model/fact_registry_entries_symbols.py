@@ -20,11 +20,36 @@ rationale."""
 
 from __future__ import annotations
 
+from typing import Any
+
 from .fact_registry_schema import FactDefinition, FactLifecycle
 
 __all__ = ["SYMBOL_FACTS"]
 
 _E = FactDefinition
+
+#: Shared by ``Function.deprecated`` and ``Variable.deprecated``.
+_DEPRECATED_DECLARATION: dict[str, Any] = dict(
+    field="deprecated",
+    value_type="str | None",
+    producing_backends=("castxml", "clang"),
+    persisted=True,
+    identity_relevant=False,
+    comparable=True,
+    suppressible=False,
+    reportable=True,
+    lifecycle=FactLifecycle.CONSUMED,
+    consumed_by=("abicheck.model.semantic_ir_declaration_facts:declaration_inputs",),
+    notes=(
+        "[[deprecated]] message string. Case (a): None is a real "
+        'value here ("not deprecated"), so availability is carried '
+        "by the stale 'clang_deprecation' fact family (model.snapshot_reliability) -- whose "
+        "False marks a pre-v19 clang snapshot's blanket None as a "
+        "placeholder -- not by the value. Shares that flag with "
+        "every other surface kind's own `deprecated` and with "
+        "EnumType.is_scoped."
+    ),
+)
 
 SYMBOL_FACTS: list[FactDefinition] = [
     _E(
@@ -343,54 +368,8 @@ SYMBOL_FACTS: list[FactDefinition] = [
             "fact stays NOT_COLLECTED there (Codex review, PR #982)."
         ),
     ),
-    _E(
-        owner="Function",
-        field="deprecated",
-        value_type="str | None",
-        producing_backends=("castxml", "clang"),
-        persisted=True,
-        identity_relevant=False,
-        comparable=True,
-        suppressible=False,
-        reportable=True,
-        lifecycle=FactLifecycle.CONSUMED,
-        consumed_by=(
-            "abicheck.model.semantic_ir_declaration_facts:declaration_inputs",
-        ),
-        notes=(
-            "[[deprecated]] message string. Case (a): None is a real "
-            'value here ("not deprecated"), so availability is carried '
-            "by the stale 'clang_deprecation' fact family (model.snapshot_reliability) -- whose "
-            "False marks a pre-v19 clang snapshot's blanket None as a "
-            "placeholder -- not by the value. Shares that flag with "
-            "every other surface kind's own `deprecated` and with "
-            "EnumType.is_scoped."
-        ),
-    ),
-    _E(
-        owner="Variable",
-        field="deprecated",
-        value_type="str | None",
-        producing_backends=("castxml", "clang"),
-        persisted=True,
-        identity_relevant=False,
-        comparable=True,
-        suppressible=False,
-        reportable=True,
-        lifecycle=FactLifecycle.CONSUMED,
-        consumed_by=(
-            "abicheck.model.semantic_ir_declaration_facts:declaration_inputs",
-        ),
-        notes=(
-            "[[deprecated]] message string. Case (a): None is a real "
-            'value here ("not deprecated"), so availability is carried '
-            "by the stale 'clang_deprecation' fact family (model.snapshot_reliability) -- whose "
-            "False marks a pre-v19 clang snapshot's blanket None as a "
-            "placeholder -- not by the value. Shares that flag with "
-            "every other surface kind's own `deprecated` and with "
-            "EnumType.is_scoped."
-        ),
-    ),
+    _E(owner="Function", **_DEPRECATED_DECLARATION),
+    _E(owner="Variable", **_DEPRECATED_DECLARATION),
     _E(
         owner="Param",
         field="is_restrict",

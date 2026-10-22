@@ -35,6 +35,7 @@ __all__ = [
     "HeaderFrontendPreflight",
     "operand_parses_headers",
     "preflight_header_frontend",
+    "require_castxml_if_needed",
 ]
 
 
@@ -155,3 +156,31 @@ def preflight_header_frontend(
         missing_tools=tuple(missing),
         clang_fallback_enabled=fallback,
     )
+
+
+def require_castxml_if_needed(
+    requested: str,
+    *,
+    lang: str = "c++",
+    gcc_path: str | None = None,
+    gcc_prefix: str | None = None,
+) -> None:
+    """Fail at request time when the header pass needs castxml and it is absent.
+
+    Called by the real dump (``workflows.dump.native._run_dump_uncached``)
+    only when that dump will parse headers, *before* any binary extraction,
+    so a missing castxml no longer surfaces after the binary/debug work
+    (issue #1710). Raises the very ``SnapshotError`` (same message, same exit
+    status) the castxml backend raises at parse time; a run that does not
+    parse headers, or whose frontend does not need castxml, is untouched.
+    Only a missing *castxml* is pre-empted here: other tool gaps keep their
+    existing late diagnostics.
+    """
+    from ..errors import SnapshotError
+    from ..extract.headers.castxml.backend import CASTXML_NOT_FOUND_MESSAGE
+
+    pf = preflight_header_frontend(
+        requested, lang=lang, gcc_path=gcc_path, gcc_prefix=gcc_prefix
+    )
+    if "castxml" in pf.missing_tools:
+        raise SnapshotError(CASTXML_NOT_FOUND_MESSAGE)

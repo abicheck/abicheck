@@ -47,6 +47,7 @@ One row per script: name, first sentence of its purpose, trigger. **Read the ful
 | `findings_report.py` | The shared `Findings` error/warning collector both gate scripts report through. | imported (by `check_ai_readiness.py`, `check_docs_contract.py`). |
 | `check_fp_rate.py` | False-positive/false-negative gate for public-surface scoping (ADR-024 §7). | CI (`ai-readiness`). Mirrored in `tests/test_fp_rate_gate.py`. |
 | `check_tier_accuracy.py` | Per-evidence-tier accuracy gate — *what each level buys*. | CI (`ai-readiness`, + step-summary artifact). |
+| `measure_l4_clang_projection.py` | Plan `l4-l2-extraction-convergence` Phase 4 measurement spike: dumps each catalog C++ TU once through the current L4 clang path and through `dumper_clang._ClangAstParser` projected by `base.entity_from_*`, and compares them per `(kind, field)` (the candidate set for ADR-063's `REVISION_COMPARABLE_FIELDS`). Read-only; changes no L4 output. | manual; evidence for the plan's Phase 4 status note. |
 | `measure_contract_shadow.py` | ADR-049 Phase 3's shadow contract-evaluator measurement **and** gate. | Manual / CI step summary. |
 | `contract_platform_corpus.py` | ADR-049 Phase 6's platform/shape corpus for the measurement above: hand-built snapshot pairs carrying real ELF `.dynsym` / PE export-directory / Mach-O export-trie shapes, plus the stripped … | imported (by `measure_contract_shadow.py`). |
 | `gen_skill_eval_pack.py` | Builds `skills-src/evaluation/agents/skills/skill-eval-pack.json`. | `verify.py --only skill-eval-pack` (CI `ai-readiness` job). |
@@ -87,6 +88,7 @@ One row per script: name, first sentence of its purpose, trigger. **Read the ful
 | `record_generation_fingerprints.py` | Re-records the extractor/resolver/source generation fingerprints in `abicheck/storage/generation_fingerprints.json` (ADR-062 D2 and its source-axis amendment): `--axis source` covers `abicheck/buildsource/source_extractors/` and the L4/L5 producers. `--bump` after raising the generation constant, or `--no-semantic-change --reason` for a scoped refactor. | manual, after a scoped edit under `abicheck/extract/`, the root parse-stage modules, the resolver list, or the source tier (`tests/unit/storage/test_generation_fingerprint.py` fails until then). |
 | `gen_learning_ladder.py` | Renders the learning-series hub's numbered step list and role-path table. | manual |
 | `gen_platform_matrix.py` | Regenerates the host-OS × binary-format capability matrix. | manual |
+| `generated_section.py` | Shared BEGIN/END GENERATED sentinel splice for the `gen_*_matrix.py` generators (library, not run directly). | n/a |
 | `gen_backend_capability_matrix.py` | Regenerates the L2 header-backend × ABI-fact capability matrix. | manual |
 | `gen_fact_capability_matrix.py` | Regenerates the fact/capability registry doc (`docs/reference/fact-registry.md`, ADR-063 D7/Phase 5). | manual |
 | `gen_stable_abi_data.py` | Regenerates the vendored CPython Stable-ABI membership set (`abicheck/stable_abi_data.py`) from a `Misc/stable_abi.toml` (local path or `--url`). | manual |

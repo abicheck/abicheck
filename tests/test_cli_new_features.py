@@ -7,6 +7,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
 from click.testing import CliRunner
 
 from abicheck.cli import main
@@ -972,3 +973,12 @@ class TestElfOnlyModePeMacho:
         kinds = [c.kind for c in result.changes]
         assert ChangeKind.FUNC_REMOVED_ELF_ONLY in kinds
         assert ChangeKind.FUNC_REMOVED not in kinds
+
+
+@pytest.fixture(autouse=True)
+def _castxml_preflight_off(monkeypatch):
+    """These tests stub the parse itself; castxml need not be on PATH (#1710)."""
+    monkeypatch.setattr(
+        "abicheck.workflows.header_frontend_preflight.require_castxml_if_needed",
+        lambda *a, **k: None,
+    )

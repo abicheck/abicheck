@@ -48,6 +48,7 @@ from abicheck.model.change import Change, LibraryMetadata
 from abicheck.policy.suppression.rules import SuppressionOutcome
 from abicheck.stack_checker import StackChange, StackCheckResult, StackVerdict
 from abicheck.workflows.elf_dependency_resolver import DependencyGraph, ResolvedDSO
+from tests._report_test_helpers import stat_line
 
 # ===========================================================================
 # Shared builders
@@ -170,7 +171,6 @@ class TestReporterShowOnly:
 class TestReporterStat:
     def test_to_stat_includes_source_and_risk(self) -> None:
         # Lines 223, 225: source-level breaks + risk parts in to_stat.
-        from abicheck.reporter import to_stat
 
         changes = [
             _change(ChangeKind.FUNC_REMOVED, "rm"),
@@ -179,15 +179,14 @@ class TestReporterStat:
             _change(ChangeKind.FUNC_ADDED, "added"),
         ]
         result = _diff_result(changes, verdict=Verdict.BREAKING)
-        text = to_stat(result)
+        text = stat_line(result)
         assert "source-level breaks" in text
         assert "risk" in text
         assert "compatible" in text
 
     def test_to_stat_no_changes(self) -> None:
-        from abicheck.reporter import to_stat
 
-        text = to_stat(_diff_result([], verdict=Verdict.NO_CHANGE))
+        text = stat_line(_diff_result([], verdict=Verdict.NO_CHANGE))
         assert "no changes" in text
 
     def test_to_stat_with_severity_config_fail(self) -> None:
@@ -195,21 +194,19 @@ class TestReporterStat:
         # render_stat_document's non-zero exit_code -> "[gate: FAIL ...]"
         # branch -- both previously unexercised by any test.
         from abicheck.policy.severity import PRESET_STRICT
-        from abicheck.reporter import to_stat
 
         changes = [_change(ChangeKind.FUNC_REMOVED, "rm")]
         result = _diff_result(changes, verdict=Verdict.BREAKING)
-        text = to_stat(result, severity_config=PRESET_STRICT)
+        text = stat_line(result, severity_config=PRESET_STRICT)
         assert "[gate: FAIL (exit " in text
 
     def test_to_stat_with_severity_config_pass(self) -> None:
         # render_stat_document's exit_code == 0 -> "[gate: PASS]" branch.
         from abicheck.policy.severity import PRESET_INFO_ONLY
-        from abicheck.reporter import to_stat
 
         changes = [_change(ChangeKind.FUNC_REMOVED, "rm")]
         result = _diff_result(changes, verdict=Verdict.BREAKING)
-        text = to_stat(result, severity_config=PRESET_INFO_ONLY)
+        text = stat_line(result, severity_config=PRESET_INFO_ONLY)
         assert "[gate: PASS]" in text
 
 

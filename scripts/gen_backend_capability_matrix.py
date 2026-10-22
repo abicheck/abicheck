@@ -35,7 +35,6 @@ Usage:
 from __future__ import annotations
 
 import argparse
-import re
 import sys
 from pathlib import Path
 
@@ -51,6 +50,7 @@ from backend_capabilities import (  # type: ignore[import-not-found]  # noqa: E4
     hybrid_capability,
     rows_for,
 )
+from generated_section import splice_generated  # noqa: E402
 
 OUT_PATH = REPO_DIR / "docs" / "reference" / "header-backend-capabilities.md"
 _MARKER = "backend-capability-matrix"
@@ -163,14 +163,7 @@ def render() -> str:
 
 def _splice(text: str, inner: str) -> str:
     """Replace the sentinel-delimited region, leaving the narrative untouched."""
-    begin = re.search(rf"<!-- BEGIN GENERATED: {_MARKER} -->\n", text)
-    end = re.search(rf"\n<!-- END GENERATED: {_MARKER} -->", text)
-    if not begin or not end or begin.end() > end.start():
-        raise ValueError(
-            f"{OUT_PATH.relative_to(REPO_DIR)}: missing/misordered sentinels "
-            f"for {_MARKER!r}"
-        )
-    return text[: begin.end()] + inner + text[end.start() :]
+    return splice_generated(text, _MARKER, inner, OUT_PATH.relative_to(REPO_DIR))
 
 
 def main(argv: list[str] | None = None) -> int:

@@ -517,3 +517,23 @@ def test_memoized_property_value_is_reached_through_the_descriptor(
     assert C.p.stats.hits >= 1  # type: ignore[attr-defined]
     monkeypatch.setenv(REFERENCE_MODE_ENV_VAR, "1")
     assert c.p == 2  # recomputed despite the stored value
+
+
+@pytest.mark.parametrize("value", [0, 7, -1])
+def test_waiter_is_served_by_a_successful_owner(value: int) -> None:
+    from concurrent.futures import Future
+
+    done: Future[int] = Future()
+    done.set_result(value)
+
+    class _OneOwner(dict):  # type: ignore[type-arg]
+        def get(self, key, default=None):  # type: ignore[no-untyped-def]
+            return done
+
+    cache: MemoryCache[int] = MemoryCache("test.ec.waiter_ok")
+    cache._in_flight = _OneOwner()
+    calls: list[int] = []
+    assert (
+        cache.get_or_compute(request_key(k=1), lambda: calls.append(1) or 99) == value
+    )
+    assert calls == []

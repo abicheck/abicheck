@@ -49,8 +49,10 @@ from ..reporter_markdown import (
 from ..root_cause_evidence import (
     entry_root_cause_evidence,
     fold_evidence_summaries,
+    impact_group_lookup_for_changes,
     scoped_only_changes_filtered,
     scoped_only_evidence_lookup,
+    scoped_only_impact_group_lookup,
 )
 from ..schemas import REPORT_SCHEMA_VERSION
 from ..semver import recommend_release_for_report
@@ -113,6 +115,7 @@ def add_changes_block(
         changes, extra_causes=scoped_only_extra_causes(result, show_only)
     )
     _rc_evidence = scoped_only_evidence_lookup(result, changes, show_only)
+    _ig_lookup = scoped_only_impact_group_lookup(result, changes, show_only)
     d["changes"] = [
         change_to_dict(
             c,
@@ -121,6 +124,7 @@ def add_changes_block(
             policy_file=result.policy_file,
             root_cause=_rc_lookup.get(finding_id(c)),
             root_cause_evidence=_rc_evidence.get(finding_id(c)),
+            impact_group_id=_ig_lookup.get(finding_id(c)),
             evidence_tiers=result.evidence_tiers,
             severity_config=severity_config,
             today=today,
@@ -317,6 +321,7 @@ def add_suppression(d: dict[str, object], result: DiffResult) -> None:
     ledger = ledger_for(result)
     _rc_lookup = root_cause_lookup_for_changes(result.suppressed_changes)
     _rc_evidence = root_cause_evidence_lookup_for_changes(result.suppressed_changes)
+    _ig_lookup = impact_group_lookup_for_changes(result.suppressed_changes)
     d["suppression"] = {
         "file_provided": result.suppression_file_provided,
         "suppressed_count": result.suppressed_count,
@@ -325,6 +330,7 @@ def add_suppression(d: dict[str, object], result: DiffResult) -> None:
                 c,
                 root_cause=_rc_lookup.get(finding_id(c)),
                 root_cause_evidence=_rc_evidence.get(finding_id(c)),
+                impact_group_id=_ig_lookup.get(finding_id(c)),
                 rule=ledger.rule_for(c),
             )
             for c in result.suppressed_changes

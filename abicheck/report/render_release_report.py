@@ -99,6 +99,7 @@ def _markdown_body(report: ReleaseReport) -> str:
         render_disposition_audit_section,
     )
     from .release_display_limits import MAX_RELEASE_FINDINGS_PER_LIBRARY
+    from .release_public_api import render_release_public_api_markdown
     from .release_public_surface_section import render_release_public_surface_markdown
     from .render_release_markdown import (
         _release_md_bundle_findings,
@@ -158,6 +159,10 @@ def _markdown_body(report: ReleaseReport) -> str:
     lines += _release_md_libraries_table(
         report.display_library_results, _VERDICT_EMOJI, library_results
     )
+    if not report.show_only:
+        # Unfiltered by construction; a `--view show=` render lists only the
+        # findings its filter kept, so this section would contradict it.
+        lines += render_release_public_api_markdown(report.display_library_results)
     lines += _release_md_coverage_warnings(library_results)
     lines += _release_md_disposed_findings(library_results)
     lines += _release_md_pattern_modulations(library_results)

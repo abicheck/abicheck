@@ -259,7 +259,6 @@ def compare_release_against_bundle_facts(
         SnapshotError,
         UnsupportedArtifactError,
     )
-    from .extract.packages import discover_shared_libraries
     from .serialization import load_bundle_facts
     from .workflows.bundle_facts_compare import compare_bundle_from_facts
     from .workflows.bundle_facts_library_overrides import (
@@ -269,6 +268,7 @@ def compare_release_against_bundle_facts(
     from .workflows.compare_policy import compare_snapshots
     from .workflows.extraction import ast_acquisition_scope, build_match_map
     from .workflows.input_resolution import resolve_input
+    from .workflows.release_inputs import discover_live_member_libraries
     from .workflows.release_public_surface import member_pass_scope
     from .workflows.release_scope import mismatch_kind
 
@@ -276,12 +276,11 @@ def compare_release_against_bundle_facts(
         old_facts_path, max_json_object_nodes=max_json_object_nodes
     )
 
-    if new_dir.is_dir():
-        new_files = discover_shared_libraries(
-            new_dir, include_private=include_private_dso
-        )
-    else:
-        new_files = [new_dir]
+    # ELF, PE and Mach-O alike (issue #1715 on Windows): the ELF-only walk
+    # found no member in a directory of `.dll`s.
+    new_files = discover_live_member_libraries(
+        new_dir, include_private=include_private_dso
+    )
     # Version-aware duplicate resolution (the same rule the live release
     # fan-out uses -- `binary_utils.build_match_map`, the primitive the CLI
     # boundary also translates for Click), rather than a plain
@@ -319,6 +318,7 @@ def compare_release_against_bundle_facts(
     # member's full `AbiSnapshot` is exactly the O(members) memory this
     # module's own discipline (and this whole product model) refuses.
     new_member_surfaces: dict[str, object] = {}
+    from .header_utils import split_public_header_inputs
     from .workflows.release_public_surface import stored_old_live_new_reconciliation
     from .workflows.release_surface_acquisition import surface_from_snapshot
 
@@ -376,10 +376,21 @@ def compare_release_against_bundle_facts(
             lib_headers = (per_library_headers or {}).get(key, headers)
             lib_includes = (per_library_includes or {}).get(key, includes)
             lib_compile = (per_library_compile or {}).get(key, compile)
+            # Issue #1715: the NEW member's `-H new=` inputs are also its
+            # public-header set, split into files/dirs exactly as the
+            # live/live path does (`workflows.compare.resolve.
+            # _public_header_sets`). Without them no declaration gets a
+            # public origin, NEW's release surface reads as unresolved, and
+            # the header-versus-exports check only ever judges OLD.
+            new_public_headers, new_public_header_dirs = split_public_header_inputs(
+                lib_headers or []
+            )
             try:
                 new_snapshot = resolve_input(
                     new_path,
                     headers=lib_headers,
+                    public_headers=new_public_headers,
+                    public_header_dirs=new_public_header_dirs,
                     includes=lib_includes,
                     version=new_version,
                     lang=lang,

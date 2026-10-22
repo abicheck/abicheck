@@ -80,6 +80,7 @@ from types import MappingProxyType
 from typing import Any, ClassVar, TypeVar
 
 from .canonical import canonical_form_unless_trusted, canonical_input_is_trusted
+from .legacy_sections import _SECTION_FIELDS
 
 __all__ = [
     "BinarySection",
@@ -575,34 +576,10 @@ class DebugSection(_SparseSectionMixin):
         "dwarf": _MAPPING_OR_NONE,
         "dwarf_advanced": _MAPPING_OR_NONE,
     }
+    #: Every non-required `"debug"` key `legacy_sections` routes here.
     OPTIONAL_FIELDS: ClassVar[frozenset[str]] = frozenset(
-        {
-            "from_headers",
-            "ast_producer",
-            "ast_toolchain",
-            "ast_fallback_reason",
-            "ast_toolchain_supported",
-            "ast_toolchain_unsupported_reasons",
-            "frontend_context_kind",
-            "ast_resolved_standard",
-            "ast_resolved_standard_fact",
-            "ast_cplusplus_macro",
-            "ast_compile_args",
-            "ast_sysroot",
-            "fact_provenance",
-            "header_cv_facts_reliable",
-            "clang_deprecation_facts_reliable",
-            "clang_field_initializer_facts_reliable",
-            "clang_vtable_facts_reliable",
-            "clang_restrict_facts_reliable",
-            "clang_va_list_facts_reliable",
-            "castxml_var_access_facts_reliable",
-            "param_kind_facts_reliable",
-            "inline_facts_reliable",
-            "parsed_with_build_context",
-            "build_context_defines",
-        }
-    )
+        _SECTION_FIELDS["debug"]
+    ) - frozenset(REQUIRED_FIELDS)
     #: Each mapped to `AbiSnapshot`'s own declared type: `.from_headers`/
     #: `.parsed_with_build_context` and the eight `*_facts_reliable` flags
     #: are plain `bool`; `.ast_toolchain_supported` is `bool | None`;

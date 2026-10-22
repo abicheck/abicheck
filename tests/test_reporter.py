@@ -5,7 +5,8 @@ import json
 import pytest
 
 from abicheck.checker import Change, ChangeKind, DiffResult, Verdict
-from abicheck.reporter import to_json, to_markdown, to_review_digest, to_stat_json
+from abicheck.reporter import to_json, to_markdown, to_stat_json
+from tests._report_test_helpers import make_result as _result, review_digest
 
 
 def _first_finding(doc: dict) -> dict:
@@ -22,7 +23,7 @@ def _first_finding(doc: dict) -> dict:
 class TestReviewDigest:
     def test_breaking_digest_has_verdict_without_invented_version_policy(self):
         c = Change(ChangeKind.FUNC_REMOVED, "_Z3foov", "Public function removed: foo")
-        out = to_review_digest(_result(Verdict.BREAKING, changes=[c]))
+        out = review_digest(_result(Verdict.BREAKING, changes=[c]))
         assert "ABI review" in out
         assert "`BREAKING`" in out
         assert "Release recommendation:" not in out
@@ -37,7 +38,7 @@ class TestReviewDigest:
         )
         r.scope_to_public_surface = True
         r.scope_resolved = False
-        out = to_review_digest(r)
+        out = review_digest(r)
         assert "Manual review required" in out
         assert "unconfirmed" in out.lower()
 
@@ -45,7 +46,7 @@ class TestReviewDigest:
         r = _result(Verdict.COMPATIBLE)
         r.scope_to_public_surface = True
         r.scope_resolved = True
-        out = to_review_digest(r)
+        out = review_digest(r)
         assert "Manual review required" not in out
         # Scoped reports label additions as public and show the filtered row.
         assert "Public additions" in out
@@ -54,11 +55,11 @@ class TestReviewDigest:
     def test_coverage_warning_surfaced_in_digest(self):
         r = _result(Verdict.COMPATIBLE)
         r.coverage_warnings = ["old and new binaries are byte-identical"]
-        assert "byte-identical" in to_review_digest(r)
+        assert "byte-identical" in review_digest(r)
 
     def test_no_coverage_warning_banner_when_none_present(self):
         r = _result(Verdict.COMPATIBLE)
-        out = to_review_digest(r)
+        out = review_digest(r)
         assert not any(line.startswith("> ⚠️") for line in out.splitlines())
 
     def test_top_impacted_symbols_truncated(self):
@@ -66,7 +67,7 @@ class TestReviewDigest:
             Change(ChangeKind.FUNC_REMOVED, f"sym{i}", f"removed sym{i}")
             for i in range(13)
         ]
-        out = to_review_digest(_result(Verdict.BREAKING, changes=changes))
+        out = review_digest(_result(Verdict.BREAKING, changes=changes))
         # Review groups are capped at eight, with an explicit omitted count.
         assert "5 more group(s) omitted" in out
         assert "**sym0**" in out
@@ -86,11 +87,11 @@ class TestReviewDigestSeverityAware:
         result = _result(Verdict.COMPATIBLE, changes=[c])
 
         # Legacy (no severity_config): the old, misleading claim.
-        legacy = to_review_digest(result)
+        legacy = review_digest(result)
         assert "safe to merge" in legacy
 
         cfg = resolve_severity_config("default", addition="error")
-        out = to_review_digest(result, severity_config=cfg)
+        out = review_digest(result, severity_config=cfg)
         assert "safe to merge" not in out
         assert "blocked by severity policy" in out
 
@@ -101,11 +102,11 @@ class TestReviewDigestSeverityAware:
         result = _result(Verdict.BREAKING, changes=[c])
 
         # Legacy (no severity_config): claims it blocks merge under a strict gate.
-        legacy = to_review_digest(result)
+        legacy = review_digest(result)
         assert "blocks merge" in legacy
 
         cfg = resolve_severity_config("default", abi_breaking="info")
-        out = to_review_digest(result, severity_config=cfg)
+        out = review_digest(result, severity_config=cfg)
         assert "blocks merge" not in out
         assert "safe to merge" in out
 
@@ -115,18 +116,8 @@ class TestReviewDigestSeverityAware:
         c = Change(ChangeKind.FUNC_REMOVED, "_Z3foov", "removed: foo")
         result = _result(Verdict.BREAKING, changes=[c])
         cfg = resolve_severity_config("default")  # default: abi_breaking=error
-        out = to_review_digest(result, severity_config=cfg)
+        out = review_digest(result, severity_config=cfg)
         assert "blocked by severity policy" in out
-
-
-def _result(verdict: Verdict, changes=None) -> DiffResult:
-    return DiffResult(
-        old_version="1.0",
-        new_version="2.0",
-        library="libtest.so.1",
-        changes=changes or [],
-        verdict=verdict,
-    )
 
 
 class TestJsonReporter:
@@ -879,7 +870,7 @@ class TestImpactAssessmentRootCause:
         assert len(ids) == 1
         for a in assessments:
             assert a["root_cause_display"] == "ns::internal::helper"
-            # impact_group_id is currently always an alias of root_cause_id.
+            # Equal whenever both are set (test_impact_group_id_correlator.py).
             assert a["impact_group_id"] == a["root_cause_id"]
 
     def test_independent_findings_sharing_a_symbol_stay_separate(self):

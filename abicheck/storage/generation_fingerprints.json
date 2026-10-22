@@ -65,7 +65,7 @@
       "abicheck/extract/headers/backend_plan.py": "1f02babf0ead52a65e4fa08dff8ce5b2a9d60feb1d02d22e7db30ee050cf8717",
       "abicheck/extract/headers/backend_protocol.py": "144cbe76456b6bceaf56f0edd0f3398f171178a222c8b968d53f8a17ee05a21b",
       "abicheck/extract/headers/castxml/__init__.py": "cebb319d35840200904dde9fe4ad16489124b02327a50d8351b086844ee19943",
-      "abicheck/extract/headers/castxml/backend.py": "dd487123cba18e0fb2ab56d18c02cc578c5757183692e2d9c4b28207780ddd72",
+      "abicheck/extract/headers/castxml/backend.py": "cb141b93be83e1351f30626349653559af38a3fccf08a593a9d7268e2dffef14",
       "abicheck/extract/headers/castxml/calling_convention.py": "ab4cd4474d11eb0da2216b29393e9daf1dbcf94226204237fd4c0381adacbcbb",
       "abicheck/extract/headers/castxml/context.py": "8178e769a346b11e94a963a6b6f4e89dd0c06ffdee8cb6d80fc2e519c5c3c504",
       "abicheck/extract/headers/castxml/dumper.py": "55aba9e4b4bf6c88810d2dfe3ceae405479d060022549500c4690c0e742da35e",
@@ -80,8 +80,8 @@
       "abicheck/extract/headers/castxml/record_traits.py": "6d836b2a2da27a0f12611f9c8dec681a8922ad2c5853f801ec9a94972654cdf1",
       "abicheck/extract/headers/castxml/records.py": "9093c5648bbe60334f4f3cbdd13e6e7d0eece582cbff9ef8a16aeb8096473cd6",
       "abicheck/extract/headers/castxml/scope.py": "41cecc8dd996c10a58c022e5dca4003cce9d7775adf674b339cc199fb59297c7",
-      "abicheck/extract/headers/castxml/specialization.py": "466a015164ac2f0fad1793cc3d19504d1eca3da3ac1414a3bbec036d04a65ca4",
-      "abicheck/extract/headers/castxml/type_resolution.py": "f04ab4d89dad8719405198d8742aac64fa17613b562916519e372bc59b9cefb2",
+      "abicheck/extract/headers/castxml/specialization.py": "3f9f021672df1b84de42bc8de5f3c915508b3f3850e0a8acbaa80a3dee04c6f3",
+      "abicheck/extract/headers/castxml/type_resolution.py": "01f6e9492d9426648a8c9d614561ee444ad2e1b492a83d708579f2b77c53a9ef",
       "abicheck/extract/headers/castxml/typedef_parsing.py": "332587638d5d4b7caebbc20fa44b69c314771fffa5839a15dec59eaba3caaf93",
       "abicheck/extract/headers/clang/__init__.py": "538add12f3ff39e1c1b39e6f5def93b50a584b78b30c4e7e59058207222757d0",
       "abicheck/extract/headers/clang/attributes.py": "7e32c123c19fa5cad688760325bd17199dd42d0cc58a0b92360349403003f1e9",
@@ -149,9 +149,9 @@
       "abicheck/symvers_metadata.py": "372737765cd132e6e87ed891dd465d2958e04debbef774e45212ceb3036871cb",
       "abicheck/type_metadata.py": "9997189de8dac522fd1db8be5ae491d811139503f83abaaded89038eb4aa9cdf"
     },
-    "fingerprint": "2983b1afa088023133cd32afe31adb187fcf8c30ea7ffc8802e51a5c588eef38",
-    "generation": 5,
-    "reason": "memory-trace stage marks only"
+    "fingerprint": "3c3128960b6b4a2b87c92a660cb66fd4eaaeee76dec8108d12098dbb22edeeb3",
+    "generation": 6,
+    "reason": "merge with main: main's castxml not-found constant (#1710, extraction unchanged) on top of this branch's generation 6 (clang instantiated_from, castxml same-line and auto spelling)"
   },
   "resolver": {
     "files": {
@@ -171,7 +171,7 @@
     },
     "fingerprint": "1746ea87424e9b91785555a49fab5634033df0e30981fffdfac6ba1f91a25630",
     "generation": 2,
-    "reason": "internal_leak moved to compare/ (split into four modules): post_processing_reachability.py changed only its import paths and comments, no fact or resolved graph changes"
+    "reason": "internal_leak moved to compare/ and split: post_processing_reachability.py changes only import paths and comments; no resolved graph changes"
   },
   "source": {
     "files": {
@@ -208,14 +208,15 @@
       "abicheck/buildsource/source_replay.py": "f1c76b8fbe787135f6ff68ee3b3aa306f6259caf4bea069d4eeb2b440cd16992",
       "abicheck/buildsource/source_replay_pool.py": "9073d72dfb693fac045dc94dd8d03fb9ad3a6f653ddca15c712609a77302ece2",
       "abicheck/buildsource/source_replay_shared.py": "695ad69596ebb3f5d268bd80c7e4de7a2c6929d0f088955f967a5a70e849d3cd",
-      "abicheck/buildsource/template_graph.py": "773f084c435cbcd213f9e3e16c000a3787f2d43ea264e595278ebaa9961308e7",
-      "abicheck/buildsource/template_graph_fold.py": "3e276ed9e4ebfe5cc41a2587f15662a79a986b4d361979c75143dbc7d220cdab",
+      "abicheck/buildsource/template_class_origin.py": "29c4d8511dff9be7ee58072f1f7526cd6a298f64c9bb60e0271892226a39f508",
+      "abicheck/buildsource/template_graph.py": "57c5248820c2ade147850c9cb92a281087213b6d3b7420620ecbbdeef6a26756",
+      "abicheck/buildsource/template_graph_fold.py": "630006aa35ad1a6dc2e3797b662e857aee790e94acee759331478993f5ffad03",
       "abicheck/buildsource/template_graph_value_decls.py": "d50b5cd979744d4ecb4ae2ad859faf99689d6af50d0e0d0a24d867f99a83931c",
       "abicheck/buildsource/type_graph.py": "a028a875057cd0cbf2930a431bfa1e579f7b770e0d124cbcfe715724e89d12e5",
       "abicheck/buildsource/type_graph_index.py": "7375f7baec7ceb3dd4a52a489b89e5a3571750dffca7490d1c5870301d55202d"
     },
-    "fingerprint": "89e34bd51a8d812e3525c2891548caebc675c8a4d7d2f3a8cc6c5c6e3db8efea",
-    "generation": 3,
-    "reason": "internal_leak moved to compare/: buildsource/source_graph.py changed only a docstring file reference to the new module path; no source fact or derived graph changes"
+    "fingerprint": "9699291e5cab56b2dd9b2b8fc09f7a9aae2c8439332ed9b53f3a740a18742243",
+    "generation": 4,
+    "reason": "internal_leak moved to compare/: buildsource/source_graph.py changes only a docstring path; no source fact or derived graph changes"
   }
 }
