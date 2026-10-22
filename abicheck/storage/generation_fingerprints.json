@@ -60,7 +60,7 @@
       "abicheck/extract/header_order_witness.py": "6a1cfce946826fa540a0601ebeefa02a8973ba6e8cd5d8287f6c1e7badc3d53a",
       "abicheck/extract/header_scan_memo.py": "56f79b5316354b938b08a5f29779c3aaf40481892d947784ec2adb48ab5e83fb",
       "abicheck/extract/headers/__init__.py": "70af0d3a16882783444077004b7a434a295505579fbbca219ce103f72074ad03",
-      "abicheck/extract/headers/ast_config.py": "bc9a5af63004129c078abdec768ce0596ec878ecb3cd845b90911e833e500bc1",
+      "abicheck/extract/headers/ast_config.py": "708e6f189d9f24510a544e22655d668733dd1b565e4ec747c11b3fb29d466749",
       "abicheck/extract/headers/ast_config_cpp20_chains.py": "ceeadbcb1d8e2eaac5eb325a3fb7c668614ce605bc04bb03835fcc4957e53c97",
       "abicheck/extract/headers/backend_plan.py": "1f02babf0ead52a65e4fa08dff8ce5b2a9d60feb1d02d22e7db30ee050cf8717",
       "abicheck/extract/headers/backend_protocol.py": "144cbe76456b6bceaf56f0edd0f3398f171178a222c8b968d53f8a17ee05a21b",
@@ -106,6 +106,7 @@
       "abicheck/extract/headers/clang/template_param_indexes.py": "d73116e7e4bf662dd4c5b00d653a8a1fd1ece26818806f8ec5f08ec417b104fa",
       "abicheck/extract/headers/clang/templates.py": "21aa38d283c3b7bd036d68cec6e655fb9be9ae84fba3e6da8d01d3b6c442105c",
       "abicheck/extract/headers/clang/vtable.py": "bc235100ce9c5cb9ec8af93ea5bafe1abf0ea29249087a2b5f073ef5293257ff",
+      "abicheck/extract/headers/clang_header_argv.py": "c198bd32d8fc6c5e59d6fd30f809544291a4a5381614f2fcbb281765da6626b7",
       "abicheck/extract/headers/compile_provenance.py": "1453703111a2abf28799b446e125c34906fd3220faca27db49220f625cc99d75",
       "abicheck/extract/headers/manifest.py": "b44a66dc760b0fd39e671876615d1e846433b2d76cb050be39749c5740c942bf",
       "abicheck/extract/headers/scope_segments.py": "d413edec257eb1334c829263770b66dc2eda3d263c765f699eac9f7e3ace9e65",
@@ -151,9 +152,9 @@
       "abicheck/symvers_metadata.py": "372737765cd132e6e87ed891dd465d2958e04debbef774e45212ceb3036871cb",
       "abicheck/type_metadata.py": "9997189de8dac522fd1db8be5ae491d811139503f83abaaded89038eb4aa9cdf"
     },
-    "fingerprint": "b2db3756678c7bf0665085e77a7dc2ce36d2b4dc77e581e9fe371c23e794063f",
+    "fingerprint": "f8c6df58ef48b3aca96eae61d5c616eb60b6c9a5212afbfa029444399bfc254d",
     "generation": 9,
-    "reason": "merged origin/main (#1698, #1691, #1693, #1710, #1705): main's own extractor bump to 6 (#1698) and the #1710 constant move are inside this build's generation 9, which is above main's 6 and includes this branch's four semantic generations (6 clang defaults fact v62, 7 positional defaults, 8 dependent members, 9 castxml template_default_header_scan v63). Extraction semantics are unchanged by the merge itself."
+    "reason": "L2 header clang argv body moved verbatim into extract/headers/clang_header_argv.py; the rendered argv is byte-identical to the pre-change golden (tests/data/compile_invocation/clang_header_argv_golden.json), so no recorded or derived output changes"
   },
   "resolver": {
     "files": {
