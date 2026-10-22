@@ -1021,7 +1021,7 @@ class TestPointerOnlyLeniencyNeedsStructuralProof:
 
     Exhaustive over each side's record state (absent, every ``ScopeOrigin``,
     opaque or not) and three internal namespace spellings. The oracle is
-    stated independently of ``policy.layout_visibility.layout_proven_invisible``: suppressed iff at
+    stated independently of ``compare.layout_visibility.layout_proven_invisible``: suppressed iff at
     least one side carries the record and every carried record is opaque or
     defined in a private header.
     """

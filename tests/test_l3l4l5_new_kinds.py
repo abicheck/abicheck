@@ -33,7 +33,6 @@ from abicheck.buildsource.inline_graph_fold import _role_coverage_key
 from abicheck.buildsource.source_abi import SourceAbiSurface, SourceEntity
 from abicheck.buildsource.source_diff import diff_source_abi
 from abicheck.buildsource.source_graph import GraphEdge, GraphNode, SourceGraphSummary
-from abicheck.buildsource.source_graph_compare import format_dependency_path
 from abicheck.buildsource.source_graph_findings import (
     _common_dependency_edge_kinds,
     _dependency_kinds_covered,
@@ -45,6 +44,7 @@ from abicheck.buildsource.source_graph_findings import (
     diff_source_graph_findings,
 )
 from abicheck.checker_policy import API_BREAK_KINDS, RISK_KINDS, ChangeKind
+from abicheck.model.source_graph_query import format_dependency_path
 
 
 # ---------------------------------------------------------------------------

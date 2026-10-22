@@ -112,7 +112,6 @@ from .frontends.cli.runtime import (
     _write_or_echo,
 )
 from .frontends.render import ONELINE_FORMAT, resolve_demangle_for_format
-from .impact.use_case_reachability import explain_use_case_impact
 from .model.sided_inputs import resolve_per_side_inputs
 from .report.report_modes import normalize_report_mode
 from .serialization import run_scoped_digest_cache
@@ -340,9 +339,7 @@ def _attach_use_case_impact(
     :func:`abicheck.workflows.compare.use_case_attribution.attach_use_case_impact`).
     """
     try:
-        attach_use_case_impact(
-            result, old, new, manifest, explain=explain_use_case_impact
-        )
+        attach_use_case_impact(result, old, new, manifest)
     except UseCaseAttributionError as exc:
         raise click.UsageError(str(exc)) from exc
 
