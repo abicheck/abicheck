@@ -230,6 +230,7 @@ NO_BASELINE_EXIT_AXIS_LABELS: dict[str, str] = {
     "evidence_contract": "evidence contract not met",
     "incomplete_scope": "comparison scope incomplete",
     "no_comparison_completed": "no audit completed",
+    "unused_rules": "configured rule unused",
 }
 
 NO_BASELINE_EXIT_AXIS_NOTICES: dict[str, str] = {
@@ -261,6 +262,11 @@ NO_BASELINE_EXIT_AXIS_NOTICES: dict[str, str] = {
     "no_comparison_completed": (
         "**No audit completed** -- this run examined nothing, which never reads "
         "as a clean pass."
+    ),
+    "unused_rules": (
+        "**Configured rule unused** -- the policy file's `unused_rules: block` "
+        "is in effect and at least one suppression or `reclassify:` rule "
+        "matched no finding (see `disposition_audit.unused_rules_review`)."
     ),
 }
 

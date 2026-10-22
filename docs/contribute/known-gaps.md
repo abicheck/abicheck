@@ -382,6 +382,11 @@ Do not re-attempt token-claiming. A header's export tokens cannot tell whether i
 
 ### Hygiene
 
+#### The Action does not recognize the `unused_rules` exit-1 axis
+
+**Status (recorded 2026-10-22): OPEN.** `unused_rules: block` exits `1` on both `compare` shapes (`exit.unused_rules_contribution`, and `exit_axes.unused_rules` on `compare --no-baseline`). `action/run.sh`'s exit-1 dispatch has no branch for it: on the two-sided shape it falls through to `ADDITIONS_UNACKNOWLEDGED`, and the audit-only shape's documented exit-1 causes in `docs/reference/github-action-inputs.md` do not list it.
+`hygiene` — The fix is a new `verdict` value (`RULES_UNUSED`) read from those report fields, which changes the Action's published output contract.
+
 #### `--required-symbol @FILE` read errors are checked on the CLI route only
 
 **Status (recorded 2026-10-22): OPEN.** An unreadable `@FILE` is refused as a typed `CompareSettingsError` (exit 64, path named) by `workflows/compare_configuration.load_required_symbols`, pinned on the CLI and the typed function in `tests/test_compare_settings_cli_translation.py`. No bug-class harness covers it: the typed `CompareRequest` API does not accept `@FILE` required symbols, so there is no second route to compare against, and family F2's route-parity matrix has nothing to attach to.

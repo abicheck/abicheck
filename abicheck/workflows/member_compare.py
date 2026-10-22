@@ -164,7 +164,7 @@ def record_release_resolved_config(result: Any, config: Any) -> None:
     result.evaluation_config = config
 
 
-def _unused_rule_keys_for_release(result: Any) -> dict[str, object]:
+def unused_rule_keys_for_release(result: Any) -> dict[str, object]:
     """ADR-067 P1: what a release fold needs to decide "unused in every member".
 
     The member's effective ``unused_rules`` mode (a release folds to the
@@ -252,7 +252,7 @@ def stamp_member_exit_contributions(
     # ADR-067 P1: per-member rule keys, so the release fold can decide "unused
     # in every comparison" without re-reading each member's ledger.
     entry["unused_rules_exit_contribution"] = decision.unused_rules_contribution
-    entry.update(_unused_rule_keys_for_release(result))
+    entry.update(unused_rule_keys_for_release(result))
     if contract_evaluation:
         entry["contract_coverage_exit_contribution"] = (
             decision.contract_coverage_contribution
