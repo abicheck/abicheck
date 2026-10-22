@@ -40,16 +40,23 @@ __all__ = ["template_default_gap"]
 
 
 def _unrecorded_pattern_count(snap: AbiSnapshot) -> int:
-    """Class-template patterns of *snap* whose defaults are not PRESENT."""
-    return sum(
-        1
-        for rec in snap.declarations.types
-        if rec.is_template_pattern
-        and (
-            rec.template_param_defaults_fact is None
-            or rec.template_param_defaults_fact.status is not FactStatus.PRESENT
-        )
-    )
+    """Class-template patterns of *snap* whose defaults are not PRESENT.
+
+    The clang walk marks every declaration nested inside a pattern as a
+    pattern too. A record whose qualified name sits under another pattern's
+    name is such a descendant, not a template of its own, so it is skipped.
+    """
+    patterns = [rec for rec in snap.declarations.types if rec.is_template_pattern]
+    names = {(rec.qualified_name or rec.name) for rec in patterns}
+    count = 0
+    for rec in patterns:
+        qualified = rec.qualified_name or rec.name
+        if any(qualified.startswith(parent + "::") for parent in names):
+            continue
+        fact = rec.template_param_defaults_fact
+        if fact is None or fact.status is not FactStatus.PRESENT:
+            count += 1
+    return count
 
 
 def _side_note(label: str, snap: AbiSnapshot, count: int) -> str:

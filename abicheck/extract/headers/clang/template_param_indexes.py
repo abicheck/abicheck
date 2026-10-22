@@ -33,6 +33,7 @@ adds a narrow immutable view for one new shared consumer.
 
 from __future__ import annotations
 
+import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from types import MappingProxyType
@@ -149,6 +150,28 @@ def _freeze_template_param_index(
     return MappingProxyType({key: tuple(row) for key, row in index.items()})
 
 
+def _positional_row(
+    row: Sequence[str | None], names: Sequence[str | None] | None
+) -> list[str | None]:
+    """*row* with each reference to the template's own parameter replaced by
+    its position (``<param 0>``).
+
+    ``template <class T, class U = T>`` and ``template <class A, class B = A>``
+    are the same declaration; spelled raw, the defaults ``"T"`` and ``"A"``
+    compare unequal and a pure rename reads as a default change.
+    """
+    own = {name: i for i, name in enumerate(names or ()) if name}
+    if not own:
+        return list(row)
+    pattern = re.compile(r"(?<![\w:])(" + "|".join(map(re.escape, own)) + r")(?![\w:])")
+    return [
+        None
+        if spelled is None
+        else pattern.sub(lambda m: f"<param {own[m.group(1)]}>", spelled)
+        for spelled in row
+    ]
+
+
 def build_template_param_indexes(root: dict[str, Any]) -> TemplateParamIndexes:
     """Build all three template-parameter indexes of *root* in one call.
 
@@ -174,7 +197,7 @@ def build_template_param_indexes(root: dict[str, Any]) -> TemplateParamIndexes:
         names=_freeze_template_param_index(names),
         type_defaults=_freeze_template_param_index(
             {
-                qualname: row
+                qualname: _positional_row(row, names.get(qualname))
                 for qualname, row in defaults.items()
                 if all_type.get(qualname) == ["type"]
             }

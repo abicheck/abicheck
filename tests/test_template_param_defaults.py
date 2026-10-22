@@ -186,3 +186,34 @@ def test_v62_record_without_the_key_reads_not_collected() -> None:
     (rec,) = snapshot_from_dict(doc).declarations.types
     assert rec.template_param_defaults_fact is not None
     assert rec.template_param_defaults_fact.status is FactStatus.NOT_COLLECTED
+
+
+def test_renamed_parameters_produce_the_same_positional_defaults() -> None:
+    # ADR-085 D1: a pure rename of the template's own parameters is the same
+    # declaration, so its recorded defaults must compare equal.
+    from abicheck.extract.headers.clang.template_param_indexes import _positional_row
+
+    original = _positional_row((None, "T"), ("T", "U"))
+    renamed = _positional_row((None, "A"), ("A", "B"))
+    assert original == renamed == [None, "<param 0>"]
+
+
+def test_nested_declaration_under_a_pattern_is_not_counted_as_a_gap() -> None:
+    from abicheck.policy.analysis_assurance._template_defaults import (
+        _unrecorded_pattern_count,
+    )
+
+    pattern = RecordType(
+        name="Box",
+        kind="struct",
+        qualified_name="mylib::Box",
+        is_template_pattern=True,
+        template_param_defaults_fact=_PRESENT_T,
+    )
+    nested = RecordType(
+        name="Impl",
+        kind="struct",
+        qualified_name="mylib::Box::Impl",
+        is_template_pattern=True,
+    )
+    assert _unrecorded_pattern_count(_snap(pattern, nested)) == 0

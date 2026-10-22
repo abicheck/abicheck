@@ -21,6 +21,7 @@ ledger, which ``compare/`` may not import (ADR-061 dependency direction).
 
 from __future__ import annotations
 
+import re
 from typing import TYPE_CHECKING
 
 from ..compare.template_param_defaults import (
@@ -63,11 +64,12 @@ def _templates_named_by_reported_functions(
             if fn.mangled in reported:
                 spellings.append(fn.return_type)
                 spellings.extend(param.type for param in fn.params)
-    return {
-        key
-        for key in keys
-        if any(f"{key.rsplit('::', 1)[-1]}<" in text for text in spellings)
-    }
+    named: set[str] = set()
+    for key in keys:
+        leaf = re.compile(r"(?<![\w:])" + re.escape(key.rsplit("::", 1)[-1]) + r"\s*<")
+        if any(leaf.search(text) for text in spellings):
+            named.add(key)
+    return named
 
 
 def detect_template_default_changes(
@@ -102,7 +104,7 @@ def detect_template_default_changes(
         for change in suppressed:
             ledger.record(
                 change,
-                Disposition.SUPPRESSED,
+                Disposition.DEDUPLICATED,
                 application_point="detect_template_default_changes",
             )
     return [*default_template_findings, *header_findings]
