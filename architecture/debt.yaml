@@ -223,7 +223,7 @@
     },
     {
       "path": "abicheck/buildsource/source_extractors/_argv.py",
-      "baseline_lines": 1491,
+      "baseline_lines": 1293,
       "target": "extract/build-or-source",
       "rule": "no_growth",
       "disposition": "migrate",
@@ -267,7 +267,7 @@
     },
     {
       "path": "abicheck/buildsource/source_replay.py",
-      "baseline_lines": 1120,
+      "baseline_lines": 1114,
       "target": "extract/build-or-source",
       "rule": "no_growth",
       "disposition": "migrate",
