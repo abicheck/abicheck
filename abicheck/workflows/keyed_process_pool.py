@@ -90,6 +90,28 @@ def _receive(recv: Any, proc: Any) -> tuple[str, Any]:
     return status, value
 
 
+def _settle(
+    recv: Any,
+    proc: Any,
+    key: str,
+    on_error: Callable[[Exception, str], _T],
+) -> tuple[_T, int]:
+    """Collect one finished child: its value (or ``on_error``'s) and the
+    header-AST bytes it reported."""
+    status, value = _receive(recv, proc)
+    recv.close()
+    reap_child(proc, escalate=status != "ok")
+    if status == "ok":
+        result, ast_bytes = value
+        return result, ast_bytes
+    exc = (
+        value
+        if isinstance(value, Exception)
+        else SnapshotError(f"member process failed: {value!r}")
+    )
+    return on_error(exc, key), 0
+
+
 def run_keyed_in_processes(
     keys: Sequence[str],
     fn: Callable[[str], _T],
@@ -104,6 +126,11 @@ def run_keyed_in_processes(
     pending = deque(keys)
     running: dict[Any, tuple[str, Any, float | None]] = {}
     results_by_key: dict[str, _T] = {}
+
+    def _release(cost: float | None, ast_bytes: int) -> None:
+        if admission is not None and cost is not None:
+            admission.release(cost, ast_bytes)
+
     try:
         while pending or running:
             while pending and len(running) < max(1, max_workers):
@@ -114,24 +141,10 @@ def run_keyed_in_processes(
                 # Not daemonic: a member forks its own side children.
                 proc, recv = fork_child(ctx, _child_body(fn, key), daemon=False)
                 running[recv] = (key, proc, cost)
-            ready: list[Any] = wait_ready(list(running))
-            for recv in ready:
+            for recv in wait_ready(list(running)):
                 key, proc, cost = running.pop(recv)
-                status, value = _receive(recv, proc)
-                recv.close()
-                reap_child(proc, escalate=status != "ok")
-                ast_bytes = 0
-                if status == "ok":
-                    results_by_key[key], ast_bytes = value
-                else:
-                    exc = (
-                        value
-                        if isinstance(value, Exception)
-                        else SnapshotError(f"member process failed: {value!r}")
-                    )
-                    results_by_key[key] = on_error(exc, key)
-                if admission is not None and cost is not None:
-                    admission.release(cost, ast_bytes)
+                results_by_key[key], ast_bytes = _settle(recv, proc, key, on_error)
+                _release(cost, ast_bytes)
     finally:
         # Only reached with children still running when this frame is left by
         # an exception (an `on_error` that raised, KeyboardInterrupt): stop
@@ -141,6 +154,5 @@ def run_keyed_in_processes(
                 proc.terminate()
             recv.close()
             reap_child(proc, escalate=True)
-            if admission is not None and cost is not None:
-                admission.release(cost, 0)
+            _release(cost, 0)
     return [results_by_key[key] for key in keys if key in results_by_key]
