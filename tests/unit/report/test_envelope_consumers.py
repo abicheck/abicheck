@@ -12,6 +12,8 @@ one-line view reads the envelope's own result.
 
 from __future__ import annotations
 
+import pytest
+
 from abicheck.checker import Change, ChangeKind, Verdict
 from abicheck.frontends.render import render_output
 from abicheck.model import AbiSnapshot
@@ -28,16 +30,29 @@ def _removed_result():
     return make_result(Verdict.BREAKING, changes=[change])
 
 
-def test_one_line_view_matches_the_envelope_path_with_and_without_a_gate() -> None:
-    result = _removed_result()
-    for config in (None, PRESET_STRICT):
-        via_entry_point = render_output(
-            "oneline", result, _SNAP, severity_config=config
-        )
-        via_envelope = to_stat(
-            result, envelope=envelope_for(result, severity_config=config)
-        )
-        assert via_envelope == via_entry_point
+def _no_change_result():
+    return make_result(Verdict.NO_CHANGE)
+
+
+def _compatible_result():
+    change = Change(ChangeKind.FUNC_ADDED, "_Z3barv", "Public function added: bar")
+    return make_result(Verdict.COMPATIBLE, changes=[change])
+
+
+@pytest.mark.parametrize(
+    "build", [_removed_result, _no_change_result, _compatible_result]
+)
+@pytest.mark.parametrize("config", [None, PRESET_STRICT])
+def test_one_line_view_matches_the_envelope_path_for_every_sibling_pair(
+    build, config
+) -> None:
+    """Sibling inputs: several verdicts, each with and without a severity gate."""
+    result = build()
+    via_entry_point = render_output("oneline", result, _SNAP, severity_config=config)
+    via_envelope = to_stat(
+        result, envelope=envelope_for(result, severity_config=config)
+    )
+    assert via_envelope == via_entry_point
 
 
 def test_one_line_view_reads_the_envelopes_own_result() -> None:
