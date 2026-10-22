@@ -57,6 +57,7 @@ __all__ = [
 HEURISTIC_OWNER_MODULES: tuple[str, ...] = (
     "abicheck.compare.enum_sentinel",
     "abicheck.compare.finding_redundancy",
+    "abicheck.compare.internal_leak_names",
     "abicheck.compare.naming_conventions",
     "abicheck.compare.typedef_respelling",
     "abicheck.diff_filtering",
@@ -64,7 +65,6 @@ HEURISTIC_OWNER_MODULES: tuple[str, ...] = (
     "abicheck.diff_serialization",
     "abicheck.diff_symbols_anon_fields",
     "abicheck.diff_types_surface",
-    "abicheck.internal_leak",
     "abicheck.policy.public_surface_closure",
 )
 

@@ -194,7 +194,7 @@ def _is_overapprox_call_graph_path(change: Change) -> bool:
     onto the ``Change`` — since :func:`~abicheck.internal_leak.
     _build_call_graph_leak_change` always sets
     ``reachability_state=PROVEN_REACHABLE`` regardless of degradation. See
-    :func:`~abicheck.internal_leak.compute_call_graph_leak_paths`'s
+    :func:`~abicheck.compare.internal_leak_graph.compute_call_graph_leak_paths`'s
     docstring for the ``"overapprox: "`` prefix this checks for.
     """
     path = change.reachability_proof_path

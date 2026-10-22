@@ -37,7 +37,7 @@ The graph is already a real detector input, not a debug dump: it drives
 version-over-version diff findings (`PUBLIC_API_INTERNAL_DEPENDENCY_ADDED`,
 `CALL_GRAPH_PUBLIC_ENTRY_REACHABILITY_CHANGED`, `INCLUDE_GRAPH_PUBLIC_HEADER_DRIFT`,
 etc. — `source_graph_findings.py`), computes transitive public reachability
-with BFS proof paths (`internal_leak.py`), gates suppression before it can
+with BFS proof paths (`compare/internal_leak.py`), gates suppression before it can
 hide a public-reachable break (`post_processing.MarkReachability` /
 `policy/suppression/rules.py`, ADR-044, now with tri-state `ReachabilityState` — Phase 1),
 and intersects real `--used-by` consumer binaries against the diff
@@ -47,7 +47,7 @@ What is still missing, per the review, is that this stays a **flat `Change` +
 several independently-computed graph-derived annotations**, not a unified
 model:
 
-- `source_graph_findings.py`, `internal_leak.py`, `post_processing.py`,
+- `source_graph_findings.py`, `compare/internal_leak.py`, `post_processing.py`,
   `policy/suppression/rules.py`, and `appcompat.py` each answer overlapping "is this
   reachable / why / how confidently" questions independently, with no shared
   object.
@@ -85,10 +85,10 @@ model:
   trail, slice 2, and `--report-mode root-cause` grouping in JSON,
   markdown/text, SARIF properties, and — Slice 6 — additive JUnit `<failure>`
   attributes). **Slices 8-10 deliver the D2 direction flip**:
-  `internal_leak.py` (Slice 8) and `appcompat.py` (Slice 9) populate
+  `compare/internal_leak.py` (Slice 8) and `appcompat.py` (Slice 9) populate
   `Change.impact_assessment` directly for their single-purpose finding
   builders (each verified safe by its own audit — a pipeline-ordering audit
-  for `internal_leak.py`, confirmation that `suppression.evaluate()` is a
+  for `compare/internal_leak.py`, confirmation that `suppression.evaluate()` is a
   pure read for `appcompat.py`); Slice 10 closes the remaining two named
   producer sites, each for a documented, code-inspected reason (see ADR-052's
   "Slice 10" and "Deliberately not implemented this slice" sections for the
@@ -107,7 +107,7 @@ model:
     `Change`, so nothing downstream invalidates the cache.
   - `source_graph_findings.py` — re-audited: none of its `Change(...)`
     construction sites are individually cacheable at construction time,
-    unlike `internal_leak.py`'s builder (itself a later `DEFAULT_PIPELINE`
+    unlike `compare/internal_leak.py`'s builder (itself a later `DEFAULT_PIPELINE`
     step) — these builders' output is merged into `checker.compare`'s
     `changes` *before* `_run_post_processing`/`DEFAULT_PIPELINE.run()`, so
     `MarkReachability` still runs downstream of them and would invalidate an
@@ -304,7 +304,7 @@ structured their walk's path representation is, plus the
 implemented** — see ADR-046's "D1 implementation"/"D2 implementation"/"D3
 implementation"/"D5 implementation"/"D6 implementation" sections,
 `abicheck/buildsource/graph_facts.py`, `abicheck/buildsource/graph_impact.py`,
-`abicheck/buildsource/inline_graph_fold.py`, `abicheck/internal_leak.py`'s
+`abicheck/buildsource/inline_graph_fold.py`, `abicheck/compare/internal_leak.py`'s
 `TraversalPolicy`/`CALL_GRAPH_TRAVERSAL_POLICY`/`select_preferred_path`,
 `tests/test_source_graph_v2.py`, `tests/test_inline_changed_paths.py`,
 `tests/test_internal_leak.py`'s `TestTraversalPolicy`/
@@ -436,7 +436,7 @@ below — `changed_entities`/`affected_consumers`/`affected_use_cases`/
 `coverage` have no data source yet and are deliberately absent rather than
 added as permanently-`None` placeholders) and
 `abicheck/impact/engine.py`'s `assess_change`, a **pure read view** built
-from the `Change` fields `source_graph_findings.py`/`internal_leak.py`/
+from the `Change` fields `source_graph_findings.py`/`compare/internal_leak.py`/
 `post_processing.py`/`policy/suppression/rules.py`/`appcompat.py` already independently
 set — none of those producers changed in slice 1 (see ADR-052 D2: the
 plan's originally-stated "existing fields become derived views over
@@ -493,7 +493,7 @@ to `main` first — see `abicheck/schemas/__init__.py`'s version-history
 docstring).
 Slices 8-9 (G29 Phase 3 follow-up) then delivered the D2 direction flip as a
 deliberately *scoped* subset: `Change.impact_assessment` (new, additive
-field) is populated directly by two producers — `internal_leak.py`'s two
+field) is populated directly by two producers — `compare/internal_leak.py`'s two
 leak-finding builders (Slice 8), verified safe by an explicit
 pipeline-ordering audit (`post_processing.MarkReachability` is the only step
 that mutates a `Change`'s reachability/evidence fields, and it runs *before*
@@ -523,7 +523,7 @@ sites, each resolved by a real audit rather than an assumption:
   `_include_graph_drift_findings`, `_build_option_reach_findings`,
   `_internal_dependency_findings`, `_target_dependency_findings`,
   `_symbol_owner_findings`). None are safe to cache at construction time —
-  unlike `internal_leak.py`'s builder (a later `DEFAULT_PIPELINE` step),
+  unlike `compare/internal_leak.py`'s builder (a later `DEFAULT_PIPELINE` step),
   these builders' findings are merged into `checker.compare`'s `changes`
   *before* `_run_post_processing`/`DEFAULT_PIPELINE.run()`, so
   `MarkReachability` still runs downstream and would invalidate an
@@ -570,12 +570,12 @@ section describes, most of it still open:
   `contract_effect`/`changed_entities`/`public_entries`/`affected_consumers`/
   `affected_use_cases`/`coverage` — no data source yet (Phase 4/5), left out
   entirely rather than added as permanently-`None` placeholders.
-- `source_graph_findings.py`, `internal_leak.py`, `post_processing.py`,
+- `source_graph_findings.py`, `compare/internal_leak.py`, `post_processing.py`,
   `appcompat.py` populate `ImpactAssessment` instead of independently setting
   overlapping `Change` fields; the existing `public_reachable`/
   `reachability_kind`/`reachability_proof_path`/`reachability_state` fields
   become **derived, backward-compatible views** over it (no JSON/SARIF
-  breaking change). **Partially done (Slices 8-10)**: `internal_leak.py` and
+  breaking change). **Partially done (Slices 8-10)**: `compare/internal_leak.py` and
   `appcompat.py` construct `Change.impact_assessment` directly for their
   finding builders (Slices 8-9); `post_processing.MarkReachability` now
   caches it for every change it tags (Slice 10), which transitively covers
@@ -2044,7 +2044,7 @@ abicheck/buildsource/template_graph_extractor.py  # ClangTemplateGraphExtractor,
 abicheck/buildsource/macro_graph.py  # Clang + raw-text macro/config-dependency pass (Phase 5 item 2, DONE — MACRO_CONTROLS_DECL/DECL_USES_MACRO)
 abicheck/buildsource/virtual_dispatch_graph.py  # pure graph transform, no clang (Phase 5 item 3, PARTIAL — VIRTUAL_CALL_MAY_DISPATCH_TO/TYPE_HAS_VTABLE; DECL_OVERRIDES_DECL already satisfied by override_graph.py, VTABLE_SLOT_MAPS_TO_DECL reserved)
 abicheck/buildsource/callback_graph.py  # Clang callback/function-pointer pass + pure join (Phase 5 item 4, PARTIAL — DECL_REGISTERS_CALLBACK/DECL_TAKES_ADDRESS_OF/CALLBACK_MAY_INVOKE; FUNCTION_POINTER_HAS_SIGNATURE populated as a node-level fact instead of an edge)
-abicheck/internal_leak.py   # TraversalPolicy + effect_transitions (Phase 2 D5, DONE — landed here, not a separate impact/traversal.py)
+abicheck/compare/internal_leak.py   # TraversalPolicy + effect_transitions (Phase 2 D5, DONE — landed here, not a separate impact/traversal.py)
 abicheck/impact/
     model.py           # ImpactAssessment, GraphProofPath, FindingDecision (Phase 3 slices 1/7, DONE — ADR-052)
     engine.py           # assess_change(...) (Phase 3 slices 1/7, DONE — ADR-052)
@@ -2061,7 +2061,7 @@ examples/case194.../case205.../           # Phase 6
 ```
 
 Modified (recurring across phases): `abicheck/buildsource/source_graph.py`,
-`source_graph_findings.py`, `internal_leak.py`, `post_processing.py`,
+`source_graph_findings.py`, `compare/internal_leak.py`, `post_processing.py`,
 `policy/suppression/rules.py`, `appcompat.py`, `reporter.py`, `sarif.py`,
 `junit_report.py`, `service_render.py`, `change_registry*.py`,
 `checker_policy.py`, `checker_types.py`.

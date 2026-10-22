@@ -476,7 +476,7 @@
     },
     {
       "path": "abicheck/diff_cpp_patterns.py",
-      "baseline_lines": 1205,
+      "baseline_lines": 1201,
       "target": "compare",
       "rule": "no_growth",
       "disposition": "migrate",
@@ -728,17 +728,6 @@
       "review_by": "2026-11-30"
     },
     {
-      "path": "abicheck/internal_leak.py",
-      "baseline_lines": 1362,
-      "target": "see ADR-061 ownership map",
-      "rule": "no_growth",
-      "disposition": "migrate",
-      "category": "legacy_oversized_module",
-      "owner": "legacy-root",
-      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice. Lowered 1583 -> 1571 (2026-10-21, buildsource/impact/policy decoupling): the L5 reads `format_dependency_path`, `label_map` and `kind_map` now come from `model/source_graph_query.py`, the ImpactAssessment cache moved to `post_processing_reachability.cache_impact_assessments` (the leak builders may not import `impact`), and `layout_visibility` moved to `compare/`. Every module it imports is now model- or compare-classified, so the gate reports no direction violation for it as a compare module. Remaining: the physical move into `compare/` and a split below the 800-line production cap, which also repoints its importers, the `policy/name_heuristics` owner list and the use-case baseline keys. +1 line (2026-08-31): Phase 5 item 2's internal-caller facade migration (PR #965) split a single two-name `from .buildsource.source_graph import GraphEdge, GraphNode, SourceGraphSummary` into two real-owner imports (`model/graph_facts.py`, `model/source_graph.py`), which D8 requires for an internal caller and which this frozen baseline had no equal-size reduction available to offset. Raised 1651 -> 1652 (P1, Codex review, ADR-061 gap B follow-up): the identical shape one more time -- `from .checker_policy import ChangeKind, ReachabilityState` split into its two real owners (`model.change_catalog.kinds`, `policy.evidence_status`). No smaller diff. Raised 1652 -> 1654 (P2, Codex review, PR #1284): the same shape a third time. detect_call_graph_leaks emits internal_symbol_required_by_public_api for a removed internal *global* as readily as for a function, so a fixed catalog entity hid those findings from --view show=variables; the overlay must therefore carry an entity discriminator derived from its triggering changes. That is exactly two lines here -- one real-owner import and one keyword argument -- because the derivation itself was deliberately placed in its proper owner (change_registry.unanimous_entity_for, a query over REGISTRY) rather than kept as a local helper, which took 22 lines back out of this file first. No equal-size reduction available to offset the remainder without relocating a block whose inline comments carry several rounds of review history.",
-      "review_by": "2026-11-30"
-    },
-    {
       "path": "abicheck/junit_report.py",
       "baseline_lines": 1183,
       "target": "report",
@@ -806,7 +795,7 @@
     },
     {
       "path": "abicheck/post_processing.py",
-      "baseline_lines": 1357,
+      "baseline_lines": 1356,
       "target": "see ADR-061 ownership map",
       "rule": "no_growth",
       "disposition": "migrate",
@@ -1631,7 +1620,7 @@
     },
     {
       "path": "tests/test_internal_leak.py",
-      "baseline_lines": 1982,
+      "baseline_lines": 1933,
       "target": "tests/unit-or-contract ownership matching production migration",
       "rule": "no_growth",
       "disposition": "migrate",

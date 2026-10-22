@@ -98,7 +98,7 @@ def resolve_l5_source_graph(
     snap: AbiSnapshot, pack: BuildSourcePack | None
 ) -> SourceGraphSummary | None:
     """The L5 evidence graph for *snap*/*pack* (ADR-063 Phase 10), the one
-    shared resolver every migrated reader (``internal_leak.py``,
+    shared resolver every migrated reader (``compare/internal_leak.py``,
     ``buildsource/cross_source_checks.py``, ``buildsource/evidence_report.py``)
     goes through, so the same
     fallback rule can't independently drift per call site the way it did

@@ -65,11 +65,7 @@ from .compare.template_surface import (
     strip_template_args as _callable_stem,  # noqa: F401
 )
 from .compare.type_map_pair import TypeMap, type_map_key
-from .diff_helpers import (
-    build_type_map,
-    lookup_matched_type,
-    make_change,
-)
+from .diff_helpers import build_type_map, lookup_matched_type, make_change
 
 # Re-exports — the generic detectors were extracted to dedicated modules
 # in PR-D, but are re-exported here so callers that import them from this
@@ -636,7 +632,7 @@ def _stable_leading_template_args(old_args: str, new_args: str) -> bool:
     >>> _stable_leading_template_args("A", "B")  # 1-arg degenerate case
     True
     """
-    from .internal_leak import _split_top_level_commas  # local import: cycle-free
+    from .compare.internal_leak_names import _split_top_level_commas
 
     old_list = [p.strip() for p in _split_top_level_commas(old_args)]
     new_list = [p.strip() for p in _split_top_level_commas(new_args)]
@@ -948,7 +944,7 @@ def _find_public_pimpl_holders(
 ) -> set[str]:
     """Return names of *public* record types that hold a pimpl pointing
     at *internal_type_name*."""
-    from .internal_leak import INTERNAL_NAMESPACE
+    from .compare.internal_leak_names import INTERNAL_NAMESPACE
 
     found: set[str] = set()
     leaf = _last_segment(internal_type_name)

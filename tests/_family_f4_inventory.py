@@ -54,9 +54,6 @@ SCAN_GLOBS = (
     "detectors*.py",
     "checker*.py",
     "classify*.py",
-    # Flat-root policy owner of the internal-namespace demotion (#1231); it
-    # decides contract membership although it predates the policy/ package.
-    "internal_leak*.py",
     # Post-diff policy passes that demote/suppress findings (design-hardening
     # Phase 5 widened the scan to them).
     "post_processing*.py",

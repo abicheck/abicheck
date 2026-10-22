@@ -18,7 +18,7 @@
 ``assess_change`` is a pure read view: it does not mutate *change*, run any
 graph traversal, or change any producer's behavior. It only reads attributes
 already independently set on ``Change`` by ``post_processing.MarkReachability``,
-``source_graph_findings.py``, ``internal_leak.py``, ``policy/suppression/rules.py``, and
+``source_graph_findings.py``, ``compare/internal_leak.py``, ``policy/suppression/rules.py``, and
 ``buildsource.graph_impact.attach_impact_metadata``.
 """
 

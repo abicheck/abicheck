@@ -1521,7 +1521,7 @@ structure already in place:
    name alone.
 4. **Cross-cutting post-processing and roll-up emitters**
    (`post_processing.py`, `post_processing_reachability.py`,
-   `pattern_verdicts.py`, `internal_leak.py`, `bundle_models.py`,
+   `pattern_verdicts.py`, `compare/internal_leak.py`, `bundle_models.py`,
    `post_manifest.py`, `cli_buildsource_helpers.py`,
    `versioned_symbol_scheme.py`'s `_build_scheme_advisory()`) — these often
    construct a `Change` by *transforming* an existing one (a roll-up, a
@@ -2990,7 +2990,7 @@ above, which this list intentionally does not re-duplicate.
   `diff_versioning.py`, `diff_vtable_layout.py`, `diff_sycl.py`,
   `diff_stdlib_impl.py`, `diff_type_spellings.py` (→ `compare/detectors/*`)
   — Phase 1's `make_change()`-routed call sites.
-- `abicheck/checker.py`, `internal_leak.py`, `pattern_verdicts.py`,
+- `abicheck/checker.py`, `compare/internal_leak.py`, `pattern_verdicts.py`,
   `post_manifest.py`, `post_processing.py`, `post_processing_reachability.py`,
   `stack_checker.py`, `versioned_symbol_scheme.py`,
   `cli_buildsource_helpers.py`, `bundle_models.py` (→ `compare/`/

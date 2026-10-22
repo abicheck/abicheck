@@ -18,7 +18,7 @@ The snapshot is, in effect, a *typed declaration graph*: functions reference
 parameter/return types, records reference field/base/typedef types, every
 declaration carries header provenance and visibility. The rest of the codebase
 queries that graph one edge at a time (``surface.py`` walks the reachability
-closure; ``internal_leak.py`` walks public→private). :class:`SurfaceGraph` is
+closure; ``compare/internal_leak.py`` walks public→private). :class:`SurfaceGraph` is
 the shared, read-only, *order-stable* index those one-edge call sites lack — it
 owns no detection logic, only structure.
 

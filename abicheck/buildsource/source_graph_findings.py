@@ -829,7 +829,7 @@ def _mapping_drift_findings(
             findings.append(
                 # ADR-052 D2 follow-up (G29 Phase 3 slice 10 audit): NOT
                 # cached with `change.impact_assessment = assess_change(change)`
-                # here, unlike Slice 8/9's `internal_leak.py`/`appcompat.py`
+                # here, unlike Slice 8/9's `compare/internal_leak.py`/`appcompat.py`
                 # sites. Those builders run as (or after) a
                 # `post_processing.DEFAULT_PIPELINE` *step*, downstream of
                 # `MarkReachability`, so their own Change objects are never

@@ -24,6 +24,7 @@ Pure Python, no external tools — part of the default fast lane.
 from __future__ import annotations
 
 from abicheck.checker_policy import ChangeKind
+from abicheck.compare.internal_leak_names import _split_top_level_commas
 from abicheck.diff_cpp_patterns import (
     BundleMember,
     _cohort_key,
@@ -41,14 +42,7 @@ from abicheck.diff_cpp_patterns import (
     detect_inline_body_renamed_member,
     detect_tag_type_renamed,
 )
-from abicheck.internal_leak import _split_top_level_commas
-from abicheck.model import (
-    AbiSnapshot,
-    AccessLevel,
-    Function,
-    RecordType,
-    TypeField,
-)
+from abicheck.model import AbiSnapshot, AccessLevel, Function, RecordType, TypeField
 from abicheck.model.change import Change
 
 # ---------------------------------------------------------------------------

@@ -216,7 +216,7 @@ def _to_json_root_cause(
     ``Change.caused_by_type`` when set, else each change is its own
     singleton group keyed by its own ``symbol`` -- reusing the existing
     ``caused_by_type`` field ``diff_filtering.py``'s redundancy collapse and
-    ``internal_leak.py``'s call-graph-leak overlay already set, rather than
+    ``compare/internal_leak.py``'s call-graph-leak overlay already set, rather than
     requiring new producer wiring. ``root_cause_id`` is a stable hash of this
     grouping key -- deliberately a different scheme from
     `RootCauseCorrelator`'s own (G29 Phase 6), whose evidence-ranked groups
