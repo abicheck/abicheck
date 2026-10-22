@@ -219,10 +219,10 @@ _219 case(s)._ [← back to all examples](../index.md)
 | [case220_public_virtual_dispatch_set_reordered](../case220_public_virtual_dispatch_set_reordered.md) | Public Virtual Method's Override Set Reordered | ✅ NO_CHANGE | No Change |
 | [case221_public_api_internal_type_renamed](../case221_public_api_internal_type_renamed.md) | Public Dependency Target Renamed Alongside an Unrelated Addition | 🟡 COMPATIBLE_WITH_RISK | Risk |
 | [case222_public_consumer_compiled_dependency_changed](../case222_public_consumer_compiled_dependency_changed.md) | Public Inline Body's Compiled-In Dependency Changes | 🟡 COMPATIBLE_WITH_RISK | Risk |
-| [case223_header_only_template_default_changed](../case223_header_only_template_default_changed.md) | Header-Only Template Default Changed | 🟡 COMPATIBLE_WITH_RISK | Risk |
+| [case223_header_only_template_default_changed](../case223_header_only_template_default_changed.md) | Header-Only Template Default Changed | ✅ NO_CHANGE | No Change |
 | [case224_header_only_template_default_added](../case224_header_only_template_default_added.md) | Header-Only Template Default Added | ✅ NO_CHANGE | No Change |
 | [case225_header_only_template_default_removed](../case225_header_only_template_default_removed.md) | Header-Only Template Default Removed | ✅ NO_CHANGE | No Change |
 | [case226_header_only_template_default_unchanged](../case226_header_only_template_default_unchanged.md) | Header-Only Template Default Unchanged | ✅ NO_CHANGE | No Change |
-| [case227_nested_namespace_template_default_changed](../case227_nested_namespace_template_default_changed.md) | Nested-Namespace Template Default Changed | 🟡 COMPATIBLE_WITH_RISK | Risk |
+| [case227_nested_namespace_template_default_changed](../case227_nested_namespace_template_default_changed.md) | Nested-Namespace Template Default Changed | ✅ NO_CHANGE | No Change |
 | [case228_nontype_template_param_default_changed](../case228_nontype_template_param_default_changed.md) | Non-Type Template Parameter Default Changed | ✅ NO_CHANGE | No Change |
 | [case229_exported_template_default_changed](../case229_exported_template_default_changed.md) | Exported Template Default Changed | 🔴 BREAKING | Breaking |

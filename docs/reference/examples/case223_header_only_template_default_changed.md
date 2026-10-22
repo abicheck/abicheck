@@ -3,40 +3,36 @@
 
 | Field | Value |
 |-------|-------|
-| **Verdict** | 🟡 **COMPATIBLE_WITH_RISK** |
-| **Category** | Risk |
+| **Verdict** | ✅ **NO_CHANGE** |
+| **Category** | No Change |
 | **Classification** | Rule |
 | **Platforms** | Linux, macOS, Windows |
 | **Flags** | — |
-| **Detected `ChangeKind`s** | `public_dependency_role_changed` |
+| **Detected `ChangeKind`s** | — |
 | **Source files** | `catalog/cases/case223_header_only_template_default_changed/` |
 | **Rule family** | [`header-only-template-default-changed`](by-rule/header-only-template-default-changed.md) |
 | **Subject** | [Template and generic-programming issues](by-subject/template-and-generic-programming-issues.md) |
 
-**Category:** Template ABI | **Verdict:** 🟡 COMPATIBLE_WITH_RISK (castxml) / 🟠 API_BREAK (clang)
+**Category:** Template ABI | **Verdict:** 🟢 NO_CHANGE (castxml) / 🟠 API_BREAK (clang)
 
 ## Verdict and consumer impact
 
-`mylib::Box<T, U = T>` is a header-only class template. Its default for `U`
-changes from `T` to `int`. Nothing exports `Box`, and no public signature names
-it, so no symbol changes. A consumer that writes `mylib::Box<char>` compiles
-unchanged against v1 but substitutes `Box<char, char>` there and `Box<char, int>`
-against v2. The change is a source-level consequence, not a binary break.
+`mylib::Box<T, U = int>` is a header-only class template. Its default for `U`
+changes from `int` to `long`. Nothing exports `Box`, and no public signature
+names it, so no symbol changes. A consumer that writes `mylib::Box<char>` still
+compiles against v2, but it now selects `Box<char, long>` instead of
+`Box<char, int>`. The change is source-level, not binary.
 
-On the default castxml lane the run reports `COMPATIBLE_WITH_RISK`. The clang
-backend reports `API_BREAK` for the same header change. That lane's one finding is the source-replay risk
-`public_dependency_role_changed`, because the old default referenced `T`. The
-header-level kind `template_param_default_changed` belongs to the clang backend
-(the clang recorder's header-level kind). castxml records no template-parameter defaults, so its run
-reports the assurance gap instead of a clean result.
-
-## Old/new diff
+On the default castxml lane the run reads `NO_CHANGE`, with run status partial
+and the template-default assurance gap: castxml cannot record template parameter
+defaults, so it cannot see this change. The clang backend records the defaults
+and reports `template_param_default_changed` as `API_BREAK`.
 
 ## Old/new diff
 
 | v1.h | v2.h |
 |------|------|
-| `template <typename T, typename U = T> struct Box;` | `template <typename T, typename U = int> struct Box;` |
+| `template <typename T, typename U = int> struct Box;` | `template <typename T, typename U = long> struct Box;` |
 
 ## abicheck command
 
@@ -51,21 +47,16 @@ abicheck dump -H v2.h --config .abicheck.yml --depth headers -o new.json
 abicheck compare old.json new.json
 ```
 
-Switch `frontend: clang` to see the clang result above.
+Switch `frontend: clang` to see the clang result.
 
 ## Expected abicheck finding
 
 castxml (default):
 
 ```text
-Verdict: COMPATIBLE_WITH_RISK
-- public_dependency_role_changed: Public entry 'mylib::Box' still depends on
-  'T' (TYPE_HAS_FIELD_TYPE) but its role changed: default_template_arg, field -> field.
-  Source-graph evidence to prioritize review.
+Verdict: NO_CHANGE
 Assurance: partial
   gap: template-parameter defaults (castxml cannot record them)
-  Warning: public-header scoping could not resolve the public surface; compatibility
-  is UNCONFIRMED (manual review required).
 ```
 
 clang:
@@ -73,21 +64,19 @@ clang:
 ```text
 Verdict: API_BREAK
 - template_param_default_changed: class template Box has a different
-  default for parameter 1 (T -> int)
+  default for parameter 1 (int -> long)
 ```
 
 ## Minimum evidence
 
-`min_evidence: L2`. The default lives in the public header, so the header
-backend is the only evidence source. `castxml` cannot record it. `clang` can.
+`min_evidence: L2`, the public header.
 
 ## Why abicheck catches it
 
-The clang dumper records `TemplateTypeParmDecl.defaultArg` for class templates
-(the clang recorder). `compare/template_param_defaults.py` pairs the pattern by
-qualified name and compares the recorded defaults. castxml writes no record for
-an uninstantiated template, so its snapshot stays UNKNOWN and the template-default
-scan reports the gap.
+The clang dumper records `TemplateTypeParmDecl.defaultArg` for class templates.
+`compare/template_param_defaults.py` pairs the pattern by qualified name and
+compares the recorded defaults. castxml writes no record for an uninstantiated
+template, so its snapshot stays UNKNOWN and the run reports the gap.
 
 ## Runtime failure demonstration
 
@@ -97,7 +86,7 @@ level, and a consumer rebuilds.
 ## Safe redesign
 
 Do not change a default in a public header without a deprecation window. Add a
-new template alias, for example `template <typename T> using BoxInt = Box<T, int>;`,
+new template alias, for example `template <typename T> using BoxLong = Box<T, long>;`,
 and leave `Box`'s default unchanged.
 
 ---
@@ -111,4 +100,4 @@ and leave `Box`'s default unchanged.
 - `v2.cpp`
 - `v2.h`
 
-_See also: [Compatibility Catalog](index.md) · [All COMPATIBLE_WITH_RISK cases](by-verdict/compatible-risk.md) · [Category: Risk](by-category/risk.md) · [Rule: Header-only template default changed](by-rule/header-only-template-default-changed.md) · [Subject: Template and generic-programming issues](by-subject/template-and-generic-programming-issues.md)._
+_See also: [Compatibility Catalog](index.md) · [All NO_CHANGE cases](by-verdict/no-change.md) · [Category: No Change](by-category/no_change.md) · [Rule: Header-only template default changed](by-rule/header-only-template-default-changed.md) · [Subject: Template and generic-programming issues](by-subject/template-and-generic-programming-issues.md)._

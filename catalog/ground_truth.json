@@ -4409,17 +4409,16 @@
    "abi_break": false,
    "api_break": false,
    "bad_practice": false,
-   "category": "risk",
-   "description": "Header-only class template mylib::Box<T, U = T> with its default changed to U = int. Nothing exports or names Box. On the default castxml lane the header-only default change itself reads NO_CHANGE, with run status partial and the 'template-parameter defaults (castxml cannot record them)' assurance gap (ADR-085 D3). The clang backend records the defaults and reports template_param_default_changed as API_BREAK (pinned in tests/test_default_template_arg_l2_matrix.py). The one finding this lane does report is the source-level consequence named in ADR-085 shape B: public_dependency_role_changed, a risk. It fires here because the old default references the template parameter T, and the new default does not. No BREAKING finding is produced because no symbol or public signature depends on the default.",
-   "expected": "COMPATIBLE_WITH_RISK",
+   "category": "no_change",
+   "description": "Header-only class template mylib::Box<T, U = int> with its default changed to U = long. Nothing exports or names Box, and the old default does not reference another template parameter. On the default castxml lane the header-only default change reads NO_CHANGE, with run status partial and the 'template-parameter defaults (castxml cannot record them)' assurance gap. The clang backend records the defaults and reports template_param_default_changed as API_BREAK (pinned in tests/test_default_template_arg_l2_matrix.py). No symbol or public signature depends on the default, so no BREAKING finding is produced.",
+   "expected": "NO_CHANGE",
    "expected_absent_kinds": [
     "template_param_default_changed",
-    "default_template_arg_changed"
-   ],
-   "expected_kinds": [
+    "default_template_arg_changed",
     "public_dependency_role_changed"
    ],
-   "min_evidence": "L5",
+   "expected_kinds": [],
+   "min_evidence": "L2",
    "platforms": [
     "linux",
     "macos",
@@ -4487,17 +4486,16 @@
    "abi_break": false,
    "api_break": false,
    "bad_practice": false,
-   "category": "risk",
-   "description": "The header-only default change of case223 (U = T becomes U = long), with the template in the nested namespace mylib::detail. The qualified-name pairing must match the pattern under its nested scope. On the default castxml lane the header-only default change itself reads NO_CHANGE, with run status partial and the 'template-parameter defaults (castxml cannot record them)' assurance gap (ADR-085 D3). The clang backend records the defaults and reports template_param_default_changed as API_BREAK (pinned in tests/test_default_template_arg_l2_matrix.py). The one finding this lane does report is the source-level consequence named in ADR-085 shape B: public_dependency_role_changed, a risk. It fires here because the old default references the template parameter T, and the new default does not. No BREAKING finding is produced because no symbol or public signature depends on the default.",
-   "expected": "COMPATIBLE_WITH_RISK",
+   "category": "no_change",
+   "description": "The header-only default change of case223 (U = int becomes U = long), with the template in the nested namespace mylib::detail. The qualified-name pairing must match the pattern under its nested scope. On the default castxml lane the header-only default change reads NO_CHANGE, with run status partial and the 'template-parameter defaults (castxml cannot record them)' assurance gap. The clang backend records the defaults and reports template_param_default_changed as API_BREAK (pinned in tests/test_default_template_arg_l2_matrix.py). No symbol or public signature depends on the default, so no BREAKING finding is produced.",
+   "expected": "NO_CHANGE",
    "expected_absent_kinds": [
     "template_param_default_changed",
-    "default_template_arg_changed"
-   ],
-   "expected_kinds": [
+    "default_template_arg_changed",
     "public_dependency_role_changed"
    ],
-   "min_evidence": "L5",
+   "expected_kinds": [],
+   "min_evidence": "L2",
    "platforms": [
     "linux",
     "macos",

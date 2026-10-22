@@ -43,10 +43,10 @@ The catalog drives abicheck's benchmark and serves as an encyclopedia of ABI pit
 |---------|-------|-------------------------|------|
 | BREAKING | 114 | `BREAKING_KINDS` | 🔴 |
 | API_BREAK | 21 | `API_BREAK_KINDS` | 🟠 |
-| COMPATIBLE_WITH_RISK | 40 | `RISK_KINDS` | 🟡 |
+| COMPATIBLE_WITH_RISK | 38 | `RISK_KINDS` | 🟡 |
 | COMPATIBLE (addition) | 12 | `ADDITION_KINDS` | 🟢 |
 | COMPATIBLE (quality) | 21 | `QUALITY_KINDS` | 🟡 |
-| NO_CHANGE | 16 | — | ✅ |
+| NO_CHANGE | 18 | — | ✅ |
 | Bundle (multi-binary) | 5 | see [Multi-binary analysis](../docs/use/multi-binary.md) | 🔵 |
 <!-- END GENERATED: verdict-distribution -->
 
@@ -493,11 +493,11 @@ Expected non-pass buckets are already represented in `ground_truth.json`:
 | [220](cases/case220_public_virtual_dispatch_set_reordered/README.md) | Public Virtual Method's Override Set Reordered | No Change | ✅ NO_CHANGE |
 | [221](cases/case221_public_api_internal_type_renamed/README.md) | Public Dependency Target Renamed Alongside an Unrelated Addition | Risk | 🟡 COMPATIBLE_WITH_RISK (bad practice) |
 | [222](cases/case222_public_consumer_compiled_dependency_changed/README.md) | Public Inline Body's Compiled-In Dependency Changes | Risk | 🟡 COMPATIBLE_WITH_RISK |
-| [223](cases/case223_header_only_template_default_changed/README.md) | Header-Only Template Default Changed | Risk | 🟡 COMPATIBLE_WITH_RISK |
+| [223](cases/case223_header_only_template_default_changed/README.md) | Header-Only Template Default Changed | No Change | ✅ NO_CHANGE |
 | [224](cases/case224_header_only_template_default_added/README.md) | Header-Only Template Default Added | No Change | ✅ NO_CHANGE |
 | [225](cases/case225_header_only_template_default_removed/README.md) | Header-Only Template Default Removed | No Change | ✅ NO_CHANGE |
 | [226](cases/case226_header_only_template_default_unchanged/README.md) | Header-Only Template Default Unchanged | No Change | ✅ NO_CHANGE |
-| [227](cases/case227_nested_namespace_template_default_changed/README.md) | Nested-Namespace Template Default Changed | Risk | 🟡 COMPATIBLE_WITH_RISK |
+| [227](cases/case227_nested_namespace_template_default_changed/README.md) | Nested-Namespace Template Default Changed | No Change | ✅ NO_CHANGE |
 | [228](cases/case228_nontype_template_param_default_changed/README.md) | Non-Type Template Parameter Default Changed | No Change | ✅ NO_CHANGE |
 | [229](cases/case229_exported_template_default_changed/README.md) | Exported Template Default Changed | Breaking | 🔴 BREAKING |
 <!-- END GENERATED: case-index -->

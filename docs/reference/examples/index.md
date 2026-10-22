@@ -20,9 +20,9 @@ Use this catalog to:
 |---------|-------|---------------|
 | 🔴 [BREAKING](by-verdict/breaking.md) | 118 | ABI breaks: existing consumers will fail at runtime. |
 | 🟠 [API_BREAK](by-verdict/api-break.md) | 21 | Source-level / API-only breaks; recompilation fails or behavior shifts. |
-| 🟡 [COMPATIBLE_WITH_RISK](by-verdict/compatible-risk.md) | 41 | Backward-compatible at the symbol level but with behavioral risk. |
+| 🟡 [COMPATIBLE_WITH_RISK](by-verdict/compatible-risk.md) | 39 | Backward-compatible at the symbol level but with behavioral risk. |
 | 🟢 [COMPATIBLE](by-verdict/compatible.md) | 33 | Backward-compatible changes (additions or quality-only). |
-| ✅ [NO_CHANGE](by-verdict/no-change.md) | 16 | Identical ABI/API — baseline control cases. |
+| ✅ [NO_CHANGE](by-verdict/no-change.md) | 18 | Identical ABI/API — baseline control cases. |
 
 ## How to read a case page
 
@@ -43,10 +43,10 @@ Source files (`v1.*`, `v2.*`, `app.*`, `CMakeLists.txt`) are listed at the botto
 |----------|-------|----------------|
 | [Breaking](by-category/breaking.md) | 114 | Listed in `BREAKING_KINDS` — runtime ABI break. |
 | [API Break](by-category/api_break.md) | 21 | Listed in `API_BREAK_KINDS` — source/API-level break. |
-| [Risk](by-category/risk.md) | 40 | Listed in `RISK_KINDS` — symbol-compatible but behaviorally risky. |
+| [Risk](by-category/risk.md) | 38 | Listed in `RISK_KINDS` — symbol-compatible but behaviorally risky. |
 | [Addition (Compatible)](by-category/addition.md) | 12 | Listed in `ADDITION_KINDS` — backward-compatible additions. |
 | [Quality (Compatible)](by-category/quality.md) | 21 | Listed in `QUALITY_KINDS` — metadata/quality issues, not ABI breaks. |
-| [No Change](by-category/no_change.md) | 16 | Identical ABI/API — sanity-check baselines. |
+| [No Change](by-category/no_change.md) | 18 | Identical ABI/API — sanity-check baselines. |
 | [Bundle (Multi-library)](by-category/bundle.md) | 5 | Multi-library release cohorts — the break is between libraries in one bundle, not inside any single one. |
 
 ## Browse by rule
@@ -94,10 +94,10 @@ The weakest evidence source that reaches this case's verdict — see [Evidence a
 |----------|-------|---------------|
 | [L0 — binary only](by-evidence/l0.md) | 70 | Detectable from the shipped binary's symbol table alone. |
 | [L1 — + debug info](by-evidence/l1.md) | 77 | Needs debug information on top of the binary. |
-| [L2 — + headers](by-evidence/l2.md) | 46 | Needs the public headers parsed alongside the binary. |
+| [L2 — + headers](by-evidence/l2.md) | 48 | Needs the public headers parsed alongside the binary. |
 | [L3 — + build evidence](by-evidence/l3.md) | 11 | Needs the build's own configuration and flags. |
 | [L4 — + source replay](by-evidence/l4.md) | 6 | Needs the sources replayed through a source-level ABI extraction. |
-| [L5 — + source graph](by-evidence/l5.md) | 19 | Needs the derived semantic source graph. |
+| [L5 — + source graph](by-evidence/l5.md) | 17 | Needs the derived semantic source graph. |
 | [Not currently detectable](by-evidence/none.md) | 0 | No evidence tier currently reaches this case's canonical verdict — a known detector gap, kept in the catalog as calibration. |
 
 ## Browse by language
@@ -337,10 +337,10 @@ The weakest evidence source that reaches this case's verdict — see [Evidence a
 | [case220_public_virtual_dispatch_set_reordered](case220_public_virtual_dispatch_set_reordered.md) | Public Virtual Method's Override Set Reordered | ✅ NO_CHANGE | No Change |
 | [case221_public_api_internal_type_renamed](case221_public_api_internal_type_renamed.md) | Public Dependency Target Renamed Alongside an Unrelated Addition | 🟡 COMPATIBLE_WITH_RISK | Risk |
 | [case222_public_consumer_compiled_dependency_changed](case222_public_consumer_compiled_dependency_changed.md) | Public Inline Body's Compiled-In Dependency Changes | 🟡 COMPATIBLE_WITH_RISK | Risk |
-| [case223_header_only_template_default_changed](case223_header_only_template_default_changed.md) | Header-Only Template Default Changed | 🟡 COMPATIBLE_WITH_RISK | Risk |
+| [case223_header_only_template_default_changed](case223_header_only_template_default_changed.md) | Header-Only Template Default Changed | ✅ NO_CHANGE | No Change |
 | [case224_header_only_template_default_added](case224_header_only_template_default_added.md) | Header-Only Template Default Added | ✅ NO_CHANGE | No Change |
 | [case225_header_only_template_default_removed](case225_header_only_template_default_removed.md) | Header-Only Template Default Removed | ✅ NO_CHANGE | No Change |
 | [case226_header_only_template_default_unchanged](case226_header_only_template_default_unchanged.md) | Header-Only Template Default Unchanged | ✅ NO_CHANGE | No Change |
-| [case227_nested_namespace_template_default_changed](case227_nested_namespace_template_default_changed.md) | Nested-Namespace Template Default Changed | 🟡 COMPATIBLE_WITH_RISK | Risk |
+| [case227_nested_namespace_template_default_changed](case227_nested_namespace_template_default_changed.md) | Nested-Namespace Template Default Changed | ✅ NO_CHANGE | No Change |
 | [case228_nontype_template_param_default_changed](case228_nontype_template_param_default_changed.md) | Non-Type Template Parameter Default Changed | ✅ NO_CHANGE | No Change |
 | [case229_exported_template_default_changed](case229_exported_template_default_changed.md) | Exported Template Default Changed | 🔴 BREAKING | Breaking |

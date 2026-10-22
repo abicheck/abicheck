@@ -7,5 +7,5 @@ _Canonical rule slug:_ `header-only-template-default-changed`. [← back to all 
 
 ## Canonical demonstration
 
-- [case223_header_only_template_default_changed](../case223_header_only_template_default_changed.md) — Header-Only Template Default Changed (🟡 COMPATIBLE_WITH_RISK)
+- [case223_header_only_template_default_changed](../case223_header_only_template_default_changed.md) — Header-Only Template Default Changed (✅ NO_CHANGE)
 

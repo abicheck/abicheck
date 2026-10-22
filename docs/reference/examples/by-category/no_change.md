@@ -3,7 +3,7 @@
 
 Identical ABI/API — sanity-check baselines.
 
-_16 case(s)._ [← back to all examples](../index.md)
+_18 case(s)._ [← back to all examples](../index.md)
 
 | Case | Title | Verdict | Category |
 |------|-------|---------|----------|
@@ -19,7 +19,9 @@ _16 case(s)._ [← back to all examples](../index.md)
 | [case210_calling_convention_respelled_via_macro](../case210_calling_convention_respelled_via_macro.md) | Calling Convention Respelled via a Macro | ✅ NO_CHANGE | No Change |
 | [case214_calling_convention_macro_redefined_after_use](../case214_calling_convention_macro_redefined_after_use.md) | Convention Macro Redefined After Use (Negative Control) | ✅ NO_CHANGE | No Change |
 | [case220_public_virtual_dispatch_set_reordered](../case220_public_virtual_dispatch_set_reordered.md) | Public Virtual Method's Override Set Reordered | ✅ NO_CHANGE | No Change |
+| [case223_header_only_template_default_changed](../case223_header_only_template_default_changed.md) | Header-Only Template Default Changed | ✅ NO_CHANGE | No Change |
 | [case224_header_only_template_default_added](../case224_header_only_template_default_added.md) | Header-Only Template Default Added | ✅ NO_CHANGE | No Change |
 | [case225_header_only_template_default_removed](../case225_header_only_template_default_removed.md) | Header-Only Template Default Removed | ✅ NO_CHANGE | No Change |
 | [case226_header_only_template_default_unchanged](../case226_header_only_template_default_unchanged.md) | Header-Only Template Default Unchanged | ✅ NO_CHANGE | No Change |
+| [case227_nested_namespace_template_default_changed](../case227_nested_namespace_template_default_changed.md) | Nested-Namespace Template Default Changed | ✅ NO_CHANGE | No Change |
 | [case228_nontype_template_param_default_changed](../case228_nontype_template_param_default_changed.md) | Non-Type Template Parameter Default Changed | ✅ NO_CHANGE | No Change |
