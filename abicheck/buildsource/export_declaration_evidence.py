@@ -49,6 +49,7 @@ caller's existing behavior unchanged.
 
 from __future__ import annotations
 
+import functools
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -367,6 +368,18 @@ def _leaf_and_scope(symbol: str) -> tuple[str, str | None] | None:
     return None
 
 
+@functools.lru_cache(maxsize=4096)
+def _leaf_declaration_re(leaf: str) -> re.Pattern[str]:
+    """*leaf* as a declared name: followed by ``(``, ``[``, ``;``, ``=`` or ``,``.
+
+    Compiled only for a header that names *leaf* and memoized here: compiling
+    one pattern per export up front cycled ``re``'s own 512-entry cache on
+    MKL-sized surfaces (~23k undeclared exports per side) and cost ~95% of
+    this function while the search itself was ~3%.
+    """
+    return re.compile(rf"\b{re.escape(leaf)}\s*(\(|\[|;|=|,)")
+
+
 def textual_declaration_hint(
     symbol: str, evidence: ExportDeclarationEvidence
 ) -> DeclarationHint | None:
@@ -386,11 +399,13 @@ def textual_declaration_hint(
     if names is None:
         return None
     leaf, scope = names
-    leaf_re = re.compile(rf"\b{re.escape(leaf)}\s*(\(|\[|;|=|,)")
+    leaf_re: re.Pattern[str] | None = None
     conditional: DeclarationHint | None = None
     for h in evidence.headers:
         if leaf not in h.identifiers or (scope and scope not in h.identifiers):
             continue
+        if leaf_re is None:
+            leaf_re = _leaf_declaration_re(leaf)
         for line, cond in h.lines:
             if not leaf_re.search(line):
                 continue
