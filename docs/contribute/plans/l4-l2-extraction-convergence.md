@@ -330,6 +330,108 @@ default-argument spelling) are recorded in
 implementation cannot pin a field until those are closed or the field stays
 excluded.
 
+**Status — Phase 4 golden and pinned set (b1, measured; Phase 4 not implemented).**
+b1 lands the pre-change golden and the measurement test that ADR-063's
+amendment "L4 clang payload comparability" (test plan item 1) requires before
+the producer switch. It changes no L4 code path or output, leaves
+`CLANG_EXTRACTOR_VERSION` at `"0.13"`, adds no projection, no guard and no
+`REVISION_COMPARABLE_FIELDS` in production code.
+
+- **Golden.** `tests/golden/l4_clang/surface_0_13.jsonl`: a header line and one
+  line per catalog C++ TU (253 TUs, 0 dump failures, 2921 current-side entities,
+  about 1.0 MB). Each TU line carries its compile unit (the argv the spike uses)
+  and the reduced view the measurement compares: each entity's kind and the
+  candidate fields of that kind, in producer order. The full `SourceEntity`
+  payload is not stored; the reduced view is exactly the input `compare_views`
+  reads on the current side. Generator: `scripts/gen_l4_clang_golden.py`
+  (`--check` regenerates in memory and fails on any difference). The header
+  records clang `Ubuntu clang version 18.1.3 (1ubuntu1)`. Regenerating on a
+  different clang may change the file; regenerate in a deliberate commit.
+- **Golden drift test.** `test_golden_is_the_output_of_its_generator` regenerates
+  the golden in-process and asserts it equals the checked-in file. The golden stores
+  repository-relative paths only, so it is identical in any checkout (checked from a
+  copy at another path).
+- **Measurement test.** `tests/test_l4_clang_projection_golden.py` (`integration` and
+  `slow`; skips without clang, and skips when the live clang differs from the version
+  in the golden header). It reads the current side from the golden, computes the
+  projection side live with the spike's configuration, compares per TU and per
+  `(kind, field)`, and asserts the measured pinned set equals the literal
+  `EXPECTED_PINNED`. The literal is written by hand from the amendment's candidate
+  set and the rule A3 (a field that differs on any TU is dropped). It is not
+  computed from the projection helper. A field is pinned only when its status is
+  `equal` with at least two paired entities.
+- **Measured pinned set.** `typedef.qualified_name`, `typedef.value`,
+  `typedef.visibility`, `typedef.api_relevant`. The last two are equal by
+  construction (`base.entity_from_typedef` hard-codes them), so they pin nothing
+  about the projection; the rule admits them and b2 must decide whether to keep
+  them. Equal only with no evidence (`equal_empty`, not pinned): `mangled_name`
+  on `record`, `enum`, `typedef`, and `variable.value`. Not established
+  (one paired variable): every `variable` row.
+
+Per-(kind, field) table, the same run as the spike (`scripts/measure_l4_clang_projection.py --json`,
+253 TUs, 0 failed; the golden reproduces it):
+
+| kind | field | compared | both empty | differing pairs | status | TUs differing |
+|---|---|---:|---:|---:|---|---:|
+| function | qualified_name | 1531 | 0 | 1045 | differs | 205 |
+| function | mangled_name | 1531 | 403 | 22 | differs | 18 |
+| function | visibility | 1531 | 0 | 1531 | differs | 249 |
+| function | api_relevant | 1531 | 0 | 1531 | differs | 249 |
+| function | value | 1531 | 1513 | 18 | differs | 7 |
+| function | signature_hash | 1531 | 0 | 1374 | differs | 247 |
+| variable | qualified_name | 1 | 0 | 0 | equal (n=1, not established) | 0 |
+| variable | mangled_name | 1 | 0 | 1 | differs | 1 |
+| variable | visibility | 1 | 0 | 1 | differs | 1 |
+| variable | api_relevant | 1 | 0 | 1 | differs | 1 |
+| variable | value | 1 | 1 | 0 | equal_empty | 0 |
+| variable | type_hash | 1 | 0 | 0 | equal (n=1, not established) | 0 |
+| record | qualified_name | 290 | 0 | 130 | differs | 75 |
+| record | mangled_name | 290 | 290 | 0 | equal_empty | 0 |
+| record | visibility | 290 | 0 | 290 | differs | 168 |
+| record | api_relevant | 290 | 0 | 290 | differs | 168 |
+| record | type_hash | 290 | 0 | 290 | differs | 168 |
+| enum | qualified_name | 5 | 0 | 5 | differs | 5 |
+| enum | mangled_name | 5 | 5 | 0 | equal_empty | 0 |
+| enum | visibility | 5 | 0 | 5 | differs | 5 |
+| enum | api_relevant | 5 | 0 | 5 | differs | 5 |
+| enum | type_hash | 5 | 0 | 5 | differs | 5 |
+| typedef | qualified_name | 22 | 0 | 0 | equal | 0 |
+| typedef | mangled_name | 22 | 22 | 0 | equal_empty | 0 |
+| typedef | visibility | 22 | 0 | 0 | equal (by construction) | 0 |
+| typedef | api_relevant | 22 | 0 | 0 | equal (by construction) | 0 |
+| typedef | value | 22 | 0 | 0 | equal | 0 |
+| typedef | type_hash | 22 | 0 | 22 | differs | 14 |
+
+**Dropped fields** (differ on at least one TU, dropped for the whole revision
+pair under A3): every `function` field, `record.{qualified_name, visibility,
+api_relevant, type_hash}`, `enum.{qualified_name, visibility, api_relevant,
+type_hash}`, `typedef.type_hash`, and `variable.{mangled_name, visibility,
+api_relevant}`. The candidate `variable` fields are not established and stay out.
+
+Presence (not a field, from the same run): current side 2600 functions, projected
+68629, of which 66953 are out of scope and excluded from pairing. The
+projected-only out-of-scope set is the public-surface problem below.
+
+**What remains for b2** (a separate PR, after this one merges), in order:
+1. The projected side in production code, with the public-surface filter applied
+   before projecting. Without the filter the projection carries 66953
+   out-of-scope declarations (for example `fclose`, `__uflow`, `asprintf`); the
+   golden shows the current side is scoped to the case directory. The gaps that
+   block the dropped fields are closed here or the fields stay excluded:
+   [Clang projection](../known-gaps.md#clang-projection-adr-063-phase-4-prerequisites)
+   (origin unset, bare member and namespace names, unmangled `distance`, hash and
+   default-argument spelling).
+2. The ADR-063 amendment's A1–A4 guard: the payload-revision mismatch
+   condition, the intersection rule that uses `REVISION_COMPARABLE_FIELDS`, and
+   the `SOURCE_FACT_COVERAGE_INCOMPLETE` / `unknown` assurance reporting. The
+   decision on whether the two equal-by-construction typedef fields are kept is
+   made here.
+3. The `CLANG_EXTRACTOR_VERSION` bump from `"0.13"` to `"0.14"`, last, once 1 and 2
+   are in place. Re-run this measurement and the golden test in that PR; the
+   expected set in `tests/test_l4_clang_projection_golden.py` changes there, not
+   before.
+
+
 ### Phase 5 — one entity identity
 
 `SourceEntity.identity` derived from `model.identity.EntityId` (ADR-063

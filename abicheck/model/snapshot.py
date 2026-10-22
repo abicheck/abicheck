@@ -161,6 +161,13 @@ class AbiSnapshot:
     # Set only when the user explicitly opted into an auto CastXML→Clang
     # fallback.  The reason remains visible after snapshot serialization.
     ast_fallback_reason: str | None = field(default=None, kw_only=True)
+    # ADR-085 D3: castxml cannot record a class-template pattern's parameter
+    # defaults, so a castxml run scans the public headers it parsed for a
+    # template parameter list with a default argument. True: one exists, so
+    # the defaults are not recorded and a default-argument change is not
+    # assessed. False: the scan found none. None: no scan ran (any non-castxml
+    # producer, and every snapshot predating schema v63).
+    template_default_header_scan: bool | None = field(default=None, kw_only=True)
 
     # CastXML version-gate outcome (schema v13, ``castxml_policy.py``). None on
     # snapshots not produced by a version-gated CastXML L2 scan (older

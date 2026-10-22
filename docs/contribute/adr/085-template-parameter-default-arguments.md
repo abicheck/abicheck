@@ -1,7 +1,7 @@
 # ADR-085: Template-Parameter Default Arguments Are a Recorded Fact, and a Header-Level Default Change Is an API Break
 
 **Date:** 2026-10-21
-**Status:** Proposed — drafted for maintainer decision; no behaviour change until accepted. The G28 Phase 5 investigation ([g28-castxml-clang-l2-parity-hardening.md](../plans/g28-castxml-clang-l2-parity-hardening.md)) measured the current state; this ADR decides what the snapshot records and what verdict a default change earns.
+**Status:** Accepted (2026-10-21). Implementation: see the Implementation slices below and [G28 Phase 5](../plans/g28-castxml-clang-l2-parity-hardening.md).
 
 Governed by: [ADR-009](009-verdict-system-and-exit-codes.md) (verdict and exit codes), [ADR-028](028-source-build-evidence-pack.md) (artifact evidence is authoritative), [ADR-061](061-responsibility-package-architecture.md) (owner of each stage), [ADR-063](063-one-semantic-pipeline.md) (the `Fact` availability model that the schema history cites for field conversion), [ADR-084](084-binary-depth-source-contract-gate.md) (`API_BREAK` buckets and the binary-depth gate).
 
@@ -11,7 +11,7 @@ A template parameter may carry a default argument: `template <typename T, typena
 
 Three shapes are relevant, measured on both header backends (`compile.frontend: castxml` and `clang`) in G28 Phase 5:
 
-- **A. An exported instantiation carries the default** (`template class descriptor<float>;`, `case87_default_template_arg_changed`). The default-substituted symbol changes. The current detector `detect_default_template_arg_changed` (`abicheck/diff_cpp_patterns.py`) pairs the removed and added instantiation and reports `DEFAULT_TEMPLATE_ARG_CHANGED`. This is `BREAKING` on both backends. It is binary evidence, so `BREAKING` is correct.
+- **A. An exported instantiation carries the default** (`template class descriptor<float>;`, `case87_default_template_arg_changed`). The default-substituted symbol changes. The current detector `detect_default_template_arg_changed` (`abicheck/compare/template_param_defaults.py`) pairs the removed and added instantiation and reports `DEFAULT_TEMPLATE_ARG_CHANGED`. This is `BREAKING` on both backends. It is binary evidence, so `BREAKING` is correct.
 - **B. Header-only, nothing public names the template.** No symbol and no public signature depends on the default. CastXML emits no record at all for an uninstantiated class template, so the change reads `NO_CHANGE`. The clang AST has the template pattern and `TemplateTypeParmDecl.defaultArg`, but `dumper_clang.py` does not record the default, so it also reads `NO_CHANGE`. A consumer's own `Box<char>` compiles against a different type, which is a source-level change that the L4 source replay reports as a risk (`public_dependency_role_changed`).
 - **C. Default-substituted type reaches a public signature** (`void take(const Box<char>&)`). The mangled name changes, and the change is reported as `func_removed` plus `func_added` with no default label on either backend. The verdict is correct and only the explanation is missing.
 
@@ -44,7 +44,7 @@ Introduce `TEMPLATE_PARAM_DEFAULT_CHANGED` (name to be checked against `model/ch
 
 - both sides carry recorded defaults (D1) for the same template pattern,
 - a parameter's default spelling differs, and
-- no `DEFAULT_TEMPLATE_ARG_CHANGED` finding already covers the same template. Shape A keeps its `BREAKING` finding and does not also emit this kind, so one root cause is not counted twice. The suppressed relation is recorded with its rule, per the "record before disposing" rule in `AGENTS.md`.
+- no `DEFAULT_TEMPLATE_ARG_CHANGED` finding already covers the same template. Shape A keeps its `BREAKING` finding and does not also emit this kind, so one root cause is not counted twice. The covered relation is recorded as `DEDUPLICATED` with its rule, per the "record before disposing" rule in `AGENTS.md`.
 
 `DEFAULT_TEMPLATE_ARG_CHANGED` keeps `BREAKING` and its exported-instantiation meaning. It is unchanged by this ADR.
 
@@ -103,9 +103,64 @@ Each slice is independently reviewable and is not started until this ADR is acce
 
 1. **Model and schema.** `RecordType.template_param_defaults` as a `Fact`, `storage/fact_codec.py` encode/decode with availability family, `SCHEMA_VERSION` 61 with its history note, and the old-snapshot UNKNOWN load path. No detector, no behaviour change.
 2. **Clang records defaults.** `dumper_clang.py` populates the fact from `TemplateTypeParmDecl.defaultArg` for class templates. castxml writes nothing, so its snapshots stay UNKNOWN.
-3. **New kind and detector.** `TEMPLATE_PARAM_DEFAULT_CHANGED` in the registry and kind names, a detector in `diff_cpp_patterns.py` gated on both sides being recorded, the shape-A suppression, `HEADER_OR_SOURCE_GATED` membership with its non-binary reason, and the canonical-identity classification.
+3. **New kind and detector.** `TEMPLATE_PARAM_DEFAULT_CHANGED` in the registry and kind names, a detector in `compare/template_param_defaults.py` gated on both sides being recorded, the shape-A suppression, `HEADER_OR_SOURCE_GATED` membership with its non-binary reason, and the canonical-identity classification.
 4. **Assurance gap for castxml.** The UNKNOWN-on-either-side coverage/assurance gap, its rendering in the report, and the header-backend capability reference (`docs/reference/header-backend-capabilities.md`, Known gaps section) updated to the new behaviour.
 5. **Closure.** Update the known-gaps entry to closed, the G28 Phase 5 plan, the ADR index status, the surface registry, and a changelog fragment.
+
+## Implementation status (2026-10-22)
+
+Landed on `feat/adr-085-template-default-args`. Deviations from the text above
+are recorded here rather than edited into the decision.
+
+- **Schema version is 62, not 61.** `SCHEMA_VERSION` was already 61: the
+  `RecordType.specialization_declared_fact` change (ADR-063 follow-up, #1684)
+  took it. The new field is v62, with its history note in
+  `storage/snapshot_schema_versions.py` and its availability constant in
+  `storage/fact_schema_versions.py`.
+- **Slice 1 (model and schema): landed.** `RecordType.template_param_defaults_fact`,
+  codec in `storage/fact_codec.py` with its validator in
+  `storage/fact_payload_validation.py`, encode-drop in `storage/snapshot_encode.py`,
+  registry entry in `model/fact_registry_entries_types.py`.
+- **Slice 2 (clang records defaults): landed, for type-parameter templates only.**
+  The clang walk reads `TemplateTypeParmDecl.defaultArg` through the merged
+  defaults index. A template with any non-type or template-template parameter
+  is not recorded (UNKNOWN), because its default spelling is not read. This is
+  a conservative limit, not a decision, and it is listed under *Remaining*.
+- **Slice 3 (kind and detector): landed.** `TEMPLATE_PARAM_DEFAULT_CHANGED`
+  (`API_BREAK`, `HEADER_OR_SOURCE_GATED`, `UNVERIFIED` identity bucket beside its
+  shape-A sibling). Detector in `compare/template_param_defaults.py`; the
+  pipeline entry in `policy/template_default_changes.py` records each shape-A
+  relation as `DEDUPLICATED` in the disposition ledger.
+- **Slice 4 (castxml assurance gap): landed (ADR-085 D3).** castxml cannot
+  record the defaults, so its run scans the public headers it parsed:
+  `extract/headers/template_default_scan.py` looks for a template parameter
+  list with a top-level default argument, and the result is persisted as
+  `AbiSnapshot.template_default_header_scan` (schema v63; `None` when no scan ran).
+  The rollup in `policy/analysis_assurance/_template_defaults.py` reports the
+  gap `template-parameter defaults (castxml cannot record them)` for each castxml
+  side whose scan is `True`, and the run reads `partial`. The compare verdict
+  stays `NO_CHANGE`: castxml still cannot see the change, so only the status
+  reports the gap. The rollup also reports a gap for any class-template pattern
+  whose defaults are not recorded, which covers pre-v62 snapshots and
+  non-type-parameter templates on clang.
+- **Slice 5 (closure): partial.** The known-gap entry is PARTIAL, not closed. The
+  G28 Phase 5 section reflects the same state.
+
+## Remaining
+
+1. **Verdict decision (open).** D3's wording says the castxml run "does not
+   produce NO_CHANGE". The landed slice reports the gap at the status level:
+   the castxml verdict stays `NO_CHANGE`, and the run reads `partial` with the
+   gap named. Making the verdict itself non-`NO_CHANGE` on castxml needs a
+   decision on what that verdict should be, and it would break the
+   same-evidence-same-verdict parity the test plan states. Confirm which reading
+   is meant.
+2. **Parity test.** Landed for the header-only shape: clang reports
+   `template_param_default_changed`, castxml reports the gap and no kind
+   (`tests/test_default_template_arg_l2_matrix.py`).
+3. **Non-type and template-template parameters.** Record their defaults so such
+   a template is not UNKNOWN.
+4. **Function-template defaults.** Same D1 contract; a separate slice, as above.
 
 ## Not done
 

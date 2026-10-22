@@ -354,6 +354,16 @@ class RecordType:
     specialization_declared_fact: Fact[bool] | None = field(
         default=None, kw_only=True, compare=False
     )
+    # Schema v62, no legacy sibling: for a class-template pattern (the record
+    # with ``is_template_pattern``), one entry per template parameter in
+    # declaration order -- the spelled default argument, or ``None`` when that
+    # parameter has no default. PRESENT only when a producer walked every
+    # parameter of the pattern and each one is a type parameter. CastXML never
+    # records it (UNKNOWN); a pre-v62 snapshot has no PRESENT value. An
+    # UNKNOWN side never compares equal to a recorded side (ADR-085 D1).
+    template_param_defaults_fact: Fact[tuple[str | None, ...]] | None = field(
+        default=None, kw_only=True, compare=False
+    )
 
     def __post_init__(
         self,

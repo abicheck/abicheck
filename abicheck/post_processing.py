@@ -810,7 +810,7 @@ class DetectCppPatterns:
       per-symbol ``func_removed`` children)
     * ``detect_cpu_dispatch_isa_dropped`` (likewise)
     * ``detect_tag_type_renamed``
-    * ``detect_default_template_arg_changed``
+    * ``detect_template_default_changes`` (ADR-085)
     * ``detect_inline_body_renamed_member``
     """
 
@@ -829,13 +829,13 @@ class DetectCppPatterns:
         """
         from .diff_cpp_patterns import (
             detect_cpu_dispatch_isa_dropped,
-            detect_default_template_arg_changed,
             detect_inline_body_renamed_member,
             detect_sycl_overload_set_removal,
             detect_tag_type_renamed,
         )
         from .diff_serialization import detect_serialization_tag_changes
         from .diff_templates import detect_missing_instantiations
+        from .policy.template_default_changes import detect_template_default_changes
 
         # `run` returns early when there is no baseline, so this is never
         # reached with `ctx.old is None`; bound locally so mypy sees it too.
@@ -852,7 +852,7 @@ class DetectCppPatterns:
         new_findings.extend(isa_findings)
 
         new_findings.extend(detect_tag_type_renamed(old, ctx.new))
-        new_findings.extend(detect_default_template_arg_changed(old, ctx.new))
+        new_findings.extend(detect_template_default_changes(old, ctx, changes))
         from .compare.internal_namespaces import DEFAULT_INTERNAL_NAMESPACES
 
         new_findings.extend(

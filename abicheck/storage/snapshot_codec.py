@@ -305,6 +305,10 @@ def decode_snapshot(
     ast_toolchain_supported = (
         raw_ast_supported if isinstance(raw_ast_supported, bool) else None
     )
+    raw_header_scan = d.get("template_default_header_scan")
+    template_default_header_scan = (
+        raw_header_scan if isinstance(raw_header_scan, bool) else None
+    )
     raw_ast_unsupported_reasons = d.get("ast_toolchain_unsupported_reasons")
     ast_toolchain_unsupported_reasons = (
         [str(r) for r in raw_ast_unsupported_reasons]
@@ -482,6 +486,7 @@ def decode_snapshot(
         ast_toolchain=ast_toolchain,
         ast_fallback_reason=ast_fallback_reason,
         ast_toolchain_supported=ast_toolchain_supported,
+        template_default_header_scan=template_default_header_scan,
         ast_toolchain_unsupported_reasons=ast_toolchain_unsupported_reasons,
         frontend_context_kind=frontend_context_kind,
         dependency_scope=dependency_scope,

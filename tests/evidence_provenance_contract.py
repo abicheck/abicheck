@@ -162,6 +162,7 @@ PROVENANCE_UNVERIFIED = frozenset(
         "declaration_renamed",
         "default_argument_changed",
         "default_template_arg_changed",
+        "template_param_default_changed",
         "dt_relr_introduced",
         "dt_relr_removed",
         "dwarf_info_missing",
