@@ -148,3 +148,23 @@ def test_malformed_source_generation_degrades_to_unstated(raw: object) -> None:
     """Informational parsing degrades; it never aborts a load or drifts."""
     parsed = StorageVersions.from_dict({"source_generation": raw})
     assert parsed.source_generation == 0
+
+
+def test_positional_construction_keeps_the_existing_field_meanings() -> None:
+    """A positional caller's seventh argument is still the comparison contract.
+
+    The source axis is declared last. Declared among the generations, it shifted
+    ``comparison_contract_version`` and both provenance fields for every
+    positional caller, and an old ``1`` read as a source generation.
+    """
+    positional = StorageVersions(
+        PACKAGE_FORMAT_VERSION,
+        {},
+        "",
+        versioning.ProducerIdentity(),
+        0,
+        0,
+        COMPARISON_CONTRACT_VERSION,
+    )
+    assert positional.comparison_contract_version == COMPARISON_CONTRACT_VERSION
+    assert positional.source_generation == 0

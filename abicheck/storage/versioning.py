@@ -353,13 +353,14 @@ class StorageVersions:
     producer: ProducerIdentity = field(default_factory=ProducerIdentity)
     extractor_generation: int = 0
     resolver_generation: int = 0
-    #: Source-tier (L4/L5) semantics epoch, ADR-062 D2 amendment. Stated only
-    #: by a package that carries source-tier facts; 0 otherwise.
-    source_generation: int = 0
     comparison_contract_version: int = COMPARISON_CONTRACT_VERSION
     #: Import provenance for an adapted legacy snapshot; 0/"" when native.
     source_schema_version: int = 0
     source_producer_generation: str = ""
+    #: Source-tier (L4/L5) semantics epoch, ADR-062 D2 amendment. Stated only
+    #: by a package that carries source-tier facts; 0 otherwise. Declared last so
+    #: that no existing positional argument changes its meaning.
+    source_generation: int = 0
 
     @classmethod
     def written_by_this_build(
