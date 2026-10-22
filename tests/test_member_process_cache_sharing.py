@@ -202,3 +202,153 @@ def test_single_flight_is_a_no_op_in_reference_mode(tmp_path, monkeypatch):
     with single_flight("a"), single_flight("a"):  # would self-deadlock if locked
         pass
     assert not (tmp_path / "cache" / "abi_check" / "locks").exists()
+
+
+# ---------------------------------------------------------------------------
+# In-process branches (forked children above are not seen by coverage)
+# ---------------------------------------------------------------------------
+
+
+@posix_only
+def test_single_flight_takes_and_releases_the_lock(tmp_path, monkeypatch):
+    import fcntl
+
+    monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "cache"))
+    with single_flight("held"):
+        (lock,) = (tmp_path / "cache" / "abi_check" / "locks").iterdir()
+        fd = os.open(lock, os.O_RDWR)
+        try:
+            with pytest.raises(BlockingIOError):
+                fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        finally:
+            os.close(fd)
+    fd = os.open(lock, os.O_RDWR)
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)  # released on exit
+    finally:
+        os.close(fd)
+
+
+@posix_only
+def test_single_flight_waits_for_a_holder_then_proceeds(tmp_path, monkeypatch):
+    import fcntl
+    import threading
+
+    from abicheck.storage import cross_process_lock
+
+    monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "cache"))
+    path = cross_process_lock._lock_path("busy")
+    assert path is not None
+    fd = os.open(path, os.O_CREAT | os.O_RDWR, 0o600)
+    fcntl.flock(fd, fcntl.LOCK_EX)
+    order: list[str] = []
+    released = threading.Timer(
+        0.2, lambda: (order.append("released"), fcntl.flock(fd, fcntl.LOCK_UN))
+    )
+    released.start()
+    with single_flight("busy"):
+        order.append("entered")
+    released.join()
+    os.close(fd)
+    assert order == ["released", "entered"]
+
+
+@posix_only
+@pytest.mark.parametrize("failure", ["lock_dir", "open", "flock"])
+def test_single_flight_runs_unlocked_when_locking_is_unavailable(
+    tmp_path, monkeypatch, failure
+):
+    import fcntl
+
+    from abicheck.storage import cross_process_lock
+
+    monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "cache"))
+    if failure == "lock_dir":
+
+        def no_dir(_backend):
+            raise OSError("read-only")
+
+        monkeypatch.setattr(
+            "abicheck.storage.ast_cache_location.backend_cache_dir", no_dir
+        )
+    elif failure == "open":
+        monkeypatch.setattr(
+            cross_process_lock, "_lock_path", lambda _n: "/nonexistent/x/y"
+        )
+    else:
+
+        def no_flock(_fd, _op):
+            raise OSError("flock unsupported")
+
+        monkeypatch.setattr(fcntl, "flock", no_flock)
+    ran: list[int] = []
+    with single_flight("x"), single_flight("x"):  # nested: would block if locked
+        ran.append(1)
+    assert ran == [1]
+
+
+@posix_only
+def test_single_flight_wait_honours_the_request_deadline(tmp_path, monkeypatch):
+    import fcntl
+
+    from abicheck import deadline
+    from abicheck.storage import cross_process_lock
+
+    monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "cache"))
+    path = cross_process_lock._lock_path("stuck")
+    assert path is not None
+    fd = os.open(path, os.O_CREAT | os.O_RDWR, 0o600)
+    fcntl.flock(fd, fcntl.LOCK_EX)
+    try:
+        calls = iter([None, deadline.DeadlineExceeded(0.0)])
+
+        def check():
+            exc = next(calls)
+            if exc is not None:
+                raise exc
+
+        monkeypatch.setattr(deadline, "check", check)
+        with pytest.raises(deadline.DeadlineExceeded), single_flight("stuck"):
+            pytest.fail("entered a lock another holder still has")
+    finally:
+        os.close(fd)
+
+
+@pytest.mark.parametrize(
+    ("backend", "group", "reference", "locked"),
+    [
+        ("clang", None, False, True),
+        ("castxml", None, False, True),
+        ("clang-normalized", None, False, False),
+        ("clang", "root", False, False),
+        ("clang", None, True, False),
+    ],
+)
+def test_ast_production_locks_only_disk_backed_content_keys(
+    tmp_path, monkeypatch, backend, group, reference, locked
+):
+    from abicheck.storage import cross_process_lock
+
+    monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "cache"))
+    if reference:
+        monkeypatch.setenv("ABICHECK_REFERENCE_MODE", "1")
+    names: list[str] = []
+    real = cross_process_lock.single_flight
+
+    def recording(name):
+        names.append(name)
+        return real(name)
+
+    monkeypatch.setattr(cross_process_lock, "single_flight", recording)
+    got = produce_ast_once_across_processes(backend, "k", lambda: "ast", group)
+    assert got == "ast"
+    assert names == ([f"ast:{backend}:k"] if locked else [])
+
+
+def test_probe_without_a_key_or_scope_records_nothing():
+    with probed_miss_scope():
+        with cache_only_probe(), pytest.raises(BaseException):
+            refuse_dump_while_probing("")
+        assert take_probed_miss("") is False
+    refuse_dump_while_probing("k")  # outside a probe: no signal at all
+    assert take_probed_miss("k") is False
