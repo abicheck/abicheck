@@ -757,6 +757,31 @@
           ],
           "description": "Schema 3.10 (ADR-067 D6): the additions-review gate's own evaluated result (policy allow/warn/block, the unacknowledged public additions found, and the orthogonal 0/1 gate_contribution), or null when this run never supplied an acknowledgment document to evaluate against.",
           "additionalProperties": true
+        },
+        "accepted_breaks": {
+          "type": "array",
+          "description": "Schema 6.4 (ADR-067 D5): one entry per acknowledged break that acknowledgment.breaks: accept made non-gating (disposition non_gating, application point acknowledgment). The verdict is unchanged; empty when nothing was accepted.",
+          "items": {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string"
+              },
+              "symbol": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "verdict_class": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            },
+            "additionalProperties": true
+          }
         }
       }
     },
@@ -3506,7 +3531,7 @@
             },
             "impact_group_id": {
               "type": "string",
-              "description": "G29 Phase 3 follow-up (ADR-052, schema 2.19), revised in schema 6.4: this finding's RootCauseCorrelator group id (abicheck.impact.correlation.correlate_root_causes) when it is a member of a multi-piece correlator group, else the same value as root_cause_id. Present iff root_cause_id is, or this finding is a correlator group member -- which can be without root_cause_id, e.g. a --used-by pair of a shared FUNC_REMOVED and its CONSUMER_REQUIRED_SYMBOL_REMOVED sibling that share a bare symbol and no caused_by_type. When both are present they are equal."
+              "description": "G29 Phase 3 follow-up (ADR-052, schema 2.19), revised in schema 6.5: this finding's RootCauseCorrelator group id (abicheck.impact.correlation.correlate_root_causes) when it is a member of a multi-piece correlator group, else the same value as root_cause_id. Present iff root_cause_id is, or this finding is a correlator group member -- which can be without root_cause_id, e.g. a --used-by pair of a shared FUNC_REMOVED and its CONSUMER_REQUIRED_SYMBOL_REMOVED sibling that share a bare symbol and no caused_by_type. When both are present they are equal."
             },
             "root_cause_evidence": {
               "type": "object",

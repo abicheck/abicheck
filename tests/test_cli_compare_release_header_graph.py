@@ -141,6 +141,9 @@ def _graphs_attached(
     (CodeRabbit review). The count is recoverable from the ids, not the
     reverse.
     """
+    # The recorder runs in the member's worker; keep members on threads so
+    # its observations land in this process.
+    monkeypatch.setenv("ABICHECK_MEMBER_PROCESSES", "0")
     import abicheck.workflows.dump.native as native
     from abicheck.cli import main
 

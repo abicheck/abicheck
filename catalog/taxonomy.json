@@ -5112,5 +5112,29 @@
   "subjects": [
    "vtable-and-virtual-dispatch"
   ]
+ },
+ "case221_public_api_internal_type_renamed": {
+  "entity": "scenario",
+  "scenario_kind": "capability",
+  "operation": "compare",
+  "ecosystem": "generic",
+  "topics": [
+   "source"
+  ],
+  "languages": [],
+  "scope": "single-library",
+  "artifact_shape": "fixture-pair",
+  "validation_owner": "evidence-cases",
+  "related_rules": [
+   "internal-declaration-renamed-reconciled",
+   "public-api-gains-internal-dependency"
+  ],
+  "rule_slug": null,
+  "variant_of": null,
+  "relation_type": null,
+  "relation_axis": null,
+  "subjects": [
+   "internal-dependency-reachability"
+  ]
  }
 }

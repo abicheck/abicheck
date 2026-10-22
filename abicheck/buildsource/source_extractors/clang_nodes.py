@@ -294,6 +294,29 @@ def _node_line(node: dict[str, Any]) -> int:
     return 0
 
 
+def _collect_files(node: Any, files: set[str] | None = None) -> set[str]:
+    """Every distinct file path referenced anywhere in the clang AST.
+
+    clang's ``file`` field is sticky (omitted when unchanged from the prior node
+    in source order), so each file it parsed is named at least once at its first
+    contributing node; the set of explicit mentions is the read-file set.
+    """
+    if files is None:
+        files = set()
+    if isinstance(node, dict):
+        loc = node.get("loc")
+        if isinstance(loc, dict):
+            for key in ("file", "expansionLoc", "spellingLoc", "includedFrom"):
+                val = loc.get(key)
+                if isinstance(val, str) and val:
+                    files.add(val)
+                elif isinstance(val, dict) and isinstance(val.get("file"), str):
+                    files.add(val["file"])
+        for child in node.get("inner", []):
+            _collect_files(child, files)
+    return files
+
+
 #: Single-child wrapper expression nodes to descend through before deciding
 #: whether an initializer is a lone literal — so `42` reads as the literal "42"
 #: while a compound expression is fingerprinted whole.

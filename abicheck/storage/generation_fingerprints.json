@@ -3,7 +3,7 @@
     "files": {
       "abicheck/btf_metadata.py": "614321e6140b32e7518deb3991dc9b9421107688c952542808ec4da88a17dc73",
       "abicheck/ctf_metadata.py": "42d3f588c6c4567c2a9d43a3ef5b886a753c37dd5357a4199d81d7ffc60d2109",
-      "abicheck/dumper.py": "75afb7ebf255a37b2e6f15ac3309f607c6138488d3c38c23d8564e5b168d5ae8",
+      "abicheck/dumper.py": "c8bbb5f77c4e8d976f3af508602ef62a3fd39c85750060fa16d403f52264577c",
       "abicheck/dwarf_advanced.py": "91cfc7f410a37e7d7ba3ec922ff2944b81253fde3dcfdb806be032087822b339",
       "abicheck/dwarf_metadata.py": "9b9c938fcfdee9e498ef007023c040d914cc8fbc4e6971ef06768463ff69002e",
       "abicheck/dwarf_presence.py": "7e73580ec7a02fdf24e3815cb89e42aa6fe00e46e8cda6b7fe9d547f06ac3f06",
@@ -49,7 +49,7 @@
       "abicheck/extract/elf_symbol_fastpath.py": "9731dd43e2a99edd25f70a77c3c1fa02612d0de537cc73a98ea90b79167b1c21",
       "abicheck/extract/elf_symbol_tables.py": "20aad46c8363b26b371f367dae054f96c92773551b1adec67628348613f4401f",
       "abicheck/extract/elf_symbol_versions.py": "b2aa29df27ed51b9cbe3f6b94e9c99e391036216621fa35cb72dc922ecf39786",
-      "abicheck/extract/env_flags.py": "99a67fc204d3333b16e9314010c1a1d0804ffb00d271fcc63aa7925b57c24ac7",
+      "abicheck/extract/env_flags.py": "6a1343268cdfcd4b2ccaf91008d96b611973bf5cab04467c2585f012e1f5466c",
       "abicheck/extract/export_symbol_identity.py": "2146bd67207411943258124a24271542c8b9767344c1b404aaa9133c0358ff00",
       "abicheck/extract/export_table_read.py": "7783c3baba176ef8b47cb99361f389984bb1797c37ba5d9120866359f60c3601",
       "abicheck/extract/flat_map_dependency_scope.py": "77659ce966d856c4b9008cdc6cf88250a3f50314fdf04140712f4e3797894648",
@@ -149,9 +149,9 @@
       "abicheck/symvers_metadata.py": "372737765cd132e6e87ed891dd465d2958e04debbef774e45212ceb3036871cb",
       "abicheck/type_metadata.py": "9997189de8dac522fd1db8be5ae491d811139503f83abaaded89038eb4aa9cdf"
     },
-    "fingerprint": "bfc49c02bf17c38476b9bf85506c93c63055f16dc7e66f449cc4ec6a539c1776",
+    "fingerprint": "2983b1afa088023133cd32afe31adb187fcf8c30ea7ffc8802e51a5c588eef38",
     "generation": 5,
-    "reason": "merge with main: main's tu_jobs.py worker-clamp refactor (no fact change) on top of this branch's generation 5 (castxml specialization_declared_fact)"
+    "reason": "memory-trace stage marks only"
   },
   "resolver": {
     "files": {
@@ -161,7 +161,7 @@
       "abicheck/compare/export_owner_resolution.py": "e9108cbdf0459cb8171f63ca328138558cfd032bff9124e4b9bd0fd5bf8553c8",
       "abicheck/debug_resolver.py": "cdcc4f72bd8fb5304fe030b3e1365da488ad009397e014ba56931a3f311cf1f3",
       "abicheck/impact/use_case_reachability.py": "4882b891f0d2d298d200d8ff8ee74fbb3b48509813cb6fbc999e1a6628fb0326",
-      "abicheck/post_processing_reachability.py": "4932e6c5e2fad3b56e054081883bd41bffc7df5b168ab4d6284389c645670df1",
+      "abicheck/post_processing_reachability.py": "7dac33964797c4b0b40c123a6363e78162402c4e77ef81d38827dbab9d30e48e",
       "abicheck/storage/native_identity_aliases.py": "061e634659b371f1688cfcd4845fdcbe6147b9c2cfddaa4285dd34c757ca80ef",
       "abicheck/type_reachability.py": "89d8db3c507a58004fd6b38ad4fee5ea6c9b40a9da97f34d8067ae440aa9e9bb",
       "abicheck/type_reachability_spelling.py": "4262f30db17f2a4c5ba2a4341b8eed9f1408e335825644845e10cb08838995cb",
@@ -169,8 +169,8 @@
       "abicheck/workflows/compare/resolve.py": "dc0381227c9e8dacaa39858d3f534ff45cbb3177f9b8645a8728c3f25c460793",
       "abicheck/workflows/elf_dependency_resolver.py": "18524281e550a7f25225441cd063de58ec33281e7bacf65fef98d1fefb101426"
     },
-    "fingerprint": "b67c0717ab797e7f7d6c14f789430b6399fa2412a0cd98f1bccbad1901aef43c",
-    "generation": 1,
-    "reason": "Moved impact/use_case_impact.py to impact/use_case_reachability.py (use-case entrypoint reachability, unchanged logic) and added it to the resolver scope; no recorded or derived fact changes."
+    "fingerprint": "22d1b29fc580f7fd0e389ea9d4ea7e17b55d54f905e5e30db05c198a13dbf8cd",
+    "generation": 2,
+    "reason": "Merge of main: #1683 relocated the use-case reachability code behind workflows/compare with no change to what the resolver derives; re-recording the fingerprint over the merged tree."
   }
 }

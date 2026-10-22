@@ -13,7 +13,7 @@ matters for a reviewer is *legibility* — without reconciliation, the raw
 graph diff would show an unrelated node removal plus node addition, leaving
 a reader to infer by hand that they're "probably" the same declaration
 renamed. abicheck's graph reconciliation collapses that into one explicit
-`declaration_renamed` finding instead.
+`public_api_internal_type_renamed` finding instead.
 
 ## Old/new diff
 
@@ -47,13 +47,15 @@ for c in diff_source_graph_findings(old, new):
 ## Expected abicheck finding
 
 ```text
-public_api_internal_dependency_added demo::Config no internal dependency -> reaches 1 internal decl(s)/type(s)
-declaration_renamed demo::detail::RawConfigV2 demo::detail::RawConfig -> demo::detail::RawConfigV2
+public_api_internal_type_renamed demo::Config demo::detail::RawConfig -> demo::detail::RawConfigV2
 ```
 
-Verdict: COMPATIBLE_WITH_RISK — the risk finding fires independently of the
-rename explanation (reconciliation only explains/localizes; it never
-suppresses an existing finding).
+Verdict: COMPATIBLE_WITH_RISK — one finding, not two. The rename replaces the
+`public_api_internal_dependency_added` add that the raw diff would report for
+the renamed target, and the reconciliation's `declaration_renamed` for the same
+pair is not emitted again (G31 Phase D). The rename is recorded in the new
+finding's description with its match evidence, so nothing is dropped; no
+artifact-proven finding is affected.
 
 ## Minimum evidence
 
@@ -71,7 +73,7 @@ the qualified name changed on both sides so neither the alias tier nor a
 shared canonical id resolves the match, but the two nodes are each the sole
 `TYPE_HAS_FIELD_TYPE:field` target of `demo::Config` in their respective
 graphs — a unique structural position — so the weakest ("structural-context")
-tier safely pairs them and reports one `declaration_renamed` finding instead
+tier safely pairs them and reports one `public_api_internal_type_renamed` finding instead
 of two disconnected facts.
 
 ## Runtime failure demonstration

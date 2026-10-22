@@ -68,7 +68,7 @@ def _write(tmp_path: Path, removed: int, kept: int, extra_old: tuple[str, ...]):
     gone = [_fn(f"gone{i}") for i in range(removed)]
     keep = [_fn(f"keep{i}") for i in range(kept)]
     # An `elf` block is what makes a JSON snapshot carry binary evidence,
-    # which `--used-by` requires (`_require_used_by_binary_evidence`).
+    # which `--used-by` requires (`require_used_by_binary_evidence`).
     old = AbiSnapshot(
         library=_SONAME,
         version="1.0",

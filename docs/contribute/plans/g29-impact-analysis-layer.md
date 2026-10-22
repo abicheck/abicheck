@@ -171,7 +171,7 @@ model:
   read view — see the
   [Detector Impact Contract](../detector-impact-contract.md).
   `impact_group_id` now follows the `RootCauseCorrelator`'s groups (G29
-  Phase 6 impact-group follow-up, schema 6.4; see the Phase 6 section).
+  Phase 6 impact-group follow-up, schema 6.5; see the Phase 6 section).
 - **G29.5** (Phase 4, **slices 1-2 done, ADR-057**) — A consumer graph
   (`CONSUMER_REQUIRES_SYMBOL`, `CONSUMER_REQUIRES_VERSION`, …) that joins
   with the source graph so a `CONSUMER_REQUIRED_SYMBOL_REMOVED` finding can
@@ -549,7 +549,7 @@ scope.
 Also still open: the full `RootCauseCorrelator`-based correlation across
 consumer-overlay findings with no `caused_by_type` link (Phase 6) — which is
 also what would ever make `impact_group_id` diverge from `root_cause_id`
-(done in the Phase 6 impact-group follow-up, schema 6.4 -- see below).
+(done in the Phase 6 impact-group follow-up, schema 6.5 -- see below).
 The two reference docs below now exist (Slice 6 gave them enough real
 surface to be worth writing, closing what ADR-052 originally called
 premature) — the rest of this list is the original Phase 3 scope this
@@ -1893,7 +1893,7 @@ case, and nothing about that asymmetry is visible from either grouping's
 own code without deliberately tracing a bare-symbol, no-`caused_by_type`
 input through both.
 
-**Impact-group follow-up (schema 6.4).** `impact_assessment.impact_group_id`
+**Impact-group follow-up (schema 6.5).** `impact_assessment.impact_group_id`
 now follows `RootCauseCorrelator`'s groups instead of aliasing
 `root_cause_id`. It is resolved by `reporter_markdown.
 impact_group_lookup_for_changes` at the same call sites as
@@ -1910,7 +1910,7 @@ oracle over randomized change sets. `root_cause_id`, `root_cause_display`,
 `root_causes[]` and every report-mode grouping are unchanged. The
 group-level `root_causes[]` rollup still keys on `root_cause_id` and is not
 re-keyed by correlator group; that is a deliberate follow-up. Additive, so
-the report schema bumps 6.3 to 6.4; `impact_group_id` may now appear without
+the report schema bumps 6.3 to 6.5 (6.4 is main's accepted-breaks bump); `impact_group_id` may now appear without
 `root_cause_id`, which relaxes its presence rule. Covered by
 `tests/test_impact_group_id_correlator.py`.
 
@@ -2102,7 +2102,7 @@ Modified (recurring across phases): `abicheck/buildsource/source_graph.py`,
   `tests/test_sarif.py::TestImpactAssessmentRootCause` — Phase 3 Slice 7's
   per-finding `root_cause_id`/`root_cause_display`/`impact_group_id`, done.
 - `tests/test_impact_group_id_correlator.py` -- Phase 6 impact-group
-  follow-up (schema 6.4): correlator-derived `impact_group_id`, done.
+  follow-up (schema 6.5): correlator-derived `impact_group_id`, done.
 - `tests/test_entity_resolver.py` — Phase 2 D4 (scoped implementation),
   done: `EntityResolver.resolve`'s USR/mangled/qualified-signature fallback
   chain, idempotence, alias sharing + conflict recording for two v1 ids

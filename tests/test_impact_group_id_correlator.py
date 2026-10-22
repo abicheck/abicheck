@@ -1,5 +1,5 @@
 """``impact_assessment.impact_group_id`` follows the ``RootCauseCorrelator``
-groups (G29 Phase 6 follow-up, report schema 6.4).
+groups (G29 Phase 6 follow-up, report schema 6.5).
 
 Before this change ``impact_group_id`` was always an alias of ``root_cause_id``.
 Now a finding that is a member of a multi-piece correlator group carries that
@@ -258,7 +258,7 @@ class TestSchemaAcceptsGroupWithoutRootCause:
             ChangeKind.CONSUMER_REQUIRED_SYMBOL_REMOVED, "pub_helper", "consumer needs"
         )
         doc = json.loads(reporter.to_json(_result([func, consumer])))
-        assert doc["report_schema_version"] == "6.4"
+        assert doc["report_schema_version"] == "6.5"
         # A bare DiffResult lacks the pipeline-level required keys, so validate
         # each `changes` entry against the schema's own change definition.
         schema = load_compare_report_schema()

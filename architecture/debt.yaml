@@ -223,7 +223,7 @@
     },
     {
       "path": "abicheck/buildsource/source_extractors/_argv.py",
-      "baseline_lines": 1491,
+      "baseline_lines": 1293,
       "target": "extract/build-or-source",
       "rule": "no_growth",
       "disposition": "migrate",
@@ -234,7 +234,7 @@
     },
     {
       "path": "abicheck/buildsource/source_extractors/clang.py",
-      "baseline_lines": 1144,
+      "baseline_lines": 1131,
       "target": "extract/build-or-source",
       "rule": "no_growth",
       "disposition": "migrate",
@@ -245,7 +245,7 @@
     },
     {
       "path": "abicheck/buildsource/source_graph_findings.py",
-      "baseline_lines": 1762,
+      "baseline_lines": 1666,
       "target": "extract/build-or-source",
       "rule": "no_growth",
       "disposition": "migrate",
@@ -267,7 +267,7 @@
     },
     {
       "path": "abicheck/buildsource/source_replay.py",
-      "baseline_lines": 1120,
+      "baseline_lines": 1114,
       "target": "extract/build-or-source",
       "rule": "no_growth",
       "disposition": "migrate",
@@ -311,7 +311,7 @@
     },
     {
       "path": "abicheck/checker.py",
-      "baseline_lines": 1407,
+      "baseline_lines": 1405,
       "target": "compare",
       "rule": "no_growth",
       "disposition": "migrate",
@@ -333,7 +333,7 @@
     },
     {
       "path": "abicheck/cli_compare_helpers.py",
-      "baseline_lines": 1670,
+      "baseline_lines": 1656,
       "target": "workflows-or-frontends",
       "rule": "no_growth",
       "disposition": "migrate",
@@ -597,7 +597,7 @@
     },
     {
       "path": "abicheck/dumper.py",
-      "baseline_lines": 1228,
+      "baseline_lines": 1227,
       "target": "see ADR-061 ownership map",
       "rule": "no_growth",
       "disposition": "migrate",
@@ -795,7 +795,7 @@
     },
     {
       "path": "abicheck/policy_file.py",
-      "baseline_lines": 914,
+      "baseline_lines": 913,
       "target": "policy (done; classified, remaining debt is line count only)",
       "rule": "no_growth",
       "disposition": "migrate",
@@ -1873,7 +1873,7 @@
     },
     {
       "path": "tests/test_source_extractors_clang.py",
-      "baseline_lines": 3484,
+      "baseline_lines": 3482,
       "target": "tests/unit-or-contract ownership matching production migration",
       "rule": "no_growth",
       "disposition": "migrate",

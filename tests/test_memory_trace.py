@@ -704,3 +704,57 @@ def test_parent_scan_degrades_to_empty_without_proc(
     monkeypatch.setattr(memory_trace.os, "listdir", _no_proc)
     assert memory_trace._parent_map() == {}
     assert memory_trace._read_ppid(str(2**30)) is None
+
+
+class TestStageCpuAttribution:
+    """Marks and phases carry CPU clocks, so a stage's CPU is the difference
+    between the samples that bound it on one thread."""
+
+    def test_cpu_spent_between_two_marks_is_attributed_to_the_closing_mark(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        import time
+
+        out = tmp_path / "trace.jsonl"
+        _enable(monkeypatch, out)
+        memory_trace.mark("stage.a:done")
+        deadline = time.thread_time() + 0.05
+        while time.thread_time() < deadline:  # burn this thread's CPU
+            pass
+        memory_trace.mark("stage.b:done")
+        first, second = memory_trace.read_samples(out)
+        assert second["thread_cpu_s"] - first["thread_cpu_s"] >= 0.05
+        assert second["process_cpu_s"] - first["process_cpu_s"] >= 0.05
+        assert first["thread"] == second["thread"]
+
+    def test_compare_marks_each_stage_in_pipeline_order(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        sys.path.insert(0, str(Path(__file__).parent))
+        from _compare_workloads import signature_churn
+
+        from abicheck.checker import compare
+
+        old, new = signature_churn(20, tag="mt_")
+        out = tmp_path / "trace.jsonl"
+        _enable(monkeypatch, out)
+        compare(old, new)
+        stages = [
+            r["event"]
+            for r in memory_trace.read_samples(out)
+            if r["event"].startswith("compare.")
+        ]
+        assert stages == [
+            "compare.prologue:done",
+            "compare.detectors:done",
+            "compare.dispose:done",
+            "compare.assemble:done",
+            "compare.ledger:done",
+            "compare.rollup:done",
+        ]
+        cpu = [
+            r["thread_cpu_s"]
+            for r in memory_trace.read_samples(out)
+            if r["event"].startswith("compare.")
+        ]
+        assert cpu == sorted(cpu)
