@@ -142,6 +142,7 @@ from .policy.policy_file_namespaces import (
     internal_namespaces as _internal_namespaces,
 )
 from .policy_file import PolicyFile
+from .workflows import memory_trace
 from .workflows.comparison_input_receipt import comparison_input_receipt
 
 if TYPE_CHECKING:
@@ -974,22 +975,19 @@ def compare(
     comparability_warnings = [mismatch.reason] if mismatch is not None else []
     contract_coverage = _contract_coverage_status(old, new) if old is not None else None
 
-    # Discover any diff_* detector modules not already imported above, then run
-    # all registered detectors via the self-registering registry. ensure_loaded
-    # is a no-op for the modules checker already imports (they fix the canonical
-    # registration order); it only catches newly-added modules.
+    # Discover diff_* detector modules not imported above (a no-op for those
+    # checker imports, which fix the canonical registration order), then run.
     _detector_registry.ensure_loaded()
-    # An OLD->NEW detector has nothing to read with no baseline, and running
-    # it against a copy of the candidate would answer a comparison that was
-    # never requested. A detector registered ``one_sided`` is different: it
-    # audits one snapshot and never reads the other, so with no baseline it
-    # runs against the candidate and its findings are marked
-    # candidate-side (``DetectorRegistry.run_one_sided``).
+    # An OLD->NEW detector has nothing to read with no baseline; a detector
+    # registered ``one_sided`` audits one snapshot, so with no baseline it runs
+    # against the candidate, its findings marked candidate-side.
+    memory_trace.mark("compare.prologue:done")  # stage marks: off by default
     changes, detector_results = (
         _detector_registry.run_all(old, new)
         if old is not None
         else _detector_registry.run_one_sided(new)
     )
+    memory_trace.mark("compare.detectors:done")
 
     # Merge externally-computed findings (e.g. build-configuration / probe-matrix
     # findings from diff_matrix(), which need multi-config inputs compare() does
@@ -1030,6 +1028,7 @@ def compare(
         ledger=ledger,
         absent_baseline=absent_baseline(new.library) if old is None else None,
     )
+    memory_trace.mark("compare.dispose:done")
     kept = pp_ctx.kept
     redundant = pp_ctx.redundant
     opaque_filtered = pp_ctx.opaque_filtered
@@ -1375,6 +1374,7 @@ def compare(
     ack_policy = effective_compare_ack_policy(
         acknowledgment_policy, policy_file, acknowledgment_breaks
     )
+    memory_trace.mark("compare.assemble:done")
     result.disposition_ledger = finalize_ledger(
         ledger,
         result,
@@ -1382,6 +1382,7 @@ def compare(
         strict_acknowledgments=True,
         acknowledged_breaks=acknowledged_breaks_of(ack_policy),
     )
+    memory_trace.mark("compare.ledger:done")
     # ADR-067 D6 additions-review gate (a no-op without acknowledgment records).
     attach_additions_review(result, acknowledgments, ack_policy, old=old, new=new)
 
@@ -1391,17 +1392,14 @@ def compare(
     # just-built `result`, never a new probe; see policy/analysis_assurance/__init__.py's
     # module docstring for the full rationale and what is deferred.
     #
-    # `checker.compare()` only ever sees each snapshot's own *embedded*
-    # BuildSourcePack (`old.build_source`/`new.build_source`) — it has no
-    # visibility into an out-of-band `--old/new-build-info`/
-    # `--old/new-sources` pack directory the `compare` CLI may have
-    # resolved separately (`_resolve_side_pack`), so it passes exactly what
-    # it has. A caller that resolved such a pack must recompute this with
-    # the real pack passed explicitly (P1 review; see
-    # `compute_analysis_assurance`'s own docstring and
-    # `cli_compare_helpers._report_compare_result`'s recomputation).
+    # `checker.compare()` sees only each snapshot's *embedded* BuildSourcePack
+    # (`old/new.build_source`), never an out-of-band `--old/new-build-info`/
+    # `--old/new-sources` pack the CLI resolved (`_resolve_side_pack`); a
+    # caller holding one recomputes with it explicitly (P1 review; see
+    # `cli_compare_helpers._report_compare_result`).
     from .workflows.analysis_assurance_attach import attach_analysis_assurance
 
     result.edge_coverage = edge_coverage_report(old, new)  # I4, before the rollup
     attach_analysis_assurance(result, old, new)
+    memory_trace.mark("compare.rollup:done")
     return result

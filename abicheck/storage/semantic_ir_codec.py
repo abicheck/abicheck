@@ -58,6 +58,7 @@ from ..model.identity import EntityKind
 from ..model.occurrence import OccurrenceId, canonical_key
 from ..model.semantic_ir import PROJECTION_FIELD_NAMES, CanonicalEntity, SemanticIR
 from ..model.semantic_ir_record_layout import LEGACY_LAYOUT_DIAGNOSTIC
+from .decode_memo import memo_fact
 from .entity_ids import domain_entity_id_from_dto, domain_entity_id_to_dto
 from .guards import (
     diagnostics_from,
@@ -182,6 +183,21 @@ def _fact_value(
 
 
 def _fact_from_dict(
+    raw: Any, *, as_tuple: bool, field_name: str, as_int: bool = False
+) -> Fact[Any]:
+    # A repeat shape is answered from `decode_memo` (validation is a pure
+    # function of the dict and these flags; error text, which also names the
+    # field, only ever comes from a fresh build).
+    return memo_fact(
+        raw,
+        lambda r: _build_fact(
+            r, as_tuple=as_tuple, field_name=field_name, as_int=as_int
+        ),
+        ("semantic_ir", as_tuple, as_int),
+    )
+
+
+def _build_fact(
     raw: Any, *, as_tuple: bool, field_name: str, as_int: bool = False
 ) -> Fact[Any]:
     data = _mapping(raw, "semantic_ir fact")

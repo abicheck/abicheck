@@ -30,6 +30,7 @@ from dataclasses import replace
 from typing import TYPE_CHECKING, Any
 
 from ..model import AccessLevel, Fact, FactStatus, ParamKind, SymbolBinding
+from .decode_memo import memo_fact
 
 # ADR-061's 800-line production ceiling: the case-(a) legacy-load
 # corrections live in ``fact_backfill.py`` and are re-exported here, so
@@ -289,31 +290,21 @@ def decode_fact(
     """
     if not raw:
         return Fact.not_collected() if schema_version >= min_schema_version else None
-    # `Fact._make` shares one instance per common valueless shape (see its
-    # docstring) -- the decoder is where most snapshot facts are built.
+    # Repeat simple shapes come from `decode_memo` (same value as a fresh
+    # build); `Fact._make` shares one instance per common valueless shape.
+    return memo_fact(raw, _build_fact)
+
+
+def _build_fact(raw: Any) -> Fact[Any]:
     return Fact._make(
         FactStatus(raw["status"]),
         raw.get("value"),
         tuple(raw.get("diagnostics") or ()),
-        # T9 (duplication-and-convergence-assessment Phase 6 item 4):
-        # additive, unversioned field -- a document predating it simply has
-        # no "producer" key, and `raw.get(...)` already reads that as
-        # `None`, the identical default every pre-existing `Fact[...]`
-        # construction site already carries. No schema-version gate needed
-        # (unlike `value`/`diagnostics`' own siblings above, whose *absence*
-        # can mean something at an older schema version): `producer` was
-        # never required for correctness, only ever additional attribution.
-        # Codex review: rejected rather than coerced if not a string, the
-        # same discipline every other provenance-shaped field in this
-        # package already applies (`fact_availability.py`'s own
-        # `producer`/`recipe`/`scope`, `semantic_ir_codec.py`'s entity
-        # `producer`) -- `str(7)` and `str("7")` would otherwise
-        # deserialize identically, letting a malformed/hand-edited
-        # document's producer claim look like real attribution. `None`
-        # (absent key, or an explicit JSON `null`) is the field's own,
-        # legitimate "no attribution recorded" value and is passed through
-        # rather than into `provenance_text`, which rejects non-str
-        # unconditionally and would raise on this legitimate case.
+        # T9: additive, unversioned field -- absent reads as `None`. Rejected
+        # rather than coerced if not a string (`str(7)` and `str("7")` would
+        # otherwise deserialize identically), the same discipline every other
+        # provenance-shaped field here applies; `None` is the legitimate "no
+        # attribution recorded" value and bypasses `provenance_text`.
         (
             None
             if raw.get("producer") is None

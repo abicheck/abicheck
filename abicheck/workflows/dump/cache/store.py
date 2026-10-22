@@ -142,19 +142,18 @@ def _write_entry(snap: AbiSnapshot, key: str, binary_path: Path) -> None:
     try:
         _CACHE_DIR.mkdir(parents=True, exist_ok=True)
         cache_file = _CACHE_DIR / f"{key}.json.zst"
-        from ....serialization import write_snapshot
         from ....snapshot_io import ZSTD_LEVEL_CACHE, SnapshotCompression
+        from ....storage.snapshot_codec import write_snapshot_compact
 
-        write_snapshot(
+        # Compact single-shot JSON: a cache entry is machine-only, so the
+        # indented streamed writer's whitespace is pure cost (see
+        # ``write_snapshot_compact``). Entries are private and any read
+        # failure is already a miss.
+        write_snapshot_compact(
             snap,
             cache_file,
             compression=SnapshotCompression.ZSTD.value,
             zstd_level=ZSTD_LEVEL_CACHE,
-            # Streamed: a cache entry is private and any read failure is
-            # already a miss, so the declared-size cross-check a one-shot
-            # zstd frame carries buys nothing here, while holding the whole
-            # JSON text and its bytes cost ~0.5 GiB on a large snapshot.
-            zstd_content_size=False,
         )
         legacy_file = _CACHE_DIR / f"{key}.json"
         if legacy_file.exists():

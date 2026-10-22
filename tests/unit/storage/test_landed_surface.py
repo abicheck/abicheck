@@ -82,6 +82,7 @@ _INTERNAL_MODULES = (
     "abicheck.storage.project_package_archive",
     "abicheck.storage.zip_member",
     "abicheck.storage.generation_scope",
+    "abicheck.storage.decode_memo",
 )
 
 

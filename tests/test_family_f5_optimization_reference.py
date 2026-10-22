@@ -95,6 +95,7 @@ _NEEDS_L5 = "UNCOVERED: L3-L5 build-source graph extraction (needs a compile dat
 COVERAGE: dict[str, str] = {
     # ---- memoized functions ----
     "abicheck.storage.code_identity::memoized::abicheck_code_fingerprint": B,
+    "abicheck.policy.selectors::memoized::_ns_forms": "UNCOVERED: pure function of a symbol name (demangle + template-argument strip); no cell runs a namespace suppression rule. Its equivalence is pinned by tests/test_disposition_hot_path_equivalence.py",
     "abicheck.model.semantic_ir_function_signature::memoized::_shared_present": B,
     "abicheck.storage.code_identity::memoized::abicheck_modules_fingerprint": H,
     "abicheck.model.graph_identity::memoized::closure_discriminator_free_identity": "UNCOVERED: pure string memo over closure spellings; no reference-mode bypass cell applies. Its behaviour is pinned by tests/test_closure_respelling.py property tests instead",
@@ -153,6 +154,7 @@ COVERAGE: dict[str, str] = {
     # ---- explicitly keyed memory caches ----
     "abicheck.buildsource.header_include_memo::memory_cache::_MEMO": _NEEDS_L5,
     "abicheck.buildsource.pattern_facts::memory_cache::_SCAN_MEMO": H,
+    "abicheck.storage.decode_memo::memory_cache::_FACT_MEMO": D,
     "abicheck.demangle::memory_cache::_BATCH_CACHE_FAIL": R,
     "abicheck.demangle::memory_cache::_BATCH_CACHE_OK": R,
     "abicheck.dumper_ast_config_cpp20::memory_cache::_SCAN_MEMO": "UNCOVERED: C++20 module/dialect header scan; only for headers using C++20 features",
@@ -542,6 +544,9 @@ def _threads_run(
     spy = GrantSpy()
     with monkeypatch.context() as mp:
         mp.setenv("ABICHECK_MAX_THREADS", threads)
+        # The thread budget is what this varies: keep members on the thread
+        # fan-out whose pools the spy counts (a GIL build would fork them).
+        mp.setenv("ABICHECK_MEMBER_PROCESSES", "0")
         mp.setattr(os, "cpu_count", lambda: 8)
         spy.install(mp)
         return _run(str(old), str(new)), spy.grants
