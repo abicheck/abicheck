@@ -6521,7 +6521,24 @@ _post_pr_comment() {
     || _gh_pr_comment_fallback "$pr_number" "$body_file" "$repo"
 }
 
+# ADR-067 D5: `acknowledgment.breaks: accept` lets acknowledged breaks leave
+# the exit code (exit 0) while the verdict stays a break. Say so on a passing
+# run rather than letting it read as clean. The line comes whole from
+# accepted_breaks_notice.py, which reads `disposition_audit.accepted_breaks`
+# and escapes every report value (%, CR, LF); it prints nothing when the
+# report lists none (`breaks: gate`, or nothing accepted). Isolated exactly
+# like `_report_query` (`-I`, empty PYTHONPATH, run from $_PY_SAFE_DIR).
+_ACCEPTED_BREAKS_NOTICE_PY="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd)/accepted_breaks_notice.py"
+_emit_accepted_breaks_notice() {
+  local _src
+  _src=$(_json_report_src)
+  [[ -n "$_src" && -n "$_PY_BIN" && -f "$_ACCEPTED_BREAKS_NOTICE_PY" ]] || return 0
+  _is_path_already_qualified "$_src" || _src="$PWD/$_src"
+  (cd "$_PY_SAFE_DIR" && PYTHONPATH= "$_PY_BIN" -I "$_ACCEPTED_BREAKS_NOTICE_PY" "$_src") 2>/dev/null || true
+}
+
 _emit_annotations
+_emit_accepted_breaks_notice
 _maybe_post_pr_comment
 
 # ---------------------------------------------------------------------------

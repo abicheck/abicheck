@@ -1574,9 +1574,13 @@ sixth `resolve-baseline` outcome to add to the table above.
   inputs without verification, verification of a directory, and (root
   Action) verification without `baseline-profile`/`baseline-target` are
   usage errors, not silently ignored settings. Defaults are unchanged.
-  `publish-baseline.yml` does not attest: it would raise every caller's
-  required permissions (`id-token: write`, `attestations: write`), so that
-  stays a maintainer decision.
+  `publish-baseline.yml` attests on opt-in only (`attest: true`, default
+  `false`, maintainer-approved): a separate `attest` job with no
+  `permissions:` block inherits the caller's grant and attests the assets
+  actually on the release, exposing `attestation-url`. Declaring
+  `id-token: write`/`attestations: write` on any job would be checked
+  against every caller's grant at load time and break callers that never
+  attest, so only callers that set `attest: true` grant the two scopes.
 
 ---
 
