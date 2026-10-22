@@ -421,3 +421,48 @@ def test_instantiated_default_change_is_attributed_at_l2(
     # ADR-085 D2 shape-A suppression: the exported instantiation already carries
     # the change, so the header-level kind is not counted a second time.
     assert HEADER_KIND not in _kinds(report)
+
+
+# ADR-085 shape C, sibling namespaces: both mylib-style ``Box`` templates change
+# their default, but only ``b::take(const Box<char>&)`` reports a function. That
+# function's ``Box`` is ``b::Box``, so only the ``b::Box`` header finding is a
+# second count of it. The ``a::Box`` finding is a different template and must
+# stay reported; a leaf-name match would suppress it too.
+_TWO_NS_HEADER = """#pragma once
+namespace a {{
+template <typename T, typename U = {a_default}>
+struct Box {{
+    T t;
+    U u;
+}};
+}}  // namespace a
+namespace b {{
+template <typename T, typename U = {b_default}>
+struct Box {{
+    T t;
+    U u;
+}};
+void take(const Box<char>& b);
+}}  // namespace b
+"""
+
+
+def test_shape_c_sibling_namespace_keeps_the_other_templates_finding_on_clang(
+    tmp_path: Path,
+) -> None:
+    """Shape C suppresses only the template the reported signature names."""
+    _require_tools("clang")
+    old_h = tmp_path / "old_two_ns.h"
+    new_h = tmp_path / "new_two_ns.h"
+    old_h.write_text(_TWO_NS_HEADER.format(a_default="T", b_default="T"))
+    new_h.write_text(_TWO_NS_HEADER.format(a_default="int", b_default="int"))
+    old = _dump_header(tmp_path, old_h, "clang", "old")
+    new = _dump_header(tmp_path, new_h, "clang", "new")
+    report = _compare_kinds(old, new, tmp_path, "clang")
+    assert report["verdict"] == "BREAKING"
+    assert {"func_removed", "func_added"} <= _kinds(report)
+    header_symbols = sorted(
+        c["symbol"] for c in report["changes"] if c["kind"] == HEADER_KIND
+    )
+    # a::Box is reported on its own; b::Box is covered by take's signature.
+    assert header_symbols == ["a::Box"]

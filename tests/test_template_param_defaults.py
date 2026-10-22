@@ -223,25 +223,102 @@ def test_nested_declaration_under_a_pattern_is_not_counted_as_a_gap() -> None:
 #    subprocess runs (ADR-085 D1/D2/C; the patch-coverage gate counts them).
 
 
+def _named_box(qualified: str) -> RecordType:
+    """A class-template pattern record under *qualified* (e.g. ``a::Box``)."""
+    return RecordType(
+        name=qualified.rsplit("::", 1)[-1],
+        kind="struct",
+        qualified_name=qualified,
+        is_template_pattern=True,
+        template_param_defaults_fact=_PRESENT_T,
+    )
+
+
+def _shape_c_named(mangled: str, spelling: str, patterns: list[str]) -> set[str]:
+    """Keys that a reported function ``mangled`` (its parameter spelled
+    *spelling*) names, with the class templates *patterns* in the snapshot."""
+    from abicheck.model.change import Change
+    from abicheck.model.change_catalog.kinds import ChangeKind
+    from abicheck.model.declarations import Function, Param
+    from abicheck.policy.template_default_changes import (
+        _templates_named_by_reported_functions,
+    )
+
+    snap = AbiSnapshot(
+        library="libtpl.so.1",
+        version="1.0",
+        types=[_named_box(q) for q in patterns],
+        functions=[
+            Function(
+                name="take",
+                mangled=mangled,
+                return_type="void",
+                params=[Param(name="b", type=spelling)],
+            )
+        ],
+    )
+    removed = Change(
+        kind=ChangeKind.FUNC_REMOVED, symbol=mangled, description="removed"
+    )
+    return _templates_named_by_reported_functions(snap, snap, [removed])
+
+
+# Shape C resolves a spelled template-id the way C++ does, so a short name
+# shared by two namespaces never lets one namespace's signature claim the
+# other's template.
+
+_TAKE_IN_B = "_ZN1b4takeERKNS_3BoxIcEE"  # b::take(const b::Box<char>&)
+_TAKE_IN_A = "_ZN1a4takeERKNS_3BoxIcEE"  # a::take(const a::Box<char>&)
+_TAKE_IN_A_OUTER = "_ZN1a5Outer4takeERKNS_3BoxIcEE"  # a::Outer::take(...)
+_TAKE_GLOBAL = "_Z4takeRKN1a3BoxIcEE"  # take(const a::Box<char>&)
+
+
 @pytest.mark.parametrize(
-    ("body", "expected"),
+    ("mangled", "spelling", "patterns", "expected"),
     [
-        ([], False),
-        (["Box<char>"], True),
-        (["Box <char>"], True),
-        (["FlatBox<char>"], False),
-        (["ns2::Box<int>"], False),
-        (["Box"], False),
-        (["Box;"], False),
-        (["const Box<char>&", "other"], True),
+        # Same short name, different namespaces: b::take's Box<char> is b::Box.
+        (_TAKE_IN_B, "const Box<char>&", ["a::Box", "b::Box"], {"b::Box"}),
+        (_TAKE_IN_A, "const Box<char>&", ["a::Box", "b::Box"], {"a::Box"}),
+        # A qualified spelling from the global scope names exactly that template.
+        (_TAKE_GLOBAL, "const a::Box<char>&", ["a::Box", "b::Box"], {"a::Box"}),
+        (_TAKE_GLOBAL, "const ::a::Box<char>&", ["a::Box", "b::Box"], {"a::Box"}),
+        # The leaf must be the whole name: a longer or differently scoped name
+        # is not the template.
+        (_TAKE_IN_B, "const FlatBox<char>&", ["a::Box", "b::Box"], set()),
+        (_TAKE_IN_B, "const b::FlatBox<char>&", ["a::Box", "b::Box"], set()),
+        (_TAKE_IN_B, "const a::Box<char>&", ["a::Box", "b::Box"], {"a::Box"}),
+        (_TAKE_IN_B, "const x::Box<char>&", ["a::Box", "b::Box"], set()),
+        # The same qualified name on both sides is the one template.
+        (_TAKE_IN_A, "const a::Box<char>&", ["a::Box"], {"a::Box"}),
+        # Not a template-id: no opening '<' after the name.
+        (_TAKE_IN_A, "const Box&", ["a::Box"], set()),
     ],
 )
-def test_spells_template_matches_only_the_leaf_on_an_identifier_boundary(
-    body: list[str], expected: bool
+def test_shape_c_names_only_the_template_in_the_functions_scope(
+    mangled: str, spelling: str, patterns: list[str], expected: set[str]
 ) -> None:
-    from abicheck.policy.template_default_changes import _spells_template
+    assert _shape_c_named(mangled, spelling, patterns) == expected
 
-    assert _spells_template(body, "mylib::Box") is expected
+
+def test_shape_c_nested_class_shadows_the_namespace_template() -> None:
+    # Inside a::Outer, a spelled Box with a nested a::Outer::Box names the
+    # nested template; the namespace-level a::Box it shadows is not claimed.
+    assert _shape_c_named(
+        _TAKE_IN_A_OUTER, "const Box<char>&", ["a::Box", "a::Outer::Box"]
+    ) == {"a::Outer::Box"}
+
+
+def test_shape_c_falls_back_to_the_enclosing_namespace_template() -> None:
+    # Without a nested Box, the same spelling resolves outward to a::Box.
+    assert _shape_c_named(
+        _TAKE_IN_A_OUTER, "const Box<char>&", ["a::Box", "b::Box"]
+    ) == {"a::Box"}
+
+
+def test_shape_c_same_short_name_in_a_sibling_namespace_is_not_claimed() -> None:
+    # Only b::Box is a pattern, and the function lives in a: a bare Box inside
+    # a does not reach b::Box, so nothing is named.
+    assert _shape_c_named(_TAKE_IN_A, "const Box<char>&", ["b::Box"]) == set()
 
 
 def test_all_type_params_is_true_only_for_a_pure_type_parameter_list() -> None:
@@ -374,7 +451,7 @@ def test_pipeline_records_a_shape_c_relation_as_deduplicated() -> None:
     def _take(return_type: str = "void") -> Function:
         return Function(
             name="take",
-            mangled="_Z4takeRK3BoxIcEE",
+            mangled="_ZN5mylib4takeERKNS_3BoxIcEE",
             return_type=return_type,
             params=[Param(name="b", type="const Box<char>&")],
         )
@@ -393,7 +470,7 @@ def test_pipeline_records_a_shape_c_relation_as_deduplicated() -> None:
     )
     removed = Change(
         kind=ChangeKind.FUNC_REMOVED,
-        symbol="_Z4takeRK3BoxIcEE",
+        symbol="_ZN5mylib4takeERKNS_3BoxIcEE",
         description="take removed",
     )
 
