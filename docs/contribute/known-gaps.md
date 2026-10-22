@@ -59,6 +59,11 @@ Each entry's status line says what is still open. A PARTIAL entry's write-up als
 
 ### False-clean risk
 
+#### A removed class-metadata export of a templated or destructor-only class is not confirmed by its header (2026-10-22)
+
+**Status (2026-10-22): PARTIAL.** A `_ZTV`/`_ZTI`/`_ZTS`/`_ZTT` export is confirmed by its owning class when the class's exact path is declared (`policy/class_metadata_identity.py`), including when the header omits an inline namespace the mangling keeps, via the class's own mangled virtual slots. Still open: a template-specialization owner (`_ZTVN3api3BoxIiEE`) is never confirmed, because the path does not spell its arguments and a primary template's declaration is not evidence about a specialization; and a class whose only virtual member is its destructor has no mangled slot to prove it, so it is confirmed only when its header spelling matches the mangled path exactly. Both stay `UNKNOWN_UNRESOLVED`: reported and not gating.
+`false-clean` — the removal of such a class's vtable or typeinfo reads `NOT_EVALUATED` under `--contract public` and does not gate the verdict.
+
 #### A header-only default template-argument change reads `NO_CHANGE` at L2 on both backends (2026-10-21)
 
 **Status (2026-10-21): OPEN, deliberate — no detector change.** A default template argument changed on a template that nothing public names and nothing exports reads `NO_CHANGE` at L2. CastXML emits no record for an uninstantiated class template; clang has the default but does not record it. A clang-only detector was rejected because it would be a `BREAKING` verdict castxml cannot reproduce.
