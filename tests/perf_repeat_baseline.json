@@ -129,10 +129,10 @@
     "abicheck/diff_symbols.py(_parameter_view_pairs)": 52,
     "abicheck/diff_symbols_scalar.py(_abi_equivalent_scalar)": 343,
     "abicheck/diff_symbols_scalar.py(_scalar_repr)": 686,
-    "abicheck/diff_templates.py(_callable_identity_name)": 1184,
-    "abicheck/diff_templates.py(_canonical_identity_name)": 1184,
+    "abicheck/diff_templates.py(_callable_identity_name)": 358,
+    "abicheck/diff_templates.py(_canonical_identity_name)": 358,
     "abicheck/diff_templates.py(_looks_like_template_instantiation)": 876,
-    "abicheck/diff_templates.py(_normalize_mach_o_mangled)": 2010,
+    "abicheck/diff_templates.py(_normalize_mach_o_mangled)": 1184,
     "abicheck/diff_templates.py(_return_is_unspecified)": 512,
     "abicheck/diff_templates.py(detect_overload_set_rerouted.<locals>._overload_key)": 204,
     "abicheck/diff_type_spellings.py(_emit_function_slot_changes)": 716,
@@ -199,8 +199,8 @@
     "abicheck/model/graph_entity_identity.py(is_linker_name)": 398,
     "abicheck/model/graph_entity_identity.py(type_identity)": 38,
     "abicheck/model/graph_identity.py(_decl_node_id)": 398,
-    "abicheck/model/graph_identity.py(_normalize_graph_identity)": 1620,
-    "abicheck/model/graph_identity.py(_strip_bare_anonymous_type_location)": 336,
+    "abicheck/model/graph_identity.py(_normalize_graph_identity)": 794,
+    "abicheck/model/graph_identity.py(_strip_bare_anonymous_type_location)": 168,
     "abicheck/model/graph_identity.py(_type_node_id)": 38,
     "abicheck/model/header_exclusion_record.py(canonical_exclusion_identity)": 14,
     "abicheck/model/header_parse_coverage.py(header_parse_excluded)": 182,
@@ -301,5 +301,5 @@
   },
   "mode": "default",
   "n": 40,
-  "total": 239418
+  "total": 235946
 }
