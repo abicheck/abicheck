@@ -45,7 +45,7 @@ from __future__ import annotations
 import re
 from collections.abc import Set as AbstractSet
 
-from .graph_facts import GraphNode
+from .graph_facts import GraphEdge, GraphNode
 from .source_graph import SourceGraphSummary, _symbol_node_id
 
 #: Graph node kinds a type entity (as opposed to a function/variable
@@ -371,3 +371,28 @@ def defining_members(graph: SourceGraphSummary, symbol: str) -> list[tuple[str, 
         archive = str((member.resolved or member.attrs).get("archive", ""))
         out.append((archive, member.label or ""))
     return sorted(set(out))
+
+
+def label_map(graph: SourceGraphSummary) -> dict[str, str]:
+    """Node id -> display label, falling back to the id for an unlabeled node."""
+    return {n.id: (n.label or n.id) for n in graph.nodes}
+
+
+def kind_map(graph: SourceGraphSummary) -> dict[str, str]:
+    """Node id -> node kind."""
+    return {n.id: n.kind for n in graph.nodes}
+
+
+def format_dependency_path(graph: SourceGraphSummary, path: list[GraphEdge]) -> str:
+    """Render a dependency path (a list of graph edges) as a human-readable chain.
+
+    E.g. ``pub() --[DECL_CALLS_DECL]--> helper() --[DECL_HAS_TYPE]--> detail::Impl``.
+    Returns ``""`` for an empty path (entry == target).
+    """
+    if not path:
+        return ""
+    labels = label_map(graph)
+    parts = [labels.get(path[0].src, path[0].src)]
+    for e in path:
+        parts.append(f"--[{e.kind}]--> {labels.get(e.dst, e.dst)}")
+    return " ".join(parts)

@@ -17,7 +17,7 @@
 Split out of ``test_internal_leak.py`` to keep that file under the
 AI-readiness line-count cap (CLAUDE.md) — this is purely a file-size split,
 not a different subsystem: it exercises the same ``CALL_GRAPH_TRAVERSAL_POLICY``/
-``_consumer_compiled_reachability``/``compute_call_graph_leak_paths`` machinery
+``consumer_compiled_reachability``/``compute_call_graph_leak_paths`` machinery
 ``test_internal_leak.py``'s own ``TestTraversalPolicy`` class covers.
 """
 
@@ -58,7 +58,7 @@ class TestEffectTransitions:
 
     def test_edge_effect_transition_none_for_direct_call(self) -> None:
         from abicheck.buildsource.source_graph import GraphEdge
-        from abicheck.internal_leak import (
+        from abicheck.compare.call_graph_walk import (
             CALL_GRAPH_TRAVERSAL_POLICY,
             _edge_effect_transition,
         )
@@ -73,7 +73,7 @@ class TestEffectTransitions:
 
     def test_edge_effect_transition_overapprox_for_virtual_call(self) -> None:
         from abicheck.buildsource.source_graph import GraphEdge, SourceGraphSummary
-        from abicheck.internal_leak import (
+        from abicheck.compare.call_graph_walk import (
             CALL_GRAPH_TRAVERSAL_POLICY,
             _edge_effect_transition,
         )
@@ -91,9 +91,9 @@ class TestEffectTransitions:
 
     def test_reachability_marks_target_of_virtual_call_as_degraded(self) -> None:
         from abicheck.buildsource.source_graph import GraphEdge, SourceGraphSummary
-        from abicheck.internal_leak import (
+        from abicheck.compare.call_graph_walk import (
             CALL_GRAPH_TRAVERSAL_POLICY,
-            _consumer_compiled_reachability,
+            consumer_compiled_reachability,
         )
 
         graph = SourceGraphSummary(
@@ -118,7 +118,7 @@ class TestEffectTransitions:
             ],
         )
         node_by_id = {n.id: n for n in graph.nodes}
-        _, _, degraded = _consumer_compiled_reachability(
+        _, _, degraded = consumer_compiled_reachability(
             graph, CALL_GRAPH_TRAVERSAL_POLICY, ["decl://pub"], node_by_id
         )["decl://pub"]
         assert degraded == frozenset({"decl://virtual"})
@@ -128,9 +128,9 @@ class TestEffectTransitions:
         # through the virtual call, so it inherits the downgrade too, even
         # though the mid->leaf edge is itself a direct call.
         from abicheck.buildsource.source_graph import GraphEdge, SourceGraphSummary
-        from abicheck.internal_leak import (
+        from abicheck.compare.call_graph_walk import (
             CALL_GRAPH_TRAVERSAL_POLICY,
-            _consumer_compiled_reachability,
+            consumer_compiled_reachability,
         )
 
         graph = SourceGraphSummary(
@@ -155,7 +155,7 @@ class TestEffectTransitions:
             ],
         )
         node_by_id = {n.id: n for n in graph.nodes}
-        _, _, degraded = _consumer_compiled_reachability(
+        _, _, degraded = consumer_compiled_reachability(
             graph, CALL_GRAPH_TRAVERSAL_POLICY, ["decl://pub"], node_by_id
         )["decl://pub"]
         assert degraded == frozenset({"decl://mid", "decl://leaf"})
@@ -171,9 +171,9 @@ class TestEffectTransitions:
         discovered first or which is shorter (matches D6's own exact-beats-
         overapprox proof-path preference)."""
         from abicheck.buildsource.source_graph import GraphEdge, SourceGraphSummary
-        from abicheck.internal_leak import (
+        from abicheck.compare.call_graph_walk import (
             CALL_GRAPH_TRAVERSAL_POLICY,
-            _consumer_compiled_reachability,
+            consumer_compiled_reachability,
         )
 
         graph = SourceGraphSummary(
@@ -206,7 +206,7 @@ class TestEffectTransitions:
             ],
         )
         node_by_id = {n.id: n for n in graph.nodes}
-        seen, came_from, degraded = _consumer_compiled_reachability(
+        seen, came_from, degraded = consumer_compiled_reachability(
             graph, CALL_GRAPH_TRAVERSAL_POLICY, ["decl://pub"], node_by_id
         )["decl://pub"]
         assert seen == frozenset({"decl://mid", "decl://target"})
@@ -214,7 +214,7 @@ class TestEffectTransitions:
         assert came_from["decl://target"].src == "decl://mid"
 
     def test_default_policy_has_no_effect_transitions(self) -> None:
-        from abicheck.internal_leak import TraversalPolicy
+        from abicheck.compare.call_graph_walk import TraversalPolicy
 
         policy = TraversalPolicy(
             allowed_edges=frozenset({"DECL_CALLS_DECL"}),

@@ -42,29 +42,7 @@ from ..model.source_graph_coverage import (
     graph_records_passes,
 )
 from ..model.source_graph_diff import GraphRelationChange, GraphSummaryDiff
-
-
-def _label_map(graph: SourceGraphSummary) -> dict[str, str]:
-    return {n.id: (n.label or n.id) for n in graph.nodes}
-
-
-def _kind_map(graph: SourceGraphSummary) -> dict[str, str]:
-    return {n.id: n.kind for n in graph.nodes}
-
-
-def format_dependency_path(graph: SourceGraphSummary, path: list[GraphEdge]) -> str:
-    """Render a :func:`_dependency_path` result as a human-readable chain.
-
-    E.g. ``pub() --[DECL_CALLS_DECL]--> helper() --[DECL_HAS_TYPE]--> detail::Impl``.
-    Returns ``""`` for an empty path (entry == target).
-    """
-    if not path:
-        return ""
-    labels = _label_map(graph)
-    parts = [labels.get(path[0].src, path[0].src)]
-    for e in path:
-        parts.append(f"--[{e.kind}]--> {labels.get(e.dst, e.dst)}")
-    return " ".join(parts)
+from ..model.source_graph_query import kind_map, label_map
 
 
 def localize_symbol(graph: SourceGraphSummary, symbol: str) -> dict[str, Any]:
@@ -84,8 +62,8 @@ def localize_symbol(graph: SourceGraphSummary, symbol: str) -> dict[str, Any]:
     """
     from ..model.source_graph_query import defining_members
 
-    labels = _label_map(graph)
-    kinds = _kind_map(graph)
+    labels = label_map(graph)
+    kinds = kind_map(graph)
     sym_id = _symbol_node_id(symbol)
     found = graph.has_node(sym_id)
 
