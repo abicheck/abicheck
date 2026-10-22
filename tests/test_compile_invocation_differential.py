@@ -193,9 +193,23 @@ def _render_header_case(kwargs: dict[str, Any]) -> list[str]:
     )
 
 
+def _posix_argv(argv: list[str]) -> list[str]:
+    """*argv* with Windows path separators spelled POSIX-style.
+
+    The renderer takes ``Path`` operands and emits ``str(path)``, which is
+    ``\\src\\include`` on Windows. The golden records the POSIX spelling, so
+    the comparison normalizes separators; no case carries a literal backslash,
+    so the renderer's output is compared unchanged apart from that spelling.
+    """
+    return [token.replace("\\", "/") for token in argv]
+
+
 def render_header_corpus() -> dict[str, list[str]]:
     """Render every L2 header-AST case, keyed by its case name."""
-    return {name: _render_header_case(kwargs) for name, kwargs in _HEADER_CASES.items()}
+    return {
+        name: _posix_argv(_render_header_case(kwargs))
+        for name, kwargs in _HEADER_CASES.items()
+    }
 
 
 def regenerate_header_golden() -> None:
