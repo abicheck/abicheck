@@ -247,6 +247,7 @@ def change_to_dict(
     evidence_status_override: EvidenceStatus | None = None,
     root_cause: tuple[str, str] | None = None,
     root_cause_evidence: dict[str, object] | None = None,
+    impact_group_id: str | None = None,
     evidence_tiers: Sequence[str] = (),
     severity_config: SeverityConfig | None = None,
     today: date | None = None,
@@ -368,7 +369,10 @@ def change_to_dict(
     # information beyond the all-defaults case, matching this function's own
     # convention of not padding every plain finding with an empty object.
     assessment = assess_change(
-        c, root_cause=root_cause, root_cause_evidence=root_cause_evidence
+        c,
+        root_cause=root_cause,
+        root_cause_evidence=root_cause_evidence,
+        impact_group_id=impact_group_id,
     )
     d["reachability_state"] = assessment.reachability_state.value
     if assessment.has_signal():
@@ -405,6 +409,7 @@ def suppressed_change_entry(
     *,
     root_cause: tuple[str, str] | None = None,
     root_cause_evidence: dict[str, object] | None = None,
+    impact_group_id: str | None = None,
     rule: RuleProvenance | None = None,
 ) -> dict[str, object]:
     """Minimal audit-trail entry for one suppressed change, plus the
@@ -438,6 +443,7 @@ def suppressed_change_entry(
         suppressed=True,
         root_cause=root_cause,
         root_cause_evidence=root_cause_evidence,
+        impact_group_id=impact_group_id,
     )
     entry["reachability_state"] = assessment.reachability_state.value
     if assessment.has_signal():

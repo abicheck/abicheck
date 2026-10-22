@@ -16,8 +16,9 @@ from abicheck.checker import Change, ChangeKind, DiffResult, Verdict, compare
 from abicheck.model import AbiSnapshot, Function, Param, Variable
 from abicheck.policy.suppression.rules import SuppressionList
 from abicheck.policy_file import PolicyFile
-from abicheck.reporter import to_json, to_markdown, to_stat, to_stat_json
+from abicheck.reporter import to_json, to_markdown, to_stat_json
 from abicheck.serialization import load_snapshot, snapshot_from_dict
+from tests._report_test_helpers import stat_line
 
 # ---------------------------------------------------------------------------
 # 1. Malformed ELF files (abicheck/elf_metadata.py)
@@ -554,5 +555,5 @@ class TestReporterEdgeCases:
     def test_stat_mode_markdown(self) -> None:
         """Stat mode Markdown output for empty result."""
         result = self._make_diff_result()
-        output = to_stat(result)
+        output = stat_line(result)
         assert "NO_CHANGE" in output

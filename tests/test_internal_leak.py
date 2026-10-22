@@ -20,6 +20,7 @@ import pytest
 from abicheck.checker import compare
 from abicheck.checker_policy import ChangeKind, ReachabilityState
 from abicheck.compare.internal_namespaces import name_segments as _name_segments
+from abicheck.impact.engine import assess_change
 from abicheck.internal_leak import (
     _build_suffix_index,
     _candidate_type_names_indirect as _cti,
@@ -41,6 +42,7 @@ from abicheck.model import (
     Visibility,
 )
 from abicheck.model.change import Change
+from abicheck.post_processing_reachability import cache_impact_assessments
 
 # ---------------------------------------------------------------------------
 # is_internal_type / segment helpers
@@ -1757,13 +1759,10 @@ class TestBuildLeakChangePreferredPath:
 
 
 class TestBuildChangeAttachesImpactAssessment:
-    """ADR-052 D2 follow-up (G29 Phase 3, scoped implementation):
-    _build_leak_change/_build_call_graph_leak_change construct their own
-    ImpactAssessment directly rather than leaving assess_change to derive
-    one later on demand."""
+    """ADR-052 D2 follow-up: the leak builders leave ImpactAssessment unset,
+    and the pipeline step caches it via cache_impact_assessments."""
 
     def test_leak_change_carries_impact_assessment(self) -> None:
-        from abicheck.impact.engine import assess_change
         from abicheck.internal_leak import _build_leak_change
 
         change = _build_leak_change(
@@ -1779,6 +1778,7 @@ class TestBuildChangeAttachesImpactAssessment:
             _snap(),
             embedded_by_value=True,
         )
+        cache_impact_assessments([change])
         assert change.impact_assessment is not None
         assert change.impact_assessment.public_reachable is True
         assert (
@@ -1791,7 +1791,6 @@ class TestBuildChangeAttachesImpactAssessment:
         assert assess_change(change) == change.impact_assessment
 
     def test_call_graph_leak_change_carries_impact_assessment(self) -> None:
-        from abicheck.impact.engine import assess_change
         from abicheck.internal_leak import _build_call_graph_leak_change
 
         change = _build_call_graph_leak_change(
@@ -1805,6 +1804,7 @@ class TestBuildChangeAttachesImpactAssessment:
             ],
             ["pub_entry -> ns::detail::helper"],
         )
+        cache_impact_assessments([change])
         assert change.impact_assessment is not None
         assert change.impact_assessment.public_reachable is True
         assert (
@@ -1881,7 +1881,7 @@ class TestTraversalPolicy:
     walk, not just be accepted and ignored."""
 
     def test_call_graph_policy_allows_call_and_reference_edges(self) -> None:
-        from abicheck.internal_leak import CALL_GRAPH_TRAVERSAL_POLICY
+        from abicheck.compare.call_graph_walk import CALL_GRAPH_TRAVERSAL_POLICY
 
         assert CALL_GRAPH_TRAVERSAL_POLICY.allowed_edges == frozenset(
             {"DECL_CALLS_DECL", "DECL_REFERENCES_DECL"}
@@ -1889,9 +1889,9 @@ class TestTraversalPolicy:
 
     def test_minimum_confidence_excludes_low_confidence_edges(self) -> None:
         from abicheck.buildsource.source_graph import GraphEdge, SourceGraphSummary
-        from abicheck.internal_leak import (
+        from abicheck.compare.call_graph_walk import (
             TraversalPolicy,
-            _consumer_compiled_reachability,
+            consumer_compiled_reachability,
         )
         from abicheck.model.graph_facts import CONF_HIGH, CONF_REDUCED
 
@@ -1919,10 +1919,10 @@ class TestTraversalPolicy:
             stop_conditions=lambda node_id, node_by_id: False,
             minimum_confidence=CONF_HIGH,
         )
-        permissive_reach = _consumer_compiled_reachability(
+        permissive_reach = consumer_compiled_reachability(
             graph, permissive, ["decl://pub"], node_by_id
         )
-        strict_reach = _consumer_compiled_reachability(
+        strict_reach = consumer_compiled_reachability(
             graph, strict, ["decl://pub"], node_by_id
         )
         assert "decl://mid" in permissive_reach["decl://pub"][0]
@@ -1930,9 +1930,9 @@ class TestTraversalPolicy:
 
     def test_stop_conditions_halts_expansion_but_keeps_node_reachable(self) -> None:
         from abicheck.buildsource.source_graph import GraphEdge, SourceGraphSummary
-        from abicheck.internal_leak import (
+        from abicheck.compare.call_graph_walk import (
             TraversalPolicy,
-            _consumer_compiled_reachability,
+            consumer_compiled_reachability,
         )
 
         graph = SourceGraphSummary(
@@ -1951,7 +1951,7 @@ class TestTraversalPolicy:
             allowed_edges=frozenset({"DECL_CALLS_DECL"}),
             stop_conditions=lambda node_id, node_by_id: node_id == "decl://mid",
         )
-        reachable, _, _ = _consumer_compiled_reachability(
+        reachable, _, _ = consumer_compiled_reachability(
             graph, stop_at_mid, ["decl://pub"], node_by_id
         )["decl://pub"]
         assert "decl://mid" in reachable

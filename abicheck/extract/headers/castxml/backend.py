@@ -102,6 +102,19 @@ class CastxmlRunError(SnapshotError):
         self.original = original
 
 
+#: The one missing-castxml message: raised here at parse time and by the
+#: request-time preflight (``workflows.header_frontend_preflight``).
+CASTXML_NOT_FOUND_MESSAGE = (
+    "castxml not found in PATH. Install with: apt install castxml, "
+    "brew install castxml, conda install -c conda-forge castxml, "
+    "or choco install castxml (Windows); then ensure castxml is in PATH. "
+    "On a clang-only host, set compile.frontend: clang in .abicheck.yml "
+    "(or ABICHECK_AST_FRONTEND=clang) to use the clang JSON-AST backend "
+    "instead — note it does not carry record size/alignment/offset "
+    "layout, so layout-only breaks need castxml or debug info (L1)."
+)
+
+
 def _resolve_gated_castxml_bin(castxml_bin: str | None) -> str:
     """Resolve the castxml executable and fail closed on an out-of-policy build.
 
@@ -117,15 +130,7 @@ def _resolve_gated_castxml_bin(castxml_bin: str | None) -> str:
     try:
         resolved = castxml_bin or _resolve_selected_tool("castxml")
     except OSError as exc:
-        raise SnapshotError(
-            "castxml not found in PATH. Install with: apt install castxml, "
-            "brew install castxml, conda install -c conda-forge castxml, "
-            "or choco install castxml (Windows); then ensure castxml is in PATH. "
-            "On a clang-only host, set compile.frontend: clang in .abicheck.yml "
-            "(or ABICHECK_AST_FRONTEND=clang) to use the clang JSON-AST backend "
-            "instead — note it does not carry record size/alignment/offset "
-            "layout, so layout-only breaks need castxml or debug info (L1)."
-        ) from exc
+        raise SnapshotError(CASTXML_NOT_FOUND_MESSAGE) from exc
     meta = _tool_identity_metadata(resolved)
     if "error" not in meta:
         check = evaluate_castxml_version(meta.get("version", ""))

@@ -224,12 +224,111 @@ the L4 `SourceEntity` payload for clang-produced surfaces, so it needs a
 `CLANG_EXTRACTOR_VERSION` bump (cache invalidation) and a stated
 comparability rule for a stored pre-change L4 surface (the `fact_set`
 mechanism, ADR-038 C.8) — decided in the
-[ADR-063 amendment "L4 clang payload comparability"](../adr/063-one-semantic-pipeline.md#amendment-2026-10-21-proposed-l4-clang-payload-comparability)
-(Proposed) before code. That amendment fixes the rule: re-extract the old side
+[ADR-063 amendment "L4 clang payload comparability"](../adr/063-one-semantic-pipeline.md#amendment-2026-10-21-accepted-l4-clang-payload-comparability)
+(accepted) before code. That amendment fixes the rule: re-extract the old side
 when its sources and compile commands are available; otherwise compare only
 the facts both payloads carry, and report the lowered assurance through
 `SOURCE_FACT_COVERAGE_INCOMPLETE`. Phase 4 implementation waits for Phase 3,
 because re-extraction uses the one compile-invocation model.
+
+**Status — Phase 4 measurement spike (measured; Phase 4 not implemented).**
+`scripts/measure_l4_clang_projection.py` measures the candidate set ADR-063's
+amendment "L4 clang payload comparability" (A3/A5) asks for. It dumps each of
+the **253** catalog translation units (`catalog/cases/*/*.cpp`; the 235 `.c`
+files are outside the amendment's C++ basis) once through `dump_for`, then builds
+two entity sets from the same AST: the current L4 set from
+`source_abi_from_dump`, and the projected set from `_ClangAstParser`'s
+`parse_functions`/`parse_variables`/`parse_types`/`parse_enums`/
+`parse_typedefs_qualified` through `base.entity_from_*`. Both sides are reduced to
+the amendment's fields and paired per TU by `(kind, bare name)` in producer
+order. Result: 253 TUs measured, 0 failed.
+
+The spike depends on Phase 3 only through its first slice:
+`compile_invocation.py` is on `main`, and the clang dump argv reads it through
+`clang_command.build_clang_command`. The remaining Phase 3 slices are not
+needed for the measurement. Phase 4 *implementation* still waits for Phase 3
+under the plan's sequencing rule.
+
+The projection configuration is the spike's own, not a production one:
+`no_binary_evidence=True` (no export tables), `is_cxx=True`, no target triple,
+the case directory as the public directory, and no public header paths. The
+spike writes no L4 output, leaves `CLANG_EXTRACTOR_VERSION` at `"0.13"`, and
+creates no `REVISION_COMPARABLE_FIELDS` set or golden. Those belong to Phase 4.
+
+Per-(kind, field) result, 1531 paired functions, 290 records, 5 enums, 22
+typedefs, 1 variable (`equal_empty` = both sides empty on every pair, so the
+equality says nothing about the producer):
+
+| kind | field | compared | both empty | differing pairs | status | TUs differing |
+|---|---|---:|---:|---:|---|---:|
+| function | qualified_name | 1531 | 0 | 1045 | differs | 205 |
+| function | mangled_name | 1531 | 403 | 22 | differs | 18 |
+| function | visibility | 1531 | 0 | 1531 | differs | 249 |
+| function | api_relevant | 1531 | 0 | 1531 | differs | 249 |
+| function | value | 1531 | 1513 | 18 | differs | 7 |
+| function | signature_hash | 1531 | 0 | 1374 | differs | 247 |
+| variable | qualified_name | 1 | 0 | 0 | equal (n=1) | 0 |
+| variable | mangled_name | 1 | 0 | 1 | differs | 1 |
+| variable | visibility | 1 | 0 | 1 | differs | 1 |
+| variable | api_relevant | 1 | 0 | 1 | differs | 1 |
+| variable | value | 1 | 1 | 0 | equal_empty | 0 |
+| variable | type_hash | 1 | 0 | 0 | equal (n=1) | 0 |
+| record | qualified_name | 290 | 0 | 130 | differs | 75 |
+| record | mangled_name | 290 | 290 | 0 | equal_empty | 0 |
+| record | visibility | 290 | 0 | 290 | differs | 168 |
+| record | api_relevant | 290 | 0 | 290 | differs | 168 |
+| record | type_hash | 290 | 0 | 290 | differs | 168 |
+| enum | qualified_name | 5 | 0 | 5 | differs | 5 |
+| enum | mangled_name | 5 | 5 | 0 | equal_empty | 0 |
+| enum | visibility | 5 | 0 | 5 | differs | 5 |
+| enum | api_relevant | 5 | 0 | 5 | differs | 5 |
+| enum | type_hash | 5 | 0 | 5 | differs | 5 |
+| typedef | qualified_name | 22 | 0 | 0 | **equal** | 0 |
+| typedef | mangled_name | 22 | 22 | 0 | equal_empty | 0 |
+| typedef | visibility | 22 | 0 | 0 | **equal** | 0 |
+| typedef | api_relevant | 22 | 0 | 0 | **equal** | 0 |
+| typedef | value | 22 | 0 | 0 | **equal** | 0 |
+| typedef | type_hash | 22 | 0 | 22 | differs | 14 |
+
+**Candidate set (A3's rule: a field that differs on any TU is dropped).**
+Equal on every TU with evidence: `typedef.qualified_name`, `typedef.value`,
+`typedef.visibility` and `typedef.api_relevant`. The last two are equal because
+`base.entity_from_typedef` hard-codes `PUBLIC_HEADER`/`api_relevant=True`, and
+the typedefs were in scope; they pin nothing about the projection. Equal only
+because both sides are always empty (no evidence): `mangled_name` for `record`,
+`enum` and `typedef`. Not established: every `variable` row, since the corpus
+has one paired variable. Dropped (differs on at least one TU): every
+`function` field, `record.{qualified_name, visibility, api_relevant, type_hash}`,
+`enum.{qualified_name, visibility, api_relevant, type_hash}`,
+`typedef.type_hash`, and `variable.{mangled_name, visibility, api_relevant}`.
+
+**Explicit row: the mangled==name strip.** `entity_from_function` blanks
+`mangled_name` when the L2 `Function.mangled` equals the bare name. Pair level:
+2 functions differ this way, both `distance(Point, Point)` in
+`case69_trivial_to_nontrivial` (`v1.cpp` and `v2.cpp`). The current side has
+`_Z8distance5PointS_` and the projection has `""`, so identity falls back to
+`qualified#signature_hash`. That is the fabricated-identity risk A1 names. The
+pairing-free counters (`group_multiset_*`) show the blanking is wider:
+projected in-scope functions have 502 blank mangled names against 404 on the
+current side, and 545 of 1435 bare-name groups differ as multisets. The spike
+does not trace why those counts differ, so do not read the 2 as the full count.
+
+Presence (not a field): the projection walks every declaration, system headers
+included. Function totals are 2600 current and 68629 projected, of which 66953
+are outside the current side's names. Pairing excludes those and counts them.
+In-scope paired counts: 1531 functions, 290 records, 5 enums, 22 typedefs,
+1 variable.
+
+**Limits of this measurement.** Pairing is by bare name plus producer order, so
+overload order can cross two same-named overloads. The 20 non-empty
+pair-level `mangled_name` differences are not separable from that and are
+dropped with the field regardless. Equal-by-construction and equal-empty rows
+are labelled as such, not counted as evidence. The gaps the table exposes
+(origin unset, bare member and namespace names, unscoped output, hash spellings,
+default-argument spelling) are recorded in
+[`known-gaps.md`](../known-gaps.md) under "Clang projection"; Phase 4's
+implementation cannot pin a field until those are closed or the field stays
+excluded.
 
 ### Phase 5 — one entity identity
 

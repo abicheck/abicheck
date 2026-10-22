@@ -54,9 +54,9 @@ from ..model.source_graph_coverage import (
     graph_records_passes,
     trusted_kinds,
 )
+from ..model.source_graph_query import format_dependency_path, kind_map, label_map
 from . import dependency_renames
 from .dependency_paths import _dependency_path, _dependency_reachability
-from .source_graph_compare import _kind_map, _label_map, format_dependency_path
 
 if TYPE_CHECKING:
     from ..model.change import Change
@@ -73,7 +73,7 @@ def _decl_to_symbol(graph: SourceGraphSummary) -> dict[str, str]:
 
 def _public_decls(graph: SourceGraphSummary) -> set[str]:
     """``source_decl`` ids reachable from a public header (``SOURCE_DECLARES``)."""
-    kinds = _kind_map(graph)
+    kinds = kind_map(graph)
     return {
         e.dst
         for e in graph.edges
@@ -97,7 +97,7 @@ def _public_types(graph: SourceGraphSummary) -> set[str]:
     field/base of its own could wrongly emit ``PUBLIC_API_INTERNAL_DEPENDENCY_ADDED``
     even though no public API is involved.
     """
-    kinds = _kind_map(graph)
+    kinds = kind_map(graph)
     node_by_id = {n.id: n for n in graph.nodes}
     out: set[str] = set()
     for e in graph.edges:
@@ -123,7 +123,7 @@ def _generated_in_public_closure(graph: SourceGraphSummary) -> set[str]:
     "generated file declares a public entity" detection awaits the include-graph
     phase, which gives generated files and headers a shared identity.
     """
-    kinds = _kind_map(graph)
+    kinds = kind_map(graph)
     return {
         e.dst
         for e in graph.edges
@@ -780,7 +780,7 @@ def _symbol_owner_source(graph: SourceGraphSummary) -> dict[str, str]:
     file's node id. A symbol with no unambiguous single declaring file is omitted,
     so the version diff never guesses.
     """
-    kinds = _kind_map(graph)
+    kinds = kind_map(graph)
     symbol_to_decls: dict[str, list[str]] = {}
     for e in graph.edges:
         if e.kind == "SOURCE_DECL_MAPS_TO_SYMBOL":
@@ -1635,7 +1635,7 @@ def diff_source_graph_findings(
     which get the uncorrelated description exactly as before.
     """
     boundary = f"[{EVIDENCE_TIER_L5}]"
-    old_labels, new_labels = _label_map(old), _label_map(new)
+    old_labels, new_labels = label_map(old), label_map(new)
 
     findings: list[Change] = []
     findings += _mapping_drift_findings(old, new, old_labels, new_labels, boundary)

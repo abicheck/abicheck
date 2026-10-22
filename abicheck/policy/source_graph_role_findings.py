@@ -35,13 +35,13 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 
-from ..buildsource.source_graph_compare import _label_map, diff_edge_relations
+from ..buildsource.source_graph_compare import diff_edge_relations
 from ..model.change import Change
 from ..model.change_catalog.kinds import ChangeKind
 from ..model.source_graph import EVIDENCE_TIER_L5, SourceGraphSummary
 from ..model.source_graph_coverage import ROLE_COVERAGE_MATRIX
 from ..model.source_graph_diff import GraphRelationChange
-from ..model.source_graph_query import is_public_dependency_node
+from ..model.source_graph_query import is_public_dependency_node, label_map
 
 #: How many example dependencies a coverage note names before "and N more".
 _UNKNOWN_EXAMPLES = 3
@@ -67,7 +67,7 @@ def role_change_findings(
             old_public.has(rel.src) or new_public.has(rel.src)
         )
 
-    labels = {**_label_map(old), **_label_map(new)}
+    labels = {**label_map(old), **label_map(new)}
     boundary = f"[{EVIDENCE_TIER_L5}]"
     findings: list[Change] = []
     gaps: dict[str, list[GraphRelationChange]] = {}

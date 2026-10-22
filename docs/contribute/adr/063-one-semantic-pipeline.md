@@ -1321,9 +1321,9 @@ before this note carries `PRESENT(True)` for the weaker tiers and reads as
 non-default-versioned, `.symtab`-only, literal `foo@@V`, bare-name and
 demangled-variant worlds against a ground-truth oracle).
 
-## Amendment (2026-10-21, Proposed): L4 clang payload comparability
+## Amendment (2026-10-21, accepted): L4 clang payload comparability
 
-**Amendment status:** Proposed. This records the decision that Phase 4 of the
+**Amendment status:** Accepted. This records the decision that Phase 4 of the
 [L2/L4/L5 extraction convergence plan](../plans/l4-l2-extraction-convergence.md)
 needs before its code lands: how a stored pre-change L4 surface (ADR-038 C.8
 `fact_set`) is compared with a surface produced after the clang payload

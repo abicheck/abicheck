@@ -23,7 +23,7 @@ import pytest
 
 from abicheck.checker import compare
 from abicheck.checker_policy import ChangeKind, Verdict
-from abicheck.report.dispatch_markdown import to_review_digest
+from tests._report_test_helpers import review_digest
 from tests.test_golden_output import _fn, _snap
 
 TESTS_DIR = Path(__file__).parent
@@ -33,7 +33,7 @@ GOLDEN_DIR = TESTS_DIR / "golden" / "review"
 def _run_golden(case_id: str, old, new, update: bool):
     golden_path = GOLDEN_DIR / f"{case_id}.md"
     result = compare(old, new)
-    actual = to_review_digest(result)
+    actual = review_digest(result)
 
     if update:
         GOLDEN_DIR.mkdir(parents=True, exist_ok=True)

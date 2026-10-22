@@ -1,9 +1,9 @@
 {
   "canonical_python": "3.14",
   "example_cases": 222,
-  "fast_test_cases_collected": 76786,
-  "generated_utc": "2026-10-22T03:24:04+00:00",
+  "fast_test_cases_collected": 76975,
+  "generated_utc": "2026-10-22T09:47:40+00:00",
   "latest_release": "0.6.0",
   "project_version": "0.7.0",
-  "source_commit": "0dff62c49a8c4c6b1583d24ad69ef784620a83ec"
+  "source_commit": "10aa6a53bb0a17457f1ff1e6cbdef36359e41a3f"
 }

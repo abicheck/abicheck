@@ -16,7 +16,7 @@ from pathlib import Path
 
 import pytest
 
-from abicheck.checker import _ROOT_TYPE_CHANGE_KINDS, Change, DiffResult, compare
+from abicheck.checker import _ROOT_TYPE_CHANGE_KINDS, Change, compare
 from abicheck.checker_policy import ChangeKind, Verdict
 from abicheck.confidence import _compute_confidence
 from abicheck.diff_filtering import _enrich_affected_symbols, _enrich_source_locations
@@ -34,7 +34,8 @@ from abicheck.model import (
     Visibility,
 )
 from abicheck.report.view import ShowOnlyFilter, apply_show_only
-from abicheck.reporter import to_json, to_markdown, to_stat, to_stat_json
+from abicheck.reporter import to_json, to_markdown, to_stat_json
+from tests._report_test_helpers import make_diff as _make_diff, stat_line
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -61,36 +62,6 @@ def _make_snap(
     )
     snap.index()
     return snap
-
-
-def _make_diff(
-    changes: list[Change] | None = None,
-    verdict: Verdict = Verdict.NO_CHANGE,
-    redundant_count: int = 0,
-    redundant_changes: list[Change] | None = None,
-    suppressed_count: int = 0,
-    suppression_file_provided: bool = False,
-    suppressed_changes: list[Change] | None = None,
-    scope_to_public_surface: bool = False,
-    out_of_surface_count: int = 0,
-    out_of_surface_changes: list[Change] | None = None,
-) -> DiffResult:
-    """Build a minimal DiffResult for testing."""
-    return DiffResult(
-        old_version="1.0",
-        new_version="2.0",
-        library="libtest.so",
-        changes=changes or [],
-        verdict=verdict,
-        redundant_count=redundant_count,
-        redundant_changes=redundant_changes or [],
-        suppressed_count=suppressed_count,
-        suppression_file_provided=suppression_file_provided,
-        suppressed_changes=suppressed_changes or [],
-        scope_to_public_surface=scope_to_public_surface,
-        out_of_surface_count=out_of_surface_count,
-        out_of_surface_changes=out_of_surface_changes or [],
-    )
 
 
 # ===========================================================================
@@ -462,7 +433,7 @@ class TestToStat:
 
     def test_stat_no_change(self):
         result = _make_diff(verdict=Verdict.NO_CHANGE)
-        out = to_stat(result)
+        out = stat_line(result)
         assert "NO_CHANGE" in out
         assert "no changes" in out
 
@@ -475,7 +446,7 @@ class TestToStat:
             ],
             verdict=Verdict.BREAKING,
         )
-        out = to_stat(result)
+        out = stat_line(result)
         assert "BREAKING" in out
         assert "breaking" in out.lower()
 
@@ -487,7 +458,7 @@ class TestToStat:
             verdict=Verdict.COMPATIBLE,
             redundant_count=5,
         )
-        out = to_stat(result)
+        out = stat_line(result)
         assert "5 redundant hidden" in out
 
     def test_stat_compatible_with_risk(self):
@@ -501,7 +472,7 @@ class TestToStat:
             ],
             verdict=Verdict.COMPATIBLE_WITH_RISK,
         )
-        out = to_stat(result)
+        out = stat_line(result)
         assert "COMPATIBLE_WITH_RISK" in out
 
     def test_stat_json_structure(self):
@@ -813,7 +784,7 @@ class TestToMarkdownBranches:
 
     def test_to_markdown_stat_mode(self):
         result = _make_diff(verdict=Verdict.NO_CHANGE)
-        out = to_stat(result)
+        out = stat_line(result)
         assert "NO_CHANGE" in out
 
     def test_to_markdown_with_show_impact(self):

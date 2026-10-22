@@ -66,6 +66,7 @@ from abicheck.policy.severity import (
     legacy_exit_code,
 )
 from abicheck.serialization import snapshot_to_json
+from tests._report_test_helpers import review_digest
 
 
 def _fn(name: str, mangled: str) -> Function:
@@ -938,16 +939,14 @@ class TestEveryRendererTellsTheSameStory:
         """The digest prints its merge advice from the verdict and its
         impacted-symbol list from the raw change set, so it said "safe to
         merge" directly above the symbol it called impacted (Codex review)."""
-        from abicheck.report.dispatch_markdown import to_review_digest
 
-        digest = to_review_digest(self._excluded())
+        digest = review_digest(self._excluded())
         assert "safe to merge" in digest
         assert "Top impacted symbols" not in digest
 
     def test_the_review_digest_lists_a_scored_finding(self) -> None:
-        from abicheck.report.dispatch_markdown import to_review_digest
 
-        digest = to_review_digest(self._scored())
+        digest = review_digest(self._scored())
         # The story, not the section heading that happens to carry it.
         assert "Internal" in digest, digest
         assert "Size changed" in digest, digest

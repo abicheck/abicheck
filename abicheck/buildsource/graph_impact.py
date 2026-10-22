@@ -120,7 +120,7 @@ _TIER_OVERAPPROX = 5  # ADR tier 6: crosses a virtual/function-pointer call
 def _edge_is_overapprox(edge: GraphEdge) -> bool:
     """Whether *edge* is a virtual/function-pointer call or otherwise
     resolved ``overapprox`` (ADR-031 D4/D9, ADR-046 D5's ``call_kind``
-    vocabulary — the same signal ``internal_leak.CALL_GRAPH_TRAVERSAL_POLICY.
+    vocabulary — the same signal ``compare.call_graph_walk.CALL_GRAPH_TRAVERSAL_POLICY.
     effect_transitions`` downgrades a walk's precision on).
     """
     resolved = edge.resolved or edge.attrs

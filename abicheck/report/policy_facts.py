@@ -39,7 +39,6 @@ from ..policy.classification import evidence_status_for_result, impact_for
 from ..policy.evaluate import effective_kind_sets, evaluate
 from ..policy.gate_decision import gate_decision_for_result
 from ..policy.reclassify import active_reclassify_rules
-from ..policy.severity import compute_exit_code
 from ..report_classifications import (
     ENVIRONMENT_DRIFT_KINDS as ENVIRONMENT_DRIFT_KINDS,
     category as category,
@@ -177,14 +176,3 @@ def reclassify_rules_in_effect(
 ) -> list[ReclassifyRuleProtocol]:
     """The reclassify rules not yet past their ``expires`` date on *today*."""
     return active_reclassify_rules(rules, today)
-
-
-def gate_exit_code_for(result: DiffResult, severity_config: SeverityConfig) -> int:
-    """The exit code *result* scores to under *severity_config*, on its own policy."""
-    return compute_exit_code(
-        result.changes,
-        severity_config,
-        policy=result.policy,
-        kind_sets=effective_kind_sets(result),
-        policy_file=result.policy_file,
-    )
