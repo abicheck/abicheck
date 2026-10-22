@@ -581,18 +581,6 @@ def rank(doc: dict, shared_at: int = 3) -> dict[str, dict]:
     return out
 
 
-def _analyse_measured(
-    cov: object, measured: str, path: Path
-) -> tuple[list[int], list[int], list[FunctionSpan]] | None:
-    """Statements, missing lines and spans of *measured*; None when stale."""
-    try:
-        _, statements, _, missing, _ = cov.analysis2(measured)  # type: ignore[attr-defined]
-        spans = function_spans(path.read_text(encoding="utf-8"))
-    except Exception:  # noqa: BLE001 - a stale file is skipped, not fatal
-        return None
-    return statements, missing, spans
-
-
 def unit_coverage_by_function(data_file: Path, root: Path = ROOT) -> dict[str, float]:
     """Statement coverage of each function in a unit-suite coverage file."""
     import coverage
@@ -608,10 +596,11 @@ def unit_coverage_by_function(data_file: Path, root: Path = ROOT) -> dict[str, f
             continue
         if not rel.startswith(f"{PACKAGE}/"):
             continue
-        analysed = _analyse_measured(cov, measured, path)
-        if analysed is None:
-            continue
-        statements, missing, spans = analysed
+        try:
+            _, statements, _, missing, _ = cov.analysis2(measured)
+            spans = function_spans(path.read_text(encoding="utf-8"))
+        except (OSError, SyntaxError, ValueError, coverage.CoverageException):
+            continue  # a stale file is skipped, not fatal
         owner = line_owner_map(spans)
         total: dict[str, int] = defaultdict(int)
         hit: dict[str, int] = defaultdict(int)
