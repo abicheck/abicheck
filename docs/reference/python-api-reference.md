@@ -262,7 +262,7 @@ Classify an already-resolved pair — the second half of ``run_compare_request``
 
 ## `cleanup_release_compare_plan`
 
-Remove every directory :func:`resolve_release_compare_plan` allocated for *plan* (``plan.temp_dirs``) -- the direct-call counterpart of ``compare_release_cmd``'s own tracked ``_make_temp_dir``/ ``_cleanup_temp_dirs`` pair (Codex review, PR #1215: a direct caller that lets a package/debug-package/devel-package/stored-package operand use the default ``make_temp_dir`` factory would otherwise leak the extracted directories for the process's lifetime, since nothing else ever removes them). A no-op, per entry, when a directory is already gone.
+Remove every directory :func:`resolve_release_compare_plan` allocated for *plan* (``plan.temp_dirs``). Callers normally reach this through ``with plan:``; it stays public for a caller that holds a plan it did not enter (Codex review, PR #1215: a direct caller that lets a package/ debug-package/devel-package/stored-package operand use the default ``make_temp_dir`` factory would otherwise leak the extracted directories for the process's lifetime). A no-op, per entry, when a directory is already gone.
 
 | Parameter | Type | Default |
 |---|---|---|

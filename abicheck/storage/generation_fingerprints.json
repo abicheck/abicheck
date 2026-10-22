@@ -161,7 +161,7 @@
       "abicheck/compare/export_owner_resolution.py": "e9108cbdf0459cb8171f63ca328138558cfd032bff9124e4b9bd0fd5bf8553c8",
       "abicheck/debug_resolver.py": "cdcc4f72bd8fb5304fe030b3e1365da488ad009397e014ba56931a3f311cf1f3",
       "abicheck/impact/use_case_reachability.py": "4882b891f0d2d298d200d8ff8ee74fbb3b48509813cb6fbc999e1a6628fb0326",
-      "abicheck/post_processing_reachability.py": "4932e6c5e2fad3b56e054081883bd41bffc7df5b168ab4d6284389c645670df1",
+      "abicheck/post_processing_reachability.py": "7dac33964797c4b0b40c123a6363e78162402c4e77ef81d38827dbab9d30e48e",
       "abicheck/storage/native_identity_aliases.py": "061e634659b371f1688cfcd4845fdcbe6147b9c2cfddaa4285dd34c757ca80ef",
       "abicheck/type_reachability.py": "89d8db3c507a58004fd6b38ad4fee5ea6c9b40a9da97f34d8067ae440aa9e9bb",
       "abicheck/type_reachability_spelling.py": "4262f30db17f2a4c5ba2a4341b8eed9f1408e335825644845e10cb08838995cb",
@@ -169,9 +169,9 @@
       "abicheck/workflows/compare/resolve.py": "dc0381227c9e8dacaa39858d3f534ff45cbb3177f9b8645a8728c3f25c460793",
       "abicheck/workflows/elf_dependency_resolver.py": "18524281e550a7f25225441cd063de58ec33281e7bacf65fef98d1fefb101426"
     },
-    "fingerprint": "b67c0717ab797e7f7d6c14f789430b6399fa2412a0cd98f1bccbad1901aef43c",
-    "generation": 1,
-    "reason": "Moved impact/use_case_impact.py to impact/use_case_reachability.py (use-case entrypoint reachability, unchanged logic) and added it to the resolver scope; no recorded or derived fact changes."
+    "fingerprint": "22d1b29fc580f7fd0e389ea9d4ea7e17b55d54f905e5e30db05c198a13dbf8cd",
+    "generation": 2,
+    "reason": "Merge of main: #1683 relocated the use-case reachability code behind workflows/compare with no change to what the resolver derives; re-recording the fingerprint over the merged tree."
   },
   "source": {
     "files": {
@@ -180,7 +180,7 @@
       "abicheck/buildsource/include_graph.py": "ef58148778e358df83199de6c509cd25633464a1458a306ce5b48c2254d9a768",
       "abicheck/buildsource/include_graph_workers.py": "efd233af0f27f8c50f29eb467e88fe42cb907246de22285a78f8552981d0c027",
       "abicheck/buildsource/inline_graph_fold.py": "8a4072d004dd1cd2ea21703b28e31b6f77fde1c30eb0dcd7044f8cb70c7d9986",
-      "abicheck/buildsource/l5_ast_pass.py": "f613794f66ef0eadb788459ab5a7b01efe04049e61ea1fe5fab1e51adc394c2c",
+      "abicheck/buildsource/l5_ast_pass.py": "e1a68183451903b956a749109847cfa40b6f8df96cc52ddf9408b6e047ec5264",
       "abicheck/buildsource/l5_ast_run.py": "819d2e615617945d0bdb2319765a757a5edbb18fc5b5373e949e83ee2e113e12",
       "abicheck/buildsource/macro_graph.py": "fa410a488ba4986365705ffb34e3201c643a946b2c31383442c7c740a169b8cf",
       "abicheck/buildsource/override_graph.py": "0503453212b0604119db1ecf845b629a4e9f790566258855eeddf417f8cb21a7",
@@ -193,12 +193,12 @@
       "abicheck/buildsource/source_extractors/android.py": "61dbcff2cb35c7d2ad1bb4a7e441acc43ec0791e1905ef7e4eb65a202ceaeb7b",
       "abicheck/buildsource/source_extractors/base.py": "6e58567edf53d8883f749828e0ab12be61ed2a3a18369023e6e5ba38d5e3c1ce",
       "abicheck/buildsource/source_extractors/castxml.py": "fa6fca55254d6c1b314a7ccd82e23d7b1493dc04a1b7bace7f6117cb110955e2",
-      "abicheck/buildsource/source_extractors/clang.py": "487fb1fb65bc71f13d212774c21f52d83d30c8609cb3be12a9343fb89a02ab41",
+      "abicheck/buildsource/source_extractors/clang.py": "0cebc2954ca71ab088a8556905401dc6006f258e56981aa36550e7ca681d5f27",
       "abicheck/buildsource/source_extractors/clang_command.py": "1d6f4736433219c3e7557147c0740d79b2152b1cd81462d4431e6d3ec2549f04",
       "abicheck/buildsource/source_extractors/clang_dump_errors.py": "ddb47a07d6258b83da0986248ece68fc6e737eb25dc7d90a141d4e1833dc1dd7",
       "abicheck/buildsource/source_extractors/clang_macros.py": "5c87c707e398da2cce4326669491e796101912eb1c95b12c5e65de8bc32468d5",
       "abicheck/buildsource/source_extractors/clang_node_predicates.py": "d773b2eeb0ee1fe163fc56a23aa1b8fb0715946df4074a3e6c23284070cd04cc",
-      "abicheck/buildsource/source_extractors/clang_nodes.py": "90e10ebe949d415d6fc4ab1f6118f5614ce6705bcd9bf030247caf4df45057a0",
+      "abicheck/buildsource/source_extractors/clang_nodes.py": "9463fbac6fe36203c29f20ab3203791e3b558f21f4ebf66ee732f39aaf912c9b",
       "abicheck/buildsource/source_extractors/clang_public_roots.py": "f82f30744407b288494e4b0a917d8f8e0e97a4187f04a28dcf54e7da75c976d9",
       "abicheck/buildsource/source_extractors/clang_source_edges.py": "c9b8c3daacd02c4913b486a6ac658b435744243ed4433f14792588f67ef800e9",
       "abicheck/buildsource/source_graph.py": "a374d3f54b1d83b8c0d5b4d0b8dd0deb2ab5f696236f79f8974358a8907e05bd",
@@ -213,8 +213,8 @@
       "abicheck/buildsource/type_graph.py": "a028a875057cd0cbf2930a431bfa1e579f7b770e0d124cbcfe715724e89d12e5",
       "abicheck/buildsource/type_graph_index.py": "7375f7baec7ceb3dd4a52a489b89e5a3571750dffca7490d1c5870301d55202d"
     },
-    "fingerprint": "e52cec9bba561ca0b332f60e7eb5caba8b6abb56b1b9317053a2a6a86d106710",
-    "generation": 1,
-    "reason": "scope correction before the axis landed: source_extractors/resolver.py decides provider selection and is owned by the resolver axis (RESOLVER_SEMANTIC_FILES), so it leaves the source scope; no file's content changed and no source fact or graph semantics changed"
+    "fingerprint": "9cf32712b1dbd67788b9079f87414a468c50740101b092710cb947318842bf5a",
+    "generation": 2,
+    "reason": "bumped to 2: the L4 clang extractor now refuses a malformed clang AST with SourceExtractionError (it read as an empty surface), and the L5 pass validates the AST shape before materializing locations; both change the facts recorded for the same input"
   }
 }

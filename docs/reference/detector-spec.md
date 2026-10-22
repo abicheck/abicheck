@@ -2,7 +2,7 @@
 
 # Detector specification matrix
 
-One row per `ChangeKind` (419 total). Columns fuse the verdict partition (`checker_policy`), default policy (`policy_for`), the weakest evidence layer at which the kind becomes detectable (`scripts/evidence_tiers`), and the example case(s) that demonstrate the kind (`catalog/ground_truth.json`). The **Examples** column is capped at 4 links per kind; the full mapping is in `detector-spec.json`.
+One row per `ChangeKind` (420 total). Columns fuse the verdict partition (`checker_policy`), default policy (`policy_for`), the weakest evidence layer at which the kind becomes detectable (`scripts/evidence_tiers`), and the example case(s) that demonstrate the kind (`catalog/ground_truth.json`). The **Examples** column is capped at 4 links per kind; the full mapping is in `detector-spec.json`.
 
 | ChangeKind | Category | Default verdict | Severity | Min evidence | Doc slug | Examples |
 |---|---|---|---|---|---|---|
@@ -64,7 +64,7 @@ One row per `ChangeKind` (419 total). Columns fuse the verdict partition (`check
 | `declaration_identity_reconciled_unresolved` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L5 | `declaration_identity_reconciled_unresolved` | [case197](examples/case197_header_graph_identity_reconciled.md) |
 | `declaration_identity_unchanged` | informational | `COMPATIBLE` | `warning` | L5 | `declaration_identity_unchanged` | — |
 | `declaration_moved` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L5 | `declaration_moved` | [case196](examples/case196_header_graph_move_reconciled.md) |
-| `declaration_renamed` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L5 | `declaration_renamed` | [case194](examples/case194_header_graph_rename_reconciled.md) |
+| `declaration_renamed` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L5 | `declaration_renamed` | — |
 | `default_argument_changed` | api_break | `API_BREAK` | `warning` | unspecified | `default_argument_changed` | — |
 | `default_template_arg_changed` | breaking | `BREAKING` | `error` | L2 | `default_template_arg_changed` | [case87](examples/case87_default_template_arg_changed.md) |
 | `dt_relr_introduced` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L0 | `dt_relr_introduced` | — |
@@ -237,6 +237,7 @@ One row per `ChangeKind` (419 total). Columns fuse the verdict partition (`check
 | `protected_visibility_changed` | risk | `COMPATIBLE_WITH_RISK` | `warning` | unspecified | `protected_visibility_changed` | — |
 | `public_api_exposes_stl_by_value` | risk | `COMPATIBLE_WITH_RISK` | `warning` | unspecified | `public_api_exposes_stl_by_value` | — |
 | `public_api_internal_dependency_added` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L5 | `public_api_internal_dependency_added` | [case160](examples/case160_public_api_internal_dep_added.md), [case187](examples/case187_public_struct_private_field_type.md), [case188](examples/case188_public_class_private_base_class.md), [case189](examples/case189_public_function_private_parameter_type.md), +6 |
+| `public_api_internal_type_renamed` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L5 | `public_api_internal_type_renamed` | [case194](examples/case194_header_graph_rename_reconciled.md), [case221](examples/case221_public_api_internal_type_renamed.md) |
 | `public_dependency_role_changed` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L5 | `public_dependency_role_changed` | — |
 | `public_dependency_role_unknown` | quality | `COMPATIBLE` | `warning` | L5 | `public_dependency_role_unknown` | — |
 | `public_macro_removed` | api_break | `API_BREAK` | `warning` | L4 | `public_macro_removed` | [case156](examples/case156_public_macro_removed.md) |

@@ -443,6 +443,13 @@ SOURCE_ENTRIES: list[ChangeKindMeta] = [
         operation=_OP.MODIFIED,
     ),
     _E(
+        "public_api_internal_type_renamed",
+        _R,
+        impact="A public entry still reaches the same internal declaration/type under a new name (reconciled as one entity, already reached before): reported once instead of an add plus a remove; not an ABI break by itself.",
+        entity=_ENT.SOURCE,
+        operation=_OP.MODIFIED,
+    ),
+    _E(
         "public_api_internal_dependency_added",
         _R,
         impact="A public/exported entry point newly reaches an internal "

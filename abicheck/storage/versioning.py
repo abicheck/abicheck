@@ -86,7 +86,7 @@ EXTRACTOR_GENERATION = 5
 #: This build's resolution semantics generation (ADR-062 D2): provider
 #: selection, alias normalization, symbol-version handling, reachability.
 #: Bump it when a graph derived from the same stored facts would change.
-RESOLVER_GENERATION = 1
+RESOLVER_GENERATION = 2
 
 #: This build's source-tier semantics generation (ADR-062 D2 amendment): what
 #: the L4 source extractors and the L5 graph passes record for the same build
@@ -94,7 +94,7 @@ RESOLVER_GENERATION = 1
 #: not drift an L2 (binary plus headers) package. Stamped only on a package
 #: that carries source-tier facts. Bump it when what those extractors or passes
 #: record for the same input changes.
-SOURCE_GENERATION = 1
+SOURCE_GENERATION = 2
 
 #: Substring every generation-drift notice carries, so a consumer can filter
 #: ``coverage_warnings`` for it.

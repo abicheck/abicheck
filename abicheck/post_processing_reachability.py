@@ -82,6 +82,7 @@ _PUBLIC_SOURCE_ABI_KINDS = frozenset(
         ChangeKind.GENERATED_HEADER_REACHES_PUBLIC_API,
         ChangeKind.CALL_GRAPH_PUBLIC_ENTRY_REACHABILITY_CHANGED,
         ChangeKind.PUBLIC_API_INTERNAL_DEPENDENCY_ADDED,
+        ChangeKind.PUBLIC_API_INTERNAL_TYPE_RENAMED,
         ChangeKind.INCLUDE_GRAPH_PUBLIC_HEADER_DRIFT,
         ChangeKind.EXPORTED_SYMBOL_SOURCE_OWNER_CHANGED,
         # _mapping_drift_findings fires only on old_sym != new_sym, and a

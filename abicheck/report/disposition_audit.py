@@ -47,6 +47,7 @@ from datetime import date
 from typing import TYPE_CHECKING, Any, cast
 
 from ..policy.disposition_close import (
+    accepted_breaks as _accepted_breaks,
     acknowledged_total as _acknowledged_total,
     ledger_for,
     reclassified_total as _reclassified_total,
@@ -149,6 +150,8 @@ class DispositionAudit:
     #: P1: the ``unused_rules`` gate, evaluated over the rows above. Always
     #: present; its ``gate_contribution`` is ``0`` unless the mode is ``block``.
     unused_rules_review: dict[str, object] | None = None
+    #: ADR-067 D5: ``{kind, symbol, verdict_class}`` per break ``breaks: accept`` made non-gating.
+    accepted_breaks: tuple[dict[str, object], ...] = ()
 
     @property
     def configured_rules(self) -> tuple[RuleAuditRow, ...]:
@@ -178,6 +181,7 @@ class DispositionAudit:
                 acknowledgment_row_json(row) for row in self.acknowledgments
             ],
             "unacknowledged_additions_review": self.unacknowledged_additions_review,
+            "accepted_breaks": [dict(row) for row in self.accepted_breaks],
             "unused_rules_review": self.unused_rules_review,
         }
 
@@ -223,6 +227,7 @@ class DispositionAudit:
             unused_rules_review=cast(
                 "dict[str, object] | None", d.get("unused_rules_review")
             ),
+            accepted_breaks=tuple(dict(r) for r in d.get("accepted_breaks") or ()),
         )
 
 
@@ -280,6 +285,7 @@ def compute_disposition_audit(
         acknowledgments=_of_kind(rows, KIND_ACKNOWLEDGMENT),
         unacknowledged_additions_review=_additions_review_dict(result),
         unused_rules_review=review.to_dict(),
+        accepted_breaks=_accepted_breaks(ledger),
     )
 
 
@@ -467,6 +473,7 @@ def fold_disposition_audits(audits: Iterable[DispositionAudit]) -> DispositionAu
         unused_rules_review=(
             unused_rules_review(folded_rows, mode=mode).to_dict() if members else None
         ),
+        accepted_breaks=tuple(r for a in members for r in a.accepted_breaks),
     )
 
 

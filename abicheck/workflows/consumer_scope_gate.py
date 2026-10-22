@@ -15,9 +15,10 @@
 
 """ADR-043 scoped gate: ``--used-by`` / ``--required-symbol(s)`` computation.
 
-Owns the worst-wins scoping passes and the scoped exit code they produce. The
-CLI decides which pass applies and maps consumer-read errors to exit 1; it
-renders the result, it does not compute it.
+Owns the worst-wins scoping passes, the scoped exit code they produce, and the
+choice of which pass applies (:func:`apply_scoped_gating`). Input refusals are
+typed :class:`ScopedGateError` subclasses; the CLI adapter renders them as
+click errors, it does not decide them.
 """
 
 from __future__ import annotations
@@ -28,6 +29,8 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from ..compare.finding_identity import report_finding_id
+from ..model.consumer_requirements import LibraryExportsUnreadableError
+from ..model.consumer_spec import ConsumerUnreadableError
 from .gate import consumer_verdict_rank, effective_kind_sets
 from .input_resolution import detect_binary_format
 
@@ -36,6 +39,40 @@ if TYPE_CHECKING:
     from ..model.consumer_spec import ConsumerAppInput
     from .consumer_scope import AppCompatResult, PluginHostContractResult
     from .policy_file import PolicyFile
+
+
+class ScopedGateError(Exception):
+    """An input the scoped gate refuses. The CLI adapter maps each subclass to
+    its own click error and exit code; this layer carries the facts only."""
+
+
+class UsedByEvidenceError(ScopedGateError):
+    """OLD or NEW carries no binary evidence to scope a ``--used-by`` consumer
+    against: not a real library path, nor a JSON snapshot with an
+    ``elf``/``pe``/``macho`` block (i.e. a headers-only dump)."""
+
+    def __init__(self, label: str, path: Path) -> None:
+        super().__init__(f"{label} ({path}) carries no binary evidence")
+        self.label = label
+        self.path = path
+
+
+class UsedByConsumerError(ScopedGateError):
+    """A REQUIRED ``--used-by`` consumer could not be read (an ADVISORY one never
+    raises: it comes back ``unreadable=True``)."""
+
+    def __init__(self, cause: ConsumerUnreadableError) -> None:
+        super().__init__(str(cause))
+        self.cause = cause
+
+
+class UsedByLibraryError(ScopedGateError):
+    """An OLD/NEW library whose export table was not read: no consumer can be
+    scoped against it, so the gate refuses rather than report an unchecked verdict."""
+
+    def __init__(self, cause: LibraryExportsUnreadableError) -> None:
+        super().__init__(str(cause))
+        self.cause = cause
 
 
 def resolve_scoping_libs(
@@ -52,6 +89,32 @@ def resolve_scoping_libs(
     old_lib = old_input if detect_binary_format(old_input) is not None else old_snapshot
     new_lib = new_input if detect_binary_format(new_input) is not None else new_snapshot
     return old_lib, new_lib
+
+
+def require_used_by_binary_evidence(
+    old_lib: Any,
+    new_lib: Any,
+    old_input: Path,
+    new_input: Path,
+) -> None:
+    """Reject a ``--used-by`` run whose OLD/NEW side carries no binary evidence.
+
+    A real library path always qualifies; a JSON snapshot qualifies only when it
+    carries an ``elf``/``pe``/``macho`` block (i.e. it is a ``dump`` of a real
+    library, not a headers-only one) -- that is what supplies the SONAME/export
+    table/version list/PE ordinal table the scoping needs. OLD is checked first.
+
+    Raises :class:`UsedByEvidenceError` for the first side that fails.
+    """
+    for lib, path, label in (
+        (old_lib, old_input, "OLD"),
+        (new_lib, new_input, "NEW"),
+    ):
+        has_binary_evidence = isinstance(lib, Path) or any(
+            getattr(lib, field, None) is not None for field in ("elf", "pe", "macho")
+        )
+        if not has_binary_evidence:
+            raise UsedByEvidenceError(label, path)
 
 
 #: Fields a scope produces only sometimes. A ``None`` here means "this scope
@@ -584,3 +647,71 @@ def _apply_required_symbol_scoping(
         scoped_severity_counts=severity_counts,
     ).stamp(result)
     return exit_code
+
+
+def apply_scoped_gating(
+    result: Any,
+    old: Any,
+    new: Any,
+    policy: str,
+    policy_file: PolicyFile | None,
+    *,
+    used_by_apps: tuple[ConsumerAppInput, ...],
+    required_symbols: tuple[str, ...],
+    used_by_old_input: Path,
+    used_by_new_input: Path,
+    severity: Any,
+    suppression: Any,
+) -> int | None:
+    """Apply whichever ADR-043 scoped gate this run selected, if any.
+
+    ``--used-by`` and ``--required-symbol`` are mutually exclusive (rejected
+    earlier), so at most one applies; ``--used-by`` wins if both arrive. *severity*
+    is the run's ``EffectiveGate.severity`` (``None`` under the legacy scheme).
+    Returns the scoped exit code, or ``None`` when the run is unscoped and the
+    full-library verdict gates instead.
+
+    Raises :class:`ScopedGateError` subclasses for refused ``--used-by`` inputs.
+    Only ``--used-by`` maps consumer-read failures to those types: a
+    ``--required-symbol`` read error propagates unwrapped, as it always has.
+    """
+    if used_by_apps:
+        try:
+            old_lib, new_lib = resolve_scoping_libs(
+                used_by_old_input, used_by_new_input, old, new
+            )
+            require_used_by_binary_evidence(
+                old_lib, new_lib, used_by_old_input, used_by_new_input
+            )
+            return _apply_used_by_scoping(
+                result,
+                used_by_apps,
+                used_by_old_input,
+                used_by_new_input,
+                old,
+                new,
+                policy,
+                policy_file,
+                severity=severity,
+                suppression=suppression,
+            )
+        except ConsumerUnreadableError as exc:
+            # A REQUIRED consumer that cannot be read is an input error (an
+            # ADVISORY one never raises -- it comes back `unreadable=True`).
+            raise UsedByConsumerError(exc) from exc
+        except LibraryExportsUnreadableError as exc:
+            # An OLD/NEW library whose export table was not read cannot scope
+            # any consumer: refuse rather than report a verdict nobody checked.
+            raise UsedByLibraryError(exc) from exc
+    if required_symbols:
+        return _apply_required_symbol_scoping(
+            result,
+            required_symbols,
+            old,
+            new,
+            policy,
+            policy_file,
+            severity=severity,
+            suppression=suppression,
+        )
+    return None

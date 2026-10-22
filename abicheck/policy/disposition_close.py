@@ -38,6 +38,7 @@ from collections.abc import Iterable
 from dataclasses import replace
 from typing import TYPE_CHECKING
 
+from .acknowledgment_breaks import ACCEPTED_BREAK_APPLICATION_POINT
 from .binary_gated_contract import binary_gate_rule_provenance
 from .disposition_acknowledgment import (
     break_verdict_reader,
@@ -668,6 +669,19 @@ def acknowledged_total(ledger: DispositionLedger) -> int:
     is still ``suppressed``.
     """
     return sum(1 for r in ledger.records if r.acknowledged_by is not None)
+
+
+def accepted_breaks(ledger: DispositionLedger) -> tuple[dict[str, object], ...]:
+    """ADR-067 D5 ``breaks: accept``: each acknowledged break made non-gating.
+
+    In ledger order; the verdict class stays the break's own.
+    """
+    return tuple(
+        {"kind": r.kind, "symbol": r.symbol, "verdict_class": r.verdict_class}
+        for r in ledger.records
+        if r.application_point == ACCEPTED_BREAK_APPLICATION_POINT
+        and r.disposition is Disposition.NON_GATING
+    )
 
 
 #: The two dispositions a contract/scope decision -- as opposed to
