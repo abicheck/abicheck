@@ -304,6 +304,7 @@ _F5 = tuple(
         "perf.narrowed_computation_must_equal_the_unnarrowed_answer",
         "perf.optimization_wired_to_one_of_several_equivalent_paths",
         "perf.per_symbol_dto_carries_a_per_instance_dict",
+        "perf.pattern_compiled_before_the_filter_that_discards_it",
         "perf.pure_content_digest_recomputed_per_consumer",
         "perf.retention_decided_by_one_switch_not_by_consumers",
         "perf.reuse_key_normalizes_an_ordered_input",

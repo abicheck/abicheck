@@ -1185,23 +1185,13 @@ PERFORMANCE_BUG_CLASSES: tuple[BugClass, ...] = (
     ),
     BugClass(
         id="perf.pattern_compiled_before_the_filter_that_discards_it",
-        invariant=(
-            "A per-item derived object (a compiled regex) is built only "
-            "after the cheap filter that decides whether it is used, and is "
-            "memoized by its key: the number of builds tracks the distinct "
-            "keys that pass the filter, never the number of items queried. "
-            "The answer must equal an oracle that does not reuse the "
-            "implementation's pattern."
+        invariant="A per-item regex is compiled only after the filter that decides it is used, memoized by key: compiles track distinct passing keys, not items queried, and answers equal a non-regex oracle.",
+        fixed_by=(1726,),  # ~23k MKL exports/side cycled re's cache: 1.4 s
+        seed_tests=(
+            "tests/test_family_f5_optimization_reference.py",
+            "tests/test_textual_declaration_hint_compile_bound.py",
         ),
-        # `textual_declaration_hint` compiled one regex per undeclared
-        # export before its `leaf in h.identifiers` filter; ~23k exports
-        # per MKL side cycled `re`'s 512-entry cache, ~1.4 s per side.
-        fixed_by=(1726,),
-        seed_tests=("tests/test_textual_declaration_hint_compile_bound.py",),
         public_surfaces=(),
-        axes={
-            "detection": ("compile-count-bound", "scan-oracle-equivalence"),
-            "input_size": ("16", "256", "2048"),
-        },
+        axes={"detection": ("compile-bound", "oracle"), "size": ("16", "2048")},
     ),
 )
