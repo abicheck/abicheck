@@ -85,7 +85,7 @@ def _receive(recv: Any, proc: Any) -> tuple[str, Any]:
             f"member process exited with status {proc.exitcode} without "
             "returning a result"
         )
-    except OSError as exc:
+    except Exception as exc:  # noqa: BLE001 -- an undecodable result is this member's failure
         return "err", SnapshotError(f"member result transfer failed: {exc!r}")
     return status, value
 

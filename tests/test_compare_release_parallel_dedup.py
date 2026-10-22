@@ -44,6 +44,12 @@ class TestParallelFanOutDedupPropagation:
     (Codex review: a `ContextVar` set in the calling thread is not
     automatically visible to a new `ThreadPoolExecutor` worker thread)."""
 
+    @pytest.fixture(autouse=True)
+    def _thread_fan_out(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        # These tests pin the thread pool's ContextVar propagation; the
+        # forked path is covered in test_release_member_processes.py.
+        monkeypatch.setenv("ABICHECK_MEMBER_PROCESSES", "0")
+
     def _member_context(
         self, tmp_path: Path, pf: Path, keys: tuple[str, ...] = ("a", "b")
     ) -> ReleaseMemberContext:

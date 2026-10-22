@@ -280,9 +280,11 @@ def load_cached_projection(ast_cache_path: Path) -> HeaderGraphAstProjection | N
     corrupt sidecar costs one re-parse instead of every future one.
 
     Inside a bisection scope (one release/compare request) a successful load
-    is shared by every library that asks for the same sidecar, so a 28-member
-    release reads each sidecar once instead of once per member. Outside a
-    scope, or in reference mode, every call reads the disk as before.
+    is shared by every library in this process that asks for the same
+    sidecar -- sequential or thread fan-out reads each sidecar once instead
+    of once per member. Forked member processes each hold their own copy of
+    the memo, so each reads a sidecar at most once. Outside a scope, or in
+    reference mode, every call reads the disk as before.
     """
     path = projection_sidecar_path(ast_cache_path)
     return current_bisection_memo().load_projection(path, lambda: _read_sidecar(path))

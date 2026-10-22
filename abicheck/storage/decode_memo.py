@@ -82,7 +82,7 @@ def memo_fact(
             and type(status) is str
             and (producer is None or type(producer) is str)
             and (
-                not diagnostics
+                diagnostics is None
                 or (
                     type(diagnostics) is list
                     and all(type(item) is str for item in diagnostics)
@@ -95,7 +95,7 @@ def memo_fact(
                 status,
                 value_type,
                 value,
-                tuple(diagnostics) if diagnostics else (),
+                None if diagnostics is None else tuple(diagnostics),
                 producer,
             )
             fact: Fact[Any] | None = _FACT_MEMO_READ(key)
