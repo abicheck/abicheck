@@ -821,8 +821,8 @@ def test_mutant_stale_disk_cache_entry_is_caught(
     cold = _run(*args)
     real_lookup = dump_cache_api._lookup_key
 
-    def stale(key: str, path: Path) -> Any:
-        snap = real_lookup(key, path)
+    def stale(key: str, path: Path, *rest: str) -> Any:
+        snap = real_lookup(key, path, *rest)
         if snap is not None and snap.declarations.functions:
             snap.declarations.functions = snap.declarations.functions[:-1]
         return snap

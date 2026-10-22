@@ -375,8 +375,8 @@ class DiskCacheSpy:
         mp.setenv("XDG_CACHE_HOME", str(root / "xdg"))
         lookup, store = dump_cache_store._lookup_key, dump_cache_store._store_key
 
-        def spy_lookup(key: str, path: Path) -> Any:
-            got = lookup(key, path)
+        def spy_lookup(key: str, path: Path, *rest: str) -> Any:
+            got = lookup(key, path, *rest)
             if got is None:
                 self.misses += 1
             else:
