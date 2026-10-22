@@ -421,15 +421,18 @@ TYPE_FACTS: list[FactDefinition] = [
         reportable=False,
         lifecycle=FactLifecycle.CONSUMED,
         consumed_by=(
-            "abicheck.compare.template_instance_absence:_instantiated_from_primary",
+            "abicheck.compare.template_instance_absence:_declared_by_own_head",
         ),
         notes=(
             "Schema v61, no legacy sibling: for a class-template specialization "
             "record, True when the header's own class-head declares it (explicit "
             "or partial specialization), False when it was instantiated from the "
             "primary template -- read by castxml from the declaring header line. "
-            "Only PRESENT(False) lets a specialization the new header stops "
-            "instantiating count as not removed; anything else keeps type_removed."
+            "PRESENT(False) proves an instantiation of the primary, PRESENT(True) "
+            "is the record's own class-head (an explicit specialization, or the "
+            "partial specialization it was instantiated from); the clang header "
+            "graph's instantiated_from can also prove the origin, and a "
+            "contradiction between the two keeps type_removed."
         ),
     ),
     _E(

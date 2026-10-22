@@ -546,18 +546,23 @@ CLASSIFICATION_BUG_CLASSES: tuple[BugClass, ...] = (
             "(a function-template instance, a class-template specialization "
             "and its implicit members, inline methods and static data "
             "members) is not removed when the new header merely stops "
-            "instantiating it while its primary template is still declared. "
+            "instantiating it while the pattern it was instantiated from (the "
+            "primary template, or a partial specialization) is still declared. "
             "Its outcome follows the new export table: still exported -> no "
             "finding; export lost and old exported -> "
             "func_visibility_changed/var_visibility_changed (BREAKING); old "
-            "not exported -> no finding. A deleted explicit or partial "
-            "specialization, a removed template, a non-template entity, and "
-            "an old record whose instantiation origin was not proven keep "
-            "their removal kinds."
+            "not exported -> no finding. The origin is proven by castxml's "
+            "declaring line or by the clang AST's structure (a macro-produced "
+            "class-head included), and a producer that contradicts the other "
+            "voids it. A deleted explicit or partial specialization, a removed "
+            "template, a non-template entity, and an old record whose "
+            "instantiation origin was not proven keep their removal kinds."
         ),
         fixed_by=(1661,),
         seed_tests=(
             "tests/test_template_export_loss_declaration_presence.py",
+            "tests/test_class_template_specialization_origin_integration.py",
+            "tests/test_class_template_origin_unit.py",
             "tests/test_template_export_loss_declaration_presence_unit.py",
             "tests/test_class_template_specialization_absence_unit.py",
             # F1 harness: inventories RecordType.specialization_declared_fact
@@ -579,16 +584,21 @@ CLASSIFICATION_BUG_CLASSES: tuple[BugClass, ...] = (
                 "extern template",
                 "explicit specialization removed",
                 "template removed",
+                "macro-produced class-head",
+                "partial specialization kept",
+                "partial specialization deleted or replaced",
+                "explicit specialization on the primary's line",
             ),
             "export": ("to_local", "to_absent", "to_hidden"),
-            "frontend": ("castxml",),
+            "frontend": ("castxml", "castxml + clang header graph"),
         },
         known_gaps=(
             KnownGap(
                 description=(
-                    "The instantiation origin is read by castxml only; a "
-                    "clang-header or pre-v61 old snapshot keeps type_removed "
-                    "for a specialization the new header stops instantiating."
+                    "An old snapshot with neither origin record, a dump made "
+                    "without clang (macro-produced class-head, partial "
+                    "specialization), or an explicit instantiation the new "
+                    "header drops keeps type_removed."
                 ),
                 reference=(
                     "docs/contribute/known-gaps/"

@@ -149,6 +149,11 @@ def type_name_uncached(ctx: CastxmlParserContext, id_: str, depth: int = 0) -> s
         return (
             f"_Atomic({type_name(ctx, inner_id, depth + 1)})" if inner_id else "_Atomic"
         )
+    if tag == "AutoType":
+        # An undeduced ``auto``/``decltype(auto)`` placeholder (a function
+        # declared ``auto f();`` and defined elsewhere): castxml gives it no
+        # name, and the tag fallback below would spell it "AutoType".
+        return "auto"
     return el.get("name", tag)
 
 

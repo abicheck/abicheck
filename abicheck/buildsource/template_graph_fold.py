@@ -69,6 +69,7 @@ from ..model.graph_facts import (
     GraphNode,
     _normalize_graph_identity,
 )
+from .template_class_origin import PARTIAL_PATTERN_KIND
 from .template_graph import (
     _FUNCTION_KIND,
     _VALUE_DECL_KINDS,
@@ -209,7 +210,12 @@ def augment_graph_with_templates(
     Mints a ``template_decl`` node per distinct :attr:`~abicheck.buildsource.
     template_graph.TemplateInstantiation.
     template_qname` and a ``template_instantiation`` node per instantiation,
-    joined by :data:`EDGE_DECL_INSTANTIATES_TEMPLATE`. A resolved *type*
+    joined by :data:`EDGE_DECL_INSTANTIATES_TEMPLATE`; a class
+    instantiation's proven pattern rides on its node as the
+    ``instantiated_from`` attribute (``primary``/``partial``), and a declared
+    partial specialization (``PARTIAL_PATTERN_KIND``) mints only its
+    ``template_decl://<template>#<signature>`` node, instantiated or not.
+    A resolved *type*
     argument gets a :data:`EDGE_TEMPLATE_USES_TYPE` edge onto
     ``type://<qname>``; a resolved *declaration* argument
     (``target_decl_kind`` in :data:`~abicheck.buildsource.template_graph.
@@ -271,6 +277,8 @@ def augment_graph_with_templates(
             inst.template_qname, inst.template_signature
         )
         ensure_node(template_id, NODE_TEMPLATE_DECL, inst.template_qname)
+        if inst.kind == PARTIAL_PATTERN_KIND:
+            continue  # a declared pattern: its template_decl node is the fact
 
         # The instantiation's own *resolved* symbol identity, NOT an
         # independent normalization (self-review round, second pass;
@@ -287,16 +295,14 @@ def augment_graph_with_templates(
         dst_in_project = bool(
             project_files and inst.file and _file_in_project(inst.file, project_files)
         )
-        ensure_node(
-            inst_id,
-            NODE_TEMPLATE_INSTANTIATION,
-            inst.label,
-            attrs=(
-                {"defined_in_project": True, "def_file": inst.file}
-                if dst_in_project
-                else {}
-            ),
+        attrs: dict[str, Any] = (
+            {"defined_in_project": True, "def_file": inst.file}
+            if dst_in_project
+            else {}
         )
+        if inst.instantiated_from:
+            attrs["instantiated_from"] = inst.instantiated_from
+        ensure_node(inst_id, NODE_TEMPLATE_INSTANTIATION, inst.label, attrs=attrs)
         add_edge(inst_id, template_id, EDGE_DECL_INSTANTIATES_TEMPLATE, CONF_HIGH)
 
         for arg in inst.args:
