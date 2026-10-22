@@ -1,0 +1,177 @@
+{
+  "coverage": {},
+  "degraded_passes": {},
+  "edges": [
+    {
+      "attrs": {},
+      "confidence": "unknown",
+      "conflicts": [],
+      "dst": "decl:demo::scale",
+      "edge": "SOURCE_DECLARES",
+      "facts": [
+        {
+          "attrs": {},
+          "confidence": "unknown",
+          "producer": ""
+        }
+      ],
+      "occurrences": [],
+      "provenance": "",
+      "resolved": {},
+      "src": "hdr:include/demo/scale.h"
+    },
+    {
+      "attrs": {},
+      "confidence": "unknown",
+      "conflicts": [],
+      "dst": "decl:demo::detail::mul",
+      "edge": "DECL_CALLS_DECL",
+      "facts": [
+        {
+          "attrs": {},
+          "confidence": "unknown",
+          "producer": ""
+        }
+      ],
+      "occurrences": [],
+      "provenance": "",
+      "resolved": {},
+      "src": "decl:demo::scale"
+    },
+    {
+      "attrs": {},
+      "confidence": "unknown",
+      "conflicts": [],
+      "dst": "decl:demo::detail::saturate",
+      "edge": "DECL_CALLS_DECL",
+      "facts": [
+        {
+          "attrs": {},
+          "confidence": "unknown",
+          "producer": ""
+        }
+      ],
+      "occurrences": [],
+      "provenance": "",
+      "resolved": {},
+      "src": "decl:demo::scale"
+    }
+  ],
+  "external_graph_refs": [],
+  "extractor_passes": {
+    "header_call_graph": true,
+    "header_declarations": true,
+    "header_type_graph": true
+  },
+  "graph_id": "sha256:94ab4d7786eddfe22073a7d9e0419c19411824b7c7f5bedaa17faee3789da399",
+  "indexes": {
+    "by_binary_symbol": {},
+    "by_file": {},
+    "by_source_decl": {
+      "decl:demo::detail::mul": [
+        "decl:demo::scale"
+      ],
+      "decl:demo::detail::saturate": [
+        "decl:demo::scale"
+      ],
+      "decl:demo::scale": [
+        "hdr:include/demo/scale.h"
+      ]
+    },
+    "by_target": {}
+  },
+  "narrowed_passes": {},
+  "narrowed_scope": {},
+  "nodes": [
+    {
+      "attrs": {
+        "header_body": true,
+        "visibility": "public_header"
+      },
+      "confidence": "unknown",
+      "conflicts": [],
+      "facts": [
+        {
+          "attrs": {
+            "header_body": true,
+            "visibility": "public_header"
+          },
+          "confidence": "unknown",
+          "producer": ""
+        }
+      ],
+      "id": "decl:demo::scale",
+      "kind": "source_decl",
+      "label": "demo::scale(int)",
+      "provenance": "",
+      "resolved": {
+        "header_body": true,
+        "visibility": "public_header"
+      }
+    },
+    {
+      "attrs": {
+        "visibility": "private_header"
+      },
+      "confidence": "unknown",
+      "conflicts": [],
+      "facts": [
+        {
+          "attrs": {
+            "visibility": "private_header"
+          },
+          "confidence": "unknown",
+          "producer": ""
+        }
+      ],
+      "id": "decl:demo::detail::mul",
+      "kind": "source_decl",
+      "label": "demo::detail::mul(int, int)",
+      "provenance": "",
+      "resolved": {
+        "visibility": "private_header"
+      }
+    },
+    {
+      "attrs": {},
+      "confidence": "unknown",
+      "conflicts": [],
+      "facts": [
+        {
+          "attrs": {},
+          "confidence": "unknown",
+          "producer": ""
+        }
+      ],
+      "id": "hdr:include/demo/scale.h",
+      "kind": "header",
+      "label": "demo/scale.h",
+      "provenance": "",
+      "resolved": {}
+    },
+    {
+      "attrs": {
+        "visibility": "private_header"
+      },
+      "confidence": "unknown",
+      "conflicts": [],
+      "facts": [
+        {
+          "attrs": {
+            "visibility": "private_header"
+          },
+          "confidence": "unknown",
+          "producer": ""
+        }
+      ],
+      "id": "decl:demo::detail::saturate",
+      "kind": "source_decl",
+      "label": "demo::detail::saturate(int)",
+      "provenance": "",
+      "resolved": {
+        "visibility": "private_header"
+      }
+    }
+  ],
+  "schema_version": 3
+}
