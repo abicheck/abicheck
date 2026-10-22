@@ -20,7 +20,7 @@
 The library exports the instantiation `Box<int>`, which carries the default
 `U = T`. The default becomes `U = long`, so the default-substituted instantiation
 `Box<int, int>` disappears and `Box<int, long>` appears. This is the shape-A case
-(ADR-085 A). A consumer built against v1 cannot find the old symbol. The verdict
+(the exported-instantiation shape). A consumer built against v1 cannot find the old symbol. The verdict
 is `BREAKING`, with `default_template_arg_changed` as the explanation.
 
 This case checks that the header-level kind does not also fire. The exported

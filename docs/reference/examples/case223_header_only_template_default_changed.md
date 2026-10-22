@@ -27,7 +27,7 @@ On the default castxml lane the run reports `COMPATIBLE_WITH_RISK`. The clang
 backend reports `API_BREAK` for the same header change. That lane's one finding is the source-replay risk
 `public_dependency_role_changed`, because the old default referenced `T`. The
 header-level kind `template_param_default_changed` belongs to the clang backend
-(ADR-085 D2). castxml records no template-parameter defaults (D3), so its run
+(the clang recorder's header-level kind). castxml records no template-parameter defaults, so its run
 reports the assurance gap instead of a clean result.
 
 ## Old/new diff
@@ -84,7 +84,7 @@ backend is the only evidence source. `castxml` cannot record it. `clang` can.
 ## Why abicheck catches it
 
 The clang dumper records `TemplateTypeParmDecl.defaultArg` for class templates
-(ADR-085 D1/slice 2). `compare/template_param_defaults.py` pairs the pattern by
+(the clang recorder). `compare/template_param_defaults.py` pairs the pattern by
 qualified name and compares the recorded defaults. castxml writes no record for
 an uninstantiated template, so its snapshot stays UNKNOWN and the template-default
 scan reports the gap.

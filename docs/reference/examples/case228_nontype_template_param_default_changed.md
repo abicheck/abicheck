@@ -22,7 +22,7 @@ non-type. A consumer that writes `Buf<char>` gets an array of a different size, 
 the change is a real source-level change. It does not appear in any symbol.
 
 Neither backend reports a finding here. The verdict agrees, but the coverage does
-not. The clang recorder covers type-parameter templates only (ADR-085 slice 2),
+not. The clang recorder covers type-parameter templates only,
 so it records no defaults for `Buf` and reports a "not a type parameter" gap. The
 castxml side reports its own gap. The validator default lane is castxml, so the
 expected result is `NO_CHANGE` with a gap.

@@ -22,7 +22,7 @@ default. Existing source that writes the one-argument form `Box<char>` stops
 compiling. That is a source break, not a binary break, because no symbol depends
 on the default.
 
-castxml cannot record defaults (ADR-085 D3). Its validator-lane result is
+castxml cannot record defaults. Its validator-lane result is
 `NO_CHANGE` with the template-default gap, so it does not see this source break.
 clang records the removal and reports `template_param_default_changed` as
 `API_BREAK`. Read the castxml result as a known blind spot, not a clean pass.
