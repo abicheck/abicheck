@@ -64,6 +64,7 @@ _MODULES = (
 #: "internal" is a statement about who imports it, not a licence to be absent
 #: from the documented surface.
 _INTERNAL_MODULES = (
+    "abicheck.storage.fact_payload_validation",
     "abicheck.storage.guards",
     "abicheck.storage.availability_status",
     "abicheck.storage.entity_ids",

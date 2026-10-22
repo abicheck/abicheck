@@ -137,6 +137,12 @@ _DECLARATION_PROJECTION = (
 )
 
 UNCOVERED: dict[str, str] = {
+    "RecordType.template_param_defaults_fact": (
+        "read only by compare/template_param_defaults, whose unit tests "
+        "(test_template_param_defaults.py) cover both recorded, UNKNOWN and "
+        "one-side-unrecorded inputs; no corpus pair records defaults on both "
+        "sides yet"
+    ),
     "RecordType.specialization_declared_fact": (
         "read only by compare/template_instance_absence, whose own unit test "
         "(test_class_template_specialization_absence_unit.py) ablates every "

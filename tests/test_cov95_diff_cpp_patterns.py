@@ -24,20 +24,22 @@ Pure Python, no external tools — part of the default fast lane.
 from __future__ import annotations
 
 from abicheck.checker_policy import ChangeKind
+from abicheck.compare.template_param_defaults import (
+    _extract_template_args,
+    _stable_leading_template_args,
+    detect_default_template_arg_changed,
+)
 from abicheck.diff_cpp_patterns import (
     BundleMember,
     _cohort_key,
     _emit_inline_body_findings,
     _extract_soname_major,
-    _extract_template_args,
     _find_public_pimpl_holders,
     _inline_accessors_for,
     _last_segment,
     _parent_namespace,
-    _stable_leading_template_args,
     _symbols_embedding_leaf,
     detect_bundle_soname_skew,
-    detect_default_template_arg_changed,
     detect_inline_body_renamed_member,
     detect_tag_type_renamed,
 )

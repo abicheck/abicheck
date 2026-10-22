@@ -46,6 +46,7 @@ from ._layout import layout_unverified_detectors as _layout_unverified_detectors
 from ._manifest_layers import _manifest_layer_incompleteness
 from ._result import AnalysisAssurance, AssuranceStatus
 from ._target_accounting import _target_accounting
+from ._template_defaults import template_default_gap
 from ._translation_units import _translation_units
 
 if TYPE_CHECKING:
@@ -197,6 +198,8 @@ def compute_analysis_assurance(
     # -- graph completeness ---------------------------------------------------
     graph_completeness, graph_notes = _graph_completeness(old_pack, new_pack)
     notes.extend(graph_notes)
+    template_defaults_gap, template_notes = template_default_gap(old, new)
+    notes.extend(template_notes)
 
     # -- manifest-level layer incompleteness ----------------------------------
     # The one check below that reads the pack MANIFEST directly (D7/D8's own
@@ -256,6 +259,7 @@ def compute_analysis_assurance(
         or (export_accounting.unaccounted or 0) > 0
         or target_unresolved
         or is_comparability_bounded(result.comparability_assurance)
+        or template_defaults_gap
     ):
         status = "partial"
     elif nothing_requested:

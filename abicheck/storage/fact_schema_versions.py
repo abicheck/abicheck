@@ -148,3 +148,10 @@ _MIN_SCHEMA_VERSION_FOR_TYPE_IDENTITY_FACTS = 54
 # a missing key reads as ``None`` at every version (unset, as in memory), which
 # keeps the existing removal path (compare/template_instance_absence.py).
 _MIN_SCHEMA_VERSION_FOR_SPECIALIZATION_FACT = 61
+
+# Schema v62: ``RecordType.template_param_defaults_fact`` -- the spelled default
+# of every type parameter of a class-template pattern (ADR-085 D1). Written only
+# when a producer recorded it (clang); castxml and every pre-v62 document carry
+# no key, which reads as NOT_COLLECTED at this version and above, so an UNKNOWN
+# side never compares equal to a recorded one.
+_MIN_SCHEMA_VERSION_FOR_TEMPLATE_PARAM_DEFAULTS = 62

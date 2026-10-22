@@ -436,6 +436,29 @@ TYPE_FACTS: list[FactDefinition] = [
         ),
     ),
     _E(
+        owner="RecordType",
+        field="template_param_defaults",
+        value_type="tuple[str | None, ...]",
+        producing_backends=("clang",),
+        persisted=True,
+        identity_relevant=False,
+        comparable=True,
+        suppressible=False,
+        reportable=False,
+        lifecycle=FactLifecycle.CONSUMED,
+        consumed_by=(
+            "abicheck.compare.template_param_defaults:detect_template_param_default_changed",
+        ),
+        notes=(
+            "Schema v62, no legacy sibling: for a class-template pattern, the "
+            "spelled default of each type parameter in declaration order (None "
+            "for a parameter with no default), read from the merged all-type "
+            "index. Only PRESENT feeds the header-level default-change kind; a "
+            "castxml or pre-v62 side is UNKNOWN and never compares equal to a "
+            "recorded side."
+        ),
+    ),
+    _E(
         owner="EnumType",
         field="deprecated",
         value_type="str | None",

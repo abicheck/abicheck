@@ -305,6 +305,12 @@ PROBES: dict[str, Probe] = {
         "int f(int x) { return x; }",
         header_reaches=False,  # producer is L4 source replay
     ),
+    "template_param_default_changed": _inline(
+        "template <class T, class U = T> struct Box { T t; U u; };\nint use(Box<char, char>*);",
+        "template <class T, class U = int> struct Box { T t; U u; };\nint use(Box<char, char>*);",
+        "int use(Box<char, char>* b) { return b->t; }",
+        header_reaches=False,  # producer is the clang header parse (ADR-085), not castxml
+    ),
 }
 
 #: ``API_BREAK`` kinds without a probe, and why. Shrink-only: add a probe to
