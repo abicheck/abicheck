@@ -1,7 +1,7 @@
 # ADR-085: Template-Parameter Default Arguments Are a Recorded Fact, and a Header-Level Default Change Is an API Break
 
 **Date:** 2026-10-21
-**Status:** Proposed — drafted for maintainer decision; no behaviour change until accepted. The G28 Phase 5 investigation ([g28-castxml-clang-l2-parity-hardening.md](../plans/g28-castxml-clang-l2-parity-hardening.md)) measured the current state; this ADR decides what the snapshot records and what verdict a default change earns.
+**Status:** Accepted (2026-10-21). Implementation: see the Implementation slices below and [G28 Phase 5](../plans/g28-castxml-clang-l2-parity-hardening.md).
 
 Governed by: [ADR-009](009-verdict-system-and-exit-codes.md) (verdict and exit codes), [ADR-028](028-source-build-evidence-pack.md) (artifact evidence is authoritative), [ADR-061](061-responsibility-package-architecture.md) (owner of each stage), [ADR-063](063-one-semantic-pipeline.md) (the `Fact` availability model that the schema history cites for field conversion), [ADR-084](084-binary-depth-source-contract-gate.md) (`API_BREAK` buckets and the binary-depth gate).
 
