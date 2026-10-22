@@ -23,6 +23,7 @@ from __future__ import annotations
 import json
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -30,7 +31,13 @@ from click.testing import CliRunner
 
 from abicheck.cli import main
 
-pytestmark = pytest.mark.integration
+pytestmark = [
+    pytest.mark.integration,
+    # The fixture libraries are built as ELF ``.so`` files.
+    pytest.mark.skipif(
+        not sys.platform.startswith("linux"), reason="needs an ELF-emitting gcc"
+    ),
+]
 
 #: Exported by liba / libb respectively, on both sides.
 _EXPORTED = {"a": ("a_one",), "b": ("b_one",)}

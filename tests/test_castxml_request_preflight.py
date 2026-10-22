@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -133,6 +134,10 @@ def _build_so(tmp: Path, name: str) -> Path:
 
 @pytest.fixture
 def libs(tmp_path):
+    # The preflight is ELF-only (PE/Mach-O keep their export-table fallback),
+    # so these end-to-end cases need a gcc that emits ELF.
+    if not sys.platform.startswith("linux"):
+        pytest.skip("needs an ELF-emitting gcc")
     if _real_which("gcc") is None:
         pytest.skip("gcc not available")
     old_dir, new_dir = tmp_path / "old", tmp_path / "new"
