@@ -41,9 +41,11 @@ new ones:
 * ``--stat``/``oneline`` is a summary-only document with no shared-document
   counterpart, and Markdown's/JSON's ``leaf``/``root-cause`` views are
   genuinely separate documents (ADR-061 Phase 2's own scope decision). The
-  ``--stat``/``oneline`` short-circuit therefore runs *before* the envelope
-  is built; the two alternate views are built by their own format branch
-  from the same envelope's ``result``. The shared document is built eagerly
+  one-line summary still reads its gate and disposition note from the
+  envelope (the same objects every other projection reads); the two alternate
+  views are built by their own format branch from the same envelope's
+  ``result``, reusing its disposition audit and severity counts. The shared
+  document is built eagerly
   for those two views even though they do not read it -- the envelope's
   whole point is that its decisions are final before a format is chosen, and
   a lazily-built field would trade that invariant for work avoided on a

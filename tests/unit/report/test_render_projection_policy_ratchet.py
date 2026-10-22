@@ -67,26 +67,25 @@ _RECORDED_POLICY_IMPORTS: dict[str, frozenset[str]] = {
     # ``policy.severity`` here is the ``TYPE_CHECKING``-only ``SeverityConfig``
     # annotation: a type, not a decision. Nothing else in the module reaches policy.
     "reporter.py": frozenset({"policy.severity"}),
-    # Two runtime decisions remain here, not in a renderer: the severity
-    # categorisation behind ``compute_severity_sections`` (``policy.severity``'s
-    # ``categorize_changes``/``gate_eligible_changes``) and the ``ADDITION_KINDS``
-    # / ``INFORMATIONAL_KINDS`` sets of the compatible-quality list. The rest of
-    # the module reaches policy through ``report/policy_facts.py`` (the
-    # ``GateDecision``/``KindSets``/``SeverityConfig`` names are annotations).
+    # Two runtime reads remain here, not decisions: ``SeverityLevel`` (an enum
+    # the summary table labels rows with) and the ``ADDITION_KINDS`` /
+    # ``INFORMATIONAL_KINDS`` sets of the compatible-quality list in
+    # ``compute_severity_sections``. The severity *categories* the summary table
+    # counts are no longer computed here: they arrive as precomputed counts from
+    # the envelope's findings (``report/markdown_compute.py``).
     "reporter_markdown.py": frozenset({"policy.classification", "policy.severity"}),
+    # Compute side, not a renderer: ``gate_eligible_changes`` is the one
+    # predicate choosing which findings the gate scores, for the ``Exit Impact``
+    # column. Per-category counts are tallied from each finding's resolved
+    # category, never re-classified here.
+    "markdown_compute.py": frozenset({"policy.severity"}),
 }
 _RECORDED_DISPOSITION_COMPUTE: dict[str, frozenset[str]] = {
-    # The alternate-mode views (``--report-mode leaf``/``root-cause``) take no
-    # envelope, so their preamble and root-cause builders compute the audit
-    # directly. The full-mode builder reuses the envelope's document through
-    # ``disposition_audit_dict_reusing_document``.
-    "markdown_compute.py": frozenset({"compute_disposition_audit"}),
-    # ``--stat`` and root-cause JSON still compute the disposition audit per call
-    # rather than reading it from a shared document (no envelope reaches them).
+    # The envelope-driven renders (every ``render_*`` module, the one-line
+    # ``to_stat`` and the review digest) read the audit their envelope's shared
+    # ``ReportDocument`` holds. ``reporter.py``'s JSON helpers (``to_stat_json``,
+    # root-cause JSON) take no envelope and compute it once for a direct caller.
     "reporter.py": frozenset({"add_disposition_audit"}),
-    # Direct-caller fallbacks for the one-line view and the review digest; the
-    # envelope-driven paths pass the audit in.
-    "reporter_markdown.py": frozenset({"compute_disposition_audit"}),
 }
 
 

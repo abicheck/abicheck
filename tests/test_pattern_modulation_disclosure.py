@@ -28,6 +28,8 @@ together.
 
 from __future__ import annotations
 
+from tests._report_test_helpers import review_digest
+
 
 class TestEveryHumanMarkdownModeDisclosesAModulation:
     """A rule that demoted a finding is named in *every* human Markdown mode.
@@ -84,12 +86,11 @@ class TestEveryHumanMarkdownModeDisclosesAModulation:
 
     def _renderers(self):
         from abicheck.report.dispatch_markdown import to_markdown
-        from abicheck.reporter import to_review_digest
 
         return {
             "markdown/full": lambda r: to_markdown(r, report_mode="full"),
             "markdown/root-cause": lambda r: to_markdown(r, report_mode="root-cause"),
-            "review": lambda r: to_review_digest(r),
+            "review": lambda r: review_digest(r),
         }
 
     def test_every_mode_names_the_rule_and_the_reason(self):
