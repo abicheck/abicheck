@@ -1,0 +1,86 @@
+# Copyright 2026 Nikolay Petrov
+# SPDX-License-Identifier: Apache-2.0
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+"""The contract's exclusion of C++ runtime / toolchain symbols.
+
+A finding on a symbol the C++ runtime or the toolchain emitted (a ``std::``,
+``__gnu_cxx::`` or ``__cxxabiv1::`` internal, a function-local static or guard of
+a standard template, a libgcc/libc helper) is not a library entity under any
+contract domain. Left to the header or export domain, a removed one reads
+``UNKNOWN_UNRESOLVED`` (no header declares it) and gates the run: the field
+report's C-API check exited 1 on six of them.
+
+The rule is applied after the domain decision, so a symbol the contract places
+in its own surface keeps its decision, and any symbol the caller declared public
+keeps gating (``public_root_membership``). The excluded finding is still
+recorded, with reason ``toolchain_runtime_origin``. Its ``NOT_APPLICABLE``
+findings (cross-source hygiene) are left alone.
+
+The symbol set comes from :func:`abicheck.buildsource.export_accounting.toolchain_runtime_symbol_names`,
+the origin classification the symbol-hygiene audit reports.
+"""
+
+from __future__ import annotations
+
+from collections.abc import Collection, Sequence
+from dataclasses import replace
+from typing import Any
+
+from ..contract_relevance_types import (
+    NON_ENTITY_RELEVANCE,
+    ContractAssurance,
+    ContractRelevance,
+)
+
+__all__ = [
+    "TOOLCHAIN_RUNTIME_ORIGIN_REASON",
+    "exclude_toolchain_runtime_findings",
+]
+
+#: The reason code an excluded finding carries (a key of
+#: ``contract_relevance_types.CONTRACT_REASON_CODES``).
+TOOLCHAIN_RUNTIME_ORIGIN_REASON = "toolchain_runtime_origin"
+
+_PUBLIC_ROOT_REASON = "public_root_membership"
+
+
+def exclude_toolchain_runtime_findings(
+    changes: Sequence[Any],
+    decisions: Sequence[Any],
+    toolchain_symbols: Collection[str],
+) -> list[Any]:
+    """*decisions* with every runtime-owned, unexcluded finding made out of contract.
+
+    *changes* and *decisions* are parallel sequences of a finding and its
+    :class:`~abicheck.contract_evaluation.ContractEvaluationDecision`. Returns
+    the decisions in order; a decision that is not replaced is returned as is.
+    """
+    if not toolchain_symbols:
+        return list(decisions)
+    out: list[Any] = []
+    for change, decision in zip(changes, decisions, strict=True):
+        if (
+            (change.symbol or "") in toolchain_symbols
+            and decision.relevance is not NON_ENTITY_RELEVANCE
+            and decision.reason_code != _PUBLIC_ROOT_REASON
+        ):
+            decision = replace(
+                decision,
+                relevance=ContractRelevance.PROVEN_OUT_OF_CONTRACT,
+                reason_code=TOOLCHAIN_RUNTIME_ORIGIN_REASON,
+                assurance=ContractAssurance.COMPLETE,
+            )
+        out.append(decision)
+    return out

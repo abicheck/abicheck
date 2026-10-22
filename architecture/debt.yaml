@@ -443,7 +443,7 @@
     },
     {
       "path": "abicheck/contract_evaluation.py",
-      "baseline_lines": 1715,
+      "baseline_lines": 1709,
       "target": "see ADR-061 ownership map",
       "rule": "no_growth",
       "disposition": "migrate",
@@ -663,7 +663,7 @@
     },
     {
       "path": "abicheck/elf_metadata.py",
-      "baseline_lines": 1081,
+      "baseline_lines": 1079,
       "target": "see ADR-061 ownership map",
       "rule": "no_growth",
       "disposition": "migrate",

@@ -43,20 +43,24 @@ from .mangled_name_template_args import (
 
 __all__ = [
     "SpecialMemberOwner",
+    "is_mangled_identity",
+    "itanium_class_metadata_owner",
+    "itanium_declaring_class_path",
     "itanium_special_member_owner",
     "itanium_special_name_owner_identifiers",
     "itanium_special_name_owner_scope_components",
 ]
 
 
-#: The three Itanium ``<special-name>`` productions
-#: ``diff_elf_layout.py``'s ELF-layout-only detectors synthesize a symbol
-#: for (``TV`` vtable, ``TI`` typeinfo, ``TT`` VTT/construction-vtable-table)
-#: -- each is ``_Z`` + this 2-character code + the SAME ``<class-enc>``/
-#: ``<name>`` production an ordinary member mangling's nested-name prefix
-#: already uses, so rewriting the code away and re-parsing through the
-#: existing structural parser needs no new grammar.
-_SPECIAL_NAME_OWNER_CODES = ("TV", "TI", "TT")
+#: The four Itanium class-metadata ``<special-name>`` productions whose
+#: operand is the class they describe: ``TV`` vtable, ``TI`` typeinfo,
+#: ``TS`` typeinfo name, ``TT`` VTT. Each is ``_Z`` + this 2-character code +
+#: the SAME ``<class-enc>``/``<name>`` production an ordinary member mangling's
+#: nested-name prefix already uses, so rewriting the code away and re-parsing
+#: through the existing structural parser needs no new grammar. ``TS`` was
+#: missing here, so a typeinfo name (``_ZTSN3api4BaseE``) had no recoverable
+#: owner and every consumer fell back to the optional demangler for it.
+_SPECIAL_NAME_OWNER_CODES = ("TV", "TI", "TS", "TT")
 
 #: Itanium ABI Section 5.9 "Abbreviations" -- the six standard substitutions
 #: that abbreviate a complete standard-library *type* (unlike ``St``, which
@@ -255,6 +259,74 @@ def itanium_special_name_owner_scope_components(
     if std_scope is not None:
         return list(std_scope), frozenset()
     return itanium_scope_components_with_template_positions("_Z" + rest)
+
+
+def is_mangled_identity(sym: str) -> bool:
+    """Whether *sym* is spelled in a C++ mangling scheme rather than source form.
+
+    ``_Z`` is Itanium, ``__Z`` the extra platform underscore a Mach-O
+    direct-clang snapshot carries (``diff_cxx_rules._itanium_strip_prefix``
+    documents the same quirk), and ``?`` opens every MSVC-mangled name
+    (``diff_cxx_rules.msvc_scope_components``). All three are spellings a
+    source-level type or function name can never take -- ``?`` is not an
+    identifier character at all, and ``_Z``-prefixed identifiers are reserved
+    -- which is what makes an exact hit on one unambiguous.
+    """
+    return sym.startswith(("_Z", "__Z", "?"))
+
+
+def itanium_class_metadata_owner(mangled: str) -> str | None:
+    """The exact qualified name of the class a class-metadata symbol describes.
+
+    ``_ZTV`` (vtable), ``_ZTI`` (typeinfo), ``_ZTS`` (typeinfo name) and
+    ``_ZTT`` (VTT) are emitted *for* a class and name it, so the owner is the
+    class's own scope path: ``_ZTVN3svs7runtime2v015DynamicIVFIndexE`` is
+    ``"svs::runtime::v0::DynamicIVFIndex"`` (inline namespaces included, as the
+    mangling spells them).
+
+    Returns ``None`` -- no exact owner -- for a template specialization owner
+    (its arguments are not spelled in the path, and a primary template's
+    declaration is not evidence about one of its specializations), for a name
+    that is not class-metadata, and for one this parser cannot read. A caller
+    must treat ``None`` as unresolved, never as "the class is undeclared".
+
+    Unlike :func:`itanium_special_name_owner_identifiers`, which returns
+    deliberately *broad* candidate spellings for a fuzzy type-name match, this
+    returns the one spelling a declaration can be checked against exactly.
+    """
+    scope = itanium_special_name_owner_scope_components(mangled)
+    if scope is None:
+        return None
+    components, templated_positions = scope
+    if templated_positions or not components:
+        return None
+    return "::".join(_strip_abi_tag_suffixes(c) for c in components)
+
+
+def itanium_declaring_class_path(mangled: str) -> str | None:
+    """The exact scope path of the class a mangled member function is declared in.
+
+    ``_ZNK3svs7runtime2v015DynamicIVFIndex4sizeEv`` is ``size`` declared in
+    ``svs::runtime::v0::DynamicIVFIndex``: the path is the function's own
+    enclosing scope, with the function's leaf dropped, and inline namespaces
+    are kept because the mangling spells them.
+
+    Returns ``None`` when the path is not a non-template scope this parser can
+    read exactly -- a template-specialization component anywhere in it, a name
+    too short to have an enclosing scope, or an unparseable name. The caller
+    decides what the path proves; this only reads it.
+    """
+    scope = itanium_scope_components_with_template_positions(mangled)
+    if scope is None:
+        return None
+    components, templated_positions = scope
+    if len(components) < 2:
+        return None
+    # Only the leaf may carry template arguments (a function template); any
+    # templated *scope* component means the path names a specialization.
+    if any(index in templated_positions for index in range(len(components) - 1)):
+        return None
+    return "::".join(_strip_abi_tag_suffixes(c) for c in components[:-1])
 
 
 @dataclass(frozen=True)

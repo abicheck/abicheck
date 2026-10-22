@@ -137,12 +137,12 @@ def _symbol_may_name_a_declaration(change: Change) -> bool:
     (symbol-level, and the member-level families whose ``symbol`` is the
     owning type) is matched by plain membership there, so it is here too.
     """
-    from .contract_evaluation import _is_mangled_identity
+    from .policy.class_metadata_identity import is_mangled_identity
     from .surface import TYPE_LEVEL_KIND_NAMES
 
     if change.kind.value not in TYPE_LEVEL_KIND_NAMES:
         return True
-    return _is_mangled_identity(change.symbol or "")
+    return is_mangled_identity(change.symbol or "")
 
 
 def _type_identity_is_ambiguous(

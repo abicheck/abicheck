@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import re
 
+from ..extract.stdlib_local_origin import is_user_specializable_std_symbol
 from ..model import AbiSnapshot
 from ..model.export_entity_name import (  # noqa: F401 -- re-exported for callers/tests
     _ARTIFACT_OPERAND_PREFIXES,
@@ -311,6 +312,30 @@ def _external_dependency_origin(
             return None
         owner, google_child = msvc
     return _vendored_owner_result(owner, google_child, self_names)
+
+
+def toolchain_runtime_symbol_names(snapshot: AbiSnapshot) -> frozenset[str]:
+    """Names of *snapshot*'s ELF symbols the C++ runtime / toolchain emitted.
+
+    The same origin classification the symbol-hygiene audit uses
+    (:func:`_external_dependency_origin`, with this snapshot's linked libraries
+    and self identity), so the contract gate and the hygiene report cannot name
+    different owners for one symbol. A customization-point specialization
+    (``std::hash<MyType>``) is user-authored and never included. Symbols the
+    audited library itself defines are never included either: auditing libstdc++
+    keeps its own exports gating. Empty when the snapshot carries no ELF table.
+    """
+    elf = snapshot.elf
+    if elf is None:
+        return frozenset()
+    needed = _linked_library_names(snapshot)
+    self_names = _library_self_names(snapshot)
+    return frozenset(
+        sym.name
+        for sym in elf.symbols
+        if not is_user_specializable_std_symbol(sym.name)
+        and _external_dependency_origin(sym.name, needed, self_names) is not None
+    )
 
 
 def _msvc_scope_components(symbol: str) -> list[str]:

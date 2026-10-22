@@ -14,7 +14,7 @@
 
 | Field | Value |
 |---|---|
-| Confidence | HIGH |
+| Confidence | MEDIUM |
 | Evidence tier | `header_aware` |
 | Evidence tiers | `elf`, `header` |
 | Coverage gap | Detector 'fingerprint_renames' disabled: neither side was dumped in elf_only_mode (both carry headers or debug info); fingerprint rename matching runs only on stripped, symbol-only dumps |
@@ -27,6 +27,7 @@
 | Coverage gap | Detector 'sycl' disabled: missing SYCL metadata |
 | Coverage gap | Detector 'vtable_layout' disabled: missing DWARF/header type metadata on one side (inheritance) |
 | Coverage gap | Detector 'advanced_dwarf' disabled: missing DWARF advanced metadata |
+| Coverage gap | Header analysis without record layout on every compared side: no DWARF layout and no header frontend that computes it (the clang frontend parses declarations but not struct layout, unless the layout companion ran), so struct size, alignment and field offset changes cannot be established; confidence capped at MEDIUM |
 
 ## Relationship Coverage
 
