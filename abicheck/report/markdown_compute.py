@@ -42,7 +42,6 @@ from typing import Any
 import abicheck.reporter_markdown as _reporter_markdown_module
 
 from .disposition_audit import (
-    compute_disposition_audit,
     disposition_audit_dict_reusing_document,
 )
 from .document import ReportDocument
@@ -50,7 +49,7 @@ from .edge_coverage_section import (
     compute_edge_coverage_section,
 )
 from .envelope import ReportEnvelope, resolved_document
-from .finding import build_report_findings
+from .finding import ReportFinding, build_report_findings
 from .not_evaluated_section import compute_not_evaluated
 from .policy_facts import evidence_status_of, impact_text_for, kind_sets_for
 from .review_digest_document import (
@@ -80,6 +79,78 @@ def _reporter_markdown() -> Any:
 
 def _opt_asdict(value: Any) -> dict[str, Any] | None:
     return None if value is None else asdict(value)
+
+
+def _severity_counts_for(
+    result: Any,
+    changes: list[Any],
+    envelope: ReportEnvelope | None,
+) -> tuple[dict[str, int], dict[str, int]]:
+    """Per-category totals for the severity table: ``(displayed, exit)``.
+
+    *displayed* counts *changes* (the ``--show-only``-filtered set the ``Count``
+    column reports); *exit* counts the set the gate scores (ADR-049 D1), which
+    drives ``Exit Impact``. Both read each change's already-resolved
+    :class:`~abicheck.report.finding.ReportFinding` category, so the table
+    never classifies a change itself. A direct caller with no envelope resolves
+    the findings here through the same primitive the envelope uses.
+    """
+    from ..policy.severity import gate_eligible_changes
+
+    def findings_for(cs: Sequence[Any]) -> Sequence[ReportFinding]:
+        if envelope is not None:
+            return envelope.findings_for(list(cs))
+        return build_report_findings(
+            list(cs),
+            policy=result.policy,
+            kind_sets=kind_sets_for(result),
+            policy_file=result.policy_file,
+        )
+
+    def tally(findings: Sequence[ReportFinding]) -> dict[str, int]:
+        counts: dict[str, int] = {}
+        for finding in findings:
+            key = finding.category.value
+            counts[key] = counts.get(key, 0) + 1
+        return counts
+
+    return (
+        tally(findings_for(changes)),
+        tally(findings_for(gate_eligible_changes(list(result.changes)))),
+    )
+
+
+def _severity_summary_mapping(
+    result: Any,
+    changes: list[Any],
+    severity_config: Any,
+    envelope: ReportEnvelope | None,
+    *,
+    scoped_gate: bool,
+) -> dict[str, Any] | None:
+    """The severity table as a JSON-safe mapping, or ``None`` with no severity config.
+
+    *scoped_gate* is the root-cause view's opt-in to the ``--used-by`` /
+    ``--required-symbol`` gate numbers; the full view never reads them.
+    """
+    if severity_config is None:
+        return None
+    displayed, exit_counts = _severity_counts_for(result, changes, envelope)
+    return asdict(
+        _reporter_markdown().compute_severity_summary(
+            severity_config,
+            counts=displayed,
+            exit_counts=exit_counts,
+            scoped_counts=(
+                getattr(result, "scoped_severity_counts", None) if scoped_gate else None
+            ),
+            scoped_blocking_categories=(
+                getattr(result, "scoped_blocking_categories", None)
+                if scoped_gate
+                else None
+            ),
+        )
+    )
 
 
 def _resolve_displayed_changes(
@@ -309,20 +380,8 @@ def build_markdown_document(
             if show_recommendation
             else None
         ),
-        "severity_summary": (
-            asdict(
-                rm.compute_severity_summary(
-                    changes,
-                    severity_config,
-                    all_changes=list(result.changes),
-                    policy=result.policy,
-                    kind_sets=kind_sets_for(result),
-                    policy_file=result.policy_file,
-                    today=resolved_today,
-                )
-            )
-            if severity_config is not None
-            else None
+        "severity_summary": _severity_summary_mapping(
+            result, changes, severity_config, envelope, scoped_gate=False
         ),
         "show_only_note": show_only_note,
         "library_files": (
@@ -422,6 +481,7 @@ def _view_preamble_mapping(
     show_only: str | None,
     show_recommendation: bool,
     severity_config: Any = None,
+    envelope: ReportEnvelope | None = None,
 ) -> tuple[dict[str, Any], list[Any]]:
     """JSON-safe fields for the opening block ``--report-mode leaf``/
     ``root-cause`` share (title/verdict table, coverage-warning banner,
@@ -431,7 +491,11 @@ def _view_preamble_mapping(
     :func:`_render_view_preamble` for the render half."""
     rm = _reporter_markdown()
 
-    changes, show_only_note = _resolve_displayed_changes(result, show_only)
+    changes, show_only_note = _resolve_displayed_changes(
+        result,
+        show_only,
+        today=None if envelope is None else envelope.resolved_today,
+    )
 
     d: dict[str, Any] = {
         "library": result.library,
@@ -452,13 +516,17 @@ def _view_preamble_mapping(
         # ADR-067 D3: both alternate modes carry the same counts the full
         # view and the digest do -- computed here, in the one preamble the
         # two share, rather than twice at their own call sites.
-        "disposition_audit": compute_disposition_audit(
-            result, severity_config
-        ).to_dict(),
+        "disposition_audit": disposition_audit_dict_reusing_document(
+            result, severity_config, resolved_document(envelope)
+        ),
         # Same "what changed / review actions" section the full view and
         # the digest carry (workstream G S1) -- one preamble, both alternate
         # modes.
-        "surface_changes": compute_surface_changes(result, changes=changes).to_dict(),
+        "surface_changes": compute_surface_changes(
+            result,
+            None if envelope is None else envelope.findings_for(changes),
+            changes=changes,
+        ).to_dict(),
     }
     return d, changes
 
@@ -471,6 +539,7 @@ def build_root_cause_document(
     show_impact: bool = False,
     severity_config: Any = None,
     contract_evaluation: bool = False,
+    envelope: ReportEnvelope | None = None,
 ) -> ReportDocument:
     """``--report-mode root-cause`` (G29 Phase 3 slice 4, ADR-052) as a
     ``ReportDocument``. See this module's own docstring for scope --
@@ -484,6 +553,7 @@ def build_root_cause_document(
         show_only=show_only,
         show_recommendation=show_recommendation,
         severity_config=severity_config,
+        envelope=envelope,
     )
 
     # G29 Phase 3 slice 3 follow-up: merge --used-by/--required-symbol
@@ -516,23 +586,8 @@ def build_root_cause_document(
         # nor the reason (Codex review, PR #1284). Same key and same rows as
         # the full document, so the two projections cannot disagree.
         "pattern_modulations": list(getattr(result, "pattern_modulations", ()) or ()),
-        "severity_summary": (
-            asdict(
-                rm.compute_severity_summary(
-                    changes,
-                    severity_config,
-                    all_changes=list(result.changes),
-                    policy=result.policy,
-                    kind_sets=kind_sets_for(result),
-                    policy_file=result.policy_file,
-                    scoped_counts=getattr(result, "scoped_severity_counts", None),
-                    scoped_blocking_categories=getattr(
-                        result, "scoped_blocking_categories", None
-                    ),
-                )
-            )
-            if severity_config is not None
-            else None
+        "severity_summary": _severity_summary_mapping(
+            result, changes, severity_config, envelope, scoped_gate=True
         ),
         "root_cause": (
             asdict(root_cause_section) if root_cause_section is not None else None

@@ -63,6 +63,7 @@ from abicheck.policy.finding_disposition import dispose_findings
 from abicheck.policy.suppression.rules import Suppression, SuppressionList
 from abicheck.report.disposition_audit import compute_disposition_audit
 from abicheck.semver import SemverBump
+from tests._report_test_helpers import review_digest, stat_line
 
 
 def _snapshots(
@@ -180,13 +181,11 @@ class TestHundredSuppressedRemovals:
         dropping the counts is not."""
         from abicheck import reporter
         from abicheck.pr_comment import build_model, render_comment
-        from abicheck.report.dispatch_markdown import to_review_digest
-        from abicheck.reporter_markdown import to_stat
 
-        one_line = to_stat(result)
+        one_line = stat_line(result)
         assert "100 detected" in one_line and "0 gating" in one_line
 
-        digest = to_review_digest(result)
+        digest = review_digest(result)
         assert "| Detected (raw) | 100 |" in digest
         assert "| Effective (gating) | 0 |" in digest
         assert "bulk internal churn" in digest
@@ -953,7 +952,6 @@ def test_the_one_line_view_states_a_support_gap_on_a_zero_change_run() -> None:
     """The one view where "no changes (0 total)" is the entire report: if the
     counts are all zero *and* detectors were skipped for missing evidence,
     dropping the note leaves the assurance gap stated nowhere at all."""
-    from abicheck.reporter_markdown import to_stat
 
     old, new = _snapshots()
     result = compare(old, new)
@@ -961,7 +959,7 @@ def test_the_one_line_view_states_a_support_gap_on_a_zero_change_run() -> None:
     assert audit.detected_total == 0
     assert audit.not_evaluated_detectors, "this pair must leave detectors unevaluated"
 
-    line = to_stat(result)
+    line = stat_line(result)
     assert "no changes (0 total)" in line
     assert f"{len(audit.not_evaluated_detectors)} detector(s) not evaluated" in line
     # ...and the counts are not dropped to make room for the note. This

@@ -40,8 +40,8 @@ from abicheck.model import (
     RecordType,
     Visibility,
 )
-from abicheck.report.dispatch_markdown import to_review_digest
 from abicheck.reporter import to_markdown
+from tests._report_test_helpers import review_digest
 
 
 def _fn(name, mangled, ret="void", params=()):
@@ -128,7 +128,7 @@ def test_markdown_report_ends_with_trailing_newline(pair_name, report_mode):
 def test_review_digest_ends_with_trailing_newline(pair_name):
     old, new = _PAIRS[pair_name]()
     result = compare(old, new)
-    text = to_review_digest(result)
+    text = review_digest(result)
     assert text.endswith("\n"), (pair_name, repr(text[-40:]))
     assert not text.endswith("\n\n"), (pair_name, repr(text[-40:]))
 

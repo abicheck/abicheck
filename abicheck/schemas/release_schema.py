@@ -243,4 +243,9 @@ __all__ = ["RELEASE_SCHEMA_VERSION"]
 #:       applied to the release envelope. The pre-2.0 value is
 #:       ``quality_issues + informational``. Each such finding's ``bucket``
 #:       reads ``informational`` under a severity setting.
-RELEASE_SCHEMA_VERSION = "2.0"
+#: - ``2.1`` (#1706) adds to every ``libraries[]`` entry the always-present
+#:       ``surface_removals``/``surface_modifications`` counts and a
+#:       ``public_api`` block (``added[]``/``removed[]`` public symbols and
+#:       ``internal_omitted.{added,removed}`` counts of internal/RTTI symbols
+#:       collapsed out of the lists, never dropped -- ADR-067). Additive.
+RELEASE_SCHEMA_VERSION = "2.1"

@@ -19,6 +19,18 @@ EXPECTED_PROFILES = {
     "mach_o_dylib",
     "rust_c_ffi",
     "gnome_parallel_install",
+    "append_only_dispatch_tables",
+}
+
+
+#: Selector-scoped (``type_pattern``) reclassifications a profile deliberately
+#: ships. ``append_only_dispatch_tables`` ignores ``type_size_changed`` only for
+#: named append-only dispatch tables; a shrink or layout break there still
+#: carries ``type_field_removed``/``type_field_offset_changed``/
+#: ``type_field_type_changed`` (pinned in test_append_only_dispatch_tables_policy.py).
+#: A project-wide ``overrides:`` downgrade is never exempt.
+_SCOPED_HIGH_RISK_RECLASSIFY: dict[str, tuple[str, ...]] = {
+    "append_only_dispatch_tables": ("type_size_changed",),
 }
 
 
@@ -45,7 +57,9 @@ def test_builtin_profile_loads_and_validates(name: str) -> None:
     # reference only valid kinds (PolicyFile.load drops unknown slugs with a
     # warning, so a populated overrides map means every key parsed).
     assert pf.base_policy in {"strict_abi", "sdk_vendor", "plugin_abi"}
-    assert pf.overrides, f"{name} has no overrides — it would be a no-op profile"
+    assert pf.overrides or pf.reclassify, (
+        f"{name} has no overrides or reclassify rules — it would be a no-op profile"
+    )
     for kind, verdict in pf.overrides.items():
         assert isinstance(kind, ChangeKind)
         assert isinstance(verdict, Verdict)
@@ -56,7 +70,15 @@ def test_builtin_profile_has_no_high_risk_downgrades(name: str) -> None:
     """No shipped profile may silently downgrade a crash-class break to ignore."""
     pf = PolicyFile.load(builtin_policy_path(name))
     warnings = pf.validate_overrides()
-    high_risk = [w for w in warnings if w.startswith("HIGH RISK")]
+    high_risk = [
+        w
+        for w in warnings
+        if w.startswith("HIGH RISK")
+        and not any(
+            w.startswith(f"HIGH RISK: '{kind}' reclassified")
+            for kind in _SCOPED_HIGH_RISK_RECLASSIFY.get(name, ())
+        )
+    ]
     assert not high_risk, f"{name} contains high-risk downgrades: {high_risk}"
 
 

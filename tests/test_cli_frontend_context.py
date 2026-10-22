@@ -294,3 +294,12 @@ def test_dump_cli_elf_path_forwards_frontend_context_to_dumper_dump(tmp_path, ru
         )
     assert result.exit_code == 0, result.output
     assert mock_dump.call_args.kwargs["frontend_context"] == "device"
+
+
+@pytest.fixture(autouse=True)
+def _castxml_preflight_off(monkeypatch):
+    """These tests stub the parse itself; castxml need not be on PATH (#1710)."""
+    monkeypatch.setattr(
+        "abicheck.workflows.header_frontend_preflight.require_castxml_if_needed",
+        lambda *a, **k: None,
+    )

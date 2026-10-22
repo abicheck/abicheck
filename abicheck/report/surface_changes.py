@@ -156,6 +156,9 @@ _PUBLIC_SURFACE_ENTITIES = frozenset(
 #: to their own report dimensions rather than this one: container/symbol-table
 #: facts, build and environment evidence, source-graph facts, and the
 #: analysis-quality axis.
+#: Public name for release projections that group without building findings.
+PUBLIC_SURFACE_ENTITIES = _PUBLIC_SURFACE_ENTITIES
+
 _NON_SURFACE_ENTITIES = frozenset(
     {
         ChangeEntity.BINARY.value,
