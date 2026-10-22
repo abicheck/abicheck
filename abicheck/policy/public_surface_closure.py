@@ -119,6 +119,7 @@ from ..model.surface_facts import in_public_surface
 from ..model.type_identifiers import type_identifiers as _type_identifiers
 from ..model.vocabulary import ScopeOrigin
 from .captured_type_identities import captured_identity_seeds, field_identities
+from .class_metadata_identity import vtable_slot_class_paths
 from .header_identifier_evidence import present_header_identifiers
 from .header_origin_evidence import collect_header_origin_unknown_types
 from .public_surface_index import (
@@ -762,6 +763,9 @@ def _resolve_public_surface_from_snapshot(snap: AbiSnapshot) -> PublicSurface:
         record_by_name,
         enum_by_name,
         seed_types | captured_identity_seeds(snap),
+    )
+    surface.class_owner_paths |= vtable_slot_class_paths(
+        snap, surface.exact_type_identities
     )
     return surface
 

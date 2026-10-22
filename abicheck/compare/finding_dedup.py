@@ -407,6 +407,40 @@ def deduplicate_ast_dwarf(
     return _dedup_cross_kind(stage2, record_names)
 
 
+#: An ELF-only removal and a header-aware visibility finding name one export
+#: loss. ``func_visibility_changed`` fires when the public declaration survives
+#: but its export is gone (``diff_symbols._check_removed_function``); the L0
+#: symbols-only fold (``l0_export_delta.fold_l0_hard_removals``) reports the
+#: same loss again as ``func_removed_elf_only``, because it is appended to the
+#: header-scoped diff without reading it. One event at two evidence tiers: the
+#: header-aware finding is kept, since it also carries the declaration's
+#: surface facts. The pair is keyed on the mangled symbol both producers share.
+_EXPORT_LOSS_ELF_ONLY_PARTNER: dict[ChangeKind, ChangeKind] = {
+    ChangeKind.FUNC_VISIBILITY_CHANGED: ChangeKind.FUNC_REMOVED_ELF_ONLY,
+    ChangeKind.VAR_VISIBILITY_CHANGED: ChangeKind.VAR_REMOVED_ELF_ONLY,
+}
+
+
+def _drop_elf_only_duplicates_of_visibility(changes: list[Change]) -> list[Change]:
+    """Drop an ELF-only removal whose symbol a visibility finding already reports.
+
+    Matches the exact ``(ELF-only kind, symbol)`` pair each visibility finding
+    implies, so a variable visibility finding never covers a function removal.
+    Only the ELF-only half is dropped; the visibility finding stays, and a
+    symbol with no visibility partner is untouched. The drop is recorded as
+    ``deduplicated`` by the disposition pipeline, so it stays auditable
+    (``AGENTS.md``: record before disposing).
+    """
+    covered = {
+        (_EXPORT_LOSS_ELF_ONLY_PARTNER[c.kind], c.symbol)
+        for c in changes
+        if c.kind in _EXPORT_LOSS_ELF_ONLY_PARTNER and c.symbol
+    }
+    if not covered:
+        return changes
+    return [c for c in changes if (c.kind, c.symbol) not in covered]
+
+
 def deduplicate_cross_detector(
     changes: list[Change],
     old: AbiSnapshot | None = None,
@@ -512,6 +546,7 @@ def deduplicate_cross_detector(
                 if qual:
                     c.qualified_name = qual
 
+    changes = _drop_elf_only_duplicates_of_visibility(changes)
     seen: set[str] = set()
     result: list[Change] = []
     for c in changes:

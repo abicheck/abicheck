@@ -76,6 +76,7 @@ from .contract_relevance_types import (
     ContractRelevance,
     evaluation_status_for,
 )
+from .policy.contract_toolchain_origin import exclude_toolchain_runtime_findings
 
 if TYPE_CHECKING:
     from collections.abc import Iterable, Sequence
@@ -135,6 +136,10 @@ class ContractEvaluationStage:
     #: conflict is a fact about the sources themselves, not about the mode's
     #: own closure. See ``policy/contract_conflict_detectors.py``.
     conflicts: tuple[ContractSourceConflict, ...] = ()
+    #: ELF symbol names either side's binary emits from the C++ runtime or
+    #: toolchain (``export_accounting.toolchain_runtime_symbol_names``), applied
+    #: by ``policy.contract_toolchain_origin`` once every domain decision is in.
+    toolchain_symbols: frozenset[str] = frozenset()
     changes: list[Change] = field(default_factory=list)
     #: ``id()`` of every already-classified finding. Identity, not equality:
     #: two findings can compare equal (``Change`` is a plain dataclass) while
@@ -180,6 +185,9 @@ class ContractEvaluationStage:
         )
         decisions = self._observed_export_fallback(fresh, decisions)
         decisions = self._unresolved_default_fallback(fresh, decisions)
+        decisions = exclude_toolchain_runtime_findings(
+            fresh, decisions, self.toolchain_symbols
+        )
         for change, decision in zip(fresh, decisions, strict=True):
             change.contract_relevance = decision.relevance
             change.contract_reason_code = decision.reason_code
@@ -565,6 +573,19 @@ def build_contract_stage(
     directly_referenced_stdlib_new = directly_referenced_stdlib_type_spellings(
         new, exclude_export_only_roots=True, committed_roots=committed_roots
     )
+    # The C++ runtime / toolchain's own symbols on either side, by the same
+    # origin classification the symbol-hygiene audit reports (see
+    # ContractEvaluationStage.toolchain_symbols). Read here, where both raw
+    # snapshots are still in scope.
+    from .buildsource.export_accounting import toolchain_runtime_symbol_names
+
+    toolchain_symbols = frozenset().union(
+        *(
+            toolchain_runtime_symbol_names(snap)
+            for snap in (old, new)
+            if snap is not None
+        )
+    )
 
     # ADR-049 Phase 3's observed provider ledger (plan Section 4.1).
     # Collected for *both* providers whenever the export surfaces were
@@ -650,6 +671,7 @@ def build_contract_stage(
             frozenset(force_public_symbols) if force_public_symbols else None
         ),
         committed_exports=committed_exports,
+        toolchain_symbols=toolchain_symbols,
     )
 
 

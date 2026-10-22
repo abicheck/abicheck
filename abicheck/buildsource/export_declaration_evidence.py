@@ -101,6 +101,10 @@ class _HeaderText:
     lines: list[tuple[str, str | None]] = field(default_factory=list)
     #: Every identifier the file spells, so a lookup skips files quickly.
     identifiers: frozenset[str] = frozenset()
+    #: Identifier -> indices into ``lines`` that spell it, so a lookup scans
+    #: only those lines rather than the whole header once per export (a
+    #: 10k-export library against a 10k-line header was quadratic).
+    line_index: dict[str, tuple[int, ...]] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -251,6 +255,17 @@ def exact_exclusion_matches(path: str, patterns: tuple[str, ...]) -> bool:
     return False
 
 
+def _identifier_line_index(
+    lines: list[tuple[str, str | None]],
+) -> dict[str, tuple[int, ...]]:
+    """Map each identifier to the indices of the lines that spell it."""
+    index: dict[str, list[int]] = {}
+    for i, (line, _) in enumerate(lines):
+        for ident in set(_IDENT.findall(line)):
+            index.setdefault(ident, []).append(i)
+    return {k: tuple(v) for k, v in index.items()}
+
+
 def build_export_declaration_evidence(
     snapshot: AbiSnapshot,
 ) -> ExportDeclarationEvidence:
@@ -269,8 +284,10 @@ def build_export_declaration_evidence(
         except OSError:
             continue
         lines = _conditioned_lines(source)
-        idents = frozenset(_IDENT.findall("\n".join(line for line, _ in lines)))
-        headers.append(_HeaderText(path, excluded, lines, idents))
+        line_index = _identifier_line_index(lines)
+        headers.append(
+            _HeaderText(path, excluded, lines, frozenset(line_index), line_index)
+        )
     return ExportDeclarationEvidence(
         owned_namespaces=_owned_namespaces(snapshot),
         public=public_template_scopes(snapshot),
@@ -391,7 +408,11 @@ def textual_declaration_hint(
     for h in evidence.headers:
         if leaf not in h.identifiers or (scope and scope not in h.identifiers):
             continue
-        for line, cond in h.lines:
+        # A ``leaf_re`` hit starts on a word boundary and ends before a
+        # non-word character, so ``_IDENT`` tokenizes it: the indexed lines
+        # are a superset of the matching ones.
+        for i in h.line_index.get(leaf, ()):
+            line, cond = h.lines[i]
             if not leaf_re.search(line):
                 continue
             if h.excluded:

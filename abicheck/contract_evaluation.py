@@ -68,6 +68,10 @@ from .export_surface import ExportSurface
 from .model import ScopeOrigin
 from .model.change import Change
 from .model.change_catalog.kinds import ChangeKind
+from .policy.class_metadata_identity import (
+    class_metadata_owner_confirmed,
+    is_mangled_identity as _is_mangled_identity,
+)
 from .policy.classification import ADDITION_KINDS
 from .policy.contract_closed_domain import (
     SURFACE_METRIC_KIND_SLUGS,
@@ -885,6 +889,10 @@ def _in_surface_result_is_confirmed(
         _type_candidates(change) | _qualified_type_candidates(change)
     ) & auth.exact_type_identities:
         return True
+    if class_metadata_owner_confirmed(
+        change.symbol or "", auth.exact_type_identities, auth.class_owner_paths
+    ):
+        return True
     directly_referenced_stdlib = (
         directly_referenced_stdlib_new
         if _new_side_is_authoritative(change)
@@ -899,20 +907,6 @@ def _in_surface_result_is_confirmed(
             and change.caused_by_type in directly_referenced_stdlib
         )
     )
-
-
-def _is_mangled_identity(sym: str) -> bool:
-    """Whether *sym* is spelled in a C++ mangling scheme rather than source form.
-
-    ``_Z`` is Itanium, ``__Z`` the extra platform underscore a Mach-O
-    direct-clang snapshot carries (``diff_cxx_rules._itanium_strip_prefix``
-    documents the same quirk), and ``?`` opens every MSVC-mangled name
-    (``diff_cxx_rules.msvc_scope_components``). All three are spellings a
-    source-level type or function name can never take -- ``?`` is not an
-    identifier character at all, and ``_Z``-prefixed identifiers are reserved
-    -- which is what makes an exact hit on one unambiguous.
-    """
-    return sym.startswith(("_Z", "__Z", "?"))
 
 
 def _symbol_matches(

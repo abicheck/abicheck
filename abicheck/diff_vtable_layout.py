@@ -339,16 +339,27 @@ def _secondary_groups(
     return groups
 
 
-@registry.detector(
-    "vtable_layout",
-    requires_support=lambda o, n: (
-        not o.elf_only_mode
-        and not n.elf_only_mode
-        and bool(o.declarations.types)
-        and bool(n.declarations.types),
-        "missing DWARF/header type metadata (inheritance)",
-    ),
-)
+def _vtable_layout_support(
+    old: AbiSnapshot, new: AbiSnapshot
+) -> tuple[bool, str | None]:
+    """Support gate for ``vtable_layout``: inheritance needs type metadata.
+
+    Refused for either of two distinct reasons, named separately. A side in
+    ``elf_only_mode`` is not comparable even when it happens to carry types
+    (the dumper marks some DWARF-backed libraries that way), so "missing type
+    metadata" would be false for it; a side with no types is the other case.
+    """
+    if old.elf_only_mode or new.elf_only_mode:
+        return False, (
+            "a side was dumped in elf_only_mode, so its class inheritance is "
+            "not comparable (inheritance needs DWARF or header type metadata)"
+        )
+    if not old.declarations.types or not new.declarations.types:
+        return False, "missing DWARF/header type metadata on one side (inheritance)"
+    return True, None
+
+
+@registry.detector("vtable_layout", requires_support=_vtable_layout_support)
 def _diff_vtable_layout(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     """Reconstruct and diff per-class vtable-group structure (B2)."""
     old_types = _type_map(old)

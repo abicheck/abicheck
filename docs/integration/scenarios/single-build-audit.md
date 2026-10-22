@@ -69,9 +69,49 @@ a `scan`-based gating job migrating to `compare --no-baseline` needs exactly
 one addition to keep gating on a `BREAKING`/`API_BREAK`-classified finding —
 add `--severity-preset default` (or `strict`) — which then exits `3`, never
 `2`, so the hygiene gate can never be mistaken for a real compatibility
-break; a non-gating job needs no change. The four orthogonal axes still
+break; a non-gating job needs no change. The other orthogonal axes still
 apply — see
 [exit codes](../../reference/exit-codes.md#compare-no-baseline-single-artifact).
+
+### Recipe: gate on "declared in a public header, not exported"
+
+`public_not_exported` is `RISK`-classified, and the audit gate never fires
+on a `RISK` finding. To make a declaration the build forgot to export fail
+the job, promote the kind and opt into gating. Keep the accepted exceptions
+in a suppression file, and set `unused_rules: block` so an exception that no
+longer matches anything fails the job too:
+
+```yaml
+# declared-exported-policy.yml
+unused_rules: block
+overrides:
+  public_not_exported: break
+```
+
+```yaml
+# declared-exported-exceptions.yml
+version: 1
+suppressions:
+  - symbol: MKLFreeTls
+    change_kind: public_not_exported
+    reason: "declared for Windows DllMain only; TICKET-123"
+    expires: 2027-06-30
+```
+
+```bash
+abicheck compare --no-baseline build/libfoo.so \
+    -H include/ --public-header-dir include/ \
+    --policy declared-exported-policy.yml --severity-preset default \
+    --suppress declared-exported-exceptions.yml
+```
+
+Exit `3` means a declared symbol is not exported, and exit `1` means an
+exception is stale. Run one job per build variant (lp64/ilp64, threading
+layer), passing the variant's own `-D` defines so the headers declare what
+that variant ships. Name the public header directory with
+`--public-header-dir`: a declaration reached only through `#include` from
+outside the `-H` set is still reported, but its description says the
+library may not owe that export.
 
 ## The Action: `mode: compare`, no baseline
 

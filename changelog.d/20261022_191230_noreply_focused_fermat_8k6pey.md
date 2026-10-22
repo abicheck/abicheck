@@ -1,0 +1,3 @@
+### Fixed
+
+- **`compare --no-baseline` now exits `1` under `unused_rules: block` when a configured suppression or `reclassify:` rule matched nothing** — the audit's `disposition_audit.unused_rules_review` already reported `gate_contribution: 1`, but the audit had no such exit axis, so a stale exception in a single-build gate (for example a declared-but-not-exported check) passed with exit `0`. The new `exit_axes.unused_rules` is folded with `max` like the other axes. A directory/package audit folds it over its members the way a release does, so a rule one member uses is not stale because another member could not match it. Runs without `unused_rules: block` are unchanged.
