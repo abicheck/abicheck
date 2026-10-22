@@ -705,7 +705,7 @@ jobs:
       # Growth-rate gate over the same real CLI: a header-count sweep on one
       # library and a library-count sweep through a directory compare (the
       # release fan-out). Head-only and absolute -- it gates the *marginal*
-      # cost exponent of each axis and a peak process-tree RSS ceiling, so it
+      # cost exponent of each axis and a peak process-tree PSS ceiling, so it
       # needs no base run and catches a change in shape (a per-library step
       # that starts re-doing every other library's work) that a one-fixture
       # PR-vs-base comparison cannot see. ~75s locally at --repeat 3. Runs

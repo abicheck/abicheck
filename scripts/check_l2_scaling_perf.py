@@ -41,8 +41,16 @@ Correctness is validated outside the timed window, exactly like the parent
 harness: a run that got fast by falling back to binary-only evidence, or by
 comparing fewer libraries than it was handed, is a failure, not a fast point.
 Each repetition runs with its own empty ``XDG_CACHE_HOME`` (cold application
-cache) and records peak concurrent process-tree RSS, which is gated against an
-absolute ceiling.
+cache) and records the peak concurrent process-tree **PSS** sum, which is gated
+against an absolute ceiling (``DEFAULT_MAX_PSS_MB``). PSS, not the RSS sum:
+release members run in forked children by default
+(``ABICHECK_MEMBER_PROCESSES``), and an RSS sum counts every copy-on-write page
+the children still share with the parent once per child -- a 10-library compare
+read ~1.1-1.25 GB of RSS sum for ~0.5 GB of real memory. The PSS sum charges a
+shared page once, so it is the tree's physical cost in both the forking and the
+thread fan-out (where, with no fork, it is the RSS sum minus shared libraries).
+The RSS sum is still recorded and printed, ungated. Without a readable
+``/proc/<pid>/smaps_rollup`` the gate falls back to the RSS sum, and says so.
 
 Usage::
 
@@ -79,6 +87,7 @@ from l2_cli_validation import (  # noqa: E402
 )
 from perf_measurement import finite_positive_float_arg, positive_int_arg  # noqa: E402
 from perf_receipt import run_measured  # noqa: E402
+from perf_tree_pss import TreePssSampler  # noqa: E402
 
 #: Sizes per axis. ``1`` is always the floor point; the rest must not be evenly
 #: spaced in log(n - 1), or an OLS fit over three points collapses onto its two
@@ -101,7 +110,11 @@ DEFAULT_TIMEOUT_SECONDS = 600.0
 #: receiving the union set (docs/contribute/known-gaps.md, "Multi-library L2
 #: compare scales quadratically with library count").
 DEFAULT_MAX_EXPONENT: dict[str, float] = {"headers": 1.4, "libraries": 1.7}
-DEFAULT_MAX_RSS_MB = 1024.0
+#: Ceiling on any point's peak process-tree PSS sum (MB). Unchanged from the
+#: old RSS-sum ceiling: before member processes the tree was one process plus
+#: castxml children, where PSS ~= RSS, and the budget's 1 GB headroom over the
+#: observed peak (<= 365 MB, then) still holds for PSS (see performance.md).
+DEFAULT_MAX_PSS_MB = 1024.0
 #: Below this marginal cost (seconds) the largest point is indistinguishable from
 #: the floor, and any exponent fitted through it is noise.
 MIN_MARGINAL_SECONDS = 0.25
@@ -119,7 +132,10 @@ class Point:
     axis: str
     n: int
     walls: list[float] = field(default_factory=list)
+    #: Informational: per-process RSS summed over the tree (overcounts COW).
     peak_rss_mb: float | None = None
+    #: Gated: PSS summed over the tree; ``None`` when PSS was unreadable.
+    peak_pss_mb: float | None = None
     problems: list[str] = field(default_factory=list)
 
     @property
@@ -219,16 +235,23 @@ def measure_point(
     fixture = fixtures.build(_spec(axis, n), work / "fixture")
     argv = build_argv(axis, fixture, work)
     rss: list[float] = []
+    pss: list[float] = []
     for index in range(repeat):
         cache = work / f"cache-{index}"
         cache.mkdir(parents=True, exist_ok=True)
         (work / "report.json").unlink(missing_ok=True)
+        samplers: list[TreePssSampler] = []
+
+        def factory(interval: float) -> TreePssSampler:
+            samplers.append(TreePssSampler(interval))
+            return samplers[-1]
+
         run = run_measured(
             argv,
             cwd=work,
             env={**os.environ, "XDG_CACHE_HOME": str(cache)},
             timeout=timeout,
-            sample_rss=True,
+            sample_rss=factory,
         )
         if run.timed_out or run.exit_code != 4:
             point.problems.append(
@@ -239,12 +262,17 @@ def measure_point(
         point.walls.append(run.wall_seconds)
         if run.rss is not None and run.rss.sampled_peak_tree_bytes:
             rss.append(run.rss.sampled_peak_tree_bytes / (1024 * 1024))
+        if samplers and samplers[0].peak_pss:
+            pss.append(samplers[0].peak_pss / (1024 * 1024))
         # Validate every repetition: a fallback on one run is still a fallback.
         point.problems += [
             f"run {index}: {p}" for p in validate(axis, n, work / "report.json")
         ]
         shutil.rmtree(cache, ignore_errors=True)
     point.peak_rss_mb = max(rss) if rss else None
+    # Every repetition must have yielded PSS, or the gate falls back to RSS:
+    # a max over the readable subset could hide the heaviest run.
+    point.peak_pss_mb = max(pss) if pss and len(pss) == len(rss) else None
     return point
 
 
@@ -289,8 +317,15 @@ def marginal_exponent(points: list[Point]) -> tuple[float | None, str | None]:
     return slope, None
 
 
+def gated_memory(point: Point) -> tuple[str, float | None]:
+    """The memory figure the ceiling applies to: PSS sum, else RSS sum."""
+    if point.peak_pss_mb is not None:
+        return "PSS", point.peak_pss_mb
+    return "RSS (PSS unavailable)", point.peak_rss_mb
+
+
 def gate(
-    axis: str, points: list[Point], *, max_exponent: float, max_rss_mb: float
+    axis: str, points: list[Point], *, max_exponent: float, max_memory_mb: float
 ) -> tuple[float | None, list[str]]:
     failures = [f"{axis} n={p.n}: {msg}" for p in points for msg in p.problems]
     if failures:
@@ -305,10 +340,11 @@ def gate(
             "units (see docs/contribute/performance.md, 'L2 scaling gate')"
         )
     for p in points:
-        if p.peak_rss_mb is not None and p.peak_rss_mb > max_rss_mb:
+        metric, value = gated_memory(p)
+        if value is not None and value > max_memory_mb:
             failures.append(
-                f"{axis} n={p.n}: peak process-tree RSS {p.peak_rss_mb:.0f} MB "
-                f"exceeds {max_rss_mb:.0f} MB"
+                f"{axis} n={p.n}: peak process-tree {metric} {value:.0f} MB "
+                f"exceeds {max_memory_mb:.0f} MB"
             )
     return exponent, failures
 
@@ -362,10 +398,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="Marginal-exponent budget for the library axis.",
     )
     p.add_argument(
-        "--max-rss-mb",
+        "--max-pss-mb",
         type=finite_positive_float_arg,
-        default=DEFAULT_MAX_RSS_MB,
-        help="Ceiling on any point's peak process-tree RSS (MB).",
+        default=DEFAULT_MAX_PSS_MB,
+        help="Ceiling on any point's peak process-tree PSS sum (MB); the RSS "
+        "sum stands in only where PSS is unreadable.",
     )
     p.add_argument(
         "--timeout",
@@ -389,7 +426,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
 def _print(results: dict[str, Any], *, markdown: bool) -> None:
     sep = " | " if markdown else "  "
-    header = ["axis", "n", "median s", "peak RSS MB", "exponent", "budget"]
+    header = ["axis", "n", "median s", "PSS MB", "RSS sum MB", "exponent", "budget"]
     if markdown:
         print("| " + sep.join(header) + " |")
         print("|" + "---|" * len(header))
@@ -403,6 +440,7 @@ def _print(results: dict[str, Any], *, markdown: bool) -> None:
                 axis,
                 str(p["n"]),
                 f"{median:.3f}",
+                f"{p['peak_pss_mb']:.0f}" if p["peak_pss_mb"] else "n/a",
                 f"{p['peak_rss_mb']:.0f}" if p["peak_rss_mb"] else "n/a",
                 f"{exp:.2f}" if exp is not None else "n/a",
                 f"{data['max_exponent']:.2f}",
@@ -431,7 +469,7 @@ def main(argv: list[str] | None = None) -> int:
         "headers": args.max_exponent_headers,
         "libraries": args.max_exponent_libraries,
     }
-    results: dict[str, Any] = {"schema": 1, "axes": {}, "failures": []}
+    results: dict[str, Any] = {"schema": 2, "axes": {}, "failures": []}
     with tempfile.TemporaryDirectory(prefix="abicheck-l2-scaling-") as tmp:
         for axis in axes:
             points = [
@@ -441,13 +479,16 @@ def main(argv: list[str] | None = None) -> int:
                 for n in sizes[axis]
             ]
             exponent, failures = gate(
-                axis, points, max_exponent=budgets[axis], max_rss_mb=args.max_rss_mb
+                axis,
+                points,
+                max_exponent=budgets[axis],
+                max_memory_mb=args.max_pss_mb,
             )
             results["axes"][axis] = {
                 "points": [asdict(p) for p in points],
                 "marginal_exponent": exponent,
                 "max_exponent": budgets[axis],
-                "max_rss_mb": args.max_rss_mb,
+                "max_pss_mb": args.max_pss_mb,
             }
             results["failures"] += failures
     _print(results, markdown=args.markdown)

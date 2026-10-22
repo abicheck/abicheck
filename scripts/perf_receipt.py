@@ -69,6 +69,7 @@ import subprocess
 import sys
 import threading
 import time
+from collections.abc import Callable
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
@@ -763,7 +764,7 @@ def run_measured(
     cwd: Path | None = None,
     env: dict[str, str] | None = None,
     timeout: float = 600.0,
-    sample_rss: bool = False,
+    sample_rss: bool | Callable[[float], TreeRssSampler] = False,
     rss_interval: float = 0.02,
 ) -> CommandRun:
     """Run *argv* as a subprocess, timing and observing it.
@@ -775,20 +776,19 @@ def run_measured(
     would report a number no user experiences. Fixture construction, artifact
     download and dependency installation happen outside, before this call.
 
-    CPU time is read from ``RUSAGE_CHILDREN`` deltas and labelled
-    ``cpu_scope="waited_children_delta"`` rather than presented as this
-    command's CPU: the counter is cumulative over all of the harness's reaped
-    children, so the delta is correct only because nothing else is reaped
+    CPU time is read from ``RUSAGE_CHILDREN`` deltas, labelled
+    ``cpu_scope="waited_children_delta"``: the counter is cumulative over all
+    reaped children, so the delta is right only because nothing else is reaped
     concurrently. Naming the scope is what keeps a later caller from
     parallelising the harness and silently turning the field into nonsense.
 
     On timeout the whole process *group* is terminated, then killed -- not just
     the direct child. A castxml grandchild outliving its parent would otherwise
     keep running, skewing every subsequent measurement on the same host, and
-    the RSS sampler would keep attributing it to a tree that had already been
-    abandoned.
+    the RSS sampler would misattribute it. Callable *sample_rss*: a factory.
     """
-    sampler = TreeRssSampler(rss_interval) if sample_rss else None
+    factory = sample_rss if callable(sample_rss) else TreeRssSampler
+    sampler = factory(rss_interval) if sample_rss else None
     # None, not zero, where `resource` is unavailable: a CPU figure of 0.0 would
     # read as a real measurement of a process that used no CPU.
     before = (
