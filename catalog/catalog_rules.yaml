@@ -385,6 +385,9 @@ rules:
   public-virtual-dispatch-set-reordered:
     title: Reordered override set is not a change
     definition: A public virtual method's override set is the same but its dispatch edges are listed in another order; the comparison is over sets, so this produces no finding.
+  public-consumer-compiled-dependency-changed:
+    title: Public inline body's compiled-in dependency changed
+    definition: A public inline or template body is compiled into every consumer that includes its header, and the declarations it calls or references changed, so consumers must recompile. Header-graph risk to review; no consumer build evidence says which consumers include the header, so it is never a proven break.
   public-function-private-parameter-type:
     title: Public function takes a private parameter type
     definition: A public function's signature names a type the public headers do not declare, so consumers cannot legally form the call.
