@@ -217,3 +217,234 @@ def test_nested_declaration_under_a_pattern_is_not_counted_as_a_gap() -> None:
         is_template_pattern=True,
     )
     assert _unrecorded_pattern_count(_snap(pattern, nested)) == 0
+
+
+# -- Coverage of the helpers the public workflow reaches only through
+#    subprocess runs (ADR-085 D1/D2/C; the patch-coverage gate counts them).
+
+
+@pytest.mark.parametrize(
+    ("body", "expected"),
+    [
+        ([], False),
+        (["Box<char>"], True),
+        (["Box <char>"], True),
+        (["FlatBox<char>"], False),
+        (["ns2::Box<int>"], False),
+        (["Box"], False),
+        (["Box;"], False),
+        (["const Box<char>&", "other"], True),
+    ],
+)
+def test_spells_template_matches_only_the_leaf_on_an_identifier_boundary(
+    body: list[str], expected: bool
+) -> None:
+    from abicheck.policy.template_default_changes import _spells_template
+
+    assert _spells_template(body, "mylib::Box") is expected
+
+
+def test_all_type_params_is_true_only_for_a_pure_type_parameter_list() -> None:
+    from abicheck.extract.headers.clang.template_param_indexes import _all_type_params
+
+    type_only = {"inner": [{"kind": "TemplateTypeParmDecl"}]}
+    mixed = {
+        "inner": [
+            {"kind": "TemplateTypeParmDecl"},
+            {"kind": "NonTypeTemplateParmDecl"},
+        ]
+    }
+    assert _all_type_params(type_only) is True
+    assert _all_type_params(mixed) is False
+    assert _all_type_params({"inner": []}) is False
+    assert _all_type_params({}) is False
+
+
+def test_positional_row_leaves_unrelated_spellings_and_none_untouched() -> None:
+    from abicheck.extract.headers.clang.template_param_indexes import _positional_row
+
+    assert _positional_row((None, "int"), ("T", "U")) == [None, "int"]
+    assert _positional_row((None, "std::vector<T>"), ("T", "U")) == [
+        None,
+        "std::vector<<param 0>>",
+    ]
+    assert _positional_row((None, "T"), None) == [None, "T"]
+
+
+def test_type_defaults_index_keeps_only_all_type_templates() -> None:
+    from abicheck.extract.headers.clang.template_param_indexes import (
+        build_template_param_indexes,
+    )
+
+    root = {
+        "kind": "TranslationUnitDecl",
+        "inner": [
+            {
+                "kind": "ClassTemplateDecl",
+                "name": "Box",
+                "inner": [
+                    {"kind": "TemplateTypeParmDecl", "name": "T"},
+                    {
+                        "kind": "TemplateTypeParmDecl",
+                        "name": "U",
+                        "defaultArg": {"type": {"qualType": "T"}},
+                    },
+                    {"kind": "CXXRecordDecl", "name": "Box"},
+                ],
+            },
+            {
+                "kind": "ClassTemplateDecl",
+                "name": "Mixed",
+                "inner": [
+                    {"kind": "NonTypeTemplateParmDecl", "name": "N"},
+                    {"kind": "CXXRecordDecl", "name": "Mixed"},
+                ],
+            },
+        ],
+    }
+    indexes = build_template_param_indexes(root)
+    assert dict(indexes.type_defaults) == {"Box": (None, "<param 0>")}
+
+
+def test_codec_validators_reject_malformed_payloads_and_pass_none_through() -> None:
+    from abicheck.model.fact import Fact
+    from abicheck.storage.fact_payload_validation import (
+        validated_identities,
+        validated_template_param_defaults,
+    )
+
+    assert validated_identities(None) is None
+    assert validated_template_param_defaults(None) is None
+    assert (
+        validated_identities(Fact.present(["ns::A", ""])).status
+        is FactStatus.NOT_COLLECTED
+    )
+    assert (
+        validated_identities(Fact.present("ns::A")).status is FactStatus.NOT_COLLECTED
+    )
+    assert validated_identities(Fact.present(["ns::A"])).value == ("ns::A",)
+    bad = validated_template_param_defaults(Fact.present("T"))
+    assert bad.status is FactStatus.NOT_COLLECTED
+    bad_item = validated_template_param_defaults(Fact.present([None, 3]))
+    assert bad_item.status is FactStatus.NOT_COLLECTED
+    good = validated_template_param_defaults(Fact.present([None, "T"]))
+    assert good.value == (None, "T")
+
+
+def test_a_partial_or_none_defaults_fact_on_one_side_is_never_a_change() -> None:
+    partial = RecordType(
+        name="Box",
+        kind="struct",
+        qualified_name="mylib::Box",
+        is_template_pattern=True,
+        template_param_defaults_fact=Fact.not_collected(),
+    )
+    findings, suppressed = detect_template_param_default_changed(
+        _snap(_box(_PRESENT_T)), _snap(partial)
+    )
+    assert findings == []
+    assert suppressed == []
+
+
+def test_a_non_pattern_record_is_ignored_by_the_pattern_index() -> None:
+    plain = RecordType(name="Point", kind="struct", is_template_pattern=False)
+    assert _pattern_records(_snap(plain, _box(_PRESENT_T))).keys() == {"mylib::Box"}
+
+
+def test_pipeline_records_a_shape_c_relation_as_deduplicated() -> None:
+    from types import SimpleNamespace
+
+    from abicheck.model.change import Change
+    from abicheck.model.change_catalog.kinds import ChangeKind
+    from abicheck.model.declarations import Function, Param
+    from abicheck.policy.disposition_types import Disposition
+    from abicheck.policy.template_default_changes import (
+        detect_template_default_changes,
+    )
+
+    def _take(return_type: str = "void") -> Function:
+        return Function(
+            name="take",
+            mangled="_Z4takeRK3BoxIcEE",
+            return_type=return_type,
+            params=[Param(name="b", type="const Box<char>&")],
+        )
+
+    old = AbiSnapshot(
+        library="libtpl.so.1",
+        version="1.0",
+        types=[_box(_PRESENT_T)],
+        functions=[_take()],
+    )
+    new = AbiSnapshot(
+        library="libtpl.so.1",
+        version="1.0",
+        types=[_box(_PRESENT_INT)],
+        functions=[],
+    )
+    removed = Change(
+        kind=ChangeKind.FUNC_REMOVED,
+        symbol="_Z4takeRK3BoxIcEE",
+        description="take removed",
+    )
+
+    class _Ledger:
+        def __init__(self) -> None:
+            self.calls: list[tuple[str, Disposition]] = []
+
+        def record(self, change, disposition, *, application_point):
+            self.calls.append((change.kind.value, disposition))
+
+    ledger = _Ledger()
+    ctx = SimpleNamespace(new=new, disposition_ledger=ledger)
+    findings = detect_template_default_changes(old, ctx, [removed])
+    assert findings == []
+    assert ledger.calls == [
+        ("template_param_default_changed", Disposition.DEDUPLICATED)
+    ]
+
+
+def test_a_present_defaults_fact_with_no_value_is_not_a_change() -> None:
+    null_value = RecordType(
+        name="Box",
+        kind="struct",
+        qualified_name="mylib::Box",
+        is_template_pattern=True,
+        template_param_defaults_fact=Fact.present(None),
+    )
+    findings, suppressed = detect_template_param_default_changed(
+        _snap(null_value), _snap(_box(_PRESENT_INT))
+    )
+    assert findings == []
+    assert suppressed == []
+
+
+def test_pipeline_with_no_reported_functions_names_no_template() -> None:
+    from abicheck.policy.template_default_changes import (
+        _templates_named_by_reported_functions,
+    )
+
+    snap = _snap(_box(_PRESENT_T))
+    assert _templates_named_by_reported_functions(snap, snap, []) == set()
+
+
+def test_pipeline_without_a_ledger_still_suppresses_the_finding() -> None:
+    from types import SimpleNamespace
+
+    from abicheck.model.change import Change
+    from abicheck.model.change_catalog.kinds import ChangeKind
+    from abicheck.policy.template_default_changes import (
+        detect_template_default_changes,
+    )
+
+    old = _snap(_box(_PRESENT_T))
+    new = _snap(_box(_PRESENT_INT))
+    removed = Change(
+        kind=ChangeKind.FUNC_REMOVED,
+        symbol="_Z4unrelatedv",
+        description="removed",
+    )
+    ctx = SimpleNamespace(new=new, disposition_ledger=None)
+    # No function reports Box, so the header finding is kept, not suppressed.
+    findings = detect_template_default_changes(old, ctx, [removed])
+    assert [f.kind for f in findings] == [ChangeKind.TEMPLATE_PARAM_DEFAULT_CHANGED]

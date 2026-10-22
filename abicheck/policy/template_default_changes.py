@@ -79,7 +79,10 @@ def _spells_template(texts: list[str], key: str) -> bool:
         while at != -1:
             before = text[at - 1] if at else ""
             tail = text[at + len(leaf) :].lstrip()
-            if not (before.isalnum() or before in "_:") and tail[:1] == "<":
+            if (
+                not (before and (before.isalnum() or before in "_:"))
+                and tail[:1] == "<"
+            ):
                 return True
             at = text.find(leaf, at + 1)
     return False
