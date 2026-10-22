@@ -29,6 +29,7 @@ from abicheck.impact.engine import assess_change
 from abicheck.model.change import Change
 from abicheck.report.view import finding_id
 from abicheck.root_cause_evidence import (
+    impact_assessment_lookups,
     impact_group_lookup_for_changes,
     scoped_only_impact_group_lookup,
 )
@@ -137,6 +138,33 @@ class TestBareSymbolPairDiverges:
         entries = _impact_entries([func], scoped=(consumer,))
         assert entries[0]["impact_assessment"]["impact_group_id"] == expected
         assert "root_cause_id" not in entries[0]["impact_assessment"]
+
+
+class TestCorrelationLookups:
+    def test_combined_lookup_returns_all_three_views_for_a_bare_pair(self) -> None:
+        func = Change(ChangeKind.FUNC_REMOVED, "pub_helper", "removed")
+        consumer = Change(
+            ChangeKind.CONSUMER_REQUIRED_SYMBOL_REMOVED, "pub_helper", "consumer needs"
+        )
+        root, evidence, group = impact_assessment_lookups([func, consumer])
+        # No caused_by_type on either side: no report-level root cause ...
+        assert root == {}
+        # ... but both are correlator members, so both carry evidence and the group id.
+        expected = _sha16("pub_helper")
+        assert group == {finding_id(func): expected, finding_id(consumer): expected}
+        assert set(evidence) == {finding_id(func), finding_id(consumer)}
+
+    def test_show_only_filter_drops_scoped_siblings_from_the_group(self) -> None:
+        func = Change(ChangeKind.FUNC_REMOVED, "pub_helper", "removed")
+        consumer = Change(
+            ChangeKind.CONSUMER_REQUIRED_SYMBOL_REMOVED, "pub_helper", "consumer needs"
+        )
+        result = _result([func], scoped=(consumer,))
+        # Unfiltered: the scoped-only sibling joins the group.
+        assert len(scoped_only_impact_group_lookup(result, [func], None)) == 2
+        # A --show-only that keeps no severity drops the scoped sibling, so the
+        # primary finding loses its partner and is no longer a group member.
+        assert scoped_only_impact_group_lookup(result, [func], "compatible") == {}
 
 
 class TestAgreementWhenBothPresent:
