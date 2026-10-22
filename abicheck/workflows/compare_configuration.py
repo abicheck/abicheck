@@ -585,9 +585,22 @@ def load_required_symbols(
     digest = path = None
     if files:
         candidate = Path(files[0])
+        if candidate.is_dir():
+            raise CompareSettingsError(
+                f"--required-symbol @{candidate}: is a directory, not a file."
+            )
         if not candidate.is_file():
             raise CompareSettingsError(f"--required-symbol @{candidate}: no such file.")
-        data = candidate.read_bytes()
+        try:
+            data = candidate.read_bytes()
+        except OSError as exc:
+            # An existing but unreadable file (permissions, EIO, ...) is an input
+            # error like a missing one, not an operational failure: it must reach
+            # the CLI as the typed refusal (exit 64), never as a traceback.
+            raise CompareSettingsError(
+                f"--required-symbol @{candidate}: cannot read file "
+                f"({exc.strerror or exc})."
+            ) from None
         digest, path = hashlib.sha256(data).hexdigest(), str(candidate)
         try:
             text = data.decode("utf-8")

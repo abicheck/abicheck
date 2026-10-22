@@ -28,8 +28,9 @@ line answers the question:
   header declares this specialization itself -> ``PRESENT(True)``;
 * the line spells the class key and the template name *not* followed by
   ``<``: the primary template's class-head -> ``PRESENT(False)``;
-* the file cannot be read, or a macro expands to the declaration ->
-  ``NOT_COLLECTED``, no claim;
+* the file cannot be read, a macro expands to the declaration, or the line
+  spells both shapes -> ``NOT_COLLECTED``, no claim (the clang template graph
+  can still prove the origin, ``compare/template_instance_absence.py``);
 * the name is not a template-id -> ``None``: there is no specialization to
   describe.
 
@@ -88,9 +89,15 @@ def specialization_declared(
     line = _declaring_line(ctx, el)
     if line is None:
         return Fact.not_collected()
-    head = re.search(
-        rf"{_CLASS_KEY}[^;{{}}]*?(?<![\w:~]){re.escape(template)}\b\s*(<)?", line
-    )
-    if head is None:
+    heads = {
+        head.group(1) is not None
+        for head in re.finditer(
+            rf"{_CLASS_KEY}[^;{{}}]*?(?<![\w:~]){re.escape(template)}\b\s*(<)?", line
+        )
+    }
+    if len(heads) != 1:
+        # No class-head, or the line holds both a primary class-head and a
+        # specialization's (``struct Box {...}; template <> struct Box<int>``):
+        # the line cannot say which one castxml located the record at.
         return Fact.not_collected()
-    return Fact.present(head.group(1) is not None, producer="castxml")
+    return Fact.present(heads.pop(), producer="castxml")

@@ -91,7 +91,7 @@
     },
     {
       "path": "abicheck/buildsource/check_report.py",
-      "baseline_lines": 878,
+      "baseline_lines": 869,
       "target": "workflows",
       "rule": "no_growth",
       "disposition": "migrate",
@@ -333,7 +333,7 @@
     },
     {
       "path": "abicheck/cli_compare_helpers.py",
-      "baseline_lines": 1653,
+      "baseline_lines": 1561,
       "target": "workflows-or-frontends",
       "rule": "no_growth",
       "disposition": "migrate",

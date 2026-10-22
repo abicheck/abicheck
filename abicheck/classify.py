@@ -39,6 +39,7 @@ Zero changes to ``cli.py`` are needed for either extension path.
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import re
 from abc import ABC, abstractmethod
@@ -239,13 +240,12 @@ class AbiJsonClassifier(FileClassifier):
         # non-None wins" pipeline before CompressedAbiJsonClassifier ever
         # gets a chance to decode and inspect it -- so abstain on a
         # recognizably compressed file and let that classifier handle it.
-        try:
+        # A failed probe falls through to the plain-text read below.
+        with contextlib.suppress(Exception):
             from .snapshot_io import SnapshotCompression, detect_snapshot_compression
 
             if detect_snapshot_compression(path) is not SnapshotCompression.NONE:
                 return None
-        except Exception:
-            pass  # fall through to the plain-text read below
         try:
             with open(path, "rb") as fh:
                 head = fh.read(self._JSON_PROBE_BYTES).decode("utf-8", errors="replace")

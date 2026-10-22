@@ -7,11 +7,20 @@ lifecycle: active
 generated: false
 ---
 
-# Class-template specialization a new header stops enumerating (mostly fixed)
+# Class-template specialization a new header stops enumerating (narrowed)
 
 Index: [Known gaps](../known-gaps.md)
 
-**Status (2026-10-21): MOSTLY FIXED.** A template instance whose primary template is still declared in the new header graph is no longer reported as removed. That now covers a class-template specialization the new header stops instantiating too: the specialization reports no `type_removed`, and its implicit constructors, destructor and `operator=`, its inline methods and its static data members report no `inline_function_removed`, `func_removed` or `var_removed`. An export the new binary dropped is `func_visibility_changed` or `var_visibility_changed` (BREAKING); nothing is reported when the new binary still exports the symbol or the old one never did (`compare/template_instance_absence.py`, called from `diff_symbols` and `diff_types`). Still open: an old snapshot that does not record whether the specialization was instantiated from its primary template (clang header backend, pre-v61 snapshot) keeps the old rows.
+**Status (2026-10-21): NARROWED.** A template instance whose primary template is still declared in the new header graph is no longer reported as removed. The same holds for a class-template specialization the new header stops instantiating. The specialization reports no `type_removed`, and its implicit constructors, destructor and `operator=`, its inline methods and its static data members report no `inline_function_removed`, `func_removed` or `var_removed`. If the new binary dropped an export, the finding is `func_visibility_changed` or `var_visibility_changed` (BREAKING). If the new binary still exports the symbol, or the old one never did, nothing is reported (`compare/template_instance_absence.py`, called from `diff_symbols` and `diff_types`).
+
+The specialization's origin is now also read from the structure of clang's AST, so the rule covers a class-head a macro produces and an instantiation of a partial specialization. A partial specialization's instantiation is not removed while that partial specialization is still declared. A line holding both a primary class-head and an explicit specialization no longer reads as an instantiation; before this change that shape hid a real removal.
+
+Still open:
+- an old snapshot that carries neither origin record (written before this change and before schema v61);
+- a dump made without clang, where the header graph is declaration-only, so a macro-produced or partial-specialization origin is not proven;
+- an explicit instantiation (`template struct Box<double>;`) the new header drops.
+
+Each of these keeps the removal: a residual false positive, never a hidden removal.
 
 ## Why the removal was wrong
 
@@ -37,7 +46,7 @@ Verified by `tests/test_template_export_loss_declaration_presence.py` (38 integr
 
 ## Class-template specializations (fixed 2026-10-21)
 
-castxml emits an implicit instantiation and an explicit specialization of `Box<double>` with the same attributes, so the record alone cannot say whether deleting it from the new enumeration deleted a declaration. The location can: an implicit instantiation points at the primary template's class-head (`struct Box {`), an explicit or partial specialization at its own (`struct Box<double> {`). The castxml extractor reads the declaring line and records `RecordType.specialization_declared_fact` (schema v61, `extract/headers/castxml/specialization.py`): `PRESENT(False)` for an instantiation, `PRESENT(True)` for a declared specialization, `NOT_COLLECTED` when the line cannot be read or a macro produces the declaration.
+castxml emits an implicit instantiation and an explicit specialization of `Box<double>` with the same attributes, so the record alone cannot say whether deleting it from the new enumeration deleted a declaration. The location can: an implicit instantiation points at the primary template's class-head (`struct Box {`), an explicit or partial specialization at its own (`struct Box<double> {`). The castxml extractor reads the declaring line and records `RecordType.specialization_declared_fact` (schema v61, `extract/headers/castxml/specialization.py`): `PRESENT(False)` for an instantiation, `PRESENT(True)` for a declared specialization, `NOT_COLLECTED` when the line cannot be read, a macro produces the declaration, or the line spells both a primary and a specialization class-head. (An instantiation of a partial specialization points at the partial specialization's head and reads `PRESENT(True)`; the next section covers it.)
 
 For an old specialization recorded `PRESENT(False)`, whose primary class template is still declared in the new header graph (a `type://<template>` node), and which the new snapshot does not enumerate:
 
@@ -49,14 +58,45 @@ For an old specialization recorded `PRESENT(False)`, whose primary class templat
 
 The member's owner is read from its spelling: the synthetic keys carry it, and a mangled member is demangled when its enclosing component carries a template-argument list. Spellings are compared without whitespace (`Box<int *>` against `Box<int*>`); a mismatch makes no claim.
 
-Kept as removals: a deleted explicit or partial specialization (`PRESENT(True)`), a removed class template, a non-template class, a member of a nested template's specialization (`Outer<int>::Inner`), and any record whose origin was not proven.
+Kept as removals: a deleted explicit specialization (`PRESENT(True)`), a removed class template, a non-template class, a member of a nested template's specialization (`Outer<int>::Inner`), and any record whose origin was not proven.
 
 Verified by `tests/test_template_export_loss_declaration_presence.py` (class-template cells: {header still instantiates, stops instantiating} x three export transitions, judged on every `Box<double>` member by `readelf` FUNC/OBJECT exports, plus explicit-specialization-removed and template-removed controls and a removed non-template class) and `tests/test_class_template_specialization_absence_unit.py` (the full truth table of the three facts, the owner parser against independently built spellings, the detectors on constructed snapshots, and the extractor's line reading). With the rule disabled, the integration run fails exactly the three stops-instantiating cells.
 
+## The origin from the clang AST and partial specializations (narrowed 2026-10-21)
+
+The castxml line reading has three blind spots. A macro-produced class-head reads as the macro's line. An instantiation of a partial specialization is located at the partial specialization's own class-head (`struct Box<T*> {`), which reads as a declared specialization. A primary class-head and an explicit specialization on one line used to read as the primary, which hid the explicit specialization's removal. That shape now reads `NOT_COLLECTED`.
+
+The header graph's clang AST pass (`buildsource/template_class_origin.py`, which runs in every header dump when clang is available) closes the first two. clang nests an implicit instantiation's complete definition under its template's first `ClassTemplateDecl` and gives it the location of the pattern it was instantiated from (`Sema::InstantiateClass`). An explicit specialization, an explicit instantiation and an `extern template` appear there only as an empty stub. Locations are compared as offsets (`offset`, plus the `spellingLoc`/`expansionLoc` offsets of a macro expansion), never as text. The comparison gives three answers:
+
+- the location is the primary's class-head (any redeclaration) and no partial specialization's: `instantiated_from = primary`;
+- the location is exactly one partial specialization's of the same template, and not the primary's: `instantiated_from = partial`, and the instantiation's `DECL_INSTANTIATES_TEMPLATE` edge names `template_decl://<template>#<signature>`;
+- otherwise (a stub, an incomplete specialization, a location two patterns share): no answer.
+
+The answer rides on the `template_instantiation` node, and every declared partial specialization keeps its `template_decl://<template>#<signature>` node even when nothing instantiates it. That node is how the comparison knows the partial specialization is still declared.
+
+Either producer can prove the origin. A producer that contradicts the other voids it:
+
+| castxml line | clang graph | Origin | Not removed while the new graph has |
+|---|---|---|---|
+| primary head | primary or none | primary | `type://<template>` |
+| own head | partial | partial | the same `template_decl://<template>#<signature>` |
+| undetermined | primary / partial | as the graph says | as above |
+| own head | primary | none (contradiction) | n/a: `type_removed` |
+| primary head | partial | none (contradiction) | n/a: `type_removed` |
+| own head or undetermined | none | none | n/a: `type_removed` |
+
+Kept as removals: a deleted partial specialization, a partial specialization replaced by a different one (`Box<T*>` to `Box<T const*>`), a deleted explicit specialization (including one produced by a macro or sharing the primary's line), a removed template.
+
+The clang header backend records the class template (`ns::P`) and not its specializations, so it never produces a specialization row this rule would have to clear.
+
+Verified by `tests/test_class_template_specialization_origin_integration.py` (24 cells, built with g++ and dumped with castxml and the clang header graph). Each scenario runs under the three export transitions: a macro-produced primary, a partial specialization and a macro-produced one that the new header stops instantiating, a still-instantiated partial specialization, and the four removals above. Each cell is judged by the old pattern's class-head in the *preprocessed* new header (`g++ -E -P`) and by `readelf` exports. On the code before this change, exactly 12 cells fail: the nine stops-instantiating cells and the three cells where an explicit specialization shares the primary's line. `tests/test_class_template_origin_unit.py` covers the AST cases, the cross-TU merge, the fold, and the full decision table of both producers against the new graph.
+
 ## What remains
 
-1. **Old snapshots without the origin fact.** The clang header backend does not record `specialization_declared_fact`, and a snapshot written before schema v61 has none, so a specialization they hold keeps `type_removed` and its members keep their removal kinds. Re-dumping the old side with castxml closes it.
-2. **A class-head the line reading cannot see.** A specialization or primary template whose class-head a macro produces reads `NOT_COLLECTED`, which keeps the removal path: a residual false positive, never a hidden removal.
+1. **Old snapshots without either origin.** A snapshot written before this change has no graph origin. One written before schema v61 also has no castxml fact. Such a snapshot keeps `type_removed` for a specialization whose class-head castxml could not read, and its members keep their removal kinds. Re-dumping the old side closes it.
+2. **No clang at dump time.** Without clang the header graph is declaration-only, so a macro-produced class-head or a partial specialization's instantiation is not proven. For a partial specialization, the *new* side also needs the graph, because the declared-pattern node lives there. The removal is kept.
+3. **An explicit instantiation the new header drops.** `template struct Box<double>;` is located at its own line, which castxml reads as the specialization's own head. In clang's AST it is a stub, so its origin is unproven, and its removal is reported even though the primary still declares the type. The AST does not distinguish its detached definition from an explicit specialization's without reading member bodies.
+4. **The graph's partial-signature edge join.** The template graph's own `(file, offset)` join that names a class instantiation's `template_decl` pattern is not restricted to one template. That join predates this change. The origin rule never claims on it: an origin needs the same-template match described above, and a disagreement keeps the join and drops the origin.
 
 ## Tried and rejected
 

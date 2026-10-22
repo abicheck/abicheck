@@ -42,7 +42,7 @@ from .availability import FactStatus
 from .declarations import Function
 from .execution_cache import memoized
 from .fact import Fact
-from .semantic_ir import CanonicalEntity
+from .semantic_ir import SIGNATURE_FIELDS, CanonicalEntity
 from .semantic_ir_declaration_facts import (
     declaration_facts_from_inputs,
     declaration_inputs,
@@ -55,36 +55,6 @@ __all__ = [
     "function_signature_facts",
     "with_declaration_signature",
 ]
-
-#: The ``CanonicalEntity`` fields this cohort owns, in declaration order.
-SIGNATURE_FIELDS = (
-    "return_type_spelling",
-    "parameter_type_spellings",
-    "parameter_kinds",
-    "ref_qualifier",
-    "is_variadic",
-    # The function-qualifier cohort (same projection formula).
-    "is_extern_c",
-    "is_noexcept",
-    "is_virtual",
-    "is_explicit",
-    "is_hidden_friend",
-    "hidden_friend_owner",
-    "contract_attributes",
-    "exception_spec",
-    "vtable_index",
-    "is_override",
-    "is_inline",
-    "is_deleted",
-    "deleted_from_dwarf",
-    # The parameter cohort.
-    "parameter_names",
-    "parameter_defaults",
-    "parameter_pointer_depths",
-    "parameter_restrict",
-    "parameter_va_list",
-    "return_pointer_depth",
-)
 
 
 def _param_kind(param: Any) -> str:

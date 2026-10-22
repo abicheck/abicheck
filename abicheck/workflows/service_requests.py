@@ -506,7 +506,7 @@ class CompareRequest:
                     f"must be one of {sorted(SEVERITY_PRESETS)} or None"
                 )
         # Codex review (fresh evidence, PR #1178): the CLI's `--budget` parser
-        # (`cli_compare_helpers._parse_budget`) already rejects non-finite
+        # (`frontends.cli.compare_input_validation.parse_budget_option`) already rejects non-finite
         # (`nan`/`inf`/`-inf`) and negative values via `math.isfinite` before
         # ever calling `deadline.deadline_scope`, because `deadline.check()`/
         # `bounded_timeout()` both test `left <= 0` -- a value that is never
