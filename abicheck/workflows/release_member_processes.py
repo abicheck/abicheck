@@ -205,6 +205,9 @@ def compare_members_in_processes(
             (reporter.notice if kind == "notice" else reporter.warning)(text)
         if failure is not None:
             entry = on_error(failure, key)
-        assert entry is not None
+        if entry is None:
+            raise RuntimeError(
+                f"release member {key!r} returned neither an entry nor a failure"
+            )
         entries.append(entry)
     return entries
