@@ -403,6 +403,7 @@ PROVENANCE_UNVERIFIED = frozenset(
         "struct_return_convention_changed",
         "struct_size_changed",
         "suppression_reachability_unknown",
+        "graph_coverage_insufficient_for_suppression",
         "support_promise_component_introduced",
         "support_promise_component_retired",
         "suppression_would_hide_public_break",

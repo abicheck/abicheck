@@ -294,10 +294,8 @@ def test_root_cause_document_round_trips_without_a_surface_changes_key() -> None
     view preamble (``_render_view_preamble``). Stated against the
     root-cause document since plan slice 7o retired the leaf one."""
     from abicheck.report.document import ReportDocument
-    from abicheck.report.render_markdown_alternate import (
-        build_root_cause_document,
-        render_root_cause_document,
-    )
+    from abicheck.report.markdown_compute import build_root_cause_document
+    from abicheck.report.render_markdown_alternate import render_root_cause_document
 
     old, new = _snapshots()
     result = compare(old, new)

@@ -69,11 +69,6 @@ Each entry's status line says what is still open. A PARTIAL entry's write-up als
 
 **Status (2026-10-21): FIXED.** A demotion now adds an `analysis_assurance.notes` entry naming each demoted claim (`policy/binary_gate_marker.binary_gate_assurance_notes`, called from `policy/analysis_assurance/_compute.py`), which is a changed analysis-assurance record in the sense `tests/test_family_f1_evidence_ablation.py` requires; the F1 cell `pimpl_inline_body_renamed` / `RecordType.source_header_fact` passes.
 
-#### A refused clang AST still leaves the header type pass collected (2026-10-17)
-
-**Status (2026-10-17): OPEN, residual.** A malformed or failed clang AST now degrades the call, override, template, callback and virtual-dispatch passes. The header type pass is still stamped from the snapshot's own declarations (the flat fallback in `header_graph.build_header_only_graph`), so its AST-only edges (`DECL_HAS_TYPE` on parameters and variables, `DECL_REFERENCES_DECL`) read as collected with role coverage unstamped. A real clang parse failure leaves the same state today. Degrading the type pass whenever `ast_failure` is set would close it, but it changes the existing clang-failure behaviour too and needs its own review.
-`false-clean` — The type pass can read as complete for a header whose AST-only type edges were never read. Owner: `service_header_graph_attach._attach_header_graph`.
-
 #### Other clang-AST readers still treat a wrong-typed `inner` as an empty list (2026-10-17)
 
 **Status (2026-10-17): OPEN.** `validate_ast_shape` guards the header-graph projection (whole-tree and streamed) and the L5 AST fold. Readers outside those two paths still coerce a non-list `inner` to empty with `or []` or skip non-object children, so a corrupt tree there reads as "nothing to report". Known sites include `abicheck/buildsource/source_extractors/clang.py` and `clang_nodes.py`.

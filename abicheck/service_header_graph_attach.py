@@ -67,11 +67,9 @@ _log = logging.getLogger(__name__)
 # headers, and degrades to a declaration-only graph when clang is
 # unavailable) — no public flag controls this anymore; see
 # ``docs/contribute/plans/g31-header-graph-default-on-followup.md``.
-# TODO(header-graph-phase-D): ``header_graph_includes`` runs one extra
-# ``clang -M`` pass per top-level header on every dump/compare with no
-# caching of its own (only the aggregate AST pass is disk-cached via
-# ``clang_header_dump``) — bounded by header count, fails soft when clang is
-# unavailable, but not yet cheap. Caching this pass is deferred to Phase D.
+# ``header_graph_includes`` runs one ``clang -M`` pass per top-level header;
+# each header's result is disk-cached (``buildsource.header_include_disk_cache``),
+# so a warm run issues no probe for a header whose inputs have not changed.
 _HEADER_GRAPH_ENABLED = True
 _HEADER_GRAPH_INCLUDES_ENABLED = True
 
@@ -146,6 +144,7 @@ def _attach_header_graph(
         ClangHeaderIncludeExtractor,
         build_header_only_graph,
     )
+    from .buildsource.header_graph_ast_projection import degrade_header_type_pass
     from .buildsource.include_graph import augment_graph_with_includes
     from .buildsource.semantic_fact_folds import HEADER_SEMANTIC_PASSES
     from .extract.compiler_driver import resolve_clang_bin
@@ -198,6 +197,10 @@ def _attach_header_graph(
         for pass_name in HEADER_SEMANTIC_PASSES:
             if pass_name in graph.extractor_passes:
                 graph.degraded_passes[pass_name] = True
+        # The type pass read the same AST for its own edges, so it cannot be
+        # stamped complete either: the flat fallback below it stamps it
+        # collected from the snapshot's declarations alone (false clean).
+        degrade_header_type_pass(graph)
         graph.finalize()
     memory_trace.mark("dump.header_graph.build:done")
     if header_graph_includes and resolved_headers and cc.frontend_context == "host":
