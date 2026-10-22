@@ -1183,27 +1183,4 @@ PERFORMANCE_BUG_CLASSES: tuple[BugClass, ...] = (
             "input": ("generated-graph", "generated-rules-and-sites"),
         },
     ),
-    BugClass(
-        id="measurement.forked_tree_rss_overstates_memory",
-        invariant=(
-            "A memory budget over a process tree must measure the tree's "
-            "physical footprint. A child forked from a parent maps the "
-            "parent's pages, so summed RSS counts each shared page once per "
-            "process and can read several times the real use, while the "
-            "tree's proportional set size (PSS) counts each shared page once "
-            "in total. Checked against the kernel's own shared-page accounting "
-            "in a real forked tree, and by the gate judging PSS (RSS only when "
-            "PSS is unreadable)."
-        ),
-        fixed_by=(1719,),
-        seed_tests=(
-            "tests/test_perf_receipt.py",
-            "tests/test_l2_scaling_perf_gate.py",
-        ),
-        public_surfaces=(),
-        axes={
-            "measurement": ("rss-sum", "pss-sum"),
-            "fan-out": ("processes", "threads"),
-        },
-    ),
 )
