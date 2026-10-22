@@ -310,10 +310,10 @@ class MemoryCache(Generic[_V]):
                     self._in_flight[key] = future
                     self.stats.misses += 1
                     break
-            try:
+            # The owner failed with an Exception: retry (a loop, not
+            # recursion). A BaseException still propagates via result().
+            if not isinstance(pending.exception(), Exception):
                 return self._out(pending.result())
-            except Exception:
-                continue  # the owner failed: retry (a loop, not recursion)
         try:
             value = self._compute_and_store(key, compute, witness, witness_of, keep)
         except BaseException as exc:
