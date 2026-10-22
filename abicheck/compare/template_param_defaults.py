@@ -26,12 +26,17 @@ from collections import defaultdict
 from collections.abc import Collection
 
 from ..diff_helpers import make_change
-from ..model import AbiSnapshot, Function, source_contract_evidence as _contract
-from ..model.availability import FactStatus
+from ..model import (
+    AbiSnapshot,
+    Function,
+    RecordType,
+    source_contract_evidence as _contract,
+)
 from ..model.change import Change
 from ..model.change_catalog.kinds import ChangeKind
 from ..model.evidence_status import ReachabilityState
 from ..model.signature_token_scan import _split_top_level_commas
+from .fact_gate import both_facts_present
 from .template_surface import (
     qualified_name_lookup,
     reconciled_abi_visible_functions,
@@ -39,17 +44,13 @@ from .template_surface import (
 )
 
 
-def _recorded_template_defaults(
-    snap: AbiSnapshot,
-) -> dict[str, tuple[str | None, ...] | None]:
-    """``qualified template name -> recorded defaults`` for the class-template
-    patterns of *snap* (ADR-085 D1).
+def _pattern_records(snap: AbiSnapshot) -> dict[str, RecordType]:
+    """``qualified template name -> class-template pattern record`` for *snap*.
 
-    A pattern whose defaults are not PRESENT maps to ``None`` (UNKNOWN), so an
-    UNKNOWN side never pairs with a recorded one. A qualified name that more
-    than one pattern carries is ambiguous and is dropped, not trusted.
+    A qualified name that more than one pattern carries is ambiguous and is
+    dropped, not trusted.
     """
-    seen: dict[str, tuple[str | None, ...] | None] = {}
+    seen: dict[str, RecordType] = {}
     ambiguous: set[str] = set()
     for rec in snap.declarations.types:
         if not rec.is_template_pattern:
@@ -58,12 +59,7 @@ def _recorded_template_defaults(
         if key in seen or key in ambiguous:
             ambiguous.add(key)
             continue
-        fact = rec.template_param_defaults_fact
-        value = fact.value if fact is not None else None
-        if fact is not None and fact.status is FactStatus.PRESENT and value is not None:
-            seen[key] = tuple(value)
-        else:
-            seen[key] = None
+        seen[key] = rec
     for key in ambiguous:
         seen.pop(key, None)
     return seen
@@ -88,18 +84,20 @@ def detect_template_param_default_changed(
 
     Returns ``(findings, suppressed)``.
     """
-    old_defaults = _recorded_template_defaults(old)
-    new_defaults = _recorded_template_defaults(new)
-    new_records = {
-        (rec.qualified_name or rec.name): rec
-        for rec in new.declarations.types
-        if rec.is_template_pattern
-    }
+    old_patterns = _pattern_records(old)
+    new_patterns = _pattern_records(new)
     findings: list[Change] = []
     suppressed: list[Change] = []
-    for key in sorted(old_defaults.keys() & new_defaults.keys()):
-        before = old_defaults[key]
-        after = new_defaults[key]
+    for key in sorted(old_patterns.keys() & new_patterns.keys()):
+        old_rec, new_rec = old_patterns[key], new_patterns[key]
+        if old_rec.template_param_defaults_fact is None:
+            continue
+        if new_rec.template_param_defaults_fact is None:
+            continue
+        if not both_facts_present(old_rec, new_rec, "template_param_defaults", key):
+            continue
+        before = old_rec.template_param_defaults_fact.value
+        after = new_rec.template_param_defaults_fact.value
         if before is None or after is None:
             continue
         if len(before) != len(after) or before == after:
@@ -114,7 +112,7 @@ def detect_template_param_default_changed(
             detail=", ".join(f"param {i}" for i in changed),
             old_value=repr(before),
             new_value=repr(after),
-            **_contract.reachability_of(new_records[key], header_parsed=True),
+            **_contract.reachability_of(new_rec, header_parsed=True),
         )
         covered = any(
             stem == key or stem.startswith(key + "::") for stem in instantiation_stems

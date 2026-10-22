@@ -24,7 +24,7 @@ from __future__ import annotations
 import pytest
 
 from abicheck.compare.template_param_defaults import (
-    _recorded_template_defaults,
+    _pattern_records,
     detect_template_param_default_changed,
 )
 from abicheck.model import AbiSnapshot, Fact, RecordType
@@ -80,15 +80,16 @@ def test_unrecorded_pattern_round_trips_as_not_present() -> None:
 
 
 def test_unrecorded_side_never_reads_as_recorded_empty_defaults() -> None:
-    recorded = _recorded_template_defaults(_snap(_box(_PRESENT_T)))
-    unrecorded = _recorded_template_defaults(_snap(_box(None), producer="castxml"))
-    assert recorded == {"mylib::Box": (None, "T")}
-    assert unrecorded == {"mylib::Box": None}
+    recorded = _pattern_records(_snap(_box(_PRESENT_T)))["mylib::Box"]
+    unrecorded = _pattern_records(_snap(_box(None), producer="castxml"))["mylib::Box"]
+    assert recorded.template_param_defaults_fact is not None
+    assert recorded.template_param_defaults_fact.value == (None, "T")
+    assert unrecorded.template_param_defaults_fact is None
 
 
 def test_ambiguous_pattern_name_is_dropped_not_trusted() -> None:
     snap = _snap(_box(_PRESENT_T), _box(_PRESENT_INT))
-    assert _recorded_template_defaults(snap) == {}
+    assert _pattern_records(snap) == {}
 
 
 # D2 -- the header-level default change is API_BREAK-kind; the detector pairs
