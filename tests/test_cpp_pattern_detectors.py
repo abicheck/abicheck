@@ -33,6 +33,7 @@ from __future__ import annotations
 import pytest
 
 from abicheck.checker_policy import ChangeKind
+from abicheck.compare.template_param_defaults import detect_default_template_arg_changed
 from abicheck.diff_cpp_patterns import (
     BundleMember,
     _extract_soname_major,
@@ -43,7 +44,6 @@ from abicheck.diff_cpp_patterns import (
     _looks_like_template_instantiation,
     detect_bundle_soname_skew,
     detect_cpu_dispatch_isa_dropped,
-    detect_default_template_arg_changed,
     detect_inline_body_renamed_member,
     detect_missing_instantiations,
     detect_serialization_tag_changes,

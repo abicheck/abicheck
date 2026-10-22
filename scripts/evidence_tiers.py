@@ -361,6 +361,7 @@ EVIDENCE_TIER_BY_KIND: dict[str, str] = {
     "constant_changed": "L2",
     "param_default_value_changed": "L2",
     "param_default_value_removed": "L2",
+    "template_param_default_changed": "L2",
     # `restrict` is a declaration property recorded by the header-AST backends
     # (Param.is_restrict, compared through its Fact[bool] sibling in
     # diff_param_qualifiers.py). It is not part of the mangled name (L0), and

@@ -556,6 +556,7 @@ NON_DETECTOR_KINDS: frozenset[str] = frozenset(
         "tag_type_renamed",
         "target_dependency_added",
         "template_body_changed",
+        "template_param_default_changed",
         "threadsafe_statics_mode_changed",
         "tls_model_changed",
         "toolchain_version_changed",

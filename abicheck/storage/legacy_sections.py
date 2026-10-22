@@ -150,6 +150,7 @@ _SECTION_FIELDS: Mapping[str, tuple[str, ...]] = {
         "ast_toolchain",
         "ast_fallback_reason",
         "ast_toolchain_supported",
+        "template_default_header_scan",
         "ast_toolchain_unsupported_reasons",
         "frontend_context_kind",
         "ast_resolved_standard",

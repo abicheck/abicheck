@@ -18,7 +18,7 @@ Targets uncovered branches in:
 
 * ``abicheck.reporter``
 * ``abicheck.post_processing``
-* ``abicheck.internal_leak``
+* ``abicheck.compare.internal_leak``
 * ``abicheck.stack_report``
 
 All tests are pure-Python (no compiler / external tools), deterministic, and

@@ -396,6 +396,7 @@ class _ClangAstParser:
         indexes = _template_param_indexes_for(root)
         self._template_param_kinds_by_qualname = indexes.kinds
         self._template_param_defaults_by_qualname = indexes.defaults
+        self._template_type_defaults_by_qualname = indexes.type_defaults
         self._template_param_names_by_qualname = indexes.names
         # Lazily-built, memoized record/specialization/vtable indices shared
         # between record-entity parsing (_build_record's base-lookup, still
@@ -1166,12 +1167,8 @@ class _ClangAstParser:
             base_lookup_index=self._base_lookup_index(),
             evaluate_bitfield_int=_evaluated_int_value,
             field_default_value=lambda p: _field_initializer_value(p, self._id_index),
+            template_param_defaults=self._template_type_defaults_by_qualname,
         )
-
-    def _anon_typedef_names(self) -> dict[str, str]:
-        """See ``extract.headers.clang.records._anon_typedef_names`` (the
-        canonical implementation this delegates to) for the full contract."""
-        return _clang_records._anon_typedef_names(self._typedefs)
 
     def _build_record(
         self,
