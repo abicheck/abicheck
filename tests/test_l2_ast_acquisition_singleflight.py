@@ -868,6 +868,9 @@ def test_directory_l2_compare_acquires_one_ast_per_key(
         pytest.skip(f"{backend} backend is not available on this host")
     monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "cache"))
     monkeypatch.setenv("ABICHECK_AST_FRONTEND", backend)
+    # The counters live in this process; keep members on threads so a forked
+    # member (ABICHECK_MEMBER_PROCESSES, default on) is not invisible to them.
+    monkeypatch.setenv("ABICHECK_MEMBER_PROCESSES", "0")
 
     # Six members against two workers, so members 3-6 run in a later group
     # than the producer's own -- the shape a per-call disk decode escaped
