@@ -354,4 +354,23 @@ CONFIG_BUG_CLASSES: tuple[BugClass, ...] = (
             ),
         ),
     ),
+    BugClass(
+        id="config.unreadable_operand_escapes_as_traceback",
+        invariant=(
+            "A user-supplied input file that the CLI cannot use -- missing, a "
+            "directory where a file is expected, or present but unreadable -- "
+            "is refused as a typed usage error with the path named and exit "
+            "64. It is never an uncaught OS exception, and it never reads as "
+            "'no such file' when the path does exist. Every failure mode of "
+            "one input is covered, not only the one a report named."
+        ),
+        fixed_by=(1705,),
+        seed_tests=("tests/test_compare_settings_cli_translation.py",),
+        public_surfaces=("cli",),
+        axes={
+            "input_failure": ("missing", "directory", "unreadable"),
+            "entry_point": ("typed_function", "cli"),
+        },
+        known_gaps=(),
+    ),
 )
