@@ -244,8 +244,10 @@ def _encode_one(fact_dict: dict[str, Any] | None) -> None:
     if fact_dict is None:
         return
     status = fact_dict.get("status")
-    if isinstance(status, FactStatus):
-        fact_dict["status"] = status.value
+    # Exact type (an enum with members cannot be subclassed) and `_value_`:
+    # no descriptor call per fact.
+    if type(status) is FactStatus:
+        fact_dict["status"] = status._value_
     # T9 (duplication-and-convergence-assessment Phase 6 item 4): `dataclasses.
     # asdict()` already put a `"producer": None` key into every fact dict here
     # (the overwhelming majority, since only PDB's vtable_fact/
@@ -672,6 +674,11 @@ def decode_fact_with_legacy_presence(
     return decode_fact(raw, schema_version, min_schema_version=min_schema_version)
 
 
+def _build_kind_fact(raw: Any) -> Fact[Any]:
+    fact = _build_fact(raw)
+    return fact if fact.value is None else replace(fact, value=ParamKind(fact.value))
+
+
 def decode_param_facts(p: dict[str, Any], schema_version: int) -> dict[str, Any]:
     """Decode every ``Param`` ``Fact[...]`` sibling from one param dict.
 
@@ -689,11 +696,14 @@ def decode_param_facts(p: dict[str, Any], schema_version: int) -> dict[str, Any]
     then carries this same real ``ParamKind`` member back into the legacy
     ``kind`` field too.
     """
-    kind_fact = decode_fact_with_legacy_presence(
-        p, "kind", schema_version, _MIN_SCHEMA_VERSION_FOR_PARAM_KIND_FACT
-    )
-    if kind_fact is not None and kind_fact.value is not None:
-        kind_fact = replace(kind_fact, value=ParamKind(kind_fact.value))
+    if raw_kind := p.get("kind_fact"):  # memoized, ParamKind rebuild folded in
+        kind_fact: Fact[Any] | None = memo_fact(raw_kind, _build_kind_fact, ("kind",))
+    else:
+        kind_fact = decode_fact_with_legacy_presence(
+            p, "kind", schema_version, _MIN_SCHEMA_VERSION_FOR_PARAM_KIND_FACT
+        )
+        if kind_fact is not None and kind_fact.value is not None:
+            kind_fact = replace(kind_fact, value=ParamKind(kind_fact.value))
     return {
         "is_va_list_fact": decode_fact(p.get("is_va_list_fact"), schema_version),
         "is_restrict_fact": decode_fact_with_legacy_presence(
