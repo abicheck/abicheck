@@ -91,7 +91,7 @@
     },
     {
       "path": "abicheck/buildsource/check_report.py",
-      "baseline_lines": 878,
+      "baseline_lines": 869,
       "target": "workflows",
       "rule": "no_growth",
       "disposition": "migrate",
