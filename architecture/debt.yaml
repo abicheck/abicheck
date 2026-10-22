@@ -333,7 +333,7 @@
     },
     {
       "path": "abicheck/cli_compare_helpers.py",
-      "baseline_lines": 1656,
+      "baseline_lines": 1564,
       "target": "workflows-or-frontends",
       "rule": "no_growth",
       "disposition": "migrate",

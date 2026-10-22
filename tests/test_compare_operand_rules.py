@@ -1,7 +1,7 @@
 """Operand refusals: one owner decides, each frontend words its own refusal.
 
 The rules live in :mod:`abicheck.workflows.operand_rules`. The ``compare`` CLI
-renders them through ``cli_compare_helpers._operand_rule_errors`` and must keep
+renders them through ``frontends.cli.compare_input_validation.operand_rule_errors`` and must keep
 its exact wording and error class; the typed API keeps the ``debug_format=``
 wording. These tests pin both, so moving a rule cannot silently re-word a flag
 message or swap a usage error for a bad-parameter one.
@@ -12,8 +12,8 @@ from __future__ import annotations
 import click
 import pytest
 
-from abicheck.cli_compare_helpers import _operand_rule_errors
 from abicheck.errors import ValidationError
+from abicheck.frontends.cli.compare_input_validation import operand_rule_errors
 from abicheck.workflows.operand_rules import (
     DebugFormatNotElfError,
     ManifestOperandError,
@@ -58,7 +58,7 @@ class TestDebugFormatRule:
 
     def test_compare_cli_wording_names_the_config_key(self) -> None:
         with pytest.raises(click.BadParameter) as info:
-            with _operand_rule_errors():
+            with operand_rule_errors():
                 reject_debug_format_for_non_elf("dwarf", "elf", "pe")
         assert info.value.message == (
             "debug.format: dwarf (.abicheck.yml) is only supported for ELF "
@@ -69,7 +69,7 @@ class TestDebugFormatRule:
 class TestManifestRules:
     def test_header_conflict_is_a_usage_error_with_the_flag_wording(self) -> None:
         with pytest.raises(click.UsageError) as info:
-            with _operand_rule_errors():
+            with operand_rule_errors():
                 reject_manifest_header_conflicts(object(), None, ("a.h",), ())
         assert info.value.message == (
             "--dump-manifest old=... and a header for the old side "
@@ -85,7 +85,7 @@ class TestManifestRules:
 
     def test_non_elf_names_the_format_it_found(self) -> None:
         with pytest.raises(click.UsageError) as info:
-            with _operand_rule_errors():
+            with operand_rule_errors():
                 reject_manifest_non_elf(object(), None, "pe", "elf")
         assert info.value.message == (
             "--dump-manifest old=... requires the old input to be an ELF "

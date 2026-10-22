@@ -28,8 +28,6 @@ a direct ``checker.compare`` call (cli-contract, ADR-037 D10.1).
 
 from __future__ import annotations
 
-import math
-from contextlib import contextmanager
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -57,7 +55,6 @@ from .cli_options import (
 )
 from .cli_resolve import (
     _resolve_compare_pair,
-    classify_compare_operand,
     resolve_directory_compile_context,
 )
 from .contract_scoped_promotion import stamp_scoped_result_findings
@@ -71,6 +68,12 @@ from .frontends.cli import compare_enrichment as _enrichment
 from .frontends.cli.acknowledgment_config import (
     compare_acknowledgments_for,
     release_acknowledgment_inputs,
+)
+from .frontends.cli.compare_input_validation import (
+    classify_and_reject_operands,
+    enter_budget_scope,
+    operand_rule_errors,
+    parse_budget_option,
 )
 from .frontends.cli.compare_report import (
     # A cohesive slice of ``run_compare``'s post-comparison phase (scoped
@@ -131,8 +134,6 @@ from .workflows.compare_configuration import (
 )
 from .workflows.header_exclusion_audit import unmatched_exclusion_warning
 from .workflows.operand_rules import (
-    DebugFormatNotElfError,
-    ManifestOperandError,
     reject_debug_format_for_non_elf,
     reject_manifest_header_conflicts,
     reject_manifest_non_elf,
@@ -143,8 +144,6 @@ from .workflows.public_header_boundary import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator
-
     from .model.consumer_spec import ConsumerAppInput
     from .workflows.compare_configuration import ResolvedCompareConfig
     from .workflows.extraction import DumpManifest
@@ -216,78 +215,6 @@ def _normalize_compare_options(
     )
 
 
-def _classify_and_reject_operands(
-    old_input: Path,
-    new_input: Path,
-) -> tuple[str, str]:
-    """Classify both compare operands and reject an application/PIE operand.
-
-    ADR-037 D7 input-type dispatch: a directory/package operand fans out to a
-    per-library comparison; an application/PIE operand is not a library `compare`
-    can pair (hint at `appcompat`). A single .so / snapshot / dump falls through.
-    """
-    from .frontends.cli.operand_diagnostics import _reject_application_operand
-
-    old_kind = classify_compare_operand(old_input)
-    new_kind = classify_compare_operand(new_input)
-    if old_kind == "app" or new_kind == "app":
-        _reject_application_operand(old_input, new_input, old_kind, new_kind)
-    return old_kind, new_kind
-
-
-#: ADR-068 §3 #19: mirrored ``cli_scan._DURATION_UNITS`` (kept as its own
-#: copy -- ``scan`` has since been deleted by ADR-068 Phase 6).
-_DURATION_UNITS: dict[str, int] = {"s": 1, "m": 60, "h": 3600}
-
-
-def _parse_budget(value: str | None) -> float | None:
-    """Parse a ``time``-style duration (``15m``/``900s``/``1h``) to seconds.
-
-    A bare number is seconds; ``None``/empty means no budget. Raises
-    :class:`click.BadParameter` for an unparseable value.
-    """
-    if not value:
-        return None
-    raw = value.strip().lower()
-    unit = 1
-    if raw and raw[-1] in _DURATION_UNITS:
-        unit = _DURATION_UNITS[raw[-1]]
-        raw = raw[:-1]
-    try:
-        amount = float(raw)
-    except ValueError as exc:
-        raise click.BadParameter(
-            f"invalid --budget {value!r}; use e.g. 15m, 900s, 1h"
-        ) from exc
-    # CodeRabbit review: nan/inf both pass `< 0` and would store a deadline
-    # `left <= 0` never trips, silently defeating the budget.
-    if not math.isfinite(amount) or amount < 0:
-        raise click.BadParameter(
-            f"--budget must be a finite, non-negative duration, got {value!r}"
-        )
-    return amount * unit
-
-
-def _enter_budget_scope(ctx: click.Context, budget_s: float | None) -> None:
-    """Set ``--budget``'s deadline for the rest of this Click invocation.
-
-    Entered once, as early as possible -- inline ``--sources``/
-    ``--build-info`` embedding included (Codex review: entering only around
-    resolution left it unbounded). ``ctx.call_on_close`` (not a ``with``
-    wrapping the rest of this function) releases it on every early exit
-    Click already tears the context down for, so it never leaks into the
-    next ``CliRunner`` invocation in the same test process. A no-op for
-    ``budget_s is None`` (``--budget`` omitted) -- unbounded, as today.
-    """
-    if budget_s is None:
-        return
-    from . import deadline
-
-    scope = deadline.deadline_scope(budget_s)
-    scope.__enter__()
-    ctx.call_on_close(lambda: scope.__exit__(None, None, None))
-
-
 # Plan slice 7m: ``_reject_incoherent_compare_flags`` is gone. Both rules it
 # enforced -- a dry run asked to write a report, and two reports aimed at one
 # file -- are now properties of the one export request, checked by
@@ -330,25 +257,6 @@ def _preflight_manifests_and_audit(
     except PackManifestError as exc:
         raise click.UsageError(str(exc)) from exc
     return manifests
-
-
-@contextmanager
-def _operand_rule_errors() -> Iterator[None]:
-    """Word a refused operand combination the way ``compare`` words its flags.
-
-    The rules are decided in :mod:`abicheck.workflows.operand_rules`; this only
-    renders the typed refusal as the usage error (or ``.abicheck.yml`` key
-    message) this command has always printed.
-    """
-    try:
-        yield
-    except DebugFormatNotElfError as exc:
-        raise click.BadParameter(
-            f"debug.format: {exc.debug_format} (.abicheck.yml) is only supported "
-            f"for ELF binaries, but the {exc.side} input is {exc.binary_fmt.upper()}."
-        ) from exc
-    except ManifestOperandError as exc:
-        raise click.UsageError(str(exc)) from exc
 
 
 def _resolve_evaluation_config(
@@ -769,8 +677,8 @@ def run_compare(
     from .frontends.cli.operand_diagnostics import _warn_unused_set_flags
 
     reject_dry_run_with_output(dry_run, output)
-    budget_s = _parse_budget(budget)
-    _enter_budget_scope(ctx, budget_s)  # before inline embedding too; see its docstring
+    budget_s = parse_budget_option(budget)
+    enter_budget_scope(ctx, budget_s)  # before inline embedding too; see its docstring
     # --contract is the only way to ask for the ADR-049 evaluator on the CLI
     # (abicheck.cli_options.resolve_contract_evaluation) -- resolved here,
     # before contract_evaluation is used for anything else in this function,
@@ -916,7 +824,7 @@ def run_compare(
     # ADR-037 D7: input-type dispatch. The resolved config (scope/suppression/
     # severity) is forwarded so a set-input compare classifies the same way a
     # single-pair one would (ADR-037 D4).
-    old_kind, new_kind = _classify_and_reject_operands(old_input, new_input)
+    old_kind, new_kind = classify_and_reject_operands(old_input, new_input)
 
     # ADR-068 D4/Phase 5: split out to _helpers_compare.reject_use_cases_
     # without_carrying_output (keeps this module under the 2000-line hard
@@ -1308,7 +1216,7 @@ def run_compare(
         old_includes_only,
         new_includes_only,
     )
-    with _operand_rule_errors():
+    with operand_rule_errors():
         reject_manifest_header_conflicts(
             old_manifest_obj, new_manifest_obj, old_h, new_h
         )
@@ -1333,7 +1241,7 @@ def run_compare(
     # did not, and that alias table no longer exists.)
     old_input, old_fmt = cli_resolve._normalize_binary_input(old_input)
     new_input, new_fmt = cli_resolve._normalize_binary_input(new_input)
-    with _operand_rule_errors():
+    with operand_rule_errors():
         reject_manifest_non_elf(old_manifest_obj, new_manifest_obj, old_fmt, new_fmt)
         reject_debug_format_for_non_elf(effective_debug_format, old_fmt, new_fmt)
     _warn_ignored_flags(
