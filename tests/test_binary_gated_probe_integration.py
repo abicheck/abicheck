@@ -220,6 +220,7 @@ UNPROBED: dict[str, str] = {
     "std_reexport_removed": "needs a public `using std::x;` re-export whose detector works on header-observed namespace shape; no binary-only trigger is known",
     # HEADER_OR_SOURCE_GATED needing inputs a compare of two .so files cannot carry
     "concept_tightened": "L4 source replay (--sources); not reachable from a .so pair",
+    "template_param_default_changed": "header-only: needs class-template default arguments recorded from the clang header parse (ADR-085 D1), which a .so pair does not carry; covered by test_template_param_defaults and test_default_template_arg_l2_matrix",
     "constexpr_value_changed": "L4 source replay (--sources); not reachable from a .so pair",
     "public_typedef_target_changed": "L4 source replay (--sources); not reachable from a .so pair",
     "public_macro_value_changed": "L4 source replay (--sources); not reachable from a .so pair",
