@@ -272,7 +272,14 @@ def measure_point(
     point.peak_rss_mb = max(rss) if rss else None
     # Every repetition must have yielded PSS, or the gate falls back to RSS:
     # a max over the readable subset could hide the heaviest run.
-    point.peak_pss_mb = max(pss) if pss and len(pss) == len(rss) else None
+    point.peak_pss_mb = max(pss) if len(pss) == repeat else None
+    # An unmeasured repetition is not a passing one: the memory figure would
+    # be a peak over a subset of runs, so the point fails the gate.
+    if len(rss) != repeat:
+        point.problems.append(
+            f"peak process-tree memory was readable on {len(rss)} of {repeat} "
+            "repetitions; the gate needs every run measured"
+        )
     return point
 
 

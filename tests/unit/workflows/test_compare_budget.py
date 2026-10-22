@@ -59,7 +59,8 @@ def test_parse_budget_seconds_rejects_unparseable(value: str) -> None:
         parse_budget_seconds(value)
 
 
-@pytest.mark.parametrize("value", ["nan", "inf", "-5m", "-1"])
+# "1e308h" is finite as written, but scaling it by 3600 overflows to infinity.
+@pytest.mark.parametrize("value", ["nan", "inf", "-5m", "-1", "1e308h"])
 def test_parse_budget_seconds_rejects_non_finite_or_negative(value: str) -> None:
     # nan/inf would store a deadline that never trips; a negative one trips at once.
     with pytest.raises(BudgetError, match="finite, non-negative"):

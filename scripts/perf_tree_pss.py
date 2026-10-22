@@ -89,7 +89,10 @@ class TreePssSampler(TreeRssSampler):
                     self.samples += 1
                     self.peak = max(self.peak, rss_total)
                     self.max_processes = max(self.max_processes, live)
-                if pss_live:
+                # A PSS sample counts only when every RSS-bearing process
+                # supplied one: a partial sum (a process that exited between
+                # the two reads) understates the tree and must not set the peak.
+                if live and pss_live == live:
                     self.pss_samples += 1
                     self.peak_pss = max(self.peak_pss, pss_total)
                 self._stop.wait(self.interval)

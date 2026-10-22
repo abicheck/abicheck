@@ -61,7 +61,14 @@ def parse_budget_seconds(value: str | None) -> float | None:
         raise BudgetError(
             f"--budget must be a finite, non-negative duration, got {value!r}"
         )
-    return amount * unit
+    # A finite amount can still overflow once scaled (``1e308h``); an infinite
+    # budget never trips, so it is refused as well.
+    seconds = amount * unit
+    if not math.isfinite(seconds):
+        raise BudgetError(
+            f"--budget must be a finite, non-negative duration, got {value!r}"
+        )
+    return seconds
 
 
 def budget_deadline(budget_s: float | None) -> AbstractContextManager[None]:
