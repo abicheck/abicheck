@@ -42,7 +42,7 @@ more detail, and CI executes those exact commands on every change
 runs.
 
 > **Looking for a catalogue rather than a tutorial?** The repository also
-> carries 222 calibration cases under `examples/case*/` — one demonstration
+> carries 229 calibration cases under `examples/case*/` — one demonstration
 > per scenario, some of them variants of the same mechanism, used to
 > calibrate the detectors rather than to teach the CLI. Browse them in the
 > [Compatibility Catalog](../reference/examples/index.md), which indexes them
