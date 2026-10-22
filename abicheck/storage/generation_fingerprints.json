@@ -161,7 +161,7 @@
       "abicheck/compare/export_owner_resolution.py": "e9108cbdf0459cb8171f63ca328138558cfd032bff9124e4b9bd0fd5bf8553c8",
       "abicheck/debug_resolver.py": "cdcc4f72bd8fb5304fe030b3e1365da488ad009397e014ba56931a3f311cf1f3",
       "abicheck/policy/use_case_reachability.py": "e21d1b32773ce42e458ec8dfe34d86c3a5c48732a829b4e985ec739cae594bc1",
-      "abicheck/post_processing_reachability.py": "db854ea4f3ab52d2d4fe80473fecab870ba4f923eb9b9c650dc3029fd59febac",
+      "abicheck/post_processing_reachability.py": "47692d1cf654f668d170be08b81bbb528799abdf4562413599a0ffc6bb23b88a",
       "abicheck/storage/native_identity_aliases.py": "061e634659b371f1688cfcd4845fdcbe6147b9c2cfddaa4285dd34c757ca80ef",
       "abicheck/type_reachability.py": "89d8db3c507a58004fd6b38ad4fee5ea6c9b40a9da97f34d8067ae440aa9e9bb",
       "abicheck/type_reachability_spelling.py": "4262f30db17f2a4c5ba2a4341b8eed9f1408e335825644845e10cb08838995cb",
@@ -169,9 +169,9 @@
       "abicheck/workflows/compare/resolve.py": "dc0381227c9e8dacaa39858d3f534ff45cbb3177f9b8645a8728c3f25c460793",
       "abicheck/workflows/elf_dependency_resolver.py": "18524281e550a7f25225441cd063de58ec33281e7bacf65fef98d1fefb101426"
     },
-    "fingerprint": "0e3e7a630d84c9dee6922a88273b2010525b800942f11cc49182f08093de12dd",
+    "fingerprint": "1746ea87424e9b91785555a49fab5634033df0e30981fffdfac6ba1f91a25630",
     "generation": 2,
-    "reason": "Merge of main into the internal_leak migration: use-case explain lives in policy/use_case_reachability.py and the call-graph walk in compare/call_graph_walk.py (moved verbatim); no derived reachability fact changes."
+    "reason": "internal_leak moved to compare/ (split into four modules): post_processing_reachability.py changed only its import paths and comments, no fact or resolved graph changes"
   },
   "source": {
     "files": {
@@ -202,7 +202,7 @@
       "abicheck/buildsource/source_extractors/clang_public_roots.py": "26b787aca87c1549b821f4f420be1960b48317e9bdefd2e946b3b2903238e214",
       "abicheck/buildsource/source_extractors/clang_source_edges.py": "c9b8c3daacd02c4913b486a6ac658b435744243ed4433f14792588f67ef800e9",
       "abicheck/buildsource/source_extractors/compile_invocation.py": "8af29f22859f7e8fd81d5abd2266e017acc31ff539db9e42bd873ae544f9dccf",
-      "abicheck/buildsource/source_graph.py": "a374d3f54b1d83b8c0d5b4d0b8dd0deb2ab5f696236f79f8974358a8907e05bd",
+      "abicheck/buildsource/source_graph.py": "28cb2b485ffcf276e9c751b99261cc2d3f4ab2ad440612ddb3111bc307372652",
       "abicheck/buildsource/source_graph_build_source_abi.py": "abc43bd1d6845f2af8ae1ad868e5455962452d64838f6c0abedc281e244090ff",
       "abicheck/buildsource/source_link.py": "b7cabfd63c78673ccc2593d4f558069472dfa6bcb2d792a2b216f3d04230b338",
       "abicheck/buildsource/source_replay.py": "f1c76b8fbe787135f6ff68ee3b3aa306f6259caf4bea069d4eeb2b440cd16992",
@@ -214,8 +214,8 @@
       "abicheck/buildsource/type_graph.py": "a028a875057cd0cbf2930a431bfa1e579f7b770e0d124cbcfe715724e89d12e5",
       "abicheck/buildsource/type_graph_index.py": "7375f7baec7ceb3dd4a52a489b89e5a3571750dffca7490d1c5870301d55202d"
     },
-    "fingerprint": "37d8cc8044a5f7dcfff913018a7dd707f80d464854d55f409b0ea7aa7e950b0e",
+    "fingerprint": "89e34bd51a8d812e3525c2891548caebc675c8a4d7d2f3a8cc6c5c6e3db8efea",
     "generation": 3,
-    "reason": "bumped to 3: main rewrote the clang argv builder around a parsed CompilerInvocation (compile_invocation.py) and moved the shared argv helpers; the emitted L4/L5 flags may change for the same build, so the axis is bumped conservatively rather than recorded as a reviewed no-semantic-change"
+    "reason": "internal_leak moved to compare/: buildsource/source_graph.py changed only a docstring file reference to the new module path; no source fact or derived graph changes"
   }
 }
