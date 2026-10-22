@@ -208,6 +208,12 @@ PROBES: dict[str, Probe] = {
         "int f(int x) { return x; }",
         header_reaches=False,  # producer is L4 source replay
     ),
+    "template_param_default_changed": _inline(
+        "template <class T, class U = T> struct Box { T t; U u; };\nint use(Box<char, char>*);",
+        "template <class T, class U = int> struct Box { T t; U u; };\nint use(Box<char, char>*);",
+        "int use(Box<char, char>* b) { return b->t; }",
+        header_reaches=False,  # producer is the clang header parse (ADR-085), not castxml
+    ),
 }
 
 #: ``API_BREAK`` kinds without a probe, and why. Shrink-only: add a probe to
@@ -220,7 +226,6 @@ UNPROBED: dict[str, str] = {
     "std_reexport_removed": "needs a public `using std::x;` re-export whose detector works on header-observed namespace shape; no binary-only trigger is known",
     # HEADER_OR_SOURCE_GATED needing inputs a compare of two .so files cannot carry
     "concept_tightened": "L4 source replay (--sources); not reachable from a .so pair",
-    "template_param_default_changed": "header-only: needs class-template default arguments recorded from the clang header parse (ADR-085 D1), which a .so pair does not carry; covered by test_template_param_defaults and test_default_template_arg_l2_matrix",
     "constexpr_value_changed": "L4 source replay (--sources); not reachable from a .so pair",
     "public_typedef_target_changed": "L4 source replay (--sources); not reachable from a .so pair",
     "public_macro_value_changed": "L4 source replay (--sources); not reachable from a .so pair",
