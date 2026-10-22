@@ -201,9 +201,9 @@
       "abicheck/buildsource/source_extractors/clang_macros.py": "a1970f60666e573bda375ea9017705b0ad9d43838524d617b0f4ee60a009bbe3",
       "abicheck/buildsource/source_extractors/clang_node_predicates.py": "1e9556dab627cac4da137bf0f34b858f6e76b194f932aeb92ffe4ba8f07bb7bf",
       "abicheck/buildsource/source_extractors/clang_nodes.py": "9463fbac6fe36203c29f20ab3203791e3b558f21f4ebf66ee732f39aaf912c9b",
-      "abicheck/buildsource/source_extractors/clang_public_roots.py": "26b787aca87c1549b821f4f420be1960b48317e9bdefd2e946b3b2903238e214",
+      "abicheck/buildsource/source_extractors/clang_public_roots.py": "c1752f2798886c97716c2361c2fe772defa2b6170104b8486871ecbc7beb3ba3",
       "abicheck/buildsource/source_extractors/clang_source_edges.py": "c9b8c3daacd02c4913b486a6ac658b435744243ed4433f14792588f67ef800e9",
-      "abicheck/buildsource/source_extractors/compile_invocation.py": "8af29f22859f7e8fd81d5abd2266e017acc31ff539db9e42bd873ae544f9dccf",
+      "abicheck/buildsource/source_extractors/compile_invocation.py": "b5bcf162889c9575bee7a117c78ddd014038e9461a00d847085edb1804ad5d05",
       "abicheck/buildsource/source_graph.py": "28cb2b485ffcf276e9c751b99261cc2d3f4ab2ad440612ddb3111bc307372652",
       "abicheck/buildsource/source_graph_build_source_abi.py": "abc43bd1d6845f2af8ae1ad868e5455962452d64838f6c0abedc281e244090ff",
       "abicheck/buildsource/source_link.py": "b7cabfd63c78673ccc2593d4f558069472dfa6bcb2d792a2b216f3d04230b338",
@@ -217,8 +217,8 @@
       "abicheck/buildsource/type_graph.py": "a028a875057cd0cbf2930a431bfa1e579f7b770e0d124cbcfe715724e89d12e5",
       "abicheck/buildsource/type_graph_index.py": "7375f7baec7ceb3dd4a52a489b89e5a3571750dffca7490d1c5870301d55202d"
     },
-    "fingerprint": "9699291e5cab56b2dd9b2b8fc09f7a9aae2c8439332ed9b53f3a740a18742243",
+    "fingerprint": "d0e35d4f1a3c7ba4b0f94c965d2b38b14742d97f0c38b15c9c9615424727671d",
     "generation": 4,
-    "reason": "Merge of origin/main: source-scope edit is a docstring path repoint to compare/internal_leak.py; no extracted fact or derived graph changes."
+    "reason": "Typed include-search operands are carried on CompilerInvocation and read by clang_public_roots; the probe's resolved roots are unchanged (checked against the old rescan on every unit of the differential corpus), so no SOURCE_GENERATION bump."
   }
 }
