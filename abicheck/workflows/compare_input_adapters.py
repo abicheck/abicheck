@@ -108,9 +108,9 @@ def compare_cli_inputs(
     symbols_list = public_symbols_list
     if policy_file is None and kwargs.get("policy_file_path") is not None:
         policy_file = _load_policy_file(kwargs["policy_file_path"])
-    if suppression is None and kwargs.get("suppress") is not None:
-        suppression = SuppressionSource.from_file(
-            kwargs["suppress"],
+    if suppression is None:
+        suppression = SuppressionSource.from_paths(
+            kwargs.get("suppress"),
             require_justification=bool(kwargs.get("require_justification")),
         )
     return ExplicitCompatibilityInputs(
@@ -166,8 +166,8 @@ def compare_request_inputs(
     """
     if policy_file is None and request.policy_file_path is not None:
         policy_file = _load_policy_file(request.policy_file_path)
-    if suppression is None and request.suppress is not None:
-        suppression = SuppressionSource.from_file(request.suppress)
+    if suppression is None:
+        suppression = SuppressionSource.from_paths(request.suppress)
     return ExplicitCompatibilityInputs(
         contract_mode=request.contract_mode,
         # `scope_public=True` is the field's own default and, since ADR-049

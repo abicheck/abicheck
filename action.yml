@@ -1078,10 +1078,11 @@ outputs:
       available evidence -- the same orthogonal coverage axis as the
       two-sided shape above; unlike the two-sided shape, there is no bare
       severity-gate exit 1 here -- severity-based audit gating uses the
-      dedicated exit 3 below instead. This is one of exit 1's three
-      causes on this shape, alongside ANALYSIS_INCOMPLETE below and a
-      dry-run-only preview of the exit-7 blocker; see the exit-code
-      output's own description for all three), AUDIT_GATE (a real,
+      dedicated exit 3 below instead. This is one of exit 1's four
+      causes on this shape, alongside ANALYSIS_INCOMPLETE below,
+      RULES_UNUSED (configured policy rules that matched nothing under
+      unused_rules: block) and a dry-run-only preview of the exit-7
+      blocker; see the exit-code output's own description for all four), AUDIT_GATE (a real,
       BREAKING/API_BREAK-classified
       finding was detected against the candidate's own public surface while
       a severity preset other than `info-only` was in effect. Gating is

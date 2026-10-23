@@ -202,3 +202,30 @@ def test_strict_expiry_names_the_second_file_and_its_own_index(
     assert f"found in {paths[1]}" in result.output
     assert str(paths[0]) not in result.output
     assert 'Rule 2: symbol="_Z5api_dv"' in result.output
+
+
+@pytest.mark.parametrize("empty", [None, (), []])
+def test_typed_api_treats_an_empty_suppress_collection_as_no_suppression(
+    tmp_path: Path, empty: object
+) -> None:
+    """``CompareRequest.suppress`` accepts a tuple of paths; an empty one
+    means no suppression input -- the same result as ``None``, never a crash
+    or a phantom empty suppression document."""
+    from abicheck.workflows.compare.execute import run_compare_request
+    from abicheck.workflows.service_requests import CompareRequest, InputSpec
+
+    old, new = _pair(tmp_path)
+
+    def run(value: object):
+        return run_compare_request(
+            CompareRequest(
+                old=InputSpec(path=old), new=InputSpec(path=new), suppress=value
+            )
+        )
+
+    baseline = run(None)
+    result = run(empty)
+    assert result.exit_decision.code == baseline.exit_decision.code
+    assert sorted(c.kind.value for c in result.diff.changes) == sorted(
+        c.kind.value for c in baseline.diff.changes
+    )

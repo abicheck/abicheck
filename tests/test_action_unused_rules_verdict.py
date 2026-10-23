@@ -173,3 +173,27 @@ def test_a_malformed_axis_value_never_gates_and_never_executes(
     assert outputs["verdict"] != "RULES_UNUSED", outputs
     assert not list(tmp_path.rglob("PWNED"))
     assert not (Path.cwd() / "PWNED").exists()
+
+
+@pytest.mark.parametrize(
+    ("unused", "additions", "add", "axis_text"),
+    [
+        ("block", "allow", False, "unused-rules axis"),
+        ("allow", "block", True, "additions-review axis"),
+    ],
+)
+def test_an_escalated_verdict_names_the_policy_axis_not_the_severity_policy(
+    tmp_path: Path, unused: str, additions: str, add: bool, axis_text: str
+) -> None:
+    """A demoted break escalated over an exit-1 policy axis: the note names
+    that axis, never the severity policy, which did not gate this run."""
+    code, report = _real_report(tmp_path, unused=unused, additions=additions, add=add)
+    assert code == 1
+    # A break the severity policy demoted (`run_outcome.compatibility` is the
+    # field the Action reads first).
+    report["verdict"] = "BREAKING"
+    report["run_outcome"]["compatibility"] = "BREAKING"
+    outputs = _action_outputs(tmp_path, code, report)
+    assert outputs["verdict"] == "BREAKING", outputs
+    assert axis_text in outputs["_summary"], outputs["_summary"]
+    assert "the severity policy gated this run" not in outputs["_summary"]

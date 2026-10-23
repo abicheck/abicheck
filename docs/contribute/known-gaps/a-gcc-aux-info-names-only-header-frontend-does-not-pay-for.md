@@ -34,7 +34,7 @@ median of three runs.
 | `abicheck compare --no-baseline libmkl_rt.so.3 -H mkl.h -I include`, cold cache (default backend, and again with `ABICHECK_AST_FRONTEND=castxml`) | 77.2 s / 77.1 s | 100% |
 | castxml alone on the aggregate (C++ mode, 26 MB XML) | 1.07 s | 1.4% |
 | `clang -ast-dump=json -fsyntax-only` alone (C mode) | 2.0 s | 2.6% |
-| `gcc -aux-info -fsyntax-only` (5.9 MB text) | 0.60 s | 0.8% |
+| `gcc -aux-info aux.txt -fsyntax-only` (5.9 MB text) | 0.60 s | 0.8% |
 | `gcc -fsyntax-only` (no aux-info) | 0.43 s | — |
 
 The best case for aux-info is about 1.5 s saved out of 77 s, roughly a 2% gain.

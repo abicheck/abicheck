@@ -87,6 +87,26 @@ class SuppressionSource:
         )
 
     @classmethod
+    def from_paths(
+        cls, value: object, *, require_justification: bool = False
+    ) -> SuppressionSource | None:
+        """:meth:`from_file` over *value*, or ``None`` when it names no file.
+
+        The one guard every caller uses: ``None`` and an empty tuple of
+        ``--suppress`` paths both mean "no suppression input", rather than a
+        load that returns nothing.
+        """
+        from ..policy.suppression.merge import suppress_paths
+
+        paths = suppress_paths(value)
+        if not paths:
+            return None
+        return cls.from_file(
+            paths[0] if len(paths) == 1 else paths,
+            require_justification=require_justification,
+        )
+
+    @classmethod
     def from_file(
         cls, path: str | Path | tuple[Path, ...], *, require_justification: bool = False
     ) -> SuppressionSource:

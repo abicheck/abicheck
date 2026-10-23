@@ -10,3 +10,4 @@
   Applies to two-sided, release/directory and `--no-baseline` compares and to
   the typed API's `suppress` field. The Action's `suppress` input still
   forwards a single file.
+  The typed API treats an empty `CompareRequest.suppress` collection the same as `None`.

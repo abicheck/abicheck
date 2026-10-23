@@ -701,11 +701,7 @@ def _resolve_typed_release_configuration(
         scope_public_headers=None if options.scope_public_headers else False,
         policy_base=stated_policy_base(options.policy, policy_file),
         policy_file=policy_file,
-        suppression=(
-            SuppressionSource.from_file(options.suppress)
-            if options.suppress is not None
-            else None
-        ),
+        suppression=(SuppressionSource.from_paths(options.suppress)),
         severity_preset=request.severity_preset,
         severity_abi_breaking=request.severity_abi_breaking,
         severity_potential_breaking=request.severity_potential_breaking,

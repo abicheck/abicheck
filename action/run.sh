@@ -5576,6 +5576,14 @@ _blocking_gate_note() {
     # question (completeness of this run's own evidence, not closure of a
     # selected --contract domain).
     echo "> ℹ️ Verdict escalated from the report: the compatibility finding above was demoted by the severity policy, and what actually produced this run's exit ${ABICHECK_EXIT} is the orthogonal analysis-assurance axis. That is **not** an ABI/API break and **not** a severity-policy failure -- the compatibility verdict is unchanged. Set assurance.require_complete: false (or omit it) in .abicheck.yml to accept incomplete assurance, or see \`analysis_assurance\` in the JSON report for what fell short."
+  elif [[ "$GATE_TIER" == "RULES_UNUSED" ]]; then
+    # ADR-067 P1's unused-rules axis: a policy-acceptance gate, not the
+    # severity policy -- naming the severity policy here sent the reader to a
+    # knob that did not fire (CodeRabbit).
+    echo "> ℹ️ Verdict escalated from the report: the compatibility finding above was demoted by the severity policy, and what actually produced this run's exit ${ABICHECK_EXIT} is the orthogonal unused-rules axis (a configured suppression/reclassify rule matched nothing under \`unused_rules: block\`). That is **not** an ABI/API break and **not** a severity-policy failure -- see \`disposition_audit.unused_rules_review\` in the JSON report."
+  elif [[ "$GATE_TIER" == "ADDITIONS_UNACKNOWLEDGED" ]]; then
+    # ADR-067 D6's additions-review axis, the same shape and reason.
+    echo "> ℹ️ Verdict escalated from the report: the compatibility finding above was demoted by the severity policy, and what actually produced this run's exit ${ABICHECK_EXIT} is the orthogonal additions-review axis (public additions no acknowledgment record covers, under \`acknowledgment.unacknowledged_additions: block\`). That is **not** an ABI/API break and **not** a severity-policy failure -- see \`disposition_audit.unacknowledged_additions_review\` in the JSON report."
   elif [[ -z "$_cats" ]] && _severity_gate_categories | grep -q 'promoted_crosscheck'; then
     # A promoted `--crosscheck KEY=error` raises the published gate the same
     # way a severity category does, but it is not one: `_severity_gate_
@@ -5625,7 +5633,12 @@ _escalate_verdict_to_report() {
   # overwrote them with COMPATIBLE, which is the opposite of the point.
   [[ "$_v" == "BREAKING" || "$_v" == "API_BREAK" ]] || return 0
   if (( $(_verdict_rank "$_v") > $(_verdict_rank "$VERDICT") )); then
-    _notice_annotation "abicheck's report records $_v while the severity policy resolved this run to exit ${ABICHECK_EXIT} (gated as ${VERDICT}); publishing the report's verdict. The step still gates at ${VERDICT}."
+    case "$VERDICT" in
+      RULES_UNUSED|ADDITIONS_UNACKNOWLEDGED|COVERAGE_INCOMPLETE|SCOPE_INCOMPLETE|ANALYSIS_INCOMPLETE)
+        _notice_annotation "abicheck's report records $_v while an orthogonal policy axis produced this run's exit ${ABICHECK_EXIT} (gated as ${VERDICT}); publishing the report's verdict. The step still gates at ${VERDICT}." ;;
+      *)
+        _notice_annotation "abicheck's report records $_v while the severity policy resolved this run to exit ${ABICHECK_EXIT} (gated as ${VERDICT}); publishing the report's verdict. The step still gates at ${VERDICT}." ;;
+    esac
     GATE_TIER="$VERDICT"
     VERDICT="$_v"
   fi
