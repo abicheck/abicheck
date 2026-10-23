@@ -201,6 +201,9 @@ _SECTION_FIELDS: Mapping[str, tuple[str, ...]] = {
         # produced") every other key in this section does, so it belongs
         # here rather than forcing a new, one-key section kind.
         "dump_provenance",
+        # ADR-062 D2: the producing build's extractor/resolver/source
+        # generations (storage/generation_migrations.py).
+        "fact_generations",
     ),
 }
 
