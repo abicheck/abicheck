@@ -7,3 +7,5 @@
   instance (e.g. `setArrays<double>(double*, size_t)`) was kept while an
   inline body instantiated it and dropped once it stopped, so `compare`
   reported a spurious `typedef_removed size_t` at `--depth headers`/`source`.
+  The extractor generation is bumped to 13, so a snapshot dumped by an
+  earlier build reports a generation-drift notice when compared.

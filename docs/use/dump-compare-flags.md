@@ -210,7 +210,7 @@ mangled names will not match the exports. abicheck does not bundle such a
 stub.
 
 The `Detector 'sycl' disabled` coverage line is unrelated: that detector
-compares SYCL *runtime* (PI plugin) metadata (ADR-020b), not header APIs.
+compares SYCL *runtime* (PI plugin) metadata, not header APIs.
 
 ## Build-context capture (`compile_commands.json`) — evidence layer L3
 

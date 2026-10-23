@@ -89,8 +89,11 @@ def fact_present(snap: AbiSnapshot, fact: str) -> bool:
     Never decodes a lazily-stored graph: a pending ``surface_graph`` counts
     as present, read from the instance dict, not through the descriptor.
     """
-    if fact.startswith("declarations."):
-        value: object = getattr(snap.declarations, fact.split(".", 1)[1], None)
+    # A fact key is this module's own ``<owner>.<field>`` path, not an ABI
+    # name, so it is parsed as one rather than prefix-matched.
+    owner, dotted, field_name = fact.partition(".")
+    if dotted and owner == "declarations":
+        value: object = getattr(snap.declarations, field_name, None)
     elif fact == "canonical_ir":
         value = snap.canonical_ir
     else:

@@ -117,6 +117,7 @@ SPELLING_MIGRATIONS: Mapping[int, GenerationSpellingChange] = {
     10: GenerationSpellingChange(_NO_SPELLING),
     11: GenerationSpellingChange(_NO_SPELLING),
     12: GenerationSpellingChange(_NO_SPELLING),
+    13: GenerationSpellingChange(_NO_SPELLING),
 }
 
 
