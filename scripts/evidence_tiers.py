@@ -538,6 +538,15 @@ EVIDENCE_TIER_BY_KIND: dict[str, str] = {
 # a false positive.
 KINDLESS_CASE_TIER: dict[str, str] = {
     "case04_no_change": "L0",
+    # ADR-085: header-only template-default cases. The header backend is the
+    # evidence (no kind, no binary). castxml reports NO_CHANGE with a gap and
+    # clang reports the header-level kind; the tier is the header layer, L2.
+    "case223_header_only_template_default_changed": "L2",
+    "case227_nested_namespace_template_default_changed": "L2",
+    "case224_header_only_template_default_added": "L2",
+    "case225_header_only_template_default_removed": "L2",
+    "case226_header_only_template_default_unchanged": "L2",
+    "case228_nontype_template_param_default_changed": "L2",
     "case220_public_virtual_dispatch_set_reordered": "L5",
     "case118_internal_struct_field_added_scoped": "L2",
     "case119_internal_struct_field_removed_scoped": "L2",

@@ -1,0 +1,63 @@
+# Case 228: Non-Type Template Parameter Default Changed
+
+**Category:** Template ABI | **Verdict:** 🟢 NO_CHANGE (both backends, both with a gap)
+
+## Verdict and consumer impact
+
+`template <typename T, int N = 4> struct Buf;` becomes `N = 8`. The default is
+non-type. A consumer that writes `Buf<char>` gets an array of a different size, so
+the change is a real source-level change. It does not appear in any symbol.
+
+Neither backend reports a finding here. The verdict agrees, but the coverage does
+not. The clang recorder covers type-parameter templates only,
+so it records no defaults for `Buf` and reports a "not a type parameter" gap. The
+castxml side reports its own gap. The validator default lane is castxml, so the
+expected result is `NO_CHANGE` with a gap.
+
+## Old/new diff
+
+## Old/new diff
+
+| v1.h | v2.h |
+|------|------|
+| `template <typename T, int N = 4> struct Buf;` | `template <typename T, int N = 8> struct Buf;` |
+
+## abicheck command
+
+```bash
+cat > .abicheck.yml <<'EOF'
+compile:
+  frontend: castxml
+  lang: c++
+EOF
+abicheck dump -H v1.h --config .abicheck.yml --depth headers -o old.json
+abicheck dump -H v2.h --config .abicheck.yml --depth headers -o new.json
+abicheck compare old.json new.json
+```
+
+Switch `frontend: clang` to see the clang result (`NO_CHANGE`, with the
+"not a type parameter" gap).
+
+## Expected abicheck finding
+
+`Verdict: NO_CHANGE`, `Assurance: partial`. The gap names the template
+default that the backend could not record: `template-parameter defaults`.
+
+## Minimum evidence
+
+`min_evidence: L2`.
+
+## Why abicheck catches it
+
+A non-type parameter's default is not captured yet, so `template_param_defaults_fact`
+is UNKNOWN and never compares equal to a recorded side. That is the
+no-manufactured-findings rule, and the gap is the honest result.
+
+## Runtime failure demonstration
+
+None.
+
+## Safe redesign
+
+Do not change a non-type default in a public header. Add a separately named
+alias with the new size.
