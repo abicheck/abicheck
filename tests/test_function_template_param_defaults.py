@@ -182,6 +182,34 @@ def test_overloaded_templates_pair_by_identity_not_by_name(tmp_path: Path) -> No
     assert change["new_value"] == "('char',)"
 
 
+_DECLARED_THEN_DEFINED = """#pragma once
+namespace mylib {{
+template <typename T = {default}> void f();
+template <typename T> void f() {{}}
+}}  // namespace mylib
+"""
+
+
+def test_declared_then_defined_template_default_change_is_reported(
+    tmp_path: Path,
+) -> None:
+    # A declaration and its later definition are two pattern declarations with
+    # one identity. Their recorded defaults agree, so the change is kept rather
+    # than dropped as an ambiguous identity.
+    _require_clang()
+    report = _pair(
+        tmp_path,
+        _DECLARED_THEN_DEFINED.format(default="int"),
+        _DECLARED_THEN_DEFINED.format(default="char"),
+        "clang",
+    )
+    assert report["verdict"] == "API_BREAK"
+    (change,) = _changes(report)
+    assert change["symbol"] == "mylib::f()"
+    assert change["old_value"] == "('int',)"
+    assert change["new_value"] == "('char',)"
+
+
 def test_castxml_function_default_change_is_a_named_gap_not_a_verdict(
     tmp_path: Path,
 ) -> None:
