@@ -29,6 +29,7 @@ import json
 import shutil
 import struct
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -177,8 +178,13 @@ def test_versioning_check_is_not_collected_on_an_archive(static_archive: bool) -
 # ── integration: real gcc/ar archives ───────────────────────────────────────
 
 _TOOLS = ("gcc", "g++", "ar", "nm")
+# The host toolchain must emit ELF objects: on macOS (Mach-O) and Windows
+# (COFF) the same commands build archives this audit deliberately refuses
+# (ADR-086), so the oracle comparison has nothing to compare there.
 needs_toolchain = pytest.mark.skipif(
-    any(shutil.which(t) is None for t in _TOOLS), reason="needs gcc, g++, ar and nm"
+    not sys.platform.startswith("linux")
+    or any(shutil.which(t) is None for t in _TOOLS),
+    reason="needs an ELF-emitting host toolchain: gcc, g++, ar and nm on Linux",
 )
 
 
