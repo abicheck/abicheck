@@ -339,3 +339,55 @@ class TestCastxmlCacheBehaviour:
         )
         # And must still be gone after
         assert not store.path("testkey").exists()
+
+
+class TestUnreadableInputsKeepTheKey:
+    def test_dangling_header_symlink_under_a_root_keys_and_changes_when_readable(
+        self, tmp_path: Path
+    ) -> None:
+        header = tmp_path / "api.hpp"
+        header.write_text("int api();\n", encoding="utf-8")
+        root = tmp_path / "include"
+        root.mkdir()
+        target = tmp_path / "generated.h"
+        (root / "dangling.h").symlink_to(target)
+
+        dangling = _cache_key([header], [root], "cc", backend="castxml", lang="c")
+        empty = _cache_key([header], [tmp_path / "other"], "cc", backend="castxml")
+        target.write_text("#define GENERATED 1\n", encoding="utf-8")
+        readable = _cache_key([header], [root], "cc", backend="castxml", lang="c")
+
+        assert len({dangling, empty, readable}) == 3
+
+
+class TestBestEffortCacheCleanup:
+    def test_a_failed_eviction_leaves_the_entry_and_does_not_raise(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        store = TuParseStore(tmp_path / "store")
+        store.publish("k", "payload", ())
+
+        def refuse(self: Path, missing_ok: bool = False) -> None:
+            raise PermissionError("read-only cache")
+
+        monkeypatch.setattr(Path, "unlink", refuse)
+        store.evict("k")
+
+        monkeypatch.undo()
+        assert store.lookup("k") == "payload"
+
+    def test_a_failed_publish_whose_cleanup_fails_does_not_raise(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        blocked = tmp_path / "not-a-directory"
+        blocked.write_text("", encoding="utf-8")
+        store = TuParseStore(blocked)
+
+        def refuse(self: Path, missing_ok: bool = False) -> None:
+            raise PermissionError("read-only cache")
+
+        monkeypatch.setattr(Path, "unlink", refuse)
+        store.publish("k", "payload", ())
+
+        monkeypatch.undo()
+        assert store.lookup("k") is None

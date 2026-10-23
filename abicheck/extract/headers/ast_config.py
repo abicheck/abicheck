@@ -243,14 +243,24 @@ def _content_digest(path: Path) -> str:
 
     A missing path digests to a fixed marker, so an absent root and an empty
     directory cannot share a key with a present one that happens to hash alike.
+    A file that cannot be read (a permission error, a dangling symlink, a
+    directory named like a header) digests to its own marker: the key still
+    computes, and it changes when the file becomes readable.
     """
+
+    def _digest(file: Path) -> str:
+        try:
+            return digest_file(file)
+        except OSError:
+            return "unreadable"
+
     if path.is_file():
-        return digest_file(path)
+        return _digest(path)
     if path.is_dir():
         h = hashlib.sha256()
         for child in iter_cache_header_files(path):
             h.update(str(child).encode())
-            h.update(digest_file(child).encode())
+            h.update(_digest(child).encode())
         return h.hexdigest()
     return "missing"
 

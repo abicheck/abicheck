@@ -113,9 +113,14 @@ class TuParseStore:
         """Remove *key*'s entry, if any, so the next lookup misses.
 
         A payload the caller cannot decode is evicted rather than left to miss
-        forever; a missing entry is not an error.
+        forever; a missing entry is not an error. Best-effort: if the entry
+        cannot be removed, it keeps missing, which costs a re-parse but never
+        a failed lookup.
         """
-        self.path(key).unlink(missing_ok=True)
+        try:
+            self.path(key).unlink(missing_ok=True)
+        except OSError:
+            pass
 
     def publish(
         self,
@@ -151,4 +156,8 @@ class TuParseStore:
             # Atomic publish so a concurrent reader never sees a partial file.
             tmp.replace(final)
         except OSError:
-            tmp.unlink(missing_ok=True)
+            # The write failed; a cleanup failure must not turn that into an error.
+            try:
+                tmp.unlink(missing_ok=True)
+            except OSError:
+                pass

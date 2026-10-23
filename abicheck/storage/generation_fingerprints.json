@@ -62,7 +62,7 @@
       "abicheck/extract/header_order_witness.py": "6a1cfce946826fa540a0601ebeefa02a8973ba6e8cd5d8287f6c1e7badc3d53a",
       "abicheck/extract/header_scan_memo.py": "56f79b5316354b938b08a5f29779c3aaf40481892d947784ec2adb48ab5e83fb",
       "abicheck/extract/headers/__init__.py": "70af0d3a16882783444077004b7a434a295505579fbbca219ce103f72074ad03",
-      "abicheck/extract/headers/ast_config.py": "cb52800af1f9817bdfe22e0d46d9ea4ae612bc0891bb290585ced594a3380dc9",
+      "abicheck/extract/headers/ast_config.py": "49b01d92d64b0e8de974fcd6984ebe851a312074edfd55663a54f642013edaf9",
       "abicheck/extract/headers/ast_config_cpp20_chains.py": "ceeadbcb1d8e2eaac5eb325a3fb7c668614ce605bc04bb03835fcc4957e53c97",
       "abicheck/extract/headers/backend_plan.py": "1f02babf0ead52a65e4fa08dff8ce5b2a9d60feb1d02d22e7db30ee050cf8717",
       "abicheck/extract/headers/backend_protocol.py": "144cbe76456b6bceaf56f0edd0f3398f171178a222c8b968d53f8a17ee05a21b",
@@ -155,9 +155,9 @@
       "abicheck/symvers_metadata.py": "372737765cd132e6e87ed891dd465d2958e04debbef774e45212ceb3036871cb",
       "abicheck/type_metadata.py": "9997189de8dac522fd1db8be5ae491d811139503f83abaaded89038eb4aa9cdf"
     },
-    "fingerprint": "9d1e5a7fb35ddc11e5d8036834aa7ef62c9947729c65535973d317764f5fa99a",
+    "fingerprint": "30b46ef4a0ae228b4ef22585e907d396116b37c6e416cac19c7d580452535a8b",
     "generation": 10,
-    "reason": "castxml header-AST cache key and entry format moved to the parse store (Phase 6 slice 2); the extracted facts for the same input are unchanged, so no generation bump"
+    "reason": "best-effort cache cleanup and unreadable-input digests in the castxml parse-store key; extracted facts for the same input are unchanged, so no generation bump"
   },
   "resolver": {
     "files": {
