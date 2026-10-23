@@ -626,7 +626,7 @@ CLASSIFICATION_BUG_CLASSES: tuple[BugClass, ...] = (
         # 22 unsuppressible finding_unresolved records (10 imported_symbol_
         # added, 8 leaked-dependency, 2 std:: binding, 2 imports removed);
         # the Markdown named six out-of-contract statics as the gate cause.
-        fixed_by=(1751,),
+        fixed_by=(1751, 1770),
         seed_tests=(
             "tests/test_contract_toolchain_runtime_origin.py",
             "tests/test_family_f1_evidence_ablation.py",
