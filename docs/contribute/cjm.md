@@ -13,136 +13,213 @@ generated: false
 
 This page maps abicheck's use cases onto the journey a library maintainer goes
 through. The [use-case registry](usecase-registry.yaml) says *what* abicheck
-supports. This map says *where in the user's work* each case is used, and so
-shows which stages are well served and which are thin.
+supports. This map says *where in the user's work* each case is used, so it
+shows which stages are well served, which are thin, and what to build next.
 
 Each registry entry carries `journey_stages: [...]` using the stage keys below.
 `tests/test_usecase_registry.py` checks that every entry has a known stage,
 that every stage has at least one use case, and that this page defines exactly
 the stage keys the test knows. To add a stage, add a `###` heading here and the
-key to `_JOURNEY_STAGES` in the test.
+key to `_JOURNEY_STAGES` in the test. Status for each use case lives in the
+registry, not here; this page names the cases and the gaps.
 
 The registry's `user_task` field (`pr_review | local_check | release | audit`,
 from `vision.md`) is coarser and stays as it is. A stage is a step in the
 journey; a user task is the reason for the run.
 
-**Persona.** A maintainer of a native C/C++ library (often with Python
-bindings) who ships binaries to consumers they do not control. Their question
-at every stage: *"Will this change break someone, and can I trust the answer?"*
+## Persona and priority
+
+**Persona.** A maintainer of a native C/C++ shared library, often with Python
+bindings, who ships binaries to consumers they do not control. Secondary
+personas: a CI owner who wires the gate, a PR reviewer who reads the comment,
+and a downstream integrator who needs to know whether their build still works.
+The question at every stage: *"Will this change break someone, and can I
+trust the answer?"*
+
+**Current priority.** Linux ELF at L2 (binary plus public headers) is the
+primary path. Windows PE, macOS Mach-O and debug-artifact work (PDB, DWP,
+dSYM, advanced DWARF) are low priority. A gap on the primary path outranks a
+gap on any other platform at the same stage.
+
+## Journey
+
+```mermaid
+flowchart LR
+    A[first_check<br/>try it locally] --> B[adopt_ci<br/>gate every PR]
+    B --> C[pr_review<br/>read the finding]
+    C --> D[trust<br/>can I believe it?]
+    D -->|noise or intended break| E[tune<br/>policy, suppress, acknowledge]
+    E --> C
+    D --> F[release<br/>bump and ship]
+    F --> G[downstream<br/>who is affected?]
+    F --> H[audit<br/>shipped artifact, history]
+    H --> A
+```
+
+`trust` sits in the middle on purpose: every later stage depends on the
+user believing the verdict. A false-clean result at `trust` is worse than a
+noisy one, because nothing downstream will catch it.
 
 ## Stages
-
-Status counts come from the registry: complete / partial / modeled or planned
-/ excluded by design. A use case may sit on more than one stage.
 
 ### `first_check`
 
 **Goal:** see what changed between two builds, locally, in minutes.
-**Touchpoints:** `abicheck compare old.so new.so`, `dump`, `--depth`, docs
+**User question:** "What does abicheck say about my library?"
+**Touchpoints:** `abicheck compare old.so new.so`, `dump`, `--depth`, the
 quick start, the `explain-abi-change` agent skill.
-**Use cases:** UC-WF-compare, UC-PLAT-linux-elf, UC-PLAT-windows-pe,
-UC-PLAT-macos-macho, UC-ARCH-c-library, UC-ARCH-cpp-library, UC-ARCH-plugin,
-UC-ARCH-python-api, UC-ARCH-kernel-btf, UC-ARCH-sycl (complete);
-UC-WF-oneshot-deep (partial); UC-ARCH-header-only, UC-ARCH-cython-api
-(planned); UC-ARCH-static-lib, UC-WF-mcp (excluded).
-**State:** strong for shared libraries on Linux. Header-only libraries have no
-first-class path yet (G4, G45).
+**Use cases:** UC-WF-compare, UC-PLAT-linux-elf, UC-ARCH-c-library,
+UC-ARCH-cpp-library, UC-ARCH-plugin, UC-ARCH-python-api, UC-ARCH-kernel-btf,
+UC-ARCH-sycl, UC-PLAT-windows-pe, UC-PLAT-macos-macho, UC-WF-oneshot-deep,
+UC-ARCH-header-only, UC-ARCH-cython-api, UC-ARCH-static-lib, UC-WF-mcp.
+**Friction:**
+- Header-only libraries have no first-class path (G4, G45, vision
+  workstream F).
+- The one-shot deep compare still needs both sides dumped by hand (G21).
+- Static archives are a `--no-baseline` audit operand only (ADR-086), so
+  UC-ARCH-static-lib's exclusion needs revisiting.
 
 ### `adopt_ci`
 
 **Goal:** make every PR fail when it breaks ABI, against the right baseline.
-**Touchpoints:** GitHub Action, `actions/baseline`, `actions/check-target`,
-`project plan`/`validate`, `--dry-run` cost preview, SARIF/JUnit/JSON output,
-the `set-up-abi-compatibility-ci` agent skill.
-**Use cases:** UC-WF-baseline, UC-WF-cli-contract, UC-REP-json, UC-REP-sarif,
-UC-REP-junit, UC-TC-make-auto-query, UC-TC-build-emitted-facts,
-UC-REPORTING-dry-run-cost-preview (complete); UC-TC-bazel-build-evidence
-(modeled); UC-WF-abicc-compat (excluded).
-**State:** works. Open: the Action still encodes some CLI semantics (ADR-070
-D1, D2, D4) and the lifecycle model's P2 (ADR-047, G30).
+**User question:** "How do I wire this into CI without false alarms?"
+**Touchpoints:** the GitHub Action, `actions/baseline`,
+`actions/check-target`, `project plan`/`validate`, `--dry-run` cost preview,
+SARIF/JUnit/JSON output, the `set-up-abi-compatibility-ci` agent skill.
+**Use cases:** UC-WF-baseline, UC-WF-cli-contract, UC-WF-policy-profile,
+UC-REP-json, UC-REP-sarif, UC-REP-junit, UC-TC-make-auto-query,
+UC-TC-build-emitted-facts, UC-REPORTING-dry-run-cost-preview,
+UC-TC-bazel-build-evidence, UC-WF-abicc-compat.
+**Friction:**
+- The Action still encodes some CLI semantics (ADR-070 D1, D2, D4).
+- The lifecycle model's P2 is open (ADR-047, G30).
+- Bazel build evidence is modeled but not validated (G18).
 
 ### `pr_review`
 
 **Goal:** a reviewer understands, from the PR comment, what broke and why.
-**Touchpoints:** PR comment, SARIF annotations, Markdown/HTML report,
-`--view root-cause|impact`, `--depth source`, the `check-abi-compatibility`
-agent skill.
-**Use cases:** UC-CHANGE-taxonomy, UC-REP-markdown-html, UC-TC-dual-abi,
-UC-TC-flag-drift, UC-TC-modern-cxx-types, UC-TC-cxx-standard-floor and the
-archetype/platform cases (complete); UC-CHANGE-inline-ns-version,
-UC-TC-numpy-capi-envelope, UC-WORKFLOW-pr-source-tier (partial).
-**State:** the most covered stage.
+**User question:** "Is this finding real, and what do I tell the author?"
+**Touchpoints:** the PR comment, SARIF annotations, Markdown/HTML report,
+`--view root-cause|impact`, `--depth source`, the
+`check-abi-compatibility` agent skill.
+**Use cases:** UC-CHANGE-taxonomy, UC-WF-compare, UC-REP-sarif,
+UC-REP-markdown-html, UC-TC-dual-abi, UC-TC-flag-drift,
+UC-TC-modern-cxx-types, UC-TC-cxx-standard-floor, UC-PLAT-linux-elf,
+UC-ARCH-c-library, UC-ARCH-cpp-library, UC-ARCH-python-api, UC-ARCH-kernel-btf,
+UC-ARCH-sycl, UC-PLAT-windows-pe, UC-PLAT-macos-macho, UC-ARCH-header-only,
+UC-ARCH-cython-api, UC-CHANGE-inline-ns-version, UC-TC-numpy-capi-envelope,
+UC-WORKFLOW-pr-source-tier.
+**Friction:**
+- HTML and the PR comment still bucket changes outside `ReportModel`
+  (ADR-036 increment 3).
+- The PR source tier is partial (G19, ADR-035).
 
 ### `trust`
 
-**Goal:** know how far the verdict can be believed — what evidence was used,
+**Goal:** know how far the verdict can be believed: what evidence was used,
 what was missing, what the scope was.
-**Touchpoints:** evidence/assurance block, `not_collected`/`FAILED` facts,
-comparability refusal, crosscheck, completeness axis, `known-gaps.md`.
-**Use cases:** UC-PLAT-arch-guard, UC-WF-probe-matrix,
-UC-TC-header-scope-robustness, UC-CHANGE-crosscheck-hygiene (complete);
-UC-WF-oneshot-deep, UC-WORKFLOW-real-world-corpus, UC-WORKFLOW-pr-source-tier,
-UC-CHANGE-crosscheck-example-corpus (partial).
-**State:** **the weakest stage for its importance.** False-clean entries in
-`known-gaps.md` (function-pointer signatures, castxml template defaults,
-`debug=1` DWARF, export shrink without a declared surface) land here. Scope and
-completeness (ADR-065) and fact adequacy (ADR-063) have no dedicated use case.
+**User question:** "Did it really check everything, or is this pass empty?"
+**Touchpoints:** the analysis-assurance block, `not_collected`/`FAILED`
+facts, comparability refusal, crosscheck, the completeness axis,
+`--require-complete-analysis`, `known-gaps.md`.
+**Use cases:** UC-WF-analysis-assurance, UC-WF-scope-completeness,
+UC-WF-contract-config, UC-PLAT-arch-guard, UC-WF-probe-matrix,
+UC-TC-header-scope-robustness, UC-CHANGE-crosscheck-hygiene,
+UC-CHANGE-taxonomy, UC-TC-dual-abi, UC-TC-flag-drift,
+UC-TC-make-auto-query, UC-TC-build-emitted-facts, UC-WF-oneshot-deep,
+UC-WORKFLOW-real-world-corpus, UC-WORKFLOW-pr-source-tier,
+UC-TC-bazel-build-evidence, UC-CHANGE-crosscheck-example-corpus.
+**Friction (highest priority, L2 Linux first):**
+- False-clean results recorded in `known-gaps.md`: a function-pointer
+  parameter's signature is not compared; castxml reports `NO_CHANGE` for a
+  default template-argument change (ADR-085); a large export shrink with no
+  declared surface emits no finding; a binary-gate demotion states no
+  coverage gap (ADR-084).
+- No INCONSISTENT/CONFLICTING fact status, and two provider-status
+  vocabularies (ADR-063, G47).
+- Scope and completeness are partial, and the exit code is still folded by
+  two resolvers (ADR-065, G46).
+- Real-world validation runs outside CI (G17).
+- Low priority: `debug=1` DWARF reads as complete; resolved PDB/DWP/dSYM
+  reach no dump path (ADR-021a).
 
 ### `tune`
 
-**Goal:** make the gate match the project's real promise — suppress noise,
+**Goal:** make the gate match the project's real promise: suppress noise,
 accept intended breaks, declare the public surface.
-**Touchpoints:** `--policy`, `--suppress`, `--contract`, `--acknowledgments`,
-`--header`/`--exclude-header`, disposition audit in the report.
-**Use cases:** UC-WF-stable-abi-subset, UC-TC-header-scope-robustness
-(complete); UC-WORKFLOW-evidence-directed-scope,
-UC-WORKFLOW-focusing-example-corpus (excluded).
-**State:** **the features ship (ADR-010, 013, 044, 049, 067) but no use case
-covers them.** Suppression, policy profiles, contract configuration and
-acknowledgment need registry entries with evidence.
+**User question:** "This is intended (or not ours). How do I say so without
+hiding real breaks?"
+**Touchpoints:** `--policy`, `--suppress`, `--contract`,
+`--acknowledgments`, `--header`/`--exclude-header`, the disposition audit in
+the report.
+**Use cases:** UC-WF-suppression, UC-WF-policy-profile,
+UC-WF-contract-config, UC-WF-acknowledgment, UC-WF-stable-abi-subset,
+UC-TC-header-scope-robustness, UC-WORKFLOW-evidence-directed-scope,
+UC-WORKFLOW-focusing-example-corpus.
+**Friction:**
+- Every disposition must stay visible with its rule and reason (ADR-067);
+  the ledger is in place, and new suppression points must join it.
+- Contract-source conflicts across multiple inputs are open (vision
+  workstream E S3).
 
 ### `release`
 
 **Goal:** decide the version bump and ship a release whose ABI promise holds.
-**Touchpoints:** release/directory/package compare, semver recommendation,
-bundle facts, wheel checks, Debian symbols.
+**User question:** "What version number does this release need, and is every
+artifact consistent?"
+**Touchpoints:** release, directory and package compare, the semver
+recommendation, bundle facts, wheel checks, Debian symbols, `project
+history`.
 **Use cases:** UC-CHANGE-semver-recommendation, UC-WF-compare,
 UC-WF-debian-symbols, UC-WF-bundle, UC-WF-wheel-vendored,
-UC-WF-stable-abi-subset, UC-WF-probe-matrix, UC-TC-glibc-floor (complete);
-UC-CHANGE-inline-ns-version, UC-TC-wheel-deployment-claims (partial).
-**State:** good. Open: bundle checks at `depth: headers` (ADR-023), history and
-versioning policy (ADR-066) have no use case.
+UC-WF-stable-abi-subset, UC-WF-probe-matrix, UC-TC-glibc-floor,
+UC-WF-acknowledgment, UC-WF-scope-completeness, UC-WF-release-history,
+UC-CHANGE-inline-ns-version, UC-TC-wheel-deployment-claims.
+**Friction:**
+- A `kind: bundle` check cannot run at `depth: headers` (ADR-023).
+- Versioning policy has no scheme-derived order and no retention (ADR-066,
+  G48).
+- Wheel deployment claims are partial (G27).
 
 ### `downstream`
 
 **Goal:** know which consumers a change affects and whether a given
 application or plugin still works.
+**User question:** "Which of my users break, and do they need to rebuild?"
 **Touchpoints:** `--used-by`, `--used-by-manifest`, `--required-symbol`,
 `--use-cases`, `deps tree`/`compare`.
 **Use cases:** UC-ARCH-plugin, UC-WF-appcompat, UC-WF-stack-deps,
-UC-TC-cxx-standard-floor (complete); UC-TC-numpy-capi-envelope (partial);
-UC-ARCH-ffi-consumers (excluded).
-**State:** works with supplied consumers. Open: prebuilt-consumer lifecycle in
-the Action (vision workstream D) and per-finding `affected_use_cases`
-(ADR-057).
+UC-TC-cxx-standard-floor, UC-TC-numpy-capi-envelope,
+UC-ARCH-ffi-consumers.
+**Friction:**
+- Prebuilt consumers cannot yet be staged and cached in the Action (vision
+  workstream D).
+- No per-finding `affected_use_cases`, and no runtime-trace ingestion
+  (ADR-057).
+- An explicit `--lang c++` does not reach the appcompat path (ADR-005).
 
 ### `audit`
 
 **Goal:** assess a shipped artifact on its own, or over time.
+**User question:** "Is this binary healthy, and how has it evolved?"
 **Touchpoints:** `compare --no-baseline`, security-hardening and glibc-floor
-checks, dependency stack.
+checks, the dependency stack, `project history`.
 **Use cases:** UC-WF-stack-deps, UC-WF-security-hardening, UC-TC-glibc-floor,
-UC-WORKFLOW-single-release-audit (complete);
-UC-WORKFLOW-audit-example-corpus (partial); UC-WF-audit (planned);
-UC-ARCH-static-lib, UC-REPORTING-scan-coverage-report (excluded).
-**State:** partial. ADR-086 added static archives as a `--no-baseline` audit
-operand, so UC-ARCH-static-lib's exclusion needs revisiting.
+UC-WORKFLOW-single-release-audit, UC-WF-release-history,
+UC-WORKFLOW-audit-example-corpus, UC-WF-audit, UC-ARCH-static-lib,
+UC-REPORTING-scan-coverage-report.
+**Friction:**
+- The single-binary audit/lint mode is planned (G11).
 
-## Gaps the map shows
+## What to build next
 
-1. **`trust`**: false-clean results and missing scope/completeness use cases.
-   For the current priority (L2, Linux ELF) this is the first stage to fix.
-2. **`tune`**: shipped policy features with no use case backing them.
-3. **History and versioning** (ADR-066) and **scope/completeness** (ADR-065)
-   have no use case on any stage.
-4. **Header-only** libraries cannot start the journey (`first_check`).
+Ordered by journey impact on the primary path (L2, Linux ELF):
+
+1. **`trust`: close the L2 false-clean gaps** (function-pointer parameter
+   signatures, castxml template defaults, export shrink without a declared
+   surface), then finish ADR-065 S0 and ADR-063's fact-status vocabulary.
+2. **`release`: bundle checks at `depth: headers`** (ADR-023).
+3. **`first_check`: header-only as a first-class task** (G4, G45).
+4. **`adopt_ci`: the Action stops encoding CLI semantics** (ADR-070).
+5. **`downstream`: prebuilt consumers in the Action** (workstream D).
+6. **Low priority:** Windows/macOS parity and debug-artifact consumption.

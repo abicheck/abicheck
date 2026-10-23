@@ -203,3 +203,20 @@ class TestJourneyStages:
         assert covered == _JOURNEY_STAGES, (
             f"stages with no use case: {_JOURNEY_STAGES - covered}"
         )
+
+    @pytest.mark.parametrize("stage", sorted(_JOURNEY_STAGES))
+    def test_cjm_doc_lists_exactly_the_stage_use_cases(self, stage: str) -> None:
+        """A stage's **Use cases:** line names exactly the registry entries on it."""
+        text = _CJM_DOC.read_text(encoding="utf-8")
+        section = re.split(rf"^### `{stage}`$", text, flags=re.MULTILINE)[1]
+        section = re.split(r"^##+ ", section, flags=re.MULTILINE)[0]
+        listed = re.search(r"\*\*Use cases:\*\*(.*?)\*\*", section, re.DOTALL)
+        assert listed, f"cjm.md: stage {stage} has no **Use cases:** line"
+        documented = set(re.findall(r"UC-[A-Z]+-[a-z0-9-]+", listed.group(1)))
+        registered = {
+            c["id"] for c in _load() if stage in (c.get("journey_stages") or [])
+        }
+        assert documented == registered, (
+            f"{stage}: only in cjm.md {sorted(documented - registered)}, "
+            f"only in registry {sorted(registered - documented)}"
+        )

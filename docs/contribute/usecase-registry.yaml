@@ -1415,3 +1415,112 @@ use_cases:
       directly against `buildsource.cross_source_checks.run_crosschecks`'s
       own coverage rows, one layer closer to the shipped shape. REMAINING:
       nothing in the surviving §3.3 half. See plan Phase 3.
+
+  # --- CJM `tune` and `trust` stages (docs/contribute/cjm.md) --------------
+  # These cases name shipped policy and evidence surfaces that previously had
+  # no use case of their own; the CJM made the hole visible.
+
+  - id: UC-WF-suppression
+    axis: workflow
+    name: Suppress known or intentional findings, judged against the public ABI
+    status: complete
+    user_task: [pr_review, release]
+    journey_stages: [tune]
+    adrs: [ADR-013, ADR-044]
+    evidence:
+      modules: [abicheck/policy/suppression/rules.py, abicheck/policy/suppression/audit.py]
+      tests: [tests/test_cli_compare_audit_suppressions.py, tests/test_finding_disposition_suppression.py]
+      docs: [docs/use/suppressions.md]
+
+  - id: UC-WF-policy-profile
+    axis: workflow
+    name: Choose a policy profile and per-kind severity overrides for the gate
+    status: complete
+    user_task: [pr_review, release]
+    journey_stages: [tune, adopt_ci]
+    adrs: [ADR-010]
+    evidence:
+      modules: [abicheck/policy_file.py, abicheck/policy/severity.py]
+      tests: [tests/test_policy_file.py, tests/test_policy_override_matrix.py]
+      docs: [docs/use/policies.md]
+
+  - id: UC-WF-contract-config
+    axis: workflow
+    name: Declare the compatibility contract (relevance, packs) and evaluate against it
+    status: complete
+    user_task: [pr_review, release]
+    journey_stages: [tune, trust]
+    adrs: [ADR-049]
+    evidence:
+      modules: [abicheck/contract_evaluation.py]
+      tests: [tests/test_contract_evaluation.py, tests/test_cli_compare_contract_evaluation.py]
+      docs: [docs/use/contract-evaluation.md]
+
+  - id: UC-WF-acknowledgment
+    axis: workflow
+    name: Acknowledge an intended break with a reason, and audit every disposition
+    status: complete
+    user_task: [pr_review, release]
+    journey_stages: [tune, release]
+    adrs: [ADR-067]
+    evidence:
+      modules: [abicheck/policy/acknowledgment.py, abicheck/policy/disposition_ledger.py]
+      tests: [tests/test_acknowledgment.py, tests/test_acknowledgment_cli_surfaces.py, tests/test_disposition_audit.py]
+      docs: [docs/use/acknowledgments.md]
+
+  - id: UC-WF-scope-completeness
+    axis: workflow
+    name: Know which members were compared, selected, missing or retired; never pass on zero comparisons
+    status: partial
+    user_task: [pr_review, release]
+    journey_stages: [trust, release]
+    adrs: [ADR-065, ADR-071]
+    gap: G46
+    plan: docs/contribute/plans/vision-api-abi-evolution.md
+    evidence:
+      modules: [abicheck/model/package_inventory.py, abicheck/workflows/release_scope.py]
+      tests: [tests/test_release_scope_completeness.py, tests/test_aggregate_scope_completeness.py, tests/test_release_package_inventory_cli.py]
+    next_steps: >-
+      Vision workstream A (ADR-065, still Proposed). Landed: dry-run plan
+      view, completeness axis, package inventory, support promise, removal of
+      the set-difference removal path. Remaining: S0 and ADR acceptance; one
+      exit-code resolver instead of the scalar and release pair
+      (known-gaps.md, PARTIAL).
+
+  - id: UC-WF-analysis-assurance
+    axis: workflow
+    name: Report what evidence the verdict rests on, and narrow it when evidence is missing
+    status: partial
+    user_task: [pr_review, release, audit]
+    journey_stages: [trust]
+    adrs: [ADR-063]
+    gap: G47
+    plan: docs/contribute/plans/vision-api-abi-evolution.md
+    evidence:
+      modules: [abicheck/policy/analysis_assurance/_compute.py]
+      tests: [tests/test_analysis_assurance.py, tests/test_analysis_assurance_cli.py]
+    next_steps: >-
+      Vision workstream E (ADR-063). Remaining: an INCONSISTENT/CONFLICTING
+      fact status; one provider-status vocabulary instead of FactStatus and
+      EvidenceProviderStatus; multi-source contract conflicts; the
+      false-clean entries in known-gaps.md (function-pointer parameter
+      signatures, castxml template defaults, debug=1 DWARF reading as
+      complete, export shrink with no declared surface).
+
+  - id: UC-WF-release-history
+    axis: workflow
+    name: Track a library's compatibility across releases under a declared versioning policy
+    status: partial
+    user_task: [release, audit]
+    journey_stages: [release, audit]
+    adrs: [ADR-066]
+    gap: G48
+    plan: docs/contribute/plans/vision-api-abi-evolution.md
+    evidence:
+      modules: [abicheck/workflows/history.py, abicheck/policy_file_versioning.py]
+      tests: [tests/test_workflows_history.py, tests/test_cli_project_history.py, tests/test_versioning_policy.py]
+    next_steps: >-
+      Vision workstream B (ADR-066, still Proposed). Landed: offline history
+      with explicit ordering (S1) and the versioning-policy model (S2).
+      Remaining: scheme-derived version order (D4), a `changed` event,
+      retention (S4) and ADR acceptance.
