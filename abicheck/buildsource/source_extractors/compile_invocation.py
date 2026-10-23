@@ -65,6 +65,13 @@ from .launcher_env_path import _apply_env_context
 #: (https://gcc.gnu.org/onlinedocs/gcc/Directory-Options.html)
 _GNU_INCLUDE_SEARCH_OPTS = frozenset({"-iquote", "-idirafter"})
 
+#: MSVC/clang-cl include-search options, recognized only in CL-mode driver
+#: context. ``/I`` and ``/external:I`` take a directory in the separate
+#: (``/I dir``) or joined (``/Idir``) spelling. ``-I`` is the same search
+#: option in the GNU spelling, which ``cl`` and ``clang-cl`` also accept.
+#: ``/imsvc`` (a system bucket) is deliberately not listed here.
+_MSVC_INCLUDE_SEARCH_OPTS = ("/I", "-I", "/external:I")
+
 
 @dataclass(frozen=True)
 class CarriedFlag:
@@ -116,13 +123,15 @@ class CompilerInvocation:
     #: Replayed flags in the order they were recovered: ABI-relevant flags first,
     #: then include-search options scanned from ``argv``.
     carried: tuple[CarriedFlag, ...]
-    #: Include-search operands recovered from :attr:`carried` that the structured
-    #: buckets do not hold: ``-iquote``/``-idirafter`` (both spellings) and, in
-    #: MSVC mode, any ``/I`` or ``-I`` token the argv scanner carried (the scanner
-    #: carries only ``/I`` today, so a bare ``-I`` argv operand is not included).
-    #: Kept in replay order and in the operand's recorded spelling, not rebased,
-    #: so a probe resolves them against the compile unit's ``directory`` exactly
-    #: as it does :attr:`~..build_evidence.CompileUnit.include_paths`.
+    #: Include-search operands the structured buckets do not hold. GNU mode:
+    #: ``-iquote``/``-idirafter`` (both spellings), read from :attr:`carried`. MSVC
+    #: mode: ``/I``, ``-I`` and ``/external:I`` (separate and joined spellings),
+    #: read from the raw argv, so a ``-I`` or ``/external:I`` operand reaches the
+    #: probe even though it is not replayed into the rendered argv (the carried
+    #: set stays as it was; see :func:`_probe_operand_tokens`). Kept in argv
+    #: order and in the operand's recorded spelling, not rebased, so a probe
+    #: resolves them against the compile unit's ``directory`` exactly as it does
+    #: :attr:`~..build_evidence.CompileUnit.include_paths`.
     replayed_include_dirs: tuple[str, ...] = ()
 
 
@@ -327,11 +336,12 @@ def _replayed_include_operands(tokens: list[str], msvc: bool) -> tuple[str, ...]
     """The include-search operands in *tokens* that the structured buckets do not hold.
 
     Matches each spelling once, in token order: a separate operand consumes the
-    next token, a joined one carries its directory inline. ``/I`` and ``-I`` are
-    include options only in MSVC mode; in GNU mode they are already structured.
+    next token, a joined one carries its directory inline. ``/I``, ``-I`` and
+    ``/external:I`` are include options only in MSVC mode; in GNU mode ``-I`` is
+    already structured.
     """
     out: list[str] = []
-    msvc_options = ("/I", "-I") if msvc else ()
+    msvc_options = _MSVC_INCLUDE_SEARCH_OPTS if msvc else ()
     i = 0
     while i < len(tokens):
         tok = tokens[i]
@@ -571,6 +581,21 @@ def parse_compile_invocation(
         target_triple=compile_unit.target_triple or "",
         carried=carried,
         replayed_include_dirs=_replayed_include_operands(
-            [carried_flag.token for carried_flag in carried], msvc
+            _probe_operand_tokens(compile_unit, carried, msvc), msvc
         ),
     )
+
+
+def _probe_operand_tokens(
+    compile_unit: CompileUnit, carried: tuple[CarriedFlag, ...], msvc: bool
+) -> list[str]:
+    """The tokens :func:`_replayed_include_operands` reads for the public-root probe.
+
+    GNU mode reads the carried tokens, as it always has. MSVC mode reads the raw
+    ``argv``: the carried set holds only ``/I``, so ``-I`` and ``/external:I``
+    would otherwise never reach the probe. A rendered replay token is never
+    affected by this choice -- :attr:`CompilerInvocation.carried` is unchanged.
+    """
+    if msvc:
+        return list(compile_unit.argv)
+    return [carried_flag.token for carried_flag in carried]
