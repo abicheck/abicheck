@@ -68,6 +68,34 @@ This resolves the Phase 5 rationale against a clang-only detector. The earlier o
 
 Consequence for shape B: once implemented, a clang run returns `API_BREAK` where it returned `NO_CHANGE`, and a castxml run returns a coverage gap where it returned `NO_CHANGE`. The `NO_CHANGE` answer in G28 Phase 5 is superseded by this ADR when it is accepted.
 
+**Amendment (2026-10-23): the castxml verdict stays `NO_CHANGE`.** The bullet
+"does not produce `NO_CHANGE` for that template" and the castxml half of
+"Consequence for shape B" above are amended. This was the open question in
+*Remaining* item 1, and the maintainer's delegate decided it as follows:
+
+- A castxml run whose headers declare a template-parameter default, where the
+  defaults are not recorded, reads `partial`. The analysis-assurance status
+  names the gap `template-parameter defaults (castxml cannot record them)` for
+  each castxml side whose header scan found one (ADR-085 D3, slice 4). The
+  compare verdict for that template stays `NO_CHANGE`. castxml cannot observe
+  the change, so the verdict does not claim one.
+- Only the clang answer is superseded: a clang run on shape B reads `API_BREAK`
+  (`TEMPLATE_PARAM_DEFAULT_CHANGED`) instead of `NO_CHANGE`.
+
+Rationale, from the product rules in `AGENTS.md`: weaker evidence narrows
+conclusions and is reported, but it never fabricates a finding. The verdict
+reports what was observed; assurance reports what could not be observed. A
+castxml verdict of anything but `NO_CHANGE` would be a finding with no observed
+evidence behind it, and it would break the same-evidence-same-verdict parity
+that the test plan requires. A castxml run that reads `NO_CHANGE` with
+`partial` assurance is not a clean pass: the gap is named, and the run is not
+reported as complete.
+
+The test plan's shape-B castxml expectation is amended the same way: the castxml
+run reads `NO_CHANGE` with `partial` assurance and the named gap, pinned by
+`tests/test_default_template_arg_l2_matrix.py` (including on
+`catalog/cases/case224_header_only_template_default_added`).
+
 ## Consequences
 
 - **Behaviour change (after acceptance).** A clang run on shape B changes from `NO_CHANGE` to `API_BREAK`. This is a new finding on a header-only default change. It needs a changelog fragment and is reviewed as a policy change, not a fix.
@@ -89,7 +117,7 @@ Each claim below is tested through the public workflow (`abicheck dump` then `ab
 
 - **Both backends, shapes A/B/C.** Run `case87_default_template_arg_changed` (A) and the two inline headers (B and C) with `compile.frontend: castxml` and `clang`. Pin:
   - A: `BREAKING`, `DEFAULT_TEMPLATE_ARG_CHANGED` on both backends (unchanged); the new kind is not emitted for it.
-  - B: clang `API_BREAK`, `TEMPLATE_PARAM_DEFAULT_CHANGED`; castxml coverage gap, not `NO_CHANGE`.
+  - B: clang `API_BREAK`, `TEMPLATE_PARAM_DEFAULT_CHANGED`; castxml `NO_CHANGE` with `partial` assurance and the named gap (amended 2026-10-23, see D3).
   - C: `BREAKING` via `func_removed`/`func_added` on both backends (unchanged); the new kind is not emitted when the mangled change already reports the break.
 - **Parity.** For each shape where both backends observe the same defaults, the verdict and kind set are equal. A parametrised test asserts this, so a backend that drops the fact fails it.
 - **Old-snapshot comparison.** A v60 fixture snapshot (from before the bump) compared with a v61 clang dump of the same header yields a coverage gap for the template and no `NO_CHANGE` and no `API_BREAK`. A v61 snapshot round-trips the fact including the `None`-per-parameter entries.
@@ -148,13 +176,11 @@ are recorded here rather than edited into the decision.
 
 ## Remaining
 
-1. **Verdict decision (open).** D3's wording says the castxml run "does not
-   produce NO_CHANGE". The landed slice reports the gap at the status level:
-   the castxml verdict stays `NO_CHANGE`, and the run reads `partial` with the
-   gap named. Making the verdict itself non-`NO_CHANGE` on castxml needs a
-   decision on what that verdict should be, and it would break the
-   same-evidence-same-verdict parity the test plan states. Confirm which reading
-   is meant.
+1. **Verdict decision (resolved 2026-10-23).** The castxml verdict stays
+   `NO_CHANGE`, and the run reads `partial` with the gap named. D3 is amended
+   above. Rationale: weaker evidence narrows the conclusion and is reported; it
+   does not fabricate a finding, and this keeps same-evidence-same-verdict
+   parity. Pinned by `tests/test_default_template_arg_l2_matrix.py`.
 2. **Parity test.** Landed for the header-only shape: clang reports
    `template_param_default_changed`, castxml reports the gap and no kind
    (`tests/test_default_template_arg_l2_matrix.py`).

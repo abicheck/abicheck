@@ -455,7 +455,8 @@ decided in [ADR-085](../adr/085-template-parameter-default-arguments.md)
 - landed: the castxml header-text scan reports the shape-B case as an explicit
   coverage gap (`template_default_header_scan`, schema v63, ADR-085 D3). The
   castxml verdict still reads `NO_CHANGE` for shape B; the run reads `partial`.
-  Whether the verdict should change is open (ADR-085 Remaining item 1).
+  Decided 2026-10-23 (ADR-085 Remaining item 1): the verdict stays
+  `NO_CHANGE`, because the gap is reported as assurance, not as a finding.
 
 The shape-B `NO_CHANGE` answer in the table above is superseded on clang
 (`API_BREAK`). It stands on castxml until the scan lands. The remaining items
