@@ -1961,7 +1961,7 @@
     },
     {
       "path": "abicheck/policy/severity.py",
-      "baseline_lines": 824,
+      "baseline_lines": 808,
       "target": "see ADR-061 ownership map",
       "rule": "no_growth",
       "disposition": "migrate",

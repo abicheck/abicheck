@@ -598,40 +598,26 @@ def gate_contribution_for_change(
     policy_file: object | None = None,
     today: date | None = None,
 ) -> int:
-    """What one finding contributes to the process exit code.
+    """What one finding contributes to the process exit code (ADR-049 D1).
 
-    ADR-049 D1 makes this a per-finding report field, so it has to be the
-    number that actually applied rather than a plausible one:
-
-    - a ``NOT_EVALUATED`` finding contributes ``0`` -- it is not on the
-      compatibility axis at all;
-    - a ``RESOLVED`` cross-source finding (plan F-9) contributes ``0``
-      too, same reason :func:`gate_eligible_changes` excludes it;
-    - under the severity scheme, a finding contributes its category's exit
-      code when that category is configured ``error``, and ``0`` otherwise --
-      which is exactly what :func:`compute_exit_code` folds with ``max``;
-    - under the legacy scheme (*config* ``None``), it contributes its own
-      effective verdict's legacy exit code. The overall legacy exit is
-      ``legacy_exit_code`` of the worst evaluated verdict, and both mappings
-      are monotone in the same verdict order, so folding these with ``max``
-      reproduces it.
-
-    This is deliberately *not* a new gate: every value it can return is one
-    :func:`compute_exit_code` or :func:`legacy_exit_code` would already have
-    produced for the same finding.
+    Resolves only the input *config*'s scheme reads -- the effective verdict
+    for the legacy scheme, the issue category for the severity scheme -- and
+    defers to :func:`~abicheck.policy.gate_contribution.
+    resolved_gate_contribution`, which owns the rule.
     """
+    from .gate_contribution import resolved_gate_contribution
+
     if not is_evaluated(change) or is_cross_source_resolved(change):
         return 0
     if config is None:
-        return legacy_exit_code(
-            effective_verdict_for_change(
-                change,
-                policy=policy,
-                kind_sets=kind_sets,
-                policy_file=policy_file,
-                today=today,
-            )
+        verdict = effective_verdict_for_change(
+            change,
+            policy=policy,
+            kind_sets=kind_sets,
+            policy_file=policy_file,
+            today=today,
         )
+        return resolved_gate_contribution(change, None, verdict=verdict)
     category = classify_effective_change(
         change,
         policy=policy,
@@ -639,9 +625,7 @@ def gate_contribution_for_change(
         policy_file=policy_file,
         today=today,
     )
-    if config.level_for(category) != SeverityLevel.ERROR:
-        return 0
-    return _CATEGORY_EXIT_CODES[category]
+    return resolved_gate_contribution(change, config, category=category)
 
 
 @dataclass(frozen=True)

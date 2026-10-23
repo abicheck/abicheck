@@ -67,6 +67,10 @@ Each entry's status line says what is still open. A PARTIAL entry's write-up als
 
 **Status (2026-10-22): OPEN.** The review-group section is bounded; the per-finding Additions rows are not. [Full write-up](known-gaps/the-additions-markdown-section-is-one-row-per-finding.md)
 
+#### The legacy gate counts a redundant finding the review groups omit (2026-10-23)
+
+**Status (2026-10-23): OPEN — gate-semantics decision needed.** A finding folded out as redundant but kept for the verdict is `gating` under the legacy scheme and `non_gating` under a severity config, so "retained" and "gating" are not nested. [Full write-up](known-gaps/legacy-gate-counts-a-redundant-finding-the-review-groups-omit.md)
+
 ### Source-replay inline removal pairing (L4/L2 Phase 8)
 
 **Status (2026-10-23): OPEN, narrowed.** A header-only inline removal is reported by the header tier and by the L4 replay. `compare.finding_dedup._drop_source_replay_inline_duplicates` keeps the header-tier finding and drops the replay copy, matched by bare function name, one for one. Two limits remain. (a) A header-tier symbol that does not demangle (no `demangled_symbol`, no demangler result) keeps its replay twin visible; this is conservative, not a silent loss. (b) Two overloads of one name pair by count, not by signature, because the replay `Change` carries no parameter list, so which of the two overloads is the twin is not recorded. Both replay copies are still counted in the ledger. Closing (b) needs the replay finding to carry its signature hash.

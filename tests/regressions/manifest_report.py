@@ -167,6 +167,16 @@ REPORT_BUG_CLASSES: tuple[BugClass, ...] = (
             # one policy-bearing fixture in every format against a
             # hand-written oracle table.
             "tests/test_report_format_bucket_parity.py",
+            # Between formats, for a derived *count*: the review groups
+            # counted "gating" from a member's raw verdict, so Markdown and
+            # the digest stated "6 gating finding(s)" over six JSON
+            # `gate_contribution: 0` members (SVS field report), and "2 gating"
+            # under `Gate: PASS` for a severity config demoting ABI breaks.
+            # Both now read `policy.gate_contribution`; the oracle renders a
+            # corpus x gate scheme x contract state and compares every stated
+            # count with the JSON's per-finding field and the ledger.
+            "tests/unit/report/test_report_gating_consistency.py",
+            "tests/test_report_gating_consistency_examples.py",
         ),
         axes={
             # Only what a seed test really drives -- and *all* of it. This
@@ -186,7 +196,10 @@ REPORT_BUG_CLASSES: tuple[BugClass, ...] = (
                 "evidence-and-coverage",
                 "finding-value",
                 "entity-operation-rollup",
+                "gating-count",
             ),
+            "gate_scheme": ("legacy", "severity-error", "severity-demoted"),
+            "contract": ("none", "in", "out", "mixed"),
         },
         known_gaps=(
             KnownGap(

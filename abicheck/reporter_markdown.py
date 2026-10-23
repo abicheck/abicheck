@@ -1018,18 +1018,18 @@ def compute_review_digest(
     # rather than raw kind-set membership, so a per-finding override (A4
     # pattern-verdict modulation, frozen-namespace guard) is reflected here
     # the same way it already is in the counts table and merge-effect phrase
-    # above — otherwise this section could list a finding the rest of the
-    # digest reports as compatible, or omit one it reports as breaking.
+    # above, or this could list a finding the digest calls compatible.
     # ADR-049 D1: and over the findings compatibility policy actually scored,
     # for the same reason -- the merge-effect phrase above is derived from the
     # verdict, which a NOT_EVALUATED finding did not reach, so listing one
     # here printed "safe to merge" directly above the symbol it says is
-    # impacted (Codex review). The excluded finding keeps its own disclosed
-    # section elsewhere in the report; this list is the digest of what gated.
+    # impacted (Codex review); it keeps its own disclosed section elsewhere.
     from .report.surface_changes import compute_surface_changes
 
     uc = use_cases_by_finding_for(result)  # `compare --use-cases` only
-    groups = tuple(review_groups or _review_compute.review_groups_for(findings))
+    groups = tuple(
+        review_groups or _review_compute.review_groups_for(findings, envelope)
+    )
     impacted = [
         f.change
         for f in findings

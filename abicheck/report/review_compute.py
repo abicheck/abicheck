@@ -12,13 +12,20 @@ if TYPE_CHECKING:
     from collections.abc import Sequence
 
     from ..checker_types import DiffResult
+    from .envelope import ReportEnvelope
     from .finding import ReportFinding
 
 
 def review_groups_for(
     findings: Sequence[ReportFinding],
+    envelope: ReportEnvelope | None = None,
 ) -> tuple[dict[str, object], ...]:
-    return tuple(group.to_dict() for group in build_review_groups(findings))
+    """Review groups over *findings*, gated under *envelope*'s own scheme."""
+    config = None if envelope is None else envelope.severity_config
+    return tuple(
+        group.to_dict()
+        for group in build_review_groups(findings, severity_config=config)
+    )
 
 
 def use_cases_by_group(
