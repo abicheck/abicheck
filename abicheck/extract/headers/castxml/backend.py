@@ -184,6 +184,7 @@ def _read_castxml_cache(store: TuParseStore, key: str) -> Element | None:
     try:
         root = parse_castxml_text(payload)
     except Exception:
+        store.evict(key)
         AST_DISK_CACHE.record(hit=False)
         return None
     AST_DISK_CACHE.record(hit=True)

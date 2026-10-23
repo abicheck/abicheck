@@ -109,6 +109,14 @@ class TuParseStore:
             return None
         return entry["payload"]
 
+    def evict(self, key: str) -> None:
+        """Remove *key*'s entry, if any, so the next lookup misses.
+
+        A payload the caller cannot decode is evicted rather than left to miss
+        forever; a missing entry is not an error.
+        """
+        self.path(key).unlink(missing_ok=True)
+
     def publish(
         self,
         key: str,

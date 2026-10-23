@@ -21,6 +21,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from abicheck.extract import header_ast_backend
+from abicheck.storage.tu_parse_store import TuParseStore
 
 # ---------------------------------------------------------------------------
 # Helper: produce a minimal valid castxml XML document with some content
@@ -68,8 +69,8 @@ class TestCastxmlNonZeroExit:
                 return_value="castxml",
             ),
             patch(
-                "abicheck.extract.headers.castxml.backend._cache_path",
-                return_value=tmp_path / "nonexistent_cache.xml",
+                "abicheck.extract.headers.castxml.backend.ast_cache_store",
+                return_value=TuParseStore(tmp_path / "no-cache"),
             ),
         ):
             from abicheck.extract.headers.castxml.backend import (
@@ -93,8 +94,8 @@ class TestCastxmlNonZeroExit:
                 return_value="castxml",
             ),
             patch(
-                "abicheck.extract.headers.castxml.backend._cache_path",
-                return_value=tmp_path / "nonexistent_cache.xml",
+                "abicheck.extract.headers.castxml.backend.ast_cache_store",
+                return_value=TuParseStore(tmp_path / "no-cache"),
             ),
         ):
             from abicheck.extract.headers.castxml.backend import (
@@ -115,8 +116,8 @@ class TestCastxmlNonZeroExit:
                 return_value="castxml",
             ),
             patch(
-                "abicheck.extract.headers.castxml.backend._cache_path",
-                return_value=tmp_path / "nonexistent_cache.xml",
+                "abicheck.extract.headers.castxml.backend.ast_cache_store",
+                return_value=TuParseStore(tmp_path / "no-cache"),
             ),
         ):
             from abicheck.extract.headers.castxml.backend import (
@@ -154,8 +155,8 @@ class TestCastxmlEmptyOutput:
                 return_value="castxml",
             ),
             patch(
-                "abicheck.extract.headers.castxml.backend._cache_path",
-                return_value=tmp_path / "nonexistent_cache.xml",
+                "abicheck.extract.headers.castxml.backend.ast_cache_store",
+                return_value=TuParseStore(tmp_path / "no-cache"),
             ),
         ):
             from abicheck.extract.headers.castxml.backend import (
@@ -180,8 +181,8 @@ class TestCastxmlEmptyOutput:
                 return_value="castxml",
             ),
             patch(
-                "abicheck.extract.headers.castxml.backend._cache_path",
-                return_value=tmp_path / "nonexistent_cache.xml",
+                "abicheck.extract.headers.castxml.backend.ast_cache_store",
+                return_value=TuParseStore(tmp_path / "no-cache"),
             ),
         ):
             from abicheck.extract.headers.castxml.backend import (
@@ -212,8 +213,8 @@ class TestCastxmlEmptyXmlRoot:
                 return_value="castxml",
             ),
             patch(
-                "abicheck.extract.headers.castxml.backend._cache_path",
-                return_value=tmp_path / "nonexistent_cache.xml",
+                "abicheck.extract.headers.castxml.backend.ast_cache_store",
+                return_value=TuParseStore(tmp_path / "no-cache"),
             ),
         ):
             from abicheck.extract.headers.castxml.backend import (
@@ -242,8 +243,8 @@ class TestCastxmlEmptyXmlRoot:
                 return_value="castxml",
             ),
             patch(
-                "abicheck.extract.headers.castxml.backend._cache_path",
-                return_value=tmp_path / "nonexistent_cache.xml",
+                "abicheck.extract.headers.castxml.backend.ast_cache_store",
+                return_value=TuParseStore(tmp_path / "no-cache"),
             ),
         ):
             from abicheck.extract.headers.castxml.backend import (
@@ -277,8 +278,8 @@ class TestCastxmlInvalidXml:
                 return_value="castxml",
             ),
             patch(
-                "abicheck.extract.headers.castxml.backend._cache_path",
-                return_value=tmp_path / "nonexistent_cache.xml",
+                "abicheck.extract.headers.castxml.backend.ast_cache_store",
+                return_value=TuParseStore(tmp_path / "no-cache"),
             ),
         ):
             from abicheck.extract.headers.castxml.backend import (
@@ -306,8 +307,8 @@ class TestCastxmlInvalidXml:
                 return_value="castxml",
             ),
             patch(
-                "abicheck.extract.headers.castxml.backend._cache_path",
-                return_value=tmp_path / "nonexistent_cache.xml",
+                "abicheck.extract.headers.castxml.backend.ast_cache_store",
+                return_value=TuParseStore(tmp_path / "no-cache"),
             ),
         ):
             from abicheck.extract.headers.castxml.backend import (
@@ -338,8 +339,8 @@ class TestCastxmlSuccessPath:
                 return_value="castxml",
             ),
             patch(
-                "abicheck.extract.headers.castxml.backend._cache_path",
-                return_value=tmp_path / "nonexistent_cache.xml",
+                "abicheck.extract.headers.castxml.backend.ast_cache_store",
+                return_value=TuParseStore(tmp_path / "no-cache"),
             ),
         ):
             from abicheck.extract.headers.castxml.backend import (
@@ -366,8 +367,8 @@ class TestCastxmlNotFound:
                 side_effect=FileNotFoundError,
             ),
             patch(
-                "abicheck.extract.headers.castxml.backend._cache_path",
-                return_value=tmp_path / "nonexistent_cache.xml",
+                "abicheck.extract.headers.castxml.backend.ast_cache_store",
+                return_value=TuParseStore(tmp_path / "no-cache"),
             ),
         ):
             from abicheck.extract.headers.castxml.backend import (
@@ -469,7 +470,9 @@ def test_castxml_cpp_std_selects_cpp_mode_for_c_compatible_dot_h(tmp_path, monke
         castxml_backend, "_resolve_selected_tool", lambda _name: "castxml"
     )
     monkeypatch.setattr(
-        castxml_backend, "_cache_path", lambda key: tmp_path / "cache.xml"
+        castxml_backend,
+        "ast_cache_store",
+        lambda key, backend="castxml": TuParseStore(tmp_path / "cache"),
     )
     monkeypatch.setattr(
         castxml_backend, "_resolve_compiler_binary", lambda *args: ("g++", "gnu")
@@ -510,7 +513,9 @@ def test_castxml_cpp20_only_syntax_selects_cpp_mode(tmp_path, monkeypatch):
         castxml_backend, "_resolve_selected_tool", lambda _name: "castxml"
     )
     monkeypatch.setattr(
-        castxml_backend, "_cache_path", lambda key: tmp_path / "cache.xml"
+        castxml_backend,
+        "ast_cache_store",
+        lambda key, backend="castxml": TuParseStore(tmp_path / "cache"),
     )
     monkeypatch.setattr(
         castxml_backend, "_resolve_compiler_binary", lambda *args: ("g++", "gnu")

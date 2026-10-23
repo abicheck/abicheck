@@ -62,12 +62,12 @@
       "abicheck/extract/header_order_witness.py": "6a1cfce946826fa540a0601ebeefa02a8973ba6e8cd5d8287f6c1e7badc3d53a",
       "abicheck/extract/header_scan_memo.py": "56f79b5316354b938b08a5f29779c3aaf40481892d947784ec2adb48ab5e83fb",
       "abicheck/extract/headers/__init__.py": "70af0d3a16882783444077004b7a434a295505579fbbca219ce103f72074ad03",
-      "abicheck/extract/headers/ast_config.py": "708e6f189d9f24510a544e22655d668733dd1b565e4ec747c11b3fb29d466749",
+      "abicheck/extract/headers/ast_config.py": "cb52800af1f9817bdfe22e0d46d9ea4ae612bc0891bb290585ced594a3380dc9",
       "abicheck/extract/headers/ast_config_cpp20_chains.py": "ceeadbcb1d8e2eaac5eb325a3fb7c668614ce605bc04bb03835fcc4957e53c97",
       "abicheck/extract/headers/backend_plan.py": "1f02babf0ead52a65e4fa08dff8ce5b2a9d60feb1d02d22e7db30ee050cf8717",
       "abicheck/extract/headers/backend_protocol.py": "144cbe76456b6bceaf56f0edd0f3398f171178a222c8b968d53f8a17ee05a21b",
       "abicheck/extract/headers/castxml/__init__.py": "cebb319d35840200904dde9fe4ad16489124b02327a50d8351b086844ee19943",
-      "abicheck/extract/headers/castxml/backend.py": "cb141b93be83e1351f30626349653559af38a3fccf08a593a9d7268e2dffef14",
+      "abicheck/extract/headers/castxml/backend.py": "a688bc95cfe295efafeddbee5cc561e1e262263ec82fffb4784107524413aea5",
       "abicheck/extract/headers/castxml/calling_convention.py": "ab4cd4474d11eb0da2216b29393e9daf1dbcf94226204237fd4c0381adacbcbb",
       "abicheck/extract/headers/castxml/context.py": "8178e769a346b11e94a963a6b6f4e89dd0c06ffdee8cb6d80fc2e519c5c3c504",
       "abicheck/extract/headers/castxml/dumper.py": "55aba9e4b4bf6c88810d2dfe3ceae405479d060022549500c4690c0e742da35e",
@@ -155,9 +155,9 @@
       "abicheck/symvers_metadata.py": "372737765cd132e6e87ed891dd465d2958e04debbef774e45212ceb3036871cb",
       "abicheck/type_metadata.py": "9997189de8dac522fd1db8be5ae491d811139503f83abaaded89038eb4aa9cdf"
     },
-    "fingerprint": "0273ef4c2a43472c25656446b2cd993f443f1d7ac02facb3e586db85f86d8f7d",
+    "fingerprint": "9d1e5a7fb35ddc11e5d8036834aa7ef62c9947729c65535973d317764f5fa99a",
     "generation": 10,
-    "reason": "Merge of main into the static-archive/repeatable-suppress branch. From main: a NON_SHAPING_MODULES classification entry for clang_header_argv (already covered by the invocation digest). From this branch (ADR-086): extract/ar_archive*.py, reached only by the new compare --no-baseline static-archive audit; a per-file quoted-include memo pinned equivalent to fresh expansion by tests/test_quoted_include_expansion_memo.py; an --exclude-header hint appended to an already-raised error. Nothing recorded or derived for an existing input changes."
+    "reason": "castxml header-AST cache key and entry format moved to the parse store (Phase 6 slice 2); the extracted facts for the same input are unchanged, so no generation bump"
   },
   "resolver": {
     "files": {

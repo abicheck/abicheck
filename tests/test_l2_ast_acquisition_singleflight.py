@@ -35,6 +35,7 @@ from abicheck.storage.header_ast_cache import (
     retain_ast_context_object,
     run_ast_acquisition,
 )
+from abicheck.storage.tu_parse_store import TuParseStore
 from abicheck.workflows.dump.cache import store as dump_cache_store
 
 
@@ -334,7 +335,9 @@ def test_castxml_singleflight_binds_producer_to_registered_key(
 
     monkeypatch.setattr(castxml_backend, "run_ast_acquisition", mutate_then_run)
     monkeypatch.setattr(
-        castxml_backend, "_cache_path", lambda *args, **kwargs: tmp_path / "c"
+        castxml_backend,
+        "ast_cache_store",
+        lambda *args, **kwargs: TuParseStore(tmp_path / "c"),
     )
     with pytest.raises(SnapshotError, match="before CastXML acquisition started"):
         with ast_acquisition_scope():
@@ -537,8 +540,8 @@ def test_warm_castxml_disk_hit_shares_producer_metadata(
 ) -> None:
     header = tmp_path / "api.hpp"
     header.write_text("int api();\n", encoding="utf-8")
-    cache = tmp_path / "ast.xml"
-    cache.write_text("<GCC_XML/>", encoding="utf-8")
+    store = TuParseStore(tmp_path / "store")
+    store.publish("same", "<GCC_XML/>", ())
     monkeypatch.setattr(
         castxml_backend, "_resolve_gated_castxml_bin", lambda value: "castxml"
     )
@@ -550,7 +553,7 @@ def test_warm_castxml_disk_hit_shares_producer_metadata(
     monkeypatch.setattr(castxml_backend.shutil, "which", lambda value: value)
     monkeypatch.setattr(castxml_backend, "_tool_identity", lambda *a, **k: "stable")
     monkeypatch.setattr(castxml_backend, "_cache_key", lambda *a, **k: "same")
-    monkeypatch.setattr(castxml_backend, "_cache_path", lambda *a, **k: cache)
+    monkeypatch.setattr(castxml_backend, "ast_cache_store", lambda *a, **k: store)
     decodes = 0
     original = castxml_backend._read_castxml_cache
 
@@ -971,25 +974,20 @@ def test_directory_l2_compare_acquires_one_ast_per_key(
 # --------------------------------------------------------------------------
 
 
-def test_read_cached_castxml_returns_the_parsed_root(tmp_path: Path) -> None:
-    from abicheck.storage.header_ast_cache import read_cached_castxml
-
-    cached = tmp_path / "ast.xml"
-    cached.write_text("<GCC_XML><Namespace name='demo'/></GCC_XML>", encoding="utf-8")
-    root = read_cached_castxml(cached)
-    assert root is not None
-    assert root.tag == "GCC_XML"
-    assert cached.exists()
+def test_read_castxml_cache_returns_the_parsed_root(tmp_path: Path) -> None:
+    store = TuParseStore(tmp_path / "store")
+    store.publish("k", "<GCC_XML><Namespace name='demo'/></GCC_XML>", ())
+    root = castxml_backend._read_castxml_cache(store, "k")
+    assert root is not None and root.tag == "GCC_XML"
+    assert root[0].get("name") == "demo"
+    assert store.path("k").exists()
 
 
-def test_read_cached_castxml_evicts_an_unusable_entry(tmp_path: Path) -> None:
-    """A torn/corrupt cache file is discarded, not raised on."""
-    from abicheck.storage.header_ast_cache import read_cached_castxml
-
-    cached = tmp_path / "ast.xml"
-    cached.write_text("<GCC_XML><unclosed>", encoding="utf-8")
-    assert read_cached_castxml(cached) is None
-    assert not cached.exists()  # evicted so the caller falls through to a run
+def test_read_castxml_cache_evicts_an_unusable_entry(tmp_path: Path) -> None:
+    store = TuParseStore(tmp_path / "store")
+    store.publish("k", "<GCC_XML><unclosed>", ())
+    assert castxml_backend._read_castxml_cache(store, "k") is None
+    assert not store.path("k").exists()  # evicted so the caller falls through to a run
 
 
 @pytest.mark.parametrize(
@@ -1079,7 +1077,7 @@ def test_cold_castxml_acquisition_shares_the_producer_run(
     """The miss branch: one real run, its metadata reaching both consumers."""
     header = tmp_path / "api.hpp"
     header.write_text("int api();\n", encoding="utf-8")
-    cache = tmp_path / "ast.xml"  # deliberately absent: this is the cold path
+    store = TuParseStore(tmp_path / "store")  # empty: this is the cold path
     monkeypatch.setattr(
         castxml_backend, "_resolve_gated_castxml_bin", lambda value: "castxml"
     )
@@ -1091,7 +1089,7 @@ def test_cold_castxml_acquisition_shares_the_producer_run(
     monkeypatch.setattr(castxml_backend.shutil, "which", lambda value: value)
     monkeypatch.setattr(castxml_backend, "_tool_identity", lambda *a, **k: "stable")
     monkeypatch.setattr(castxml_backend, "_cache_key", lambda *a, **k: "same")
-    monkeypatch.setattr(castxml_backend, "_cache_path", lambda *a, **k: cache)
+    monkeypatch.setattr(castxml_backend, "ast_cache_store", lambda *a, **k: store)
     monkeypatch.setattr(castxml_backend, "_write_castxml_cache", lambda *a, **k: None)
     produced = ElementTree.Element("GCC_XML")
     runs = 0
