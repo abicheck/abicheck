@@ -357,6 +357,30 @@ def _graph_section(d: Mapping[str, Any]) -> str:
     )
 
 
+def _library_states(d: Mapping[str, Any]) -> str:
+    """Libraries present on one side only, each with its ADR-065 state.
+
+    Only ``removed``/``added`` are proven; every other state says why a
+    one-sided library is not a removal or an addition.
+    """
+    surface = d.get("surface_changes")
+    rows = [
+        r for r in (surface or {}).get("library_states") or () if isinstance(r, Mapping)
+    ]
+    if not rows:
+        return ""
+    body = "".join(
+        f"<tr><td><code>{_h(r.get('library'))}</code></td>"
+        f"<td>{_h(r.get('state'))}</td><td>{_h(r.get('reason') or '')}</td></tr>"
+        for r in rows
+    )
+    return (
+        "<div class='section' id='library-states'><h3>Libraries present on one side only "
+        f"({len(rows)})</h3><table class='changes'><thead><tr><th>Library</th>"
+        f"<th>State</th><th>Reason</th></tr></thead><tbody>{body}</tbody></table></div>"
+    )
+
+
 def render_release_html(document: Mapping[str, Any]) -> str:
     """The complete HTML page for one release comparison document."""
     old_dir = _h(document.get("old_dir", ""))
@@ -379,6 +403,7 @@ def render_release_html(document: Mapping[str, Any]) -> str:
 {_members(document)}
 {_scope(document)}
 {surface}
+{_library_states(document)}
 {_graph_section(document)}
 {_bundle(document)}
 {warn_html}

@@ -101,6 +101,10 @@ def _markdown_body(report: ReleaseReport) -> str:
     from .release_display_limits import MAX_RELEASE_FINDINGS_PER_LIBRARY
     from .release_public_api import render_release_public_api_markdown
     from .release_public_surface_section import render_release_public_surface_markdown
+    from .release_surface_changes import (
+        live_surface_changes,
+        render_release_surface_lines,
+    )
     from .render_release_markdown import (
         _release_md_bundle_findings,
         _release_md_changed_libraries,
@@ -184,6 +188,9 @@ def _markdown_body(report: ReleaseReport) -> str:
         )
         if public_surface_markdown:
             lines.append(public_surface_markdown)
+    lines += render_release_surface_lines(
+        live_surface_changes(ev.library_results, ev.scope_terms.record)
+    )
     lines += render_disposition_audit_section(
         DispositionAudit.from_dict(report.disposition_audit)
     )

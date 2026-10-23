@@ -58,6 +58,7 @@ from . import release_change_inventory as _inventory
 from .comparison_scope import ComparisonScopeTerms
 from .document import ReportDocument
 from .release_assurance_section import ReleaseAssuranceTerms
+from .release_surface_changes import live_surface_changes, stored_surface_changes
 
 if TYPE_CHECKING:
     from ..bundle_models import BundleDiffResult, BundleFinding
@@ -622,6 +623,8 @@ def release_json_document(report: ReleaseReport) -> ReportDocument:
     summary["effective_config_fields"] = dict(fields)
     # ADR-067 C-S2: unconditional -- raw-versus-effective is never dropped.
     summary["disposition_audit"] = report.disposition_audit
+    # Schema 2.2: the same per-member surface block the stored operand carries.
+    summary["surface_changes"] = live_surface_changes(ev.library_results, terms.record)
     return ReportDocument.from_mapping(summary)
 
 
@@ -694,4 +697,6 @@ def stored_release_json_document(report: StoredReleaseReport) -> ReportDocument:
         summary["public_surface_reconciliation"] = _surface.to_dict()
     if result.env_matrix_source_sha256 is not None:
         summary["env_matrix_source_sha256"] = result.env_matrix_source_sha256
+    # Schema 2.2: the same block the live operand carries (both build it here).
+    summary["surface_changes"] = stored_surface_changes(ev)
     return ReportDocument.from_mapping(summary)
