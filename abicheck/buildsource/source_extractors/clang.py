@@ -71,11 +71,7 @@ from ..source_abi import (
     coverage_state_for_family,
     default_fact_set,
 )
-from ._argv import (
-    effective_directory,
-    resolve_read_files,
-    unredact_home,
-)
+from ._argv import resolve_read_files, unredact_home
 from ._deadline_bound import run_bounded_for_extraction
 from .base import SourceExtractionError
 from .clang_command import (
@@ -140,6 +136,7 @@ from .clang_public_roots import (  # noqa: F401
     clang_cache_identity_extra,
 )
 from .clang_source_edges import build_source_edges
+from .launcher_env import effective_directory
 
 #: clang extractor schema/behaviour version, recorded in the dump provenance and
 #: folded into the per-TU cache key (ADR-030 D8). Bump on ANY recipe change so a

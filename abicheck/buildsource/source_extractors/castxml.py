@@ -45,17 +45,15 @@ from ...model.execution_cache import memoized
 from ...storage.castxml_xml import parse_castxml_xml
 from ..build_evidence import CompileUnit
 from ..source_abi import SourceAbiTu, coverage_state_for_family, default_fact_set
-from ._argv import (
-    effective_directory,
-    is_msvc_mode,
-    pick_compiler_binary,
-    resolve_read_files,
-    split_public_roots,
-    unredact_home,
-)
+from ._argv import is_msvc_mode, resolve_read_files, split_public_roots, unredact_home
 from ._deadline_bound import run_bounded_for_extraction
 from .base import SourceExtractionError, assemble_source_tu
-from .compile_invocation import parse_compile_invocation, replayed_tokens
+from .compile_invocation import (
+    parse_compile_invocation,
+    pick_compiler_binary,
+    replayed_tokens,
+)
+from .launcher_env import effective_directory
 
 #: castxml extractor schema/behaviour version, recorded in the dump provenance
 #: and folded into ``source_replay.compute_tu_cache_key``'s per-TU cache key

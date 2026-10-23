@@ -61,6 +61,7 @@ from ..model import AbiSnapshot, Function
 from ..model.change import LibraryMetadata
 from ..serialization import load_snapshot
 from .dump.cache.api import cached_run_dump
+from .dump.cache.finished import Finisher, finish_material, offering
 from .dump.formats import emit_notice
 from .header_exclusion_audit import record_achieved_header_exclusions
 from .project_package_input import resolve_project_package
@@ -405,26 +406,40 @@ def resolve_input(
     exclude_headers = tuple(kwargs.get("exclude_headers") or ())
     ownership = kwargs.pop("ownership", None)  # ADR-075: not an impl kwarg
     reject_exclusions_against_a_manifest(exclude_headers, kwargs.get("dump_manifest"))
-    snapshot = _resolve_input_impl(path, headers, includes, version, lang, **kwargs)
     extracted_now = not is_stored_snapshot_operand(path)
-    if extracted_now:  # ADR-075 D1: a loaded snapshot keeps its recorded scope
-        snapshot = finish_snapshot(
+
+    def _finish(snapshot: AbiSnapshot) -> AbiSnapshot:
+        if extracted_now:  # ADR-075 D1: a loaded snapshot keeps its recorded scope
+            snapshot = finish_snapshot(
+                snapshot,
+                SnapshotFinish(
+                    ownership=OwnershipInputs(
+                        ownership, headers, kwargs.get("public_header_dirs")
+                    )
+                ),
+            )
+        # The *achieved* narrowing, never the request; `headers` is still the
+        # unfiltered operand (`_resolve_input_impl` applies the patterns).
+        return record_achieved_header_exclusions(
             snapshot,
-            SnapshotFinish(
-                ownership=OwnershipInputs(
-                    ownership, headers, kwargs.get("public_header_dirs")
-                )
-            ),
+            headers or [],
+            exclude_headers,
+            extracted_now=extracted_now,
+            scope_inputs=kwargs,
         )
-    # The *achieved* narrowing, never the request; `headers` is still the
-    # unfiltered operand (`_resolve_input_impl` applies the patterns).
-    return record_achieved_header_exclusions(
-        snapshot,
-        headers or [],
-        exclude_headers,
-        extracted_now=extracted_now,
-        scope_inputs=kwargs,
+
+    # A warm extraction-cache hit serves the finished snapshot, not the raw
+    # one re-finished every run (`dump.cache.finished`).
+    finisher = (
+        Finisher(finish_material(ownership, headers, exclude_headers, kwargs), _finish)
+        if extracted_now and kwargs.get("dump_manifest") is None
+        else None
     )
+    with offering(finisher):
+        snapshot = _resolve_input_impl(path, headers, includes, version, lang, **kwargs)
+    if finisher is not None and finisher.applied:
+        return snapshot
+    return _finish(snapshot)
 
 
 def _resolve_input_impl(

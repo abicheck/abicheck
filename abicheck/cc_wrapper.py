@@ -152,7 +152,7 @@ def emit_facts_for_command(
     units = compile_units_from_command(command, directory)
     if not units:
         return None
-    from .buildsource.source_extractors._argv import strip_launchers
+    from .buildsource.source_extractors.compile_invocation import strip_launchers
     from .buildsource.source_extractors.resolver import select_source_backend
     from .extract.compiler_driver import resolve_source_frontend_clang_bin
 

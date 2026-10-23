@@ -55,7 +55,7 @@ from ..checker_types import DiffResult
 from ..errors import ValidationError
 from ..model import AbiSnapshot
 from ..model.comparison_memo import comparison_memo_scope
-from ..policy.public_surface_query import PublicSurfaceQuery
+from ..policy.public_surface_query import ComparisonPublicSurfaces, PublicSurfaceQuery
 from ..policy_file import (
     dedup_validate_overrides_warnings as _dedup_validate_overrides_warnings,
     pending_validate_overrides_warnings as _pending_validate_overrides_warnings,
@@ -307,7 +307,9 @@ def compare_snapshots(
         public_surface_allowlist = set(
             public_surface_allowlist
         ) | _snapshot_contract_symbols(old)
-    query = PublicSurfaceQuery()
+    # One resolution per side for the whole comparison: the entity-id sets
+    # below and every later consumer inside ``compare()`` share it.
+    surfaces = ComparisonPublicSurfaces()
     # Codex review, second look (PR #1154 follow-up: "Obtain ADR approval
     # before forcing verdict modulation"): the prior version of this
     # chokepoint forced `pattern_verdicts=True` unconditionally, citing
@@ -342,8 +344,9 @@ def compare_snapshots(
         diagnostic_comparison=diagnostic_comparison,
         contract_evaluation=contract_evaluation,
         contract_mode=contract_mode,
-        old_public_entity_ids=query.resolve(old),
-        new_public_entity_ids=query.resolve(new),
+        old_public_entity_ids=PublicSurfaceQuery.resolve(old, surfaces.of(old)),
+        new_public_entity_ids=PublicSurfaceQuery.resolve(new, surfaces.of(new)),
+        public_surfaces=surfaces,
         acknowledgments=acknowledgments,
         acknowledgment_policy=acknowledgment_policy,
     )

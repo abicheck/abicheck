@@ -1,6 +1,6 @@
 # L2/L4/L5 extraction convergence — one parse per TU, one owner per primitive
 
-**Status:** Proposed; Phases 1 and 2 implemented (the first two PRs); Phase 3 first slice implemented (the model and four clang/castxml consumers; see Phase 3 for the remaining slices).
+**Status:** Proposed; Phases 1 and 2 implemented (the first two PRs); Phase 3 first slice implemented (the model and four clang/castxml consumers); Phase 3 remaining slice 1 (the L2 header clang argv) and slice 2 (typed include-search operands on `CompilerInvocation`, `clang_public_roots` rescan deleted) implemented; slices 3–4 remain (see Phase 3).
 **Parent plans:** [Duplication & convergence assessment](duplication-and-convergence-assessment.md)
 (its P1 "Compiler invocation handling needs one typed model" owns Phase 3
 here — this plan does not restate that design), [One Semantic Pipeline](one-semantic-pipeline.md)
@@ -198,17 +198,41 @@ the pre-change commit. A mutation of the dedup rule fails it.
 
 **Remaining slices**, each a separate PR:
 
-1. **L2 header clang argv.** `extract/headers/ast_config.py:_build_clang_header_command`
-   still builds its own argv from `header_compile_context`'s derived flags.
-   Route it through the model (the same dedup rule, the same rebase) and add
-   its rows to the golden.
-2. **Typed include search for the public roots.** `clang_public_roots` still
-   re-scans the replayed tokens for `-iquote`/`-I` operands. Carry the
-   include-search entries as typed fields on the model and delete the rescan.
-3. **Launcher and `env` parsing into the model.** `strip_launchers`,
-   `pick_compiler_binary` and the `env` fold still live in `_argv.py` and are
-   called from the model. Move the fold into `parse_compile_invocation`, so
-   `_argv.py` keeps only the backend rendering the plan names.
+1. **L2 header clang argv — implemented.** `_build_clang_header_command` is now a
+   thin wrapper over `extract/headers/clang_header_argv.py`'s
+   `HeaderCompileContext` and `render_clang_header_argv`, which
+   `dumper_ast_config`'s re-export and the clang header backends reach through
+   the same wrapper. Two decisions differ from the first draft of this slice.
+   The renderer lives in `extract/`, not `buildsource/source_extractors/
+   compile_invocation.py`: `extract` may import only `model` and `storage`
+   (`architecture/modules.yaml`), and the header path has no `CompileUnit` for
+   the model to parse. The header keeps its path-class include dedup
+   (`drop_include_tokens_duplicating_paths`), not the token-identity rule
+   `replayed_tokens` applies, because the two rules differ on purpose and the
+   header inputs are already resolved, so there is no rebase to share. The
+   golden (`clang_header_argv_golden.json`, 11 cases) was recorded at the
+   pre-change commit and is asserted unchanged by
+   `tests/test_compile_invocation_differential.py`.
+2. **Typed include search for the public roots.** *Implemented.*
+   `CompilerInvocation.replayed_include_dirs` carries the `-iquote`/`-idirafter`
+   operands (and MSVC `/I`/`-I`) parsed once from the replayed tokens, in the
+   recorded spelling; `clang_public_roots` reads it and its rescan is deleted.
+   The `-I`/`-isystem` structured buckets stay on `CompileUnit`: the probe reads
+   them unrebased, and rebasing them onto the effective directory would change
+   `env -C` output, which is a separate decision.
+3. **Launcher and `env` parsing into the model.** *Implemented.*
+   `strip_launchers`, `pick_compiler_binary` and `_resolve_relative_driver`
+   moved into `compile_invocation.py`, the parse step that owns the
+   launcher decision. The `env` traversal (`-C`/`-u`/`-i`/`-S`, `NAME=VALUE`,
+   ccache/sccache/distcc prefixes) moved to `launcher_env.py`, and its `PATH`
+   and chdir folding to `launcher_env_path.py`: a single 1,000-line module
+   would have breached the 800-line production cap, so the leaf split is the
+   one departure from "fold into `compile_invocation.py`". `_argv.py` keeps the
+   shared helpers and the backend-facing names. The differential test file is
+   unchanged; the launcher rows live in
+   `test_compile_invocation_launcher_differential.py`, whose golden was recorded
+   from the pre-move code. The source generation moved to 5 (a `--bump`, as
+   the gate offered; the scoped edit changes no recorded fact).
 4. **`SourceOperand` and `CompileAction`.** The parent plan's per-source
    `language`/`effective_output`/`action` and `link_inputs` are not in this
    slice. They need a multi-source corpus (`gcc -c a.c b.c`, `-x` switching
@@ -413,11 +437,14 @@ Presence (not a field, from the same run): current side 2600 functions, projecte
 projected-only out-of-scope set is the public-surface problem below.
 
 **What remains for b2** (a separate PR, after this one merges), in order:
-1. The projected side in production code, with the public-surface filter applied
-   before projecting. Without the filter the projection carries 66953
-   out-of-scope declarations (for example `fclose`, `__uflow`, `asprintf`); the
-   golden shows the current side is scoped to the case directory. The gaps that
-   block the dropped fields are closed here or the fields stay excluded:
+1. **Status (2026-10-22): filter and production projection DONE; field gaps OPEN.**
+   The projected side is in production code: `PublicSurfaceClangParser` and
+   `project_clang_surface()` in `abicheck/buildsource/source_extractors/clang_projection.py`.
+   The public-surface provenance filter runs on the declaration lists before any
+   parse, so the 66953 out-of-scope declarations (for example `fclose`, `__uflow`,
+   `asprintf`) no longer reach the projection; the golden test now builds its
+   projected side through this code and its pinned set is unchanged. The four
+   field-level gaps are not closed in this PR and their fields stay excluded:
    [Clang projection](../known-gaps.md#clang-projection-adr-063-phase-4-prerequisites)
    (origin unset, bare member and namespace names, unmangled `distance`, hash and
    default-argument spelling).

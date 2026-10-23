@@ -505,7 +505,7 @@ def expand_export_kwargs(kwargs: dict[str, object]) -> ExportSet:
 
     That the expansion designates a "primary" changes nothing a user can
     observe: :attr:`ExportSet.primary` documents why, and
-    ``cli_compare_helpers._report_compare_result`` renders every target from
+    ``frontends/cli/compare_result.py (_report_compare_result)`` renders every target from
     the same result under the same options, so the pair and the list are two
     slices of one uniform emission loop rather than two behaviours.
 

@@ -351,6 +351,13 @@ subjects:
       - case79_missing_template_instantiation
       - case85_internal_template_signature_changed
       - case87_default_template_arg_changed
+      - case223_header_only_template_default_changed
+      - case224_header_only_template_default_added
+      - case225_header_only_template_default_removed
+      - case226_header_only_template_default_unchanged
+      - case227_nested_namespace_template_default_changed
+      - case228_nontype_template_param_default_changed
+      - case229_exported_template_default_changed
       - case105_concept_tightening
       - case111_enumerable_thread_specific_lambda_ambiguity
       - case122_template_signature_uninstantiated

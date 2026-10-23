@@ -632,7 +632,7 @@ class CompileEntry:
         # (e.g. "sccache clang-cl @args.rsp") tests the launcher name
         # instead of the real driver and picks the wrong quoting convention
         # (Codex review).
-        from .buildsource.source_extractors._argv import strip_launchers
+        from .buildsource.source_extractors.compile_invocation import strip_launchers
 
         unwrapped = strip_launchers(arguments)
         cl_style = bool(unwrapped) and _is_cl_style_driver(unwrapped[0])

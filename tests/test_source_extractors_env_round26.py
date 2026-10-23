@@ -46,7 +46,11 @@ import stat
 import sys
 from pathlib import Path
 
-from abicheck.buildsource.source_extractors._argv import strip_launchers
+from abicheck.buildsource.source_extractors.compile_invocation import (
+    _resolve_relative_driver,
+    pick_compiler_binary,
+    strip_launchers,
+)
 
 
 def _make_executable(path: Path) -> Path:
@@ -93,7 +97,6 @@ def test_pick_compiler_binary_resolves_env_chdir_relative_driver_path(
     would resolve it a SECOND, wrong time.
     """
     from abicheck.buildsource.build_evidence import CompileUnit
-    from abicheck.buildsource.source_extractors._argv import pick_compiler_binary
 
     (tmp_path / "build").mkdir()
     tool_dir = tmp_path / "tool"
@@ -144,7 +147,6 @@ def test_pick_compiler_binary_resolves_plain_relative_driver_without_env_too() -
     in ``test_header_compile_context_gcc_path.py``) -- ``pick_compiler_binary``
     was the one caller inconsistent with it."""
     from abicheck.buildsource.build_evidence import CompileUnit
-    from abicheck.buildsource.source_extractors._argv import pick_compiler_binary
 
     cu = CompileUnit(
         id="cu://x.cc",
@@ -206,7 +208,6 @@ def test_resolve_relative_driver_windows_relative_driver_joined_with_windows_dir
     token/directory's own spelling via ``PureWindowsPath``/``PurePosixPath``,
     never from the analyzing host.
     """
-    from abicheck.buildsource.source_extractors._argv import _resolve_relative_driver
 
     token = r"..\llvm\bin\clang-cl.exe"
     directory = r"C:\work\build"
@@ -225,7 +226,6 @@ def test_resolve_relative_driver_posix_relative_driver_joined_with_posix_directo
     through ``ntpath``. Mirrors ``test_header_compile_context_gcc_path.py``'s
     ``test_resolve_driver_token_posix_relative_driver_joined_with_posix_
     directory`` for the sibling function."""
-    from abicheck.buildsource.source_extractors._argv import _resolve_relative_driver
 
     token = "../llvm/bin/clang-cl"
     directory = "/work/build"
@@ -238,7 +238,6 @@ def test_pick_compiler_binary_relative_driver_empty_directory_left_unjoined() ->
     exactly ``_resolve_driver_token``'s own treatment of this degenerate
     case."""
     from abicheck.buildsource.build_evidence import CompileUnit
-    from abicheck.buildsource.source_extractors._argv import pick_compiler_binary
 
     cu = CompileUnit(
         id="cu://x.cc",
@@ -257,7 +256,6 @@ def test_pick_compiler_binary_bare_driver_name_unaffected_by_directory() -> None
     since a bare name is resolved by ``PATH`` lookup, never relative to any
     directory."""
     from abicheck.buildsource.build_evidence import CompileUnit
-    from abicheck.buildsource.source_extractors._argv import pick_compiler_binary
 
     cu = CompileUnit(
         id="cu://x.cc",
@@ -274,7 +272,6 @@ def test_pick_compiler_binary_absolute_driver_via_env_chdir_unaffected() -> None
     """An already-ABSOLUTE driver token following ``env -C`` must never be
     joined onto ``directory`` a second time -- only normalized."""
     from abicheck.buildsource.build_evidence import CompileUnit
-    from abicheck.buildsource.source_extractors._argv import pick_compiler_binary
 
     cu = CompileUnit(
         id="cu://x.cc",

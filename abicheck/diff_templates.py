@@ -573,29 +573,21 @@ def _callable_identity_name(
     return _strip_param_signature(_canonical_identity_name(name, mangled, demangled))
 
 
-def _template_stems(
-    funcs: list[Function],
-    demangled: dict[str, str],
-) -> set[str]:
-    """Return the template-args-stripped stem of every template
-    instantiation in *funcs*, whatever namespace it lives in."""
-    out: set[str] = set()
-    for f in funcs:
-        qname = _callable_identity_name(f.name, f.mangled, demangled)
-        if _looks_like_template_instantiation(qname):
-            out.add(_strip_template_args(qname))
-    return out
-
-
 def _functions_by_stem(
     funcs: list[Function],
     demangled: dict[str, str],
+    template_stems: set[str],
 ) -> dict[str, list[Function]]:
-    """Group *funcs* by template-args-stripped stem."""
+    """Group *funcs* by template-args-stripped stem, adding to *template_stems*
+    the stem of every template instantiation (whatever its namespace) --
+    one identity resolution per function serves both."""
     out: dict[str, list[Function]] = defaultdict(list)
     for f in funcs:
         qname = _callable_identity_name(f.name, f.mangled, demangled)
-        out[_strip_template_args(qname)].append(f)
+        stem = _strip_template_args(qname)
+        out[stem].append(f)
+        if _looks_like_template_instantiation(qname):
+            template_stems.add(stem)
     return out
 
 
@@ -677,14 +669,13 @@ def detect_internal_template_leaks(
     # unchanged between old and new resolves to byte-identical canonical
     # text on both sides regardless of demangle_batch's own dict-ordering.
     demangled = _batch_demangle_for_identity(old_funcs + new_funcs)
-    old_by_stem = _functions_by_stem(old_funcs, demangled)
-    new_by_stem = _functions_by_stem(new_funcs, demangled)
+    template_stems: set[str] = set()
+    old_by_stem = _functions_by_stem(old_funcs, demangled, template_stems)
+    new_by_stem = _functions_by_stem(new_funcs, demangled, template_stems)
     identity_of = partial(_instantiation_identity, demangled=demangled)
 
     changes: list[Change] = []
-    for stem in sorted(
-        _template_stems(old_funcs, demangled) | _template_stems(new_funcs, demangled)
-    ):
+    for stem in sorted(template_stems):
         sigs = LazyFactInput(
             partial(_sig_pair, stem, old_by_stem, new_by_stem, identity_of)
         )

@@ -1563,7 +1563,7 @@ def _derived_gcc_path(cu: CompileUnit) -> str | None:
         # too means a launcher-wrapped generic driver is found the same way
         # a launcher-wrapped CL-named one already is, rather than only the
         # narrower CL-named case being fixed.
-        from .source_extractors._argv import strip_launchers
+        from .source_extractors.compile_invocation import strip_launchers
 
         stripped = strip_launchers(cu.argv, directory=cu.directory)
         driver = stripped[0] if stripped and not stripped[0].startswith("-") else None
@@ -1584,10 +1584,8 @@ def _derived_gcc_path(cu: CompileUnit) -> str | None:
     # platform's own default path (`os.defpath`) rather than failing
     # outright -- `resolve_bare_token_with_default_path` is tried before
     # giving up, mirroring `pick_compiler_binary`'s identical fix.
-    from .source_extractors._argv import (
-        env_path_cleared_for_bare_token,
-        resolve_bare_token_with_default_path,
-    )
+    from .source_extractors._argv import resolve_bare_token_with_default_path
+    from .source_extractors.launcher_env import env_path_cleared_for_bare_token
 
     if env_path_cleared_for_bare_token(cu.argv, token):
         return resolve_bare_token_with_default_path(token)

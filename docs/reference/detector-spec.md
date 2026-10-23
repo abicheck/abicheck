@@ -66,7 +66,7 @@ One row per `ChangeKind` (422 total). Columns fuse the verdict partition (`check
 | `declaration_moved` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L5 | `declaration_moved` | [case196](examples/case196_header_graph_move_reconciled.md) |
 | `declaration_renamed` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L5 | `declaration_renamed` | — |
 | `default_argument_changed` | api_break | `API_BREAK` | `warning` | unspecified | `default_argument_changed` | — |
-| `default_template_arg_changed` | breaking | `BREAKING` | `error` | L2 | `default_template_arg_changed` | [case87](examples/case87_default_template_arg_changed.md) |
+| `default_template_arg_changed` | breaking | `BREAKING` | `error` | L2 | `default_template_arg_changed` | [case229](examples/case229_exported_template_default_changed.md), [case87](examples/case87_default_template_arg_changed.md) |
 | `dt_relr_introduced` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L0 | `dt_relr_introduced` | — |
 | `dt_relr_removed` | quality | `COMPATIBLE` | `warning` | L0 | `dt_relr_removed` | — |
 | `dwarf_info_missing` | quality | `COMPATIBLE` | `warning` | unspecified | `dwarf_info_missing` | — |

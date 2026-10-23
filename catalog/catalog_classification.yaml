@@ -167,6 +167,13 @@ rules:
   - case219_public_virtual_dispatch_set_changed
   - case220_public_virtual_dispatch_set_reordered
   - case222_public_consumer_compiled_dependency_changed
+  - case223_header_only_template_default_changed
+  - case224_header_only_template_default_added
+  - case225_header_only_template_default_removed
+  - case226_header_only_template_default_unchanged
+  - case227_nested_namespace_template_default_changed
+  - case228_nontype_template_param_default_changed
+  - case229_exported_template_default_changed
   - case19_enum_member_removed
   - case20_enum_member_value_changed
   - case21_method_became_static

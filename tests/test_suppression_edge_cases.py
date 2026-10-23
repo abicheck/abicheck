@@ -12,6 +12,7 @@ Tests:
 
 from __future__ import annotations
 
+import sys
 from datetime import date, timedelta
 
 from abicheck.checker import ChangeKind, Verdict, compare
@@ -21,7 +22,41 @@ from abicheck.model import (
     Visibility,
 )
 from abicheck.model.change import Change
+from abicheck.policy import selectors_namespace_glob
 from abicheck.policy.suppression.rules import Suppression, SuppressionList
+
+
+def _matcher_work(suppression: Suppression, symbol: str) -> tuple[bool, int]:
+    """Match *symbol* and count the line events the namespace matcher executes.
+
+    Deterministic, not wall-clock: the count depends only on the matcher's
+    work, so the verdict is the same on every machine and under any load.
+    Only frames whose code lives in ``selectors_namespace_glob`` are traced,
+    so the count holds the matcher's own work and nothing else. The hook
+    saved and restores whatever tracer was installed (coverage tracing in
+    CI), not None, so this measurement does not switch it off.
+    """
+    module_file = selectors_namespace_glob.__file__
+    lines = 0
+
+    def line_hook(frame, event, arg):
+        nonlocal lines
+        if event == "line":
+            lines += 1
+        return line_hook
+
+    def trace(frame, event, arg):
+        return line_hook if frame.f_code.co_filename == module_file else None
+
+    saved_trace = sys.gettrace()
+    sys.settrace(trace)
+    try:
+        matched = suppression.matches(
+            Change(kind=ChangeKind.FUNC_REMOVED, symbol=symbol, description="removed")
+        )
+    finally:
+        sys.settrace(saved_trace)
+    return matched, lines
 
 
 def _snap(
@@ -485,20 +520,23 @@ class TestNamespaceGlobstarSemantics:
         # single backtracking regex — verified both for speed and for
         # producing the same match/no-match verdict a correct backtracking
         # match would.
-        import time
-
         s = Suppression(
             namespace="**::a::**::a::**::a::**::a::**::a::z",
             reachability="any",
             reason="x",
         )
-        non_matching = "::".join(["a"] * 120 + ["y"])
-        t0 = time.monotonic()
-        result = s.matches(self._change(non_matching))
-        elapsed = time.monotonic() - t0
-        assert result is False
-        assert elapsed < 3.0, (
-            f"namespace match took {elapsed:.2f}s — not backtracking-safe"
+        # Operation count, not wall-clock: doubling the name roughly doubles
+        # the matcher's line events when it is linear (measured ~2.0x). An
+        # exponential or backtracking matcher grows far faster, so the 3.0
+        # bound sits between the two.
+        small_matched, small_work = _matcher_work(s, "::".join(["a"] * 120 + ["y"]))
+        large_matched, large_work = _matcher_work(s, "::".join(["a"] * 240 + ["y"]))
+        assert small_matched is False
+        assert large_matched is False
+        assert large_work / small_work < 3.0, (
+            f"doubling the name grew the matcher's work "
+            f"{large_work / small_work:.2f}x ({small_work} -> {large_work} "
+            "line events) — not backtracking-safe"
         )
 
         # Correctness, not just speed: a genuinely matching long name still
@@ -524,20 +562,22 @@ class TestNamespaceGlobstarSemantics:
         # standalone globstar and walks them with a backtracking-safe DP
         # (see that class's docstring) — matching this pattern's 5
         # globstars in polynomial time regardless of what borders them.
-        import time
-
         s = Suppression(
             namespace="**::a*::**::a::**::a::**::a::**::a::z",
             reachability="any",
             reason="x",
         )
-        non_matching = "::".join(["a"] * 300 + ["y"])
-        t0 = time.monotonic()
-        result = s.matches(self._change(non_matching))
-        elapsed = time.monotonic() - t0
-        assert result is False
-        assert elapsed < 3.0, (
-            f"namespace match took {elapsed:.2f}s — not backtracking-safe"
+        # Operation count, not wall-clock (see the test above): linear work
+        # doubles per doubling of the name (measured ~2.0x), so 3.0 separates
+        # it from any super-linear regression.
+        small_matched, small_work = _matcher_work(s, "::".join(["a"] * 300 + ["y"]))
+        large_matched, large_work = _matcher_work(s, "::".join(["a"] * 600 + ["y"]))
+        assert small_matched is False
+        assert large_matched is False
+        assert large_work / small_work < 3.0, (
+            f"doubling the name grew the matcher's work "
+            f"{large_work / small_work:.2f}x ({small_work} -> {large_work} "
+            "line events) — not backtracking-safe"
         )
 
         # Correctness: the wildcarded segment ("a*") still matches one
@@ -565,8 +605,6 @@ class TestNamespaceGlobstarSemantics:
         # span by its own last declared segment before attempting the full
         # regex match, turning "try every span with a regex" into "skip
         # every span whose last name segment doesn't literally equal 'z'".
-        import sys
-
         s = Suppression(
             namespace="**::a*::**::a*::**::a*::z",
             reachability="any",
@@ -589,7 +627,6 @@ class TestNamespaceGlobstarSemantics:
         # Each bound sits between the measured fixed-matcher growth and the
         # growth it must catch. Only the matcher's own work is counted: the
         # hooks see `_match_run` frames and `fullmatch` calls, nothing else.
-        from abicheck.policy import selectors_namespace_glob
 
         match_run_code = selectors_namespace_glob._match_run.__code__
 

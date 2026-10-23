@@ -860,7 +860,7 @@ class TestSyclHostOnlyGatedOnInvokedBinary:
     the binary a command will actually be RUN with (``clang_bin``), never on
     ``pick_compiler_binary``'s *emulated* compiler (``cc_bin``, which falls
     back to the compile unit's own recorded ``argv[0]`` absent an explicit
-    override -- see ``_argv.pick_compiler_binary``'s own docstring for why
+    override -- see ``compile_invocation.pick_compiler_binary``'s own docstring for why
     the two must never be conflated). The individual example tests above
     pin the specific reported scenario; this class sweeps a matrix so the
     SAME class of bug (a future binary-specific flag gated on the wrong one

@@ -113,7 +113,7 @@ def test_validate_pack_manifests_forwards_the_contract(monkeypatch) -> None:
 
 
 def _preflight(**overrides):
-    from abicheck.cli_compare_helpers import _preflight_manifests_and_audit
+    from abicheck.frontends.cli.compare_preflight import _preflight_manifests_and_audit
 
     kwargs = dict(
         old_dump_manifest=None,
@@ -155,7 +155,7 @@ def test_preflight_renders_pack_error_as_usage_error(monkeypatch) -> None:
 
 
 def _evaluation_config(**overrides):
-    from abicheck.cli_compare_helpers import _resolve_evaluation_config
+    from abicheck.frontends.cli.compare_preflight import _resolve_evaluation_config
 
     kwargs = dict(
         headers=(),
