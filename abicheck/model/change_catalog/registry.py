@@ -531,8 +531,8 @@ def _validate_entry(e: ChangeKindMeta) -> None:
         )
     if e.contract_subject is None:
         raise ValueError(
-            f"{e.kind!r}: contract_subject must be declared (ADR-049 amendment) "
-            f"-- an undeclared kind would read UNKNOWN_UNRESOLVED and gate"
+            f"{e.kind!r}: contract_subject must be declared -- an undeclared "
+            f"kind would read UNKNOWN_UNRESOLVED under a stated contract and gate"
         )
     if (
         e.entity is ChangeEntity.ANALYSIS

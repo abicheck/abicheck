@@ -951,7 +951,8 @@ read `UNKNOWN_UNRESOLVED`, which the coverage ledger turns into an
 unsuppressible `finding_unresolved` failure and exit 1; under the adaptive
 default the `all` fallback hid the gap. The list grew one field report at a
 time (SONAME, `DT_NEEDED`, version nodes, then the SVS report's imports), and
-a whole-catalog probe still found 83 binary and build kinds unresolved —
+a whole-catalog probe still found 59 kinds whose subject is not a
+declaration reading `UNKNOWN_UNRESOLVED` —
 `toolchain_flag_drift`, the `*_mode_changed` build modes, every `bundle_*` and
 `sycl_*` kind, `stdlib_implementation_changed`, `dwarf_info_missing`,
 `target_dependency_added`, and more.
@@ -1005,7 +1006,7 @@ exports, all} × subject shape).
 
 - **2026-10-23 — every ChangeKind declares its contract subject.** See the
   amendment above: the hand-curated `NOT_APPLICABLE` list is replaced by a
-  mandatory catalog field, closing 83 kinds that read `UNKNOWN_UNRESOLVED`
+  mandatory catalog field, closing the 59 non-declaration kinds that read `UNKNOWN_UNRESOLVED`
   under a stated contract.
 
 - **2026-10-07 — the evidence-adaptive default never drops a finding it

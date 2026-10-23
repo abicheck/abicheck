@@ -6,7 +6,7 @@ no contract domain claimed fell through to the header domain, read
 ``finding_unresolved`` coverage failure (exit 1). The escapes were a
 hand-curated exemption list grown one field report at a time (SONAME, then
 ``DT_NEEDED``, then version nodes, then -- the SVS report -- imports), and a
-probe of the whole catalog still found 83 binary/build kinds unresolved
+probe of the whole catalog still found 59 non-declaration kinds unresolved
 (``toolchain_flag_drift``, ``exceptions_mode_changed``, every ``bundle_*`` and
 ``sycl_*`` kind, ...).
 

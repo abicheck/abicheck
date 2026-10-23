@@ -4,7 +4,7 @@
   `scope: public: true`) no longer leaves binary-wide, build, toolchain and
   dependency-edge findings `UNKNOWN_UNRESOLVED`. Such a finding names nothing
   a contract can place, so it used to become an unsuppressible
-  `finding_unresolved` coverage failure and exit 1. 83 kinds were affected,
+  `finding_unresolved` coverage failure and exit 1. 59 kinds were affected,
   among them `toolchain_flag_drift`, `exceptions_mode_changed`,
   `rtti_mode_changed`, `stdlib_implementation_changed`, `dwarf_info_missing`,
   `target_dependency_added` and every `bundle_*` and `sycl_*` kind. They are

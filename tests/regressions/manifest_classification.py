@@ -637,7 +637,7 @@ CLASSIFICATION_BUG_CLASSES: tuple[BugClass, ...] = (
         public_surfaces=("cli",),
         axes={
             # The whole ChangeKind catalog, by its declared contract subject
-            # (the 2026-10 ADR-049 amendment; a probe found 83 binary/build
+            # (the 2026-10 ADR-049 amendment; a probe found 59 binary/build
             # kinds still unresolved after #1751).
             "kind": (
                 "declaration",
