@@ -698,5 +698,7 @@ def stored_release_json_document(report: StoredReleaseReport) -> ReportDocument:
     if result.env_matrix_source_sha256 is not None:
         summary["env_matrix_source_sha256"] = result.env_matrix_source_sha256
     # Schema 2.2: the same block the live operand carries (both build it here).
-    summary["surface_changes"] = stored_surface_changes(ev)
+    summary["surface_changes"] = stored_surface_changes(
+        result.per_library, ev.scope_terms.record
+    )
     return ReportDocument.from_mapping(summary)

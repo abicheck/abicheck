@@ -15,7 +15,6 @@ from __future__ import annotations
 import json
 import re
 from pathlib import Path
-from types import SimpleNamespace
 
 from click.testing import CliRunner
 
@@ -257,12 +256,7 @@ def test_stored_and_live_folds_agree_over_the_same_member_results() -> None:
         _snap("libcore.so", ["core_a", "core_new"]),
     )
     live = live_surface_changes([{"library": "libcore.so", "_diff_result": diff}], None)
-    stored = stored_surface_changes(
-        SimpleNamespace(
-            result=SimpleNamespace(per_library=[diff]),
-            scope_terms=SimpleNamespace(record=None),
-        )
-    )
+    stored = stored_surface_changes([diff], None)
 
     assert live == stored
     assert _entries(live) == {
