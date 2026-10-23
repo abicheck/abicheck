@@ -34,9 +34,16 @@ records a declaration line.
 from __future__ import annotations
 
 import os
+import posixpath
 from typing import Any
 
-__all__ = ["decl_file_path"]
+__all__ = ["decl_file_path", "decl_header_location"]
+
+#: Suffixes of a declaring file the snapshot records as a header location.
+#: A suffix-less path (a standard-library header) counts as a header too.
+_HEADER_LOCATION_SUFFIXES = frozenset(
+    {".h", ".hh", ".hpp", ".hxx", ".h++", ".ipp", ".tpp", ".inc", ".inl", ".tcc"}
+)
 
 
 def _text(value: Any) -> str:
@@ -103,6 +110,28 @@ def decl_file_path(die: Any, CU: Any) -> str | None:
         if line:
             return f"{path}:{line}"
     return path
+
+
+def decl_header_location(die: Any, CU: Any) -> str | None:
+    """:func:`decl_file_path`, kept only when the declaring file is a header.
+
+    A declaration whose file is a source file (``lib.cpp``) is the library's
+    own definition, not a header it declares its surface in. Recording that
+    file as the declaration's ``source_location`` would make the snapshot's
+    ``is_impl_source`` treat the type as an implementation detail and mark it
+    opaque, which downgrades a real layout change to a non-break. Such a
+    declaration keeps no location, exactly as before DWARF declaration files
+    were resolved, and a header-declared one carries its location.
+    """
+    location = decl_file_path(die, CU)
+    if location is None:
+        return None
+    head, sep, tail = location.rpartition(":")
+    path = head if sep and tail.isdigit() else location
+    suffix = posixpath.splitext(path)[1].lower()
+    if suffix == "" or suffix in _HEADER_LOCATION_SUFFIXES:
+        return location
+    return None
 
 
 def _file_path(header: Any, file_idx: int, comp_dir: str, CU: Any) -> str | None:

@@ -54,7 +54,7 @@ from .dwarf_utils import (
 )
 from .elf_symbol_filter import is_abi_relevant_elf_symbol
 from .extract import dwarf_vtable_completeness as _dvc
-from .extract.dwarf_decl_file import decl_file_path
+from .extract.dwarf_decl_file import decl_header_location
 from .extract.dwarf_records import (
     access_from_dwarf as _access_from_dwarf,
     admit_subprogram as _admit_subprogram,
@@ -1089,14 +1089,13 @@ class _DwarfSnapshotBuilder:
                 vtable.append(vt_mangled)
 
     def _resolve_decl_file(self, die: Any, CU: Any) -> str | None:
-        """Resolve DW_AT_decl_file to a source file path.
+        """Resolve DW_AT_decl_file to a header location, or ``None``.
 
-        Returns ``"<path>:<line>"`` (or the bare path when no line is
-        recorded), or ``None`` if the attribute is absent or unresolvable.
-        DWARF 4 and DWARF 5 file tables differ; see
-        :mod:`abicheck.extract.dwarf_decl_file`.
+        Returns ``"<path>:<line>"`` when the declaring file is a header, else
+        ``None``: a source-file declaration keeps no location (see
+        :func:`abicheck.extract.dwarf_decl_file.decl_header_location`).
         """
-        return decl_file_path(die, CU)
+        return decl_header_location(die, CU)
 
     def _process_field(
         self,

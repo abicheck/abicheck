@@ -13,7 +13,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from abicheck.extract.dwarf_decl_file import decl_file_path
+from abicheck.extract.dwarf_decl_file import decl_file_path, decl_header_location
 
 COMP_DIR = b"/work/build"
 
@@ -98,3 +98,41 @@ def test_dwarf4_zero_index_is_no_file_and_missing_attribute_is_none() -> None:
 def test_out_of_range_file_index_resolves_to_none() -> None:
     cu = _cu(5, [{"DW_LNCT_path": b"api.h", "DW_LNCT_directory_index": 0}], [COMP_DIR])
     assert decl_file_path(_Die(9, 4), cu) is None
+
+
+@pytest.mark.parametrize(
+    ("version", "files", "dirs", "file_index", "expected"),
+    [
+        pytest.param(
+            5,
+            [{"DW_LNCT_path": b"lib.cpp", "DW_LNCT_directory_index": 1}],
+            [COMP_DIR, b"lib"],
+            0,
+            None,
+            id="source-file-is-not-a-header-location",
+        ),
+        pytest.param(
+            5,
+            [{"DW_LNCT_path": b"api.h", "DW_LNCT_directory_index": 1}],
+            [COMP_DIR, b"lib"],
+            0,
+            "/work/build/lib/api.h:6",
+            id="header-keeps-its-location",
+        ),
+        pytest.param(
+            4,
+            [{"name": b"stdlib_vector", "dir_index": 1}],
+            [b"/usr/include/c++/12/vector"],
+            1,
+            "/usr/include/c++/12/vector/stdlib_vector:6",
+            id="suffixless-header-is-a-header-location",
+        ),
+    ],
+)
+def test_declaration_location_is_recorded_only_for_a_header(
+    version, files, dirs, file_index, expected
+) -> None:
+    # A source-file declaration recorded as a location would make the snapshot's
+    # is_impl_source treat the type as opaque and downgrade its layout change.
+    cu = _cu(version, files, dirs)
+    assert decl_header_location(_Die(file_index, 6), cu) == expected
