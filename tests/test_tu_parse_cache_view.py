@@ -339,3 +339,20 @@ def test_cache_hit_takes_the_current_units_identity(tmp_path: Path) -> None:
     served = results[0]
     assert served is not None
     assert (served.tu_id, served.target_id) == ("cu://b", "target://two")
+
+
+def test_dependency_digest_is_none_when_the_file_cannot_be_read(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # A file that exists but cannot be read is an unreadable dependency: no digest,
+    # so the entry it would have recorded is not published.
+    from abicheck.storage import tu_parse_store
+
+    dep = tmp_path / "locked.h"
+    dep.write_text("int x;\n")
+
+    def unreadable(_path: Path) -> str:
+        raise OSError("permission denied")
+
+    monkeypatch.setattr(tu_parse_store, "digest_file", unreadable)
+    assert tu_parse_store.dep_digest(str(dep)) is None
