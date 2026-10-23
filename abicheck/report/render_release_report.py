@@ -188,9 +188,13 @@ def _markdown_body(report: ReleaseReport) -> str:
         )
         if public_surface_markdown:
             lines.append(public_surface_markdown)
-    lines += render_release_surface_lines(
-        live_surface_changes(ev.library_results, ev.scope_terms.record)
-    )
+    if not report.show_only:
+        # Like the public-API section above: a `--show-only` view lists only
+        # the findings its filter kept, so an unfiltered surface section would
+        # contradict it. The JSON block stays full (raw-versus-effective).
+        lines += render_release_surface_lines(
+            live_surface_changes(ev.library_results, ev.scope_terms.record)
+        )
     lines += render_disposition_audit_section(
         DispositionAudit.from_dict(report.disposition_audit)
     )
