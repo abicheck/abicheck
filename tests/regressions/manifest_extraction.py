@@ -54,7 +54,10 @@ EXTRACTION_BUG_CLASSES: tuple[BugClass, ...] = (
             "produced the binary. A unit with no -m flag gains none."
         ),
         fixed_by=(1769,),
-        seed_tests=("tests/test_header_target_isa_flags.py",),
+        seed_tests=(
+            "tests/test_header_target_isa_flags.py",
+            "tests/test_family_f4_heuristics.py",
+        ),
         axes={
             "frontend": ("castxml", "clang"),
             "isa": ("sse4.2", "avx", "avx2", "avx512f", "none"),
