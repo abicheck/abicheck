@@ -325,6 +325,17 @@ ANALYSIS_1_BUG_CLASSES: tuple[BugClass, ...] = (
         seed_tests=(
             "tests/test_cross_tier_dedup_unhashable_value.py",
             "tests/test_finding_identity_properties.py",
+            # A header-only inline removal is one observation at two tiers: the
+            # header tier and the L4 replay both emit INLINE_FUNCTION_REMOVED
+            # under different wording, so the exact key never collapsed them.
+            # Pinned by name-level, one-for-one pairing across C and C++ shapes.
+            "tests/test_inline_removal_dedup.py",
+            "tests/test_inline_removal_source_replay_e2e.py",
+            # A namespace-scope constexpr value change is one observation at two
+            # tiers: CONSTANT_CHANGED (header) and CONSTEXPR_VALUE_CHANGED (L4
+            # replay). Same name-level, one-for-one pairing as the inline pair.
+            "tests/test_constexpr_constant_dedup.py",
+            "tests/test_constexpr_constant_source_replay_e2e.py",
             "tests/unit/compare/test_dedup_key.py",
             "tests/test_diff_namespaces.py",
             # workflows/cross_source_hygiene.py's own per-side OLD/NEW

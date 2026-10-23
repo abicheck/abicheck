@@ -30,8 +30,10 @@ it. Moved out of the legacy ``diff_filtering.py`` (ADR-061).
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections import Counter
+from collections.abc import Callable, Mapping
 
+from ..demangle import demangle
 from ..diff_helpers import (
     canonicalize_record_symbol,
     cross_tier_transition,
@@ -441,6 +443,98 @@ def _drop_elf_only_duplicates_of_visibility(changes: list[Change]) -> list[Chang
     return [c for c in changes if (c.kind, c.symbol) not in covered]
 
 
+#: The evidence bucket the L4 source replay tags its findings with (set by
+#: ``buildsource.evidence_report`` before the disposition pipeline runs).
+_SOURCE_REPLAY_EVIDENCE = "source_only"
+
+
+def _inline_removal_name(change: Change) -> str:
+    """The bare qualified name an inline-removal finding is about.
+
+    The header tier names the function by its mangled symbol. Its demangled form
+    (``demo::f(int)``) is filled in by enrichment that runs only after this step,
+    so it is demangled here. The source replay names the function by qualified
+    name (``demo::f``). Stripping the parameter list lines the two up.
+    """
+    name = change.demangled_symbol or demangle(change.symbol) or change.symbol
+    return name.split("(", 1)[0]
+
+
+def _constant_name(change: Change) -> str:
+    """The qualified name a constant finding is about.
+
+    Both tiers spell a namespace-scope constant by its qualified name
+    (``demo::kLimit``), so the symbol is the key with no normalization.
+    """
+    return change.symbol
+
+
+#: (source-replay kind, header-tier kind, name key) for each observation the
+#: header tier and the L4 replay both report. The header tier is the owner in
+#: every pair: it is artifact-anchored (ADR-028 D3) and carries the
+#: declaration's own facts, which the replay copy does not.
+_SOURCE_REPLAY_TWINS: tuple[
+    tuple[ChangeKind, ChangeKind, Callable[[Change], str]], ...
+] = (
+    (
+        ChangeKind.INLINE_FUNCTION_REMOVED,
+        ChangeKind.INLINE_FUNCTION_REMOVED,
+        _inline_removal_name,
+    ),
+    # L4 emits CONSTEXPR_VALUE_CHANGED only for C++ constexpr variables
+    # (clang_node_predicates: VarDecl with ``constexpr``). Plain ``const`` and
+    # all of C reach the header tier alone.
+    (
+        ChangeKind.CONSTEXPR_VALUE_CHANGED,
+        ChangeKind.CONSTANT_CHANGED,
+        _constant_name,
+    ),
+)
+
+
+def _drop_source_replay_twins(
+    changes: list[Change],
+    replay_kind: ChangeKind,
+    header_kind: ChangeKind,
+    name_of: Callable[[Change], str],
+) -> list[Change]:
+    """Drop a source-replay ``replay_kind`` finding the header tier reports too.
+
+    The header tier's finding and the L4 replay's finding are one observation
+    with different descriptions, so the exact and identity keys above never see
+    them as equal. The header-tier finding is kept.
+
+    Matched one for one by name, so an extra replay finding with no header-tier
+    twin (say, a second overload the header tier did not see) stays visible.
+    Every dropped finding is recorded as ``deduplicated`` by the disposition
+    pipeline, so the raw total still counts it (ADR-067).
+    """
+    header_tier = Counter(
+        name_of(c)
+        for c in changes
+        if c.kind is header_kind and c.evidence_category != _SOURCE_REPLAY_EVIDENCE
+    )
+    result: list[Change] = []
+    for c in changes:
+        if (
+            c.kind is replay_kind
+            and c.evidence_category == _SOURCE_REPLAY_EVIDENCE
+            and header_tier[name_of(c)] > 0
+        ):
+            header_tier[name_of(c)] -= 1
+            continue
+        result.append(c)
+    return result
+
+
+def _drop_source_replay_duplicates(changes: list[Change]) -> list[Change]:
+    """Apply :func:`_drop_source_replay_twins` for every pair in
+    :data:`_SOURCE_REPLAY_TWINS`."""
+    for replay_kind, header_kind, name_of in _SOURCE_REPLAY_TWINS:
+        changes = _drop_source_replay_twins(changes, replay_kind, header_kind, name_of)
+    return changes
+
+
 def deduplicate_cross_detector(
     changes: list[Change],
     old: AbiSnapshot | None = None,
@@ -547,6 +641,7 @@ def deduplicate_cross_detector(
                     c.qualified_name = qual
 
     changes = _drop_elf_only_duplicates_of_visibility(changes)
+    changes = _drop_source_replay_duplicates(changes)
     seen: set[str] = set()
     result: list[Change] = []
     for c in changes:
