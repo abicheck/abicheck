@@ -436,6 +436,29 @@ TYPE_FACTS: list[FactDefinition] = [
         ),
     ),
     _E(
+        owner="Function",
+        field="template_param_defaults",
+        value_type="tuple[str | None, ...]",
+        producing_backends=("clang",),
+        persisted=True,
+        identity_relevant=False,
+        comparable=True,
+        suppressible=False,
+        reportable=False,
+        lifecycle=FactLifecycle.CONSUMED,
+        consumed_by=(
+            "abicheck.compare.template_param_defaults:detect_function_template_param_default_changed",
+        ),
+        notes=(
+            "Schema v64, no legacy sibling: for a function template's pattern "
+            "(its FunctionTemplateDecl's own FunctionDecl), the spelled default "
+            "of each template parameter in declaration order (None for a "
+            "parameter with no default), read from the clang AST. Only PRESENT "
+            "feeds the header-level default-change kind; a castxml or pre-v64 "
+            "side is UNKNOWN and never compares equal to a recorded side."
+        ),
+    ),
+    _E(
         owner="RecordType",
         field="template_param_defaults",
         value_type="tuple[str | None, ...]",

@@ -286,6 +286,14 @@ class Function:
     return_type_identities_fact: Fact[tuple[str, ...]] | None = field(
         default=None, kw_only=True, compare=False
     )
+    # ADR-085 D1 for a function template: the spelled default of each template
+    # parameter of the ``FunctionTemplateDecl`` this declaration is the pattern
+    # of, in declaration order (``None`` for a parameter with no default). Set
+    # only on a function-template pattern by a producer that records it (clang);
+    # see ``model/entities.py``'s ``RecordType.template_param_defaults_fact``.
+    template_param_defaults_fact: Fact[tuple[str | None, ...]] | None = field(
+        default=None, kw_only=True, compare=False
+    )
     # ADR-063 Phase 2 identity carrier (persisted since schema v28) -- see
     # ``model/entities.py``'s ``RecordType.entity_id`` for the full
     # rationale, including why this is keyword-only, excluded from

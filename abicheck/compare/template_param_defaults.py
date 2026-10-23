@@ -35,6 +35,7 @@ from ..model import (
 from ..model.change import Change
 from ..model.change_catalog.kinds import ChangeKind
 from ..model.evidence_status import ReachabilityState
+from ..model.identity import EntityId, InlineNamespace, Namespace, Record
 from ..model.signature_token_scan import _split_top_level_commas
 from .fact_gate import both_facts_present
 from .template_surface import (
@@ -120,6 +121,90 @@ def detect_template_param_default_changed(
         covered = key in reported_templates or any(
             _is_in_scope(stem, key) for stem in instantiation_stems
         )
+        (suppressed if covered else findings).append(change)
+    return findings, suppressed
+
+
+def _function_pattern_facts(snap: AbiSnapshot) -> dict[EntityId, Function]:
+    """``entity_id -> function-template pattern`` for *snap* (ADR-085 D1, function
+    slice). Only a declaration that carries a recorded defaults fact and an
+    entity identity is a candidate. Two patterns with the same identity are
+    ambiguous and dropped, not trusted.
+    """
+    seen: dict[EntityId, Function] = {}
+    ambiguous: set[EntityId] = set()
+    for fn in snap.declarations.functions:
+        if fn.template_param_defaults_fact is None or fn.entity_id is None:
+            continue
+        key = fn.entity_id
+        if key in seen or key in ambiguous:
+            ambiguous.add(key)
+            continue
+        seen[key] = fn
+    for key in ambiguous:
+        seen.pop(key, None)
+    return seen
+
+
+def detect_function_template_param_default_changed(
+    old: AbiSnapshot,
+    new: AbiSnapshot,
+    *,
+    instantiation_stems: Collection[str] = (),
+) -> tuple[list[Change], list[Change]]:
+    """ADR-085 D2 for a function template: a header-level change to a
+    function template's default argument.
+
+    Pairs the function-template patterns of *old* and *new* by their entity
+    identity, which carries each template parameter's kind, so two overloads
+    that share a name are never paired with each other. A pair fires only when
+    both sides carry PRESENT recorded defaults (D1), the parameter count is the
+    same, and at least one default spelling differs. A change already reported
+    as ``DEFAULT_TEMPLATE_ARG_CHANGED`` (shape A, an exported instantiation of
+    the same template, named by *instantiation_stems*) is returned in the second
+    list instead, so the caller can record it as deduplicated.
+
+    Returns ``(findings, suppressed)``.
+    """
+    old_patterns = _function_pattern_facts(old)
+    new_patterns = _function_pattern_facts(new)
+    findings: list[Change] = []
+    suppressed: list[Change] = []
+    for key in sorted(old_patterns.keys() & new_patterns.keys(), key=repr):
+        old_fn, new_fn = old_patterns[key], new_patterns[key]
+        # The identity carries the namespace/record path and the leaf name, so
+        # the qualified name needs no demangled spelling (a pattern has none).
+        scope_names = [
+            segment.name
+            for segment in key.scope
+            if isinstance(segment, (Namespace, Record, InlineNamespace))
+        ]
+        qname = "::".join([*scope_names, key.leaf_name])
+        if not both_facts_present(old_fn, new_fn, "template_param_defaults", qname):
+            continue
+        old_fact = old_fn.template_param_defaults_fact
+        new_fact = new_fn.template_param_defaults_fact
+        if old_fact is None or new_fact is None:
+            continue
+        before, after = old_fact.value, new_fact.value
+        if before is None or after is None or len(before) != len(after):
+            continue
+        if before == after:
+            continue
+        changed = [
+            i for i, (a, b) in enumerate(zip(before, after, strict=True)) if a != b
+        ]
+        symbol = f"{qname}({', '.join(param.type for param in new_fn.params)})"
+        change = make_change(
+            ChangeKind.TEMPLATE_PARAM_DEFAULT_CHANGED,
+            symbol=symbol,
+            name=qname,
+            detail=", ".join(f"param {i}" for i in changed),
+            old_value=repr(before),
+            new_value=repr(after),
+            **_contract.reachability_of(new_fn, header_parsed=True),
+        )
+        covered = any(_is_in_scope(stem, qname) for stem in instantiation_stems)
         (suppressed if covered else findings).append(change)
     return findings, suppressed
 
