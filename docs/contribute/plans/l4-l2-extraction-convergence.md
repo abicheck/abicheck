@@ -233,10 +233,30 @@ the pre-change commit. A mutation of the dedup rule fails it.
    `test_compile_invocation_launcher_differential.py`, whose golden was recorded
    from the pre-move code. The source generation moved to 5 (a `--bump`, as
    the gate offered; the scoped edit changes no recorded fact).
-4. **`SourceOperand` and `CompileAction`.** The parent plan's per-source
-   `language`/`effective_output`/`action` and `link_inputs` are not in this
-   slice. They need a multi-source corpus (`gcc -c a.c b.c`, `-x` switching
-   between sources) before the model can carry them honestly.
+4. **`SourceOperand` and `CompileAction`.** *Model implemented; consumer
+   wiring is the next slice.* The multi-source corpus
+   (`tests/data/compile_invocation/multi_source_compile_commands.json`, 16
+   entries: `gcc -c a.c b.c`, `-x` switching, `-E`/`-S`/`-c`, link with
+   objects and archives, `-include`/`-MF` operands) is pinned by
+   `multi_source_clang_argv_golden.json`, recorded before the model gained its
+   fields and unchanged after. `source_extractors/compile_action.py` (a leaf)
+   parses the GNU-driver argv tail into `SourceOperand`s, `CompileAction`
+   (last of `-E`/`-S`/`-c` wins; none means `LINK`) and `link_inputs`
+   (non-source positionals, under `LINK` only). `CompilerInvocation` carries
+   `action`, `operands` and `link_inputs` with defaults, so no existing
+   constructor changes. Expectations are hand-written in
+   `tests/test_compile_invocation_source_operands.py`.
+   Decisions: `effective_output` is the `-o` value only when one source
+   produces one output (gcc rejects `-o` with several `-c` sources); otherwise
+   the default basename in the working directory. Under `LINK` every operand
+   shares the link output. `SourceOperand.source` is spelled as in argv.
+   Not in this slice: CL-mode (`/c`, `/Fo`, `/Tc`/`/Tp`) operands, which stay
+   `action=None`; `@file` response files, reported as link inputs rather than
+   expanded; `env -C` prefixes, whose operand spelling is the launcher-folded
+   one. **Next slice:** route the link-unit and per-source compile decisions
+   (currently one `CompileUnit` per entry, and link entries become compile
+   units) through `operands`, with a differential golden for the changed
+   consumers.
 
 ### Phase 4 — one clang AST → declaration/type parser
 
