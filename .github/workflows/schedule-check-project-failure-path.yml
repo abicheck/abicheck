@@ -80,8 +80,9 @@ jobs:
       # carries contents:write + actions:write (AGENTS.md's Action-pinning
       # convention for a write-permission job), matching the pin already
       # used by ci.yml/pages.yml/agentready.yml/dependency-review.yml.
+      # Credentials stay: the next step pushes the fixture branch with them.
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10  # v6
-        with:
+        with:  # zizmor: ignore[artipacked]
           fetch-depth: 1
 
       - name: Create fixture ref with a fresh commit (never part of main's own history)

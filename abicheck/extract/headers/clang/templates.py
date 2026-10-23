@@ -402,23 +402,35 @@ def _index_template_param_defaults(
     tracked_names_by_qualname = names or _index_template_param_names(root, decls)
 
     def defaults_for(qualname: str, node: dict[str, Any]) -> list[str | None]:
-        this_names = _template_param_names(node)
-        defaults = _template_param_defaults(node)
-        tracked_names = tracked_names_by_qualname.get(qualname)
-        if tracked_names is not None:
-            own_positions = {n: i for i, n in enumerate(this_names) if n}
-            defaults = [
-                tracked_names[own_positions[d]]
-                if d is not None
-                and d in own_positions
-                and own_positions[d] < len(tracked_names)
-                and tracked_names[own_positions[d]]
-                else d
-                for d in defaults
-            ]
-        return defaults
+        return _translate_dependent_defaults(
+            _template_param_defaults(node),
+            _template_param_names(node),
+            tracked_names_by_qualname.get(qualname),
+        )
 
     return _register_all(decls, defaults_for)
+
+
+def _translate_dependent_defaults(
+    defaults: list[str | None],
+    this_names: Sequence[str | None],
+    tracked_names: Sequence[str | None] | None,
+) -> list[str | None]:
+    """*defaults* with each dependent reference rewritten from the declaration's
+    own parameter name to the tracked name at the same position (see
+    :func:`_index_template_param_defaults`)."""
+    if tracked_names is None:
+        return defaults
+    own_positions = {n: i for i, n in enumerate(this_names) if n}
+    return [
+        tracked_names[own_positions[d]]
+        if d is not None
+        and d in own_positions
+        and own_positions[d] < len(tracked_names)
+        and tracked_names[own_positions[d]]
+        else d
+        for d in defaults
+    ]
 
 
 def _template_param_names(class_template_decl: dict[str, Any]) -> list[str | None]:

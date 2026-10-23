@@ -143,6 +143,12 @@ UNCOVERED: dict[str, str] = {
         "one-side-unrecorded inputs; no corpus pair records defaults on both "
         "sides yet"
     ),
+    "Function.template_param_defaults_fact": (
+        "read only by compare/template_param_defaults' function-template "
+        "detector, whose unit tests (test_function_template_param_defaults.py) "
+        "cover changed, added, removed, unchanged and overloaded patterns; no "
+        "corpus pair records function-template defaults on both sides yet"
+    ),
     "RecordType.specialization_declared_fact": (
         "read only by compare/template_instance_absence, whose own unit test "
         "(test_class_template_specialization_absence_unit.py) ablates every "
@@ -757,3 +763,63 @@ def test_malformed_member_location_is_unknown_not_a_value(expr: list[object]) ->
     from abicheck.dwarf_utils import decode_member_location
 
     assert decode_member_location(expr) is None
+
+
+#: Runtime-owned subjects, written by hand from the libstdc++ ABI (not read
+#: back from the classifier): typeinfo, a destructor, a function-local static.
+_RUNTIME_SUBJECTS = (
+    "_ZTISt9exception",
+    "_ZNSt18bad_variant_accessD1Ev",
+    "_ZZNSt8__detail18__to_chars_10_implIjEEvPcjT_E8__digits",
+)
+
+
+@pytest.mark.parametrize("table", ["lists_symbol", "omits_symbol", "no_elf"])
+@pytest.mark.parametrize("subject", _RUNTIME_SUBJECTS)
+def test_ablated_elf_table_never_makes_a_runtime_finding_gate(
+    subject: str, table: str
+) -> None:
+    """Dropping a runtime symbol from the ELF table (or the table itself) is
+    evidence removed, so it may not turn an excluded finding into an
+    ``UNKNOWN_UNRESOLVED`` one that raises the contract-coverage exit (the
+    SVS field report: 8 leaked-dependency findings did exactly that)."""
+    from abicheck.buildsource.export_accounting import (
+        toolchain_runtime_name_predicate,
+        toolchain_runtime_symbol_names,
+    )
+    from abicheck.checker_policy import ChangeKind
+    from abicheck.contract_evaluation import evaluate_change_contract_relevance
+    from abicheck.contract_relevance_types import ContractMode, ContractRelevance
+    from abicheck.elf_metadata import ElfMetadata, ElfSymbol
+    from abicheck.model import AbiSnapshot
+    from abicheck.model.change import Change
+    from abicheck.policy.contract_toolchain_origin import (
+        exclude_toolchain_runtime_findings,
+    )
+    from abicheck.policy.public_surface_index import PublicSurface
+
+    names = {"lists_symbol": [subject, "mylib_init"], "omits_symbol": ["mylib_init"]}
+    elf = (
+        ElfMetadata(
+            soname="libmylib.so.1",
+            needed=["libstdc++.so.6"],
+            symbols=[ElfSymbol(name=n) for n in names[table]],
+        )
+        if table in names
+        else None
+    )
+    snap = AbiSnapshot(library="libmylib.so.1", version="1", elf=elf)
+    surface = PublicSurface(
+        resolvable=True, public_symbols={"mylib_init"}, all_symbols={"mylib_init"}
+    )
+    change = Change(kind=ChangeKind.FUNC_REMOVED, symbol=subject, description="")
+    decision = evaluate_change_contract_relevance(
+        change, surface, surface, mode=ContractMode.PUBLIC
+    )
+    (out,) = exclude_toolchain_runtime_findings(
+        [change],
+        [decision],
+        toolchain_runtime_symbol_names(snap),
+        is_runtime_name=toolchain_runtime_name_predicate([snap]),
+    )
+    assert out.relevance is ContractRelevance.PROVEN_OUT_OF_CONTRACT

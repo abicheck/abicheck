@@ -13,7 +13,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Assurance gap for class-template parameter defaults (ADR-085 D3).
+"""Assurance gap for template-parameter defaults (ADR-085 D3).
 
 A class-template pattern carries its parameters' default spellings only when
 the header backend recorded them (``RecordType.template_param_defaults_fact``,
@@ -68,7 +68,7 @@ def _is_nested_in(qualified: str, parent: str) -> bool:
 def _castxml_header_note(label: str) -> str:
     return (
         f"template-parameter defaults (castxml cannot record them): the public "
-        f"headers of the {label} snapshot declare class-template parameter "
+        f"headers of the {label} snapshot declare template-parameter "
         "defaults that castxml does not record, so a default-argument change in "
         "them is not assessed"
     )
@@ -80,7 +80,7 @@ def _side_note(label: str, snap: AbiSnapshot, count: int) -> str:
     else:
         reason = (
             "not recorded by this snapshot (it predates schema v62, or a "
-            "template parameter is not a type parameter)"
+            "default in the pattern could not be spelled)"
         )
     return (
         f"template-parameter defaults ({reason}): {count} class template "

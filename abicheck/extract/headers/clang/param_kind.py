@@ -24,6 +24,8 @@ mirroring this package's ``return_type.py`` split.
 
 from __future__ import annotations
 
+from typing import Any
+
 from abicheck.model import ParamKind
 
 
@@ -81,3 +83,17 @@ def param_kind(type_str: str) -> ParamKind:
     if last == "*":
         return ParamKind.POINTER
     return ParamKind.VALUE
+
+
+def param_has_default(param: dict[str, Any]) -> bool:
+    """Whether a ``ParmVarDecl`` carries a default argument.
+
+    clang flags it either with ``"init": "c"`` or by nesting the default-value
+    expression as the parameter's lone ``inner`` child.
+    """
+    if param.get("init"):
+        return True
+    return any(
+        isinstance(c, dict) and not str(c.get("kind", "")).endswith(("Attr", "Comment"))
+        for c in param.get("inner", []) or []
+    )

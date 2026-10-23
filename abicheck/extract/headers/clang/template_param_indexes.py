@@ -34,17 +34,21 @@ adds a narrow immutable view for one new shared consumer.
 from __future__ import annotations
 
 import re
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
+from pathlib import Path
 from types import MappingProxyType
 from typing import Any
 
 from .template_decl_walk import ClassTemplateDecls
+from .template_default_spelling import _template_param_default_spellings
 from .templates import (
     _index_template_param_defaults,
     _index_template_param_kinds,
     _index_template_param_names,
     _register_all,
+    _template_param_names,
+    _translate_dependent_defaults,
     class_template_decls,
 )
 
@@ -98,48 +102,35 @@ class TemplateParamIndexes:
     kinds: TemplateParamIndex
     defaults: TemplateParamIndex
     names: TemplateParamIndex
-    # ``defaults`` restricted to templates whose parameters are all type
-    # parameters (ADR-085 D1): the only rows the default-fact producer trusts.
-    type_defaults: TemplateParamIndex
+    # The spelled defaults of ADR-085 D1's fact, for every class template whose
+    # defaults are all spelled (a non-type or template-template default is
+    # spelled too). A template with an unspelled default has no row.
+    fact_defaults: TemplateParamIndex
 
 
-def _all_type_params(class_template_decl: dict[str, Any]) -> bool:
-    """Whether a ``ClassTemplateDecl``'s parameter list is non-empty and every
-    parameter is a TYPE parameter (ADR-085 D1).
+def _source_span_reader() -> Callable[[str, int, int], str | None]:
+    """A reader of byte spans from the headers an AST names, for one build.
 
-    A non-type or template-template parameter's default is not recorded by
-    :func:`_template_param_defaults` (it reads as ``None``), so a template with
-    one cannot be told apart from one whose defaults are simply absent. The
-    default-fact producer therefore records only the all-type case.
+    clang's ``offset`` values are byte offsets into the file a location names,
+    and a template-template default is recorded as the source text of its span
+    (clang's JSON carries no name for it). The cache lives only for the reader's
+    own lifetime, so a header rewritten between two parses is re-read, never
+    served stale. A file that cannot be read yields ``None``, not an error.
     """
-    kinds: list[str] = []
-    for child in class_template_decl.get("inner", []) or []:
-        if not isinstance(child, dict):
-            continue
-        kind = child.get("kind")
-        if kind in (
-            "TemplateTypeParmDecl",
-            "NonTypeTemplateParmDecl",
-            "TemplateTemplateParmDecl",
-        ):
-            kinds.append(str(kind))
-        else:
-            break
-    return bool(kinds) and all(k == "TemplateTypeParmDecl" for k in kinds)
+    cache: dict[str, bytes | None] = {}
 
+    def span(path: str, start: int, stop: int) -> str | None:
+        if path not in cache:
+            try:
+                cache[path] = Path(path).read_bytes()
+            except OSError:
+                cache[path] = None
+        data = cache[path]
+        if data is None or not 0 <= start < stop <= len(data):
+            return None
+        return data[start:stop].decode("utf-8", errors="replace")
 
-def _index_all_type_template_params(
-    root: dict[str, Any], decls: ClassTemplateDecls | None = None
-) -> dict[str, list[str | None]]:
-    """``qualified template name -> ["type"]`` for every template whose
-    parameters are all type parameters (see :func:`_all_type_params`), and
-    ``[None]`` otherwise. A conflicting redeclaration is dropped as ambiguous,
-    like every other index here, so the key is absent rather than trusted.
-    """
-    return _register_all(
-        decls if decls is not None else class_template_decls(root),
-        lambda _qualname, node: ["type"] if _all_type_params(node) else [None],
-    )
+    return span
 
 
 def _freeze_template_param_index(
@@ -172,6 +163,39 @@ def _positional_row(
     ]
 
 
+def _index_template_param_default_facts(
+    names: Mapping[str, Sequence[str | None]],
+    decls: ClassTemplateDecls,
+    source_span: Callable[[str, int, int], str | None],
+) -> dict[str, list[str | None]]:
+    """``qualified template name -> per-position spelled defaults`` for the
+    ADR-085 D1 fact (see :func:`_template_param_default_spellings`), over the
+    same dependent-translated registration as
+    :func:`_index_template_param_defaults`, with each row made positional.
+
+    A pattern with any default that is not spelled is absent (UNKNOWN). The
+    registration is conservative as a whole: if any declaration of a name leaves
+    a default unspelled, the name is dropped, never trusted from its spelled half.
+    """
+    unspelled: set[str] = set()
+
+    def spellings_for(qualname: str, node: dict[str, Any]) -> list[str | None]:
+        spelled = _template_param_default_spellings(node, source_span)
+        if spelled is None:
+            unspelled.add(qualname)
+            return []
+        return _translate_dependent_defaults(
+            spelled, _template_param_names(node), names.get(qualname)
+        )
+
+    registered = _register_all(decls, spellings_for)
+    return {
+        qualname: _positional_row(row, names.get(qualname))
+        for qualname, row in registered.items()
+        if qualname not in unspelled
+    }
+
+
 def build_template_param_indexes(root: dict[str, Any]) -> TemplateParamIndexes:
     """Build all three template-parameter indexes of *root* in one call.
 
@@ -190,16 +214,10 @@ def build_template_param_indexes(root: dict[str, Any]) -> TemplateParamIndexes:
     decls = class_template_decls(root)
     names = _index_template_param_names(root, decls)
     defaults = _index_template_param_defaults(root, names, decls)
-    all_type = _index_all_type_template_params(root, decls)
+    facts = _index_template_param_default_facts(names, decls, _source_span_reader())
     return TemplateParamIndexes(
         kinds=_freeze_template_param_index(_index_template_param_kinds(root, decls)),
         defaults=_freeze_template_param_index(defaults),
         names=_freeze_template_param_index(names),
-        type_defaults=_freeze_template_param_index(
-            {
-                qualname: _positional_row(row, names.get(qualname))
-                for qualname, row in defaults.items()
-                if all_type.get(qualname) == ["type"]
-            }
-        ),
+        fact_defaults=_freeze_template_param_index(facts),
     )

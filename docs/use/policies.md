@@ -149,7 +149,8 @@ guidance, not invented heuristics.
 
 Some C APIs version a struct of function pointers by appending members at the
 end and never touching existing ones: Level Zero's `ze_*_dditable_t`
-(and `zet_`/`zes_`/`zer_`/`zel_` siblings), the Vulkan loader's
+(and `zet_`/`zes_`/`zer_`/`zel_` siblings, the top-level `ze_dditable_t`/`zes_dditable_t`,
+and the `_ze_…_dditable_t` struct-tag spellings DWARF reports), the Vulkan loader's
 `VkLayerDispatchTable`/`VkLayerInstanceDispatchTable`, and the OpenCL ICD
 `cl_icd_dispatch`. Under `strict_abi`, a new entry reads as
 `type_size_changed` + `type_field_added[_compatible]`, a `BREAKING` verdict.
@@ -170,6 +171,7 @@ abicheck compare libVkLayer_foo.so.old libVkLayer_foo.so --policy append_only_di
 | Reorder, or insert anywhere but the tail | `BREAKING` (`type_field_offset_changed`) |
 | Change an existing member's type | `BREAKING` (`type_field_type_changed`) |
 | Any edit to a type whose name does not match | unchanged (`strict_abi`) |
+| A member of an aggregate (`ze_dditable_t`) shifted because an embedded sub-table grew | `BREAKING` (`type_field_offset_changed`) — [known gap](../contribute/known-gaps.md) |
 
 The findings are reclassified, not suppressed: each one stays in the report,
 the JSON `change.reclassified_by` names the rule's label and reason, and

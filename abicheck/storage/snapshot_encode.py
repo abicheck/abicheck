@@ -436,6 +436,8 @@ def _drop_uncaptured(entry: dict[str, Any], key: str) -> None:
 def _drop_uncaptured_type_identities(d: dict[str, Any]) -> None:
     for fn in d.get("functions", ()):
         _drop_uncaptured(fn, _RETURN_TYPE_IDENTITY_KEY)
+        # Schema v64: written only when a producer recorded the defaults.
+        _drop_uncaptured(fn, _TEMPLATE_PARAM_DEFAULTS_KEY)
         for param in fn.get("params", ()):
             _drop_uncaptured(param, _TYPE_IDENTITY_KEY)
     for var in d.get("variables", ()):

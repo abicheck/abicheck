@@ -1,0 +1,82 @@
+[
+  {
+    "directory": "/work",
+    "file": "a.c",
+    "arguments": ["gcc", "-c", "a.c", "b.c"]
+  },
+  {
+    "directory": "/work",
+    "file": "a.h",
+    "arguments": ["g++", "-x", "c++", "a.h", "-x", "none", "b.c", "-o", "prog"]
+  },
+  {
+    "directory": "/work",
+    "file": "c.c",
+    "arguments": ["gcc", "-c", "c.c", "-o", "c.o"]
+  },
+  {
+    "directory": "/work",
+    "file": "d.c",
+    "arguments": ["gcc", "d.c", "-o", "d.so", "-shared", "c.o", "lib.a"]
+  },
+  {
+    "directory": "/work",
+    "file": "e.cpp",
+    "arguments": ["gcc", "-x", "c", "-c", "e.cpp", "-o", "e.o"]
+  },
+  {
+    "directory": "/work",
+    "file": "f.c",
+    "arguments": ["gcc", "-E", "f.c", "-o", "f.i"]
+  },
+  {
+    "directory": "/work",
+    "file": "g.c",
+    "arguments": ["gcc", "-S", "g.c", "-o", "g.s"]
+  },
+  {
+    "directory": "/work",
+    "file": "h1.cpp",
+    "arguments": ["g++", "-c", "h1.cpp", "h2.cc", "-Iinc", "-DX=1"]
+  },
+  {
+    "directory": "/work",
+    "file": "main.c",
+    "arguments": ["gcc", "main.c", "util.o", "libfoo.a", "-lm", "-o", "app"]
+  },
+  {
+    "directory": "/work",
+    "file": "k.S",
+    "arguments": ["gcc", "-c", "k.S", "-o", "k.o"]
+  },
+  {
+    "directory": "/work",
+    "file": "stdio_like.h",
+    "arguments": ["gcc", "-x", "c-header", "-c", "stdio_like.h", "-o", "stdio_like.h.gch"]
+  },
+  {
+    "directory": "/work",
+    "file": "script_src",
+    "arguments": ["gcc", "-x", "c", "-c", "script_src", "-o", "script.o"]
+  },
+  {
+    "directory": "/work",
+    "file": "m.mm",
+    "arguments": ["clang++", "-c", "m.mm", "-o", "m.o"]
+  },
+  {
+    "directory": "/work",
+    "file": "n.cpp",
+    "arguments": ["g++", "-c", "n.cpp", "-include", "pre.h", "-o", "n.o"]
+  },
+  {
+    "directory": "/work",
+    "file": "o.c",
+    "arguments": ["gcc", "-c", "o.c", "-MD", "-MF", "o.d", "-o", "o.o"]
+  },
+  {
+    "directory": "/work",
+    "file": "p.cpp",
+    "arguments": ["g++", "-xc++", "-c", "p.cpp", "-xnone", "-c", "p2.cpp"]
+  }
+]

@@ -49,6 +49,7 @@ from ._argv_shortopts import (
     rebase_structured_path,
     resolve_bare_token_with_default_path,
 )
+from .compile_action import CompileAction, SourceOperand, parse_gnu_operands
 from .launcher_env import (
     _traverse_env_and_launcher_prefix,
     effective_directory,
@@ -64,6 +65,13 @@ from .launcher_env_path import _apply_env_context
 #: spellings are carried through.
 #: (https://gcc.gnu.org/onlinedocs/gcc/Directory-Options.html)
 _GNU_INCLUDE_SEARCH_OPTS = frozenset({"-iquote", "-idirafter"})
+
+#: MSVC/clang-cl include-search options, recognized only in CL-mode driver
+#: context. ``/I`` and ``/external:I`` take a directory in the separate
+#: (``/I dir``) or joined (``/Idir``) spelling. ``-I`` is the same search
+#: option in the GNU spelling, which ``cl`` and ``clang-cl`` also accept.
+#: ``/imsvc`` (a system bucket) is deliberately not listed here.
+_MSVC_INCLUDE_SEARCH_OPTS = ("/I", "-I", "/external:I")
 
 
 @dataclass(frozen=True)
@@ -116,14 +124,25 @@ class CompilerInvocation:
     #: Replayed flags in the order they were recovered: ABI-relevant flags first,
     #: then include-search options scanned from ``argv``.
     carried: tuple[CarriedFlag, ...]
-    #: Include-search operands recovered from :attr:`carried` that the structured
-    #: buckets do not hold: ``-iquote``/``-idirafter`` (both spellings) and, in
-    #: MSVC mode, any ``/I`` or ``-I`` token the argv scanner carried (the scanner
-    #: carries only ``/I`` today, so a bare ``-I`` argv operand is not included).
-    #: Kept in replay order and in the operand's recorded spelling, not rebased,
-    #: so a probe resolves them against the compile unit's ``directory`` exactly
-    #: as it does :attr:`~..build_evidence.CompileUnit.include_paths`.
+    #: Include-search operands the structured buckets do not hold. GNU mode:
+    #: ``-iquote``/``-idirafter`` (both spellings), read from :attr:`carried`. MSVC
+    #: mode: ``/I``, ``-I`` and ``/external:I`` (separate and joined spellings),
+    #: read from the raw argv, so a ``-I`` or ``/external:I`` operand reaches the
+    #: probe even though it is not replayed into the rendered argv (the carried
+    #: set stays as it was; see :func:`_probe_operand_tokens`). Kept in argv
+    #: order and in the operand's recorded spelling, not rebased, so a probe
+    #: resolves them against the compile unit's ``directory`` exactly as it does
+    #: :attr:`~..build_evidence.CompileUnit.include_paths`.
     replayed_include_dirs: tuple[str, ...] = ()
+    #: What the driver does with its sources (``-c``/``-S``/``-E``/link), or
+    #: ``None`` when the operand parse does not cover this driver (CL mode).
+    action: CompileAction | None = None
+    #: One entry per source the driver compiles, in argv order, each with its
+    #: own language, action and output. Empty when :attr:`action` is ``None``.
+    operands: tuple[SourceOperand, ...] = ()
+    #: Non-source inputs (objects, archives, libraries) a link consumes, in argv
+    #: order. Empty unless :attr:`action` is :attr:`CompileAction.LINK`.
+    link_inputs: tuple[str, ...] = ()
 
 
 def strip_launchers(argv: list[str], *, directory: str | None = None) -> list[str]:
@@ -327,11 +346,12 @@ def _replayed_include_operands(tokens: list[str], msvc: bool) -> tuple[str, ...]
     """The include-search operands in *tokens* that the structured buckets do not hold.
 
     Matches each spelling once, in token order: a separate operand consumes the
-    next token, a joined one carries its directory inline. ``/I`` and ``-I`` are
-    include options only in MSVC mode; in GNU mode they are already structured.
+    next token, a joined one carries its directory inline. ``/I``, ``-I`` and
+    ``/external:I`` are include options only in MSVC mode; in GNU mode ``-I`` is
+    already structured.
     """
     out: list[str] = []
-    msvc_options = ("/I", "-I") if msvc else ()
+    msvc_options = _MSVC_INCLUDE_SEARCH_OPTS if msvc else ()
     i = 0
     while i < len(tokens):
         tok = tokens[i]
@@ -505,6 +525,22 @@ def replayed_tokens_for(
     return replayed_tokens(parse_compile_invocation(compile_unit, compiler_binary))
 
 
+def _source_operands(
+    compile_unit: CompileUnit, msvc: bool
+) -> tuple[CompileAction | None, tuple[SourceOperand, ...], tuple[str, ...]]:
+    """The per-source operands of *compile_unit*, or nothing for the CL driver.
+
+    The launcher-stripped argv's tail (the driver token removed) is parsed once
+    by :func:`~.compile_action.parse_gnu_operands`. CL-mode operands are a
+    separate slice, so an MSVC driver reports no action rather than a guess.
+    """
+    if msvc:
+        return None, (), ()
+    argv = strip_launchers(compile_unit.argv, directory=compile_unit.directory)
+    parsed = parse_gnu_operands(argv[1:])
+    return parsed.action, parsed.operands, parsed.link_inputs
+
+
 def parse_compile_invocation(
     compile_unit: CompileUnit, compiler_binary: str | None = None
 ) -> CompilerInvocation:
@@ -556,6 +592,7 @@ def parse_compile_invocation(
             for token in _scan_argv_for_extra_flags(compile_unit.argv, cc_id)
         ),
     )
+    action, operands, link_inputs = _source_operands(compile_unit, msvc)
     return CompilerInvocation(
         source=compile_unit.source,
         compiler=compiler,
@@ -571,6 +608,24 @@ def parse_compile_invocation(
         target_triple=compile_unit.target_triple or "",
         carried=carried,
         replayed_include_dirs=_replayed_include_operands(
-            [carried_flag.token for carried_flag in carried], msvc
+            _probe_operand_tokens(compile_unit, carried, msvc), msvc
         ),
+        action=action,
+        operands=operands,
+        link_inputs=link_inputs,
     )
+
+
+def _probe_operand_tokens(
+    compile_unit: CompileUnit, carried: tuple[CarriedFlag, ...], msvc: bool
+) -> list[str]:
+    """The tokens :func:`_replayed_include_operands` reads for the public-root probe.
+
+    GNU mode reads the carried tokens, as it always has. MSVC mode reads the raw
+    ``argv``: the carried set holds only ``/I``, so ``-I`` and ``/external:I``
+    would otherwise never reach the probe. A rendered replay token is never
+    affected by this choice -- :attr:`CompilerInvocation.carried` is unchanged.
+    """
+    if msvc:
+        return list(compile_unit.argv)
+    return [carried_flag.token for carried_flag in carried]

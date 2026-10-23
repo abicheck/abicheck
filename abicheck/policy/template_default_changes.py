@@ -27,6 +27,7 @@ from typing import TYPE_CHECKING
 from ..compare.template_param_defaults import (
     _pattern_records,
     detect_default_template_arg_changed,
+    detect_function_template_param_default_changed,
     detect_template_param_default_changed,
 )
 from ..compare.template_surface import (
@@ -111,8 +112,9 @@ def detect_template_default_changes(
     old: AbiSnapshot, ctx: PipelineContext, changes: list[Change]
 ) -> list[Change]:
     """The pipeline entry for ADR-085: the exported-instantiation detector
-    (``DEFAULT_TEMPLATE_ARG_CHANGED``, shape A) plus the header-level one
-    (``TEMPLATE_PARAM_DEFAULT_CHANGED``, shape B).
+    (``DEFAULT_TEMPLATE_ARG_CHANGED``, shape A) plus the header-level ones
+    (``TEMPLATE_PARAM_DEFAULT_CHANGED``, shape B) for class and function
+    templates alike.
 
     A header-level relation that shape A (an exported instantiation) or shape
     C (a reported function signature) already covers is recorded in the
@@ -135,11 +137,16 @@ def detect_template_default_changes(
         instantiation_stems=instantiation_stems,
         reported_templates=_templates_named_by_reported_functions(old, new, changes),
     )
+    function_findings, function_suppressed = (
+        detect_function_template_param_default_changed(
+            old, new, instantiation_stems=instantiation_stems
+        )
+    )
     if ledger is not None:
-        for change in suppressed:
+        for change in [*suppressed, *function_suppressed]:
             ledger.record(
                 change,
                 Disposition.DEDUPLICATED,
                 application_point="detect_template_default_changes",
             )
-    return [*default_template_findings, *header_findings]
+    return [*default_template_findings, *header_findings, *function_findings]

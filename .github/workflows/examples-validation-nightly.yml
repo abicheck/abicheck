@@ -45,13 +45,15 @@ jobs:
       matrix:
         toolchain: [gcc, clang]
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803  # v6.1.0
+        with:
+          persist-credentials: false
       - name: Install system deps
         uses: ./.github/actions/install-system-deps
         with:
           packages: gcc g++ clang cmake binutils curl ca-certificates
       - uses: ./.github/actions/setup-castxml
-      - uses: actions/setup-python@v6
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1  # v6.3.0
         with:
           python-version: "3.14"
           cache: "pip"
@@ -85,7 +87,7 @@ jobs:
           python tests/check_validate_results.py || rc=1
           python tests/check_stripped_fp.py "results/validate_examples-aarch64-$tc-stripped-headers.json" || rc=1
           exit $rc
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
         if: always()
         with:
           name: examples-nightly-aarch64-${{ matrix.toolchain }}
@@ -97,10 +99,12 @@ jobs:
     runs-on: macos-14
     timeout-minutes: 60
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803  # v6.1.0
+        with:
+          persist-credentials: false
       - name: Install castxml + cmake
         run: brew install castxml cmake
-      - uses: actions/setup-python@v6
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1  # v6.3.0
         with:
           python-version: "3.14"
           cache: "pip"
@@ -116,7 +120,7 @@ jobs:
             > results/validate_examples-macos.json
           cp results/validate_examples-macos.json results/validate_examples.json
           python tests/check_validate_results.py
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
         if: always()
         with:
           name: examples-nightly-macos

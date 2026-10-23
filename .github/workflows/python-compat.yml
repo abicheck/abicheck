@@ -44,6 +44,8 @@ jobs:
         python-version: ['3.11', '3.12', '3.14', '3.15']
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10  # v6
+        with:
+          persist-credentials: false
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1  # v6
         with:
           python-version: ${{ matrix.python-version }}
@@ -143,6 +145,8 @@ jobs:
       MICROMAMBA_SHA256: '366cd9cd8be14df1ab8ed50352a82111082a36686b2d389fdb79a92c3fafb3e3'
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10  # v6
+        with:
+          persist-credentials: false
       - name: Install free-threaded CPython 3.15 from conda-forge
         run: |
           curl -Ls -o "$RUNNER_TEMP/micromamba" \
@@ -211,6 +215,8 @@ jobs:
         shard: [1, 2, 3]
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10  # v6
+        with:
+          persist-credentials: false
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1  # v6
         with:
           python-version: ${{ matrix.python-version }}

@@ -787,7 +787,12 @@ inputs:
       `policy` for the run, exactly as the removed `--policy-file` flag did.
     required: false
   suppress:
-    description: 'Path to a YAML suppression file to filter known/intentional changes.'
+    description: >
+      Path to a YAML suppression file to filter known/intentional changes.
+      One path per line supplies several files (for example the exceptions
+      every build variant shares, then the variant's own); each line is
+      forwarded as its own `--suppress`, and every file's rules apply. A
+      single-line value is one path even if it contains spaces.
     required: false
   acknowledgments:
     description: >

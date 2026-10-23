@@ -1,6 +1,6 @@
 # L2/L4/L5 extraction convergence — one parse per TU, one owner per primitive
 
-**Status:** Proposed; Phases 1 and 2 implemented (the first two PRs); Phase 3 first slice implemented (the model and four clang/castxml consumers); Phase 3 remaining slice 1 (the L2 header clang argv) and slice 2 (typed include-search operands on `CompilerInvocation`, `clang_public_roots` rescan deleted) implemented; slices 3–4 remain (see Phase 3).
+**Status:** Proposed; Phases 1 and 2 implemented (the first two PRs); Phase 3 first slice implemented (the model and four clang/castxml consumers); Phase 3 remaining slice 1 (the L2 header clang argv) and slice 2 (typed include-search operands on `CompilerInvocation`, `clang_public_roots` rescan deleted) implemented; slice 3 and slice 4's model and consumer wiring are implemented; CL-mode operands and `@file` expansion remain out of scope (see Phase 3).
 **Parent plans:** [Duplication & convergence assessment](duplication-and-convergence-assessment.md)
 (its P1 "Compiler invocation handling needs one typed model" owns Phase 3
 here — this plan does not restate that design), [One Semantic Pipeline](one-semantic-pipeline.md)
@@ -233,12 +233,63 @@ the pre-change commit. A mutation of the dedup rule fails it.
    `test_compile_invocation_launcher_differential.py`, whose golden was recorded
    from the pre-move code. The source generation moved to 5 (a `--bump`, as
    the gate offered; the scoped edit changes no recorded fact).
-4. **`SourceOperand` and `CompileAction`.** The parent plan's per-source
-   `language`/`effective_output`/`action` and `link_inputs` are not in this
-   slice. They need a multi-source corpus (`gcc -c a.c b.c`, `-x` switching
-   between sources) before the model can carry them honestly.
+4. **`SourceOperand` and `CompileAction`.** *Model and consumer wiring implemented.* The multi-source corpus
+   (`tests/data/compile_invocation/multi_source_compile_commands.json`, 16
+   entries: `gcc -c a.c b.c`, `-x` switching, `-E`/`-S`/`-c`, link with
+   objects and archives, `-include`/`-MF` operands) is pinned by
+   `multi_source_clang_argv_golden.json`, recorded before the model gained its
+   fields and unchanged after. `source_extractors/compile_action.py` (a leaf)
+   parses the GNU-driver argv tail into `SourceOperand`s, `CompileAction`
+   (last of `-E`/`-S`/`-c` wins; none means `LINK`) and `link_inputs`
+   (non-source positionals, under `LINK` only). `CompilerInvocation` carries
+   `action`, `operands` and `link_inputs` with defaults, so no existing
+   constructor changes. Expectations are hand-written in
+   `tests/test_compile_invocation_source_operands.py`.
+   Decisions: `effective_output` is the `-o` value only when one source
+   produces one output (gcc rejects `-o` with several `-c` sources); otherwise
+   the default basename in the working directory. Under `LINK` every operand
+   shares the link output. `SourceOperand.source` is spelled as in argv.
+   Not in this slice: CL-mode (`/c`, `/Fo`, `/Tc`/`/Tp`) operands, which stay
+   `action=None`; `@file` response files, reported as link inputs rather than
+   expanded; `env -C` prefixes, whose operand spelling is the launcher-folded
+   one. **Consumer wiring — implemented.** Compile-database entries are routed by
+   their operands in `adapters/compile_db.py`, and the shared corpus is
+   pinned by `multi_source_unit_routing_golden.json`. Three routes:
+   - **legacy** (one source, or an MSVC entry): one unit, exactly as before,
+     including a single-source link. The unit's source and language are
+     unchanged, so these entries are byte-identical (12 of 16 corpus entries).
+   - **per_operand** (several sources): one `CompileUnit` per `SourceOperand`,
+     with the operand's own `-x` language and its path resolved against the
+     entry directory (as `load_compile_db` resolves `file`). A multi-source
+     link also records one `LinkUnit` (`link://<output>`, `inputs` = the link
+     inputs; the compiled objects are intermediates, not inputs). Corpus:
+     `a.c`, `a.h`, `h1.cpp`, `p.cpp`.
+   - **link_only** (a link with no source operand): no compile unit, one
+     `LinkUnit`. The corpus has no such entry, so
+     `test_compile_db_operand_routing.py` pins it inline.
+
+   What changes and why, against the pre-change output recorded from
+   `origin/main`: `a.c` gains the `b.c` unit it was missing; `a.h` (`g++ -x
+   c++ a.h -x none b.c -o prog`) gains `b.c` as C plus the `prog` link unit;
+   `h1.cpp` gains `h2.cc`; `p.cpp` gains `p2.cpp`. Nothing else moves. The
+   clang argv each per-operand unit renders takes its own `-x` (`b.c` renders
+   `-x c`, not the entry's `-x c++`).
+
+   Decisions: (a) single-source entries keep their unit and record no link
+   unit, so their link inputs (`c.o`, `lib.a` for `d.c`) are still not
+   recorded. Recording them would add output to every single-source link;
+   that is a separate, deliberate change. (b) The source generation moves to
+   9 (`SOURCE_GENERATION`), one above main's 8: the source tier
+   replays different units for the same multi-source input. (c) `multi_source_clang_argv_golden.json` pins
+   single-source units only; its four keys for changed entries were removed
+   and the routing golden owns them. (d) `adapters/compile_db.py` is not in
+   `generation_scope.SOURCE_TIER_FILES`, so a future adapter-only change to
+   this routing would not fail the fingerprint gate; the scope should list
+   it (follow-up). CL-mode operands and `@file` expansion stay out of scope.
 
 ### Phase 4 — one clang AST → declaration/type parser
+
+**Status (2026-10-23): b2 done.** Items 1–3 of the b2 list below are merged or in this PR; the clang stamp is `0.14`.
 
 Do for clang what `source_extractors/castxml.py` already does for castxml:
 run L2's `dumper_clang._ClangAstParser` over the TU's AST and project through
@@ -436,7 +487,7 @@ Presence (not a field, from the same run): current side 2600 functions, projecte
 68629, of which 66953 are out of scope and excluded from pairing. The
 projected-only out-of-scope set is the public-surface problem below.
 
-**What remains for b2** (a separate PR, after this one merges), in order:
+**What remains for b2** (a separate PR, after this one merges), in order. Items 1–3 are done; the list is kept as the record:
 1. **Status (2026-10-22): filter and production projection DONE; field gaps OPEN.**
    The projected side is in production code: `PublicSurfaceClangParser` and
    `project_clang_surface()` in `abicheck/buildsource/source_extractors/clang_projection.py`.
@@ -448,15 +499,123 @@ projected-only out-of-scope set is the public-surface problem below.
    [Clang projection](../known-gaps.md#clang-projection-adr-063-phase-4-prerequisites)
    (origin unset, bare member and namespace names, unmangled `distance`, hash and
    default-argument spelling).
-2. The ADR-063 amendment's A1–A4 guard: the payload-revision mismatch
-   condition, the intersection rule that uses `REVISION_COMPARABLE_FIELDS`, and
-   the `SOURCE_FACT_COVERAGE_INCOMPLETE` / `unknown` assurance reporting. The
-   decision on whether the two equal-by-construction typedef fields are kept is
-   made here.
-3. The `CLANG_EXTRACTOR_VERSION` bump from `"0.13"` to `"0.14"`, last, once 1 and 2
-   are in place. Re-run this measurement and the golden test in that PR; the
-   expected set in `tests/test_l4_clang_projection_golden.py` changes there, not
-   before.
+2. **Status (2026-10-23): A1–A4 guard DONE; pinned set decided.** A1 is
+   `is_payload_revision_mismatch()` in
+   `abicheck/buildsource/revision_comparability.py`. A3 is the early return in
+   `diff_source_abi`: under a mismatch only the pinned typedef fields are in the
+   intersection, and every other check is withheld. A4 is the
+   `SOURCE_FACT_COVERAGE_INCOMPLETE` finding (compared-fact count, withheld
+   checks, "withheld, not clean"). Its assurance already reads `unknown` through
+   `policy/analysis_assurance/_fact_set.py`'s `producer_version_mismatch` branch,
+   and a test pins it. The two equal-by-construction typedef fields are
+   decided: `typedef.visibility` and `typedef.api_relevant` are **dropped** from
+   `REVISION_COMPARABLE_FIELDS` (equality comes from `entity_from_typedef`'s
+   hard-coding, so it measures nothing); `typedef.qualified_name` and
+   `typedef.value` stay. Per-check decisions, from the amendment's A3 rule:
+
+   | check (`source_diff.py` / `source_provenance_diff.py`) | under mismatch |
+   |---|---|
+   | `_diff_generated` | withheld: removal and value on unpinned fields |
+   | `_diff_typedefs` | withheld: `type_hash` and removal are unpinned |
+   | `_diff_macros` | withheld: value and removal, not pinned |
+   | `_diff_concepts` | withheld: value/hash fallback chain, unpinned |
+   | `_diff_declarations` | withheld: `value` and `signature_hash`, unpinned |
+   | `_diff_inline_bodies` | withheld: body hash and removal keyed on mangled |
+   | `_diff_templates` | withheld: body hash and removal |
+   | `_diff_mappings` | withheld: symbol mapping keyed on mangled names |
+   | `_diff_provenance` | withheld: mangled-name symbol match |
+   | `_diff_odr` | withheld: keyed on `qualified_name` of unpinned records |
+   | `_diff_fact_coverage` | replaced by the A4 finding for this case |
+
+   Consequence, stated plainly: for a mismatched pair the pinned intersection
+   produces no finding today, because no check reads `typedef.qualified_name`
+   or `typedef.value` as a finding. The coverage finding reports the pinned
+   count (for example `Compared 2 pinned facts (1 shared typedefs ...)`), so the
+   run is never a clean pass. Growing the intersection needs a new pinned field
+   first, which the measurement test has to confirm.
+   A regression test (`tests/test_revision_comparability.py`) fails when the
+   guard is disabled (mutation recorded in the PR body). The
+   `_diff_provenance` block moved to `source_provenance_diff.py` to keep
+   `source_diff.py` under its line budget (`debt.yaml` baseline 1113 → 1066).
+3. **Status (2026-10-23): DONE — `CLANG_EXTRACTOR_VERSION` is `"0.14"`.**
+   Last, as planned. Changes in this PR:
+   - `CLANG_EXTRACTOR_VERSION` `"0.13"` → `"0.14"`. The shipped L4 payload is
+     unchanged apart from the stamp: production does not switch to the
+     projection (the projection runs only in the measurement and the golden
+     test). The stamp alone makes a stored 0.13 surface a payload-revision
+     mismatch, which invalidates the L4 cache for 0.13 entries too.
+   - Source generation fingerprint: `clang.py` sits on the `source` axis, so
+     `SOURCE_GENERATION` `6` → `7` and `scripts/record_generation_fingerprints.py
+     --axis source --bump` (strictly +1). The recorded reason names this change.
+   - `scripts/gen_l4_clang_golden.py` writes a fixed `PRE_CHANGE_PRODUCER_VERSION
+     = "0.13"` into the golden header instead of the live constant. The golden
+     is the pre-change side; regenerating must not turn it into the new side.
+     `surface_0_13.jsonl` is unchanged.
+   - `tests/test_l4_clang_projection_golden.py`: the expected pinned set and its
+     justification are below. A new test asserts the expected literal equals
+     `REVISION_COMPARABLE_FIELDS`, so the test and the production guard cannot
+     drift apart again.
+   - Public-workflow validation: `tests/test_l4_revision_mismatch_cli.py`. A
+     source-only snapshot dumped with the stamp patched to `0.13` is compared
+     through `abicheck compare --depth source` with a live `0.14` snapshot. Result:
+     one `source_fact_coverage_incomplete` coverage finding ("payload revision
+     mismatch … Compared 0 pinned facts"), `fact_set_comparability: unknown`,
+     and no break kinds. The same-revision control reports no change and reads
+     `comparable`.
+
+   **Re-measurement** (`scripts/measure_l4_clang_projection.py --json`, run on
+   this branch; 274 catalog C++ TUs, 0 failed). The earlier 253-TU table was
+   taken before the catalog grew to 274 TUs; the golden already held 274. Totals:
+   1553 paired functions (was 1531), 290 records, 5 enums, 22 typedefs, 1
+   variable.
+
+   | kind | field | compared | both empty | differing pairs | status | TUs differing |
+   |---|---|---:|---:|---:|---|---:|
+| function | qualified_name | 1553 | 0 | 1060 | differs | 208 |
+| function | mangled_name | 1553 | 420 | 19 | differs | 15 |
+| function | visibility | 1553 | 0 | 1553 | differs | 258 |
+| function | api_relevant | 1553 | 0 | 1553 | differs | 258 |
+| function | value | 1553 | 1535 | 18 | differs | 7 |
+| function | signature_hash | 1553 | 0 | 1396 | differs | 256 |
+| variable | qualified_name | 1 | 0 | 0 | equal | 0 |
+| variable | mangled_name | 1 | 0 | 1 | differs | 1 |
+| variable | visibility | 1 | 0 | 1 | differs | 1 |
+| variable | api_relevant | 1 | 0 | 1 | differs | 1 |
+| variable | value | 1 | 1 | 0 | equal_empty | 0 |
+| variable | type_hash | 1 | 0 | 0 | equal | 0 |
+| record | qualified_name | 290 | 0 | 130 | differs | 75 |
+| record | mangled_name | 290 | 290 | 0 | equal_empty | 0 |
+| record | visibility | 290 | 0 | 290 | differs | 168 |
+| record | api_relevant | 290 | 0 | 290 | differs | 168 |
+| record | type_hash | 290 | 0 | 290 | differs | 168 |
+| enum | qualified_name | 5 | 0 | 5 | differs | 5 |
+| enum | mangled_name | 5 | 5 | 0 | equal_empty | 0 |
+| enum | visibility | 5 | 0 | 5 | differs | 5 |
+| enum | api_relevant | 5 | 0 | 5 | differs | 5 |
+| enum | type_hash | 5 | 0 | 5 | differs | 5 |
+| typedef | qualified_name | 22 | 0 | 0 | equal | 0 |
+| typedef | mangled_name | 22 | 22 | 0 | equal_empty | 0 |
+| typedef | visibility | 22 | 0 | 0 | equal | 0 |
+| typedef | api_relevant | 22 | 0 | 0 | equal | 0 |
+| typedef | value | 22 | 0 | 0 | equal | 0 |
+| typedef | type_hash | 22 | 0 | 22 | differs | 14 |
+
+   **Expected pinned set, decided.** The measured `equal` fields with at least
+   two paired entities are `typedef.{qualified_name, value, visibility,
+   api_relevant}`. Two are equal by construction (`base.entity_from_typedef`
+   hard-codes `visibility` and `api_relevant`), so the test excludes them as
+   `EQUAL_BY_CONSTRUCTION`. The pinned set is `typedef.qualified_name` and
+   `typedef.value`: each is equal on all 22 typedefs with evidence. Item 2
+   already dropped the two by-construction fields from `REVISION_COMPARABLE_FIELDS`;
+   the test literal now matches. `variable.qualified_name` and
+   `variable.type_hash` show `equal` with one paired variable, which does not
+   meet the two-entity rule and stays unpinned.
+
+   **Open, not changed here.** The mismatch report exits `0` with exit reason
+   `clean`, and `analysis_assurance_exit_contribution` is `0`. Under the
+   A4 design `unknown` assurance is reported but does not gate the exit code.
+   Changing that is an exit-code policy change and needs its own ADR, so it is
+   recorded here rather than made in this PR.
 
 
 ### Phase 5 — one entity identity
@@ -581,14 +740,60 @@ unified, and two edge cases changed (see the changelog fragment).
 measurement in "Measurements" on the PVXS fixture; it was deliberately not
 changed in this phase.
 
-### Phase 8 — diffing: assess before merging
+### Phase 8 — diffing: assess before merging (assessed; merge waits for Phase 4)
 
-`source_diff.diff_source_abi` compares L4-only facts (macro values, body
-fingerprints, template patterns, ODR) that `diff_types`/`diff_symbols` have
-no counterpart for — that part is not duplication. What *is* likely
-duplicated is declaration/type comparison once Phase 4 makes both tiers
-produce the same model; audit it then, with a list of each `ChangeKind`
-either tier can emit for the same underlying change.
+Assessment only, no behaviour change. `scripts/source_l2_overlap.py` derives
+each tier's emitter set with the static closure `gen_detector_kind_map.py`
+already uses: L4 from `source_diff.diff_source_abi`, L2 from every registered
+detector in `diff_types*`/`diff_symbols*`. `tests/test_source_l2_overlap.py`
+fails when a kind lands on either tier unclassified, when a row goes stale, or
+when a label contradicts the derivation. Run the script for the full table.
+
+**The premise was mostly wrong.** L4 emits no declaration or type-shape kind
+at all: no function signature, record layout, field, enum or vtable kind.
+Its declaration check covers only constexpr values and default arguments
+(`_diff_declarations`). So making both tiers produce the same model would not,
+by itself, duplicate declaration or type findings. The overlap is one shared
+kind and three near-duplicate pairs; the other twelve L4 kinds have no L2
+counterpart.
+
+| L4 kind | L2 kind | Class | Why |
+|---|---|---|---|
+| `INLINE_FUNCTION_REMOVED` | same | **true duplicate** | Header-only inline removed: `_diff_inline_bodies` (L4) and `_check_removed_function` (L2, export confirmed absent) both emit it. The descriptions differ, so `finding_dedup`'s exact key (which includes the description) should not collapse them. Not yet reproduced end to end. |
+| `CONSTEXPR_VALUE_CHANGED` | `CONSTANT_CHANGED` | near-duplicate | Same namespace-scope `const`/`constexpr` value change, from the same headers. |
+| `PUBLIC_TYPEDEF_REMOVED` | `TYPEDEF_REMOVED` | near-duplicate | Same typedef removal. |
+| `PUBLIC_TYPEDEF_TARGET_CHANGED` | `TYPEDEF_BASE_CHANGED` | near-duplicate | Same typedef retarget. |
+
+L4-only, not duplication: `CONCEPT_TIGHTENED`, `DEFAULT_ARGUMENT_CHANGED`,
+`GENERATED_HEADER_CHANGED`, `INLINE_BODY_CHANGED`, `ODR_SOURCE_CONFLICT`,
+`PUBLIC_MACRO_REMOVED`, `PUBLIC_MACRO_VALUE_CHANGED`,
+`SOURCE_BINARY_PROVENANCE_MISMATCH`, `SOURCE_DECL_BINARY_SYMBOL_MISMATCH`,
+`SOURCE_FACT_COVERAGE_INCOMPLETE`, `TEMPLATE_BODY_CHANGED`,
+`UNINSTANTIATED_TEMPLATE_REMOVED`. The L2 side emits 126 kinds in total (an
+over-approximation: "can emit" per registered detector); 122 have no L4
+counterpart.
+
+**Proposed merge order** (none of it lands before Phase 4 b2.2/b2.3, the A1–A4
+guard and `CLANG_EXTRACTOR_VERSION` 0.14, are in):
+
+1. **`INLINE_FUNCTION_REMOVED`** first. It is the only shared kind name, and the
+   fix is a disposition choice, not a new model. Reproduce the double finding
+   end to end, then keep one owner per change. Both records stay visible (ADR-067,
+   "record before disposing"); neither tier drops silently.
+2. **`CONSTEXPR_VALUE_CHANGED` / `CONSTANT_CHANGED`**. Both read the header tier's
+   const values. Route the L4 value comparison through `compare.constants`, which
+   already owns the occurrence logic, or drop the L4 emission when the L2 header
+   tier ran.
+3. **Typedef pair**, last. `compare.typedefs` owns the occurrence and sentinel
+   logic and the ADR-063 typedef cutover, and L4's `_diff_typedefs` keys
+   differently. It is the largest of the three.
+
+No L4-only kind moves. Each step is behaviour-preserving, and is proven through
+`dump --depth source` and a compare on a fixture that contains the change.
+
+**Not yet verified:** the true duplicate's double finding is read from the
+emitters, not run; the near-duplicate pairs are judged the same way. Step 1
+starts by reproducing both.
 
 ## Measurements
 

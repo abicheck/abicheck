@@ -90,3 +90,26 @@ def test_the_bench_sees_an_injected_quadratic(monkeypatch: pytest.MonkeyPatch) -
     monkeypatch.setitem(cb.PREPARERS, "quad", quadratic)
     k = cb.fit_exponent(cb.measure_in_process(case))
     assert k > 1.6
+
+
+_USECASE_REGISTRY = (
+    Path(__file__).resolve().parent.parent
+    / "docs"
+    / "contribute"
+    / "usecase-registry.yaml"
+)
+
+
+def test_every_perf_case_names_existing_use_cases() -> None:
+    """Each complexity-bench case protects >=1 use case, and every id it names
+    is a real entry of the use-case registry (the oracle is the registry file,
+    not ``USE_CASES`` itself)."""
+    import yaml
+
+    registry = yaml.safe_load(_USECASE_REGISTRY.read_text(encoding="utf-8"))
+    known = {uc["id"] for uc in registry["use_cases"]}
+    assert set(cb.USE_CASES) == set(cb.CASES), "USE_CASES must key every case"
+    for case, ucs in cb.USE_CASES.items():
+        assert ucs, f"perf case {case} protects no use case"
+        missing = [uc for uc in ucs if uc not in known]
+        assert not missing, f"perf case {case} names unknown use cases {missing}"

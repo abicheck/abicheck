@@ -58,6 +58,7 @@ import platform
 import shutil
 import subprocess
 import sys
+import sysconfig
 import time
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
@@ -126,117 +127,16 @@ FULL = "full"
 PROFILES = (FAST, PR, FULL)
 
 
-def _which_any(*names: str) -> str | None:
-    for name in names:
-        found = shutil.which(name)
-        if found:
-            return found
-    return None
-
-
-def _module_available(name: str) -> bool:
-    import importlib.util
-
-    return importlib.util.find_spec(name) is not None
-
-
-def _origin_main_available() -> str | None:
-    proc = subprocess.run(
-        ["git", "rev-parse", "--verify", "-q", "origin/main"],
-        cwd=ROOT,
-        capture_output=True,
-        text=True,
-    )
-    if proc.returncode != 0:
-        return (
-            "no origin/main ref available locally (shallow clone or detached checkout)"
-        )
-    return None
-
-
-def _need_bins(*names: str) -> Callable[[], str | None]:
-    def check() -> str | None:
-        if _which_any(*names) is None:
-            return f"none of {', '.join(names)} found on PATH"
-        return None
-
-    return check
-
-
-def _need_all_bins(*names: str) -> Callable[[], str | None]:
-    """Like :func:`_need_bins`, but every name must be present, not just one.
-
-    ``_need_bins``'s "any of" semantics fit a single-tool-with-aliases check
-    (``abi-compliance-checker``/``.pl``); a step needing several genuinely
-    different tools together (e.g. ``clang``/``clang++``/``g++``) needs
-    "all of", not "at least one of".
-    """
-
-    def check() -> str | None:
-        missing = [n for n in names if shutil.which(n) is None]
-        if missing:
-            return f"not found on PATH: {', '.join(missing)}"
-        return None
-
-    return check
-
-
-def _need_linux_and_all_bins(*names: str) -> Callable[[], str | None]:
-    """Like :func:`_need_all_bins`, but also requires a Linux host.
-
-    A step whose *script* self-restricts to Linux (its own module docstring,
-    not something this precondition duplicates) would otherwise still report
-    `passed` on a macOS/Windows host that happens to have every named tool on
-    PATH — the precondition would pass, the step would run, and the script's
-    own internal platform check would exit 0 immediately having measured
-    nothing, which `run_step()` cannot tell apart from genuine work (Codex
-    review: this is exactly the gap `--json-out`'s `complete` receipt field
-    exists to catch, and a step-level false pass defeats it at the source).
-    """
-    bins_check = _need_all_bins(*names)
-
-    def check() -> str | None:
-        if not sys.platform.startswith("linux"):
-            return f"Linux only (host platform is {sys.platform!r})"
-        return bins_check()
-
-    return check
-
-
-def _need_castxml_and_system_zlib() -> str | None:
-    """castxml plus the distro zlib that scripts/demo_libz.py dumps."""
-    if shutil.which("castxml") is None:
-        return "castxml not found on PATH"
-    if not Path("/usr/include/zlib.h").is_file():
-        return "/usr/include/zlib.h not found (install zlib1g-dev)"
-    return None
-
-
-def _need_platform_and_bins(
-    per_platform: dict[str, tuple[str, ...]],
-) -> Callable[[], str | None]:
-    """Run only on the listed `sys.platform` values, each with its own tools."""
-
-    def check() -> str | None:
-        bins = per_platform.get(sys.platform)
-        if bins is None:
-            return f"needs one of {sorted(per_platform)} (host platform is {sys.platform!r})"
-        missing = [b for b in bins if shutil.which(b) is None]
-        if missing:
-            return f"missing tool(s) on PATH: {', '.join(missing)}"
-        return None
-
-    return check
-
-
-def _need_modules(*names: str) -> Callable[[], str | None]:
-    def check() -> str | None:
-        missing = [n for n in names if not _module_available(n)]
-        if missing:
-            return f"module(s) not installed: {', '.join(missing)}"
-        return None
-
-    return check
+if str(Path(__file__).resolve().parent) not in sys.path:
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+from verify_preconditions import (  # noqa: E402 -- sibling leaf, see that module
+    _need_bins,
+    _need_castxml_and_system_zlib,
+    _need_linux_and_all_bins,
+    _need_modules,
+    _need_platform_and_bins,
+    _origin_main_available,
+)
 
 
 def _py(*mod_args: str) -> tuple[str, ...]:
@@ -261,6 +161,18 @@ def _py(*mod_args: str) -> tuple[str, ...]:
     instead — `-m` takes a dotted module name, not a file path.
     """
     return _isolated_module_command(*mod_args)
+
+
+def _venv_bin(name: str, *args: str) -> tuple[str, ...]:
+    """Invoke a console script installed next to this interpreter.
+
+    For tools with no ``python -m`` entry point (``zizmor`` ships a Rust
+    binary as its console script). Resolved in this interpreter's scripts
+    directory first, for the same reason `_py` never uses a bare name: PATH
+    can hold a different version than the one ``[dev]`` pins.
+    """
+    found = shutil.which(name, path=sysconfig.get_path("scripts")) or shutil.which(name)
+    return (found or name, *args)
 
 
 def _pyscript(path: str, *args: str) -> tuple[str, ...]:
@@ -364,6 +276,26 @@ STEPS: tuple[Step, ...] = (
         ),
         frozenset({FAST}),
         description="Fast unit lane — matches the documented go-to command",
+    ),
+    Step(
+        # Static audit of the workflows and composite actions: unpinned
+        # `uses:`, template injection, persisted checkout credentials,
+        # over-broad token permissions, cache poisoning in release jobs.
+        "workflow-audit",
+        _venv_bin(
+            "zizmor",
+            "--quiet",
+            "--offline",
+            "--min-severity",
+            "medium",
+            ".github/workflows",
+            ".github/actions",
+            "actions",
+            "action.yml",
+        ),
+        frozenset({PR, FULL}),
+        precondition=_need_bins("zizmor"),
+        description="zizmor workflow/action security audit (pinned per pyproject.toml [dev])",
     ),
     Step(
         "ai-readiness",
