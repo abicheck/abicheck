@@ -10,6 +10,8 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from ..compare.finding_identity import report_finding_id, resolve_change_identity
+from ..model.contract_finding_relevance import is_evaluated
+from ..model.evidence_status import is_cross_source_resolved
 from .change_operation import entity_for_change, operation_for_kind
 
 if TYPE_CHECKING:
@@ -229,7 +231,16 @@ def build_review_groups(findings: Sequence[ReportFinding]) -> tuple[ReviewGroup,
                 e for m in members for e in (m.change.evidence_provenance or ())
             )
         )
-        gating = sum(m.verdict.name in {"BREAKING", "API_BREAK"} for m in members)
+        # Only an evaluated finding reaches the gate (ADR-049 D1's
+        # `gate_contribution`): one the contract proved out of scope keeps its
+        # raw breaking verdict as a label but contributes nothing, and must not
+        # be counted here as the cause of the exit (SVS field report).
+        gating = sum(
+            m.verdict.name in {"BREAKING", "API_BREAK"}
+            and is_evaluated(m.change)
+            and not is_cross_source_resolved(m.change)
+            for m in members
+        )
         if family == "export":
             group_operation = review_operation(kinds[0])
             transition = "public declaration retained; dynamic export removed"

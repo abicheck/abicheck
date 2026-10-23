@@ -19,7 +19,10 @@ from __future__ import annotations
 
 import pytest
 
-from abicheck.buildsource.export_accounting import toolchain_runtime_symbol_names
+from abicheck.buildsource.export_accounting import (
+    toolchain_runtime_name_predicate,
+    toolchain_runtime_symbol_names,
+)
 from abicheck.checker_policy import ChangeKind
 from abicheck.contract_evaluation import (
     ContractEvaluationDecision,
@@ -35,6 +38,7 @@ from abicheck.elf_metadata import ElfMetadata, ElfSymbol, SymbolBinding, SymbolT
 from abicheck.model import AbiSnapshot
 from abicheck.model.change import Change
 from abicheck.policy.contract_toolchain_origin import (
+    DEPENDENCY_EDGE_KINDS,
     TOOLCHAIN_RUNTIME_ORIGIN_REASON,
     exclude_toolchain_runtime_findings,
 )
@@ -248,3 +252,124 @@ def test_exclusion_pairs_each_finding_with_its_own_decision() -> None:
     assert out[0].reason_code == TOOLCHAIN_RUNTIME_ORIGIN_REASON
     assert out[1] is decisions[1]
     assert out[1].relevance is ContractRelevance.UNKNOWN_UNRESOLVED
+
+
+# --- SVS field report: dependency edges and runtime symbols no ELF table lists.
+#
+# Invariant: under a stated public contract, a finding whose subject is an
+# import/dependency edge, or a symbol the C++ runtime owns, is never left
+# UNKNOWN_UNRESOLVED (the state that feeds contract_coverage_failures and exit
+# 1) -- regardless of whether either snapshot's export table lists the symbol.
+
+#: Hand-picked dependency-edge kinds, independent of DEPENDENCY_EDGE_KINDS.
+_EDGE_KINDS = [
+    ChangeKind.IMPORTED_SYMBOL_ADDED,
+    ChangeKind.IMPORTED_SYMBOL_REMOVED,
+    ChangeKind.SYMBOL_VERSION_REQUIRED_ADDED,
+    ChangeKind.SYMBOL_VERSION_REQUIRED_REMOVED,
+    ChangeKind.NEEDED_ADDED,
+    ChangeKind.NEEDED_REMOVED,
+]
+
+_IMPORT_KINDS = {ChangeKind.IMPORTED_SYMBOL_ADDED, ChangeKind.IMPORTED_SYMBOL_REMOVED}
+
+#: Subjects an edge finding can carry: a runtime import, a library-owned name,
+#: and a plain C import -- the kind decides, not the name.
+_EDGE_SUBJECTS = [
+    "_ZNSt15basic_streambufIcSt11char_traitsIcEEC2ERKS2_",
+    "_ZN5mylib3fooEv",
+    "memcpy",
+]
+
+
+def _decide(change: Change, **kwargs):
+    decision = evaluate_change_contract_relevance(
+        change, _HEADERS, _HEADERS, mode=ContractMode.PUBLIC
+    )
+    (out,) = exclude_toolchain_runtime_findings([change], [decision], **kwargs)
+    return decision, out
+
+
+#: An unresolvable header surface: no header domain can place anything.
+_NO_HEADERS = PublicSurface(resolvable=False)
+
+
+@pytest.mark.parametrize("surface", [_HEADERS, _NO_HEADERS], ids=["hdr", "nohdr"])
+@pytest.mark.parametrize("mode", [ContractMode.PUBLIC, ContractMode.ALL])
+@pytest.mark.parametrize("subject", _EDGE_SUBJECTS)
+@pytest.mark.parametrize("kind", _EDGE_KINDS, ids=lambda k: k.value)
+def test_dependency_edge_findings_are_not_contract_entities(
+    kind: ChangeKind, subject: str, mode: ContractMode, surface: PublicSurface
+) -> None:
+    # NOT_APPLICABLE, not out-of-contract: policy keeps scoring the finding
+    # (a strict preset still gates an import), and it never reaches the
+    # contract-coverage ledger as UNKNOWN_UNRESOLVED -- whatever the subject,
+    # mode or header evidence, and even when the name test claims it.
+    change = Change(kind=kind, symbol=subject, description="")
+    decision = evaluate_change_contract_relevance(change, surface, surface, mode=mode)
+    (out,) = exclude_toolchain_runtime_findings(
+        [change],
+        [decision],
+        frozenset({subject}),
+        is_runtime_name=lambda _name: True,
+    )
+    assert out.relevance is NON_ENTITY_RELEVANCE
+    assert (kind in _IMPORT_KINDS) <= (kind in DEPENDENCY_EDGE_KINDS)
+
+
+@pytest.mark.parametrize(
+    "kind",
+    [
+        ChangeKind.SYMBOL_LEAKED_FROM_DEPENDENCY_CHANGED,
+        ChangeKind.SYMBOL_BINDING_STRENGTHENED,
+        ChangeKind.FUNC_REMOVED,
+    ],
+    ids=lambda k: k.value,
+)
+@pytest.mark.parametrize(
+    "symbol",
+    [
+        "_ZTISt9exception",
+        "_ZNSt18bad_variant_accessD1Ev",
+        RUNTIME_SYMBOLS["to_chars_digits_unsigned"],
+    ],
+)
+def test_runtime_symbol_absent_from_every_table_is_still_excluded(
+    kind: ChangeKind, symbol: str
+) -> None:
+    # The snapshots' ELF tables do not list the symbol (the old behaviour
+    # matched only on those tables and left it unresolved).
+    snaps = [_snapshot(["mylib_init"])]
+    change = Change(kind=kind, symbol=symbol, description="")
+    decision, out = _decide(
+        change,
+        toolchain_symbols=toolchain_runtime_symbol_names(snaps[0]),
+        is_runtime_name=toolchain_runtime_name_predicate(snaps),
+    )
+    assert decision.relevance is ContractRelevance.UNKNOWN_UNRESOLVED
+    assert out.relevance is ContractRelevance.PROVEN_OUT_OF_CONTRACT
+    assert out.reason_code == TOOLCHAIN_RUNTIME_ORIGIN_REASON
+
+
+@pytest.mark.parametrize("symbol", _UNDECLARED_USER_SYMBOLS)
+def test_name_predicate_never_claims_library_symbols(symbol: str) -> None:
+    snaps = [_snapshot(["mylib_init"])]
+    change = Change(kind=ChangeKind.FUNC_REMOVED, symbol=symbol, description="")
+    decision, out = _decide(
+        change,
+        toolchain_symbols=frozenset(),
+        is_runtime_name=toolchain_runtime_name_predicate(snaps),
+    )
+    assert out is decision
+    assert out.relevance is ContractRelevance.UNKNOWN_UNRESOLVED
+
+
+def test_leaked_dependency_kind_is_excluded_by_its_own_attribution() -> None:
+    # The detector already named the origin library; no table is needed.
+    change = Change(
+        kind=ChangeKind.SYMBOL_LEAKED_FROM_DEPENDENCY_CHANGED,
+        symbol="_ZN3fmt2v96detail5errorEv",
+        description="",
+    )
+    _, out = _decide(change, toolchain_symbols=frozenset())
+    assert out.reason_code == TOOLCHAIN_RUNTIME_ORIGIN_REASON

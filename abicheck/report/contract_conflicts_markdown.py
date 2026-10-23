@@ -45,6 +45,48 @@ class ContractConflictsSection:
     rows: tuple[ContractConflictRow, ...]
 
 
+#: Rows itemised in Markdown; the rest are counted. The JSON
+#: ``contract_conflicts`` block keeps every row. Without a cap a C++ library
+#: exporting libstdc++ template instantiations rendered a 355 KB section on a
+#: byte-identical rebuild (SVS field report), past what a GitHub step summary
+#: or PR comment can hold.
+CONFLICT_ROW_LIMIT = 20
+#: Characters of one entity name shown; the JSON keeps the full name.
+CONFLICT_NAME_LIMIT = 160
+#: Characters of one source line shown.
+CONFLICT_SOURCE_LINE_LIMIT = 300
+
+_RUNTIME_PREFIXES = (
+    "std::",
+    "__gnu_cxx::",
+    "__cxxabiv1::",
+    "_ZNSt",
+    "_ZNKSt",
+    "_ZSt",
+    "_ZTISt",
+    "_ZTSSt",
+    "_ZTVSt",
+    "_ZZNSt",
+    "_ZZSt",
+    "_ZGVZNSt",
+    "_ZN9__gnu_cxx",
+    "_ZNK9__gnu_cxx",
+)
+
+
+def conflict_origin(entity: str) -> str:
+    """``toolchain runtime`` for a C++ runtime entity, else ``library``.
+
+    A display grouping only: the contract's own origin decision is
+    ``policy.contract_toolchain_origin``'s and is not re-derived here.
+    """
+    return "toolchain runtime" if entity.startswith(_RUNTIME_PREFIXES) else "library"
+
+
+def _clip(text: str, limit: int) -> str:
+    return text if len(text) <= limit else text[: limit - 1] + "…"
+
+
 def render_contract_conflicts_section(
     section: ContractConflictsSection | None,
 ) -> list[str]:
@@ -56,6 +98,10 @@ def render_contract_conflicts_section(
     Markdown section, distinct from the JSON report's own `[]`-means-"ran
     clean" convention (Markdown has no analogous "field was present but
     empty" signal worth spending a heading on).
+
+    The section is bounded: a count per conflict kind and origin, then at
+    most :data:`CONFLICT_ROW_LIMIT` rows (library-owned entities first) with
+    clipped names. Nothing is dropped from the JSON report.
     """
     if not section or not section.rows:
         return []
@@ -68,17 +114,36 @@ def render_contract_conflicts_section(
         ),
         "",
     ]
+    counts: dict[tuple[str, str], int] = {}
     for row in section.rows:
+        key = (row.conflict_kind, conflict_origin(row.entity))
+        counts[key] = counts.get(key, 0) + 1
+    if len(section.rows) > CONFLICT_ROW_LIMIT or len(counts) > 1:
+        lines += ["| Conflict | Origin | Count |", "|---|---|---|"]
+        for (kind, origin), n in sorted(counts.items()):
+            lines.append(f"| {kind} | {origin} | {n} |")
+        lines.append("")
+    ordered = sorted(section.rows, key=lambda r: conflict_origin(r.entity) != "library")
+    for row in ordered[:CONFLICT_ROW_LIMIT]:
         side_suffix = f" ({row.side})" if row.side else ""
-        lines.append(f"- **{row.conflict_kind}**{side_suffix}: `{row.entity}`")
+        entity = _clip(row.entity, CONFLICT_NAME_LIMIT)
+        lines.append(f"- **{row.conflict_kind}**{side_suffix}: `{entity}`")
         for src_line in row.source_lines:
-            lines.append(f"  - {src_line}")
+            lines.append(f"  - {_clip(src_line, CONFLICT_SOURCE_LINE_LIMIT)}")
+    hidden = len(section.rows) - CONFLICT_ROW_LIMIT
+    if hidden > 0:
+        lines.append(
+            f"- … and {hidden} more; itemised in full in the machine-readable "
+            "report (JSON `contract_conflicts`)."
+        )
     lines.append("")
     return lines
 
 
 __all__ = [
     "ContractConflictRow",
+    "CONFLICT_ROW_LIMIT",
     "ContractConflictsSection",
+    "conflict_origin",
     "render_contract_conflicts_section",
 ]
