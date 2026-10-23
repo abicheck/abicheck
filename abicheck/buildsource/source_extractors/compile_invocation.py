@@ -39,11 +39,22 @@ from ..build_evidence import CompileUnit
 from ._argv import (
     CXX_LANGS,
     STRUCTURED_TOOLCHAIN_FLAG_PREFIXES,
-    effective_directory,
     is_msvc_mode,
-    pick_compiler_binary,
 )
-from ._argv_shortopts import rebase_structured_path
+from ._argv_shortopts import (
+    fold_chdir_into_operands as _fold_chdir_into_operands,
+    is_absolute_path_token,
+    join_path_token,
+    normalize_path_token,
+    rebase_structured_path,
+    resolve_bare_token_with_default_path,
+)
+from .launcher_env import (
+    _traverse_env_and_launcher_prefix,
+    effective_directory,
+    env_path_cleared_for_bare_token,
+)
+from .launcher_env_path import _apply_env_context
 
 #: GNU include-search options that take a directory operand and are NOT
 #: normalized into the structured ``include_paths``/``system_include_paths``
@@ -113,6 +124,203 @@ class CompilerInvocation:
     #: so a probe resolves them against the compile unit's ``directory`` exactly
     #: as it does :attr:`~..build_evidence.CompileUnit.include_paths`.
     replayed_include_dirs: tuple[str, ...] = ()
+
+
+def strip_launchers(argv: list[str], *, directory: str | None = None) -> list[str]:
+    """Drop leading ``env``/compiler-launcher tokens (``ccache``/``sccache``/…).
+
+    Also skips any ``KEY=VALUE`` per-invocation config-override tokens ccache
+    accepts immediately after its own name (``ccache compiler_check=content
+    gcc -c foo.c``) — otherwise the override token, not the real compiler, is
+    left as the new ``argv[0]``.
+
+    A leading POSIX ``env`` invocation (bare ``env``, or a path ending in
+    ``/env``) is unwrapped first, along with any ``env``-specific flags and
+    ``NAME=VALUE`` environment assignments that follow it (see
+    :func:`_skip_env_prefix`) — and a compiler-cache/distribution launcher
+    may itself follow ``env`` (``env FOO=1 sccache clang-cl ...``), or an
+    ``env`` invocation may appear between launchers, so the two prefix kinds
+    are unwrapped in a loop until neither can strip anything further, rather
+    than each running only once.
+
+    An ``env -C DIR``/``env PATH=...`` prefix's effect on how the resulting
+    driver token must be interpreted -- not merely which token it is -- is
+    folded into that token before it is returned (P2 review round 19, both
+    findings; see :func:`_apply_env_context`'s own docstring for the full
+    reasoning): a relative driver path is joined onto the *effective* chdir
+    directory (the most recent ``-C``/``--chdir`` seen, closest to the
+    driver, if more than one ``env`` prefix chains), and a bare driver name
+    is resolved to an absolute path via the most recent env-supplied
+    ``PATH`` when found there. Every existing caller of this function
+    receives the corrected token automatically, with no signature change.
+
+    Operates on a local **copy** of *argv* (Codex review, ``_argv.py:102``,
+    fresh evidence): expanding an ``env -S``/``--split-string`` prefix (see
+    :func:`_skip_env_prefix`) mutates its argv list in place, splicing the
+    split tokens into it. Several callers pass ``compile_unit.argv`` -- a
+    persisted-evidence field -- straight through without copying it first
+    (:func:`pick_compiler_binary` here; ``adapters.base.
+    _executable_token_positions``/``_msvc_driver_scan``), so mutating the
+    caller's own list in place would silently corrupt that stored evidence
+    for every later reader of the same ``CompileUnit``. Copying once here
+    means every one of :func:`_skip_env_prefix`'s in-place splices are
+    confined to this call's own local list.
+
+    *directory*: the compile unit's own directory, when the caller has one
+    (Codex review, ``_argv.py:576``, Finding 3, fresh evidence) -- used
+    only to resolve a *relative* ``env``-supplied ``PATH`` entry (``env -C
+    build PATH=../tool clang-cl ...``) against the directory GNU ``env``
+    actually executes the command from, composed with any ``-C``/
+    ``--chdir`` value seen (see :func:`_resolve_env_path_entries`).
+    ``None`` (the default) for every caller with no compile-unit context to
+    supply -- unchanged from the pre-Finding-3 behavior for those callers.
+
+    **Chained ``env -C`` prefixes COMPOSE (Codex review, Finding 7, fresh
+    evidence).** ``env -C a env -C b driver ...`` -- one ``env`` invocation
+    wrapping another, each with its own ``-C`` -- really does chdir into
+    ``a`` and then, from there, into ``b``: the effective directory is
+    ``a/b``, not bare ``b`` alone. The previous revision simply overwrote
+    ``chdir`` with the most recently seen ``-C`` value every iteration,
+    silently discarding the outer ``-C`` entirely. A later, genuinely
+    ABSOLUTE ``-C`` still fully replaces whatever was accumulated so far
+    (an absolute chdir is a literal directory regardless of any earlier
+    relative one) -- only two RELATIVE values compose.
+
+    **The resolved ``chdir`` is also folded into every OTHER operand in the
+    result, not merely the driver token (Codex review, Finding 8, fresh
+    evidence).** GNU ``env -C DIR`` chdirs the whole invoked process before
+    it execs the real command -- every relative filesystem argument the
+    command receives (a source file operand, an ``-I``/``-isystem``-family
+    include path, ...) is interpreted relative to that same chdir'd
+    directory by the real OS, not merely the executable name. See
+    :func:`_fold_chdir_into_operands`'s own docstring for exactly which
+    tokens are (and, to avoid corrupting an unrelated flag value, are NOT)
+    corrected.
+    """
+    argv = list(argv)
+    i, chdir, env_path, _path_cleared = _traverse_env_and_launcher_prefix(argv)
+    result = argv[i:]
+    if not result or (chdir is None and env_path is None):
+        return result
+    resolved = _apply_env_context(result[0], chdir, env_path, directory)
+    tail = _fold_chdir_into_operands(result[1:], chdir)
+    if resolved == result[0] and tail == result[1:]:
+        return result
+    return [resolved, *tail]
+
+
+def pick_compiler_binary(compile_unit: CompileUnit, override: str | None) -> str:
+    """Pick the compiler binary an extractor should EMULATE for this TU.
+
+    Prefers the compiler actually recorded in the build action (``argv[0]``,
+    after unwrapping any launcher) so a clang/clang-cl/cross TU is replayed
+    against its real builtin include paths, target defaults, and accepted flags.
+    Falls back to g++/gcc by language when no command is available; an explicit
+    ``override`` always wins.
+
+    **This is emulation identity, not invocation identity — do not use it to
+    gate whether a flag is safe to append to the command an extractor is
+    about to run.** Without an explicit ``override``, this falls back to the
+    real build's own recorded ``argv[0]`` (e.g. ``icpx``) purely so flag
+    *shape* (MSVC ``/D``/``/I`` vs. GNU ``-D``/``-I``, language-standard
+    spelling, …) matches what the real build used — it says nothing about
+    which binary a given extractor is genuinely going to shell out to. A
+    caller in `castxml.py` passes this value as castxml's own
+    ``--castxml-cc-<id> <path>`` *argument* (castxml itself is invoked, and
+    is explicitly designed to accept an arbitrary compiler identity to
+    emulate), so appending a flag there based on this result is safe by
+    construction. A caller in `clang.py`/`clang_public_roots.py` that
+    instead builds an argv for **this same binary to execute directly**
+    must gate any binary-capability-specific flag (e.g. an Intel-only
+    ``-fsycl-host-only``) on the extractor's own actually-invoked binary
+    (its own ``clang_bin``, distinct from this function's return value)
+    instead — conflating the two let `-fsycl-host-only` get appended to a
+    genuinely stock ``clang`` invocation whenever a SYCL TU's real build
+    happened to use an Intel driver, which stock clang hard-rejects as
+    "unknown argument" (Codex review, `source_extractors/clang.py`'s
+    `_clang_context_args`). See that function's own docstring for the fix
+    and `tests/test_source_extractors_clang.py`'s
+    ``TestSyclHostOnlyGatedOnInvokedBinary`` for the regression matrix any
+    future binary-capability-gated flag addition here should extend.
+
+    **Never trusts a bare driver name PATH could not have resolved (round
+    27 Finding 1, Codex review, fresh evidence).** ``strip_launchers``
+    correctly leaves a bare token (e.g. ``"cc"`` from ``env -i cc ...``)
+    unresolved rather than guessing -- but returning it here unchanged
+    would let a downstream ``shutil.which``-style lookup (``dumper_clang.
+    resolve_clang_bin``, or the eventual subprocess spawn itself) resolve
+    it against ABICHECK'S OWN inherited ``PATH``, which the real recorded
+    command -- genuinely PATH-less under ``env -i`` -- could never have
+    done. See :func:`env_path_cleared_for_bare_token`'s own docstring for
+    the full reasoning. Degrading to the same language-based ``g++``/``gcc``
+    fallback used for a missing/flag-only command is the correct response:
+    a name this provably unresolvable carries no more real toolchain
+    identity than no recorded command at all -- UNLESS
+    :func:`resolve_bare_token_with_default_path` (round 29) resolves it.
+    """
+    if override:
+        return override
+    argv = strip_launchers(compile_unit.argv, directory=compile_unit.directory)
+    if argv and argv[0] and not argv[0].startswith("-"):
+        if env_path_cleared_for_bare_token(compile_unit.argv, argv[0]):
+            resolved = resolve_bare_token_with_default_path(argv[0])
+            if resolved:
+                return resolved
+        else:
+            return _resolve_relative_driver(argv[0], compile_unit.directory)
+    return "g++" if compile_unit.language.lower() in CXX_LANGS else "gcc"
+
+
+def _resolve_relative_driver(token: str, directory: str) -> str:
+    """Compose *token* onto *directory* when it is still relative (round 26
+    Finding 1, Codex review, fresh evidence).
+
+    :func:`strip_launchers`'s ``env -C``/chdir handling
+    (:func:`_apply_env_context`) deliberately returns a still-*relative*
+    driver token for a relative path-shaped token -- its own docstring
+    states this explicitly: "the result is still a relative path (DIR is
+    not itself resolved against anything here), so the existing downstream
+    join against ``cu.directory`` in ``header_compile_context.
+    _resolve_driver_token`` composes correctly". That downstream join is
+    real for the one caller that goes through
+    ``header_compile_context._derived_gcc_path``, but :func:`pick_compiler_binary`
+    -- the OTHER caller with a full ``CompileUnit`` (and therefore
+    ``directory``) in scope -- returned ``strip_launchers``'s token
+    completely unjoined, silently skipping that composition.
+
+    Concretely wrong for a compile unit recorded in directory ``/work``
+    with ``argv == ["env", "-C", "build", "../tool/clang++", ...]``: GNU
+    ``env -C build`` chdirs to ``/work/build`` first, and THEN resolves the
+    now-relative ``../tool/clang++`` from there -- landing back at
+    ``/work/tool/clang++``. ``_apply_env_context`` already folds the ``-C``
+    value into the token (``join_path_token("build", "../tool/clang++")``
+    == ``"tool/clang++"``), but that result is still relative to the
+    compile unit's OWN ``directory`` (``/work``), not to whatever cwd a
+    caller happens to run a subprocess from -- returning it unjoined let
+    ``CastxmlSourceExtractor`` (which runs from the effective ``-C`` cwd,
+    ``/work/build``) resolve it a second, wrong time, landing on
+    ``/work/build/tool/clang++`` instead.
+
+    Mirrors ``header_compile_context._resolve_driver_token``'s own
+    resolution (same host-independent absolute check/join grammar via
+    :func:`is_absolute_path_token`/:func:`join_path_token`, both already
+    defined in this module) rather than importing that private helper back
+    from ``header_compile_context`` -- which imports ``adapters.base``,
+    which in turn imports from this module at module scope, so a top-level
+    import in the other direction here would be a real import cycle; only
+    a function-local import would work, and duplicating the (already
+    tiny, already-local) composition logic here avoids that indirection
+    entirely. A bare token (no path separator -- a plain ``PATH``-searched
+    name like ``clang-cl``) and an already-absolute token are both left
+    unchanged, exactly as ``_resolve_driver_token`` treats them.
+    """
+    if "/" not in token and "\\" not in token:
+        return token
+    if is_absolute_path_token(token):
+        return normalize_path_token(token)
+    if not directory:
+        return token
+    return join_path_token(directory, token)
 
 
 def _replayed_include_operands(tokens: list[str], msvc: bool) -> tuple[str, ...]:

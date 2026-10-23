@@ -220,10 +220,19 @@ the pre-change commit. A mutation of the dedup rule fails it.
    The `-I`/`-isystem` structured buckets stay on `CompileUnit`: the probe reads
    them unrebased, and rebasing them onto the effective directory would change
    `env -C` output, which is a separate decision.
-3. **Launcher and `env` parsing into the model.** `strip_launchers`,
-   `pick_compiler_binary` and the `env` fold still live in `_argv.py` and are
-   called from the model. Move the fold into `parse_compile_invocation`, so
-   `_argv.py` keeps only the backend rendering the plan names.
+3. **Launcher and `env` parsing into the model.** *Implemented.*
+   `strip_launchers`, `pick_compiler_binary` and `_resolve_relative_driver`
+   moved into `compile_invocation.py`, the parse step that owns the
+   launcher decision. The `env` traversal (`-C`/`-u`/`-i`/`-S`, `NAME=VALUE`,
+   ccache/sccache/distcc prefixes) moved to `launcher_env.py`, and its `PATH`
+   and chdir folding to `launcher_env_path.py`: a single 1,000-line module
+   would have breached the 800-line production cap, so the leaf split is the
+   one departure from "fold into `compile_invocation.py`". `_argv.py` keeps the
+   shared helpers and the backend-facing names. The differential test file is
+   unchanged; the launcher rows live in
+   `test_compile_invocation_launcher_differential.py`, whose golden was recorded
+   from the pre-move code. The source generation moved to 5 (a `--bump`, as
+   the gate offered; the scoped edit changes no recorded fact).
 4. **`SourceOperand` and `CompileAction`.** The parent plan's per-source
    `language`/`effective_output`/`action` and `link_inputs` are not in this
    slice. They need a multi-source corpus (`gcc -c a.c b.c`, `-x` switching

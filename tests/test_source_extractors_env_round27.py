@@ -39,10 +39,12 @@ unresolvable; it just can never search abicheck's own, unrelated inherited
 
 from __future__ import annotations
 
-from abicheck.buildsource.source_extractors._argv import (
-    env_path_cleared_for_bare_token,
+from abicheck.buildsource.source_extractors.compile_invocation import (
     pick_compiler_binary,
     strip_launchers,
+)
+from abicheck.buildsource.source_extractors.launcher_env import (
+    env_path_cleared_for_bare_token,
 )
 
 # -- env_path_cleared_for_bare_token: the shared predicate ------------------

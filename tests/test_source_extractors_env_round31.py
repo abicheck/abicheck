@@ -32,8 +32,8 @@ from __future__ import annotations
 
 import os
 
-from abicheck.buildsource.source_extractors._argv import strip_launchers
 from abicheck.buildsource.source_extractors._argv_shortopts import join_path_token
+from abicheck.buildsource.source_extractors.compile_invocation import strip_launchers
 
 
 def test_strip_launchers_chdir_rebases_extensionless_source_after_dash_x() -> None:

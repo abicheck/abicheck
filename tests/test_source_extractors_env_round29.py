@@ -68,11 +68,15 @@ import sys
 from pathlib import Path
 
 from abicheck.buildsource.source_extractors._argv import (
-    env_path_cleared_for_bare_token,
     join_path_token,
-    pick_compiler_binary,
     resolve_bare_token_with_default_path,
+)
+from abicheck.buildsource.source_extractors.compile_invocation import (
+    pick_compiler_binary,
     strip_launchers,
+)
+from abicheck.buildsource.source_extractors.launcher_env import (
+    env_path_cleared_for_bare_token,
 )
 
 

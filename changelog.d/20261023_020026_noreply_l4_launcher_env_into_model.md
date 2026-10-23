@@ -1,0 +1,3 @@
+### Changed
+
+- **Launcher and `env` prefix parsing now runs in the compile-invocation parse step.** `strip_launchers` and `pick_compiler_binary` moved from `source_extractors/_argv.py` into `compile_invocation.py`, and the `env`/ccache/sccache/distcc traversal moved into `launcher_env.py` and `launcher_env_path.py`. `_argv.py` keeps only the shared helpers and the backend-facing names. The replayed argv is unchanged, and the new launcher golden (ccache, distcc, sccache, chained launchers, nested `env -C`/`env -i`) was recorded from the pre-move code. The L4 source-tier generation moves to 5 because the source scope's files changed.

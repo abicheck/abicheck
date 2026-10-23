@@ -14,7 +14,7 @@
     },
     {
       "path": "abicheck/buildsource/adapters/adapter_shared.py",
-      "baseline_lines": 1112,
+      "baseline_lines": 1110,
       "target": "extract/build-or-source",
       "rule": "no_growth",
       "disposition": "migrate",
@@ -135,7 +135,7 @@
     },
     {
       "path": "abicheck/buildsource/header_compile_context.py",
-      "baseline_lines": 1760,
+      "baseline_lines": 1758,
       "target": "extract/build-or-source",
       "rule": "no_growth",
       "disposition": "migrate",
@@ -222,19 +222,8 @@
       "review_by": "2026-11-30"
     },
     {
-      "path": "abicheck/buildsource/source_extractors/_argv.py",
-      "baseline_lines": 1293,
-      "target": "extract/build-or-source",
-      "rule": "no_growth",
-      "disposition": "migrate",
-      "category": "legacy_extraction_monolith",
-      "owner": "buildsource",
-      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice.",
-      "review_by": "2026-11-30"
-    },
-    {
       "path": "abicheck/buildsource/source_extractors/clang.py",
-      "baseline_lines": 1131,
+      "baseline_lines": 1128,
       "target": "extract/build-or-source",
       "rule": "no_growth",
       "disposition": "migrate",
@@ -1818,7 +1807,7 @@
     },
     {
       "path": "tests/test_source_extractors.py",
-      "baseline_lines": 1976,
+      "baseline_lines": 1962,
       "target": "tests/unit-or-contract ownership matching production migration",
       "rule": "no_growth",
       "disposition": "migrate",
@@ -1840,7 +1829,7 @@
     },
     {
       "path": "tests/test_source_extractors_env.py",
-      "baseline_lines": 1417,
+      "baseline_lines": 1399,
       "target": "tests/unit-or-contract ownership matching production migration",
       "rule": "no_growth",
       "disposition": "migrate",
