@@ -13,7 +13,7 @@ from abicheck.storage.cache_integrity import (
     sidecar_path,
     verify_entry,
 )
-from abicheck.storage.header_ast_cache import load_cached_ast, read_cached_castxml
+from abicheck.storage.header_ast_cache import load_cached_ast
 from abicheck.storage.json_compact import CompactedAst
 
 _DOC = {
@@ -69,20 +69,6 @@ def test_unusable_sidecar_counts_as_unrecorded(tmp_path):
     assert verify_entry(cached) is True
 
 
-def test_castxml_entry_is_protected_too(tmp_path):
-    cached = tmp_path / "c.xml"
-    cached.write_text(
-        '<?xml version="1.0"?><CastXML><Namespace id="_1" name="::"/></CastXML>'
-    )
-    assert read_cached_castxml(cached) is not None
-    assert verify_entry(cached) is True
-    cached.write_text(
-        '<?xml version="1.0"?><CastXML><Namespace id="_1" name="x"/></CastXML>'
-    )
-    assert read_cached_castxml(cached) is None
-    assert not cached.exists() and not sidecar_path(cached).exists()
-
-
 def test_record_digest_on_missing_entry_is_a_no_op(tmp_path):
     record_digest(tmp_path / "absent.json")
     assert list(tmp_path.iterdir()) == []
@@ -110,21 +96,3 @@ def test_failed_digest_write_drops_the_stale_sidecar(tmp_path, monkeypatch):
     assert not sidecar_path(cached).exists()
     monkeypatch.undo()
     assert load_cached_ast("k", "clang", cached, memoize=False) == {"new": 1}
-
-
-def test_castxml_store_records_its_digest(tmp_path, monkeypatch):
-    from abicheck.extract.headers.castxml import backend as castxml_backend
-
-    out = tmp_path / "out.xml"
-    out.write_text("<CastXML/>")
-    cached = tmp_path / "c.xml"
-    monkeypatch.setattr(castxml_backend, "_tool_identity", lambda _b: "id")
-    castxml_backend._write_castxml_cache(
-        cached,
-        out,
-        castxml_bin="castxml",
-        cc_bin="cc",
-        frontend_identity="id",
-        compiler_identity="id",
-    )
-    assert verify_entry(cached) is True

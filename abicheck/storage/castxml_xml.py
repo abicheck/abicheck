@@ -49,7 +49,7 @@ from xml.etree.ElementTree import Element, TreeBuilder
 
 from defusedxml.ElementTree import DefusedXMLParser, parse as _defused_parse
 
-__all__ = ["ARGUMENT_ATTRIBUTES_READ", "parse_castxml_xml"]
+__all__ = ["ARGUMENT_ATTRIBUTES_READ", "parse_castxml_text", "parse_castxml_xml"]
 
 #: The only ``Argument`` attributes any castxml reader consults
 #: (``extract.headers.castxml.functions.parse_function_params``). Adding a
@@ -96,3 +96,14 @@ def parse_castxml_xml(path: Path | str) -> Element:
     """
     parser = DefusedXMLParser(target=_SharingTreeBuilder())
     return cast(Element, _defused_parse(str(path), parser=parser).getroot())
+
+
+def parse_castxml_text(text: str) -> Element:
+    """The root element of the castxml document held in *text*.
+
+    The same defused parser and tree builder as :func:`parse_castxml_xml`, so a
+    tree parsed from a stored payload is the tree the cold run parsed from disk.
+    """
+    parser = DefusedXMLParser(target=_SharingTreeBuilder())
+    parser.feed(text)
+    return cast(Element, parser.close())

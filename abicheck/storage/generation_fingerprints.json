@@ -62,12 +62,12 @@
       "abicheck/extract/header_order_witness.py": "6a1cfce946826fa540a0601ebeefa02a8973ba6e8cd5d8287f6c1e7badc3d53a",
       "abicheck/extract/header_scan_memo.py": "56f79b5316354b938b08a5f29779c3aaf40481892d947784ec2adb48ab5e83fb",
       "abicheck/extract/headers/__init__.py": "70af0d3a16882783444077004b7a434a295505579fbbca219ce103f72074ad03",
-      "abicheck/extract/headers/ast_config.py": "708e6f189d9f24510a544e22655d668733dd1b565e4ec747c11b3fb29d466749",
+      "abicheck/extract/headers/ast_config.py": "49b01d92d64b0e8de974fcd6984ebe851a312074edfd55663a54f642013edaf9",
       "abicheck/extract/headers/ast_config_cpp20_chains.py": "ceeadbcb1d8e2eaac5eb325a3fb7c668614ce605bc04bb03835fcc4957e53c97",
       "abicheck/extract/headers/backend_plan.py": "1f02babf0ead52a65e4fa08dff8ce5b2a9d60feb1d02d22e7db30ee050cf8717",
       "abicheck/extract/headers/backend_protocol.py": "144cbe76456b6bceaf56f0edd0f3398f171178a222c8b968d53f8a17ee05a21b",
       "abicheck/extract/headers/castxml/__init__.py": "cebb319d35840200904dde9fe4ad16489124b02327a50d8351b086844ee19943",
-      "abicheck/extract/headers/castxml/backend.py": "cb141b93be83e1351f30626349653559af38a3fccf08a593a9d7268e2dffef14",
+      "abicheck/extract/headers/castxml/backend.py": "a688bc95cfe295efafeddbee5cc561e1e262263ec82fffb4784107524413aea5",
       "abicheck/extract/headers/castxml/calling_convention.py": "ab4cd4474d11eb0da2216b29393e9daf1dbcf94226204237fd4c0381adacbcbb",
       "abicheck/extract/headers/castxml/context.py": "8178e769a346b11e94a963a6b6f4e89dd0c06ffdee8cb6d80fc2e519c5c3c504",
       "abicheck/extract/headers/castxml/dumper.py": "55aba9e4b4bf6c88810d2dfe3ceae405479d060022549500c4690c0e742da35e",
@@ -157,9 +157,9 @@
       "abicheck/symvers_metadata.py": "372737765cd132e6e87ed891dd465d2958e04debbef774e45212ceb3036871cb",
       "abicheck/type_metadata.py": "9997189de8dac522fd1db8be5ae491d811139503f83abaaded89038eb4aa9cdf"
     },
-    "fingerprint": "9997aa988598878efa3ca8bf467ad2bfad81507e97161e9d6685b38a83e873c9",
+    "fingerprint": "af867c14a3203711afb2773c64bd53ad0b769b184e2154c0f445416f7b9a0169",
     "generation": 12,
-    "reason": "bumped to 12 for a semantic change"
+    "reason": "castxml header-AST cache key and entry format moved to the parse store (Phase 6 slice 2) and best-effort cache cleanup; extracted facts for the same input are unchanged, so no generation bump"
   },
   "resolver": {
     "files": {

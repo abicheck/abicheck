@@ -671,15 +671,51 @@ target, sysroot, ABI flag, forced include in argv, cwd) and asserts each one
 misses. Two insensitivity checks cover inputs the parse ignores (define order,
 output path).
 
-**Next slice — migrate the header-AST cache onto the store.** Its disk entry
-becomes a `TuParseStore` payload (or the store gains a raw-bytes payload
-form, so the XML and JSON bodies are not re-encoded). The entry-budget
-bookkeeping and the cross-process single-flight stay where they are, because
-they coordinate producers rather than describe an entry. The key is the same
-parsed-invocation key `compute_tu_cache_key` now builds, so the header-AST key
-must be re-derived from `CompilerInvocation` rather than from its own argv
-inputs. Done when the header-AST and `SourceAbiCache` entries come from one
-store with one key function, and a changed header misses under both.
+**Slice 2 — castxml header-AST cache is the second view (implemented; clang open).**
+`extract.headers.castxml.backend` stores its entry through
+`storage.ast_cache_location.ast_cache_store`, which returns a `TuParseStore`
+over the castxml cache directory. The entry is `<key>.json` (the same
+`{"deps", "payload"}` format as slice 1); the payload is the castxml XML text,
+and a hit parses it with `storage.castxml_xml.parse_castxml_text`, the same
+defused parser the cold run uses on disk. `read_cached_castxml` and its
+`.xml` digest sidecar are deleted; a payload the parser rejects is evicted
+(`TuParseStore.evict`) and misses.
+
+**Departure from the plan text: the key is built from `HeaderParseRequest`
+inputs, not from a `CompilerInvocation`.** The header-AST call sites receive a
+header request, not a compile unit, and no constructor in
+`compile_invocation.py` represents one (`parse_compile_invocation` takes a
+`CompileUnit`; the #1733 header renderer builds argv, not an invocation). The
+castxml key is therefore one `content_key` over the same inputs the old key
+folded -- schema, frontend and compiler identities, the compiler and its
+overrides, sysroot, `-nostdinc`, language, system include directories, the
+forced-C++ decisions, the invocation digest -- with each header and include
+root keyed by its **content digest** instead of its mtime
+(`extract.headers.ast_config._castxml_store_key`). Consequences: touching a
+header without editing it keeps the entry; editing one, or any file under an
+include root, misses. The global code fingerprint is not folded for castxml
+(the schema constant covers code shaping, as before); the clang key is
+unchanged and still mtime-based.
+
+Known gap: the castxml key records the sysroot path, not its contents. The previous key did the same, and hashing a whole sysroot on every lookup is too costly; a header changed inside an unchanged sysroot can still reuse an entry. Costs recorded, not yet measured: each lookup re-digests every header under
+an include root (the old key stat'ed them), and the XML payload is re-encoded
+inside the JSON entry on write. A payload-digest check is not in the store
+format, so a tampered but parseable entry is served; the old sidecar caught
+that. Each is a candidate for a follow-up: a raw-bytes payload form, and a
+payload digest in the entry.
+
+Tests: `tests/test_castxml_parse_store_view.py` states the equivalence (a warm
+dump returns the cold tree and runs castxml zero more times) and the key
+sensitivity (each parse input, each header and include-root edit, a
+touch-without-edit that must keep the key, a missing root keyed apart from a
+present one). The castxml cache tests in `test_dumper_unit.py`,
+`test_castxml_errors.py`, `test_castxml_toolchain_robustness.py` and
+`test_l2_ast_acquisition_singleflight.py` now patch `ast_cache_store`.
+
+**Remaining:** migrate the clang header-AST entry (its compacted document,
+DPC++ selection, failing-header retry and `ast_parse_exclusions` sidecar must
+each be written as the store payload, or the store must carry them). Phase 6
+is not done until the clang entry comes from the same store.
 
 ### Phase 7 — one worker-sizing and executor policy (sizing implemented; executor default open)
 
@@ -752,7 +788,7 @@ guard and `CLANG_EXTRACTOR_VERSION` 0.14, are in):
    logic and the ADR-063 typedef cutover, and L4's `_diff_typedefs` keys
    differently. It is the largest of the three.
 
-No L4-only kind moves. Each step is behaviour-preserving, and is proven through
+No L4-only kind moves. Each step is behaviour-preserving, and must be proven through
 `dump --depth source` and a compare on a fixture that contains the change.
 
 **Step 1 — landed.** The double finding was reproduced through `compare

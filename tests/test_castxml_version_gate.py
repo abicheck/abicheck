@@ -17,6 +17,7 @@ import pytest
 
 from abicheck.errors import UnsupportedCastxmlVersionError
 from abicheck.extract.headers.castxml.backend import castxml_dump as _castxml_dump
+from abicheck.storage.tu_parse_store import TuParseStore
 
 
 def _mock_identity(version_output: str):
@@ -74,8 +75,8 @@ class TestCastxmlVersionGate:
             "abicheck.extract.headers.castxml.backend._cache_key", lambda *a, **kw: "k"
         )
         monkeypatch.setattr(
-            "abicheck.extract.headers.castxml.backend._cache_path",
-            lambda k: tmp_path / "does-not-exist.xml",
+            "abicheck.extract.headers.castxml.backend.ast_cache_store",
+            lambda k, backend="castxml": TuParseStore(tmp_path / "no-cache"),
         )
 
         def fake_run(*_args, **_kwargs):
@@ -100,8 +101,8 @@ class TestCastxmlVersionGate:
             "abicheck.extract.headers.castxml.backend._cache_key", lambda *a, **kw: "k"
         )
         monkeypatch.setattr(
-            "abicheck.extract.headers.castxml.backend._cache_path",
-            lambda k: tmp_path / "does-not-exist.xml",
+            "abicheck.extract.headers.castxml.backend.ast_cache_store",
+            lambda k, backend="castxml": TuParseStore(tmp_path / "no-cache"),
         )
 
         def fake_run(*_args, **_kwargs):
@@ -127,8 +128,8 @@ class TestCastxmlVersionGate:
             "abicheck.extract.headers.castxml.backend._cache_key", lambda *a, **kw: "k"
         )
         monkeypatch.setattr(
-            "abicheck.extract.headers.castxml.backend._cache_path",
-            lambda k: tmp_path / "does-not-exist.xml",
+            "abicheck.extract.headers.castxml.backend.ast_cache_store",
+            lambda k, backend="castxml": TuParseStore(tmp_path / "no-cache"),
         )
 
         def fake_run(*_args, **_kwargs):
