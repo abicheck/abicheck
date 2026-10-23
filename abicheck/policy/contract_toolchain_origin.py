@@ -34,7 +34,7 @@ the origin classification the symbol-hygiene audit reports.
 
 from __future__ import annotations
 
-from collections.abc import Collection, Sequence
+from collections.abc import Callable, Collection, Sequence
 from dataclasses import replace
 from typing import Any
 
@@ -43,8 +43,11 @@ from ..contract_relevance_types import (
     ContractAssurance,
     ContractRelevance,
 )
+from ..model.change_catalog.kinds import ChangeKind
 
 __all__ = [
+    "DEPENDENCY_EDGE_KINDS",
+    "DEPENDENCY_EDGE_KIND_SLUGS",
     "TOOLCHAIN_RUNTIME_ORIGIN_REASON",
     "exclude_toolchain_runtime_findings",
 ]
@@ -55,32 +58,77 @@ TOOLCHAIN_RUNTIME_ORIGIN_REASON = "toolchain_runtime_origin"
 
 _PUBLIC_ROOT_REASON = "public_root_membership"
 
+#: Kinds whose subject is an edge from this library to another one (an
+#: imported symbol), not a declaration this library makes. Like ``DT_NEEDED``
+#: and required symbol versions, they are ``NOT_APPLICABLE`` to the contract
+#: (``contract_evaluation._NOT_APPLICABLE_KIND_SLUGS`` unions this set): policy
+#: scores them exactly as before, and they never reach contract coverage. Left
+#: to the header domain, an import read ``UNKNOWN_UNRESOLVED`` and raised exit
+#: 1 on every toolchain drift (the SVS field report).
+DEPENDENCY_EDGE_KINDS: frozenset[ChangeKind] = frozenset(
+    {
+        ChangeKind.IMPORTED_SYMBOL_ADDED,
+        ChangeKind.IMPORTED_SYMBOL_REMOVED,
+    }
+)
+DEPENDENCY_EDGE_KIND_SLUGS: frozenset[str] = frozenset(
+    k.value for k in DEPENDENCY_EDGE_KINDS
+)
+
+#: Kinds whose detector has already attributed the symbol to an external
+#: dependency (``export_existence_wording.ACCOUNT_EXTERNAL_DEP``).
+_EXTERNAL_ORIGIN_KINDS: frozenset[ChangeKind] = frozenset(
+    {ChangeKind.SYMBOL_LEAKED_FROM_DEPENDENCY_CHANGED}
+)
+
 
 def exclude_toolchain_runtime_findings(
     changes: Sequence[Any],
     decisions: Sequence[Any],
     toolchain_symbols: Collection[str],
+    *,
+    is_runtime_name: Callable[[str], bool] | None = None,
 ) -> list[Any]:
     """*decisions* with every runtime-owned, unexcluded finding made out of contract.
 
     *changes* and *decisions* are parallel sequences of a finding and its
     :class:`~abicheck.contract_evaluation.ContractEvaluationDecision`. Returns
     the decisions in order; a decision that is not replaced is returned as is.
+
+    A finding is runtime-owned when its symbol is in *toolchain_symbols* (the
+    snapshots' own ELF tables), when *is_runtime_name* says so for a symbol no
+    table lists, or when its kind already attributes the symbol to an external
+    dependency.
     """
-    if not toolchain_symbols:
-        return list(decisions)
     out: list[Any] = []
     for change, decision in zip(changes, decisions, strict=True):
         if (
-            (change.symbol or "") in toolchain_symbols
-            and decision.relevance is not NON_ENTITY_RELEVANCE
+            decision.relevance is not NON_ENTITY_RELEVANCE
             and decision.reason_code != _PUBLIC_ROOT_REASON
         ):
-            decision = replace(
-                decision,
-                relevance=ContractRelevance.PROVEN_OUT_OF_CONTRACT,
-                reason_code=TOOLCHAIN_RUNTIME_ORIGIN_REASON,
-                assurance=ContractAssurance.COMPLETE,
-            )
+            reason = _exclusion_reason(change, toolchain_symbols, is_runtime_name)
+            if reason is not None:
+                decision = replace(
+                    decision,
+                    relevance=ContractRelevance.PROVEN_OUT_OF_CONTRACT,
+                    reason_code=reason,
+                    assurance=ContractAssurance.COMPLETE,
+                )
         out.append(decision)
     return out
+
+
+def _exclusion_reason(
+    change: Any,
+    toolchain_symbols: Collection[str],
+    is_runtime_name: Callable[[str], bool] | None,
+) -> str | None:
+    kind = getattr(change, "kind", None)
+    symbol = change.symbol or ""
+    if (
+        kind in _EXTERNAL_ORIGIN_KINDS
+        or (symbol and symbol in toolchain_symbols)
+        or (is_runtime_name is not None and is_runtime_name(symbol))
+    ):
+        return TOOLCHAIN_RUNTIME_ORIGIN_REASON
+    return None

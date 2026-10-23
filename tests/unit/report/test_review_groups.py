@@ -186,3 +186,33 @@ def test_the_nameless_case_is_really_nameless() -> None:
     assert change.symbol == ""
     assert not getattr(change, "qualified_name", None)
     assert not getattr(change, "demangled_symbol", None)
+
+
+def _out_of_contract(finding: ReportFinding) -> ReportFinding:
+    from abicheck.contract_relevance_types import (
+        ContractRelevance,
+        evaluation_status_for,
+    )
+
+    finding.change.contract_relevance = ContractRelevance.PROVEN_OUT_OF_CONTRACT
+    finding.change.compatibility_evaluation_status = evaluation_status_for(
+        ContractRelevance.PROVEN_OUT_OF_CONTRACT
+    )
+    return finding
+
+
+def test_out_of_contract_breaking_members_contribute_no_gate() -> None:
+    # SVS field report: six `severity: breaking` toolchain statics proven out
+    # of contract (JSON gate_contribution 0) rendered "6 gating finding(s)".
+    statics = [
+        _out_of_contract(
+            _finding(ChangeKind.VAR_REMOVED_ELF_ONLY, f"_ZZN3std1fIiEEvvE1x{i}")
+        )
+        for i in range(6)
+    ]
+    live = _finding(ChangeKind.FUNC_REMOVED_ELF_ONLY, "_ZN5mylib3addEv")
+    groups = build_review_groups((*statics, live))
+    by_symbol = {g.exact_symbols[0]: g.gating_findings for g in groups}
+    assert by_symbol.pop("_ZN5mylib3addEv") == 1
+    assert set(by_symbol.values()) == {0}
+    assert sum(g.gating_findings for g in groups) == 1
