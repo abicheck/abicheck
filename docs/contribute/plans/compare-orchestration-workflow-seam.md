@@ -90,7 +90,12 @@ Rules this must keep (from `workflows/AGENTS.md`):
   `ValidationError` that the adapter renders as exit 64.
 - Errors keep their contract: `SnapshotError` is operational (exit 1), `ValidationError`
   is usage (exit 64), `ProfileMismatchError`/`ScopeMismatchError` become a
-  `not_comparable` outcome, `DeadlineExceeded` becomes a `budget` outcome (exit 5).
+  `not_comparable` outcome (exit 16, `_EXIT_NOT_COMPARABLE` in
+  `frontends/cli/runtime.py`), `DeadlineExceeded` becomes a `budget` outcome (exit 5).
+  `PlanningError` (raised through `resolve_compare_request` when no collector/backend
+  combination can satisfy the request) takes the same route as `ValidationError`: the
+  current compare adapter (`cli_resolve.py`) maps it to `click.UsageError`, exit 64.
+  The compare adapter keeps that mapping in S6.
   Characterization tests pin each before it moves.
 
 ## Slices
