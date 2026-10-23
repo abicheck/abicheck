@@ -186,6 +186,22 @@ FAMILIES: dict[str, Family] = {
             ),
         ),
         Family(
+            key="F12",
+            title="Argv replay and public-root probe read the same operands",
+            invariant=(
+                "Every spelling a compiler driver accepts for one include-search "
+                "operand is read the same way by every consumer of the compile "
+                "unit: the replayed argv and the public-root probe agree on which "
+                "directories the compile searches."
+            ),
+            harness_tests=(),
+            planned_reason=(
+                "One class so far; revisit when a second class has a consumer "
+                "that reads a driver's option spellings differently from the "
+                "replay, and the two share one mechanism."
+            ),
+        ),
+        Family(
             key="OTHER",
             title="CI, tooling, storage and trust-boundary surfaces",
             invariant=(
@@ -368,13 +384,13 @@ _F9 = (
     "concurrency.per_thread_state_in_inherited_context",
 )
 _F10 = ("concurrency.abandoned_child_outlives_failed_owner",)
-# Heterogeneous mechanisms with no shared harness (see the OTHER family).
-_OTHER = (
-    # A CL-mode `-I` or `/external:I` include operand never reached the
-    # public-root probe, so its public headers were classified non-public.
+_F11 = ("measurement.forked_tree_rss_overstates_memory",)
+_F12 = (
+    # The public-root probe read only `/I` from a CL-mode argv, so a `-I` or
+    # `/external:I` include root was never probed while the replay read a
+    # different operand set from the same driver spelling.
     "extraction.msvc_include_operand_spelling_not_probed",
 )
-_F11 = ("measurement.forked_tree_rss_overstates_memory",)
 
 #: id -> reason it belongs to no shared family.
 OTHER_REASONS: dict[str, str] = {
@@ -417,7 +433,7 @@ for _key, _ids in (
     ("F9", _F9),
     ("F10", _F10),
     ("F11", _F11),
-    ("OTHER", _OTHER),
+    ("F12", _F12),
     ("OTHER", tuple(OTHER_REASONS)),
 ):
     for _id in _ids:
