@@ -20,10 +20,12 @@ link objects and archives, or stop after ``-E``/``-S``/``-c``. The corpus in
 
 Two pins live here:
 
-* **Consumers are unchanged.** The clang argv golden was recorded from the
-  code before :class:`~abicheck.buildsource.source_extractors.compile_invocation.CompilerInvocation`
-  gained its operand fields. The renderers never read those fields, so every
-  rendered argv must stay byte-identical.
+* **Consumers are unchanged for single-source units.** The clang argv golden
+  was recorded before :class:`~abicheck.buildsource.source_extractors.compile_invocation.CompilerInvocation`
+  gained its operand fields, and it pins every single-source unit byte for
+  byte. The units of multi-source entries are no longer one-per-entry (plan
+  Phase 3 item 4), so they are pinned by
+  ``test_compile_db_operand_routing.py`` and dropped from this golden.
 * **The operands match a hand-written oracle.** The expectations below are
   written from the gcc driver's documented behaviour, not copied from the
   implementation, so a parser bug shows up as a disagreement.
@@ -55,9 +57,27 @@ _GOLDEN = _DATA / "multi_source_clang_argv_golden.json"
 C = CompileAction
 
 
+#: Units of multi-source entries: pinned by the routing golden, not this one.
+_MULTI_SOURCE_UNITS = frozenset(
+    {
+        "/work/a.c",
+        "/work/b.c",
+        "/work/a.h",
+        "/work/h1.cpp",
+        "/work/h2.cc",
+        "/work/p.cpp",
+        "/work/p2.cpp",
+    }
+)
+
+
 def _render_corpus() -> dict[str, dict[str, Any]]:
     evidence = CompileDbAdapter(_CORPUS).collect()
-    return {cu.source: _render_unit(cu) for cu in evidence.compile_units}
+    return {
+        cu.source: _render_unit(cu)
+        for cu in evidence.compile_units
+        if cu.source not in _MULTI_SOURCE_UNITS
+    }
 
 
 def test_consumer_argv_matches_pre_change_golden() -> None:

@@ -29,12 +29,20 @@ from typing import Any
 import pytest
 
 from abicheck.buildsource.adapters.compile_db import CompileDbAdapter
+from abicheck.buildsource.build_evidence import CompileUnit
 from abicheck.buildsource.source_extractors.base import SourceExtractionError
 from abicheck.buildsource.source_extractors.castxml import build_castxml_command
 from abicheck.buildsource.source_extractors.clang_command import (
     build_clang_command,
     build_clang_macro_command,
     compile_unit_invocation,
+)
+from abicheck.buildsource.source_extractors.clang_public_roots import (
+    _compile_unit_include_roots,
+)
+from abicheck.buildsource.source_extractors.compile_invocation import (
+    parse_compile_invocation,
+    replayed_tokens_for,
 )
 
 _DATA = Path(__file__).parent / "data" / "compile_invocation"
@@ -292,3 +300,81 @@ def test_header_argv_branches_match_hand_written_expectation(
     kwargs: dict[str, Any], expected: list[str]
 ) -> None:
     assert _posix_argv(_render_header_case(kwargs)) == expected
+
+
+# ---------------------------------------------------------------------------
+# MSVC/clang-cl include-search operands (typed ``replayed_include_dirs``)
+#
+# ``/I``, ``-I`` and ``/external:I`` in CL-mode context are read from the raw
+# argv into the typed probe field, in both spellings. The rendered replay argv
+# is unchanged by this field: a ``-I`` or ``/external:I`` operand reaches the
+# public-root probe only.
+# ---------------------------------------------------------------------------
+
+
+def _single_unit(tmp_path: Path, command: str) -> CompileUnit:
+    """The one compile unit a one-entry ``compile_commands.json`` records."""
+    db = tmp_path / "compile_commands.json"
+    db.write_text(
+        json.dumps(
+            [{"directory": str(tmp_path), "command": command, "file": "src.cpp"}]
+        ),
+        encoding="utf-8",
+    )
+    (cu,) = CompileDbAdapter(db).collect().compile_units
+    return cu
+
+
+_MSVC_SPELLINGS = [
+    pytest.param(["/I", "inc"], ("inc",), id="slash-I-separate"),
+    pytest.param(["/Iinc"], ("inc",), id="slash-I-joined"),
+    pytest.param(["-I", "inc"], ("inc",), id="dash-I-separate"),
+    pytest.param(["-Iinc"], ("inc",), id="dash-I-joined"),
+    pytest.param(["/external:I", "ext"], ("ext",), id="external-I-separate"),
+    pytest.param(["/external:Iext"], ("ext",), id="external-I-joined"),
+]
+
+
+@pytest.mark.parametrize("driver", ["cl", "clang-cl"])
+@pytest.mark.parametrize(("spelling", "expected"), _MSVC_SPELLINGS)
+def test_msvc_include_operand_reaches_typed_probe_field(
+    tmp_path: Path, driver: str, spelling: list[str], expected: tuple[str, ...]
+) -> None:
+    cu = _single_unit(tmp_path, " ".join([driver, "/c", *spelling, "src.cpp"]))
+    assert parse_compile_invocation(cu).replayed_include_dirs == expected
+
+
+@pytest.mark.parametrize(
+    ("command", "expected"),
+    [
+        # GNU spelling in a GNU driver is structured, never replayed as a probe operand.
+        pytest.param("g++ -c -I inc src.cpp", (), id="gnu-I-is-structured"),
+        pytest.param(
+            "g++ -c -iquote q src.cpp", ("q",), id="gnu-iquote-still-replayed"
+        ),
+        # The MSVC spelling is not an include-search option outside CL mode.
+        pytest.param(
+            "g++ -c /external:I ext src.cpp", (), id="gnu-mode-ignores-external-I"
+        ),
+        # ``/imsvc`` is a system bucket, deliberately outside this change.
+        pytest.param("clang-cl /c /imsvc sys src.cpp", (), id="imsvc-not-probed"),
+    ],
+)
+def test_include_operand_probe_rules_are_scoped_to_their_dialect(
+    tmp_path: Path, command: str, expected: tuple[str, ...]
+) -> None:
+    cu = _single_unit(tmp_path, command)
+    assert parse_compile_invocation(cu).replayed_include_dirs == expected
+
+
+def test_external_include_is_a_public_root_candidate(tmp_path: Path) -> None:
+    cu = _single_unit(tmp_path, "clang-cl /c /external:I ext src.cpp")
+    assert [raw for raw, _ in _compile_unit_include_roots(cu)] == ["ext"]
+
+
+def test_external_include_does_not_change_the_rendered_replay(tmp_path: Path) -> None:
+    # The typed probe field widens; the replayed argv does not. ``/external:I``
+    # reaches the probe only, so its rendered replay is unchanged by this change.
+    cu = _single_unit(tmp_path, "clang-cl /c /external:I ext src.cpp")
+    assert "/external:I" not in replayed_tokens_for(cu)
+    assert "ext" not in replayed_tokens_for(cu)

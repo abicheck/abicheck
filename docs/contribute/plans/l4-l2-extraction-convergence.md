@@ -1,6 +1,6 @@
 # L2/L4/L5 extraction convergence — one parse per TU, one owner per primitive
 
-**Status:** Proposed; Phases 1 and 2 implemented (the first two PRs); Phase 3 first slice implemented (the model and four clang/castxml consumers); Phase 3 remaining slice 1 (the L2 header clang argv) and slice 2 (typed include-search operands on `CompilerInvocation`, `clang_public_roots` rescan deleted) implemented; slices 3–4 remain (see Phase 3).
+**Status:** Proposed; Phases 1 and 2 implemented (the first two PRs); Phase 3 first slice implemented (the model and four clang/castxml consumers); Phase 3 remaining slice 1 (the L2 header clang argv) and slice 2 (typed include-search operands on `CompilerInvocation`, `clang_public_roots` rescan deleted) implemented; slice 3 and slice 4's model and consumer wiring are implemented; CL-mode operands and `@file` expansion remain out of scope (see Phase 3).
 **Parent plans:** [Duplication & convergence assessment](duplication-and-convergence-assessment.md)
 (its P1 "Compiler invocation handling needs one typed model" owns Phase 3
 here — this plan does not restate that design), [One Semantic Pipeline](one-semantic-pipeline.md)
@@ -233,8 +233,7 @@ the pre-change commit. A mutation of the dedup rule fails it.
    `test_compile_invocation_launcher_differential.py`, whose golden was recorded
    from the pre-move code. The source generation moved to 5 (a `--bump`, as
    the gate offered; the scoped edit changes no recorded fact).
-4. **`SourceOperand` and `CompileAction`.** *Model implemented; consumer
-   wiring is the next slice.* The multi-source corpus
+4. **`SourceOperand` and `CompileAction`.** *Model and consumer wiring implemented.* The multi-source corpus
    (`tests/data/compile_invocation/multi_source_compile_commands.json`, 16
    entries: `gcc -c a.c b.c`, `-x` switching, `-E`/`-S`/`-c`, link with
    objects and archives, `-include`/`-MF` operands) is pinned by
@@ -253,10 +252,40 @@ the pre-change commit. A mutation of the dedup rule fails it.
    Not in this slice: CL-mode (`/c`, `/Fo`, `/Tc`/`/Tp`) operands, which stay
    `action=None`; `@file` response files, reported as link inputs rather than
    expanded; `env -C` prefixes, whose operand spelling is the launcher-folded
-   one. **Next slice:** route the link-unit and per-source compile decisions
-   (currently one `CompileUnit` per entry, and link entries become compile
-   units) through `operands`, with a differential golden for the changed
-   consumers.
+   one. **Consumer wiring — implemented.** Compile-database entries are routed by
+   their operands in `adapters/compile_db.py`, and the shared corpus is
+   pinned by `multi_source_unit_routing_golden.json`. Three routes:
+   - **legacy** (one source, or an MSVC entry): one unit, exactly as before,
+     including a single-source link. The unit's source and language are
+     unchanged, so these entries are byte-identical (12 of 16 corpus entries).
+   - **per_operand** (several sources): one `CompileUnit` per `SourceOperand`,
+     with the operand's own `-x` language and its path resolved against the
+     entry directory (as `load_compile_db` resolves `file`). A multi-source
+     link also records one `LinkUnit` (`link://<output>`, `inputs` = the link
+     inputs; the compiled objects are intermediates, not inputs). Corpus:
+     `a.c`, `a.h`, `h1.cpp`, `p.cpp`.
+   - **link_only** (a link with no source operand): no compile unit, one
+     `LinkUnit`. The corpus has no such entry, so
+     `test_compile_db_operand_routing.py` pins it inline.
+
+   What changes and why, against the pre-change output recorded from
+   `origin/main`: `a.c` gains the `b.c` unit it was missing; `a.h` (`g++ -x
+   c++ a.h -x none b.c -o prog`) gains `b.c` as C plus the `prog` link unit;
+   `h1.cpp` gains `h2.cc`; `p.cpp` gains `p2.cpp`. Nothing else moves. The
+   clang argv each per-operand unit renders takes its own `-x` (`b.c` renders
+   `-x c`, not the entry's `-x c++`).
+
+   Decisions: (a) single-source entries keep their unit and record no link
+   unit, so their link inputs (`c.o`, `lib.a` for `d.c`) are still not
+   recorded. Recording them would add output to every single-source link;
+   that is a separate, deliberate change. (b) The source generation moves to
+   9 (`SOURCE_GENERATION`), one above main's 8: the source tier
+   replays different units for the same multi-source input. (c) `multi_source_clang_argv_golden.json` pins
+   single-source units only; its four keys for changed entries were removed
+   and the routing golden owns them. (d) `adapters/compile_db.py` is not in
+   `generation_scope.SOURCE_TIER_FILES`, so a future adapter-only change to
+   this routing would not fail the fingerprint gate; the scope should list
+   it (follow-up). CL-mode operands and `@file` expansion stay out of scope.
 
 ### Phase 4 — one clang AST → declaration/type parser
 

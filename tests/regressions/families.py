@@ -186,6 +186,40 @@ FAMILIES: dict[str, Family] = {
             ),
         ),
         Family(
+            key="F12",
+            title="Argv replay and public-root probe read the same operands",
+            invariant=(
+                "Every spelling a compiler driver accepts for one include-search "
+                "operand is read by every consumer of the compile unit: the "
+                "public-root probe reads each CL-mode spelling. Replay parity with "
+                "the probe is tracked as the remaining gap in known-gaps.md, not "
+                "yet met."
+            ),
+            harness_tests=(),
+            planned_reason=(
+                "One class so far; revisit when a second class has a consumer "
+                "that reads a driver's option spellings differently from the "
+                "replay, and the two share one mechanism."
+            ),
+        ),
+        Family(
+            key="F13",
+            title="Build inputs route to their own units",
+            invariant=(
+                "Every source operand a build input names becomes exactly one "
+                "compile unit owned by that operand, and a link with no source "
+                "operand compiles nothing: no operand is dropped, and no link "
+                "object is taken for a source, by collapsing a record onto its "
+                "first operand."
+            ),
+            harness_tests=(),
+            planned_reason=(
+                "One class so far, pinned by its own seed test; revisit when a "
+                "second build-input adapter (Bazel, Ninja, make) collapses operands "
+                "the same way and a shared operand-shape harness can enumerate them."
+            ),
+        ),
+        Family(
             key="OTHER",
             title="CI, tooling, storage and trust-boundary surfaces",
             invariant=(
@@ -370,6 +404,13 @@ _F9 = (
 )
 _F10 = ("concurrency.abandoned_child_outlives_failed_owner",)
 _F11 = ("measurement.forked_tree_rss_overstates_memory",)
+_F12 = (
+    # The public-root probe read only `/I` from a CL-mode argv, so a `-I` or
+    # `/external:I` include root was never probed while the replay read a
+    # different operand set from the same driver spelling.
+    "extraction.msvc_include_operand_spelling_not_probed",
+)
+_F13 = ("extraction.compile_entry_collapsed_to_first_source",)
 
 #: id -> reason it belongs to no shared family.
 OTHER_REASONS: dict[str, str] = {
@@ -412,6 +453,8 @@ for _key, _ids in (
     ("F9", _F9),
     ("F10", _F10),
     ("F11", _F11),
+    ("F12", _F12),
+    ("F13", _F13),
     ("OTHER", tuple(OTHER_REASONS)),
 ):
     for _id in _ids:

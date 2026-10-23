@@ -79,6 +79,9 @@ class GnuOperands:
     #: Non-source inputs a :attr:`CompileAction.LINK` consumes, in argv order.
     #: Empty for every other action, which does not invoke the linker.
     link_inputs: tuple[str, ...]
+    #: The file a :attr:`CompileAction.LINK` writes: the ``-o`` value, or the
+    #: driver's ``a.out`` default. ``""`` under every other action.
+    link_output: str = ""
 
 
 #: Options whose operand is the following token (``-o out``), not a joined
@@ -265,8 +268,10 @@ def parse_gnu_operands(tail: list[str]) -> GnuOperands:
         )
         for token, language in sources
     )
+    is_link = action is CompileAction.LINK
     return GnuOperands(
         action=action,
         operands=operands,
-        link_inputs=tuple(link_inputs) if action is CompileAction.LINK else (),
+        link_inputs=tuple(link_inputs) if is_link else (),
+        link_output=(output or _DEFAULT_LINK_OUTPUT) if is_link else "",
     )

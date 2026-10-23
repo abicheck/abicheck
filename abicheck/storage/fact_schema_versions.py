@@ -155,3 +155,10 @@ _MIN_SCHEMA_VERSION_FOR_SPECIALIZATION_FACT = 61
 # no key, which reads as NOT_COLLECTED at this version and above, so an UNKNOWN
 # side never compares equal to a recorded one.
 _MIN_SCHEMA_VERSION_FOR_TEMPLATE_PARAM_DEFAULTS = 62
+
+# Schema v64: ``Function.template_param_defaults_fact`` -- the same spelled
+# default record as v62, for a function template's pattern (ADR-085 D1, function
+# slice). Written only when a producer recorded it (clang); castxml and every
+# pre-v64 document carry no key, which reads as NOT_COLLECTED at this version
+# and above.
+_MIN_SCHEMA_VERSION_FOR_FUNCTION_TEMPLATE_PARAM_DEFAULTS = 64

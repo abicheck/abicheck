@@ -274,6 +274,20 @@ LEADING_ROWS: tuple[FactRow, ...] = (
     ),
     FactRow(
         "Function",
+        "template_param_defaults_fact",
+        _NONE,
+        _PARTIAL,
+        note=(
+            "Schema v64. clang records the spelled default of each parameter of a "
+            "function template's pattern "
+            "(`extract/headers/clang/function_template_defaults.py`); a default "
+            "whose spelling is not read leaves the pattern NOT_COLLECTED. castxml "
+            "emits no function-template pattern defaults, so its side is "
+            "NOT_COLLECTED and its header scan reports the gap."
+        ),
+    ),
+    FactRow(
+        "Function",
         "is_compiler_generated",
         _FULL,
         _NONE,

@@ -53,6 +53,7 @@ from .fact_schema_versions import (
     _MIN_SCHEMA_VERSION_FOR_DEPRECATION_FACTS,
     _MIN_SCHEMA_VERSION_FOR_ENUMTYPE_FACTS,
     _MIN_SCHEMA_VERSION_FOR_FUNCTION_CASE_B_FACTS,
+    _MIN_SCHEMA_VERSION_FOR_FUNCTION_TEMPLATE_PARAM_DEFAULTS,
     _MIN_SCHEMA_VERSION_FOR_HEADER_IDENTIFIERS_FACT,
     _MIN_SCHEMA_VERSION_FOR_INLINE_FACT,
     _MIN_SCHEMA_VERSION_FOR_IS_FINAL_FACT,
@@ -157,6 +158,7 @@ _VARIABLE_FACT_KEYS = (
 # collection ("functions", not "variables"/"types"/"enums").
 _FUNCTION_FACT_KEYS = (
     "contract_attributes_fact",
+    "template_param_defaults_fact",
     "is_explicit_fact",
     "is_hidden_friend_fact",
     "source_header_fact",
@@ -625,6 +627,13 @@ def decode_function_facts(f: dict[str, Any], schema_version: int) -> dict[str, A
                     f.get("return_type_identities_fact"),
                     schema_version,
                     min_schema_version=_MIN_SCHEMA_VERSION_FOR_TYPE_IDENTITY_FACTS,
+                )
+            ),
+            "template_param_defaults_fact": validated_template_param_defaults(
+                decode_fact(
+                    f.get("template_param_defaults_fact"),
+                    schema_version,
+                    _MIN_SCHEMA_VERSION_FOR_FUNCTION_TEMPLATE_PARAM_DEFAULTS,
                 )
             ),
         },
