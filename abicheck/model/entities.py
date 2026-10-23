@@ -358,7 +358,8 @@ class RecordType:
     # with ``is_template_pattern``), one entry per template parameter in
     # declaration order -- the spelled default argument, or ``None`` when that
     # parameter has no default. PRESENT only when a producer walked every
-    # parameter of the pattern and each one is a type parameter. CastXML never
+    # parameter of the pattern and spelled every default it found (type,
+    # non-type and template-template parameters alike). CastXML never
     # records it (UNKNOWN); a pre-v62 snapshot has no PRESENT value. An
     # UNKNOWN side never compares equal to a recorded side (ADR-085 D1).
     template_param_defaults_fact: Fact[tuple[str | None, ...]] | None = field(

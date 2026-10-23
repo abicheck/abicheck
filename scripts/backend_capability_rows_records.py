@@ -393,12 +393,12 @@ RECORD_AND_LATER_ROWS: tuple[FactRow, ...] = (
         _NONE,
         _PARTIAL,
         note=(
-            "Schema v62. clang records each type parameter's spelled default for "
-            "a class-template pattern whose parameters are all type parameters "
-            "(`extract/headers/clang/template_param_indexes.py`); a template with "
-            "a non-type or template-template parameter stays NOT_COLLECTED. "
-            "castxml emits no pattern record for an uninstantiated template, so "
-            "it never sets this."
+            "Schema v62. clang records the spelled default of each parameter of a "
+            "class-template pattern, for type, non-type and template-template "
+            "parameters (`extract/headers/clang/template_param_indexes.py`); a "
+            "default whose spelling is not read (for example `sizeof(T)`) leaves "
+            "the whole pattern NOT_COLLECTED. castxml emits no pattern record for "
+            "an uninstantiated template, so it never sets this."
         ),
     ),
     FactRow(

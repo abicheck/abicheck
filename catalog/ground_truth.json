@@ -4507,7 +4507,7 @@
    "api_break": false,
    "bad_practice": false,
    "category": "no_change",
-   "description": "Header-only Buf<T, int N = 4> with its non-type default changed to N = 8. The clang recorder covers type-parameter templates only, so it records nothing for Buf and reports a 'not recorded ... not a type parameter' gap. The castxml side reports its own gap. Both backends give NO_CHANGE and no template_param_default_changed finding, so the verdict agrees but the coverage does not.",
+   "description": "Header-only Buf<T, int N = 4> with its non-type default changed to N = 8. The clang recorder spells non-type defaults (ADR-085 Remaining 3), so it reports template_param_default_changed as API_BREAK. The castxml side records nothing and reports its own gap, so its verdict stays NO_CHANGE. The validator lane is castxml, so the expected result is NO_CHANGE with a gap.",
    "expected": "NO_CHANGE",
    "expected_absent_kinds": [
     "template_param_default_changed",
