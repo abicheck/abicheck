@@ -30,8 +30,10 @@ it. Moved out of the legacy ``diff_filtering.py`` (ADR-061).
 
 from __future__ import annotations
 
+from collections import Counter
 from collections.abc import Mapping
 
+from ..demangle import demangle
 from ..diff_helpers import (
     canonicalize_record_symbol,
     cross_tier_transition,
@@ -441,6 +443,58 @@ def _drop_elf_only_duplicates_of_visibility(changes: list[Change]) -> list[Chang
     return [c for c in changes if (c.kind, c.symbol) not in covered]
 
 
+#: The evidence bucket the L4 source replay tags its findings with (set by
+#: ``buildsource.evidence_report`` before the disposition pipeline runs).
+_SOURCE_REPLAY_EVIDENCE = "source_only"
+
+
+def _inline_removal_name(change: Change) -> str:
+    """The bare qualified name an inline-removal finding is about.
+
+    The header tier names the function by its mangled symbol. Its demangled form
+    (``demo::f(int)``) is filled in by enrichment that runs only after this step,
+    so it is demangled here. The source replay names the function by qualified
+    name (``demo::f``). Stripping the parameter list lines the two up.
+    """
+    name = change.demangled_symbol or demangle(change.symbol) or change.symbol
+    return name.split("(", 1)[0]
+
+
+def _drop_source_replay_inline_duplicates(changes: list[Change]) -> list[Change]:
+    """Drop a source-replay ``INLINE_FUNCTION_REMOVED`` the header tier reports.
+
+    A public header-only inline removed from the headers is one observation at
+    two tiers: the header tier's ``diff_symbols._check_removed_function`` and the
+    L4 replay's ``source_diff._diff_inline_bodies`` both emit it, with different
+    descriptions, so the exact and identity keys above never see them as equal.
+    The header-tier finding is kept: it is the artifact-anchored owner (ADR-028
+    D3) and also carries the declaration's surface facts, which the replay
+    finding does not.
+
+    Matched one for one by function name, so an extra replay removal with no
+    header-tier twin (say, a second overload the header tier did not see) stays
+    visible. Every dropped finding is recorded as ``deduplicated`` by the
+    disposition pipeline, so the raw total still counts it (ADR-067).
+    """
+    header_tier = Counter(
+        _inline_removal_name(c)
+        for c in changes
+        if c.kind is ChangeKind.INLINE_FUNCTION_REMOVED
+        and c.evidence_category != _SOURCE_REPLAY_EVIDENCE
+    )
+    result: list[Change] = []
+    for c in changes:
+        if (
+            c.kind is ChangeKind.INLINE_FUNCTION_REMOVED
+            and c.evidence_category == _SOURCE_REPLAY_EVIDENCE
+            and header_tier[_inline_removal_name(c)] > 0
+        ):
+            header_tier[_inline_removal_name(c)] -= 1
+            continue
+        result.append(c)
+    return result
+
+
 def deduplicate_cross_detector(
     changes: list[Change],
     old: AbiSnapshot | None = None,
@@ -547,6 +601,7 @@ def deduplicate_cross_detector(
                     c.qualified_name = qual
 
     changes = _drop_elf_only_duplicates_of_visibility(changes)
+    changes = _drop_source_replay_inline_duplicates(changes)
     seen: set[str] = set()
     result: list[Change] = []
     for c in changes:

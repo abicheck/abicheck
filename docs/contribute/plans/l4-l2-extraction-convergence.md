@@ -704,7 +704,7 @@ unified, and two edge cases changed (see the changelog fragment).
 measurement in "Measurements" on the PVXS fixture; it was deliberately not
 changed in this phase.
 
-### Phase 8 — diffing: assess before merging (assessed; merge waits for Phase 4)
+### Phase 8 — diffing: assess before merging (step 1 landed; steps 2–3 open)
 
 Assessment only, no behaviour change. `scripts/source_l2_overlap.py` derives
 each tier's emitter set with the static closure `gen_detector_kind_map.py`
@@ -723,7 +723,7 @@ counterpart.
 
 | L4 kind | L2 kind | Class | Why |
 |---|---|---|---|
-| `INLINE_FUNCTION_REMOVED` | same | **true duplicate** | Header-only inline removed: `_diff_inline_bodies` (L4) and `_check_removed_function` (L2, export confirmed absent) both emit it. The descriptions differ, so `finding_dedup`'s exact key (which includes the description) should not collapse them. Not yet reproduced end to end. |
+| `INLINE_FUNCTION_REMOVED` | same | **true duplicate — resolved (step 1)** | Header-only inline removed: `_diff_inline_bodies` (L4) and `_check_removed_function` (L2, export confirmed absent) both emit it, with different wording, so the exact and identity keys never collapsed them. Reproduced end to end (C and C++); fixed in `compare.finding_dedup._drop_source_replay_inline_duplicates`. |
 | `CONSTEXPR_VALUE_CHANGED` | `CONSTANT_CHANGED` | near-duplicate | Same namespace-scope `const`/`constexpr` value change, from the same headers. |
 | `PUBLIC_TYPEDEF_REMOVED` | `TYPEDEF_REMOVED` | near-duplicate | Same typedef removal. |
 | `PUBLIC_TYPEDEF_TARGET_CHANGED` | `TYPEDEF_BASE_CHANGED` | near-duplicate | Same typedef retarget. |
@@ -755,9 +755,22 @@ guard and `CLANG_EXTRACTOR_VERSION` 0.14, are in):
 No L4-only kind moves. Each step is behaviour-preserving, and is proven through
 `dump --depth source` and a compare on a fixture that contains the change.
 
-**Not yet verified:** the true duplicate's double finding is read from the
-emitters, not run; the near-duplicate pairs are judged the same way. Step 1
-starts by reproducing both.
+**Step 1 — landed.** The double finding was reproduced through `compare
+--sources --depth source` before the change (C: `clamp_it`; C++:
+`demo::clamp_it`, header tier mangled, replay qualified). The owner is the
+header tier: it is artifact-anchored (ADR-028 D3) and is the only copy that
+carries the declaration's surface facts. The replay copy is dropped by a
+one-for-one match on the bare function name (demangled on the header side,
+since enrichment runs after dedup), inside `deduplicate_cross_detector`, so the
+pipeline records it as `deduplicated`. Checked against the unfixed code, on the
+same fixture: the verdict and exit code are unchanged, `detected_total` stays
+at 3, `deduplicated` goes 0 → 1, `gating` 2 → 1, and no other finding moves.
+Name-level pairing has two limits, recorded in `known-gaps.md`: a header symbol
+that does not demangle keeps its replay twin visible (conservative), and two
+overloads of one name pair by count, not by signature.
+
+The near-duplicate pairs are still judged from the emitters, not run. Step 2 is
+where they get reproduced first.
 
 ## Measurements
 
