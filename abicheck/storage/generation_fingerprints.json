@@ -7,7 +7,7 @@
       "abicheck/dwarf_advanced.py": "91cfc7f410a37e7d7ba3ec922ff2944b81253fde3dcfdb806be032087822b339",
       "abicheck/dwarf_metadata.py": "9b9c938fcfdee9e498ef007023c040d914cc8fbc4e6971ef06768463ff69002e",
       "abicheck/dwarf_presence.py": "7e73580ec7a02fdf24e3815cb89e42aa6fe00e46e8cda6b7fe9d547f06ac3f06",
-      "abicheck/dwarf_snapshot.py": "5f6ffa8f31819e2c8ce345fe172dd15a4ec46694091e8a9f49d4361415678546",
+      "abicheck/dwarf_snapshot.py": "b151b210f45e16e58d0176cb82dab0dd3222c05adb2c2e6699855b8e3c00bfae",
       "abicheck/dwarf_snapshot_datasources.py": "e337f8be3a8ae16350c0639d0be10670d4d5d1197108659fa210fcbbf8a5bdde",
       "abicheck/dwarf_unified.py": "9ecb70b59bb26674ac98ba14ad1211b4103e3a78426a91ed7901e59f1a7d9cdf",
       "abicheck/dwarf_utils.py": "d236971e77d092bbdc578c5f36380e6383a4d9a19716127adf32b28065f24a83",
@@ -36,7 +36,7 @@
       "abicheck/extract/digest_memo.py": "babd25889fb4ac54b8defd27ea009fc2e125085c5692f5a4d864aec5491fbee9",
       "abicheck/extract/dpcpp_jobs.py": "7e30f36f5a4ccaf84aa9abe6ed7958d23ce5c43dbb9f6504b9921502c99fad08",
       "abicheck/extract/dump_manifest_roots.py": "b616e45b7eafdd2dd4c69c1031f9a5c8b54973633aa3e9057edc60525ea0d15a",
-      "abicheck/extract/dwarf_decl_file.py": "ab0c408a4ba98938fde120078085ad002f3c3a40cea9631ccb4cb01d36593be5",
+      "abicheck/extract/dwarf_decl_file.py": "f1fadf216dc2fef339d31a130d3f6d898736cdb7f2cbc1035396aaa7f0a7a89a",
       "abicheck/extract/dwarf_layout_backfill.py": "3dcc9efb8907b6b3419b09b1c262f64403a5162148bc3be0a5d51e112ef69a4d",
       "abicheck/extract/dwarf_producer.py": "86e449f5776fe7aead410ef979dc636837d28c8caae5599d3c22b8c3f442e1c6",
       "abicheck/extract/dwarf_records.py": "e77d5320c3a56b7ca6a46b20ab7197ed03817d0f838d0a7c0fe899439a71ec42",
@@ -158,9 +158,9 @@
       "abicheck/symvers_metadata.py": "372737765cd132e6e87ed891dd465d2958e04debbef774e45212ceb3036871cb",
       "abicheck/type_metadata.py": "9997189de8dac522fd1db8be5ae491d811139503f83abaaded89038eb4aa9cdf"
     },
-    "fingerprint": "3174aeb6b0e46525e50edbb4d3a0106911687ffc86d8bd4278ea90335660f8dc",
+    "fingerprint": "e38cb759b187c0355f2dffccda04559a9df0727d7466638966a22b26f5480261",
     "generation": 13,
-    "reason": "Generation 13 is this branch's own unreleased bump (DWARF declaration-file resolution). The later edit to dwarf_decl_file.py only makes the DWARF 5 file-index-0 sentinel explicit and documents it; the recorded facts for generation 13 are unchanged in kind, so the generation stays 13 and only the content fingerprint is re-recorded."
+    "reason": "Generation 13 is still this branch's own unreleased bump. The last edits make a source-file declaration keep no location (header-only recording) and fold that rule into decl_header_location; generation 13 covers the same unreleased change, so the stamp stays 13 and only the content fingerprint is re-recorded."
   },
   "resolver": {
     "files": {
