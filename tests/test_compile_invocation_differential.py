@@ -26,6 +26,8 @@ import json
 from pathlib import Path
 from typing import Any
 
+import pytest
+
 from abicheck.buildsource.adapters.compile_db import CompileDbAdapter
 from abicheck.buildsource.source_extractors.base import SourceExtractionError
 from abicheck.buildsource.source_extractors.castxml import build_castxml_command
@@ -223,3 +225,70 @@ def regenerate_header_golden() -> None:
 def test_header_argv_matches_pre_change_golden() -> None:
     golden = json.loads(_HEADER_GOLDEN.read_text(encoding="utf-8"))
     assert render_header_corpus() == golden
+
+
+#: The clang AST-dump tail every header argv ends with (copied from the golden).
+_HEADER_TAIL = [
+    "-D__malloc__(...)=__malloc__",
+    "-fsyntax-only",
+    "-ferror-limit=0",
+    "-Xclang",
+    "-ast-dump=json",
+    "<abicheck-aggregate>.h",
+]
+
+
+@pytest.mark.parametrize(
+    ("kwargs", "expected"),
+    [
+        pytest.param(
+            {"clang_bin": "clang", "cc_id": "gnu", "gcc_options": "-std=c11"},
+            ["clang", "-std=c11", *_HEADER_TAIL],
+            id="c-mode-explicit-std-keeps-caller-standard",
+        ),
+        pytest.param(
+            {"clang_bin": "clang++", "cc_id": "gnu", "force_cpp": True},
+            ["clang++", "-x", "c++", *_HEADER_TAIL],
+            id="cxx-forced-without-cpp20-leaves-default-dialect",
+        ),
+        pytest.param(
+            {
+                "clang_bin": "icpx",
+                "cc_id": "gnu",
+                "gcc_option_tokens": ("-fsycl", "-fsycl-host-only"),
+                "dpcpp_host_context": True,
+            },
+            [
+                "icpx",
+                "-fsycl",
+                "-fsycl-host-only",
+                "-x",
+                "c",
+                "-std=gnu11",
+                *_HEADER_TAIL,
+            ],
+            id="sycl-host-context-does-not-duplicate-pinned-flags",
+        ),
+        pytest.param(
+            {
+                "clang_bin": "icpx",
+                "cc_id": "gnu",
+                "gcc_option_tokens": ("-fsycl",),
+            },
+            [
+                "icpx",
+                "-fsycl",
+                "-fsycl-host-only",
+                "-x",
+                "c",
+                "-std=gnu11",
+                *_HEADER_TAIL,
+            ],
+            id="intel-fsycl-from-argv-appends-host-only",
+        ),
+    ],
+)
+def test_header_argv_branches_match_hand_written_expectation(
+    kwargs: dict[str, Any], expected: list[str]
+) -> None:
+    assert _posix_argv(_render_header_case(kwargs)) == expected
