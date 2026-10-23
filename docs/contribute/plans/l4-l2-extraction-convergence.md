@@ -697,7 +697,7 @@ include root, misses. The global code fingerprint is not folded for castxml
 (the schema constant covers code shaping, as before); the clang key is
 unchanged and still mtime-based.
 
-Costs recorded, not yet measured: each lookup re-digests every header under
+Known gap: the castxml key records the sysroot path, not its contents. The previous key did the same, and hashing a whole sysroot on every lookup is too costly; a header changed inside an unchanged sysroot can still reuse an entry. Costs recorded, not yet measured: each lookup re-digests every header under
 an include root (the old key stat'ed them), and the XML payload is re-encoded
 inside the JSON entry on write. A payload-digest check is not in the store
 format, so a tampered but parseable entry is served; the old sidecar caught
@@ -788,7 +788,7 @@ guard and `CLANG_EXTRACTOR_VERSION` 0.14, are in):
    logic and the ADR-063 typedef cutover, and L4's `_diff_typedefs` keys
    differently. It is the largest of the three.
 
-No L4-only kind moves. Each step is behaviour-preserving, and is proven through
+No L4-only kind moves. Each step is behaviour-preserving, and must be proven through
 `dump --depth source` and a compare on a fixture that contains the change.
 
 **Not yet verified:** the true duplicate's double finding is read from the
