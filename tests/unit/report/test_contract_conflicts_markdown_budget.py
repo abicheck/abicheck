@@ -56,16 +56,65 @@ def test_small_section_lists_every_row_without_a_more_line() -> None:
 
 
 @pytest.mark.parametrize(
-    ("name", "root"),
+    ("name", "demangled", "root"),
     [
-        ("_ZZNSt8__detail18__to_chars_10_implIjEEvPcjT_E8__digits", "std"),
-        ("_ZN5mylib3addEv", "mylib"),
-        ("_Z3foov", "(global)"),
-        ("_Zbogus", "(undemangled)"),
-        ("std::vector<int>::size()", "std"),
+        (
+            "_ZZNSt8__detail18__to_chars_10_implIjEEvPcjT_E8__digits",
+            "std::__detail::__to_chars_10_impl<unsigned int>(char*, unsigned int, unsigned int)::__digits",
+            "std",
+        ),
+        ("_ZN5mylib3addEv", "mylib::add()", "mylib"),
+        ("_Z3foov", "foo()", "(global)"),
+        ("_Zbogus", None, "(undemangled)"),
+        ("std::vector<int>::size()", None, "std"),
     ],
 )
-def test_review_family_label_demangles_mangled_names(name: str, root: str) -> None:
+def test_review_family_label_demangles_mangled_names(
+    name: str, demangled: str | None, root: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Pinned demangler output, so the label does not depend on which backend
+    # (cxxfilt, c++filt, none) this machine has.
+    import abicheck.demangle as demangle_module
     from abicheck.report.render_markdown_document import _review_namespace_root
 
+    monkeypatch.setattr(demangle_module, "demangle", lambda *_a, **_k: demangled)
     assert _review_namespace_root(name) == root
+
+
+@pytest.mark.parametrize(
+    ("entity", "origin"),
+    [
+        ("_ZNSolsEi", "toolchain runtime"),  # std::ostream::operator<<, `So`
+        ("_ZNKSs4sizeEv", "toolchain runtime"),  # std::string, `Ss`
+        ("_ZNSi3getEv", "toolchain runtime"),  # std::istream, `Si`
+        ("_ZTVSd", "toolchain runtime"),  # vtable for std::iostream
+        ("_ZSt4cout", "toolchain runtime"),
+        ("_ZNSt6vectorIiE4sizeEv", "toolchain runtime"),
+        ("_ZN9__gnu_cxx3fooEv", "toolchain runtime"),
+        ("_ZGVZNSt3fooEvE1x", "toolchain runtime"),
+        ("std::once_flag", "toolchain runtime"),
+        ("_ZN3Std1fEv", "library"),  # a user namespace spelled `Std`
+        ("_ZN5mylib3fooEv", "library"),
+        ("_Z3foov", "library"),
+        ("mylib_init", "library"),
+    ],
+)
+def test_conflict_origin_reads_itanium_std_substitutions(
+    entity: str, origin: str
+) -> None:
+    from abicheck.report.contract_conflicts_markdown import conflict_origin
+
+    assert conflict_origin(entity) == origin
+
+
+def test_mangled_runtime_rows_do_not_take_library_first_slots() -> None:
+    runtime = tuple(_row(f"_ZNSolsE{i}") for i in range(CONFLICT_ROW_LIMIT))
+    rows = (*runtime, _row("mylib_init"))
+    text = "\n".join(render_contract_conflicts_section(ContractConflictsSection(rows)))
+    assert "| exported_but_undeclared | library | 1 |" in text
+    assert (
+        f"| exported_but_undeclared | toolchain runtime | {CONFLICT_ROW_LIMIT} |"
+        in text
+    )
+    itemised = [line for line in text.splitlines() if line.startswith("- **")]
+    assert itemised[0].endswith("`mylib_init`")

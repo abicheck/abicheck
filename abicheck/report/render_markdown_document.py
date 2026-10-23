@@ -348,6 +348,17 @@ def _review_group_families(
     shown only when every member of the family agrees; otherwise the family
     says so and points at the JSON. Each family keeps counts and a few example
     names; nothing is dropped, only folded."""
+    from ..demangle import demangle_batch
+
+    # One c++filt call for every mangled name, so _review_namespace_root's
+    # per-name demangle() is a cache hit instead of a process per group.
+    demangle_batch(
+        [
+            name
+            for name in (str(g.get("display_name", "")) for g in groups)
+            if name.startswith("_Z")
+        ]
+    )
     families: dict[tuple[str, str], dict[str, Any]] = {}
     for group in groups:
         name = str(group.get("display_name", "?"))

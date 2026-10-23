@@ -25,6 +25,7 @@ nothing.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 
 
@@ -56,22 +57,14 @@ CONFLICT_NAME_LIMIT = 160
 #: Characters of one source line shown.
 CONFLICT_SOURCE_LINE_LIMIT = 300
 
-_RUNTIME_PREFIXES = (
-    "std::",
-    "__gnu_cxx::",
-    "__cxxabiv1::",
-    "_ZNSt",
-    "_ZNKSt",
-    "_ZSt",
-    "_ZTISt",
-    "_ZTSSt",
-    "_ZTVSt",
-    "_ZZNSt",
-    "_ZZSt",
-    "_ZGVZNSt",
-    "_ZN9__gnu_cxx",
-    "_ZNK9__gnu_cxx",
-)
+_RUNTIME_DEMANGLED_PREFIXES = ("std::", "__gnu_cxx::", "__cxxabiv1::")
+
+#: An Itanium name owned by ``std``/``__gnu_cxx``: a nested name (``_ZN``,
+#: ``_ZNK``), special name (``_ZT[VIST]``), local entity (``_ZZ``) or guard
+#: (``_ZGVZ``) whose first component is ``St`` or one of the standard
+#: substitutions (``Sa`` allocator, ``Sb`` basic_string, ``Ss`` string,
+#: ``Si``/``So``/``Sd`` istream/ostream/iostream), or ``9__gnu_cxx``.
+_RUNTIME_MANGLED = re.compile(r"^_Z(?:GVZ|Z|T[VIST])?N?K?(?:S[tabsiod]|9__gnu_cxx)")
 
 
 def conflict_origin(entity: str) -> str:
@@ -80,7 +73,10 @@ def conflict_origin(entity: str) -> str:
     A display grouping only: the contract's own origin decision is
     ``policy.contract_toolchain_origin``'s and is not re-derived here.
     """
-    return "toolchain runtime" if entity.startswith(_RUNTIME_PREFIXES) else "library"
+    runtime = entity.startswith(_RUNTIME_DEMANGLED_PREFIXES) or bool(
+        _RUNTIME_MANGLED.match(entity)
+    )
+    return "toolchain runtime" if runtime else "library"
 
 
 def _clip(text: str, limit: int) -> str:

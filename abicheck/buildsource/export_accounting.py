@@ -350,20 +350,23 @@ def toolchain_runtime_name_predicate(
     import edge, a leaked-dependency or binding finding whose subject was read
     from the dynamic table's undefined entries). The linked libraries and self
     identity of every snapshot are pooled, so a symbol is runtime-owned when
-    either side would classify it so.
+    either side would classify it so. Each side is classified against its own
+    linked libraries and self identity: pooling them would let one side's
+    identity (an old ``libfmt``) hide the other side's leak (a wrapper that
+    re-exports ``fmt::``).
     """
-    needed = list(
-        dict.fromkeys(n for snap in snapshots for n in _linked_library_names(snap))
-    )
-    self_names = tuple(
-        dict.fromkeys(n for snap in snapshots for n in _library_self_names(snap))
-    )
+    sides = [
+        (_linked_library_names(snap), _library_self_names(snap)) for snap in snapshots
+    ]
 
     def is_runtime(name: str) -> bool:
         return (
             bool(name)
             and not is_user_specializable_std_symbol(name)
-            and _external_dependency_origin(name, needed, self_names) is not None
+            and any(
+                _external_dependency_origin(name, needed, self_names) is not None
+                for needed, self_names in sides
+            )
         )
 
     return is_runtime

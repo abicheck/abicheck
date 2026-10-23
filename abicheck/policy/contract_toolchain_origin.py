@@ -38,12 +38,12 @@ from collections.abc import Callable, Collection, Sequence
 from dataclasses import replace
 from typing import Any
 
-from ..checker_policy import ChangeKind
 from ..contract_relevance_types import (
     NON_ENTITY_RELEVANCE,
     ContractAssurance,
     ContractRelevance,
 )
+from ..model.change_catalog.kinds import ChangeKind
 
 __all__ = [
     "DEPENDENCY_EDGE_KINDS",

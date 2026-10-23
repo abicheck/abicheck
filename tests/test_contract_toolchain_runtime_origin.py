@@ -373,3 +373,14 @@ def test_leaked_dependency_kind_is_excluded_by_its_own_attribution() -> None:
     )
     _, out = _decide(change, toolchain_symbols=frozenset())
     assert out.reason_code == TOOLCHAIN_RUNTIME_ORIGIN_REASON
+
+
+def test_one_sides_identity_never_hides_the_other_sides_leak() -> None:
+    # OLD is libfmt itself (fmt:: is native there); NEW is a wrapper that
+    # leaks fmt::. Pooling the two identities read NEW's leak as native.
+    fmt_symbol = "_ZN3fmt2v96detail5errorEv"
+    old = _snapshot(["fmt_init"], soname="libfmt.so.9", needed=[])
+    new = _snapshot(["mylib_init"], soname="libmylib.so.1", needed=["libfmt.so.9"])
+    assert toolchain_runtime_name_predicate([new])(fmt_symbol)
+    assert not toolchain_runtime_name_predicate([old])(fmt_symbol)
+    assert toolchain_runtime_name_predicate([old, new])(fmt_symbol)
