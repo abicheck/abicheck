@@ -417,7 +417,7 @@ EXTRACTION_BUG_CLASSES: tuple[BugClass, ...] = (
             "C++ and never turns a C parse into C++, and a standard the caller "
             "gave always wins."
         ),
-        fixed_by=(1759,),
+        fixed_by=(1778,),
         seed_tests=("tests/test_binary_dialect_integration.py",),
         public_surfaces=("cli",),
         axes={"dialect": ("c++17", "c++20", "c++23")},
