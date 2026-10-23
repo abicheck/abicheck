@@ -201,15 +201,10 @@ def parse_producer_target_isa(producer: str | None) -> TargetIsa | None:
 def parse_note_target_isa(levels: frozenset[str]) -> TargetIsa | None:
     """The target a GNU-property ISA-needed note requires (the strongest level
     named), or ``None`` when no level token is present."""
-    best: str | None = None
-    for token in levels:
-        level = _NOTE_LEVEL_TOKENS.get(token)
-        if level is None:
-            continue
-        if best is None or len(LEVEL_FEATURES[level]) > len(LEVEL_FEATURES[best]):
-            best = level
-    if best is None:
+    named = [_NOTE_LEVEL_TOKENS[t] for t in levels if t in _NOTE_LEVEL_TOKENS]
+    if not named:
         return None
+    best = max(named, key=lambda level: len(LEVEL_FEATURES[level]))
     return TargetIsa(arch=None, features=feature_closure(LEVEL_FEATURES[best]))
 
 

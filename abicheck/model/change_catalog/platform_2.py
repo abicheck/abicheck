@@ -700,7 +700,7 @@ PLATFORM_ENTRIES_2: list[ChangeKindMeta] = [
         "means CPUs without the new features can no longer run the library. "
         "The layout and mangling findings reported alongside it may be "
         "consequences of this root cause.",
-        description_template="compiled target ISA changed: {old} → {new}",
+        description_template="compiled target ISA changed: {old} → {new} ({detail})",
         entity=_ENT.BINARY,
         operation=_OP.MODIFIED,
     ),

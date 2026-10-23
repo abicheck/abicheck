@@ -73,6 +73,24 @@ def test_downgrade_is_reported_as_lowered_requirement():
     assert change.new_value == "x86-64 (+avx2)"
 
 
+def test_mixed_change_names_both_the_new_requirement_and_what_was_dropped():
+    # avx2 -> fma: the new build needs fma the old one did not, and no longer
+    # needs avx/avx2. Raised wins the direction; the drop is still stated.
+    old = _snap("GNU C17 -mavx2 -g")
+    new = _snap("GNU C17 -mfma -g")
+    (change,) = _isa_changes(old, new)
+    assert "raised: the new build requires fma" in change.description
+    assert "also drops" in change.description
+    assert "avx2" in change.description
+
+
+def test_direction_is_stated_in_the_finding_text():
+    old = _snap("GNU C17 -mavx512f -g")
+    new = _snap("GNU C17 -mavx2 -g")
+    (change,) = _isa_changes(old, new)
+    assert "lowered: the new build no longer requires avx512f" in change.description
+
+
 def test_same_target_is_silent():
     producer = "GNU C17 13.3.0 -mavx2 -mtune=generic -march=x86-64 -g"
     assert _isa_changes(_snap(producer), _snap(producer)) == []
