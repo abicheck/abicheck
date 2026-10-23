@@ -402,12 +402,16 @@ def _orphan_from_provenance(ref: RuleRef, provenance: object) -> ConfiguredRule:
 
 
 def suppression_rules(suppression: object) -> tuple[ConfiguredRule, ...]:
-    """The configured suppression rules of one loaded ``SuppressionList``."""
-    source = getattr(suppression, "source_path", None)
-    source_file = None if source is None else str(source)
+    """The configured rules of one loaded ``SuppressionList``, each at its origin.
+
+    A list merged from several ``--suppress`` files names each rule's own file
+    and in-file index (:func:`~abicheck.policy.suppression.merge.rule_origin`).
+    """
+    from .suppression.merge import rule_origin
+
     return tuple(
         ConfiguredRule(
-            ref=RuleRef(KIND_SUPPRESSION, source_file, index),
+            ref=RuleRef(KIND_SUPPRESSION, *rule_origin(suppression, index)),
             rule_id=rule_id_of(rule),
             label=getattr(rule, "label", None),
             reason=getattr(rule, "reason", None),

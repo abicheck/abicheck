@@ -32,7 +32,7 @@ import click
 
 if TYPE_CHECKING:
     from ....workflows.policy_file import PolicyFile
-    from ....workflows.suppression_input import SuppressionList
+    from ....workflows.suppression_input import SuppressionList, SuppressPaths
 
 
 #: The built-in verdict-classification profiles ``--policy`` accepts by name,
@@ -275,8 +275,19 @@ class SidedStrParam(click.ParamType):
 SIDED_STR_PARAM = SidedStrParam()
 
 
+def normalize_suppress_callback(ctx: Any, param: Any, value: Any) -> Any:
+    """``--suppress`` (repeatable) as ``None``, one ``Path``, or a tuple of them.
+
+    One file stays a bare ``Path`` so a one-file invocation is unchanged; the
+    merge itself is ``policy.suppression.merge``'s (via ``suppression_input``).
+    """
+    from ....workflows.suppression_input import normalize_suppress_option
+
+    return normalize_suppress_option(value)
+
+
 def _load_suppression_and_policy(
-    suppress: Path | None,
+    suppress: SuppressPaths | None,
     policy: str,
     policy_file_path: Path | None,
     *,
@@ -289,17 +300,19 @@ def _load_suppression_and_policy(
     plugin command — kept here, next to ``POLICY_FILE_PARAM``, rather than in the
     oversized ``cli.py`` so the cross-command resolution logic has one home.
     """
-    from ....workflows.compare_policy import expired_suppressions_message
+    from ....workflows.compare_policy import strict_expiry_message
     from ....workflows.policy_file import (
         PolicyFile,
         pending_validate_overrides_warnings,
     )
-    from ....workflows.suppression_input import SuppressionList
+    from ....workflows.suppression_input import (
+        load_suppression_files,
+    )
 
     suppression: SuppressionList | None = None
     if suppress is not None:
         try:
-            suppression = SuppressionList.load(
+            suppression = load_suppression_files(
                 suppress,
                 require_justification=require_justification,
             )
@@ -310,12 +323,9 @@ def _load_suppression_and_policy(
             if "no 'reason' field" in msg:
                 raise click.ClickException(msg) from e
             raise click.BadParameter(msg, param_hint="--suppress") from e
-        if strict_suppressions:
-            expired = suppression.check_expired_strict()
-            if expired:
-                raise click.ClickException(
-                    expired_suppressions_message(expired, suppress)
-                )
+        expired_message = strict_expiry_message(suppression, strict_suppressions)
+        if expired_message:
+            raise click.ClickException(expired_message)
 
     pf: PolicyFile | None = None
     if policy_file_path is not None:

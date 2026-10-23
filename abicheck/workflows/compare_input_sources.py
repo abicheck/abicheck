@@ -76,20 +76,41 @@ class SuppressionSource:
         if suppression is None:
             return None
         from ..contract_evidence_collect import content_digest
+        from ..policy.suppression.merge import suppress_label
 
         rules = tuple(suppression.rule_identities())
         return cls(
-            path=str(path) if path is not None else None,
+            path=suppress_label(path) if path is not None else None,
             sha256=getattr(suppression, "source_sha256", None)
             or content_digest(list(rules)),
             rules=rules,
         )
 
     @classmethod
+    def from_paths(
+        cls, value: object, *, require_justification: bool = False
+    ) -> SuppressionSource | None:
+        """:meth:`from_file` over *value*, or ``None`` when it names no file.
+
+        The one guard every caller uses: ``None`` and an empty tuple of
+        ``--suppress`` paths both mean "no suppression input", rather than a
+        load that returns nothing.
+        """
+        from ..policy.suppression.merge import suppress_paths
+
+        paths = suppress_paths(value)
+        if not paths:
+            return None
+        return cls.from_file(
+            paths[0] if len(paths) == 1 else paths,
+            require_justification=require_justification,
+        )
+
+    @classmethod
     def from_file(
-        cls, path: str | Path, *, require_justification: bool = False
+        cls, path: str | Path | tuple[Path, ...], *, require_justification: bool = False
     ) -> SuppressionSource:
-        """Read, digest, and summarize a real suppression file.
+        """Read, digest, and summarize a real suppression file (or several).
 
         ``sha256`` is the digest ``SuppressionList.load`` captured over the
         raw bytes it parsed (exact replay, ADR-049 D6); ``rules`` is
@@ -99,17 +120,19 @@ class SuppressionSource:
         running with ``--require-justification`` gets the same hard error
         here that it gets from its own load.
         """
-        from ..policy.suppression.rules import SuppressionList
+        from ..policy.suppression.merge import load_suppression_files, suppress_label
 
-        file_path = Path(path)
-        loaded = SuppressionList.load(
-            file_path, require_justification=require_justification
+        loaded = load_suppression_files(
+            path, require_justification=require_justification
         )
+        assert loaded is not None  # a path was given
+        # Several repeated ``--suppress`` files: ``path`` lists them all, and
+        # the digest is the merged list's own (see ``MergedSuppressionList``).
         # The digest comes from the same read that produced these rules --
         # digesting the path separately could pair one content's hash with
         # another's rules if the file changed in between (Codex review).
         return cls(
-            path=str(file_path),
+            path=suppress_label(path),
             sha256=loaded.source_sha256 or "",
             rules=loaded.rule_identities(),
         )

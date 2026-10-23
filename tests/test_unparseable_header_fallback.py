@@ -377,11 +377,31 @@ def test_cross_header_conflict_is_never_resolved_by_dropping(seed):
         )
         raise exc
 
-    with pytest.raises(SnapshotError):
+    with pytest.raises(SnapshotError) as info:
         parse_excluding_unparseable_headers(headers, attempt)
     assert calls == [headers]  # no reduced retry was attempted
+    # The give-up message names the user's remedy and the implicated header.
+    message = str(info.value)
+    assert message.startswith("castxml failed")
+    assert "--exclude-header" in message
+    assert str(b) in message
     stderr = _conflict_stderr(headers, [(a, b)])
     assert _scan_diagnostics(stderr, headers)[1] == {headers.index(b)}
+
+
+def test_single_header_failure_gets_no_exclude_header_hint():
+    """A lone ``-H`` file is the user's explicit choice: excluding it would
+    leave nothing, so its failure is re-raised without the hint."""
+    header = Path("/inc/only.h")
+
+    def attempt(active: list[Path]) -> str:
+        exc = SnapshotError("castxml failed")
+        setattr(exc, "stderr", f"{header}:1:1: error: boom")
+        raise exc
+
+    with pytest.raises(SnapshotError) as info:
+        parse_excluding_unparseable_headers([header], attempt)
+    assert str(info.value) == "castxml failed"
 
 
 @pytest.mark.parametrize("seed", range(20))

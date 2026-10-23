@@ -166,7 +166,7 @@ def run_compare(
     lang: str = _declared_default(CompareRequest, "lang"),
     lang_explicit: bool = _declared_default(CompareRequest, "lang_explicit"),
     frontend: str = _declared_default(CompareRequest, "frontend"),
-    suppress: Path | None = None,
+    suppress: Path | tuple[Path, ...] | None = None,
     policy: str = _declared_default(CompareRequest, "policy"),
     policy_file_path: Path | None = None,
     old_pdb_path: Path | None = None,

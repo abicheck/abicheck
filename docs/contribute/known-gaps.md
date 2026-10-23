@@ -389,11 +389,6 @@ Do not re-attempt token-claiming. A header's export tokens cannot tell whether i
 
 ### Hygiene
 
-#### The Action does not recognize the `unused_rules` exit-1 axis
-
-**Status (recorded 2026-10-22): OPEN.** `unused_rules: block` exits `1` on both `compare` shapes (`exit.unused_rules_contribution`, and `exit_axes.unused_rules` on `compare --no-baseline`). `action/run.sh`'s exit-1 dispatch has no branch for it: on the two-sided shape it falls through to `ADDITIONS_UNACKNOWLEDGED`, and the audit-only shape's documented exit-1 causes in `docs/reference/github-action-inputs.md` do not list it.
-`hygiene` — The fix is a new `verdict` value (`RULES_UNUSED`) read from those report fields, which changes the Action's published output contract.
-
 #### `--required-symbol @FILE` read errors are checked on the CLI route only
 
 **Status (recorded 2026-10-22): OPEN.** An unreadable `@FILE` is refused as a typed `CompareSettingsError` (exit 64, path named) by `workflows/compare_configuration.load_required_symbols`, pinned on the CLI and the typed function in `tests/test_compare_settings_cli_translation.py`. No bug-class harness covers it: the typed `CompareRequest` API does not accept `@FILE` required symbols, so there is no second route to compare against, and family F2's route-parity matrix has nothing to attach to.
@@ -530,6 +525,7 @@ Approaches that were tried, measured or reviewed and did not help. Their value i
 | Drop the release fan-out's `futures` map as results complete | Saves only `Future` wrappers; `results_by_key` holds the same result objects. | — | [The release fan-out's future map is not a last owner, so dropping it saves nothing (2026-09-17)](known-gaps/the-release-fan-outs-future-map-is-not-a-last-owner-so-dropping.md) |
 | Release the clang AST before the header-graph build | Peak unchanged (2215 MiB, 0.05%); steady state ~8-12 MiB worse. Kept for mid-attach residency only. | — | [Releasing the clang AST before the graph build does not reduce the peak (2026-09-19)](known-gaps/releasing-the-clang-ast-before-the-graph-build-does-not-reduce.md) |
 | m1360 asks not taken (shared stdlib scan, union vocabulary, `loc` strip, derived primary-pass form, forked child) | Each needs a rewrite or an ADR, not a cache. | — | [m1360 performance round: the asks not taken, and why (2026-09-24)](known-gaps/m1360-performance-round-the-asks-not-taken-and-why-2026-09-24.md) |
+| A `gcc -aux-info` names-only header frontend for `compare --no-baseline` | On MKL (27,111 functions, same names as castxml) aux-info takes 0.60 s, castxml 1.07 s and clang 2.0 s, against a 77 s cold run. That is at most about a 2% gain, and aux-info is C-only, with no variables and no mangling. | One library (MKL, C); the time is in the Python stages, not the parse | [A `gcc -aux-info` names-only header frontend does not pay for itself (2026-10-22)](known-gaps/a-gcc-aux-info-names-only-header-frontend-does-not-pay-for.md) |
 | Canonicalise the declared header order (sort the aggregate driver TU) so a reorder of existing headers stops refusing | Sorted order is the failing order for any header that depends on an earlier one: castxml returns zero declarations, clang raises. Removing the refusal alone reports a false BREAKING on an unchanged library. | — | [Declared-header order is still load-bearing because the driver TU is sequential](known-gaps/declared-header-order-is-still-load-bearing-because-the-driver.md) |
 
 ## Deliberate limitations

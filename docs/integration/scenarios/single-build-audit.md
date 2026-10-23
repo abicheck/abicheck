@@ -100,18 +100,102 @@ suppressions:
 
 ```bash
 abicheck compare --no-baseline build/libfoo.so \
-    -H include/ --public-header-dir include/ \
+    -H include/foo.h -H include/foo_types.h -I include/ \
     --policy declared-exported-policy.yml --severity-preset default \
     --suppress declared-exported-exceptions.yml
 ```
 
 Exit `3` means a declared symbol is not exported, and exit `1` means an
-exception is stale. Run one job per build variant (lp64/ilp64, threading
-layer), passing the variant's own `-D` defines so the headers declare what
-that variant ships. Name the public header directory with
-`--public-header-dir`: a declaration reached only through `#include` from
-outside the `-H` set is still reported, but its description says the
-library may not owe that export.
+exception is stale. The `-H` set is the public contract: a declaration
+reached only through `#include` from a header outside it is still reported,
+but its description says the library may not owe that export.
+
+#### The whole include directory
+
+`-H` takes the whole include directory, so you need not list headers one by
+one. A vendor tree often also ships headers that cannot share one
+translation unit with the rest, or that belong to other packages. Leave
+them out with `--exclude-header`. Excluded headers are never parsed, and the report
+records which were left out. For Intel MKL installed from conda-forge,
+whose `include/` also holds FFTW2/FFTW3 wrappers that redefine each other's
+typedefs, plus the hwloc and ICU headers of other packages:
+
+```bash
+abicheck compare --no-baseline lib/libmkl_rt.so.3 \
+    -H include/ \
+    --exclude-header 'fftw/*' --exclude-header '*mkl_cdft*' \
+    --exclude-header '*blacs*' --exclude-header '*scalapack*' \
+    --exclude-header 'hwloc/*' --exclude-header 'unicode/*' \
+    --policy declared-exported-policy.yml --severity-preset default \
+    --suppress declared-exported-exceptions.yml
+```
+
+The first four patterns are required: without them the parse fails, and
+the error names `--exclude-header` and the headers involved. The `hwloc/*`
+and `unicode/*` patterns are optional, but they keep findings about other
+packages out of the report. They also keep the run fast. Headers that fail
+on their own are dropped automatically, but each one costs extra parses to
+isolate.
+
+#### One job per build variant
+
+Run the gate once per variant the product ships (lp64/ilp64, threading
+layer, shared/static), with the variant's own `-D` defines so the headers
+declare what that variant ships. `--suppress` is repeatable: pass the
+exceptions every variant shares and the variant's own file, and each rule
+keeps its file in `disposition_audit.rules`. A rule is checked for staleness
+in every job that loads it, so put a rule in the shared file only when every
+variant needs it.
+
+```yaml
+# .github/workflows/declared-exported.yml (excerpt)
+strategy:
+  matrix:
+    include:
+      - {variant: lp64,         lib: lib/libfoo_lp64.so,  defines: ""}
+      - {variant: ilp64,        lib: lib/libfoo_ilp64.so, defines: "-D FOO_ILP64"}
+      - {variant: ilp64-static, lib: lib/libfoo_ilp64.a,  defines: "-D FOO_ILP64"}
+steps:
+  - run: >
+      abicheck compare --no-baseline ${{ matrix.lib }}
+      -H include/foo.h -I include/ ${{ matrix.defines }}
+      --policy declared-exported-policy.yml --severity-preset default
+      --suppress exceptions/common.yml
+      --suppress exceptions/${{ matrix.variant }}.yml
+```
+
+### A static archive as the operand
+
+`compare --no-baseline` also accepts an ELF static archive,
+for products that ship `libfoo.a` (for example lp64/ilp64 variants) beside or
+instead of a shared library:
+
+```bash
+abicheck compare --no-baseline lib/intel64/libfoo_lp64.a -H include/
+abicheck compare --no-baseline lib/intel64/libfoo_ilp64.a -H include/
+```
+
+The archive's own symbol index (what `ar s`/`ranlib` writes, and what the
+linker reads) is its export table: every global or weak symbol some member
+defines, C++ names mangled. `public_not_exported` then reports each public
+declaration no member defines, and `exported_not_public` each defined symbol
+no public header declares. The run is the same audit as for a `.so`, with
+three differences:
+
+- `-H/--header` is required; without a declared surface there is nothing
+  to audit.
+- An archive with **no symbol index** (`ar S`, or a tool that omits it) is a
+  usage error (exit `64`) telling you to run `ranlib libfoo.a`. It is never
+  read as an archive that defines nothing.
+- An archive has no dynamic section, so SONAME, `DT_NEEDED`, symbol
+  versioning and visibility are not collected: `unversioned_exported_symbol`
+  reports `not_collected`, and the run carries a coverage warning that says
+  so. A hidden-visibility symbol is still listed, because a static link can
+  resolve it.
+
+Only archives whose members are all ELF objects for one target are read.
+Thin archives, Mach-O or COFF/`.lib` members, and LLVM-bitcode members are
+refused with a reason. Two-sided `compare` and `dump` still reject archives.
 
 ## The Action: `mode: compare`, no baseline
 

@@ -1,0 +1,3 @@
+### Performance
+
+- **Faster `-H <include dir>` runs when some headers fail to parse** — the quoted-`#include` expansion behind the C++20 dialect scan now caches each file's reachable includes by content. Before, every header group re-preprocessed every file: each probe and bisect step that isolates unparseable headers, and both language-mode polarities. On Intel MKL's conda `include/`, the scan took about 3.5x fewer profiler samples, and the output was unchanged. When a multi-header parse fails in a way that cannot be traced to one header, such as two listed headers redefining each other's typedefs, the error now names the headers involved and suggests `--exclude-header`.

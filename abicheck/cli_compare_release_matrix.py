@@ -114,7 +114,7 @@ def _finalize_release_output(
     contract_coverage_failure_count: int = 0,
     policy: str = DEFAULT_POLICY_PROFILE,
     policy_file_path: Path | None = None,
-    suppress: Path | None = None,
+    suppress: Path | tuple[Path, ...] | None = None,
     pack_application: PackApplication | None = None,
     scope_public_headers: bool = True,
     scope_terms: ComparisonScopeTerms | None = None,
@@ -324,7 +324,7 @@ def _finalize_release_output(
 
 
 def _validate_suppression_early(
-    suppress: Path | None,
+    suppress: Path | tuple[Path, ...] | None,
     policy: str,
     policy_file_path: Path | None,
     strict_suppressions: bool,

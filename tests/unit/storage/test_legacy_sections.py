@@ -41,6 +41,8 @@ from abicheck.storage.package import SECTION_KINDS
 #: `live_preprocessor_clang_bin`: the compiler a live side's pre-scan runs is a
 #: fact of this run's configuration, not of the stored snapshot. And
 #: `load_notices`: what *this run's* loader said about the package it read.
+#: And `static_archive` (ADR-086): this run read the export table from a
+#: static archive's symbol index; never serialized.
 _NEVER_IN_A_DOCUMENT = (
     "semantic_ir",
     "semantic_ir_conflicts",
@@ -48,6 +50,7 @@ _NEVER_IN_A_DOCUMENT = (
     "live_source_evidence",
     "live_preprocessor_clang_bin",
     "load_notices",
+    "static_archive",
     "_func_by_mangled",
     "_var_by_mangled",
     "_type_by_name",

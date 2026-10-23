@@ -83,7 +83,7 @@ def render_release_summary(
     fail_on_removed: bool = False,
     policy: str = DEFAULT_POLICY_PROFILE,
     policy_file_path: Path | None = None,
-    suppress: Path | None = None,
+    suppress: Path | tuple[Path, ...] | None = None,
     pack_application: Any = None,
     scope_public_headers: bool = True,
     scope_terms: ComparisonScopeTerms | None = None,

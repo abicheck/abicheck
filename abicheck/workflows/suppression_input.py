@@ -37,9 +37,19 @@ substitute this must patch it *here*, where the call actually resolves.
 
 from __future__ import annotations
 
+from ..policy.suppression.merge import (
+    SuppressPaths,
+    load_suppression_files,
+    normalize_suppress_option,
+    suppress_label,
+)
 from ..policy.suppression.rules import Suppression, SuppressionList
 
 __all__ = [
+    "SuppressPaths",
+    "load_suppression_files",
+    "normalize_suppress_option",
+    "suppress_label",
     "Suppression",
     "SuppressionList",
 ]

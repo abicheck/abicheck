@@ -72,6 +72,7 @@ _PRODUCERS = frozenset(
 #: ``(module, enclosing function, producer) -> how ownership is recorded``.
 _INVENTORY: dict[tuple[str, str, str], str] = {
     ("abicheck/workflows/input_resolution.py", "_resolve_input_impl", "cached_run_dump"): "stamped in resolve_input",
+    ("abicheck/workflows/static_archive_snapshot.py", "dump_static_archive_snapshot", "build_header_only_snapshot"): "stamped in resolve_input",
     ("abicheck/workflows/release_surface_acquisition.py", "_produce", "build_header_only_snapshot"): "stamped in _produce",
     ("abicheck/workflows/artifact/execute_header_only.py", "execute_header_only_dump_request", "build_header_only_snapshot"): "stamped in execute_header_only_dump_request",
     ("abicheck/workflows/consumer_scope_standalone.py", "check_appcompat", "run_dump"): "stamped in check_appcompat",

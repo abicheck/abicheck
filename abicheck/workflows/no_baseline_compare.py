@@ -246,6 +246,9 @@ def resolve_no_baseline_candidate(
         debug_format=debug_format,
         include_labels=include_labels,
         notify=notify,
+        # ADR-086: a static archive is a valid audit operand here (its
+        # symbol index is the export table), and nowhere else.
+        static_archive=True,
     )
 
 

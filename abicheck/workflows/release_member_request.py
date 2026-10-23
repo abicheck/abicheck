@@ -82,7 +82,7 @@ class ReleaseMemberCompareRequest:
     new_version: str = ""
     lang: str = "c++"
     lang_explicit: bool = False
-    suppress: Path | None = None
+    suppress: Path | tuple[Path, ...] | None = None
     policy: str = "strict_abi"
     policy_file_path: Path | None = None
     scope_to_public_surface: bool = True

@@ -295,21 +295,28 @@ if you can only obtain debug info as separate files.)
 
 ## Static / import library archives (`.a`, `.lib`)
 
-`abicheck` analyses **single linkable images** — shared libraries (`.so`,
-`.dll`, `.dylib`) and individual object files — not static/import library
-archives (`.a` on Unix, `.lib` on Windows, both `ar`-format member
+`abicheck`'s compatibility comparisons (`dump`, two-sided `compare`) analyse
+**single linkable images** — shared libraries (`.so`, `.dll`, `.dylib`) and
+individual object files — not static/import library archives (`.a` on Unix, `.lib` on Windows, both `ar`-format member
 containers). This is a current limitation, not a permanent exclusion (see the [vision](../contribute/vision.md) and [goals](../contribute/goals.md#non-goals) for the bounded investigation that is recorded): a static archive has no runtime
 ABI surface for abicheck's verdict semantics to be built on. See [Project
 Goals → Non-goals](../contribute/goals.md#non-goals) for the full reasoning.
 
-Handing a `.a`/`.lib` to `dump` or `compare` produces a **clear, actionable
-error** rather than a misleading "unknown format" message or a traceback:
+One bounded question is answered for an ELF static archive: `compare
+--no-baseline libfoo.a -H include/` audits declared-vs-defined symbols, using
+the archive's own symbol index as its export table (see
+[Single-build audit](../integration/scenarios/single-build-audit.md#a-static-archive-as-the-operand)).
+
+Handing a `.a`/`.lib` to `dump` or a two-sided `compare` produces a **clear,
+actionable error** rather than a misleading "unknown format" message or a
+traceback:
 
 ```text
-'libfoo.a' is a static/import library archive (.a/.lib), which abicheck does
-not analyse — it compares single linkable images (shared libraries and
-objects). Extract the members (e.g. `ar x lib.a`) and compare the resulting
-object files or the shared library built from them instead.
+'libfoo.a' is a static/import library archive (.a/.lib). Only `compare
+--no-baseline LIB.a -H include/` reads one (the declared-vs-defined audit, ELF
+archives only); other commands compare single linkable images (shared
+libraries and objects). Extract the members (e.g. `ar x lib.a`) and compare
+the resulting object files or the shared library built from them instead.
 ```
 
 For the full compatibility model of a static (or header-only) library —

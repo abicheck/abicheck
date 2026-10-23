@@ -57,7 +57,7 @@ One row per module: name, first sentence of its role, ADR. **Read [`docs/contrib
 | `build_config.py` | `BuildConfig`/`load_build_config()`/`discover_build_config()`/`KNOWN_TOP_LEVEL_KEYS`. | 028 amendment D4, 037 D4, 043 |
 | `build_config_io.py` | `load_build_config_with_digest()` — `load_build_config()` plus the sha256 of the exact bytes it parsed, from one read. | 049 |
 | `inline_graph_fold.py` | `fold_call_graph()`/`fold_type_graph()`/`fold_override_graph()`/`fold_template_graph()`/`fold_include_graph()`. | 041 P0, 046 D3 |
-| `archive_graph.py` | `ar`-index introspection (G29 Phase 5 item 6, G29.6): a pure parser (`parse_ar_archive`/`read_archive`) over an archive's own linker-written symbol index. | 041 P1 #2 (G29 Phase 5) |
+| `archive_graph.py` | `ar`-index introspection (G29 Phase 5 item 6, G29.6): reads (through `extract/ar_archive.py`'s `parse_ar_archive`/`read_archive`, moved there for ADR-086) an archive's own linker-written symbol index. | 041 P1 #2 (G29 Phase 5) |
 | `template_graph.py` | Template-instantiation *parsing* (G29 Phase 5 item 1, G29.6's first-priority open graph family): a pure parser (`parse_clang_ast_templates`) over `clang -ast-dump=json`, empirically verified against … | 041 (G29 Phase 5 item 1), 061 Phase 5 item 2 |
 | `template_graph_fold.py` | `augment_graph_with_templates()` — the graph-*folding* half split out of `template_graph.py` (that module was sitting exactly at the repository's absolute 2000-line hard cap, leaving no line budget … | 041 (G29 Phase 5 item 1), 061 Phase 5 item 2 |
 | `template_graph_value_decls.py` | `index_value_decls()`/`arg_label_spelling()`. | 041 (G29 Phase 5 item 1) |

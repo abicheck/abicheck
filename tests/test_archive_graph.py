@@ -13,12 +13,11 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Tests for :mod:`abicheck.buildsource.archive_graph` (G29 Phase 5 item 6).
-
-Every archive fixture is built byte-for-byte in Python (no ``ar`` binary
-required) so this stays a fast unit test — real ``ar``-produced bytes were
-hand-verified once while writing the parser (see the module's own review
-notes) and are re-verified here structurally, not by re-invoking the tool.
+"""Tests for :mod:`abicheck.buildsource.archive_graph` and the ``ar`` parser in
+:mod:`abicheck.extract.ar_archive` (G29 Phase 5 item 6). Every archive fixture
+is built byte-for-byte in Python (no ``ar`` binary required) so this stays a
+fast unit test — real ``ar``-produced bytes were hand-verified once while
+writing the parser and are re-verified here structurally.
 """
 
 from __future__ import annotations
@@ -31,24 +30,25 @@ from pathlib import Path
 import pytest
 
 from abicheck.buildsource.archive_graph import (
-    _MAX_BSD_NAME_BYTES,
-    _MAX_SPECIAL_MEMBER_BYTES,
-    ARCHIVE_MAGIC,
-    THIN_ARCHIVE_MAGIC,
-    ArchiveFormatError,
     ArchiveGraphResult,
-    BytesReader,
-    _long_name_at,
     archive_member_node_id,
     augment_graph_with_archives,
-    parse_ar_archive,
-    read_archive,
 )
 from abicheck.buildsource.build_evidence import BuildEvidence, LinkUnit
 from abicheck.buildsource.source_graph import (
     GraphNode,
     SourceGraphSummary,
     build_source_graph,
+)
+from abicheck.extract.ar_archive import parse_ar_archive, read_archive
+from abicheck.extract.ar_archive_format import (
+    _MAX_BSD_NAME_BYTES,
+    _MAX_SPECIAL_MEMBER_BYTES,
+    ARCHIVE_MAGIC,
+    THIN_ARCHIVE_MAGIC,
+    ArchiveFormatError,
+    BytesReader,
+    _long_name_at,
 )
 from abicheck.model.source_graph_query import defining_members
 
