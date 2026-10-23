@@ -41,6 +41,7 @@ means "fix this before merging," check which bucket it's in:
 | `agentready.yml` | No (informational) | Runs the external AgentReady structural scanner: PR diff (PR comment + SARIF) and a `scan` on push to main; no cron (pinned tool, push already scans every main commit). Distinct from — and does not replace — `scripts/check_ai_readiness.py`, which enforces abicheck-specific invariants (ChangeKind partition, doc-count sync, import cycles, ...). See root `AGENTS.md`'s "AI-readiness gate" section. |
 | `test-action.yml` | Yes, when `action/**`/`action.yml` or `abicheck/**` changes | End-to-end composite-Action scenarios on **6 runners**: `test-action-scenarios` runs every `dependency-source: none` scenario (snapshot compares, SARIF/JSON, fail-on-breaking, severity, audit-only, extra-args, `--used-by`, `check-target`) as consecutive `uses: ./` steps on one ubuntu runner, each with its own assertion step and `if: !cancelled()` so one failure does not hide the rest; `test-dependency-source-conda-forge` keeps one runner per pixi toolchain (5 cells; each installs a different toolchain onto `GITHUB_PATH`), with the macOS snapshot smoke and the versioning-policy/consumer-impact report scenarios riding the matching conda-forge cells. No roll-up summary job (nothing is merge-blocking; see the workflow's header comment). Separate runners only where isolation is the point — see the workflow's header comment and `action/AGENTS.md` |
 | `bugfix-test-contract.yml` | Yes, on `fix:`/`perf:`/`security:` PRs | Structural half: a fix changing shipped code must change a test. Declared half: the PR body must answer the bug-fix test contract, plus any conditional the diff triggers. Bypass with the `skip-test-contract` label. See `scripts/check_bugfix_test_contract.py` for what each answer is for. |
+| `gitleaks.yml` | Yes (guidance) | Secret scan of git history (gitleaks CLI, checksum-pinned): on a PR the commits it adds over `main`, on a push to `main` the whole history. False-positive classes live in `.gitleaks.toml` (mangled `_Z` symbols, Bazel action digests, recorded commit SHAs, the public LLVM key fingerprint); see the workflow's header for how to add one. |
 | `publish.yml` / `pages.yml` | N/A (release/deploy only) | Not PR gates |
 
 ## Required-status-check configuration — `lint-and-types` required (2026-10-15)
@@ -117,11 +118,16 @@ never be surprised by a required CI job it had no way to reproduce.
   head/.github/actions/install-system-deps/install.sh` with
   `INPUT_PACKAGES`), the same way those jobs already run
   `head/action/install-castxml.sh`.
-- Action pins are inconsistent across workflows: some steps pin by commit SHA
-  (e.g. `actions/upload-artifact@ea165f8d...`), most use a floating major tag
-  (`actions/checkout@v6`). If you're touching a workflow that executes
-  untrusted input or has write permissions, prefer pinning by commit SHA
-  rather than copying the floating-tag style from nearby steps.
+- Every `uses:` of a third-party action is pinned to a commit SHA with the
+  exact tag in a trailing comment (`actions/checkout@<sha>  # v6`), and every
+  `actions/checkout` sets `persist-credentials: false` unless a later step in
+  that job pushes with the checkout's token. `zizmor` enforces both, plus
+  template injection, over-broad `permissions:` and cache poisoning in
+  release jobs, through `verify.py`'s `workflow-audit` step in the required
+  `lint-and-types` job (`python scripts/verify.py --profile pr --only
+  workflow-audit` locally). A finding that is a deliberate exception gets an
+  inline `# zizmor: ignore[<audit>]` on a line inside the finding's span,
+  with the reason in a comment above it, not a weakened severity threshold.
 - `CODEOWNERS` currently routes every path to one owner — it exists for
   auto-assignment, not differentiated review policy. Don't assume a
   `.github/`, release, or security-relevant change gets extra scrutiny by

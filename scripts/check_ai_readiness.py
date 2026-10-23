@@ -362,7 +362,7 @@ FILE_SIZE_GRANDFATHERED: dict[str, int] = {
     "scripts/perf_receipt.py": 875,
     "scripts/retired_surfaces.py": 1422,
     "scripts/usecase_paths.py": 1084,
-    "scripts/verify.py": 1163,
+    "scripts/verify.py": 1095,
     "scripts/check_bugfix_test_contract.py": 1140,
     "skills-src/evaluation/agents/ci-setup/grader.py": 852,
     "skills-src/evaluation/agents/skills/graders/dimensions.py": 841,
