@@ -678,3 +678,125 @@ def test_shape_c_only_a_reported_function_claims_a_template() -> None:
         kind=ChangeKind.FUNC_REMOVED, symbol=_TAKE_IN_B, description="removed"
     )
     assert _templates_named_by_reported_functions(snap, snap, [removed]) == {"b::Box"}
+
+
+def test_expression_spelling_covers_each_literal_and_reference_shape() -> None:
+    from abicheck.extract.headers.clang.template_default_spelling import (
+        _expression_spelling,
+    )
+
+    def lit(value: object) -> dict:
+        return {"kind": "CXXBoolLiteralExpr", "value": value}
+
+    assert _expression_spelling(lit(True)) == "true"
+    assert _expression_spelling(lit(False)) == "false"
+    assert _expression_spelling({"kind": "IntegerLiteral"}) is None
+    # A transparent wrapper spells as its single operand.
+    wrapped = {"kind": "ParenExpr", "inner": [lit(True)]}
+    assert _expression_spelling(wrapped) == "true"
+    # A reference must name a variable, an enumerator or an earlier parameter.
+    assert _expression_spelling({"kind": "DeclRefExpr", "referencedDecl": {}}) is None
+    fn_ref = {
+        "kind": "DeclRefExpr",
+        "referencedDecl": {"kind": "FunctionDecl", "name": "f"},
+    }
+    assert _expression_spelling(fn_ref) is None
+    var_ref = {
+        "kind": "DeclRefExpr",
+        "referencedDecl": {"kind": "VarDecl", "name": "K"},
+    }
+    assert _expression_spelling(var_ref) == "K"
+    untyped_enum = {
+        "kind": "DeclRefExpr",
+        "referencedDecl": {"kind": "EnumConstantDecl", "name": "B"},
+    }
+    assert _expression_spelling(untyped_enum) is None
+    # Postfix operators and an unspellable operand are not spelled.
+    neg = {"kind": "UnaryOperator", "opcode": "-", "inner": [lit(True)]}
+    assert _expression_spelling(neg) == "(-true)"
+    post = {
+        "kind": "UnaryOperator",
+        "opcode": "++",
+        "isPostfix": True,
+        "inner": [lit(True)],
+    }
+    assert _expression_spelling(post) is None
+    bad_unary = {
+        "kind": "UnaryOperator",
+        "opcode": "-",
+        "inner": [{"kind": "CallExpr"}],
+    }
+    assert _expression_spelling(bad_unary) is None
+    bad_binary = {
+        "kind": "BinaryOperator",
+        "opcode": "+",
+        "inner": [lit(True), {"kind": "CallExpr"}],
+    }
+    assert _expression_spelling(bad_binary) is None
+    assert _expression_spelling({"kind": "CallExpr"}) is None
+
+
+def test_template_name_spelling_requires_a_plain_name_read_from_a_span() -> None:
+    from abicheck.extract.headers.clang.template_default_spelling import (
+        _template_name_spelling,
+    )
+
+    def arg(file: object = "h.hpp", start: object = 0, stop: object = 0) -> dict:
+        return {
+            "range": {
+                "begin": {"file": file, "offset": start},
+                "end": {"offset": stop, "tokLen": 4},
+            }
+        }
+
+    text = {(0, 8): "Box2"}
+
+    def span(_path: str, a: int, b: int) -> str | None:
+        return text.get((a, b))
+
+    assert _template_name_spelling(arg(file=None, stop=4), span) is None
+    assert _template_name_spelling(arg(start="0", stop=4), span) is None
+    assert _template_name_spelling(arg(stop=4), lambda *_: None) is None
+    assert _template_name_spelling(arg(stop=4), lambda *_: "a + b") is None
+    assert _template_name_spelling(arg(stop=4), lambda *_: "Box2") == "Box2"
+
+
+def test_undefaulted_type_param_with_a_non_dict_default_spells_none() -> None:
+    from abicheck.extract.headers.clang.template_default_spelling import (
+        _template_param_default_spellings,
+    )
+
+    odd = {"kind": "TemplateTypeParmDecl", "name": "T", "defaultArg": "junk"}
+    typed_without_qual = {
+        "kind": "TemplateTypeParmDecl",
+        "name": "U",
+        "defaultArg": {"type": {}},
+    }
+    assert _template_param_default_spellings(
+        _tpl_node(odd, typed_without_qual), lambda *_: None
+    ) == [None, None]
+
+
+def test_source_span_reader_returns_none_for_missing_or_out_of_range_spans(
+    tmp_path,
+) -> None:
+    from abicheck.extract.headers.clang.template_param_indexes import (
+        _source_span_reader,
+    )
+
+    header = tmp_path / "h.hpp"
+    header.write_bytes(b"template <typename T> class Box2 {};\n")
+    span = _source_span_reader()
+    assert span(str(header), 10, 18) == "typename"
+    assert span(str(tmp_path / "missing.hpp"), 0, 4) is None
+    assert span(str(header), 5, 5) is None
+    assert span(str(header), 0, 10_000) is None
+
+
+def test_non_dict_child_of_a_template_is_skipped_not_taken_as_the_end() -> None:
+    from abicheck.extract.headers.clang.template_default_spelling import (
+        _template_param_default_spellings,
+    )
+
+    tpl = _tpl_node("junk", {"kind": "TemplateTypeParmDecl", "name": "T"})
+    assert _template_param_default_spellings(tpl, lambda *_: None) == [None]
