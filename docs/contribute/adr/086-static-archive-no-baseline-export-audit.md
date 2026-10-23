@@ -1,7 +1,7 @@
 # ADR-086: A Static Archive Is a `compare --no-baseline` Audit Operand, Read Through Its Own Symbol Index
 
 **Date:** 2026-10-22
-**Status:** Proposed — implemented on its branch (`compare --no-baseline LIB.a -H include/`); awaiting maintainer acceptance. Every other command still rejects an archive.
+**Status:** Accepted (2026-10-23) — implemented (`compare --no-baseline LIB.a -H include/`). Every other command still rejects an archive.
 
 Governed by: [ADR-061](061-responsibility-package-architecture.md) (owner of each stage), [ADR-063](063-one-semantic-pipeline.md) / [ADR-064](064-canonical-gate-algorithm-and-exit-decision.md) (missing evidence narrows conclusions, never fabricates them), [ADR-068](068-one-comparison-product-and-scan-retirement.md) (the `--no-baseline` single-build audit). Amends the G8 "option A" decision recorded on `UC-ARCH-static-lib` (`docs/contribute/usecase-registry.yaml`).
 
