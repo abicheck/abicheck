@@ -406,4 +406,20 @@ EXTRACTION_BUG_CLASSES: tuple[BugClass, ...] = (
             ),
         ),
     ),
+    BugClass(
+        id="extraction.header_dialect_not_recovered_from_binary",
+        invariant=(
+            "A header parse of an ELF image with no build data uses the C++ "
+            "standard and target ISA flags the image's own DWARF producer "
+            "records, whenever the caller gave no explicit standard: a C++20 "
+            "or C++23 image parses at gnu++20, and its recorded -m flags reach "
+            "the frontend. The image's dialect refines a parse that is already "
+            "C++ and never turns a C parse into C++, and a standard the caller "
+            "gave always wins."
+        ),
+        fixed_by=(1759,),
+        seed_tests=("tests/test_binary_dialect_integration.py",),
+        public_surfaces=("cli",),
+        axes={"dialect": ("c++17", "c++20", "c++23")},
+    ),
 )

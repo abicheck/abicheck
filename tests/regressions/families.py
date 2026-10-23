@@ -410,7 +410,10 @@ _F12 = (
     # different operand set from the same driver spelling.
     "extraction.msvc_include_operand_spelling_not_probed",
 )
-_F13 = ("extraction.compile_entry_collapsed_to_first_source",)
+_F13 = (
+    "extraction.compile_entry_collapsed_to_first_source",
+    "extraction.header_dialect_not_recovered_from_binary",
+)
 
 #: id -> reason it belongs to no shared family.
 OTHER_REASONS: dict[str, str] = {

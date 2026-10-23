@@ -15,6 +15,7 @@
       "abicheck/extract/__init__.py": "011ec37fad96ea2035983eaaedeba0976940a570900f85db8c03bb7369af742a",
       "abicheck/extract/ar_archive.py": "6fdab7ed7390a20f087f9407eaa3988c0f8c658400bc0ea8c7e193271923956d",
       "abicheck/extract/ar_archive_format.py": "38a51cae7762eb269af3788d5dca9cfe50de38d9b315f34fa31427f791cb7e62",
+      "abicheck/extract/binary_dialect.py": "2eb680daedbb3be19bd71dd2d6bd6a8950151955f94efef862659cbd177df42e",
       "abicheck/extract/binary_format.py": "4b9f591077fa5c90d2e3a767343d92b098061870403d431694470bc05e5468b3",
       "abicheck/extract/binary_identity.py": "4645eaf3dddd0a2230a5c694882548476406c57514275fa4c8c1bc152607ca88",
       "abicheck/extract/build_mode_capture.py": "7a46c5babcc5bf770a1a38d5a5d3abb49a2b7d9575bda2b210d2e2861ebfb51f",
@@ -157,9 +158,9 @@
       "abicheck/symvers_metadata.py": "372737765cd132e6e87ed891dd465d2958e04debbef774e45212ceb3036871cb",
       "abicheck/type_metadata.py": "9997189de8dac522fd1db8be5ae491d811139503f83abaaded89038eb4aa9cdf"
     },
-    "fingerprint": "af867c14a3203711afb2773c64bd53ad0b769b184e2154c0f445416f7b9a0169",
-    "generation": 12,
-    "reason": "castxml header-AST cache key and entry format moved to the parse store (Phase 6 slice 2) and best-effort cache cleanup; extracted facts for the same input are unchanged, so no generation bump"
+    "fingerprint": "ab0a6f89bd81ed7ac68c9d6f112bd673cf37b7d078bd22348d7038bb86df5e0a",
+    "generation": 13,
+    "reason": "bumped to 13 for a semantic change"
   },
   "resolver": {
     "files": {

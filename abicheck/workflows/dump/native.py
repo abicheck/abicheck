@@ -47,6 +47,7 @@ from ...errors import (
     UnsupportedArtifactError,
     ValidationError,
 )
+from ...extract.binary_dialect import binary_dialect_compile, record_implied_options
 from ...extract.headers.clang.layout_tool import attach_clang_layout
 from ...extract.metadata_attach import (
     try_attach_numpy_capi_surface,
@@ -229,6 +230,17 @@ def _run_dump_uncached(
             gcc_prefix=getattr(compile, "gcc_prefix", None),
         )
 
+    # Without build data the header frontends parse in their default dialect
+    # and target: a C++20 library's concepts or __AVX2__-guarded intrinsics
+    # then fail. The image's own DWARF producer records what it was built
+    # with, so the same compile context every consumer reads -- the
+    # frontends and the header-graph pass alike -- carries those flags.
+    implied: tuple[str, ...] = ()
+    if _parses and not (dwarf_only or symbols_only):
+        compile, implied = binary_dialect_compile(
+            compile, path, lang=lang, lang_explicit=lang_explicit, headers=_headers
+        )
+
     request = NativeExtractRequest(
         path=path,
         version=version,
@@ -276,7 +288,7 @@ def _run_dump_uncached(
         )
         # dwarf_only/symbols_only mean "ignore headers entirely", same as the
         # ELF tail's own _attach_header_graph call (Codex review).
-        return _attach_header_graph(
+        snap = _attach_header_graph(
             merged,
             _HEADER_GRAPH_ENABLED and not dwarf_only and not symbols_only,
             _HEADER_GRAPH_INCLUDES_ENABLED and not dwarf_only and not symbols_only,
@@ -288,13 +300,15 @@ def _run_dump_uncached(
             public_header_dirs,
             include_search_dirs=_public_include_search_dirs,
         )
+        return record_implied_options(snap, implied)
 
-    return _extract_and_finish(
+    snap = _extract_and_finish(
         binary_fmt,
         request,
         header_graph_lang=_header_graph_lang,
         skip_header_graph_attach=False,
     )
+    return record_implied_options(snap, implied)
 
 
 def _extract_and_finish(
