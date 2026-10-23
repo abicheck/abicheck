@@ -413,11 +413,14 @@ Presence (not a field, from the same run): current side 2600 functions, projecte
 projected-only out-of-scope set is the public-surface problem below.
 
 **What remains for b2** (a separate PR, after this one merges), in order:
-1. The projected side in production code, with the public-surface filter applied
-   before projecting. Without the filter the projection carries 66953
-   out-of-scope declarations (for example `fclose`, `__uflow`, `asprintf`); the
-   golden shows the current side is scoped to the case directory. The gaps that
-   block the dropped fields are closed here or the fields stay excluded:
+1. **Status (2026-10-22): filter and production projection DONE; field gaps OPEN.**
+   The projected side is in production code: `PublicSurfaceClangParser` and
+   `project_clang_surface()` in `abicheck/buildsource/source_extractors/clang_projection.py`.
+   The public-surface provenance filter runs on the declaration lists before any
+   parse, so the 66953 out-of-scope declarations (for example `fclose`, `__uflow`,
+   `asprintf`) no longer reach the projection; the golden test now builds its
+   projected side through this code and its pinned set is unchanged. The four
+   field-level gaps are not closed in this PR and their fields stay excluded:
    [Clang projection](../known-gaps.md#clang-projection-adr-063-phase-4-prerequisites)
    (origin unset, bare member and namespace names, unmangled `distance`, hash and
    default-argument spelling).

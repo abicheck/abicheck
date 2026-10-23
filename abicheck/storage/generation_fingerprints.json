@@ -202,6 +202,7 @@
       "abicheck/buildsource/source_extractors/clang_macros.py": "a1970f60666e573bda375ea9017705b0ad9d43838524d617b0f4ee60a009bbe3",
       "abicheck/buildsource/source_extractors/clang_node_predicates.py": "1e9556dab627cac4da137bf0f34b858f6e76b194f932aeb92ffe4ba8f07bb7bf",
       "abicheck/buildsource/source_extractors/clang_nodes.py": "9463fbac6fe36203c29f20ab3203791e3b558f21f4ebf66ee732f39aaf912c9b",
+      "abicheck/buildsource/source_extractors/clang_projection.py": "7d731ca0551bec84372d4c57bdb31af143220e99bbf04e7417cc34a9f851fc6f",
       "abicheck/buildsource/source_extractors/clang_public_roots.py": "26b787aca87c1549b821f4f420be1960b48317e9bdefd2e946b3b2903238e214",
       "abicheck/buildsource/source_extractors/clang_source_edges.py": "c9b8c3daacd02c4913b486a6ac658b435744243ed4433f14792588f67ef800e9",
       "abicheck/buildsource/source_extractors/compile_invocation.py": "8af29f22859f7e8fd81d5abd2266e017acc31ff539db9e42bd873ae544f9dccf",
@@ -218,8 +219,8 @@
       "abicheck/buildsource/type_graph.py": "a028a875057cd0cbf2930a431bfa1e579f7b770e0d124cbcfe715724e89d12e5",
       "abicheck/buildsource/type_graph_index.py": "7375f7baec7ceb3dd4a52a489b89e5a3571750dffca7490d1c5870301d55202d"
     },
-    "fingerprint": "9699291e5cab56b2dd9b2b8fc09f7a9aae2c8439332ed9b53f3a740a18742243",
+    "fingerprint": "9af8ade5d330bbbed1ff35ced048ac3def398759229baff8eaa37b2f6ca57aba",
     "generation": 4,
-    "reason": "Merge of origin/main: source-scope edit is a docstring path repoint to compare/internal_leak.py; no extracted fact or derived graph changes."
+    "reason": "Adds clang_projection.py (PublicSurfaceClangParser, project_clang_surface) as a new production projection. Emitted L4/L2 output and SOURCE_GENERATION-relevant extraction are unchanged; the golden pinned set is unchanged."
   }
 }

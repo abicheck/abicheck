@@ -379,8 +379,10 @@ def measure_tu(cpp: Path, extractor: Any) -> TuComparison:
     Imports abicheck lazily so the pure half above stays importable on its own.
     """
     from abicheck.buildsource.build_evidence import CompileUnit
-    from abicheck.buildsource.source_extractors import base
-    from abicheck.dumper_clang import _ClangAstParser
+    from abicheck.buildsource.source_extractors.clang_projection import (
+        PublicSurfaceClangParser,
+        project_clang_surface,
+    )
 
     case_dir = cpp.parent
     roots = [str(case_dir)]
@@ -401,7 +403,7 @@ def measure_tu(cpp: Path, extractor: Any) -> TuComparison:
         current = extractor.source_abi_from_dump(
             cu, dump, public_header_roots=roots, target_id="target://spike"
         )
-        parser = _ClangAstParser(
+        parser = PublicSurfaceClangParser(
             dump.ast,
             set(),
             set(),
@@ -411,16 +413,7 @@ def measure_tu(cpp: Path, extractor: Any) -> TuComparison:
             no_binary_evidence=True,
             is_cxx=True,
         )
-        projected: list[Any] = [
-            base.entity_from_function(f) for f in parser.parse_functions()
-        ]
-        projected += [base.entity_from_variable(v) for v in parser.parse_variables()]
-        projected += [base.entity_from_record(r) for r in parser.parse_types()]
-        projected += [base.entity_from_enum(e) for e in parser.parse_enums()]
-        projected += [
-            base.entity_from_typedef(name, target)
-            for name, target in parser.parse_typedefs_qualified().items()
-        ]
+        projected: list[Any] = project_clang_surface(parser)
     finally:
         dump.release()
     current_entities = list(current.all_entities())

@@ -69,14 +69,16 @@ def _current_views(row: dict) -> list:
 
 def _projected_views(cpp: Path, extractor) -> list:
     """The spike's projection configuration, applied to one TU's AST."""
-    from abicheck.buildsource.source_extractors import base
-    from abicheck.dumper_clang import _ClangAstParser
+    from abicheck.buildsource.source_extractors.clang_projection import (
+        PublicSurfaceClangParser,
+        project_clang_surface,
+    )
 
     case_dir = cpp.parent
     dump = extractor.dump_for(G.compile_unit_for(cpp))
     try:
         assert dump.ast is not None, f"clang AST dump failed for {cpp}"
-        parser = _ClangAstParser(
+        parser = PublicSurfaceClangParser(
             dump.ast,
             set(),
             set(),
@@ -86,14 +88,7 @@ def _projected_views(cpp: Path, extractor) -> list:
             no_binary_evidence=True,
             is_cxx=True,
         )
-        projected = [base.entity_from_function(f) for f in parser.parse_functions()]
-        projected += [base.entity_from_variable(v) for v in parser.parse_variables()]
-        projected += [base.entity_from_record(r) for r in parser.parse_types()]
-        projected += [base.entity_from_enum(e) for e in parser.parse_enums()]
-        projected += [
-            base.entity_from_typedef(name, target)
-            for name, target in parser.parse_typedefs_qualified().items()
-        ]
+        projected = project_clang_surface(parser)
     finally:
         dump.release()
     return [M.view_of(e) for e in projected if e.kind in M.CANDIDATE_FIELDS]
