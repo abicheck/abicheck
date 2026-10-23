@@ -183,7 +183,7 @@ EXTRACTION_BUG_CLASSES: tuple[BugClass, ...] = (
             "re-probed. The `/I`-only scanner left `-I` and `/external:I` out, "
             "so a public header root reached only through them was missed."
         ),
-        fixed_by=(),
+        fixed_by=(1742,),
         seed_tests=("tests/test_compile_invocation_differential.py",),
         public_surfaces=("cli",),
         axes={
