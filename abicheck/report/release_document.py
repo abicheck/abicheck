@@ -16,8 +16,7 @@
 """The one release (directory/package) report builder (ADR-061 gap "six
 separately-built report documents", release slice).
 
-A release report used to be assembled four times over, once per format, by
-``cli_compare_release_helpers``' ``_format_release_{summary,json,markdown,
+A release report used to be assembled four times over, once per format, by the retired ``cli_compare_release_helpers``' ``_format_release_{summary,json,markdown,
 junit}`` -- each re-deriving the display projection, the ``--view show=``
 filtered counts, the exit block and the disposition audit on its own. This
 module computes all of it **once**:

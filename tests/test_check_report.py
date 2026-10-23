@@ -321,7 +321,7 @@ class TestAugmentReport:
     def test_analysis_exit_code_overrides_a_clean_severity_block(self):
         """The exact Codex-flagged gap: --fail-on-removed-library on a
         directory/package compare makes the CLI process exit 8 "in
-        preference to the severity code" (cli_compare_release_helpers.py's
+        preference to the severity code" (frontends/cli/release_exit.py's
         _exit_compare_release), so a bundle report's own severity.exit_code
         can read 0/COMPATIBLE_WITH_RISK even though the real process exited
         nonzero. analysis_exit_code must win via max() so the gate doesn't

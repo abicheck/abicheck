@@ -162,7 +162,7 @@ VALIDITY_NO_RESULT = "no_result"
 #: * ``abicheck.checker.Verdict`` -- the five compatibility tiers, used for
 #:   both keys (ADR-063 D6 makes ``run_outcome.compatibility`` the canonical
 #:   one, and it carries the same enum);
-#: * ``cli_compare_release_helpers._RELEASE_VERDICT_ORDER`` plus
+#: * ``policy.release_outcome.RELEASE_VERDICT_ORDER`` plus
 #:   ``workflows/release_scope.py`` -- a release envelope's per-library rollup
 #:   adds ``ERROR``, ``not_comparable``, ``unsupported`` and ``failed``;
 #: * ``reporter.py``'s appcompat document -- ``UNKNOWN`` when no verdict was
@@ -204,8 +204,7 @@ KNOWN_VERDICTS = frozenset(
 #: capture failed.
 #:
 #: The engine draws the same line for the same reason, which is what this set
-#: mirrors rather than invents: ``cli_compare_release_helpers.
-#: _release_completed_compatibility_verdict`` excludes exactly these four from
+#: mirrors rather than invents: ``policy.outcome_release.run_outcome_dict_for_release`` excludes exactly these four from
 #: ``run_outcome.compatibility`` because that axis is separate from the
 #: release's own rolled-up ``verdict``, where an operational failure
 #: deliberately dominates. ``UNKNOWN`` joins them from a different emitter --
