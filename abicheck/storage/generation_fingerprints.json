@@ -54,13 +54,13 @@
       "abicheck/extract/export_table_read.py": "7783c3baba176ef8b47cb99361f389984bb1797c37ba5d9120866359f60c3601",
       "abicheck/extract/flat_map_dependency_scope.py": "77659ce966d856c4b9008cdc6cf88250a3f50314fdf04140712f4e3797894648",
       "abicheck/extract/header_ast_backend.py": "1f5b15c126b139c49b702b69a4f626ed7d30f8294e15ad116d61387e96d31f16",
-      "abicheck/extract/header_ast_cache_producers.py": "9fdd20b55d57ae059e2d10136f11ad02149acf1eeffe9439b54c1fa67ea1e035",
+      "abicheck/extract/header_ast_cache_producers.py": "b20f72d82c73d0f82a91bf53b32edf673a043aae5f68eec9c38d6d7ad9c7b63a",
       "abicheck/extract/header_ast_fields.py": "436f6feaed4da7566a551fa44d3e102d28964fecc57a22821111d7f63c6f5840",
       "abicheck/extract/header_exclusions.py": "254ca6e4ccf7366b9db516183d6814cb865c279845abe7d05051ac2f72bf0884",
       "abicheck/extract/header_order_witness.py": "6a1cfce946826fa540a0601ebeefa02a8973ba6e8cd5d8287f6c1e7badc3d53a",
       "abicheck/extract/header_scan_memo.py": "56f79b5316354b938b08a5f29779c3aaf40481892d947784ec2adb48ab5e83fb",
       "abicheck/extract/headers/__init__.py": "70af0d3a16882783444077004b7a434a295505579fbbca219ce103f72074ad03",
-      "abicheck/extract/headers/ast_config.py": "bc9a5af63004129c078abdec768ce0596ec878ecb3cd845b90911e833e500bc1",
+      "abicheck/extract/headers/ast_config.py": "708e6f189d9f24510a544e22655d668733dd1b565e4ec747c11b3fb29d466749",
       "abicheck/extract/headers/ast_config_cpp20_chains.py": "ceeadbcb1d8e2eaac5eb325a3fb7c668614ce605bc04bb03835fcc4957e53c97",
       "abicheck/extract/headers/backend_plan.py": "1f02babf0ead52a65e4fa08dff8ce5b2a9d60feb1d02d22e7db30ee050cf8717",
       "abicheck/extract/headers/backend_protocol.py": "144cbe76456b6bceaf56f0edd0f3398f171178a222c8b968d53f8a17ee05a21b",
@@ -106,6 +106,7 @@
       "abicheck/extract/headers/clang/template_param_indexes.py": "d73116e7e4bf662dd4c5b00d653a8a1fd1ece26818806f8ec5f08ec417b104fa",
       "abicheck/extract/headers/clang/templates.py": "21aa38d283c3b7bd036d68cec6e655fb9be9ae84fba3e6da8d01d3b6c442105c",
       "abicheck/extract/headers/clang/vtable.py": "bc235100ce9c5cb9ec8af93ea5bafe1abf0ea29249087a2b5f073ef5293257ff",
+      "abicheck/extract/headers/clang_header_argv.py": "c198bd32d8fc6c5e59d6fd30f809544291a4a5381614f2fcbb281765da6626b7",
       "abicheck/extract/headers/compile_provenance.py": "1453703111a2abf28799b446e125c34906fd3220faca27db49220f625cc99d75",
       "abicheck/extract/headers/manifest.py": "b44a66dc760b0fd39e671876615d1e846433b2d76cb050be39749c5740c942bf",
       "abicheck/extract/headers/scope_segments.py": "d413edec257eb1334c829263770b66dc2eda3d263c765f699eac9f7e3ace9e65",
@@ -152,9 +153,9 @@
       "abicheck/symvers_metadata.py": "372737765cd132e6e87ed891dd465d2958e04debbef774e45212ceb3036871cb",
       "abicheck/type_metadata.py": "9997189de8dac522fd1db8be5ae491d811139503f83abaaded89038eb4aa9cdf"
     },
-    "fingerprint": "0e2d10fbc023a3fb3d6ba4890f9cbcd422dfedb426fc2edda5165617f862f683",
+    "fingerprint": "c4700d24d671d22f72f54d3b319a986539641f27a83815da88412f9e59e3ed4c",
     "generation": 10,
-    "reason": "origin_lib now attributes std template local statics to the C++ runtime (ElfSymbol.origin_lib); extractor semantics changed"
+    "reason": "Adds a NON_SHAPING_MODULES classification entry for clang_header_argv (the body of the keyed header argv builder, already covered by the invocation digest). No extraction output or cache key changes; the CLANG_AST_OUTPUT_MODULES fingerprint is untouched."
   },
   "resolver": {
     "files": {
