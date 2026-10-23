@@ -49,6 +49,7 @@ from ._immutable_mapping import _ImmutableDict as _ImmutableDict
 from .dimensions import (
     ChangeEntity as ChangeEntity,
     ChangeOperation as ChangeOperation,
+    ContractSubject as ContractSubject,
 )
 
 
@@ -208,6 +209,11 @@ class ChangeKindMeta:
     # COMPATIBLE, non-addition kind may carry it (``_validate_entry``).
     # Appended last for the same pickle-order reason as the fields above.
     is_informational: bool = field(default=False, kw_only=True)
+    # ADR-049 amendment: whether the finding's subject is a declaration a
+    # contract can place, or a dependency edge / binary-wide / build / analysis
+    # fact contract evaluation calls ``NOT_APPLICABLE``. Mandatory on a
+    # registry entry (``_validate_entry``); appended last for pickle order.
+    contract_subject: ContractSubject | None = field(default=None, kw_only=True)
 
     def __post_init__(self) -> None:
         # ``frozen=True`` only stops reassigning the *attribute*
@@ -523,6 +529,19 @@ def _validate_entry(e: ChangeKindMeta) -> None:
             f"7o makes the display dimensions a property of the catalog entry, "
             f"so a kind cannot be added without landing in the right dimension"
         )
+    if e.contract_subject is None:
+        raise ValueError(
+            f"{e.kind!r}: contract_subject must be declared (ADR-049 amendment) "
+            f"-- an undeclared kind would read UNKNOWN_UNRESOLVED and gate"
+        )
+    if (
+        e.entity is ChangeEntity.ANALYSIS
+        and e.contract_subject is not ContractSubject.ANALYSIS
+    ):
+        raise ValueError(
+            f"{e.kind!r}: a finding about the analysis has no contract subject "
+            f"-- entity 'analysis' requires contract_subject 'analysis'"
+        )
     for policy, override in e.policy_overrides.items():
         if policy not in VALID_BASE_POLICIES:
             raise ValueError(
@@ -717,6 +736,12 @@ class ChangeKindRegistry:
         A subset of COMPATIBLE disjoint from :meth:`addition_kinds`.
         """
         return frozenset(e.kind for e in self._entries.values() if e.is_informational)
+
+    def contract_subject_kinds(self, *subjects: ContractSubject) -> frozenset[str]:
+        """Return kind values whose declared ``contract_subject`` is in *subjects*."""
+        return frozenset(
+            e.kind for e in self._entries.values() if e.contract_subject in subjects
+        )
 
     def entity_for(self, kind_value: str) -> ChangeEntity | None:
         """The declared display *entity* for a kind, or ``None`` if unknown.

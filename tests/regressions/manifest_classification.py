@@ -611,9 +611,11 @@ CLASSIFICATION_BUG_CLASSES: tuple[BugClass, ...] = (
         id="classification.non_entity_finding_feeds_contract_coverage",
         invariant=(
             "A finding whose subject is not a declaration of the library "
-            "under test -- an import/dependency edge, or a symbol the C++ "
-            "runtime or toolchain owns -- is never left UNKNOWN_UNRESOLVED "
-            "by contract evaluation, so it never reaches "
+            "under test -- an import/dependency edge, a binary-wide, build "
+            "or toolchain fact, a statement about the analysis (each "
+            "declared by the kind's mandatory catalog contract_subject), or "
+            "a symbol the C++ runtime or toolchain owns -- is never left "
+            "UNKNOWN_UNRESOLVED by contract evaluation, so it never reaches "
             "contract_coverage_failures and never raises exit 1, whatever "
             "the contract mode, the header evidence, or whether either "
             "snapshot's ELF table lists the symbol. Policy keeps scoring "
@@ -630,11 +632,29 @@ CLASSIFICATION_BUG_CLASSES: tuple[BugClass, ...] = (
             "tests/test_family_f1_evidence_ablation.py",
             "tests/unit/report/test_review_groups.py",
             "tests/test_informational_never_gates.py",
+            "tests/test_contract_subject_totality.py",
         ),
         public_surfaces=("cli",),
         axes={
-            "kind": ("import_edge", "leaked_dependency", "binding", "removal"),
-            "mode": ("public", "all"),
+            # The whole ChangeKind catalog, by its declared contract subject
+            # (the 2026-10 ADR-049 amendment; a probe found 83 binary/build
+            # kinds still unresolved after #1751).
+            "kind": (
+                "declaration",
+                "dependency_edge",
+                "binary_wide",
+                "build_fact",
+                "analysis",
+                "leaked_dependency",
+            ),
+            "mode": ("adaptive", "public", "exports", "all"),
+            "subject": (
+                "declared_public",
+                "undeclared_own_export",
+                "runtime_std_name",
+                "import",
+                "sentinel",
+            ),
             "header_evidence": ("resolvable", "unresolvable"),
             "elf_table": ("lists_symbol", "omits_symbol"),
         },
