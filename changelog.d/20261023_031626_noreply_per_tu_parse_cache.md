@@ -1,0 +1,3 @@
+### Changed
+
+- **The per-TU source-ABI cache and its key now run over one parsed compile invocation** — `SourceAbiCache` is a view over a single content-addressed parse store (`abicheck/storage/tu_parse_store.py`), and `compute_tu_cache_key` is built from the same `CompilerInvocation` every renderer reads, the tool identity and the input digests. A replayed flag or include directory now reaches the key exactly as the parse decided it. Existing `--source-abi-cache-dir` / `ABICHECK_L4_CACHE_DIR` directories start cold after upgrading, because every key and entry layout changed; nothing is read back from the old layout.

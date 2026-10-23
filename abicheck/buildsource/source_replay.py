@@ -52,11 +52,19 @@ from pathlib import Path
 
 from .. import deadline
 from ..storage.code_identity import abicheck_code_fingerprint
+from ..storage.tu_parse_store import (
+    TuParseStore,
+    content_key,
+    digest_file,
+)
 from .build_evidence import BuildEvidence, CompileUnit, Target
 from .l5_ast_run import L5AstRun
 from .source_abi import SOURCE_ABI_VERSION, SourceAbiSurface, SourceAbiTu
 from .source_extractors.base import SourceAbiExtractor, SourceExtractionError
-from .source_extractors.compile_invocation import replayed_tokens_for
+from .source_extractors.compile_invocation import (
+    parse_compile_invocation,
+    replayed_tokens,
+)
 from .source_link import link_source_abi
 from .source_replay_pool import (
     _extract_cache_misses,
@@ -589,14 +597,6 @@ def _resolve_source(compile_unit: CompileUnit) -> Path | None:
     return path if path.is_file() else None
 
 
-def _digest_file(path: Path) -> str:
-    h = hashlib.sha256()
-    with path.open("rb") as fh:
-        for chunk in iter(lambda: fh.read(65536), b""):
-            h.update(chunk)
-    return h.hexdigest()
-
-
 def _digest_path(raw: str) -> str:
     """Content digest of a header root, whether it is a file or a directory.
 
@@ -609,13 +609,13 @@ def _digest_path(raw: str) -> str:
     expanded = os.path.expanduser(raw) if raw else ""
     p = Path(expanded) if expanded else None
     if p and p.is_file():
-        return _digest_file(p)
+        return digest_file(p)
     if p and p.is_dir():
         h = hashlib.sha256()
         for child in sorted(p.rglob("*")):
             if child.is_file():
                 h.update(child.as_posix().encode("utf-8"))
-                h.update(_digest_file(child).encode("utf-8"))
+                h.update(digest_file(child).encode("utf-8"))
         return h.hexdigest()
     return "path:" + _norm(raw)
 
@@ -630,12 +630,19 @@ def compute_tu_cache_key(
 ) -> str | None:
     """Compute the D8 per-TU cache key, or ``None`` if the TU is uncacheable.
 
-    Folds the extractor identity/version, the source-file content hash, each
-    public-header-root content hash, the normalized compile-context hash, the
-    public-header root set, language standard / target / sysroot, and the source
-    schema version. Returns ``None`` when the source content cannot be read, so
-    the driver re-extracts rather than risk a false cache hit on stale content
-    (ADR-033 D5).
+    The key is one content-addressed store key for a parsed invocation
+    (:func:`~..storage.tu_parse_store.content_key`), built from three groups of
+    parts: the **tool identity** (schema version, abicheck code fingerprint,
+    extractor name and version), the **input digests** (the source file's content
+    and location, and every public-header root's content), and the **parsed
+    invocation** (:func:`parse_compile_invocation`, the same object every renderer
+    reads). Keying on the parsed invocation rather than the raw compile unit means
+    a fact the extractor actually replays -- the emulated driver, the rebased
+    include directories, the replayed forced-include and ABI flags -- is in the key
+    exactly as the parse decided it, not as the build spelled it.
+
+    Returns ``None`` when the source content cannot be read, so the driver
+    re-extracts rather than risk a false cache hit on stale content (ADR-033 D5).
 
     This is the *preliminary* key: it cannot see a TU's transitively included
     private/forced headers before parsing. :class:`SourceAbiCache` closes that gap
@@ -646,90 +653,75 @@ def compute_tu_cache_key(
     source = _resolve_source(compile_unit)
     if source is None:
         return None
+    inv = parse_compile_invocation(compile_unit, compiler_override)
     parts = [
-        "abicheck-source-abi-cache",
-        str(SOURCE_ABI_VERSION),
+        # Tool identity: which parser, at which version, with which abicheck code.
+        "schema:" + str(SOURCE_ABI_VERSION),
         "code:" + abicheck_code_fingerprint(),
-        extractor_name,
-        extractor_version,
-        # Source *location* (not just content): two distinct TUs with identical
-        # contents must not collide — a relative `#include "local.h"` and
-        # `__FILE__` depend on the file's path, so a content-only key could reuse
-        # another TU's dump and read_files (CodeRabbit review).
+        "extractor:" + extractor_name,
+        "extractor_version:" + extractor_version,
+        # Input digests. The source location (not just its content) is folded in:
+        # a relative `#include "local.h"` and `__FILE__` depend on the path, so two
+        # TUs with identical contents must not share a dump (CodeRabbit review).
         "src_path:" + source.as_posix(),
+        "src:" + digest_file(source),
         "cwd:" + _norm(os.path.expanduser(compile_unit.directory or "")),
-        compile_unit.standard,
-        compile_unit.target_triple,
-        compile_unit.sysroot or "",
-        compile_unit.language,
-        "src:" + _digest_file(source),
-        "defs:" + ",".join(f"{k}={v}" for k, v in sorted(compile_unit.defines.items())),
-        "undefs:" + ",".join(sorted(compile_unit.undefines)),
-        "inc:" + ",".join(compile_unit.include_paths),
-        "sysinc:" + ",".join(compile_unit.system_include_paths),
-        "flags:" + ",".join(compile_unit.abi_relevant_flags),
-        # The argv-only replay flags the extractor actually carries — forced
-        # includes (`-include`/`-imacros`/`/FI`) and unnormalized include-search
-        # paths (`-iquote`/`-idirafter`/`/I`). These change *what* clang parses but
-        # live in argv, not the structured fields, so without them a compile
-        # command that swaps `-include old.h` for `-include new.h` would reuse a
-        # stale cached dump (Codex review #339, P2).
-        "replay:" + ",".join(_replay_flags_for_key(compile_unit, compiler_override)),
-        "roots:" + ",".join(sorted(public_header_roots)),
+        "roots:" + json.dumps(sorted(public_header_roots)),
+        # The parsed invocation. Lists go through json.dumps so a comma inside one
+        # value cannot make two different lists fold to the same text.
+        "compiler:" + inv.compiler,
+        "msvc:" + str(inv.msvc),
+        "language:" + inv.language,
+        "standard:" + inv.standard,
+        "run_dir:" + (inv.run_directory or ""),
+        "target:" + inv.target_triple,
+        "sysroot:" + inv.sysroot,
+        "defines:" + json.dumps(sorted(inv.defines)),
+        "undefines:" + json.dumps(sorted(inv.undefines)),
+        "include_dirs:" + json.dumps(list(inv.include_dirs)),
+        "system_include_dirs:" + json.dumps(list(inv.system_include_dirs)),
+        "replayed:" + json.dumps(replayed_tokens(inv)),
+        "replayed_include_dirs:" + json.dumps(list(inv.replayed_include_dirs)),
     ]
     for root in sorted(public_header_roots):
         parts.append(f"hdr:{_norm(root)}:{_digest_path(root)}")
-    blob = "\x00".join(parts).encode("utf-8")
-    return hashlib.sha256(blob).hexdigest()
-
-
-def _replay_flags_for_key(
-    compile_unit: CompileUnit, compiler_override: str | None = None
-) -> list[str]:
-    """The exact replay flags an extractor would carry from argv, for the cache key.
-
-    Mirrors the replayed tokens of :func:`source_extractors.compile_invocation.parse_compile_invocation` so the key folds in
-    forced-include / include-search options that change the parsed TU but are not
-    captured by the structured ``CompileUnit`` fields (Codex review #339, P2).
-    *compiler_override* must be the same override the extractor actually resolves
-    mode from (e.g. ``ClangSourceExtractor.compiler_binary``) -- an override that
-    switches a GNU-argv TU into CL mode changes which flags the replay
-    carries (``/FI``/``/I`` vs ``-include``/``-iquote``), so keying on the
-    compile unit's own un-overridden argv alone can collide two TUs that replay
-    under genuinely different forced-include flags (Codex review, sixth round).
-    """
-    return replayed_tokens_for(compile_unit, compiler_override)
+    return content_key(parts)
 
 
 class SourceAbiCache:
     """A content-addressed on-disk cache of per-TU :class:`SourceAbiTu` dumps (D8).
 
-    Keys come from :func:`compute_tu_cache_key` (source + roots + compile context).
-    Because that key cannot see a TU's *transitive* private/forced includes before
-    parsing, each entry also stores a **dependency map** — the content hash of
-    every file the extractor actually read (`SourceAbiTu.read_files`). On lookup
-    those hashes are re-validated, so an edit to any included header — not just a
-    configured public root — is a cache miss and forces re-extraction (Codex
-    review #339, P1; ADR-030 D8 "transitive included … header hashes"). A
-    missing/unreadable dependency also misses (prefer a false miss over a false
-    hit, ADR-033 D5). Parsing is the expensive step, so linking is still
-    recomputed each run rather than cached.
+    A view over :class:`~..storage.tu_parse_store.TuParseStore`, the one store
+    that also backs every other per-invocation parse result. The store owns the
+    entry format and the dependency re-validation; this class owns the
+    ``SourceAbiTu`` payload and the hit/miss instrumentation (ADR-033 D9).
+
+    Keys come from :func:`compute_tu_cache_key`. Because that key cannot see a
+    TU's *transitive* private/forced includes before parsing, each entry also
+    records the content hash of every file the extractor actually read
+    (`SourceAbiTu.read_files`). On lookup those hashes are re-validated, so an
+    edit to any included header -- not just a configured public root -- is a
+    cache miss (ADR-030 D8 "transitive included … header hashes"). A missing or
+    unreadable dependency also misses (prefer a false miss over a false hit,
+    ADR-033 D5). Parsing is the expensive step, so linking is still recomputed
+    each run rather than cached.
     """
 
     def __init__(self, cache_dir: Path | str) -> None:
-        self.cache_dir = Path(cache_dir)
+        self._store = TuParseStore(cache_dir)
         # ADR-033 D9 — hit/miss instrumentation for the cache_hit_rate metric.
         self.hits = 0
         self.misses = 0
+
+    @property
+    def cache_dir(self) -> Path:
+        return self._store.cache_dir
 
     @property
     def hit_rate(self) -> float | None:
         """Fraction of cacheable lookups served from cache, or ``None`` if none."""
         total = self.hits + self.misses
         return self.hits / total if total else None
-
-    def _path(self, key: str) -> Path:
-        return self.cache_dir / f"{key}.json"
 
     def get(
         self, key: str | None, memo: dict[str, str | None] | None = None
@@ -738,8 +730,8 @@ class SourceAbiCache:
 
         ``memo`` (optional) is a per-pass path→digest cache shared across all
         lookups in one ``run_source_replay`` invocation so a header included by
-        many TUs is hashed once. It must **not** outlive a pass — a file may
-        change between passes — so direct callers that omit it get the safe
+        many TUs is hashed once. It must **not** outlive a pass -- a file may
+        change between passes -- so direct callers that omit it get the safe
         always-rehash behaviour.
         """
         tu = self._get(key, memo)
@@ -757,31 +749,11 @@ class SourceAbiCache:
     ) -> SourceAbiTu | None:
         if not key:
             return None
-        path = self._path(key)
-        if not path.is_file():
+        payload = self._store.lookup(key, memo)
+        if not isinstance(payload, dict):
             return None
         try:
-            entry = json.loads(path.read_text(encoding="utf-8"))
-        except (OSError, ValueError):
-            # A corrupt/half-written cache entry is a miss, never a failure.
-            return None
-        if not isinstance(entry, dict):
-            return None
-        # A non-dict deps payload is a malformed entry → miss, never a failure
-        # (CodeRabbit review): keep the "corrupt entry is a miss" contract.
-        deps = entry.get("deps") or {}
-        if not isinstance(deps, dict):
-            return None
-        # Re-validate every recorded dependency: a changed/missing included file
-        # invalidates the dump even though the preliminary key still matches.
-        for dep_path, dep_hash in deps.items():
-            if _dep_digest(dep_path, memo) != dep_hash:
-                return None
-        tu_data = entry.get("tu")
-        if not isinstance(tu_data, dict):
-            return None
-        try:
-            return SourceAbiTu.from_dict(tu_data)
+            return SourceAbiTu.from_dict(payload)
         except (KeyError, TypeError, ValueError):
             # A structurally bad payload is a miss, not a crash that aborts replay.
             return None
@@ -794,47 +766,7 @@ class SourceAbiCache:
     ) -> None:
         if not key:
             return
-        deps: dict[str, str] = {}
-        for dep_path in tu.read_files:
-            digest = _dep_digest(dep_path, memo)
-            if digest is not None:
-                deps[dep_path] = digest
-        entry = {"tu": tu.to_dict(), "deps": deps}
-        tmp = self._path(key).with_suffix(".json.tmp")
-        try:
-            self.cache_dir.mkdir(parents=True, exist_ok=True)
-            tmp.write_text(
-                json.dumps(entry, indent=2, sort_keys=True) + "\n", encoding="utf-8"
-            )
-            # Atomic publish so a concurrent reader never sees a partial file.
-            tmp.replace(self._path(key))
-        except OSError:
-            # Cache writes are best-effort; replay already produced the facts.
-            tmp.unlink(missing_ok=True)
-
-
-def _dep_digest(path: str, memo: dict[str, str | None] | None = None) -> str | None:
-    """Content digest of a dependency file, or ``None`` if it cannot be read.
-
-    A ``None`` (missing/unreadable) dependency makes the entry miss on lookup —
-    preferring a false miss over a false hit (ADR-033 D5).
-
-    ``memo`` (optional) caches the digest per path **for the duration of one
-    replay pass**: a public header included by N TUs is otherwise re-hashed N
-    times in the serial cache-validation phase. Files do not change mid-pass, so
-    hashing each once is correct; the memo is created per ``run_source_replay``
-    call and discarded after, so a long-lived process still re-reads on the next
-    run (a file may change between runs)."""
-    if memo is not None and path in memo:
-        return memo[path]
-    try:
-        fp = Path(os.path.expanduser(path)) if path else None
-        digest = _digest_file(fp) if (fp is not None and fp.is_file()) else None
-    except OSError:
-        digest = None
-    if memo is not None:
-        memo[path] = digest
-    return digest
+        self._store.publish(key, tu.to_dict(), tu.read_files, memo)
 
 
 # -- replay driver -----------------------------------------------------------

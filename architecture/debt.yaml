@@ -256,7 +256,7 @@
     },
     {
       "path": "abicheck/buildsource/source_replay.py",
-      "baseline_lines": 1114,
+      "baseline_lines": 1046,
       "target": "extract/build-or-source",
       "rule": "no_growth",
       "disposition": "migrate",
