@@ -564,6 +564,15 @@ class AbiSnapshot:
     header_declaration_ids: frozenset[str] | None = field(
         default=None, repr=False, compare=False, kw_only=True
     )
+    # Runtime-only, like `header_declaration_ids`: ``(depth, facts)`` when a
+    # `policy/depth_projection.py` projection cleared facts this snapshot
+    # carried -- the names `compare/detector_inputs.py` declares detectors
+    # read. The registry disables a detector whose required fact is listed
+    # ("disabled: <fact> not available at depth X") instead of running it on
+    # emptied input. Never serialized.
+    projection_unavailable: tuple[str, frozenset[str]] | None = field(
+        default=None, repr=False, compare=False, kw_only=True
+    )
 
     # Indexes (built lazily)
     _func_by_mangled: dict[str, Function] | None = field(

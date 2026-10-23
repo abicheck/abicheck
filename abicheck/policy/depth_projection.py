@@ -143,6 +143,7 @@ from ..model.surface_facts import (
     headers_discarded_surface_facts,
     is_export_confirmed_absent,
 )
+from .depth_fact_availability import cleared_facts
 
 if TYPE_CHECKING:
     from ..buildsource.pack import BuildSourcePack
@@ -658,6 +659,13 @@ def project_snapshot_to_depth(
         if not deep:  # below `headers` the declarations are gone too
             out.header_declaration_ids = header_declaration_ids(out)
         out.surface_graph = None
+    # Record what this rung emptied, so a detector whose declared required
+    # input (`compare/detector_inputs.py`) is gone reports "disabled" rather
+    # than running on emptied input (bug class
+    # `evidence.depth_projection_drops_lower_layer_detector_input`).
+    gone = cleared_facts(snap, out, depth)
+    if gone:
+        out.projection_unavailable = (depth, gone)
     return out
 
 

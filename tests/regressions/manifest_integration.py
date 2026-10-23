@@ -327,6 +327,14 @@ INTEGRATION_BUG_CLASSES: tuple[BugClass, ...] = (
             # oracle plus the headers-subset-of-source metamorphic check and
             # a compiled -fvisibility-inlines-hidden reproduction.
             "tests/test_template_instance_absence_shapes.py",
+            # The class: every detector's declared projectable inputs vs
+            # every rung's clearable facts (pure table, projection behaviour,
+            # AST read oracle, registry "disabled" coverage), and the
+            # catalog-wide lower-rung-never-invents-a-removal relation.
+            "tests/test_depth_detector_input_contract.py",
+            "tests/test_depth_metamorphic_examples.py",
+            # F1 harness: records the runtime-only projection fact.
+            "tests/test_family_f1_evidence_ablation.py",
         ),
         public_surfaces=("cli",),
         axes={
