@@ -1,0 +1,32 @@
+# gitleaks configuration: the default rule set plus the false positives this
+# repository's history is known to produce. Read by gitleaks.yml (and by any
+# local `gitleaks git` run from the repo root). Every allowlist names one
+# class of non-secret, not a single line: a real credential matching none of
+# these classes still fails the scan. A one-off false positive in a commit
+# already on main goes in `.gitleaksignore` by its fingerprint instead.
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "Itanium C++ mangled symbol names (_Z...), the subject of most ABI fixtures"
+regexTarget = "secret"
+regexes = ['''^_Z[A-Za-z0-9_]+$''']
+
+[[allowlists]]
+description = "Python keyword arguments (`name=value`) read as an `access`/`key` assignment"
+regexTarget = "secret"
+regexes = ['''^[a-z_]+=[A-Za-z_][A-Za-z0-9_.]*$''']
+
+[[allowlists]]
+description = "Bazel aquery fixtures: actionKey values are SHA-256 action digests"
+paths = ['''^(b/)?tests/fixtures/bazel/.*\.json$''']
+
+[[allowlists]]
+description = "Git commit SHAs recorded by generated baselines (`\"revision\": \"<sha>\"`)"
+regexTarget = "line"
+regexes = ['''"revision": "[0-9a-f]{40}"''']
+
+[[allowlists]]
+description = "LLVM apt repository signing-key fingerprint (public, pinned in clang-plugin.yml)"
+regexTarget = "line"
+regexes = ['''LLVM_KEY_FPR: "[0-9A-F]{40}"''']

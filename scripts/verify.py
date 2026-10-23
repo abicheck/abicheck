@@ -58,6 +58,7 @@ import platform
 import shutil
 import subprocess
 import sys
+import sysconfig
 import time
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
@@ -263,6 +264,18 @@ def _py(*mod_args: str) -> tuple[str, ...]:
     return _isolated_module_command(*mod_args)
 
 
+def _venv_bin(name: str, *args: str) -> tuple[str, ...]:
+    """Invoke a console script installed next to this interpreter.
+
+    For tools with no ``python -m`` entry point (``zizmor`` ships a Rust
+    binary as its console script). Resolved in this interpreter's scripts
+    directory first, for the same reason `_py` never uses a bare name: PATH
+    can hold a different version than the one ``[dev]`` pins.
+    """
+    found = shutil.which(name, path=sysconfig.get_path("scripts")) or shutil.which(name)
+    return (found or name, *args)
+
+
 def _pyscript(path: str, *args: str) -> tuple[str, ...]:
     """Invoke a local script file with the same interpreter running verify.py."""
     return (sys.executable, path, *args)
@@ -364,6 +377,26 @@ STEPS: tuple[Step, ...] = (
         ),
         frozenset({FAST}),
         description="Fast unit lane — matches the documented go-to command",
+    ),
+    Step(
+        # Static audit of the workflows and composite actions: unpinned
+        # `uses:`, template injection, persisted checkout credentials,
+        # over-broad token permissions, cache poisoning in release jobs.
+        "workflow-audit",
+        _venv_bin(
+            "zizmor",
+            "--quiet",
+            "--offline",
+            "--min-severity",
+            "medium",
+            ".github/workflows",
+            ".github/actions",
+            "actions",
+            "action.yml",
+        ),
+        frozenset({PR, FULL}),
+        precondition=_need_bins("zizmor"),
+        description="zizmor workflow/action security audit (pinned per pyproject.toml [dev])",
     ),
     Step(
         "ai-readiness",

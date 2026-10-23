@@ -275,7 +275,7 @@ jobs:
       has-checks: ${{ steps.plan.outputs.has-checks }}
       run-plan-artifact-name: ${{ inputs.run-plan-artifact-name }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803  # v6.1.0
         with:
           persist-credentials: false
 
@@ -324,14 +324,14 @@ jobs:
           echo "ref=${WORKFLOW_SHA:-$FALLBACK_REF}" >> "$GITHUB_OUTPUT"
 
       - name: Checkout abicheck (for installing the CLI)
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803  # v6.1.0
         with:
           repository: ${{ steps.identity.outputs.repository }}
           ref: ${{ steps.identity.outputs.ref }}
           path: .check-project-src
           persist-credentials: false
 
-      - uses: actions/setup-python@v6
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1  # v6.3.0
         with:
           python-version: ${{ inputs.python-version }}
 
@@ -340,7 +340,7 @@ jobs:
         run: pip install ./.check-project-src
 
       - name: Download build-output artifacts
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333  # v8.0.2
         with:
           path: build-outputs
           pattern: '${{ inputs.build-output-artifact-prefix }}*'
@@ -421,7 +421,7 @@ jobs:
           print('has-checks=' + ('true' if checks else 'false'))
           " >> "$GITHUB_OUTPUT"
 
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
         with:
           name: ${{ inputs.run-plan-artifact-name }}
           path: run-plan.json
@@ -472,7 +472,7 @@ jobs:
       fail-fast: false
       matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803  # v6.1.0
         with:
           persist-credentials: false
 
@@ -497,14 +497,14 @@ jobs:
           echo "ref=${WORKFLOW_SHA:-$FALLBACK_REF}" >> "$GITHUB_OUTPUT"
 
       - name: Checkout abicheck (for installing the CLI and nested Action composition)
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803  # v6.1.0
         with:
           repository: ${{ steps.identity.outputs.repository }}
           ref: ${{ steps.identity.outputs.ref }}
           path: .check-project-src
           persist-credentials: false
 
-      - uses: actions/setup-python@v6
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1  # v6.3.0
         with:
           python-version: ${{ inputs.python-version }}
 
@@ -533,7 +533,7 @@ jobs:
           rm -rf candidate build-output "$BASELINE_STAGING_DIR"
 
       - name: Download candidate artifact
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333  # v8.0.2
         with:
           name: '${{ inputs.candidate-artifact-prefix }}${{ matrix.profile_id }}'
           path: candidate
@@ -546,7 +546,7 @@ jobs:
       # their own artifact, not one shared download (Codex review).
       - name: Download baseline-set artifact
         if: matrix.baseline_channel != 'none'
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333  # v8.0.2
         with:
           name: '${{ inputs.baseline-artifact-prefix }}${{ matrix.profile_id }}-${{ matrix.baseline_channel }}'
           path: 'baseline-sets/${{ matrix.profile_id }}-${{ matrix.baseline_channel }}'
@@ -585,7 +585,7 @@ jobs:
       - name: Download build-output artifact
         id: download_build_output
         if: matrix.baseline_channel != 'none' || matrix.requested_depth == 'build' || matrix.requested_depth == 'source' || inputs.evidence-producer == 'wrapper' || inputs.evidence-producer == 'clang-plugin'
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333  # v8.0.2
         with:
           name: '${{ inputs.build-output-artifact-prefix }}${{ matrix.profile_id }}'
           path: build-output
@@ -1250,7 +1250,7 @@ jobs:
       # pre-check-failure counterpart (issue #628).
       - name: Upload report
         if: always() && (steps.run.outputs.report-path != '' || steps.precheck.outputs.report-path != '')
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
         with:
           name: '${{ inputs.report-artifact-prefix }}${{ steps.sanitized.outputs.id }}'
           path: ${{ steps.run.outputs.report-path || steps.precheck.outputs.report-path }}
@@ -1269,7 +1269,7 @@ jobs:
     outputs:
       exit-code: ${{ steps.aggregate.outputs.exit-code }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803  # v6.1.0
         with:
           persist-credentials: false
 
@@ -1291,14 +1291,14 @@ jobs:
           echo "ref=${WORKFLOW_SHA:-$FALLBACK_REF}" >> "$GITHUB_OUTPUT"
 
       - name: Checkout abicheck (for installing the CLI)
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803  # v6.1.0
         with:
           repository: ${{ steps.identity.outputs.repository }}
           ref: ${{ steps.identity.outputs.ref }}
           path: .check-project-src
           persist-credentials: false
 
-      - uses: actions/setup-python@v6
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1  # v6.3.0
         with:
           python-version: ${{ inputs.python-version }}
 
@@ -1307,7 +1307,7 @@ jobs:
         run: pip install ./.check-project-src
 
       - name: Download run-plan.json
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333  # v8.0.2
         with:
           name: ${{ inputs.run-plan-artifact-name }}
 
@@ -1325,7 +1325,7 @@ jobs:
         run: rm -rf reports
 
       - name: Download every check report
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333  # v8.0.2
         with:
           path: reports
           pattern: '${{ inputs.report-artifact-prefix }}*'
@@ -1354,7 +1354,7 @@ jobs:
 
       - name: Upload aggregate result
         if: always()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
         with:
           name: ${{ inputs.aggregate-artifact-name }}
           path: aggregate-result.json

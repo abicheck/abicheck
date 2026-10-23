@@ -468,7 +468,7 @@ def test_ci_ai_readiness_job_calls_verify_py() -> None:
 def test_ci_lint_and_types_job_calls_verify_py() -> None:
     ci = _read(".github/workflows/ci.yml")
     assert (
-        "scripts/verify.py --profile pr --only lint,fmt-check,typecheck,docs-build,examples-docs"
+        "scripts/verify.py --profile pr --only lint,fmt-check,typecheck,workflow-audit,docs-build,examples-docs"
         in ci
     )
 
