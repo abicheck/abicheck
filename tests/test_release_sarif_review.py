@@ -276,3 +276,22 @@ def test_release_sarif_with_no_comparable_members_is_still_a_valid_log(
     sarif = json.loads(out.read_text())
     assert sarif["version"] == "2.1.0"
     assert sarif["runs"] == []
+
+
+def test_review_states_matrix_bundle_and_warning_facts_when_present() -> None:
+    from abicheck.report.render_release_sarif import render_release_review
+
+    page = render_release_review(
+        {
+            "verdict": "BREAKING",
+            "exit": {"code": 4},
+            "matrix_verdict": "BREAKING",
+            "bundle_verdict": "COMPATIBLE",
+            "warnings": ["libold.so.1 was not found in NEW"],
+            "libraries": [],
+        }
+    )
+    assert "- **Matrix verdict:** `BREAKING`" in page
+    assert "- **Bundle verdict:** `COMPATIBLE`" in page
+    assert "## Warnings" in page
+    assert "- libold.so.1 was not found in NEW" in page
