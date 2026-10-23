@@ -102,3 +102,24 @@ def test_replayed_include_dirs_carries_each_spelling_once_in_order(
         _cu(argv=argv, language="CXX"), "g++" if argv[0] != "cl.exe" else "cl.exe"
     )
     assert inv.replayed_include_dirs == expected
+
+
+@pytest.mark.parametrize(
+    ("argv", "compiler", "expected"),
+    [
+        # CL mode reads the raw argv, so the -I and /external:I operands reach the probe.
+        (
+            ["cl", "/c", "-I", "inc", "/external:I", "ext"],
+            "cl",
+            ("inc", "ext"),
+        ),
+        # GNU mode reads the carried tokens: -I is structured and never probed here,
+        # while -iquote still reaches the probe.
+        (["g++", "-c", "-I", "inc", "-iquote", "q"], "g++", ("q",)),
+    ],
+)
+def test_probe_operands_read_raw_argv_in_cl_mode_and_carried_tokens_in_gnu(
+    argv: list[str], compiler: str, expected: tuple[str, ...]
+) -> None:
+    inv = parse_compile_invocation(_cu(argv=argv), compiler)
+    assert inv.replayed_include_dirs == expected
