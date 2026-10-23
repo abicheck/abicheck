@@ -210,7 +210,7 @@
       "abicheck/buildsource/source_extractors/clang_projection.py": "7d731ca0551bec84372d4c57bdb31af143220e99bbf04e7417cc34a9f851fc6f",
       "abicheck/buildsource/source_extractors/clang_public_roots.py": "c1752f2798886c97716c2361c2fe772defa2b6170104b8486871ecbc7beb3ba3",
       "abicheck/buildsource/source_extractors/clang_source_edges.py": "c9b8c3daacd02c4913b486a6ac658b435744243ed4433f14792588f67ef800e9",
-      "abicheck/buildsource/source_extractors/compile_action.py": "cb74212db8f92e019d97776186552ed6ed49bd354bf630ce51c6b06222ede928",
+      "abicheck/buildsource/source_extractors/compile_action.py": "2712bfa332f110f9fbd623531d4ccab7bfec7749c3fc70ae91887b5988205c40",
       "abicheck/buildsource/source_extractors/compile_invocation.py": "0cdd61a5f994beb08a250d8a59c05141f910088c3d1a12aa9171ef136e0bc0ce",
       "abicheck/buildsource/source_extractors/launcher_env.py": "a84547b10b80a8d02c07c5f2a1949fdf661afc0abeaf7dae486e3a1d7762b470",
       "abicheck/buildsource/source_extractors/launcher_env_path.py": "9f746dd8170e1c6d2ff7289998e0e8738fe0bdc4c35edb06c39db2a5ebd5c16d",
@@ -227,8 +227,8 @@
       "abicheck/buildsource/type_graph.py": "a028a875057cd0cbf2930a431bfa1e579f7b770e0d124cbcfe715724e89d12e5",
       "abicheck/buildsource/type_graph_index.py": "7375f7baec7ceb3dd4a52a489b89e5a3571750dffca7490d1c5870301d55202d"
     },
-    "fingerprint": "b2deb85b5dc19e091cef1799539b0077fc4af9713c358d5750627809fbe60c89",
-    "generation": 8,
-    "reason": "CL-mode -I and /external:I operands now reach the public-root probe"
+    "fingerprint": "e01a9e2f41260a6dde31982589c4d573ae920eaacf18455d873df05f8d34579f",
+    "generation": 9,
+    "reason": "Compile-db routing: multi-source entries yield one unit per source operand and sourceless links record a link unit (plan l4-l2 Phase 3 item 4), on top of main's generation 8 (#1754)."
   }
 }
