@@ -185,7 +185,7 @@ EXTRACTION_BUG_CLASSES: tuple[BugClass, ...] = (
         ),
         fixed_by=(1742,),
         seed_tests=("tests/test_compile_invocation_differential.py",),
-        public_surfaces=("cli",),
+        public_surfaces=(),
         axes={
             "driver": ("cl", "clang-cl", "g++"),
             "spelling": (
