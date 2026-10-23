@@ -186,6 +186,23 @@ FAMILIES: dict[str, Family] = {
             ),
         ),
         Family(
+            key="F12",
+            title="Build inputs route to their own units",
+            invariant=(
+                "Every source operand a build input names becomes exactly one "
+                "compile unit owned by that operand, and a link with no source "
+                "operand compiles nothing: no operand is dropped, and no link "
+                "object is taken for a source, by collapsing a record onto its "
+                "first operand."
+            ),
+            harness_tests=(),
+            planned_reason=(
+                "One class so far, pinned by its own seed test; revisit when a "
+                "second build-input adapter (Bazel, Ninja, make) collapses operands "
+                "the same way and a shared operand-shape harness can enumerate them."
+            ),
+        ),
+        Family(
             key="OTHER",
             title="CI, tooling, storage and trust-boundary surfaces",
             invariant=(
@@ -302,7 +319,6 @@ _F4 = (
     "extraction.implicit_language_rule_read_off_one_explicit_key",
     "extraction.language_mode_export_evidence",
     "extraction.ast_wrapper_chain_traversal",
-    "extraction.compile_entry_collapsed_to_first_source",
     "guard.proxy_predicate_overshoots_justification",
     "evidence.linker_reserved_export_symbols",
 )
@@ -370,6 +386,7 @@ _F9 = (
 )
 _F10 = ("concurrency.abandoned_child_outlives_failed_owner",)
 _F11 = ("measurement.forked_tree_rss_overstates_memory",)
+_F12 = ("extraction.compile_entry_collapsed_to_first_source",)
 
 #: id -> reason it belongs to no shared family.
 OTHER_REASONS: dict[str, str] = {
@@ -412,6 +429,7 @@ for _key, _ids in (
     ("F9", _F9),
     ("F10", _F10),
     ("F11", _F11),
+    ("F12", _F12),
     ("OTHER", tuple(OTHER_REASONS)),
 ):
     for _id in _ids:
