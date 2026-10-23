@@ -740,7 +740,7 @@ REPORT_BUG_CLASSES: tuple[BugClass, ...] = (
         # because Additions, suppressed and not-evaluated findings were
         # itemised one row each, and the demangle pass grew every clipped
         # mangled name back into a multi-KB libstdc++ template name.
-        fixed_by=(1751,),
+        fixed_by=(1751, 1766),
         seed_tests=(
             "tests/unit/report/test_markdown_report_budget.py",
             "tests/unit/report/test_review_group_bounds.py",
