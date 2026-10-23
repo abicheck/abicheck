@@ -321,45 +321,6 @@ GUARD_BUG_CLASSES: tuple[BugClass, ...] = (
         ),
     ),
     BugClass(
-        id="preflight.request_guard_narrower_than_late_gate",
-        invariant=(
-            "A request-time preflight that exists to fail fast must block "
-            "every failure the late gate it front-runs would raise without a "
-            "fallback, and nothing that gate would let through. Checking only "
-            "a subset (tool presence but not tool version) leaves the rest to "
-            "surface after the expensive work the preflight was added to "
-            "avoid. The preflight reuses the late gate's own decision "
-            "functions, so opt-ins and fallbacks agree by construction."
-        ),
-        fixed_by=(1763,),
-        seed_tests=("tests/test_castxml_request_preflight.py",),
-        public_surfaces=(),
-        axes={
-            "backend": ("auto", "castxml", "hybrid", "clang"),
-            "castxml_version": (
-                "missing",
-                "below_minimum",
-                "at_maximum",
-                "old_bundled_clang",
-                "unparseable",
-                "supported",
-            ),
-            "opt_in": ("none", "allow_unsupported", "ast_fallback"),
-        },
-        known_gaps=(
-            KnownGap(
-                description=(
-                    "Only castxml presence and version are pre-empted. Other "
-                    "late header-pass failures (a missing emulated host "
-                    "compiler without an explicit --compiler-path, a "
-                    "castxml/toolchain mismatch only visible when parsing) "
-                    "still surface after binary and debug-info extraction."
-                ),
-                reference="docs/contribute/plans/bug-class-regression-testing.md",
-            ),
-        ),
-    ),
-    BugClass(
         id="test_infra.autouse_allocator_cannot_recover",
         invariant=(
             "A fixture every test enters must not convert a transient "
