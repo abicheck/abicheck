@@ -36,6 +36,7 @@ import pytest
 _REPO = Path(__file__).parent.parent
 _REGISTRY = _REPO / "docs" / "contribute" / "usecase-registry.yaml"
 _EVAL_DOC = _REPO / "docs" / "contribute" / "usecase-coverage-evaluation.md"
+_CJM_DOC = _REPO / "docs" / "contribute" / "cjm.md"
 
 _STATUSES = {"complete", "partial", "modeled", "planned", "by_design_excluded"}
 _AXES = {"change_class", "archetype", "platform", "workflow", "reporting", "toolchain"}
@@ -163,4 +164,42 @@ class TestTraceabilityFields:
         covered = {t for c in _load() for t in c.get("user_task") or []}
         assert covered == _USER_TASKS, (
             f"user tasks with no use case: {_USER_TASKS - covered}"
+        )
+
+
+_JOURNEY_STAGES = {
+    "first_check",
+    "adopt_ci",
+    "pr_review",
+    "trust",
+    "tune",
+    "release",
+    "downstream",
+    "audit",
+}
+
+
+class TestJourneyStages:
+    """Every use case sits on at least one CJM stage defined in cjm.md."""
+
+    @pytest.mark.parametrize("case", _load(), ids=lambda c: c["id"])
+    def test_journey_stages_is_a_known_nonempty_list(self, case: dict) -> None:
+        stages = case.get("journey_stages")
+        assert isinstance(stages, list) and stages, (
+            f"{case['id']}: needs journey_stages: [...]"
+        )
+        assert set(stages) <= _JOURNEY_STAGES, (
+            f"{case['id']}: unknown journey_stages {set(stages) - _JOURNEY_STAGES}"
+        )
+        assert len(stages) == len(set(stages)), f"{case['id']}: duplicate stage"
+
+    def test_cjm_doc_defines_exactly_the_known_stages(self) -> None:
+        text = _CJM_DOC.read_text(encoding="utf-8")
+        documented = set(re.findall(r"^### `([a-z_]+)`", text, re.MULTILINE))
+        assert documented == _JOURNEY_STAGES
+
+    def test_every_stage_has_a_use_case(self) -> None:
+        covered = {s for c in _load() for s in c.get("journey_stages") or []}
+        assert covered == _JOURNEY_STAGES, (
+            f"stages with no use case: {_JOURNEY_STAGES - covered}"
         )
