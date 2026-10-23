@@ -22,6 +22,7 @@ from collections.abc import Iterable
 from pathlib import Path
 from typing import Any
 
+from .atomic_file import atomic_write
 from .guards import decision_key as _decision_key
 
 __all__ = ["TuParseStore", "content_key", "digest_file", "dep_digest"]
@@ -147,17 +148,11 @@ class TuParseStore:
                 return
             deps[dep] = digest
         entry = {"deps": deps, "payload": payload}
-        tmp = final.with_suffix(".json.tmp")
+        text = json.dumps(entry, indent=2, sort_keys=True) + "\n"
         try:
             self.cache_dir.mkdir(parents=True, exist_ok=True)
-            tmp.write_text(
-                json.dumps(entry, indent=2, sort_keys=True) + "\n", encoding="utf-8"
-            )
-            # Atomic publish so a concurrent reader never sees a partial file.
-            tmp.replace(final)
+            # Atomic publish: a concurrent reader sees the old entry or the new
+            # one, never a partial file. atomic_write removes its own temp file.
+            atomic_write(final, text.encode("utf-8"))
         except OSError:
-            # The write failed; a cleanup failure must not turn that into an error.
-            try:
-                tmp.unlink(missing_ok=True)
-            except OSError:
-                pass
+            pass

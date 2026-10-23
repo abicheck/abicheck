@@ -376,18 +376,13 @@ class TestBestEffortCacheCleanup:
         monkeypatch.undo()
         assert store.lookup("k") == "payload"
 
-    def test_a_failed_publish_whose_cleanup_fails_does_not_raise(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    def test_a_failed_publish_does_not_raise_and_leaves_no_entry(
+        self, tmp_path: Path
     ) -> None:
         blocked = tmp_path / "not-a-directory"
         blocked.write_text("", encoding="utf-8")
         store = TuParseStore(blocked)
 
-        def refuse(self: Path, missing_ok: bool = False) -> None:
-            raise PermissionError("read-only cache")
-
-        monkeypatch.setattr(Path, "unlink", refuse)
         store.publish("k", "payload", ())
 
-        monkeypatch.undo()
         assert store.lookup("k") is None
