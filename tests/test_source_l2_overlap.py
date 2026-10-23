@@ -64,7 +64,12 @@ def test_classification_has_no_stale_rows():
 
 def test_l4_closure_equals_direct_source_diff_references():
     l4, _ = overlap.derive_sides()
-    direct = _direct_refs([ROOT / "abicheck" / "buildsource" / "source_diff.py"])
+    # ``diff_source_abi`` calls helpers in sibling modules (``_diff_provenance``
+    # lives in ``source_provenance_diff``), so the oracle scans every L4 emitter.
+    buildsource = ROOT / "abicheck" / "buildsource"
+    direct = _direct_refs(
+        [buildsource / "source_diff.py", buildsource / "source_provenance_diff.py"]
+    )
     assert set(l4) == direct
 
 
