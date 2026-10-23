@@ -259,7 +259,7 @@ def depfile_args_from_argv(
         return []
     # Reuse the source extractors' launcher-stripping so a ccache/sccache-wrapped
     # command leaves only the compiler token to drop next.
-    from .source_extractors._argv import strip_launchers
+    from .source_extractors.compile_invocation import strip_launchers
 
     unwrapped = strip_launchers(list(argv))
     # After the launcher, the first token is the compiler driver (an executable

@@ -25,13 +25,14 @@ from ..._compiler_options import clang_ast_dump_tail
 from ...extract.compiler_driver import is_intel_sycl_driver, needs_sycl_host_only
 from ..abi_flags import drop_code_loading_options
 from ..build_evidence import CompileUnit
-from ._argv import effective_directory, unredact_home
+from ._argv import unredact_home
 from .base import SourceExtractionError
 from .compile_invocation import (
     CompilerInvocation,
     parse_compile_invocation,
     replayed_tokens,
 )
+from .launcher_env import effective_directory
 
 #: clang extractor schema/behaviour version, recorded in the dump provenance and
 #: folded into the per-TU cache key (ADR-030 D8). Bump on ANY recipe change so a

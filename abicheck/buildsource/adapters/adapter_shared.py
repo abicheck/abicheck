@@ -34,10 +34,8 @@ from ..abi_flags import (
     split_operand_survivor as split_operand_survivor,
 )
 from ..build_evidence import BuildEvidence, BuildOption, CompileUnit
-from ..source_extractors._argv import (
-    expand_env_split_prefixes,
-    strip_launchers,
-)
+from ..source_extractors.compile_invocation import strip_launchers
+from ..source_extractors.launcher_env import expand_env_split_prefixes
 
 # Source-file extension → normalized language token.
 _LANG_BY_EXT: dict[str, str] = {
@@ -206,7 +204,7 @@ _NON_ABI_LTO_TUNING_PREFIXES: tuple[str, ...] = (
 #: ``_carry_abi_relevant_flags``), which read the raw ``abi_relevant_flags``
 #: survivors verbatim and could not decode them without importing this
 #: predicate/set from here -- but this module already imports
-#: :func:`~abicheck.buildsource.source_extractors._argv.strip_launchers`
+#: :func:`~abicheck.buildsource.source_extractors.compile_invocation.strip_launchers`
 #: from ``_argv`` at its own top level (:func:`_executable_token_positions`),
 #: so a reverse ``_argv -> adapters.base`` import would be a genuine import
 #: cycle, not a runtime-only circularity a deferred import could paper over
@@ -478,7 +476,7 @@ def _executable_token_positions(
     parser when locating clang-cl", fresh evidence): an earlier revision
     hard-coded a 3-name list (``sccache``/``ccache``/``distcc``) and a fixed
     ``{0, 1}`` position pair, which already immediately drifted from
-    ``source_extractors._argv.COMPILER_LAUNCHERS``'s six recognized
+    ``source_extractors.launcher_env.COMPILER_LAUNCHERS``'s six recognized
     launchers (also ``icecc``/``icerun``/``buildcache``) and could not
     locate the driver at all for a chained launcher or one carrying a
     ccache-style ``KEY=VALUE`` config-override token -- e.g. a plain
@@ -532,7 +530,7 @@ def _msvc_driver_scan(
     *directory* (round 26 Finding 2, Codex review, fresh evidence): the
     compile unit's own ``directory``, threaded through to
     :func:`_executable_token_positions`/:func:`~abicheck.buildsource.
-    source_extractors._argv.strip_launchers` so a relative ``env``-supplied
+    source_extractors.compile_invocation.strip_launchers` so a relative ``env``-supplied
     ``PATH=`` entry resolves against the compile unit's real base directory
     (composed with any effective ``-C``/``--chdir``) rather than abicheck's
     own process CWD. ``None`` (the default) for a caller with no compile-unit
@@ -592,9 +590,9 @@ def _msvc_driver_scan(
     x.cc'``) -- scanning the raw, three-token input directly would see the
     literal ``-S``/joined-string pair, never the real ``clang-cl``/``/c``
     tokens hiding inside it, the same failure shape :func:`~abicheck.
-    buildsource.source_extractors._argv.pick_compiler_binary` already
+    buildsource.source_extractors.compile_invocation.pick_compiler_binary` already
     avoids by working from :func:`~abicheck.buildsource.source_extractors.
-    _argv.strip_launchers`'s own internally-expanded result. Expanding once
+    compile_invocation.strip_launchers`'s own internally-expanded result. Expanding once
     here, via :func:`~abicheck.buildsource.source_extractors._argv.
     expand_env_split_prefixes`, and scanning/indexing into that SAME
     expanded list throughout (the ``/c`` marker check, the executable-
@@ -686,7 +684,7 @@ def msvc_driver_token(argv: list[str], *, directory: str | None = None) -> str |
     caller has one (round 26 Finding 2, Codex review, fresh evidence).**
     Without it, an ``env -C DIR PATH=... clang-cl ...``-shaped command's
     relative ``PATH=`` entry is resolved by :func:`_msvc_driver_scan` (via
-    :func:`~abicheck.buildsource.source_extractors._argv.strip_launchers`)
+    :func:`~abicheck.buildsource.source_extractors.compile_invocation.strip_launchers`)
     against abicheck's own process CWD instead of the compile unit's real
     base directory + effective ``-C`` chdir -- the identical wrong-CWD
     failure :func:`~abicheck.buildsource.source_extractors._argv.

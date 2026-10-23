@@ -149,7 +149,7 @@ def test_msvc_driver_token_recognizes_buildcache_launcher():
     # Codex review, "Reuse the complete launcher parser when locating
     # clang-cl": the hard-coded 3-name launcher list (sccache/ccache/distcc)
     # this scan previously used immediately drifted from
-    # source_extractors._argv.COMPILER_LAUNCHERS's six recognized launchers
+    # source_extractors.launcher_env.COMPILER_LAUNCHERS's six recognized launchers
     # (which also include icecc/icerun/buildcache), so a real
     # `buildcache clang-cl /std:c++20 /c x.cc` command was not recognized as
     # MSVC-dialect at all -- the driver scan never looked past position 1's
@@ -256,7 +256,7 @@ def test_msvc_driver_token_relative_env_path_left_bare_without_directory(tmp_pat
 
 
 def test_msvc_driver_token_behind_chained_launchers():
-    # source_extractors._argv.strip_launchers unwraps a chain of launcher
+    # source_extractors.compile_invocation.strip_launchers unwraps a chain of launcher
     # tokens (and any per-launcher `KEY=VALUE` config override) in one pass;
     # reusing it (rather than a fixed {0, 1} position pair) means a chained
     # launcher invocation is handled too, not just a single wrapper.

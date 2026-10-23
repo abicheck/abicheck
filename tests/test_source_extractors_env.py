@@ -27,7 +27,7 @@ on :mod:`abicheck.buildsource.source_extractors._argv`:
 
 ``strip_launchers`` folds both effects directly into the driver token it
 returns (see its own docstring and :func:`~abicheck.buildsource.
-source_extractors._argv._apply_env_context`'s), so every existing caller
+source_extractors.launcher_env_path._apply_env_context`'s), so every existing caller
 (``header_compile_context._derived_gcc_path``,
 ``adapters.base._msvc_driver_scan``, ``cc_wrapper.py``,
 ``include_graph.py``, ``build_context.py``) gets the corrected token for
@@ -47,7 +47,16 @@ from pathlib import Path
 
 import pytest
 
-from abicheck.buildsource.source_extractors._argv import strip_launchers
+from abicheck.buildsource.source_extractors.compile_invocation import (
+    pick_compiler_binary,
+    strip_launchers,
+)
+from abicheck.buildsource.source_extractors.launcher_env import (
+    expand_env_split_prefixes,
+)
+from abicheck.buildsource.source_extractors.launcher_env_path import (
+    _resolve_env_path_entries,
+)
 
 
 def _make_executable(path: Path) -> Path:
@@ -402,7 +411,6 @@ def test_pick_compiler_binary_resolves_env_split_string_driver(tmp_path) -> None
     pick_compiler_binary` (the real consumer) must also see the expanded,
     spliced driver token, not the raw ``-S``/joined-string pair."""
     from abicheck.buildsource.build_evidence import CompileUnit
-    from abicheck.buildsource.source_extractors._argv import pick_compiler_binary
 
     cu = CompileUnit(
         id="cu://x.cc",
@@ -429,7 +437,6 @@ def test_pick_compiler_binary_resolves_env_chdir_and_relative_path_together(
     a full ``CompileUnit`` (and therefore ``directory``) in scope to
     resolve this correctly."""
     from abicheck.buildsource.build_evidence import CompileUnit
-    from abicheck.buildsource.source_extractors._argv import pick_compiler_binary
 
     (tmp_path / "build").mkdir()
     tool_dir = tmp_path / "tool"
@@ -479,7 +486,6 @@ def test_pick_compiler_binary_resolves_env_relative_path_without_chdir(
     compile unit's own ``directory`` (the ``chdir is None`` branch of
     ``_resolve_env_path_entries``)."""
     from abicheck.buildsource.build_evidence import CompileUnit
-    from abicheck.buildsource.source_extractors._argv import pick_compiler_binary
 
     tool_dir = tmp_path / "tool"
     tool_dir.mkdir()
@@ -596,9 +602,6 @@ def test_pick_compiler_binary_resolves_env_chdir_windows_base_posix_path_entry(
     ``directory`` composed with a POSIX-spelled relative ``PATH=`` entry
     must still find the real driver, not silently fail to resolve it."""
     from abicheck.buildsource.build_evidence import CompileUnit
-    from abicheck.buildsource.source_extractors._argv import (
-        _resolve_env_path_entries,
-    )
 
     # `_resolve_env_path_entries` is exercised directly here (rather than
     # `pick_compiler_binary`, which needs a real filesystem `directory` --
@@ -632,9 +635,6 @@ def test_resolve_env_path_entries_empty_component_means_effective_cwd() -> None:
     (round 24 follow-up, live Windows CI signal) -- see this function's
     own docstring for why a pathsep-joined string is no longer safe to
     hand to a single ``shutil.which`` call."""
-    from abicheck.buildsource.source_extractors._argv import (
-        _resolve_env_path_entries,
-    )
 
     assert _resolve_env_path_entries(":", "build", "/work") == [
         "/work/build",
@@ -645,9 +645,6 @@ def test_resolve_env_path_entries_empty_component_means_effective_cwd() -> None:
 def test_resolve_env_path_entries_empty_component_between_real_entries() -> None:
     """``PATH=/a::/b`` -- an empty component BETWEEN two real ones -- also
     means the effective cwd, not merely the leading/trailing-colon case."""
-    from abicheck.buildsource.source_extractors._argv import (
-        _resolve_env_path_entries,
-    )
 
     assert _resolve_env_path_entries("/a::/b", None, "/work") == ["/a", "/work", "/b"]
 
@@ -658,9 +655,6 @@ def test_resolve_env_path_entries_negative_control_non_empty_relative_unaffected
     """Negative control: a genuinely non-empty relative entry is still
     resolved the pre-existing way, not accidentally routed through the new
     empty-component branch."""
-    from abicheck.buildsource.source_extractors._argv import (
-        _resolve_env_path_entries,
-    )
 
     assert _resolve_env_path_entries("tool", None, "/work") == ["/work/tool"]
 
@@ -670,9 +664,6 @@ def test_resolve_env_path_entries_splits_on_literal_colon_not_host_pathsep() -> 
     LITERAL ``:`` -- POSIX ``env``'s own fixed separator -- never
     host-native ``os.pathsep`` (``;`` on Windows), regardless of which host
     OS is running this analysis."""
-    from abicheck.buildsource.source_extractors._argv import (
-        _resolve_env_path_entries,
-    )
 
     assert _resolve_env_path_entries("/a:/b:/c", None, "/work") == [
         "/a",
@@ -685,9 +676,6 @@ def test_resolve_env_path_entries_does_not_split_windows_drive_letter() -> None:
     """A single ``PATH`` entry that is itself an absolute Windows path
     (``C:\\Users\\x``) must NOT be cut in two at its own drive-letter
     colon -- only a genuine POSIX entry separator splits."""
-    from abicheck.buildsource.source_extractors._argv import (
-        _resolve_env_path_entries,
-    )
 
     assert _resolve_env_path_entries(r"C:\Users\x", None, "/work") == [r"C:\Users\x"]
     assert _resolve_env_path_entries("C:/Users/x", None, "/work") == ["C:/Users/x"]
@@ -697,9 +685,6 @@ def test_resolve_env_path_entries_windows_drive_letter_among_other_entries() -> 
     """A Windows-drive-letter entry mixed with genuine POSIX entries splits
     correctly on every real separator while leaving the drive letter's own
     colon untouched."""
-    from abicheck.buildsource.source_extractors._argv import (
-        _resolve_env_path_entries,
-    )
 
     assert _resolve_env_path_entries(r"/a:C:\tools:/b", None, "/work") == [
         "/a",
@@ -1054,9 +1039,6 @@ def test_expand_env_split_prefixes_follows_launcher_then_nested_env_s() -> None:
     must not stop the moment ``argv[0]`` isn't itself ``env``; a NESTED
     ``env -S`` reached only after unwrapping a leading launcher must still
     get its split-string expanded."""
-    from abicheck.buildsource.source_extractors._argv import (
-        expand_env_split_prefixes,
-    )
 
     result = expand_env_split_prefixes(["sccache", "env", "-S", "clang-cl /c x.cc"])
     assert result == ["sccache", "env", "clang-cl", "/c", "x.cc"]

@@ -16,7 +16,7 @@
 
 A leaf module: the prefix list the build-evidence adapters use to decide which
 flags are ABI-relevant, and the split-operand encoding the replay paths decode.
-Both :mod:`.adapters.adapter_shared` and :mod:`.source_extractors._argv` read it,
+Both :mod:`.adapters.adapter_shared` and :mod:`.source_extractors.compile_invocation` read it,
 and neither may be imported from here, so it sits below both.
 """
 
@@ -210,9 +210,9 @@ ABI_RELEVANT_FLAG_PREFIXES: tuple[str, ...] = (
 #: ``extract_abi_relevant_flags`` -- because :func:`_carry_abi_relevant_flags`
 #: below (the L4 source-replay decode path, P2 review "Decode normalized cc1
 #: flags in every replay path") needs it too, and ``adapters.base`` already
-#: imports :func:`strip_launchers` from this module at its own top level
+#: imports :func:`strip_launchers` from :mod:`.source_extractors.compile_invocation` at its own top level
 #: (:func:`~abicheck.buildsource.adapters.adapter_shared._executable_token_positions`)
-#: -- a reverse ``_argv -> adapters.base`` import would be a genuine import
+#: -- a reverse ``compile_invocation -> adapters.base`` import would be a genuine import
 #: cycle (the ai-readiness ``import-cycle-growth`` gate walks the full AST,
 #: function-local imports included, so a deferred import does not avoid it
 #: either). Keeping the encoding's constants and decode function in this

@@ -1,0 +1,113 @@
+[
+  {
+    "directory": "/work",
+    "file": "src/ccache_cxx.cpp",
+    "arguments": [
+      "ccache",
+      "compiler_check=content",
+      "g++",
+      "-std=c++17",
+      "-Iinc",
+      "-c",
+      "src/ccache_cxx.cpp",
+      "-o",
+      "ccache_cxx.o"
+    ]
+  },
+  {
+    "directory": "/work",
+    "file": "src/distcc_c.c",
+    "arguments": [
+      "distcc",
+      "gcc",
+      "-std=c11",
+      "-DD=1",
+      "-c",
+      "src/distcc_c.c",
+      "-o",
+      "distcc_c.o"
+    ]
+  },
+  {
+    "directory": "/work",
+    "file": "src/sccache_win.cpp",
+    "arguments": [
+      "sccache",
+      "clang-cl",
+      "/std:c++17",
+      "/DS=1",
+      "/c",
+      "src/sccache_win.cpp",
+      "/Fosccache_win.obj"
+    ]
+  },
+  {
+    "directory": "/work/rel",
+    "file": "../src/env_nested.cpp",
+    "arguments": [
+      "env",
+      "-C",
+      "build",
+      "env",
+      "-C",
+      "sub",
+      "clang++",
+      "-std=c++17",
+      "-I../include",
+      "-c",
+      "../src/env_nested.cpp",
+      "-o",
+      "env_nested.o"
+    ]
+  },
+  {
+    "directory": "/work/rel",
+    "file": "src/env_ccache.cpp",
+    "arguments": [
+      "env",
+      "-i",
+      "PATH=/usr/bin",
+      "ccache",
+      "g++",
+      "-std=c++17",
+      "-c",
+      "src/env_ccache.cpp",
+      "-o",
+      "env_ccache.o"
+    ]
+  },
+  {
+    "directory": "/work/rel",
+    "file": "../src/env_i_nested.cpp",
+    "arguments": [
+      "env",
+      "-C",
+      "build",
+      "env",
+      "-i",
+      "PATH=/usr/bin",
+      "clang++",
+      "-std=c++17",
+      "-I",
+      "inc2",
+      "-c",
+      "../src/env_i_nested.cpp",
+      "-o",
+      "ei.o"
+    ]
+  },
+  {
+    "directory": "/work",
+    "file": "src/chain.cpp",
+    "arguments": [
+      "sccache",
+      "distcc",
+      "g++",
+      "-std=c++17",
+      "-c",
+      "src/chain.cpp",
+      "-o",
+      "chain.o"
+    ]
+  }
+]
