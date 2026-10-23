@@ -26,6 +26,8 @@ import json
 from pathlib import Path
 from typing import Any
 
+import pytest
+
 from abicheck.buildsource.adapters.compile_db import CompileDbAdapter
 from abicheck.buildsource.source_extractors.base import SourceExtractionError
 from abicheck.buildsource.source_extractors.castxml import build_castxml_command
@@ -92,3 +94,201 @@ def test_corpus_covers_every_unit_the_plan_names() -> None:
 def test_rendered_clang_argv_matches_pre_change_golden() -> None:
     golden = json.loads(_GOLDEN.read_text(encoding="utf-8"))
     assert render_corpus() == golden
+
+
+# ---------------------------------------------------------------------------
+# L2 header-AST argv (``extract.headers.ast_config._build_clang_header_command``)
+#
+# The L2 header backend has no ``CompileUnit``: its include, sysroot and
+# pass-through inputs arrive as the header-level arguments below. These rows pin
+# the argv those inputs produce, recorded before the header renderer moved onto
+# the compile-invocation model. Every case must stay byte-identical.
+# ---------------------------------------------------------------------------
+
+_HEADER_GOLDEN = _DATA / "clang_header_argv_golden.json"
+_HEADER_AGG = Path("<abicheck-aggregate>.h")
+
+#: Each case is the keyword arguments of ``_build_clang_header_command`` (other
+#: than the fixed driver, include list and aggregate path, which are passed
+#: positionally). Chosen to cover the include-dedup rule, the ``-isystem``
+#: ordering, sysroot/nostdinc, C vs C++ language selection, SYCL host/multi
+#: context, and the clang-cl driver.
+_HEADER_CASES: dict[str, dict[str, Any]] = {
+    "plain-c": {
+        "clang_bin": "clang",
+        "cc_id": "gnu",
+        "extra_includes": ["/src/include"],
+    },
+    "cxx20-forced": {
+        "clang_bin": "clang++",
+        "cc_id": "gnu",
+        "extra_includes": ["/src/include"],
+        "force_cpp": True,
+        "force_cpp20": True,
+    },
+    "cxx-explicit-std": {
+        "clang_bin": "clang++",
+        "cc_id": "gnu",
+        "gcc_options": "-std=c++17",
+        "force_cpp": True,
+        "force_cpp20": True,
+    },
+    "gcc-option-duplicates-include": {
+        "clang_bin": "clang",
+        "cc_id": "gnu",
+        "extra_includes": ["/src/include"],
+        "gcc_option_tokens": ("-I", "/src/include", "-DFOO=1"),
+    },
+    "gcc-option-joined-include-and-iquote": {
+        "clang_bin": "clang",
+        "cc_id": "gnu",
+        "extra_includes": ["/src/include"],
+        "gcc_option_tokens": ("-I/src/include", "-iquote", "/q", "-iquote/q2"),
+    },
+    "sysroot-nostdinc-system-includes": {
+        "clang_bin": "clang",
+        "cc_id": "gnu",
+        "sysroot": "/sdk",
+        "nostdinc": True,
+        "system_includes": ("/usr/include",),
+    },
+    "system-includes-with-user-isystem": {
+        "clang_bin": "clang",
+        "cc_id": "gnu",
+        "gcc_option_tokens": ("-isystem", "/usr/include"),
+        "system_includes": ("/usr/include", "/opt/inc"),
+    },
+    "intel-sycl-host-context": {
+        "clang_bin": "icpx",
+        "cc_id": "gnu",
+        "dpcpp_host_context": True,
+    },
+    "intel-sycl-multi-context": {
+        "clang_bin": "icpx",
+        "cc_id": "gnu",
+        "dpcpp_multi_context": True,
+    },
+    "stock-clang-sycl-host-context": {
+        "clang_bin": "clang++",
+        "cc_id": "gnu",
+        "dpcpp_host_context": True,
+    },
+    "clang-cl-msvc": {
+        "clang_bin": "clang-cl",
+        "cc_id": "msvc",
+        "extra_includes": ["C:/inc"],
+    },
+}
+
+
+def _render_header_case(kwargs: dict[str, Any]) -> list[str]:
+    from abicheck.extract.headers.ast_config import _build_clang_header_command
+
+    args = dict(kwargs)
+    clang_bin = args.pop("clang_bin")
+    cc_id = args.pop("cc_id")
+    extra_includes = [Path(p) for p in args.pop("extra_includes", [])]
+    if "sysroot" in args:
+        args["sysroot"] = Path(args["sysroot"])
+    return _build_clang_header_command(
+        clang_bin, cc_id, extra_includes, _HEADER_AGG, **args
+    )
+
+
+def _posix_argv(argv: list[str]) -> list[str]:
+    """*argv* with Windows path separators spelled POSIX-style.
+
+    The renderer takes ``Path`` operands and emits ``str(path)``, which is
+    ``\\src\\include`` on Windows. The golden records the POSIX spelling, so
+    the comparison normalizes separators; no case carries a literal backslash,
+    so the renderer's output is compared unchanged apart from that spelling.
+    """
+    return [token.replace("\\", "/") for token in argv]
+
+
+def render_header_corpus() -> dict[str, list[str]]:
+    """Render every L2 header-AST case, keyed by its case name."""
+    return {
+        name: _posix_argv(_render_header_case(kwargs))
+        for name, kwargs in _HEADER_CASES.items()
+    }
+
+
+def regenerate_header_golden() -> None:
+    """Rewrite the L2 header golden from the current code. Review the diff before committing."""
+    _HEADER_GOLDEN.write_text(
+        json.dumps(render_header_corpus(), indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+
+
+def test_header_argv_matches_pre_change_golden() -> None:
+    golden = json.loads(_HEADER_GOLDEN.read_text(encoding="utf-8"))
+    assert render_header_corpus() == golden
+
+
+#: The clang AST-dump tail every header argv ends with (copied from the golden).
+_HEADER_TAIL = [
+    "-D__malloc__(...)=__malloc__",
+    "-fsyntax-only",
+    "-ferror-limit=0",
+    "-Xclang",
+    "-ast-dump=json",
+    "<abicheck-aggregate>.h",
+]
+
+
+@pytest.mark.parametrize(
+    ("kwargs", "expected"),
+    [
+        pytest.param(
+            {"clang_bin": "clang", "cc_id": "gnu", "gcc_options": "-std=c11"},
+            ["clang", "-std=c11", *_HEADER_TAIL],
+            id="c-mode-explicit-std-keeps-caller-standard",
+        ),
+        pytest.param(
+            {"clang_bin": "clang++", "cc_id": "gnu", "force_cpp": True},
+            ["clang++", "-x", "c++", *_HEADER_TAIL],
+            id="cxx-forced-without-cpp20-leaves-default-dialect",
+        ),
+        pytest.param(
+            {
+                "clang_bin": "icpx",
+                "cc_id": "gnu",
+                "gcc_option_tokens": ("-fsycl", "-fsycl-host-only"),
+                "dpcpp_host_context": True,
+            },
+            [
+                "icpx",
+                "-fsycl",
+                "-fsycl-host-only",
+                "-x",
+                "c",
+                "-std=gnu11",
+                *_HEADER_TAIL,
+            ],
+            id="sycl-host-context-does-not-duplicate-pinned-flags",
+        ),
+        pytest.param(
+            {
+                "clang_bin": "icpx",
+                "cc_id": "gnu",
+                "gcc_option_tokens": ("-fsycl",),
+            },
+            [
+                "icpx",
+                "-fsycl",
+                "-fsycl-host-only",
+                "-x",
+                "c",
+                "-std=gnu11",
+                *_HEADER_TAIL,
+            ],
+            id="intel-fsycl-from-argv-appends-host-only",
+        ),
+    ],
+)
+def test_header_argv_branches_match_hand_written_expectation(
+    kwargs: dict[str, Any], expected: list[str]
+) -> None:
+    assert _posix_argv(_render_header_case(kwargs)) == expected

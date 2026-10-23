@@ -66,6 +66,11 @@ from .extract.parse_failures import (
     note_export_read_failure,
     recording_export_read_failures,
 )
+from .extract.stdlib_local_origin import (
+    find_cxx_stdlib as _find_cxx_stdlib,
+    find_libcxx as _find_libcxx,
+    stdlib_local_static_origin,
+)
 from .model.elf_facts import (
     ElfImport as ElfImport,
     ElfMetadata as ElfMetadata,
@@ -759,22 +764,6 @@ def _parse_version_need(section: GNUVerNeedSection, meta: ElfMetadata) -> None:
                 meta.versions_required[lib].append(ver)
 
 
-def _find_libcxx(needed_libs: list[str]) -> str | None:
-    """Find a libc++ (not libstdc++) library in the needed list."""
-    for lib in needed_libs:
-        if "c++" in lib and "stdc++" not in lib:
-            return lib
-    return None
-
-
-def _find_cxx_stdlib(needed_libs: list[str]) -> str | None:
-    """Find any C++ standard library (libstdc++ or libc++) in the needed list."""
-    for lib in needed_libs:
-        if "stdc++" in lib or "c++" in lib:
-            return lib
-    return None
-
-
 def _find_fundamental_cxx_rtti_runtime(needed_libs: list[str]) -> str | None:
     """Find the C++ runtime that owns fundamental RTTI, excluding libc++abi."""
     for lib in needed_libs:
@@ -822,6 +811,10 @@ _ORIGIN_PREFIX_TABLE: list[tuple[tuple[str, ...], _FinderFn | None, str]] = [
             "_ZTIN10__cxxabiv",
             "_ZTSN10__cxxabiv",
             "_ZTVN10__cxxabiv",
+            # Guard variables of std static members (``_ZGVNSt5ctype...2idE``).
+            "_ZGVNSt",
+            "_ZGVN9__gnu_cxx",
+            "_ZGVN10__cxxabiv",
         ),
         _find_cxx_stdlib,
         "libstdc++.so.6",
@@ -946,6 +939,11 @@ def _guess_symbol_origin(name: str, needed_libs: list[str]) -> str | None:
     # library, not exported by the C++ runtime -- which never saw the type.
     if has_foreign_template_argument(name):
         return None
+
+    # Function-local std template statics (``_ZZNSt...``): see stdlib_local_origin.
+    local_static_origin = stdlib_local_static_origin(name, needed_libs)
+    if local_static_origin is not None:
+        return local_static_origin
 
     for prefixes, finder_fn, default in _ORIGIN_PREFIX_TABLE:
         if name.startswith(prefixes):

@@ -14,10 +14,10 @@
 
 | Field | Value |
 |---|---|
-| Confidence | HIGH |
+| Confidence | MEDIUM |
 | Evidence tier | `header_aware` |
 | Evidence tiers | `elf`, `header` |
-| Coverage gap | Detector 'fingerprint_renames' disabled: requires ELF metadata in elf_only_mode |
+| Coverage gap | Detector 'fingerprint_renames' disabled: neither side was dumped in elf_only_mode (both carry headers or debug info); fingerprint rename matching runs only on stripped, symbol-only dumps |
 | Coverage gap | Detector 'kabi' disabled: missing Module.symvers (kABI) metadata |
 | Coverage gap | Detector 'pe' disabled: missing PE metadata |
 | Coverage gap | Detector 'macho' disabled: missing Mach-O metadata |
@@ -25,8 +25,9 @@
 | Coverage gap | Detector 'python_ext' disabled: missing CPython extension metadata |
 | Coverage gap | Detector 'python_api' disabled: missing Python API surface (no .pyi stub recovered) |
 | Coverage gap | Detector 'sycl' disabled: missing SYCL metadata |
-| Coverage gap | Detector 'vtable_layout' disabled: missing DWARF/header type metadata (inheritance) |
+| Coverage gap | Detector 'vtable_layout' disabled: missing DWARF/header type metadata on one side (inheritance) |
 | Coverage gap | Detector 'advanced_dwarf' disabled: missing DWARF advanced metadata |
+| Coverage gap | Header analysis without record layout on every compared side: no DWARF layout and no header frontend that computes it (the clang frontend parses declarations but not struct layout, unless the layout companion ran), so struct size, alignment and field offset changes cannot be established; confidence capped at MEDIUM |
 
 ## Relationship Coverage
 
@@ -72,6 +73,8 @@
 
 
 ## Related review groups
+
+1 review group(s) across 1 family; 0 gating finding(s). Per-group members and exact symbols are in the JSON `review_groups`.
 
 ### 1. `_ZNSt6thread8_M_startEv`
 

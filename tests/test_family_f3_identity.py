@@ -537,6 +537,7 @@ COVERAGE: dict[str, str] = {
     # -- exercised --------------------------------------------------------
     "abicheck.extract.binary_identity:stamp_binary_identity": "symlink x rename transforms (test_snapshot_hit_binary_identity)",
     "abicheck.name_classification:strip_anonymous_type_location": "string probe x path transforms",
+    "abicheck.model.owner_recovery:is_mangled_identity": "moved verbatim from contract_evaluation; exercised by tests/test_contract_replay.py (mangled type-level symbols)",
     "abicheck.name_classification:canonicalize_type_name": "string probe x path transforms",
     "abicheck.model.graph_identity:checkout_stable_spelling": "string probe x path transforms",
     "abicheck.model.graph_identity:closure_location_free_identity": "string probe x path transforms",
@@ -630,6 +631,9 @@ def test_covered_rows_are_really_registered_in_the_catalogue() -> None:
             # tests/test_snapshot_hit_binary_identity.py, not a catalogue transform.
             "abicheck.extract.binary_identity:stamp_binary_identity",
             "abicheck.model.special_member_identity:special_member_variant_aliases",
+            # The mangled-spelling predicate contract_replay's type-level branch
+            # reads; exercised by tests/test_contract_replay.py.
+            "abicheck.model.owner_recovery:is_mangled_identity",
             "abicheck.compare.finding_identity.declaration_identity:resolve_variable_identity",
             "abicheck.compare.finding_identity.change_identity:resolve_change_identity",
             # Exercised by the JSON report check_identity assertions in

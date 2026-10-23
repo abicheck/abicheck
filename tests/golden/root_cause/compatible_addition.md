@@ -7,7 +7,7 @@
 | **Verdict** | ✅ `COMPATIBLE` |
 
 > ⚠️ Detector 'elf_layout' disabled: missing ELF metadata on one side
-> ⚠️ Detector 'fingerprint_renames' disabled: requires ELF metadata in elf_only_mode
+> ⚠️ Detector 'fingerprint_renames' disabled: missing ELF metadata on both sides
 > ⚠️ Detector 'kabi' disabled: missing Module.symvers (kABI) metadata
 > ⚠️ Detector 'long_double' disabled: missing ELF metadata on one side
 > ⚠️ Detector 'elf' disabled: missing ELF metadata
@@ -24,7 +24,7 @@
 > ⚠️ Detector 'python_api' disabled: missing Python API surface (no .pyi stub recovered)
 > ⚠️ Detector 'sycl' disabled: missing SYCL metadata
 > ⚠️ Detector 'unnamed_types' disabled: missing ELF metadata on one side
-> ⚠️ Detector 'vtable_layout' disabled: missing DWARF/header type metadata (inheritance)
+> ⚠️ Detector 'vtable_layout' disabled: missing DWARF/header type metadata on one side (inheritance)
 > ⚠️ Detector 'advanced_dwarf' disabled: missing DWARF advanced metadata
 > ⚠️ No binary metadata available; verdict is based on header analysis only
 

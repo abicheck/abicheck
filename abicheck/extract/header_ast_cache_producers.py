@@ -75,6 +75,7 @@ NON_SHAPING_MODULES: dict[str, str] = {
     # builders the key's invocation digest calls, so it is keyed already.
     "abicheck.extract.headers.clang.backend": "rebuilds the aggregate for a retry (`clang_aggregate_text`, keyed)",
     "abicheck.extract.headers.ast_config": "rebuilds the command line for a retry (keyed builder)",
+    "abicheck.extract.headers.clang_header_argv": "the body of that keyed builder, rendering the same argv",
     "abicheck.dumper_clang": "command-line helpers of that keyed builder",
     "abicheck._compiler_options": "command-line helpers of that keyed builder",
     "abicheck.header_utils": "command-line helpers of that keyed builder",

@@ -69,7 +69,7 @@ def _write_enabled() -> bool:
     return env_flag("ABICHECK_SNAPSHOT_CACHE_WRITE")
 
 
-def _lookup_key(key: str, binary_path: Path) -> AbiSnapshot | None:
+def _lookup_key(key: str, binary_path: Path, subdir: str = "") -> AbiSnapshot | None:
     """Look up an entry using a key already bound to validated inputs.
 
     ADR-059: new entries are written zstd-compressed (``<key>.json.zst``);
@@ -85,7 +85,7 @@ def _lookup_key(key: str, binary_path: Path) -> AbiSnapshot | None:
     # Traced: on a hit this load replaces the whole dump, so without it
     # `ABICHECK_MEMORY_TRACE` would see none of a warm run's `dump.*` marks.
     with memory_trace.phase("dump.cache.lookup"):
-        snap = SNAPSHOT_DISK_CACHE.lookup(lambda: _read_entry(key, binary_path))
+        snap = SNAPSHOT_DISK_CACHE.lookup(lambda: _read_entry(key, binary_path, subdir))
     if snap is not None:
         # A hit replaces every extraction phase, each of which reports its own
         # progress line. Say so, or a warm run's redirected log is silent --
@@ -97,10 +97,19 @@ def _lookup_key(key: str, binary_path: Path) -> AbiSnapshot | None:
     return snap
 
 
-def _read_entry(key: str, binary_path: Path) -> AbiSnapshot | None:
+def _entry_dir(subdir: str) -> Path:
+    """The directory holding one tier's entries. A tier in its own
+    sub-directory keeps its own LRU budget (:func:`_evict_if_needed` globs
+    one directory), so finished entries (:mod:`.finished`) never evict the
+    raw entries they are derived from, nor the reverse."""
+    return _CACHE_DIR / subdir if subdir else _CACHE_DIR
+
+
+def _read_entry(key: str, binary_path: Path, subdir: str = "") -> AbiSnapshot | None:
     from ....serialization import load_snapshot
 
-    for cache_file in (_CACHE_DIR / f"{key}.json.zst", _CACHE_DIR / f"{key}.json"):
+    base = _entry_dir(subdir)
+    for cache_file in (base / f"{key}.json.zst", base / f"{key}.json"):
         if not cache_file.exists():
             continue
         try:
@@ -120,7 +129,9 @@ def _read_entry(key: str, binary_path: Path) -> AbiSnapshot | None:
     return None
 
 
-def _store_key(snap: AbiSnapshot, key: str, binary_path: Path) -> None:
+def _store_key(
+    snap: AbiSnapshot, key: str, binary_path: Path, subdir: str = ""
+) -> None:
     """Store under a previously computed, post-execution-validated key.
 
     ADR-059: written zstd-compressed at the fast, cache-tuned level (this
@@ -135,13 +146,16 @@ def _store_key(snap: AbiSnapshot, key: str, binary_path: Path) -> None:
     from ... import memory_trace
 
     with memory_trace.phase("dump.cache.store"):
-        SNAPSHOT_DISK_CACHE.store(lambda: _write_entry(snap, key, binary_path))
+        SNAPSHOT_DISK_CACHE.store(lambda: _write_entry(snap, key, binary_path, subdir))
 
 
-def _write_entry(snap: AbiSnapshot, key: str, binary_path: Path) -> None:
+def _write_entry(
+    snap: AbiSnapshot, key: str, binary_path: Path, subdir: str = ""
+) -> None:
     try:
-        _CACHE_DIR.mkdir(parents=True, exist_ok=True)
-        cache_file = _CACHE_DIR / f"{key}.json.zst"
+        base = _entry_dir(subdir)
+        base.mkdir(parents=True, exist_ok=True)
+        cache_file = base / f"{key}.json.zst"
         from ....snapshot_io import ZSTD_LEVEL_CACHE, SnapshotCompression
         from ....storage.snapshot_codec import write_snapshot_compact
 
@@ -155,14 +169,14 @@ def _write_entry(snap: AbiSnapshot, key: str, binary_path: Path) -> None:
             compression=SnapshotCompression.ZSTD.value,
             zstd_level=ZSTD_LEVEL_CACHE,
         )
-        legacy_file = _CACHE_DIR / f"{key}.json"
+        legacy_file = base / f"{key}.json"
         if legacy_file.exists():
             try:
                 legacy_file.unlink()
             except OSError:
                 pass
         _logger.debug("Cache store: %s → %s", binary_path.name, key[:12])
-        _evict_if_needed()
+        _evict_if_needed(base)
     except Exception as exc:
         # Caching is a pure optimization layered on top of a real dump that
         # already succeeded — any failure here (disk full, an unserializable
@@ -181,15 +195,16 @@ def _safe_mtime(p: Path) -> float:
         return 0.0
 
 
-def _evict_if_needed() -> None:
+def _evict_if_needed(base: Path | None = None) -> None:
     """Remove oldest entries if cache exceeds MAX_ENTRIES.
 
     Globs both the current ``*.json.zst`` suffix and the legacy plain
     ``*.json`` suffix (ADR-059) so LRU eviction accounts for a cache
     directory that still has pre-upgrade entries mixed in with new ones."""
+    base = _CACHE_DIR if base is None else base
     try:
         entries = sorted(
-            (*_CACHE_DIR.glob("*.json.zst"), *_CACHE_DIR.glob("*.json")),
+            (*base.glob("*.json.zst"), *base.glob("*.json")),
             key=_safe_mtime,
         )
     except OSError:

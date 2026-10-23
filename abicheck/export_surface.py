@@ -1024,20 +1024,20 @@ def _unresolved_type_edges(
     """
     unresolved: set[str] = set()
     seen_aliases: set[str] = set()
+    judged: dict[str | None, tuple[set[str], set[str]]] = {}  # pure per spelling
 
     def scan(type_str: str | None) -> None:
-        # An explicit stack, not recursion: an alias chain
-        # (``A0 -> A1 -> ... -> An``) is followed one link per iteration, and
-        # a chain longer than Python's frame limit raised ``RecursionError``
-        # and aborted the whole comparison -- reproduced at 1200 links, which
-        # template-heavy C++ reaches (one real library measured here already
-        # carries 399 typedefs). Same conversion, for the same reason, that
-        # ``type_reachability._finditer_allow_nested`` already carries.
+        # Explicit stack, not recursion: a 1200-link typedef chain overflowed.
         pending: list[str | None] = [type_str]
         while pending:
             current = pending.pop()
-            unresolved.update(_edge_is_unresolved(current, index))
-            for alias in _followed_typedef_aliases(current, snap, index):
+            if (hit := judged.get(current)) is None:
+                hit = judged[current] = (
+                    _edge_is_unresolved(current, index),
+                    _followed_typedef_aliases(current, snap, index),
+                )
+            unresolved.update(hit[0])
+            for alias in hit[1]:
                 if alias in seen_aliases:
                     continue
                 seen_aliases.add(alias)

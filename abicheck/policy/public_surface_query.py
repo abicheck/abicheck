@@ -38,7 +38,49 @@ if TYPE_CHECKING:
     from ..model.identity import EntityId
     from ..model.snapshot import AbiSnapshot
 
-__all__ = ["PublicSurfaceQuery"]
+__all__ = ["ComparisonPublicSurfaces", "PublicSurfaceQuery"]
+
+
+class ComparisonPublicSurfaces:
+    """Each snapshot's public surface, resolved at most once per comparison.
+
+    One comparison reads the same surface from several owners (the Tier-2
+    entity-id resolution, ``FilterNonPublicSurface``, contract evaluation,
+    surface metrics, scope confidence). Instead of a process- or
+    context-wide memo, the comparison creates one of these and passes it
+    down explicitly, so its lifetime is exactly the comparison's.
+
+    Keyed by snapshot *identity*: a consumer handed a different (derived)
+    snapshot gets that snapshot's own resolution, never a stale one. The
+    same :class:`PublicSurface` object is handed to every consumer, which is
+    sound because no consumer mutates a resolved surface (pinned by
+    ``tests/test_comparison_public_surfaces.py``).
+    """
+
+    __slots__ = ("_resolved",)
+
+    def __init__(self) -> None:
+        self._resolved: list[tuple[AbiSnapshot, PublicSurface]] = []
+
+    def of(self, snapshot: AbiSnapshot) -> PublicSurface:
+        """*snapshot*'s public surface, resolved on first request."""
+        for known, surface in self._resolved:
+            if known is snapshot:
+                return surface
+        surface = resolve_public_surface(snapshot)
+        self._resolved.append((snapshot, surface))
+        return surface
+
+
+def public_surface_of(
+    snapshot: AbiSnapshot, surfaces: ComparisonPublicSurfaces | None
+) -> PublicSurface:
+    """*snapshot*'s public surface from *surfaces*, or freshly resolved."""
+    return (
+        surfaces.of(snapshot)
+        if surfaces is not None
+        else resolve_public_surface(snapshot)
+    )
 
 
 def _linker_key_is_public(mangled: str, name: str, public_symbols: set[str]) -> bool:
@@ -67,7 +109,9 @@ class PublicSurfaceQuery:
     snapshot's public/exports surface (ADR-063 Phase 3 D5)."""
 
     @staticmethod
-    def resolve(snapshot: AbiSnapshot) -> frozenset[EntityId] | None:
+    def resolve(
+        snapshot: AbiSnapshot, surface: PublicSurface | None = None
+    ) -> frozenset[EntityId] | None:
         """Which declarations' resolved ``EntityId`` are on *snapshot*'s
         public surface — the bare-membership convenience a caller that
         only needs set membership reaches for, never
@@ -110,8 +154,11 @@ class PublicSurfaceQuery:
         ``entity_id`` while siblings have theirs is a different,
         already-accepted degradation — that declaration alone drops out of
         the (non-``None``) set below, unchanged.
+
+        *surface* is *snapshot*'s already-resolved surface, when the caller
+        holds one (see :class:`ComparisonPublicSurfaces`).
         """
-        surf = resolve_public_surface(snapshot)
+        surf = surface if surface is not None else resolve_public_surface(snapshot)
         if not surf.resolvable:
             return None
         ids: set[EntityId] = set()
@@ -152,11 +199,14 @@ class PublicSurfaceQuery:
         return resolve_public_surface(snapshot)
 
     @staticmethod
-    def public_type_names(snapshot: AbiSnapshot) -> frozenset[str] | None:
+    def public_type_names(
+        snapshot: AbiSnapshot, surfaces: ComparisonPublicSurfaces | None = None
+    ) -> frozenset[str] | None:
         """*snapshot*'s resolved public type closure, or ``None`` when no
         public surface is resolvable -- the shape ``surface_graph.
-        compute_surface_metrics`` counts public types/enums against."""
-        surface = resolve_public_surface(snapshot)
+        compute_surface_metrics`` counts public types/enums against.
+        *surfaces* is the comparison's shared resolutions, if any."""
+        surface = public_surface_of(snapshot, surfaces)
         return frozenset(surface.public_types) if surface.resolvable else None
 
     @staticmethod

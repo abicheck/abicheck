@@ -36,6 +36,7 @@ if TYPE_CHECKING:  # pragma: no cover - typing only
     from ...policy_file import PolicyFile
     from ...surface import PublicSurface
     from ..disposition_ledger import DispositionLedger
+    from ..public_surface_query import ComparisonPublicSurfaces
     from ..suppression.rules import SuppressionList
 
 
@@ -167,6 +168,11 @@ class PipelineContext:
     # the type-closure walk. None when scoping was not run.
     surf_old: PublicSurface | None = None
     surf_new: PublicSurface | None = None
+    # The comparison's own per-snapshot public-surface resolutions, handed in
+    # by ``compare()`` so every consumer shares one resolution per side (see
+    # ``public_surface_of``). Unlike ``surf_old``/``surf_new`` it says nothing
+    # about whether scoping ran. None: this context resolves for itself.
+    public_surfaces: ComparisonPublicSurfaces | None = None
     # Accumulated side-outputs
     opaque_filtered: list[Change] = field(default_factory=list)
     suppressed: list[Change] = field(default_factory=list)
@@ -201,6 +207,14 @@ class PipelineContext:
         a confidently-clean public surface).
         """
         return not (self.scope_to_public_surface and self.scope_fell_back)
+
+    def public_surface_of(self, snapshot: AbiSnapshot) -> PublicSurface:
+        """*snapshot*'s public surface, resolved at most once per comparison."""
+        if self.public_surfaces is None:
+            from ..public_surface_query import ComparisonPublicSurfaces
+
+            self.public_surfaces = ComparisonPublicSurfaces()
+        return self.public_surfaces.of(snapshot)
 
     @property
     def baseline_or_empty(self) -> AbiSnapshot:
@@ -238,6 +252,7 @@ class PipelineContext:
         *,
         ledger: DispositionLedger | None,
         absent_baseline: AbiSnapshot | None = None,
+        public_surfaces: ComparisonPublicSurfaces | None = None,
     ) -> PipelineContext:
         """A fresh context for one run of *rules* over *old* -> *new*."""
         return cls(
@@ -255,4 +270,5 @@ class PipelineContext:
             else None,
             disposition_ledger=ledger,
             absent_baseline=absent_baseline,
+            public_surfaces=public_surfaces,
         )
