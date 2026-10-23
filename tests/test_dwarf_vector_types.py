@@ -16,7 +16,7 @@ import pytest
 
 from abicheck.checker import ChangeKind, Verdict, compare
 from abicheck.dwarf_unified import parse_dwarf
-from abicheck.dwarf_utils import array_type_spelling
+from abicheck.dwarf_utils import array_type_spelling, vector_byte_size
 from abicheck.elf_metadata import parse_elf_metadata
 from abicheck.model import AbiSnapshot
 from abicheck.workflows.dwarf_snapshot_assembly import build_snapshot_from_dwarf
@@ -177,3 +177,40 @@ class TestDwarfVectorTypes:
         )
         assert ChangeKind.TYPE_FIELD_TYPE_CHANGED in {c.kind for c in result.changes}
         assert result.verdict == Verdict.BREAKING
+
+
+class _Attr:
+    def __init__(self, value: int) -> None:
+        self.value = value
+
+
+class _Subrange:
+    tag = "DW_TAG_subrange_type"
+
+    def __init__(self, attrs: dict[str, int]) -> None:
+        self.attributes = {name: _Attr(value) for name, value in attrs.items()}
+
+
+class _VectorDie:
+    tag = "DW_TAG_array_type"
+
+    def __init__(self, subrange: _Subrange) -> None:
+        self.attributes: dict[str, _Attr] = {}
+        self._children = [subrange]
+
+    def iter_children(self) -> object:
+        return iter(self._children)
+
+
+@pytest.mark.parametrize(
+    "bounds",
+    [
+        {"DW_AT_count": 8},
+        {"DW_AT_upper_bound": 7},
+        {"DW_AT_upper_bound": 8, "DW_AT_lower_bound": 1},
+    ],
+    ids=["count", "zero_based_upper_bound", "explicit_lower_bound"],
+)
+def test_vector_byte_size_counts_lanes_from_subrange(bounds: dict[str, int]) -> None:
+    # Each case is 8 lanes of 4-byte float: 8 * 4 = 32 bytes.
+    assert vector_byte_size(_VectorDie(_Subrange(bounds)), element_size=4) == 32

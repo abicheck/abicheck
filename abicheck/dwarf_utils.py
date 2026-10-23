@@ -125,7 +125,8 @@ def vector_byte_size(die: Any, element_size: int | None) -> int | None:
         if "DW_AT_count" in child.attributes:
             count = attr_int(child, "DW_AT_count")
         elif "DW_AT_upper_bound" in child.attributes:
-            count = attr_int(child, "DW_AT_upper_bound") + 1
+            lower_bound = attr_int(child, "DW_AT_lower_bound")
+            count = attr_int(child, "DW_AT_upper_bound") - lower_bound + 1
         else:
             return None
         return count * element_size if count and element_size else None
