@@ -580,6 +580,15 @@ def test_binary_gated_kind_demoted_then_restored(
     assert {c["compatibility_decision"] for c in with_headers} == {"API_BREAK"}
 
 
+#: A source-replay kind whose change the header tier also reports. With headers
+#: and sources the replay copy is dropped as a duplicate of the header-tier
+#: finding (``compare.finding_dedup._drop_source_replay_typedef_duplicates``,
+#: recorded as ``deduplicated``), so the change surfaces under the header kind.
+_HEADER_TIER_TWIN = {
+    "public_typedef_target_changed": "typedef_base_changed",
+}
+
+
 @pytest.mark.parametrize("kind", sorted(k for k in PROBES if k in _HEADER_GATED_VALUES))
 def test_header_gated_kind_absent_binary_only(
     kind: str, outcomes: dict[str, Outcome]
@@ -587,7 +596,15 @@ def test_header_gated_kind_absent_binary_only(
     """A HEADER_OR_SOURCE_GATED kind is not produced binary-only; the fixture is a real trigger."""
     assert _of_kind(outcomes[kind].binary_only, kind) == []
     if PROBES[kind].header_reaches:
-        assert {
-            c["compatibility_decision"]
-            for c in _of_kind(outcomes[kind].with_headers, kind)
-        } == {"API_BREAK"}
+        twin = _HEADER_TIER_TWIN.get(kind)
+        if twin is None:
+            assert {
+                c["compatibility_decision"]
+                for c in _of_kind(outcomes[kind].with_headers, kind)
+            } == {"API_BREAK"}
+        else:
+            assert _of_kind(outcomes[kind].with_headers, kind) == []
+            assert {
+                c["compatibility_decision"]
+                for c in _of_kind(outcomes[kind].with_headers, twin)
+            } == {"API_BREAK"}
