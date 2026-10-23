@@ -63,7 +63,7 @@ from .source_abi import SOURCE_ABI_VERSION, SourceAbiSurface, SourceAbiTu
 from .source_extractors.base import SourceAbiExtractor, SourceExtractionError
 from .source_extractors.compile_invocation import (
     parse_compile_invocation,
-    replayed_tokens,
+    replayed_tokens_for,
 )
 from .source_link import link_source_abi
 from .source_replay_pool import (
@@ -680,7 +680,7 @@ def compute_tu_cache_key(
         "undefines:" + json.dumps(sorted(inv.undefines)),
         "include_dirs:" + json.dumps(list(inv.include_dirs)),
         "system_include_dirs:" + json.dumps(list(inv.system_include_dirs)),
-        "replayed:" + json.dumps(replayed_tokens(inv)),
+        "replayed:" + json.dumps(replayed_tokens_for(compile_unit, compiler_override)),
         "replayed_include_dirs:" + json.dumps(list(inv.replayed_include_dirs)),
     ]
     for root in sorted(public_header_roots):
