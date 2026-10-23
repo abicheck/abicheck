@@ -134,18 +134,21 @@ def golden_tu(cpp: Path, extractor: Any) -> dict[str, Any]:
     }
 
 
+#: The golden is the pre-change side of the projection test. It stays at the
+#: 0.13 producer stamp after ``CLANG_EXTRACTOR_VERSION`` moved on (plan b2), so
+#: regenerating it cannot silently turn the old side into the new one.
+PRE_CHANGE_PRODUCER_VERSION = "0.13"
+
+
 def build_golden_text(cases: list[Path], clang_bin: str = "clang") -> str:
-    from abicheck.buildsource.source_extractors.clang import (
-        CLANG_EXTRACTOR_VERSION,
-        ClangSourceExtractor,
-    )
+    from abicheck.buildsource.source_extractors.clang import ClangSourceExtractor
 
     extractor = ClangSourceExtractor(clang_bin=clang_bin)
     if not extractor.available():
         raise SystemExit(f"{clang_bin} is not on PATH; the golden needs clang")
     header = {
         "record": "header",
-        "producer_version": CLANG_EXTRACTOR_VERSION,
+        "producer_version": PRE_CHANGE_PRODUCER_VERSION,
         "clang_version": live_clang_version(clang_bin),
         "corpus": "catalog/cases/*/*.cpp",
         "tu_count": len(cases),

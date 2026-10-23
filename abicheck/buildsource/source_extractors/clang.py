@@ -176,7 +176,7 @@ from .launcher_env import effective_directory
 #: abicheck upgrade would otherwise silently keep serving the old label
 #: forever, since ``compute_tu_cache_key`` doesn't fold ``compiler_family``
 #: in on its own -- only the extractor version invalidates it).
-CLANG_EXTRACTOR_VERSION = "0.13"
+CLANG_EXTRACTOR_VERSION = "0.14"
 
 
 @memoized(maxsize=8, witness=path_witness)
