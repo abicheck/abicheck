@@ -598,14 +598,60 @@ unified, and two edge cases changed (see the changelog fragment).
 measurement in "Measurements" on the PVXS fixture; it was deliberately not
 changed in this phase.
 
-### Phase 8 — diffing: assess before merging
+### Phase 8 — diffing: assess before merging (assessed; merge waits for Phase 4)
 
-`source_diff.diff_source_abi` compares L4-only facts (macro values, body
-fingerprints, template patterns, ODR) that `diff_types`/`diff_symbols` have
-no counterpart for — that part is not duplication. What *is* likely
-duplicated is declaration/type comparison once Phase 4 makes both tiers
-produce the same model; audit it then, with a list of each `ChangeKind`
-either tier can emit for the same underlying change.
+Assessment only, no behaviour change. `scripts/source_l2_overlap.py` derives
+each tier's emitter set with the static closure `gen_detector_kind_map.py`
+already uses: L4 from `source_diff.diff_source_abi`, L2 from every registered
+detector in `diff_types*`/`diff_symbols*`. `tests/test_source_l2_overlap.py`
+fails when a kind lands on either tier unclassified, when a row goes stale, or
+when a label contradicts the derivation. Run the script for the full table.
+
+**The premise was mostly wrong.** L4 emits no declaration or type-shape kind
+at all: no function signature, record layout, field, enum or vtable kind.
+Its declaration check covers only constexpr values and default arguments
+(`_diff_declarations`). So making both tiers produce the same model would not,
+by itself, duplicate declaration or type findings. The overlap is one shared
+kind and three near-duplicate pairs; the other twelve L4 kinds have no L2
+counterpart.
+
+| L4 kind | L2 kind | Class | Why |
+|---|---|---|---|
+| `INLINE_FUNCTION_REMOVED` | same | **true duplicate** | Header-only inline removed: `_diff_inline_bodies` (L4) and `_check_removed_function` (L2, export confirmed absent) both emit it. The descriptions differ, so `finding_dedup`'s exact key (which includes the description) should not collapse them. Not yet reproduced end to end. |
+| `CONSTEXPR_VALUE_CHANGED` | `CONSTANT_CHANGED` | near-duplicate | Same namespace-scope `const`/`constexpr` value change, from the same headers. |
+| `PUBLIC_TYPEDEF_REMOVED` | `TYPEDEF_REMOVED` | near-duplicate | Same typedef removal. |
+| `PUBLIC_TYPEDEF_TARGET_CHANGED` | `TYPEDEF_BASE_CHANGED` | near-duplicate | Same typedef retarget. |
+
+L4-only, not duplication: `CONCEPT_TIGHTENED`, `DEFAULT_ARGUMENT_CHANGED`,
+`GENERATED_HEADER_CHANGED`, `INLINE_BODY_CHANGED`, `ODR_SOURCE_CONFLICT`,
+`PUBLIC_MACRO_REMOVED`, `PUBLIC_MACRO_VALUE_CHANGED`,
+`SOURCE_BINARY_PROVENANCE_MISMATCH`, `SOURCE_DECL_BINARY_SYMBOL_MISMATCH`,
+`SOURCE_FACT_COVERAGE_INCOMPLETE`, `TEMPLATE_BODY_CHANGED`,
+`UNINSTANTIATED_TEMPLATE_REMOVED`. The L2 side emits 126 kinds in total (an
+over-approximation: "can emit" per registered detector); 122 have no L4
+counterpart.
+
+**Proposed merge order** (none of it lands before Phase 4 b2.2/b2.3, the A1–A4
+guard and `CLANG_EXTRACTOR_VERSION` 0.14, are in):
+
+1. **`INLINE_FUNCTION_REMOVED`** first. It is the only shared kind name, and the
+   fix is a disposition choice, not a new model. Reproduce the double finding
+   end to end, then keep one owner per change. Both records stay visible (ADR-067,
+   "record before disposing"); neither tier drops silently.
+2. **`CONSTEXPR_VALUE_CHANGED` / `CONSTANT_CHANGED`**. Both read the header tier's
+   const values. Route the L4 value comparison through `compare.constants`, which
+   already owns the occurrence logic, or drop the L4 emission when the L2 header
+   tier ran.
+3. **Typedef pair**, last. `compare.typedefs` owns the occurrence and sentinel
+   logic and the ADR-063 typedef cutover, and L4's `_diff_typedefs` keys
+   differently. It is the largest of the three.
+
+No L4-only kind moves. Each step is behaviour-preserving, and is proven through
+`dump --depth source` and a compare on a fixture that contains the change.
+
+**Not yet verified:** the true duplicate's double finding is read from the
+emitters, not run; the near-duplicate pairs are judged the same way. Step 1
+starts by reproducing both.
 
 ## Measurements
 
