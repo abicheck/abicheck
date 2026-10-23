@@ -135,7 +135,7 @@ Each slice is independently reviewable and is not started until this ADR is acce
 4. **Assurance gap for castxml.** The UNKNOWN-on-either-side coverage/assurance gap, its rendering in the report, and the header-backend capability reference (`docs/reference/header-backend-capabilities.md`, Known gaps section) updated to the new behaviour.
 5. **Closure.** Update the known-gaps entry to closed, the G28 Phase 5 plan, the ADR index status, the surface registry, and a changelog fragment.
 
-## Implementation status (2026-10-22)
+## Implementation status (2026-10-23)
 
 Landed on `feat/adr-085-template-default-args`. Deviations from the text above
 are recorded here rather than edited into the decision.
@@ -173,6 +173,23 @@ are recorded here rather than edited into the decision.
   non-type-parameter templates on clang.
 - **Slice 5 (closure): partial.** The known-gap entry is PARTIAL, not closed. The
   G28 Phase 5 section reflects the same state.
+- **Remaining 3 (non-type and template-template defaults): landed.** The
+  all-type gate is removed. `dumper_clang` records the spelled default of every
+  parameter of a class-template pattern (`extract/headers/clang/templates.py`,
+  `_template_param_default_spellings`), so `TEMPLATE_PARAM_DEFAULT_CHANGED` fires
+  for them on clang. Spelling is the normalized form, not the source text:
+  a non-type default is its expression (a literal by value, a named constant by
+  name, an enumerator as `Enum::NAME`, an operator as `(lhs op rhs)`); a
+  template-template default is the plain name read from its source span, since
+  clang's JSON carries no name for a `template` argument. Any default outside
+  that set (`sizeof(T)`, a cast, a call) leaves its whole pattern unrecorded
+  rather than recording a spelling that could be wrong.
+  **No schema change.** The fact is still `Fact[tuple[str | None, ...]]` under
+  the v62 availability, so `SCHEMA_VERSION` is not bumped. A stored clang
+  baseline with a non-type pattern was UNKNOWN and stays UNKNOWN until it is
+  re-dumped: comparing it with a new dump reports the coverage gap, not a change.
+  castxml is unchanged. Case 228's castxml expectation stays `NO_CHANGE`; its
+  clang result is now `API_BREAK`, recorded in its README.
 
 ## Remaining
 
@@ -184,8 +201,9 @@ are recorded here rather than edited into the decision.
 2. **Parity test.** Landed for the header-only shape: clang reports
    `template_param_default_changed`, castxml reports the gap and no kind
    (`tests/test_default_template_arg_l2_matrix.py`).
-3. **Non-type and template-template parameters.** Record their defaults so such
-   a template is not UNKNOWN.
+3. ~~**Non-type and template-template parameters.**~~ Done (see Implementation
+   status). The spelling rule and the `sizeof`-style exclusion are recorded there
+   and in `header-backend-capabilities.md`.
 4. **Function-template defaults.** Same D1 contract; a separate slice, as above.
 
 ## Not done

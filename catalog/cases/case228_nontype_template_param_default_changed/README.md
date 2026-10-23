@@ -1,6 +1,6 @@
 # Case 228: Non-Type Template Parameter Default Changed
 
-**Category:** Template ABI | **Verdict:** 🟢 NO_CHANGE (both backends, both with a gap)
+**Category:** Template ABI | **Verdict:** 🟢 NO_CHANGE on castxml (with a gap); 🟠 API_BREAK on clang
 
 ## Verdict and consumer impact
 
@@ -8,11 +8,10 @@
 non-type. A consumer that writes `Buf<char>` gets an array of a different size, so
 the change is a real source-level change. It does not appear in any symbol.
 
-Neither backend reports a finding here. The verdict agrees, but the coverage does
-not. The clang recorder covers type-parameter templates only,
-so it records no defaults for `Buf` and reports a "not a type parameter" gap. The
-castxml side reports its own gap. The validator default lane is castxml, so the
-expected result is `NO_CHANGE` with a gap.
+The validator default lane is castxml, and castxml cannot record the default, so
+its expected result is `NO_CHANGE` with a gap. The clang recorder spells non-type
+defaults, so the same change reads as
+`TEMPLATE_PARAM_DEFAULT_CHANGED`, `API_BREAK`, on clang.
 
 ## Old/new diff
 
@@ -35,13 +34,14 @@ abicheck dump -H v2.h --config .abicheck.yml --depth headers -o new.json
 abicheck compare old.json new.json
 ```
 
-Switch `frontend: clang` to see the clang result (`NO_CHANGE`, with the
-"not a type parameter" gap).
+Switch `frontend: clang` to see the clang result (`API_BREAK`,
+`template_param_default_changed`).
 
 ## Expected abicheck finding
 
-`Verdict: NO_CHANGE`, `Assurance: partial`. The gap names the template
+castxml: `Verdict: NO_CHANGE`, `Assurance: partial`. The gap names the template
 default that the backend could not record: `template-parameter defaults`.
+clang: `Verdict: API_BREAK`, `template_param_default_changed`.
 
 ## Minimum evidence
 
@@ -49,9 +49,10 @@ default that the backend could not record: `template-parameter defaults`.
 
 ## Why abicheck catches it
 
-A non-type parameter's default is not captured yet, so `template_param_defaults_fact`
-is UNKNOWN and never compares equal to a recorded side. That is the
-no-manufactured-findings rule, and the gap is the honest result.
+On clang, the non-type default `4` and `8` are both recorded in
+`template_param_defaults_fact`, so the two sides differ and the change is reported.
+On castxml the fact is UNKNOWN and never compares equal to a recorded side, so the
+gap is the honest result.
 
 ## Runtime failure demonstration
 

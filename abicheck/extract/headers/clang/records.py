@@ -166,7 +166,7 @@ def parse_types(
     for identity in order:
         rec = best[identity]
         # ADR-085 D1: a class-template pattern carries its parameters' spelled
-        # defaults, read from the merged, all-type-gated index. Only a pattern
+        # defaults, read from the merged fact index. Only a pattern
         # with a row gets the fact; every other record stays UNKNOWN.
         row = (
             template_param_defaults.get(identity)
@@ -334,7 +334,8 @@ def _build_record(
         is_trivially_copyable=is_trivially_copyable,
         is_template_pattern=entry.in_template,
         # ADR-085 D1: the spelled defaults when the caller resolved them (a
-        # class-template pattern with all type parameters), else not recorded.
+        # class-template pattern whose defaults are all spelled), else not
+        # recorded.
         template_param_defaults_fact=(
             Fact.present(tuple(template_param_defaults))
             if template_param_defaults is not None

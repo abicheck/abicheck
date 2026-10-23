@@ -80,7 +80,7 @@ def _side_note(label: str, snap: AbiSnapshot, count: int) -> str:
     else:
         reason = (
             "not recorded by this snapshot (it predates schema v62, or a "
-            "template parameter is not a type parameter)"
+            "default in the pattern could not be spelled)"
         )
     return (
         f"template-parameter defaults ({reason}): {count} class template "
