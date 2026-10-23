@@ -195,3 +195,14 @@ def test_cl_driver_entry_keeps_one_unit_per_entry(tmp_path: Path) -> None:
     out = _collect_entry(entry, tmp_path)
     assert [u["source"] for u in out["compile_units"]] == ["/work/a.c"]
     assert out["link_units"] == []
+
+
+def test_windows_drive_operand_is_absolute_and_not_rebased(tmp_path: Path) -> None:
+    # normalize_source_path keeps a drive path as "C:/...": it must not be joined to /work.
+    entry = {
+        "directory": "/work",
+        "file": "C:/src/a.c",
+        "arguments": ["gcc", "-c", "C:/src/a.c", "y.c"],
+    }
+    out = _collect_entry(entry, tmp_path)
+    assert [u["source"] for u in out["compile_units"]] == ["C:/src/a.c", "/work/y.c"]

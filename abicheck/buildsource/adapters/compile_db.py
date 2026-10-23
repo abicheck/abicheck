@@ -23,7 +23,7 @@ entry into a normalized :class:`CompileUnit`.
 from __future__ import annotations
 
 import posixpath
-from pathlib import Path, PurePosixPath
+from pathlib import Path, PurePosixPath, PureWindowsPath
 
 from ...build_context import BuildContext, _extract_flags, load_compile_db
 from ..build_evidence import BuildEvidence, CompileUnit, LinkUnit
@@ -186,7 +186,8 @@ def _operand_path(spelled: str, directory: str) -> str:
     mix relative and absolute spellings.
     """
     path = normalize_source_path(spelled)
-    if PurePosixPath(path).is_absolute():
+    # A Windows drive path is absolute too: normalize_source_path keeps "C:/...".
+    if PurePosixPath(path).is_absolute() or PureWindowsPath(path).drive:
         return path
     return posixpath.normpath(posixpath.join(directory, path))
 
