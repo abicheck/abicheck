@@ -143,6 +143,12 @@ UNCOVERED: dict[str, str] = {
         "one-side-unrecorded inputs; no corpus pair records defaults on both "
         "sides yet"
     ),
+    "Function.template_param_defaults_fact": (
+        "read only by compare/template_param_defaults' function-template "
+        "detector, whose unit tests (test_function_template_param_defaults.py) "
+        "cover changed, added, removed, unchanged and overloaded patterns; no "
+        "corpus pair records function-template defaults on both sides yet"
+    ),
     "RecordType.specialization_declared_fact": (
         "read only by compare/template_instance_absence, whose own unit test "
         "(test_class_template_specialization_absence_unit.py) ablates every "

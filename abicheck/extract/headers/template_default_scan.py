@@ -13,7 +13,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Header-text scan for class-template parameter defaults (ADR-085 D3).
+"""Header-text scan for template-parameter defaults (ADR-085 D3).
 
 castxml emits no record for an uninstantiated class template, so a castxml
 run cannot see a default-argument change in a header. This scan answers the

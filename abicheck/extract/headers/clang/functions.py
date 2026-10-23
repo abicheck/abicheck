@@ -58,7 +58,7 @@ and ``context.py``'s ``is_record_definition`` already received.
 from __future__ import annotations
 
 import re
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from typing import Any
 
 from ....model import Fact, Function, Param
@@ -84,9 +84,13 @@ from .context import (
     symbol_candidates as _symbol_candidates,
     visibility_and_surface_facts as _visibility_and_surface_facts,
 )
+from .function_template_defaults import function_template_defaults_fact
 from .inline_semantics import fold_inline_across_redeclarations, is_effectively_inline
 from .macro_qualifier import node_qualtype_without_macro_qualifiers
-from .param_kind import param_kind as _param_kind
+from .param_kind import (
+    param_has_default as _param_has_default,
+    param_kind as _param_kind,
+)
 from .qualifiers import (
     OVERRIDE_ELIGIBLE_KINDS as _OVERRIDE_ELIGIBLE_KINDS,
     clang_method_is_override as _clang_method_is_override,
@@ -183,20 +187,6 @@ def _function_qualifiers(qualtype: str) -> str:
                 j += 1
             return qualtype[j:]
     return ""
-
-
-def _param_has_default(param: dict[str, Any]) -> bool:
-    """Whether a ``ParmVarDecl`` carries a default argument.
-
-    clang flags it either with ``"init": "c"`` or by nesting the default-value
-    expression as the parameter's lone ``inner`` child.
-    """
-    if param.get("init"):
-        return True
-    return any(
-        isinstance(c, dict) and not str(c.get("kind", "")).endswith(("Attr", "Comment"))
-        for c in param.get("inner", []) or []
-    )
 
 
 def function_template_param_kinds(
@@ -445,6 +435,7 @@ def parse_functions(
     default_value: DefaultValueEvaluator,
     no_binary_evidence: bool = False,
     is_cxx: bool = True,
+    function_template_defaults: Mapping[int, tuple[str | None, ...]] | None = None,
 ) -> list[Function]:
     funcs: list[Function] = []
     for entry in functions:
@@ -733,6 +724,10 @@ def parse_functions(
                     else Fact.not_applicable()
                 ),
                 is_compiler_generated=False,
+                # ADR-085 D1 (function template): the pattern's spelled defaults.
+                template_param_defaults_fact=function_template_defaults_fact(
+                    entry.node, function_template_defaults
+                ),
                 # ADR-063 Phase 2. `mangled_name` is offered here only when
                 # `raw_mangled` is genuinely present -- NOT when `mangled`
                 # (which may itself be the bare-`name` fallback) is merely
