@@ -32,6 +32,22 @@ __all__ = ["EXTRACTION_BUG_CLASSES"]
 
 EXTRACTION_BUG_CLASSES: tuple[BugClass, ...] = (
     BugClass(
+        id="extraction.vector_type_collapsed_to_plain_array",
+        invariant=(
+            "A type whose identity is a DWARF attribute, not its shape, keeps "
+            "that attribute in the recorded spelling: a DW_AT_GNU_vector array "
+            "spells with its element and total byte size, so a same-size "
+            "element, lane-count, or vector-versus-array change is a different "
+            "type, never the same plain T[] spelling."
+        ),
+        fixed_by=(),
+        seed_tests=("tests/test_dwarf_vector_types.py",),
+        axes={
+            "backend": ("dwarf",),
+            "vector_shape": ("element", "lane_count", "array_vs_vector"),
+        },
+    ),
+    BugClass(
         id="extraction.compile_entry_collapsed_to_first_source",
         invariant=(
             "A compile-database entry yields one compile unit per source "

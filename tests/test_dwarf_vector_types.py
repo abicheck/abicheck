@@ -163,3 +163,17 @@ class TestDwarfVectorTypes:
         )
         assert ChangeKind.FUNC_PARAMS_CHANGED in {c.kind for c in result.changes}
         assert result.verdict == Verdict.BREAKING
+
+    def test_inline_vector_swap_without_typedef_is_breaking(
+        self, tmp_path: Path
+    ) -> None:
+        # No typedef: base spelled both sides as a plain float[] and reported
+        # NO_CHANGE for a real array -> vector break.
+        result = _pair(
+            tmp_path,
+            "inline",
+            "struct W { float a[8]; };\nstruct W g_w;\n",
+            "struct W { float __attribute__((vector_size(32))) a; };\nstruct W g_w;\n",
+        )
+        assert ChangeKind.TYPE_FIELD_TYPE_CHANGED in {c.kind for c in result.changes}
+        assert result.verdict == Verdict.BREAKING
