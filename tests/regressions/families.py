@@ -190,9 +190,10 @@ FAMILIES: dict[str, Family] = {
             title="Argv replay and public-root probe read the same operands",
             invariant=(
                 "Every spelling a compiler driver accepts for one include-search "
-                "operand is read the same way by every consumer of the compile "
-                "unit: the replayed argv and the public-root probe agree on which "
-                "directories the compile searches."
+                "operand is read by every consumer of the compile unit: the "
+                "public-root probe reads each CL-mode spelling. Replay parity with "
+                "the probe is tracked as the remaining gap in known-gaps.md, not "
+                "yet met."
             ),
             harness_tests=(),
             planned_reason=(

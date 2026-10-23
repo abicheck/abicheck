@@ -228,7 +228,7 @@ current emitter, which is unchanged.
 
 **Status (2026-10-23): PARTIAL.** `parse_compile_invocation` reads `/I`, `-I` and `/external:I` (separate and joined spellings) from a CL-mode argv into `CompilerInvocation.replayed_include_dirs`, which `clang_public_roots` probes, so a `/external:I` root that holds the public headers is no longer missed. Still open: those operands are not rendered into the AST-dump argv (only `/I` is carried today), so a declaration that comes only through a `-I` or `/external:I` include is not replayed. `/imsvc` (a system bucket) is not probed at all.
 
-`false-clean` — A public header reached only through `/external:I` (or a `-I` operand under clang-cl) is classified non-public by the probe in a way the replayed argv would not reproduce, and an MSVC `/imsvc` include tree is never a probed public root.
+`false-clean` — A public header reached only through a `-I` or `/external:I` include under clang-cl is probed as a public root, but the replayed AST dump does not search that directory, so a declaration that comes only through it is not replayed. An MSVC `/imsvc` include tree is never a probed public root.
 
 ### False-positive risk
 
