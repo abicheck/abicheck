@@ -318,6 +318,7 @@ _F3 = (
     "identity.special_member_variant_family",
     "matching.dedup_key_soundness",
     "evidence.backfill_bare_name_match",
+    "identity.type_index_bare_name_collision",
     "extraction.macho_mangled_identity_normalization",
     "extraction.macho_export_index_double_strip",
     "classification.one_spelling_of_a_path_treated_as_its_identity",

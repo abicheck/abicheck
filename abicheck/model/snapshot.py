@@ -673,6 +673,9 @@ class AbiSnapshot:
         return self.variable_map.get(mangled)
 
     def type_by_name(self, name: str) -> RecordType | None:
+        """The record whose qualified name is *name*, or whose bare name is
+        *name* when exactly one record carries it; ``None`` when absent or
+        when a bare *name* is ambiguous across scopes."""
         if self._type_by_name is None:
             self.index()
         assert self._type_by_name is not None
