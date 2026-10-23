@@ -1,0 +1,1 @@
+Rewritten from the `code-review` skill in https://github.com/mattpocock/skills (MIT License, Copyright (c) 2026 Matt Pocock). The two-axis design (Standards and Spec), the parallel sub-agent flow and the GitHub-based issue fetching are local.
