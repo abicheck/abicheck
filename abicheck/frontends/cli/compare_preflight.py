@@ -84,7 +84,7 @@ def _resolve_evaluation_config(
     policy_file_path: Path | None,
     policy_file: PolicyFile | None,
     suppression: Any,
-    suppress: Path | None,
+    suppress: Path | tuple[Path, ...] | None,
     symbols_list: Any,
     contract_mode: str | None,
     contract_evaluation: bool,

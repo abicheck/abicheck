@@ -44,6 +44,7 @@ from .frontends.cli.options.params import (
     SIDED_INCLUDE_PATH_PARAM,
     SIDED_PATH_PARAM,
     SIDED_STR_PARAM,
+    normalize_suppress_callback,
 )
 from .model.macro_definition import (
     MacroDefinition,
@@ -454,17 +455,16 @@ def _resolve_policy_operand(
 
 
 def policy_options(func: F) -> F:
-    """Verdict-classification policy + suppression file (`--policy`/`--suppress`).
+    """Policy + suppression files for every verdict-emitting command (ADR-037 D4).
 
-    Shared verbatim by every verdict-emitting command. ADR-037 D4's fold: the
-    separate ``--policy-file`` is gone and ``--policy`` takes both operands
-    (see :func:`_resolve_policy_operand`).
+    ``--policy`` takes both operands (:func:`_resolve_policy_operand`).
     """
     func = click.option(
         "--suppress",
         type=click.Path(exists=True, path_type=Path),
-        default=None,
-        help="Suppression file (YAML) to filter known/intentional changes.",
+        multiple=True,
+        callback=normalize_suppress_callback,
+        help="Suppression file (YAML) to filter known/intentional changes. Repeatable: the rules of all files are merged in order, each keeping its file.",
     )(func)
     return policy_option(func)
 

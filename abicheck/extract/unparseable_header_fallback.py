@@ -219,6 +219,7 @@ def parse_excluding_unparseable_headers(
             # explicit ``--exclude-header`` is the way to make it.
             dropped = attribute_failing_headers(exc, active)
             if not dropped:
+                _add_exclude_header_hint(exc, active)
                 raise
             log.warning(
                 "L2 header parse failed in %d of %d header(s); excluding them and "
@@ -264,6 +265,35 @@ def parse_excluding_unparseable_headers(
                 excluded = [h for h in excluded if h not in set(restored)]
                 continue
         return result, excluded
+
+
+def _add_exclude_header_hint(exc: SnapshotError, headers: Sequence[Path]) -> None:
+    """Append an ``--exclude-header`` hint to *exc*'s message, in place.
+
+    Called only where this loop gives up on a multi-header parse it could
+    not reduce on its own (a conflict between listed headers, or a failure
+    it cannot attribute): the one remedy left is the user's explicit choice
+    of which header(s) to leave out, so the message names the flag and the
+    headers the diagnostics implicate. The exception keeps its type and
+    attributes; only its message text grows.
+    """
+    stderr = exc.attribution_stderr or exc.stderr or str(exc)
+    bad, conflicts = _scan_diagnostics(stderr, headers)
+    # A conflict's error side first: it is the likeliest one to leave out.
+    order = sorted(conflicts) + sorted(bad - conflicts)
+    named = [str(headers[i]) for i in order][:5]
+    more = ", ..." if len(bad) > len(named) else ""
+    implicated = (
+        f" The diagnostics implicate: {', '.join(named)}{more}." if named else ""
+    )
+    hint = (
+        f"\nHint: {len(headers)} headers were parsed as one translation unit and "
+        "the failure could not be confined to a single header automatically."
+        f"{implicated} To audit the rest, leave the offending headers out with "
+        "--exclude-header GLOB (repeatable; e.g. --exclude-header 'subdir/*'); "
+        "the exclusion is recorded in the report."
+    )
+    exc.args = (f"{exc.args[0] if exc.args else ''}{hint}", *exc.args[1:])
 
 
 def _confirm_in_context(

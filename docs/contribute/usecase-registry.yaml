@@ -248,13 +248,14 @@ use_cases:
     name: Static libraries (.a / .lib)
     status: by_design_excluded
     user_task: [pr_review, local_check]
-    adrs: []
+    adrs: [ADR-086]
     note: >
       G8 decision (option A, shipped): static/import library archives are
-      unsupported input today. abicheck compares single linkable images
+      unsupported input for comparison today. abicheck compares single linkable images
       (shared libraries + objects); an `ar` archive (.a / .lib, magic
       `!<arch>\n`) has no runtime ABI surface (no SONAME, no dynamic symbol
-      table, no symbol versioning). The CLI detects archives and fails with
+      table, no symbol versioning). For comparison (two-sided `compare`) and
+      `dump`, the CLI detects archives and fails with
       actionable guidance (extract members or compare the shared library)
       instead of a misleading "unknown format" error.
       Amendment (2026-09, clarification): `vision.md`'s current, authoritative
@@ -266,9 +267,15 @@ use_cases:
       a permanent decision against ever investigating option B. See
       docs/contribute/goals.md (Non-goals), docs/learn/limitations.md, and
       the plan docs/contribute/plans/g8-static-libraries.md.
+      Amendment (2026-10, ADR-086): the one bounded question an archive can
+      honestly answer is now answered -- `compare --no-baseline LIB.a -H
+      include/` reads an ELF archive's own symbol index as its export table
+      for the declared-vs-defined audit (`public_not_exported` /
+      `exported_not_public`). Comparison of archives, and every other
+      command, keeps option A's rejection.
     evidence:
-      modules: [abicheck/binary_utils.py, abicheck/service.py]
-      tests: [tests/test_compare_input_modes.py, tests/test_service_compare_pipeline_unit.py, tests/test_input_resolution_unit.py]
+      modules: [abicheck/binary_utils.py, abicheck/service.py, abicheck/extract/ar_archive.py, abicheck/workflows/static_archive_snapshot.py]
+      tests: [tests/test_compare_input_modes.py, tests/test_service_compare_pipeline_unit.py, tests/test_input_resolution_unit.py, tests/test_static_archive_no_baseline.py]
       docs: [docs/learn/limitations.md]
 
   - id: UC-ARCH-ffi-consumers

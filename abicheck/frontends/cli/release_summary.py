@@ -60,7 +60,7 @@ def _write_release_summary_file(
     matrix_result: DiffResult | None = None,
     policy: str = DEFAULT_POLICY_PROFILE,
     policy_file_path: Path | None = None,
-    suppress: Path | None = None,
+    suppress: Path | tuple[Path, ...] | None = None,
     pack_application: Any = None,
     scope_public_headers: bool = True,
     scope_terms: ComparisonScopeTerms | None = None,

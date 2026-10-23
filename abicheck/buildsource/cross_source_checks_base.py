@@ -51,6 +51,30 @@ PROVIDER_BUILD_CONFIG = "build_config"
 PROVIDER_SOURCE_INDEX = "source_index"
 
 
+#: Checks reading ELF dynamic-section facts (symbol versioning) that a
+#: static archive does not carry (ADR-086). Spelled as the check names
+#: ``cross_source_checks`` registers, kept here so this module stays a leaf.
+_DYNAMIC_SECTION_CHECKS = frozenset({"unversioned_exported_symbol"})
+
+
+def not_collected_reason(
+    name: str, snapshot: AbiSnapshot, enabled: frozenset[str] | set[str]
+) -> str:
+    """Why check *name* does not run on *snapshot* ("" when it runs).
+
+    A disabled check, and -- ADR-086 -- a dynamic-section check on a
+    snapshot whose export table came from a static archive's symbol index:
+    that is ``not_collected``, never a clean ``skipped`` row.
+    """
+    if name not in enabled:
+        return "disabled by configuration"
+    if name in _DYNAMIC_SECTION_CHECKS and getattr(snapshot, "static_archive", False):
+        return (
+            "not collected: a static archive has no dynamic section (symbol versioning)"
+        )
+    return ""
+
+
 @dataclass(frozen=True)
 class _CheckOutput:
     """One check's result: findings, its coverage row, and the providers used."""

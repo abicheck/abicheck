@@ -275,7 +275,7 @@ def run_compare(
     new_version: str,
     fmt: str,
     output: Path | None,
-    suppress: Path | None,
+    suppress: Path | tuple[Path, ...] | None,
     acknowledgments: Path | None = None,
     policy: str,
     policy_file_path: Path | None,

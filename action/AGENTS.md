@@ -578,3 +578,15 @@ own job-summary case, and sets an unconditional `FINAL_EXIT=1`, since no
 `fail-on-*` input governs it. Tests: `tests/test_action_additions_verdict.py`,
 which replays reports produced by the real `compare` CLI rather than
 hand-written ones.
+
+## Unused-rules review axis (`RULES_UNUSED`)
+
+`_unused_rules_gated()` reads `_report_query ... unused_rules_contribution`:
+the root `exit` block's `unused_rules_contribution` on a two-sided compare,
+`exit_axes.unused_rules` on the audit-only shape (the fold's own fields, not
+`disposition_audit.unused_rules_review.gate_contribution`, which an older
+audit reported without exiting on it). It joins the
+exit-1 dispatch last, so `ADDITIONS_UNACKNOWLEDGED` is chosen only when the
+additions axis gated; when it co-fires it gets an "also reports" warning,
+and it has its own job-summary case and an unconditional `FINAL_EXIT=1`.
+Tests: `tests/test_action_unused_rules_verdict.py`.

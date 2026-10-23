@@ -107,6 +107,7 @@ QUERIES = (
     "coverage_where",
     "scope_contribution",
     "additions_review_contribution",
+    "unused_rules_contribution",
     "scope_incomplete",
     "scope_where",
     "assurance_notes",

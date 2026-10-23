@@ -117,7 +117,7 @@ class CompareRequest:
     has_sources: bool = False
     policy: str = "strict_abi"
     policy_file_path: Path | None = None
-    suppress: Path | None = None
+    suppress: Path | tuple[Path, ...] | None = None
     scope_public: bool = True
     force_public_symbols: frozenset[str] | None = None
     # `compare --post-manifest`: the committed `pp_*`/ufunc-loop surface of a POST

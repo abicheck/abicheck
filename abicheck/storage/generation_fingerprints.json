@@ -13,6 +13,8 @@
       "abicheck/dwarf_utils.py": "d236971e77d092bbdc578c5f36380e6383a4d9a19716127adf32b28065f24a83",
       "abicheck/elf_metadata.py": "43f4f804a24e2a0d9a4dca59772ecbfe1a6e70cd6c4d05c9f22efb469b2ab92f",
       "abicheck/extract/__init__.py": "011ec37fad96ea2035983eaaedeba0976940a570900f85db8c03bb7369af742a",
+      "abicheck/extract/ar_archive.py": "6fdab7ed7390a20f087f9407eaa3988c0f8c658400bc0ea8c7e193271923956d",
+      "abicheck/extract/ar_archive_format.py": "38a51cae7762eb269af3788d5dca9cfe50de38d9b315f34fa31427f791cb7e62",
       "abicheck/extract/binary_format.py": "4b9f591077fa5c90d2e3a767343d92b098061870403d431694470bc05e5468b3",
       "abicheck/extract/binary_identity.py": "4645eaf3dddd0a2230a5c694882548476406c57514275fa4c8c1bc152607ca88",
       "abicheck/extract/build_mode_capture.py": "7a46c5babcc5bf770a1a38d5a5d3abb49a2b7d9575bda2b210d2e2861ebfb51f",
@@ -129,7 +131,7 @@
       "abicheck/extract/progress.py": "69e7aed5482c82b2b2206ac0055631d2338c427c27064c64d6865041207bafc8",
       "abicheck/extract/public_header_identifiers.py": "c0899048d31a666fd45d87fab578aa455e9a1e053098d63066a95f6accfc7412",
       "abicheck/extract/public_root_ownership.py": "c5c72f76093e4dedfcc6d6d838b0ca2df47ce44dcbb81d65469ccf8b1dc857f2",
-      "abicheck/extract/quoted_include_expansion.py": "e7cc7fe89dc3ce568186b58b2e3f2f9bec930e018ce3411b49a42d9fdbc6829d",
+      "abicheck/extract/quoted_include_expansion.py": "d26085d7fdde4ce88a5245e00af377d0431d24e651c9274ad70a457bf8bde762",
       "abicheck/extract/semantic_ir_merge.py": "250830d3bd6a06c18bcd79abb90011cceaabe875581172047c2b20688edbc203",
       "abicheck/extract/semantic_normalizer.py": "d7fb1ef96f74b9052a94a6877211f68488d2b317dd9651ab0e5425df94ed8910",
       "abicheck/extract/semantic_normalizer_dwarf.py": "d092c309a8e349f9b699e5931456188485670ef05a8048783496d915fe7a7a83",
@@ -141,7 +143,7 @@
       "abicheck/extract/target_platform_probe.py": "060c391c71dca8f863f3452de90731edcf67ac14c1b804fb91606eb8140b1ee7",
       "abicheck/extract/toolchain_identity.py": "a695a96ce37cc859a048d7cde13d2b28ca5b2509c0a800d238cb268248cf1d1f",
       "abicheck/extract/tu_jobs.py": "6ed530395738f83bc46664a6ae9e91fa7286a2a6bb81e4fbb723447f6524b070",
-      "abicheck/extract/unparseable_header_fallback.py": "f845b80782f38996a5a77175ebe559c1ecf82c2561cefe18f72794116d98be0f",
+      "abicheck/extract/unparseable_header_fallback.py": "a9aae1490ad88bb1f1bd9ddfe96681d4a3b9558436446305c66fb44f0003c2f6",
       "abicheck/extract/wheel_tags.py": "0a6eff34860223c9efb0fc2d62469804d50d59ae1825c726abafaf7c898789db",
       "abicheck/macho_metadata.py": "5fb0d218553c8e3f8911429074132849087fbc2f440bba6073fa7a5a43d7d7b1",
       "abicheck/pdb_metadata.py": "79beb794904dd26afaf7d1fa8e9fdf74d4d4dfd21f5c09b9764c45b253a2dc1f",
@@ -153,9 +155,9 @@
       "abicheck/symvers_metadata.py": "372737765cd132e6e87ed891dd465d2958e04debbef774e45212ceb3036871cb",
       "abicheck/type_metadata.py": "9997189de8dac522fd1db8be5ae491d811139503f83abaaded89038eb4aa9cdf"
     },
-    "fingerprint": "c4700d24d671d22f72f54d3b319a986539641f27a83815da88412f9e59e3ed4c",
+    "fingerprint": "0273ef4c2a43472c25656446b2cd993f443f1d7ac02facb3e586db85f86d8f7d",
     "generation": 10,
-    "reason": "Adds a NON_SHAPING_MODULES classification entry for clang_header_argv (the body of the keyed header argv builder, already covered by the invocation digest). No extraction output or cache key changes; the CLANG_AST_OUTPUT_MODULES fingerprint is untouched."
+    "reason": "Merge of main into the static-archive/repeatable-suppress branch. From main: a NON_SHAPING_MODULES classification entry for clang_header_argv (already covered by the invocation digest). From this branch (ADR-086): extract/ar_archive*.py, reached only by the new compare --no-baseline static-archive audit; a per-file quoted-include memo pinned equivalent to fresh expansion by tests/test_quoted_include_expansion_memo.py; an --exclude-header hint appended to an already-raised error. Nothing recorded or derived for an existing input changes."
   },
   "resolver": {
     "files": {

@@ -732,6 +732,20 @@
       "use_cases": [
         "UC-WF-compare"
       ]
+    },
+    "ADR-085": {
+      "disposition": "gap",
+      "surfaces": [],
+      "use_cases": []
+    },
+    "ADR-086": {
+      "disposition": "surfaced",
+      "surfaces": [
+        "cli: compare --no-baseline"
+      ],
+      "use_cases": [
+        "UC-ARCH-static-lib"
+      ]
     }
   },
   "multichannel_without_family": [
@@ -863,6 +877,7 @@
     "ADR-074 cli: dump --define",
     "ADR-078 report: compare_report.severity",
     "ADR-078 report: compare_report.summary",
-    "ADR-084 report: compare_report.disposition_audit"
+    "ADR-084 report: compare_report.disposition_audit",
+    "ADR-086 cli: compare --no-baseline"
   ]
 }

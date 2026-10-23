@@ -474,6 +474,7 @@ def _resolve_input_impl(
     # `False` matches the CLI flag, `InputSpec.include_dependencies`, `run_dump`.
     include_dependencies: bool = False,
     public_include_search_dirs: list[Path] | None = None,
+    static_archive: bool = False,
 ) -> AbiSnapshot:
     """Auto-detect input type and return an ABI snapshot.
 
@@ -682,16 +683,35 @@ def _resolve_input_impl(
             )
 
     # Static/import libraries (`.a`, `.lib`) are member archives, not single
-    # linkable images -- abicheck does not analyse archives by design (see
-    # docs/learn/limitations.md); fail with actionable guidance instead.
+    # linkable images. Only the single-build `compare --no-baseline` audit
+    # reads one (ADR-086: *static_archive*), and only its symbol index as the
+    # export table; every other command fails with actionable guidance.
     from ..binary_utils import detect_archive
 
     if detect_archive(path):
+        if static_archive:
+            from .static_archive_snapshot import dump_static_archive_snapshot
+
+            return dump_static_archive_snapshot(
+                path,
+                _headers,
+                _includes,
+                version,
+                lang,
+                lang_explicit=lang_explicit,
+                public_headers=public_headers,
+                public_header_dirs=public_header_dirs,
+                header_backend=header_backend,
+                compile=compile,
+                include_dependencies=include_dependencies,
+            )
         raise ValidationError(
-            f"'{path}' is a static/import library archive (.a/.lib), which abicheck "
-            "does not analyse — it compares single linkable images (shared libraries "
-            "and objects). Extract the members (e.g. `ar x lib.a`) and compare the "
-            "resulting object files or the shared library built from them instead."
+            f"'{path}' is a static/import library archive (.a/.lib). Only "
+            "`compare --no-baseline LIB.a -H include/` reads one (the "
+            "declared-vs-defined audit, ELF archives only); other commands "
+            "compare single linkable images (shared libraries and objects). "
+            "Extract the members (e.g. `ar x lib.a`) and compare the resulting "
+            "object files or the shared library built from them instead."
         )
 
     raise ValidationError(

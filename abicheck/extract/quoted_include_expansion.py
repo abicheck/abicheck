@@ -27,8 +27,11 @@ dialect scan imports it back from here.
 from __future__ import annotations
 
 import re
+from functools import partial
 from pathlib import Path
 
+from ..model.execution_cache import MemoryCache, request_key
+from .digest_memo import content_digest
 from .headers.ast_config_cpp20_chains import _strip_inactive_if_zero_blocks
 
 # C++11 raw string literal: [prefix]R"delim(...)delim" — the standard
@@ -154,37 +157,13 @@ def _expand_with_quoted_includes(
             content = p.read_bytes()
         except OSError:
             continue
-        # Splice backslash-newline continuations first (Codex review):
-        # joins a directive spanning one, e.g. ``#include \`` followed by
-        # ``"concepts.hpp"`` on the next physical line, back onto a single
-        # physical line the pattern below can match -- and, done before
-        # comment stripping, correctly extends a ``//`` comment ending in
-        # a trailing backslash over its continuation line too.
-        content = re.sub(rb"\\\r?\n", b"", content)
-        # Raw string literals only -- NOT ordinary string/char literals,
-        # unlike the main scan's preprocessing pipeline: an ordinary
-        # literal has the exact same lexical shape (a bare double-quote)
-        # as a genuine #include's argument, so blanking it here would
-        # destroy the include target this loop needs to read next. A raw
-        # string's delimiter (``R"delim(...)delim"``) is unambiguous and
-        # never collides with ``#include "..."``, so it's safe to strip
-        # -- and necessary, so a fake ``#include "x"``-looking line
-        # trapped inside a raw string's body is never mistaken for a real
-        # directive (Codex review).
-        content = _strip_raw_strings(content)
-        # Comments next.
-        content = re.sub(
-            rb"/\*.*?\*/",
-            lambda m: b"\n" * m.group(0).count(b"\n"),
-            content,
-            flags=re.DOTALL,
-        )
-        content = re.sub(rb"//[^\n]*", b"", content)
-        reachable_content = _strip_inactive_if_zero_blocks(
-            content, mask_cplusplus_defined_guards=for_language_mode_decision
-        )
-        for m in _QUOTED_INCLUDE_PATTERN.finditer(reachable_content):
-            name = m.group(1).decode("utf-8", "surrogateescape")
+        for name in _QUOTED_INCLUDES_MEMO.get_or_compute(
+            request_key(
+                content=content_digest(content),
+                for_language_mode_decision=for_language_mode_decision,
+            ),
+            partial(_reachable_quoted_includes, content, for_language_mode_decision),
+        ):
             included = p.parent / name
             if included.is_file():
                 stack.append(included)
@@ -193,3 +172,58 @@ def _expand_with_quoted_includes(
                 # a caller caching this expansion must notice it appearing.
                 unresolved.append(included)
     return expanded
+
+
+#: Per-file memo of the quoted ``#include`` names reachable in one file's
+#: content. The expansion runs once per distinct header *group* (a bisecting
+#: header-graph parse, an unparseable-header probe, both language-mode
+#: polarities, the dialect memo's own stamp), and every group re-reads the
+#: same files: without this, preprocessing a file (splice, raw-string,
+#: comment and inactive-block stripping) cost O(groups x files) on a
+#: whole-directory ``-H`` (Intel MKL's conda ``include/``). Keyed on the
+#: content digest, like the dialect scan's own per-file memos, so an edited
+#: file is never served a stale answer; the names are resolved against the
+#: including file's directory by the caller, so the result depends on
+#: content alone.
+_QUOTED_INCLUDES_MEMO: MemoryCache[tuple[str, ...]] = MemoryCache(
+    "abicheck.extract.quoted_include_expansion.includes", max_entries=8192
+)
+
+
+def _reachable_quoted_includes(
+    content: bytes, for_language_mode_decision: bool
+) -> tuple[str, ...]:
+    """The quoted ``#include`` names reachable in *content*, in order."""
+    # Splice backslash-newline continuations first (Codex review):
+    # joins a directive spanning one, e.g. ``#include \`` followed by
+    # ``"concepts.hpp"`` on the next physical line, back onto a single
+    # physical line the pattern below can match -- and, done before
+    # comment stripping, correctly extends a ``//`` comment ending in
+    # a trailing backslash over its continuation line too.
+    content = re.sub(rb"\\\r?\n", b"", content)
+    # Raw string literals only -- NOT ordinary string/char literals,
+    # unlike the main scan's preprocessing pipeline: an ordinary
+    # literal has the exact same lexical shape (a bare double-quote)
+    # as a genuine #include's argument, so blanking it here would
+    # destroy the include target this loop needs to read next. A raw
+    # string's delimiter (``R"delim(...)delim"``) is unambiguous and
+    # never collides with ``#include "..."``, so it's safe to strip
+    # -- and necessary, so a fake ``#include "x"``-looking line
+    # trapped inside a raw string's body is never mistaken for a real
+    # directive (Codex review).
+    content = _strip_raw_strings(content)
+    # Comments next.
+    content = re.sub(
+        rb"/\*.*?\*/",
+        lambda m: b"\n" * m.group(0).count(b"\n"),
+        content,
+        flags=re.DOTALL,
+    )
+    content = re.sub(rb"//[^\n]*", b"", content)
+    reachable_content = _strip_inactive_if_zero_blocks(
+        content, mask_cplusplus_defined_guards=for_language_mode_decision
+    )
+    return tuple(
+        m.group(1).decode("utf-8", "surrogateescape")
+        for m in _QUOTED_INCLUDE_PATTERN.finditer(reachable_content)
+    )

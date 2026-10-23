@@ -764,9 +764,8 @@ def record_suppressed_change(
     """
     if ledger is None:
         return
-    source_file = _source_file_for(suppression)
-    entry_index, shadowed = _suppression_position(
-        suppression, change, rule, source_file
+    source_file, entry_index, shadowed = _suppression_position(
+        suppression, change, rule
     )
     ledger.record_suppression(
         change,
@@ -780,45 +779,35 @@ def record_suppressed_change(
 
 
 def _suppression_position(
-    suppression: object | None,
-    change: Change,
-    rule: Suppression | None,
-    source_file: str | None,
-) -> tuple[int | None, tuple[RuleRef, ...]]:
-    """Where *rule* sits in its document, and which later rules also matched.
+    suppression: object | None, change: Change, rule: Suppression | None
+) -> tuple[str | None, int | None, tuple[RuleRef, ...]]:
+    """*rule*'s document, its index there, and which other rules also matched.
 
     P1 (ADR-067 D3): the winning rule is first-match, so every other rule that
     matches *change* is *shadowed*. Computed here, at the one recording
-    primitive, because the list is in hand and the winner is known -- asking
-    again later would re-evaluate against a finding whose fields may since have
-    changed. ``(None, ())`` when the rule is not in the list (a synthetic
-    decision, or a caller that passed no list).
+    primitive, because the list is in hand and the winner is known. Positions
+    come from :func:`~abicheck.policy.suppression.merge.rule_origin`, so a
+    rule merged from one of several ``--suppress`` files keeps that file and
+    its index in it. A rule not in the list (a synthetic decision, or a caller
+    that passed no list) gets the list's own ``source_path`` and no position.
     """
     from .rule_inventory import KIND_SUPPRESSION
+    from .suppression.merge import rule_origin
 
+    source_path = getattr(suppression, "source_path", None)
+    fallback = str(source_path) if source_path is not None else None
     rules = getattr(suppression, "rules", None) if suppression is not None else None
     if rule is None or not rules:
-        return None, ()
+        return fallback, None, ()
     winner = next((i for i, r in enumerate(rules) if r is rule), None)
     if winner is None:
-        return None, ()
+        return fallback, None, ()
     shadowed = tuple(
-        RuleRef(KIND_SUPPRESSION, source_file, i)
+        RuleRef(KIND_SUPPRESSION, *rule_origin(suppression, i))
         for i, other in enumerate(rules)
         if i != winner and other.matches(change)
     )
-    return winner, shadowed
-
-
-def _source_file_for(suppression: object | None) -> str | None:
-    """The document *rule* came from: its rule set's own ``source_path``.
-
-    Every rule in a ``SuppressionList`` comes from the one document the list
-    was loaded from (or none, for a programmatically-built list), so the
-    list-level path answers for each rule.
-    """
-    source_path = getattr(suppression, "source_path", None)
-    return str(source_path) if source_path is not None else None
+    return (*rule_origin(suppression, winner), shadowed)
 
 
 def _verdict_class_of(change: object) -> str | None:
