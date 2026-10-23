@@ -395,6 +395,21 @@ _cmd_has_config_flag() {
   return 1
 }
 
+# One flag per non-empty *line* of $2. Unlike `add_flag`, a single-line value
+# is never word-split, so a path containing spaces stays one argument: the
+# input that used to take one path keeps every existing value's meaning, and
+# a multi-line value supplies several.
+add_line_flags() {
+  local flag="$1"
+  local value="$2"
+  local item
+  [[ -n "$value" ]] || return 0
+  while IFS= read -r item; do
+    # A blank or whitespace-only line names no file.
+    [[ -n "${item//[[:space:]]/}" ]] && CMD+=("$flag" "$item")
+  done <<< "$value"
+}
+
 add_single_flag() {
   local flag="$1"
   local value="$2"
@@ -4072,7 +4087,7 @@ elif [[ "$MODE" == "compare" ]]; then
   # input therefore *is* the policy for this run and outranks the profile,
   # exactly as the removed `--policy-file` flag did.
   add_single_flag "--policy" "${INPUT_POLICY_FILE:-${INPUT_POLICY:-}}"
-  add_single_flag "--suppress" "${INPUT_SUPPRESS:-}"
+  add_line_flags "--suppress" "${INPUT_SUPPRESS:-}"
   # ADR-067 D5: this run's acknowledgment records. Operator-named, like
   # `suppress`, so the CLI trusts it to supply records (a discovered
   # .abicheck.yml is not; see add_compile_context_flags' overlay strip).

@@ -233,7 +233,7 @@ degrades gracefully and L0–L2 stay authoritative.
 | `audit` | — | **Retired** (0.6, hard removal): this applied only to the now-removed `mode: scan`, forcing a one-build audit-only run. Under `mode: compare`, simply omit `old-library`/`abi-baseline` to run an audit-only `compare --no-baseline`; set `severity-preset` (e.g. `default`) if this job should still gate on a `BREAKING`/`API_BREAK`-classified finding the way `mode: scan`'s own audit mode always did. Setting `audit` is now a hard error naming that replacement. |
 | `policy` | `strict_abi` | Built-in policy: `strict_abi`, `sdk_vendor`, `plugin_abi` |
 | `policy-file` | — | Custom YAML policy file |
-| `suppress` | — | YAML suppression file (supports `label`, `source_location`, `expires`) |
+| `suppress` | — | YAML suppression file (supports `label`, `source_location`, `expires`); one path per line for several files |
 | `verbose` | `false` | Enable debug output |
 
 To enable suppression lifecycle enforcement, set it in the repository's own
