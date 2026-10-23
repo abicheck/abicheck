@@ -116,7 +116,12 @@ class TuParseStore:
         dep_paths: Iterable[str],
         memo: dict[str, str | None] | None = None,
     ) -> None:
-        """Write *payload* under *key*, recording the digest of each readable dependency.
+        """Write *payload* under *key*, recording the digest of every dependency.
+
+        If any dependency cannot be read, nothing is written. An entry that
+        omitted that dependency would serve its payload unchecked once the
+        path became readable, so a partial record is worse than no record
+        (ADR-033 D5: prefer a false miss over a false hit).
 
         Best-effort: a write failure leaves no entry and raises nothing, because
         the parse already produced its result.
@@ -125,8 +130,9 @@ class TuParseStore:
         deps: dict[str, str] = {}
         for dep in dep_paths:
             digest = dep_digest(dep, memo)
-            if digest is not None:
-                deps[dep] = digest
+            if digest is None:
+                return
+            deps[dep] = digest
         entry = {"deps": deps, "payload": payload}
         tmp = final.with_suffix(".json.tmp")
         try:

@@ -922,7 +922,13 @@ def _replay_cache_lookup(
         keys.append(key)
         cached = cache.get(key, digest_memo) if cache is not None else None
         if cached is not None:
-            results[i] = cached
+            # The key folds the unit's source and flags but not its id or
+            # target: two units that compile the same TU share one entry. Rebind
+            # the identity to this unit, as a fresh extraction would, so the
+            # hit cannot attribute the dump to another target.
+            results[i] = dataclasses.replace(
+                cached, tu_id=cu.id, target_id=cu.target_id
+            )
         else:
             misses.append(i)
     return keys, results, misses

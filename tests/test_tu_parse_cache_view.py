@@ -25,6 +25,7 @@ from abicheck.buildsource.source_abi import (
 )
 from abicheck.buildsource.source_replay import (
     SourceAbiCache,
+    _replay_cache_lookup,
     compute_tu_cache_key,
     run_source_replay,
 )
@@ -271,3 +272,70 @@ def test_content_key_does_not_collide_across_part_boundaries() -> None:
     # A separator folded between parts keeps ("ab", "c") and ("a", "bc") apart.
     assert content_key(["ab", "c"]) != content_key(["a", "bc"])
     assert content_key(["ab", "c"]) == content_key(["ab", "c"])
+
+
+def test_store_misses_when_a_recorded_dependency_vanishes(tmp_path: Path) -> None:
+    dep = tmp_path / "dep.h"
+    dep.write_text("#define N 1\n")
+    store = TuParseStore(tmp_path / "store")
+    store.publish("k", {"v": 1}, [str(dep)])
+    dep.unlink()
+    assert store.lookup("k") is None
+
+
+def test_store_writes_nothing_when_a_dependency_is_unreadable(tmp_path: Path) -> None:
+    dep = tmp_path / "late.h"
+    store = TuParseStore(tmp_path / "store")
+    store.publish("k", {"v": 1}, [str(dep)])
+    assert not store.path("k").exists()
+    # The path becomes readable afterwards. Nothing was recorded for it, so the
+    # payload is not served unchecked.
+    dep.write_text("int x;\n")
+    assert store.lookup("k") is None
+
+
+@pytest.mark.parametrize(
+    "entry_text",
+    ["not json", "[]", '{"deps": ["x"], "payload": {"v": 1}}', '{"deps": {}}'],
+    ids=["non-json", "json-list", "deps-not-dict", "missing-payload"],
+)
+def test_store_misses_on_malformed_entry(tmp_path: Path, entry_text: str) -> None:
+    store = TuParseStore(tmp_path / "store")
+    store.publish("k", {"v": 1}, [])
+    store.path("k").write_text(entry_text)
+    assert store.lookup("k") is None
+
+
+def test_cache_hit_takes_the_current_units_identity(tmp_path: Path) -> None:
+    # Two units that compile the same source with the same flags share one
+    # entry, because the key does not fold the unit's id or target. The hit must
+    # still carry the identity of the unit it serves.
+    src = tmp_path / "a.cpp"
+    src.write_text("int a;\n")
+
+    def unit(cu_id: str, target: str) -> CompileUnit:
+        return CompileUnit(
+            id=cu_id,
+            source=str(src),
+            target_id=target,
+            language="CXX",
+            standard="c++17",
+            directory=str(tmp_path),
+        )
+
+    build = BuildEvidence(
+        targets=[Target(id="target://one", public_headers=["foo.h"])],
+        compile_units=[unit("cu://a", "target://one")],
+    )
+    cache = SourceAbiCache(tmp_path / "cache")
+    run_source_replay(
+        build, _CountingExtractor(), scope="full", public_header_roots=[], cache=cache
+    )
+
+    _, results, misses = _replay_cache_lookup(
+        [unit("cu://b", "target://two")], _CountingExtractor(), [], cache, {}
+    )
+    assert misses == []
+    served = results[0]
+    assert served is not None
+    assert (served.tu_id, served.target_id) == ("cu://b", "target://two")
