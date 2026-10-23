@@ -561,3 +561,38 @@ def test_a_repeated_removed_instance_is_reported_once() -> None:
     )
     new = AbiSnapshot(library="lib", version="1.0", functions=[_instance(new_fn)])
     assert len(detect_default_template_arg_changed(old, new)) == 1
+
+
+def test_shape_c_only_a_reported_function_claims_a_template() -> None:
+    # b::take is reported (removed); a::other spells a Box too but is not part
+    # of any change, so its spelling must not claim a::Box.
+    from abicheck.model.change import Change
+    from abicheck.model.change_catalog.kinds import ChangeKind
+    from abicheck.model.declarations import Function, Param
+    from abicheck.policy.template_default_changes import (
+        _templates_named_by_reported_functions,
+    )
+
+    snap = AbiSnapshot(
+        library="libtpl.so.1",
+        version="1.0",
+        types=[_named_box("a::Box"), _named_box("b::Box")],
+        functions=[
+            Function(
+                name="take",
+                mangled=_TAKE_IN_B,
+                return_type="void",
+                params=[Param(name="b", type="const Box<char>&")],
+            ),
+            Function(
+                name="other",
+                mangled="_ZN1a5otherERKNS_3BoxIcEE",
+                return_type="void",
+                params=[Param(name="b", type="const Box<char>&")],
+            ),
+        ],
+    )
+    removed = Change(
+        kind=ChangeKind.FUNC_REMOVED, symbol=_TAKE_IN_B, description="removed"
+    )
+    assert _templates_named_by_reported_functions(snap, snap, [removed]) == {"b::Box"}
