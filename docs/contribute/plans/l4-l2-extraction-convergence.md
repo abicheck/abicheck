@@ -435,11 +435,44 @@ projected-only out-of-scope set is the public-surface problem below.
    [Clang projection](../known-gaps.md#clang-projection-adr-063-phase-4-prerequisites)
    (origin unset, bare member and namespace names, unmangled `distance`, hash and
    default-argument spelling).
-2. The ADR-063 amendment's A1–A4 guard: the payload-revision mismatch
-   condition, the intersection rule that uses `REVISION_COMPARABLE_FIELDS`, and
-   the `SOURCE_FACT_COVERAGE_INCOMPLETE` / `unknown` assurance reporting. The
-   decision on whether the two equal-by-construction typedef fields are kept is
-   made here.
+2. **Status (2026-10-23): A1–A4 guard DONE; pinned set decided.** A1 is
+   `is_payload_revision_mismatch()` in
+   `abicheck/buildsource/revision_comparability.py`. A3 is the early return in
+   `diff_source_abi`: under a mismatch only the pinned typedef fields are in the
+   intersection, and every other check is withheld. A4 is the
+   `SOURCE_FACT_COVERAGE_INCOMPLETE` finding (compared-fact count, withheld
+   checks, "withheld, not clean"). Its assurance already reads `unknown` through
+   `policy/analysis_assurance/_fact_set.py`'s `producer_version_mismatch` branch,
+   and a test pins it. The two equal-by-construction typedef fields are
+   decided: `typedef.visibility` and `typedef.api_relevant` are **dropped** from
+   `REVISION_COMPARABLE_FIELDS` (equality comes from `entity_from_typedef`'s
+   hard-coding, so it measures nothing); `typedef.qualified_name` and
+   `typedef.value` stay. Per-check decisions, from the amendment's A3 rule:
+
+   | check (`source_diff.py` / `source_provenance_diff.py`) | under mismatch |
+   |---|---|
+   | `_diff_generated` | withheld: removal and value on unpinned fields |
+   | `_diff_typedefs` | withheld: `type_hash` and removal are unpinned |
+   | `_diff_macros` | withheld: value and removal, not pinned |
+   | `_diff_concepts` | withheld: value/hash fallback chain, unpinned |
+   | `_diff_declarations` | withheld: `value` and `signature_hash`, unpinned |
+   | `_diff_inline_bodies` | withheld: body hash and removal keyed on mangled |
+   | `_diff_templates` | withheld: body hash and removal |
+   | `_diff_mappings` | withheld: symbol mapping keyed on mangled names |
+   | `_diff_provenance` | withheld: mangled-name symbol match |
+   | `_diff_odr` | withheld: keyed on `qualified_name` of unpinned records |
+   | `_diff_fact_coverage` | replaced by the A4 finding for this case |
+
+   Consequence, stated plainly: for a mismatched pair the pinned intersection
+   produces no finding today, because no check reads `typedef.qualified_name`
+   or `typedef.value` as a finding. The coverage finding reports the pinned
+   count (for example `Compared 2 pinned facts (1 shared typedefs ...)`), so the
+   run is never a clean pass. Growing the intersection needs a new pinned field
+   first, which the measurement test has to confirm.
+   A regression test (`tests/test_revision_comparability.py`) fails when the
+   guard is disabled (mutation recorded in the PR body). The
+   `_diff_provenance` block moved to `source_provenance_diff.py` to keep
+   `source_diff.py` under its line budget (`debt.yaml` baseline 1113 → 1066).
 3. The `CLANG_EXTRACTOR_VERSION` bump from `"0.13"` to `"0.14"`, last, once 1 and 2
    are in place. Re-run this measurement and the golden test in that PR; the
    expected set in `tests/test_l4_clang_projection_golden.py` changes there, not
