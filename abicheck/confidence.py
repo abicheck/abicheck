@@ -356,6 +356,7 @@ def compute_confidence(
     warnings.extend(unparseable_header_warnings(old, new))
     warnings.extend(extraction_scope_notes(old, new))  # ADR-075 D3
     warnings.extend(snapshot_load_notices(old, new))  # ADR-062 D2
+    warnings.extend(undeclared_export_warnings(old, new))  # field report H5
 
     # Layout evidence must cover every compared side: a layout change is only
     # established when both sides' layouts are known. A baseline-less audit
@@ -375,6 +376,45 @@ def compute_confidence(
     )
 
     return tiers, confidence, warnings, evidence_tier
+
+
+def undeclared_export_warnings(old: AbiSnapshot | None, new: AbiSnapshot) -> list[str]:
+    """Per side: exports the parsed headers did not declare, by recognized cause.
+
+    Informational only (no finding, no exit-code effect). Reads a side only
+    when it is header-aware and its export table was really captured
+    (``elf.machine`` set), so an uncaptured table never reads as "everything
+    undeclared". See :mod:`abicheck.model.undeclared_export_census`.
+    """
+    from .demangle import demangle_batch
+    from .elf_symbol_filter import ALL_SYMBOL_TYPES, exported_symbol_names
+    from .model.undeclared_export_census import (
+        census_undeclared_exports,
+        census_warning,
+    )
+
+    notes: list[str] = []
+    for side, snap in (("old", old), ("new", new)):
+        if snap is None or getattr(snap, "elf_only_mode", False):
+            continue
+        elf = getattr(snap, "elf", None)
+        if elf is None or not getattr(elf, "machine", ""):
+            continue
+        exported = exported_symbol_names(elf, ALL_SYMBOL_TYPES, abi_relevant_only=True)
+        declared: set[str] = set()
+        for decl_map in (snap.function_map, snap.variable_map):
+            declared.update(decl_map)
+            declared.update(d.name for d in decl_map.values())
+        undeclared = exported - declared
+        if not undeclared:
+            continue
+        census = census_undeclared_exports(
+            undeclared, demangle_batch(sorted(undeclared))
+        )
+        line = census_warning(side, census)
+        if line is not None:
+            notes.append(line)
+    return notes
 
 
 def snapshot_load_notices(old: AbiSnapshot | None, new: AbiSnapshot) -> list[str]:

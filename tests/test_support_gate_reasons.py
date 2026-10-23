@@ -79,7 +79,10 @@ _PRECONDITIONS: tuple[tuple[str, Predicate], ...] = (
     ("missing ELF metadata", lambda o, n: o.elf is None or n.elf is None),
     ("missing PE metadata", lambda o, n: o.pe is None or n.pe is None),
     ("missing Mach-O metadata", lambda o, n: o.macho is None or n.macho is None),
-    ("missing SYCL metadata", lambda o, n: o.sycl is None or n.sycl is None),
+    (
+        "missing SYCL runtime (PI plugin) metadata",
+        lambda o, n: o.sycl is None or n.sycl is None,
+    ),
     (
         "missing CPython extension metadata",
         lambda o, n: o.python_ext is None or n.python_ext is None,
