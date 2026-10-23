@@ -54,6 +54,7 @@ from .dwarf_utils import (
 )
 from .elf_symbol_filter import is_abi_relevant_elf_symbol
 from .extract import dwarf_vtable_completeness as _dvc
+from .extract.dwarf_decl_file import decl_file_path
 from .extract.dwarf_records import (
     access_from_dwarf as _access_from_dwarf,
     admit_subprogram as _admit_subprogram,
@@ -1090,36 +1091,12 @@ class _DwarfSnapshotBuilder:
     def _resolve_decl_file(self, die: Any, CU: Any) -> str | None:
         """Resolve DW_AT_decl_file to a source file path.
 
-        Returns a string like ``"foo.c:42"`` or ``"foo.h"`` (without line if
-        unavailable), or ``None`` if the attribute is absent.
+        Returns ``"<path>:<line>"`` (or the bare path when no line is
+        recorded), or ``None`` if the attribute is absent or unresolvable.
+        DWARF 4 and DWARF 5 file tables differ; see
+        :mod:`abicheck.extract.dwarf_decl_file`.
         """
-        if "DW_AT_decl_file" not in die.attributes:
-            return None
-        file_idx = die.attributes["DW_AT_decl_file"].value
-        if file_idx == 0:
-            return None  # no file
-        try:
-            line_prog = CU.dwarfinfo.line_program_for_CU(CU)
-            if line_prog is None:
-                return None
-            # DWARF 4: file_entry is 1-indexed into line_prog['file_entry']
-            # DWARF 5: file_entry is 0-indexed into line_prog.header['file_names']
-            file_entries = line_prog.header.get("file_names") or []
-            # pyelftools uses 1-based indexing for DWARF 4
-            ver = CU.header.get("version", 4) if hasattr(CU, "header") else 4
-            idx = file_idx - 1 if ver < 5 else file_idx
-            if 0 <= idx < len(file_entries):
-                entry = file_entries[idx]
-                fname = (
-                    entry.name
-                    if isinstance(entry.name, str)
-                    else entry.name.decode("utf-8", errors="replace")
-                )
-                line = _attr_int(die, "DW_AT_decl_line")
-                return f"{fname}:{line}" if line else fname
-        except Exception:  # noqa: BLE001
-            log.debug("Failed to resolve source location for DIE")
-        return None
+        return decl_file_path(die, CU)
 
     def _process_field(
         self,
