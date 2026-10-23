@@ -552,3 +552,21 @@ Deliberate rulings and scope limits, not defects. Changing one needs the decisio
 | The compatibility percentage divides findings by symbols (ABICC heuristic, public contract); kept. | [The compatibility percentage counts findings against symbols](known-gaps/the-compatibility-percentage-counts-findings-against-symbols.md) |
 | DWARF member-location evaluation covers `DW_OP_plus`/`plus_uconst`/`constu`/`consts`/`lit0..31` only; other ops give unknown offsets, not values. | [DWARF member-location evaluator implements only a subset of DW_OP](known-gaps/dwarf-member-location-evaluator-implements-only-a-subset-of-dw-op.md) |
 | Local-exec TLS in an AArch64 shared object leaves no binary evidence; toolchain limit. | [Local-exec TLS in an AArch64 shared object leaves no binary evidence](known-gaps/local-exec-tls-in-an-aarch64-shared-object-leaves-no-binary.md) |
+
+## Unreached oneDAL profiling hotspots (perf, 2026-10-23)
+
+**Status: OPEN.** No use-case scenario executes any oneDAL-profiled hotspot.
+The repository records oneDAL only as whole-run receipts (wall time, peak RSS,
+verdict) in [`performance.md`](performance.md) and as the periodic
+`scripts/l2_real_profiles.py` profile; neither names the hot functions, so no
+function-level list is traceable from the repo. Function-level coverage
+needs the oneDAL operands (about 120 build-minutes and 25 GB), which
+`usecase_flows.yaml` cannot provide: its flows run against self-contained
+catalog cases only. Reach stays unrecorded until a maintainer supplies the
+profiled function list and runs `usecase_paths.py record --source flows` against
+a built oneDAL tree. The perf-side mapping for the measured hot paths is
+`USE_CASES` in `scripts/complexity_bench.py`.
+
+`perf` — oneDAL hot paths (`compare()` over a 125-header-root L2 surface, the
+rows in the 2026-09 receipt series) are not exercised by any scenario, so a
+regression there shows up only in the manual real-profile lane.

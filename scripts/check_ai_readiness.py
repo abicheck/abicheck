@@ -26,7 +26,7 @@ import os
 import re
 import subprocess
 import sys
-from collections import defaultdict
+from collections import Counter, defaultdict
 from collections.abc import Callable, Iterable
 from pathlib import Path
 
@@ -3441,6 +3441,148 @@ def check_license_header(f: Findings) -> None:
 
 
 # ---------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# Check: a `complete` use case has at least one automated scenario or flow
+# ---------------------------------------------------------------------------
+
+USECASE_REGISTRY_REL = "docs/contribute/usecase-registry.yaml"
+USECASE_FLOWS_REL = "scripts/usecase_flows.yaml"
+USECASE_SCENARIOS_REL = "tests/scenarios"
+#: no-growth list of `complete` use cases that may have zero runs. Every entry
+#: carries a reason. An entry that gains a run, or stops being `complete`, is
+#: stale and fails, so the list only shrinks.
+USECASE_ZERO_RUN_GRANDFATHER_REL = "scripts/usecase_zero_run_grandfather.json"
+
+_YAML_ITEM_RE = re.compile(r"^  - id: (\S+)\s*$")
+_YAML_FIELD_RE = re.compile(r"^    ([a-z_]+): (.*)$")
+
+
+def _yaml_items(text: str) -> list[dict[str, str]]:
+    """The ``  - id:`` items of a block list, each as ``{field: value}`` for its
+    4-space-indented scalar fields.
+
+    Line-based on purpose: this gate runs before ``pip install``, so PyYAML is
+    not available. Values are plain scalars with trailing comments stripped;
+    deeper-indented lines (nested maps, block scalars) are not fields here.
+    """
+    items: list[dict[str, str]] = []
+    for line in text.split("\n"):
+        item = _YAML_ITEM_RE.match(line)
+        if item:
+            items.append({"id": item.group(1)})
+            continue
+        field = _YAML_FIELD_RE.match(_strip_yaml_line_comment(line))
+        if field and items:
+            items[-1].setdefault(field.group(1), field.group(2).strip().strip("\"'"))
+    return items
+
+
+def _usecase_run_counts(root: Path) -> Counter[str]:
+    """Automated scenario and usecase-flow runs per use case id.
+
+    A scenario counts only when ``automated: true``: a manual or planned
+    scenario is documentation, not a run. Every flow in
+    ``scripts/usecase_flows.yaml`` is run by ``usecase_paths.py record``.
+    """
+    runs: Counter[str] = Counter()
+    for path in sorted((root / USECASE_SCENARIOS_REL).glob("*.yaml")):
+        for sc in _yaml_items(_read(path)):
+            if sc.get("automated") == "true" and sc.get("validates"):
+                runs[sc["validates"]] += 1
+    for flow in _yaml_items(_read(root / USECASE_FLOWS_REL)):
+        if flow.get("use_case"):
+            runs[flow["use_case"]] += 1
+    return runs
+
+
+def _load_usecase_zero_run_grandfather(path: Path) -> tuple[dict[str, str], list[str]]:
+    """``{use case id: reason}`` from the grandfather file, plus its own problems."""
+    text = _read(path)
+    if not text:
+        return {}, [f"{USECASE_ZERO_RUN_GRANDFATHER_REL} is missing or unreadable"]
+    try:
+        data = json.loads(text)
+    except json.JSONDecodeError as exc:
+        return {}, [f"{USECASE_ZERO_RUN_GRANDFATHER_REL}: invalid JSON ({exc})"]
+    entries = data.get("entries") if isinstance(data, dict) else None
+    if not isinstance(entries, list):
+        return {}, [
+            f"{USECASE_ZERO_RUN_GRANDFATHER_REL}: needs a top-level 'entries' list"
+        ]
+    out: dict[str, str] = {}
+    problems: list[str] = []
+    for entry in entries:
+        if not (
+            isinstance(entry, dict)
+            and isinstance(entry.get("id"), str)
+            and isinstance(entry.get("reason"), str)
+            and entry["reason"].strip()
+        ):
+            problems.append(
+                f"{USECASE_ZERO_RUN_GRANDFATHER_REL}: malformed entry {entry!r} "
+                "(needs a string 'id' and a non-empty 'reason')"
+            )
+            continue
+        if entry["id"] in out:
+            problems.append(
+                f"{USECASE_ZERO_RUN_GRANDFATHER_REL}: {entry['id']} is listed twice"
+            )
+        out[entry["id"]] = entry["reason"]
+    return out, problems
+
+
+def usecase_zero_run_problems(root: Path = ROOT) -> list[str]:
+    """Problems with zero-run ``complete`` use cases; empty when the tree passes.
+
+    A ``complete`` use case with no automated scenario and no flow fails unless
+    it is grandfathered. A grandfathered entry fails as stale once it is
+    unknown, no longer ``complete``, or has gained a run.
+    """
+    registry = {
+        uc["id"]: uc.get("status", "")
+        for uc in _yaml_items(_read(root / USECASE_REGISTRY_REL))
+    }
+    if not registry:
+        return [f"{USECASE_REGISTRY_REL}: no use cases parsed"]
+    runs = _usecase_run_counts(root)
+    grandfathered, problems = _load_usecase_zero_run_grandfather(
+        root / USECASE_ZERO_RUN_GRANDFATHER_REL
+    )
+    for uc_id in sorted(registry):
+        if registry[uc_id] != "complete" or runs[uc_id] > 0:
+            continue
+        if uc_id not in grandfathered:
+            problems.append(
+                f"{uc_id}: status complete but no automated scenario or usecase "
+                f"flow runs it; add one, or grandfather it in "
+                f"{USECASE_ZERO_RUN_GRANDFATHER_REL} with a reason"
+            )
+    for uc_id in sorted(grandfathered):
+        if uc_id not in registry:
+            problems.append(
+                f"{uc_id}: grandfathered but not in {USECASE_REGISTRY_REL}; "
+                "remove the entry"
+            )
+        elif registry[uc_id] != "complete":
+            problems.append(
+                f"{uc_id}: grandfathered but its status is "
+                f"{registry[uc_id]!r}, not complete; remove the entry"
+            )
+        elif runs[uc_id] > 0:
+            problems.append(
+                f"{uc_id}: grandfathered but now has {runs[uc_id]} run(s); "
+                "remove the entry so the list only shrinks"
+            )
+    return problems
+
+
+def check_usecase_complete_has_runs(f: Findings) -> None:
+    """ADR-076 follow-up: a ``complete`` use case must have a scenario or flow run."""
+    for problem in usecase_zero_run_problems(ROOT):
+        f.err("usecase-complete-has-runs", problem)
+
+
+# ---------------------------------------------------------------------------
 # Registry & CLI
 # ---------------------------------------------------------------------------
 
@@ -3482,6 +3624,7 @@ CHECKS: dict[str, Callable[[Findings], None]] = {
     "no-inline-gate-computation": check_no_inline_gate_computation,
     "license-header": check_license_header,
     "test-assertion-density": check_test_assertion_density,
+    "usecase-complete-has-runs": check_usecase_complete_has_runs,
 }
 
 
