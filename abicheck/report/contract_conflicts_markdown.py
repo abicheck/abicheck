@@ -28,6 +28,8 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
+from .markdown_budget import NAME_LIMIT, clip, more_line
+
 
 @dataclass(frozen=True, slots=True)
 class ContractConflictRow:
@@ -53,7 +55,7 @@ class ContractConflictsSection:
 #: or PR comment can hold.
 CONFLICT_ROW_LIMIT = 20
 #: Characters of one entity name shown; the JSON keeps the full name.
-CONFLICT_NAME_LIMIT = 160
+CONFLICT_NAME_LIMIT = NAME_LIMIT
 #: Characters of one source line shown.
 CONFLICT_SOURCE_LINE_LIMIT = 300
 
@@ -77,10 +79,6 @@ def conflict_origin(entity: str) -> str:
         _RUNTIME_MANGLED.match(entity)
     )
     return "toolchain runtime" if runtime else "library"
-
-
-def _clip(text: str, limit: int) -> str:
-    return text if len(text) <= limit else text[: limit - 1] + "…"
 
 
 def render_contract_conflicts_section(
@@ -122,16 +120,13 @@ def render_contract_conflicts_section(
     ordered = sorted(section.rows, key=lambda r: conflict_origin(r.entity) != "library")
     for row in ordered[:CONFLICT_ROW_LIMIT]:
         side_suffix = f" ({row.side})" if row.side else ""
-        entity = _clip(row.entity, CONFLICT_NAME_LIMIT)
+        entity = clip(row.entity, CONFLICT_NAME_LIMIT)
         lines.append(f"- **{row.conflict_kind}**{side_suffix}: `{entity}`")
         for src_line in row.source_lines:
-            lines.append(f"  - {_clip(src_line, CONFLICT_SOURCE_LINE_LIMIT)}")
+            lines.append(f"  - {clip(src_line, CONFLICT_SOURCE_LINE_LIMIT)}")
     hidden = len(section.rows) - CONFLICT_ROW_LIMIT
-    if hidden > 0:
-        lines.append(
-            f"- … and {hidden} more; itemised in full in the machine-readable "
-            "report (JSON `contract_conflicts`)."
-        )
+    if (more := more_line(hidden, "contract_conflicts")) is not None:
+        lines.append(more)
     lines.append("")
     return lines
 

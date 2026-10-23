@@ -220,6 +220,18 @@ FAMILIES: dict[str, Family] = {
             ),
         ),
         Family(
+            key="F14",
+            title="Human output stays within its display budget",
+            invariant=(
+                "A bounded human rendering (Markdown report, review digest, "
+                "compact summary) stays within a fixed size however many "
+                "non-gating findings the run carries, budgets each group it "
+                "caps independently, and states every population it cut with "
+                "its full count; machine formats keep every finding."
+            ),
+            harness_tests=("tests/unit/report/test_markdown_report_budget.py",),
+        ),
+        Family(
             key="OTHER",
             title="CI, tooling, storage and trust-boundary surfaces",
             invariant=(
@@ -411,6 +423,10 @@ _F12 = (
     "extraction.msvc_include_operand_spelling_not_probed",
 )
 _F13 = ("extraction.compile_entry_collapsed_to_first_source",)
+_F14 = (
+    "report.shared_display_budget_starvation",
+    "report.markdown_size_unbounded_by_finding_count",
+)
 
 #: id -> reason it belongs to no shared family.
 OTHER_REASONS: dict[str, str] = {
@@ -429,7 +445,6 @@ OTHER_REASONS: dict[str, str] = {
     "cli_surface.derived_table_lost_in_its_own_encoding": "Action option-table encoding",
     "cli_surface.destination_collision_checked_only_by_exact_path": "output-path handling",
     "cli_surface.retired_spelling_in_remediation": "user-facing message text",
-    "report.shared_display_budget_starvation": "report rendering budget",
     "report.untrusted_value_escapes_its_cell": "report rendering escaping",
     "storage.out_of_band_snapshot_reader_envelope_drift": "storage envelope readers",
     "storage.safety_limit_used_as_allocation_size": "storage resource limits",
@@ -455,6 +470,7 @@ for _key, _ids in (
     ("F11", _F11),
     ("F12", _F12),
     ("F13", _F13),
+    ("F14", _F14),
     ("OTHER", tuple(OTHER_REASONS)),
 ):
     for _id in _ids:

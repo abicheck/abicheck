@@ -760,6 +760,16 @@ def compute_library_files(
     )
 
 
+def _rolled_up_group(
+    heading: str, changes: list[Change], level: object | None, **kw: Any
+) -> _rmd.ChangeGroup:
+    """A non-gating section's group with its flooded kinds rolled up."""
+    items, rollups = roll_up_large_kinds(changes, severity_level=level)
+    return _rmd.ChangeGroup(
+        heading=heading, changes=tuple(items), rollups=rollups, **kw
+    )
+
+
 def compute_severity_sections(
     breaking: list[Change],
     source_breaks: list[Change],
@@ -810,18 +820,13 @@ def compute_severity_sections(
             c for c in risk if getattr(c, "cross_source_evolution", None) is None
         ]
         sev_label = _section_severity_label(severity_config, "potential_breaking")
+        risk_level = _section_severity_level(severity_config, "potential_breaking")
         if deployment_risk:
-            risk_items, risk_rollups = roll_up_large_kinds(
-                deployment_risk,
-                severity_level=_section_severity_level(
-                    severity_config, "potential_breaking"
-                ),
-            )
             groups.append(
-                _rmd.ChangeGroup(
-                    heading=f"## {_RISK_ICON} Deployment Risk Changes{sev_label}",
-                    changes=tuple(risk_items),
-                    rollups=risk_rollups,
+                _rolled_up_group(
+                    f"## {_RISK_ICON} Deployment Risk Changes{sev_label}",
+                    deployment_risk,
+                    risk_level,
                     oneline=True,
                     note_lines=(
                         "> These changes are **binary-compatible** but may cause the library to fail",
@@ -831,17 +836,11 @@ def compute_severity_sections(
                 )
             )
         if hygiene:
-            hygiene_items, hygiene_rollups = roll_up_large_kinds(
-                hygiene,
-                severity_level=_section_severity_level(
-                    severity_config, "potential_breaking"
-                ),
-            )
             groups.append(
-                _rmd.ChangeGroup(
-                    heading=f"## {_HYGIENE_ICON} Cross-Source Hygiene Findings{sev_label}",
-                    changes=tuple(hygiene_items),
-                    rollups=hygiene_rollups,
+                _rolled_up_group(
+                    f"## {_HYGIENE_ICON} Cross-Source Hygiene Findings{sev_label}",
+                    hygiene,
+                    risk_level,
                     oneline=True,
                     note_lines=(
                         "> These findings compare each snapshot's own evidence sources against each",
@@ -868,17 +867,11 @@ def compute_severity_sections(
         informational = [c for c in compatible if c.kind in _INFORMATIONAL_KINDS]
         if quality:
             sev_label = _section_severity_label(severity_config, "quality_issues")
-            quality_items, quality_rollups = roll_up_large_kinds(
-                quality,
-                severity_level=_section_severity_level(
-                    severity_config, "quality_issues"
-                ),
-            )
             groups.append(
-                _rmd.ChangeGroup(
-                    heading=f"## {_QUALITY_ICON} Quality Issues{sev_label}",
-                    changes=tuple(quality_items),
-                    rollups=quality_rollups,
+                _rolled_up_group(
+                    f"## {_QUALITY_ICON} Quality Issues{sev_label}",
+                    quality,
+                    _section_severity_level(severity_config, "quality_issues"),
                     oneline=True,
                 )
             )
@@ -891,23 +884,21 @@ def compute_severity_sections(
             # surface.
             sev_label = _section_severity_label(severity_config, "addition")
             groups.append(
-                _rmd.ChangeGroup(
-                    heading=f"## {_ADDITION_ICON} Additions{sev_label}",
-                    changes=tuple(additions_list),
+                _rolled_up_group(
+                    f"## {_ADDITION_ICON} Additions{sev_label}",
+                    additions_list,
+                    _section_severity_level(severity_config, "addition"),
                     oneline=False,
                 )
             )
         if informational:
             # ADR-078: recorded, never gated -- no configurable level, so the
             # heading carries no severity label.
-            info_items, info_rollups = roll_up_large_kinds(
-                informational, severity_level=None
-            )
             groups.append(
-                _rmd.ChangeGroup(
-                    heading=f"## {_INFORMATIONAL_ICON} Informational (no material change)",
-                    changes=tuple(info_items),
-                    rollups=info_rollups,
+                _rolled_up_group(
+                    f"## {_INFORMATIONAL_ICON} Informational (no material change)",
+                    informational,
+                    None,
                     oneline=True,
                 )
             )
