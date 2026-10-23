@@ -287,7 +287,9 @@ def test_a_cache_hit_reports_itself_and_a_miss_does_not(
         dump_cache_store.SNAPSHOT_DISK_CACHE, "lookup", lambda read: read()
     )
     monkeypatch.setattr(
-        dump_cache_store, "_read_entry", lambda key, path: sentinel if hit else None
+        dump_cache_store,
+        "_read_entry",
+        lambda key, path, *rest: sentinel if hit else None,
     )
     got = dump_cache_store._lookup_key("k" * 16, tmp_path / "libwarm.so")
     assert (got is sentinel) == hit

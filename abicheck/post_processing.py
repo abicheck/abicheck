@@ -364,15 +364,14 @@ class FilterNonPublicSurface:
         if not ctx.scope_to_public_surface:
             return changes
 
-        from .policy.public_surface_query import PublicSurfaceQuery
         from .surface import (
             classify_change_surface,
             demangle_batch_on_first_need,
             surface_unions,
         )
 
-        surf_old = PublicSurfaceQuery.resolve_public_domain(ctx.baseline_or_empty)
-        surf_new = PublicSurfaceQuery.resolve_public_domain(ctx.new)
+        surf_old = ctx.public_surface_of(ctx.baseline_or_empty)
+        surf_new = ctx.public_surface_of(ctx.new)
         # Cache for reuse (surface_scope_confidence) — avoids a second walk.
         ctx.surf_old = surf_old
         ctx.surf_new = surf_new

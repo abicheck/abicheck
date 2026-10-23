@@ -53,9 +53,24 @@ def _offenders(small: dict[str, int], large: dict[str, int]) -> list[str]:
     return [o.describe() for o in superlinear_call_sites(small, large, LARGE / SMALL)]
 
 
-def test_dump_call_counts_grow_subquadratically(tmp_path: Path) -> None:
+def _isolate_ast_cache(monkeypatch: pytest.MonkeyPatch, root: Path) -> None:
+    # The header-AST cache budget scan (storage/ast_cache_budget) sizes every
+    # entry already in the shared cache directory, at most once per
+    # RECHECK_INTERVAL_SECONDS. Under xdist other workers fill that directory
+    # between the two sizes, so on a slow runner the LARGE run's scan counted
+    # foreign entries (seen on Windows: sidecar_path 1 -> 203) -- a count of
+    # shared state, not of dump() work. A private cache root per measured run
+    # makes the count a function of the run alone.
+    monkeypatch.setenv("XDG_CACHE_HOME", str(root))
+    monkeypatch.setenv("LOCALAPPDATA", str(root))
+
+
+def test_dump_call_counts_grow_subquadratically(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     def counts(n: int) -> dict[str, int]:
         run = next(_runs)
+        _isolate_ast_cache(monkeypatch, tmp_path / f"cache{run}")
         lib = build_library(tmp_path / f"d{run}_{n}", n, tag=f"r{run}")
         holder = {}
         c = profile_call_counts(

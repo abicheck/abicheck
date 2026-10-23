@@ -169,6 +169,7 @@ def _no_baseline_exit_axes(
     from ..policy.audit_gate_exit import audit_gate_exit_contribution
     from ..policy.contract_coverage_exit import coverage_exit_floor
     from ..policy.exit_decision_precedence import EXIT_EVIDENCE_CONTRACT_ERROR
+    from ..policy.unused_rules_gate import unused_rules_exit_contribution
 
     scope_decision = _scope_decision(result)
     return {
@@ -201,6 +202,12 @@ def _no_baseline_exit_axes(
         "no_comparison_completed": (
             scope_decision.no_comparison_completed_exit_contribution
         ),
+        # ADR-067 P1: a policy file's `unused_rules: block` fails a run whose
+        # configured suppression/reclassify rule matched nothing. The audit
+        # already reported `unused_rules_review.gate_contribution: 1` while
+        # its exit code stayed 0 -- the stale-exception gate a single-build
+        # declared-vs-exported check relies on was silently inert here.
+        "unused_rules": unused_rules_exit_contribution(result.diff),
     }
 
 

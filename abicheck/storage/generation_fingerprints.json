@@ -11,7 +11,7 @@
       "abicheck/dwarf_snapshot_datasources.py": "e337f8be3a8ae16350c0639d0be10670d4d5d1197108659fa210fcbbf8a5bdde",
       "abicheck/dwarf_unified.py": "9ecb70b59bb26674ac98ba14ad1211b4103e3a78426a91ed7901e59f1a7d9cdf",
       "abicheck/dwarf_utils.py": "d236971e77d092bbdc578c5f36380e6383a4d9a19716127adf32b28065f24a83",
-      "abicheck/elf_metadata.py": "2f9f737e80fa34d4c7ea72d7e9256f0e9e94e5f7fc6d91f3ed368d709cb4dc26",
+      "abicheck/elf_metadata.py": "43f4f804a24e2a0d9a4dca59772ecbfe1a6e70cd6c4d05c9f22efb469b2ab92f",
       "abicheck/extract/__init__.py": "011ec37fad96ea2035983eaaedeba0976940a570900f85db8c03bb7369af742a",
       "abicheck/extract/binary_format.py": "4b9f591077fa5c90d2e3a767343d92b098061870403d431694470bc05e5468b3",
       "abicheck/extract/binary_identity.py": "4645eaf3dddd0a2230a5c694882548476406c57514275fa4c8c1bc152607ca88",
@@ -54,13 +54,13 @@
       "abicheck/extract/export_table_read.py": "7783c3baba176ef8b47cb99361f389984bb1797c37ba5d9120866359f60c3601",
       "abicheck/extract/flat_map_dependency_scope.py": "77659ce966d856c4b9008cdc6cf88250a3f50314fdf04140712f4e3797894648",
       "abicheck/extract/header_ast_backend.py": "1f5b15c126b139c49b702b69a4f626ed7d30f8294e15ad116d61387e96d31f16",
-      "abicheck/extract/header_ast_cache_producers.py": "9fdd20b55d57ae059e2d10136f11ad02149acf1eeffe9439b54c1fa67ea1e035",
+      "abicheck/extract/header_ast_cache_producers.py": "b20f72d82c73d0f82a91bf53b32edf673a043aae5f68eec9c38d6d7ad9c7b63a",
       "abicheck/extract/header_ast_fields.py": "436f6feaed4da7566a551fa44d3e102d28964fecc57a22821111d7f63c6f5840",
       "abicheck/extract/header_exclusions.py": "254ca6e4ccf7366b9db516183d6814cb865c279845abe7d05051ac2f72bf0884",
       "abicheck/extract/header_order_witness.py": "6a1cfce946826fa540a0601ebeefa02a8973ba6e8cd5d8287f6c1e7badc3d53a",
       "abicheck/extract/header_scan_memo.py": "56f79b5316354b938b08a5f29779c3aaf40481892d947784ec2adb48ab5e83fb",
       "abicheck/extract/headers/__init__.py": "70af0d3a16882783444077004b7a434a295505579fbbca219ce103f72074ad03",
-      "abicheck/extract/headers/ast_config.py": "bc9a5af63004129c078abdec768ce0596ec878ecb3cd845b90911e833e500bc1",
+      "abicheck/extract/headers/ast_config.py": "708e6f189d9f24510a544e22655d668733dd1b565e4ec747c11b3fb29d466749",
       "abicheck/extract/headers/ast_config_cpp20_chains.py": "ceeadbcb1d8e2eaac5eb325a3fb7c668614ce605bc04bb03835fcc4957e53c97",
       "abicheck/extract/headers/backend_plan.py": "1f02babf0ead52a65e4fa08dff8ce5b2a9d60feb1d02d22e7db30ee050cf8717",
       "abicheck/extract/headers/backend_protocol.py": "144cbe76456b6bceaf56f0edd0f3398f171178a222c8b968d53f8a17ee05a21b",
@@ -106,6 +106,7 @@
       "abicheck/extract/headers/clang/template_param_indexes.py": "d73116e7e4bf662dd4c5b00d653a8a1fd1ece26818806f8ec5f08ec417b104fa",
       "abicheck/extract/headers/clang/templates.py": "21aa38d283c3b7bd036d68cec6e655fb9be9ae84fba3e6da8d01d3b6c442105c",
       "abicheck/extract/headers/clang/vtable.py": "bc235100ce9c5cb9ec8af93ea5bafe1abf0ea29249087a2b5f073ef5293257ff",
+      "abicheck/extract/headers/clang_header_argv.py": "c198bd32d8fc6c5e59d6fd30f809544291a4a5381614f2fcbb281765da6626b7",
       "abicheck/extract/headers/compile_provenance.py": "1453703111a2abf28799b446e125c34906fd3220faca27db49220f625cc99d75",
       "abicheck/extract/headers/manifest.py": "b44a66dc760b0fd39e671876615d1e846433b2d76cb050be39749c5740c942bf",
       "abicheck/extract/headers/scope_segments.py": "d413edec257eb1334c829263770b66dc2eda3d263c765f699eac9f7e3ace9e65",
@@ -114,7 +115,7 @@
       "abicheck/extract/headers/toolchain.py": "be0be05950476ff2c0cb168727ebcde4859cc634c258f5ff23b1af1d2c50b754",
       "abicheck/extract/library_export_facts.py": "071b2a58f284753b57fa2e374680a57e9ce6897877b65a84fb92f420e7cf2ab7",
       "abicheck/extract/macho_build_signals.py": "c277bfdd55f26aae61af66c8fa6c5cdc5fa45acc49a3ae513af5899417db88bb",
-      "abicheck/extract/mangled_foreign_template_args.py": "68a87749f13cafca0ce75725b98b22f7695afaf20a71a158759eef220ec72274",
+      "abicheck/extract/mangled_foreign_template_args.py": "58892490cdf5173d3e562a8f63abe3b55371beb30aaacbf79d9aecfcd08ca8bc",
       "abicheck/extract/manifest_semantic_ir.py": "9d8a6ddaa619a7d4b214bbeab5c2c0dfef681a6fd9dffd004760b19a62da3b15",
       "abicheck/extract/metadata_attach.py": "a4d2cba939ecf96036f0c974e723c15e68699d9f5ce847c8e9f8b04f0440fa6d",
       "abicheck/extract/occurrence_dependency_scope.py": "d28ca573fecaecec3c67b784c9d44d516d039824e744179f852f5a89dc135d8e",
@@ -133,6 +134,7 @@
       "abicheck/extract/semantic_normalizer.py": "d7fb1ef96f74b9052a94a6877211f68488d2b317dd9651ab0e5425df94ed8910",
       "abicheck/extract/semantic_normalizer_dwarf.py": "d092c309a8e349f9b699e5931456188485670ef05a8048783496d915fe7a7a83",
       "abicheck/extract/semantic_normalizer_template_args.py": "9e07ae6b02395411ad22cbd02e2acbe3f9d70b5a33283b606a9296ba9d55b1b2",
+      "abicheck/extract/stdlib_local_origin.py": "5ba2ab65b5d264138e07adfa3506ade7706239bcc07cc04e3fb75596ec7b4358",
       "abicheck/extract/surface_fact_producers.py": "04bf7fb7a1cef30ffbc942101d82f23f2f25fcd1e59a49aa6de2d3acdcf59cc9",
       "abicheck/extract/system_header_layout.py": "9c5c2fa835eb4cccb6a7b6ccce22ba0941ea403c42d1f91fd7b09365bf017280",
       "abicheck/extract/target_platform.py": "d2f2774c26bd12eb623a64883c2611782cac8f3d84da51248a969bd1f288e739",
@@ -151,9 +153,9 @@
       "abicheck/symvers_metadata.py": "372737765cd132e6e87ed891dd465d2958e04debbef774e45212ceb3036871cb",
       "abicheck/type_metadata.py": "9997189de8dac522fd1db8be5ae491d811139503f83abaaded89038eb4aa9cdf"
     },
-    "fingerprint": "b2db3756678c7bf0665085e77a7dc2ce36d2b4dc77e581e9fe371c23e794063f",
-    "generation": 9,
-    "reason": "merged origin/main (#1698, #1691, #1693, #1710, #1705): main's own extractor bump to 6 (#1698) and the #1710 constant move are inside this build's generation 9, which is above main's 6 and includes this branch's four semantic generations (6 clang defaults fact v62, 7 positional defaults, 8 dependent members, 9 castxml template_default_header_scan v63). Extraction semantics are unchanged by the merge itself."
+    "fingerprint": "c4700d24d671d22f72f54d3b319a986539641f27a83815da88412f9e59e3ed4c",
+    "generation": 10,
+    "reason": "Adds a NON_SHAPING_MODULES classification entry for clang_header_argv (the body of the keyed header argv builder, already covered by the invocation digest). No extraction output or cache key changes; the CLANG_AST_OUTPUT_MODULES fingerprint is untouched."
   },
   "resolver": {
     "files": {
@@ -201,6 +203,7 @@
       "abicheck/buildsource/source_extractors/clang_macros.py": "a1970f60666e573bda375ea9017705b0ad9d43838524d617b0f4ee60a009bbe3",
       "abicheck/buildsource/source_extractors/clang_node_predicates.py": "1e9556dab627cac4da137bf0f34b858f6e76b194f932aeb92ffe4ba8f07bb7bf",
       "abicheck/buildsource/source_extractors/clang_nodes.py": "9463fbac6fe36203c29f20ab3203791e3b558f21f4ebf66ee732f39aaf912c9b",
+      "abicheck/buildsource/source_extractors/clang_projection.py": "7d731ca0551bec84372d4c57bdb31af143220e99bbf04e7417cc34a9f851fc6f",
       "abicheck/buildsource/source_extractors/clang_public_roots.py": "26b787aca87c1549b821f4f420be1960b48317e9bdefd2e946b3b2903238e214",
       "abicheck/buildsource/source_extractors/clang_source_edges.py": "c9b8c3daacd02c4913b486a6ac658b435744243ed4433f14792588f67ef800e9",
       "abicheck/buildsource/source_extractors/compile_invocation.py": "8af29f22859f7e8fd81d5abd2266e017acc31ff539db9e42bd873ae544f9dccf",
@@ -217,8 +220,8 @@
       "abicheck/buildsource/type_graph.py": "a028a875057cd0cbf2930a431bfa1e579f7b770e0d124cbcfe715724e89d12e5",
       "abicheck/buildsource/type_graph_index.py": "7375f7baec7ceb3dd4a52a489b89e5a3571750dffca7490d1c5870301d55202d"
     },
-    "fingerprint": "9699291e5cab56b2dd9b2b8fc09f7a9aae2c8439332ed9b53f3a740a18742243",
+    "fingerprint": "9af8ade5d330bbbed1ff35ced048ac3def398759229baff8eaa37b2f6ca57aba",
     "generation": 4,
-    "reason": "Merge of origin/main: source-scope edit is a docstring path repoint to compare/internal_leak.py; no extracted fact or derived graph changes."
+    "reason": "Adds clang_projection.py (PublicSurfaceClangParser, project_clang_surface) as a new production projection. Emitted L4/L2 output and SOURCE_GENERATION-relevant extraction are unchanged; the golden pinned set is unchanged."
   }
 }

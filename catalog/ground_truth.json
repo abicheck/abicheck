@@ -4405,6 +4405,142 @@
     "linux"
    ]
   },
+  "case223_header_only_template_default_changed": {
+   "abi_break": false,
+   "api_break": false,
+   "bad_practice": false,
+   "category": "no_change",
+   "description": "Header-only class template mylib::Box<T, U = int> with its default changed to U = long. Nothing exports or names Box, and the old default does not reference another template parameter. On the default castxml lane the header-only default change reads NO_CHANGE, with run status partial and the 'template-parameter defaults (castxml cannot record them)' assurance gap. The clang backend records the defaults and reports template_param_default_changed as API_BREAK (pinned in tests/test_default_template_arg_l2_matrix.py). No symbol or public signature depends on the default, so no BREAKING finding is produced.",
+   "expected": "NO_CHANGE",
+   "expected_absent_kinds": [
+    "template_param_default_changed",
+    "default_template_arg_changed",
+    "public_dependency_role_changed"
+   ],
+   "expected_kinds": [],
+   "min_evidence": "L2",
+   "platforms": [
+    "linux",
+    "macos",
+    "windows"
+   ]
+  },
+  "case224_header_only_template_default_added": {
+   "abi_break": false,
+   "api_break": false,
+   "bad_practice": false,
+   "category": "no_change",
+   "description": "Header-only Box<T, U>: a default U = int is added to a parameter that had none. Same header-only shape as case223, in the opposite direction. On the default castxml lane the header-only default change reads NO_CHANGE, with run status partial and the 'template-parameter defaults (castxml cannot record them)' assurance gap (ADR-085 D3). The clang backend records the defaults and reports template_param_default_changed as API_BREAK, which is pinned in tests/test_default_template_arg_l2_matrix.py, not here. No symbol or public signature depends on the default, so no BREAKING finding is produced.",
+   "expected": "NO_CHANGE",
+   "expected_absent_kinds": [
+    "template_param_default_changed",
+    "default_template_arg_changed"
+   ],
+   "expected_kinds": [],
+   "min_evidence": "L2",
+   "platforms": [
+    "linux",
+    "macos",
+    "windows"
+   ]
+  },
+  "case225_header_only_template_default_removed": {
+   "abi_break": false,
+   "api_break": false,
+   "bad_practice": false,
+   "category": "no_change",
+   "description": "Header-only Box<T, U = int>: the default is removed from U. Same header-only shape as case223, in the removal direction. On the default castxml lane the header-only default change reads NO_CHANGE, with run status partial and the 'template-parameter defaults (castxml cannot record them)' assurance gap (ADR-085 D3). The clang backend records the defaults and reports template_param_default_changed as API_BREAK, which is pinned in tests/test_default_template_arg_l2_matrix.py, not here. No symbol or public signature depends on the default, so no BREAKING finding is produced.",
+   "expected": "NO_CHANGE",
+   "expected_absent_kinds": [
+    "template_param_default_changed",
+    "default_template_arg_changed"
+   ],
+   "expected_kinds": [],
+   "min_evidence": "L2",
+   "platforms": [
+    "linux",
+    "macos",
+    "windows"
+   ]
+  },
+  "case226_header_only_template_default_unchanged": {
+   "abi_break": false,
+   "api_break": false,
+   "bad_practice": false,
+   "category": "no_change",
+   "description": "Header-only Box<T, U = int> is identical on both sides except for a reworded comment. No default changed, so the template-default detector must emit nothing on any backend. Negative control for case223-225 and case227.",
+   "expected": "NO_CHANGE",
+   "expected_absent_kinds": [
+    "template_param_default_changed",
+    "default_template_arg_changed"
+   ],
+   "expected_kinds": [],
+   "min_evidence": "L2",
+   "platforms": [
+    "linux",
+    "macos",
+    "windows"
+   ]
+  },
+  "case227_nested_namespace_template_default_changed": {
+   "abi_break": false,
+   "api_break": false,
+   "bad_practice": false,
+   "category": "no_change",
+   "description": "The header-only default change of case223 (U = int becomes U = long), with the template in the nested namespace mylib::detail. The qualified-name pairing must match the pattern under its nested scope. On the default castxml lane the header-only default change reads NO_CHANGE, with run status partial and the 'template-parameter defaults (castxml cannot record them)' assurance gap. The clang backend records the defaults and reports template_param_default_changed as API_BREAK (pinned in tests/test_default_template_arg_l2_matrix.py). No symbol or public signature depends on the default, so no BREAKING finding is produced.",
+   "expected": "NO_CHANGE",
+   "expected_absent_kinds": [
+    "template_param_default_changed",
+    "default_template_arg_changed",
+    "public_dependency_role_changed"
+   ],
+   "expected_kinds": [],
+   "min_evidence": "L2",
+   "platforms": [
+    "linux",
+    "macos",
+    "windows"
+   ]
+  },
+  "case228_nontype_template_param_default_changed": {
+   "abi_break": false,
+   "api_break": false,
+   "bad_practice": false,
+   "category": "no_change",
+   "description": "Header-only Buf<T, int N = 4> with its non-type default changed to N = 8. The clang recorder covers type-parameter templates only, so it records nothing for Buf and reports a 'not recorded ... not a type parameter' gap. The castxml side reports its own gap. Both backends give NO_CHANGE and no template_param_default_changed finding, so the verdict agrees but the coverage does not.",
+   "expected": "NO_CHANGE",
+   "expected_absent_kinds": [
+    "template_param_default_changed",
+    "default_template_arg_changed"
+   ],
+   "expected_kinds": [],
+   "min_evidence": "L2",
+   "platforms": [
+    "linux",
+    "macos",
+    "windows"
+   ]
+  },
+  "case229_exported_template_default_changed": {
+   "abi_break": true,
+   "api_break": false,
+   "bad_practice": false,
+   "category": "breaking",
+   "description": "Exported instantiation Box<int> carries the default U = T, which becomes U = long. The default-substituted symbol changes, so this is shape A (ADR-085): a BREAKING default_template_arg_changed finding on the exported instantiation. The header-level template_param_default_changed kind must NOT appear, because the exported instantiation already covers the same template and the relation is recorded as DEDUPLICATED.",
+   "expected": "BREAKING",
+   "expected_absent_kinds": [
+    "template_param_default_changed"
+   ],
+   "expected_kinds": [
+    "default_template_arg_changed"
+   ],
+   "min_evidence": "L2",
+   "platforms": [
+    "linux",
+    "macos",
+    "windows"
+   ]
+  },
   "case221_public_api_internal_type_renamed": {
    "abi_break": false,
    "api_break": false,

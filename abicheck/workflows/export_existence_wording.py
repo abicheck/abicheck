@@ -60,6 +60,7 @@ from ..model.cxx_artifact_symbols import (
     KIND_DESTRUCTOR,
     cxx_class_artifact_kind,
 )
+from ..model.owner_recovery import itanium_class_metadata_owner
 
 __all__ = ["EXISTENCE_KINDS", "describe_export_existence", "existence_description"]
 
@@ -112,10 +113,14 @@ def existence_description(change: Change, decision: ExportAccount) -> str | None
                 f"{lead} C++ ABI artifact ({what}) of a class, accounted for "
                 f"by its class's declaration: {sym}"
             )
-        return (
-            f"{lead} C++ ABI artifact ({what}) of a class, declared by no "
-            f"header by construction: {sym}"
-        )
+        # Names the class the artifact describes, and makes no claim about
+        # whether a header declares it: that is the class declaration's own
+        # question, decided by contract evaluation. "Declared by no header by
+        # construction" was true of the symbol and false of the class whenever
+        # the class was declared in a public header.
+        owner = itanium_class_metadata_owner(sym)
+        of_class = f"of class {owner}" if owner is not None else "of a class"
+        return f"{lead} C++ ABI artifact ({what}) {of_class}: {sym}"
     if category == ACCOUNT_ALLOCATOR_INTERPOSER:
         return f"{lead} allocator replacement of a malloc-interposer library: {sym}"
     reach = _REMOVAL_REACH if removed else ""

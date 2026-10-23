@@ -127,6 +127,7 @@ AUDIT_SET_EXIT_AXIS_LABELS: dict[str, str] = {
     "operational_error": "member audit failed",
     "incomplete_scope": NO_BASELINE_EXIT_AXIS_LABELS["incomplete_scope"],
     "no_comparison_completed": NO_BASELINE_EXIT_AXIS_LABELS["no_comparison_completed"],
+    "unused_rules": NO_BASELINE_EXIT_AXIS_LABELS["unused_rules"],
 }
 
 _AUDIT_SET_EXIT_AXIS_NOTICES: dict[str, str] = {
@@ -230,6 +231,8 @@ def compute_no_baseline_set_document(
     audit_gate_enabled: bool = False,
 ) -> NoBaselineSetDocument:
     """Resolve *result* into the one document every format below projects."""
+    from ..policy.release_exit_decision import release_unused_rules_contribution
+    from ..workflows.member_compare import unused_rule_keys_for_release
     from .disposition_audit import compute_disposition_audit, fold_disposition_audits
 
     decision = resolve_scope_decision(result.record, on_incomplete)
@@ -237,6 +240,7 @@ def compute_no_baseline_set_document(
     members: list[AuditSetMember] = []
     policy = "strict_abi"
     dispositions = []
+    unused_rule_stamps: list[dict[str, object]] = []
     for acq in result.record.members:
         audit = audits.get(acq.member)
         doc = None
@@ -250,6 +254,7 @@ def compute_no_baseline_set_document(
             report = no_baseline_report_document(doc).to_mapping()
             policy = doc.policy
             dispositions.append(compute_disposition_audit(audit.result.diff))
+            unused_rule_stamps.append(unused_rule_keys_for_release(audit.result.diff))
         members.append(
             AuditSetMember(
                 member=acq.member,
@@ -274,6 +279,10 @@ def compute_no_baseline_set_document(
     exit_axes["no_comparison_completed"] = (
         decision.no_comparison_completed_exit_contribution
     )
+    # Not a per-member max: a rule one member exercises is not stale because
+    # another member could not match it -- the same union fold a
+    # directory/package compare applies (ADR-067 P1).
+    exit_axes["unused_rules"] = release_unused_rules_contribution(unused_rule_stamps)
     run_outcome = RunOutcome(
         compatibility=None,
         assurance=None,

@@ -25,6 +25,7 @@ from typing import TYPE_CHECKING
 from ....buildsource.source_inputs import extraction_read_source_inputs
 from ....extract.binary_identity import stamp_binary_identity
 from ...cache_probe import refuse_dump_while_probing, take_probed_miss
+from .finished import FINISHED_SUBDIR, take_pending
 from .key import (
     _cache_key,
     _dump_cache_extra_key,
@@ -41,6 +42,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable
 
     from ....model import AbiSnapshot
+    from .finished import Finisher
 
 
 def _dump_is_cacheable(req: DumpCacheRequest) -> bool:
@@ -381,22 +383,29 @@ def cached_run_dump(
     # An uncacheable shape derives the empty key: no lookup, no store, and no
     # key-side tool execution (the gate in _cache_key_for runs first).
     initial_key = _cache_key_for(req)
+    # A finisher offered by `resolve_input` is only honoured when keyed: an
+    # uncacheable shape leaves the finishing to the caller, as before.
+    finisher = take_pending() if initial_key else None
+    finished_key = finisher.key_for(initial_key) if finisher else ""
+    if finisher is not None:
+        done = _lookup_key(finished_key, path, FINISHED_SUBDIR)
+        if done is not None:
+            _stamp_cache_hit(done, path)
+            finisher.applied = True
+            return done
     # A probe that just missed this key (the parent, before forking this
     # side) already paid the lookup; reading again would miss again.
     probed_miss = bool(initial_key) and take_probed_miss(initial_key)
-    cached = _lookup_key(initial_key, path) if initial_key and not probed_miss else None
+    # With a finisher, a finished-tier miss re-extracts instead of finishing
+    # the raw entry: re-scoping a cache-reloaded snapshot can differ from
+    # scoping the fresh extraction (docs/contribute/known-gaps/rescoping-a-
+    # cache-reloaded-snapshot-...), and the finished tier must hold the cold
+    # result. One extra extraction per operand, once; every later run hits.
+    use_raw = bool(initial_key) and not probed_miss and finisher is None
+    cached = _lookup_key(initial_key, path) if use_raw else None
     if cached is not None:
-        # A cache hit stands in for the live extraction it replaces, so it needs
-        # the source-read licence stamped here: `run_dump` grants it (see
-        # `buildsource.source_inputs.granting_live_source_licence`), but this path
-        # never calls `run_dump` and the flag is runtime-only. Granting it is sound:
-        # the key hashes the live inputs' content, so the hit is a provenance check.
-        # Same predicate the shared dump applies: a headerless DWARF hit is no
-        # more entitled to re-read DW_AT_decl_file paths (Codex review, P2).
-        stamp_binary_identity(cached, path)
-        if extraction_read_source_inputs(cached):
-            cached.live_source_evidence = True
-        return cached
+        _stamp_cache_hit(cached, path)
+        return _finish_and_store(cached, finisher, finished_key, req)
     refuse_dump_while_probing(initial_key)
     snap = _dump_uncached()
     # Re-derive after the dump: a tool that appeared or changed mid-run must
@@ -404,4 +413,36 @@ def cached_run_dump(
     final_key = _cache_key_for(req) if initial_key else ""
     if initial_key and initial_key == final_key and _write_enabled():
         _store_key(snap, initial_key, path)
-    return snap
+    elif finisher is not None:
+        finished_key = ""  # unstable key: finish, but never store
+    return _finish_and_store(snap, finisher, finished_key, req)
+
+
+def _stamp_cache_hit(cached: AbiSnapshot, path: Path) -> None:
+    """A cache hit stands in for the live extraction it replaces, so it needs
+    the source-read licence stamped here: `run_dump` grants it (see
+    `buildsource.source_inputs.granting_live_source_licence`), but this path
+    never calls `run_dump` and the flag is runtime-only. Granting it is sound:
+    the key hashes the live inputs' content, so the hit is a provenance check.
+    Same predicate the shared dump applies: a headerless DWARF hit is no
+    more entitled to re-read DW_AT_decl_file paths (Codex review, P2)."""
+    stamp_binary_identity(cached, path)
+    if extraction_read_source_inputs(cached):
+        cached.live_source_evidence = True
+
+
+def _finish_and_store(
+    snap: AbiSnapshot,
+    finisher: Finisher | None,
+    finished_key: str,
+    req: DumpCacheRequest,
+) -> AbiSnapshot:
+    """*snap* finished by *finisher* (when one was claimed), stored in the
+    finished tier under *finished_key* when that is non-empty."""
+    if finisher is None:
+        return snap
+    done = finisher.finish(snap)
+    finisher.applied = True
+    if finished_key and _write_enabled():
+        _store_key(done, finished_key, req.path, FINISHED_SUBDIR)
+    return done
