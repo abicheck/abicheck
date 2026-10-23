@@ -46,11 +46,26 @@ _MATCHING = [
     "ze_device_dditable_t",
     "zet_metric_dditable_t",
     "zes_device_dditable_t",
+    # DWARF names a typedef'd struct by its tag: ``_ze_..._dditable_t``.
+    "_ze_global_dditable_t",
+    "_zes_driver_dditable_t",
+    # Top-level aggregates have no middle component.
+    "ze_dditable_t",
+    "zes_dditable_t",
+    "_ze_dditable_t",
+    "_zes_dditable_t",
     "VkLayerDispatchTable",
     "VkLayerInstanceDispatchTable",
     "cl_icd_dispatch",
 ]
-_NON_MATCHING = ["my_struct_t", "ze_device_properties_t", "VkDeviceCreateInfo"]
+_NON_MATCHING = [
+    "my_struct_t",
+    "ze_device_properties_t",
+    "_ze_device_properties_t",
+    "__ze_dditable_t",
+    "ze_dditable",
+    "VkDeviceCreateInfo",
+]
 
 
 def _is_append_only(old: list[str], new: list[str]) -> bool:

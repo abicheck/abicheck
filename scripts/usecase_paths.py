@@ -913,10 +913,9 @@ def _summary(text: str, step_summary: bool) -> None:
 
 def cmd_ratchet(args: argparse.Namespace) -> int:
     from usecase_adr_reach import (
-        load_unreached_baseline,
-        ratchet_unreached,
+        ratchet_or_move,
         render_ratchet_markdown,
-        unreached_baseline_payload,
+        write_unreached_baseline,
     )
 
     doc = load_recording(args.recording)
@@ -928,19 +927,19 @@ def cmd_ratchet(args: argparse.Namespace) -> int:
         )
         return 1
     if args.write:
-        payload = unreached_baseline_payload(unreached, sources, doc.get("revision"))
-        Path(args.baseline).write_text(
-            json.dumps(payload, indent=1) + "\n", encoding="utf-8"
-        )
+        write_unreached_baseline(args.baseline, unreached, sources, doc.get("revision"))
         print(f"wrote {args.baseline} ({len(unreached)} unreached)")
         return 0
     try:
-        result = ratchet_unreached(
-            unreached, load_unreached_baseline(args.baseline), sources
+        result = ratchet_or_move(
+            unreached, args.baseline, sources, write_moves=args.write_moves
         )
     except ValueError as exc:
         print(f"ratchet: {exc}")
         return 1
+    if args.write_moves:
+        print(f"moved {len(result.moved)} entries; {len(result.grown)} new left out")
+        return 0
     _summary(render_ratchet_markdown(result, limit=args.top), args.step_summary)
     return 1 if args.strict and not result.ok else 0
 
@@ -1053,9 +1052,10 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="re-record the baseline from this recording",
     )
-    rt.add_argument(
-        "--strict", action="store_true", help="exit 1 on newly unreached functions"
-    )
+    rt.add_argument("--write-moves", action="store_true",
+                    help="rewrite only the moved baseline entries")  # fmt: skip
+    rt.add_argument("--strict", action="store_true",
+                    help="exit 1 on newly unreached functions")  # fmt: skip
     rt.add_argument("--step-summary", action="store_true",
                     help="also append the report to $GITHUB_STEP_SUMMARY")  # fmt: skip
     rt.add_argument("--top", type=int, default=50)

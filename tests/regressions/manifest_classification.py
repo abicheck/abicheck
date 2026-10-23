@@ -607,4 +607,36 @@ CLASSIFICATION_BUG_CLASSES: tuple[BugClass, ...] = (
             ),
         ),
     ),
+    BugClass(
+        id="classification.non_entity_finding_feeds_contract_coverage",
+        invariant=(
+            "A finding whose subject is not a declaration of the library "
+            "under test -- an import/dependency edge, or a symbol the C++ "
+            "runtime or toolchain owns -- is never left UNKNOWN_UNRESOLVED "
+            "by contract evaluation, so it never reaches "
+            "contract_coverage_failures and never raises exit 1, whatever "
+            "the contract mode, the header evidence, or whether either "
+            "snapshot's ELF table lists the symbol. Policy keeps scoring "
+            "it (a strict preset still gates an import), and any report "
+            "count of gating findings sums only evaluated findings."
+        ),
+        # SVS PR 387 field scan: libsvs_c_api v0.5.0 -> rebuild exited 1 on
+        # 22 unsuppressible finding_unresolved records (10 imported_symbol_
+        # added, 8 leaked-dependency, 2 std:: binding, 2 imports removed);
+        # the Markdown named six out-of-contract statics as the gate cause.
+        fixed_by=(1751,),
+        seed_tests=(
+            "tests/test_contract_toolchain_runtime_origin.py",
+            "tests/test_family_f1_evidence_ablation.py",
+            "tests/unit/report/test_review_groups.py",
+            "tests/test_informational_never_gates.py",
+        ),
+        public_surfaces=("cli",),
+        axes={
+            "kind": ("import_edge", "leaked_dependency", "binding", "removal"),
+            "mode": ("public", "all"),
+            "header_evidence": ("resolvable", "unresolvable"),
+            "elf_table": ("lists_symbol", "omits_symbol"),
+        },
+    ),
 )

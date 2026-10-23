@@ -92,7 +92,7 @@ def _ast_compile_provenance(
         "ast_cplusplus_macro": _cplusplus_macro_for_standard(resolved_standard),
         "ast_compile_args": tuple(DEFAULT_REDACTION.argv(args)),
         "ast_sysroot": DEFAULT_REDACTION.path(str(sysroot)) if sysroot else None,
-        # ADR-085 D3: castxml cannot record class-template parameter defaults,
+        # ADR-085 D3: castxml cannot record class- or function-template parameter defaults,
         # so its run scans the headers it parsed for one. Other producers record
         # them (clang) or are hybrid, and get no scan.
         "template_default_header_scan": (

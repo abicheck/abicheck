@@ -101,7 +101,9 @@ jobs:
     outputs:
       profile-id: ${{ steps.profile.outputs.id }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803  # v6.1.0
+        with:
+          persist-credentials: false
 
       # run_id-namespaced so this fixture's cache entries/artifacts can
       # never collide across concurrent runs of this same workflow.
@@ -143,13 +145,13 @@ jobs:
           done
 
       - name: Upload version 1's build-output artifact
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
         with:
           name: 'rotation-test-build-1-${{ steps.profile.outputs.id }}'
           path: run1
 
       - name: Upload version 2's build-output artifact
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
         with:
           name: 'rotation-test-build-2-${{ steps.profile.outputs.id }}'
           path: run2

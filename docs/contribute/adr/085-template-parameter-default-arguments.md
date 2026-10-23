@@ -191,6 +191,23 @@ are recorded here rather than edited into the decision.
   castxml is unchanged. Case 228's castxml expectation stays `NO_CHANGE`; its
   clang result is now `API_BREAK`, recorded in its README.
 
+- **Function-template slice (2026-10-23): landed.** `Function.template_param_defaults_fact`
+  (schema v64, `storage/snapshot_schema_versions.py`) is the D1 fact on the
+  function pattern. A function-template pattern is already a `Function` entry, and its
+  `entity_id` carries each template parameter's kind, so two overloads that share
+  a name are paired by identity and never by name. The clang dumper maps every
+  pattern declaration to its enclosing `FunctionTemplateDecl`'s defaults in one
+  pass over the AST (`extract/headers/clang/function_template_defaults.py`), and
+  `parse_functions` attaches the fact. The detector is
+  `detect_function_template_param_default_changed` in
+  `compare/template_param_defaults.py`. **No new kind**: the header-level break
+  is the same `API_BREAK` `TEMPLATE_PARAM_DEFAULT_CHANGED` as for a class template,
+  since D2's reasoning does not depend on whether the template is a class or a
+  function. Shape-A dedup applies unchanged, by qualified name. The castxml
+  verdict stays `NO_CHANGE` and reads `partial`, as for class templates.
+  Residual: a function template with an unspelled default records nothing, and
+  the rollup does not count it (see Not done).
+
 ## Remaining
 
 1. **Verdict decision (resolved 2026-10-23).** The castxml verdict stays
@@ -204,11 +221,16 @@ are recorded here rather than edited into the decision.
 3. ~~**Non-type and template-template parameters.**~~ Done (see Implementation
    status). The spelling rule and the `sizeof`-style exclusion are recorded there
    and in `header-backend-capabilities.md`.
-4. **Function-template defaults.** Same D1 contract; a separate slice, as above.
+4. ~~**Function-template defaults.**~~ Done (see Implementation status, function
+   slice). The clang backend records them; the castxml header scan already
+   covered function templates.
 
 ## Not done
 
-- Function-template default arguments (same D1 contract, separate slice).
 - Source-replay (L4) wording for shape B beyond the existing `public_dependency_role_changed` risk.
+- Function-template defaults the clang walk cannot spell (a default expression
+  outside the spelling set, such as `sizeof(T)`): the pattern records nothing
+  and the assurance rollup, which counts class-template patterns only, reports
+  no gap for it. Recorded in known-gaps.
 
 Index: [ADR index](index.md)
