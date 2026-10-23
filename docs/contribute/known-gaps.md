@@ -67,6 +67,10 @@ Each entry's status line says what is still open. A PARTIAL entry's write-up als
 
 **Status (2026-10-22): OPEN.** The review-group section is bounded; the per-finding Additions rows are not. [Full write-up](known-gaps/the-additions-markdown-section-is-one-row-per-finding.md)
 
+#### `append_only_dispatch_tables` does not forgive offset shifts inside a dispatch-table aggregate (2026-10-23)
+
+**Status (2026-10-23): OPEN.** Level Zero's `_ze_dditable_t`/`_zes_dditable_t` embed each sub-table by value, so when a sub-table grows by a tail append every later sub-table moves; on a real Level Zero pair that is 41 `type_field_offset_changed` findings, still `BREAKING` under the profile. A `type_pattern` rule cannot express "shifted only because an earlier embedded matching table grew append-only" without also hiding a genuine reorder, so the fix needs a cause-aware check (every member before the shifted one is unchanged or is itself an append-only-grown matching table), not a wider selector.
+
 ### Clang projection (ADR-063 Phase 4 prerequisites)
 
 The entries below come from the Phase 4 measurement spike

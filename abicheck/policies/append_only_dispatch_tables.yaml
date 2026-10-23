@@ -2,7 +2,9 @@
 # function-pointer / dispatch tables whose contract is append-only tail growth
 # (issue #1709).
 #
-# Level Zero (`ze_*_dditable_t`, `zet_*`, `zes_*`, `zer_*`), the Vulkan
+# Level Zero (`ze_*_dditable_t`, `zet_*`, `zes_*`, `zer_*`, `zel_*`, plus the
+# top-level aggregates `ze_dditable_t`/`zes_dditable_t`; DWARF names each by its
+# struct tag, so `_ze_device_dditable_t` matches too), the Vulkan
 # loader/layer dispatch tables (`VkLayerDispatchTable`,
 # `VkLayerInstanceDispatchTable`) and the OpenCL ICD dispatch table
 # (`cl_icd_dispatch`) are versioned by appending function pointers at the end.
@@ -24,6 +26,9 @@
 #   - retyping a member ........... type_field_type_changed
 #   - alignment change ............ type_alignment_changed
 #   - any type whose name does not match the patterns below.
+#   - member offsets shifted inside the top-level aggregates (`_ze_dditable_t`,
+#     `_zes_dditable_t`) because an embedded-by-value sub-table grew: still
+#     type_field_offset_changed (see docs/contribute/known-gaps.md).
 #
 # A size shrink always comes with type_field_removed (or an offset/type change
 # of an existing member), so ignoring type_size_changed for these names never
@@ -39,7 +44,7 @@ base_policy: strict_abi
 reclassify:
   - id: append-only-dispatch-table-member-added
     kind: type_field_added_compatible
-    type_pattern: &dispatch_tables "(ze|zet|zes|zer|zel)_[A-Za-z0-9_]*_dditable_t|VkLayer(Instance)?DispatchTable|_?cl_icd_dispatch"
+    type_pattern: &dispatch_tables "_?(ze|zet|zes|zer|zel)(_[A-Za-z0-9_]*)?_dditable_t|VkLayer(Instance)?DispatchTable|_?cl_icd_dispatch"
     to: ignore
     label: append-only dispatch table
     reason: "member appended at the tail of an append-only dispatch table; existing members keep their offsets"
