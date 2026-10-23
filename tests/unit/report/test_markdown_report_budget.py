@@ -8,11 +8,16 @@ whole-document demangle pass grew each already-clipped mangled name back into
 a multi-KB demangled template name.
 
 The properties are stated over N (10, 500, 3000) synthetic leaked ``std::``
-exports with real Itanium names that demangle to several KB, spread across
+exports with real Itanium names, spread across
 every section that lists findings: hygiene, deployment risk, additions,
 quality, informational, not-evaluated, suppressed, contract conflicts and
 review groups. The oracle is independent of the implementation: byte counts
 of the rendered text, and the JSON's own finding list.
+
+The demangler is pinned (:func:`_pinned_demangler`) to a ~1.5 KB expansion
+per name, so the bound does not depend on which backend (cxxfilt, c++filt,
+none) the host has; one test repeats the budget check through the real
+``c++filt`` where it exists.
 """
 
 from __future__ import annotations
@@ -39,7 +44,7 @@ DIGEST_BUDGET = 8 * 1024
 #: pass's bounded additions (a clipped demangled half beside each name).
 LINE_BUDGET = 2500
 
-pytestmark = pytest.mark.skipif(
+_needs_cxxfilt = pytest.mark.skipif(
     shutil.which("c++filt") is None, reason="needs c++filt for real demangling"
 )
 
@@ -55,6 +60,32 @@ _TEMPLATE = (
 def _mangled(tag: str, i: int) -> str:
     ident = f"_M_{tag}{i}"
     return _TEMPLATE.format(length=len(ident), ident=ident)
+
+
+_STRING = (
+    "std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >"
+)
+
+
+def _fake_demangle(symbol: str) -> str | None:
+    """The shape c++filt gives the template above: a ~1.5 KB name."""
+    if not symbol.startswith("_Z"):
+        return None
+    ident = symbol[-24:]  # keeps distinct symbols distinct
+    args = ", ".join([_STRING] * 16)
+    return f"std::_Rb_tree<{args}>::{ident}(std::_Rb_tree_node<{_STRING}>*)"
+
+
+@pytest.fixture(autouse=True)
+def _pinned_demangler(monkeypatch: pytest.MonkeyPatch) -> None:
+    import abicheck.demangle as demangle_module
+
+    def batch(symbols: list[str], **_kw: object) -> dict[str, str]:
+        out = {s: _fake_demangle(s) for s in symbols}
+        return {s: d for s, d in out.items() if d}
+
+    monkeypatch.setattr(demangle_module, "demangle_batch", batch)
+    monkeypatch.setattr(demangle_module, "demangle", lambda s, **_kw: _fake_demangle(s))
 
 
 def _change(kind: ChangeKind, tag: str, i: int, **extra: object) -> Change:
@@ -119,13 +150,23 @@ def _markdown(n: int) -> str:
     return to_markdown(_result(n), demangle=True, contract_evaluation=True)
 
 
-@pytest.fixture(scope="module")
+@pytest.fixture
 def sizes() -> dict[int, int]:
     return {n: len(_markdown(n).encode()) for n in (10, 500, 3000)}
 
 
 def test_report_stays_under_the_documented_budget(sizes: dict[int, int]) -> None:
     assert max(sizes.values()) <= REPORT_BUDGET, sizes
+
+
+@_needs_cxxfilt
+def test_report_stays_under_budget_with_the_real_demangler(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.undo()  # drop the pinned demangler: this one runs c++filt
+    sizes = {n: len(_markdown(n).encode()) for n in (10, 500)}
+    assert max(sizes.values()) <= REPORT_BUDGET, sizes
+    assert "std::_Rb_tree<" in _markdown(10)
 
 
 def test_report_grows_sublinearly_with_the_finding_count(
@@ -241,3 +282,41 @@ def test_additions_roll_up_unless_they_gate(
         assert all(len(row) <= LINE_BUDGET for row in rows)
     else:
         assert rows == [rows[0]] and f"**func_added**: {n} findings" in rows[0]
+
+
+def _gating_and_drift_result() -> DiffResult:
+    long_type = "struct " + "std::map<int, std::vector<std::string>>, " * 200
+    breaking = Change(
+        ChangeKind.TYPE_SIZE_CHANGED,
+        _mangled("brk", 0),
+        "Size of a type changed",
+        old_value=long_type + "A",
+        new_value=long_type + "B",
+        source_location="include/" + "deep/" * 300 + "x.h:1",
+        affected_symbols=[_mangled("aff", i) for i in range(8)],
+    )
+    drift = [
+        Change(ChangeKind.DT_RELR_INTRODUCED, f"drift{i}", "x" * 3000 + f" {i}")
+        for i in range(30)
+    ]
+    return DiffResult("1", "2", "libsvs.so", [breaking, *drift], Verdict.BREAKING)
+
+
+@pytest.mark.parametrize("report_mode", ["full", "root-cause"])
+def test_gating_rows_and_drift_notes_are_clipped(report_mode: str) -> None:
+    text = to_markdown(
+        _gating_and_drift_result(), report_mode=report_mode, demangle=True
+    )
+    longest = max(len(line) for line in text.splitlines())
+    assert longest <= LINE_BUDGET, longest
+    # The single breaking finding is still named, with a clipped name.
+    assert f"[{_mangled('brk', 0)}]" in text or _mangled("brk", 0) in text
+    if report_mode == "full":
+        assert "(+3 more)" in text  # 8 affected symbols, 5 shown
+        drift = text.split("Environment & Toolchain Drift", 1)[1]
+        assert "… and 20 more; itemised in full" in drift
+        assert (
+            len([ln for ln in drift.splitlines() if ln.startswith("- **dt_relr")]) == 10
+        )
+        # A lone review group keeps its own heading and member lines.
+        assert "- **Members:** `" in text

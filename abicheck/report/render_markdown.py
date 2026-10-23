@@ -185,11 +185,14 @@ def render_root_cause_section(data: RootCauseSectionData | None) -> list[str]:
     if data is None:
         return []
     lines: list[str] = [f"## Root Causes ({len(data.groups)})", ""]
+    # Every finding stays listed (a root may carry a break); only names and
+    # lines are clipped to the shared Markdown budget.
     for group in data.groups:
         plural = "" if group.count == 1 else "s"
-        lines.append(f"### `{group.root_display}` ({group.count} finding{plural})")
+        root = clip_name(group.root_display)
+        lines.append(f"### `{root}` ({group.count} finding{plural})")
         lines.append("")
-        lines.extend(group.finding_lines)
+        lines.extend(clip(line) for line in group.finding_lines)
         lines.append("")
     return lines
 
