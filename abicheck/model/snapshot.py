@@ -538,6 +538,15 @@ class AbiSnapshot:
     load_notices: tuple[str, ...] = field(
         default=(), repr=False, compare=False, kw_only=True
     )
+    # ADR-062 D2: the ``(extractor, resolver, source)`` generations of the
+    # build that extracted these facts, persisted as the document's
+    # ``fact_generations`` key (storage/generation_migrations.py). ``None``
+    # means "extracted by this process", so the writer stamps this build's
+    # generations; a loaded snapshot always carries the stated triple (0 for
+    # an unstated axis), so re-saving an old baseline never re-dates it.
+    fact_generations: tuple[int, int, int] | None = field(
+        default=None, repr=False, compare=False, kw_only=True
+    )
     # Runtime-only, like `live_source_evidence`: True when the export table
     # (`elf`) was read from a static archive's own symbol index (ADR-086),
     # not from a linked image -- so the dynamic-section facts (SONAME,
