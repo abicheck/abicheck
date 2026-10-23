@@ -1,0 +1,1205 @@
+{
+  "/work/a.c": {
+    "ast[clang++]": [
+      "clang++",
+      "-x",
+      "c",
+      "-D__malloc__(...)=__malloc__",
+      "-fsyntax-only",
+      "-ferror-limit=0",
+      "-Xclang",
+      "-ast-dump=json",
+      "/work/a.c"
+    ],
+    "ast[clang]": [
+      "clang",
+      "-x",
+      "c",
+      "-D__malloc__(...)=__malloc__",
+      "-fsyntax-only",
+      "-ferror-limit=0",
+      "-Xclang",
+      "-ast-dump=json",
+      "/work/a.c"
+    ],
+    "ast[icpx]": [
+      "icpx",
+      "-x",
+      "c",
+      "-D__malloc__(...)=__malloc__",
+      "-fsyntax-only",
+      "-ferror-limit=0",
+      "-Xclang",
+      "-ast-dump=json",
+      "/work/a.c"
+    ],
+    "castxml": [
+      "castxml",
+      "--castxml-output=1",
+      "--castxml-cc-gnu-c",
+      "gcc",
+      "-o",
+      "out.xml",
+      "/work/a.c"
+    ],
+    "macro[clang++]": [
+      "clang++",
+      "-x",
+      "c",
+      "-E",
+      "-dD",
+      "-ferror-limit=0",
+      "/work/a.c"
+    ],
+    "macro[clang]": [
+      "clang",
+      "-x",
+      "c",
+      "-E",
+      "-dD",
+      "-ferror-limit=0",
+      "/work/a.c"
+    ],
+    "macro[icpx]": [
+      "icpx",
+      "-x",
+      "c",
+      "-E",
+      "-dD",
+      "-ferror-limit=0",
+      "/work/a.c"
+    ],
+    "run_directory": "/work",
+    "source": "/work/a.c"
+  },
+  "/work/a.h": {
+    "ast[clang++]": [
+      "clang++",
+      "-x",
+      "c",
+      "-D__malloc__(...)=__malloc__",
+      "-fsyntax-only",
+      "-ferror-limit=0",
+      "-Xclang",
+      "-ast-dump=json",
+      "/work/a.h"
+    ],
+    "ast[clang]": [
+      "clang",
+      "-x",
+      "c",
+      "-D__malloc__(...)=__malloc__",
+      "-fsyntax-only",
+      "-ferror-limit=0",
+      "-Xclang",
+      "-ast-dump=json",
+      "/work/a.h"
+    ],
+    "ast[icpx]": [
+      "icpx",
+      "-x",
+      "c",
+      "-D__malloc__(...)=__malloc__",
+      "-fsyntax-only",
+      "-ferror-limit=0",
+      "-Xclang",
+      "-ast-dump=json",
+      "/work/a.h"
+    ],
+    "castxml": [
+      "castxml",
+      "--castxml-output=1",
+      "--castxml-cc-gnu",
+      "g++",
+      "-o",
+      "out.xml",
+      "/work/a.h"
+    ],
+    "macro[clang++]": [
+      "clang++",
+      "-x",
+      "c",
+      "-E",
+      "-dD",
+      "-ferror-limit=0",
+      "/work/a.h"
+    ],
+    "macro[clang]": [
+      "clang",
+      "-x",
+      "c",
+      "-E",
+      "-dD",
+      "-ferror-limit=0",
+      "/work/a.h"
+    ],
+    "macro[icpx]": [
+      "icpx",
+      "-x",
+      "c",
+      "-E",
+      "-dD",
+      "-ferror-limit=0",
+      "/work/a.h"
+    ],
+    "run_directory": "/work",
+    "source": "/work/a.h"
+  },
+  "/work/c.c": {
+    "ast[clang++]": [
+      "clang++",
+      "-x",
+      "c",
+      "-D__malloc__(...)=__malloc__",
+      "-fsyntax-only",
+      "-ferror-limit=0",
+      "-Xclang",
+      "-ast-dump=json",
+      "/work/c.c"
+    ],
+    "ast[clang]": [
+      "clang",
+      "-x",
+      "c",
+      "-D__malloc__(...)=__malloc__",
+      "-fsyntax-only",
+      "-ferror-limit=0",
+      "-Xclang",
+      "-ast-dump=json",
+      "/work/c.c"
+    ],
+    "ast[icpx]": [
+      "icpx",
+      "-x",
+      "c",
+      "-D__malloc__(...)=__malloc__",
+      "-fsyntax-only",
+      "-ferror-limit=0",
+      "-Xclang",
+      "-ast-dump=json",
+      "/work/c.c"
+    ],
+    "castxml": [
+      "castxml",
+      "--castxml-output=1",
+      "--castxml-cc-gnu-c",
+      "gcc",
+      "-o",
+      "out.xml",
+      "/work/c.c"
+    ],
+    "macro[clang++]": [
+      "clang++",
+      "-x",
+      "c",
+      "-E",
+      "-dD",
+      "-ferror-limit=0",
+      "/work/c.c"
+    ],
+    "macro[clang]": [
+      "clang",
+      "-x",
+      "c",
+      "-E",
+      "-dD",
+      "-ferror-limit=0",
+      "/work/c.c"
+    ],
+    "macro[icpx]": [
+      "icpx",
+      "-x",
+      "c",
+      "-E",
+      "-dD",
+      "-ferror-limit=0",
+      "/work/c.c"
+    ],
+    "run_directory": "/work",
+    "source": "/work/c.c"
+  },
+  "/work/d.c": {
+    "ast[clang++]": [
+      "clang++",
+      "-x",
+      "c",
+      "-D__malloc__(...)=__malloc__",
+      "-fsyntax-only",
+      "-ferror-limit=0",
+      "-Xclang",
+      "-ast-dump=json",
+      "/work/d.c"
+    ],
+    "ast[clang]": [
+      "clang",
+      "-x",
+      "c",
+      "-D__malloc__(...)=__malloc__",
+      "-fsyntax-only",
+      "-ferror-limit=0",
+      "-Xclang",
+      "-ast-dump=json",
+      "/work/d.c"
+    ],
+    "ast[icpx]": [
+      "icpx",
+      "-x",
+      "c",
+      "-D__malloc__(...)=__malloc__",
+      "-fsyntax-only",
+      "-ferror-limit=0",
+      "-Xclang",
+      "-ast-dump=json",
+      "/work/d.c"
+    ],
+    "castxml": [
+      "castxml",
+      "--castxml-output=1",
+      "--castxml-cc-gnu-c",
+      "gcc",
+      "-o",
+      "out.xml",
+      "/work/d.c"
+    ],
+    "macro[clang++]": [
+      "clang++",
+      "-x",
+      "c",
+      "-E",
+      "-dD",
+      "-ferror-limit=0",
+      "/work/d.c"
+    ],
+    "macro[clang]": [
+      "clang",
+      "-x",
+      "c",
+      "-E",
+      "-dD",
+      "-ferror-limit=0",
+      "/work/d.c"
+    ],
+    "macro[icpx]": [
+      "icpx",
+      "-x",
+      "c",
+      "-E",
+      "-dD",
+      "-ferror-limit=0",
+      "/work/d.c"
+    ],
+    "run_directory": "/work",
+    "source": "/work/d.c"
+  },
+  "/work/e.cpp": {
+    "ast[clang++]": [
+      "clang++",
+      "-x",
+      "c",
+      "-D__malloc__(...)=__malloc__",
+      "-fsyntax-only",
+      "-ferror-limit=0",
+      "-Xclang",
+      "-ast-dump=json",
+      "/work/e.cpp"
+    ],
+    "ast[clang]": [
+      "clang",
+      "-x",
+      "c",
+      "-D__malloc__(...)=__malloc__",
+      "-fsyntax-only",
+      "-ferror-limit=0",
+      "-Xclang",
+      "-ast-dump=json",
+      "/work/e.cpp"
+    ],
+    "ast[icpx]": [
+      "icpx",
+      "-x",
+      "c",
+      "-D__malloc__(...)=__malloc__",
+      "-fsyntax-only",
+      "-ferror-limit=0",
+      "-Xclang",
+      "-ast-dump=json",
+      "/work/e.cpp"
+    ],
+    "castxml": [
+      "castxml",
+      "--castxml-output=1",
+      "--castxml-cc-gnu-c",
+      "gcc",
+      "-o",
+      "out.xml",
+      "/work/e.cpp"
+    ],
+    "macro[clang++]": [
+      "clang++",
+      "-x",
+      "c",
+      "-E",
+      "-dD",
+      "-ferror-limit=0",
+      "/work/e.cpp"
+    ],
+    "macro[clang]": [
+      "clang",
+      "-x",
+      "c",
+      "-E",
+      "-dD",
+      "-ferror-limit=0",
+      "/work/e.cpp"
+    ],
+    "macro[icpx]": [
+      "icpx",
+      "-x",
+      "c",
+      "-E",
+      "-dD",
+      "-ferror-limit=0",
+      "/work/e.cpp"
+    ],
+    "run_directory": "/work",
+    "source": "/work/e.cpp"
+  },
+  "/work/f.c": {
+    "ast[clang++]": [
+      "clang++",
+      "-x",
+      "c",
+      "-D__malloc__(...)=__malloc__",
+      "-fsyntax-only",
+      "-ferror-limit=0",
+      "-Xclang",
+      "-ast-dump=json",
+      "/work/f.c"
+    ],
+    "ast[clang]": [
+      "clang",
+      "-x",
+      "c",
+      "-D__malloc__(...)=__malloc__",
+      "-fsyntax-only",
+      "-ferror-limit=0",
+      "-Xclang",
+      "-ast-dump=json",
+      "/work/f.c"
+    ],
+    "ast[icpx]": [
+      "icpx",
+      "-x",
+      "c",
+      "-D__malloc__(...)=__malloc__",
+      "-fsyntax-only",
+      "-ferror-limit=0",
+      "-Xclang",
+      "-ast-dump=json",
+      "/work/f.c"
+    ],
+    "castxml": [
+      "castxml",
+      "--castxml-output=1",
+      "--castxml-cc-gnu-c",
+      "gcc",
+      "-o",
+      "out.xml",
+      "/work/f.c"
+    ],
+    "macro[clang++]": [
+      "clang++",
+      "-x",
+      "c",
+      "-E",
+      "-dD",
+      "-ferror-limit=0",
+      "/work/f.c"
+    ],
+    "macro[clang]": [
+      "clang",
+      "-x",
+      "c",
+      "-E",
+      "-dD",
+      "-ferror-limit=0",
+      "/work/f.c"
+    ],
+    "macro[icpx]": [
+      "icpx",
+      "-x",
+      "c",
+      "-E",
+      "-dD",
+      "-ferror-limit=0",
+      "/work/f.c"
+    ],
+    "run_directory": "/work",
+    "source": "/work/f.c"
+  },
+  "/work/g.c": {
+    "ast[clang++]": [
+      "clang++",
+      "-x",
+      "c",
+      "-D__malloc__(...)=__malloc__",
+      "-fsyntax-only",
+      "-ferror-limit=0",
+      "-Xclang",
+      "-ast-dump=json",
+      "/work/g.c"
+    ],
+    "ast[clang]": [
+      "clang",
+      "-x",
+      "c",
+      "-D__malloc__(...)=__malloc__",
+      "-fsyntax-only",
+      "-ferror-limit=0",
+      "-Xclang",
+      "-ast-dump=json",
+      "/work/g.c"
+    ],
+    "ast[icpx]": [
+      "icpx",
+      "-x",
+      "c",
+      "-D__malloc__(...)=__malloc__",
+      "-fsyntax-only",
+      "-ferror-limit=0",
+      "-Xclang",
+      "-ast-dump=json",
+      "/work/g.c"
+    ],
+    "castxml": [
+      "castxml",
+      "--castxml-output=1",
+      "--castxml-cc-gnu-c",
+      "gcc",
+      "-o",
+      "out.xml",
+      "/work/g.c"
+    ],
+    "macro[clang++]": [
+      "clang++",
+      "-x",
+      "c",
+      "-E",
+      "-dD",
+      "-ferror-limit=0",
+      "/work/g.c"
+    ],
+    "macro[clang]": [
+      "clang",
+      "-x",
+      "c",
+      "-E",
+      "-dD",
+      "-ferror-limit=0",
+      "/work/g.c"
+    ],
+    "macro[icpx]": [
+      "icpx",
+      "-x",
+      "c",
+      "-E",
+      "-dD",
+      "-ferror-limit=0",
+      "/work/g.c"
+    ],
+    "run_directory": "/work",
+    "source": "/work/g.c"
+  },
+  "/work/h1.cpp": {
+    "ast[clang++]": [
+      "clang++",
+      "-x",
+      "c++",
+      "-DX=1",
+      "-I",
+      "/work/inc",
+      "-D__malloc__(...)=__malloc__",
+      "-fsyntax-only",
+      "-ferror-limit=0",
+      "-Xclang",
+      "-ast-dump=json",
+      "/work/h1.cpp"
+    ],
+    "ast[clang]": [
+      "clang",
+      "-x",
+      "c++",
+      "-DX=1",
+      "-I",
+      "/work/inc",
+      "-D__malloc__(...)=__malloc__",
+      "-fsyntax-only",
+      "-ferror-limit=0",
+      "-Xclang",
+      "-ast-dump=json",
+      "/work/h1.cpp"
+    ],
+    "ast[icpx]": [
+      "icpx",
+      "-x",
+      "c++",
+      "-DX=1",
+      "-I",
+      "/work/inc",
+      "-D__malloc__(...)=__malloc__",
+      "-fsyntax-only",
+      "-ferror-limit=0",
+      "-Xclang",
+      "-ast-dump=json",
+      "/work/h1.cpp"
+    ],
+    "castxml": [
+      "castxml",
+      "--castxml-output=1",
+      "--castxml-cc-gnu",
+      "g++",
+      "-DX=1",
+      "-I",
+      "/work/inc",
+      "-o",
+      "out.xml",
+      "/work/h1.cpp"
+    ],
+    "macro[clang++]": [
+      "clang++",
+      "-x",
+      "c++",
+      "-DX=1",
+      "-I",
+      "/work/inc",
+      "-E",
+      "-dD",
+      "-ferror-limit=0",
+      "/work/h1.cpp"
+    ],
+    "macro[clang]": [
+      "clang",
+      "-x",
+      "c++",
+      "-DX=1",
+      "-I",
+      "/work/inc",
+      "-E",
+      "-dD",
+      "-ferror-limit=0",
+      "/work/h1.cpp"
+    ],
+    "macro[icpx]": [
+      "icpx",
+      "-x",
+      "c++",
+      "-DX=1",
+      "-I",
+      "/work/inc",
+      "-E",
+      "-dD",
+      "-ferror-limit=0",
+      "/work/h1.cpp"
+    ],
+    "run_directory": "/work",
+    "source": "/work/h1.cpp"
+  },
+  "/work/k.S": {
+    "ast[clang++]": [
+      "clang++",
+      "-x",
+      "c",
+      "-D__malloc__(...)=__malloc__",
+      "-fsyntax-only",
+      "-ferror-limit=0",
+      "-Xclang",
+      "-ast-dump=json",
+      "/work/k.S"
+    ],
+    "ast[clang]": [
+      "clang",
+      "-x",
+      "c",
+      "-D__malloc__(...)=__malloc__",
+      "-fsyntax-only",
+      "-ferror-limit=0",
+      "-Xclang",
+      "-ast-dump=json",
+      "/work/k.S"
+    ],
+    "ast[icpx]": [
+      "icpx",
+      "-x",
+      "c",
+      "-D__malloc__(...)=__malloc__",
+      "-fsyntax-only",
+      "-ferror-limit=0",
+      "-Xclang",
+      "-ast-dump=json",
+      "/work/k.S"
+    ],
+    "castxml": [
+      "castxml",
+      "--castxml-output=1",
+      "--castxml-cc-gnu",
+      "gcc",
+      "-o",
+      "out.xml",
+      "/work/k.S"
+    ],
+    "macro[clang++]": [
+      "clang++",
+      "-x",
+      "c",
+      "-E",
+      "-dD",
+      "-ferror-limit=0",
+      "/work/k.S"
+    ],
+    "macro[clang]": [
+      "clang",
+      "-x",
+      "c",
+      "-E",
+      "-dD",
+      "-ferror-limit=0",
+      "/work/k.S"
+    ],
+    "macro[icpx]": [
+      "icpx",
+      "-x",
+      "c",
+      "-E",
+      "-dD",
+      "-ferror-limit=0",
+      "/work/k.S"
+    ],
+    "run_directory": "/work",
+    "source": "/work/k.S"
+  },
+  "/work/m.mm": {
+    "ast[clang++]": [
+      "clang++",
+      "-x",
+      "c",
+      "-D__malloc__(...)=__malloc__",
+      "-fsyntax-only",
+      "-ferror-limit=0",
+      "-Xclang",
+      "-ast-dump=json",
+      "/work/m.mm"
+    ],
+    "ast[clang]": [
+      "clang",
+      "-x",
+      "c",
+      "-D__malloc__(...)=__malloc__",
+      "-fsyntax-only",
+      "-ferror-limit=0",
+      "-Xclang",
+      "-ast-dump=json",
+      "/work/m.mm"
+    ],
+    "ast[icpx]": [
+      "icpx",
+      "-x",
+      "c",
+      "-D__malloc__(...)=__malloc__",
+      "-fsyntax-only",
+      "-ferror-limit=0",
+      "-Xclang",
+      "-ast-dump=json",
+      "/work/m.mm"
+    ],
+    "castxml": [
+      "castxml",
+      "--castxml-output=1",
+      "--castxml-cc-gnu",
+      "clang++",
+      "-o",
+      "out.xml",
+      "/work/m.mm"
+    ],
+    "macro[clang++]": [
+      "clang++",
+      "-x",
+      "c",
+      "-E",
+      "-dD",
+      "-ferror-limit=0",
+      "/work/m.mm"
+    ],
+    "macro[clang]": [
+      "clang",
+      "-x",
+      "c",
+      "-E",
+      "-dD",
+      "-ferror-limit=0",
+      "/work/m.mm"
+    ],
+    "macro[icpx]": [
+      "icpx",
+      "-x",
+      "c",
+      "-E",
+      "-dD",
+      "-ferror-limit=0",
+      "/work/m.mm"
+    ],
+    "run_directory": "/work",
+    "source": "/work/m.mm"
+  },
+  "/work/main.c": {
+    "ast[clang++]": [
+      "clang++",
+      "-x",
+      "c",
+      "-D__malloc__(...)=__malloc__",
+      "-fsyntax-only",
+      "-ferror-limit=0",
+      "-Xclang",
+      "-ast-dump=json",
+      "/work/main.c"
+    ],
+    "ast[clang]": [
+      "clang",
+      "-x",
+      "c",
+      "-D__malloc__(...)=__malloc__",
+      "-fsyntax-only",
+      "-ferror-limit=0",
+      "-Xclang",
+      "-ast-dump=json",
+      "/work/main.c"
+    ],
+    "ast[icpx]": [
+      "icpx",
+      "-x",
+      "c",
+      "-D__malloc__(...)=__malloc__",
+      "-fsyntax-only",
+      "-ferror-limit=0",
+      "-Xclang",
+      "-ast-dump=json",
+      "/work/main.c"
+    ],
+    "castxml": [
+      "castxml",
+      "--castxml-output=1",
+      "--castxml-cc-gnu-c",
+      "gcc",
+      "-o",
+      "out.xml",
+      "/work/main.c"
+    ],
+    "macro[clang++]": [
+      "clang++",
+      "-x",
+      "c",
+      "-E",
+      "-dD",
+      "-ferror-limit=0",
+      "/work/main.c"
+    ],
+    "macro[clang]": [
+      "clang",
+      "-x",
+      "c",
+      "-E",
+      "-dD",
+      "-ferror-limit=0",
+      "/work/main.c"
+    ],
+    "macro[icpx]": [
+      "icpx",
+      "-x",
+      "c",
+      "-E",
+      "-dD",
+      "-ferror-limit=0",
+      "/work/main.c"
+    ],
+    "run_directory": "/work",
+    "source": "/work/main.c"
+  },
+  "/work/n.cpp": {
+    "ast[clang++]": [
+      "clang++",
+      "-x",
+      "c++",
+      "-include",
+      "pre.h",
+      "-D__malloc__(...)=__malloc__",
+      "-fsyntax-only",
+      "-ferror-limit=0",
+      "-Xclang",
+      "-ast-dump=json",
+      "/work/n.cpp"
+    ],
+    "ast[clang]": [
+      "clang",
+      "-x",
+      "c++",
+      "-include",
+      "pre.h",
+      "-D__malloc__(...)=__malloc__",
+      "-fsyntax-only",
+      "-ferror-limit=0",
+      "-Xclang",
+      "-ast-dump=json",
+      "/work/n.cpp"
+    ],
+    "ast[icpx]": [
+      "icpx",
+      "-x",
+      "c++",
+      "-include",
+      "pre.h",
+      "-D__malloc__(...)=__malloc__",
+      "-fsyntax-only",
+      "-ferror-limit=0",
+      "-Xclang",
+      "-ast-dump=json",
+      "/work/n.cpp"
+    ],
+    "castxml": [
+      "castxml",
+      "--castxml-output=1",
+      "--castxml-cc-gnu",
+      "g++",
+      "-include",
+      "pre.h",
+      "-o",
+      "out.xml",
+      "/work/n.cpp"
+    ],
+    "macro[clang++]": [
+      "clang++",
+      "-x",
+      "c++",
+      "-include",
+      "pre.h",
+      "-E",
+      "-dD",
+      "-ferror-limit=0",
+      "/work/n.cpp"
+    ],
+    "macro[clang]": [
+      "clang",
+      "-x",
+      "c++",
+      "-include",
+      "pre.h",
+      "-E",
+      "-dD",
+      "-ferror-limit=0",
+      "/work/n.cpp"
+    ],
+    "macro[icpx]": [
+      "icpx",
+      "-x",
+      "c++",
+      "-include",
+      "pre.h",
+      "-E",
+      "-dD",
+      "-ferror-limit=0",
+      "/work/n.cpp"
+    ],
+    "run_directory": "/work",
+    "source": "/work/n.cpp"
+  },
+  "/work/o.c": {
+    "ast[clang++]": [
+      "clang++",
+      "-x",
+      "c",
+      "-D__malloc__(...)=__malloc__",
+      "-fsyntax-only",
+      "-ferror-limit=0",
+      "-Xclang",
+      "-ast-dump=json",
+      "/work/o.c"
+    ],
+    "ast[clang]": [
+      "clang",
+      "-x",
+      "c",
+      "-D__malloc__(...)=__malloc__",
+      "-fsyntax-only",
+      "-ferror-limit=0",
+      "-Xclang",
+      "-ast-dump=json",
+      "/work/o.c"
+    ],
+    "ast[icpx]": [
+      "icpx",
+      "-x",
+      "c",
+      "-D__malloc__(...)=__malloc__",
+      "-fsyntax-only",
+      "-ferror-limit=0",
+      "-Xclang",
+      "-ast-dump=json",
+      "/work/o.c"
+    ],
+    "castxml": [
+      "castxml",
+      "--castxml-output=1",
+      "--castxml-cc-gnu-c",
+      "gcc",
+      "-o",
+      "out.xml",
+      "/work/o.c"
+    ],
+    "macro[clang++]": [
+      "clang++",
+      "-x",
+      "c",
+      "-E",
+      "-dD",
+      "-ferror-limit=0",
+      "/work/o.c"
+    ],
+    "macro[clang]": [
+      "clang",
+      "-x",
+      "c",
+      "-E",
+      "-dD",
+      "-ferror-limit=0",
+      "/work/o.c"
+    ],
+    "macro[icpx]": [
+      "icpx",
+      "-x",
+      "c",
+      "-E",
+      "-dD",
+      "-ferror-limit=0",
+      "/work/o.c"
+    ],
+    "run_directory": "/work",
+    "source": "/work/o.c"
+  },
+  "/work/p.cpp": {
+    "ast[clang++]": [
+      "clang++",
+      "-x",
+      "c++",
+      "-D__malloc__(...)=__malloc__",
+      "-fsyntax-only",
+      "-ferror-limit=0",
+      "-Xclang",
+      "-ast-dump=json",
+      "/work/p.cpp"
+    ],
+    "ast[clang]": [
+      "clang",
+      "-x",
+      "c++",
+      "-D__malloc__(...)=__malloc__",
+      "-fsyntax-only",
+      "-ferror-limit=0",
+      "-Xclang",
+      "-ast-dump=json",
+      "/work/p.cpp"
+    ],
+    "ast[icpx]": [
+      "icpx",
+      "-x",
+      "c++",
+      "-D__malloc__(...)=__malloc__",
+      "-fsyntax-only",
+      "-ferror-limit=0",
+      "-Xclang",
+      "-ast-dump=json",
+      "/work/p.cpp"
+    ],
+    "castxml": [
+      "castxml",
+      "--castxml-output=1",
+      "--castxml-cc-gnu",
+      "g++",
+      "-o",
+      "out.xml",
+      "/work/p.cpp"
+    ],
+    "macro[clang++]": [
+      "clang++",
+      "-x",
+      "c++",
+      "-E",
+      "-dD",
+      "-ferror-limit=0",
+      "/work/p.cpp"
+    ],
+    "macro[clang]": [
+      "clang",
+      "-x",
+      "c++",
+      "-E",
+      "-dD",
+      "-ferror-limit=0",
+      "/work/p.cpp"
+    ],
+    "macro[icpx]": [
+      "icpx",
+      "-x",
+      "c++",
+      "-E",
+      "-dD",
+      "-ferror-limit=0",
+      "/work/p.cpp"
+    ],
+    "run_directory": "/work",
+    "source": "/work/p.cpp"
+  },
+  "/work/script_src": {
+    "ast[clang++]": [
+      "clang++",
+      "-x",
+      "c",
+      "-D__malloc__(...)=__malloc__",
+      "-fsyntax-only",
+      "-ferror-limit=0",
+      "-Xclang",
+      "-ast-dump=json",
+      "/work/script_src"
+    ],
+    "ast[clang]": [
+      "clang",
+      "-x",
+      "c",
+      "-D__malloc__(...)=__malloc__",
+      "-fsyntax-only",
+      "-ferror-limit=0",
+      "-Xclang",
+      "-ast-dump=json",
+      "/work/script_src"
+    ],
+    "ast[icpx]": [
+      "icpx",
+      "-x",
+      "c",
+      "-D__malloc__(...)=__malloc__",
+      "-fsyntax-only",
+      "-ferror-limit=0",
+      "-Xclang",
+      "-ast-dump=json",
+      "/work/script_src"
+    ],
+    "castxml": [
+      "castxml",
+      "--castxml-output=1",
+      "--castxml-cc-gnu-c",
+      "gcc",
+      "-o",
+      "out.xml",
+      "/work/script_src"
+    ],
+    "macro[clang++]": [
+      "clang++",
+      "-x",
+      "c",
+      "-E",
+      "-dD",
+      "-ferror-limit=0",
+      "/work/script_src"
+    ],
+    "macro[clang]": [
+      "clang",
+      "-x",
+      "c",
+      "-E",
+      "-dD",
+      "-ferror-limit=0",
+      "/work/script_src"
+    ],
+    "macro[icpx]": [
+      "icpx",
+      "-x",
+      "c",
+      "-E",
+      "-dD",
+      "-ferror-limit=0",
+      "/work/script_src"
+    ],
+    "run_directory": "/work",
+    "source": "/work/script_src"
+  },
+  "/work/stdio_like.h": {
+    "ast[clang++]": [
+      "clang++",
+      "-x",
+      "c",
+      "-D__malloc__(...)=__malloc__",
+      "-fsyntax-only",
+      "-ferror-limit=0",
+      "-Xclang",
+      "-ast-dump=json",
+      "/work/stdio_like.h"
+    ],
+    "ast[clang]": [
+      "clang",
+      "-x",
+      "c",
+      "-D__malloc__(...)=__malloc__",
+      "-fsyntax-only",
+      "-ferror-limit=0",
+      "-Xclang",
+      "-ast-dump=json",
+      "/work/stdio_like.h"
+    ],
+    "ast[icpx]": [
+      "icpx",
+      "-x",
+      "c",
+      "-D__malloc__(...)=__malloc__",
+      "-fsyntax-only",
+      "-ferror-limit=0",
+      "-Xclang",
+      "-ast-dump=json",
+      "/work/stdio_like.h"
+    ],
+    "castxml": [
+      "castxml",
+      "--castxml-output=1",
+      "--castxml-cc-gnu-c",
+      "gcc",
+      "-o",
+      "out.xml",
+      "/work/stdio_like.h"
+    ],
+    "macro[clang++]": [
+      "clang++",
+      "-x",
+      "c",
+      "-E",
+      "-dD",
+      "-ferror-limit=0",
+      "/work/stdio_like.h"
+    ],
+    "macro[clang]": [
+      "clang",
+      "-x",
+      "c",
+      "-E",
+      "-dD",
+      "-ferror-limit=0",
+      "/work/stdio_like.h"
+    ],
+    "macro[icpx]": [
+      "icpx",
+      "-x",
+      "c",
+      "-E",
+      "-dD",
+      "-ferror-limit=0",
+      "/work/stdio_like.h"
+    ],
+    "run_directory": "/work",
+    "source": "/work/stdio_like.h"
+  }
+}

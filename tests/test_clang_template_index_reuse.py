@@ -447,7 +447,7 @@ class TestMemberIndependence:
                     kinds=parser._template_param_kinds_by_qualname,
                     defaults=parser._template_param_defaults_by_qualname,
                     names=parser._template_param_names_by_qualname,
-                    type_defaults=parser._template_type_defaults_by_qualname,
+                    fact_defaults=parser._template_param_default_facts_by_qualname,
                 )
             )
             == baseline

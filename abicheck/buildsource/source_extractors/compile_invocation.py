@@ -49,6 +49,7 @@ from ._argv_shortopts import (
     rebase_structured_path,
     resolve_bare_token_with_default_path,
 )
+from .compile_action import CompileAction, SourceOperand, parse_gnu_operands
 from .launcher_env import (
     _traverse_env_and_launcher_prefix,
     effective_directory,
@@ -133,6 +134,15 @@ class CompilerInvocation:
     #: resolves them against the compile unit's ``directory`` exactly as it does
     #: :attr:`~..build_evidence.CompileUnit.include_paths`.
     replayed_include_dirs: tuple[str, ...] = ()
+    #: What the driver does with its sources (``-c``/``-S``/``-E``/link), or
+    #: ``None`` when the operand parse does not cover this driver (CL mode).
+    action: CompileAction | None = None
+    #: One entry per source the driver compiles, in argv order, each with its
+    #: own language, action and output. Empty when :attr:`action` is ``None``.
+    operands: tuple[SourceOperand, ...] = ()
+    #: Non-source inputs (objects, archives, libraries) a link consumes, in argv
+    #: order. Empty unless :attr:`action` is :attr:`CompileAction.LINK`.
+    link_inputs: tuple[str, ...] = ()
 
 
 def strip_launchers(argv: list[str], *, directory: str | None = None) -> list[str]:
@@ -515,6 +525,22 @@ def replayed_tokens_for(
     return replayed_tokens(parse_compile_invocation(compile_unit, compiler_binary))
 
 
+def _source_operands(
+    compile_unit: CompileUnit, msvc: bool
+) -> tuple[CompileAction | None, tuple[SourceOperand, ...], tuple[str, ...]]:
+    """The per-source operands of *compile_unit*, or nothing for the CL driver.
+
+    The launcher-stripped argv's tail (the driver token removed) is parsed once
+    by :func:`~.compile_action.parse_gnu_operands`. CL-mode operands are a
+    separate slice, so an MSVC driver reports no action rather than a guess.
+    """
+    if msvc:
+        return None, (), ()
+    argv = strip_launchers(compile_unit.argv, directory=compile_unit.directory)
+    parsed = parse_gnu_operands(argv[1:])
+    return parsed.action, parsed.operands, parsed.link_inputs
+
+
 def parse_compile_invocation(
     compile_unit: CompileUnit, compiler_binary: str | None = None
 ) -> CompilerInvocation:
@@ -566,6 +592,7 @@ def parse_compile_invocation(
             for token in _scan_argv_for_extra_flags(compile_unit.argv, cc_id)
         ),
     )
+    action, operands, link_inputs = _source_operands(compile_unit, msvc)
     return CompilerInvocation(
         source=compile_unit.source,
         compiler=compiler,
@@ -583,6 +610,9 @@ def parse_compile_invocation(
         replayed_include_dirs=_replayed_include_operands(
             _probe_operand_tokens(compile_unit, carried, msvc), msvc
         ),
+        action=action,
+        operands=operands,
+        link_inputs=link_inputs,
     )
 
 

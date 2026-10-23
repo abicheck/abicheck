@@ -451,9 +451,10 @@ TYPE_FACTS: list[FactDefinition] = [
         ),
         notes=(
             "Schema v62, no legacy sibling: for a class-template pattern, the "
-            "spelled default of each type parameter in declaration order (None "
-            "for a parameter with no default), read from the merged all-type "
-            "index. Only PRESENT feeds the header-level default-change kind; a "
+            "spelled default of each template parameter in declaration order "
+            "(None for a parameter with no default), read from the merged "
+            "index. A template with a default that could not be spelled is "
+            "UNKNOWN. Only PRESENT feeds the header-level default-change kind; a "
             "castxml or pre-v62 side is UNKNOWN and never compares equal to a "
             "recorded side."
         ),

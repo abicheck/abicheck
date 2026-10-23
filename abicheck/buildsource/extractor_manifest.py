@@ -56,6 +56,7 @@ from typing import Any
 import yaml
 
 from ..deadline import run_bounded
+from ..storage.tu_parse_store import digest_file as _file_sha256
 from .extractor import (
     CollectionAction,
     CollectionContext,
@@ -886,14 +887,6 @@ def _stderr_excerpt(stderr: str | None, mode: CollectionMode) -> str:
     """
     text = (stderr or "").strip()
     return text if mode == CollectionMode.AUDIT else text[:500]
-
-
-def _file_sha256(path: Path) -> str:
-    h = hashlib.sha256()
-    with path.open("rb") as fh:
-        for chunk in iter(lambda: fh.read(65536), b""):
-            h.update(chunk)
-    return h.hexdigest()
 
 
 __all__ = [

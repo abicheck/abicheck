@@ -57,6 +57,7 @@ import json
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from ..storage.tu_parse_store import digest_file as _file_sha256
 from .build_evidence import BuildEvidence
 from .model import BuildSourceManifest, BuildSourceRef
 from .pack import BuildSourcePack
@@ -318,14 +319,6 @@ def _write_json(path: Path, payload: dict[str, Any]) -> None:
         encoding="utf-8",
         newline="\n",
     )
-
-
-def _file_sha256(path: Path) -> str:
-    h = hashlib.sha256()
-    with path.open("rb") as fh:
-        for chunk in iter(lambda: fh.read(65536), b""):
-            h.update(chunk)
-    return h.hexdigest()
 
 
 def _payload_sha256(payload: dict[str, Any]) -> str:

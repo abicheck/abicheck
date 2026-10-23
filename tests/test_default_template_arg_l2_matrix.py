@@ -466,3 +466,35 @@ def test_shape_c_sibling_namespace_keeps_the_other_templates_finding_on_clang(
     )
     # a::Box is reported on its own; b::Box is covered by take's signature.
     assert header_symbols == ["a::Box"]
+
+
+_CASE224 = (
+    Path(__file__).resolve().parent.parent
+    / "catalog"
+    / "cases"
+    / "case224_header_only_template_default_added"
+)
+
+
+@pytest.mark.integration
+def test_catalog_case224_castxml_reads_no_change_with_partial_assurance(
+    tmp_path: Path,
+) -> None:
+    """ADR-085 D3 on the catalog case: castxml's verdict stays NO_CHANGE, and the run reads partial.
+
+    case224 is the header-only default-added shape. Its castxml lane must not
+    report a finding it cannot observe, and must not read as a clean pass: the
+    assurance status is partial, and the gap is named on each side.
+    """
+    _require_tools("castxml")
+    old = _dump_header(tmp_path, _CASE224 / "v1.h", "castxml", "old")
+    new = _dump_header(tmp_path, _CASE224 / "v2.h", "castxml", "new")
+    report = _compare_kinds(old, new, tmp_path, "castxml")
+    assert report["verdict"] == "NO_CHANGE"
+    assert HEADER_KIND not in _kinds(report)
+    assurance = report["analysis_assurance"]
+    assert assurance["status"] == "partial"
+    gap = [n for n in assurance["notes"] if n.startswith(_CASTXML_GAP)]
+    # v1.h declares no default, so only the new side's scan finds one.
+    assert len(gap) == 1
+    assert "the new snapshot" in gap[0]
