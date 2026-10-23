@@ -1,0 +1,86 @@
+{
+  "schema_version": 1,
+  "description": "Complete use cases allowed to have zero automated scenario or flow runs. No-growth: entries may only be removed; an entry that gains a run fails as stale (check_ai_readiness usecase-complete-has-runs).",
+  "entries": [
+    {
+      "id": "UC-ARCH-plugin",
+      "reason": "complete in usecase-registry.yaml but no automated scenario (automated: true) and no usecase_flows.yaml flow runs it; seeded when ADR-076 zero-run gate was added. Remove the entry once a run exists."
+    },
+    {
+      "id": "UC-ARCH-python-api",
+      "reason": "complete in usecase-registry.yaml but no automated scenario (automated: true) and no usecase_flows.yaml flow runs it; seeded when ADR-076 zero-run gate was added. Remove the entry once a run exists."
+    },
+    {
+      "id": "UC-ARCH-kernel-btf",
+      "reason": "complete in usecase-registry.yaml but no automated scenario (automated: true) and no usecase_flows.yaml flow runs it; seeded when ADR-076 zero-run gate was added. Remove the entry once a run exists."
+    },
+    {
+      "id": "UC-ARCH-sycl",
+      "reason": "complete in usecase-registry.yaml but no automated scenario (automated: true) and no usecase_flows.yaml flow runs it; seeded when ADR-076 zero-run gate was added. Remove the entry once a run exists."
+    },
+    {
+      "id": "UC-PLAT-windows-pe",
+      "reason": "complete in usecase-registry.yaml but no automated scenario (automated: true) and no usecase_flows.yaml flow runs it; seeded when ADR-076 zero-run gate was added. Remove the entry once a run exists."
+    },
+    {
+      "id": "UC-PLAT-macos-macho",
+      "reason": "complete in usecase-registry.yaml but no automated scenario (automated: true) and no usecase_flows.yaml flow runs it; seeded when ADR-076 zero-run gate was added. Remove the entry once a run exists."
+    },
+    {
+      "id": "UC-PLAT-arch-guard",
+      "reason": "complete in usecase-registry.yaml but no automated scenario (automated: true) and no usecase_flows.yaml flow runs it; seeded when ADR-076 zero-run gate was added. Remove the entry once a run exists."
+    },
+    {
+      "id": "UC-WF-debian-symbols",
+      "reason": "complete in usecase-registry.yaml but no automated scenario (automated: true) and no usecase_flows.yaml flow runs it; seeded when ADR-076 zero-run gate was added. Remove the entry once a run exists."
+    },
+    {
+      "id": "UC-WF-bundle",
+      "reason": "complete in usecase-registry.yaml but no automated scenario (automated: true) and no usecase_flows.yaml flow runs it; seeded when ADR-076 zero-run gate was added. Remove the entry once a run exists."
+    },
+    {
+      "id": "UC-WF-cli-contract",
+      "reason": "complete in usecase-registry.yaml but no automated scenario (automated: true) and no usecase_flows.yaml flow runs it; seeded when ADR-076 zero-run gate was added. Remove the entry once a run exists."
+    },
+    {
+      "id": "UC-WF-wheel-vendored",
+      "reason": "complete in usecase-registry.yaml but no automated scenario (automated: true) and no usecase_flows.yaml flow runs it; seeded when ADR-076 zero-run gate was added. Remove the entry once a run exists."
+    },
+    {
+      "id": "UC-WF-stable-abi-subset",
+      "reason": "complete in usecase-registry.yaml but no automated scenario (automated: true) and no usecase_flows.yaml flow runs it; seeded when ADR-076 zero-run gate was added. Remove the entry once a run exists."
+    },
+    {
+      "id": "UC-WF-security-hardening",
+      "reason": "complete in usecase-registry.yaml but no automated scenario (automated: true) and no usecase_flows.yaml flow runs it; seeded when ADR-076 zero-run gate was added. Remove the entry once a run exists."
+    },
+    {
+      "id": "UC-TC-glibc-floor",
+      "reason": "complete in usecase-registry.yaml but no automated scenario (automated: true) and no usecase_flows.yaml flow runs it; seeded when ADR-076 zero-run gate was added. Remove the entry once a run exists."
+    },
+    {
+      "id": "UC-TC-header-scope-robustness",
+      "reason": "complete in usecase-registry.yaml but no automated scenario (automated: true) and no usecase_flows.yaml flow runs it; seeded when ADR-076 zero-run gate was added. Remove the entry once a run exists."
+    },
+    {
+      "id": "UC-TC-make-auto-query",
+      "reason": "complete in usecase-registry.yaml but no automated scenario (automated: true) and no usecase_flows.yaml flow runs it; seeded when ADR-076 zero-run gate was added. Remove the entry once a run exists."
+    },
+    {
+      "id": "UC-CHANGE-crosscheck-hygiene",
+      "reason": "complete in usecase-registry.yaml but no automated scenario (automated: true) and no usecase_flows.yaml flow runs it; seeded when ADR-076 zero-run gate was added. Remove the entry once a run exists."
+    },
+    {
+      "id": "UC-WORKFLOW-single-release-audit",
+      "reason": "complete in usecase-registry.yaml but no automated scenario (automated: true) and no usecase_flows.yaml flow runs it; seeded when ADR-076 zero-run gate was added. Remove the entry once a run exists."
+    },
+    {
+      "id": "UC-TC-build-emitted-facts",
+      "reason": "complete in usecase-registry.yaml but no automated scenario (automated: true) and no usecase_flows.yaml flow runs it; seeded when ADR-076 zero-run gate was added. Remove the entry once a run exists."
+    },
+    {
+      "id": "UC-REPORTING-dry-run-cost-preview",
+      "reason": "complete in usecase-registry.yaml but no automated scenario (automated: true) and no usecase_flows.yaml flow runs it; seeded when ADR-076 zero-run gate was added. Remove the entry once a run exists."
+    }
+  ]
+}
