@@ -15,6 +15,7 @@ on:
       - 'pixi.lock'
       - '.github/workflows/test-action.yml'
       - 'tests/fixtures/action/**'
+      - 'scripts/check_no_adr_citations.py'
   push:
     branches: [main]
     paths:
@@ -27,6 +28,7 @@ on:
       - 'pixi.lock'
       - '.github/workflows/test-action.yml'
       - 'tests/fixtures/action/**'
+      - 'scripts/check_no_adr_citations.py'
 
 concurrency:
   # A PR groups by PR number, so a new push supersedes the stale run for
