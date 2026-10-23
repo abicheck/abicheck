@@ -158,6 +158,25 @@ PLATFORM_FACTS: list[FactDefinition] = [
     ),
     _E(
         owner="MachoMetadata",
+        field="weak_dependent_libs",
+        value_type="list[str] | None",
+        producing_backends=("macho",),
+        persisted=True,
+        identity_relevant=False,
+        comparable=True,
+        suppressible=False,
+        reportable=True,
+        lifecycle=FactLifecycle.PERSISTED,
+        notes=(
+            "LC_LOAD_WEAK_DYLIB install names, kept apart from dependent_libs "
+            "so a weak load never reads as a change to the hard dependency "
+            "set. None means 'not captured' (legacy snapshot), [] means "
+            "'parsed Mach-O with no weak load commands'. Plain case (b) "
+            "conversion, the Mach-O analogue of rpaths below."
+        ),
+    ),
+    _E(
+        owner="MachoMetadata",
         field="rpaths",
         value_type="list[str] | None",
         producing_backends=("macho",),

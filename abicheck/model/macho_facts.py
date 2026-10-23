@@ -69,6 +69,19 @@ class MachoMetadata:
     # Re-exported libraries
     reexported_libs: list[str] = field(default_factory=list)  # LC_REEXPORT_DYLIB
 
+    # Weak-linked dependencies (LC_LOAD_WEAK_DYLIB): loaded when present, so a
+    # missing one does not fail the load. Kept apart from ``dependent_libs`` so
+    # a weak load never reads as a change to the hard dependency set. Tri-state:
+    # None = not captured (legacy snapshot written before this field existed);
+    # [] = parsed Mach-O carrying no weak load commands.
+    weak_dependent_libs: list[str] | None = None
+
+    # ADR-063 Phase 5: Fact[...] sibling of weak_dependent_libs -- the same
+    # schema-version-driven case-(b) shape as rpaths_fact below.
+    weak_dependent_libs_fact: Fact[list[str] | None] | None = field(
+        default=None, kw_only=True
+    )
+
     # Exported symbols
     exports: list[MachoExport] = field(default_factory=list)
 
@@ -97,6 +110,14 @@ class MachoMetadata:
     def __post_init__(self) -> None:
         self.rpaths, self.rpaths_fact = bridge_legacy_and_fact(
             self.rpaths, self.rpaths_fact, None, None
+        )
+        self.weak_dependent_libs, self.weak_dependent_libs_fact = (
+            bridge_legacy_and_fact(
+                self.weak_dependent_libs,
+                self.weak_dependent_libs_fact,
+                None,
+                None,
+            )
         )
 
     @memoized_property

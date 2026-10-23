@@ -808,11 +808,18 @@ Landed after that note, in the same slice:
   (`report/render_release_html.py`): headline verdict/exit, per-member
   table, the `comparison_scope` section with reasons, release-level surface
   changes when present, coherence findings.
-- *Dependency graph (relationship visualization).* Release schema 1.9 adds
-  `libraries[].dependencies` (per side: recorded ELF `DT_SONAME`/
-  `DT_NEEDED`), and the release HTML draws it as a layered SVG (text +
-  colour status per node, per-node/edge titles, one-side-only edges dashed,
-  a full edge table, capped at 60 nodes with omitted counts stated)
+- *Dependency graph (relationship visualization).* Release schema 1.9 added
+  `libraries[].dependencies` for ELF members (`DT_SONAME`/`DT_NEEDED`);
+  schema 2.2 extends it to PE/COFF (import and delay-load DLL names) and
+  Mach-O (`LC_LOAD_DYLIB`, `LC_LOAD_WEAK_DYLIB`, `LC_REEXPORT_DYLIB`), each
+  side naming its `format`. The facts are recorded in
+  `workflows/release_dependency_facts.py`; a side missing a fact family is
+  marked `incomplete`, and a member with no format metadata is an explicit
+  `not_evaluated` state, never an empty edge list. The release HTML draws
+  the graph as a layered SVG (text + colour status per node, per-node/edge
+  titles, one-side-only edges dashed, a full edge table, capped at 60 nodes
+  with omitted counts stated), matching names per format (PE
+  case-insensitively, Mach-O by install name basename)
   (`report/release_dependency_graph.py`).
 
 Tests: `tests/test_release_html_report.py` (through the CLI, the JSON is the
@@ -835,8 +842,7 @@ and without `-o html`; generated documents check escaping and the cap) and
 
 Still open: `affected_use_cases` in the HTML changes table and SARIF;
 release-level `surface_changes` (the release JSON carries none yet, so the
-release page renders the section only when a document has one); dependency
-facts for PE/Mach-O members (only ELF is recorded); the step summary written
+release page renders the section only when a document has one); the step summary written
 by the Action is not itself asserted ADR-free by the new job (only the
 report files are).
 

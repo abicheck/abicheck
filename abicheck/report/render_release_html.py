@@ -238,7 +238,7 @@ def _node_svg(node: GraphNode, x: float, y: float) -> str:
     dash_attr = f" stroke-dasharray='{dash}'" if dash else ""
     return (
         f"<g class='rel-node' data-name='{_h(node.name)}'><title>{_h(node.name)}: {_h(status)} "
-        f"({_h(node.detail)})</title>"
+        f"({_h(node.detail)}; dependencies {_h(node.deps.replace('_', ' '))})</title>"
         f"<rect x='{x:.1f}' y='{y:.1f}' width='{_NODE_W}' height='{_NODE_H}' rx='6' "
         f"fill='{fill}' stroke='{stroke}' stroke-width='2'{dash_attr}/>"
         f"<text x='{x + _NODE_W / 2:.1f}' y='{y + 18:.1f}' text-anchor='middle'>{_h(label)}</text>"
@@ -324,8 +324,19 @@ def _graph_section(d: Mapping[str, Any]) -> str:
     )
     notes = [
         f"{graph.members_with_facts} of {graph.members_total} compared member(s) "
-        "recorded dependency facts (ELF dynamic section)."
+        "recorded dependency facts (ELF dynamic section, PE import tables, Mach-O "
+        "load commands)."
     ]
+    if graph.members_partial:
+        notes.append(
+            f"{graph.members_partial} member(s) recorded only part of their facts: "
+            "a fact family the snapshot did not capture is marked incomplete."
+        )
+    if graph.members_not_evaluated:
+        notes.append(
+            f"{graph.members_not_evaluated} member(s) have dependencies not evaluated: "
+            "no format metadata was read for them, so no edges are drawn and none are implied."
+        )
     if graph.omitted_nodes or graph.omitted_edges:
         notes.append(
             f"{graph.omitted_nodes} more librar(ies) and {graph.omitted_edges} more "

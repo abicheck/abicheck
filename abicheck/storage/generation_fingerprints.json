@@ -147,7 +147,7 @@
       "abicheck/extract/tu_jobs.py": "6ed530395738f83bc46664a6ae9e91fa7286a2a6bb81e4fbb723447f6524b070",
       "abicheck/extract/unparseable_header_fallback.py": "a9aae1490ad88bb1f1bd9ddfe96681d4a3b9558436446305c66fb44f0003c2f6",
       "abicheck/extract/wheel_tags.py": "0a6eff34860223c9efb0fc2d62469804d50d59ae1825c726abafaf7c898789db",
-      "abicheck/macho_metadata.py": "5fb0d218553c8e3f8911429074132849087fbc2f440bba6073fa7a5a43d7d7b1",
+      "abicheck/macho_metadata.py": "e4d71d4885ce9f95fb0e2cf5be0a9f391b18ac5f031249eb331d4e20dc4a3deb",
       "abicheck/pdb_metadata.py": "79beb794904dd26afaf7d1fa8e9fdf74d4d4dfd21f5c09b9764c45b253a2dc1f",
       "abicheck/pdb_model.py": "d79ccfac86f4889d8d9b2c745ee2dacd6132c1789c0ca77988aaf53bd50aea8a",
       "abicheck/pdb_parser.py": "0e36976c17fbea1c7cfe98f9ede5713418624c69821eb9ce12cac6c9a736543f",
@@ -157,9 +157,9 @@
       "abicheck/symvers_metadata.py": "372737765cd132e6e87ed891dd465d2958e04debbef774e45212ceb3036871cb",
       "abicheck/type_metadata.py": "9997189de8dac522fd1db8be5ae491d811139503f83abaaded89038eb4aa9cdf"
     },
-    "fingerprint": "af867c14a3203711afb2773c64bd53ad0b769b184e2154c0f445416f7b9a0169",
-    "generation": 12,
-    "reason": "castxml header-AST cache key and entry format moved to the parse store (Phase 6 slice 2) and best-effort cache cleanup; extracted facts for the same input are unchanged, so no generation bump"
+    "fingerprint": "26de190758600d0510b1eeb487034b564264d1806d28946eb215533d86eb9fd7",
+    "generation": 13,
+    "reason": "bumped to 13 for a semantic change"
   },
   "resolver": {
     "files": {

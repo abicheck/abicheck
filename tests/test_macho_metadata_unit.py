@@ -488,6 +488,7 @@ def _build_macho_64_le(
     install_name: str = "",
     dependent_libs: list[str] | None = None,
     reexported_libs: list[str] | None = None,
+    weak_dependent_libs: list[str] | None = None,
     min_os_version: int = 0,
     symbols: list[tuple[str, int, int]] | None = None,  # (name, n_type, n_desc)
 ) -> bytes:
@@ -528,6 +529,11 @@ def _build_macho_64_le(
 
     for dep in reexported_libs or []:
         load_cmds += _dylib_cmd(0x8000001F, dep)
+        ncmds += 1
+
+    for dep in weak_dependent_libs or []:
+        # LC_LOAD_WEAK_DYLIB = LC_REQ_DYLD | 0x18
+        load_cmds += _dylib_cmd(0x80000018, dep)
         ncmds += 1
 
     if min_os_version:
@@ -694,6 +700,23 @@ class TestParseMachoMetadata:
         f.write_bytes(data)
         meta = parse_macho_metadata(f)
         assert "/usr/lib/libreexport.dylib" in meta.reexported_libs
+
+    def test_parse_weak_dylib_kept_apart_from_hard_dependencies(self, tmp_path):
+        data = _build_macho_64_le(
+            dependent_libs=["/usr/lib/libSystem.B.dylib"],
+            weak_dependent_libs=["@rpath/libplugin.dylib"],
+        )
+        f = tmp_path / "libtest.dylib"
+        f.write_bytes(data)
+        meta = parse_macho_metadata(f)
+        assert meta.weak_dependent_libs == ["@rpath/libplugin.dylib"]
+        assert meta.dependent_libs == ["/usr/lib/libSystem.B.dylib"]
+
+    def test_parse_without_weak_commands_records_verified_none(self, tmp_path):
+        f = tmp_path / "libtest.dylib"
+        f.write_bytes(_build_macho_64_le())
+        meta = parse_macho_metadata(f)
+        assert meta.weak_dependent_libs == []
 
     def test_parse_fat_binary_returns_metadata(self, tmp_path):
         """Fat binary with single slice should parse that slice."""
