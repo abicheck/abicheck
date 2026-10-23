@@ -27,6 +27,7 @@ accounted". These helpers are free of any ``Change``/``ChangeKind`` concern;
 from __future__ import annotations
 
 import re
+from collections.abc import Callable, Sequence
 
 from ..extract.stdlib_local_origin import is_user_specializable_std_symbol
 from ..model import AbiSnapshot
@@ -336,6 +337,39 @@ def toolchain_runtime_symbol_names(snapshot: AbiSnapshot) -> frozenset[str]:
         if not is_user_specializable_std_symbol(sym.name)
         and _external_dependency_origin(sym.name, needed, self_names) is not None
     )
+
+
+def toolchain_runtime_name_predicate(
+    snapshots: Sequence[AbiSnapshot],
+) -> Callable[[str], bool]:
+    """A test for "the C++ runtime / toolchain owns this symbol name".
+
+    The same origin classification as :func:`toolchain_runtime_symbol_names`,
+    but over any *name* rather than only the names in an ELF table: a finding
+    can name a runtime symbol the snapshots' export tables do not list (an
+    import edge, a leaked-dependency or binding finding whose subject was read
+    from the dynamic table's undefined entries). The linked libraries and self
+    identity of every snapshot are pooled, so a symbol is runtime-owned when
+    either side would classify it so. Each side is classified against its own
+    linked libraries and self identity: pooling them would let one side's
+    identity (an old ``libfmt``) hide the other side's leak (a wrapper that
+    re-exports ``fmt::``).
+    """
+    sides = [
+        (_linked_library_names(snap), _library_self_names(snap)) for snap in snapshots
+    ]
+
+    def is_runtime(name: str) -> bool:
+        return (
+            bool(name)
+            and not is_user_specializable_std_symbol(name)
+            and any(
+                _external_dependency_origin(name, needed, self_names) is not None
+                for needed, self_names in sides
+            )
+        )
+
+    return is_runtime
 
 
 def _msvc_scope_components(symbol: str) -> list[str]:

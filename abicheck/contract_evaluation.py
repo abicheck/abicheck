@@ -77,6 +77,7 @@ from .policy.contract_closed_domain import (
     SURFACE_METRIC_KIND_SLUGS,
     closed_domain_decision,
 )
+from .policy.contract_toolchain_origin import DEPENDENCY_EDGE_KIND_SLUGS
 from .policy.finding_type_candidates import (
     qualified_type_candidates as _qualified_type_candidates,
     type_candidates as _type_candidates,
@@ -337,6 +338,7 @@ def _analysis_entity_kind_slugs() -> frozenset[str]:
 _NOT_APPLICABLE_KIND_SLUGS: frozenset[str] = (
     frozenset(k.value for k in _NOT_APPLICABLE_KINDS)
     | SURFACE_METRIC_KIND_SLUGS
+    | DEPENDENCY_EDGE_KIND_SLUGS
     | _analysis_entity_kind_slugs()
 )
 
@@ -590,13 +592,10 @@ def _decision_for_surface_reason(
 # Deliberately NOT included, considered and left as a documented gap since
 # no Codex finding has named these and this module's own discipline is to
 # fix the verified case rather than speculatively expand it:
-# `imported_symbol_added`/`target_dependency_added`/
-# `public_api_internal_dependency_added`/`numpy_capi_consumption_added`/
-# `symbol_version_defined_added`/`symbol_version_required_added` (each
-# describes a new edge/obligation in a dependency or versioning graph
-# rather than a new function/variable/type member, so whether "new-side
-# authoritative" is even the right frame for them needs its own scoped
-# look, not a drive-by inclusion here).
+# `target_dependency_added`/`public_api_internal_dependency_added`/
+# `numpy_capi_consumption_added`/`symbol_version_defined_added` (each a new
+# edge/obligation in a dependency or versioning graph, not a new member;
+# `imported_symbol_*` is NOT_APPLICABLE via `DEPENDENCY_EDGE_KIND_SLUGS`).
 _NON_COMPATIBLE_ADDITION_SHAPE_KINDS: frozenset[ChangeKind] = frozenset(
     {
         ChangeKind.TYPE_FIELD_ADDED,

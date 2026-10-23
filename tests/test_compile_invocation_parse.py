@@ -88,9 +88,11 @@ def test_msvc_include_search_is_recognized_only_in_cl_mode(
         (["g++", "-iquotex", "-idirafterx"], ("x", "x")),
         # A trailing option with no operand contributes nothing and ends the scan.
         (["g++", "-iquote", "q1", "-idirafter"], ("q1",)),
-        # MSVC /I (separate and joined) is carried. A bare -I is not: the argv
-        # scanner carries only /I, the documented gap in replayed_include_dirs.
-        (["cl.exe", "/I", "s", "/Ij", "-Ik"], ("s", "j")),
+        # MSVC /I, -I and /external:I (separate and joined) are probed in CL
+        # mode. The rendered replay still carries only /I (see the carried
+        # tests above), so -I and /external:I reach the probe alone.
+        (["cl.exe", "/I", "s", "/Ij", "-Ik"], ("s", "j", "k")),
+        (["cl.exe", "/external:I", "e", "/external:Ix"], ("e", "x")),
     ],
 )
 def test_replayed_include_dirs_carries_each_spelling_once_in_order(
@@ -99,4 +101,25 @@ def test_replayed_include_dirs_carries_each_spelling_once_in_order(
     inv = parse_compile_invocation(
         _cu(argv=argv, language="CXX"), "g++" if argv[0] != "cl.exe" else "cl.exe"
     )
+    assert inv.replayed_include_dirs == expected
+
+
+@pytest.mark.parametrize(
+    ("argv", "compiler", "expected"),
+    [
+        # CL mode reads the raw argv, so the -I and /external:I operands reach the probe.
+        (
+            ["cl", "/c", "-I", "inc", "/external:I", "ext"],
+            "cl",
+            ("inc", "ext"),
+        ),
+        # GNU mode reads the carried tokens: -I is structured and never probed here,
+        # while -iquote still reaches the probe.
+        (["g++", "-c", "-I", "inc", "-iquote", "q"], "g++", ("q",)),
+    ],
+)
+def test_probe_operands_read_raw_argv_in_cl_mode_and_carried_tokens_in_gnu(
+    argv: list[str], compiler: str, expected: tuple[str, ...]
+) -> None:
+    inv = parse_compile_invocation(_cu(argv=argv), compiler)
     assert inv.replayed_include_dirs == expected

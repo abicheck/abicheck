@@ -279,7 +279,7 @@ the pre-change commit. A mutation of the dedup rule fails it.
    unit, so their link inputs (`c.o`, `lib.a` for `d.c`) are still not
    recorded. Recording them would add output to every single-source link;
    that is a separate, deliberate change. (b) The source generation moves to
-   8 (`SOURCE_GENERATION`), one above main's 7 from #1752: the source tier
+   9 (`SOURCE_GENERATION`), one above main's 8: the source tier
    replays different units for the same multi-source input. (c) `multi_source_clang_argv_golden.json` pins
    single-source units only; its four keys for changed entries were removed
    and the routing golden owns them. (d) `adapters/compile_db.py` is not in

@@ -17,7 +17,9 @@ runs:
     # guard do its job.
     - name: Pin the CastXML install root to a cacheable path
       shell: bash
-      run: |
+      # Every value written to GITHUB_ENV comes from $HOME, uname and
+      # /etc/os-release on the runner, never from event or PR input.
+      run: |  # zizmor: ignore[github-env]
         echo "ABICHECK_CASTXML_INSTALL_ROOT=${HOME}/.cache/abicheck-castxml" >> "$GITHUB_ENV"
         # The installer selects its asset (and its install dir) by
         # "$VERSION_ID:$(uname -m)", so an Ubuntu 22.04 build and a 24.04 build

@@ -68,6 +68,7 @@ own wiring rather than a second copy of D7's precedence.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
@@ -140,6 +141,9 @@ class ContractEvaluationStage:
     #: toolchain (``export_accounting.toolchain_runtime_symbol_names``), applied
     #: by ``policy.contract_toolchain_origin`` once every domain decision is in.
     toolchain_symbols: frozenset[str] = frozenset()
+    #: The same origin test over any name, for a finding whose symbol no ELF
+    #: table lists (``export_accounting.toolchain_runtime_name_predicate``).
+    toolchain_name_predicate: Callable[[str], bool] | None = None
     changes: list[Change] = field(default_factory=list)
     #: ``id()`` of every already-classified finding. Identity, not equality:
     #: two findings can compare equal (``Change`` is a plain dataclass) while
@@ -186,7 +190,10 @@ class ContractEvaluationStage:
         decisions = self._observed_export_fallback(fresh, decisions)
         decisions = self._unresolved_default_fallback(fresh, decisions)
         decisions = exclude_toolchain_runtime_findings(
-            fresh, decisions, self.toolchain_symbols
+            fresh,
+            decisions,
+            self.toolchain_symbols,
+            is_runtime_name=self.toolchain_name_predicate,
         )
         for change, decision in zip(fresh, decisions, strict=True):
             change.contract_relevance = decision.relevance
@@ -573,7 +580,10 @@ def build_contract_stage(
     # origin classification the symbol-hygiene audit reports (see
     # ContractEvaluationStage.toolchain_symbols). Read here, where both raw
     # snapshots are still in scope.
-    from .buildsource.export_accounting import toolchain_runtime_symbol_names
+    from .buildsource.export_accounting import (
+        toolchain_runtime_name_predicate,
+        toolchain_runtime_symbol_names,
+    )
 
     toolchain_symbols = frozenset().union(
         *(
@@ -668,6 +678,9 @@ def build_contract_stage(
         ),
         committed_exports=committed_exports,
         toolchain_symbols=toolchain_symbols,
+        toolchain_name_predicate=toolchain_runtime_name_predicate(
+            [snap for snap in (old, new) if snap is not None]
+        ),
     )
 
 

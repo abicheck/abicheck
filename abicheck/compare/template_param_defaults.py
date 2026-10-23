@@ -32,9 +32,11 @@ from ..model import (
     RecordType,
     source_contract_evidence as _contract,
 )
+from ..model.availability import FactStatus
 from ..model.change import Change
 from ..model.change_catalog.kinds import ChangeKind
 from ..model.evidence_status import ReachabilityState
+from ..model.identity import EntityId, InlineNamespace, Namespace, Record
 from ..model.signature_token_scan import _split_top_level_commas
 from .fact_gate import both_facts_present
 from .template_surface import (
@@ -120,6 +122,123 @@ def detect_template_param_default_changed(
         covered = key in reported_templates or any(
             _is_in_scope(stem, key) for stem in instantiation_stems
         )
+        (suppressed if covered else findings).append(change)
+    return findings, suppressed
+
+
+def _function_pattern_groups(snap: AbiSnapshot) -> dict[EntityId, list[Function]]:
+    """``entity_id -> the function-template pattern declarations of *snap*``
+    (ADR-085 D1, function slice).
+
+    A header that declares a function template and then defines it gives two
+    pattern declarations with one identity, so the group keeps all of them and
+    :func:`_merged_function_defaults` decides what they agree on. A declaration
+    whose fact is NOT_COLLECTED is an ordinary function that never had a
+    template pattern to record, so it is not grouped.
+    """
+    groups: dict[EntityId, list[Function]] = {}
+    for fn in snap.declarations.functions:
+        fact = fn.template_param_defaults_fact
+        if (
+            fact is None
+            or fact.status is FactStatus.NOT_COLLECTED
+            or fn.entity_id is None
+        ):
+            continue
+        groups.setdefault(fn.entity_id, []).append(fn)
+    return groups
+
+
+def _merged_function_defaults(
+    decls: list[Function],
+) -> tuple[str | None, ...] | None:
+    """The one default per parameter that a group of redeclarations agrees on.
+
+    C++ allows a default argument to be stated once, on whichever redeclaration
+    introduces it, so a parameter's spelling is taken from any declaration that
+    spells it. Two different spellings for one parameter, a differing parameter
+    count, or any declaration whose fact is not PRESENT makes the group unusable
+    (``None``): the identity is not trusted, so no finding is produced for it.
+    """
+    rows: list[tuple[str | None, ...]] = []
+    for fn in decls:
+        fact = fn.template_param_defaults_fact
+        if fact is None or fact.status is not FactStatus.PRESENT or fact.value is None:
+            return None
+        rows.append(fact.value)
+    if len({len(row) for row in rows}) != 1:
+        return None
+    merged: list[str | None] = []
+    for column in zip(*rows, strict=True):
+        spelled = {spelling for spelling in column if spelling is not None}
+        if len(spelled) > 1:
+            return None
+        merged.append(spelled.pop() if spelled else None)
+    return tuple(merged)
+
+
+def detect_function_template_param_default_changed(
+    old: AbiSnapshot,
+    new: AbiSnapshot,
+    *,
+    instantiation_stems: Collection[str] = (),
+) -> tuple[list[Change], list[Change]]:
+    """ADR-085 D2 for a function template: a header-level change to a
+    function template's default argument.
+
+    Pairs the function-template patterns of *old* and *new* by their entity
+    identity, which carries each template parameter's kind, so two overloads
+    that share a name are never paired with each other. A pair fires only when
+    both sides carry recorded defaults (D1), the parameter count is the same,
+    and at least one default spelling differs. A change already reported as
+    ``DEFAULT_TEMPLATE_ARG_CHANGED`` (shape A, an exported instantiation of the
+    same template, named by *instantiation_stems*) is returned in the second
+    list instead, so the caller can record it as deduplicated.
+
+    Returns ``(findings, suppressed)``.
+    """
+    old_groups = _function_pattern_groups(old)
+    new_groups = _function_pattern_groups(new)
+    findings: list[Change] = []
+    suppressed: list[Change] = []
+    for key in sorted(old_groups.keys() & new_groups.keys(), key=repr):
+        old_decls, new_decls = old_groups[key], new_groups[key]
+        # The identity carries the namespace/record path and the leaf name, so
+        # the qualified name needs no demangled spelling (a pattern has none).
+        scope_names = [
+            segment.name
+            for segment in key.scope
+            if isinstance(segment, (Namespace, Record, InlineNamespace))
+        ]
+        qname = "::".join([*scope_names, key.leaf_name])
+        if not both_facts_present(
+            old_decls[0], new_decls[0], "template_param_defaults", qname
+        ):
+            continue
+        before = _merged_function_defaults(old_decls)
+        after = _merged_function_defaults(new_decls)
+        if (
+            before is None
+            or after is None
+            or len(before) != len(after)
+            or before == after
+        ):
+            continue
+        changed = [
+            i for i, (a, b) in enumerate(zip(before, after, strict=True)) if a != b
+        ]
+        new_fn = new_decls[0]
+        symbol = f"{qname}({', '.join(param.type for param in new_fn.params)})"
+        change = make_change(
+            ChangeKind.TEMPLATE_PARAM_DEFAULT_CHANGED,
+            symbol=symbol,
+            name=qname,
+            detail=", ".join(f"param {i}" for i in changed),
+            old_value=repr(before),
+            new_value=repr(after),
+            **_contract.reachability_of(new_fn, header_parsed=True),
+        )
+        covered = any(_is_in_scope(stem, qname) for stem in instantiation_stems)
         (suppressed if covered else findings).append(change)
     return findings, suppressed
 

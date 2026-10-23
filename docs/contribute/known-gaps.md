@@ -67,6 +67,10 @@ Each entry's status line says what is still open. A PARTIAL entry's write-up als
 
 **Status (2026-10-22): OPEN.** The review-group section is bounded; the per-finding Additions rows are not. [Full write-up](known-gaps/the-additions-markdown-section-is-one-row-per-finding.md)
 
+#### `append_only_dispatch_tables` does not forgive offset shifts inside a dispatch-table aggregate (2026-10-23)
+
+**Status (2026-10-23): OPEN.** Level Zero's `_ze_dditable_t`/`_zes_dditable_t` embed each sub-table by value, so when a sub-table grows by a tail append every later sub-table moves; on a real Level Zero pair that is 41 `type_field_offset_changed` findings, still `BREAKING` under the profile. A `type_pattern` rule cannot express "shifted only because an earlier embedded matching table grew append-only" without also hiding a genuine reorder, so the fix needs a cause-aware check (every member before the shifted one is unchanged or is itself an append-only-grown matching table), not a wider selector.
+
 ### Clang projection (ADR-063 Phase 4 prerequisites)
 
 The entries below come from the Phase 4 measurement spike
@@ -223,6 +227,12 @@ current emitter, which is unchanged.
 #### The root Action's baseline provenance is not recorded in the JSON report (2026-10-16)
 
 **Status (2026-10-16): OPEN.** The root Action now says which baseline it compared against, in its `baseline-source`, `baseline-asset-name`, `baseline-project-ref`, `baseline-generation` and `baseline-profile` outputs and in a "Baseline source" step-summary block. The JSON report, which a downstream consumer reads on its own, does not carry that provenance, so it cannot tell a legacy asset from a baseline-set, or which `project_ref` was checked. The nearest existing owner is ADR-065's acquisition record (`abicheck/model/scope_acquisition.py`). It records a per-member *state* (`available`, `failed`, `expected_not_produced`, and so on), not the artifact or revision a member was read from, so it does not already carry this. Adding the fields there is a report-schema change with its own decision and golden updates, so it is not made here.
+
+#### MSVC/clang-cl include operands reach the public-root probe, not the replayed argv (2026-10-23)
+
+**Status (2026-10-23): PARTIAL.** `parse_compile_invocation` reads `/I`, `-I` and `/external:I` (separate and joined spellings) from a CL-mode argv into `CompilerInvocation.replayed_include_dirs`, which `clang_public_roots` probes, so a `/external:I` root that holds the public headers is no longer missed. Still open: those operands are not rendered into the AST-dump argv (only `/I` is carried today), so a declaration that comes only through a `-I` or `/external:I` include is not replayed. `/imsvc` (a system bucket) is not probed at all.
+
+`false-clean` — A public header reached only through a `-I` or `/external:I` include under clang-cl is probed as a public root, but the replayed AST dump does not search that directory, so a declaration that comes only through it is not replayed. An MSVC `/imsvc` include tree is never a probed public root.
 
 ### False-positive risk
 
@@ -548,3 +558,21 @@ Deliberate rulings and scope limits, not defects. Changing one needs the decisio
 | The compatibility percentage divides findings by symbols (ABICC heuristic, public contract); kept. | [The compatibility percentage counts findings against symbols](known-gaps/the-compatibility-percentage-counts-findings-against-symbols.md) |
 | DWARF member-location evaluation covers `DW_OP_plus`/`plus_uconst`/`constu`/`consts`/`lit0..31` only; other ops give unknown offsets, not values. | [DWARF member-location evaluator implements only a subset of DW_OP](known-gaps/dwarf-member-location-evaluator-implements-only-a-subset-of-dw-op.md) |
 | Local-exec TLS in an AArch64 shared object leaves no binary evidence; toolchain limit. | [Local-exec TLS in an AArch64 shared object leaves no binary evidence](known-gaps/local-exec-tls-in-an-aarch64-shared-object-leaves-no-binary.md) |
+
+## Unreached oneDAL profiling hotspots (perf, 2026-10-23)
+
+**Status: OPEN.** No use-case scenario executes any oneDAL-profiled hotspot.
+The repository records oneDAL only as whole-run receipts (wall time, peak RSS,
+verdict) in [`performance.md`](performance.md) and as the periodic
+`scripts/l2_real_profiles.py` profile; neither names the hot functions, so no
+function-level list is traceable from the repo. Function-level coverage
+needs the oneDAL operands (about 120 build-minutes and 25 GB), which
+`usecase_flows.yaml` cannot provide: its flows run against self-contained
+catalog cases only. Reach stays unrecorded until a maintainer supplies the
+profiled function list and runs `usecase_paths.py record --source flows` against
+a built oneDAL tree. The perf-side mapping for the measured hot paths is
+`USE_CASES` in `scripts/complexity_bench.py`.
+
+`perf` — oneDAL hot paths (`compare()` over a 125-header-root L2 surface, the
+rows in the 2026-09 receipt series) are not exercised by any scenario, so a
+regression there shows up only in the manual real-profile lane.

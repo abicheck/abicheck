@@ -8,6 +8,6 @@
   `disposition_audit.rules`, the `unused_rules` gate and strict-expiry errors
   name the file that holds the rule, and a one-file invocation is unchanged.
   Applies to two-sided, release/directory and `--no-baseline` compares and to
-  the typed API's `suppress` field. The Action's `suppress` input still
-  forwards a single file.
+  the typed API's `suppress` field. The Action's `suppress` input takes one
+  path per line, each forwarded as its own `--suppress`.
   The typed API treats an empty `CompareRequest.suppress` collection the same as `None`.

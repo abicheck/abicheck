@@ -115,6 +115,10 @@ from .extract.headers.clang.expr import (  # noqa: F401  (some re-exported for t
     _specialization_scope_key,
     _unwrap_expr,
 )
+from .extract.headers.clang.function_template_defaults import (
+    FUNCTION_NODE_KINDS as _FUNCTION_NODE_KINDS,
+    function_template_default_index,
+)
 
 # Split out to keep this module under the 2000-line hard cap; imported (not
 # just referenced) so the historical ``dumper_clang._name`` import paths that
@@ -162,15 +166,6 @@ from .storage import header_ast_cache as dumper_cache
 #: Clang AST node kinds for the function-like declarations we emit. Includes the
 #: C++ special members so a public constructor/destructor/conversion change is
 #: captured, mirroring castxml's ``Constructor``/``Destructor``/``Converter``.
-_FUNCTION_NODE_KINDS = frozenset(
-    {
-        "FunctionDecl",
-        "CXXMethodDecl",
-        "CXXConstructorDecl",
-        "CXXDestructorDecl",
-        "CXXConversionDecl",
-    }
-)
 #: Pseudo-files clang attributes builtin / command-line declarations to.
 #: Single source of truth is now ``extract.headers.clang.context.BUILTIN_FILES``;
 #: kept as a module attribute of the same name for any external reader of it.
@@ -954,6 +949,7 @@ class _ClangAstParser:
             default_value=lambda p: _initializer_value(p, self._id_index),
             no_binary_evidence=self._no_binary_evidence,
             is_cxx=self._is_cxx,
+            function_template_defaults=function_template_default_index(self._root),
         )
 
     def parse_variables(self) -> list[Variable]:
@@ -1328,12 +1324,6 @@ def _default_record_access(node: dict[str, Any]) -> str:
     """See ``extract.headers.clang.context.default_record_access`` (the
     canonical implementation this delegates to) for the full contract."""
     return _clang_context.default_record_access(node)
-
-
-def _param_has_default(param: dict[str, Any]) -> bool:
-    """See ``extract.headers.clang.functions._param_has_default`` (the
-    canonical implementation this delegates to) for the full contract."""
-    return _clang_functions._param_has_default(param)
 
 
 def _evaluated_int_value(node: dict[str, Any]) -> int | None:

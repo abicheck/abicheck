@@ -1,0 +1,76 @@
+name: gitleaks
+
+# Secret scan of git history with the gitleaks CLI: on a PR, the commits it
+# adds over the base branch (a secret committed and then deleted is still in
+# them); on a push to main, the whole history (~30 s for ~9k commits). The
+# CLI, not gitleaks/gitleaks-action: the action needs a license key for a
+# repository owned by an organization, and is under its own license.
+#
+# Findings are redacted in the log, which is public. A false positive: add a
+# class-level allowlist to `.gitleaks.toml` (path, or regex on the secret or
+# line, with its reason), or append `gitleaks:allow` in a comment on the line.
+# A finding in a merge commit (a conflict resolution) is reported under
+# `b/<path>`, so a path entry must match that (`^(b/)?f\.txt$`). A one-off
+# finding in a commit already on main goes in `.gitleaksignore` by the
+# fingerprint printed with it. A real secret: revoke it first; deleting it
+# from the tree does not remove it from history, forks or clones.
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+# A PR groups by PR number, a push to main by ref: a newer main push scans
+# the whole history again, so the superseded scan can be cancelled.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || (github.event_name == 'push' && github.ref) || github.run_id }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  gitleaks:
+    name: Secret scan (gitleaks)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10  # v6
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      # The release tarball, checked against a SHA-256 kept here rather than
+      # the release's own checksums file, which comes from the same place as
+      # the tarball. Bumping: update both values from the release's
+      # gitleaks_<version>_checksums.txt (linux_x64 line).
+      - name: Install gitleaks
+        env:
+          GITLEAKS_VERSION: 8.30.1
+          GITLEAKS_SHA256: 551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb
+        run: |
+          tarball="gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+          mkdir -p "$RUNNER_TEMP/gitleaks"
+          curl -fsSL --retry 3 -o "$RUNNER_TEMP/$tarball" \
+            "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/$tarball"
+          echo "$GITLEAKS_SHA256  $RUNNER_TEMP/$tarball" | sha256sum -c -
+          tar -xzf "$RUNNER_TEMP/$tarball" -C "$RUNNER_TEMP/gitleaks" gitleaks
+          "$RUNNER_TEMP/gitleaks/gitleaks" version
+      # --log-opts replaces gitleaks' own git-log arguments, so the push scan
+      # repeats --full-history --all to cover every ref. --diff-merges=remerge:
+      # a merge shows only what it adds over the automatic merge, so a line
+      # from a parent is reported once, under its own commit. --redact: the
+      # finding's location and rule, never the value.
+      - name: Scan commits
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          if [ "$EVENT" = pull_request ]; then
+            git rev-parse --verify --quiet "origin/$BASE_REF^{commit}" >/dev/null \
+              || { echo "::error::origin/$BASE_REF is not fetched"; exit 1; }
+            log_opts="--diff-merges=remerge origin/$BASE_REF..HEAD"
+          else
+            log_opts="--diff-merges=remerge --full-history --all"
+          fi
+          "$RUNNER_TEMP/gitleaks/gitleaks" git --redact --verbose --no-banner \
+            --log-opts="$log_opts" .

@@ -186,6 +186,32 @@ EXTRACTION_BUG_CLASSES: tuple[BugClass, ...] = (
         ),
     ),
     BugClass(
+        id="extraction.msvc_include_operand_spelling_not_probed",
+        invariant=(
+            "Every spelling a CL-mode driver accepts for an include-search "
+            "operand -- `/I` and `-I`, separate or joined, and `/external:I` "
+            "separate or joined -- is recorded as a typed include-search "
+            "operand, so the public-root probe reads the same directories the "
+            "compile searches; a GNU driver's `-I` stays structured and is not "
+            "re-probed. The `/I`-only scanner left `-I` and `/external:I` out, "
+            "so a public header root reached only through them was missed."
+        ),
+        fixed_by=(1742,),
+        seed_tests=("tests/test_compile_invocation_differential.py",),
+        public_surfaces=(),
+        axes={
+            "driver": ("cl", "clang-cl", "g++"),
+            "spelling": (
+                "/I",
+                "/Idir",
+                "-I",
+                "-Idir",
+                "/external:I",
+                "/external:Idir",
+            ),
+        },
+    ),
+    BugClass(
         id="scoping.system_header_layout_unrecognized",
         invariant=(
             "Every layout a toolchain uses for the target's own system headers "

@@ -322,7 +322,15 @@ def _review_namespace_root(display_name: str) -> str:
     ``std::__cxx11::basic_string<...>::f(...)``), ignoring template arguments
     and parameter lists so ``foo<std::string>`` is not read as ``foo<std``."""
     if display_name.startswith("_Z"):
-        return "(undemangled)"
+        # A mangled display name (a function-local static has no qualified
+        # name) still has a namespace: demangle before reading it, so the
+        # family label agrees with the demangled examples beside it.
+        from ..demangle import demangle
+
+        demangled = demangle(display_name)
+        if not demangled:
+            return "(undemangled)"
+        display_name = demangled
     base = re.split(r"[<(]", display_name, maxsplit=1)[0]
     if "::" not in base:
         return "(global)"
@@ -340,6 +348,17 @@ def _review_group_families(
     shown only when every member of the family agrees; otherwise the family
     says so and points at the JSON. Each family keeps counts and a few example
     names; nothing is dropped, only folded."""
+    from ..demangle import demangle_batch
+
+    # One c++filt call for every mangled name, so _review_namespace_root's
+    # per-name demangle() is a cache hit instead of a process per group.
+    demangle_batch(
+        [
+            name
+            for name in (str(g.get("display_name", "")) for g in groups)
+            if name.startswith("_Z")
+        ]
+    )
     families: dict[tuple[str, str], dict[str, Any]] = {}
     for group in groups:
         name = str(group.get("display_name", "?"))
