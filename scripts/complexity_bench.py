@@ -117,6 +117,19 @@ CASES: dict[str, Case] = {
     )
 }
 
+#: Perf case id -> the use cases (ids in ``docs/contribute/usecase-registry.yaml``)
+#: whose user-facing workflow runs the hot path it measures. Every case in
+#: ``CASES`` must name at least one; ``tests/test_complexity_bench.py`` checks
+#: both directions against the registry.
+USE_CASES: dict[str, tuple[str, ...]] = {
+    "compare_by_symbols": ("UC-WF-compare", "UC-CHANGE-taxonomy"),
+    "compare_by_types": ("UC-WF-compare", "UC-CHANGE-taxonomy"),
+    "compare_add_remove": ("UC-WF-compare",),
+    "rename_matching": ("UC-WF-compare",),
+    "policy_classification": ("UC-CHANGE-taxonomy",),
+    "history_by_releases": ("UC-WF-baseline",),
+}
+
 
 # -- case bodies (run inside the worker subprocess) ------------------------
 
