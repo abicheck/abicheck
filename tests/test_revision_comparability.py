@@ -66,6 +66,7 @@ def _kinds(changes) -> list[ChangeKind]:
         (_fs("0.13", producer="other"), _fs("0.14"), False),
         # a contract (name/version) mismatch is hard-blocking on its own
         (_fs("0.13"), {**_fs("0.14"), "version": "999"}, False),
+        (_fs("0.13"), {**_fs("0.14"), "name": "other-contract"}, False),
         # an empty side is not a revision pair
         ({}, _fs("0.14"), False),
         (_fs("0.13"), {}, False),
@@ -243,3 +244,80 @@ def test_same_revision_assurance_is_not_unknown_from_revision() -> None:
     new = _surface(_fs("0.13"))
     state, _notes = _fact_set_comparability(_pack(old), _pack(new))
     assert state == "comparable"
+
+
+# -- binary provenance: the moved block, same-revision path -------------------
+
+
+def test_provenance_fires_when_public_functions_map_to_no_export() -> None:
+    """Six exportable functions none of which the binary exports read as a
+    provenance mismatch. The entity with an empty identity is skipped, not
+    counted as an unmapped declaration."""
+
+    def fn(mangled: str) -> SourceEntity:
+        return SourceEntity(
+            id=mangled, kind="function", qualified_name=mangled, mangled_name=mangled
+        )
+
+    decls = [fn(f"_Z{i}f") for i in range(6)]
+    decls.append(
+        SourceEntity(id="", kind="function", qualified_name="", mangled_name="")
+    )
+    old = _surface(_fs("0.13"), declarations=decls)
+    new = _surface(_fs("0.13"), declarations=list(decls))
+    old.roots = {"exported_symbols": ["_Zother"]}
+    new.roots = {"exported_symbols": ["_Zother"]}
+    assert ChangeKind.SOURCE_BINARY_PROVENANCE_MISMATCH in _kinds(
+        diff_source_abi(old, new)
+    )
+
+
+def _public_fn(mangled: str) -> SourceEntity:
+    return SourceEntity(
+        id=mangled, kind="function", qualified_name=mangled, mangled_name=mangled
+    )
+
+
+@pytest.mark.parametrize(
+    ("exports", "declarations"),
+    [
+        # no exported symbols at all: nothing to map against
+        ([], [_public_fn(f"_Z{i}f") for i in range(6)]),
+        # fewer exportable declarations than the minimum: too small to judge
+        (["_Zother"], [_public_fn(f"_Z{i}f") for i in range(4)]),
+        # most declarations map to a real export: the miss ratio is below 0.8
+        (
+            [f"_Z{i}f" for i in range(5)],
+            [_public_fn(f"_Z{i}f") for i in range(6)],
+        ),
+    ],
+)
+def test_provenance_stays_silent_when_the_surface_cannot_be_judged(
+    exports: list[str], declarations: list[SourceEntity]
+) -> None:
+    old = _surface(_fs("0.13"), declarations=declarations)
+    new = _surface(_fs("0.13"), declarations=list(declarations))
+    old.roots = {"exported_symbols": list(exports)}
+    new.roots = {"exported_symbols": list(exports)}
+    assert ChangeKind.SOURCE_BINARY_PROVENANCE_MISMATCH not in _kinds(
+        diff_source_abi(old, new)
+    )
+
+
+def test_provenance_counts_only_exportable_declarations_with_a_symbol() -> None:
+    """A record is not exportable, and a method with no mangled name has no
+    comparable symbol. Neither is counted, so the six unmapped functions alone
+    still decide the finding."""
+    functions = [_public_fn(f"_Z{i}f") for i in range(6)]
+    record = SourceEntity(id="R", kind="record", qualified_name="R")
+    unmangled_method = SourceEntity(
+        id="M::m", kind="method", qualified_name="M::m", mangled_name=""
+    )
+    decls = [*functions, record, unmangled_method]
+    old = _surface(_fs("0.13"), declarations=decls)
+    new = _surface(_fs("0.13"), declarations=list(decls))
+    old.roots = {"exported_symbols": ["_Zother"]}
+    new.roots = {"exported_symbols": ["_Zother"]}
+    assert ChangeKind.SOURCE_BINARY_PROVENANCE_MISMATCH in _kinds(
+        diff_source_abi(old, new)
+    )
