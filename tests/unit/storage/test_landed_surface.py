@@ -85,6 +85,7 @@ _INTERNAL_MODULES = (
     "abicheck.storage.generation_scope",
     "abicheck.storage.decode_memo",
     "abicheck.storage.cross_process_lock",
+    "abicheck.storage.tu_parse_store",
 )
 
 

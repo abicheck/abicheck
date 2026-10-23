@@ -214,7 +214,7 @@
       "abicheck/buildsource/source_graph.py": "28cb2b485ffcf276e9c751b99261cc2d3f4ab2ad440612ddb3111bc307372652",
       "abicheck/buildsource/source_graph_build_source_abi.py": "abc43bd1d6845f2af8ae1ad868e5455962452d64838f6c0abedc281e244090ff",
       "abicheck/buildsource/source_link.py": "b7cabfd63c78673ccc2593d4f558069472dfa6bcb2d792a2b216f3d04230b338",
-      "abicheck/buildsource/source_replay.py": "f1c76b8fbe787135f6ff68ee3b3aa306f6259caf4bea069d4eeb2b440cd16992",
+      "abicheck/buildsource/source_replay.py": "720a4223bb3401dc1ff0721e298cfc7a3636d4da550e18ce259945ac650be62d",
       "abicheck/buildsource/source_replay_pool.py": "9073d72dfb693fac045dc94dd8d03fb9ad3a6f653ddca15c712609a77302ece2",
       "abicheck/buildsource/source_replay_shared.py": "695ad69596ebb3f5d268bd80c7e4de7a2c6929d0f088955f967a5a70e849d3cd",
       "abicheck/buildsource/template_class_origin.py": "29c4d8511dff9be7ee58072f1f7526cd6a298f64c9bb60e0271892226a39f508",
@@ -224,8 +224,8 @@
       "abicheck/buildsource/type_graph.py": "a028a875057cd0cbf2930a431bfa1e579f7b770e0d124cbcfe715724e89d12e5",
       "abicheck/buildsource/type_graph_index.py": "7375f7baec7ceb3dd4a52a489b89e5a3571750dffca7490d1c5870301d55202d"
     },
-    "fingerprint": "962af44b41664c73a1b1d6beedc1e74c8e39ae14659ca4cc112181ea952a868b",
-    "generation": 5,
-    "reason": "bumped to 5 for a semantic change"
+    "fingerprint": "63c976b7dcda1fb233f8199fac6ca28cdea63b1ecacf02dc466ecb7b42347a27",
+    "generation": 6,
+    "reason": "source_replay.py now reaches the replayed tokens through replayed_tokens_for, which is defined as replayed_tokens(parse_compile_invocation(...)), the same call the previous line made. Output is unchanged. SOURCE_GENERATION is not bumped."
   }
 }
