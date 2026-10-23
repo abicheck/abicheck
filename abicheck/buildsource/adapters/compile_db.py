@@ -192,7 +192,9 @@ def _operand_path(spelled: str, directory: str) -> str:
 
 
 def _operand_language(operand: SourceOperand) -> str:
-    """The language the driver applies at *operand*'s own ``-x`` position."""
-    if not operand.language:
-        return effective_language([], operand.source)
+    """The language the driver applies at *operand*'s own ``-x`` position.
+
+    Every source operand has one: a ``-x`` in effect, or a known source
+    extension (an extensionless file is a link input, not an operand).
+    """
     return effective_language(["-x", operand.language], operand.source)

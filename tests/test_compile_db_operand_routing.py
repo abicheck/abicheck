@@ -161,11 +161,37 @@ def test_link_only_entry_without_output_uses_driver_default(tmp_path: Path) -> N
     assert [lu["inputs"] for lu in out["link_units"]] == [["/work/util.o"]]
 
 
-def test_shared_link_unit_is_a_shared_library(tmp_path: Path) -> None:
+@pytest.mark.parametrize("flag", ["-shared", "-dynamiclib"])
+def test_shared_link_unit_is_a_shared_library(flag: str, tmp_path: Path) -> None:
     entry = {
         "directory": "/work",
         "file": "c.o",
-        "arguments": ["gcc", "c.o", "-shared", "-o", "libc.so"],
+        "arguments": ["gcc", "c.o", flag, "-o", "libc.so"],
     }
     out = _collect_entry(entry, tmp_path)
     assert [lu["kind"] for lu in out["link_units"]] == ["shared_library"]
+
+
+def test_absolute_operand_keeps_its_path_and_relative_one_is_resolved(
+    tmp_path: Path,
+) -> None:
+    # The first operand is spelled absolute, the second relative to the entry directory.
+    entry = {
+        "directory": "/work",
+        "file": "/abs/x.c",
+        "arguments": ["gcc", "-c", "/abs/x.c", "y.c"],
+    }
+    out = _collect_entry(entry, tmp_path)
+    assert [u["source"] for u in out["compile_units"]] == ["/abs/x.c", "/work/y.c"]
+
+
+def test_cl_driver_entry_keeps_one_unit_per_entry(tmp_path: Path) -> None:
+    # CL-mode operands are out of scope: the entry stays one unit, as before.
+    entry = {
+        "directory": "/work",
+        "file": "a.c",
+        "arguments": ["cl.exe", "/c", "a.c", "b.c"],
+    }
+    out = _collect_entry(entry, tmp_path)
+    assert [u["source"] for u in out["compile_units"]] == ["/work/a.c"]
+    assert out["link_units"] == []
