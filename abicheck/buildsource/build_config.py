@@ -128,6 +128,10 @@ def _safe_compile_atom(path: str, value: str) -> str:
     return value
 
 
+#: One validator, shared by every ``severity:`` level row.
+_SEVERITY_LEVEL = _enum(_SEVERITY_LEVELS)
+
+
 def _system(value: str, path: str) -> str:
     return value or "auto"
 
@@ -204,25 +208,25 @@ KEY_TABLE = KeyTable(
             "severity.abi_breaking",
             Kind.STR,
             "severity_abi_breaking",
-            normalize=_enum(_SEVERITY_LEVELS),
+            normalize=_SEVERITY_LEVEL,
         ),
         KeySpec(
             "severity.potential_breaking",
             Kind.STR,
             "severity_potential_breaking",
-            normalize=_enum(_SEVERITY_LEVELS),
+            normalize=_SEVERITY_LEVEL,
         ),
         KeySpec(
             "severity.quality_issues",
             Kind.STR,
             "severity_quality_issues",
-            normalize=_enum(_SEVERITY_LEVELS),
+            normalize=_SEVERITY_LEVEL,
         ),
         KeySpec(
             "severity.addition",
             Kind.STR,
             "severity_addition",
-            normalize=_enum(_SEVERITY_LEVELS),
+            normalize=_SEVERITY_LEVEL,
         ),
         KeySpec("scope.public", Kind.BOOL, "scope_public"),
         KeySpec(
