@@ -22,6 +22,10 @@ from collections.abc import Iterable
 from pathlib import Path
 from typing import Any
 
+from .guards import decision_key as _decision_key
+
+__all__ = ["TuParseStore", "content_key", "digest_file", "dep_digest"]
+
 #: Separator folded between key parts. A NUL cannot occur in a path or in any
 #: flag spelling, so two different part sequences cannot collide by concatenation.
 _PART_SEPARATOR = "\x00"
@@ -76,6 +80,7 @@ class TuParseStore:
         self.cache_dir = Path(cache_dir)
 
     def path(self, key: str) -> Path:
+        key = _decision_key(key, "store key")
         return self.cache_dir / f"{key}.json"
 
     def lookup(self, key: str, memo: dict[str, str | None] | None = None) -> Any | None:
@@ -116,13 +121,13 @@ class TuParseStore:
         Best-effort: a write failure leaves no entry and raises nothing, because
         the parse already produced its result.
         """
+        final = self.path(key)
         deps: dict[str, str] = {}
         for dep in dep_paths:
             digest = dep_digest(dep, memo)
             if digest is not None:
                 deps[dep] = digest
         entry = {"deps": deps, "payload": payload}
-        final = self.path(key)
         tmp = final.with_suffix(".json.tmp")
         try:
             self.cache_dir.mkdir(parents=True, exist_ok=True)
