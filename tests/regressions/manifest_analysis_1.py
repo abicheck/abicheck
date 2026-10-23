@@ -331,6 +331,11 @@ ANALYSIS_1_BUG_CLASSES: tuple[BugClass, ...] = (
             # Pinned by name-level, one-for-one pairing across C and C++ shapes.
             "tests/test_inline_removal_dedup.py",
             "tests/test_inline_removal_source_replay_e2e.py",
+            # A namespace-scope constexpr value change is one observation at two
+            # tiers: CONSTANT_CHANGED (header) and CONSTEXPR_VALUE_CHANGED (L4
+            # replay). Same name-level, one-for-one pairing as the inline pair.
+            "tests/test_constexpr_constant_dedup.py",
+            "tests/test_constexpr_constant_source_replay_e2e.py",
             "tests/unit/compare/test_dedup_key.py",
             "tests/test_diff_namespaces.py",
             # workflows/cross_source_hygiene.py's own per-side OLD/NEW
