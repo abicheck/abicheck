@@ -50,7 +50,7 @@ from typing import Any
 import _yaml_fast
 import pytest
 
-from abicheck.buildsource.build_config_schema import BOOL_SUBKEYS
+from abicheck.buildsource.build_config import BOOL_SUBKEYS
 
 _REPO = Path(__file__).resolve().parents[1]
 ROOT_ACTION = _REPO / "action.yml"

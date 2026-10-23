@@ -196,7 +196,7 @@ from .workflows.bundle_facts_stored_request import (
 
 def validate_base_config(doc: dict[str, object]) -> None:
     """Validate *doc* against the real ``BuildConfig`` schema -- the same
-    strict-structure check (``BuildConfig._validate_structure``: unknown
+    strict-structure check (``BuildConfig.from_dict``: unknown
     top-level keys, wrong-typed values) that ``load_build_config``/
     ``discover_project_config`` always apply before the native CLI ever
     sees a parsed config document.

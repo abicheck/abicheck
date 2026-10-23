@@ -577,7 +577,7 @@ class TestConfigRoundtrip:
         # scheme:` key entirely (`BuildConfig` no longer has a matching
         # field at all) -- it now falls through to the standard unknown-
         # top-level-key path, which is a hard `ValueError`
-        # (`_validate_structure`), same as any other unrecognized key.
+        # (`BuildConfig.from_dict`), same as any other unrecognized key.
         with pytest.raises(ValueError, match="exit_code_scheme"):
             BuildConfig.from_dict({"exit_code_scheme": "auto"})
 
@@ -1030,7 +1030,7 @@ class TestExitSchemeExplicit:
         )
         # The unrecognized `exit_code_scheme:` key is a hard error, same as
         # any other unknown `.abicheck.yml` top-level key
-        # (`BuildConfig._validate_structure`) -- a config written before PR
+        # (`BuildConfig.from_dict`) -- a config written before PR
         # G2's removal no longer loads at all, rather than silently no
         # longer pinning anything.
         assert res.exit_code == 64, res.output
