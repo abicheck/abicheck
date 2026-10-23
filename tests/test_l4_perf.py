@@ -22,6 +22,7 @@ from abicheck.buildsource import source_replay as sr, source_replay_pool as sp
 from abicheck.buildsource.build_evidence import BuildEvidence, CompileUnit
 from abicheck.buildsource.source_abi import SourceAbiTu
 from abicheck.buildsource.source_extractors.base import SourceExtractionError
+from abicheck.storage.tu_parse_store import dep_digest
 
 
 # ── worker-count clamp (#5: oversubscription guard) ───────────────────────────
@@ -185,23 +186,23 @@ def test_dep_digest_memo_reuses_within_pass(tmp_path: Path) -> None:
     header.write_text("#define A 1\n")
     memo: dict[str, str | None] = {}
 
-    first = sr._dep_digest(str(header), memo)
+    first = dep_digest(str(header), memo)
     assert first is not None and memo[str(header)] == first
 
     # Mutate the file: a memoized lookup intentionally returns the cached digest
     # (the pass assumes files are stable for its duration) ...
     header.write_text("#define A 2\n")
-    assert sr._dep_digest(str(header), memo) == first
+    assert dep_digest(str(header), memo) == first
 
     # ... while a memo-less lookup (direct cache callers) always re-reads, which
     # is what preserves the cache-invalidation contract across passes.
-    assert sr._dep_digest(str(header)) != first
+    assert dep_digest(str(header)) != first
 
 
 def test_dep_digest_memo_records_missing_as_none(tmp_path: Path) -> None:
     memo: dict[str, str | None] = {}
     missing = str(tmp_path / "gone.h")
-    assert sr._dep_digest(missing, memo) is None
+    assert dep_digest(missing, memo) is None
     assert missing in memo and memo[missing] is None
 
 

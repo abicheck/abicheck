@@ -215,7 +215,7 @@
       "abicheck/buildsource/source_graph.py": "28cb2b485ffcf276e9c751b99261cc2d3f4ab2ad440612ddb3111bc307372652",
       "abicheck/buildsource/source_graph_build_source_abi.py": "abc43bd1d6845f2af8ae1ad868e5455962452d64838f6c0abedc281e244090ff",
       "abicheck/buildsource/source_link.py": "b7cabfd63c78673ccc2593d4f558069472dfa6bcb2d792a2b216f3d04230b338",
-      "abicheck/buildsource/source_replay.py": "f1c76b8fbe787135f6ff68ee3b3aa306f6259caf4bea069d4eeb2b440cd16992",
+      "abicheck/buildsource/source_replay.py": "720a4223bb3401dc1ff0721e298cfc7a3636d4da550e18ce259945ac650be62d",
       "abicheck/buildsource/source_replay_pool.py": "9073d72dfb693fac045dc94dd8d03fb9ad3a6f653ddca15c712609a77302ece2",
       "abicheck/buildsource/source_replay_shared.py": "695ad69596ebb3f5d268bd80c7e4de7a2c6929d0f088955f967a5a70e849d3cd",
       "abicheck/buildsource/template_class_origin.py": "29c4d8511dff9be7ee58072f1f7526cd6a298f64c9bb60e0271892226a39f508",
@@ -225,8 +225,8 @@
       "abicheck/buildsource/type_graph.py": "a028a875057cd0cbf2930a431bfa1e579f7b770e0d124cbcfe715724e89d12e5",
       "abicheck/buildsource/type_graph_index.py": "7375f7baec7ceb3dd4a52a489b89e5a3571750dffca7490d1c5870301d55202d"
     },
-    "fingerprint": "8000f092f8cfd531ccd395f5904883240dea8c2fb51293c7010affb6db812707",
-    "generation": 5,
-    "reason": "Adds per-source operand facts (SourceOperand, CompileAction, link_inputs) to CompilerInvocation and a leaf parser; no extractor consumes them and no recorded fact or replayed argv changes (multi_source golden unchanged)."
+    "fingerprint": "7f8c58285c11b68700a02a177044f4d8c300ba0f7823e596873ff2a17354958c",
+    "generation": 6,
+    "reason": "Adds per-source operand facts (SourceOperand, CompileAction, link_inputs) to CompilerInvocation and a leaf parser; no extractor reads them and no recorded fact or replayed argv changes. Merged main's generation 6 (#1740) unchanged."
   }
 }

@@ -53,7 +53,7 @@ high call counts. Measure unprofiled before attacking a "hotspot".
 | clang JSON → declarations/types | `dumper_clang._ClangAstParser` → `RecordType`/`Function` | `source_extractors/clang.py` + `clang_nodes.py` → `SourceEntity` | **Duplicated** → Phase 4 |
 | body/default-arg/template fingerprints, macros (`-E -dD`) | — | `clang_nodes.py`, `clang.py:macros_from_preprocessor` | **Intentionally L4-only** — additive facts, keep |
 | entity identity | `model.identity.EntityId`, `extract.semantic_normalizer` | `SourceEntity.identity`, `abicheck-clang-canonical` fact set | **Duplicated** → Phase 5 (ADR-063) |
-| per-TU cache | `dumper_cache.py`, header AST cache | `source_replay.SourceAbiCache` | **Duplicated** → Phase 6 |
+| per-TU cache | `dumper_cache.py`, header AST cache | `source_replay.SourceAbiCache` (now a view over `storage/tu_parse_store.py`) | **Partly converged** → Phase 6 (header-AST cache is the next slice) |
 | worker sizing | `extract.tu_jobs._tu_jobs` | `source_replay._l4_jobs`, `call_graph._call_graph_jobs` | **Duplicated** → Phase 7 |
 | diffing | `diff_types` / `diff_symbols` | `source_diff.diff_source_abi` | **Partly intentional** → Phase 8 (assess, don't assume) |
 
@@ -494,6 +494,53 @@ invocation + tool identity + input digests) that the header-AST cache and
 `SourceAbiCache` both become views of. Depends on Phases 2–3; without a
 shared invocation key a shared store would just be two key schemes in one
 directory.
+
+**Status — slice 1 implemented: `SourceAbiCache` is the view.** Two caches
+existed. The header-AST cache (`storage/header_ast_cache.py`) stores raw
+castxml XML or clang JSON per key, has no dependency validation, and is wired
+into the entry-budget bookkeeping (`ast_cache_budget`) and cross-process
+single-flight (`cross_process_lock`). `SourceAbiCache` stores a wrapped JSON
+entry with its read-file digests, so it is the simpler one to move first.
+
+- `storage/tu_parse_store.py` (`TuParseStore`, `content_key`, `digest_file`,
+  `dep_digest`) owns the entry format, the atomic publish, and the rule that
+  a changed, missing or unreadable recorded dependency is a miss. It imports
+  nothing from `buildsource` (ADR-061: `storage -> model` only). The caller
+  supplies the key parts; the store only folds them.
+- `source_replay.compute_tu_cache_key` builds those parts from the parsed
+  `CompilerInvocation` (`parse_compile_invocation`), the tool identity (schema,
+  code fingerprint, extractor name and version), and the input digests (the
+  source's content and location, each public-header root's content). The
+  replayed flags come from `replayed_tokens(inv)`, which is the same rule the
+  argv renderers use, so a flag the parse carries is in the key exactly once.
+  Lists are JSON-encoded so a comma inside one value cannot make two lists
+  fold to the same text.
+- `SourceAbiCache` keeps its public API (`get`/`put`/`hit_rate`/`cache_dir`
+  and the `hits`/`misses` counters) and is now a view over the store.
+
+Changes a reader of an existing cache directory will notice: every key is
+new, so the first run after upgrading is a cold run, and the old
+`<key>.json` entries are never read again. The on-disk entry is
+`{"deps": ..., "payload": ...}` instead of `{"deps": ..., "tu": ...}`.
+
+Tests: `tests/test_tu_parse_cache_view.py`. The equivalence test asserts that a
+warm run reproduces the cold run field for field (excluding only the cache's
+own telemetry and timings). The key-sensitivity table changes one input at a
+time (source and root content, extractor name and version, compiler and
+override, language, standard, defines, undefines, include and system directories,
+target, sysroot, ABI flag, forced include in argv, cwd) and asserts each one
+misses. Two insensitivity checks cover inputs the parse ignores (define order,
+output path).
+
+**Next slice — migrate the header-AST cache onto the store.** Its disk entry
+becomes a `TuParseStore` payload (or the store gains a raw-bytes payload
+form, so the XML and JSON bodies are not re-encoded). The entry-budget
+bookkeeping and the cross-process single-flight stay where they are, because
+they coordinate producers rather than describe an entry. The key is the same
+parsed-invocation key `compute_tu_cache_key` now builds, so the header-AST key
+must be re-derived from `CompilerInvocation` rather than from its own argv
+inputs. Done when the header-AST and `SourceAbiCache` entries come from one
+store with one key function, and a changed header misses under both.
 
 ### Phase 7 — one worker-sizing and executor policy (sizing implemented; executor default open)
 
