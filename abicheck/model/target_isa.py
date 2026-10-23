@@ -30,8 +30,9 @@ case where the feature set cannot say more.
 
 from __future__ import annotations
 
-from collections.abc import Iterable
 from dataclasses import dataclass
+
+from .execution_cache import memoized
 
 __all__ = [
     "LEVEL_FEATURES",
@@ -156,6 +157,7 @@ _NOTE_LEVEL_TOKENS: dict[str, str] = {
 }
 
 
+@memoized(maxsize=4096)
 def parse_producer_target_isa(producer: str | None) -> TargetIsa | None:
     """The target a ``DW_AT_producer`` string records, or ``None`` when it records
     no ``-march=``/``-mcpu=`` and no ISA feature flag (clang, or a stripped
@@ -195,7 +197,8 @@ def parse_producer_target_isa(producer: str | None) -> TargetIsa | None:
     return TargetIsa(arch=arch, features=feature_closure(features))
 
 
-def parse_note_target_isa(levels: Iterable[str]) -> TargetIsa | None:
+@memoized(maxsize=4096)
+def parse_note_target_isa(levels: frozenset[str]) -> TargetIsa | None:
     """The target a GNU-property ISA-needed note requires (the strongest level
     named), or ``None`` when no level token is present."""
     best: str | None = None
@@ -210,6 +213,7 @@ def parse_note_target_isa(levels: Iterable[str]) -> TargetIsa | None:
     return TargetIsa(arch=None, features=feature_closure(LEVEL_FEATURES[best]))
 
 
+@memoized(maxsize=4096)
 def target_isa_from_sources(
     producer: TargetIsa | None, note: TargetIsa | None
 ) -> TargetIsa | None:

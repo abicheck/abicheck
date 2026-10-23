@@ -182,7 +182,7 @@ def test_note_without_isa_token_is_unknown():
 
 def test_producer_and_note_merge_into_the_union_requirement():
     producer = parse_producer_target_isa("GNU C17 -mavx2 -march=x86-64 -g")
-    note = parse_note_target_isa(["x86-64-v2"])
+    note = parse_note_target_isa(frozenset({"x86-64-v2"}))
     merged = target_isa_from_sources(producer, note)
     assert merged is not None
     assert merged.arch == "x86-64"

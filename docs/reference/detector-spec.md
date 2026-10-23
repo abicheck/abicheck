@@ -348,7 +348,7 @@ One row per `ChangeKind` (423 total). Columns fuse the verdict partition (`check
 | `tag_type_renamed` | api_break | `API_BREAK` | `warning` | L0 | `tag_type_renamed` | [case86](examples/case86_tag_struct_renamed.md) |
 | `tail_padding_reuse_changed` | risk | `COMPATIBLE_WITH_RISK` | `warning` | unspecified | `tail_padding_reuse_changed` | — |
 | `target_dependency_added` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L5 | `target_dependency_added` | [case161](examples/case161_target_dependency_added.md) |
-| `target_isa_changed` | risk | `COMPATIBLE_WITH_RISK` | `warning` | unspecified | `target_isa_changed` | — |
+| `target_isa_changed` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L0 | `target_isa_changed` | — |
 | `template_body_changed` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L4 | `template_body_changed` | [case122](examples/case122_template_signature_uninstantiated.md) |
 | `template_param_default_changed` | api_break | `API_BREAK` | `warning` | L2 | `template_param_default_changed` | — |
 | `template_param_type_changed` | breaking | `BREAKING` | `error` | unspecified | `template_param_type_changed` | — |
