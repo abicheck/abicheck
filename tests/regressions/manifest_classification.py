@@ -630,13 +630,22 @@ CLASSIFICATION_BUG_CLASSES: tuple[BugClass, ...] = (
             "tests/test_family_f1_evidence_ablation.py",
             "tests/unit/report/test_review_groups.py",
             "tests/test_informational_never_gates.py",
+            "tests/test_toolchain_drift_stated_contract.py",
+            "tests/test_toolchain_drift_stated_contract_integration.py",
+            "tests/test_contract_mode_differential_corpus.py",
         ),
         public_surfaces=("cli",),
         axes={
             "kind": ("import_edge", "leaked_dependency", "binding", "removal"),
-            "mode": ("public", "all"),
+            "mode": ("public", "exports", "all", "adaptive"),
             "header_evidence": ("resolvable", "unresolvable"),
             "elf_table": ("lists_symbol", "omits_symbol"),
+            "toolchain_drift": (
+                "none",
+                "opt_level",
+                "inline_imports",
+                "static_runtime",
+            ),
         },
     ),
 )

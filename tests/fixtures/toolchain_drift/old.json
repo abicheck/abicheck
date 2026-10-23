@@ -1,0 +1,635 @@
+{
+  "schema_version": 64,
+  "sections": {
+    "binary": {
+      "payload": {
+        "build_id": null,
+        "build_mode": null,
+        "elf": {
+          "abi_flags": [],
+          "bind_now": false,
+          "dynamic_flags": null,
+          "dynamic_flags_fact": {
+            "diagnostics": [],
+            "status": "not_collected",
+            "value": null
+          },
+          "e_flags": 0,
+          "ei_data": "",
+          "elf_class": 64,
+          "gnu_properties": [],
+          "has_dt_relr": false,
+          "has_executable_stack": false,
+          "has_fini": null,
+          "has_fini_fact": {
+            "diagnostics": [],
+            "status": "not_collected",
+            "value": null
+          },
+          "has_fortify_source": false,
+          "has_init": null,
+          "has_init_fact": {
+            "diagnostics": [],
+            "status": "not_collected",
+            "value": null
+          },
+          "has_stack_canary": false,
+          "has_static_tls": false,
+          "has_textrel": false,
+          "has_tls_symbols": false,
+          "has_writable_executable_segment": false,
+          "hash_styles": [
+            "gnu"
+          ],
+          "imports": [
+            {
+              "binding": "global",
+              "is_default": true,
+              "name": "memcpy",
+              "sym_type": "notype",
+              "version": "",
+              "version_soname": ""
+            },
+            {
+              "binding": "global",
+              "is_default": true,
+              "name": "strlen",
+              "sym_type": "notype",
+              "version": "",
+              "version_soname": ""
+            },
+            {
+              "binding": "global",
+              "is_default": true,
+              "name": "__cxa_finalize",
+              "sym_type": "notype",
+              "version": "",
+              "version_soname": ""
+            },
+            {
+              "binding": "global",
+              "is_default": true,
+              "name": "_ZNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEE9_M_createERmm",
+              "sym_type": "notype",
+              "version": "",
+              "version_soname": ""
+            },
+            {
+              "binding": "global",
+              "is_default": true,
+              "name": "_ZSt20__throw_length_errorPKc",
+              "sym_type": "notype",
+              "version": "",
+              "version_soname": ""
+            }
+          ],
+          "interpreter": "",
+          "is_pie": false,
+          "is_symbolic": false,
+          "machine": "EM_X86_64",
+          "min_kernel_version": "",
+          "needed": [
+            "libstdc++.so.6",
+            "libm.so.6",
+            "libgcc_s.so.1",
+            "libc.so.6"
+          ],
+          "osabi": "",
+          "pointer_size": 8,
+          "relro": "none",
+          "rpath": "",
+          "runpath": "",
+          "soname": "libsvs_c_api.so",
+          "symbols": [
+            {
+              "binding": "global",
+              "is_default": true,
+              "name": "svs_index_build",
+              "origin_lib": null,
+              "size": 0,
+              "sym_type": "func",
+              "value_alignment": 0,
+              "version": "",
+              "visibility": "default"
+            },
+            {
+              "binding": "global",
+              "is_default": true,
+              "name": "svs_format",
+              "origin_lib": null,
+              "size": 0,
+              "sym_type": "func",
+              "value_alignment": 0,
+              "version": "",
+              "visibility": "default"
+            },
+            {
+              "binding": "weak",
+              "is_default": true,
+              "name": "_ZNSt6vectorIfSaIfEED2Ev",
+              "origin_lib": "libstdc++.so.6",
+              "size": 0,
+              "sym_type": "func",
+              "value_alignment": 0,
+              "version": "",
+              "visibility": "default"
+            },
+            {
+              "binding": "weak",
+              "is_default": true,
+              "name": "_ZNSt6vectorIfSaIfEEC2IPKfvEET_S5_RKS0_",
+              "origin_lib": "libstdc++.so.6",
+              "size": 0,
+              "sym_type": "func",
+              "value_alignment": 0,
+              "version": "",
+              "visibility": "default"
+            },
+            {
+              "binding": "weak",
+              "is_default": true,
+              "name": "_ZNSt12_Vector_baseIfSaIfEED2Ev",
+              "origin_lib": "libstdc++.so.6",
+              "size": 0,
+              "sym_type": "func",
+              "value_alignment": 0,
+              "version": "",
+              "visibility": "default"
+            },
+            {
+              "binding": "weak",
+              "is_default": true,
+              "name": "_ZNSt7__cxx119to_stringEj",
+              "origin_lib": "libstdc++.so.6",
+              "size": 0,
+              "sym_type": "func",
+              "value_alignment": 0,
+              "version": "",
+              "visibility": "default"
+            },
+            {
+              "binding": "weak",
+              "is_default": true,
+              "name": "_ZNSt12_Vector_baseIfSaIfEE11_M_allocateEm",
+              "origin_lib": "libstdc++.so.6",
+              "size": 0,
+              "sym_type": "func",
+              "value_alignment": 0,
+              "version": "",
+              "visibility": "default"
+            },
+            {
+              "binding": "weak",
+              "is_default": true,
+              "name": "_ZNSt16allocator_traitsISaIfEE8allocateERS0_m",
+              "origin_lib": "libstdc++.so.6",
+              "size": 0,
+              "sym_type": "func",
+              "value_alignment": 0,
+              "version": "",
+              "visibility": "default"
+            }
+          ],
+          "versions_defined": [],
+          "versions_required": {}
+        },
+        "elf_only_mode": false,
+        "kabi": null,
+        "macho": null,
+        "pe": null,
+        "platform": null,
+        "source_mtime": null,
+        "source_mtime_epoch": false,
+        "source_path": null,
+        "source_size": null
+      },
+      "section_kind": "binary",
+      "section_schema_version": 1
+    },
+    "build": {
+      "payload": {
+        "build_source_pack": null
+      },
+      "section_kind": "build",
+      "section_schema_version": 1
+    },
+    "debug": {
+      "payload": {
+        "ast_compile_args": [],
+        "ast_cplusplus_macro": null,
+        "ast_fallback_reason": null,
+        "ast_producer": null,
+        "ast_resolved_standard": null,
+        "ast_resolved_standard_fact": {
+          "diagnostics": [],
+          "status": "not_collected",
+          "value": null
+        },
+        "ast_sysroot": null,
+        "ast_toolchain": {},
+        "ast_toolchain_supported": null,
+        "ast_toolchain_unsupported_reasons": [],
+        "build_context_defines": [],
+        "castxml_var_access_facts_reliable": true,
+        "clang_deprecation_facts_reliable": true,
+        "clang_field_initializer_facts_reliable": true,
+        "clang_restrict_facts_reliable": true,
+        "clang_va_list_facts_reliable": true,
+        "clang_vtable_facts_reliable": true,
+        "dwarf": null,
+        "dwarf_advanced": null,
+        "fact_provenance": {},
+        "from_headers": false,
+        "frontend_context_kind": null,
+        "header_cv_facts_reliable": true,
+        "inline_facts_reliable": true,
+        "param_kind_facts_reliable": true,
+        "parsed_with_build_context": false,
+        "template_default_header_scan": null
+      },
+      "section_kind": "debug",
+      "section_schema_version": 1
+    },
+    "declarations": {
+      "payload": {
+        "constant_entity_ids": {},
+        "constants": {},
+        "enums": [],
+        "functions": [
+          {
+            "access": "public",
+            "binary_exported_fact": null,
+            "contract_attributes": null,
+            "contract_attributes_fact": {
+              "diagnostics": [],
+              "status": "not_collected",
+              "value": null
+            },
+            "declared_in_headers_fact": null,
+            "deleted_from_dwarf": false,
+            "deprecated": null,
+            "deprecated_fact": {
+              "diagnostics": [],
+              "status": "not_collected",
+              "value": null
+            },
+            "elf_binding": null,
+            "elf_binding_fact": {
+              "diagnostics": [],
+              "status": "not_collected",
+              "value": null
+            },
+            "elf_visibility": null,
+            "exception_spec": null,
+            "exception_spec_fact": {
+              "diagnostics": [],
+              "status": "not_collected",
+              "value": null
+            },
+            "hidden_friend_owner": null,
+            "hidden_friend_owner_fact": {
+              "diagnostics": [],
+              "status": "not_collected",
+              "value": null
+            },
+            "in_public_contract_fact": null,
+            "is_compiler_generated": null,
+            "is_compiler_generated_fact": {
+              "diagnostics": [],
+              "status": "not_collected",
+              "value": null
+            },
+            "is_const": false,
+            "is_deleted": false,
+            "is_explicit": null,
+            "is_explicit_fact": {
+              "diagnostics": [],
+              "status": "not_collected",
+              "value": null
+            },
+            "is_extern_c": false,
+            "is_hidden_friend": null,
+            "is_hidden_friend_fact": {
+              "diagnostics": [],
+              "status": "not_collected",
+              "value": null
+            },
+            "is_inline": false,
+            "is_inline_fact": {
+              "diagnostics": [],
+              "status": "not_collected",
+              "value": null
+            },
+            "is_noexcept": false,
+            "is_override": null,
+            "is_override_fact": {
+              "diagnostics": [],
+              "status": "not_collected",
+              "value": null
+            },
+            "is_pure_virtual": false,
+            "is_static": false,
+            "is_variadic": null,
+            "is_variadic_fact": {
+              "diagnostics": [],
+              "status": "not_collected",
+              "value": null
+            },
+            "is_virtual": false,
+            "is_volatile": false,
+            "mangled": "svs_index_build",
+            "name": "svs_index_build",
+            "origin": "public_header",
+            "params": [
+              {
+                "default": null,
+                "is_restrict": false,
+                "is_restrict_fact": {
+                  "diagnostics": [],
+                  "status": "not_collected",
+                  "value": null
+                },
+                "is_va_list": false,
+                "is_va_list_fact": {
+                  "diagnostics": [],
+                  "status": "not_collected",
+                  "value": null
+                },
+                "kind": "value",
+                "kind_fact": {
+                  "diagnostics": [],
+                  "status": "not_collected",
+                  "value": null
+                },
+                "name": "data",
+                "pointer_depth": 0,
+                "type": "const float *"
+              },
+              {
+                "default": null,
+                "is_restrict": false,
+                "is_restrict_fact": {
+                  "diagnostics": [],
+                  "status": "not_collected",
+                  "value": null
+                },
+                "is_va_list": false,
+                "is_va_list_fact": {
+                  "diagnostics": [],
+                  "status": "not_collected",
+                  "value": null
+                },
+                "kind": "value",
+                "kind_fact": {
+                  "diagnostics": [],
+                  "status": "not_collected",
+                  "value": null
+                },
+                "name": "n",
+                "pointer_depth": 0,
+                "type": "int"
+              }
+            ],
+            "ref_qualifier": "",
+            "return_pointer_depth": 0,
+            "return_type": "int",
+            "source_header": null,
+            "source_header_fact": {
+              "diagnostics": [],
+              "status": "not_collected",
+              "value": null
+            },
+            "source_location": null,
+            "visibility": "public",
+            "vtable_index": null
+          },
+          {
+            "access": "public",
+            "binary_exported_fact": null,
+            "contract_attributes": null,
+            "contract_attributes_fact": {
+              "diagnostics": [],
+              "status": "not_collected",
+              "value": null
+            },
+            "declared_in_headers_fact": null,
+            "deleted_from_dwarf": false,
+            "deprecated": null,
+            "deprecated_fact": {
+              "diagnostics": [],
+              "status": "not_collected",
+              "value": null
+            },
+            "elf_binding": null,
+            "elf_binding_fact": {
+              "diagnostics": [],
+              "status": "not_collected",
+              "value": null
+            },
+            "elf_visibility": null,
+            "exception_spec": null,
+            "exception_spec_fact": {
+              "diagnostics": [],
+              "status": "not_collected",
+              "value": null
+            },
+            "hidden_friend_owner": null,
+            "hidden_friend_owner_fact": {
+              "diagnostics": [],
+              "status": "not_collected",
+              "value": null
+            },
+            "in_public_contract_fact": null,
+            "is_compiler_generated": null,
+            "is_compiler_generated_fact": {
+              "diagnostics": [],
+              "status": "not_collected",
+              "value": null
+            },
+            "is_const": false,
+            "is_deleted": false,
+            "is_explicit": null,
+            "is_explicit_fact": {
+              "diagnostics": [],
+              "status": "not_collected",
+              "value": null
+            },
+            "is_extern_c": false,
+            "is_hidden_friend": null,
+            "is_hidden_friend_fact": {
+              "diagnostics": [],
+              "status": "not_collected",
+              "value": null
+            },
+            "is_inline": false,
+            "is_inline_fact": {
+              "diagnostics": [],
+              "status": "not_collected",
+              "value": null
+            },
+            "is_noexcept": false,
+            "is_override": null,
+            "is_override_fact": {
+              "diagnostics": [],
+              "status": "not_collected",
+              "value": null
+            },
+            "is_pure_virtual": false,
+            "is_static": false,
+            "is_variadic": null,
+            "is_variadic_fact": {
+              "diagnostics": [],
+              "status": "not_collected",
+              "value": null
+            },
+            "is_virtual": false,
+            "is_volatile": false,
+            "mangled": "svs_format",
+            "name": "svs_format",
+            "origin": "public_header",
+            "params": [
+              {
+                "default": null,
+                "is_restrict": false,
+                "is_restrict_fact": {
+                  "diagnostics": [],
+                  "status": "not_collected",
+                  "value": null
+                },
+                "is_va_list": false,
+                "is_va_list_fact": {
+                  "diagnostics": [],
+                  "status": "not_collected",
+                  "value": null
+                },
+                "kind": "value",
+                "kind_fact": {
+                  "diagnostics": [],
+                  "status": "not_collected",
+                  "value": null
+                },
+                "name": "buf",
+                "pointer_depth": 0,
+                "type": "char *"
+              },
+              {
+                "default": null,
+                "is_restrict": false,
+                "is_restrict_fact": {
+                  "diagnostics": [],
+                  "status": "not_collected",
+                  "value": null
+                },
+                "is_va_list": false,
+                "is_va_list_fact": {
+                  "diagnostics": [],
+                  "status": "not_collected",
+                  "value": null
+                },
+                "kind": "value",
+                "kind_fact": {
+                  "diagnostics": [],
+                  "status": "not_collected",
+                  "value": null
+                },
+                "name": "cap",
+                "pointer_depth": 0,
+                "type": "int"
+              },
+              {
+                "default": null,
+                "is_restrict": false,
+                "is_restrict_fact": {
+                  "diagnostics": [],
+                  "status": "not_collected",
+                  "value": null
+                },
+                "is_va_list": false,
+                "is_va_list_fact": {
+                  "diagnostics": [],
+                  "status": "not_collected",
+                  "value": null
+                },
+                "kind": "value",
+                "kind_fact": {
+                  "diagnostics": [],
+                  "status": "not_collected",
+                  "value": null
+                },
+                "name": "value",
+                "pointer_depth": 0,
+                "type": "unsigned int"
+              }
+            ],
+            "ref_qualifier": "",
+            "return_pointer_depth": 0,
+            "return_type": "int",
+            "source_header": null,
+            "source_header_fact": {
+              "diagnostics": [],
+              "status": "not_collected",
+              "value": null
+            },
+            "source_location": null,
+            "visibility": "public",
+            "vtable_index": null
+          }
+        ],
+        "numpy_capi": null,
+        "python_api": null,
+        "python_ext": null,
+        "sycl": null,
+        "typedef_entity_ids": {},
+        "typedefs": {},
+        "typedefs_qualified": {},
+        "variables": []
+      },
+      "section_kind": "declarations",
+      "section_schema_version": 1
+    },
+    "layout": {
+      "payload": {
+        "conditional_fields": {},
+        "contract": null,
+        "dependency_scope": null,
+        "dwarf_layout_coherence": null,
+        "dwarf_layout_coherence_mismatches": [],
+        "excluded_header_matching": "glob",
+        "excluded_header_patterns": [],
+        "header_only": false,
+        "scope_fallback": null
+      },
+      "section_kind": "layout",
+      "section_schema_version": 1
+    },
+    "provenance": {
+      "payload": {
+        "created_at": null,
+        "dependency_info": null,
+        "git_commit": null,
+        "git_tag": null,
+        "language_profile": null,
+        "library": "libsvs_c_api.so",
+        "version": "0.5.0"
+      },
+      "section_kind": "provenance",
+      "section_schema_version": 1
+    },
+    "types": {
+      "payload": {
+        "types": []
+      },
+      "section_kind": "types",
+      "section_schema_version": 1
+    }
+  },
+  "section_schema_versions": {
+    "binary": 1,
+    "build": 1,
+    "debug": 1,
+    "declarations": 1,
+    "layout": 1,
+    "provenance": 1,
+    "types": 1
+  }
+}
