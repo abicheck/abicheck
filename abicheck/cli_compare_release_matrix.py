@@ -64,6 +64,10 @@ from .workflows.gate import (
 )
 from .workflows.release_exit_fold import release_compatibility_base_exit
 
+#: Release formats rendered from the per-member DiffResults (``diff_pairs``):
+#: JUnit suites and SARIF runs each come from one member's own comparison.
+_PAIR_FORMATS = frozenset({"junit", "sarif"})
+
 if TYPE_CHECKING:
     from .model.package_inventory import PackageInventory  # noqa: F401
     from .pack_application import PackApplication
@@ -156,7 +160,7 @@ def _finalize_release_output(
         old_map,
         new_map,
         warning_msgs,
-        diff_pairs=diff_pairs if fmt == "junit" else None,
+        diff_pairs=diff_pairs if fmt in _PAIR_FORMATS else None,
         bundle_result=bundle_result,
         matrix_result=matrix_result,
         severity_config=severity_config,

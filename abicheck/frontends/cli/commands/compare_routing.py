@@ -30,9 +30,10 @@ from typing import Any
 
 import click
 
+from ....report.release_formats import RELEASE_FORMATS
 from ....report.report_modes import normalize_report_mode
 
-_RELEASE_FORMATS = frozenset({"json", "markdown", "junit", "oneline", "html"})
+_RELEASE_FORMATS = RELEASE_FORMATS
 
 
 def reject_release_incompatible_view_mode(report_mode: str) -> None:
@@ -123,20 +124,16 @@ def _dispatch_release_compare(ctx: click.Context, **kwargs: Any) -> None:
     if fmt not in _RELEASE_FORMATS:
         raise click.UsageError(
             f"-o {fmt}=... is not available when comparing directories or "
-            "packages: sarif/review require a single-pair (non-directory, "
-            "non-package) comparison. Choose one of: "
-            f"{', '.join(sorted(_RELEASE_FORMATS))}, or compare one library at "
-            f"a time (a single old/new .so pair) to export {fmt}."
+            "packages. Choose one of: "
+            f"{', '.join(sorted(_RELEASE_FORMATS))}."
         )
-    # `compare`'s own `-o` accepts sarif/html/review (a single-pair
-    # comparison renders all three), and the export set is parsed before
-    # this dispatch knows the operands are directories -- so a format this
-    # fan-out cannot produce must be rejected here explicitly. Without it,
-    # compare_release_cmd's own callback is reached directly (not through
-    # Click's arg parsing, so its own decorator-level validation never runs)
-    # and render_release_summary's fallback branch would silently render
-    # markdown to the requested sarif/html/review destination instead of
-    # erroring.
+    # `compare`'s own `-o` accepts a format the release fan-out cannot
+    # produce, and the export set is parsed before this dispatch knows the
+    # operands are directories -- so a format outside _RELEASE_FORMATS must be
+    # rejected here explicitly. Without it, compare_release_cmd's own callback
+    # is reached directly (not through Click's arg parsing, so its own
+    # decorator-level validation never runs) and render_release_summary's
+    # fallback branch would silently render markdown to that destination.
     #
     # Every export is checked, not just the first: the release engine renders
     # each one from the same already-computed result (one analysis, several
@@ -149,11 +146,8 @@ def _dispatch_release_compare(ctx: click.Context, **kwargs: Any) -> None:
         if secondary_fmt not in _RELEASE_FORMATS:
             raise click.UsageError(
                 f"-o {secondary_fmt}=... is not available when comparing "
-                "directories or packages: sarif/review require a "
-                "single-pair (non-directory, non-package) comparison. Choose "
-                f"one of: {', '.join(sorted(_RELEASE_FORMATS))}, or compare one "
-                "library at a time (a single old/new .so pair) to export "
-                f"{secondary_fmt}."
+                "directories or packages. Choose one of: "
+                f"{', '.join(sorted(_RELEASE_FORMATS))}."
             )
     from ....cli_compare_release import compare_release_cmd
 
