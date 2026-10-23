@@ -341,7 +341,7 @@ for", never "none". The debug-type join (`compare/debug_type_join.py`)
 reports a conflicted name as ambiguous rather than trusting the first
 definition.
 
-(v64) `functions[].template_param_defaults_fact` -- on a clang snapshot, the spelled default of each template parameter of a function template's pattern, in declaration order (`null` for a parameter with no default). Written only when clang recorded it, so every other function encodes exactly as v63; a missing key reads as `NOT_COLLECTED` at v64 and above. A pre-v64 reader would drop it and read the pattern as defaultless, hence the bump. ADR-085 D1, function slice.
+(v64) `functions[].template_param_defaults_fact` -- on a clang snapshot, the spelled default of each template parameter of a function template's pattern, in declaration order (`null` for a parameter with no default). Written only when clang recorded it, so every other function encodes exactly as v63; a missing key reads as `NOT_COLLECTED` at v64 and above. A pre-v64 reader would drop it and read the pattern as defaultless, hence the bump.
 
 (v63) `template_default_header_scan` -- a top-level `bool` on a castxml snapshot: `true` when a public header parsed by castxml declares a template parameter with a default argument (castxml cannot record it), `false` when the scan found none. Absent on every other producer and on any snapshot predating v63, which reads as `null` (no scan ran). Written only by a castxml run, so other snapshots encode exactly as v62. A pre-v63 reader would drop it, hence the bump.
 
