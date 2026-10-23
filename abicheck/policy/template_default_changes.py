@@ -21,6 +21,7 @@ ledger, which ``compare/`` may not import (ADR-061 dependency direction).
 
 from __future__ import annotations
 
+import re
 from typing import TYPE_CHECKING
 
 from ..compare.template_param_defaults import (
@@ -44,48 +45,66 @@ if TYPE_CHECKING:
 _FUNCTION_CHANGE_KINDS = frozenset({ChangeKind.FUNC_REMOVED, ChangeKind.FUNC_ADDED})
 
 
+#: A template-id spelling: an optional leading ``::`` (global scope), a possibly
+#: qualified name, and the ``<`` that opens its arguments. The lookbehind keeps
+#: a match from starting in the middle of a longer qualified name.
+_SPELLED_TEMPLATE_ID = re.compile(r"(?<![\w:])(::)?((?:\w+::)*\w+)\s*<")
+
+
 def _templates_named_by_reported_functions(
     old: AbiSnapshot, new: AbiSnapshot, changes: list[Change]
 ) -> set[str]:
-    """Class-template keys spelled in the signature of a reported function.
+    """Qualified class-template keys spelled in the signature of a reported
+    function.
 
     A removed or added function whose parameter or return type names
     ``Box<...>`` already reports the break (shape C), so the header-level
-    finding for ``Box`` would be a second count of it.
+    finding for ``Box`` would be a second count of it. The spelling is resolved
+    the way C++ resolves it, from the function's own enclosing scope outward,
+    so ``b::take(Box<char>)`` names ``b::Box`` and not ``a::Box``.
     """
     reported = {c.symbol for c in changes if c.kind in _FUNCTION_CHANGE_KINDS}
     if not reported:
         return set()
     keys = set(_pattern_records(old)) | set(_pattern_records(new))
-    spellings: list[str] = []
+    named: set[str] = set()
     for snap in (old, new):
+        name_of = qualified_name_lookup(snap)
         for fn in snap.declarations.functions:
-            if fn.mangled in reported:
-                spellings.append(fn.return_type)
-                spellings.extend(param.type for param in fn.params)
-    return {key for key in keys if _spells_template(spellings, key)}
+            if fn.mangled not in reported:
+                continue
+            # The qualified name carries the parameter list; the scope is the
+            # path before it (``b::take(b::Box<char> const&)`` -> ``b``).
+            scope = _callable_stem(name_of(fn)).split("(", 1)[0].split("::")[:-1]
+            spellings = [fn.return_type, *(param.type for param in fn.params)]
+            for text in spellings:
+                for match in _SPELLED_TEMPLATE_ID.finditer(text):
+                    resolved = _resolve_spelled_name(match, scope, keys)
+                    if resolved is not None:
+                        named.add(resolved)
+    return named
 
 
-def _spells_template(texts: list[str], key: str) -> bool:
-    """Whether a spelled type in *texts* names the template *key*.
+def _resolve_spelled_name(
+    match: re.Match[str], scope: list[str], keys: set[str]
+) -> str | None:
+    """The template key a spelled template-id denotes, or ``None``.
 
-    The leaf name must begin an identifier (no word character or ``:`` before
-    it), and an opening ``<`` must follow it, after optional whitespace. So
-    ``Box<char>`` matches and ``FlatBox<char>`` or ``ns2::Box<int>`` do not.
+    A global ``::Box`` names exactly ``Box``. An unqualified or partly
+    qualified ``Box`` / ``Outer::Box`` is looked up the way C++ does: each
+    enclosing scope of the function, innermost first, down to the global
+    namespace, and the first scope that holds a known template wins. So inside
+    ``a::Outer`` a spelled ``Box`` that has an ``a::Outer::Box`` names that one,
+    not ``a::Box`` as well.
     """
-    leaf = key.rsplit("::", 1)[-1]
-    for text in texts:
-        at = text.find(leaf)
-        while at != -1:
-            before = text[at - 1] if at else ""
-            tail = text[at + len(leaf) :].lstrip()
-            if (
-                not (before and (before.isalnum() or before in "_:"))
-                and tail[:1] == "<"
-            ):
-                return True
-            at = text.find(leaf, at + 1)
-    return False
+    global_scope, spelled = match.group(1), match.group(2)
+    if global_scope:
+        return spelled if spelled in keys else None
+    for depth in range(len(scope), -1, -1):
+        candidate = "::".join([*scope[:depth], spelled])
+        if candidate in keys:
+            return candidate
+    return None
 
 
 def detect_template_default_changes(

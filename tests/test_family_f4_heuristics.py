@@ -97,7 +97,9 @@ UNCATEGORIZED_CEILING = 0
 #: (Itanium/MSVC mangling grammar, C cv/_Atomic spelling, ChangeKind-slug
 #: prefixes and abicheck's own synthetic-key format).
 EXEMPTION_CEILINGS: dict[str, int] = {
-    "spelling": 68,
+    # 69: ADR-085 shape C resolves a spelled template-id (C++ type spelling)
+    # against the function scope in policy/template_default_changes.py.
+    "spelling": 69,
     # 44: the merge with main brought model/symbol_ownership.py into the scan
     # (main made it the vocabulary owner) and main's shared
     # match_frozen_namespace -- both one pre-existing `_Z` mangling check.

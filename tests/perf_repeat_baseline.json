@@ -86,9 +86,9 @@
     "abicheck/compare/template_surface.py(alias_identity)": 330,
     "abicheck/compare/template_surface.py(public_functions)": 28,
     "abicheck/compare/template_surface.py(qualified_declaration_name)": 1580,
-    "abicheck/compare/template_surface.py(qualified_name_lookup)": 182,
-    "abicheck/compare/template_surface.py(qualified_name_lookup.<locals>.lookup)": 3414,
-    "abicheck/compare/template_surface.py(qualified_name_table)": 182,
+    "abicheck/compare/template_surface.py(qualified_name_lookup)": 186,
+    "abicheck/compare/template_surface.py(qualified_name_lookup.<locals>.lookup)": 3524,
+    "abicheck/compare/template_surface.py(qualified_name_table)": 186,
     "abicheck/compare/template_surface.py(qualified_name_table.<locals>.build)": 14,
     "abicheck/compare/template_surface.py(reconciled_abi_visible_functions)": 42,
     "abicheck/compare/template_surface.py(reconciled_public_function_maps)": 42,
@@ -161,7 +161,7 @@
     "abicheck/model/castxml_spelling_artifacts.py(has_unresolved_component)": 3431,
     "abicheck/model/castxml_spelling_artifacts.py(is_castxml_opaque_function_type)": 78,
     "abicheck/model/change_catalog/registry.py(ChangeKindRegistry.description_template_for)": 620,
-    "abicheck/model/comparison_memo.py(comparison_memo_active)": 196,
+    "abicheck/model/comparison_memo.py(comparison_memo_active)": 200,
     "abicheck/model/contract_finding_relevance.py(contract_relevance_of)": 756,
     "abicheck/model/contract_finding_relevance.py(evaluation_status_of)": 756,
     "abicheck/model/contract_finding_relevance.py(is_evaluated)": 756,
@@ -172,7 +172,7 @@
     "abicheck/model/edge_coverage.py(CoverageRecord.covered_units)": 934,
     "abicheck/model/entity_identity.py(source_relative_identity)": 774,
     "abicheck/model/evidence_status.py(is_cross_source_resolved)": 756,
-    "abicheck/model/execution_cache_scoped.py(ScopedCache.active)": 196,
+    "abicheck/model/execution_cache_scoped.py(ScopedCache.active)": 200,
     "abicheck/model/execution_cache_scoped.py(ScopedCache.scope)": 14,
     "abicheck/model/export_index.py(build_raw_export_index)": 28,
     "abicheck/model/export_index.py(build_raw_export_indexes)": 266,
@@ -301,5 +301,5 @@
   },
   "mode": "default",
   "n": 40,
-  "total": 236136
+  "total": 236262
 }
