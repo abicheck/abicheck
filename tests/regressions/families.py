@@ -252,6 +252,7 @@ _F1 = (
     "report.unobserved_population_counted_as_observed",
     "report.unestablished_result_reads_as_success",
     "storage.legacy_availability_collapse",
+    "storage.cross_generation_spelling_drift",
     "storage.short_decode_mistaken_for_complete_decode",
     "classification.two_agreeing_sources_read_as_unknown",
     "classification.default_branch_asserts_more_than_inputs",

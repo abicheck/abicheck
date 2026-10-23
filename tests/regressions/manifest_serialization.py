@@ -182,7 +182,10 @@ SERIALIZATION_BUG_CLASSES: tuple[BugClass, ...] = (
         ),
         # #1698 introduced the AutoType -> auto spelling this class escaped through.
         fixed_by=(1698,),
-        seed_tests=("tests/test_snapshot_generation_migration.py",),
+        seed_tests=(
+            "tests/test_snapshot_generation_migration.py",
+            "tests/test_family_f1_evidence_ablation.py",
+        ),
         known_gaps=(
             KnownGap(
                 description=(
