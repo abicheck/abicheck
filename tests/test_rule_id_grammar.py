@@ -9,6 +9,7 @@ so two rules that share a label or a reason stay two rules.
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 import pytest
@@ -89,7 +90,12 @@ def test_a_rule_without_an_id_is_identified_by_its_canonical_identity(
     old, new = _snapshots()
     result = compare(old, new, policy_file=PolicyFile.load(path))
     (row,) = compute_disposition_audit(result).reclassifications
-    assert "symbol=" + repr(_MANGLED) in row.rule_id
+    # H3: a portable digest token, the same one the rule's identity yields.
+    from abicheck.policy.rule_identity import rule_id_of
+
+    (rule,) = PolicyFile.load(path).reclassify
+    assert row.rule_id == rule_id_of(rule)
+    assert re.fullmatch(r"rule-[0-9a-f]{12}", row.rule_id)
     assert row.rule_id != "grp", "a label is never the identifier"
 
 

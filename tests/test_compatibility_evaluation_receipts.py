@@ -384,7 +384,7 @@ class TestPathInputsAreNotSilentlyIgnored:
         path.write_text("version: 1\nsuppressions:\n  - symbol: foo\n    reason: ok\n")
         cfg = _resolve(explicit=compare_cli_inputs({"suppress": path}))
         assert cfg.suppressions is not None
-        assert cfg.suppressions.rules == ("symbol='foo'",)
+        assert cfg.suppressions.rules == ('{"symbol":"foo"}',)
 
     def test_request_policy_and_suppression_paths_are_honoured(self, tmp_path):
         policy = tmp_path / "policy.yml"
@@ -404,7 +404,7 @@ class TestPathInputsAreNotSilentlyIgnored:
         # separately re-loaded the same files.
         assert cfg.policy.base.id == "sdk_vendor"
         assert cfg.suppressions is not None
-        assert cfg.suppressions.rules == ("symbol='foo'",)
+        assert cfg.suppressions.rules == ('{"symbol":"foo"}',)
 
 
 class TestReceiptMetadataIsCompared:
@@ -893,7 +893,7 @@ class TestSuppressionDigestAndRulesShareOneRead:
         path = tmp_path / "s.yml"
         path.write_bytes(b"version: 1\r\nsuppressions:\r\n  - symbol: foo\r\n")
         source = SuppressionSource.from_file(path)
-        assert source.rules == ("symbol='foo'",)
+        assert source.rules == ('{"symbol":"foo"}',)
         # Raw bytes, so a CRLF file does not digest as its LF twin.
         assert source.sha256 == hashlib.sha256(path.read_bytes()).hexdigest()
 
