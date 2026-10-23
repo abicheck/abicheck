@@ -24,9 +24,15 @@ which finding survives. It is not the implementation's own helper.
 
 from __future__ import annotations
 
+import itertools
+from collections import Counter
+
 import pytest
 
-from abicheck.compare.finding_dedup import deduplicate_cross_detector
+from abicheck.compare.finding_dedup import (
+    _drop_source_replay_typedef_duplicates,
+    deduplicate_cross_detector,
+)
 from abicheck.model.change import Change
 from abicheck.model.change_catalog.kinds import ChangeKind
 from abicheck.model.identity import EntityId, EntityKind, Namespace
@@ -183,3 +189,95 @@ def test_header_finding_without_entity_id_pairs_by_symbol() -> None:
     assert _kept(deduplicate_cross_detector([header, _replay_removed("old_t")])) == [
         ("typedef_removed", "old_t")
     ]
+
+
+_NAMES = ("old_t", "demo::old_t", "demo::inner::deep_t")
+_PAIRS = (
+    (_header_removed, _replay_removed, "typedef_removed", "public_typedef_removed"),
+    (
+        _header_retarget,
+        _replay_retarget,
+        "typedef_base_changed",
+        "public_typedef_target_changed",
+    ),
+)
+_SLOTS = [(i, name) for i in range(len(_PAIRS)) for name in _NAMES]
+
+
+def _domain() -> list[
+    tuple[list[Change], dict[tuple[str, str], int], dict[tuple[str, str], int]]
+]:
+    """Every combination of header and replay copies over a small domain.
+
+    Each (kind pair, name) slot takes 0 or 1 header copies and 0 or 1 replay
+    copies: 4^6 = 4096 cases, exhaustive rather than sampled. Each case carries
+    the copy counts it was built from, so the oracle does not read the
+    implementation's own name rendering.
+    """
+    cases = []
+    for counts in itertools.product(range(2), repeat=2 * len(_SLOTS)):
+        header_counts = counts[: len(_SLOTS)]
+        replay_counts = counts[len(_SLOTS) :]
+        changes: list[Change] = []
+        expected_header: dict[tuple[str, str], int] = {}
+        expected_replay: dict[tuple[str, str], int] = {}
+        for (i, name), h, r in zip(_SLOTS, header_counts, replay_counts, strict=True):
+            build_header, build_replay, header_kind, replay_kind = _PAIRS[i]
+            bare = name.rsplit("::", 1)[-1]
+            changes += [build_header(bare, name)] * h
+            changes += [build_replay(name)] * r
+            if h:
+                expected_header[(header_kind, name)] = h
+            if r:
+                expected_replay[(replay_kind, name)] = r
+        cases.append((changes, expected_header, expected_replay))
+    return cases
+
+
+_DOMAIN = _domain()
+_REPLAY_KINDS = {replay for _, _, _, replay in _PAIRS}
+
+
+def test_typedef_pairing_oracle_over_exhaustive_domain() -> None:
+    """Over every case: all header copies survive, each surviving replay copy
+    count is exactly ``max(0, replay - header)`` for its qualified name, only
+    replay-kind findings are ever dropped, and nothing is lost in total.
+    """
+    for changes, expected_header, expected_replay in _DOMAIN:
+        result = _drop_source_replay_typedef_duplicates(changes)
+        kept = Counter((c.kind.value, c.symbol) for c in result)
+        for header_kind, replay_kind in ((h, r) for _, _, h, r in _PAIRS):
+            # A header-tier finding's symbol is the bare alias, so names that
+            # share one bare alias ("old_t", "demo::old_t") share one count.
+            for bare in {n.rsplit("::", 1)[-1] for n in _NAMES}:
+                header_bare = sum(
+                    expected_header.get((header_kind, n), 0)
+                    for n in _NAMES
+                    if n.rsplit("::", 1)[-1] == bare
+                )
+                assert kept[(header_kind, bare)] == header_bare, (header_kind, bare)
+            for name in _NAMES:
+                replay_n = expected_replay.get((replay_kind, name), 0)
+                header_n = expected_header.get((header_kind, name), 0)
+                assert kept[(replay_kind, name)] == max(0, replay_n - header_n), (
+                    replay_kind,
+                    name,
+                )
+        dropped = Counter(c.kind.value for c in changes) - Counter(
+            c.kind.value for c in result
+        )
+        assert set(dropped) <= _REPLAY_KINDS
+        assert sum(dropped.values()) + len(result) == len(changes)
+
+
+def test_typedef_pairing_is_input_order_invariant() -> None:
+    for changes, _, _ in _DOMAIN:
+        forward = Counter(
+            (c.kind.value, c.symbol)
+            for c in _drop_source_replay_typedef_duplicates(changes)
+        )
+        backward = Counter(
+            (c.kind.value, c.symbol)
+            for c in _drop_source_replay_typedef_duplicates(list(reversed(changes)))
+        )
+        assert forward == backward
