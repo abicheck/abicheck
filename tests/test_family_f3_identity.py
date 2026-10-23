@@ -739,3 +739,33 @@ def test_mutant_m7_checkout_prefix_kept_in_path_identity_is_caught(
     monkeypatch.setattr(rrp, "PROJECT_LAYOUT_MARKERS", frozenset())
     relocate = cat.TRANSFORMS_BY_NAME["relocate_checkout"]
     assert any(cat.path_violations(p, relocate) for p in cat._path_probes())
+
+
+# -- type-index identity (bug class identity.type_index_bare_name_collision) --
+
+
+@pytest.mark.parametrize(
+    "scopes",
+    [
+        ("a", "b", "c"),
+        ("a", "a::inner", "Holder"),
+        ("x::y", "x", "z::y"),
+    ],
+)
+def test_type_index_keys_on_qualified_identity_not_bare_spelling(
+    scopes: tuple[str, ...],
+) -> None:
+    """Header records carry a bare ``name`` and their scope in
+    ``qualified_name``; one bare name in several scopes is several types.
+    Oracle: the scope each record was declared in."""
+    from abicheck.model import AbiSnapshot
+    from abicheck.model.entities import RecordType
+
+    recs = [
+        RecordType(name="Parameter", kind="struct", qualified_name=f"{s}::Parameter")
+        for s in scopes
+    ]
+    snap = AbiSnapshot(library="l.so", version="1", types=recs)
+    for scope, rec in zip(scopes, recs, strict=True):
+        assert snap.type_by_name(f"{scope}::Parameter") is rec
+    assert snap.type_by_name("Parameter") is None
