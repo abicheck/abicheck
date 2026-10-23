@@ -24,15 +24,23 @@ import pytest
 from _l4_clang_golden_support import GOLDEN, REPO_ROOT, G, M, golden_header_and_rows
 
 #: Pinned ``(kind, field)`` pairs: status ``equal`` with at least two paired
-#: entities. Written by hand from the amendment's candidate set and the rule A3
-#: (a field that differs on any TU is dropped). ``typedef.visibility`` and
-#: ``typedef.api_relevant`` are equal by construction (``base.entity_from_typedef``
-#: hard-codes them), not by evidence; the rule admits them, and the plan's status
-#: note says so.
+#: entities, minus the equal-by-construction fields below. Written by hand from
+#: the amendment's candidate set and the rule A3 (a field that differs on any TU
+#: is dropped). Plan b2 decided the pinned set: ``typedef.visibility`` and
+#: ``typedef.api_relevant`` are dropped, because ``base.entity_from_typedef``
+#: hard-codes them and their equality measures nothing about the projection.
 EXPECTED_PINNED: frozenset[tuple[str, str]] = frozenset(
     {
         ("typedef", "qualified_name"),
         ("typedef", "value"),
+    }
+)
+
+#: Fields that compare equal on every TU because the projection hard-codes them
+#: (``base.entity_from_typedef``). They satisfy the status rule but are not
+#: evidence, so the measured set excludes them before it is compared.
+EQUAL_BY_CONSTRUCTION: frozenset[tuple[str, str]] = frozenset(
+    {
         ("typedef", "visibility"),
         ("typedef", "api_relevant"),
     }
@@ -98,10 +106,10 @@ def test_golden_header_pins_the_pre_change_producer() -> None:
     from abicheck.buildsource.source_extractors.clang import CLANG_EXTRACTOR_VERSION
 
     header, rows = golden_header_and_rows()
+    # The golden is the pre-change (0.13) side. The live producer moved on to
+    # 0.14 in plan b2; the golden stays 0.13 so the old side is still the old side.
     assert header["producer_version"] == "0.13"
-    # The golden is the pre-change side: the producer must still be 0.13 here.
-    # A bump to 0.14 is the b2 change and must regenerate this file first.
-    assert CLANG_EXTRACTOR_VERSION == "0.13"
+    assert CLANG_EXTRACTOR_VERSION == "0.14"
     assert header["tu_count"] == len(rows) == 274
 
 
@@ -110,11 +118,6 @@ def test_golden_header_pins_the_pre_change_producer() -> None:
 def test_golden_is_the_output_of_its_generator() -> None:
     """Regenerating from this checkout reproduces the checked-in bytes exactly."""
     _require_golden_clang()
-    from abicheck.buildsource.source_extractors.clang import (
-        CLANG_EXTRACTOR_VERSION,
-    )
-
-    assert CLANG_EXTRACTOR_VERSION == "0.13"
     regenerated = G.build_golden_text(M.corpus_cases(REPO_ROOT / "catalog" / "cases"))
     assert regenerated == GOLDEN.read_text(encoding="utf-8"), (
         "golden is stale: run scripts/gen_l4_clang_golden.py and review the diff"
@@ -150,10 +153,17 @@ def test_pinned_set_matches_the_measured_projection_equivalence() -> None:
         (r.kind, r.field)
         for r in M.aggregate(comparisons)
         if r.status == "equal" and r.compared >= MIN_PAIRED
-    }
+    } - EQUAL_BY_CONSTRUCTION
     assert measured == set(EXPECTED_PINNED), (
         f"measured pinned set {sorted(measured)} != expected {sorted(EXPECTED_PINNED)}"
     )
+
+
+def test_expected_pinned_set_is_the_production_comparable_set() -> None:
+    """The literal above must equal what the production guard intersects on."""
+    from abicheck.buildsource.revision_comparability import REVISION_COMPARABLE_FIELDS
+
+    assert set(REVISION_COMPARABLE_FIELDS) == set(EXPECTED_PINNED)
 
 
 @pytest.mark.parametrize(

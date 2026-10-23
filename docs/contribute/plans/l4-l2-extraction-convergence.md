@@ -240,6 +240,8 @@ the pre-change commit. A mutation of the dedup rule fails it.
 
 ### Phase 4 — one clang AST → declaration/type parser
 
+**Status (2026-10-23): b2 done.** Items 1–3 of the b2 list below are merged or in this PR; the clang stamp is `0.14`.
+
 Do for clang what `source_extractors/castxml.py` already does for castxml:
 run L2's `dumper_clang._ClangAstParser` over the TU's AST and project through
 `base.entity_from_*`, keeping L4's genuinely additive facts (body/default-arg/
@@ -436,7 +438,7 @@ Presence (not a field, from the same run): current side 2600 functions, projecte
 68629, of which 66953 are out of scope and excluded from pairing. The
 projected-only out-of-scope set is the public-surface problem below.
 
-**What remains for b2** (a separate PR, after this one merges), in order:
+**What remains for b2** (a separate PR, after this one merges), in order. Items 1–3 are done; the list is kept as the record:
 1. **Status (2026-10-22): filter and production projection DONE; field gaps OPEN.**
    The projected side is in production code: `PublicSurfaceClangParser` and
    `project_clang_surface()` in `abicheck/buildsource/source_extractors/clang_projection.py`.
@@ -486,10 +488,85 @@ projected-only out-of-scope set is the public-surface problem below.
    guard is disabled (mutation recorded in the PR body). The
    `_diff_provenance` block moved to `source_provenance_diff.py` to keep
    `source_diff.py` under its line budget (`debt.yaml` baseline 1113 → 1066).
-3. The `CLANG_EXTRACTOR_VERSION` bump from `"0.13"` to `"0.14"`, last, once 1 and 2
-   are in place. Re-run this measurement and the golden test in that PR; the
-   expected set in `tests/test_l4_clang_projection_golden.py` changes there, not
-   before.
+3. **Status (2026-10-23): DONE — `CLANG_EXTRACTOR_VERSION` is `"0.14"`.**
+   Last, as planned. Changes in this PR:
+   - `CLANG_EXTRACTOR_VERSION` `"0.13"` → `"0.14"`. The shipped L4 payload is
+     unchanged apart from the stamp: production does not switch to the
+     projection (the projection runs only in the measurement and the golden
+     test). The stamp alone makes a stored 0.13 surface a payload-revision
+     mismatch, which invalidates the L4 cache for 0.13 entries too.
+   - Source generation fingerprint: `clang.py` sits on the `source` axis, so
+     `SOURCE_GENERATION` `6` → `7` and `scripts/record_generation_fingerprints.py
+     --axis source --bump` (strictly +1). The recorded reason names this change.
+   - `scripts/gen_l4_clang_golden.py` writes a fixed `PRE_CHANGE_PRODUCER_VERSION
+     = "0.13"` into the golden header instead of the live constant. The golden
+     is the pre-change side; regenerating must not turn it into the new side.
+     `surface_0_13.jsonl` is unchanged.
+   - `tests/test_l4_clang_projection_golden.py`: the expected pinned set and its
+     justification are below. A new test asserts the expected literal equals
+     `REVISION_COMPARABLE_FIELDS`, so the test and the production guard cannot
+     drift apart again.
+   - Public-workflow validation: `tests/test_l4_revision_mismatch_cli.py`. A
+     source-only snapshot dumped with the stamp patched to `0.13` is compared
+     through `abicheck compare --depth source` with a live `0.14` snapshot. Result:
+     one `source_fact_coverage_incomplete` coverage finding ("payload revision
+     mismatch … Compared 0 pinned facts"), `fact_set_comparability: unknown`,
+     and no break kinds. The same-revision control reports no change and reads
+     `comparable`.
+
+   **Re-measurement** (`scripts/measure_l4_clang_projection.py --json`, run on
+   this branch; 274 catalog C++ TUs, 0 failed). The earlier 253-TU table was
+   taken before the catalog grew to 274 TUs; the golden already held 274. Totals:
+   1553 paired functions (was 1531), 290 records, 5 enums, 22 typedefs, 1
+   variable.
+
+   | kind | field | compared | both empty | differing pairs | status | TUs differing |
+   |---|---|---:|---:|---:|---|---:|
+| function | qualified_name | 1553 | 0 | 1060 | differs | 208 |
+| function | mangled_name | 1553 | 420 | 19 | differs | 15 |
+| function | visibility | 1553 | 0 | 1553 | differs | 258 |
+| function | api_relevant | 1553 | 0 | 1553 | differs | 258 |
+| function | value | 1553 | 1535 | 18 | differs | 7 |
+| function | signature_hash | 1553 | 0 | 1396 | differs | 256 |
+| variable | qualified_name | 1 | 0 | 0 | equal | 0 |
+| variable | mangled_name | 1 | 0 | 1 | differs | 1 |
+| variable | visibility | 1 | 0 | 1 | differs | 1 |
+| variable | api_relevant | 1 | 0 | 1 | differs | 1 |
+| variable | value | 1 | 1 | 0 | equal_empty | 0 |
+| variable | type_hash | 1 | 0 | 0 | equal | 0 |
+| record | qualified_name | 290 | 0 | 130 | differs | 75 |
+| record | mangled_name | 290 | 290 | 0 | equal_empty | 0 |
+| record | visibility | 290 | 0 | 290 | differs | 168 |
+| record | api_relevant | 290 | 0 | 290 | differs | 168 |
+| record | type_hash | 290 | 0 | 290 | differs | 168 |
+| enum | qualified_name | 5 | 0 | 5 | differs | 5 |
+| enum | mangled_name | 5 | 5 | 0 | equal_empty | 0 |
+| enum | visibility | 5 | 0 | 5 | differs | 5 |
+| enum | api_relevant | 5 | 0 | 5 | differs | 5 |
+| enum | type_hash | 5 | 0 | 5 | differs | 5 |
+| typedef | qualified_name | 22 | 0 | 0 | equal | 0 |
+| typedef | mangled_name | 22 | 22 | 0 | equal_empty | 0 |
+| typedef | visibility | 22 | 0 | 0 | equal | 0 |
+| typedef | api_relevant | 22 | 0 | 0 | equal | 0 |
+| typedef | value | 22 | 0 | 0 | equal | 0 |
+| typedef | type_hash | 22 | 0 | 22 | differs | 14 |
+
+   **Expected pinned set, decided.** The measured `equal` fields with at least
+   two paired entities are `typedef.{qualified_name, value, visibility,
+   api_relevant}`. Two are equal by construction (`base.entity_from_typedef`
+   hard-codes `visibility` and `api_relevant`), so the test excludes them as
+   `EQUAL_BY_CONSTRUCTION`. The pinned set is `typedef.qualified_name` and
+   `typedef.value`: each is equal on all 22 typedefs with evidence. Item 2
+   already dropped the two by-construction fields from `REVISION_COMPARABLE_FIELDS`;
+   the test literal now matches. `variable.qualified_name` and
+   `variable.type_hash` show `equal` with one paired variable, which does not
+   meet the two-entity rule and stays unpinned.
+
+   **Open, not changed here.** The mismatch report exits `0` with exit reason
+   `clean`, and `analysis_assurance_exit_contribution` is `0`. Under the
+   A4 design `unknown` assurance is reported but does not gate the exit code.
+   Changing that is an exit-code policy change and needs its own ADR, so it is
+   recorded here rather than made in this PR.
 
 
 ### Phase 5 — one entity identity
