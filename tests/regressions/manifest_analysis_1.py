@@ -331,6 +331,12 @@ ANALYSIS_1_BUG_CLASSES: tuple[BugClass, ...] = (
             # Pinned by name-level, one-for-one pairing across C and C++ shapes.
             "tests/test_inline_removal_dedup.py",
             "tests/test_inline_removal_source_replay_e2e.py",
+            # A removed or retargeted typedef is one observation at two tiers:
+            # the header tier's TYPEDEF_* and the L4 replay's PUBLIC_TYPEDEF_*
+            # differ in kind, so no exact key pairs them. Pinned by one-for-one
+            # qualified-name pairing across C and C++ (nested namespace included).
+            "tests/test_typedef_dedup.py",
+            "tests/test_typedef_source_replay_e2e.py",
             "tests/unit/compare/test_dedup_key.py",
             "tests/test_diff_namespaces.py",
             # workflows/cross_source_hygiene.py's own per-side OLD/NEW
