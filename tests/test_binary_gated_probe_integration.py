@@ -603,8 +603,10 @@ def test_header_gated_kind_absent_binary_only(
                 for c in _of_kind(outcomes[kind].with_headers, kind)
             } == {"API_BREAK"}
         else:
+            # The replay copy's API_BREAK is dropped as a duplicate; the header
+            # tier owns the change and classifies it BREAKING (its default verdict).
             assert _of_kind(outcomes[kind].with_headers, kind) == []
             assert {
                 c["compatibility_decision"]
                 for c in _of_kind(outcomes[kind].with_headers, twin)
-            } == {"API_BREAK"}
+            } == {"BREAKING"}
