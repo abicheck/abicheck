@@ -62,6 +62,7 @@ from elftools.elf.elffile import ELFFile
 
 from .dwarf_utils import (
     BASE_PRUNE_TAGS,
+    array_type_spelling,
     attr_bool as _attr_bool,  # noqa: F401
     attr_int as _attr_int,
     attr_str as _attr_str,
@@ -69,6 +70,7 @@ from .dwarf_utils import (
     decode_member_location as _decode_member_location,
     has_real_dwarf_info,
     resolve_die_ref as _resolve_ref,
+    vector_byte_size,
 )
 
 # Fact dataclasses live in the model package (ADR-061 Phase 5): this module
@@ -673,9 +675,14 @@ def _compute_array_type_info(
     depth: int,
     cache: dict[tuple[int, int], tuple[str, int]],
 ) -> tuple[str, int]:
-    size = _attr_int(die, "DW_AT_byte_size")
-    inner_name = _resolve_inner_type_name(die, CU, depth, cache)
-    return (f"{inner_name}[]", size) if inner_name is not None else ("array", size)
+    is_vector = "DW_AT_GNU_vector" in die.attributes
+    inner = _resolve_inner_type_info(die, CU, depth, cache)
+    inner_name = inner[0] if inner is not None else None
+    if is_vector:
+        size = vector_byte_size(die, inner[1] if inner is not None else None) or 0
+    else:
+        size = _attr_int(die, "DW_AT_byte_size")
+    return (array_type_spelling(inner_name, size, is_vector), size)
 
 
 def _resolve_inner_type_info(
