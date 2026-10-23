@@ -369,6 +369,22 @@ EXTRACTION_BUG_CLASSES: tuple[BugClass, ...] = (
         seed_tests=("tests/test_diff_templates_fn_type_arity.py",),
     ),
     BugClass(
+        id="templates.parameter_template_args_read_as_family_membership",
+        invariant=(
+            "A declaration joins a template-instantiation family only when its "
+            "own declared name carries template arguments: a template argument "
+            "list inside a parameter or return type never makes a non-template "
+            "function an instantiation, so a parameter type's mangling change is "
+            "not reported as a missing instantiation of that function."
+        ),
+        fixed_by=(239,),
+        seed_tests=(
+            "tests/test_instantiation_family_name_scope.py",
+            "tests/test_parameter_replacement_pairing.py",
+            "tests/test_family_f3_identity.py",
+        ),
+    ),
+    BugClass(
         id="evidence.malformed_input_yields_value",
         invariant=(
             "A malformed input that has no exact interpretation -- a "

@@ -323,6 +323,7 @@ _F3 = (
     "classification.one_spelling_of_a_path_treated_as_its_identity",
     "comparability.incidental_ordering_treated_as_contract",
     "tooling.platform_dependent_path_key",
+    "templates.parameter_template_args_read_as_family_membership",
 )
 _F4 = (
     "classification.name_shape_as_contract_membership",
