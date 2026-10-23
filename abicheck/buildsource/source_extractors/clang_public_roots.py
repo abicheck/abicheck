@@ -35,7 +35,7 @@ from pathlib import Path, PurePosixPath
 
 from ..build_evidence import CompileUnit
 from ._argv import unredact_home
-from .compile_invocation import parse_compile_invocation, replayed_tokens
+from .compile_invocation import parse_compile_invocation
 
 _PUBLIC_ROOT_SAMPLE_LIMIT = 128
 _PUBLIC_ROOT_WHOLE_DIR_MIN_MATCHES = 2
@@ -133,35 +133,10 @@ def _compile_unit_include_roots(
         for raw in compile_unit.system_include_paths
     )
     invocation = parse_compile_invocation(compile_unit, compiler_binary)
-    cc_id = "msvc" if invocation.msvc else "gnu"
-    replay_flags = replayed_tokens(invocation)
-    i = 0
-    while i < len(replay_flags):
-        tok = replay_flags[i]
-        raw: str | None = None
-        if tok in {"-iquote", "-idirafter"} and i + 1 < len(replay_flags):
-            raw = replay_flags[i + 1]
-            i += 2
-        elif tok.startswith("-iquote") and len(tok) > len("-iquote"):
-            raw = tok[len("-iquote") :]
-            i += 1
-        elif tok.startswith("-idirafter") and len(tok) > len("-idirafter"):
-            raw = tok[len("-idirafter") :]
-            i += 1
-        elif cc_id == "msvc" and tok in {"/I", "-I"} and i + 1 < len(replay_flags):
-            raw = replay_flags[i + 1]
-            i += 2
-        elif (
-            cc_id == "msvc"
-            and len(tok) > 2
-            and (tok.startswith("/I") or tok.startswith("-I"))
-        ):
-            raw = tok[2:]
-            i += 1
-        else:
-            i += 1
-        if raw:
-            roots.append((raw, _compile_unit_include_dir(raw, compile_unit)))
+    roots.extend(
+        (raw, _compile_unit_include_dir(raw, compile_unit))
+        for raw in invocation.replayed_include_dirs
+    )
     return roots
 
 

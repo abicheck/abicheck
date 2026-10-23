@@ -105,6 +105,50 @@ class CompilerInvocation:
     #: Replayed flags in the order they were recovered: ABI-relevant flags first,
     #: then include-search options scanned from ``argv``.
     carried: tuple[CarriedFlag, ...]
+    #: Include-search operands recovered from :attr:`carried` that the structured
+    #: buckets do not hold: ``-iquote``/``-idirafter`` (both spellings) and, in
+    #: MSVC mode, any ``/I`` or ``-I`` token the argv scanner carried (the scanner
+    #: carries only ``/I`` today, so a bare ``-I`` argv operand is not included).
+    #: Kept in replay order and in the operand's recorded spelling, not rebased,
+    #: so a probe resolves them against the compile unit's ``directory`` exactly
+    #: as it does :attr:`~..build_evidence.CompileUnit.include_paths`.
+    replayed_include_dirs: tuple[str, ...] = ()
+
+
+def _replayed_include_operands(tokens: list[str], msvc: bool) -> tuple[str, ...]:
+    """The include-search operands in *tokens* that the structured buckets do not hold.
+
+    Matches each spelling once, in token order: a separate operand consumes the
+    next token, a joined one carries its directory inline. ``/I`` and ``-I`` are
+    include options only in MSVC mode; in GNU mode they are already structured.
+    """
+    out: list[str] = []
+    msvc_options = ("/I", "-I") if msvc else ()
+    i = 0
+    while i < len(tokens):
+        tok = tokens[i]
+        raw: str | None = None
+        if tok in _GNU_INCLUDE_SEARCH_OPTS or tok in msvc_options:
+            if i + 1 < len(tokens):
+                raw = tokens[i + 1]
+                i += 2
+            else:
+                i += 1
+        else:
+            joined = next(
+                (
+                    opt
+                    for opt in (*_GNU_INCLUDE_SEARCH_OPTS, *msvc_options)
+                    if tok.startswith(opt) and len(tok) > len(opt)
+                ),
+                None,
+            )
+            if joined is not None:
+                raw = tok[len(joined) :]
+            i += 1
+        if raw:
+            out.append(raw)
+    return tuple(out)
 
 
 def _carry_abi_relevant_flags(
@@ -318,4 +362,7 @@ def parse_compile_invocation(
         sysroot=compile_unit.sysroot or "",
         target_triple=compile_unit.target_triple or "",
         carried=carried,
+        replayed_include_dirs=_replayed_include_operands(
+            [carried_flag.token for carried_flag in carried], msvc
+        ),
     )

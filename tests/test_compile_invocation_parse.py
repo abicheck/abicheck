@@ -78,3 +78,25 @@ def test_msvc_include_search_is_recognized_only_in_cl_mode(
     argv: list[str], compiler: str, expected: list[str]
 ) -> None:
     assert replayed_tokens_for(_cu(argv=argv), compiler) == expected
+
+
+@pytest.mark.parametrize(
+    ("argv", "expected"),
+    [
+        # Separate and joined spellings of both GNU include-search options.
+        (["g++", "-iquote", "q1", "-idirafter", "d1"], ("q1", "d1")),
+        (["g++", "-iquotex", "-idirafterx"], ("x", "x")),
+        # A trailing option with no operand contributes nothing and ends the scan.
+        (["g++", "-iquote", "q1", "-idirafter"], ("q1",)),
+        # MSVC /I (separate and joined) is carried. A bare -I is not: the argv
+        # scanner carries only /I, the documented gap in replayed_include_dirs.
+        (["cl.exe", "/I", "s", "/Ij", "-Ik"], ("s", "j")),
+    ],
+)
+def test_replayed_include_dirs_carries_each_spelling_once_in_order(
+    argv: list[str], expected: tuple[str, ...]
+) -> None:
+    inv = parse_compile_invocation(
+        _cu(argv=argv, language="CXX"), "g++" if argv[0] != "cl.exe" else "cl.exe"
+    )
+    assert inv.replayed_include_dirs == expected

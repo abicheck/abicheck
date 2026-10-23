@@ -204,9 +204,9 @@
       "abicheck/buildsource/source_extractors/clang_node_predicates.py": "1e9556dab627cac4da137bf0f34b858f6e76b194f932aeb92ffe4ba8f07bb7bf",
       "abicheck/buildsource/source_extractors/clang_nodes.py": "9463fbac6fe36203c29f20ab3203791e3b558f21f4ebf66ee732f39aaf912c9b",
       "abicheck/buildsource/source_extractors/clang_projection.py": "7d731ca0551bec84372d4c57bdb31af143220e99bbf04e7417cc34a9f851fc6f",
-      "abicheck/buildsource/source_extractors/clang_public_roots.py": "26b787aca87c1549b821f4f420be1960b48317e9bdefd2e946b3b2903238e214",
+      "abicheck/buildsource/source_extractors/clang_public_roots.py": "c1752f2798886c97716c2361c2fe772defa2b6170104b8486871ecbc7beb3ba3",
       "abicheck/buildsource/source_extractors/clang_source_edges.py": "c9b8c3daacd02c4913b486a6ac658b435744243ed4433f14792588f67ef800e9",
-      "abicheck/buildsource/source_extractors/compile_invocation.py": "8af29f22859f7e8fd81d5abd2266e017acc31ff539db9e42bd873ae544f9dccf",
+      "abicheck/buildsource/source_extractors/compile_invocation.py": "e7c5891901fa149f970458b18839654e0e7a4133c048ce483abc16de91bba263",
       "abicheck/buildsource/source_graph.py": "28cb2b485ffcf276e9c751b99261cc2d3f4ab2ad440612ddb3111bc307372652",
       "abicheck/buildsource/source_graph_build_source_abi.py": "abc43bd1d6845f2af8ae1ad868e5455962452d64838f6c0abedc281e244090ff",
       "abicheck/buildsource/source_link.py": "b7cabfd63c78673ccc2593d4f558069472dfa6bcb2d792a2b216f3d04230b338",
@@ -220,8 +220,8 @@
       "abicheck/buildsource/type_graph.py": "a028a875057cd0cbf2930a431bfa1e579f7b770e0d124cbcfe715724e89d12e5",
       "abicheck/buildsource/type_graph_index.py": "7375f7baec7ceb3dd4a52a489b89e5a3571750dffca7490d1c5870301d55202d"
     },
-    "fingerprint": "9af8ade5d330bbbed1ff35ced048ac3def398759229baff8eaa37b2f6ca57aba",
+    "fingerprint": "5b1132ec90837e65e1f844842ea80cf3b592a5d96b231932617448cd462e7a9c",
     "generation": 4,
-    "reason": "Adds clang_projection.py (PublicSurfaceClangParser, project_clang_surface) as a new production projection. Emitted L4/L2 output and SOURCE_GENERATION-relevant extraction are unchanged; the golden pinned set is unchanged."
+    "reason": "Merge of origin/main into the include-search branch: source-scope files now include main's changes; no semantic change is introduced by this merge itself."
   }
 }
