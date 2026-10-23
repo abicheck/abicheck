@@ -201,3 +201,78 @@ def test_new_release_format_leaves_verdict_and_exit_unchanged(
 
 def test_release_formats_include_sarif_and_review() -> None:
     assert {"sarif", "review"} <= RELEASE_FORMATS
+
+
+# ── the review renderer's edges ───────────────────────────────────────────
+
+
+def _review_mapping(libraries: list[dict[str, object]]) -> dict[str, object]:
+    return {"verdict": "BREAKING", "exit": {"code": 4}, "libraries": libraries}
+
+
+def test_review_lists_at_most_ten_breaking_findings_per_member_and_counts_the_rest() -> (
+    None
+):
+    from abicheck.report.render_release_sarif import render_release_review
+
+    findings = [
+        {"bucket": "breaking", "kind": "func_removed", "symbol": f"f{i}"}
+        for i in range(13)
+    ]
+    page = render_release_review(
+        _review_mapping(
+            [
+                {
+                    "library": "libbig.so.1",
+                    "verdict": "BREAKING",
+                    "breaking": 13,
+                    "findings": findings,
+                }
+            ]
+        )
+    )
+    assert page.count("- `func_removed` `f") == 10
+    assert "- ... and 3 more" in page
+
+
+def test_review_omits_the_breaking_section_when_no_member_breaks() -> None:
+    from abicheck.report.render_release_sarif import render_release_review
+
+    page = render_release_review(
+        _review_mapping(
+            [
+                {
+                    "library": "libok.so.1",
+                    "verdict": "COMPATIBLE",
+                    "breaking": 0,
+                    "compatible_additions": 1,
+                    "findings": [
+                        {"bucket": "compatible", "kind": "func_added", "symbol": "g"}
+                    ],
+                }
+            ]
+        )
+    )
+    assert "## Breaking findings" not in page
+    assert "| `libok.so.1` | `COMPATIBLE` | 0 | 0 | 0 | 1 |" in page
+
+
+def test_release_sarif_with_no_comparable_members_is_still_a_valid_log(
+    tmp_path: Path,
+) -> None:
+    old_dir, new_dir = tmp_path / "old", tmp_path / "new"
+    old_dir.mkdir()
+    new_dir.mkdir()
+    (old_dir / "libgone.so.1.json").write_text(
+        snapshot_to_json(_snap("libgone.so.1.json", ["gone"], [])), encoding="utf-8"
+    )
+    (new_dir / "libnew.so.1.json").write_text(
+        snapshot_to_json(_snap("libnew.so.1.json", ["new"], [])), encoding="utf-8"
+    )
+    out = tmp_path / "empty.sarif"
+    CliRunner().invoke(
+        main, ["compare", str(old_dir), str(new_dir), "-o", f"sarif={out}"]
+    )
+    sarif = json.loads(out.read_text())
+    assert sarif["version"] == "2.1.0"
+    assert sarif["runs"] == []
