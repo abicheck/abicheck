@@ -132,7 +132,7 @@ REPORT_BUG_CLASSES: tuple[BugClass, ...] = (
         # reason and source file. And the JUnit projection published only
         # the total exit code where JSON/Markdown/oneline/SARIF all named
         # the orthogonal axis that fired.
-        fixed_by=(1176, 1185, 1304),
+        fixed_by=(1176, 1185, 1304, 1773),
         seed_tests=(
             # ADR-072: the PR comment was a third instance of this exact
             # shape, and the largest -- `confidence`, `evidence_tier(s)`,
