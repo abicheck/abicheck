@@ -386,3 +386,90 @@ class TestBestEffortCacheCleanup:
         store.publish("k", "payload", ())
 
         assert store.lookup("k") is None
+
+
+class TestWriteAndStoreBoundaries:
+    def test_a_matching_toolchain_publishes_the_dumped_xml(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        store = TuParseStore(tmp_path / "store")
+        out = tmp_path / "out.xml"
+        out.write_text(_CASTXML_DOC, encoding="utf-8")
+        monkeypatch.setattr(_cx, "_tool_identity", lambda _b: "same")
+
+        _cx._write_castxml_cache(
+            store,
+            "k",
+            out,
+            castxml_bin="castxml",
+            cc_bin="cc",
+            frontend_identity="same",
+            compiler_identity="same",
+        )
+
+        assert store.lookup("k") == _CASTXML_DOC
+
+    def test_a_toolchain_that_moved_during_the_run_publishes_nothing(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        store = TuParseStore(tmp_path / "store")
+        out = tmp_path / "out.xml"
+        out.write_text(_CASTXML_DOC, encoding="utf-8")
+        monkeypatch.setattr(_cx, "_tool_identity", lambda _b: "upgraded")
+
+        _cx._write_castxml_cache(
+            store,
+            "k",
+            out,
+            castxml_bin="castxml",
+            cc_bin="cc",
+            frontend_identity="before",
+            compiler_identity="before",
+        )
+
+        assert store.lookup("k") is None
+
+    def test_an_unreadable_dump_publishes_nothing_and_raises_nothing(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        store = TuParseStore(tmp_path / "store")
+        monkeypatch.setattr(_cx, "_tool_identity", lambda _b: "same")
+
+        _cx._write_castxml_cache(
+            store,
+            "k",
+            tmp_path / "never-written.xml",
+            castxml_bin="castxml",
+            cc_bin="cc",
+            frontend_identity="same",
+            compiler_identity="same",
+        )
+
+        assert store.lookup("k") is None
+
+    def test_the_real_store_for_a_key_is_the_backend_entry_path(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from abicheck.storage import ast_cache_location as alc
+
+        monkeypatch.setattr(alc.AST_DISK_CACHE, "enabled", lambda: True)
+        monkeypatch.setattr(
+            alc, "backend_cache_dir", lambda backend: tmp_path / backend
+        )
+
+        store = alc.ast_cache_store("k", "castxml")
+
+        assert store.path("k") == tmp_path / "castxml" / "k.json"
+
+
+def test_a_disabled_cache_still_names_the_entry_json_in_scratch(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from abicheck.storage import ast_cache_location as alc
+
+    monkeypatch.setattr(alc.AST_DISK_CACHE, "enabled", lambda: False)
+
+    entry = alc.ast_cache_entry_path("k", "castxml")
+
+    assert entry.name == "k.json"
+    assert entry.parent.name.startswith("castxml-")
