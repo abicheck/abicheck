@@ -1,6 +1,6 @@
 {
   "description": "Formal detector specification matrix (generated).",
-  "count": 422,
+  "count": 423,
   "detectors": [
     {
       "kind": "abi_relevant_build_flag_changed",
@@ -3079,6 +3079,15 @@
       "min_evidence": "L5",
       "doc_slug": "target_dependency_added",
       "examples": "case161_target_dependency_added"
+    },
+    {
+      "kind": "target_isa_changed",
+      "category": "risk",
+      "default_verdict": "COMPATIBLE_WITH_RISK",
+      "severity": "warning",
+      "min_evidence": "unspecified",
+      "doc_slug": "target_isa_changed",
+      "examples": ""
     },
     {
       "kind": "template_body_changed",

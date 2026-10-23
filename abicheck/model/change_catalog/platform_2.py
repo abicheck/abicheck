@@ -691,4 +691,17 @@ PLATFORM_ENTRIES_2: list[ChangeKindMeta] = [
         entity=_ENT.BINARY,
         operation=_OP.MODIFIED,
     ),
+    _E(
+        "target_isa_changed",
+        _R,
+        impact="The two builds require different compiled instruction-set "
+        "targets (the -march / -m<feature> flags recorded in DW_AT_producer, "
+        "or the GNU_PROPERTY_X86_ISA_1_NEEDED level). A raised requirement "
+        "means CPUs without the new features can no longer run the library. "
+        "The layout and mangling findings reported alongside it may be "
+        "consequences of this root cause.",
+        description_template="compiled target ISA changed: {old} → {new}",
+        entity=_ENT.BINARY,
+        operation=_OP.MODIFIED,
+    ),
 ]

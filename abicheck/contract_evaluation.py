@@ -286,11 +286,11 @@ _NOT_APPLICABLE_KINDS: frozenset[ChangeKind] = frozenset(
         # fell through to the `python_*`-prefix "trusted by construction"
         # shortcut further down and was wrongly reported `IN_CONTRACT`
         # rather than the mode-independent `NOT_APPLICABLE` every other
-        # deployment-floor kind above already gets (Codex review, fresh
-        # evidence).
+        # deployment-floor kind above already gets (Codex review, fresh evidence).
         ChangeKind.PYTHON_ABI3_FLOOR_RAISED,
         ChangeKind.MACOS_DEPLOYMENT_TARGET_RAISED,
         ChangeKind.X86_ISA_BASELINE_RAISED,
+        ChangeKind.TARGET_ISA_CHANGED,
         ChangeKind.OS_DEPLOYMENT_FLOOR_RAISED,
         # ELF version *definitions* and *requirements*: each finding's
         # `symbol` is the version tag itself (`diff_platform_elf_symbols.
