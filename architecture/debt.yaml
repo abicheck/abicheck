@@ -1960,17 +1960,6 @@
       "review_by": "2026-11-30"
     },
     {
-      "path": "abicheck/policy/severity.py",
-      "baseline_lines": 808,
-      "target": "see ADR-061 ownership map",
-      "rule": "no_growth",
-      "disposition": "migrate",
-      "category": "legacy_oversized_module",
-      "owner": "policy",
-      "rationale": "New entry, 798 -> 827, created by the one-time `ruff format` pass that made `fmt-check` a real CI gate (see docs/contribute/known-gaps.md). This file sat under the 800-line maximum only because it was unformatted; rewrapping its call sites and expanding magic trailing commas crossed the cap without adding a statement (its parsed statement count is unchanged, verified via `ast.dump`). Recorded as debt rather than exempted so it stays in the no-growth ledger and is split like any other oversized file; the formatting bump is not itself a reason to split, so the target below is the pre-existing ADR-061 ownership question, not this change.",
-      "review_by": "2026-11-30"
-    },
-    {
       "path": "abicheck/storage/bundle_archive.py",
       "baseline_lines": 804,
       "target": "see ADR-061 ownership map",

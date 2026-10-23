@@ -51,6 +51,7 @@ from abicheck.model.change_catalog.registry import (
     ChangeKindRegistry,
     Verdict,
 )
+from abicheck.policy.gate_contribution import gate_contribution_for_change
 from abicheck.policy.severity import (
     SEVERITY_PRESETS,
     IssueCategory,
@@ -59,7 +60,6 @@ from abicheck.policy.severity import (
     classify_change,
     compute_exit_code,
     compute_gate_decision,
-    gate_contribution_for_change,
 )
 from abicheck.serialization import snapshot_to_json
 

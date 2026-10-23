@@ -343,7 +343,7 @@ def _contract_properties(
     props["compatibilityEvaluationStatus"] = status.value
     decision = getattr(change, "compatibility_decision", None)
     props["compatibilityDecision"] = getattr(decision, "value", None)
-    from abicheck.policy.severity import gate_contribution_for_change
+    from abicheck.policy.gate_contribution import gate_contribution_for_change
 
     props["gateContribution"] = gate_contribution_for_change(
         change,

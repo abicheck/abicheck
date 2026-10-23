@@ -17,6 +17,7 @@ lives in ``tests/test_report_gating_consistency_examples.py``.
 
 from __future__ import annotations
 
+import json
 from collections.abc import Callable
 from pathlib import Path
 
@@ -159,3 +160,48 @@ def test_out_of_contract_breaking_group_renders_zero_everywhere(
     assert f"**Gate contribution:** {count} finding(s)" not in markdown
     assert "**Review:** 0 gating finding(s) in 0 gating group(s)" in digest
     assert "(0 gating," in digest
+
+
+_ACTION = _FIXTURES / "action"
+
+
+@pytest.mark.parametrize(
+    ("preset", "exit_code", "gating"),
+    [("default", 4, 1), ("strict", 4, 1), ("info-only", 0, 0)],
+)
+def test_cli_markdown_and_digest_gating_follow_the_preset(
+    tmp_path: Path, preset: str, exit_code: int, gating: int
+) -> None:
+    # Public CLI route of the same class: on base, `info-only` printed
+    # "1 gating finding(s) in 1 gating group(s)" under "Gate: PASS (exit 0)".
+    from click.testing import CliRunner
+
+    from abicheck.cli import main
+
+    md, js, review = (tmp_path / n for n in ("r.md", "r.json", "d.md"))
+    res = CliRunner().invoke(
+        main,
+        [
+            "compare",
+            str(_ACTION / "action_test_v1.json"),
+            str(_ACTION / "action_test_v2.json"),
+            "--severity-preset",
+            preset,
+            "-o",
+            f"markdown={md}",
+            "-o",
+            f"json={js}",
+            "-o",
+            f"review={review}",
+        ],
+    )
+    assert res.exit_code == exit_code, res.output
+    document = json.loads(js.read_text())
+    assert sum(g["gating_findings"] for g in document["review_groups"]) == gating
+    assert document["result_counts"]["gating"] == gating
+    groups = len(document["review_groups"])
+    assert f"; {gating} gating finding(s)." in md.read_text()
+    assert (
+        f"**Review:** {gating} gating finding(s) in {gating} gating group(s); "
+        f"{groups} retained group(s) total" in review.read_text()
+    )

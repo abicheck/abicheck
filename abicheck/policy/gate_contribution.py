@@ -2,10 +2,10 @@
 # SPDX-License-Identifier: Apache-2.0
 """ADR-049 D1's per-finding gate contribution from already-resolved inputs.
 
-The one rule a report counts "gating" by. :func:`~abicheck.policy.severity.
-gate_contribution_for_change` resolves a finding's verdict/category and
-defers here; a report projection that already holds both (a
-:class:`~abicheck.report.finding.ReportFinding`) calls this directly, so the
+The one rule a report counts "gating" by. :func:`gate_contribution_for_change`
+resolves a finding's verdict/category and applies it; a report projection
+that already holds both (a :class:`~abicheck.report.finding.ReportFinding`)
+calls :func:`resolved_gate_contribution` directly, so the
 JSON ``gate_contribution`` field and every Markdown/digest/PR-comment gating
 total come from the same function (SVS field report: a review group of
 contract-excluded breaks rendered "6 gating finding(s)" over JSON
@@ -14,16 +14,59 @@ contract-excluded breaks rendered "6 gating finding(s)" over JSON
 
 from __future__ import annotations
 
+from datetime import date
+
+from ..model.change_catalog.kinds import HasKind
 from ..model.contract_finding_relevance import is_evaluated
 from ..model.evidence_status import is_cross_source_resolved
 from .severity import (
     _CATEGORY_EXIT_CODES,
     IssueCategory,
+    KindSets,
     SeverityConfig,
     SeverityLevel,
     Verdict,
+    classify_effective_change,
+    effective_verdict_for_change,
     legacy_exit_code,
 )
+
+
+def gate_contribution_for_change(
+    change: HasKind,
+    config: SeverityConfig | None,
+    *,
+    policy: str | None = None,
+    kind_sets: KindSets | None = None,
+    policy_file: object | None = None,
+    today: date | None = None,
+) -> int:
+    """What one finding contributes to the process exit code (ADR-049 D1).
+
+    Resolves only the input *config*'s scheme reads -- the effective verdict
+    for the legacy scheme, the issue category for the severity scheme -- and
+    applies :func:`resolved_gate_contribution`'s rule. An excluded finding
+    returns before either is resolved.
+    """
+    if not is_evaluated(change) or is_cross_source_resolved(change):
+        return 0
+    if config is None:
+        verdict = effective_verdict_for_change(
+            change,
+            policy=policy,
+            kind_sets=kind_sets,
+            policy_file=policy_file,
+            today=today,
+        )
+        return _contribution(None, verdict, None)
+    category = classify_effective_change(
+        change,
+        policy=policy,
+        kind_sets=kind_sets,
+        policy_file=policy_file,
+        today=today,
+    )
+    return _contribution(config, None, category)
 
 
 def resolved_gate_contribution(
@@ -54,6 +97,15 @@ def resolved_gate_contribution(
     """
     if not is_evaluated(change) or is_cross_source_resolved(change):
         return 0
+    return _contribution(config, verdict, category)
+
+
+def _contribution(
+    config: SeverityConfig | None,
+    verdict: Verdict | None,
+    category: IssueCategory | None,
+) -> int:
+    """The scheme half of the rule, for a finding already known to be gate-eligible."""
     if config is None:
         return 0 if verdict is None else legacy_exit_code(verdict)
     if category is None or config.level_for(category) != SeverityLevel.ERROR:

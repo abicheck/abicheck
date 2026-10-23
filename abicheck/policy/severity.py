@@ -589,45 +589,6 @@ def compute_exit_code(
     return worst
 
 
-def gate_contribution_for_change(
-    change: HasKind,
-    config: SeverityConfig | None,
-    *,
-    policy: str | None = None,
-    kind_sets: KindSets | None = None,
-    policy_file: object | None = None,
-    today: date | None = None,
-) -> int:
-    """What one finding contributes to the process exit code (ADR-049 D1).
-
-    Resolves only the input *config*'s scheme reads -- the effective verdict
-    for the legacy scheme, the issue category for the severity scheme -- and
-    defers to :func:`~abicheck.policy.gate_contribution.
-    resolved_gate_contribution`, which owns the rule.
-    """
-    from .gate_contribution import resolved_gate_contribution
-
-    if not is_evaluated(change) or is_cross_source_resolved(change):
-        return 0
-    if config is None:
-        verdict = effective_verdict_for_change(
-            change,
-            policy=policy,
-            kind_sets=kind_sets,
-            policy_file=policy_file,
-            today=today,
-        )
-        return resolved_gate_contribution(change, None, verdict=verdict)
-    category = classify_effective_change(
-        change,
-        policy=policy,
-        kind_sets=kind_sets,
-        policy_file=policy_file,
-        today=today,
-    )
-    return resolved_gate_contribution(change, config, category=category)
-
-
 @dataclass(frozen=True)
 class CategorizedChanges:
     """Changes partitioned into the issue categories.
