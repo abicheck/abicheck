@@ -201,7 +201,7 @@
     },
     {
       "path": "abicheck/buildsource/source_diff.py",
-      "baseline_lines": 1113,
+      "baseline_lines": 1066,
       "target": "extract/build-or-source",
       "rule": "no_growth",
       "disposition": "migrate",
