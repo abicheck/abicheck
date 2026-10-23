@@ -21,10 +21,10 @@ Split out of :mod:`abicheck.cli_compare_helpers` (2026-09-11, ai-readiness
 `file-size` gate) for the usual reason this package exists -- that module
 sits at its ``architecture/debt.yaml`` ``no_growth`` baseline (2000 lines),
 so a new, cohesive slice belongs in its own file rather than pushing that
-one further over the hard cap. ``run_compare`` (and its own
+one further over the hard cap. ``run_compare`` (and the Click-facing
+``compare_preflight``/``compare_result`` modules that now hold its
 ``_resolve_evaluation_config``/``_attach_use_case_impact``/
-``_report_compare_result`` helpers, which stay in
-:mod:`abicheck.cli_compare_helpers`) import these functions back rather than
+``_report_compare_result`` helpers) import these functions back rather than
 being moved themselves: two of those three lazily import genuinely
 unclassified legacy modules (``compatibility_evaluation_resolver.py``,
 ``impact/``), which a real *migrated* ``frontends`` package file may not do

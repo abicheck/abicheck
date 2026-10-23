@@ -35,7 +35,7 @@ rather than importing them from the parent module -- every other
 way, and there is no existing cross-test-module import to follow instead.
 
 Finding 3 (PR #767 follow-up, P2 review ``discussion_r3787839902``): Finding
-1's fix above was CLI-only (``cli_compare_helpers._report_compare_result``);
+1's fix above was CLI-only (``frontends/cli/compare_result.py (_report_compare_result)``);
 a direct ``service.run_compare_request()``/``CompareRequest`` caller -- the
 typed Python API / MCP ``abi_compare`` entry point, which never routes
 through that CLI helper -- still read ``requested_depth=None``/
@@ -245,7 +245,7 @@ class TestRequestedDepthPropagation:
 
 class TestRequestedDepthPropagationSharedPipeline:
     """PR #767 follow-up (P2 review, ``discussion_r3787839902``): the CLI-only
-    fix above (``cli_compare_helpers._report_compare_result``) left the
+    fix above (``frontends/cli/compare_result.py (_report_compare_result)``) left the
     shared ``workflows.compare.execute.classify_compare_pair`` -- what
     ``service.run_compare_request()`` (the typed Python API / MCP
     ``abi_compare`` entry point) actually runs -- never populating either

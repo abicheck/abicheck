@@ -176,6 +176,10 @@ module = [
     "abicheck.frontends.cli.commands.compare",
     "abicheck.frontends.cli.commands.dump",
     "abicheck.frontends.cli.runtime",
+    # Split out of cli_compare_helpers (same Click-decorator surface, same
+    # Any-returning resolver calls; see that module's own history).
+    "abicheck.frontends.cli.compare_preflight",
+    "abicheck.frontends.cli.compare_result",
 ]
 disallow_untyped_decorators = false
 disable_error_code = ["no-any-return", "misc"]

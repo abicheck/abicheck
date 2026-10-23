@@ -68,7 +68,7 @@ EVIDENCE_DEPTH_VALUES = frozenset({"binary", "headers", "build", "source"})
 def validate_evidence_depth(field_name: str, value: str) -> None:
     """Reject a depth spelling outside EVIDENCE_DEPTH_VALUES (G30 P0.3).
 
-    ``cli_compare_helpers._report_compare_result`` is the first real caller
+    ``frontends/cli/compare_result.py (_report_compare_result)`` is the first real caller
     to populate ``requested_depth`` (P0.4 round 9, from the CLI's own
     Click-validated ``--depth`` string, which is already restricted to this
     exact set — see ``cli_params.DepthParam``), so a typo'd value reaching
