@@ -324,6 +324,8 @@ _SNAPSHOT_SKIP_FIELDS = frozenset(
         "_func_by_mangled",
         "_var_by_mangled",
         "_type_by_name",
+        # Runtime-only L2 ids a depth projection kept; never persisted.
+        "header_declaration_ids",
         # Owned by encode_surface_graph() below, which unconditionally
         # replaces the key with the graph codec's own to_dict()
         # (Codex review, PR #962).
@@ -509,6 +511,7 @@ def _snapshot_to_dict(snap: AbiSnapshot, encode: Any) -> dict[str, Any]:
     d.pop("live_preprocessor_clang_bin", None)  # runtime-only, as above
     d.pop("load_notices", None)  # runtime-only, as above
     d.pop("static_archive", None)  # runtime-only, as above (ADR-086)
+    d.pop("header_declaration_ids", None)  # runtime-only, depth projection
     # If ``from_headers`` was only *inferred* (a legacy snapshot loaded without
     # the explicit key), do not persist it as explicit provenance: drop the key
     # so a reload re-runs the same inference and re-marks it inferred, rather

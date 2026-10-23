@@ -138,6 +138,7 @@ from ..compare.edge_query import export_table_covered
 from ..evidence_depth import DEPTH_RANK
 from ..model import ScopeOrigin, Visibility
 from ..model.export_index import build_raw_export_index, default_versioned_names
+from ..model.graph_identity import header_declaration_ids
 from ..model.surface_facts import (
     headers_discarded_surface_facts,
     is_export_confirmed_absent,
@@ -650,6 +651,12 @@ def project_snapshot_to_depth(
         # projection) keeps it: that pack's explicit L5 "not collected" row
         # already stops the fallback. Checked after the pack is projected,
         # since below `build` the pack itself is dropped.
+        # The graph's L2 declaration nodes are not L5 evidence, though: keep
+        # their ids (no edges) as the runtime-only `header_declaration_ids`,
+        # so a header-depth detector that asks "is this template still
+        # declared" (`compare/template_instance_absence.py`) keeps its input.
+        if not deep:  # below `headers` the declarations are gone too
+            out.header_declaration_ids = header_declaration_ids(out)
         out.surface_graph = None
     return out
 
