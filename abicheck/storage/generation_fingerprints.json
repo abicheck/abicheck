@@ -5,12 +5,12 @@
       "abicheck/ctf_metadata.py": "42d3f588c6c4567c2a9d43a3ef5b886a753c37dd5357a4199d81d7ffc60d2109",
       "abicheck/dumper.py": "927ae0341825a7683ffc52a7e5d29c97116d26a2788e5ba96aea0d5dde79e8b8",
       "abicheck/dwarf_advanced.py": "91cfc7f410a37e7d7ba3ec922ff2944b81253fde3dcfdb806be032087822b339",
-      "abicheck/dwarf_metadata.py": "9b9c938fcfdee9e498ef007023c040d914cc8fbc4e6971ef06768463ff69002e",
+      "abicheck/dwarf_metadata.py": "2973de51a3d75c63a5364cc0381e9d020ada5e1a1a54bd78b20458ee07581e20",
       "abicheck/dwarf_presence.py": "7e73580ec7a02fdf24e3815cb89e42aa6fe00e46e8cda6b7fe9d547f06ac3f06",
-      "abicheck/dwarf_snapshot.py": "539a87bff99a7fae53dab2e4cbbb05a362cfc8eb40461d1ae6862e484f13643c",
+      "abicheck/dwarf_snapshot.py": "1ecb4940b848bac40dd7a112f060197a365658e23d70602b73701fa53a54550c",
       "abicheck/dwarf_snapshot_datasources.py": "e337f8be3a8ae16350c0639d0be10670d4d5d1197108659fa210fcbbf8a5bdde",
       "abicheck/dwarf_unified.py": "9ecb70b59bb26674ac98ba14ad1211b4103e3a78426a91ed7901e59f1a7d9cdf",
-      "abicheck/dwarf_utils.py": "d236971e77d092bbdc578c5f36380e6383a4d9a19716127adf32b28065f24a83",
+      "abicheck/dwarf_utils.py": "a74c943e25b9a7d60b7e97c6aa5dd3147680b9820229164d3cd7116d7c29f258",
       "abicheck/elf_metadata.py": "43f4f804a24e2a0d9a4dca59772ecbfe1a6e70cd6c4d05c9f22efb469b2ab92f",
       "abicheck/extract/__init__.py": "011ec37fad96ea2035983eaaedeba0976940a570900f85db8c03bb7369af742a",
       "abicheck/extract/ar_archive.py": "6fdab7ed7390a20f087f9407eaa3988c0f8c658400bc0ea8c7e193271923956d",
@@ -157,9 +157,9 @@
       "abicheck/symvers_metadata.py": "372737765cd132e6e87ed891dd465d2958e04debbef774e45212ceb3036871cb",
       "abicheck/type_metadata.py": "9997189de8dac522fd1db8be5ae491d811139503f83abaaded89038eb4aa9cdf"
     },
-    "fingerprint": "af867c14a3203711afb2773c64bd53ad0b769b184e2154c0f445416f7b9a0169",
-    "generation": 12,
-    "reason": "castxml header-AST cache key and entry format moved to the parse store (Phase 6 slice 2) and best-effort cache cleanup; extracted facts for the same input are unchanged, so no generation bump"
+    "fingerprint": "0d6a183f69a3d303198ba4a2bf8967f9de65c16fe1f1f33e93ec79da1761f4f9",
+    "generation": 13,
+    "reason": "bumped to 13 for a semantic change"
   },
   "resolver": {
     "files": {

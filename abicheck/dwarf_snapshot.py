@@ -39,7 +39,7 @@ from elftools.elf.elffile import ELFFile
 from .dwarf_snapshot_datasources import show_data_sources as show_data_sources
 from .dwarf_utils import (
     add_bit_offsets as _add_bit_offsets,
-    array_type_spelling,
+    array_type_info,
     attr_bool as _attr_bool,
     attr_int as _attr_int,
     attr_str as _attr_str,
@@ -52,7 +52,6 @@ from .dwarf_utils import (
     resolve_die_ref as _resolve_ref,
     resolve_type_die as _resolve_type_die,
     unwrap_cv_typedef as _unwrap_cv_typedef,
-    vector_byte_size,
 )
 from .elf_symbol_filter import is_abi_relevant_elf_symbol
 from .extract import dwarf_vtable_completeness as _dvc
@@ -1666,14 +1665,7 @@ class _DwarfSnapshotBuilder:
             return (name or inner_info[0], inner_info[1])
 
         if tag == "DW_TAG_array_type":
-            is_vector = "DW_AT_GNU_vector" in die.attributes
-            inner_info = self._resolve_inner_info(die, CU, depth)
-            inner = inner_info[0] if inner_info is not None else None
-            if is_vector:
-                size = vector_byte_size(die, inner_info[1] if inner_info else None) or 0
-            else:
-                size = _attr_int(die, "DW_AT_byte_size")
-            return (array_type_spelling(inner, size, is_vector), size)
+            return array_type_info(die, self._resolve_inner_info(die, CU, depth))
 
         if tag == "DW_TAG_subroutine_type":
             return ("fn(...)", _attr_int(die, "DW_AT_byte_size"))

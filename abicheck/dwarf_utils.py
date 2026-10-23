@@ -148,6 +148,17 @@ def array_type_spelling(element: str | None, size: int, is_vector: bool) -> str:
     return f"{element}[]"
 
 
+def array_type_info(die: Any, inner: tuple[str, int] | None) -> tuple[str, int]:
+    """Name and byte size of a DW_TAG_array_type from its element's (name, size)."""
+    is_vector = "DW_AT_GNU_vector" in die.attributes
+    element_name = inner[0] if inner is not None else None
+    if is_vector:
+        size = vector_byte_size(die, inner[1] if inner is not None else None) or 0
+    else:
+        size = attr_int(die, "DW_AT_byte_size")
+    return (array_type_spelling(element_name, size, is_vector), size)
+
+
 def resolve_die_ref(die: Any, attr_name: str, CU: Any) -> Any:
     """Resolve a DW_AT_type (or similar) reference to the target DIE.
 
