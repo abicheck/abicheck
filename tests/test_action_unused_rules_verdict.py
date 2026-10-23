@@ -153,3 +153,23 @@ def test_audit_only_unused_rules_axis(tmp_path: Path, flag: int) -> None:
     else:
         assert outputs["verdict"] != "RULES_UNUSED", outputs
         assert outputs["_exit"] == 0, outputs
+
+
+@pytest.mark.parametrize(
+    "hostile",
+    ["1", "$(touch PWNED)", "1; touch PWNED", True, 1.5, 2, -1, None, [1], {"x": 1}],
+)
+def test_a_malformed_axis_value_never_gates_and_never_executes(
+    tmp_path: Path, hostile: object
+) -> None:
+    """A report is data a PR-controlled build can shape: only an integer 0/1
+    is an answer. Anything else reads as "cannot tell", is never mapped to
+    RULES_UNUSED, and is never evaluated by the shell."""
+    code, report = _real_report(
+        tmp_path, unused="block", additions="allow", add=False, no_baseline=True
+    )
+    report["exit_axes"]["unused_rules"] = hostile
+    outputs = _action_outputs(tmp_path, 1, report, no_baseline=True)
+    assert outputs["verdict"] != "RULES_UNUSED", outputs
+    assert not list(tmp_path.rglob("PWNED"))
+    assert not (Path.cwd() / "PWNED").exists()

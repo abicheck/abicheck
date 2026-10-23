@@ -305,8 +305,7 @@ Goals → Non-goals](../contribute/goals.md#non-goals) for the full reasoning.
 One bounded question is answered for an ELF static archive: `compare
 --no-baseline libfoo.a -H include/` audits declared-vs-defined symbols, using
 the archive's own symbol index as its export table (see
-[Single-build audit](../integration/scenarios/single-build-audit.md#a-static-archive-as-the-operand)
-and [ADR-086](../contribute/adr/086-static-archive-no-baseline-export-audit.md)).
+[Single-build audit](../integration/scenarios/single-build-audit.md#a-static-archive-as-the-operand)).
 
 Handing a `.a`/`.lib` to `dump` or a two-sided `compare` produces a **clear,
 actionable error** rather than a misleading "unknown format" message or a

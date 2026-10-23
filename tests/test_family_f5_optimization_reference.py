@@ -161,6 +161,7 @@ COVERAGE: dict[str, str] = {
     "abicheck.dumper_ast_config_cpp20::memory_cache::_SHADOW_MEMO": "UNCOVERED: as dumper_ast_config_cpp20._SCAN_MEMO",
     "abicheck.dumper_ast_config_cpp20::header_scan::_find_cpp20_requirements": H,
     "abicheck.extract.header_scan_memo::memory_cache::memoize_header_scan.decorate->MemoryCache": "UNCOVERED: the factory itself; each decorated use is its own header_scan site",
+    "abicheck.extract.quoted_include_expansion::memory_cache::_QUOTED_INCLUDES_MEMO": "UNCOVERED: memo of quoted-#include expansion for header-only surface reconciliation; no reference cell reaches it. Its equivalence (memoized expansion == fresh brute-force expansion) is pinned by tests/test_quoted_include_expansion_memo.py",
     "abicheck.elf_metadata::memory_cache::_PARSE_MEMO": B,
     "abicheck.policy.reclassify::memory_cache::_KIND_BUCKETS": "UNCOVERED: reached only when a policy carries two or more reclassify rules",
     "abicheck.policy.type_spelling::memory_cache::_strip_ptr_memo": R,

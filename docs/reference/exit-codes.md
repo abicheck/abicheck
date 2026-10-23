@@ -176,7 +176,7 @@ from argument count: `compare NEW` (one operand, no flag) and
 errors, exit `64`. A directory of libraries, a package archive, or a
 multi-artifact stored package is audited per member instead — see
 [`compare --no-baseline DIR`](#compare-no-baseline-dir-n-library-audit) below.
-`NEW` may be an ELF static archive (`libfoo.a`, ADR-086); an archive with no
+`NEW` may be an ELF static archive (`libfoo.a`); an archive with no
 symbol index, a thin archive, non-ELF members, or no `-H` header is a usage
 error, exit `64`.
 

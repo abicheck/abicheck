@@ -1,9 +1,9 @@
 --- a/abicheck/workflows/service_requests.py
 +++ b/abicheck/workflows/service_requests.py
-@@ -125,7 +125,7 @@
+@@ -118,7 +118,7 @@ class CompareRequest:
      policy: str = "strict_abi"
      policy_file_path: Path | None = None
-     suppress: Path | None = None
+     suppress: Path | tuple[Path, ...] | None = None
 -    scope_public: bool = True
 +    scope_public: bool = False
      force_public_symbols: frozenset[str] | None = None

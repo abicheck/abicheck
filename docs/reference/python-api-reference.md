@@ -19,7 +19,7 @@ A fully-specified comparison request — the single input to ``run_compare``.
 | `has_sources` | `bool` | `False` |
 | `policy` | `str` | `'strict_abi'` |
 | `policy_file_path` | `Path \| None` | `None` |
-| `suppress` | `Path \| None` | `None` |
+| `suppress` | `Path \| tuple[Path, ...] \| None` | `None` |
 | `scope_public` | `bool` | `True` |
 | `force_public_symbols` | `frozenset[str] \| None` | `None` |
 | `public_surface_allowlist` | `frozenset[str] \| None` | `None` |
@@ -347,7 +347,7 @@ Load suppression list and policy file from paths.
 
 | Parameter | Type | Default |
 |---|---|---|
-| `suppress` | `Path \| None` | *(required)* |
+| `suppress` | `SuppressPaths \| None` | *(required)* |
 | `policy` | `str` | `'strict_abi'` |
 | `policy_file_path` | `Path \| None` | `None` |
 | *(keyword-only below)* | | |
@@ -435,7 +435,7 @@ Compare two ABI inputs and return the classified diff result.
 | `lang` | `str` | `'c++'` |
 | `lang_explicit` | `bool` | `False` |
 | `frontend` | `str` | `'auto'` |
-| `suppress` | `Path \| None` | `None` |
+| `suppress` | `Path \| tuple[Path, ...] \| None` | `None` |
 | `policy` | `str` | `'strict_abi'` |
 | `policy_file_path` | `Path \| None` | `None` |
 | `old_pdb_path` | `Path \| None` | `None` |

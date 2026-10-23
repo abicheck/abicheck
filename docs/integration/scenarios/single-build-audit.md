@@ -166,8 +166,7 @@ steps:
 
 ### A static archive as the operand
 
-`compare --no-baseline` also accepts an ELF static archive
-([ADR-086](../../contribute/adr/086-static-archive-no-baseline-export-audit.md)),
+`compare --no-baseline` also accepts an ELF static archive,
 for products that ship `libfoo.a` (for example lp64/ilp64 variants) beside or
 instead of a shared library:
 
