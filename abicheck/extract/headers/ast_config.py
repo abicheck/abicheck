@@ -16,6 +16,7 @@ and tests import ``abicheck.dumper._build_clang_header_command``).
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 import re
 from collections.abc import Sequence
@@ -27,6 +28,7 @@ from ..._compiler_options import (
 )
 from ...dumper_ast_config_cpp20 import _preprocessed_header_content
 from ...header_utils import drop_include_tokens_duplicating_paths
+from ...storage.tu_parse_store import content_key, digest_file
 from ..cache_header_scan import iter_cache_header_files
 from ..castxml_compiler_emulation import (
     castxml_parser_arguments,
@@ -98,6 +100,26 @@ def _cache_key(
     frontend_context: str = "host",
     invocation_tool: tuple[str, ...] = (),
 ) -> str:
+    if backend == "castxml":
+        return _castxml_store_key(
+            headers,
+            extra_includes,
+            compiler,
+            gcc_path=gcc_path,
+            gcc_prefix=gcc_prefix,
+            gcc_options=gcc_options,
+            gcc_option_tokens=gcc_option_tokens,
+            sysroot=sysroot,
+            nostdinc=nostdinc,
+            lang=lang,
+            system_includes=system_includes,
+            extra_hash_dirs=extra_hash_dirs,
+            frontend_identity=frontend_identity,
+            compiler_identity=compiler_identity,
+            force_cpp=force_cpp,
+            force_cpp20=force_cpp20,
+            invocation_tool=invocation_tool,
+        )
     h = hashlib.sha256()
     h.update(f"backend={backend}".encode())
     schema_name = _CACHE_SCHEMA_VERSION_NAMES.get(backend)
@@ -214,6 +236,91 @@ def _cache_key(
     if backend == "clang":
         h.update(f"output_code={clang_ast_output_fingerprint()}".encode())
     return h.hexdigest()
+
+
+def _content_digest(path: Path) -> str:
+    """Content digest of a file, or of every header-like file under a directory.
+
+    A missing path digests to a fixed marker, so an absent root and an empty
+    directory cannot share a key with a present one that happens to hash alike.
+    """
+    if path.is_file():
+        return digest_file(path)
+    if path.is_dir():
+        h = hashlib.sha256()
+        for child in iter_cache_header_files(path):
+            h.update(str(child).encode())
+            h.update(digest_file(child).encode())
+        return h.hexdigest()
+    return "missing"
+
+
+def _castxml_store_key(
+    headers: list[Path],
+    extra_includes: list[Path],
+    compiler: str,
+    *,
+    gcc_path: str | None,
+    gcc_prefix: str | None,
+    gcc_options: str | None,
+    gcc_option_tokens: tuple[str, ...],
+    sysroot: Path | None,
+    nostdinc: bool,
+    lang: str | None,
+    system_includes: tuple[str, ...],
+    extra_hash_dirs: tuple[Path, ...],
+    frontend_identity: str,
+    compiler_identity: str,
+    force_cpp: bool | None,
+    force_cpp20: bool,
+    invocation_tool: tuple[str, ...],
+) -> str:
+    """The castxml entry key: a content-addressed parse-store key (Phase 6).
+
+    The inputs are the ones the old mtime key folded, with two changes: every
+    header and include root is keyed by its content digest rather than its
+    mtime, and the whole key is one :func:`~..storage.tu_parse_store.content_key`
+    over ordered parts. ``frontend_context`` is not folded: castxml only ever runs
+    in the host context, so the value was constant.
+    """
+    parts = [
+        f"castxml_cache_schema={_CASTXML_CACHE_SCHEMA_VERSION}",
+        f"frontend_identity={frontend_identity}",
+        f"compiler_identity={compiler_identity}",
+        f"compiler={compiler}",
+        f"gcc_path={gcc_path or ''}",
+        f"gcc_prefix={gcc_prefix or ''}",
+        f"gcc_options={gcc_options or ''}",
+        f"gcc_option_tokens={json.dumps(list(gcc_option_tokens))}",
+        f"sysroot={sysroot or ''}",
+        f"nostdinc={nostdinc}",
+        f"lang={lang or ''}",
+        f"system_includes={json.dumps(list(system_includes))}",
+        f"force_cpp={force_cpp}",
+        f"force_cpp20={force_cpp20}",
+    ]
+    for header in sorted(str(p.resolve()) for p in headers):
+        parts.append(f"header:{header}:{_content_digest(Path(header))}")
+    for root in sorted(str(p) for p in (*extra_includes, *extra_hash_dirs)):
+        parts.append(f"root:{root}:{_content_digest(Path(root))}")
+    if invocation_tool:
+        parts.append(
+            "invocation="
+            + _invocation_digest(
+                "castxml",
+                invocation_tool,
+                headers,
+                extra_includes,
+                sysroot=sysroot,
+                nostdinc=nostdinc,
+                gcc_options=gcc_options,
+                gcc_option_tokens=gcc_option_tokens,
+                force_cpp=bool(force_cpp),
+                force_cpp20=force_cpp20,
+                system_includes=system_includes,
+            )
+        )
+    return content_key(parts)
 
 
 def clang_aggregate_text(headers: Sequence[Path]) -> str:

@@ -44,14 +44,13 @@ from xml.etree.ElementTree import Element, tostring
 
 from ....dumper_ast_config_cpp20 import _detect_cpp20_headers
 from ....errors import SnapshotError, UnsupportedCastxmlVersionError
-from ....storage.atomic_file import atomic_write as _atomic_write
-from ....storage.cache_integrity import record_digest
+from ....storage.ast_cache_location import AST_DISK_CACHE, ast_cache_store
+from ....storage.castxml_xml import parse_castxml_text
 from ....storage.header_ast_cache import (
-    _cache_path,
     ast_acquisition_active,
-    read_cached_castxml as _read_castxml_cache,
     run_ast_acquisition,
 )
+from ....storage.tu_parse_store import TuParseStore
 from ...castxml_header_compat import write_castxml_aggregate
 from ...path_aliases import absolutize_include_roots
 from ..ast_config import (
@@ -140,7 +139,8 @@ def _resolve_gated_castxml_bin(castxml_bin: str | None) -> str:
 
 
 def _write_castxml_cache(
-    cached: Path,
+    store: TuParseStore,
+    key: str,
     out_xml: Path,
     *,
     castxml_bin: str,
@@ -148,13 +148,13 @@ def _write_castxml_cache(
     frontend_identity: str,
     compiler_identity: str,
 ) -> None:
-    """Persist a fresh castxml XML dump, unless the toolchain moved underneath us.
+    """Publish a fresh castxml XML dump under *key*, unless the toolchain moved underneath us.
 
     The cache key encodes the frontend/compiler identities observed *before* the
     run; if either changed while castxml was executing, the produced XML no
     longer describes that key, so the write is skipped rather than poisoning the
-    cache. A cache write that fails on I/O is a warning, never an error — the
-    dump itself already succeeded.
+    cache. The store's publish is best-effort, so an I/O failure never fails the
+    dump, which already succeeded.
     """
     if (
         _tool_identity(castxml_bin) != frontend_identity
@@ -165,10 +165,29 @@ def _write_castxml_cache(
         )
         return
     try:
-        _atomic_write(cached, out_xml.read_bytes())
-        record_digest(cached)  # so the first read is already verified
-    except OSError as exc:
-        log.warning("Could not write castxml AST cache %s: %s", cached, exc)
+        text = out_xml.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError) as exc:
+        log.warning("Could not read CastXML XML for the AST cache: %s", exc)
+        return
+    store.publish(key, text, ())
+
+
+def _read_castxml_cache(store: TuParseStore, key: str) -> Element | None:
+    """The parsed castxml tree stored under *key*, or ``None`` on a miss.
+
+    A payload the parser rejects is a miss, never an error: the caller re-runs
+    castxml, and the fresh publish replaces the unusable entry.
+    """
+    payload = store.lookup(key)
+    if payload is None:
+        return None
+    try:
+        root = parse_castxml_text(payload)
+    except Exception:
+        AST_DISK_CACHE.record(hit=False)
+        return None
+    AST_DISK_CACHE.record(hit=True)
+    return root
 
 
 def castxml_dump(
@@ -247,7 +266,7 @@ def castxml_dump(
     key = _make_key()
     if _expected_acquisition_key is not None and key != _expected_acquisition_key:
         raise SnapshotError("header inputs changed before CastXML acquisition started")
-    cached = _cache_path(key)
+    store = ast_cache_store(key, "castxml")
     if not _coordinated and ast_acquisition_active():
         # Same ordering rule (and reason) as the clang backend above; waiters
         # also get the producer's `(resolved_compiler, force_cpp)` selection.
@@ -281,14 +300,13 @@ def castxml_dump(
             _selected_meta_out.append(selected_meta)
         return root
 
-    if cached.exists():
+    check_deadline()
+    _cached_root = _read_castxml_cache(store, key)
+    if _cached_root is not None:
         check_deadline()
-        _cached_root = _read_castxml_cache(cached)
-        if _cached_root is not None:
-            check_deadline()
-            if _selected_meta_out is not None:
-                _selected_meta_out.append((resolved_compiler, force_cpp))
-            return _cached_root
+        if _selected_meta_out is not None:
+            _selected_meta_out.append((resolved_compiler, force_cpp))
+        return _cached_root
 
     with tempfile.NamedTemporaryFile(suffix=".xml", delete=False) as tmp:
         out_xml = Path(tmp.name)
@@ -356,7 +374,8 @@ def castxml_dump(
                     "evidence; discarding the unstable result"
                 )
             _write_castxml_cache(
-                cached,
+                store,
+                key,
                 out_xml,
                 castxml_bin=castxml_bin,
                 cc_bin=cc_bin,
