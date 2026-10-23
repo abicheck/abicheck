@@ -2,7 +2,7 @@
 # function-pointer / dispatch tables whose contract is append-only tail growth
 # (issue #1709).
 #
-# Level Zero (`ze_*_dditable_t`, `zet_*`, `zes_*`, `zer_*`, `zel_*`, plus the
+# Level Zero (`ze_*_dditable_t`, `zes_dditable_driver_t`, `zet_*`, `zes_*`, `zer_*`, `zel_*`, plus the
 # top-level aggregates `ze_dditable_t`/`zes_dditable_t`; DWARF names each by its
 # struct tag, so `_ze_device_dditable_t` matches too), the Vulkan
 # loader/layer dispatch tables (`VkLayerDispatchTable`,
@@ -19,6 +19,10 @@
 # What this profile does, for matching type names ONLY:
 #   - type_field_added / type_field_added_compatible  -> ignore
 #   - type_size_changed                               -> ignore
+#   - type_field_offset_changed, ONLY when compare recorded that the shift is
+#     exactly the size growth of earlier members embedded by value whose types
+#     also match (the top-level aggregates `_ze_dditable_t`/`_zes_dditable_t`
+#     hold every sub-table by value; issue #1759)        -> ignore
 #
 # What stays BREAKING (not listed, so strict_abi still decides):
 #   - removing a member ........... type_field_removed
@@ -26,9 +30,10 @@
 #   - retyping a member ........... type_field_type_changed
 #   - alignment change ............ type_alignment_changed
 #   - any type whose name does not match the patterns below.
-#   - member offsets shifted inside the top-level aggregates (`_ze_dditable_t`,
-#     `_zes_dditable_t`) because an embedded-by-value sub-table grew: still
-#     type_field_offset_changed (see docs/contribute/known-gaps.md).
+#   - an aggregate offset shift with any other cause (a reorder, insertion,
+#     removal or retype before it, a padding change, or growth of an embedded
+#     member whose type does not match): still type_field_offset_changed.
+#     The grown sub-table's own reorder/removal/retype is reported on it.
 #
 # A size shrink always comes with type_field_removed (or an offset/type change
 # of an existing member), so ignoring type_size_changed for these names never
@@ -44,7 +49,7 @@ base_policy: strict_abi
 reclassify:
   - id: append-only-dispatch-table-member-added
     kind: type_field_added_compatible
-    type_pattern: &dispatch_tables "_?(ze|zet|zes|zer|zel)(_[A-Za-z0-9_]*)?_dditable_t|VkLayer(Instance)?DispatchTable|_?cl_icd_dispatch"
+    type_pattern: &dispatch_tables "_?(ze|zet|zes|zer|zel)(_[A-Za-z0-9_]*)?_dditable(_[A-Za-z0-9]+)?_t|VkLayer(Instance)?DispatchTable|_?cl_icd_dispatch"
     to: ignore
     label: append-only dispatch table
     reason: "member appended at the tail of an append-only dispatch table; existing members keep their offsets"
@@ -60,3 +65,10 @@ reclassify:
     to: ignore
     label: append-only dispatch table
     reason: "size growth of an append-only dispatch table from trailing members; removals, reorders and retypes are still reported separately"
+  - id: append-only-dispatch-table-aggregate-shift
+    kind: type_field_offset_changed
+    type_pattern: *dispatch_tables
+    shifted_by_type_pattern: *dispatch_tables
+    to: ignore
+    label: append-only dispatch table
+    reason: "member shifted only because earlier embedded append-only dispatch tables grew; reorders, removals and retypes are still reported"

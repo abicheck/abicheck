@@ -71,10 +71,6 @@ Each entry's status line says what is still open. A PARTIAL entry's write-up als
 
 **Status (2026-10-23): OPEN, narrowed.** A header-only inline removal is reported by the header tier and by the L4 replay. `compare.finding_dedup._drop_source_replay_inline_duplicates` keeps the header-tier finding and drops the replay copy, matched by bare function name, one for one. Two limits remain. (a) A header-tier symbol that does not demangle (no `demangled_symbol`, no demangler result) keeps its replay twin visible; this is conservative, not a silent loss. (b) Two overloads of one name pair by count, not by signature, because the replay `Change` carries no parameter list, so which of the two overloads is the twin is not recorded. Both replay copies are still counted in the ledger. Closing (b) needs the replay finding to carry its signature hash.
 
-#### `append_only_dispatch_tables` does not forgive offset shifts inside a dispatch-table aggregate (2026-10-23)
-
-**Status (2026-10-23): OPEN.** Level Zero's `_ze_dditable_t`/`_zes_dditable_t` embed each sub-table by value, so when a sub-table grows by a tail append every later sub-table moves; on a real Level Zero pair that is 41 `type_field_offset_changed` findings, still `BREAKING` under the profile. A `type_pattern` rule cannot express "shifted only because an earlier embedded matching table grew append-only" without also hiding a genuine reorder, so the fix needs a cause-aware check (every member before the shifted one is unchanged or is itself an append-only-grown matching table), not a wider selector.
-
 ### Clang projection (ADR-063 Phase 4 prerequisites)
 
 The entries below come from the Phase 4 measurement spike

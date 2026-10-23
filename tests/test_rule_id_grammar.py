@@ -180,6 +180,7 @@ _KEY_CLASSES: dict[str, str] = {
     "cause_namespace": "selector",
     "source_location": "selector",
     "binding": "selector",
+    "shifted_by_type_pattern": "selector",
     "finding_id": "selector",
     "reachability": "selector",
     "allow_public_break": "gate",
