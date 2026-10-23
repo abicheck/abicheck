@@ -101,7 +101,7 @@ current emitter, which is unchanged.
 
 #### A header-only default template-argument change reads `NO_CHANGE` at L2 on castxml (2026-10-21)
 
-**Status (2026-10-22): PARTIAL — clang closed, castxml open.** ADR-085 is accepted. Clang records the default (schema v62) and reports a header-only default change as `API_BREAK` (`template_param_default_changed`). A castxml run still reads `NO_CHANGE` on this shape, because castxml emits no record for an uninstantiated class template. The castxml coverage gap (ADR-085 D3, header-text scan) is not implemented yet.
+**Status (2026-10-23): PARTIAL — clang closed; castxml reports the gap, and its verdict stays `NO_CHANGE` by decision.** ADR-085 is accepted. Clang records the default (schema v62) and reports a header-only default change as `API_BREAK` (`template_param_default_changed`). A castxml run still reads `NO_CHANGE` on this shape, because castxml emits no record for an uninstantiated class template. The castxml header-text scan (ADR-085 D3, schema v63) reports the gap: the run reads `partial` with `template-parameter defaults (castxml cannot record them)` named. The verdict question is decided (ADR-085 Remaining item 1, 2026-10-23): the castxml verdict stays `NO_CHANGE`, because weaker evidence narrows the conclusion and is reported, and does not fabricate a finding.
 
 `false-clean` — A default template argument changed on a header-only template reads `NO_CHANGE` on castxml (clang reports `API_BREAK`), and the source-level consequence appears only as an L4 risk on castxml. [Full write-up](known-gaps/a-header-only-default-template-argument-change-reads-no-change-at-l2.md)
 
