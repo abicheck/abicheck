@@ -131,7 +131,9 @@ def _library_state_rows(
         proven_removed = {m.member for m in record.proven_removed_members}
         proven_added = {m.member for m in record.proven_added_members}
         for member in record.expected_members:
-            if member.old_present and member.new_present:
+            # Exactly one side present: a member absent on both sides was never
+            # produced at all, which the comparison-scope section reports.
+            if member.old_present == member.new_present:
                 continue
             rows.append(_row_for(member, proven_removed, proven_added))
     rows.extend(
@@ -221,6 +223,11 @@ def stored_surface_changes(
     return release_surface_changes(sections, record)
 
 
+def _md_cell(value: object) -> str:
+    """One Markdown table cell's text: no pipe, no line break."""
+    return " ".join(str(value).replace("|", "\\|").split())
+
+
 def render_release_surface_lines(block: Mapping[str, object]) -> list[str]:
     """The Markdown ``## Surface changes`` section of a release document.
 
@@ -251,7 +258,8 @@ def render_release_surface_lines(block: Mapping[str, object]) -> list[str]:
         lines += ["**Libraries present on one side only**", ""]
         lines += ["| Library | State | Reason |", "|---|---|---|"]
         lines += [
-            f"| `{row['library']}` | {row['state']} | {row.get('reason') or ''} |"
+            f"| `{_md_cell(row['library']).replace('`', chr(39))}` "
+            f"| {_md_cell(row['state'])} | {_md_cell(row.get('reason') or '')} |"
             for row in states
         ]
         lines.append("")

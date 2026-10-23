@@ -143,6 +143,9 @@ class ReleaseReport:
     compatibility: str | None
     disposition_audit: dict[str, object]
     junit_error_libraries: list[dict[str, object]]
+    #: The live ``surface_changes`` block, folded once here so both the
+    #: JSON document and the Markdown projection read the same value.
+    surface_changes: dict[str, object]
 
 
 @dataclass(frozen=True)
@@ -420,6 +423,7 @@ def _build_live(evaluation: ReleaseEvaluation, show_only: str | None) -> Release
             library_results, ev.matrix_result, ev.severity_config, ev.bundle_result
         ),
         junit_error_libraries=_junit_error_libraries(library_results),
+        surface_changes=live_surface_changes(library_results, terms.record),
     )
 
 
@@ -624,7 +628,7 @@ def release_json_document(report: ReleaseReport) -> ReportDocument:
     # ADR-067 C-S2: unconditional -- raw-versus-effective is never dropped.
     summary["disposition_audit"] = report.disposition_audit
     # Schema 2.2: the same per-member surface block the stored operand carries.
-    summary["surface_changes"] = live_surface_changes(ev.library_results, terms.record)
+    summary["surface_changes"] = report.surface_changes
     return ReportDocument.from_mapping(summary)
 
 

@@ -263,3 +263,25 @@ def test_stored_and_live_folds_agree_over_the_same_member_results() -> None:
         ("libcore.so", "additions", "core_new"),
         ("libcore.so", "removals", "core_gone"),
     }
+
+
+def test_markdown_state_table_escapes_pipes_and_line_breaks() -> None:
+    """A library name or reason with a pipe or a newline must not change the
+    table's columns or rows (CodeRabbit review on #1781)."""
+    from abicheck.report.release_surface_changes import render_release_surface_lines
+
+    block = {
+        "total": 0,
+        "additions": [],
+        "removals": [],
+        "modifications": [],
+        "members": [],
+        "library_states": [
+            {"library": "lib`x|y.so", "state": "unproven", "reason": "a | b\nc"}
+        ],
+    }
+    rows = [
+        line for line in render_release_surface_lines(block) if line.startswith("| `")
+    ]
+
+    assert rows == ["| `lib'x\\|y.so` | unproven | a \\| b c |"]
