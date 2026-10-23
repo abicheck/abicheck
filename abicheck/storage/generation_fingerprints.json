@@ -208,7 +208,7 @@
       "abicheck/buildsource/source_extractors/clang_projection.py": "7d731ca0551bec84372d4c57bdb31af143220e99bbf04e7417cc34a9f851fc6f",
       "abicheck/buildsource/source_extractors/clang_public_roots.py": "c1752f2798886c97716c2361c2fe772defa2b6170104b8486871ecbc7beb3ba3",
       "abicheck/buildsource/source_extractors/clang_source_edges.py": "c9b8c3daacd02c4913b486a6ac658b435744243ed4433f14792588f67ef800e9",
-      "abicheck/buildsource/source_extractors/compile_invocation.py": "c44a0acfee80fdbba5337d097972e71dd4005231fc485cf257c57e1579496849",
+      "abicheck/buildsource/source_extractors/compile_invocation.py": "4432dfc7f700ed846c03d6aa4720d2f03eddd8a25be932e80289f0c28e4f918d",
       "abicheck/buildsource/source_extractors/launcher_env.py": "a84547b10b80a8d02c07c5f2a1949fdf661afc0abeaf7dae486e3a1d7762b470",
       "abicheck/buildsource/source_extractors/launcher_env_path.py": "9f746dd8170e1c6d2ff7289998e0e8738fe0bdc4c35edb06c39db2a5ebd5c16d",
       "abicheck/buildsource/source_graph.py": "28cb2b485ffcf276e9c751b99261cc2d3f4ab2ad440612ddb3111bc307372652",
@@ -224,8 +224,8 @@
       "abicheck/buildsource/type_graph.py": "a028a875057cd0cbf2930a431bfa1e579f7b770e0d124cbcfe715724e89d12e5",
       "abicheck/buildsource/type_graph_index.py": "7375f7baec7ceb3dd4a52a489b89e5a3571750dffca7490d1c5870301d55202d"
     },
-    "fingerprint": "962af44b41664c73a1b1d6beedc1e74c8e39ae14659ca4cc112181ea952a868b",
-    "generation": 5,
-    "reason": "bumped to 5 for a semantic change"
+    "fingerprint": "fc0c68133b707c8f89fbfd2a62dde41d3e97a84f83eb5e4d58b4ed26818f451e",
+    "generation": 6,
+    "reason": "L4 public-root probe now reads CL-mode -I and /external:I operands"
   }
 }

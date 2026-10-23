@@ -368,6 +368,12 @@ _F9 = (
     "concurrency.per_thread_state_in_inherited_context",
 )
 _F10 = ("concurrency.abandoned_child_outlives_failed_owner",)
+# Heterogeneous mechanisms with no shared harness (see the OTHER family).
+_OTHER = (
+    # A CL-mode `-I` or `/external:I` include operand never reached the
+    # public-root probe, so its public headers were classified non-public.
+    "extraction.msvc_include_operand_spelling_not_probed",
+)
 _F11 = ("measurement.forked_tree_rss_overstates_memory",)
 
 #: id -> reason it belongs to no shared family.
@@ -411,6 +417,7 @@ for _key, _ids in (
     ("F9", _F9),
     ("F10", _F10),
     ("F11", _F11),
+    ("OTHER", _OTHER),
     ("OTHER", tuple(OTHER_REASONS)),
 ):
     for _id in _ids:

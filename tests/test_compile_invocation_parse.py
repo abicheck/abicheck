@@ -88,9 +88,11 @@ def test_msvc_include_search_is_recognized_only_in_cl_mode(
         (["g++", "-iquotex", "-idirafterx"], ("x", "x")),
         # A trailing option with no operand contributes nothing and ends the scan.
         (["g++", "-iquote", "q1", "-idirafter"], ("q1",)),
-        # MSVC /I (separate and joined) is carried. A bare -I is not: the argv
-        # scanner carries only /I, the documented gap in replayed_include_dirs.
-        (["cl.exe", "/I", "s", "/Ij", "-Ik"], ("s", "j")),
+        # MSVC /I, -I and /external:I (separate and joined) are probed in CL
+        # mode. The rendered replay still carries only /I (see the carried
+        # tests above), so -I and /external:I reach the probe alone.
+        (["cl.exe", "/I", "s", "/Ij", "-Ik"], ("s", "j", "k")),
+        (["cl.exe", "/external:I", "e", "/external:Ix"], ("e", "x")),
     ],
 )
 def test_replayed_include_dirs_carries_each_spelling_once_in_order(
