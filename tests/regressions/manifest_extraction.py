@@ -40,7 +40,7 @@ EXTRACTION_BUG_CLASSES: tuple[BugClass, ...] = (
             "yields no compile unit and one link unit; a single-source entry "
             "yields exactly the unit it always yielded."
         ),
-        fixed_by=(),
+        fixed_by=(1755,),
         seed_tests=("tests/test_compile_db_operand_routing.py",),
         axes={"sources": ("single", "multi", "link_only")},
     ),
