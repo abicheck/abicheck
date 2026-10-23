@@ -32,6 +32,19 @@ __all__ = ["EXTRACTION_BUG_CLASSES"]
 
 EXTRACTION_BUG_CLASSES: tuple[BugClass, ...] = (
     BugClass(
+        id="extraction.compile_entry_collapsed_to_first_source",
+        invariant=(
+            "A compile-database entry yields one compile unit per source "
+            "operand it names, each with the language the driver applies at "
+            "that operand's own -x position; a link with no source operand "
+            "yields no compile unit and one link unit; a single-source entry "
+            "yields exactly the unit it always yielded."
+        ),
+        fixed_by=(),
+        seed_tests=("tests/test_compile_db_operand_routing.py",),
+        axes={"sources": ("single", "multi", "link_only")},
+    ),
+    BugClass(
         id="extraction.function_local_declaration_leaks_into_surface",
         invariant=(
             "A declaration local to a function body (a local typedef, "
