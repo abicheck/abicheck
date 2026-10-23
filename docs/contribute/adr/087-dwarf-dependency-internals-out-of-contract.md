@@ -3,7 +3,7 @@
 **Date:** 2026-10-23
 **Status:** Accepted (2026-10-23) — implemented for binary + DWARF compares without headers.
 
-Governed by: [ADR-061](061-responsibility-package-architecture.md) (owner of each stage), [ADR-062](062-package-generation-and-semantics.md) (extractor generation), [ADR-065](065-comparison-scope-selection-and-completeness.md) (absent is not removed), [ADR-067](067-change-intent-acknowledgment-and-disposition-audit.md) (record before disposing).
+Governed by: [ADR-061](061-responsibility-package-architecture.md) (owner of each stage), [ADR-062](062-project-snapshot-storage-v2.md) (extractor generation), [ADR-065](065-comparison-scope-selection-and-completeness.md) (absent is not removed), [ADR-067](067-change-intent-acknowledgment-and-disposition-audit.md) (record before disposing).
 
 ## Context
 
