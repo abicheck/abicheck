@@ -337,6 +337,11 @@ ANALYSIS_1_BUG_CLASSES: tuple[BugClass, ...] = (
             # qualified-name pairing across C and C++ (nested namespace included).
             "tests/test_typedef_dedup.py",
             "tests/test_typedef_source_replay_e2e.py",
+            # A namespace-scope constexpr value change is one observation at two
+            # tiers: CONSTANT_CHANGED (header) and CONSTEXPR_VALUE_CHANGED (L4
+            # replay). Same name-level, one-for-one pairing as the inline pair.
+            "tests/test_constexpr_constant_dedup.py",
+            "tests/test_constexpr_constant_source_replay_e2e.py",
             "tests/unit/compare/test_dedup_key.py",
             "tests/test_diff_namespaces.py",
             # workflows/cross_source_hygiene.py's own per-side OLD/NEW
