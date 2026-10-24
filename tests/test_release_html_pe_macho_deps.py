@@ -152,12 +152,15 @@ def _oracle_edges(doc: dict) -> set[tuple[str, str, str]]:
 
 
 @pytest.mark.parametrize(
-    "release_factory",
-    [_pe_release, _macho_release],
+    ("release_factory", "required_edge"),
+    [
+        (_pe_release, ("app.dll", "foo.dll", "old+new")),
+        (_macho_release, ("libtop.dylib", "libmid.dylib", "old+new")),
+    ],
     ids=["pe", "macho"],
 )
 def test_html_edges_equal_the_release_json_edges(
-    tmp_path: Path, release_factory
+    tmp_path: Path, release_factory, required_edge
 ) -> None:
     old_dir, new_dir = _write(tmp_path, release_factory())
     out_json, out_html = tmp_path / "r.json", tmp_path / "r.html"
@@ -175,6 +178,9 @@ def test_html_edges_equal_the_release_json_edges(
 
     expected = _oracle_edges(doc)
     assert expected, "fixture must record dependency edges"
+    # A fixed edge the fixture states by construction, so a fact dropped from
+    # the JSON cannot shrink the expected set and the drawn set together.
+    assert required_edge in expected
     drawn = {(r[0], r[1], r[3]) for r in parsed.rows["dependency-edges"]}
     assert drawn == expected
     titles = {
@@ -207,6 +213,7 @@ def test_states_the_release_json_records_are_disclosed_in_the_html(
 
     # Recorded per side, with the container format named.
     assert by_name["app.dll"]["dependencies"]["old"]["format"] == "pe"
+    assert by_name["app.dll"]["dependencies"]["new"]["format"] == "pe"
     assert by_name["libtop.dylib"]["dependencies"]["old"]["format"] == "macho"
     # A legacy side names the fact family it did not capture; it is not
     # silently complete.

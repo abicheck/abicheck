@@ -74,7 +74,7 @@ class MachoMetadata:
     # a weak load never reads as a change to the hard dependency set. Tri-state:
     # None = not captured (legacy snapshot written before this field existed);
     # [] = parsed Mach-O carrying no weak load commands.
-    weak_dependent_libs: list[str] | None = None
+    weak_dependent_libs: list[str] | None = field(default=None, kw_only=True)
 
     # ADR-063 Phase 5: Fact[...] sibling of weak_dependent_libs -- the same
     # schema-version-driven case-(b) shape as rpaths_fact below.
