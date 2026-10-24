@@ -87,7 +87,7 @@ def _compare(tmp: Path, *extra: str) -> dict:
     ]  # fmt: skip
     result = CliRunner().invoke(main, args, catch_exceptions=False)
     assert result.exit_code in (0, 4), result.output
-    return json.loads(report.read_text())
+    return json.loads(report.read_text(encoding="utf-8"))
 
 
 def _census(report: dict) -> dict[str, int]:

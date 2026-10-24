@@ -48,7 +48,9 @@ from abicheck.storage.versioning import (
 
 CORPUS_ROOT = Path(__file__).parent / "fixtures" / "generations"
 SOURCES = CORPUS_ROOT / "corpus"
-MANIFEST: dict[str, Any] = json.loads((CORPUS_ROOT / "manifest.json").read_text())
+MANIFEST: dict[str, Any] = json.loads(
+    (CORPUS_ROOT / "manifest.json").read_text(encoding="utf-8")
+)
 FROZEN = sorted(int(g) for g in MANIFEST["entries"])
 _GATING = {"BREAKING", "API_BREAK"}
 
@@ -270,7 +272,7 @@ def test_frozen_generation_compares_clean_against_fresh_dump(
     generation: int, fresh_dump: Path
 ) -> None:
     old = snapshot_from_dict(_frozen_document(generation))
-    new = snapshot_from_dict(json.loads(fresh_dump.read_text()))
+    new = snapshot_from_dict(json.loads(fresh_dump.read_text(encoding="utf-8")))
     result = compare(old, new)
     assert _gating(result) == []
     assert any(GENERATION_DRIFT_NOTICE_MARKER in w for w in result.coverage_warnings)
@@ -284,7 +286,7 @@ def test_every_respelling_against_fresh_dump_is_a_declared_migration(
     """The detector for the next ``AutoType``: a fresh dump that spells any
     entity differently from an older generation, without a
     ``SPELLING_MIGRATIONS`` rule mapping one to the other, fails here."""
-    fresh = json.loads(fresh_dump.read_text())
+    fresh = json.loads(fresh_dump.read_text(encoding="utf-8"))
     assert (
         _undeclared_respellings(_frozen_document(generation), fresh, generation) == []
     )

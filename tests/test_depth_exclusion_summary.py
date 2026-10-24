@@ -156,8 +156,8 @@ def test_binary_depth_on_header_snapshots_matches_binary_only(tmp_path: Path) ->
     exit_oracle = _cli(
         "compare", str(snaps["b1"]), str(snaps["b2"]), "-o", f"json={oracle_json}"
     )
-    depth = json.loads(depth_json.read_text())
-    oracle = json.loads(oracle_json.read_text())
+    depth = json.loads(depth_json.read_text(encoding="utf-8"))
+    oracle = json.loads(oracle_json.read_text(encoding="utf-8"))
 
     excluded = [d for d in depth["detectors"] if d.get("excluded_by_depth")]
     assert len(excluded) > 1
@@ -185,7 +185,7 @@ def test_binary_depth_on_header_snapshots_matches_binary_only(tmp_path: Path) ->
             detector_disablement_warning(d["name"], d["coverage_gap"])
             in depth["coverage_warnings"]
         )
-    md = depth_md.read_text()
+    md = depth_md.read_text(encoding="utf-8")
     assert md.count(DEPTH_EXCLUSION_PREFIX) == 1
     assert "not available at depth" not in md
 
