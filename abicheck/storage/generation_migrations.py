@@ -185,6 +185,9 @@ SPELLING_MIGRATIONS: Mapping[int, GenerationSpellingChange] = {
         "a stored 'T[N-1]' cannot be told apart from a genuine 'T[N-1]', so no rewrite "
         "is sound and a baseline holding those spellings is re-dumped"
     ),
+    16: GenerationSpellingChange(
+        "DWARF declarations record their declaring file when it is a header, and a dependency-internal presence finding no public declaration reaches is out of contract; no stored type spelling changed, only which declarations carry a location and which findings gate"
+    ),
 }
 
 #: Reasons that say nothing about what was audited; the bump gate refuses them.
