@@ -503,8 +503,8 @@ Do not re-attempt token-claiming. A header's export tokens cannot tell whether i
 
 #### Five SVS-scan report findings not addressed by the change-vs-inventory/depth/exclusion fixes (2026-09-17)
 
-**Status (re-verified 2026-10-09 at `456989f`): OPEN.** unverified: none of the five SVS report items was checked in code (header accounting does not lower status, the not-applicable detector vocabulary, the 294 KB Markdown default, partial telemetry, the identical-binary channel). Nothing marks any of them fixed.  
-`hygiene` — Unverified: five SVS report items (header accounting, not-applicable detector vocabulary, 294 KB Markdown default, partial telemetry, identical-binary channel) are not marked fixed. [Full write-up](known-gaps/five-svs-scan-report-findings-not-addressed-by-the-change-vs.md)
+**Status (re-verified 2026-10-09 at `456989f`): OPEN.** unverified: four of the five SVS report items were not checked in code (header accounting does not lower status, the not-applicable detector vocabulary, partial telemetry, the identical-binary channel). The 294 KB Markdown default is fixed (2026-10-23): see that item below.  
+`hygiene` — Unverified: four SVS report items (header accounting, not-applicable detector vocabulary, partial telemetry, identical-binary channel) are not marked fixed; the 294 KB Markdown default is fixed. [Full write-up](known-gaps/five-svs-scan-report-findings-not-addressed-by-the-change-vs.md)
 
 #### A snapshot is not byte-reproducible across processes
 

@@ -11,7 +11,7 @@ generated: false
 
 Index: [Known gaps](../known-gaps.md)
 
-**Status (re-verified 2026-10-09 at `456989f`): OPEN.** unverified: none of the five SVS report items was checked in code (header accounting does not lower status, the not-applicable detector vocabulary, the 294 KB Markdown default, partial telemetry, the identical-binary channel). Nothing marks any of them fixed.
+**Status (re-verified 2026-10-09 at `456989f`): OPEN.** unverified: four of the five SVS report items were not checked in code (header accounting does not lower status, the not-applicable detector vocabulary, partial telemetry, the identical-binary channel). The 294 KB Markdown default is fixed (2026-10-23): see that item below.
 
 
 An external reproduction of a real PR scan (SVS, Linux ELF C++, Clang 20,
@@ -51,7 +51,13 @@ reported them is reproducible, so none of them needs re-discovery.
   applicability rule must be derived from the artifact's own container/
   language facts rather than from a hand-maintained per-detector list that
   will drift.
-- **The default Markdown report is ~294 KB for a no-change result.**
+- **Fixed (2026-10-23): the default Markdown report was ~294 KB for a
+  no-change result.** Every non-gating list is now bounded by one shared
+  budget (`report/markdown_budget.py`): kinds roll up past 25 findings,
+  notes show 10 rows, names are clipped and the demangle pass clips the
+  demangled half while keeping the mangled spelling
+  (`tests/unit/report/test_markdown_report_budget.py`). Original report:
+  the default Markdown report was ~294 KB for a no-change result.
   Mostly 32 persistent findings expanded with full C++ mangled names, plus
   suppressed findings. The default CI/PR report should summarize persistent
   hygiene by family, collapse or truncate mangled symbols, cap example
