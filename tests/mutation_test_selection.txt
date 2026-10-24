@@ -783,6 +783,7 @@ tests/test_template_instance_absence_shapes.py
 tests/test_template_param_defaults.py
 tests/test_tier_accuracy_gate.py
 tests/test_tu_merge.py
+tests/test_type_indirection.py
 tests/test_type_symbol_disambiguation.py
 tests/test_typed_api_gate_options.py
 tests/test_typed_dump_request.py
