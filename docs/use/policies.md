@@ -149,7 +149,7 @@ guidance, not invented heuristics.
 
 Some C APIs version a struct of function pointers by appending members at the
 end and never touching existing ones: Level Zero's `ze_*_dditable_t`
-(and `zet_`/`zes_`/`zer_`/`zel_` siblings, the top-level `ze_dditable_t`/`zes_dditable_t`,
+(and `zet_`/`zes_`/`zer_`/`zel_` siblings, the top-level `ze_dditable_t`/`zes_dditable_t`, `zes_dditable_driver_t`,
 and the `_ze_…_dditable_t` struct-tag spellings DWARF reports), the Vulkan loader's
 `VkLayerDispatchTable`/`VkLayerInstanceDispatchTable`, and the OpenCL ICD
 `cl_icd_dispatch`. Under `strict_abi`, a new entry reads as
@@ -171,7 +171,8 @@ abicheck compare libVkLayer_foo.so.old libVkLayer_foo.so --policy append_only_di
 | Reorder, or insert anywhere but the tail | `BREAKING` (`type_field_offset_changed`) |
 | Change an existing member's type | `BREAKING` (`type_field_type_changed`) |
 | Any edit to a type whose name does not match | unchanged (`strict_abi`) |
-| A member of an aggregate (`ze_dditable_t`) shifted because an embedded sub-table grew | `BREAKING` (`type_field_offset_changed`) — [known gap](../contribute/known-gaps.md) |
+| A member of an aggregate (`ze_dditable_t`) shifted only because earlier embedded matching sub-tables grew | `COMPATIBLE` (the sub-tables' own edits are judged by the rows above) |
+| An aggregate shift with any other cause (reorder, insertion, padding, growth of a non-matching embedded type) | `BREAKING` (`type_field_offset_changed`) |
 
 The findings are reclassified, not suppressed: each one stays in the report,
 the JSON `change.reclassified_by` names the rule's label and reason, and
@@ -239,7 +240,10 @@ option: the same selector grammar suppression rules use — `symbol`,
 `entity_namespace`, `cause_namespace`, `source_location`, `binding`
 (conjunctive-only, same caveat as `suppress`'s `binding:` — see
 [Suppressions](suppressions.md)), `expires` — plus a required `to`, applied
-instead of deleting the finding:
+instead of deleting the finding. `reclassify` also accepts the conjunctive-only
+`shifted_by_type_pattern`: it matches a `type_field_offset_changed` only when the
+compare recorded the shift as exactly the size growth of earlier by-value
+members, all of whose types full-match the regex:
 
 ```yaml
 reclassify:

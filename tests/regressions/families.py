@@ -341,6 +341,7 @@ _F4 = (
     "extraction.implicit_language_rule_read_off_one_explicit_key",
     "extraction.language_mode_export_evidence",
     "extraction.ast_wrapper_chain_traversal",
+    "extraction.target_flag_dropped_from_header_parse",
     "guard.proxy_predicate_overshoots_justification",
     "evidence.linker_reserved_export_symbols",
 )

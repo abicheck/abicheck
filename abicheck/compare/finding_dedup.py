@@ -527,6 +527,63 @@ def _drop_source_replay_twins(
     return result
 
 
+#: A typedef removed or retargeted is one observation at two tiers. The header
+#: tier (``compare.typedefs``) emits the L2 kind; the L4 source replay
+#: (``buildsource.source_diff._diff_typedefs``) emits its ``PUBLIC_`` twin.
+_TYPEDEF_REPLAY_TWIN: dict[ChangeKind, ChangeKind] = {
+    ChangeKind.TYPEDEF_REMOVED: ChangeKind.PUBLIC_TYPEDEF_REMOVED,
+    ChangeKind.TYPEDEF_BASE_CHANGED: ChangeKind.PUBLIC_TYPEDEF_TARGET_CHANGED,
+}
+_TYPEDEF_REPLAY_KINDS = frozenset(_TYPEDEF_REPLAY_TWIN.values())
+
+
+def _typedef_header_name(change: Change) -> str:
+    """The qualified name a header-tier typedef finding is about.
+
+    The header tier names the alias by its bare spelling (``old_t``) and keeps
+    the namespace in its entity id; the replay names it by qualified name
+    (``demo::old_t``). Rendering the entity id gives the replay's spelling. A
+    finding with no entity id falls back to its symbol, so it can still pair
+    with a replay finding that spells the same name.
+    """
+    from ..model.semantic_ir_legacy_adapter import render_display_name_or_leaf
+
+    if change.entity_id is None:
+        return change.symbol
+    return render_display_name_or_leaf(change.entity_id)
+
+
+def _drop_source_replay_typedef_duplicates(changes: list[Change]) -> list[Change]:
+    """Drop a source-replay typedef finding the header tier already reports.
+
+    A typedef removed from the headers, or retargeted, is reported by the header
+    tier (``TYPEDEF_REMOVED`` / ``TYPEDEF_BASE_CHANGED``) and by the L4 replay
+    (``PUBLIC_TYPEDEF_REMOVED`` / ``PUBLIC_TYPEDEF_TARGET_CHANGED``). The kinds
+    differ, so the exact and identity keys never see the pair as equal. The
+    header-tier finding is kept: it is the artifact-anchored owner (ADR-028 D3),
+    and it is the copy that the typedef cutover (ADR-063) models.
+
+    Matched one for one on the qualified name, so a second replay finding with
+    no header-tier twin stays visible. The value spellings are not compared: the
+    header tier prints the canonical type and the replay prints the source
+    spelling (``long int`` vs ``long``), so a value check would miss real pairs.
+    Every dropped finding is recorded as ``deduplicated`` by the disposition
+    pipeline, so the raw total still counts it (ADR-067).
+    """
+    header_tier = Counter(
+        (_TYPEDEF_REPLAY_TWIN[c.kind], _typedef_header_name(c))
+        for c in changes
+        if c.kind in _TYPEDEF_REPLAY_TWIN
+    )
+    result: list[Change] = []
+    for c in changes:
+        if c.kind in _TYPEDEF_REPLAY_KINDS and header_tier[(c.kind, c.symbol)] > 0:
+            header_tier[(c.kind, c.symbol)] -= 1
+            continue
+        result.append(c)
+    return result
+
+
 def _drop_source_replay_duplicates(changes: list[Change]) -> list[Change]:
     """Apply :func:`_drop_source_replay_twins` for every pair in
     :data:`_SOURCE_REPLAY_TWINS`."""
@@ -642,6 +699,7 @@ def deduplicate_cross_detector(
 
     changes = _drop_elf_only_duplicates_of_visibility(changes)
     changes = _drop_source_replay_duplicates(changes)
+    changes = _drop_source_replay_typedef_duplicates(changes)
     seen: set[str] = set()
     result: list[Change] = []
     for c in changes:
