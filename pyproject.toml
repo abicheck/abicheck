@@ -278,6 +278,7 @@ markers = [
     "slow: marks tests as slow (hypothesis / performance benchmarks)",
     "golden: golden-output snapshot tests",
     "repo_scan: statically scans the whole repository tree; OS- and coverage-independent, run once by the repo-scan-tests CI job",
+    "model_warning_hygiene: fails the test on an unexpected WARNING log record from abicheck.model.* (tests/_model_warning_hygiene.py allowlist)",
     "host_memory_probe: opts out of tests/conftest.py's autouse pin of process_resources.available_mem_gib (tests of the real probe)",
 ]
 # Global per-test hang safety valve (pytest-timeout), not a perf regression

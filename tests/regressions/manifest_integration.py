@@ -327,6 +327,7 @@ INTEGRATION_BUG_CLASSES: tuple[BugClass, ...] = (
             # oracle plus the headers-subset-of-source metamorphic check and
             # a compiled -fvisibility-inlines-hidden reproduction.
             "tests/test_template_instance_absence_shapes.py",
+            "tests/test_field_shapes.py",
             # The class: every detector's declared projectable inputs vs
             # every rung's clearable facts (pure table, projection behaviour,
             # AST read oracle, registry "disabled" coverage), and the

@@ -1,0 +1,8 @@
+# Field shape: a rule with no `id:` -- the audit must still name it with a
+# portable token (rule-<12 hex>), never a Python repr() of its fields.
+version: 1
+suppressions:
+  - symbol_pattern: ".*legacy_entry.*"
+    change_kind: "func_removed"
+    reason: "legacy_entry retired in v2"
+    expires: "2099-04-01"
