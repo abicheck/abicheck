@@ -34,7 +34,13 @@ the "Adding a new ChangeKind" procedure names those five modules by name.
 
 from __future__ import annotations
 
-from .registry import ChangeEntity, ChangeKindMeta, ChangeOperation, Verdict
+from .registry import (
+    ChangeEntity,
+    ChangeKindMeta,
+    ChangeOperation,
+    ContractSubject,
+    Verdict,
+)
 
 _B = Verdict.BREAKING
 _C = Verdict.COMPATIBLE
@@ -43,8 +49,67 @@ _R = Verdict.COMPATIBLE_WITH_RISK
 _E = ChangeKindMeta
 _ENT = ChangeEntity
 _OP = ChangeOperation
+_CS = ContractSubject
 
 SYMBOLS_ENTRIES_2: list[ChangeKindMeta] = [
+    _E(
+        "param_lost_va_list",
+        _C,
+        impact="A parameter that was previously typed va_list now has a "
+        "fixed type; source recompiled against the new header sees "
+        "a stricter, non-variadic parameter type. This detector "
+        "only checks the declared type flip, not whether the two "
+        "representations agree: since va_list's own layout is "
+        "platform-defined (an opaque struct/array on many ABIs, not "
+        "a plain pointer), an already-linked caller still "
+        "constructing and passing a va_list object has that value "
+        "reinterpreted by the new callee as the fixed type — safe "
+        "only if the caller already happened to pass a value "
+        "compatible with the new fixed type.",
+        description_template="Parameter was va_list, now fixed: {name} param {detail}",
+        entity=_ENT.FUNCTION,
+        contract_subject=_CS.DECLARATION,
+        operation=_OP.MODIFIED,
+    ),
+    _E(
+        "param_pointer_level_changed",
+        _B,
+        impact="A parameter's pointer indirection depth changed (e.g. T* → "
+        "T** or the reverse); the value passed for that argument is "
+        "interpreted differently by callee and caller, so a caller "
+        "compiled against the old signature passes the wrong kind "
+        "of value — silent misinterpretation or a crash.",
+        description_template="Parameter pointer level changed: {name} param {detail} (depth {old} → {new})",
+        entity=_ENT.FUNCTION,
+        contract_subject=_CS.DECLARATION,
+        operation=_OP.MODIFIED,
+    ),
+    _E(
+        "param_renamed",
+        _R,
+        impact="A parameter's name changed. Neither the compiled ABI "
+        "(parameter names aren't part of the mangled signature or "
+        "calling convention) nor C/C++ source compatibility is affected: "
+        "neither language has named arguments. Generated bindings, "
+        "documentation or IDE tooling keyed on the old name may be.",
+        description_template="Parameter renamed: {name} param {detail}: {old} → {new}",
+        entity=_ENT.FUNCTION,
+        contract_subject=_CS.DECLARATION,
+        operation=_OP.MODIFIED,
+    ),
+    _E(
+        "param_restrict_changed",
+        _C,
+        impact="A parameter's restrict qualifier was removed: the callee "
+        "drops an optimization assumption and becomes more conservative, "
+        "which is safe for every caller and leaves the calling convention "
+        "untouched. (Adding restrict tightens the caller's obligation and "
+        "is reported separately as param_restrict_added.)",
+        description_template="Parameter restrict qualifier {detail}: {name} param {old}",
+        entity=_ENT.FUNCTION,
+        contract_subject=_CS.DECLARATION,
+        operation=_OP.MODIFIED,
+    ),
     _E(
         "param_pointee_qualifier_added",
         _R,
@@ -58,6 +123,7 @@ SYMBOLS_ENTRIES_2: list[ChangeKindMeta] = [
         "Whether any consumer does that is not visible from the library.",
         description_template="Parameter pointee qualifier added: {name} param {detail}: {old} → {new}",
         entity=_ENT.FUNCTION,
+        contract_subject=_CS.DECLARATION,
         operation=_OP.MODIFIED,
     ),
     _E(
@@ -73,6 +139,7 @@ SYMBOLS_ENTRIES_2: list[ChangeKindMeta] = [
         "data the caller assumed it would not.",
         description_template="Parameter pointee qualifier changed: {name} param {detail}: {old} → {new}",
         entity=_ENT.FUNCTION,
+        contract_subject=_CS.DECLARATION,
         operation=_OP.MODIFIED,
     ),
     _E(
@@ -87,6 +154,7 @@ SYMBOLS_ENTRIES_2: list[ChangeKindMeta] = [
         "stores the function in a pointer of the old type.",
         description_template="Return pointee qualifier added: {name}: {old} → {new}",
         entity=_ENT.FUNCTION,
+        contract_subject=_CS.DECLARATION,
         operation=_OP.MODIFIED,
     ),
     _E(
@@ -101,6 +169,7 @@ SYMBOLS_ENTRIES_2: list[ChangeKindMeta] = [
         "from the library.",
         description_template="Return pointee qualifier removed: {name}: {old} → {new}",
         entity=_ENT.FUNCTION,
+        contract_subject=_CS.DECLARATION,
         operation=_OP.MODIFIED,
     ),
     _E(
@@ -116,6 +185,7 @@ SYMBOLS_ENTRIES_2: list[ChangeKindMeta] = [
         "(`const char **p = f();`) no longer compiles.",
         description_template="Return pointee qualifier changed: {name}: {old} → {new}",
         entity=_ENT.FUNCTION,
+        contract_subject=_CS.DECLARATION,
         operation=_OP.MODIFIED,
     ),
     _E(
@@ -131,6 +201,7 @@ SYMBOLS_ENTRIES_2: list[ChangeKindMeta] = [
         "not visible from the library.",
         description_template="Overload makes an existing call ambiguous: {detail} — was {old}, new {new}",
         entity=_ENT.FUNCTION,
+        contract_subject=_CS.DECLARATION,
         operation=_OP.ADDED,
     ),
     _E(
@@ -146,6 +217,7 @@ SYMBOLS_ENTRIES_2: list[ChangeKindMeta] = [
         "are safe. Removing `restrict` is reported as param_restrict_changed.",
         description_template="Parameter restrict qualifier added: {name} param {old}",
         entity=_ENT.FUNCTION,
+        contract_subject=_CS.DECLARATION,
         operation=_OP.MODIFIED,
     ),
     _E(
@@ -159,6 +231,7 @@ SYMBOLS_ENTRIES_2: list[ChangeKindMeta] = [
         "reads the wrong layout. Pass an opaque handle or a C-style view "
         "instead.",
         entity=_ENT.FUNCTION,
+        contract_subject=_CS.DECLARATION,
         operation=_OP.MODIFIED,
     ),
     _E(
@@ -174,6 +247,7 @@ SYMBOLS_ENTRIES_2: list[ChangeKindMeta] = [
         "RISK for anyone not on the exact new interpreter.",
         description_template="extension '{name}' dropped its abi3 promise: {old} → {new}",
         entity=_ENT.BUILD,
+        contract_subject=_CS.DECLARATION,
         operation=_OP.MODIFIED,
     ),
     _E(
@@ -191,6 +265,7 @@ SYMBOLS_ENTRIES_2: list[ChangeKindMeta] = [
         "depends on which interpreters the consumer must support.",
         description_template="abi3 extension '{name}' raised its Py_LIMITED_API floor: {old} → {new}",
         entity=_ENT.BUILD,
+        contract_subject=_CS.BUILD_FACT,
         operation=_OP.MODIFIED,
     ),
     _E(
@@ -207,6 +282,7 @@ SYMBOLS_ENTRIES_2: list[ChangeKindMeta] = [
         "Source-level (`API_BREAK`).",
         description_template="Python callable kind changed for {name}: {detail}",
         entity=_ENT.FUNCTION,
+        contract_subject=_CS.DECLARATION,
         operation=_OP.MODIFIED,
     ),
     _E(
@@ -217,6 +293,7 @@ SYMBOLS_ENTRIES_2: list[ChangeKindMeta] = [
         "Additive — existing callers are unaffected.",
         description_template="New Python class in extension API: {name}",
         entity=_ENT.TYPE,
+        contract_subject=_CS.DECLARATION,
         operation=_OP.ADDED,
     ),
     _E(
@@ -228,6 +305,7 @@ SYMBOLS_ENTRIES_2: list[ChangeKindMeta] = [
         "source-level (`API_BREAK`) change invisible to the C-ABI view.",
         description_template="Python class removed from extension API: {name}",
         entity=_ENT.TYPE,
+        contract_subject=_CS.DECLARATION,
         operation=_OP.REMOVED,
     ),
     _E(
@@ -239,6 +317,7 @@ SYMBOLS_ENTRIES_2: list[ChangeKindMeta] = [
         "missing-argument `TypeError`. Source-level (`API_BREAK`).",
         description_template="Python parameter default removed in {name}: {detail}",
         entity=_ENT.FUNCTION,
+        contract_subject=_CS.DECLARATION,
         operation=_OP.MODIFIED,
     ),
     _E(
@@ -249,6 +328,7 @@ SYMBOLS_ENTRIES_2: list[ChangeKindMeta] = [
         "Python-visible API. Additive — existing callers are unaffected.",
         description_template="New Python function in extension API: {name}",
         entity=_ENT.FUNCTION,
+        contract_subject=_CS.DECLARATION,
         operation=_OP.ADDED,
     ),
     _E(
@@ -263,6 +343,7 @@ SYMBOLS_ENTRIES_2: list[ChangeKindMeta] = [
         "see.",
         description_template="Python function removed from extension API: {name}",
         entity=_ENT.FUNCTION,
+        contract_subject=_CS.DECLARATION,
         operation=_OP.REMOVED,
     ),
     _E(
@@ -274,6 +355,7 @@ SYMBOLS_ENTRIES_2: list[ChangeKindMeta] = [
         "unaffected.",
         description_template="New Python method in extension API: {name}",
         entity=_ENT.FUNCTION,
+        contract_subject=_CS.DECLARATION,
         operation=_OP.ADDED,
     ),
     _E(
@@ -285,6 +367,7 @@ SYMBOLS_ENTRIES_2: list[ChangeKindMeta] = [
         "binary are otherwise unchanged. Source-level (`API_BREAK`).",
         description_template="Python method removed from extension API: {name}",
         entity=_ENT.FUNCTION,
+        contract_subject=_CS.DECLARATION,
         operation=_OP.REMOVED,
     ),
     _E(
@@ -299,6 +382,7 @@ SYMBOLS_ENTRIES_2: list[ChangeKindMeta] = [
         "Source-level (`API_BREAK`).",
         description_template="Python overload removed from {name}: {detail}",
         entity=_ENT.FUNCTION,
+        contract_subject=_CS.DECLARATION,
         operation=_OP.REMOVED,
     ),
     _E(
@@ -311,6 +395,7 @@ SYMBOLS_ENTRIES_2: list[ChangeKindMeta] = [
         "parameter would be compatible and is not reported.",
         description_template="Required Python parameter added to {name}: {detail}",
         entity=_ENT.FUNCTION,
+        contract_subject=_CS.DECLARATION,
         operation=_OP.MODIFIED,
     ),
     _E(
@@ -327,6 +412,7 @@ SYMBOLS_ENTRIES_2: list[ChangeKindMeta] = [
         "Source-level (`API_BREAK`).",
         description_template="Python parameter binding changed in {name}: {detail}",
         entity=_ENT.FUNCTION,
+        contract_subject=_CS.DECLARATION,
         operation=_OP.MODIFIED,
     ),
     _E(
@@ -339,6 +425,7 @@ SYMBOLS_ENTRIES_2: list[ChangeKindMeta] = [
         "Source-level (`API_BREAK`).",
         description_template="Python parameter removed from {name}: {detail}",
         entity=_ENT.FUNCTION,
+        contract_subject=_CS.DECLARATION,
         operation=_OP.MODIFIED,  # the function persists (Codex, PR #1284)
     ),
     _E(
@@ -351,6 +438,7 @@ SYMBOLS_ENTRIES_2: list[ChangeKindMeta] = [
         "check misses. Source-level (`API_BREAK`).",
         description_template="Python parameter renamed in {name}: {old} → {new}",
         entity=_ENT.FUNCTION,
+        contract_subject=_CS.DECLARATION,
         operation=_OP.MODIFIED,
     ),
     _E(
@@ -363,6 +451,7 @@ SYMBOLS_ENTRIES_2: list[ChangeKindMeta] = [
         "be affected. A `RISK`.",
         description_template="Python parameter type changed in {name}: {detail} ({old} → {new})",
         entity=_ENT.FUNCTION,
+        contract_subject=_CS.DECLARATION,
         operation=_OP.MODIFIED,
     ),
     _E(
@@ -374,6 +463,7 @@ SYMBOLS_ENTRIES_2: list[ChangeKindMeta] = [
         "type-checker `RISK`, not a hard break.",
         description_template="Python return type changed for {name}: {old} → {new}",
         entity=_ENT.FUNCTION,
+        contract_subject=_CS.DECLARATION,
         operation=_OP.MODIFIED,
     ),
     _E(
@@ -385,6 +475,7 @@ SYMBOLS_ENTRIES_2: list[ChangeKindMeta] = [
         "fail closed rather than disabling Python-level API checks.",
         description_template="Invalid Python API stub for extension module: {detail}",
         entity=_ENT.BUILD,
+        contract_subject=_CS.DECLARATION,
         operation=_OP.MODIFIED,
     ),
     _E(
@@ -402,6 +493,7 @@ SYMBOLS_ENTRIES_2: list[ChangeKindMeta] = [
         "whether it breaks depends on which interpreter the consumer runs.",
         description_template="extension '{name}' changed GIL/free-threaded ABI: {old} → {new}",
         entity=_ENT.BUILD,
+        contract_subject=_CS.DECLARATION,
         operation=_OP.MODIFIED,
     ),
     _E(
@@ -419,6 +511,7 @@ SYMBOLS_ENTRIES_2: list[ChangeKindMeta] = [
         "interpreter, not on the module's own consumers.",
         description_template="abi3 extension '{name}' imports non-stable CPython symbol: {detail}",
         entity=_ENT.BUILD,
+        contract_subject=_CS.DECLARATION,
         operation=_OP.MODIFIED,
     ),
     _E(
@@ -430,6 +523,7 @@ SYMBOLS_ENTRIES_2: list[ChangeKindMeta] = [
         "misinterpretation or a crash.",
         description_template="Return pointer level changed: {name} (depth {old} → {new})",
         entity=_ENT.FUNCTION,
+        contract_subject=_CS.DECLARATION,
         operation=_OP.MODIFIED,
     ),
     _E(
@@ -447,6 +541,7 @@ SYMBOLS_ENTRIES_2: list[ChangeKindMeta] = [
         # two of the three resolve to) -- reasoning and contract in
         # `TestSerializationTagFindingsKeepTheirContributingSource`.
         entity=_ENT.VARIABLE,
+        contract_subject=_CS.DECLARATION,
         entity_from_field="entity_discriminator",
         operation=_OP.MODIFIED,
     ),
@@ -457,6 +552,7 @@ SYMBOLS_ENTRIES_2: list[ChangeKindMeta] = [
         "old binaries reference the old names and will get undefined symbol errors at load time.",
         description_template="Batch symbol rename detected (namespace refactoring): prefix '{name}' added to {detail}",
         entity=_ENT.BINARY,
+        contract_subject=_CS.DECLARATION,
         operation=_OP.MODIFIED,
     ),
     _E(
@@ -465,6 +561,7 @@ SYMBOLS_ENTRIES_2: list[ChangeKindMeta] = [
         impact="ELF symbol size changed; copy relocations or memcpy-based consumers get truncated/oversized data.",
         description_template="Symbol size changed: {name} ({old} → {new} bytes)",
         entity=_ENT.VARIABLE,  # OBJECT/COMMON/TLS only
+        contract_subject=_CS.DECLARATION,
         operation=_OP.MODIFIED,
     ),
     _E(
@@ -475,6 +572,7 @@ SYMBOLS_ENTRIES_2: list[ChangeKindMeta] = [
         "truncate or otherwise mis-copy data at load time.",
         description_template="Symbol size changed: {name} ({old} → {new} bytes)",
         entity=_ENT.VARIABLE,  # OBJECT/COMMON/TLS only
+        contract_subject=_CS.DECLARATION,
         operation=_OP.MODIFIED,
     ),
     _E(
@@ -485,6 +583,7 @@ SYMBOLS_ENTRIES_2: list[ChangeKindMeta] = [
         "or direct data consumers. Override severity via --policy only when the symbol is known private.",
         description_template="Symbol size changed: {name} ({old} → {new} bytes)",
         entity=_ENT.VARIABLE,  # OBJECT/COMMON/TLS only
+        contract_subject=_CS.DECLARATION,
         operation=_OP.MODIFIED,
     ),
     _E(
@@ -497,6 +596,7 @@ SYMBOLS_ENTRIES_2: list[ChangeKindMeta] = [
         "access control isn't enforced at link/load time.",
         description_template="Variable access level narrowed: {name} ({old} → {new})",
         entity=_ENT.VARIABLE,
+        contract_subject=_CS.DECLARATION,
         operation=_OP.MODIFIED,
     ),
     _E(
@@ -507,6 +607,7 @@ SYMBOLS_ENTRIES_2: list[ChangeKindMeta] = [
         "anything that already compiled successfully.",
         description_template="Variable access level widened: {name} ({old} → {new})",
         entity=_ENT.VARIABLE,
+        contract_subject=_CS.DECLARATION,
         operation=_OP.MODIFIED,
     ),
     _E(
@@ -516,6 +617,7 @@ SYMBOLS_ENTRIES_2: list[ChangeKindMeta] = [
         impact="New variable available; existing binaries are unaffected.",
         description_template="New public variable: {name}",
         entity=_ENT.VARIABLE,
+        contract_subject=_CS.DECLARATION,
         operation=_OP.ADDED,
     ),
     _E(
@@ -528,6 +630,7 @@ SYMBOLS_ENTRIES_2: list[ChangeKindMeta] = [
         "change breaks layout assumptions baked into old binaries.",
         description_template="Variable alignment changed: {name} ({old} → {new} bits)",
         entity=_ENT.VARIABLE,
+        contract_subject=_CS.DECLARATION,
         operation=_OP.MODIFIED,
     ),
     _E(
@@ -535,6 +638,7 @@ SYMBOLS_ENTRIES_2: list[ChangeKindMeta] = [
         _B,
         impact="Variable moved to read-only section; old code writing to it gets SIGSEGV.",
         entity=_ENT.VARIABLE,
+        contract_subject=_CS.DECLARATION,
         operation=_OP.MODIFIED,
     ),
     _E(
@@ -551,6 +655,7 @@ SYMBOLS_ENTRIES_2: list[ChangeKindMeta] = [
         "has this turn a previously clean build into a failing one.",
         description_template="Variable marked deprecated: {name} ({detail})",
         entity=_ENT.VARIABLE,
+        contract_subject=_CS.DECLARATION,
         operation=_OP.MODIFIED,
     ),
     _E(
@@ -560,6 +665,7 @@ SYMBOLS_ENTRIES_2: list[ChangeKindMeta] = [
         "warning stops, with no effect on the variable's ABI.",
         description_template="Variable no longer marked deprecated: {name}",
         entity=_ENT.VARIABLE,
+        contract_subject=_CS.DECLARATION,
         operation=_OP.MODIFIED,
     ),
     _E(
@@ -567,6 +673,7 @@ SYMBOLS_ENTRIES_2: list[ChangeKindMeta] = [
         _B,
         impact="Variable no longer const; ODR violations possible if old code inlined the value.",
         entity=_ENT.VARIABLE,
+        contract_subject=_CS.DECLARATION,
         operation=_OP.MODIFIED,
     ),
     _E(
@@ -592,6 +699,7 @@ SYMBOLS_ENTRIES_2: list[ChangeKindMeta] = [
         "clean.",
         description_template="Exported data symbol not declared in any public header removed: {name}",
         entity=_ENT.VARIABLE,
+        contract_subject=_CS.DECLARATION,
         operation=_OP.REMOVED,
     ),
     _E(
@@ -600,6 +708,7 @@ SYMBOLS_ENTRIES_2: list[ChangeKindMeta] = [
         impact="Old binaries reference a global variable that no longer exists; link or load failure.",
         description_template="Public variable removed: {name}",
         entity=_ENT.VARIABLE,
+        contract_subject=_CS.DECLARATION,
         operation=_OP.REMOVED,
     ),
     _E(
@@ -608,6 +717,7 @@ SYMBOLS_ENTRIES_2: list[ChangeKindMeta] = [
         impact="Old binaries read/write the variable with wrong size or layout; data corruption or segfault.",
         description_template="Variable type changed: {name}",
         entity=_ENT.VARIABLE,
+        contract_subject=_CS.DECLARATION,
         operation=_OP.MODIFIED,
     ),
 ]

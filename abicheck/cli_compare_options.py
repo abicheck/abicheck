@@ -255,7 +255,7 @@ def _resolve_depth_for_set_inputs(ctx: click.Context) -> str | None:
     guidance the removed rung errors used to carry (compare libraries
     individually, or pre-dump snapshots with ``dump --sources``) is carried
     by the release's own evidence-contract notice
-    (``cli_compare_release_matrix``), which is where a run that pinned a
+    (``frontends.cli.release_exit``), which is where a run that pinned a
     rung its members could not reach now reports it.
 
     Lives here (not next to its caller in ``cli_resolve.py``) purely because

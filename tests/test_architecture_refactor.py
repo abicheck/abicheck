@@ -16,6 +16,7 @@ from abicheck.change_registry import (
     ChangeKindMeta,
     ChangeKindRegistry,
     ChangeOperation,
+    ContractSubject,
     Verdict,
 )
 from abicheck.checker_policy import (
@@ -33,15 +34,17 @@ from abicheck.checker_policy import (
 
 
 def _entry(*args: object, **kwargs: object) -> ChangeKindMeta:
-    """A ``ChangeKindMeta`` with the two display dimensions filled in.
+    """A ``ChangeKindMeta`` with the mandatory catalog dimensions filled in.
 
     Plan slice 7o made ``entity``/``operation`` mandatory on any entry that
     reaches a registry. Every construction in this module tests something
     *else* (overrides, templates, immutability, pickling), so each supplies
     a neutral pair rather than restating them 30 times; the mandatory-ness
-    itself is asserted in ``tests/test_view_internal_grammar.py``."""
+    itself is asserted in ``tests/test_view_internal_grammar.py`` (and
+    ``contract_subject``'s in ``tests/test_contract_subject_totality.py``)."""
     kwargs.setdefault("entity", ChangeEntity.FUNCTION)
     kwargs.setdefault("operation", ChangeOperation.MODIFIED)
+    kwargs.setdefault("contract_subject", ContractSubject.DECLARATION)
     return ChangeKindMeta(*args, **kwargs)  # type: ignore[arg-type]
 
 

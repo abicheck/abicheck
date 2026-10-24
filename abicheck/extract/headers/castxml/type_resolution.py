@@ -137,9 +137,21 @@ def type_name_uncached(ctx: CastxmlParserContext, id_: str, depth: int = 0) -> s
     if tag == "Typedef":
         return el.get("name", "?")
     if tag == "ArrayType":
+        # castxml's ``max`` is the last valid index, so the element count is
+        # ``max + 1``: ``float a[8]`` has ``max="7"`` and spells ``float[8]``.
         max_ = el.get("max", "")
         base = type_name(ctx, el.get("type", ""), depth + 1)
-        return f"{base}[{max_}]" if max_ else f"{base}[]"
+        if not max_:
+            return f"{base}[]"
+        try:
+            count = int(max_) + 1
+        except ValueError:
+            return f"{base}[{max_}]"
+        return f"{base}[{max(count, 0)}]"
+    if tag == "Unimplemented" and el.get("type_class") == "Vector":
+        # castxml drops a vector's element and lane count; the clang join
+        # (``vector_spellings``) supplies the spelling, or the node stays unresolved.
+        return ctx.vector_spellings.get(id_, "Unimplemented")
     if tag == "AtomicType" or (
         tag == "Unimplemented" and el.get("type_class") == "Atomic"
     ):

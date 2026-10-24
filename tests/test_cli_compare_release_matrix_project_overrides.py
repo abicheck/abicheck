@@ -13,7 +13,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Codex review, round 9: ``cli_compare_release_matrix._collect_matrix_result``
+"""Codex review, round 9: ``workflows.release_compare.collect_matrix_result``
 built its own ``PolicyFile`` by hand (``_load_suppression_and_policy`` plus a
 manual pack fold) instead of calling
 ``pack_application.resolve_bundle_policy_file`` -- the shared resolver its

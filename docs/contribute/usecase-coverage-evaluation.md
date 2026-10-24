@@ -123,6 +123,9 @@ A real invocation is a point in this space:
 | **G25** | planned | Cython API/ABI frontend (`.pxd` + `__pyx_capi__` capsule surface) — see the [SciPy/Scientific-Python Roadmap](scipy-scientific-python-roadmap.md#1-a-first-class-cython-apiabi-frontend). Neither the native C-ABI check (G14) nor the Python-level API check (G23) see a capsule signature change. |
 | **G26** | partial | NumPy C-API compatibility-envelope analysis. `numpy_capi.extract_numpy_capi_surface()` recovers `_ARRAY_API`/`_UFUNC_API` consumption and the `NPY_TARGET_VERSION` build/target facts from binary evidence and cross-checks them against the declared metadata range; the raw `NPY_ABI_VERSION`/`NPY_API_VERSION` hex constants need disassembly to recover (out of scope, same reasoning as G4) — see the [SciPy/Scientific-Python Roadmap](scipy-scientific-python-roadmap.md#2-numpy-c-api-compatibility-envelope-analysis) and the plan's "Out of scope". NumPy's capsule-based C-API is invisible to ordinary symbol-table diffing. |
 | **G27** | planned | Wheel tag / deployment-claim verification across Linux (extends G10 to `GLIBCXX`/`CXXABI`/musllinux), macOS (deployment target), and Windows (UCRT/runtime) — see the [SciPy/Scientific-Python Roadmap](scipy-scientific-python-roadmap.md#3-wheel-tag-and-deployment-claim-verification). |
+| **G46** | partial | Comparison scope and completeness (vision workstream A, ADR-065): which members were selected, missing or retired, and no pass on zero comparisons — see [the vision plan](plans/vision-api-abi-evolution.md). |
+| **G47** | partial | Analysis assurance and evidence adequacy (vision workstream E, ADR-063): the verdict states its evidence and narrows when evidence is missing; false-clean known gaps remain — see [the vision plan](plans/vision-api-abi-evolution.md). |
+| **G48** | partial | Release history under a versioning policy (vision workstream B, ADR-066) — see [the vision plan](plans/vision-api-abi-evolution.md). |
 
 ## Proposed next steps (tracked in the registry)
 
@@ -143,3 +146,6 @@ planned row from drifting away from its plan.
 | High | G25 — Cython API/ABI frontend | [g25](plans/g25-cython-api-abi-frontend.md) |
 | High | G26 — NumPy C-API compatibility envelope | [g26](plans/g26-numpy-capi-envelope.md) |
 | Medium | G27 — wheel tag / deployment-claim verification | [g27](plans/g27-wheel-deployment-verification.md) |
+| High | G46 — comparison scope and completeness | [vision A](plans/vision-api-abi-evolution.md) |
+| High | G47 — analysis assurance and evidence adequacy | [vision E](plans/vision-api-abi-evolution.md) |
+| Medium | G48 — release history and versioning policy | [vision B](plans/vision-api-abi-evolution.md) |

@@ -169,7 +169,10 @@ def classify_resolved_pair(
     from ..buildsource.evidence_report import attach_evidence_metrics
     from ..deadline import check as check_deadline
     from ..policy.depth_evidence_contract import record_depth_evidence_contract_error
-    from ..policy.depth_projection import project_pair_to_depth
+    from ..policy.depth_projection import (
+        header_scope_excluded_by_depth,
+        project_pair_to_depth,
+    )
     from . import abi3_audit
     from .compare_policy import compare_snapshots
     from .pair_evidence import fold_pair_evidence, load_probe_matrix_changes
@@ -177,12 +180,26 @@ def classify_resolved_pair(
     # The operands as the request names them -- every route builds its
     # request from the user's real operands, so nothing overrides these.
     operands = ComparedOperands.from_request(request)
+    if request.require_same_generation:
+        from ..errors import ValidationError
+        from .generation_drift import generation_mismatch_message
+
+        mismatch = generation_mismatch_message(pair.old, pair.new)
+        if mismatch is not None:
+            raise ValidationError(mismatch)
     # A stored-snapshot-only pair may do no extraction work at all, so nothing
     # below would otherwise consult an already-expired `budget_s` (PR #1178).
     check_deadline()
     # ADR-063 Phase 8's depth *ceiling*: narrow what classification may see
     # to the requested rung. The floor is the exit-7 axis recorded below.
     old, new = project_pair_to_depth(pair.old, pair.new, request.depth)
+    # A depth below `headers` that left no header surface to scope against
+    # puts public-header scoping outside the requested scope: classify the
+    # pair as a binary-only comparison would be, rather than reporting a
+    # scope that "failed to resolve" (manual review, partial assurance).
+    scope_public = request.scope_public and not header_scope_excluded_by_depth(
+        (pair.old, pair.new), (old, new), request.depth
+    )
     folded = fold_pair_evidence(
         old,
         new,
@@ -205,7 +222,7 @@ def classify_resolved_pair(
         policy_file=policy.policy_file,
         acknowledgments=policy.acknowledgments.records,
         acknowledgment_policy=policy.acknowledgments.policy,
-        scope_to_public_surface=request.scope_public,
+        scope_to_public_surface=scope_public,
         force_public_symbols=(
             set(request.force_public_symbols) if request.force_public_symbols else None
         ),

@@ -556,7 +556,8 @@
     "ADR-062": {
       "disposition": "partial",
       "surfaces": [
-        "api: abicheck.storage"
+        "api: abicheck.storage",
+        "cli: compare --require-same-generation"
       ],
       "use_cases": [
         "UC-WF-baseline"
@@ -857,6 +858,7 @@
     "ADR-059 action: snapshot-compression",
     "ADR-059 cli: dump --compression",
     "ADR-062 api: abicheck.storage",
+    "ADR-062 cli: compare --require-same-generation",
     "ADR-064 action: severity-preset",
     "ADR-064 report: compare_report.exit",
     "ADR-065 cli: compare --select --select-required --dry-run",

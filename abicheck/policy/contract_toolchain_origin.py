@@ -38,11 +38,13 @@ from collections.abc import Callable, Collection, Sequence
 from dataclasses import replace
 from typing import Any
 
+from ..change_registry import REGISTRY
 from ..contract_relevance_types import (
     NON_ENTITY_RELEVANCE,
     ContractAssurance,
     ContractRelevance,
 )
+from ..model.change_catalog.dimensions import ContractSubject
 from ..model.change_catalog.kinds import ChangeKind
 
 __all__ = [
@@ -59,20 +61,18 @@ TOOLCHAIN_RUNTIME_ORIGIN_REASON = "toolchain_runtime_origin"
 _PUBLIC_ROOT_REASON = "public_root_membership"
 
 #: Kinds whose subject is an edge from this library to another one (an
-#: imported symbol), not a declaration this library makes. Like ``DT_NEEDED``
-#: and required symbol versions, they are ``NOT_APPLICABLE`` to the contract
-#: (``contract_evaluation._NOT_APPLICABLE_KIND_SLUGS`` unions this set): policy
+#: imported symbol, a ``DT_NEEDED`` entry, a required version node, a resolved
+#: provider), not a declaration this library makes: the catalog's
+#: ``contract_subject`` is ``dependency_edge`` (ADR-049 amendment). Like every
+#: non-declaration kind they are ``NOT_APPLICABLE`` to the contract: policy
 #: scores them exactly as before, and they never reach contract coverage. Left
 #: to the header domain, an import read ``UNKNOWN_UNRESOLVED`` and raised exit
 #: 1 on every toolchain drift (the SVS field report).
-DEPENDENCY_EDGE_KINDS: frozenset[ChangeKind] = frozenset(
-    {
-        ChangeKind.IMPORTED_SYMBOL_ADDED,
-        ChangeKind.IMPORTED_SYMBOL_REMOVED,
-    }
+DEPENDENCY_EDGE_KIND_SLUGS: frozenset[str] = REGISTRY.contract_subject_kinds(
+    ContractSubject.DEPENDENCY_EDGE
 )
-DEPENDENCY_EDGE_KIND_SLUGS: frozenset[str] = frozenset(
-    k.value for k in DEPENDENCY_EDGE_KINDS
+DEPENDENCY_EDGE_KINDS: frozenset[ChangeKind] = frozenset(
+    ChangeKind(k) for k in DEPENDENCY_EDGE_KIND_SLUGS
 )
 
 #: Kinds whose detector has already attributed the symbol to an external

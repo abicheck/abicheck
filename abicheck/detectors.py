@@ -39,3 +39,9 @@ class DetectorResult:
     #: ``not_evaluated`` (``compare/declined_comparisons.py``). Plain pairs
     #: rather than that module's dataclass, so this leaf type imports nothing.
     declined: tuple[tuple[str, str], ...] = ()
+    #: The explicitly requested ``--depth`` whose projection cleared a fact
+    #: this detector requires (``compare/detector_inputs.py``), when that is
+    #: the *only* reason it did not run; ``None`` otherwise. Such a
+    #: detector is out of the requested scope, not an evidence gap: reports
+    #: collapse these into one summary line while keeping each entry here.
+    excluded_by_depth: str | None = None

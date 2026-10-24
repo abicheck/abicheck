@@ -73,11 +73,7 @@ from .policy.class_metadata_identity import (
     is_mangled_identity as _is_mangled_identity,
 )
 from .policy.classification import ADDITION_KINDS
-from .policy.contract_closed_domain import (
-    SURFACE_METRIC_KIND_SLUGS,
-    closed_domain_decision,
-)
-from .policy.contract_toolchain_origin import DEPENDENCY_EDGE_KIND_SLUGS
+from .policy.contract_closed_domain import closed_domain_decision
 from .policy.finding_type_candidates import (
     qualified_type_candidates as _qualified_type_candidates,
     type_candidates as _type_candidates,
@@ -115,232 +111,32 @@ if TYPE_CHECKING:  # pragma: no cover - typing only
 # --------------------------------------------------------------------------
 # NOT_APPLICABLE: findings that are not about a contract entity at all.
 # --------------------------------------------------------------------------
-#
-# Curated, deliberately non-exhaustive (ADR-049 D2's "non-entity" column):
-# every kind here concerns the library's loader/deployment/security-hardening
-# identity, never a specific function/variable/type an importing consumer's
-# code references. A kind missing from this set simply falls through to the
-# ordinary entity-surface classification below -- the failure mode is "still
-# gets a relevance decision" (harmless for a shadow evaluator), not a crash,
-# so this set can grow incrementally as new non-entity kinds are noticed
-# without needing to be complete from day one.
-# Built from real `ChangeKind` members (not raw string literals): a
-# misspelled/stale entry now fails loudly at import time (an `AttributeError`
-# on `ChangeKind`) instead of silently degrading to "not in the set" and
-# falling through to ordinary classification with no signal at all -- the
-# same reasoning already applied to `_PUBLIC_SOURCE_ABI_KIND_SLUGS` below
-# (CodeRabbit review).
-_NOT_APPLICABLE_KINDS: frozenset[ChangeKind] = frozenset(
-    {
-        # Linker identity (SONAME/RPATH/RUNPATH/DT_NEEDED).
-        ChangeKind.SONAME_CHANGED,
-        ChangeKind.SONAME_MISSING,
-        ChangeKind.SONAME_BUMP_RECOMMENDED,
-        ChangeKind.SONAME_BUMP_UNNECESSARY,
-        ChangeKind.BUNDLE_SONAME_SKEW,
-        ChangeKind.RPATH_CHANGED,
-        ChangeKind.RUNPATH_CHANGED,
-        ChangeKind.RPATH_TYPE_CHANGED,
-        ChangeKind.WHEEL_RPATH_NOT_PORTABLE,
-        ChangeKind.WHEEL_CLOSURE_DEPENDENCY_VIOLATION,
-        # A binary-wide file/product version regression -- PE's
-        # `VS_FIXEDFILEINFO` resource or Mach-O's `LC_ID_DYLIB`
-        # current_version (`diff_platform._diff_pe_versions`/
-        # `_diff_macho_versions`'s own `symbol="VS_FIXEDFILEINFO"`/
-        # `symbol="LC_ID_DYLIB"` construction) -- and a missing ELF version
-        # script (`diff_versioning.py`'s own `symbol="<version-script>"`
-        # sentinel) are both linker/version metadata, never a function/
-        # variable/type (Codex review, fresh evidence).
-        ChangeKind.LIBRARY_VERSION_DOWNGRADED,
-        ChangeKind.VERSION_SCRIPT_MISSING,
-        # DT_NEEDED loader dependency list -- which *other* shared libraries
-        # this one requires, not a function/variable/type consumer code
-        # references. Falling through the ordinary path made these
-        # `UNKNOWN_UNRESOLVED` without headers, or `IN_CONTRACT` in `ALL`
-        # mode -- both wrong for a loader-deployment fact (Codex review,
-        # fresh evidence).
-        ChangeKind.NEEDED_ADDED,
-        ChangeKind.NEEDED_REMOVED,
-        # _diff_needed_order's own reorder-only finding (the dependency SET
-        # is unchanged, only DT_NEEDED entry order) -- same synthetic
-        # "DT_NEEDED" subject, same loader-level state, not a different kind
-        # of entity (Codex review, fresh evidence).
-        ChangeKind.NEEDED_ORDER_CHANGED,
-        # _diff_dynamic_contract's own PT_INTERP/DT_* loader-control state --
-        # program interpreter path, eager/lazy symbol binding, dlopen/dlclose
-        # flags, and init/fini array presence are all binary-wide
-        # loader-contract properties, the same synthetic-subject shape as
-        # the DT_NEEDED findings immediately above, never a specific
-        # function/variable/type (Codex review, fresh evidence).
-        ChangeKind.INTERPRETER_CHANGED,
-        ChangeKind.BIND_NOW_DISABLED,
-        ChangeKind.DYNAMIC_LOADING_FLAGS_CHANGED,
-        ChangeKind.ELF_INIT_FINI_CHANGED,
-        # DT_SYMBOLIC/DF_SYMBOLIC toggle (ELF) -- the same synthetic-subject
-        # loader-control shape as the PT_INTERP/DT_* findings immediately
-        # above (`diff_platform_elf_dynamic.py`'s own `symbol="DT_SYMBOLIC"`
-        # construction), never a specific function/variable/type (Codex
-        # review, fresh evidence).
-        ChangeKind.SYMBOLIC_BINDING_MODE_CHANGED,
-        # DF_STATIC_TLS toggle (ELF) -- `_diff_static_tls`'s own
-        # `symbol="DF_STATIC_TLS"` construction, the same synthetic-subject
-        # binary-wide loader/TLS-model shape as the PT_INTERP/DT_* findings
-        # above, never a consumer-referenced entity (Codex review, fresh
-        # evidence).
-        ChangeKind.STATIC_TLS_INTRODUCED,
-        ChangeKind.STATIC_TLS_REMOVED,
-        # LC_ID_DYLIB compat_version (Mach-O) -- a binary-wide loader
-        # contract property with its own synthetic `symbol="compat_version"`
-        # subject (`diff_platform._diff_macho_compat_version`), the Mach-O
-        # counterpart of the ELF loader-state findings above (Codex review,
-        # fresh evidence).
-        ChangeKind.COMPAT_VERSION_CHANGED,
-        # A PE import's eager/delay-load mode (a link-time property of the
-        # import table entry, not a change to the imported function itself),
-        # ELF's SysV/GNU symbol-hash style (a synthetic `.hash`/`.gnu.hash`
-        # subject, `diff_platform_elf_dynamic.py`'s own
-        # `symbol=".hash" if ... else ".gnu.hash"` construction), and a
-        # musllinux-tagged wheel actually depending on a glibc-versioned
-        # symbol (a synthetic `symbol="<platform-baseline>"` sentinel,
-        # `diff_versioning.py`) are all loader/deployment-packaging state,
-        # never a specific function/variable/type (Codex review, fresh
-        # evidence).
-        ChangeKind.PE_IMPORT_LOAD_MODE_CHANGED,
-        ChangeKind.HASH_STYLE_REMOVED,
-        ChangeKind.MUSLLINUX_GLIBC_DEPENDENCY_DETECTED,
-        # Architecture / file-format identity.
-        ChangeKind.PE_MACHINE_CHANGED,
-        ChangeKind.WHEEL_TAG_ARCHITECTURE_MISMATCH,
-        ChangeKind.ELF_CLASS_CHANGED,
-        ChangeKind.ELF_OSABI_CHANGED,
-        ChangeKind.ELF_ENDIANNESS_CHANGED,
-        # e_machine / decoded float-ABI-EABI drift -- binary-wide
-        # architecture/calling-convention identity, the ELF analogue of
-        # pe_machine_changed/macho_cpu_type_changed already covered above
-        # (Codex review, fresh evidence).
-        ChangeKind.ELF_MACHINE_CHANGED,
-        ChangeKind.ELF_ABI_FLAGS_CHANGED,
-        # The Mach-O analogue of pe_machine_changed/elf_class_changed --
-        # binary-wide CPU architecture identity, not a function/variable/type
-        # (Codex review, fresh evidence). Previously fell through to
-        # UNKNOWN_UNRESOLVED (PUBLIC mode, no headers) or IN_CONTRACT (ALL
-        # mode), skewing shadow relevance metrics for ordinary Mach-O
-        # architecture changes the same way the sibling PE/ELF kinds already
-        # correctly short-circuit.
-        ChangeKind.MACHO_CPU_TYPE_CHANGED,
-        ChangeKind.MACHO_FILETYPE_CHANGED,
-        ChangeKind.MACHO_LINKAGE_FLAGS_CHANGED,
-        ChangeKind.MACHO_REEXPORT_CHANGED,
-        # Security-hardening posture (PT_GNU_STACK/RELRO/PIE/canary/FORTIFY/
-        # PE DllCharacteristics/text relocations/DT_RELR) -- a property of
-        # the binary's build flags, not of any one exported entity.
-        ChangeKind.EXECUTABLE_STACK,
-        ChangeKind.EXECUTABLE_STACK_REMOVED,
-        ChangeKind.RELRO_WEAKENED,
-        ChangeKind.PIE_DISABLED,
-        ChangeKind.STACK_CANARY_REMOVED,
-        ChangeKind.FORTIFY_SOURCE_WEAKENED,
-        ChangeKind.PE_HARDENING_WEAKENED,
-        ChangeKind.PE_HARDENING_IMPROVED,
-        ChangeKind.TEXT_RELOCATION_INTRODUCED,
-        ChangeKind.DT_RELR_INTRODUCED,
-        ChangeKind.DT_RELR_REMOVED,
-        # W^X/CET/BTI-PAC hardening posture -- the same binary-wide
-        # build-flag property as the security-hardening kinds immediately
-        # above, just omitted from the original curation (Codex review,
-        # fresh evidence): a writable+executable segment, and IBT/SHSTK
-        # (x86 CET) / BTI/PAC (AArch64 branch protection) gained or
-        # dropped, are never about one exported entity.
-        ChangeKind.WRITABLE_EXECUTABLE_SEGMENT,
-        ChangeKind.TEXT_RELOCATION_REMOVED,
-        ChangeKind.CET_PROTECTION_WEAKENED,
-        ChangeKind.BRANCH_PROTECTION_WEAKENED,
-        ChangeKind.CET_PROTECTION_IMPROVED,
-        ChangeKind.BRANCH_PROTECTION_IMPROVED,
-        # Toolchain/runtime identity, not a consumer-visible entity.
-        ChangeKind.LIBCPP_ABI_VERSION_CHANGED,
-        ChangeKind.SYCL_PLUGIN_SEARCH_PATH_CHANGED,
-        # Deployment/runtime-floor state (ADR-049 D2's "deployment" column):
-        # each is a synthesized headline finding over a synthetic subject
-        # (e.g. "libc.so.6:GLIBC_2" for RUNTIME_FLOOR_RAISED, per
-        # diff_platform_elf_symbols._runtime_floor_changes's own
-        # `symbol=f"{lib}:{prefix}"` construction) -- the minimum
-        # runtime/OS/CPU-ISA a binary now requires, never a specific
-        # function/variable/type a consumer's code references (Codex
-        # review, fresh evidence).
-        ChangeKind.RUNTIME_FLOOR_RAISED,
-        ChangeKind.PLATFORM_BASELINE_FLOOR_RAISED,
-        # The C++ standard floor (`diff_build_config.detect_cxx_standard_floor_raised`'s
-        # own `symbol="__cplusplus"` construction) and the NumPy C-API target
-        # floor (`diff_numpy_capi.py`'s own `symbol="<numpy-capi>"`
-        # construction) are the identical synthesized, package-wide
-        # minimum-toolchain-floor shape as the runtime/OS/CPU-ISA kinds
-        # immediately above, just for a different axis, never a specific
-        # function/variable/type (Codex review, fresh evidence).
-        ChangeKind.CXX_STANDARD_FLOOR_RAISED,
-        ChangeKind.NUMPY_TARGET_FLOOR_RAISED,
-        # The Python stable-ABI (abi3) floor (`diff_python.py`'s own
-        # `symbol=<module>` construction) is the same package-wide
-        # minimum-toolchain-floor shape, just spelled with a real module
-        # symbol instead of a synthetic sentinel -- without this entry it
-        # fell through to the `python_*`-prefix "trusted by construction"
-        # shortcut further down and was wrongly reported `IN_CONTRACT`
-        # rather than the mode-independent `NOT_APPLICABLE` every other
-        # deployment-floor kind above already gets (Codex review, fresh evidence).
-        ChangeKind.PYTHON_ABI3_FLOOR_RAISED,
-        ChangeKind.MACOS_DEPLOYMENT_TARGET_RAISED,
-        ChangeKind.X86_ISA_BASELINE_RAISED,
-        ChangeKind.TARGET_ISA_CHANGED,
-        ChangeKind.OS_DEPLOYMENT_FLOOR_RAISED,
-        # ELF version *definitions* and *requirements*: each finding's
-        # `symbol` is the version tag itself (`diff_platform_elf_symbols.
-        # _diff_elf_symbol_versioning` / `diff_versioning`'s node-removal pass
-        # build `symbol=ver` / `symbol=node`), and the scheme detector's is
-        # `"<library>"` -- a property of the binary's version script or its
-        # runtime floor, never a declaration the headers could commit to.
-        # Without these, a removed version node under the evidence-adaptive
-        # default read UNKNOWN_UNRESOLVED and a "version `X' not found" break
-        # scored COMPATIBLE_WITH_RISK.
-        ChangeKind.SYMBOL_VERSION_NODE_REMOVED,
-        ChangeKind.SYMBOL_VERSION_DEFINED_ADDED,
-        ChangeKind.SYMBOL_VERSION_DEFINED_REMOVED,
-        ChangeKind.SYMBOL_VERSION_REQUIRED_ADDED,
-        ChangeKind.SYMBOL_VERSION_REQUIRED_ADDED_COMPAT,
-        ChangeKind.SYMBOL_VERSION_REQUIRED_REMOVED,
-        ChangeKind.VERSIONED_SYMBOL_SCHEME_DETECTED,
-    }
-)
 
 
-def _analysis_entity_kind_slugs() -> frozenset[str]:
-    """Every kind the change catalog files under the ``analysis`` entity.
+def _non_declaration_kind_slugs() -> frozenset[str]:
+    """Every kind whose catalog ``contract_subject`` is not a declaration.
 
-    Such a finding is about the analysis itself -- asymmetric evidence
-    layers, a required evidence layer missing, a suppression that would hide
-    a break -- never about a contract entity, so relevance is not its
-    question. Derived from the catalog's mandatory per-kind ``entity`` field
-    rather than listed by hand: the curated set above is deliberately
-    incomplete, and once contract evaluation became the default (ADR-049
-    Phase 7) every non-entity kind it missed read ``UNKNOWN_UNRESOLVED`` and
-    raised the coverage exit of an otherwise clean run
-    (``layer_coverage_asymmetric`` on a manifest-vs-``-H`` comparison).
+    A dependency edge (``DT_NEEDED``, an import, a required version node), a
+    binary-wide property (format, loader state, hardening, a runtime floor), a
+    build or toolchain fact, or a statement about the analysis names nothing a
+    contract domain can commit to or exclude, so relevance is not its question
+    in any mode: ``NOT_APPLICABLE`` keeps it scored by policy exactly as
+    before. Derived from the catalog's mandatory per-kind field (ADR-049
+    amendment) rather than listed by hand: the hand-curated list it replaced
+    grew one field report at a time, and every kind it missed read
+    ``UNKNOWN_UNRESOLVED`` under a stated contract and raised the
+    contract-coverage exit (``toolchain_flag_drift``, the ``bundle_*`` and
+    ``sycl_*`` families, ``imported_symbol_*`` in the SVS report).
     """
     from .change_registry import REGISTRY
-    from .model.change_catalog.dimensions import ChangeEntity
+    from .model.change_catalog.dimensions import ContractSubject
 
-    return frozenset(
-        k.value
-        for k in ChangeKind
-        if getattr(REGISTRY.get(k.value), "entity", None) is ChangeEntity.ANALYSIS
+    return REGISTRY.contract_subject_kinds(
+        *(s for s in ContractSubject if s is not ContractSubject.DECLARATION)
     )
 
 
-_NOT_APPLICABLE_KIND_SLUGS: frozenset[str] = (
-    frozenset(k.value for k in _NOT_APPLICABLE_KINDS)
-    | SURFACE_METRIC_KIND_SLUGS
-    | DEPENDENCY_EDGE_KIND_SLUGS
-    | _analysis_entity_kind_slugs()
-)
+_NOT_APPLICABLE_KIND_SLUGS: frozenset[str] = _non_declaration_kind_slugs()
 
 
 # post_processing.MarkReachability's own set of L4/L5 source-derived kinds
@@ -595,7 +391,7 @@ def _decision_for_surface_reason(
 # `target_dependency_added`/`public_api_internal_dependency_added`/
 # `numpy_capi_consumption_added`/`symbol_version_defined_added` (each a new
 # edge/obligation in a dependency or versioning graph, not a new member;
-# `imported_symbol_*` is NOT_APPLICABLE via `DEPENDENCY_EDGE_KIND_SLUGS`).
+# `imported_symbol_*` is NOT_APPLICABLE via its catalog `contract_subject`).
 _NON_COMPATIBLE_ADDITION_SHAPE_KINDS: frozenset[ChangeKind] = frozenset(
     {
         ChangeKind.TYPE_FIELD_ADDED,
