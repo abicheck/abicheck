@@ -20,6 +20,7 @@ DWARF-only path cannot resolve; that exercises the size bound on the alias.
 from __future__ import annotations
 
 import json
+import platform
 import shutil
 import subprocess
 import sys
@@ -29,6 +30,10 @@ import pytest
 
 pytestmark = [
     pytest.mark.skipif(sys.platform != "linux", reason="builds an ELF .so"),
+    pytest.mark.skipif(
+        platform.machine().lower() not in ("x86_64", "amd64"),
+        reason="builds with -mavx2/-mavx512f, which need an x86 compiler target",
+    ),
     pytest.mark.skipif(shutil.which("g++") is None, reason="g++ not found"),
 ]
 
