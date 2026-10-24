@@ -18,7 +18,7 @@ from abicheck.compare.target_isa import (
 from abicheck.elf_metadata import ElfMetadata
 from abicheck.model import AbiSnapshot
 from abicheck.model.change import Change
-from abicheck.model.target_isa import TargetIsa
+from abicheck.model.target_isa import TargetIsa, parse_producer_target_isa
 
 
 def _snap(
@@ -196,3 +196,51 @@ def test_annotation_without_a_root_changes_nothing():
     size = _layout_change(ChangeKind.STRUCT_SIZE_CHANGED)
     annotate_target_isa_consequences([size])
     assert size.description == "struct_size_changed on Vec8f"
+
+
+def _snap_as(platform: str, machine: str | None, producer: str | None) -> AbiSnapshot:
+    snap = _snap(producer)
+    snap.platform = platform
+    if snap.elf is not None and machine is not None:
+        snap.elf.machine = machine
+    return snap
+
+
+def test_cross_architecture_pair_is_silent():
+    # x86 -mavx2 against an aarch64 -march=: different machines, not comparable.
+    old = _snap_as("elf", "EM_X86_64", "GNU C17 13.3.0 -mavx2 -march=x86-64 -g")
+    new = _snap_as("elf", "EM_AARCH64", "GNU C17 13.3.0 -march=armv8.2-a+sve -g")
+    assert _isa_changes(old, new) == []
+
+
+def test_pe_and_elf_pair_is_silent():
+    # A MinGW PE build against an ELF build of the same code: no shared format.
+    old = _snap_as("pe", None, "GNU C17 13.3.0 -mavx2 -march=x86-64 -g")
+    new = _snap_as("elf", "EM_X86_64", "GNU C17 13.3.0 -mavx512f -march=x86-64 -g")
+    assert _isa_changes(old, new) == []
+
+
+def test_pe_pair_on_the_same_format_is_compared():
+    old = _snap_as("pe", None, "GNU C17 13.3.0 -mavx2 -march=x86-64 -g")
+    new = _snap_as("pe", None, "GNU C17 13.3.0 -mavx512f -march=x86-64 -g")
+    (change,) = _isa_changes(old, new)
+    assert change.new_value == "x86-64 (+avx512f)"
+
+
+def test_apple_arm64_clang_producer_is_unknown_and_silent():
+    # Apple clang records no -march/-m ISA flag: the target is unknown, so an
+    # x86 build of the same format is not a comparable ISA target either.
+    assert parse_producer_target_isa("clang version 17.0.0 (clang-1700.0.13.5)") is None
+    old = _snap_as("macho", None, "GNU C17 13.3.0 -mavx2 -march=x86-64 -g")
+    new = _snap_as("macho", None, "clang version 17.0.0 (clang-1700.0.13.5)")
+    assert _isa_changes(old, new) == []
+
+
+def test_arm64_gcc_arch_change_on_one_machine_is_reported():
+    old = _snap_as("elf", "EM_AARCH64", "GNU C17 13.3.0 -march=armv8-a -mabi=lp64 -g")
+    new = _snap_as(
+        "elf", "EM_AARCH64", "GNU C17 13.3.0 -march=armv8.2-a+sve -mabi=lp64 -g"
+    )
+    (change,) = _isa_changes(old, new)
+    assert change.old_value == "armv8-a"
+    assert change.new_value == "armv8.2-a+sve"

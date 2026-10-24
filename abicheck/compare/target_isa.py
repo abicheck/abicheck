@@ -84,6 +84,17 @@ def _diff_target_isa(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     compared only when both sides record one, so a note-only side never reads
     as a change of ``-march=`` value.
     """
+    # Across two different machines or binary formats the ISA targets are not
+    # comparable (x86 features against aarch64 -march): the machine change is
+    # already its own finding, so a target finding would be a false one.
+    if old.platform != new.platform:
+        return []
+    if (
+        old.elf is not None
+        and new.elf is not None
+        and old.elf.machine != new.elf.machine
+    ):
+        return []
     o = target_isa_of(old)
     n = target_isa_of(new)
     if o is None or n is None:
