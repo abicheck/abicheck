@@ -185,6 +185,13 @@ SPELLING_MIGRATIONS: Mapping[int, GenerationSpellingChange] = {
         "a stored 'T[N-1]' cannot be told apart from a genuine 'T[N-1]', so no rewrite "
         "is sound and a baseline holding those spellings is re-dumped"
     ),
+    16: GenerationSpellingChange(
+        "castxml function types spell their full declarator, 'int (*)(int, int)', "
+        "instead of the opaque 'FunctionType*' tag (extract/headers/castxml/"
+        "type_resolution.py): the stored tag dropped the signature, so no rewrite "
+        "is sound; policy/generation_drift_demotion.py demotes a stored tag "
+        "against a fresh declarator, and a baseline holding callbacks is re-dumped"
+    ),
 }
 
 #: Reasons that say nothing about what was audited; the bump gate refuses them.

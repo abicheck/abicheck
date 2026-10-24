@@ -224,8 +224,8 @@ CJM: trust stage (docs/contribute/cjm.md) — use case UC-WF-analysis-assurance 
 
 #### A function-pointer parameter's signature is not compared, so a callback arity change reads `NO_CHANGE` on the header path (2026-10-15)
 
-**Status (2026-10-15): OPEN.** Reproduced in plain C. The parameter record keeps only the pointer's type name, and the pointee's signature is not compared on either path.
-`false-clean` — A callback that gains a parameter is reported as no change with headers, and on DWARF unless the type name happens to carry the signature. [Full write-up](known-gaps/function-pointer-signatures-are-not-compared-in-header-mode.md)
+**Status (2026-10-24): FIXED for the header (castxml) path.** `extract/headers/castxml/type_resolution.py` spells a castxml `FunctionType` as its full declarator (`int (*)(int, int)`, with `...`, calling-convention attributes and the pointer/reference/cv/array declarator) instead of the opaque `FunctionType` tag, so an inline callback parameter, a pointer to one, a callback typedef, a struct field and a returned callback report `func_params_changed`/`typedef_base_changed`/`type_field_type_changed`. `EXTRACTOR_GENERATION` is 16; a pre-16 baseline's `FunctionType*` against a fresh declarator is demoted as generation drift (`policy/generation_drift_demotion.py`), and a callback typedef is no longer read as an opaque handle (`idioms.py`). Tests: `tests/test_castxml_function_pointer_spelling.py`, `tests/test_castxml_function_pointer_integration.py`. Still open: the DWARF path spells every subroutine type `fn(...)`, so a DWARF-only (or header-less Rust) comparison still reads `NO_CHANGE`; C++ `noexcept` on a function type is not in castxml's output.
+`false-clean` — (DWARF residual) A callback that gains a parameter is reported as no change on DWARF unless the type name happens to carry the signature. [Full write-up](known-gaps/function-pointer-signatures-are-not-compared-in-header-mode.md)
 
 #### A default release-profile Rust run without headers reports `NO_CHANGE ... ACCEPTED` while its own warnings say the result is unconfirmed (2026-10-15)
 

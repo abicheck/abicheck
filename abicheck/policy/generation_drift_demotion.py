@@ -40,6 +40,7 @@ from __future__ import annotations
 import re
 from collections.abc import Iterable
 
+from ..model.castxml_spelling_artifacts import is_castxml_opaque_function_type
 from ..model.change import Change
 from ..model.change_catalog.kinds import ChangeKind
 from ..model.change_catalog.registry import Verdict
@@ -140,10 +141,12 @@ def _declared_names(snapshot: AbiSnapshot) -> frozenset[str]:
 def is_spelling_only_drift(old: str, new: str, old_declared: Iterable[str]) -> bool:
     """Whether *old* -> *new* differs only by renaming identifiers that are
     neither builtins nor names *old_declared* holds, keeping the skeleton."""
+    declared = frozenset(old_declared)
+    if _is_opaque_callback_respelled(old, new, declared):
+        return True
     old_t, new_t = _TOKEN.findall(old), _TOKEN.findall(new)
     if len(old_t) != len(new_t) or old_t == new_t:
         return False
-    declared = frozenset(old_declared)
     for a, b in zip(old_t, new_t, strict=True):
         if a == b:
             continue
@@ -152,6 +155,22 @@ def is_spelling_only_drift(old: str, new: str, old_declared: Iterable[str]) -> b
         if a in _BUILTINS or b in _BUILTINS or a in declared:
             return False
     return True
+
+
+def _is_opaque_callback_respelled(old: str, new: str, declared: frozenset[str]) -> bool:
+    """Whether *old* is castxml's pre-generation-16 opaque ``FunctionType``
+    tag and *new* a full function declarator (``int (*)(int)``).
+
+    The stored tag dropped the callback's signature, so the pair cannot say
+    whether the signature changed: drift, not evidence of a break. A real
+    type the old snapshot declares as ``FunctionType`` is not the tag.
+    """
+    return (
+        "FunctionType" not in declared
+        and "(" in new
+        and "FunctionType" not in new
+        and is_castxml_opaque_function_type(old, "castxml")
+    )
 
 
 def _spelling_pair_drifts(pair: tuple[str, str], *, declared: Iterable[str]) -> bool:
@@ -178,7 +197,7 @@ GENERATION_SPELLING_DRIFT = register_name_heuristic(
     confirmed_by=StructuralFact(
         "policy.generation_drift_demotion.generations_differ", _generations_differ
     ),
-    helpers=(is_spelling_only_drift, _declared_names),
+    helpers=(is_spelling_only_drift, _declared_names, _is_opaque_callback_respelled),
     vocabularies=("_BUILTINS",),
     patterns=(_IDENT, _TOKEN),
 )

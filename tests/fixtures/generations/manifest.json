@@ -30,6 +30,12 @@
       "compiler": "g++ (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0",
       "snapshot": "gen13/corpus.json.gz"
     },
+    "14": {
+      "castxml": "castxml version 0.7.0",
+      "commit": "81b71a3c9296",
+      "compiler": "g++ (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0",
+      "snapshot": "gen14/corpus.json.gz"
+    },
     "2": {
       "castxml": "castxml version 0.7.0",
       "commit": "098e2535fd71",
@@ -68,6 +74,7 @@
     }
   },
   "skipped": {
+    "15": "generation 15 changed castxml array element counts (max + 1), which its own SPELLING_MIGRATIONS row declares unmigratable; a frozen generation-15 corpus spells Box<double, 2>.items as double[2] where every older frozen generation spells double[1], so the newest-frozen oracle fails for all of them. Not frozen until that oracle accepts a declared-unsound row (see the generation-16 fix-fnptr report)",
     "7": "generations 7 and 8 were intermediate bumps inside PR #1712's branch (clang positional defaults, dependent members); main went from 6 (49529426d) straight to 9 (c23a9ad57), so no main commit ever ran them",
     "8": "generations 7 and 8 were intermediate bumps inside PR #1712's branch (clang positional defaults, dependent members); main went from 6 (49529426d) straight to 9 (c23a9ad57), so no main commit ever ran them"
   },

@@ -83,7 +83,7 @@
       "abicheck/extract/headers/castxml/records.py": "9093c5648bbe60334f4f3cbdd13e6e7d0eece582cbff9ef8a16aeb8096473cd6",
       "abicheck/extract/headers/castxml/scope.py": "41cecc8dd996c10a58c022e5dca4003cce9d7775adf674b339cc199fb59297c7",
       "abicheck/extract/headers/castxml/specialization.py": "3f9f021672df1b84de42bc8de5f3c915508b3f3850e0a8acbaa80a3dee04c6f3",
-      "abicheck/extract/headers/castxml/type_resolution.py": "73b472e102170e76950c47dab5871c51d2c534d3de3d50caec2defa7d320b4c2",
+      "abicheck/extract/headers/castxml/type_resolution.py": "dba855d77fb5e32a63977fe03e219712bb3d40cc8afad6ca35517ac564318fb1",
       "abicheck/extract/headers/castxml/typedef_parsing.py": "332587638d5d4b7caebbc20fa44b69c314771fffa5839a15dec59eaba3caaf93",
       "abicheck/extract/headers/castxml/vector_join.py": "043e4a849bbc324568e240d4a94323b0952583678ec2ca0a62c81515a1798db0",
       "abicheck/extract/headers/castxml/vector_spellings.py": "208f0891eedceda82e172fe846a5fc09d26a3b3d917795a416ae117450cf600c",
@@ -159,9 +159,9 @@
       "abicheck/symvers_metadata.py": "372737765cd132e6e87ed891dd465d2958e04debbef774e45212ceb3036871cb",
       "abicheck/type_metadata.py": "9997189de8dac522fd1db8be5ae491d811139503f83abaaded89038eb4aa9cdf"
     },
-    "fingerprint": "2296cf48bc9b8b47f28b7b8f780529129f9fe7ea20d0263002428cb2f079db93",
-    "generation": 15,
-    "reason": "PR-internal fixes within unreleased generation 15: C++ overloads keyed by mangled name and inline vector returns resolved; no generation has shipped with the previous keys"
+    "fingerprint": "ca88a09da53460189e7e9173b3884033a4069c4ebbc73b98eef1f0398a311705",
+    "generation": 16,
+    "reason": "bumped to 16 for a semantic change"
   },
   "resolver": {
     "files": {

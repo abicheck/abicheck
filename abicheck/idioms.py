@@ -238,7 +238,10 @@ def _recognise_handle(graph: SurfaceGraph) -> dict[str, IdiomTag]:
     out: dict[str, IdiomTag] = {}
     for alias, target in sorted(graph.snapshot.declarations.typedefs.items()):
         t = target.strip()
-        if not _is_pointer(t):
+        # A function-pointer typedef is a callback, never an opaque token --
+        # including castxml's pre-generation-16 ``FunctionType*`` spelling,
+        # which would otherwise read as a pointer to an unknown record.
+        if not _is_pointer(t) or _is_callback_type(t, {}):
             continue
         pointee = _strip_ptr(t)
         # void* token, or a pointer to a forward-declared / unknown struct.
