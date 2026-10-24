@@ -78,7 +78,7 @@ Which public surface reaches each ADR, which use cases it serves, and whether a 
 | [ADR-059](../adr/059-compressed-snapshot-storage.md) | surfaced | UC-WF-baseline | `cli: dump --compression`<br>`action: snapshot-compression` | — |
 | [ADR-060](../adr/060-synthetic-consumer-compile-probe-deferral.md) | gap | — | — | Decision to defer; no synthetic-consumer compile probe exists and none is scheduled. |
 | [ADR-061](../adr/061-responsibility-package-architecture.md) | internal | — | — | Internal package architecture and import direction. |
-| [ADR-062](../adr/062-project-snapshot-storage-v2.md) | partial | UC-WF-baseline | `api: abicheck.storage` | Proposed; only Phase 0 primitives and the default single-artifact format are wired. |
+| [ADR-062](../adr/062-project-snapshot-storage-v2.md) | partial | UC-WF-baseline | `api: abicheck.storage`<br>`cli: compare --require-same-generation` | Proposed; only Phase 0 primitives and the default single-artifact format are wired. |
 | [ADR-063](../adr/063-one-semantic-pipeline.md) | partial | — | `cli: compare` | Roadmap ADR; Phase 10 accounting remains open. |
 | [ADR-064](../adr/064-canonical-gate-algorithm-and-exit-decision.md) | surfaced | UC-WF-compare | `cli: compare --severity-preset`<br>`report: compare_report.exit`<br>`action: severity-preset` | — |
 | [ADR-065](../adr/065-comparison-scope-selection-and-completeness.md) | surfaced | UC-WF-compare | `cli: compare --select --select-required --dry-run`<br>`report: compare_report.comparison_scope`<br>`report: compare_report.run_outcome` | — |
@@ -216,6 +216,7 @@ Which public surface reaches each ADR, which use cases it serves, and whether a 
 - ADR-059 action: snapshot-compression
 - ADR-059 cli: dump --compression
 - ADR-062 api: abicheck.storage
+- ADR-062 cli: compare --require-same-generation
 - ADR-064 action: severity-preset
 - ADR-064 report: compare_report.exit
 - ADR-065 cli: compare --select --select-required --dry-run
