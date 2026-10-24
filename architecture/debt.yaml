@@ -773,7 +773,7 @@
     },
     {
       "path": "abicheck/reporter_markdown.py",
-      "baseline_lines": 1234,
+      "baseline_lines": 1229,
       "target": "report",
       "rule": "no_growth",
       "disposition": "migrate",

@@ -663,7 +663,12 @@ def prewarm_demangle_from_json_value(value: object) -> None:
         demangle_batch(sorted(tokens), accept_macho_prefix=True)
 
 
-def demangle_text(text: str, *, escape_table_pipes: bool = False) -> str:
+def demangle_text(
+    text: str,
+    *,
+    escape_table_pipes: bool = False,
+    max_demangled: int | None = None,
+) -> str:
     """Demangle every Itanium-mangled symbol token embedded in *text*.
 
     Tokens that are not valid C++ mangled names, or that cannot be demangled
@@ -686,6 +691,13 @@ def demangle_text(text: str, *, escape_table_pipes: bool = False) -> str:
     this function has no other, correctness-critical caller to put at risk
     of misreading a coincidentally-``__Z``-prefixed literal ELF symbol --
     see :func:`_is_itanium_mangled`'s docstring.
+
+    *max_demangled* clips the demangled half of each annotation to that many
+    characters (ending in ``…``); the bracketed mangled spelling is never
+    clipped. Size-bounded Markdown passes it: a libstdc++ template
+    instantiation demangles to several KB, and this pass runs after every
+    section has clipped its own names, so without it a clipped mangled name
+    grew back into a multi-KB line here (SVS field report).
     """
     tokens = extract_mangled_tokens(text)
     if not tokens:
@@ -713,6 +725,8 @@ def demangle_text(text: str, *, escape_table_pipes: bool = False) -> str:
         demangled = mapping.get(tok)
         if not demangled or demangled == tok:
             return tok
+        if max_demangled is not None and len(demangled) > max_demangled:
+            demangled = demangled[: max_demangled - 1] + "…"
         if escape_table_pipes:
             # A demangled name can *contain* a pipe -- `_ZN3FooorERKS_` is
             # `Foo::operator|(Foo const&)` -- and this substitution runs over
