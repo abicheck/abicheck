@@ -870,7 +870,7 @@ def test_header_declaration_ablation_never_hides_an_export_removal(
             elf=ElfMetadata(
                 machine="x86-64",
                 symbols=[ElfSymbol("api")]
-                + [ElfSymbol(n, sym_type=st) for n in exports]
+                + [ElfSymbol(n, sym_type=st) for n in exports],
             ),
         )
 
