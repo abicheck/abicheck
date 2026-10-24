@@ -33,6 +33,11 @@ prior rule already modulated, and never when the punctuation/qualifier
 skeleton differs (``T*`` -> ``T&`` stays a break), when a builtin is renamed
 (``int`` -> ``long``), or when the old identifier names a type the old
 snapshot declares (``Foo`` -> ``Bar``).
+
+A generation that declared an array-extent shift (its ``SPELLING_MIGRATIONS``
+row's ``extent_shift``, passed in by the workflow) also demotes a finding
+whose spellings differ only by every differing ``[N]`` growing by exactly
+that shift: castxml spelled an extent as its last index before generation 15.
 """
 
 from __future__ import annotations
@@ -54,6 +59,7 @@ __all__ = [
     "GENERATION_DRIFT_REASON",
     "GENERATION_DRIFT_RULE",
     "demote_generation_spelling_drift",
+    "is_extent_shift_drift",
     "is_spelling_only_drift",
 ]
 
@@ -154,6 +160,30 @@ def is_spelling_only_drift(old: str, new: str, old_declared: Iterable[str]) -> b
     return True
 
 
+def is_extent_shift_drift(old: str, new: str, shift: int) -> bool:
+    """Whether *old* -> *new* differs only in array extents (``[N]``), each
+    differing one grown by exactly *shift*, keeping every other token."""
+    if shift <= 0:
+        return False
+    old_t, new_t = _TOKEN.findall(old), _TOKEN.findall(new)
+    if len(old_t) != len(new_t) or old_t == new_t:
+        return False
+    for index, (a, b) in enumerate(zip(old_t, new_t, strict=True)):
+        if a == b:
+            continue
+        if not (a.isdigit() and b.isdigit()):
+            return False
+        if (
+            index == 0
+            or old_t[index - 1] != "["
+            or old_t[index + 1 : index + 2] != ["]"]
+        ):
+            return False
+        if int(b) - int(a) != shift:
+            return False
+    return True
+
+
 def _spelling_pair_drifts(pair: tuple[str, str], *, declared: Iterable[str]) -> bool:
     return is_spelling_only_drift(pair[0], pair[1], declared)
 
@@ -190,10 +220,13 @@ def demote_generation_spelling_drift(
     new: AbiSnapshot,
     old_generation: int,
     new_generation: int,
+    *,
+    extent_shift: int = 0,
 ) -> list[Change]:
     """Annotate each spelling-only finding between operands of different
     extractor generations as ``COMPATIBLE_WITH_RISK``. Mutates and returns
-    *changes*; a no-op when the generations match."""
+    *changes*; a no-op when the generations match. *extent_shift* is the
+    array-extent respelling the generations in between declared."""
     if old_generation == new_generation:
         return changes
     declared: frozenset[str] | None = None
@@ -207,7 +240,9 @@ def demote_generation_spelling_drift(
             continue
         if declared is None:
             declared = _declared_names(old)
-        if not GENERATION_SPELLING_DRIFT.confirmed(
+        if not is_extent_shift_drift(
+            change.old_value, change.new_value, extent_shift
+        ) and not GENERATION_SPELLING_DRIFT.confirmed(
             (change.old_value, change.new_value),
             (old_generation, new_generation),
             declared=declared,

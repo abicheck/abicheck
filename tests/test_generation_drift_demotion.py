@@ -256,3 +256,70 @@ def test_demotion_skips_disposed_and_non_spelling_findings(
     assert (change.modulation_rule == GENERATION_DRIFT_RULE) is (
         expected_verdict is Verdict.COMPATIBLE_WITH_RISK and prior_verdict is None
     )
+
+
+@pytest.mark.parametrize(
+    ("old", "new", "shift", "expected"),
+    [
+        ("double[1]", "double[2]", 1, True),
+        ("Box<int, 3>[7][2]", "Box<int, 3>[8][3]", 1, True),
+        ("char[0]", "char[1]", 1, True),
+        ("double[1]", "double[3]", 1, False),  # grew by two
+        ("double[2]", "double[1]", 1, False),  # shrank
+        ("double[1]", "double[2]", 0, False),  # no generation declared a shift
+        ("Box<int, 1>", "Box<int, 2>", 1, False),  # template argument, not extent
+        ("float[1]", "double[2]", 1, False),  # element type changed too
+        ("double[1]", "double[1]", 1, False),  # unchanged
+        ("double[1]", "double[1][1]", 1, False),  # rank changed
+    ],
+)
+def test_extent_shift_drift_is_exactly_the_declared_growth(
+    old: str, new: str, shift: int, expected: bool
+) -> None:
+    from abicheck.policy.generation_drift_demotion import is_extent_shift_drift
+
+    assert is_extent_shift_drift(old, new, shift) is expected
+
+
+@pytest.mark.parametrize(
+    ("old_generation", "new_generation", "expected"),
+    [(0, 15, 1), (14, 15, 1), (15, 15, 0), (15, 16, 0), (13, 14, 0), (15, 14, 0)],
+)
+def test_pending_extent_shift_sums_the_rows_in_between(
+    old_generation: int, new_generation: int, expected: int
+) -> None:
+    from abicheck.storage.generation_migrations import pending_extent_shift
+
+    assert pending_extent_shift(old_generation, new_generation) == expected
+
+
+@pytest.mark.parametrize(
+    ("old_generation", "expected_verdict"),
+    [(14, Verdict.COMPATIBLE_WITH_RISK), (15, None)],
+)
+def test_castxml_extent_respelling_demotes_only_across_generation_15(
+    old_generation: int, expected_verdict: Verdict | None
+) -> None:
+    from abicheck.model.change import Change
+    from abicheck.policy.generation_drift_demotion import (
+        demote_generation_spelling_drift,
+    )
+    from abicheck.storage.generation_migrations import pending_extent_shift
+
+    change = Change(
+        kind=ChangeKind.TYPE_FIELD_TYPE_CHANGED,
+        symbol="Box<double, 2>",
+        description="field type changed",
+        old_value="double[1]",
+        new_value="double[2]",
+    )
+    snap = _snapshot("Placeholder&")
+    demote_generation_spelling_drift(
+        [change],
+        snap,
+        snap,
+        old_generation,
+        16,
+        extent_shift=pending_extent_shift(old_generation, 16),
+    )
+    assert change.effective_verdict is expected_verdict
