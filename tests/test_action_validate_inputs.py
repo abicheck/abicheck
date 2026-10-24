@@ -32,7 +32,6 @@ class checks its duplicated ``_is_release_style_operand`` copy against
 from __future__ import annotations
 
 import os
-import re
 import subprocess
 import tempfile
 from pathlib import Path
@@ -548,18 +547,14 @@ class TestFormatIsHardErrorNotSilentFallback:
     not VALIDATE_SH.is_file(), reason="action/validate-inputs.sh not found"
 )
 class TestCompareFormatAllowlists:
-    """compare's full --format choice set (`abicheck compare --help-all`) is
-    json|markdown|sarif|html|junit|review; a directory/package operand fans
-    out through the release engine, which narrows that to cli.py's
-    _RELEASE_FORMATS = {json, markdown, junit} (sarif/html/review rejected
-    -- a clear UsageError, surfaced as VERDICT=ERROR by run.sh -- but only
-    after Python/deps are installed). Codex + CodeRabbit review, PR #594:
-    catch both restrictions here too, checking BOTH old-library and
-    new-library for the release-style case, and any garbage value (not
-    just sarif/html) for both cases. See TestCompareFormatAllowlistMatchesCli
-    for the drift guard against the live CLI."""
+    """A directory/package operand fans out through the release engine, which
+    renders the generated `release-compare` set (every compare format except
+    terminal). Anything outside it is rejected before install, on either
+    operand, not only a known-bad spelling. See
+    TestCompareFormatAllowlistMatchesCli for the drift guard against the live
+    CLI."""
 
-    @pytest.mark.parametrize("fmt", ["sarif", "review", "xml"])
+    @pytest.mark.parametrize("fmt", ["terminal", "xml"])
     def test_directory_new_library_rejects_non_release_format(
         self, tmp_path: Path, fmt: str
     ) -> None:
@@ -576,7 +571,7 @@ class TestCompareFormatAllowlists:
         assert result.returncode == 1
         assert "directory/package comparison" in result.stdout
 
-    @pytest.mark.parametrize("fmt", ["sarif", "review", "xml"])
+    @pytest.mark.parametrize("fmt", ["terminal", "xml"])
     def test_directory_old_library_rejects_non_release_format(
         self, tmp_path: Path, fmt: str
     ) -> None:
@@ -593,7 +588,9 @@ class TestCompareFormatAllowlists:
         assert result.returncode == 1
         assert "directory/package comparison" in result.stdout
 
-    @pytest.mark.parametrize("fmt", ["json", "markdown", "junit", "oneline", "html"])
+    @pytest.mark.parametrize(
+        "fmt", ["json", "markdown", "junit", "oneline", "html", "sarif", "review"]
+    )
     def test_directory_operand_accepts_release_formats(
         self, tmp_path: Path, fmt: str
     ) -> None:
@@ -661,33 +658,26 @@ class TestCompareFormatAllowlistMatchesCli:
     derived fact -- so it remains a transcription, and therefore still needs
     this source-parsing guard until ADR-070 D1/D2 resolve the mirror itself."""
 
-    def _extract_allowlist(self, fail_marker: str) -> set[str]:
-        """The `"$FORMAT" != "x"` chain in the `if`/`elif [[ ... ]]` block
-        that guards the `_fail` call containing *fail_marker* -- scanned
-        backward from that line to its nearest preceding `if`/`elif` line so
-        two adjacent blocks (release-style vs. single-pair) aren't conflated."""
-        lines = VALIDATE_SH.read_text(encoding="utf-8").splitlines()
-        fail_idx = next(i for i, line in enumerate(lines) if fail_marker in line)
-        start = fail_idx
-        while start > 0 and not re.search(r"\b(if|elif)\s*\[\[", lines[start]):
-            start -= 1
-        condition_text = " ".join(lines[start : fail_idx + 1])
-        return set(re.findall(r'"\$FORMAT" != "([a-z]+)"', condition_text))
+    def test_release_style_allowlist_is_the_generated_cli_set(self) -> None:
+        """validate-inputs.sh no longer transcribes the release set: it reads
+        `release-compare` from action/cli-surface.txt, which the generator
+        derives from the compare command module's RELEASE_FORMATS. This pins
+        that the committed file carries exactly that set, and that the shell
+        names no release format literal of its own."""
+        from abicheck.report.release_formats import RELEASE_FORMATS
 
-    def test_release_style_allowlist_matches_cli_constant(self) -> None:
-        validator_formats = self._extract_allowlist(
-            "only 'json', 'markdown', 'junit', 'oneline', and 'html' are available"
-        )
-        # ADR-061 Phase 4 moved `compare`'s body out of the `cli.py` facade.
-        cmd = "abicheck/frontends/cli/commands/compare_routing.py"
-        cli_source = (Path(__file__).resolve().parents[1] / cmd).read_text("utf-8")
-        m = re.search(r"_RELEASE_FORMATS = frozenset\(\{([^}]+)\}\)", cli_source)
-        assert m, "could not find _RELEASE_FORMATS in the compare command module"
-        cli_formats = {f.strip().strip('"') for f in m.group(1).split(",")}
-        assert validator_formats == cli_formats, (
-            f"validate-inputs.sh's release-style compare allowlist {sorted(validator_formats)} "
-            f"has drifted from the compare command module's _RELEASE_FORMATS {sorted(cli_formats)}"
-        )
+        surface = (
+            Path(__file__).resolve().parents[1] / "action" / "cli-surface.txt"
+        ).read_text(encoding="utf-8")
+        generated = {
+            line.rsplit(" ", 1)[1]
+            for line in surface.splitlines()
+            if line.startswith("CHOICE release-compare -o ")
+        }
+        assert generated == set(RELEASE_FORMATS)
+        shell = VALIDATE_SH.read_text(encoding="utf-8")
+        assert "only 'json', 'markdown', 'junit', 'oneline', and 'html'" not in shell
+        assert 'release-compare -o "$FORMAT"' in shell
 
 
 @pytest.mark.skipif(
