@@ -409,6 +409,10 @@ DETECTOR_INPUTS: dict[str, DetectorInputs] = {
             "from_headers": _FROM_HEADERS,
         },
     ),
+    # The ISA target is read from the producer string only: a rung that clears
+    # build_mode leaves no target to compare, so the detector must report that
+    # as disabled rather than read the absence as "same target".
+    "target_isa": DetectorInputs(requires=frozenset({"build_mode"})),
 }
 
 #: Non-detector rules consulted during compare, keyed ``module:qualname``.
