@@ -3,6 +3,11 @@ counted in the coverage block, never silently dropped (field report H5).
 
 Oracle: the fixture's own list of ``#ifdef``-hidden exported functions,
 cross-checked against ``nm -D``. The count must also create no finding.
+
+Deliberately not sourced from ``field_shapes/ifdef_sycl_overload``: that
+shape removes an overload between v1 and v2 and needs the SYCL stub headers,
+while this census needs identical sides, a self-contained ``sycl::queue``
+and three hidden exports to count.
 """
 
 from __future__ import annotations
