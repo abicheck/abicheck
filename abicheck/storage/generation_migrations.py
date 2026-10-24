@@ -125,6 +125,7 @@ SPELLING_MIGRATIONS: Mapping[int, GenerationSpellingChange] = {
         "holding a vector type is re-dumped"
     ),
     15: GenerationSpellingChange(_NO_SPELLING),
+    16: GenerationSpellingChange(_NO_SPELLING),
 }
 
 

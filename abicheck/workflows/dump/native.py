@@ -237,8 +237,14 @@ def _run_dump_uncached(
     # frontends and the header-graph pass alike -- carries those flags.
     implied: tuple[str, ...] = ()
     if _parses and not (dwarf_only or symbols_only):
+        # Headers may be directories: expand them so the language detectors
+        # read the header files themselves.
         compile, implied = binary_dialect_compile(
-            compile, path, lang=lang, lang_explicit=lang_explicit, headers=_headers
+            compile,
+            path,
+            lang=lang,
+            lang_explicit=lang_explicit,
+            headers=expand_header_inputs(_headers) if _headers else [],
         )
 
     request = NativeExtractRequest(

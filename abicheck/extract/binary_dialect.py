@@ -181,8 +181,15 @@ def parse_producer_dialect(
 
 
 def _option_key(token: str) -> str:
-    """``-march=native`` -> ``-march``: the option a token sets."""
-    return token.split("=", 1)[0]
+    """``-march=native`` -> ``-march``: the option a token sets.
+
+    ``-mno-avx2`` is keyed as ``-mavx2``: the two spell one feature switch in
+    opposite senses, so a caller's flag for either one settles both.
+    """
+    key = token.split("=", 1)[0]
+    if key.startswith("-mno-"):
+        return "-m" + key[len("-mno-") :]
+    return key
 
 
 def binary_dialect_option_tokens(
@@ -260,7 +267,11 @@ def header_parse_option_tokens(
 
     dialect = read_elf_binary_dialect(path, debug_path)
     explicit_tokens = [*split_gcc_options(gcc_options or ""), *gcc_option_tokens]
-    explicit_std = has_explicit_std(gcc_options, tuple(gcc_option_tokens))
+    # ``-ansi`` selects the ISO standard (C++98 for C++), an explicit dialect
+    # choice that has_explicit_std does not recognise.
+    explicit_std = has_explicit_std(gcc_options, tuple(gcc_option_tokens)) or (
+        "-ansi" in explicit_tokens
+    )
     needs_std = (
         not explicit_std
         and dialect.is_cxx is True
