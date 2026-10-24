@@ -1,0 +1,668 @@
+diff --git a/abicheck/extract/headers/castxml/duplicate_declarations.py b/abicheck/extract/headers/castxml/duplicate_declarations.py
+new file mode 100644
+index 000000000..dcffc7928
+--- /dev/null
++++ b/abicheck/extract/headers/castxml/duplicate_declarations.py
+@@ -0,0 +1,92 @@
++# Copyright 2026 Nikolay Petrov
++# SPDX-License-Identifier: Apache-2.0
++#
++# Licensed under the Apache License, Version 2.0 (the "License");
++# you may not use this file except in compliance with the License.
++# You may obtain a copy of the License at
++#
++#     http://www.apache.org/licenses/LICENSE-2.0
++#
++# Unless required by applicable law or agreed to in writing, software
++# distributed under the License is distributed on an "AS IS" BASIS,
++# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++# See the License for the specific language governing permissions and
++# limitations under the License.
++
++"""Collapse benign duplicate declarations of one function key at the source.
++
++castxml reports two ``Function`` records under one snapshot key in two
++dependency-header shapes, and ``AbiSnapshot.index`` then warned
++"Duplicate mangled symbols skipped (first-wins)" for each:
++
++* glibc's C++ ``<wchar.h>``/``<string.h>`` declare ``const`` and non-``const``
++  overloads of ``wcschr``/``strchr``/``memchr``/... bound to one asm name --
++  one symbol, two declarations differing only in cv-qualification.
++* libstdc++ declares a defaulted copy/move constructor *and* a converting
++  constructor template whose instantiation for the class's own argument has the
++  identical parameter list, so both synthesize the same
++  ``__abicheck_ctor__std::...(...)`` placeholder key. Overload resolution
++  always picks the non-template one; the template instance is not a second
++  entry point.
++
++A group is collapsed to its first declaration (castxml document order, so the
++result is deterministic) only when *every* member was declared outside the
++public header set and the members' signatures agree modulo cv-qualification.
++Anything else -- a member from the library's own headers, or signatures that
++genuinely conflict -- is left for the snapshot index, which still warns.
++"""
++
++from __future__ import annotations
++
++import re
++from collections.abc import Callable, Sequence
++from xml.etree.ElementTree import Element
++
++from ....model import Function
++
++_CV = re.compile(r"\b(?:const|volatile)\b")
++
++
++def _cv_free(spelling: str) -> str:
++    return " ".join(_CV.sub(" ", spelling).split())
++
++
++def _signature(func: Function) -> tuple[str, str, tuple[str, ...]]:
++    return (
++        func.name,
++        _cv_free(func.return_type),
++        tuple(_cv_free(p.type) for p in func.params),
++    )
++
++
++def is_benign_duplicate_group(
++    funcs: Sequence[Function], public: Sequence[bool]
++) -> bool:
++    """Whether same-key *funcs* are one dependency-header entity, declared twice.
++
++    *public* holds, per member, whether its declaration sits in a public
++    (library) header.
++    """
++    if len(funcs) < 2 or any(public):
++        return False
++    first = _signature(funcs[0])
++    return all(_signature(f) == first for f in funcs[1:])
++
++
++def collapse_benign_duplicates(
++    parsed: Sequence[tuple[Element, Function]], is_public: Callable[[Element], bool]
++) -> list[Function]:
++    """*parsed* functions, with each benign duplicate group reduced to its first
++    member. *is_public* (``decl_is_public``) is asked only about duplicates."""
++    groups: dict[str, list[int]] = {}
++    for index, (_, func) in enumerate(parsed):
++        groups.setdefault(func.mangled, []).append(index)
++    drop: set[int] = set()
++    for indexes in groups.values():
++        if len(indexes) < 2:
++            continue
++        funcs = [parsed[i][1] for i in indexes]
++        public = [is_public(parsed[i][0]) for i in indexes]
++        if is_benign_duplicate_group(funcs, public):
++            drop.update(indexes[1:])
++    return [func for i, (_, func) in enumerate(parsed) if i not in drop]
+diff --git a/abicheck/extract/headers/castxml/functions.py b/abicheck/extract/headers/castxml/functions.py
+index b3e317544..cc4cdc1de 100644
+--- a/abicheck/extract/headers/castxml/functions.py
++++ b/abicheck/extract/headers/castxml/functions.py
+@@ -44,6 +44,7 @@ from ....model.identity import entity_id_for_function
+ from ...surface_fact_producers import header_ast_surface_facts
+ from .calling_convention import source_calling_conventions
+ from .context import CastxmlParserContext
++from .duplicate_declarations import collapse_benign_duplicates
+ from .location import (
+     access_level,
+     contract_attributes as _extract_contract_attributes,
+@@ -713,13 +714,16 @@ def parse_function_element(
+ 
+ 
+ def parse_functions(ctx: CastxmlParserContext) -> list[Function]:
+-    funcs: list[Function] = []
++    parsed: list[tuple[Element, Function]] = []
+     hidden_friend_owner_by_id = build_hidden_friend_ids(ctx)
+     for el in ctx.function_els:
+         func = parse_function_element(ctx, el, hidden_friend_owner_by_id)
+         if func is not None:
+-            funcs.append(func)
+-    return funcs
++            parsed.append((el, func))
++    # Dependency headers declare some entities twice under one key (glibc's
++    # cv overloads, libstdc++'s copy ctor + same-signature converting
++    # template); keep one record instead of handing the index a duplicate.
++    return collapse_benign_duplicates(parsed, lambda el: decl_is_public(ctx, el))
+ 
+ 
+ def _contract_attributes_with_source_cc(
+diff --git a/abicheck/storage/generation_fingerprints.json b/abicheck/storage/generation_fingerprints.json
+index 9bd320828..2595e2430 100644
+--- a/abicheck/storage/generation_fingerprints.json
++++ b/abicheck/storage/generation_fingerprints.json
+@@ -71,8 +71,9 @@
+       "abicheck/extract/headers/castxml/calling_convention.py": "ab4cd4474d11eb0da2216b29393e9daf1dbcf94226204237fd4c0381adacbcbb",
+       "abicheck/extract/headers/castxml/context.py": "4b1ff6544ba29d2236885086a65ad9f7037f8f46105da4579b751a499058b9d8",
+       "abicheck/extract/headers/castxml/dumper.py": "af0686fef5366815892a95a63503f3620299ea87b5182d7de63209c6c6d91b45",
++      "abicheck/extract/headers/castxml/duplicate_declarations.py": "29dcf25504b916f336f5d18beddbd3f0fddf66e5b81b435b21d862aa0122f51d",
+       "abicheck/extract/headers/castxml/enums.py": "e616c768543061d71812378dd92cbcb7b8d00afbb734bcb7b4b5334ee34042aa",
+-      "abicheck/extract/headers/castxml/functions.py": "c6e19d532a0467cdf05d59465a77021c8dcc9554752e21ebd6812d259e6e3a2d",
++      "abicheck/extract/headers/castxml/functions.py": "1304683f51e5a7b7fe63cad3c7b1a6abfafddd2665d62bd1c15af5af301f77e2",
+       "abicheck/extract/headers/castxml/location.py": "e8e3a0a3e3abd14742c93f02c99b4487aae81b9b619d471c0603ca443d0f5ab0",
+       "abicheck/extract/headers/castxml/names.py": "038abc55f72f11185c0a5ec48d57bff95a1ab894380f7978b6187cd76b044796",
+       "abicheck/extract/headers/castxml/out_of_line_inline.py": "7f8a77d82dd9f87865163ffda63e6c5a762887800886ea9f70dae40e378cbd89",
+@@ -159,9 +160,9 @@
+       "abicheck/symvers_metadata.py": "372737765cd132e6e87ed891dd465d2958e04debbef774e45212ceb3036871cb",
+       "abicheck/type_metadata.py": "9997189de8dac522fd1db8be5ae491d811139503f83abaaded89038eb4aa9cdf"
+     },
+-    "fingerprint": "2296cf48bc9b8b47f28b7b8f780529129f9fe7ea20d0263002428cb2f079db93",
+-    "generation": 15,
+-    "reason": "PR-internal fixes within unreleased generation 15: C++ overloads keyed by mangled name and inline vector returns resolved; no generation has shipped with the previous keys"
++    "fingerprint": "fbcf795fbce6ce8b2702d4a97e02ba48de906428a69a26bab081cf074f270b9e",
++    "generation": 16,
++    "reason": "castxml collapses benign same-key duplicate declarations from non-public headers (glibc cv overloads, libstdc++ ctor template twins)"
+   },
+   "resolver": {
+     "files": {
+diff --git a/abicheck/storage/generation_migrations.py b/abicheck/storage/generation_migrations.py
+index 30f9e99bc..3e73641d5 100644
+--- a/abicheck/storage/generation_migrations.py
++++ b/abicheck/storage/generation_migrations.py
+@@ -185,6 +185,14 @@ SPELLING_MIGRATIONS: Mapping[int, GenerationSpellingChange] = {
+         "a stored 'T[N-1]' cannot be told apart from a genuine 'T[N-1]', so no rewrite "
+         "is sound and a baseline holding those spellings is re-dumped"
+     ),
++    16: GenerationSpellingChange(
++        "castxml collapses a same-key function group declared only in non-public "
++        "headers whose signatures agree modulo cv (glibc wcschr/strchr overloads, "
++        "libstdc++ copy ctor beside its converting-template twin) to its first "
++        "declaration (duplicate_declarations.py): the dropped record was already "
++        "shadowed first-wins by the index, so set membership shrinks and no "
++        "stored type spelling is rewritten"
++    ),
+ }
+ 
+ #: Reasons that say nothing about what was audited; the bump gate refuses them.
+diff --git a/abicheck/storage/versioning.py b/abicheck/storage/versioning.py
+index f4cfe72f1..0df871079 100644
+--- a/abicheck/storage/versioning.py
++++ b/abicheck/storage/versioning.py
+@@ -81,7 +81,7 @@ COMPARISON_CONTRACT_VERSION = 1
+ #: every package this build writes and passed by every reader, so a package
+ #: produced under different extraction semantics is reported, never refused.
+ #: Bump it when what an extractor records for the same input changes.
+-EXTRACTOR_GENERATION = 15
++EXTRACTOR_GENERATION = 16
+ 
+ #: This build's resolution semantics generation (ADR-062 D2): provider
+ #: selection, alias normalization, symbol-version handling, reachability.
+diff --git a/changelog.d/20261024_120000_noreply_benign_duplicate_declarations.md b/changelog.d/20261024_120000_noreply_benign_duplicate_declarations.md
+new file mode 100644
+index 000000000..4bed84d0d
+--- /dev/null
++++ b/changelog.d/20261024_120000_noreply_benign_duplicate_declarations.md
+@@ -0,0 +1,10 @@
++### Fixed
++
++- **No more "Duplicate mangled symbols skipped (first-wins)" warning for
++  system-header duplicates** — glibc's C++ `const`/non-`const` overloads of
++  `wcschr`/`strchr`/`memchr` (one asm symbol) and libstdc++'s copy/move
++  constructor beside a same-signature converting-constructor template (one
++  `__abicheck_ctor__std::...` key) are now collapsed to one record when the
++  castxml dump is built, so dumping a header that includes `<memory>` or
++  `<cstring>` no longer warns. A duplicate from the library's own headers, or
++  with conflicting signatures, still warns. Extractor generation is now 16.
+diff --git a/tests/_model_warning_hygiene.py b/tests/_model_warning_hygiene.py
+index 91a28a8b1..8620f5181 100644
+--- a/tests/_model_warning_hygiene.py
++++ b/tests/_model_warning_hygiene.py
+@@ -31,20 +31,12 @@ ALLOWED_MODEL_WARNINGS: dict[str, str] = {}
+ #: ``{regex over one dropped key: reason}`` for the first-wins index warning
+ #: (``model.first_wins_index.warn_dropped``). That warning lists every
+ #: dropped key in one line, so it is allowed only when *each* key fullmatches
+-#: an entry here -- a new colliding name still fails. Found by the
+-#: ``catalog/cases`` depth-metamorphic run (case80, case126).
+-ALLOWED_FIRST_WINS_KEYS: dict[str, str] = {
+-    r"(wcschr|wcsrchr|wcspbrk|wcsstr|wcswcs|wmemchr|strchr|strrchr|strpbrk|strstr|memchr)": (
+-        "glibc's C++ <wchar.h>/<string.h> declare const and non-const overloads "
+-        "that share one asm name (one symbol, two declarations): a genuine "
+-        "duplicate key, and first-wins is the correct resolution"
+-    ),
+-    r"__abicheck_ctor__std::.*": (
+-        "castxml placeholder key for an implicitly-declared std:: template "
+-        "constructor, declared once per instantiation context; libstdc++ "
+-        "internals, never the library's own surface"
+-    ),
+-}
++#: an entry here -- a new colliding name still fails. Empty by design: the
++#: glibc cv-overload and libstdc++ ctor-placeholder duplicates the
++#: ``catalog/cases`` depth-metamorphic run found (case80, case126) are now
++#: collapsed at the source
++#: (``extract/headers/castxml/duplicate_declarations.py``).
++ALLOWED_FIRST_WINS_KEYS: dict[str, str] = {}
+ 
+ 
+ class _Collector(logging.Handler):
+diff --git a/tests/fixtures/generations/gen15/corpus.json.gz b/tests/fixtures/generations/gen15/corpus.json.gz
+new file mode 100644
+index 0000000000000000000000000000000000000000..c002a383c1574df91630a328a47846b54a902a4a
+GIT binary patch
+literal 11465
+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
+
+literal 0
+HcmV?d00001
+
+diff --git a/tests/fixtures/generations/manifest.json b/tests/fixtures/generations/manifest.json
+index 167d2065c..ef011e4fe 100644
+--- a/tests/fixtures/generations/manifest.json
++++ b/tests/fixtures/generations/manifest.json
+@@ -30,6 +30,12 @@
+       "compiler": "g++ (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0",
+       "snapshot": "gen13/corpus.json.gz"
+     },
++    "15": {
++      "castxml": "castxml version 0.7.0",
++      "commit": "904915283a2d",
++      "compiler": "g++ (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0",
++      "snapshot": "gen15/corpus.json.gz"
++    },
+     "2": {
+       "castxml": "castxml version 0.7.0",
+       "commit": "098e2535fd71",
+diff --git a/tests/regressions/manifest_classification.py b/tests/regressions/manifest_classification.py
+index c3dbd3f2e..51391a6b9 100644
+--- a/tests/regressions/manifest_classification.py
++++ b/tests/regressions/manifest_classification.py
+@@ -689,4 +689,26 @@ CLASSIFICATION_BUG_CLASSES: tuple[BugClass, ...] = (
+             "lookup": ("qualified", "unambiguous bare", "ambiguous bare"),
+         },
+     ),
++    BugClass(
++        id="identity.benign_duplicate_declaration_key",
++        invariant=(
++            "A function key declared more than once only in non-public "
++            "(system/dependency) headers with signatures equal modulo "
++            "cv-qualification is one entity: the dump keeps exactly its first "
++            "declaration whatever the order, and indexing logs no first-wins "
++            "duplicate; a same-key group reaching a public header, or with "
++            "conflicting signatures, is kept and still warns."
++        ),
++        fixed_by=(),
++        seed_tests=(
++            "tests/test_castxml_duplicate_declarations.py",
++            "tests/test_model_warning_hygiene.py",
++        ),
++        public_surfaces=("cli",),
++        axes={
++            "shape": ("glibc cv overload", "std ctor placeholder", "conflicting"),
++            "provenance": ("non-public", "public"),
++            "frontend": ("castxml",),
++        },
++    ),
+ )
+diff --git a/tests/test_castxml_duplicate_declarations.py b/tests/test_castxml_duplicate_declarations.py
+new file mode 100644
+index 000000000..d7858fb7b
+--- /dev/null
++++ b/tests/test_castxml_duplicate_declarations.py
+@@ -0,0 +1,131 @@
++"""Benign duplicate function declarations collapse at the castxml source.
++
++Bug class ``identity.benign_duplicate_declaration_key``: glibc's C++ cv
++overloads (``wcschr``/``strchr``/... sharing one asm name) and libstdc++'s
++copy/move constructor next to a same-signature converting-constructor template
++(one ``__abicheck_ctor__std::...`` placeholder key) used to reach the snapshot
++as two records under one key, so every dump of a header including
++``<memory>``/``<cstring>`` warned "Duplicate mangled symbols skipped
++(first-wins)". A group whose members all come from non-public headers and agree
++modulo cv-qualification is one entity: it keeps exactly its first declaration.
++A duplicate reaching the library's own headers, or with conflicting
++signatures, is left to the snapshot index, which still warns.
++"""
++
++from __future__ import annotations
++
++import itertools
++import logging
++import shutil
++import subprocess
++from pathlib import Path
++from xml.etree.ElementTree import Element
++
++import pytest
++from click.testing import CliRunner
++
++from abicheck.extract.headers.castxml.duplicate_declarations import (
++    collapse_benign_duplicates,
++)
++from abicheck.model import AbiSnapshot, Function, Param
++
++REPO = Path(__file__).resolve().parents[1]
++
++
++def _fn(name: str, mangled: str, ret: str, *params: str) -> Function:
++    return Function(
++        name=name,
++        mangled=mangled,
++        return_type=ret,
++        params=[Param(name=f"p{i}", type=t) for i, t in enumerate(params)],
++    )
++
++
++def _parsed(funcs: list[Function]) -> list[tuple[Element, Function]]:
++    return [(Element("Function", id=f"_{i}"), f) for i, f in enumerate(funcs)]
++
++
++_GLIBC = [
++    _fn("wcschr", "wcschr", "wchar_t*", "wchar_t*", "wchar_t"),
++    _fn("wcschr", "wcschr", "const wchar_t*", "const wchar_t*", "wchar_t"),
++]
++_STD_CTOR_KEY = "__abicheck_ctor__std::shared_ptr<X>(const shared_ptr<X>&)"
++_STD_CTOR = [
++    _fn("shared_ptr", _STD_CTOR_KEY, "void", "const shared_ptr<X>&"),
++    _fn("shared_ptr", _STD_CTOR_KEY, "void", "const shared_ptr<X>&"),
++]
++
++
++@pytest.mark.parametrize("group", [_GLIBC, _STD_CTOR], ids=["glibc_cv", "std_ctor"])
++def test_benign_group_keeps_first_declaration_in_any_order(
++    group: list[Function], caplog: pytest.LogCaptureFixture
++) -> None:
++    other = _fn("f", "_Z1fv", "void")
++    for perm in itertools.permutations([*group, other]):
++        out = collapse_benign_duplicates(_parsed(list(perm)), lambda _el: False)
++        dup_first = next(f for f in perm if f is not other)
++        assert out == [f for f in perm if f is other or f is dup_first]
++        caplog.clear()
++        with caplog.at_level(logging.WARNING, logger="abicheck.model"):
++            AbiSnapshot(library="l", version="1", functions=out).index()
++        assert not [r for r in caplog.records if "first-wins" in r.getMessage()]
++
++
++@pytest.mark.parametrize(
++    ("group", "public"),
++    [
++        (_GLIBC, [True, False]),  # one member from the library's own header
++        (_STD_CTOR, [True, True]),
++        (
++            [  # conflicting signatures under one key, both non-public
++                _fn("g", "_Z1gi", "int", "int"),
++                _fn("g", "_Z1gi", "int", "long"),
++            ],
++            [False, False],
++        ),
++        ([_fn("h", "_Z1hv", "int"), _fn("h", "_Z1hv", "double")], [False, False]),
++    ],
++)
++def test_conflicting_or_public_duplicate_is_kept_and_still_warns(
++    group: list[Function], public: list[bool], caplog: pytest.LogCaptureFixture
++) -> None:
++    parsed = _parsed(group)
++    by_el = {id(el): p for (el, _), p in zip(parsed, public, strict=True)}
++    out = collapse_benign_duplicates(parsed, lambda el: by_el[id(el)])
++    assert out == group
++    with caplog.at_level(logging.WARNING, logger="abicheck.model"):
++        AbiSnapshot(library="l", version="1", functions=out).index()
++    assert [r for r in caplog.records if "first-wins" in r.getMessage()]
++
++
++_CASES = ("case80_pimpl_shared_to_unique", "case126_sycl_device_impl_ptr")
++
++
++@pytest.mark.integration
++@pytest.mark.model_warning_hygiene
++@pytest.mark.parametrize("case", _CASES)
++def test_catalog_case_compare_logs_no_first_wins_duplicate(
++    case: str, tmp_path: Path, caplog: pytest.LogCaptureFixture
++) -> None:
++    if not shutil.which("castxml") or not shutil.which("g++"):
++        pytest.skip("needs castxml and g++")
++    from abicheck.cli import main
++
++    src = REPO / "catalog" / "cases" / case
++    args = []
++    for v in ("v1", "v2"):
++        lib = tmp_path / f"lib{v}.so"
++        subprocess.run(
++            ["g++", "-shared", "-fPIC", "-g", "-std=c++17", f"-I{src}",
++             "-o", str(lib), str(src / f"{v}.cpp")],
++            check=True,
++        )  # fmt: skip
++        args += [str(lib)]
++    with caplog.at_level(logging.WARNING, logger="abicheck.model"):
++        res = CliRunner().invoke(
++            main,
++            ["compare", args[0], args[1],
++             "-H", f"old={src / 'v1.h'}", "-H", f"new={src / 'v2.h'}"],
++        )  # fmt: skip
++    assert res.exit_code in (0, 2, 4), res.output
++    assert not [r for r in caplog.records if "first-wins" in r.getMessage()]
+diff --git a/tests/test_model_warning_hygiene.py b/tests/test_model_warning_hygiene.py
+index d10f65a06..ccddd564a 100644
+--- a/tests/test_model_warning_hygiene.py
++++ b/tests/test_model_warning_hygiene.py
+@@ -94,4 +94,10 @@ def _first_wins(keys: str) -> logging.LogRecord:
+ def test_first_wins_warning_allowed_only_when_every_key_is(
+     keys: str, allowed: bool
+ ) -> None:
+-    assert (unexpected([_first_wins(keys)], {}) == []) is allowed
++    keys_allowed = {r"wcschr|wmemchr": "test", r"__abicheck_ctor__std::.*": "test"}
++    assert (unexpected([_first_wins(keys)], {}, keys_allowed) == []) is allowed
++
++
++def test_first_wins_allowlist_is_empty() -> None:
++    """The benign duplicates are fixed at the source, not allowlisted."""
++    assert unexpected([_first_wins("wcschr (×2)")], {}) != []

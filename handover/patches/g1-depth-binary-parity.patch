@@ -1,0 +1,285 @@
+diff --git a/abicheck/compare/debug_layout_view.py b/abicheck/compare/debug_layout_view.py
+index 3f5b96f66..de5c9599c 100644
+--- a/abicheck/compare/debug_layout_view.py
++++ b/abicheck/compare/debug_layout_view.py
+@@ -34,6 +34,8 @@ from ..model.dwarf_facts import (
+     advanced_facts_collected,
+     debug_info_present,
+ )
++from ..model.entities import EnumMember, EnumType, RecordType, TypeField
++from ..model.fact import Fact
+ 
+ if TYPE_CHECKING:
+     from ..model.snapshot import AbiSnapshot
+@@ -41,6 +43,7 @@ if TYPE_CHECKING:
+ __all__ = [
+     "DebugLayoutView",
+     "advanced_dwarf_support",
++    "debug_layout_declarations",
+     "debug_layout_view",
+     "restrict_debug_layout",
+ ]
+@@ -114,6 +117,71 @@ def restrict_debug_layout(
+         dwarf.enums = {k: v for k, v in dwarf.enums.items() if k in enum_scope}
+ 
+ 
++#: Representative underlying-type spelling per enum byte size (the model's
++#: own ``"int"`` default for an unknown size), as the BTF/CTF/PDB producers use.
++_ENUM_UNDERLYING_BY_SIZE: dict[int, str] = {
++    1: "char",
++    2: "short",
++    4: "int",
++    8: "long long",
++}
++
++
++def debug_layout_declarations(
++    snap: AbiSnapshot,
++) -> tuple[list[RecordType], list[EnumType]]:
++    """*snap*'s debug record/enum layouts as layout-only model declarations.
++
++    What a binary-only (debug info, no headers) dump puts in
++    ``declarations.types``/``.enums`` for the same layouts, reduced to the
++    facts the layout channel itself carries: size, alignment, field
++    names/spellings/offsets/bitfields, enumerators. Every other field fact
++    reads unsupported, never a confirmed negative. Depth projection uses it
++    so a header-derived snapshot projected to ``binary`` is classified by the
++    same type detectors a binary-only dump is, not by the raw-layout
++    fallback (bug class ``evidence.depth_projection_diverges_from_shallow_dump``).
++    """
++    view = debug_layout_view(snap)
++    if not view.present:
++        return [], []
++    records = [
++        RecordType(
++            name=name,
++            kind="union" if layout.is_union else "struct",
++            size_bits=layout.byte_size * 8 if layout.byte_size else None,
++            alignment_bits=layout.alignment * 8 if layout.alignment else None,
++            fields=[
++                TypeField(
++                    name=fi.name,
++                    type=fi.type_name,
++                    offset_bits=fi.byte_offset * 8 + fi.bit_offset,
++                    is_bitfield=fi.bit_size > 0,
++                    bitfield_bits=fi.bit_size if fi.bit_size > 0 else None,
++                    is_const_fact=Fact.unsupported(),
++                    is_volatile_fact=Fact.unsupported(),
++                    is_mutable_fact=Fact.unsupported(),
++                    default_fact=Fact.unsupported(),
++                    deprecated_fact=Fact.unsupported(),
++                )
++                for fi in layout.fields
++            ],
++            is_union=layout.is_union,
++        )
++        for name, layout in view.records.items()
++    ]
++    enums = [
++        EnumType(
++            name=name,
++            members=[EnumMember(name=m, value=v) for m, v in info.members.items()],
++            underlying_type=_ENUM_UNDERLYING_BY_SIZE.get(
++                info.underlying_byte_size, "int"
++            ),
++        )
++        for name, info in view.enums.items()
++    ]
++    return records, enums
++
++
+ def advanced_dwarf_support(old: AbiSnapshot, new: AbiSnapshot) -> tuple[bool, str]:
+     """Support gate for the ``advanced_dwarf`` detector.
+ 
+diff --git a/abicheck/policy/depth_projection.py b/abicheck/policy/depth_projection.py
+index 3e5b5b426..37bc9fd33 100644
+--- a/abicheck/policy/depth_projection.py
++++ b/abicheck/policy/depth_projection.py
+@@ -405,9 +405,25 @@ def _strip_header_and_above_evidence(
+         # (triggered because its own scope derivation now sees empty
+         # `types`/`enums` on both sides) falls back to a pool that was
+         # already reduced, not the raw, unscoped DWARF universe.
+-        from ..compare.debug_layout_view import restrict_debug_layout
++        from ..compare.debug_layout_view import (
++            debug_layout_declarations,
++            restrict_debug_layout,
++        )
+ 
+         restrict_debug_layout(snap, dwarf_struct_scope, dwarf_enum_scope)
++        # Rebuild layout-only records/enums from the (scoped) debug layout:
++        # a binary-only dump of the same library carries its debug-info
++        # records in `types`/`enums`, so its type detectors (type_size_changed,
++        # type_field_added_compatible, ...) judge a layout change. Leaving
++        # them empty sent the projected pair to the raw-layout fallback
++        # instead, which spells the same change struct_size_changed/
++        # struct_field_removed -- a different finding set from dumping at
++        # the requested depth (bug class
++        # `evidence.depth_projection_diverges_from_shallow_dump`). These are
++        # debug-info facts, not the discarded header spellings.
++        snap.declarations.types, snap.declarations.enums = debug_layout_declarations(
++            snap
++        )
+ 
+     snap.declarations.constants = {}
+     # Sidecar keyed exactly like `constants` (same docstring as above) --
+diff --git a/tests/test_depth_metamorphic_examples.py b/tests/test_depth_metamorphic_examples.py
+index cc347bced..8c7a0185b 100644
+--- a/tests/test_depth_metamorphic_examples.py
++++ b/tests/test_depth_metamorphic_examples.py
+@@ -171,7 +171,7 @@ def test_lower_depth_never_invents_a_removal(
+     old = dump(v1_lib, headers=_header_list(v1_hdr), version="v1")
+     new = dump(v2_lib, headers=_header_list(v2_hdr), version="v2")
+ 
+-    kinds_by_depth = {}
++    kinds_by_depth: dict[str, set[Finding]] = {}
+     for depth in _DEPTHS:
+         p_old, p_new = project_pair_to_depth(old, new, depth)
+         kinds_by_depth[depth] = _findings(compare(p_old, p_new).changes)
+diff --git a/tests/test_depth_projection.py b/tests/test_depth_projection.py
+index f59f1ddfa..09657f529 100644
+--- a/tests/test_depth_projection.py
++++ b/tests/test_depth_projection.py
+@@ -365,7 +365,10 @@ class TestStructuralFactsRequireDwarfSourcing:
+         new_b = project_snapshot_to_depth(new, "binary")
+         result = checker.compare(old_b, new_b)
+         assert result.verdict != checker.Verdict.NO_CHANGE
+-        assert {c.kind.value for c in result.changes} == {"struct_field_type_changed"}
++        # The DWARF layouts become layout-only records (the header RecordType
++        # is discarded), so the type detector spells it as a binary-only
++        # dump of the same layouts would.
++        assert {c.kind.value for c in result.changes} == {"type_field_type_changed"}
+ 
+     def test_dwarf_only_snapshot_keeps_types_wholesale(self) -> None:
+         # from_headers=False -- a genuinely DWARF/symbols-only dump, where
+@@ -1008,8 +1011,11 @@ class TestProjectPairToDepthPreservesDwarfPublicScope:
+         new = self._make(from_headers=False, private_size=8, public_size=64)
+         old_p, new_p = project_pair_to_depth(old, new, "binary")
+         result = checker.compare(old_p, new_p)
++        # Spelled as a binary-only dump spells it: the projection rebuilds
++        # layout-only records from the debug layout, so the type detector
++        # (not the raw-layout fallback's struct_size_changed) reports it.
+         assert any(
+-            c.kind == ChangeKind.STRUCT_SIZE_CHANGED and c.symbol == "S"
++            c.kind == ChangeKind.TYPE_SIZE_CHANGED and c.symbol == "S"
+             for c in result.changes
+         )
+ 
+diff --git a/tests/test_depth_projection_matches_shallow_dump.py b/tests/test_depth_projection_matches_shallow_dump.py
+new file mode 100644
+index 000000000..c2873a26d
+--- /dev/null
++++ b/tests/test_depth_projection_matches_shallow_dump.py
+@@ -0,0 +1,113 @@
++# Copyright 2026 Nikolay Petrov
++# SPDX-License-Identifier: Apache-2.0
++#
++# Licensed under the Apache License, Version 2.0 (the "License");
++# you may not use this file except in compliance with the License.
++# You may obtain a copy of the License at
++#
++#     http://www.apache.org/licenses/LICENSE-2.0
++#
++# Unless required by applicable law or agreed to in writing, software
++# distributed under the License is distributed on an "AS IS" BASIS,
++# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++# See the License for the specific language governing permissions and
++# limitations under the License.
++
++"""Projecting a richer snapshot to ``binary`` equals dumping at ``binary``.
++
++Bug class ``evidence.depth_projection_diverges_from_shallow_dump``: a
++header-built snapshot projected to ``--depth binary`` had its record/enum
++declarations cleared, so a layout change reached only the raw debug-layout
++fallback (``struct_size_changed``, ``struct_field_removed``) while a
++binary-only dump of the very same library carries its debug-info records in
++``declarations.types`` and is judged by the type detectors
++(``type_size_changed``, ``type_field_added_compatible``,
++``type_field_removed``). Same library, same requested depth, different
++findings.
++
++The invariant, over every catalog case gcc can build: the findings
++(kind, symbol) of ``compare(project(headers dump, binary))`` equal those of
++``compare(binary-only dump)``. The oracle is an independent extraction (a
++dump with no headers), never the projection's own bookkeeping. Any residual
++difference must be named in :data:`RESIDUAL` with the reason the projection
++cannot (or deliberately does not) reproduce it.
++"""
++
++from __future__ import annotations
++
++import shutil
++from pathlib import Path
++
++import pytest
++
++from abicheck.checker import compare
++from abicheck.policy.depth_projection import project_pair_to_depth
++from tests.test_example_autodiscovery import (
++    _ALL_CASES,
++    BUILD_INFO_CASES,
++    CURRENT_PLATFORM,
++    PLATFORMS,
++    REQUIRES_FEATURE,
++    SOURCE_SMOKE_CASES,
++    _build_libs_for_case,
++    _find_sources,
++    _header_list,
++)
++
++#: ``(kind, symbol)`` of one finding.
++Finding = tuple[str, str]
++
++#: ``{case: reason}`` for a case whose projected and binary-only findings
++#: still differ, each for a reason the projection cannot remove.
++RESIDUAL: dict[str, str] = {}
++
++
++def _findings(changes: list) -> set[Finding]:
++    return {(c.kind.value, c.symbol) for c in changes}
++
++
++@pytest.mark.integration
++@pytest.mark.parametrize("case_name", [c for c, _ in _ALL_CASES])
++def test_binary_projection_matches_binary_only_dump(
++    case_name: str, tmp_path: Path, shared_cmake_build_dir: Path | None
++) -> None:
++    if CURRENT_PLATFORM not in PLATFORMS.get(case_name, [CURRENT_PLATFORM]):
++        pytest.skip(f"{case_name}: not on {CURRENT_PLATFORM}")
++    if case_name in BUILD_INFO_CASES or case_name in SOURCE_SMOKE_CASES:
++        pytest.skip(f"{case_name}: needs the CLI build/source path")
++    if not shutil.which("castxml"):
++        pytest.skip("castxml not found in PATH")
++    feature = REQUIRES_FEATURE.get(case_name)
++    if feature is not None:
++        from tests.feature_probe import compiler_supports
++
++        if not compiler_supports(feature):
++            pytest.skip(f"{case_name}: compiler lacks {feature!r}")
++
++    import example_catalog  # on sys.path via test_example_autodiscovery
++
++    from abicheck.dumper import dump
++
++    case_dir = example_catalog.case_dir(case_name)
++    v1_src, v2_src, v1_hdr, v2_hdr = _find_sources(case_dir)
++    v1_lib, v2_lib = _build_libs_for_case(
++        case_name, case_dir, tmp_path, shared_cmake_build_dir, v1_src, v2_src
++    )
++    rich_old = dump(v1_lib, headers=_header_list(v1_hdr), version="v1")
++    rich_new = dump(v2_lib, headers=_header_list(v2_hdr), version="v2")
++    p_old, p_new = project_pair_to_depth(rich_old, rich_new, "binary")
++    projected = _findings(compare(p_old, p_new).changes)
++
++    oracle = _findings(
++        compare(
++            dump(v1_lib, headers=[], version="v1"),
++            dump(v2_lib, headers=[], version="v2"),
++        ).changes
++    )
++    if case_name in RESIDUAL:
++        assert projected != oracle, f"{case_name}: residual gone; drop it"
++        return
++    assert projected == oracle, {
++        "only_projected": sorted(projected - oracle),
++        "only_binary_dump": sorted(oracle - projected),
++    }

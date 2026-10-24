@@ -1,0 +1,1419 @@
+diff --git a/abicheck/checker.py b/abicheck/checker.py
+index fb93465be..260134691 100644
+--- a/abicheck/checker.py
++++ b/abicheck/checker.py
+@@ -46,7 +46,7 @@ from .compare.surface_reconcile import releases_reconciliation
+ from .compare.type_layout_diff import (
+     diff_struct_layouts,  # noqa: F401 — tests import it from here
+ )
+-from .confidence import _compute_confidence
++from .confidence import _compute_confidence, undeclared_export_census_block
+ from .contract_pipeline import (
+     ContractEvaluationStage,
+     build_contract_stage,
+@@ -1387,14 +1387,14 @@ def compare(
+     # just-built `result`, never a new probe; see policy/analysis_assurance/__init__.py's
+     # module docstring for the full rationale and what is deferred.
+     #
+-    # `checker.compare()` sees only each snapshot's *embedded* BuildSourcePack
+-    # (`old/new.build_source`), never an out-of-band `--old/new-build-info`/
++    # `checker.compare()` sees only each snapshot's *embedded* BuildSourcePack (`old/new.build_source`), never an out-of-band `--old/new-build-info`/
+     # `--old/new-sources` pack the CLI resolved (`_resolve_side_pack`); a
+     # caller holding one recomputes with it explicitly (P1 review; see
+     # `frontends/cli/compare_result.py (_report_compare_result)`).
+     from .workflows.analysis_assurance_attach import attach_analysis_assurance
+ 
+     result.edge_coverage = edge_coverage_report(old, new)  # I4, before the rollup
++    result.undeclared_export_census = undeclared_export_census_block(old, new)
+     attach_analysis_assurance(result, old, new)
+     memory_trace.mark("compare.rollup:done")
+     return result
+diff --git a/abicheck/checker_types.py b/abicheck/checker_types.py
+index 600e1a201..0fa8e74fc 100644
+--- a/abicheck/checker_types.py
++++ b/abicheck/checker_types.py
+@@ -75,6 +75,10 @@ class DiffResult(ReportSideFacts):
+     coverage_warnings: list[str] = field(
+         default_factory=list
+     )  # human-readable coverage gaps
++    # Report schema 6.7: per side, the undeclared-export census behind the
++    # coverage line (guard macro -> count/examples, named cause -> count);
++    # None when no export was attributed (`confidence.undeclared_export_census_block`).
++    undeclared_export_census: dict[str, object] | None = None
+     # ADR-024: findings excluded because they are not on the public-header
+     # ABI surface (only populated when scope_to_public_surface is enabled).
+     # Recorded for audit — surfaced under --show-filtered — never dropped.
+diff --git a/abicheck/confidence.py b/abicheck/confidence.py
+index c091cc213..acad6d774 100644
+--- a/abicheck/confidence.py
++++ b/abicheck/confidence.py
+@@ -38,6 +38,7 @@ from .model.header_exclusion_record import exclusions_are_symmetric
+ 
+ if TYPE_CHECKING:
+     from .checker_types import DiffResult
++    from .model.undeclared_export_census import UndeclaredExportCensus
+ 
+ __all__ = [
+     "compute_confidence",
+@@ -427,14 +428,42 @@ def undeclared_export_warnings(old: AbiSnapshot | None, new: AbiSnapshot) -> lis
+     (``elf.machine`` set), so an uncaptured table never reads as "everything
+     undeclared". See :mod:`abicheck.model.undeclared_export_census`.
+     """
++    from .model.undeclared_export_census import census_warning
++
++    notes: list[str] = []
++    for side, census in undeclared_export_censuses(old, new):
++        line = census_warning(side, census)
++        if line is not None:
++            notes.append(line)
++    return notes
++
++
++def undeclared_export_census_block(
++    old: AbiSnapshot | None, new: AbiSnapshot
++) -> dict[str, object] | None:
++    """The report's ``undeclared_export_census`` block: per side, the census
++    behind the coverage line, emitted under the same rule (only when at
++    least one export is attributed to a guard macro or a named cause)."""
++    from .model.undeclared_export_census import census_to_dict
++
++    block = {
++        side: census_to_dict(census)
++        for side, census in undeclared_export_censuses(old, new)
++        if census.attributed
++    }
++    return block or None
++
++
++def undeclared_export_censuses(
++    old: AbiSnapshot | None, new: AbiSnapshot
++) -> list[tuple[str, UndeclaredExportCensus]]:
++    """``(side, census)`` for each side with a captured export table and at
++    least one undeclared export (see :func:`undeclared_export_warnings`)."""
+     from .demangle import demangle_batch
+     from .elf_symbol_filter import ALL_SYMBOL_TYPES, exported_symbol_names
+-    from .model.undeclared_export_census import (
+-        census_undeclared_exports,
+-        census_warning,
+-    )
++    from .model.undeclared_export_census import census_undeclared_exports
+ 
+-    notes: list[str] = []
++    out: list[tuple[str, UndeclaredExportCensus]] = []
+     for side, snap in (("old", old), ("new", new)):
+         if snap is None or getattr(snap, "elf_only_mode", False):
+             continue
+@@ -450,12 +479,12 @@ def undeclared_export_warnings(old: AbiSnapshot | None, new: AbiSnapshot) -> lis
+         if not undeclared:
+             continue
+         census = census_undeclared_exports(
+-            undeclared, demangle_batch(sorted(undeclared))
++            undeclared,
++            demangle_batch(sorted(undeclared)),
++            getattr(snap, "preprocessor_hidden_declarations", None),
+         )
+-        line = census_warning(side, census)
+-        if line is not None:
+-            notes.append(line)
+-    return notes
++        out.append((side, census))
++    return out
+ 
+ 
+ def snapshot_load_notices(old: AbiSnapshot | None, new: AbiSnapshot) -> list[str]:
+diff --git a/abicheck/dumper.py b/abicheck/dumper.py
+index 633ad3ad2..24b79072d 100644
+--- a/abicheck/dumper.py
++++ b/abicheck/dumper.py
+@@ -846,8 +846,7 @@ def _dump_elf(
+         elf=elf_meta,
+         dwarf=dwarf_meta,
+         dwarf_advanced=dwarf_adv,
+-        # Reached only when headers were supplied and castxml ran (the no-header
+-        # and DWARF-only branches return earlier): this surface is header-parsed.
++        # Reached only when headers were supplied and castxml ran (the no-header and DWARF-only branches return earlier): this surface is header-parsed.
+         from_headers=True,
+         ast_producer=ast_result.ast_producer,
+         ast_toolchain=ast_result.ast_toolchain,
+@@ -868,6 +867,7 @@ def _dump_elf(
+             sysroot,
+             ast_toolchain=ast_result.ast_toolchain,
+             lang=lang,
++            preprocessor_hidden=ast_result.preprocessor_hidden,
+         ),
+     )
+     _populate_elf_visibility(snapshot)
+diff --git a/abicheck/extract/headers/ast_config.py b/abicheck/extract/headers/ast_config.py
+index afca643b3..6a597de63 100644
+--- a/abicheck/extract/headers/ast_config.py
++++ b/abicheck/extract/headers/ast_config.py
+@@ -72,7 +72,9 @@ _CLANG_CACHE_SCHEMA_VERSION = 4
+ #: before this carries no vector spellings, so it must miss and re-run.
+ #: Bumped to 7 when vector sidecars keyed C++ overloads by mangled name and
+ #: resolved inline vector returns: a sidecar from before this is keyed wrongly.
+-_CASTXML_CACHE_SCHEMA_VERSION = 7
++#: Bumped to 8 when the cached document started carrying the preprocessor-
++#: excluded declaration scan (`extract.headers.preprocessor_branches`).
++_CASTXML_CACHE_SCHEMA_VERSION = 8
+ 
+ #: Which module constant salts each backend's header-parse cache key. Named,
+ #: not copied, so the key always reads the constant's current value.
+diff --git a/abicheck/extract/headers/castxml/backend.py b/abicheck/extract/headers/castxml/backend.py
+index 2baf50041..7bb18146b 100644
+--- a/abicheck/extract/headers/castxml/backend.py
++++ b/abicheck/extract/headers/castxml/backend.py
+@@ -37,7 +37,7 @@ import logging
+ import shutil
+ import subprocess
+ import tempfile
+-from collections.abc import Callable
++from collections.abc import Callable, Sequence
+ from pathlib import Path
+ from typing import cast
+ from xml.etree.ElementTree import Element, tostring
+@@ -70,6 +70,12 @@ from ..toolchain import (
+ from .calling_convention import calling_conventions_in
+ from .dumper import _CastxmlParser
+ from .policy import evaluate_castxml_version
++from ..preprocessor_branches import hidden_declarations_for_headers
++from .hidden_declarations import (
++    PARSER_ATTR,
++    attach_hidden_declarations,
++    read_hidden_declarations,
++)
+ from .preprocessed_text import attach_preprocessed_text, resolve_preprocessed_text
+ from .probe import (
+     _castxml_cpp_retry_allowed,
+@@ -480,7 +486,9 @@ def _run_castxml_attempt(
+         root = _validate_castxml_output(
+             result, out_xml, headers, force_cpp, castxml_bin=castxml_bin
+         )
+-        _record_calling_convention_macros(root, cmd, out_xml, agg_path.parent, run)
++        _record_calling_convention_macros(
++            root, cmd, out_xml, agg_path.parent, run, headers
++        )
+         return root
+     finally:
+         shutil.rmtree(agg_path.parent, ignore_errors=True)
+@@ -492,18 +500,27 @@ def _record_calling_convention_macros(
+     out_xml: Path,
+     work_dir: Path,
+     run: CastxmlRunner,
++    headers: Sequence[Path] = (),
+ ) -> None:
+     """Attach the preprocessed text of the declarations spelling a calling
+     convention to *root* and to *out_xml* (so the cached AST keeps it); see
+-    :mod:`.preprocessed_text`. A failed preprocess run leaves both untouched."""
++    :mod:`.preprocessed_text`. The same run's surviving lines also decide
++    which public-header declarations the configuration excluded
++    (:mod:`..preprocessor_branches`). A failed preprocess run leaves both
++    untouched."""
++    present: dict[str, set[int]] = {}
+     table = resolve_preprocessed_text(
+-        cmd, root, work_dir, run, lambda t: bool(calling_conventions_in(t))
++        cmd, root, work_dir, run, lambda t: bool(calling_conventions_in(t)), present
+     )
+     if table is None:
+         return
+     extra = Element("_")
+     attach_preprocessed_text(extra, table)
+     attach_preprocessed_text(root, table)
++    hidden = hidden_declarations_for_headers(headers, present)
++    if hidden is not None:
++        attach_hidden_declarations(extra, hidden)
++        attach_hidden_declarations(root, hidden)
+     data = out_xml.read_bytes()
+     close_at = data.rfind(b"</")
+     if close_at == -1:
+@@ -573,6 +590,7 @@ class CastxmlBackend:
+             public_dir_paths=r.public_dir_paths,
+             no_binary_evidence=r.no_binary_evidence,
+         )
++        setattr(parser, PARSER_ATTR, read_hidden_declarations(xml_root))
+         setattr(
+             parser,
+             "_abicheck_neutral_factory",
+diff --git a/abicheck/extract/headers/castxml/hidden_declarations.py b/abicheck/extract/headers/castxml/hidden_declarations.py
+new file mode 100644
+index 000000000..d3feb74f6
+--- /dev/null
++++ b/abicheck/extract/headers/castxml/hidden_declarations.py
+@@ -0,0 +1,69 @@
++# Copyright 2026 Nikolay Petrov
++# SPDX-License-Identifier: Apache-2.0
++#
++# Licensed under the Apache License, Version 2.0 (the "License");
++# you may not use this file except in compliance with the License.
++# You may obtain a copy of the License at
++#
++#     http://www.apache.org/licenses/LICENSE-2.0
++#
++# Unless required by applicable law or agreed to in writing, software
++# distributed under the License is distributed on an "AS IS" BASIS,
++# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++# See the License for the specific language governing permissions and
++# limitations under the License.
++
++"""Carry :mod:`..preprocessor_branches`' result inside the CastXML document.
++
++Stored in the document (one ``<AbicheckHiddenDecl>`` per guard/name pair
++under an ``<AbicheckHiddenScan>`` marker) for the same reason
++:mod:`.preprocessed_text` stores its lines there: a cached AST must carry it
++too. A document without the marker had no scan (a failed preprocess run or
++a cache entry predating it) and reads as ``None`` -- never "nothing hidden".
++"""
++
++from __future__ import annotations
++
++from collections.abc import Mapping
++from typing import Any
++from xml.etree.ElementTree import Element, SubElement
++
++SCAN_TAG = "AbicheckHiddenScan"
++DECL_TAG = "AbicheckHiddenDecl"
++#: Parser attribute the backend stamps (read by ``_parser_preprocessor_hidden``).
++PARSER_ATTR = "_abicheck_preprocessor_hidden"
++
++
++def attach_hidden_declarations(
++    root: Element, hidden: Mapping[str, tuple[str, ...]]
++) -> None:
++    SubElement(root, SCAN_TAG)
++    for macro, names in sorted(hidden.items()):
++        for name in names:
++            SubElement(root, DECL_TAG, macro=macro, name=name)
++
++
++def read_hidden_declarations(root: Element) -> dict[str, tuple[str, ...]] | None:
++    if root.find(SCAN_TAG) is None:
++        return None
++    out: dict[str, set[str]] = {}
++    for el in root.iter(DECL_TAG):
++        macro, name = el.get("macro", ""), el.get("name", "")
++        if macro and name:
++            out.setdefault(macro, set()).add(name)
++    return {m: tuple(sorted(n)) for m, n in sorted(out.items())}
++
++
++def parser_preprocessor_hidden(parser: Any) -> dict[str, tuple[str, ...]] | None:
++    """The stamped scan of a header-AST parser, or ``None`` (no scan: any
++    non-castxml backend, or a castxml run whose preprocess step failed)."""
++    value = getattr(parser, PARSER_ATTR, None)
++    return dict(value) if isinstance(value, dict) else None
++
++
++__all__ = [
++    "PARSER_ATTR",
++    "attach_hidden_declarations",
++    "parser_preprocessor_hidden",
++    "read_hidden_declarations",
++]
+diff --git a/abicheck/extract/headers/castxml/preprocessed_text.py b/abicheck/extract/headers/castxml/preprocessed_text.py
+index 3d78797a0..35d22d72b 100644
+--- a/abicheck/extract/headers/castxml/preprocessed_text.py
++++ b/abicheck/extract/headers/castxml/preprocessed_text.py
+@@ -214,9 +214,14 @@ def resolve_preprocessed_text(
+     work_dir: Path,
+     run: Callable[..., subprocess.CompletedProcess[str]],
+     has_cc: Callable[[str], bool],
++    files_out: dict[str, set[int]] | None = None,
+ ) -> PreprocessedText | None:
+     """Run the ``-E -dD`` sibling of *castxml_cmd* and keep the declaration
+-    windows of *root* that matter; ``None`` on any failure."""
++    windows of *root* that matter; ``None`` on any failure.
++
++    *files_out*, when given, receives every file's surviving line numbers
++    (``{file_key: lines}``) -- the evidence
++    :mod:`abicheck.extract.headers.preprocessor_branches` reads."""
+     out_path = work_dir / "preprocessed.txt"
+     cmd = preprocess_command(castxml_cmd, out_path)
+     if cmd is None:
+@@ -230,6 +235,8 @@ def resolve_preprocessed_text(
+         log.debug("castxml preprocess run failed: %s", exc)
+         return None
+     files, defined = parse_preprocessed(text)
++    if files_out is not None:
++        files_out.update({key: set(by_line) for key, by_line in files.items()})
+     return PreprocessedText(
+         declaration_windows(root, files, has_cc), target_default_convention(defined)
+     )
+diff --git a/abicheck/extract/headers/compile_provenance.py b/abicheck/extract/headers/compile_provenance.py
+index b65d4e41a..066d99d71 100644
+--- a/abicheck/extract/headers/compile_provenance.py
++++ b/abicheck/extract/headers/compile_provenance.py
+@@ -39,6 +39,7 @@ class _AstCompileProvenance(TypedDict):
+     ast_compile_args: tuple[str, ...]
+     ast_sysroot: str | None
+     template_default_header_scan: bool | None
++    preprocessor_hidden_declarations: dict[str, tuple[str, ...]] | None
+ 
+ 
+ def _ast_compile_provenance(
+@@ -49,6 +50,7 @@ def _ast_compile_provenance(
+     *,
+     ast_toolchain: dict[str, str] | None = None,
+     lang: str | None = None,
++    preprocessor_hidden: dict[str, tuple[str, ...]] | None = None,
+ ) -> _AstCompileProvenance:
+     """Structured compile-context provenance kwargs for an ``AbiSnapshot``
+     built from a header-AST parse (schema v15). A single call site shared by
+@@ -100,4 +102,7 @@ def _ast_compile_provenance(
+             if (ast_toolchain or {}).get("producer") == "castxml"
+             else None
+         ),
++        # Schema v65: what this parse's preprocessor configuration excluded
++        # (`extract/headers/preprocessor_branches.py`); None = no scan.
++        "preprocessor_hidden_declarations": preprocessor_hidden,
+     }
+diff --git a/abicheck/extract/headers/manifest.py b/abicheck/extract/headers/manifest.py
+index 6e74c6315..7ec1d8870 100644
+--- a/abicheck/extract/headers/manifest.py
++++ b/abicheck/extract/headers/manifest.py
+@@ -73,6 +73,7 @@ from ..path_aliases import absolutize_include_roots
+ from ..progress import track
+ from ..semantic_normalizer import normalize_header_ast
+ from ..tu_jobs import _tu_jobs
++from .castxml.hidden_declarations import parser_preprocessor_hidden
+ from .clang.streaming import (
+     streaming_prune_suppressed,
+     suppress_streaming_prune,
+@@ -209,6 +210,7 @@ def run_tu_fragment(
+         ),
+         frontend_context_kind=_parser_frontend_context_kind(parser),
+         semantic_ir=fields.semantic_ir,
++        preprocessor_hidden=parser_preprocessor_hidden(parser),
+     )
+ 
+ 
+@@ -562,6 +564,7 @@ class ElfHeaderAstResult:
+     # `typedef_entity_ids`/`constants`/`constant_entity_ids` above. See
+     # `extract/semantic_normalizer.py`'s own docstring for each slice's scope.
+     semantic_ir: SemanticIR | None = None
++    preprocessor_hidden: dict[str, tuple[str, ...]] | None = None
+ 
+ 
+ def resolve_header_ast_result(
+@@ -695,6 +698,7 @@ def resolve_header_ast_result(
+             ast_toolchain_unsupported_reasons=fragment.ast_toolchain_unsupported_reasons,
+             frontend_context_kind=fragment.frontend_context_kind,
+             semantic_ir=fragment.semantic_ir,
++            preprocessor_hidden=fragment.preprocessor_hidden,
+         )
+         provenance_headers = tuple(headers)
+ 
+@@ -716,6 +720,7 @@ def resolve_header_ast_result(
+         frontend_context_kind=merged.frontend_context_kind,
+         is_clang=merged.ast_producer == "clang",
+         provenance_headers=provenance_headers,
++        preprocessor_hidden=merged.preprocessor_hidden,
+         # A real manifest carries its occurrence-preserving merged IR.
+         semantic_ir=(
+             merged.semantic_ir
+diff --git a/abicheck/extract/headers/preprocessor_branches.py b/abicheck/extract/headers/preprocessor_branches.py
+new file mode 100644
+index 000000000..ac74922be
+--- /dev/null
++++ b/abicheck/extract/headers/preprocessor_branches.py
+@@ -0,0 +1,301 @@
++# Copyright 2026 Nikolay Petrov
++# SPDX-License-Identifier: Apache-2.0
++#
++# Licensed under the Apache License, Version 2.0 (the "License");
++# you may not use this file except in compliance with the License.
++# You may obtain a copy of the License at
++#
++#     http://www.apache.org/licenses/LICENSE-2.0
++#
++# Unless required by applicable law or agreed to in writing, software
++# distributed under the License is distributed on an "AS IS" BASIS,
++# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++# See the License for the specific language governing permissions and
++# limitations under the License.
++
++"""Function declarations a header parse could not see: they sit in a
++preprocessor branch the parse's configuration excluded.
++
++A header-AST parse sees one preprocessor configuration. A declaration under
++``#ifdef FOO`` is removed before the parser runs when ``FOO`` is not defined,
++and the export it declares then reads as "undeclared" with no stated reason
++(field report H5, generalized beyond ``sycl::``).
++
++**Which branches were excluded is decided by the compiler, not by this
++module.** The castxml backend already re-runs its exact command with
++``-E -dD`` (:mod:`.castxml.preprocessed_text`): every source line that
++survived preprocessing appears in that output under a line marker naming its
++``file:line``. This module only scans each public header's *raw* text for its
++``#if``/``#ifdef``/``#ifndef``/``#elif``/``#else``/``#endif`` structure and
++asks, per branch, whether any of its lines survived. Evaluating the
++conditions here instead would mean re-implementing the preprocessor
++(``__has_include``, function-like macros, macros a header defines for a
++later one, the compiler's predefined set) and getting some of it wrong; the
++compiler's own answer has none of those failure modes.
++
++A branch is **excluded** when it has at least one line that would produce
++output if taken (code, or a ``#define``/``#undef``, which ``-dD`` keeps in
++place) and none of them did. Its *guard macros* are the identifiers of every
++condition of its ``#if`` group up to and including its own (an ``#else`` of
++``#ifdef FOO`` is guarded by ``FOO`` too). A classic include guard
++(``#ifndef X`` immediately followed by ``#define X``) is never reported and
++``X`` never names a guard.
++
++A hidden declaration is attributed to the excluded branches enclosing it,
++innermost first, up to the first enclosing branch that produced output.
++Branches with code of their own outrank a branch whose only content is the
++nested group (whose exclusion cannot be told apart from the nested one's);
++see ``docs/contribute/known-gaps.md`` for that ambiguity.
++
++Declared names are found by a lightweight token scan (an identifier followed
++by ``(`` on a code line), which is evidence for attribution, never a
++declaration of record.
++"""
++
++from __future__ import annotations
++
++import os
++import re
++from collections.abc import Iterable, Mapping
++from dataclasses import dataclass, field
++
++_COMMENT = re.compile(r"//[^\n]*|/\*.*?\*/", re.DOTALL)
++_DIRECTIVE = re.compile(r"^\s*#\s*(\w+)\s*(.*)$")
++_IDENT = re.compile(r"[A-Za-z_]\w*")
++_CALL = re.compile(r"\b([A-Za-z_]\w*)\s*\(")
++#: Directives whose own line ``-E -dD`` keeps in place.
++_EMITTED_DIRECTIVES = frozenset({"define", "undef"})
++#: Identifiers in a condition that are operators or builtins, not macros.
++_CONDITION_NOISE = frozenset(
++    {
++        "defined",
++        "__has_include",
++        "__has_include_next",
++        "__has_attribute",
++        "__has_cpp_attribute",
++        "__has_builtin",
++        "__has_feature",
++        "__has_extension",
++        "true",
++        "false",
++    }
++)
++#: Identifiers followed by ``(`` that never name a declared function.
++_NOT_A_DECLARATION = frozenset(
++    {
++        "if",
++        "while",
++        "for",
++        "switch",
++        "return",
++        "sizeof",
++        "alignof",
++        "alignas",
++        "decltype",
++        "noexcept",
++        "static_assert",
++        "_Static_assert",
++        "__attribute__",
++        "__declspec",
++        "__typeof__",
++        "typeof",
++        "operator",
++        "throw",
++        "catch",
++        "defined",
++        "requires",
++        "explicit",
++    }
++)
++
++
++@dataclass
++class Branch:
++    """One arm of an ``#if`` group (lines are 1-based, *body* exclusive of
++    the directive lines that delimit it)."""
++
++    guard_macros: tuple[str, ...]
++    parent: int | None
++    include_guard: bool = False
++    #: Lines that produce output when taken, directly in this branch.
++    own_lines: list[int] = field(default_factory=list)
++    #: The same, including every nested branch's lines.
++    all_lines: list[int] = field(default_factory=list)
++    #: ``(name, line)`` of each call-shaped identifier directly in this branch.
++    names: list[tuple[str, int]] = field(default_factory=list)
++
++
++def _strip_comments(text: str) -> str:
++    """Blank comments, keeping every newline so line numbers hold."""
++    return _COMMENT.sub(lambda m: "\n" * m.group(0).count("\n") + " ", text)
++
++
++def _logical_lines(text: str) -> list[tuple[int, str]]:
++    """``(first physical line, joined text)`` with ``\\``-continuations folded."""
++    out: list[tuple[int, str]] = []
++    pending: list[str] = []
++    start = 0
++    for number, raw in enumerate(text.splitlines(), start=1):
++        if not pending:
++            start = number
++        if raw.endswith("\\"):
++            pending.append(raw[:-1])
++            continue
++        pending.append(raw)
++        out.append((start, " ".join(pending)))
++        pending = []
++    if pending:
++        out.append((start, " ".join(pending)))
++    return out
++
++
++def _condition_macros(expr: str) -> list[str]:
++    expr = re.sub(r"\b\d\w*", " ", expr)  # integer literals and their suffixes
++    return [m for m in _IDENT.findall(expr) if m not in _CONDITION_NOISE]
++
++
++def scan_branches(text: str) -> list[Branch]:
++    """Every conditional branch of one header's raw *text*."""
++    lines = _logical_lines(_strip_comments(text))
++    branches: list[Branch] = []
++    #: Per open group: (branch index of the current arm, accumulated macros).
++    stack: list[tuple[int, list[str]]] = []
++    guard_candidate: tuple[int, str] | None = None  # (branch index, macro)
++
++    def current() -> int | None:
++        return stack[-1][0] if stack else None
++
++    def record(line_no: int, *, names: Iterable[str] = ()) -> None:
++        idx = current()
++        if idx is None:
++            return
++        branches[idx].own_lines.append(line_no)
++        branches[idx].names.extend((n, line_no) for n in names)
++        while idx is not None:
++            branches[idx].all_lines.append(line_no)
++            idx = branches[idx].parent
++
++    for line_no, line in lines:
++        directive = _DIRECTIVE.match(line)
++        if directive is None:
++            if line.strip():
++                names = [
++                    n for n in _CALL.findall(line) if n not in _NOT_A_DECLARATION
++                ]
++                record(line_no, names=names)
++            guard_candidate = None
++            continue
++        kind, rest = directive.group(1), directive.group(2).strip()
++        if kind in ("if", "ifdef", "ifndef"):
++            macros = (
++                _condition_macros(rest)
++                if kind == "if"
++                else _IDENT.findall(rest)[:1]
++            )
++            branches.append(Branch(tuple(macros), current()))
++            stack.append((len(branches) - 1, list(macros)))
++            guard_candidate = (
++                (len(branches) - 1, macros[0]) if kind == "ifndef" and macros else None
++            )
++            continue
++        if kind in ("elif", "else", "elifdef", "elifndef") and stack:
++            _, acc = stack.pop()
++            new = (
++                _condition_macros(rest)
++                if kind == "elif"
++                else _IDENT.findall(rest)[:1]
++                if kind != "else"
++                else []
++            )
++            acc = acc + [m for m in new if m not in acc]
++            branches.append(Branch(tuple(acc), current()))
++            stack.append((len(branches) - 1, acc))
++            guard_candidate = None
++            continue
++        if kind == "endif" and stack:
++            stack.pop()
++            guard_candidate = None
++            continue
++        if kind in _EMITTED_DIRECTIVES:
++            name = (_IDENT.findall(rest) or [""])[0]
++            if (
++                kind == "define"
++                and guard_candidate is not None
++                and guard_candidate[1] == name
++                and guard_candidate[0] == current()
++                and not branches[guard_candidate[0]].all_lines
++            ):
++                branches[guard_candidate[0]].include_guard = True
++            record(line_no)
++        guard_candidate = None
++    guards = {b.guard_macros[0] for b in branches if b.include_guard}
++    for b in branches:
++        if guards & set(b.guard_macros) and not b.include_guard:
++            b.guard_macros = tuple(m for m in b.guard_macros if m not in guards)
++    return branches
++
++
++def _excluded(branch: Branch, present: set[int]) -> bool:
++    return (
++        not branch.include_guard
++        and bool(branch.all_lines)
++        and present.isdisjoint(branch.all_lines)
++    )
++
++
++def hidden_declarations(
++    text: str, present: Iterable[int]
++) -> dict[str, set[str]]:
++    """``{guard macro: declared names}`` for one header.
++
++    *present* is the set of the header's line numbers that produced output
++    in the parse's own preprocessing run.
++    """
++    present_set = set(present)
++    branches = scan_branches(text)
++    out: dict[str, set[str]] = {}
++    for b in branches:
++        if not _excluded(b, present_set) or not b.names:
++            continue
++        chain: list[Branch] = []
++        node: Branch | None = b
++        while node is not None and _excluded(node, present_set):
++            chain.append(node)
++            node = branches[node.parent] if node.parent is not None else None
++        with_code = [c for c in chain if c.own_lines]
++        macros = {m for c in (with_code or chain) for m in c.guard_macros}
++        for macro in macros:
++            out.setdefault(macro, set()).update(n for n, _ in b.names)
++    return out
++
++
++def hidden_declarations_for_headers(
++    headers: Iterable[str | os.PathLike[str]],
++    present_lines: Mapping[str, Iterable[int]],
++) -> dict[str, tuple[str, ...]] | None:
++    """Merge :func:`hidden_declarations` over the public *headers*.
++
++    *present_lines* maps a resolved, normalized path to its surviving line
++    numbers. ``None`` when a header cannot be read -- never "nothing hidden".
++    """
++    merged: dict[str, set[str]] = {}
++    for header in headers:
++        key = os.path.normpath(os.path.realpath(header))
++        try:
++            with open(header, encoding="utf-8", errors="replace") as fh:
++                text = fh.read()
++        except OSError:
++            return None
++        for macro, names in hidden_declarations(
++            text, present_lines.get(key, ())
++        ).items():
++            merged.setdefault(macro, set()).update(names)
++    return {m: tuple(sorted(n)) for m, n in sorted(merged.items())}
++
++
++__all__ = [
++    "Branch",
++    "hidden_declarations",
++    "hidden_declarations_for_headers",
++    "scan_branches",
++]
+diff --git a/abicheck/model/snapshot.py b/abicheck/model/snapshot.py
+index d1e0117dd..1a66d1cd6 100644
+--- a/abicheck/model/snapshot.py
++++ b/abicheck/model/snapshot.py
+@@ -168,6 +168,14 @@ class AbiSnapshot:
+     # assessed. False: the scan found none. None: no scan ran (any non-castxml
+     # producer, and every snapshot predating schema v63).
+     template_default_header_scan: bool | None = field(default=None, kw_only=True)
++    # v65: {guard macro: function names} declared only inside a preprocessor
++    # branch the castxml parse's configuration excluded (decided by the
++    # compiler's own `-E` run; `extract/headers/preprocessor_branches.py`).
++    # Read by `model/undeclared_export_census.py`. None = no scan ran (any
++    # non-castxml producer, a multi-TU manifest, a pre-v65 snapshot).
++    preprocessor_hidden_declarations: dict[str, tuple[str, ...]] | None = field(
++        default=None, kw_only=True
++    )
+ 
+     # CastXML version-gate outcome (schema v13, ``castxml_policy.py``). None on
+     # snapshots not produced by a version-gated CastXML L2 scan (older
+diff --git a/abicheck/model/undeclared_export_census.py b/abicheck/model/undeclared_export_census.py
+index 78486788d..df2243d67 100644
+--- a/abicheck/model/undeclared_export_census.py
++++ b/abicheck/model/undeclared_export_census.py
+@@ -22,10 +22,20 @@ count that: the only SYCL line in the coverage block was the *runtime* (PI
+ plugin) detector's, which is unrelated to header API coverage.
+ 
+ This module is the pure half: given the undeclared export names of one side
+-and their demangled spellings, count them and attribute the ones whose
+-signature names a recognizable conditionally-compiled API to a cause. It
+-creates no finding and decides nothing -- the caller renders the result as
+-a coverage line (``confidence.undeclared_export_warnings``).
++and their demangled spellings, count them and attribute each to
++
++1. a **guard macro**, when the side's snapshot recorded which public-header
++   declarations its parse's preprocessor configuration excluded
++   (``AbiSnapshot.preprocessor_hidden_declarations``, decided by the
++   compiler's own ``-E`` run in ``extract/headers/preprocessor_branches.py``)
++   and the export's function name is one of those declared under the
++   macro; else
++2. a **named cause** (:data:`CONDITIONAL_DECLARATION_CAUSES`), whose
++   signature names a recognizable conditionally-compiled API.
++
++It creates no finding and decides nothing -- the caller renders the result
++as a coverage line (``confidence.undeclared_export_warnings``) and a
++structured report block (:func:`census_to_dict`).
+ """
+ 
+ from __future__ import annotations
+@@ -53,30 +63,116 @@ class UndeclaredExportCensus:
+ 
+     total: int = 0
+     by_cause: Mapping[str, int] = field(default_factory=dict)
++    #: Exports per guard macro (an export under ``A && B`` counts for both).
++    by_guard: Mapping[str, int] = field(default_factory=dict)
++    #: Up to :data:`EXAMPLES_PER_GUARD` demangled examples per guard macro.
++    guard_examples: Mapping[str, tuple[str, ...]] = field(default_factory=dict)
++    #: Exports attributed to at least one guard macro.
++    guard_attributed: int = 0
+ 
+     @property
+     def attributed(self) -> int:
+-        return sum(self.by_cause.values())
++        return self.guard_attributed + sum(self.by_cause.values())
++
++
++#: How many example symbols the structured report keeps per guard macro.
++EXAMPLES_PER_GUARD = 3
++
++
++def function_base_name(text: str) -> str:
++    """The unqualified function name of a demangled signature (or a C name).
++
++    ``ns::foo<int>(sycl::queue&) const`` -> ``foo``. The parameter list is cut
++    at the first ``(`` outside template arguments, template arguments are
++    dropped, and the last ``::`` component is kept.
++    """
++    depth = 0
++    head = text
++    for i, ch in enumerate(text):
++        if ch == "<":
++            depth += 1
++        elif ch == ">":
++            depth = max(0, depth - 1)
++        elif ch == "(" and depth == 0:
++            head = text[:i]
++            break
++    out: list[str] = []
++    depth = 0
++    for ch in head:
++        if ch == "<":
++            depth += 1
++        elif ch == ">":
++            depth = max(0, depth - 1)
++        elif depth == 0:
++            out.append(ch)
++    stripped = "".join(out).strip()
++    return stripped.rsplit("::", 1)[-1].split()[-1] if stripped else ""
+ 
+ 
+ def census_undeclared_exports(
+-    undeclared: Iterable[str], demangled: Mapping[str, str]
++    undeclared: Iterable[str],
++    demangled: Mapping[str, str],
++    hidden: Mapping[str, Iterable[str]] | None = None,
+ ) -> UndeclaredExportCensus:
+-    """Count *undeclared* export names and attribute each to at most one cause.
++    """Count *undeclared* export names and attribute each one.
+ 
+     *demangled* maps a mangled name to its demangled spelling; a name absent
+-    from it (a C symbol) is matched on its raw spelling.
++    from it (a C symbol) is matched on its raw spelling. *hidden* is the
++    side's ``{guard macro: function names}`` scan; an export whose function
++    name it lists is attributed to those guards and to no named cause.
+     """
+     names = set(undeclared)
++    by_name: dict[str, list[str]] = {}
++    for macro, declared in (hidden or {}).items():
++        for fn in declared:
++            by_name.setdefault(fn, []).append(macro)
+     by_cause: dict[str, int] = {}
+-    for name in names:
++    by_guard: dict[str, int] = {}
++    examples: dict[str, list[str]] = {}
++    guard_attributed = 0
++    for name in sorted(names):
+         text = demangled.get(name, name)
++        guards = by_name.get(function_base_name(text))
++        if guards:
++            guard_attributed += 1
++            for macro in guards:
++                by_guard[macro] = by_guard.get(macro, 0) + 1
++                shown = examples.setdefault(macro, [])
++                if len(shown) < EXAMPLES_PER_GUARD:
++                    shown.append(text)
++            continue
+         for cause, needle, _macro in CONDITIONAL_DECLARATION_CAUSES:
+             # A whole namespace component: ``mysycl::`` is not ``sycl::``.
+             if re.search(rf"(?<![\w]){re.escape(needle)}", text):
+                 by_cause[cause] = by_cause.get(cause, 0) + 1
+                 break
+-    return UndeclaredExportCensus(total=len(names), by_cause=by_cause)
++    return UndeclaredExportCensus(
++        total=len(names),
++        by_cause=by_cause,
++        by_guard=dict(sorted(by_guard.items())),
++        guard_examples={m: tuple(e) for m, e in sorted(examples.items())},
++        guard_attributed=guard_attributed,
++    )
++
++
++def census_to_dict(census: UndeclaredExportCensus) -> dict[str, object]:
++    """The structured report form of one side's census."""
++    return {
++        "undeclared_total": census.total,
++        "attributed": census.attributed,
++        "by_guard": [
++            {
++                "macro": macro,
++                "count": count,
++                "examples": list(census.guard_examples.get(macro, ())),
++            }
++            for macro, count in census.by_guard.items()
++        ],
++        "by_cause": [
++            {"cause": cause, "count": count}
++            for cause, count in sorted(census.by_cause.items())
++        ],
++    }
+ 
+ 
+ def census_warning(side: str, census: UndeclaredExportCensus) -> str | None:
+@@ -90,7 +186,11 @@ def census_warning(side: str, census: UndeclaredExportCensus) -> str | None:
+     """
+     if not census.attributed:
+         return None
+-    parts = []
++    parts = [
++        f"{count} declared only under a #if branch on {macro} that this parse "
++        f"excluded (set -D {macro} accordingly to check them)"
++        for macro, count in census.by_guard.items()
++    ]
+     for cause, needle, macro in CONDITIONAL_DECLARATION_CAUSES:
+         count = census.by_cause.get(cause, 0)
+         if count:
+diff --git a/abicheck/report/json_sections.py b/abicheck/report/json_sections.py
+index d40c052e3..f1808ae9b 100644
+--- a/abicheck/report/json_sections.py
++++ b/abicheck/report/json_sections.py
+@@ -146,6 +146,9 @@ def add_confidence_evidence(d: dict[str, object], result: DiffResult) -> None:
+     d["evidence_tiers"] = list(result.evidence_tiers)
+     if result.coverage_warnings:
+         d["coverage_warnings"] = list(result.coverage_warnings)
++    # Schema 6.7: the structured form of the undeclared-export coverage line.
++    if result.undeclared_export_census:
++        d["undeclared_export_census"] = result.undeclared_export_census
+     # ADR-050 D2 (schema 2.17) — report-level comparability metadata, never a
+     # Change/ChangeKind finding, so it stays unreachable by severity promotion.
+     # Omitted entirely (not emitted as null) when unset, matching every other
+diff --git a/abicheck/schemas/__init__.py b/abicheck/schemas/__init__.py
+index dcb704116..c68d08a2c 100644
+--- a/abicheck/schemas/__init__.py
++++ b/abicheck/schemas/__init__.py
+@@ -55,7 +55,7 @@ from .release_schema import RELEASE_SCHEMA_VERSION
+ #: SemVer-style (MAJOR.MINOR) version of the compare-report JSON schema.
+ #: The per-version history, with the migration note for each bump, lives in
+ #: docs/contribute/report-schema-history.md; add the new entry there in the same PR.
+-REPORT_SCHEMA_VERSION = "6.6"
++REPORT_SCHEMA_VERSION = "6.7"
+ 
+ from .artifact_versions import current_artifact_version  # noqa: E402
+ 
+diff --git a/abicheck/schemas/compare_report.schema.json b/abicheck/schemas/compare_report.schema.json
+index 7adc65b29..45bd5aa78 100644
+--- a/abicheck/schemas/compare_report.schema.json
++++ b/abicheck/schemas/compare_report.schema.json
+@@ -1723,6 +1723,41 @@
+         "type": "string"
+       }
+     },
++    "undeclared_export_census": {
++      "type": "object",
++      "description": "Schema 6.7: per side (`old`/`new`), the census behind the undeclared-export coverage_warnings line -- exported symbols the parsed headers did not declare, attributed to the guard macro of a preprocessor branch the parse excluded (decided by the castxml run's own `-E` output) or to a named cause (`sycl`). Emitted only when at least one export on some side is attributed. Informational: never affects `verdict`, `severity` or any exit code.",
++      "additionalProperties": {
++        "type": "object",
++        "required": ["undeclared_total", "attributed", "by_guard", "by_cause"],
++        "properties": {
++          "undeclared_total": {"type": "integer", "minimum": 0},
++          "attributed": {"type": "integer", "minimum": 0},
++          "by_guard": {
++            "type": "array",
++            "items": {
++              "type": "object",
++              "required": ["macro", "count", "examples"],
++              "properties": {
++                "macro": {"type": "string"},
++                "count": {"type": "integer", "minimum": 1},
++                "examples": {"type": "array", "items": {"type": "string"}, "maxItems": 3}
++              }
++            }
++          },
++          "by_cause": {
++            "type": "array",
++            "items": {
++              "type": "object",
++              "required": ["cause", "count"],
++              "properties": {
++                "cause": {"type": "string"},
++                "count": {"type": "integer", "minimum": 1}
++              }
++            }
++          }
++        }
++      }
++    },
+     "policy_overrides": {
+       "type": "object",
+       "additionalProperties": {
+diff --git a/abicheck/storage/legacy_sections.py b/abicheck/storage/legacy_sections.py
+index 15da58a02..1c31d4052 100644
+--- a/abicheck/storage/legacy_sections.py
++++ b/abicheck/storage/legacy_sections.py
+@@ -151,6 +151,7 @@ _SECTION_FIELDS: Mapping[str, tuple[str, ...]] = {
+         "ast_fallback_reason",
+         "ast_toolchain_supported",
+         "template_default_header_scan",
++        "preprocessor_hidden_declarations",
+         "ast_toolchain_unsupported_reasons",
+         "frontend_context_kind",
+         "ast_resolved_standard",
+diff --git a/abicheck/storage/snapshot_codec.py b/abicheck/storage/snapshot_codec.py
+index 2f0e7f284..bce424bf7 100644
+--- a/abicheck/storage/snapshot_codec.py
++++ b/abicheck/storage/snapshot_codec.py
+@@ -314,6 +314,16 @@ def decode_snapshot(
+     template_default_header_scan = (
+         raw_header_scan if isinstance(raw_header_scan, bool) else None
+     )
++    raw_hidden = d.get("preprocessor_hidden_declarations")
++    preprocessor_hidden_declarations = (
++        {
++            str(m): tuple(str(n) for n in names)
++            for m, names in raw_hidden.items()
++            if isinstance(names, list)
++        }
++        if isinstance(raw_hidden, dict)
++        else None
++    )
+     raw_ast_unsupported_reasons = d.get("ast_toolchain_unsupported_reasons")
+     ast_toolchain_unsupported_reasons = (
+         [str(r) for r in raw_ast_unsupported_reasons]
+@@ -492,6 +502,7 @@ def decode_snapshot(
+         ast_fallback_reason=ast_fallback_reason,
+         ast_toolchain_supported=ast_toolchain_supported,
+         template_default_header_scan=template_default_header_scan,
++        preprocessor_hidden_declarations=preprocessor_hidden_declarations,
+         ast_toolchain_unsupported_reasons=ast_toolchain_unsupported_reasons,
+         frontend_context_kind=frontend_context_kind,
+         dependency_scope=dependency_scope,
+diff --git a/abicheck/storage/snapshot_encode.py b/abicheck/storage/snapshot_encode.py
+index 15f48275d..a46a04ba3 100644
+--- a/abicheck/storage/snapshot_encode.py
++++ b/abicheck/storage/snapshot_encode.py
+@@ -523,6 +523,8 @@ def _snapshot_to_dict(snap: AbiSnapshot, encode: Any) -> dict[str, Any]:
+     d.pop("static_archive", None)  # runtime-only, as above (ADR-086)
+     d.pop("header_declaration_ids", None)  # runtime-only, depth projection
+     d.pop("projection_unavailable", None)  # runtime-only, depth projection
++    if d.get("preprocessor_hidden_declarations") is None:  # v65: only when scanned
++        d.pop("preprocessor_hidden_declarations", None)
+     # If ``from_headers`` was only *inferred* (a legacy snapshot loaded without
+     # the explicit key), do not persist it as explicit provenance: drop the key
+     # so a reload re-runs the same inference and re-marks it inferred, rather
+diff --git a/abicheck/storage/snapshot_schema_versions.py b/abicheck/storage/snapshot_schema_versions.py
+index 4167c8a38..f9641194e 100644
+--- a/abicheck/storage/snapshot_schema_versions.py
++++ b/abicheck/storage/snapshot_schema_versions.py
+@@ -291,7 +291,7 @@ from __future__ import annotations
+ # newer than itself, so re-dump one. The next real bump used 58, never
+ # reusing 57, so a stray v57 document can never be read as a different shape
+ # (its "version": 3 semantic_ir is still refused by storage/semantic_ir_codec.py).
+-SCHEMA_VERSION: int = 64  # v64: Function.template_param_defaults_fact persisted (Fact[tuple[str | None, ...]], ADR-085 D1 for a function template) -- the spelled default of each template parameter of a FunctionTemplateDecl's pattern, in declaration order. Recorded by the clang header backend only (castxml does not record it: UNKNOWN). Written only when captured, so every other function encodes exactly as v63; a missing key reads as NOT_COLLECTED at v64 and above. A pre-v64 reader would silently drop the defaults and read the pattern as defaultless, hence the bump. v63: AbiSnapshot.template_default_header_scan persisted (bool | None, ADR-085 D3) -- whether a castxml-parsed public header declares a class/function template parameter with a default argument (extract/headers/template_default_scan.py). Written only when a castxml run scanned, so every other snapshot encodes exactly as v62; a pre-v63 snapshot loads it as None (no scan ran -- never "no default declared"), and the assurance rollup then reports no castxml gap for it, as before. A pre-v63 reader would silently drop the scan and read a castxml run as clean, hence the bump. v62: RecordType.template_param_defaults_fact persisted (Fact[tuple[str | None, ...]], storage/fact_codec.py, ADR-085 D1) -- the spelled default of each type parameter of a class-template pattern, in declaration order (None for a parameter with no default). Recorded by the clang header backend only (castxml does not record it: UNKNOWN). Written only when captured, so every other record encodes exactly as v61; a missing key reads as NOT_COLLECTED at v62 and above and as unset below, and an UNKNOWN side never compares equal to a recorded side (the ADR-085 D2 detector in compare/template_param_defaults.py). A pre-v62 reader would silently drop the defaults and read the pattern as defaultless, hence the bump. v61: RecordType.specialization_declared_fact persisted (Fact[bool], storage/fact_codec.py) -- whether a class-template specialization record was declared by its own class-head (True: explicit or partial specialization) or instantiated from the primary template (False), read by castxml from the declaring header line (extract/headers/castxml/specialization.py). Written only when determined, so every other record encodes exactly as v60; a missing key reads as None at every version, which keeps the existing type_removed path (compare/template_instance_absence.py). A pre-v61 reader would silently drop it, hence the bump. v60: Function.is_inline_fact persisted (storage/fact_codec.py) -- ADR-063 Phase 5's twelfth batch, closing the last case-(a) field (is_inline, guarded by the stale 'inline' family, ADR-081). Written for every declaration a producer captured, so a snapshot's JSON gains one key per function and nothing else changes. A pre-v60 document has no such key and decodes through the legacy presence bridge, so its availability is still decided by the v53 'inline' threshold. A pre-v60 reader would silently drop the sibling and fall back to the bare bool, hence the bump. v59: ExtractionContract.header_canonical persisted (ADR-082) -- the canonical (sorted) header identity sequence a dump proved its declarations equal to (extract/header_order_witness.py). Written only when proven, so a snapshot without it encodes exactly as v58; a pre-v59 snapshot loads it as None (not proven -- the declared order keeps governing comparison). A pre-v59 reader would silently drop the proof and refuse a reorder it could have accepted, hence the bump. v58: ElfSymbol.version_binding persisted (model/elf_facts.ElfVersionBinding) -- whether an export with an empty `version` is bound to the library's VER_FLG_BASE definition ("base", what objdump -T prints as Base) or carries no version at all ("unversioned"), which `version == ""` alone conflated, so cross_source_checks' unversioned_exported_symbol flagged every base-API symbol of a versioned library (known gap, fixed). Written only where `version` cannot say it: absent decodes as "named" when `version` is set and "unknown" otherwise (snapshot_platform_blocks.elf_symbol_binding), so a pre-v58 snapshot never guesses either way and a snapshot without the facts encodes exactly as v56. A pre-v58 reader would silently drop them, hence the bump. v56: ElfSymbol.code_hash persisted -- a BLAKE2b-128 digest of each exported STT_FUNC symbol's code bytes, computed at dump time (extract/elf_code_hash.py) so the fingerprint rename detector can confirm a same-size rename and break a same-size tie. Written only when computed, so a snapshot without hashes encodes exactly as v55; a pre-v56 snapshot loads every hash as "" (not hashed), and the detector then behaves exactly as before. A pre-v56 reader would silently drop them, hence the bump. v55: AbiSnapshot.public_header_identifiers persisted (ADR-063 2026-10-01 amendment) -- every identifier token the public header set's raw text spells, every preprocessor branch included, comments/literals stripped (extract/public_header_identifiers.py), as a sorted JSON list. Written only when captured, so a snapshot without it encodes exactly as v54; a pre-v55 snapshot loads it as None (not captured -- never "the headers spell nothing"). The --contract public evaluator reads it to decide closed_domain_no_commitment for an undeclared export; without it the decision stays UNKNOWN_UNRESOLVED. A pre-v55 reader would silently drop the index, hence the bump. v54: Param/TypeField/Variable.type_identities_fact and Function.return_type_identities_fact persisted (Fact[tuple[str, ...]], storage/fact_codec.py) -- the exact qualified names of the records/enums a header backend resolved each type slot to (castxml only today: extract/headers/castxml/type_resolution.type_identities), since the slot's own spelling is the bare source text and cannot say which of two same-leaf records (ns1::Cache/ns2::Cache) it names. Written only when captured, so a snapshot from any other producer encodes exactly as v53. A pre-v54 snapshot loads every one as None, and a v54 document without the key (any non-castxml producer) as NOT_COLLECTED; policy/public_surface_closure's exact walk then behaves exactly as before. A pre-v54 reader would silently drop them, losing the confirmation they give the public contract domain, hence the bump. v53: SemanticIR record occurrences carry layout facts (ADR-063 6B record-layout cohort) -- CanonicalEntity.size_bits/alignment_bits, written for a TYPE occurrence only, inside a semantic_ir document now stamped "version": 2 (storage/semantic_ir_codec.py). A pre-v53 IR (no "version" key) decodes those facts as NOT_COLLECTED with a legacy diagnostic, and the load path fills them from the snapshot's own RecordType of the same EntityId (model/semantic_ir_record_layout.py) -- so a stored baseline reaches the migrated TYPE_SIZE_CHANGED/TYPE_ALIGNMENT_CHANGED detector with the layout it recorded. A pre-v53 reader would silently drop the new facts, hence the bump. v52: AbiSnapshot.extraction_scope persisted (ADR-075 D1/D2, target-ownership plan Phase 2) -- the ownership rules (target roots relative to the project root, named dependency roots, private headers/namespaces), dependency_evidence ("full" only) and a reserved prefilter a header-derived snapshot's declarations were classified under, with a fingerprint, the classifier's diagnostics, and each Function/Variable/RecordType/EnumType's ownership_fact (owner, contract, rule id) as an interned decisions table plus one index per declaration (-1 = unclassified). Declaration lists themselves encode exactly as v51. A pre-v52 snapshot loads with extraction_scope=None (unrecorded -- never read as "full") and every ownership_fact unset (unknown -- never guessed); comparability.check_contracts_comparable's extraction-scope check decides what such a pair may do. v51: DwarfMetadata.struct_odr_conflicts/enum_odr_conflicts/odr_conflicts_observed persisted (evidence-entity-model Phase 2) -- the further, layout-distinct definitions another CU gave a name DwarfMetadata.structs/enums already holds, which the debug-type join (compare/debug_type_join.py) reports as ambiguous instead of trusting the first. Written only when the DWARF CU walk looked for them (or found one), so a snapshot with no such walk encodes exactly as v50. A pre-v51 snapshot loads with odr_conflicts_observed=False: its empty conflict maps mean "not looked for", never "none exist". No other field changed. v50: the persisted header/L5 source graph (AbiSnapshot.surface_graph / build_source.source_graph) now uses the evidence-entity-model invariant-I1 node ids -- SourceGraphSummary.schema_version 3: a C-linkage declaration keyed on its linker name, an identity-less entity (a castxml constructor/destructor placeholder, an unmangled overload, a type spelling two declarations share) as an explicit unresolved:// node, a flat-path type by its qualified name, and a persisted identity_aliases map. A pre-v50 snapshot still loads unchanged (its graph keeps SourceGraphSummary.schema_version 2); compare.source_graph_identity_scheme.source_graph_identity_mismatch then reports the L5 graph layer of a v2-vs-v3 pair as not compared instead of diffing mismatched ids. No other field changed. v49: AbiSnapshot.surface_graph persisted in the compact, interned, columnar graph-table encoding (storage/graph_table_codec.py; evidence-entity-model Phase 5b) instead of SourceGraphSummary.to_dict()'s per-entity objects, and without the derived fields the decoder never read back (indexes, resolved, conflicts, occurrences). A pre-v49 graph (no `encoding` key) still decodes through SourceGraphSummary.from_dict exactly as before. A pre-v49 reader cannot read a v49 graph, hence the bump; v48: AbiSnapshot.excluded_header_matching persisted -- which rule the recorded exclusion patterns were matched by ("glob" for native `--exclude-header`, fnmatch plus a `*/<pattern>` try; "exact" for a descriptor's `<skip_headers>` basename-or-path membership). The same pattern text is not the same scope under both: `include/foo.h` excludes `/pkg/include/foo.h` natively and keeps it through a descriptor, so recording the text alone let the ADR-050 comparability gate accept two snapshots covering different surfaces. Absent on a pre-v48 snapshot, which loads as "unknown" -- NOT as "glob". v47 already recorded a descriptor's *exact*-matched `<skip_headers>` alongside the native fnmatch ones, so assuming fnmatch for a mode-less snapshot would let a baseline holding `include/foo.h` compare clean against a native glob snapshot that excluded a different set of headers. An unrecorded rule is refused rather than guessed; a mode-less snapshot carrying no patterns is unaffected, since there is nothing for a rule to have matched. v47: AbiSnapshot.excluded_header_patterns persisted -- the `--exclude-header PATTERN` values a snapshot was dumped under. The parsed surface is narrower than the operand names and nothing else recorded that, so a stored baseline dumped with an exclusion, compared later against a full dump of the same library, reported every declaration the excluded header carried as appearing out of nowhere. Absent on a pre-v47 snapshot, which loads as the empty tuple -- correct for every such snapshot, since the flag did not exist; v46: Function/Variable.declared_in_headers_fact/in_public_contract_fact/binary_exported_fact persisted (storage/fact_codec.py) -- the split of the three independent facts Visibility conflated (a declaration exists in the parsed headers; it belongs to the promised public contract; a binary symbol is exported), see model/surface_facts.py and the Visibility.PUBLIC entry in docs/contribute/known-gaps.md. Missing on a pre-v46 snapshot, which model/surface_facts.py resolves by deriving each fact from the stored `visibility` value as a PARTIAL, diagnostic-stamped reading -- never as a confirmed negative, so a headerless snapshot still reads "declaration not established" rather than "no declaration"; v45: Param.kind_fact persisted (storage/fact_codec.py) -- ADR-063 Phase 5's eleventh batch, closing the last case-(a) field the "field-by-field conversion complete" v41 note missed: Param.kind was never flagged as availability-ambiguous (neither header-AST backend had ever set it to anything but the dataclass's own resting ParamKind.VALUE, so nothing about it looked wrong by inspection until diff_symbols._params_differ's raw kind comparison was found to fabricate FUNC_PARAMS_CHANGED whenever a header-derived snapshot was compared against a DWARF-derived one of the identical library). Guarded by the stale 'param_kind' fact family (model.snapshot_reliability); v44: AbiSnapshot.header_only persisted (workstream F "Header-only comparison" S1) -- the explicit marker for a snapshot built by the binary-less header-AST dump path; missing on a pre-v44 snapshot loads as False, matching every prior snapshot's implicit "this has a binary, or is a pre-existing source-only dump" status; v43: Variable.is_static persisted (PR #1024 review fix -- closes the plain-C/extern-"C" same-named static-vs-external variable identity collision `tu_merge._variable_key`'s own docstring long documented as a known, accepted limitation; missing on a pre-v43 snapshot loads as False, matching every prior reader's implicit assumption since the field did not exist); v42: ADR-062/063 Phase 8 (redesign) -- the on-disk wire format itself changed (snapshot_to_json() now writes storage.sectioned_document's single-file sectioned envelope instead of a flat document), not just a field. Bumped specifically so a pre-Phase-8 reader (whose own SCHEMA_VERSION was already 41) hits the ">SCHEMA_VERSION and >=_MIN_SCHEMA_VERSION_REQUIRING_HARD_REJECTION" hard-rejection path below instead of silently reading every top-level field as absent/empty -- a same-numbered envelope change would have given that reader no signal at all (Codex review, fresh evidence). This build itself reads the envelope transparently regardless of version, per snapshot_from_dict's own is_sectioned_document check; v41: Param.is_restrict_fact and Variable.access_fact persisted (storage/fact_codec.py) -- ADR-063 Phase 5's field-by-field conversion complete; v40: Function/Variable/RecordType/EnumType.deprecated_fact and EnumType.is_scoped_fact persisted (storage/fact_codec.py); v39: TypeField.is_const_fact/is_volatile_fact/is_mutable_fact persisted (storage/fact_codec.py); v38: AbiSnapshot.semantic_ir + semantic_ir_conflicts persisted (storage/semantic_ir_codec.py); v37: ElfMetadata.dynamic_flags_fact/has_init_fact/has_fini_fact, PeMetadata.delay_imports_fact, MachoMetadata.rpaths_fact persisted (snapshot_platform_blocks.py/storage/fact_codec.py); v36: AbiSnapshot.ast_resolved_standard_fact persisted (storage/fact_codec.py); v35: Function.contract_attributes_fact/is_explicit_fact/is_hidden_friend_fact/source_header_fact/is_variadic_fact/exception_spec_fact/is_override_fact/hidden_friend_owner_fact/elf_binding_fact/is_compiler_generated_fact persisted (storage/fact_codec.py); v34: Variable.source_header_fact/alignment_bits_fact/elf_binding_fact persisted (storage/fact_codec.py); v33: EnumType.qualified_name_fact/source_header_fact persisted (storage/fact_codec.py); v32: RecordType.is_abstract_fact/data_size_bits_fact/is_standard_layout_fact/is_trivially_copyable_fact/qualified_name_fact/source_header_fact persisted (storage/fact_codec.py); v31: typedef/constant entity_id sidecars persisted (storage/entity_id_codec.py); v30: RecordType.is_final_fact persisted (storage/fact_codec.py); v29: AbiSnapshot.surface_graph persisted (storage/surface_graph_codec.py); v28: entity_id carrier persisted (storage/entity_id_codec.py).
++SCHEMA_VERSION: int = 65  # v65: AbiSnapshot.preprocessor_hidden_declarations persisted ({guard macro: [function names]}, extract/headers/preprocessor_branches.py) -- the public-header function declarations a castxml parse's own preprocessor configuration excluded, decided from the same command's `-E -dD` run. Written only when scanned, so every other snapshot encodes exactly as v64; a pre-v65 snapshot loads it as None (no scan -- never "nothing hidden"), and the undeclared-export census then attributes by the named sycl:: cause only, as before. A pre-v65 reader would silently drop the scan, hence the bump. v64: Function.template_param_defaults_fact persisted (Fact[tuple[str | None, ...]], ADR-085 D1 for a function template) -- the spelled default of each template parameter of a FunctionTemplateDecl's pattern, in declaration order. Recorded by the clang header backend only (castxml does not record it: UNKNOWN). Written only when captured, so every other function encodes exactly as v63; a missing key reads as NOT_COLLECTED at v64 and above. A pre-v64 reader would silently drop the defaults and read the pattern as defaultless, hence the bump. v63: AbiSnapshot.template_default_header_scan persisted (bool | None, ADR-085 D3) -- whether a castxml-parsed public header declares a class/function template parameter with a default argument (extract/headers/template_default_scan.py). Written only when a castxml run scanned, so every other snapshot encodes exactly as v62; a pre-v63 snapshot loads it as None (no scan ran -- never "no default declared"), and the assurance rollup then reports no castxml gap for it, as before. A pre-v63 reader would silently drop the scan and read a castxml run as clean, hence the bump. v62: RecordType.template_param_defaults_fact persisted (Fact[tuple[str | None, ...]], storage/fact_codec.py, ADR-085 D1) -- the spelled default of each type parameter of a class-template pattern, in declaration order (None for a parameter with no default). Recorded by the clang header backend only (castxml does not record it: UNKNOWN). Written only when captured, so every other record encodes exactly as v61; a missing key reads as NOT_COLLECTED at v62 and above and as unset below, and an UNKNOWN side never compares equal to a recorded side (the ADR-085 D2 detector in compare/template_param_defaults.py). A pre-v62 reader would silently drop the defaults and read the pattern as defaultless, hence the bump. v61: RecordType.specialization_declared_fact persisted (Fact[bool], storage/fact_codec.py) -- whether a class-template specialization record was declared by its own class-head (True: explicit or partial specialization) or instantiated from the primary template (False), read by castxml from the declaring header line (extract/headers/castxml/specialization.py). Written only when determined, so every other record encodes exactly as v60; a missing key reads as None at every version, which keeps the existing type_removed path (compare/template_instance_absence.py). A pre-v61 reader would silently drop it, hence the bump. v60: Function.is_inline_fact persisted (storage/fact_codec.py) -- ADR-063 Phase 5's twelfth batch, closing the last case-(a) field (is_inline, guarded by the stale 'inline' family, ADR-081). Written for every declaration a producer captured, so a snapshot's JSON gains one key per function and nothing else changes. A pre-v60 document has no such key and decodes through the legacy presence bridge, so its availability is still decided by the v53 'inline' threshold. A pre-v60 reader would silently drop the sibling and fall back to the bare bool, hence the bump. v59: ExtractionContract.header_canonical persisted (ADR-082) -- the canonical (sorted) header identity sequence a dump proved its declarations equal to (extract/header_order_witness.py). Written only when proven, so a snapshot without it encodes exactly as v58; a pre-v59 snapshot loads it as None (not proven -- the declared order keeps governing comparison). A pre-v59 reader would silently drop the proof and refuse a reorder it could have accepted, hence the bump. v58: ElfSymbol.version_binding persisted (model/elf_facts.ElfVersionBinding) -- whether an export with an empty `version` is bound to the library's VER_FLG_BASE definition ("base", what objdump -T prints as Base) or carries no version at all ("unversioned"), which `version == ""` alone conflated, so cross_source_checks' unversioned_exported_symbol flagged every base-API symbol of a versioned library (known gap, fixed). Written only where `version` cannot say it: absent decodes as "named" when `version` is set and "unknown" otherwise (snapshot_platform_blocks.elf_symbol_binding), so a pre-v58 snapshot never guesses either way and a snapshot without the facts encodes exactly as v56. A pre-v58 reader would silently drop them, hence the bump. v56: ElfSymbol.code_hash persisted -- a BLAKE2b-128 digest of each exported STT_FUNC symbol's code bytes, computed at dump time (extract/elf_code_hash.py) so the fingerprint rename detector can confirm a same-size rename and break a same-size tie. Written only when computed, so a snapshot without hashes encodes exactly as v55; a pre-v56 snapshot loads every hash as "" (not hashed), and the detector then behaves exactly as before. A pre-v56 reader would silently drop them, hence the bump. v55: AbiSnapshot.public_header_identifiers persisted (ADR-063 2026-10-01 amendment) -- every identifier token the public header set's raw text spells, every preprocessor branch included, comments/literals stripped (extract/public_header_identifiers.py), as a sorted JSON list. Written only when captured, so a snapshot without it encodes exactly as v54; a pre-v55 snapshot loads it as None (not captured -- never "the headers spell nothing"). The --contract public evaluator reads it to decide closed_domain_no_commitment for an undeclared export; without it the decision stays UNKNOWN_UNRESOLVED. A pre-v55 reader would silently drop the index, hence the bump. v54: Param/TypeField/Variable.type_identities_fact and Function.return_type_identities_fact persisted (Fact[tuple[str, ...]], storage/fact_codec.py) -- the exact qualified names of the records/enums a header backend resolved each type slot to (castxml only today: extract/headers/castxml/type_resolution.type_identities), since the slot's own spelling is the bare source text and cannot say which of two same-leaf records (ns1::Cache/ns2::Cache) it names. Written only when captured, so a snapshot from any other producer encodes exactly as v53. A pre-v54 snapshot loads every one as None, and a v54 document without the key (any non-castxml producer) as NOT_COLLECTED; policy/public_surface_closure's exact walk then behaves exactly as before. A pre-v54 reader would silently drop them, losing the confirmation they give the public contract domain, hence the bump. v53: SemanticIR record occurrences carry layout facts (ADR-063 6B record-layout cohort) -- CanonicalEntity.size_bits/alignment_bits, written for a TYPE occurrence only, inside a semantic_ir document now stamped "version": 2 (storage/semantic_ir_codec.py). A pre-v53 IR (no "version" key) decodes those facts as NOT_COLLECTED with a legacy diagnostic, and the load path fills them from the snapshot's own RecordType of the same EntityId (model/semantic_ir_record_layout.py) -- so a stored baseline reaches the migrated TYPE_SIZE_CHANGED/TYPE_ALIGNMENT_CHANGED detector with the layout it recorded. A pre-v53 reader would silently drop the new facts, hence the bump. v52: AbiSnapshot.extraction_scope persisted (ADR-075 D1/D2, target-ownership plan Phase 2) -- the ownership rules (target roots relative to the project root, named dependency roots, private headers/namespaces), dependency_evidence ("full" only) and a reserved prefilter a header-derived snapshot's declarations were classified under, with a fingerprint, the classifier's diagnostics, and each Function/Variable/RecordType/EnumType's ownership_fact (owner, contract, rule id) as an interned decisions table plus one index per declaration (-1 = unclassified). Declaration lists themselves encode exactly as v51. A pre-v52 snapshot loads with extraction_scope=None (unrecorded -- never read as "full") and every ownership_fact unset (unknown -- never guessed); comparability.check_contracts_comparable's extraction-scope check decides what such a pair may do. v51: DwarfMetadata.struct_odr_conflicts/enum_odr_conflicts/odr_conflicts_observed persisted (evidence-entity-model Phase 2) -- the further, layout-distinct definitions another CU gave a name DwarfMetadata.structs/enums already holds, which the debug-type join (compare/debug_type_join.py) reports as ambiguous instead of trusting the first. Written only when the DWARF CU walk looked for them (or found one), so a snapshot with no such walk encodes exactly as v50. A pre-v51 snapshot loads with odr_conflicts_observed=False: its empty conflict maps mean "not looked for", never "none exist". No other field changed. v50: the persisted header/L5 source graph (AbiSnapshot.surface_graph / build_source.source_graph) now uses the evidence-entity-model invariant-I1 node ids -- SourceGraphSummary.schema_version 3: a C-linkage declaration keyed on its linker name, an identity-less entity (a castxml constructor/destructor placeholder, an unmangled overload, a type spelling two declarations share) as an explicit unresolved:// node, a flat-path type by its qualified name, and a persisted identity_aliases map. A pre-v50 snapshot still loads unchanged (its graph keeps SourceGraphSummary.schema_version 2); compare.source_graph_identity_scheme.source_graph_identity_mismatch then reports the L5 graph layer of a v2-vs-v3 pair as not compared instead of diffing mismatched ids. No other field changed. v49: AbiSnapshot.surface_graph persisted in the compact, interned, columnar graph-table encoding (storage/graph_table_codec.py; evidence-entity-model Phase 5b) instead of SourceGraphSummary.to_dict()'s per-entity objects, and without the derived fields the decoder never read back (indexes, resolved, conflicts, occurrences). A pre-v49 graph (no `encoding` key) still decodes through SourceGraphSummary.from_dict exactly as before. A pre-v49 reader cannot read a v49 graph, hence the bump; v48: AbiSnapshot.excluded_header_matching persisted -- which rule the recorded exclusion patterns were matched by ("glob" for native `--exclude-header`, fnmatch plus a `*/<pattern>` try; "exact" for a descriptor's `<skip_headers>` basename-or-path membership). The same pattern text is not the same scope under both: `include/foo.h` excludes `/pkg/include/foo.h` natively and keeps it through a descriptor, so recording the text alone let the ADR-050 comparability gate accept two snapshots covering different surfaces. Absent on a pre-v48 snapshot, which loads as "unknown" -- NOT as "glob". v47 already recorded a descriptor's *exact*-matched `<skip_headers>` alongside the native fnmatch ones, so assuming fnmatch for a mode-less snapshot would let a baseline holding `include/foo.h` compare clean against a native glob snapshot that excluded a different set of headers. An unrecorded rule is refused rather than guessed; a mode-less snapshot carrying no patterns is unaffected, since there is nothing for a rule to have matched. v47: AbiSnapshot.excluded_header_patterns persisted -- the `--exclude-header PATTERN` values a snapshot was dumped under. The parsed surface is narrower than the operand names and nothing else recorded that, so a stored baseline dumped with an exclusion, compared later against a full dump of the same library, reported every declaration the excluded header carried as appearing out of nowhere. Absent on a pre-v47 snapshot, which loads as the empty tuple -- correct for every such snapshot, since the flag did not exist; v46: Function/Variable.declared_in_headers_fact/in_public_contract_fact/binary_exported_fact persisted (storage/fact_codec.py) -- the split of the three independent facts Visibility conflated (a declaration exists in the parsed headers; it belongs to the promised public contract; a binary symbol is exported), see model/surface_facts.py and the Visibility.PUBLIC entry in docs/contribute/known-gaps.md. Missing on a pre-v46 snapshot, which model/surface_facts.py resolves by deriving each fact from the stored `visibility` value as a PARTIAL, diagnostic-stamped reading -- never as a confirmed negative, so a headerless snapshot still reads "declaration not established" rather than "no declaration"; v45: Param.kind_fact persisted (storage/fact_codec.py) -- ADR-063 Phase 5's eleventh batch, closing the last case-(a) field the "field-by-field conversion complete" v41 note missed: Param.kind was never flagged as availability-ambiguous (neither header-AST backend had ever set it to anything but the dataclass's own resting ParamKind.VALUE, so nothing about it looked wrong by inspection until diff_symbols._params_differ's raw kind comparison was found to fabricate FUNC_PARAMS_CHANGED whenever a header-derived snapshot was compared against a DWARF-derived one of the identical library). Guarded by the stale 'param_kind' fact family (model.snapshot_reliability); v44: AbiSnapshot.header_only persisted (workstream F "Header-only comparison" S1) -- the explicit marker for a snapshot built by the binary-less header-AST dump path; missing on a pre-v44 snapshot loads as False, matching every prior snapshot's implicit "this has a binary, or is a pre-existing source-only dump" status; v43: Variable.is_static persisted (PR #1024 review fix -- closes the plain-C/extern-"C" same-named static-vs-external variable identity collision `tu_merge._variable_key`'s own docstring long documented as a known, accepted limitation; missing on a pre-v43 snapshot loads as False, matching every prior reader's implicit assumption since the field did not exist); v42: ADR-062/063 Phase 8 (redesign) -- the on-disk wire format itself changed (snapshot_to_json() now writes storage.sectioned_document's single-file sectioned envelope instead of a flat document), not just a field. Bumped specifically so a pre-Phase-8 reader (whose own SCHEMA_VERSION was already 41) hits the ">SCHEMA_VERSION and >=_MIN_SCHEMA_VERSION_REQUIRING_HARD_REJECTION" hard-rejection path below instead of silently reading every top-level field as absent/empty -- a same-numbered envelope change would have given that reader no signal at all (Codex review, fresh evidence). This build itself reads the envelope transparently regardless of version, per snapshot_from_dict's own is_sectioned_document check; v41: Param.is_restrict_fact and Variable.access_fact persisted (storage/fact_codec.py) -- ADR-063 Phase 5's field-by-field conversion complete; v40: Function/Variable/RecordType/EnumType.deprecated_fact and EnumType.is_scoped_fact persisted (storage/fact_codec.py); v39: TypeField.is_const_fact/is_volatile_fact/is_mutable_fact persisted (storage/fact_codec.py); v38: AbiSnapshot.semantic_ir + semantic_ir_conflicts persisted (storage/semantic_ir_codec.py); v37: ElfMetadata.dynamic_flags_fact/has_init_fact/has_fini_fact, PeMetadata.delay_imports_fact, MachoMetadata.rpaths_fact persisted (snapshot_platform_blocks.py/storage/fact_codec.py); v36: AbiSnapshot.ast_resolved_standard_fact persisted (storage/fact_codec.py); v35: Function.contract_attributes_fact/is_explicit_fact/is_hidden_friend_fact/source_header_fact/is_variadic_fact/exception_spec_fact/is_override_fact/hidden_friend_owner_fact/elf_binding_fact/is_compiler_generated_fact persisted (storage/fact_codec.py); v34: Variable.source_header_fact/alignment_bits_fact/elf_binding_fact persisted (storage/fact_codec.py); v33: EnumType.qualified_name_fact/source_header_fact persisted (storage/fact_codec.py); v32: RecordType.is_abstract_fact/data_size_bits_fact/is_standard_layout_fact/is_trivially_copyable_fact/qualified_name_fact/source_header_fact persisted (storage/fact_codec.py); v31: typedef/constant entity_id sidecars persisted (storage/entity_id_codec.py); v30: RecordType.is_final_fact persisted (storage/fact_codec.py); v29: AbiSnapshot.surface_graph persisted (storage/surface_graph_codec.py); v28: entity_id carrier persisted (storage/entity_id_codec.py).
+ 
+ # Schema version at which CastXML field CV facts became reliable (see v9 above).
+ _MIN_SCHEMA_VERSION_FOR_CV_FACTS = 9
+diff --git a/abicheck/storage/sparse_section_codec.py b/abicheck/storage/sparse_section_codec.py
+index 29d3cf8cb..e22c6ec9c 100644
+--- a/abicheck/storage/sparse_section_codec.py
++++ b/abicheck/storage/sparse_section_codec.py
+@@ -584,6 +584,7 @@ class DebugSection(_SparseSectionMixin):
+     #: `.parsed_with_build_context` and the eight `*_facts_reliable` flags
+     #: are plain `bool`; `.ast_toolchain_supported` and
+     #: `.template_default_header_scan` are `bool | None`;
++    #: `.preprocessor_hidden_declarations` is `dict[str, tuple] | None`;
+     #: `.ast_producer`/`.ast_fallback_reason`/`.frontend_context_kind`/
+     #: `.ast_resolved_standard`/`.ast_cplusplus_macro`/`.ast_sysroot` are
+     #: `str | None`; `.ast_toolchain`/`.fact_provenance` are
+@@ -600,6 +601,7 @@ class DebugSection(_SparseSectionMixin):
+         "ast_fallback_reason": _STR_OR_NONE,
+         "ast_toolchain_supported": _BOOL_OR_NONE,
+         "template_default_header_scan": _BOOL_OR_NONE,
++        "preprocessor_hidden_declarations": _MAPPING_OR_NONE,
+         "ast_toolchain_unsupported_reasons": _LIST,
+         "frontend_context_kind": _STR_OR_NONE,
+         "ast_resolved_standard": _STR_OR_NONE,
+diff --git a/abicheck/tu_fragment.py b/abicheck/tu_fragment.py
+index 4bd8b6867..cacd4a5b6 100644
+--- a/abicheck/tu_fragment.py
++++ b/abicheck/tu_fragment.py
+@@ -80,6 +80,9 @@ class TuFragment:
+     # provenance fields above.
+     frontend_context_kind: str | None = None
+     semantic_ir: SemanticIR | None = None
++    # {guard macro: function names} the parse's preprocessor configuration
++    # excluded (extract/headers/preprocessor_branches.py); None = no scan.
++    preprocessor_hidden: dict[str, tuple[str, ...]] | None = None
+ 
+ 
+ @dataclass(frozen=True)
+@@ -116,6 +119,8 @@ class MergedTuFragments:
+     #: returns. ``None`` only for a caller that never sets it (there is
+     #: currently none -- ``run_tu_loop`` always populates this).
+     semantic_ir: SemanticIR | None = None
++    #: Only the single-TU path carries it; a multi-TU merge leaves it None.
++    preprocessor_hidden: dict[str, tuple[str, ...]] | None = None
+ 
+ 
+ def entity_key(kind: str, name: str) -> tuple[str, str]:
+diff --git a/docs/contribute/report-schema-history.md b/docs/contribute/report-schema-history.md
+index 94f0d03d1..493893dbf 100644
+--- a/docs/contribute/report-schema-history.md
++++ b/docs/contribute/report-schema-history.md
+@@ -181,3 +181,5 @@ accept any report sharing their expected MAJOR and ignore unknown keys.
+ **6.6** — additive `rule_identity` (the canonical JSON identity, `abicheck.policy.rule_identity.rule_identity`) next to `rule_id` on every `disposition_audit.rules` / `reclassifications` row and every ledger `rule` provenance object of an id-less rule (absent when the rule has a user `id:`), and additive `suppression_audit.stale_rule_ids`, the `rule_id` of each `stale_rules` entry in the same order, so a stale entry joins to its audit row by `rule_id`. `stale_rules` stays a list of strings. Never affects `verdict`, `severity` or any exit code.
+ 
+ Also additive in 6.6: `detectors[].excluded_by_depth`: the explicitly requested `--depth` whose projection cleared a fact the detector requires, when that is the only reason it did not run (`null` otherwise). Each such detector stays listed with `not_evaluated: true` and its `coverage_gap` (now `<fact> not available at depth <d>`, without the duplicated `disabled:` prefix); `coverage_warnings` carries one `Detectors not applicable at --depth <d>: ...` summary line instead of one line per detector. That line is requested scope, not an evidence gap: it is not a PR-comment limitation and lowers neither `confidence` nor `analysis_assurance`. Additive, so a MINOR bump. Never affects `verdict`, `severity` or any exit code.
++
++**6.7** — additive `undeclared_export_census` object: per side (`old`/`new`), the census behind the undeclared-export `coverage_warnings` line — `undeclared_total`, `attributed`, `by_guard` (one `{macro, count, examples}` row per guard macro of a preprocessor branch the castxml parse excluded, decided from that run's own `-E -dD` output) and `by_cause` (the named `sycl::` fallback). Emitted only when some export is attributed. Additive, so a MINOR bump. Never affects `verdict`, `severity` or any exit code.
+diff --git a/docs/reference/schemas/v1/compare_report.schema.json b/docs/reference/schemas/v1/compare_report.schema.json
+index 7adc65b29..45bd5aa78 100644
+--- a/docs/reference/schemas/v1/compare_report.schema.json
++++ b/docs/reference/schemas/v1/compare_report.schema.json
+@@ -1723,6 +1723,41 @@
+         "type": "string"
+       }
+     },
++    "undeclared_export_census": {
++      "type": "object",
++      "description": "Schema 6.7: per side (`old`/`new`), the census behind the undeclared-export coverage_warnings line -- exported symbols the parsed headers did not declare, attributed to the guard macro of a preprocessor branch the parse excluded (decided by the castxml run's own `-E` output) or to a named cause (`sycl`). Emitted only when at least one export on some side is attributed. Informational: never affects `verdict`, `severity` or any exit code.",
++      "additionalProperties": {
++        "type": "object",
++        "required": ["undeclared_total", "attributed", "by_guard", "by_cause"],
++        "properties": {
++          "undeclared_total": {"type": "integer", "minimum": 0},
++          "attributed": {"type": "integer", "minimum": 0},
++          "by_guard": {
++            "type": "array",
++            "items": {
++              "type": "object",
++              "required": ["macro", "count", "examples"],
++              "properties": {
++                "macro": {"type": "string"},
++                "count": {"type": "integer", "minimum": 1},
++                "examples": {"type": "array", "items": {"type": "string"}, "maxItems": 3}
++              }
++            }
++          },
++          "by_cause": {
++            "type": "array",
++            "items": {
++              "type": "object",
++              "required": ["cause", "count"],
++              "properties": {
++                "cause": {"type": "string"},
++                "count": {"type": "integer", "minimum": 1}
++              }
++            }
++          }
++        }
++      }
++    },
+     "policy_overrides": {
+       "type": "object",
+       "additionalProperties": {
+diff --git a/tests/field_shapes/ifdef_generic_guard/ground_truth.json b/tests/field_shapes/ifdef_generic_guard/ground_truth.json
+new file mode 100644
+index 000000000..cd76f5f72
+--- /dev/null
++++ b/tests/field_shapes/ifdef_generic_guard/ground_truth.json
+@@ -0,0 +1,16 @@
++{
++  "description": "Exports declared only under #ifdef FOO and #ifdef SYCL_LANGUAGE_VERSION, parsed with neither macro defined: the coverage block attributes each hidden export to its guard macro (decided from the castxml run's own -E output), and the export v2 drops (foo_two) is still counted rather than silently ignored.",
++  "field_report": "oneDAL #3693 handover r2, H5 (generalized beyond sycl::)",
++  "bug_class": "evidence.silent_degradation_to_clean_verdict",
++  "related_tests": [
++    "tests/test_preprocessor_hidden_census_integration.py",
++    "tests/test_preprocessor_branches.py"
++  ],
++  "depths": [
++    "headers"
++  ],
++  "coverage_contains": [
++    "declared only under a #if branch on FOO that this parse excluded",
++    "declared only under a #if branch on SYCL_LANGUAGE_VERSION that this parse excluded"
++  ]
++}
+diff --git a/tests/field_shapes/ifdef_generic_guard/v1/api.cpp b/tests/field_shapes/ifdef_generic_guard/v1/api.cpp
+new file mode 100644
+index 000000000..9db6aa1d8
+--- /dev/null
++++ b/tests/field_shapes/ifdef_generic_guard/v1/api.cpp
+@@ -0,0 +1,5 @@
++namespace sycl { class queue {}; }
++int base(int x) { return x; }
++int foo_one(int x) { return x + 1; }
++int foo_two(double) { return 2; }
++int on_queue(sycl::queue&) { return 3; }
+diff --git a/tests/field_shapes/ifdef_generic_guard/v1/api.h b/tests/field_shapes/ifdef_generic_guard/v1/api.h
+new file mode 100644
+index 000000000..b1f9cdd82
+--- /dev/null
++++ b/tests/field_shapes/ifdef_generic_guard/v1/api.h
+@@ -0,0 +1,12 @@
++#ifndef GENERIC_GUARD_API_H
++#define GENERIC_GUARD_API_H
++int base(int);
++#ifdef FOO
++int foo_one(int);
++int foo_two(double);
++#endif
++#ifdef SYCL_LANGUAGE_VERSION
++namespace sycl { class queue; }
++int on_queue(sycl::queue&);
++#endif
++#endif
+diff --git a/tests/field_shapes/ifdef_generic_guard/v2/api.cpp b/tests/field_shapes/ifdef_generic_guard/v2/api.cpp
+new file mode 100644
+index 000000000..e94a2af09
+--- /dev/null
++++ b/tests/field_shapes/ifdef_generic_guard/v2/api.cpp
+@@ -0,0 +1,4 @@
++namespace sycl { class queue {}; }
++int base(int x) { return x; }
++int foo_one(int x) { return x + 1; }
++int on_queue(sycl::queue&) { return 3; }
+diff --git a/tests/field_shapes/ifdef_generic_guard/v2/api.h b/tests/field_shapes/ifdef_generic_guard/v2/api.h
+new file mode 100644
+index 000000000..bbf3abd33
+--- /dev/null
++++ b/tests/field_shapes/ifdef_generic_guard/v2/api.h
+@@ -0,0 +1,11 @@
++#ifndef GENERIC_GUARD_API_H
++#define GENERIC_GUARD_API_H
++int base(int);
++#ifdef FOO
++int foo_one(int);
++#endif
++#ifdef SYCL_LANGUAGE_VERSION
++namespace sycl { class queue; }
++int on_queue(sycl::queue&);
++#endif
++#endif
+diff --git a/tests/test_declined_comparisons.py b/tests/test_declined_comparisons.py
+index d9d380b26..bc6f81a73 100644
+--- a/tests/test_declined_comparisons.py
++++ b/tests/test_declined_comparisons.py
+@@ -137,7 +137,7 @@ def test_compare_reports_the_decline_and_leaves_findings_unchanged():
+         assert listed[det.name]["declined"] == [
+             {"entity": e, "reason": r} for e, r in det.declined
+         ]
+-    assert doc["report_schema_version"] == "6.6"
++    assert doc["report_schema_version"] == "6.7"
+     from pathlib import Path
+ 
+     from schema_validation import jsonschema_available, validate_instance
+diff --git a/tests/test_impact_group_id_correlator.py b/tests/test_impact_group_id_correlator.py
+index 5337ede04..25d4b0529 100644
+--- a/tests/test_impact_group_id_correlator.py
++++ b/tests/test_impact_group_id_correlator.py
+@@ -258,7 +258,7 @@ class TestSchemaAcceptsGroupWithoutRootCause:
+             ChangeKind.CONSUMER_REQUIRED_SYMBOL_REMOVED, "pub_helper", "consumer needs"
+         )
+         doc = json.loads(reporter.to_json(_result([func, consumer])))
+-        assert doc["report_schema_version"] == "6.6"
++        assert doc["report_schema_version"] == "6.7"
+         # A bare DiffResult lacks the pipeline-level required keys, so validate
+         # each `changes` entry against the schema's own change definition.
+         schema = load_compare_report_schema()
+diff --git a/tests/test_preprocessor_branches.py b/tests/test_preprocessor_branches.py
+new file mode 100644
+index 000000000..7a54c26df
+--- /dev/null
++++ b/tests/test_preprocessor_branches.py
+@@ -0,0 +1,168 @@
++"""Unit tests for the preprocessor-excluded declaration scan.
++
++The scanner never evaluates a condition: which lines survived is the
++compiler's answer. Here that answer is either written out by hand (the
++oracle is the test author's reading of the preprocessor rules) or, in the
++``integration`` cross-check, produced by a real ``g++ -E``.
++"""
++
++from __future__ import annotations
++
++import itertools
++import os
++import shutil
++import subprocess
++from pathlib import Path
++
++import pytest
++
++from abicheck.extract.headers.castxml.hidden_declarations import (
++    attach_hidden_declarations,
++    read_hidden_declarations,
++)
++from abicheck.extract.headers.castxml.preprocessed_text import parse_preprocessed
++from abicheck.extract.headers.preprocessor_branches import (
++    hidden_declarations,
++    hidden_declarations_for_headers,
++    scan_branches,
++)
++
++_HEADER = """\
++#ifndef API_H
++#define API_H
++int visible(int);
++#ifdef FOO
++int foo_a(int);
++#  if defined(BAR) && defined(BAZ)
++int nested(void);
++#  endif
++#elif OTHER > 2
++int other(void);
++#else
++int fallback(void);
++#endif
++#ifndef NOPE
++int not_nope(void);
++#endif
++#endif
++"""
++
++
++def _code_lines(text: str) -> dict[str, int]:
++    """Name declared on each line (the test's own index, not the scanner's)."""
++    out = {}
++    for no, line in enumerate(text.splitlines(), start=1):
++        if line.startswith("int "):
++            out[line.split()[1].split("(")[0]] = no
++    return out
++
++
++def _present(text: str, kept: set[str]) -> set[int]:
++    lines = _code_lines(text)
++    # The include guard's `#define` and every kept declaration produce output.
++    return {2} | {lines[n] for n in kept}
++
++
++@pytest.mark.parametrize(
++    ("kept", "expected"),
++    [
++        # Nothing defined: FOO's arm and its nested group are out, #else is in.
++        (
++            {"visible", "fallback", "not_nope"},
++            {"FOO": {"foo_a"}, "OTHER": {"other"}},
++        ),
++        # FOO defined, BAR/BAZ not: only the nested group is out; the #elif
++        # and #else arms of FOO are out too and keep FOO among their guards.
++        (
++            {"visible", "foo_a", "not_nope"},
++            {
++                "BAR": {"nested"},
++                "BAZ": {"nested"},
++                "FOO": {"other", "fallback"},
++                "OTHER": {"other", "fallback"},
++            },
++        ),
++        # NOPE defined: the #ifndef arm is out and names NOPE.
++        (
++            {"visible", "fallback"},
++            {"FOO": {"foo_a"}, "OTHER": {"other"}, "NOPE": {"not_nope"}},
++        ),
++    ],
++)
++def test_hidden_declarations_by_guard(kept: set[str], expected: dict) -> None:
++    got = hidden_declarations(_HEADER, _present(_HEADER, kept))
++    assert got == expected
++
++
++def test_include_guard_is_never_a_guard() -> None:
++    branches = scan_branches(_HEADER)
++    assert [b.include_guard for b in branches].count(True) == 1
++    assert all("API_H" not in b.guard_macros for b in branches)
++    # Even with nothing present the include guard is never reported.
++    assert "API_H" not in hidden_declarations(_HEADER, set())
++
++
++def test_wrapper_without_own_code_defers_to_inner_branch() -> None:
++    text = "#ifdef OUTER\n#ifdef INNER\nint f(void);\n#endif\n#endif\n"
++    assert hidden_declarations(text, set()) == {"INNER": {"f"}}
++
++
++def test_comments_continuations_and_noise_are_ignored() -> None:
++    text = (
++        "/* #ifdef FAKE\n int fake(void);\n#endif */\n"
++        "#if defined(A) || \\\n    __has_include(<x.h>) || 2 > 1L\n"
++        "int g(void); // if (x)\n"
++        "#endif\n"
++    )
++    assert hidden_declarations(text, set()) == {"A": {"g"}}
++
++
++def test_headers_merge_and_unreadable_header(tmp_path: Path) -> None:
++    a = tmp_path / "a.h"
++    a.write_text("#ifdef X\nint a(void);\n#endif\n", encoding="utf-8")
++    b = tmp_path / "b.h"
++    b.write_text("#ifdef X\nint b(void);\n#endif\n", encoding="utf-8")
++    assert hidden_declarations_for_headers([a, b], {}) == {"X": ("a", "b")}
++    key = os.path.normpath(os.path.realpath(a))
++    assert hidden_declarations_for_headers([a], {key: {2}}) == {}
++    assert hidden_declarations_for_headers([tmp_path / "missing.h"], {}) is None
++
++
++def test_xml_round_trip() -> None:
++    from xml.etree.ElementTree import Element
++
++    root = Element("CastXML")
++    assert read_hidden_declarations(root) is None
++    attach_hidden_declarations(root, {"FOO": ("a", "b"), "BAR": ()})
++    assert read_hidden_declarations(root) == {"FOO": ("a", "b")}
++
++
++@pytest.mark.integration
++@pytest.mark.skipif(not shutil.which("g++"), reason="needs g++")
++@pytest.mark.parametrize(
++    "defines",
++    [
++        list(c)
++        for n in range(4)
++        for c in itertools.combinations(["FOO", "BAR", "BAZ", "NOPE"], n)
++    ],
++)
++def test_against_real_preprocessor(tmp_path: Path, defines: list[str]) -> None:
++    """Cross-check against ``g++ -E -dD``: a declaration is reported iff the
++    compiler dropped it, and only under a macro its group's conditions name."""
++    header = tmp_path / "api.h"
++    header.write_text(_HEADER, encoding="utf-8")
++    out = subprocess.run(
++        ["g++", "-E", "-dD", "-x", "c++", *(f"-D{d}" for d in defines), str(header)],
++        capture_output=True,
++        text=True,
++        check=True,
++    ).stdout
++    files, _ = parse_preprocessed(out)
++    key = os.path.normpath(str(header))
++    present = set(files.get(key, {}))
++    got = hidden_declarations(_HEADER, present)
++    reported = set().union(*got.values()) if got else set()
++    dropped = {n for n, line in _code_lines(_HEADER).items() if line not in present}
++    assert reported == dropped
++    assert set(got) <= {"FOO", "BAR", "BAZ", "OTHER", "NOPE"}
