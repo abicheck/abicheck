@@ -85,8 +85,8 @@
       "abicheck/extract/headers/castxml/specialization.py": "3f9f021672df1b84de42bc8de5f3c915508b3f3850e0a8acbaa80a3dee04c6f3",
       "abicheck/extract/headers/castxml/type_resolution.py": "73b472e102170e76950c47dab5871c51d2c534d3de3d50caec2defa7d320b4c2",
       "abicheck/extract/headers/castxml/typedef_parsing.py": "332587638d5d4b7caebbc20fa44b69c314771fffa5839a15dec59eaba3caaf93",
-      "abicheck/extract/headers/castxml/vector_join.py": "38178ef2da152738fd2d3a97349ed22c64911902869571ef9898fcf917d2a64d",
-      "abicheck/extract/headers/castxml/vector_spellings.py": "5cf188c45efc12c68963c4cf0e8c6e411aff661a665da4591a21f503c5ea0b84",
+      "abicheck/extract/headers/castxml/vector_join.py": "770ccd12e038401d6c9547105a1e025bec53f99740e7579dc5691f1988dbfc10",
+      "abicheck/extract/headers/castxml/vector_spellings.py": "6d3be07dd47cf3052bbb56444d2d3b282aa24a30af3d297695adc8bfef5f0ada",
       "abicheck/extract/headers/clang/__init__.py": "538add12f3ff39e1c1b39e6f5def93b50a584b78b30c4e7e59058207222757d0",
       "abicheck/extract/headers/clang/attributes.py": "7e32c123c19fa5cad688760325bd17199dd42d0cc58a0b92360349403003f1e9",
       "abicheck/extract/headers/clang/backend.py": "a8ca2ac1f7e7518064b693f2eb54aa525c46691faeea3e6c1ac2910efcd04224",
@@ -159,9 +159,9 @@
       "abicheck/symvers_metadata.py": "372737765cd132e6e87ed891dd465d2958e04debbef774e45212ceb3036871cb",
       "abicheck/type_metadata.py": "9997189de8dac522fd1db8be5ae491d811139503f83abaaded89038eb4aa9cdf"
     },
-    "fingerprint": "9f4def8605e798de296ce9f896c239acea460262eba673cc2045730c141e2611",
+    "fingerprint": "5982be9d26f5e553bacfc944cdc1187671fa75ed4508dbfa81abad52338ff15b",
     "generation": 15,
-    "reason": "bumped to 15 for a semantic change"
+    "reason": "SPDX license headers added to two new castxml vector modules; comment-only, no fact changes"
   },
   "resolver": {
     "files": {
