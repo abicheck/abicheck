@@ -16,7 +16,7 @@
 """Branches of the release output finalization and suppression validation.
 
 ``_validate_suppression_early`` and ``_finalize_release_output`` were moved
-verbatim out of ``cli_compare_release_matrix``. These tests pin the branches
+verbatim out of the retired ``cli_compare_release_matrix`` module. These tests pin the branches
 the moved code owns through the entry points a user reaches, so the patch
 coverage of the move does not depend on the full unit lane.
 """
