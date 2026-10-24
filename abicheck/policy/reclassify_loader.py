@@ -81,6 +81,7 @@ _RECLASSIFY_STRING_FIELDS: tuple[str, ...] = (
     "cause_namespace",
     "source_location",
     "binding",
+    "shifted_by_type_pattern",
     "reason",
     "label",
 )
@@ -177,6 +178,7 @@ def parse_reclassify(
                 cause_namespace=string_fields["cause_namespace"],
                 source_location=string_fields["source_location"],
                 binding=string_fields["binding"],
+                shifted_by_type_pattern=string_fields["shifted_by_type_pattern"],
                 change_kind=kind,
                 reason=string_fields["reason"],
                 label=string_fields["label"],

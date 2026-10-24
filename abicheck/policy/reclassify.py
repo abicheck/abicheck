@@ -186,6 +186,7 @@ RECLASSIFY_KNOWN_KEYS: frozenset[str] = frozenset(
         "cause_namespace",
         "source_location",
         "binding",
+        "shifted_by_type_pattern",
         "to",
         "reason",
         "label",
@@ -253,6 +254,7 @@ class ReclassifyRule:
     #: `expires` (Codex review, fresh evidence: this rule form otherwise
     #: fell out of sync with `Suppression`'s selector grammar).
     binding: str | None = None
+    shifted_by_type_pattern: str | None = None  # conjunctive; see SelectorSet
     #: P2: optional user-chosen identifier, unique within its document. The
     #: audit's ``rule_id`` when set; otherwise the canonical rule identity.
     id: str | None = None
@@ -315,6 +317,7 @@ class ReclassifyRule:
             change_kind=self.change_kind,
             expires=self.expires,
             binding=self.binding,
+            shifted_by_type_pattern=self.shifted_by_type_pattern,
         )
 
     def matches(self, change: Any, today: date | None = None) -> bool:
@@ -359,6 +362,7 @@ class ReclassifyRule:
             "cause_namespace",
             "source_location",
             "binding",
+            "shifted_by_type_pattern",
         ):
             val = getattr(self, field_name)
             if val is not None:
@@ -401,6 +405,7 @@ class ReclassifyRule:
             "cause_namespace",
             "source_location",
             "binding",
+            "shifted_by_type_pattern",
         ):
             val = getattr(self, field_name)
             if val is not None:
