@@ -87,6 +87,7 @@ EXTRACTION_BUG_CLASSES: tuple[BugClass, ...] = (
             "tests/test_flat_map_dependency_scope.py",
             "tests/test_exclude_header_flat_maps_integration.py",
             "tests/test_typedef_retention_instantiation_independent.py",
+            "tests/test_field_shapes.py",
         ),
         public_surfaces=("cli",),
         axes={

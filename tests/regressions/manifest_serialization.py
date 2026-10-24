@@ -184,6 +184,7 @@ SERIALIZATION_BUG_CLASSES: tuple[BugClass, ...] = (
         fixed_by=(1698,),
         seed_tests=(
             "tests/test_snapshot_generation_migration.py",
+            "tests/test_field_shapes.py",
             "tests/test_family_f1_evidence_ablation.py",
         ),
         known_gaps=(
