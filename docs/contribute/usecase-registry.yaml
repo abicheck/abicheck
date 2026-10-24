@@ -261,10 +261,12 @@ use_cases:
   - id: UC-ARCH-static-lib
     axis: archetype
     name: Static libraries (.a / .lib)
-    status: by_design_excluded
+    status: partial
     user_task: [pr_review, local_check]
     journey_stages: [first_check, audit]
     adrs: [ADR-086]
+    gap: G8
+    plan: docs/contribute/plans/g8-static-libraries.md
     note: >
       G8 decision (option A, shipped): static/import library archives are
       unsupported input for comparison today. abicheck compares single linkable images
@@ -293,6 +295,20 @@ use_cases:
       modules: [abicheck/binary_utils.py, abicheck/service.py, abicheck/extract/ar_archive.py, abicheck/workflows/static_archive_snapshot.py]
       tests: [tests/test_compare_input_modes.py, tests/test_service_compare_pipeline_unit.py, tests/test_input_resolution_unit.py, tests/test_static_archive_no_baseline.py]
       docs: [docs/learn/limitations.md]
+    next_steps: >
+      DONE (ADR-086, one-sided audit): `compare --no-baseline LIB.a -H include/`
+      reads the archive's own symbol index (`extract/ar_archive.py`) as its export
+      table and runs the declared-vs-defined audit (`public_not_exported` /
+      `exported_not_public`); a missing index is exit 64 with a `ranlib` hint, and
+      the snapshot is marked `static_archive` so dynamic-section checks report
+      `not_collected`. REMAINING: (1) two-sided `compare` of two archives, which
+      ADR-086 D1 keeps out of scope until a link-model-aware comparison is
+      designed; (2) `dump` and every other command still reject an archive with
+      exit 64 (the message names the one command that reads it); (3) Mach-O
+      leading-underscore and COFF/`.lib` import-library members, which ADR-086
+      D3 refuses with a reason until they are handled explicitly; (4) thin
+      archives, LLVM bitcode members and mixed-target archives remain refused.
+      The decision record and the open investigation are in the plan.
 
   - id: UC-ARCH-ffi-consumers
     axis: archetype
@@ -1476,7 +1492,7 @@ use_cases:
     journey_stages: [trust, release]
     adrs: [ADR-065, ADR-071]
     gap: G46
-    plan: docs/contribute/plans/vision-api-abi-evolution.md
+    plan: docs/contribute/plans/g46-scope-completeness.md
     evidence:
       modules: [abicheck/model/package_inventory.py, abicheck/workflows/release_scope.py]
       tests: [tests/test_release_scope_completeness.py, tests/test_aggregate_scope_completeness.py, tests/test_release_package_inventory_cli.py]
@@ -1495,7 +1511,7 @@ use_cases:
     journey_stages: [trust]
     adrs: [ADR-063]
     gap: G47
-    plan: docs/contribute/plans/vision-api-abi-evolution.md
+    plan: docs/contribute/plans/g47-analysis-assurance.md
     evidence:
       modules: [abicheck/policy/analysis_assurance/_compute.py]
       tests: [tests/test_analysis_assurance.py, tests/test_analysis_assurance_cli.py]
@@ -1515,7 +1531,7 @@ use_cases:
     journey_stages: [release, audit]
     adrs: [ADR-066]
     gap: G48
-    plan: docs/contribute/plans/vision-api-abi-evolution.md
+    plan: docs/contribute/plans/g48-release-history.md
     evidence:
       modules: [abicheck/workflows/history.py, abicheck/policy_file_versioning.py]
       tests: [tests/test_workflows_history.py, tests/test_cli_project_history.py, tests/test_versioning_policy.py]

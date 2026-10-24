@@ -76,8 +76,9 @@ UC-ARCH-header-only, UC-ARCH-cython-api, UC-ARCH-static-lib, UC-WF-mcp.
 - Header-only libraries have no first-class path (G4, G45, vision
   workstream F).
 - The one-shot deep compare still needs both sides dumped by hand (G21).
-- Static archives are a `--no-baseline` audit operand only (ADR-086), so
-  UC-ARCH-static-lib's exclusion needs revisiting.
+- Static archives are an audit-only operand: `compare --no-baseline LIB.a -H
+  include/` reads the archive's symbol index (ADR-086), but two-sided archive
+  compare and every other command still reject archives (G8).
 
 ### `adopt_ci`
 
@@ -210,6 +211,9 @@ UC-WORKFLOW-audit-example-corpus, UC-WF-audit, UC-ARCH-static-lib,
 UC-REPORTING-scan-coverage-report.
 **Friction:**
 - The single-binary audit/lint mode is planned (G11).
+- A static archive is audited only as a `compare --no-baseline` operand
+  (ADR-086): the declared-vs-defined check runs, but two-sided archive compare
+  and the other commands still reject it (G8).
 
 ## What to build next
 

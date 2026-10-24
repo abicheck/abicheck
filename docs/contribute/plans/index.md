@@ -22,9 +22,10 @@ scope**.
 | **G25** | [Cython API/ABI frontend](g25-cython-api-abi-frontend.md) | `UC-ARCH-cython-api` | XL |
 | **G26** | [NumPy C-API compatibility envelope](g26-numpy-capi-envelope.md) | `UC-TC-numpy-capi-envelope` | L |
 | **G27** | [Wheel tag / deployment-claim verification](g27-wheel-deployment-verification.md) | `UC-TC-wheel-deployment-claims` | L |
-| **G46** | [Comparison scope and completeness (vision workstream A)](vision-api-abi-evolution.md) | `UC-WF-scope-completeness` | L |
-| **G47** | [Analysis assurance and evidence adequacy (vision workstream E)](vision-api-abi-evolution.md) | `UC-WF-analysis-assurance` | L |
-| **G48** | [Release history and versioning policy (vision workstream B)](vision-api-abi-evolution.md) | `UC-WF-release-history` | M |
+| **G8** | [Static libraries (`.a` / `.lib`)](g8-static-libraries.md) — `compare --no-baseline` archive audit landed (ADR-086); two-sided archive compare and other commands remain | `UC-ARCH-static-lib` | M |
+| **G46** | [Comparison scope and completeness (vision workstream A, ADR-065)](g46-scope-completeness.md) | `UC-WF-scope-completeness` | L |
+| **G47** | [Analysis assurance and evidence adequacy (vision workstream E, ADR-063)](g47-analysis-assurance.md) | `UC-WF-analysis-assurance` | L |
+| **G48** | [Release history and versioning policy (vision workstream B, ADR-066)](g48-release-history.md) | `UC-WF-release-history` | M |
 
 Initiative plans (cross-cutting, not tied to a single registry gap):
 
@@ -88,7 +89,6 @@ Completed or decided plans are retained for implementation history:
 | **G9** | Done — auditwheel/delocate vendored-library pairing, filename and embedded DT_SONAME/install-name both normalized via `strip_vendor_hash` | plan retired (`g9-wheel-vendored-matching.md`, removed after completion) |
 | **G10** | Done — manylinux glibc-floor / platform-baseline check (`platform_baseline_floor_raised`, declared via `--env-matrix`'s `runtime_floors`) | plan retired (`g10-glibc-floor-check.md`, removed after completion) |
 | **G16** | Done — header-scope toolchain diagnostics, `HeaderToolchainError`, and a real-host `integration` end-to-end check | plan retired (`g16-header-scope-toolchain-robustness.md`, removed after completion) |
-| **G8** | Decided (option A, shipped) — static/import archives are unsupported input today; `vision.md`'s amended framing treats this as a current limitation open to a bounded future investigation, not a permanent exclusion | [g8](g8-static-libraries.md) |
 | **G12** | Done — security-hardening drift surface and policy preset | plan retired (`g12-security-hardening.md`, removed after completion) |
 | **G13** | Done — ELF snapshot captures `e_machine`/`EI_CLASS`/endianness; a mismatch is a dominating `BREAKING_KINDS` guard | plan retired (`g13-arch-mismatch-guard.md`, removed after completion) |
 | **G14** | Done — CPython extension recognition, `abi3`/Limited-API import-contract check, `scan --abi3` audit | plan retired (`g14-stable-abi-subset.md`, removed after completion) |
