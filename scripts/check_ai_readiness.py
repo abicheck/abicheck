@@ -94,6 +94,7 @@ from fact_registry_completeness import (  # noqa: E402
     check_fact_registry_completeness,
 )
 from findings_report import Findings as _SharedFindings  # noqa: E402
+from generation_corpus_gate import check_generation_corpus  # noqa: E402
 
 # The generated-skill publication trees' own generator (ADR-058 / G36 P0.3).
 # Imported for `discover_skills` alone, so the ownership check below asks the
@@ -3610,6 +3611,7 @@ CHECKS: dict[str, Callable[[Findings], None]] = {
     "learning-nav-order": check_learning_nav_order,
     "adr-index-nav-sync": check_adr_index_and_nav_sync,
     "adr-status-sync": check_adr_status_sync,
+    "generation-corpus": check_generation_corpus,
     "banned-imports": check_banned_imports,
     "perf-antipatterns": check_perf_antipatterns,
     "project-snapshot-dto-no-asdict": check_project_snapshot_dto_no_asdict,

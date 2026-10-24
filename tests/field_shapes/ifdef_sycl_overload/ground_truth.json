@@ -1,0 +1,26 @@
+{
+  "description": "A sycl::queue& overload declared only under #ifdef SYCL_LANGUAGE_VERSION, parsed with the macro defined and a test-only forward-declaration stub (stubs/sycl/sycl.hpp): removing the bar(sycl::queue&, int) overload in v2 reports func_removed, and no export is left undeclared.",
+  "field_report": "oneDAL #3693 handover r2, H5",
+  "bug_class": "evidence.silent_degradation_to_clean_verdict",
+  "related_tests": [
+    "tests/test_undeclared_sycl_census_integration.py",
+    "tests/test_sycl_stub_parse_integration.py"
+  ],
+  "parse_defines": [
+    "SYCL_LANGUAGE_VERSION=202001"
+  ],
+  "parse_includes": [
+    "stubs"
+  ],
+  "depths": [
+    "headers",
+    "source"
+  ],
+  "expected": "BREAKING",
+  "expected_kinds": [
+    "func_removed"
+  ],
+  "coverage_absent": [
+    "not declared under the parsed header configuration"
+  ]
+}

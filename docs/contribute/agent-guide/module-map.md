@@ -777,7 +777,10 @@ cover the surrounding first-party trees this file doesn't detail.
    `ChangeKind`/`HasKind` unchanged, so every existing `from .checker_policy
    import ChangeKind` call site is unaffected.
 2. Add ONE `ChangeKindMeta` entry (kind string, `default_verdict`, required
-   `impact`, optional `description_template`) to the taxonomy module under
+   `impact`, `entity`/`operation`, and `contract_subject` — what contract
+   evaluation may place: a non-`declaration` subject is `NOT_APPLICABLE` in
+   every mode, ADR-049's 2026-10 amendment — optional
+   `description_template`) to the taxonomy module under
    `abicheck/model/change_catalog/` that matches which detector actually
    produces the kind (ADR-061 D9 — see each module's own docstring for its
    scope and the categorization methodology):

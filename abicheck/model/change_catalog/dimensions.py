@@ -70,3 +70,31 @@ class ChangeOperation(StrEnum):
     ADDED = "added"
     REMOVED = "removed"
     MODIFIED = "modified"
+
+
+class ContractSubject(StrEnum):
+    """What a finding's subject is, as far as a contract can place it (ADR-049
+    amendment, "Contract subject of a ChangeKind").
+
+    Only a ``DECLARATION`` names an entity a contract domain (headers, the
+    export table, the Python API surface, a manifest) can commit to or
+    exclude; contract evaluation answers ``NOT_APPLICABLE`` for every other
+    value in every mode. Declared once per kind beside ``entity``, so a kind
+    added tomorrow cannot fall through to ``UNKNOWN_UNRESOLVED`` and raise
+    the contract-coverage exit the way hand-curated exemption lists let it.
+    """
+
+    #: A function, variable, type, enum, macro, Python object or source
+    #: declaration of the library under test (or a roll-up of several).
+    DECLARATION = "declaration"
+    #: An edge from this library to another one: a ``DT_NEEDED`` entry, an
+    #: imported symbol, a required version node, a resolved provider.
+    DEPENDENCY_EDGE = "dependency_edge"
+    #: A property of the whole artifact: format, architecture, loader state,
+    #: hardening, the runtime or platform floor it requires.
+    BINARY_WIDE = "binary_wide"
+    #: A build, toolchain or package-configuration fact: a compiler flag or
+    #: mode, a toolchain version, a build target, a release's composition.
+    BUILD_FACT = "build_fact"
+    #: A statement about the analysis or its evidence, not about the library.
+    ANALYSIS = "analysis"

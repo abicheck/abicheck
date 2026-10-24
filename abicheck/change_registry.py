@@ -51,6 +51,7 @@ from .model.change_catalog.registry import (  # noqa: F401
     ChangeKindMeta as ChangeKindMeta,
     ChangeKindRegistry as ChangeKindRegistry,
     ChangeOperation as ChangeOperation,
+    ContractSubject as ContractSubject,
     Verdict as Verdict,
 )
 from .model.change_catalog.source import SOURCE_ENTRIES

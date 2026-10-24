@@ -116,6 +116,7 @@ from .typedef_parsing import (
     _deprecation_marker as _deprecation_marker,
     _extract_contract_attributes as _extract_contract_attributes,
 )
+from .vector_spellings import load_vector_spellings
 
 
 class _CastxmlParser:
@@ -145,6 +146,7 @@ class _CastxmlParser:
             no_binary_evidence=no_binary_evidence,
         )
         self._ctx.build_id_map()
+        self._ctx.vector_spellings = load_vector_spellings(self._ctx)
 
     # ── shared-context state, exposed for methods not yet migrated ─────────
 

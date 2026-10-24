@@ -353,6 +353,7 @@ def fold_rule_rows(
                 selector_matched_count=sum(row.selector_matched_count for row in group),
                 intent=first.intent,
                 allow_public_break=first.allow_public_break,
+                rule_identity=first.rule_identity,
                 missing_evidence=(
                     next(
                         (r.missing_evidence for r in group if r.missing_evidence), None

@@ -315,6 +315,7 @@ def test_catalog_rejects_an_informational_flag_that_claims_a_change(
         policy_overrides=overrides,
         entity=REGISTRY.entries["public_surface_grew"].entity,
         operation=REGISTRY.entries["public_surface_grew"].operation,
+        contract_subject=REGISTRY.entries["public_surface_grew"].contract_subject,
         is_informational=True,
     )
     with pytest.raises(ValueError, match="is_informational"):

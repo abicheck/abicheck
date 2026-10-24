@@ -174,6 +174,9 @@ def add_detectors(d: dict[str, object], result: DiffResult) -> None:
             # and found nothing", and `changes_count: 0` cannot tell them
             # apart on its own.
             "not_evaluated": getattr(det, "not_evaluated", False),
+            # Schema 6.6: the explicitly requested --depth that excluded this
+            # detector's required facts, when that is why it did not run.
+            "excluded_by_depth": getattr(det, "excluded_by_depth", None),
             # ADR-063 T9 (schema 5.11): comparisons the detector ran but
             # declined to judge, each with its evidence reason.
             "declined": [

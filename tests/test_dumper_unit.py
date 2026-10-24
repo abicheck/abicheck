@@ -817,7 +817,7 @@ class TestCastxmlParserTypeName:
         arr = Element("ArrayType", id="t2", type="t1", max="9")
         root = _xml_root(ft, arr)
         p = _CastxmlParser(root, set(), set())
-        assert p._type_name("t2") == "int[9]"
+        assert p._type_name("t2") == "int[10]"  # max="9" is the last index
 
     def test_array_type_no_max(self):
         ft = _fund_type("t1", "char")
