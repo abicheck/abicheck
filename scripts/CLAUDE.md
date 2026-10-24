@@ -89,6 +89,7 @@ One row per script: name, first sentence of its purpose, trigger. **Read the ful
 | `gen_action_cli_surface.py` | Generates `action/cli-surface.txt` — the CLI `click.Choice` sets `action/validate-inputs.sh` needs **before** abicheck is installed. | manual |
 | `record_generation_fingerprints.py` | Re-records the extractor/resolver/source generation fingerprints in `abicheck/storage/generation_fingerprints.json` (ADR-062 D2 and its source-axis amendment): `--axis source` covers `abicheck/buildsource/source_extractors/` and the L4/L5 producers. `--bump` after raising the generation constant, or `--no-semantic-change --reason` for a scoped refactor. | manual, after a scoped edit under `abicheck/extract/`, the root parse-stage modules, the resolver list, or the source tier (`tests/unit/storage/test_generation_fingerprint.py` fails until then). |
 | `gen_learning_ladder.py` | Renders the learning-series hub's numbered step list and role-path table. | manual |
+| `gen_cjm_stage_table.py` | Renders the CJM stage-coverage table in `docs/contribute/cjm.md` from `usecase-registry.yaml`. | `verify.py --only cjm-stage-table` (PR profile); manual. |
 | `gen_platform_matrix.py` | Regenerates the host-OS × binary-format capability matrix. | manual |
 | `generated_section.py` | Shared BEGIN/END GENERATED sentinel splice for the `gen_*_matrix.py` generators (library, not run directly). | n/a |
 | `gen_backend_capability_matrix.py` | Regenerates the L2 header-backend × ABI-fact capability matrix. | manual |

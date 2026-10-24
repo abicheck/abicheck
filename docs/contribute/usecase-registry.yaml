@@ -37,6 +37,8 @@
 #   non-empty list from first_check | adopt_ci | pr_review | trust | tune |
 #   release | downstream | audit. The stages are defined in
 #   docs/contribute/cjm.md, which tests/test_usecase_registry.py keeps in sync.
+#   A new use case needs `journey_stages`; then rerun
+#   `python scripts/gen_cjm_stage_table.py` to refresh the stage coverage table.
 # axis legend: change_class | archetype | platform | workflow | reporting | toolchain
 
 schema_version: 1
