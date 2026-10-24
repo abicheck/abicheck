@@ -48,6 +48,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from .versioning import (
+    EXTRACTOR_GENERATION,
     GENERATION_DRIFT_NOTICE_MARKER,
     UNSTATED_GENERATION,
     FactGenerations,
@@ -57,10 +58,13 @@ from .versioning import (
 
 __all__ = [
     "FACT_GENERATIONS_KEY",
+    "PLACEHOLDER_REASONS",
     "SPELLING_MIGRATIONS",
     "GenerationSpellingChange",
     "decode_fact_generations",
     "encode_fact_generations",
+    "extractor_generation_of",
+    "is_placeholder_reason",
     "migrate_and_describe",
     "without_snapshot_generation_notices",
 ]
@@ -95,36 +99,124 @@ class GenerationSpellingChange:
     rewrites: tuple[tuple[str, str], ...] = ()
 
 
-_NO_SPELLING = "no stored type spelling changed in this generation"
-
-#: One row per extractor generation, keyed by the generation that *introduced*
-#: the change. A snapshot stamped below a row's key (or unstated) gets that
-#: row's rewrites on load.
+#: Every row's reason cites the commit that introduced the generation and what
+#: an audit of that commit's extractor diff found. Rows without rewrites were
+#: audited by reading the diff over the fingerprinted extractor scope
+#: (``generation_fingerprints.json``) and confirmed empirically: the frozen
+#: corpus under ``tests/fixtures/generations/``, dumped at each generation's
+#: last main commit, spells every entity like a fresh dump once these
+#: rewrites are applied (``tests/test_generation_corpus.py``).
+#: ``scripts/check_ai_readiness.py``'s ``generation-corpus`` check refuses a
+#: row whose reason is empty or a bare "no change" placeholder.
 SPELLING_MIGRATIONS: Mapping[int, GenerationSpellingChange] = {
-    1: GenerationSpellingChange("first stamped generation"),
-    2: GenerationSpellingChange(_NO_SPELLING),
-    3: GenerationSpellingChange(_NO_SPELLING),
-    4: GenerationSpellingChange(_NO_SPELLING),
-    5: GenerationSpellingChange(_NO_SPELLING),
+    1: GenerationSpellingChange(
+        "85d745b9a (#1538): first stamped generation; the baseline every "
+        "later row is measured from, so it has nothing to migrate"
+    ),
+    2: GenerationSpellingChange(
+        "9d291e8df (#1589): header declaration-order witness, ELF "
+        "symbol-versioned alias binding and DWARF advanced-extraction status "
+        "are new facts; the lambda-closure respelling fix (d150dbdd0) is a "
+        "compare-side filter -- no stored type spelling changed"
+    ),
+    3: GenerationSpellingChange(
+        "27e6c848d (#1599): build_mode capture from detached debug and "
+        "Mach-O and compiler-family switch bounds; the header-backend edits "
+        "are import renames -- no stored type spelling changed"
+    ),
+    4: GenerationSpellingChange(
+        "9245b872f (#1649): malformed DW_OP member locations read as unknown "
+        "offsets instead of values; the castxml/clang edits are module moves "
+        "-- offsets changed, no stored type spelling changed"
+    ),
+    5: GenerationSpellingChange(
+        "362976812 (#1684): new castxml specialization_declared_fact on "
+        "records -- a new fact, no stored type spelling changed"
+    ),
     6: GenerationSpellingChange(
-        "castxml's undeduced AutoType placeholder is spelled 'auto' "
-        "(extract/headers/castxml/type_resolution.py)",
+        "49529426d (#1698): castxml's undeduced AutoType placeholder is "
+        "spelled 'auto' (extract/headers/castxml/type_resolution.py); the "
+        "same-line specialization and clang instantiated_from edits add facts",
         (("AutoType", "auto"),),
     ),
-    7: GenerationSpellingChange(_NO_SPELLING),
-    8: GenerationSpellingChange(_NO_SPELLING),
-    9: GenerationSpellingChange(_NO_SPELLING),
-    10: GenerationSpellingChange(_NO_SPELLING),
-    11: GenerationSpellingChange(_NO_SPELLING),
-    12: GenerationSpellingChange(_NO_SPELLING),
-    13: GenerationSpellingChange(_NO_SPELLING),
+    7: GenerationSpellingChange(
+        "never on main: an intermediate bump inside #1712's branch (clang "
+        "positional template defaults), folded into generation 9 by "
+        "c23a9ad57 -- no snapshot was ever stamped 7"
+    ),
+    8: GenerationSpellingChange(
+        "never on main: an intermediate bump inside #1712's branch (clang "
+        "dependent-member defaults), folded into generation 9 by c23a9ad57 "
+        "-- no snapshot was ever stamped 8"
+    ),
+    9: GenerationSpellingChange(
+        "c23a9ad57 (#1712): class-template parameter defaults recorded as a "
+        "new template_param_defaults fact (clang records, castxml header "
+        "scan) -- previously absent, not respelled"
+    ),
+    10: GenerationSpellingChange(
+        "1fc6c46c5 (#1720): ElfSymbol.origin_lib attributes std template "
+        "local statics to the C++ runtime -- a symbol attribute, no stored "
+        "type spelling changed"
+    ),
+    11: GenerationSpellingChange(
+        "34c66d618 (#1745): clang records non-type and template-template "
+        "parameter defaults (template_default_spelling.py) where the fact "
+        "was absent before -- new values, not respelled ones"
+    ),
+    12: GenerationSpellingChange(
+        "2be210ea9 (#1754): clang records function-template default "
+        "arguments as a new fact -- no stored type spelling changed"
+    ),
+    13: GenerationSpellingChange(
+        "126b3e759 (#1783): dump-time typedef retention rooted on header "
+        "identifiers (flat_map_dependency_scope.py), so a dependency typedef "
+        "can now be kept where it was dropped -- set membership, not spelling"
+    ),
     14: GenerationSpellingChange(
-        "DWARF vector types spell as 'T __attribute__((vector_size(N)))' instead "
+        "dd03cb6a6 (#1785): DWARF vector types spell as 'T __attribute__((vector_size(N)))' instead "
         "of 'T[]' (dwarf_utils.array_type_info); a stored 'T[]' cannot say whether "
         "it was an array or a vector, so no rewrite is sound and a baseline "
         "holding a vector type is re-dumped"
     ),
+    15: GenerationSpellingChange(
+        "castxml vector types resolve to 'T __attribute__((vector_size(N)))' from the "
+        "clang AST, and castxml arrays spell their element count (max + 1, was max): "
+        "a stored 'T[N-1]' cannot be told apart from a genuine 'T[N-1]', so no rewrite "
+        "is sound and a baseline holding those spellings is re-dumped"
+    ),
 }
+
+#: Reasons that say nothing about what was audited; the bump gate refuses them.
+PLACEHOLDER_REASONS = frozenset(
+    {
+        "",
+        "tbd",
+        "todo",
+        "none",
+        "n/a",
+        "no change",
+        "no spelling change",
+        "no stored type spelling changed",
+        "no stored type spelling changed in this generation",
+        "bumped for a semantic change",
+    }
+)
+
+
+def is_placeholder_reason(reason: str) -> bool:
+    """Whether *reason* is empty or a bare "no change" placeholder."""
+    return reason.strip().lower().rstrip(".") in PLACEHOLDER_REASONS
+
+
+def extractor_generation_of(fact_generations: FactGenerations | None) -> int:
+    """The extractor generation a snapshot's facts were extracted under:
+    ``None`` (extracted by this process) reads as this build's
+    ``EXTRACTOR_GENERATION``; an unstated stamp stays
+    :data:`~.versioning.UNSTATED_GENERATION`."""
+    if fact_generations is None:
+        return EXTRACTOR_GENERATION
+    return fact_generations[0]
 
 
 def encode_fact_generations(generations: FactGenerations) -> dict[str, int]:

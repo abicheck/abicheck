@@ -39,11 +39,14 @@ from __future__ import annotations
 
 from .platform_1 import PLATFORM_ENTRIES_1
 from .platform_2 import PLATFORM_ENTRIES_2
+from .platform_3 import PLATFORM_ENTRIES_3
 from .registry import ChangeKindMeta
 
 #: Assembled from the numbered parts above; split purely to keep each
 #: file under ADR-061's 800-line ceiling, exactly as
 #: ``kind_names_{1,2,3}.py`` already is. The public name is unchanged.
-PLATFORM_ENTRIES: list[ChangeKindMeta] = PLATFORM_ENTRIES_1 + PLATFORM_ENTRIES_2
+PLATFORM_ENTRIES: list[ChangeKindMeta] = (
+    PLATFORM_ENTRIES_1 + PLATFORM_ENTRIES_2 + PLATFORM_ENTRIES_3
+)
 
 __all__ = ["PLATFORM_ENTRIES"]

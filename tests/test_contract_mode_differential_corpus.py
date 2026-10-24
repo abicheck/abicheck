@@ -30,12 +30,9 @@ through the CLI and compared twice: ``--contract auto`` and ``--contract
 public``. A finding ``UNKNOWN_UNRESOLVED`` only under the stated mode whose
 kind's subject is not a declaration is an offender.
 
-Subject oracle (provisional): the catalog family that owns the kind's entry.
-``platform`` (binary format, symbol-table representation, toolchain-mode
-traits) and ``build`` (L3 build facts) are facts about the artifact, not a
-declaration; ``symbols``, ``types`` and ``source`` entries describe
-declarations. When the per-kind ``contract_subject`` catalog field lands, it
-replaces :func:`_is_declaration_subject`.
+Subject oracle: the kind's declared ``contract_subject`` in the change
+catalog (#1770). Only a ``declaration`` names an entity a contract domain can
+place; every other subject must be ``NOT_APPLICABLE`` in every mode.
 
 :data:`KNOWN_OFFENDERS` is shrink-only: each case must produce exactly its
 listed offenders, so a fixed kind fails here until its entry is deleted, and
@@ -54,9 +51,9 @@ import pytest
 from click.testing import CliRunner
 
 import tests.test_example_autodiscovery as corpus
+from abicheck.change_registry import REGISTRY
 from abicheck.cli import main
-from abicheck.model.change_catalog.build import BUILD_ENTRIES
-from abicheck.model.change_catalog.platform import PLATFORM_ENTRIES
+from abicheck.model.change_catalog.dimensions import ContractSubject
 
 pytestmark = [
     pytest.mark.integration,
@@ -66,24 +63,18 @@ pytestmark = [
     ),
 ]
 
-_NON_DECLARATION_KINDS = frozenset(
-    str(entry.kind) for entry in (*PLATFORM_ENTRIES, *BUILD_ENTRIES)
-)
+_DECLARATION_KINDS = REGISTRY.contract_subject_kinds(ContractSubject.DECLARATION)
 
 
 def _is_declaration_subject(kind: str) -> bool:
-    return kind not in _NON_DECLARATION_KINDS
+    return kind in _DECLARATION_KINDS
 
 
 #: Shrink-only: case -> kinds that are UNKNOWN_UNRESOLVED only under a stated
 #: ``public`` contract although their subject is not a declaration.
 KNOWN_OFFENDERS: dict[str, frozenset[str]] = {
-    "case71_inline_namespace_moved": frozenset({"inline_namespace_moved"}),
-    "case103_toolchain_flag_drift": frozenset({"toolchain_flag_drift"}),
-    "case104_glibcxx_dual_abi_flip": frozenset({"glibcxx_dual_abi_flip_detected"}),
-    "case112_lp64_ilp64": frozenset({"integer_model_changed"}),
-    "case178_unnamed_type_in_public_abi": frozenset({"symbol_binding_became_unique"}),
-    "case180_symbol_binding_lost_unique": frozenset({"symbol_binding_lost_unique"}),
+    # Emptied by #1770 (per-kind contract_subject): cases 71/103/104/112/178/180
+    # were listed here. Add an entry only with a known-gaps write-up.
 }
 
 

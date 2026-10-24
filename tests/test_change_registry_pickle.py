@@ -33,6 +33,7 @@ from abicheck.change_registry import (
     ChangeOperation,
     Verdict,
 )
+from abicheck.model.change_catalog.dimensions import ContractSubject
 
 
 def test_registry_pickle_revalidates_on_load():
@@ -56,6 +57,7 @@ def test_registry_pickle_revalidates_on_load():
         impact="i",
         entity=ChangeEntity.FUNCTION,
         operation=ChangeOperation.REMOVED,
+        contract_subject=ContractSubject.DECLARATION,
     )
     reg = ChangeKindRegistry([ok_entry])
     rehydrated = pickle.loads(pickle.dumps(reg))
@@ -95,6 +97,7 @@ def test_registry_setstate_revalidates_a_pre_reduce_legacy_pickle():
         impact="i",
         entity=ChangeEntity.FUNCTION,
         operation=ChangeOperation.REMOVED,
+        contract_subject=ContractSubject.DECLARATION,
     )
     restored = object.__new__(ChangeKindRegistry)
     restored.__setstate__({"_entries": {"ok_kind": ok_entry}})
@@ -123,6 +126,7 @@ def test_registry_setstate_refuses_to_mutate_an_already_initialized_instance():
         impact="i",
         entity=ChangeEntity.FUNCTION,
         operation=ChangeOperation.REMOVED,
+        contract_subject=ContractSubject.DECLARATION,
     )
     reg = ChangeKindRegistry([ok_entry])
     with pytest.raises(TypeError, match="already-initialized"):

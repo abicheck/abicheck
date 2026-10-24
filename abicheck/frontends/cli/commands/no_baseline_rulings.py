@@ -246,6 +246,12 @@ _UNSUPPORTED_OPTIONS: dict[str, tuple[str, str]] = {
         "the baseline declared absent there is no second contract to be "
         "incomparable with, so the check never runs",
     ),
+    "require_same_generation": (
+        "--require-same-generation",
+        "it refuses a pair whose two operands differ in extractor "
+        "generation; with the baseline declared absent there is no second "
+        "operand to compare generations with",
+    ),
     "bundle_facts_out": (
         "--bundle-facts-out",
         "bundle facts record a two-sided release comparison",

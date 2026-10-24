@@ -183,6 +183,25 @@ CI's `pr` profile.
   fixtures that still build satisfy the floor. Bug class
   `guard.absent_capability_vs_real_failure`; contract in
   `test_compile_failure_contract.py`.
+## Field-shapes corpus (`field_shapes/`)
+
+**Every new field report adds its minimal repro here before the fix lands.**
+One directory per real-world shape that escaped every other test: `v1/` and
+`v2/` (`api.h` + `api.cpp`) plus a `ground_truth.json` in the
+`catalog/ground_truth.json` vocabulary (`expected`, `expected_kinds`,
+`expected_absent_kinds`) with the shape's `bug_class`, `related_tests` and
+build/parse knobs (`cxxflags`, `parse_defines`, `parse_includes`, `suppress`,
+`old_generation`, `depths`). `test_field_shapes.py` is the one runner: it
+builds, dumps and compares each shape through the CLI at every listed depth
+and rejects an unknown ground-truth key. Reuse a shape's sources from other
+tests (as `test_sycl_stub_parse_integration.py` and
+`test_type_index_backend_shapes.py` do) rather than copying them.
+
+**Warning hygiene.** `@pytest.mark.model_warning_hygiene` fails a test on an
+unexpected `WARNING` from `abicheck.model.*` (`_model_warning_hygiene.py`;
+the corpus runner and the depth-metamorphic catalog run carry it). Allow a
+warning only with a reasoned allowlist entry there.
+
 ## What NOT to do
 
 - Don't change the marker scheme — CI gates depend on it.

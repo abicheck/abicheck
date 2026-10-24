@@ -32,6 +32,20 @@ __all__ = ["EXTRACTION_BUG_CLASSES"]
 
 EXTRACTION_BUG_CLASSES: tuple[BugClass, ...] = (
     BugClass(
+        id="extraction.castxml_vector_element_not_modelled",
+        invariant=(
+            "A castxml vector node resolves to the spelling clang gives for the same "
+            "declaration, or stays unresolved; it is never a shared opaque spelling "
+            "that hides a same-size element change through a header comparison."
+        ),
+        fixed_by=(1791,),
+        seed_tests=("tests/test_castxml_vector_integration.py",),
+        axes={
+            "backend": ("castxml", "clang"),
+            "vector_shape": ("typedef", "inline_field", "inline_param", "return"),
+        },
+    ),
+    BugClass(
         id="extraction.vector_type_collapsed_to_plain_array",
         invariant=(
             "A type whose identity is a DWARF attribute, not its shape, keeps "
@@ -122,6 +136,7 @@ EXTRACTION_BUG_CLASSES: tuple[BugClass, ...] = (
             "tests/test_flat_map_dependency_scope.py",
             "tests/test_exclude_header_flat_maps_integration.py",
             "tests/test_typedef_retention_instantiation_independent.py",
+            "tests/test_field_shapes.py",
         ),
         public_surfaces=("cli",),
         axes={
@@ -403,6 +418,22 @@ EXTRACTION_BUG_CLASSES: tuple[BugClass, ...] = (
         ),
         fixed_by=(1623,),
         seed_tests=("tests/test_diff_templates_fn_type_arity.py",),
+    ),
+    BugClass(
+        id="templates.parameter_template_args_read_as_family_membership",
+        invariant=(
+            "A declaration joins a template-instantiation family only when its "
+            "own declared name carries template arguments: a template argument "
+            "list inside a parameter or return type never makes a non-template "
+            "function an instantiation, so a parameter type's mangling change is "
+            "not reported as a missing instantiation of that function."
+        ),
+        fixed_by=(239,),
+        seed_tests=(
+            "tests/test_instantiation_family_name_scope.py",
+            "tests/test_parameter_replacement_pairing.py",
+            "tests/test_family_f3_identity.py",
+        ),
     ),
     BugClass(
         id="evidence.malformed_input_yields_value",

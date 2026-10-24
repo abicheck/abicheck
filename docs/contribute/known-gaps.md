@@ -242,8 +242,8 @@ current emitter, which is unchanged.
 
 #### A toolchain-only rebuild still fails a stated contract's coverage (2026-10-23)
 
-**Status (2026-10-23 at `94d5467`): OPEN.** #1751 fixed import edges and leaked-dependency symbols. Still open: libstdc++ `_ZGTt` transactional-memory clones are not seen as runtime-owned; runtime exports make the `exports` domain `unmatched_exports` (even for a byte-identical pair); six binary/toolchain kinds stay `UNKNOWN_UNRESOLVED` under a stated `public`. Pinned by shrink-only lists in the toolchain-drift and contract-mode-differential tests.  
-`false-positive` — Under a stated `--contract public|exports`, a rebuild from unchanged source with a static libstdc++, clang `-O0` `std::` instantiations or a toolchain-mode change exits 1 on unsuppressible coverage failures. [Full write-up](known-gaps/toolchain-runtime-rebuild-fails-stated-contract-coverage.md)
+**Status (2026-10-24 at `9513369`): PARTIAL.** #1751 fixed import edges and leaked-dependency symbols; #1770 fixed the binary/toolchain kinds a stated `public` left `UNKNOWN_UNRESOLVED`. Still open: libstdc++ `_ZGTt` transactional-memory clones are not seen as runtime-owned, and runtime exports make the `exports` domain `unmatched_exports` (even for a byte-identical pair). Pinned by shrink-only lists in the toolchain-drift tests.  
+`false-positive` — Under a stated `--contract public|exports`, a rebuild from unchanged source with a static libstdc++ or clang `-O0` `std::` instantiations exits 1 on unsuppressible coverage failures. [Full write-up](known-gaps/toolchain-runtime-rebuild-fails-stated-contract-coverage.md)
 
 #### Below `source`, `TemplateInstanceAbsence` loses the clang-graph instantiation origins (H2a residual, 2026-10-23)
 

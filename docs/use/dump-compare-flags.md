@@ -207,7 +207,9 @@ abicheck compare old/libfoo.so new/libfoo.so -H include/ -I stubs/ \
 The stub must declare every SYCL type the parsed headers use, with the
 namespace nesting the real SYCL headers use (`sycl::_V1` for DPC++), or the
 mangled names will not match the exports. abicheck does not bundle such a
-stub.
+stub. `-D NAME=VALUE` (with a space) works the same as `-DNAME=VALUE`; a
+working example of this setup is the repository's
+`tests/field_shapes/ifdef_sycl_overload/` fixture.
 
 The `Detector 'sycl' disabled` coverage line is unrelated: that detector
 compares SYCL *runtime* (PI plugin) metadata, not header APIs.
