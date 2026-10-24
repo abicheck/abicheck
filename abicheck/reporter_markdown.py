@@ -175,7 +175,7 @@ def filter_release_bundle_findings(
     expects a real :class:`Change`) cannot be called on them directly.
     Each finding is lowered through its own ``to_change()`` projection --
     the identical lowering
-    ``cli_compare_release_helpers._fold_release_global_severity`` already
+    ``workflows.release_exit_fold.fold_release_global_severity`` already
     uses to resolve a bundle finding's severity for the release's exit
     code -- so this display filter can never disagree with what that exit
     code already computed for the same finding. *kind_sets* is deliberately
@@ -205,12 +205,10 @@ def release_bundle_findings_for_view(
 
     Codex review, PR #1154 second follow-up ("Apply release show filters
     inside each renderer"): shared by the release fan-out's JSON
-    (``cli_compare_release_helpers._format_release_json``) and Markdown
-    (``cli_compare_release_helpers._format_release_markdown``) bundle
+    (``report.render_release_report.render_release_json``) and Markdown
+    (``report.render_release_report.render_release_markdown_report``) bundle
     sections so the two formats can never disagree about which bundle
-    findings a given ``show_only`` selection keeps. Both call sites live in
-    ``cli_compare_release_helpers.py`` (a ``frontends`` module, which may
-    import both this module and ``report``) as of Codex review, fresh
+    findings a given ``show_only`` selection keeps. Both call sites live in ``report/release_document.py`` (a ``report`` module, so it may import this module directly) as of Codex review, fresh
     evidence, PR #1154 follow-up ("Move release filtering out of the
     Markdown renderer") -- ``report/render_release_markdown.py``'s own
     Markdown section renderer used to call this function directly, which
@@ -235,8 +233,7 @@ def release_matrix_changes_for_view(
     """Return *matrix_result*'s changes, ``--view show=``-filtered when active.
 
     Shared by the release fan-out's JSON and Markdown release-global matrix
-    (build-configuration) sections, both called from
-    ``cli_compare_release_helpers.py`` for the identical reason as
+    (build-configuration) sections, both called from ``report/release_document.py`` for the identical reason as
     :func:`release_bundle_findings_for_view` -- see that function's own
     docstring. Unlike a bundle finding, a matrix result is a real
     :class:`DiffResult`, so it is filtered the identical way a per-library

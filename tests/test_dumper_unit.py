@@ -30,6 +30,7 @@ from abicheck.extract.headers.castxml.backend import castxml_dump as _castxml_du
 from abicheck.extract.headers.castxml.records import collect_virtual_methods
 from abicheck.model import Visibility
 from abicheck.name_classification import canonicalize_type_name
+from abicheck.storage.tu_parse_store import TuParseStore
 
 # ── _safe_mtime ──────────────────────────────────────────────────────────
 
@@ -247,7 +248,7 @@ class TestCacheKey:
 class TestCachePath:
     def test_returns_path(self):
         p = _cache_path("abc123")
-        assert p.name == "abc123.xml"
+        assert p.name == "abc123.json"
         assert "abi_check" in str(p)
 
     def test_posix_honors_xdg_cache_home(self, tmp_path, monkeypatch):
@@ -276,7 +277,7 @@ class TestCachePath:
 
         p = _cache_path("abc123")
 
-        assert p == tmp_path / "abi_check" / "castxml" / "abc123.xml"
+        assert p == tmp_path / "abi_check" / "castxml" / "abc123.json"
 
 
 # ── _resolve_debug_metadata ─────────────────────────────────────────────
@@ -553,153 +554,17 @@ class TestCastxmlDump:
         with pytest.raises(RuntimeError, match="castxml not found"):
             _castxml_dump([Path("test.h")], [])
 
-    def test_cache_hit_returns_cached(self, tmp_path, monkeypatch):
-        """When cache file exists, castxml is not invoked."""
-        monkeypatch.setattr(_cx, "_resolve_selected_tool", lambda _: "/mock/castxml")
-        # Create a valid XML cache file
-        cache_xml = tmp_path / "cached.xml"
-        root = Element("GCC_XML")
-        from xml.etree.ElementTree import ElementTree
-
-        ElementTree(root).write(str(cache_xml))
-
-        # Patch _cache_key/_cache_path to return our cached file
-        monkeypatch.setattr(_cx, "_cache_key", lambda *a, **kw: "testkey")
-        monkeypatch.setattr(_cx, "_cache_path", lambda k: cache_xml)
-
-        result = _castxml_dump([Path("h.h")], [])
-        assert result.tag == "GCC_XML"
-
-    def test_cache_hit_rechecks_deadline(self, tmp_path, monkeypatch):
-        """Codex review (PR #591): a warm XML cache hit still costs real time
-        parsing a potentially large cached AST — deadline.check() must fire
-        on that path too, not just once before castxml would be spawned."""
-        monkeypatch.setattr(_cx, "_resolve_selected_tool", lambda _: "/mock/castxml")
-        cache_xml = tmp_path / "cached.xml"
-        from xml.etree.ElementTree import ElementTree
-
-        ElementTree(Element("GCC_XML")).write(str(cache_xml))
-        monkeypatch.setattr(_cx, "_cache_key", lambda *a, **kw: "testkey")
-        monkeypatch.setattr(_cx, "_cache_path", lambda k: cache_xml)
-
-        from abicheck import deadline
-
-        with deadline.deadline_scope(-1):  # already expired
-            with pytest.raises(deadline.DeadlineExceeded):
-                _castxml_dump([Path("h.h")], [])
-
-    def test_cache_hit_rechecks_deadline_after_parse(self, tmp_path, monkeypatch):
-        """Codex review (PR #591, round 3): DefusedET.parse() on a warm cache
-        hit can itself consume the rest of the budget for a huge cached XML
-        tree -- the existing pre-parse deadline.check() doesn't catch that;
-        must re-check again after the parse before handing the root off."""
-        import time
-
-        monkeypatch.setattr(_cx, "_resolve_selected_tool", lambda _: "/mock/castxml")
-        cache_xml = tmp_path / "cached.xml"
-        from xml.etree.ElementTree import ElementTree
-
-        ElementTree(Element("GCC_XML")).write(str(cache_xml))
-        monkeypatch.setattr(_cx, "_cache_key", lambda *a, **kw: "testkey")
-        monkeypatch.setattr(_cx, "_cache_path", lambda k: cache_xml)
-
-        from abicheck import deadline
-        from abicheck.storage import header_ast_cache as dumper_cache
-
-        # The warm-cache parse this exercises lives in `dumper_cache.
-        # read_cached_castxml` (`dumper` re-exports it as
-        # `_read_castxml_cache`), so slow down the parser *that* module holds.
-        real_parse = dumper_cache.parse_castxml_xml
-
-        def _slow_parse(path):
-            time.sleep(0.05)
-            return real_parse(path)
-
-        monkeypatch.setattr(dumper_cache, "parse_castxml_xml", _slow_parse)
-        with deadline.deadline_scope(0.03):
-            with pytest.raises(deadline.DeadlineExceeded):
-                _castxml_dump([Path("h.h")], [])
-
-    def test_fresh_run_rechecks_deadline_after_writing_cache(
-        self, tmp_path, monkeypatch
-    ):
-        """Codex review (PR #591, round 10): after a fresh (non-cached)
-        castxml run parses successfully, castxml_dump() still re-reads the
-        whole output file (read_bytes) and writes it to the AST cache
-        (_atomic_write) before returning the parsed root -- that read+write
-        can itself consume real time on a huge fresh XML tree, but nothing
-        re-checked the deadline after it. Must re-check before returning."""
-        import subprocess
-        import time
-        from xml.etree.ElementTree import Element as _Element, ElementTree
-
-        monkeypatch.setattr(_cx, "_resolve_selected_tool", lambda _: "/mock/castxml")
-        monkeypatch.setattr(_cx, "_cache_key", lambda *a, **kw: "k")
-        monkeypatch.setattr(_cx, "_cache_path", lambda k: tmp_path / "c.xml")
-
-        def fake_run(*args, **kwargs):
-            for a in args:
-                if isinstance(a, list):
-                    for part in a:
-                        if str(part).endswith(".xml") and "castxml" not in str(part):
-                            root = _Element("GCC_XML")
-                            root.append(_Element("File", id="f1", name="foo.h"))
-                            ElementTree(root).write(str(part))
-            return subprocess.CompletedProcess(
-                args=[], returncode=0, stdout="", stderr=""
-            )
-
-        def _slow_atomic_write(path, data):
-            time.sleep(0.05)
-
-        monkeypatch.setattr(_cx, "_atomic_write", _slow_atomic_write)
-
-        from abicheck import deadline
-
-        with deadline.deadline_scope(0.03):
-            with pytest.raises(deadline.DeadlineExceeded):
-                _castxml_dump([Path("h.h")], [], run=fake_run)
-
-    def test_corrupt_cache_is_discarded(self, tmp_path, monkeypatch):
-        """Corrupt cache entry is removed before castxml is re-invoked."""
-        import subprocess
-
-        monkeypatch.setattr(_cx, "_resolve_selected_tool", lambda _: "/mock/castxml")
-        # Write an unparseable (empty) XML cache file
-        cache_xml = tmp_path / "cached.xml"
-        cache_xml.write_text("")
-
-        monkeypatch.setattr(_cx, "_cache_key", lambda *a, **kw: "testkey")
-        monkeypatch.setattr(_cx, "_cache_path", lambda k: cache_xml)
-
-        # Track whether cache was already gone when the injected runner was called
-        cache_existed_at_run = []
-
-        def fake_run(*args, **kwargs):
-            cache_existed_at_run.append(cache_xml.exists())
-            return subprocess.CompletedProcess(
-                args=[], returncode=1, stdout="", stderr="castxml stub error"
-            )
-
-        with pytest.raises(RuntimeError, match="castxml failed"):
-            _castxml_dump([Path("h.h")], [], run=fake_run)
-
-        # subprocess.run must have been called (cache didn't short-circuit)
-        assert cache_existed_at_run, "subprocess.run was never called"
-        # The corrupt cache must have been deleted BEFORE the re-run
-        assert not cache_existed_at_run[0], (
-            "Cache was not deleted before castxml re-run"
-        )
-        # And must still be gone after
-        assert not cache_xml.exists()
-
     def test_castxml_empty_output_file_raises(self, tmp_path, monkeypatch):
         """castxml exits 0 but writes no output file → RuntimeError."""
         import subprocess
 
         monkeypatch.setattr(_cx, "_resolve_selected_tool", lambda _: "/mock/castxml")
         monkeypatch.setattr(_cx, "_cache_key", lambda *a, **kw: "k")
-        monkeypatch.setattr(_cx, "_cache_path", lambda k: tmp_path / "c.xml")
+        monkeypatch.setattr(
+            _cx,
+            "ast_cache_store",
+            lambda k, backend="castxml": TuParseStore(tmp_path / "c"),
+        )
 
         def fake_run(*args, **kwargs):
             # Do NOT write out_xml — simulate castxml exiting 0 with no output
@@ -716,7 +581,11 @@ class TestCastxmlDump:
 
         monkeypatch.setattr(_cx, "_resolve_selected_tool", lambda _: "/mock/castxml")
         monkeypatch.setattr(_cx, "_cache_key", lambda *a, **kw: "k")
-        monkeypatch.setattr(_cx, "_cache_path", lambda k: tmp_path / "c.xml")
+        monkeypatch.setattr(
+            _cx,
+            "ast_cache_store",
+            lambda k, backend="castxml": TuParseStore(tmp_path / "c"),
+        )
 
         def fake_run(*args, **kwargs):
             # Write the output file with garbage XML
@@ -739,7 +608,11 @@ class TestCastxmlDump:
 
         monkeypatch.setattr(_cx, "_resolve_selected_tool", lambda _: "/mock/castxml")
         monkeypatch.setattr(_cx, "_cache_key", lambda *a, **kw: "k")
-        monkeypatch.setattr(_cx, "_cache_path", lambda k: tmp_path / "c.xml")
+        monkeypatch.setattr(
+            _cx,
+            "ast_cache_store",
+            lambda k, backend="castxml": TuParseStore(tmp_path / "c"),
+        )
 
         def fake_run(*args, **kwargs):
             # Write valid XML with empty root (no declarations)
@@ -944,7 +817,7 @@ class TestCastxmlParserTypeName:
         arr = Element("ArrayType", id="t2", type="t1", max="9")
         root = _xml_root(ft, arr)
         p = _CastxmlParser(root, set(), set())
-        assert p._type_name("t2") == "int[9]"
+        assert p._type_name("t2") == "int[10]"  # max="9" is the last index
 
     def test_array_type_no_max(self):
         ft = _fund_type("t1", "char")

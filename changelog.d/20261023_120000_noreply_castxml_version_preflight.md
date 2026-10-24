@@ -1,0 +1,3 @@
+### Fixed
+
+- **An unsupported castxml now fails before the binary and debug-info work** — the CastXML version gate (`>=0.6.11,<0.8.0`, bundled Clang `>=18`) used to run only when the header pass started, so a `dump`/`compare` with `-H` against an out-of-policy castxml (typically the PyPI `castxml` 0.4.5 wheel) spent the whole DWARF extraction before reporting it. The gate now runs in the same request-time preflight that already caught a missing castxml (#1710), with the same error text and the same opt-ins: `ABICHECK_ALLOW_UNSUPPORTED_CASTXML` still lets the scan proceed, and an opted-in auto castxml-to-clang fallback still takes over.

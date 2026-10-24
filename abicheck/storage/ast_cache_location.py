@@ -41,6 +41,7 @@ from typing import Any, TypeVar
 
 from ..model.execution_cache_scoped import DiskCache
 from . import ast_cache_budget
+from .tu_parse_store import TuParseStore
 
 __all__ = [
     "AST_DISK_CACHE",
@@ -108,17 +109,27 @@ def reference_scratch_scoped(fn: _F) -> _F:
 
 
 def ast_cache_entry_path(key: str, backend: str = "castxml") -> Path:
-    # One sub-directory + extension per backend: castxml XML and clang JSON coexist.
-    ext = "json" if backend == "clang" else "xml"
+    # One sub-directory per backend, and one parse-store entry (`<key>.json`) per
+    # key in it, so the castxml and clang entries never share a directory.
     if not AST_DISK_CACHE.enabled():
         AST_DISK_CACHE.record_bypass()
         root = _SCOPE_ROOT.get() or _reference_scratch_root()
         root.mkdir(parents=True, exist_ok=True)
         scratch = Path(tempfile.mkdtemp(prefix=f"{backend}-", dir=root))
-        return scratch / f"{key}.{ext}"
+        return scratch / f"{key}.json"
     cache_dir = backend_cache_dir(backend)
-    ast_cache_budget.note_use(cache_dir, entry := cache_dir / f"{key}.{ext}")
+    ast_cache_budget.note_use(cache_dir, entry := cache_dir / f"{key}.json")
     return entry
+
+
+def ast_cache_store(key: str, backend: str = "castxml") -> TuParseStore:
+    """The parse store holding *backend*'s entries, with *key*'s entry at :meth:`TuParseStore.path`.
+
+    Budget and reference-mode scratch bookkeeping stay in :func:`ast_cache_entry_path`
+    (the entry it names is the store's entry for *key*), so the store only reads and
+    writes; it never decides where a directory lives.
+    """
+    return TuParseStore(ast_cache_entry_path(key, backend).parent)
 
 
 def backend_cache_dir(backend: str) -> Path:

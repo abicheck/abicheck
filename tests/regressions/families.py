@@ -220,7 +220,36 @@ FAMILIES: dict[str, Family] = {
             ),
         ),
         Family(
+            key="F15",
+            title="castxml header vectors keep the element type clang reports",
+            invariant=(
+                "A castxml vector node resolves to the spelling clang gives for the same "
+                "declaration, so a header comparison sees a same-size element change."
+            ),
+            harness_tests=(),
+            planned_reason=(
+                "One class so far; revisit when a second header-backend node type is "
+                "collapsed to an opaque spelling and the two share the clang join."
+            ),
+        ),
+        Family(
             key="F14",
+            title="DWARF type spelling keeps the attribute that makes a type",
+            invariant=(
+                "A DWARF type whose identity is an attribute rather than its "
+                "shape (DW_AT_GNU_vector) keeps that attribute in its recorded "
+                "spelling: a vector never collapses onto a plain array's T[] "
+                "spelling, so a same-size vector-versus-array change is reported."
+            ),
+            harness_tests=(),
+            planned_reason=(
+                "One class so far; revisit when a second attribute-determined "
+                "type (for example a sized or address-space-qualified type) "
+                "collapses the same way and the two share one mechanism."
+            ),
+        ),
+        Family(
+            key="F16",
             title="Human output stays within its display budget",
             invariant=(
                 "A bounded human rendering (Markdown report, review digest, "
@@ -252,6 +281,7 @@ _F1 = (
     "detector.selector_axis_unstamped",
     "detector.removal_from_header_enumeration",
     "evidence.unread_producer_read_as_confirmed_absence",
+    "evidence.depth_projection_drops_lower_layer_detector_input",
     "evidence.container_presence_read_as_evidence_content",
     "evidence.silent_degradation_to_clean_verdict",
     "evidence.export_presence_as_declaration_presence",
@@ -263,6 +293,7 @@ _F1 = (
     "report.unobserved_population_counted_as_observed",
     "report.unestablished_result_reads_as_success",
     "storage.legacy_availability_collapse",
+    "storage.cross_generation_spelling_drift",
     "storage.short_decode_mistaken_for_complete_decode",
     "classification.two_agreeing_sources_read_as_unknown",
     "classification.default_branch_asserts_more_than_inputs",
@@ -330,11 +361,13 @@ _F3 = (
     "identity.special_member_variant_family",
     "matching.dedup_key_soundness",
     "evidence.backfill_bare_name_match",
+    "identity.type_index_bare_name_collision",
     "extraction.macho_mangled_identity_normalization",
     "extraction.macho_export_index_double_strip",
     "classification.one_spelling_of_a_path_treated_as_its_identity",
     "comparability.incidental_ordering_treated_as_contract",
     "tooling.platform_dependent_path_key",
+    "templates.parameter_template_args_read_as_family_membership",
 )
 _F4 = (
     "classification.name_shape_as_contract_membership",
@@ -349,6 +382,7 @@ _F4 = (
     "extraction.implicit_language_rule_read_off_one_explicit_key",
     "extraction.language_mode_export_evidence",
     "extraction.ast_wrapper_chain_traversal",
+    "extraction.target_flag_dropped_from_header_parse",
     "guard.proxy_predicate_overshoots_justification",
     "evidence.linker_reserved_export_symbols",
 )
@@ -423,7 +457,9 @@ _F12 = (
     "extraction.msvc_include_operand_spelling_not_probed",
 )
 _F13 = ("extraction.compile_entry_collapsed_to_first_source",)
-_F14 = (
+_F14 = ("extraction.vector_type_collapsed_to_plain_array",)
+_F15 = ("extraction.castxml_vector_element_not_modelled",)
+_F16 = (
     "report.shared_display_budget_starvation",
     "report.markdown_size_unbounded_by_finding_count",
 )
@@ -471,6 +507,8 @@ for _key, _ids in (
     ("F12", _F12),
     ("F13", _F13),
     ("F14", _F14),
+    ("F15", _F15),
+    ("F16", _F16),
     ("OTHER", tuple(OTHER_REASONS)),
 ):
     for _id in _ids:

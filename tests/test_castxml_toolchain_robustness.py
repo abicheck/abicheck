@@ -50,6 +50,7 @@ from abicheck.dumper import (
 )
 from abicheck.errors import HeaderToolchainError, SnapshotError
 from abicheck.extract.headers.castxml.backend import castxml_dump as _castxml_dump
+from abicheck.storage.tu_parse_store import TuParseStore
 
 _FLOATN_STDERR = (
     "/usr/include/bits/floatn-common.h:214:14: error: unknown type name '_Float32'"
@@ -322,8 +323,8 @@ class TestProbeGating:
                 side_effect=fake_run,
             ),
             patch(
-                "abicheck.extract.headers.castxml.backend._cache_path",
-                return_value=tmp_path / "cache.xml",
+                "abicheck.extract.headers.castxml.backend.ast_cache_store",
+                return_value=TuParseStore(tmp_path / "no-cache"),
             ),
         ):
             header = tmp_path / "api.hpp"
@@ -361,8 +362,8 @@ class TestProbeGating:
                 side_effect=fake_run,
             ),
             patch(
-                "abicheck.extract.headers.castxml.backend._cache_path",
-                return_value=tmp_path / "cache.xml",
+                "abicheck.extract.headers.castxml.backend.ast_cache_store",
+                return_value=TuParseStore(tmp_path / "no-cache"),
             ),
             # Round-3 note: propagation requires the *outer scan* deadline to
             # be the binding constraint, not just this probe's own 15s local
@@ -389,8 +390,8 @@ class TestProbeGating:
                 return_value="castxml",
             ),
             patch(
-                "abicheck.extract.headers.castxml.backend._cache_path",
-                return_value=tmp_path / "cache.xml",
+                "abicheck.extract.headers.castxml.backend.ast_cache_store",
+                return_value=TuParseStore(tmp_path / "no-cache"),
             ),
         ):
             header = tmp_path / "api.hpp"
@@ -443,8 +444,8 @@ class TestLangCFallsBackToCpp:
                 return_value="castxml",
             ),
             patch(
-                "abicheck.extract.headers.castxml.backend._cache_path",
-                return_value=tmp_path / "cache.xml",
+                "abicheck.extract.headers.castxml.backend.ast_cache_store",
+                return_value=TuParseStore(tmp_path / "no-cache"),
             ),
             caplog.at_level("WARNING"),
         ):
@@ -481,8 +482,8 @@ class TestLangCFallsBackToCpp:
                 return_value="castxml",
             ),
             patch(
-                "abicheck.extract.headers.castxml.backend._cache_path",
-                return_value=tmp_path / "cache.xml",
+                "abicheck.extract.headers.castxml.backend.ast_cache_store",
+                return_value=TuParseStore(tmp_path / "no-cache"),
             ),
             pytest.raises(SnapshotError) as exc,
         ):
@@ -520,8 +521,8 @@ class TestLangCFallsBackToCpp:
                 side_effect=fake_run,
             ),
             patch(
-                "abicheck.extract.headers.castxml.backend._cache_path",
-                return_value=tmp_path / "cache.xml",
+                "abicheck.extract.headers.castxml.backend.ast_cache_store",
+                return_value=TuParseStore(tmp_path / "no-cache"),
             ),
             pytest.raises(SnapshotError) as exc,
         ):
@@ -554,8 +555,8 @@ class TestLangCFallsBackToCpp:
                 return_value="castxml",
             ),
             patch(
-                "abicheck.extract.headers.castxml.backend._cache_path",
-                return_value=tmp_path / "cache.xml",
+                "abicheck.extract.headers.castxml.backend.ast_cache_store",
+                return_value=TuParseStore(tmp_path / "no-cache"),
             ),
             pytest.raises(SnapshotError),
         ):
@@ -587,8 +588,8 @@ class TestHeaderToolchainErrorClass:
                 return_value="castxml",
             ),
             patch(
-                "abicheck.extract.headers.castxml.backend._cache_path",
-                return_value=tmp_path / "cache.xml",
+                "abicheck.extract.headers.castxml.backend.ast_cache_store",
+                return_value=TuParseStore(tmp_path / "no-cache"),
             ),
             pytest.raises(HeaderToolchainError) as exc,
         ):
@@ -611,8 +612,8 @@ class TestHeaderToolchainErrorClass:
                 return_value="castxml",
             ),
             patch(
-                "abicheck.extract.headers.castxml.backend._cache_path",
-                return_value=tmp_path / "cache.xml",
+                "abicheck.extract.headers.castxml.backend.ast_cache_store",
+                return_value=TuParseStore(tmp_path / "no-cache"),
             ),
             pytest.raises(SnapshotError) as exc,
         ):
@@ -643,8 +644,8 @@ class TestHeaderToolchainErrorClass:
                 return_value="castxml",
             ),
             patch(
-                "abicheck.extract.headers.castxml.backend._cache_path",
-                return_value=tmp_path / "cache.xml",
+                "abicheck.extract.headers.castxml.backend.ast_cache_store",
+                return_value=TuParseStore(tmp_path / "no-cache"),
             ),
             pytest.raises(SnapshotError) as exc,
         ):

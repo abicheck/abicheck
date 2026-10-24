@@ -369,8 +369,7 @@ def test_legacy_release_report_recovers_a_completed_library_verdict_from_an_erro
     to run_outcome_dict_for_release would erase that completed result
     (compatibility: null) even though it actually ran -- the backfill must
     recover it from out["libraries"] the same way a native release writer
-    does via cli_compare_release_helpers._release_completed_compatibility_
-    verdict."""
+    does via policy.outcome_release.run_outcome_dict_for_release."""
     report = {
         "libraries": [
             {"name": "a", "verdict": "ERROR"},

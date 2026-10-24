@@ -100,6 +100,7 @@ from ...extract.header_exclusions import scoping_header_predicate
 from ...extract.occurrence_dependency_scope import (
     scoped_occurrences_excluding_dependencies,
 )
+from ...extract.public_header_identifiers import identifiers_in_kept_headers
 from ...model import AbiSnapshot, EnumType, Function, RecordType, Variable
 from ...model.dwarf_facts import AdvancedDwarfMetadata, DwarfMetadata
 from ...model.header_parse_coverage import AllBut, header_parse_excluded
@@ -489,6 +490,7 @@ def scope_snapshot_excluding_dependencies(
         ),
         scoped_semantic_ir,
         scoped_semantic_ir_conflicts,
+        identifiers_in_kept_headers(header_roots, _is_dep),
     )
     return dataclasses.replace(
         snap,

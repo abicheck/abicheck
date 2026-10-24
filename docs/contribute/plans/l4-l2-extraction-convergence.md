@@ -671,15 +671,51 @@ target, sysroot, ABI flag, forced include in argv, cwd) and asserts each one
 misses. Two insensitivity checks cover inputs the parse ignores (define order,
 output path).
 
-**Next slice — migrate the header-AST cache onto the store.** Its disk entry
-becomes a `TuParseStore` payload (or the store gains a raw-bytes payload
-form, so the XML and JSON bodies are not re-encoded). The entry-budget
-bookkeeping and the cross-process single-flight stay where they are, because
-they coordinate producers rather than describe an entry. The key is the same
-parsed-invocation key `compute_tu_cache_key` now builds, so the header-AST key
-must be re-derived from `CompilerInvocation` rather than from its own argv
-inputs. Done when the header-AST and `SourceAbiCache` entries come from one
-store with one key function, and a changed header misses under both.
+**Slice 2 — castxml header-AST cache is the second view (implemented; clang open).**
+`extract.headers.castxml.backend` stores its entry through
+`storage.ast_cache_location.ast_cache_store`, which returns a `TuParseStore`
+over the castxml cache directory. The entry is `<key>.json` (the same
+`{"deps", "payload"}` format as slice 1); the payload is the castxml XML text,
+and a hit parses it with `storage.castxml_xml.parse_castxml_text`, the same
+defused parser the cold run uses on disk. `read_cached_castxml` and its
+`.xml` digest sidecar are deleted; a payload the parser rejects is evicted
+(`TuParseStore.evict`) and misses.
+
+**Departure from the plan text: the key is built from `HeaderParseRequest`
+inputs, not from a `CompilerInvocation`.** The header-AST call sites receive a
+header request, not a compile unit, and no constructor in
+`compile_invocation.py` represents one (`parse_compile_invocation` takes a
+`CompileUnit`; the #1733 header renderer builds argv, not an invocation). The
+castxml key is therefore one `content_key` over the same inputs the old key
+folded -- schema, frontend and compiler identities, the compiler and its
+overrides, sysroot, `-nostdinc`, language, system include directories, the
+forced-C++ decisions, the invocation digest -- with each header and include
+root keyed by its **content digest** instead of its mtime
+(`extract.headers.ast_config._castxml_store_key`). Consequences: touching a
+header without editing it keeps the entry; editing one, or any file under an
+include root, misses. The global code fingerprint is not folded for castxml
+(the schema constant covers code shaping, as before); the clang key is
+unchanged and still mtime-based.
+
+Known gap: the castxml key records the sysroot path, not its contents. The previous key did the same, and hashing a whole sysroot on every lookup is too costly; a header changed inside an unchanged sysroot can still reuse an entry. Costs recorded, not yet measured: each lookup re-digests every header under
+an include root (the old key stat'ed them), and the XML payload is re-encoded
+inside the JSON entry on write. A payload-digest check is not in the store
+format, so a tampered but parseable entry is served; the old sidecar caught
+that. Each is a candidate for a follow-up: a raw-bytes payload form, and a
+payload digest in the entry.
+
+Tests: `tests/test_castxml_parse_store_view.py` states the equivalence (a warm
+dump returns the cold tree and runs castxml zero more times) and the key
+sensitivity (each parse input, each header and include-root edit, a
+touch-without-edit that must keep the key, a missing root keyed apart from a
+present one). The castxml cache tests in `test_dumper_unit.py`,
+`test_castxml_errors.py`, `test_castxml_toolchain_robustness.py` and
+`test_l2_ast_acquisition_singleflight.py` now patch `ast_cache_store`.
+
+**Remaining:** migrate the clang header-AST entry (its compacted document,
+DPC++ selection, failing-header retry and `ast_parse_exclusions` sidecar must
+each be written as the store payload, or the store must carry them). Phase 6
+is not done until the clang entry comes from the same store.
 
 ### Phase 7 — one worker-sizing and executor policy (sizing implemented; executor default open)
 
@@ -704,7 +740,7 @@ unified, and two edge cases changed (see the changelog fragment).
 measurement in "Measurements" on the PVXS fixture; it was deliberately not
 changed in this phase.
 
-### Phase 8 — diffing: assess before merging (step 1 landed; steps 2–3 open)
+### Phase 8 — diffing: assess before merging (done: steps 1–3 landed)
 
 Assessment only, no behaviour change. `scripts/source_l2_overlap.py` derives
 each tier's emitter set with the static closure `gen_detector_kind_map.py`
@@ -723,10 +759,10 @@ counterpart.
 
 | L4 kind | L2 kind | Class | Why |
 |---|---|---|---|
-| `INLINE_FUNCTION_REMOVED` | same | **true duplicate — resolved (step 1)** | Header-only inline removed: `_diff_inline_bodies` (L4) and `_check_removed_function` (L2, export confirmed absent) both emit it, with different wording, so the exact and identity keys never collapsed them. Reproduced end to end (C and C++); fixed in `compare.finding_dedup._drop_source_replay_inline_duplicates`. |
-| `CONSTEXPR_VALUE_CHANGED` | `CONSTANT_CHANGED` | near-duplicate | Same namespace-scope `const`/`constexpr` value change, from the same headers. |
-| `PUBLIC_TYPEDEF_REMOVED` | `TYPEDEF_REMOVED` | near-duplicate | Same typedef removal. |
-| `PUBLIC_TYPEDEF_TARGET_CHANGED` | `TYPEDEF_BASE_CHANGED` | near-duplicate | Same typedef retarget. |
+| `INLINE_FUNCTION_REMOVED` | same | **true duplicate — resolved (step 1)** | Header-only inline removed: `_diff_inline_bodies` (L4) and `_check_removed_function` (L2, export confirmed absent) both emit it, with different wording, so the exact and identity keys never collapsed them. Reproduced end to end (C and C++); fixed in `compare.finding_dedup._SOURCE_REPLAY_TWINS` (the inline pair; later generalized by step 2). |
+| `CONSTEXPR_VALUE_CHANGED` | `CONSTANT_CHANGED` | **true duplicate — resolved (step 2)** | Namespace-scope C++ `constexpr` value change: `_diff_declarations` (L4) and `compare.constants` (L2) both emit it, with different wording. The L4 emitter is C++ `constexpr` VarDecls only (`clang_node_predicates`), so plain `const` and C never produce the replay copy. Reproduced end to end (C++ namespaced and nested); fixed in `compare.finding_dedup._SOURCE_REPLAY_TWINS`. |
+| `PUBLIC_TYPEDEF_REMOVED` | `TYPEDEF_REMOVED` | **true duplicate — resolved (step 3)** | Same typedef removal, reproduced end to end (C and C++, nested namespace included); fixed in `compare.finding_dedup._drop_source_replay_typedef_duplicates`. |
+| `PUBLIC_TYPEDEF_TARGET_CHANGED` | `TYPEDEF_BASE_CHANGED` | **true duplicate — resolved (step 3)** | Same typedef retarget, reproduced end to end; fixed by the same function. |
 
 L4-only, not duplication: `CONCEPT_TIGHTENED`, `DEFAULT_ARGUMENT_CHANGED`,
 `GENERATED_HEADER_CHANGED`, `INLINE_BODY_CHANGED`, `ODR_SOURCE_CONFLICT`,
@@ -752,7 +788,7 @@ guard and `CLANG_EXTRACTOR_VERSION` 0.14, are in):
    logic and the ADR-063 typedef cutover, and L4's `_diff_typedefs` keys
    differently. It is the largest of the three.
 
-No L4-only kind moves. Each step is behaviour-preserving, and is proven through
+No L4-only kind moves. Each step is behaviour-preserving, and must be proven through
 `dump --depth source` and a compare on a fixture that contains the change.
 
 **Step 1 — landed.** The double finding was reproduced through `compare
@@ -769,8 +805,47 @@ Name-level pairing has two limits, recorded in `known-gaps.md`: a header symbol
 that does not demangle keeps its replay twin visible (conservative), and two
 overloads of one name pair by count, not by signature.
 
-The near-duplicate pairs are still judged from the emitters, not run. Step 2 is
-where they get reproduced first.
+**Step 2 — landed.** Reproduced first, as step 1 was: `compare --sources --depth
+source` on a C++ fixture (`constexpr int kLimit` in `namespace demo`, 10 → 20)
+emits `constant_changed` (header tier) and `constexpr_value_changed` (replay)
+for the same name, both gating. The C fixture (`static const int`) emits only
+the header copy, because L4 has no replay kind for C or for plain `const`.
+Owner: the header tier, by the same argument as step 1. Option taken: drop the
+L4 emission when the L2 header tier ran, rather than routing the L4 comparison
+through `compare.constants`. The replay copy is matched by qualified name, one
+for one, through the table `_SOURCE_REPLAY_TWINS`, which now also drives the
+inline pair. Before/after on the C++ fixture: verdict `API_BREAK` and exit 2
+unchanged, `detected_total` 3 → 3, `deduplicated` 0 → 1, `gating` 2 → 1, and
+`constant_changed`, `var_value_changed` and every other finding are unchanged.
+Limits, in `known-gaps.md`: pairing is by name only, so a replay copy whose
+value disagrees with the header copy is still dropped; and the "L2 tier not
+run, replay copy kept" case is covered at unit level, because a no-header
+replay matches no symbols and does not produce the copy end to end.
+
+**Step 3 — landed.** Reproduced through `compare --sources --depth source
+--contract all` before the change, on compiled C and C++ fixtures: a typedef
+removed, a typedef retargeted, an unchanged typedef (control), and a typedef in
+a nested namespace. Both tiers emitted every change, under different kinds
+(`TYPEDEF_REMOVED` vs `PUBLIC_TYPEDEF_REMOVED`, `TYPEDEF_BASE_CHANGED` vs
+`PUBLIC_TYPEDEF_TARGET_CHANGED`), so the exact and identity keys never paired
+them. The owner is the header tier, which is the one ADR-063's typedef cutover
+models (`compare.typedefs`). The replay copy is dropped by a one-for-one match on
+the qualified name: the header entity id is rendered through
+`render_display_name_or_leaf` (`demo::inner::deep_t`), and the replay's own
+symbol is already qualified. Kinds must match, so a removal never absorbs a
+retarget. Value spellings are not compared (`long int` vs `long`).
+
+| Before → after (same fixture) | C | C++ |
+|---|---|---|
+| verdict, exit code | `BREAKING`, 4 → `BREAKING`, 4 | `BREAKING`, 4 → `BREAKING`, 4 |
+| `detected_total` | 4 → 4 | 6 → 6 |
+| `deduplicated` | 0 → 2 | 0 → 3 |
+| `gating` | 4 → 2 | 6 → 3 |
+
+No other finding moves: the surviving set is the header-tier copies alone. The
+case where the header tier does not run has no header-tier twin, so the replay
+copy is kept by construction (`tests/test_typedef_dedup.py`). Name-level pairing
+limits are recorded in `known-gaps.md`.
 
 ## Measurements
 

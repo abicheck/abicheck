@@ -11,11 +11,7 @@ from collections.abc import Callable, Iterator
 from concurrent.futures import Future, TimeoutError as FutureTimeoutError
 from contextlib import contextmanager
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, TypeVar, cast
-
-if TYPE_CHECKING:
-    from xml.etree.ElementTree import Element
-
+from typing import Any, TypeVar, cast
 
 import abicheck.deadline as deadline
 
@@ -24,7 +20,6 @@ from . import ast_parse_exclusions, cache_integrity
 from .acyclic_json import gc_paused
 from .ast_cache_location import AST_DISK_CACHE, ast_cache_entry_path
 from .ast_size_observer import mark_ast_intake, report_ast_size
-from .castxml_xml import parse_castxml_xml
 from .cross_process_lock import produce_ast_once_across_processes
 from .derived_ast import offer_derived_ast_source
 from .json_compact import open_cached_entry
@@ -751,28 +746,4 @@ def load_cached_ast(
     ast_parse_exclusions.attach_parse_exclusions(root, cache_path)
     if memoize:
         store_cached_ast(key, backend, root)
-    return root
-
-
-def read_cached_castxml(cached: Path) -> Element | None:
-    """Parse a cached castxml XML tree, discarding the entry if it is unusable.
-
-    Returns ``None`` (having unlinked *cached*) when the file cannot be parsed,
-    so the caller falls through to a fresh run rather than failing on a
-    truncated or corrupt cache entry. The CastXML counterpart of
-    :func:`load_cached_ast`; lives here, next to it, rather than in
-    ``dumper.py`` (which re-exports it under its historical private name).
-    """
-    if not cache_integrity.entry_intact(cached):
-        AST_DISK_CACHE.record(hit=False)
-        return None
-    try:
-        root = parse_castxml_xml(cached)
-    except Exception:
-        root = None
-    if root is None:
-        cache_integrity.evict(cached)
-        AST_DISK_CACHE.record(hit=False)
-        return None
-    AST_DISK_CACHE.record(hit=True)
     return root

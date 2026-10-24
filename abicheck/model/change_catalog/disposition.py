@@ -24,12 +24,19 @@ verdict or exit code.
 
 from __future__ import annotations
 
-from .registry import ChangeEntity, ChangeKindMeta, ChangeOperation, Verdict
+from .registry import (
+    ChangeEntity,
+    ChangeKindMeta,
+    ChangeOperation,
+    ContractSubject,
+    Verdict,
+)
 
 _C = Verdict.COMPATIBLE
 _E = ChangeKindMeta
 _ENT = ChangeEntity
 _OP = ChangeOperation
+_CS = ContractSubject
 
 DISPOSITION_ENTRIES: list[ChangeKindMeta] = [
     _E(
@@ -41,6 +48,7 @@ DISPOSITION_ENTRIES: list[ChangeKindMeta] = [
         "carries the count and the suppressed change ids. Never changes the verdict "
         "or exit code.",
         entity=_ENT.ANALYSIS,
+        contract_subject=_CS.ANALYSIS,
         operation=_OP.MODIFIED,
     ),
 ]

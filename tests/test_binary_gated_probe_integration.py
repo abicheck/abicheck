@@ -514,6 +514,18 @@ def _of_kind(changes: list[dict], kind: str) -> list[dict]:
     return [c for c in changes if c["kind"] == kind]
 
 
+#: A probed kind whose with-headers observation survives under the header
+#: tier's kind. The L4 replay copy is dropped as ``deduplicated`` when the
+#: header tier reports the same constant (``compare.finding_dedup``), so the
+#: fixture's API_BREAK is carried by ``constant_changed``.
+_SURVIVING_KIND: dict[str, tuple[str, str]] = {
+    "constexpr_value_changed": ("constant_changed", "API_BREAK"),
+    # The header tier owns this typedef change and classifies it BREAKING (its
+    # default verdict); the replay copy's API_BREAK is dropped as a duplicate.
+    "public_typedef_target_changed": ("typedef_base_changed", "BREAKING"),
+}
+
+
 def test_tables_partition_api_break_kinds() -> None:
     """Every API_BREAK kind outside OUT_OF_AXIS is probed or justified, never both."""
     in_scope = _API_BREAK_VALUES - {k.value for k in OUT_OF_AXIS}
@@ -587,7 +599,10 @@ def test_header_gated_kind_absent_binary_only(
     """A HEADER_OR_SOURCE_GATED kind is not produced binary-only; the fixture is a real trigger."""
     assert _of_kind(outcomes[kind].binary_only, kind) == []
     if PROBES[kind].header_reaches:
+        surviving, decision = _SURVIVING_KIND.get(kind, (kind, "API_BREAK"))
+        if surviving != kind:
+            assert _of_kind(outcomes[kind].with_headers, kind) == []
         assert {
             c["compatibility_decision"]
-            for c in _of_kind(outcomes[kind].with_headers, kind)
-        } == {"API_BREAK"}
+            for c in _of_kind(outcomes[kind].with_headers, surviving)
+        } == {decision}

@@ -22,7 +22,7 @@
 > ⚠️ Detector 'elf_deleted_fallback' disabled: missing ELF metadata
 > ⚠️ Detector 'python_ext' disabled: missing CPython extension metadata
 > ⚠️ Detector 'python_api' disabled: missing Python API surface (no .pyi stub recovered)
-> ⚠️ Detector 'sycl' disabled: missing SYCL metadata
+> ⚠️ Detector 'sycl' disabled: missing SYCL runtime (PI plugin) metadata; SYCL header APIs are covered by header parsing, not this detector
 > ⚠️ Detector 'unnamed_types' disabled: missing ELF metadata on one side
 > ⚠️ Detector 'vtable_layout' disabled: missing DWARF/header type metadata on one side (inheritance)
 > ⚠️ Detector 'advanced_dwarf' disabled: missing DWARF advanced metadata

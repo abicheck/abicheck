@@ -29,12 +29,15 @@ from __future__ import annotations
 import xml.etree.ElementTree as ET
 from typing import TYPE_CHECKING, cast
 
+from .envelope import resolved_scoped_gate
+
 if TYPE_CHECKING:
     from datetime import date
 
     from ..checker_types import DiffResult
     from ..model.change import Change
     from ..policy.severity import SeverityConfig
+    from .envelope import ReportEnvelope
 
 
 def testcase_properties(tc: ET.Element) -> ET.Element:
@@ -79,13 +82,18 @@ def add_demangled_symbol_property(tc: ET.Element, change: Change) -> None:
     prop.set("value", demangled)
 
 
-def add_scoped_properties(props: ET.Element, result: DiffResult) -> None:
+def add_scoped_properties(
+    props: ET.Element, result: DiffResult, envelope: ReportEnvelope | None = None
+) -> None:
     """Append the ``--used-by``/``--required-symbol(s)`` scoping properties
     into the testsuite's ``<properties>`` element (ADR-043 + CLI-audit P1).
 
-    *props* is created by the caller and shared with the ADR-067 disposition
-    audit above; this function adds nothing at all when no scoping was
-    requested, which is the pre-existing behaviour of its own rows.
+    The facts come from the envelope's :class:`~abicheck.report.scoped_gate_facts.
+    ScopedGateFacts` (computed once by the builder, not here); *result* is read
+    only when no envelope is given. *props* is created by the caller and shared
+    with the ADR-067 disposition audit above; this function adds nothing at all
+    when no scoping was requested, which is the pre-existing behaviour of its
+    own rows.
 
     **Purely informational (workstream D-S1).** ``failures``/pass-fail
     status always follow ``result.verdict``, reported here unswapped as
@@ -93,10 +101,8 @@ def add_scoped_properties(props: ET.Element, result: DiffResult) -> None:
     ``abicheck.gate_verdict``/``abicheck.gate_exit_code``, a supplied
     consumer's own impact, reported *beside* the full-library result.
     """
-    from .view import finding_id
-
-    scoped_verdict = getattr(result, "scoped_verdict", None)
-    if scoped_verdict is None:
+    facts = resolved_scoped_gate(envelope, result)
+    if facts is None:
         return
 
     def _prop(name: str, value: str) -> None:
@@ -104,46 +110,26 @@ def add_scoped_properties(props: ET.Element, result: DiffResult) -> None:
         p.set("name", name)
         p.set("value", value)
 
-    gate_scope = getattr(result, "gate_scope", None)
-    if gate_scope is not None:
-        _prop("abicheck.gate_scope", gate_scope)
-    _prop("abicheck.gate_verdict", scoped_verdict.value)
-    _prop("abicheck.full_library_verdict", result.verdict.value)
+    if facts.gate_scope is not None:
+        _prop("abicheck.gate_scope", facts.gate_scope)
+    _prop("abicheck.gate_verdict", facts.gate_verdict)
+    _prop("abicheck.full_library_verdict", facts.full_library_verdict)
     # Back-compat alias for the property's original name.
-    _prop("abicheck.scoped_verdict", scoped_verdict.value)
-    relevant_ids = getattr(result, "scoped_relevant_finding_ids", None) or frozenset()
-    relevant_in_changes = sum(
-        1 for c in result.changes if finding_id(c) in relevant_ids
-    )
-    # Scoped-only changes and missing-contract members are relevant by
-    # construction and never in result.changes, so they count toward
-    # relevant_finding_count but not unrelated_finding_count, which only
-    # counts irrelevant entries *within* result.changes (CodeRabbit review,
-    # mirrors sarif._scoped_gate_properties).
-    scoped_only_count = len(getattr(result, "scoped_only_changes", ()) or ())
-    missing_count = len(getattr(result, "scoped_missing_labels", ()) or ())
-    relevant_count = relevant_in_changes + scoped_only_count + missing_count
-    _prop("abicheck.relevant_finding_count", str(relevant_count))
-    _prop(
-        "abicheck.unrelated_finding_count",
-        str(len(result.changes) - relevant_in_changes),
-    )
-    scoped_exit_code = getattr(result, "scoped_exit_code", None)
-    scoped_exit_code_scheme = getattr(result, "scoped_exit_code_scheme", None)
-    if scoped_exit_code is not None:
-        _prop("abicheck.gate_exit_code", str(scoped_exit_code))
-        _prop("abicheck.gate_exit_code_scheme", str(scoped_exit_code_scheme))
+    _prop("abicheck.scoped_verdict", facts.gate_verdict)
+    _prop("abicheck.relevant_finding_count", str(facts.relevant_finding_count))
+    _prop("abicheck.unrelated_finding_count", str(facts.unrelated_finding_count))
+    if facts.gate_exit_code is not None:
+        _prop("abicheck.gate_exit_code", str(facts.gate_exit_code))
+        _prop("abicheck.gate_exit_code_scheme", str(facts.gate_exit_code_scheme))
         # Back-compat aliases.
-        _prop("abicheck.scoped_exit_code", str(scoped_exit_code))
-        _prop("abicheck.scoped_exit_code_scheme", str(scoped_exit_code_scheme))
-    used_by = getattr(result, "used_by", None)
-    if used_by is not None:
-        _prop("abicheck.used_by_app_count", str(len(used_by)))
-    required_symbols = getattr(result, "required_symbols", None)
-    if required_symbols is not None:
+        _prop("abicheck.scoped_exit_code", str(facts.gate_exit_code))
+        _prop("abicheck.scoped_exit_code_scheme", str(facts.gate_exit_code_scheme))
+    if facts.used_by_app_count is not None:
+        _prop("abicheck.used_by_app_count", str(facts.used_by_app_count))
+    if facts.required_symbol_contract_verdict is not None:
         _prop(
             "abicheck.required_symbol_contract_verdict",
-            str(required_symbols.get("verdict", "")),
+            facts.required_symbol_contract_verdict,
         )
 
 

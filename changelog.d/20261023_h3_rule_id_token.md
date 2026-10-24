@@ -1,0 +1,1 @@
+- The compare JSON report's `suppression_audit.stale_rules` keeps listing an id-less stale rule by its readable canonical identity (for example `{"symbol":"never_matches_anything"}`), not by the opaque `rule-<12 hex>` token, so a reviewer can still tell which rule went stale; a rule with an `id:` is listed by that id.

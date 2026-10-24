@@ -20,6 +20,7 @@ import re
 from collections.abc import Collection, Mapping
 
 from .compare.base_class_diff import diff_bases as _diff_bases
+from .compare.embedded_growth_shift import stamp_embedded_growth_shifts
 from .compare.enum_sentinel import is_confirmed_enum_sentinel
 from .compare.fact_gate import both_facts_present
 from .compare.field_addition import new_field_change_kind
@@ -273,20 +274,20 @@ def _removals_are_unconfirmed(old: AbiSnapshot, new: AbiSnapshot) -> bool:
 @registry.detector("types")
 def _diff_types(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     changes: list[Change] = []
-    # Include ALL types (including unions) for size/alignment/base/vtable checks.
-    # TYPE_FIELD_* for unions is skipped below — handled by _diff_unions() instead.
+    # ALL types (incl. unions) for size/alignment/base/vtable; unions' TYPE_FIELD_* is _diff_unions()'.
     excl = _exclude_stdlib_namespaces(old, new)
     directly_referenced = _directly_referenced(old, new)
+    od, nd = old.declarations, new.declarations
     old_map = _build_type_map(
         t
-        for t in old.declarations.types
+        for t in od.types
         if _is_abi_surface_type(
             t, exclude_stdlib=excl, directly_referenced=directly_referenced
         )
     )
     new_map = _build_type_map(
         t
-        for t in new.declarations.types
+        for t in nd.types
         if _is_abi_surface_type(
             t, exclude_stdlib=excl, directly_referenced=directly_referenced
         )
@@ -299,10 +300,9 @@ def _diff_types(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     new_funcs = new.function_map
     # Unfiltered (unlike old_map/new_map above) so a private/internal base
     # class still resolves when _transitive_bases walks the hierarchy for
-    # vtable_slot_is_override_reuse() -- mirrors diff_symbols._diff_functions'
-    # own old_types/new_types for the identical virtual_method_addition() walk.
-    old_types = _build_type_map(t for t in old.declarations.types)
-    new_types = _build_type_map(t for t in new.declarations.types)
+    # vtable_slot_is_override_reuse() (as diff_symbols._diff_functions does).
+    old_types = _build_type_map(t for t in od.types)
+    new_types = _build_type_map(t for t in nd.types)
     cv_facts_reliable = family_reliable(old, "header_cv") and family_reliable(
         new, "header_cv"
     )
@@ -384,7 +384,7 @@ def _diff_types(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
                 )
             )
 
-    return changes
+    return stamp_embedded_growth_shifts(changes, od, nd)
 
 
 def _overload_group_key(f: Function) -> str:

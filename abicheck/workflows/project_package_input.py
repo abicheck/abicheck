@@ -31,6 +31,7 @@ from pathlib import Path
 
 from ..errors import SnapshotError
 from ..model import AbiSnapshot
+from ..storage.generation_migrations import without_snapshot_generation_notices
 from .storage import is_project_package_archive, unpack_project_package
 
 __all__ = ["resolve_project_package"]
@@ -93,7 +94,13 @@ def _resolve_project_snapshot_directory(
     # generation is read, never refused -- but the run that loaded it says so.
     # `read_legacy_snapshot_document` above already validated the manifest.
     notice = read_manifest_summary(path).semantics_notice
+    # The manifest owns the package's generations; the member document's
+    # own stamp notice would state them twice (or contradict them).
+    snapshot.load_notices = without_snapshot_generation_notices(snapshot.load_notices)
     if notice:
         shown = display_path if display_path is not None else path
-        snapshot.load_notices = (f"stored package '{shown}': {notice}",)
+        snapshot.load_notices = (
+            f"stored package '{shown}': {notice}",
+            *snapshot.load_notices,
+        )
     return snapshot

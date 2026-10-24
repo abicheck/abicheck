@@ -22,6 +22,7 @@ from collections.abc import Iterable
 from pathlib import Path
 from typing import Any
 
+from .atomic_file import atomic_write
 from .guards import decision_key as _decision_key
 
 __all__ = ["TuParseStore", "content_key", "digest_file", "dep_digest"]
@@ -109,6 +110,19 @@ class TuParseStore:
             return None
         return entry["payload"]
 
+    def evict(self, key: str) -> None:
+        """Remove *key*'s entry, if any, so the next lookup misses.
+
+        A payload the caller cannot decode is evicted rather than left to miss
+        forever; a missing entry is not an error. Best-effort: if the entry
+        cannot be removed, it keeps missing, which costs a re-parse but never
+        a failed lookup.
+        """
+        try:
+            self.path(key).unlink(missing_ok=True)
+        except OSError:
+            pass
+
     def publish(
         self,
         key: str,
@@ -134,13 +148,11 @@ class TuParseStore:
                 return
             deps[dep] = digest
         entry = {"deps": deps, "payload": payload}
-        tmp = final.with_suffix(".json.tmp")
+        text = json.dumps(entry, indent=2, sort_keys=True) + "\n"
         try:
             self.cache_dir.mkdir(parents=True, exist_ok=True)
-            tmp.write_text(
-                json.dumps(entry, indent=2, sort_keys=True) + "\n", encoding="utf-8"
-            )
-            # Atomic publish so a concurrent reader never sees a partial file.
-            tmp.replace(final)
+            # Atomic publish: a concurrent reader sees the old entry or the new
+            # one, never a partial file. atomic_write removes its own temp file.
+            atomic_write(final, text.encode("utf-8"))
         except OSError:
-            tmp.unlink(missing_ok=True)
+            pass
