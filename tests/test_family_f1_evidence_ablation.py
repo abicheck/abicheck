@@ -137,6 +137,13 @@ _DECLARATION_PROJECTION = (
 )
 
 UNCOVERED: dict[str, str] = {
+    "MachoMetadata.weak_dependent_libs_fact": (
+        "read only by the release dependency graph's Mach-O facts "
+        "(workflows/release_dependency_facts.py), whose unit and CLI tests "
+        "(test_release_dependency_facts.py, test_release_html_pe_macho_deps.py) "
+        "cover recorded, legacy-incomplete and absent inputs; no corpus Mach-O "
+        "pair carries LC_LOAD_WEAK_DYLIB yet"
+    ),
     "AbiSnapshot.header_declaration_ids": (
         "runtime-only L2 ids a header-depth projection keeps when it clears "
         "surface_graph; never stored, so no stored-corpus ablation reaches it. "

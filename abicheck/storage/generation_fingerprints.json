@@ -149,7 +149,7 @@
       "abicheck/extract/tu_jobs.py": "6ed530395738f83bc46664a6ae9e91fa7286a2a6bb81e4fbb723447f6524b070",
       "abicheck/extract/unparseable_header_fallback.py": "a9aae1490ad88bb1f1bd9ddfe96681d4a3b9558436446305c66fb44f0003c2f6",
       "abicheck/extract/wheel_tags.py": "0a6eff34860223c9efb0fc2d62469804d50d59ae1825c726abafaf7c898789db",
-      "abicheck/macho_metadata.py": "5fb0d218553c8e3f8911429074132849087fbc2f440bba6073fa7a5a43d7d7b1",
+      "abicheck/macho_metadata.py": "e4d71d4885ce9f95fb0e2cf5be0a9f391b18ac5f031249eb331d4e20dc4a3deb",
       "abicheck/pdb_metadata.py": "79beb794904dd26afaf7d1fa8e9fdf74d4d4dfd21f5c09b9764c45b253a2dc1f",
       "abicheck/pdb_model.py": "d79ccfac86f4889d8d9b2c745ee2dacd6132c1789c0ca77988aaf53bd50aea8a",
       "abicheck/pdb_parser.py": "0e36976c17fbea1c7cfe98f9ede5713418624c69821eb9ce12cac6c9a736543f",
@@ -159,9 +159,9 @@
       "abicheck/symvers_metadata.py": "372737765cd132e6e87ed891dd465d2958e04debbef774e45212ceb3036871cb",
       "abicheck/type_metadata.py": "9997189de8dac522fd1db8be5ae491d811139503f83abaaded89038eb4aa9cdf"
     },
-    "fingerprint": "2296cf48bc9b8b47f28b7b8f780529129f9fe7ea20d0263002428cb2f079db93",
-    "generation": 15,
-    "reason": "PR-internal fixes within unreleased generation 15: C++ overloads keyed by mangled name and inline vector returns resolved; no generation has shipped with the previous keys"
+    "fingerprint": "a74dd85da7a500830802593f85411008f0f730e4ae9847e42602381f371571f7",
+    "generation": 16,
+    "reason": "bumped to 16 for a semantic change"
   },
   "resolver": {
     "files": {

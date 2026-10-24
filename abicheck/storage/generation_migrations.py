@@ -185,6 +185,11 @@ SPELLING_MIGRATIONS: Mapping[int, GenerationSpellingChange] = {
         "a stored 'T[N-1]' cannot be told apart from a genuine 'T[N-1]', so no rewrite "
         "is sound and a baseline holding those spellings is re-dumped"
     ),
+    16: GenerationSpellingChange(
+        "Mach-O LC_LOAD_WEAK_DYLIB install names are recorded as weak_dependent_libs, "
+        "a new fact rather than a spelling: no stored type or declaration spelling "
+        "changes, so no rewrite is needed and a stored snapshot reads as before"
+    ),
 }
 
 #: Reasons that say nothing about what was audited; the bump gate refuses them.
