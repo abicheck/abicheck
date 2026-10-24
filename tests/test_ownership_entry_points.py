@@ -89,6 +89,7 @@ _INVENTORY: dict[tuple[str, str, str], str] = {
     ("abicheck/dumper.py", "dump", "run_hybrid_dump"): "inner layer of dumper.dump",
     ("abicheck/workflows/aggregate/collection.py", "_write_json_atomic", "dump"): "json.dump, not a snapshot",
     ("abicheck/storage/ast_parse_exclusions.py", "_write_sidecar", "dump"): "json.dump, not a snapshot",
+    ("abicheck/buildsource/build_config.py", "to_dict", "dump"): "config mapping dump (KeyTable.dump), not a snapshot",
 }  # fmt: skip
 
 

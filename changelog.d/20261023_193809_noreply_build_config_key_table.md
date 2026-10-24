@@ -1,0 +1,3 @@
+### Changed
+
+- **`.abicheck.yml` keys are declared once, in a key table** — every recognized key is now one `KeySpec` row in `buildsource/build_config.py`'s `KEY_TABLE`, which drives the strict-load checks, `BuildConfig` construction and the `to_dict()` round-trip. Previously one key cost a dataclass field plus hand-written `from_dict`/`to_dict` lines, a registry entry and a type-table entry. The `BuildConfig` fields, the accepted keys, the error messages and the exit-64 usage errors are unchanged; the generated `config-keys-reference.md` is byte-identical. `build_config_schema.py` now holds the shared engine instead of per-type dispatch, and the scope ownership keys dump through a `ownership_block()` helper.
