@@ -244,3 +244,13 @@ def test_arm64_gcc_arch_change_on_one_machine_is_reported():
     (change,) = _isa_changes(old, new)
     assert change.old_value == "armv8-a"
     assert change.new_value == "armv8.2-a+sve"
+
+
+def test_negative_flag_removes_the_feature_and_what_implies_it():
+    # -mno-avx2 turns off avx2 and avx512f (which implies it), keeping avx and the
+    # SSE chain: the target a snapshot requires, read straight from its producer.
+    target = target_isa_of(_snap("GNU C17 13.3.0 -mavx512f -mno-avx2 -g"))
+    assert target == TargetIsa(
+        arch=None,
+        features=frozenset({"avx", "sse2", "sse3", "ssse3", "sse4.1", "sse4.2"}),
+    )

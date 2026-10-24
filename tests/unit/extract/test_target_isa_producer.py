@@ -193,3 +193,12 @@ def test_merge_with_one_side_absent_returns_the_other():
     producer = parse_producer_target_isa("GNU C17 -march=x86-64-v3 -g")
     assert target_isa_from_sources(producer, None) == producer
     assert target_isa_from_sources(None, None) is None
+
+
+def test_describe_names_the_top_extensions_beyond_the_level():
+    # A feature set above the baseline names its top-level extension only:
+    # avx2 is implied by avx512f, so only avx512f is shown.
+    features = frozenset(
+        {"avx512f", "avx2", "avx", "sse2", "sse3", "ssse3", "sse4.1", "sse4.2"}
+    )
+    assert TargetIsa(arch="x86-64", features=features).describe() == "x86-64 (+avx512f)"
