@@ -812,12 +812,18 @@ class TestCastxmlParserTypeName:
         p = _CastxmlParser(root, set(), set())
         assert p._type_name("t2") == "size_t"
 
-    def test_array_type(self):
+    @pytest.mark.parametrize(
+        ("max_index", "spelled"),
+        [("9", "int[10]"), ("0", "int[1]"), ("-1", "int[0]")],
+        ids=["ten_elements", "one_element", "zero_length"],
+    )
+    def test_array_type(self, max_index, spelled):
+        # castxml's ``max`` is the last valid index: count = max + 1.
         ft = _fund_type("t1", "int")
-        arr = Element("ArrayType", id="t2", type="t1", max="9")
+        arr = Element("ArrayType", id="t2", type="t1", max=max_index)
         root = _xml_root(ft, arr)
         p = _CastxmlParser(root, set(), set())
-        assert p._type_name("t2") == "int[9]"
+        assert p._type_name("t2") == spelled
 
     def test_array_type_no_max(self):
         ft = _fund_type("t1", "char")
