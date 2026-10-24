@@ -400,6 +400,30 @@ def decl_node_identity(node_id: str) -> str | None:
     return node_id[len("decl://") :].split("#", 1)[0]
 
 
+_HEADER_DECLARATION_PREFIXES = ("decl://", "type://", "template_decl://")
+
+
+def header_declaration_ids(snapshot: object) -> frozenset[str] | None:
+    """The header (L2) declaration node ids *snapshot* records: the
+    ``decl://``/``type://``/``template_decl://`` nodes of its
+    ``surface_graph`` when it still carries one, else the
+    ``header_declaration_ids`` a depth projection kept when it cleared that
+    graph, else ``None`` (no header declarations recorded at all).
+
+    Ids only -- never edges -- so the answer states what the headers
+    declare without standing in for the L5 graph.
+    """
+    graph = getattr(snapshot, "surface_graph", None)
+    if graph is None:
+        kept = getattr(snapshot, "header_declaration_ids", None)
+        return kept if isinstance(kept, frozenset) else None
+    return frozenset(
+        node.id
+        for node in graph.nodes
+        if node.id.startswith(_HEADER_DECLARATION_PREFIXES)
+    )
+
+
 def _type_node_id(identity: str) -> str:
     if identity.startswith(_UNRESOLVED_PREFIX):
         return identity
