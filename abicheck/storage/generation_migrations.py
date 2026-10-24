@@ -189,6 +189,10 @@ SPELLING_MIGRATIONS: Mapping[int, GenerationSpellingChange] = {
         "no stored type spelling changed in this generation: the header parse "
         "now uses the dialect and target flags the binary was built with"
     ),
+    17: GenerationSpellingChange(
+        "no stored type spelling changed in this generation: the header parse "
+        "now uses the dialect and target flags the binary was built with"
+    ),
 }
 #: Reasons that say nothing about what was audited; the bump gate refuses them.
 PLACEHOLDER_REASONS = frozenset(

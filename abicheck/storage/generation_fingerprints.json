@@ -161,8 +161,8 @@
       "abicheck/type_metadata.py": "9997189de8dac522fd1db8be5ae491d811139503f83abaaded89038eb4aa9cdf"
     },
     "fingerprint": "337ca03093298cc86d18237a5e84ceed72287ca437c47fd2c02e22df8762d870",
-    "generation": 16,
-    "reason": "re-record after the spelling row"
+    "generation": 17,
+    "reason": "bumped to 17 for a semantic change"
   },
   "resolver": {
     "files": {
