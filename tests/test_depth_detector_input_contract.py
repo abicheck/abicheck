@@ -21,7 +21,7 @@
 every registered detector, each depth-projectable fact the detector reads is
 either kept by that rung, explicitly tolerated (with a reason), or required
 -- and a required fact the rung cleared makes the detector report
-``"disabled: <fact> not available at depth <d>"`` instead of running on the
+``"<fact> not available at depth <d>"`` instead of running on the
 emptied input.
 
 Three independent oracles keep the two declarations honest:
@@ -197,11 +197,12 @@ def test_registry_disables_a_detector_whose_required_input_was_cleared(
         missing = sorted(requires & gone)
         if missing:
             assert result.not_evaluated and not result.enabled, result
+            assert result.excluded_by_depth == depth
             assert result.coverage_gap == (
-                f"disabled: {', '.join(missing)} not available at depth {depth}"
+                f"{', '.join(missing)} not available at depth {depth}"
             )
         else:
-            assert not (result.coverage_gap or "").startswith("disabled: ")
+            assert result.excluded_by_depth is None
     if depth == "binary":
         assert any(r.coverage_gap and "python_api" in r.coverage_gap for r in results)
 

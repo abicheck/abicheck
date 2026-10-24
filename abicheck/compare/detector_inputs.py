@@ -430,10 +430,11 @@ RULE_INPUTS: dict[str, DetectorInputs] = {
 }
 
 
-def unavailable_required_input(name: str, *snapshots: object) -> str | None:
-    """``"disabled: <fact> not available at depth <d>"`` when a depth
-    projection cleared a fact detector *name* requires on any of
-    *snapshots*, else ``None``."""
+def unavailable_required_facts(
+    name: str, *snapshots: object
+) -> tuple[str, tuple[str, ...]] | None:
+    """``(depth, missing facts)`` when a depth projection cleared a fact
+    detector *name* requires on any of *snapshots*, else ``None``."""
     inputs = DETECTOR_INPUTS.get(name)
     if inputs is None or not inputs.requires:
         return None
@@ -442,7 +443,20 @@ def unavailable_required_input(name: str, *snapshots: object) -> str | None:
         if record is None:
             continue
         depth, gone = record
-        missing = sorted(inputs.requires & gone)
+        missing = tuple(sorted(inputs.requires & gone))
         if missing:
-            return f"disabled: {', '.join(missing)} not available at depth {depth}"
+            return str(depth), missing
     return None
+
+
+def unavailable_required_input(name: str, *snapshots: object) -> str | None:
+    """``"<fact> not available at depth <d>"`` for
+    :func:`unavailable_required_facts`, else ``None``. No leading
+    ``disabled:``: the coverage-warning formatter adds that itself."""
+    found = unavailable_required_facts(name, *snapshots)
+    return None if found is None else depth_gap_reason(*found)
+
+
+def depth_gap_reason(depth: str, missing: tuple[str, ...]) -> str:
+    """The one spelling of a depth-projection ``coverage_gap``."""
+    return f"{', '.join(missing)} not available at depth {depth}"

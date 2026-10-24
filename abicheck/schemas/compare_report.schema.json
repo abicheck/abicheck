@@ -1677,6 +1677,10 @@
           "not_evaluated": {
             "type": "boolean",
             "description": "ADR-067 D3 (schema 2.51): true when this detector did not run at all -- its requires_support gate refused it -- as opposed to running and producing no findings. `changes_count` is 0 in both cases, which is the ambiguity this flag removes; `coverage_gap` carries the gate's reason."
+          },
+          "excluded_by_depth": {
+            "type": ["string", "null"],
+            "description": "Schema 6.6: the explicitly requested --depth whose projection cleared a fact this detector requires, when that is the only reason it did not run; null otherwise. Such detectors are summarized in one coverage_warnings line and are not an evidence gap."
           }
         }
       }
