@@ -185,6 +185,14 @@ SPELLING_MIGRATIONS: Mapping[int, GenerationSpellingChange] = {
         "a stored 'T[N-1]' cannot be told apart from a genuine 'T[N-1]', so no rewrite "
         "is sound and a baseline holding those spellings is re-dumped"
     ),
+    16: GenerationSpellingChange(
+        "no stored type spelling changed in this generation: the header parse "
+        "now uses the dialect and target flags the binary was built with"
+    ),
+    17: GenerationSpellingChange(
+        "no stored type spelling changed in this generation: the header parse "
+        "now uses the dialect and target flags the binary was built with"
+    ),
 }
 
 #: Reasons that say nothing about what was audited; the bump gate refuses them.

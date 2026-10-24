@@ -456,7 +456,10 @@ _F12 = (
     # different operand set from the same driver spelling.
     "extraction.msvc_include_operand_spelling_not_probed",
 )
-_F13 = ("extraction.compile_entry_collapsed_to_first_source",)
+_F13 = (
+    "extraction.compile_entry_collapsed_to_first_source",
+    "extraction.header_dialect_not_recovered_from_binary",
+)
 _F14 = ("extraction.vector_type_collapsed_to_plain_array",)
 _F15 = ("extraction.castxml_vector_element_not_modelled",)
 _F16 = (
