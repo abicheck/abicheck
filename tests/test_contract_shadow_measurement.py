@@ -398,7 +398,26 @@ class TestPhase6CorpusCoverage:
             # appearing means the fixture invented a spelling no real
             # snapshot can hold (Codex review found exactly that on macho).
             assert counts["unresolved"] == 0, f"{lane} left findings unresolved"
-        assert lanes["fp_corpus"]["resolved"] == 0
+        # The FP-rate corpus resolves nothing an export table would have to
+        # place: a finding it does resolve is a non-declaration kind (a
+        # stdlib-implementation switch), NOT_APPLICABLE in every domain by its
+        # catalog contract subject, which needs no export evidence at all.
+        from abicheck.contract_relevance_types import ContractMode
+
+        entity_resolved = {
+            case.name: row
+            for case in shadow.CORPUS
+            if shadow.lane_of(case.name) == "fp_corpus"
+            for row in shadow.measure_case(
+                case, ContractMode.EXPORTS
+            ).delta_matrix.values()
+            if set(row)
+            - {
+                ContractRelevance.UNKNOWN_UNRESOLVED.value,
+                ContractRelevance.NOT_APPLICABLE.value,
+            }
+        }
+        assert entity_resolved == {}
 
     def test_the_exports_domain_proves_something_out_of_contract(self) -> None:
         """Without this the `exports` domain could pass every gate while
