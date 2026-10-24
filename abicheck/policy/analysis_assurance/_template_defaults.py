@@ -59,6 +59,26 @@ def _unrecorded_pattern_count(snap: AbiSnapshot) -> int:
     return count
 
 
+def _unrecorded_function_pattern_count(snap: AbiSnapshot) -> int:
+    """Function-template patterns of *snap* whose defaults were not recorded.
+
+    A declaration whose fact is absent or NOT_COLLECTED is an ordinary function
+    (no template pattern to record), so it does not count. A pattern the clang
+    backend saw but could not spell a default of carries a non-PRESENT fact
+    (UNSUPPORTED). Redeclarations share one identity and count once.
+    """
+    unrecorded: set[object] = set()
+    for fn in snap.declarations.functions:
+        fact = fn.template_param_defaults_fact
+        if fact is None or fact.status in (
+            FactStatus.NOT_COLLECTED,
+            FactStatus.PRESENT,
+        ):
+            continue
+        unrecorded.add(fn.entity_id if fn.entity_id is not None else id(fn))
+    return len(unrecorded)
+
+
 def _is_nested_in(qualified: str, parent: str) -> bool:
     """Whether *qualified* is a member of *parent*, on ``::`` boundaries."""
     parts, owner = qualified.split("::"), parent.split("::")
@@ -89,13 +109,22 @@ def _side_note(label: str, snap: AbiSnapshot, count: int) -> str:
     )
 
 
+def _function_side_note(label: str, count: int) -> str:
+    return (
+        "template-parameter defaults (a default could not be spelled): "
+        f"{count} function template pattern(s) in the {label} snapshot carry "
+        "no recorded defaults, so a default-argument change in them is not "
+        "assessed"
+    )
+
+
 def template_default_gap(
     old: AbiSnapshot | None, new: AbiSnapshot
 ) -> tuple[bool, list[str]]:
     """``(gap, notes)`` for the template-defaults axis of the rollup.
 
-    *gap* is True when either side has at least one class-template pattern
-    without recorded defaults, or is a castxml run whose headers declare a
+    *gap* is True when either side has at least one class- or function-template
+    pattern without recorded defaults, or is a castxml run whose headers declare a
     template parameter default castxml does not record (ADR-085 D3). *notes*
     names each such side. A snapshot with neither contributes nothing.
     """
@@ -109,4 +138,7 @@ def template_default_gap(
         count = _unrecorded_pattern_count(snap)
         if count:
             notes.append(_side_note(label, snap, count))
+        fn_count = _unrecorded_function_pattern_count(snap)
+        if fn_count:
+            notes.append(_function_side_note(label, fn_count))
     return bool(notes), notes

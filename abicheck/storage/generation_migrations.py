@@ -192,6 +192,12 @@ SPELLING_MIGRATIONS: Mapping[int, GenerationSpellingChange] = {
         "is sound; policy/generation_drift_demotion.py demotes a stored tag "
         "against a fresh declarator, and a baseline holding callbacks is re-dumped"
     ),
+    17: GenerationSpellingChange(
+        "clang function-template patterns whose default argument cannot be spelled "
+        "record template_param_defaults_fact as UNSUPPORTED (was absent); no type "
+        "or name spelling changes, so no rewrite is needed -- an older clang "
+        "snapshot simply names no gap for such a pattern"
+    ),
 }
 
 #: Reasons that say nothing about what was audited; the bump gate refuses them.
