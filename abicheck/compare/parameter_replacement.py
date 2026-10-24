@@ -34,7 +34,13 @@ The pairing is deliberately narrow, because overloads are legitimate:
   and no other function on either side has it, so a removed ``f(int)``
   beside a surviving ``f(double)`` is never read as a parameter change;
 * only when the trailing qualifiers (``const``, ref-qualifier) agree, so a
-  cv-qualification change keeps its own detector.
+  cv-qualification change keeps its own detector;
+* only when neither side was parsed from public headers. A header-parsed
+  declaration carries contract evidence: a parameter retyped to an internal
+  type is a removal from the public contract (``func_removed``, the documented
+  ground truth of case189), and folding it into a parameter change would hide
+  that. The binary+DWARF comparison, which has no header evidence, is where a
+  replaced symbol is only a removal and an addition by its spelling.
 
 A replacement the rule cannot prove stays the removal and addition it was.
 A pair it does prove is one finding, and the verdict does not change: the
@@ -90,6 +96,8 @@ def pair_parameter_replacements(
     ``FUNC_PARAMS_CHANGED``. Every other change passes through unchanged and
     in order; a pair is replaced only when all of its evidence is in hand.
     """
+    if old.from_headers or new.from_headers:
+        return changes
     removed = {c.symbol: c for c in changes if c.kind in _REMOVAL_KINDS and c.symbol}
     added = {c.symbol: c for c in changes if c.kind is ChangeKind.FUNC_ADDED}
     if not removed or not added:
