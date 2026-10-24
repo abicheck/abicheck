@@ -24,7 +24,7 @@
 | Coverage gap | Detector 'dwarf' disabled: no DWARF debug info on either side |
 | Coverage gap | Detector 'python_ext' disabled: missing CPython extension metadata |
 | Coverage gap | Detector 'python_api' disabled: missing Python API surface (no .pyi stub recovered) |
-| Coverage gap | Detector 'sycl' disabled: missing SYCL metadata |
+| Coverage gap | Detector 'sycl' disabled: missing SYCL runtime (PI plugin) metadata; SYCL header APIs are covered by header parsing, not this detector |
 | Coverage gap | Detector 'vtable_layout' disabled: missing DWARF/header type metadata on one side (inheritance) |
 | Coverage gap | Detector 'advanced_dwarf' disabled: missing DWARF advanced metadata |
 | Coverage gap | Header analysis without record layout on every compared side: no DWARF layout and no header frontend that computes it (the clang frontend parses declarations but not struct layout, unless the layout companion ran), so struct size, alignment and field offset changes cannot be established; confidence capped at MEDIUM |

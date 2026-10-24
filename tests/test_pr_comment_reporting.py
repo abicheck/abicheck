@@ -296,7 +296,10 @@ _ROUTINE_DISABLED = [
     ("macho", "missing Mach-O metadata"),
     ("python_ext", "missing CPython extension metadata"),
     ("python_api", "missing Python API surface (no .pyi stub recovered)"),
-    ("sycl", "missing SYCL metadata"),
+    (
+        "sycl",
+        "missing SYCL runtime (PI plugin) metadata; SYCL header APIs are covered by header parsing, not this detector",
+    ),
     ("vtable_layout", "missing DWARF/header type metadata on one side (inheritance)"),
 ]
 

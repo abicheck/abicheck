@@ -25,8 +25,9 @@ owns it) is still declared in the new header graph, so the declaration did not
 go. What can have changed is only whether the library still exports the
 instantiation, and the new export table answers that question.
 
-For an old instantiation whose primary template is declared exactly once in the
-new header graph:
+For an old instantiation whose primary template is still declared in the new
+header graph (:meth:`TemplateInstanceAbsence._primary_still_declared`: one
+primary, or every old overload of the name kept with its signature):
 
 * the new binary still exports the same symbol: no finding, since the binary
   still provides what consumers bind to;
@@ -39,8 +40,8 @@ new header graph:
 The rule never emits a declaration-removal kind for such an instantiation, and
 it never demotes an export loss: a WEAK loss keeps its binding and its verdict
 (``case217``/``case218`` pin that contract). It returns ``None`` whenever it
-makes no claim -- not a template instance, no declared primary or an ambiguous
-one, an unknown export table, or an ELF-only old record -- and the caller falls
+makes no claim -- not a template instance, no declared primary or a deleted
+overload, an unknown export table, or an ELF-only old record -- and the caller falls
 back to the existing removal path.
 
 The same holds one level up, for a class-template specialization the new
@@ -77,7 +78,6 @@ template), and a non-template class all keep the existing removal path.
 
 from __future__ import annotations
 
-from collections import Counter
 from typing import TYPE_CHECKING
 
 from ..demangle import demangle
@@ -89,7 +89,7 @@ from ..model.change import Change
 from ..model.change_catalog.kinds import ChangeKind
 from ..model.edge_coverage import EdgeAnswer
 from ..model.export_entity_name import entity_name_components, has_synthetic_component
-from ..model.graph_identity import decl_node_identity
+from ..model.graph_identity import decl_node_identity, header_declaration_ids
 from ..model.qualified_name_split import split_top_level_scopes
 from ..model.surface_facts import (
     is_binary_exported,
@@ -272,6 +272,21 @@ def _template_of(spelling: str) -> str | None:
     return spelling[:cut]
 
 
+#: Sentinel: the old side recorded no header declarations.
+_NO_OLD_DECLS: dict[str, frozenset[str]] = {}
+
+
+def _primaries_by_stem(node_ids: frozenset[str]) -> dict[str, frozenset[str]]:
+    """Declared ``decl://`` ids grouped by their declaration identity (the
+    qualified name without the ``#sha256:`` overload discriminator)."""
+    found: dict[str, set[str]] = {}
+    for node_id in node_ids:
+        identity = decl_node_identity(node_id)
+        if identity is not None:
+            found.setdefault(identity, set()).add(node_id)
+    return {k: frozenset(v) for k, v in found.items()}
+
+
 class TemplateInstanceAbsence:
     """The facts a template-absence decision reads, for one comparison.
 
@@ -287,8 +302,9 @@ class TemplateInstanceAbsence:
         self._new = new
         self._old = old
         self._exports: dict[frozenset[str], ObservedExportTable] = {}
-        self._node_ids: set[str] | None = None
-        self._declared: Counter[str] | None = None
+        self._node_ids: frozenset[str] | None = None
+        self._declared: dict[str, frozenset[str]] | None = None
+        self._old_declared: dict[str, frozenset[str]] | None = None
         self._vanished: frozenset[str] | None = None
 
     def _export_table(self, types: frozenset[str]) -> ObservedExportTable:
@@ -297,19 +313,55 @@ class TemplateInstanceAbsence:
             table = self._exports[types] = observed_exports(self._new, types)
         return table
 
-    def _graph_node_ids(self) -> set[str]:
+    def _graph_node_ids(self) -> frozenset[str]:
+        """The new header's declaration node ids -- from its graph, or the
+        L2 ids a header-depth projection kept (``header_declaration_ids``)."""
         if self._node_ids is None:
-            graph = getattr(self._new, "surface_graph", None)
-            self._node_ids = (
-                {node.id for node in graph.nodes} if graph is not None else set()
-            )
+            self._node_ids = header_declaration_ids(self._new) or frozenset()
         return self._node_ids
 
-    def _declared_primaries(self) -> Counter[str]:
+    def _declared_primaries(self) -> dict[str, frozenset[str]]:
         if self._declared is None:
-            identities = (decl_node_identity(i) for i in self._graph_node_ids())
-            self._declared = Counter(i for i in identities if i is not None)
+            self._declared = _primaries_by_stem(self._graph_node_ids())
         return self._declared
+
+    def _old_declared_primaries(self) -> dict[str, frozenset[str]] | None:
+        """The old header's primaries by stem, or ``None`` when the old side
+        recorded no header declarations (no graph, nothing kept)."""
+        if self._old_declared is None:
+            ids = header_declaration_ids(self._old) if self._old is not None else None
+            self._old_declared = (
+                _primaries_by_stem(ids) if ids is not None else _NO_OLD_DECLS
+            )
+        return None if self._old_declared is _NO_OLD_DECLS else self._old_declared
+
+    def _primary_still_declared(self, stem: str) -> bool:
+        """Whether the primary template an instance of *stem* came from is
+        still declared in the new header.
+
+        A ``decl://`` primary's id is ``<stem>#sha256:<hash of its dependent
+        signature>``: a one-way hash, so an instance's argument list cannot be
+        matched to one overload. Instead:
+
+        * exactly one primary on the new side, and at most one on the old
+          side: the same template (the original rule);
+        * several overloads, and the old header's are known: every old
+          overload of *stem* must still be declared with the identical
+          signature -- a deleted overload leaves the instance's origin
+          unproven, so the removal path keeps reporting it;
+        * several overloads, old header unknown: any declared primary of
+          *stem* (the stem fallback).
+        """
+        new = self._declared_primaries().get(stem, frozenset())
+        if not new:
+            return False
+        old_all = self._old_declared_primaries()
+        if old_all is None:
+            return True
+        old = old_all.get(stem, frozenset())
+        if len(new) == 1 and len(old) <= 1:
+            return True
+        return old <= new
 
     def _vanished_specializations(self) -> frozenset[str]:
         """Old specializations proven instantiated from a pattern the new
@@ -364,7 +416,7 @@ class TemplateInstanceAbsence:
                 return []  # a synthetic constructor/destructor key: no symbol
             return self._judged(mangled, f_old, FUNCTION_SYMBOL_TYPES)
         stem = _primary_stem_of(parsed)
-        if stem is None or self._declared_primaries().get(stem, 0) != 1:
+        if stem is None or not self._primary_still_declared(stem):
             return None
         return self._judged(mangled, f_old, FUNCTION_SYMBOL_TYPES)
 

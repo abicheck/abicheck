@@ -775,3 +775,33 @@ def test_parameter_template_args_do_not_join_a_template_family() -> None:
     findings = detect_missing_instantiations(old, new)
     assert [f.symbol for f in findings] == ["_Z3getIdET_S0_"]
     assert all(f.kind == ChangeKind.INSTANTIATION_MISSING_FROM_BINARY for f in findings)
+
+
+# -- type-index identity (bug class identity.type_index_bare_name_collision) --
+
+
+@pytest.mark.parametrize(
+    "scopes",
+    [
+        ("a", "b", "c"),
+        ("a", "a::inner", "Holder"),
+        ("x::y", "x", "z::y"),
+    ],
+)
+def test_type_index_keys_on_qualified_identity_not_bare_spelling(
+    scopes: tuple[str, ...],
+) -> None:
+    """Header records carry a bare ``name`` and their scope in
+    ``qualified_name``; one bare name in several scopes is several types.
+    Oracle: the scope each record was declared in."""
+    from abicheck.model import AbiSnapshot
+    from abicheck.model.entities import RecordType
+
+    recs = [
+        RecordType(name="Parameter", kind="struct", qualified_name=f"{s}::Parameter")
+        for s in scopes
+    ]
+    snap = AbiSnapshot(library="l.so", version="1", types=recs)
+    for scope, rec in zip(scopes, recs, strict=True):
+        assert snap.type_by_name(f"{scope}::Parameter") is rec
+    assert snap.type_by_name("Parameter") is None
