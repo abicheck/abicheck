@@ -263,3 +263,10 @@ def test_partial_member_keeps_its_edges_and_is_counted_as_partial() -> None:
     assert {n.name: n.deps for n in graph.nodes}["p.dll"] == DEPS_PARTIAL
     assert graph.members_partial == 1
     assert graph.members_with_facts == 1
+
+
+def test_a_member_with_neither_side_read_is_not_evaluated() -> None:
+    assert member_dependency_facts(None, None) == {
+        "state": "not_evaluated",
+        "reason": "no dependency metadata was read from either side",
+    }
