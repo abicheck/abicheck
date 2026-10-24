@@ -33,7 +33,6 @@ records a declaration line.
 
 from __future__ import annotations
 
-import os
 import posixpath
 from typing import Any
 
@@ -78,7 +77,7 @@ def _comp_dir(CU: Any) -> str:
 
 
 def _under(base: str, name: str) -> str:
-    return name if os.path.isabs(name) or not base else os.path.join(base, name)
+    return name if posixpath.isabs(name) or not base else posixpath.join(base, name)
 
 
 def decl_file_path(die: Any, CU: Any) -> str | None:
@@ -162,4 +161,4 @@ def _file_path(header: Any, file_idx: int, comp_dir: str, CU: Any) -> str | None
             base = _under(comp_dir, _dir_name(dirs[dir_idx - 1]))
     if name is None:
         return None
-    return os.path.normpath(_under(base, _text(name)))
+    return posixpath.normpath(_under(base, _text(name)))

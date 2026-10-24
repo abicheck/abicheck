@@ -36,7 +36,7 @@
       "abicheck/extract/digest_memo.py": "babd25889fb4ac54b8defd27ea009fc2e125085c5692f5a4d864aec5491fbee9",
       "abicheck/extract/dpcpp_jobs.py": "7e30f36f5a4ccaf84aa9abe6ed7958d23ce5c43dbb9f6504b9921502c99fad08",
       "abicheck/extract/dump_manifest_roots.py": "b616e45b7eafdd2dd4c69c1031f9a5c8b54973633aa3e9057edc60525ea0d15a",
-      "abicheck/extract/dwarf_decl_file.py": "f1fadf216dc2fef339d31a130d3f6d898736cdb7f2cbc1035396aaa7f0a7a89a",
+      "abicheck/extract/dwarf_decl_file.py": "a585b6e38dc879b04db4b3d70a8b7131774a8b735df1068e6baafcaac934af42",
       "abicheck/extract/dwarf_layout_backfill.py": "3dcc9efb8907b6b3419b09b1c262f64403a5162148bc3be0a5d51e112ef69a4d",
       "abicheck/extract/dwarf_producer.py": "86e449f5776fe7aead410ef979dc636837d28c8caae5599d3c22b8c3f442e1c6",
       "abicheck/extract/dwarf_records.py": "e77d5320c3a56b7ca6a46b20ab7197ed03817d0f838d0a7c0fe899439a71ec42",
@@ -158,9 +158,9 @@
       "abicheck/symvers_metadata.py": "372737765cd132e6e87ed891dd465d2958e04debbef774e45212ceb3036871cb",
       "abicheck/type_metadata.py": "9997189de8dac522fd1db8be5ae491d811139503f83abaaded89038eb4aa9cdf"
     },
-    "fingerprint": "8f58bfbda84d89806994b5280a94b2d8c471a4f8f0cbfadd0a91e3147c9cd1d3",
+    "fingerprint": "63fb28c89d58db57d551f4175bb4d972a0707ef23d3de600c4a8db5bcbb8466c",
     "generation": 14,
-    "reason": "bumped to 14 for a semantic change"
+    "reason": "Refactor only: dwarf_decl_file.py now uses posixpath for DWARF path joins and normalization instead of os.path. On POSIX hosts the output is identical, so the recorded facts and the generation (14) are unchanged; the content fingerprint is re-recorded."
   },
   "resolver": {
     "files": {

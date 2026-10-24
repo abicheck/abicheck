@@ -28,7 +28,6 @@ from pathlib import Path
 import pytest
 
 pytestmark = [
-    pytest.mark.integration,
     pytest.mark.skipif(sys.platform != "linux", reason="builds an ELF .so"),
     pytest.mark.skipif(shutil.which("g++") is None, reason="g++ not found"),
 ]
