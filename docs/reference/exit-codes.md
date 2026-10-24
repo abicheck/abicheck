@@ -165,6 +165,10 @@ can be demoted. Only legacy output without a gate block falls back from
 compatibility verdict to `2`/`4`. Existing command-specific `5`, `8`, and `64`
 behavior is as documented below.
 
+`compare --require-same-generation` turns an extractor-generation mismatch
+between the two operands into a usage error, exit `64`, with a "re-dump
+baseline" message instead of a comparison.
+
 ## `compare --no-baseline` (single artifact)
 
 `abicheck compare --no-baseline NEW` declares that no prior surface exists
@@ -179,10 +183,6 @@ multi-artifact stored package is audited per member instead — see
 `NEW` may be an ELF static archive (`libfoo.a`); an archive with no
 symbol index, a thin archive, non-ELF members, or no `-H` header is a usage
 error, exit `64`.
-
-`compare --require-same-generation` turns an extractor-generation mismatch
-between the two operands into a usage error, exit `64`, with a "re-dump
-baseline" message instead of a comparison.
 
 The OLD side is recorded with the `declared_absent`
 `MemberAcquisition` state — distinct from `not_supplied` (an *unproven*
