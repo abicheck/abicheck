@@ -136,6 +136,10 @@ class ChangeRow:
     compatibility_decision: str | None
     contract_evidence_refs: tuple[str, ...]
     correlated_change_kind: str | None
+    # ``compare --use-cases``'s per-finding attribution. ``None`` means no
+    # attribution ran (the line is omitted); an empty tuple means it ran and
+    # no use case reaches this finding.
+    affected_use_cases: tuple[str, ...] | None = None
 
 
 def render_changes_table(rows: tuple[ChangeRow, ...], demangle: bool = True) -> str:
@@ -210,6 +214,16 @@ def render_changes_table(rows: tuple[ChangeRow, ...], demangle: bool = True) -> 
                 f"<div style='font-size:0.82em; color:#999; margin-top:2px;'>"
                 f"🔗 See also: <code>{html.escape(row.correlated_change_kind)}</code> "
                 f"finding for the same symbol</div>"
+            )
+        if row.affected_use_cases is not None:
+            names = (
+                f"<code>{html.escape(', '.join(row.affected_use_cases))}</code>"
+                if row.affected_use_cases
+                else "none"
+            )
+            desc_parts.append(
+                f"<div style='font-size:0.82em; color:#2e7d32; margin-top:2px;'>"
+                f"🧭 Affected use cases: {names}</div>"
             )
         full_desc = "".join(desc_parts)
 

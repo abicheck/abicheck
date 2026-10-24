@@ -95,6 +95,11 @@ def _change_row_from_mapping(d: Mapping[str, Any]) -> ChangeRow:
         compatibility_decision=d["compatibility_decision"],
         contract_evidence_refs=tuple(d["contract_evidence_refs"]),
         correlated_change_kind=d["correlated_change_kind"],
+        affected_use_cases=(
+            None
+            if d.get("affected_use_cases") is None
+            else tuple(d["affected_use_cases"])
+        ),
     )
 
 

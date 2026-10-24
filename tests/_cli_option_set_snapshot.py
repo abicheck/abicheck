@@ -105,6 +105,7 @@ OPTION_SET_SNAPSHOT: dict[str, tuple[str, ...]] = {
         "--pack",
         "--performance-profile",
         "--policy",
+        "--require-same-generation",
         "--required-symbol",
         "--search-path",
         "--select",

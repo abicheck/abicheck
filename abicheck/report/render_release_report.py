@@ -290,4 +290,6 @@ def render_stored_release_markdown(report: StoredReleaseReport) -> str:
     lines.append("")
     bundle_lines = render_bundle_findings_markdown(result.bundle_findings)
     lines += bundle_lines if bundle_lines else ["(none)"]
-    return demangle_text("\n".join(lines) + "\n")
+    from .markdown_budget import DEMANGLED_NAME_LIMIT
+
+    return demangle_text("\n".join(lines) + "\n", max_demangled=DEMANGLED_NAME_LIMIT)

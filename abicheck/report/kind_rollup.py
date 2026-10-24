@@ -40,6 +40,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+from .markdown_budget import EXAMPLE_LIMIT, ITEM_LIMIT, clip_name
+
 if TYPE_CHECKING:
     from ..model.change import Change
 
@@ -56,10 +58,10 @@ if TYPE_CHECKING:
 #: (``report/release_display_limits.py``): this is a single-library report,
 #: where a reader legitimately expects to see individual findings, so it
 #: only engages for a genuine flood.
-KIND_ROLLUP_THRESHOLD = 25
+KIND_ROLLUP_THRESHOLD = ITEM_LIMIT
 #: Symbols named inline for a rolled-up kind. Enough to recognise what the
 #: kind is picking up, few enough that the count stays the headline.
-KIND_ROLLUP_SAMPLES = 5
+KIND_ROLLUP_SAMPLES = EXAMPLE_LIMIT
 
 
 @dataclass(frozen=True, slots=True)
@@ -90,7 +92,7 @@ def render_kind_rollups(rollups: tuple[KindRollup, ...]) -> list[str]:
         return []
     lines: list[str] = []
     for r in rollups:
-        shown = ", ".join(f"`{s}`" for s in r.sample_symbols)
+        shown = ", ".join(f"`{clip_name(s)}`" for s in r.sample_symbols)
         remaining = r.count - len(r.sample_symbols)
         more = f", and {remaining:,} more" if remaining > 0 else ""
         lines.append(

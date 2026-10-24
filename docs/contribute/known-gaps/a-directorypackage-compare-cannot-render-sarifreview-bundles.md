@@ -29,7 +29,7 @@ loud rather than silent, and it is not arbitrary — the missing formats are
 the ones whose renderers take a single `DiffResult`:
 
 - `sarif` is **closed**: the fan-out keeps each member's `DiffResult` only
-  for the pair formats (`junit`, `sarif`; `cli_compare_release_matrix._PAIR_FORMATS`),
+  for the pair formats (`junit`, `sarif`; `frontends/cli/release_summary._PAIR_FORMATS`),
   and the SARIF log is one run per member, each run the single-pair
   `to_sarif` projection, with every result stamped `properties.releaseMember`.
   Each run keeps its own rule catalog, so `ruleIndex` values stay valid.

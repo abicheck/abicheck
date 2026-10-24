@@ -114,10 +114,8 @@ def backfill_run_outcome(out: dict[str, Any]) -> None:
     confirmed-clean report -- before this function ever sees it). Its
     ``compatibility`` verdict is recovered from the worst REAL per-library
     result via :func:`~abicheck.policy.outcome.worst_real_verdict` -- the
-    same sentinel-excluding precision ``cli_compare_release_helpers.
-    fold_release_outcome`` gives a native release
-    writer, reimplemented here since that helper lives in a `frontends`-
-    classified module this leaf may not import -- rather than the raw
+    same sentinel-excluding precision ``policy.release_outcome.fold_release_outcome`` gives a native release
+    writer, reimplemented here rather than imported from ``policy.release_outcome`` -- rather than the raw
     top-level ``verdict`` alone, so a legacy release whose top-level
     verdict is the ``"ERROR"``/``"not_comparable"`` sentinel does not lose
     a real completed ``BREAKING``/``API_BREAK`` library result on upgrade
@@ -249,8 +247,7 @@ def backfill_run_outcome(out: dict[str, Any]) -> None:
 
     if "libraries" in out and ("old_dir" in out or "unmatched_old" in out):
         # `old_dir` alone would miss a release fan-out's per-component export
-        # summary.json (`cli_compare_release_matrix._write_release_summary_
-        # file`'s own shape): it carries `libraries`/`unmatched_old` but no
+        # summary.json (`frontends.cli.release_summary._write_release_summary_file`'s own shape): it carries `libraries`/`unmatched_old` but no
         # `old_dir`/`new_dir` at all, so it previously fell through to the
         # single-compare fallback below -- discarding a completed member
         # result and the release's own operational failure alike (Codex

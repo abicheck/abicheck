@@ -1,0 +1,22 @@
+{
+  "description": "A system typedef (std::size_t) reachable only through a member-template instance the new inline code stops instantiating: the typedef is not reported removed, at headers or source depth.",
+  "field_report": "oneDAL #3693 handover r2, H2 (typedef retention)",
+  "bug_class": "scoping.declaration_kind_forwarded_unfiltered",
+  "related_tests": [
+    "tests/test_typedef_retention_instantiation_independent.py"
+  ],
+  "cxxflags": [
+    "-fvisibility-inlines-hidden"
+  ],
+  "depths": [
+    "headers",
+    "source"
+  ],
+  "expected_kinds": [],
+  "expected_absent_kinds": [
+    "typedef_removed",
+    "public_surface_shrank",
+    "func_removed",
+    "inline_function_removed"
+  ]
+}

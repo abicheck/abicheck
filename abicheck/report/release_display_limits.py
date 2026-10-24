@@ -16,9 +16,9 @@
 """How many findings a release *summary* shows per library, and where.
 
 A one-value leaf, extracted so the modules that need it -- the resolver
-(``cli_compare_release_matrix``) and the Markdown renderer that applies the
-cap (``report.render_release_markdown.release_md_library_findings``, reached from
-``cli_compare_release_helpers``) -- can both depend on it without depending
+(``report.release_findings``) and the Markdown renderer that applies the
+cap (``report.render_release_markdown.release_md_library_findings``) -- can
+both depend on it without depending
 on each other. A function-local import between those two was a real new
 import cycle the ``import-cycle-growth`` gate rejects, and ``AGENTS.md``'s
 own rule for that shape is to move the shared thing to a leaf, not to

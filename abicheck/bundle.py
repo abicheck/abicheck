@@ -1089,7 +1089,7 @@ def discover_artifact_set(paths: list[Path], *, explicit: bool) -> dict[str, Pat
 def render_bundle_findings_markdown(findings: list[BundleFinding]) -> list[str]:
     """Markdown lines for a list of bundle findings (G34 Phase 4).
 
-    Shared by ``cli_compare_release_helpers._release_md_bundle_findings``
+    Shared by ``report.render_release_markdown._release_md_bundle_findings``
     (:class:`BundleDiffResult`'s two-sided findings) and
     the single-sided audit renderer the retired ``scan --artifact-set`` had
     -- the rendering itself only ever needs the flat ``list[BundleFinding]``,

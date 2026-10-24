@@ -464,6 +464,31 @@ def test_diff_lacks_git_headers_for_its_hunks_ignores_a_headed_binary_marker() -
     assert gate.diff_lacks_git_headers_for_its_hunks(diff) is False
 
 
+@pytest.mark.parametrize(
+    "marker",
+    [
+        "Binary files /dev/null and b/tests/fixtures/new.bin differ",
+        "Binary files a/tests/fixtures/new.bin and /dev/null differ",
+    ],
+)
+def test_diff_lacks_git_headers_for_its_hunks_ignores_dev_null_on_added_or_deleted_binary(
+    marker: str,
+) -> None:
+    """git names ``/dev/null`` on the missing side of an added or deleted
+    binary file. That side is not a path, so a headed add/delete must not
+    read as a headerless hunk (it made every PR adding a binary fixture fail
+    ``--diff-only`` with "could not establish a function scope")."""
+    diff = (
+        "diff --git a/tests/fixtures/new.bin b/tests/fixtures/new.bin\n"
+        "new file mode 100644\n"
+        "index 0000000..def456\n"
+        f"{marker}\n"
+    )
+    assert gate.diff_lacks_git_headers_for_its_hunks(diff) is False
+    # A headerless add is still caught by its real path.
+    assert gate.diff_lacks_git_headers_for_its_hunks(f"{marker}\n") is True
+
+
 def test_diff_lacks_git_headers_for_its_hunks_detects_a_headerless_binary_marker() -> (
     None
 ):

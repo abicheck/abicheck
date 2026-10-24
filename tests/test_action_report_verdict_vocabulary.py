@@ -238,7 +238,7 @@ class TestALibraryArrayIsNotAVerdictSource:
     `_report_compat_verdict` looks at `libraries`, so admitting a library-only
     document licensed COMPATIBLE for a release whose members said `BREAKING`
     (Codex review, P2). A rollup was not the answer either --
-    `cli_compare_release_helpers._format_release_json` emits a top-level
+    `report.render_release_report.render_release_json` emits a top-level
     `"verdict": worst_verdict`, already rolled up, on *every* release document,
     so a `libraries` array with no readable verdict beside it is not a shape any
     emitter produces.

@@ -852,7 +852,7 @@ TOOL_SURFACE_BUG_CLASSES: tuple[BugClass, ...] = (
             "and decays the same way -- silently, because its own tests pin "
             "its prose rather than measuring what it adapts."
         ),
-        fixed_by=(1195, 1233),
+        fixed_by=(1195, 1233, 1763),
         seed_tests=(
             "tests/test_cli_compare_release_depth.py",
             "tests/test_cli_compare_release_header_graph.py",
@@ -870,6 +870,14 @@ TOOL_SURFACE_BUG_CLASSES: tuple[BugClass, ...] = (
             # which is the strongest evidence yet that the mechanical
             # sweep in this class's gap note is the thing actually needed.
             "tests/test_action_run_sh_release_capability_parity.py",
+            # PR #1763: the inverse direction -- a request-time guard
+            # *narrower* than the pipeline gate it front-runs. The castxml
+            # preflight caught a missing binary but not an out-of-policy
+            # version, so the late gate fired only after the DWARF work the
+            # preflight exists to avoid. The preflight now reuses the late
+            # gate's own decision functions; the seed enumerates versions on
+            # both sides of each policy bound against the documented range.
+            "tests/test_castxml_request_preflight.py",
         ),
         # "cli" is earned by the two CLI seeds above (real `CliRunner`
         # invocations). "github-action" is deliberately NOT claimed: the
@@ -890,6 +898,7 @@ TOOL_SURFACE_BUG_CLASSES: tuple[BugClass, ...] = (
                 "action-compile-context-rejection",
                 "action-depth-headers-drop",
                 "action-depth-build-source-rejection",
+                "castxml-version-preflight",
             ),
             "depth_rung": ("binary", "headers", "build", "source"),
             "member_evidence": ("binary", "headers", "build"),

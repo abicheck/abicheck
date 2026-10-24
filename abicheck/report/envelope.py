@@ -82,6 +82,7 @@ from typing import TYPE_CHECKING
 
 from ..policy.evaluate import effective_kind_sets
 from .finding import ReportFinding, build_report_findings
+from .scoped_gate_facts import ScopedGateFacts, build_scoped_gate_facts
 
 if TYPE_CHECKING:
     from ..checker_types import DiffResult
@@ -181,6 +182,11 @@ class ReportEnvelope:
     #: an envelope is supposed to make read-only (Codex review, fresh
     #: evidence).
     suppressed_findings: tuple[ReportFinding, ...] = ()
+    #: The scoped-gate facts a ``--used-by``/``--required-symbol(s)`` run
+    #: reports beside the full-library verdict; ``None`` for an unscoped run.
+    #: Carried here rather than in ``document`` so the JSON projection, which
+    #: serializes the document wholesale, keeps its published shape.
+    scoped_gate: ScopedGateFacts | None = None
     #: Cached ``id(change) -> finding`` index over all three tuples above,
     #: built on first use within one render. Valid only while those exact
     #: ``Change`` objects are alive -- see ``report/finding.py``'s module
@@ -270,6 +276,16 @@ def resolved_document(envelope: ReportEnvelope | None) -> ReportDocument | None:
     the same reuse; no production call passed it, so it is gone.
     """
     return envelope.document if envelope is not None else None
+
+
+def resolved_scoped_gate(
+    envelope: ReportEnvelope | None, result: DiffResult
+) -> ScopedGateFacts | None:
+    """The envelope's scoped-gate facts, or the same facts built from *result*
+    for a direct caller with no envelope (the :func:`resolved_gate` pattern)."""
+    if envelope is not None:
+        return envelope.scoped_gate
+    return build_scoped_gate_facts(result)
 
 
 def env_matrix_digest_reusing_document(

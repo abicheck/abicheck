@@ -162,15 +162,6 @@ module = [
     "abicheck.cli_resolve",
     "abicheck.cli_aggregate",
     "abicheck.cli_compare_release",
-    # `cli_compare_release_matrix` (G38 Phase 15 file-split prerequisite)
-    # declares no Click decorator of its own -- unlike every other entry in
-    # this override, it needs it only because it calls `.cli`'s own helpers
-    # (`_safe_write_output`, ...), whose return types are themselves Any
-    # under `cli`'s identical override; without the same relaxation here,
-    # mypy reports `Any? not callable` (`misc`) at each call site (CodeRabbit
-    # review on PR #973 questioned this entry; reproduced by removing it and
-    # re-running mypy before restoring it).
-    "abicheck.cli_compare_release_matrix",
     "abicheck.cli_buildsource",
     "abicheck.cli_dump_helpers",
     "abicheck.cli_graph",
@@ -278,6 +269,7 @@ markers = [
     "slow: marks tests as slow (hypothesis / performance benchmarks)",
     "golden: golden-output snapshot tests",
     "repo_scan: statically scans the whole repository tree; OS- and coverage-independent, run once by the repo-scan-tests CI job",
+    "model_warning_hygiene: fails the test on an unexpected WARNING log record from abicheck.model.* (tests/_model_warning_hygiene.py allowlist)",
     "host_memory_probe: opts out of tests/conftest.py's autouse pin of process_resources.available_mem_gib (tests of the real probe)",
 ]
 # Global per-test hang safety valve (pytest-timeout), not a perf regression

@@ -315,6 +315,7 @@ class ChangeKind(StrEnum):
     TARGET_DEPENDENCY_ADDED = 'target_dependency_added'
     EXPORTED_SYMBOL_SOURCE_OWNER_CHANGED = 'exported_symbol_source_owner_changed'
     DECLARATION_RENAMED = 'declaration_renamed'
+    TARGET_ISA_CHANGED = 'target_isa_changed'
     DECLARATION_MOVED = 'declaration_moved'
     DECLARATION_IDENTITY_RECONCILED = 'declaration_identity_reconciled'
     EXPORTED_NOT_PUBLIC = 'exported_not_public'
