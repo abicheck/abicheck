@@ -648,4 +648,31 @@ CLASSIFICATION_BUG_CLASSES: tuple[BugClass, ...] = (
             ),
         },
     ),
+    BugClass(
+        id="identity.type_index_bare_name_collision",
+        invariant=(
+            "AbiSnapshot's type index keys a record on its qualified identity "
+            "(qualified_name or name, the key old/new type matching uses): "
+            "records sharing a bare name in distinct scopes never collide, never "
+            "log a first-wins duplicate, and a lookup resolves the declared "
+            "record; a bare spelling shared by several scopes resolves to "
+            "nothing rather than the first one indexed. Only a duplicate "
+            "qualified identity is a first-wins drop."
+        ),
+        fixed_by=(1316, 1621),
+        seed_tests=(
+            "tests/test_type_index_qualified_identity.py",
+            "tests/test_family_f3_identity.py",
+        ),
+        axes={
+            "scope": (
+                "sibling namespaces",
+                "nested namespace",
+                "class-scoped nested type",
+                "global next to namespaced twin",
+                "DWARF-style qualified name",
+            ),
+            "lookup": ("qualified", "unambiguous bare", "ambiguous bare"),
+        },
+    ),
 )

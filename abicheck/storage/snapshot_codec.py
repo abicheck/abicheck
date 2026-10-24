@@ -91,6 +91,7 @@ from .fact_codec import (
     decode_snapshot_facts,
     evidenced_producers,
 )
+from .generation_migrations import migrate_and_describe
 from .sectioned_document import from_sectioned_document, is_sectioned_document
 from .semantic_ir_codec import decode_semantic_ir
 from .snapshot_decode_declarations import decode_declarations
@@ -149,6 +150,10 @@ def decode_snapshot(
     # flat document from any schema version cannot collide with it.
     if is_sectioned_document(d):
         d = from_sectioned_document(d, defer_graph=True)
+    # ADR-062 D2: read the generation stamp, report drift through the shared
+    # reader-compatibility owner, and migrate spellings an older extractor
+    # generation wrote (storage/generation_migrations.py).
+    d, _fact_generations, _generation_notices = migrate_and_describe(d)
     # Inspect schema version for future migration hooks.
     # Snapshots without schema_version are treated as v1 (pre-versioning format).
     # Currently only v1 and v2 exist and have the same on-disk layout, so no
@@ -566,6 +571,8 @@ def decode_snapshot(
     # ADR-063 6B: the same call also fills record layout a pre-v53 IR never
     # recorded, from the snapshot's own records.
     finalize_snapshot_semantic_ir(snap)
+    snap.fact_generations = _fact_generations
+    snap.load_notices = (*snap.load_notices, *_generation_notices)
     return snap, _schema_version
 
 

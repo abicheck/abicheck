@@ -373,8 +373,21 @@ def add_suppression_audit(d: dict[str, Any], result: DiffResult) -> None:
     # A rule the suppression pass matched -- including on a consumer-scoped
     # finding the ledger does not carry -- was never stale, as before.
     matched_elsewhere = {i for i, count in audit.match_counts.items() if count > 0}
+    # ``rule_id`` of an id-less rule is an opaque ``rule-<sha256>`` token
+    # (ADR-067 D3); the stale list is read by a reviewer, so it renders such a
+    # rule by its readable canonical identity (its selectors and gates), and a
+    # rule with a user ``id:`` by that id.
+    from .policy.rule_identity import rule_id_of, rule_identity
+
+    readable: dict[str, str] = {}
+    for suppression in ledger.suppression_inventories:
+        for rule in getattr(suppression, "rules", ()) or ():
+            identity = rule_identity(rule)
+            rid = rule_id_of(rule)
+            if identity is not None and rid != getattr(rule, "id", None):
+                readable.setdefault(rid, identity)
     stale = [
-        row.rule_id
+        readable.get(row.rule_id, row.rule_id)
         for row in configured_rule_rows(result, ledger=ledger)
         if row.kind == KIND_SUPPRESSION
         and row.status in (STATUS_UNUSED, STATUS_NOT_EVALUATED, STATUS_SHADOWED_ONLY)
