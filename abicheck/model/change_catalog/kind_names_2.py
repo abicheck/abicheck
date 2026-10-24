@@ -570,4 +570,9 @@ KIND_NAMES_2: tuple[tuple[str, str, str | None], ...] = (
         "declaration_renamed",
         "G31 Phase B (ADR-048): graph-node reconciliation outcomes, distinct -- from a plain add+remove pair in the L5 graph diff. Emitted only when -- buildsource.graph_reconcile.reconcile_graph_diff finds an unambiguous -- (canonical-id, alias, or unique-structural-context) old/new match for -- a declaration/type that the raw node-id diff would otherwise report as -- an unrelated removal + addition. Pure enrichment/classification -- metadata — never overrides or suppresses an artifact-proven finding -- (ADR-028 D3); all default to RISK (COMPATIBLE_WITH_RISK). -- graph-reconciled: same entity, new qualified name → RISK",
     ),
+    (
+        "TARGET_ISA_CHANGED",
+        "target_isa_changed",
+        "the compiled instruction-set target differs between the two builds (-march / -m<feature> from DW_AT_producer, GNU_PROPERTY_X86_ISA_1_NEEDED) — a raised requirement means CPUs without the new features can no longer run the library, and layout/mangling findings may be its consequences → RISK",
+    ),
 )
