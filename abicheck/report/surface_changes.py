@@ -50,6 +50,7 @@ from ..change_registry import ChangeEntity
 from ..policy.evaluate import effective_kind_sets
 from .change_operation import entity_for_change, operation_for_kind
 from .finding import ReportFinding, build_report_findings, report_findings_for
+from .markdown_budget import clip, clip_name
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from ..checker_types import DiffResult
@@ -267,9 +268,10 @@ def add_surface_changes(
 
 
 def _declaration_line(entry: SurfaceChangeEntry) -> str:
-    old = entry.old_declaration
-    new = entry.new_declaration
-    if old and new and old != new:
+    # Clipped by the shared Markdown budget; JSON keeps every value whole.
+    old = entry.old_declaration and clip_name(entry.old_declaration)
+    new = entry.new_declaration and clip_name(entry.new_declaration)
+    if old and new and entry.old_declaration != entry.new_declaration:
         decl = f"`{old}` → `{new}`"
     elif new:
         decl = f"`{new}`"
@@ -277,9 +279,9 @@ def _declaration_line(entry: SurfaceChangeEntry) -> str:
         decl = f"`{old}`"
     else:
         decl = entry.description
-    loc = f" ({entry.source_location})" if entry.source_location else ""
-    member = f"`{entry.library}` · " if entry.library is not None else ""
-    return f"- {member}**{entry.symbol}** — {decl}{loc}"
+    loc = f" ({clip_name(entry.source_location)})" if entry.source_location else ""
+    member = f"`{clip_name(entry.library)}` · " if entry.library is not None else ""
+    return clip(f"- {member}**{clip_name(entry.symbol)}** — {decl}{loc}")
 
 
 #: Per-group cap on the compact/bounded rendering of this section.

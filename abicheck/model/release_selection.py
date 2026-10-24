@@ -15,8 +15,7 @@
 
 """ADR-065 S1: an explicit, identity-keyed release member *selection*.
 
-Before this module, the release fan-out (``cli_compare_release_helpers.
-_match_release_keys``) only ever inferred what to compare from filename
+Before this module, the release fan-out (``workflows.release_inputs.match_release_keys``) only ever inferred what to compare from filename
 set-difference between two discovered directories -- there was no way for a
 caller to *declare* "these are the members I expect", independent of what a
 directory listing happens to contain. That inference is still how members

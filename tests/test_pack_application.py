@@ -957,7 +957,7 @@ class TestOnlyAppliedFieldsAreAccepted:
         (the single-pair version, above): a bare `gate.severity.<category>`
         assignment -- no explicit `gate.exit_code_scheme` -- still moves the
         release onto the severity scheme, via
-        `cli_compare_release_helpers.apply_release_gate_pack`'s fallback to
+        `policy.release_gate_options.apply_release_gate_pack`'s fallback to
         the canonical resolver's own already-decided `resolved_exit_code_
         scheme`, exactly as `pack_application.apply_to_compare_config` does
         for a single-pair `compare`."""

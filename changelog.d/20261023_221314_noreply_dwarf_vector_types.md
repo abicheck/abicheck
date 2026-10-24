@@ -1,0 +1,3 @@
+### Fixed
+
+- **GCC/Clang vector types are spelled from DWARF with their lane count** — a `DW_AT_GNU_vector` array (`__attribute__((vector_size(N)))`, `__m256`, `ext_vector_type`) was recorded as a plain `T[]`, so its vector-ness and total size were invisible and an array↔vector swap was not distinguishable from an array. It now spells as `T __attribute__((vector_size(N)))` with `N` in bytes, computed from the subrange when the DIE carries no `DW_AT_byte_size`. Element-type and lane-count changes at the same total size are reported as typedef base changes, and a by-value parameter or field swap between a vector and an array is reported as a type or parameter change.

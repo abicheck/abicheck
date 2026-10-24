@@ -307,7 +307,7 @@ def load_snapshot(path: str | Path) -> AbiSnapshot:
 # a lazy `__getattr__` instead of importing it back. Unlike that
 # facade, these are real typed `def`s rather than a blanket module
 # `__getattr__`: these four names are called with real argument/return types
-# by other first-party modules (`cli_compare_release_helpers.py`, ...), and
+# by other first-party modules (`storage/bundle_facts_package.py`, ...), and
 # `__getattr__(...) -> Any` would
 # silently erase that checking for every caller reaching them through this
 # module's documented `from abicheck.serialization import ...` path (Codex

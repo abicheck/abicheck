@@ -363,8 +363,9 @@ def _binary_marker_paths(diff_text: str) -> set[str]:
         m = _BINARY_MARKER.match(line)
         if not m:
             continue
-        for group in m.group(1), m.group(2):
-            paths.add(group[2:] if group.startswith(("a/", "b/")) else group)
+        for group in m.group(1), m.group(2):  # /dev/null: an add/delete's missing side
+            if group != "/dev/null":
+                paths.add(group[2:] if group.startswith(("a/", "b/")) else group)
     return paths
 
 

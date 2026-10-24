@@ -113,7 +113,12 @@ class TestDemangleTriState:
         # Mirrors the real contract since plan slice 7o: a demangled name
         # keeps its exact mangled spelling beside it, so human output stays
         # copyable and no `no-demangle` toggle is needed.
-        def _stub(text: str, *, escape_table_pipes: bool = False) -> str:
+        def _stub(
+            text: str,
+            *,
+            escape_table_pipes: bool = False,
+            max_demangled: int | None = None,
+        ) -> str:
             return text.replace("_Z3foov", "foo() [_Z3foov]")
 
         # A stub whose signature drifts from the real one swallows the call

@@ -392,6 +392,16 @@ COMPARE_OPTION_RULINGS: dict[str, OptionRuling] = {
         "override is the right shape. It changes execution only -- never "
         "the snapshots, findings, verdict or exit code."
     ),
+    "--require-same-generation": _keep(
+        "ADR-062 D2 (plan H1 step 4): the strict counterpart of the default "
+        "generation-drift demotion -- refuse (exit 64) a pair whose operands "
+        "were extracted by different abicheck extractor generations. Whether "
+        "*this* pair mixes a stored older baseline with a fresh dump is a "
+        "property of the operands this run was given, not of the project. "
+        "Not one-for-one (no config key or other flag spells it) and not an "
+        "analysis-disabling hatch: it only adds a refusal, never removes a "
+        "finding or a detector."
+    ),
     "--diagnostic-comparison": _keep(
         "ADR-050 D2's sanctioned escape hatch, and the calibrated, bounded "
         "kind D5 explicitly permits: it never disables analysis, it "

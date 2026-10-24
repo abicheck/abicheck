@@ -34,7 +34,13 @@ the "Adding a new ChangeKind" procedure names those five modules by name.
 
 from __future__ import annotations
 
-from .registry import ChangeEntity, ChangeKindMeta, ChangeOperation, Verdict
+from .registry import (
+    ChangeEntity,
+    ChangeKindMeta,
+    ChangeOperation,
+    ContractSubject,
+    Verdict,
+)
 
 _B = Verdict.BREAKING
 _C = Verdict.COMPATIBLE
@@ -43,6 +49,7 @@ _R = Verdict.COMPATIBLE_WITH_RISK
 _E = ChangeKindMeta
 _ENT = ChangeEntity
 _OP = ChangeOperation
+_CS = ContractSubject
 
 TYPES_ENTRIES_1: list[ChangeKindMeta] = [
     _E(
@@ -55,6 +62,7 @@ TYPES_ENTRIES_1: list[ChangeKindMeta] = [
         "diverge and old code is miscompiled.",
         description_template="_Atomic {detail} on {name}: {old} → {new}. _Atomic size/alignment may differ from the unqualified type and varies across compilers.",
         entity=_ENT.TYPE,
+        contract_subject=_CS.DECLARATION,
         entity_from_field="entity_discriminator",
         operation=_OP.MODIFIED,
     ),
@@ -68,6 +76,7 @@ TYPES_ENTRIES_1: list[ChangeKindMeta] = [
         "binaries read the wrong addresses.",
         description_template="Base class '{detail}' moved within '{name}' ({old} → {new} bits). The `this`-pointer adjustment for that base and the offset of every field after it shift; existing binaries read the wrong addresses.",
         entity=_ENT.TYPE,
+        contract_subject=_CS.DECLARATION,
         operation=_OP.MODIFIED,
     ),
     _E(
@@ -86,6 +95,7 @@ TYPES_ENTRIES_1: list[ChangeKindMeta] = [
         "through the wrong offset.",
         description_template="Base class order reordered: {name} — this-pointer adjustments changed",
         entity=_ENT.TYPE,
+        contract_subject=_CS.DECLARATION,
         operation=_OP.MODIFIED,
     ),
     _E(
@@ -99,6 +109,7 @@ TYPES_ENTRIES_1: list[ChangeKindMeta] = [
         "subobject incorrectly.",
         description_template="Base class virtual inheritance changed: {name} — {detail}",
         entity=_ENT.TYPE,
+        contract_subject=_CS.DECLARATION,
         operation=_OP.MODIFIED,
     ),
     _E(
@@ -112,6 +123,7 @@ TYPES_ENTRIES_1: list[ChangeKindMeta] = [
         "incompatible internal contracts and corrupt at the first cross-"
         "library call.",
         entity=_ENT.BUILD,
+        contract_subject=_CS.BUILD_FACT,
         operation=_OP.MODIFIED,
     ),
     _E(
@@ -126,6 +138,7 @@ TYPES_ENTRIES_1: list[ChangeKindMeta] = [
         "took the CPO's address.",
         description_template="Public name '{name}' was a {old} in old and is a {new} in new. Call syntax preserved; decltype, extern templates, and trait specializations break.",
         entity=_ENT.FUNCTION,
+        contract_subject=_CS.DECLARATION,
         entity_from_field="entity_discriminator",
         operation=_OP.MODIFIED,
     ),
@@ -140,6 +153,7 @@ TYPES_ENTRIES_1: list[ChangeKindMeta] = [
         "stems.",
         description_template="CPU dispatch ISA '{name}' tier removed: {detail}. Runtime dispatcher continues to work; consumers that pinned directly to '{name}' symbols get unresolved references at load time.",
         entity=_ENT.BINARY,
+        contract_subject=_CS.BINARY_WIDE,
         operation=_OP.REMOVED,
     ),
     _E(
@@ -155,6 +169,7 @@ TYPES_ENTRIES_1: list[ChangeKindMeta] = [
         "ARE part of the substituted type and affect mangling.",
         description_template="Template instantiation '{name}' substitutes to different arguments than its surviving sibling '{detail}'. This is consistent with a change to a default template argument in the declaring header: consumer source compiles unchanged, but the substituted mangled symbol differs. Consumers built against the old default get unresolved symbols.",
         entity=_ENT.FUNCTION,
+        contract_subject=_CS.DECLARATION,
         operation=_OP.MODIFIED,
     ),
     _E(
@@ -169,6 +184,7 @@ TYPES_ENTRIES_1: list[ChangeKindMeta] = [
         "only the enum-to-integer direction changes here.)",
         description_template="Enum became scoped: {name} — unqualified enumerator lookup and implicit int conversion no longer compile",
         entity=_ENT.ENUM,
+        contract_subject=_CS.DECLARATION,
         operation=_OP.MODIFIED,
     ),
     _E(
@@ -184,6 +200,7 @@ TYPES_ENTRIES_1: list[ChangeKindMeta] = [
         "has this turn a previously clean build into a failing one.",
         description_template="Enum marked deprecated: {name} ({detail})",
         entity=_ENT.ENUM,
+        contract_subject=_CS.DECLARATION,
         operation=_OP.MODIFIED,
     ),
     _E(
@@ -193,6 +210,7 @@ TYPES_ENTRIES_1: list[ChangeKindMeta] = [
         "compiler warning stops, with no effect on the enum's ABI.",
         description_template="Enum no longer marked deprecated: {name}",
         entity=_ENT.ENUM,
+        contract_subject=_CS.DECLARATION,
         operation=_OP.MODIFIED,
     ),
     _E(
@@ -201,6 +219,7 @@ TYPES_ENTRIES_1: list[ChangeKindMeta] = [
         impact="Sentinel/MAX value changed; old code using it for array sizes allocates wrong amount.",
         description_template="Enum member value changed: {name}::{detail}",
         entity=_ENT.ENUM,
+        contract_subject=_CS.DECLARATION,
         operation=_OP.MODIFIED,
     ),
     _E(
@@ -215,6 +234,7 @@ TYPES_ENTRIES_1: list[ChangeKindMeta] = [
         "review rather than a hard break.",
         description_template="Enum lost scoped status: {name} — implicit int conversion silently reappears",
         entity=_ENT.ENUM,
+        contract_subject=_CS.DECLARATION,
         operation=_OP.MODIFIED,
     ),
     _E(
@@ -224,6 +244,7 @@ TYPES_ENTRIES_1: list[ChangeKindMeta] = [
         impact="New enumerator may shift subsequent values in non-fixed enums; switch defaults may miss the new case.",
         description_template="Enum member added: {name}::{detail}",
         entity=_ENT.ENUM,
+        contract_subject=_CS.DECLARATION,
         operation=_OP.ADDED,
     ),
     _E(
@@ -232,6 +253,7 @@ TYPES_ENTRIES_1: list[ChangeKindMeta] = [
         impact="Old code uses a constant that no longer exists; compile error for source, stale value for binaries.",
         description_template="Enum member removed: {name}::{detail}",
         entity=_ENT.ENUM,
+        contract_subject=_CS.DECLARATION,
         operation=_OP.REMOVED,
     ),
     _E(
@@ -241,6 +263,7 @@ TYPES_ENTRIES_1: list[ChangeKindMeta] = [
         policy_overrides={"sdk_vendor": _C},
         description_template="Enum member renamed: {name}::{old} → {new} (value={detail})",
         entity=_ENT.ENUM,
+        contract_subject=_CS.DECLARATION,
         operation=_OP.MODIFIED,
     ),
     _E(
@@ -249,6 +272,7 @@ TYPES_ENTRIES_1: list[ChangeKindMeta] = [
         impact="Old binaries use stale numeric values; logic comparisons and switch statements silently break.",
         description_template="Enum member value changed: {name}::{detail}",
         entity=_ENT.ENUM,
+        contract_subject=_CS.DECLARATION,
         operation=_OP.MODIFIED,
     ),
     _E(
@@ -262,6 +286,7 @@ TYPES_ENTRIES_1: list[ChangeKindMeta] = [
         "are encouraged to migrate to the stable name.",
         description_template="Experimental {detail} '{old}' graduated to stable name '{new}'; experimental alias retained.",
         entity=_ENT.TYPE,
+        contract_subject=_CS.DECLARATION,
         entity_from_field="entity_discriminator",
         operation=_OP.ADDED,
     ),
@@ -278,6 +303,7 @@ TYPES_ENTRIES_1: list[ChangeKindMeta] = [
         "users see whether a replacement was published.",
         description_template="Experimental {detail} '{old}' was removed and no {detail} with leaf '{name}' was published at a stable namespace in the new headers.",
         entity=_ENT.TYPE,
+        contract_subject=_CS.DECLARATION,
         entity_from_field="entity_discriminator",
         operation=_OP.REMOVED,
     ),
@@ -294,6 +320,7 @@ TYPES_ENTRIES_1: list[ChangeKindMeta] = [
         "compiles.",
         description_template="Field became const: {name}::{detail}",
         entity=_ENT.TYPE,
+        contract_subject=_CS.DECLARATION,
         operation=_OP.MODIFIED,
     ),
     _E(
@@ -310,6 +337,7 @@ TYPES_ENTRIES_1: list[ChangeKindMeta] = [
         "rely on.",
         description_template="Field became mutable: {name}::{detail}",
         entity=_ENT.TYPE,
+        contract_subject=_CS.DECLARATION,
         operation=_OP.MODIFIED,
     ),
     _E(
@@ -327,6 +355,7 @@ TYPES_ENTRIES_1: list[ChangeKindMeta] = [
         "compiler could cache a read.",
         description_template="Field became volatile: {name}::{detail}",
         entity=_ENT.TYPE,
+        contract_subject=_CS.DECLARATION,
         operation=_OP.MODIFIED,
     ),
     _E(
@@ -335,6 +364,7 @@ TYPES_ENTRIES_1: list[ChangeKindMeta] = [
         impact="Bit-field width or offset changed; old code reads/writes wrong bits.",
         description_template="Bitfield layout changed: {name}::{detail}",
         entity=_ENT.TYPE,
+        contract_subject=_CS.DECLARATION,
         operation=_OP.MODIFIED,
     ),
     _E(
@@ -345,6 +375,7 @@ TYPES_ENTRIES_1: list[ChangeKindMeta] = [
         "new header silently pick up the new value.",
         description_template="Field default initializer changed: {name}::{detail} ({old} → {new})",
         entity=_ENT.TYPE,
+        contract_subject=_CS.DECLARATION,
         operation=_OP.MODIFIED,
     ),
     _E(
@@ -361,6 +392,7 @@ TYPES_ENTRIES_1: list[ChangeKindMeta] = [
         "left indeterminate.)",
         description_template="Field lost its default initializer: {name}::{detail}",
         entity=_ENT.TYPE,
+        contract_subject=_CS.DECLARATION,
         operation=_OP.MODIFIED,
     ),
     _E(
@@ -377,6 +409,7 @@ TYPES_ENTRIES_1: list[ChangeKindMeta] = [
         "previously clean build into a failing one.",
         description_template="Field marked deprecated: {name}::{detail} ({new})",
         entity=_ENT.TYPE,
+        contract_subject=_CS.DECLARATION,
         operation=_OP.MODIFIED,
     ),
     _E(
@@ -386,6 +419,7 @@ TYPES_ENTRIES_1: list[ChangeKindMeta] = [
         "warning stops, with no effect on the field's layout.",
         description_template="Field no longer marked deprecated: {name}::{detail}",
         entity=_ENT.TYPE,
+        contract_subject=_CS.DECLARATION,
         operation=_OP.MODIFIED,
     ),
     _E(
@@ -401,6 +435,7 @@ TYPES_ENTRIES_1: list[ChangeKindMeta] = [
         "access to it no longer gets that guarantee.",
         description_template="Field lost const: {name}::{detail}",
         entity=_ENT.TYPE,
+        contract_subject=_CS.DECLARATION,
         operation=_OP.MODIFIED,
     ),
     _E(
@@ -416,6 +451,7 @@ TYPES_ENTRIES_1: list[ChangeKindMeta] = [
         "compiles.",
         description_template="Field lost mutable: {name}::{detail}",
         entity=_ENT.TYPE,
+        contract_subject=_CS.DECLARATION,
         operation=_OP.MODIFIED,
     ),
     _E(
@@ -433,6 +469,7 @@ TYPES_ENTRIES_1: list[ChangeKindMeta] = [
         "against the new declaration.",
         description_template="Field lost volatile: {name}::{detail}",
         entity=_ENT.TYPE,
+        contract_subject=_CS.DECLARATION,
         operation=_OP.MODIFIED,
     ),
     _E(
@@ -442,6 +479,7 @@ TYPES_ENTRIES_1: list[ChangeKindMeta] = [
         policy_overrides={"sdk_vendor": _C},
         description_template="Field renamed: {name}::{old} → {new}",
         entity=_ENT.TYPE,
+        contract_subject=_CS.DECLARATION,
         operation=_OP.MODIFIED,
     ),
     _E(
@@ -452,6 +490,7 @@ TYPES_ENTRIES_1: list[ChangeKindMeta] = [
         "binary layout is unchanged (FAM has zero static size), but runtime "
         "allocation patterns may differ.",
         entity=_ENT.TYPE,
+        contract_subject=_CS.DECLARATION,
         operation=_OP.MODIFIED,
     ),
     _E(
@@ -460,6 +499,7 @@ TYPES_ENTRIES_1: list[ChangeKindMeta] = [
         impact="const/volatile on 'this' changes the mangled name; old binaries link to the wrong symbol.",
         description_template="CV qualifier changed: {name}",
         entity=_ENT.FUNCTION,
+        contract_subject=_CS.DECLARATION,
         operation=_OP.MODIFIED,
     ),
     _E(
@@ -468,6 +508,7 @@ TYPES_ENTRIES_1: list[ChangeKindMeta] = [
         impact="Old subclasses don't implement the pure virtual; instantiation causes linker error or UB.",
         description_template="Function became pure virtual: {name}",
         entity=_ENT.FUNCTION,
+        contract_subject=_CS.DECLARATION,
         operation=_OP.MODIFIED,
     ),
     _E(
@@ -478,6 +519,7 @@ TYPES_ENTRIES_1: list[ChangeKindMeta] = [
         "link to the wrong symbol or fail to resolve it.",
         description_template="Ref-qualifier changed: {name} ({old} → {new})",
         entity=_ENT.FUNCTION,
+        contract_subject=_CS.DECLARATION,
         operation=_OP.MODIFIED,
     ),
     _E(
@@ -486,6 +528,7 @@ TYPES_ENTRIES_1: list[ChangeKindMeta] = [
         impact="Static/non-static transition changes calling convention (implicit this pointer); ABI mismatch.",
         description_template="Static qualifier changed: {name}",
         entity=_ENT.FUNCTION,
+        contract_subject=_CS.DECLARATION,
         operation=_OP.MODIFIED,
     ),
     _E(
@@ -494,6 +537,7 @@ TYPES_ENTRIES_1: list[ChangeKindMeta] = [
         impact="Concrete virtual became pure; old binaries calling it get unresolved dispatch.",
         description_template="Function became pure virtual: {name}",
         entity=_ENT.FUNCTION,
+        contract_subject=_CS.DECLARATION,
         operation=_OP.MODIFIED,
     ),
     _E(
@@ -504,6 +548,7 @@ TYPES_ENTRIES_1: list[ChangeKindMeta] = [
         "callers can observe. Code that stored or compared the old handle "
         "representation now operates on an incompatible token.",
         entity=_ENT.TYPE,
+        contract_subject=_CS.DECLARATION,
         operation=_OP.MODIFIED,
     ),
     _E(
@@ -519,6 +564,7 @@ TYPES_ENTRIES_1: list[ChangeKindMeta] = [
         "longer exists), producing silent wrong data or crashes.",
         description_template="Public class '{name}' has inline accessors {detail} by name. Field '{old}' was renamed to '{new}' in the new internal layout. Consumers compiled against the old header have the old member name baked into their inline accessor bodies; running against the new library reads the wrong offset or fails to resolve the member.",
         entity=_ENT.TYPE,
+        contract_subject=_CS.DECLARATION,
         operation=_OP.MODIFIED,
     ),
     _E(
@@ -534,6 +580,7 @@ TYPES_ENTRIES_1: list[ChangeKindMeta] = [
         "when the library ships no .so).",
         description_template="Inline namespace version bumped: '{old}' → '{new}' (version segment changed from {detail}); mangled names change so old and new TUs of the same program ODR-violate.",
         entity=_ENT.TYPE,
+        contract_subject=_CS.DECLARATION,
         entity_from_field="entity_discriminator",
         operation=_OP.MODIFIED,
     ),
@@ -547,6 +594,7 @@ TYPES_ENTRIES_1: list[ChangeKindMeta] = [
         "the public header's `extern template` declarations.",
         description_template="Template instantiation '{name}' was exported by the old library but is missing from the new binary. Other instantiations of '{detail}' still exist, so the public header very likely still advertises this one. Consumers built against the old header link cleanly but fail at load time with an undefined-symbol error.",
         entity=_ENT.FUNCTION,
+        contract_subject=_CS.DECLARATION,
         operation=_OP.REMOVED,
     ),
     _E(
@@ -559,6 +607,7 @@ TYPES_ENTRIES_1: list[ChangeKindMeta] = [
         "headers) to confirm.",
         description_template="'{name}' layout could not be verified: one side carries a layout descriptor but the other has no layout evidence (no size/offsets). A real layout change cannot be ruled out — rebuild with debug info (or supply headers) to confirm. Informational and non-escalating.",
         entity=_ENT.ANALYSIS,
+        contract_subject=_CS.ANALYSIS,
         operation=_OP.MODIFIED,
     ),
     _E(
@@ -571,6 +620,7 @@ TYPES_ENTRIES_1: list[ChangeKindMeta] = [
         "libc++ ABI version.",
         description_template="libc++ ABI version changed ({old} → {new}). libc++ selects incompatible internal layouts for std:: types via an inline namespace (std::__{old} vs std::__{new}); types embedding them by value are laid out differently. Rebuild consumers against the matching libc++ ABI version.",
         entity=_ENT.BINARY,
+        contract_subject=_CS.BINARY_WIDE,
         operation=_OP.MODIFIED,
     ),
     _E(
@@ -583,6 +633,7 @@ TYPES_ENTRIES_1: list[ChangeKindMeta] = [
         "instantiation tuple differs.",
         description_template="Template '{name}' minimum effective argument count grew from {old} to {new}. Consumers that wrote '{name}<...{old} args...>' without supplying the new parameter no longer compile.",
         entity=_ENT.FUNCTION,
+        contract_subject=_CS.DECLARATION,
         entity_from_field="entity_discriminator",
         operation=_OP.MODIFIED,
     ),
@@ -597,6 +648,7 @@ TYPES_ENTRIES_1: list[ChangeKindMeta] = [
         "size and fields have joined the ABI and any later change to them is "
         "a hard break.",
         entity=_ENT.TYPE,
+        contract_subject=_CS.DECLARATION,
         operation=_OP.MODIFIED,
     ),
     _E(
@@ -614,6 +666,7 @@ TYPES_ENTRIES_1: list[ChangeKindMeta] = [
         "strict source-compatibility profile.",
         description_template="Overload added to previously non-overloaded function: {name} — `&{name}` becomes ambiguous and overload resolution may change",
         entity=_ENT.FUNCTION,
+        contract_subject=_CS.DECLARATION,
         operation=_OP.ADDED,
     ),
     _E(
@@ -628,6 +681,7 @@ TYPES_ENTRIES_1: list[ChangeKindMeta] = [
         "runs different code.",
         description_template="Overload set for '{name}' changed: {detail}. Call sites that previously resolved to a removed overload may silently re-route to a different overload.",
         entity=_ENT.FUNCTION,
+        contract_subject=_CS.DECLARATION,
         operation=_OP.MODIFIED,
     ),
     _E(
@@ -639,6 +693,7 @@ TYPES_ENTRIES_1: list[ChangeKindMeta] = [
         "derived destructor never runs and the wrong amount of memory may be "
         "freed. Declare the base destructor `virtual`.",
         entity=_ENT.TYPE,
+        contract_subject=_CS.DECLARATION,
         operation=_OP.MODIFIED,
     ),
     _E(
@@ -648,6 +703,7 @@ TYPES_ENTRIES_1: list[ChangeKindMeta] = [
         policy_overrides={"sdk_vendor": _C},
         description_template="Const method overload removed: {name} (non-const version still exists)",
         entity=_ENT.FUNCTION,
+        contract_subject=_CS.DECLARATION,
         operation=_OP.REMOVED,
     ),
     _E(
@@ -663,6 +719,7 @@ TYPES_ENTRIES_1: list[ChangeKindMeta] = [
         "DWARF — the binary-only analogue of TYPE_BASE_CHANGED.",
         description_template="RTTI typeinfo for '{name}' changed size: {old} → {new} bytes ({detail}). The base-class shape changed, which shifts this-pointer adjustments, member offsets, and the vtable. Detected from the ELF symbol size without debug info.",
         entity=_ENT.TYPE,
+        contract_subject=_CS.DECLARATION,
         operation=_OP.MODIFIED,
     ),
     _E(
@@ -681,6 +738,7 @@ TYPES_ENTRIES_1: list[ChangeKindMeta] = [
         "which only sees the unchanged derived class — cannot.",
         description_template="Secondary vtable groups changed for '{name}': {old} → {new} — a base's polymorphism changed, restructuring the derived vtable",
         entity=_ENT.TYPE,
+        contract_subject=_CS.DECLARATION,
         operation=_OP.MODIFIED,
     ),
     _E(
@@ -699,6 +757,7 @@ TYPES_ENTRIES_1: list[ChangeKindMeta] = [
         policy_overrides={"sdk_vendor": _C},
         description_template="Aggregate kind changed: {name} ({old} → {new})",
         entity=_ENT.TYPE,
+        contract_subject=_CS.DECLARATION,
         operation=_OP.MODIFIED,
     ),
     _E(
@@ -710,79 +769,7 @@ TYPES_ENTRIES_1: list[ChangeKindMeta] = [
         "rules change; review code that relies on the C-compatible layout.",
         description_template="'{name}' is no longer standard-layout. `offsetof` and C interoperability are no longer guaranteed and tail-padding reuse rules change; review code relying on the C-compatible layout.",
         entity=_ENT.TYPE,
-        operation=_OP.MODIFIED,
-    ),
-    _E(
-        "std_reexport_removed",
-        _A,
-        impact="A public header used to re-export a name from `std::` "
-        "(e.g. `using std::execution::par;`) and the re-export was "
-        "deleted in the new headers. Consumer source that referenced "
-        "the library-qualified name (`lib::par`) no longer compiles "
-        "even though the underlying `std::par` is still available. "
-        "Source break only — no symbol disappears, but every TU that "
-        "named the library alias must be edited.",
-        description_template="Public re-export '{name}' of standard-library entity '{detail}' was removed. Consumer code that named '{name}' no longer compiles; '{detail}' is still available under its std:: name.",
-        entity=_ENT.FUNCTION,
-        operation=_OP.REMOVED,
-    ),
-    _E(
-        "stdlib_implementation_changed",
-        _R,
-        impact="The two artifacts were built against different C++ standard-library "
-        "implementations (e.g. libstdc++ vs libc++, or vs MSVC STL). The "
-        "standard does not guarantee ABI compatibility across implementations: "
-        "any public type embedding a std:: container/string by value gets a "
-        "different layout, and inline std:: code can ODR-conflict. Pin a single "
-        "implementation or rebuild consumers against the matching runtime.",
-        entity=_ENT.BINARY,
-        operation=_OP.MODIFIED,
-    ),
-    _E(
-        "struct_alignment_changed",
-        _B,
-        impact="Struct alignment changed; may cause misaligned access in embedded structs.",
-        description_template="Struct alignment changed: {name} ({old} → {new})",
-        entity=_ENT.TYPE,
-        operation=_OP.MODIFIED,
-    ),
-    _E(
-        "struct_field_offset_changed",
-        _B,
-        impact="Field moved to different offset; old code accesses wrong memory.",
-        description_template="Field offset changed: {name}::{detail} (+{old} → +{new})",
-        entity=_ENT.TYPE,
-        operation=_OP.MODIFIED,
-    ),
-    _E(
-        "struct_field_removed",
-        _B,
-        impact="Field removed from struct; old code accessing it reads/writes garbage.",
-        description_template="Struct field removed: {name}::{detail}",
-        entity=_ENT.TYPE,
-        operation=_OP.REMOVED,
-    ),
-    _E(
-        "struct_field_type_changed",
-        _B,
-        impact="Field type changed in binary; old code misinterprets the field data.",
-        description_template="Field type changed: {name}::{detail} {old} → {new}",
-        entity=_ENT.TYPE,
-        operation=_OP.MODIFIED,
-    ),
-    _E(
-        "struct_packing_changed",
-        _B,
-        impact="Packing attribute changed; field offsets differ from what old code expects.",
-        entity=_ENT.TYPE,
-        operation=_OP.MODIFIED,
-    ),
-    _E(
-        "struct_size_changed",
-        _B,
-        impact="sizeof(T) changed in debug info; confirms layout break visible at binary level.",
-        description_template="Struct size changed: {name} ({old} → {new} bytes)",
-        entity=_ENT.TYPE,
+        contract_subject=_CS.DECLARATION,
         operation=_OP.MODIFIED,
     ),
 ]

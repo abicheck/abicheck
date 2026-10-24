@@ -24,6 +24,8 @@ variables and for mangled C++ functions.
 
 from __future__ import annotations
 
+import shutil
+
 import pytest
 
 from abicheck.checker import compare
@@ -32,7 +34,14 @@ from abicheck.compare.finding_identity import (
     SymbolIdentityIndex,
     resolve_function_identity,
 )
+from abicheck.demangle import demangle
 from abicheck.model import AbiSnapshot, Function, Param, Variable, Visibility
+
+_HAS_DEMANGLER = demangle("_Z1fv") == "f()"
+needs_demangler = pytest.mark.skipif(
+    not _HAS_DEMANGLER and shutil.which("c++filt") is None,
+    reason="the C++ identity case needs cxxfilt or c++filt",
+)
 
 
 def _func(
@@ -176,15 +185,19 @@ class TestFunctionMatchingThroughTheIndex:
         )
         assert ChangeKind.FUNC_REMOVED in _kinds(old, new)
 
+    @needs_demangler
     def test_a_cxx_old_side_does_not_match_a_cxx_peer_by_name(self):
-        # A changed mangled name on a C++ function IS a removal + addition:
-        # the old export is genuinely gone. Only an extern-C candidate is
-        # eligible for the name fallback.
+        # A changed mangled name on a C++ function is not an identity match:
+        # the old export is genuinely gone, and only an extern-C candidate is
+        # eligible for the name fallback. The one removal and one addition of
+        # the same declared name are reported as one parameter change
+        # (compare/parameter_replacement.py); the identity pairing is unchanged.
         old = _snapshot([_func("f", "_Z1fv")])
         new = _snapshot([_func("f", "_Z1fi", params=[Param(name="a", type="int")])])
         kinds = _kinds(old, new)
-        assert ChangeKind.FUNC_REMOVED in kinds
-        assert ChangeKind.FUNC_ADDED in kinds
+        assert ChangeKind.FUNC_PARAMS_CHANGED in kinds
+        assert ChangeKind.FUNC_REMOVED not in kinds
+        assert ChangeKind.FUNC_ADDED not in kinds
 
     def test_a_name_matched_peer_is_not_also_reported_as_added(self):
         old = _snapshot([_func("f", "f", extern_c=True)])

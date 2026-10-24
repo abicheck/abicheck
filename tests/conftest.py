@@ -333,6 +333,19 @@ def _pin_host_memory_probe(
 
 
 @pytest.fixture(autouse=True)
+def _model_warning_hygiene(request: pytest.FixtureRequest) -> Iterator[None]:
+    """Opt-in gate (``@pytest.mark.model_warning_hygiene``): an unexpected
+    ``abicheck.model.*`` WARNING fails the test (``_model_warning_hygiene``)."""
+    if request.node.get_closest_marker("model_warning_hygiene") is None:
+        yield
+        return
+    from tests._model_warning_hygiene import model_warning_gate
+
+    with model_warning_gate():
+        yield
+
+
+@pytest.fixture(autouse=True)
 def _isolate_ast_memo() -> Iterator[None]:
     """Clear the in-process clang-AST memo slot (``dumper_cache._ast_memo_slot``,
     G31 Phase C AST reuse) before and after every test.

@@ -1,4 +1,5 @@
 # Copyright 2026 Nikolay Petrov
+# SPDX-License-Identifier: Apache-2.0
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -12,245 +13,183 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""``BuildConfig``'s (``.abicheck.yml``) strict-schema subkey-type tables
-*and* the type-dispatch logic that checks a value against them.
+"""Generic ``.abicheck.yml`` key-table engine (strict schema, ADR-043).
 
-Split out of ``inline.py`` (which sits at the AI-readiness 2000-line hard
-cap) purely to keep it under that cap — this module has no other reason to
-exist independently and is imported only by ``inline.py``'s
-``BuildConfig._scalar_findings``/``_subkey_findings`` (ADR-043 CLI reset: no
-separate ``config validate`` command — every real ingestion path enforces
-this).
+``BuildConfig``'s recognized keys are declared once, as a table of
+:class:`KeySpec` rows in ``build_config.py``. This module is the mechanism
+that table is run through: it checks a raw mapping against the table
+(unknown keys, wrong YAML types, whole-block validators), reads the values
+into ``BuildConfig`` constructor arguments, and dumps the non-default values
+back out. Adding a key is one table row, not a dataclass-side ``from_dict``
+read, ``to_dict`` emission, registry entry and type-table entry.
 
-Block subkeys ``BuildConfig.from_dict()`` parses with
-``_opt_bool``/``_opt_str``/``_str``/``_strs`` — a value of the wrong type
-there (e.g. the YAML string "false" for a boolean, or a bare number for a
-string/list field) must be rejected outright rather than silently
-dropped/coerced. Keep these tables in sync with ``BuildConfig.from_dict``'s
-helper calls when a new subkey is added — nothing enforces that
-automatically.
-
-``subkey_findings()`` (new defect-3-fix review round) is the single
-consolidated dispatch every subkey type family goes through --
-``BuildConfig._subkey_findings`` used to hold this dispatch chain itself
-(bool/str inline, ``int``/dict-of-str via a split-out helper each), which
-meant every new subkey *family* (not just every new subkey) cost that
-capped file a fresh dispatch branch. Consolidating the whole chain here
-means a new family costs `build_config.py` nothing beyond the one new
-table + the one new call site its own field/from_dict/to_dict triplet
-already needs -- see ``architecture/debt.yaml``'s entry for that file for
-the concrete accounting.
+It lives here, not in ``build_config.py``, because it has no dependency on
+``BuildConfig`` itself and is ``extract``-classified (it may import only the
+``model``/``storage`` layers and sibling leaf modules). The few validators a
+table row can point at that need a richer dependency (``EnvironmentMatrix``,
+``model.bundle_variants``) are defined here too, for the same reason.
 """
 
 from __future__ import annotations
 
 from collections.abc import Callable
+from dataclasses import dataclass
+from enum import StrEnum
+from typing import Any
 
 from ..environment_matrix import EnvironmentMatrix
-from ..model.bundle_variants import BUNDLE_VARIANTS_KEY, bundle_variants_findings
-from .build_config_acknowledgment import ACKNOWLEDGMENT_KEY, acknowledgment_findings
-from .build_config_contract import CONTRACT_KEY, contract_findings
-from .build_config_scope import (
-    OWNERSHIP_LIST_KEYS,
-    dependencies_findings,
-    dependency_evidence_findings,
-)
+from ..model.bundle_variants import bundle_variants_findings
 
-#: Phase 7g (one-comparison-product.md §4.1/§3 #21): the calibrated JSON
-#: decode resource limit, demoted off the CLI (`--max-json-object-nodes`).
-#: See `bundle_facts.DEFAULT_MAX_JSON_OBJECT_NODES`'s own docstring for the
-#: real measurement this default and this config key's unit are calibrated
-#: from, and for why the unit stays node-based rather than a memory size.
-INT_SUBKEYS: dict[str, frozenset[str]] = {
-    "resource_limits": frozenset({"max_bundle_facts_decode_nodes"}),
-}
-
-
-def opt_int(d: dict[str, object], key: str) -> int | None:
-    """``BuildConfig``'s ``_opt_int`` -- an int-or-``None`` subkey read,
-    same shape as its ``_opt_bool``/``_opt_str`` siblings. Lives here (not
-    ``build_config.py``, at its own line-count cap) purely for that
-    reason -- it has no dependency on anything else in this module."""
-    v = d.get(key)
-    return v if isinstance(v, int) and not isinstance(v, bool) else None
-
-
-BOOL_SUBKEYS: dict[str, frozenset[str]] = {
-    "scope": frozenset({"public", "collapse_versioned_symbols", "show_redundant"}),
-    "suppression": frozenset({"strict", "require_justification"}),
-    "compile": frozenset(
-        {"nostdinc", "ast_frontend_fallback", "allow_unsupported_castxml"}
-    ),
-    "debug": frozenset({"dwarf_only", "debuginfod"}),
-    # Phase 7d (one-comparison-product.md §4.1): CI gate policy and
-    # directory/package release topology, demoted off the CLI.
-    "gate": frozenset({"fail_on_removed_library"}),
-    "release": frozenset({"dso_only", "include_private_dso"}),
-    # rulings.py deferred-option followup: the former `compare
-    # --require-complete-analysis` (P0.4's orthogonal assurance-floor exit
-    # axis), demoted off the CLI entirely -- a project's CI strictness is a
-    # stable property, same shape as `gate.fail_on_removed_library` above.
-    "assurance": frozenset({"require_complete"}),
-}
-STR_SUBKEYS: dict[str, frozenset[str]] = {
-    "build": frozenset({"system", "query", "compile_db", "compile_db_filter"}),
-    "sources": frozenset({"graph"}),
-    "severity": frozenset(
-        {"preset", "abi_breaking", "potential_breaking", "quality_issues", "addition"}
-    ),
-    "scope": frozenset({"on_incomplete"}),
-    "performance": frozenset({"profile"}),
-    "source": frozenset({"method"}),
-    "compile": frozenset(
-        {"frontend", "std", "sysroot", "compiler", "frontend_context", "lang"}
-    ),
-    "debug": frozenset({"format", "debuginfod_url", "pdb_path"}),
-    # one-comparison-product.md Phase 7: the former `compare
-    # --support-promise`, whose own help already called it "a contract-policy
-    # field" (ADR-065 D1/D6) -- i.e. a stable project property, D5 guard 1.
-    # `"off"` must be quoted: bare `off` is a YAML *boolean*, which this type
-    # check rejects outright rather than coercing into a policy name -- the
-    # same trap, and the same answer, as `python.abi3_floor`'s bare `3.9`.
-    "release": frozenset({"support_promise"}),
-    # ADR-068 D5: the project's declared abi3 floor, e.g. "3.9" (quoted --
-    # a bare 3.9 is a YAML float, which this type check rejects outright
-    # rather than coercing it into a version spelling).
-    "python": frozenset({"abi3_floor"}),
-}
-#: New defect 3 (ADR-068 §3 #23's documented `.abicheck.yml` `policy:`
-#: project-config policy-override mechanism, distinct from the still-live
-#: `scan --crosscheck KEY=LEVEL` flag): a flat ``str ->
-#: str`` mapping subkey, unlike every other subkey table above (a fixed key
-#: set). Deep content validation (real `ChangeKind` slugs, real severity
-#: spellings) is `policy_file._parse_overrides`'s job once this is folded
-#: into a `PolicyFile`; this table only gates the block's own shape.
-DICT_STR_STR_SUBKEYS: dict[str, frozenset[str]] = {
-    "policy": frozenset({"overrides"}),
-}
-#: Sub-keys whose value is a structured YAML shape with its own validator
-#: (dispatched in `subkey_findings`), spelled as the reference docs show it.
+#: Recognized top-level keys whose value is validated by a dedicated,
+#: whole-block validator rather than a flat key table: ``deployment:`` embeds
+#: ``EnvironmentMatrix``'s nested shape, ``bundle_variants:`` (ADR-062 A1.6)
+#: is a name -> spec mapping (``model.bundle_variants``).
 STRUCTURED_SUBKEY_TYPES: dict[str, dict[str, str]] = {
     "scope": {
         "dependencies": "list[{name: str, header_roots: list[str]}]",
         "dependency_evidence": "str ('full')",
     },
 }
-# `_strs()` accepts either a list of strings or a single bare string (folded
-# to a 1-element list), so both shapes are valid here — anything else isn't.
-LIST_SUBKEYS: dict[str, frozenset[str]] = {
-    "build": frozenset({"targets"}),  # P0.2: root target(s) scoping L3 collection
-    "sources": frozenset({"public_headers", "exclude"}),
-    "scope": frozenset(
-        {
-            "public_symbols",
-            "public_header_dirs",
-            "exclude_headers",
-            *OWNERSHIP_LIST_KEYS,
-        }
-    ),
-    "compile": frozenset({"include_dirs", "defines", "options"}),
-    # CLI cleanup phase two, PR J: release/scan bundle topology, demoted off
-    # the CLI from --bundle-system-providers/--bundle-cohort.
-    "bundle": frozenset({"system_providers", "cohorts"}),
-}
-# Recognized top-level keys that are scalars, not blocks (i.e. absent from
-# BuildConfig._KNOWN_BLOCK_KEYS) — the same wrong-type gap as the block
-# subkeys above, one level up. Empty since CLI cleanup phase two PR G2
-# removed the only entry (`exit_code_scheme`) -- kept as a named, typed
-# frozenset rather than deleted outright so a future scalar top-level key
-# has an obvious home, and so every existing `TOP_LEVEL_STR_KEYS` reader
-# keeps working unchanged against an empty set.
-TOP_LEVEL_STR_KEYS: frozenset[str] = frozenset()
-TOP_LEVEL_INT_KEYS: frozenset[str] = frozenset({"version"})
 
 
-def subkey_findings(key: str, sub: str, sub_value: object) -> list[str]:
-    """Type findings for one ``<block>.<subkey>`` entry -- the single
-    dispatch every subkey type family (bool/str/int/dict-of-str/list) goes
-    through, checked in that order. ``BuildConfig._subkey_findings`` is a
-    thin delegator to this function (see module docstring for why the
-    whole chain, not just the int/dict-of-str branches, lives here now).
+class Kind(StrEnum):
+    """How one table row's YAML value is typed and read/written.
+
+    ``BOOL``/``STR``/``INT``/``LIST``/``DICT_STR`` are plain typed leaves, each
+    filling one ``BuildConfig`` field. ``CUSTOM`` is a leaf validated by its own
+    ``validate`` callable and parsed elsewhere (no field of its own).
+    ``GROUP`` is a whole block's extra keys, read and written as one unit
+    (``scope:`` ownership). ``WHOLE`` is a whole top-level block with its own
+    ``validate``/``read``/``write``.
     """
-    if key == "scope" and sub == "dependencies":
-        return dependencies_findings(sub_value)
-    if key == "scope" and sub == "dependency_evidence":
-        return dependency_evidence_findings(sub_value)
-    if sub in BOOL_SUBKEYS.get(key, ()) and not isinstance(sub_value, bool):
-        return [
-            f"{key}.{sub} must be a boolean, got "
-            f"{type(sub_value).__name__}: {sub_value!r}"
-        ]
-    if sub in STR_SUBKEYS.get(key, ()) and not isinstance(sub_value, str):
-        return [
-            f"{key}.{sub} must be a string, got "
-            f"{type(sub_value).__name__}: {sub_value!r}"
-        ]
-    if sub in INT_SUBKEYS.get(key, ()) and (
-        not isinstance(sub_value, int) or isinstance(sub_value, bool)
+
+    BOOL = "bool"
+    STR = "str"
+    INT = "int"
+    LIST = "list"
+    DICT_STR = "dict_str"
+    CUSTOM = "custom"
+    GROUP = "group"
+    WHOLE = "whole"
+
+
+@dataclass(frozen=True)
+class KeySpec:
+    """One recognized ``.abicheck.yml`` key.
+
+    ``path`` is ``"block.sub"`` for a block sub-key, a bare name for a
+    top-level scalar (``"version"``), or a bare block name for a ``GROUP``/
+    ``WHOLE`` row. ``attr`` is the ``BuildConfig`` field it fills (``None``
+    when the key is only validated). ``normalize(value, path)`` runs after a
+    present, type-checked value is read and may raise ``ValueError``.
+    ``always_emit`` makes a ``WHOLE`` row dump whenever its field is not its
+    default, even when its block is empty.
+    """
+
+    path: str
+    kind: Kind
+    attr: str | None = None
+    default: Any = None
+    normalize: Callable[[Any, str], Any] | None = None
+    validate: Callable[[Any], list[str]] | None = None
+    read: Callable[[Any], Any] | None = None
+    write: Callable[[Any], dict[str, Any]] | None = None
+    always_emit: bool = False
+
+
+def _block(data: dict[str, Any], key: str) -> dict[str, Any]:
+    """One top-level block as a mapping (``{}`` when absent or not a mapping)."""
+    value = data.get(key)
+    return value if isinstance(value, dict) else {}
+
+
+def _type_findings(spec: KeySpec, label: str, value: object) -> list[str]:
+    """Type findings for one present value of *spec*; *label* names it in a message."""
+    if spec.kind is Kind.CUSTOM or spec.kind is Kind.WHOLE:
+        return spec.validate(value) if spec.validate is not None else []
+    if spec.kind is Kind.BOOL and not isinstance(value, bool):
+        return [f"{label} must be a boolean, got {type(value).__name__}: {value!r}"]
+    if spec.kind is Kind.STR and not isinstance(value, str):
+        return [f"{label} must be a string, got {type(value).__name__}: {value!r}"]
+    if spec.kind is Kind.INT and (
+        not isinstance(value, int) or isinstance(value, bool)
     ):
-        return [
-            f"{key}.{sub} must be an integer, got "
-            f"{type(sub_value).__name__}: {sub_value!r}"
-        ]
-    if sub in DICT_STR_STR_SUBKEYS.get(key, ()):
-        if not isinstance(sub_value, dict):
+        return [f"{label} must be an integer, got {type(value).__name__}: {value!r}"]
+    if spec.kind is Kind.DICT_STR:
+        if not isinstance(value, dict):
             return [
-                f"{key}.{sub} must be a mapping of string to string, got "
-                f"{type(sub_value).__name__}: {sub_value!r}"
+                f"{label} must be a mapping of string to string, got "
+                f"{type(value).__name__}: {value!r}"
             ]
         bad_pairs = [
             (k, v)
-            for k, v in sub_value.items()
+            for k, v in value.items()
             if not isinstance(k, str) or not isinstance(v, str)
         ]
         if bad_pairs:
             return [
-                f"{key}.{sub} must be a mapping of string to string, got "
+                f"{label} must be a mapping of string to string, got "
                 f"non-string key/value pair(s): {bad_pairs!r}"
             ]
-        return []
-    if sub not in LIST_SUBKEYS.get(key, ()):
-        return []
-    if not isinstance(sub_value, (list, str)):
-        return [
-            f"{key}.{sub} must be a string or list of strings, "
-            f"got {type(sub_value).__name__}: {sub_value!r}"
-        ]
-    # `_strs()` accepts a list container but a non-string element must be
-    # rejected outright, not coerced via `str(x)`.
-    bad = (
-        [x for x in sub_value if not isinstance(x, str)]
-        if isinstance(sub_value, list)
-        else []
-    )
-    if bad:
-        return [
-            f"{key}.{sub} must be a list of strings, got non-string element(s): {bad!r}"
-        ]
+    if spec.kind is Kind.LIST:
+        if not isinstance(value, (list, str)):
+            return [
+                f"{label} must be a string or list of strings, "
+                f"got {type(value).__name__}: {value!r}"
+            ]
+        # A bare string is folded to a 1-element list on read; a list container
+        # must hold strings only, never coerced via ``str(x)``.
+        bad = (
+            [x for x in value if not isinstance(x, str)]
+            if isinstance(value, list)
+            else []
+        )
+        if bad:
+            return [
+                f"{label} must be a list of strings, got non-string element(s): {bad!r}"
+            ]
     return []
 
 
-def deployment_findings(value: object) -> list[str]:
-    """Type findings for the top-level ``deployment:`` key -- not a fixed
-    subkey set (unlike every other block above) since it embeds
-    ``EnvironmentMatrix``'s own richer, nested YAML shape (a ``compilers``
-    list, ``sycl:``/``cuda:`` sub-blocks, a ``runtime_floors:`` dict), so it
-    delegates to ``EnvironmentMatrix.from_dict`` itself rather than
-    re-declaring that shape here.
+def _read_leaf(spec: KeySpec, raw: object) -> Any:
+    """One typed leaf value, normalized; an absent or ``null`` value is the default."""
+    if raw is None:
+        return _fresh(spec.default)
+    value: Any = raw
+    if spec.kind is Kind.LIST:
+        value = [value] if isinstance(value, str) else list(value)
+    elif spec.kind is Kind.DICT_STR:
+        value = dict(value)
+    if spec.normalize is not None:
+        value = spec.normalize(value, spec.path)
+    return value
 
-    This function used to live on ``BuildConfig`` itself
-    (``build_config.py``): ``environment_matrix.py`` was classified
-    ``workflows`` in ``architecture/modules.yaml``, and this module (``build_
-    config_schema.py``) is ``extract``-classified, which may import only
-    ``model``/``storage`` -- an ``extract -> workflows`` edge
-    ``scripts/check_architecture.py`` rejects. Splitting
-    ``model.dotted_version.parse_dotted_numeric_version`` out of
-    ``diff_versioning.py`` (``compare``-classified) removed
-    ``environment_matrix.py``'s only non-stdlib dependency, which is what let
-    it be reclassified ``model`` instead -- ``model`` is exactly the one
-    extra layer ``extract`` may import, so this validation now has a real
-    home in the sibling schema module every other subkey-type check already
-    lives in, the same as everything else here.
+
+def _fresh(default: Any) -> Any:
+    """A copy of a mutable default, so no two configs share one list/dict."""
+    if isinstance(default, list):
+        return list(default)
+    if isinstance(default, dict):
+        return dict(default)
+    return default
+
+
+def _plain(value: Any) -> Any:
+    """A YAML-dumpable copy of a leaf value."""
+    if isinstance(value, list):
+        return list(value)
+    if isinstance(value, dict):
+        return dict(value)
+    return value
+
+
+def deployment_findings(value: object) -> list[str]:
+    """Type findings for the top-level ``deployment:`` key.
+
+    Not a fixed subkey set, since it embeds ``EnvironmentMatrix``'s own nested
+    YAML shape (a ``compilers`` list, ``sycl:``/``cuda:`` sub-blocks, a
+    ``runtime_floors:`` dict), so it delegates to ``EnvironmentMatrix.from_dict``
+    rather than re-declaring that shape here.
     """
     if value is None:
         return []
@@ -263,51 +202,130 @@ def deployment_findings(value: object) -> list[str]:
     return []
 
 
-#: Top-level keys whose value is validated by a dedicated, whole-block
-#: validator rather than a flat subkey table: ``deployment:`` embeds
-#: ``EnvironmentMatrix``'s nested shape, ``bundle_variants:`` (ADR-062 A1.6)
-#: is a name -> spec mapping (``model.bundle_variants``). Parsed by their own
-#: consumers; validated here so every ``.abicheck.yml`` ingestion is strict.
-def _bundle_variants_block_findings(value: object) -> list[str]:
+def bundle_variants_block_findings(value: object) -> list[str]:
+    """Type findings for the top-level ``bundle_variants:`` key."""
     return [] if value is None else bundle_variants_findings(value)
 
 
-WHOLE_BLOCK_VALIDATORS: dict[str, Callable[[object], list[str]]] = {
-    "deployment": deployment_findings,
-    CONTRACT_KEY: contract_findings,
-    ACKNOWLEDGMENT_KEY: acknowledgment_findings,
-    BUNDLE_VARIANTS_KEY: _bundle_variants_block_findings,
-}
+class KeyTable:
+    """Checks, reads and dumps a ``.abicheck.yml`` mapping against a key table.
 
+    *specs* is the full table in dump order (blocks are emitted at the position
+    of their first row). *opaque_top* lists recognized top-level keys that no
+    row describes and that this loader accepts without parsing (a sibling
+    module owns them).
+    """
 
-def parse_policy_overrides(policy_block: dict[str, object]) -> dict[str, str]:
-    """``policy.overrides`` -> a raw ``str -> str`` mapping (unvalidated
-    beyond shape, which `subkey_findings()` above already enforced by the
-    time `BuildConfig.from_dict()` reaches this call; real `ChangeKind`
-    slug/severity validation is `policy_file._parse_overrides`'s job once
-    this is folded into a `PolicyFile` for the run)."""
-    raw = policy_block.get("overrides")
-    return dict(raw) if isinstance(raw, dict) else {}
+    def __init__(self, specs: tuple[KeySpec, ...], opaque_top: frozenset[str]) -> None:
+        self.specs = specs
+        #: ``block`` -> ``sub`` -> spec, for every row a block sub-key owns.
+        self.blocks: dict[str, dict[str, KeySpec]] = {}
+        #: Bare top-level scalar name -> spec (``version``).
+        self.top_scalars: dict[str, KeySpec] = {}
+        #: Whole top-level block name -> spec.
+        self.whole: dict[str, KeySpec] = {}
+        for spec in specs:
+            if spec.kind is Kind.GROUP:
+                continue
+            if spec.kind is Kind.WHOLE:
+                self.whole[spec.path] = spec
+            elif "." in spec.path:
+                block, sub = spec.path.split(".", 1)
+                self.blocks.setdefault(block, {})[sub] = spec
+            else:
+                self.top_scalars[spec.path] = spec
+        #: Every recognized top-level key.
+        self.known_top: frozenset[str] = frozenset(
+            opaque_top
+            | self.blocks.keys()
+            | self.top_scalars.keys()
+            | self.whole.keys()
+        )
+        #: Every recognized block sub-key, per block.
+        self.known_blocks: dict[str, frozenset[str]] = {
+            block: frozenset(subs) for block, subs in self.blocks.items()
+        }
 
+    def findings(self, data: dict[str, Any]) -> list[str]:
+        """Every structural problem in *data*, collected (not just the first)."""
+        out: list[str] = []
+        for key, value in data.items():
+            if key not in self.known_top:
+                out.append(f"unknown .abicheck.yml key {key!r}")
+            elif key in self.whole:
+                out += _type_findings(self.whole[key], key, value)
+            elif key in self.blocks:
+                out += self._block_findings(key, value)
+            elif key in self.top_scalars and value is not None:
+                out += _type_findings(self.top_scalars[key], key, value)
+        return out
 
-def parse_performance_profile_key(top: dict[str, object]) -> str | None:
-    """``performance.profile`` as its canonical spelling, ``None`` if unset.
+    def _block_findings(self, block: str, value: object) -> list[str]:
+        if value is None:
+            return []
+        if not isinstance(value, dict):
+            return [f"{block} must be a mapping, got {type(value).__name__}: {value!r}"]
+        out: list[str] = []
+        for sub, sub_value in value.items():
+            spec = self.blocks[block].get(sub)
+            if spec is None:
+                out.append(f"unknown .abicheck.yml key {block}.{sub!r}")
+            else:
+                out += _type_findings(spec, f"{block}.{sub}", sub_value)
+        return out
 
-    An unknown value is a ``ValueError`` naming the valid ones (the same
-    load-time failure every other enumerated ``.abicheck.yml`` key gives).
-    Lives here, not ``build_config.py``, which is at its line-count cap."""
-    from ..model.performance import parse_performance_profile
+    def read(self, top: dict[str, Any]) -> dict[str, Any]:
+        """Constructor arguments (``BuildConfig`` field name -> value) from *top*.
 
-    block = top.get("performance")
-    raw = block.get("profile") if isinstance(block, dict) else None
-    if raw is None:
-        return None
-    try:
-        return parse_performance_profile(str(raw)).value
-    except ValueError as exc:
-        raise ValueError(f"performance.profile: {exc}") from None
+        Assumes :meth:`findings` already passed for *top*.
+        """
+        values: dict[str, Any] = {}
+        for spec in self.specs:
+            if spec.kind is Kind.GROUP:
+                assert spec.read is not None
+                values.update(spec.read(_block(top, spec.path)))
+            elif spec.kind is Kind.WHOLE:
+                if spec.attr is not None and spec.read is not None:
+                    values[spec.attr] = spec.read(top)
+            elif spec.attr is not None:
+                if "." in spec.path:
+                    block, sub = spec.path.split(".", 1)
+                    values[spec.attr] = _read_leaf(spec, _block(top, block).get(sub))
+                else:
+                    values[spec.attr] = _read_leaf(spec, top.get(spec.path))
+        return values
 
+    def dump(self, cfg: Any) -> dict[str, Any]:
+        """The non-default ``.abicheck.yml`` mapping of *cfg* (a ``BuildConfig``).
 
-def performance_block(profile: str | None) -> dict[str, object]:
-    """``BuildConfig.to_dict``'s ``performance:`` block (empty when unset)."""
-    return {} if profile is None else {"profile": profile}
+        A leaf is emitted only when its value differs from its default, so a
+        dumped config stays minimal and reloads to the same ``BuildConfig``.
+        """
+        out: dict[str, Any] = {}
+        for spec in self.specs:
+            if spec.kind is Kind.GROUP:
+                assert spec.write is not None
+                block_values = spec.write(cfg)
+                if block_values:
+                    out.setdefault(spec.path, {}).update(block_values)
+            elif spec.kind is Kind.WHOLE:
+                if spec.write is None or spec.attr is None:
+                    continue
+                block_value = spec.write(cfg)
+                emit = (
+                    getattr(cfg, spec.attr) != spec.default
+                    if spec.always_emit
+                    else bool(block_value)
+                )
+                if emit:
+                    out[spec.path] = block_value
+            elif spec.attr is not None:
+                value = getattr(cfg, spec.attr)
+                if value == spec.default:
+                    continue
+                if "." in spec.path:
+                    block, sub = spec.path.split(".", 1)
+                    out.setdefault(block, {})[sub] = _plain(value)
+                else:
+                    out[spec.path] = _plain(value)
+        return out

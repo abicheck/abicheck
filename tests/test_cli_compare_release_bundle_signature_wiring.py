@@ -16,8 +16,7 @@
 """Regression tests for wiring G38 Phase 4's
 :func:`abicheck.bundle_signature_evidence.find_unverified_signature_findings`
 into the real ``compare --release`` bundle-analysis path
-(``_run_bundle_analysis``/``_collect_bundle_result`` in
-``cli_compare_release_helpers.py``/``cli_compare_release.py``).
+(``workflows.release_bundle.run_bundle_analysis``, reached from ``cli_compare_release.py``).
 
 Before this wiring, ``find_unverified_signature_findings`` had exactly one
 caller anywhere in the codebase: its own test module. These tests exercise
@@ -384,7 +383,7 @@ class TestBundleAnalysisErrorsAreStructural:
         # The real call site does `from .bundle_signature_evidence import
         # find_unverified_signature_findings` *inside* the function body,
         # so the patch target is the source module's own attribute, not a
-        # name re-exported by `cli_compare_release_helpers`.
+        # name re-exported by a frontend module.
         import abicheck.bundle_signature_evidence as sig_mod
 
         monkeypatch.setattr(sig_mod, "find_unverified_signature_findings", _boom)
@@ -629,11 +628,7 @@ class TestResolveBundlePolicyFile:
     """``pack_application.resolve_bundle_policy_file`` (G38 Phase 16) --
     the primitive the ``compare-release`` fan-out uses to resolve the
     ``PolicyFile`` bundle analysis should score against. Lives in
-    ``pack_application.py``, not ``cli_compare_release_helpers.py``,
-    because the latter (and its sibling ``cli_compare_release.py``) are
-    pinned at a no-growth line-count baseline (``architecture/debt.yaml``,
-    ADR-061); tested here rather than in ``test_pack_application.py``
-    because that file is pinned at one too (Codex review, fresh evidence)."""
+    ``pack_application.py``, not the CLI adapter ``cli_compare_release.py``, because a frontend module may not own policy composition (ADR-061); tested here rather than in ``test_pack_application.py``, because that file is pinned at a no-growth baseline too (Codex review, fresh evidence)."""
 
     def test_no_policy_file_and_no_pack_resolves_none(self) -> None:
         from abicheck.pack_application import resolve_bundle_policy_file

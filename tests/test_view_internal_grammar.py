@@ -55,7 +55,11 @@ from abicheck.frontends.cli.options.compare_view import (
     parse_view_tokens,
 )
 from abicheck.model.change_catalog.kinds import ChangeKind
-from abicheck.model.change_catalog.registry import ChangeEntity, ChangeOperation
+from abicheck.model.change_catalog.registry import (
+    ChangeEntity,
+    ChangeOperation,
+    ContractSubject,
+)
 from abicheck.report.change_operation import operation_for_kind
 from abicheck.report.view import SHOW_ONLY_GROUP_SEP, ShowOnlyFilter
 from abicheck.reporter_markdown import (
@@ -235,6 +239,7 @@ class TestDisplayDimensionsComeFromTheCatalog:
                     impact="i",
                     entity=ChangeEntity.BUILD,
                     operation=ChangeOperation.REMOVED,
+                    contract_subject=ContractSubject.BUILD_FACT,
                 )
             ]
         )

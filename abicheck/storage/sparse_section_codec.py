@@ -694,6 +694,7 @@ class ProvenanceSection(_SparseSectionMixin):
             "git_tag",
             "created_at",
             "dump_provenance",
+            "fact_generations",
         }
     )
     #: `.language_profile`/`.git_commit`/`.git_tag`/`.created_at` are
@@ -710,6 +711,8 @@ class ProvenanceSection(_SparseSectionMixin):
         "git_tag": _STR_OR_NONE,
         "created_at": _STR_OR_NONE,
         "dump_provenance": _MAPPING,
+        # ADR-062 D2 generation stamp (storage/generation_migrations.py).
+        "fact_generations": _MAPPING,
     }
 
     library: Any

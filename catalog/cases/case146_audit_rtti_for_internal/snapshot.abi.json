@@ -123,6 +123,11 @@
   "enums": [],
   "excluded_header_matching": "glob",
   "excluded_header_patterns": [],
+  "fact_generations": {
+    "extractor": 15,
+    "resolver": 2,
+    "source": 0
+  },
   "fact_provenance": {},
   "from_headers": true,
   "frontend_context_kind": null,

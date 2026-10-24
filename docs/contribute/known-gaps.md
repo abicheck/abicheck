@@ -63,17 +63,19 @@ Each entry's status line says what is still open. A PARTIAL entry's write-up als
 
 **Status (2026-10-22): OPEN, deliberate follow-up — product decision needed.** `abi_surface_explosion` is growth-only now; a header-mode shrink of undeclared exports has no finding. [Full write-up](known-gaps/a-large-export-shrink-with-no-declared-surface-emits-nothing.md)
 
+CJM: trust stage (docs/contribute/cjm.md) — use case UC-WF-analysis-assurance (G47); priority: L2 Linux ELF.
+
 #### The Markdown "Additions" section is one row per finding, so it grows linearly (2026-10-22)
 
 **Status (2026-10-22): OPEN.** The review-group section is bounded; the per-finding Additions rows are not. [Full write-up](known-gaps/the-additions-markdown-section-is-one-row-per-finding.md)
 
-### Source-replay inline removal pairing (L4/L2 Phase 8)
+### Source-replay twin pairing (L4/L2 Phase 8)
 
-**Status (2026-10-23): OPEN, narrowed.** A header-only inline removal is reported by the header tier and by the L4 replay. `compare.finding_dedup._drop_source_replay_inline_duplicates` keeps the header-tier finding and drops the replay copy, matched by bare function name, one for one. Two limits remain. (a) A header-tier symbol that does not demangle (no `demangled_symbol`, no demangler result) keeps its replay twin visible; this is conservative, not a silent loss. (b) Two overloads of one name pair by count, not by signature, because the replay `Change` carries no parameter list, so which of the two overloads is the twin is not recorded. Both replay copies are still counted in the ledger. Closing (b) needs the replay finding to carry its signature hash.
+**Status (2026-10-23): OPEN, narrowed.** Two observations are reported by both the header tier and the L4 replay: a header-only inline removal (`INLINE_FUNCTION_REMOVED`) and a C++ `constexpr` value change (`CONSTEXPR_VALUE_CHANGED` / `CONSTANT_CHANGED`). `compare.finding_dedup._SOURCE_REPLAY_TWINS` keeps the header-tier finding and drops the replay copy, matched by name, one for one. For constants, the match is on the qualified name only: a replay copy whose value disagrees with the header copy is still dropped, and the header copy's value is what is reported. The "L2 tier not run, replay copy kept" case is covered only at unit level, because the replay alone does not produce the copy end to end (a no-header run matches no symbols). For inline removals the match is on the bare function name. Two limits remain there. (a) A header-tier symbol that does not demangle (no `demangled_symbol`, no demangler result) keeps its replay twin visible; this is conservative, not a silent loss. (b) Two overloads of one name pair by count, not by signature, because the replay `Change` carries no parameter list, so which of the two overloads is the twin is not recorded. Both replay copies are still counted in the ledger. Closing (b) needs the replay finding to carry its signature hash.
 
-#### `append_only_dispatch_tables` does not forgive offset shifts inside a dispatch-table aggregate (2026-10-23)
+### Source-replay typedef pairing (L4/L2 Phase 8)
 
-**Status (2026-10-23): OPEN.** Level Zero's `_ze_dditable_t`/`_zes_dditable_t` embed each sub-table by value, so when a sub-table grows by a tail append every later sub-table moves; on a real Level Zero pair that is 41 `type_field_offset_changed` findings, still `BREAKING` under the profile. A `type_pattern` rule cannot express "shifted only because an earlier embedded matching table grew append-only" without also hiding a genuine reorder, so the fix needs a cause-aware check (every member before the shifted one is unchanged or is itself an append-only-grown matching table), not a wider selector.
+**Status (2026-10-23): OPEN, narrowed.** A removed or retargeted typedef is reported by the header tier (`TYPEDEF_REMOVED`, `TYPEDEF_BASE_CHANGED`) and by the L4 replay (`PUBLIC_TYPEDEF_REMOVED`, `PUBLIC_TYPEDEF_TARGET_CHANGED`). `compare.finding_dedup._drop_source_replay_typedef_duplicates` keeps the header-tier finding and drops the replay copy, matched by qualified name (the header entity id rendered through `render_display_name_or_leaf`), one for one, and recorded as `deduplicated`. Two limits remain. (a) The value spellings are not compared, so a pair whose two tiers disagree on the type text (`long int` vs `long`) still pairs; this is deliberate, since a value check would miss every real pair, but it means a replay finding is dropped even when the tiers name different types. (b) A header-tier finding with no entity id pairs by bare symbol, so in C++ a namespaced typedef without an entity id keeps its replay twin visible (conservative).
 
 ### Clang projection (ADR-063 Phase 4 prerequisites)
 
@@ -116,6 +118,8 @@ current emitter, which is unchanged.
 #### A binary-gate demotion does not state a coverage gap (ADR-084)
 
 **Status (2026-10-21): FIXED.** A demotion now adds an `analysis_assurance.notes` entry naming each demoted claim (`policy/binary_gate_marker.binary_gate_assurance_notes`, called from `policy/analysis_assurance/_compute.py`), which is a changed analysis-assurance record in the sense `tests/test_family_f1_evidence_ablation.py` requires; the F1 cell `pimpl_inline_body_renamed` / `RecordType.source_header_fact` passes.
+
+CJM: trust stage (docs/contribute/cjm.md) — use case UC-WF-analysis-assurance (G47); priority: L2 Linux ELF.
 
 #### A refused clang AST still leaves the header type pass collected (2026-10-17)
 
@@ -239,6 +243,10 @@ current emitter, which is unchanged.
 `false-clean` — A public header reached only through a `-I` or `/external:I` include under clang-cl is probed as a public root, but the replayed AST dump does not search that directory, so a declaration that comes only through it is not replayed. An MSVC `/imsvc` include tree is never a probed public root.
 
 ### False-positive risk
+
+#### Below `source`, `TemplateInstanceAbsence` loses the clang-graph instantiation origins (H2a residual, 2026-10-23)
+
+**Status (2026-10-23): OPEN, unobserved.** `compare/detector_inputs.py` declares `surface_graph` as a *tolerated* input of the `functions`/`variables`/`types` detectors: its L2 declaration-node role survives below `source` as `header_declaration_ids`, but `_graph_origins` (the `template_instantiation` nodes' `instantiated_from` + `DECL_INSTANTIATES_TEMPLATE` edges) does not. At `--depth headers`/`build` the rule then proves a vanished specialization's origin from the castxml class-head reading alone, so a specialization only the clang graph could place may read as `type_removed`. `tests/test_depth_metamorphic_examples.py` found no such case in `catalog/cases`. Fix, if one appears: keep the proven `(spelling, origin, pattern)` triples as a second runtime-only L2 fact alongside `header_declaration_ids`, and move the read from `tolerates` to the substitute.
 
 #### Two BINARY_GATED detectors still assert public reachability from the export population (ADR-084)
 
@@ -500,8 +508,8 @@ Do not re-attempt token-claiming. A header's export tokens cannot tell whether i
 
 #### Five SVS-scan report findings not addressed by the change-vs-inventory/depth/exclusion fixes (2026-09-17)
 
-**Status (re-verified 2026-10-09 at `456989f`): OPEN.** unverified: none of the five SVS report items was checked in code (header accounting does not lower status, the not-applicable detector vocabulary, the 294 KB Markdown default, partial telemetry, the identical-binary channel). Nothing marks any of them fixed.  
-`hygiene` — Unverified: five SVS report items (header accounting, not-applicable detector vocabulary, 294 KB Markdown default, partial telemetry, identical-binary channel) are not marked fixed. [Full write-up](known-gaps/five-svs-scan-report-findings-not-addressed-by-the-change-vs.md)
+**Status (re-verified 2026-10-09 at `456989f`): OPEN.** unverified: four of the five SVS report items were not checked in code (header accounting does not lower status, the not-applicable detector vocabulary, partial telemetry, the identical-binary channel). The 294 KB Markdown default is fixed (2026-10-23): see that item below.  
+`hygiene` — Unverified: four SVS report items (header accounting, not-applicable detector vocabulary, partial telemetry, identical-binary channel) are not marked fixed; the 294 KB Markdown default is fixed. [Full write-up](known-gaps/five-svs-scan-report-findings-not-addressed-by-the-change-vs.md)
 
 #### A snapshot is not byte-reproducible across processes
 
@@ -566,6 +574,8 @@ Deliberate rulings and scope limits, not defects. Changing one needs the decisio
 | ADR-071's fold excludes per-library overrides, per-member blocks and fold convergence; items 4-5 are residual defects. | [ADR-071's release assurance fold: what it deliberately does not do](known-gaps/adr-071s-release-assurance-fold-what-it-deliberately-does-not-do.md) |
 | The compatibility percentage divides findings by symbols (ABICC heuristic, public contract); kept. | [The compatibility percentage counts findings against symbols](known-gaps/the-compatibility-percentage-counts-findings-against-symbols.md) |
 | DWARF member-location evaluation covers `DW_OP_plus`/`plus_uconst`/`constu`/`consts`/`lit0..31` only; other ops give unknown offsets, not values. | [DWARF member-location evaluator implements only a subset of DW_OP](known-gaps/dwarf-member-location-evaluator-implements-only-a-subset-of-dw-op.md) |
+| Declarations under an `#ifdef` the parse does not define (e.g. `SYCL_LANGUAGE_VERSION` `sycl::queue&` overloads) are not header-checked by default; the hidden exports are counted in the coverage block (sycl as a named cause), and `-D` plus a user stub header parses them. No stub is bundled. | [`docs/use/dump-compare-flags.md`](../use/dump-compare-flags.md#declarations-behind-ifdef-sycl_language_version) |
+| A release binary without debug info disables the DWARF layout detectors by design; layout then comes only from headers. Not a bug. | [Evidence depth](../use/evidence-depth.md) |
 | Local-exec TLS in an AArch64 shared object leaves no binary evidence; toolchain limit. | [Local-exec TLS in an AArch64 shared object leaves no binary evidence](known-gaps/local-exec-tls-in-an-aarch64-shared-object-leaves-no-binary.md) |
 
 ## Unreached oneDAL profiling hotspots (perf, 2026-10-23)

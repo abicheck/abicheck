@@ -60,6 +60,7 @@ from .compare.parameter_facts import (
     return_pointee_qualifier_changes,
     va_list_changes,
 )
+from .compare.parameter_replacement import pair_parameter_replacements
 from .compare.public_surface import (
     is_extern_c_function,
     reconciled_function_surfaces,
@@ -631,8 +632,7 @@ def _diff_functions(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
             )
 
     old_all = old.function_map
-    new_all_map = new.function_map
-    changes.extend(_detect_newly_deleted_functions(old_all, new_all_map, old, new))
+    changes.extend(_detect_newly_deleted_functions(old_all, new_all, old, new))
 
     # FUNC_BECAME_INLINE / FUNC_LOST_INLINE: detect inline↔non-inline transitions
     changes.extend(_check_inline_transitions(old_map, new_map, old, new))
@@ -646,17 +646,17 @@ def _diff_functions(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     changes.extend(
         diff_inline_hidden_friends(
             old_all,
-            new_all_map,
+            new_all,
             old_map,
             new_map,
             signatures=(
                 function_signature_index(old.canonical_ir, old_all.values()),
-                function_signature_index(new.canonical_ir, new_all_map.values()),
+                function_signature_index(new.canonical_ir, new_all.values()),
             ),
         )
     )
 
-    return changes
+    return pair_parameter_replacements(changes, old, new)
 
 
 def _converting_ctors_by_class(

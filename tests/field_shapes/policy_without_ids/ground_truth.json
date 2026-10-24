@@ -1,0 +1,16 @@
+{
+  "description": "A suppression rule with no id: suppresses the func_removed it targets, and the disposition audit names it with a portable rule-<12 hex> token, never a Python repr() of its fields.",
+  "field_report": "oneDAL #3693 handover r2, H3",
+  "bug_class": "policy.disposition_conservation",
+  "related_tests": [
+    "tests/test_rule_id_token_properties.py"
+  ],
+  "suppress": "suppressions.yaml",
+  "depths": [
+    "headers"
+  ],
+  "expected_absent_kinds": [
+    "func_removed"
+  ],
+  "suppressed_rule_id_pattern": "rule-[0-9a-f]{12}"
+}

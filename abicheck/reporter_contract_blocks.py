@@ -373,13 +373,23 @@ def add_suppression_audit(d: dict[str, Any], result: DiffResult) -> None:
     # A rule the suppression pass matched -- including on a consumer-scoped
     # finding the ledger does not carry -- was never stale, as before.
     matched_elsewhere = {i for i, count in audit.match_counts.items() if count > 0}
-    stale = [
-        row.rule_id
+    # ``rule_id`` of an id-less rule is an opaque ``rule-<sha256>`` token
+    # (ADR-067 D3); the stale list is read by a reviewer, so it renders such a
+    # rule by its readable canonical identity (the same ``rule_identity`` its
+    # disposition-audit row carries), and a rule with a user ``id:`` by that
+    # id. ``stale_rule_ids`` is the parallel list of ``rule_id``s, so a reader
+    # joins a stale entry to its ``disposition_audit.rules`` row by id.
+    from .policy.rule_identity import rule_id_of
+
+    stale_rows = [
+        row
         for row in configured_rule_rows(result, ledger=ledger)
         if row.kind == KIND_SUPPRESSION
         and row.status in (STATUS_UNUSED, STATUS_NOT_EVALUATED, STATUS_SHADOWED_ONLY)
         and row.entry_index not in matched_elsewhere
     ]
+    stale = [row.rule_identity or row.rule_id for row in stale_rows]
+    stale_ids = [row.rule_id for row in stale_rows]
     if not ledger.suppression_inventories:
         # A result no suppression pass registered (hand-built, or a caller that
         # never ran one) has no inventory to project. Its attached audit is the
@@ -387,9 +397,11 @@ def add_suppression_audit(d: dict[str, Any], result: DiffResult) -> None:
         stale = [
             suppression_rule_label(rule, i) for i, rule in enumerate(audit.stale_rules)
         ]
+        stale_ids = [rule_id_of(rule) for rule in audit.stale_rules]
     d["suppression_audit"] = {
         "total_rules": audit.total_rules,
         "stale_rules": stale,
+        "stale_rule_ids": stale_ids,
         "high_risk_matches": [
             {
                 "rule": suppression_rule_label(rule, i),
