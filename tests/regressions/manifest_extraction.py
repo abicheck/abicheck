@@ -32,6 +32,20 @@ __all__ = ["EXTRACTION_BUG_CLASSES"]
 
 EXTRACTION_BUG_CLASSES: tuple[BugClass, ...] = (
     BugClass(
+        id="extraction.castxml_vector_element_not_modelled",
+        invariant=(
+            "A castxml vector node resolves to the spelling clang gives for the same "
+            "declaration, or stays unresolved; it is never a shared opaque spelling "
+            "that hides a same-size element change through a header comparison."
+        ),
+        fixed_by=(1791,),
+        seed_tests=("tests/test_castxml_vector_integration.py",),
+        axes={
+            "backend": ("castxml", "clang"),
+            "vector_shape": ("typedef", "inline_field", "inline_param", "return"),
+        },
+    ),
+    BugClass(
         id="extraction.vector_type_collapsed_to_plain_array",
         invariant=(
             "A type whose identity is a DWARF attribute, not its shape, keeps "
