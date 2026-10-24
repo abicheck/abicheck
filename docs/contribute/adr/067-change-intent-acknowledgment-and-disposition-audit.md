@@ -475,7 +475,7 @@ which embedded `repr()` spellings such as `datetime.date(2027, 4, 1)`; it is
 now a portable token matching `[A-Za-z0-9._-]+`. A label is not used as the
 fallback because its uniqueness depends on the whole policy, and the
 per-change provenance must derive the same id from the rule alone. The
-readable identity remains in the effective-configuration receipt (ADR-049 D7). `label` is a grouping tag and `reason` is
+readable identity remains in the effective-configuration receipt (ADR-049 D7). *Amended 2026-10-24 (report schema 6.6):* an id-less rule's audit row and ledger provenance also carry that readable identity as `rule_identity` next to `rule_id`; `suppression_audit.stale_rules` renders the same identity and the parallel `stale_rule_ids` names each entry's `rule_id`, so stale entries join to audit rows; the release recommendation names an id-less rule as `rule-<hex> (label: …)`, or by its identity when it has no label. `label` is a grouping tag and `reason` is
 prose: both are reported as their own fields and are never the identifier.
 `id:` is accepted in both the suppression and the `reclassify:` grammars, must
 be a non-empty string, and must be unique within its document; a repeat is a

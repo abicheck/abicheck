@@ -65,6 +65,7 @@ HEURISTIC_OWNER_MODULES: tuple[str, ...] = (
     "abicheck.diff_serialization",
     "abicheck.diff_symbols_anon_fields",
     "abicheck.diff_types_surface",
+    "abicheck.policy.generation_drift_demotion",
     "abicheck.policy.public_surface_closure",
 )
 

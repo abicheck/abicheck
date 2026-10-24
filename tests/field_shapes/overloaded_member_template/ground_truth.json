@@ -1,0 +1,21 @@
+{
+  "description": "An overloaded member template whose implicit instance (setArrays<double>) the new inline code stops instantiating, built with -fvisibility-inlines-hidden: every primary is still declared, so no removal at headers or source depth.",
+  "field_report": "oneDAL #3693 handover r2, H2a/H2b",
+  "bug_class": "evidence.depth_projection_drops_lower_layer_detector_input",
+  "related_tests": [
+    "tests/test_template_instance_absence_shapes.py"
+  ],
+  "cxxflags": [
+    "-fvisibility-inlines-hidden"
+  ],
+  "depths": [
+    "headers",
+    "source"
+  ],
+  "expected_kinds": [],
+  "expected_absent_kinds": [
+    "func_removed",
+    "inline_function_removed",
+    "func_removed_elf_only"
+  ]
+}

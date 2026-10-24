@@ -653,6 +653,9 @@ CLASSIFICATION_BUG_CLASSES: tuple[BugClass, ...] = (
         fixed_by=(1316, 1621),
         seed_tests=(
             "tests/test_type_index_qualified_identity.py",
+            "tests/test_type_index_backend_shapes.py",
+            "tests/test_model_warning_hygiene.py",
+            "tests/test_field_shapes.py",
             "tests/test_family_f3_identity.py",
         ),
         axes={

@@ -223,6 +223,7 @@ class TestEvidenceDepthAndSuppressionAuditJsonByteParity:
         assert new_text == old_text
 
     def test_suppression_audit_matches_reconstructed_old_fold(self) -> None:
+        from abicheck.policy.rule_identity import rule_id_of
         from abicheck.policy.suppression.rules import Suppression, SuppressionAudit
         from abicheck.reporter import to_json
         from abicheck.reporter_contract_blocks import suppression_rule_label
@@ -248,6 +249,9 @@ class TestEvidenceDepthAndSuppressionAuditJsonByteParity:
             "stale_rules": [
                 suppression_rule_label(r, i) for i, r in enumerate(audit.stale_rules)
             ],
+            # Schema 6.6: the parallel ``rule_id`` list, emitted right after
+            # ``stale_rules`` so a reader joins it to disposition_audit.rules.
+            "stale_rule_ids": [rule_id_of(r) for r in audit.stale_rules],
             "high_risk_matches": [],
             "expired_rules": [],
             "near_expiry_rules": [],
@@ -284,6 +288,7 @@ class TestEvidenceDepthAndSuppressionAuditJsonByteParity:
         payload["suppression_audit"] = {
             "total_rules": 1,
             "stale_rules": [],
+            "stale_rule_ids": [],
             "high_risk_matches": [],
             "expired_rules": [],
             "near_expiry_rules": ["near (symbol=s)"],

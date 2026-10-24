@@ -141,6 +141,7 @@ def test_depth_rungs_are_the_public_ladder() -> None:
 
 
 @pytest.mark.integration
+@pytest.mark.model_warning_hygiene
 @pytest.mark.parametrize("case_name", [c for c, _ in _ALL_CASES])
 def test_lower_depth_never_invents_a_removal(
     case_name: str, tmp_path: Path, shared_cmake_build_dir: Path | None
