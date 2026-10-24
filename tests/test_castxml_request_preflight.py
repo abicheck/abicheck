@@ -182,3 +182,140 @@ def test_cli_without_headers_still_extracts(monkeypatch, spy, libs, tmp_path, sh
         args = ["dump", str(old), "-o", str(tmp_path / "s.json")]
     CliRunner().invoke(_cli(), args)
     assert spy.calls >= 1
+
+
+# -- the version gate runs at request time too (PyPI castxml 0.4.5 case)
+
+_OLD_CASTXML = "castxml version 0.4.5\nclang version 8.0.0"
+_GOOD_CASTXML = "castxml version 0.7.0\nclang version 18.1.8"
+
+
+def _castxml_reports(monkeypatch: pytest.MonkeyPatch, version_output: str) -> None:
+    """A castxml on PATH whose ``--version`` prints *version_output*."""
+    monkeypatch.setattr(
+        shutil, "which", lambda n, *a, **k: f"/fake/{str(n).rsplit('/', 1)[-1]}"
+    )
+    monkeypatch.setattr(
+        "abicheck.extract.headers.castxml.backend._tool_identity_metadata",
+        lambda exe: {"selected": exe, "version": version_output},
+    )
+    monkeypatch.setattr(
+        "abicheck.extract.headers.castxml.backend._resolve_selected_tool",
+        lambda name: f"/fake/{name}",
+    )
+    for var in (
+        "ABICHECK_AST_FRONTEND",
+        "ABICHECK_ALLOW_AST_FALLBACK",
+        "ABICHECK_ALLOW_UNSUPPORTED_CASTXML",
+    ):
+        monkeypatch.delenv(var, raising=False)
+
+
+@pytest.mark.parametrize("backend", ["auto", "castxml", "hybrid"])
+@pytest.mark.parametrize(
+    "version_output",
+    [
+        _OLD_CASTXML,
+        "castxml version 0.6.10\nclang version 18.1.8",
+        "castxml version 0.8.0\nclang version 18.1.8",
+        "castxml version 0.7.0\nclang version 17.0.6",
+        "garbage",
+    ],
+    ids=["pypi-0.4.5", "just-below-min", "at-max", "old-clang", "unparseable"],
+)
+def test_unsupported_castxml_fails_before_extraction(
+    monkeypatch, spy, tmp_path, backend, version_output
+):
+    from abicheck.errors import UnsupportedCastxmlVersionError
+
+    _castxml_reports(monkeypatch, version_output)
+    with pytest.raises(UnsupportedCastxmlVersionError) as exc:
+        native._run_dump_uncached(
+            tmp_path / "lib.so",
+            "elf",
+            headers=[_header(tmp_path)],
+            header_backend=backend,
+        )
+    assert ">=0.6.11" in str(exc.value)
+    assert "PyPI" in str(exc.value)
+    assert spy.calls == 0
+
+
+@pytest.mark.parametrize(
+    "version_output",
+    [
+        _GOOD_CASTXML,
+        "castxml version 0.6.11\nclang version 18.1.8",
+        "castxml version 0.7.0-g9864b1e\nclang version 19.1.0",
+    ],
+)
+def test_supported_castxml_reaches_extraction(
+    monkeypatch, spy, tmp_path, version_output
+):
+    _castxml_reports(monkeypatch, version_output)
+    with pytest.raises(AssertionError, match="extraction reached"):
+        native._run_dump_uncached(
+            tmp_path / "lib.so", "elf", headers=[_header(tmp_path)]
+        )
+    assert spy.calls == 1
+
+
+def test_unsupported_override_reaches_extraction(monkeypatch, spy, tmp_path):
+    _castxml_reports(monkeypatch, _OLD_CASTXML)
+    monkeypatch.setenv("ABICHECK_ALLOW_UNSUPPORTED_CASTXML", "1")
+    with pytest.raises(AssertionError, match="extraction reached"):
+        native._run_dump_uncached(
+            tmp_path / "lib.so", "elf", headers=[_header(tmp_path)]
+        )
+    assert spy.calls == 1
+
+
+def test_opted_in_clang_fallback_reaches_extraction(monkeypatch, spy, tmp_path):
+    """auto + ABICHECK_ALLOW_AST_FALLBACK: the dump falls back to clang later,
+    so the request-time gate must not block it."""
+    _castxml_reports(monkeypatch, _OLD_CASTXML)
+    monkeypatch.setenv("ABICHECK_ALLOW_AST_FALLBACK", "1")
+    monkeypatch.setattr(
+        "abicheck.extract.compiler_driver.resolve_clang_bin", lambda *a, **k: "clang"
+    )
+    with pytest.raises(AssertionError, match="extraction reached"):
+        native._run_dump_uncached(
+            tmp_path / "lib.so", "elf", headers=[_header(tmp_path)]
+        )
+    assert spy.calls == 1
+
+
+def test_fallback_not_opted_in_names_the_opt_ins(monkeypatch, spy, tmp_path):
+    """auto without the opt-in: same annotated message the late path raises."""
+    from abicheck.errors import UnsupportedCastxmlVersionError
+
+    _castxml_reports(monkeypatch, _OLD_CASTXML)
+    with pytest.raises(UnsupportedCastxmlVersionError) as exc:
+        native._run_dump_uncached(
+            tmp_path / "lib.so", "elf", headers=[_header(tmp_path)]
+        )
+    assert "ABICHECK_ALLOW_AST_FALLBACK" in str(exc.value)
+    assert spy.calls == 0
+
+
+@pytest.mark.parametrize(
+    "kwargs",
+    [
+        {"dwarf_only": True},
+        {"symbols_only": True},
+        {"header_backend": "clang"},
+    ],
+    ids=["dwarf-only", "symbols-only", "clang-backend"],
+)
+def test_old_castxml_ignored_when_castxml_not_needed(
+    monkeypatch, spy, tmp_path, kwargs
+):
+    _castxml_reports(monkeypatch, _OLD_CASTXML)
+    monkeypatch.setattr(
+        "abicheck.extract.compiler_driver.resolve_clang_bin", lambda *a, **k: "clang"
+    )
+    with pytest.raises(AssertionError, match="extraction reached"):
+        native._run_dump_uncached(
+            tmp_path / "lib.so", "elf", headers=[_header(tmp_path)], **kwargs
+        )
+    assert spy.calls == 1

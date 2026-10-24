@@ -67,9 +67,9 @@ Each entry's status line says what is still open. A PARTIAL entry's write-up als
 
 **Status (2026-10-22): OPEN.** The review-group section is bounded; the per-finding Additions rows are not. [Full write-up](known-gaps/the-additions-markdown-section-is-one-row-per-finding.md)
 
-### Source-replay inline removal pairing (L4/L2 Phase 8)
+### Source-replay twin pairing (L4/L2 Phase 8)
 
-**Status (2026-10-23): OPEN, narrowed.** A header-only inline removal is reported by the header tier and by the L4 replay. `compare.finding_dedup._drop_source_replay_inline_duplicates` keeps the header-tier finding and drops the replay copy, matched by bare function name, one for one. Two limits remain. (a) A header-tier symbol that does not demangle (no `demangled_symbol`, no demangler result) keeps its replay twin visible; this is conservative, not a silent loss. (b) Two overloads of one name pair by count, not by signature, because the replay `Change` carries no parameter list, so which of the two overloads is the twin is not recorded. Both replay copies are still counted in the ledger. Closing (b) needs the replay finding to carry its signature hash.
+**Status (2026-10-23): OPEN, narrowed.** Two observations are reported by both the header tier and the L4 replay: a header-only inline removal (`INLINE_FUNCTION_REMOVED`) and a C++ `constexpr` value change (`CONSTEXPR_VALUE_CHANGED` / `CONSTANT_CHANGED`). `compare.finding_dedup._SOURCE_REPLAY_TWINS` keeps the header-tier finding and drops the replay copy, matched by name, one for one. For constants, the match is on the qualified name only: a replay copy whose value disagrees with the header copy is still dropped, and the header copy's value is what is reported. The "L2 tier not run, replay copy kept" case is covered only at unit level, because the replay alone does not produce the copy end to end (a no-header run matches no symbols). For inline removals the match is on the bare function name. Two limits remain there. (a) A header-tier symbol that does not demangle (no `demangled_symbol`, no demangler result) keeps its replay twin visible; this is conservative, not a silent loss. (b) Two overloads of one name pair by count, not by signature, because the replay `Change` carries no parameter list, so which of the two overloads is the twin is not recorded. Both replay copies are still counted in the ledger. Closing (b) needs the replay finding to carry its signature hash.
 
 #### `append_only_dispatch_tables` does not forgive offset shifts inside a dispatch-table aggregate (2026-10-23)
 
@@ -239,6 +239,10 @@ current emitter, which is unchanged.
 `false-clean` — A public header reached only through a `-I` or `/external:I` include under clang-cl is probed as a public root, but the replayed AST dump does not search that directory, so a declaration that comes only through it is not replayed. An MSVC `/imsvc` include tree is never a probed public root.
 
 ### False-positive risk
+
+#### Below `source`, `TemplateInstanceAbsence` loses the clang-graph instantiation origins (H2a residual, 2026-10-23)
+
+**Status (2026-10-23): OPEN, unobserved.** `compare/detector_inputs.py` declares `surface_graph` as a *tolerated* input of the `functions`/`variables`/`types` detectors: its L2 declaration-node role survives below `source` as `header_declaration_ids`, but `_graph_origins` (the `template_instantiation` nodes' `instantiated_from` + `DECL_INSTANTIATES_TEMPLATE` edges) does not. At `--depth headers`/`build` the rule then proves a vanished specialization's origin from the castxml class-head reading alone, so a specialization only the clang graph could place may read as `type_removed`. `tests/test_depth_metamorphic_examples.py` found no such case in `catalog/cases`. Fix, if one appears: keep the proven `(spelling, origin, pattern)` triples as a second runtime-only L2 fact alongside `header_declaration_ids`, and move the read from `tolerates` to the substitute.
 
 #### Two BINARY_GATED detectors still assert public reachability from the export population (ADR-084)
 
@@ -561,6 +565,8 @@ Deliberate rulings and scope limits, not defects. Changing one needs the decisio
 | ADR-071's fold excludes per-library overrides, per-member blocks and fold convergence; items 4-5 are residual defects. | [ADR-071's release assurance fold: what it deliberately does not do](known-gaps/adr-071s-release-assurance-fold-what-it-deliberately-does-not-do.md) |
 | The compatibility percentage divides findings by symbols (ABICC heuristic, public contract); kept. | [The compatibility percentage counts findings against symbols](known-gaps/the-compatibility-percentage-counts-findings-against-symbols.md) |
 | DWARF member-location evaluation covers `DW_OP_plus`/`plus_uconst`/`constu`/`consts`/`lit0..31` only; other ops give unknown offsets, not values. | [DWARF member-location evaluator implements only a subset of DW_OP](known-gaps/dwarf-member-location-evaluator-implements-only-a-subset-of-dw-op.md) |
+| Declarations under an `#ifdef` the parse does not define (e.g. `SYCL_LANGUAGE_VERSION` `sycl::queue&` overloads) are not header-checked by default; the hidden exports are counted in the coverage block (sycl as a named cause), and `-D` plus a user stub header parses them. No stub is bundled. | [`docs/use/dump-compare-flags.md`](../use/dump-compare-flags.md#declarations-behind-ifdef-sycl_language_version) |
+| A release binary without debug info disables the DWARF layout detectors by design; layout then comes only from headers. Not a bug. | [Evidence depth](../use/evidence-depth.md) |
 | Local-exec TLS in an AArch64 shared object leaves no binary evidence; toolchain limit. | [Local-exec TLS in an AArch64 shared object leaves no binary evidence](known-gaps/local-exec-tls-in-an-aarch64-shared-object-leaves-no-binary.md) |
 
 ## Unreached oneDAL profiling hotspots (perf, 2026-10-23)

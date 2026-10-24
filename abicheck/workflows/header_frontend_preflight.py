@@ -184,3 +184,49 @@ def require_castxml_if_needed(
     )
     if "castxml" in pf.missing_tools:
         raise SnapshotError(CASTXML_NOT_FOUND_MESSAGE)
+    if "castxml" in pf.required_tools:
+        _require_supported_castxml(
+            requested, lang=lang, gcc_path=gcc_path, gcc_prefix=gcc_prefix
+        )
+
+
+def _require_supported_castxml(
+    requested: str,
+    *,
+    lang: str,
+    gcc_path: str | None,
+    gcc_prefix: str | None,
+) -> None:
+    """Run the CastXML version gate at request time, not at header-parse time.
+
+    An out-of-policy castxml (notably the PyPI ``castxml`` wheel) used to be
+    rejected only once the header pass started, after the binary and debug-info
+    extraction had already run. This calls the backend's own gate
+    (``_resolve_gated_castxml_bin``) and decides with the dump's own
+    ``_castxml_fallback_reason``, so the error, its wording and the opt-ins
+    (``ABICHECK_ALLOW_UNSUPPORTED_CASTXML``, the auto castxml->clang fallback)
+    are the ones the late path applies. When the fallback would take over,
+    nothing is raised and the dump proceeds exactly as before.
+    """
+    from ..dumper import _castxml_fallback_reason
+    from ..errors import SnapshotError, UnsupportedCastxmlVersionError
+    from ..extract.headers.backend_plan import BackendPlan
+    from ..extract.headers.castxml.backend import _resolve_gated_castxml_bin
+
+    try:
+        _resolve_gated_castxml_bin(None)
+    except UnsupportedCastxmlVersionError as exc:
+        plan = BackendPlan.from_environment()
+        reason = _castxml_fallback_reason(
+            exc,
+            auto_selected=plan.auto_selected(requested),
+            compiler="cc" if lang == "c" else "c++",
+            gcc_path=gcc_path,
+            gcc_prefix=gcc_prefix,
+            plan=plan,
+        )
+        if reason is None:
+            raise
+    except SnapshotError:
+        # Unresolvable binary: the missing-tool branch above owns that case.
+        return

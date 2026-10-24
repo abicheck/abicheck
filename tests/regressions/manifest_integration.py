@@ -306,4 +306,58 @@ INTEGRATION_BUG_CLASSES: tuple[BugClass, ...] = (
             "entry_visibility": ("public", "private"),
         },
     ),
+    BugClass(
+        id="evidence.depth_projection_drops_lower_layer_detector_input",
+        invariant=(
+            "A depth projection that clears a field for being evidence of a "
+            "higher layer must keep the lower-layer facts the same field "
+            "carries for a detector still enabled at that depth: a lower "
+            "depth never invents a finding the higher depth rejects. "
+            "`--depth headers` cleared `surface_graph` as L5 evidence and "
+            "with it the L2 template declarations the template-instance-"
+            "absence rule reads, so a vanished implicit instance of a still-"
+            "declared member template read as `inline_function_removed`; "
+            "separately, an overloaded primary was excluded at every depth."
+        ),
+        # 1661 introduced the rule; append the H2 fix PR number on merge.
+        fixed_by=(1661,),
+        seed_tests=(
+            # Generator: member/free x namespace depth 0/2 x overloads 1-3 x
+            # primary kept/deleted x depth headers/source, ground-truth
+            # oracle plus the headers-subset-of-source metamorphic check and
+            # a compiled -fvisibility-inlines-hidden reproduction.
+            "tests/test_template_instance_absence_shapes.py",
+            # The class: every detector's declared projectable inputs vs
+            # every rung's clearable facts (pure table, projection behaviour,
+            # AST read oracle, registry "disabled" coverage), and the
+            # catalog-wide lower-rung-never-invents-a-removal relation.
+            "tests/test_depth_detector_input_contract.py",
+            "tests/test_depth_metamorphic_examples.py",
+            # F1 harness: records the runtime-only projection fact.
+            "tests/test_family_f1_evidence_ablation.py",
+        ),
+        public_surfaces=("cli",),
+        axes={
+            "template": ("member", "free"),
+            "namespace_depth": ("0", "2"),
+            "overloads": ("1", "2", "3"),
+            "primary": ("kept", "deleted"),
+            "depth": ("headers", "source"),
+        },
+        known_gaps=(
+            KnownGap(
+                description=(
+                    "Overload shape is not matched: a primary's graph id "
+                    "carries a one-way hash of its dependent signature, so "
+                    "with several overloads the rule requires every old "
+                    "overload to be kept (or, with no old header graph, any "
+                    "one). The old side's clang template-origin edges "
+                    "(`_graph_origins`) are still dropped at headers depth; "
+                    "only castxml's line reading proves a class-template "
+                    "specialization's origin there."
+                ),
+                reference="abicheck/compare/template_instance_absence.py",
+            ),
+        ),
+    ),
 )
