@@ -131,11 +131,17 @@ UC-TC-make-auto-query, UC-TC-build-emitted-facts, UC-WF-oneshot-deep,
 UC-WORKFLOW-real-world-corpus, UC-WORKFLOW-pr-source-tier,
 UC-TC-bazel-build-evidence, UC-CHANGE-crosscheck-example-corpus.
 **Friction (highest priority, L2 Linux first):**
-- False-clean results recorded in `known-gaps.md`: a function-pointer
-  parameter's signature is not compared; castxml reports `NO_CHANGE` for a
-  default template-argument change (ADR-085); a large export shrink with no
-  declared surface emits no finding; a binary-gate demotion states no
-  coverage gap (ADR-084).
+- [A function-pointer parameter's signature is not compared, so a callback
+  arity change reads `NO_CHANGE` on the header path](known-gaps.md#a-function-pointer-parameters-signature-is-not-compared-so-a-callback-arity-change-reads-no_change-on-the-header-path-2026-10-15)
+  (known gap).
+- [castxml reports `NO_CHANGE` for a header-only default template-argument
+  change at L2](known-gaps.md#a-header-only-default-template-argument-change-reads-no_change-at-l2-on-castxml-2026-10-21)
+  (ADR-085).
+- [A large export shrink with no declared surface emits no
+  finding](known-gaps.md#a-large-export-shrink-with-no-declared-surface-emits-no-finding-in-header-mode-2026-10-22)
+  (known gap).
+- [A binary-gate demotion states no coverage gap](known-gaps.md#a-binary-gate-demotion-does-not-state-a-coverage-gap-adr-084)
+  (ADR-084).
 - No INCONSISTENT/CONFLICTING fact status, and two provider-status
   vocabularies (ADR-063, G47).
 - Scope and completeness are partial, and the exit code is still folded by
