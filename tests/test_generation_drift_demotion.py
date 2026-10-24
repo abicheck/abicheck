@@ -215,3 +215,44 @@ def test_require_same_generation_is_rejected_with_no_baseline(tmp_path: Path) ->
     assert "--require-same-generation is not available with --no-baseline" in (
         " ".join(result.output.split())
     )
+
+
+@pytest.mark.parametrize(
+    ("prior_verdict", "old_value", "new_value", "expected_verdict"),
+    [
+        # An earlier policy disposition is never overwritten by the demotion.
+        (Verdict.BREAKING, "Placeholder&", "auto&", Verdict.BREAKING),
+        # A finding whose values are not type spellings is left alone.
+        (None, None, "auto&", None),
+        # The control: an undisposed string respelling is demoted.
+        (None, "Placeholder&", "auto&", Verdict.COMPATIBLE_WITH_RISK),
+    ],
+)
+def test_demotion_skips_disposed_and_non_spelling_findings(
+    prior_verdict: Verdict | None,
+    old_value: str | None,
+    new_value: str,
+    expected_verdict: Verdict | None,
+) -> None:
+    from abicheck.model.change import Change
+    from abicheck.policy.generation_drift_demotion import (
+        demote_generation_spelling_drift,
+    )
+
+    change = Change(
+        kind=ChangeKind.FUNC_RETURN_CHANGED,
+        symbol="_Z1fi",
+        description="return type changed",
+        old_value=old_value,
+        new_value=new_value,
+    )
+    change.effective_verdict = prior_verdict
+    snap = _snapshot("Placeholder&")
+    out = demote_generation_spelling_drift(
+        [change], snap, snap, 5, EXTRACTOR_GENERATION
+    )
+    assert out == [change]
+    assert change.effective_verdict is expected_verdict
+    assert (change.modulation_rule == GENERATION_DRIFT_RULE) is (
+        expected_verdict is Verdict.COMPATIBLE_WITH_RISK and prior_verdict is None
+    )
