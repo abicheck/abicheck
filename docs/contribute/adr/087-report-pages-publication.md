@@ -3,7 +3,7 @@
 **Date:** 2026-10-23
 **Status:** Proposed — not implemented. Implementation (Stage 2) waits for this ADR's acceptance by a maintainer.
 
-Governed by: [ADR-047](047-github-actions-integration-model.md) (the Actions integration model: reusable workflows, the elevated-permission boundary, release/push-only publishing), [ADR-073](073-report-only-publication-and-the-trusted-reporter-boundary.md) (publication is a separate capability from analysis; the artifact is hostile input; a trusted reporter does not make contents trusted), [ADR-070](070-action-layer-does-not-encode-cli-semantics.md) (the Action layer does not re-implement engine semantics), [ADR-042](042-compatibility-versus-gate-separation.md) / [ADR-064](064-canonical-gate-algorithm-and-exit-decision.md) (compatibility and gate are separate from publication). Amends none of them.
+Governed by: [ADR-047](047-github-actions-integration-model.md) (the Actions integration model: reusable workflows, the elevated-permission boundary, release/push-only publishing), [ADR-073](073-report-only-publication-and-the-trusted-reporter-boundary.md) (publication is a separate capability from analysis; the artifact is hostile input; a trusted reporter does not make contents trusted), [ADR-070](070-action-layer-does-not-encode-cli-semantics.md) (the Action layer does not re-implement engine semantics), [ADR-042](042-compatibility-and-gate-decision-separation.md) / [ADR-064](064-canonical-gate-algorithm-and-exit-decision.md) (compatibility and gate are separate from publication). Amends none of them.
 
 ## Context
 
