@@ -180,6 +180,13 @@ def classify_resolved_pair(
     # The operands as the request names them -- every route builds its
     # request from the user's real operands, so nothing overrides these.
     operands = ComparedOperands.from_request(request)
+    if request.require_same_generation:
+        from ..errors import ValidationError
+        from .generation_drift import generation_mismatch_message
+
+        mismatch = generation_mismatch_message(pair.old, pair.new)
+        if mismatch is not None:
+            raise ValidationError(mismatch)
     # A stored-snapshot-only pair may do no extraction work at all, so nothing
     # below would otherwise consult an already-expired `budget_s` (PR #1178).
     check_deadline()
