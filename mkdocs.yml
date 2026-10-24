@@ -308,6 +308,7 @@ nav:
       - Testing: contribute/testing.md
       - Detector Impact Contract: contribute/detector-impact-contract.md
       - Use-Case Impact: contribute/use-case-impact.md
+      - Customer Journey Map: contribute/cjm.md
       - Performance: contribute/performance.md
       - Performance findings: contribute/perf-findings.md
       - Memory: contribute/memory.md
