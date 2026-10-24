@@ -409,6 +409,13 @@ Do not re-attempt token-claiming. A header's export tokens cannot tell whether i
 **Status (2026-10-11): OPEN.** Location-pass, cache trace and cache write switch landed; threads-on-free-threaded, a faster `json_compact` and pickle protocol 5 were measured on oneDAL and rejected; walk fusion is smaller than profiled (cProfile ~7x); closure renumbering after scoping and the cold GIL member-parallelism A/B remain.  
 `perf` — The clang JSON tree is walked at least eight times in Python, snapshots are pickled across the side boundary, and populating the snapshot cache costs ~30 % wall on a 28-member release. [Full write-up](known-gaps/python-level-ast-walks-side-boundary-and-cache-costs.md)
 
+### Generation corpus: retirement without a freeze, and the re-dump respelling contract
+
+**Status (recorded 2026-10-24): OPEN.** Generation 14 was retired by #1791 (`a486625db`, `EXTRACTOR_GENERATION` 14 → 15) with no frozen snapshot and no skip note, so the `generation-corpus` gate of `check_ai_readiness.py` failed on `main`. The freeze that restores the gate is `tests/fixtures/generations/gen14/` (taken at `81b71a3c9`, the last commit that declared 14). The commit that retired 14 says in its message that the PR gate had not been run on it, and it landed anyway. Process gap: a retire must be blocked in the PR that makes it, not found on `main` afterwards.
+
+Separately, the integration-marked tests in `tests/test_generation_corpus.py` (`test_frozen_generation_compares_clean_against_fresh_dump` and `test_every_respelling_against_fresh_dump_is_a_declared_migration`) fail for every frozen generation. Generation 15's row in `SPELLING_MIGRATIONS` declares that a castxml array count change (`T[N-1]` → `T[N]`) has no sound rewrite and that a baseline holding those spellings is re-dumped. The test oracle has no notion of a re-dump row, so it reports the change as an undeclared respelling and as a gating `type_field_type_changed`. Deciding whether those entities should compare clean, or be reported as needing a re-dump, is a semantics decision for the owner of ADR-062 and the generation corpus, not a fixture edit.
+`hygiene` — A check that would catch the first part in the PR itself: run `scripts/check_ai_readiness.py` (the `generation-corpus` gate) on every PR that changes `EXTRACTOR_GENERATION`, and make that job required. The second part needs the re-dump contract defined before the oracle can encode it.
+
 ### Hygiene
 
 #### `--required-symbol @FILE` read errors are checked on the CLI route only
