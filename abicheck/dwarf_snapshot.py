@@ -39,6 +39,7 @@ from elftools.elf.elffile import ELFFile
 from .dwarf_snapshot_datasources import show_data_sources as show_data_sources
 from .dwarf_utils import (
     add_bit_offsets as _add_bit_offsets,
+    array_type_info,
     attr_bool as _attr_bool,
     attr_int as _attr_int,
     attr_str as _attr_str,
@@ -1640,12 +1641,7 @@ class _DwarfSnapshotBuilder:
             return (name or inner_info[0], inner_info[1])
 
         if tag == "DW_TAG_array_type":
-            size = _attr_int(die, "DW_AT_byte_size")
-            inner = self._resolve_inner_name(die, CU, depth)
-            return (
-                f"{inner}[]" if inner else "array",
-                size,
-            )
+            return array_type_info(die, self._resolve_inner_info(die, CU, depth))
 
         if tag == "DW_TAG_subroutine_type":
             return ("fn(...)", _attr_int(die, "DW_AT_byte_size"))

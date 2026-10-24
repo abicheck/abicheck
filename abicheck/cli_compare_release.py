@@ -33,10 +33,6 @@ from typing import TYPE_CHECKING, Any
 
 import click
 
-from .cli_compare_release_matrix import (
-    _finalize_release_output,
-    _validate_suppression_early,
-)
 from .cli_options import (
     include_dependencies_option,
     lang_option,
@@ -49,12 +45,14 @@ from .errors import (
     SnapshotError,
 )
 from .frontends.cli.release_compare_request import (
+    _validate_suppression_early,
     execute_release_compare_checked,
     reject_bundle_facts_out_collision,
     reject_bundle_facts_out_dir_collision,
 )
 from .frontends.cli.release_member_reporter import CliReleaseReporter
 from .frontends.cli.release_report import render_release_summary
+from .frontends.cli.release_summary import _finalize_release_output
 from .frontends.cli.runtime import _setup_verbosity, _write_or_echo
 from .model.release_selection import ReleaseSelection
 from .report.release_outcome_projection import project_release_outcome

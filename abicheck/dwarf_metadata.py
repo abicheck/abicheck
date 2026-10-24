@@ -62,6 +62,7 @@ from elftools.elf.elffile import ELFFile
 
 from .dwarf_utils import (
     BASE_PRUNE_TAGS,
+    array_type_info,
     attr_bool as _attr_bool,  # noqa: F401
     attr_int as _attr_int,
     attr_str as _attr_str,
@@ -673,9 +674,7 @@ def _compute_array_type_info(
     depth: int,
     cache: dict[tuple[int, int], tuple[str, int]],
 ) -> tuple[str, int]:
-    size = _attr_int(die, "DW_AT_byte_size")
-    inner_name = _resolve_inner_type_name(die, CU, depth, cache)
-    return (f"{inner_name}[]", size) if inner_name is not None else ("array", size)
+    return array_type_info(die, _resolve_inner_type_info(die, CU, depth, cache))
 
 
 def _resolve_inner_type_info(

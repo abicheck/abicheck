@@ -118,7 +118,13 @@ SPELLING_MIGRATIONS: Mapping[int, GenerationSpellingChange] = {
     11: GenerationSpellingChange(_NO_SPELLING),
     12: GenerationSpellingChange(_NO_SPELLING),
     13: GenerationSpellingChange(_NO_SPELLING),
-    14: GenerationSpellingChange(_NO_SPELLING),
+    14: GenerationSpellingChange(
+        "DWARF vector types spell as 'T __attribute__((vector_size(N)))' instead "
+        "of 'T[]' (dwarf_utils.array_type_info); a stored 'T[]' cannot say whether "
+        "it was an array or a vector, so no rewrite is sound and a baseline "
+        "holding a vector type is re-dumped"
+    ),
+    15: GenerationSpellingChange(_NO_SPELLING),
 }
 
 

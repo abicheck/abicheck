@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -24,6 +25,9 @@ pytestmark = [
         not (shutil.which("castxml") and shutil.which("g++") and shutil.which("nm")),
         reason="needs castxml, g++ and nm",
     ),
+    # The fixture is an ELF shared object read back with ``nm -D``: g++ emits
+    # Mach-O/PE elsewhere, where ``nm -D`` fails or lists nothing.
+    pytest.mark.skipif(sys.platform != "linux", reason="ELF-only fixture (nm -D)"),
 ]
 
 #: Exported functions the header declares only under SYCL_LANGUAGE_VERSION.

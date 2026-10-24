@@ -102,7 +102,7 @@ adrs:
   - id: ADR-010
     file: 010-policy-profile-system.md
     disposition: surfaced
-    use_cases: [UC-CHANGE-taxonomy]
+    use_cases: [UC-CHANGE-taxonomy, UC-WF-policy-profile]
     surfaces:
       - cli: compare --policy
       - action: policy
@@ -125,7 +125,7 @@ adrs:
   - id: ADR-013
     file: 013-suppression-system.md
     disposition: surfaced
-    use_cases: [UC-WF-compare]
+    use_cases: [UC-WF-compare, UC-WF-suppression]
     surfaces:
       - cli: compare --suppress
       - action: suppress
@@ -385,7 +385,7 @@ adrs:
   - id: ADR-044
     file: 044-reachability-aware-suppression.md
     disposition: surfaced
-    use_cases: []
+    use_cases: [UC-WF-suppression]
     surfaces:
       - cli: compare --suppress
       - report: compare_report.suppression_audit
@@ -427,7 +427,7 @@ adrs:
   - id: ADR-049
     file: 049-contract-relevance-and-compatibility-configuration.md
     disposition: surfaced
-    use_cases: [UC-WF-compare]
+    use_cases: [UC-WF-compare, UC-WF-contract-config]
     surfaces:
       - cli: compare --contract
       - api: abicheck.workflows.service_requests.CompareRequest.pack_paths
@@ -537,7 +537,7 @@ adrs:
   - id: ADR-063
     file: 063-one-semantic-pipeline.md
     disposition: partial
-    use_cases: []
+    use_cases: [UC-WF-analysis-assurance]
     surfaces:
       - cli: compare
     missing: Roadmap ADR; Phase 10 accounting remains open.
@@ -554,7 +554,7 @@ adrs:
   - id: ADR-065
     file: 065-comparison-scope-selection-and-completeness.md
     disposition: surfaced
-    use_cases: [UC-WF-compare]
+    use_cases: [UC-WF-compare, UC-WF-scope-completeness]
     surfaces:
       - cli: compare --select --select-required --dry-run
       - report: compare_report.comparison_scope
@@ -563,7 +563,7 @@ adrs:
   - id: ADR-066
     file: 066-longitudinal-history-and-versioning-policy.md
     disposition: partial
-    use_cases: [UC-CHANGE-semver-recommendation]
+    use_cases: [UC-CHANGE-semver-recommendation, UC-WF-release-history]
     surfaces:
       - cli: project history --policy
       - api: abicheck.workflows.history.build_longitudinal_history
@@ -572,7 +572,7 @@ adrs:
   - id: ADR-067
     file: 067-change-intent-acknowledgment-and-disposition-audit.md
     disposition: partial
-    use_cases: [UC-WF-compare]
+    use_cases: [UC-WF-compare, UC-WF-acknowledgment]
     surfaces:
       - cli: compare --suppress
       - cli: compare --acknowledgments
@@ -604,7 +604,7 @@ adrs:
   - id: ADR-071
     file: 071-release-analysis-assurance-fold.md
     disposition: surfaced
-    use_cases: [UC-WF-compare]
+    use_cases: [UC-WF-compare, UC-WF-scope-completeness]
     surfaces:
       - action: analysis-assurance-complete
       - report: compare_report.analysis_assurance
