@@ -170,11 +170,21 @@ def test_binary_depth_on_header_snapshots_matches_binary_only(tmp_path: Path) ->
     assert len(summary) == 1
     assert f": {len(excluded)} detectors " in summary[0]
     assert not any("not available at depth" in w for w in depth["coverage_warnings"])
-    # Disabled for another reason: still one line each.
-    assert (
-        detector_disablement_warning("pe", "missing PE metadata")
-        in (depth["coverage_warnings"])
-    )
+    # Disabled for another reason (which ones depends on the host's binary
+    # format): still one line each.
+    other = [
+        d
+        for d in depth["detectors"]
+        if not d.get("enabled", True)
+        and d.get("excluded_by_depth") is None
+        and d.get("coverage_gap")
+    ]
+    assert other
+    for d in other:
+        assert (
+            detector_disablement_warning(d["name"], d["coverage_gap"])
+            in depth["coverage_warnings"]
+        )
     md = depth_md.read_text()
     assert md.count(DEPTH_EXCLUSION_PREFIX) == 1
     assert "not available at depth" not in md
