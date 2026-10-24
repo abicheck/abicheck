@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 """Join clang's vector spellings onto a castxml root, cached as a sidecar.
 
 castxml's XML cannot say what a vector type is (see

@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 """Vector-type spellings castxml cannot express, joined from the clang AST.
 
 castxml's XML renders a GCC/Clang vector type (``vector_size``, ``__m256``,
