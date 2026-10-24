@@ -136,3 +136,66 @@ def test_declaration_location_is_recorded_only_for_a_header(
     # is_impl_source treat the type as opaque and downgrade its layout change.
     cu = _cu(version, files, dirs)
     assert decl_header_location(_Die(file_index, 6), cu) == expected
+
+
+def test_missing_line_program_resolves_to_none() -> None:
+    cu = _cu(5, [], [COMP_DIR])
+    cu.dwarfinfo.line_program_for_CU = lambda _cu: None
+    assert decl_file_path(_Die(0, 4), cu) is None
+
+
+def test_line_program_error_is_swallowed_as_none() -> None:
+    # Resolution is best-effort evidence: a broken line table is no location.
+    cu = _cu(5, [], [COMP_DIR])
+
+    def _broken(_cu):
+        raise ValueError("corrupt line table")
+
+    cu.dwarfinfo.line_program_for_CU = _broken
+    assert decl_file_path(_Die(0, 4), cu) is None
+
+
+def test_dwarf5_index_past_the_file_table_resolves_to_none() -> None:
+    cu = _cu(5, [{"DW_LNCT_path": b"api.h", "DW_LNCT_directory_index": 0}], [COMP_DIR])
+    assert decl_file_path(_Die(5, 4), cu) is None
+
+
+def test_dwarf4_index_past_the_file_table_resolves_to_none() -> None:
+    cu = _cu(4, [{"name": b"api.h", "dir_index": 0}], [])
+    assert decl_file_path(_Die(9, 4), cu) is None
+
+
+def test_directory_index_past_the_table_falls_back_to_compilation_directory() -> None:
+    cu = _cu(5, [{"DW_LNCT_path": b"api.h", "DW_LNCT_directory_index": 7}], [COMP_DIR])
+    assert decl_file_path(_Die(0, None), cu) == "/work/build/api.h"
+
+
+def test_dwarf4_directory_index_past_the_table_falls_back_to_compilation_directory() -> (
+    None
+):
+    cu = _cu(4, [{"name": b"api.h", "dir_index": 9}], [b"lib"])
+    assert decl_file_path(_Die(1, None), cu) == "/work/build/api.h"
+
+
+def test_keyed_directory_entry_is_read_by_its_path_key() -> None:
+    # Some producers key a directory entry rather than yielding bytes.
+    cu = _cu(
+        5,
+        [{"DW_LNCT_path": b"api.h", "DW_LNCT_directory_index": 1}],
+        [COMP_DIR, {"DW_LNCT_path": b"lib"}],
+    )
+    assert decl_file_path(_Die(0, None), cu) == "/work/build/lib/api.h"
+
+
+def test_file_entry_without_a_name_resolves_to_none() -> None:
+    cu = _cu(5, [{"DW_LNCT_directory_index": 0}], [COMP_DIR])
+    assert decl_file_path(_Die(0, 4), cu) is None
+
+
+def test_zero_declaration_line_is_recorded_without_a_line() -> None:
+    cu = _cu(
+        5,
+        [{"DW_LNCT_path": b"api.h", "DW_LNCT_directory_index": 1}],
+        [COMP_DIR, b"lib"],
+    )
+    assert decl_file_path(_Die(0, 0), cu) == "/work/build/lib/api.h"

@@ -124,9 +124,10 @@ def _strip_qualifiers(spelling: str) -> str:
     changed = True
     while changed:
         changed = False
-        if text.startswith("const "):
-            text = text[len("const ") :].strip()
-            changed = True
+        for leading in ("const ", "volatile "):
+            if text.startswith(leading):
+                text = text[len(leading) :].strip()
+                changed = True
         for suffix in _QUALIFIER_SUFFIXES:
             if text.endswith(suffix):
                 text = text[: -len(suffix)].rstrip()
