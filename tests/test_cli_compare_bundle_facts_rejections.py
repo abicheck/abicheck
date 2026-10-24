@@ -682,7 +682,9 @@ class TestCompareOldBundleFactsEarlyRejections:
         assert code == 0, out
         assert out_path.exists()
 
-    def test_extraction_failure_does_not_leak_temp_dir(self, tmp_path: Path) -> None:
+    def test_extraction_failure_does_not_leak_temp_dir(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         # Codex review: a malformed archive (a real recognized extension,
         # bad content) raised from inside _extract_if_package *after*
         # make_temp_dir() had already recorded the directory -- when
@@ -695,7 +697,13 @@ class TestCompareOldBundleFactsEarlyRejections:
         malformed_archive = tmp_path / "release.tar.gz"
         malformed_archive.write_bytes(b"not a real gzip/tar stream")
 
-        before = set(Path(tempfile.gettempdir()).iterdir())
+        # The shared temp root is written by every parallel test worker, so a
+        # before/after diff of it flags another worker's extraction as a leak.
+        # Point the temp root at a directory only this test uses.
+        private_tmp = tmp_path / "tmp"
+        private_tmp.mkdir()
+        monkeypatch.setattr(tempfile, "tempdir", str(private_tmp))
+        before = set(private_tmp.iterdir())
 
         code, out = _invoke(
             "compare",
@@ -706,7 +714,7 @@ class TestCompareOldBundleFactsEarlyRejections:
         )
 
         assert code != 0, out
-        after = set(Path(tempfile.gettempdir()).iterdir())
+        after = set(private_tmp.iterdir())
         leaked = {p for p in (after - before) if p.name.startswith("abicheck_pkg_")}
         assert not leaked, f"leaked extraction temp dir(s): {leaked}"
 

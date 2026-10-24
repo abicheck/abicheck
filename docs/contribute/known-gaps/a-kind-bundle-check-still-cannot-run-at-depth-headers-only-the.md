@@ -49,7 +49,7 @@ the cost calibration in (c).
 (b) **The candidate side still has no per-member header selection.**
 `check-project.yml` carries one project-wide `header:` input, and the
 release fan-out resolves headers run-wide
-(`cli_compare_release_helpers._resolve_release_headers`, threaded to every
+(`retired cli_compare_release_helpers._resolve_release_headers`, threaded to every
 pair) rather than per member. A bundle whose members have disjoint public
 header sets would therefore parse each member's candidate side against
 the union.

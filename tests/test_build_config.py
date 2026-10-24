@@ -224,7 +224,7 @@ class TestBuildConfigPublicHeaderDirs:
     def test_accepts_a_single_bare_string(self) -> None:
         """``_strs()``'s documented convention: a single bare string folds to
         a one-element list, same as every other list-shaped ``scope:``
-        subkey (``LIST_SUBKEYS`` in ``build_config_schema.py``)."""
+        subkey (``LIST_SUBKEYS`` in ``build_config.py``)."""
         cfg = BuildConfig.from_dict({"scope": {"public_header_dirs": "include"}})
         assert cfg.public_header_dirs == ["include"]
 
@@ -408,39 +408,30 @@ class TestRemovedCommandsAreGone:
         assert "doctor" not in main.commands
 
 
-# ── build_config_schema.py: opt_int/int_subkey_findings direct coverage ─────
+# ── resource_limits int subkey: strictness via from_dict ─────
 
 
-class TestIntSubkeyHelpers:
-    """Direct unit coverage for `build_config_schema.opt_int`/
-    `int_subkey_findings` (Phase 7g) -- both are exercised indirectly
-    through `BuildConfig.from_dict`/`_validate_structure` in
-    tests/test_config_rebalance.py, but `_validate_structure` rejects a
-    bool value before `opt_int` ever sees one on that path, so its own
-    bool-rejection branch (matching `_opt_bool`/`_opt_str`'s identical
-    defensive shape) needs a direct call to reach."""
+class TestIntSubkeyStrictness:
+    """The Phase 7g int subkey (`resource_limits.max_bundle_facts_decode_nodes`)
+    through the public `BuildConfig.from_dict` contract. A bool is not an int
+    for YAML purposes (it must be rejected, not read as 0/1), and a real int
+    loads and round-trips."""
 
-    def test_opt_int_rejects_bool(self) -> None:
-        from abicheck.buildsource.build_config_schema import opt_int
+    def test_bool_is_rejected_as_an_integer(self) -> None:
+        with pytest.raises(ValueError, match="must be an integer"):
+            BuildConfig.from_dict(
+                {"resource_limits": {"max_bundle_facts_decode_nodes": True}}
+            )
 
-        assert opt_int({"n": True}, "n") is None
-        assert opt_int({"n": False}, "n") is None
-
-    def test_opt_int_accepts_real_int(self) -> None:
-        from abicheck.buildsource.build_config_schema import opt_int
-
-        assert opt_int({"n": 5}, "n") == 5
-        assert opt_int({}, "n") is None
-
-    def test_int_subkey_findings_rejects_bool(self) -> None:
-        from abicheck.buildsource.build_config_schema import subkey_findings
-
-        findings = subkey_findings(
-            "resource_limits", "max_bundle_facts_decode_nodes", True
+    def test_real_int_loads_and_round_trips(self) -> None:
+        cfg = BuildConfig.from_dict(
+            {"resource_limits": {"max_bundle_facts_decode_nodes": 5}}
         )
-        assert findings and "must be an integer" in findings[0]
+        assert cfg.resource_limits_max_bundle_facts_decode_nodes == 5
+        assert BuildConfig.from_dict(cfg.to_dict()) == cfg
 
-    def test_int_subkey_findings_unregistered_subkey_is_silent(self) -> None:
-        from abicheck.buildsource.build_config_schema import subkey_findings
-
-        assert subkey_findings("scope", "not_a_real_subkey", "not-an-int") == []
+    def test_absent_int_is_unset(self) -> None:
+        assert (
+            BuildConfig.from_dict({}).resource_limits_max_bundle_facts_decode_nodes
+            is None
+        )
