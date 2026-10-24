@@ -198,8 +198,7 @@ def _compute_release_legacy_exit_code(
     """Worst legacy-scheme exit code across libraries *and* release-global
     (bundle/probe-matrix) findings.
 
-    ADR-064 stage 1b. Mirrors ``cli_compare_release_helpers.
-    _compute_release_severity_exit_code``'s per-library independence for
+    ADR-064 stage 1b. Mirrors ``workflows.release_exit_fold.release_severity_exit_code``'s per-library independence for
     the *legacy* scheme: ``release_outcome.RELEASE_VERDICT_ORDER``'s collapsed
     ``worst_verdict`` ranks ``"ERROR"``/``"not_comparable"`` above every
     real :class:`~abicheck.checker_policy.Verdict`, so using it directly as
@@ -282,7 +281,7 @@ def resolve_release_exit_decision_for_report(
     every compared member by ``policy.release_assurance``; ``0`` whenever the
     setting is off, which is every pre-existing invocation.
 
-    Reproduces ``cli_compare_release_helpers._exit_compare_release``'s own
+    Reproduces ``frontends.cli.release_exit._exit_compare_release``'s own
     precedence via :func:`resolve_release_exit_decision`, for **report
     purposes only** -- this function never calls ``sys.exit`` and is not
     itself called from ``_exit_compare_release``, which keeps computing the

@@ -37,7 +37,7 @@ drift, and ``severity``/``contract_coverage_exit``/``analysis_assurance``/
 change. ``GateOptions``/``resolve_release_gate_options``/
 ``apply_release_gate_pack`` (ADR-064) are the directory/package release
 fan-out's own severity/exit-code-scheme resolution -- reached this way
-because the fan-out's frontend module (``cli_compare_release_helpers.py``)
+because the fan-out's frontend module (``cli_compare_release.py``)
 may not import ``policy`` directly (``frontends -> policy`` is forbidden,
 same rule as every other name here).
 

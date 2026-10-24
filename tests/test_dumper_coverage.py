@@ -26,6 +26,7 @@ from abicheck.elf_metadata import ElfMetadata
 from abicheck.extract.headers.castxml import backend as castxml_backend
 from abicheck.extract.headers.castxml.backend import castxml_dump as _castxml_dump
 from abicheck.extract.headers.castxml.type_resolution import pointer_depth
+from abicheck.storage.tu_parse_store import TuParseStore
 
 # ── castxml_dump internal branches ────────────────────────────────────
 
@@ -38,9 +39,8 @@ class TestCastxmlDumpBranches:
         )
         monkeypatch.setattr(castxml_backend, "_cache_key", lambda *a, **kw: "test_key")
 
-        # Cache path that doesn't exist yet
-        cache_file = tmp_path / "cache.xml"
-        monkeypatch.setattr(castxml_backend, "_cache_path", lambda k: cache_file)
+        store = TuParseStore(tmp_path)
+        monkeypatch.setattr(castxml_backend, "ast_cache_store", lambda *a, **k: store)
 
         header = tmp_path / "test.h"
         header.write_text("int foo();", encoding="utf-8")

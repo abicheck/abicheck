@@ -22,6 +22,9 @@ scope**.
 | **G25** | [Cython API/ABI frontend](g25-cython-api-abi-frontend.md) | `UC-ARCH-cython-api` | XL |
 | **G26** | [NumPy C-API compatibility envelope](g26-numpy-capi-envelope.md) | `UC-TC-numpy-capi-envelope` | L |
 | **G27** | [Wheel tag / deployment-claim verification](g27-wheel-deployment-verification.md) | `UC-TC-wheel-deployment-claims` | L |
+| **G46** | [Comparison scope and completeness (vision workstream A)](vision-api-abi-evolution.md) | `UC-WF-scope-completeness` | L |
+| **G47** | [Analysis assurance and evidence adequacy (vision workstream E)](vision-api-abi-evolution.md) | `UC-WF-analysis-assurance` | L |
+| **G48** | [Release history and versioning policy (vision workstream B)](vision-api-abi-evolution.md) | `UC-WF-release-history` | M |
 
 Initiative plans (cross-cutting, not tied to a single registry gap):
 

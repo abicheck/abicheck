@@ -51,9 +51,14 @@ def use_cases_by_group(
 
 def compact_coverage_warnings(warnings: Sequence[str]) -> tuple[str, ...]:
     """Keep material limitations; routine applicability stays in detail output."""
+    from ..confidence import DEPTH_EXCLUSION_PREFIX
+
     material = []
     for warning in warnings:
         lowered = warning.lower()
+        # Detectors the explicitly requested --depth excludes: scope, not a gap.
+        if warning.startswith(DEPTH_EXCLUSION_PREFIX):
+            continue
         if warning.startswith("Detector '") and not any(
             word in lowered for word in ("failed", "required", "asymmetric")
         ):

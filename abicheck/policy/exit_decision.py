@@ -56,7 +56,7 @@ and :func:`~abicheck.policy.exit_decision_precedence.
 resolve_release_exit_decision` are pure functions reproducing today's exact
 precedence for `scan` and the directory/package release fan-out
 respectively (verified against `scan_engine.py`/
-`cli_compare_release_helpers.py` at the commit that added them) -- neither
+the retired `cli_compare_release_helpers.py` (now `frontends/cli/release_exit.py`) at the commit that added them) -- neither
 is wired into any call site's *actually returned* exit code yet, exactly
 the same "wraps the existing behaviour, doesn't call it yet" scoping PR G1
 itself used for the three axes above. Split into its own module purely for
@@ -69,7 +69,7 @@ ADR-064 fields (report schema 2.47/1.22), `scan`'s `NOT_COMPARABLE` outcome
 persists a real `diff.exit` block via `resolve_scan_exit_decision`, and the
 release fan-out's JSON summary gains an `exit` block via
 `resolve_release_exit_decision`, verified to always agree numerically with
-`cli_compare_release_helpers._exit_compare_release`'s own, independently
+`frontends.cli.release_exit._exit_compare_release`'s own, independently
 computed and heavily pinned exit code (`tests/test_exit_code_integrity.py`'s
 `TestReleaseExitDecisionForReportAgreesWithRealExit`) without changing that
 function itself. `scan`'s `_BudgetOverflow`/`_EvidenceContractError` abort

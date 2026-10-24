@@ -53,6 +53,7 @@ from ..policy.evaluate import effective_kind_sets
 from .document import ReportDocument
 from .envelope import RenderOptions, ReportEnvelope
 from .finding import build_report_findings
+from .scoped_gate_facts import build_scoped_gate_facts
 
 if TYPE_CHECKING:
     from ..checker_types import DiffResult
@@ -630,4 +631,5 @@ def build_report_envelope(
         resolved_today=today,
         scoped_only_findings=scoped_only_findings,
         suppressed_findings=suppressed_findings,
+        scoped_gate=build_scoped_gate_facts(result),
     )

@@ -138,10 +138,12 @@ from ..compare.edge_query import export_table_covered
 from ..evidence_depth import DEPTH_RANK
 from ..model import ScopeOrigin, Visibility
 from ..model.export_index import build_raw_export_index, default_versioned_names
+from ..model.graph_identity import header_declaration_ids
 from ..model.surface_facts import (
     headers_discarded_surface_facts,
     is_export_confirmed_absent,
 )
+from .depth_fact_availability import cleared_facts
 
 if TYPE_CHECKING:
     from ..buildsource.pack import BuildSourcePack
@@ -650,7 +652,20 @@ def project_snapshot_to_depth(
         # projection) keeps it: that pack's explicit L5 "not collected" row
         # already stops the fallback. Checked after the pack is projected,
         # since below `build` the pack itself is dropped.
+        # The graph's L2 declaration nodes are not L5 evidence, though: keep
+        # their ids (no edges) as the runtime-only `header_declaration_ids`,
+        # so a header-depth detector that asks "is this template still
+        # declared" (`compare/template_instance_absence.py`) keeps its input.
+        if not deep:  # below `headers` the declarations are gone too
+            out.header_declaration_ids = header_declaration_ids(out)
         out.surface_graph = None
+    # Record what this rung emptied, so a detector whose declared required
+    # input (`compare/detector_inputs.py`) is gone reports "disabled" rather
+    # than running on emptied input (bug class
+    # `evidence.depth_projection_drops_lower_layer_detector_input`).
+    gone = cleared_facts(snap, out, depth)
+    if gone:
+        out.projection_unavailable = (depth, gone)
     return out
 
 
@@ -726,4 +741,26 @@ def project_pair_to_depth(
             dwarf_struct_scope=dwarf_struct_scope,
             dwarf_enum_scope=dwarf_enum_scope,
         ),
+    )
+
+
+def header_scope_excluded_by_depth(
+    before: tuple[AbiSnapshot | None, AbiSnapshot],
+    after: tuple[AbiSnapshot | None, AbiSnapshot],
+    depth: str | None,
+) -> bool:
+    """Whether the explicitly requested *depth* is what made public-header
+    scoping impossible for this pair.
+
+    True only when *depth* ranks below ``headers`` and the projection itself
+    switched every present side into ``elf_only_mode`` (which no public
+    surface resolves from). Header scoping is then outside the requested
+    scope rather than a scope that failed to resolve, so a caller should not
+    request it -- the same treatment a pure binary-only comparison gets.
+    """
+    if depth is None or DEPTH_RANK.get(depth.lower(), 99) >= DEPTH_RANK["headers"]:
+        return False
+    pairs = [(b, a) for b, a in zip(before, after, strict=True) if b is not None]
+    return bool(pairs) and all(
+        a is not None and a.elf_only_mode and not b.elf_only_mode for b, a in pairs
     )

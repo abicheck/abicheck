@@ -530,18 +530,18 @@ def _apply_soname_policy(
     from .diff_versioning import demote_internal_version_node_findings
     from .elf_metadata import ElfMetadata as _ElfMetadata
     from .policy.closure_identity_postprocess import apply_closure_identity_postprocess
+    from .workflows.generation_drift import demote_cross_generation_drift
 
     _old_elf = getattr(old, "elf", None) or _ElfMetadata()
     _new_elf = getattr(new, "elf", None) or _ElfMetadata()
 
-    # Demote findings for ELF-internal symbols before the bump check so a
-    # demoted internal change neither drives a BREAKING verdict nor triggers a
-    # spurious bump recommendation (validation parity class A — nettle 3.6→3.7).
+    # Demote ELF-internal findings before the bump check: no BREAKING verdict
+    # or spurious bump recommendation (validation parity class A, nettle 3.7).
     demote_internal_version_node_findings(kept + verdict_redundant, _old_elf, _new_elf)
 
-    # Lambda-closure findings: drop ordinal re-spellings, then demote the
-    # never-exported ones (ordering matters -- see the policy module).
+    # Closure respellings, then undeclared cross-generation respellings (H1).
     apply_closure_identity_postprocess(kept, verdict_redundant, old, new)
+    demote_cross_generation_drift(kept + verdict_redundant, old, new)
 
     # Classify before deriving, not after: everything appended to `kept` up to
     # this point (the declared-floor, wheel and numpy checks above included) is

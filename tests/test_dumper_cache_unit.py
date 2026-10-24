@@ -28,7 +28,7 @@ def test_posix_uses_xdg_cache_home(monkeypatch, tmp_path) -> None:
 
     path = _cache_path("abcd", backend="castxml")
 
-    assert path == tmp_path / "abi_check" / "castxml" / "abcd.xml"
+    assert path == tmp_path / "abi_check" / "castxml" / "abcd.json"
     assert path.parent.is_dir()  # directory was created
 
 
@@ -60,7 +60,7 @@ def test_windows_without_localappdata_uses_home_appdata(monkeypatch, tmp_path) -
 
     path = _cache_path("k", backend="castxml")
 
-    assert path == tmp_path / "AppData" / "Local" / "abi_check" / "castxml" / "k.xml"
+    assert path == tmp_path / "AppData" / "Local" / "abi_check" / "castxml" / "k.json"
 
 
 def test_unwritable_cache_dir_falls_back_to_tempdir(monkeypatch, tmp_path) -> None:

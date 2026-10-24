@@ -34,7 +34,13 @@ the "Adding a new ChangeKind" procedure names those five modules by name.
 
 from __future__ import annotations
 
-from .registry import ChangeEntity, ChangeKindMeta, ChangeOperation, Verdict
+from .registry import (
+    ChangeEntity,
+    ChangeKindMeta,
+    ChangeOperation,
+    ContractSubject,
+    Verdict,
+)
 
 _B = Verdict.BREAKING
 _C = Verdict.COMPATIBLE
@@ -43,6 +49,7 @@ _R = Verdict.COMPATIBLE_WITH_RISK
 _E = ChangeKindMeta
 _ENT = ChangeEntity
 _OP = ChangeOperation
+_CS = ContractSubject
 
 PLATFORM_ENTRIES_1: list[ChangeKindMeta] = [
     _E(
@@ -55,6 +62,7 @@ PLATFORM_ENTRIES_1: list[ChangeKindMeta] = [
         "already its own finding.",
         description_template="ABI surface {detail} dramatically: {old} → {new} exported symbols ({name}); check -fvisibility=hidden and version scripts",
         entity=_ENT.ANALYSIS,
+        contract_subject=_CS.ANALYSIS,
         operation=_OP.MODIFIED,
     ),
     _E(
@@ -67,6 +75,7 @@ PLATFORM_ENTRIES_1: list[ChangeKindMeta] = [
         "flip: this is a per-symbol tag change.",
         description_template="ABI-tag set changed for '{name}': {detail}. The mangled name encodes the tag, so the old symbol ({old}) no longer exists under that name ({new}).",
         entity=_ENT.BINARY,
+        contract_subject=_CS.DECLARATION,
         operation=_OP.MODIFIED,
     ),
     _E(
@@ -79,6 +88,7 @@ PLATFORM_ENTRIES_1: list[ChangeKindMeta] = [
         "mismatched-allocator heap corruption hazard.",
         description_template="Global allocator replacement introduced: {detail}",
         entity=_ENT.BINARY,
+        contract_subject=_CS.BINARY_WIDE,
         operation=_OP.ADDED,
     ),
     _E(
@@ -91,6 +101,7 @@ PLATFORM_ENTRIES_1: list[ChangeKindMeta] = [
         "replacement provided disappear.",
         description_template="Global allocator replacement removed: {detail}",
         entity=_ENT.BINARY,
+        contract_subject=_CS.BINARY_WIDE,
         operation=_OP.REMOVED,
     ),
     _E(
@@ -103,6 +114,7 @@ PLATFORM_ENTRIES_1: list[ChangeKindMeta] = [
         "applies in practice.",
         description_template="Eager binding (BIND_NOW) disabled",
         entity=_ENT.BINARY,
+        contract_subject=_CS.BINARY_WIDE,
         operation=_OP.MODIFIED,
     ),
     _E(
@@ -115,6 +127,7 @@ PLATFORM_ENTRIES_1: list[ChangeKindMeta] = [
         "width.",
         description_template="_BitInt change on {name}: {detail} ({old} → {new}). The bit width determines storage size and ABI treatment.",
         entity=_ENT.TYPE,
+        contract_subject=_CS.DECLARATION,
         entity_from_field="entity_discriminator",
         operation=_OP.MODIFIED,
     ),
@@ -125,6 +138,7 @@ PLATFORM_ENTRIES_1: list[ChangeKindMeta] = [
         ".note.gnu.property — a hardening improvement. Informational.",
         description_template="Branch protection improved: {old} → {new}",
         entity=_ENT.BINARY,
+        contract_subject=_CS.BINARY_WIDE,
         operation=_OP.MODIFIED,
     ),
     _E(
@@ -136,6 +150,7 @@ PLATFORM_ENTRIES_1: list[ChangeKindMeta] = [
         "map. RISK by default; gated to break by the security policy.",
         description_template="Branch protection weakened: {old} → {new}",
         entity=_ENT.BINARY,
+        contract_subject=_CS.BINARY_WIDE,
         operation=_OP.MODIFIED,
     ),
     _E(
@@ -145,6 +160,7 @@ PLATFORM_ENTRIES_1: list[ChangeKindMeta] = [
         "a hardening improvement. Informational.",
         description_template="CET protection improved: {old} → {new}",
         entity=_ENT.BINARY,
+        contract_subject=_CS.BINARY_WIDE,
         operation=_OP.MODIFIED,
     ),
     _E(
@@ -158,6 +174,7 @@ PLATFORM_ENTRIES_1: list[ChangeKindMeta] = [
         "it to break.",
         description_template="CET protection weakened: {old} → {new}",
         entity=_ENT.BINARY,
+        contract_subject=_CS.BINARY_WIDE,
         operation=_OP.MODIFIED,
     ),
     _E(
@@ -170,6 +187,7 @@ PLATFORM_ENTRIES_1: list[ChangeKindMeta] = [
         "old binaries fail to resolve it.",
         description_template="char8_t migration ({detail}) on {name}: {old} → {new}. char8_t is a distinct C++20 type that changes overload identity and name mangling.",
         entity=_ENT.TYPE,
+        contract_subject=_CS.DECLARATION,
         entity_from_field="entity_discriminator",
         operation=_OP.MODIFIED,
     ),
@@ -185,6 +203,7 @@ PLATFORM_ENTRIES_1: list[ChangeKindMeta] = [
         "names are unchanged, so only the captured build flag exposes it. "
         "Build consumers with the matching char signedness.",
         entity=_ENT.BINARY,
+        contract_subject=_CS.BUILD_FACT,
         operation=_OP.MODIFIED,
     ),
     _E(
@@ -197,6 +216,7 @@ PLATFORM_ENTRIES_1: list[ChangeKindMeta] = [
         "non-determinism worth being aware of.",
         description_template="Exported STT_COMMON symbol: {name} (resolution depends on linker/loader)",
         entity=_ENT.BINARY,
+        contract_subject=_CS.DECLARATION,
         operation=_OP.MODIFIED,
     ),
     _E(
@@ -205,6 +225,7 @@ PLATFORM_ENTRIES_1: list[ChangeKindMeta] = [
         impact="Mach-O compatibility version changed; dylibs linked against old version may fail to load.",
         description_template="compatibility version changed: {old} → {new}",
         entity=_ENT.BINARY,
+        contract_subject=_CS.BINARY_WIDE,
         operation=_OP.MODIFIED,
     ),
     _E(
@@ -219,6 +240,7 @@ PLATFORM_ENTRIES_1: list[ChangeKindMeta] = [
         "supporting older runtimes.",
         description_template="Packed relative relocations introduced (DT_RELR): requires glibc >= 2.36 or equivalent loader",
         entity=_ENT.BINARY,
+        contract_subject=_CS.BINARY_WIDE,
         operation=_OP.MODIFIED,
     ),
     _E(
@@ -229,6 +251,7 @@ PLATFORM_ENTRIES_1: list[ChangeKindMeta] = [
         "tables, no compatibility cost.",
         description_template="Packed relative relocations removed (DT_RELR): loader floor lowered",
         entity=_ENT.BINARY,
+        contract_subject=_CS.BINARY_WIDE,
         operation=_OP.REMOVED,
     ),
     _E(
@@ -249,6 +272,7 @@ PLATFORM_ENTRIES_1: list[ChangeKindMeta] = [
         "re-scan to restore full DWARF-derived coverage.",
         description_template="New binary has no DWARF debug info — struct/enum layout comparison was skipped. Ensure debug info is present (compiled in or supplied separately) to enable.",
         entity=_ENT.BINARY,
+        contract_subject=_CS.BINARY_WIDE,
         operation=_OP.MODIFIED,
     ),
     _E(
@@ -262,6 +286,7 @@ PLATFORM_ENTRIES_1: list[ChangeKindMeta] = [
         "relying on the previous behaviour break at runtime.",
         description_template="Dynamic loading flags changed: {detail}",
         entity=_ENT.BINARY,
+        contract_subject=_CS.BINARY_WIDE,
         operation=_OP.MODIFIED,
     ),
     _E(
@@ -275,6 +300,7 @@ PLATFORM_ENTRIES_1: list[ChangeKindMeta] = [
         "flag-level FLOAT_ABI_CHANGED (L3) stays the explanatory signal.",
         description_template="ELF ABI flags changed: {old} → {new}",
         entity=_ENT.BINARY,
+        contract_subject=_CS.BINARY_WIDE,
         operation=_OP.MODIFIED,
     ),
     _E(
@@ -285,6 +311,7 @@ PLATFORM_ENTRIES_1: list[ChangeKindMeta] = [
         "built against one class can use the other.",
         description_template="ELF class changed: {old}-bit → {new}-bit",
         entity=_ENT.BINARY,
+        contract_subject=_CS.BINARY_WIDE,
         operation=_OP.MODIFIED,
     ),
     _E(
@@ -296,6 +323,7 @@ PLATFORM_ENTRIES_1: list[ChangeKindMeta] = [
         "is reinterpreted.",
         description_template="ELF endianness changed: {old} → {new}",
         entity=_ENT.BINARY,
+        contract_subject=_CS.BINARY_WIDE,
         operation=_OP.MODIFIED,
     ),
     _E(
@@ -309,6 +337,7 @@ PLATFORM_ENTRIES_1: list[ChangeKindMeta] = [
         "dlclose/exit.",
         description_template="ELF init/fini sections changed: {detail}",
         entity=_ENT.BINARY,
+        contract_subject=_CS.BINARY_WIDE,
         operation=_OP.MODIFIED,
     ),
     _E(
@@ -320,6 +349,7 @@ PLATFORM_ENTRIES_1: list[ChangeKindMeta] = [
         "The ELF-side analogue of PE_MACHINE_CHANGED / MACHO_CPU_TYPE_CHANGED.",
         description_template="ELF machine changed: {old} → {new} — different target architecture",
         entity=_ENT.BINARY,
+        contract_subject=_CS.BINARY_WIDE,
         operation=_OP.MODIFIED,
     ),
     _E(
@@ -330,6 +360,7 @@ PLATFORM_ENTRIES_1: list[ChangeKindMeta] = [
         "and relocations; consumers may resolve or load differently. RISK.",
         description_template="ELF OS ABI changed: {old} → {new}",
         entity=_ENT.BINARY,
+        contract_subject=_CS.BINARY_WIDE,
         operation=_OP.MODIFIED,
     ),
     _E(
@@ -344,6 +375,7 @@ PLATFORM_ENTRIES_1: list[ChangeKindMeta] = [
         "check is blind; the artifact/type diff confirms any concrete layout "
         "break. Build all consumers with the matching -fshort-enums setting.",
         entity=_ENT.ENUM,
+        contract_subject=_CS.DECLARATION,
         operation=_OP.MODIFIED,
     ),
     _E(
@@ -352,6 +384,7 @@ PLATFORM_ENTRIES_1: list[ChangeKindMeta] = [
         impact="Enum underlying type changed (e.g. int→long); affects ABI of functions passing enums by value.",
         description_template="Enum underlying type size changed: {name} ({old} → {new} bytes)",
         entity=_ENT.ENUM,
+        contract_subject=_CS.DECLARATION,
         operation=_OP.MODIFIED,
     ),
     _E(
@@ -366,6 +399,7 @@ PLATFORM_ENTRIES_1: list[ChangeKindMeta] = [
         "throw/try/catch. If the public API exposes exception types or "
         "throwing inlines, rebuild all consumers in the matching mode.",
         entity=_ENT.BINARY,
+        contract_subject=_CS.BUILD_FACT,
         operation=_OP.MODIFIED,
     ),
     _E(
@@ -374,6 +408,7 @@ PLATFORM_ENTRIES_1: list[ChangeKindMeta] = [
         impact="Library has executable stack (PT_GNU_STACK RWE); NX protection disabled — security risk.",
         description_template="Executable stack detected: library linked with -Wl,-z,execstack — NX protection disabled (security risk)",
         entity=_ENT.BINARY,
+        contract_subject=_CS.BINARY_WIDE,
         operation=_OP.MODIFIED,
     ),
     _E(
@@ -382,6 +417,7 @@ PLATFORM_ENTRIES_1: list[ChangeKindMeta] = [
         impact="Executable stack removed (PT_GNU_STACK RWE→RW); NX protection restored — a hardening improvement, not a regression.",
         description_template="Executable stack removed: library now uses a non-executable stack — NX protection restored (good practice)",
         entity=_ENT.BINARY,
+        contract_subject=_CS.BINARY_WIDE,
         operation=_OP.REMOVED,
     ),
     _E(
@@ -394,6 +430,7 @@ PLATFORM_ENTRIES_1: list[ChangeKindMeta] = [
         "fault or fall back to slow paths.",
         description_template="Exported object alignment reduced: {name} ({old} → {new} bytes)",
         entity=_ENT.VARIABLE,
+        contract_subject=_CS.DECLARATION,
         operation=_OP.MODIFIED,
     ),
     _E(
@@ -407,6 +444,7 @@ PLATFORM_ENTRIES_1: list[ChangeKindMeta] = [
         "with an incompatible convention across the boundary — a silent "
         "corruption or crash. Build the whole stack with one float ABI.",
         entity=_ENT.BINARY,
+        contract_subject=_CS.BUILD_FACT,
         operation=_OP.MODIFIED,
     ),
     _E(
@@ -415,6 +453,7 @@ PLATFORM_ENTRIES_1: list[ChangeKindMeta] = [
         impact="_FORTIFY_SOURCE fortified libc wrappers no longer referenced; compile-time/runtime buffer-overflow checks were dropped.",
         description_template="FORTIFY_SOURCE weakened: fortified libc wrappers (*_chk) no longer referenced",
         entity=_ENT.BINARY,
+        contract_subject=_CS.BINARY_WIDE,
         operation=_OP.MODIFIED,
     ),
     _E(
@@ -427,6 +466,7 @@ PLATFORM_ENTRIES_1: list[ChangeKindMeta] = [
         "load time.",
         description_template="Symbol disappeared from ELF .dynsym without explicit deletion marker: {name} — was exported in old library, absent in new library's dynamic symbol table while header still declares it",
         entity=_ENT.FUNCTION,
+        contract_subject=_CS.DECLARATION,
         operation=_OP.REMOVED,
     ),
     _E(
@@ -441,6 +481,7 @@ PLATFORM_ENTRIES_1: list[ChangeKindMeta] = [
         "never interpose; a break for those that do -- unknown from the binary alone.",
         description_template="ELF symbol visibility changed: {name} ({old} → {new}); symbol still exported, interposition semantics changed",
         entity=_ENT.FUNCTION,
+        contract_subject=_CS.DECLARATION,
         operation=_OP.MODIFIED,
     ),
     _E(
@@ -451,6 +492,7 @@ PLATFORM_ENTRIES_1: list[ChangeKindMeta] = [
         "caused by this single root cause rather than intentional API changes.",
         description_template="libstdc++ dual ABI flip detected ({detail}): {name} churned symbols contain CXX11 ABI markers; likely caused by _GLIBCXX_USE_CXX11_ABI toggle",
         entity=_ENT.BINARY,
+        contract_subject=_CS.BINARY_WIDE,
         operation=_OP.MODIFIED,
     ),
     _E(
@@ -464,6 +506,7 @@ PLATFORM_ENTRIES_1: list[ChangeKindMeta] = [
         "library.",
         description_template="Symbol hash table style removed: {old} → {new}",
         entity=_ENT.BINARY,
+        contract_subject=_CS.BINARY_WIDE,
         operation=_OP.REMOVED,
     ),
     _E(
@@ -472,6 +515,7 @@ PLATFORM_ENTRIES_1: list[ChangeKindMeta] = [
         impact="IFUNC resolver indirection added; transparent to well-behaved callers.",
         description_template="Symbol became GNU_IFUNC: {name}",
         entity=_ENT.BINARY,
+        contract_subject=_CS.DECLARATION,
         operation=_OP.MODIFIED,
     ),
     _E(
@@ -480,6 +524,7 @@ PLATFORM_ENTRIES_1: list[ChangeKindMeta] = [
         impact="IFUNC removed; transparent to callers.",
         description_template="Symbol no longer GNU_IFUNC: {name}",
         entity=_ENT.BINARY,
+        contract_subject=_CS.DECLARATION,
         operation=_OP.REMOVED,
     ),
     _E(
@@ -492,6 +537,7 @@ PLATFORM_ENTRIES_1: list[ChangeKindMeta] = [
         "exempt (they resolve to null instead of failing).",
         description_template="New imported symbol: {name}{detail}",
         entity=_ENT.BINARY,
+        contract_subject=_CS.DEPENDENCY_EDGE,
         operation=_OP.ADDED,
     ),
     _E(
@@ -501,6 +547,7 @@ PLATFORM_ENTRIES_1: list[ChangeKindMeta] = [
         "external obligation. Existing consumers are unaffected.",
         description_template="Imported symbol no longer required: {name}{detail}",
         entity=_ENT.BINARY,
+        contract_subject=_CS.DEPENDENCY_EDGE,
         operation=_OP.REMOVED,
     ),
     _E(
@@ -510,6 +557,7 @@ PLATFORM_ENTRIES_1: list[ChangeKindMeta] = [
         "mangled names change so old binaries fail to resolve the symbols.",
         description_template="Inline namespace move detected: {detail} symbols appear to have moved between inline namespace versions (e.g. ::v1:: → ::v2::); mangled names changed",
         entity=_ENT.BINARY,
+        contract_subject=_CS.DECLARATION,
         operation=_OP.MODIFIED,
     ),
     _E(
@@ -525,6 +573,7 @@ PLATFORM_ENTRIES_1: list[ChangeKindMeta] = [
         "indices are silently truncated or sign-extended.",
         description_template="Integer model changed ({new}): {detail}. This is the signature of an LP64↔ILP64 switch (e.g. oneMKL's 32-bit vs 64-bit MKL_INT interface); every caller passes/reads integers with the wrong width.",
         entity=_ENT.BINARY,
+        contract_subject=_CS.BINARY_WIDE,
         operation=_OP.MODIFIED,
     ),
     _E(
@@ -535,6 +584,7 @@ PLATFORM_ENTRIES_1: list[ChangeKindMeta] = [
         "or missing path fails at exec time with a cryptic ENOENT.",
         description_template="ELF interpreter changed: {old} → {new}",
         entity=_ENT.BINARY,
+        contract_subject=_CS.BINARY_WIDE,
         operation=_OP.MODIFIED,
     ),
     _E(
@@ -547,6 +597,7 @@ PLATFORM_ENTRIES_1: list[ChangeKindMeta] = [
         "changed.",
         description_template="Kernel symbol CRC changed: {name} ({old} → {new}) — modversions will reject the module",
         entity=_ENT.BINARY,
+        contract_subject=_CS.DECLARATION,
         operation=_OP.MODIFIED,
     ),
     _E(
@@ -558,6 +609,7 @@ PLATFORM_ENTRIES_1: list[ChangeKindMeta] = [
         "availability break for that class of consumer.",
         description_template="Kernel symbol export type changed: {name} ({old} → {new})",
         entity=_ENT.BINARY,
+        contract_subject=_CS.DECLARATION,
         operation=_OP.MODIFIED,
     ),
     _E(
@@ -567,6 +619,7 @@ PLATFORM_ENTRIES_1: list[ChangeKindMeta] = [
         impact="A new kernel-exported symbol appeared; existing modules are unaffected.",
         description_template="New kernel-exported symbol: {name}",
         entity=_ENT.BINARY,
+        contract_subject=_CS.DECLARATION,
         operation=_OP.ADDED,
     ),
     _E(
@@ -578,6 +631,7 @@ PLATFORM_ENTRIES_1: list[ChangeKindMeta] = [
         "load-time break for existing modules.",
         description_template="Kernel symbol namespace changed: {name} ({old} → {new})",
         entity=_ENT.BINARY,
+        contract_subject=_CS.DECLARATION,
         operation=_OP.MODIFIED,
     ),
     _E(
@@ -588,6 +642,7 @@ PLATFORM_ENTRIES_1: list[ChangeKindMeta] = [
         "with 'Unknown symbol'.",
         description_template="Kernel-exported symbol removed: {name}",
         entity=_ENT.BINARY,
+        contract_subject=_CS.DECLARATION,
         operation=_OP.REMOVED,
     ),
     _E(
@@ -600,6 +655,7 @@ PLATFORM_ENTRIES_1: list[ChangeKindMeta] = [
         "downgrade usually signals a mispackaged artifact.",
         description_template="Library version downgraded: {old} → {new}",
         entity=_ENT.BINARY,
+        contract_subject=_CS.BINARY_WIDE,
         operation=_OP.MODIFIED,
     ),
     _E(
@@ -615,6 +671,7 @@ PLATFORM_ENTRIES_1: list[ChangeKindMeta] = [
         "from the `long double` DWARF byte size on a persisting symbol.",
         description_template="long double ABI changed: {detail} — floating-point representation differs (symbol {old} → {new})",
         entity=_ENT.BINARY,
+        contract_subject=_CS.DECLARATION,
         operation=_OP.MODIFIED,
     ),
     _E(
@@ -628,6 +685,7 @@ PLATFORM_ENTRIES_1: list[ChangeKindMeta] = [
         "signal to review; the artifact diff proves any concrete symbol/layout "
         "break. Prefer a single LTO policy across the library and consumers.",
         entity=_ENT.BINARY,
+        contract_subject=_CS.BUILD_FACT,
         operation=_OP.MODIFIED,
     ),
     _E(
@@ -639,6 +697,7 @@ PLATFORM_ENTRIES_1: list[ChangeKindMeta] = [
         "the dylib. Adding slices (single-arch → universal) is not flagged.",
         description_template="Mach-O architecture slice removed: {detail} no longer present ({old} → {new}); existing clients of the dropped arch can no longer load the dylib",
         entity=_ENT.BINARY,
+        contract_subject=_CS.BINARY_WIDE,
         operation=_OP.MODIFIED,
     ),
     _E(
@@ -650,6 +709,7 @@ PLATFORM_ENTRIES_1: list[ChangeKindMeta] = [
         "use the new one at all.",
         description_template="Mach-O filetype changed: {old} → {new}",
         entity=_ENT.BINARY,
+        contract_subject=_CS.BINARY_WIDE,
         operation=_OP.MODIFIED,
     ),
     _E(
@@ -662,6 +722,7 @@ PLATFORM_ENTRIES_1: list[ChangeKindMeta] = [
         "providers, and weak-definition coalescing behaviour differs.",
         description_template="Mach-O linkage flags changed: {detail}",
         entity=_ENT.BINARY,
+        contract_subject=_CS.BINARY_WIDE,
         operation=_OP.MODIFIED,
     ),
     _E(
@@ -674,6 +735,7 @@ PLATFORM_ENTRIES_1: list[ChangeKindMeta] = [
         "new target differs.",
         description_template="Re-exported dylib repointed: {old} → {new}",
         entity=_ENT.BINARY,
+        contract_subject=_CS.BINARY_WIDE,
         operation=_OP.MODIFIED,
     ),
     _E(
@@ -681,6 +743,7 @@ PLATFORM_ENTRIES_1: list[ChangeKindMeta] = [
         _C,
         impact="New shared library dependency; may not be available on target systems.",
         entity=_ENT.BINARY,
+        contract_subject=_CS.DEPENDENCY_EDGE,
         operation=_OP.ADDED,
     ),
     _E(
@@ -695,6 +758,7 @@ PLATFORM_ENTRIES_1: list[ChangeKindMeta] = [
         "to confirm an actual provider changed.",
         description_template="DT_NEEDED order changed: {old} → {new}",
         entity=_ENT.BINARY,
+        contract_subject=_CS.DEPENDENCY_EDGE,
         operation=_OP.MODIFIED,
     ),
     _E(
@@ -702,6 +766,7 @@ PLATFORM_ENTRIES_1: list[ChangeKindMeta] = [
         _C,
         impact="Dependency removed; should be transparent to consumers.",
         entity=_ENT.BINARY,
+        contract_subject=_CS.DEPENDENCY_EDGE,
         operation=_OP.REMOVED,
     ),
     _E(
@@ -714,62 +779,7 @@ PLATFORM_ENTRIES_1: list[ChangeKindMeta] = [
         "though its symbol surface is unchanged.",
         description_template="OS deployment floor raised: {old} → {new}",
         entity=_ENT.BUILD,
-        operation=_OP.MODIFIED,
-    ),
-    _E(
-        "pe_forwarder_changed",
-        _B,
-        impact="A DLL export forwarder was repointed to a different target (DLL!Symbol). The "
-        "effective implementation behind the exported name changed; dependent binaries get "
-        "different — and possibly missing — behaviour at load time.",
-        description_template="export '{name}' forwarder changed: {old} → {new}",
-        entity=_ENT.BINARY,
-        operation=_OP.MODIFIED,
-    ),
-    _E(
-        "pe_hardening_improved",
-        _C,
-        impact="The DLL gained exploit-mitigation bits in DllCharacteristics. "
-        "A hardening improvement; existing consumers are unaffected.",
-        description_template="PE hardening improved: gained {detail}",
-        entity=_ENT.BINARY,
-        operation=_OP.MODIFIED,
-    ),
-    _E(
-        "pe_hardening_weakened",
-        _R,
-        impact="The DLL lost exploit-mitigation bits in "
-        "OPTIONAL_HEADER.DllCharacteristics (NX_COMPAT/DEP, "
-        "DYNAMIC_BASE/ASLR, HIGH_ENTROPY_VA, GUARD_CF). Loading this "
-        "DLL weakens the mitigation posture of every process that maps "
-        "it — the PE counterpart of the ELF RELRO/PIE/canary "
-        "regressions.",
-        description_template="PE hardening weakened: lost {detail}",
-        entity=_ENT.BINARY,
-        operation=_OP.MODIFIED,
-    ),
-    _E(
-        "pe_import_load_mode_changed",
-        _R,
-        impact="An imported DLL function moved between the eager import table "
-        "(IMAGE_DIRECTORY_ENTRY_IMPORT, resolved at process load) and the "
-        "delay-load table (IMAGE_DIRECTORY_ENTRY_DELAY_IMPORT, resolved "
-        "on first call). The two have different failure-timing "
-        "contracts: an eager import that fails aborts the process at "
-        "load; a delay import that fails surfaces only when the "
-        "consumer first calls it — a deployment/error-handling risk "
-        "even though the DLL and symbol both still exist.",
-        description_template="Import load mode changed for '{name}': {old} → {new}",
-        entity=_ENT.BINARY,
-        operation=_OP.MODIFIED,
-    ),
-    _E(
-        "pe_machine_changed",
-        _B,
-        impact="PE machine/architecture changed (e.g. AMD64 → ARM64); the DLL is a different "
-        "architecture and cannot be loaded by existing clients.",
-        description_template="PE machine/architecture changed: {old} → {new}",
-        entity=_ENT.BINARY,
+        contract_subject=_CS.BUILD_FACT,
         operation=_OP.MODIFIED,
     ),
 ]

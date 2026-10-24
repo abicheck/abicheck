@@ -13,32 +13,20 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+
 """``.abicheck.yml`` project-config schema: :class:`BuildConfig` + loading.
 
-Split out of :mod:`abicheck.buildsource.inline` (G38 Phase 15 file-split
-prerequisite — see ``docs/contribute/plans/
-g38-bundle-facts-model-and-multibuild-comparability.md``'s Phase 13/15
-tables): that module was within a couple of lines of the AI-readiness
-2000-line hard cap, and the config *schema* (parsing/validating a raw
-``.abicheck.yml`` mapping into a typed :class:`BuildConfig`) has no
-dependency on, and shares no state with, ``inline.py``'s own inline
-build/source *collection* pipeline (``collect_inline_pack`` and everything
-it calls) — the two were bundled in one file purely by history, not by any
-real coupling. Every private dict-parsing helper this module needs
-(``_block``/``_str``/``_opt_str``/``_opt_bool``/``_strs``/``_lowered``/
-``_one_of``/``_safe_compile_atom``) is used *only* by :class:`BuildConfig`
-itself, confirmed by a full-file grep before the split — so this is a
-mechanical extraction (unchanged function/method bodies), not a redesign,
-mirroring how ``build_config_schema.py``/``build_config_io.py`` were already
-split out of the same file for the identical reason.
+Every recognized key is declared once, in :data:`KEY_TABLE` below, as a
+:class:`~abicheck.buildsource.build_config_schema.KeySpec` row. That table
+drives the strict load (unknown keys, wrong YAML types, bad enum values, all
+collected into one usage error), the ``BuildConfig`` construction, and the
+non-default ``to_dict()`` round-trip. The mechanism lives in
+``build_config_schema.py``; the table lives here because it needs the policy
+enumeration in :mod:`abicheck.policy.support_promise`.
 
 :mod:`abicheck.buildsource.inline` re-exports :class:`BuildConfig`,
 :func:`load_build_config`, :func:`discover_build_config`, and
-:data:`KNOWN_TOP_LEVEL_KEYS` for back-compat (``BuildConfig as BuildConfig``
-— the same explicit-re-export spelling ``checker_policy.py`` uses for
-``ChangeKind``), so every existing ``from abicheck.buildsource.inline import
-BuildConfig`` (or ``KNOWN_TOP_LEVEL_KEYS``) call site keeps working
-unchanged; new code should import from here directly.
+:data:`KNOWN_TOP_LEVEL_KEYS` for back-compat, so existing imports keep working.
 """
 
 from __future__ import annotations
@@ -50,29 +38,33 @@ from typing import Any, ClassVar
 from ..config_paths import discover_build_config as _discover_build_config
 from ..environment_matrix import EnvironmentMatrix
 from ..model.ownership_rules import OwnershipRules
+from ..model.performance import parse_performance_profile
 from ..policy.support_promise import (
     SUPPORT_PROMISE_POLICIES as _SUPPORT_PROMISE_POLICIES,
 )
 from .build_config_acknowledgment import (
     AcknowledgmentConfig,
     acknowledgment_block,
+    acknowledgment_findings,
     parse_acknowledgment_config,
 )
-from .build_config_contract import contract_block, parse_contract_post_manifest
+from .build_config_contract import (
+    contract_block,
+    contract_findings,
+    parse_contract_post_manifest,
+)
 from .build_config_schema import (
-    TOP_LEVEL_INT_KEYS as _TOP_LEVEL_INT_KEYS,
-    TOP_LEVEL_STR_KEYS as _TOP_LEVEL_STR_KEYS,
-    WHOLE_BLOCK_VALIDATORS as _WHOLE_BLOCK_VALIDATORS,
-    opt_int as _opt_int,
-    parse_performance_profile_key as _parse_performance_profile_key,
-    parse_policy_overrides as _parse_policy_overrides,
-    performance_block as _performance_block,
-    subkey_findings as _subkey_type_findings,
+    KeySpec,
+    KeyTable,
+    Kind,
+    bundle_variants_block_findings,
+    deployment_findings,
 )
 from .build_config_scope import (
-    OWNERSHIP_KEYS,
+    dependencies_findings,
+    dependency_evidence_findings,
+    ownership_block,
     parse_ownership_rules,
-    scope_block as _scope_block,
 )
 from .compile_options_safety import (  # PR #1146 finding #2 (sibling leaf module)
     reject_plugin_loading_options as _reject_plugin_loading_options,
@@ -82,54 +74,30 @@ from .compile_options_safety import (  # PR #1146 finding #2 (sibling leaf modul
 _SEVERITY_LEVELS = ("error", "warning", "info")
 #: Valid severity presets (mirror of ``severity.SEVERITY_PRESETS`` spelling).
 _SEVERITY_PRESETS = ("default", "strict", "info-only")
-
-# ── strict-schema knowledge (ADR-043 CLI reset: no separate `config validate`
-# command — every real ingestion path enforces this) ─────────────────────────
-#
-# The subkey-type tables AND the dispatch that checks a value against them
-# (`subkey_findings`) live in `build_config_schema.py` (split out purely to
-# stay under the AI-readiness 2000-line hard cap) -- `_subkey_findings`
-# below is a thin delegator.
-
-
-def _block(data: dict[str, object], key: str) -> dict[str, object]:
-    """One top-level config block as a mapping (``{}`` when absent or wrong-typed).
-
-    A wrong type here is never silently accepted -- :meth:`BuildConfig.
-    _validate_structure` already rejected it -- so falling back to ``{}`` only
-    covers a caller that bypassed validation with a non-dict payload.
-    """
-    value = data.get(key)
-    return value if isinstance(value, dict) else {}
+#: Recognized top-level keys parsed by sibling modules (project_targets.py,
+#: ADR-047) or reserved without a parser, so they must not trip the
+#: unknown-key error. ``risk_rules`` was consumed by the deleted ``risk.py``
+#: (ADR-068 Phase 6) and ``crosschecks`` was never parsed by anything.
+_OPAQUE_TOP_KEYS = frozenset(
+    {
+        "risk_rules",
+        "crosschecks",
+        "targets",
+        "bundles",
+        "profiles",
+        "baseline",
+        "aggregate",
+    }
+)
 
 
-def _str(d: dict[str, object], key: str, default: str = "") -> str:
-    v = d.get(key)
-    return v if isinstance(v, str) else default
+def _enum(allowed: tuple[str, ...] | frozenset[str], *, lower: bool = False) -> Any:
+    """A normalizer: the value (case-folded when *lower*) must be one of *allowed*."""
 
+    def check(value: str, path: str) -> str | None:
+        return _one_of(_lowered(value) if lower else value, allowed, path)
 
-def _opt_str(d: dict[str, object], key: str) -> str | None:
-    v = d.get(key)
-    return v if isinstance(v, str) else None
-
-
-def _opt_bool(d: dict[str, object], key: str) -> bool | None:
-    v = d.get(key)
-    return v if isinstance(v, bool) else None
-
-
-def _strs(d: dict[str, object], key: str) -> list[str]:
-    v = d.get(key)
-    if isinstance(v, list):
-        return [str(x) for x in v]
-    if isinstance(v, str):
-        return [v]
-    return []
-
-
-def _lowered(value: str | None) -> str | None:
-    """Case-normalize an optional enum-ish config scalar."""
-    return value.lower() if value is not None else None
+    return check
 
 
 def _one_of(
@@ -141,7 +109,12 @@ def _one_of(
     return value
 
 
-def _safe_compile_atom(key: str, value: str) -> str:
+def _lowered(value: str | None) -> str | None:
+    """Case-normalize an optional enum-ish config scalar."""
+    return value.lower() if value is not None else None
+
+
+def _safe_compile_atom(path: str, value: str) -> str:
     """One ``compile.*`` scalar, rejected unless it is a single argv atom.
 
     Values from auto-discovered source-tree configs are later embedded in
@@ -151,10 +124,267 @@ def _safe_compile_atom(key: str, value: str) -> str:
     ``-Xclang -load ./evil.so``.
     """
     if not value or any(ch.isspace() for ch in value):
-        raise ValueError(
-            f"compile.{key} must be a single compiler option atom, got {value!r}"
-        )
+        raise ValueError(f"{path} must be a single compiler option atom, got {value!r}")
     return value
+
+
+#: One validator, shared by every ``severity:`` level row.
+_SEVERITY_LEVEL = _enum(_SEVERITY_LEVELS)
+
+
+def _system(value: str, path: str) -> str:
+    return value or "auto"
+
+
+def _graph_detail(value: str, path: str) -> str:
+    return _one_of(value or "summary", ("summary", "full"), path) or "summary"
+
+
+def _compile_atom(value: str, path: str) -> str:
+    return _safe_compile_atom(path, value)
+
+
+def _compile_atoms(values: list[str], path: str) -> list[str]:
+    return [_safe_compile_atom(path, item) for item in values]
+
+
+def _compile_options(values: list[str], path: str) -> list[str]:
+    atoms = _compile_atoms(values, path)
+    _reject_plugin_loading_options(atoms)
+    return atoms
+
+
+def _stripped(values: list[str], path: str) -> list[str]:
+    """Entries stripped once at the one choke point every consumer reads through,
+    with whitespace-only entries dropped (Codex review: a quoted entry with stray
+    whitespace matched one consumer's SONAME comparison and missed another's)."""
+    return [s.strip() for s in values if s.strip()]
+
+
+def _performance_profile(value: str, path: str) -> str:
+    """``performance.profile`` as its canonical spelling (an unknown value is a
+    ``ValueError`` naming the valid ones)."""
+    try:
+        return parse_performance_profile(str(value)).value
+    except ValueError as exc:
+        raise ValueError(f"performance.profile: {exc}") from None
+
+
+def _read_deployment(top: dict[str, Any]) -> EnvironmentMatrix | None:
+    return EnvironmentMatrix.from_dict_or_none(top.get("deployment"), strict=True)
+
+
+def _write_deployment(cfg: Any) -> dict[str, Any]:
+    return EnvironmentMatrix.dump_or_empty(cfg.deployment)
+
+
+#: Every recognized ``.abicheck.yml`` key: one row per key. Dump order is this
+#: order (blocks are emitted at their first row). Adding a key means adding one
+#: row here plus its dataclass field; nothing else in this file or in
+#: ``build_config_schema.py`` needs touching.
+KEY_TABLE = KeyTable(
+    (
+        KeySpec("build.system", Kind.STR, "system", "auto", normalize=_system),
+        KeySpec("build.query", Kind.STR, "query", ""),
+        KeySpec("build.compile_db", Kind.STR, "compile_db", ""),
+        KeySpec("build.compile_db_filter", Kind.STR, "compile_db_filter", ""),
+        KeySpec("build.targets", Kind.LIST, "targets", []),
+        KeySpec("sources.public_headers", Kind.LIST, "public_headers", []),
+        KeySpec("sources.exclude", Kind.LIST, "exclude", []),
+        KeySpec(
+            "sources.graph",
+            Kind.STR,
+            "graph_detail",
+            "summary",
+            normalize=_graph_detail,
+        ),
+        KeySpec(
+            "severity.preset",
+            Kind.STR,
+            "severity_preset",
+            normalize=_enum(_SEVERITY_PRESETS),
+        ),
+        KeySpec(
+            "severity.abi_breaking",
+            Kind.STR,
+            "severity_abi_breaking",
+            normalize=_SEVERITY_LEVEL,
+        ),
+        KeySpec(
+            "severity.potential_breaking",
+            Kind.STR,
+            "severity_potential_breaking",
+            normalize=_SEVERITY_LEVEL,
+        ),
+        KeySpec(
+            "severity.quality_issues",
+            Kind.STR,
+            "severity_quality_issues",
+            normalize=_SEVERITY_LEVEL,
+        ),
+        KeySpec(
+            "severity.addition",
+            Kind.STR,
+            "severity_addition",
+            normalize=_SEVERITY_LEVEL,
+        ),
+        KeySpec("scope.public", Kind.BOOL, "scope_public"),
+        KeySpec(
+            "scope.collapse_versioned_symbols", Kind.BOOL, "collapse_versioned_symbols"
+        ),
+        KeySpec("scope.public_symbols", Kind.LIST, "public_symbols", []),
+        KeySpec("scope.show_redundant", Kind.BOOL, "scope_show_redundant"),
+        KeySpec("scope.public_header_dirs", Kind.LIST, "public_header_dirs", []),
+        KeySpec("scope.exclude_headers", Kind.LIST, "exclude_headers", []),
+        KeySpec(
+            "scope.on_incomplete",
+            Kind.STR,
+            "scope_on_incomplete",
+            normalize=_enum(("warn", "block")),
+        ),
+        # Ownership keys (ADR-075): validated here, parsed as one group by the
+        # `scope` GROUP row below, which also owns their dump.
+        KeySpec("scope.dependencies", Kind.CUSTOM, validate=dependencies_findings),
+        KeySpec(
+            "scope.dependency_evidence",
+            Kind.CUSTOM,
+            validate=dependency_evidence_findings,
+        ),
+        KeySpec("scope.private_headers", Kind.LIST),
+        KeySpec("scope.private_namespaces", Kind.LIST),
+        KeySpec(
+            "scope",
+            Kind.GROUP,
+            read=lambda scope: {"ownership": parse_ownership_rules(scope)},
+            write=ownership_block,
+        ),
+        KeySpec(
+            "contract",
+            Kind.WHOLE,
+            "contract_post_manifest",
+            validate=contract_findings,
+            read=parse_contract_post_manifest,
+            write=contract_block,
+        ),
+        KeySpec(
+            "acknowledgment",
+            Kind.WHOLE,
+            "acknowledgment",
+            validate=acknowledgment_findings,
+            read=parse_acknowledgment_config,
+            write=acknowledgment_block,
+        ),
+        KeySpec("suppression.strict", Kind.BOOL, "suppression_strict"),
+        KeySpec(
+            "suppression.require_justification",
+            Kind.BOOL,
+            "suppression_require_justification",
+        ),
+        KeySpec("source.method", Kind.STR, "source_method"),
+        KeySpec(
+            "compile.frontend",
+            Kind.STR,
+            "compile_frontend",
+            normalize=_enum(("auto", "castxml", "clang", "hybrid"), lower=True),
+        ),
+        KeySpec("compile.std", Kind.STR, "compile_std", normalize=_compile_atom),
+        KeySpec("compile.include_dirs", Kind.LIST, "compile_include_dirs", []),
+        KeySpec(
+            "compile.defines",
+            Kind.LIST,
+            "compile_defines",
+            [],
+            normalize=_compile_atoms,
+        ),
+        KeySpec("compile.sysroot", Kind.STR, "compile_sysroot"),
+        KeySpec("compile.nostdinc", Kind.BOOL, "compile_nostdinc"),
+        KeySpec("compile.compiler", Kind.STR, "compile_compiler"),
+        KeySpec(
+            "compile.options",
+            Kind.LIST,
+            "compile_options",
+            [],
+            normalize=_compile_options,
+        ),
+        KeySpec(
+            "compile.ast_frontend_fallback", Kind.BOOL, "compile_ast_frontend_fallback"
+        ),
+        KeySpec(
+            "compile.allow_unsupported_castxml",
+            Kind.BOOL,
+            "compile_allow_unsupported_castxml",
+        ),
+        KeySpec(
+            "compile.frontend_context",
+            Kind.STR,
+            "compile_frontend_context",
+            normalize=_enum(("host", "device"), lower=True),
+        ),
+        KeySpec(
+            "compile.lang",
+            Kind.STR,
+            "compile_lang",
+            normalize=_enum(("c++", "c"), lower=True),
+        ),
+        KeySpec(
+            "debug.format",
+            Kind.STR,
+            "debug_format",
+            normalize=_enum(("auto", "dwarf", "btf", "ctf"), lower=True),
+        ),
+        KeySpec("debug.dwarf_only", Kind.BOOL, "debug_dwarf_only"),
+        KeySpec("debug.debuginfod", Kind.BOOL, "debug_debuginfod"),
+        KeySpec("debug.debuginfod_url", Kind.STR, "debug_debuginfod_url"),
+        KeySpec("debug.pdb_path", Kind.STR, "debug_pdb_path"),
+        KeySpec(
+            "bundle.system_providers",
+            Kind.LIST,
+            "bundle_system_providers",
+            [],
+            normalize=_stripped,
+        ),
+        KeySpec("bundle.cohorts", Kind.LIST, "bundle_cohorts", [], normalize=_stripped),
+        KeySpec("python.abi3_floor", Kind.STR, "python_abi3_floor"),
+        KeySpec(
+            "gate.fail_on_removed_library", Kind.BOOL, "gate_fail_on_removed_library"
+        ),
+        KeySpec("release.dso_only", Kind.BOOL, "release_dso_only"),
+        KeySpec(
+            "release.include_private_dso", Kind.BOOL, "release_include_private_dso"
+        ),
+        KeySpec(
+            "release.support_promise",
+            Kind.STR,
+            "release_support_promise",
+            normalize=_enum(_SUPPORT_PROMISE_POLICIES),
+        ),
+        KeySpec(
+            "resource_limits.max_bundle_facts_decode_nodes",
+            Kind.INT,
+            "resource_limits_max_bundle_facts_decode_nodes",
+        ),
+        KeySpec("policy.overrides", Kind.DICT_STR, "policy_overrides", {}),
+        KeySpec("assurance.require_complete", Kind.BOOL, "assurance_require_complete"),
+        KeySpec(
+            "performance.profile",
+            Kind.STR,
+            "performance_profile",
+            normalize=_performance_profile,
+        ),
+        KeySpec(
+            "deployment",
+            Kind.WHOLE,
+            "deployment",
+            validate=deployment_findings,
+            read=_read_deployment,
+            write=_write_deployment,
+            always_emit=True,
+        ),
+        KeySpec("bundle_variants", Kind.WHOLE, validate=bundle_variants_block_findings),
+        KeySpec("version", Kind.INT, "version", 0),
+    ),
+    _OPAQUE_TOP_KEYS,
+)
 
 
 @dataclass
@@ -370,486 +600,24 @@ class BuildConfig:
     #: `docs/reference/config-file.md`'s own `policy:` section.
     policy_overrides: dict[str, str] = field(default_factory=dict)
 
-    #: ADR-037 §Backward-compat (G22 Phase 7): recognized ``.abicheck.yml`` keys.
-    #: ``version:`` makes the config forward-compatible — an *unknown* key (a
-    #: newer schema read by an older abicheck) **warns**, never errors, so a
-    #: project can adopt a future key without breaking older installs. Keys parsed
-    #: by sibling modules -- ``risk_rules`` named ``risk.py``, deleted outright
-    #: in ADR-068 Phase 6 along with ``scan`` (nothing loads a ``risk_rules:``
-    #: block any more; the key stays recognized so an existing file does not
-    #: trip the unknown-key warning) -- ``crosschecks`` was never actually
-    #: parsed by ``cross_source_checks.py`` or anything else, reserved key
-    #: only -- ``targets``/``bundles``/``profiles``/``baseline``/
-    #: ``aggregate`` → ``project_targets.py``, ADR-047 §3/G30 P1.5; CLI cleanup
-    #: phase two, PR 2 follow-up for ``aggregate``) are listed so they don't
-    #: trip the warning.
-    _KNOWN_TOP_KEYS: ClassVar[frozenset[str]] = frozenset(
-        {
-            "build",
-            "sources",
-            "severity",
-            "scope",
-            "suppression",
-            "source",
-            "compile",
-            "debug",
-            "bundle",
-            "python",
-            "gate",
-            "release",
-            "resource_limits",
-            "performance",
-            "assurance",
-            "version",
-            "risk_rules",
-            "crosschecks",
-            "targets",
-            "bundles",
-            "profiles",
-            "baseline",
-            "aggregate",
-            "policy",
-            "deployment",
-            "bundle_variants",
-            "contract",
-            "acknowledgment",
-        }
-    )
-    _KNOWN_BLOCK_KEYS: ClassVar[dict[str, frozenset[str]]] = {
-        "build": frozenset(
-            {"system", "query", "compile_db", "compile_db_filter", "targets"}
-        ),
-        "sources": frozenset({"public_headers", "exclude", "graph"}),
-        "severity": frozenset(
-            {
-                "preset",
-                "abi_breaking",
-                "potential_breaking",
-                "quality_issues",
-                "addition",
-            }
-        ),
-        "scope": frozenset(
-            {
-                "public",
-                "collapse_versioned_symbols",
-                "public_symbols",
-                "show_redundant",
-                "public_header_dirs",
-                "exclude_headers",
-                "on_incomplete",
-                *OWNERSHIP_KEYS,
-            }
-        ),
-        "suppression": frozenset({"strict", "require_justification"}),
-        "source": frozenset({"method"}),
-        "compile": frozenset(
-            {
-                "frontend",
-                "std",
-                "include_dirs",
-                "defines",
-                "sysroot",
-                "nostdinc",
-                "compiler",
-                "options",
-                "ast_frontend_fallback",
-                "allow_unsupported_castxml",
-                "frontend_context",
-                "lang",
-            }
-        ),
-        "debug": frozenset(
-            {"format", "dwarf_only", "debuginfod", "debuginfod_url", "pdb_path"}
-        ),
-        # Distinct from the plural `bundles:` block (`project_targets.py`,
-        # ADR-047 §3 — named release groups of project *targets*, consumed
-        # only by the `project` command family). This singular `bundle:`
-        # block is release/scan-wide topology consumed directly by
-        # `compare`'s directory/package fan-out and `scan --artifact-set`,
-        # with no dependency on any `targets:`/`bundles:` declaration.
-        "bundle": frozenset({"system_providers", "cohorts"}),
-        # ADR-068 D5: the stable half of the `--abi3` audit (its floor).
-        "python": frozenset({"abi3_floor"}),
-        # Phase 7d (one-comparison-product.md §4.1): CI gate policy and
-        # directory/package release topology demoted off the CLI.
-        "gate": frozenset({"fail_on_removed_library"}),
-        "release": frozenset({"dso_only", "include_private_dso", "support_promise"}),
-        "resource_limits": frozenset({"max_bundle_facts_decode_nodes"}),  # Phase 7g
-        "performance": frozenset({"profile"}),
-        "policy": frozenset({"overrides"}),  # ADR-068 §3 #23
-        # rulings.py deferred-option followup: former --require-complete-analysis.
-        "assurance": frozenset({"require_complete"}),
-    }
-
-    @classmethod
-    def _scalar_findings(cls, key: str, value: object) -> list[str]:
-        """Type findings for a recognized top-level *scalar* key.
-
-        ``risk_rules``/``crosschecks`` are deliberately excluded:
-        :meth:`from_dict` never parses them at all. ``risk_rules`` was
-        consumed by ``risk.py`` until that module was deleted outright in
-        ADR-068 Phase 6 (nothing loads it now); ``crosschecks`` has never
-        been parsed by anything, reserved key only. Neither has a
-        from_dict-level type contract to enforce here.
-        """
-        if value is None:
-            return []
-        if key in _TOP_LEVEL_STR_KEYS and not isinstance(value, str):
-            return [f"{key} must be a string, got {type(value).__name__}: {value!r}"]
-        if key in _TOP_LEVEL_INT_KEYS and (
-            not isinstance(value, int) or isinstance(value, bool)
-        ):
-            return [f"{key} must be an integer, got {type(value).__name__}: {value!r}"]
-        return []
-
-    @classmethod
-    def _subkey_findings(cls, key: str, sub: str, sub_value: object) -> list[str]:
-        """Type findings for one ``<block>.<subkey>`` entry -- delegates to
-        `build_config_schema.subkey_findings`, the single dispatch every
-        subkey type family goes through (see that module's own docstring
-        for why the whole chain lives there now, not just part of it)."""
-        return _subkey_type_findings(key, sub, sub_value)
-
-    @classmethod
-    def _block_findings(cls, key: str, value: object, known_block: object) -> list[str]:
-        """Type findings for one recognized top-level *block* key."""
-        if value is None:
-            return []
-        if not isinstance(value, dict):
-            return [f"{key} must be a mapping, got {type(value).__name__}: {value!r}"]
-        findings: list[str] = []
-        for sub, sub_value in value.items():
-            if sub not in known_block:  # type: ignore[operator]
-                findings.append(f"unknown .abicheck.yml key {key}.{sub!r}")
-                continue
-            findings += cls._subkey_findings(key, sub, sub_value)
-        return findings
-
-    @classmethod
-    def _validate_structure(cls, data: dict[str, object]) -> None:
-        """Raise ``ValueError`` for every structural problem in a raw ``.abicheck.yml``.
-
-        ADR-043 (pre-1.0 CLI reset): unknown keys and wrong-typed values used
-        to only ``warnings.warn`` (forward-compat) or be silently
-        coerced/dropped, which is what the now-removed ``abicheck config
-        validate`` command existed to catch as a separate, easy-to-skip step.
-        That strictness now lives here, so it fires on every real dump/
-        compare/scan ingestion of a project config — no opt-in step needed.
-        Collects every finding (not just the first) so a single bad file
-        reports everything wrong with it at once.
-        """
-        findings: list[str] = []
-        for key, value in data.items():
-            if key not in cls._KNOWN_TOP_KEYS:
-                findings.append(f"unknown .abicheck.yml key {key!r}")
-                continue
-            if key in _WHOLE_BLOCK_VALIDATORS:  # deployment, bundle_variants
-                # Whole-block validators live in ``build_config_schema.py``
-                # (``extract`` may import the ``model`` layer both
-                # ``EnvironmentMatrix`` and ``model.bundle_variants`` sit
-                # in), the module ``_subkey_findings`` above delegates to for
-                # every other block's own subkey type table.
-                findings += _WHOLE_BLOCK_VALIDATORS[key](value)
-                continue
-            known_block = cls._KNOWN_BLOCK_KEYS.get(key)
-            if known_block is None:
-                findings += cls._scalar_findings(key, value)
-            else:
-                findings += cls._block_findings(key, value, known_block)
-        if findings:
-            raise ValueError("; ".join(findings))
+    #: Recognized top-level / block key registries, derived from :data:`KEY_TABLE`.
+    _KNOWN_TOP_KEYS: ClassVar[frozenset[str]] = KEY_TABLE.known_top
+    _KNOWN_BLOCK_KEYS: ClassVar[dict[str, frozenset[str]]] = KEY_TABLE.known_blocks
 
     @classmethod
     def from_dict(cls, data: dict[str, object]) -> BuildConfig:
-        """Parse a raw ``.abicheck.yml`` mapping into a :class:`BuildConfig`."""
+        """Parse a raw ``.abicheck.yml`` mapping into a :class:`BuildConfig`.
+
+        Strict (ADR-043): every structural problem -- unknown key, wrong YAML
+        type, bad enum value -- is collected and raised together as one
+        ``ValueError``, so a single bad file reports everything wrong with it.
+        """
         if isinstance(data, dict):
-            cls._validate_structure(data)
+            findings = KEY_TABLE.findings(data)
+            if findings:
+                raise ValueError("; ".join(findings))
         top = data if isinstance(data, dict) else {}
-        build = _block(top, "build")
-        sources = _block(top, "sources")
-        severity = _block(top, "severity")
-        scope = _block(top, "scope")
-        suppression = _block(top, "suppression")
-        source = _block(top, "source")
-        compile_blk = _block(top, "compile")
-        debug = _block(top, "debug")
-        bundle = _block(top, "bundle")
-        python_blk = _block(top, "python")
-        gate = _block(top, "gate")
-        release = _block(top, "release")
-        resource_limits = _block(top, "resource_limits")
-        policy = _block(top, "policy")
-        assurance = _block(top, "assurance")
-        deployment_raw = top.get("deployment")
-
-        def _safe_compile_atoms(key: str) -> list[str]:
-            atoms = [_safe_compile_atom(key, item) for item in _strs(compile_blk, key)]
-            if key == "options":
-                _reject_plugin_loading_options(atoms)
-            return atoms
-
-        def _level(key: str) -> str | None:
-            return _one_of(_opt_str(severity, key), _SEVERITY_LEVELS, f"severity.{key}")
-
-        version_raw = top.get("version")
-        return cls(
-            system=_str(build, "system", "auto") or "auto",
-            query=_str(build, "query"),
-            compile_db=_str(build, "compile_db"),
-            compile_db_filter=_str(build, "compile_db_filter"),
-            targets=_strs(build, "targets"),
-            public_headers=_strs(sources, "public_headers"),
-            exclude=_strs(sources, "exclude"),
-            graph_detail=_one_of(
-                _str(sources, "graph", "summary") or "summary",
-                ("summary", "full"),
-                "sources.graph",
-            )
-            or "summary",
-            severity_preset=_one_of(
-                _opt_str(severity, "preset"), _SEVERITY_PRESETS, "severity.preset"
-            ),
-            severity_abi_breaking=_level("abi_breaking"),
-            severity_potential_breaking=_level("potential_breaking"),
-            severity_quality_issues=_level("quality_issues"),
-            severity_addition=_level("addition"),
-            scope_public=_opt_bool(scope, "public"),
-            collapse_versioned_symbols=_opt_bool(scope, "collapse_versioned_symbols"),
-            public_symbols=_strs(scope, "public_symbols"),
-            scope_show_redundant=_opt_bool(scope, "show_redundant"),
-            public_header_dirs=_strs(scope, "public_header_dirs"),
-            exclude_headers=_strs(scope, "exclude_headers"),
-            ownership=parse_ownership_rules(scope),
-            contract_post_manifest=parse_contract_post_manifest(top),
-            acknowledgment=parse_acknowledgment_config(top),
-            scope_on_incomplete=_one_of(
-                _opt_str(scope, "on_incomplete"),
-                ("warn", "block"),
-                "scope.on_incomplete",
-            ),
-            suppression_strict=_opt_bool(suppression, "strict"),
-            suppression_require_justification=_opt_bool(
-                suppression, "require_justification"
-            ),
-            source_method=_opt_str(source, "method"),
-            # The CLI accepts the frontend case-insensitively (Click Choice
-            # case_sensitive=False); normalize the config value to match.
-            compile_frontend=_one_of(
-                _lowered(_opt_str(compile_blk, "frontend")),
-                ("auto", "castxml", "clang", "hybrid"),
-                "compile.frontend",
-            ),
-            compile_std=(
-                _safe_compile_atom("std", std)
-                if (std := _opt_str(compile_blk, "std")) is not None
-                else None
-            ),
-            compile_include_dirs=_strs(compile_blk, "include_dirs"),
-            compile_defines=_safe_compile_atoms("defines"),
-            compile_sysroot=_opt_str(compile_blk, "sysroot"),
-            compile_nostdinc=_opt_bool(compile_blk, "nostdinc"),
-            compile_compiler=_opt_str(compile_blk, "compiler"),
-            compile_options=_safe_compile_atoms("options"),
-            compile_ast_frontend_fallback=_opt_bool(
-                compile_blk, "ast_frontend_fallback"
-            ),
-            compile_allow_unsupported_castxml=_opt_bool(
-                compile_blk, "allow_unsupported_castxml"
-            ),
-            compile_frontend_context=_one_of(
-                _lowered(_opt_str(compile_blk, "frontend_context")),
-                ("host", "device"),
-                "compile.frontend_context",
-            ),
-            compile_lang=_one_of(
-                _lowered(_opt_str(compile_blk, "lang")),
-                ("c++", "c"),
-                "compile.lang",
-            ),
-            debug_format=_one_of(
-                _lowered(_opt_str(debug, "format")),
-                ("auto", "dwarf", "btf", "ctf"),
-                "debug.format",
-            ),
-            debug_dwarf_only=_opt_bool(debug, "dwarf_only"),
-            debug_debuginfod=_opt_bool(debug, "debuginfod"),
-            debug_debuginfod_url=_opt_str(debug, "debuginfod_url"),
-            debug_pdb_path=_opt_str(debug, "pdb_path"),
-            # Stripped here, once, at the single choke point every consumer
-            # (compare's fan-out, scan --artifact-set, stored-BundleFacts
-            # compare) reads through -- compare's own fan-out incidentally
-            # stripped via a comma-join/split round trip through a legacy
-            # string parameter, but the other two forwarded the raw tuple
-            # unchanged, so a quoted entry with stray whitespace matched one
-            # consumer's SONAME comparison and silently missed another's
-            # (Codex review, fresh evidence).
-            bundle_system_providers=[
-                s.strip() for s in _strs(bundle, "system_providers") if s.strip()
-            ],
-            bundle_cohorts=[s.strip() for s in _strs(bundle, "cohorts") if s.strip()],
-            python_abi3_floor=_opt_str(python_blk, "abi3_floor"),
-            gate_fail_on_removed_library=_opt_bool(gate, "fail_on_removed_library"),
-            release_dso_only=_opt_bool(release, "dso_only"),
-            release_include_private_dso=_opt_bool(release, "include_private_dso"),
-            release_support_promise=_one_of(
-                _opt_str(release, "support_promise"),
-                _SUPPORT_PROMISE_POLICIES,
-                "release.support_promise",
-            ),
-            resource_limits_max_bundle_facts_decode_nodes=_opt_int(
-                resource_limits, "max_bundle_facts_decode_nodes"
-            ),
-            assurance_require_complete=_opt_bool(assurance, "require_complete"),
-            performance_profile=_parse_performance_profile_key(top),
-            version=(
-                version_raw
-                if isinstance(version_raw, int) and not isinstance(version_raw, bool)
-                else 0
-            ),
-            policy_overrides=_parse_policy_overrides(policy),
-            deployment=EnvironmentMatrix.from_dict_or_none(deployment_raw, strict=True),
-        )
-
-    def _build_block(self) -> dict[str, Any]:
-        """Non-default ``build:`` keys (empty when the block is all-defaults)."""
-        build: dict[str, Any] = {}
-        if self.system and self.system != "auto":
-            build["system"] = self.system
-        if self.query:
-            build["query"] = self.query
-        if self.compile_db:
-            build["compile_db"] = self.compile_db
-        if self.compile_db_filter:
-            build["compile_db_filter"] = self.compile_db_filter
-        if self.targets:
-            build["targets"] = list(self.targets)
-        return build
-
-    def _sources_block(self) -> dict[str, Any]:
-        """Non-default ``sources:`` keys (headers/excludes/graph detail)."""
-        sources: dict[str, Any] = {}
-        if self.public_headers:
-            sources["public_headers"] = list(self.public_headers)
-        if self.exclude:
-            sources["exclude"] = list(self.exclude)
-        if self.graph_detail and self.graph_detail != "summary":
-            sources["graph"] = self.graph_detail
-        return sources
-
-    def _severity_block(self) -> dict[str, Any]:
-        """Non-default ``severity:`` keys (preset + per-category levels)."""
-        severity: dict[str, Any] = {}
-        if self.severity_preset is not None:
-            severity["preset"] = self.severity_preset
-        for key in ("abi_breaking", "potential_breaking", "quality_issues", "addition"):
-            val = getattr(self, f"severity_{key}")
-            if val is not None:
-                severity[key] = val
-        return severity
-
-    def _suppression_block(self) -> dict[str, Any]:
-        """Non-default ``suppression:`` keys (hygiene policy)."""
-        suppression: dict[str, Any] = {}
-        if self.suppression_strict is not None:
-            suppression["strict"] = self.suppression_strict
-        if self.suppression_require_justification is not None:
-            suppression["require_justification"] = (
-                self.suppression_require_justification
-            )
-        return suppression
-
-    def _source_block(self) -> dict[str, Any]:
-        """``source:`` block (``method`` only; empty when unset)."""
-        if self.source_method is not None:
-            return {"method": self.source_method}
-        return {}
-
-    def _compile_block(self) -> dict[str, Any]:
-        """Non-default ``compile:`` keys (stable L2 header compile context)."""
-        compile_blk: dict[str, Any] = {}
-        if self.compile_frontend is not None:
-            compile_blk["frontend"] = self.compile_frontend
-        if self.compile_std is not None:
-            compile_blk["std"] = self.compile_std
-        if self.compile_include_dirs:
-            compile_blk["include_dirs"] = list(self.compile_include_dirs)
-        if self.compile_defines:
-            compile_blk["defines"] = list(self.compile_defines)
-        if self.compile_sysroot is not None:
-            compile_blk["sysroot"] = self.compile_sysroot
-        if self.compile_nostdinc is not None:
-            compile_blk["nostdinc"] = self.compile_nostdinc
-        if self.compile_compiler is not None:
-            compile_blk["compiler"] = self.compile_compiler
-        if self.compile_options:
-            compile_blk["options"] = list(self.compile_options)
-        if self.compile_ast_frontend_fallback is not None:
-            compile_blk["ast_frontend_fallback"] = self.compile_ast_frontend_fallback
-        if self.compile_allow_unsupported_castxml is not None:
-            compile_blk["allow_unsupported_castxml"] = (
-                self.compile_allow_unsupported_castxml
-            )
-        if self.compile_frontend_context is not None:
-            compile_blk["frontend_context"] = self.compile_frontend_context
-        if self.compile_lang is not None:
-            compile_blk["lang"] = self.compile_lang
-        return compile_blk
-
-    def _debug_block(self) -> dict[str, Any]:
-        """Non-default ``debug:`` keys (separate-debug-file resolution; ADR-040 L2)."""
-        debug: dict[str, Any] = {}
-        if self.debug_format is not None:
-            debug["format"] = self.debug_format
-        if self.debug_dwarf_only is not None:
-            debug["dwarf_only"] = self.debug_dwarf_only
-        if self.debug_debuginfod is not None:
-            debug["debuginfod"] = self.debug_debuginfod
-        if self.debug_debuginfod_url is not None:
-            debug["debuginfod_url"] = self.debug_debuginfod_url
-        if self.debug_pdb_path is not None:
-            debug["pdb_path"] = self.debug_pdb_path
-        return debug
-
-    def _bundle_block(self) -> dict[str, Any]:
-        """Non-default ``bundle:`` keys (release/scan topology; CLI cleanup
-        phase two, PR J)."""
-        bundle: dict[str, Any] = {}
-        if self.bundle_system_providers:
-            bundle["system_providers"] = list(self.bundle_system_providers)
-        if self.bundle_cohorts:
-            bundle["cohorts"] = list(self.bundle_cohorts)
-        return bundle
-
-    def _python_block(self) -> dict[str, Any]:
-        """Non-default ``python:`` keys (the project's ``abi3`` floor)."""
-        if self.python_abi3_floor is not None:
-            return {"abi3_floor": self.python_abi3_floor}
-        return {}
-
-    def _gate_block(self) -> dict[str, Any]:
-        """Non-default ``gate:`` keys (Phase 7d: CI gate policy)."""
-        if self.gate_fail_on_removed_library is not None:
-            return {"fail_on_removed_library": self.gate_fail_on_removed_library}
-        return {}
-
-    def _release_block(self) -> dict[str, Any]:
-        """Non-default ``release:`` keys (Phase 7d: directory/package
-        release topology)."""
-        release: dict[str, Any] = {}
-        if self.release_dso_only is not None:
-            release["dso_only"] = self.release_dso_only
-        if self.release_include_private_dso is not None:
-            release["include_private_dso"] = self.release_include_private_dso
-        if self.release_support_promise is not None:
-            release["support_promise"] = self.release_support_promise
-        return release
-
-    def _assurance_block(self) -> dict[str, Any]:
-        """Non-default ``assurance:`` keys (former ``--require-complete-analysis``)."""
-        if self.assurance_require_complete is not None:
-            return {"require_complete": self.assurance_require_complete}
-        return {}
+        return cls(**KEY_TABLE.read(top))
 
     def to_dict(self) -> dict[str, Any]:
         """Serialize back to a ``.abicheck.yml`` mapping (round-trips via from_dict).
@@ -858,50 +626,32 @@ class BuildConfig:
         and a reload reproduces the same :class:`BuildConfig` (ADR-037 D4
         round-trip contract, ``test_config_roundtrip``).
         """
-        out: dict[str, Any] = {}
-        # Insertion order is the stable dump order: block by block, then the
-        # top-level scalars — keep it in sync with the dataclass field order.
-        for key, block in (
-            ("build", self._build_block()),
-            ("sources", self._sources_block()),
-            ("severity", self._severity_block()),
-            ("scope", _scope_block(self)),
-            ("contract", contract_block(self)),
-            ("acknowledgment", acknowledgment_block(self)),
-            ("suppression", self._suppression_block()),
-            ("source", self._source_block()),
-            ("compile", self._compile_block()),
-            ("debug", self._debug_block()),
-            ("bundle", self._bundle_block()),
-            ("python", self._python_block()),
-            ("gate", self._gate_block()),
-            ("release", self._release_block()),
-            (
-                "resource_limits",
-                {}
-                if (n := self.resource_limits_max_bundle_facts_decode_nodes) is None
-                else {"max_bundle_facts_decode_nodes": n},
-            ),
-            (
-                "policy",
-                {"overrides": dict(self.policy_overrides)}
-                if self.policy_overrides
-                else {},
-            ),
-            ("assurance", self._assurance_block()),
-            ("performance", _performance_block(self.performance_profile)),
-            (
-                "deployment",
-                EnvironmentMatrix.dump_or_empty(self.deployment),
-            ),  # keys on is-not-None: empty != absent
-        ):
-            if (self.deployment is not None) if key == "deployment" else block:
-                out[key] = block
+        return KEY_TABLE.dump(self)
 
-        if self.version:
-            out["version"] = self.version
-        return out
 
+def _kinds(kind: Kind) -> dict[str, frozenset[str]]:
+    """``block`` -> the sub-keys :data:`KEY_TABLE` types as *kind*."""
+    out: dict[str, frozenset[str]] = {}
+    for block, subs in KEY_TABLE.blocks.items():
+        keys = frozenset(sub for sub, spec in subs.items() if spec.kind is kind)
+        if keys:
+            out[block] = keys
+    return out
+
+
+#: Per-type views of :data:`KEY_TABLE`, kept under their historical names: the
+#: generated ``config-keys-reference.md`` and its sync test read these.
+BOOL_SUBKEYS = _kinds(Kind.BOOL)
+STR_SUBKEYS = _kinds(Kind.STR)
+LIST_SUBKEYS = _kinds(Kind.LIST)
+INT_SUBKEYS = _kinds(Kind.INT)
+DICT_STR_STR_SUBKEYS = _kinds(Kind.DICT_STR)
+TOP_LEVEL_STR_KEYS: frozenset[str] = frozenset(
+    key for key, spec in KEY_TABLE.top_scalars.items() if spec.kind is Kind.STR
+)
+TOP_LEVEL_INT_KEYS: frozenset[str] = frozenset(
+    key for key, spec in KEY_TABLE.top_scalars.items() if spec.kind is Kind.INT
+)
 
 #: Public re-export of every recognized ``.abicheck.yml`` top-level key —
 #: including the four ``project_targets.py``-owned ones. That sibling module

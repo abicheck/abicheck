@@ -522,6 +522,22 @@ def test_sc_suppression_expiry(tmp_path: Path) -> None:
     assert res.exit_code == 1  # the expired waiver fails the run
 
 
+def test_sc_contract_domain_coverage(tmp_path: Path) -> None:
+    old = _lib("1", [_fn("api_a"), _fn("api_b")], from_headers=True)
+    new = _lib("2", [_fn("api_a")], from_headers=True)
+
+    def _run(*extra: str) -> tuple[int, dict]:
+        report = tmp_path / "report.json"
+        result = _compare(tmp_path, old, new, "-o", f"json={report}", *extra)
+        return result.exit_code, json.loads(report.read_text(encoding="utf-8"))
+
+    exit_unstated, unstated = _run()
+    exit_stated, stated = _run("--contract", "public")
+    assert (exit_unstated, exit_stated) == (4, 4)
+    assert unstated["contract_coverage_exit_contribution"] == 0
+    assert stated["contract_coverage_exit_contribution"] == 1
+
+
 def test_sc_policy_profile(tmp_path: Path) -> None:
     e1 = EnumType(
         name="Mode",

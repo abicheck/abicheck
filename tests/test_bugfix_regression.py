@@ -28,6 +28,7 @@ from abicheck.policy_file import PolicyFile
 from abicheck.report_summary import compatibility_metrics
 from abicheck.reporter import to_json
 from abicheck.serialization import snapshot_to_json
+from abicheck.storage.tu_parse_store import TuParseStore
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -470,8 +471,8 @@ class TestBug8CppHintOnCFailure:
                 return_value="/mock/castxml",
             ),
             patch(
-                "abicheck.extract.headers.castxml.backend._cache_path",
-                return_value=tmp_path / "nonexistent.xml",
+                "abicheck.extract.headers.castxml.backend.ast_cache_store",
+                return_value=TuParseStore(tmp_path / "no-cache"),
             ),
         ):
             from abicheck.extract.headers.castxml.backend import (
@@ -500,8 +501,8 @@ class TestBug8CppHintOnCFailure:
                 return_value="/mock/castxml",
             ),
             patch(
-                "abicheck.extract.headers.castxml.backend._cache_path",
-                return_value=tmp_path / "nonexistent.xml",
+                "abicheck.extract.headers.castxml.backend.ast_cache_store",
+                return_value=TuParseStore(tmp_path / "no-cache"),
             ),
         ):
             from abicheck.extract.headers.castxml.backend import (
@@ -546,8 +547,8 @@ class TestBug9CastxmlTimeout:
                 return_value="/mock/castxml",
             ),
             patch(
-                "abicheck.extract.headers.castxml.backend._cache_path",
-                return_value=tmp_path / "nonexistent.xml",
+                "abicheck.extract.headers.castxml.backend.ast_cache_store",
+                return_value=TuParseStore(tmp_path / "no-cache"),
             ),
         ):
             from abicheck.extract.headers.castxml.backend import (
@@ -567,8 +568,8 @@ class TestBug9CastxmlTimeout:
                 return_value="/mock/castxml",
             ),
             patch(
-                "abicheck.extract.headers.castxml.backend._cache_path",
-                return_value=tmp_path / "nonexistent.xml",
+                "abicheck.extract.headers.castxml.backend.ast_cache_store",
+                return_value=TuParseStore(tmp_path / "no-cache"),
             ),
         ):
             from abicheck.extract.headers.castxml.backend import (
@@ -592,8 +593,8 @@ class TestBug9CastxmlTimeout:
                 return_value="/mock/castxml",
             ),
             patch(
-                "abicheck.extract.headers.castxml.backend._cache_path",
-                return_value=tmp_path / "nonexistent.xml",
+                "abicheck.extract.headers.castxml.backend.ast_cache_store",
+                return_value=TuParseStore(tmp_path / "no-cache"),
             ),
         ):
             from abicheck.extract.headers.castxml.backend import (
@@ -614,8 +615,8 @@ class TestBug9CastxmlTimeout:
                 return_value="/mock/castxml",
             ),
             patch(
-                "abicheck.extract.headers.castxml.backend._cache_path",
-                return_value=tmp_path / "nonexistent.xml",
+                "abicheck.extract.headers.castxml.backend.ast_cache_store",
+                return_value=TuParseStore(tmp_path / "no-cache"),
             ),
         ):
             from abicheck.extract.headers.castxml.backend import (
@@ -657,8 +658,8 @@ def test_castxml_rechecks_deadline_before_parsing_xml(tmp_path: Path) -> None:
             return_value="/mock/castxml",
         ),
         patch(
-            "abicheck.extract.headers.castxml.backend._cache_path",
-            return_value=tmp_path / "nonexistent.xml",
+            "abicheck.extract.headers.castxml.backend.ast_cache_store",
+            return_value=TuParseStore(tmp_path / "no-cache"),
         ),
     ):
         from abicheck.extract.headers.castxml.backend import (

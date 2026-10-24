@@ -1,0 +1,21 @@
+{
+  "description": "One short name (Parameter) in sibling namespaces, a nested namespace and a class scope; only algo_b::Parameter grows. No first-wins duplicate warning (the warning-hygiene gate), and the size change lands on algo_b::Parameter only.",
+  "field_report": "oneDAL #3693 handover r2, H4",
+  "bug_class": "identity.type_index_bare_name_collision",
+  "related_tests": [
+    "tests/test_type_index_qualified_identity.py"
+  ],
+  "depths": [
+    "headers",
+    "source"
+  ],
+  "expected_kinds": [
+    "type_size_changed"
+  ],
+  "expected_findings": [
+    [
+      "type_size_changed",
+      "algo_b::Parameter"
+    ]
+  ]
+}

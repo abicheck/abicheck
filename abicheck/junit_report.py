@@ -674,7 +674,7 @@ def _build_testsuite(
         severity_config,
         report_document=_resolved_document(envelope),
     )
-    add_scoped_properties(props, result)
+    add_scoped_properties(props, result, envelope)
     _add_env_matrix_property(
         props, result, report_document=_resolved_document(envelope)
     )
