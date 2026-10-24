@@ -55,8 +55,7 @@ EXTRACTION_BUG_CLASSES: tuple[BugClass, ...] = (
             "wherever the callback appears: inline parameter, pointer to it, "
             "typedef, struct field or return."
         ),
-        # PLACEHOLDER: the PR number this fix lands in; set when the PR opens.
-        fixed_by=(1792,),
+        fixed_by=(1796,),
         seed_tests=(
             "tests/test_castxml_function_pointer_spelling.py",
             "tests/test_castxml_function_pointer_integration.py",
