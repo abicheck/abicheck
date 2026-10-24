@@ -15,6 +15,7 @@ from __future__ import annotations
 import json
 import re
 from pathlib import Path
+from types import SimpleNamespace
 
 from click.testing import CliRunner
 
@@ -285,3 +286,155 @@ def test_markdown_state_table_escapes_pipes_and_line_breaks() -> None:
     ]
 
     assert rows == ["| `lib'x\\|y.so` | unproven | a \\| b c |"]
+
+
+def _member(name: str, state, old: bool, new: bool, reason: str = ""):
+    from abicheck.model.scope_acquisition import MemberAcquisition
+
+    return MemberAcquisition(
+        member=name, state=state, old_present=old, new_present=new, reason=reason
+    )
+
+
+def _record(members, removed=(), added=()):
+    """The two proven-inventory properties and the expected set are all the
+    release block reads from an acquisition record."""
+    return SimpleNamespace(
+        expected_members=tuple(members),
+        proven_removed_members=tuple(m for m in members if m.member in removed),
+        proven_added_members=tuple(m for m in members if m.member in added),
+    )
+
+
+def test_library_states_name_each_one_sided_state_and_skip_two_sided_members() -> None:
+    from abicheck.model.scope_acquisition import AcquisitionState as S
+    from abicheck.report.release_surface_changes import release_surface_changes
+
+    members = [
+        _member("libgone.so", S.NOT_SUPPLIED, old=True, new=False),
+        _member("libnew.so", S.NOT_SUPPLIED, old=False, new=True),
+        _member("libunproven.so", S.NOT_SUPPLIED, old=True, new=False),
+        _member("libnever.so", S.EXPECTED_NOT_PRODUCED, old=True, new=False),
+        _member("libbroke.so", S.FAILED, old=False, new=True),
+        _member("libout.so", S.OUT_OF_SCOPE, old=True, new=False),
+        _member("libboth.so", S.AVAILABLE, old=True, new=True),
+    ]
+    record = _record(members, removed={"libgone.so"}, added={"libnew.so"})
+
+    block = release_surface_changes([], record)
+
+    states = {row["library"]: row["state"] for row in block["library_states"]}
+    assert states == {
+        "libgone.so": "removed",
+        "libnew.so": "added",
+        "libunproven.so": "unproven",
+        "libnever.so": "expected_not_produced",
+        "libbroke.so": "failed",
+        "libout.so": "unselected",
+    }
+
+
+def test_support_promise_component_is_a_state_not_a_member() -> None:
+    from abicheck.checker import compare
+    from abicheck.report.release_surface_changes import (
+        compute_surface_changes,
+        release_surface_changes,
+    )
+
+    diff = compare(_snap("libpromised.so", ["p"]), _snap("libpromised.so", ["p", "p2"]))
+    section = compute_surface_changes(diff)
+
+    block = release_surface_changes(
+        [("libpromised.so", section)], None, {"libpromised.so": "retired"}
+    )
+
+    assert block["library_states"] == [
+        {"library": "libpromised.so", "state": "retired", "reason": ""}
+    ]
+    assert block["members"] == []
+
+
+def test_live_block_takes_promise_entries_out_of_the_member_fold() -> None:
+    from abicheck.checker import compare
+    from abicheck.report.release_surface_changes import live_surface_changes
+
+    diff = compare(_snap("libx.so", ["x_old"]), _snap("libx.so", ["x_old", "x_new"]))
+    results = [
+        {"library": "libcomp.so", "support_promise": "introduced"},
+        {"library": "libnodata.so"},
+        {"library": "libx.so", "_diff_result": diff},
+    ]
+
+    block = live_surface_changes(results, None)
+
+    assert [m["library"] for m in block["members"]] == ["libx.so"]
+    assert block["library_states"] == [
+        {"library": "libcomp.so", "state": "introduced", "reason": ""}
+    ]
+    assert _entries(block) == {("libx.so", "additions", "x_new")}
+
+
+def test_attach_is_idempotent_and_skips_entries_without_a_diff() -> None:
+    from abicheck.checker import compare
+    from abicheck.report.release_surface_changes import attach_member_surface_changes
+
+    diff = compare(_snap("libx.so", ["x"]), _snap("libx.so", ["x", "x_new"]))
+    preset = {"total": 99}
+    results = [
+        {"library": "libnodiff.so"},
+        {"library": "libpreset.so", "_diff_result": diff, "surface_changes": preset},
+        {"library": "libx.so", "_diff_result": diff},
+    ]
+
+    attach_member_surface_changes(results)
+    attach_member_surface_changes(results)
+
+    assert "surface_changes" not in results[0]
+    assert results[1]["surface_changes"] is preset
+    assert results[2]["surface_changes"]["total"] == 1
+
+
+def test_member_section_reads_attached_block_then_diff_then_nothing() -> None:
+    from abicheck.checker import compare
+    from abicheck.report.release_surface_changes import member_surface_section
+
+    diff = compare(_snap("libx.so", ["x"]), _snap("libx.so", ["x", "x_new"]))
+
+    attached = member_surface_section({"surface_changes": {"total": 0}})
+    computed = member_surface_section({"_diff_result": diff})
+    neither = member_surface_section({"library": "libnone.so"})
+
+    assert attached is not None and attached.total == 0
+    assert computed is not None and computed.total == 1
+    assert neither is None
+
+
+def test_markdown_section_omits_the_state_table_when_there_are_none() -> None:
+    from abicheck.report.release_surface_changes import render_release_surface_lines
+
+    block = {
+        "total": 1,
+        "additions": [
+            {
+                "kind": "func_added",
+                "symbol": "x_new",
+                "description": "",
+                "verdict": "COMPATIBLE",
+                "category": "addition",
+                "old_declaration": None,
+                "new_declaration": "int x_new()",
+                "source_location": None,
+                "library": "libx.so",
+            }
+        ],
+        "removals": [],
+        "modifications": [],
+        "members": [{"library": "libx.so"}],
+        "library_states": None,
+    }
+
+    lines = render_release_surface_lines(block)
+
+    assert "## Surface changes" in lines
+    assert not any("Libraries present on one side" in line for line in lines)
+    assert render_release_surface_lines({"total": 0, "library_states": []}) == []
