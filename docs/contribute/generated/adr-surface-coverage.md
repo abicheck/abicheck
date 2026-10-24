@@ -116,7 +116,6 @@ Which public surface reaches each ADR, which use cases it serves, and whether a 
 ## ADR surfaces no scenario traces
 
 - ADR-002 cli: compare --select
-- ADR-002 report: compare_report.comparison_scope
 - ADR-004 report: compare_report.filtered_summary
 - ADR-004 report: compare_report.redundant_count
 - ADR-004 report: compare_report.root_causes
@@ -218,8 +217,6 @@ Which public surface reaches each ADR, which use cases it serves, and whether a 
 - ADR-064 action: severity-preset
 - ADR-064 report: compare_report.exit
 - ADR-065 cli: compare --select --select-required --dry-run
-- ADR-065 report: compare_report.comparison_scope
-- ADR-065 report: compare_report.run_outcome
 - ADR-066 api: abicheck.workflows.history.build_longitudinal_history
 - ADR-066 cli: project history --policy
 - ADR-067 report: compare_report.disposition_audit
