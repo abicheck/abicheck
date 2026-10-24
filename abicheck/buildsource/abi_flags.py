@@ -147,6 +147,32 @@ ABI_RELEVANT_FLAG_PREFIXES: tuple[str, ...] = (
     "-fno-sycl",
 )
 
+
+#: Target-machine ``-m`` flags: the ISA, CPU, FPU and float-ABI selection a TU
+#: is compiled for (``-mavx2``, ``-mavx512f``, ``-msse4.2``, ``-mno-avx``,
+#: ``-mfpu=neon``, ``-mcpu=``, ``-mhard-float``, ...). Each one changes which
+#: feature macro (``__AVX2__``, ``__SSE4_2__``, ``__ARM_NEON``) a header sees,
+#: and a header-only library selects its vector type from those macros, so the
+#: whole family is ABI-relevant. It is matched as a family rather than a
+#: spelling list, because the ISA set grows with every compiler release and a
+#: missed spelling silently drops the flag from the header parse. ``-mllvm``
+#: is excluded: it forwards an option to the codegen backend and its operand
+#: is parser-only (see ``castxml_compiler_emulation``).
+def is_target_machine_flag(arg: str) -> bool:
+    """True for a ``-m`` target-machine flag, never for ``-mllvm``."""
+    return arg.startswith("-m") and len(arg) > 2 and not arg.startswith("-mllvm")
+
+
+def is_abi_relevant_flag(arg: str) -> bool:
+    """True when *arg* is captured into ``CompileUnit.abi_relevant_flags``.
+
+    The single capture predicate: the closed :data:`ABI_RELEVANT_FLAG_PREFIXES`
+    list, plus the open target-machine family, which a closed list cannot
+    enumerate.
+    """
+    return arg.startswith(ABI_RELEVANT_FLAG_PREFIXES) or is_target_machine_flag(arg)
+
+
 #: ABI-relevant flags whose value is a *separate*, following argv token
 #: rather than a combined ``=``/immediate-suffix spelling -- confirmed
 #: against a real ``clang -cc1 --help``: ``-target-abi <value>``,

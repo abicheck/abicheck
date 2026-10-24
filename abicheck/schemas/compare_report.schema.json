@@ -1757,6 +1757,9 @@
           "cause_namespace": {
             "type": "string"
           },
+          "shifted_by_type_pattern": {
+            "type": "string"
+          },
           "source_location": {
             "type": "string"
           },

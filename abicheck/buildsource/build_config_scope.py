@@ -40,7 +40,7 @@ __all__ = [
     "dependency_evidence_findings",
     "dependencies_findings",
     "parse_ownership_rules",
-    "scope_block",
+    "ownership_block",
 ]
 
 #: ``scope:`` ownership keys taking a string or a list of strings.
@@ -138,23 +138,13 @@ def parse_ownership_rules(scope: dict[str, object]) -> OwnershipRules:
     )
 
 
-def scope_block(cfg: Any) -> dict[str, Any]:
-    """Non-default ``scope:`` keys of *cfg* (a ``BuildConfig``)."""
+def ownership_block(cfg: Any) -> dict[str, Any]:
+    """Non-default ownership ``scope:`` keys of *cfg* (a ``BuildConfig``).
+
+    The ``scope:`` leaf keys are dumped by ``build_config``'s key table; this
+    is the one group of them that is parsed and written as a unit.
+    """
     scope: dict[str, Any] = {}
-    if cfg.scope_public is not None:
-        scope["public"] = cfg.scope_public
-    if cfg.collapse_versioned_symbols is not None:
-        scope["collapse_versioned_symbols"] = cfg.collapse_versioned_symbols
-    if cfg.public_symbols:
-        scope["public_symbols"] = list(cfg.public_symbols)
-    if cfg.scope_show_redundant is not None:
-        scope["show_redundant"] = cfg.scope_show_redundant
-    if cfg.public_header_dirs:
-        scope["public_header_dirs"] = list(cfg.public_header_dirs)
-    if cfg.exclude_headers:
-        scope["exclude_headers"] = list(cfg.exclude_headers)
-    if cfg.scope_on_incomplete is not None:
-        scope["on_incomplete"] = cfg.scope_on_incomplete
     rules: OwnershipRules = cfg.ownership
     if rules.dependencies:
         scope["dependencies"] = [
