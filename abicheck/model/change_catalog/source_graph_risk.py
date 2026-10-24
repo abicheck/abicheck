@@ -24,12 +24,19 @@ modules.
 
 from __future__ import annotations
 
-from .registry import ChangeEntity, ChangeKindMeta, ChangeOperation, Verdict
+from .registry import (
+    ChangeEntity,
+    ChangeKindMeta,
+    ChangeOperation,
+    ContractSubject,
+    Verdict,
+)
 
 _R = Verdict.COMPATIBLE_WITH_RISK
 _E = ChangeKindMeta
 _ENT = ChangeEntity
 _OP = ChangeOperation
+_CS = ContractSubject
 
 SOURCE_GRAPH_RISK_ENTRIES: list[ChangeKindMeta] = [
     _E(
@@ -37,6 +44,7 @@ SOURCE_GRAPH_RISK_ENTRIES: list[ChangeKindMeta] = [
         _R,
         impact="A public inline or template body compiled into every consumer's code changed its dependencies; consumers must recompile. Header-graph risk, never a proven break: no consumer build evidence exists.",
         entity=_ENT.FUNCTION,
+        contract_subject=_CS.DECLARATION,
         operation=_OP.MODIFIED,
     ),
 ]

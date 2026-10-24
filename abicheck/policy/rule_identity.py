@@ -112,6 +112,21 @@ def rule_id_of(rule: object) -> str:
     return str(getattr(rule, "label", None) or getattr(rule, "reason", None) or "rule")
 
 
+def readable_identity_of(rule: object) -> str | None:
+    """The readable identity a report shows next to an id-less rule's ``rule_id``.
+
+    :func:`rule_identity` when *rule* has no user ``id:`` (its ``rule_id`` is
+    then the opaque ``rule-<hex>`` digest of exactly this string), else
+    ``None``: a user id is already the readable name, so restating the
+    identity would only add noise. One derivation for every view (audit
+    rows, ``suppression_audit.stale_rules``, the release rationale).
+    """
+    user_id = getattr(rule, "id", None)
+    if isinstance(user_id, str) and user_id:
+        return None
+    return rule_identity(rule)
+
+
 def rule_identity(rule: object) -> str | None:
     """*rule*'s canonical, human-readable identity, or ``None``.
 

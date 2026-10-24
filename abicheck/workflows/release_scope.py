@@ -15,7 +15,7 @@
 
 """ADR-065 S2/S3/S4: the release fan-out's acquisition record.
 
-``cli_compare_release_helpers._match_release_keys`` pairs libraries by
+``workflows.release_inputs.match_release_keys`` pairs libraries by
 canonical filename key and used to define ``removed = old_keys - new_keys``
 -- one state for a name-normalization miss, a SONAME bump, a failed
 extraction, a partial local build, and a genuine deletion. This module

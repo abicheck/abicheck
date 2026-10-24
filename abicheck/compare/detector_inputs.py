@@ -115,6 +115,7 @@ DETECTOR_INPUTS: dict[str, DetectorInputs] = {
         tolerates={
             "canonical_ir": _CANONICAL,
             "declarations.enums": _LOOKUP,
+            "from_headers": _FROM_HEADERS,
             "declarations.typedefs": _LOOKUP,
             "declarations.types": _LOOKUP,
             "surface_graph": _GRAPH,
@@ -409,6 +410,10 @@ DETECTOR_INPUTS: dict[str, DetectorInputs] = {
             "from_headers": _FROM_HEADERS,
         },
     ),
+    # The ISA target is read from the producer string only: a rung that clears
+    # build_mode leaves no target to compare, so the detector must report that
+    # as disabled rather than read the absence as "same target".
+    "target_isa": DetectorInputs(requires=frozenset({"build_mode"})),
 }
 
 #: Non-detector rules consulted during compare, keyed ``module:qualname``.
@@ -430,10 +435,11 @@ RULE_INPUTS: dict[str, DetectorInputs] = {
 }
 
 
-def unavailable_required_input(name: str, *snapshots: object) -> str | None:
-    """``"disabled: <fact> not available at depth <d>"`` when a depth
-    projection cleared a fact detector *name* requires on any of
-    *snapshots*, else ``None``."""
+def unavailable_required_facts(
+    name: str, *snapshots: object
+) -> tuple[str, tuple[str, ...]] | None:
+    """``(depth, missing facts)`` when a depth projection cleared a fact
+    detector *name* requires on any of *snapshots*, else ``None``."""
     inputs = DETECTOR_INPUTS.get(name)
     if inputs is None or not inputs.requires:
         return None
@@ -442,7 +448,12 @@ def unavailable_required_input(name: str, *snapshots: object) -> str | None:
         if record is None:
             continue
         depth, gone = record
-        missing = sorted(inputs.requires & gone)
+        missing = tuple(sorted(inputs.requires & gone))
         if missing:
-            return f"disabled: {', '.join(missing)} not available at depth {depth}"
+            return str(depth), missing
     return None
+
+
+def depth_gap_reason(depth: str, missing: tuple[str, ...]) -> str:
+    """The one spelling of a depth-projection ``coverage_gap``."""
+    return f"{', '.join(missing)} not available at depth {depth}"

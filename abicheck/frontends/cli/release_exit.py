@@ -23,16 +23,13 @@ over the axes a release can be decided on lives in
 process status and the report cannot disagree *by construction* rather than
 by an asserted invariant over two implementations (Codex review, P1).
 
-Moved out of :mod:`abicheck.cli_compare_release_helpers` (PR #1195), which
+Moved out of the retired ``cli_compare_release_helpers`` (PR #1195), which
 sat at its `architecture/debt.yaml` ``no_growth`` baseline with no room for
 a new axis. That is the sanctioned remedy -- move responsibility out, never
 trim the file to fit -- and this function is a responsibility in its own
 right, not a helper: it is the release's exit contract, and
 `tests/test_exit_code_integrity.py` gates it directly.
-:mod:`abicheck.cli_compare_release_helpers` and
-:mod:`abicheck.cli_compare_release` both re-export the name, so every
-existing importer (including tests that import it from either) is
-unaffected.
+Importers use this module's own path; the re-exports from the retired ``cli_compare_release_helpers`` and ``cli_compare_release`` were dropped with the split.
 """
 
 from __future__ import annotations

@@ -494,8 +494,7 @@ def release_finding_entry(
     _baseline_finding_dicts`` use -- so all four entry builders agree
     on which rule (if any) fired for a shared finding, instead of the release
     fan-out's own projection never computing the field at all. Lives here
-    (not in ``cli_compare_release_matrix.py``, which sits at its own
-    ``no_growth`` line cap with no headroom) since this module already owns
+    (not in ``frontends/cli/release_summary.py``, a frontend output writer that does not own per-change entry builders) since this module already owns
     ``reclassified_by_for_change`` and every other entry builder that calls
     it.
     """

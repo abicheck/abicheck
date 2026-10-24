@@ -175,7 +175,7 @@ def filter_release_bundle_findings(
     expects a real :class:`Change`) cannot be called on them directly.
     Each finding is lowered through its own ``to_change()`` projection --
     the identical lowering
-    ``cli_compare_release_helpers._fold_release_global_severity`` already
+    ``workflows.release_exit_fold.fold_release_global_severity`` already
     uses to resolve a bundle finding's severity for the release's exit
     code -- so this display filter can never disagree with what that exit
     code already computed for the same finding. *kind_sets* is deliberately
@@ -205,12 +205,10 @@ def release_bundle_findings_for_view(
 
     Codex review, PR #1154 second follow-up ("Apply release show filters
     inside each renderer"): shared by the release fan-out's JSON
-    (``cli_compare_release_helpers._format_release_json``) and Markdown
-    (``cli_compare_release_helpers._format_release_markdown``) bundle
+    (``report.render_release_report.render_release_json``) and Markdown
+    (``report.render_release_report.render_release_markdown_report``) bundle
     sections so the two formats can never disagree about which bundle
-    findings a given ``show_only`` selection keeps. Both call sites live in
-    ``cli_compare_release_helpers.py`` (a ``frontends`` module, which may
-    import both this module and ``report``) as of Codex review, fresh
+    findings a given ``show_only`` selection keeps. Both call sites live in ``report/release_document.py`` (a ``report`` module, so it may import this module directly) as of Codex review, fresh
     evidence, PR #1154 follow-up ("Move release filtering out of the
     Markdown renderer") -- ``report/render_release_markdown.py``'s own
     Markdown section renderer used to call this function directly, which
@@ -235,8 +233,7 @@ def release_matrix_changes_for_view(
     """Return *matrix_result*'s changes, ``--view show=``-filtered when active.
 
     Shared by the release fan-out's JSON and Markdown release-global matrix
-    (build-configuration) sections, both called from
-    ``cli_compare_release_helpers.py`` for the identical reason as
+    (build-configuration) sections, both called from ``report/release_document.py`` for the identical reason as
     :func:`release_bundle_findings_for_view` -- see that function's own
     docstring. Unlike a bundle finding, a matrix result is a real
     :class:`DiffResult`, so it is filtered the identical way a per-library
@@ -760,6 +757,16 @@ def compute_library_files(
     )
 
 
+def _rolled_up_group(
+    heading: str, changes: list[Change], level: object | None, **kw: Any
+) -> _rmd.ChangeGroup:
+    """A non-gating section's group with its flooded kinds rolled up."""
+    items, rollups = roll_up_large_kinds(changes, severity_level=level)
+    return _rmd.ChangeGroup(
+        heading=heading, changes=tuple(items), rollups=rollups, **kw
+    )
+
+
 def compute_severity_sections(
     breaking: list[Change],
     source_breaks: list[Change],
@@ -810,18 +817,13 @@ def compute_severity_sections(
             c for c in risk if getattr(c, "cross_source_evolution", None) is None
         ]
         sev_label = _section_severity_label(severity_config, "potential_breaking")
+        risk_level = _section_severity_level(severity_config, "potential_breaking")
         if deployment_risk:
-            risk_items, risk_rollups = roll_up_large_kinds(
-                deployment_risk,
-                severity_level=_section_severity_level(
-                    severity_config, "potential_breaking"
-                ),
-            )
             groups.append(
-                _rmd.ChangeGroup(
-                    heading=f"## {_RISK_ICON} Deployment Risk Changes{sev_label}",
-                    changes=tuple(risk_items),
-                    rollups=risk_rollups,
+                _rolled_up_group(
+                    f"## {_RISK_ICON} Deployment Risk Changes{sev_label}",
+                    deployment_risk,
+                    risk_level,
                     oneline=True,
                     note_lines=(
                         "> These changes are **binary-compatible** but may cause the library to fail",
@@ -831,17 +833,11 @@ def compute_severity_sections(
                 )
             )
         if hygiene:
-            hygiene_items, hygiene_rollups = roll_up_large_kinds(
-                hygiene,
-                severity_level=_section_severity_level(
-                    severity_config, "potential_breaking"
-                ),
-            )
             groups.append(
-                _rmd.ChangeGroup(
-                    heading=f"## {_HYGIENE_ICON} Cross-Source Hygiene Findings{sev_label}",
-                    changes=tuple(hygiene_items),
-                    rollups=hygiene_rollups,
+                _rolled_up_group(
+                    f"## {_HYGIENE_ICON} Cross-Source Hygiene Findings{sev_label}",
+                    hygiene,
+                    risk_level,
                     oneline=True,
                     note_lines=(
                         "> These findings compare each snapshot's own evidence sources against each",
@@ -868,17 +864,11 @@ def compute_severity_sections(
         informational = [c for c in compatible if c.kind in _INFORMATIONAL_KINDS]
         if quality:
             sev_label = _section_severity_label(severity_config, "quality_issues")
-            quality_items, quality_rollups = roll_up_large_kinds(
-                quality,
-                severity_level=_section_severity_level(
-                    severity_config, "quality_issues"
-                ),
-            )
             groups.append(
-                _rmd.ChangeGroup(
-                    heading=f"## {_QUALITY_ICON} Quality Issues{sev_label}",
-                    changes=tuple(quality_items),
-                    rollups=quality_rollups,
+                _rolled_up_group(
+                    f"## {_QUALITY_ICON} Quality Issues{sev_label}",
+                    quality,
+                    _section_severity_level(severity_config, "quality_issues"),
                     oneline=True,
                 )
             )
@@ -891,23 +881,21 @@ def compute_severity_sections(
             # surface.
             sev_label = _section_severity_label(severity_config, "addition")
             groups.append(
-                _rmd.ChangeGroup(
-                    heading=f"## {_ADDITION_ICON} Additions{sev_label}",
-                    changes=tuple(additions_list),
+                _rolled_up_group(
+                    f"## {_ADDITION_ICON} Additions{sev_label}",
+                    additions_list,
+                    _section_severity_level(severity_config, "addition"),
                     oneline=False,
                 )
             )
         if informational:
             # ADR-078: recorded, never gated -- no configurable level, so the
             # heading carries no severity label.
-            info_items, info_rollups = roll_up_large_kinds(
-                informational, severity_level=None
-            )
             groups.append(
-                _rmd.ChangeGroup(
-                    heading=f"## {_INFORMATIONAL_ICON} Informational (no material change)",
-                    changes=tuple(info_items),
-                    rollups=info_rollups,
+                _rolled_up_group(
+                    f"## {_INFORMATIONAL_ICON} Informational (no material change)",
+                    informational,
+                    None,
                     oneline=True,
                 )
             )

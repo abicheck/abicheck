@@ -252,3 +252,55 @@ scenarios:
       Per-library release_recommendation is available in the -o json=reports/
       (single-library JSON). The job_summary / pr_comment digest is the G3
       review-UX deliverable; full automation needs a real multi-library bundle.
+
+  - id: SC-ZERO-COMPARISON-NOT-CLEAN
+    title: A release compare that pairs nothing must not read as a clean pass
+    persona: Release engineer gating a directory of libraries in CI
+    narrative: >
+      The baseline and the new release directories share no library name, so
+      no member pairs and zero comparisons complete. The run must not exit 0
+      or report a compatibility verdict. It records no_comparison_completed
+      and an incomplete scope, and exits 1 under both the warn and block
+      scope policies.
+    flow:
+      - abicheck compare baseline/ candidate/ --config abicheck.yml -o json=report.json
+    expected:
+      exit_code: 1
+      run_outcome:
+        operational: no_comparison_completed
+        compatibility: null
+        scope: incomplete
+      exit_reasons_include: [no_comparison_completed]
+    surfaces:
+      - report: compare_report.run_outcome
+      - report: compare_report.comparison_scope
+    validates: UC-WF-scope-completeness
+    automated: true
+    test: test_sc_zero_comparison_not_clean
+
+  - id: SC-ANALYSIS-ASSURANCE-GATE
+    title: Missing evidence is reported, and assurance.require_complete turns it into a gate
+    persona: Library maintainer whose CI only has the exported symbol table
+    narrative: >
+      The snapshots carry only the ELF export table, with no headers and no
+      DWARF. Without a completeness requirement the run exits 0, but the JSON
+      report says the analysis is partial and lists the unverified layout
+      detectors. With assurance.require_complete: true the same clean run exits
+      1. A real ABI break in the same configuration still exits 4, because the
+      assurance axis only raises a clean exit and never lowers a break.
+    flow:
+      - abicheck compare old.json new.json -o json=report.json
+      - abicheck compare old.json new.json --config abicheck.yml -o json=report.json
+    expected:
+      exit_code_default: 0
+      exit_code_required: 1
+      analysis_assurance:
+        status: partial
+        contribution_required: 1
+        unverified_includes: [dwarf]
+      breaking_pair_exit_required: 4
+    surfaces:
+      - cli: compare
+    validates: UC-WF-analysis-assurance
+    automated: true
+    test: test_sc_analysis_assurance_gate

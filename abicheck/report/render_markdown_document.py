@@ -107,6 +107,16 @@ from .edge_coverage_section import (
     edge_coverage_section_from_mapping,
 )
 from .kind_rollup import KindRollup, render_kind_rollups
+from .markdown_budget import (
+    DEMANGLED_NAME_LIMIT,
+    EXAMPLE_LIMIT,
+    NOTE_ITEM_LIMIT,
+    clip,
+    clip_name,
+    example_names,
+    more_line,
+    split_items,
+)
 from .pattern_modulations_markdown import render_pattern_modulations_from_mapping
 from .render_edge_coverage import render_edge_coverage_markdown
 from .render_markdown import (
@@ -195,12 +205,12 @@ def _row_symbol_suffix(row: Mapping[str, Any]) -> str:
     every finding's symbol still appears."""
     symbol = row.get("symbol")
     if symbol and symbol not in row["description"]:
-        return f" — `{symbol}`"
+        return f" — `{clip_name(symbol)}`"
     return ""
 
 
 def _render_change_row_oneline(row: Mapping[str, Any]) -> str:
-    line = f"- **{row['kind']}**: {row['description']}"
+    line = clip(f"- **{row['kind']}**: {row['description']}")
     line += _row_symbol_suffix(row)
     correlated = row.get("correlated_change_kind")
     if correlated:
@@ -211,6 +221,10 @@ def _render_change_row_oneline(row: Mapping[str, Any]) -> str:
 
 def _render_change_row(row: Mapping[str, Any]) -> str:
     old_val, new_val = row.get("old_value"), row.get("new_value")
+    if old_val is not None:
+        old_val = clip_name(old_val)
+    if new_val is not None:
+        new_val = clip_name(new_val)
     old_new = ""
     if old_val is not None and new_val is not None:
         old_new = f" (`{old_val}` → `{new_val}`)"
@@ -218,11 +232,11 @@ def _render_change_row(row: Mapping[str, Any]) -> str:
         old_new = f" (`{old_val}`)"
     elif new_val is not None:
         old_new = f" (`{new_val}`)"
-    line = f"- **{row['kind']}**: {row['description']}{old_new}"
+    line = f"- **{row['kind']}**: {clip(row['description'])}{old_new}"
     line += _row_symbol_suffix(row)
     loc = row.get("source_location")
     if loc:
-        line += f" — `{loc}`"
+        line += f" — `{clip_name(loc)}`"
     impact = row.get("impact")
     if impact:
         line += f"\n  > {impact}"
@@ -231,8 +245,9 @@ def _render_change_row(row: Mapping[str, Any]) -> str:
         line += f"\n  > {caused_count} derived change(s) collapsed"
     affected = row.get("affected_symbols")
     if affected:
-        names = ", ".join(f"`{s}`" for s in affected[:5])
-        suffix = f" (+{len(affected) - 5} more)" if len(affected) > 5 else ""
+        names = ", ".join(f"`{clip_name(s)}`" for s in affected[:EXAMPLE_LIMIT])
+        hidden = len(affected) - EXAMPLE_LIMIT
+        suffix = f" (+{hidden} more)" if hidden > 0 else ""
         line += f"\n  > Affected symbols: {names}{suffix}"
     tag = _row_contract_tag(row)
     if tag is not None:
@@ -264,9 +279,13 @@ def _render_not_evaluated_lines(d: Mapping[str, Any] | None) -> list[str]:
         "> code — uncertainty is never silently treated as compatible.",
         "",
     ]
-    for entry in d["entries"]:
+    # Never gating, so bounded like every other non-gating list.
+    shown, hidden = split_items(d["entries"], NOTE_ITEM_LIMIT)
+    for entry in shown:
         lines.append(_render_change_row_oneline(entry["row"]))
-        lines.append(f"  > Contract: {entry['label']}{entry['suffix']}")
+        lines.append(clip(f"  > Contract: {entry['label']}{entry['suffix']}"))
+    if (more := more_line(hidden, "changes")) is not None:
+        lines.append(more)
     lines.append("")
     return lines
 
@@ -306,15 +325,9 @@ def _render_surface_changes_from_mapping(d: Any) -> list[str]:
 # Review-group caps for the Markdown view. The JSON ``review_groups`` block
 # keeps every group with its members and exact symbols; these only bound the
 # prose. Without them a ``std::`` surface yields one group per symbol, each
-# with multi-KB demangled names: 1000 symbols was a 650 KB section.
-_REVIEW_LINE_LIMIT = 1000  # no rendered line is longer than this
-_REVIEW_NAME_LIMIT = 160  # one demangled name, as shown
-_REVIEW_EXAMPLE_LIMIT = 5  # example names listed per family
+# with multi-KB demangled names: 1000 symbols was a 650 KB section. Line,
+# name and example limits are the shared ``markdown_budget`` ones.
 _REVIEW_FAMILY_LIMIT = 50  # families rendered before "... and N more"
-
-
-def _clip(text: str, limit: int = _REVIEW_LINE_LIMIT) -> str:
-    return text if len(text) <= limit else text[: limit - 1] + "…"
 
 
 def _review_namespace_root(display_name: str) -> str:
@@ -388,7 +401,7 @@ def _review_group_families(
         family["groups"] += 1
         family["gating"] += int(group.get("gating_findings", 0) or 0)
         family["members"] += len(group.get("member_finding_ids", []) or [])
-        if len(family["examples"]) < _REVIEW_EXAMPLE_LIMIT:
+        if len(family["examples"]) < EXAMPLE_LIMIT:
             family["examples"].append(name)
         if family["groups"] == 1:
             family["first"] = group
@@ -396,13 +409,7 @@ def _review_group_families(
 
 
 def _capped_list(items: Any) -> str:
-    shown = [str(item) for item in list(items or [])]
-    text = ", ".join(
-        f"`{_clip(item, _REVIEW_NAME_LIMIT)}`" for item in shown[:_REVIEW_EXAMPLE_LIMIT]
-    )
-    if len(shown) > _REVIEW_EXAMPLE_LIMIT:
-        text += f" … and {len(shown) - _REVIEW_EXAMPLE_LIMIT} more"
-    return text
+    return example_names(list(items or []))
 
 
 def _render_review_groups_from_mapping(value: Any) -> list[str]:
@@ -432,44 +439,35 @@ def _render_review_groups_from_mapping(value: Any) -> list[str]:
             # small report reads the same; only a family of several is folded.
             group = family["first"]
             lines += [
-                _clip(
-                    f"### {index}. `{_clip(str(group.get('display_name', '?')), _REVIEW_NAME_LIMIT)}`"
-                ),
+                clip(f"### {index}. `{clip_name(group.get('display_name', '?'))}`"),
                 "",
-                _clip(f"- **Observed:** {transition}"),
-                _clip(f"- **Implication:** {family['consequence']}"),
-                _clip(f"- **Action:** {family['action']}"),
+                clip(f"- **Observed:** {transition}"),
+                clip(f"- **Implication:** {family['consequence']}"),
+                clip(f"- **Action:** {family['action']}"),
                 f"- **Gate contribution:** {family['gating']} finding(s)",
-                _clip(
-                    f"- **Members:** {_capped_list(group.get('member_finding_ids'))}"
-                ),
-                _clip(
+                clip(f"- **Members:** {_capped_list(group.get('member_finding_ids'))}"),
+                clip(
                     f"- **Exact symbols:** {_capped_list(group.get('exact_symbols'))}"
                 ),
                 "",
             ]
             continue
-        examples = ", ".join(
-            f"`{_clip(name, _REVIEW_NAME_LIMIT)}`" for name in family["examples"]
-        )
-        more = family["groups"] - len(family["examples"])
-        if more > 0:
-            examples += f" … and {more} more"
+        examples = example_names(family["examples"], total=family["groups"])
         if family["uniform"]:
             consequence, action = family["consequence"], family["action"]
         else:
             consequence = action = "varies by member; see the JSON `review_groups`"
         lines += [
-            _clip(
-                f"### {index}. `{_clip(root, _REVIEW_NAME_LIMIT)}` "
+            clip(
+                f"### {index}. `{clip_name(root)}` "
                 f"({family['groups']} group(s), {family['members']} member finding(s))"
             ),
             "",
-            _clip(f"- **Observed:** {transition}"),
-            _clip(f"- **Implication:** {consequence}"),
-            _clip(f"- **Action:** {action}"),
+            clip(f"- **Observed:** {transition}"),
+            clip(f"- **Implication:** {consequence}"),
+            clip(f"- **Action:** {action}"),
             f"- **Gate contribution:** {family['gating']} finding(s)",
-            _clip(f"- **Examples:** {examples}"),
+            clip(f"- **Examples:** {examples}"),
             "",
         ]
     hidden = len(families) - _REVIEW_FAMILY_LIMIT
@@ -611,5 +609,7 @@ def render_markdown_document(doc: ReportDocument) -> str:
     if d["demangle"]:
         from ..demangle import demangle_text
 
-        text = demangle_text(text, escape_table_pipes=True)  # Foo::operator|
+        text = demangle_text(  # escape: Foo::operator|
+            text, escape_table_pipes=True, max_demangled=DEMANGLED_NAME_LIMIT
+        )
     return text

@@ -184,19 +184,11 @@ SERIALIZATION_BUG_CLASSES: tuple[BugClass, ...] = (
         fixed_by=(1698,),
         seed_tests=(
             "tests/test_snapshot_generation_migration.py",
+            "tests/test_field_shapes.py",
             "tests/test_family_f1_evidence_ablation.py",
-        ),
-        known_gaps=(
-            KnownGap(
-                description=(
-                    "Rows for generations 1-5 and 7-12 record no spelling "
-                    "change from a review of the generation-6 history only; "
-                    "no frozen per-generation snapshot corpus yet proves "
-                    "that a fresh dump and an older one spell every entity "
-                    "the same."
-                ),
-                reference="abicheck/storage/generation_migrations.py",
-            ),
+            "tests/test_generation_corpus.py",
+            "tests/test_generation_drift_demotion.py",
+            "tests/test_generation_corpus_gate.py",
         ),
     ),
 )

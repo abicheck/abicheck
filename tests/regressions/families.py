@@ -220,6 +220,47 @@ FAMILIES: dict[str, Family] = {
             ),
         ),
         Family(
+            key="F15",
+            title="castxml header vectors keep the element type clang reports",
+            invariant=(
+                "A castxml vector node resolves to the spelling clang gives for the same "
+                "declaration, so a header comparison sees a same-size element change."
+            ),
+            harness_tests=(),
+            planned_reason=(
+                "One class so far; revisit when a second header-backend node type is "
+                "collapsed to an opaque spelling and the two share the clang join."
+            ),
+        ),
+        Family(
+            key="F14",
+            title="DWARF type spelling keeps the attribute that makes a type",
+            invariant=(
+                "A DWARF type whose identity is an attribute rather than its "
+                "shape (DW_AT_GNU_vector) keeps that attribute in its recorded "
+                "spelling: a vector never collapses onto a plain array's T[] "
+                "spelling, so a same-size vector-versus-array change is reported."
+            ),
+            harness_tests=(),
+            planned_reason=(
+                "One class so far; revisit when a second attribute-determined "
+                "type (for example a sized or address-space-qualified type) "
+                "collapses the same way and the two share one mechanism."
+            ),
+        ),
+        Family(
+            key="F16",
+            title="Human output stays within its display budget",
+            invariant=(
+                "A bounded human rendering (Markdown report, review digest, "
+                "compact summary) stays within a fixed size however many "
+                "non-gating findings the run carries, budgets each group it "
+                "caps independently, and states every population it cut with "
+                "its full count; machine formats keep every finding."
+            ),
+            harness_tests=("tests/unit/report/test_markdown_report_budget.py",),
+        ),
+        Family(
             key="OTHER",
             title="CI, tooling, storage and trust-boundary surfaces",
             invariant=(
@@ -326,6 +367,7 @@ _F3 = (
     "classification.one_spelling_of_a_path_treated_as_its_identity",
     "comparability.incidental_ordering_treated_as_contract",
     "tooling.platform_dependent_path_key",
+    "templates.parameter_template_args_read_as_family_membership",
 )
 _F4 = (
     "classification.name_shape_as_contract_membership",
@@ -415,6 +457,12 @@ _F12 = (
     "extraction.msvc_include_operand_spelling_not_probed",
 )
 _F13 = ("extraction.compile_entry_collapsed_to_first_source",)
+_F14 = ("extraction.vector_type_collapsed_to_plain_array",)
+_F15 = ("extraction.castxml_vector_element_not_modelled",)
+_F16 = (
+    "report.shared_display_budget_starvation",
+    "report.markdown_size_unbounded_by_finding_count",
+)
 
 #: id -> reason it belongs to no shared family.
 OTHER_REASONS: dict[str, str] = {
@@ -433,7 +481,6 @@ OTHER_REASONS: dict[str, str] = {
     "cli_surface.derived_table_lost_in_its_own_encoding": "Action option-table encoding",
     "cli_surface.destination_collision_checked_only_by_exact_path": "output-path handling",
     "cli_surface.retired_spelling_in_remediation": "user-facing message text",
-    "report.shared_display_budget_starvation": "report rendering budget",
     "report.untrusted_value_escapes_its_cell": "report rendering escaping",
     "storage.out_of_band_snapshot_reader_envelope_drift": "storage envelope readers",
     "storage.safety_limit_used_as_allocation_size": "storage resource limits",
@@ -459,6 +506,9 @@ for _key, _ids in (
     ("F11", _F11),
     ("F12", _F12),
     ("F13", _F13),
+    ("F14", _F14),
+    ("F15", _F15),
+    ("F16", _F16),
     ("OTHER", tuple(OTHER_REASONS)),
 ):
     for _id in _ids:

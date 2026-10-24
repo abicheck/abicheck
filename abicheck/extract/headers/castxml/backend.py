@@ -79,6 +79,7 @@ from .probe import (
     record_unparseable_headers,
     run_castxml,
 )
+from .vector_join import join_vector_spellings
 
 # The orchestrator's logger name, kept from before the move.
 log = logging.getLogger("abicheck.dumper")
@@ -265,6 +266,25 @@ def castxml_dump(
         )
 
     key = _make_key()
+
+    def _with_vectors(root: Element) -> Element:
+        return join_vector_spellings(
+            root,
+            key,
+            headers=headers,
+            extra_includes=extra_includes,
+            compiler=compiler,
+            gcc_path=gcc_path,
+            gcc_prefix=gcc_prefix,
+            gcc_options=gcc_options,
+            gcc_option_tokens=gcc_option_tokens,
+            sysroot=sysroot,
+            nostdinc=nostdinc,
+            lang=lang,
+            extra_hash_dirs=extra_hash_dirs,
+            exported_symbols=exported_symbols,
+        )
+
     if _expected_acquisition_key is not None and key != _expected_acquisition_key:
         raise SnapshotError("header inputs changed before CastXML acquisition started")
     store = ast_cache_store(key, "castxml")
@@ -299,6 +319,7 @@ def castxml_dump(
         root, selected_meta = run_ast_acquisition("castxml", key, _produce)
         if _selected_meta_out is not None:
             _selected_meta_out.append(selected_meta)
+        # The coordinated producer already joined the vector spellings.
         return root
 
     check_deadline()
@@ -307,7 +328,7 @@ def castxml_dump(
         check_deadline()
         if _selected_meta_out is not None:
             _selected_meta_out.append((resolved_compiler, force_cpp))
-        return _cached_root
+        return _with_vectors(_cached_root)
 
     with tempfile.NamedTemporaryFile(suffix=".xml", delete=False) as tmp:
         out_xml = Path(tmp.name)
@@ -386,7 +407,7 @@ def castxml_dump(
         check_deadline()
         if _selected_meta_out is not None:
             _selected_meta_out.append((resolved_compiler, final_force_cpp))
-        return root
+        return _with_vectors(root)
     finally:
         out_xml.unlink(missing_ok=True)
 

@@ -28,15 +28,13 @@ SARIF spec: https://docs.oasis-open.org/sarif/sarif/v2.1.0/sarif-v2.1.0.html
 from __future__ import annotations
 
 from importlib.metadata import version as _pkg_version
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any
 
 from abicheck.checker import Change, ChangeKind, DiffResult
 from abicheck.compare.finding_identity import missing_contract_kind
-from abicheck.contract_relevance_types import CompatibilityEvaluationStatus
 from abicheck.impact import assess_change
 from abicheck.model.contract_finding_relevance import (
     contract_relevance_of,
-    evaluation_status_of,
     is_evaluated,
 )
 from abicheck.model.evidence_status import EvidenceStatus, ReachabilityState
@@ -47,11 +45,16 @@ from abicheck.policy.classification import (
     policy_for,
 )
 from abicheck.policy.severity import missing_contract_exit_code
-from abicheck.report.change_json import resolve_demangled_symbol
 from abicheck.report.disposition_audit import disposition_audit_dict_reusing_document
 from abicheck.report.envelope import ReportEnvelope, resolved_document, resolved_gate
 from abicheck.report.render_json import render_mapping_as_json
 from abicheck.report.sarif_invocation import compute_sarif_invocation_exit
+from abicheck.report.sarif_properties import (
+    _change_detail_properties,
+    _contract_properties,
+    _reachability_and_impact_properties,
+)
+from abicheck.report.use_case_impact_render import use_cases_by_finding_for
 from abicheck.report.view import (
     apply_show_only,
     display_changes,
@@ -246,117 +249,6 @@ def _missing_contract_rule(rule_id: str) -> dict[str, Any]:
     }
 
 
-def _change_detail_properties(change: Change) -> dict[str, Any]:
-    """The optional per-change value/attribution entries of the properties bag.
-
-    Each is omitted rather than emitted as ``null`` when it carries nothing, so
-    a SARIF consumer can tell "not applicable" from "empty".
-    """
-    props: dict[str, Any] = {}
-    if change.old_value is not None:
-        props["oldValue"] = change.old_value
-    if change.new_value is not None:
-        props["newValue"] = change.new_value
-    if change.affected_symbols:
-        props["affectedSymbols"] = change.affected_symbols
-    if change.caused_by_type:
-        props["causedByType"] = change.caused_by_type
-    if change.caused_count > 0:
-        props["causedCount"] = change.caused_count
-    if change.correlated_change_kind:
-        props["correlatedChangeKind"] = change.correlated_change_kind
-    # ELF symbol linkage of a removed symbol (see reporter.py's identical
-    # symbol_binding property for the full rationale) -- Codex review.
-    if change.symbol_binding:
-        props["symbolBinding"] = change.symbol_binding
-    # Plan slice 7o: both names on every machine projection, not only on an
-    # ELF_ONLY finding that carries its own -- `symbol`/`old_value` stay raw
-    # (see `reporter.resolve_demangled_symbol` for the full rationale).
-    if demangled := resolve_demangled_symbol(change):
-        props["demangledSymbol"] = demangled
-    return props
-
-
-def _reachability_and_impact_properties(change: Change) -> dict[str, Any]:
-    """Structured reachability evidence and graph-impact data.
-
-    ADR-044 P1 item 4 — structured reachability evidence (previously
-    description-text-only, e.g. inside the suppression_would_hide_public_break
-    diagnostic's prose): whether this change is public-reachable, how, and
-    the shortest proof path.
-
-    G31 Phase B B3 (ADR-048) — structured graph impact data. SARIF's own
-    relatedLocations/codeFlows model source-file locations, not abstract
-    graph node/edge references, so surfacing this as typed `properties`
-    (matching every other graph-derived field on this object) is the
-    pragmatic fit here rather than forcing an artificial codeFlow —
-    documented as a deliberate scope decision in ADR-048.
-    """
-    props: dict[str, Any] = {}
-    if change.public_reachable:
-        props["publicReachable"] = True
-        if change.reachability_kind:
-            props["reachabilityKind"] = change.reachability_kind
-        if change.reachability_proof_path:
-            props["reachabilityProofPath"] = change.reachability_proof_path
-    if change.affected_public_roots:
-        props["affectedPublicRoots"] = change.affected_public_roots
-    if change.impact_proof_path:
-        props["impactProofPath"] = change.impact_proof_path
-    if change.impact_is_direct is not None:
-        props["impactIsDirect"] = change.impact_is_direct
-    return props
-
-
-def _contract_properties(
-    change: Change,
-    relevance: Any,
-    result: DiffResult,
-    severity_config: Any,
-    *,
-    today: date | None = None,
-) -> dict[str, Any]:
-    """The per-finding ADR-049 contract fields, in reporter.py's canonical shape.
-
-    ``contract_relevance_of`` returns ``None`` for a run that never opted into
-    ``--contract``, which is what keeps this inert for every
-    pre-existing SARIF report. Before this shape was unified, only the
-    ``NOT_EVALUATED`` case set any of these, so an ``IN_CONTRACT`` /
-    ``NOT_APPLICABLE`` finding under ``--contract`` carried no
-    contract properties at all even though it has a real, stamped decision
-    (CLI-audit P1).
-    """
-    if relevance is None:
-        return {}
-    props: dict[str, Any] = {}
-    props["contractRelevance"] = relevance.value
-    if change.contract_reason_code:
-        props["contractReasonCode"] = change.contract_reason_code
-    if change.contract_assurance is not None:
-        props["contractAssurance"] = change.contract_assurance.value
-    # evaluation_status_of always resolves to a real status once
-    # `relevance` is known non-None (it falls back to deriving one from
-    # the relevance itself -- see its own docstring), so there is no
-    # reachable `None` branch to guard here -- `cast` tells mypy that
-    # without adding one.
-    status = cast(CompatibilityEvaluationStatus, evaluation_status_of(change))
-    props["compatibilityEvaluationStatus"] = status.value
-    decision = getattr(change, "compatibility_decision", None)
-    props["compatibilityDecision"] = getattr(decision, "value", None)
-    from abicheck.policy.severity import gate_contribution_for_change
-
-    props["gateContribution"] = gate_contribution_for_change(
-        change,
-        severity_config,
-        policy=result.policy,
-        policy_file=result.policy_file,
-        today=today,
-    )
-    if change.contract_evidence_refs is not None:
-        props["contractEvidenceRefs"] = list(change.contract_evidence_refs)
-    return props
-
-
 def _result_for(
     change: Change,
     result: DiffResult,
@@ -370,11 +262,18 @@ def _result_for(
     impact_group_id: str | None = None,
     finding: ReportFinding | None = None,
     today: date | None = None,
+    affected_use_cases: tuple[str, ...] | None = None,
 ) -> dict[str, Any]:
     """Produce a SARIF result object for a Change.
 
     *finding* (ADR-061 gap C), when given, is forwarded to :func:`_severity`
     unchanged -- see that function's own docstring for what it drives.
+
+    *affected_use_cases*, when not ``None`` (``compare --use-cases`` ran), is
+    this finding's per-finding attribution, written as
+    ``properties.affectedUseCases`` -- empty when no use case reaches it. The
+    same inverse of the report-level ``use_case_impact`` block the JSON
+    ``affected_use_cases`` field and Markdown rows read.
 
     *root_cause*, when given (``--report-mode root-cause``, G29 Phase 3
     slice 5, ADR-052), is this finding's ``(root_cause_id, root_display)``
@@ -484,6 +383,8 @@ def _result_for(
         root_cause_id, root_display = root_cause
         properties["rootCauseId"] = root_cause_id
         properties["rootCause"] = root_display
+    if affected_use_cases is not None:
+        properties["affectedUseCases"] = list(affected_use_cases)
 
     # CLI-audit P1: bring per-finding contract fields to the same canonical
     # shape reporter.py's JSON output already has (contract_relevance/
@@ -901,6 +802,10 @@ def to_sarif(
                 [*changes, *result.suppressed_changes, *scoped_only_changes]
             )
         }
+    # ``compare --use-cases`` attribution, read the same way Markdown rows
+    # read it. Carried only on the displayed-change results below, matching
+    # the JSON ``changes`` entries that hold ``affected_use_cases``.
+    use_cases = use_cases_by_finding_for(result)
     for change in changes:
         rule_id = change.kind.value
         if rule_id not in rules_seen:
@@ -922,6 +827,9 @@ def to_sarif(
                 impact_group_id=_impact_ig_lookup.get(finding_id(change)),
                 finding=finding_by_id.get(id(change)),
                 today=_resolved_today,
+                affected_use_cases=(
+                    None if use_cases is None else use_cases.get(finding_id(change), ())
+                ),
             )
         )
 

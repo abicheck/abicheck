@@ -49,6 +49,7 @@ from ...workflows.release_request import (
     cleanup_release_compare_plan as cleanup_release_compare_plan,
     resolve_release_compare_plan as _resolve_release_compare_plan,
 )
+from .options.params import _load_suppression_and_policy
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -207,3 +208,26 @@ def reject_bundle_facts_out_dir_collision(
                 "both to the same file would silently overwrite whichever "
                 "was written second."
             )
+
+
+def _validate_suppression_early(
+    suppress: Path | tuple[Path, ...] | None,
+    policy: str,
+    policy_file_path: Path | None,
+    strict_suppressions: bool,
+    require_justification: bool,
+) -> None:
+    """Load and validate the suppression file before entering the per-library loop.
+
+    Only invoked when the user passes a suppression file together with
+    *strict_suppressions* or *require_justification*, so that stale or
+    undocumented rules are rejected before any expensive per-library work.
+    """
+    if suppress is not None and (strict_suppressions or require_justification):
+        _load_suppression_and_policy(
+            suppress,
+            policy,
+            policy_file_path,
+            strict_suppressions=strict_suppressions,
+            require_justification=require_justification,
+        )

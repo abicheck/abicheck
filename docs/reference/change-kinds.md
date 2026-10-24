@@ -565,6 +565,7 @@ retargeted — rather than a single library's own declaration diff.
 |------|-------------|
 | `elf_endianness_changed` | The ELF `EI_DATA` byte order flipped (LSB ↔ MSB) — a different binary contract entirely (`BREAKING`). |
 | `x86_isa_baseline_raised` | `GNU_PROPERTY_X86_ISA_1_NEEDED` gained a micro-architecture level (e.g. x86-64-v2 → v3): older CPUs can no longer run the library (`COMPATIBLE_WITH_RISK`). |
+| `target_isa_changed` | The compiled instruction-set target differs between the two builds (`-march=` / `-m<feature>` in `DW_AT_producer`, or the `GNU_PROPERTY_X86_ISA_1_NEEDED` level). A raised requirement means CPUs without the new features can no longer run the library; layout and mangling findings reported alongside it are annotated as possible consequences (`COMPATIBLE_WITH_RISK`). |
 | `os_deployment_floor_raised` | The minimum OS/kernel floor was raised — Mach-O `LC_BUILD_VERSION` minos, PE `MajorSubsystemVersion`, or the ELF `NT_GNU_ABI_TAG` kernel floor (`COMPATIBLE_WITH_RISK`). |
 | `pe_hardening_weakened` / `pe_hardening_improved` | PE `DllCharacteristics` exploit mitigations (DEP, ASLR, HIGH_ENTROPY_VA, Control Flow Guard) lost or gained — see [Security Hardening](../use/security-hardening.md). |
 | `library_version_downgraded` | The embedded version regressed (PE `VS_FIXEDFILEINFO` or Mach-O `LC_ID_DYLIB` current_version) (`COMPATIBLE_WITH_RISK`). |

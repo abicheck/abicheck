@@ -64,6 +64,7 @@ maps are verbatim; each `payload` is elided.)*
 | `schema_version` | The **document's** version — one integer, currently **`65`**. Top-level so a loader can read it without parsing the rest. |
 | `sections` | The nine named sections. Each carries its own `section_kind`, `section_schema_version` and `payload`. |
 | `section_schema_versions` | A flat map of the same per-section versions, so a reader can check them without walking `sections`. |
+| `fact_generations` | The extractor/resolver (and, with build-source facts, source) generations that produced the facts. A loader compares them with its own generations and reports drift; absent in snapshots written before it existed, which read as unstated, never as current. |
 
 Every `dump` invocation produces this, with no flag. Compression
 (`--compression`, see [Storage encoding](#storage-encoding)) wraps it

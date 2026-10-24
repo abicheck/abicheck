@@ -1202,7 +1202,7 @@ def detect_missing_instantiations(
     for fn in new.declarations.functions:
         if not is_public_export(fn):
             continue
-        qname = new_name_of(fn)
+        qname = _strip_param_signature(new_name_of(fn))
         if _looks_like_template_instantiation(qname):
             surviving_stems.add(_strip_template_args(qname))
     for fn in old.declarations.functions:
@@ -1210,7 +1210,7 @@ def detect_missing_instantiations(
             continue
         if fn.mangled in new_mangled:
             continue
-        qname = old_name_of(fn)
+        qname = _strip_param_signature(old_name_of(fn))
         if not _looks_like_template_instantiation(qname):
             continue
         stem = _strip_template_args(qname)

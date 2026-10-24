@@ -742,3 +742,25 @@ def project_pair_to_depth(
             dwarf_enum_scope=dwarf_enum_scope,
         ),
     )
+
+
+def header_scope_excluded_by_depth(
+    before: tuple[AbiSnapshot | None, AbiSnapshot],
+    after: tuple[AbiSnapshot | None, AbiSnapshot],
+    depth: str | None,
+) -> bool:
+    """Whether the explicitly requested *depth* is what made public-header
+    scoping impossible for this pair.
+
+    True only when *depth* ranks below ``headers`` and the projection itself
+    switched every present side into ``elf_only_mode`` (which no public
+    surface resolves from). Header scoping is then outside the requested
+    scope rather than a scope that failed to resolve, so a caller should not
+    request it -- the same treatment a pure binary-only comparison gets.
+    """
+    if depth is None or DEPTH_RANK.get(depth.lower(), 99) >= DEPTH_RANK["headers"]:
+        return False
+    pairs = [(b, a) for b, a in zip(before, after, strict=True) if b is not None]
+    return bool(pairs) and all(
+        a is not None and a.elf_only_mode and not b.elf_only_mode for b, a in pairs
+    )
