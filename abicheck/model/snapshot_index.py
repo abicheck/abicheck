@@ -67,7 +67,36 @@ def build_snapshot_indexes(
     var_index = build_first_wins_index(variables, lambda v: v.mangled)
     warn_dropped(_log, "mangled variables", owner, var_index.dropped)
 
-    type_index = build_first_wins_index(types, lambda t: t.name)
+    # Keyed on the qualified identity -- the same ``qualified_name or name``
+    # key ``compare.type_map_pair.type_map_key`` matches old/new types by
+    # (not imported: model may not depend on compare). Header backends keep a
+    # bare ``name`` and the scope in ``qualified_name``, so keying on ``name``
+    # merged ``algo_a::Parameter`` and ``algo_b::Parameter`` into one entry
+    # and warned about a "duplicate" that was two distinct types.
+    type_index = build_first_wins_index(types, _qualified_key)
     warn_dropped(_log, "type names", owner, type_index.dropped)
 
-    return func_index.mapping, var_index.mapping, type_index.mapping
+    return func_index.mapping, var_index.mapping, _with_bare_aliases(type_index.mapping)
+
+
+def _qualified_key(t: RecordType) -> str:
+    return t.qualified_name or t.name
+
+
+def _with_bare_aliases(by_qualified: dict[str, RecordType]) -> dict[str, RecordType]:
+    """*by_qualified* plus a bare-``name`` alias for every record whose bare
+    name belongs to exactly one qualified identity.
+
+    A caller holding only a bare spelling still resolves an unambiguous
+    type; an ambiguous bare name (two namespaces declare it) gets no alias,
+    so the lookup misses rather than answering with whichever came first.
+    An alias never shadows a real qualified key.
+    """
+    owners: dict[str, set[str]] = {}
+    for key, rec in by_qualified.items():
+        owners.setdefault(rec.name, set()).add(key)
+    out = dict(by_qualified)
+    for bare, keys in owners.items():
+        if len(keys) == 1 and bare not in out:
+            out[bare] = by_qualified[next(iter(keys))]
+    return out
