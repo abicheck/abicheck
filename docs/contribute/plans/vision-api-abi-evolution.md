@@ -831,14 +831,18 @@ and without `-o html`; generated documents check escaping and the cap) and
   `test-report-policy-and-consumer-impact`) run the composite Action twice
   (with and without a versioning policy) on a real breaking pair and assert
   the policy acceptance, the HTML sections, an unchanged verdict/exit code,
-  and no ADR numbers in the report files.
+  and no ADR numbers in the report files (checked by
+  `scripts/check_no_adr_citations.py`, the pattern shared with
+  `tests/test_no_adr_in_user_text.py`).
 
 Still open: `affected_use_cases` in the HTML changes table and SARIF;
 release-level `surface_changes` (the release JSON carries none yet, so the
 release page renders the section only when a document has one); dependency
 facts for PE/Mach-O members (only ELF is recorded); the step summary written
-by the Action is not itself asserted ADR-free by the new job (only the
-report files are).
+by the Action is asserted ADR-free by `tests/test_action_step_summary_no_adr.py`
+(real `compare` over snapshot fixtures, summary rendered at every detail level),
+not by the CI job: a step's `$GITHUB_STEP_SUMMARY` is that step's own file, so a
+later step cannot read what the Action wrote.
 
 ## Files & surfaces
 
