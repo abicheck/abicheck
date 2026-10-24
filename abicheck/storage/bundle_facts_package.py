@@ -94,6 +94,7 @@ from .bundle_facts_archive import (
     DEFAULT_MAX_LIBRARY_COUNT,
 )
 from .bundle_facts_codec import bundle_facts_from_dict, bundle_facts_to_dict
+from .generation_migrations import without_snapshot_generation_notices
 from .import_bundle_facts import export_bundle_facts, import_bundle_facts
 from .json_budget import DEFAULT_MAX_JSON_CONTAINER_NODES
 from .package import ObjectStore, PackageManifest
@@ -332,8 +333,14 @@ def read_bundle_facts_package(
     # per-library snapshot, the same runtime-only `load_notices` a ProjectSnapshot
     # package carries, so it reaches `DiffResult.coverage_warnings` through
     # `confidence.snapshot_load_notices` and moves neither verdict nor exit code.
+    # The package manifest owns the generations: drop each member document's
+    # own stamp notice so they are stated once.
+    for snapshot in facts.per_library_snapshots.values():
+        snapshot.load_notices = without_snapshot_generation_notices(
+            snapshot.load_notices
+        )
     if compatibility.semantics_differ:
         notice = f"stored bundle facts '{variant_id}': {compatibility.reason}"
         for snapshot in facts.per_library_snapshots.values():
-            snapshot.load_notices = (notice,)
+            snapshot.load_notices = (notice, *snapshot.load_notices)
     return facts

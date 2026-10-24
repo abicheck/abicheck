@@ -129,8 +129,13 @@ def test_the_audit_and_the_receipt_derive_one_identity() -> None:
         ),
     ]
     receipt = SuppressionList(rules).rule_identities()
-    # For an id-less rule the audit's rule_id *is* the canonical identity.
-    assert list(receipt) == [rule_provenance(r).rule_id for r in rules]
+    # For an id-less rule the audit's rule_id is a digest of the canonical
+    # identity (H3: a portable token, not the readable string itself).
+    import hashlib
+
+    assert ["rule-" + hashlib.sha256(i.encode()).hexdigest()[:12] for i in receipt] == [
+        rule_provenance(r).rule_id for r in rules
+    ]
     assert len(set(receipt)) == 3, "three distinct rules, three identities"
 
 

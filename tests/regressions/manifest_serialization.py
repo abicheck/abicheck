@@ -168,4 +168,35 @@ SERIALIZATION_BUG_CLASSES: tuple[BugClass, ...] = (
             ),
         ),
     ),
+    BugClass(
+        id="storage.cross_generation_spelling_drift",
+        invariant=(
+            "A snapshot extracted by an older extractor generation, compared "
+            "against a fresh dump of identical source, reports no change and "
+            "carries a visible generation notice: the generation is stamped "
+            "on every single-file snapshot (absent reads as unstated, never "
+            "current), drift is decided by the one reader-compatibility "
+            "owner, and every extractor generation records the stored type "
+            "spellings it changed (or that it changed none), which the load "
+            "path migrates at every position a type spelling is stored."
+        ),
+        # #1698 introduced the AutoType -> auto spelling this class escaped through.
+        fixed_by=(1698,),
+        seed_tests=(
+            "tests/test_snapshot_generation_migration.py",
+            "tests/test_family_f1_evidence_ablation.py",
+        ),
+        known_gaps=(
+            KnownGap(
+                description=(
+                    "Rows for generations 1-5 and 7-12 record no spelling "
+                    "change from a review of the generation-6 history only; "
+                    "no frozen per-generation snapshot corpus yet proves "
+                    "that a fresh dump and an older one spell every entity "
+                    "the same."
+                ),
+                reference="abicheck/storage/generation_migrations.py",
+            ),
+        ),
+    ),
 )

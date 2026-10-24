@@ -33,6 +33,7 @@ must never move a finding's ``counts()`` bucket or ``detected_total``.
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 
 import pytest
@@ -97,7 +98,7 @@ def test_a_reclassified_finding_is_recorded_without_moving_the_counts(
     assert row.selector_matched_count == 1
     assert row.shadowed_count == 0
     assert row.status == "active"
-    assert "symbol='foo'" in row.rule_id
+    assert re.fullmatch(r"rule-[0-9a-f]{12}", row.rule_id)
     # Never added into `counts`/`detected_total` -- conservation still holds
     # over the *disposition* axis alone.
     assert audit.detected_total == 1

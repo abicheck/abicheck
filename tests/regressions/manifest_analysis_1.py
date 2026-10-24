@@ -331,6 +331,11 @@ ANALYSIS_1_BUG_CLASSES: tuple[BugClass, ...] = (
             # Pinned by name-level, one-for-one pairing across C and C++ shapes.
             "tests/test_inline_removal_dedup.py",
             "tests/test_inline_removal_source_replay_e2e.py",
+            # A namespace-scope constexpr value change is one observation at two
+            # tiers: CONSTANT_CHANGED (header) and CONSTEXPR_VALUE_CHANGED (L4
+            # replay). Same name-level, one-for-one pairing as the inline pair.
+            "tests/test_constexpr_constant_dedup.py",
+            "tests/test_constexpr_constant_source_replay_e2e.py",
             "tests/unit/compare/test_dedup_key.py",
             "tests/test_diff_namespaces.py",
             # workflows/cross_source_hygiene.py's own per-side OLD/NEW
@@ -653,6 +658,11 @@ ANALYSIS_1_BUG_CLASSES: tuple[BugClass, ...] = (
             "tests/test_header_graph_projection_cache.py",
             "tests/test_source_extractors_clang_ast_shape.py",
             "tests/test_field_added_unknown_polymorphism.py",  # vtables unseen (PDB UNSUPPORTED/FAILED/empty PARTIAL) read as non-polymorphic -> appended field COMPATIBLE
+            # Field report H5: exports whose declarations an undefined #ifdef
+            # (SYCL_LANGUAGE_VERSION) hid from the header parse vanished with
+            # no count; now counted per side, sycl:: as a named cause.
+            "tests/test_undeclared_export_census.py",
+            "tests/test_undeclared_sycl_census_integration.py",
         ),
         # Only the two consumer-scoping seeds reach a public surface: their integration tests drive `abicheck compare --used-by` end to end.
         public_surfaces=("cli",),

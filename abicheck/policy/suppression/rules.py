@@ -254,7 +254,8 @@ class Suppression:
     redundant — the id already encodes kind and identity."""
     id: str | None = field(default=None, kw_only=True)
     """P2 (ADR-067 D3): optional user-chosen identifier, unique within its
-    document. The audit's ``rule_id`` when set; otherwise the canonical
+    document. The audit's ``rule_id`` when set; otherwise ``rule-<12 hex>``,
+    a digest of the canonical
     :func:`~abicheck.policy.rule_identity.rule_identity`. Never affects
     matching."""
     #: Constructed in :meth:`__post_init__` from this class's own selector
@@ -794,14 +795,12 @@ class SuppressionList:
         - ``reason`` is excluded — it is prose that changes what a reviewer
           reads, never what the rule matches, and the source digest already
           records that it changed;
-        - fields are emitted in declaration order with no positional index, so
-          the identity depends only on the rule's own content;
-        - each value is rendered with ``repr()``, so a selector that itself
-          contains the ``|`` separator or an ``=`` (routine in a regex
-          selector — ``symbol_pattern: "a|change_kind=x"``) cannot render
-          the same identity as a different rule with those as separate
-          fields, and a ``date`` reads as a date rather than as a bare
-          number triple.
+        - it is compact canonical JSON with sorted keys and no positional
+          index, so the identity depends only on the rule's own content, and
+          JSON string quoting keeps a selector containing ``|`` or ``=``
+          (routine in a regex) from rendering the same identity as a rule
+          with those as separate fields; a ``date`` is ISO 8601, never a
+          Python ``repr()``.
 
         Derived generically from :class:`Suppression`'s own dataclass fields
         (skipping the compiled/resolved ``init=False`` internals), so a rule
