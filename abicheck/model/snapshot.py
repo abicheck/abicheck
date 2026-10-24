@@ -538,12 +538,41 @@ class AbiSnapshot:
     load_notices: tuple[str, ...] = field(
         default=(), repr=False, compare=False, kw_only=True
     )
+    # ADR-062 D2: the ``(extractor, resolver, source)`` generations of the
+    # build that extracted these facts, persisted as the document's
+    # ``fact_generations`` key (storage/generation_migrations.py). ``None``
+    # means "extracted by this process", so the writer stamps this build's
+    # generations; a loaded snapshot always carries the stated triple (0 for
+    # an unstated axis), so re-saving an old baseline never re-dates it.
+    fact_generations: tuple[int, int, int] | None = field(
+        default=None, repr=False, compare=False, kw_only=True
+    )
     # Runtime-only, like `live_source_evidence`: True when the export table
     # (`elf`) was read from a static archive's own symbol index (ADR-086),
     # not from a linked image -- so the dynamic-section facts (SONAME,
     # versioning, visibility, DT_NEEDED) were never observable. Never
     # serialized (`storage/snapshot_encode.py` drops it).
     static_archive: bool = field(default=False, repr=False, compare=False, kw_only=True)
+    # Runtime-only, like `static_archive`: the ``decl://``/``type://``/
+    # ``template_decl://`` node ids of the header (L2) graph, kept by
+    # `policy/depth_projection.py` when a projection below ``source`` clears
+    # `surface_graph` (the L5 fallback, ADR-063 Phase 10). Ids only, no edges,
+    # so `evidence_depth.resolve_l5_source_graph` cannot read it as L5
+    # evidence; `compare/template_instance_absence.py` reads it as the L2
+    # "is this template still declared" fact. `None` when nothing was kept.
+    # Never serialized (`storage/snapshot_encode.py` drops it).
+    header_declaration_ids: frozenset[str] | None = field(
+        default=None, repr=False, compare=False, kw_only=True
+    )
+    # Runtime-only, like `header_declaration_ids`: ``(depth, facts)`` when a
+    # `policy/depth_projection.py` projection cleared facts this snapshot
+    # carried -- the names `compare/detector_inputs.py` declares detectors
+    # read. The registry disables a detector whose required fact is listed
+    # ("disabled: <fact> not available at depth X") instead of running it on
+    # emptied input. Never serialized.
+    projection_unavailable: tuple[str, frozenset[str]] | None = field(
+        default=None, repr=False, compare=False, kw_only=True
+    )
 
     # Indexes (built lazily)
     _func_by_mangled: dict[str, Function] | None = field(
@@ -653,6 +682,9 @@ class AbiSnapshot:
         return self.variable_map.get(mangled)
 
     def type_by_name(self, name: str) -> RecordType | None:
+        """The record whose qualified name is *name*, or whose bare name is
+        *name* when exactly one record carries it; ``None`` when absent or
+        when a bare *name* is ambiguous across scopes."""
         if self._type_by_name is None:
             self.index()
         assert self._type_by_name is not None

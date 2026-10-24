@@ -214,7 +214,7 @@ class TestJsonReport:
         payload = json.loads(result.stdout)
         audit = payload["suppression_audit"]
         assert audit["total_rules"] == 1
-        assert audit["stale_rules"] == ["symbol='never_matches_anything'"]
+        assert audit["stale_rules"] == ['{"symbol":"never_matches_anything"}']
         assert audit["high_risk_matches"] == []
 
     @_requires_jsonschema
@@ -286,7 +286,7 @@ class TestJsonReport:
         payload = json.loads(result.stdout)
         audit = payload["suppression_audit"]
         assert audit["total_rules"] == 2
-        assert audit["stale_rules"] == ["symbol='never_matches_anything'"]
+        assert audit["stale_rules"] == ['{"symbol":"never_matches_anything"}']
 
     def test_label_includes_every_conjunctive_selector_not_just_the_first(
         self, tmp_path
@@ -328,10 +328,10 @@ class TestJsonReport:
             "two distinct rules must not render as the same label"
         )
         assert sorted(
-            label.rsplit("change_kind=", 1)[1] for label in audit["stale_rules"]
+            json.loads(label)["change_kind"] for label in audit["stale_rules"]
         ) == [
-            "'func_removed'",
-            "'var_removed'",
+            "func_removed",
+            "var_removed",
         ]
 
     def test_shared_reason_still_disambiguated_by_selectors(self, tmp_path):
@@ -371,7 +371,7 @@ class TestJsonReport:
             "two rules sharing a reason must still render distinct labels"
         )
         for label in audit["stale_rules"]:
-            assert label.startswith("symbol=")
+            assert json.loads(label)["symbol"]
 
     def test_label_includes_reachability_gates(self, tmp_path):
         # Regression (Codex review, fresh evidence): two rules sharing every
@@ -410,7 +410,7 @@ class TestJsonReport:
             "rules differing only by reachability must not render identically"
         )
         for label in audit["stale_rules"]:
-            assert "reachability=" in label
+            assert "reachability" in json.loads(label)
 
     def test_label_includes_binding_selector(self, tmp_path):
         # Regression (Codex review, fresh evidence): two rules sharing every
@@ -449,7 +449,7 @@ class TestJsonReport:
             "rules differing only by binding must not render identically"
         )
         for label in audit["stale_rules"]:
-            assert "binding=" in label
+            assert "binding" in json.loads(label)
 
     def test_label_includes_expires_date(self, tmp_path):
         # Regression (Codex review, fresh evidence): two otherwise-identical
@@ -629,7 +629,7 @@ class TestJsonReport:
         payload = json.loads(result.stdout)
         audit = payload["suppression_audit"]
         assert audit["total_rules"] == 1
-        assert audit["stale_rules"] == ["symbol='never_matches_anything'"]
+        assert audit["stale_rules"] == ['{"symbol":"never_matches_anything"}']
 
 
 class TestMarkdownReport:

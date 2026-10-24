@@ -408,7 +408,7 @@ class TestSuppressions:
             )
         )
         assert cfg.suppressions is not None
-        assert cfg.suppressions.rules == ("symbol='_ZN3foo3barEv'",)
+        assert cfg.suppressions.rules == ('{"symbol":"_ZN3foo3barEv"}',)
         assert len(cfg.suppressions.sha256) == 64
         assert cfg.provenance[SUPPRESSIONS_FIELD].path == str(path)
 

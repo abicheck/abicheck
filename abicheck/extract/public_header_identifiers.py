@@ -38,7 +38,7 @@ non-present status saying why the scan cannot vouch for completeness:
 from __future__ import annotations
 
 import re
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -150,6 +150,37 @@ def scan_public_header_identifiers(
     return Fact.present(frozenset(out), producer=_PRODUCER)
 
 
+def identifiers_in_kept_headers(
+    headers: Iterable[Path | str] | None, is_dependency: Callable[[str], bool]
+) -> frozenset[str] | None:
+    """Identifiers spelled by the header set's *non-dependency* files.
+
+    Dump-time scoping's instantiation-independent retention root (see
+    :mod:`abicheck.extract.flat_map_dependency_scope`): unlike
+    :func:`scan_public_header_identifiers` it skips every file
+    *is_dependency* names (an ``--exclude-header``-ed file under a ``-H``
+    directory), so a dependency header's own text never retains its own
+    typedefs. ``None`` -- no root, never "everything" -- when the set is
+    empty, a file is missing or unreadable, or one token-pastes.
+    """
+    files = _header_files(headers or (), ())
+    if isinstance(files, str) or not files:
+        return None
+    out: set[str] = set()
+    for path in files:
+        if is_dependency(str(path)):
+            continue
+        try:
+            text = path.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            return None
+        found = identifiers_in_header_text(text)
+        if found is None:
+            return None
+        out |= found
+    return frozenset(out)
+
+
 def stamp_public_header_identifiers(
     snapshot: AbiSnapshot,
     headers: Iterable[Path | str] | None,
@@ -163,6 +194,7 @@ def stamp_public_header_identifiers(
 
 __all__ = [
     "identifiers_in_header_text",
+    "identifiers_in_kept_headers",
     "scan_public_header_identifiers",
     "stamp_public_header_identifiers",
 ]
