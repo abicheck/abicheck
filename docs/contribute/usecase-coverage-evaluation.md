@@ -40,8 +40,7 @@ steps" below for the current state of each.
 Several formerly broad gaps are now closed and should no longer be treated as
 open roadmap work: native PE/Mach-O compare validation (G1), build-config matrix
 integration (G2), workflow/report coverage (G3), plugin host↔plugin checking
-(G5), BTF/CTF and SYCL workflows (G6), release recommendations (G7), static
-library stance (G8), security-hardening drift (G12), cross-architecture
+(G5), BTF/CTF and SYCL workflows (G6), release recommendations (G7), security-hardening drift (G12), cross-architecture
 comparison guardrails (G13), and CPython `abi3` import-contract checking
 (G14).
 
@@ -89,7 +88,7 @@ A real invocation is a point in this space:
 | Header-only / inline-only | `planned` | castxml can't emit concept bodies / ctor mangled names (G4; cases 78/105/106/111 dormant) |
 | Kernel / eBPF (BTF/CTF) | `complete` | **G6 closed**: BTF + CTF struct-change run through `compare`; committed `case121` BTF blobs + bare-blob CLI ingestion + `gcc -gbtf` integration fixture |
 | SYCL / accelerator (PI/UR) | `complete` | **G6 closed**: PI *and* UR adapter entrypoint-drop driven through `compare` + reports |
-| Static libraries (`.a`/`.lib`) | `by_design_excluded` | **G8 decided (option A, shipped)**: unsupported input today; CLI rejects archives with guidance. `vision.md`'s amended framing treats this as a current limitation open to a bounded future investigation, not a permanent exclusion — see [g8](plans/g8-static-libraries.md) |
+| Static libraries (`.a`/`.lib`) | `partial` | **G8 partial (ADR-086)**: `compare --no-baseline LIB.a -H include/` audits an archive's symbol index; two-sided archive compare and every other command still reject archives with guidance — see [g8](plans/g8-static-libraries.md) |
 | FFI consumers (Rust/Go/Python) | `by_design_excluded` | C ABI covered; other languages a stated non-goal |
 
 ---
@@ -105,7 +104,7 @@ A real invocation is a point in this space:
 | **G5** | ✅ closed | `plugin-check` and `check_plugin_host_contract` cover host↔plugin load contracts. |
 | **G6** | ✅ closed | BTF/CTF and SYCL PI/UR workflows run through `compare` and reports. |
 | **G7** | ✅ closed | Semver bump and SONAME action recommendations are emitted by the report layer. |
-| **G8** | by-design excluded (option A, shipped) | Static/import archives are rejected with guidance. `vision.md`'s amended framing treats archive-member API checking as a current limitation open to a bounded future investigation, not a permanent non-goal — see [g8](plans/g8-static-libraries.md). |
+| **G8** | partial (ADR-086) | `compare --no-baseline LIB.a -H include/` audits the archive's own symbol index (declared-vs-defined). Two-sided archive compare and other commands still reject archives with guidance — see [g8](plans/g8-static-libraries.md). |
 | **G9** | ✅ closed | Vendored-library pairing, both halves: `strip_vendor_hash` normalizes the auditwheel/delocate content-hash suffix in `compare-release`'s matching pass (filename) and in `bundle.py`'s cohort-scoped SONAME-skew detector (embedded DT_SONAME/install-name) — a bundled `libpng16-<hash>.so.16.x` pairs across rebuilds instead of removed+added noise, and a real break in the paired dependency (e.g. a SONAME major bump) still surfaces. |
 | **G10** | ✅ closed | manylinux glibc-floor / platform-baseline check. `check_platform_baseline_floor` (`diff_versioning.py`) compares a binary's own max required `GLIBC_2.x` (plus the implied floor from `DT_RELR`) against a declared floor (`.abicheck.yml`'s `deployment.runtime_floors` — no new flag) and emits `platform_baseline_floor_raised` — fires even with no old/new delta, unlike the pre-existing `runtime_floor_raised` reclassification. `package.parse_manylinux_glibc_floor` derives the floor from a manylinux wheel tag for programmatic use. |
 | **G11** | planned | Single-binary ABI audit/lint mode. |
@@ -123,9 +122,9 @@ A real invocation is a point in this space:
 | **G25** | planned | Cython API/ABI frontend (`.pxd` + `__pyx_capi__` capsule surface) — see the [SciPy/Scientific-Python Roadmap](scipy-scientific-python-roadmap.md#1-a-first-class-cython-apiabi-frontend). Neither the native C-ABI check (G14) nor the Python-level API check (G23) see a capsule signature change. |
 | **G26** | partial | NumPy C-API compatibility-envelope analysis. `numpy_capi.extract_numpy_capi_surface()` recovers `_ARRAY_API`/`_UFUNC_API` consumption and the `NPY_TARGET_VERSION` build/target facts from binary evidence and cross-checks them against the declared metadata range; the raw `NPY_ABI_VERSION`/`NPY_API_VERSION` hex constants need disassembly to recover (out of scope, same reasoning as G4) — see the [SciPy/Scientific-Python Roadmap](scipy-scientific-python-roadmap.md#2-numpy-c-api-compatibility-envelope-analysis) and the plan's "Out of scope". NumPy's capsule-based C-API is invisible to ordinary symbol-table diffing. |
 | **G27** | planned | Wheel tag / deployment-claim verification across Linux (extends G10 to `GLIBCXX`/`CXXABI`/musllinux), macOS (deployment target), and Windows (UCRT/runtime) — see the [SciPy/Scientific-Python Roadmap](scipy-scientific-python-roadmap.md#3-wheel-tag-and-deployment-claim-verification). |
-| **G46** | partial | Comparison scope and completeness (vision workstream A, ADR-065): which members were selected, missing or retired, and no pass on zero comparisons — see [the vision plan](plans/vision-api-abi-evolution.md). |
-| **G47** | partial | Analysis assurance and evidence adequacy (vision workstream E, ADR-063): the verdict states its evidence and narrows when evidence is missing; false-clean known gaps remain — see [the vision plan](plans/vision-api-abi-evolution.md). |
-| **G48** | partial | Release history under a versioning policy (vision workstream B, ADR-066) — see [the vision plan](plans/vision-api-abi-evolution.md). |
+| **G46** | partial | Comparison scope and completeness (vision workstream A, ADR-065): which members were selected, missing or retired, and no pass on zero comparisons — see [g46](plans/g46-scope-completeness.md). |
+| **G47** | partial | Analysis assurance and evidence adequacy (vision workstream E, ADR-063): the verdict states its evidence and narrows when evidence is missing; false-clean known gaps remain — see [g47](plans/g47-analysis-assurance.md). |
+| **G48** | partial | Release history under a versioning policy (vision workstream B, ADR-066) — see [g48](plans/g48-release-history.md). |
 
 ## Proposed next steps (tracked in the registry)
 
@@ -146,6 +145,7 @@ planned row from drifting away from its plan.
 | High | G25 — Cython API/ABI frontend | [g25](plans/g25-cython-api-abi-frontend.md) |
 | High | G26 — NumPy C-API compatibility envelope | [g26](plans/g26-numpy-capi-envelope.md) |
 | Medium | G27 — wheel tag / deployment-claim verification | [g27](plans/g27-wheel-deployment-verification.md) |
-| High | G46 — comparison scope and completeness | [vision A](plans/vision-api-abi-evolution.md) |
-| High | G47 — analysis assurance and evidence adequacy | [vision E](plans/vision-api-abi-evolution.md) |
-| Medium | G48 — release history and versioning policy | [vision B](plans/vision-api-abi-evolution.md) |
+| Medium | G8 — static libraries (two-sided archive compare, other commands) | [g8](plans/g8-static-libraries.md) |
+| High | G46 — comparison scope and completeness | [g46](plans/g46-scope-completeness.md) |
+| High | G47 — analysis assurance and evidence adequacy | [g47](plans/g47-analysis-assurance.md) |
+| Medium | G48 — release history and versioning policy | [g48](plans/g48-release-history.md) |
