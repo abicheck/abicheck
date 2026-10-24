@@ -280,6 +280,7 @@ _F1 = (
     "classification.non_entity_finding_feeds_contract_coverage",
     "detector.selector_axis_unstamped",
     "detector.removal_from_header_enumeration",
+    "detector.undeclared_export_shrink_silent",
     "evidence.unread_producer_read_as_confirmed_absence",
     "evidence.depth_projection_drops_lower_layer_detector_input",
     "evidence.container_presence_read_as_evidence_content",
