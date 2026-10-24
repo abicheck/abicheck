@@ -220,6 +220,22 @@ FAMILIES: dict[str, Family] = {
             ),
         ),
         Family(
+            key="F14",
+            title="DWARF type spelling keeps the attribute that makes a type",
+            invariant=(
+                "A DWARF type whose identity is an attribute rather than its "
+                "shape (DW_AT_GNU_vector) keeps that attribute in its recorded "
+                "spelling: a vector never collapses onto a plain array's T[] "
+                "spelling, so a same-size vector-versus-array change is reported."
+            ),
+            harness_tests=(),
+            planned_reason=(
+                "One class so far; revisit when a second attribute-determined "
+                "type (for example a sized or address-space-qualified type) "
+                "collapses the same way and the two share one mechanism."
+            ),
+        ),
+        Family(
             key="OTHER",
             title="CI, tooling, storage and trust-boundary surfaces",
             invariant=(
@@ -415,6 +431,7 @@ _F12 = (
     "extraction.msvc_include_operand_spelling_not_probed",
 )
 _F13 = ("extraction.compile_entry_collapsed_to_first_source",)
+_F14 = ("extraction.vector_type_collapsed_to_plain_array",)
 
 #: id -> reason it belongs to no shared family.
 OTHER_REASONS: dict[str, str] = {
@@ -459,6 +476,7 @@ for _key, _ids in (
     ("F11", _F11),
     ("F12", _F12),
     ("F13", _F13),
+    ("F14", _F14),
     ("OTHER", tuple(OTHER_REASONS)),
 ):
     for _id in _ids:
