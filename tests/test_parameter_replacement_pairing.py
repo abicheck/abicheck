@@ -140,3 +140,27 @@ def test_header_parsed_side_keeps_removal_and_addition(header_side: str) -> None
     (old if header_side == "old" else new).from_headers = True
     removed, added = _removed(OLD_SCALE), _added(NEW_SCALE)
     assert pair_parameter_replacements([removed, added], old, new) == [removed, added]
+
+
+def test_removal_absent_from_the_snapshot_is_not_paired() -> None:
+    # A removal the old snapshot does not hold has no declaration to read a
+    # name from, so it stays a removal while a real pair beside it is paired.
+    missing = "_Z7missingv"
+    old = _snap([_fn("scale", OLD_SCALE)])
+    new = _snap([_fn("scale", NEW_SCALE)])
+    changes = pair_parameter_replacements(
+        [_removed(missing), _removed(OLD_SCALE), _added(NEW_SCALE)], old, new
+    )
+    assert [(c.kind, c.symbol) for c in changes] == [
+        (ChangeKind.FUNC_REMOVED, missing),
+        (ChangeKind.FUNC_PARAMS_CHANGED, OLD_SCALE),
+    ]
+
+
+def test_unparseable_removal_is_not_paired() -> None:
+    # A plain C name is not an Itanium symbol: it has no parameter list to
+    # compare, so the pass makes no claim.
+    old = _snap([_fn("scale", "scale")])
+    new = _snap([_fn("scale", NEW_SCALE)])
+    removed, added = _removed("scale"), _added(NEW_SCALE)
+    assert pair_parameter_replacements([removed, added], old, new) == [removed, added]
