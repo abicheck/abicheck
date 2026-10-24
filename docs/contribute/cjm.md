@@ -70,14 +70,14 @@ How many registry use cases serve each stage, by status (counted from
 
 | Stage | complete | partial | modeled | planned | by_design_excluded |
 |---|---:|---:|---:|---:|---:|
-| `first_check` | 10 | 1 | 0 | 2 | 2 |
+| `first_check` | 10 | 2 | 0 | 2 | 1 |
 | `adopt_ci` | 9 | 0 | 1 | 0 | 1 |
 | `pr_review` | 16 | 3 | 0 | 2 | 0 |
 | `trust` | 10 | 6 | 1 | 0 | 0 |
 | `tune` | 6 | 0 | 0 | 0 | 2 |
 | `release` | 9 | 4 | 0 | 0 | 0 |
 | `downstream` | 4 | 1 | 0 | 0 | 1 |
-| `audit` | 4 | 2 | 0 | 1 | 2 |
+| `audit` | 4 | 3 | 0 | 1 | 1 |
 
 <!-- END GENERATED: cjm-stage-table -->
 
@@ -143,7 +143,7 @@ what was missing, what the scope was.
 **User question:** "Did it really check everything, or is this pass empty?"
 **Touchpoints:** the analysis-assurance block, `not_collected`/`FAILED`
 facts, comparability refusal, crosscheck, the completeness axis,
-`--require-complete-analysis`, `known-gaps.md`.
+the `assurance.require_complete` config key, `known-gaps.md`.
 **Use cases:** UC-WF-analysis-assurance, UC-WF-scope-completeness,
 UC-WF-contract-config, UC-PLAT-arch-guard, UC-WF-probe-matrix,
 UC-TC-header-scope-robustness, UC-CHANGE-crosscheck-hygiene,
@@ -161,8 +161,6 @@ UC-TC-bazel-build-evidence, UC-CHANGE-crosscheck-example-corpus.
 - [A large export shrink with no declared surface emits no
   finding](known-gaps.md#a-large-export-shrink-with-no-declared-surface-emits-no-finding-in-header-mode-2026-10-22)
   (known gap).
-- [A binary-gate demotion states no coverage gap](known-gaps.md#a-binary-gate-demotion-does-not-state-a-coverage-gap-adr-084)
-  (ADR-084).
 - No INCONSISTENT/CONFLICTING fact status, and two provider-status
   vocabularies (ADR-063, G47).
 - Scope and completeness are partial, and the exit code is still folded by

@@ -84,10 +84,9 @@ Tests that pin this behaviour include `tests/test_release_scope_completeness.py`
 
 1. **Scalar and bundle operand convergence.** One live/stored driver and one
    evaluation, gate, report and dry-run path across all four operand shapes.
-   The vision assigns this to `cli-cleanup-phase-two.md` (PR I) and names it as
-   overlapping this workstream. That file is not in the current tree, so its
-   status must be confirmed before the step is claimed as owned there. The
-   engine-side half is [ADR-061](../adr/061-responsibility-package-architecture.md)
+   The vision assigns this to `cli-cleanup-phase-two.md` (PR I); that plan is
+   retired and its PR I remainder is re-homed (see [plans index](index.md)).
+   The engine-side half is [ADR-061](../adr/061-responsibility-package-architecture.md)
    gap D, re-homed as [`one-comparison-product.md`](one-comparison-product.md)
    Phase 7d.
 2. **Typed selection.** Carry the selection and expected inventory as fields of
