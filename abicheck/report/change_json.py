@@ -280,7 +280,7 @@ def change_to_dict(
 
     ``severity_config`` is the run's resolved gate configuration, when it has
     one — it decides ADR-049's per-finding ``gate_contribution`` (see the call
-    to :func:`~abicheck.policy.severity.gate_contribution_for_change` below). ``None``
+    to :func:`~abicheck.policy.gate_contribution.gate_contribution_for_change` below). ``None``
     means the legacy verdict-based scheme, not "no gate".
 
     ``today``, forwarded to every date-sensitive resolution below (verdict,
@@ -380,10 +380,10 @@ def change_to_dict(
     # ADR-049 D1's `gate_contribution`, computed for a `changes` entry (the
     # only findings that reach a gate at all) from the same severity/legacy
     # scheme the run itself exits on -- see
-    # `severity.gate_contribution_for_change`. `severity_config` is None on
+    # `gate_contribution.gate_contribution_for_change`. `severity_config` is None on
     # the legacy scheme, where the contribution is the finding's own
     # verdict-to-exit mapping.
-    from ..policy.severity import gate_contribution_for_change
+    from ..policy.gate_contribution import gate_contribution_for_change
 
     _add_contract_evaluation_fields(
         d,

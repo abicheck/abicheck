@@ -57,12 +57,12 @@ from abicheck.model import (
 )
 from abicheck.model.change import Change
 from abicheck.policy.evaluate import evaluate
+from abicheck.policy.gate_contribution import gate_contribution_for_change
 from abicheck.policy.severity import (
     SeverityConfig,
     SeverityLevel,
     compute_exit_code,
     compute_gate_decision,
-    gate_contribution_for_change,
     legacy_exit_code,
 )
 from abicheck.serialization import snapshot_to_json
