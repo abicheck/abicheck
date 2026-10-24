@@ -33,6 +33,10 @@
 #   lists this use case; must mirror that file exactly (ADR-076,
 #   scripts/check_adr_surfaces.py).
 #
+# journey_stages: which customer-journey (CJM) stage(s) the case serves — a
+#   non-empty list from first_check | adopt_ci | pr_review | trust | tune |
+#   release | downstream | audit. The stages are defined in
+#   docs/contribute/cjm.md, which tests/test_usecase_registry.py keeps in sync.
 # axis legend: change_class | archetype | platform | workflow | reporting | toolchain
 
 schema_version: 1
@@ -44,6 +48,7 @@ use_cases:
     name: ABI/API change taxonomy (422 ChangeKinds, 5-tier policy)
     status: complete
     user_task: [pr_review, release]
+    journey_stages: [pr_review, trust]
     adrs: [ADR-010, ADR-011]
     evidence:
       modules: [abicheck/change_registry.py, abicheck/checker_policy.py]
@@ -55,6 +60,7 @@ use_cases:
     name: Release recommendation (semver bump + SONAME action)
     status: complete
     user_task: [release]
+    journey_stages: [release]
     adrs: [ADR-066]
     evidence:
       modules: [abicheck/semver.py]
@@ -65,6 +71,7 @@ use_cases:
     name: Inline-namespace version-stamp normalization (ICU-style)
     status: partial
     user_task: [pr_review, release]
+    journey_stages: [pr_review, release]
     adrs: []
     gap: G15
     plan: docs/contribute/plans/g15-inline-namespace-version.md
@@ -89,6 +96,7 @@ use_cases:
     name: Pure-C shared library (extern "C", SONAME-versioned)
     status: complete
     user_task: [pr_review, local_check]
+    journey_stages: [first_check, pr_review]
     adrs: []
     evidence:
       examples: [catalog/ground_truth.json]
@@ -99,6 +107,7 @@ use_cases:
     name: C++ library (templates, vtables, inline namespaces)
     status: complete
     user_task: [pr_review, local_check]
+    journey_stages: [first_check, pr_review]
     adrs: []
     evidence:
       examples: [catalog/ground_truth.json]
@@ -109,6 +118,7 @@ use_cases:
     name: Plugin host↔plugin load contract (dlopen)
     status: complete
     user_task: [pr_review, local_check]
+    journey_stages: [first_check, downstream]
     adrs: []
     note: >
       G5 closed: first-class host-contract check
@@ -135,6 +145,7 @@ use_cases:
     name: Header-only / inline-only libraries
     status: planned
     user_task: [pr_review, local_check]
+    journey_stages: [first_check, pr_review]
     adrs: []
     gap: G4
     plan: docs/contribute/plans/g4-header-ast-extractor.md
@@ -150,6 +161,7 @@ use_cases:
     name: Cython API/ABI surface (.pxd + __pyx_capi__ capsule table)
     status: planned
     user_task: [pr_review, local_check]
+    journey_stages: [first_check, pr_review]
     adrs: []
     gap: G25
     plan: docs/contribute/plans/g25-cython-api-abi-frontend.md
@@ -168,6 +180,7 @@ use_cases:
     name: CPython extension Python-level API surface
     status: complete
     user_task: [pr_review, local_check]
+    journey_stages: [first_check, pr_review]
     adrs: [ADR-034]
     note: >
       G23 closed (static path). Beyond G14's native C-ABI contract, abicheck now
@@ -206,6 +219,7 @@ use_cases:
     name: Kernel / eBPF modules (BTF/CTF)
     status: complete
     user_task: [pr_review, local_check]
+    journey_stages: [first_check, pr_review]
     adrs: [ADR-007]
     note: >
       G6 (kernel half) closed. The "module vs vmlinux BTF" workflow runs
@@ -229,6 +243,7 @@ use_cases:
     name: SYCL / heterogeneous accelerator stacks (PI/UR)
     status: complete
     user_task: [pr_review, local_check]
+    journey_stages: [first_check, pr_review]
     adrs: [ADR-020b]
     note: >
       G6 (accelerator half) closed. SYCL plugin-interface detection is driven
@@ -248,6 +263,7 @@ use_cases:
     name: Static libraries (.a / .lib)
     status: by_design_excluded
     user_task: [pr_review, local_check]
+    journey_stages: [first_check, audit]
     adrs: [ADR-086]
     note: >
       G8 decision (option A, shipped): static/import library archives are
@@ -283,6 +299,7 @@ use_cases:
     name: FFI consumers in other languages (Rust/Go/Python)
     status: by_design_excluded
     user_task: [pr_review, local_check]
+    journey_stages: [downstream]
     adrs: []
     note: >
       The C ABI such consumers bind to is covered; first-class support for
@@ -294,6 +311,7 @@ use_cases:
     name: Linux ELF (the CI-validated baseline)
     status: complete
     user_task: [pr_review, local_check]
+    journey_stages: [first_check, pr_review]
     adrs: [ADR-018]
     evidence:
       modules: [abicheck/elf_metadata.py]
@@ -304,6 +322,7 @@ use_cases:
     name: Windows PE/COFF + PDB (MSVC / MinGW)
     status: complete
     user_task: [pr_review, local_check]
+    journey_stages: [first_check, pr_review]
     adrs: [ADR-018]
     note: >
       G1 (Windows half) closed. The `compare` workflow is validated end-to-end
@@ -327,6 +346,7 @@ use_cases:
     name: macOS Mach-O (x86-64 / ARM64)
     status: complete
     user_task: [pr_review, local_check]
+    journey_stages: [first_check, pr_review]
     adrs: [ADR-018]
     note: >
       G1 (macOS half) closed. The `native-compare` CI step (macos-latest)
@@ -349,6 +369,7 @@ use_cases:
     name: Cross-architecture comparison guardrail (ELF e_machine)
     status: complete
     user_task: [pr_review, local_check]
+    journey_stages: [trust]
     adrs: []
     note: >
       G13 closed. The ELF snapshot captures e_machine, EI_CLASS, and
@@ -369,6 +390,7 @@ use_cases:
     name: Pairwise compare (CI PR gate)
     status: complete
     user_task: [pr_review, local_check, release]
+    journey_stages: [first_check, pr_review, release]
     adrs: [ADR-002, ADR-006, ADR-009, ADR-013, ADR-017, ADR-042, ADR-049, ADR-055, ADR-064, ADR-065, ADR-067, ADR-068, ADR-071, ADR-078, ADR-084]
     evidence:
       tests: [tests/test_reporter.py]
@@ -379,6 +401,7 @@ use_cases:
     name: Application compatibility (consumer-scoped)
     status: complete
     user_task: [release, audit]
+    journey_stages: [downstream]
     adrs: [ADR-005, ADR-052, ADR-057]
     evidence:
       modules: [abicheck/workflows/consumer_scope.py]
@@ -389,6 +412,7 @@ use_cases:
     name: Baseline pinning / registry
     status: complete
     user_task: [release, pr_review]
+    journey_stages: [adopt_ci]
     adrs: [ADR-015, ADR-047, ADR-059, ADR-062]
     note: >
       ADR-043: the baseline registry (push/pull/list/delete) was removed
@@ -406,6 +430,7 @@ use_cases:
     name: Debian symbols file generate/validate/diff
     status: complete
     user_task: [release]
+    journey_stages: [release]
     adrs: []
     evidence:
       modules: [abicheck/debian_symbols.py]
@@ -416,6 +441,7 @@ use_cases:
     name: ABICC drop-in replacement
     status: by_design_excluded
     user_task: [pr_review]
+    journey_stages: [adopt_ci]
     adrs: []
     note: >
       The `compat` drop-in shipped and was removed before 0.6 (ADR-012,
@@ -428,6 +454,7 @@ use_cases:
     name: Full-stack dependency / sysroot validation
     status: complete
     user_task: [release, audit]
+    journey_stages: [downstream, audit]
     adrs: [ADR-008]
     evidence:
       modules: [abicheck/cli_stack.py, abicheck/workflows/elf_dependency_resolver.py]
@@ -438,6 +465,7 @@ use_cases:
     name: MCP server (AI-agent integration)
     status: by_design_excluded
     user_task: [local_check]
+    journey_stages: [first_check]
     adrs: []
     note: >
       An experimental MCP server shipped and was later removed. Agent
@@ -450,6 +478,7 @@ use_cases:
     name: Multi-library bundle / cohort analysis
     status: complete
     user_task: [release, pr_review]
+    journey_stages: [release]
     adrs: [ADR-023]
     note: >
       Linux/ELF only by design (ADR-018/ADR-023 — no DT_NEEDED/.gnu.version_*
@@ -473,6 +502,7 @@ use_cases:
     name: One-shot deep compare (auto-collect L3–L5) + CLI usability
     status: partial
     user_task: [local_check]
+    journey_stages: [first_check, trust]
     adrs: []
     gap: G21
     plan: docs/contribute/plans/g21-oneshot-deep-compare.md
@@ -504,6 +534,7 @@ use_cases:
     name: CLI interface contract, config balance, and extension policy
     status: complete
     user_task: [pr_review, local_check]
+    journey_stages: [adopt_ci]
     adrs: [ADR-009, ADR-037, ADR-040, ADR-043, ADR-054, ADR-068]
     gap: G22
     evidence:
@@ -529,6 +560,7 @@ use_cases:
     name: manylinux/auditwheel vendored-library pairing (hashed sonames)
     status: complete
     user_task: [release]
+    journey_stages: [release]
     adrs: []
     gap: G9
     note: >
@@ -560,6 +592,7 @@ use_cases:
     name: CPython Limited-API / abi3 import-contract conformance
     status: complete
     user_task: [release, pr_review]
+    journey_stages: [release, tune]
     adrs: []
     gap: G14
     evidence:
@@ -601,6 +634,7 @@ use_cases:
     name: Single-binary ABI audit / lint (no baseline)
     status: planned
     user_task: [audit]
+    journey_stages: [audit]
     adrs: []
     gap: G11
     plan: docs/contribute/plans/g11-single-binary-audit.md
@@ -616,6 +650,7 @@ use_cases:
     name: Security-hardening drift scan (checksec across releases)
     status: complete
     user_task: [audit]
+    journey_stages: [audit]
     adrs: []
     note: >
       G12 closed. The ELF snapshot now captures the full checksec-equivalent
@@ -639,6 +674,7 @@ use_cases:
     name: Build-configuration matrix (probe harness)
     status: complete
     user_task: [local_check, release]
+    journey_stages: [release, trust]
     adrs: []
     note: >
       G2 closed. Matrix findings fold into `compare`/`compare-release` via
@@ -661,6 +697,7 @@ use_cases:
     name: JSON report (versioned schema)
     status: complete
     user_task: [pr_review]
+    journey_stages: [adopt_ci]
     adrs: [ADR-004, ADR-014]
     evidence:
       modules: [abicheck/reporter.py, abicheck/schemas/__init__.py]
@@ -671,6 +708,7 @@ use_cases:
     name: SARIF 2.1.0 (GitHub Code Scanning)
     status: complete
     user_task: [pr_review]
+    journey_stages: [adopt_ci, pr_review]
     adrs: [ADR-014]
     evidence:
       modules: [abicheck/sarif.py]
@@ -681,6 +719,7 @@ use_cases:
     name: JUnit XML (CI dashboards)
     status: complete
     user_task: [pr_review]
+    journey_stages: [adopt_ci]
     adrs: [ADR-014]
     evidence:
       modules: [abicheck/junit_report.py]
@@ -691,6 +730,7 @@ use_cases:
     name: Markdown / HTML reports
     status: complete
     user_task: [pr_review]
+    journey_stages: [pr_review]
     adrs: [ADR-014, ADR-072]
     note: >
       Structural coverage across verdict tiers and the major sections (summary,
@@ -707,6 +747,7 @@ use_cases:
     name: Platform baseline floor (manylinux glibc requirement)
     status: complete
     user_task: [release, audit]
+    journey_stages: [release, audit]
     adrs: []
     gap: G10
     evidence:
@@ -743,6 +784,7 @@ use_cases:
     name: NumPy C-API build/target compatibility envelope
     status: partial
     user_task: [pr_review, local_check]
+    journey_stages: [pr_review, downstream]
     adrs: []
     gap: G26
     plan: docs/contribute/plans/g26-numpy-capi-envelope.md
@@ -786,6 +828,7 @@ use_cases:
     name: Wheel tag / deployment-claim verification (multi-platform)
     status: partial
     user_task: [release]
+    journey_stages: [release]
     adrs: []
     gap: G27
     plan: docs/contribute/plans/g27-wheel-deployment-verification.md
@@ -862,6 +905,7 @@ use_cases:
     name: libstdc++ dual ABI flip (_GLIBCXX_USE_CXX11_ABI)
     status: complete
     user_task: [pr_review, local_check]
+    journey_stages: [pr_review, trust]
     adrs: []
     evidence:
       examples: [catalog/cases/case104_glibcxx_dual_abi_flip]
@@ -871,6 +915,7 @@ use_cases:
     name: Toolchain flag drift (DW_AT_producer)
     status: complete
     user_task: [pr_review, local_check]
+    journey_stages: [pr_review, trust]
     adrs: [ADR-020a]
     evidence:
       modules: [abicheck/diff_build_config.py]
@@ -881,6 +926,7 @@ use_cases:
     name: Integer model / char8_t / _BitInt / atomic / ABI tags
     status: complete
     user_task: [pr_review, local_check]
+    journey_stages: [pr_review]
     adrs: []
     evidence:
       modules: [abicheck/diff_integer_model.py, abicheck/diff_char8t.py, abicheck/diff_bit_int.py, abicheck/diff_atomic.py]
@@ -891,6 +937,7 @@ use_cases:
     name: Header-scoped source-mode robustness on stock host toolchains
     status: complete
     user_task: [pr_review, local_check]
+    journey_stages: [trust, tune]
     adrs: [ADR-024, ADR-074]
     gap: G16
     evidence:
@@ -937,6 +984,7 @@ use_cases:
     name: C++ standard floor raised (per-consumer source break)
     status: complete
     user_task: [pr_review, local_check]
+    journey_stages: [pr_review, downstream]
     adrs: []
     note: >
       Surfaced through the mainline `compare`/`compare-release` command via
@@ -952,6 +1000,7 @@ use_cases:
     name: Real-world upstream-library validation corpus (conda-forge)
     status: partial
     user_task: [audit]
+    journey_stages: [trust]
     adrs: []
     gap: G17
     plan: docs/contribute/plans/g17-real-world-corpus.md
@@ -973,6 +1022,7 @@ use_cases:
     name: Bazel-built C++ project build evidence (L3)
     status: modeled
     user_task: [pr_review, local_check]
+    journey_stages: [adopt_ci, trust]
     adrs: [ADR-029]
     gap: G18
     plan: docs/contribute/plans/g18-bazel-build-evidence.md
@@ -991,6 +1041,7 @@ use_cases:
     name: GNU Make / EPICS-style zero-config build evidence (L3)
     status: complete
     user_task: [pr_review, local_check]
+    journey_stages: [adopt_ci, trust]
     adrs: [ADR-029]
     note: >
       `--sources` on a Make project now runs a fixed GNU Make dry-run query
@@ -1012,6 +1063,7 @@ use_cases:
     name: Always-on compiler-free PR pre-scan + deterministic level selection
     status: partial
     user_task: [pr_review]
+    journey_stages: [pr_review, trust]
     adrs: [ADR-025, ADR-028, ADR-030, ADR-035]
     gap: G19
     plan: docs/contribute/plans/g19-pr-source-intelligence.md
@@ -1071,6 +1123,7 @@ use_cases:
     name: Cross-source validation findings (intra-version ABI hygiene)
     status: complete
     user_task: [pr_review, release]
+    journey_stages: [trust]
     adrs: [ADR-035]
     gap: G19
     plan: docs/contribute/plans/g19-pr-source-intelligence.md
@@ -1102,6 +1155,7 @@ use_cases:
     name: Single-release ABI-hygiene audit (no baseline compare)
     status: complete
     user_task: [audit]
+    journey_stages: [audit]
     adrs: []
     gap: G19
     plan: docs/contribute/plans/g19-pr-source-intelligence.md
@@ -1144,6 +1198,7 @@ use_cases:
     name: Evidence-directed scan focusing (binary/header facts steer source scan)
     status: by_design_excluded
     user_task: [pr_review]
+    journey_stages: [tune]
     adrs: []
     gap: G19
     plan: docs/contribute/plans/g19-pr-source-intelligence.md
@@ -1175,6 +1230,7 @@ use_cases:
     name: Build-emitted source facts (artifact protocol + Clang plugin/wrapper)
     status: complete
     user_task: [pr_review, local_check]
+    journey_stages: [adopt_ci, trust]
     adrs: [ADR-028, ADR-038]
     gap: G19
     plan: docs/contribute/plans/g19-pr-source-intelligence.md
@@ -1204,6 +1260,7 @@ use_cases:
     name: Per-project dry-run cost estimate
     status: complete
     user_task: [local_check]
+    journey_stages: [adopt_ci]
     adrs: [ADR-033, ADR-043]
     gap: G19
     plan: docs/contribute/plans/g19-pr-source-intelligence.md
@@ -1233,6 +1290,7 @@ use_cases:
     name: Per-run coverage/confidence report (retired)
     status: by_design_excluded
     user_task: [audit]
+    journey_stages: [audit]
     adrs: []
     gap: G19
     note: >
@@ -1259,6 +1317,7 @@ use_cases:
     name: Single-release audit example corpus (no baseline)
     status: partial
     user_task: [audit]
+    journey_stages: [audit]
     adrs: []
     gap: G20
     plan: docs/contribute/plans/g20-source-scan-example-catalog.md
@@ -1294,6 +1353,7 @@ use_cases:
     name: Cross-source corroboration example corpus (combination beats one source)
     status: partial
     user_task: [pr_review, release]
+    journey_stages: [trust]
     adrs: []
     gap: G20
     plan: docs/contribute/plans/g20-source-scan-example-catalog.md
@@ -1322,6 +1382,7 @@ use_cases:
     name: Evidence-directed focusing scenarios (sources steer sources)
     status: by_design_excluded
     user_task: [pr_review]
+    journey_stages: [tune]
     adrs: []
     gap: G20
     plan: docs/contribute/plans/g20-source-scan-example-catalog.md
@@ -1354,3 +1415,112 @@ use_cases:
       directly against `buildsource.cross_source_checks.run_crosschecks`'s
       own coverage rows, one layer closer to the shipped shape. REMAINING:
       nothing in the surviving §3.3 half. See plan Phase 3.
+
+  # --- CJM `tune` and `trust` stages (docs/contribute/cjm.md) --------------
+  # These cases name shipped policy and evidence surfaces that previously had
+  # no use case of their own; the CJM made the hole visible.
+
+  - id: UC-WF-suppression
+    axis: workflow
+    name: Suppress known or intentional findings, judged against the public ABI
+    status: complete
+    user_task: [pr_review, release]
+    journey_stages: [tune]
+    adrs: [ADR-013, ADR-044]
+    evidence:
+      modules: [abicheck/policy/suppression/rules.py, abicheck/policy/suppression/audit.py]
+      tests: [tests/test_cli_compare_audit_suppressions.py, tests/test_finding_disposition_suppression.py]
+      docs: [docs/use/suppressions.md]
+
+  - id: UC-WF-policy-profile
+    axis: workflow
+    name: Choose a policy profile and per-kind severity overrides for the gate
+    status: complete
+    user_task: [pr_review, release]
+    journey_stages: [tune, adopt_ci]
+    adrs: [ADR-010]
+    evidence:
+      modules: [abicheck/policy_file.py, abicheck/policy/severity.py]
+      tests: [tests/test_policy_file.py, tests/test_policy_override_matrix.py]
+      docs: [docs/use/policies.md]
+
+  - id: UC-WF-contract-config
+    axis: workflow
+    name: Declare the compatibility contract (relevance, packs) and evaluate against it
+    status: complete
+    user_task: [pr_review, release]
+    journey_stages: [tune, trust]
+    adrs: [ADR-049]
+    evidence:
+      modules: [abicheck/contract_evaluation.py]
+      tests: [tests/test_contract_evaluation.py, tests/test_cli_compare_contract_evaluation.py]
+      docs: [docs/use/contract-evaluation.md]
+
+  - id: UC-WF-acknowledgment
+    axis: workflow
+    name: Acknowledge an intended break with a reason, and audit every disposition
+    status: complete
+    user_task: [pr_review, release]
+    journey_stages: [tune, release]
+    adrs: [ADR-067]
+    evidence:
+      modules: [abicheck/policy/acknowledgment.py, abicheck/policy/disposition_ledger.py]
+      tests: [tests/test_acknowledgment.py, tests/test_acknowledgment_cli_surfaces.py, tests/test_disposition_audit.py]
+      docs: [docs/use/acknowledgments.md]
+
+  - id: UC-WF-scope-completeness
+    axis: workflow
+    name: Know which members were compared, selected, missing or retired; never pass on zero comparisons
+    status: partial
+    user_task: [pr_review, release]
+    journey_stages: [trust, release]
+    adrs: [ADR-065, ADR-071]
+    gap: G46
+    plan: docs/contribute/plans/vision-api-abi-evolution.md
+    evidence:
+      modules: [abicheck/model/package_inventory.py, abicheck/workflows/release_scope.py]
+      tests: [tests/test_release_scope_completeness.py, tests/test_aggregate_scope_completeness.py, tests/test_release_package_inventory_cli.py]
+    next_steps: >-
+      Vision workstream A (ADR-065, still Proposed). Landed: dry-run plan
+      view, completeness axis, package inventory, support promise, removal of
+      the set-difference removal path. Remaining: S0 and ADR acceptance; one
+      exit-code resolver instead of the scalar and release pair
+      (known-gaps.md, PARTIAL).
+
+  - id: UC-WF-analysis-assurance
+    axis: workflow
+    name: Report what evidence the verdict rests on, and narrow it when evidence is missing
+    status: partial
+    user_task: [pr_review, release, audit]
+    journey_stages: [trust]
+    adrs: [ADR-063]
+    gap: G47
+    plan: docs/contribute/plans/vision-api-abi-evolution.md
+    evidence:
+      modules: [abicheck/policy/analysis_assurance/_compute.py]
+      tests: [tests/test_analysis_assurance.py, tests/test_analysis_assurance_cli.py]
+    next_steps: >-
+      Vision workstream E (ADR-063). Remaining: an INCONSISTENT/CONFLICTING
+      fact status; one provider-status vocabulary instead of FactStatus and
+      EvidenceProviderStatus; multi-source contract conflicts; the
+      false-clean entries in known-gaps.md (function-pointer parameter
+      signatures, castxml template defaults, debug=1 DWARF reading as
+      complete, export shrink with no declared surface).
+
+  - id: UC-WF-release-history
+    axis: workflow
+    name: Track a library's compatibility across releases under a declared versioning policy
+    status: partial
+    user_task: [release, audit]
+    journey_stages: [release, audit]
+    adrs: [ADR-066]
+    gap: G48
+    plan: docs/contribute/plans/vision-api-abi-evolution.md
+    evidence:
+      modules: [abicheck/workflows/history.py, abicheck/policy_file_versioning.py]
+      tests: [tests/test_workflows_history.py, tests/test_cli_project_history.py, tests/test_versioning_policy.py]
+    next_steps: >-
+      Vision workstream B (ADR-066, still Proposed). Landed: offline history
+      with explicit ordering (S1) and the versioning-policy model (S2).
+      Remaining: scheme-derived version order (D4), a `changed` event,
+      retention (S4) and ADR acceptance.

@@ -16,8 +16,7 @@
 """``compare --dry-run``'s "Comparison plan" section (ADR-065 S1).
 
 A new, dedicated leaf module rather than an addition to
-:mod:`abicheck.cli_compare_helpers` or
-:mod:`abicheck.cli_compare_release_helpers`: both of those already sit at
+:mod:`abicheck.cli_compare_helpers` (the other option, the retired ``cli_compare_release_helpers``, is gone): the first of those already sits at
 their own ``architecture/debt.yaml`` ``no_growth`` baseline with no room for
 a new function (see this file's own PR for the measurement) -- exactly the
 "prefer extending a split-out module over growing the parent toward the cap"

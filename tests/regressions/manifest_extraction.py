@@ -32,6 +32,22 @@ __all__ = ["EXTRACTION_BUG_CLASSES"]
 
 EXTRACTION_BUG_CLASSES: tuple[BugClass, ...] = (
     BugClass(
+        id="extraction.vector_type_collapsed_to_plain_array",
+        invariant=(
+            "A type whose identity is a DWARF attribute, not its shape, keeps "
+            "that attribute in the recorded spelling: a DW_AT_GNU_vector array "
+            "spells with its element and total byte size, so a same-size "
+            "element, lane-count, or vector-versus-array change is a different "
+            "type, never the same plain T[] spelling."
+        ),
+        fixed_by=(1785,),
+        seed_tests=("tests/test_dwarf_vector_types.py",),
+        axes={
+            "backend": ("dwarf",),
+            "vector_shape": ("element", "lane_count", "array_vs_vector"),
+        },
+    ),
+    BugClass(
         id="extraction.compile_entry_collapsed_to_first_source",
         invariant=(
             "A compile-database entry yields one compile unit per source "
@@ -43,6 +59,25 @@ EXTRACTION_BUG_CLASSES: tuple[BugClass, ...] = (
         fixed_by=(1755,),
         seed_tests=("tests/test_compile_db_operand_routing.py",),
         axes={"sources": ("single", "multi", "link_only")},
+    ),
+    BugClass(
+        id="extraction.target_flag_dropped_from_header_parse",
+        invariant=(
+            "Every target-machine -m flag a translation unit is compiled with "
+            "(ISA, CPU, FPU, float ABI) reaches the header AST parse of that "
+            "unit, under both castxml and clang, so the predefined feature "
+            "macros a header selects its types by match the build that "
+            "produced the binary. A unit with no -m flag gains none."
+        ),
+        fixed_by=(1769,),
+        seed_tests=(
+            "tests/test_header_target_isa_flags.py",
+            "tests/test_family_f4_heuristics.py",
+        ),
+        axes={
+            "frontend": ("castxml", "clang"),
+            "isa": ("sse4.2", "avx", "avx2", "avx512f", "none"),
+        },
     ),
     BugClass(
         id="extraction.function_local_declaration_leaks_into_surface",

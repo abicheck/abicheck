@@ -401,7 +401,7 @@ def resolve_release_exit_decision(
     unused_rules_contribution: int = 0,
 ) -> ExitDecision:
     """ADR-064's precedence for a directory/package release comparison,
-    reproducing `cli_compare_release_helpers._exit_compare_release` exactly
+    reproducing `frontends.cli.release_exit._exit_compare_release` exactly
     -- including the one asymmetry that function's own two branches encode,
     which a flat `max()` over contributions cannot express (this is exactly
     why ADR-064 calls removed-required-library's rank "mode-dependent, not
@@ -477,8 +477,7 @@ def resolve_release_exit_decision(
     pure resolver can manufacture from an input its real caller does not
     yet compute.
 
-    Pure, additive logic (ADR-064's first stage): not yet called from
-    `cli_compare_release_helpers.py`, so no existing release comparison's
+    Pure, additive logic (ADR-064's first stage): not yet called from the release fan-out (`frontends/cli/release_exit.py`, formerly the retired `cli_compare_release_helpers.py`), so no existing release comparison's
     actually-returned exit code changes because this function exists. The
     two dominant codes are :data:`EXIT_RELEASE_NOT_COMPARABLE` and
     :data:`EXIT_REMOVED_REQUIRED_LIBRARY`.

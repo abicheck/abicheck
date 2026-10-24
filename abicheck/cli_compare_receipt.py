@@ -315,8 +315,7 @@ def _release_summary_effective_config_block(
     same ``dedup_validate_overrides_warnings()`` scope ``compare_release_cmd``
     opens, so it doesn't duplicate a per-library warning).
 
-    Called from ``frontends.cli.release_report``/``cli_compare_release_matrix``/
-    ``frontends.cli.release_summary`` (all three at their own ``no_growth``
+    Called from ``frontends.cli.release_report``/``frontends.cli.release_summary`` (both at their own ``no_growth``
     cap, hence living here).
 
     *scope_public_headers* (PR #1016): same bug shape as ``policy`` above,

@@ -100,27 +100,22 @@ def render() -> str:
     # fails there without this.
     if str(REPO_DIR) not in sys.path:
         sys.path.insert(0, str(REPO_DIR))
+    # The per-type subkey tables are derived from build_config.KEY_TABLE, the
+    # one declaration of every recognized key (its own module-level views).
     from abicheck.buildsource.build_config import (
-        _TOP_LEVEL_INT_KEYS,
-        _TOP_LEVEL_STR_KEYS,
-        BuildConfig,
-    )
-
-    # The raw subkey-type tables live only in build_config_schema.py --
-    # build_config.py itself never re-imports them as module-level names
-    # (it calls schema.subkey_findings() instead), so this generator reads
-    # them straight from their own schema home.
-    from abicheck.buildsource.build_config_schema import (
         BOOL_SUBKEYS as _BOOL_SUBKEYS,
         DICT_STR_STR_SUBKEYS as _DICT_STR_STR_SUBKEYS,
         INT_SUBKEYS as _INT_SUBKEYS,
         LIST_SUBKEYS as _LIST_SUBKEYS,
         STR_SUBKEYS as _STR_SUBKEYS,
+        TOP_LEVEL_INT_KEYS,
+        TOP_LEVEL_STR_KEYS,
+        BuildConfig,
     )
 
     known_top = BuildConfig._KNOWN_TOP_KEYS
     known_blocks = BuildConfig._KNOWN_BLOCK_KEYS
-    scalar_keys = _TOP_LEVEL_STR_KEYS | _TOP_LEVEL_INT_KEYS
+    scalar_keys = TOP_LEVEL_STR_KEYS | TOP_LEVEL_INT_KEYS
     nested_keys = set(NESTED_VALUE_TYPE_KEYS)
     other_keys = sorted(known_top - set(known_blocks) - scalar_keys - nested_keys)
 
@@ -161,7 +156,7 @@ def render() -> str:
 
     lines += ["## Top-level scalar keys", "", "| Key | Type |", "|---|---|"]
     for key in sorted(scalar_keys):
-        type_str = "int" if key in _TOP_LEVEL_INT_KEYS else "str"
+        type_str = "int" if key in TOP_LEVEL_INT_KEYS else "str"
         lines.append(f"| `{key}` | {type_str} |")
     lines.append("")
 

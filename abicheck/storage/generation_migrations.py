@@ -173,6 +173,12 @@ SPELLING_MIGRATIONS: Mapping[int, GenerationSpellingChange] = {
         "identifiers (flat_map_dependency_scope.py), so a dependency typedef "
         "can now be kept where it was dropped -- set membership, not spelling"
     ),
+    14: GenerationSpellingChange(
+        "dd03cb6a6 (#1785): DWARF vector types spell as 'T __attribute__((vector_size(N)))' instead "
+        "of 'T[]' (dwarf_utils.array_type_info); a stored 'T[]' cannot say whether "
+        "it was an array or a vector, so no rewrite is sound and a baseline "
+        "holding a vector type is re-dumped"
+    ),
 }
 
 #: Reasons that say nothing about what was audited; the bump gate refuses them.
