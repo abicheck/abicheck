@@ -144,6 +144,16 @@ UNCOVERED: dict[str, str] = {
         "cover recorded, legacy-incomplete and absent inputs; no corpus Mach-O "
         "pair carries LC_LOAD_WEAK_DYLIB yet"
     ),
+    "AbiSnapshot.header_declaration_ids": (
+        "runtime-only L2 ids a header-depth projection keeps when it clears "
+        "surface_graph; never stored, so no stored-corpus ablation reaches it. "
+        "Covered by test_template_instance_absence_shapes.py at both depths"
+    ),
+    "AbiSnapshot.projection_unavailable": (
+        "runtime-only record of the facts a depth projection cleared; never "
+        "stored. Covered by test_depth_detector_input_contract.py at every "
+        "rung"
+    ),
     "RecordType.template_param_defaults_fact": (
         "read only by compare/template_param_defaults, whose unit tests "
         "(test_template_param_defaults.py) cover both recorded, UNKNOWN and "

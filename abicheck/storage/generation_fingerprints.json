@@ -54,7 +54,7 @@
       "abicheck/extract/env_flags.py": "6a1343268cdfcd4b2ccaf91008d96b611973bf5cab04467c2585f012e1f5466c",
       "abicheck/extract/export_symbol_identity.py": "2146bd67207411943258124a24271542c8b9767344c1b404aaa9133c0358ff00",
       "abicheck/extract/export_table_read.py": "7783c3baba176ef8b47cb99361f389984bb1797c37ba5d9120866359f60c3601",
-      "abicheck/extract/flat_map_dependency_scope.py": "77659ce966d856c4b9008cdc6cf88250a3f50314fdf04140712f4e3797894648",
+      "abicheck/extract/flat_map_dependency_scope.py": "5fa66ab2f8ebdbc37d735e3dbad3b6fe1ae3907d7a98eab5c6e6257842e2ea07",
       "abicheck/extract/header_ast_backend.py": "1f5b15c126b139c49b702b69a4f626ed7d30f8294e15ad116d61387e96d31f16",
       "abicheck/extract/header_ast_cache_producers.py": "b20f72d82c73d0f82a91bf53b32edf673a043aae5f68eec9c38d6d7ad9c7b63a",
       "abicheck/extract/header_ast_fields.py": "436f6feaed4da7566a551fa44d3e102d28964fecc57a22821111d7f63c6f5840",
@@ -131,7 +131,7 @@
       "abicheck/extract/path_segments.py": "c96f59df6fc126e26c6ca2052c6040d3180aa49f6c1265029eeb7206f0466b22",
       "abicheck/extract/pdb_scope.py": "d5c551c9ceec500c76670cf9ecf4a76f844e4aad2c4ed37f91ab7fc630988753",
       "abicheck/extract/progress.py": "69e7aed5482c82b2b2206ac0055631d2338c427c27064c64d6865041207bafc8",
-      "abicheck/extract/public_header_identifiers.py": "c0899048d31a666fd45d87fab578aa455e9a1e053098d63066a95f6accfc7412",
+      "abicheck/extract/public_header_identifiers.py": "274a3587f65239a214aa57b5f782fc1d06ab61637af54f219fe713d2ade486af",
       "abicheck/extract/public_root_ownership.py": "c5c72f76093e4dedfcc6d6d838b0ca2df47ce44dcbb81d65469ccf8b1dc857f2",
       "abicheck/extract/quoted_include_expansion.py": "d26085d7fdde4ce88a5245e00af377d0431d24e651c9274ad70a457bf8bde762",
       "abicheck/extract/semantic_ir_merge.py": "250830d3bd6a06c18bcd79abb90011cceaabe875581172047c2b20688edbc203",
@@ -157,9 +157,9 @@
       "abicheck/symvers_metadata.py": "372737765cd132e6e87ed891dd465d2958e04debbef774e45212ceb3036871cb",
       "abicheck/type_metadata.py": "9997189de8dac522fd1db8be5ae491d811139503f83abaaded89038eb4aa9cdf"
     },
-    "fingerprint": "26de190758600d0510b1eeb487034b564264d1806d28946eb215533d86eb9fd7",
-    "generation": 13,
-    "reason": "bumped to 13 for a semantic change"
+    "fingerprint": "2626a924f596a50d312e21bc74d975ff6aa8cc61bece383e31d56e3ad34f8e3d",
+    "generation": 14,
+    "reason": "bumped to 14 for a semantic change"
   },
   "resolver": {
     "files": {

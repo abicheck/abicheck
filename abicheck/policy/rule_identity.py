@@ -45,7 +45,11 @@ from either module.
 from __future__ import annotations
 
 import dataclasses
+import datetime
 import enum
+import hashlib
+import json
+import re
 
 #: Excluded from every identity: prose that changes what a *reviewer* reads,
 #: never what the rule *matches*. The receipt's source digest already records
@@ -58,44 +62,69 @@ _PROSE_FIELDS = frozenset({"reason"})
 _DERIVED_FIELDS = frozenset({"to_verdict"})
 
 
-def _render(value: object) -> str:
-    """``repr`` for a plain value; an enum member's *value*, so the identity
-    never embeds an enum's class-qualified repr."""
+def _canonical(value: object) -> object:
+    """*value* as a JSON-native value: an enum by its value, a date/datetime
+    as ISO 8601, a compiled regex as its raw pattern string, a tuple, list,
+    set or frozenset as a list (sets sorted), a mapping with string keys.
+    Never ``repr()`` -- the identity must not depend on Python's repr
+    spelling of a type, which differs across versions and leaks into ids."""
     if isinstance(value, enum.Enum):
-        return repr(value.value)
-    return repr(value)
+        return _canonical(value.value)
+    if isinstance(value, (datetime.date, datetime.time)):
+        return value.isoformat()
+    if isinstance(value, re.Pattern):
+        return value.pattern
+    if isinstance(value, (set, frozenset)):
+        return sorted((_canonical(v) for v in value), key=_dumps)
+    if isinstance(value, (list, tuple)):
+        return [_canonical(v) for v in value]
+    if isinstance(value, dict):
+        return {str(k): _canonical(v) for k, v in value.items()}
+    if value is None or isinstance(value, (bool, int, float, str)):
+        return value
+    return str(value)
+
+
+def _dumps(value: object) -> str:
+    return json.dumps(value, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
 
 
 def rule_id_of(rule: object) -> str:
     """The audit's ``rule_id`` for *rule* (ADR-067 D3, P2).
 
-    The user's own ``id:`` when the rule states one, else the canonical
-    :func:`rule_identity` -- never the free-form ``label``/``reason`` prose,
-    which two distinct rules can share (``label`` is a grouping tag and
-    ``reason`` is prose; both are surfaced as their own fields). ``label`` and
-    ``reason`` are a last resort only for a duck-typed stand-in with neither a
-    dataclass identity nor an ``id``.
+    The user's own ``id:`` when the rule states one, else
+    ``rule-<12 hex>``: the first 12 hex digits of the SHA-256 of the rule's
+    canonical :func:`rule_identity`. That token matches ``[A-Za-z0-9._-]+``,
+    so it can be pasted into an acknowledgment file, and is stable across
+    Python versions and YAML key order. Never the free-form ``label``/``reason``
+    prose, which two distinct rules can share; a label is only unique when
+    the whole policy is known, and the two callers (the inventory and the
+    per-change provenance) must derive the same id from one rule alone.
+    ``label`` and ``reason`` are a last resort only for a duck-typed
+    stand-in with neither a dataclass identity nor an ``id``.
     """
     user_id = getattr(rule, "id", None)
     if isinstance(user_id, str) and user_id:
         return user_id
     identity = rule_identity(rule)
     if identity is not None:
-        return identity
+        return "rule-" + hashlib.sha256(identity.encode("utf-8")).hexdigest()[:12]
     return str(getattr(rule, "label", None) or getattr(rule, "reason", None) or "rule")
 
 
 def rule_identity(rule: object) -> str | None:
-    """*rule*'s canonical, machine-facing identity, or ``None``.
+    """*rule*'s canonical, human-readable identity, or ``None``.
 
-    Every populated ``init=True`` field except :data:`_PROSE_FIELDS` is
-    included, so two rules that differ in any matching-relevant way — a
-    selector *or* a gate — get different identities. Fields are emitted in
-    declaration order with no positional index, so the identity depends only
-    on the rule's own content, and each value is rendered with ``repr()`` so
-    that a selector containing the ``|`` separator or an ``=`` (routine in a
-    regex selector, ``symbol_pattern: "a|change_kind=x"``) cannot collide
-    with a different rule carrying those as separate fields.
+    Every populated ``init=True`` field except :data:`_PROSE_FIELDS` and
+    :data:`_DERIVED_FIELDS` is included, so two rules that differ in any
+    matching-relevant way — a selector *or* a gate — get different
+    identities. The identity is compact canonical JSON (``sort_keys``,
+    values via :func:`_canonical`): JSON string quoting means a selector
+    containing ``|``, ``=``, ``"`` or ``,`` (routine in a regex,
+    ``symbol_pattern: "a|change_kind=x"``) cannot collide with a different
+    rule carrying those as separate fields, and no Python ``repr()``
+    (``datetime.date(...)``) leaks in. The ``rule_id`` of an id-less rule
+    is a digest of this string (:func:`rule_id_of`).
 
     ``None`` for anything that is not a dataclass instance — the audit accepts
     duck-typed rule stand-ins, and falls back to the rule's label or reason
@@ -103,12 +132,12 @@ def rule_identity(rule: object) -> str | None:
     """
     if not dataclasses.is_dataclass(rule) or isinstance(rule, type):
         return None
-    parts = [
-        f"{f.name}={_render(getattr(rule, f.name))}"
+    fields = {
+        f.name: _canonical(getattr(rule, f.name))
         for f in dataclasses.fields(rule)
         if f.init
         and f.name not in _PROSE_FIELDS
         and f.name not in _DERIVED_FIELDS
         and getattr(rule, f.name) not in (None, False)
-    ]
-    return "|".join(parts) if parts else None
+    }
+    return _dumps(fields) if fields else None

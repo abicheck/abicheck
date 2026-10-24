@@ -36,6 +36,17 @@ same header-origin rule the other kinds already follow:
   public ``size_t`` parameter keeps ``size_t``; a ``void f(int = DEP_MAX)``
   keeps ``DEP_MAX``). Deliberately generous: over-retaining reproduces the
   old behaviour, under-retaining would hide what the public surface names;
+* a dependency typedef or constant whose leaf identifier the library's
+  own (non-dependency) **header text** spells (*header_identifiers*, from
+  :func:`~abicheck.extract.public_header_identifiers.identifiers_in_kept_headers`)
+  is kept too. Kept declarations alone are not a stable root: a member
+  template's implicit instance (``setArrays<double>(double*, size_t)``)
+  exists only while some inline body instantiates it, so rooting retention
+  on it alone kept ``size_t`` in one release and dropped it in the next
+  although the header still declares ``setArrays(T*, std::size_t)`` --
+  a manufactured ``TYPEDEF_REMOVED``. The header spelling is the same on
+  both sides whenever the declaration is, so retention no longer depends on
+  which instances an inline body happens to request;
 * when any kept default is an opaque clang ``expr:`` fingerprint the
   references inside it are not observable, so every dependency constant is
   kept (weaker evidence narrows the conclusion, never the surface);
@@ -139,6 +150,7 @@ def scope_flat_maps(
     kept_signature_text: str,
     semantic_ir: SemanticIR | None,
     semantic_ir_conflicts: dict[str, str],
+    header_identifiers: frozenset[str] | None = None,
 ) -> FlatMapScope:
     """*snap*'s flat maps scoped by declaring header.
 
@@ -148,6 +160,9 @@ def scope_flat_maps(
     back with every map as the identical object it passed in.
     """
     referenced = set(_IDENTIFIER_RE.findall(kept_signature_text))
+    # Instantiation-independent root (see the module docstring): what the
+    # library's own headers spell, when the scan succeeded.
+    referenced |= header_identifiers or frozenset()
     opaque = _OPAQUE_EXPR_RE.search(kept_signature_text) is not None
 
     def retain(key: str) -> bool:

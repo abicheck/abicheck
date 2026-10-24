@@ -45,6 +45,25 @@ EXTRACTION_BUG_CLASSES: tuple[BugClass, ...] = (
         axes={"sources": ("single", "multi", "link_only")},
     ),
     BugClass(
+        id="extraction.target_flag_dropped_from_header_parse",
+        invariant=(
+            "Every target-machine -m flag a translation unit is compiled with "
+            "(ISA, CPU, FPU, float ABI) reaches the header AST parse of that "
+            "unit, under both castxml and clang, so the predefined feature "
+            "macros a header selects its types by match the build that "
+            "produced the binary. A unit with no -m flag gains none."
+        ),
+        fixed_by=(1769,),
+        seed_tests=(
+            "tests/test_header_target_isa_flags.py",
+            "tests/test_family_f4_heuristics.py",
+        ),
+        axes={
+            "frontend": ("castxml", "clang"),
+            "isa": ("sse4.2", "avx", "avx2", "avx512f", "none"),
+        },
+    ),
+    BugClass(
         id="extraction.function_local_declaration_leaks_into_surface",
         invariant=(
             "A declaration local to a function body (a local typedef, "
@@ -86,6 +105,7 @@ EXTRACTION_BUG_CLASSES: tuple[BugClass, ...] = (
         seed_tests=(
             "tests/test_flat_map_dependency_scope.py",
             "tests/test_exclude_header_flat_maps_integration.py",
+            "tests/test_typedef_retention_instantiation_independent.py",
         ),
         public_surfaces=("cli",),
         axes={

@@ -148,8 +148,8 @@ be scanned **without** `--lang c` (castxml always parses in a C++-aware mode).
 
 ### "CastXML \<version\> ... is not a supported default scanner setup"
 
-An authoritative L2 scan runs a version gate (`castxml_policy.py`) before
-parsing any header: it rejects a resolved `castxml` build outside the
+An authoritative L2 scan runs a version gate (`castxml_policy.py`) when the
+request starts, before any binary or debug-info extraction: it rejects a resolved `castxml` build outside the
 supported range (currently `>=0.6.11,<0.8.0`, bundled/linked Clang `>=18`).
 This most commonly fires against the legacy PyPI `castxml` distribution
 (`pip install castxml`), which is **not** a supported default scanner setup —
