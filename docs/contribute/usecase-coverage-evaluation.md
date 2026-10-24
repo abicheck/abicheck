@@ -146,3 +146,6 @@ planned row from drifting away from its plan.
 | High | G25 — Cython API/ABI frontend | [g25](plans/g25-cython-api-abi-frontend.md) |
 | High | G26 — NumPy C-API compatibility envelope | [g26](plans/g26-numpy-capi-envelope.md) |
 | Medium | G27 — wheel tag / deployment-claim verification | [g27](plans/g27-wheel-deployment-verification.md) |
+| High | G46 — comparison scope and completeness | [vision A](plans/vision-api-abi-evolution.md) |
+| High | G47 — analysis assurance and evidence adequacy | [vision E](plans/vision-api-abi-evolution.md) |
+| Medium | G48 — release history and versioning policy | [vision B](plans/vision-api-abi-evolution.md) |
