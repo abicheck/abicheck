@@ -31,15 +31,16 @@ from .context import CastxmlParserContext
 
 __all__ = [
     "VECTOR_SPELLINGS_ATTR",
-    "attach_vector_spellings",
+    "resolve_vector_spellings",
     "castxml_vector_spellings",
     "clang_vector_spellings",
     "has_vector_nodes",
     "parse_vector_qualtype",
+    "with_vector_spellings",
 ]
 
-#: The in-memory attribute ``attach_vector_spellings`` stores the mapping under
-#: on the parsed root. It is never written to castxml's XML on disk.
+#: The attribute :func:`with_vector_spellings` carries the mapping under, on a
+#: copy of the parsed root. The parsed tree itself is never written.
 VECTOR_SPELLINGS_ATTR = "abicheck-vector-spellings"
 
 #: Byte size of each element type a vector may carry (LP64 / common ABIs). An
@@ -246,19 +247,31 @@ def _castxml_function_key(el: Element, index: dict[str, Element]) -> str:
     return f"{scope}::{name}" if scope else name
 
 
-def attach_vector_spellings(
+def resolve_vector_spellings(
     root: Element, clang_root: dict[str, Any]
 ) -> dict[str, str]:
-    """Resolve castxml's vector nodes to spellings and store the mapping on *root*.
+    """Map castxml's vector nodes to clang spellings. Writes nothing.
 
     Returns the node-id -> spelling mapping. Vector nodes with no clang
     declaration keep their ``Unimplemented`` status (the mapping omits them).
     """
     keys = castxml_vector_spellings(root)
     by_key = clang_vector_spellings(clang_root)
-    resolved = {node: by_key[key] for node, key in keys.items() if key in by_key}
-    root.set(VECTOR_SPELLINGS_ATTR, json.dumps(resolved, sort_keys=True))
-    return resolved
+    return {node: by_key[key] for node, key in keys.items() if key in by_key}
+
+
+def with_vector_spellings(root: Element, spellings: dict[str, str]) -> Element:
+    """A new root element carrying *spellings*, sharing *root*'s children.
+
+    The parsed tree (and its interned children) is never written: the copy is
+    a fresh element whose children are the original objects.
+    """
+    carried = Element(root.tag, dict(root.attrib))
+    carried.set(VECTOR_SPELLINGS_ATTR, json.dumps(spellings, sort_keys=True))
+    carried.extend(list(root))
+    carried.text = root.text
+    carried.tail = root.tail
+    return carried
 
 
 def has_vector_nodes(root: Element) -> bool:
@@ -270,7 +283,7 @@ def has_vector_nodes(root: Element) -> bool:
 
 
 def load_vector_spellings(ctx: CastxmlParserContext) -> dict[str, str]:
-    """The mapping :func:`attach_vector_spellings` stored on ``ctx.root``, or ``{}``."""
+    """The mapping :func:`with_vector_spellings` carried on ``ctx.root``, or ``{}``."""
     raw = ctx.root.get(VECTOR_SPELLINGS_ATTR)
     if not raw:
         return {}

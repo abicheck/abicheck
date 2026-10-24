@@ -268,7 +268,7 @@ def castxml_dump(
     key = _make_key()
 
     def _with_vectors(root: Element) -> Element:
-        join_vector_spellings(
+        return join_vector_spellings(
             root,
             key,
             headers=headers,
@@ -284,7 +284,6 @@ def castxml_dump(
             extra_hash_dirs=extra_hash_dirs,
             exported_symbols=exported_symbols,
         )
-        return root
 
     if _expected_acquisition_key is not None and key != _expected_acquisition_key:
         raise SnapshotError("header inputs changed before CastXML acquisition started")

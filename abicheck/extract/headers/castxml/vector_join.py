@@ -12,7 +12,6 @@ the fresh mapping replaces the entry. It is never read as "no vector data".
 
 from __future__ import annotations
 
-import json
 import logging
 from pathlib import Path
 from typing import Any
@@ -22,9 +21,9 @@ from ....errors import SnapshotError
 from ....storage.ast_cache_location import ast_cache_store
 from ..clang.backend import clang_header_dump
 from .vector_spellings import (
-    VECTOR_SPELLINGS_ATTR,
-    attach_vector_spellings,
     has_vector_nodes,
+    resolve_vector_spellings,
+    with_vector_spellings,
 )
 
 log = logging.getLogger(__name__)
@@ -64,20 +63,19 @@ def join_vector_spellings(
     lang: str | None,
     extra_hash_dirs: tuple[Path, ...],
     exported_symbols: frozenset[str],
-) -> None:
-    """Attach the clang-derived vector spellings to *root*, using the sidecar.
+) -> Element:
+    """Return *root* carrying the clang-derived vector spellings, using the sidecar.
 
     A root with no vector node is returned untouched and costs nothing. A clang
     failure leaves the vector nodes ``Unimplemented`` and is logged; nothing is
     published for it, so the next run tries again.
     """
     if not has_vector_nodes(root):
-        return
+        return root
     store = ast_cache_store(key, VECTOR_SIDECAR_BACKEND)
     cached = _valid_sidecar(store.lookup(key))
     if cached is not None:
-        root.set(VECTOR_SPELLINGS_ATTR, json.dumps(cached, sort_keys=True))
-        return
+        return with_vector_spellings(root, cached)
     try:
         clang_root, _kind, _force_cpp = clang_header_dump(
             headers,
@@ -99,6 +97,7 @@ def join_vector_spellings(
             "vector types stay unresolved",
             exc,
         )
-        return
-    resolved = attach_vector_spellings(root, clang_root)
+        return root
+    resolved = resolve_vector_spellings(root, clang_root)
     store.publish(key, {"spellings": resolved}, ())
+    return with_vector_spellings(root, resolved)

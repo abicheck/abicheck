@@ -18,11 +18,12 @@ from abicheck.extract.headers.castxml.vector_join import (
 )
 from abicheck.extract.headers.castxml.vector_spellings import (
     VECTOR_SPELLINGS_ATTR,
-    attach_vector_spellings,
     castxml_vector_spellings,
     clang_vector_spellings,
     has_vector_nodes,
     parse_vector_qualtype,
+    resolve_vector_spellings,
+    with_vector_spellings,
 )
 
 _F8 = "float __attribute__((vector_size(32)))"
@@ -148,18 +149,28 @@ def test_typedef_and_shared_inline_field_resolve_to_one_node() -> None:
     assert keys["_19"] == "typedef:f8"
 
 
-def test_attach_resolves_nodes_to_clang_spellings_and_stores_them() -> None:
+def test_resolve_maps_nodes_and_leaves_the_parsed_tree_unwritten() -> None:
     root = _castxml_root()
-    resolved = attach_vector_spellings(root, _clang_tree())
+    before = dict(root.attrib)
+    resolved = resolve_vector_spellings(root, _clang_tree())
     assert resolved["_19"] == _F8
-    assert has_vector_nodes(root)
-    assert root.get(VECTOR_SPELLINGS_ATTR) is not None
+    assert dict(root.attrib) == before
+    assert VECTOR_SPELLINGS_ATTR not in root.attrib
+
+
+def test_carried_root_shares_children_and_holds_the_mapping() -> None:
+    root = _castxml_root()
+    carried = with_vector_spellings(root, {"_19": _F8})
+    assert carried is not root
+    assert list(carried) == list(root)
+    assert has_vector_nodes(carried)
+    assert VECTOR_SPELLINGS_ATTR in carried.attrib
 
 
 def test_vector_node_without_a_clang_declaration_stays_unresolved() -> None:
     root = _castxml_with_param()
     clang = {"kind": "TranslationUnitDecl", "inner": []}
-    resolved = attach_vector_spellings(root, clang)
+    resolved = resolve_vector_spellings(root, clang)
     assert "_26" not in resolved
 
 
@@ -218,7 +229,7 @@ def _join(monkeypatch: pytest.MonkeyPatch, store: _FakeStore, calls: list[int]):
 
     monkeypatch.setattr(vj, "clang_header_dump", fake_clang)
     root = _castxml_root()
-    join_vector_spellings(
+    return join_vector_spellings(
         root,
         "key-1",
         headers=[],
@@ -234,7 +245,6 @@ def _join(monkeypatch: pytest.MonkeyPatch, store: _FakeStore, calls: list[int]):
         extra_hash_dirs=(),
         exported_symbols=frozenset(),
     )
-    return root
 
 
 def test_sidecar_hit_skips_clang(monkeypatch: pytest.MonkeyPatch) -> None:
