@@ -180,6 +180,10 @@ multi-artifact stored package is audited per member instead — see
 symbol index, a thin archive, non-ELF members, or no `-H` header is a usage
 error, exit `64`.
 
+`compare --require-same-generation` turns an extractor-generation mismatch
+between the two operands into a usage error, exit `64`, with a "re-dump
+baseline" message instead of a comparison.
+
 The OLD side is recorded with the `declared_absent`
 `MemberAcquisition` state — distinct from `not_supplied` (an *unproven*
 absence that can leave the scope reading incomplete): the user declared
