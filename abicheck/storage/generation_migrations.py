@@ -194,6 +194,7 @@ SPELLING_MIGRATIONS: Mapping[int, GenerationSpellingChange] = {
         "now uses the dialect and target flags the binary was built with"
     ),
 }
+
 #: Reasons that say nothing about what was audited; the bump gate refuses them.
 PLACEHOLDER_REASONS = frozenset(
     {
