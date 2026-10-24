@@ -3,8 +3,10 @@ compiled-target root finding, and its layout consequences stay visible."""
 
 from __future__ import annotations
 
+import platform
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -12,7 +14,22 @@ import pytest
 from abicheck.checker import ChangeKind, compare
 from abicheck.dumper import dump
 
-pytestmark = pytest.mark.integration
+# The fixture is ELF x86-64 by construction: `-mavx2` is an x86 flag, and the
+# detector reads the ELF producer and GNU-property note. macOS compilers (Apple
+# clang on arm64) reject it, and MinGW on Windows emits PE, so those platforms
+# have no ELF target to compare. Skip where the premise does not hold; a real
+# compiler failure on Linux x86-64 still fails the test.
+_ELF_X86_64 = sys.platform.startswith("linux") and platform.machine() in (
+    "x86_64",
+    "AMD64",
+)
+
+pytestmark = [
+    pytest.mark.integration,
+    pytest.mark.skipif(
+        not _ELF_X86_64, reason="ELF x86-64 fixture (Linux x86-64 only)"
+    ),
+]
 
 _VEC_SOURCE = r"""
 #include <immintrin.h>
