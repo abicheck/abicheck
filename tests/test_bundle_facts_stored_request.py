@@ -39,8 +39,12 @@ def _request(tmp_path: Path, **overrides: object) -> BundleFactsCompareRequest:
     return BundleFactsCompareRequest(**fields)  # type: ignore[arg-type]
 
 
-def test_supported_formats_are_json_and_markdown() -> None:
-    assert STORED_BUNDLE_FACTS_FORMATS == frozenset({"json", "markdown"})
+def test_supported_formats_are_json_markdown_junit_and_oneline() -> None:
+    # HTML and --view stay out: the HTML document needs an effective-config
+    # receipt a stored comparison does not resolve yet (PR 1 scope).
+    assert STORED_BUNDLE_FACTS_FORMATS == frozenset(
+        {"json", "markdown", "junit", "oneline"}
+    )
 
 
 def test_a_plain_request_validates_with_no_config(tmp_path: Path) -> None:

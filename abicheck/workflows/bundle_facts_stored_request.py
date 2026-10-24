@@ -44,7 +44,13 @@ from ..model.sided_inputs import compose_sided_paths
 #: rejects an explicitly requested format outside this set, and the CLI's
 #: default-format fallback draws from it. Two copies would be free to
 #: disagree about which formats exist.
-STORED_BUNDLE_FACTS_FORMATS: frozenset[str] = frozenset({"json", "markdown"})
+#: Formats a stored-bundle-facts comparison renders. ``junit``/``oneline`` go
+#: through the same release renderer a live directory comparison uses; HTML
+#: and ``--view`` stay out because the HTML document needs the effective-
+#: config receipt, which a stored comparison does not resolve yet.
+STORED_BUNDLE_FACTS_FORMATS: frozenset[str] = frozenset(
+    {"json", "markdown", "junit", "oneline"}
+)
 
 
 class BundleFactsCompareError(Exception):
@@ -298,16 +304,16 @@ def _reject_unsupported_output(
     if request.fmt not in STORED_BUNDLE_FACTS_FORMATS:
         raise BundleFactsCompareError(
             f"-o {request.fmt}=... is not available with a stored-bundle-facts OLD_INPUT: only "
-            "json/markdown are supported for a stored-bundle-facts "
-            "comparison. Choose one of: json, markdown.",
+            "json/markdown/junit/oneline are supported for a stored-bundle-facts "
+            "comparison. Choose one of: json, markdown, junit, oneline.",
             usage=True,
         )
     for secondary_fmt, _secondary_path in request.secondary_writes:
         if secondary_fmt not in STORED_BUNDLE_FACTS_FORMATS:
             raise BundleFactsCompareError(
                 f"-o {secondary_fmt}=... is not available with "
-                "a stored-bundle-facts OLD_INPUT: only json/markdown are supported for a "
-                "stored-bundle-facts comparison.",
+                "a stored-bundle-facts OLD_INPUT: only json/markdown/junit/oneline are "
+                "supported for a stored-bundle-facts comparison.",
                 usage=True,
             )
     if fail_on_removed:

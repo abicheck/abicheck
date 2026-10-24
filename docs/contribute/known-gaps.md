@@ -410,7 +410,7 @@ Do not re-attempt token-claiming. A header's export tokens cannot tell whether i
 
 #### Release report: live and stored operands render different documents
 
-**Status (recorded 2026-10-11): OPEN.** Both operands go through `report.release_document.build_release_report` and agree on every shared semantic field (`tests/unit/report/test_release_document.py`), but each yields its own JSON/Markdown shape and the stored operand has no JUnit, HTML, `oneline` or `--view show=` projection.
+**Status (updated 2026-10-24): PARTIAL.** A stored `BundleFacts` operand now renders JUnit and `oneline` through the live release renderer (`report.render_release_report.render_release_text`), pinned live-vs-stored through the CLI by `tests/test_cli_compare_stored_release_parity.py`. Still open: the stored JSON and Markdown shapes (see the write-up), the stored `html` and `--view show=` projections (HTML needs an effective-config receipt the stored path does not resolve), and the stored JUnit's passing testcases for unchanged symbols (no old-side inventory reaches it, so the pass-rate denominator differs from live).  
 `hygiene` — Converging the shapes changes a published JSON document, so it needs a release-schema decision. [Full write-up](known-gaps/release-report-live-and-stored-operands-render-different-documents.md)
 
 #### Public-surface graph: surface_graph vs L5 header_graph node-id namespaces not unified; type_reachability stdlib query unmigrated

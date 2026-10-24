@@ -53,6 +53,7 @@ from ....report.release_document import (
     stored_reported_verdict,
 )
 from ....report.render_release_report import (
+    render_release_text,
     render_stored_release_json,
     render_stored_release_markdown,
 )
@@ -66,6 +67,7 @@ from ....workflows.bundle_facts_stored_request import (
     reject_explicit_compile_config,
 )
 from ....workflows.gate import resolve_scope_decision
+from .compare_bundle_facts_release import stored_release_evaluation
 
 
 def _click_error(exc: BundleFactsCompareError) -> click.ClickException:
@@ -405,13 +407,30 @@ def _render(
     scope_terms: ComparisonScopeTerms | None = None,
     assurance_decision: ReleaseAssuranceDecision | None = None,
 ) -> str:
-    """Hand the stored-operand comparison to the one release report builder
-    (``report.release_document``) and render it as *fmt* (``markdown``, else
-    JSON). With no *scope_terms*, the default ``scope.on_incomplete`` policy
-    is applied to *result*'s own scope record."""
+    """Render the stored-operand comparison as *fmt*. ``junit``/``oneline``
+    go through the live release renderer; ``markdown``, else JSON, go through
+    the stored document builder in ``report.release_document``. With no
+    *scope_terms*, the default ``scope.on_incomplete`` policy is applied to
+    *result*'s own scope record."""
     if scope_terms is None:
         scope_terms = comparison_scope_terms(
             resolve_scope_decision(getattr(result, "scope_record", None), None)
+        )
+    if fmt in ("junit", "oneline"):
+        # The live release renderer, fed the stored comparison's own entries.
+        evaluation = stored_release_evaluation(
+            result,
+            worst_verdict=stored_reported_verdict(result),
+            old_facts_path=old_facts_path,
+            new_dir=new_dir,
+            scope_terms=scope_terms,
+            assurance_decision=assurance_decision,
+            require_complete_analysis=bool(
+                assurance_decision and assurance_decision.require_complete
+            ),
+        )
+        return render_release_text(
+            fmt, build_release_report(evaluation), demangle=False
         )
     report = build_release_report(
         StoredReleaseEvaluation(
