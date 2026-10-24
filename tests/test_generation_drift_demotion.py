@@ -264,6 +264,9 @@ def test_demotion_skips_disposed_and_non_spelling_findings(
         ("double[1]", "double[2]", 1, True),
         ("Box<int, 3>[7][2]", "Box<int, 3>[8][3]", 1, True),
         ("char[0]", "char[1]", 1, True),
+        ("char[9]", "char[10]", 1, True),  # digit count changes
+        ("int[99][10]", "int[100][11]", 1, True),
+        ("char[19]", "char[110]", 1, False),  # not +1 as numbers
         ("double[1]", "double[3]", 1, False),  # grew by two
         ("double[2]", "double[1]", 1, False),  # shrank
         ("double[1]", "double[2]", 0, False),  # no generation declared a shift
@@ -323,3 +326,6 @@ def test_castxml_extent_respelling_demotes_only_across_generation_15(
         extent_shift=pending_extent_shift(old_generation, 16),
     )
     assert change.effective_verdict is expected_verdict
+    if expected_verdict is not None:
+        assert "array extents grown by 1" in change.modulation_reason
+        assert "no SPELLING_MIGRATIONS rule" not in change.modulation_reason

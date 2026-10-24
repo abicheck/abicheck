@@ -130,6 +130,8 @@ _BUILTINS = frozenset(
 
 _IDENT = re.compile(r"[A-Za-z_]\w*")
 _TOKEN = re.compile(r"[A-Za-z_]\w*|\S")
+#: Like ``_TOKEN``, but keeps a multi-digit extent (``[10]``) one token.
+_EXTENT_TOKEN = re.compile(r"[A-Za-z_]\w*|\d+|\S")
 
 
 def _declared_names(snapshot: AbiSnapshot) -> frozenset[str]:
@@ -165,7 +167,7 @@ def is_extent_shift_drift(old: str, new: str, shift: int) -> bool:
     differing one grown by exactly *shift*, keeping every other token."""
     if shift <= 0:
         return False
-    old_t, new_t = _TOKEN.findall(old), _TOKEN.findall(new)
+    old_t, new_t = _EXTENT_TOKEN.findall(old), _EXTENT_TOKEN.findall(new)
     if len(old_t) != len(new_t) or old_t == new_t:
         return False
     for index, (a, b) in enumerate(zip(old_t, new_t, strict=True)):
@@ -240,19 +242,24 @@ def demote_generation_spelling_drift(
             continue
         if declared is None:
             declared = _declared_names(old)
-        if not is_extent_shift_drift(
-            change.old_value, change.new_value, extent_shift
-        ) and not GENERATION_SPELLING_DRIFT.confirmed(
+        if is_extent_shift_drift(change.old_value, change.new_value, extent_shift):
+            cause = (
+                f"a SPELLING_MIGRATIONS row declares array extents grown by "
+                f"{extent_shift}, which no load-time rewrite can apply soundly"
+            )
+        elif GENERATION_SPELLING_DRIFT.confirmed(
             (change.old_value, change.new_value),
             (old_generation, new_generation),
             declared=declared,
         ):
+            cause = "no SPELLING_MIGRATIONS rule covers this spelling"
+        else:
             continue
         change.effective_verdict = Verdict.COMPATIBLE_WITH_RISK
         change.modulation_rule = GENERATION_DRIFT_RULE
         change.modulation_reason = (
             f"{GENERATION_DRIFT_REASON} (old operand extractor generation "
             f"{old_generation or 'unstated'}, new {new_generation or 'unstated'}; "
-            "no SPELLING_MIGRATIONS rule covers this spelling)"
+            f"{cause})"
         )
     return changes
