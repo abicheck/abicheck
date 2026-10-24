@@ -670,6 +670,11 @@
       "payload": {
         "created_at": null,
         "dependency_info": null,
+        "fact_generations": {
+          "extractor": 13,
+          "resolver": 2,
+          "source": 0
+        },
         "git_commit": null,
         "git_tag": null,
         "language_profile": null,

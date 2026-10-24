@@ -42,6 +42,7 @@ import pytest
 from click.testing import CliRunner
 
 from abicheck.cli import main
+from abicheck.model import AbiSnapshot
 from abicheck.serialization import load_snapshot, snapshot_to_json
 
 FIXTURE_DIR = Path(__file__).parent / "fixtures" / "toolchain_drift"
@@ -77,10 +78,25 @@ def _every_recorded_finding(report: dict) -> list[dict]:
     return [*report["changes"], *scope.get("filtered_internal_changes", [])]
 
 
+def _content(snapshot: AbiSnapshot) -> object:
+    """*snapshot*'s serialized form without its ``fact_generations`` stamp."""
+
+    def strip(node: object) -> object:
+        if isinstance(node, dict):
+            return {k: strip(v) for k, v in node.items() if k != "fact_generations"}
+        if isinstance(node, list):
+            return [strip(v) for v in node]
+        return node
+
+    return strip(json.loads(snapshot_to_json(snapshot)))
+
+
 def test_fixture_matches_its_generator(tmp_path: Path) -> None:
     """The committed pair holds what ``generate.py`` builds, so the narrative
     in its docstring describes what this module replays. Compared after a
-    load, so a snapshot schema migration does not force a regeneration."""
+    load, so a snapshot schema migration does not force a regeneration, and
+    without ``fact_generations`` -- which extractor generation wrote the file
+    is provenance, not content."""
     sys.path.insert(0, str(FIXTURE_DIR))
     try:
         import generate  # type: ignore[import-not-found]
@@ -90,7 +106,7 @@ def test_fixture_matches_its_generator(tmp_path: Path) -> None:
         fresh = tmp_path / f"{side}.json"
         fresh.write_text(snapshot_to_json(built))
         stored = load_snapshot(FIXTURE_DIR / f"{side}.json")
-        assert snapshot_to_json(stored) == snapshot_to_json(load_snapshot(fresh)), side
+        assert _content(stored) == _content(load_snapshot(fresh)), side
 
 
 @pytest.mark.parametrize("mode", MODES)
