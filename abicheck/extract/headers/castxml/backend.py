@@ -319,7 +319,8 @@ def castxml_dump(
         root, selected_meta = run_ast_acquisition("castxml", key, _produce)
         if _selected_meta_out is not None:
             _selected_meta_out.append(selected_meta)
-        return _with_vectors(root)
+        # The coordinated producer already joined the vector spellings.
+        return root
 
     check_deadline()
     _cached_root = _read_castxml_cache(store, key)

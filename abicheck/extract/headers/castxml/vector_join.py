@@ -92,7 +92,7 @@ def join_vector_spellings(
             extra_hash_dirs=extra_hash_dirs,
             exported_symbols=exported_symbols,
         )
-    except SnapshotError as exc:
+    except (SnapshotError, OSError) as exc:
         log.warning(
             "clang could not parse the header(s) for vector spellings (%s); "
             "vector types stay unresolved",

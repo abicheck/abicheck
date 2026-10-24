@@ -277,3 +277,100 @@ def test_corrupt_sidecar_is_a_miss_that_reruns_clang(
 
 def test_sidecar_namespace_is_distinct_from_the_xml_entry() -> None:
     assert VECTOR_SIDECAR_BACKEND != "castxml"
+
+
+# ── inline vector returns, overloads, clang launch failure (unit) ─────────────
+
+
+def test_inline_vector_return_is_keyed_and_spelled() -> None:
+    # The return qualType carries its own ``__attribute__((...))`` parentheses.
+    vec = "__attribute__((__vector_size__(8 * sizeof(float)))) float"
+    clang = {
+        "kind": "TranslationUnitDecl",
+        "inner": [
+            {
+                "kind": "FunctionDecl",
+                "name": "mk",
+                "type": {"qualType": f"{vec} (float)"},
+            },
+        ],
+    }
+    assert clang_vector_spellings(clang)["return:mk"] == _F8
+
+
+def test_overloads_with_inline_vector_params_get_distinct_keys() -> None:
+    def overload(mangled: str, elem: str) -> dict:
+        vec = f"__attribute__((__vector_size__(4 * sizeof({elem})))) {elem}"
+        return {
+            "kind": "FunctionDecl",
+            "name": "ov",
+            "mangledName": mangled,
+            "inner": [{"kind": "ParmVarDecl", "name": "p", "type": {"qualType": vec}}],
+        }
+
+    clang = {
+        "kind": "TranslationUnitDecl",
+        "inner": [overload("_Z2ovDv4_f", "float"), overload("_Z2ovDv4_i", "int")],
+    }
+    keys = clang_vector_spellings(clang)
+    assert keys["param:_Z2ovDv4_f#0"] == "float __attribute__((vector_size(16)))"
+    assert keys["param:_Z2ovDv4_i#0"] == "int __attribute__((vector_size(16)))"
+
+
+def test_castxml_overloads_key_by_mangled_name() -> None:
+    root = Element("GCC_XML")
+    root.append(Element("Namespace", id="_1", name="::"))
+    for fn_id, mangled, arg_id in (
+        ("_13", "_Z2ovDv4_f", "_16"),
+        ("_14", "_Z2ovDv4_i", "_17"),
+    ):
+        root.append(Element("Unimplemented", id=arg_id, type_class="Vector"))
+        fn = Element("Function", id=fn_id, name="ov", mangled=mangled, context="_1")
+        fn.append(Element("Argument", id=f"{arg_id}a", name="p", type=arg_id))
+        root.append(fn)
+    keys = castxml_vector_spellings(root)
+    assert keys == {"_16": "param:_Z2ovDv4_f#0", "_17": "param:_Z2ovDv4_i#0"}
+
+
+def test_clang_launch_failure_leaves_vectors_unresolved(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import abicheck.extract.headers.castxml.vector_join as vj
+
+    class _Store:
+        published: list[object] = []
+
+        def lookup(self, key: str, memo: object = None) -> object:
+            return None
+
+        def publish(
+            self, key: str, payload: object, deps: object, memo: object = None
+        ) -> None:
+            self.published.append(payload)
+
+    store = _Store()
+    monkeypatch.setattr(vj, "ast_cache_store", lambda key, backend: store)
+
+    def launch_fails(*args: object, **kwargs: object) -> None:
+        raise OSError("clang vanished")
+
+    monkeypatch.setattr(vj, "clang_header_dump", launch_fails)
+    root = _castxml_root()
+    returned = vj.join_vector_spellings(
+        root,
+        "key-os",
+        headers=[],
+        extra_includes=[],
+        compiler="c++",
+        gcc_path=None,
+        gcc_prefix=None,
+        gcc_options=None,
+        gcc_option_tokens=(),
+        sysroot=None,
+        nostdinc=False,
+        lang=None,
+        extra_hash_dirs=(),
+        exported_symbols=frozenset(),
+    )
+    assert returned is root
+    assert store.published == []

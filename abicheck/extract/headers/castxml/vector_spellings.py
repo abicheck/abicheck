@@ -150,7 +150,8 @@ def clang_vector_spellings(clang_root: dict[str, Any]) -> dict[str, str]:
             if spelling is not None and qual_type not in typedefs:
                 keyed.append((f"field:{_clang_qualified(scope, '')}::{name}", spelling))
         elif kind == "FunctionDecl" and name:
-            fn_key = _clang_qualified(scope, name)
+            # The mangled name tells overloads apart; fall back to the scoped name.
+            fn_key = node.get("mangledName") or _clang_qualified(scope, name)
             ret_spelling = _vector_of_function_return(node, typedefs)
             if ret_spelling is not None:
                 keyed.append((f"return:{fn_key}", ret_spelling))
@@ -177,13 +178,32 @@ def clang_vector_spellings(clang_root: dict[str, Any]) -> dict[str, str]:
     return out
 
 
+def _before_parameter_list(qual_type: str) -> str:
+    """The text before the last top-level ``(...)`` group, or ``""``.
+
+    A function's qualType ends with its parameter list, but an inline vector
+    return carries its own ``__attribute__((...))`` parentheses first, so the
+    split must be on the last top-level group, not the first ``(``.
+    """
+    depth = 0
+    start = -1
+    for i, ch in enumerate(qual_type):
+        if ch == "(":
+            if depth == 0:
+                start = i
+            depth += 1
+        elif ch == ")":
+            depth -= 1
+    return qual_type[:start].strip() if start > 0 else ""
+
+
 def _vector_of_function_return(
     node: dict[str, Any], typedefs: dict[str, str]
 ) -> str | None:
     """The vector return spelling of a function, from its ``T (args)`` qualType."""
     qual_type = (node.get("type") or {}).get("qualType", "")
-    head = qual_type.split("(", 1)[0].strip()
-    if not head or head == qual_type.strip():
+    head = _before_parameter_list(qual_type)
+    if not head:
         return None
     return typedefs.get(head) or parse_vector_qualtype(head)
 
@@ -243,6 +263,10 @@ def castxml_vector_spellings(root: Element) -> dict[str, str]:
 
 
 def _castxml_function_key(el: Element, index: dict[str, Element]) -> str:
+    """The key clang uses for this function: its mangled name when castxml has one."""
+    mangled = el.get("mangled")
+    if mangled:
+        return mangled
     scope = _castxml_scope(el, index)
     name = el.get("name") or ""
     return f"{scope}::{name}" if scope else name
