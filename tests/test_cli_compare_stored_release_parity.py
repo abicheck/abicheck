@@ -219,3 +219,47 @@ def test_stored_oneline_names_the_stored_verdict(tmp_path: Path) -> None:
     _code, oneline = _run("compare", str(facts_path), str(new_dir), "-o", "oneline=-")
 
     assert re.search(r"— BREAKING\b", oneline), oneline
+
+
+def test_stored_entry_carries_coverage_digest_and_default_assurance(
+    tmp_path: Path,
+) -> None:
+    """The adapter's own branches, with inputs chosen by hand: a member's
+    coverage warnings and deployment digest survive into its release entry,
+    and an absent assurance decision falls back to the release default."""
+    from abicheck.bundle_models import BundleDiffResult
+    from abicheck.change_registry_types import Verdict
+    from abicheck.checker_types import DiffResult
+    from abicheck.frontends.cli.commands.compare_bundle_facts_release import (
+        stored_release_evaluation,
+    )
+    from abicheck.report.comparison_scope import comparison_scope_terms
+    from abicheck.workflows.gate import resolve_scope_decision
+
+    diff = DiffResult(
+        old_version="old",
+        new_version="new",
+        library="libcalc.so",
+        changes=[],
+        verdict=Verdict.NO_CHANGE,
+        coverage_warnings=["headers not supplied"],
+        env_matrix_source_sha256="sha256:abc",
+    )
+    result = BundleDiffResult(old_root=tmp_path, new_root=tmp_path, per_library=[diff])
+
+    evaluation = stored_release_evaluation(
+        result,
+        worst_verdict="NO_CHANGE",
+        old_facts_path=tmp_path / "old.bundlefacts.json",
+        new_dir=tmp_path,
+        scope_terms=comparison_scope_terms(resolve_scope_decision(None, None)),
+        assurance_decision=None,
+        require_complete_analysis=False,
+    )
+
+    (entry,) = evaluation.library_results
+    assert entry["library"] == "libcalc.so"
+    assert entry["verdict"] == "NO_CHANGE"
+    assert entry["coverage_warnings"] == ["headers not supplied"]
+    assert entry["env_matrix_source_sha256"] == "sha256:abc"
+    assert evaluation.assurance_terms is not None
