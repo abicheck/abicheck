@@ -220,6 +220,22 @@ FAMILIES: dict[str, Family] = {
             ),
         ),
         Family(
+            key="F16",
+            title="Header parse uses the dialect the binary was built with",
+            invariant=(
+                "A header parse of a library with no build data takes its C++ "
+                "standard and target flags from the binary's own build record, so "
+                "a declaration that needs the dialect the library was compiled "
+                "with parses, and a caller's explicit choice still wins."
+            ),
+            harness_tests=(),
+            planned_reason=(
+                "One class so far; revisit when a second build fact read from the "
+                "binary (for example a sanitizer or a libc selection) feeds the same "
+                "header parse and the two share one mechanism."
+            ),
+        ),
+        Family(
             key="F15",
             title="castxml header vectors keep the element type clang reports",
             invariant=(
@@ -444,12 +460,10 @@ _F12 = (
     # different operand set from the same driver spelling.
     "extraction.msvc_include_operand_spelling_not_probed",
 )
-_F13 = (
-    "extraction.compile_entry_collapsed_to_first_source",
-    "extraction.header_dialect_not_recovered_from_binary",
-)
+_F13 = ("extraction.compile_entry_collapsed_to_first_source",)
 _F14 = ("extraction.vector_type_collapsed_to_plain_array",)
 _F15 = ("extraction.castxml_vector_element_not_modelled",)
+_F16 = ("extraction.header_dialect_not_recovered_from_binary",)
 
 #: id -> reason it belongs to no shared family.
 OTHER_REASONS: dict[str, str] = {
@@ -496,6 +510,7 @@ for _key, _ids in (
     ("F13", _F13),
     ("F14", _F14),
     ("F15", _F15),
+    ("F16", _F16),
     ("OTHER", tuple(OTHER_REASONS)),
 ):
     for _id in _ids:

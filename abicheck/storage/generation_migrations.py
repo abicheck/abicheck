@@ -186,8 +186,8 @@ SPELLING_MIGRATIONS: Mapping[int, GenerationSpellingChange] = {
         "is sound and a baseline holding those spellings is re-dumped"
     ),
     16: GenerationSpellingChange(
-        "no stored type spelling changed in this generation: the header parse "
-        "now uses the dialect and target flags the binary was built with"
+        "never on main: an intermediate bump inside #1778's branch, superseded "
+        "by generation 17 on the same branch -- no snapshot was ever stamped 16"
     ),
     17: GenerationSpellingChange(
         "no stored type spelling changed in this generation: the header parse "
