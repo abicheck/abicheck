@@ -59,7 +59,7 @@ from ..model.export_entity_name import entity_name_components, has_synthetic_com
 from .template_surface import qualified_name_table
 
 if TYPE_CHECKING:
-    from ..model import AbiSnapshot
+    from ..model import AbiSnapshot, Function
     from ..model.change import Change
 
 __all__ = ["pair_parameter_replacements"]
@@ -87,6 +87,17 @@ def _declaration_parts(mangled: str) -> tuple[str, str, str] | None:
     if open_at <= 0 or close_at < open_at:
         return None
     return text[:open_at], text[open_at : close_at + 1], text[close_at + 1 :]
+
+
+def _return_types_disagree(old_fn: Function, new_fn: Function) -> bool:
+    """Whether both sides establish a return type and the two differ. The
+    removal would not show that change, so such a pair stays a removal and an
+    addition. An unknown return type on either side does not block pairing."""
+    return bool(
+        old_fn.return_type
+        and new_fn.return_type
+        and old_fn.return_type != new_fn.return_type
+    )
 
 
 def pair_parameter_replacements(
@@ -156,6 +167,9 @@ def pair_parameter_replacements(
         if old_parts is None or new_parts is None:
             continue
         if old_parts[2] != new_parts[2] or old_parts[1] == new_parts[1]:
+            continue
+        new_fn = new_fns.get(new_symbol)
+        if new_fn is None or _return_types_disagree(old_fn, new_fn):
             continue
         replaced[old_symbol] = make_change(
             ChangeKind.FUNC_PARAMS_CHANGED,

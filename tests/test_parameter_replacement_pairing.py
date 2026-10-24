@@ -15,6 +15,7 @@ The mangled names are written out from the Itanium ABI grammar:
 from __future__ import annotations
 
 import pytest
+from hypothesis import given, settings, strategies as st
 
 from abicheck.compare.parameter_replacement import pair_parameter_replacements
 from abicheck.diff_helpers import make_change
@@ -164,3 +165,113 @@ def test_unparseable_removal_is_not_paired() -> None:
     new = _snap([_fn("scale", NEW_SCALE)])
     removed, added = _removed("scale"), _added(NEW_SCALE)
     assert pair_parameter_replacements([removed, added], old, new) == [removed, added]
+
+
+# Generated-input contract for the pairing primitive. Each symbol's declared
+# name is written out here by hand, not read back from the implementation.
+_DECLARED = {
+    OLD_SCALE: "scale",
+    NEW_SCALE: "scale",
+    "_ZN2ns1C1fEi": "ns::C::f",
+    "_ZN2ns1C1fEl": "ns::C::f",
+    "_ZN2ns1C1fEd": "ns::C::f",
+    "_Z7computev": "compute",
+}
+_SYMBOLS = sorted(_DECLARED)
+_RETURN_TYPES = st.sampled_from(["int", "double", ""])
+
+
+def _generated_pair(
+    old_syms: set[str], new_syms: set[str], old_ret: str, new_ret: str
+) -> tuple[AbiSnapshot, AbiSnapshot, list[Change]]:
+    old = AbiSnapshot(
+        library="lib",
+        version="1.0",
+        functions=[
+            Function(name=_DECLARED[s], mangled=s, return_type=old_ret, params=[])
+            for s in sorted(old_syms)
+        ],
+    )
+    new = AbiSnapshot(
+        library="lib",
+        version="1.0",
+        functions=[
+            Function(name=_DECLARED[s], mangled=s, return_type=new_ret, params=[])
+            for s in sorted(new_syms)
+        ],
+    )
+    changes = [_removed(s) for s in sorted(old_syms - new_syms)] + [
+        _added(s) for s in sorted(new_syms - old_syms)
+    ]
+    return old, new, changes
+
+
+class TestPairingPrimitiveProperties:
+    @given(
+        old_syms=st.sets(st.sampled_from(_SYMBOLS)),
+        new_syms=st.sets(st.sampled_from(_SYMBOLS)),
+        old_ret=_RETURN_TYPES,
+        new_ret=_RETURN_TYPES,
+    )
+    @settings(max_examples=200, deadline=None)
+    def test_each_pair_consumes_two_changes_and_leaves_the_rest_untouched(
+        self, old_syms: set[str], new_syms: set[str], old_ret: str, new_ret: str
+    ) -> None:
+        old, new, changes = _generated_pair(old_syms, new_syms, old_ret, new_ret)
+        out = pair_parameter_replacements(changes, old, new)
+        replacements = [c for c in out if c.kind == ChangeKind.FUNC_PARAMS_CHANGED]
+        assert len(out) == len(changes) - len(replacements)
+        survivors = [c for c in out if c.kind != ChangeKind.FUNC_PARAMS_CHANGED]
+        assert all(any(c is original for original in changes) for c in survivors)
+
+    @given(
+        old_syms=st.sets(st.sampled_from(_SYMBOLS)),
+        new_syms=st.sets(st.sampled_from(_SYMBOLS)),
+        data=st.data(),
+    )
+    @settings(max_examples=200, deadline=None)
+    def test_input_order_cannot_change_the_result(
+        self, old_syms: set[str], new_syms: set[str], data: st.DataObject
+    ) -> None:
+        old, new, changes = _generated_pair(old_syms, new_syms, "int", "int")
+        shuffled = data.draw(st.permutations(changes))
+
+        def signature(result: list[Change]) -> list[tuple[str, str]]:
+            return sorted((c.kind.value, c.symbol) for c in result)
+
+        assert signature(pair_parameter_replacements(shuffled, old, new)) == signature(
+            pair_parameter_replacements(changes, old, new)
+        )
+
+    @given(
+        old_syms=st.sets(st.sampled_from(_SYMBOLS)),
+        new_syms=st.sets(st.sampled_from(_SYMBOLS)),
+    )
+    @settings(max_examples=200, deadline=None)
+    def test_an_ambiguous_declared_name_is_never_paired(
+        self, old_syms: set[str], new_syms: set[str]
+    ) -> None:
+        old, new, changes = _generated_pair(old_syms, new_syms, "int", "int")
+        out = pair_parameter_replacements(changes, old, new)
+        replaced = {c.symbol for c in out if c.kind == ChangeKind.FUNC_PARAMS_CHANGED}
+        for name in set(_DECLARED.values()):
+            members_old = {s for s in old_syms if _DECLARED[s] == name}
+            members_new = {s for s in new_syms if _DECLARED[s] == name}
+            if len(members_old) != 1 or len(members_new) != 1:
+                assert not (replaced & members_old), name
+
+    @given(
+        old_syms=st.sets(st.sampled_from(_SYMBOLS)),
+        new_syms=st.sets(st.sampled_from(_SYMBOLS)),
+        old_ret=_RETURN_TYPES,
+        new_ret=_RETURN_TYPES,
+    )
+    @settings(max_examples=200, deadline=None)
+    def test_known_disagreeing_return_types_are_never_paired(
+        self, old_syms: set[str], new_syms: set[str], old_ret: str, new_ret: str
+    ) -> None:
+        old, new, changes = _generated_pair(old_syms, new_syms, old_ret, new_ret)
+        out = pair_parameter_replacements(changes, old, new)
+        replaced = {c.symbol for c in out if c.kind == ChangeKind.FUNC_PARAMS_CHANGED}
+        if old_ret and new_ret and old_ret != new_ret:
+            assert not replaced
