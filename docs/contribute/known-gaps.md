@@ -63,6 +63,8 @@ Each entry's status line says what is still open. A PARTIAL entry's write-up als
 
 **Status (2026-10-22): OPEN, deliberate follow-up — product decision needed.** `abi_surface_explosion` is growth-only now; a header-mode shrink of undeclared exports has no finding. [Full write-up](known-gaps/a-large-export-shrink-with-no-declared-surface-emits-nothing.md)
 
+CJM: trust stage (docs/contribute/cjm.md) — use case UC-WF-analysis-assurance (G47); priority: L2 Linux ELF.
+
 #### The Markdown "Additions" section is one row per finding, so it grows linearly (2026-10-22)
 
 **Status (2026-10-22): OPEN.** The review-group section is bounded; the per-finding Additions rows are not. [Full write-up](known-gaps/the-additions-markdown-section-is-one-row-per-finding.md)
@@ -116,6 +118,8 @@ current emitter, which is unchanged.
 #### A binary-gate demotion does not state a coverage gap (ADR-084)
 
 **Status (2026-10-21): FIXED.** A demotion now adds an `analysis_assurance.notes` entry naming each demoted claim (`policy/binary_gate_marker.binary_gate_assurance_notes`, called from `policy/analysis_assurance/_compute.py`), which is a changed analysis-assurance record in the sense `tests/test_family_f1_evidence_ablation.py` requires; the F1 cell `pimpl_inline_body_renamed` / `RecordType.source_header_fact` passes.
+
+CJM: trust stage (docs/contribute/cjm.md) — use case UC-WF-analysis-assurance (G47); priority: L2 Linux ELF.
 
 #### A refused clang AST still leaves the header type pass collected (2026-10-17)
 
