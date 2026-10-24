@@ -179,6 +179,12 @@ SPELLING_MIGRATIONS: Mapping[int, GenerationSpellingChange] = {
         "it was an array or a vector, so no rewrite is sound and a baseline "
         "holding a vector type is re-dumped"
     ),
+    15: GenerationSpellingChange(
+        "castxml vector types resolve to 'T __attribute__((vector_size(N)))' from the "
+        "clang AST, and castxml arrays spell their element count (max + 1, was max): "
+        "a stored 'T[N-1]' cannot be told apart from a genuine 'T[N-1]', so no rewrite "
+        "is sound and a baseline holding those spellings is re-dumped"
+    ),
 }
 
 #: Reasons that say nothing about what was audited; the bump gate refuses them.
