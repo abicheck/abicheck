@@ -17,7 +17,11 @@ import pytest
 
 from abicheck.checker import ChangeKind, Verdict, compare
 from abicheck.dwarf_unified import parse_dwarf
-from abicheck.dwarf_utils import array_type_spelling, vector_byte_size
+from abicheck.dwarf_utils import (
+    array_type_info,
+    array_type_spelling,
+    vector_byte_size,
+)
 from abicheck.elf_metadata import parse_elf_metadata
 from abicheck.model import AbiSnapshot
 from abicheck.workflows.dwarf_snapshot_assembly import build_snapshot_from_dwarf
@@ -204,33 +208,111 @@ class _Attr:
         self.value = value
 
 
-class _Subrange:
-    tag = "DW_TAG_subrange_type"
+class _Die:
+    """Just enough of a pyelftools DIE for the size and spelling helpers."""
 
-    def __init__(self, attrs: dict[str, int]) -> None:
-        self.attributes = {name: _Attr(value) for name, value in attrs.items()}
-
-
-class _VectorDie:
-    tag = "DW_TAG_array_type"
-
-    def __init__(self, subrange: _Subrange) -> None:
-        self.attributes: dict[str, _Attr] = {}
-        self._children = [subrange]
+    def __init__(
+        self,
+        tag: str,
+        attrs: dict[str, int] | None = None,
+        children: tuple[_Die, ...] = (),
+    ) -> None:
+        self.tag = tag
+        self.attributes = {name: _Attr(v) for name, v in (attrs or {}).items()}
+        self._children = children
 
     def iter_children(self) -> object:
         return iter(self._children)
 
 
+def _subrange(attrs: dict[str, int]) -> _Die:
+    return _Die("DW_TAG_subrange_type", attrs)
+
+
 @pytest.mark.parametrize(
-    "bounds",
+    ("array", "element_size", "expected"),
     [
-        {"DW_AT_count": 8},
-        {"DW_AT_upper_bound": 7},
-        {"DW_AT_upper_bound": 8, "DW_AT_lower_bound": 1},
+        # Each case is 8 lanes of 4-byte float: 8 * 4 = 32 bytes.
+        (_Die("DW_TAG_array_type", children=(_subrange({"DW_AT_count": 8}),)), 4, 32),
+        (
+            _Die("DW_TAG_array_type", children=(_subrange({"DW_AT_upper_bound": 7}),)),
+            4,
+            32,
+        ),
+        (
+            _Die(
+                "DW_TAG_array_type",
+                children=(_subrange({"DW_AT_upper_bound": 8, "DW_AT_lower_bound": 1}),),
+            ),
+            4,
+            32,
+        ),
+        # A declared byte size is taken as given, with no subrange needed.
+        (_Die("DW_TAG_array_type", {"DW_AT_byte_size": 32}), 4, 32),
+        # Non-subrange children are skipped before the subrange is read.
+        (
+            _Die(
+                "DW_TAG_array_type",
+                children=(
+                    _Die("DW_TAG_enumerator"),
+                    _subrange({"DW_AT_count": 8}),
+                ),
+            ),
+            4,
+            32,
+        ),
     ],
-    ids=["count", "zero_based_upper_bound", "explicit_lower_bound"],
+    ids=[
+        "count",
+        "zero_based_upper_bound",
+        "explicit_lower_bound",
+        "declared_byte_size",
+        "skips_non_subrange_child",
+    ],
 )
-def test_vector_byte_size_counts_lanes_from_subrange(bounds: dict[str, int]) -> None:
-    # Each case is 8 lanes of 4-byte float: 8 * 4 = 32 bytes.
-    assert vector_byte_size(_VectorDie(_Subrange(bounds)), element_size=4) == 32
+def test_vector_byte_size_is_total_bytes(
+    array: _Die, element_size: int, expected: int
+) -> None:
+    assert vector_byte_size(array, element_size=element_size) == expected
+
+
+@pytest.mark.parametrize(
+    ("array", "element_size"),
+    [
+        # Unknown bounds or no subrange at all: the size cannot be derived.
+        (_Die("DW_TAG_array_type", children=(_subrange({}),)), 4),
+        (_Die("DW_TAG_array_type"), 4),
+        # A bounded subrange but no element size to multiply it by.
+        (_Die("DW_TAG_array_type", children=(_subrange({"DW_AT_count": 8}),)), None),
+    ],
+    ids=["unbounded_subrange", "no_subrange", "no_element_size"],
+)
+def test_vector_byte_size_unknown_is_none(
+    array: _Die, element_size: int | None
+) -> None:
+    assert vector_byte_size(array, element_size=element_size) is None
+
+
+def test_plain_array_info_keeps_declared_size() -> None:
+    # A plain float[9] with a declared 36 bytes: spelled T[], sized from the DIE.
+    array = _Die("DW_TAG_array_type", {"DW_AT_byte_size": 36})
+    assert array_type_info(array, ("float", 4)) == ("float[]", 36)
+
+
+def test_vector_info_without_element_has_unknown_spelling() -> None:
+    # Neither the element nor the size is resolvable: the spelling still says
+    # "vector", with a zero size, rather than falling back to a plain array.
+    array = _Die(
+        "DW_TAG_array_type",
+        {"DW_AT_GNU_vector": 1},
+        children=(_subrange({"DW_AT_count": 8}),),
+    )
+    assert array_type_info(array, None) == (
+        "? __attribute__((vector_size(0)))",
+        0,
+    )
+
+
+def test_unresolved_plain_array_spelling_is_array() -> None:
+    array = _Die("DW_TAG_array_type", {"DW_AT_byte_size": 36})
+    assert array_type_info(array, None) == ("array", 36)
