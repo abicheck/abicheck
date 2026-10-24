@@ -115,6 +115,7 @@ DETECTOR_INPUTS: dict[str, DetectorInputs] = {
         tolerates={
             "canonical_ir": _CANONICAL,
             "declarations.enums": _LOOKUP,
+            "from_headers": _FROM_HEADERS,
             "declarations.typedefs": _LOOKUP,
             "declarations.types": _LOOKUP,
             "surface_graph": _GRAPH,
