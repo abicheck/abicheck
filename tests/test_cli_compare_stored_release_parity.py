@@ -33,11 +33,11 @@ import re
 import shutil
 import subprocess
 import sys
-import xml.etree.ElementTree as ET
 from pathlib import Path
 
 import pytest
 from click.testing import CliRunner
+from defusedxml.ElementTree import fromstring as xml_fromstring
 
 from abicheck.cli import main
 from abicheck.cli_resolve import _resolve_input
@@ -145,7 +145,7 @@ def _run(*args: str) -> tuple[int, str]:
 
 def _junit_cases(xml_text: str) -> list[tuple[str, str, bool]]:
     """Every testcase as ``(suite, name, failed)``, in document order."""
-    root = ET.fromstring(xml_text)
+    root = xml_fromstring(xml_text)
     cases: list[tuple[str, str, bool]] = []
     for suite in root.iter("testsuite"):
         for case in suite.findall("testcase"):
@@ -158,7 +158,7 @@ def _suite_names(xml_text: str) -> set[str]:
     """Every ``<testsuite>`` name, including a suite with no testcases: a
     member with nothing to report still has a suite, and reading members off
     testcases would silently drop it."""
-    root = ET.fromstring(xml_text)
+    root = xml_fromstring(xml_text)
     return {suite.get("name", "") for suite in root.iter("testsuite")}
 
 
