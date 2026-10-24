@@ -471,8 +471,9 @@ use-case attribution landed (2026-09-29):** under `compare --use-cases`,
 every JSON `changes` entry carries `affected_use_cases` (report schema
 5.10), derived once from the report-level `use_case_impact.by_use_case` by
 joining on `finding_id` so the two are exact inverses; Markdown change rows
-and the review digest's review groups and impacted-symbol list render it. Still open for S3:
-SARIF/JUnit/HTML-table carriage, coverage-qualified use-case reports, and
+and the review digest's review groups and impacted-symbol list render it;
+the HTML changes table and SARIF `properties.affectedUseCases` carry it too.
+Still open for S3: JUnit carriage, coverage-qualified use-case reports, and
 the planned `USE_CASE_IMPACT_CONFIRMED` overlay. **S4** separately
 designed, opt-in compile/link/runtime validation with its own execution
 design review — never implied by S1–S3, and not a reauthorization of
