@@ -14,16 +14,24 @@ The mangled names are written out from the Itanium ABI grammar:
 
 from __future__ import annotations
 
+import shutil
+
 import pytest
 from hypothesis import given, settings, strategies as st
 
 from abicheck.compare.parameter_replacement import pair_parameter_replacements
+from abicheck.demangle import demangle
 from abicheck.diff_helpers import make_change
 from abicheck.model import AbiSnapshot, Function
 from abicheck.model.change import Change
 from abicheck.model.change_catalog.kinds import ChangeKind
 
 OLD_SCALE = "_Z5scale3vecIf3abiILi8E2t8EEf"
+_HAS_DEMANGLER = demangle(OLD_SCALE) is not None
+needs_demangler = pytest.mark.skipif(
+    not _HAS_DEMANGLER and shutil.which("c++filt") is None,
+    reason="demangled parameter text needs cxxfilt or c++filt",
+)
 NEW_SCALE = "_Z5scale3vecIf3abiILi16E3t16EEf"
 
 
@@ -47,6 +55,7 @@ def _added(mangled: str) -> Change:
     )
 
 
+@needs_demangler
 def test_replaced_non_template_is_one_params_change() -> None:
     old = _snap([_fn("scale", OLD_SCALE)])
     new = _snap([_fn("scale", NEW_SCALE)])
@@ -60,6 +69,7 @@ def test_replaced_non_template_is_one_params_change() -> None:
     assert NEW_SCALE in change.description
 
 
+@needs_demangler
 def test_namespaced_member_pair_is_one_params_change() -> None:
     old = _snap([_fn("ns::C::f", "_ZN2ns1C1fEi")])
     new = _snap([_fn("ns::C::f", "_ZN2ns1C1fEl")])
@@ -69,6 +79,7 @@ def test_namespaced_member_pair_is_one_params_change() -> None:
     assert [c.kind for c in changes] == [ChangeKind.FUNC_PARAMS_CHANGED]
 
 
+@needs_demangler
 def test_unrelated_changes_pass_through_in_order() -> None:
     unrelated = make_change(
         ChangeKind.FUNC_ADDED, symbol="_Z7computev", new="c", description="added"
@@ -143,6 +154,7 @@ def test_header_parsed_side_keeps_removal_and_addition(header_side: str) -> None
     assert pair_parameter_replacements([removed, added], old, new) == [removed, added]
 
 
+@needs_demangler
 def test_removal_absent_from_the_snapshot_is_not_paired() -> None:
     # A removal the old snapshot does not hold has no declaration to read a
     # name from, so it stays a removal while a real pair beside it is paired.

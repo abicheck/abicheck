@@ -24,6 +24,8 @@ variables and for mangled C++ functions.
 
 from __future__ import annotations
 
+import shutil
+
 import pytest
 
 from abicheck.checker import compare
@@ -32,7 +34,14 @@ from abicheck.compare.finding_identity import (
     SymbolIdentityIndex,
     resolve_function_identity,
 )
+from abicheck.demangle import demangle
 from abicheck.model import AbiSnapshot, Function, Param, Variable, Visibility
+
+_HAS_DEMANGLER = demangle("_Z1fv") == "f()"
+needs_demangler = pytest.mark.skipif(
+    not _HAS_DEMANGLER and shutil.which("c++filt") is None,
+    reason="the C++ identity case needs cxxfilt or c++filt",
+)
 
 
 def _func(
@@ -176,6 +185,7 @@ class TestFunctionMatchingThroughTheIndex:
         )
         assert ChangeKind.FUNC_REMOVED in _kinds(old, new)
 
+    @needs_demangler
     def test_a_cxx_old_side_does_not_match_a_cxx_peer_by_name(self):
         # A changed mangled name on a C++ function is not an identity match:
         # the old export is genuinely gone, and only an extern-C candidate is
