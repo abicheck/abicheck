@@ -384,6 +384,24 @@ def _matches_cause_namespace(
     return _ns_match(compiled, change.caused_by_type)
 
 
+def _matches_shift_cause(compiled: re.Pattern[str], change: SelectorMatchable) -> bool:
+    """True if *change*'s offset shift is recorded as caused only by grown
+    embedded members, and every grown member's type fullmatches *compiled*.
+
+    Reads ``review_evidence["offset_shift_cause"]``, written by
+    ``compare/embedded_growth_shift.py`` only when the shift is exactly that
+    growth (issue #1759); any other finding never matches.
+    """
+    evidence = getattr(change, "review_evidence", None) or {}
+    cause = evidence.get("offset_shift_cause")
+    if not isinstance(cause, dict) or cause.get("cause") != "embedded_member_growth":
+        return False
+    grown = cause.get("grown_members") or []
+    return bool(grown) and all(
+        compiled.fullmatch(str(m.get("type", ""))) for m in grown
+    )
+
+
 def _matches_type_pattern(
     compiled: re.Pattern[str],
     change_kind_filter: str | None,
@@ -509,6 +527,10 @@ class SelectorSet:
     binding: str | None = None
     finding_id: str | None = None
     expires: date | None = None
+    #: Conjunctive-only: the finding is an offset shift explained solely by
+    #: growth of earlier by-value members whose types all fullmatch this
+    #: regex (see :func:`_matches_shift_cause`).
+    shifted_by_type_pattern: str | None = None
     _compiled_pattern: re.Pattern[str] | None = field(
         default=None, init=False, repr=False
     )
@@ -525,6 +547,9 @@ class SelectorSet:
         default=None, init=False, repr=False
     )
     _compiled_cause_namespace_pattern: _SegmentGlobMatcher | None = field(
+        default=None, init=False, repr=False
+    )
+    _compiled_shift_cause_pattern: re.Pattern[str] | None = field(
         default=None, init=False, repr=False
     )
 
@@ -575,6 +600,9 @@ class SelectorSet:
         )
         self._compiled_cause_namespace_pattern = _compile_namespace_glob(
             self.cause_namespace, "cause_namespace"
+        )
+        self._compiled_shift_cause_pattern = _compile_pattern(
+            self.shifted_by_type_pattern, "shifted_by_type_pattern"
         )
         if self.change_kind is not None and self.change_kind not in _VALID_CHANGE_KINDS:
             valid = ", ".join(sorted(_VALID_CHANGE_KINDS))
@@ -650,6 +678,9 @@ class SelectorSet:
             if not _matches_cause_namespace(
                 self._compiled_cause_namespace_pattern, change
             ):
+                return False
+        if self._compiled_shift_cause_pattern is not None:
+            if not _matches_shift_cause(self._compiled_shift_cause_pattern, change):
                 return False
         if self._compiled_type_pattern is not None:
             return _matches_type_pattern(

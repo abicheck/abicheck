@@ -75,10 +75,6 @@ Each entry's status line says what is still open. A PARTIAL entry's write-up als
 
 **Status (2026-10-23): OPEN, narrowed.** A removed or retargeted typedef is reported by the header tier (`TYPEDEF_REMOVED`, `TYPEDEF_BASE_CHANGED`) and by the L4 replay (`PUBLIC_TYPEDEF_REMOVED`, `PUBLIC_TYPEDEF_TARGET_CHANGED`). `compare.finding_dedup._drop_source_replay_typedef_duplicates` keeps the header-tier finding and drops the replay copy, matched by qualified name (the header entity id rendered through `render_display_name_or_leaf`), one for one, and recorded as `deduplicated`. Two limits remain. (a) The value spellings are not compared, so a pair whose two tiers disagree on the type text (`long int` vs `long`) still pairs; this is deliberate, since a value check would miss every real pair, but it means a replay finding is dropped even when the tiers name different types. (b) A header-tier finding with no entity id pairs by bare symbol, so in C++ a namespaced typedef without an entity id keeps its replay twin visible (conservative).
 
-#### `append_only_dispatch_tables` does not forgive offset shifts inside a dispatch-table aggregate (2026-10-23)
-
-**Status (2026-10-23): OPEN.** Level Zero's `_ze_dditable_t`/`_zes_dditable_t` embed each sub-table by value, so when a sub-table grows by a tail append every later sub-table moves; on a real Level Zero pair that is 41 `type_field_offset_changed` findings, still `BREAKING` under the profile. A `type_pattern` rule cannot express "shifted only because an earlier embedded matching table grew append-only" without also hiding a genuine reorder, so the fix needs a cause-aware check (every member before the shifted one is unchanged or is itself an append-only-grown matching table), not a wider selector.
-
 ### Clang projection (ADR-063 Phase 4 prerequisites)
 
 The entries below come from the Phase 4 measurement spike
