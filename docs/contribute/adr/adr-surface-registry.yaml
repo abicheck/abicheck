@@ -717,3 +717,10 @@ adrs:
     use_cases: [UC-ARCH-static-lib]
     surfaces:
       - cli: compare --no-baseline
+
+  - id: ADR-087
+    file: 087-report-pages-publication.md
+    disposition: gap
+    use_cases: []
+    surfaces: []
+    missing: Proposed, not yet implemented; no publish-report reusable workflow, site generator, or page-link Action input exists yet.
