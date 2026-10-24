@@ -10,6 +10,7 @@ Oracles are hand-computed from the source declarations: ``float x8`` is
 from __future__ import annotations
 
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -45,6 +46,24 @@ def test_unresolved_element_keeps_legacy_fallbacks() -> None:
 
 
 # ── DWARF snapshot + comparison (integration: needs gcc) ─────────────────────
+
+
+def _can_compile_elf() -> bool:
+    """Whether ``gcc`` produces ELF here, as the DWARF parser requires.
+
+    On macOS ``gcc`` is a Clang symlink that emits Mach-O, which the ELF
+    parser rejects ("Magic number does not match"), so these tests run on
+    Linux only -- the same rule ``test_dwarf_entity_id.py`` applies.
+    """
+    if sys.platform != "linux":
+        return False
+    try:
+        result = subprocess.run(
+            [_GCC, "--version"], capture_output=True, text=True, timeout=10
+        )
+    except (FileNotFoundError, OSError):
+        return False
+    return result.returncode == 0
 
 
 def _build(side_dir: Path, name: str, src: str) -> AbiSnapshot:
@@ -87,6 +106,7 @@ def _field_type(snap: AbiSnapshot, struct: str, field: str) -> str:
 
 
 @pytest.mark.integration
+@pytest.mark.skipif(not _can_compile_elf(), reason="needs GCC producing ELF (Linux)")
 class TestDwarfVectorTypes:
     def test_vector_fields_spelled_with_element_and_bytes(self, tmp_path: Path) -> None:
         snap = _build(
