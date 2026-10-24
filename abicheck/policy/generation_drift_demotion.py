@@ -194,6 +194,15 @@ def _generations_differ(generations: tuple[int, int]) -> bool:
     return generations[0] != generations[1]
 
 
+_GENERATIONS_DIFFER = StructuralFact(
+    "policy.generation_drift_demotion.generations_differ", _generations_differ
+)
+
+
+def _extent_pair_drifts(pair: tuple[str, str], *, shift: int) -> bool:
+    return is_extent_shift_drift(pair[0], pair[1], shift)
+
+
 #: The spelling check is a lowering-only name heuristic: the operands'
 #: differing extractor generations are the structural fact that confirms it.
 GENERATION_SPELLING_DRIFT = register_name_heuristic(
@@ -207,12 +216,29 @@ GENERATION_SPELLING_DRIFT = register_name_heuristic(
         "generations is extractor drift, not a type change"
     ),
     matcher=_spelling_pair_drifts,
-    confirmed_by=StructuralFact(
-        "policy.generation_drift_demotion.generations_differ", _generations_differ
-    ),
+    confirmed_by=_GENERATIONS_DIFFER,
     helpers=(is_spelling_only_drift, _declared_names),
     vocabularies=("_BUILTINS",),
     patterns=(_IDENT, _TOKEN),
+)
+
+
+#: The declared array-extent respelling, lowering-only the same way.
+GENERATION_EXTENT_SHIFT_DRIFT = register_name_heuristic(
+    "generation_extent_shift_drift",
+    owner=__name__,
+    effect=NameHeuristicEffect.LOWER_CONFIDENCE,
+    lowers_from=tuple(sorted(k.name for k in _SPELLING_KINDS)),
+    description=(
+        "a type spelling whose only difference is every differing array "
+        "extent grown by the shift a SPELLING_MIGRATIONS row declared, "
+        "between operands of different extractor generations, is extractor "
+        "drift, not a type change"
+    ),
+    matcher=_extent_pair_drifts,
+    confirmed_by=_GENERATIONS_DIFFER,
+    helpers=(is_extent_shift_drift,),
+    patterns=(_EXTENT_TOKEN,),
 )
 
 
@@ -242,16 +268,16 @@ def demote_generation_spelling_drift(
             continue
         if declared is None:
             declared = _declared_names(old)
-        if is_extent_shift_drift(change.old_value, change.new_value, extent_shift):
+        pair = (change.old_value, change.new_value)
+        generations = (old_generation, new_generation)
+        if GENERATION_EXTENT_SHIFT_DRIFT.confirmed(
+            pair, generations, shift=extent_shift
+        ):
             cause = (
                 f"a SPELLING_MIGRATIONS row declares array extents grown by "
                 f"{extent_shift}, which no load-time rewrite can apply soundly"
             )
-        elif GENERATION_SPELLING_DRIFT.confirmed(
-            (change.old_value, change.new_value),
-            (old_generation, new_generation),
-            declared=declared,
-        ):
+        elif GENERATION_SPELLING_DRIFT.confirmed(pair, generations, declared=declared):
             cause = "no SPELLING_MIGRATIONS rule covers this spelling"
         else:
             continue
