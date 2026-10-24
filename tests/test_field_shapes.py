@@ -21,6 +21,7 @@ import json
 import re
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -111,6 +112,11 @@ def _build_and_dump(shape: str, side: str, truth: dict, tmp: Path) -> Path:
         str(src / "api.cpp"),
         "-o",
         str(lib),
+        # Same install name on both sides (as ELF builds carry no -soname at
+        # all): Mach-O otherwise records each side's own output path in
+        # LC_ID_DYLIB, a soname_changed that is a build artefact, not the API
+        # change the shape encodes.
+        *(["-Wl,-install_name,@rpath/libapi.so"] if sys.platform == "darwin" else []),
     ]
     proc = subprocess.run(cmd, capture_output=True, text=True)
     assert proc.returncode == 0, (cmd, proc.stderr)

@@ -192,10 +192,39 @@ def test_frozen_dump_compares_clean_against_newest_frozen(generation: int) -> No
 # ── against a fresh dump (integration: g++ + castxml) ────────────────────────
 
 
+def _tool_banner(tool: str) -> str:
+    """First line of ``tool --version`` (castxml prints it on stderr)."""
+    proc = subprocess.run([tool, "--version"], capture_output=True, text=True)
+    lines = (proc.stdout + proc.stderr).strip().splitlines()
+    return lines[0].strip() if lines else ""
+
+
+def _toolchain_mismatch() -> str:
+    """Why this host cannot reproduce the frozen generations' compile profile.
+
+    The invariant is extractor-generation drift; a different compiler or
+    castxml changes the snapshot's compile profile (``compiler_version``,
+    ``language_standard``) and ``compare`` rightly refuses that as a profile
+    mismatch. So the fresh-dump checks run only on the manifest's toolchain
+    (CI: the ubuntu-24.04 integration leg) and say what differs elsewhere.
+    """
+    host = {"compiler": _tool_banner("g++"), "castxml": _tool_banner("castxml")}
+    entries = [MANIFEST["entries"][str(g)] for g in FROZEN]
+    diffs = []
+    for key, value in host.items():
+        frozen = sorted({e[key] for e in entries})
+        if frozen != [value]:
+            diffs.append(f"{key} {value!r} vs frozen {frozen}")
+    return "; ".join(diffs)
+
+
 @pytest.fixture(scope="module")
 def fresh_dump(tmp_path_factory: pytest.TempPathFactory) -> Path:
     if shutil.which("g++") is None or shutil.which("castxml") is None:
         pytest.skip("needs g++ and castxml")
+    mismatch = _toolchain_mismatch()
+    if mismatch:
+        pytest.skip(f"host toolchain differs from the frozen corpus: {mismatch}")
     work = tmp_path_factory.mktemp("generation_corpus")
     lib = work / "libcorpus.so"
     cmd = [

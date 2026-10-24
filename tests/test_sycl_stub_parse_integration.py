@@ -22,6 +22,7 @@ import json
 import re
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -36,6 +37,9 @@ pytestmark = [
         not (shutil.which("castxml") and shutil.which("g++") and shutil.which("nm")),
         reason="needs castxml, g++ and nm",
     ),
+    # The oracle is the ELF dynamic symbol table (``nm -D``); Mach-O and PE
+    # have no such table, as in the sibling census integration test.
+    pytest.mark.skipif(sys.platform != "linux", reason="ELF-only fixture (nm -D)"),
 ]
 
 SHAPE = Path(__file__).parent / "field_shapes" / "ifdef_sycl_overload"

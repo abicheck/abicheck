@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -109,6 +110,13 @@ def _build_g(side: str, out: Path) -> Path:
 
 @pytest.mark.integration
 @pytest.mark.skipif(shutil.which("g++") is None, reason="needs g++")
+@pytest.mark.skipif(
+    sys.platform != "linux",
+    # The headerless DWARF-only snapshot (ADR-003 fallback) is built on the
+    # ELF dump path; Mach-O keeps DWARF in a .dSYM/object files and PE in a
+    # PDB, and neither path builds records from it without headers.
+    reason="ELF-only fixture: headerless DWARF-only records need an ELF .so",
+)
 def test_compiled_dwarf_same_short_name_in_many_scopes(tmp_path: Path) -> None:
     from abicheck.checker import compare
     from abicheck.dumper import dump
