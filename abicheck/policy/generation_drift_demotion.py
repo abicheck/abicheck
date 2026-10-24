@@ -43,6 +43,11 @@ from collections.abc import Iterable
 from ..model.change import Change
 from ..model.change_catalog.kinds import ChangeKind
 from ..model.change_catalog.registry import Verdict
+from ..model.name_heuristics import (
+    NameHeuristicEffect,
+    StructuralFact,
+    register_name_heuristic,
+)
 from ..model.snapshot import AbiSnapshot
 
 __all__ = [
@@ -149,6 +154,36 @@ def is_spelling_only_drift(old: str, new: str, old_declared: Iterable[str]) -> b
     return True
 
 
+def _spelling_pair_drifts(pair: tuple[str, str], *, declared: Iterable[str]) -> bool:
+    return is_spelling_only_drift(pair[0], pair[1], declared)
+
+
+def _generations_differ(generations: tuple[int, int]) -> bool:
+    return generations[0] != generations[1]
+
+
+#: The spelling check is a lowering-only name heuristic: the operands'
+#: differing extractor generations are the structural fact that confirms it.
+GENERATION_SPELLING_DRIFT = register_name_heuristic(
+    "generation_spelling_drift",
+    owner=__name__,
+    effect=NameHeuristicEffect.LOWER_CONFIDENCE,
+    lowers_from=tuple(sorted(k.name for k in _SPELLING_KINDS)),
+    description=(
+        "a type spelling that differs only by renaming non-builtin, "
+        "undeclared identifiers between operands of different extractor "
+        "generations is extractor drift, not a type change"
+    ),
+    matcher=_spelling_pair_drifts,
+    confirmed_by=StructuralFact(
+        "policy.generation_drift_demotion.generations_differ", _generations_differ
+    ),
+    helpers=(is_spelling_only_drift, _declared_names),
+    vocabularies=("_BUILTINS",),
+    patterns=(_IDENT, _TOKEN),
+)
+
+
 def demote_generation_spelling_drift(
     changes: list[Change],
     old: AbiSnapshot,
@@ -172,7 +207,11 @@ def demote_generation_spelling_drift(
             continue
         if declared is None:
             declared = _declared_names(old)
-        if not is_spelling_only_drift(change.old_value, change.new_value, declared):
+        if not GENERATION_SPELLING_DRIFT.confirmed(
+            (change.old_value, change.new_value),
+            (old_generation, new_generation),
+            declared=declared,
+        ):
             continue
         change.effective_verdict = Verdict.COMPATIBLE_WITH_RISK
         change.modulation_rule = GENERATION_DRIFT_RULE

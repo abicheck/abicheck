@@ -449,14 +449,6 @@ def unavailable_required_facts(
     return None
 
 
-def unavailable_required_input(name: str, *snapshots: object) -> str | None:
-    """``"<fact> not available at depth <d>"`` for
-    :func:`unavailable_required_facts`, else ``None``. No leading
-    ``disabled:``: the coverage-warning formatter adds that itself."""
-    found = unavailable_required_facts(name, *snapshots)
-    return None if found is None else depth_gap_reason(*found)
-
-
 def depth_gap_reason(depth: str, missing: tuple[str, ...]) -> str:
     """The one spelling of a depth-projection ``coverage_gap``."""
     return f"{', '.join(missing)} not available at depth {depth}"

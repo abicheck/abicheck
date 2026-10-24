@@ -178,3 +178,40 @@ def test_require_same_generation_refuses_directory_operands(tmp_path: Path) -> N
     )
     assert result.exit_code == 64, result.output
     assert re.search(r"not supported for\s+directory/package", result.output)
+
+
+@pytest.mark.parametrize(
+    ("old_generation", "refused"),
+    [(None, True), (5, True), (EXTRACTOR_GENERATION, False)],
+)
+def test_typed_api_require_same_generation_matches_the_cli(
+    tmp_path: Path, old_generation: int | None, refused: bool
+) -> None:
+    """``CompareRequest.require_same_generation`` is the flag's typed-API
+    spelling: it refuses exactly the pairs the CLI refuses."""
+    from abicheck.errors import ValidationError
+    from abicheck.service import CompareRequest, InputSpec, run_compare_request
+
+    old = _write(tmp_path / "old.json", _snapshot("int"), old_generation)
+    new = _write(tmp_path / "new.json", _snapshot("int"), EXTRACTOR_GENERATION)
+    request = CompareRequest(
+        old=InputSpec(path=old), new=InputSpec(path=new), require_same_generation=True
+    )
+    if refused:
+        with pytest.raises(ValidationError, match="re-dump baseline"):
+            run_compare_request(request)
+    else:
+        assert run_compare_request(request).diff is not None
+
+
+def test_require_same_generation_is_rejected_with_no_baseline(tmp_path: Path) -> None:
+    """With --no-baseline there is no second operand: the flag is a usage
+    error, never silently dropped."""
+    new = _write(tmp_path / "new.json", _snapshot("int"), EXTRACTOR_GENERATION)
+    result = CliRunner().invoke(
+        main, ["compare", "--no-baseline", str(new), "--require-same-generation"]
+    )
+    assert result.exit_code == 64, result.output
+    assert "--require-same-generation is not available with --no-baseline" in (
+        " ".join(result.output.split())
+    )

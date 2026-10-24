@@ -50,6 +50,11 @@ def operand_extractor_generations(
 def demote_cross_generation_drift(
     changes: list[Change], old: AbiSnapshot, new: AbiSnapshot
 ) -> list[Change]:
+    # Identical stamps (the common case: two live dumps, both ``None``) are
+    # one extractor generation by construction -- skip resolving them, which
+    # ran once per compared pair (per package member) for a known no-op.
+    if old.fact_generations == new.fact_generations:
+        return changes
     old_generation, new_generation = operand_extractor_generations(old, new)
     return demote_generation_spelling_drift(
         changes, old, new, old_generation, new_generation

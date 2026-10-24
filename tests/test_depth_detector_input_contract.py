@@ -45,7 +45,7 @@ from abicheck.buildsource.source_graph import GraphNode, SourceGraphSummary
 from abicheck.compare.detector_inputs import (
     DETECTOR_INPUTS,
     RULE_INPUTS,
-    unavailable_required_input,
+    unavailable_required_facts,
 )
 from abicheck.detector_registry import registry
 from abicheck.evidence_depth import DEPTH_RANK
@@ -210,5 +210,5 @@ def test_registry_disables_a_detector_whose_required_input_was_cleared(
 def test_unprojected_snapshot_disables_nothing() -> None:
     snap = _full_snapshot("1", pack=True)
     assert all(
-        unavailable_required_input(name, snap, snap) is None for name in DETECTOR_INPUTS
+        unavailable_required_facts(name, snap, snap) is None for name in DETECTOR_INPUTS
     )

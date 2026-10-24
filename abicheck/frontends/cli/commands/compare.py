@@ -422,9 +422,6 @@ def _compare_cmd(ctx: click.Context, /, **kwargs: Any) -> None:
     from ..project_config import enter_performance_profile
 
     enter_performance_profile(ctx, kwargs.pop("performance_profile", None))
-    from .compare_generation import enter_require_same_generation
-
-    enter_require_same_generation(ctx, kwargs)
 
     # Plan slice 7m: one repeatable ``-o FORMAT=DESTINATION`` request reaches
     # this callback as a single ``ExportSet``; expand it into the
@@ -492,6 +489,12 @@ def _compare_cmd(ctx: click.Context, /, **kwargs: Any) -> None:
 
     if maybe_dispatch_no_baseline_compare(ctx, kwargs):
         return
+
+    # After the --no-baseline dispatch, which rejects the flag (no second
+    # operand to share or differ in extractor generation with).
+    from .compare_generation import enter_require_same_generation
+
+    enter_require_same_generation(ctx, kwargs)
 
     # CLI cleanup phase two, PR I: OLD_INPUT/NEW_INPUT are classified
     # automatically for bundle-facts routing, replacing the removed
