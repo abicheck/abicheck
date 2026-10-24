@@ -675,7 +675,7 @@
         },
         "rules": {
           "type": "array",
-          "description": "Schema 6.3 (ADR-067 P1): one row per configured suppression rule, zero-count rules included. `matched_count` is the findings the rule disposed of (first-match credit); `shadowed_count` the findings it also matched but an earlier rule claimed; `status` is one of active, shadowed_only, not_evaluated, unused, expired. `rule_id` is the rule's `id:` when set, else its canonical identity; `label` and `reason` are their own fields. `entry_index` is the rule's zero-based position in its file.",
+          "description": "Schema 6.3 (ADR-067 P1): one row per configured suppression rule, zero-count rules included. `matched_count` is the findings the rule disposed of (first-match credit); `shadowed_count` the findings it also matched but an earlier rule claimed; `status` is one of active, shadowed_only, not_evaluated, unused, expired. `rule_id` is the rule's `id:` when set, else `rule-` plus 12 hex digits of the SHA-256 of its canonical identity; schema 6.6 adds `rule_identity` (that canonical JSON identity) next to `rule_id`, on an id-less rule's row only. `label` and `reason` are their own fields. `entry_index` is the rule's zero-based position in its file.",
           "items": {
             "type": "object",
             "additionalProperties": true
@@ -944,7 +944,11 @@
                       "string",
                       "null"
                     ],
-                    "description": "Canonical selector identity of the matched rule."
+                    "description": "The matched rule's `id:` when set, else `rule-` plus 12 hex digits of the SHA-256 of its canonical identity."
+                  },
+                  "rule_identity": {
+                    "type": "string",
+                    "description": "Schema 6.6: the canonical JSON identity behind an id-less rule's `rule_id`; absent when the rule has a user `id:`."
                   },
                   "source_file": {
                     "type": [
@@ -1025,7 +1029,14 @@
           "items": {
             "type": "string"
           },
-          "description": "Identifier (label, reason, or a matching selector like \"symbol=foo\") of each rule that matched zero changes this run."
+          "description": "Readable identifier of each rule that matched zero changes this run: the rule's `id:` when set, else its canonical JSON identity (the `rule_identity` of its `disposition_audit.rules` row). A result without a registered suppression inventory falls back to label, reason, or a matching selector like \"symbol=foo\"."
+        },
+        "stale_rule_ids": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Schema 6.6: the `rule_id` of each `stale_rules` entry, in the same order (a parallel list), so a reader joins a stale entry to its `disposition_audit.rules` row by `rule_id`."
         },
         "high_risk_matches": {
           "type": "array",

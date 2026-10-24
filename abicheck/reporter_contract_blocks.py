@@ -375,24 +375,21 @@ def add_suppression_audit(d: dict[str, Any], result: DiffResult) -> None:
     matched_elsewhere = {i for i, count in audit.match_counts.items() if count > 0}
     # ``rule_id`` of an id-less rule is an opaque ``rule-<sha256>`` token
     # (ADR-067 D3); the stale list is read by a reviewer, so it renders such a
-    # rule by its readable canonical identity (its selectors and gates), and a
-    # rule with a user ``id:`` by that id.
-    from .policy.rule_identity import rule_id_of, rule_identity
+    # rule by its readable canonical identity (the same ``rule_identity`` its
+    # disposition-audit row carries), and a rule with a user ``id:`` by that
+    # id. ``stale_rule_ids`` is the parallel list of ``rule_id``s, so a reader
+    # joins a stale entry to its ``disposition_audit.rules`` row by id.
+    from .policy.rule_identity import rule_id_of
 
-    readable: dict[str, str] = {}
-    for suppression in ledger.suppression_inventories:
-        for rule in getattr(suppression, "rules", ()) or ():
-            identity = rule_identity(rule)
-            rid = rule_id_of(rule)
-            if identity is not None and rid != getattr(rule, "id", None):
-                readable.setdefault(rid, identity)
-    stale = [
-        readable.get(row.rule_id, row.rule_id)
+    stale_rows = [
+        row
         for row in configured_rule_rows(result, ledger=ledger)
         if row.kind == KIND_SUPPRESSION
         and row.status in (STATUS_UNUSED, STATUS_NOT_EVALUATED, STATUS_SHADOWED_ONLY)
         and row.entry_index not in matched_elsewhere
     ]
+    stale = [row.rule_identity or row.rule_id for row in stale_rows]
+    stale_ids = [row.rule_id for row in stale_rows]
     if not ledger.suppression_inventories:
         # A result no suppression pass registered (hand-built, or a caller that
         # never ran one) has no inventory to project. Its attached audit is the
@@ -400,9 +397,11 @@ def add_suppression_audit(d: dict[str, Any], result: DiffResult) -> None:
         stale = [
             suppression_rule_label(rule, i) for i, rule in enumerate(audit.stale_rules)
         ]
+        stale_ids = [rule_id_of(rule) for rule in audit.stale_rules]
     d["suppression_audit"] = {
         "total_rules": audit.total_rules,
         "stale_rules": stale,
+        "stale_rule_ids": stale_ids,
         "high_risk_matches": [
             {
                 "rule": suppression_rule_label(rule, i),
