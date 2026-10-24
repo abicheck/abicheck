@@ -16,8 +16,7 @@
 """CLI cleanup phase two, "PR B" effective-config parity, first slice.
 
 Split out of ``test_effective_config_digest.py`` rather than appended to it
-(ADR-061 no-growth debt ledger: that file, like ``cli_compare_release.py``/
-``cli_compare_release_helpers.py``, is a ``debt.yaml``-tracked legacy module
+(ADR-061 no-growth debt ledger: that file is a ``debt.yaml``-tracked legacy module
 already sitting at its adoption baseline, so a new behavior axis gets its own
 focused module instead of growing it) -- see ``abicheck.cli_compare_receipt.
 record_release_resolved_config``'s own docstring for what this covers and

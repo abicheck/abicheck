@@ -20,12 +20,10 @@ raw severity/exit-code-scheme inputs, and resolving the result into one
 :class:`GateOptions` object -- this package's job (deciding gate/severity
 effect), per ``abicheck/policy/AGENTS.md``.
 
-Split out of :mod:`abicheck.cli_compare_release_helpers` (CLI cleanup phase
+Split out of the retired ``cli_compare_release_helpers`` module (CLI cleanup phase
 two, ADR-064 stage 1b) both to give this gating logic its ADR-061-owned
 package and to keep that flat, unclassified module under the AI-readiness
-file-size no-growth baseline (``architecture/debt.yaml``). Re-exported from
-``cli_compare_release_helpers`` (and, from there, ``cli_compare_release``)
-to preserve the pre-existing public import surface.
+file-size no-growth baseline (``architecture/debt.yaml``). Its former re-exports from the retired module were dropped with it; import these names from here.
 
 Depends on ``PackApplication`` (``abicheck/pack_application.py``) only
 *structurally*, via :class:`_GatePackApplication` below, not by importing
@@ -195,8 +193,7 @@ class GateOptions:
     directory/package release run carries were threaded independently
     through three functions -- :func:`_resolve_release_severity_config`,
     ``_compute_release_severity_exit_code``,
-    ``_fold_release_global_severity`` (both in
-    :mod:`abicheck.cli_compare_release_helpers`) -- each re-deriving the
+    ``_fold_release_global_severity`` (the last two now in ``workflows.release_exit_fold``) -- each re-deriving the
     identical :class:`SeverityConfig` from the same strings. They could not
     actually *disagree* (``compare_release_cmd`` reassigns the six raw
     values exactly once, early, before any of the three ever read them),

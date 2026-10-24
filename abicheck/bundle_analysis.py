@@ -26,8 +26,7 @@ signature-evidence gate — a sibling's undefined import resolving by name to
 a new export whose type evidence can't confirm or deny the signature
 actually agrees).
 
-The live ``compare --release`` CLI path (``cli_compare_release_helpers.
-run_bundle_analysis``) called both, in order, folding the second into the
+The live ``compare --release`` CLI path (``workflows.release_bundle.run_bundle_analysis``) called both, in order, folding the second into the
 first's own ``bundle_findings`` list. The stored-baseline path
 (:func:`abicheck.model.bundle_facts.compare_bundle_from_facts`) called only the
 first — a stored side had no full ``AbiSnapshot`` map (a
