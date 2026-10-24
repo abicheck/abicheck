@@ -185,3 +185,47 @@ def test_resaved_migrated_baseline_is_not_shifted_again(
     assert any("castxml array spelling" in n for n in snap.load_notices) is (
         fresh != old
     )
+
+
+def test_malformed_entries_pass_through_unchanged() -> None:
+    """A hand-edited or partial document: non-mapping entries, missing lists,
+    non-string spellings and a non-mapping typedef table are kept verbatim;
+    only the well-formed spellings are respelled and counted."""
+    from abicheck.storage.castxml_array_migration import migrate_castxml_array_counts
+
+    document = {
+        "ast_producer": "castxml",
+        "functions": [
+            "junk",
+            {"name": "f", "return_type": 3},
+            {"name": "g", "params": None},
+        ],
+        "variables": [None, {"name": "v", "type": "int[3]"}],
+        "types": [
+            "junk",
+            {"name": "R"},
+            {"name": "S", "fields": [{"name": "x", "type": None}]},
+        ],
+        "typedefs": {"a_t": 7, "b_t": "char[0]"},
+        "typedefs_qualified": ["not", "a", "mapping"],
+    }
+    migrated, notices = migrate_castxml_array_counts(document, 14)
+
+    assert migrated["functions"] is document["functions"]
+    assert migrated["types"] is document["types"]
+    assert migrated["variables"] == [None, {"name": "v", "type": "int[4]"}]
+    assert migrated["typedefs"] == {"a_t": 7, "b_t": "char[1]"}
+    assert migrated["typedefs_qualified"] == ["not", "a", "mapping"]
+    assert document["variables"][1]["type"] == "int[3]"  # never mutated in place
+    assert len(notices) == 1
+
+
+def test_nothing_to_migrate_returns_the_same_document() -> None:
+    from abicheck.storage.castxml_array_migration import migrate_castxml_array_counts
+
+    document = {
+        "ast_producer": "castxml",
+        "functions": [{"name": "f", "return_type": "int"}],
+    }
+    assert migrate_castxml_array_counts(document, 14) == (document, [])
+    assert migrate_castxml_array_counts(document, 14)[0] is document
