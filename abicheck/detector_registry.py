@@ -52,7 +52,7 @@ from collections.abc import Callable
 from typing import TYPE_CHECKING
 
 from .compare.declined_comparisons import declined_scope
-from .compare.detector_inputs import unavailable_required_input
+from .compare.detector_inputs import depth_gap_reason, unavailable_required_facts
 from .detectors import DetectorResult
 
 if TYPE_CHECKING:
@@ -363,15 +363,16 @@ class DetectorRegistry:
             # (`compare/detector_inputs.py`): not evaluated, never run on the
             # emptied input (bug class depth_projection_drops_lower_layer_
             # detector_input).
-            depth_gap = unavailable_required_input(entry.name, old, new)
+            depth_gap = unavailable_required_facts(entry.name, old, new)
             if depth_gap is not None:
                 detector_results.append(
                     DetectorResult(
                         name=entry.name,
                         changes_count=0,
                         enabled=False,
-                        coverage_gap=depth_gap,
+                        coverage_gap=depth_gap_reason(*depth_gap),
                         not_evaluated=True,
+                        excluded_by_depth=depth_gap[0],
                     )
                 )
                 continue
