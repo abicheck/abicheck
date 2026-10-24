@@ -8,7 +8,7 @@ Which public surface reaches each ADR, which use cases it serves, and whether a 
 |---|---|
 | surfaced | 47 |
 | partial | 14 |
-| gap | 7 |
+| gap | 8 |
 | internal | 20 |
 
 ## ADRs
@@ -103,6 +103,7 @@ Which public surface reaches each ADR, which use cases it serves, and whether a 
 | [ADR-080](../adr/080-persisting-the-advanced-dwarf-extraction-status.md) | gap | — | — | Proposed, not yet implemented; the advanced-DWARF extraction status is in memory only and is not persisted. |
 | [ADR-082](../adr/082-declared-header-order-independent-extraction.md) | internal | — | — | Dump-time proof of declared-header order and the stored header_canonical contract field; users reach it only through dump/compare, and the change is a schema v59 contract field, not a flag, report field or exit code. |
 | [ADR-086](../adr/086-static-archive-no-baseline-export-audit.md) | surfaced | UC-ARCH-static-lib | `cli: compare --no-baseline` | — |
+| [ADR-087](../adr/087-report-pages-publication.md) | gap | — | — | Proposed, not yet implemented; no publish-report reusable workflow, site generator, or page-link Action input exists yet. |
 
 ## Use cases by user task
 
