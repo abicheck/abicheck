@@ -532,6 +532,7 @@ adrs:
     use_cases: [UC-WF-baseline]
     surfaces:
       - api: abicheck.storage
+      - cli: compare --require-same-generation
     missing: Proposed; only Phase 0 primitives and the default single-artifact format are wired.
 
   - id: ADR-063

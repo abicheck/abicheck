@@ -21,7 +21,7 @@
 every registered detector, each depth-projectable fact the detector reads is
 either kept by that rung, explicitly tolerated (with a reason), or required
 -- and a required fact the rung cleared makes the detector report
-``"disabled: <fact> not available at depth <d>"`` instead of running on the
+``"<fact> not available at depth <d>"`` instead of running on the
 emptied input.
 
 Three independent oracles keep the two declarations honest:
@@ -45,7 +45,7 @@ from abicheck.buildsource.source_graph import GraphNode, SourceGraphSummary
 from abicheck.compare.detector_inputs import (
     DETECTOR_INPUTS,
     RULE_INPUTS,
-    unavailable_required_input,
+    unavailable_required_facts,
 )
 from abicheck.detector_registry import registry
 from abicheck.evidence_depth import DEPTH_RANK
@@ -197,11 +197,12 @@ def test_registry_disables_a_detector_whose_required_input_was_cleared(
         missing = sorted(requires & gone)
         if missing:
             assert result.not_evaluated and not result.enabled, result
+            assert result.excluded_by_depth == depth
             assert result.coverage_gap == (
-                f"disabled: {', '.join(missing)} not available at depth {depth}"
+                f"{', '.join(missing)} not available at depth {depth}"
             )
         else:
-            assert not (result.coverage_gap or "").startswith("disabled: ")
+            assert result.excluded_by_depth is None
     if depth == "binary":
         assert any(r.coverage_gap and "python_api" in r.coverage_gap for r in results)
 
@@ -209,5 +210,5 @@ def test_registry_disables_a_detector_whose_required_input_was_cleared(
 def test_unprojected_snapshot_disables_nothing() -> None:
     snap = _full_snapshot("1", pack=True)
     assert all(
-        unavailable_required_input(name, snap, snap) is None for name in DETECTOR_INPUTS
+        unavailable_required_facts(name, snap, snap) is None for name in DETECTOR_INPUTS
     )
