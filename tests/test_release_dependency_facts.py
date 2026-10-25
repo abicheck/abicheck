@@ -252,6 +252,19 @@ def test_elf_names_stay_exact_and_are_not_case_folded() -> None:
     assert _edges(doc) == {("libA.so", "liba.so", "old")}
 
 
+def test_scope_entries_that_are_not_mappings_are_ignored() -> None:
+    # A malformed comparison_scope entry is skipped, not read as a member; a
+    # well-formed unchecked member beside it is still a not_evaluated node.
+    doc = _doc(_member("libA.so", {}))
+    doc["comparison_scope"] = {
+        "members": ["junk", None, {"name": "libB.so", "state": "unselected"}]
+    }
+    graph = compute_release_dependency_graph(doc)
+    nodes = {n.name: n for n in graph.nodes}
+    assert set(nodes) == {"libA.so", "libB.so"}
+    assert nodes["libB.so"].deps == DEPS_NOT_EVALUATED
+
+
 def test_member_without_facts_is_a_not_evaluated_node_with_no_edges() -> None:
     doc = _doc(
         _member(

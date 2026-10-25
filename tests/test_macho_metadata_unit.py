@@ -712,6 +712,13 @@ class TestParseMachoMetadata:
         assert meta.weak_dependent_libs == ["@rpath/libplugin.dylib"]
         assert meta.dependent_libs == ["/usr/lib/libSystem.B.dylib"]
 
+    def test_parse_weak_dylib_with_empty_name_is_not_recorded(self, tmp_path):
+        data = _build_macho_64_le(weak_dependent_libs=["", "@rpath/libplugin.dylib"])
+        f = tmp_path / "libtest.dylib"
+        f.write_bytes(data)
+        meta = parse_macho_metadata(f)
+        assert meta.weak_dependent_libs == ["@rpath/libplugin.dylib"]
+
     def test_parse_without_weak_commands_records_verified_none(self, tmp_path):
         f = tmp_path / "libtest.dylib"
         f.write_bytes(_build_macho_64_le())
