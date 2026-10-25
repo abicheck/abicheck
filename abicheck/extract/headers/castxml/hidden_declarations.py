@@ -55,7 +55,7 @@ def read_hidden_declarations(root: Element) -> dict[str, tuple[str, ...]] | None
 def parser_preprocessor_hidden(parser: Any) -> dict[str, tuple[str, ...]] | None:
     """The scan a castxml parser's document carried, or ``None`` (no scan:
     any non-castxml backend, or a castxml run whose preprocess step failed)."""
-    value = getattr(getattr(parser, "_ctx", None), "preprocessor_hidden", None)
+    value = getattr(parser, "_preprocessor_hidden", None)
     return dict(value) if isinstance(value, dict) else None
 
 
