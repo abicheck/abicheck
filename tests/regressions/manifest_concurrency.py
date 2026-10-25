@@ -260,7 +260,7 @@ CONCURRENCY_BUG_CLASSES: tuple[BugClass, ...] = (
         # the same key and walked the marker. The forwarded exception had
         # neither the child's nor the producer's frames, so the seed test
         # also pins both tracebacks surviving.
-        fixed_by=(1810,),
+        fixed_by=(1811,),
         seed_tests=(
             "tests/test_ast_acquisition_derived_withheld.py",
             # The F5 harness cell: the real `compare` CLI on a castxml
