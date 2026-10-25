@@ -36,7 +36,7 @@ named sections.
 
 ```json
 {
-  "schema_version": 65,
+  "schema_version": 66,
   "sections": {
     "binary":       {"section_kind": "binary",       "section_schema_version": 1, "payload": {"...": "..."}},
     "declarations": {"section_kind": "declarations", "section_schema_version": 1, "payload": {"...": "..."}},
@@ -124,7 +124,7 @@ abicheck, rather than round-tripped.
 ## Schema version history
 
 `schema_version` is a single integer, not `MAJOR.MINOR`.
-The current value is **`65`**. See
+The current value is **`66`**. See
 `abicheck/storage/snapshot_schema_versions.py`'s `SCHEMA_VERSION` for the
 authoritative, up-to-date value and the full per-version comment.
 
@@ -341,6 +341,8 @@ with `odr_conflicts_observed` false: its lack of conflicts means "not looked
 for", never "none". The debug-type join (`compare/debug_type_join.py`)
 reports a conflicted name as ambiguous rather than trusting the first
 definition.
+
+(v66) `macho.weak_dependent_libs` and `macho.weak_dependent_libs_fact` -- the install names of a Mach-O image's `LC_LOAD_WEAK_DYLIB` loads, kept apart from `macho.dependent_libs` so a weak load never reads as a change to the hard dependency set. Written only on a Mach-O snapshot, so every other snapshot encodes exactly as v65. A pre-v66 snapshot decodes the fact as not collected, and the release dependency graph marks that side's Mach-O facts incomplete rather than reading it as "no weak loads".
 
 (v65) `functions[].explicit_instantiation_fact` and `variables[].explicit_instantiation_fact` -- on a clang snapshot, how the header declared each template instance: `declaration` (`extern template`), `definition` (`template` instantiation), `specialization` (explicit specialization), or `absent` (implicit). Read from the clang text AST pass; castxml never writes it. Written only when clang recorded it; a missing key reads as `NOT_COLLECTED` at v65 and above. A pre-v65 reader hard-rejects a v65 document (see the compatibility table), so it never reads an explicit instance as implicit; the bump keeps that refusal explicit.
 

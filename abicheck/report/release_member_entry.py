@@ -61,7 +61,7 @@ class ReleaseMemberEntryProjection(SilentReleaseReporter):
 
     def project(self, entry: dict[str, object], member: ComparedMember) -> None:
         from ..reporter import disposition_ledger_blocks
-        from .release_dependency_graph import member_dependencies
+        from ..workflows.release_dependency_facts import member_dependency_facts
         from .release_member_summary import add_member_review_summary
 
         compared = member.compared
@@ -74,9 +74,11 @@ class ReleaseMemberEntryProjection(SilentReleaseReporter):
         if result.env_matrix_source_sha256 is not None:
             entry["env_matrix_source_sha256"] = result.env_matrix_source_sha256
         add_member_review_summary(entry, result, self.severity_config)
-        # Release schema 1.9: the recorded DT_SONAME/DT_NEEDED facts, per side.
-        if deps := member_dependencies(compared.old_snapshot, compared.new_snapshot):
-            entry["dependencies"] = deps
+        # Release schema 2.2: the recorded per-side dependency facts, or an
+        # explicit not_evaluated state -- always present, never silently absent.
+        entry["dependencies"] = member_dependency_facts(
+            compared.old_snapshot, compared.new_snapshot
+        )
         # ADR-067's structured half; see `reporter.disposition_ledger_blocks`.
         entry.update(disposition_ledger_blocks(result))
 

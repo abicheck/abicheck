@@ -36,6 +36,7 @@ from macholib.mach_o import (  # type: ignore[import-untyped]
     LC_DYLD_INFO_ONLY,
     LC_ID_DYLIB,
     LC_LOAD_DYLIB,
+    LC_LOAD_WEAK_DYLIB,
     LC_REEXPORT_DYLIB,
     LC_RPATH,
     LC_SEGMENT,
@@ -369,6 +370,9 @@ def _parse_macho_load_commands(header: Any, meta: MachoMetadata) -> None:
     # even when no such command exists ([] = "verified none"), keeping None
     # reserved for legacy snapshots where it was never looked at.
     rpaths: list[str] = []
+    # A successful parse captures the weak-load surface even when there are no
+    # such commands ([] = "verified none"); None stays reserved for legacy.
+    meta.weak_dependent_libs = []
     for lc, cmd, data in header.commands:
         cmd_type = lc.cmd
 
@@ -381,6 +385,11 @@ def _parse_macho_load_commands(header: Any, meta: MachoMetadata) -> None:
             name = _dylib_name_from_cmd(data)
             if name:
                 meta.dependent_libs.append(name)
+
+        elif cmd_type == LC_LOAD_WEAK_DYLIB:
+            name = _dylib_name_from_cmd(data)
+            if name:
+                meta.weak_dependent_libs.append(name)
 
         elif cmd_type == LC_REEXPORT_DYLIB:
             name = _dylib_name_from_cmd(data)
@@ -401,6 +410,7 @@ def _parse_macho_load_commands(header: Any, meta: MachoMetadata) -> None:
     # Plain attribute assignment never re-runs __post_init__ (ADR-063
     # Phase 5 -- see elf_metadata.py's/pe_metadata.py's identical fix).
     sync_present_facts(meta, "rpaths")
+    sync_present_facts(meta, "weak_dependent_libs")
 
 
 def _build_section_segment_map(header: Any) -> dict[int, str]:
