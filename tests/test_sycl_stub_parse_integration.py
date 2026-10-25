@@ -29,7 +29,10 @@ import pytest
 from click.testing import CliRunner
 
 from abicheck.cli import main
-from abicheck.model.undeclared_export_census import UNDECLARED_EXPORT_WARNING_MARKER
+from abicheck.model.undeclared_export_census import (
+    GUARD_WARNING_MARKER,
+    UNDECLARED_EXPORT_WARNING_MARKER,
+)
 
 pytestmark = [
     pytest.mark.integration,
@@ -91,13 +94,20 @@ def _compare(tmp: Path, *extra: str) -> dict:
 
 
 def _census(report: dict) -> dict[str, int]:
-    """``{side: N}`` from the ``(N reference sycl::`` census lines."""
+    """``{side: N}`` from the census lines: the per-guard line a live parse
+    writes (``N exported symbols declared only under #ifdef
+    SYCL_LANGUAGE_VERSION``) or the ``(N reference sycl::`` name-rule line."""
     out = {}
+    guard = f"{GUARD_WARNING_MARKER} SYCL_LANGUAGE_VERSION "
     for w in report["coverage_warnings"]:
-        if UNDECLARED_EXPORT_WARNING_MARKER in w:
+        if guard in w:
+            m = re.search(r"side headers: (\d+) ", w)
+        elif UNDECLARED_EXPORT_WARNING_MARKER in w:
             m = re.search(r"\((\d+) reference sycl::", w)
-            assert m, w
-            out[w.split(" ", 1)[0]] = int(m.group(1))
+        else:
+            continue
+        assert m, w
+        out[w.split(" ", 1)[0]] = int(m.group(1))
     return out
 
 
@@ -121,4 +131,7 @@ def test_without_the_macro_the_census_counts_the_hidden_overloads(
 ) -> None:
     data = _compare(tmp_path)
     assert _census(data) == {"old": len(HIDDEN["v1"]), "new": len(HIDDEN["v2"])}
+    # A live parse attributes them to their guard, not the sycl:: name rule.
+    lines = [w for w in data["coverage_warnings"] if GUARD_WARNING_MARKER in w]
+    assert [w.split(" ", 1)[0] for w in lines] == ["old", "new"]
     assert "func_removed" not in {c["kind"] for c in data["changes"]}

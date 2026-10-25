@@ -55,7 +55,7 @@ from .release_schema import RELEASE_SCHEMA_VERSION
 #: SemVer-style (MAJOR.MINOR) version of the compare-report JSON schema.
 #: The per-version history, with the migration note for each bump, lives in
 #: docs/contribute/report-schema-history.md; add the new entry there in the same PR.
-REPORT_SCHEMA_VERSION = "6.6"
+REPORT_SCHEMA_VERSION = "6.7"
 
 from .artifact_versions import current_artifact_version  # noqa: E402
 

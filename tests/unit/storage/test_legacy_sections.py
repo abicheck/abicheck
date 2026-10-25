@@ -46,6 +46,7 @@ from abicheck.storage.package import SECTION_KINDS
 #: `header_declaration_ids`: the L2 declaration ids a depth projection kept;
 #: `projection_unavailable`: the facts it cleared. `spellings_generation` is
 #: persisted only inside the `fact_generations` stamp, never as its own key.
+#: And `live_preprocessor_hidden`: what *this run's* castxml preprocessing excluded.
 _NEVER_IN_A_DOCUMENT = (
     "semantic_ir",
     "semantic_ir_conflicts",
@@ -56,6 +57,7 @@ _NEVER_IN_A_DOCUMENT = (
     "static_archive",
     "header_declaration_ids",
     "projection_unavailable",
+    "live_preprocessor_hidden",
     "spellings_generation",
     "_func_by_mangled",
     "_var_by_mangled",

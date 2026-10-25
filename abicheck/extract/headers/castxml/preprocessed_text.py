@@ -214,9 +214,16 @@ def resolve_preprocessed_text(
     work_dir: Path,
     run: Callable[..., subprocess.CompletedProcess[str]],
     has_cc: Callable[[str], bool],
+    files_out: dict[str, set[int]] | None = None,
+    defined_out: set[str] | None = None,
 ) -> PreprocessedText | None:
     """Run the ``-E -dD`` sibling of *castxml_cmd* and keep the declaration
-    windows of *root* that matter; ``None`` on any failure."""
+    windows of *root* that matter; ``None`` on any failure.
+
+    *files_out*, when given, receives every file's surviving line numbers
+    (``{file_key: lines}``) and *defined_out* every macro the run defined --
+    the evidence :mod:`abicheck.extract.headers.preprocessor_branches`
+    reads."""
     out_path = work_dir / "preprocessed.txt"
     cmd = preprocess_command(castxml_cmd, out_path)
     if cmd is None:
@@ -230,6 +237,10 @@ def resolve_preprocessed_text(
         log.debug("castxml preprocess run failed: %s", exc)
         return None
     files, defined = parse_preprocessed(text)
+    if files_out is not None:
+        files_out.update({key: set(by_line) for key, by_line in files.items()})
+    if defined_out is not None:
+        defined_out.update(defined)
     return PreprocessedText(
         declaration_windows(root, files, has_cc), target_default_convention(defined)
     )

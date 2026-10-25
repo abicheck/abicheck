@@ -7,7 +7,9 @@ Every directory holds ``v1/`` and ``v2/`` (``api.h`` + ``api.cpp``) and a
 plus the build/parse knobs the shape needs. This one runner compiles both
 sides with g++, dumps them with ``abicheck dump`` (castxml headers), and
 compares the snapshots with ``abicheck compare`` at each depth the truth
-lists -- all through the CLI, in-process, under the
+lists (or, for a ``live_compare`` shape, compares the two libraries with
+``-H`` directly, so runtime-only facts reach the comparison) -- all through
+the CLI, in-process, under the
 ``model_warning_hygiene`` gate, so a misleading model warning is a failure
 too.
 
@@ -46,6 +48,8 @@ _KNOWN_KEYS = frozenset(
         "parse_includes",
         "suppress",
         "old_generation",
+        "live_compare",
+        "platforms",
         "depths",
         "expected",
         "expected_kinds",
@@ -82,6 +86,8 @@ def test_ground_truth_is_well_formed(shape: str) -> None:
     assert truth["description"].strip()
     assert truth["bug_class"].strip()
     assert truth["depths"] and set(truth["depths"]) <= {"headers", "build", "source"}
+    assert not (truth.get("live_compare") and truth.get("old_generation"))
+    assert set(truth.get("platforms", ["linux"])) <= {"linux", "darwin", "win32"}
     for rel in truth.get("related_tests", []):
         assert (Path(__file__).parent.parent / rel).is_file(), rel
     for side in ("v1", "v2"):
@@ -186,14 +192,24 @@ def _build_and_dump(shape: str, side: str, truth: dict, tmp: Path) -> Path:
     ]
     proc = subprocess.run(cmd, capture_output=True, text=True)
     assert proc.returncode == 0, (cmd, proc.stderr)
+    if truth.get("live_compare"):
+        return lib  # `_compare` parses the headers itself
     snap = out / "snap.json"
-    args = ["dump", str(lib), "-H", str(src / "api.h"), "-I", str(src)]
-    for inc in includes:
-        args += ["-I", inc]
-    for d in defines:
-        args += ["-D", d]
-    _cli([*args, "-o", str(snap)])
+    _cli(["dump", str(lib), *_parse_args(shape, side, truth), "-o", str(snap)])
     return snap
+
+
+def _parse_args(shape: str, side: str, truth: dict, label: str = "") -> list[str]:
+    """``-H``/``-I``/``-D`` for one side's header parse; *label* (``old=``/
+    ``new=``) scopes ``-H``/``-I`` to one side of a live compare."""
+    src = CORPUS / shape / side
+    args = ["-H", f"{label}{src / 'api.h'}", "-I", f"{label}{src}"]
+    for inc in truth.get("parse_includes", []):
+        args += ["-I", f"{label}{CORPUS / shape / inc}"]
+    if side == "v1" or not label:  # defines are shared by both sides
+        for d in truth.get("parse_defines", []):
+            args += ["-D", d]
+    return args
 
 
 def _freeze_old_generation(snap: Path) -> None:
@@ -224,6 +240,11 @@ def _compare(
 ) -> dict:
     report = tmp / f"{depth}.json"
     args = ["compare", str(old), str(new), "--depth", depth, "-o", f"json={report}"]
+    if truth.get("live_compare"):
+        # Both libraries parsed in this run: runtime-only facts (the
+        # preprocessor-excluded declaration scan) reach the comparison.
+        args += _parse_args(shape, "v1", truth, "old=")
+        args += _parse_args(shape, "v2", truth, "new=")
     if "suppress" in truth:
         args += ["--suppress", str(CORPUS / shape / truth["suppress"])]
     _cli(args)
@@ -315,6 +336,9 @@ def test_field_shape_matches_ground_truth(shape: str, tmp_path: Path) -> None:
     if not (shutil.which("g++") and shutil.which("castxml")):
         pytest.skip("needs g++ and castxml")
     truth = _truth(shape)
+    platforms = truth.get("platforms")
+    if platforms and not any(sys.platform.startswith(p) for p in platforms):
+        pytest.skip(f"shape runs on {platforms} only")
     old = _build_and_dump(shape, "v1", truth, tmp_path)
     new = _build_and_dump(shape, "v2", truth, tmp_path)
     if truth.get("old_generation"):

@@ -38,7 +38,6 @@ from .compare.debug_layout_view import (
     advanced_dwarf_support,
     debug_layout_view as _debug_layout_view,
 )
-from .compare.edge_query import edge_coverage_report
 from .compare.finding_redundancy import (
     ROOT_TYPE_CHANGE_KINDS as _ROOT_TYPE_CHANGE_KINDS,
 )
@@ -46,7 +45,7 @@ from .compare.surface_reconcile import releases_reconciliation
 from .compare.type_layout_diff import (
     diff_struct_layouts,  # noqa: F401 — tests import it from here
 )
-from .confidence import _compute_confidence
+from .confidence import attach_coverage_reports, compute_confidence_and_census
 from .contract_pipeline import (
     ContractEvaluationStage,
     build_contract_stage,
@@ -1155,10 +1154,8 @@ def compare(
     true_redundant_count = len(redundant)  # dedup-only (not opaque); report label
 
     # Compute evidence tiers and confidence from detector results.
-    evidence_tiers, confidence, coverage_warnings, evidence_tier = _compute_confidence(
-        detector_results,
-        old,
-        new,
+    evidence_tiers, confidence, coverage_warnings, evidence_tier, census = (
+        compute_confidence_and_census(detector_results, old, new)
     )
 
     # ADR-024 §D5.3: structured confidence in the surface resolution itself,
@@ -1394,7 +1391,7 @@ def compare(
     # `frontends/cli/compare_result.py (_report_compare_result)`).
     from .workflows.analysis_assurance_attach import attach_analysis_assurance
 
-    result.edge_coverage = edge_coverage_report(old, new)  # I4, before the rollup
+    attach_coverage_reports(result, old, new, census)  # I4 + H5, before the rollup
     attach_analysis_assurance(result, old, new)
     memory_trace.mark("compare.rollup:done")
     return result

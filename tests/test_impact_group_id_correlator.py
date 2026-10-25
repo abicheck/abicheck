@@ -258,7 +258,7 @@ class TestSchemaAcceptsGroupWithoutRootCause:
             ChangeKind.CONSUMER_REQUIRED_SYMBOL_REMOVED, "pub_helper", "consumer needs"
         )
         doc = json.loads(reporter.to_json(_result([func, consumer])))
-        assert doc["report_schema_version"] == "6.6"
+        assert doc["report_schema_version"] == "6.7"
         # A bare DiffResult lacks the pipeline-level required keys, so validate
         # each `changes` entry against the schema's own change definition.
         schema = load_compare_report_schema()

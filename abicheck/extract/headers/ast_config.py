@@ -72,7 +72,9 @@ _CLANG_CACHE_SCHEMA_VERSION = 4
 #: before this carries no vector spellings, so it must miss and re-run.
 #: Bumped to 7 when vector sidecars keyed C++ overloads by mangled name and
 #: resolved inline vector returns: a sidecar from before this is keyed wrongly.
-_CASTXML_CACHE_SCHEMA_VERSION = 7
+#: Bumped to 8 when the cached document started carrying the preprocessor-
+#: excluded declaration scan (`extract.headers.preprocessor_branches`).
+_CASTXML_CACHE_SCHEMA_VERSION = 8
 
 #: Which module constant salts each backend's header-parse cache key. Named,
 #: not copied, so the key always reads the constant's current value.

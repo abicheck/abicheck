@@ -329,6 +329,8 @@ _SNAPSHOT_SKIP_FIELDS = frozenset(
         # Runtime-only L2 ids a depth projection kept; never persisted.
         "header_declaration_ids",
         "projection_unavailable",
+        # Runtime-only preprocessor-excluded declaration scan; never persisted.
+        "live_preprocessor_hidden",
         # Owned by encode_surface_graph() below, which unconditionally
         # replaces the key with the graph codec's own to_dict()
         # (Codex review, PR #962).
