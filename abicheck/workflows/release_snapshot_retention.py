@@ -28,7 +28,7 @@ NEW as soon as JUnit or ``--bundle-facts-out`` was requested, and both
 consumers read **only the OLD side**:
 
 * ``--bundle-facts-out`` captures the OLD side's per-library snapshots as
-  the baseline document (``cli_compare_release_helpers._write_bundle_facts``,
+  the baseline document (``workflows.release_bundle.write_bundle_facts_out``,
   which iterates the same ``diff_pairs``).
 
 JUnit was the second OLD-side consumer, and is no longer one at all. An

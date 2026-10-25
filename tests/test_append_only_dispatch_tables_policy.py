@@ -161,3 +161,151 @@ def test_disposition_visible_in_json_report(policy: PolicyFile) -> None:
         for r in doc["disposition_audit"]["reclassifications"]
     }
     assert applied["append-only-dispatch-table-size-grew"] == 1
+
+
+def test_driver_suffixed_table_name_matches(policy: PolicyFile) -> None:
+    """Issue #1759: ``_zes_dditable_driver_t`` is an append-only table too."""
+    name = "_zes_dditable_driver_t"
+    result = compare(
+        _snap(name, ["a", "b"]), _snap(name, ["a", "b", "c"]), policy_file=policy
+    )
+    assert result.verdict == Verdict.COMPATIBLE
+
+
+# --- Aggregates embedding sub-tables by value (issue #1759) -----------------
+
+_AGG = "_ze_dditable_t"
+
+#: Sub-table member edits: (old, new). Compatible iff append-only.
+_SUB_EDITS = {
+    "same": (["a", "b"], ["a", "b"]),
+    "append": (["a", "b"], ["a", "b", "c"]),
+    "append-two": (["a", "b"], ["a", "b", "c", "d"]),
+    "reorder": (["a", "b"], ["b", "a"]),
+    "insert-head": (["a", "b"], ["x", "a", "b"]),
+    "remove-head": (["a", "b", "c"], ["b", "c"]),
+}
+
+
+def _agg_snap(
+    first: list[str],
+    *,
+    first_tag: str = "_ze_global_dditable_t",
+    order: tuple[str, ...] = ("Global", "Device", "Tail"),
+) -> AbiSnapshot:
+    sub_sizes = {
+        first_tag: len(first),
+        "_ze_device_dditable_t": 2,
+        "_ze_tail_dditable_t": 1,
+    }
+    member_type = {
+        "Global": first_tag.lstrip("_"),
+        "Device": "ze_device_dditable_t",
+        "Tail": "ze_tail_dditable_t",
+    }
+    types = [
+        RecordType(
+            name=tag,
+            kind="struct",
+            size_bits=_PTR_BITS * n,
+            fields=[
+                TypeField(name=m, type="void *", offset_bits=_PTR_BITS * i)
+                for i, m in enumerate(first if tag == first_tag else ["p", "q"][:n])
+            ],
+        )
+        for tag, n in sub_sizes.items()
+    ]
+    offset, fields = 0, []
+    for m in order:
+        fields.append(TypeField(name=m, type=member_type[m], offset_bits=offset))
+        offset += _PTR_BITS * sub_sizes["_" + member_type[m]]
+    types.append(RecordType(name=_AGG, kind="struct", size_bits=offset, fields=fields))
+    getter = Function(
+        name="getTables",
+        mangled="getTables",
+        return_type="int",
+        params=[Param(name="t", type="ze_dditable_t *")],
+        visibility=Visibility.PUBLIC,
+    )
+    snap = AbiSnapshot(
+        library="libdisp.so.1",
+        version="1",
+        functions=[getter],
+        types=types,
+        typedefs={tag.lstrip("_"): tag for tag in [*sub_sizes, _AGG]},
+    )
+    return snap
+
+
+@pytest.mark.parametrize("edit", sorted(_SUB_EDITS))
+def test_aggregate_shift_compatible_iff_embedded_growth_is_append_only(
+    edit: str, policy: PolicyFile
+) -> None:
+    old, new = _SUB_EDITS[edit]
+    result = compare(_agg_snap(old), _agg_snap(new), policy_file=policy)
+    if not _is_append_only(old, new):
+        assert result.verdict == Verdict.BREAKING
+    else:
+        assert result.verdict in {Verdict.COMPATIBLE, Verdict.NO_CHANGE}
+    if len(new) != len(old):
+        # Record before disposing: the aggregate shifts stay in the report.
+        shifts = [
+            c
+            for c in result.changes
+            if c.kind == ChangeKind.TYPE_FIELD_OFFSET_CHANGED and c.symbol == _AGG
+        ]
+        assert {c.field_name for c in shifts} == {"Device", "Tail"}
+
+
+@pytest.mark.parametrize("edit", ["append", "append-two"])
+def test_aggregate_shift_without_policy_still_breaks(edit: str) -> None:
+    old, new = _SUB_EDITS[edit]
+    assert compare(_agg_snap(old), _agg_snap(new)).verdict == Verdict.BREAKING
+
+
+def test_aggregate_reorder_still_breaks(policy: PolicyFile) -> None:
+    result = compare(
+        _agg_snap(["a", "b"]),
+        _agg_snap(["a", "b"], order=("Device", "Global", "Tail")),
+        policy_file=policy,
+    )
+    assert result.verdict == Verdict.BREAKING
+
+
+def test_growth_of_non_matching_embedded_type_still_breaks(
+    policy: PolicyFile,
+) -> None:
+    """The shifted aggregate matches, but the grown member's type does not."""
+    result = compare(
+        _agg_snap(["a", "b"], first_tag="_my_props_t"),
+        _agg_snap(["a", "b", "c"], first_tag="_my_props_t"),
+        policy_file=policy,
+    )
+    assert result.verdict == Verdict.BREAKING
+    shifts = [
+        c
+        for c in result.changes
+        if c.kind == ChangeKind.TYPE_FIELD_OFFSET_CHANGED and c.symbol == _AGG
+    ]
+    assert shifts and all(c.review_evidence for c in shifts)
+
+
+@pytest.mark.parametrize("extra_pad", [_PTR_BITS, 2 * _PTR_BITS])
+def test_shift_not_equal_to_growth_is_not_stamped(extra_pad: int) -> None:
+    """Oracle: the stamp needs shift == summed embedded growth, exactly."""
+    from abicheck.compare.embedded_growth_shift import stamp_embedded_growth_shifts
+
+    old, new = _agg_snap(["a", "b"]), _agg_snap(["a", "b", "c"])
+    agg = next(t for t in new.declarations.types if t.name == _AGG)
+    for f in agg.fields[1:]:
+        assert f.offset_bits is not None
+        f.offset_bits += extra_pad
+    result = compare(old, new)
+    shifts = [
+        c
+        for c in result.changes
+        if c.kind == ChangeKind.TYPE_FIELD_OFFSET_CHANGED and c.symbol == _AGG
+    ]
+    assert shifts
+    stamp_embedded_growth_shifts(shifts, old.declarations, new.declarations)
+    assert not any((c.review_evidence or {}).get("offset_shift_cause") for c in shifts)

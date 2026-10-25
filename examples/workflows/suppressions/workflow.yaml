@@ -66,4 +66,4 @@ steps:
       suppression.suppressed_changes[].symbol:
         - to_rgb
       suppression.suppressed_changes[].rule.rule_id:
-        - "symbol='to_rgb'"
+        - rule-d34b2575ec7a

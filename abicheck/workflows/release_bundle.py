@@ -5,7 +5,7 @@
 analysis over the members' already-computed results, and the
 ``--bundle-facts-out`` baseline capture.
 
-Moved from ``cli_compare_release_helpers.py`` into the release compare owner
+Moved from the retired ``cli_compare_release_helpers.py`` into the release compare owner
 (:mod:`abicheck.workflows.release_compare`). Failures that used to be raised
 as ``click`` exceptions from inside this work are now the typed
 :class:`~abicheck.errors.ReleaseOperandError` family, which the CLI boundary

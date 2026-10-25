@@ -1093,11 +1093,10 @@ def run_compare(
     # it only fixes the bug where asking *why* (--view patterns) used to
     # also decide *whether* modulation happened, which could change the
     # verdict and exit code.
-    # ADR-068 D4/Phase 5: --surface-metrics computation is unconditional
-    # too now (§4.1's AUTO classification) -- always True regardless of
-    # what the (now vestigial, accepted-for-compatibility) flag says, the
-    # same "the flag is a no-op, the analysis always runs" treatment
-    # pattern_verdicts=True above already gets.
+    # ADR-068 D4/Phase 5: --surface-metrics computation is unconditional too
+    # (§4.1 AUTO): the vestigial flag is a no-op, like pattern_verdicts=True.
+    from .frontends.cli.commands.compare_generation import REQUIRE_SAME_GENERATION_META
+
     # The run's one resolved gate (duplication-and-convergence P0
     # `EffectiveGate`), read after any gate pack moved a severity level. Its
     # severity is `None` exactly under the legacy scheme, so every consumer
@@ -1114,8 +1113,7 @@ def run_compare(
     resolved_contract_mode = stated_contract_mode(
         evaluation_config, contract_mode, contract_evaluation=contract_evaluation
     )
-    # ADR-020b / ADR-068 D5: `deployment:` (former `--env-matrix FILE`) is
-    # config-only -- `resolved_cfg.deployment` is the resolved matrix.
+    # ADR-020b/068 D5: `deployment:` is config-only (resolved_cfg.deployment).
     request = dataclasses.replace(
         resolution_request,
         policy=policy,
@@ -1134,6 +1132,7 @@ def run_compare(
         collapse_versioned_symbols=collapse_versioned_symbols,
         env_matrix=resolved_cfg.deployment,
         diagnostic_comparison=diagnostic_comparison,
+        require_same_generation=bool(ctx.meta.get(REQUIRE_SAME_GENERATION_META)),
         contract_evaluation=contract_evaluation,
         contract_mode=resolved_contract_mode,
         depth=depth,

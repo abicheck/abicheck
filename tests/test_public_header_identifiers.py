@@ -351,6 +351,16 @@ def test_symbol_leaf_rejects_non_ascii_digits(digit: str) -> None:
     assert symbol_leaf_identifier(f"_ZN3ns{digit}fooEv") is None
 
 
+#: Whole-surface count findings (``diff_surface_metrics``), listed by hand.
+_SURFACE_METRIC_KINDS = frozenset(
+    {
+        "public_surface_grew",
+        "public_surface_shrank",
+        "undocumented_export_ratio_increased",
+    }
+)
+
+
 @pytest.mark.parametrize("mode", ["public", "exports", "all"])
 @pytest.mark.parametrize("direction", ["grew", "shrank"])
 def test_surface_metric_findings_are_not_applicable(mode: str, direction: str) -> None:
@@ -360,7 +370,6 @@ def test_surface_metric_findings_are_not_applicable(mode: str, direction: str) -
     from abicheck.checker import compare
     from abicheck.contract_relevance_types import ContractRelevance
     from abicheck.model import AbiSnapshot, Function, ScopeOrigin, Visibility
-    from abicheck.policy.contract_closed_domain import SURFACE_METRIC_KIND_SLUGS
 
     def fn(n: str) -> Function:
         return Function(
@@ -381,6 +390,6 @@ def test_surface_metric_findings_are_not_applicable(mode: str, direction: str) -
     r = compare(
         old, new, contract_evaluation=True, contract_mode=mode, surface_metrics=True
     )
-    metric = [c for c in r.changes if c.kind.value in SURFACE_METRIC_KIND_SLUGS]
+    metric = [c for c in r.changes if c.kind.value in _SURFACE_METRIC_KINDS]
     assert metric, "fixture must produce a surface-metric finding"
     assert all(c.contract_relevance is ContractRelevance.NOT_APPLICABLE for c in metric)

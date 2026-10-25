@@ -519,6 +519,8 @@ ASSERTED_CHANGE_KINDS: set[ChangeKind] = {
     ChangeKind.BIND_NOW_DISABLED,
     ChangeKind.ELF_ENDIANNESS_CHANGED,
     ChangeKind.X86_ISA_BASELINE_RAISED,
+    # Producer-side root of the same ISA requirement; tests/unit/compare/test_target_isa_detector.py.
+    ChangeKind.TARGET_ISA_CHANGED,
     ChangeKind.OS_DEPLOYMENT_FLOOR_RAISED,
     ChangeKind.DYNAMIC_LOADING_FLAGS_CHANGED,
     ChangeKind.EXPORTED_OBJECT_ALIGNMENT_REDUCED,

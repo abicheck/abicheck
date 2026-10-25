@@ -49,10 +49,16 @@ def _missing_evidence_json(row: RuleAuditRow) -> dict[str, object]:
     )
 
 
+def _identity_json(row: RuleAuditRow) -> dict[str, object]:
+    """``rule_identity`` next to ``rule_id``, for an id-less rule only."""
+    return {} if row.rule_identity is None else {"rule_identity": row.rule_identity}
+
+
 def suppression_row_json(row: RuleAuditRow) -> dict[str, object]:
     """A suppression row, as JSON. Keeps the pre-P1 keys, adds the P1 ones."""
     return {
         "rule_id": row.rule_id,
+        **_identity_json(row),
         "source_file": row.source_file,
         "entry_index": row.entry_index,
         "reason": row.reason,
@@ -73,6 +79,7 @@ def reclassify_row_json(row: RuleAuditRow) -> dict[str, object]:
     changed); ``changed_count`` names the same number explicitly (ADR-067 P1)."""
     return {
         "rule_id": row.rule_id,
+        **_identity_json(row),
         "source_file": row.source_file,
         "entry_index": row.entry_index,
         "label": row.label,
@@ -125,5 +132,8 @@ def row_from_json(kind: str, entry: Mapping[str, Any]) -> RuleAuditRow:
         allow_public_break=bool(entry.get("allow_public_break", False)),
         missing_evidence=(
             str(entry["missing_evidence"]) if entry.get("missing_evidence") else None
+        ),
+        rule_identity=(
+            str(entry["rule_identity"]) if entry.get("rule_identity") else None
         ),
     )

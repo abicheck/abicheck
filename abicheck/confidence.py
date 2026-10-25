@@ -309,6 +309,41 @@ def detector_disablement_warning(name: str, coverage_gap: str) -> str:
     return f"Detector '{name}' disabled: {coverage_gap}"
 
 
+#: Leading words of :func:`depth_exclusion_summary`'s line -- exported so a
+#: compact renderer can drop the routine line without re-deriving it.
+DEPTH_EXCLUSION_PREFIX = "Detectors not applicable at --depth "
+
+_DEPTH_EXCLUSION_NAMES_SHOWN = 6
+
+
+def depth_exclusion_summary(excluded: list[tuple[str, str]]) -> list[str]:
+    """One coverage line per requested depth for detectors that did not run
+    *only* because that explicitly requested ``--depth`` excludes the facts
+    they need (``DetectorResult.excluded_by_depth``).
+
+    *excluded* is ``(detector name, depth)`` pairs in report order. These
+    are out of the requested scope, not an evidence gap, so they are stated
+    once rather than one line each; every detector stays individually
+    recorded in ``detectors[]`` (``excluded_by_depth``). Shared by the
+    producer and :mod:`abicheck.report.evidence_summary`, which reconstructs
+    the same line from the JSON ledger instead of parsing the prose.
+    """
+    by_depth: dict[str, list[str]] = {}
+    for name, depth in excluded:
+        by_depth.setdefault(depth, []).append(name)
+    lines = []
+    for depth, names in by_depth.items():
+        shown = ", ".join(names[:_DEPTH_EXCLUSION_NAMES_SHOWN])
+        more = ", …" if len(names) > _DEPTH_EXCLUSION_NAMES_SHOWN else ""
+        noun = "detector" if len(names) == 1 else "detectors"
+        lines.append(
+            f"{DEPTH_EXCLUSION_PREFIX}{depth}: {len(names)} {noun} need "
+            f"evidence the requested depth excludes ({shown}{more}); not an "
+            "evidence gap -- listed per detector in the JSON report"
+        )
+    return lines
+
+
 def compute_confidence(
     detector_results: list[DetectorResult],
     old: AbiSnapshot | None,
@@ -346,9 +381,15 @@ def compute_confidence(
     warnings: list[str] = []
 
     # Check for disabled detectors and generate warnings.
+    # A detector excluded solely by the explicitly requested depth is
+    # collapsed into one summary line; every other disablement keeps its own.
+    depth_excluded: list[tuple[str, str]] = []
     for dr in detector_results:
-        if not dr.enabled and dr.coverage_gap:
+        if not dr.enabled and dr.excluded_by_depth:
+            depth_excluded.append((dr.name, dr.excluded_by_depth))
+        elif not dr.enabled and dr.coverage_gap:
             warnings.append(detector_disablement_warning(dr.name, dr.coverage_gap))
+    warnings.extend(depth_exclusion_summary(depth_excluded))
 
     warnings.extend(header_exclusion_warnings(old, new))
     from .model.header_exclusion_record import unparseable_header_warnings
@@ -356,6 +397,7 @@ def compute_confidence(
     warnings.extend(unparseable_header_warnings(old, new))
     warnings.extend(extraction_scope_notes(old, new))  # ADR-075 D3
     warnings.extend(snapshot_load_notices(old, new))  # ADR-062 D2
+    warnings.extend(undeclared_export_warnings(old, new))  # field report H5
 
     # Layout evidence must cover every compared side: a layout change is only
     # established when both sides' layouts are known. A baseline-less audit
@@ -375,6 +417,45 @@ def compute_confidence(
     )
 
     return tiers, confidence, warnings, evidence_tier
+
+
+def undeclared_export_warnings(old: AbiSnapshot | None, new: AbiSnapshot) -> list[str]:
+    """Per side: exports the parsed headers did not declare, by recognized cause.
+
+    Informational only (no finding, no exit-code effect). Reads a side only
+    when it is header-aware and its export table was really captured
+    (``elf.machine`` set), so an uncaptured table never reads as "everything
+    undeclared". See :mod:`abicheck.model.undeclared_export_census`.
+    """
+    from .demangle import demangle_batch
+    from .elf_symbol_filter import ALL_SYMBOL_TYPES, exported_symbol_names
+    from .model.undeclared_export_census import (
+        census_undeclared_exports,
+        census_warning,
+    )
+
+    notes: list[str] = []
+    for side, snap in (("old", old), ("new", new)):
+        if snap is None or getattr(snap, "elf_only_mode", False):
+            continue
+        elf = getattr(snap, "elf", None)
+        if elf is None or not getattr(elf, "machine", ""):
+            continue
+        exported = exported_symbol_names(elf, ALL_SYMBOL_TYPES, abi_relevant_only=True)
+        declared: set[str] = set()
+        for decl_map in (snap.function_map, snap.variable_map):
+            declared.update(decl_map)
+            declared.update(d.name for d in decl_map.values())
+        undeclared = exported - declared
+        if not undeclared:
+            continue
+        census = census_undeclared_exports(
+            undeclared, demangle_batch(sorted(undeclared))
+        )
+        line = census_warning(side, census)
+        if line is not None:
+            notes.append(line)
+    return notes
 
 
 def snapshot_load_notices(old: AbiSnapshot | None, new: AbiSnapshot) -> list[str]:

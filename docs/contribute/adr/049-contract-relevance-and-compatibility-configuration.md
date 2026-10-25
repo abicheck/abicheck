@@ -939,7 +939,75 @@ header/export-derived relevance conclusion when `--contract` is given, and
 still operates on `DiffResult.changes` before this ADR's own D9
 policy-scoring pipeline runs.
 
+## Amendment (2026-10, decision): every ChangeKind declares its contract subject
+
+**Problem.** D2's `NOT_APPLICABLE` relevance ("not about a contract entity
+at all") was implemented as a hand-curated exemption list in
+`contract_evaluation.py`, deliberately non-exhaustive, plus later unions
+(`analysis`-entity kinds, surface metrics, `imported_symbol_*`). A kind the
+list missed fell through to the header domain. Under a *stated* domain
+(`--contract public|exports`, or the legacy `scope.public: true` alias) it
+read `UNKNOWN_UNRESOLVED`, which the coverage ledger turns into an
+unsuppressible `finding_unresolved` failure and exit 1; under the adaptive
+default the `all` fallback hid the gap. The list grew one field report at a
+time (SONAME, `DT_NEEDED`, version nodes, then the SVS report's imports), and
+a whole-catalog probe still found 59 kinds whose subject is not a
+declaration reading `UNKNOWN_UNRESOLVED` —
+`toolchain_flag_drift`, the `*_mode_changed` build modes, every `bundle_*` and
+`sycl_*` kind, `stdlib_implementation_changed`, `dwarf_info_missing`,
+`target_dependency_added`, and more.
+
+**Decision.** `ChangeKindMeta` carries a mandatory `contract_subject`,
+declared on every catalog entry beside `entity`, one of:
+
+| `contract_subject` | The finding's subject is | Relevance |
+|---|---|---|
+| `declaration` | a function, variable, type, enum, macro, Python object or source declaration of the library under test, or a roll-up of several (`symbol_renamed_batch`, `inline_namespace_moved`) | decided by the selected domain (unchanged) |
+| `dependency_edge` | an edge to another library: a `DT_NEEDED` entry, an imported symbol, a required version node, a resolved provider, a build-target or bundle-internal dependency | `NOT_APPLICABLE` in every mode |
+| `binary_wide` | a property of the whole artifact: format, architecture, loader state, hardening, the runtime or platform floor, the C++ runtime implementation | `NOT_APPLICABLE` in every mode |
+| `build_fact` | a build, toolchain or package-configuration fact: a compiler flag or mode, a toolchain version, a release's composition | `NOT_APPLICABLE` in every mode |
+| `analysis` | the analysis or its evidence (asymmetric layers, a source tree that does not match its binary) | `NOT_APPLICABLE` in every mode |
+
+`ChangeKindRegistry` refuses an entry without the field, and an
+`entity=analysis` entry whose subject is not `analysis`, so a new kind cannot
+reach a comparison unclassified. Contract evaluation derives its
+`NOT_APPLICABLE` set from the field (`REGISTRY.contract_subject_kinds`);
+`policy.contract_toolchain_origin.DEPENDENCY_EDGE_KINDS` is the
+`dependency_edge` slice of it. The hand list, the analysis-entity union and the
+surface-metric list are gone.
+
+**Classified per kind, from the detector's subject.** A kind is
+non-declaration only when its detector builds a subject no contract can place
+(a `build-option:<key>`, `<toolchain>`, `<dwarf>`, `sycl::pi`, a target label,
+a provider binding). Symbol-scoped binary kinds — `symbol_binding_*`,
+`symbol_type_changed`, `ifunc_*`, `kabi_symbol_*`, `long_double_abi_changed`,
+`pe_forwarder_changed` — name one of the library's own exports and stay
+`declaration`: an undeclared export of them keeps reading
+`UNKNOWN_UNRESOLVED` under a stated domain, which is D5's intended answer.
+`symbol_leaked_from_dependency_changed` also stays `declaration`; the
+toolchain-origin rule already proves it out of contract.
+
+**What does not change.** Policy scoring: `NOT_APPLICABLE` is evaluated
+exactly like `IN_CONTRACT`, so every newly classified kind is scored as it
+was without a contract and still gates under a strict preset. No finding
+moved from `PROVEN_OUT_OF_CONTRACT`; the only relevance changes are
+`UNKNOWN_UNRESOLVED` → `NOT_APPLICABLE` (a stated domain stops raising the
+coverage exit for them) and `IN_CONTRACT` → `NOT_APPLICABLE` (under `all`, or
+the adaptive default's `all` fallback; both evaluated). The verdict of an
+adaptive-default run is unchanged.
+
+Rule owners: `abicheck/model/change_catalog/dimensions.py`
+(`ContractSubject`), `registry.py` (validation), `contract_evaluation.py`
+(`_non_declaration_kind_slugs`). Class test:
+`tests/test_contract_subject_totality.py` (every kind × {adaptive, public,
+exports, all} × subject shape).
+
 ## Revision history
+
+- **2026-10-23 — every ChangeKind declares its contract subject.** See the
+  amendment above: the hand-curated `NOT_APPLICABLE` list is replaced by a
+  mandatory catalog field, closing the 59 non-declaration kinds that read `UNKNOWN_UNRESOLVED`
+  under a stated contract.
 
 - **2026-10-07 — the evidence-adaptive default never drops a finding it
   cannot place** (implemented by #1500; recorded here by #1502). A stated

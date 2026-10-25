@@ -73,7 +73,9 @@ class TestCoverageWarnings:
         """Only the same-binary warning renders here -- an ordinary
         comparison's routine detector-disabled/missing-metadata notices
         must not flood every JUnit document with boilerplate testcases."""
-        result = _result_with_warning("Detector 'sycl' disabled: missing SYCL metadata")
+        result = _result_with_warning(
+            "Detector 'sycl' disabled: missing SYCL runtime (PI plugin) metadata; SYCL header APIs are covered by header parsing, not this detector"
+        )
         root = xml_fromstring(to_junit_xml(result))
         assert not [
             s

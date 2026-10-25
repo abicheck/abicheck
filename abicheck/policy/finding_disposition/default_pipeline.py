@@ -52,6 +52,7 @@ from ..export_existence_fold import FoldExportHygieneIntoExistence
 from .binary_gate import DemoteUnprovenBinaryApiBreaks
 from .pipeline import DispositionPipeline
 from .suppression import ApplySuppression
+from .target_isa import AttributeTargetIsaConsequences
 
 DEFAULT_PIPELINE = DispositionPipeline(
     [
@@ -105,6 +106,7 @@ DEFAULT_PIPELINE = DispositionPipeline(
         FilterRedundant(),
         EnrichAffectedSymbols(),
         AttributeStdlibEmbedding(),
+        AttributeTargetIsaConsequences(),
         DetectInternalLeaks(),
         # Must run immediately after DetectInternalLeaks: it consumes that step's
         # leak verdict to demote confirmed-unreachable internal-namespace churn.

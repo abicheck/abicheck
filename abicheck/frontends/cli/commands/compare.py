@@ -128,7 +128,9 @@ from .compare_routing import _RELEASE_FORMATS
     "suitable for a job summary or PR comment; 'oneline' emits a "
     "single human-readable summary line -- the 'just tell me' "
     "flow. A directory/package (release) comparison renders "
-    "json/markdown/junit/oneline/html only. Every export is rendered "
+    "json/markdown/sarif/html/junit/review/oneline (not terminal; sarif "
+    "carries one run per library, each result stamped with its release "
+    "member). Every export is rendered "
     "from the one completed comparison -- asking for more "
     "artifacts never re-runs the analysis and never changes the "
     "verdict or the exit code.",
@@ -280,6 +282,19 @@ from .compare_routing import _RELEASE_FORMATS
     "reader knows not to trust it the way an ordinary comparable "
     "diff is trusted. Not needed, and does nothing, on a "
     "comparable pair.",
+)
+@click.option(
+    "--require-same-generation",
+    "require_same_generation",
+    is_flag=True,
+    default=False,
+    help="Refuse (exit 64) a pair whose operands were extracted by "
+    "different abicheck extractor generations -- a baseline dumped by an "
+    "older abicheck -- with a 're-dump baseline' message. Without it such "
+    "a pair is compared: known spelling changes are migrated on load and "
+    "any other spelling-only difference is reported at risk level with "
+    "the reason 'extractor-generation drift; re-dump baseline'. "
+    "Single-pair comparisons only.",
 )
 @contract_options  # ADR-049: --contract (--audit-suppressions is gone -- `--view suppressions`)
 @pack_option  # ADR-049 D8: --pack
@@ -476,6 +491,12 @@ def _compare_cmd(ctx: click.Context, /, **kwargs: Any) -> None:
 
     if maybe_dispatch_no_baseline_compare(ctx, kwargs):
         return
+
+    # After the --no-baseline dispatch, which rejects the flag (no second
+    # operand to share or differ in extractor generation with).
+    from .compare_generation import enter_require_same_generation
+
+    enter_require_same_generation(ctx, kwargs)
 
     # CLI cleanup phase two, PR I: OLD_INPUT/NEW_INPUT are classified
     # automatically for bundle-facts routing, replacing the removed

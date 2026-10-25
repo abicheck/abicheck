@@ -45,16 +45,20 @@ FUNCTION_NODE_KINDS = frozenset(
 
 def function_template_default_index(
     root: dict[str, Any],
-) -> dict[int, tuple[str | None, ...]]:
+) -> dict[int, tuple[str | None, ...] | None]:
     """``id(pattern node) -> spelled defaults`` for every function template of
-    *root* whose defaults are all spelled.
+    *root*.
 
     Keyed by object identity because the parser hands the same node objects
-    back. A template with an unspelled default has no entry (UNKNOWN), never a
-    partial one (see :func:`_template_param_default_spellings`).
+    back. A template with an unspelled default maps to ``None``, never to a
+    partial tuple (see :func:`_template_param_default_spellings`): the node is
+    a pattern whose defaults the clang backend could not record, which
+    :func:`function_template_defaults_fact` reports as UNSUPPORTED so the
+    assurance rollup names the gap instead of reading the pattern as an
+    ordinary function.
     """
     span = _source_span_reader()
-    index: dict[int, tuple[str | None, ...]] = {}
+    index: dict[int, tuple[str | None, ...] | None] = {}
     stack: list[Any] = [root]
     while stack:
         node = stack.pop()
@@ -63,24 +67,30 @@ def function_template_default_index(
         children = node.get("inner") or []
         if node.get("kind") == "FunctionTemplateDecl":
             spelled = _template_param_default_spellings(node, span)
-            if spelled is not None:
-                for child in children:
-                    if (
-                        isinstance(child, dict)
-                        and child.get("kind") in FUNCTION_NODE_KINDS
-                    ):
-                        index[id(child)] = tuple(spelled)
+            for child in children:
+                if isinstance(child, dict) and child.get("kind") in FUNCTION_NODE_KINDS:
+                    index[id(child)] = None if spelled is None else tuple(spelled)
         stack.extend(children)
     return index
 
 
 def function_template_defaults_fact(
     node: dict[str, Any],
-    index: Mapping[int, tuple[str | None, ...]] | None,
+    index: Mapping[int, tuple[str | None, ...] | None] | None,
 ) -> Fact[tuple[str | None, ...]] | None:
-    """The PRESENT defaults fact of a pattern *node*, or ``None`` (UNKNOWN) when
-    it is not a recorded function-template pattern."""
-    if not index:
+    """The defaults fact of a function-template pattern *node*.
+
+    PRESENT with the spellings when every default was spelled; UNSUPPORTED when
+    *node* is a pattern with a default the backend could not spell; ``None``
+    (not collected) when *node* is not a function-template pattern at all.
+    """
+    if not index or id(node) not in index:
         return None
-    spelled = index.get(id(node))
-    return None if spelled is None else Fact.present(spelled)
+    spelled = index[id(node)]
+    if spelled is None:
+        return Fact.unsupported(
+            "a template-parameter default of this function template could not "
+            "be spelled from the clang AST",
+            producer="clang",
+        )
+    return Fact.present(spelled)

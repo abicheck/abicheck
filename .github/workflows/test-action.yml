@@ -15,6 +15,7 @@ on:
       - 'pixi.lock'
       - '.github/workflows/test-action.yml'
       - 'tests/fixtures/action/**'
+      - 'scripts/check_no_adr_citations.py'
   push:
     branches: [main]
     paths:
@@ -27,6 +28,7 @@ on:
       - 'pixi.lock'
       - '.github/workflows/test-action.yml'
       - 'tests/fixtures/action/**'
+      - 'scripts/check_no_adr_citations.py'
 
 concurrency:
   # A PR groups by PR number, so a new push supersedes the stale run for
@@ -825,10 +827,9 @@ jobs:
           check("id='versioning-policy'" in html, "HTML report has no versioning-policy section")
           check("id='use-case-impact'" in html, "HTML report has no use-case-impact (consumer impact) section")
 
-          for path in ("policy-report.json", "policy-report.md", "policy-report.html", "baseline-report.json"):
-              check("ADR-" not in open(path, encoding="utf-8").read(), f"{path} mentions an internal ADR id")
-
           for e in errors:
               print(f"::error::{e}")
           sys.exit(1 if errors else 0)
           PY
+          # Same pattern the user-text test uses (scripts/check_no_adr_citations.py).
+          python3 scripts/check_no_adr_citations.py policy-report.json policy-report.md policy-report.html baseline-report.json

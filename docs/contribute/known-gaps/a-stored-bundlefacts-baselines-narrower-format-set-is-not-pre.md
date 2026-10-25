@@ -11,7 +11,7 @@ generated: false
 
 Index: [Known gaps](../known-gaps.md)
 
-**Status (re-verified 2026-10-09 at `456989f`): OPEN.** action/validate-inputs.sh:327-338 still checks only the release allowlist (json|markdown|junit|oneline|html) and has no stored-BundleFacts narrowing. No --probe-formats capability exists.
+**Status (2026-10-23): PARTIAL.** The release allowlist that `action/validate-inputs.sh` checks is now the generated `release-compare` set (`action/cli-surface.txt`, from `RELEASE_FORMATS`), and the generator also emits the stored set (`stored-bundle-facts`, from `STORED_BUNDLE_FACTS_FORMATS`) so both have one source. The stored narrowing is still not applied before install, for the reason in the Classify-in-shell discussion below. No --probe-formats capability exists.
 
 
 `actions/`' preflight (`action/validate-inputs.sh`) mirrors every one of

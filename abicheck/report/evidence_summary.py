@@ -43,7 +43,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from dataclasses import dataclass
 
-from ..confidence import detector_disablement_warning
+from ..confidence import depth_exclusion_summary, detector_disablement_warning
 
 #: Human-readable label per ``evidence_tiers`` token, where the raw token is
 #: not already self-explanatory to a maintainer. An unrecognised tier is
@@ -89,6 +89,9 @@ class DetectorGap:
     #: not parse it to recover a semantic state, because the state is already
     #: carried structurally by ``not_evaluated``.
     reason: str = ""
+    #: The explicitly requested ``--depth`` that excluded this detector's
+    #: required facts (``detectors[].excluded_by_depth``), else ``""``.
+    excluded_by_depth: str = ""
 
 
 @dataclass(frozen=True)
@@ -175,6 +178,7 @@ def _detector_gaps(report: Mapping[str, object]) -> tuple[DetectorGap, ...]:
                 not_evaluated=not_evaluated,
                 enabled=enabled,
                 reason=reason,
+                excluded_by_depth=str(det.get("excluded_by_depth") or ""),
             )
         )
     return tuple(gaps)
@@ -205,6 +209,11 @@ def _material_warnings(
         for g in gaps
         if g.reason and not g.enabled
     }
+    disablement.update(
+        depth_exclusion_summary(
+            [(g.name, g.excluded_by_depth) for g in gaps if g.excluded_by_depth]
+        )
+    )
     material = tuple(w for w in warnings if w not in disablement)
     split_out = tuple(w for w in warnings if w in disablement)
     return material, split_out

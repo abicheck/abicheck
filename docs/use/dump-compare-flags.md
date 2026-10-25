@@ -181,6 +181,39 @@ are refused as `profile_mismatch` rather than silently diffed.
 | `--define=-DFOO`, `--define=-Xclang`, `--define=@resp.txt` | rejected with a targeted hint |
 | `-U`/undefine | no CLI spelling; remove the entry from `compile.defines` |
 
+### Declarations behind `#ifdef SYCL_LANGUAGE_VERSION`
+
+castxml parses as a plain C++ compiler, so `SYCL_LANGUAGE_VERSION` is
+undefined and overloads a header declares only for SYCL (`sycl::queue&`
+parameters) are removed by the preprocessor. abicheck counts the exports this
+hides and reports them in the coverage block, per side, as
+`... exported symbols not declared under the parsed header configuration (N reference sycl:: ...)`.
+The line is informational: it adds no finding and does not change the exit code.
+
+To check those overloads too, parse with the macro defined and give castxml a
+stub SYCL header that only forward-declares the types the signatures name:
+
+```cpp
+// stubs/sycl/sycl.hpp -- declarations only, never compiled into anything
+#pragma once
+namespace sycl { inline namespace _V1 { class queue; class event; class device; class context; } }
+```
+
+```bash
+abicheck compare old/libfoo.so new/libfoo.so -H include/ -I stubs/ \
+  -DSYCL_LANGUAGE_VERSION=202001
+```
+
+The stub must declare every SYCL type the parsed headers use, with the
+namespace nesting the real SYCL headers use (`sycl::_V1` for DPC++), or the
+mangled names will not match the exports. abicheck does not bundle such a
+stub. `-D NAME=VALUE` (with a space) works the same as `-DNAME=VALUE`; a
+working example of this setup is the repository's
+`tests/field_shapes/ifdef_sycl_overload/` fixture.
+
+The `Detector 'sycl' disabled` coverage line is unrelated: that detector
+compares SYCL *runtime* (PI plugin) metadata, not header APIs.
+
 ## Build-context capture (`compile_commands.json`) — evidence layer L3
 
 This is **evidence layer L3** in abicheck's [five-source evidence

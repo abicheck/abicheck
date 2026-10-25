@@ -496,7 +496,7 @@ class TestResolveScanExitDecision:
 
 class TestResolveReleaseExitDecision:
     """`resolve_release_exit_decision` -- reproduces
-    `cli_compare_release_helpers._exit_compare_release`'s exact precedence,
+    `frontends.cli.release_exit._exit_compare_release`'s exact precedence,
     including removed-required-library's mode-dependent rank.
     """
 

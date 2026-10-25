@@ -32,7 +32,7 @@ rather than reimplemented. What it needs is the whole release input-resolution
 chain — package/debug-package/devel-package extraction, library discovery and
 canonical-key matching, stored-`ProjectSnapshot` variant materialization,
 `--dso-only` classification — and every one of those functions is currently
-`frontends`/flat-`cli_*`-classified (`cli_compare_release_matrix.
+`frontends`/flat-`cli_*`-classified (`retired cli_compare_release_matrix.
 _prepare_compare_release_inputs` and its helpers), with `click.UsageError`
 raises inside them. `dump`'s own execution path is `workflows`-classified, so
 the `engine-cli-boundary` gate forbids it from reaching any of that, and the
@@ -60,6 +60,6 @@ slice, with the blocker removed, instead of left reading as unreachable.
 what it is:** a capture ridden on a comparison. It is not reimplemented, not
 widened, and not given a second spelling. When the `dump` fan-out lands, the
 flag becomes a deprecated alias for it rather than a separate producer —
-`abicheck/cli_compare_release_helpers.py`'s `write_bundle_facts_out` already
+`abicheck/retired cli_compare_release_helpers.py`'s `write_bundle_facts_out` already
 takes the already-resolved per-library snapshots and nothing else, so it is
 the reusable half and moves as-is.

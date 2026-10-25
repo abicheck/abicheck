@@ -177,8 +177,7 @@ class AmbiguousVariantSelectionError(AbicheckError, ValueError):
     only at the front end that resolved the two operands, not in the engine
     (Codex review, PR #1184, second round -- an earlier fix hard-coded
     ``old=`` here and so misdirected a caller whose *NEW* operand was the
-    ambiguous one). ``cli_compare_release_matrix._resolve_release_package_
-    side`` catches this and re-raises ``click.UsageError`` with the
+    ambiguous one). ``frontends.cli.release_compare_request`` catches this and re-raises ``click.UsageError`` with the
     side-correct example appended, the same engine-error/CLI-wrapper split
     :class:`AmbiguousLibraryMatchError` already uses.
 
