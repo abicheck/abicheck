@@ -117,7 +117,7 @@
       "abicheck/extract/headers/manifest.py": "b44a66dc760b0fd39e671876615d1e846433b2d76cb050be39749c5740c942bf",
       "abicheck/extract/headers/scope_segments.py": "d413edec257eb1334c829263770b66dc2eda3d263c765f699eac9f7e3ace9e65",
       "abicheck/extract/headers/sysinc.py": "1c25ee983ff10085afca9bdd0686b8177da252920a130cb2959c435065a9e51b",
-      "abicheck/extract/headers/template_default_scan.py": "ea17752750a06cc0a1d5ecdf15f8137c9edd498e85e1c5562f69522086906a38",
+      "abicheck/extract/headers/template_default_scan.py": "9bc1b485a742c445b876dc58968cb5929f93ee2c26492da45ec5aa3eeb7af9d8",
       "abicheck/extract/headers/toolchain.py": "be0be05950476ff2c0cb168727ebcde4859cc634c258f5ff23b1af1d2c50b754",
       "abicheck/extract/library_export_facts.py": "071b2a58f284753b57fa2e374680a57e9ce6897877b65a84fb92f420e7cf2ab7",
       "abicheck/extract/macho_build_signals.py": "c277bfdd55f26aae61af66c8fa6c5cdc5fa45acc49a3ae513af5899417db88bb",
@@ -159,9 +159,9 @@
       "abicheck/symvers_metadata.py": "372737765cd132e6e87ed891dd465d2958e04debbef774e45212ceb3036871cb",
       "abicheck/type_metadata.py": "9997189de8dac522fd1db8be5ae491d811139503f83abaaded89038eb4aa9cdf"
     },
-    "fingerprint": "12afbf64465d4b7e186efb8d909f10e48136095a48615536739acfa887d388f2",
+    "fingerprint": "8ea6b35e8c9c49342bc782581d31c3cef55463d6cc37ed6d32094eb29e67c691",
     "generation": 18,
-    "reason": "clang runs record whether a public header declares an alias or variable template with a default template argument (template_default_header_scan), so the template-defaults assurance gap is named instead of reading complete"
+    "reason": "Review fix inside the unreleased generation 18 (same PR): the alias/variable template scan also recognises requires clauses and initializer-less variable templates"
   },
   "resolver": {
     "files": {
