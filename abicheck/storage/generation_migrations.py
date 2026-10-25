@@ -242,6 +242,10 @@ SPELLING_MIGRATIONS: Mapping[int, GenerationSpellingChange] = {
         "snapshot names no explicit form and reads as not collected"
     ),
     21: GenerationSpellingChange(
+        "no stored type spelling changed in this generation: the header parse "
+        "now uses the dialect and target flags the binary was built with"
+    ),
+    22: GenerationSpellingChange(
         "Mach-O LC_LOAD_WEAK_DYLIB install names are recorded as weak_dependent_libs, "
         "a new fact rather than a spelling: no stored type or declaration spelling "
         "changes, so no rewrite is needed and a stored snapshot reads as before"
