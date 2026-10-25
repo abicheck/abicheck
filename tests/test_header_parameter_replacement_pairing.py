@@ -392,3 +392,35 @@ def test_asymmetric_header_evidence_is_never_paired(header_side: str) -> None:
     (new if header_side == "old" else old).from_headers = False
     removed, added = _removed(OLD), _added(NEW)
     assert pair_parameter_replacements([removed, added], old, new) == [removed, added]
+
+
+def test_multi_word_builtin_spelling_names_no_typedef() -> None:
+    # ``unsigned int`` is two tokens, not one typedef name: no lookup, so a
+    # stray ``lib::unsigned`` entry cannot be read as the parameter's typedef.
+    old = _snap(
+        [_fn(OLD, [_param("unsigned int"), _param("float")])], {"lib::unsigned": "a"}
+    )
+    new = _snap(
+        [_fn(NEW, [_param("unsigned int"), _param("float")])], {"lib::unsigned": "b"}
+    )
+    assert (
+        _kinds(pair_parameter_replacements([_removed(OLD), _added(NEW)], old, new))
+        == UNPAIRED
+    )
+
+
+def test_record_layout_is_read_for_every_identity_of_every_slot() -> None:
+    # The first record (lib::A) is unchanged; the second slot's record grew.
+    # Both lookups share one layout index built on the first.
+    old = _snap(
+        [_fn(OLD, [_param("A", ("lib::A",)), _param("B", ("lib::B",))])],
+        types=[_record("lib::A", 32), _record("lib::B", 64)],
+    )
+    new = _snap(
+        [_fn(NEW, [_param("A", ("lib::A",)), _param("B", ("lib::B",))])],
+        types=[_record("lib::A", 32), _record("lib::B", 128)],
+    )
+    assert (
+        _kinds(pair_parameter_replacements([_removed(OLD), _added(NEW)], old, new))
+        == PAIRED
+    )
