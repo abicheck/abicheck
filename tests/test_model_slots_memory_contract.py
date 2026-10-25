@@ -259,7 +259,8 @@ class TestSlottingDidNotChangeBehaviour:
         # when captured -- storage/snapshot_encode drops an uncaptured one).
         # 51: schema v60 added `is_inline_fact` (same encode rule).
         # 52: schema v64 added `template_param_defaults_fact` (same encode rule).
-        assert len(dataclasses.fields(Function)) == 52
+        # 53: schema v65 added `explicit_instantiation_fact`.
+        assert len(dataclasses.fields(Function)) == 53
         # 9: ADR-063 Phase 10 retired `is_va_list` to an InitVar view.
         # 10: schema v54 added `type_identities_fact`, same encode rule.
         assert len(dataclasses.fields(Param)) == 10

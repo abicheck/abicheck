@@ -456,6 +456,19 @@ EXTRACTION_BUG_CLASSES: tuple[BugClass, ...] = (
         ),
     ),
     BugClass(
+        id="templates.explicit_instance_removal_read_as_visibility_change",
+        invariant=(
+            "An instance the old header spelled explicitly (extern template, "
+            "template instantiation, explicit specialization) is removed when the "
+            "new header stops declaring it: its absence is a removed declaration, "
+            "never an export change, whatever the primary template still declares. "
+            "A producer that cannot read the declaration kind leaves the implicit "
+            "path in force."
+        ),
+        fixed_by=(1807,),
+        seed_tests=("tests/test_explicit_instantiation_removal.py",),
+    ),
+    BugClass(
         id="evidence.malformed_input_yields_value",
         invariant=(
             "A malformed input that has no exact interpretation -- a "

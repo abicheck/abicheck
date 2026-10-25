@@ -29,7 +29,7 @@ every duplication axis that goal names found most of them already unified
 through `service.run_compare`'s Tier-2 classification chokepoint
 (suppression, pack policy/namespace overrides, depth enforcement, compile
 context, and contract evaluation are all threaded through *that* one
-function for every real per-library pair -- see `cli_compare_release_pairwise
+function for every real per-library pair -- see the retired `cli_compare_release_pairwise
 ._run_compare_pair`'s own docstring), or structurally justified rather than
 a maintenance bug (the release fan-out's per-library JSON write has no
 `--use-cases`/suppression-audit folding to share because `compare-release`

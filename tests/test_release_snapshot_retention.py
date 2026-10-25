@@ -191,7 +191,7 @@ class TestConsumerInventory:
 
         Executed, not read as source text. The previous version of this
         test asserted that a particular two-line snippet appeared in
-        ``cli_compare_release_pairwise.py``, which broke the moment the
+        retired ``cli_compare_release_pairwise.py``, which broke the moment the
         loop moved to its owner and -- more to the point -- proved nothing
         about what the builder *does*: a snippet can mention
         ``_old_snapshot`` and still read the NEW side on the next line.

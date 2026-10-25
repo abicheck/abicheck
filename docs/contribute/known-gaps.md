@@ -316,6 +316,10 @@ CJM: trust stage (docs/contribute/cjm.md) — use case UC-WF-analysis-assurance 
 
 `false-positive` — Such a specialization still reports `type_removed` and its members' removals when no producer proved its origin: an old snapshot from before this change and schema v61, a dump without clang (macro-produced class-head, partial specialization), or an explicit instantiation the new header drops. [Full write-up](known-gaps/class-template-specialization-members-a-new-header-stops-enumerating.md)
 
+#### Explicit function and variable instances: removal is castxml-blind and class-scope-ambiguous (2026-10-25)
+
+**Status: NARROWED** (2026-10-25). An explicitly dropped function or static member is a removal on the clang header backend; castxml and two-instances-in-one-TU cases still take the export-loss or unsupported path. [Full write-up](known-gaps/explicit-function-and-variable-instances-removal-is-castxml-blind.md)
+
 #### MinGW toolchain headers are not classified as dependencies (2026-09-23)
 
 **Status (re-verified 2026-10-09 at `456989f`): OPEN.** abicheck/extract/declaration_provenance.py:270 _is_toolchain_compiler_include_dir still recognises only lib/gcc/<triple>/<ver>/include, lib/clang, and castxml layouts. provenance.py has no handling for MinGW's <prefix>/<triple>/include.  

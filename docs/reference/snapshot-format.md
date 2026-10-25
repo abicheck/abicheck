@@ -36,7 +36,7 @@ named sections.
 
 ```json
 {
-  "schema_version": 64,
+  "schema_version": 65,
   "sections": {
     "binary":       {"section_kind": "binary",       "section_schema_version": 1, "payload": {"...": "..."}},
     "declarations": {"section_kind": "declarations", "section_schema_version": 1, "payload": {"...": "..."}},
@@ -61,7 +61,7 @@ maps are verbatim; each `payload` is elided.)*
 
 | Key | Meaning |
 |---|---|
-| `schema_version` | The **document's** version — one integer, currently **`64`**. Top-level so a loader can read it without parsing the rest. |
+| `schema_version` | The **document's** version — one integer. Top-level so a loader can read it without parsing the rest. See [Schema version history](#schema-version-history) for the current value. |
 | `sections` | The nine named sections. Each carries its own `section_kind`, `section_schema_version` and `payload`. |
 | `section_schema_versions` | A flat map of the same per-section versions, so a reader can check them without walking `sections`. |
 | `fact_generations` | The extractor/resolver (and, with build-source facts, source) generations that produced the facts. A loader compares them with its own generations and reports drift; absent in snapshots written before it existed, which read as unstated, never as current. |
@@ -124,7 +124,7 @@ abicheck, rather than round-tripped.
 ## Schema version history
 
 `schema_version` is a single integer, not `MAJOR.MINOR`.
-The current value is **`64`**. See
+The current value is **`65`**. See
 `abicheck/storage/snapshot_schema_versions.py`'s `SCHEMA_VERSION` for the
 authoritative, up-to-date value and the full per-version comment.
 
@@ -342,6 +342,8 @@ for", never "none". The debug-type join (`compare/debug_type_join.py`)
 reports a conflicted name as ambiguous rather than trusting the first
 definition.
 
+(v65) `functions[].explicit_instantiation_fact` and `variables[].explicit_instantiation_fact` -- on a clang snapshot, how the header declared each template instance: `declaration` (`extern template`), `definition` (`template` instantiation), `specialization` (explicit specialization), or `absent` (implicit). Read from the clang text AST pass; castxml never writes it. Written only when clang recorded it; a missing key reads as `NOT_COLLECTED` at v65 and above. A pre-v65 reader hard-rejects a v65 document (see the compatibility table), so it never reads an explicit instance as implicit; the bump keeps that refusal explicit.
+
 (v64) `functions[].template_param_defaults_fact` -- on a clang snapshot, the spelled default of each template parameter of a function template's pattern, in declaration order (`null` for a parameter with no default). Written only when clang recorded it, so every other function encodes exactly as v63; a missing key reads as `NOT_COLLECTED` at v64 and above. A pre-v64 reader would drop it and read the pattern as defaultless, hence the bump.
 
 (v63) `template_default_header_scan` -- a top-level `bool` on a castxml snapshot: `true` when a public header parsed by castxml declares a template parameter with a default argument (castxml cannot record it), `false` when the scan found none. Absent on every other producer and on any snapshot predating v63, which reads as `null` (no scan ran). Written only by a castxml run, so other snapshots encode exactly as v62. A pre-v63 reader would drop it, hence the bump.
@@ -500,7 +502,7 @@ model rather than against either physical layout. Optional keys are omitted or `
 
 | Key | Type | Meaning |
 |-----|------|---------|
-| `schema_version` | int | Snapshot format version (currently `64`). |
+| `schema_version` | int | Snapshot format version; see [Schema version history](#schema-version-history). |
 | `library` | string | Library identity, e.g. `libfoo.so.1`. |
 | `version` | string | Library version string, e.g. `1.2.3`. |
 | `source_path` | string \| null | Original path the snapshot was taken from. |
@@ -659,7 +661,7 @@ files:
 | | Snapshot (`dump`) | Comparison report (`compare -o json=-`) |
 |-|-------------------|---------------------------------------------|
 | **Version field** | `schema_version` | `report_schema_version` |
-| **Type** | integer (currently `64`) | string `MAJOR.MINOR` (e.g. `1.0`) |
+| **Type** | integer; see [Schema version history](#schema-version-history) | string `MAJOR.MINOR` (e.g. `1.0`) |
 | **Describes** | one library's ABI surface | the diff between two snapshots |
 
 A snapshot has no `report_schema_version`, and a report has no

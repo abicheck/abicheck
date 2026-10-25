@@ -29,7 +29,14 @@ import dataclasses
 from dataclasses import replace
 from typing import TYPE_CHECKING, Any
 
-from ..model import AccessLevel, Fact, FactStatus, ParamKind, SymbolBinding
+from ..model import (
+    AccessLevel,
+    ExplicitInstantiation,
+    Fact,
+    FactStatus,
+    ParamKind,
+    SymbolBinding,
+)
 from .decode_memo import memo_fact
 
 # ADR-061's 800-line production ceiling: the case-(a) legacy-load
@@ -52,6 +59,7 @@ from .fact_schema_versions import (
     _FACT_FIELDS_SCHEMA_VERSION,
     _MIN_SCHEMA_VERSION_FOR_DEPRECATION_FACTS,
     _MIN_SCHEMA_VERSION_FOR_ENUMTYPE_FACTS,
+    _MIN_SCHEMA_VERSION_FOR_EXPLICIT_INSTANTIATION_FACT,
     _MIN_SCHEMA_VERSION_FOR_FUNCTION_CASE_B_FACTS,
     _MIN_SCHEMA_VERSION_FOR_FUNCTION_TEMPLATE_PARAM_DEFAULTS,
     _MIN_SCHEMA_VERSION_FOR_HEADER_IDENTIFIERS_FACT,
@@ -151,6 +159,7 @@ _VARIABLE_FACT_KEYS = (
     "in_public_contract_fact",
     "binary_exported_fact",
     "type_identities_fact",
+    "explicit_instantiation_fact",
 )
 
 # ADR-063 Phase 5 (fifth batch): Function's own ten case-(b) *_fact
@@ -159,6 +168,7 @@ _VARIABLE_FACT_KEYS = (
 _FUNCTION_FACT_KEYS = (
     "contract_attributes_fact",
     "template_param_defaults_fact",
+    "explicit_instantiation_fact",
     "is_explicit_fact",
     "is_hidden_friend_fact",
     "source_header_fact",
@@ -523,6 +533,13 @@ def decode_variable_facts(v: dict[str, Any], schema_version: int) -> dict[str, A
                     min_schema_version=_MIN_SCHEMA_VERSION_FOR_TYPE_IDENTITY_FACTS,
                 )
             ),
+            "explicit_instantiation_fact": _explicit_instantiation_value(
+                decode_fact(
+                    v.get("explicit_instantiation_fact"),
+                    schema_version,
+                    _MIN_SCHEMA_VERSION_FOR_EXPLICIT_INSTANTIATION_FACT,
+                )
+            ),
         },
     )
 
@@ -636,8 +653,26 @@ def decode_function_facts(f: dict[str, Any], schema_version: int) -> dict[str, A
                     _MIN_SCHEMA_VERSION_FOR_FUNCTION_TEMPLATE_PARAM_DEFAULTS,
                 )
             ),
+            "explicit_instantiation_fact": _explicit_instantiation_value(
+                decode_fact(
+                    f.get("explicit_instantiation_fact"),
+                    schema_version,
+                    _MIN_SCHEMA_VERSION_FOR_EXPLICIT_INSTANTIATION_FACT,
+                )
+            ),
         },
     )
+
+
+def _explicit_instantiation_value(
+    fact: Fact[Any] | None,
+) -> Fact[ExplicitInstantiation] | None:
+    """Rebuild ``Function``/``Variable.explicit_instantiation_fact``'s value as
+    an :class:`ExplicitInstantiation` member (JSON carries the string). A missing
+    key reads as ``None`` before v65 and ``NOT_COLLECTED`` from it on."""
+    if fact is not None and fact.value is not None:
+        return replace(fact, value=ExplicitInstantiation(fact.value))
+    return fact
 
 
 def decode_snapshot_facts(d: dict[str, Any], schema_version: int) -> dict[str, Any]:
