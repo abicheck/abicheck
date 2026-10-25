@@ -80,6 +80,9 @@ class TuFragment:
     # provenance fields above.
     frontend_context_kind: str | None = None
     semantic_ir: SemanticIR | None = None
+    # {guard macro: function names} the parse's preprocessor configuration
+    # excluded (extract/headers/preprocessor_branches.py); None = no scan.
+    preprocessor_hidden: dict[str, tuple[str, ...]] | None = None
 
 
 @dataclass(frozen=True)
@@ -116,6 +119,8 @@ class MergedTuFragments:
     #: returns. ``None`` only for a caller that never sets it (there is
     #: currently none -- ``run_tu_loop`` always populates this).
     semantic_ir: SemanticIR | None = None
+    #: Only the single-TU path carries it; a multi-TU merge leaves it None.
+    preprocessor_hidden: dict[str, tuple[str, ...]] | None = None
 
 
 def entity_key(kind: str, name: str) -> tuple[str, str]:

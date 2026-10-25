@@ -37,7 +37,7 @@ import logging
 import shutil
 import subprocess
 import tempfile
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import cast
 from xml.etree.ElementTree import Element, tostring
@@ -59,6 +59,7 @@ from ..ast_config import (
     _resolve_compiler_binary,
 )
 from ..backend_protocol import HeaderParseRequest
+from ..preprocessor_branches import hidden_declarations_for_headers
 from ..toolchain import (
     _allow_unsupported_castxml_enabled,
     _resolve_force_cpp,
@@ -69,6 +70,7 @@ from ..toolchain import (
 )
 from .calling_convention import calling_conventions_in
 from .dumper import _CastxmlParser
+from .hidden_declarations import attach_hidden_declarations
 from .policy import evaluate_castxml_version
 from .preprocessed_text import attach_preprocessed_text, resolve_preprocessed_text
 from .probe import (
@@ -480,7 +482,9 @@ def _run_castxml_attempt(
         root = _validate_castxml_output(
             result, out_xml, headers, force_cpp, castxml_bin=castxml_bin
         )
-        _record_calling_convention_macros(root, cmd, out_xml, agg_path.parent, run)
+        _record_calling_convention_macros(
+            root, cmd, out_xml, agg_path.parent, run, headers
+        )
         return root
     finally:
         shutil.rmtree(agg_path.parent, ignore_errors=True)
@@ -492,18 +496,34 @@ def _record_calling_convention_macros(
     out_xml: Path,
     work_dir: Path,
     run: CastxmlRunner,
+    headers: Sequence[Path] = (),
 ) -> None:
     """Attach the preprocessed text of the declarations spelling a calling
     convention to *root* and to *out_xml* (so the cached AST keeps it); see
-    :mod:`.preprocessed_text`. A failed preprocess run leaves both untouched."""
+    :mod:`.preprocessed_text`. The same run's surviving lines also decide
+    which public-header declarations the configuration excluded
+    (:mod:`..preprocessor_branches`). A failed preprocess run leaves both
+    untouched."""
+    present: dict[str, set[int]] = {}
+    defined: set[str] = set()
     table = resolve_preprocessed_text(
-        cmd, root, work_dir, run, lambda t: bool(calling_conventions_in(t))
+        cmd,
+        root,
+        work_dir,
+        run,
+        lambda t: bool(calling_conventions_in(t)),
+        present,
+        defined,
     )
     if table is None:
         return
     extra = Element("_")
     attach_preprocessed_text(extra, table)
     attach_preprocessed_text(root, table)
+    hidden = hidden_declarations_for_headers(headers, present, defined)
+    if hidden is not None:
+        attach_hidden_declarations(extra, hidden)
+        attach_hidden_declarations(root, hidden)
     data = out_xml.read_bytes()
     close_at = data.rfind(b"</")
     if close_at == -1:

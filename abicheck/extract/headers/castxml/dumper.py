@@ -169,6 +169,10 @@ class _CastxmlParser:
         return self._ctx.pub_dir_segs
 
     @property
+    def _preprocessor_hidden(self) -> dict[str, tuple[str, ...]] | None:
+        return self._ctx.preprocessor_hidden
+
+    @property
     def _exported_dynamic(self) -> set[str]:
         return self._ctx.exported_dynamic
 

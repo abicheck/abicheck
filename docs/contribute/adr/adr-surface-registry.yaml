@@ -235,6 +235,7 @@ adrs:
       - cli: compare --header --exclude-header
       - action: public-header-dir
       - report: compare_report.scope
+      - report: compare_report.undeclared_export_census
 
   - id: ADR-025
     file: 025-pr-diff-source-evaluation.md

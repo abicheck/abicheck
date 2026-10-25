@@ -278,7 +278,7 @@
     },
     {
       "path": "abicheck/checker.py",
-      "baseline_lines": 1400,
+      "baseline_lines": 1397,
       "target": "compare",
       "rule": "no_growth",
       "disposition": "migrate",
@@ -553,7 +553,7 @@
     },
     {
       "path": "abicheck/dumper.py",
-      "baseline_lines": 1227,
+      "baseline_lines": 1226,
       "target": "see ADR-061 ownership map",
       "rule": "no_growth",
       "disposition": "migrate",

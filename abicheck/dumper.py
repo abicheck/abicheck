@@ -146,9 +146,7 @@ from .extract.path_aliases import absolutize_include_roots
 from .extract.progress import timed
 from .model import AbiSnapshot, RecordType
 from .storage.ast_cache_location import reference_scratch_scoped
-from .storage.header_ast_cache import (
-    _cache_path as _cache_path,
-)
+from .storage.header_ast_cache import _cache_path as _cache_path
 from .workflows import memory_trace
 from .workflows.dump.elf_fallback import (
     # DWARF/symbol-only fallback snapshot builders live in the sibling module
@@ -861,6 +859,7 @@ def _dump_elf(
         language_profile=profile_hint,
         dwarf_layout_coherence=_dwarf_layout_coherence,
         dwarf_layout_coherence_mismatches=_dwarf_layout_coherence_mismatches,
+        live_preprocessor_hidden=ast_result.preprocessor_hidden,
         **_ast_compile_provenance(
             list(ast_result.provenance_headers),
             gcc_options,

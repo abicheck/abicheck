@@ -1723,6 +1723,41 @@
         "type": "string"
       }
     },
+    "undeclared_export_census": {
+      "type": "object",
+      "description": "Schema 6.7: per side (`old`/`new`), the census behind the undeclared-export coverage_warnings lines -- exported symbols the parsed headers did not declare, attributed to the guard macro of a preprocessor branch the parse excluded (`by_guard`, decided by the castxml run's own `-E -dD` output; only for a side whose headers were parsed in this run, since the scan is never stored in a snapshot) or else to a named cause (`by_cause`, the `sycl` name rule). A guard macro is one whose definition would enable the branch; an export under `defined(A) && defined(B)` counts for both. Emitted only when at least one export on some side is attributed. Informational: never affects `verdict`, `severity` or any exit code.",
+      "additionalProperties": {
+        "type": "object",
+        "required": ["undeclared_total", "attributed", "by_guard", "by_cause"],
+        "properties": {
+          "undeclared_total": {"type": "integer", "minimum": 0},
+          "attributed": {"type": "integer", "minimum": 0},
+          "by_guard": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["macro", "count", "examples"],
+              "properties": {
+                "macro": {"type": "string"},
+                "count": {"type": "integer", "minimum": 1},
+                "examples": {"type": "array", "items": {"type": "string"}, "maxItems": 3}
+              }
+            }
+          },
+          "by_cause": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["cause", "count"],
+              "properties": {
+                "cause": {"type": "string"},
+                "count": {"type": "integer", "minimum": 1}
+              }
+            }
+          }
+        }
+      }
+    },
     "policy_overrides": {
       "type": "object",
       "additionalProperties": {
