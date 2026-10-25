@@ -1,6 +1,6 @@
 {
   "description": "Formal detector specification matrix (generated).",
-  "count": 422,
+  "count": 423,
   "detectors": [
     {
       "kind": "abi_relevant_build_flag_changed",
@@ -1188,7 +1188,7 @@
       "severity": "error",
       "min_evidence": "L0",
       "doc_slug": "func_removed_elf_only",
-      "examples": "case182_accidental_export_removed_still_breaking,case217_export_loss_weak_binding_demoted,case218_export_loss_strong_binding_stays_breaking,case59_func_became_inline,case86_tag_struct_renamed,case97_api_depends_on_consumer_env"
+      "examples": "case182_accidental_export_removed_still_breaking,case217_export_loss_weak_binding_demoted,case218_export_loss_strong_binding_stays_breaking,case86_tag_struct_renamed,case97_api_depends_on_consumer_env"
     },
     {
       "kind": "func_return_changed",
@@ -3079,6 +3079,15 @@
       "min_evidence": "L5",
       "doc_slug": "target_dependency_added",
       "examples": "case161_target_dependency_added"
+    },
+    {
+      "kind": "target_isa_changed",
+      "category": "risk",
+      "default_verdict": "COMPATIBLE_WITH_RISK",
+      "severity": "warning",
+      "min_evidence": "L0",
+      "doc_slug": "target_isa_changed",
+      "examples": ""
     },
     {
       "kind": "template_body_changed",

@@ -46,6 +46,26 @@ EXTRACTION_BUG_CLASSES: tuple[BugClass, ...] = (
         },
     ),
     BugClass(
+        id="extraction.castxml_function_type_collapsed_to_opaque_tag",
+        invariant=(
+            "A castxml function type spells its full declarator (return type, "
+            "parameter types, variadic marker, calling-convention attributes, "
+            "and the pointer/reference/cv/array declarator around it), so two "
+            "callbacks compare equal exactly when their signatures are equal, "
+            "wherever the callback appears: inline parameter, pointer to it, "
+            "typedef, struct field or return."
+        ),
+        fixed_by=(1796,),
+        seed_tests=(
+            "tests/test_castxml_function_pointer_spelling.py",
+            "tests/test_castxml_function_pointer_integration.py",
+        ),
+        axes={
+            "signature_part": ("arity", "param_type", "return", "variadic", "cc"),
+            "site": ("inline_param", "pointer_to_fp", "typedef", "field"),
+        },
+    ),
+    BugClass(
         id="extraction.vector_type_collapsed_to_plain_array",
         invariant=(
             "A type whose identity is a DWARF attribute, not its shape, keeps "

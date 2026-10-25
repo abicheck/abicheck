@@ -2923,7 +2923,6 @@
    "description": "Functions moved from outlined to static inline in header \u2014 symbols disappear from .dynsym (FUNC_REMOVED, inverse of case47)",
    "expected": "BREAKING",
    "expected_kinds": [
-    "func_removed_elf_only",
     "func_visibility_changed"
    ],
    "min_evidence": "L0",

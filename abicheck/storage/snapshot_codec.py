@@ -153,7 +153,9 @@ def decode_snapshot(
     # ADR-062 D2: read the generation stamp, report drift through the shared
     # reader-compatibility owner, and migrate spellings an older extractor
     # generation wrote (storage/generation_migrations.py).
-    d, _fact_generations, _generation_notices = migrate_and_describe(d)
+    d, _fact_generations, _spellings_generation, _generation_notices = (
+        migrate_and_describe(d)
+    )
     # Inspect schema version for future migration hooks.
     # Snapshots without schema_version are treated as v1 (pre-versioning format).
     # Currently only v1 and v2 exist and have the same on-disk layout, so no
@@ -572,6 +574,7 @@ def decode_snapshot(
     # recorded, from the snapshot's own records.
     finalize_snapshot_semantic_ir(snap)
     snap.fact_generations = _fact_generations
+    snap.spellings_generation = _spellings_generation
     snap.load_notices = (*snap.load_notices, *_generation_notices)
     return snap, _schema_version
 

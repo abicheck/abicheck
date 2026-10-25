@@ -128,7 +128,9 @@ from .compare_routing import _RELEASE_FORMATS
     "suitable for a job summary or PR comment; 'oneline' emits a "
     "single human-readable summary line -- the 'just tell me' "
     "flow. A directory/package (release) comparison renders "
-    "json/markdown/junit/oneline/html only. Every export is rendered "
+    "json/markdown/sarif/html/junit/review/oneline (not terminal; sarif "
+    "carries one run per library, each result stamped with its release "
+    "member). Every export is rendered "
     "from the one completed comparison -- asking for more "
     "artifacts never re-runs the analysis and never changes the "
     "verdict or the exit code.",
@@ -442,7 +444,7 @@ def _compare_cmd(ctx: click.Context, /, **kwargs: Any) -> None:
     # normally and never silently rewritten.
     exports = kwargs["exports"]
     assert isinstance(exports, ExportSet)
-    from ....workflows.bundle_facts_stored_request import STORED_BUNDLE_FACTS_FORMATS
+    from ....report.release_formats import STORED_RELEASE_FORMATS
     from .compare_default_format import renderable_formats, resolve_export_set
 
     kwargs["exports"] = resolve_export_set(
@@ -451,7 +453,7 @@ def _compare_cmd(ctx: click.Context, /, **kwargs: Any) -> None:
             kwargs.get("old_input"),
             kwargs.get("new_input"),
             release_formats=_RELEASE_FORMATS,
-            stored_formats=STORED_BUNDLE_FACTS_FORMATS,
+            stored_formats=STORED_RELEASE_FORMATS,
         ),
         rewrite_all=(
             any(token != "full" for token in kwargs.get("view", ()))

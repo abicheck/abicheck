@@ -434,8 +434,11 @@ def finish_release_markdown(
     """
     if demangle:
         from ..demangle import demangle_text
+        from .markdown_budget import DEMANGLED_NAME_LIMIT
 
-        md = demangle_text(md, escape_table_pipes=True)
+        md = demangle_text(
+            md, escape_table_pipes=True, max_demangled=DEMANGLED_NAME_LIMIT
+        )
     audit_lines = _release_md_suppression_audit(library_results, demangle=demangle)
     return md + "\n".join(audit_lines) if audit_lines else md
 

@@ -90,12 +90,15 @@ def to_markdown(
         if not demangle:
             return text
         from ..demangle import demangle_text
+        from .markdown_budget import DEMANGLED_NAME_LIMIT
 
         # `escape_table_pipes`: this document contains tables (the pattern-
         # modulation ledger, the headline/severity tables), and a demangled
         # operator name can carry a `|` into a row that was already built and
         # correctly escaped (Codex review, PR #1284).
-        return demangle_text(text, escape_table_pipes=True)
+        return demangle_text(
+            text, escape_table_pipes=True, max_demangled=DEMANGLED_NAME_LIMIT
+        )
 
     alternate = _markdown_alternate_rendering(
         result,
