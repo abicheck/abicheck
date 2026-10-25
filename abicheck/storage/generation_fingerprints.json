@@ -7,7 +7,7 @@
       "abicheck/dwarf_advanced.py": "91cfc7f410a37e7d7ba3ec922ff2944b81253fde3dcfdb806be032087822b339",
       "abicheck/dwarf_metadata.py": "2973de51a3d75c63a5364cc0381e9d020ada5e1a1a54bd78b20458ee07581e20",
       "abicheck/dwarf_presence.py": "7e73580ec7a02fdf24e3815cb89e42aa6fe00e46e8cda6b7fe9d547f06ac3f06",
-      "abicheck/dwarf_snapshot.py": "1ecb4940b848bac40dd7a112f060197a365658e23d70602b73701fa53a54550c",
+      "abicheck/dwarf_snapshot.py": "8a416e8aef1bb5d6b45490f1a57b4a82a81d35d15fdc287581c2ac8e81e46b23",
       "abicheck/dwarf_snapshot_datasources.py": "e337f8be3a8ae16350c0639d0be10670d4d5d1197108659fa210fcbbf8a5bdde",
       "abicheck/dwarf_unified.py": "9ecb70b59bb26674ac98ba14ad1211b4103e3a78426a91ed7901e59f1a7d9cdf",
       "abicheck/dwarf_utils.py": "18a0d5ce15b7d72aead50bd9771112a2a19e5058501cca3e52253323434ff646",
@@ -36,6 +36,7 @@
       "abicheck/extract/digest_memo.py": "babd25889fb4ac54b8defd27ea009fc2e125085c5692f5a4d864aec5491fbee9",
       "abicheck/extract/dpcpp_jobs.py": "7e30f36f5a4ccaf84aa9abe6ed7958d23ce5c43dbb9f6504b9921502c99fad08",
       "abicheck/extract/dump_manifest_roots.py": "b616e45b7eafdd2dd4c69c1031f9a5c8b54973633aa3e9057edc60525ea0d15a",
+      "abicheck/extract/dwarf_decl_file.py": "a585b6e38dc879b04db4b3d70a8b7131774a8b735df1068e6baafcaac934af42",
       "abicheck/extract/dwarf_layout_backfill.py": "3dcc9efb8907b6b3419b09b1c262f64403a5162148bc3be0a5d51e112ef69a4d",
       "abicheck/extract/dwarf_producer.py": "86e449f5776fe7aead410ef979dc636837d28c8caae5599d3c22b8c3f442e1c6",
       "abicheck/extract/dwarf_records.py": "e77d5320c3a56b7ca6a46b20ab7197ed03817d0f838d0a7c0fe899439a71ec42",
@@ -91,13 +92,14 @@
       "abicheck/extract/headers/castxml/vector_spellings.py": "208f0891eedceda82e172fe846a5fc09d26a3b3d917795a416ae117450cf600c",
       "abicheck/extract/headers/clang/__init__.py": "538add12f3ff39e1c1b39e6f5def93b50a584b78b30c4e7e59058207222757d0",
       "abicheck/extract/headers/clang/attributes.py": "7e32c123c19fa5cad688760325bd17199dd42d0cc58a0b92360349403003f1e9",
-      "abicheck/extract/headers/clang/backend.py": "a8ca2ac1f7e7518064b693f2eb54aa525c46691faeea3e6c1ac2910efcd04224",
+      "abicheck/extract/headers/clang/backend.py": "5025e5d53c93c90daa08f8962f6a44ae593185d7a6446b10b7303987b044fd6b",
       "abicheck/extract/headers/clang/context.py": "648411b558314ee3ba099c4ecbd302193535330c8dc85bb087ad8d2f967b76ec",
       "abicheck/extract/headers/clang/enums.py": "69f90fd8e342371d246a257f7ed4230d9a548173f856ec63776d6af12ee53644",
       "abicheck/extract/headers/clang/error_header_retry.py": "3153f727c9d1934783a51d6917727a48aeba31e68b3c2462aef6e6b2f489f690",
+      "abicheck/extract/headers/clang/explicit_instantiation.py": "bf0178df431eef00d5ee5c9e918cba99a80fab226a68f7a179b2f1a36ab5da95",
       "abicheck/extract/headers/clang/expr.py": "5d8e1ef086c583db2557fd7fdb3fd5e4f51b55e4b556f120f624eea6875e8e6a",
       "abicheck/extract/headers/clang/function_template_defaults.py": "2867a70d0b85c891efbf80194ae147fd96429e9d51cdb93e029ff642be0bc780",
-      "abicheck/extract/headers/clang/functions.py": "69d43218201ac33d7f00572fa3dc176e63afad1a568f811ddf72483de939bdc4",
+      "abicheck/extract/headers/clang/functions.py": "47f788f6f3225bf8ca25b2f19431a3da700f335f138e232c6fcc5c93db3903b8",
       "abicheck/extract/headers/clang/inline_semantics.py": "9add1c49ba9e755b12cd50aaa82254bfe2a7141e7bb0bfeec640e540d291691d",
       "abicheck/extract/headers/clang/layout_tool.py": "84fe5c86af2f0ae7486012297356d18046345a9ec5c0bbab1b8ec0a59645a2fe",
       "abicheck/extract/headers/clang/locations.py": "d4292c937fb928268132c6a3f21a35a5d7576b8164416648ef73815cd07fcddf",
@@ -162,9 +164,9 @@
       "abicheck/symvers_metadata.py": "372737765cd132e6e87ed891dd465d2958e04debbef774e45212ceb3036871cb",
       "abicheck/type_metadata.py": "9997189de8dac522fd1db8be5ae491d811139503f83abaaded89038eb4aa9cdf"
     },
-    "fingerprint": "db34657c7c1811a630e7d5bca0f1692275ae0a074a3de96c19e2ff7b147a7391",
-    "generation": 18,
-    "reason": "G3 runtime-only ifdef guard scan plus the ported #1806 collapse fix (source names no longer compared): no persisted snapshot fact changes; on mingw only a duplicate system-header record the index already discarded is dropped"
+    "fingerprint": "c980b2e1e4defd82af42b098b43ac3989fa30f91639731e52c0577c11b6514ca",
+    "generation": 20,
+    "reason": "G3 runtime-only ifdef guard scan: the castxml backend carries the excluded-branch scan only on AbiSnapshot.live_preprocessor_hidden (dropped on encode) and the header-AST cache document; no persisted snapshot fact or spelling changes"
   },
   "resolver": {
     "files": {

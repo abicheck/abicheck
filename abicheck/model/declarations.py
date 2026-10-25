@@ -21,6 +21,7 @@ from dataclasses import InitVar, dataclass, field
 from typing import cast
 
 from .elf_facts import SymbolBinding
+from .explicit_instantiation import ExplicitInstantiation
 from .extraction_scope import EntityOwnership
 from .fact import Fact, _Omitted, bridge_legacy_and_fact, retire_bridge_fields
 from .identity import EntityId
@@ -294,6 +295,14 @@ class Function:
     template_param_defaults_fact: Fact[tuple[str | None, ...]] | None = field(
         default=None, kw_only=True, compare=False
     )
+    # How the header declared this instance: an explicit instantiation or
+    # specialization, or ``ABSENT`` for an implicit one. Set only by a producer
+    # that reads the declaration kind (clang, ``extract/headers/clang/
+    # explicit_instantiation.py``); castxml leaves it unset (``NOT_CAPTURED``).
+    # Read by ``compare/template_instance_absence.py``. Persisted since v65.
+    explicit_instantiation_fact: Fact[ExplicitInstantiation] | None = field(
+        default=None, kw_only=True, compare=False
+    )
     # ADR-063 Phase 2 identity carrier (persisted since schema v28) -- see
     # ``model/entities.py``'s ``RecordType.entity_id`` for the full
     # rationale, including why this is keyword-only, excluded from
@@ -448,6 +457,12 @@ class Variable:
     # keyword, so this closes off a new positional dependency without
     # touching any of them.
     is_static: bool = field(default=False, kw_only=True)
+    # See ``Function.explicit_instantiation_fact``: a static data member of an
+    # explicitly instantiated class template, or a namespace-scope template
+    # variable instance.
+    explicit_instantiation_fact: Fact[ExplicitInstantiation] | None = field(
+        default=None, kw_only=True, compare=False
+    )
     # See ``Param.type_identities_fact``.
     type_identities_fact: Fact[tuple[str, ...]] | None = field(
         default=None, kw_only=True, compare=False

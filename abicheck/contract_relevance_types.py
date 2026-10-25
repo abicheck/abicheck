@@ -291,6 +291,15 @@ CONTRACT_REASON_CODES: MappingProxyType[str, str] = MappingProxyType(
             "with this reason, and does not gate. A symbol the caller declared "
             "public explicitly keeps gating."
         ),
+        "dependency_internal_unreachable": (
+            "The type is declared in a dependency (a header-only or vendored "
+            "library outside the library's own declarations, or a toolchain "
+            "header) and no public declaration reaches it: it is an "
+            "instantiation or internal of that dependency, not part of the "
+            "library's surface. Its presence change is reported, outside the "
+            "contract, with this reason, and does not gate. A type a public "
+            "signature, field or base names is never given this reason."
+        ),
         "closed_domain_no_commitment": (
             "The declared evidence domain was searched completely and no "
             "commitment or authoritative exclusion was found."

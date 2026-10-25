@@ -156,7 +156,7 @@ def test_build_summary_quality_issues_does_not_shadow_real_additions() -> None:
     4 fix): compatible_additions counts only the genuine addition,
     quality_issues names only the non-addition subset -- the two sum to
     the old (pre-3.15), historically-inflated total, mirroring
-    cli_compare_release_pairwise.py's ADDITION_KINDS-based `quality_issues`
+    retired cli_compare_release_pairwise.py's ADDITION_KINDS-based `quality_issues`
     derivation for the release path.
     """
     result = DiffResult(

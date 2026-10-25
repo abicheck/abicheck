@@ -4,7 +4,7 @@
 """The release member fan-out: every matched member compared, then the
 release-level dispositions that need all of them.
 
-Moved out of ``cli_compare_release_pairwise.py`` (which could only be reached
+Moved out of the retired ``cli_compare_release_pairwise.py`` (which could only be reached
 through Click) into the release compare owner
 (:mod:`abicheck.workflows.release_compare`):
 

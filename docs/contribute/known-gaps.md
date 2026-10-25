@@ -321,6 +321,10 @@ CJM: trust stage (docs/contribute/cjm.md) — use case UC-WF-analysis-assurance 
 
 `false-positive` — Such a specialization still reports `type_removed` and its members' removals when no producer proved its origin: an old snapshot from before this change and schema v61, a dump without clang (macro-produced class-head, partial specialization), or an explicit instantiation the new header drops. [Full write-up](known-gaps/class-template-specialization-members-a-new-header-stops-enumerating.md)
 
+#### Explicit function and variable instances: removal is castxml-blind and class-scope-ambiguous (2026-10-25)
+
+**Status: NARROWED** (2026-10-25). An explicitly dropped function or static member is a removal on the clang header backend; castxml and two-instances-in-one-TU cases still take the export-loss or unsupported path. [Full write-up](known-gaps/explicit-function-and-variable-instances-removal-is-castxml-blind.md)
+
 #### MinGW toolchain headers are not classified as dependencies (2026-09-23)
 
 **Status (re-verified 2026-10-09 at `456989f`): OPEN.** abicheck/extract/declaration_provenance.py:270 _is_toolchain_compiler_include_dir still recognises only lib/gcc/<triple>/<ver>/include, lib/clang, and castxml layouts. provenance.py has no handling for MinGW's <prefix>/<triple>/include.  
@@ -433,7 +437,7 @@ Do not re-attempt token-claiming. A header's export tokens cannot tell whether i
 
 #### Release report: live and stored operands render different documents
 
-**Status (updated 2026-10-24): PARTIAL.** A stored `BundleFacts` operand now renders JUnit and `oneline` through the live release renderer (`report.render_release_report.render_release_text`), pinned live-vs-stored through the CLI by `tests/test_cli_compare_stored_release_parity.py`. Still open: the stored JSON and Markdown shapes (see the write-up), the stored `html` and `--view show=` projections (HTML needs an effective-config receipt the stored path does not resolve), and the stored JUnit's passing testcases for unchanged symbols (no old-side inventory reaches it, so the pass-rate denominator differs from live).  
+**Status (updated 2026-10-25): PARTIAL.** A stored `BundleFacts` operand renders JSON, Markdown, JUnit, `oneline` and HTML. JUnit, `oneline` and HTML go through the live release renderer on one live-shaped evaluation of the stored comparison (`tests/test_cli_compare_stored_release_parity.py`). Its JSON also carries an additive `release` block (release schema 2.3) that is the live document, with explicit `unavailable` markers and a reason for each field a stored comparison cannot compute, and a receipt marked `reconstructed_from_stored_facts`. Still open: the stored document's own flat shape (`mode: bundle_facts`) is kept beside that block and is deprecated; it is removed by a follow-up change that moves `action/report_query.py` and its tests to the live shape. `--view show=` and `sarif`/`review` stay refused for a stored OLD_INPUT.  
 `hygiene` — Converging the shapes changes a published JSON document, so it needs a release-schema decision. [Full write-up](known-gaps/release-report-live-and-stored-operands-render-different-documents.md)
 
 #### A stored `BundleFacts` operand pairs versioned member names on one side only (2026-10-23)

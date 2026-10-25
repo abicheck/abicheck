@@ -840,7 +840,6 @@ def run_compare(
     collect_mode = _enrich.localize_collect_mode(collect_mode)
 
     # Applies to both sides; a per-side --ast-frontend old=/new= still wins.
-    import dataclasses
 
     compile_context, merged_includes = resolve_compile_context(
         **_compile_context_kwargs
@@ -1114,7 +1113,9 @@ def run_compare(
         evaluation_config, contract_mode, contract_evaluation=contract_evaluation
     )
     # ADR-020b/068 D5: `deployment:` is config-only (resolved_cfg.deployment).
-    request = dataclasses.replace(
+    from .workflows.compare.invocation import build_resolved_compare_request
+
+    request = build_resolved_compare_request(
         resolution_request,
         policy=policy,
         policy_file_path=policy_file_path,
@@ -1122,13 +1123,8 @@ def run_compare(
         strict_suppressions=strict_suppressions,
         require_justification=require_justification,
         scope_public=scope_public_headers,
-        force_public_symbols=frozenset(force_public) if force_public else None,
-        public_surface_allowlist=(
-            frozenset(post_manifest_allowlist)
-            if post_manifest_allowlist is not None
-            else None
-        ),
-        pattern_verdicts=True,
+        force_public=force_public,
+        post_manifest_allowlist=post_manifest_allowlist,
         collapse_versioned_symbols=collapse_versioned_symbols,
         env_matrix=resolved_cfg.deployment,
         diagnostic_comparison=diagnostic_comparison,
@@ -1136,8 +1132,8 @@ def run_compare(
         contract_evaluation=contract_evaluation,
         contract_mode=resolved_contract_mode,
         depth=depth,
-        old_probe_matrix=probe_matrix_old,
-        new_probe_matrix=probe_matrix_new,
+        probe_matrix_old=probe_matrix_old,
+        probe_matrix_new=probe_matrix_new,
         abi3_floor=_enrich.abi3_floor,
     )
     from .cli_buildsource_helpers import _echo as _evidence_echo

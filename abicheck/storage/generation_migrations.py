@@ -232,6 +232,15 @@ SPELLING_MIGRATIONS: Mapping[int, GenerationSpellingChange] = {
         "system_header where they read unknown or private_header -- an origin "
         "value, not a type spelling"
     ),
+    19: GenerationSpellingChange(
+        "DWARF declarations record their declaring file when it is a header, and a dependency-internal presence finding no public declaration reaches is out of contract; no stored type spelling changed, only which declarations carry a location and which findings gate"
+    ),
+    20: GenerationSpellingChange(
+        "clang records Function/Variable.explicit_instantiation_fact from a text "
+        "AST pass (extract/headers/clang/explicit_instantiation.py); no existing "
+        "type, name or fact spelling changes, so no rewrite is needed -- an older "
+        "snapshot names no explicit form and reads as not collected"
+    ),
 }
 
 #: Reasons that say nothing about what was audited; the bump gate refuses them.
