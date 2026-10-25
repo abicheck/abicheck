@@ -7,4 +7,4 @@
   `__abicheck_ctor__std::...` key) are now collapsed to one record when the
   castxml dump is built, so dumping a header that includes `<memory>` or
   `<cstring>` no longer warns. A duplicate from the library's own headers, or
-  with conflicting signatures, still warns. Extractor generation is now 16.
+  with conflicting signatures, still warns. Extractor generation is now 18.

@@ -540,6 +540,36 @@ CLASSIFICATION_BUG_CLASSES: tuple[BugClass, ...] = (
         axes={"evidence": ("header", "elf")},
     ),
     BugClass(
+        id="detector.undeclared_export_shrink_silent",
+        invariant=(
+            "In header mode with no declared contract, every default-"
+            "visibility export the old library carried and the new one lost "
+            "is reported as a removal finding, whether or not a public header "
+            "declares it, at any shrink size, for C and C++-mangled names, "
+            "functions and data, versioned or not; the run is BREAKING "
+            "(ADR-063 2026-10-01 amendment, catalog case182). An unchanged "
+            "export set and the loss of hidden-visibility symbols that were "
+            "never exported produce no removal."
+        ),
+        fixed_by=(1308,),
+        seed_tests=(
+            "tests/test_undeclared_export_shrink.py",
+            "tests/test_undeclared_export_shrink_integration.py",
+            "tests/test_abi_surface_direction.py",
+            # F1 harness: header-declaration ablation cell
+            "tests/test_family_f1_evidence_ablation.py",
+        ),
+        public_surfaces=("cli", "json_report"),
+        axes={
+            "evidence": ("header", "elf"),
+            "language": ("c", "c++"),
+            "symbol": ("function", "variable"),
+            "versioning": ("unversioned", "version script"),
+            "header_coverage": ("none declared", "some declared"),
+            "frontend": ("castxml",),
+        },
+    ),
+    BugClass(
         id="detector.removal_from_header_enumeration",
         invariant=(
             "An entity castxml records only while the header instantiates it "

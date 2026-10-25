@@ -221,15 +221,17 @@ FAMILIES: dict[str, Family] = {
         ),
         Family(
             key="F15",
-            title="castxml header vectors keep the element type clang reports",
+            title="castxml type nodes keep the spelling that tells two types apart",
             invariant=(
-                "A castxml vector node resolves to the spelling clang gives for the same "
-                "declaration, so a header comparison sees a same-size element change."
+                "A castxml type node (a vector's element type, a function type's "
+                "declarator) resolves to the spelling clang gives for the same "
+                "declaration and never collapses to an opaque tag, so a header "
+                "comparison sees the change."
             ),
             harness_tests=(),
             planned_reason=(
-                "One class so far; revisit when a second header-backend node type is "
-                "collapsed to an opaque spelling and the two share the clang join."
+                "The vector and FunctionType classes share this invariant; a family "
+                "harness that enumerates both node types and their sites is planned."
             ),
         ),
         Family(
@@ -280,6 +282,7 @@ _F1 = (
     "classification.non_entity_finding_feeds_contract_coverage",
     "detector.selector_axis_unstamped",
     "detector.removal_from_header_enumeration",
+    "detector.undeclared_export_shrink_silent",
     "evidence.unread_producer_read_as_confirmed_absence",
     "evidence.depth_projection_drops_lower_layer_detector_input",
     "evidence.container_presence_read_as_evidence_content",
@@ -459,7 +462,10 @@ _F12 = (
 )
 _F13 = ("extraction.compile_entry_collapsed_to_first_source",)
 _F14 = ("extraction.vector_type_collapsed_to_plain_array",)
-_F15 = ("extraction.castxml_vector_element_not_modelled",)
+_F15 = (
+    "extraction.castxml_vector_element_not_modelled",
+    "extraction.castxml_function_type_collapsed_to_opaque_tag",
+)
 _F16 = (
     "report.shared_display_budget_starvation",
     "report.markdown_size_unbounded_by_finding_count",

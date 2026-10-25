@@ -248,4 +248,17 @@ __all__ = ["RELEASE_SCHEMA_VERSION"]
 #:       ``public_api`` block (``added[]``/``removed[]`` public symbols and
 #:       ``internal_omitted.{added,removed}`` counts of internal/RTTI symbols
 #:       collapsed out of the lists, never dropped -- ADR-067). Additive.
-RELEASE_SCHEMA_VERSION = "2.1"
+#: - ``2.2`` adds ``libraries[].surface_changes`` (each compared member's
+#:       scalar ``surface_changes`` block, the identical one a standalone
+#:       ``compare`` of that pair carries) and the top-level
+#:       ``surface_changes`` on both the live and the stored operand: the
+#:       members' additions, removals and modifications (each entry gaining
+#:       a ``library`` key), the aggregate ``counts``, per-member
+#:       ``members[]`` counts, and ``library_states[]`` -- every library
+#:       present on one side only, with its ADR-065 state (``removed``/
+#:       ``added`` only when the inventory proves it; otherwise
+#:       ``unselected``, ``expected_not_produced``, ``failed``, ``unproven``,
+#:       ``unsupported``, ``ambiguous``, ``declared_absent``, or a support-
+#:       promise ``retired``/``introduced``). Always present, possibly empty,
+#:       like the scalar report's block. Additive; no existing field moves.
+RELEASE_SCHEMA_VERSION = "2.2"

@@ -195,10 +195,23 @@ SPELLING_MIGRATIONS: Mapping[int, GenerationSpellingChange] = {
         extent_shift=1,
     ),
     16: GenerationSpellingChange(
+        "castxml function types spell their full declarator, 'int (*)(int, int)', "
+        "instead of the opaque 'FunctionType*' tag (extract/headers/castxml/"
+        "type_resolution.py): the stored tag dropped the signature, so no rewrite "
+        "is sound; policy/generation_drift_demotion.py demotes a stored tag "
+        "against a fresh declarator, and a baseline holding callbacks is re-dumped"
+    ),
+    17: GenerationSpellingChange(
+        "clang function-template patterns whose default argument cannot be spelled "
+        "record template_param_defaults_fact as UNSUPPORTED (was absent); no type "
+        "or name spelling changes, so no rewrite is needed -- an older clang "
+        "snapshot simply names no gap for such a pattern"
+    ),
+    18: GenerationSpellingChange(
         "castxml collapses a same-key function group declared only in system "
-        "headers outside the public set whose signatures agree modulo cv (glibc "
-        "wcschr/strchr overloads, "
-        "libstdc++ copy ctor beside its converting-template twin) to its first "
+        "headers outside a given public set, whose signatures (and exception "
+        "specification) agree modulo cv -- glibc wcschr/strchr overloads, "
+        "libstdc++ copy ctor beside its converting-template twin -- to its first "
         "declaration (duplicate_declarations.py): the dropped record was already "
         "shadowed first-wins by the index, so set membership shrinks and no "
         "stored type spelling is rewritten"
