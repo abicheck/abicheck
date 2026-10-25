@@ -388,6 +388,7 @@ _F3 = (
     "comparability.incidental_ordering_treated_as_contract",
     "tooling.platform_dependent_path_key",
     "templates.parameter_template_args_read_as_family_membership",
+    "identity.benign_duplicate_declaration_key",
 )
 _F4 = (
     "classification.name_shape_as_contract_membership",
