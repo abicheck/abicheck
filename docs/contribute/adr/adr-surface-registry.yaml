@@ -715,7 +715,7 @@ adrs:
   - id: ADR-089
     file: 089-dwarf-dependency-internals-out-of-contract.md
     disposition: internal
-    reason: The DWARF declaration-file fix is extractor-internal, and the contract rule adds a reason value to the existing contract_reason_code field and scope_reasons, with no new flag, report field or exit code.
+    reason: The DWARF declaration-file fix is extractor-internal, and the contract rule adds a reason value to the existing contract_reason_code field and scope_reasons, with no new flag, report field or exit code. The 2026-10-25 amendment extends the same rule to header-derived snapshots, again with no new flag, field or exit code.
     use_cases: []
 
   - id: ADR-086

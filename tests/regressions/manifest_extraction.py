@@ -310,6 +310,45 @@ EXTRACTION_BUG_CLASSES: tuple[BugClass, ...] = (
         },
     ),
     BugClass(
+        id="scoping.dependency_internals_in_contract",
+        invariant=(
+            "A dependency entity -- a record, a typedef, a function (hidden "
+            "friends included) or a variable declared by a dependency's "
+            "header, or a weak template instance in a dependency-only "
+            "namespace -- that no public declaration of the library names and "
+            "the library's binary does not define (a GLOBAL export) is "
+            "recorded but out of contract (dependency_internal_unreachable), "
+            "on a DWARF-only and on a header-derived snapshot alike; one the "
+            "library names or defines stays in contract. A header-only SIMD "
+            "dependency (intel/xvec) rebuilt -mavx2 against -mavx512f gated "
+            "a header compare on ~90 of its own instances while the library's "
+            "own break was 6 findings."
+        ),
+        fixed_by=(1775,),
+        seed_tests=(
+            "tests/test_header_dependency_internals.py",
+            "tests/test_contract_dependency_origin.py",
+            "tests/test_header_dependency_internals_integration.py",
+            "tests/test_dwarf_dependency_scope_integration.py",
+        ),
+        public_surfaces=("cli",),
+        axes={
+            "evidence": ("dwarf_only", "headers_stored", "headers_live"),
+            "entity": (
+                "record",
+                "typedef",
+                "hidden_friend",
+                "variable",
+                "weak_instance",
+            ),
+            "layout": (
+                "sibling_include_root",
+                "nested_include_root",
+                "no_recorded_include_root",
+            ),
+        },
+    ),
+    BugClass(
         id="extraction.aggregate_layout_inverted_by_line",
         invariant=(
             "A diagnostic raised while parsing the multi-header aggregate "

@@ -1,7 +1,7 @@
 # ADR-089: A DWARF Declaration's File Is Read Correctly, and a Dependency's Unreachable Internals Are Out of Contract
 
 **Date:** 2026-10-23
-**Status:** Accepted (2026-10-23) — implemented for binary + DWARF compares without headers.
+**Status:** Accepted (2026-10-23) — implemented for binary + DWARF compares without headers; amended 2026-10-25 for compares with headers (see the amendment below).
 
 Governed by: [ADR-061](061-responsibility-package-architecture.md) (owner of each stage), [ADR-062](062-project-snapshot-storage-v2.md) (extractor generation), [ADR-065](065-comparison-scope-selection-and-completeness.md) (absent is not removed), [ADR-067](067-change-intent-acknowledgment-and-disposition-audit.md) (record before disposing).
 
@@ -46,7 +46,7 @@ Anything not reached is unreachable. Unreachable names are returned, except a na
 
 Only presence kinds are handled. A size or layout change on the same type is not presence evidence, and stays on its own rule.
 
-Header-derived snapshots are not touched: they are already scoped by `resolve_dependency_scope`, and the rule returns no names for them.
+Header-derived snapshots are not touched: they are already scoped by `resolve_dependency_scope`, and the rule returns no names for them. *(Superseded by the 2026-10-25 amendment: that scoping drops only toolchain/system declarations, so a dependency reached through `-I` was never scoped.)*
 
 ## Consequences
 
@@ -68,3 +68,40 @@ Header-derived snapshots are not touched: they are already scoped by `resolve_de
 ## Verification
 
 `tests/test_dwarf_decl_file.py` (both DWARF layouts, sentinel and out-of-range), `tests/test_contract_dependency_origin.py` (the rule's judgments per side and kind), and `tests/test_dwarf_dependency_scope_integration.py` (gcc-built fake header-only dependency, with and without an exported vector parameter; the field-alias-only shape exercises the size bound).
+
+## Amendment (2026-10-25): compares with headers
+
+### Context
+
+D5's last paragraph assumed a header-derived snapshot was already scoped. It is only for toolchain and system headers: `resolve_dependency_scope` keeps every declaration of a header-only dependency reached through `-I`. The field report (intel/xvec, `-H api.h -I xvec/include --build-info`, `-mavx2` against `-mavx512f`) produced 98 findings, about 90 of them xvec's own, all in contract: 68 `HIDDEN_FRIEND_ADDED`/`_REMOVED` on `basic_vec<float, simd_fixed_size_abi<8, x86_avx2_tag>>` against `<16, x86_avx512_tag>`, `VAR_ADDED` for `xvec::simd::detail` tables, `TYPE_ADDED`, `TYPEDEF_REMOVED`/`TYPEDEF_BASE_CHANGED` on `vec_traits` members, `TAG_TYPE_RENAMED`, `OVERLOAD_SET_REROUTED`. The library's own break was `State`'s size, alignment and offset and the vector it holds.
+
+### Decision
+
+**A1. One owner for both paths.** `workflows/dump/dependency_internals.py` answers, per snapshot, a `DependencyInternals` (`policy/contract_dependency_origin.py`): unreachable record names, typedef names, function/variable symbols and overload stems. A DWARF-only snapshot delegates to D2-D4 (`dwarf_dependency_types`, unchanged); a header-derived one is answered there. The rule (D5) and its reason `dependency_internal_unreachable` are reused; no second mechanism.
+
+**A2. Dependency, on the header path, needs both a path and a namespace.** The public headers (`ScopeOrigin.PUBLIC_HEADER`) are the library's. Any other header is placed under its deepest *root*: the recorded include directories (`-I`, `-isystem`, `-iquote`, `-idirafter` in `ast_compile_args`) plus the public headers' own directories. A root holding a public header is the library's; a header under any other root, or under none, is at a dependency path. So `xvec/include` nested under the library's own `-I .` is a dependency root. In addition the declaration's outermost namespace must be one only dependency-path declarations use (read from the linkage name where there is one, since castxml keys implicit members by a synthetic `__abicheck_ctor__ns::C(...)`). A library's own generated or private header outside its public directories keeps its `lib::` entities on path evidence alone. With no public header nothing is classified.
+
+**A3. Reached, per entity.**
+- A record is reached by a direct name from a public declaration (D4's single-hop walk, with typedef aliases). `basic_vec<float>` named by `State::acc` (`V`) stays in contract, presence and layout; its template arguments do not.
+- A function or variable is the library's only when the library's binary defines it: a `GLOBAL` ELF export (any export on PE/Mach-O, which carry no binding). `WEAK`/`GNU_UNIQUE` exports are COMDAT copies every consumer instantiates itself; one in a dependency-only namespace with no header declaration (`fakesimd::reduce<float>`, emitted by the library's build) is internal too.
+- **Hidden friends of a reached dependency record are out of contract.** They are the dependency's API on that type, compiled into every consumer from the dependency's header and not defined by the library. What the library promises about the type (identity, size, layout wherever its declarations use it) keeps gating through the record's own findings. A friend the library exports as `GLOBAL` stays in contract. The same rule applies to a reached record's member typedefs.
+- A typedef (member of a dependency record, or in a dependency-only namespace) is reached when its name occurs in a public declaration's signature, field or default, or in the library's own header text.
+
+**A4. The rule's kinds.** Added: judged on the new side; removed: on the old; modified: on both. Records: `TYPE_ADDED`, `TYPE_REMOVED`, `TAG_TYPE_RENAMED` (both names), and `INTERNAL_TYPE_LEAKS_VIA_PUBLIC_API` raised on such a record (either side). Typedefs: `TYPEDEF_REMOVED`, `TYPEDEF_BASE_CHANGED`. Any function- or variable-entity kind on an internal symbol; `OVERLOAD_SET_REROUTED` when the stem's overloads are all internal on both sides. Layout kinds on records stay out of the rule (D5).
+
+**A5. Only a caller's declaration keeps a finding in contract.** D5 skipped any decision with reason `public_root_membership`, assuming it meant "declared public". The header domain stamps that reason on its whole closure, which runs through the dependency's headers, so under the default public contract the rule never fired. The rule now skips only a finding the caller declared public (`--public-symbol`, a post-manifest commitment), the two overlays `contract_evaluation` trusts outright.
+
+### Consequences
+
+- A **default change** for compares with headers, stored or live: an unreachable dependency internal no longer gates. It is recorded, counted in `scope_reasons`. On the field report, 85 of xvec's findings move out of contract (91 counted, with deduplicated ones), and the 6 library-owned layout findings gate as before.
+- Limits, stated so they are not mistaken for coverage:
+  - Without a recorded include directory (no build data), a dependency vendored under a public header's own directory cannot be told from the library's; it stays in contract.
+  - Paths are compared as recorded. A home-prefixed include directory redacted in `ast_compile_args` no longer matches its headers; only the public-header roots are then used.
+  - A dependency header declaring into a namespace the library also uses (both in the global namespace, a C dependency) is not classified.
+  - A dependency relying on `extern template` with the explicit instantiation in the library's binary exports `WEAK` symbols consumers do need; they read as internal.
+  - `INTERNAL_SYMBOL_REQUIRED_BY_PUBLIC_API` names its subject by display name, not linkage name, and is not matched.
+
+### Verification
+
+`tests/test_header_dependency_internals.py` (an exhaustive layout × relation domain against a truth table: sibling, nested and unrecorded include roots, the library's own generated header; named/unnamed records and typedefs; GLOBAL/WEAK/absent exports; through the policy rule), `tests/test_contract_dependency_origin.py` (each kind's sides), `tests/test_header_dependency_internals_integration.py` and the field shape `tests/field_shapes/header_only_dependency_internals` (g++ + castxml, stored and live, with and without a library break).
+
