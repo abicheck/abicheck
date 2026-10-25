@@ -216,6 +216,9 @@ REQUEST_ROUTING: dict[str, tuple[str, Any]] = {
         _UC,
         "the assurance.require_complete exit needs an incomplete-analysis fixture; gate-level parity is test_compare_exit_gate_unified.py",
     ),
+    "diagnostic_comparison": ("covered", ("diagnostic_comparison",)),
+    "contract_evaluation": ("covered", ("contract_exports",)),
+    "contract_mode": ("covered", ("contract_exports",)),
     "pattern_verdicts": (
         "covered",
         ("default",),
