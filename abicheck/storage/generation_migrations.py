@@ -195,8 +195,9 @@ SPELLING_MIGRATIONS: Mapping[int, GenerationSpellingChange] = {
         extent_shift=1,
     ),
     16: GenerationSpellingChange(
-        "castxml collapses a same-key function group declared only in non-public "
-        "headers whose signatures agree modulo cv (glibc wcschr/strchr overloads, "
+        "castxml collapses a same-key function group declared only in system "
+        "headers outside the public set whose signatures agree modulo cv (glibc "
+        "wcschr/strchr overloads, "
         "libstdc++ copy ctor beside its converting-template twin) to its first "
         "declaration (duplicate_declarations.py): the dropped record was already "
         "shadowed first-wins by the index, so set membership shrinks and no "

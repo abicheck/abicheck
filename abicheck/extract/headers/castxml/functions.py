@@ -49,6 +49,7 @@ from .location import (
     access_level,
     contract_attributes as _extract_contract_attributes,
     decl_is_public,
+    decl_is_system_dependency,
     deprecation_marker as _deprecation_marker,
     export_match,
     is_builtin_element,
@@ -720,10 +721,12 @@ def parse_functions(ctx: CastxmlParserContext) -> list[Function]:
         func = parse_function_element(ctx, el, hidden_friend_owner_by_id)
         if func is not None:
             parsed.append((el, func))
-    # Dependency headers declare some entities twice under one key (glibc's
-    # cv overloads, libstdc++'s copy ctor + same-signature converting
-    # template); keep one record instead of handing the index a duplicate.
-    return collapse_benign_duplicates(parsed, lambda el: decl_is_public(ctx, el))
+    # System headers declare some entities twice under one key (glibc's cv
+    # overloads, libstdc++'s copy ctor + same-signature converting template);
+    # keep one record instead of handing the index a duplicate.
+    return collapse_benign_duplicates(
+        parsed, lambda el: decl_is_system_dependency(ctx, el)
+    )
 
 
 def _contract_attributes_with_source_cc(

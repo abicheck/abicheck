@@ -6,7 +6,7 @@ copy/move constructor next to a same-signature converting-constructor template
 (one ``__abicheck_ctor__std::...`` placeholder key) used to reach the snapshot
 as two records under one key, so every dump of a header including
 ``<memory>``/``<cstring>`` warned "Duplicate mangled symbols skipped
-(first-wins)". A group whose members all come from non-public headers and agree
+(first-wins)". A group whose members all come from system headers and agree
 modulo cv-qualification is one entity: it keeps exactly its first declaration.
 A duplicate reaching the library's own headers, or with conflicting
 signatures, is left to the snapshot index, which still warns.
@@ -20,7 +20,7 @@ import shutil
 import subprocess
 import sys
 from pathlib import Path
-from xml.etree.ElementTree import Element
+from xml.etree.ElementTree import Element, SubElement
 
 import pytest
 
@@ -62,7 +62,7 @@ def test_benign_group_keeps_first_declaration_in_any_order(
 ) -> None:
     other = _fn("f", "_Z1fv", "void")
     for perm in itertools.permutations([*group, other]):
-        out = collapse_benign_duplicates(_parsed(list(perm)), lambda _el: False)
+        out = collapse_benign_duplicates(_parsed(list(perm)), lambda _el: True)
         dup_first = next(f for f in perm if f is not other)
         assert out == [f for f in perm if f is other or f is dup_first]
         caplog.clear()
@@ -72,30 +72,85 @@ def test_benign_group_keeps_first_declaration_in_any_order(
 
 
 @pytest.mark.parametrize(
-    ("group", "public"),
+    ("group", "dependency"),
     [
-        (_GLIBC, [True, False]),  # one member from the library's own header
-        (_STD_CTOR, [True, True]),
+        (_GLIBC, [False, True]),  # one member from the library's own header
+        (_STD_CTOR, [False, False]),
         (
-            [  # conflicting signatures under one key, both non-public
+            [  # conflicting signatures under one key, both system headers
                 _fn("g", "_Z1gi", "int", "int"),
                 _fn("g", "_Z1gi", "int", "long"),
             ],
-            [False, False],
+            [True, True],
         ),
-        ([_fn("h", "_Z1hv", "int"), _fn("h", "_Z1hv", "double")], [False, False]),
+        ([_fn("h", "_Z1hv", "int"), _fn("h", "_Z1hv", "double")], [True, True]),
     ],
 )
 def test_conflicting_or_public_duplicate_is_kept_and_still_warns(
-    group: list[Function], public: list[bool], caplog: pytest.LogCaptureFixture
+    group: list[Function], dependency: list[bool], caplog: pytest.LogCaptureFixture
 ) -> None:
     parsed = _parsed(group)
-    by_el = {id(el): p for (el, _), p in zip(parsed, public, strict=True)}
+    by_el = {id(el): p for (el, _), p in zip(parsed, dependency, strict=True)}
     out = collapse_benign_duplicates(parsed, lambda el: by_el[id(el)])
     assert out == group
     with caplog.at_level(logging.WARNING, logger="abicheck.model"):
         AbiSnapshot(library="l", version="1", functions=out).index()
     assert [r for r in caplog.records if "first-wins" in r.getMessage()]
+
+
+def _two_ctor_root(header: str) -> Element:
+    """castxml shape of two same-key artificial ctors (one
+    ``__abicheck_ctor__W()`` key) declared in *header*."""
+    root = Element("CastXML", attrib={"format": "1.4.0"})
+    SubElement(root, "File", attrib={"id": "f1", "name": header})
+    SubElement(root, "Namespace", attrib={"id": "_1", "name": "::"})
+    SubElement(
+        root,
+        "Class",
+        attrib={
+            "id": "_2",
+            "name": "W",
+            "context": "_1",
+            "file": "f1",
+            "location": "f1:1",
+        },
+    )
+    for i in (3, 4):
+        SubElement(
+            root,
+            "Constructor",
+            attrib={
+                "id": f"_{i}", "name": "W", "context": "_2", "access": "public",
+                "file": "f1", "line": "1", "artificial": "1",
+            },
+        )  # fmt: skip
+    return root
+
+
+@pytest.mark.parametrize(
+    ("header", "public", "kept"),
+    [
+        ("/usr/include/c++/13/bits/w.h", None, 1),  # system, no public set
+        ("/usr/include/c++/13/bits/w.h", ["/opt/lib/api.h"], 1),  # system
+        ("/usr/include/mylib/w.h", ["/usr/include/mylib/w.h"], 2),  # declared public
+        ("/src/mylib/include/w.h", None, 2),  # project header, no public set
+        ("/src/mylib/include/w.h", ["/src/mylib/include/api.h"], 2),  # private
+    ],
+)
+def test_parser_collapses_only_provable_system_header_duplicates(
+    header: str, public: list[str] | None, kept: int
+) -> None:
+    """Through the real castxml parser: the provenance oracle is the header
+    path itself -- only a toolchain/system header outside the public set is
+    a dependency the library cannot have meant twice."""
+    from abicheck.extract.headers.castxml.dumper import _CastxmlParser
+
+    parser = _CastxmlParser(
+        _two_ctor_root(header), set(), set(), public_header_paths=public
+    )
+    names = [f.mangled for f in parser.parse_functions() if f.name == "W"]
+    assert len(names) == kept
+    assert len(set(names)) == 1
 
 
 _CASES = ("case80_pimpl_shared_to_unique", "case126_sycl_device_impl_ptr")

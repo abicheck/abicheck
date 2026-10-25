@@ -840,6 +840,6 @@ def test_castxml_duplicate_collapse_is_order_invariant_and_keeps_distinct() -> N
     for perm in itertools.permutations(funcs):
         parsed = [(Element("Function"), f) for f in perm]
         keys = Counter(
-            f.mangled for f in collapse_benign_duplicates(parsed, lambda _: False)
+            f.mangled for f in collapse_benign_duplicates(parsed, lambda _: True)
         )
         assert keys == {"strchr": 1, "lookup": 2}

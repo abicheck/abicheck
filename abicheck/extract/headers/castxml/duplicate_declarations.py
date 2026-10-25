@@ -30,9 +30,11 @@ dependency-header shapes, and ``AbiSnapshot.index`` then warned
   entry point.
 
 A group is collapsed to its first declaration (castxml document order, so the
-result is deterministic) only when *every* member was declared outside the
-public header set and the members' signatures agree modulo cv-qualification.
-Anything else -- a member from the library's own headers, or signatures that
+result is deterministic) only when *every* member is provably a dependency
+declaration -- in a toolchain/system header outside the public set
+(``location.decl_is_system_dependency``) -- and the members' signatures agree
+modulo cv-qualification. Anything else -- a member from the library's own
+headers (public, private or of unknown provenance), or signatures that
 genuinely conflict -- is left for the snapshot index, which still warns.
 """
 
@@ -60,24 +62,26 @@ def _signature(func: Function) -> tuple[str, str, tuple[str, ...]]:
 
 
 def is_benign_duplicate_group(
-    funcs: Sequence[Function], public: Sequence[bool]
+    funcs: Sequence[Function], dependency: Sequence[bool]
 ) -> bool:
     """Whether same-key *funcs* are one dependency-header entity, declared twice.
 
-    *public* holds, per member, whether its declaration sits in a public
-    (library) header.
+    *dependency* holds, per member, whether its declaration is provably in a
+    system (dependency) header rather than the library's own.
     """
-    if len(funcs) < 2 or any(public):
+    if len(funcs) < 2 or not all(dependency):
         return False
     first = _signature(funcs[0])
     return all(_signature(f) == first for f in funcs[1:])
 
 
 def collapse_benign_duplicates(
-    parsed: Sequence[tuple[Element, Function]], is_public: Callable[[Element], bool]
+    parsed: Sequence[tuple[Element, Function]],
+    is_dependency: Callable[[Element], bool],
 ) -> list[Function]:
     """*parsed* functions, with each benign duplicate group reduced to its first
-    member. *is_public* (``decl_is_public``) is asked only about duplicates."""
+    member. *is_dependency* (``decl_is_system_dependency``) is asked only
+    about duplicates."""
     groups: dict[str, list[int]] = {}
     for index, (_, func) in enumerate(parsed):
         groups.setdefault(func.mangled, []).append(index)
@@ -86,7 +90,7 @@ def collapse_benign_duplicates(
         if len(indexes) < 2:
             continue
         funcs = [parsed[i][1] for i in indexes]
-        public = [is_public(parsed[i][0]) for i in indexes]
-        if is_benign_duplicate_group(funcs, public):
+        dependency = [is_dependency(parsed[i][0]) for i in indexes]
+        if is_benign_duplicate_group(funcs, dependency):
             drop.update(indexes[1:])
     return [func for i, (_, func) in enumerate(parsed) if i not in drop]
