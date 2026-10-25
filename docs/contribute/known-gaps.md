@@ -428,7 +428,7 @@ Do not re-attempt token-claiming. A header's export tokens cannot tell whether i
 
 #### Release report: live and stored operands render different documents
 
-**Status (recorded 2026-10-11): OPEN.** Both operands go through `report.release_document.build_release_report` and agree on every shared semantic field (`tests/unit/report/test_release_document.py`), but each yields its own JSON/Markdown shape and the stored operand has no JUnit, HTML, `oneline` or `--view show=` projection.
+**Status (updated 2026-10-24): PARTIAL.** A stored `BundleFacts` operand now renders JUnit and `oneline` through the live release renderer (`report.render_release_report.render_release_text`), pinned live-vs-stored through the CLI by `tests/test_cli_compare_stored_release_parity.py`. Still open: the stored JSON and Markdown shapes (see the write-up), the stored `html` and `--view show=` projections (HTML needs an effective-config receipt the stored path does not resolve), and the stored JUnit's passing testcases for unchanged symbols (no old-side inventory reaches it, so the pass-rate denominator differs from live).  
 `hygiene` — Converging the shapes changes a published JSON document, so it needs a release-schema decision. [Full write-up](known-gaps/release-report-live-and-stored-operands-render-different-documents.md)
 
 #### A stored `BundleFacts` operand pairs versioned member names on one side only (2026-10-23)
@@ -488,7 +488,7 @@ Do not re-attempt token-claiming. A header's export tokens cannot tell whether i
 
 #### A stored-`BundleFacts` baseline's narrower format set is not pre-checked by the Action
 
-**Status (2026-10-23): PARTIAL.** `action/validate-inputs.sh` now takes the release set from the generated `action/cli-surface.txt` (`release-compare`), and the generator also emits the stored set (`stored-bundle-facts`, from `STORED_BUNDLE_FACTS_FORMATS`), so both sets have one source. Still open: the stored narrowing itself is not applied before install, because deciding that an operand *is* a stored BundleFacts document needs `workflows/bundle_compare_operand.looks_like_stored_bundle_facts` (a multi-probe, FIFO-safe reader), and a shell copy of it would be the second transcription ADR-070 forbids. The narrowing is enforced by the CLI after install.  
+**Status (2026-10-23): PARTIAL.** `action/validate-inputs.sh` now takes the release set from the generated `action/cli-surface.txt` (`release-compare`), and the generator also emits the stored set (`stored-bundle-facts`, from `STORED_RELEASE_FORMATS`), so both sets have one source. Still open: the stored narrowing itself is not applied before install, because deciding that an operand *is* a stored BundleFacts document needs `workflows/bundle_compare_operand.looks_like_stored_bundle_facts` (a multi-probe, FIFO-safe reader), and a shell copy of it would be the second transcription ADR-070 forbids. The narrowing is enforced by the CLI after install.  
 `hygiene` — For a stored-`BundleFacts` baseline the Action checks the release allowlist before install but not the stored subset, so a format the stored driver cannot render fails late, not at input validation. [Full write-up](known-gaps/a-stored-bundlefacts-baselines-narrower-format-set-is-not-pre.md)
 
 #### `compare --bundle-facts-out` stays a `compare` flag because `dump` has no release fan-out
