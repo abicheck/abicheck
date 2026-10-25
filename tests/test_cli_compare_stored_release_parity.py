@@ -411,3 +411,20 @@ def test_stored_html_carries_the_same_verdict_and_exit_as_live(
     shown = lambda html: {token for token in vocabulary if token in html}  # noqa: E731
     assert shown(stored_html) == shown(live_html)
     assert shown(live_html), "the live HTML states a verdict"
+
+
+@pytest.mark.parametrize("fmt", ["junit", "oneline", "html"])
+def test_live_formats_refuse_a_render_without_a_release_evaluation(
+    fmt: str, tmp_path: Path
+) -> None:
+    """The live-renderer formats need the stored run's release evaluation; a
+    caller without one gets a stated error, not a silent fallback."""
+    from abicheck.frontends.cli.commands.compare_bundle_facts import _render
+
+    with pytest.raises(ValueError, match=rf"-o {fmt}= renders the live release"):
+        _render(
+            object(),
+            fmt,
+            old_facts_path=tmp_path / "old.bundlefacts.json",
+            new_dir=tmp_path / "new",
+        )
