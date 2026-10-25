@@ -23,6 +23,7 @@ from abicheck.model import (
     Variable,
     Visibility,
 )
+from abicheck.policy.generation_drift_demotion import GENERATION_DRIFT_RULE
 from abicheck.serialization import snapshot_from_dict, snapshot_to_dict
 from abicheck.storage.generation_migrations import FACT_GENERATIONS_KEY
 
@@ -135,7 +136,27 @@ def test_real_array_resize_still_reported(position: str) -> None:
     current = snapshot_from_dict(
         snapshot_to_dict(_snapshot(position, "double[3]", "castxml"))
     )
-    assert compare(baseline, current).changes
+    changes = compare(baseline, current).changes
+    assert changes
+    # The load-time rewrite consumed generation 15's extent shift, so the
+    # comparison's drift demotion must not lower this real resize.
+    assert all(c.modulation_rule != GENERATION_DRIFT_RULE for c in changes)
+
+
+@pytest.mark.parametrize("position", ["return", "param", "variable"])
+@pytest.mark.parametrize("producer", ["hybrid", None])
+def test_unmigrated_extent_shift_still_demoted(
+    position: str, producer: str | None
+) -> None:
+    """Fallback: a snapshot the load rewrite does not touch (no castxml
+    provenance) keeps the comparison's extent-shift demotion."""
+    baseline = _stored(position, "double[1]", producer, 14)
+    current = snapshot_from_dict(
+        snapshot_to_dict(_snapshot(position, "double[2]", producer))
+    )
+    changes = compare(baseline, current).changes
+    assert changes
+    assert all(c.modulation_rule == GENERATION_DRIFT_RULE for c in changes)
 
 
 @pytest.mark.parametrize(

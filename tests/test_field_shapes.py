@@ -17,19 +17,21 @@ field report, never the detectors' helpers.
 
 from __future__ import annotations
 
+import ast
 import json
 import re
 import shutil
 import subprocess
 import sys
+import textwrap
 from pathlib import Path
 
 import pytest
+from _field_shapes import CORPUS, SOURCE_FILES
 from click.testing import CliRunner
 
 from abicheck.cli import main
 
-CORPUS = Path(__file__).parent / "field_shapes"
 SHAPES = sorted(p.name for p in CORPUS.iterdir() if (p / "ground_truth.json").is_file())
 
 #: Keys a ground truth may carry; anything else is a typo, not a silent no-op.
@@ -85,6 +87,70 @@ def test_ground_truth_is_well_formed(shape: str) -> None:
     for side in ("v1", "v2"):
         assert (CORPUS / shape / side / "api.h").is_file()
         assert (CORPUS / shape / side / "api.cpp").is_file()
+
+
+def test_every_corpus_side_file_is_consumed_by_the_runner() -> None:
+    """Each file under ``<shape>/v*/`` is one the runner builds or parses:
+    a shape with a ground truth, side ``v1``/``v2``, file ``api.h``/``api.cpp``."""
+    consumed = {
+        CORPUS / shape / side / name
+        for shape in SHAPES
+        for side in ("v1", "v2")
+        for name in SOURCE_FILES
+    }
+    present = {p for p in CORPUS.glob("*/v*/**/*") if p.is_file()}
+    assert present, "corpus has no side files"
+    assert present <= consumed, sorted(str(p) for p in present - consumed)
+
+
+def _string_literals(path: Path) -> list[tuple[int, str]]:
+    tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+    return [
+        (node.lineno, node.value)
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Constant) and isinstance(node.value, str)
+    ]
+
+
+def _embedded_copies(path: Path, sources: dict[str, Path]) -> list[str]:
+    hits = []
+    for lineno, text in _string_literals(path):
+        for candidate in {text, textwrap.dedent(text).lstrip("\n")}:
+            if candidate in sources:
+                hits.append(f"{path.name}:{lineno} copies {sources[candidate]}")
+    return hits
+
+
+def test_embedded_copy_scan_detects_a_copy(tmp_path: Path) -> None:
+    src = CORPUS / SHAPES[0] / "v1" / "api.cpp"
+    text = src.read_text(encoding="utf-8")
+    probe = tmp_path / "probe.py"
+    probe.write_text(
+        f"A = {text!r}\nB = {('  ' + text.replace(chr(10), chr(10) + '  '))!r}\n"
+        f"C = {text[:-2]!r}\n",
+        encoding="utf-8",
+    )
+    hits = _embedded_copies(probe, {text: src})
+    assert [h.split(" ", 1)[0] for h in hits] == ["probe.py:1", "probe.py:2"]
+
+
+@pytest.mark.repo_scan
+def test_no_test_embeds_a_corpus_source() -> None:
+    """A repro test reads its corpus shape through ``_field_shapes`` instead
+    of carrying an inline copy that can drift from the corpus file."""
+    sources = {
+        p.read_text(encoding="utf-8"): p.relative_to(CORPUS)
+        for p in CORPUS.glob("*/v*/*")
+        if p.is_file()
+    }
+    tests_root = Path(__file__).parent
+    hits = [
+        hit
+        for path in sorted(tests_root.rglob("*.py"))
+        if CORPUS not in path.parents
+        for hit in _embedded_copies(path, sources)
+    ]
+    assert hits == [], hits
 
 
 def _cli(args: list[str]) -> str:

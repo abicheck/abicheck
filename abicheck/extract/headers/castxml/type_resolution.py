@@ -59,6 +59,10 @@ def type_name_uncached(ctx: CastxmlParserContext, id_: str, depth: int = 0) -> s
     if el is None:
         return "?"
     tag = el.tag
+    if tag in _DECLARATOR_TAGS or tag == "FunctionType":
+        spelled = _function_declarator_spelling(ctx, el, depth)
+        if spelled is not None:
+            return spelled
     if tag == "FundamentalType":
         return el.get("name", "?")
     if tag == "Enumeration":
@@ -167,6 +171,81 @@ def type_name_uncached(ctx: CastxmlParserContext, id_: str, depth: int = 0) -> s
         # name, and the tag fallback below would spell it "AutoType".
         return "auto"
     return el.get("name", tag)
+
+
+#: Declarator wrappers that, around a ``FunctionType``, nest *inside* the
+#: function's own parentheses (``void (*const)(int)``) instead of suffixing it.
+_DECLARATOR_TAGS = frozenset(
+    {
+        "PointerType",
+        "ReferenceType",
+        "RValueReferenceType",
+        "CvQualifiedType",
+        "ArrayType",
+    }
+)
+
+
+def _function_declarator_spelling(
+    ctx: CastxmlParserContext, el: Any, depth: int
+) -> str | None:
+    """Render a (wrapped) castxml ``FunctionType`` as a full C declarator.
+
+    castxml's ``FunctionType`` node has no ``name``, so the generic fallback
+    spelled every callback ``FunctionType*`` and two callbacks with different
+    signatures compared equal (known gap 2026-10-15). This walks the
+    declarator wrappers down to the ``FunctionType`` and spells it as clang's
+    ``qualType`` does (``void (*)(int, void *)`` shape): return type, every
+    parameter type, a variadic ``...`` and castxml's calling-convention
+    ``attributes``. The signature then reaches every comparator (parameter,
+    return, field, variable, typedef) through the ordinary type spelling.
+
+    Returns ``None`` when the chain does not end at a ``FunctionType``. A
+    ``Typedef`` stops the walk: its name is the spelling there, and its
+    signature is compared on the typedef record itself.
+    """
+    declarator = ""
+    node = el
+    for _ in range(12):
+        if node is None or node.tag not in _DECLARATOR_TAGS:
+            break
+        tag = node.tag
+        if tag == "PointerType":
+            declarator = "*" + declarator
+        elif tag == "ReferenceType":
+            declarator = "&" + declarator
+        elif tag == "RValueReferenceType":
+            declarator = "&&" + declarator
+        elif tag == "CvQualifiedType":
+            quals = " ".join(q for q in ("const", "volatile") if node.get(q) == "1")
+            if quals:
+                declarator = quals + (" " + declarator if declarator else "")
+        else:  # ArrayType: castxml's ``max`` is the last valid index.
+            max_ = node.get("max", "")
+            try:
+                bound = str(int(max_) + 1) if max_ else ""
+            except ValueError:
+                bound = max_
+            declarator = f"{declarator}[{bound}]"
+        node = ctx.resolve(node.get("type", ""))
+    else:
+        return None
+    if node is None or node.tag != "FunctionType":
+        return None
+    ret = type_name(ctx, node.get("returns", ""), depth + 1)
+    args = [
+        type_name(ctx, child.get("type", ""), depth + 1)
+        for child in node
+        if child.tag == "Argument"
+    ]
+    if any(child.tag == "Ellipsis" for child in node):
+        args.append("...")
+    params = ", ".join(args) if args else "void"
+    attrs = (node.get("attributes") or "").strip()
+    suffix = f" __attribute__(({attrs}))" if attrs else ""
+    if not declarator:
+        return f"{ret} ({params}){suffix}"
+    return f"{ret} ({declarator})({params}){suffix}"
 
 
 #: Wrapper nodes whose referent is the same entity a slot names: walking

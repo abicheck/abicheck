@@ -116,6 +116,25 @@ def _declared_rewrite(spelling: str, generation: int) -> str:
     return spelling
 
 
+def _declared_extent_shift(old: str, new: str, generation: int) -> bool:
+    """Whether *old* -> *new* is the array-extent growth (``[N]`` ->
+    ``[N + shift]``) a generation above *generation* declared."""
+    shift = sum(
+        change.extent_shift
+        for introduced, change in SPELLING_MIGRATIONS.items()
+        if introduced > generation
+    )
+    if not shift:
+        return False
+    old_parts, new_parts = re.split(r"\[(\d+)\]", old), re.split(r"\[(\d+)\]", new)
+    if len(old_parts) != len(new_parts):
+        return False
+    return all(
+        (a == b) if i % 2 == 0 else int(b) - int(a) in (0, shift)
+        for i, (a, b) in enumerate(zip(old_parts, new_parts, strict=True))
+    )
+
+
 def _undeclared_respellings(
     old: dict[str, Any], new: dict[str, Any], generation: int
 ) -> list[str]:
@@ -127,7 +146,12 @@ def _undeclared_respellings(
         if old_s[key] != new_s[key]
         and (
             old_s[key] is None
-            or _declared_rewrite(old_s[key], generation) != new_s[key]
+            or (
+                _declared_rewrite(old_s[key], generation) != new_s[key]
+                and not _declared_extent_shift(
+                    _declared_rewrite(old_s[key], generation), new_s[key], generation
+                )
+            )
         )
     ]
 

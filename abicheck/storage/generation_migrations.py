@@ -66,6 +66,7 @@ __all__ = [
     "decode_spellings_generation",
     "encode_fact_generations",
     "extractor_generation_of",
+    "pending_extent_shift",
     "is_placeholder_reason",
     "migrate_and_describe",
     "without_snapshot_generation_notices",
@@ -102,10 +103,17 @@ class GenerationSpellingChange:
     *rewrites* maps an old whole-word spelling to the spelling this
     generation writes instead; empty means the generation changed no
     spelling, and *reason* then says why (it must be non-empty either way).
+
+    *extent_shift* is a respelling no load-time rewrite can apply soundly:
+    this generation spells every array extent the older extractor wrote as
+    ``N`` as ``N + extent_shift`` for some, but not all, arrays (a stored
+    snapshot does not say which backend wrote an extent). Comparison demotes
+    a finding whose spellings differ only by that shift instead.
     """
 
     reason: str
     rewrites: tuple[tuple[str, str], ...] = ()
+    extent_shift: int = 0
 
 
 #: Every row's reason cites the commit that introduced the generation and what
@@ -193,7 +201,23 @@ SPELLING_MIGRATIONS: Mapping[int, GenerationSpellingChange] = {
         "clang AST (a stored unresolved vector cannot be respelled, so a baseline "
         "holding one is re-dumped), and castxml arrays spell their element count "
         "(max + 1, was max): castxml_array_migration.py rewrites a castxml "
-        "snapshot's stored 'T[N-1]' to 'T[N]' by provenance"
+        "snapshot's stored 'T[N-1]' to 'T[N]' by provenance on load; for a "
+        "snapshot whose producer is not recorded as castxml, comparison demotes "
+        "the extent shift instead",
+        extent_shift=1,
+    ),
+    16: GenerationSpellingChange(
+        "castxml function types spell their full declarator, 'int (*)(int, int)', "
+        "instead of the opaque 'FunctionType*' tag (extract/headers/castxml/"
+        "type_resolution.py): the stored tag dropped the signature, so no rewrite "
+        "is sound; policy/generation_drift_demotion.py demotes a stored tag "
+        "against a fresh declarator, and a baseline holding callbacks is re-dumped"
+    ),
+    17: GenerationSpellingChange(
+        "clang function-template patterns whose default argument cannot be spelled "
+        "record template_param_defaults_fact as UNSUPPORTED (was absent); no type "
+        "or name spelling changes, so no rewrite is needed -- an older clang "
+        "snapshot simply names no gap for such a pattern"
     ),
 }
 
@@ -227,6 +251,16 @@ def extractor_generation_of(fact_generations: FactGenerations | None) -> int:
     if fact_generations is None:
         return EXTRACTOR_GENERATION
     return fact_generations[0]
+
+
+def pending_extent_shift(old_generation: int, new_generation: int) -> int:
+    """The array-extent shift the generations in (*old_generation*,
+    *new_generation*] declared; 0 when none did or the order is reversed."""
+    return sum(
+        change.extent_shift
+        for introduced, change in SPELLING_MIGRATIONS.items()
+        if old_generation < introduced <= new_generation
+    )
 
 
 def encode_fact_generations(
