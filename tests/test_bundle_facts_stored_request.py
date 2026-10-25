@@ -39,10 +39,12 @@ def _request(tmp_path: Path, **overrides: object) -> BundleFactsCompareRequest:
     return BundleFactsCompareRequest(**fields)  # type: ignore[arg-type]
 
 
-def test_supported_formats_are_json_markdown_junit_and_oneline() -> None:
-    # HTML and --view stay out: the HTML document needs an effective-config
-    # receipt a stored comparison does not resolve yet (PR 1 scope).
-    assert STORED_RELEASE_FORMATS == frozenset({"json", "markdown", "junit", "oneline"})
+def test_supported_formats_are_json_markdown_junit_oneline_and_html() -> None:
+    # --view show= stays out: a stored comparison has no per-member fan-out
+    # to project a filter over. Every listed format is one live-shaped render.
+    assert STORED_RELEASE_FORMATS == frozenset(
+        {"json", "markdown", "junit", "oneline", "html"}
+    )
 
 
 def test_a_plain_request_validates_with_no_config(tmp_path: Path) -> None:

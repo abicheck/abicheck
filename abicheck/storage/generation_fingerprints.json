@@ -164,7 +164,7 @@
     },
     "fingerprint": "afe92936a546bfc584e57b86de0c08b0a189d8d341a154dd350f1773e804b80b",
     "generation": 21,
-    "reason": "clang template_default_header_scan for alias/variable template defaults (generation 21 after main took 20)"
+    "reason": "clang template_default_header_scan for alias/variable template defaults (generation 21; re-recorded after main merged #1805/#1806)"
   },
   "resolver": {
     "files": {

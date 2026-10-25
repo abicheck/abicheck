@@ -162,6 +162,11 @@ class StoredReleaseEvaluation:
     scope_terms: ComparisonScopeTerms
     new_is_stored: bool = False
     assurance_decision: ReleaseAssuranceDecision | None = None
+    #: The live-shaped release evaluation the frontend built from this same
+    #: comparison (see ``frontends/cli/commands/compare_bundle_facts_release``);
+    #: its JSON becomes the additive ``release`` block. ``None`` when a caller
+    #: has no receipt to build it with.
+    release: ReleaseEvaluation | None = None
 
 
 @dataclass(frozen=True)
@@ -631,6 +636,25 @@ def release_json_document(report: ReleaseReport) -> ReportDocument:
     return ReportDocument.from_mapping(summary)
 
 
+def _stored_release_block(release: ReleaseEvaluation) -> dict[str, object]:
+    """The live release document of a stored comparison, with its receipt
+    marked as reconstructed from the stored facts: the receipt is a frontend
+    resolution, and a stored run recomputes it rather than reading it from a
+    live run."""
+    block = release_json_document(build_release_report(release)).to_mapping()
+    block["effective_config_source"] = "reconstructed_from_stored_facts"
+    # The release-level public-surface fold reads the live surface stage, which
+    # a stored comparison does not have: an explicit state, not an absent key.
+    block["public_surface"] = {
+        "state": "unavailable",
+        "reason": (
+            "the release public-surface fold needs the live surface stage, which "
+            "a stored comparison does not carry"
+        ),
+    }
+    return block
+
+
 def stored_release_json_document(report: StoredReleaseReport) -> ReportDocument:
     """The stored-``BundleFacts`` comparison's JSON document (``mode:
     bundle_facts``) -- a different shape from :func:`release_json_document`;
@@ -696,6 +720,8 @@ def stored_release_json_document(report: StoredReleaseReport) -> ReportDocument:
         "analysis_errors": list(result.analysis_errors),
     }
     summary.update(assurance_sections(ev.assurance_decision))
+    if ev.release is not None:
+        summary["release"] = _stored_release_block(ev.release)
     if (_surface := public_surface_terms(result)) is not None:
         summary["public_surface_reconciliation"] = _surface.to_dict()
     if result.env_matrix_source_sha256 is not None:
