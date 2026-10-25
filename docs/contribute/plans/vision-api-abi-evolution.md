@@ -811,7 +811,7 @@ Landed after that note, in the same slice:
   changes when present, coherence findings.
 - *Dependency graph (relationship visualization).* Release schema 1.9 added
   `libraries[].dependencies` for ELF members (`DT_SONAME`/`DT_NEEDED`);
-  schema 2.2 extends it to PE/COFF (import and delay-load DLL names) and
+  schema 2.3 extends it to PE/COFF (import and delay-load DLL names) and
   Mach-O (`LC_LOAD_DYLIB`, `LC_LOAD_WEAK_DYLIB`, `LC_REEXPORT_DYLIB`), each
   side naming its `format`. The facts are recorded in
   `workflows/release_dependency_facts.py`; a side missing a fact family is
@@ -843,9 +843,26 @@ and without `-o html`; generated documents check escaping and the cap) and
   `scripts/check_no_adr_citations.py`, the pattern shared with
   `tests/test_no_adr_in_user_text.py`).
 
-Still open: `affected_use_cases` in the HTML changes table and SARIF;
-release-level `surface_changes` (the release JSON carries none yet, so the
-release page renders the section only when a document has one); the step summary written
+**Release-level `surface_changes` landed (release schema 2.2).** A directory
+or package `compare` now carries the "what changed" section too: every
+compared member's additions, removals and modifications through the same
+`report/surface_changes.py` owner the scalar report uses (each entry naming
+its `library`), with the aggregate counts; a one-sided library is a
+`library_states` row whose state is its ADR-065 state (`removed`/`added`
+only when the inventory proves it, otherwise `unselected`,
+`expected_not_produced`, `failed`, `unproven`, or a support-promise
+`retired`/`introduced`). The member blocks are attached before the release
+projection strips the working `DiffResult`s (`report/release_surface_changes.py`).
+Rendered in the release Markdown and HTML from that one block. Tests:
+`tests/unit/report/test_release_surface_changes.py` (the JSON is the oracle
+for the HTML and Markdown entries; a one-member package equals the scalar
+compare; an unproven absence is never a removal). Still open: the stored
+`BundleFacts` operand pairs a versioned `libX.so.N` file name with the
+canonical `libX.so` key on one side only, so a stored comparison of such a
+directory compares nothing (`docs/contribute/known-gaps.md`); the output
+directory's `summary.json` sidecar does not carry the block yet.
+
+Still open: `affected_use_cases` in the HTML changes table and SARIF; the step summary written
 by the Action is asserted ADR-free by `tests/test_action_step_summary_no_adr.py`
 (real `compare` over snapshot fixtures, summary rendered at every detail level),
 not by the CI job: a step's `$GITHUB_STEP_SUMMARY` is that step's own file, so a

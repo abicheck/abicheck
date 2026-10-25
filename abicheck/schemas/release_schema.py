@@ -248,7 +248,20 @@ __all__ = ["RELEASE_SCHEMA_VERSION"]
 #:       ``public_api`` block (``added[]``/``removed[]`` public symbols and
 #:       ``internal_omitted.{added,removed}`` counts of internal/RTTI symbols
 #:       collapsed out of the lists, never dropped -- ADR-067). Additive.
-#: - ``2.2`` extends ``libraries[].dependencies`` (introduced in 1.9, ELF only)
+#: - ``2.2`` adds ``libraries[].surface_changes`` (each compared member's
+#:       scalar ``surface_changes`` block, the identical one a standalone
+#:       ``compare`` of that pair carries) and the top-level
+#:       ``surface_changes`` on both the live and the stored operand: the
+#:       members' additions, removals and modifications (each entry gaining
+#:       a ``library`` key), the aggregate ``counts``, per-member
+#:       ``members[]`` counts, and ``library_states[]`` -- every library
+#:       present on one side only, with its ADR-065 state (``removed``/
+#:       ``added`` only when the inventory proves it; otherwise
+#:       ``unselected``, ``expected_not_produced``, ``failed``, ``unproven``,
+#:       ``unsupported``, ``ambiguous``, ``declared_absent``, or a support-
+#:       promise ``retired``/``introduced``). Always present, possibly empty,
+#:       like the scalar report's block. Additive; no existing field moves.
+#: - ``2.3`` extends ``libraries[].dependencies`` (introduced in 1.9, ELF only)
 #:       to PE/COFF and Mach-O members. Each side carries ``format``
 #:       (``elf``/``pe``/``macho``) and ``needed``: ELF ``DT_NEEDED``; PE the
 #:       import and delay-load DLL names; Mach-O the ``LC_LOAD_DYLIB``,
@@ -261,4 +274,4 @@ __all__ = ["RELEASE_SCHEMA_VERSION"]
 #:       dependencies". A side with no format metadata likewise carries that
 #:       ``state``. Additive for ELF documents, except that ``format`` is new
 #:       on every side and ``state`` replaces the absent block.
-RELEASE_SCHEMA_VERSION = "2.2"
+RELEASE_SCHEMA_VERSION = "2.3"

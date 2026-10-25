@@ -152,15 +152,15 @@ UC-TC-make-auto-query, UC-TC-build-emitted-facts, UC-WF-oneshot-deep,
 UC-WORKFLOW-real-world-corpus, UC-WORKFLOW-pr-source-tier,
 UC-TC-bazel-build-evidence, UC-CHANGE-crosscheck-example-corpus.
 **Friction (highest priority, L2 Linux first):**
-- [A function-pointer parameter's signature is not compared, so a callback
-  arity change reads `NO_CHANGE` on the header path](known-gaps.md#a-function-pointer-parameters-signature-is-not-compared-so-a-callback-arity-change-reads-no_change-on-the-header-path-2026-10-15)
-  (known gap).
-- [castxml reports `NO_CHANGE` for a header-only default template-argument
-  change at L2](known-gaps.md#a-header-only-default-template-argument-change-reads-no_change-at-l2-on-castxml-2026-10-21)
-  (ADR-085).
-- [A large export shrink with no declared surface emits no
-  finding](known-gaps.md#a-large-export-shrink-with-no-declared-surface-emits-no-finding-in-header-mode-2026-10-22)
-  (known gap).
+- Remaining L2 header-path false clean: clang does not model alias or
+  variable template defaults, so their default change reads `NO_CHANGE`
+  ([known gap](known-gaps.md#a-header-only-default-template-argument-change-reads-no_change-at-l2-on-castxml-2026-10-21),
+  ADR-085). castxml cannot carry template defaults at all; its runs name the
+  gap and read `partial` instead of clean.
+- Closed 2026-10-24: callback (function-pointer) signature changes on the
+  castxml path, and unspellable clang function-template defaults; an export
+  shrink with no declared surface was already reported (PR #1308), now
+  pinned by tests.
 - No INCONSISTENT/CONFLICTING fact status, and two provider-status
   vocabularies (ADR-063, G47).
 - Scope and completeness are partial, and the exit code is still folded by
@@ -244,9 +244,8 @@ UC-REPORTING-scan-coverage-report.
 
 Ordered by journey impact on the primary path (L2, Linux ELF):
 
-1. **`trust`: close the L2 false-clean gaps** (function-pointer parameter
-   signatures, castxml template defaults, export shrink without a declared
-   surface), then finish ADR-065 S0 and ADR-063's fact-status vocabulary.
+1. **`trust`: finish ADR-065 S0 and ADR-063's fact-status vocabulary**;
+   close the remaining L2 gap (clang alias/variable template defaults).
 2. **`release`: bundle checks at `depth: headers`** (ADR-023).
 3. **`first_check`: header-only as a first-class task** (G4, G45).
 4. **`adopt_ci`: the Action stops encoding CLI semantics** (ADR-070).

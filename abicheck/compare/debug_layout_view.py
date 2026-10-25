@@ -34,6 +34,14 @@ from ..model.dwarf_facts import (
     advanced_facts_collected,
     debug_info_present,
 )
+from ..model.entities import (
+    EnumMember,
+    EnumType,
+    RecordType,
+    TypeField,
+    resolve_vptr_offset_bits,
+)
+from ..model.fact import Fact
 
 if TYPE_CHECKING:
     from ..model.snapshot import AbiSnapshot
@@ -41,6 +49,7 @@ if TYPE_CHECKING:
 __all__ = [
     "DebugLayoutView",
     "advanced_dwarf_support",
+    "debug_layout_declarations",
     "debug_layout_view",
     "restrict_debug_layout",
 ]
@@ -112,6 +121,83 @@ def restrict_debug_layout(
         dwarf.structs = {k: v for k, v in dwarf.structs.items() if k in record_scope}
     if enum_scope is not None:
         dwarf.enums = {k: v for k, v in dwarf.enums.items() if k in enum_scope}
+
+
+#: Representative underlying-type spelling per enum byte size (the model's
+#: own ``"int"`` default for an unknown size), as the BTF/CTF/PDB producers use.
+_ENUM_UNDERLYING_BY_SIZE: dict[int, str] = {
+    1: "char",
+    2: "short",
+    4: "int",
+    8: "long long",
+}
+
+
+def _layout_record(name: str, layout: StructLayout) -> RecordType:
+    vptr_offsets = [fi.byte_offset * 8 for fi in layout.fields if fi.is_vptr_member]
+    record = RecordType(
+        name=name,
+        kind="union" if layout.is_union else "struct",
+        size_bits=layout.byte_size * 8 if layout.byte_size else None,
+        alignment_bits=layout.alignment * 8 if layout.alignment else None,
+        fields=[
+            TypeField(
+                name=fi.name,
+                type=fi.type_name,
+                offset_bits=fi.byte_offset * 8 + fi.bit_offset,
+                is_bitfield=fi.bit_size > 0,
+                bitfield_bits=fi.bit_size if fi.bit_size > 0 else None,
+                is_const_fact=Fact.unsupported(),
+                is_volatile_fact=Fact.unsupported(),
+                is_mutable_fact=Fact.unsupported(),
+                default_fact=Fact.unsupported(),
+                deprecated_fact=Fact.unsupported(),
+            )
+            for fi in layout.fields
+            if not fi.is_vptr_member
+        ],
+        is_union=layout.is_union,
+    )
+    # Only a local vptr member is evidence; its absence is not (a derived
+    # class's vptr lives in its base subobject), so it stays not collected.
+    if vptr_offsets:
+        resolve_vptr_offset_bits(record, vptr_offsets[0])
+    return record
+
+
+def debug_layout_declarations(
+    snap: AbiSnapshot,
+) -> tuple[list[RecordType], list[EnumType]]:
+    """*snap*'s debug record/enum layouts as layout-only model declarations.
+
+    What a binary-only (debug info, no headers) dump puts in
+    ``declarations.types``/``.enums`` for the same layouts, reduced to the
+    facts the layout channel itself carries: size, alignment, field
+    names/spellings/offsets/bitfields, enumerators. Every other field fact
+    reads unsupported, never a confirmed negative; bases and the vtable are
+    not collected. The compiler's artificial vptr member is the record's
+    vptr offset, not a data member -- the DWARF record builder never lists it
+    as a field, and listing it would read a class turning polymorphic as a
+    compatible field addition. Depth projection uses it
+    so a header-derived snapshot projected to ``binary`` is classified by the
+    same type detectors a binary-only dump is, not by the raw-layout
+    fallback (bug class ``evidence.depth_projection_diverges_from_shallow_dump``).
+    """
+    view = debug_layout_view(snap)
+    if not view.present:
+        return [], []
+    records = [_layout_record(name, layout) for name, layout in view.records.items()]
+    enums = [
+        EnumType(
+            name=name,
+            members=[EnumMember(name=m, value=v) for m, v in info.members.items()],
+            underlying_type=_ENUM_UNDERLYING_BY_SIZE.get(
+                info.underlying_byte_size, "int"
+            ),
+        )
+        for name, info in view.enums.items()
+    ]
+    return records, enums
 
 
 def advanced_dwarf_support(old: AbiSnapshot, new: AbiSnapshot) -> tuple[bool, str]:

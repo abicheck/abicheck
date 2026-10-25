@@ -267,10 +267,9 @@ class TestReleaseSeveralExports:
         assert code == 64
         assert "both export to" in out
 
-    def test_sarif_export_rejected_on_release_operand(self, tmp_path: Path) -> None:
-        """`compare`'s own `-o` accepts sarif/html/review too (for a
-        single-pair operand) -- those must still be rejected for a
-        release operand, not silently fall through to markdown."""
+    def test_sarif_export_on_release_operand_writes_sarif(self, tmp_path: Path) -> None:
+        """`-o sarif=` is a release format now: a directory/package compare
+        writes a SARIF 2.1.0 log (one run per member) instead of refusing it."""
         old_dir = tmp_path / "old"
         old_dir.mkdir()
         new_dir = tmp_path / "new"
@@ -287,9 +286,10 @@ class TestReleaseSeveralExports:
             "-o",
             f"sarif={write_path}",
         )
-        assert code == 64
-        assert "-o sarif=..." in out
-        assert not write_path.exists()
+        assert code == 0, out
+        sarif = json.loads(write_path.read_text(encoding="utf-8"))
+        assert sarif["version"] == "2.1.0"
+        assert all(run["tool"]["driver"]["name"] for run in sarif["runs"])
 
     def test_write_junit_from_release_uses_diff_pairs(self, tmp_path: Path) -> None:
         """A junit --write must trigger the same diff-pair collection the

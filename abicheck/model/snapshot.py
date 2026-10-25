@@ -547,6 +547,12 @@ class AbiSnapshot:
     fact_generations: tuple[int, int, int] | None = field(
         default=None, repr=False, compare=False, kw_only=True
     )
+    # The extractor generation whose type spellings this snapshot carries
+    # when loading migrated an older document; persisted inside the
+    # ``fact_generations`` stamp so a re-save is never migrated twice.
+    spellings_generation: int | None = field(
+        default=None, repr=False, compare=False, kw_only=True
+    )
     # Runtime-only, like `live_source_evidence`: True when the export table
     # (`elf`) was read from a static archive's own symbol index (ADR-086),
     # not from a linked image -- so the dynamic-section facts (SONAME,

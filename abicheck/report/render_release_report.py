@@ -101,6 +101,7 @@ def _markdown_body(report: ReleaseReport) -> str:
     from .release_display_limits import MAX_RELEASE_FINDINGS_PER_LIBRARY
     from .release_public_api import render_release_public_api_markdown
     from .release_public_surface_section import render_release_public_surface_markdown
+    from .release_surface_changes import render_release_surface_lines
     from .render_release_markdown import (
         _release_md_bundle_findings,
         _release_md_changed_libraries,
@@ -184,6 +185,11 @@ def _markdown_body(report: ReleaseReport) -> str:
         )
         if public_surface_markdown:
             lines.append(public_surface_markdown)
+    if not report.show_only:
+        # Like the public-API section above: a `--show-only` view lists only
+        # the findings its filter kept, so an unfiltered surface section would
+        # contradict it. The JSON block stays full (raw-versus-effective).
+        lines += render_release_surface_lines(report.surface_changes)
     lines += render_disposition_audit_section(
         DispositionAudit.from_dict(report.disposition_audit)
     )
@@ -228,6 +234,14 @@ def render_release_text(fmt: str, report: ReleaseReport, *, demangle: bool) -> s
         )
     if fmt == "junit":
         return render_release_junit(report)
+    if fmt == "sarif":
+        from .render_release_sarif import render_release_sarif
+
+        return render_release_sarif(report)
+    if fmt == "review":
+        from .render_release_sarif import render_release_review
+
+        return render_release_review(json.loads(render_release_json(report)))
     if fmt == "json":
         return render_release_json(report)
     return render_release_markdown_report(report, demangle=demangle)

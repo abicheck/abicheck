@@ -1091,7 +1091,15 @@ code. It contains:
   policy, both inventories, and every unchecked, out-of-scope,
   inventory-proven removed and inventory-proven added member with its state
   and reason;
-- release-level surface changes, when the document carries them;
+- release-level surface changes: every compared member's additions,
+  removals and modifications (the single-pair report's grouping, each entry
+  naming its library), the aggregate counts, and each library present on one
+  side only with its state. A library is shown as `removed` or `added` only
+  when the inventory proves it; any other one-sided library says why it is
+  not (`unselected`, `expected_not_produced`, `failed`, `unproven`, or a
+  support-promise `retired`/`introduced`). The same block is the release JSON's
+  `surface_changes` (release schema 2.2) and `libraries[].surface_changes`
+  carries each member's own block;
 - a **dependency graph**: one box per member (status as text and colour:
   breaking, api break, compatible, no change, unchecked) plus one per needed
   library no member provides (external), and one arrow per recorded
@@ -1105,7 +1113,7 @@ code. It contains:
   could not be confirmed) and run warnings.
 
 The graph is drawn only from facts the report records: each member's
-`libraries[].dependencies` block (release schema 2.2) carries, per side, the
+`libraries[].dependencies` block (release schema 2.3) carries, per side, the
 container `format` (`elf`, `pe` or `macho`), the `soname` (ELF `DT_SONAME`,
 Mach-O `LC_ID_DYLIB`) and the `needed` list read from that member's
 snapshot. A side missing a fact family its snapshot predates names it in

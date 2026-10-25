@@ -93,6 +93,25 @@ scenarios:
     automated: true
     test: test_sc_ci_strict_informational
 
+  - id: SC-CI-SEVERITY-CONFIG
+    title: A .abicheck.yml severity override decides the CI exit code
+    persona: CI engineer
+    narrative: >
+      A project accepts a removed function for one release by setting
+      `severity.abi_breaking: info` in .abicheck.yml. The documented config rule
+      (exit-codes.md) makes the CI gate exit 0 where the verdict alone exits 4.
+      The typed API takes the same value through CompareRequest (ADR-088).
+    flow:
+      - abicheck compare old.json new.json --config abi-info.abicheck.yml
+    expected:
+      exit_code: 0
+    surfaces:
+      - cli: compare --config
+      - api: abicheck.workflows.service_requests.CompareRequest
+    validates: UC-WF-compare
+    automated: true
+    test: test_sc_ci_severity_block_demotes_removal
+
   - id: SC-CI-STAT
     title: One-line summary for CI logs (-o oneline=...)
     persona: CI engineer
