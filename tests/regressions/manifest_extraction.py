@@ -62,7 +62,7 @@ EXTRACTION_BUG_CLASSES: tuple[BugClass, ...] = (
         ),
         axes={
             "signature_part": ("arity", "param_type", "return", "variadic", "cc"),
-            "site": ("inline_param", "pointer_to_fp", "typedef", "field", "return"),
+            "site": ("inline_param", "pointer_to_fp", "typedef", "field"),
         },
     ),
     BugClass(

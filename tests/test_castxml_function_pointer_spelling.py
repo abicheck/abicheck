@@ -174,6 +174,13 @@ def _stamped(snapshot: AbiSnapshot, extractor: int) -> AbiSnapshot:
         ("const FunctionType*", "int (*)(void)", True),
         ("FunctionType*", "FunctionType*", False),
         ("FunctionType*", "int*", False),  # not a function declarator
+        ("FunctionType* const", "void (*const)(int)", True),
+        ("FunctionType*[4]", "void (*[5])(int)", True),  # extent respelled
+        ("FunctionType*", "void (&)(int)", False),  # pointer became reference
+        ("FunctionType*", "void (**)(int)", False),  # pointer depth changed
+        ("FunctionType**", "void (*)(int)", False),
+        ("FunctionType*", "void (*const)(int)", False),  # cv added
+        ("FunctionType*[4]", "void (*)(int)", False),  # array dropped
     ],
 )
 def test_opaque_tag_against_declarator_is_drift(

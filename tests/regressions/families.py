@@ -221,15 +221,17 @@ FAMILIES: dict[str, Family] = {
         ),
         Family(
             key="F15",
-            title="castxml header vectors keep the element type clang reports",
+            title="castxml type nodes keep the spelling that tells two types apart",
             invariant=(
-                "A castxml vector node resolves to the spelling clang gives for the same "
-                "declaration, so a header comparison sees a same-size element change."
+                "A castxml type node (a vector's element type, a function type's "
+                "declarator) resolves to the spelling clang gives for the same "
+                "declaration and never collapses to an opaque tag, so a header "
+                "comparison sees the change."
             ),
             harness_tests=(),
             planned_reason=(
-                "One class so far; revisit when a second header-backend node type is "
-                "collapsed to an opaque spelling and the two share the clang join."
+                "The vector and FunctionType classes share this invariant; a family "
+                "harness that enumerates both node types and their sites is planned."
             ),
         ),
         Family(

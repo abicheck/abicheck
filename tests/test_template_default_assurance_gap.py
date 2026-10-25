@@ -65,31 +65,46 @@ def _snap(*functions: Function) -> AbiSnapshot:
     return snap
 
 
-# (fact, counts as an unrecorded function-template pattern?)
-_FACTS: list[tuple[Fact[Any] | None, bool]] = [
-    (None, False),  # ordinary function
-    (Fact.not_collected(), False),  # ordinary function, explicit
-    (Fact.present(("int",)), False),  # recorded pattern
-    (Fact.present((None,)), False),  # recorded pattern, no default
-    (Fact.unsupported("unspelled"), True),
-    (Fact.failed("boom"), True),
+# (fact, the reason the gap note names, or None when it is not a gap)
+_FACTS: list[tuple[Fact[Any] | None, str | None]] = [
+    (None, None),  # ordinary function
+    (Fact.not_collected(), None),  # ordinary function, explicit
+    (Fact.present(("int",)), None),  # recorded pattern
+    (Fact.present((None,)), None),  # recorded pattern, no default
+    (Fact.unsupported("unspelled"), "a default could not be spelled"),
+    (Fact.failed("boom"), "their extraction failed"),
 ]
 
 
-@pytest.mark.parametrize(("fact", "unrecorded"), _FACTS)
+@pytest.mark.parametrize(("fact", "reason"), _FACTS)
 @pytest.mark.parametrize("side", ["old", "new"])
 def test_function_pattern_without_recorded_defaults_is_a_named_gap(
-    fact: Fact[Any] | None, unrecorded: bool, side: str
+    fact: Fact[Any] | None, reason: str | None, side: str
 ) -> None:
     clean = _snap(_fn("f", Fact.present(("int",))))
     probe = _snap(_fn("f", fact))
     old, new = (probe, clean) if side == "old" else (clean, probe)
     gap, notes = template_default_gap(old, new)
-    assert gap is unrecorded
+    assert gap is (reason is not None)
     hits = [n for n in notes if n.startswith(_GAP) and "function template" in n]
-    assert len(hits) == (1 if unrecorded else 0)
-    if unrecorded:
+    assert len(hits) == (0 if reason is None else 1)
+    if reason is not None:
         assert f"the {side} snapshot" in hits[0]
+        assert f"({reason})" in hits[0]
+
+
+def test_unspellable_and_failed_patterns_get_separate_notes() -> None:
+    snap = _snap(_fn("f", Fact.unsupported("x")), _fn("g", Fact.failed("y")))
+    _, notes = template_default_gap(None, snap)
+    assert sorted(notes) == sorted(
+        [
+            n
+            for n in notes
+            if "(a default could not be spelled): 1 function" in n
+            or "(their extraction failed): 1 function" in n
+        ]
+    )
+    assert len(notes) == 2
 
 
 def test_redeclarations_of_one_unrecorded_pattern_count_once() -> None:

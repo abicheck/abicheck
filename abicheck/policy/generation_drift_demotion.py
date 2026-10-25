@@ -171,13 +171,38 @@ def _is_opaque_callback_respelled(old: str, new: str, declared: frozenset[str]) 
 
     The stored tag dropped the callback's signature, so the pair cannot say
     whether the signature changed: drift, not evidence of a break. A real
-    type the old snapshot declares as ``FunctionType`` is not the tag.
+    type the old snapshot declares as ``FunctionType`` is not the tag. The
+    declarator around the callback (pointer, reference, cv, array) was stored
+    and must match: a pointer that became a reference, or a changed pointer
+    depth, is a real change. Array extents are not compared, since castxml
+    respelled them across generations.
     """
-    return (
-        "FunctionType" not in declared
-        and "(" in new
-        and "FunctionType" not in new
-        and is_castxml_opaque_function_type(old, "castxml")
+    if (
+        "FunctionType" in declared
+        or "FunctionType" in new
+        or "_Atomic" in old
+        or not is_castxml_opaque_function_type(old, "castxml")
+    ):
+        return False
+    declarator = _FUNCTION_DECLARATOR.match(new)
+    if declarator is None:
+        return False
+    stored = _OPAQUE_CV_PREFIX.sub("", old).removeprefix("FunctionType")
+    return _wrapper_shape(stored) == _wrapper_shape(declarator.group(1))
+
+
+#: ``ret (DECLARATOR)(params)`` -- the declarator castxml's generation-16
+#: renderer writes around a function type.
+_FUNCTION_DECLARATOR = re.compile(r"^[^()]*\(([^()]*)\)\s*\(")
+_OPAQUE_CV_PREFIX = re.compile(r"^(?:(?:const|volatile)\s+)*")
+_WRAPPER_TOKEN = re.compile(r"[*&]|\[\d*\]|\bconst\b|\bvolatile\b")
+
+
+def _wrapper_shape(declarator: str) -> tuple[str, ...]:
+    """Ordered pointer/reference/cv/array wrappers, array extents erased."""
+    return tuple(
+        "[]" if token.startswith("[") else token
+        for token in _WRAPPER_TOKEN.findall(declarator)
     )
 
 

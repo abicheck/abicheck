@@ -59,15 +59,17 @@ def _unrecorded_pattern_count(snap: AbiSnapshot) -> int:
     return count
 
 
-def _unrecorded_function_pattern_count(snap: AbiSnapshot) -> int:
+def _unrecorded_function_pattern_count(snap: AbiSnapshot) -> tuple[int, int]:
     """Function-template patterns of *snap* whose defaults were not recorded.
 
     A declaration whose fact is absent or NOT_COLLECTED is an ordinary function
     (no template pattern to record), so it does not count. A pattern the clang
     backend saw but could not spell a default of carries a non-PRESENT fact
-    (UNSUPPORTED). Redeclarations share one identity and count once.
+    (UNSUPPORTED); one whose extraction failed carries FAILED. Returns
+    ``(unspellable, failed)``; redeclarations share one identity and count once.
     """
-    unrecorded: set[object] = set()
+    unspellable: set[object] = set()
+    failed: set[object] = set()
     for fn in snap.declarations.functions:
         fact = fn.template_param_defaults_fact
         if fact is None or fact.status in (
@@ -75,8 +77,9 @@ def _unrecorded_function_pattern_count(snap: AbiSnapshot) -> int:
             FactStatus.PRESENT,
         ):
             continue
-        unrecorded.add(fn.entity_id if fn.entity_id is not None else id(fn))
-    return len(unrecorded)
+        key = fn.entity_id if fn.entity_id is not None else id(fn)
+        (unspellable if fact.status is FactStatus.UNSUPPORTED else failed).add(key)
+    return len(unspellable), len(failed)
 
 
 def _is_nested_in(qualified: str, parent: str) -> bool:
@@ -109,9 +112,9 @@ def _side_note(label: str, snap: AbiSnapshot, count: int) -> str:
     )
 
 
-def _function_side_note(label: str, count: int) -> str:
+def _function_side_note(label: str, count: int, reason: str) -> str:
     return (
-        "template-parameter defaults (a default could not be spelled): "
+        f"template-parameter defaults ({reason}): "
         f"{count} function template pattern(s) in the {label} snapshot carry "
         "no recorded defaults, so a default-argument change in them is not "
         "assessed"
@@ -138,7 +141,13 @@ def template_default_gap(
         count = _unrecorded_pattern_count(snap)
         if count:
             notes.append(_side_note(label, snap, count))
-        fn_count = _unrecorded_function_pattern_count(snap)
-        if fn_count:
-            notes.append(_function_side_note(label, fn_count))
+        unspellable, failed = _unrecorded_function_pattern_count(snap)
+        if unspellable:
+            notes.append(
+                _function_side_note(
+                    label, unspellable, "a default could not be spelled"
+                )
+            )
+        if failed:
+            notes.append(_function_side_note(label, failed, "their extraction failed"))
     return bool(notes), notes
