@@ -60,7 +60,6 @@ old symbol is gone, which was already BREAKING.
 
 from __future__ import annotations
 
-import re
 from collections import Counter
 from collections.abc import Hashable, Mapping
 from typing import TYPE_CHECKING
@@ -113,9 +112,6 @@ def _return_types_disagree(old_fn: Function, new_fn: Function) -> bool:
     )
 
 
-_TYPE_DECORATION = re.compile(r"\b(?:const|volatile)\b|[*&]")
-
-
 def _declaring_header(fn: Function) -> str:
     """Basename of the header *fn* is declared in (``""`` when unknown): the
     two sides are parsed from different trees, so only the name compares."""
@@ -149,9 +145,13 @@ class _HeaderEvidence:
         """Whether *spelling* names a typedef, visible from *stem*'s scope,
         whose target differs between the sides. The innermost scope that
         declares the name on either side is the one the spelling resolves to."""
-        name = _TYPE_DECORATION.sub(" ", spelling).strip()
-        if not name or " " in name:
+        # The one name left once cv and declarator sigils are stripped, as
+        # typedef_respelling._core_leaf reads it, but with its scope kept.
+        tokens = spelling.replace("*", " ").replace("&", " ").split()
+        core = [t for t in tokens if t not in ("const", "volatile")]
+        if len(core) != 1:
             return False
+        name = core[0]
         scopes = stem.split("::")[:-1]
         old_map, new_map = self._typedefs
         for depth in range(len(scopes), -1, -1):
