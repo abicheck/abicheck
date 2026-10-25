@@ -19,6 +19,7 @@ import subprocess
 from pathlib import Path
 
 import pytest
+from _field_shapes import materialize
 
 from abicheck.checker import compare
 from abicheck.model import (
@@ -183,18 +184,6 @@ def test_every_extractor_generation_has_a_spelling_record() -> None:
     assert ("AutoType", "auto") in SPELLING_MIGRATIONS[_SPELLING_INTRODUCED_AT].rewrites
 
 
-_HEADER = (
-    "template <class T> struct Box { T v; };\n"
-    "struct S { int x; auto& set_x(); auto get(); };\n"
-    "auto& ref();\nauto val(int);\n"
-)
-_SOURCE = (
-    '#include "lib.h"\nstatic int g;\n'
-    "auto& S::set_x() { return *this; }\nauto S::get() { return x; }\n"
-    "auto& ref() { return g; }\nauto val(int a) { return a; }\n"
-)
-
-
 @pytest.mark.integration
 @pytest.mark.skipif(shutil.which("g++") is None, reason="needs g++")
 @pytest.mark.parametrize("stamp", _OLD_STAMPS)
@@ -205,8 +194,8 @@ def test_real_castxml_dump_old_generation_compares_clean(
     rewritten to the generation-5 spelling, against a fresh dump."""
     from abicheck.dumper import dump
 
-    (tmp_path / "lib.h").write_text(_HEADER)
-    (tmp_path / "lib.cpp").write_text(_SOURCE)
+    # Sources: the field-shapes corpus copy of this repro (one owner).
+    materialize("auto_return_setters", "v1", tmp_path)
     so = tmp_path / "libx.so"
     subprocess.run(
         [
@@ -216,11 +205,11 @@ def test_real_castxml_dump_old_generation_compares_clean(
             "-fPIC",
             "-o",
             str(so),
-            str(tmp_path / "lib.cpp"),
+            str(tmp_path / "api.cpp"),
         ],
         check=True,
     )
-    fresh_doc = snapshot_to_dict(dump(so, [tmp_path / "lib.h"]))
+    fresh_doc = snapshot_to_dict(dump(so, [tmp_path / "api.h"]))
     assert "auto&" in json.dumps(fresh_doc)
     old = snapshot_from_dict(_as_old_generation(fresh_doc, stamp))
     result = compare(old, snapshot_from_dict(fresh_doc))

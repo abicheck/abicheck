@@ -25,6 +25,7 @@ import sys
 from pathlib import Path
 
 import pytest
+from _field_shapes import materialize, replace_once, shape_sources
 
 from abicheck.extract.flat_map_dependency_scope import scope_flat_maps
 from abicheck.extract.public_header_identifiers import identifiers_in_kept_headers
@@ -114,38 +115,37 @@ def test_kept_header_scan_skips_dependency_files(tmp_path: Path) -> None:
 
 # ---------------------------------------------------------------- compiled
 
-_HEADER = """#include <cstddef>
-%(own)s
-class Table {
-public:
-  template <class T> int setArrays(T* p, std::size_t n) { return (int)n + (p ? 1 : 0); }
-  template <class T> int setImpl(T* p) { return p ? 1 : 0; }
-  int fill() { double d = 0; %(fill)s }
-  int other(%(handle)s h);
-};
-"""
+_SHAPE = "system_typedef_via_vanished_instance"
 
 
 def _build(root: Path, *, uses_set_arrays: bool, own_typedef: bool) -> Path:
-    root.mkdir(parents=True)
-    fill = (
-        "return setArrays<double>(&d, 1);"
-        if uses_set_arrays
-        else "return setImpl<double>(&d);"
-    )
-    own = "typedef int Handle;" if own_typedef else ""
-    handle = "Handle" if own_typedef else "int"
-    (root / "t.h").write_text(_HEADER % {"own": own, "fill": fill, "handle": handle})
-    (root / "t.cpp").write_text(
-        f'#include "t.h"\nint Table::other({handle} h) {{ return fill() + h; }}\n'
-    )
+    """One side of the corpus shape (``v1`` instantiates ``setArrays``,
+    ``v2`` only ``setImpl``); ``own_typedef`` derives the control variant
+    whose ``other`` takes a library-declared ``Handle`` typedef."""
+    sources = shape_sources(_SHAPE, "v1" if uses_set_arrays else "v2")
+    if own_typedef:
+        sources = {
+            "api.h": replace_once(
+                replace_once(
+                    sources["api.h"],
+                    "#include <cstddef>\n",
+                    "#include <cstddef>\ntypedef int Handle;\n",
+                ),
+                "int other(int h);",
+                "int other(Handle h);",
+            ),
+            "api.cpp": replace_once(
+                sources["api.cpp"], "Table::other(int h)", "Table::other(Handle h)"
+            ),
+        }
+    materialize(_SHAPE, "", root, sources)
     cmd = [
         "g++",
         "-shared",
         "-fPIC",
         "-fvisibility-inlines-hidden",
         f"-I{root}",
-        str(root / "t.cpp"),
+        str(root / "api.cpp"),
         "-o",
         str(root / "libt.so"),
     ]
@@ -158,13 +158,13 @@ def _typedef_kinds(old: Path, new: Path, depth: str) -> set[tuple[str, str]]:
     snap = old / "old.abicheck.json"
     dump = [
         sys.executable, "-m", "abicheck", "dump", str(old / "libt.so"),
-        "-H", str(old / "t.h"), "-I", str(old), "-o", str(snap),
+        "-H", str(old / "api.h"), "-I", str(old), "-o", str(snap),
     ]  # fmt: skip
     proc = subprocess.run(dump, capture_output=True, text=True)
     assert proc.returncode == 0, proc.stderr[-2000:]
     cmd = [
         sys.executable, "-m", "abicheck", "compare", str(snap), str(new / "libt.so"),
-        "--header", f"new={new / 't.h'}", "--include", f"new={new}",
+        "--header", f"new={new / 'api.h'}", "--include", f"new={new}",
         "--depth", depth, "-o", "json=-",
     ]  # fmt: skip
     proc = subprocess.run(cmd, capture_output=True, text=True)
