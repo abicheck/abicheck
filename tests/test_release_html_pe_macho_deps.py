@@ -125,7 +125,7 @@ def _oracle_edges(doc: dict) -> set[tuple[str, str, str]]:
 
     def key(name: str, fmt: str) -> str:
         base = PurePosixPath(name.replace("\\", "/")).name
-        return base.lower() if fmt in ("pe", "macho") else base
+        return base.lower() if fmt == "pe" else base
 
     provider: dict[str, str] = {}
     for name, m in members.items():

@@ -210,6 +210,34 @@ def test_macho_install_name_matches_member_by_basename() -> None:
     assert _edges(doc) == {("libtop.dylib", "libmid.dylib", "new")}
 
 
+def test_macho_names_stay_exact_and_are_not_case_folded() -> None:
+    # Install names differing only in case are two libraries: a need for
+    # ``@rpath/liba.dylib`` binds to ``liba.dylib``, never to ``libA.dylib``.
+    doc = _doc(
+        _member(
+            "libA.dylib",
+            {
+                "new": {
+                    "format": "macho",
+                    "soname": "@rpath/libA.dylib",
+                    "needed": ["@rpath/liba.dylib"],
+                }
+            },
+        ),
+        _member(
+            "liba.dylib",
+            {
+                "new": {
+                    "format": "macho",
+                    "soname": "@rpath/liba.dylib",
+                    "needed": [],
+                }
+            },
+        ),
+    )
+    assert _edges(doc) == {("libA.dylib", "liba.dylib", "new")}
+
+
 def test_elf_names_stay_exact_and_are_not_case_folded() -> None:
     doc = _doc(
         _member(

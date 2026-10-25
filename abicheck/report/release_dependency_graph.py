@@ -62,8 +62,10 @@ DEPS_NOT_EVALUATED = "not_evaluated"
 
 def _match_key(name: str, fmt: str) -> str:
     """The name two dependency records are compared by, for *fmt*."""
-    if fmt in ("pe", "macho"):
+    if fmt == "pe":
         return PurePosixPath(name.replace("\\", "/")).name.lower()
+    if fmt == "macho":
+        return PurePosixPath(name.replace("\\", "/")).name
     return name
 
 
