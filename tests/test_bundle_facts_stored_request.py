@@ -16,11 +16,11 @@ from types import SimpleNamespace
 import click
 import pytest
 
+from abicheck.report.release_formats import STORED_RELEASE_FORMATS
 from abicheck.workflows.bundle_facts_stored_compare import (
     per_library_report_path,
 )
 from abicheck.workflows.bundle_facts_stored_request import (
-    STORED_BUNDLE_FACTS_FORMATS,
     BundleFactsCompareError,
     BundleFactsCompareRequest,
     resolve_max_json_object_nodes_cfg,
@@ -42,9 +42,7 @@ def _request(tmp_path: Path, **overrides: object) -> BundleFactsCompareRequest:
 def test_supported_formats_are_json_markdown_junit_and_oneline() -> None:
     # HTML and --view stay out: the HTML document needs an effective-config
     # receipt a stored comparison does not resolve yet (PR 1 scope).
-    assert STORED_BUNDLE_FACTS_FORMATS == frozenset(
-        {"json", "markdown", "junit", "oneline"}
-    )
+    assert STORED_RELEASE_FORMATS == frozenset({"json", "markdown", "junit", "oneline"})
 
 
 def test_a_plain_request_validates_with_no_config(tmp_path: Path) -> None:
@@ -54,11 +52,6 @@ def test_a_plain_request_validates_with_no_config(tmp_path: Path) -> None:
 @pytest.mark.parametrize(
     ("overrides", "message"),
     [
-        ({"fmt": "sarif"}, "-o sarif=... is not available"),
-        (
-            {"secondary_writes": (("html", Path("x.html")),)},
-            "-o html=... is not available",
-        ),
         (
             {"bundle_facts_out": Path("b.json")},
             "--bundle-facts-out is not supported",

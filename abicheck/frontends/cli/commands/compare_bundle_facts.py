@@ -52,6 +52,7 @@ from ....report.release_document import (
     build_release_report,
     stored_reported_verdict,
 )
+from ....report.release_formats import STORED_RELEASE_FORMATS
 from ....report.render_release_report import (
     render_release_text,
     render_stored_release_json,
@@ -191,6 +192,21 @@ def apply_env_toggles_for_stored_pair(
             f"cannot parse build config {config_path}: {exc}"
         ) from exc
     apply_env_toggles(ctx, cfg)
+
+
+def _reject_unrendered_formats(request: Any) -> None:
+    """Refuse a ``-o`` format a stored comparison does not render.
+
+    The one format list is ``report.release_formats.STORED_RELEASE_FORMATS``;
+    this is the layer that renders, so it owns the check. Usage error (exit 64).
+    """
+    for fmt in (request.fmt, *(f for f, _path in request.secondary_writes)):
+        if fmt not in STORED_RELEASE_FORMATS:
+            raise click.UsageError(
+                f"-o {fmt}=... is not available with a stored-bundle-facts OLD_INPUT: "
+                "only json/markdown/junit/oneline are supported for a stored-bundle-facts "
+                "comparison. Choose one of: json, markdown, junit, oneline."
+            )
 
 
 def _warn(message: str) -> None:
@@ -338,6 +354,7 @@ def dispatch(
         new_is_stored=new_is_stored,
         config_explicit=config_explicit,
     )
+    _reject_unrendered_formats(request)
     try:
         outcome = execute_bundle_facts_compare(request)
     except BundleFactsCompareError as exc:

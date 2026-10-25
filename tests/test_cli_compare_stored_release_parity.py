@@ -263,3 +263,30 @@ def test_stored_entry_carries_coverage_digest_and_default_assurance(
     assert entry["coverage_warnings"] == ["headers not supplied"]
     assert entry["env_matrix_source_sha256"] == "sha256:abc"
     assert evaluation.assurance_terms is not None
+
+
+_STUB_FACTS = (
+    '{"artifact_type": "abicheck.bundle-facts", "schema_version": 2, '
+    '"per_library_snapshots": {}}'
+)
+
+
+@pytest.mark.parametrize(
+    "export",
+    ["sarif=-", "html=-"],
+    ids=["primary-sarif", "primary-html"],
+)
+def test_stored_operand_refuses_a_format_it_does_not_render(
+    export: str, tmp_path: Path
+) -> None:
+    """Refused by the frontend before any comparison runs (exit 64), by the
+    one format set ``STORED_RELEASE_FORMATS``."""
+    old = tmp_path / "old.bundlefacts.json"
+    new = tmp_path / "new.bundlefacts.json"
+    old.write_text(_STUB_FACTS)
+    new.write_text(_STUB_FACTS)
+
+    result = CliRunner().invoke(main, ["compare", str(old), str(new), "-o", export])
+
+    assert result.exit_code == 64, result.output
+    assert f"-o {export.split('=')[0]}=... is not available" in result.output
