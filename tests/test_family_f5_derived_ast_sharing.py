@@ -180,6 +180,14 @@ def test_shared_acquisition_matches_reference_with_a_derived_consumer(
         "--build-info",
         f"new={new_build}",
     ]
+    if execution == "forked-child":
+        # `low-memory` resolves each side in its own forked child on Linux
+        # whatever else runs in this process. The default profile forks two
+        # concurrent children only when this process has a single thread
+        # (`side_isolation.fork_is_safe`), which a pytest-xdist worker need
+        # not, and then resolves in-process. The race under test is inside
+        # the child either way: its prefetch thread against its castxml join.
+        args += ["--performance-profile", "low-memory"]
     exit_opt, optimized, seen = _compare(
         monkeypatch, args, tmp_path / "cache-opt", reference=False
     )

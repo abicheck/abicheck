@@ -12,11 +12,15 @@ waiter and to every later caller of the key. The vector join, which needs the
 tree, then walked a bare ``object()``.
 
 The class: whatever a producer returns because of its *caller's* context is
-not a value of the key, so the shared table must not serve it to anyone else.
-Exercised over every order the two consumers can meet in (derived first then
-tree, tree first then derived, a tree consumer waiting on a derived leader),
-each in this process and in a forked side child, with the oracle being the
-tree a scope-free producer builds.
+not a tree, so a consumer the table serves it to must not read it as one.
+The answer still stays in the table, because every other derived consumer of
+the key (each release member's header-graph attach) can take its own form
+from the cache entry, and the key keeps one producer run. A consumer that
+needs the tree replaces the answer with the tree. Exercised over every order
+the consumers can meet in (derived first then tree, tree first then derived,
+a tree consumer waiting on a derived leader, several derived consumers before
+and after a tree consumer), each in this process and in a forked side child.
+The oracle is the tree a scope-free producer builds.
 """
 
 from __future__ import annotations
@@ -176,11 +180,11 @@ def test_tree_consumer_never_receives_the_derived_marker(
 ) -> None:
     got = _in(where, lambda: _sequential(entry, derived_first))
     assert got["tree"] == _TREE and got["again"] == _TREE
-    # The derived consumer still took the cheap form: the fix withholds the
-    # marker from others rather than giving up the substitution.
+    # The derived consumer still took the cheap form: the fix keeps the
+    # marker from the others rather than giving up the substitution.
     assert got["derived"] == (True, _PROJECTION)
-    # Derived first: the marker was not stored, so the tree consumer produced
-    # once and the third call reused that real tree. Tree first: one produce
+    # Derived first: the tree consumer replaced the derived answer with one
+    # produce, and the third call reused that tree. Tree first: one produce
     # serves all three, the derived consumer substituting only its own copy.
     assert got["again_is_tree"]
     assert got["runs"] == (2 if derived_first else 1)
@@ -193,6 +197,36 @@ def test_waiter_on_a_derived_leader_reacquires_a_real_tree(
     got = _in(where, lambda: _tree_waits_on_derived_leader(entry))
     assert got["tree"] == _TREE
     assert got["derived"] == (True, _PROJECTION)
+    assert got["runs"] == 2
+
+
+def _derived_consumers_around_a_tree_consumer(entry: Path) -> dict[str, Any]:
+    """Three derived consumers, a tree consumer, then a fourth derived one:
+    a release's members, each with its header-graph attach, beside one
+    castxml vector join."""
+    runs: list[str] = []
+
+    def derived_outcome() -> tuple[bool, Any]:
+        art = _derived(entry, runs)[1]
+        return art.used, art.value
+
+    with ast_acquisition_scope():
+        derived = [derived_outcome() for _ in range(3)]
+        tree = _tree_consumer(entry, runs)
+        derived.append(derived_outcome())
+    return {"derived": derived, "tree": tree[0], "runs": len(runs)}
+
+
+@pytest.mark.parametrize("where", ["in-process", "forked-child"])
+def test_derived_consumers_share_one_acquisition_and_a_tree_replaces_it(
+    where: str, entry: Path
+) -> None:
+    got = _in(where, lambda: _derived_consumers_around_a_tree_consumer(entry))
+    assert got["derived"] == [(True, _PROJECTION)] * 4
+    assert got["tree"] == _TREE
+    # One produce for the first derived consumer, whose answer the next two
+    # reuse; one for the tree consumer. A placeholder withdrawn from the table
+    # instead re-ran the producer for every derived consumer (one per member).
     assert got["runs"] == 2
 
 

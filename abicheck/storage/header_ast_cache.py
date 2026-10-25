@@ -21,11 +21,7 @@ from .acyclic_json import gc_paused
 from .ast_cache_location import AST_DISK_CACHE, ast_cache_entry_path
 from .ast_size_observer import mark_ast_intake, report_ast_size
 from .cross_process_lock import produce_ast_once_across_processes
-from .derived_ast import (
-    AcquisitionWithheld,
-    carries_superseded_ast,
-    offer_derived_ast_source,
-)
+from .derived_ast import carries_superseded_ast, offer_derived_ast_source
 from .json_compact import open_cached_entry
 
 log = logging.getLogger(__name__)
@@ -355,15 +351,16 @@ class AstAcquisitionScope:
                 "released_raw_entries": self.released_entries,
             }
 
-    def _settle_withdrawn(
+    def _settle_failed(
         self, lookup: tuple[str, str], future: Future[Any], exc: BaseException
     ) -> None:
         """Unregister our entry, then wake its waiters with *exc*.
 
-        In that order: one that retries (``run``'s retry branch) must find no
-        entry, or it would re-read this same future and recurse. A withdrawn
-        acquisition is retryable within the request; removing only our own
-        entry avoids racing a later successful producer.
+        In that order: one that retries (``run``'s ``ProcessCancelled``
+        branch) must find no entry, or it would re-read this same failed
+        future and recurse. A failed acquisition is retryable within the
+        request; removing only our own entry avoids racing a later successful
+        producer.
         """
         with self._lock:
             if self._entries.get(lookup) is future:
@@ -375,6 +372,25 @@ class AstAcquisitionScope:
             # bound here -- see `set_result` in `run` for why.
             self._evict_groups_locked()
             self._evict_ungrouped_locked()
+
+    def discard_result(self, backend: str, key: str, result: Any) -> None:
+        """Drop the entry for *key* if it still holds exactly *result*.
+
+        For a consumer that cannot use the published value (a derived
+        consumer's placeholder) and must produce its own in its place; an
+        entry already replaced, in flight or failed is left alone.
+        """
+        lookup = (backend, key)
+        with self._lock:
+            future = self._entries.get(lookup)
+            if (
+                future is not None
+                and future.done()
+                and future.exception() is None
+                and future.result() is result
+            ):
+                del self._entries[lookup]
+                self._ungrouped.pop(lookup, None)
 
     def run(
         self, backend: str, key: str, producer: Callable[[], _T], group: Any = None
@@ -414,12 +430,10 @@ class AstAcquisitionScope:
             left = deadline.remaining()
             try:
                 result = future.result(timeout=left)
-            except (deadline.ProcessCancelled, AcquisitionWithheld):
+            except deadline.ProcessCancelled:
                 # The producer was cancelled because *its* request's dump
-                # failed, or its result was a derived form only its own
-                # consumer may use -- not because this waiter gave up. This
-                # waiter still needs the value, so acquire it again as leader
-                # or follower.
+                # failed, not because this waiter gave up. This waiter still
+                # needs the value, so acquire it again as leader or follower.
                 return self.run(backend, key, producer, group=group)
             except FutureTimeoutError:
                 if future.done():
@@ -440,17 +454,9 @@ class AstAcquisitionScope:
             # Waiters get the exception without the producer's frames; this
             # caller re-raises it with them, so the failure stays diagnosable.
             tb = exc.__traceback__
-            self._settle_withdrawn(lookup, future, exc.with_traceback(None))
+            self._settle_failed(lookup, future, exc.with_traceback(None))
             exc.with_traceback(tb)
             raise
-        if carries_superseded_ast(result):
-            # The producer ran inside its caller's `derived_ast_scope`, which
-            # took a derived form instead of the tree. That answer is this
-            # caller's alone: published, it reached a sibling consumer of the
-            # same key (the castxml vector join beside the header-graph
-            # prefetch) as a bare `object()`. Withdraw it like a failure.
-            self._settle_withdrawn(lookup, future, AcquisitionWithheld(backend))
-            return result
         future.set_result(result)
         with self._lock:
             # Retry the bound now that this producer has settled. Admission
@@ -567,7 +573,25 @@ def run_ast_acquisition_offering_entry(
         ran = True
         return producer()
 
-    result = run_ast_acquisition(backend, key, _tracked)
+    while True:
+        result = run_ast_acquisition(backend, key, _tracked)
+        if ran or not carries_superseded_ast(result):
+            break
+        # Served another consumer's derived answer: its `derived_ast_scope`
+        # took a projection instead of the tree, and the table keeps that
+        # answer so the key's other derived consumers (every release member's
+        # header-graph attach) still share one acquisition. It is not a tree.
+        # A derived consumer of our own takes its form from the entry; any
+        # other consumer (the castxml vector join) drops the answer and
+        # acquires the tree in its place.
+        path = entry_path(result) if callable(entry_path) else entry_path
+        if path.is_file():
+            own = offer_derived_ast_source(path, is_cache_entry=True)
+            if own is not None:
+                return cast("_T", (own, *cast("tuple[Any, ...]", result)[1:]))
+        scope = _ast_acquisition_scope.get()
+        if scope is not None:
+            scope.discard_result(backend, key, result)
     if ran:
         return result
     # The entry the producer actually wrote, which a result can determine:
