@@ -685,7 +685,7 @@ def _in_surface_result_is_confirmed(
     ) & auth.exact_type_identities:
         return True
     if class_metadata_owner_confirmed(
-        change.symbol or "", auth.exact_type_identities, auth.class_owner_paths
+        change.symbol or "", auth.exact_type_identities, auth.class_owner_scopes
     ):
         return True
     directly_referenced_stdlib = (
