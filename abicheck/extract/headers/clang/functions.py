@@ -67,9 +67,8 @@ from ....model.identity import (
     entity_id_for_function,
 )
 from ..scope_segments import strip_record_scopes
-from .attributes import (
-    clang_contract_attributes as _clang_contract_attributes,
-)
+from .attributes import clang_contract_attributes as _clang_contract_attributes
+from .constraints import FunctionConstraintIndex
 from .context import (
     _Decl,
     access_level as _access_level,
@@ -97,6 +96,7 @@ from .qualifiers import (
     clang_param_is_restrict as _clang_param_is_restrict,
     clang_param_is_va_list as _clang_param_is_va_list,
 )
+from .redeclarations import RedeclarationIdentity
 from .restrict_spelling import without_top_level_restrict
 from .return_type import return_type as _return_type
 
@@ -438,8 +438,10 @@ def parse_functions(
     function_template_defaults: Mapping[int, tuple[str | None, ...] | None]
     | None = None,
     explicit_facts: Mapping[int, Fact[ExplicitInstantiation]] | None = None,
+    function_constraints: FunctionConstraintIndex | None = None,
 ) -> list[Function]:
     funcs: list[Function] = []
+    redeclared = RedeclarationIdentity()  # out-of-line def -> in-class identity
     for entry in functions:
         node = entry.node
         if is_builtin_file(entry.file):
@@ -746,53 +748,51 @@ def parse_functions(
                 # distinct functions into one `EntityId`. The C-linkage case
                 # is routed through `is_extern_c` instead, same order
                 # `finding_identity.resolve_function_identity` applies.
-                entity_id=entity_id_for_function(
-                    # A hidden friend's OWN scope is the nearest enclosing
-                    # namespace, never the befriending class it is lexically
-                    # nested inside (Codex review, PR #943) -- see
-                    # `strip_record_scopes`'s own docstring for the
-                    # confirmed-by-compilation redefinition proof.
-                    # `entry.scope_path` stays untouched everywhere else
-                    # (display qualified name, `hidden_friend_owner` below),
-                    # so this is the one place the distinction matters.
-                    (
-                        strip_record_scopes(entry.scope_path)
-                        if entry.in_friend
-                        else entry.scope_path
+                entity_id=redeclared.resolve(
+                    node,
+                    entity_id_for_function(
+                        # A hidden friend's OWN scope is the nearest enclosing
+                        # namespace, never the befriending class it is lexically
+                        # nested inside (Codex review, PR #943) -- see
+                        # `strip_record_scopes`'s own docstring for the
+                        # confirmed-by-compilation redefinition proof.
+                        # `entry.scope_path` stays untouched everywhere else
+                        # (display qualified name, `hidden_friend_owner` below),
+                        # so this is the one place the distinction matters.
+                        (
+                            strip_record_scopes(entry.scope_path)
+                            if entry.in_friend
+                            else entry.scope_path
+                        ),
+                        leaf_name,
+                        mangled_name=(  # `mangled`: match Darwin stripping.
+                            mangled
+                            if (raw_mangled is not None and not is_extern_c)
+                            else None
+                        ),
+                        is_extern_c=is_extern_c,
+                        param_types=tuple(p.type for p in params),
+                        is_const=is_const,
+                        is_volatile=is_volatile,
+                        ref_qualifier=ref_qualifier,
+                        is_variadic=is_variadic,
+                        # Template-parameter KIND discriminator (`template<class
+                        # T>` vs `template<int N>`; Codex review, PR #943).
+                        template_param_kinds=entry.template_param_kinds,
+                        # Rename-blind dependent parameter types (PR #943).
+                        type_param_names=entry.template_type_param_names,
+                        # A template's dependent return type distinguishes
+                        # overloads; ignored for a non-template (PR #943).
+                        return_type=ret_type,
+                        # C++20 requires-clause / type-constraint discriminator.
+                        constraints=(
+                            function_constraints.signature(
+                                node, entry.template_type_param_names
+                            )
+                            if function_constraints is not None
+                            else ()
+                        ),
                     ),
-                    leaf_name,
-                    mangled_name=(  # `mangled`: match Darwin stripping.
-                        mangled
-                        if (raw_mangled is not None and not is_extern_c)
-                        else None
-                    ),
-                    is_extern_c=is_extern_c,
-                    param_types=tuple(p.type for p in params),
-                    is_const=is_const,
-                    is_volatile=is_volatile,
-                    ref_qualifier=ref_qualifier,
-                    is_variadic=is_variadic,
-                    # Distinguishes two uninstantiated function templates
-                    # overloaded only by template-parameter KIND (e.g.
-                    # `template<class T> void f()` vs. `template<int N> void
-                    # f()`) -- both share scope/leaf_name/param_types/
-                    # mangled_name=None, so without this the "sig" fallback
-                    # tuple would collide them too (Codex review, PR #943).
-                    template_param_kinds=entry.template_param_kinds,
-                    # Canonicalizes a dependent ORDINARY parameter type
-                    # (e.g. `template<class T> void f(T)`) against a pure
-                    # template-parameter rename the identical way a
-                    # non-type template parameter's own declared type
-                    # already is (Codex review, PR #943).
-                    type_param_names=entry.template_type_param_names,
-                    # A function template's return type can itself depend
-                    # on a template parameter (`template<class T> typename
-                    # T::x f(T);`) -- two such templates can share every
-                    # other "sig" dimension and still be distinct, legal
-                    # overloads (Codex review, PR #943). Ignored by
-                    # `entity_id_for_function` for a non-template function,
-                    # so this is a no-op there.
-                    return_type=ret_type,
                 ),
             )
         )

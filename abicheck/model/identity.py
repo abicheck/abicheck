@@ -484,6 +484,7 @@ def entity_id_for_function(
     template_param_kinds: tuple[str, ...] = (),
     type_param_names: tuple[str, ...] = (),
     return_type: str = "",
+    constraints: tuple[str, ...] = (),
 ) -> EntityId:
     """``EntityId`` for a function.
 
@@ -643,6 +644,12 @@ def entity_id_for_function(
     error. A pure template-parameter rename that only the return type's
     own dependent spelling reflects still resolves to the same ``EntityId``.
 
+    *constraints* is the declaration's tagged C++20 constraint signature
+    (``extract.headers.clang.constraints``): two templates differing only
+    in a ``requires``-clause or type-constraint are distinct overloads.
+    Folded in as ``("requires", *constraints)`` before ``"ret"`` only when
+    non-empty, so an unconstrained function's ``extra`` is unchanged.
+
     When *mangled_name* is present, *leaf_name* is likewise ignored -- see
     :func:`entity_id_for_variable`'s docstring for the confirmed reason
     (the ELF-only fallback path reuses the raw exported symbol for both
@@ -710,6 +717,7 @@ def entity_id_for_function(
             # ``canonicalize_type_param_references`` afterwards for the
             # identical rename-blind substitution as every other dependent
             # spelling here.
+            *(("requires", *constraints) if constraints else ()),
             *(
                 (
                     "ret",

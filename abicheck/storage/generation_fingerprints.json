@@ -94,13 +94,14 @@
       "abicheck/extract/headers/clang/__init__.py": "538add12f3ff39e1c1b39e6f5def93b50a584b78b30c4e7e59058207222757d0",
       "abicheck/extract/headers/clang/attributes.py": "7e32c123c19fa5cad688760325bd17199dd42d0cc58a0b92360349403003f1e9",
       "abicheck/extract/headers/clang/backend.py": "5025e5d53c93c90daa08f8962f6a44ae593185d7a6446b10b7303987b044fd6b",
+      "abicheck/extract/headers/clang/constraints.py": "824b871e3b2eefe9e0970cf847c190eb0a4546757f002a4ab77704bdbeec1db7",
       "abicheck/extract/headers/clang/context.py": "648411b558314ee3ba099c4ecbd302193535330c8dc85bb087ad8d2f967b76ec",
       "abicheck/extract/headers/clang/enums.py": "69f90fd8e342371d246a257f7ed4230d9a548173f856ec63776d6af12ee53644",
       "abicheck/extract/headers/clang/error_header_retry.py": "3153f727c9d1934783a51d6917727a48aeba31e68b3c2462aef6e6b2f489f690",
       "abicheck/extract/headers/clang/explicit_instantiation.py": "bf0178df431eef00d5ee5c9e918cba99a80fab226a68f7a179b2f1a36ab5da95",
       "abicheck/extract/headers/clang/expr.py": "5d8e1ef086c583db2557fd7fdb3fd5e4f51b55e4b556f120f624eea6875e8e6a",
       "abicheck/extract/headers/clang/function_template_defaults.py": "2867a70d0b85c891efbf80194ae147fd96429e9d51cdb93e029ff642be0bc780",
-      "abicheck/extract/headers/clang/functions.py": "47f788f6f3225bf8ca25b2f19431a3da700f335f138e232c6fcc5c93db3903b8",
+      "abicheck/extract/headers/clang/functions.py": "2bed96505e3f281e1afe2b4ea8f2dfc9fe732e6bb53f8ccc1979f32e46b9b486",
       "abicheck/extract/headers/clang/inline_semantics.py": "9add1c49ba9e755b12cd50aaa82254bfe2a7141e7bb0bfeec640e540d291691d",
       "abicheck/extract/headers/clang/layout_tool.py": "84fe5c86af2f0ae7486012297356d18046345a9ec5c0bbab1b8ec0a59645a2fe",
       "abicheck/extract/headers/clang/locations.py": "d4292c937fb928268132c6a3f21a35a5d7576b8164416648ef73815cd07fcddf",
@@ -108,6 +109,7 @@
       "abicheck/extract/headers/clang/param_kind.py": "78d7f6a874de047bd6b3c6f3bebf5007ffa3dec5ca37456ca14c8ac79c6740c7",
       "abicheck/extract/headers/clang/qualifiers.py": "34ed3ec2f0a0fad21c86d8e7b3708653c18670e955e39d1fb3d2c647a764cc67",
       "abicheck/extract/headers/clang/records.py": "e51898f2fbf90428a14efc29f032d82946e7a83bc65f0c36fc2755b9e03d6f43",
+      "abicheck/extract/headers/clang/redeclarations.py": "a721440b183b81c24d1faad4c75dbb2241d28bc29c64792d79f99863b56029c8",
       "abicheck/extract/headers/clang/restrict_spelling.py": "309efe53d934303354ef102e0b223363a099c164b2000727e4f591998afa2ec7",
       "abicheck/extract/headers/clang/return_type.py": "3b758adeb133ea1544b4de420bb7d6cc19a6ac5f6f16b27f3c81e963b22940bc",
       "abicheck/extract/headers/clang/scope.py": "5b7bf471b1e95184c97da44aed88c8f4b29b36f77699a44255c33a889ea3a4b3",
@@ -165,9 +167,9 @@
       "abicheck/symvers_metadata.py": "372737765cd132e6e87ed891dd465d2958e04debbef774e45212ceb3036871cb",
       "abicheck/type_metadata.py": "9997189de8dac522fd1db8be5ae491d811139503f83abaaded89038eb4aa9cdf"
     },
-    "fingerprint": "6f47b3f6fbf46cf7c12710ec71547087734c578a086b59ab1742a1f2ef6ae13a",
-    "generation": 24,
-    "reason": "bumped to 24 for a semantic change"
+    "fingerprint": "e2c2802b667367c533abeff50a444013eb4d0e772926d475400df14ad849f423",
+    "generation": 25,
+    "reason": "bumped to 25 for a semantic change"
   },
   "resolver": {
     "files": {
@@ -187,7 +189,7 @@
     },
     "fingerprint": "1746ea87424e9b91785555a49fab5634033df0e30981fffdfac6ba1f91a25630",
     "generation": 2,
-    "reason": "Merge of origin/main: resolver-scope edits are import-path repoints to compare/internal_leak_* (ADR-061 move), no change to what is extracted or derived."
+    "reason": "merge of the gen-24 call-graph fix and the gen-25 EntityId fix; this axis's own code is unchanged by the EntityId fix"
   },
   "source": {
     "files": {
@@ -237,6 +239,6 @@
     },
     "fingerprint": "be14c2e0edc25f585da25f2ebb7cedb8ec6646298674f6b8e84822a90938520f",
     "generation": 10,
-    "reason": "bumped to 10 for a semantic change"
+    "reason": "merge of the gen-24 call-graph fix and the gen-25 EntityId fix; this axis's own code is unchanged by the EntityId fix"
   }
 }

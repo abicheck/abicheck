@@ -233,7 +233,7 @@
     "abicheck/model/signature_normalization.py(_strip_cv_tokens_outside_nesting)": 35,
     "abicheck/model/signature_normalization.py(canonicalize_function_signature_param_type)": 563,
     "abicheck/model/snapshot.py(AbiSnapshot.canonical_ir)": 488,
-    "abicheck/model/snapshot.py(AbiSnapshot.declarations)": 4613,
+    "abicheck/model/snapshot.py(AbiSnapshot.declarations)": 4641,
     "abicheck/model/snapshot.py(AbiSnapshot.function_map)": 182,
     "abicheck/model/snapshot.py(AbiSnapshot.index)": 196,
     "abicheck/model/snapshot.py(AbiSnapshot.variable_map)": 28,
@@ -278,6 +278,7 @@
     "abicheck/policy/analysis_assurance/_template_defaults.py(template_default_gap)": 14,
     "abicheck/policy/binary_gate_marker.py(is_binary_gate_demoted)": 3024,
     "abicheck/policy/captured_type_identities.py(present_identities)": 2388,
+    "abicheck/policy/class_metadata_identity.py(_implicit_copy_assign_owner)": 204,
     "abicheck/policy/classification.py(apply_policy_file_overrides)": 28,
     "abicheck/policy/classification.py(effective_category)": 756,
     "abicheck/policy/disposition_gate.py(_GateContext.of)": 28,
@@ -303,5 +304,5 @@
   },
   "mode": "default",
   "n": 40,
-  "total": 237110
+  "total": 237342
 }
