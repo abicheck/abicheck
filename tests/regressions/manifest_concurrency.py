@@ -261,10 +261,17 @@ CONCURRENCY_BUG_CLASSES: tuple[BugClass, ...] = (
         # neither the child's nor the producer's frames, so the seed test
         # also pins both tracebacks surviving.
         fixed_by=(1810,),
-        seed_tests=("tests/test_ast_acquisition_derived_withheld.py",),
+        seed_tests=(
+            "tests/test_ast_acquisition_derived_withheld.py",
+            # The F5 harness cell: the real `compare` CLI on a castxml
+            # vector header with the table on and in reference mode.
+            "tests/test_family_f5_derived_ast_sharing.py",
+        ),
+        public_surfaces=("cli",),
         axes={
             "order": ("derived-first", "tree-first", "tree-waits-on-derived"),
             "execution": ("in-process", "forked-child"),
+            "frontend": ("castxml", "clang"),
         },
     ),
 )
