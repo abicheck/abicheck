@@ -1,0 +1,3 @@
+### Changed
+
+- **The typed `compare` API takes the CLI's severity and assurance inputs, so both front ends share one exit gate** — `CompareRequest` gains the four `.abicheck.yml` `severity:` overrides (`severity_abi_breaking`, `severity_potential_breaking`, `severity_quality_issues`, `severity_addition`) and `require_complete_analysis` (`assurance.require_complete`). A typed caller that sets them now gets the exit code `docs/reference/exit-codes.md` documents, which the CLI already produced; before, those inputs could not be expressed through the typed API. Callers that set none of the new fields, and every CLI exit code, are unchanged. See ADR-087.

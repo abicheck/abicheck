@@ -316,8 +316,32 @@ def effective_gate_for_resolved_compare_config(
     (``policy/release_gate_options.py``) is where those two axes are real at
     the object's own scope, once resolved for the release fan-out itself.
     """
-    return EffectiveGate.from_severity(
+    return effective_gate_for_compare(
         cfg.severity if cfg.severity_active else None,
+        require_complete_analysis=require_complete_analysis,
+        result=result,
+    )
+
+
+def effective_gate_for_compare(
+    severity: Any,
+    *,
+    require_complete_analysis: bool = False,
+    result: Any = None,
+) -> EffectiveGate:
+    """The one single-pair ``compare`` gate derivation, from explicit inputs.
+
+    Both front ends reach the exit code through this function: the native
+    CLI via :func:`effective_gate_for_resolved_compare_config` (which reads
+    its own resolved ``.abicheck.yml`` config) and the typed API via
+    ``workflows.compare_finalize.finalize_classified_pair`` (which reads the
+    ``CompareRequest`` fields). Keeping the derivation in one place is what
+    stops the two gates from drifting apart, the divergence the CLI/typed
+    exit-code parity tests guard. *severity* is the resolved
+    ``SeverityConfig``, or ``None`` when no severity setting is in effect.
+    """
+    return EffectiveGate.from_severity(
+        severity,
         require_complete_analysis=require_complete_analysis,
         scope=scoped_gate_selection_from_result(result),
     )

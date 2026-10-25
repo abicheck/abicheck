@@ -342,12 +342,14 @@ class CompareRequest:
     #: The ``DEFAULTED_COMPARE_PARAMETERS`` stated (the CLI derives its set
     #: from Click's ``ParameterSource``); ``None`` reads every field as stated.
     stated_settings: frozenset[str] | None = field(default=None, kw_only=True)
-    #: The one automatic gate algorithm (ADR-064/CLI cleanup phase two PR
-    #: G2) is fully determined by whether a severity setting is in effect
-    #: -- there is no ``exit_code_scheme`` field here to force one direction
-    #: or the other (removed in PR G2 along with the CLI flag, the
-    #: ``.abicheck.yml`` key, and the pack field it used to mirror).
-    severity_preset: str | None = field(default=None, kw_only=True)  # ADR-064/PR G2
+    #: ADR-064: the gate algorithm follows from whether a severity setting is in effect.
+    severity_preset: str | None = field(default=None, kw_only=True)
+    #: ``.abicheck.yml`` ``severity:`` overrides (win over the preset) and ``assurance.require_complete`` (ADR-087).
+    severity_abi_breaking: str | None = field(default=None, kw_only=True)
+    severity_potential_breaking: str | None = field(default=None, kw_only=True)
+    severity_quality_issues: str | None = field(default=None, kw_only=True)
+    severity_addition: str | None = field(default=None, kw_only=True)
+    require_complete_analysis: bool = field(default=False, kw_only=True)
     #: ADR-068 / plan §3 #12 (Phase 2c): the resolved changed-path seed
     #: (``compare --changed-path``, or ``--since`` after its ``git diff``).
     #: Scoping input only -- it produces no finding of its own; it narrows
