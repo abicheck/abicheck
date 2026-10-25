@@ -49,7 +49,7 @@ def add_contract_evaluation_fields(
     It defaults to ``0`` -- the true answer for every audit ledger this
     helper serializes, since none of those findings reach a gate. Only the
     ``changes`` path passes a computed value, from
-    :func:`~abicheck.policy.severity.gate_contribution_for_change`.
+    :func:`~abicheck.policy.gate_contribution.gate_contribution_for_change`.
     """
     # The audit-ledger serializers (`_out_of_surface_entry`,
     # `suppressed_change_entry`, `add_reconciled`, `filtered_internal_entry`)

@@ -5,16 +5,16 @@
 from __future__ import annotations
 
 import hashlib
-from collections.abc import Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from ..compare.finding_identity import report_finding_id, resolve_change_identity
-from ..model.contract_finding_relevance import is_evaluated
-from ..model.evidence_status import is_cross_source_resolved
+from ..policy.gate_contribution import resolved_gate_contribution
 from .change_operation import entity_for_change, operation_for_kind
 
 if TYPE_CHECKING:
+    from ..policy.severity import SeverityConfig
     from .finding import ReportFinding
 
 _EXPORT_KINDS = frozenset({"func_removed_elf_only", "func_visibility_changed"})
@@ -41,6 +41,26 @@ class ReviewGroup:
 
     def to_dict(self) -> dict[str, object]:
         return {name: getattr(self, name) for name in self.__dataclass_fields__}
+
+
+def gating_totals(
+    groups: Iterable[ReviewGroup | Mapping[str, object]],
+) -> tuple[int, int]:
+    """``(gating findings, gating groups)`` over *groups* -- the one sum every
+    report states its review-group gating line from, read off each group's
+    already-decided ``gating_findings`` (never re-derived from a verdict or a
+    severity label in a renderer)."""
+    findings = gating_groups = 0
+    for group in groups:
+        raw = (
+            group.get("gating_findings", 0)
+            if isinstance(group, Mapping)
+            else group.gating_findings
+        )
+        count = int(raw) if isinstance(raw, int) else 0
+        findings += count
+        gating_groups += count > 0
+    return findings, gating_groups
 
 
 def _family(kind: str) -> str:
@@ -170,8 +190,18 @@ def _vtable_transition(members: list[ReportFinding]) -> tuple[str, str]:
     return "; ".join(parts), consequence
 
 
-def build_review_groups(findings: Sequence[ReportFinding]) -> tuple[ReviewGroup, ...]:
-    """Group only structurally identical, explicitly-correlatable findings."""
+def build_review_groups(
+    findings: Sequence[ReportFinding],
+    *,
+    severity_config: SeverityConfig | None = None,
+) -> tuple[ReviewGroup, ...]:
+    """Group only structurally identical, explicitly-correlatable findings.
+
+    A group's ``gating_findings`` counts the members whose ADR-049 D1
+    ``gate_contribution`` is nonzero under the run's own gate scheme --
+    *severity_config*, ``None`` for the legacy verdict scheme -- so it agrees
+    with the JSON per-finding field and with the exit code.
+    """
     buckets: dict[tuple[str, str, str], list[ReportFinding]] = {}
     for finding in findings:
         change = finding.change
@@ -231,14 +261,15 @@ def build_review_groups(findings: Sequence[ReportFinding]) -> tuple[ReviewGroup,
                 e for m in members for e in (m.change.evidence_provenance or ())
             )
         )
-        # Only an evaluated finding reaches the gate (ADR-049 D1's
-        # `gate_contribution`): one the contract proved out of scope keeps its
-        # raw breaking verdict as a label but contributes nothing, and must not
-        # be counted here as the cause of the exit (SVS field report).
+        # ADR-049 D1: the same per-finding rule as the JSON
+        # `gate_contribution` -- a contract-excluded break keeps its raw
+        # verdict as a label but contributes nothing (SVS field report), and a
+        # category the severity config does not set to `error` gates nothing.
         gating = sum(
-            m.verdict.name in {"BREAKING", "API_BREAK"}
-            and is_evaluated(m.change)
-            and not is_cross_source_resolved(m.change)
+            resolved_gate_contribution(
+                m.change, severity_config, verdict=m.verdict, category=m.category
+            )
+            > 0
             for m in members
         )
         if family == "export":

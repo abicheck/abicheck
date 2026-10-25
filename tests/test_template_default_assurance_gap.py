@@ -15,7 +15,7 @@
 
 """ADR-085 D3: a header-only template-default change is never a silent clean.
 
-Invariant: for every template family (class, function, alias) and every
+Invariant: for every template family (class, function, alias, variable) and every
 parameter kind (type, non-type, template-template), a header pair whose
 default is added, removed or changed either reports
 ``template_param_default_changed`` or reads ``partial`` with a named
@@ -172,17 +172,105 @@ _CHANGED = [
         "template <class T, class U = int> using P = Q<U>;",
     ),
     (
+        "alias_type_added",
+        "template <class T, class U> using P = Q<U>;",
+        "template <class T, class U = int> using P = Q<U>;",
+    ),
+    (
+        "alias_type_removed",
+        "template <class T, class U = int> using P = Q<U>;",
+        "template <class T, class U> using P = Q<U>;",
+    ),
+    (
+        "alias_nontype_changed",
+        "template <class T, int N = 1> using P = Q<T>;",
+        "template <class T, int N = 2> using P = Q<T>;",
+    ),
+    (
+        "alias_nontype_added",
+        "template <class T, int N> using P = Q<T>;",
+        "template <class T, int N = 2> using P = Q<T>;",
+    ),
+    (
+        "alias_nontype_removed",
+        "template <class T, int N = 2> using P = Q<T>;",
+        "template <class T, int N> using P = Q<T>;",
+    ),
+    (
+        "alias_template_template_changed",
+        "template <class T, template <class> class C = Q> using P = Q<C<T>>;",
+        "template <class T, template <class> class C = R> using P = Q<C<T>>;",
+    ),
+    (
+        "alias_template_template_added",
+        "template <class T, template <class> class C> using P = Q<C<T>>;",
+        "template <class T, template <class> class C = R> using P = Q<C<T>>;",
+    ),
+    (
+        "alias_template_template_removed",
+        "template <class T, template <class> class C = Q> using P = Q<C<T>>;",
+        "template <class T, template <class> class C> using P = Q<C<T>>;",
+    ),
+    (
         "variable_type_changed",
         "template <class T, class U = T> constexpr int V = sizeof(U);",
         "template <class T, class U = int> constexpr int V = sizeof(U);",
     ),
+    (
+        "variable_type_added",
+        "template <class T, class U> constexpr int V = sizeof(U);",
+        "template <class T, class U = int> constexpr int V = sizeof(U);",
+    ),
+    (
+        "variable_type_removed",
+        "template <class T, class U = int> constexpr int V = sizeof(U);",
+        "template <class T, class U> constexpr int V = sizeof(U);",
+    ),
+    (
+        "variable_nontype_changed",
+        "template <class T, int N = 1> constexpr int V = sizeof(T);",
+        "template <class T, int N = 2> constexpr int V = sizeof(T);",
+    ),
+    (
+        "variable_nontype_added",
+        "template <class T, int N> constexpr int V = sizeof(T);",
+        "template <class T, int N = 2> constexpr int V = sizeof(T);",
+    ),
+    (
+        "variable_nontype_removed",
+        "template <class T, int N = 2> constexpr int V = sizeof(T);",
+        "template <class T, int N> constexpr int V = sizeof(T);",
+    ),
+    (
+        "variable_template_template_changed",
+        "template <class T, template <class> class C = Q> constexpr int V = sizeof(C<T>);",
+        "template <class T, template <class> class C = R> constexpr int V = sizeof(C<T>);",
+    ),
+    (
+        "variable_template_template_added",
+        "template <class T, template <class> class C> constexpr int V = sizeof(C<T>);",
+        "template <class T, template <class> class C = R> constexpr int V = sizeof(C<T>);",
+    ),
+    (
+        "variable_template_template_removed",
+        "template <class T, template <class> class C = Q> constexpr int V = sizeof(C<T>);",
+        "template <class T, template <class> class C> constexpr int V = sizeof(C<T>);",
+    ),
 ]
 
-# Known gap (docs/contribute/known-gaps.md, ADR-085): the clang backend models
-# neither alias nor variable templates, so their default change is not seen
-# and no gap is named. castxml's header scan covers them. The clang rows of
-# these cases are a canary: they pin the gap and fail once it is closed.
-_CLANG_UNMODELED = {"alias_type_changed", "variable_type_changed"}
+# The clang backend records class- and function-template defaults but models
+# neither alias nor variable templates (docs/contribute/known-gaps.md,
+# ADR-085 D3). Its run scans the parsed headers for an alias or variable
+# template with a default and names the gap, so these rows read ``partial``
+# on clang exactly as every row does on castxml.
+_CLANG_UNMODELED = {
+    case for case, _, _ in _CHANGED if case.startswith(("alias_", "variable_"))
+}
+_ALIAS_VARIABLE_UNCHANGED = (
+    "template <class T, class U = int> using P = Q<U>;\n"
+    "template <class T, int N = 2> constexpr int V = N;"
+)
+_ALIAS_VARIABLE_NO_DEFAULTS = "template <class T> using P = Q<T>;\ntemplate <class T> constexpr int V = sizeof(T);"
 _UNCHANGED = "template <class T, class U = int> struct Box { T t; };\ntemplate <class T = int> void f() {}"
 _NO_DEFAULTS = "template <class T> struct Box { T t; };\ntemplate <class T> void f() {}"
 
@@ -253,17 +341,15 @@ def test_changed_default_is_never_a_silent_clean(
     _require(backend)
     report = _compare(tmp_path, backend, old, new)
     kinds = {c["kind"] for c in report["changes"]}
-    if backend == "clang" and case in _CLANG_UNMODELED:
-        assert "template_param_default_changed" not in kinds
-        assert _gap_notes(report) == []
-        return
     reported = "template_param_default_changed" in kinds
     assert reported or (
         report["analysis_assurance"]["status"] == "partial" and _gap_notes(report)
     ), (case, report["verdict"], report["analysis_assurance"])
-    # castxml cannot observe the default: it may only report the gap, never a finding.
-    if backend == "castxml":
+    # castxml cannot observe the default, and clang does not model alias or
+    # variable templates: either may only report the gap, never a finding.
+    if backend == "castxml" or case in _CLANG_UNMODELED:
         assert not reported
+        assert report["analysis_assurance"]["status"] == "partial"
         assert _gap_notes(report)
 
 
@@ -286,5 +372,37 @@ def test_unchanged_default_reports_no_finding(tmp_path: Path, backend: str) -> N
 def test_templates_without_defaults_name_no_gap(tmp_path: Path, backend: str) -> None:
     _require(backend)
     report = _compare(tmp_path, backend, _NO_DEFAULTS, _NO_DEFAULTS)
+    assert report["verdict"] == "NO_CHANGE"
+    assert _gap_notes(report) == []
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("backend", ["castxml", "clang"])
+def test_unchanged_alias_variable_default_is_named_not_reported(
+    tmp_path: Path, backend: str
+) -> None:
+    """Negative control: an unchanged alias/variable default is no finding.
+    Neither backend records it, so the gap is still named (not ``complete``)."""
+    _require(backend)
+    report = _compare(
+        tmp_path, backend, _ALIAS_VARIABLE_UNCHANGED, _ALIAS_VARIABLE_UNCHANGED
+    )
+    assert "template_param_default_changed" not in {
+        c["kind"] for c in report["changes"]
+    }
+    assert report["verdict"] == "NO_CHANGE"
+    assert report["analysis_assurance"]["status"] == "partial"
+    assert _gap_notes(report)
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("backend", ["castxml", "clang"])
+def test_alias_variable_templates_without_defaults_name_no_gap(
+    tmp_path: Path, backend: str
+) -> None:
+    _require(backend)
+    report = _compare(
+        tmp_path, backend, _ALIAS_VARIABLE_NO_DEFAULTS, _ALIAS_VARIABLE_NO_DEFAULTS
+    )
     assert report["verdict"] == "NO_CHANGE"
     assert _gap_notes(report) == []

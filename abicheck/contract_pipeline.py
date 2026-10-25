@@ -77,7 +77,11 @@ from .contract_relevance_types import (
     ContractRelevance,
     evaluation_status_for,
 )
-from .policy.contract_dependency_origin import exclude_unreachable_dependency_findings
+from .policy.contract_dependency_origin import (
+    NO_DEPENDENCY_INTERNALS,
+    DependencyInternals,
+    exclude_unreachable_dependency_findings,
+)
 from .policy.contract_toolchain_origin import exclude_toolchain_runtime_findings
 
 if TYPE_CHECKING:
@@ -145,12 +149,12 @@ class ContractEvaluationStage:
     #: The same origin test over any name, for a finding whose symbol no ELF
     #: table lists (``export_accounting.toolchain_runtime_name_predicate``).
     toolchain_name_predicate: Callable[[str], bool] | None = None
-    #: Each side's dependency-internal record names no public declaration
-    #: reaches (``workflows.dump.dwarf_dependency_types``), for the presence
-    #: findings :func:`~abicheck.policy.contract_dependency_origin.exclude_unreachable_dependency_findings`
-    #: moves out of contract. Empty for a header-derived snapshot.
-    dependency_type_names_old: frozenset[str] = frozenset()
-    dependency_type_names_new: frozenset[str] = frozenset()
+    #: Each side's dependency internals no public declaration reaches
+    #: (``workflows.dump.dependency_internals``), for the findings
+    #: :func:`~abicheck.policy.contract_dependency_origin.exclude_unreachable_dependency_findings`
+    #: moves out of contract.
+    dependency_internals_old: DependencyInternals = NO_DEPENDENCY_INTERNALS
+    dependency_internals_new: DependencyInternals = NO_DEPENDENCY_INTERNALS
     changes: list[Change] = field(default_factory=list)
     #: ``id()`` of every already-classified finding. Identity, not equality:
     #: two findings can compare equal (``Change`` is a plain dataclass) while
@@ -165,6 +169,17 @@ class ContractEvaluationStage:
     #: recycled ``id`` would read as already-classified, and a fresh finding
     #: would reach compatibility policy unstamped.
     _classified: set[int] = field(default_factory=set, repr=False)
+
+    def _is_declared_public(self, change: Change) -> bool:
+        """Whether the caller declared *change*'s symbol public: the same
+        two overlays ``contract_evaluation`` trusts outright."""
+        from .post_processing import _change_matches_symbols
+
+        if self.forced_public and _change_matches_symbols(change, self.forced_public):
+            return True
+        return bool(
+            self.committed_exports and (change.symbol or "") in self.committed_exports
+        )
 
     def classify(self, changes: Iterable[Change]) -> None:
         """Stamp relevance, reason, assurance, evidence refs and evaluation
@@ -205,8 +220,9 @@ class ContractEvaluationStage:
         decisions = exclude_unreachable_dependency_findings(
             fresh,
             decisions,
-            old_names=self.dependency_type_names_old,
-            new_names=self.dependency_type_names_new,
+            old=self.dependency_internals_old,
+            new=self.dependency_internals_new,
+            is_declared_public=self._is_declared_public,
         )
         for change, decision in zip(fresh, decisions, strict=True):
             change.contract_relevance = decision.relevance
@@ -589,12 +605,12 @@ def build_contract_stage(
     directly_referenced_stdlib_new = directly_referenced_stdlib_type_spellings(
         new, exclude_export_only_roots=True, committed_roots=committed_roots
     )
-    from .workflows.dump.dwarf_dependency_types import unreachable_dependency_type_names
+    from .workflows.dump.dependency_internals import dependency_internals
 
-    dependency_type_names_old = (
-        unreachable_dependency_type_names(old) if old is not None else frozenset()
+    dependency_internals_old = (
+        dependency_internals(old) if old is not None else NO_DEPENDENCY_INTERNALS
     )
-    dependency_type_names_new = unreachable_dependency_type_names(new)
+    dependency_internals_new = dependency_internals(new)
     # The C++ runtime / toolchain's own symbols on either side, by the same
     # origin classification the symbol-hygiene audit reports (see
     # ContractEvaluationStage.toolchain_symbols). Read here, where both raw
@@ -690,8 +706,8 @@ def build_contract_stage(
         exports_new=exports_new,
         directly_referenced_stdlib_old=directly_referenced_stdlib_old,
         directly_referenced_stdlib_new=directly_referenced_stdlib_new,
-        dependency_type_names_old=dependency_type_names_old,
-        dependency_type_names_new=dependency_type_names_new,
+        dependency_internals_old=dependency_internals_old,
+        dependency_internals_new=dependency_internals_new,
         conflicts=tuple(conflicts),
         evidence=evidence,
         forced_public=(

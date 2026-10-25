@@ -154,6 +154,7 @@ from .review_digest_document import (
     build_review_digest_document as build_review_digest_document,
     render_review_digest_document as render_review_digest_document,
 )
+from .review_groups import gating_totals
 from .surface_changes import (
     SurfaceChangeSection,
     render_surface_changes_section,
@@ -399,7 +400,7 @@ def _review_group_families(
             and action == family["action"]
         )
         family["groups"] += 1
-        family["gating"] += int(group.get("gating_findings", 0) or 0)
+        family["gating"] += gating_totals((group,))[0]
         family["members"] += len(group.get("member_finding_ids", []) or [])
         if len(family["examples"]) < EXAMPLE_LIMIT:
             family["examples"].append(name)
@@ -423,7 +424,7 @@ def _render_review_groups_from_mapping(value: Any) -> list[str]:
     if not groups:
         return []
     families = _review_group_families(groups)
-    gating = sum(int(group.get("gating_findings", 0) or 0) for group in groups)
+    gating, _ = gating_totals(groups)
     family_word = "family" if len(families) == 1 else "families"
     summary = (
         f"{len(groups)} review group(s) across {len(families)} {family_word}; "
