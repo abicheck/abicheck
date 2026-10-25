@@ -777,6 +777,73 @@ def test_parameter_template_args_do_not_join_a_template_family() -> None:
     assert all(f.kind == ChangeKind.INSTANTIATION_MISSING_FROM_BINARY for f in findings)
 
 
+# -- header declaration identity (identity.header_declaration_retype_read_as_removal) --
+
+
+@pytest.mark.parametrize(
+    ("old_header", "new_header", "new_spelling", "same_declaration"),
+    [
+        # Relocated checkout, same header: one declaration.
+        ("/a/v1/include/api.h", "/b/build/v2/include/api.h", "V", True),
+        ("C:\\src\\v1\\api.h", "/home/ci/v2/api.h", "V", True),
+        # Another header, or another written signature: another declaration.
+        ("/a/v1/include/api.h", "/a/v2/include/other.h", "V", False),
+        ("/a/v1/include/api.h", "/a/v2/include/api.h", "W", False),
+    ],
+)
+def test_header_declaration_identity_survives_relocation_not_a_new_signature(
+    old_header: str, new_header: str, new_spelling: str, same_declaration: bool
+) -> None:
+    """A header declaration's identity is its declared name, written
+    signature and declaring header, invariant under where the tree was
+    checked out. Oracle: the scenario says whether the declaration is the
+    same; a same declaration whose typedef retargeted is one parameter
+    change, any other pair stays a removal and an addition."""
+    from abicheck.checker_policy import ChangeKind
+    from abicheck.compare.parameter_replacement import pair_parameter_replacements
+    from abicheck.diff_helpers import make_change
+    from abicheck.model import AbiSnapshot, Function, Param
+
+    # _ZN3lib5scaleEi / _ZN3lib5scaleEl: lib::scale(int) / lib::scale(long)
+    def snap(mangled: str, spelling: str, header: str, target: str) -> AbiSnapshot:
+        fn = Function(
+            name="scale",
+            mangled=mangled,
+            return_type="void",
+            params=[Param(name="v", type=spelling)],
+            source_location=f"{header}:7",
+        )
+        return AbiSnapshot(
+            library="lib",
+            version="1.0",
+            functions=[fn],
+            typedefs_qualified={"lib::V": target, "lib::W": target},
+            from_headers=True,
+        )
+
+    old = snap("_ZN3lib5scaleEi", "V", old_header, "int")
+    new = snap("_ZN3lib5scaleEl", new_spelling, new_header, "long")
+    changes = [
+        make_change(
+            ChangeKind.FUNC_REMOVED,
+            symbol="_ZN3lib5scaleEi",
+            name="scale",
+            description="r",
+        ),
+        make_change(
+            ChangeKind.FUNC_ADDED,
+            symbol="_ZN3lib5scaleEl",
+            new="scale",
+            description="a",
+        ),
+    ]
+    kinds = [c.kind for c in pair_parameter_replacements(changes, old, new)]
+    if same_declaration:
+        assert kinds == [ChangeKind.FUNC_PARAMS_CHANGED]
+    else:
+        assert kinds == [ChangeKind.FUNC_REMOVED, ChangeKind.FUNC_ADDED]
+
+
 # -- type-index identity (bug class identity.type_index_bare_name_collision) --
 
 
