@@ -537,15 +537,14 @@ def test_docs_snapshot_schema_version_matches_constant():
         f"docs/reference/snapshot-format.md does not mention the current "
         f"SCHEMA_VERSION ({SCHEMA_VERSION}) — update it alongside any schema bump."
     )
-    assert f"(currently `{SCHEMA_VERSION}`)" in text
-    # Every "currently `N`" occurrence (there are two: the schema-version
-    # section and the "Two contracts" table) must agree with the constant —
-    # a page can drift to a stale number in one spot while another was
-    # updated (CodeRabbit review: this table's "currently `8`" survived an
-    # earlier SCHEMA_VERSION bump to 11 unnoticed).
+    assert f"The current value is **`{SCHEMA_VERSION}`**" in text
+    # The page states the current value once, in its "Schema version history"
+    # section; every other place links there. Any stale literal in that
+    # sentence must agree with the constant (CodeRabbit review: a copy that
+    # survived an earlier SCHEMA_VERSION bump went unnoticed).
     stale = [
         m.group(0)
-        for m in re.finditer(r"currently `(\d+)`", text)
+        for m in re.finditer(r"current value is \*\*`(\d+)`\*\*", text)
         if m.group(1) != str(SCHEMA_VERSION)
     ]
     assert not stale, f"stale schema-version literal(s) in docs: {stale}"
