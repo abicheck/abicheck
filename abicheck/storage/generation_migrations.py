@@ -233,6 +233,9 @@ SPELLING_MIGRATIONS: Mapping[int, GenerationSpellingChange] = {
         "value, not a type spelling"
     ),
     19: GenerationSpellingChange(
+        "DWARF declarations record their declaring file when it is a header, and a dependency-internal presence finding no public declaration reaches is out of contract; no stored type spelling changed, only which declarations carry a location and which findings gate"
+    ),
+    20: GenerationSpellingChange(
         "clang runs set template_default_header_scan when a parsed public header "
         "declares an alias or variable template with a default template argument "
         "(was None for every clang run); no type or name spelling changes, so no "
