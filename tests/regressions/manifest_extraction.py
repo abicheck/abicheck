@@ -465,7 +465,7 @@ EXTRACTION_BUG_CLASSES: tuple[BugClass, ...] = (
             "A producer that cannot read the declaration kind leaves the implicit "
             "path in force."
         ),
-        fixed_by=(),
+        fixed_by=(1807,),
         seed_tests=("tests/test_explicit_instantiation_removal.py",),
     ),
     BugClass(
