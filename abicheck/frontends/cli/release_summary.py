@@ -57,6 +57,10 @@ if TYPE_CHECKING:
 
 __all__ = ["_finalize_release_output", "_write_release_summary_file"]
 
+#: Release formats rendered from the per-member DiffResults (``diff_pairs``):
+#: JUnit suites and SARIF runs each come from one member's own comparison.
+_PAIR_FORMATS = frozenset({"junit", "sarif"})
+
 
 def _write_release_summary_file(
     output_dir: Path,
@@ -319,7 +323,7 @@ def _finalize_release_output(
         old_map,
         new_map,
         warning_msgs,
-        diff_pairs=diff_pairs if fmt == "junit" else None,
+        diff_pairs=diff_pairs if fmt in _PAIR_FORMATS else None,
         bundle_result=bundle_result,
         matrix_result=matrix_result,
         severity_config=severity_config,

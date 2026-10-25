@@ -11,7 +11,7 @@ generated: false
 
 Index: [Known gaps](../known-gaps.md)
 
-**Status (re-verified 2026-10-09 at `456989f`): OPEN.** frontends/cli/commands/compare_routing.py:45 `_RELEASE_FORMATS = {json, markdown, junit, oneline, html}`, so sarif/review are still rejected for a release, and BundleSpec still has no scope-policy keys (not re-checked in detail).
+**Status (2026-10-23): PARTIAL.** The format set is closed: `sarif` and `review` now render for a directory/package `compare` (`abicheck/report/render_release_sarif.py`; `RELEASE_FORMATS` in `frontends/cli/commands/compare_routing.py`). Part 2 below (bundle-level scope policy) is still open.
 
 
 Two halves of `one-comparison-product.md`'s bundle-parity item that this
@@ -28,15 +28,17 @@ rest
 loud rather than silent, and it is not arbitrary — the missing formats are
 the ones whose renderers take a single `DiffResult`:
 
-- `sarif` needs one result set with stable per-finding locations; a release
-  has N of them and the fan-out discards each member's `DiffResult` before
-  rendering (`_strip_diff_results_and_adjust_verdict`, to bound peak memory
-  across a whole release). Producing a real release SARIF means either
-  keeping every member's findings live or projecting SARIF per member and
-  merging runs — a design choice, not a wiring gap.
-- `review` is a narrative rendering of *one* comparison, a PR-comment
-  digest whose aggregate shape ("which of 40 libraries broke, and how
-  badly") is a product question nobody has answered yet.
+- `sarif` is **closed**: the fan-out keeps each member's `DiffResult` only
+  for the pair formats (`junit`, `sarif`; `frontends/cli/release_summary._PAIR_FORMATS`),
+  and the SARIF log is one run per member, each run the single-pair
+  `to_sarif` projection, with every result stamped `properties.releaseMember`.
+  Each run keeps its own rule catalog, so `ruleIndex` values stay valid.
+- `review` is **closed** as a release-level digest: the verdict, exit code,
+  per-member counts and each member's breaking findings, rendered from the
+  release JSON document. The per-member `review_digest_document` needs a
+  per-member `ReportEnvelope` (old and new snapshots) that the fan-out does
+  not retain, so it is not reused per member. The aggregate shape question
+  is answered by that digest, not by a per-library PR comment.
 `oneline` was the fourth of that list and is **closed**: it never needed a
 `DiffResult` at all (it is a count summary, and the release summary already
 carries every count), so `report/release_oneline.py` folds the per-library
@@ -48,9 +50,8 @@ comparison scope, release coherence findings and the recorded dependency
 graph), so it needs no member `DiffResult` either. It is a release page, not
 the single-pair HTML report; per-member finding detail stays in the JSON.
 
-So library count still changes which of `sarif`/`review` are
-available -- a real parity gap, stated here rather than implied by a usage
-error -- and no longer changes anything about `oneline` or `html`.
+Library count no longer changes which formats a release can render:
+`sarif` and `review` are available for one library and for N.
 
 **2. Scope policy at bundle level.** ADR-065's scope policy is fully
 expressible for a directory/package `compare` — `--select`,

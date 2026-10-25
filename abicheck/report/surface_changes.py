@@ -69,9 +69,12 @@ class SurfaceChangeEntry:
     old_declaration: str | None
     new_declaration: str | None
     source_location: str | None
+    #: The release member this entry belongs to. ``None`` for a scalar
+    #: comparison, where the key is then omitted from the JSON entirely.
+    library: str | None = None
 
     def to_dict(self) -> dict[str, object]:
-        return {
+        entry: dict[str, object] = {
             "kind": self.kind,
             "symbol": self.symbol,
             "description": self.description,
@@ -81,6 +84,9 @@ class SurfaceChangeEntry:
             "new_declaration": self.new_declaration,
             "source_location": self.source_location,
         }
+        if self.library is not None:
+            entry["library"] = self.library
+        return entry
 
     @classmethod
     def from_dict(cls, d: Mapping[str, Any]) -> SurfaceChangeEntry:
@@ -93,6 +99,7 @@ class SurfaceChangeEntry:
             old_declaration=d.get("old_declaration"),
             new_declaration=d.get("new_declaration"),
             source_location=d.get("source_location"),
+            library=d.get("library"),
         )
 
 
@@ -273,7 +280,8 @@ def _declaration_line(entry: SurfaceChangeEntry) -> str:
     else:
         decl = entry.description
     loc = f" ({clip_name(entry.source_location)})" if entry.source_location else ""
-    return clip(f"- **{clip_name(entry.symbol)}** — {decl}{loc}")
+    member = f"`{clip_name(entry.library)}` · " if entry.library is not None else ""
+    return clip(f"- {member}**{clip_name(entry.symbol)}** — {decl}{loc}")
 
 
 #: Per-group cap on the compact/bounded rendering of this section.
