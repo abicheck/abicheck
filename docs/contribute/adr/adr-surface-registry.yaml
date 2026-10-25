@@ -724,3 +724,9 @@ adrs:
     use_cases: []
     surfaces: []
     missing: Proposed, not yet implemented; no publish-report reusable workflow, site generator, or page-link Action input exists yet.
+  - id: ADR-088
+    file: 088-one-compare-exit-gate.md
+    disposition: surfaced
+    use_cases: []
+    surfaces:
+      - api: abicheck.workflows.service_requests.CompareRequest

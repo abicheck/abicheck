@@ -104,6 +104,11 @@ current emitter, which is unchanged.
 
 ### False-clean risk
 
+#### `--depth binary` on a header-built snapshot misses debug-only declaration findings (2026-10-25)
+
+**Status (2026-10-25): OPEN.** A header snapshot does not persist debug-info subprogram/variable records or record relations, so its `--depth binary` projection cannot report the signature, typedef, vtable or base findings a binary-only dump reports. Each residual is named in `tests/test_depth_projection_matches_shallow_dump.py`.
+`false-clean` — `compare old.json new.json --depth binary` on two header snapshots can read `NO_CHANGE` where a binary-only dump of the same libraries reads `BREAKING` (a return or parameter type change). [Full write-up](known-gaps/depth-binary-projection-cannot-reproduce-debug-declaration-findings.md)
+
 #### A removed class-metadata export of a templated or destructor-only class is not confirmed by its header (2026-10-22)
 
 **Status (2026-10-22): PARTIAL.** A `_ZTV`/`_ZTI`/`_ZTS`/`_ZTT` export is confirmed by its owning class when the class's exact path is declared (`policy/class_metadata_identity.py`), including when the header omits an inline namespace the mangling keeps, via the class's own mangled virtual slots. Still open: a template-specialization owner (`_ZTVN3api3BoxIiEE`) is never confirmed, because the path does not spell its arguments and a primary template's declaration is not evidence about a specialization; and a class whose only virtual member is its destructor has no mangled slot to prove it, so it is confirmed only when its header spelling matches the mangled path exactly. Both stay `UNKNOWN_UNRESOLVED`: reported and not gating.
@@ -111,7 +116,7 @@ current emitter, which is unchanged.
 
 #### A header-only default template-argument change reads `NO_CHANGE` at L2 on castxml (2026-10-21)
 
-**Status (2026-10-25): PARTIAL — the clang alias/variable default is now a named gap, not a finding; residual: the textual scan misses macro-generated or indirectly-included alias and variable templates, whose default change can still read `complete` NO_CHANGE.** castxml 0.7 emits no element for an uninstantiated template and names an instantiation as written (`Box<char>`, `f` with `_ZN1m1fIiEEvv`), so the default cannot be recovered from its XML; its run reads `NO_CHANGE` with `partial` assurance and `template-parameter defaults (castxml cannot record them)` named (ADR-085 D3), for class, function, alias and variable templates and for type, non-type and template-template defaults. Fixed 2026-10-24: a clang function template whose default cannot be spelled (`int N = sizeof(T)`) records the defaults as `UNSUPPORTED` and names the gap. Fixed 2026-10-25 (extractor generation 18): the clang backend still models neither alias nor variable templates, but a clang run now scans its public headers for one with a default template argument (`extract/headers/template_default_scan.alias_or_variable_template_default_scan`) and names `template-parameter defaults (the clang backend does not model alias or variable templates)`, so a default change on one reads `partial`, never `complete` `NO_CHANGE`. Residual: on clang such a change is not reported as `template_param_default_changed` (no model entity carries the default; an unchanged default also reads `partial`), and the scan is textual, so a macro-generated alias or variable template is not seen. `tests/test_template_default_assurance_gap.py` pins every family on both backends.
+**Status (2026-10-25): PARTIAL — the clang alias/variable default is now a named gap, not a finding; residual: the textual scan misses macro-generated or indirectly-included alias and variable templates, whose default change can still read `complete` NO_CHANGE.** castxml 0.7 emits no element for an uninstantiated template and names an instantiation as written (`Box<char>`, `f` with `_ZN1m1fIiEEvv`), so the default cannot be recovered from its XML; its run reads `NO_CHANGE` with `partial` assurance and `template-parameter defaults (castxml cannot record them)` named (ADR-085 D3), for class, function, alias and variable templates and for type, non-type and template-template defaults. Fixed 2026-10-24: a clang function template whose default cannot be spelled (`int N = sizeof(T)`) records the defaults as `UNSUPPORTED` and names the gap. Fixed 2026-10-25 (extractor generation 19): the clang backend still models neither alias nor variable templates, but a clang run now scans its public headers for one with a default template argument (`extract/headers/template_default_scan.alias_or_variable_template_default_scan`) and names `template-parameter defaults (the clang backend does not model alias or variable templates)`, so a default change on one reads `partial`, never `complete` `NO_CHANGE`. Residual: on clang such a change is not reported as `template_param_default_changed` (no model entity carries the default; an unchanged default also reads `partial`), and the scan is textual, so a macro-generated alias or variable template is not seen. `tests/test_template_default_assurance_gap.py` pins every family on both backends.
 
 `false-clean` — A default template argument changed on a header-only template reads `NO_CHANGE` on castxml (clang reports `API_BREAK`), and the source-level consequence appears only as an L4 risk on castxml. [Full write-up](known-gaps/a-header-only-default-template-argument-change-reads-no-change-at-l2.md)
 
@@ -243,6 +248,11 @@ CJM: trust stage (docs/contribute/cjm.md) — use case UC-WF-analysis-assurance 
 `false-clean` — A public header reached only through a `-I` or `/external:I` include under clang-cl is probed as a public root, but the replayed AST dump does not search that directory, so a declaration that comes only through it is not replayed. An MSVC `/imsvc` include tree is never a probed public root.
 
 ### False-positive risk
+
+#### A binary-only dump loses exports with no debug subprogram, so a still-exported symbol reads as removed (2026-10-25)
+
+**Status (2026-10-25): OPEN.** When debug info yields any function, the binary-only dump declares only debug-confirmed functions. Exports with no subprogram drop out, so a version dumped through the other path disagrees.
+`false-positive` — `abicheck compare libv1.so libv2.so` on catalog case38 reports `Processor::validate` as "dynamic export removed" although `libv2.so` still exports it. [Full write-up](known-gaps/binary-only-dump-drops-exports-without-a-debug-subprogram.md)
 
 #### Below `source`, `TemplateInstanceAbsence` loses the clang-graph instantiation origins (H2a residual, 2026-10-23)
 
@@ -418,7 +428,7 @@ Do not re-attempt token-claiming. A header's export tokens cannot tell whether i
 
 #### Release report: live and stored operands render different documents
 
-**Status (recorded 2026-10-11): OPEN.** Both operands go through `report.release_document.build_release_report` and agree on every shared semantic field (`tests/unit/report/test_release_document.py`), but each yields its own JSON/Markdown shape and the stored operand has no JUnit, HTML, `oneline` or `--view show=` projection.
+**Status (updated 2026-10-24): PARTIAL.** A stored `BundleFacts` operand now renders JUnit and `oneline` through the live release renderer (`report.render_release_report.render_release_text`), pinned live-vs-stored through the CLI by `tests/test_cli_compare_stored_release_parity.py`. Still open: the stored JSON and Markdown shapes (see the write-up), the stored `html` and `--view show=` projections (HTML needs an effective-config receipt the stored path does not resolve), and the stored JUnit's passing testcases for unchanged symbols (no old-side inventory reaches it, so the pass-rate denominator differs from live).  
 `hygiene` — Converging the shapes changes a published JSON document, so it needs a release-schema decision. [Full write-up](known-gaps/release-report-live-and-stored-operands-render-different-documents.md)
 
 #### A stored `BundleFacts` operand pairs versioned member names on one side only (2026-10-23)
@@ -478,8 +488,8 @@ Do not re-attempt token-claiming. A header's export tokens cannot tell whether i
 
 #### A stored-`BundleFacts` baseline's narrower format set is not pre-checked by the Action
 
-**Status (re-verified 2026-10-09 at `456989f`): OPEN.** action/validate-inputs.sh:327-338 still checks only the release allowlist (json|markdown|junit|oneline|html) and has no stored-BundleFacts narrowing. No --probe-formats capability exists.  
-`hygiene` — `action/validate-inputs.sh` checks only the release format allowlist, so a format the stored-`BundleFacts` baseline cannot render fails late, not at input validation. [Full write-up](known-gaps/a-stored-bundlefacts-baselines-narrower-format-set-is-not-pre.md)
+**Status (2026-10-23): PARTIAL.** `action/validate-inputs.sh` now takes the release set from the generated `action/cli-surface.txt` (`release-compare`), and the generator also emits the stored set (`stored-bundle-facts`, from `STORED_RELEASE_FORMATS`), so both sets have one source. Still open: the stored narrowing itself is not applied before install, because deciding that an operand *is* a stored BundleFacts document needs `workflows/bundle_compare_operand.looks_like_stored_bundle_facts` (a multi-probe, FIFO-safe reader), and a shell copy of it would be the second transcription ADR-070 forbids. The narrowing is enforced by the CLI after install.  
+`hygiene` — For a stored-`BundleFacts` baseline the Action checks the release allowlist before install but not the stored subset, so a format the stored driver cannot render fails late, not at input validation. [Full write-up](known-gaps/a-stored-bundlefacts-baselines-narrower-format-set-is-not-pre.md)
 
 #### `compare --bundle-facts-out` stays a `compare` flag because `dump` has no release fan-out
 
@@ -488,8 +498,8 @@ Do not re-attempt token-claiming. A header's export tokens cannot tell whether i
 
 #### A directory/package `compare` cannot render sarif/review; `bundles:` cannot state scope policy
 
-**Status (re-verified 2026-10-09 at `456989f`): OPEN.** frontends/cli/commands/compare_routing.py:45 `_RELEASE_FORMATS = {json, markdown, junit, oneline, html}`, so sarif/review are still rejected for a release, and BundleSpec still has no scope-policy keys (not re-checked in detail).  
-`hygiene` — A release `compare` rejects `sarif`/`review` output, and `bundles:` has no scope-policy keys. [Full write-up](known-gaps/a-directorypackage-compare-cannot-render-sarifreview-bundles.md)
+**Status (2026-10-23): PARTIAL.** Closed: a directory/package `compare` now renders `sarif` (one run per library, each result stamped with `properties.releaseMember`) and `review` (a release digest rendered from the release JSON), so `RELEASE_FORMATS` is the full compare set minus `terminal`. Still open: BundleSpec has no scope-policy keys (`bundles:` cannot state scope policy at bundle level).  
+`hygiene` — `bundles:` has no scope-policy keys. [Full write-up](known-gaps/a-directorypackage-compare-cannot-render-sarifreview-bundles.md)
 
 #### Release-fan-out CLI tests JSON-parse `CliRunner.output`, which the memory-clamp note can join
 

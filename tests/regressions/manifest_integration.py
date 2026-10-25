@@ -361,4 +361,69 @@ INTEGRATION_BUG_CLASSES: tuple[BugClass, ...] = (
             ),
         ),
     ),
+    BugClass(
+        id="evidence.depth_projection_diverges_from_shallow_dump",
+        invariant=(
+            "A snapshot projected to `--depth binary` is judged on the "
+            "evidence a binary-only dump of the same library carries: "
+            "projecting a binary-only pair is the identity, and a projected "
+            "header pair matches the binary-only dump except where the "
+            "header snapshot does not persist what the binary-only extractor "
+            "reads, each such residual named with its reason. The projection "
+            "cleared record/enum declarations (layout changes reached the "
+            "raw struct_* fallback), kept header-only function attributes "
+            "(static, cv/ref qualifier, virtuality, access, deprecation), "
+            "dropped hidden-but-defined functions of a binary-only pair, and "
+            "lost every export no header declared, so losing a vtable or an "
+            "undeclared helper read NO_CHANGE at `--depth binary` and "
+            "BREAKING without it."
+        ),
+        fixed_by=(1802,),
+        seed_tests=(
+            # Catalog-wide: identity over binary-only pairs (exact), and
+            # header->binary parity with every residual rule named.
+            "tests/test_depth_projection_matches_shallow_dump.py",
+            # Mechanisms: every Function/Variable field against the
+            # binary-only dumper's export constructor, header-only attribute
+            # changes x binary depth, undeclared export loss, layout records.
+            "tests/test_depth_projection_binary_parity.py",
+            "tests/test_depth_metamorphic_examples.py",
+            # F1 harness: removing evidence never makes the result cleaner.
+            "tests/test_family_f1_evidence_ablation.py",
+        ),
+        public_surfaces=("cli", "api"),
+        axes={
+            "evidence_per_side": ("binary_only", "headers_plus_dwarf"),
+            "fact_family": (
+                "record_layout",
+                "function_attribute",
+                "undeclared_export",
+                "hidden_function",
+            ),
+        },
+        known_gaps=(
+            KnownGap(
+                description=(
+                    "A header-built snapshot does not persist debug-info "
+                    "subprogram/variable records or record relations (bases, "
+                    "vtable, access, field cv), so the projection cannot "
+                    "report signature, typedef, vtable or base findings a "
+                    "binary-only dump reports; a verdict can read lower "
+                    "(case02/10/33: NO_CHANGE vs BREAKING)."
+                ),
+                reference="docs/contribute/known-gaps/depth-binary-projection-cannot-reproduce-debug-declaration-findings.md",
+            ),
+            KnownGap(
+                description=(
+                    "The binary-only dump's debug-info path declares only "
+                    "debug-confirmed functions once DWARF yields any, so "
+                    "still-exported symbols read as removed (case38) or "
+                    "added (case65/80) -- an oracle defect the parity test "
+                    "excuses when the projection proves the export on both "
+                    "sides."
+                ),
+                reference="docs/contribute/known-gaps/binary-only-dump-drops-exports-without-a-debug-subprogram.md",
+            ),
+        ),
+    ),
 )

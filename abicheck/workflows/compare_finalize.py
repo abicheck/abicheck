@@ -54,14 +54,22 @@ def finalize_classified_pair(
     gate = gate_workflow.resolve_release_gate_options(
         pack_application,
         severity_preset=request.severity_preset,
-        severity_abi_breaking=None,
-        severity_potential_breaking=None,
-        severity_quality_issues=None,
-        severity_addition=None,
+        severity_abi_breaking=request.severity_abi_breaking,
+        severity_potential_breaking=request.severity_potential_breaking,
+        severity_quality_issues=request.severity_quality_issues,
+        severity_addition=request.severity_addition,
     )
-    # Abort-axes-aware (plan P3): a typed caller's own `exit_decision` reports an `--abi3` evidence-contract abort too.
+    # The same derivation the native CLI uses (`effective_gate_for_compare`),
+    # so a typed caller with the same severity and assurance inputs gets the
+    # same exit code. Abort-axes-aware (plan P3): a typed caller's own
+    # `exit_decision` reports an `--abi3` evidence-contract abort too.
     exit_decision = gate_workflow.resolve_compare_exit_decision_with_abort_axes(
-        result, gate.effective_gate
+        result,
+        gate_workflow.effective_gate_for_compare(
+            gate.severity,
+            require_complete_analysis=request.require_complete_analysis,
+            result=result,
+        ),
     )
 
     # Installs the same gate onto result.contract_context; see
