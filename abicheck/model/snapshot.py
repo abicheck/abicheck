@@ -165,8 +165,11 @@ class AbiSnapshot:
     # defaults, so a castxml run scans the public headers it parsed for a
     # template parameter list with a default argument. True: one exists, so
     # the defaults are not recorded and a default-argument change is not
-    # assessed. False: the scan found none. None: no scan ran (any non-castxml
-    # producer, and every snapshot predating schema v63).
+    # assessed. False: the scan found none. A clang run records class- and
+    # function-template defaults itself and scans only for an alias or variable
+    # template with a default, the two families it does not model (extractor
+    # generation 18). None: no scan ran (any other producer, a clang snapshot
+    # before generation 18, and every snapshot predating schema v63).
     template_default_header_scan: bool | None = field(default=None, kw_only=True)
 
     # CastXML version-gate outcome (schema v13, ``castxml_policy.py``). None on

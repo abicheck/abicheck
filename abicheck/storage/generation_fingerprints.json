@@ -113,11 +113,11 @@
       "abicheck/extract/headers/clang/templates.py": "9ef0106a8223d2bf6c33bb17f74b6d1ca4bbc027717c36d2949f55b116ed8bcf",
       "abicheck/extract/headers/clang/vtable.py": "bc235100ce9c5cb9ec8af93ea5bafe1abf0ea29249087a2b5f073ef5293257ff",
       "abicheck/extract/headers/clang_header_argv.py": "c198bd32d8fc6c5e59d6fd30f809544291a4a5381614f2fcbb281765da6626b7",
-      "abicheck/extract/headers/compile_provenance.py": "fecc4a720bcc2f1a44db4d8588c3410ab80450651c5b2a365f4d70d6dac69f95",
+      "abicheck/extract/headers/compile_provenance.py": "5c800725da59c2c3aeac4e85118dcd54edd6ec5c75875e483978b78a750ec0af",
       "abicheck/extract/headers/manifest.py": "b44a66dc760b0fd39e671876615d1e846433b2d76cb050be39749c5740c942bf",
       "abicheck/extract/headers/scope_segments.py": "d413edec257eb1334c829263770b66dc2eda3d263c765f699eac9f7e3ace9e65",
       "abicheck/extract/headers/sysinc.py": "1c25ee983ff10085afca9bdd0686b8177da252920a130cb2959c435065a9e51b",
-      "abicheck/extract/headers/template_default_scan.py": "08e178486cd5984a1180afcd2d7d6b1091ee2743382121701ca18b628136d1a1",
+      "abicheck/extract/headers/template_default_scan.py": "ea17752750a06cc0a1d5ecdf15f8137c9edd498e85e1c5562f69522086906a38",
       "abicheck/extract/headers/toolchain.py": "be0be05950476ff2c0cb168727ebcde4859cc634c258f5ff23b1af1d2c50b754",
       "abicheck/extract/library_export_facts.py": "071b2a58f284753b57fa2e374680a57e9ce6897877b65a84fb92f420e7cf2ab7",
       "abicheck/extract/macho_build_signals.py": "c277bfdd55f26aae61af66c8fa6c5cdc5fa45acc49a3ae513af5899417db88bb",
@@ -159,9 +159,9 @@
       "abicheck/symvers_metadata.py": "372737765cd132e6e87ed891dd465d2958e04debbef774e45212ceb3036871cb",
       "abicheck/type_metadata.py": "9997189de8dac522fd1db8be5ae491d811139503f83abaaded89038eb4aa9cdf"
     },
-    "fingerprint": "b2352ecf59c321d971f88c5c498fb23f9b56e3207045f24eac5a96c061bc2ac6",
-    "generation": 17,
-    "reason": "clang unspellable function-template defaults record UNSUPPORTED (template-defaults assurance gap)"
+    "fingerprint": "12afbf64465d4b7e186efb8d909f10e48136095a48615536739acfa887d388f2",
+    "generation": 18,
+    "reason": "clang runs record whether a public header declares an alias or variable template with a default template argument (template_default_header_scan), so the template-defaults assurance gap is named instead of reading complete"
   },
   "resolver": {
     "files": {

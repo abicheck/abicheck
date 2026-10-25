@@ -26,6 +26,10 @@ The scan is a text heuristic over the headers the parse was given. Comments
 and string literals are stripped first. A macro-generated ``template <...>``
 is not seen; a header included indirectly is not read. Both make the scan
 say ``False``, which is the same as no gap reported, not a clean pass.
+
+The clang backend records class- and function-template defaults from its AST
+but models neither alias nor variable templates, so a clang run scans for
+those two families only (:func:`alias_or_variable_template_default_scan`).
 """
 
 from __future__ import annotations
@@ -34,7 +38,12 @@ import re
 from collections.abc import Iterable
 from pathlib import Path
 
-__all__ = ["header_declares_template_default", "template_default_header_scan"]
+__all__ = [
+    "alias_or_variable_template_default_scan",
+    "header_declares_alias_or_variable_template_default",
+    "header_declares_template_default",
+    "template_default_header_scan",
+]
 
 _COMMENT = re.compile(r"//[^\n]*|/\*.*?\*/", re.DOTALL)
 _STRING = re.compile(r'"(?:\\.|[^"\\\n])*"|\'(?:\\.|[^\'\\\n])*\'')
@@ -49,7 +58,16 @@ def _list_has_default(text: str, start: int) -> bool:
     inside a default such as ``(N > 2)`` does not close the list. ``==``,
     ``!=``, ``<=`` and ``>=`` are comparisons, not defaults.
     """
+    return _scan_list(text, start)[0]
+
+
+def _scan_list(text: str, start: int) -> tuple[bool, int]:
+    """``(has_default, end)`` for the template parameter list opened just
+    before *start*: whether it has a top-level default (see
+    :func:`_list_has_default`) and the index just past its closing ``>``,
+    or ``-1`` when the list never closes (then it has no default either)."""
     angle = parens = 0
+    has_default = False
     for i in range(start, len(text)):
         c = text[i]
         if c == "(":
@@ -62,14 +80,14 @@ def _list_has_default(text: str, start: int) -> bool:
             angle += 1
         elif c == ">":
             if angle == 0:
-                return False
+                return has_default, i + 1
             angle -= 1
         elif c == "=" and angle == 0:
             prev = text[i - 1] if i > start else ""
             nxt = text[i + 1] if i + 1 < len(text) else ""
             if prev not in ("=", "!", "<", ">") and nxt != "=":
-                return True
-    return False
+                has_default = True
+    return False, -1
 
 
 def header_declares_template_default(text: str) -> bool:
@@ -94,5 +112,83 @@ def template_default_header_scan(paths: Iterable[str | Path]) -> bool:
         except OSError:
             continue
         if header_declares_template_default(text):
+            return True
+    return False
+
+
+#: A declaration after a template parameter list that is neither an alias nor
+#: a variable template: a class/union template, a concept, a friend, or the
+#: inner list of a member template of a class template.
+_NOT_ALIAS_OR_VARIABLE = frozenset(
+    {"class", "struct", "union", "enum", "concept", "friend", "template"}
+)
+_WORD = re.compile(r"[A-Za-z_]\w*")
+
+
+def _declares_alias_or_variable(text: str, end: int) -> bool:
+    """Whether the declaration that starts at *end* (just past a template
+    parameter list) is an alias template (``using X = ...``) or a variable
+    template (``constexpr int v = ...``/``int v{...}``).
+
+    A function template reaches ``(`` before any ``=`` or ``{`` at the top
+    level; a variable reaches ``=`` or ``{`` first. ``<``/``>`` nest only
+    outside parentheses, as in :func:`_list_has_default`.
+    """
+    word = _WORD.match(text, len(text) - len(text[end:].lstrip()))
+    if word is not None:
+        if word.group() == "using":
+            return True
+        if word.group() in _NOT_ALIAS_OR_VARIABLE:
+            return False
+    angle = parens = 0
+    for i in range(end, len(text)):
+        c = text[i]
+        if c == "(":
+            if parens == 0 and angle == 0:
+                return False
+            parens += 1
+        elif c == ")":
+            parens = max(parens - 1, 0)
+        elif parens:
+            continue
+        elif c == "<":
+            angle += 1
+        elif c == ">":
+            angle = max(angle - 1, 0)
+        elif angle:
+            continue
+        elif c in "={":
+            return True
+        elif c == ";":
+            return False
+    return False
+
+
+def header_declares_alias_or_variable_template_default(text: str) -> bool:
+    """Whether the header *text* declares an alias or variable template whose
+    parameter list carries a default argument.
+
+    The clang backend records class- and function-template defaults but
+    models neither alias nor variable templates, so only these two families
+    leave a clang run unable to assess a default change (ADR-085 D3).
+    """
+    stripped = _STRING.sub('""', _COMMENT.sub(" ", text))
+    for match in _TEMPLATE_OPEN.finditer(stripped):
+        has_default, end = _scan_list(stripped, match.end())
+        if has_default and _declares_alias_or_variable(stripped, end):
+            return True
+    return False
+
+
+def alias_or_variable_template_default_scan(paths: Iterable[str | Path]) -> bool:
+    """Whether any header in *paths* declares an alias or variable template
+    with a default template argument. Unreadable files are skipped, as in
+    :func:`template_default_header_scan`."""
+    for path in paths:
+        try:
+            text = Path(path).read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        if header_declares_alias_or_variable_template_default(text):
             return True
     return False

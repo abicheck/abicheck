@@ -1,0 +1,3 @@
+### Fixed
+
+- **A default change on a clang alias or variable template no longer reads as a clean run** — the clang header backend does not model alias templates (`template <class T, class U = T> using P = ...`) or variable templates (`template <class T, int N = 4> constexpr int v = ...`), so changing one's default template argument read `NO_CHANGE` with `complete` assurance. A clang dump now scans its public headers for such a template with a default, and the analysis reads `partial` with a `template-parameter defaults (the clang backend does not model alias or variable templates)` gap note (ADR-085 D3). Extractor generation 18.

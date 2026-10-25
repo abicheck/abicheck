@@ -207,6 +207,13 @@ SPELLING_MIGRATIONS: Mapping[int, GenerationSpellingChange] = {
         "or name spelling changes, so no rewrite is needed -- an older clang "
         "snapshot simply names no gap for such a pattern"
     ),
+    18: GenerationSpellingChange(
+        "clang runs set template_default_header_scan when a parsed public header "
+        "declares an alias or variable template with a default template argument "
+        "(was None for every clang run); no type or name spelling changes, so no "
+        "rewrite is needed -- an older clang snapshot simply names no "
+        "alias/variable template-defaults gap"
+    ),
 }
 
 #: Reasons that say nothing about what was audited; the bump gate refuses them.
