@@ -72,7 +72,7 @@
       "abicheck/extract/headers/castxml/calling_convention.py": "ab4cd4474d11eb0da2216b29393e9daf1dbcf94226204237fd4c0381adacbcbb",
       "abicheck/extract/headers/castxml/context.py": "4b1ff6544ba29d2236885086a65ad9f7037f8f46105da4579b751a499058b9d8",
       "abicheck/extract/headers/castxml/dumper.py": "af0686fef5366815892a95a63503f3620299ea87b5182d7de63209c6c6d91b45",
-      "abicheck/extract/headers/castxml/duplicate_declarations.py": "cb81faa193488add762622ae5559076a5ebd2234b75b5d4edef19cfb1092ee2e",
+      "abicheck/extract/headers/castxml/duplicate_declarations.py": "977b85a15408fa9877b9b686f0bd913af9442e4da5b1d9292975bda7eff424f7",
       "abicheck/extract/headers/castxml/enums.py": "e616c768543061d71812378dd92cbcb7b8d00afbb734bcb7b4b5334ee34042aa",
       "abicheck/extract/headers/castxml/functions.py": "f62f5549a9602089d682c1627d3d2c546ae48a842944735b3cd3ecbb7f867593",
       "abicheck/extract/headers/castxml/location.py": "a5469fedb2774dfdf1b87a49ddc713471c088ecee6ea5ccbfe4d9764012c97e6",
@@ -162,9 +162,9 @@
       "abicheck/symvers_metadata.py": "372737765cd132e6e87ed891dd465d2958e04debbef774e45212ceb3036871cb",
       "abicheck/type_metadata.py": "9997189de8dac522fd1db8be5ae491d811139503f83abaaded89038eb4aa9cdf"
     },
-    "fingerprint": "deceb27edfeae588bd825d5b20d7947363d5018df048e343a560b0e38d7351cf",
+    "fingerprint": "094e5d8b33fa6c9017354c59f48bf69191acd748ad3782b8c16b778189b8e51e",
     "generation": 21,
-    "reason": "Mach-O LC_LOAD_WEAK_DYLIB is captured into weak_dependent_libs (ADR-063 Phase 5 fact sibling); the extractor records a fact it did not record before for the same input"
+    "reason": "PE and Mach-O dependency facts recorded for the release graph (generation 21; re-recorded after main merged #1805/#1806)"
   },
   "resolver": {
     "files": {

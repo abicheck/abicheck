@@ -1113,7 +1113,7 @@ code. It contains:
   could not be confirmed) and run warnings.
 
 The graph is drawn only from facts the report records: each member's
-`libraries[].dependencies` block (release schema 2.3) carries, per side, the
+`libraries[].dependencies` block (release schema 2.4) carries, per side, the
 container `format` (`elf`, `pe` or `macho`), the `soname` (ELF `DT_SONAME`,
 Mach-O `LC_ID_DYLIB`) and the `needed` list read from that member's
 snapshot. A side missing a fact family its snapshot predates names it in

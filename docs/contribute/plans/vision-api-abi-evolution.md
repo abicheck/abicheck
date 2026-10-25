@@ -811,7 +811,7 @@ Landed after that note, in the same slice:
   changes when present, coherence findings.
 - *Dependency graph (relationship visualization).* Release schema 1.9 added
   `libraries[].dependencies` for ELF members (`DT_SONAME`/`DT_NEEDED`);
-  schema 2.3 extends it to PE/COFF (import and delay-load DLL names) and
+  schema 2.4 extends it to PE/COFF (import and delay-load DLL names) and
   Mach-O (`LC_LOAD_DYLIB`, `LC_LOAD_WEAK_DYLIB`, `LC_REEXPORT_DYLIB`), each
   side naming its `format`. The facts are recorded in
   `workflows/release_dependency_facts.py`; a side missing a fact family is

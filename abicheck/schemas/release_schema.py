@@ -261,7 +261,16 @@ __all__ = ["RELEASE_SCHEMA_VERSION"]
 #:       ``unsupported``, ``ambiguous``, ``declared_absent``, or a support-
 #:       promise ``retired``/``introduced``). Always present, possibly empty,
 #:       like the scalar report's block. Additive; no existing field moves.
-#: - ``2.3`` extends ``libraries[].dependencies`` (introduced in 1.9, ELF only)
+#: - ``2.3`` adds the stored-``BundleFacts`` operand's additive ``release``
+#:       block: the live release document (this same schema) built from the
+#:       stored comparison, beside the stored document's own unchanged keys.
+#:       Fields a stored comparison cannot compute are explicit
+#:       ``{"state": "unavailable", "reason": ...}`` markers, never empty values
+#:       or absent keys (``type_attribution``, ``unreached_type_disposition``,
+#:       ``bundle_evidence`` per library); its receipt is marked
+#:       ``effective_config_source: "reconstructed_from_stored_facts"``. The live
+#:       document's own content does not change; only this version moves.
+#: - ``2.4`` extends ``libraries[].dependencies`` (introduced in 1.9, ELF only)
 #:       to PE/COFF and Mach-O members. Each side carries ``format``
 #:       (``elf``/``pe``/``macho``) and ``needed``: ELF ``DT_NEEDED``; PE the
 #:       import and delay-load DLL names; Mach-O the ``LC_LOAD_DYLIB``,
@@ -274,4 +283,4 @@ __all__ = ["RELEASE_SCHEMA_VERSION"]
 #:       dependencies". A side with no format metadata likewise carries that
 #:       ``state``. Additive for ELF documents, except that ``format`` is new
 #:       on every side and ``state`` replaces the absent block.
-RELEASE_SCHEMA_VERSION = "2.3"
+RELEASE_SCHEMA_VERSION = "2.4"

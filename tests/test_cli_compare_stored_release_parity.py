@@ -29,6 +29,7 @@ is ``integration`` and Linux-only, like its sibling
 
 from __future__ import annotations
 
+import json
 import re
 import shutil
 import subprocess
@@ -273,8 +274,8 @@ _STUB_FACTS = (
 
 @pytest.mark.parametrize(
     "export",
-    ["sarif=-", "html=-"],
-    ids=["primary-sarif", "primary-html"],
+    ["sarif=-", "review=-"],
+    ids=["primary-sarif", "primary-review"],
 )
 def test_stored_operand_refuses_a_format_it_does_not_render(
     export: str, tmp_path: Path
@@ -290,3 +291,140 @@ def test_stored_operand_refuses_a_format_it_does_not_render(
 
     assert result.exit_code == 64, result.output
     assert f"-o {export.split('=')[0]}=... is not available" in result.output
+
+
+_UNAVAILABLE_FIELDS = (
+    "type_attribution",
+    "unreached_type_disposition",
+    "bundle_evidence",
+)
+
+#: The shape a stored ``release`` block must hold: the live release envelope's
+#: own keys, the reconstructed receipt marker, and an explicit ``unavailable``
+#: marker (with a reason) wherever a stored comparison cannot compute a field.
+_RELEASE_BLOCK_SCHEMA = {
+    "type": "object",
+    "required": [
+        "release_schema_version",
+        "verdict",
+        "libraries",
+        "exit",
+        "effective_config_source",
+        "public_surface",
+    ],
+    "properties": {
+        "release_schema_version": {"const": "2.4"},
+        "effective_config_source": {"const": "reconstructed_from_stored_facts"},
+        "public_surface": {"$ref": "#/$defs/unavailable"},
+        "libraries": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "required": ["library", "verdict", *_UNAVAILABLE_FIELDS],
+                "properties": {
+                    field: {"$ref": "#/$defs/unavailable"}
+                    for field in _UNAVAILABLE_FIELDS
+                },
+            },
+        },
+    },
+    "$defs": {
+        "unavailable": {
+            "type": "object",
+            "required": ["state", "reason"],
+            "properties": {
+                "state": {"const": "unavailable"},
+                "reason": {"type": "string", "minLength": 1},
+            },
+        }
+    },
+}
+
+
+def _stored_json(tmp_path: Path, case: str) -> tuple[int, dict, dict]:
+    """Run live and stored JSON for one fixture; return (exit, live, stored)."""
+    old_members, new_members = _CASES[case]
+    old_dir, new_dir = _release_dirs(tmp_path, old_members, new_members)
+    facts_path = _stored_old_facts(tmp_path, old_dir, old_members)
+    live_code, live_out = _run("compare", str(old_dir), str(new_dir), "-o", "json=-")
+    stored_code, stored_out = _run(
+        "compare", str(facts_path), str(new_dir), "-o", "json=-"
+    )
+    assert live_code == stored_code
+    return stored_code, json.loads(live_out), json.loads(stored_out)
+
+
+@pytest.mark.parametrize("case", sorted(_CASES))
+def test_stored_release_block_agrees_with_live_on_shared_fields(
+    case: str, tmp_path: Path
+) -> None:
+    code, live, stored = _stored_json(tmp_path, case)
+    release = stored["release"]
+
+    assert release["verdict"] == live["verdict"]
+    assert release["exit"] == live["exit"]
+    assert {e["library"]: e["verdict"] for e in release["libraries"]} == {
+        e["library"]: e["verdict"] for e in live["libraries"]
+    }
+    assert (code != 0) == _EXPECTED_EXIT_NONZERO[case]
+
+
+@pytest.mark.parametrize("case", sorted(_CASES))
+def test_stored_release_block_satisfies_its_schema(case: str, tmp_path: Path) -> None:
+    from tests.schema_validation import validate_instance
+
+    _code, _live, stored = _stored_json(tmp_path, case)
+
+    validate_instance(stored["release"], _RELEASE_BLOCK_SCHEMA)
+
+
+@pytest.mark.parametrize("case", sorted(_CASES))
+def test_every_unavailable_field_states_a_reason(case: str, tmp_path: Path) -> None:
+    _code, _live, stored = _stored_json(tmp_path, case)
+    release = stored["release"]
+
+    markers = [release["public_surface"]] + [
+        entry[field] for entry in release["libraries"] for field in _UNAVAILABLE_FIELDS
+    ]
+    assert markers, "the fixture has members to mark"
+    for marker in markers:
+        assert marker["state"] == "unavailable"
+        assert marker["reason"].strip(), marker
+
+
+@pytest.mark.parametrize("case", sorted(_CASES))
+def test_stored_html_carries_the_same_verdict_and_exit_as_live(
+    case: str, tmp_path: Path
+) -> None:
+    old_members, new_members = _CASES[case]
+    old_dir, new_dir = _release_dirs(tmp_path, old_members, new_members)
+    facts_path = _stored_old_facts(tmp_path, old_dir, old_members)
+    live_code, live_html = _run("compare", str(old_dir), str(new_dir), "-o", "html=-")
+    stored_code, stored_html = _run(
+        "compare", str(facts_path), str(new_dir), "-o", "html=-"
+    )
+
+    assert stored_code == live_code
+    # The verdict vocabulary both HTML documents may print, read off the
+    # renderer's own tokens (the live document is the reference for them).
+    vocabulary = ("BREAKING", "COMPATIBLE", "NO_CHANGE", "API_BREAK", "ERROR")
+    shown = lambda html: {token for token in vocabulary if token in html}  # noqa: E731
+    assert shown(stored_html) == shown(live_html)
+    assert shown(live_html), "the live HTML states a verdict"
+
+
+@pytest.mark.parametrize("fmt", ["junit", "oneline", "html"])
+def test_live_formats_refuse_a_render_without_a_release_evaluation(
+    fmt: str, tmp_path: Path
+) -> None:
+    """The live-renderer formats need the stored run's release evaluation; a
+    caller without one gets a stated error, not a silent fallback."""
+    from abicheck.frontends.cli.commands.compare_bundle_facts import _render
+
+    with pytest.raises(ValueError, match=rf"-o {fmt}= renders the live release"):
+        _render(
+            object(),
+            fmt,
+            old_facts_path=tmp_path / "old.bundlefacts.json",
+            new_dir=tmp_path / "new",
+        )

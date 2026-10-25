@@ -28,12 +28,16 @@ dependency-header shapes, and ``AbiSnapshot.index`` then warned
   ``__abicheck_ctor__std::...(...)`` placeholder key. Overload resolution
   always picks the non-template one; the template instance is not a second
   entry point.
+* mingw-w64's ``<wchar.h>`` declares ``_swprintf``/``_vswprintf`` and its
+  ``swprintf.inl`` declares ``swprintf``/``vswprintf`` bound to the same asm
+  name -- one symbol under two source names.
 
 A group is collapsed to its first declaration (castxml document order, so the
 result is deterministic) only when *every* member is provably a dependency
 declaration -- in a toolchain/system header outside the public set
 (``location.decl_is_system_dependency``) -- and the members' signatures agree
-modulo cv-qualification (exception specification and variadicity equal). Anything else -- a member from the library's own
+modulo cv-qualification (exception specification and variadicity equal). The
+source name is not compared: the shared key already names the one symbol. Anything else -- a member from the library's own
 headers (public, private or of unknown provenance), or signatures that
 genuinely conflict -- is left for the snapshot index, which still warns.
 """
@@ -63,11 +67,11 @@ def _cv_free(spelling: str) -> str:
 
 def _signature(
     func: Function,
-) -> tuple[str, str, tuple[str, ...], bool | None, bool, str | None]:
+) -> tuple[str, tuple[str, ...], bool | None, bool, str | None]:
     # Exception specifications are not mangled, so two same-key records can
-    # disagree on them; such a pair is not one entity.
+    # disagree on them; such a pair is not one entity. The source name is not
+    # part of it: an asm label binds two names to the one key.
     return (
-        func.name,
         _cv_free(func.return_type),
         tuple(_cv_free(p.type) for p in func.params),
         func.is_variadic,
