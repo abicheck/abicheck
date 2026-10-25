@@ -1103,19 +1103,23 @@ code. It contains:
 - a **dependency graph**: one box per member (status as text and colour:
   breaking, api break, compatible, no change, unchecked) plus one per needed
   library no member provides (external), and one arrow per recorded
-  `DT_NEEDED` entry. Layers follow dependency depth (a library that needs
-  nothing recorded sits at the bottom). A dashed arrow was recorded on one
-  side only. The same edges are listed in a plain table under the picture,
+  dependency entry (ELF `DT_NEEDED`, PE import and delay-load DLL names,
+  Mach-O load-command install names). Layers follow dependency depth (a
+  library that needs nothing recorded sits at the bottom). A dashed arrow
+  was recorded on one side only. The same edges are listed in a plain table under the picture,
   and a graph of more than 60 libraries is capped with the omitted counts
   stated;
 - release coherence findings (calls between members whose compatibility
   could not be confirmed) and run warnings.
 
 The graph is drawn only from facts the report records: each member's
-`libraries[].dependencies` block (release schema 1.9) carries, per side, the
-ELF `DT_SONAME` (`soname`) and `DT_NEEDED` list (`needed`) read from that
-member's snapshot. A member without ELF metadata (PE, Mach-O) has no block,
-and the page says how many members recorded dependency facts.
+`libraries[].dependencies` block (release schema 2.4) carries, per side, the
+container `format` (`elf`, `pe` or `macho`), the `soname` (ELF `DT_SONAME`,
+Mach-O `LC_ID_DYLIB`) and the `needed` list read from that member's
+snapshot. A side missing a fact family its snapshot predates names it in
+`incomplete`. A member with no format metadata carries a `not_evaluated`
+state: the page draws it without edges and says so, rather than reading it
+as having no dependencies.
 
 The single-pair HTML report gains a **Surface changes** section with the
 same additions/removals/modifications grouping as Markdown and the same
