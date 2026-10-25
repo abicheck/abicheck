@@ -805,3 +805,41 @@ def test_type_index_keys_on_qualified_identity_not_bare_spelling(
     for scope, rec in zip(scopes, recs, strict=True):
         assert snap.type_by_name(f"{scope}::Parameter") is rec
     assert snap.type_by_name("Parameter") is None
+
+
+# -- duplicate declarations (bug class identity.benign_duplicate_declaration_key) --
+
+
+def test_castxml_duplicate_collapse_is_order_invariant_and_keeps_distinct() -> None:
+    """One entity declared twice in a system header (glibc's cv overloads under
+    one asm name) collapses to one key whatever the declaration order; a
+    same-key pair with a different parameter type is two entities and both
+    survive. Oracle: the hand-written entity count per key."""
+    import itertools
+    from xml.etree.ElementTree import Element
+
+    from abicheck.extract.headers.castxml.duplicate_declarations import (
+        collapse_benign_duplicates,
+    )
+    from abicheck.model import Function, Param
+
+    def fn(mangled: str, ret: str, param: str) -> Function:
+        return Function(
+            name=mangled,
+            mangled=mangled,
+            return_type=ret,
+            params=[Param(name="p", type=param)],
+        )
+
+    funcs = [
+        fn("strchr", "char*", "char*"),
+        fn("strchr", "const char*", "const char*"),
+        fn("lookup", "int", "int"),
+        fn("lookup", "int", "long"),
+    ]
+    for perm in itertools.permutations(funcs):
+        parsed = [(Element("Function"), f) for f in perm]
+        keys = Counter(
+            f.mangled for f in collapse_benign_duplicates(parsed, lambda _: False)
+        )
+        assert keys == {"strchr": 1, "lookup": 2}

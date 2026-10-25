@@ -689,4 +689,27 @@ CLASSIFICATION_BUG_CLASSES: tuple[BugClass, ...] = (
             "lookup": ("qualified", "unambiguous bare", "ambiguous bare"),
         },
     ),
+    BugClass(
+        id="identity.benign_duplicate_declaration_key",
+        invariant=(
+            "A function key declared more than once only in non-public "
+            "(system/dependency) headers with signatures equal modulo "
+            "cv-qualification is one entity: the dump keeps exactly its first "
+            "declaration whatever the order, and indexing logs no first-wins "
+            "duplicate; a same-key group reaching a public header, or with "
+            "conflicting signatures, is kept and still warns."
+        ),
+        fixed_by=(1797,),
+        seed_tests=(
+            "tests/test_castxml_duplicate_declarations.py",
+            "tests/test_model_warning_hygiene.py",
+            "tests/test_family_f3_identity.py",
+        ),
+        public_surfaces=("cli",),
+        axes={
+            "shape": ("glibc cv overload", "std ctor placeholder", "conflicting"),
+            "provenance": ("non-public", "public"),
+            "frontend": ("castxml",),
+        },
+    ),
 )

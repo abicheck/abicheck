@@ -1,0 +1,198 @@
+"""Benign duplicate function declarations collapse at the castxml source.
+
+Bug class ``identity.benign_duplicate_declaration_key``: glibc's C++ cv
+overloads (``wcschr``/``strchr``/... sharing one asm name) and libstdc++'s
+copy/move constructor next to a same-signature converting-constructor template
+(one ``__abicheck_ctor__std::...`` placeholder key) used to reach the snapshot
+as two records under one key, so every dump of a header including
+``<memory>``/``<cstring>`` warned "Duplicate mangled symbols skipped
+(first-wins)". A group whose members all come from non-public headers and agree
+modulo cv-qualification is one entity: it keeps exactly its first declaration.
+A duplicate reaching the library's own headers, or with conflicting
+signatures, is left to the snapshot index, which still warns.
+"""
+
+from __future__ import annotations
+
+import itertools
+import logging
+import shutil
+import subprocess
+import sys
+from pathlib import Path
+from xml.etree.ElementTree import Element
+
+import pytest
+
+from abicheck.extract.headers.castxml.duplicate_declarations import (
+    collapse_benign_duplicates,
+)
+from abicheck.model import AbiSnapshot, Function, Param
+
+REPO = Path(__file__).resolve().parents[1]
+
+
+def _fn(name: str, mangled: str, ret: str, *params: str) -> Function:
+    return Function(
+        name=name,
+        mangled=mangled,
+        return_type=ret,
+        params=[Param(name=f"p{i}", type=t) for i, t in enumerate(params)],
+    )
+
+
+def _parsed(funcs: list[Function]) -> list[tuple[Element, Function]]:
+    return [(Element("Function", id=f"_{i}"), f) for i, f in enumerate(funcs)]
+
+
+_GLIBC = [
+    _fn("wcschr", "wcschr", "wchar_t*", "wchar_t*", "wchar_t"),
+    _fn("wcschr", "wcschr", "const wchar_t*", "const wchar_t*", "wchar_t"),
+]
+_STD_CTOR_KEY = "__abicheck_ctor__std::shared_ptr<X>(const shared_ptr<X>&)"
+_STD_CTOR = [
+    _fn("shared_ptr", _STD_CTOR_KEY, "void", "const shared_ptr<X>&"),
+    _fn("shared_ptr", _STD_CTOR_KEY, "void", "const shared_ptr<X>&"),
+]
+
+
+@pytest.mark.parametrize("group", [_GLIBC, _STD_CTOR], ids=["glibc_cv", "std_ctor"])
+def test_benign_group_keeps_first_declaration_in_any_order(
+    group: list[Function], caplog: pytest.LogCaptureFixture
+) -> None:
+    other = _fn("f", "_Z1fv", "void")
+    for perm in itertools.permutations([*group, other]):
+        out = collapse_benign_duplicates(_parsed(list(perm)), lambda _el: False)
+        dup_first = next(f for f in perm if f is not other)
+        assert out == [f for f in perm if f is other or f is dup_first]
+        caplog.clear()
+        with caplog.at_level(logging.WARNING, logger="abicheck.model"):
+            AbiSnapshot(library="l", version="1", functions=out).index()
+        assert not [r for r in caplog.records if "first-wins" in r.getMessage()]
+
+
+@pytest.mark.parametrize(
+    ("group", "public"),
+    [
+        (_GLIBC, [True, False]),  # one member from the library's own header
+        (_STD_CTOR, [True, True]),
+        (
+            [  # conflicting signatures under one key, both non-public
+                _fn("g", "_Z1gi", "int", "int"),
+                _fn("g", "_Z1gi", "int", "long"),
+            ],
+            [False, False],
+        ),
+        ([_fn("h", "_Z1hv", "int"), _fn("h", "_Z1hv", "double")], [False, False]),
+    ],
+)
+def test_conflicting_or_public_duplicate_is_kept_and_still_warns(
+    group: list[Function], public: list[bool], caplog: pytest.LogCaptureFixture
+) -> None:
+    parsed = _parsed(group)
+    by_el = {id(el): p for (el, _), p in zip(parsed, public, strict=True)}
+    out = collapse_benign_duplicates(parsed, lambda el: by_el[id(el)])
+    assert out == group
+    with caplog.at_level(logging.WARNING, logger="abicheck.model"):
+        AbiSnapshot(library="l", version="1", functions=out).index()
+    assert [r for r in caplog.records if "first-wins" in r.getMessage()]
+
+
+_CASES = ("case80_pimpl_shared_to_unique", "case126_sycl_device_impl_ptr")
+
+
+class _Records(logging.Handler):
+    """Every ``abicheck.model`` record, attached to the logger itself: the
+    in-process dump reconfigures logging, so ``caplog`` misses them."""
+
+    def __init__(self) -> None:
+        super().__init__(level=logging.WARNING)
+        self.messages: list[str] = []
+
+    def emit(self, record: logging.LogRecord) -> None:
+        self.messages.append(record.getMessage())
+
+
+def _dump_and_index_first_wins(
+    lib: Path, header: Path
+) -> tuple[AbiSnapshot, list[str]]:
+    """Dump *lib* against *header* the way the depth-metamorphic run does
+    (in-process ``dump``, then ``index``) and return its first-wins warnings."""
+    from abicheck.dumper import dump
+
+    logger = logging.getLogger("abicheck.model")
+    handler, old_level = _Records(), logger.level
+    logger.setLevel(logging.WARNING)
+    logger.addHandler(handler)
+    try:
+        snap = dump(lib, headers=[header], version="v1")
+        snap.index()
+    finally:
+        logger.removeHandler(handler)
+        logger.setLevel(old_level)
+    return snap, [m for m in handler.messages if "first-wins" in m]
+
+
+def _build(src: Path, out: Path, *include: Path) -> Path:
+    if not shutil.which("castxml") or not shutil.which("g++"):
+        pytest.skip("needs castxml and g++")
+    subprocess.run(
+        ["g++", "-shared", "-fPIC", "-g", "-std=c++17",
+         *(f"-I{d}" for d in include), "-o", str(out), str(src)],
+        check=True,
+    )  # fmt: skip
+    return out
+
+
+@pytest.mark.integration
+@pytest.mark.model_warning_hygiene
+@pytest.mark.parametrize("case", _CASES)
+@pytest.mark.parametrize("v", ["v1", "v2"])
+def test_catalog_case_dump_logs_no_first_wins_duplicate(
+    case: str, v: str, tmp_path: Path
+) -> None:
+    """case80/case126 include ``<memory>``/``<cstring>``: before the fix each
+    dump warned about ``wcschr (x2)`` ... and ``__abicheck_ctor__std::...
+    (x2)``."""
+    src = REPO / "catalog" / "cases" / case
+    lib = _build(src / f"{v}.cpp", tmp_path / f"lib{v}.so", src)
+    snap, first_wins = _dump_and_index_first_wins(lib, src / f"{v}.h")
+    assert first_wins == []
+    keys = [f.mangled for f in snap.declarations.functions]
+    assert len(keys) == len(set(keys))
+
+
+#: Same-key pairs in the library's *own* header (asm-labelled to one symbol,
+#: the glibc mechanism): not collapsed, so the index still warns.
+_PUBLIC_DUPLICATES = {
+    "conflicting": (
+        'extern "C++" int lookup(int key) __asm__("api_lookup");\n'
+        'extern "C++" double lookup(double key) __asm__("api_lookup");\n'
+    ),
+    "cv_only": (
+        'extern "C++" char* lookup(char* s) __asm__("api_lookup");\n'
+        'extern "C++" const char* lookup(const char* s) __asm__("api_lookup");\n'
+    ),
+}
+
+
+@pytest.mark.integration
+@pytest.mark.skipif(not sys.platform.startswith("linux"), reason="ELF asm labels")
+@pytest.mark.parametrize("shape", sorted(_PUBLIC_DUPLICATES))
+def test_library_header_duplicate_still_warns(shape: str, tmp_path: Path) -> None:
+    header = tmp_path / "api.h"
+    header.write_text(
+        "#pragma once\n" + _PUBLIC_DUPLICATES[shape] + "int other(int);\n",
+        encoding="utf-8",
+    )
+    impl = tmp_path / "api.cpp"
+    impl.write_text(
+        '#include "api.h"\n'
+        'extern "C" void* api_lookup(void* k) { return k; }\n'
+        "int other(int x) { return x; }\n",
+        encoding="utf-8",
+    )
+    lib = _build(impl, tmp_path / "libapi.so", tmp_path)
+    snap, first_wins = _dump_and_index_first_wins(lib, header)
+    assert len(first_wins) == 1 and "api_lookup (\u00d72)" in first_wins[0]
+    assert [f.mangled for f in snap.declarations.functions].count("api_lookup") == 2

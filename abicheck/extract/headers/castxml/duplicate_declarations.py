@@ -1,0 +1,92 @@
+# Copyright 2026 Nikolay Petrov
+# SPDX-License-Identifier: Apache-2.0
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+"""Collapse benign duplicate declarations of one function key at the source.
+
+castxml reports two ``Function`` records under one snapshot key in two
+dependency-header shapes, and ``AbiSnapshot.index`` then warned
+"Duplicate mangled symbols skipped (first-wins)" for each:
+
+* glibc's C++ ``<wchar.h>``/``<string.h>`` declare ``const`` and non-``const``
+  overloads of ``wcschr``/``strchr``/``memchr``/... bound to one asm name --
+  one symbol, two declarations differing only in cv-qualification.
+* libstdc++ declares a defaulted copy/move constructor *and* a converting
+  constructor template whose instantiation for the class's own argument has the
+  identical parameter list, so both synthesize the same
+  ``__abicheck_ctor__std::...(...)`` placeholder key. Overload resolution
+  always picks the non-template one; the template instance is not a second
+  entry point.
+
+A group is collapsed to its first declaration (castxml document order, so the
+result is deterministic) only when *every* member was declared outside the
+public header set and the members' signatures agree modulo cv-qualification.
+Anything else -- a member from the library's own headers, or signatures that
+genuinely conflict -- is left for the snapshot index, which still warns.
+"""
+
+from __future__ import annotations
+
+import re
+from collections.abc import Callable, Sequence
+from xml.etree.ElementTree import Element
+
+from ....model import Function
+
+_CV = re.compile(r"\b(?:const|volatile)\b")
+
+
+def _cv_free(spelling: str) -> str:
+    return " ".join(_CV.sub(" ", spelling).split())
+
+
+def _signature(func: Function) -> tuple[str, str, tuple[str, ...]]:
+    return (
+        func.name,
+        _cv_free(func.return_type),
+        tuple(_cv_free(p.type) for p in func.params),
+    )
+
+
+def is_benign_duplicate_group(
+    funcs: Sequence[Function], public: Sequence[bool]
+) -> bool:
+    """Whether same-key *funcs* are one dependency-header entity, declared twice.
+
+    *public* holds, per member, whether its declaration sits in a public
+    (library) header.
+    """
+    if len(funcs) < 2 or any(public):
+        return False
+    first = _signature(funcs[0])
+    return all(_signature(f) == first for f in funcs[1:])
+
+
+def collapse_benign_duplicates(
+    parsed: Sequence[tuple[Element, Function]], is_public: Callable[[Element], bool]
+) -> list[Function]:
+    """*parsed* functions, with each benign duplicate group reduced to its first
+    member. *is_public* (``decl_is_public``) is asked only about duplicates."""
+    groups: dict[str, list[int]] = {}
+    for index, (_, func) in enumerate(parsed):
+        groups.setdefault(func.mangled, []).append(index)
+    drop: set[int] = set()
+    for indexes in groups.values():
+        if len(indexes) < 2:
+            continue
+        funcs = [parsed[i][1] for i in indexes]
+        public = [is_public(parsed[i][0]) for i in indexes]
+        if is_benign_duplicate_group(funcs, public):
+            drop.update(indexes[1:])
+    return [func for i, (_, func) in enumerate(parsed) if i not in drop]

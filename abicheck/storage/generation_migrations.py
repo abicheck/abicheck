@@ -194,6 +194,14 @@ SPELLING_MIGRATIONS: Mapping[int, GenerationSpellingChange] = {
         "is sound and a baseline holding those spellings is re-dumped",
         extent_shift=1,
     ),
+    16: GenerationSpellingChange(
+        "castxml collapses a same-key function group declared only in non-public "
+        "headers whose signatures agree modulo cv (glibc wcschr/strchr overloads, "
+        "libstdc++ copy ctor beside its converting-template twin) to its first "
+        "declaration (duplicate_declarations.py): the dropped record was already "
+        "shadowed first-wins by the index, so set membership shrinks and no "
+        "stored type spelling is rewritten"
+    ),
 }
 
 #: Reasons that say nothing about what was audited; the bump gate refuses them.
