@@ -17,6 +17,7 @@ from __future__ import annotations
 import dataclasses
 import itertools
 import logging
+import pprint
 import shutil
 import subprocess
 import sys
@@ -222,9 +223,34 @@ def test_catalog_case_dump_logs_no_first_wins_duplicate(
     src = REPO / "catalog" / "cases" / case
     lib = _build(src / f"{v}.cpp", tmp_path / f"lib{v}.so", src)
     snap, first_wins = _dump_and_index_first_wins(lib, src / f"{v}.h")
-    assert first_wins == []
-    keys = [f.mangled for f in snap.declarations.functions]
-    assert len(keys) == len(set(keys))
+    groups = _same_key_groups(snap)
+    assert first_wins == [], pprint.pformat(groups, width=120)
+    assert groups == {}
+
+
+def _same_key_groups(snap: AbiSnapshot) -> dict[str, list[tuple[object, ...]]]:
+    """Every function key the dump holds more than once, with the facts the
+    collapse compares and the provenance it reads -- the failure message that
+    says *why* a group was kept on a toolchain this suite cannot run locally."""
+    by_key: dict[str, list[Function]] = {}
+    for f in snap.declarations.functions:
+        by_key.setdefault(f.mangled, []).append(f)
+    return {
+        key: [
+            (
+                f.return_type,
+                tuple(p.type for p in f.params),
+                f.is_variadic,
+                f.is_noexcept,
+                f.exception_spec,
+                f.source_header,
+                str(f.origin),
+            )
+            for f in funcs
+        ]  # fmt: skip
+        for key, funcs in by_key.items()
+        if len(funcs) > 1
+    }
 
 
 #: Same-key pairs in the library's *own* header (asm-labelled to one symbol,
