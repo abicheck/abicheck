@@ -252,6 +252,21 @@ def test_elf_names_stay_exact_and_are_not_case_folded() -> None:
     assert _edges(doc) == {("libA.so", "liba.so", "old")}
 
 
+def test_scope_only_member_links_a_pe_need_by_its_case_folded_name() -> None:
+    # An old-only member is never read, but a PE import of it still names it:
+    # the need links to the scope member, not to an external node.
+    doc = _doc(
+        _member(
+            "app.dll",
+            {"new": {"format": "pe", "needed": ["FOO.DLL"]}},
+        )
+    )
+    doc["comparison_scope"] = {"members": [{"name": "Foo.dll", "state": "removed"}]}
+    graph = compute_release_dependency_graph(doc)
+    assert {(e.source, e.target) for e in graph.edges} == {("app.dll", "Foo.dll")}
+    assert {n.name for n in graph.nodes if n.status == "external"} == set()
+
+
 def test_scope_entries_that_are_not_mappings_are_ignored() -> None:
     # A malformed comparison_scope entry is skipped, not read as a member; a
     # well-formed unchecked member beside it is still a not_evaluated node.

@@ -167,7 +167,10 @@ def compute_release_dependency_graph(
         if name not in status:
             status[name] = ("unchecked", str(m.get("state")))
             deps_state[name] = DEPS_NOT_EVALUATED
-            provides.setdefault(_match_key(name, "elf"), name)
+            # The member's file name may be the provider of a PE or Mach-O need
+            # too, so register it under every format's key (first one wins).
+            for scope_fmt in ("elf", "pe", "macho"):
+                provides.setdefault(_match_key(name, scope_fmt), name)
 
     edge_rows: list[GraphEdge] = []
     adjacency: dict[str, set[str]] = {}
