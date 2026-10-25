@@ -193,9 +193,10 @@ One directory per real-world shape that escaped every other test: `v1/` and
 build/parse knobs (`cxxflags`, `parse_defines`, `parse_includes`, `suppress`,
 `old_generation`, `depths`). `test_field_shapes.py` is the one runner: it
 builds, dumps and compares each shape through the CLI at every listed depth
-and rejects an unknown ground-truth key. Reuse a shape's sources from other
-tests (as `test_sycl_stub_parse_integration.py` and
-`test_type_index_backend_shapes.py` do) rather than copying them.
+and rejects an unknown ground-truth key. Another test reproducing a shape
+loads its sources through `_field_shapes.py` (`shape_sources`, `materialize`;
+derive a variant with `replace_once`) rather than copying them;
+`test_no_test_embeds_a_corpus_source` fails on an inline byte-identical copy.
 
 **Warning hygiene.** `@pytest.mark.model_warning_hygiene` fails a test on an
 unexpected `WARNING` from `abicheck.model.*` (`_model_warning_hygiene.py`;
