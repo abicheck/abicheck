@@ -466,7 +466,7 @@ EXTRACTION_BUG_CLASSES: tuple[BugClass, ...] = (
             "changed). A changed written signature, or a mangling change the "
             "header evidence does not explain, stays a removal and an addition."
         ),
-        fixed_by=(1779,),
+        fixed_by=(1779, 1812),
         seed_tests=(
             "tests/test_header_parameter_replacement_pairing.py",
             "tests/test_header_param_change_pairing_integration.py",
