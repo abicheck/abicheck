@@ -37,12 +37,25 @@ primary, or every old overload of the name kept with its signature):
 * the old binary never exported it: no finding, since there was no symbol for a
   consumer to bind to and the declaration remains.
 
-The rule never emits a declaration-removal kind for such an instantiation, and
-it never demotes an export loss: a WEAK loss keeps its binding and its verdict
-(``case217``/``case218`` pin that contract). It returns ``None`` whenever it
-makes no claim -- not a template instance, no declared primary or a deleted
-overload, an unknown export table, or an ELF-only old record -- and the caller falls
-back to the existing removal path.
+The rule never emits a declaration-removal kind for such an *implicit*
+instantiation, and it never demotes an export loss: a WEAK loss keeps its
+binding and its verdict (``case217``/``case218`` pin that contract). It
+returns ``None`` whenever it makes no claim -- not a template instance, no
+declared primary or a deleted overload, an unknown export table, or an
+ELF-only old record -- and the caller falls back to the existing removal path.
+
+An instance the old header spelled explicitly -- ``extern template`` or
+``template`` instantiation, or an explicit specialization -- is a declaration
+the new header no longer contains, so its absence is a removal, not an export
+change: the rule makes no claim for it and the removal path reports
+``func_removed`` / ``var_removed``. That needs the old snapshot's
+``explicit_instantiation_fact`` (``Function``/``Variable``), which only the
+clang header backend records; a castxml or pre-v65 side is not collected, and
+the implicit-instance path above applies.
+
+An explicit declaration the new header still spells, whose export the new
+binary dropped, is not an absence: the declaration matches and the export loss
+is judged on the matched symbol, as for any other declared function.
 
 The same holds one level up, for a class-template specialization the new
 header stops instantiating (:meth:`TemplateInstanceAbsence.specialization_vanished`).
@@ -88,6 +101,7 @@ from ..model.availability import FactStatus
 from ..model.change import Change
 from ..model.change_catalog.kinds import ChangeKind
 from ..model.edge_coverage import EdgeAnswer
+from ..model.explicit_instantiation import ExplicitInstantiation
 from ..model.export_entity_name import entity_name_components, has_synthetic_component
 from ..model.graph_identity import decl_node_identity, header_declaration_ids
 from ..model.qualified_name_split import split_top_level_scopes
@@ -409,6 +423,8 @@ class TemplateInstanceAbsence:
         """
         if elf_only_mode and is_export_table_only_record(f_old):
             return None
+        if _declared_explicitly(f_old):
+            return None  # the removed explicit declaration is the change
         parsed, scope = _spellings(mangled)  # read once, shared by both rules
         owner = _member_owner_of(mangled, parsed, scope)
         if owner is not None and owner in self._vanished_specializations():
@@ -426,6 +442,8 @@ class TemplateInstanceAbsence:
         """The findings for *v_old*, an old variable with no new peer, or
         ``None`` when this rule makes no claim: only a static data member of a
         vanished specialization is judged here."""
+        if _declared_explicitly(v_old):
+            return None  # the removed explicit declaration is the change
         owner = member_owner(mangled)
         if owner is None or owner not in self._vanished_specializations():
             return None
@@ -446,19 +464,43 @@ class TemplateInstanceAbsence:
         return None
 
 
+def _declared_explicitly(decl: Function | Variable) -> bool:
+    """Whether the old header spelled *decl*'s instance explicitly (a fact the
+    clang header backend recorded): its absence is a removed declaration."""
+    fact = decl.explicit_instantiation_fact
+    return (
+        fact is not None
+        and fact.status is FactStatus.PRESENT
+        and fact.value is not None
+        and fact.value is not ExplicitInstantiation.ABSENT
+    )
+
+
 def _export_lost(mangled: str, old: Function | Variable) -> Change:
     """``func_visibility_changed`` (``var_visibility_changed`` for a variable)
-    for an export the new binary dropped while its declaration remained. The
-    facts are the old side's, with the new side's export fact replaced by the
-    confirmed absence the table proved."""
-    return make_change(
+    for an export the new binary dropped while its declaration remained.
+
+    The proof is the export table's confirmed absence, not a visibility
+    attribute, so the text says "no longer exported" and never "hidden": the
+    new side's value is the absence the table established. The facts are the
+    old side's, with the new side's export fact replaced by that absence.
+    """
+    kind = (
         ChangeKind.FUNC_VISIBILITY_CHANGED
         if isinstance(old, Function)
-        else ChangeKind.VAR_VISIBILITY_CHANGED,
+        else ChangeKind.VAR_VISIBILITY_CHANGED
+    )
+    what = "Function" if isinstance(old, Function) else "Variable"
+    return make_change(
+        kind,
         symbol=mangled,
         name=old.name,
+        description=(
+            f"{what} {old.name} is no longer exported by the new binary; "
+            "its declaration remains in the new header"
+        ),
         old_value=visibility_label(old),
-        new_value="hidden",
+        new_value="not exported",
         symbol_binding=old.elf_binding.value if old.elf_binding else None,
         entity_id=old.entity_id,
         surface_facts={**surface_fact_summary(old), "binary_exported": "false"},

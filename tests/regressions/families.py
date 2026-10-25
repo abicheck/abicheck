@@ -474,6 +474,11 @@ _F16 = (
 
 #: id -> reason it belongs to no shared family.
 OTHER_REASONS: dict[str, str] = {
+    "templates.explicit_instance_removal_read_as_visibility_change": (
+        "removal-vs-export classification of a template instance; no sibling "
+        "shares a harness yet (the removal rule is a single-owner decision in "
+        "compare/template_instance_absence.py)"
+    ),
     "guard.platform_convention_without_a_gate": "platform convention lint gate",
     "ci.inert_concurrency_group_key": "GitHub workflow configuration",
     "ci.instrumentation_without_a_consumer": "GitHub workflow configuration",

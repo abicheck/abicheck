@@ -144,6 +144,17 @@ UNCOVERED: dict[str, str] = {
         "cover recorded, legacy-incomplete and absent inputs; no corpus Mach-O "
         "pair carries LC_LOAD_WEAK_DYLIB yet"
     ),
+    "Function.explicit_instantiation_fact": (
+        "read only by compare/template_instance_absence's _declared_explicitly, "
+        "whose unit and CLI tests (test_explicit_instantiation_removal.py) cover "
+        "declaration, definition, specialization and absent instances; no stored "
+        "corpus pair records an explicit instantiation on both sides yet"
+    ),
+    "Variable.explicit_instantiation_fact": (
+        "read only by compare/template_instance_absence's variable path through "
+        "_declared_explicitly, covered by test_explicit_instantiation_removal.py; "
+        "no stored corpus pair records an explicit static member instance yet"
+    ),
     "AbiSnapshot.header_declaration_ids": (
         "runtime-only L2 ids a header-depth projection keeps when it clears "
         "surface_graph; never stored, so no stored-corpus ablation reaches it. "

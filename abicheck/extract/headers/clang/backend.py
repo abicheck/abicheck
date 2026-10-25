@@ -51,6 +51,7 @@ from ....dumper_clang_errors import (
     run_clang_ast,
 )
 from ....errors import SnapshotError
+from ....model import ExplicitInstantiation, Fact
 from ....storage.header_ast_cache import (
     _cache_path,
     ast_acquisition_active,
@@ -81,6 +82,11 @@ from ..toolchain import (
     _tool_identity,
 )
 from .error_header_retry import retry_excluding_error_headers
+from .explicit_instantiation import (
+    explicit_instantiation_facts,
+    may_hold_explicit_instantiation,
+    parse_explicit_dump,
+)
 from .locations import materialize_locations
 
 # The orchestrator's logger name, kept from before the move so callers and
@@ -423,6 +429,88 @@ def clang_header_dump(
             _p.unlink(missing_ok=True)
 
 
+def _explicit_instantiation_facts(
+    request: HeaderParseRequest,
+    ast_root: dict[str, Any],
+    *,
+    clang_bin: str,
+    force_cpp: bool,
+    run_ast: ClangAstRunner,
+) -> dict[int, Fact[ExplicitInstantiation]]:
+    """The explicit-instantiation facts of *ast_root*, from a text AST pass.
+
+    Runs one extra ``clang -Xclang -ast-dump`` over the same aggregate header
+    the JSON pass used, only when a header spells an explicit instantiation or
+    specialization (:func:`may_hold_explicit_instantiation`). Not cached: a warm
+    and a cold dump read the same facts. A failed text pass leaves the facts
+    unset (``NOT_COLLECTED``) rather than guessing their kind.
+    """
+    try:
+        texts = [
+            h.read_text(encoding="utf-8", errors="replace") for h in request.headers
+        ]
+    except OSError:
+        return {}  # the JSON pass owns reporting an unreadable header
+    if not may_hold_explicit_instantiation(texts):
+        return {}
+    headers = list(request.headers)
+    extra_includes = absolutize_include_roots(list(request.extra_includes))
+    system_includes = _resolve_clang_system_includes(
+        request.compiler,
+        gcc_path=request.gcc_path,
+        gcc_prefix=request.gcc_prefix,
+        sysroot=request.sysroot,
+        nostdinc=request.nostdinc,
+        force_cpp=force_cpp,
+        gcc_options=request.gcc_options,
+        gcc_option_tokens=request.gcc_option_tokens,
+    )
+    with tempfile.NamedTemporaryFile(
+        suffix=".hpp" if force_cpp else ".h", mode="w", delete=False
+    ) as agg:
+        agg.write(clang_aggregate_text(headers))
+    agg_path = Path(agg.name)
+    dumps: list[Path] = []
+    try:
+        cmd = _build_clang_header_command(
+            clang_bin,
+            "gnu",
+            extra_includes,
+            agg_path,
+            sysroot=request.sysroot,
+            nostdinc=request.nostdinc,
+            gcc_options=request.gcc_options,
+            gcc_option_tokens=request.gcc_option_tokens,
+            force_cpp=force_cpp,
+            force_cpp20=force_cpp and _detect_cpp20_headers(headers),
+            system_includes=system_includes,
+        )
+        text_cmd = ["-ast-dump" if tok == "-ast-dump=json" else tok for tok in cmd]
+        try:
+            run = run_ast(text_cmd, timeout=120, on_created=dumps.append)
+        except subprocess.TimeoutExpired:
+            # The text pass is optional: a slow pass leaves the facts unset and
+            # must not abort the dump the JSON pass already completed.
+            log.warning(
+                "clang text AST pass timed out; explicit-instantiation facts left unset"
+            )
+            return {}
+        if run.returncode != 0 or not dumps:
+            log.debug(
+                "clang text AST pass failed (rc=%s); explicit-instantiation facts left unset",
+                run.returncode,
+            )
+            return {}
+        dump = parse_explicit_dump(
+            dumps[0].read_text(encoding="utf-8", errors="replace")
+        )
+        return explicit_instantiation_facts(ast_root, dump)
+    finally:
+        agg_path.unlink(missing_ok=True)
+        for path in dumps:
+            path.unlink(missing_ok=True)
+
+
 class ClangBackend:
     """The ``clang`` :class:`~abicheck.extract.headers.backend_protocol.HeaderAstBackend`.
 
@@ -514,6 +602,14 @@ class ClangBackend:
             no_binary_evidence=r.no_binary_evidence,
             is_cxx=resolved_force_cpp,
         )
+        if resolved_kind is None:  # a DPC++ dump keeps its facts unset
+            parser.explicit_instantiations = _explicit_instantiation_facts(
+                r,
+                ast_root,
+                clang_bin=clang_bin,
+                force_cpp=resolved_force_cpp,
+                run_ast=self.runner,
+            )
         setattr(
             parser,
             "_abicheck_neutral_factory",
