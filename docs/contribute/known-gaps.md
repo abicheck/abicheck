@@ -262,6 +262,11 @@ CJM: trust stage (docs/contribute/cjm.md) — use case UC-WF-analysis-assurance 
 
 ### False-positive risk
 
+#### A typedef retargeted inside a template argument still reads as a removal plus an addition under headers (2026-10-25)
+
+**Status (2026-10-25): OPEN.** #1812 pairs a header-declared parameter retype into `func_params_changed` when the typedef it names changed target, but `compare/parameter_replacement.py`'s `typedef_target_changed` reads only a spelling that reduces to one name.
+`false-positive` — `void f(std::span<V>)` or `void g(const vec<V>&)` with `V` retargeted is reported as `func_removed` + `func_added`, unless the two resolved parameter identities differ. Closing it means resolving each typedef named inside the written spelling, not only the whole spelling.
+
 #### A toolchain-only rebuild still fails a stated contract's coverage (2026-10-23)
 
 **Status (2026-10-24 at `9513369`): PARTIAL.** #1751 fixed import edges and leaked-dependency symbols; #1770 fixed the binary/toolchain kinds a stated `public` left `UNKNOWN_UNRESOLVED`. Still open: libstdc++ `_ZGTt` transactional-memory clones are not seen as runtime-owned, and runtime exports make the `exports` domain `unmatched_exports` (even for a byte-identical pair). Pinned by shrink-only lists in the toolchain-drift tests.  
