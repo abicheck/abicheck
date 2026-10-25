@@ -174,7 +174,7 @@
   "excluded_header_matching": "glob",
   "excluded_header_patterns": [],
   "fact_generations": {
-    "extractor": 21,
+    "extractor": 22,
     "resolver": 2,
     "source": 9
   },
