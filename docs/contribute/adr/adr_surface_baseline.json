@@ -243,7 +243,8 @@
       "surfaces": [
         "action: public-header-dir",
         "cli: compare --header --exclude-header",
-        "report: compare_report.scope"
+        "report: compare_report.scope",
+        "report: compare_report.undeclared_export_census"
       ],
       "use_cases": [
         "UC-TC-header-scope-robustness"
@@ -826,6 +827,7 @@
     "ADR-024 action: public-header-dir",
     "ADR-024 cli: compare --header --exclude-header",
     "ADR-024 report: compare_report.scope",
+    "ADR-024 report: compare_report.undeclared_export_census",
     "ADR-025 action: changed-path",
     "ADR-025 cli: compare --changed-path",
     "ADR-027 api: abicheck.pattern_verdicts",

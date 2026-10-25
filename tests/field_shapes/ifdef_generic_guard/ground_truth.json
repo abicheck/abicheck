@@ -1,0 +1,25 @@
+{
+  "description": "Exports declared only under #ifdef FOO and #ifdef SYCL_LANGUAGE_VERSION, parsed with neither macro defined and compared live (both libraries parsed in the same run): the coverage block attributes each hidden export to its guard macro, one line per macro, decided from the castxml run's own -E -dD output rather than the sycl:: name rule, and the export v2 drops (foo_two) is still reported from the export table.",
+  "field_report": "oneDAL #3693 handover r2, H5 (generalized beyond sycl::)",
+  "bug_class": "evidence.silent_degradation_to_clean_verdict",
+  "related_tests": [
+    "tests/test_preprocessor_hidden_census_integration.py",
+    "tests/test_preprocessor_branches.py"
+  ],
+  "live_compare": true,
+  "platforms": [
+    "linux"
+  ],
+  "depths": [
+    "headers"
+  ],
+  "expected": "BREAKING",
+  "coverage_contains": [
+    "old side headers: 2 exported symbols declared only under #ifdef FOO (not defined; pass -D FOO)",
+    "new side headers: 1 exported symbols declared only under #ifdef FOO (not defined; pass -D FOO)",
+    "new side headers: 1 exported symbols declared only under #ifdef SYCL_LANGUAGE_VERSION (not defined; pass -D SYCL_LANGUAGE_VERSION)"
+  ],
+  "coverage_absent": [
+    "not declared under the parsed header configuration"
+  ]
+}

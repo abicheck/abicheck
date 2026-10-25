@@ -22,7 +22,10 @@ import pytest
 from click.testing import CliRunner
 
 from abicheck.cli import main
-from abicheck.model.undeclared_export_census import UNDECLARED_EXPORT_WARNING_MARKER
+from abicheck.model.undeclared_export_census import (
+    GUARD_WARNING_MARKER,
+    UNDECLARED_EXPORT_WARNING_MARKER,
+)
 
 pytestmark = [
     pytest.mark.integration,
@@ -106,10 +109,17 @@ def test_hidden_sycl_overloads_are_counted_not_findings(tmp_path: Path) -> None:
     assert result.exit_code == 0, result.output
     data = json.loads(report.read_text())
     warnings = data["coverage_warnings"]
-    lines = [w for w in warnings if UNDECLARED_EXPORT_WARNING_MARKER in w]
+    # Both sides were parsed in this run, so the castxml run's own -E output
+    # attributes the hidden overloads to their guard macro; the sycl:: name
+    # rule is only the fallback for a side with no such scan.
+    lines = [w for w in warnings if GUARD_WARNING_MARKER in w]
     assert [line.split(" ", 1)[0] for line in lines] == ["old", "new"]
     for line in lines:
-        assert f"({len(_HIDDEN)} reference sycl::" in line
+        assert (
+            f"headers: {len(_HIDDEN)} {GUARD_WARNING_MARKER} SYCL_LANGUAGE_VERSION "
+            "(not defined; pass -D SYCL_LANGUAGE_VERSION)"
+        ) in line
+    assert not any(UNDECLARED_EXPORT_WARNING_MARKER in w for w in warnings)
     # The census creates no finding: the only findings are the pre-existing
     # `exported_not_public` hygiene rows for the same hidden exports.
     assert {c["kind"] for c in data["changes"]} <= {"exported_not_public"}

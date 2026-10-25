@@ -48,6 +48,10 @@ ROOT = Path(__file__).resolve().parent.parent
 BACKEND_SPECIFIC = {
     "_target_triple": "clang records the probed triple; castxml's AST root is per-target already",
     "_is_cxx": "clang parses C and C++ ASTs; castxml always parses C++",
+    "_preprocessor_hidden": (
+        "castxml re-runs its own command with -E -dD and scans the excluded "
+        "branches; the clang frontend has no such run, so it reads as no scan"
+    ),
 }
 
 
