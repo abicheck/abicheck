@@ -12,6 +12,16 @@ never come out BREAKING in the reduced mode. Missed breaks (BREAKING→COMPATIBL
 e.g. case129 stripped/release) are expected evidence loss and are reported, not
 failed.
 
+Row handling (``validate_examples.py`` status → guard):
+
+* ``PASS`` / ``FAIL`` / ``XFAIL`` *with* a verdict: the FP invariant is checked
+  on the verdict. ``FAIL`` rows are verdict differences the reduced mode got
+  wrong and are reported.
+* ``XFAIL`` *without* a verdict: a declared ``known_gap`` whose compare produced
+  no verdict (e.g. a profile-mismatch refusal). Nothing was manufactured, so it
+  is listed and not failed; the FP invariant is unchecked for it.
+* ``ERROR`` and any other row without a verdict: a crash, failed.
+
 Usage:
     python tests/check_stripped_fp.py <results.json> [label]
 
@@ -98,11 +108,20 @@ def _gap_applies(
 
 def _classify_results(
     rows: list[dict[str, Any]], gt: dict[str, Any], label: str, data: dict[str, Any]
-) -> tuple[list[str], list[str], list[str]]:
-    """Split result rows into (false_positives, downgrades, errors) messages."""
+) -> tuple[list[str], list[str], list[str], list[str]]:
+    """Split result rows into (false_positives, downgrades, errors, unverified).
+
+    *unverified* is an XFAIL row with no verdict (``got`` empty). The validate
+    run only XFAILs a case that declares a ``known_gap``, so such a row is a
+    documented gap whose compare produced no verdict (e.g. an ADR-050 profile
+    mismatch refusal) rather than a crash. It cannot manufacture a break, so it
+    does not fail the guard, but the FP invariant is unchecked for it and it is
+    listed explicitly. An XFAIL with no verdict and no declared gap is an error.
+    """
     false_positives: list[str] = []
     downgrades: list[str] = []
     errors: list[str] = []
+    unverified: list[str] = []
     for r in rows:
         case = str(r.get("case_id") or r.get("name") or "")
         got = (r.get("got") or "").upper()
@@ -116,6 +135,18 @@ def _classify_results(
         # green without ever checking the false-positive invariant — so treat
         # ERROR (and a missing verdict that is not a SKIP) as a guard failure.
         if status == "SKIP":
+            continue
+        if status == "XFAIL" and not got:
+            if entry.get("known_gap"):
+                unverified.append(
+                    f"{case}: XFAIL with no verdict (declared known_gap; FP invariant "
+                    "not checkable for this row)"
+                )
+            else:
+                errors.append(
+                    f"{case}: XFAIL with no verdict and no declared known_gap "
+                    f"({r.get('message', '')[:120]})"
+                )
             continue
         if status == "ERROR" or not got:
             errors.append(f"{case}: status={status} ({r.get('message', '')[:120]})")
@@ -151,19 +182,36 @@ def _classify_results(
             downgrades.append(
                 f"{case}: {expected}→{got} (evidence lost in {label} mode)"
             )
-    return false_positives, downgrades, errors
+        elif got != expected:
+            # Not a break manufactured from nothing, so the guard does not fail
+            # on it, but it is a verdict the reduced mode got wrong; say so
+            # rather than letting the row vanish.
+            downgrades.append(
+                f"{case}: {expected}→{got} (verdict differs in {label} mode; "
+                "not a false positive)"
+            )
+    return false_positives, downgrades, errors, unverified
 
 
 def _report(
-    label: str, false_positives: list[str], downgrades: list[str], errors: list[str]
+    label: str,
+    false_positives: list[str],
+    downgrades: list[str],
+    errors: list[str],
+    unverified: list[str],
 ) -> int:
     """Print the guard report and return the process exit code."""
     if downgrades:
-        print(
-            f"{label} downgrades (expected evidence loss, reported): {len(downgrades)}"
-        )
+        print(f"{label} reported verdict differences (not failed): {len(downgrades)}")
         for d in downgrades:
             print(f"  - {d}")
+    if unverified:
+        print(
+            f"{label} declared known gaps with no verdict (not checked, not failed): "
+            f"{len(unverified)}"
+        )
+        for u in unverified:
+            print(f"  - {u}")
 
     failed = False
     if errors:
@@ -201,10 +249,10 @@ def main(argv: list[str] | None = None) -> int:
 
     gt = _load(GROUND_TRUTH)["verdicts"]
     data = _load(results_path)
-    false_positives, downgrades, errors = _classify_results(
+    false_positives, downgrades, errors, unverified = _classify_results(
         data.get("results", []), gt, label, data
     )
-    return _report(label, false_positives, downgrades, errors)
+    return _report(label, false_positives, downgrades, errors, unverified)
 
 
 if __name__ == "__main__":
