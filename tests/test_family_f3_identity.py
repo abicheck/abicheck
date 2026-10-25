@@ -801,8 +801,17 @@ def test_header_declaration_identity_survives_relocation_not_a_new_signature(
     change, any other pair stays a removal and an addition."""
     from abicheck.checker_policy import ChangeKind
     from abicheck.compare.parameter_replacement import pair_parameter_replacements
+    from abicheck.demangle import demangle
     from abicheck.diff_helpers import make_change
     from abicheck.model import AbiSnapshot, Function, Param
+
+    # Only a pair reads demangled parameter text; the unpaired cases do not.
+    if (
+        same_declaration
+        and demangle("_ZN3lib5scaleEi") is None
+        and shutil.which("c++filt") is None
+    ):
+        pytest.skip("same-declaration pairing needs cxxfilt or c++filt")
 
     # _ZN3lib5scaleEi / _ZN3lib5scaleEl: lib::scale(int) / lib::scale(long)
     def snap(mangled: str, spelling: str, header: str, target: str) -> AbiSnapshot:
