@@ -142,8 +142,7 @@ from ..model.graph_identity import header_declaration_ids
 from ..model.surface_facts import is_export_confirmed_absent
 from .depth_fact_availability import cleared_facts
 from .depth_projection_declarations import (
-    binary_level_function,
-    binary_level_variable,
+    binary_level_declarations,
     export_only_declarations,
     pair_layout_scope,
 )
@@ -377,14 +376,9 @@ def _strip_header_and_above_evidence(
         extra_functions, extra_variables = export_only_declarations(
             snap, {f.mangled for f in functions} | {v.mangled for v in variables}
         )
-        snap.declarations.functions = [
-            *(binary_level_function(f) for f in functions),
-            *extra_functions,
-        ]
-        snap.declarations.variables = [
-            *(binary_level_variable(v) for v in variables),
-            *extra_variables,
-        ]
+        functions_b, variables_b = binary_level_declarations(snap, functions, variables)
+        snap.declarations.functions = [*functions_b, *extra_functions]
+        snap.declarations.variables = [*variables_b, *extra_variables]
     # A DWARF-sourced pair's declarations are already binary-depth facts --
     # a debug subprogram's signature, a hidden-but-defined function's
     # visibility -- so they stay as the binary-only dump recorded them:

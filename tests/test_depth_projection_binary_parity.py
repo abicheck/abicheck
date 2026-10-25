@@ -522,3 +522,50 @@ class TestPairLayoutScope:
         old, new = _header_pair_with_layouts({"A": 4, "B": 4}, {"A": 4, "B": 4})
         records, _ = pair_layout_scope(frozenset({"A"}), None, old, new)
         assert records <= {"A"}
+
+
+class TestPeHasNoDataExports:
+    def _pe_snap(self) -> AbiSnapshot:
+        return AbiSnapshot(
+            library="w.dll",
+            version="1",
+            from_headers=True,
+            platform="pe",
+            variables=[
+                Variable(
+                    name="g_limit",
+                    mangled="g_limit",
+                    type="const int",
+                    binary_exported_fact=Fact.present(True),
+                )
+            ],
+            pe=PeMetadata(
+                machine="IMAGE_FILE_MACHINE_AMD64", exports=[PeExport(name="g_limit")]
+            ),
+        )
+
+    def test_a_declared_variable_projects_as_an_export_function(self) -> None:
+        # The export directory carries no code/data split, so the binary-only
+        # PE dump lists every export as a function (`msvc_export_function`).
+        projected = project_snapshot_to_depth(self._pe_snap(), "binary")
+        assert [f.mangled for f in projected.declarations.functions] == ["g_limit"]
+        assert projected.declarations.variables == []
+
+    def test_control_elf_keeps_the_variable(self) -> None:
+        snap = AbiSnapshot(
+            library="libw.so",
+            version="1",
+            from_headers=True,
+            variables=[
+                Variable(
+                    name="g_limit",
+                    mangled="g_limit",
+                    type="const int",
+                    binary_exported_fact=Fact.present(True),
+                )
+            ],
+            elf=_elf(_sym("g_limit", SymbolType.OBJECT)),
+        )
+        projected = project_snapshot_to_depth(snap, "binary")
+        assert [v.mangled for v in projected.declarations.variables] == ["g_limit"]
+        assert projected.declarations.functions == []

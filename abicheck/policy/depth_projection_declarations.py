@@ -61,6 +61,7 @@ if TYPE_CHECKING:
     from ..model.elf_facts import ElfSymbol
 
 __all__ = [
+    "binary_level_declarations",
     "binary_level_function",
     "binary_level_variable",
     "export_only_declarations",
@@ -122,6 +123,37 @@ def binary_level_variable(var: Variable) -> Variable:
         elf_binding=var.elf_binding,
         binary_exported_fact=var.binary_exported_fact,
         **_discarded_surface_facts(),
+    )
+
+
+def binary_level_declarations(
+    snap: AbiSnapshot, functions: list[Function], variables: list[Variable]
+) -> tuple[list[Function], list[Variable]]:
+    """*functions*/*variables* each reduced to its binary-level view.
+
+    On PE a declared variable becomes an export-only *function*: a PE export
+    directory does not say whether an export is code or data, so a
+    binary-only PE dump lists every export as a function, and the header's
+    variable/function split is evidence the binary view never had (a const
+    change read ``var_added`` projected and ``func_added`` from the
+    binary-only dump). ELF and Mach-O record the split (symbol type,
+    section), so a variable stays a variable there.
+    """
+    projected_functions = [binary_level_function(f) for f in functions]
+    index = build_raw_export_index(snap)
+    if index is not None and index.platform == "pe":
+        return projected_functions + [
+            binary_level_function(_as_function(v)) for v in variables
+        ], []
+    return projected_functions, [binary_level_variable(v) for v in variables]
+
+
+def _as_function(var: Variable) -> Function:
+    return Function(
+        name=var.mangled,
+        mangled=var.mangled,
+        return_type="?",
+        binary_exported_fact=var.binary_exported_fact,
     )
 
 
