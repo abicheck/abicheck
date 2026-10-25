@@ -8,7 +8,7 @@ Which public surface reaches each ADR, which use cases it serves, and whether a 
 |---|---|
 | surfaced | 47 |
 | partial | 14 |
-| gap | 7 |
+| gap | 8 |
 | internal | 21 |
 
 ## ADRs
@@ -102,8 +102,9 @@ Which public surface reaches each ADR, which use cases it serves, and whether a 
 | [ADR-079](../adr/079-partial-export-table-read-in-the-stored-snapshot.md) | gap | — | — | Proposed, not yet implemented; no per-platform export_read snapshot field exists. |
 | [ADR-080](../adr/080-persisting-the-advanced-dwarf-extraction-status.md) | gap | — | — | Proposed, not yet implemented; the advanced-DWARF extraction status is in memory only and is not persisted. |
 | [ADR-082](../adr/082-declared-header-order-independent-extraction.md) | internal | — | — | Dump-time proof of declared-header order and the stored header_canonical contract field; users reach it only through dump/compare, and the change is a schema v59 contract field, not a flag, report field or exit code. |
-| [ADR-087](../adr/087-dwarf-dependency-internals-out-of-contract.md) | internal | — | — | The DWARF declaration-file fix is extractor-internal, and the contract rule adds a reason value to the existing contract_reason_code field and scope_reasons, with no new flag, report field or exit code. |
+| [ADR-088](../adr/088-dwarf-dependency-internals-out-of-contract.md) | internal | — | — | The DWARF declaration-file fix is extractor-internal, and the contract rule adds a reason value to the existing contract_reason_code field and scope_reasons, with no new flag, report field or exit code. |
 | [ADR-086](../adr/086-static-archive-no-baseline-export-audit.md) | surfaced | UC-ARCH-static-lib | `cli: compare --no-baseline` | — |
+| [ADR-087](../adr/087-report-pages-publication.md) | gap | — | — | Proposed, not yet implemented; no publish-report reusable workflow, site generator, or page-link Action input exists yet. |
 
 ## Use cases by user task
 
@@ -117,7 +118,6 @@ Which public surface reaches each ADR, which use cases it serves, and whether a 
 ## ADR surfaces no scenario traces
 
 - ADR-002 cli: compare --select
-- ADR-002 report: compare_report.comparison_scope
 - ADR-004 report: compare_report.filtered_summary
 - ADR-004 report: compare_report.redundant_count
 - ADR-004 report: compare_report.root_causes
@@ -220,8 +220,6 @@ Which public surface reaches each ADR, which use cases it serves, and whether a 
 - ADR-064 action: severity-preset
 - ADR-064 report: compare_report.exit
 - ADR-065 cli: compare --select --select-required --dry-run
-- ADR-065 report: compare_report.comparison_scope
-- ADR-065 report: compare_report.run_outcome
 - ADR-066 api: abicheck.workflows.history.build_longitudinal_history
 - ADR-066 cli: project history --policy
 - ADR-067 report: compare_report.disposition_audit

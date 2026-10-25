@@ -84,7 +84,7 @@
       "abicheck/extract/headers/castxml/records.py": "9093c5648bbe60334f4f3cbdd13e6e7d0eece582cbff9ef8a16aeb8096473cd6",
       "abicheck/extract/headers/castxml/scope.py": "41cecc8dd996c10a58c022e5dca4003cce9d7775adf674b339cc199fb59297c7",
       "abicheck/extract/headers/castxml/specialization.py": "3f9f021672df1b84de42bc8de5f3c915508b3f3850e0a8acbaa80a3dee04c6f3",
-      "abicheck/extract/headers/castxml/type_resolution.py": "73b472e102170e76950c47dab5871c51d2c534d3de3d50caec2defa7d320b4c2",
+      "abicheck/extract/headers/castxml/type_resolution.py": "dba855d77fb5e32a63977fe03e219712bb3d40cc8afad6ca35517ac564318fb1",
       "abicheck/extract/headers/castxml/typedef_parsing.py": "332587638d5d4b7caebbc20fa44b69c314771fffa5839a15dec59eaba3caaf93",
       "abicheck/extract/headers/castxml/vector_join.py": "043e4a849bbc324568e240d4a94323b0952583678ec2ca0a62c81515a1798db0",
       "abicheck/extract/headers/castxml/vector_spellings.py": "208f0891eedceda82e172fe846a5fc09d26a3b3d917795a416ae117450cf600c",
@@ -95,8 +95,8 @@
       "abicheck/extract/headers/clang/enums.py": "69f90fd8e342371d246a257f7ed4230d9a548173f856ec63776d6af12ee53644",
       "abicheck/extract/headers/clang/error_header_retry.py": "3153f727c9d1934783a51d6917727a48aeba31e68b3c2462aef6e6b2f489f690",
       "abicheck/extract/headers/clang/expr.py": "5d8e1ef086c583db2557fd7fdb3fd5e4f51b55e4b556f120f624eea6875e8e6a",
-      "abicheck/extract/headers/clang/function_template_defaults.py": "e0f054313edf859824b6cb3fce8d570b9e89d9adb1a574641f65e7c3ea57541a",
-      "abicheck/extract/headers/clang/functions.py": "6307f1c4f4d4771cddf6a33c1291f542cb100ede3e586888eb8feb6d82fe5d38",
+      "abicheck/extract/headers/clang/function_template_defaults.py": "2867a70d0b85c891efbf80194ae147fd96429e9d51cdb93e029ff642be0bc780",
+      "abicheck/extract/headers/clang/functions.py": "69d43218201ac33d7f00572fa3dc176e63afad1a568f811ddf72483de939bdc4",
       "abicheck/extract/headers/clang/inline_semantics.py": "9add1c49ba9e755b12cd50aaa82254bfe2a7141e7bb0bfeec640e540d291691d",
       "abicheck/extract/headers/clang/layout_tool.py": "84fe5c86af2f0ae7486012297356d18046345a9ec5c0bbab1b8ec0a59645a2fe",
       "abicheck/extract/headers/clang/locations.py": "d4292c937fb928268132c6a3f21a35a5d7576b8164416648ef73815cd07fcddf",
@@ -160,9 +160,9 @@
       "abicheck/symvers_metadata.py": "372737765cd132e6e87ed891dd465d2958e04debbef774e45212ceb3036871cb",
       "abicheck/type_metadata.py": "9997189de8dac522fd1db8be5ae491d811139503f83abaaded89038eb4aa9cdf"
     },
-    "fingerprint": "4e658ad12c77d542ea1d23a6e07a61f12f200d71080cd1a36052322e808ac5c7",
-    "generation": 16,
-    "reason": "bumped to 16 for a semantic change"
+    "fingerprint": "cff0befc2f9402ffbd2da86a4fa774318f71dbe87284d4170c0dbc119e39e17f",
+    "generation": 18,
+    "reason": "DWARF DW_AT_decl_file resolves for DWARF 4 and 5, so the recorded source_location of DWARF declarations changes (ADR-088)"
   },
   "resolver": {
     "files": {

@@ -7,4 +7,4 @@
   types they name) is out of contract with reason
   `dependency_internal_unreachable`. It is still reported and counted in the
   disposition audit's `scope_reasons`. The library's own changes, and any
-  dependency type a public declaration reaches, are unchanged. See ADR-087.
+  dependency type a public declaration reaches, are unchanged. See ADR-088.

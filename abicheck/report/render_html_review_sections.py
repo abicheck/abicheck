@@ -95,6 +95,14 @@ def render_use_case_impact_html(impact: Mapping[str, Any] | None) -> str:
     )
 
 
+def _member_prefix_html(entry: Mapping[str, Any]) -> str:
+    """A release entry's member attribution; empty for a scalar entry."""
+    library = entry.get("library")
+    if library is None:
+        return ""
+    return f"<code>{html.escape(str(library))}</code> &middot; "
+
+
 def _surface_declaration_html(entry: Mapping[str, Any]) -> str:
     h = html.escape
     old = entry.get("old_declaration")
@@ -141,7 +149,7 @@ def render_surface_changes_html(
             continue
         shown = entries[:cap]
         rows = "".join(
-            f"<tr><td><code>{h(str(e.get('symbol')))}</code></td>"
+            f"<tr><td>{_member_prefix_html(e)}<code>{h(str(e.get('symbol')))}</code></td>"
             f"<td>{h(str(e.get('verdict')))}</td>"
             f"<td>{_surface_declaration_html(e)}</td></tr>"
             for e in shown

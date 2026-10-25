@@ -5,4 +5,4 @@
   read a DWARF 4 `name` entry for both, so every DWARF 5 declaration (GCC's
   default) recorded no declaring file. Declarations now carry their full
   declaring path and line (`<dir>/<file>:<line>`). This is an extractor
-  change: the extractor generation is 16 (generations 13, 14 and 15 belong to other changes already on main).
+  change: the extractor generation is 18 (generations 13 to 17 belong to other changes already on main).

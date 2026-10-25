@@ -968,3 +968,87 @@ def test_sc_linux_elf_baseline(tmp_path: Path) -> None:
     doc = json.loads(res.output)
     assert doc["verdict"] == "BREAKING"
     assert doc["release_recommendation"]["version_bump"] == "major"
+
+
+def test_sc_zero_comparison_not_clean(tmp_path: Path) -> None:
+    # Two release directories with disjoint library names: nothing pairs, so
+    # zero comparisons complete. Under either scope policy the run must exit 1,
+    # never read as a clean pass, and must not report a compatibility verdict.
+    old_dir, new_dir = tmp_path / "baseline", tmp_path / "candidate"
+    old_dir.mkdir()
+    new_dir.mkdir()
+    save_snapshot(
+        AbiSnapshot(
+            library="libold.so", version="1", functions=[_fn("a")], from_headers=True
+        ),
+        old_dir / "libold.json",
+    )
+    save_snapshot(
+        AbiSnapshot(
+            library="libnew.so", version="1", functions=[_fn("a")], from_headers=True
+        ),
+        new_dir / "libnew.json",
+    )
+    for policy in ("warn", "block"):
+        cfg = tmp_path / f"{policy}.yml"
+        cfg.write_text(f"scope:\n  on_incomplete: {policy}\n", encoding="utf-8")
+        report = tmp_path / f"report-{policy}.json"
+        res = _cli(
+            "compare",
+            str(old_dir),
+            str(new_dir),
+            "--config",
+            str(cfg),
+            "-o",
+            f"json={report}",
+        )
+        assert res.exit_code == 1, (policy, res.output)
+        doc = json.loads(report.read_text(encoding="utf-8"))
+        assert doc["libraries"] == []
+        assert doc["run_outcome"]["operational"] == "no_comparison_completed"
+        assert doc["run_outcome"]["compatibility"] is None
+        assert doc["run_outcome"]["scope"] == "incomplete"
+        assert "no_comparison_completed" in doc["exit"]["reasons"]
+
+
+def test_sc_analysis_assurance_gate(tmp_path: Path) -> None:
+    # Export-table-only snapshots (elf_only_mode, no headers): the run is clean
+    # by default, but the report states the analysis is partial. Requiring
+    # complete analysis raises the clean exit to 1; a real break stays 4.
+    def _elf_only(lib: str, funcs: list[str]) -> AbiSnapshot:
+        return AbiSnapshot(
+            library=lib,
+            version="1",
+            elf_only_mode=True,
+            functions=[_fn(f) for f in funcs],
+        )
+
+    old = _elf_only("libfoo.so.1", ["pub_a"])
+    new = _elf_only("libfoo.so.1", ["pub_a"])
+    cfg = tmp_path / "abicheck.yml"
+    cfg.write_text("assurance:\n  require_complete: true\n", encoding="utf-8")
+
+    default_report = tmp_path / "default.json"
+    default = _compare(tmp_path, old, new, "-o", f"json={default_report}")
+    assert default.exit_code == 0
+    aa = json.loads(default_report.read_text(encoding="utf-8"))["analysis_assurance"]
+    assert aa["status"] == "partial"
+
+    required_report = tmp_path / "required.json"
+    required = _compare(
+        tmp_path, old, new, "--config", str(cfg), "-o", f"json={required_report}"
+    )
+    assert required.exit_code == 1
+    doc = json.loads(required_report.read_text(encoding="utf-8"))
+    assert doc["analysis_assurance"]["status"] == "partial"
+    assert doc["analysis_assurance_exit_contribution"] == 1
+    assert "dwarf" in doc["analysis_assurance"]["layout_unverified_detectors"]
+
+    broken = _compare(
+        tmp_path,
+        _elf_only("libfoo.so.1", ["pub_a", "pub_b"]),
+        _elf_only("libfoo.so.1", ["pub_a"]),
+        "--config",
+        str(cfg),
+    )
+    assert broken.exit_code == 4

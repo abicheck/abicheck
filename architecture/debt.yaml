@@ -662,17 +662,6 @@
       "review_by": "2026-11-30"
     },
     {
-      "path": "abicheck/html_report.py",
-      "baseline_lines": 856,
-      "target": "report",
-      "rule": "no_growth",
-      "disposition": "migrate",
-      "category": "legacy_report_monolith",
-      "owner": "report",
-      "rationale": "Lowered 1243 -> 904 (ADR-067 report view: JUnit/HTML/SARIF/JSON/Markdown now read the --show-only filter, finding id and root-cause key from abicheck/report/view.py instead of each other). Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice. Lowered 870 -> 861: `compute_use_case_impact` now delegates to `report/use_case_impact_render.py`'s `use_case_impact_block`, so the projection lives with its renderer.",
-      "review_by": "2026-11-30"
-    },
-    {
       "path": "abicheck/junit_report.py",
       "baseline_lines": 1183,
       "target": "report",
@@ -773,7 +762,7 @@
     },
     {
       "path": "abicheck/reporter_markdown.py",
-      "baseline_lines": 1234,
+      "baseline_lines": 1229,
       "target": "report",
       "rule": "no_growth",
       "disposition": "migrate",
@@ -784,7 +773,7 @@
     },
     {
       "path": "abicheck/sarif.py",
-      "baseline_lines": 1343,
+      "baseline_lines": 1251,
       "target": "report",
       "rule": "no_growth",
       "disposition": "migrate",
@@ -927,7 +916,7 @@
     },
     {
       "path": "tests/test_action_validate_inputs.py",
-      "baseline_lines": 1330,
+      "baseline_lines": 1320,
       "target": "tests/unit-or-contract ownership matching production migration",
       "rule": "no_growth",
       "disposition": "migrate",

@@ -1,6 +1,11 @@
 # G8 — Static-library (`.a` / `.lib`) stance
 
-**Registry:** `UC-ARCH-static-lib` (`by_design_excluded`)
+**Registry:** `UC-ARCH-static-lib` (`partial`)
+
+**Update (2026-10-23, ADR-086):** a static archive is now accepted as a
+`compare --no-baseline` audit operand (export audit from the `ar` symbol
+index). Every other command still rejects archives, as option (A) below
+describes. The registry entry lists what remains.
 **Effort:** S (decision) → M (if implemented) · **Risk:** low
 
 ## Problem

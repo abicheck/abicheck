@@ -711,8 +711,8 @@ adrs:
     reason: Dump-time proof of declared-header order and the stored header_canonical contract field; users reach it only through dump/compare, and the change is a schema v59 contract field, not a flag, report field or exit code.
     use_cases: []
 
-  - id: ADR-087
-    file: 087-dwarf-dependency-internals-out-of-contract.md
+  - id: ADR-088
+    file: 088-dwarf-dependency-internals-out-of-contract.md
     disposition: internal
     reason: The DWARF declaration-file fix is extractor-internal, and the contract rule adds a reason value to the existing contract_reason_code field and scope_reasons, with no new flag, report field or exit code.
     use_cases: []
@@ -723,3 +723,10 @@ adrs:
     use_cases: [UC-ARCH-static-lib]
     surfaces:
       - cli: compare --no-baseline
+
+  - id: ADR-087
+    file: 087-report-pages-publication.md
+    disposition: gap
+    use_cases: []
+    surfaces: []
+    missing: Proposed, not yet implemented; no publish-report reusable workflow, site generator, or page-link Action input exists yet.

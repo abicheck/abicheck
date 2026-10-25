@@ -31,15 +31,19 @@ the set of values the CLI itself will accept for an option. That is three
 facts today (the renderable-format set behind `compare -o`/`deps tree -o`/
 `deps compare -o`, and `dump --compression`).
 
-`validate-inputs.sh` also enforces two *subsets* — `json|markdown|junit` for a
-directory/package compare, and `json|markdown|sarif|junit|oneline` for
-`compare --no-baseline` — and those are **not** emitted here on purpose. They
-are not choice sets; they are claims about which renderer a particular
-comparison shape supports, i.e. restriction mirrors in ADR-070 D1/D2's sense.
-Deriving them would require modelling renderer capability per shape, which is
-exactly the kind of CLI semantics the Action is supposed to stop
-re-implementing. They are Phase 2 material, and generating them here would
-dress a mirror up as a derived fact — worse than leaving them visible.
+`validate-inputs.sh` also enforces a *subset* for `compare --no-baseline`
+(`json|markdown|sarif|junit|oneline`). That one is **not** emitted here on
+purpose: it is a claim about which renderer an audit-only shape supports, i.e.
+a restriction mirror in ADR-070 D1/D2's sense. Deriving it would require
+modelling renderer capability per shape, which is exactly the kind of CLI
+semantics the Action is supposed to stop re-implementing. It is Phase 2
+material, and generating it here would dress a mirror up as a derived fact.
+
+The directory/package set (`release-compare`) and the stored-BundleFacts set
+(`stored-bundle-facts`) are emitted, because each is a named constant the CLI
+itself enforces at runtime (`RELEASE_FORMATS`, `STORED_RELEASE_FORMATS`),
+not a transcription of a claim. The shell reads the same constant the engine
+checks against.
 
 Usage:
     python scripts/gen_action_cli_surface.py            # write the file
@@ -82,6 +86,28 @@ def _resolve(path: tuple[str, ...]) -> click.Command:
     return node
 
 
+#: (Action-facing label, the declared set). Sets the CLI keeps as a named
+#: constant rather than on a parameter: the directory/package fan-out's
+#: renderable formats and the stored-BundleFacts comparison's renderable
+#: formats. A narrower set for a *shape* stays out of this list (see the
+#: module docstring); these are the whole-shape sets a shape-level check
+#: reads, so the Action checks against the same constants the CLI does.
+EMITTED_SETS: tuple[tuple[str, str], ...] = (
+    ("release-compare", "RELEASE_FORMATS"),
+    ("stored-bundle-facts", "STORED_RELEASE_FORMATS"),
+)
+
+
+def _declared_sets() -> dict[str, tuple[str, ...]]:
+    from abicheck.report.release_formats import RELEASE_FORMATS, STORED_RELEASE_FORMATS
+
+    sets = {
+        "RELEASE_FORMATS": RELEASE_FORMATS,
+        "STORED_RELEASE_FORMATS": STORED_RELEASE_FORMATS,
+    }
+    return {name: tuple(sorted(values)) for name, values in sets.items()}
+
+
 def _choices(path: tuple[str, ...], spelling: str) -> tuple[str, ...]:
     for param in _resolve(path).params:
         if isinstance(param, click.Option) and spelling in param.opts:
@@ -118,6 +144,10 @@ def render() -> str:
     for label, path, spelling in EMITTED_CHOICES:
         for value in _choices(path, spelling):
             lines.append(f"CHOICE {label} {spelling} {value}")
+    declared = _declared_sets()
+    for label, set_name in EMITTED_SETS:
+        for value in declared[set_name]:
+            lines.append(f"CHOICE {label} -o {value}")
     return "\n".join(lines) + "\n"
 
 

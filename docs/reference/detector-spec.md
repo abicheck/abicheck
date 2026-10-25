@@ -2,7 +2,7 @@
 
 # Detector specification matrix
 
-One row per `ChangeKind` (422 total). Columns fuse the verdict partition (`checker_policy`), default policy (`policy_for`), the weakest evidence layer at which the kind becomes detectable (`scripts/evidence_tiers`), and the example case(s) that demonstrate the kind (`catalog/ground_truth.json`). The **Examples** column is capped at 4 links per kind; the full mapping is in `detector-spec.json`.
+One row per `ChangeKind` (423 total). Columns fuse the verdict partition (`checker_policy`), default policy (`policy_for`), the weakest evidence layer at which the kind becomes detectable (`scripts/evidence_tiers`), and the example case(s) that demonstrate the kind (`catalog/ground_truth.json`). The **Examples** column is capped at 4 links per kind; the full mapping is in `detector-spec.json`.
 
 | ChangeKind | Category | Default verdict | Severity | Min evidence | Doc slug | Examples |
 |---|---|---|---|---|---|---|
@@ -137,7 +137,7 @@ One row per `ChangeKind` (422 total). Columns fuse the verdict partition (`check
 | `func_pure_virtual_added` | breaking | `BREAKING` | `error` | L1 | `func_pure_virtual_added` | — |
 | `func_ref_qual_changed` | breaking | `BREAKING` | `error` | L2 | `func_ref_qual_changed` | [case166](examples/case166_ref_qualifier_added.md) |
 | `func_removed` | breaking | `BREAKING` | `error` | L0 | `func_removed` | [case01](examples/case01_symbol_removal.md), [case100](examples/case100_experimental_removed_without_replacement.md), [case104](examples/case104_glibcxx_dual_abi_flip.md), [case107](examples/case107_task_scheduler_init_removed.md), +11 |
-| `func_removed_elf_only` | breaking | `BREAKING` | `error` | L0 | `func_removed_elf_only` | [case182](examples/case182_accidental_export_removed_still_breaking.md), [case217](examples/case217_export_loss_weak_binding_demoted.md), [case218](examples/case218_export_loss_strong_binding_stays_breaking.md), [case59](examples/case59_func_became_inline.md), +2 |
+| `func_removed_elf_only` | breaking | `BREAKING` | `error` | L0 | `func_removed_elf_only` | [case182](examples/case182_accidental_export_removed_still_breaking.md), [case217](examples/case217_export_loss_weak_binding_demoted.md), [case218](examples/case218_export_loss_strong_binding_stays_breaking.md), [case86](examples/case86_tag_struct_renamed.md), +1 |
 | `func_return_changed` | breaking | `BREAKING` | `error` | L1 | `func_return_changed` | [case102](examples/case102_frozen_runtime_signature_changed.md), [case10](examples/case10_return_type.md), [case46](examples/case46_pointer_chain_type_change.md), [case70](examples/case70_flexible_array_member_changed.md), +1 |
 | `func_return_pointee_qualifier_added` | api_break | `API_BREAK` | `warning` | L2 | `func_return_pointee_qualifier_added` | [case211](examples/case211_return_pointee_gained_const.md) |
 | `func_return_pointee_qualifier_changed` | api_break | `API_BREAK` | `warning` | L2 | `func_return_pointee_qualifier_changed` | [case215](examples/case215_return_double_pointer_lost_const.md) |
@@ -348,6 +348,7 @@ One row per `ChangeKind` (422 total). Columns fuse the verdict partition (`check
 | `tag_type_renamed` | api_break | `API_BREAK` | `warning` | L0 | `tag_type_renamed` | [case86](examples/case86_tag_struct_renamed.md) |
 | `tail_padding_reuse_changed` | risk | `COMPATIBLE_WITH_RISK` | `warning` | unspecified | `tail_padding_reuse_changed` | — |
 | `target_dependency_added` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L5 | `target_dependency_added` | [case161](examples/case161_target_dependency_added.md) |
+| `target_isa_changed` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L0 | `target_isa_changed` | — |
 | `template_body_changed` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L4 | `template_body_changed` | [case122](examples/case122_template_signature_uninstantiated.md) |
 | `template_param_default_changed` | api_break | `API_BREAK` | `warning` | L2 | `template_param_default_changed` | — |
 | `template_param_type_changed` | breaking | `BREAKING` | `error` | unspecified | `template_param_type_changed` | — |

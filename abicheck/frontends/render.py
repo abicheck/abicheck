@@ -480,8 +480,13 @@ def _demangled(
     if not envelope.options.demangle:
         return text
     from ..demangle import demangle_text
+    from ..report.markdown_budget import DEMANGLED_NAME_LIMIT
 
-    return demangle_text(text, escape_table_pipes=escape_table_pipes)
+    return demangle_text(
+        text,
+        escape_table_pipes=escape_table_pipes,
+        max_demangled=DEMANGLED_NAME_LIMIT,
+    )
 
 
 _PROJECTIONS: dict[str, Callable[[ReportEnvelope], str]] = {

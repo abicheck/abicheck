@@ -206,6 +206,9 @@ COVERAGE: dict[str, str] = {
     # it replaced the six per-extractor ``extract_from_build`` pools.
     "abicheck.parallel_probe::pool::run_parallel_probes->BudgetedExecutor": "UNCOVERED: environment-matrix probes (--probe-matrix) and the shared L5 clang AST passes; needs a probe matrix or a compile database + clang",
     "abicheck.workflows.dump.header_graph_prefetch::pool::prefetch_header_graph_ast->BudgetedExecutor": _NEEDS_L5,
+    "abicheck.model.target_isa::memoized::parse_producer_target_isa": "UNCOVERED: pure parse of a producer string or note tokens; no reference-mode bypass cell applies. Equivalence is pinned by tests/unit/extract/test_target_isa_producer.py hand-written oracles",
+    "abicheck.model.target_isa::memoized::parse_note_target_isa": "UNCOVERED: pure parse of a producer string or note tokens; no reference-mode bypass cell applies. Equivalence is pinned by tests/unit/extract/test_target_isa_producer.py hand-written oracles",
+    "abicheck.model.target_isa::memoized::target_isa_from_sources": "UNCOVERED: pure parse of a producer string or note tokens; no reference-mode bypass cell applies. Equivalence is pinned by tests/unit/extract/test_target_isa_producer.py hand-written oracles",
 }
 
 _SITES = scan_optimization_sites()

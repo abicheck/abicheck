@@ -84,6 +84,7 @@ _INTERNAL_MODULES = (
     "abicheck.storage.zip_member",
     "abicheck.storage.generation_scope",
     "abicheck.storage.generation_migrations",
+    "abicheck.storage.castxml_array_migration",
     "abicheck.storage.decode_memo",
     "abicheck.storage.cross_process_lock",
     "abicheck.storage.tu_parse_store",

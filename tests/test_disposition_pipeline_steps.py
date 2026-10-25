@@ -36,6 +36,7 @@ class TestDispositionPipeline:
             *("disambiguate_type_symbols", "filter_redundant"),
             "enrich_affected_symbols",
             "attribute_stdlib_embedding",
+            "attribute_target_isa_consequences",
             "detect_internal_leaks",
             "demote_unreachable_internal_churn",
             "detect_cpp_patterns",

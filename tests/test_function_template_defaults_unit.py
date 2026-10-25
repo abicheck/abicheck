@@ -187,9 +187,10 @@ def test_index_maps_the_pattern_declaration_to_its_template_defaults() -> None:
     assert index == {id(pattern): ("int",)}
 
 
-def test_index_leaves_a_template_with_an_unspelled_default_unrecorded() -> None:
+def test_index_marks_a_template_with_an_unspelled_default_as_unrecorded() -> None:
     # A non-type default with no spelled argument is not a value the walk can
-    # read, so the whole pattern is left UNKNOWN instead of recording a guess.
+    # read, so the pattern maps to None (never a partial guess), and its fact
+    # is UNSUPPORTED rather than "not a pattern".
     pattern = {"kind": "FunctionDecl", "name": "f"}
     root = {
         "kind": "FunctionTemplateDecl",
@@ -198,7 +199,12 @@ def test_index_leaves_a_template_with_an_unspelled_default_unrecorded() -> None:
             pattern,
         ],
     }
-    assert function_template_default_index(root) == {}
+    index = function_template_default_index(root)
+    assert index == {id(pattern): None}
+    fact = function_template_defaults_fact(pattern, index)
+    assert fact is not None
+    assert fact.status is FactStatus.UNSUPPORTED
+    assert fact.value is None
 
 
 def test_index_ignores_non_function_children_of_a_template() -> None:
