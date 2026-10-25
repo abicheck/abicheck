@@ -102,7 +102,10 @@ FAMILIES: dict[str, Family] = {
                 "Every cache, memo, fast path, narrowing and parallel fan-out "
                 "produces output identical to the unoptimized serial run."
             ),
-            harness_tests=("tests/test_family_f5_optimization_reference.py",),
+            harness_tests=(
+                "tests/test_family_f5_optimization_reference.py",
+                "tests/test_family_f5_derived_ast_sharing.py",
+            ),
         ),
         Family(
             key="F6",
@@ -434,6 +437,7 @@ _F5 = tuple(
         "concurrency.compound_cache_operation_under_fan_out",
         "concurrency.gc_census_beside_live_thread",
         "concurrency.forked_child_unbounded_reap",
+        "concurrency.caller_local_answer_published_to_shared_acquisition",
         "serialization.pure_projection_mutates_its_own_input",
         "serialization.whole_document_materialised_to_write_it",
         "cache.hit_identity_follows_the_requested_path",

@@ -47,6 +47,7 @@ import multiprocessing
 import pickle
 import sys
 import threading
+import traceback
 from collections.abc import Callable, Sequence
 from typing import Any, TypeVar
 
@@ -123,6 +124,12 @@ def _child(conn: Any, fn: Callable[[], Any]) -> None:
     try:
         payload: tuple[str, Any] = ("ok", fn())
     except BaseException as exc:  # noqa: BLE001 -- forwarded to the parent
+        # A pickled exception loses its traceback, which is the only record
+        # of where in the child it was raised; carry it as a note.
+        exc.add_note(
+            "Raised in the side-resolution child:\n"
+            + "".join(traceback.format_exception(exc)).rstrip()
+        )
         payload = ("err", exc)
     try:
         conn.send(payload)
