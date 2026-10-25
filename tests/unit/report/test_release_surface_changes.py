@@ -241,31 +241,6 @@ def test_one_member_package_reports_the_scalar_compare_entries(tmp_path: Path) -
         assert all(e["library"] == "libcore.so.1" for e in release[group])
 
 
-def test_stored_and_live_folds_agree_over_the_same_member_results() -> None:
-    """Both operands fold their members through one owner. Asserted in-process
-    (the CLI stored path's name pairing is a separate, pre-existing matter):
-    the same ``DiffResult`` projected through a live ``libraries[]`` entry and
-    through a stored ``per_library`` result must give the identical block."""
-    from abicheck.checker import compare
-    from abicheck.report.release_surface_changes import (
-        live_surface_changes,
-        stored_surface_changes,
-    )
-
-    diff = compare(
-        _snap("libcore.so", ["core_a", "core_gone"]),
-        _snap("libcore.so", ["core_a", "core_new"]),
-    )
-    live = live_surface_changes([{"library": "libcore.so", "_diff_result": diff}], None)
-    stored = stored_surface_changes([diff], None)
-
-    assert live == stored
-    assert _entries(live) == {
-        ("libcore.so", "additions", "core_new"),
-        ("libcore.so", "removals", "core_gone"),
-    }
-
-
 def test_markdown_state_table_escapes_pipes_and_line_breaks() -> None:
     """A library name or reason with a pipe or a newline must not change the
     table's columns or rows (CodeRabbit review on #1781)."""

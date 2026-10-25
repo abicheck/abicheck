@@ -53,7 +53,6 @@ from .surface_changes import (
 )
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
-    from ..checker_types import DiffResult
     from ..model.scope_acquisition import MemberAcquisition, ScopeAcquisitionRecord
 
 #: ADR-065's named states for a one-sided library that is *not* a proven
@@ -211,16 +210,6 @@ def live_surface_changes(
         if section is not None:
             sections.append((name, section))
     return release_surface_changes(sections, record, promise)
-
-
-def stored_surface_changes(
-    per_library: Sequence[DiffResult],
-    record: ScopeAcquisitionRecord | None,
-) -> dict[str, object]:
-    """The block for a stored ``BundleFacts`` operand: its per-library results
-    (never stripped), with the acquisition record the scope already resolved."""
-    sections = [(diff.library, compute_surface_changes(diff)) for diff in per_library]
-    return release_surface_changes(sections, record)
 
 
 def _md_cell(value: object) -> str:

@@ -20,16 +20,15 @@ from pathlib import Path
 import pytest
 
 from abicheck.elf_metadata import ElfImport, ElfMetadata, ElfSymbol
+from abicheck.frontends.cli.commands.compare_bundle_facts_release import (
+    stored_document_details,
+)
 from abicheck.model.bundle_facts import BundleFacts
 from abicheck.model.python_facts import PythonApiSurface
 from abicheck.model.snapshot import AbiSnapshot
 from abicheck.project_snapshot_store import (
     DirectoryObjectStore,
     write_project_manifest,
-)
-from abicheck.report.release_stored_scope import (
-    json_scope_fields,
-    scope_terms_for,
 )
 from abicheck.serialization import snapshot_to_dict
 from abicheck.storage.bundle_facts_package import (
@@ -158,7 +157,7 @@ def test_comparison_result_and_report_carry_the_named_fact() -> None:
     expected = {f"member-{k}": k for k in NON_ELF_KINDS}
     assert result.resolution_not_applicable_members == expected
 
-    fields = json_scope_fields(scope_terms_for(result, {}), {}, result)
+    fields = stored_document_details(result, new_is_stored=False)
     assert fields["resolution_not_applicable_members"] == {
         name: {"artifact_kind": kind, "resolution": "not_applicable"}
         for name, kind in sorted(expected.items())
@@ -169,7 +168,7 @@ def test_pure_elf_report_has_no_not_applicable_key() -> None:
     facts = capture_bundle_facts({"libcore.so": _elf_snapshot()})
     result = compare_bundle_from_facts(facts, bundle_snapshot_from_facts(facts), [])
     assert result.resolution_not_applicable_members == {}
-    fields = json_scope_fields(scope_terms_for(result, {}), {}, result)
+    fields = stored_document_details(result, new_is_stored=False)
     assert "resolution_not_applicable_members" not in fields
 
 

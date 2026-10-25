@@ -176,14 +176,12 @@ def _unresolved_member_entries(result: Any) -> list[dict[str, object]]:
 
 def stored_document_details(result: Any, *, new_is_stored: bool) -> dict[str, object]:
     """The stored comparison's own keys beside the live release document: the
-    operand kind, and the members a stored run could not compare, extract or
-    resolve, each named with its reason. Always present, possibly empty, as
-    the stored document has always carried them."""
+    operand kind, the analysis errors, and the members a stored run could not
+    compare, extract or resolve, each named with its reason. The maps the stored
+    document always carried are present, possibly empty; the resolution map was
+    present only when non-empty, and stays so."""
     not_comparable = dict(getattr(result, "not_comparable_members", {}) or {})
-    not_applicable = dict(
-        getattr(result, "resolution_not_applicable_members", {}) or {}
-    )
-    return {
+    details: dict[str, object] = {
         "new_is_stored": new_is_stored,
         "analysis_errors": list(getattr(result, "analysis_errors", []) or []),
         "extraction_failures": dict(getattr(result, "extraction_failures", {}) or {}),
@@ -191,8 +189,13 @@ def stored_document_details(result: Any, *, new_is_stored: bool) -> dict[str, ob
             name: {"kind": kind, "message": message}
             for name, (kind, message) in not_comparable.items()
         },
-        "resolution_not_applicable_members": {
+    }
+    not_applicable = dict(
+        getattr(result, "resolution_not_applicable_members", {}) or {}
+    )
+    if not_applicable:
+        details["resolution_not_applicable_members"] = {
             name: {"artifact_kind": kind, "resolution": "not_applicable"}
             for name, kind in sorted(not_applicable.items())
-        },
-    }
+        }
+    return details
