@@ -63,11 +63,14 @@ def _cv_free(spelling: str) -> str:
 
 def _signature(
     func: Function,
-) -> tuple[str, str, tuple[str, ...], bool | None, bool, str | None]:
+) -> tuple[str, tuple[str, ...], bool | None, bool, str | None]:
+    # The identifier is not compared: the group key is the mangled name, so
+    # same-key records already name one symbol. mingw-w64 declares
+    # ``_swprintf`` as a dllimport alias in ``<wchar.h>`` and implements it
+    # as ``swprintf`` in ``swprintf.inl``; the two identifiers differ.
     # Exception specifications are not mangled, so two same-key records can
     # disagree on them; such a pair is not one entity.
     return (
-        func.name,
         _cv_free(func.return_type),
         tuple(_cv_free(p.type) for p in func.params),
         func.is_variadic,

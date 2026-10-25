@@ -72,10 +72,19 @@ _MINGW_VA_LIST = [
 ]
 
 
+#: mingw-w64 declares ``_swprintf`` as a dllimport alias in ``<wchar.h>`` and
+#: implements it as ``swprintf`` in ``swprintf.inl``: one asm name, two
+#: identifiers, identical signatures.
+_MINGW_ALIAS = [
+    _fn("_swprintf", "_swprintf", "int", "wchar_t*", "const wchar_t*"),
+    _fn("swprintf", "_swprintf", "int", "wchar_t*", "const wchar_t*"),
+]
+
+
 @pytest.mark.parametrize(
     "group",
-    [_GLIBC, _STD_CTOR, _MINGW_VA_LIST],
-    ids=["glibc_cv", "std_ctor", "mingw_va_list"],
+    [_GLIBC, _STD_CTOR, _MINGW_VA_LIST, _MINGW_ALIAS],
+    ids=["glibc_cv", "std_ctor", "mingw_va_list", "mingw_alias"],
 )
 def test_benign_group_keeps_first_declaration_in_any_order(
     group: list[Function], caplog: pytest.LogCaptureFixture
@@ -104,6 +113,13 @@ def test_benign_group_keeps_first_declaration_in_any_order(
             [True, True],
         ),
         ([_fn("h", "_Z1hv", "int"), _fn("h", "_Z1hv", "double")], [True, True]),
+        (  # different identifiers under one key, but the signatures conflict
+            [
+                _fn("_swprintf", "_swprintf", "int", "wchar_t*", "const wchar_t*"),
+                _fn("swprintf", "_swprintf", "int", "wchar_t*", "char*"),
+            ],
+            [True, True],
+        ),
         (  # exception specifications are not mangled: same key, two entities
             [
                 _fn("k", "_Z1kv", "void"),
