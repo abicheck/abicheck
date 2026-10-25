@@ -179,3 +179,40 @@ def test_release_findings_for_render_never_leaks_private_keys() -> None:
         (projected,) = rd.release_findings_for_render([entry], show)
         assert private.isdisjoint(projected)
     assert private <= set(entry)  # the shared input is never mutated
+
+
+@pytest.mark.parametrize("n_bundle", [0, 1])
+def test_stored_document_names_nothing_it_cannot_demangle(n_bundle: int) -> None:
+    stored = json.loads(
+        render_stored_release_json(
+            _live_evaluation(_stored_result([Verdict.BREAKING], n_bundle))
+        )
+    )
+    assert len(stored["bundle_findings"]) == n_bundle
+    assert all("demangled_symbol" not in f for f in stored["bundle_findings"])
+    assert "public_surface_reconciliation" not in stored
+
+
+def test_stored_document_projects_the_stored_reconciliation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from abicheck.report import release_public_surface_section as surface_section
+
+    reconciliation = object()
+    seen: list[object] = []
+
+    class _Projection:
+        def to_dict(self) -> dict[str, object]:
+            return {"evaluated": True}
+
+    def _project(recon: object, **_kw: object) -> _Projection:
+        seen.append(recon)
+        return _Projection()
+
+    monkeypatch.setattr(surface_section, "compute_release_public_surface", _project)
+    result = _stored_result([Verdict.BREAKING], 0)
+    result.public_surface_reconciliation = reconciliation
+    document = rd.stored_release_document(_live_evaluation(result), details={})
+    # Oracle: the reconciliation the stored driver recorded, handed through as is.
+    assert seen == [reconciliation]
+    assert document.to_mapping()["public_surface_reconciliation"] == {"evaluated": True}
