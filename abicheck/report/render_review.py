@@ -9,6 +9,7 @@ from typing import Any
 
 from .disposition_audit import DispositionAudit, render_disposition_audit_lines
 from .result_counts import held_out_note
+from .review_groups import gating_totals
 from .surface_changes import SurfaceChangeSection, render_surface_changes_lines
 
 
@@ -116,10 +117,7 @@ def render_review_digest(digest: ReviewDigest) -> str:
         lines += [f"**Evidence:** {digest.evidence_summary}.", ""]
 
     if digest.review_groups:
-        gating = sum(int(group["gating_findings"]) for group in digest.review_groups)
-        gating_groups = sum(
-            bool(group["gating_findings"]) for group in digest.review_groups
-        )
+        gating, gating_groups = gating_totals(digest.review_groups)
         lines += [
             f"**Review:** {gating} gating finding(s) in {gating_groups} gating "
             f"group(s); {len(digest.review_groups)} retained group(s) total",

@@ -156,7 +156,7 @@ def add_contract_properties(
         contract_relevance_of,
         evaluation_status_of,
     )
-    from ..policy.severity import gate_contribution_for_change
+    from ..policy.gate_contribution import gate_contribution_for_change
 
     relevance = contract_relevance_of(change)
     if relevance is None:

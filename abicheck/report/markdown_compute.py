@@ -448,7 +448,8 @@ def build_markdown_document(
                         policy_file=result.policy_file,
                     )
                     if envelope is None
-                    else envelope.findings_for(changes)
+                    else envelope.findings_for(changes),
+                    severity_config=severity_config,
                 )
             ]
         ),
