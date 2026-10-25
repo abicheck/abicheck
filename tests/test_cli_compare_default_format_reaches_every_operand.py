@@ -190,13 +190,14 @@ def test_an_explicitly_requested_unsupported_format_is_still_a_usage_error(
     The fix for the above is to fall an *unrequested* default back into the
     path's own set. A fallback that also swallowed an explicit request would
     render a different format than the one asked for -- the silent-wrong-
-    artifact failure the restricted-format checks exist to prevent. `sarif`
+    artifact failure the restricted-format checks exist to prevent. `terminal`
     is unsupported by both restricted paths and supported by the single-pair
-    one, so this also pins that the single pair keeps accepting it.
+    one, so this also pins that the single pair keeps accepting it. (`sarif`
+    and `review` are no longer unsupported for a directory/package operand.)
     """
     args = OPERAND_SHAPES[shape](tmp_path)
     result = CliRunner().invoke(
-        main, ["compare", *args, "-o", f"sarif={tmp_path}/out.sarif"]
+        main, ["compare", *args, "-o", f"terminal={tmp_path}/out.txt"]
     )
     if shape == "single_pair":
         assert "is not available" not in result.output
@@ -221,7 +222,9 @@ def test_the_operand_shapes_really_dispatch_differently(tmp_path: Path) -> None:
         sub = tmp_path / shape
         sub.mkdir()
         args = build(sub)
-        result = runner.invoke(main, ["compare", *args, "-o", f"sarif={sub}/out.sarif"])
+        result = runner.invoke(
+            main, ["compare", *args, "-o", f"terminal={sub}/out.txt"]
+        )
         messages.add(result.output.split("Error:")[-1].strip()[:80])
     assert len(messages) >= 2, (
         "the restricted operand paths gave indistinguishable refusals, so "

@@ -100,13 +100,39 @@ def _spellings(document: dict[str, Any]) -> dict[tuple[str, str], str | None]:
 
 def _declared_rewrite(spelling: str, generation: int) -> str:
     """*spelling* after every rewrite a generation above *generation*
-    declares -- an independent whole-word substitution."""
+    declares -- an independent whole-word substitution -- and, below
+    generation 15, castxml's last-index array count read as an element count
+    (the corpus is castxml-dumped; counts inside a template argument list are
+    castxml's own, already correct, spelling)."""
     for introduced in sorted(SPELLING_MIGRATIONS):
         if introduced <= generation:
             continue
         for old, new in SPELLING_MIGRATIONS[introduced].rewrites:
             spelling = re.sub(rf"\b{re.escape(old)}\b", new, spelling)
+    if generation < 15:
+        head, sep, tail = spelling.rpartition(">")
+        tail = re.sub(r"\[(\d+)\]", lambda m: f"[{int(m.group(1)) + 1}]", tail)
+        spelling = head + sep + tail
     return spelling
+
+
+def _declared_extent_shift(old: str, new: str, generation: int) -> bool:
+    """Whether *old* -> *new* is the array-extent growth (``[N]`` ->
+    ``[N + shift]``) a generation above *generation* declared."""
+    shift = sum(
+        change.extent_shift
+        for introduced, change in SPELLING_MIGRATIONS.items()
+        if introduced > generation
+    )
+    if not shift:
+        return False
+    old_parts, new_parts = re.split(r"\[(\d+)\]", old), re.split(r"\[(\d+)\]", new)
+    if len(old_parts) != len(new_parts):
+        return False
+    return all(
+        (a == b) if i % 2 == 0 else int(b) - int(a) in (0, shift)
+        for i, (a, b) in enumerate(zip(old_parts, new_parts, strict=True))
+    )
 
 
 def _undeclared_respellings(
@@ -120,7 +146,12 @@ def _undeclared_respellings(
         if old_s[key] != new_s[key]
         and (
             old_s[key] is None
-            or _declared_rewrite(old_s[key], generation) != new_s[key]
+            or (
+                _declared_rewrite(old_s[key], generation) != new_s[key]
+                and not _declared_extent_shift(
+                    _declared_rewrite(old_s[key], generation), new_s[key], generation
+                )
+            )
         )
     ]
 

@@ -27,7 +27,10 @@ from __future__ import annotations
 from ..model.change import Change
 from ..model.snapshot import AbiSnapshot
 from ..policy.generation_drift_demotion import demote_generation_spelling_drift
-from ..storage.generation_migrations import extractor_generation_of
+from ..storage.generation_migrations import (
+    extractor_generation_of,
+    pending_extent_shift,
+)
 
 __all__ = [
     "demote_cross_generation_drift",
@@ -47,6 +50,16 @@ def operand_extractor_generations(
     )
 
 
+def _extent_generation(snapshot: AbiSnapshot, generation: int) -> int:
+    """The generation whose array extents *snapshot* carries: a castxml
+    snapshot whose extents were already rewritten on load
+    (``storage/castxml_array_migration.py``) owes no extent shift, so a real
+    ``[N]`` -> ``[N + 1]`` resize against it is not demoted as drift."""
+    if snapshot.ast_producer == "castxml" and snapshot.spellings_generation:
+        return max(generation, snapshot.spellings_generation)
+    return generation
+
+
 def demote_cross_generation_drift(
     changes: list[Change], old: AbiSnapshot, new: AbiSnapshot
 ) -> list[Change]:
@@ -57,7 +70,15 @@ def demote_cross_generation_drift(
         return changes
     old_generation, new_generation = operand_extractor_generations(old, new)
     return demote_generation_spelling_drift(
-        changes, old, new, old_generation, new_generation
+        changes,
+        old,
+        new,
+        old_generation,
+        new_generation,
+        extent_shift=pending_extent_shift(
+            _extent_generation(old, old_generation),
+            _extent_generation(new, new_generation),
+        ),
     )
 
 

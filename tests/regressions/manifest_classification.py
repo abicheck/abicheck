@@ -540,6 +540,36 @@ CLASSIFICATION_BUG_CLASSES: tuple[BugClass, ...] = (
         axes={"evidence": ("header", "elf")},
     ),
     BugClass(
+        id="detector.undeclared_export_shrink_silent",
+        invariant=(
+            "In header mode with no declared contract, every default-"
+            "visibility export the old library carried and the new one lost "
+            "is reported as a removal finding, whether or not a public header "
+            "declares it, at any shrink size, for C and C++-mangled names, "
+            "functions and data, versioned or not; the run is BREAKING "
+            "(ADR-063 2026-10-01 amendment, catalog case182). An unchanged "
+            "export set and the loss of hidden-visibility symbols that were "
+            "never exported produce no removal."
+        ),
+        fixed_by=(1308,),
+        seed_tests=(
+            "tests/test_undeclared_export_shrink.py",
+            "tests/test_undeclared_export_shrink_integration.py",
+            "tests/test_abi_surface_direction.py",
+            # F1 harness: header-declaration ablation cell
+            "tests/test_family_f1_evidence_ablation.py",
+        ),
+        public_surfaces=("cli", "json_report"),
+        axes={
+            "evidence": ("header", "elf"),
+            "language": ("c", "c++"),
+            "symbol": ("function", "variable"),
+            "versioning": ("unversioned", "version script"),
+            "header_coverage": ("none declared", "some declared"),
+            "frontend": ("castxml",),
+        },
+    ),
+    BugClass(
         id="detector.removal_from_header_enumeration",
         invariant=(
             "An entity castxml records only while the header instantiates it "
@@ -696,6 +726,43 @@ CLASSIFICATION_BUG_CLASSES: tuple[BugClass, ...] = (
                 "DWARF-style qualified name",
             ),
             "lookup": ("qualified", "unambiguous bare", "ambiguous bare"),
+        },
+    ),
+    BugClass(
+        id="identity.benign_duplicate_declaration_key",
+        invariant=(
+            "A function key declared more than once only in system "
+            "(dependency) headers outside the public set, with signatures "
+            "equal modulo cv-qualification, is one entity: the dump keeps "
+            "exactly its first declaration whatever the order, and indexing "
+            "logs no first-wins duplicate; a same-key group with a member in "
+            "the library's own headers (public, private, or with no public "
+            "set given), or with conflicting signatures or exception "
+            "specifications, is kept and still warns."
+        ),
+        fixed_by=(1797,),
+        seed_tests=(
+            "tests/test_castxml_duplicate_declarations.py",
+            "tests/test_model_warning_hygiene.py",
+            "tests/test_family_f3_identity.py",
+        ),
+        public_surfaces=(),
+        axes={
+            "shape": (
+                "glibc cv overload",
+                "std ctor placeholder",
+                "mingw va_list spelling",
+                "conflicting",
+            ),
+            "provenance": (
+                "system",
+                "mingw-w64 sysroot",
+                "public",
+                "private",
+                "installed library private header",
+                "no public set",
+            ),
+            "frontend": ("castxml",),
         },
     ),
 )

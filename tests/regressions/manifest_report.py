@@ -721,4 +721,57 @@ REPORT_BUG_CLASSES: tuple[BugClass, ...] = (
             )
         },
     ),
+    BugClass(
+        id="report.markdown_size_unbounded_by_finding_count",
+        invariant=(
+            "The Markdown report's size is bounded independently of how many "
+            "non-gating findings the run carries: every list of findings that "
+            "does not gate itemises at most a fixed number of rows and states "
+            "the full count and the JSON field that holds the rest, every "
+            "rendered name is clipped (a bare mangled symbol, the identity, "
+            "far less aggressively than a demangled one), and the "
+            "whole-document demangle pass clips the demangled half it adds "
+            "while keeping the mangled spelling. Bounds come from one shared "
+            "budget (`report/markdown_budget.py`), not per-section caps, and "
+            "machine formats keep every finding."
+        ),
+        # SVS: a byte-identical C++ rebuild rendered 574 KB of Markdown
+        # (785 KB against an older release) -- past a PR comment's 64 KiB --
+        # because Additions, suppressed and not-evaluated findings were
+        # itemised one row each, and the demangle pass grew every clipped
+        # mangled name back into a multi-KB libstdc++ template name.
+        fixed_by=(1751, 1766),
+        seed_tests=(
+            "tests/unit/report/test_markdown_report_budget.py",
+            "tests/unit/report/test_review_group_bounds.py",
+            "tests/unit/report/test_contract_conflicts_markdown_budget.py",
+            "tests/test_report_kind_rollup.py",
+        ),
+        axes={
+            "section": (
+                "hygiene",
+                "deployment_risk",
+                "additions",
+                "not_evaluated",
+                "suppressed",
+                "contract_conflicts",
+                "review_groups",
+                "review_digest",
+            ),
+            "finding_count": ("10", "500", "3000"),
+        },
+        known_gaps=(
+            KnownGap(
+                description=(
+                    "Gating sections (Breaking, Source-Level Breaks, and any "
+                    "section a severity setting raises to `error`) stay "
+                    "itemised by product rule (`report/kind_rollup.py`): a "
+                    "break is always listed. Their rows are clipped, so the "
+                    "report is linear in the number of gating findings with a "
+                    "bounded per-row cost, not bounded outright."
+                ),
+                reference="abicheck/report/kind_rollup.py",
+            ),
+        ),
+    ),
 )

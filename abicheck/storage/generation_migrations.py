@@ -47,6 +47,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
 
+from .castxml_array_migration import migrate_castxml_array_counts
 from .versioning import (
     EXTRACTOR_GENERATION,
     GENERATION_DRIFT_NOTICE_MARKER,
@@ -62,8 +63,10 @@ __all__ = [
     "SPELLING_MIGRATIONS",
     "GenerationSpellingChange",
     "decode_fact_generations",
+    "decode_spellings_generation",
     "encode_fact_generations",
     "extractor_generation_of",
+    "pending_extent_shift",
     "is_placeholder_reason",
     "migrate_and_describe",
     "without_snapshot_generation_notices",
@@ -71,6 +74,13 @@ __all__ = [
 
 #: Top-level snapshot document key holding the producing build's generations.
 FACT_GENERATIONS_KEY = "fact_generations"
+
+#: Key inside :data:`FACT_GENERATIONS_KEY` naming the extractor generation
+#: whose spellings the document already carries, written when a load migrated
+#: an older document and it is saved again. The stamp itself is never
+#: re-dated, so without this a re-saved baseline would be migrated twice
+#: (harmless for a rename, wrong for a count shift).
+SPELLINGS_KEY = "spellings"
 
 #: Prefix of the drift/unstated notice a single-file snapshot's own stamp
 #: raises, so a package reader whose manifest owns the generation can drop it.
@@ -93,10 +103,17 @@ class GenerationSpellingChange:
     *rewrites* maps an old whole-word spelling to the spelling this
     generation writes instead; empty means the generation changed no
     spelling, and *reason* then says why (it must be non-empty either way).
+
+    *extent_shift* is a respelling no load-time rewrite can apply soundly:
+    this generation spells every array extent the older extractor wrote as
+    ``N`` as ``N + extent_shift`` for some, but not all, arrays (a stored
+    snapshot does not say which backend wrote an extent). Comparison demotes
+    a finding whose spellings differ only by that shift instead.
     """
 
     reason: str
     rewrites: tuple[tuple[str, str], ...] = ()
+    extent_shift: int = 0
 
 
 #: Every row's reason cites the commit that introduced the generation and what
@@ -181,9 +198,42 @@ SPELLING_MIGRATIONS: Mapping[int, GenerationSpellingChange] = {
     ),
     15: GenerationSpellingChange(
         "castxml vector types resolve to 'T __attribute__((vector_size(N)))' from the "
-        "clang AST, and castxml arrays spell their element count (max + 1, was max): "
-        "a stored 'T[N-1]' cannot be told apart from a genuine 'T[N-1]', so no rewrite "
-        "is sound and a baseline holding those spellings is re-dumped"
+        "clang AST (a stored unresolved vector cannot be respelled, so a baseline "
+        "holding one is re-dumped), and castxml arrays spell their element count "
+        "(max + 1, was max): castxml_array_migration.py rewrites a castxml "
+        "snapshot's stored 'T[N-1]' to 'T[N]' by provenance on load; for a "
+        "snapshot whose producer is not recorded as castxml, comparison demotes "
+        "the extent shift instead",
+        extent_shift=1,
+    ),
+    16: GenerationSpellingChange(
+        "castxml function types spell their full declarator, 'int (*)(int, int)', "
+        "instead of the opaque 'FunctionType*' tag (extract/headers/castxml/"
+        "type_resolution.py): the stored tag dropped the signature, so no rewrite "
+        "is sound; policy/generation_drift_demotion.py demotes a stored tag "
+        "against a fresh declarator, and a baseline holding callbacks is re-dumped"
+    ),
+    17: GenerationSpellingChange(
+        "clang function-template patterns whose default argument cannot be spelled "
+        "record template_param_defaults_fact as UNSUPPORTED (was absent); no type "
+        "or name spelling changes, so no rewrite is needed -- an older clang "
+        "snapshot simply names no gap for such a pattern"
+    ),
+    18: GenerationSpellingChange(
+        "castxml collapses a same-key function group declared only in system "
+        "headers outside a given public set, whose signatures (and exception "
+        "specification) agree modulo cv -- glibc wcschr/strchr overloads, "
+        "libstdc++ copy ctor beside its converting-template twin -- to its first "
+        "declaration (duplicate_declarations.py): the dropped record was already "
+        "shadowed first-wins by the index, so set membership shrinks and no "
+        "stored type spelling is rewritten. A standalone mingw-w64 CRT "
+        "(<prefix>/<arch>-w64-mingw32/include) now classifies as a system header "
+        "(system_header_layout.py), so its declarations record origin "
+        "system_header where they read unknown or private_header -- an origin "
+        "value, not a type spelling"
+    ),
+    19: GenerationSpellingChange(
+        "DWARF declarations record their declaring file when it is a header, and a dependency-internal presence finding no public declaration reaches is out of contract; no stored type spelling changed, only which declarations carry a location and which findings gate"
     ),
 }
 
@@ -219,9 +269,32 @@ def extractor_generation_of(fact_generations: FactGenerations | None) -> int:
     return fact_generations[0]
 
 
-def encode_fact_generations(generations: FactGenerations) -> dict[str, int]:
+def pending_extent_shift(old_generation: int, new_generation: int) -> int:
+    """The array-extent shift the generations in (*old_generation*,
+    *new_generation*] declared; 0 when none did or the order is reversed."""
+    return sum(
+        change.extent_shift
+        for introduced, change in SPELLING_MIGRATIONS.items()
+        if old_generation < introduced <= new_generation
+    )
+
+
+def encode_fact_generations(
+    generations: FactGenerations, spellings_generation: int | None = None
+) -> dict[str, int]:
     extractor, resolver, source = generations
-    return {"extractor": extractor, "resolver": resolver, "source": source}
+    encoded = {"extractor": extractor, "resolver": resolver, "source": source}
+    if spellings_generation is not None and spellings_generation > extractor:
+        encoded[SPELLINGS_KEY] = spellings_generation
+    return encoded
+
+
+def decode_spellings_generation(document: Mapping[str, Any]) -> int | None:
+    """The generation whose spellings *document* already carries, when a
+    previous load migrated it; ``None`` when it was never migrated."""
+    raw = document.get(FACT_GENERATIONS_KEY)
+    value = raw.get(SPELLINGS_KEY) if isinstance(raw, Mapping) else None
+    return value if isinstance(value, int) and not isinstance(value, bool) else None
 
 
 def decode_fact_generations(document: Mapping[str, Any]) -> FactGenerations:
@@ -329,12 +402,13 @@ def _migrate_spellings(
 
 def migrate_and_describe(
     document: dict[str, Any],
-) -> tuple[dict[str, Any], FactGenerations, tuple[str, ...]]:
+) -> tuple[dict[str, Any], FactGenerations, int | None, tuple[str, ...]]:
     """Read *document*'s generation stamp, apply the spelling migrations its
     extractor generation predates, and describe both as load notices.
 
     Returns the (possibly rewritten, never mutated in place) document, the
-    stated generations, and the notices. Drift is decided by
+    stated generations, the generation whose spellings the returned document
+    carries (``None`` when no migration was due), and the notices. Drift is decided by
     :func:`~.versioning.reader_generation_compatibility` -- the one owner
     every package read uses -- not by a second comparison here.
     """
@@ -358,6 +432,17 @@ def migrate_and_describe(
             f"{GENERATION_DRIFT_NOTICE_MARKER} extractor semantics; "
             "re-dump the baseline"
         )
-    migrated, spelling_notices = _migrate_spellings(document, extractor)
+    previous = decode_spellings_generation(document)
+    spellings = max(extractor, previous or extractor)
+    if previous is not None and spellings > extractor:
+        # Migrated by an earlier load and saved again: the spellings are
+        # already rewritten, but the document still holds them, so say so
+        # exactly as the first load did (a dry run that keeps only notices).
+        notices.extend(migrate_castxml_array_counts(document, extractor)[1])
+    if spellings >= EXTRACTOR_GENERATION:
+        return document, generations, previous, tuple(notices)
+    migrated, spelling_notices = _migrate_spellings(document, spellings)
     notices.extend(spelling_notices)
-    return migrated, generations, tuple(notices)
+    migrated, array_notices = migrate_castxml_array_counts(migrated, spellings)
+    notices.extend(array_notices)
+    return migrated, generations, EXTRACTOR_GENERATION, tuple(notices)

@@ -518,6 +518,7 @@ PROVENANCE_UNVERIFIED = frozenset(
         "wheel_rpath_not_portable",
         "wheel_tag_architecture_mismatch",
         "whole_program_vtables_mode_changed",
+        "target_isa_changed",
         "x86_isa_baseline_raised",
     }
 )

@@ -163,14 +163,23 @@ class TestTheArtifactIsDerived:
             SURFACE.write_text(original, encoding="utf-8")
 
     def test_no_per_shape_subset_is_emitted(self) -> None:
-        """Scope guard. `validate-inputs.sh` also enforces narrower format sets
-        for a directory/package compare and for `--no-baseline`. Those are
-        claims about which renderer a comparison *shape* supports -- ADR-070
-        D1/D2 restriction mirrors, not choice sets -- and emitting them here
-        would dress a mirror up as a derived fact. If a future change wants
-        them derived, that is Phase 2 and needs the mirrors resolved first."""
+        """Scope guard. `validate-inputs.sh` also enforces a narrower format set
+        for `--no-baseline`. That is a claim about which renderer a comparison
+        *shape* supports -- an ADR-070 D1/D2 restriction mirror, not a choice
+        set -- and emitting it here would dress a mirror up as a derived fact.
+        The directory/package set is not a mirror: the release engine itself
+        checks against the same constant (RELEASE_FORMATS), so it is emitted as
+        a named set, not transcribed. If a future change wants the no-baseline
+        subset derived, that is Phase 2 and needs the mirror resolved first."""
         labels = {line.split()[1] for line in _surface_lines()}
-        assert labels == {"compare", "deps-tree", "deps-compare", "dump"}
+        assert labels == {
+            "compare",
+            "deps-tree",
+            "deps-compare",
+            "dump",
+            "release-compare",
+            "stored-bundle-facts",
+        }
 
 
 @pytest.mark.skipif(not VALIDATE.is_file(), reason="validate-inputs.sh not found")

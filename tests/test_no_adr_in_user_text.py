@@ -18,13 +18,18 @@ from __future__ import annotations
 
 import ast
 import re
+import sys
 from pathlib import Path
 
 import _yaml_fast
 import click
 import pytest
 
-ADR_RE = re.compile(r"\bADR[- ]?\d")
+_REPO_DIR = Path(__file__).resolve().parent.parent
+if str(_REPO_DIR / "scripts") not in sys.path:
+    sys.path.insert(0, str(_REPO_DIR / "scripts"))
+from check_no_adr_citations import ADR_CITATION_RE as ADR_RE  # noqa: E402
+
 PACKAGE_ROOT = Path(__file__).resolve().parent.parent / "abicheck"
 
 #: Files whose ADR-citing literals are never shown to a user, with why.

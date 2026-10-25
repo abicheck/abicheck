@@ -41,6 +41,7 @@ from .release_public_surface_section import (
     ReleasePublicSurfaceTerms,
     assemble_release_public_surface,
 )
+from .release_surface_changes import attach_member_surface_changes
 
 if TYPE_CHECKING:
     from ..workflows.release_compare import ReleaseCompareOutcome
@@ -75,6 +76,9 @@ def project_release_outcome(
     the caller asked for; they filter what each library reports, never the
     counts or the verdict.
     """
+    # Each member's surface block is read off its DiffResult before the
+    # projection strips it (schema 2.2, libraries[].surface_changes).
+    attach_member_surface_changes(outcome.library_results)
     worst_verdict = project_release_library_results(
         outcome.library_results,
         outcome.removed_keys,
