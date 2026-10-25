@@ -207,6 +207,12 @@ SPELLING_MIGRATIONS: Mapping[int, GenerationSpellingChange] = {
         "or name spelling changes, so no rewrite is needed -- an older clang "
         "snapshot simply names no gap for such a pattern"
     ),
+    18: GenerationSpellingChange(
+        "clang records Function/Variable.explicit_instantiation_fact from a text "
+        "AST pass (extract/headers/clang/explicit_instantiation.py); no existing "
+        "type, name or fact spelling changes, so no rewrite is needed -- an older "
+        "snapshot names no explicit form and reads as not collected"
+    ),
 }
 
 #: Reasons that say nothing about what was audited; the bump gate refuses them.

@@ -410,6 +410,7 @@ _TYPE_IDENTITY_KEY = "type_identities_fact"
 _RETURN_TYPE_IDENTITY_KEY = "return_type_identities_fact"
 _SPECIALIZATION_KEY = "specialization_declared_fact"
 _TEMPLATE_PARAM_DEFAULTS_KEY = "template_param_defaults_fact"
+_EXPLICIT_INSTANTIATION_KEY = "explicit_instantiation_fact"
 
 
 def _drop_advanced_extraction_status(d: dict[str, Any]) -> None:
@@ -443,10 +444,13 @@ def _drop_uncaptured_type_identities(d: dict[str, Any]) -> None:
         _drop_uncaptured(fn, _RETURN_TYPE_IDENTITY_KEY)
         # Schema v64: written only when a producer recorded the defaults.
         _drop_uncaptured(fn, _TEMPLATE_PARAM_DEFAULTS_KEY)
+        # Schema v65: written only when the clang text pass recorded the kind.
+        _drop_uncaptured(fn, _EXPLICIT_INSTANTIATION_KEY)
         for param in fn.get("params", ()):
             _drop_uncaptured(param, _TYPE_IDENTITY_KEY)
     for var in d.get("variables", ()):
         _drop_uncaptured(var, _TYPE_IDENTITY_KEY)
+        _drop_uncaptured(var, _EXPLICIT_INSTANTIATION_KEY)
     for rec in d.get("types", ()):
         for fld in rec.get("fields", ()):
             _drop_uncaptured(fld, _TYPE_IDENTITY_KEY)
