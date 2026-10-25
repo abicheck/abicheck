@@ -142,6 +142,13 @@ def test_gap_follows_the_scan_result_of_its_own_side(
             True,
         ),
         ("template <class T, int N = (2 > 1)> constexpr int V = N;", True),
+        ("template <class T = int> extern T value;", True),
+        ("template <class T = int> T value;", True),
+        ("template <class T = int> requires (sizeof(T) > 1) using P = T;", True),
+        ("template <class T = int> requires std::is_integral_v<T> using P = T;", True),
+        ("template <class T = int> requires C<T> && (sizeof(T) > 1) T v;", True),
+        ("template <class T = int> requires C<T> void f(T);", False),
+        ("template <class T = int> requires C<T> struct S;", False),
         # No default: not counted, whatever the family.
         ("template <class T> using P = Q<T>;", False),
         ("template <class T> constexpr int V = sizeof(T);", False),

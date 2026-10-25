@@ -136,6 +136,10 @@ def _declares_alias_or_variable(text: str, end: int) -> bool:
     """
     word = _WORD.match(text, len(text) - len(text[end:].lstrip()))
     if word is not None:
+        if word.group() == "requires":
+            return _declares_alias_or_variable(
+                text, _skip_requires_clause(text, word.end())
+            )
         if word.group() == "using":
             return True
         if word.group() in _NOT_ALIAS_OR_VARIABLE:
@@ -157,11 +161,50 @@ def _declares_alias_or_variable(text: str, end: int) -> bool:
             angle = max(angle - 1, 0)
         elif angle:
             continue
-        elif c in "={":
+        elif c in "={;":
+            # ``;`` ends a variable declared without an initializer
+            # (``extern T value;``); a function reached ``(`` first.
             return True
-        elif c == ";":
-            return False
     return False
+
+
+_CONSTRAINT_NAME = re.compile(r"\s*(?:::)?[A-Za-z_][\w:]*")
+_CONSTRAINT_JOIN = re.compile(r"\s*(?:&&|\|\|)")
+
+
+def _skip_balanced(text: str, start: int, open_c: str, close_c: str) -> int:
+    """Index just past the bracket at *start* and its balanced partner."""
+    depth = 0
+    for i in range(start, len(text)):
+        if text[i] == open_c:
+            depth += 1
+        elif text[i] == close_c:
+            depth -= 1
+            if depth == 0:
+                return i + 1
+    return len(text)
+
+
+def _skip_requires_clause(text: str, pos: int) -> int:
+    """Index just past a C++20 ``requires`` clause whose keyword ends at *pos*:
+    primaries (``(expr)`` or ``Concept<T>``/``trait_v<T>``) joined by
+    ``&&``/``||``."""
+    while True:
+        rest = len(text) - len(text[pos:].lstrip())
+        if rest < len(text) and text[rest] == "(":
+            pos = _skip_balanced(text, rest, "(", ")")
+        else:
+            name = _CONSTRAINT_NAME.match(text, pos)
+            if name is None:
+                return pos
+            pos = name.end()
+            after = len(text) - len(text[pos:].lstrip())
+            if after < len(text) and text[after] == "<":
+                pos = _skip_balanced(text, after, "<", ">")
+        join = _CONSTRAINT_JOIN.match(text, pos)
+        if join is None:
+            return pos
+        pos = join.end()
 
 
 def header_declares_alias_or_variable_template_default(text: str) -> bool:
