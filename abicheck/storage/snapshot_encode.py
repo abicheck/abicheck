@@ -519,10 +519,12 @@ def _snapshot_to_dict(snap: AbiSnapshot, encode: Any) -> dict[str, Any]:
     d.pop("load_notices", None)  # runtime-only, as above
     # ADR-062 D2: the producing build's generations, never re-dated on re-save.
     d.pop("fact_generations", None)
+    d.pop("spellings_generation", None)  # folded into the stamp below
     d[FACT_GENERATIONS_KEY] = encode_fact_generations(
         snap.fact_generations
         if snap.fact_generations is not None
-        else this_build_generations(carries_source_facts=snap.build_source is not None)
+        else this_build_generations(carries_source_facts=snap.build_source is not None),
+        snap.spellings_generation if snap.fact_generations is not None else None,
     )
     d.pop("static_archive", None)  # runtime-only, as above (ADR-086)
     d.pop("header_declaration_ids", None)  # runtime-only, depth projection

@@ -31,20 +31,12 @@ ALLOWED_MODEL_WARNINGS: dict[str, str] = {}
 #: ``{regex over one dropped key: reason}`` for the first-wins index warning
 #: (``model.first_wins_index.warn_dropped``). That warning lists every
 #: dropped key in one line, so it is allowed only when *each* key fullmatches
-#: an entry here -- a new colliding name still fails. Found by the
-#: ``catalog/cases`` depth-metamorphic run (case80, case126).
-ALLOWED_FIRST_WINS_KEYS: dict[str, str] = {
-    r"(wcschr|wcsrchr|wcspbrk|wcsstr|wcswcs|wmemchr|strchr|strrchr|strpbrk|strstr|memchr)": (
-        "glibc's C++ <wchar.h>/<string.h> declare const and non-const overloads "
-        "that share one asm name (one symbol, two declarations): a genuine "
-        "duplicate key, and first-wins is the correct resolution"
-    ),
-    r"__abicheck_ctor__std::.*": (
-        "castxml placeholder key for an implicitly-declared std:: template "
-        "constructor, declared once per instantiation context; libstdc++ "
-        "internals, never the library's own surface"
-    ),
-}
+#: an entry here -- a new colliding name still fails. Empty by design: the
+#: glibc cv-overload and libstdc++ ctor-placeholder duplicates the
+#: ``catalog/cases`` depth-metamorphic run found (case80, case126) are now
+#: collapsed at the source
+#: (``extract/headers/castxml/duplicate_declarations.py``).
+ALLOWED_FIRST_WINS_KEYS: dict[str, str] = {}
 
 
 class _Collector(logging.Handler):

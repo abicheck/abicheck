@@ -26,7 +26,7 @@ Its own module rather than another block inside `compare.py` (already at its
 separately-testable rule over one export set and two operand paths, and
 `compare.py`'s job is to dispatch, not to own it. The restricted sets
 themselves stay with the checks that enforce them (`_RELEASE_FORMATS`,
-`STORED_BUNDLE_FACTS_FORMATS`) and are passed in, so this module cannot
+`STORED_RELEASE_FORMATS`) and are passed in, so this module cannot
 form a second opinion about which formats exist.
 """
 

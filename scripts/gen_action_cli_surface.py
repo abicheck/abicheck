@@ -41,7 +41,7 @@ material, and generating it here would dress a mirror up as a derived fact.
 
 The directory/package set (`release-compare`) and the stored-BundleFacts set
 (`stored-bundle-facts`) are emitted, because each is a named constant the CLI
-itself enforces at runtime (`RELEASE_FORMATS`, `STORED_BUNDLE_FACTS_FORMATS`),
+itself enforces at runtime (`RELEASE_FORMATS`, `STORED_RELEASE_FORMATS`),
 not a transcription of a claim. The shell reads the same constant the engine
 checks against.
 
@@ -94,19 +94,16 @@ def _resolve(path: tuple[str, ...]) -> click.Command:
 #: reads, so the Action checks against the same constants the CLI does.
 EMITTED_SETS: tuple[tuple[str, str], ...] = (
     ("release-compare", "RELEASE_FORMATS"),
-    ("stored-bundle-facts", "STORED_BUNDLE_FACTS_FORMATS"),
+    ("stored-bundle-facts", "STORED_RELEASE_FORMATS"),
 )
 
 
 def _declared_sets() -> dict[str, tuple[str, ...]]:
-    from abicheck.report.release_formats import RELEASE_FORMATS
-    from abicheck.workflows.bundle_facts_stored_request import (
-        STORED_BUNDLE_FACTS_FORMATS,
-    )
+    from abicheck.report.release_formats import RELEASE_FORMATS, STORED_RELEASE_FORMATS
 
     sets = {
         "RELEASE_FORMATS": RELEASE_FORMATS,
-        "STORED_BUNDLE_FACTS_FORMATS": STORED_BUNDLE_FACTS_FORMATS,
+        "STORED_RELEASE_FORMATS": STORED_RELEASE_FORMATS,
     }
     return {name: tuple(sorted(values)) for name, values in sets.items()}
 

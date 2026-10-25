@@ -173,3 +173,57 @@ def test_cross_target_dump_keeps_what_the_host_dump_keeps(tmp_path: Path) -> Non
     cross = dump("cross", str(shim / "g++"), str(shim))
     assert "f" in host
     assert cross == host
+
+
+# -- standalone mingw-w64 (C:/mingw64, MSYS2 /mingw64, Strawberry c/) --------
+
+_MINGW_W64_TRIPLES = ("x86_64-w64-mingw32", "i686-w64-mingw32", "aarch64-w64-mingw32")
+_MINGW_PREFIXES = ("C:/mingw64", "D:/msys64/mingw64", "C:/Strawberry/c", "/mingw64")
+#: Triple-shaped names that are not the mingw-w64 triple, under a non-usr
+#: prefix: still project directories.
+_NEAR_MISS = (
+    "aarch64-linux-gnu",
+    "x86_64-pc-mingw32",
+    "x86_64-w64-mingw32x",
+    "my-w64-tool",
+    "w64-mingw32",
+)
+
+
+def _spell(path: str, sep: str) -> str:
+    return path.replace("/", sep)
+
+
+@given(
+    triple=st.sampled_from(_MINGW_W64_TRIPLES),
+    prefix=st.sampled_from(_MINGW_PREFIXES),
+    tail=_TAIL,
+    sep=st.sampled_from(["/", "\\"]),
+    via_gcc=st.booleans(),
+)
+def test_standalone_mingw_w64_crt_is_system_under_any_prefix(
+    triple, prefix, tail, sep, via_gcc
+) -> None:
+    """Oracle: mingw-w64's own layout, ``<prefix>/<triple>/include``, as
+    castxml reports it directly or through ``lib/gcc/<triple>/<ver>/../..``."""
+    root = (
+        f"{prefix}/bin/../lib/gcc/{triple}/15.2.0/../../../../{triple}/include"
+        if via_gcc
+        else f"{prefix}/{triple}/include"
+    )
+    assert is_system_header(_spell("/".join([root, *tail, "wchar.h"]), sep))
+    assert _is_bare_system_dir(_segments(_spell(f"{prefix}/{triple}/include", sep)))
+    assert not _is_bare_system_dir(
+        _segments(_spell(f"{prefix}/{triple}/include/mylib", sep))
+    )
+
+
+@given(
+    name=st.sampled_from(_NEAR_MISS + _PROJECT_NAMES),
+    prefix=st.sampled_from(("/opt", "C:/work/proj", "/home/u/src")),
+    tail=_TAIL,
+)
+def test_only_the_exact_mingw_w64_triple_stands_without_the_usr_anchor(
+    name, prefix, tail
+) -> None:
+    assert not is_system_header("/".join([prefix, name, "include", *tail, "h.h"]))

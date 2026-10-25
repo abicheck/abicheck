@@ -44,10 +44,12 @@ from ....model.identity import entity_id_for_function
 from ...surface_fact_producers import header_ast_surface_facts
 from .calling_convention import source_calling_conventions
 from .context import CastxmlParserContext
+from .duplicate_declarations import collapse_benign_duplicates
 from .location import (
     access_level,
     contract_attributes as _extract_contract_attributes,
     decl_is_public,
+    decl_is_system_dependency,
     deprecation_marker as _deprecation_marker,
     export_match,
     is_builtin_element,
@@ -713,13 +715,18 @@ def parse_function_element(
 
 
 def parse_functions(ctx: CastxmlParserContext) -> list[Function]:
-    funcs: list[Function] = []
+    parsed: list[tuple[Element, Function]] = []
     hidden_friend_owner_by_id = build_hidden_friend_ids(ctx)
     for el in ctx.function_els:
         func = parse_function_element(ctx, el, hidden_friend_owner_by_id)
         if func is not None:
-            funcs.append(func)
-    return funcs
+            parsed.append((el, func))
+    # System headers declare some entities twice under one key (glibc's cv
+    # overloads, libstdc++'s copy ctor + same-signature converting template);
+    # keep one record instead of handing the index a duplicate.
+    return collapse_benign_duplicates(
+        parsed, lambda el: decl_is_system_dependency(ctx, el)
+    )
 
 
 def _contract_attributes_with_source_cc(

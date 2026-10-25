@@ -29,4 +29,6 @@ CHOICE release-compare -o oneline
 CHOICE release-compare -o review
 CHOICE release-compare -o sarif
 CHOICE stored-bundle-facts -o json
+CHOICE stored-bundle-facts -o junit
 CHOICE stored-bundle-facts -o markdown
+CHOICE stored-bundle-facts -o oneline
