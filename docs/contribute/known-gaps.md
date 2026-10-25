@@ -59,6 +59,10 @@ Each entry's status line says what is still open. A PARTIAL entry's write-up als
 
 ### Report and detector coverage
 
+#### case98 release-headers is refused as a profile mismatch since 44473ffcb (2026-10-25)
+
+**Status (2026-10-25): OPEN.** Since #1778 the release-headers compare of case98 returns no verdict (`profile_mismatch`) instead of the documented `NO_CHANGE`; the guard accepts a declared-gap no-verdict row, so the job is green but the change is unruled. [Full write-up](known-gaps/case98-release-headers-is-refused-as-profile-mismatch-since-44473ffcb.md)
+
 #### The `#ifdef` guard census is runtime-only, so stored snapshots fall back to the `sycl::` name rule (2026-10-25)
 
 **Status (2026-10-25): OPEN, deliberate split.** The census of exports declared only under an excluded `#ifdef` (`extract/headers/preprocessor_branches.py`, reported per macro in `coverage_warnings` and `undeclared_export_census.by_guard`, report schema 6.7) is computed from the castxml run's own `-E -dD` output and kept on `AbiSnapshot.live_preprocessor_hidden`, which `storage/snapshot_encode.py` drops. A compare of `abicheck dump` outputs, a stored baseline, a clang-frontend parse and a multi-TU manifest therefore carry no scan and use the `sycl::` name rule only, so a generic `#ifdef FOO` export reads as unattributed there. Persisting it is the follow-up: a new snapshot fact, which needs its `SCHEMA_VERSION` ruling, an `EXTRACTOR_GENERATION` bump with a `SPELLING_MIGRATIONS` row, and a generation-corpus freeze. Also open: the census reads only the ELF export table, and matches an export to a hidden declaration by function name only (no variables, no signature check).
