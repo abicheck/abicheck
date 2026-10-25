@@ -232,6 +232,9 @@ SPELLING_MIGRATIONS: Mapping[int, GenerationSpellingChange] = {
         "system_header where they read unknown or private_header -- an origin "
         "value, not a type spelling"
     ),
+    19: GenerationSpellingChange(
+        "DWARF declarations record their declaring file when it is a header, and a dependency-internal presence finding no public declaration reaches is out of contract; no stored type spelling changed, only which declarations carry a location and which findings gate"
+    ),
 }
 
 #: Reasons that say nothing about what was audited; the bump gate refuses them.
