@@ -219,6 +219,19 @@ SPELLING_MIGRATIONS: Mapping[int, GenerationSpellingChange] = {
         "or name spelling changes, so no rewrite is needed -- an older clang "
         "snapshot simply names no gap for such a pattern"
     ),
+    18: GenerationSpellingChange(
+        "castxml collapses a same-key function group declared only in system "
+        "headers outside a given public set, whose signatures (and exception "
+        "specification) agree modulo cv -- glibc wcschr/strchr overloads, "
+        "libstdc++ copy ctor beside its converting-template twin -- to its first "
+        "declaration (duplicate_declarations.py): the dropped record was already "
+        "shadowed first-wins by the index, so set membership shrinks and no "
+        "stored type spelling is rewritten. A standalone mingw-w64 CRT "
+        "(<prefix>/<arch>-w64-mingw32/include) now classifies as a system header "
+        "(system_header_layout.py), so its declarations record origin "
+        "system_header where they read unknown or private_header -- an origin "
+        "value, not a type spelling"
+    ),
 }
 
 #: Reasons that say nothing about what was audited; the bump gate refuses them.
