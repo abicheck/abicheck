@@ -27,6 +27,7 @@ from abicheck.model import AbiSnapshot, Function, Visibility
 from abicheck.model.elf_facts import ElfMetadata
 from abicheck.report.release_dependency_graph import MAX_GRAPH_NODES
 from abicheck.report.render_release_html import render_release_html
+from abicheck.schemas.release_schema import RELEASE_SCHEMA_VERSION
 from abicheck.serialization import snapshot_to_json
 
 # ── helpers ────────────────────────────────────────────────────────────────
@@ -282,7 +283,7 @@ def test_release_json_records_per_side_dependency_facts(tmp_path: Path) -> None:
     out = tmp_path / "r.json"
     _run("compare", str(old_dir), str(new_dir), "-o", f"json={out}")
     doc = json.loads(out.read_text())
-    assert doc["release_schema_version"] == "2.4"
+    assert doc["release_schema_version"] == RELEASE_SCHEMA_VERSION
     by_name = {m["library"]: m for m in doc["libraries"]}
     checked = 0
     for member, sides in _SPEC.items():

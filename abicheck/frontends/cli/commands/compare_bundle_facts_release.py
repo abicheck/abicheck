@@ -131,6 +131,7 @@ def stored_release_evaluation(
     entries = stored_library_entries(
         result, require_complete_analysis=require_complete_analysis
     )
+    entries.extend(_unresolved_member_entries(result))
     # The per-member steps of the live projection that read each DiffResult,
     # in the live order: the surface block first, then findings and the strip
     # of private keys. The release-level public-surface fold needs the live
@@ -154,27 +155,44 @@ def stored_release_evaluation(
     )
 
 
+def _unresolved_member_entries(result: Any) -> list[dict[str, object]]:
+    """One release entry per member the stored run could not compare
+    (``not_comparable``) or extract (``ERROR``), named with its reason."""
+    entries: list[dict[str, object]] = []
+    not_comparable = dict(getattr(result, "not_comparable_members", {}) or {})
+    for name, (kind, message) in not_comparable.items():
+        entries.append(
+            {
+                "library": name,
+                "verdict": "not_comparable",
+                "not_comparable": {"kind": kind, "message": message},
+            }
+        )
+    failures = dict(getattr(result, "extraction_failures", {}) or {})
+    for name, message in failures.items():
+        entries.append({"library": name, "verdict": "ERROR", "error": message})
+    return entries
+
+
 def stored_document_details(result: Any, *, new_is_stored: bool) -> dict[str, object]:
     """The stored comparison's own keys beside the live release document: the
-    operand kind, and the members a stored run could not compare or resolve,
-    each named with its reason. Present only when active, like every other
-    release key; ``new_is_stored`` always, since it names the operand."""
-    details: dict[str, object] = {"new_is_stored": new_is_stored}
-    failures = dict(getattr(result, "extraction_failures", {}) or {})
-    if failures:
-        details["extraction_failures"] = failures
+    operand kind, and the members a stored run could not compare, extract or
+    resolve, each named with its reason. Always present, possibly empty, as
+    the stored document has always carried them."""
     not_comparable = dict(getattr(result, "not_comparable_members", {}) or {})
-    if not_comparable:
-        details["not_comparable_members"] = {
-            name: {"kind": kind, "message": message}
-            for name, (kind, message) in not_comparable.items()
-        }
     not_applicable = dict(
         getattr(result, "resolution_not_applicable_members", {}) or {}
     )
-    if not_applicable:
-        details["resolution_not_applicable_members"] = {
+    return {
+        "new_is_stored": new_is_stored,
+        "analysis_errors": list(getattr(result, "analysis_errors", []) or []),
+        "extraction_failures": dict(getattr(result, "extraction_failures", {}) or {}),
+        "not_comparable_members": {
+            name: {"kind": kind, "message": message}
+            for name, (kind, message) in not_comparable.items()
+        },
+        "resolution_not_applicable_members": {
             name: {"artifact_kind": kind, "resolution": "not_applicable"}
             for name, kind in sorted(not_applicable.items())
-        }
-    return details
+        },
+    }

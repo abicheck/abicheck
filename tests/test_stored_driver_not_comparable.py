@@ -142,7 +142,10 @@ class TestNotComparableMemberIsRecordedNotRaised:
         assert doc["run_outcome"]["operational"] == "not_comparable"
         assert doc["run_outcome"]["compatibility"] is None
         assert doc["run_outcome"]["scope"] == "incomplete"
-        assert list(doc["libraries"]) == ["libok.so"]
+        assert [entry["library"] for entry in doc["libraries"]] == [
+            "libok.so",
+            "libmix.so",
+        ]
         assert doc["not_comparable_members"]["libmix.so"]["kind"] == "scope_mismatch"
         members = {m["member"]: m for m in doc["comparison_scope"]["members"]}
         assert members["libmix.so"]["state"] == "failed"
@@ -178,7 +181,7 @@ class TestZeroOverlapPairRendersItsScope:
         assert scope["proven_removed"] == ["libold.so"]
         assert scope["proven_added"] == ["libnew.so"]
         assert doc["run_outcome"]["operational"] == "no_comparison_completed"
-        assert doc["libraries"] == {}
+        assert doc["libraries"] == []
 
     def test_markdown_warns_and_exits_1(self, tmp_path: Path) -> None:
         old = tmp_path / "old.bundlefacts.json"

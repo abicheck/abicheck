@@ -65,9 +65,7 @@ class TestStoredBundleMarkdownDemanglesLikeEveryOtherHumanRenderer:
         )
 
     def _render(self, symbol: str, tmp_path: Path) -> str:
-        from abicheck.frontends.cli.commands.compare_bundle_facts import (
-            _render as render_stored,
-        )
+        from tests._stored_render import render_stored
 
         return render_stored(
             self._result(symbol),
@@ -146,10 +144,10 @@ class TestStoredBundleJsonCarriesBothSymbolNames:
         )
 
     def _findings(self, symbol: str, tmp_path: Path) -> list[dict]:
-        from abicheck.frontends.cli.commands.compare_bundle_facts import _render
+        from tests._stored_render import render_stored
 
         payload = json.loads(
-            _render(
+            render_stored(
                 self._result(symbol),
                 "json",
                 old_facts_path=tmp_path / "old.bundlefacts.json",

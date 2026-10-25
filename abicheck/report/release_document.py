@@ -606,6 +606,32 @@ def _stored_release_block(release: ReleaseEvaluation) -> dict[str, object]:
     return block
 
 
+def _add_bundle_demangled_names(
+    block: dict[str, object], release: ReleaseEvaluation
+) -> None:
+    """Carry each bundle finding's demangled name beside its raw symbol, as the
+    stored document always did (a JSON projection; the raw symbol is kept)."""
+    from .change_json import prewarm_change_demangling, resolve_demangled_symbol
+
+    bundle = release.bundle_result
+    rows = block.get("bundle_findings")
+    if bundle is None or not isinstance(rows, list) or not bundle.bundle_findings:
+        return
+    prewarm_change_demangling(
+        type("_Findings", (), {"changes": list(bundle.bundle_findings)})()
+    )
+    names: dict[tuple[object, object], str] = {}
+    for finding in bundle.bundle_findings:
+        demangled = resolve_demangled_symbol(finding)
+        if demangled:
+            names[(finding.kind.value, finding.symbol)] = demangled
+    for row in rows:
+        if isinstance(row, dict):
+            demangled = names.get((row.get("kind"), row.get("symbol")))
+            if demangled:
+                row["demangled_symbol"] = demangled
+
+
 def stored_release_document(
     release: ReleaseEvaluation, *, details: Mapping[str, object] | None = None
 ) -> ReportDocument:
@@ -615,5 +641,6 @@ def stored_release_document(
     ``unavailable`` (see :func:`_stored_release_block`), and the stored run's
     own *details* (operand kind, unresolved members) beside them."""
     block = _stored_release_block(release)
+    _add_bundle_demangled_names(block, release)
     block.update(details or {})
     return ReportDocument.from_mapping(block)
