@@ -48,6 +48,7 @@ from ....model.sided_inputs import compose_sided_paths
 from ....report.comparison_scope import ComparisonScopeTerms, comparison_scope_terms
 from ....report.release_assurance_section import ReleaseAssuranceDecision
 from ....report.release_document import (
+    ReleaseEvaluation,
     StoredReleaseEvaluation,
     build_release_report,
     stored_reported_verdict,
@@ -362,6 +363,20 @@ def dispatch(
 
     scope_terms = comparison_scope_terms(outcome.scope_decision)
     result = outcome.result
+    # One live-shaped evaluation for every format of this run: the receipt is
+    # resolved once, from the same policy flags the stored run was given.
+    release = stored_release_evaluation(
+        result,
+        worst_verdict=stored_reported_verdict(result),
+        old_facts_path=request.old_facts_path,
+        new_dir=request.new_input,
+        scope_terms=scope_terms,
+        assurance_decision=outcome.assurance_decision,
+        require_complete_analysis=bool(
+            outcome.assurance_decision and outcome.assurance_decision.require_complete
+        ),
+        effective_config=_stored_effective_config(kwargs),
+    )
     text = _render(
         result,
         request.fmt,
@@ -370,6 +385,7 @@ def dispatch(
         new_is_stored=new_is_stored,
         scope_terms=scope_terms,
         assurance_decision=outcome.assurance_decision,
+        release=release,
     )
     if request.output is not None:
         _safe_write_output(request.output, text)
@@ -388,6 +404,7 @@ def dispatch(
                 new_is_stored=new_is_stored,
                 scope_terms=scope_terms,
                 assurance_decision=outcome.assurance_decision,
+                release=release,
             ),
         )
     if request.output_dir is not None:
@@ -414,6 +431,23 @@ def dispatch(
     )
 
 
+def _stored_effective_config(kwargs: dict[str, Any]) -> tuple[str, dict[str, str]]:
+    """The receipt a stored run recomputes from the policy flags it was given.
+
+    The stored run has no live fan-out to resolve it from, so it resolves the
+    same baseline receipt ``compare`` states for a single release, from the
+    stored run's own ``--policy``/``--policy-file``/``--suppress``.
+    """
+    from ....cli_compare_receipt import _release_summary_effective_config_block
+
+    return _release_summary_effective_config_block(
+        None,
+        policy=kwargs["policy"],
+        policy_file_path=kwargs.get("policy_file_path"),
+        suppress=kwargs.get("suppress"),
+    )
+
+
 def _render(
     result: Any,
     fmt: str,
@@ -423,32 +457,21 @@ def _render(
     new_is_stored: bool = False,
     scope_terms: ComparisonScopeTerms | None = None,
     assurance_decision: ReleaseAssuranceDecision | None = None,
+    release: ReleaseEvaluation | None = None,
 ) -> str:
-    """Render the stored-operand comparison as *fmt*. ``junit``/``oneline``
-    go through the live release renderer; ``markdown``, else JSON, go through
-    the stored document builder in ``report.release_document``. With no
-    *scope_terms*, the default ``scope.on_incomplete`` policy is applied to
-    *result*'s own scope record."""
+    """Render the stored-operand comparison as *fmt*. ``junit``, ``oneline``
+    and ``html`` go through the live release renderer on *release*; ``markdown``
+    and JSON go through the stored document builder, which carries *release* as
+    its additive ``release`` block. With no *scope_terms*, the default
+    ``scope.on_incomplete`` policy is applied to *result*'s own scope record."""
     if scope_terms is None:
         scope_terms = comparison_scope_terms(
             resolve_scope_decision(getattr(result, "scope_record", None), None)
         )
-    if fmt in ("junit", "oneline"):
-        # The live release renderer, fed the stored comparison's own entries.
-        evaluation = stored_release_evaluation(
-            result,
-            worst_verdict=stored_reported_verdict(result),
-            old_facts_path=old_facts_path,
-            new_dir=new_dir,
-            scope_terms=scope_terms,
-            assurance_decision=assurance_decision,
-            require_complete_analysis=bool(
-                assurance_decision and assurance_decision.require_complete
-            ),
-        )
-        return render_release_text(
-            fmt, build_release_report(evaluation), demangle=False
-        )
+    if fmt in ("junit", "oneline", "html"):
+        if release is None:
+            raise ValueError(f"-o {fmt}= renders the live release evaluation")
+        return render_release_text(fmt, build_release_report(release), demangle=False)
     report = build_release_report(
         StoredReleaseEvaluation(
             result=result,
@@ -457,6 +480,7 @@ def _render(
             scope_terms=scope_terms,
             new_is_stored=new_is_stored,
             assurance_decision=assurance_decision,
+            release=release,
         )
     )
     if fmt == "markdown":
