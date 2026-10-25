@@ -47,6 +47,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
 
+from .castxml_array_migration import migrate_castxml_array_counts
 from .versioning import (
     EXTRACTOR_GENERATION,
     GENERATION_DRIFT_NOTICE_MARKER,
@@ -62,6 +63,7 @@ __all__ = [
     "SPELLING_MIGRATIONS",
     "GenerationSpellingChange",
     "decode_fact_generations",
+    "decode_spellings_generation",
     "encode_fact_generations",
     "extractor_generation_of",
     "pending_extent_shift",
@@ -72,6 +74,13 @@ __all__ = [
 
 #: Top-level snapshot document key holding the producing build's generations.
 FACT_GENERATIONS_KEY = "fact_generations"
+
+#: Key inside :data:`FACT_GENERATIONS_KEY` naming the extractor generation
+#: whose spellings the document already carries, written when a load migrated
+#: an older document and it is saved again. The stamp itself is never
+#: re-dated, so without this a re-saved baseline would be migrated twice
+#: (harmless for a rename, wrong for a count shift).
+SPELLINGS_KEY = "spellings"
 
 #: Prefix of the drift/unstated notice a single-file snapshot's own stamp
 #: raises, so a package reader whose manifest owns the generation can drop it.
@@ -189,9 +198,12 @@ SPELLING_MIGRATIONS: Mapping[int, GenerationSpellingChange] = {
     ),
     15: GenerationSpellingChange(
         "castxml vector types resolve to 'T __attribute__((vector_size(N)))' from the "
-        "clang AST, and castxml arrays spell their element count (max + 1, was max): "
-        "a stored 'T[N-1]' cannot be told apart from a genuine 'T[N-1]', so no rewrite "
-        "is sound and a baseline holding those spellings is re-dumped",
+        "clang AST (a stored unresolved vector cannot be respelled, so a baseline "
+        "holding one is re-dumped), and castxml arrays spell their element count "
+        "(max + 1, was max): castxml_array_migration.py rewrites a castxml "
+        "snapshot's stored 'T[N-1]' to 'T[N]' by provenance on load; for a "
+        "snapshot whose producer is not recorded as castxml, comparison demotes "
+        "the extent shift instead",
         extent_shift=1,
     ),
     16: GenerationSpellingChange(
@@ -251,9 +263,22 @@ def pending_extent_shift(old_generation: int, new_generation: int) -> int:
     )
 
 
-def encode_fact_generations(generations: FactGenerations) -> dict[str, int]:
+def encode_fact_generations(
+    generations: FactGenerations, spellings_generation: int | None = None
+) -> dict[str, int]:
     extractor, resolver, source = generations
-    return {"extractor": extractor, "resolver": resolver, "source": source}
+    encoded = {"extractor": extractor, "resolver": resolver, "source": source}
+    if spellings_generation is not None and spellings_generation > extractor:
+        encoded[SPELLINGS_KEY] = spellings_generation
+    return encoded
+
+
+def decode_spellings_generation(document: Mapping[str, Any]) -> int | None:
+    """The generation whose spellings *document* already carries, when a
+    previous load migrated it; ``None`` when it was never migrated."""
+    raw = document.get(FACT_GENERATIONS_KEY)
+    value = raw.get(SPELLINGS_KEY) if isinstance(raw, Mapping) else None
+    return value if isinstance(value, int) and not isinstance(value, bool) else None
 
 
 def decode_fact_generations(document: Mapping[str, Any]) -> FactGenerations:
@@ -361,12 +386,13 @@ def _migrate_spellings(
 
 def migrate_and_describe(
     document: dict[str, Any],
-) -> tuple[dict[str, Any], FactGenerations, tuple[str, ...]]:
+) -> tuple[dict[str, Any], FactGenerations, int | None, tuple[str, ...]]:
     """Read *document*'s generation stamp, apply the spelling migrations its
     extractor generation predates, and describe both as load notices.
 
     Returns the (possibly rewritten, never mutated in place) document, the
-    stated generations, and the notices. Drift is decided by
+    stated generations, the generation whose spellings the returned document
+    carries (``None`` when no migration was due), and the notices. Drift is decided by
     :func:`~.versioning.reader_generation_compatibility` -- the one owner
     every package read uses -- not by a second comparison here.
     """
@@ -390,6 +416,17 @@ def migrate_and_describe(
             f"{GENERATION_DRIFT_NOTICE_MARKER} extractor semantics; "
             "re-dump the baseline"
         )
-    migrated, spelling_notices = _migrate_spellings(document, extractor)
+    previous = decode_spellings_generation(document)
+    spellings = max(extractor, previous or extractor)
+    if previous is not None and spellings > extractor:
+        # Migrated by an earlier load and saved again: the spellings are
+        # already rewritten, but the document still holds them, so say so
+        # exactly as the first load did (a dry run that keeps only notices).
+        notices.extend(migrate_castxml_array_counts(document, extractor)[1])
+    if spellings >= EXTRACTOR_GENERATION:
+        return document, generations, previous, tuple(notices)
+    migrated, spelling_notices = _migrate_spellings(document, spellings)
     notices.extend(spelling_notices)
-    return migrated, generations, tuple(notices)
+    migrated, array_notices = migrate_castxml_array_counts(migrated, spellings)
+    notices.extend(array_notices)
+    return migrated, generations, EXTRACTOR_GENERATION, tuple(notices)
