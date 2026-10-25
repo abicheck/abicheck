@@ -71,7 +71,7 @@
       "abicheck/extract/headers/castxml/calling_convention.py": "ab4cd4474d11eb0da2216b29393e9daf1dbcf94226204237fd4c0381adacbcbb",
       "abicheck/extract/headers/castxml/context.py": "bd4a6165d45d4fc754f472b4537d9224009493369d9053ae99ff7659cf8d660d",
       "abicheck/extract/headers/castxml/dumper.py": "3d97df75930f3897b4acde5cc9a95d694b0bc6e3ad18cab27848736aa48b1c51",
-      "abicheck/extract/headers/castxml/duplicate_declarations.py": "cb81faa193488add762622ae5559076a5ebd2234b75b5d4edef19cfb1092ee2e",
+      "abicheck/extract/headers/castxml/duplicate_declarations.py": "977b85a15408fa9877b9b686f0bd913af9442e4da5b1d9292975bda7eff424f7",
       "abicheck/extract/headers/castxml/enums.py": "e616c768543061d71812378dd92cbcb7b8d00afbb734bcb7b4b5334ee34042aa",
       "abicheck/extract/headers/castxml/functions.py": "f62f5549a9602089d682c1627d3d2c546ae48a842944735b3cd3ecbb7f867593",
       "abicheck/extract/headers/castxml/hidden_declarations.py": "500abf62faa042e1c33a3ef3897557e263f0c7b1060b60c323d8d34895f5b057",
@@ -162,9 +162,9 @@
       "abicheck/symvers_metadata.py": "372737765cd132e6e87ed891dd465d2958e04debbef774e45212ceb3036871cb",
       "abicheck/type_metadata.py": "9997189de8dac522fd1db8be5ae491d811139503f83abaaded89038eb4aa9cdf"
     },
-    "fingerprint": "da048100a382f99415e89eecfe0e92317203918d8cd391b41c3f9da8d5bcec22",
+    "fingerprint": "db34657c7c1811a630e7d5bca0f1692275ae0a074a3de96c19e2ff7b147a7391",
     "generation": 18,
-    "reason": "G3 ifdef guard census: the castxml backend now also scans which -H header branches its existing -E -dD run excluded and carries the result only on the runtime-only AbiSnapshot.live_preprocessor_hidden (dropped on encode) and inside the header-AST cache document; no persisted snapshot fact or spelling changes"
+    "reason": "G3 runtime-only ifdef guard scan plus the ported #1806 collapse fix (source names no longer compared): no persisted snapshot fact changes; on mingw only a duplicate system-header record the index already discarded is dropped"
   },
   "resolver": {
     "files": {
