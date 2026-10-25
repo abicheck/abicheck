@@ -102,7 +102,7 @@
   "excluded_header_matching": "glob",
   "excluded_header_patterns": [],
   "fact_generations": {
-    "extractor": 21,
+    "extractor": 22,
     "resolver": 2,
     "source": 0
   },
@@ -225,7 +225,7 @@
   "platform": null,
   "python_api": null,
   "python_ext": null,
-  "schema_version": 65,
+  "schema_version": 66,
   "scope_fallback": null,
   "source_mtime": null,
   "source_mtime_epoch": false,
