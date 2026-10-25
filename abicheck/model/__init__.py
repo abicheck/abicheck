@@ -59,6 +59,7 @@ from .entities import (
     record_layout_facts as record_layout_facts,
     resolve_vptr_offset_bits as resolve_vptr_offset_bits,
 )
+from .explicit_instantiation import ExplicitInstantiation as ExplicitInstantiation
 from .extraction_contract import (
     DependencyInfo as DependencyInfo,
     ExtractionContract as ExtractionContract,
@@ -156,6 +157,7 @@ __all__ = [
     "ElfVisibility",
     "EnumMember",
     "EnumType",
+    "ExplicitInstantiation",
     "ExtractionContract",
     "FACT_REGISTRY",
     "Fact",

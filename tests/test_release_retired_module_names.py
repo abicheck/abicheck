@@ -30,14 +30,18 @@ from pathlib import Path
 import pytest
 
 _ROOT = Path(__file__).resolve().parents[1]
-_RETIRED = ("cli_compare_release_helpers", "cli_compare_release_matrix")
+_RETIRED = (
+    "cli_compare_release_helpers",
+    "cli_compare_release_matrix",
+    "cli_compare_release_pairwise",
+)
 _SCANNED = ("abicheck", "action", "scripts", "tests", "architecture")
 _SUFFIXES = {".py", ".yaml", ".yml", ".json", ".md"}
 # A mention is history only when it is labelled ``retired`` right before the
 # name, optionally inside a code span; any other mention is a live reference.
 _LIVE_RE = {
     name: re.compile(rf"(?<!retired )(?<!retired `)(?<!retired ``){re.escape(name)}")
-    for name in ("cli_compare_release_helpers", "cli_compare_release_matrix")
+    for name in _RETIRED
 }
 
 

@@ -162,3 +162,12 @@ _MIN_SCHEMA_VERSION_FOR_TEMPLATE_PARAM_DEFAULTS = 62
 # pre-v64 document carry no key, which reads as NOT_COLLECTED at this version
 # and above.
 _MIN_SCHEMA_VERSION_FOR_FUNCTION_TEMPLATE_PARAM_DEFAULTS = 64
+
+# Schema v65: ``Function.explicit_instantiation_fact`` and
+# ``Variable.explicit_instantiation_fact`` -- whether the old header spelled a
+# template instance explicitly (declaration, definition, or explicit
+# specialization) or it is implicit (absent), read from the clang text AST
+# (extract/headers/clang/explicit_instantiation.py). Written only by a producer
+# that read it; castxml and every pre-v65 document carry no key, which reads as
+# NOT_COLLECTED at this version and above and as unset below.
+_MIN_SCHEMA_VERSION_FOR_EXPLICIT_INSTANTIATION_FACT = 65

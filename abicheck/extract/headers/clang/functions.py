@@ -61,7 +61,7 @@ import re
 from collections.abc import Callable, Mapping
 from typing import Any
 
-from ....model import Fact, Function, Param
+from ....model import ExplicitInstantiation, Fact, Function, Param
 from ....model.identity import (
     canonicalize_type_param_references,
     entity_id_for_function,
@@ -437,6 +437,7 @@ def parse_functions(
     is_cxx: bool = True,
     function_template_defaults: Mapping[int, tuple[str | None, ...] | None]
     | None = None,
+    explicit_facts: Mapping[int, Fact[ExplicitInstantiation]] | None = None,
 ) -> list[Function]:
     funcs: list[Function] = []
     for entry in functions:
@@ -729,6 +730,8 @@ def parse_functions(
                 template_param_defaults_fact=function_template_defaults_fact(
                     entry.node, function_template_defaults
                 ),
+                # Explicit-instantiation kind (explicit_instantiation.py).
+                explicit_instantiation_fact=(explicit_facts or {}).get(id(entry.node)),
                 # ADR-063 Phase 2. `mangled_name` is offered here only when
                 # `raw_mangled` is genuinely present -- NOT when `mangled`
                 # (which may itself be the bare-`name` fallback) is merely

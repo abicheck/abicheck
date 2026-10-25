@@ -519,7 +519,7 @@ def test_compare_request_collapse_versioned_symbols_field_reaches_the_diff(tmp_p
 def test_service_run_compare_shim_forwards_collapse_versioned_symbols(tmp_path):
     """Codex review, fresh evidence: ``workflows.compare.execute.run_compare()``
     -- the single Tier-2 chokepoint the directory/package release fan-out
-    calls per member (``cli_compare_release_pairwise._run_compare_pair`` ->
+    calls per member (retired ``cli_compare_release_pairwise._run_compare_pair`` ->
     ``service.run_compare``), not just the typed ``CompareRequest`` path the
     test above already covers -- had no ``collapse_versioned_symbols``
     parameter at all, so a ``scope.collapse_versioned_symbols: true``

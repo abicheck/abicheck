@@ -25,7 +25,7 @@ observed).
 gaps CodeRabbit's PR #1138 review found in the original wiring: the
 directory/package fan-out (``cli_compare_helpers.run_compare``'s
 ``_dispatch_release_compare`` dispatch, then
-``cli_compare_release_pairwise._run_compare_pair`` ->
+retired ``cli_compare_release_pairwise._run_compare_pair`` ->
 ``service.run_compare``'s own ``public_header_dirs`` keyword) and the
 release fan-out's own "stranded library" fallback (``compare_release_cmd``'s
 ``_resolve_stranded_library`` closure, which builds a ``DumpRequest``/
