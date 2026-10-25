@@ -11,7 +11,7 @@ generated: false
 
 Index: [Known gaps](../known-gaps.md)
 
-**Status (re-verified 2026-10-09 at `456989f`): PARTIAL.** The compat/* modules named in the entry are gone (compat front end removed). Several named nested modules still exist with no architecture/*.yaml mention, e.g. buildsource/build_evidence.py, build_output.py, evidence_policy.py, fact_set.py, merge_support.py, source_graph.py and impact/use_case_impact.py (0 hits).
+**Status (re-verified 2026-10-25): PARTIAL, narrowed.** The compat/* modules are gone. `impact/use_case_impact.py` is deleted (reachability moved to `policy/use_case_reachability.py`), and `buildsource/fact_set.py` and every remaining `impact/*` module (`assessment`, `consumer_graph`, `correlation`, `engine`) are now classified in `architecture/modules.yaml`. Still with no `architecture/*.yaml` entry: `buildsource/build_evidence.py`, `build_output.py`, `evidence_policy.py`, `merge_support.py` and `source_graph.py`.
 
 
 [ADR-061](../adr/061-responsibility-package-architecture.md)'s gap F requires
