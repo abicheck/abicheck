@@ -245,7 +245,7 @@ def _diff_backend_driver_reqs(
     "sycl",
     requires_support=lambda o, n: (
         o.sycl is not None and n.sycl is not None,
-        "missing SYCL metadata",
+        "missing SYCL runtime (PI plugin) metadata; SYCL header APIs are covered by header parsing, not this detector",
     ),
 )
 def _diff_sycl(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:

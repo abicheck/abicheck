@@ -99,7 +99,7 @@ def record_release_resolved_config(result: Any, config: Any) -> None:
     Never calls :func:`~abicheck.contract_context.with_resolved_gate`, unlike
     ``record_resolved_config``: that call needs a resolved gate config
     (exit-code scheme/severity) the release fan-out has no per-library
-    equivalent of yet -- ``cli_compare_release_helpers.apply_release_gate_
+    equivalent of yet -- ``policy.release_gate_options.apply_release_gate_
     pack``'s own docstring already documents that as a separate, deferred
     "GateOptions unification" slice, not something this function should
     reach for on its own.

@@ -64,7 +64,7 @@ scenarios:
       exit_code: 0
     surfaces:
       - cli: compare --suppress
-    validates: UC-WF-compare
+    validates: UC-WF-suppression
     automated: true
     test: test_sc_accept_known_break
 
@@ -84,7 +84,7 @@ scenarios:
     surfaces:
       - cli: compare --acknowledgments
       - action: acknowledgments
-    validates: UC-WF-compare
+    validates: UC-WF-acknowledgment
     automated: true
     test: test_sc_accept_known_break_via_acknowledgments
 
@@ -100,7 +100,7 @@ scenarios:
       - abicheck compare old.json new.json --suppress expired.yaml --config strict.abicheck.yml
     expected:
       exit_code: 1
-    validates: UC-WF-compare
+    validates: UC-WF-suppression
     automated: true
     test: test_sc_suppression_expiry
 
@@ -119,6 +119,26 @@ scenarios:
       strict_exit_code: 2
     surfaces:
       - cli: compare --policy
-    validates: UC-WF-compare
+    validates: UC-WF-policy-profile
     automated: true
     test: test_sc_policy_profile
+
+  - id: SC-CONTRACT-DOMAIN-COVERAGE
+    title: Stating a contract domain makes missing evidence for it visible
+    persona: Library maintainer
+    narrative: >
+      A maintainer declares that the public contract is what the gate judges.
+      A removed public function still breaks (exit 4), and because the
+      snapshots carry no export table, the run also records that coverage of
+      the stated domain is incomplete (contract-coverage exit contribution 1).
+      Without --contract there is no stated domain, so nothing is recorded as
+      missing for it.
+    flow:
+      - abicheck compare old.json new.json --contract public -o json=report.json
+    expected:
+      exit_code: 4
+    surfaces:
+      - cli: compare --contract
+    validates: UC-WF-contract-config
+    automated: true
+    test: test_sc_contract_domain_coverage

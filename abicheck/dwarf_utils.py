@@ -109,6 +109,57 @@ def attr_bool(die: Any, attr: str) -> bool:
     return bool(die.attributes[attr].value)
 
 
+def vector_byte_size(die: Any, element_size: int | None) -> int | None:
+    """Total bytes of a ``DW_AT_GNU_vector`` array DIE.
+
+    A vector DIE usually carries no ``DW_AT_byte_size``: its size is the
+    subrange count times the element size. Returns None when neither the
+    declared size nor a bounded subrange with a known element size is present.
+    """
+    declared = attr_int(die, "DW_AT_byte_size")
+    if declared:
+        return declared
+    for child in die.iter_children():
+        if child.tag != "DW_TAG_subrange_type":
+            continue
+        if "DW_AT_count" in child.attributes:
+            count = attr_int(child, "DW_AT_count")
+        elif "DW_AT_upper_bound" in child.attributes:
+            lower_bound = attr_int(child, "DW_AT_lower_bound")
+            count = attr_int(child, "DW_AT_upper_bound") - lower_bound + 1
+        else:
+            return None
+        return count * element_size if count and element_size else None
+    return None
+
+
+def array_type_spelling(element: str | None, size: int, is_vector: bool) -> str:
+    """Spell a DW_TAG_array_type, distinguishing GCC/Clang vector types.
+
+    A ``DW_AT_GNU_vector`` array is a ``vector_size`` vector: its lane count
+    and vector-ness are part of its identity, so it spells as the source
+    spelling ``T __attribute__((vector_size(N)))`` (``N`` in bytes, the same
+    total size the ``DW_AT_byte_size`` carries). A plain array keeps the
+    ``T[]`` form, which never names its element count.
+    """
+    if is_vector:
+        return f"{element or '?'} __attribute__((vector_size({size or 0})))"
+    if element is None:
+        return "array"
+    return f"{element}[]"
+
+
+def array_type_info(die: Any, inner: tuple[str, int] | None) -> tuple[str, int]:
+    """Name and byte size of a DW_TAG_array_type from its element's (name, size)."""
+    is_vector = "DW_AT_GNU_vector" in die.attributes
+    element_name = inner[0] if inner is not None else None
+    if is_vector:
+        size = vector_byte_size(die, inner[1] if inner is not None else None) or 0
+    else:
+        size = attr_int(die, "DW_AT_byte_size")
+    return (array_type_spelling(element_name, size, is_vector), size)
+
+
 def resolve_die_ref(die: Any, attr_name: str, CU: Any) -> Any:
     """Resolve a DW_AT_type (or similar) reference to the target DIE.
 

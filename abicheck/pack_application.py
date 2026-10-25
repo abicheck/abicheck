@@ -456,10 +456,7 @@ def resolve_bundle_policy_file(
     resolve-then-fold-packs pattern (``_load_suppression_and_policy`` then,
     when a ``--pack`` was resolved, :func:`policy_file_with_packs`) so
     ``bundle_*`` findings honor the same ``--policy``/``--pack`` overrides
-    every other finding kind already does. Lives here rather than in
-    ``cli_compare_release_helpers.py`` because that module -- and its
-    sibling ``cli_compare_release.py`` -- are pinned at a no-growth line-
-    count baseline (``architecture/debt.yaml``, ADR-061); this module isn't.
+    every other finding kind already does. Lives here rather than in the CLI adapter ``cli_compare_release.py``, which is a frontend module and may not own policy composition (ADR-061).
 
     *project_policy_overrides* (ADR-068 §3 #23 / ADR-049 D7, second review
     round) is an already-resolved ``.abicheck.yml`` ``policy.overrides``

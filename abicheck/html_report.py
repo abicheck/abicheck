@@ -29,7 +29,7 @@ No external CSS/JS dependencies — fully self-contained single HTML file.
 from __future__ import annotations
 
 import dataclasses
-from collections.abc import Callable, Iterable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from typing import TYPE_CHECKING, Any, cast
 
 # Page chrome (DOCTYPE/head/stylesheet/body frame, verdict palette, footer) now
@@ -61,13 +61,12 @@ from .report.envelope import ReportEnvelope, resolved_document, resolved_gate
 from .report.finding import (
     active_reclassify_labels,
     effective_bucket,
-    impact_text_for,
     kind_sets_for_result,
 )
-from .report.policy_facts import category, compatibility_metrics, kind_str, severity
+from .report.html_change_rows import compute_full_change_rows
+from .report.policy_facts import compatibility_metrics, kind_str
 from .report.redundancy_reasons import redundancy_reason_text
 from .report.render_html import (
-    ChangeRow,
     ConfidenceData,
     FileMetadataTable,
     GateCardData,
@@ -81,72 +80,11 @@ from .report.render_html import (
     SummaryTableData,
 )
 from .report.render_html_document import render_html_document
+from .report.use_case_impact_render import use_cases_by_finding_for
 from .report.versioning_policy_section import compute_versioning_policy
 
 if TYPE_CHECKING:
     from datetime import date
-
-
-def compute_full_change_rows(
-    changes: Iterable[object],
-    evidence_tiers: Sequence[str] = (),
-) -> tuple[ChangeRow, ...]:
-    """Resolve every fact a changes-table row needs for one change: the four
-    registry-lookup decisions (kind string, category, impact text, ABICC
-    severity band) plus every raw display field `render_changes_table`
-    read directly off a live `Change` before ADR-061 Phase 2 item 1 closed
-    for HTML.
-
-    Building this once per render, rather than reading `Change` attributes
-    mid-render, is what lets that function -- and the whole-document
-    `render_html_document` -- become pure `ReportDocument` projections: a
-    `ChangeRow` is an ordinary, JSON-round-trippable value, so this replaces
-    the previous `id(change)`-keyed `ChangeRowFactsById` lookup table (needed
-    only because `Change` is not hashable) with a plain ordered tuple.
-
-    *evidence_tiers* lets an UNATTRIBUTED finding's impact text carry the
-    same evidence caveat the JSON/Markdown views already do (Codex review).
-    """
-    rows = []
-    for ch in changes:
-        ks = kind_str(ch)
-        relevance = getattr(ch, "contract_relevance", None)
-        assurance = getattr(ch, "contract_assurance", None)
-        decision = getattr(ch, "compatibility_decision", None)
-        rows.append(
-            ChangeRow(
-                kind=ks,
-                category=category(ks),
-                impact=impact_text_for(ch, evidence_tiers),
-                severity=severity(ks),
-                symbol=getattr(ch, "symbol", "") or "",
-                description=getattr(ch, "description", "") or "",
-                old_value=str(getattr(ch, "old_value", "") or ""),
-                new_value=str(getattr(ch, "new_value", "") or ""),
-                source_location=getattr(ch, "source_location", None) or None,
-                affected_symbols=tuple(getattr(ch, "affected_symbols", None) or ()),
-                caused_count=getattr(ch, "caused_count", 0) or 0,
-                contract_relevance=(
-                    str(relevance.value) if relevance is not None else None
-                ),
-                contract_reason_code=(
-                    getattr(ch, "contract_reason_code", None) or None
-                ),
-                contract_assurance=(
-                    str(assurance.value) if assurance is not None else None
-                ),
-                compatibility_decision=(
-                    str(decision.value) if decision is not None else None
-                ),
-                contract_evidence_refs=tuple(
-                    getattr(ch, "contract_evidence_refs", None) or ()
-                ),
-                correlated_change_kind=(
-                    getattr(ch, "correlated_change_kind", None) or None
-                ),
-            )
-        )
-    return tuple(rows)
 
 
 # ---------------------------------------------------------------------------
@@ -618,6 +556,7 @@ def build_html_document(
         not_evaluated=not_evaluated,
         relevance_of=contract_relevance_of,
         evidence_tiers=getattr(result, "evidence_tiers", None) or (),
+        use_cases=use_cases_by_finding_for(result),
     )
 
     empty_state: dict[str, object] | None = None
@@ -805,6 +744,7 @@ def _build_sections_data(
     not_evaluated: list[object] | None = None,
     relevance_of: Callable[[object], object] | None = None,
     evidence_tiers: Sequence[str] = (),
+    use_cases: Mapping[str, tuple[str, ...]] | None = None,
 ) -> list[dict[str, object]]:
     """Build the ordered list of section facts for the native HTML report
     body -- the JSON-shaped counterpart of the pre-split
@@ -838,7 +778,9 @@ def _build_sections_data(
                     "css_class": css_class,
                     "rows": [
                         dataclasses.asdict(row)
-                        for row in compute_full_change_rows(items, evidence_tiers)
+                        for row in compute_full_change_rows(
+                            items, evidence_tiers, use_cases
+                        )
                     ],
                 }
             )

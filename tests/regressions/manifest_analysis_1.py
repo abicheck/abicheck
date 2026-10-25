@@ -331,6 +331,17 @@ ANALYSIS_1_BUG_CLASSES: tuple[BugClass, ...] = (
             # Pinned by name-level, one-for-one pairing across C and C++ shapes.
             "tests/test_inline_removal_dedup.py",
             "tests/test_inline_removal_source_replay_e2e.py",
+            # A removed or retargeted typedef is one observation at two tiers:
+            # the header tier's TYPEDEF_* and the L4 replay's PUBLIC_TYPEDEF_*
+            # differ in kind, so no exact key pairs them. Pinned by one-for-one
+            # qualified-name pairing across C and C++ (nested namespace included).
+            "tests/test_typedef_dedup.py",
+            "tests/test_typedef_source_replay_e2e.py",
+            # A namespace-scope constexpr value change is one observation at two
+            # tiers: CONSTANT_CHANGED (header) and CONSTEXPR_VALUE_CHANGED (L4
+            # replay). Same name-level, one-for-one pairing as the inline pair.
+            "tests/test_constexpr_constant_dedup.py",
+            "tests/test_constexpr_constant_source_replay_e2e.py",
             "tests/unit/compare/test_dedup_key.py",
             "tests/test_diff_namespaces.py",
             # workflows/cross_source_hygiene.py's own per-side OLD/NEW
@@ -350,6 +361,7 @@ ANALYSIS_1_BUG_CLASSES: tuple[BugClass, ...] = (
             # several PYTHONHASHSEED values.
             "tests/test_graph_reconcile_order_invariance.py",
         ),
+        public_surfaces=("cli",),
         # Phase 5's own two originally-tracked gaps here (a compare()-level
         # collision test, and an adversarial generator over the shapes
         # #879's post-mortem named) are now closed -- see PR #905 for the
@@ -365,22 +377,15 @@ ANALYSIS_1_BUG_CLASSES: tuple[BugClass, ...] = (
         known_gaps=(
             KnownGap(
                 description=(
-                    "No seed test for this class reaches a real public "
-                    "surface (a Click invocation or a call through "
-                    "`abicheck.service`, per `BugClass.public_surfaces`'s "
-                    "own contract) with a value-slot collision shape — "
-                    "every one of this entry's `seed_tests` calls "
-                    "`abicheck.checker`/`abicheck.compare.dedup_key`/"
-                    "`abicheck.diff_helpers`/`abicheck.diff_filtering`/"
-                    "`abicheck.diff_namespaces` directly, which this "
-                    "registry treats as internal regardless of how "
-                    "thorough the coverage is at that layer. Not attempted "
-                    "in Phase 5: a CLI (`CliRunner`) or `abicheck.service` "
-                    "-level test proving the same list-valued "
-                    "`PYTHON_STABLE_ABI_VIOLATION` collision case survives "
-                    "into a real `compare`/`scan` invocation's reported "
-                    "output, not just `checker.compare()`'s return value "
-                    "(Codex review, PR #905)."
+                    "No seed test reaches a real public surface with the "
+                    "list-valued value-slot collision shape: the typedef "
+                    "CLI test (`test_typedef_source_replay_e2e.py`) drives "
+                    "`compare` through `CliRunner`, but on typedef findings "
+                    "only. The `PYTHON_STABLE_ABI_VIOLATION` case still "
+                    "needs a `compare`/`scan` invocation proving its "
+                    "collision survives into the reported output, not just "
+                    "`checker.compare()`'s return value (Codex review, PR "
+                    "#905)."
                 ),
                 reference="docs/contribute/plans/bug-class-regression-testing.md#phase-5",
             ),
@@ -653,6 +658,17 @@ ANALYSIS_1_BUG_CLASSES: tuple[BugClass, ...] = (
             "tests/test_header_graph_projection_cache.py",
             "tests/test_source_extractors_clang_ast_shape.py",
             "tests/test_field_added_unknown_polymorphism.py",  # vtables unseen (PDB UNSUPPORTED/FAILED/empty PARTIAL) read as non-polymorphic -> appended field COMPATIBLE
+            # Field report H5: exports whose declarations an undefined #ifdef
+            # (SYCL_LANGUAGE_VERSION) hid from the header parse vanished with
+            # no count; now counted per side, sycl:: as a named cause.
+            # ADR-085 D3: a template-default change whose default no backend
+            # recorded (castxml; an unspellable clang function-template default)
+            # read complete NO_CHANGE; now partial with the gap named.
+            "tests/test_template_default_assurance_gap.py",
+            "tests/test_undeclared_export_census.py",
+            "tests/test_undeclared_sycl_census_integration.py",
+            "tests/test_sycl_stub_parse_integration.py",
+            "tests/test_field_shapes.py",
         ),
         # Only the two consumer-scoping seeds reach a public surface: their integration tests drive `abicheck compare --used-by` end to end.
         public_surfaces=("cli",),

@@ -1,0 +1,22 @@
+{
+  "description": "auto& setters and auto-returning functions: a baseline dumped by an older extractor generation (castxml AutoType spelled 'AutoType&') against a fresh dump of identical source must compare clean with a generation-drift notice, not a false func_return_changed BREAKING.",
+  "field_report": "oneDAL #3693 handover r2, H1",
+  "bug_class": "storage.cross_generation_spelling_drift",
+  "related_tests": [
+    "tests/test_snapshot_generation_migration.py"
+  ],
+  "old_generation": true,
+  "depths": [
+    "headers",
+    "source"
+  ],
+  "expected": "NO_CHANGE",
+  "expected_kinds": [],
+  "expected_absent_kinds": [
+    "func_return_changed",
+    "unspecified_return_now_named"
+  ],
+  "coverage_contains": [
+    "produced under different"
+  ]
+}

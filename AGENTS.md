@@ -20,7 +20,7 @@ branch-specific reference behind a trigger-worded pointer).
 abicheck helps library and package maintainers understand and validate
 API/ABI evolution: it compares two versions of a native library (ELF, PE/COFF,
 Mach-O, plus optional debug info, headers, build data and sources — evidence
-levels L0–L5), classifies every change into one of 422 `ChangeKind`s
+levels L0–L5), classifies every change into one of 423 `ChangeKind`s
 (`BREAKING_KINDS`, `API_BREAK_KINDS`, `COMPATIBLE_KINDS`, `RISK_KINDS`), and
 gates CI on the result while reporting what the evidence could not establish.
 Pure Python, 3.11+. Product direction: [`vision.md`](vision.md); this file owns
@@ -227,7 +227,7 @@ Follow the pointer whose trigger matches your task:
 
 - `AbiSnapshot` (`model/snapshot.py`) — serializable snapshot of a library's ABI surface
 - `DiffResult` (`checker_types.py`) — comparison result: changes, verdict, context
-- `ChangeKind` (`model/change_catalog/kinds.py`, re-exported by `checker_policy.py`) — the 422 change types
+- `ChangeKind` (`model/change_catalog/kinds.py`, re-exported by `checker_policy.py`) — the 423 change types
 - `Verdict` (`checker.py`) — overall result (compatible/source_break/breaking)
 
 ## Adding a new ChangeKind
@@ -237,7 +237,9 @@ Follow the pointer whose trigger matches your task:
    required). Run `python scripts/gen_changekind_stub.py` to regenerate
    `kinds.pyi` (mypy reads the stub).
 2. Add one `ChangeKindMeta` entry (`default_verdict`, non-empty `impact`,
-   optional `description_template`) to the taxonomy module matching the
+   `entity`, `operation`, `contract_subject` — `declaration` only when the
+   finding's subject is a declaration a contract can place, ADR-049's
+   2026-10 amendment — optional `description_template`) to the taxonomy module matching the
    producing detector: `symbols.py` (functions/variables/params/constants),
    `types.py` (records/enums/typedefs/layout/vtables), `platform.py`
    (ELF/PE/Mach-O, DWARF presence, versioning, SYCL), `build.py` (L3, bundle,

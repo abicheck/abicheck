@@ -47,6 +47,7 @@ from typing import Any
 
 from ..model.change import Change
 from .kind_rollup import KindRollup
+from .markdown_budget import NOTE_ITEM_LIMIT, clip, clip_name, more_line, split_items
 
 
 def _contract_decision_text(
@@ -184,11 +185,14 @@ def render_root_cause_section(data: RootCauseSectionData | None) -> list[str]:
     if data is None:
         return []
     lines: list[str] = [f"## Root Causes ({len(data.groups)})", ""]
+    # Every finding stays listed (a root may carry a break); only names and
+    # lines are clipped to the shared Markdown budget.
     for group in data.groups:
         plural = "" if group.count == 1 else "s"
-        lines.append(f"### `{group.root_display}` ({group.count} finding{plural})")
+        root = clip_name(group.root_display)
+        lines.append(f"### `{root}` ({group.count} finding{plural})")
         lines.append("")
-        lines.extend(group.finding_lines)
+        lines.extend(clip(line) for line in group.finding_lines)
         lines.append("")
     return lines
 
@@ -278,11 +282,17 @@ def render_suppression_note(note: SuppressionNote | None) -> list[str]:
     lines.append(
         f"> ℹ️ {note.suppressed_count} change(s) suppressed via suppression file"
     )
-    for entry in note.entries:
-        line = f">   - `{entry.symbol}` — {entry.description}"
+    # Suppressed findings never gate: bounded like any non-gating list.
+    shown, hidden = split_items(note.entries, NOTE_ITEM_LIMIT)
+    for entry in shown:
+        line = f">   - `{clip_name(entry.symbol)}` — {entry.description}"
         if entry.contract_text is not None:
             line += f" [contract: {entry.contract_text}]"
-        lines.append(line)
+        lines.append(clip(line))
+    if (
+        more := more_line(hidden, "suppression.suppressed_changes", prefix=">   - ")
+    ) is not None:
+        lines.append(more)
     return lines
 
 
@@ -481,8 +491,12 @@ def render_environment_drift_section(
         "> environment first.",
         "",
     ]
-    for entry in section.entries:
-        lines.append(f"- **{entry.kind}**: {entry.description}")
+    # Every entry is also itemised (or counted) in its severity section.
+    shown, hidden = split_items(section.entries, NOTE_ITEM_LIMIT)
+    for entry in shown:
+        lines.append(clip(f"- **{entry.kind}**: {entry.description}"))
+    if (more := more_line(hidden, "changes")) is not None:
+        lines.append(more)
     lines.append("")
     return lines
 

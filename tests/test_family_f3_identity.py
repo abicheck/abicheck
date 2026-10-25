@@ -739,3 +739,69 @@ def test_mutant_m7_checkout_prefix_kept_in_path_identity_is_caught(
     monkeypatch.setattr(rrp, "PROJECT_LAYOUT_MARKERS", frozenset())
     relocate = cat.TRANSFORMS_BY_NAME["relocate_checkout"]
     assert any(cat.path_violations(p, relocate) for p in cat._path_probes())
+
+
+def test_parameter_template_args_do_not_join_a_template_family() -> None:
+    """Distinct entities stay distinct: a non-template function whose parameter
+    type is a class template is not a member of a function-template family,
+    and a real family member keeps its finding. The oracle is the hand-written
+    Itanium spelling, not the detector's own name helper."""
+    from abicheck.checker_policy import ChangeKind
+    from abicheck.diff_templates import detect_missing_instantiations
+    from abicheck.model import AbiSnapshot, Function
+
+    def fn(name: str, mangled: str) -> Function:
+        return Function(name=name, mangled=mangled, return_type="void", params=[])
+
+    # _Z5scale3vecIf3abiILi8E2t8EEf: lib::scale(vec<float, abi<8, t8>>, float)
+    # _Z3getIdET_S0_: get<double>
+    old = AbiSnapshot(
+        library="lib",
+        version="1.0",
+        functions=[
+            fn("scale", "_Z5scale3vecIf3abiILi8E2t8EEf"),
+            fn("get<int>", "_Z3getIiET_S0_"),
+            fn("get<double>", "_Z3getIdET_S0_"),
+        ],
+    )
+    new = AbiSnapshot(
+        library="lib",
+        version="1.0",
+        functions=[
+            fn("scale", "_Z5scale3vecIf3abiILi16E3t16EEf"),
+            fn("get<int>", "_Z3getIiET_S0_"),
+        ],
+    )
+    findings = detect_missing_instantiations(old, new)
+    assert [f.symbol for f in findings] == ["_Z3getIdET_S0_"]
+    assert all(f.kind == ChangeKind.INSTANTIATION_MISSING_FROM_BINARY for f in findings)
+
+
+# -- type-index identity (bug class identity.type_index_bare_name_collision) --
+
+
+@pytest.mark.parametrize(
+    "scopes",
+    [
+        ("a", "b", "c"),
+        ("a", "a::inner", "Holder"),
+        ("x::y", "x", "z::y"),
+    ],
+)
+def test_type_index_keys_on_qualified_identity_not_bare_spelling(
+    scopes: tuple[str, ...],
+) -> None:
+    """Header records carry a bare ``name`` and their scope in
+    ``qualified_name``; one bare name in several scopes is several types.
+    Oracle: the scope each record was declared in."""
+    from abicheck.model import AbiSnapshot
+    from abicheck.model.entities import RecordType
+
+    recs = [
+        RecordType(name="Parameter", kind="struct", qualified_name=f"{s}::Parameter")
+        for s in scopes
+    ]
+    snap = AbiSnapshot(library="l.so", version="1", types=recs)
+    for scope, rec in zip(scopes, recs, strict=True):
+        assert snap.type_by_name(f"{scope}::Parameter") is rec
+    assert snap.type_by_name("Parameter") is None

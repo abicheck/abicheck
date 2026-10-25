@@ -137,6 +137,16 @@ _DECLARATION_PROJECTION = (
 )
 
 UNCOVERED: dict[str, str] = {
+    "AbiSnapshot.header_declaration_ids": (
+        "runtime-only L2 ids a header-depth projection keeps when it clears "
+        "surface_graph; never stored, so no stored-corpus ablation reaches it. "
+        "Covered by test_template_instance_absence_shapes.py at both depths"
+    ),
+    "AbiSnapshot.projection_unavailable": (
+        "runtime-only record of the facts a depth projection cleared; never "
+        "stored. Covered by test_depth_detector_input_contract.py at every "
+        "rung"
+    ),
     "RecordType.template_param_defaults_fact": (
         "read only by compare/template_param_defaults, whose unit tests "
         "(test_template_param_defaults.py) cover both recorded, UNKNOWN and "
@@ -823,3 +833,56 @@ def test_ablated_elf_table_never_makes_a_runtime_finding_gate(
         is_runtime_name=toolchain_runtime_name_predicate([snap]),
     )
     assert out.relevance is ContractRelevance.PROVEN_OUT_OF_CONTRACT
+
+
+# Header declaration coverage (bug class
+# ``detector.undeclared_export_shrink_silent``): how many of the lost exports
+# a public header declares is evidence about *contract*, not about *loss*.
+# Ablating the declarations (none, some, all declared) must never change the
+# set of lost exports reported as removals, and the run stays BREAKING.
+@pytest.mark.parametrize("sym_type", ["func", "object"])
+@pytest.mark.parametrize("lost", [1, 5, 40])
+def test_header_declaration_ablation_never_hides_an_export_removal(
+    sym_type: str, lost: int
+) -> None:
+    from abicheck.checker import compare
+    from abicheck.checker_policy import Verdict
+    from abicheck.model import AbiSnapshot, Function, Variable
+    from abicheck.model.elf_facts import ElfMetadata, ElfSymbol, SymbolType
+
+    st = SymbolType.FUNC if sym_type == "func" else SymbolType.OBJECT
+    names = [f"_ZN2ns4lossE{i}" if i % 2 else f"loss_{i}" for i in range(lost)]
+
+    def snap(version: str, exports: list[str], declared: list[str]) -> AbiSnapshot:
+        decls = [n for n in declared if n in exports]
+        funcs = [Function(name="api", mangled="api", return_type="int")]
+        variables: list[Variable] = []
+        if st is SymbolType.FUNC:
+            funcs += [Function(name=n, mangled=n, return_type="int") for n in decls]
+        else:
+            variables = [Variable(name=n, mangled=n, type="int") for n in decls]
+        return AbiSnapshot(
+            library="libx.so",
+            version=version,
+            from_headers=True,
+            functions=funcs,
+            variables=variables,
+            elf=ElfMetadata(
+                machine="x86-64",
+                symbols=[ElfSymbol("api")]
+                + [ElfSymbol(n, sym_type=st) for n in exports],
+            ),
+        )
+
+    removal_kinds = {
+        "func_removed",
+        "func_removed_elf_only",
+        "var_removed",
+        "var_removed_elf_only",
+    }
+    seen = []
+    for declared in ([], names[::2], names):
+        result = compare(snap("1", names, declared), snap("2", [], declared))
+        seen.append({c.symbol for c in result.changes if c.kind.value in removal_kinds})
+        assert result.verdict is Verdict.BREAKING
+    assert seen[0] == seen[1] == seen[2] == set(names)

@@ -27,7 +27,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from .rule_identity import rule_id_of
+from .rule_identity import readable_identity_of, rule_id_of
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from .suppression.rules import Suppression
@@ -56,6 +56,9 @@ class RuleProvenance:
     #: Zero-based position of the rule in its document (P1). In equality, so
     #: two byte-identical entries in one file stay two rules in every tally.
     entry_index: int | None = None
+    #: Canonical JSON identity of an id-less rule; ``None`` when the rule has
+    #: a user ``id:``. Emitted only when set.
+    rule_identity: str | None = None
 
     def to_dict(self) -> dict[str, object]:
         """JSON-safe mapping; ``None`` fields are emitted so the ledger's rows
@@ -69,7 +72,22 @@ class RuleProvenance:
             "intent": self.intent,
             "allow_public_break": self.allow_public_break,
             "entry_index": self.entry_index,
+            **(
+                {}
+                if self.rule_identity is None
+                else {"rule_identity": self.rule_identity}
+            ),
         }
+
+    def readable_name(self) -> str:
+        """``rule_id`` for a reader: a user id as is; an id-less rule's
+        opaque digest followed by its ``label`` when set, else its identity."""
+        rid = self.rule_id or "rule"
+        if self.rule_identity is None:
+            return rid
+        if self.label:
+            return f"{rid} (label: {self.label})"
+        return f"{rid} (identity: {self.rule_identity})"
 
 
 def rule_provenance(
@@ -92,6 +110,7 @@ def rule_provenance(
     reason = getattr(rule, "reason", None)
     return RuleProvenance(
         rule_id=rule_id_of(rule),
+        rule_identity=readable_identity_of(rule),
         source_file=source_file,
         reason=reason,
         label=label,

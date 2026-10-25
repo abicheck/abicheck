@@ -502,7 +502,7 @@ def compare_release_against_bundle_facts(
     # every successfully-resolved member's ELF from disk a second time just
     # to assemble the bundle graph. `build_bundle_snapshot_mixed` is the
     # existing builder for exactly this -- the same call the live release
-    # fan-out makes (`cli_compare_release_helpers._bundle_analysis`) -- and
+    # fan-out makes (`workflows.release_bundle.run_bundle_analysis`) -- and
     # it keeps the documented fallback: a member with no resolved evidence
     # (skipped, degraded, unsupported, failed, or a proven removal/addition
     # that never reached the loop) is still parsed live by

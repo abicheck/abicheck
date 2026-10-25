@@ -229,16 +229,18 @@ def test_plain_function_is_not_a_template_instance() -> None:
     assert [c.kind.value for c in changes] == ["func_removed"]
 
 
-def test_ambiguous_primary_keeps_the_existing_path() -> None:
-    """Two declarations share the primary's spelling (an overload set), so this
-    rule cannot tell which one the instance belonged to."""
+def test_kept_overload_set_is_judged_by_the_export_table() -> None:
+    """Two declarations share the primary's spelling (an overload set) and
+    both are kept: the template is still declared, so the export table
+    decides (H2b). The deleted-overload control lives in
+    ``test_template_instance_absence_shapes.py``."""
     mangled, stem = _KINDS["free_fn_template"]
     changes = _detect(
         mangled,
         new_exports=(),
         stems=((stem, "a"), (stem, "b")),
     )
-    assert [c.kind.value for c in changes] == ["func_removed"]
+    assert [c.kind.value for c in changes] == ["func_visibility_changed"]
 
 
 def test_unread_new_export_table_makes_no_claim() -> None:

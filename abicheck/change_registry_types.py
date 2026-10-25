@@ -36,6 +36,7 @@ from .model.change_catalog.registry import (
     ChangeKindMeta as ChangeKindMeta,
     ChangeKindRegistry as ChangeKindRegistry,
     ChangeOperation as ChangeOperation,
+    ContractSubject as ContractSubject,
     Verdict as Verdict,
     _validate_entry as _validate_entry,
 )

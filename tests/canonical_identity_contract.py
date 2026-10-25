@@ -529,6 +529,9 @@ UNVERIFIED = frozenset(
         "wheel_tag_architecture_mismatch",
         "whole_program_vtables_mode_changed",
         "writable_executable_segment",
+        # old_value/new_value carry the ISA target spellings and feed the identity,
+        # so it varies with value spelling (the same reason as x86_isa_baseline_raised).
+        "target_isa_changed",
         "x86_isa_baseline_raised",
     }
 )

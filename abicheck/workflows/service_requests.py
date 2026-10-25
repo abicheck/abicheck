@@ -180,6 +180,8 @@ class CompareRequest:
     # caller can still see a result but knows not to trust it. Forwarded
     # to ``checker.compare``'s own ``diagnostic_comparison`` parameter.
     diagnostic_comparison: bool = False
+    # ADR-062 D2: refuse a cross-generation pair (workflows/generation_drift).
+    require_same_generation: bool = False
     # ADR-049: classify each finding's contract relevance before
     # compatibility policy, which then scores only IN_CONTRACT/NOT_APPLICABLE
     # findings. On by default since Phase 7, matching the CLI: an

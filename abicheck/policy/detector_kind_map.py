@@ -356,6 +356,7 @@ DETECTOR_KINDS: Mapping[str, frozenset[str]] = MappingProxyType(
         ),
         "symbol_renames": frozenset({"symbol_renamed_batch"}),
         "symbol_version_alias": frozenset({"symbol_version_alias_changed"}),
+        "target_isa": frozenset({"target_isa_changed"}),
         "template_inner_types": frozenset(
             {"template_param_type_changed", "template_return_type_changed"}
         ),
