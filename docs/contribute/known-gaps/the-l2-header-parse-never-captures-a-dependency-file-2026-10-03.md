@@ -11,7 +11,7 @@ generated: false
 
 Index: [Known gaps](../known-gaps.md)
 
-**Status (re-verified 2026-10-09 at `456989f`): OPEN.** depfile_resolved_paths is referenced only inside abicheck/comparability.py:563, and no production caller passes it.
+**Status (re-verified 2026-10-25): OPEN.** `depfile_resolved_paths` is a parameter of `abicheck/comparability.py` (line 314, forwarded at 443) and named in a `header_conditionals.py` docstring; no production caller passes it.
 
 
 Also from Stage E: `compute_extraction_contract`'s `depfile_resolved_paths`

@@ -68,12 +68,6 @@ Each entry's status line says what is still open. A PARTIAL entry's write-up als
 **Status (2026-10-25): OPEN, deliberate split.** The census of exports declared only under an excluded `#ifdef` (`extract/headers/preprocessor_branches.py`, reported per macro in `coverage_warnings` and `undeclared_export_census.by_guard`, report schema 6.7) is computed from the castxml run's own `-E -dD` output and kept on `AbiSnapshot.live_preprocessor_hidden`, which `storage/snapshot_encode.py` drops. A compare of `abicheck dump` outputs, a stored baseline, a clang-frontend parse and a multi-TU manifest therefore carry no scan and use the `sycl::` name rule only, so a generic `#ifdef FOO` export reads as unattributed there. Persisting it is the follow-up: a new snapshot fact, which needs its `SCHEMA_VERSION` ruling, an `EXTRACTOR_GENERATION` bump with a `SPELLING_MIGRATIONS` row, and a generation-corpus freeze. Also open: the census reads only the ELF export table, and matches an export to a hidden declaration by function name only (no variables, no signature check).
 `hygiene` — A stored-snapshot compare under-reports why exports are undeclared; it never fabricates a finding. Owner: `confidence.undeclared_export_censuses`.
 
-#### A large export shrink with no declared surface emits no finding in header mode (2026-10-22)
-
-**Status (2026-10-24): FIXED (no longer reproduces; pinned).** The premise was wrong: header-aware dumps already report each lost undeclared export as `func_removed_elf_only`/`var_removed_elf_only` (`compare.undeclared_exports._export_only_removals`, #1308), BREAKING by default per ADR-063. Now pinned by `tests/test_undeclared_export_shrink.py` and its `_integration` sibling. [Full write-up](known-gaps/a-large-export-shrink-with-no-declared-surface-emits-nothing.md)
-
-CJM: trust stage (docs/contribute/cjm.md) — use case UC-WF-analysis-assurance (G47); priority: L2 Linux ELF.
-
 #### The Markdown "Additions" section is one row per finding, so it grows linearly (2026-10-22)
 
 **Status (2026-10-22): OPEN.** The review-group section is bounded; the per-finding Additions rows are not. [Full write-up](known-gaps/the-additions-markdown-section-is-one-row-per-finding.md)
@@ -133,12 +127,6 @@ current emitter, which is unchanged.
 
 `false-clean` — A default template argument changed on a header-only template reads `NO_CHANGE` on castxml (clang reports `API_BREAK`), and the source-level consequence appears only as an L4 risk on castxml. [Full write-up](known-gaps/a-header-only-default-template-argument-change-reads-no-change-at-l2.md)
 
-#### A binary-gate demotion does not state a coverage gap (ADR-084)
-
-**Status (2026-10-21): FIXED.** A demotion now adds an `analysis_assurance.notes` entry naming each demoted claim (`policy/binary_gate_marker.binary_gate_assurance_notes`, called from `policy/analysis_assurance/_compute.py`), which is a changed analysis-assurance record in the sense `tests/test_family_f1_evidence_ablation.py` requires; the F1 cell `pimpl_inline_body_renamed` / `RecordType.source_header_fact` passes.
-
-CJM: trust stage (docs/contribute/cjm.md) — use case UC-WF-analysis-assurance (G47); priority: L2 Linux ELF.
-
 #### A refused clang AST still leaves the header type pass collected (2026-10-17)
 
 **Status (2026-10-17): OPEN, residual.** A malformed or failed clang AST now degrades the call, override, template, callback and virtual-dispatch passes. The header type pass is still stamped from the snapshot's own declarations (the flat fallback in `header_graph.build_header_only_graph`), so its AST-only edges (`DECL_HAS_TYPE` on parameters and variables, `DECL_REFERENCES_DECL`) read as collected with role coverage unstamped. A real clang parse failure leaves the same state today. Degrading the type pass whenever `ast_failure` is set would close it, but it changes the existing clang-failure behaviour too and needs its own review.
@@ -146,7 +134,7 @@ CJM: trust stage (docs/contribute/cjm.md) — use case UC-WF-analysis-assurance 
 
 #### A `kind: bundle` check still cannot run at `depth: headers`: only the *baseline* half of per-member header staging is wired (2026-09-12)
 
-**Status (re-verified 2026-10-12): OPEN, partly narrowed.** actions/check-target/action.yml:1828 still routes bundle old-library to `steps.resolve.outputs.binaries-dir`, not `member-snapshots-dir`. BUNDLE_CHECK_DEPTHS is unchanged (abicheck/buildsource/project_targets.py:151). The fail-early requirement for `depth: headers` on a bundle is met at input validation, with a corrected reason. So (a) routing and (b) candidate-side per-member headers are still open.  
+**Status (re-verified 2026-10-25): OPEN, partly narrowed.** actions/check-target/action.yml:1832 still routes bundle old-library to `steps.resolve.outputs.binaries-dir`, not `member-snapshots-dir`. BUNDLE_CHECK_DEPTHS is unchanged (binary only, abicheck/buildsource/project_targets.py:144). The fail-early requirement for `depth: headers` on a bundle is met at input validation, with a corrected reason. So (a) routing and (b) candidate-side per-member headers are still open.  
 `false-clean` — Bundle checks can stage per-member *baseline* header snapshots, but the Action still routes the old side to binaries and the candidate side has no per-member headers, so a bundle check cannot run at `depth: headers`. [Full write-up](known-gaps/a-kind-bundle-check-still-cannot-run-at-depth-headers-only-the.md)
 
 #### Header-pass body coverage is one blanket unit, not per body (2026-10-11)
@@ -169,7 +157,7 @@ CJM: trust stage (docs/contribute/cjm.md) — use case UC-WF-analysis-assurance 
 
 #### The castxml L4 source-ABI extractor does not fold the resolved EMULATED compiler's identity into either `fact_set.compiler_version` or the D8 TU cache key — attempted once for the persisted half, and REVERTED after a follow-up review caught it as a real regression, not a fix (Codex review, PR #719, three follow-up rounds)
 
-**Status (re-verified 2026-10-09 at `456989f`): OPEN.** buildsource/source_extractors/castxml.py:700-738 still resolves cc_bin. compiler_version is _castxml_identity_with_stat_fallback(self.castxml_bin), and the comment at line 734 says a `cc_bin --version` probe is still future work.  
+**Status (re-verified 2026-10-25): OPEN.** buildsource/source_extractors/castxml.py still resolves cc_bin. compiler_version is _castxml_identity_with_stat_fallback(self.castxml_bin) (line 723), and the comment at line 719 says a `cc_bin --version` probe is still future work.  
 `false-clean` — The castxml L4 extractor's persisted `compiler_version` and TU cache key omit the emulated compiler's identity, so changing that compiler can reuse stale facts. One attempted fix was a regression and was reverted. [Full write-up](known-gaps/the-castxml-l4-source-abi-extractor-does-not-fold-the-resolved.md)
 
 #### `advanced_facts_collected` infers "advanced DWARF extraction ran" from its output rather than recording it
@@ -187,9 +175,9 @@ CJM: trust stage (docs/contribute/cjm.md) — use case UC-WF-analysis-assurance 
 `false-clean` — `depfile_args_from_argv`'s `trusted_root` has no production caller, so `@file` tokens are dropped, and the L2 header parse never writes a dependency file, so `depfile_resolved_paths` is never fed.
 
 - [`depfile_args_from_argv()`'s `trusted_root` parameter — the self-jail vulnerability is closed, real production wiring not implemented](known-gaps/depfile-args-from-argvs-trusted-root-parameter-the-self-jail.md)  
-  **Status (re-verified 2026-10-09 at `456989f`): OPEN.** grep finds no `trusted_root=` argument at any production call site; only buildsource/include_graph.py defines the parameter (lines 119-216), so production callers still drop the @file token.
+  **Status (re-verified 2026-10-25): OPEN.** grep finds no `trusted_root=` argument at any production call site; only buildsource/include_graph.py defines the parameter (lines 119-216), so production callers still drop the @file token.
 - [The L2 header parse never captures a dependency file (2026-10-03)](known-gaps/the-l2-header-parse-never-captures-a-dependency-file-2026-10-03.md)  
-  **Status (re-verified 2026-10-09 at `456989f`): OPEN.** depfile_resolved_paths is referenced only inside abicheck/comparability.py:563, and no production caller passes it.
+  **Status (re-verified 2026-10-25): OPEN.** `depfile_resolved_paths` is a parameter of `abicheck/comparability.py` (line 314, forwarded at 443) and named in a `header_conditionals.py` docstring; no production caller passes it.
 
 #### `Param.is_va_list` (G31 Phase C continued) inherits the toolchain- identity-probe gap above, rather than being a new problem
 
@@ -206,23 +194,23 @@ CJM: trust stage (docs/contribute/cjm.md) — use case UC-WF-analysis-assurance 
 `false-clean` — `requires`-constrained overloads with the same signature share one `EntityId`, and an out-of-line member template definition gets a different `EntityId` scope from its in-class declaration in the header parser.
 
 - [Two function/method template overloads distinguished only by a `requires`-clause still collide under ADR-063 Phase 2's `EntityId` discriminator (Codex review, PR #943, fresh evidence)](known-gaps/two-functionmethod-template-overloads-distinguished-only-by-a.md)  
-  **Status (re-verified 2026-10-09 at `456989f`): OPEN.** abicheck/buildsource/template_graph.py:102-122 still defers CONSTRAINT_DEPENDS_ON_DECL and says requires-constrained overloads with the same signature collide. abicheck/extract/headers/clang has no ConceptSpecializationExpr handling.
+  **Status (re-verified 2026-10-25): OPEN.** abicheck/buildsource/template_graph.py:102-122 still defers CONSTRAINT_DEPENDS_ON_DECL and says requires-constrained overloads with the same signature collide. abicheck/extract/headers/clang has no ConceptSpecializationExpr handling.
 - [Out-of-line member template definition gets a different EntityId scope than its in-class declaration (header parser; template_graph fixed)](known-gaps/out-of-line-member-template-definition-gets-a-different.md)  
-  **Status (re-verified 2026-10-09 at `456989f`): PARTIAL.** The template_graph half is fixed: abicheck/buildsource/template_graph.py:1207-1211 uses parentDeclContextId. No parentDeclContextId use exists in dumper_clang.py (_ClangAstParser at :743) or in extract/headers/clang, so the EntityId scope split is still present.
+  **Status (re-verified 2026-10-25): PARTIAL.** The template_graph half is fixed: abicheck/buildsource/template_graph.py uses parentDeclContextId (its only use in `abicheck/`). No parentDeclContextId use exists in dumper_clang.py or in extract/headers/clang, so the EntityId scope split is still present.
 
 #### Dependency static/dynamic linking-mode change has no ChangeKind
 
-**Status (re-verified 2026-10-09 at `456989f`): OPEN.** docs/contribute/abi-taxonomy-coverage.md:177 still lists dependency-abi.linking-mode-change as NOT_IMPLEMENTED, and no ChangeKind containing linking_mode exists in abicheck/model/change_catalog.  
+**Status (re-verified 2026-10-25): OPEN.** docs/contribute/abi-taxonomy-coverage.md:177 still lists dependency-abi.linking-mode-change as NOT_IMPLEMENTED, and no ChangeKind containing linking_mode exists in abicheck/model/change_catalog.  
 `false-clean` — A dependency switching between static and dynamic linking has no `ChangeKind` (`dependency-abi.linking-mode-change` is NOT_IMPLEMENTED). [Full write-up](known-gaps/dependency-staticdynamic-linking-mode-change-has-no-changekind.md)
 
 #### AArch64 AAPCS64 by-value aggregate passing is not modeled
 
-**Status (re-verified 2026-10-09 at `456989f`): OPEN.** abicheck/dwarf_advanced.py:885-893 models only SysV AMD64 (_SYSV_AMD64_RETURN_ARCHES), and its comment says an AArch64 HFA flip is just a generic value-ABI change.  
+**Status (re-verified 2026-10-25): OPEN.** abicheck/dwarf_advanced.py:893-899 models only SysV AMD64 (_SYSV_AMD64_RETURN_ARCHES), and its comment says an AArch64 HFA flip is just a generic value-ABI change.  
 `false-clean` — By-value aggregate passing is modelled only for SysV AMD64; an AArch64 HFA/HVA flip reads as a generic value-ABI change or not at all. [Full write-up](known-gaps/aarch64-aapcs64-by-value-aggregate-passing-is-not-modeled.md)
 
 #### A resolved PDB/DWP/dSYM artifact reaches no dump path
 
-**Status (re-verified 2026-10-09 at `456989f`): OPEN.** abicheck/dumper.py:1089 _dump_pe has no debug_roots parameter, and dwp_path/dsym_path are referenced only in extract/debug_artifact.py (no dump consumer). The directory form still resolves PDB/DWP/dSYM artifacts that are then dropped.  
+**Status (re-verified 2026-10-25): OPEN.** `abicheck/dumper.py:1051` `_dump_pe` has no debug_roots parameter, and `dwp_path`/`dsym_path` are set only by `debug_resolver.py` and read only by `extract/debug_artifact.py`'s description (no dump consumer). The directory form still resolves PDB/DWP/dSYM artifacts that are then dropped.  
 `false-clean` — The directory form resolves PDB/DWP/dSYM artifacts, but no dump path consumes them, so the debug evidence is dropped. [Full write-up](known-gaps/a-resolved-pdbdwpdsym-artifact-reaches-no-dump-path.md)
 
 #### A labelled side-scoped `--include` appeared to suppress unlabelled global include roots
@@ -480,7 +468,7 @@ Do not re-attempt token-claiming. A header's export tokens cannot tell whether i
 
 #### Retired `--crosscheck` promotion axis still serialized in ExitDecision and read by action/run.sh
 
-**Status (re-verified 2026-10-09 at `456989f`): PARTIAL.** The engine half is gone: scan_engine.py/cli_scan*.py are deleted, policy/exit_decision.py:147-154 marks PROMOTED_CROSSCHECK a read-only retired producer, and resolve_exit_decision no longer takes it. Residue: ExitDecision still serializes crosscheck_promotion_contribution (exit_decision.py:322,435; compare_report.schema.json:2058) and action/run.sh:5125,5183-5191 still reads promoted_crosscheck.  
+**Status (re-verified 2026-10-09 at `456989f`): PARTIAL.** The engine half is gone: scan_engine.py/cli_scan*.py are deleted, policy/exit_decision.py:147-154 marks PROMOTED_CROSSCHECK a read-only retired producer, and resolve_exit_decision no longer takes it. Residue: ExitDecision still serializes crosscheck_promotion_contribution (exit_decision.py:327,442) and action/run.sh still reads promoted_crosscheck (re-verified 2026-10-25).  
 `hygiene` — The `--crosscheck` engine is gone, but `ExitDecision` still serializes `crosscheck_promotion_contribution` and `action/run.sh` still reads `promoted_crosscheck`. [Full write-up](known-gaps/retired-crosscheck-promotion-axis-still-serialized-in.md)
 
 #### SARIF suppression justification carries only the display label, not the full disposition record
@@ -500,8 +488,8 @@ Do not re-attempt token-claiming. A header's export tokens cannot tell whether i
 
 #### ADR-061 gap F: nested `buildsource`/`impact` modules still carry no disposition
 
-**Status (re-verified 2026-10-09 at `456989f`): PARTIAL.** The compat/* modules named in the entry are gone (compat front end removed). Several named nested modules still exist with no architecture/*.yaml mention, e.g. buildsource/build_evidence.py, build_output.py, evidence_policy.py, fact_set.py, merge_support.py, source_graph.py and impact/use_case_impact.py (0 hits).  
-`hygiene` — Several nested `buildsource/` and `impact/` modules (e.g. `build_evidence.py`, `fact_set.py`, `impact/use_case_impact.py`) have no ADR-061 disposition in `architecture/*.yaml`. [Full write-up](known-gaps/adr-061-gap-f-nested-buildsourceimpact-modules-still-carry-no.md)
+**Status (re-verified 2026-10-25): PARTIAL, narrowed.** The compat/* modules are gone. `impact/use_case_impact.py` is deleted (reachability moved to `policy/use_case_reachability.py`), and `buildsource/fact_set.py` and every remaining `impact/*` module (`assessment`, `consumer_graph`, `correlation`, `engine`) are now classified in `architecture/modules.yaml`. Still with no `architecture/*.yaml` entry: `buildsource/build_evidence.py`, `build_output.py`, `evidence_policy.py`, `merge_support.py` and `source_graph.py`.  
+`hygiene` — Five nested `buildsource/` modules (`build_evidence.py`, `build_output.py`, `evidence_policy.py`, `merge_support.py`, `source_graph.py`) have no ADR-061 disposition in `architecture/*.yaml`. [Full write-up](known-gaps/adr-061-gap-f-nested-buildsourceimpact-modules-still-carry-no.md)
 
 #### `internal_leak` is now four `compare/` modules, but its test module is still grandfathered above the test cap (ADR-061 migration, 2026-10-22)
 

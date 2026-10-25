@@ -11,7 +11,7 @@ generated: false
 
 Index: [Known gaps](../known-gaps.md)
 
-**Status (re-verified 2026-10-09 at `456989f`): PARTIAL.** The template_graph half is fixed: abicheck/buildsource/template_graph.py:1207-1211 uses parentDeclContextId. No parentDeclContextId use exists in dumper_clang.py (_ClangAstParser at :743) or in extract/headers/clang, so the EntityId scope split is still present.
+**Status (re-verified 2026-10-25): PARTIAL.** The template_graph half is fixed: abicheck/buildsource/template_graph.py uses parentDeclContextId (its only use in `abicheck/`). No parentDeclContextId use exists in dumper_clang.py or in extract/headers/clang, so the EntityId scope split is still present.
 
 `struct A { template<class T> void f(T); }; template
 <class T> void A::f(T) {}` -- confirmed by direct compilation

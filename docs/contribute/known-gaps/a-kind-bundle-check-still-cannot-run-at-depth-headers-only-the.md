@@ -11,7 +11,7 @@ generated: false
 
 Index: [Known gaps](../known-gaps.md)
 
-**Status (re-verified 2026-10-12): OPEN, partly narrowed.** actions/check-target/action.yml:1828 still routes bundle old-library to `steps.resolve.outputs.binaries-dir`, not `member-snapshots-dir`. BUNDLE_CHECK_DEPTHS is unchanged (abicheck/buildsource/project_targets.py:151). (b)'s fail-early requirement is met: `actions/check-target/validate-inputs.sh` rejects `requested-depth: headers` for `kind: bundle` at input validation, before any tool runs, and the message now names the real remaining blockers instead of the retired "no historical header snapshot" reason (pinned by `tests/test_action_check_target.py::TestValidateInputs::test_bundle_kind_rejects_headers_depth`). (a) routing and the candidate-side per-member header selection are still open; see "Why (a) was not routed in this pass" below.
+**Status (re-verified 2026-10-25): OPEN, partly narrowed.** actions/check-target/action.yml:1832 still routes bundle old-library to `steps.resolve.outputs.binaries-dir`, not `member-snapshots-dir`. BUNDLE_CHECK_DEPTHS is unchanged (binary only, abicheck/buildsource/project_targets.py:144). (b)'s fail-early requirement is met: `actions/check-target/validate-inputs.sh` rejects `requested-depth: headers` for `kind: bundle` at input validation, before any tool runs, and the message now names the real remaining blockers instead of the retired "no historical header snapshot" reason (pinned by `tests/test_action_check_target.py::TestValidateInputs::test_bundle_kind_rejects_headers_depth`). (a) routing and the candidate-side per-member header selection are still open; see "Why (a) was not routed in this pass" below.
 
 
 `abicheck/buildsource/bundle_member_snapshots.py` now resolves and stages
