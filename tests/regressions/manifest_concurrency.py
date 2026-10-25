@@ -237,4 +237,34 @@ CONCURRENCY_BUG_CLASSES: tuple[BugClass, ...] = (
             "propagation": ("direct", "pool", "uncarried"),
         },
     ),
+    BugClass(
+        id="concurrency.caller_local_answer_published_to_shared_acquisition",
+        invariant=(
+            "A request's AST acquisition table serves one value per key to "
+            "every consumer, so a producer's result may be published only "
+            "if it is a value of the key alone. A result shaped by the "
+            "leading caller's own context -- the derived-AST scope's "
+            "superseded marker, which tells only the header-graph attach "
+            "that it took a stored projection instead of the tree -- must "
+            "reach that caller and nobody else: a waiter re-acquires, and "
+            "a later caller of the key finds no entry. Whichever consumer "
+            "arrives first, and whether it runs in this process or in a "
+            "forked side child, a consumer that needs the tree gets a "
+            "tree equal to what a scope-free producer builds, and the "
+            "derived consumer still gets its derived form."
+        ),
+        # `compare` with `--build-info` on an xvec-based library crashed in
+        # the forked side child with `'object' object has no attribute
+        # 'get'`: the header-graph prefetch led the clang key, its scope
+        # took the stored projection, and the castxml vector join waited on
+        # the same key and walked the marker. The forwarded exception had
+        # neither the child's nor the producer's frames, so the seed test
+        # also pins both tracebacks surviving.
+        fixed_by=(1810,),
+        seed_tests=("tests/test_ast_acquisition_derived_withheld.py",),
+        axes={
+            "order": ("derived-first", "tree-first", "tree-waits-on-derived"),
+            "execution": ("in-process", "forked-child"),
+        },
+    ),
 )

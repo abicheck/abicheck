@@ -156,3 +156,21 @@ def offer_derived_ast_source(
     holder.value = value
     holder.used = True
     return _AST_SUPERSEDED
+
+
+def carries_superseded_ast(result: Any) -> bool:
+    """Whether *result* -- an AST acquisition's value, the tree or an
+    ``(ast, ...)`` tuple -- holds the superseded marker instead of a tree.
+
+    The marker answers only the consumer whose scope took the offer. The
+    request's acquisition table (``header_ast_cache.AstAcquisitionScope``)
+    asks this so it never hands that answer to another consumer of the same
+    key -- the castxml vector join, say -- which needs the tree itself."""
+    head = result[0] if isinstance(result, tuple) and result else result
+    return head is _AST_SUPERSEDED
+
+
+class AcquisitionWithheld(Exception):
+    """What a waiter on a shared acquisition receives when the producer's
+    result was a derived form only its own consumer may use: the waiter
+    acquires again, as leader or follower, for a real tree."""

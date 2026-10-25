@@ -21,7 +21,11 @@ from .acyclic_json import gc_paused
 from .ast_cache_location import AST_DISK_CACHE, ast_cache_entry_path
 from .ast_size_observer import mark_ast_intake, report_ast_size
 from .cross_process_lock import produce_ast_once_across_processes
-from .derived_ast import offer_derived_ast_source
+from .derived_ast import (
+    AcquisitionWithheld,
+    carries_superseded_ast,
+    offer_derived_ast_source,
+)
 from .json_compact import open_cached_entry
 
 log = logging.getLogger(__name__)
@@ -351,6 +355,27 @@ class AstAcquisitionScope:
                 "released_raw_entries": self.released_entries,
             }
 
+    def _settle_withdrawn(
+        self, lookup: tuple[str, str], future: Future[Any], exc: BaseException
+    ) -> None:
+        """Unregister our entry, then wake its waiters with *exc*.
+
+        In that order: one that retries (``run``'s retry branch) must find no
+        entry, or it would re-read this same future and recurse. A withdrawn
+        acquisition is retryable within the request; removing only our own
+        entry avoids racing a later successful producer.
+        """
+        with self._lock:
+            if self._entries.get(lookup) is future:
+                del self._entries[lookup]
+            self._ungrouped.pop(lookup, None)
+        future.set_exception(exc)
+        with self._lock:
+            # A settled producer can make its group releasable, so retry the
+            # bound here -- see `set_result` in `run` for why.
+            self._evict_groups_locked()
+            self._evict_ungrouped_locked()
+
     def run(
         self, backend: str, key: str, producer: Callable[[], _T], group: Any = None
     ) -> _T:
@@ -389,10 +414,12 @@ class AstAcquisitionScope:
             left = deadline.remaining()
             try:
                 result = future.result(timeout=left)
-            except deadline.ProcessCancelled:
+            except (deadline.ProcessCancelled, AcquisitionWithheld):
                 # The producer was cancelled because *its* request's dump
-                # failed, not because this waiter gave up. This waiter still
-                # needs the value, so acquire it again as leader or follower.
+                # failed, or its result was a derived form only its own
+                # consumer may use -- not because this waiter gave up. This
+                # waiter still needs the value, so acquire it again as leader
+                # or follower.
                 return self.run(backend, key, producer, group=group)
             except FutureTimeoutError:
                 if future.done():
@@ -410,22 +437,20 @@ class AstAcquisitionScope:
         try:
             result = produce_ast_once_across_processes(backend, key, producer, group)
         except BaseException as exc:
-            # Unregister before waking waiters: set_exception wakes them, and
-            # one that retries (the ProcessCancelled branch above) must find no
-            # entry, or it would re-read this same failed future and recurse.
-            with self._lock:
-                if self._entries.get(lookup) is future:
-                    del self._entries[lookup]
-                self._ungrouped.pop(lookup, None)
-            future.set_exception(exc.with_traceback(None))
-            # A failed acquisition is retryable within the request.  Removing
-            # only our own entry avoids racing a later successful producer.
-            with self._lock:
-                # A settled producer can make its group releasable, so retry
-                # the bound here -- see `set_result` below for why.
-                self._evict_groups_locked()
-                self._evict_ungrouped_locked()
+            # Waiters get the exception without the producer's frames; this
+            # caller re-raises it with them, so the failure stays diagnosable.
+            tb = exc.__traceback__
+            self._settle_withdrawn(lookup, future, exc.with_traceback(None))
+            exc.with_traceback(tb)
             raise
+        if carries_superseded_ast(result):
+            # The producer ran inside its caller's `derived_ast_scope`, which
+            # took a derived form instead of the tree. That answer is this
+            # caller's alone: published, it reached a sibling consumer of the
+            # same key (the castxml vector join beside the header-graph
+            # prefetch) as a bare `object()`. Withdraw it like a failure.
+            self._settle_withdrawn(lookup, future, AcquisitionWithheld(backend))
+            return result
         future.set_result(result)
         with self._lock:
             # Retry the bound now that this producer has settled. Admission
