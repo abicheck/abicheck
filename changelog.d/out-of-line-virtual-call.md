@@ -1,0 +1,3 @@
+### Fixed
+
+- **A call to a virtual method defined out of line is now recorded as a virtual call** — the call graph read the `virtual` flag only from the definition a call resolves to, and an out-of-line definition (`double Shape::area() const { ... }`) carries none, so the call read as a direct, exact call and `PUBLIC_VIRTUAL_DISPATCH_SET_CHANGED` could not fire for that base. The header graph and the L5 source graph now follow the definition back to its in-class declaration. Graphs stored by an earlier version are reported as produced under a different extractor generation; re-dump the baseline to compare dispatch sets.

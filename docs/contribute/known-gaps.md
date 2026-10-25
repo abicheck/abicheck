@@ -156,7 +156,7 @@ CJM: trust stage (docs/contribute/cjm.md) — use case UC-WF-analysis-assurance 
 
 #### A virtual call through an out-of-line definition is classified as direct (2026-10-21)
 
-**Status (2026-10-21): OPEN.** `call_graph.py` reads a callee's `virtual` flag from the resolved node, and an out-of-line definition carries no flag, so the call is recorded `direct`/`exact` and no `VIRTUAL_CALL_MAY_DISPATCH_TO` edge is produced. The dispatch-set detector cannot fire for such bases. `false-clean` — The call reads as exact when its targets can change. [Full write-up](known-gaps/virtual-call-through-out-of-line-definition-is-classified-direct.md)
+**Status (2026-10-25): FIXED.** `call_graph._ref_is_virtual` now follows the resolved node's `previousDecl` chain (kept in the compact `member_index` record) back to the in-class declaration, so a call to a virtual method or override defined out of line is recorded `virtual`/`overapprox` and joins onto its `VIRTUAL_CALL_MAY_DISPATCH_TO` edges. `EXTRACTOR_GENERATION` 24 and `SOURCE_GENERATION` 10 for the changed edge attributes. Tests: `tests/test_call_graph_out_of_line_virtual.py`. [Full write-up](known-gaps/virtual-call-through-out-of-line-definition-is-classified-direct.md)
 
 #### Type identity: typedef and tag names keyed by bare spelling
 

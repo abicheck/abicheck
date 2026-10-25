@@ -166,8 +166,8 @@
       "abicheck/type_metadata.py": "9997189de8dac522fd1db8be5ae491d811139503f83abaaded89038eb4aa9cdf"
     },
     "fingerprint": "6f47b3f6fbf46cf7c12710ec71547087734c578a086b59ab1742a1f2ef6ae13a",
-    "generation": 23,
-    "reason": "Review fix inside the unreleased generation 23 (same PR): the alias/variable scan skips [[...]] attributes"
+    "generation": 24,
+    "reason": "bumped to 24 for a semantic change"
   },
   "resolver": {
     "files": {
@@ -191,7 +191,7 @@
   },
   "source": {
     "files": {
-      "abicheck/buildsource/call_graph.py": "13d5620926991986b1f02456e80cfa9e5d831d13840833df0d6350e86c0e1e06",
+      "abicheck/buildsource/call_graph.py": "33da68d459ee4cdd958a58f460eb4ea4fbdd9ea2966af1544eb99485d0a5902e",
       "abicheck/buildsource/clang_ast_run.py": "6843af8b3adff08e8a8bba93a09437f0edfef8704c21e553ebed45d8d2ebc1a5",
       "abicheck/buildsource/include_graph.py": "66e0153b7bb6887ed532818ee1f8789667551179f40de9a35a34bcfbe415cd99",
       "abicheck/buildsource/include_graph_workers.py": "efd233af0f27f8c50f29eb467e88fe42cb907246de22285a78f8552981d0c027",
@@ -235,8 +235,8 @@
       "abicheck/buildsource/type_graph.py": "a028a875057cd0cbf2930a431bfa1e579f7b770e0d124cbcfe715724e89d12e5",
       "abicheck/buildsource/type_graph_index.py": "7375f7baec7ceb3dd4a52a489b89e5a3571750dffca7490d1c5870301d55202d"
     },
-    "fingerprint": "e01a9e2f41260a6dde31982589c4d573ae920eaacf18455d873df05f8d34579f",
-    "generation": 9,
-    "reason": "Compile-db routing: multi-source entries yield one unit per source operand and sourceless links record a link unit (plan l4-l2 Phase 3 item 4), on top of main's generation 8 (#1754)."
+    "fingerprint": "be14c2e0edc25f585da25f2ebb7cedb8ec6646298674f6b8e84822a90938520f",
+    "generation": 10,
+    "reason": "bumped to 10 for a semantic change"
   }
 }
