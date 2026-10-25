@@ -15,6 +15,7 @@
       "abicheck/extract/__init__.py": "011ec37fad96ea2035983eaaedeba0976940a570900f85db8c03bb7369af742a",
       "abicheck/extract/ar_archive.py": "6fdab7ed7390a20f087f9407eaa3988c0f8c658400bc0ea8c7e193271923956d",
       "abicheck/extract/ar_archive_format.py": "38a51cae7762eb269af3788d5dca9cfe50de38d9b315f34fa31427f791cb7e62",
+      "abicheck/extract/binary_dialect.py": "5c0d98fe9e4b05b031450f4ce37bae6b7f922e801936129ba19b887f6738dad7",
       "abicheck/extract/binary_format.py": "4b9f591077fa5c90d2e3a767343d92b098061870403d431694470bc05e5468b3",
       "abicheck/extract/binary_identity.py": "4645eaf3dddd0a2230a5c694882548476406c57514275fa4c8c1bc152607ca88",
       "abicheck/extract/build_mode_capture.py": "7a46c5babcc5bf770a1a38d5a5d3abb49a2b7d9575bda2b210d2e2861ebfb51f",
@@ -162,9 +163,9 @@
       "abicheck/symvers_metadata.py": "372737765cd132e6e87ed891dd465d2958e04debbef774e45212ceb3036871cb",
       "abicheck/type_metadata.py": "9997189de8dac522fd1db8be5ae491d811139503f83abaaded89038eb4aa9cdf"
     },
-    "fingerprint": "8d5c490ee3d844e3fce452f429d77f3475f7b33264f7cea3a2b7b63b5077814c",
-    "generation": 20,
-    "reason": "explicit_instantiation_fact recorded by the clang text AST pass (generation 20 after main took 19)"
+    "fingerprint": "17748b51b76cd2175b995d352284256799080b04fb0243d0b0fe9c2025012c5b",
+    "generation": 21,
+    "reason": "header parse takes its C++ dialect and target flags from the binary's build record"
   },
   "resolver": {
     "files": {
