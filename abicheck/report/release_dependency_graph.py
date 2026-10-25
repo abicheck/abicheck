@@ -13,33 +13,33 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""The release's recorded member-to-library dependency relation.
+"""The release's recorded member-to-library dependency relation, as drawn.
 
-Two halves, following this package's compute/render split:
+The *recording* half -- reading each member's ELF, PE/COFF or Mach-O
+dependency facts off its snapshots -- lives in
+``workflows/release_dependency_facts.py`` and lands on the release member
+entry as ``libraries[].dependencies``.
 
-* :func:`member_dependencies` is the *recording* half. It copies the one
-  dependency fact the snapshots already carry -- the ELF dynamic section's
-  ``DT_SONAME`` and ``DT_NEEDED`` entries -- onto a release member entry as
-  ``libraries[].dependencies`` (release schema 1.9), per side. Nothing is
-  inferred: a side without ELF metadata (a PE or Mach-O member, or a side
-  that was never read) is simply absent from the block.
-* :func:`compute_release_dependency_graph` is the *projection* half. It reads
-  only the published release document (the same mapping ``-o json`` writes)
-  and returns plain values: one node per member, one node per needed library
-  no member provides, and one edge per recorded ``DT_NEEDED`` relation, each
-  edge saying on which side(s) it was recorded. Layout is deterministic:
-  layered by dependency depth (a library that needs nothing recorded sits at
-  depth 0), names sorted within a layer.
+This module is the *projection* half. It reads only the published release
+document (the same mapping ``-o json`` writes) and returns plain values: one
+node per member, one node per needed library no member provides, and one edge
+per recorded relation, each edge saying on which side(s) it was recorded.
+A member whose dependency facts were not evaluated is a node that says so; it
+is never silently a node with no edges.
+
+Names are matched per format: an ELF ``DT_NEEDED`` entry is its soname
+verbatim, while a PE import (a DLL name) and a Mach-O install name are matched
+by their final path component, case-insensitively for PE (Windows file names).
+Layout is deterministic: layered by dependency depth (a library that needs
+nothing recorded sits at depth 0), names sorted within a layer.
 """
 
 from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any
-
-if TYPE_CHECKING:  # pragma: no cover - typing only
-    from ..model.snapshot import AbiSnapshot
+from pathlib import PurePosixPath
+from typing import Any
 
 #: Nodes drawn before the rest are summarised with a disclosed count.
 MAX_GRAPH_NODES = 60
@@ -53,28 +53,20 @@ _STATUS_FOR_VERDICT = {
     "NO_CHANGE": "no_change",
 }
 
+#: Dependency state of a node, as drawn. A library no member provides, or a
+#: scope-only member, was never read, so its state is ``not_evaluated``.
+DEPS_RECORDED = "recorded"
+DEPS_PARTIAL = "partial"
+DEPS_NOT_EVALUATED = "not_evaluated"
 
-def _side_dependencies(snapshot: AbiSnapshot | None) -> dict[str, object] | None:
-    elf = None if snapshot is None else getattr(snapshot, "elf", None)
-    if elf is None:
-        return None
-    return {"soname": elf.soname or None, "needed": list(elf.needed)}
 
-
-def member_dependencies(
-    old_snapshot: AbiSnapshot | None, new_snapshot: AbiSnapshot | None
-) -> dict[str, object] | None:
-    """``{"old": {...}, "new": {...}}`` of recorded ELF dependency facts, or
-    ``None`` when neither side recorded any."""
-    block: dict[str, object] = {
-        side: facts
-        for side, facts in (
-            ("old", _side_dependencies(old_snapshot)),
-            ("new", _side_dependencies(new_snapshot)),
-        )
-        if facts is not None
-    }
-    return block or None
+def _match_key(name: str, fmt: str) -> str:
+    """The name two dependency records are compared by, for *fmt*."""
+    if fmt == "pe":
+        return PurePosixPath(name.replace("\\", "/")).name.lower()
+    if fmt == "macho":
+        return PurePosixPath(name.replace("\\", "/")).name
+    return name
 
 
 @dataclass(frozen=True, slots=True)
@@ -83,6 +75,7 @@ class GraphNode:
     status: str  #: breaking/api_break/compatible/no_change/unchecked/external
     detail: str  #: verdict or scope state, as recorded
     layer: int
+    deps: str  #: DEPS_RECORDED/DEPS_PARTIAL/DEPS_NOT_EVALUATED
 
 
 @dataclass(frozen=True, slots=True)
@@ -98,7 +91,9 @@ class ReleaseDependencyGraph:
     edges: tuple[GraphEdge, ...]
     omitted_nodes: int
     omitted_edges: int
-    members_with_facts: int
+    members_with_facts: int  #: recorded or partial
+    members_partial: int  #: some fact family on a side was not captured
+    members_not_evaluated: int
     members_total: int
 
 
@@ -117,32 +112,52 @@ def _depth(name: str, edges: Mapping[str, set[str]], memo: dict[str, int]) -> in
     return memo[name]
 
 
+def _evaluated_sides(deps: Any) -> list[tuple[str, Mapping[str, Any]]]:
+    """The sides that recorded a dependency list; a side whose state is
+    ``not_evaluated`` carries no ``needed`` and is not one of them."""
+    if not isinstance(deps, Mapping):
+        return []
+    return [
+        (side, facts)
+        for side in ("old", "new")
+        if isinstance(facts := deps.get(side), Mapping) and "needed" in facts
+    ]
+
+
 def compute_release_dependency_graph(
     document: Mapping[str, Any],
 ) -> ReleaseDependencyGraph:
     """Nodes and edges recorded in *document*; see the module docstring."""
     members = _member_rows(document)
     status: dict[str, tuple[str, str]] = {}
+    deps_state: dict[str, str] = {}
+    # match key -> the member node it names
     provides: dict[str, str] = {}
-    needed: dict[str, dict[str, set[str]]] = {}
-    with_facts = 0
+    # match key -> the spelling first seen for a library no member provides
+    external_names: dict[str, str] = {}
+    # source member -> match key -> (spelling, sides it was recorded on)
+    needed: dict[str, dict[str, tuple[str, set[str]]]] = {}
     for m in members:
         name = str(m.get("library"))
         verdict = str(m.get("verdict"))
         status[name] = (_STATUS_FOR_VERDICT.get(verdict, verdict.lower()), verdict)
-        provides.setdefault(name, name)
-        deps = m.get("dependencies")
-        if not isinstance(deps, Mapping) or not deps:
+        evaluated = _evaluated_sides(m.get("dependencies"))
+        fmt = str(evaluated[0][1].get("format", "elf")) if evaluated else "elf"
+        provides.setdefault(_match_key(name, fmt), name)
+        if not evaluated:
+            deps_state[name] = DEPS_NOT_EVALUATED
             continue
-        with_facts += 1
-        for side in ("old", "new"):
-            facts = deps.get(side)
-            if not isinstance(facts, Mapping):
-                continue
+        deps_state[name] = DEPS_RECORDED
+        for side, facts in evaluated:
+            side_fmt = str(facts.get("format", "elf"))
+            if facts.get("incomplete"):
+                deps_state[name] = DEPS_PARTIAL
             if facts.get("soname"):
-                provides.setdefault(str(facts["soname"]), name)
+                provides.setdefault(_match_key(str(facts["soname"]), side_fmt), name)
             for lib in facts.get("needed") or ():
-                needed.setdefault(name, {}).setdefault(str(lib), set()).add(side)
+                key = _match_key(str(lib), side_fmt)
+                slot = needed.setdefault(name, {}).setdefault(key, (str(lib), set()))
+                slot[1].add(side)
     scope = document.get("comparison_scope")
     scope_members = scope.get("members") if isinstance(scope, Mapping) else None
     for m in scope_members or ():
@@ -151,16 +166,22 @@ def compute_release_dependency_graph(
         name = str(m.get("name"))
         if name not in status:
             status[name] = ("unchecked", str(m.get("state")))
-            provides.setdefault(name, name)
+            deps_state[name] = DEPS_NOT_EVALUATED
+            # The member's file name may be the provider of a PE or Mach-O need
+            # too, so register it under every format's key (first one wins).
+            for scope_fmt in ("elf", "pe", "macho"):
+                provides.setdefault(_match_key(name, scope_fmt), name)
 
     edge_rows: list[GraphEdge] = []
     adjacency: dict[str, set[str]] = {}
     for source in sorted(needed):
-        for lib in sorted(needed[source]):
-            target = provides.get(lib, lib)
-            if target not in status:
-                status[target] = ("external", "not a release member")
-            sides = needed[source][lib]
+        for key in sorted(needed[source]):
+            spelling, sides = needed[source][key]
+            target = provides.get(key)
+            if target is None:
+                target = external_names.setdefault(key, spelling)
+                status.setdefault(target, ("external", "not a release member"))
+                deps_state.setdefault(target, DEPS_NOT_EVALUATED)
             edge_rows.append(
                 GraphEdge(
                     source=source,
@@ -184,15 +205,24 @@ def compute_release_dependency_graph(
     ranked = sorted(status, key=lambda n: (order.get(status[n][0], 5), n))
     kept = set(ranked[:MAX_GRAPH_NODES])
     nodes = tuple(
-        GraphNode(name=n, status=status[n][0], detail=status[n][1], layer=layers[n])
+        GraphNode(
+            name=n,
+            status=status[n][0],
+            detail=status[n][1],
+            layer=layers[n],
+            deps=deps_state.get(n, DEPS_NOT_EVALUATED),
+        )
         for n in sorted(kept, key=lambda n: (-layers[n], n))
     )
     edges = tuple(e for e in edge_rows if e.source in kept and e.target in kept)
+    states = [deps_state.get(str(m.get("library"))) for m in members]
     return ReleaseDependencyGraph(
         nodes=nodes,
         edges=edges,
         omitted_nodes=len(status) - len(kept),
         omitted_edges=len(edge_rows) - len(edges),
-        members_with_facts=with_facts,
+        members_with_facts=sum(s in (DEPS_RECORDED, DEPS_PARTIAL) for s in states),
+        members_partial=sum(s == DEPS_PARTIAL for s in states),
+        members_not_evaluated=sum(s == DEPS_NOT_EVALUATED for s in states),
         members_total=len(members),
     )

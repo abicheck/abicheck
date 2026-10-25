@@ -107,6 +107,12 @@
       "commit": "44473ffcb852",
       "compiler": "g++ (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0",
       "snapshot": "gen21/corpus.json.gz"
+    },
+    "22": {
+      "castxml": "castxml version 0.7.0",
+      "commit": "a6741d205ef5",
+      "compiler": "g++ (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0",
+      "snapshot": "gen22/corpus.json.gz"
     }
   },
   "skipped": {
