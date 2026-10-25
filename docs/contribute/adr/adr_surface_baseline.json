@@ -746,6 +746,13 @@
       "use_cases": [
         "UC-ARCH-static-lib"
       ]
+    },
+    "ADR-087": {
+      "disposition": "surfaced",
+      "surfaces": [
+        "api: abicheck.workflows.service_requests.CompareRequest"
+      ],
+      "use_cases": []
     }
   },
   "multichannel_without_family": [
@@ -849,7 +856,6 @@
     "ADR-052 report: compare_report.consumer_impact_summary",
     "ADR-054 cli: project plan",
     "ADR-054 cli: project validate",
-    "ADR-055 api: abicheck.workflows.service_requests.CompareRequest",
     "ADR-055 api: abicheck.workflows.service_requests.DumpRequest",
     "ADR-055 report: compare_report.report_schema_version",
     "ADR-057 cli: compare --use-cases --used-by",

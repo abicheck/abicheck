@@ -465,6 +465,19 @@ def test_sc_ci_strict_informational(tmp_path: Path) -> None:
     assert {c["kind"] for c in doc["changes"]} >= {"func_added", "public_surface_grew"}
 
 
+def test_sc_ci_severity_block_demotes_removal(tmp_path: Path) -> None:
+    # exit-codes.md: `.abicheck.yml`'s `severity.abi_breaking` overrides the
+    # verdict-based exit. A removed function is a BREAKING verdict (exit 4)
+    # until the config accepts it as info (exit 0). ADR-087.
+    old, new = _lib("1", [_fn("a"), _fn("b")]), _lib("2", [_fn("a")])
+    legacy = _compare(tmp_path, old, new)
+    assert legacy.exit_code == 4, legacy.output
+    cfg = tmp_path / "abi-info.abicheck.yml"
+    cfg.write_text("severity:\n  abi_breaking: info\n", encoding="utf-8")
+    res = _compare(tmp_path, old, new, "--config", str(cfg))
+    assert res.exit_code == 0, res.output
+
+
 def test_sc_ci_oneline_format(tmp_path: Path) -> None:
     # CLI cleanup phase two, PR 1: --stat removed, --format oneline is its
     # sole surviving one-line-summary use (originally reached only via the

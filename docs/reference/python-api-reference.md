@@ -53,6 +53,11 @@ A fully-specified comparison request — the single input to ``run_compare``.
 | `pack_paths` | `tuple[Path, ...]` | `()` |
 | `stated_settings` | `frozenset[str] \| None` | `None` |
 | `severity_preset` | `str \| None` | `None` |
+| `severity_abi_breaking` | `str \| None` | `None` |
+| `severity_potential_breaking` | `str \| None` | `None` |
+| `severity_quality_issues` | `str \| None` | `None` |
+| `severity_addition` | `str \| None` | `None` |
+| `require_complete_analysis` | `bool` | `False` |
 | `changed_paths` | `tuple[str, ...]` | `()` |
 | `abi3_floor` | `tuple[int, int] \| None` | `None` |
 | `collapse_versioned_symbols` | `bool` | `False` |

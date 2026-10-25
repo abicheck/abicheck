@@ -198,6 +198,26 @@ REQUEST_ROUTING: dict[str, tuple[str, Any]] = {
     "require_justification": ("covered", ("suppress_strict",)),
     "scope_public": ("covered", ("no_scope_public",)),
     "severity_preset": ("covered", ("severity_strict",)),
+    "severity_abi_breaking": (
+        _UC,
+        "the .abicheck.yml severity override; CLI/typed parity is test_compare_exit_gate_unified.py, not yet a route-matrix cell",
+    ),
+    "severity_potential_breaking": (
+        _UC,
+        "the .abicheck.yml severity override; CLI/typed parity is test_compare_exit_gate_unified.py, not yet a route-matrix cell",
+    ),
+    "severity_quality_issues": (
+        _UC,
+        "the .abicheck.yml severity override; CLI/typed parity is test_compare_exit_gate_unified.py, not yet a route-matrix cell",
+    ),
+    "severity_addition": (
+        _UC,
+        "the .abicheck.yml severity override; CLI/typed parity is test_compare_exit_gate_unified.py, not yet a route-matrix cell",
+    ),
+    "require_complete_analysis": (
+        _UC,
+        "the assurance.require_complete exit needs an incomplete-analysis fixture; gate-level parity is test_compare_exit_gate_unified.py",
+    ),
     "diagnostic_comparison": ("covered", ("diagnostic_comparison",)),
     "contract_evaluation": ("covered", ("contract_exports",)),
     "contract_mode": ("covered", ("contract_exports",)),

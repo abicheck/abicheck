@@ -716,3 +716,10 @@ adrs:
     use_cases: [UC-ARCH-static-lib]
     surfaces:
       - cli: compare --no-baseline
+
+  - id: ADR-087
+    file: 087-one-compare-exit-gate.md
+    disposition: surfaced
+    use_cases: []
+    surfaces:
+      - api: abicheck.workflows.service_requests.CompareRequest
