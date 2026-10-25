@@ -38,6 +38,7 @@ Phase 5 section for the design this page's data comes from.
 | `Function.deprecated` | `str \| None` | castxml, clang | consumed | ✅ | — | ✅ | — | ✅ |
 | `Function.elf_binding` | `SymbolBinding \| None` | castxml, clang, elf | persisted | ✅ | — | ✅ | — | ✅ |
 | `Function.exception_spec` | `str \| None` | castxml, clang | persisted | ✅ | — | ✅ | — | ✅ |
+| `Function.explicit_instantiation` | `ExplicitInstantiation` | clang | consumed | ✅ | — | ✅ | — | — |
 | `Function.hidden_friend_owner` | `str \| None` | castxml, clang | persisted | ✅ | — | ✅ | — | ✅ |
 | `Function.in_public_contract` | `bool` | castxml, clang | persisted | ✅ | — | ✅ | — | ✅ |
 | `Function.is_compiler_generated` | `bool \| None` | castxml | persisted | ✅ | — | ✅ | — | ✅ |
@@ -83,6 +84,7 @@ Phase 5 section for the design this page's data comes from.
 | `Variable.declared_in_headers` | `bool` | castxml, clang | persisted | ✅ | — | ✅ | — | ✅ |
 | `Variable.deprecated` | `str \| None` | castxml, clang | consumed | ✅ | — | ✅ | — | ✅ |
 | `Variable.elf_binding` | `SymbolBinding \| None` | castxml, clang, elf | persisted | ✅ | — | ✅ | — | ✅ |
+| `Variable.explicit_instantiation` | `ExplicitInstantiation` | clang | consumed | ✅ | — | ✅ | — | — |
 | `Variable.in_public_contract` | `bool` | castxml, clang | persisted | ✅ | — | ✅ | — | ✅ |
 | `Variable.ownership` | `EntityOwnership` | castxml, clang | persisted | ✅ | — | — | — | ✅ |
 | `Variable.source_header` | `str \| None` | castxml, clang | persisted | ✅ | — | ✅ | — | ✅ |
