@@ -164,7 +164,7 @@
     },
     "fingerprint": "8d5c490ee3d844e3fce452f429d77f3475f7b33264f7cea3a2b7b63b5077814c",
     "generation": 20,
-    "reason": "clang header backend records explicit_instantiation_fact on functions and variables from a text AST pass; an explicit old instance the new header drops is func_removed, not func_visibility_changed"
+    "reason": "explicit_instantiation_fact recorded by the clang text AST pass (generation 20 after main took 19)"
   },
   "resolver": {
     "files": {
