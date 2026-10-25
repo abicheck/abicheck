@@ -145,14 +145,15 @@ class PublicSurface:
     # different, colliding spelling (during the *other*, ambiguity-tolerant
     # walk -- this set itself never records an ambiguous route at all).
     exact_type_identities: set[str] = field(default_factory=set)
-    # Exact scope paths (inline namespaces included, as the mangling spells
-    # them) of classes a public record's own virtual slots prove declared:
-    # a class-metadata symbol (``_ZTV``/``_ZTI``/``_ZTS``/``_ZTT``) names its
-    # class in that spelling, which a header's own qualified name can drop
-    # (clang omits an inline namespace from ``qualified_name``). Built only
-    # from exact, unambiguous public records' vtable slots -- see
-    # ``policy.class_metadata_identity.vtable_slot_class_paths``.
-    class_owner_paths: set[str] = field(default_factory=set)
+    # Mangled scopes (raw components: inline namespaces and specialization
+    # arguments included, as the mangling spells them) of classes a public
+    # record's own members prove declared: a class-metadata symbol
+    # (``_ZTV``/``_ZTI``/``_ZTS``/``_ZTT``) names its class in that spelling,
+    # which a header's own qualified name can drop (clang and castxml omit an
+    # inline namespace) or cannot express exactly (a template specialization).
+    # Built only from exact, unambiguous, non-pattern public records -- see
+    # ``policy.class_metadata_identity.declared_class_owner_scopes``.
+    class_owner_scopes: set[tuple[str, ...]] = field(default_factory=set)
     # Export-table names with no modeled declaration at all -- the subset
     # `_seed_undeclared_exports` really added, not every export it saw.
     # Kept as its own set because "provably undocumented" licenses demoting
