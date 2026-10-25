@@ -273,19 +273,63 @@ def _build(src: Path, out: Path, *include: Path) -> Path:
 @pytest.mark.parametrize("case", _CASES)
 @pytest.mark.parametrize("v", ["v1", "v2"])
 def test_catalog_case_dump_logs_no_first_wins_duplicate(
-    case: str, v: str, tmp_path: Path
+    case: str, v: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """case80/case126 include ``<memory>``/``<cstring>``: before the fix each
     dump warned about ``wcschr (x2)`` ... and ``__abicheck_ctor__std::...
     (x2)``."""
     src = REPO / "catalog" / "cases" / case
     lib = _build(src / f"{v}.cpp", tmp_path / f"lib{v}.so", src)
+    seen = _record_collapse_inputs(monkeypatch)
     snap, first_wins = _dump_and_index_first_wins(lib, src / f"{v}.h")
     groups = _same_key_groups(snap)
+    names = {f.name for f in snap.declarations.functions if f.mangled in groups}
     assert first_wins == [], pprint.pformat(
-        {"ast_producer": snap.ast_producer, "groups": groups}, width=120
+        {
+            "ast_producer": snap.ast_producer,
+            "groups": groups,
+            "collapse_inputs": [row for row in seen if row[1] in names],
+        },
+        width=120,
     )
     assert groups == {}
+
+
+def _record_collapse_inputs(
+    monkeypatch: pytest.MonkeyPatch,
+) -> list[tuple[object, ...]]:
+    """What the castxml collapse itself saw: per parsed function, its element
+    attributes, key, and the dependency predicate's answer (diagnostic only:
+    the wrapped collapse runs unchanged)."""
+    from abicheck.extract.headers.castxml import (
+        functions as castxml_functions,
+        location,
+    )
+
+    seen: list[tuple[object, ...]] = []
+    real = castxml_functions.collapse_benign_duplicates
+
+    def why(ctx, el) -> dict[str, object]:  # type: ignore[no-untyped-def]
+        sh = location.header_from_location(location.source_location(ctx, el))
+        return {
+            "have_public_set": ctx.have_public_set,
+            "header": sh,
+            "system": bool(sh) and location.is_system_header(sh),
+            "public": location.decl_is_public(ctx, el),
+            "beside_public": bool(sh) and location._beside_a_public_header(ctx, sh),
+            "dependency": location.decl_is_system_dependency(ctx, el),
+        }
+
+    def recording(parsed, is_dependency):  # type: ignore[no-untyped-def]
+        ctx = is_dependency.__closure__[0].cell_contents
+        for el, func in parsed:
+            seen.append(
+                (el.tag, func.name, func.mangled, dict(el.attrib), why(ctx, el))
+            )
+        return real(parsed, is_dependency)
+
+    monkeypatch.setattr(castxml_functions, "collapse_benign_duplicates", recording)
+    return seen
 
 
 def _same_key_groups(snap: AbiSnapshot) -> dict[str, list[tuple[object, ...]]]:
