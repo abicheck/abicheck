@@ -113,8 +113,8 @@ current emitter, which is unchanged.
 
 #### `--depth binary` on a header-built snapshot misses debug-only declaration findings (2026-10-25)
 
-**Status (2026-10-25): OPEN.** A header snapshot does not persist debug-info subprogram/variable records or record relations, so its `--depth binary` projection cannot report the signature, typedef, vtable or base findings a binary-only dump reports. Each residual is named in `tests/test_depth_projection_matches_shallow_dump.py`.
-`false-clean` — `compare old.json new.json --depth binary` on two header snapshots can read `NO_CHANGE` where a binary-only dump of the same libraries reads `BREAKING` (a return or parameter type change). [Full write-up](known-gaps/depth-binary-projection-cannot-reproduce-debug-declaration-findings.md)
+**Status (2026-10-25): PARTIAL — no longer a false clean; the findings themselves are still missing.** A header snapshot does not persist debug-info subprogram/variable records or record relations, so its `--depth binary` projection cannot report the signature, typedef, vtable or base findings a binary-only dump reports. Fixed 2026-10-25: such a projection (header-built side with debug info) now reads `analysis_assurance` `partial` and names both missing evidence families (`policy/depth_projection_gaps.py`, `policy/analysis_assurance/_depth_projection.py`; `tests/test_depth_projection_declaration_gap.py`). Residual: the findings are not reported; each is named in `tests/test_depth_projection_matches_shallow_dump.py`.
+`false-clean` — `compare old.json new.json --depth binary` on two header snapshots can read `NO_CHANGE` (with `partial` assurance naming the missing evidence) where a binary-only dump of the same libraries reads `BREAKING` (a return or parameter type change). [Full write-up](known-gaps/depth-binary-projection-cannot-reproduce-debug-declaration-findings.md)
 
 #### A removed class-metadata export of a templated or destructor-only class is not confirmed by its header (2026-10-22)
 

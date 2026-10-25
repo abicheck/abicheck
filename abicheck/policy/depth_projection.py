@@ -642,6 +642,14 @@ def project_snapshot_to_depth(
     deep = rank < headers_rank
     out = copy.deepcopy(snap) if deep else copy.copy(snap)
     if deep:
+        from .depth_projection_gaps import binary_projection_gaps
+
+        out.projection_evidence_gaps = binary_projection_gaps(
+            snap,
+            _structural_facts_are_dwarf_confirmed(snap)
+            if dwarf_sourced is None
+            else dwarf_sourced,
+        )
         _strip_header_and_above_evidence(
             out,
             dwarf_sourced=dwarf_sourced,

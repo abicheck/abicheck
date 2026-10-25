@@ -11,8 +11,23 @@ generated: false
 
 Index: [Known gaps](../known-gaps.md)
 
-**Status (2026-10-25): OPEN.** Residual of bug class
+**Status (2026-10-25): PARTIAL.** Residual of bug class
 `evidence.depth_projection_diverges_from_shallow_dump`.
+
+**Fixed 2026-10-25: no false clean.** When the projection discards a
+header-built snapshot's signatures and that snapshot carries debug info, it
+records the evidence it could not rebuild on the projected snapshot
+(`AbiSnapshot.projection_evidence_gaps`, runtime-only, never stored;
+`policy/depth_projection_gaps.py`). `analysis_assurance` then reads
+`partial` and names "debug-info function/variable signatures and typedefs"
+and "debug-info record relations" as not assessed at that depth
+(`policy/analysis_assurance/_depth_projection.py`). The verdict and exit code
+are unchanged. A binary-only snapshot, or a header snapshot without debug
+info (where a binary-only dump has no such evidence either), is not flagged.
+`tests/test_depth_projection_declaration_gap.py` pins return type,
+parameter type, typedef, vtable and base changes against a binary-only-dump
+oracle through the CLI. What follows is the residual: the findings
+themselves are still not reported.
 
 `policy/depth_projection.py` projects a header-built snapshot down to the
 `binary` rung. It now gives the findings a binary-only dump of the same
