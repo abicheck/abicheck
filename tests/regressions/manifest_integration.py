@@ -378,8 +378,7 @@ INTEGRATION_BUG_CLASSES: tuple[BugClass, ...] = (
             "undeclared helper read NO_CHANGE at `--depth binary` and "
             "BREAKING without it."
         ),
-        # Provisional until the PR is opened; replaced with its number.
-        fixed_by=(1798,),
+        fixed_by=(1802,),
         seed_tests=(
             # Catalog-wide: identity over binary-only pairs (exact), and
             # header->binary parity with every residual rule named.
