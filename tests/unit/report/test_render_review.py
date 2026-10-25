@@ -217,7 +217,7 @@ def _group(name: str, *, gating: bool = False, library: str | None = None) -> di
     group: dict[str, object] = {
         "display_name": name,
         "transition": "signature changed",
-        "gating_findings": [name] if gating else [],
+        "gating_findings": int(gating),
     }
     if library is not None:
         group["library"] = library
