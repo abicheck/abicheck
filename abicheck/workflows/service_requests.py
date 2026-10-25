@@ -180,6 +180,8 @@ class CompareRequest:
     # caller can still see a result but knows not to trust it. Forwarded
     # to ``checker.compare``'s own ``diagnostic_comparison`` parameter.
     diagnostic_comparison: bool = False
+    # ADR-062 D2: refuse a cross-generation pair (workflows/generation_drift).
+    require_same_generation: bool = False
     # ADR-049: classify each finding's contract relevance before
     # compatibility policy, which then scores only IN_CONTRACT/NOT_APPLICABLE
     # findings. On by default since Phase 7, matching the CLI: an
@@ -342,10 +344,8 @@ class CompareRequest:
     #: The ``DEFAULTED_COMPARE_PARAMETERS`` stated (the CLI derives its set
     #: from Click's ``ParameterSource``); ``None`` reads every field as stated.
     stated_settings: frozenset[str] | None = field(default=None, kw_only=True)
-    #: ADR-064: the gate algorithm follows from whether a severity setting is in effect.
-    severity_preset: str | None = field(default=None, kw_only=True)
-    #: ``.abicheck.yml`` ``severity:`` overrides (win over the preset) and ``assurance.require_complete`` (ADR-087).
-    severity_abi_breaking: str | None = field(default=None, kw_only=True)
+    severity_preset: str | None = field(default=None, kw_only=True)  # ADR-064
+    severity_abi_breaking: str | None = field(default=None, kw_only=True)  # ADR-088
     severity_potential_breaking: str | None = field(default=None, kw_only=True)
     severity_quality_issues: str | None = field(default=None, kw_only=True)
     severity_addition: str | None = field(default=None, kw_only=True)

@@ -15,7 +15,7 @@
 
 """The release (directory/package) Markdown report's per-section renderers.
 
-Moved verbatim out of ``cli_compare_release_helpers.py`` (a ``no_growth``
+Moved verbatim out of the retired ``cli_compare_release_helpers.py`` (a ``no_growth``
 module at its baseline) when ADR-065 S2 added the ``comparison_scope``
 section; they take plain per-library result dicts, a
 ``BundleDiffResult``, or a ``DiffResult`` and return Markdown lines --
@@ -309,7 +309,7 @@ def _release_md_bundle_findings(
     *findings* (Codex review, fresh evidence, PR #1154 follow-up: "Move
     release filtering out of the Markdown renderer") is *bundle_result*'s
     ``--view show=``-filtered finding list, already computed by the caller
-    (``cli_compare_release_helpers.release_bundle_findings_for_view``) --
+    (``reporter_markdown.release_bundle_findings_for_view``) --
     this renderer only ever formats it. `report/AGENTS.md`'s renderer
     contract forbids a renderer from filtering findings itself (an earlier
     revision called that filter function from here directly); the caller
@@ -341,7 +341,7 @@ def _release_md_matrix_findings(
     *changes* (Codex review, fresh evidence, PR #1154 follow-up: "Move
     release filtering out of the Markdown renderer") is *matrix_result*'s
     ``--view show=``-filtered change list, already computed by the caller
-    (``cli_compare_release_helpers.release_matrix_changes_for_view``) --
+    (``reporter_markdown.release_matrix_changes_for_view``) --
     see :func:`_release_md_bundle_findings`'s own docstring for the full
     rationale; this renderer no longer calls that filter itself.
     """
@@ -434,8 +434,11 @@ def finish_release_markdown(
     """
     if demangle:
         from ..demangle import demangle_text
+        from .markdown_budget import DEMANGLED_NAME_LIMIT
 
-        md = demangle_text(md, escape_table_pipes=True)
+        md = demangle_text(
+            md, escape_table_pipes=True, max_demangled=DEMANGLED_NAME_LIMIT
+        )
     audit_lines = _release_md_suppression_audit(library_results, demangle=demangle)
     return md + "\n".join(audit_lines) if audit_lines else md
 

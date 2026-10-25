@@ -32,6 +32,56 @@ __all__ = ["EXTRACTION_BUG_CLASSES"]
 
 EXTRACTION_BUG_CLASSES: tuple[BugClass, ...] = (
     BugClass(
+        id="extraction.castxml_vector_element_not_modelled",
+        invariant=(
+            "A castxml vector node resolves to the spelling clang gives for the same "
+            "declaration, or stays unresolved; it is never a shared opaque spelling "
+            "that hides a same-size element change through a header comparison."
+        ),
+        fixed_by=(1791,),
+        seed_tests=("tests/test_castxml_vector_integration.py",),
+        axes={
+            "backend": ("castxml", "clang"),
+            "vector_shape": ("typedef", "inline_field", "inline_param", "return"),
+        },
+    ),
+    BugClass(
+        id="extraction.castxml_function_type_collapsed_to_opaque_tag",
+        invariant=(
+            "A castxml function type spells its full declarator (return type, "
+            "parameter types, variadic marker, calling-convention attributes, "
+            "and the pointer/reference/cv/array declarator around it), so two "
+            "callbacks compare equal exactly when their signatures are equal, "
+            "wherever the callback appears: inline parameter, pointer to it, "
+            "typedef, struct field or return."
+        ),
+        fixed_by=(1796,),
+        seed_tests=(
+            "tests/test_castxml_function_pointer_spelling.py",
+            "tests/test_castxml_function_pointer_integration.py",
+        ),
+        axes={
+            "signature_part": ("arity", "param_type", "return", "variadic", "cc"),
+            "site": ("inline_param", "pointer_to_fp", "typedef", "field"),
+        },
+    ),
+    BugClass(
+        id="extraction.vector_type_collapsed_to_plain_array",
+        invariant=(
+            "A type whose identity is a DWARF attribute, not its shape, keeps "
+            "that attribute in the recorded spelling: a DW_AT_GNU_vector array "
+            "spells with its element and total byte size, so a same-size "
+            "element, lane-count, or vector-versus-array change is a different "
+            "type, never the same plain T[] spelling."
+        ),
+        fixed_by=(1785,),
+        seed_tests=("tests/test_dwarf_vector_types.py",),
+        axes={
+            "backend": ("dwarf",),
+            "vector_shape": ("element", "lane_count", "array_vs_vector"),
+        },
+    ),
+    BugClass(
         id="extraction.compile_entry_collapsed_to_first_source",
         invariant=(
             "A compile-database entry yields one compile unit per source "
@@ -43,6 +93,25 @@ EXTRACTION_BUG_CLASSES: tuple[BugClass, ...] = (
         fixed_by=(1755,),
         seed_tests=("tests/test_compile_db_operand_routing.py",),
         axes={"sources": ("single", "multi", "link_only")},
+    ),
+    BugClass(
+        id="extraction.target_flag_dropped_from_header_parse",
+        invariant=(
+            "Every target-machine -m flag a translation unit is compiled with "
+            "(ISA, CPU, FPU, float ABI) reaches the header AST parse of that "
+            "unit, under both castxml and clang, so the predefined feature "
+            "macros a header selects its types by match the build that "
+            "produced the binary. A unit with no -m flag gains none."
+        ),
+        fixed_by=(1769,),
+        seed_tests=(
+            "tests/test_header_target_isa_flags.py",
+            "tests/test_family_f4_heuristics.py",
+        ),
+        axes={
+            "frontend": ("castxml", "clang"),
+            "isa": ("sse4.2", "avx", "avx2", "avx512f", "none"),
+        },
     ),
     BugClass(
         id="extraction.function_local_declaration_leaks_into_surface",
@@ -86,6 +155,8 @@ EXTRACTION_BUG_CLASSES: tuple[BugClass, ...] = (
         seed_tests=(
             "tests/test_flat_map_dependency_scope.py",
             "tests/test_exclude_header_flat_maps_integration.py",
+            "tests/test_typedef_retention_instantiation_independent.py",
+            "tests/test_field_shapes.py",
         ),
         public_surfaces=("cli",),
         axes={
@@ -367,6 +438,22 @@ EXTRACTION_BUG_CLASSES: tuple[BugClass, ...] = (
         ),
         fixed_by=(1623,),
         seed_tests=("tests/test_diff_templates_fn_type_arity.py",),
+    ),
+    BugClass(
+        id="templates.parameter_template_args_read_as_family_membership",
+        invariant=(
+            "A declaration joins a template-instantiation family only when its "
+            "own declared name carries template arguments: a template argument "
+            "list inside a parameter or return type never makes a non-template "
+            "function an instantiation, so a parameter type's mangling change is "
+            "not reported as a missing instantiation of that function."
+        ),
+        fixed_by=(239,),
+        seed_tests=(
+            "tests/test_instantiation_family_name_scope.py",
+            "tests/test_parameter_replacement_pairing.py",
+            "tests/test_family_f3_identity.py",
+        ),
     ),
     BugClass(
         id="evidence.malformed_input_yields_value",

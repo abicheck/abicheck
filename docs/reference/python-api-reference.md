@@ -28,6 +28,7 @@ A fully-specified comparison request — the single input to ``run_compare``.
 | `debuginfod_url` | `str \| None` | `None` |
 | `env_matrix` | `EnvironmentMatrix \| None` | `None` |
 | `diagnostic_comparison` | `bool` | `False` |
+| `require_same_generation` | `bool` | `False` |
 | `contract_evaluation` | `bool` | `True` |
 | `contract_mode` | `str \| None` | `None` |
 | `depth` | `str \| None` | `None` |

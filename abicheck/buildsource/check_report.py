@@ -136,7 +136,7 @@ RESOLVE_FAILURE_OUTCOMES = ALL_OUTCOMES - {ResolveOutcome.RESOLVED}
 
 GATE_MODES = ("local", "deferred", "advisory")
 
-#: ``cli_compare_release_helpers._exit_compare_release``'s dedicated
+#: ``frontends.cli.release_exit._exit_compare_release``'s dedicated
 #: ``--fail-on-removed-library`` exit code -- applied "in preference to the
 #: severity code," so it's the one value the analysis step's real exit code
 #: can carry that the persisted ``severity`` block never independently
@@ -486,8 +486,7 @@ def _stamp_schema_version(out: dict[str, Any], report: dict[str, Any]) -> None:
 def _escalate_removed_library_severity(out: dict[str, Any]) -> None:
     """Fold ``--fail-on-removed-library``'s exit 8 into the severity block.
 
-    Exit 8 is the *only* value ``cli_compare_release_helpers.
-    _exit_compare_release`` applies "in preference to the severity code" --
+    Exit 8 is the *only* value ``frontends.cli.release_exit._exit_compare_release`` applies "in preference to the severity code" --
     every other severity-aware exit path there emits ``severity_exit_code``
     directly, so 8 is the sole case where the real outcome can diverge from
     what is already persisted. Escalating ``policy_gate_decision``/

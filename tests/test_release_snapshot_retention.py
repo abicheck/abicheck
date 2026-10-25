@@ -161,7 +161,6 @@ class TestConsumerInventory:
                 # The producer, and the tolerant fold / strip pass.
                 "workflows/release_snapshot_retention.py",
                 "workflows/release_bundle.py",
-                "cli_compare_release_matrix.py",
             ):
                 continue
             if "_new_snapshot" in _subscript_string_keys(

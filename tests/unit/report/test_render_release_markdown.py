@@ -20,7 +20,7 @@ format an already-computed, immutable projection. An earlier revision of
 ``_release_md_bundle_findings``/``_release_md_matrix_findings`` violated
 this by calling ``reporter_markdown.release_bundle_findings_for_view``/
 ``release_matrix_changes_for_view`` (a ``--view show=`` filter) directly;
-the caller (``cli_compare_release_helpers.py``) now computes the filtered
+the caller (``report/release_document.py``) now computes the filtered
 view once and passes it in as a plain parameter.
 
 This module pins both halves of the fix: a structural check that the

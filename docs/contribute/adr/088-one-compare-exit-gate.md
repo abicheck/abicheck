@@ -1,4 +1,4 @@
-# ADR-087: One Compare Exit Gate — the Typed API Takes the CLI's Severity and Assurance Inputs
+# ADR-088: One Compare Exit Gate — the Typed API Takes the CLI's Severity and Assurance Inputs
 
 **Date:** 2026-10-25
 **Status:** Accepted (2026-10-25) — implemented on `refactor/unify-exit-gate`. The native CLI's exit codes do not change.

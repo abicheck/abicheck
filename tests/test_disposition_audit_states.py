@@ -238,7 +238,19 @@ class TestRecommendReleaseReadsTheConservedDelta:
             ),
         )
         rationale = recommend_release(result).rationale
-        assert "symbol_pattern" in rationale
+        # H3: an id-less rule is named by its portable `rule-<hex>` token.
+        from abicheck.policy.rule_identity import rule_id_of
+
+        assert (
+            rule_id_of(
+                Suppression(
+                    symbol_pattern=".*gone.*",
+                    reason="tracked in ticket 42",
+                    allow_public_break=True,
+                )
+            )
+            in rationale
+        )
         assert "func_removed" in rationale
 
 

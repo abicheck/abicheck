@@ -1,7 +1,7 @@
 # ADR-075: Target Ownership, Extraction Scope, and Ownership in the Graph
 
 **Date:** 2026-09-24
-**Status:** Accepted — not yet implemented. Decides Phase 2 ("Persist") of
+**Status:** Accepted — implemented (plan Phase 2 landed; see the plan's "Phase 2 as landed"). Decides Phase 2 ("Persist") of
 [`plans/target-ownership-and-extraction-scope.md`](../plans/target-ownership-and-extraction-scope.md)
 and Phase 3 ("Ownership in the graph", invariant I5) of
 [`plans/evidence-entity-model.md`](../plans/evidence-entity-model.md), which

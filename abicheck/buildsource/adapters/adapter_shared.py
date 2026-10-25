@@ -28,8 +28,8 @@ from typing import Protocol, runtime_checkable
 from ...header_utils import is_msvc_driver_stem
 from ..abi_flags import (
     _XCLANG_WRAPPED_ABI_FLAG_MARKER,
-    ABI_RELEVANT_FLAG_PREFIXES as ABI_RELEVANT_FLAG_PREFIXES,
     SPLIT_OPERAND_ABI_FLAGS,
+    is_abi_relevant_flag,
     is_split_operand_abi_flag_survivor,
     split_operand_survivor as split_operand_survivor,
 )
@@ -841,7 +841,7 @@ def extract_abi_relevant_flags(argv: list[str]) -> list[str]:
             out.append(f"{arg}={argv[i + 1]}")
             i += 2
             continue
-        elif arg.startswith(ABI_RELEVANT_FLAG_PREFIXES):
+        elif is_abi_relevant_flag(arg):
             out.append(arg)
         elif arg in ("-D", "/D") and i + 1 < len(argv):
             # Split form: -D KEY[=VALUE]. Normalize to the combined token.

@@ -35,8 +35,8 @@ from pathlib import Path
 import pytest
 
 from abicheck.bundle_models import BundleSignatureEvidence
-from abicheck.cli_compare_release_matrix import _finalize_release_output
 from abicheck.frontends.cli.release_report import render_release_summary
+from abicheck.frontends.cli.release_summary import _finalize_release_output
 from abicheck.model.symbol_inventory import (
     SymbolInventory,
     build_symbol_inventory,

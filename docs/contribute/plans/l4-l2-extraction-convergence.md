@@ -740,7 +740,7 @@ unified, and two edge cases changed (see the changelog fragment).
 measurement in "Measurements" on the PVXS fixture; it was deliberately not
 changed in this phase.
 
-### Phase 8 — diffing: assess before merging (step 1 landed; steps 2–3 open)
+### Phase 8 — diffing: assess before merging (done: steps 1–3 landed)
 
 Assessment only, no behaviour change. `scripts/source_l2_overlap.py` derives
 each tier's emitter set with the static closure `gen_detector_kind_map.py`
@@ -759,10 +759,10 @@ counterpart.
 
 | L4 kind | L2 kind | Class | Why |
 |---|---|---|---|
-| `INLINE_FUNCTION_REMOVED` | same | **true duplicate — resolved (step 1)** | Header-only inline removed: `_diff_inline_bodies` (L4) and `_check_removed_function` (L2, export confirmed absent) both emit it, with different wording, so the exact and identity keys never collapsed them. Reproduced end to end (C and C++); fixed in `compare.finding_dedup._drop_source_replay_inline_duplicates`. |
-| `CONSTEXPR_VALUE_CHANGED` | `CONSTANT_CHANGED` | near-duplicate | Same namespace-scope `const`/`constexpr` value change, from the same headers. |
-| `PUBLIC_TYPEDEF_REMOVED` | `TYPEDEF_REMOVED` | near-duplicate | Same typedef removal. |
-| `PUBLIC_TYPEDEF_TARGET_CHANGED` | `TYPEDEF_BASE_CHANGED` | near-duplicate | Same typedef retarget. |
+| `INLINE_FUNCTION_REMOVED` | same | **true duplicate — resolved (step 1)** | Header-only inline removed: `_diff_inline_bodies` (L4) and `_check_removed_function` (L2, export confirmed absent) both emit it, with different wording, so the exact and identity keys never collapsed them. Reproduced end to end (C and C++); fixed in `compare.finding_dedup._SOURCE_REPLAY_TWINS` (the inline pair; later generalized by step 2). |
+| `CONSTEXPR_VALUE_CHANGED` | `CONSTANT_CHANGED` | **true duplicate — resolved (step 2)** | Namespace-scope C++ `constexpr` value change: `_diff_declarations` (L4) and `compare.constants` (L2) both emit it, with different wording. The L4 emitter is C++ `constexpr` VarDecls only (`clang_node_predicates`), so plain `const` and C never produce the replay copy. Reproduced end to end (C++ namespaced and nested); fixed in `compare.finding_dedup._SOURCE_REPLAY_TWINS`. |
+| `PUBLIC_TYPEDEF_REMOVED` | `TYPEDEF_REMOVED` | **true duplicate — resolved (step 3)** | Same typedef removal, reproduced end to end (C and C++, nested namespace included); fixed in `compare.finding_dedup._drop_source_replay_typedef_duplicates`. |
+| `PUBLIC_TYPEDEF_TARGET_CHANGED` | `TYPEDEF_BASE_CHANGED` | **true duplicate — resolved (step 3)** | Same typedef retarget, reproduced end to end; fixed by the same function. |
 
 L4-only, not duplication: `CONCEPT_TIGHTENED`, `DEFAULT_ARGUMENT_CHANGED`,
 `GENERATED_HEADER_CHANGED`, `INLINE_BODY_CHANGED`, `ODR_SOURCE_CONFLICT`,
@@ -805,8 +805,47 @@ Name-level pairing has two limits, recorded in `known-gaps.md`: a header symbol
 that does not demangle keeps its replay twin visible (conservative), and two
 overloads of one name pair by count, not by signature.
 
-The near-duplicate pairs are still judged from the emitters, not run. Step 2 is
-where they get reproduced first.
+**Step 2 — landed.** Reproduced first, as step 1 was: `compare --sources --depth
+source` on a C++ fixture (`constexpr int kLimit` in `namespace demo`, 10 → 20)
+emits `constant_changed` (header tier) and `constexpr_value_changed` (replay)
+for the same name, both gating. The C fixture (`static const int`) emits only
+the header copy, because L4 has no replay kind for C or for plain `const`.
+Owner: the header tier, by the same argument as step 1. Option taken: drop the
+L4 emission when the L2 header tier ran, rather than routing the L4 comparison
+through `compare.constants`. The replay copy is matched by qualified name, one
+for one, through the table `_SOURCE_REPLAY_TWINS`, which now also drives the
+inline pair. Before/after on the C++ fixture: verdict `API_BREAK` and exit 2
+unchanged, `detected_total` 3 → 3, `deduplicated` 0 → 1, `gating` 2 → 1, and
+`constant_changed`, `var_value_changed` and every other finding are unchanged.
+Limits, in `known-gaps.md`: pairing is by name only, so a replay copy whose
+value disagrees with the header copy is still dropped; and the "L2 tier not
+run, replay copy kept" case is covered at unit level, because a no-header
+replay matches no symbols and does not produce the copy end to end.
+
+**Step 3 — landed.** Reproduced through `compare --sources --depth source
+--contract all` before the change, on compiled C and C++ fixtures: a typedef
+removed, a typedef retargeted, an unchanged typedef (control), and a typedef in
+a nested namespace. Both tiers emitted every change, under different kinds
+(`TYPEDEF_REMOVED` vs `PUBLIC_TYPEDEF_REMOVED`, `TYPEDEF_BASE_CHANGED` vs
+`PUBLIC_TYPEDEF_TARGET_CHANGED`), so the exact and identity keys never paired
+them. The owner is the header tier, which is the one ADR-063's typedef cutover
+models (`compare.typedefs`). The replay copy is dropped by a one-for-one match on
+the qualified name: the header entity id is rendered through
+`render_display_name_or_leaf` (`demo::inner::deep_t`), and the replay's own
+symbol is already qualified. Kinds must match, so a removal never absorbs a
+retarget. Value spellings are not compared (`long int` vs `long`).
+
+| Before → after (same fixture) | C | C++ |
+|---|---|---|
+| verdict, exit code | `BREAKING`, 4 → `BREAKING`, 4 | `BREAKING`, 4 → `BREAKING`, 4 |
+| `detected_total` | 4 → 4 | 6 → 6 |
+| `deduplicated` | 0 → 2 | 0 → 3 |
+| `gating` | 4 → 2 | 6 → 3 |
+
+No other finding moves: the surviving set is the header-tier copies alone. The
+case where the header tier does not run has no header-tier twin, so the replay
+copy is kept by construction (`tests/test_typedef_dedup.py`). Name-level pairing
+limits are recorded in `known-gaps.md`.
 
 ## Measurements
 

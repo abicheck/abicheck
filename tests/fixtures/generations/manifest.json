@@ -1,0 +1,88 @@
+{
+  "entries": {
+    "1": {
+      "castxml": "castxml version 0.7.0",
+      "commit": "276f25a5c24a",
+      "compiler": "g++ (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0",
+      "snapshot": "gen1/corpus.json.gz"
+    },
+    "10": {
+      "castxml": "castxml version 0.7.0",
+      "commit": "94079d55ad8d",
+      "compiler": "g++ (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0",
+      "snapshot": "gen10/corpus.json.gz"
+    },
+    "11": {
+      "castxml": "castxml version 0.7.0",
+      "commit": "821a3d845aa2",
+      "compiler": "g++ (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0",
+      "snapshot": "gen11/corpus.json.gz"
+    },
+    "12": {
+      "castxml": "castxml version 0.7.0",
+      "commit": "0cfa8938cfbb",
+      "compiler": "g++ (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0",
+      "snapshot": "gen12/corpus.json.gz"
+    },
+    "13": {
+      "castxml": "castxml version 0.7.0",
+      "commit": "59bf2c6a919f",
+      "compiler": "g++ (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0",
+      "snapshot": "gen13/corpus.json.gz"
+    },
+    "14": {
+      "castxml": "castxml version 0.7.0",
+      "commit": "81b71a3c9296",
+      "compiler": "g++ (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0",
+      "snapshot": "gen14/corpus.json.gz"
+    },
+    "15": {
+      "castxml": "castxml version 0.7.0",
+      "commit": "ada15f0f33f7",
+      "compiler": "g++ (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0",
+      "snapshot": "gen15/corpus.json.gz"
+    },
+    "2": {
+      "castxml": "castxml version 0.7.0",
+      "commit": "098e2535fd71",
+      "compiler": "g++ (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0",
+      "snapshot": "gen2/corpus.json.gz"
+    },
+    "3": {
+      "castxml": "castxml version 0.7.0",
+      "commit": "2019836cc92a",
+      "compiler": "g++ (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0",
+      "snapshot": "gen3/corpus.json.gz"
+    },
+    "4": {
+      "castxml": "castxml version 0.7.0",
+      "commit": "35a52095596c",
+      "compiler": "g++ (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0",
+      "snapshot": "gen4/corpus.json.gz"
+    },
+    "5": {
+      "castxml": "castxml version 0.7.0",
+      "commit": "28a3a2c784aa",
+      "compiler": "g++ (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0",
+      "snapshot": "gen5/corpus.json.gz"
+    },
+    "6": {
+      "castxml": "castxml version 0.7.0",
+      "commit": "6f640dd33189",
+      "compiler": "g++ (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0",
+      "snapshot": "gen6/corpus.json.gz"
+    },
+    "9": {
+      "castxml": "castxml version 0.7.0",
+      "commit": "a614517e8979",
+      "compiler": "g++ (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0",
+      "snapshot": "gen9/corpus.json.gz"
+    }
+  },
+  "skipped": {
+    "16": "generation 16 (castxml function-type declarators) and 17 (clang unspellable template defaults) land together in one PR; main goes from 15 straight to 17, so no main commit ever ran generation 16",
+    "7": "generations 7 and 8 were intermediate bumps inside PR #1712's branch (clang positional defaults, dependent members); main went from 6 (49529426d) straight to 9 (c23a9ad57), so no main commit ever ran them",
+    "8": "generations 7 and 8 were intermediate bumps inside PR #1712's branch (clang positional defaults, dependent members); main went from 6 (49529426d) straight to 9 (c23a9ad57), so no main commit ever ran them"
+  },
+  "sources_sha256": "e11d1372d25b44c7369c13f322830386c43e524c696f089c932f146f082d6514"
+}

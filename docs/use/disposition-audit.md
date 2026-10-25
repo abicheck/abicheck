@@ -96,7 +96,8 @@ fared, so "this waiver does nothing any more" is visible rather than silent:
 | `matched_count` | Findings the rule disposed of. For a reclassify rule, the findings whose verdict it changed (also `changed_count`). |
 | `shadowed_count` | Findings the rule also matched but an earlier rule claimed, or a no-op reclassification. |
 | `selector_matched_count` | `matched_count` plus `shadowed_count`. |
-| `rule_id` | The rule's `id:` when it has one, else its canonical identity. `label` and `reason` are their own fields. |
+| `rule_id` | The rule's `id:` when it has one, else `rule-` plus the first 12 hex digits of the SHA-256 of its canonical identity (sorted-key JSON of its selector and gate fields, dates in ISO 8601), e.g. `rule-2f4c127a72d9`. Matches `[A-Za-z0-9._-]+` and is stable across Python versions and YAML key order; give the rule an `id:` for a readable name. `label` and `reason` are their own fields. |
+| `rule_identity` | Only on a rule with no `id:`: the canonical identity its `rule_id` digests, as readable JSON. `suppression_audit.stale_rules` shows the same text, and `suppression_audit.stale_rule_ids` gives each stale entry's `rule_id` in the same order, so you can join a stale entry to its row here. |
 | `entry_index` | The rule's position in its file, so two identical entries stay two rows. |
 
 The status is decided per rule. A rule's `kind`/`change_kind` selector names
