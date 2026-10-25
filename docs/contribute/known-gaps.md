@@ -254,6 +254,11 @@ CJM: trust stage (docs/contribute/cjm.md) — use case UC-WF-analysis-assurance 
 
 ### False-positive risk
 
+#### A toolchain-only rebuild still fails a stated contract's coverage (2026-10-23)
+
+**Status (2026-10-24 at `9513369`): PARTIAL.** #1751 fixed import edges and leaked-dependency symbols; #1770 fixed the binary/toolchain kinds a stated `public` left `UNKNOWN_UNRESOLVED`. Still open: libstdc++ `_ZGTt` transactional-memory clones are not seen as runtime-owned, and runtime exports make the `exports` domain `unmatched_exports` (even for a byte-identical pair). Pinned by shrink-only lists in the toolchain-drift tests.  
+`false-positive` — Under a stated `--contract public|exports`, a rebuild from unchanged source with a static libstdc++ or clang `-O0` `std::` instantiations exits 1 on unsuppressible coverage failures. [Full write-up](known-gaps/toolchain-runtime-rebuild-fails-stated-contract-coverage.md)
+
 #### A binary-only dump loses exports with no debug subprogram, so a still-exported symbol reads as removed (2026-10-25)
 
 **Status (2026-10-25): OPEN.** When debug info yields any function, the binary-only dump declares only debug-confirmed functions. Exports with no subprogram drop out, so a version dumped through the other path disagrees.
