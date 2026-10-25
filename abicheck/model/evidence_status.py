@@ -198,7 +198,7 @@ class CrossSourceEvolution(StrEnum):
     the one predicate every gate/exit-code chokepoint
     (``checker.compare``'s ``all_unsuppressed``,
     ``policy.severity.gate_eligible_changes``,
-    ``policy.severity.gate_contribution_for_change``) shares for that
+    ``policy.gate_contribution.gate_contribution_for_change``) shares for that
     exclusion (Codex review, PR #1172, round 12: this state used to reach
     the gate exactly like ``PERSISTENT``/``INTRODUCED``, contradicting F-9).
     """

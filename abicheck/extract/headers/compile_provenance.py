@@ -23,7 +23,10 @@ from pathlib import Path
 from typing import TypedDict
 
 from ...buildsource.redaction import DEFAULT_REDACTION
-from .template_default_scan import template_default_header_scan
+from .template_default_scan import (
+    alias_or_variable_template_default_scan,
+    template_default_header_scan,
+)
 from .toolchain import (
     _combined_option_tokens,
     _cplusplus_macro_for_standard,
@@ -92,12 +95,20 @@ def _ast_compile_provenance(
         "ast_cplusplus_macro": _cplusplus_macro_for_standard(resolved_standard),
         "ast_compile_args": tuple(DEFAULT_REDACTION.argv(args)),
         "ast_sysroot": DEFAULT_REDACTION.path(str(sysroot)) if sysroot else None,
-        # ADR-085 D3: castxml cannot record class- or function-template parameter defaults,
-        # so its run scans the headers it parsed for one. Other producers record
-        # them (clang) or are hybrid, and get no scan.
-        "template_default_header_scan": (
-            template_default_header_scan(headers)
-            if (ast_toolchain or {}).get("producer") == "castxml"
-            else None
+        "template_default_header_scan": _template_default_scan(
+            headers, (ast_toolchain or {}).get("producer")
         ),
     }
+
+
+def _template_default_scan(headers: list[Path], producer: str | None) -> bool | None:
+    """ADR-085 D3: whether the parsed headers declare a template-parameter
+    default *producer* does not record. castxml records none, so any default
+    counts. clang records class- and function-template defaults but models
+    neither alias nor variable templates, so only those count. Other
+    producers (hybrid, none) get no scan: ``None``."""
+    if producer == "castxml":
+        return template_default_header_scan(headers)
+    if producer == "clang":
+        return alias_or_variable_template_default_scan(headers)
+    return None

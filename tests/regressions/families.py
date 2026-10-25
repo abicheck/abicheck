@@ -295,6 +295,7 @@ FAMILIES: dict[str, Family] = {
 
 
 _F1 = (
+    "scoping.dependency_internals_in_contract",
     "classification.non_entity_finding_feeds_contract_coverage",
     "detector.selector_axis_unstamped",
     "detector.removal_from_header_enumeration",

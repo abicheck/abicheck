@@ -50,20 +50,29 @@ runs:
     # produced -- validating the cache instead of the PR's extractor.
     #
     # The key is the content of every input that can change an entry: the
-    # catalog/example sources (headers), the toolchain versions, and the AST
-    # cache schema constants in extract/headers/ast_config.py. Unchanged inputs mean an
+    # catalog/example sources (headers), the toolchain versions, and the whole
+    # abicheck package source. The package hash is not optional: a dump is a
+    # function of the extractor's code (argv builders, header-dialect and
+    # target inference, EXTRACTOR_GENERATION in storage/versioning.py), so a
+    # cache keyed only on the toolchain and on ast_config.py could restore
+    # entries an older extractor wrote and serve them to a newer one. Unchanged inputs mean an
     # exact hit, and actions/cache skips the save on an exact hit, so a run
     # that changes none of them neither saves a new entry nor evicts other
     # caches (the previous key ended in github.run_id, which saved a fresh
     # entry for every leg of every run). A changed input restores the closest
     # prefix match and saves once under the new key; entries the dumper's own
     # key no longer matches are simply never read.
+    #
+    # The restore-keys prefix carries the package hash too, so a prefix match
+    # never crosses an extractor generation: it can only reuse entries written
+    # by the same abicheck source. Bump the `v3` schema token to invalidate
+    # every existing entry at once.
     - name: Cache abicheck header-AST dumps (castxml/clang)
       uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830  # v4.3.0
       with:
         path: |
           ~/.cache/abi_check/castxml
           ~/.cache/abi_check/clang
-        key: abi-check-ast-v2-${{ runner.os }}-${{ inputs.key-suffix }}-${{ hashFiles('results/abi-check-toolchain-versions.txt', 'abicheck/extract/headers/ast_config.py') }}-${{ hashFiles('examples/**', 'catalog/**') }}
+        key: abi-check-ast-v3-${{ runner.os }}-${{ inputs.key-suffix }}-${{ hashFiles('results/abi-check-toolchain-versions.txt', 'abicheck/extract/headers/ast_config.py') }}-${{ hashFiles('abicheck/**/*.py') }}-${{ hashFiles('examples/**', 'catalog/**') }}
         restore-keys: |
-          abi-check-ast-v2-${{ runner.os }}-${{ inputs.key-suffix }}-${{ hashFiles('results/abi-check-toolchain-versions.txt', 'abicheck/extract/headers/ast_config.py') }}-
+          abi-check-ast-v3-${{ runner.os }}-${{ inputs.key-suffix }}-${{ hashFiles('results/abi-check-toolchain-versions.txt', 'abicheck/extract/headers/ast_config.py') }}-${{ hashFiles('abicheck/**/*.py') }}-
