@@ -90,6 +90,14 @@ def _findings(changes: list) -> set[Finding]:
     return {(c.kind.value, c.symbol) for c in changes}
 
 
+def _unqualified(symbol: str) -> str:
+    """*symbol* without its leading scope (``ns::T<ns::U>`` -> ``T<ns::U>``):
+    the header model names a type by its unqualified name, a debug layout by
+    its qualified one."""
+    head, angle, args = symbol.partition("<")
+    return head.rpartition("::")[2] + angle + args
+
+
 def depth_violations(
     by_depth: dict[str, set[Finding]],
 ) -> list[tuple[str, str, set[Finding]]]:
@@ -97,11 +105,13 @@ def depth_violations(
     the removal findings the lower rung reports on a symbol the higher rung
     reports *nothing* about. A higher rung that judges the same symbol under
     another kind (``func_static_changed`` for a binary-rung ``func_removed``
-    of the old mangled name) is a rung-specific spelling of one finding, not
-    an invention."""
+    of the old mangled name), or the same type under its unqualified name
+    (the binary rung's debug layout spells ``ns::T``, the header model
+    ``T``), is a rung-specific spelling of one finding, not an invention."""
     out = []
     for lo, hi in zip(_DEPTHS, _DEPTHS[1:], strict=False):
         judged = {sym for _, sym in by_depth[hi]}
+        judged |= {_unqualified(sym) for sym in judged}
         extra = {
             (kind, sym)
             for kind, sym in by_depth[lo]
@@ -110,6 +120,7 @@ def depth_violations(
             and kind not in _COMPATIBLE
             and (kind, sym) not in by_depth[hi]
             and sym not in judged
+            and _unqualified(sym) not in judged
         }
         if extra:
             out.append((lo, hi, extra))
@@ -134,6 +145,14 @@ def test_depth_violations_flags_an_invented_lower_rung_removal() -> None:
     assert depth_violations(ladder) == []
     ladder["headers"] = {("func_removed", "f"), ("func_removed_elf_only", "h")}
     assert depth_violations(ladder) == []
+    # A qualified debug spelling of a type the higher rung names unqualified.
+    ladder = {d: {("func_removed", "f"), ("type_removed", "T<ns::U>")} for d in _DEPTHS}
+    ladder["binary"] = {("func_removed", "f"), ("type_removed", "ns::T<ns::U>")}
+    assert depth_violations(ladder) == []
+    ladder["binary"] = {("func_removed", "f"), ("type_removed", "ns::Other")}
+    assert depth_violations(ladder) == [
+        ("binary", "headers", {("type_removed", "ns::Other")})
+    ]
 
 
 def test_depth_rungs_are_the_public_ladder() -> None:
@@ -141,6 +160,7 @@ def test_depth_rungs_are_the_public_ladder() -> None:
 
 
 @pytest.mark.integration
+@pytest.mark.model_warning_hygiene
 @pytest.mark.parametrize("case_name", [c for c, _ in _ALL_CASES])
 def test_lower_depth_never_invents_a_removal(
     case_name: str, tmp_path: Path, shared_cmake_build_dir: Path | None
@@ -170,7 +190,7 @@ def test_lower_depth_never_invents_a_removal(
     old = dump(v1_lib, headers=_header_list(v1_hdr), version="v1")
     new = dump(v2_lib, headers=_header_list(v2_hdr), version="v2")
 
-    kinds_by_depth = {}
+    kinds_by_depth: dict[str, set[Finding]] = {}
     for depth in _DEPTHS:
         p_old, p_new = project_pair_to_depth(old, new, depth)
         kinds_by_depth[depth] = _findings(compare(p_old, p_new).changes)

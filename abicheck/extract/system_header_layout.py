@@ -95,14 +95,36 @@ def _looks_like_multiarch_component(component: str) -> bool:
     )
 
 
+#: The mingw-w64 target triple, exactly: ``x86_64-w64-mingw32``,
+#: ``i686-w64-mingw32``, ``aarch64-w64-mingw32``. Far narrower than
+#: :func:`_looks_like_multiarch_component`, which is why it alone may stand
+#: under any prefix (below).
+_MINGW_W64_TRIPLE_RE = re.compile(r"^[A-Za-z0-9_]+-w64-mingw32$")
+
+
 def _cross_sysroot_includes(segs: tuple[str, ...]) -> list[tuple[str, ...]]:
-    """``usr/<triple>/include`` roots in *segs*: Debian/Ubuntu's cross-toolchain
-    sysroot (``/usr/aarch64-linux-gnu/include``, ``/usr/x86_64-w64-mingw32/
-    include``), treated exactly like ``usr/include`` for the target."""
-    return [
+    """Target system include roots in *segs*, treated exactly like
+    ``usr/include`` for the target:
+
+    * ``usr/<triple>/include`` -- Debian/Ubuntu's cross-toolchain sysroot
+      (``/usr/aarch64-linux-gnu/include``, ``/usr/x86_64-w64-mingw32/include``);
+    * ``<arch>-w64-mingw32/include`` under any prefix -- a standalone
+      mingw-w64 install (``C:/mingw64``, MSYS2 ``/mingw64``, Strawberry's
+      ``c/``) keeps its CRT at ``<prefix>/<triple>/include``, reported as
+      ``<prefix>/lib/gcc/<triple>/<ver>/../../../../<triple>/include``. Only
+      this exact triple shape is accepted unanchored; any other triple-shaped
+      directory still needs the ``usr`` anchor.
+    """
+    roots = [
         segs[i : i + 3]
         for i in range(len(segs) - 2)
         if segs[i] == "usr"
         and segs[i + 2] == "include"
         and _looks_like_multiarch_component(segs[i + 1])
     ]
+    roots += [
+        segs[i : i + 2]
+        for i in range(len(segs) - 1)
+        if segs[i + 1] == "include" and _MINGW_W64_TRIPLE_RE.match(segs[i])
+    ]
+    return roots

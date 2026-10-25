@@ -302,7 +302,11 @@ def _suppressed_major_class_recommendation(
         return None
     binary_break = any(r.verdict_class == Verdict.BREAKING.value for r in hidden)
     rules = sorted(
-        {r.rule.rule_id for r in hidden if r.rule is not None and r.rule.rule_id}
+        {
+            r.rule.readable_name()
+            for r in hidden
+            if r.rule is not None and r.rule.rule_id
+        }
     )
     attribution = f" (rule(s): {', '.join(rules)})" if rules else ""
     kinds = ", ".join(sorted({r.kind for r in hidden}))

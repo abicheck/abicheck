@@ -661,8 +661,14 @@ ANALYSIS_1_BUG_CLASSES: tuple[BugClass, ...] = (
             # Field report H5: exports whose declarations an undefined #ifdef
             # (SYCL_LANGUAGE_VERSION) hid from the header parse vanished with
             # no count; now counted per side, sycl:: as a named cause.
+            # ADR-085 D3: a template-default change whose default no backend
+            # recorded (castxml; an unspellable clang function-template default)
+            # read complete NO_CHANGE; now partial with the gap named.
+            "tests/test_template_default_assurance_gap.py",
             "tests/test_undeclared_export_census.py",
             "tests/test_undeclared_sycl_census_integration.py",
+            "tests/test_sycl_stub_parse_integration.py",
+            "tests/test_field_shapes.py",
         ),
         # Only the two consumer-scoping seeds reach a public surface: their integration tests drive `abicheck compare --used-by` end to end.
         public_surfaces=("cli",),

@@ -44,7 +44,8 @@ from abicheck.storage.package import SECTION_KINDS
 #: And `static_archive` (ADR-086): this run read the export table from a
 #: static archive's symbol index; never serialized. And
 #: `header_declaration_ids`: the L2 declaration ids a depth projection kept;
-#: `projection_unavailable`: the facts it cleared.
+#: `projection_unavailable`: the facts it cleared. `spellings_generation` is
+#: persisted only inside the `fact_generations` stamp, never as its own key.
 _NEVER_IN_A_DOCUMENT = (
     "semantic_ir",
     "semantic_ir_conflicts",
@@ -55,6 +56,7 @@ _NEVER_IN_A_DOCUMENT = (
     "static_archive",
     "header_declaration_ids",
     "projection_unavailable",
+    "spellings_generation",
     "_func_by_mangled",
     "_var_by_mangled",
     "_type_by_name",

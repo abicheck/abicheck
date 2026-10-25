@@ -52,7 +52,9 @@ from ....report.release_document import (
     build_release_report,
     stored_reported_verdict,
 )
+from ....report.release_formats import STORED_RELEASE_FORMATS
 from ....report.render_release_report import (
+    render_release_text,
     render_stored_release_json,
     render_stored_release_markdown,
 )
@@ -66,6 +68,7 @@ from ....workflows.bundle_facts_stored_request import (
     reject_explicit_compile_config,
 )
 from ....workflows.gate import resolve_scope_decision
+from .compare_bundle_facts_release import stored_release_evaluation
 
 
 def _click_error(exc: BundleFactsCompareError) -> click.ClickException:
@@ -189,6 +192,21 @@ def apply_env_toggles_for_stored_pair(
             f"cannot parse build config {config_path}: {exc}"
         ) from exc
     apply_env_toggles(ctx, cfg)
+
+
+def _reject_unrendered_formats(request: Any) -> None:
+    """Refuse a ``-o`` format a stored comparison does not render.
+
+    The one format list is ``report.release_formats.STORED_RELEASE_FORMATS``;
+    this is the layer that renders, so it owns the check. Usage error (exit 64).
+    """
+    for fmt in (request.fmt, *(f for f, _path in request.secondary_writes)):
+        if fmt not in STORED_RELEASE_FORMATS:
+            raise click.UsageError(
+                f"-o {fmt}=... is not available with a stored-bundle-facts OLD_INPUT: "
+                "only json/markdown/junit/oneline are supported for a stored-bundle-facts "
+                "comparison. Choose one of: json, markdown, junit, oneline."
+            )
 
 
 def _warn(message: str) -> None:
@@ -336,6 +354,7 @@ def dispatch(
         new_is_stored=new_is_stored,
         config_explicit=config_explicit,
     )
+    _reject_unrendered_formats(request)
     try:
         outcome = execute_bundle_facts_compare(request)
     except BundleFactsCompareError as exc:
@@ -405,13 +424,30 @@ def _render(
     scope_terms: ComparisonScopeTerms | None = None,
     assurance_decision: ReleaseAssuranceDecision | None = None,
 ) -> str:
-    """Hand the stored-operand comparison to the one release report builder
-    (``report.release_document``) and render it as *fmt* (``markdown``, else
-    JSON). With no *scope_terms*, the default ``scope.on_incomplete`` policy
-    is applied to *result*'s own scope record."""
+    """Render the stored-operand comparison as *fmt*. ``junit``/``oneline``
+    go through the live release renderer; ``markdown``, else JSON, go through
+    the stored document builder in ``report.release_document``. With no
+    *scope_terms*, the default ``scope.on_incomplete`` policy is applied to
+    *result*'s own scope record."""
     if scope_terms is None:
         scope_terms = comparison_scope_terms(
             resolve_scope_decision(getattr(result, "scope_record", None), None)
+        )
+    if fmt in ("junit", "oneline"):
+        # The live release renderer, fed the stored comparison's own entries.
+        evaluation = stored_release_evaluation(
+            result,
+            worst_verdict=stored_reported_verdict(result),
+            old_facts_path=old_facts_path,
+            new_dir=new_dir,
+            scope_terms=scope_terms,
+            assurance_decision=assurance_decision,
+            require_complete_analysis=bool(
+                assurance_decision and assurance_decision.require_complete
+            ),
+        )
+        return render_release_text(
+            fmt, build_release_report(evaluation), demangle=False
         )
     report = build_release_report(
         StoredReleaseEvaluation(

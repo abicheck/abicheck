@@ -21,6 +21,7 @@ tests/test_action_additions_verdict.py
 tests/test_action_compare_operand_format.py
 tests/test_action_resolve_baseline.py
 tests/test_action_stage_baseline.py
+tests/test_action_step_summary_no_adr.py
 tests/test_action_unused_rules_verdict.py
 tests/test_adr061_gap_b_facades.py
 tests/test_advanced_extraction_status.py
@@ -95,6 +96,7 @@ tests/test_bundle_facts_archive.py
 tests/test_bundle_facts_archive_hardening.py
 tests/test_bundle_facts_artifact_type.py
 tests/test_bundle_facts_library_overrides.py
+tests/test_bundle_facts_signature_evidence.py
 tests/test_bundle_facts_store.py
 tests/test_bundle_facts_streaming_write.py
 tests/test_bundle_member_baseline_staging.py
@@ -104,6 +106,7 @@ tests/test_bundle_side_input.py
 tests/test_bundle_side_input_env_matrix_digest.py
 tests/test_bundle_stored_file_members.py
 tests/test_bundle_stored_pair_compare.py
+tests/test_bundle_unresolved_imports.py
 tests/test_bundle_variants_capture.py
 tests/test_bundlefacts_l2_request_reuse.py
 tests/test_call_graph.py
@@ -117,6 +120,7 @@ tests/test_castxml_enum_underlying_type.py
 tests/test_castxml_fact_construction.py
 tests/test_castxml_free_examples.py
 tests/test_castxml_hidden_friends.py
+tests/test_castxml_literal_double_underscore_mangled.py
 tests/test_castxml_ref_qualifier_vtable.py
 tests/test_castxml_schema_completeness.py
 tests/test_castxml_var_access_value.py
@@ -138,7 +142,9 @@ tests/test_clang_layout_tool.py
 tests/test_clang_macro_qualifier.py
 tests/test_clang_param_restrict.py
 tests/test_clang_param_va_list.py
+tests/test_clang_projection_public_surface.py
 tests/test_clang_specialization_spelling_location.py
+tests/test_clang_template_index_reuse.py
 tests/test_clang_template_index_reuse_e2e.py
 tests/test_class_metadata_owner_contract.py
 tests/test_class_template_origin_unit.py
@@ -218,6 +224,7 @@ tests/test_compare_release_annotations.py
 tests/test_compare_release_contract_coverage.py
 tests/test_compare_release_env_matrix.py
 tests/test_compare_release_lockstep_soname.py
+tests/test_compare_release_parallel_dedup.py
 tests/test_compare_request_configuration_parity.py
 tests/test_compare_request_inline_evidence.py
 tests/test_compare_request_probe_matrix.py
@@ -241,6 +248,7 @@ tests/test_conftest_host_memory_pin.py
 tests/test_const_pointer_abi_neutral.py
 tests/test_constant_cutover.py
 tests/test_constant_cutover_dedup.py
+tests/test_constexpr_constant_dedup.py
 tests/test_consumer_graph.py
 tests/test_contract_adaptive_default_fallback.py
 tests/test_contract_adaptive_default_monotone.py
@@ -248,6 +256,7 @@ tests/test_contract_api.py
 tests/test_contract_authoritative_pipeline.py
 tests/test_contract_conflicts.py
 tests/test_contract_context_io.py
+tests/test_contract_context_with_resolved_gate.py
 tests/test_contract_coverage_exit.py
 tests/test_contract_coverage_ledger.py
 tests/test_contract_evaluation.py
@@ -259,6 +268,7 @@ tests/test_contract_legacy_scope_mapping.py
 tests/test_contract_replay.py
 tests/test_contract_replay_node_ids.py
 tests/test_contract_shadow_measurement.py
+tests/test_contract_subject_totality.py
 tests/test_contract_toolchain_runtime_origin.py
 tests/test_contract_type_identities.py
 tests/test_cov95_cli.py
@@ -287,6 +297,7 @@ tests/test_decode_memo.py
 tests/test_demangle_batching_consumers.py
 tests/test_demangled_symbol_field.py
 tests/test_deprecation_family_facts.py
+tests/test_depth_detector_input_contract.py
 tests/test_depth_projection.py
 tests/test_depth_projection_ownership.py
 tests/test_depth_vocabulary.py
@@ -342,12 +353,20 @@ tests/test_dump_request_from_cli.py
 tests/test_dump_resolved_execution_context.py
 tests/test_dump_source_only_execution.py
 tests/test_dumper_clang.py
+tests/test_dumper_clang_compiler_generated.py
+tests/test_dumper_clang_extern_c_identity.py
+tests/test_dumper_clang_fact_construction.py
 tests/test_dumper_clang_vtable.py
+tests/test_dumper_clang_vtable_redecl.py
 tests/test_dumper_contract_wiring.py
 tests/test_dumper_coverage.py
+tests/test_dumper_elf_fallback_coverage.py
 tests/test_dumper_hybrid.py
+tests/test_dumper_hybrid_semantic_ir.py
 tests/test_dumper_manifest.py
+tests/test_dumper_manifest_semantic_ir.py
 tests/test_dumper_members.py
+tests/test_dumper_phase1.py
 tests/test_dumper_presence_semantic_ir.py
 tests/test_dumper_scoping.py
 tests/test_dumper_unit.py
@@ -366,6 +385,7 @@ tests/test_dwarf_vptr_offset.py
 tests/test_edge_cases.py
 tests/test_edge_coverage_readers.py
 tests/test_effective_config_digest.py
+tests/test_effective_config_digest_scheme.py
 tests/test_effective_gate.py
 tests/test_effective_gate_single_input.py
 tests/test_effective_verdict.py
@@ -380,6 +400,7 @@ tests/test_elf_symbol_roundtrip_and_origin.py
 tests/test_elf_symbol_versions.py
 tests/test_elf_version_alias_binding.py
 tests/test_elf_version_policy.py
+tests/test_embedded_growth_shift.py
 tests/test_entity_id_carrier.py
 tests/test_enum_cross_tier_dedup.py
 tests/test_enum_sentinel_and_tag_heuristics.py
@@ -442,13 +463,14 @@ tests/test_g23_phase_d.py
 tests/test_g23_vtable_b1.py
 tests/test_g23_vtable_b2.py
 tests/test_gate_decision_shared.py
+tests/test_generation_corpus.py
+tests/test_generation_drift_demotion.py
 tests/test_golden_output.py
 tests/test_golden_review_digest.py
 tests/test_golden_root_cause.py
 tests/test_graph_coverage_suppression.py
 tests/test_graph_dependency_renames.py
 tests/test_graph_entity_identity.py
-tests/test_graph_identity_invariants.py
 tests/test_graph_observed_persistence.py
 tests/test_graph_reconcile.py
 tests/test_graph_reconcile_candidate_index.py
@@ -484,6 +506,7 @@ tests/test_incremental_compression.py
 tests/test_informational_never_gates.py
 tests/test_inline_body_internal_namespaces.py
 tests/test_inline_fact_reliability.py
+tests/test_inline_removal_dedup.py
 tests/test_input_resolution_unit.py
 tests/test_inputs_pack.py
 tests/test_inputs_validate.py
@@ -501,6 +524,7 @@ tests/test_kabi_examples.py
 tests/test_kde_compat_detectors.py
 tests/test_l0_export_delta.py
 tests/test_l0_fold_every_route.py
+tests/test_l2_ast_acquisition_singleflight.py
 tests/test_l3l4l5_examples.py
 tests/test_l5_producer_coverage.py
 tests/test_lambda_closure_function_demotion.py
@@ -516,6 +540,7 @@ tests/test_libuv_private_type_churn.py
 tests/test_macho_metadata_unit.py
 tests/test_macos_arm64_abi.py
 tests/test_macro_graph.py
+tests/test_manifest_semantic_ir_locality.py
 tests/test_markdown_rollup_conservation.py
 tests/test_markdown_trailing_newline.py
 tests/test_member_compare_typed_path.py
@@ -549,8 +574,11 @@ tests/test_orphan_struct.py
 tests/test_overload_ambiguity.py
 tests/test_override_graph.py
 tests/test_ownership_entry_points.py
+tests/test_ownership_relations.py
 tests/test_p3_feature_gaps.py
 tests/test_pack_application.py
+tests/test_pack_application_project_override_warning.py
+tests/test_pack_application_provenance.py
 tests/test_package.py
 tests/test_package_component_inventory.py
 tests/test_package_unit_extra.py
@@ -619,15 +647,20 @@ tests/test_release_compare_workflow.py
 tests/test_release_discovery_name_vs_content.py
 tests/test_release_disposition_disclosure.py
 tests/test_release_evaluation_config.py
+tests/test_release_header_exclusions.py
 tests/test_release_html_report.py
+tests/test_release_member_processes.py
 tests/test_release_member_type_attribution.py
 tests/test_release_obligation_standing.py
+tests/test_release_outcome.py
+tests/test_release_output_finalization.py
 tests/test_release_package_inventory_cli.py
 tests/test_release_public_api.py
 tests/test_release_public_surface.py
 tests/test_release_public_surface_drivers.py
 tests/test_release_public_surface_persistence.py
 tests/test_release_request_parity.py
+tests/test_release_run_outcome.py
 tests/test_release_scan_hotspots.py
 tests/test_release_scope_bundle.py
 tests/test_release_scope_completeness.py
@@ -656,9 +689,12 @@ tests/test_review_fixes.py
 tests/test_root_cause_scoped_only_evidence.py
 tests/test_root_type_matching.py
 tests/test_rule_id_grammar.py
+tests/test_rule_id_token_properties.py
+tests/test_rule_identity_report_fields.py
 tests/test_rule_status_per_kind.py
 tests/test_run_outcome.py
 tests/test_sarif.py
+tests/test_sarif_property_projections.py
 tests/test_scan_accuracy.py
 tests/test_scan_hotspot_memos.py
 tests/test_scenarios.py
@@ -699,6 +735,7 @@ tests/test_snapshot_digest_recomputation.py
 tests/test_snapshot_encode_single_pass.py
 tests/test_snapshot_encode_sorted_dispatch.py
 tests/test_snapshot_envelope_out_of_band_readers.py
+tests/test_snapshot_generation_migration.py
 tests/test_snapshot_output_destination.py
 tests/test_snapshot_python_ext_backfill.py
 tests/test_snapshot_roundtrip.py
@@ -767,9 +804,11 @@ tests/test_template_graph.py
 tests/test_template_graph_fold.py
 tests/test_template_graph_identity.py
 tests/test_template_graph_value_decls.py
+tests/test_template_instance_absence_shapes.py
 tests/test_template_param_defaults.py
 tests/test_tier_accuracy_gate.py
 tests/test_tu_merge.py
+tests/test_tu_merge_variable_linkage.py
 tests/test_type_indirection.py
 tests/test_type_symbol_disambiguation.py
 tests/test_typed_api_gate_options.py
@@ -777,6 +816,7 @@ tests/test_typed_dump_request.py
 tests/test_typed_scope_paths.py
 tests/test_typedef_bare_symbol_disambiguation.py
 tests/test_typedef_cutover.py
+tests/test_typedef_dedup.py
 tests/test_typedef_qualified_collision.py
 tests/test_typedef_version_sentinel.py
 tests/test_typefield_case_a_facts.py
@@ -784,6 +824,7 @@ tests/test_undeclared_export_additions.py
 tests/test_undeclared_export_binding.py
 tests/test_undocumented_export_surface_scope.py
 tests/test_unversioned_exported_symbol.py
+tests/test_use_case_html_sarif_carriage.py
 tests/test_use_case_impact.py
 tests/test_use_case_per_finding.py
 tests/test_use_cases.py
@@ -795,6 +836,7 @@ tests/test_variable_cutover.py
 tests/test_vector_abi.py
 tests/test_versioned_symbol_scheme.py
 tests/test_versioning_policy.py
+tests/test_versioning_policy_wiring.py
 tests/test_view_internal_grammar.py
 tests/test_virtual_dispatch_graph.py
 tests/test_visibility.py
@@ -811,6 +853,7 @@ tests/test_xcheck_scenarios.py
 tests/test_zstd_multithread_determinism.py
 tests/unit/buildsource/test_baseline_set_sectioned.py
 tests/unit/compare/test_namespace_move.py
+tests/unit/compare/test_target_isa_detector.py
 tests/unit/extract/test_library_export_read_failures.py
 tests/unit/policy/test_consumer_requirements.py
 tests/unit/policy/test_consumer_requirements_examples.py
@@ -822,6 +865,7 @@ tests/unit/report/test_evidence_status_json.py
 tests/unit/report/test_evidence_status_sarif.py
 tests/unit/report/test_html_policy_facts.py
 tests/unit/report/test_markdown_cross_source_evolution.py
+tests/unit/report/test_markdown_report_budget.py
 tests/unit/report/test_policy_facts.py
 tests/unit/report/test_policy_facts_boundary.py
 tests/unit/report/test_release_document.py
@@ -836,6 +880,7 @@ tests/unit/report/test_result_counts.py
 tests/unit/report/test_review_group_bounds.py
 tests/unit/report/test_review_groups.py
 tests/unit/report/test_review_sections_html.py
+tests/unit/report/test_scoped_gate_facts.py
 tests/unit/report/test_section_notes.py
 tests/unit/storage/test_bundle_facts_generation_drift.py
 tests/unit/storage/test_decode_fast_path.py

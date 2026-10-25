@@ -6,9 +6,9 @@ Which public surface reaches each ADR, which use cases it serves, and whether a 
 
 | Disposition | ADRs |
 |---|---|
-| surfaced | 47 |
+| surfaced | 48 |
 | partial | 14 |
-| gap | 7 |
+| gap | 8 |
 | internal | 20 |
 
 ## ADRs
@@ -78,7 +78,7 @@ Which public surface reaches each ADR, which use cases it serves, and whether a 
 | [ADR-059](../adr/059-compressed-snapshot-storage.md) | surfaced | UC-WF-baseline | `cli: dump --compression`<br>`action: snapshot-compression` | — |
 | [ADR-060](../adr/060-synthetic-consumer-compile-probe-deferral.md) | gap | — | — | Decision to defer; no synthetic-consumer compile probe exists and none is scheduled. |
 | [ADR-061](../adr/061-responsibility-package-architecture.md) | internal | — | — | Internal package architecture and import direction. |
-| [ADR-062](../adr/062-project-snapshot-storage-v2.md) | partial | UC-WF-baseline | `api: abicheck.storage` | Proposed; only Phase 0 primitives and the default single-artifact format are wired. |
+| [ADR-062](../adr/062-project-snapshot-storage-v2.md) | partial | UC-WF-baseline | `api: abicheck.storage`<br>`cli: compare --require-same-generation` | Proposed; only Phase 0 primitives and the default single-artifact format are wired. |
 | [ADR-063](../adr/063-one-semantic-pipeline.md) | partial | UC-WF-analysis-assurance | `cli: compare` | Roadmap ADR; Phase 10 accounting remains open. |
 | [ADR-064](../adr/064-canonical-gate-algorithm-and-exit-decision.md) | surfaced | UC-WF-compare | `cli: compare --severity-preset`<br>`report: compare_report.exit`<br>`action: severity-preset` | — |
 | [ADR-065](../adr/065-comparison-scope-selection-and-completeness.md) | surfaced | UC-WF-compare, UC-WF-scope-completeness | `cli: compare --select --select-required --dry-run`<br>`report: compare_report.comparison_scope`<br>`report: compare_report.run_outcome` | — |
@@ -103,6 +103,8 @@ Which public surface reaches each ADR, which use cases it serves, and whether a 
 | [ADR-080](../adr/080-persisting-the-advanced-dwarf-extraction-status.md) | gap | — | — | Proposed, not yet implemented; the advanced-DWARF extraction status is in memory only and is not persisted. |
 | [ADR-082](../adr/082-declared-header-order-independent-extraction.md) | internal | — | — | Dump-time proof of declared-header order and the stored header_canonical contract field; users reach it only through dump/compare, and the change is a schema v59 contract field, not a flag, report field or exit code. |
 | [ADR-086](../adr/086-static-archive-no-baseline-export-audit.md) | surfaced | UC-ARCH-static-lib | `cli: compare --no-baseline` | — |
+| [ADR-087](../adr/087-report-pages-publication.md) | gap | — | — | Proposed, not yet implemented; no publish-report reusable workflow, site generator, or page-link Action input exists yet. |
+| [ADR-088](../adr/088-one-compare-exit-gate.md) | surfaced | — | `api: abicheck.workflows.service_requests.CompareRequest` | — |
 
 ## Use cases by user task
 
@@ -116,7 +118,6 @@ Which public surface reaches each ADR, which use cases it serves, and whether a 
 ## ADR surfaces no scenario traces
 
 - ADR-002 cli: compare --select
-- ADR-002 report: compare_report.comparison_scope
 - ADR-004 report: compare_report.filtered_summary
 - ADR-004 report: compare_report.redundant_count
 - ADR-004 report: compare_report.root_causes
@@ -207,7 +208,6 @@ Which public surface reaches each ADR, which use cases it serves, and whether a 
 - ADR-052 report: compare_report.consumer_impact_summary
 - ADR-054 cli: project plan
 - ADR-054 cli: project validate
-- ADR-055 api: abicheck.workflows.service_requests.CompareRequest
 - ADR-055 api: abicheck.workflows.service_requests.DumpRequest
 - ADR-055 report: compare_report.report_schema_version
 - ADR-057 cli: compare --use-cases --used-by
@@ -215,11 +215,10 @@ Which public surface reaches each ADR, which use cases it serves, and whether a 
 - ADR-059 action: snapshot-compression
 - ADR-059 cli: dump --compression
 - ADR-062 api: abicheck.storage
+- ADR-062 cli: compare --require-same-generation
 - ADR-064 action: severity-preset
 - ADR-064 report: compare_report.exit
 - ADR-065 cli: compare --select --select-required --dry-run
-- ADR-065 report: compare_report.comparison_scope
-- ADR-065 report: compare_report.run_outcome
 - ADR-066 api: abicheck.workflows.history.build_longitudinal_history
 - ADR-066 cli: project history --policy
 - ADR-067 report: compare_report.disposition_audit

@@ -68,7 +68,11 @@ _CLANG_CACHE_SCHEMA_VERSION = 4
 #: calling-convention macro table (`extract.headers.castxml.macro_table`).
 #: Bumped to 5 when that table was replaced by the preprocessed text of each
 #: convention-bearing declaration (`extract.headers.castxml.preprocessed_text`).
-_CASTXML_CACHE_SCHEMA_VERSION = 5
+#: Bumped to 6 when vector types joined the clang AST: a castxml entry written
+#: before this carries no vector spellings, so it must miss and re-run.
+#: Bumped to 7 when vector sidecars keyed C++ overloads by mangled name and
+#: resolved inline vector returns: a sidecar from before this is keyed wrongly.
+_CASTXML_CACHE_SCHEMA_VERSION = 7
 
 #: Which module constant salts each backend's header-parse cache key. Named,
 #: not copied, so the key always reads the constant's current value.

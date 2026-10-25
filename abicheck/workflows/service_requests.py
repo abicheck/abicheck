@@ -180,6 +180,8 @@ class CompareRequest:
     # caller can still see a result but knows not to trust it. Forwarded
     # to ``checker.compare``'s own ``diagnostic_comparison`` parameter.
     diagnostic_comparison: bool = False
+    # ADR-062 D2: refuse a cross-generation pair (workflows/generation_drift).
+    require_same_generation: bool = False
     # ADR-049: classify each finding's contract relevance before
     # compatibility policy, which then scores only IN_CONTRACT/NOT_APPLICABLE
     # findings. On by default since Phase 7, matching the CLI: an
@@ -342,12 +344,12 @@ class CompareRequest:
     #: The ``DEFAULTED_COMPARE_PARAMETERS`` stated (the CLI derives its set
     #: from Click's ``ParameterSource``); ``None`` reads every field as stated.
     stated_settings: frozenset[str] | None = field(default=None, kw_only=True)
-    #: The one automatic gate algorithm (ADR-064/CLI cleanup phase two PR
-    #: G2) is fully determined by whether a severity setting is in effect
-    #: -- there is no ``exit_code_scheme`` field here to force one direction
-    #: or the other (removed in PR G2 along with the CLI flag, the
-    #: ``.abicheck.yml`` key, and the pack field it used to mirror).
-    severity_preset: str | None = field(default=None, kw_only=True)  # ADR-064/PR G2
+    severity_preset: str | None = field(default=None, kw_only=True)  # ADR-064
+    severity_abi_breaking: str | None = field(default=None, kw_only=True)  # ADR-088
+    severity_potential_breaking: str | None = field(default=None, kw_only=True)
+    severity_quality_issues: str | None = field(default=None, kw_only=True)
+    severity_addition: str | None = field(default=None, kw_only=True)
+    require_complete_analysis: bool = field(default=False, kw_only=True)
     #: ADR-068 / plan §3 #12 (Phase 2c): the resolved changed-path seed
     #: (``compare --changed-path``, or ``--since`` after its ``git diff``).
     #: Scoping input only -- it produces no finding of its own; it narrows

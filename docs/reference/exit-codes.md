@@ -165,6 +165,10 @@ can be demoted. Only legacy output without a gate block falls back from
 compatibility verdict to `2`/`4`. Existing command-specific `5`, `8`, and `64`
 behavior is as documented below.
 
+`compare --require-same-generation` turns an extractor-generation mismatch
+between the two operands into a usage error, exit `64`, with a "re-dump
+baseline" message instead of a comparison.
+
 ## `compare --no-baseline` (single artifact)
 
 `abicheck compare --no-baseline NEW` declares that no prior surface exists
@@ -545,6 +549,11 @@ Per-category overrides — `.abicheck.yml`'s `severity:` block
 (`abi_breaking`/`potential_breaking`/`quality_issues`/`addition`) — take
 precedence over the preset. `informational` is fixed at `info` in every preset
 and has no override.
+
+The typed Python API (`CompareRequest`) takes the same overrides as
+`severity_abi_breaking`, `severity_potential_breaking`, `severity_quality_issues`
+and `severity_addition`, and `assurance.require_complete` as
+`require_complete_analysis`, and derives its exit code through the same gate.
 
 ### CI gate patterns
 

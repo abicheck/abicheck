@@ -741,6 +741,42 @@ def test_mutant_m7_checkout_prefix_kept_in_path_identity_is_caught(
     assert any(cat.path_violations(p, relocate) for p in cat._path_probes())
 
 
+def test_parameter_template_args_do_not_join_a_template_family() -> None:
+    """Distinct entities stay distinct: a non-template function whose parameter
+    type is a class template is not a member of a function-template family,
+    and a real family member keeps its finding. The oracle is the hand-written
+    Itanium spelling, not the detector's own name helper."""
+    from abicheck.checker_policy import ChangeKind
+    from abicheck.diff_templates import detect_missing_instantiations
+    from abicheck.model import AbiSnapshot, Function
+
+    def fn(name: str, mangled: str) -> Function:
+        return Function(name=name, mangled=mangled, return_type="void", params=[])
+
+    # _Z5scale3vecIf3abiILi8E2t8EEf: lib::scale(vec<float, abi<8, t8>>, float)
+    # _Z3getIdET_S0_: get<double>
+    old = AbiSnapshot(
+        library="lib",
+        version="1.0",
+        functions=[
+            fn("scale", "_Z5scale3vecIf3abiILi8E2t8EEf"),
+            fn("get<int>", "_Z3getIiET_S0_"),
+            fn("get<double>", "_Z3getIdET_S0_"),
+        ],
+    )
+    new = AbiSnapshot(
+        library="lib",
+        version="1.0",
+        functions=[
+            fn("scale", "_Z5scale3vecIf3abiILi16E3t16EEf"),
+            fn("get<int>", "_Z3getIiET_S0_"),
+        ],
+    )
+    findings = detect_missing_instantiations(old, new)
+    assert [f.symbol for f in findings] == ["_Z3getIdET_S0_"]
+    assert all(f.kind == ChangeKind.INSTANTIATION_MISSING_FROM_BINARY for f in findings)
+
+
 # -- type-index identity (bug class identity.type_index_bare_name_collision) --
 
 
@@ -769,3 +805,41 @@ def test_type_index_keys_on_qualified_identity_not_bare_spelling(
     for scope, rec in zip(scopes, recs, strict=True):
         assert snap.type_by_name(f"{scope}::Parameter") is rec
     assert snap.type_by_name("Parameter") is None
+
+
+# -- duplicate declarations (bug class identity.benign_duplicate_declaration_key) --
+
+
+def test_castxml_duplicate_collapse_is_order_invariant_and_keeps_distinct() -> None:
+    """One entity declared twice in a system header (glibc's cv overloads under
+    one asm name) collapses to one key whatever the declaration order; a
+    same-key pair with a different parameter type is two entities and both
+    survive. Oracle: the hand-written entity count per key."""
+    import itertools
+    from xml.etree.ElementTree import Element
+
+    from abicheck.extract.headers.castxml.duplicate_declarations import (
+        collapse_benign_duplicates,
+    )
+    from abicheck.model import Function, Param
+
+    def fn(mangled: str, ret: str, param: str) -> Function:
+        return Function(
+            name=mangled,
+            mangled=mangled,
+            return_type=ret,
+            params=[Param(name="p", type=param)],
+        )
+
+    funcs = [
+        fn("strchr", "char*", "char*"),
+        fn("strchr", "const char*", "const char*"),
+        fn("lookup", "int", "int"),
+        fn("lookup", "int", "long"),
+    ]
+    for perm in itertools.permutations(funcs):
+        parsed = [(Element("Function"), f) for f in perm]
+        keys = Counter(
+            f.mangled for f in collapse_benign_duplicates(parsed, lambda _: True)
+        )
+        assert keys == {"strchr": 1, "lookup": 2}

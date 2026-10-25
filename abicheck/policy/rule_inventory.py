@@ -64,7 +64,7 @@ from typing import Any, cast
 
 from ..model.change_catalog.kinds import ChangeKind
 from .detector_kind_map import DETECTOR_KINDS
-from .rule_identity import rule_id_of
+from .rule_identity import readable_identity_of, rule_id_of
 
 KIND_SUPPRESSION = "suppression"
 KIND_RECLASSIFY = "reclassify"
@@ -125,6 +125,9 @@ class ConfiguredRule:
     intent: str = "unspecified"
     allow_public_break: bool = False
     change_kinds: frozenset[str] | None = None
+    #: Canonical JSON identity of an id-less rule (its ``rule_id`` is the
+    #: digest of it); ``None`` for a rule with a user ``id:``.
+    rule_identity: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -158,6 +161,8 @@ class RuleAuditRow:
     #: from being checked (the candidate detectors that did not run, with
     #: their gate reasons). ``None`` for every other status.
     missing_evidence: str | None = None
+    #: See :attr:`ConfiguredRule.rule_identity`.
+    rule_identity: str | None = None
 
     @property
     def kind(self) -> str:
@@ -335,6 +340,7 @@ def build_rule_rows(
                     if status == STATUS_NOT_EVALUATED
                     else None
                 ),
+                rule_identity=rule.rule_identity,
             )
         )
     return tuple(rows)
@@ -398,6 +404,7 @@ def _orphan_from_provenance(ref: RuleRef, provenance: object) -> ConfiguredRule:
         expires=expires,
         intent=str(getattr(provenance, "intent", "unspecified") or "unspecified"),
         allow_public_break=bool(getattr(provenance, "allow_public_break", False)),
+        rule_identity=getattr(provenance, "rule_identity", None),
     )
 
 
@@ -413,6 +420,7 @@ def suppression_rules(suppression: object) -> tuple[ConfiguredRule, ...]:
         ConfiguredRule(
             ref=RuleRef(KIND_SUPPRESSION, *rule_origin(suppression, index)),
             rule_id=rule_id_of(rule),
+            rule_identity=readable_identity_of(rule),
             label=getattr(rule, "label", None),
             reason=getattr(rule, "reason", None),
             expires=getattr(rule, "expires", None),
@@ -433,6 +441,7 @@ def reclassify_rules(policy_file: object | None) -> tuple[ConfiguredRule, ...]:
         ConfiguredRule(
             ref=RuleRef(KIND_RECLASSIFY, source_file, index),
             rule_id=rule_id_of(rule),
+            rule_identity=readable_identity_of(rule),
             label=getattr(rule, "label", None),
             reason=getattr(rule, "reason", None),
             expires=getattr(rule, "expires", None),

@@ -38,14 +38,6 @@ from typing import Any
 
 from ..model.sided_inputs import compose_sided_paths
 
-#: The only report formats a stored-bundle-facts comparison renders.
-#:
-#: One owner for both directions: :func:`validate_bundle_facts_request`
-#: rejects an explicitly requested format outside this set, and the CLI's
-#: default-format fallback draws from it. Two copies would be free to
-#: disagree about which formats exist.
-STORED_BUNDLE_FACTS_FORMATS: frozenset[str] = frozenset({"json", "markdown"})
-
 
 class BundleFactsCompareError(Exception):
     """A stored-bundle-facts comparison that cannot run as requested.
@@ -295,21 +287,6 @@ def _reject_unsupported_output(
     fail_on_removed: bool,
     support_promise: str | None,
 ) -> None:
-    if request.fmt not in STORED_BUNDLE_FACTS_FORMATS:
-        raise BundleFactsCompareError(
-            f"-o {request.fmt}=... is not available with a stored-bundle-facts OLD_INPUT: only "
-            "json/markdown are supported for a stored-bundle-facts "
-            "comparison. Choose one of: json, markdown.",
-            usage=True,
-        )
-    for secondary_fmt, _secondary_path in request.secondary_writes:
-        if secondary_fmt not in STORED_BUNDLE_FACTS_FORMATS:
-            raise BundleFactsCompareError(
-                f"-o {secondary_fmt}=... is not available with "
-                "a stored-bundle-facts OLD_INPUT: only json/markdown are supported for a "
-                "stored-bundle-facts comparison.",
-                usage=True,
-            )
     if fail_on_removed:
         raise BundleFactsCompareError(
             "gate.fail_on_removed_library is not supported together with "

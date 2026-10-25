@@ -184,7 +184,17 @@ CLICK_ROUTING: dict[str, tuple[str, Any]] = {
         "performance profile only changes resource use, not the report",
     ),
     "verbose": (_RS, "stderr progress only"),
+    "require_same_generation": (
+        _UC,
+        "every corpus pair shares one extractor generation, so the refusal "
+        "never fires; CLI/API refusal is test_generation_drift_demotion.py",
+    ),
 }
+
+_SEVERITY_OVERRIDE = (
+    _UC,
+    "the .abicheck.yml severity override; CLI/typed parity is test_compare_exit_gate_unified.py",
+)
 
 REQUEST_ROUTING: dict[str, tuple[str, Any]] = {
     "old": ("covered", ("default",)),
@@ -198,6 +208,14 @@ REQUEST_ROUTING: dict[str, tuple[str, Any]] = {
     "require_justification": ("covered", ("suppress_strict",)),
     "scope_public": ("covered", ("no_scope_public",)),
     "severity_preset": ("covered", ("severity_strict",)),
+    "severity_abi_breaking": _SEVERITY_OVERRIDE,
+    "severity_potential_breaking": _SEVERITY_OVERRIDE,
+    "severity_quality_issues": _SEVERITY_OVERRIDE,
+    "severity_addition": _SEVERITY_OVERRIDE,
+    "require_complete_analysis": (
+        _UC,
+        "the assurance.require_complete exit needs an incomplete-analysis fixture; gate-level parity is test_compare_exit_gate_unified.py",
+    ),
     "diagnostic_comparison": ("covered", ("diagnostic_comparison",)),
     "contract_evaluation": ("covered", ("contract_exports",)),
     "contract_mode": ("covered", ("contract_exports",)),
@@ -257,6 +275,11 @@ REQUEST_ROUTING: dict[str, tuple[str, Any]] = {
     "collapse_versioned_symbols": (_UC, "config-only; needs versioned ELF symbols"),
     "allow_build_query": (_UC, "needs a build tree"),
     "performance_profile": (_UC, "resource use only"),
+    "require_same_generation": (
+        _UC,
+        "corpus pairs share one extractor generation; refusal parity is "
+        "test_generation_drift_demotion.py",
+    ),
     "resolved_collect_mode": (
         _UC,
         "needs a source tree; the CLI resolves it from source.method/--since",
@@ -306,6 +329,7 @@ DEFAULT_MAP: dict[str, tuple[str, str]] = {
     "abi3": ("CompareRequest", "abi3_floor"),
     "changed_paths_opt": ("CompareRequest", "changed_paths"),
     "performance_profile": ("CompareRequest", "performance_profile"),
+    "require_same_generation": ("CompareRequest", "require_same_generation"),
     "pack_paths": ("CompareRequest", "pack_paths"),
     "include_dependencies": ("InputSpec", "include_dependencies"),
     "header": ("InputSpec", "headers"),

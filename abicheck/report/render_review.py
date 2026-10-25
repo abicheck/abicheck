@@ -131,7 +131,7 @@ def render_review_digest(digest: ReviewDigest) -> str:
                 f"{number}. **{compact(group['display_name'])}** — {compact(group['transition'], 240)}",
                 f"   {compact(group['consequence'], 240)}",
                 f"   Action: {compact(group['action'], 200)}",
-                f"   Findings: {', '.join(group['member_kinds'])}",
+                f"   Findings: {compact(', '.join(group['member_kinds']), 240)}",
             ]
             if affects := digest.review_group_use_cases.get(str(group.get("group_id"))):
                 lines.append(f"   Affects use cases: {', '.join(affects)}")
@@ -350,7 +350,7 @@ def render_terminal_digest(digest: ReviewDigest) -> str:
                 f"{index}. {name}: {compact(group['transition'], 240)}",
                 f"   Consequence: {compact(group['consequence'], 240)}",
                 f"   Action: {compact(group['action'], 200)}",
-                f"   Findings: {', '.join(group['member_kinds'])}",
+                f"   Findings: {compact(', '.join(group['member_kinds']), 240)}",
             ]
         if len(digest.review_groups) > 8:
             lines.append(f"... {len(digest.review_groups) - 8} more groups omitted.")
