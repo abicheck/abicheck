@@ -30,8 +30,6 @@ from xml.etree.ElementTree import Element, SubElement
 
 SCAN_TAG = "AbicheckHiddenScan"
 DECL_TAG = "AbicheckHiddenDecl"
-#: Parser attribute the backend stamps (read by ``_parser_preprocessor_hidden``).
-PARSER_ATTR = "_abicheck_preprocessor_hidden"
 
 
 def attach_hidden_declarations(
@@ -47,7 +45,7 @@ def read_hidden_declarations(root: Element) -> dict[str, tuple[str, ...]] | None
     if root.find(SCAN_TAG) is None:
         return None
     out: dict[str, set[str]] = {}
-    for el in root.iter(DECL_TAG):
+    for el in root.findall(DECL_TAG):
         macro, name = el.get("macro", ""), el.get("name", "")
         if macro and name:
             out.setdefault(macro, set()).add(name)
@@ -55,14 +53,13 @@ def read_hidden_declarations(root: Element) -> dict[str, tuple[str, ...]] | None
 
 
 def parser_preprocessor_hidden(parser: Any) -> dict[str, tuple[str, ...]] | None:
-    """The stamped scan of a header-AST parser, or ``None`` (no scan: any
-    non-castxml backend, or a castxml run whose preprocess step failed)."""
-    value = getattr(parser, PARSER_ATTR, None)
+    """The scan a castxml parser's document carried, or ``None`` (no scan:
+    any non-castxml backend, or a castxml run whose preprocess step failed)."""
+    value = getattr(getattr(parser, "_ctx", None), "preprocessor_hidden", None)
     return dict(value) if isinstance(value, dict) else None
 
 
 __all__ = [
-    "PARSER_ATTR",
     "attach_hidden_declarations",
     "parser_preprocessor_hidden",
     "read_hidden_declarations",

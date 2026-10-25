@@ -278,7 +278,7 @@
     },
     {
       "path": "abicheck/checker.py",
-      "baseline_lines": 1399,
+      "baseline_lines": 1397,
       "target": "compare",
       "rule": "no_growth",
       "disposition": "migrate",

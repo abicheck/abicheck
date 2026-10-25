@@ -44,6 +44,7 @@ from __future__ import annotations
 from xml.etree.ElementTree import Element
 
 from ...declaration_provenance import build_public_set
+from .hidden_declarations import read_hidden_declarations
 from .preprocessed_text import PreprocessedText, read_preprocessed_text
 
 # castxml tags that represent a callable (free function, method, special
@@ -102,6 +103,9 @@ class CastxmlParserContext:
         #: convention (``preprocessed_text``); ``None`` when the document
         #: carries none.
         self.preprocessed: PreprocessedText | None = read_preprocessed_text(root)
+        #: ``{guard macro: names}`` the parse's preprocessing excluded
+        #: (``hidden_declarations``); ``None`` when the document has no scan.
+        self.preprocessor_hidden = read_hidden_declarations(root)
         #: ``record_traits.trivially_copyable`` memo, keyed by element id.
         self.trivially_copyable_cache: dict[str, bool | None] = {}
         # Per-file index / per-directory file list for

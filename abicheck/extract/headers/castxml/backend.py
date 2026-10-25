@@ -70,11 +70,7 @@ from ..toolchain import (
 )
 from .calling_convention import calling_conventions_in
 from .dumper import _CastxmlParser
-from .hidden_declarations import (
-    PARSER_ATTR,
-    attach_hidden_declarations,
-    read_hidden_declarations,
-)
+from .hidden_declarations import attach_hidden_declarations
 from .policy import evaluate_castxml_version
 from .preprocessed_text import attach_preprocessed_text, resolve_preprocessed_text
 from .probe import (
@@ -597,7 +593,6 @@ class CastxmlBackend:
             public_dir_paths=r.public_dir_paths,
             no_binary_evidence=r.no_binary_evidence,
         )
-        setattr(parser, PARSER_ATTR, read_hidden_declarations(xml_root))
         setattr(
             parser,
             "_abicheck_neutral_factory",
