@@ -36,6 +36,16 @@ class FieldInfo:
     bit_offset: int = 0  # for bitfields: normalised bit offset from LSB
     bit_size: int = 0  # for bitfields: width in bits (0 = not a bitfield)
 
+    @property
+    def is_vptr_member(self) -> bool:
+        """Whether this is the compiler's artificial vptr member, not a data
+        member. GCC names it ``_vptr.<Class>``, Clang ``_vptr$<Class>``
+        (``extract.dwarf_records.local_vptr_member_offset_bits`` reads the
+        same member with its ``DW_AT_artificial`` flag); this record does not
+        keep the flag, and the separator cannot occur in a source identifier,
+        so the producer's own spelling is the record of it."""
+        return self.name.startswith(("_vptr.", "_vptr$"))
+
 
 @dataclass
 class StructLayout:
