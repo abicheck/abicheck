@@ -219,8 +219,12 @@ def build_report_document(
         if show_only
         else all_findings
     )
-    review_groups = build_review_groups(displayed_findings)
-    all_review_groups = build_review_groups(all_findings)
+    review_groups = build_review_groups(
+        displayed_findings, severity_config=severity_config
+    )
+    all_review_groups = build_review_groups(
+        all_findings, severity_config=severity_config
+    )
     d["review_groups"] = [group.to_dict() for group in review_groups]
     audit_value = d["disposition_audit"]
     assert isinstance(audit_value, dict)

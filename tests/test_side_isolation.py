@@ -184,6 +184,10 @@ def test_child_body_sends_result_error_and_unpicklable_report():
 
     status, err = _child_payload(boom)
     assert status == "err" and isinstance(err, _SideFailed)
+    # The child's traceback rides along as a note: pickling drops the frames.
+    (note,) = err.__notes__
+    assert note.startswith("Raised in the side-resolution child:")
+    assert "in boom" in note
     status, err = _child_payload(lambda: threading.Lock())
     assert status == "err" and isinstance(err, SnapshotError)
     assert "could not be returned" in str(err)

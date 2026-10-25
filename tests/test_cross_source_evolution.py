@@ -531,7 +531,7 @@ class TestResolvedExcludedFromTheGate:
 
     def test_resolved_leak_reports_zero_gate_contribution(self) -> None:
         from abicheck.checker_policy import Verdict
-        from abicheck.policy.severity import gate_contribution_for_change
+        from abicheck.policy.gate_contribution import gate_contribution_for_change
 
         old = _phl_isolated_snapshot(leaked=True)
         new = _phl_isolated_snapshot(leaked=False)

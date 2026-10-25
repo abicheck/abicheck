@@ -1,0 +1,23 @@
+{
+  "description": "A library whose public struct holds a header-only SIMD dependency's vector typedef, rebuilt for a wider ISA (intel/xvec, -mavx2 against -mavx512f): the dependency's ABI-tag instances, hidden-friend operators, inline tables, member typedefs and weak template instances all change, the library's own surface does not. They are still reported, but out of contract (dependency_internal_unreachable), so the comparison does not gate on them.",
+  "field_report": "intel/xvec header-only dependency compared with headers (follow-up to ADR-089 / PR #1775)",
+  "bug_class": "scoping.dependency_internals_in_contract",
+  "related_tests": [
+    "tests/test_header_dependency_internals.py",
+    "tests/test_header_dependency_internals_integration.py"
+  ],
+  "parse_includes": [
+    "dep"
+  ],
+  "depths": [
+    "headers"
+  ],
+  "expected": "COMPATIBLE_WITH_RISK",
+  "expected_kinds": [
+    "hidden_friend_removed",
+    "hidden_friend_added",
+    "var_added",
+    "type_added",
+    "type_removed"
+  ]
+}

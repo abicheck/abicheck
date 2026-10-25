@@ -59,6 +59,10 @@ Each entry's status line says what is still open. A PARTIAL entry's write-up als
 
 ### Report and detector coverage
 
+#### case98 release-headers is refused as a profile mismatch since 44473ffcb (2026-10-25)
+
+**Status (2026-10-25): OPEN.** Since #1778 the release-headers compare of case98 returns no verdict (`profile_mismatch`) instead of the documented `NO_CHANGE`; the guard accepts a declared-gap no-verdict row, so the job is green but the change is unruled. [Full write-up](known-gaps/case98-release-headers-is-refused-as-profile-mismatch-since-44473ffcb.md)
+
 #### The `#ifdef` guard census is runtime-only, so stored snapshots fall back to the `sycl::` name rule (2026-10-25)
 
 **Status (2026-10-25): OPEN, deliberate split.** The census of exports declared only under an excluded `#ifdef` (`extract/headers/preprocessor_branches.py`, reported per macro in `coverage_warnings` and `undeclared_export_census.by_guard`, report schema 6.7) is computed from the castxml run's own `-E -dD` output and kept on `AbiSnapshot.live_preprocessor_hidden`, which `storage/snapshot_encode.py` drops. A compare of `abicheck dump` outputs, a stored baseline, a clang-frontend parse and a multi-TU manifest therefore carry no scan and use the `sycl::` name rule only, so a generic `#ifdef FOO` export reads as unattributed there. Persisting it is the follow-up: a new snapshot fact, which needs its `SCHEMA_VERSION` ruling, an `EXTRACTOR_GENERATION` bump with a `SPELLING_MIGRATIONS` row, and a generation-corpus freeze. Also open: the census reads only the ELF export table, and matches an export to a hidden declaration by function name only (no variables, no signature check).
@@ -73,6 +77,10 @@ CJM: trust stage (docs/contribute/cjm.md) — use case UC-WF-analysis-assurance 
 #### The Markdown "Additions" section is one row per finding, so it grows linearly (2026-10-22)
 
 **Status (2026-10-22): OPEN.** The review-group section is bounded; the per-finding Additions rows are not. [Full write-up](known-gaps/the-additions-markdown-section-is-one-row-per-finding.md)
+
+#### The legacy gate counts a redundant finding the review groups omit (2026-10-23)
+
+**Status (2026-10-23): OPEN — gate-semantics decision needed.** A finding folded out as redundant but kept for the verdict is `gating` under the legacy scheme and `non_gating` under a severity config, so "retained" and "gating" are not nested. [Full write-up](known-gaps/legacy-gate-counts-a-redundant-finding-the-review-groups-omit.md)
 
 ### Source-replay twin pairing (L4/L2 Phase 8)
 
@@ -253,6 +261,11 @@ CJM: trust stage (docs/contribute/cjm.md) — use case UC-WF-analysis-assurance 
 `false-clean` — A public header reached only through a `-I` or `/external:I` include under clang-cl is probed as a public root, but the replayed AST dump does not search that directory, so a declaration that comes only through it is not replayed. An MSVC `/imsvc` include tree is never a probed public root.
 
 ### False-positive risk
+
+#### A toolchain-only rebuild still fails a stated contract's coverage (2026-10-23)
+
+**Status (2026-10-24 at `9513369`): PARTIAL.** #1751 fixed import edges and leaked-dependency symbols; #1770 fixed the binary/toolchain kinds a stated `public` left `UNKNOWN_UNRESOLVED`. Still open: libstdc++ `_ZGTt` transactional-memory clones are not seen as runtime-owned, and runtime exports make the `exports` domain `unmatched_exports` (even for a byte-identical pair). Pinned by shrink-only lists in the toolchain-drift tests.  
+`false-positive` — Under a stated `--contract public|exports`, a rebuild from unchanged source with a static libstdc++ or clang `-O0` `std::` instantiations exits 1 on unsuppressible coverage failures. [Full write-up](known-gaps/toolchain-runtime-rebuild-fails-stated-contract-coverage.md)
 
 #### A binary-only dump loses exports with no debug subprogram, so a still-exported symbol reads as removed (2026-10-25)
 
