@@ -42,13 +42,16 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 from ..compare.debug_layout_view import debug_layout_view
+from ..compare.edge_query import export_table_covered
 from ..compare.public_surface import should_filter_transitive_runtime_symbols
 from ..elf_symbol_filter import (
     FUNCTION_SYMBOL_TYPES,
     VARIABLE_SYMBOL_TYPES,
     exported_symbol_names,
+    is_abi_relevant_elf_symbol,
 )
 from ..model import ElfVisibility, Function, Variable, Visibility
+from ..model.export_index import build_raw_export_index
 from ..model.fact import Fact
 from ..model.owner_recovery import is_mangled_identity
 from ..model.surface_facts import headers_discarded_surface_facts
@@ -125,7 +128,7 @@ def binary_level_variable(var: Variable) -> Variable:
 def export_only_declarations(
     snap: AbiSnapshot, declared: set[str]
 ) -> tuple[list[Function], list[Variable]]:
-    """An export-only record for every ABI-relevant ELF export not in *declared*.
+    """An export-only record for every ABI-relevant export not in *declared*.
 
     The projection switches a header-derived snapshot into ``elf_only_mode``,
     which tells every detector that the function/variable maps *are* the
@@ -137,34 +140,51 @@ def export_only_declarations(
     comparison altogether: losing one was BREAKING in a binary-only dump and
     in the unprojected header comparison, and nothing at ``--depth binary``.
 
-    The export set is the one the ``undeclared_exports`` detector reads
-    (ABI-relevant dynamic exports, C++ runtime symbols filtered unless *snap*
-    is the runtime). A ``notype`` export is listed as a function only, as a
-    headerless dump lists it. Empty when the export table was never captured
-    (no ``machine``): an uncaptured table is not an empty one.
+    The export set is the one the binary-only dumper builds for the format:
+
+    * ELF -- the set the ``undeclared_exports`` detector reads (ABI-relevant
+      dynamic exports, C++ runtime symbols filtered unless *snap* is the
+      runtime); a ``notype`` export is listed as a function only.
+    * Mach-O -- the ABI-relevant exports, split into functions and variables
+      by section (``MachoExport.is_data``), as ``dumper``'s export-only path.
+    * PE -- every export as a function, an ordinal-only one under its
+      ``ordinal:N`` placeholder, as ``dumper``'s export-only path.
+
+    Empty when the export table was never read: an unread table is not an
+    empty one.
     """
-    elf = snap.elf
-    if elf is None or not elf.machine:
+    index = build_raw_export_index(snap)
+    if index is None or not export_table_covered(snap, index.platform):
         return [], []
-    filter_transitive = should_filter_transitive_runtime_symbols(snap)
-    func_names = exported_symbol_names(
-        elf,
-        FUNCTION_SYMBOL_TYPES,
-        abi_relevant_only=True,
-        filter_transitive_runtime_symbols=filter_transitive,
-    )
-    var_names = (
-        exported_symbol_names(
-            elf,
-            VARIABLE_SYMBOL_TYPES,
+    if index.platform == "elf" and snap.elf is not None:
+        filter_transitive = should_filter_transitive_runtime_symbols(snap)
+        func_names = exported_symbol_names(
+            snap.elf,
+            FUNCTION_SYMBOL_TYPES,
             abi_relevant_only=True,
             filter_transitive_runtime_symbols=filter_transitive,
         )
-        - func_names
-    )
+        var_names = (
+            exported_symbol_names(
+                snap.elf,
+                VARIABLE_SYMBOL_TYPES,
+                abi_relevant_only=True,
+                filter_transitive_runtime_symbols=filter_transitive,
+            )
+            - func_names
+        )
+    elif index.platform == "macho":
+        relevant = [
+            e for e in index.entries if e.name and is_abi_relevant_elf_symbol(e.name)
+        ]
+        func_names = {e.name for e in relevant if not e.is_data}
+        var_names = {e.name for e in relevant if e.is_data}
+    else:
+        func_names = {e.name or f"ordinal:{e.ordinal}" for e in index.entries}
+        var_names = set()
     functions: list[Function] = []
     for sym in sorted(func_names - declared):
-        elf_sym = elf.unambiguous_symbol(sym)
+        elf_sym = _elf_symbol(snap, sym)
         functions.append(
             Function(
                 name=sym,
@@ -180,7 +200,7 @@ def export_only_declarations(
         )
     variables: list[Variable] = []
     for sym in sorted(var_names - declared):
-        elf_sym = elf.unambiguous_symbol(sym)
+        elf_sym = _elf_symbol(snap, sym)
         variables.append(
             Variable(
                 name=sym,
@@ -194,6 +214,10 @@ def export_only_declarations(
             )
         )
     return functions, variables
+
+
+def _elf_symbol(snap: AbiSnapshot, sym: str) -> ElfSymbol | None:
+    return snap.elf.unambiguous_symbol(sym) if snap.elf is not None else None
 
 
 def _elf_visibility(elf_sym: ElfSymbol | None) -> ElfVisibility | None:

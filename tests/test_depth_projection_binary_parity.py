@@ -62,6 +62,8 @@ from abicheck.model import (
 from abicheck.model.dwarf_facts import DwarfMetadata, EnumInfo, FieldInfo, StructLayout
 from abicheck.model.elf_facts import ElfMetadata, ElfSymbol, SymbolBinding, SymbolType
 from abicheck.model.fact import Fact, FactStatus
+from abicheck.model.macho_facts import MachoExport, MachoMetadata
+from abicheck.model.pe_facts import PeExport, PeMetadata
 from abicheck.policy.depth_projection import (
     project_pair_to_depth,
     project_snapshot_to_depth,
@@ -291,13 +293,45 @@ class TestUndeclaredExportsReachTheProjection:
             for f in (*functions, *variables)
         )
 
-    def test_uncaptured_export_table_adds_nothing(self) -> None:
-        snap = _header_snap(
-            "1",
-            [],
-            ElfMetadata(symbols=[_sym("helper")]),  # no `machine`
-        )
+    def test_unread_export_table_adds_nothing(self) -> None:
+        # A default (never parsed) block is not an empty table.
+        snap = _header_snap("1", [], ElfMetadata())
         assert export_only_declarations(snap, set()) == ([], [])
+
+    def test_macho_exports_split_by_section_and_filtered(self) -> None:
+        snap = AbiSnapshot(
+            library="libw.dylib",
+            version="1",
+            from_headers=True,
+            platform="macho",
+            macho=MachoMetadata(
+                exports=[
+                    MachoExport(name="api"),
+                    MachoExport(name="helper"),
+                    MachoExport(name="_ZTV6Widget", is_data=True),
+                    # The dumper's own ABI-relevance filter drops this one.
+                    MachoExport(name="H5C__flush"),
+                ]
+            ),
+        )
+        functions, variables = export_only_declarations(snap, {"api"})
+        assert [f.mangled for f in functions] == ["helper"]
+        assert [v.mangled for v in variables] == ["_ZTV6Widget"]
+
+    def test_pe_exports_are_functions_with_ordinal_placeholders(self) -> None:
+        snap = AbiSnapshot(
+            library="w.dll",
+            version="1",
+            from_headers=True,
+            platform="pe",
+            pe=PeMetadata(
+                machine="IMAGE_FILE_MACHINE_AMD64",
+                exports=[PeExport(name="api"), PeExport(name="", ordinal=7)],
+            ),
+        )
+        functions, variables = export_only_declarations(snap, set())
+        assert [f.mangled for f in functions] == ["api", "ordinal:7"]
+        assert variables == []
 
     @pytest.mark.parametrize(
         ("lost", "sym_type", "kinds"),

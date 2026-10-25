@@ -196,6 +196,8 @@ ONLY_BINARY_DUMP: dict[str, str] = {
     "typedef_base_changed": _DEBUG_DECLARATIONS,
     "typedef_removed": _DEBUG_DECLARATIONS,
     "integer_model_changed": _DEBUG_DECLARATIONS,
+    # Mach-O (dSYM): a variable's kind read from its debug record.
+    "cpo_kind_changed": _DEBUG_DECLARATIONS,
     "base_class_offset_changed": _RECORD_RELATIONS,
     "base_class_virtual_changed": _RECORD_RELATIONS,
     "field_access_changed": _RECORD_RELATIONS,
@@ -206,6 +208,8 @@ ONLY_BINARY_DUMP: dict[str, str] = {
     "type_vtable_changed": _RECORD_RELATIONS,
     "vptr_introduced": _RECORD_RELATIONS,
     "internal_type_leaks_via_public_api": _RECORD_RELATIONS,
+    # Mach-O: which exports read as internal follows the type scope.
+    "visibility_leak": _TYPE_SCOPE,
 }
 
 #: ``kind -> reason`` the projection reports and a binary-only dump does not.
