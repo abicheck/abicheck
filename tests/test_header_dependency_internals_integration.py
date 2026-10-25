@@ -195,12 +195,18 @@ def test_the_library_break_alone_gates(compared) -> None:
         assert report["exit"]["code"] == 0
         return
     assert report["verdict"] == "BREAKING"
-    # Exactly the library's own layout break: State and the vector it holds.
+    # Exactly the library's own break: State and the vector it holds, and the
+    # re-mangled lib::scale(V, float), one parameter change on the old (avx2)
+    # export since V's resolved type changed under the same declaration.
     assert gating == {
         ("type_size_changed", "State"),
         ("type_field_offset_changed", "State"),
         ("type_size_changed", "basic_vec<float>"),
         ("type_field_type_changed", "basic_vec<float>"),
+        (
+            "func_params_changed",
+            "_ZN3lib5scaleEN8fakesimd9basic_vecIfNS0_14fixed_size_abiILi8ENS0_12x86_avx2_tagEEEEEf",
+        ),
     }
     for change in report["changes"]:
         if (change["kind"], change["symbol"]) in gating:

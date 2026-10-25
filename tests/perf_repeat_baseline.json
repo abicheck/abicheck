@@ -88,7 +88,7 @@
     "abicheck/compare/template_surface.py(qualified_declaration_name)": 1580,
     "abicheck/compare/template_surface.py(qualified_name_lookup)": 186,
     "abicheck/compare/template_surface.py(qualified_name_lookup.<locals>.lookup)": 3524,
-    "abicheck/compare/template_surface.py(qualified_name_table)": 186,
+    "abicheck/compare/template_surface.py(qualified_name_table)": 190,
     "abicheck/compare/template_surface.py(qualified_name_table.<locals>.build)": 14,
     "abicheck/compare/template_surface.py(reconciled_abi_visible_functions)": 42,
     "abicheck/compare/template_surface.py(reconciled_public_function_maps)": 42,
@@ -234,7 +234,7 @@
     "abicheck/model/signature_normalization.py(canonicalize_function_signature_param_type)": 563,
     "abicheck/model/snapshot.py(AbiSnapshot.canonical_ir)": 488,
     "abicheck/model/snapshot.py(AbiSnapshot.declarations)": 4641,
-    "abicheck/model/snapshot.py(AbiSnapshot.function_map)": 182,
+    "abicheck/model/snapshot.py(AbiSnapshot.function_map)": 186,
     "abicheck/model/snapshot.py(AbiSnapshot.index)": 196,
     "abicheck/model/snapshot.py(AbiSnapshot.variable_map)": 28,
     "abicheck/model/snapshot_identity_table.py(identities_for_snapshot)": 56,
@@ -304,5 +304,5 @@
   },
   "mode": "default",
   "n": 40,
-  "total": 237342
+  "total": 237350
 }

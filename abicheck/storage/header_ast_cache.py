@@ -451,8 +451,9 @@ class AstAcquisitionScope:
         try:
             result = produce_ast_once_across_processes(backend, key, producer, group)
         except BaseException as exc:
-            # Waiters get the exception without the producer's frames; this
-            # caller re-raises it with them, so the failure stays diagnosable.
+            # Settle with the frames detached, then re-attach them so this
+            # caller's re-raise stays diagnosable. Waiters share this one
+            # exception object, so they can see the same frames.
             tb = exc.__traceback__
             self._settle_failed(lookup, future, exc.with_traceback(None))
             exc.with_traceback(tb)

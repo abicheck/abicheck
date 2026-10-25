@@ -43,7 +43,8 @@ __all__ = ["annotate_target_isa_consequences", "target_isa_of"]
 
 #: Findings a compiled-target change plausibly causes: type layout (a wider
 #: vector member moves fields and resizes records) and symbol churn (a changed
-#: mangling or inlined-symbol set shows up as removed/added or renamed symbols).
+#: mangling or inlined-symbol set shows up as removed/added or renamed symbols,
+#: or as one parameter change when the removal and addition pair up).
 _CONSEQUENCE_KINDS: frozenset[ChangeKind] = frozenset(
     {
         ChangeKind.TYPE_SIZE_CHANGED,
@@ -54,6 +55,7 @@ _CONSEQUENCE_KINDS: frozenset[ChangeKind] = frozenset(
         ChangeKind.STRUCT_FIELD_OFFSET_CHANGED,
         ChangeKind.FUNC_REMOVED,
         ChangeKind.FUNC_ADDED,
+        ChangeKind.FUNC_PARAMS_CHANGED,
         ChangeKind.FUNC_LIKELY_RENAMED,
         ChangeKind.SYMBOL_RENAMED_BATCH,
     }
