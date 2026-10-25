@@ -13,4 +13,4 @@
   `template<class U> int C<U>::s = 0;`) now carries the `EntityId` of the
   in-class declaration it redeclares, following clang's `previousDecl` link.
   Unconstrained declarations keep their identities. `EXTRACTOR_GENERATION`
-  is raised (24); no stored spelling changes.
+  is raised (25); no stored spelling changes.

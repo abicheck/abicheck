@@ -36,6 +36,7 @@ the parser under test.
 
 from __future__ import annotations
 
+import shutil
 import subprocess
 import sys
 from dataclasses import dataclass
@@ -344,6 +345,7 @@ D* mkd() { return nullptr; }
 
 @pytest.mark.integration
 @pytest.mark.skipif(sys.platform != "linux", reason="ELF/Itanium fixture")
+@pytest.mark.skipif(shutil.which("g++") is None, reason="needs g++")
 def test_real_specialization_and_dtor_only_vtable_removal_gates(
     tmp_path: Path,
 ) -> None:
@@ -367,6 +369,7 @@ def test_real_specialization_and_dtor_only_vtable_removal_gates(
                 str(so),
             ],
             check=True,
+            timeout=120,
         )
         return dump(so, [d / "api.h"], version=tag)
 
