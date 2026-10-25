@@ -71,11 +71,35 @@ _MINGW_VA_LIST = [
     ),
 ]
 
+#: ... and ``<wchar.h>`` names the symbol ``_swprintf`` while ``swprintf.inl``
+#: declares ``swprintf`` bound to it with an asm label: two names, one key.
+_MINGW_ASM_LABEL = [
+    _fn("_swprintf", "_swprintf", "int", "wchar_t*", "const wchar_t*"),
+    _fn("swprintf", "_swprintf", "int", "wchar_t*", "const wchar_t*"),
+]
+_MINGW_ASM_LABEL_VA_LIST = [
+    _fn("_vswprintf", "_vswprintf", "int", "wchar_t*", "const wchar_t*", "va_list"),
+    _fn(
+        "vswprintf",
+        "_vswprintf",
+        "int",
+        "wchar_t*",
+        "const wchar_t*",
+        "__builtin_va_list",
+    ),
+]
+
 
 @pytest.mark.parametrize(
     "group",
-    [_GLIBC, _STD_CTOR, _MINGW_VA_LIST],
-    ids=["glibc_cv", "std_ctor", "mingw_va_list"],
+    [_GLIBC, _STD_CTOR, _MINGW_VA_LIST, _MINGW_ASM_LABEL, _MINGW_ASM_LABEL_VA_LIST],
+    ids=[
+        "glibc_cv",
+        "std_ctor",
+        "mingw_va_list",
+        "mingw_asm_label",
+        "mingw_asm_label_va_list",
+    ],
 )
 def test_benign_group_keeps_first_declaration_in_any_order(
     group: list[Function], caplog: pytest.LogCaptureFixture
@@ -104,6 +128,14 @@ def test_benign_group_keeps_first_declaration_in_any_order(
             [True, True],
         ),
         ([_fn("h", "_Z1hv", "int"), _fn("h", "_Z1hv", "double")], [True, True]),
+        (  # two names bound to one key, but the signatures conflict
+            [
+                _fn("_swprintf", "_swprintf", "int", "wchar_t*"),
+                _fn("swprintf", "_swprintf", "int", "wchar_t*", "size_t"),
+            ],
+            [True, True],
+        ),
+        (_MINGW_ASM_LABEL, [True, False]),  # one name from the library's header
         (  # exception specifications are not mangled: same key, two entities
             [
                 _fn("k", "_Z1kv", "void"),

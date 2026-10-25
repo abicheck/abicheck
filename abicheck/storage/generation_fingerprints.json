@@ -72,7 +72,7 @@
       "abicheck/extract/headers/castxml/calling_convention.py": "ab4cd4474d11eb0da2216b29393e9daf1dbcf94226204237fd4c0381adacbcbb",
       "abicheck/extract/headers/castxml/context.py": "4b1ff6544ba29d2236885086a65ad9f7037f8f46105da4579b751a499058b9d8",
       "abicheck/extract/headers/castxml/dumper.py": "af0686fef5366815892a95a63503f3620299ea87b5182d7de63209c6c6d91b45",
-      "abicheck/extract/headers/castxml/duplicate_declarations.py": "cb81faa193488add762622ae5559076a5ebd2234b75b5d4edef19cfb1092ee2e",
+      "abicheck/extract/headers/castxml/duplicate_declarations.py": "977b85a15408fa9877b9b686f0bd913af9442e4da5b1d9292975bda7eff424f7",
       "abicheck/extract/headers/castxml/enums.py": "e616c768543061d71812378dd92cbcb7b8d00afbb734bcb7b4b5334ee34042aa",
       "abicheck/extract/headers/castxml/functions.py": "f62f5549a9602089d682c1627d3d2c546ae48a842944735b3cd3ecbb7f867593",
       "abicheck/extract/headers/castxml/location.py": "a5469fedb2774dfdf1b87a49ddc713471c088ecee6ea5ccbfe4d9764012c97e6",
@@ -162,9 +162,9 @@
       "abicheck/symvers_metadata.py": "372737765cd132e6e87ed891dd465d2958e04debbef774e45212ceb3036871cb",
       "abicheck/type_metadata.py": "9997189de8dac522fd1db8be5ae491d811139503f83abaaded89038eb4aa9cdf"
     },
-    "fingerprint": "8d5c490ee3d844e3fce452f429d77f3475f7b33264f7cea3a2b7b63b5077814c",
+    "fingerprint": "6a17e56328994fce1e5a6a115be03688593180525ce8e8eacbd771134ae9b1a6",
     "generation": 20,
-    "reason": "explicit_instantiation_fact recorded by the clang text AST pass (generation 20 after main took 19)"
+    "reason": "duplicate_declarations no longer compares source names (mingw-w64 asm-labelled swprintf/_swprintf collapse): Linux/macOS dumps unchanged; on mingw only a second system-header record of one key is dropped, the one AbiSnapshot.index already discarded"
   },
   "resolver": {
     "files": {
