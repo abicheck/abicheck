@@ -365,7 +365,10 @@ class TestStructuralFactsRequireDwarfSourcing:
         new_b = project_snapshot_to_depth(new, "binary")
         result = checker.compare(old_b, new_b)
         assert result.verdict != checker.Verdict.NO_CHANGE
-        assert {c.kind.value for c in result.changes} == {"struct_field_type_changed"}
+        # The DWARF layouts become layout-only records (the header RecordType
+        # is discarded), so the type detector spells it as a binary-only
+        # dump of the same layouts would.
+        assert {c.kind.value for c in result.changes} == {"type_field_type_changed"}
 
     def test_dwarf_only_snapshot_keeps_types_wholesale(self) -> None:
         # from_headers=False -- a genuinely DWARF/symbols-only dump, where
@@ -546,8 +549,9 @@ class TestHiddenVisibilityDropped:
 
     def test_hidden_function_and_variable_dropped(self) -> None:
         projected = project_snapshot_to_depth(self._snap(), "binary")
-        assert [f.name for f in projected.declarations.functions] == ["pub"]
-        assert [v.name for v in projected.declarations.variables] == ["pub_v"]
+        # Spelled by symbol, as a binary-only dump spells an export.
+        assert [f.mangled for f in projected.declarations.functions] == ["_Z3pubv"]
+        assert [v.mangled for v in projected.declarations.variables] == ["pub_v"]
 
     def test_surviving_public_declarations_still_demoted_to_elf_only(self) -> None:
         projected = project_snapshot_to_depth(self._snap(), "binary")
@@ -1008,8 +1012,11 @@ class TestProjectPairToDepthPreservesDwarfPublicScope:
         new = self._make(from_headers=False, private_size=8, public_size=64)
         old_p, new_p = project_pair_to_depth(old, new, "binary")
         result = checker.compare(old_p, new_p)
+        # Spelled as a binary-only dump spells it: the projection rebuilds
+        # layout-only records from the debug layout, so the type detector
+        # (not the raw-layout fallback's struct_size_changed) reports it.
         assert any(
-            c.kind == ChangeKind.STRUCT_SIZE_CHANGED and c.symbol == "S"
+            c.kind == ChangeKind.TYPE_SIZE_CHANGED and c.symbol == "S"
             for c in result.changes
         )
 

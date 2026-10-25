@@ -285,6 +285,7 @@ _F1 = (
     "detector.undeclared_export_shrink_silent",
     "evidence.unread_producer_read_as_confirmed_absence",
     "evidence.depth_projection_drops_lower_layer_detector_input",
+    "evidence.depth_projection_diverges_from_shallow_dump",
     "evidence.container_presence_read_as_evidence_content",
     "evidence.silent_degradation_to_clean_verdict",
     "evidence.export_presence_as_declaration_presence",
