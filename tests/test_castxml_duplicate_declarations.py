@@ -196,6 +196,32 @@ def test_parser_collapses_only_provable_system_header_duplicates(
     assert len(set(names)) == 1
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="symlinks need privileges")
+def test_symlinked_install_private_header_is_still_the_librarys_own(
+    tmp_path: Path,
+) -> None:
+    """A library installed as ``usr/include/mylib -> opt/mylib/include``: its
+    private header, reported through the symlink, still sits beside the public
+    header declared by its real path, so the group is kept."""
+    from abicheck.extract.headers.castxml.dumper import _CastxmlParser
+
+    real = tmp_path / "opt" / "mylib" / "include"
+    real.mkdir(parents=True)
+    for name in ("api.h", "detail.h"):
+        (real / name).write_text("#pragma once\n", encoding="utf-8")
+    (tmp_path / "usr" / "include").mkdir(parents=True)
+    (tmp_path / "usr" / "include" / "mylib").symlink_to(real, target_is_directory=True)
+    reported = (tmp_path / "usr" / "include" / "mylib" / "detail.h").as_posix()
+
+    parser = _CastxmlParser(
+        _two_ctor_root(reported),
+        set(),
+        set(),
+        public_header_paths=[str(real / "api.h")],
+    )
+    assert [f.name for f in parser.parse_functions() if f.name == "W"] == ["W", "W"]
+
+
 _CASES = ("case80_pimpl_shared_to_unique", "case126_sycl_device_impl_ptr")
 
 

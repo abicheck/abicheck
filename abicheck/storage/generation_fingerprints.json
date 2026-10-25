@@ -74,7 +74,7 @@
       "abicheck/extract/headers/castxml/duplicate_declarations.py": "cb81faa193488add762622ae5559076a5ebd2234b75b5d4edef19cfb1092ee2e",
       "abicheck/extract/headers/castxml/enums.py": "e616c768543061d71812378dd92cbcb7b8d00afbb734bcb7b4b5334ee34042aa",
       "abicheck/extract/headers/castxml/functions.py": "f62f5549a9602089d682c1627d3d2c546ae48a842944735b3cd3ecbb7f867593",
-      "abicheck/extract/headers/castxml/location.py": "71496e6acb0b0a7f40bba7de6517d6ef67927b25fb3b1c842f1fceeaf3302ff1",
+      "abicheck/extract/headers/castxml/location.py": "a5469fedb2774dfdf1b87a49ddc713471c088ecee6ea5ccbfe4d9764012c97e6",
       "abicheck/extract/headers/castxml/names.py": "038abc55f72f11185c0a5ec48d57bff95a1ab894380f7978b6187cd76b044796",
       "abicheck/extract/headers/castxml/out_of_line_inline.py": "7f8a77d82dd9f87865163ffda63e6c5a762887800886ea9f70dae40e378cbd89",
       "abicheck/extract/headers/castxml/policy.py": "fda86c1de147934e620824b9a97262f218bffb7340cbbf394ac5fdd437e47f23",
@@ -160,9 +160,9 @@
       "abicheck/symvers_metadata.py": "372737765cd132e6e87ed891dd465d2958e04debbef774e45212ceb3036871cb",
       "abicheck/type_metadata.py": "9997189de8dac522fd1db8be5ae491d811139503f83abaaded89038eb4aa9cdf"
     },
-    "fingerprint": "4c2659e0208f39962b1d0053e6b17c5f02ac5943d6a8ee5f7ea8e121292e0343",
+    "fingerprint": "175aa2ac1c3dd1d5f86be24b04d9e3bc5e9bda9780d9acc4f77bc0de38eed1d6",
     "generation": 18,
-    "reason": "castxml collapses benign same-key duplicate declarations from system headers outside a given public set and not beside a public header, signatures and exception specs equal modulo cv (glibc cv overloads, libstdc++ ctor template twins, mingw-w64 va_list spellings); standalone mingw-w64 CRT recognized as system headers; PR-internal refinements within unreleased generation 18"
+    "reason": "castxml collapses benign same-key duplicate declarations from system headers outside a given public set and not beside a public header (alias-aware), signatures and exception specs equal modulo cv (glibc cv overloads, libstdc++ ctor template twins, mingw-w64 va_list spellings); standalone mingw-w64 CRT recognized as system headers; PR-internal refinements within unreleased generation 18"
   },
   "resolver": {
     "files": {

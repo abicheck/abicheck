@@ -41,7 +41,7 @@ from ...declaration_provenance import (
     header_from_location,
     is_system_header,
 )
-from ...path_aliases import segments
+from ...path_aliases import source_header_alias_segments
 from .context import CastxmlParserContext
 
 
@@ -297,7 +297,14 @@ def _beside_a_public_header(ctx: CastxmlParserContext, header: str) -> bool:
         for p in ctx.pub_header_segs
         if len(p) > 1 and not _is_bare_system_dir(p[:-1])
     ]
-    return _matches_any_dir(segments(header), owned)
+    # Alias-aware both ways, as classify_origin is: the public set already
+    # carries each root's canonical spelling, and the header contributes its
+    # own, so a symlinked install (/usr/include/mylib -> /opt/mylib/include)
+    # still meets its public header.
+    return any(
+        _matches_any_dir(spelling, owned)
+        for spelling in source_header_alias_segments(header)
+    )
 
 
 def visibility(ctx: CastxmlParserContext, mangled: str, name: str = "") -> Visibility:
