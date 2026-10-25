@@ -1,4 +1,4 @@
-# ADR-088: A DWARF Declaration's File Is Read Correctly, and a Dependency's Unreachable Internals Are Out of Contract
+# ADR-089: A DWARF Declaration's File Is Read Correctly, and a Dependency's Unreachable Internals Are Out of Contract
 
 **Date:** 2026-10-23
 **Status:** Accepted (2026-10-23) — implemented for binary + DWARF compares without headers.
@@ -18,7 +18,7 @@ Two defects produced this on a binary-plus-DWARF compare:
 
 ### D1. A DWARF declaration's file is resolved for both layouts
 
-`extract/dwarf_decl_file.py` owns `decl_file_path(die, CU)`. It reads DWARF 4 (`file_entry`, 1-based, directory 0 = compilation directory) and DWARF 5 (`file_names`, 0-based, directory 0 is the table's own first entry), joins a relative directory with the compilation directory, and returns `path` or `path:line`. Index 0 is the "no file" sentinel only before DWARF 5; in DWARF 5 it is the primary source file. `dwarf_snapshot._resolve_decl_file` delegates to it. The extractor generation is bumped to 18 (`storage/versioning.py`; generations 13 to 17 belong to other changes already on main) and its fingerprint re-recorded, because the recorded `source_location` of every DWARF declaration changes for the same input.
+`extract/dwarf_decl_file.py` owns `decl_file_path(die, CU)`. It reads DWARF 4 (`file_entry`, 1-based, directory 0 = compilation directory) and DWARF 5 (`file_names`, 0-based, directory 0 is the table's own first entry), joins a relative directory with the compilation directory, and returns `path` or `path:line`. Index 0 is the "no file" sentinel only before DWARF 5; in DWARF 5 it is the primary source file. `dwarf_snapshot._resolve_decl_file` delegates to it. The extractor generation is bumped to 19 (`storage/versioning.py`; generations 13 to 18 belong to other changes already on main) and its fingerprint re-recorded, because the recorded `source_location` of every DWARF declaration changes for the same input.
 
 Only a **header** declaration records that location. A declaration whose file is a source file (the library's own `.cpp`) keeps no `source_location`, as it did before this ADR. `compare/opaque_types.is_impl_source` treats a type declared in an implementation file as an implementation detail, and a type referenced only through pointers becomes opaque. Recording the `.cpp` would therefore downgrade a real layout change: `catalog/cases/case117_no_unique_address` read `NO_CHANGE` on the first version of this change and reads `BREAKING` with the header-only rule.
 
