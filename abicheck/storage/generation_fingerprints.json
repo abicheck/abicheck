@@ -90,7 +90,7 @@
       "abicheck/extract/headers/castxml/vector_spellings.py": "208f0891eedceda82e172fe846a5fc09d26a3b3d917795a416ae117450cf600c",
       "abicheck/extract/headers/clang/__init__.py": "538add12f3ff39e1c1b39e6f5def93b50a584b78b30c4e7e59058207222757d0",
       "abicheck/extract/headers/clang/attributes.py": "7e32c123c19fa5cad688760325bd17199dd42d0cc58a0b92360349403003f1e9",
-      "abicheck/extract/headers/clang/backend.py": "66c8aa54f73e8cc5af363db8bbe5fdeabc9fd38c0d4a0a9bb856ac417d232ba3",
+      "abicheck/extract/headers/clang/backend.py": "5025e5d53c93c90daa08f8962f6a44ae593185d7a6446b10b7303987b044fd6b",
       "abicheck/extract/headers/clang/context.py": "648411b558314ee3ba099c4ecbd302193535330c8dc85bb087ad8d2f967b76ec",
       "abicheck/extract/headers/clang/enums.py": "69f90fd8e342371d246a257f7ed4230d9a548173f856ec63776d6af12ee53644",
       "abicheck/extract/headers/clang/error_header_retry.py": "3153f727c9d1934783a51d6917727a48aeba31e68b3c2462aef6e6b2f489f690",
@@ -161,9 +161,9 @@
       "abicheck/symvers_metadata.py": "372737765cd132e6e87ed891dd465d2958e04debbef774e45212ceb3036871cb",
       "abicheck/type_metadata.py": "9997189de8dac522fd1db8be5ae491d811139503f83abaaded89038eb4aa9cdf"
     },
-    "fingerprint": "512101ddd578393aa3dcfb4abf9a5ae3a3d7e72aa5e10942fe91afa40a820238",
+    "fingerprint": "f119aca3b744a87fc1d9cc6da73602004bb59b49e16b4db5494f71a2d0f8fd19",
     "generation": 19,
-    "reason": "diagnostic wording only: an unjoinable instance's unsupported reason now names its scope or type; no fact value changes"
+    "reason": "clang text AST pass: a timeout or non-zero exit now logs and leaves the explicit-instantiation facts unset instead of raising; the facts of a successful pass are unchanged"
   },
   "resolver": {
     "files": {

@@ -301,7 +301,7 @@ def _compare_case85(tmp_path: Path, frontend: str) -> dict:
     out = tmp_path / f"out-{frontend}.json"
     subprocess.run(
         [
-            "python",
+            sys.executable,
             "-m",
             "abicheck.cli",
             "compare",

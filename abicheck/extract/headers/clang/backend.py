@@ -486,8 +486,20 @@ def _explicit_instantiation_facts(
             system_includes=system_includes,
         )
         text_cmd = ["-ast-dump" if tok == "-ast-dump=json" else tok for tok in cmd]
-        run = run_ast(text_cmd, timeout=120, on_created=dumps.append)
+        try:
+            run = run_ast(text_cmd, timeout=120, on_created=dumps.append)
+        except subprocess.TimeoutExpired:
+            # The text pass is optional: a slow pass leaves the facts unset and
+            # must not abort the dump the JSON pass already completed.
+            log.warning(
+                "clang text AST pass timed out; explicit-instantiation facts left unset"
+            )
+            return {}
         if run.returncode != 0 or not dumps:
+            log.debug(
+                "clang text AST pass failed (rc=%s); explicit-instantiation facts left unset",
+                run.returncode,
+            )
             return {}
         dump = parse_explicit_dump(
             dumps[0].read_text(encoding="utf-8", errors="replace")
