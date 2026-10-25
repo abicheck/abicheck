@@ -9,9 +9,9 @@ generated: false
 
 # Out-of-line member template definition gets a different EntityId scope than its in-class declaration (header parser; template_graph fixed)
 
-Index: [Known gaps](../known-gaps.md)
+Index: [Known gaps — closed and moot](../archive/known-gaps-closed.md)
 
-**Status (re-verified 2026-10-09 at `456989f`): PARTIAL.** The template_graph half is fixed: abicheck/buildsource/template_graph.py:1207-1211 uses parentDeclContextId. No parentDeclContextId use exists in dumper_clang.py (_ClangAstParser at :743) or in extract/headers/clang, so the EntityId scope split is still present.
+**Status (2026-10-25): CLOSED.** Fixed by `extract/headers/clang/redeclarations.py`; see the closed entry in [Known gaps — closed and moot](../archive/known-gaps-closed.md). The investigation below is kept for history. Earlier status: Status (re-verified 2026-10-09 at `456989f`): PARTIAL.
 
 `struct A { template<class T> void f(T); }; template
 <class T> void A::f(T) {}` -- confirmed by direct compilation

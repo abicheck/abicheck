@@ -257,6 +257,13 @@ SPELLING_MIGRATIONS: Mapping[int, GenerationSpellingChange] = {
         "rewrite is needed -- an older clang snapshot simply names no "
         "alias/variable template-defaults gap"
     ),
+    24: GenerationSpellingChange(
+        "clang function EntityIds gain a ('requires', ...) constraint block for "
+        "a requires-clause/type-constraint, and an out-of-line member/static "
+        "data member definition takes its in-class declaration's EntityId; no "
+        "type or name spelling changes, so no rewrite is needed -- an older "
+        "clang snapshot keeps the colliding/split identities it recorded"
+    ),
 }
 
 #: Reasons that say nothing about what was audited; the bump gate refuses them.

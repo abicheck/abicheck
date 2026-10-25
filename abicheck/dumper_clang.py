@@ -102,6 +102,7 @@ from .extract.headers.clang import (
 # resolving, even though the real call site moved to
 # ``extract.headers.clang.functions``.
 from .extract.headers.clang.attributes import _clang_contract_attributes  # noqa: F401
+from .extract.headers.clang.constraints import FunctionConstraintIndex
 from .extract.headers.clang.expr import (  # noqa: F401  (some re-exported for tests)
     _SCOPE_NODE_KINDS,
     _WRAPPER_EXPR_KINDS,
@@ -136,6 +137,7 @@ from .extract.headers.clang.qualifiers import (  # noqa: F401  (compatibility re
     _record_kind,
     _reduce_opaque_kind_set,
 )
+from .extract.headers.clang.redeclarations import RedeclarationIdentity
 from .extract.headers.clang.return_type import return_type as _clang_return_type
 from .extract.headers.clang.template_param_indexes import (
     TemplateParamIndexes,
@@ -951,10 +953,12 @@ class _ClangAstParser:
             is_cxx=self._is_cxx,
             function_template_defaults=function_template_default_index(self._root),
             explicit_facts=self.explicit_instantiations,
+            function_constraints=FunctionConstraintIndex(self._root),
         )
 
     def parse_variables(self) -> list[Variable]:
         variables: list[Variable] = []
+        redeclared = RedeclarationIdentity()  # out-of-line static member def
         for entry in self._variables:
             node = entry.node
             if _is_builtin_file(entry.file):
@@ -1065,23 +1069,19 @@ class _ClangAstParser:
                     explicit_instantiation_fact=self.explicit_instantiations.get(
                         id(node)
                     ),
-                    # ADR-063 Phase 2, same routing/bug-fix as
-                    # parse_functions: `mangled_name` is offered only when
-                    # `raw_mangled` is genuinely present, not merely when
-                    # `mangled` (which may itself be the bare-`name`
-                    # fallback) is non-empty -- passing the fallback
-                    # through as a "genuine" mangling would collapse two
-                    # distinct static members of an uninstantiated
-                    # class-template pattern onto one `EntityId`.
-                    entity_id=entity_id_for_variable(
-                        entry.scope_path,
-                        name,
-                        mangled_name=(  # `mangled`: match Darwin stripping.
-                            mangled
-                            if (raw_mangled is not None and not is_extern_c)
-                            else None
+                    # ADR-063 Phase 2: real manglings only (see parse_functions).
+                    entity_id=redeclared.resolve(
+                        node,
+                        entity_id_for_variable(
+                            entry.scope_path,
+                            name,
+                            mangled_name=(  # `mangled`: match Darwin stripping.
+                                mangled
+                                if (raw_mangled is not None and not is_extern_c)
+                                else None
+                            ),
+                            is_extern_c=is_extern_c,
                         ),
-                        is_extern_c=is_extern_c,
                     ),
                 )
             )

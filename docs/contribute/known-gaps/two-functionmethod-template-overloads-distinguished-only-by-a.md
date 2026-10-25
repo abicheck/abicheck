@@ -9,9 +9,9 @@ generated: false
 
 # Two function/method template overloads distinguished only by a `requires`-clause still collide under ADR-063 Phase 2's `EntityId` discriminator (Codex review, PR #943, fresh evidence)
 
-Index: [Known gaps](../known-gaps.md)
+Index: [Known gaps — closed and moot](../archive/known-gaps-closed.md)
 
-**Status (re-verified 2026-10-09 at `456989f`): OPEN.** abicheck/buildsource/template_graph.py:102-122 still defers CONSTRAINT_DEPENDS_ON_DECL and says requires-constrained overloads with the same signature collide. abicheck/extract/headers/clang has no ConceptSpecializationExpr handling.
+**Status (2026-10-25): CLOSED.** Fixed by `extract/headers/clang/constraints.py`; see the closed entry in [Known gaps — closed and moot](../archive/known-gaps-closed.md). The investigation below is kept for history. Earlier status: Status (re-verified 2026-10-09 at `456989f`): OPEN.
 
 
 `template<class T> requires C1<T> void f();` and the same declaration
