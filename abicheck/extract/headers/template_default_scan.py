@@ -153,6 +153,10 @@ def _declares_alias_or_variable(text: str, end: int) -> bool:
     while i + 1 < len(text):
         i += 1
         c = text[i]
+        if c == "[" and parens == 0 and angle == 0:
+            # ``[[attr(...)]]`` and ``T a[N]`` carry no function declarator.
+            i = _skip_balanced(text, i, "[", "]") - 1
+            continue
         if c == "(":
             if parens == 0 and angle == 0:
                 if _TYPE_SPECIFIER_CALL.search(text, end, i) is None:

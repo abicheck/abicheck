@@ -157,6 +157,10 @@ def test_gap_follows_the_scan_result_of_its_own_side(
         ("template <class T = int> decltype(sizeof(T)) value;", True),
         ("template <class T = int> alignas(8) T buf{};", True),
         ("template <class T = int> decltype(sizeof(T)) f(T);", False),
+        ('template <class T = int> [[deprecated("x")]] constexpr int v = 1;', True),
+        ("template <class T = int> [[gnu::aligned(8)]] T buf;", True),
+        ('template <class T = int> [[deprecated("x")]] void f(T);', False),
+        ("template <class T = int> T& operator[](int);", False),
         # No default: not counted, whatever the family.
         ("template <class T> using P = Q<T>;", False),
         ("template <class T> constexpr int V = sizeof(T);", False),
