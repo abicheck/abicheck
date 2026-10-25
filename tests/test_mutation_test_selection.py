@@ -205,6 +205,73 @@ def test_the_trace_is_independent_of_test_order(tmp_path: Path) -> None:
     assert single == {"tests/test_reach.py::test_lazy_import_inside_the_test"}
 
 
+_MEMO_MUTATED = """
+from abicheck.model.execution_cache import memoized
+
+@memoized(maxsize=64)
+def canon(x):
+    return x.strip()
+"""
+_MEMO_TESTS = """
+import pkg.memo
+
+def test_{0}():
+    assert pkg.memo.canon(" a ") == "a"
+"""
+
+
+@pytest.mark.parametrize("order", [("a", "b"), ("b", "a")])
+@pytest.mark.parametrize("workers", [["-p", "no:randomly"], ["-n", "2"]])
+def test_a_memo_hit_from_an_earlier_test_still_credits_the_later_one(
+    tmp_path: Path, order: tuple[str, str], workers: list[str]
+) -> None:
+    """Root cause of the generator/CI disagreement on
+    tests/test_type_indirection.py: its only reach was the memoized
+    ``canonicalize_type_name``, executed only when no earlier test in the
+    same worker had cached the same spelling. Several files call one memo
+    with the same argument; each must be credited whatever ran first."""
+    project = _project(tmp_path)
+    (project / "pkg" / "memo.py").write_text(_MEMO_MUTATED)
+    (project / "pyproject.toml").write_text(
+        '[tool.mutmut]\nonly_mutate = ["pkg/mutated.py", "pkg/memo.py"]\n'
+        '[tool.pytest.ini_options]\npythonpath = ["."]\n'
+    )
+    # Files sort (and so run) in *order*: the memo is warm for the second.
+    for i, o in enumerate(order):
+        (project / "tests" / f"test_memo_{i}_{o}.py").write_text(_MEMO_TESTS.format(o))
+    hits = _trace(project, workers)
+    want = {f"tests/test_memo_{i}_{o}.py::test_{o}" for i, o in enumerate(order)}
+    assert want <= hits, hits
+    assert hits - want == _REACHING
+
+
+def test_generate_and_check_share_one_trace(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The writer and ``--check`` compute reach through the same call with
+    the same arguments, and ``--check``'s failure names that method."""
+    calls: list[str] = []
+
+    def fake_trace(workers: str) -> list[str]:
+        calls.append(workers)
+        return ["tests/test_a.py::t", "tests/test_b.py::t"]
+
+    sel = tmp_path / "sel.txt"
+    monkeypatch.setattr(gen, "trace", fake_trace)
+    monkeypatch.setattr(gen, "SELECTION_FILE", sel)
+    monkeypatch.setattr(gen, "REPO_ROOT", tmp_path)
+    assert gen.main(["-n", "3"]) == 0
+    assert sel.read_text() == "tests/test_a.py\ntests/test_b.py\n"
+    sel.write_text("tests/test_a.py\n")
+    capsys.readouterr()
+    assert gen.main(["--check", "-n", "3"]) == 1
+    out = capsys.readouterr().out
+    assert calls == ["3", "3"]
+    assert "tests/test_b.py" in out
+    assert out.count(gen.method_description("3")) == 2
+    assert "pytest -n 3" in gen.method_description("3")
+
+
 # --------------------------------------------------------------------------
 # Generator
 # --------------------------------------------------------------------------
