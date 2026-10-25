@@ -40,7 +40,7 @@ Which public surface reaches each ADR, which use cases it serves, and whether a 
 | [ADR-021b](../adr/021-mcp-security-model.md) | internal | — | — | Deprecated — the MCP interface was removed. |
 | [ADR-022](../adr/022-baseline-registry.md) | internal | — | — | Superseded by ADR-043 D4; recreating a registry is an explicit non-goal. |
 | [ADR-023](../adr/023-bundle-aware-multi-binary-analysis.md) | surfaced | UC-WF-bundle | `cli: compare --bundle-facts-out`<br>`cli: compare --variant` | — |
-| [ADR-024](../adr/024-public-abi-surface-resolution.md) | surfaced | UC-TC-header-scope-robustness | `cli: compare --header --exclude-header`<br>`action: public-header-dir`<br>`report: compare_report.scope` | — |
+| [ADR-024](../adr/024-public-abi-surface-resolution.md) | surfaced | UC-TC-header-scope-robustness | `cli: compare --header --exclude-header`<br>`action: public-header-dir`<br>`report: compare_report.scope`<br>`report: compare_report.undeclared_export_census` | — |
 | [ADR-025](../adr/025-pr-diff-source-evaluation.md) | partial | UC-WORKFLOW-pr-source-tier | `cli: compare --changed-path`<br>`action: changed-path` | D4 (source diff as a localizer beyond the ADR-033/035 absorption) is future work. |
 | [ADR-026](../adr/026-source-only-undetectable-changes.md) | internal | — | — | Substantially superseded by ADR-028/030/035/038, which own the surviving surfaces. |
 | [ADR-027](../adr/027-api-surface-intelligence.md) | partial | — | `api: abicheck.pattern_verdicts` | No first-class CLI or Action switch reaches pattern-aware verdicts; the default-on flip is deferred pending FP-rate/parity validation. |
@@ -162,6 +162,7 @@ Which public surface reaches each ADR, which use cases it serves, and whether a 
 - ADR-024 action: public-header-dir
 - ADR-024 cli: compare --header --exclude-header
 - ADR-024 report: compare_report.scope
+- ADR-024 report: compare_report.undeclared_export_census
 - ADR-025 action: changed-path
 - ADR-025 cli: compare --changed-path
 - ADR-027 api: abicheck.pattern_verdicts

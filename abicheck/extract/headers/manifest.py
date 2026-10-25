@@ -73,6 +73,7 @@ from ..path_aliases import absolutize_include_roots
 from ..progress import track
 from ..semantic_normalizer import normalize_header_ast
 from ..tu_jobs import _tu_jobs
+from .castxml.hidden_declarations import parser_preprocessor_hidden
 from .clang.streaming import (
     streaming_prune_suppressed,
     suppress_streaming_prune,
@@ -209,6 +210,7 @@ def run_tu_fragment(
         ),
         frontend_context_kind=_parser_frontend_context_kind(parser),
         semantic_ir=fields.semantic_ir,
+        preprocessor_hidden=parser_preprocessor_hidden(parser),
     )
 
 
@@ -562,6 +564,7 @@ class ElfHeaderAstResult:
     # `typedef_entity_ids`/`constants`/`constant_entity_ids` above. See
     # `extract/semantic_normalizer.py`'s own docstring for each slice's scope.
     semantic_ir: SemanticIR | None = None
+    preprocessor_hidden: dict[str, tuple[str, ...]] | None = None
 
 
 def resolve_header_ast_result(
@@ -695,6 +698,7 @@ def resolve_header_ast_result(
             ast_toolchain_unsupported_reasons=fragment.ast_toolchain_unsupported_reasons,
             frontend_context_kind=fragment.frontend_context_kind,
             semantic_ir=fragment.semantic_ir,
+            preprocessor_hidden=fragment.preprocessor_hidden,
         )
         provenance_headers = tuple(headers)
 
@@ -716,6 +720,7 @@ def resolve_header_ast_result(
         frontend_context_kind=merged.frontend_context_kind,
         is_clang=merged.ast_producer == "clang",
         provenance_headers=provenance_headers,
+        preprocessor_hidden=merged.preprocessor_hidden,
         # A real manifest carries its occurrence-preserving merged IR.
         semantic_ir=(
             merged.semantic_ir

@@ -38,6 +38,7 @@ from .model.header_exclusion_record import exclusions_are_symmetric
 
 if TYPE_CHECKING:
     from .checker_types import DiffResult
+    from .model.undeclared_export_census import UndeclaredExportCensus
 
 __all__ = [
     "compute_confidence",
@@ -427,14 +428,52 @@ def undeclared_export_warnings(old: AbiSnapshot | None, new: AbiSnapshot) -> lis
     (``elf.machine`` set), so an uncaptured table never reads as "everything
     undeclared". See :mod:`abicheck.model.undeclared_export_census`.
     """
-    from .demangle import demangle_batch
-    from .elf_symbol_filter import ALL_SYMBOL_TYPES, exported_symbol_names
-    from .model.undeclared_export_census import (
-        census_undeclared_exports,
-        census_warning,
-    )
+    from .model.undeclared_export_census import census_warnings
 
     notes: list[str] = []
+    for side, census in undeclared_export_censuses(old, new):
+        notes.extend(census_warnings(side, census))
+    return notes
+
+
+def attach_coverage_reports(
+    result: DiffResult, old: AbiSnapshot | None, new: AbiSnapshot
+) -> None:
+    """Attach the structured coverage blocks ``compare()`` reports beside
+    ``coverage_warnings``: the I4 edge-coverage report and the undeclared-
+    export census (report schema 6.7). Both read only *old*/*new*."""
+    from .compare.edge_query import edge_coverage_report
+
+    result.edge_coverage = edge_coverage_report(old, new)
+    result.undeclared_export_census = undeclared_export_census_block(old, new)
+
+
+def undeclared_export_census_block(
+    old: AbiSnapshot | None, new: AbiSnapshot
+) -> dict[str, dict[str, object]] | None:
+    """The report's ``undeclared_export_census`` block: per side, the census
+    behind the coverage line, emitted under the same rule (only when at
+    least one export is attributed to a guard macro or a named cause)."""
+    from .model.undeclared_export_census import census_to_dict
+
+    block = {
+        side: census_to_dict(census)
+        for side, census in undeclared_export_censuses(old, new)
+        if census.attributed
+    }
+    return block or None
+
+
+def undeclared_export_censuses(
+    old: AbiSnapshot | None, new: AbiSnapshot
+) -> list[tuple[str, UndeclaredExportCensus]]:
+    """``(side, census)`` for each side with a captured export table and at
+    least one undeclared export (see :func:`undeclared_export_warnings`)."""
+    from .demangle import demangle_batch
+    from .elf_symbol_filter import ALL_SYMBOL_TYPES, exported_symbol_names
+    from .model.undeclared_export_census import census_undeclared_exports
+
+    out: list[tuple[str, UndeclaredExportCensus]] = []
     for side, snap in (("old", old), ("new", new)):
         if snap is None or getattr(snap, "elf_only_mode", False):
             continue
@@ -450,12 +489,12 @@ def undeclared_export_warnings(old: AbiSnapshot | None, new: AbiSnapshot) -> lis
         if not undeclared:
             continue
         census = census_undeclared_exports(
-            undeclared, demangle_batch(sorted(undeclared))
+            undeclared,
+            demangle_batch(sorted(undeclared)),
+            getattr(snap, "live_preprocessor_hidden", None),
         )
-        line = census_warning(side, census)
-        if line is not None:
-            notes.append(line)
-    return notes
+        out.append((side, census))
+    return out
 
 
 def snapshot_load_notices(old: AbiSnapshot | None, new: AbiSnapshot) -> list[str]:

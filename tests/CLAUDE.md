@@ -191,7 +191,8 @@ One directory per real-world shape that escaped every other test: `v1/` and
 `catalog/ground_truth.json` vocabulary (`expected`, `expected_kinds`,
 `expected_absent_kinds`) with the shape's `bug_class`, `related_tests` and
 build/parse knobs (`cxxflags`, `parse_defines`, `parse_includes`, `suppress`,
-`old_generation`, `depths`). `test_field_shapes.py` is the one runner: it
+`old_generation`, `live_compare` — compare the built libraries with `-H`
+instead of stored snapshots, for runtime-only facts — `platforms`, `depths`). `test_field_shapes.py` is the one runner: it
 builds, dumps and compares each shape through the CLI at every listed depth
 and rejects an unknown ground-truth key. Another test reproducing a shape
 loads its sources through `_field_shapes.py` (`shape_sources`, `materialize`;

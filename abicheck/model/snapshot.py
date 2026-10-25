@@ -573,6 +573,16 @@ class AbiSnapshot:
     projection_unavailable: tuple[str, frozenset[str]] | None = field(
         default=None, repr=False, compare=False, kw_only=True
     )
+    # Runtime-only, like `load_notices`: {guard macro: function names} the
+    # castxml parse could not see because they sit in a preprocessor branch
+    # its configuration excluded -- decided by that run's own `-E -dD` output
+    # (`extract/headers/preprocessor_branches.py`). Read by
+    # `confidence.undeclared_export_censuses`. `None`: no scan ran (a stored
+    # snapshot, a non-castxml producer, a multi-TU manifest). Never serialized
+    # (`storage/snapshot_encode.py` drops it).
+    live_preprocessor_hidden: dict[str, tuple[str, ...]] | None = field(
+        default=None, repr=False, compare=False, kw_only=True
+    )
 
     # Indexes (built lazily)
     _func_by_mangled: dict[str, Function] | None = field(

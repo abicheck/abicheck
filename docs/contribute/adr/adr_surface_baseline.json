@@ -96,7 +96,8 @@
         "report: compare_report.policy"
       ],
       "use_cases": [
-        "UC-CHANGE-taxonomy"
+        "UC-CHANGE-taxonomy",
+        "UC-WF-policy-profile"
       ]
     },
     "ADR-011": {
@@ -122,7 +123,8 @@
         "report: compare_report.suppression"
       ],
       "use_cases": [
-        "UC-WF-compare"
+        "UC-WF-compare",
+        "UC-WF-suppression"
       ]
     },
     "ADR-014": {
@@ -241,7 +243,8 @@
       "surfaces": [
         "action: public-header-dir",
         "cli: compare --header --exclude-header",
-        "report: compare_report.scope"
+        "report: compare_report.scope",
+        "report: compare_report.undeclared_export_census"
       ],
       "use_cases": [
         "UC-TC-header-scope-robustness"
@@ -417,7 +420,9 @@
         "cli: compare --suppress",
         "report: compare_report.suppression_audit"
       ],
-      "use_cases": []
+      "use_cases": [
+        "UC-WF-suppression"
+      ]
     },
     "ADR-045": {
       "disposition": "internal",
@@ -461,7 +466,8 @@
         "report: compare_report.contract_coverage"
       ],
       "use_cases": [
-        "UC-WF-compare"
+        "UC-WF-compare",
+        "UC-WF-contract-config"
       ]
     },
     "ADR-050": {
@@ -568,7 +574,9 @@
       "surfaces": [
         "cli: compare"
       ],
-      "use_cases": []
+      "use_cases": [
+        "UC-WF-analysis-assurance"
+      ]
     },
     "ADR-064": {
       "disposition": "surfaced",
@@ -589,7 +597,8 @@
         "report: compare_report.run_outcome"
       ],
       "use_cases": [
-        "UC-WF-compare"
+        "UC-WF-compare",
+        "UC-WF-scope-completeness"
       ]
     },
     "ADR-066": {
@@ -599,7 +608,8 @@
         "cli: project history --policy"
       ],
       "use_cases": [
-        "UC-CHANGE-semver-recommendation"
+        "UC-CHANGE-semver-recommendation",
+        "UC-WF-release-history"
       ]
     },
     "ADR-067": {
@@ -611,6 +621,7 @@
         "report: compare_report.disposition_audit"
       ],
       "use_cases": [
+        "UC-WF-acknowledgment",
         "UC-WF-compare"
       ]
     },
@@ -643,7 +654,8 @@
         "report: compare_report.analysis_assurance"
       ],
       "use_cases": [
-        "UC-WF-compare"
+        "UC-WF-compare",
+        "UC-WF-scope-completeness"
       ]
     },
     "ADR-072": {
@@ -747,6 +759,11 @@
       "use_cases": [
         "UC-ARCH-static-lib"
       ]
+    },
+    "ADR-087": {
+      "disposition": "gap",
+      "surfaces": [],
+      "use_cases": []
     }
   },
   "multichannel_without_family": [
@@ -758,7 +775,6 @@
   "schema_version": 1,
   "untraced_surfaces": [
     "ADR-002 cli: compare --select",
-    "ADR-002 report: compare_report.comparison_scope",
     "ADR-004 report: compare_report.filtered_summary",
     "ADR-004 report: compare_report.redundant_count",
     "ADR-004 report: compare_report.root_causes",
@@ -804,6 +820,7 @@
     "ADR-024 action: public-header-dir",
     "ADR-024 cli: compare --header --exclude-header",
     "ADR-024 report: compare_report.scope",
+    "ADR-024 report: compare_report.undeclared_export_census",
     "ADR-025 action: changed-path",
     "ADR-025 cli: compare --changed-path",
     "ADR-027 api: abicheck.pattern_verdicts",
@@ -841,7 +858,6 @@
     "ADR-047 cli: aggregate",
     "ADR-049 api: abicheck.workflows.service_requests.CompareRequest.pack_paths",
     "ADR-049 api: abicheck.workflows.service_requests.CompareRequest.stated_settings",
-    "ADR-049 cli: compare --contract",
     "ADR-049 report: compare_report.contract_context",
     "ADR-049 report: compare_report.contract_coverage",
     "ADR-050 cli: compare --dump-manifest",
@@ -862,8 +878,6 @@
     "ADR-064 action: severity-preset",
     "ADR-064 report: compare_report.exit",
     "ADR-065 cli: compare --select --select-required --dry-run",
-    "ADR-065 report: compare_report.comparison_scope",
-    "ADR-065 report: compare_report.run_outcome",
     "ADR-066 api: abicheck.workflows.history.build_longitudinal_history",
     "ADR-066 cli: project history --policy",
     "ADR-067 report: compare_report.disposition_audit",

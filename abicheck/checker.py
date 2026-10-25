@@ -38,7 +38,6 @@ from .compare.debug_layout_view import (
     advanced_dwarf_support,
     debug_layout_view as _debug_layout_view,
 )
-from .compare.edge_query import edge_coverage_report
 from .compare.finding_redundancy import (
     ROOT_TYPE_CHANGE_KINDS as _ROOT_TYPE_CHANGE_KINDS,
 )
@@ -46,7 +45,7 @@ from .compare.surface_reconcile import releases_reconciliation
 from .compare.type_layout_diff import (
     diff_struct_layouts,  # noqa: F401 — tests import it from here
 )
-from .confidence import _compute_confidence
+from .confidence import _compute_confidence, attach_coverage_reports
 from .contract_pipeline import (
     ContractEvaluationStage,
     build_contract_stage,
@@ -1394,7 +1393,7 @@ def compare(
     # `frontends/cli/compare_result.py (_report_compare_result)`).
     from .workflows.analysis_assurance_attach import attach_analysis_assurance
 
-    result.edge_coverage = edge_coverage_report(old, new)  # I4, before the rollup
+    attach_coverage_reports(result, old, new)  # I4 + H5 census, before the rollup
     attach_analysis_assurance(result, old, new)
     memory_trace.mark("compare.rollup:done")
     return result

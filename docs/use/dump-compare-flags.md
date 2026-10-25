@@ -181,14 +181,56 @@ are refused as `profile_mismatch` rather than silently diffed.
 | `--define=-DFOO`, `--define=-Xclang`, `--define=@resp.txt` | rejected with a targeted hint |
 | `-U`/undefine | no CLI spelling; remove the entry from `compile.defines` |
 
+### Exports declared only under an `#ifdef`
+
+A header parse sees one preprocessor configuration. A declaration under
+`#ifdef FOO` is removed before castxml parses it when `FOO` is not defined,
+so the export it declares has no header declaration and its API changes go
+unchecked. abicheck finds those declarations and reports, per side and per
+macro, one coverage line:
+
+```text
+old side headers: 2 exported symbols declared only under #ifdef FOO (not defined; pass -D FOO); their API changes are not header-checked
+```
+
+and the same counts, with up to three demangled examples per macro, in the
+JSON report's `undeclared_export_census` object (report schema 6.7). The
+lines are informational: they add no finding and do not change the exit
+code. Nothing is emitted when no undeclared export is attributed.
+
+How the macro is found:
+
+- **The compiler decides which branches were excluded.** castxml's own
+  command is re-run with `-E -dD`; a branch of a `-H` header none of whose
+  lines survived that run was excluded. abicheck never evaluates a
+  condition itself.
+- **A guard is a macro whose definition would enable the branch**: `FOO` in
+  `#ifdef FOO`, both `A` and `B` in `#if defined(A) && defined(B)`, `BAR` in
+  `#elif BAR`. A macro the run *did* define is never named, so nested
+  `#ifdef WRAP` / `#ifdef INNER` with `INNER` defined names only `WRAP`.
+  `#ifndef X`, `!defined(X)` and `#else` arms name no guard ("pass -D X"
+  would be wrong advice for them), and a classic `#ifndef X` / `#define X`
+  include guard is ignored.
+- **An export is matched to a hidden declaration by its function name**
+  (the last `::` component, template arguments dropped). Variables are not
+  matched.
+- **Only a side parsed in this run carries the scan.** It is not stored in a
+  snapshot, so comparing `abicheck dump` outputs, or a castxml parse whose
+  `-E` step failed, or a clang header frontend (`compile.frontend: clang`), falls back to
+  the name rule below. The census reads the ELF export table, so it is
+  reported for ELF libraries only.
+
+The name rule: an undeclared export whose demangled signature names
+`sycl::` is reported as
+`... exported symbols not declared under the parsed header configuration (N reference sycl:: ...)`.
+
 ### Declarations behind `#ifdef SYCL_LANGUAGE_VERSION`
 
 castxml parses as a plain C++ compiler, so `SYCL_LANGUAGE_VERSION` is
 undefined and overloads a header declares only for SYCL (`sycl::queue&`
-parameters) are removed by the preprocessor. abicheck counts the exports this
-hides and reports them in the coverage block, per side, as
-`... exported symbols not declared under the parsed header configuration (N reference sycl:: ...)`.
-The line is informational: it adds no finding and does not change the exit code.
+parameters) are removed by the preprocessor. The coverage block counts them
+as above, under `#ifdef SYCL_LANGUAGE_VERSION` (or, from stored snapshots,
+by the `sycl::` name rule).
 
 To check those overloads too, parse with the macro defined and give castxml a
 stub SYCL header that only forward-declares the types the signatures name:

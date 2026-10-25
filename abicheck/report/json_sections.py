@@ -146,6 +146,9 @@ def add_confidence_evidence(d: dict[str, object], result: DiffResult) -> None:
     d["evidence_tiers"] = list(result.evidence_tiers)
     if result.coverage_warnings:
         d["coverage_warnings"] = list(result.coverage_warnings)
+    # Schema 6.7: the structured form of the undeclared-export coverage line.
+    if result.undeclared_export_census:
+        d["undeclared_export_census"] = result.undeclared_export_census
     # ADR-050 D2 (schema 2.17) — report-level comparability metadata, never a
     # Change/ChangeKind finding, so it stays unreachable by severity promotion.
     # Omitted entirely (not emitted as null) when unset, matching every other
