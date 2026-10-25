@@ -41,7 +41,13 @@ from pathlib import Path
 
 import pytest
 
-pytestmark = pytest.mark.integration
+pytestmark = [
+    pytest.mark.integration,
+    # The oracle is a binary-only dump that reads the debug info embedded in
+    # the library: ELF + DWARF. A Mach-O dylib keeps its DWARF in the objects
+    # or a dSYM, so the binary-only side has no signatures to break on.
+    pytest.mark.skipif(sys.platform != "linux", reason="needs ELF with embedded DWARF"),
+]
 
 #: name -> (v1 header, v2 header, v1 source body, v2 source body).
 CASES: dict[str, tuple[str, str, str, str]] = {
