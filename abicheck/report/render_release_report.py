@@ -234,6 +234,14 @@ def render_release_text(fmt: str, report: ReleaseReport, *, demangle: bool) -> s
         )
     if fmt == "junit":
         return render_release_junit(report)
+    if fmt == "sarif":
+        from .render_release_sarif import render_release_sarif
+
+        return render_release_sarif(report)
+    if fmt == "review":
+        from .render_release_sarif import render_release_review
+
+        return render_release_review(json.loads(render_release_json(report)))
     if fmt == "json":
         return render_release_json(report)
     return render_release_markdown_report(report, demangle=demangle)

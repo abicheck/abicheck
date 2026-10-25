@@ -128,7 +128,9 @@ from .compare_routing import _RELEASE_FORMATS
     "suitable for a job summary or PR comment; 'oneline' emits a "
     "single human-readable summary line -- the 'just tell me' "
     "flow. A directory/package (release) comparison renders "
-    "json/markdown/junit/oneline/html only. Every export is rendered "
+    "json/markdown/sarif/html/junit/review/oneline (not terminal; sarif "
+    "carries one run per library, each result stamped with its release "
+    "member). Every export is rendered "
     "from the one completed comparison -- asking for more "
     "artifacts never re-runs the analysis and never changes the "
     "verdict or the exit code.",
