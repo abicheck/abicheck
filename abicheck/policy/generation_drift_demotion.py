@@ -261,9 +261,20 @@ GENERATION_SPELLING_DRIFT = register_name_heuristic(
     ),
     matcher=_spelling_pair_drifts,
     confirmed_by=_GENERATIONS_DIFFER,
-    helpers=(is_spelling_only_drift, _declared_names, _is_opaque_callback_respelled),
+    helpers=(
+        is_spelling_only_drift,
+        _declared_names,
+        _is_opaque_callback_respelled,
+        _wrapper_shape,
+    ),
     vocabularies=("_BUILTINS",),
-    patterns=(_IDENT, _TOKEN),
+    patterns=(
+        _IDENT,
+        _TOKEN,
+        _FUNCTION_DECLARATOR,
+        _OPAQUE_CV_PREFIX,
+        _WRAPPER_TOKEN,
+    ),
 )
 
 
