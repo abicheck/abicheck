@@ -739,8 +739,19 @@ CLASSIFICATION_BUG_CLASSES: tuple[BugClass, ...] = (
         ),
         public_surfaces=(),
         axes={
-            "shape": ("glibc cv overload", "std ctor placeholder", "conflicting"),
-            "provenance": ("system", "public", "private", "no public set"),
+            "shape": (
+                "glibc cv overload",
+                "std ctor placeholder",
+                "mingw va_list spelling",
+                "conflicting",
+            ),
+            "provenance": (
+                "system",
+                "mingw-w64 sysroot",
+                "public",
+                "private",
+                "no public set",
+            ),
             "frontend": ("castxml",),
         },
     ),

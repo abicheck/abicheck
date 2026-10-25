@@ -49,8 +49,16 @@ from ....model import Function
 _CV = re.compile(r"\b(?:const|volatile)\b")
 
 
+#: GCC/Clang's ``<stdarg.h>`` spellings of one type
+#: (``va_list`` -> ``__gnuc_va_list`` -> ``__builtin_va_list``): mingw-w64
+#: declares ``_vswprintf`` once through the typedef and once with the builtin.
+#: MSVC's ``va_list`` is ``char*`` and has no builtin spelling, so it never
+#: reaches this mapping.
+_VA_LIST = re.compile(r"\b(?:__builtin_va_list|__gnuc_va_list)\b")
+
+
 def _cv_free(spelling: str) -> str:
-    return " ".join(_CV.sub(" ", spelling).split())
+    return " ".join(_VA_LIST.sub("va_list", _CV.sub(" ", spelling)).split())
 
 
 def _signature(

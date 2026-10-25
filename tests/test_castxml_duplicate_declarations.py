@@ -56,9 +56,26 @@ _STD_CTOR = [
     _fn("shared_ptr", _STD_CTOR_KEY, "void", "const shared_ptr<X>&"),
     _fn("shared_ptr", _STD_CTOR_KEY, "void", "const shared_ptr<X>&"),
 ]
+#: mingw-w64's ``<wchar.h>`` and ``swprintf.inl`` both declare ``_vswprintf``,
+#: once through ``va_list`` and once with the builtin it names.
+_MINGW_VA_LIST = [
+    _fn("_vswprintf", "_vswprintf", "int", "wchar_t*", "const wchar_t*", "va_list"),
+    _fn(
+        "_vswprintf",
+        "_vswprintf",
+        "int",
+        "wchar_t*",
+        "const wchar_t*",
+        "__builtin_va_list",
+    ),
+]
 
 
-@pytest.mark.parametrize("group", [_GLIBC, _STD_CTOR], ids=["glibc_cv", "std_ctor"])
+@pytest.mark.parametrize(
+    "group",
+    [_GLIBC, _STD_CTOR, _MINGW_VA_LIST],
+    ids=["glibc_cv", "std_ctor", "mingw_va_list"],
+)
 def test_benign_group_keeps_first_declaration_in_any_order(
     group: list[Function], caplog: pytest.LogCaptureFixture
 ) -> None:
@@ -145,6 +162,14 @@ def _two_ctor_root(header: str) -> Element:
         ("/usr/include/mylib/w.h", ["/usr/include/mylib/w.h"], 2),  # declared public
         ("/src/mylib/include/w.h", None, 2),  # project header, no public set
         ("/src/mylib/include/w.h", ["/src/mylib/include/api.h"], 2),  # private
+        # standalone mingw-w64 CRT, as castxml reports it on Windows
+        (
+            "C:/mingw64/bin/../lib/gcc/x86_64-w64-mingw32/15.2.0/../../../../"
+            "x86_64-w64-mingw32/include\\wchar.h",
+            ["C:/src/mylib/include/api.h"],
+            1,
+        ),
+        ("C:\\work\\my-w64-tool\\include\\w.h", ["C:/src/api.h"], 2),  # project dir
     ],
 )
 def test_parser_collapses_only_provable_system_header_duplicates(

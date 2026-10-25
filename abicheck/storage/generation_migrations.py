@@ -214,7 +214,11 @@ SPELLING_MIGRATIONS: Mapping[int, GenerationSpellingChange] = {
         "libstdc++ copy ctor beside its converting-template twin -- to its first "
         "declaration (duplicate_declarations.py): the dropped record was already "
         "shadowed first-wins by the index, so set membership shrinks and no "
-        "stored type spelling is rewritten"
+        "stored type spelling is rewritten. A standalone mingw-w64 CRT "
+        "(<prefix>/<arch>-w64-mingw32/include) now classifies as a system header "
+        "(system_header_layout.py), so its declarations record origin "
+        "system_header where they read unknown or private_header -- an origin "
+        "value, not a type spelling"
     ),
 }
 
