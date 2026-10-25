@@ -149,6 +149,11 @@ def test_gap_follows_the_scan_result_of_its_own_side(
         ("template <class T = int> requires C<T> && (sizeof(T) > 1) T v;", True),
         ("template <class T = int> requires C<T> void f(T);", False),
         ("template <class T = int> requires C<T> struct S;", False),
+        ("template <class T = int> ::ns::Box<T> v;", True),
+        ("template <class T = int> std::array<int, (1 + 1)> v;", True),
+        ("template <class T = int> int v", False),
+        ("template <class T = int> requires (sizeof(T) > 1", False),
+        ("template <class T = int> requires 1 using P = T;", True),
         # No default: not counted, whatever the family.
         ("template <class T> using P = Q<T>;", False),
         ("template <class T> constexpr int V = sizeof(T);", False),
