@@ -220,6 +220,22 @@ FAMILIES: dict[str, Family] = {
             ),
         ),
         Family(
+            key="F17",
+            title="Header parse uses the dialect the binary was built with",
+            invariant=(
+                "A header parse of a library with no build data takes its C++ "
+                "standard and target flags from the binary's own build record, so "
+                "a declaration that needs the dialect the library was compiled "
+                "with parses, and a caller's explicit choice still wins."
+            ),
+            harness_tests=(),
+            planned_reason=(
+                "One class so far; revisit when a second build fact read from the "
+                "binary (for example a sanitizer or a libc selection) feeds the same "
+                "header parse and the two share one mechanism."
+            ),
+        ),
+        Family(
             key="F15",
             title="castxml type nodes keep the spelling that tells two types apart",
             invariant=(
@@ -471,6 +487,7 @@ _F16 = (
     "report.shared_display_budget_starvation",
     "report.markdown_size_unbounded_by_finding_count",
 )
+_F17 = ("extraction.header_dialect_not_recovered_from_binary",)
 
 #: id -> reason it belongs to no shared family.
 OTHER_REASONS: dict[str, str] = {
@@ -522,6 +539,7 @@ for _key, _ids in (
     ("F14", _F14),
     ("F15", _F15),
     ("F16", _F16),
+    ("F17", _F17),
     ("OTHER", tuple(OTHER_REASONS)),
 ):
     for _id in _ids:

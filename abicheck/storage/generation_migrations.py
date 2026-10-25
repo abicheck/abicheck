@@ -242,6 +242,10 @@ SPELLING_MIGRATIONS: Mapping[int, GenerationSpellingChange] = {
         "snapshot names no explicit form and reads as not collected"
     ),
     21: GenerationSpellingChange(
+        "no stored type spelling changed in this generation: the header parse "
+        "now uses the dialect and target flags the binary was built with"
+    ),
+    22: GenerationSpellingChange(
         "clang runs set template_default_header_scan when a parsed public header "
         "declares an alias or variable template with a default template argument "
         "(was None for every clang run); no type or name spelling changes, so no "
