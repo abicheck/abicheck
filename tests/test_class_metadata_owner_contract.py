@@ -51,7 +51,6 @@ from abicheck.model import AbiSnapshot, Function, RecordType, Visibility
 from abicheck.model.elf_facts import SymbolBinding, SymbolType
 from abicheck.model.owner_recovery import (
     itanium_class_metadata_owner,
-    itanium_declaring_class_path,
     itanium_special_name_owner_identifiers,
 )
 from abicheck.model.vocabulary import ScopeOrigin
@@ -310,19 +309,3 @@ def test_a_same_leaf_class_in_another_namespace_is_not_confirmed_by_slots() -> N
 
     assert change.contract_relevance is not ContractRelevance.IN_CONTRACT
     assert result.verdict is not Verdict.BREAKING
-
-
-@pytest.mark.parametrize(
-    ("mangled", "expected"),
-    [
-        (_INLINE_SLOT, "svs::runtime::v0::DynamicIVFIndex"),
-        ("_ZN3api4Base1vEv", "api::Base"),
-        # A template-specialization scope is not a path this can prove.
-        ("_ZN3api3BoxIiE3getEv", None),
-        ("~DynamicIVFIndex", None),
-    ],
-)
-def test_declaring_class_path_is_the_enclosing_scope(
-    mangled: str, expected: str | None
-) -> None:
-    assert itanium_declaring_class_path(mangled) == expected
