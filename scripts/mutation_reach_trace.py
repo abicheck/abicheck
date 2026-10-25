@@ -68,6 +68,7 @@ from typing import Any
 
 import pytest
 
+from abicheck.model.execution_cache import clear_all_caches
 from abicheck.workflows.memory_trace import gc_census_is_safe
 
 #: ``sys.monitoring`` (3.12+), typed loosely: mypy here targets 3.11.
@@ -314,6 +315,13 @@ def pytest_runtest_protocol(item: pytest.Item, nextitem: object) -> Generator[No
         yield
         return
     mon.arm()
+    # Reach means "would execute only_mutate code if run first", never "did,
+    # after whatever this worker ran before": a memoized only_mutate function
+    # (``canonicalize_type_name``) whose answer an earlier test cached is not
+    # executed again, so reach depended on xdist scheduling and a local
+    # regeneration and CI's --check disagreed (tests/test_type_indirection.py).
+    # Every abicheck process-lifetime cache registers with execution_cache.
+    clear_all_caches()
     mon.hit = False
     _MON.restart_events()
     try:

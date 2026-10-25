@@ -85,6 +85,18 @@ def files_of(nodeids: list[str]) -> list[str]:
     return sorted({n.split("::", 1)[0] for n in nodeids})
 
 
+def method_description(workers: str) -> str:
+    """How :func:`trace` computes reach, printed by both modes so a local
+    regeneration and CI's check name the environment each one used."""
+    v = sys.version_info
+    return (
+        "reach method: scripts/mutation_reach_trace.py (sys.monitoring PY_START, "
+        f"abicheck caches cleared before every test); Python {v.major}.{v.minor}."
+        f"{v.micro} on {sys.platform}; pytest -n {workers}; lane args from "
+        f"[tool.mutmut].pytest_add_cli_args; selection {' '.join(FULL_SELECTION)}"
+    )
+
+
 def trace(workers: str) -> list[str]:
     """Node ids of every test that reaches ``only_mutate`` code."""
     with tempfile.TemporaryDirectory() as out:
@@ -164,6 +176,8 @@ def main(argv: list[str] | None = None) -> int:
     )
     args = parser.parse_args(argv)
 
+    method = method_description(args.workers)
+    print(method)
     reaching = files_of(trace(args.workers))
     if not args.check:
         SELECTION_FILE.write_text("\n".join(reaching) + "\n", encoding="utf-8")
@@ -183,7 +197,7 @@ def main(argv: list[str] | None = None) -> int:
         print(
             f"ERROR: {len(missing)} test file(s) reach only_mutate code but are not in "
             f"{SELECTION_FILE.relative_to(REPO_ROOT)}, so their kills are not counted: "
-            f"{missing}\nRegenerate: python scripts/gen_mutation_test_selection.py"
+            f"{missing}\n{method}\nRegenerate: python scripts/gen_mutation_test_selection.py"
         )
         return 1
     print(f"mutation test selection is complete ({len(committed)} files)")

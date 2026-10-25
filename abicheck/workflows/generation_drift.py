@@ -27,7 +27,10 @@ from __future__ import annotations
 from ..model.change import Change
 from ..model.snapshot import AbiSnapshot
 from ..policy.generation_drift_demotion import demote_generation_spelling_drift
-from ..storage.generation_migrations import extractor_generation_of
+from ..storage.generation_migrations import (
+    extractor_generation_of,
+    pending_extent_shift,
+)
 
 __all__ = [
     "demote_cross_generation_drift",
@@ -57,7 +60,12 @@ def demote_cross_generation_drift(
         return changes
     old_generation, new_generation = operand_extractor_generations(old, new)
     return demote_generation_spelling_drift(
-        changes, old, new, old_generation, new_generation
+        changes,
+        old,
+        new,
+        old_generation,
+        new_generation,
+        extent_shift=pending_extent_shift(old_generation, new_generation),
     )
 
 

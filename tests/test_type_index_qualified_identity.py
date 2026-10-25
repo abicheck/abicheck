@@ -15,10 +15,10 @@ from __future__ import annotations
 import logging
 import shutil
 import subprocess
-import textwrap
 from pathlib import Path
 
 import pytest
+from _field_shapes import materialize
 
 from abicheck.model import AbiSnapshot
 from abicheck.model.entities import RecordType, TypeField
@@ -125,39 +125,19 @@ class TestPureModel:
 
 # ── castxml end-to-end ──────────────────────────────────────────────────────
 
-_HEADER = """
-namespace algo_a {{ struct Parameter {{ int a; }}; int fa(Parameter*); }}
-namespace algo_b {{ struct Parameter {{ int b; {extra} }}; int fb(Parameter*); }}
-namespace algo_c {{ struct Parameter {{ int c; }}; int fc(Parameter*); }}
-namespace algo_d {{ namespace inner {{ struct Parameter {{ int d; }}; }}
-                    int fd(inner::Parameter*); }}
-struct Holder {{ struct Parameter {{ int h; }}; Parameter p; }};
-int fh(Holder*);
-"""
 
-_SOURCE = """
-#include "ns.h"
-int algo_a::fa(Parameter* p) { return p->a; }
-int algo_b::fb(Parameter* p) { return p->b; }
-int algo_c::fc(Parameter* p) { return p->c; }
-int algo_d::fd(inner::Parameter* p) { return p->d; }
-int fh(Holder* h) { return h->p.h; }
-"""
-
-
-def _build(tmp: Path, extra: str) -> tuple[Path, Path]:
-    tmp.mkdir()
-    hdr = tmp / "ns.h"
-    hdr.write_text(textwrap.dedent(_HEADER.format(extra=extra)), encoding="utf-8")
-    (tmp / "ns.cpp").write_text(_SOURCE, encoding="utf-8")
+def _build(tmp: Path, side: str) -> tuple[Path, Path]:
+    """Build one side of the ``same_short_name_namespaces`` corpus shape
+    (``v2`` grows ``algo_b::Parameter`` by one ``int``)."""
+    materialize("same_short_name_namespaces", side, tmp)
     lib = tmp / "libns.so"
     subprocess.run(
-        ["g++", "-shared", "-fPIC", "-o", str(lib), str(tmp / "ns.cpp")],
+        ["g++", "-shared", "-fPIC", "-o", str(lib), str(tmp / "api.cpp")],
         check=True,
         capture_output=True,
         timeout=60,
     )
-    return lib, hdr
+    return lib, tmp / "api.h"
 
 
 @pytest.mark.integration
@@ -169,8 +149,8 @@ def test_castxml_namespace_collision_end_to_end(
     from abicheck.checker import compare
     from abicheck.dumper import dump
 
-    old_lib, old_hdr = _build(tmp_path / "v1", "")
-    new_lib, new_hdr = _build(tmp_path / "v2", "int added;")
+    old_lib, old_hdr = _build(tmp_path / "v1", "v1")
+    new_lib, new_hdr = _build(tmp_path / "v2", "v2")
     with caplog.at_level(logging.WARNING, logger=_INDEX_LOGGER):
         old = dump(old_lib, headers=[old_hdr], version="1", compiler="c++")
         new = dump(new_lib, headers=[new_hdr], version="2", compiler="c++")
