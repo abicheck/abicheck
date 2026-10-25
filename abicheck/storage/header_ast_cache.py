@@ -589,9 +589,9 @@ def run_ast_acquisition_offering_entry(
             own = offer_derived_ast_source(path, is_cache_entry=True)
             if own is not None:
                 return cast("_T", (own, *cast("tuple[Any, ...]", result)[1:]))
-        scope = _ast_acquisition_scope.get()
-        if scope is not None:
-            scope.discard_result(backend, key, result)
+        # Served from the table, so a scope is open.
+        scope = cast("AstAcquisitionScope", _ast_acquisition_scope.get())
+        scope.discard_result(backend, key, result)
     if ran:
         return result
     # The entry the producer actually wrote, which a result can determine:

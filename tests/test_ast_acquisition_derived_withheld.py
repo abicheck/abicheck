@@ -259,3 +259,45 @@ def test_failed_producer_keeps_its_traceback_for_the_leader() -> None:
             )
     frames = [f.name for f in info.traceback]
     assert "failing_producer" in frames
+
+
+def test_tree_consumer_replaces_the_answer_when_no_entry_was_written(
+    tmp_path: Path,
+) -> None:
+    """A derived answer whose cache entry was never written (inputs changed
+    mid-acquisition) cannot be re-offered, so even the tree consumer's
+    lookup must not stop at it: it produces the tree in its place."""
+    missing = tmp_path / "never-written.json"
+    runs: list[str] = []
+    with ast_acquisition_scope():
+        (_marker, *_), art = _derived(missing, runs)
+        tree = _tree_consumer(missing, runs)
+    assert (art.used, art.value) == (True, _PROJECTION)
+    assert tree[0] == _TREE
+    assert len(runs) == 2
+
+
+@pytest.mark.parametrize("held", ["missing", "replaced", "in-flight", "failed"])
+def test_discard_result_drops_only_the_exact_completed_value(held: str) -> None:
+    from abicheck.storage.header_ast_cache import AstAcquisitionScope
+
+    scope = AstAcquisitionScope()
+    stale = object()
+    lookup = ("clang", "k")
+    future: Future[Any] = Future()
+    if held == "replaced":
+        future.set_result(object())
+    elif held == "failed":
+        future.set_exception(RuntimeError("producer failed"))
+    if held != "missing":
+        scope._entries[lookup] = future
+    scope.discard_result("clang", "k", stale)
+    # Nothing but the exact completed value is ever dropped: a waiter may be
+    # blocked on the in-flight future, and a replacement is someone's tree.
+    assert scope._entries.get(lookup) is (None if held == "missing" else future)
+
+    exact: Future[Any] = Future()
+    exact.set_result(stale)
+    scope._entries[lookup] = exact
+    scope.discard_result("clang", "k", stale)
+    assert lookup not in scope._entries
