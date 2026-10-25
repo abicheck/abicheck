@@ -233,6 +233,9 @@ SPELLING_MIGRATIONS: Mapping[int, GenerationSpellingChange] = {
         "value, not a type spelling"
     ),
     19: GenerationSpellingChange(
+        "DWARF declarations record their declaring file when it is a header, and a dependency-internal presence finding no public declaration reaches is out of contract; no stored type spelling changed, only which declarations carry a location and which findings gate"
+    ),
+    20: GenerationSpellingChange(
         "no stored type spelling changed in this generation: the header parse "
         "now uses the dialect and target flags the binary was built with"
     ),
