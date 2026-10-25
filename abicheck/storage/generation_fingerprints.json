@@ -7,7 +7,7 @@
       "abicheck/dwarf_advanced.py": "91cfc7f410a37e7d7ba3ec922ff2944b81253fde3dcfdb806be032087822b339",
       "abicheck/dwarf_metadata.py": "2973de51a3d75c63a5364cc0381e9d020ada5e1a1a54bd78b20458ee07581e20",
       "abicheck/dwarf_presence.py": "7e73580ec7a02fdf24e3815cb89e42aa6fe00e46e8cda6b7fe9d547f06ac3f06",
-      "abicheck/dwarf_snapshot.py": "1ecb4940b848bac40dd7a112f060197a365658e23d70602b73701fa53a54550c",
+      "abicheck/dwarf_snapshot.py": "8a416e8aef1bb5d6b45490f1a57b4a82a81d35d15fdc287581c2ac8e81e46b23",
       "abicheck/dwarf_snapshot_datasources.py": "e337f8be3a8ae16350c0639d0be10670d4d5d1197108659fa210fcbbf8a5bdde",
       "abicheck/dwarf_unified.py": "9ecb70b59bb26674ac98ba14ad1211b4103e3a78426a91ed7901e59f1a7d9cdf",
       "abicheck/dwarf_utils.py": "18a0d5ce15b7d72aead50bd9771112a2a19e5058501cca3e52253323434ff646",
@@ -37,6 +37,7 @@
       "abicheck/extract/digest_memo.py": "babd25889fb4ac54b8defd27ea009fc2e125085c5692f5a4d864aec5491fbee9",
       "abicheck/extract/dpcpp_jobs.py": "7e30f36f5a4ccaf84aa9abe6ed7958d23ce5c43dbb9f6504b9921502c99fad08",
       "abicheck/extract/dump_manifest_roots.py": "b616e45b7eafdd2dd4c69c1031f9a5c8b54973633aa3e9057edc60525ea0d15a",
+      "abicheck/extract/dwarf_decl_file.py": "a585b6e38dc879b04db4b3d70a8b7131774a8b735df1068e6baafcaac934af42",
       "abicheck/extract/dwarf_layout_backfill.py": "3dcc9efb8907b6b3419b09b1c262f64403a5162148bc3be0a5d51e112ef69a4d",
       "abicheck/extract/dwarf_producer.py": "86e449f5776fe7aead410ef979dc636837d28c8caae5599d3c22b8c3f442e1c6",
       "abicheck/extract/dwarf_records.py": "e77d5320c3a56b7ca6a46b20ab7197ed03817d0f838d0a7c0fe899439a71ec42",
@@ -161,9 +162,9 @@
       "abicheck/symvers_metadata.py": "372737765cd132e6e87ed891dd465d2958e04debbef774e45212ceb3036871cb",
       "abicheck/type_metadata.py": "9997189de8dac522fd1db8be5ae491d811139503f83abaaded89038eb4aa9cdf"
     },
-    "fingerprint": "1a0f1746ec69475733753e5714803947b66c32f6bc1295c2556913cec63f7b95",
-    "generation": 19,
-    "reason": "header parse takes its C++ dialect and target flags from the binary's build record"
+    "fingerprint": "bdd0dd007b8e4f2aca8f972c3e2b0273a706e99d2d0fa6421102a98d9ba92b79",
+    "generation": 20,
+    "reason": "C++ dialect and target flags inferred from the binary for the header parse (generation 20 after main took 19)"
   },
   "resolver": {
     "files": {
