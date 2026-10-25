@@ -220,6 +220,19 @@ SPELLING_MIGRATIONS: Mapping[int, GenerationSpellingChange] = {
         "snapshot simply names no gap for such a pattern"
     ),
     18: GenerationSpellingChange(
+        "castxml collapses a same-key function group declared only in system "
+        "headers outside a given public set, whose signatures (and exception "
+        "specification) agree modulo cv -- glibc wcschr/strchr overloads, "
+        "libstdc++ copy ctor beside its converting-template twin -- to its first "
+        "declaration (duplicate_declarations.py): the dropped record was already "
+        "shadowed first-wins by the index, so set membership shrinks and no "
+        "stored type spelling is rewritten. A standalone mingw-w64 CRT "
+        "(<prefix>/<arch>-w64-mingw32/include) now classifies as a system header "
+        "(system_header_layout.py), so its declarations record origin "
+        "system_header where they read unknown or private_header -- an origin "
+        "value, not a type spelling"
+    ),
+    19: GenerationSpellingChange(
         "Mach-O LC_LOAD_WEAK_DYLIB install names are recorded as weak_dependent_libs, "
         "a new fact rather than a spelling: no stored type or declaration spelling "
         "changes, so no rewrite is needed and a stored snapshot reads as before"
