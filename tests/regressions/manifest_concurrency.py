@@ -241,17 +241,18 @@ CONCURRENCY_BUG_CLASSES: tuple[BugClass, ...] = (
         id="concurrency.caller_local_answer_published_to_shared_acquisition",
         invariant=(
             "A request's AST acquisition table serves one value per key to "
-            "every consumer, so a producer's result may be published only "
-            "if it is a value of the key alone. A result shaped by the "
-            "leading caller's own context -- the derived-AST scope's "
-            "superseded marker, which tells only the header-graph attach "
-            "that it took a stored projection instead of the tree -- must "
-            "reach that caller and nobody else: a waiter re-acquires, and "
-            "a later caller of the key finds no entry. Whichever consumer "
-            "arrives first, and whether it runs in this process or in a "
-            "forked side child, a consumer that needs the tree gets a "
-            "tree equal to what a scope-free producer builds, and the "
-            "derived consumer still gets its derived form."
+            "every consumer, so a value shaped by the leading caller's own "
+            "context -- the derived-AST scope's superseded marker, which "
+            "tells only the header-graph attach that it took a projection "
+            "instead of the tree -- must never be read as a value of the key "
+            "by anyone else. A consumer served it takes its own derived form "
+            "from the cache entry, or, if it needs the tree, replaces the "
+            "marker with a tree; the key's other derived consumers keep "
+            "sharing one producer run. Whichever consumer arrives first, and "
+            "whether it runs in this process or in a forked side child, a "
+            "consumer that needs the tree gets a tree equal to what a "
+            "scope-free producer builds, and the derived consumer still gets "
+            "its derived form."
         ),
         # `compare` with `--build-info` on an xvec-based library crashed in
         # the forked side child with `'object' object has no attribute
