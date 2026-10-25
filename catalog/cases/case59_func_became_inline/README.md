@@ -41,13 +41,11 @@ Verdict: BREAKING (exit 4)
   > Symbol hidden from dynamic linking; old binaries can't find it at load time.
 - func_visibility_changed: Function visibility changed to hidden: fast_max (public -> hidden)
   > Symbol hidden from dynamic linking; old binaries can't find it at load time.
-- func_removed_elf_only: Elf_only function removed: fast_abs
-  > Exported function symbol removed from the binary; old binaries that
-    link or dlsym() it can fail even without header evidence.
-- func_removed_elf_only: Elf_only function removed: fast_max
-  > Exported function symbol removed from the binary; old binaries that
-    link or dlsym() it can fail even without header evidence.
 ```
+
+The ELF-only removal of each symbol is not listed separately: it describes the
+same export loss as the visibility finding above, so the cross-detector
+deduplication drops it (recorded as `deduplicated`, commit 1fc6c46c5).
 
 ## Minimum evidence
 
@@ -57,7 +55,7 @@ Verdict: BREAKING (exit 4)
 BREAKING via the plain `func_removed` kind. Adding `good.h`'s header AST (as
 above) sharpens the diagnosis from "symbol removed" to "removed from the
 binary but still declared `static inline` in the header" — surfacing the
-more precise `func_visibility_changed`/`func_removed_elf_only` pair — but
+more precise `func_visibility_changed` finding — but
 that extra precision isn't needed to reach the correct BREAKING verdict.
 
 ## Why abicheck catches it
@@ -67,9 +65,8 @@ The dynamic symbol table is authoritative L0 evidence: `fast_abs` and
 abicheck flags a plain removal without any further evidence. When public
 headers are also supplied, abicheck cross-references the header AST and
 sees both functions are still declared (as `static inline`) on the new
-side — reclassifying the finding as a visibility change plus an ELF-only
-hard removal, rather than treating it as if the API vanished from source
-too.
+side — reclassifying the finding as a visibility change, rather than
+treating it as if the API vanished from source too.
 
 ## Runtime failure demonstration
 

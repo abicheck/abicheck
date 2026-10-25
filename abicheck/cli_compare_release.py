@@ -52,9 +52,10 @@ from .frontends.cli.release_compare_request import (
 )
 from .frontends.cli.release_member_reporter import CliReleaseReporter
 from .frontends.cli.release_report import render_release_summary
-from .frontends.cli.release_summary import _finalize_release_output
+from .frontends.cli.release_summary import _PAIR_FORMATS, _finalize_release_output
 from .frontends.cli.runtime import _setup_verbosity, _write_or_echo
 from .model.release_selection import ReleaseSelection
+from .report.release_formats import RELEASE_FORMATS
 from .report.release_outcome_projection import project_release_outcome
 from .workflows.release_compare import (
     ReleaseCompareOptions,
@@ -67,8 +68,9 @@ if TYPE_CHECKING:
     from .pack_application import PackApplication
 
 
-#: The formats the release fan-out actually produces.
-_ENGINE_FORMATS = ["json", "markdown", "junit", "oneline", "html"]
+#: The formats the release fan-out actually produces (one source: the
+#: compare routing set the directory/package dispatch also checks against).
+_ENGINE_FORMATS = sorted(RELEASE_FORMATS)
 
 
 # NOTE: not registered on `main` — the user-facing `compare-release` command was
@@ -619,7 +621,12 @@ def compare_release_cmd(
                     probe_matrix_old=probe_matrix_old,
                     probe_matrix_new=probe_matrix_new,
                     bundle_facts_out=bundle_facts_out,
-                    junit_inventory=(fmt == "junit" or "junit" in secondary_formats),
+                    # The per-member pairs JUnit and SARIF render from need the
+                    # compact old-side inventory kept beside each DiffResult.
+                    junit_inventory=(
+                        fmt in _PAIR_FORMATS
+                        or any(f in _PAIR_FORMATS for f in secondary_formats)
+                    ),
                 ),
                 reporter=CliReleaseReporter(
                     severity_config=severity_config,
@@ -722,7 +729,7 @@ def _render_release_outcome(
             outcome.old_map,
             outcome.new_map,
             outcome.warnings,
-            diff_pairs=outcome.junit_pairs if secondary_fmt == "junit" else None,
+            diff_pairs=outcome.junit_pairs if secondary_fmt in _PAIR_FORMATS else None,
             fail_on_removed=fail_on_removed,
             demangle=resolve_demangle_for_format(secondary_fmt),
             **common,
