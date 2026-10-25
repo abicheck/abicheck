@@ -29,8 +29,8 @@ RELEASE_FORMATS = frozenset(
 )
 
 #: The formats a stored-``BundleFacts`` ``compare`` renders. A stored OLD_INPUT
-#: has no per-member fan-out and no ``--view``; HTML needs the effective-config
-#: receipt, which the stored path does not resolve, so it stays out. Each
-#: member of this set is a :data:`RELEASE_FORMATS` member, rendered by the same
-#: release renderer (JSON and Markdown keep the stored document's own shape).
-STORED_RELEASE_FORMATS = frozenset({"json", "markdown", "junit", "oneline"})
+#: has no per-member fan-out and no ``--view``. Every format here is rendered
+#: from one live-shaped release evaluation of the stored comparison (its receipt
+#: recomputed, its unknown fields explicit ``unavailable`` markers); JSON and
+#: Markdown keep the stored document's own shape and carry it as ``release``.
+STORED_RELEASE_FORMATS = frozenset({"json", "markdown", "junit", "oneline", "html"})

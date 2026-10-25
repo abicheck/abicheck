@@ -31,6 +31,7 @@ member's severity fold never applies here: the entries carry no
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
@@ -40,10 +41,34 @@ from ....report.release_assurance_section import (
     release_assurance_terms,
 )
 from ....report.release_document import ReleaseEvaluation
+from ....report.release_findings import project_release_library_results
 from ....report.release_member_entry import stamp_member_counts
 from ....report.release_member_summary import add_member_review_summary
+from ....report.release_surface_changes import attach_member_surface_changes
 from ....workflows.gate import resolve_release_assurance_decision
 from ....workflows.member_compare import stamp_member_exit_contributions
+
+#: Per-member fields a stored comparison cannot compute, each an explicit
+#: ``unavailable`` marker with its reason (never an empty value or a missing key).
+_UNAVAILABLE_MEMBER_FIELDS = {
+    "type_attribution": (
+        "stored facts keep no per-member snapshot to say which type findings "
+        "this member's own exports reach"
+    ),
+    "unreached_type_disposition": (
+        "unreached-type disposition needs the sibling members' snapshots, which "
+        "stored facts do not carry"
+    ),
+    "bundle_evidence": (
+        "per-side bundle evidence is collected during a live compare and is not "
+        "stored with the facts"
+    ),
+}
+
+
+def unavailable_marker(reason: str) -> dict[str, str]:
+    """An explicit ``unavailable`` state with the reason it is unavailable."""
+    return {"state": "unavailable", "reason": reason}
 
 
 def stored_library_entries(
@@ -75,6 +100,8 @@ def stored_library_entries(
             require_complete_analysis=require_complete_analysis,
             contract_evaluation=False,
         )
+        for field, reason in _UNAVAILABLE_MEMBER_FIELDS.items():
+            entry[field] = unavailable_marker(reason)
         entries.append(entry)
     return entries
 
@@ -88,6 +115,7 @@ def stored_release_evaluation(
     scope_terms: ComparisonScopeTerms,
     assurance_decision: ReleaseAssuranceDecision | None,
     require_complete_analysis: bool,
+    effective_config: tuple[str, Mapping[str, str]] | None = None,
 ) -> ReleaseEvaluation:
     """The live :class:`ReleaseEvaluation` a stored comparison renders as.
 
@@ -100,16 +128,26 @@ def stored_release_evaluation(
         if assurance_decision is not None
         else resolve_release_assurance_decision((), require_complete=False)
     )
+    entries = stored_library_entries(
+        result, require_complete_analysis=require_complete_analysis
+    )
+    # The per-member steps of the live projection that read each DiffResult,
+    # in the live order: the surface block first, then findings and the strip
+    # of private keys. The release-level public-surface fold needs the live
+    # surface stage, so a stored run has none (see _stored_release_block).
+    attach_member_surface_changes(entries)
+    worst_verdict = project_release_library_results(
+        entries, [], worst_verdict, None, needs_annotations=True
+    )
     return ReleaseEvaluation(
         worst_verdict=worst_verdict,
         old_dir=old_facts_path,
         new_dir=new_dir,
-        library_results=stored_library_entries(
-            result, require_complete_analysis=require_complete_analysis
-        ),
+        library_results=entries,
         scope_terms=scope_terms,
         assurance_terms=assurance_terms,
         diff_pairs=[(diff, None) for diff in result.per_library],
         bundle_result=result,
         require_complete_analysis=require_complete_analysis,
+        effective_config=effective_config,
     )
