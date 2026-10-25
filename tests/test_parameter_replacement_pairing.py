@@ -145,8 +145,9 @@ def test_no_removal_or_no_addition_returns_input_unchanged() -> None:
 
 @pytest.mark.parametrize("header_side", ["old", "new"])
 def test_header_parsed_side_keeps_removal_and_addition(header_side: str) -> None:
-    # A header-parsed declaration is contract evidence: a parameter retyped to
-    # an internal type stays func_removed (case189's documented finding).
+    # Header evidence on one side only: neither the name rule nor the header
+    # declaration rule has complete evidence (both-sides header pairing is
+    # tests/test_header_parameter_replacement_pairing.py).
     old = _snap([_fn("scale", OLD_SCALE)])
     new = _snap([_fn("scale", NEW_SCALE)])
     (old if header_side == "old" else new).from_headers = True

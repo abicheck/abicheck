@@ -496,6 +496,25 @@ EXTRACTION_BUG_CLASSES: tuple[BugClass, ...] = (
         ),
     ),
     BugClass(
+        id="identity.header_declaration_retype_read_as_removal",
+        invariant=(
+            "With headers on both sides, a removed and an added symbol that are "
+            "the same header declaration -- declared name, written parameter and "
+            "return spellings, declaring header -- are one parameter change when "
+            "a parameter written the same resolves to a different type (its "
+            "resolved record/enum, that record's layout, or a typedef's target "
+            "changed). A changed written signature, or a mangling change the "
+            "header evidence does not explain, stays a removal and an addition."
+        ),
+        fixed_by=(1779, 1812),
+        seed_tests=(
+            "tests/test_header_parameter_replacement_pairing.py",
+            "tests/test_header_param_change_pairing_integration.py",
+            "tests/test_closure_param_churn_pipeline.py",
+            "tests/test_family_f3_identity.py",
+        ),
+    ),
+    BugClass(
         id="templates.explicit_instance_removal_read_as_visibility_change",
         invariant=(
             "An instance the old header spelled explicitly (extern template, "

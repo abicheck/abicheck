@@ -1,0 +1,27 @@
+{
+  "description": "A non-template function whose parameter type is a typedef (V = basic_vec<float>) whose resolved type changed under one written spelling: the mangled name of lib::scale changes, the header declaration does not. Under headers it is one func_params_changed on the old symbol (still BREAKING: the old symbol is gone), not an unexplained func_added with no removal.",
+  "field_report": "xvec target-ISA comparison (lib::scale, avx2 -> avx512f), header-free pairing of PR #1779 extended to headers",
+  "bug_class": "identity.header_declaration_retype_read_as_removal",
+  "related_tests": [
+    "tests/test_header_parameter_replacement_pairing.py",
+    "tests/test_header_param_change_pairing_integration.py"
+  ],
+  "depths": [
+    "headers",
+    "source"
+  ],
+  "expected": "BREAKING",
+  "expected_kinds": [
+    "func_params_changed"
+  ],
+  "expected_absent_kinds": [
+    "func_removed",
+    "func_added"
+  ],
+  "expected_findings": [
+    [
+      "func_params_changed",
+      "_ZN3lib5scaleE9basic_vecIfLi8EEf"
+    ]
+  ]
+}

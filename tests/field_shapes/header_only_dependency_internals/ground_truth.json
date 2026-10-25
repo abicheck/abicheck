@@ -9,6 +9,9 @@
   "parse_includes": [
     "dep"
   ],
+  "platforms": [
+    "linux"
+  ],
   "depths": [
     "headers"
   ],
