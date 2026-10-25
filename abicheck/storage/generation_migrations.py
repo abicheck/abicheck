@@ -194,6 +194,19 @@ SPELLING_MIGRATIONS: Mapping[int, GenerationSpellingChange] = {
         "is sound and a baseline holding those spellings is re-dumped",
         extent_shift=1,
     ),
+    16: GenerationSpellingChange(
+        "castxml function types spell their full declarator, 'int (*)(int, int)', "
+        "instead of the opaque 'FunctionType*' tag (extract/headers/castxml/"
+        "type_resolution.py): the stored tag dropped the signature, so no rewrite "
+        "is sound; policy/generation_drift_demotion.py demotes a stored tag "
+        "against a fresh declarator, and a baseline holding callbacks is re-dumped"
+    ),
+    17: GenerationSpellingChange(
+        "clang function-template patterns whose default argument cannot be spelled "
+        "record template_param_defaults_fact as UNSUPPORTED (was absent); no type "
+        "or name spelling changes, so no rewrite is needed -- an older clang "
+        "snapshot simply names no gap for such a pattern"
+    ),
 }
 
 #: Reasons that say nothing about what was audited; the bump gate refuses them.

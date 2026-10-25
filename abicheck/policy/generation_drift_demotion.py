@@ -45,6 +45,7 @@ from __future__ import annotations
 import re
 from collections.abc import Iterable
 
+from ..model.castxml_spelling_artifacts import is_castxml_opaque_function_type
 from ..model.change import Change
 from ..model.change_catalog.kinds import ChangeKind
 from ..model.change_catalog.registry import Verdict
@@ -148,10 +149,12 @@ def _declared_names(snapshot: AbiSnapshot) -> frozenset[str]:
 def is_spelling_only_drift(old: str, new: str, old_declared: Iterable[str]) -> bool:
     """Whether *old* -> *new* differs only by renaming identifiers that are
     neither builtins nor names *old_declared* holds, keeping the skeleton."""
+    declared = frozenset(old_declared)
+    if _is_opaque_callback_respelled(old, new, declared):
+        return True
     old_t, new_t = _TOKEN.findall(old), _TOKEN.findall(new)
     if len(old_t) != len(new_t) or old_t == new_t:
         return False
-    declared = frozenset(old_declared)
     for a, b in zip(old_t, new_t, strict=True):
         if a == b:
             continue
@@ -160,6 +163,47 @@ def is_spelling_only_drift(old: str, new: str, old_declared: Iterable[str]) -> b
         if a in _BUILTINS or b in _BUILTINS or a in declared:
             return False
     return True
+
+
+def _is_opaque_callback_respelled(old: str, new: str, declared: frozenset[str]) -> bool:
+    """Whether *old* is castxml's pre-generation-16 opaque ``FunctionType``
+    tag and *new* a full function declarator (``int (*)(int)``).
+
+    The stored tag dropped the callback's signature, so the pair cannot say
+    whether the signature changed: drift, not evidence of a break. A real
+    type the old snapshot declares as ``FunctionType`` is not the tag. The
+    declarator around the callback (pointer, reference, cv, array) was stored
+    and must match: a pointer that became a reference, or a changed pointer
+    depth, is a real change. Array extents are not compared, since castxml
+    respelled them across generations.
+    """
+    if (
+        "FunctionType" in declared
+        or "FunctionType" in new
+        or "_Atomic" in old
+        or not is_castxml_opaque_function_type(old, "castxml")
+    ):
+        return False
+    declarator = _FUNCTION_DECLARATOR.match(new)
+    if declarator is None:
+        return False
+    stored = _OPAQUE_CV_PREFIX.sub("", old).removeprefix("FunctionType")
+    return _wrapper_shape(stored) == _wrapper_shape(declarator.group(1))
+
+
+#: ``ret (DECLARATOR)(params)`` -- the declarator castxml's generation-16
+#: renderer writes around a function type.
+_FUNCTION_DECLARATOR = re.compile(r"^[^()]*\(([^()]*)\)\s*\(")
+_OPAQUE_CV_PREFIX = re.compile(r"^(?:(?:const|volatile)\s+)*")
+_WRAPPER_TOKEN = re.compile(r"[*&]|\[\d*\]|\bconst\b|\bvolatile\b")
+
+
+def _wrapper_shape(declarator: str) -> tuple[str, ...]:
+    """Ordered pointer/reference/cv/array wrappers, array extents erased."""
+    return tuple(
+        "[]" if token.startswith("[") else token
+        for token in _WRAPPER_TOKEN.findall(declarator)
+    )
 
 
 def is_extent_shift_drift(old: str, new: str, shift: int) -> bool:
@@ -217,9 +261,20 @@ GENERATION_SPELLING_DRIFT = register_name_heuristic(
     ),
     matcher=_spelling_pair_drifts,
     confirmed_by=_GENERATIONS_DIFFER,
-    helpers=(is_spelling_only_drift, _declared_names),
+    helpers=(
+        is_spelling_only_drift,
+        _declared_names,
+        _is_opaque_callback_respelled,
+        _wrapper_shape,
+    ),
     vocabularies=("_BUILTINS",),
-    patterns=(_IDENT, _TOKEN),
+    patterns=(
+        _IDENT,
+        _TOKEN,
+        _FUNCTION_DECLARATOR,
+        _OPAQUE_CV_PREFIX,
+        _WRAPPER_TOKEN,
+    ),
 )
 
 

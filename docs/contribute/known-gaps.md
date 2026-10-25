@@ -61,7 +61,7 @@ Each entry's status line says what is still open. A PARTIAL entry's write-up als
 
 #### A large export shrink with no declared surface emits no finding in header mode (2026-10-22)
 
-**Status (2026-10-22): OPEN, deliberate follow-up — product decision needed.** `abi_surface_explosion` is growth-only now; a header-mode shrink of undeclared exports has no finding. [Full write-up](known-gaps/a-large-export-shrink-with-no-declared-surface-emits-nothing.md)
+**Status (2026-10-24): FIXED (no longer reproduces; pinned).** The premise was wrong: header-aware dumps already report each lost undeclared export as `func_removed_elf_only`/`var_removed_elf_only` (`compare.undeclared_exports._export_only_removals`, #1308), BREAKING by default per ADR-063. Now pinned by `tests/test_undeclared_export_shrink.py` and its `_integration` sibling. [Full write-up](known-gaps/a-large-export-shrink-with-no-declared-surface-emits-nothing.md)
 
 CJM: trust stage (docs/contribute/cjm.md) — use case UC-WF-analysis-assurance (G47); priority: L2 Linux ELF.
 
@@ -111,7 +111,7 @@ current emitter, which is unchanged.
 
 #### A header-only default template-argument change reads `NO_CHANGE` at L2 on castxml (2026-10-21)
 
-**Status (2026-10-23): PARTIAL — clang closed; castxml reports the gap, and its verdict stays `NO_CHANGE` by decision.** ADR-085 is accepted. Clang records the default (schema v62) and reports a header-only default change as `API_BREAK` (`template_param_default_changed`). A castxml run still reads `NO_CHANGE` on this shape, because castxml emits no record for an uninstantiated class template. The castxml header-text scan (ADR-085 D3, schema v63) reports the gap: the run reads `partial` with `template-parameter defaults (castxml cannot record them)` named. The verdict question is decided (ADR-085 Remaining item 1, 2026-10-23): the castxml verdict stays `NO_CHANGE`, because weaker evidence narrows the conclusion and is reported, and does not fabricate a finding.
+**Status (2026-10-24): PARTIAL — castxml cannot carry the default; every class and function template now reads `partial` with the gap named. Remaining: clang alias and variable templates.** castxml 0.7 emits no element for an uninstantiated template and names an instantiation as written (`Box<char>`, `f` with `_ZN1m1fIiEEvv`), so the default cannot be recovered from its XML; its run reads `NO_CHANGE` with `partial` assurance and `template-parameter defaults (castxml cannot record them)` named (ADR-085 D3), for class, function, alias and variable templates and for type, non-type and template-template defaults. Fixed 2026-10-24: a clang function template whose default cannot be spelled (`int N = sizeof(T)`) now records the defaults as `UNSUPPORTED` and names the gap; before, it read `complete`. Still open: the clang backend models neither alias nor variable templates, so a default change on one reads `NO_CHANGE` with no gap note on clang (`tests/test_template_default_assurance_gap.py` pins it).
 
 `false-clean` — A default template argument changed on a header-only template reads `NO_CHANGE` on castxml (clang reports `API_BREAK`), and the source-level consequence appears only as an L4 risk on castxml. [Full write-up](known-gaps/a-header-only-default-template-argument-change-reads-no-change-at-l2.md)
 
@@ -224,8 +224,8 @@ CJM: trust stage (docs/contribute/cjm.md) — use case UC-WF-analysis-assurance 
 
 #### A function-pointer parameter's signature is not compared, so a callback arity change reads `NO_CHANGE` on the header path (2026-10-15)
 
-**Status (2026-10-15): OPEN.** Reproduced in plain C. The parameter record keeps only the pointer's type name, and the pointee's signature is not compared on either path.
-`false-clean` — A callback that gains a parameter is reported as no change with headers, and on DWARF unless the type name happens to carry the signature. [Full write-up](known-gaps/function-pointer-signatures-are-not-compared-in-header-mode.md)
+**Status (2026-10-24): FIXED for the header (castxml) path.** `extract/headers/castxml/type_resolution.py` spells a castxml `FunctionType` as its full declarator (`int (*)(int, int)`, with `...`, calling-convention attributes and the pointer/reference/cv/array declarator) instead of the opaque `FunctionType` tag, so an inline callback parameter, a pointer to one, a callback typedef, a struct field and a returned callback report `func_params_changed`/`typedef_base_changed`/`type_field_type_changed`. `EXTRACTOR_GENERATION` advanced to 16 for this fix; a pre-16 baseline's `FunctionType*` against a fresh declarator is demoted as generation drift (`policy/generation_drift_demotion.py`), and a callback typedef is no longer read as an opaque handle (`idioms.py`). Tests: `tests/test_castxml_function_pointer_spelling.py`, `tests/test_castxml_function_pointer_integration.py`. Still open: the DWARF path spells every subroutine type `fn(...)`, so a DWARF-only (or header-less Rust) comparison still reads `NO_CHANGE`; C++ `noexcept` on a function type is not in castxml's output.
+`false-clean` — (DWARF residual) A callback that gains a parameter is reported as no change on DWARF unless the type name happens to carry the signature. [Full write-up](known-gaps/function-pointer-signatures-are-not-compared-in-header-mode.md)
 
 #### A default release-profile Rust run without headers reports `NO_CHANGE ... ACCEPTED` while its own warnings say the result is unconfirmed (2026-10-15)
 
