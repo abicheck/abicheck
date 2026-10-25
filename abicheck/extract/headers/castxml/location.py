@@ -35,10 +35,13 @@ from ....model.export_index import ExportMatch, match_export
 from ....name_classification import strip_anonymous_type_location
 from ...castxml_header_compat import PREAMBLE_FILENAME
 from ...declaration_provenance import (
+    _is_bare_system_dir,
+    _matches_any_dir,
     classify_origin,
     header_from_location,
     is_system_header,
 )
+from ...path_aliases import segments
 from .context import CastxmlParserContext
 
 
@@ -275,16 +278,26 @@ def decl_is_system_dependency(ctx: CastxmlParserContext, el: Any) -> bool:
 
     Needs a public-header set: without one, a library installed under a
     system prefix (``/usr/include/mylib/``) reads as a system header too, so
-    provenance is unknown and nothing is a dependency. A declaration with no
-    location, or in a project header, is never one.
+    provenance is unknown and nothing is a dependency. For the same reason a
+    header sharing a directory with a declared public header
+    (``/usr/include/mylib/detail.h`` beside ``-H /usr/include/mylib/api.h``)
+    is the library's own, unless that directory is a bare system root
+    (``/usr/include`` itself). A declaration with no location, or in a
+    project header, is never one.
     """
     sh = header_from_location(source_location(ctx, el))
-    return (
-        ctx.have_public_set
-        and bool(sh)
-        and is_system_header(sh)
-        and not decl_is_public(ctx, el)
-    )
+    if not (ctx.have_public_set and sh and is_system_header(sh)):
+        return False
+    return not decl_is_public(ctx, el) and not _beside_a_public_header(ctx, sh)
+
+
+def _beside_a_public_header(ctx: CastxmlParserContext, header: str) -> bool:
+    owned = [
+        p[:-1]
+        for p in ctx.pub_header_segs
+        if len(p) > 1 and not _is_bare_system_dir(p[:-1])
+    ]
+    return _matches_any_dir(segments(header), owned)
 
 
 def visibility(ctx: CastxmlParserContext, mangled: str, name: str = "") -> Visibility:

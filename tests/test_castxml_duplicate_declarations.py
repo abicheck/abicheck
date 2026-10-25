@@ -162,6 +162,12 @@ def _two_ctor_root(header: str) -> Element:
         ("/usr/include/mylib/w.h", ["/usr/include/mylib/w.h"], 2),  # declared public
         ("/src/mylib/include/w.h", None, 2),  # project header, no public set
         ("/src/mylib/include/w.h", ["/src/mylib/include/api.h"], 2),  # private
+        # an installed library's private header beside its public one
+        ("/usr/include/mylib/detail.h", ["/usr/include/mylib/api.h"], 2),
+        # ... while the toolchain's headers stay dependencies of that library
+        ("/usr/include/c++/13/bits/w.h", ["/usr/include/mylib/api.h"], 1),
+        # a public header straight in a bare system root owns nothing there
+        ("/usr/include/c++/13/bits/w.h", ["/usr/include/zlib.h"], 1),
         # standalone mingw-w64 CRT, as castxml reports it on Windows
         (
             "C:/mingw64/bin/../lib/gcc/x86_64-w64-mingw32/15.2.0/../../../../"

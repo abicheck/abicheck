@@ -750,6 +750,7 @@ CLASSIFICATION_BUG_CLASSES: tuple[BugClass, ...] = (
                 "mingw-w64 sysroot",
                 "public",
                 "private",
+                "installed library private header",
                 "no public set",
             ),
             "frontend": ("castxml",),
