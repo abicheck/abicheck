@@ -61,7 +61,10 @@ class TestDepthProjection:
         ]
 
     def test_read_table_still_strips_an_unexported_declaration(self):
-        assert self._project(_read("other")).declarations.functions == []
+        # The table's own export joins as an export-only record; the
+        # declaration it does not carry is gone.
+        functions = self._project(_read("other")).declarations.functions
+        assert [f.mangled for f in functions] == ["other"]
 
 
 # -- ELF deleted fallback -----------------------------------------------------

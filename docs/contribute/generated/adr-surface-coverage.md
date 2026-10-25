@@ -6,7 +6,7 @@ Which public surface reaches each ADR, which use cases it serves, and whether a 
 
 | Disposition | ADRs |
 |---|---|
-| surfaced | 47 |
+| surfaced | 48 |
 | partial | 14 |
 | gap | 8 |
 | internal | 20 |
@@ -104,6 +104,7 @@ Which public surface reaches each ADR, which use cases it serves, and whether a 
 | [ADR-082](../adr/082-declared-header-order-independent-extraction.md) | internal | — | — | Dump-time proof of declared-header order and the stored header_canonical contract field; users reach it only through dump/compare, and the change is a schema v59 contract field, not a flag, report field or exit code. |
 | [ADR-086](../adr/086-static-archive-no-baseline-export-audit.md) | surfaced | UC-ARCH-static-lib | `cli: compare --no-baseline` | — |
 | [ADR-087](../adr/087-report-pages-publication.md) | gap | — | — | Proposed, not yet implemented; no publish-report reusable workflow, site generator, or page-link Action input exists yet. |
+| [ADR-088](../adr/088-one-compare-exit-gate.md) | surfaced | — | `api: abicheck.workflows.service_requests.CompareRequest` | — |
 
 ## Use cases by user task
 
@@ -208,7 +209,6 @@ Which public surface reaches each ADR, which use cases it serves, and whether a 
 - ADR-052 report: compare_report.consumer_impact_summary
 - ADR-054 cli: project plan
 - ADR-054 cli: project validate
-- ADR-055 api: abicheck.workflows.service_requests.CompareRequest
 - ADR-055 api: abicheck.workflows.service_requests.DumpRequest
 - ADR-055 report: compare_report.report_schema_version
 - ADR-057 cli: compare --use-cases --used-by

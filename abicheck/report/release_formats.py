@@ -27,3 +27,10 @@ from __future__ import annotations
 RELEASE_FORMATS = frozenset(
     {"json", "markdown", "junit", "oneline", "html", "sarif", "review"}
 )
+
+#: The formats a stored-``BundleFacts`` ``compare`` renders. A stored OLD_INPUT
+#: has no per-member fan-out and no ``--view``; HTML needs the effective-config
+#: receipt, which the stored path does not resolve, so it stays out. Each
+#: member of this set is a :data:`RELEASE_FORMATS` member, rendered by the same
+#: release renderer (JSON and Markdown keep the stored document's own shape).
+STORED_RELEASE_FORMATS = frozenset({"json", "markdown", "junit", "oneline"})

@@ -34,7 +34,14 @@ from ....model import AccessLevel, ScopeOrigin, Visibility
 from ....model.export_index import ExportMatch, match_export
 from ....name_classification import strip_anonymous_type_location
 from ...castxml_header_compat import PREAMBLE_FILENAME
-from ...declaration_provenance import classify_origin, header_from_location
+from ...declaration_provenance import (
+    _is_bare_system_dir,
+    _matches_any_dir,
+    classify_origin,
+    header_from_location,
+    is_system_header,
+)
+from ...path_aliases import source_header_alias_segments
 from .context import CastxmlParserContext
 
 
@@ -262,6 +269,41 @@ def decl_is_public(ctx: CastxmlParserContext, el: Any) -> bool:
             have_public_set=ctx.have_public_set,
         )
         == ScopeOrigin.PUBLIC_HEADER
+    )
+
+
+def decl_is_system_dependency(ctx: CastxmlParserContext, el: Any) -> bool:
+    """True if *el* is declared in a toolchain/system header that is not part
+    of the public set -- provably a dependency, not the library's own code.
+
+    Needs a public-header set: without one, a library installed under a
+    system prefix (``/usr/include/mylib/``) reads as a system header too, so
+    provenance is unknown and nothing is a dependency. For the same reason a
+    header sharing a directory with a declared public header
+    (``/usr/include/mylib/detail.h`` beside ``-H /usr/include/mylib/api.h``)
+    is the library's own, unless that directory is a bare system root
+    (``/usr/include`` itself). A declaration with no location, or in a
+    project header, is never one.
+    """
+    sh = header_from_location(source_location(ctx, el))
+    if not (ctx.have_public_set and sh and is_system_header(sh)):
+        return False
+    return not decl_is_public(ctx, el) and not _beside_a_public_header(ctx, sh)
+
+
+def _beside_a_public_header(ctx: CastxmlParserContext, header: str) -> bool:
+    owned = [
+        p[:-1]
+        for p in ctx.pub_header_segs
+        if len(p) > 1 and not _is_bare_system_dir(p[:-1])
+    ]
+    # Alias-aware both ways, as classify_origin is: the public set already
+    # carries each root's canonical spelling, and the header contributes its
+    # own, so a symlinked install (/usr/include/mylib -> /opt/mylib/include)
+    # still meets its public header.
+    return any(
+        _matches_any_dir(spelling, owned)
+        for spelling in source_header_alias_segments(header)
     )
 
 

@@ -94,4 +94,10 @@ def _first_wins(keys: str) -> logging.LogRecord:
 def test_first_wins_warning_allowed_only_when_every_key_is(
     keys: str, allowed: bool
 ) -> None:
-    assert (unexpected([_first_wins(keys)], {}) == []) is allowed
+    keys_allowed = {r"wcschr|wmemchr": "test", r"__abicheck_ctor__std::.*": "test"}
+    assert (unexpected([_first_wins(keys)], {}, keys_allowed) == []) is allowed
+
+
+def test_first_wins_allowlist_is_empty() -> None:
+    """The benign duplicates are fixed at the source, not allowlisted."""
+    assert unexpected([_first_wins("wcschr (×2)")], {}) != []

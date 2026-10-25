@@ -71,10 +71,11 @@
       "abicheck/extract/headers/castxml/calling_convention.py": "ab4cd4474d11eb0da2216b29393e9daf1dbcf94226204237fd4c0381adacbcbb",
       "abicheck/extract/headers/castxml/context.py": "bd4a6165d45d4fc754f472b4537d9224009493369d9053ae99ff7659cf8d660d",
       "abicheck/extract/headers/castxml/dumper.py": "3d97df75930f3897b4acde5cc9a95d694b0bc6e3ad18cab27848736aa48b1c51",
+      "abicheck/extract/headers/castxml/duplicate_declarations.py": "cb81faa193488add762622ae5559076a5ebd2234b75b5d4edef19cfb1092ee2e",
       "abicheck/extract/headers/castxml/enums.py": "e616c768543061d71812378dd92cbcb7b8d00afbb734bcb7b4b5334ee34042aa",
-      "abicheck/extract/headers/castxml/functions.py": "c6e19d532a0467cdf05d59465a77021c8dcc9554752e21ebd6812d259e6e3a2d",
+      "abicheck/extract/headers/castxml/functions.py": "f62f5549a9602089d682c1627d3d2c546ae48a842944735b3cd3ecbb7f867593",
       "abicheck/extract/headers/castxml/hidden_declarations.py": "500abf62faa042e1c33a3ef3897557e263f0c7b1060b60c323d8d34895f5b057",
-      "abicheck/extract/headers/castxml/location.py": "e8e3a0a3e3abd14742c93f02c99b4487aae81b9b619d471c0603ca443d0f5ab0",
+      "abicheck/extract/headers/castxml/location.py": "a5469fedb2774dfdf1b87a49ddc713471c088ecee6ea5ccbfe4d9764012c97e6",
       "abicheck/extract/headers/castxml/names.py": "038abc55f72f11185c0a5ec48d57bff95a1ab894380f7978b6187cd76b044796",
       "abicheck/extract/headers/castxml/out_of_line_inline.py": "7f8a77d82dd9f87865163ffda63e6c5a762887800886ea9f70dae40e378cbd89",
       "abicheck/extract/headers/castxml/policy.py": "fda86c1de147934e620824b9a97262f218bffb7340cbbf394ac5fdd437e47f23",
@@ -144,7 +145,7 @@
       "abicheck/extract/semantic_normalizer_template_args.py": "9e07ae6b02395411ad22cbd02e2acbe3f9d70b5a33283b606a9296ba9d55b1b2",
       "abicheck/extract/stdlib_local_origin.py": "5ba2ab65b5d264138e07adfa3506ade7706239bcc07cc04e3fb75596ec7b4358",
       "abicheck/extract/surface_fact_producers.py": "04bf7fb7a1cef30ffbc942101d82f23f2f25fcd1e59a49aa6de2d3acdcf59cc9",
-      "abicheck/extract/system_header_layout.py": "9c5c2fa835eb4cccb6a7b6ccce22ba0941ea403c42d1f91fd7b09365bf017280",
+      "abicheck/extract/system_header_layout.py": "3784ee2f9386949eb3db9e4d77f9b92a5211106d72e4de1d004c9ea7f7d1a0cd",
       "abicheck/extract/target_platform.py": "d2f2774c26bd12eb623a64883c2611782cac8f3d84da51248a969bd1f288e739",
       "abicheck/extract/target_platform_probe.py": "060c391c71dca8f863f3452de90731edcf67ac14c1b804fb91606eb8140b1ee7",
       "abicheck/extract/toolchain_identity.py": "a695a96ce37cc859a048d7cde13d2b28ca5b2509c0a800d238cb268248cf1d1f",
@@ -161,9 +162,9 @@
       "abicheck/symvers_metadata.py": "372737765cd132e6e87ed891dd465d2958e04debbef774e45212ceb3036871cb",
       "abicheck/type_metadata.py": "9997189de8dac522fd1db8be5ae491d811139503f83abaaded89038eb4aa9cdf"
     },
-    "fingerprint": "4d9bf633c1c337a7a57ecb8530c71061ace91db8246aa69bdf200b81d071ef93",
-    "generation": 17,
-    "reason": "G3 ifdef guard census: the castxml backend now also scans which -H header branches its existing -E -dD run excluded and carries the result only on the runtime-only AbiSnapshot.live_preprocessor_hidden (dropped on encode) and inside the header-AST cache document (cache key 7->8); no persisted snapshot fact or spelling changes"
+    "fingerprint": "da048100a382f99415e89eecfe0e92317203918d8cd391b41c3f9da8d5bcec22",
+    "generation": 18,
+    "reason": "G3 ifdef guard census: the castxml backend now also scans which -H header branches its existing -E -dD run excluded and carries the result only on the runtime-only AbiSnapshot.live_preprocessor_hidden (dropped on encode) and inside the header-AST cache document; no persisted snapshot fact or spelling changes"
   },
   "resolver": {
     "files": {

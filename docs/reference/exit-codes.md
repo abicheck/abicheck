@@ -550,6 +550,11 @@ Per-category overrides — `.abicheck.yml`'s `severity:` block
 precedence over the preset. `informational` is fixed at `info` in every preset
 and has no override.
 
+The typed Python API (`CompareRequest`) takes the same overrides as
+`severity_abi_breaking`, `severity_potential_breaking`, `severity_quality_issues`
+and `severity_addition`, and `assurance.require_complete` as
+`require_complete_analysis`, and derives its exit code through the same gate.
+
 ### CI gate patterns
 
 ```bash
