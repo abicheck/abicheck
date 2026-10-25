@@ -329,6 +329,7 @@ _SNAPSHOT_SKIP_FIELDS = frozenset(
         # Runtime-only L2 ids a depth projection kept; never persisted.
         "header_declaration_ids",
         "projection_unavailable",
+        "projection_evidence_gaps",
         # Runtime-only preprocessor-excluded declaration scan; never persisted.
         "live_preprocessor_hidden",
         # Owned by encode_surface_graph() below, which unconditionally
@@ -531,6 +532,7 @@ def _snapshot_to_dict(snap: AbiSnapshot, encode: Any) -> dict[str, Any]:
     d.pop("static_archive", None)  # runtime-only, as above (ADR-086)
     d.pop("header_declaration_ids", None)  # runtime-only, depth projection
     d.pop("projection_unavailable", None)  # runtime-only, depth projection
+    d.pop("projection_evidence_gaps", None)  # runtime-only, depth projection
     # If ``from_headers`` was only *inferred* (a legacy snapshot loaded without
     # the explicit key), do not persist it as explicit provenance: drop the key
     # so a reload re-runs the same inference and re-marks it inferred, rather
