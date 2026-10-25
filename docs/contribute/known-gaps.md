@@ -421,6 +421,11 @@ Do not re-attempt token-claiming. A header's export tokens cannot tell whether i
 **Status (recorded 2026-10-11): OPEN.** Both operands go through `report.release_document.build_release_report` and agree on every shared semantic field (`tests/unit/report/test_release_document.py`), but each yields its own JSON/Markdown shape and the stored operand has no JUnit, HTML, `oneline` or `--view show=` projection.
 `hygiene` — Converging the shapes changes a published JSON document, so it needs a release-schema decision. [Full write-up](known-gaps/release-report-live-and-stored-operands-render-different-documents.md)
 
+#### A stored `BundleFacts` operand pairs versioned member names on one side only (2026-10-23)
+
+**Status (recorded 2026-10-23): OPEN.** A stored operand keys a member `libX.so.N` by its canonical `libX.so`, while a directory NEW side keys it by its file name `libX.so.N`, so `compare OLD.bundle-facts.json NEW_DIR` pairs no versioned member: it reports "no library pair was compared" (exit 1) where the live `compare OLD_DIR NEW_DIR` pairs them. Unversioned names pair on both sides. Found while proving the release `surface_changes` block (schema 2.2); that block's stored/live agreement is asserted in-process, not through this CLI path.
+`hygiene` — The stored and live operands key a versioned member name differently, so a stored comparison of a versioned directory compares nothing and reads as a no-comparison run. [Full write-up](known-gaps/a-stored-bundlefacts-operand-pairs-versioned-member-names-on-one-side-only.md)
+
 #### Public-surface graph: surface_graph vs L5 header_graph node-id namespaces not unified; type_reachability stdlib query unmigrated
 
 **Status (re-verified 2026-10-09 at `456989f`): PARTIAL.** The traversal half is superseded: the closure walk moved to policy/public_surface_closure.py. Still true: abicheck/type_reachability.py is unmigrated, and the compare/surface_graph.py and header_graph node-id namespaces are not unified.  
