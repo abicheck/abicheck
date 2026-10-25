@@ -42,7 +42,7 @@ from ....report.release_assurance_section import (
 )
 from ....report.release_document import ReleaseEvaluation
 from ....report.release_findings import project_release_library_results
-from ....report.release_member_entry import stamp_member_counts
+from ....report.release_member_entry import stamp_member_assurance, stamp_member_counts
 from ....report.release_member_summary import add_member_review_summary
 from ....report.release_surface_changes import attach_member_surface_changes
 from ....workflows.gate import resolve_release_assurance_decision
@@ -92,6 +92,7 @@ def stored_library_entries(
             entry["coverage_warnings"] = list(diff.coverage_warnings)
         if diff.env_matrix_source_sha256 is not None:
             entry["env_matrix_source_sha256"] = diff.env_matrix_source_sha256
+        stamp_member_assurance(entry, diff)
         add_member_review_summary(entry, diff, None)
         stamp_member_exit_contributions(
             entry,

@@ -30,7 +30,20 @@ if TYPE_CHECKING:
     from ..checker_types import DiffResult
     from ..workflows.gate import SeverityConfig
 
-__all__ = ["ReleaseMemberEntryProjection", "stamp_member_counts"]
+__all__ = [
+    "ReleaseMemberEntryProjection",
+    "stamp_member_assurance",
+    "stamp_member_counts",
+]
+
+
+def stamp_member_assurance(entry: dict[str, object], result: DiffResult) -> None:
+    """The per-member ``analysis_assurance`` block a stored run carries for each
+    library, read from the same DiffResult the live member's block comes from."""
+    from ..policy.analysis_assurance import analysis_assurance_report_dict
+
+    if (block := analysis_assurance_report_dict(result)) is not None:
+        entry["analysis_assurance"] = block
 
 
 def stamp_member_counts(entry: dict[str, object], result: DiffResult) -> None:

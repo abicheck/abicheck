@@ -626,10 +626,9 @@ def _add_bundle_demangled_names(
         if demangled:
             names[(finding.kind.value, finding.symbol)] = demangled
     for row in rows:
-        if isinstance(row, dict):
-            demangled = names.get((row.get("kind"), row.get("symbol")))
-            if demangled:
-                row["demangled_symbol"] = demangled
+        demangled = names.get((row.get("kind"), row.get("symbol")))
+        if demangled:
+            row["demangled_symbol"] = demangled
 
 
 def stored_release_document(
@@ -642,5 +641,17 @@ def stored_release_document(
     own *details* (operand kind, unresolved members) beside them."""
     block = _stored_release_block(release)
     _add_bundle_demangled_names(block, release)
+    # The NEW side's header reconciliation is computed by the stored driver and
+    # carried on the stored result; the old flat document projected it here.
+    reconciliation = getattr(
+        release.bundle_result, "public_surface_reconciliation", None
+    )
+    if reconciliation is not None:
+        from .release_public_surface_section import compute_release_public_surface
+
+        surface = compute_release_public_surface(
+            reconciliation, acquisition={}, shared_findings=()
+        )
+        block["public_surface_reconciliation"] = surface.to_dict()
     block.update(details or {})
     return ReportDocument.from_mapping(block)
