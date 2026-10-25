@@ -369,6 +369,29 @@ SYMBOL_FACTS: list[FactDefinition] = [
         ),
     ),
     _E(owner="Function", **_DEPRECATED_DECLARATION),
+    _E(
+        owner="Variable",
+        field="explicit_instantiation",
+        value_type="ExplicitInstantiation",
+        producing_backends=("clang",),
+        persisted=True,
+        identity_relevant=False,
+        comparable=True,
+        suppressible=False,
+        reportable=False,
+        lifecycle=FactLifecycle.CONSUMED,
+        consumed_by=(
+            "abicheck.compare.template_instance_absence:_declared_explicitly",
+        ),
+        notes=(
+            "Schema v65, no legacy sibling: how the header declared a variable "
+            "instance -- an explicit instantiation declaration/definition or an "
+            "explicit specialization, or ABSENT (implicit). Read from the clang text "
+            "AST (extract/headers/clang/explicit_instantiation.py); castxml never sets "
+            "it. Only a PRESENT explicit value makes an absent old instance a "
+            "removed declaration; any other status keeps the implicit-instance path."
+        ),
+    ),
     _E(owner="Variable", **_DEPRECATED_DECLARATION),
     _E(
         owner="Param",

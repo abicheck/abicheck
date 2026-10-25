@@ -147,6 +147,8 @@ from .extract.surface_fact_producers import header_ast_surface_facts
 from .model import (
     AccessLevel,
     EnumType,
+    ExplicitInstantiation,
+    Fact,
     Function,
     RecordType,
     TypeField,
@@ -194,12 +196,6 @@ def _clang_exception_spec(quals: str) -> str:
     """See ``extract.headers.clang.functions._clang_exception_spec`` (the
     canonical implementation this delegates to) for the full contract."""
     return _clang_functions._clang_exception_spec(quals)
-
-
-def _clang_record_is_final(node: dict[str, Any]) -> bool:
-    """See ``extract.headers.clang.records._clang_record_is_final`` (the
-    canonical implementation this delegates to) for the full contract."""
-    return _clang_records._clang_record_is_final(node)
 
 
 def _clang_deprecated_message(node: dict[str, Any]) -> str | None:
@@ -377,6 +373,10 @@ class _ClangAstParser:
         # paying on every dump when nothing in this TU has a referenced-decl
         # initializer to fingerprint.
         self._decl_id_qualified_names: dict[str, str] | None = None
+        # ``id(decl node) -> Fact[ExplicitInstantiation]``, set by the header
+        # backend when its text pass ran (``extract/headers/clang/
+        # explicit_instantiation.py``); empty means not collected.
+        self.explicit_instantiations: dict[int, Fact[ExplicitInstantiation]] = {}
         # Computed eagerly (not lazily like the id-qualified-names cache
         # above) because `_walk` itself -- run immediately below, during
         # __init__ -- needs these to correctly scope a specialization's own
@@ -950,6 +950,7 @@ class _ClangAstParser:
             no_binary_evidence=self._no_binary_evidence,
             is_cxx=self._is_cxx,
             function_template_defaults=function_template_default_index(self._root),
+            explicit_facts=self.explicit_instantiations,
         )
 
     def parse_variables(self) -> list[Variable]:
@@ -1061,6 +1062,9 @@ class _ClangAstParser:
                     # `parse_functions`'s identical `storageClass ==
                     # "static"` read on the AST-JSON node.
                     is_static=node.get("storageClass") == "static",
+                    explicit_instantiation_fact=self.explicit_instantiations.get(
+                        id(node)
+                    ),
                     # ADR-063 Phase 2, same routing/bug-fix as
                     # parse_functions: `mangled_name` is offered only when
                     # `raw_mangled` is genuinely present, not merely when
@@ -1376,24 +1380,6 @@ def _evaluated_int_value(node: dict[str, Any]) -> int | None:
             break
         cur = inner[0]
     return None
-
-
-def _bitfield_width(field: dict[str, Any]) -> tuple[int | None, bool]:
-    """See ``extract.headers.clang.records._bitfield_width`` (the canonical
-    implementation this delegates to) for the full contract."""
-    return _clang_records._bitfield_width(field, _evaluated_int_value)
-
-
-def _anonymous_member_names(node: dict[str, Any]) -> set[str]:
-    """See ``extract.headers.clang.records._anonymous_member_names`` (the
-    canonical implementation this delegates to) for the full contract."""
-    return _clang_records._anonymous_member_names(node)
-
-
-def _parse_bases(node: dict[str, Any]) -> tuple[list[str], list[str], dict[str, str]]:
-    """See ``extract.headers.clang.records._parse_bases`` (the canonical
-    implementation this delegates to) for the full contract."""
-    return _clang_records._parse_bases(node)
 
 
 # ``_enum_underlying``/``_enum_constant_value`` moved to

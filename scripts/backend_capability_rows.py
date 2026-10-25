@@ -288,6 +288,22 @@ LEADING_ROWS: tuple[FactRow, ...] = (
     ),
     FactRow(
         "Function",
+        "explicit_instantiation_fact",
+        _NONE,
+        _PARTIAL,
+        note=(
+            "Schema v65. clang reads how the header declared an instance "
+            "(explicit instantiation declaration/definition, explicit "
+            "specialization, or absent) from a text AST pass gated by a header "
+            "prefilter (`extract/headers/clang/explicit_instantiation.py`); "
+            "PARTIAL because a class-template scope is spelled by its bare name, "
+            "so two instances of one template in a translation unit read "
+            "UNSUPPORTED. castxml does not record the declaration kind, so its "
+            "side is NOT_COLLECTED."
+        ),
+    ),
+    FactRow(
+        "Function",
         "is_compiler_generated",
         _FULL,
         _NONE,
@@ -335,6 +351,18 @@ LEADING_ROWS: tuple[FactRow, ...] = (
     ),
     # ── Variable ───────────────────────────────────────────────────────────
     FactRow("Variable", "name", _FULL, _FULL),
+    FactRow(
+        "Variable",
+        "explicit_instantiation_fact",
+        _NONE,
+        _PARTIAL,
+        note=(
+            "Schema v65: the same clang text-pass evidence as "
+            "Function.explicit_instantiation_fact, for a static data member of an "
+            "explicitly instantiated class template and a namespace-scope variable "
+            "template instance. castxml does not record the declaration kind."
+        ),
+    ),
     FactRow("Variable", "mangled", _FULL, _FULL),
     FactRow("Variable", "type", _FULL, _FULL),
     FactRow("Variable", "visibility", _FULL, _FULL),

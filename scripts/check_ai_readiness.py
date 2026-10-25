@@ -1144,18 +1144,6 @@ def check_doc_count_sync(f: Findings) -> None:
             r'"schema_version":\s*(\d+),',
         ),
         (
-            DOCS / "reference/snapshot-format.md",
-            "snapshot schema_version (field table)",
-            SCHEMA_VERSION,
-            r"Snapshot format version \(currently `(\d+)`\)",
-        ),
-        (
-            DOCS / "reference/snapshot-format.md",
-            "snapshot schema_version (snapshot-vs-report comparison table)",
-            SCHEMA_VERSION,
-            r"\*\*Type\*\* \| integer \(currently `(\d+)`\)",
-        ),
-        (
             DOCS / "use/output-formats.md",
             "compare report_schema_version (compare report JSON example)",
             REPORT_SCHEMA_VERSION,

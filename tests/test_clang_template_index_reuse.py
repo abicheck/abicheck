@@ -250,7 +250,7 @@ class TestReuseWithinOneRequest:
     ) -> None:
         """The release fan-out's real shape: workers on context copies.
 
-        ``cli_compare_release_pairwise`` runs each library in a copy of the
+        retired ``cli_compare_release_pairwise`` ran each library in a copy of the
         parent ``contextvars`` context, which is what carries the acquisition
         scope into the worker. A sequential-only test would not cover the path
         the six-DSO measurement actually took.
