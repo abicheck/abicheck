@@ -33,7 +33,7 @@ A group is collapsed to its first declaration (castxml document order, so the
 result is deterministic) only when *every* member is provably a dependency
 declaration -- in a toolchain/system header outside the public set
 (``location.decl_is_system_dependency``) -- and the members' signatures agree
-modulo cv-qualification. Anything else -- a member from the library's own
+modulo cv-qualification (exception specification and variadicity equal). Anything else -- a member from the library's own
 headers (public, private or of unknown provenance), or signatures that
 genuinely conflict -- is left for the snapshot index, which still warns.
 """
@@ -53,11 +53,18 @@ def _cv_free(spelling: str) -> str:
     return " ".join(_CV.sub(" ", spelling).split())
 
 
-def _signature(func: Function) -> tuple[str, str, tuple[str, ...]]:
+def _signature(
+    func: Function,
+) -> tuple[str, str, tuple[str, ...], bool | None, bool, str | None]:
+    # Exception specifications are not mangled, so two same-key records can
+    # disagree on them; such a pair is not one entity.
     return (
         func.name,
         _cv_free(func.return_type),
         tuple(_cv_free(p.type) for p in func.params),
+        func.is_variadic,
+        func.is_noexcept,
+        func.exception_spec,
     )
 
 

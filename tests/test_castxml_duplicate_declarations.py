@@ -14,6 +14,7 @@ signatures, is left to the snapshot index, which still warns.
 
 from __future__ import annotations
 
+import dataclasses
 import itertools
 import logging
 import shutil
@@ -84,6 +85,13 @@ def test_benign_group_keeps_first_declaration_in_any_order(
             [True, True],
         ),
         ([_fn("h", "_Z1hv", "int"), _fn("h", "_Z1hv", "double")], [True, True]),
+        (  # exception specifications are not mangled: same key, two entities
+            [
+                _fn("k", "_Z1kv", "void"),
+                dataclasses.replace(_fn("k", "_Z1kv", "void"), is_noexcept=True),
+            ],
+            [True, True],
+        ),
     ],
 )
 def test_conflicting_or_public_duplicate_is_kept_and_still_warns(
@@ -130,7 +138,8 @@ def _two_ctor_root(header: str) -> Element:
 @pytest.mark.parametrize(
     ("header", "public", "kept"),
     [
-        ("/usr/include/c++/13/bits/w.h", None, 1),  # system, no public set
+        ("/usr/include/c++/13/bits/w.h", None, 2),  # no public set: unknown
+        ("/usr/include/mylib/w.h", None, 2),  # installed library, no public set
         ("/usr/include/c++/13/bits/w.h", ["/opt/lib/api.h"], 1),  # system
         ("/usr/include/mylib/w.h", ["/usr/include/mylib/w.h"], 2),  # declared public
         ("/src/mylib/include/w.h", None, 2),  # project header, no public set
@@ -141,8 +150,9 @@ def test_parser_collapses_only_provable_system_header_duplicates(
     header: str, public: list[str] | None, kept: int
 ) -> None:
     """Through the real castxml parser: the provenance oracle is the header
-    path itself -- only a toolchain/system header outside the public set is
-    a dependency the library cannot have meant twice."""
+    path itself -- only a toolchain/system header outside a given public set
+    is a dependency the library cannot have meant twice. With no public set
+    a system-prefixed path may be the library itself, so both are kept."""
     from abicheck.extract.headers.castxml.dumper import _CastxmlParser
 
     parser = _CastxmlParser(

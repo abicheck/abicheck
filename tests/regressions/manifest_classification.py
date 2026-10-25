@@ -698,7 +698,8 @@ CLASSIFICATION_BUG_CLASSES: tuple[BugClass, ...] = (
             "exactly its first declaration whatever the order, and indexing "
             "logs no first-wins duplicate; a same-key group with a member in "
             "the library's own headers (public, private, or with no public "
-            "set given), or with conflicting signatures, is kept and still warns."
+            "set given), or with conflicting signatures or exception "
+            "specifications, is kept and still warns."
         ),
         fixed_by=(1797,),
         seed_tests=(
@@ -706,7 +707,7 @@ CLASSIFICATION_BUG_CLASSES: tuple[BugClass, ...] = (
             "tests/test_model_warning_hygiene.py",
             "tests/test_family_f3_identity.py",
         ),
-        public_surfaces=("cli",),
+        public_surfaces=(),
         axes={
             "shape": ("glibc cv overload", "std ctor placeholder", "conflicting"),
             "provenance": ("system", "public", "private", "no public set"),

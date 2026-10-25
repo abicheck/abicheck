@@ -273,11 +273,18 @@ def decl_is_system_dependency(ctx: CastxmlParserContext, el: Any) -> bool:
     """True if *el* is declared in a toolchain/system header that is not part
     of the public set -- provably a dependency, not the library's own code.
 
-    Path-based (:func:`is_system_header`), so it needs no public-header set;
-    a declaration with no location, or in a project header, is never one.
+    Needs a public-header set: without one, a library installed under a
+    system prefix (``/usr/include/mylib/``) reads as a system header too, so
+    provenance is unknown and nothing is a dependency. A declaration with no
+    location, or in a project header, is never one.
     """
     sh = header_from_location(source_location(ctx, el))
-    return bool(sh) and is_system_header(sh) and not decl_is_public(ctx, el)
+    return (
+        ctx.have_public_set
+        and bool(sh)
+        and is_system_header(sh)
+        and not decl_is_public(ctx, el)
+    )
 
 
 def visibility(ctx: CastxmlParserContext, mangled: str, name: str = "") -> Visibility:

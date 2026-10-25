@@ -71,10 +71,10 @@
       "abicheck/extract/headers/castxml/calling_convention.py": "ab4cd4474d11eb0da2216b29393e9daf1dbcf94226204237fd4c0381adacbcbb",
       "abicheck/extract/headers/castxml/context.py": "4b1ff6544ba29d2236885086a65ad9f7037f8f46105da4579b751a499058b9d8",
       "abicheck/extract/headers/castxml/dumper.py": "af0686fef5366815892a95a63503f3620299ea87b5182d7de63209c6c6d91b45",
-      "abicheck/extract/headers/castxml/duplicate_declarations.py": "e3da74281384f5f46d262c36cf9e5f879c175d366a023e89893b9eb8393d6c51",
+      "abicheck/extract/headers/castxml/duplicate_declarations.py": "b41a6760cdb1dc467957bfafaf6eeae5b6313607c9ecc0d6e1093b82da914113",
       "abicheck/extract/headers/castxml/enums.py": "e616c768543061d71812378dd92cbcb7b8d00afbb734bcb7b4b5334ee34042aa",
       "abicheck/extract/headers/castxml/functions.py": "f62f5549a9602089d682c1627d3d2c546ae48a842944735b3cd3ecbb7f867593",
-      "abicheck/extract/headers/castxml/location.py": "34c08559e000e164bb70ead0f0afd3ecebc851d6a2539bf3174b552ac9400501",
+      "abicheck/extract/headers/castxml/location.py": "201c33d5b9ea8755e0bd4678ca8fb27bed647fbce2001fe6e17d03e01b28012e",
       "abicheck/extract/headers/castxml/names.py": "038abc55f72f11185c0a5ec48d57bff95a1ab894380f7978b6187cd76b044796",
       "abicheck/extract/headers/castxml/out_of_line_inline.py": "7f8a77d82dd9f87865163ffda63e6c5a762887800886ea9f70dae40e378cbd89",
       "abicheck/extract/headers/castxml/policy.py": "fda86c1de147934e620824b9a97262f218bffb7340cbbf394ac5fdd437e47f23",
@@ -160,9 +160,9 @@
       "abicheck/symvers_metadata.py": "372737765cd132e6e87ed891dd465d2958e04debbef774e45212ceb3036871cb",
       "abicheck/type_metadata.py": "9997189de8dac522fd1db8be5ae491d811139503f83abaaded89038eb4aa9cdf"
     },
-    "fingerprint": "2ccbd6233f15daaec2c90fad87d9e952e014129b7963ae4eaf338e6df13a3b2b",
+    "fingerprint": "b780542f06adee4d71ef89f2ea05fa7b9ff1f5fdaf2284983728a4e9a99c22c1",
     "generation": 16,
-    "reason": "castxml collapses benign same-key duplicate declarations from system headers outside the public set (glibc cv overloads, libstdc++ ctor template twins); PR-internal narrowing to provable system headers within unreleased generation 16"
+    "reason": "castxml collapses benign same-key duplicate declarations from system headers outside a given public set, signatures and exception specs equal modulo cv (glibc cv overloads, libstdc++ ctor template twins); PR-internal refinements within unreleased generation 16"
   },
   "resolver": {
     "files": {
