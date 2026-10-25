@@ -89,7 +89,7 @@ def _kept_disposition(
     """The terminal disposition of a change that survived into ``changes``.
 
     ``gating`` means *contributes to this run's gate*, and the answer to that
-    is ``severity.gate_contribution_for_change`` — the identical per-finding
+    is ``gate_contribution.gate_contribution_for_change`` — the identical per-finding
     function ``compute_exit_code``/``compute_gate_decision`` fold, so this
     cannot become a second gate algorithm. With no severity configuration in
     effect (*severity_config* ``None``) it returns the finding's own legacy
@@ -118,7 +118,7 @@ def _kept_disposition(
             )
             else Disposition.OUT_OF_CONTRACT
         )
-    from .severity import gate_contribution_for_change
+    from .gate_contribution import gate_contribution_for_change
 
     # Read through ``getattr``, like every other finding-shaped input this
     # module takes: several report paths (the HTML characterization goldens'

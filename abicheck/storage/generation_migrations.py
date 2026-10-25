@@ -250,6 +250,13 @@ SPELLING_MIGRATIONS: Mapping[int, GenerationSpellingChange] = {
         "a new fact rather than a spelling: no stored type or declaration spelling "
         "changes, so no rewrite is needed and a stored snapshot reads as before"
     ),
+    23: GenerationSpellingChange(
+        "clang runs set template_default_header_scan when a parsed public header "
+        "declares an alias or variable template with a default template argument "
+        "(was None for every clang run); no type or name spelling changes, so no "
+        "rewrite is needed -- an older clang snapshot simply names no "
+        "alias/variable template-defaults gap"
+    ),
 }
 
 #: Reasons that say nothing about what was audited; the bump gate refuses them.

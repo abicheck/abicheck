@@ -118,12 +118,12 @@
       "abicheck/extract/headers/clang/templates.py": "9ef0106a8223d2bf6c33bb17f74b6d1ca4bbc027717c36d2949f55b116ed8bcf",
       "abicheck/extract/headers/clang/vtable.py": "bc235100ce9c5cb9ec8af93ea5bafe1abf0ea29249087a2b5f073ef5293257ff",
       "abicheck/extract/headers/clang_header_argv.py": "c198bd32d8fc6c5e59d6fd30f809544291a4a5381614f2fcbb281765da6626b7",
-      "abicheck/extract/headers/compile_provenance.py": "fecc4a720bcc2f1a44db4d8588c3410ab80450651c5b2a365f4d70d6dac69f95",
+      "abicheck/extract/headers/compile_provenance.py": "5c800725da59c2c3aeac4e85118dcd54edd6ec5c75875e483978b78a750ec0af",
       "abicheck/extract/headers/manifest.py": "fe87c3c7f5eb30d24b4750fa4a2c4feb4e8bc829ee4c2dc55cb191a4df7aff92",
       "abicheck/extract/headers/preprocessor_branches.py": "d3a409d126b0dd1b19a634d4aad25660d372dad931b310cfbaaefc9d769b244d",
       "abicheck/extract/headers/scope_segments.py": "d413edec257eb1334c829263770b66dc2eda3d263c765f699eac9f7e3ace9e65",
       "abicheck/extract/headers/sysinc.py": "1c25ee983ff10085afca9bdd0686b8177da252920a130cb2959c435065a9e51b",
-      "abicheck/extract/headers/template_default_scan.py": "08e178486cd5984a1180afcd2d7d6b1091ee2743382121701ca18b628136d1a1",
+      "abicheck/extract/headers/template_default_scan.py": "3b56f9307028934aa2126de14fa9847333bdc990f0943445604b255e494060e8",
       "abicheck/extract/headers/toolchain.py": "be0be05950476ff2c0cb168727ebcde4859cc634c258f5ff23b1af1d2c50b754",
       "abicheck/extract/library_export_facts.py": "071b2a58f284753b57fa2e374680a57e9ce6897877b65a84fb92f420e7cf2ab7",
       "abicheck/extract/macho_build_signals.py": "c277bfdd55f26aae61af66c8fa6c5cdc5fa45acc49a3ae513af5899417db88bb",
@@ -165,9 +165,9 @@
       "abicheck/symvers_metadata.py": "372737765cd132e6e87ed891dd465d2958e04debbef774e45212ceb3036871cb",
       "abicheck/type_metadata.py": "9997189de8dac522fd1db8be5ae491d811139503f83abaaded89038eb4aa9cdf"
     },
-    "fingerprint": "222b9d356512fefd99dcc47f5f9ab0e316442d62c171db9d2aa291c3a5b16fcf",
-    "generation": 22,
-    "reason": "Mach-O LC_LOAD_WEAK_DYLIB is captured into weak_dependent_libs (ADR-063 Phase 5 fact sibling); the extractor records a fact it did not record before for the same input"
+    "fingerprint": "6f47b3f6fbf46cf7c12710ec71547087734c578a086b59ab1742a1f2ef6ae13a",
+    "generation": 23,
+    "reason": "Review fix inside the unreleased generation 23 (same PR): the alias/variable scan skips [[...]] attributes"
   },
   "resolver": {
     "files": {

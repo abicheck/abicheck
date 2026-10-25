@@ -97,6 +97,15 @@ def _castxml_header_note(label: str) -> str:
     )
 
 
+def _clang_alias_variable_note(label: str) -> str:
+    return (
+        "template-parameter defaults (the clang backend does not model alias "
+        f"or variable templates): the public headers of the {label} snapshot "
+        "declare an alias or variable template with a default template "
+        "argument, so a default-argument change in one is not assessed"
+    )
+
+
 def _side_note(label: str, snap: AbiSnapshot, count: int) -> str:
     if snap.ast_producer == "castxml":
         reason = "castxml cannot record them"
@@ -127,8 +136,10 @@ def template_default_gap(
     """``(gap, notes)`` for the template-defaults axis of the rollup.
 
     *gap* is True when either side has at least one class- or function-template
-    pattern without recorded defaults, or is a castxml run whose headers declare a
-    template parameter default castxml does not record (ADR-085 D3). *notes*
+    pattern without recorded defaults, is a castxml run whose headers declare a
+    template parameter default castxml does not record, or is a clang run whose
+    headers declare an alias or variable template with a default, which the
+    clang backend does not model (ADR-085 D3). *notes*
     names each such side. A snapshot with neither contributes nothing.
     """
     notes: list[str] = []
@@ -138,6 +149,8 @@ def template_default_gap(
         if snap.ast_producer == "castxml" and snap.template_default_header_scan:
             notes.append(_castxml_header_note(label))
             continue
+        if snap.ast_producer == "clang" and snap.template_default_header_scan:
+            notes.append(_clang_alias_variable_note(label))
         count = _unrecorded_pattern_count(snap)
         if count:
             notes.append(_side_note(label, snap, count))

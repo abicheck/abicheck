@@ -27,15 +27,18 @@ from .review_groups import build_review_groups
 
 if TYPE_CHECKING:
     from ..checker_types import DiffResult
+    from ..policy.severity import SeverityConfig
 
 
 def add_member_review_summary(
-    entry: dict[str, object], result: DiffResult, severity_config: object | None
+    entry: dict[str, object],
+    result: DiffResult,
+    severity_config: SeverityConfig | None,
 ) -> None:
     from ..report_summary import build_summary
 
     findings = report_findings_for(result)
-    groups = build_review_groups(findings)
+    groups = build_review_groups(findings, severity_config=severity_config)
     audit = compute_disposition_audit(result, severity_config)
     entry["disposition_audit"] = audit.to_dict()
     entry["review_groups"] = [group.to_dict() for group in groups]

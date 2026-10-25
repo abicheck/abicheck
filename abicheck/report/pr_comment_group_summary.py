@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 from .pr_comment_model import CommentModel, escape_cell
+from .review_groups import gating_totals
 
 #: Cap on how many review groups the PR comment itemizes. Named rather than
 #: inline so the bound is visible next to the disclosure that reports it --
@@ -26,9 +27,7 @@ def review_group_note(model: CommentModel) -> list[str]:
     # (CodeRabbit review).
     if not model.review_groups and not counts.get("review_groups"):
         return []
-    gating_groups = sum(
-        bool(group.get("gating_findings")) for group in model.review_groups
-    )
+    _, gating_groups = gating_totals(model.review_groups)
     # The authoritative retained total, which is what the headline states.
     retained_total = counts.get("review_groups", len(model.review_groups))
     lines = [
