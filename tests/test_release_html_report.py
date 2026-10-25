@@ -282,7 +282,7 @@ def test_release_json_records_per_side_dependency_facts(tmp_path: Path) -> None:
     out = tmp_path / "r.json"
     _run("compare", str(old_dir), str(new_dir), "-o", f"json={out}")
     doc = json.loads(out.read_text())
-    assert doc["release_schema_version"] == "2.3"
+    assert doc["release_schema_version"] == "2.4"
     by_name = {m["library"]: m for m in doc["libraries"]}
     checked = 0
     for member, sides in _SPEC.items():
@@ -293,6 +293,7 @@ def test_release_json_records_per_side_dependency_facts(tmp_path: Path) -> None:
             continue
         for side in ("old", "new"):
             assert by_name[f"{member}.json"]["dependencies"][side] == {
+                "format": "elf",
                 "soname": member,
                 "needed": sides[side][1],
             }
@@ -300,7 +301,7 @@ def test_release_json_records_per_side_dependency_facts(tmp_path: Path) -> None:
     assert checked == 6
 
 
-def test_a_member_without_elf_facts_records_no_dependencies_block(
+def test_a_member_without_format_facts_records_not_evaluated(
     tmp_path: Path,
 ) -> None:
     old_dir, new_dir = tmp_path / "old", tmp_path / "new"
@@ -330,11 +331,18 @@ def test_a_member_without_elf_facts_records_no_dependencies_block(
         f"html={tmp_path / 'r.html'}",
     )
     doc = json.loads(out.read_text())
-    assert "dependencies" not in doc["libraries"][0]
-    assert (
-        "0 of 1 compared member(s) recorded dependency facts"
-        in (tmp_path / "r.html").read_text()
-    )
+    # A member whose format was never read is an explicit state, not an
+    # absent block and not an empty edge list.
+    assert doc["libraries"][0]["dependencies"] == {
+        side: {
+            "state": "not_evaluated",
+            "reason": "no ELF, PE/COFF or Mach-O metadata on this side",
+        }
+        for side in ("old", "new")
+    }
+    page = (tmp_path / "r.html").read_text()
+    assert "0 of 1 compared member(s) recorded dependency facts" in page
+    assert "1 member(s) have dependencies not evaluated" in page
 
 
 # ── projection properties over generated documents ─────────────────────────

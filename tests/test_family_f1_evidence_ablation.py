@@ -137,6 +137,13 @@ _DECLARATION_PROJECTION = (
 )
 
 UNCOVERED: dict[str, str] = {
+    "MachoMetadata.weak_dependent_libs_fact": (
+        "read only by the release dependency graph's Mach-O facts "
+        "(workflows/release_dependency_facts.py), whose unit and CLI tests "
+        "(test_release_dependency_facts.py, test_release_html_pe_macho_deps.py) "
+        "cover recorded, legacy-incomplete and absent inputs; no corpus Mach-O "
+        "pair carries LC_LOAD_WEAK_DYLIB yet"
+    ),
     "Function.explicit_instantiation_fact": (
         "read only by compare/template_instance_absence's _declared_explicitly, "
         "whose unit and CLI tests (test_explicit_instantiation_removal.py) cover "

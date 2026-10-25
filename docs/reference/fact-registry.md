@@ -52,6 +52,7 @@ Phase 5 section for the design this page's data comes from.
 | `Function.source_header` | `str \| None` | castxml, clang | persisted | ✅ | — | ✅ | — | ✅ |
 | `Function.template_param_defaults` | `tuple[str \| None, ...]` | clang | consumed | ✅ | — | ✅ | — | — |
 | `MachoMetadata.rpaths` | `list[str] \| None` | macho | persisted | ✅ | — | ✅ | — | ✅ |
+| `MachoMetadata.weak_dependent_libs` | `list[str] \| None` | macho | persisted | ✅ | — | ✅ | — | ✅ |
 | `Param.is_restrict` | `bool` | castxml, clang | consumed | ✅ | — | ✅ | — | ✅ |
 | `Param.is_va_list` | `bool` | clang | consumed | ✅ | — | ✅ | — | ✅ |
 | `Param.kind` | `ParamKind` | castxml, clang, dwarf | consumed | ✅ | — | ✅ | — | ✅ |
