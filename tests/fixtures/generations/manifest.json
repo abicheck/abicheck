@@ -30,6 +30,30 @@
       "compiler": "g++ (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0",
       "snapshot": "gen13/corpus.json.gz"
     },
+    "14": {
+      "castxml": "castxml version 0.7.0",
+      "commit": "81b71a3c9296",
+      "compiler": "g++ (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0",
+      "snapshot": "gen14/corpus.json.gz"
+    },
+    "15": {
+      "castxml": "castxml version 0.7.0",
+      "commit": "ada15f0f33f7",
+      "compiler": "g++ (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0",
+      "snapshot": "gen15/corpus.json.gz"
+    },
+    "17": {
+      "castxml": "castxml version 0.7.0",
+      "commit": "44937cb3f22c",
+      "compiler": "g++ (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0",
+      "snapshot": "gen17/corpus.json.gz"
+    },
+    "18": {
+      "castxml": "castxml version 0.7.0",
+      "commit": "dde8888a69f6",
+      "compiler": "g++ (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0",
+      "snapshot": "gen18/corpus.json.gz"
+    },
     "2": {
       "castxml": "castxml version 0.7.0",
       "commit": "098e2535fd71",
@@ -68,6 +92,7 @@
     }
   },
   "skipped": {
+    "16": "generation 16 (castxml function-type declarators) and 17 (clang unspellable template defaults) land together in one PR; main goes from 15 straight to 17, so no main commit ever ran generation 16",
     "7": "generations 7 and 8 were intermediate bumps inside PR #1712's branch (clang positional defaults, dependent members); main went from 6 (49529426d) straight to 9 (c23a9ad57), so no main commit ever ran them",
     "8": "generations 7 and 8 were intermediate bumps inside PR #1712's branch (clang positional defaults, dependent members); main went from 6 (49529426d) straight to 9 (c23a9ad57), so no main commit ever ran them"
   },

@@ -136,14 +136,16 @@ from ..buildsource.model import CoverageStatus, DataLayer, LayerCoverage
 from ..compare.debug_type_scope import debug_layout_scope
 from ..compare.edge_query import export_table_covered
 from ..evidence_depth import DEPTH_RANK
-from ..model import ScopeOrigin, Visibility
+from ..model import ScopeOrigin
 from ..model.export_index import build_raw_export_index, default_versioned_names
 from ..model.graph_identity import header_declaration_ids
-from ..model.surface_facts import (
-    headers_discarded_surface_facts,
-    is_export_confirmed_absent,
-)
+from ..model.surface_facts import is_export_confirmed_absent
 from .depth_fact_availability import cleared_facts
+from .depth_projection_declarations import (
+    binary_level_declarations,
+    export_only_declarations,
+    pair_layout_scope,
+)
 
 if TYPE_CHECKING:
     from ..buildsource.pack import BuildSourcePack
@@ -333,46 +335,54 @@ def _strip_header_and_above_evidence(
     platform export table at all, so a synthetic/incomplete snapshot with
     no platform block populated keeps its prior, looser behavior rather
     than being stripped to nothing.
+
+    That filtering, and the rebuild below, apply only when *dwarf_sourced*
+    is false (a header-derived side). A surviving declaration is then
+    rebuilt from binary-level facts alone
+    (:func:`~abicheck.policy.depth_projection_declarations.binary_level_function`),
+    and every export the headers did not declare joins as an export-only
+    record, since ``elf_only_mode`` promises the maps are the export table.
+    A DWARF-sourced pair's declarations are binary-depth facts already (a
+    hidden-but-defined function is a debug-info fact, not a header one), so
+    they are left as recorded: projecting a binary-only pair is the
+    identity (bug class
+    ``evidence.depth_projection_diverges_from_shallow_dump``).
     """
     if dwarf_sourced is None:
         dwarf_sourced = _structural_facts_are_dwarf_confirmed(snap)
 
-    # A confirmed non-export -- the fact, not the conflated enum: a
-    # declaration no binary-only view could ever have seen.
-    snap.declarations.functions = [
-        f for f in snap.declarations.functions if not is_export_confirmed_absent(f)
-    ]
-    snap.declarations.variables = [
-        v for v in snap.declarations.variables if not is_export_confirmed_absent(v)
-    ]
-    exported = _exported_symbol_names(snap)
-    if exported is not None:
-        snap.declarations.functions = [
-            f for f in snap.declarations.functions if f.mangled in exported
+    if not dwarf_sourced:
+        # A confirmed non-export -- the fact, not the conflated enum: a
+        # declaration no binary-only view could ever have seen.
+        functions = [
+            f for f in snap.declarations.functions if not is_export_confirmed_absent(f)
         ]
-        snap.declarations.variables = [
-            v for v in snap.declarations.variables if v.mangled in exported
+        variables = [
+            v for v in snap.declarations.variables if not is_export_confirmed_absent(v)
         ]
-    # Projecting to a binary-only view *discards* the header evidence; it
-    # does not disprove it. So the two header-derived surface facts go back
-    # to unknown rather than to a confirmed negative -- a projected
-    # snapshot must read "public declaration not established", never "no
-    # declaration" (model/surface_facts.py). The export fact is untouched:
-    # it never came from a header, and the filter just above already
-    # required a real export-table entry.
-    discarded = headers_discarded_surface_facts(
-        reason="header evidence discarded by evidence-depth projection"
-    )
-    for f in snap.declarations.functions:
-        f.visibility = Visibility.ELF_ONLY
-        f.origin = ScopeOrigin.UNKNOWN
-        for fact_name, fact in discarded.items():
-            setattr(f, fact_name, fact)
-    for v in snap.declarations.variables:
-        v.visibility = Visibility.ELF_ONLY
-        v.origin = ScopeOrigin.UNKNOWN
-        for fact_name, fact in discarded.items():
-            setattr(v, fact_name, fact)
+        exported = _exported_symbol_names(snap)
+        if exported is not None:
+            functions = [f for f in functions if f.mangled in exported]
+            variables = [v for v in variables if v.mangled in exported]
+        # Rebuilt from binary-level facts only, the way a binary-only dump
+        # synthesizes an export with no debug subprogram: discarding header
+        # evidence does not disprove it, so the header surface facts read
+        # unknown (model/surface_facts.py), and no header attribute (static,
+        # cv/ref qualifier, virtuality, access, deprecation, ...) reaches a
+        # detector (bug class
+        # `evidence.depth_projection_diverges_from_shallow_dump`).
+        # `elf_only_mode` (set below) promises the maps are the export
+        # table, so the exports no header declared join them too.
+        extra_functions, extra_variables = export_only_declarations(
+            snap, {f.mangled for f in functions} | {v.mangled for v in variables}
+        )
+        functions_b, variables_b = binary_level_declarations(snap, functions, variables)
+        snap.declarations.functions = [*functions_b, *extra_functions]
+        snap.declarations.variables = [*variables_b, *extra_variables]
+    # A DWARF-sourced pair's declarations are already binary-depth facts --
+    # a debug subprogram's signature, a hidden-but-defined function's
+    # visibility -- so they stay as the binary-only dump recorded them:
+    # projecting a binary-only dump to `binary` is the identity.
 
     if dwarf_sourced:
         for t in snap.declarations.types:
@@ -405,9 +415,25 @@ def _strip_header_and_above_evidence(
         # (triggered because its own scope derivation now sees empty
         # `types`/`enums` on both sides) falls back to a pool that was
         # already reduced, not the raw, unscoped DWARF universe.
-        from ..compare.debug_layout_view import restrict_debug_layout
+        from ..compare.debug_layout_view import (
+            debug_layout_declarations,
+            restrict_debug_layout,
+        )
 
         restrict_debug_layout(snap, dwarf_struct_scope, dwarf_enum_scope)
+        # Rebuild layout-only records/enums from the (scoped) debug layout:
+        # a binary-only dump of the same library carries its debug-info
+        # records in `types`/`enums`, so its type detectors (type_size_changed,
+        # type_field_added_compatible, ...) judge a layout change. Leaving
+        # them empty sent the projected pair to the raw-layout fallback
+        # instead, which spells the same change struct_size_changed/
+        # struct_field_removed -- a different finding set from dumping at
+        # the requested depth (bug class
+        # `evidence.depth_projection_diverges_from_shallow_dump`). These are
+        # debug-info facts, not the discarded header spellings.
+        snap.declarations.types, snap.declarations.enums = debug_layout_declarations(
+            snap
+        )
 
     snap.declarations.constants = {}
     # Sidecar keyed exactly like `constants` (same docstring as above) --
@@ -431,13 +457,6 @@ def _strip_header_and_above_evidence(
     snap.contract = None
 
     if not dwarf_sourced:
-        for f in snap.declarations.functions:
-            f.return_type = "?"
-            f.params = []
-        for v in snap.declarations.variables:
-            v.type = "?"
-            v.is_const = False
-            v.value = None
         snap.elf_only_mode = True
 
 
@@ -725,7 +744,9 @@ def project_pair_to_depth(
                 old
             ) and _structural_facts_are_dwarf_confirmed(new)
             if not dwarf_sourced:
-                dwarf_struct_scope, dwarf_enum_scope = _public_dwarf_scope(old, new)
+                dwarf_struct_scope, dwarf_enum_scope = pair_layout_scope(
+                    *_public_dwarf_scope(old, new), old, new
+                )
     return (
         project_snapshot_to_depth(
             old,

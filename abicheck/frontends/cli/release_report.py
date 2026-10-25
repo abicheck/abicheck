@@ -57,8 +57,9 @@ if TYPE_CHECKING:
 
 __all__ = ["render_release_summary"]
 
-#: Formats whose rendering states the effective-config receipt.
-_RECEIPT_FORMATS = frozenset({"json", "html"})
+#: Formats whose rendering states the effective-config receipt. ``review`` is
+#: rendered from the release JSON document, which carries the receipt.
+_RECEIPT_FORMATS = frozenset({"json", "html", "review"})
 
 
 @memory_trace.phase("report.release_render")  # stage timing; off by default

@@ -46,6 +46,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import pytest
+from _field_shapes import materialize, replace_once, shape_sources
 
 from abicheck.buildsource.source_graph import GraphNode, SourceGraphSummary
 from abicheck.buildsource.template_graph_fold import NODE_SOURCE_DECL
@@ -184,34 +185,34 @@ def test_binary_projection_keeps_no_declaration_ids() -> None:
 
 # --- compiled reproduction ---------------------------------------------------
 
-_HEADER = """#pragma once
-#include <cstddef>
-class Table {
-public:
-%(first)s%(second)s  int fill() { %(fill)s }
-  int other();
-};
-"""
-_FIRST = "  template <typename T> int setArrays(T* p, std::size_t n) { return (int)n + (p ? 1 : 0); }\n"
-_SECOND = "  template <typename T> int setArrays(T* p, T* q, std::size_t n) { return (int)n + (p == q); }\n"
+_SHAPE = "overloaded_member_template"
+
+
+def _overload_line(header: str, marker: str) -> str:
+    (line,) = [ln for ln in header.splitlines(keepends=True) if marker in ln]
+    return line
 
 
 def _build(root: Path, *, overloads: int, uses: bool, keep_first: bool = True) -> Path:
-    root.mkdir(parents=True)
-    fill = "double d = 0; return setArrays(&d, 1);" if uses else "return other();"
-    first = _FIRST if keep_first else ""
-    second = _SECOND if overloads == 2 else ""
-    (root / "t.h").write_text(
-        _HEADER % {"first": first, "second": second, "fill": fill}
-    )
-    (root / "t.cpp").write_text('#include "t.h"\nint Table::other() { return 3; }\n')
+    """The corpus shape (``v1`` instantiates ``setArrays`` from ``fill()``,
+    ``v2`` does not; both declare two overloads), with the overload count and
+    the first overload's presence varied by dropping corpus lines."""
+    sources = shape_sources(_SHAPE, "v1" if uses else "v2")
+    header = sources["api.h"]
+    first = _overload_line(header, "setArrays(T* p, std::size_t n)")
+    second = _overload_line(header, "setArrays(T* p, T* q, std::size_t n)")
+    if overloads == 1:
+        header = replace_once(header, second, "")
+    if not keep_first:
+        header = replace_once(header, first, "")
+    materialize(_SHAPE, "", root, {**sources, "api.h": header})
     cmd = [
         "g++",
         "-shared",
         "-fPIC",
         "-fvisibility-inlines-hidden",
         f"-I{root}",
-        str(root / "t.cpp"),
+        str(root / "api.cpp"),
         "-o",
         str(root / "libt.so"),
     ]
@@ -225,7 +226,7 @@ def _build(root: Path, *, overloads: int, uses: bool, keep_first: bool = True) -
         "dump",
         str(root / "libt.so"),
         "-H",
-        str(root / "t.h"),
+        str(root / "api.h"),
         "-o",
         str(out),
     ]

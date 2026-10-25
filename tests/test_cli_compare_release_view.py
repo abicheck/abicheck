@@ -28,8 +28,8 @@ crash the release path, and `leaf`/`root-cause` are rejected outright with
 a clear usage error rather than being silently ignored -- the release
 report is a genuinely different, already-aggregated document with no
 single-`DiffResult` root-cause graph for those two view modes to
-restructure (the same structural reason `--format sarif/html/review`
-already reject a directory/package operand).
+restructure. (`--format sarif` and `--format review` are release formats
+now; `leaf`/`root-cause` still have no release equivalent.)
 """
 
 from __future__ import annotations

@@ -191,6 +191,11 @@ CLICK_ROUTING: dict[str, tuple[str, Any]] = {
     ),
 }
 
+_SEVERITY_OVERRIDE = (
+    _UC,
+    "the .abicheck.yml severity override; CLI/typed parity is test_compare_exit_gate_unified.py",
+)
+
 REQUEST_ROUTING: dict[str, tuple[str, Any]] = {
     "old": ("covered", ("default",)),
     "new": ("covered", ("default",)),
@@ -203,6 +208,14 @@ REQUEST_ROUTING: dict[str, tuple[str, Any]] = {
     "require_justification": ("covered", ("suppress_strict",)),
     "scope_public": ("covered", ("no_scope_public",)),
     "severity_preset": ("covered", ("severity_strict",)),
+    "severity_abi_breaking": _SEVERITY_OVERRIDE,
+    "severity_potential_breaking": _SEVERITY_OVERRIDE,
+    "severity_quality_issues": _SEVERITY_OVERRIDE,
+    "severity_addition": _SEVERITY_OVERRIDE,
+    "require_complete_analysis": (
+        _UC,
+        "the assurance.require_complete exit needs an incomplete-analysis fixture; gate-level parity is test_compare_exit_gate_unified.py",
+    ),
     "diagnostic_comparison": ("covered", ("diagnostic_comparison",)),
     "contract_evaluation": ("covered", ("contract_exports",)),
     "contract_mode": ("covered", ("contract_exports",)),

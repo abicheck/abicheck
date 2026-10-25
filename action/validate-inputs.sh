@@ -310,22 +310,19 @@ case "$MODE" in
       fi
     fi
     # compare's full renderable-format set (behind `-o FORMAT=DESTINATION`)
-    # is json|markdown|sarif|html|junit|
-    # review (`abicheck compare --help-all`); a directory/package operand
-    # fans out through the release engine, which narrows that to
-    # cli.py's _RELEASE_FORMATS = {json, markdown, junit} (sarif/html/review
-    # rejected — a clear UsageError, surfaced as VERDICT=ERROR by run.sh —
-    # but only after Python/deps are installed). Mirror both allowlists
-    # here so a bad value (a typo, or a release-only-invalid format like
-    # sarif/html/review on a directory/package) is caught before that
-    # install, not just downstream in the CLI.
-    # tests/test_action_validate_inputs.py cross-checks these two sets
-    # against the live CLI to catch drift.
+    # is the generated `compare -o` choice set. A directory/package operand
+    # fans out through the release engine, which renders the narrower
+    # `release-compare` set (RELEASE_FORMATS in compare_routing.py). Both
+    # come from one generated file (action/cli-surface.txt), so a typo or a
+    # format the release fan-out cannot produce is caught before the install,
+    # not downstream in the CLI.
+    # tests/test_action_validate_inputs.py cross-checks these sets against the
+    # live CLI to catch drift.
     if [[ -n "$FORMAT" ]]; then
       if { [[ -n "$NEW_LIBRARY" ]] && _is_compare_release_operand "$NEW_LIBRARY"; } \
          || { [[ -n "$OLD_LIBRARY" ]] && _is_compare_release_operand "$OLD_LIBRARY"; }; then
-        if [[ "$FORMAT" != "json" && "$FORMAT" != "markdown" && "$FORMAT" != "junit" && "$FORMAT" != "oneline" && "$FORMAT" != "html" ]]; then
-          _fail "mode: compare does not support format: $FORMAT with a directory/package operand (old-library='$OLD_LIBRARY', new-library='$NEW_LIBRARY') — only 'json', 'markdown', 'junit', 'oneline', and 'html' are available for a directory/package comparison."
+        if ! _cli_choice_allows release-compare -o "$FORMAT"; then
+          _fail "mode: compare does not support format: $FORMAT with a directory/package operand (old-library='$OLD_LIBRARY', new-library='$NEW_LIBRARY') — only $(_cli_choice_list release-compare -o) are available for a directory/package comparison."
         fi
       elif [[ -z "$OLD_LIBRARY" && -z "${INPUT_ABI_BASELINE:-}" ]]; then
         # Audit-only shape (`compare --no-baseline`): the CLI's own

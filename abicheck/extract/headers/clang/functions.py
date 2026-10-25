@@ -435,7 +435,8 @@ def parse_functions(
     default_value: DefaultValueEvaluator,
     no_binary_evidence: bool = False,
     is_cxx: bool = True,
-    function_template_defaults: Mapping[int, tuple[str | None, ...]] | None = None,
+    function_template_defaults: Mapping[int, tuple[str | None, ...] | None]
+    | None = None,
 ) -> list[Function]:
     funcs: list[Function] = []
     for entry in functions:

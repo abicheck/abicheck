@@ -57,6 +57,7 @@ from . import release_change_inventory as _inventory
 from .comparison_scope import ComparisonScopeTerms
 from .document import ReportDocument
 from .release_assurance_section import ReleaseAssuranceTerms
+from .release_surface_changes import live_surface_changes, stored_surface_changes
 
 if TYPE_CHECKING:
     from ..bundle_models import BundleDiffResult, BundleFinding
@@ -141,6 +142,9 @@ class ReleaseReport:
     compatibility: str | None
     disposition_audit: dict[str, object]
     junit_error_libraries: list[dict[str, object]]
+    #: The live ``surface_changes`` block, folded once here so both the
+    #: JSON document and the Markdown projection read the same value.
+    surface_changes: dict[str, object]
 
 
 @dataclass(frozen=True)
@@ -418,6 +422,7 @@ def _build_live(evaluation: ReleaseEvaluation, show_only: str | None) -> Release
             library_results, ev.matrix_result, ev.severity_config, ev.bundle_result
         ),
         junit_error_libraries=_junit_error_libraries(library_results),
+        surface_changes=live_surface_changes(library_results, terms.record),
     )
 
 
@@ -621,6 +626,8 @@ def release_json_document(report: ReleaseReport) -> ReportDocument:
     summary["effective_config_fields"] = dict(fields)
     # ADR-067 C-S2: unconditional -- raw-versus-effective is never dropped.
     summary["disposition_audit"] = report.disposition_audit
+    # Schema 2.2: the same per-member surface block the stored operand carries.
+    summary["surface_changes"] = report.surface_changes
     return ReportDocument.from_mapping(summary)
 
 
@@ -693,4 +700,8 @@ def stored_release_json_document(report: StoredReleaseReport) -> ReportDocument:
         summary["public_surface_reconciliation"] = _surface.to_dict()
     if result.env_matrix_source_sha256 is not None:
         summary["env_matrix_source_sha256"] = result.env_matrix_source_sha256
+    # Schema 2.2: the same block the live operand carries (both build it here).
+    summary["surface_changes"] = stored_surface_changes(
+        result.per_library, ev.scope_terms.record
+    )
     return ReportDocument.from_mapping(summary)

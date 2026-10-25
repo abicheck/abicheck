@@ -9,7 +9,7 @@ generated: false
 
 # A function-pointer parameter's signature is not compared, so a callback arity change reads `NO_CHANGE` on the header path (2026-10-15)
 
-**Status (2026-10-15): OPEN.** Reproduced in plain C, so this is not Rust-specific.
+**Status (2026-10-24): FIXED for the header (castxml) path; OPEN on DWARF.** castxml function types now spell their full declarator (`EXTRACTOR_GENERATION` 16); see the index entry. Originally (2026-10-15): reproduced in plain C, so this is not Rust-specific.
 
 Repro:
 
