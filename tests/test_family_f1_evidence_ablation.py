@@ -897,3 +897,76 @@ def test_header_declaration_ablation_never_hides_an_export_removal(
         seen.append({c.symbol for c in result.changes if c.kind.value in removal_kinds})
         assert result.verdict is Verdict.BREAKING
     assert seen[0] == seen[1] == seen[2] == set(names)
+
+
+# Dependency internals (bug class ``scoping.dependency_internals_in_contract``):
+# each input the header-path classifier reads is ablatable evidence -- the
+# export table, the public-header origin, the header-text identifier scan,
+# a declaration's location. Losing one may only keep more findings in
+# contract: every internal set under ablation is a subset of the full one.
+def _ablate_export_table(snap):
+    snap.elf = None
+
+
+def _ablate_public_origin(snap):
+    from abicheck.model import ScopeOrigin
+
+    for decl in [*snap.declarations.functions, *snap.declarations.types]:
+        decl.origin = ScopeOrigin.UNKNOWN
+
+
+def _ablate_header_identifiers(snap):
+    snap.public_header_identifiers = None
+
+
+def _ablate_dependency_locations(snap):
+    decls = snap.declarations
+    for decl in [*decls.functions, *decls.variables, *decls.types]:
+        if decl.origin.value != "public_header":
+            decl.source_header = None
+
+
+_DEPENDENCY_ABLATIONS = {
+    "export_table": _ablate_export_table,
+    "public_origin": _ablate_public_origin,
+    "header_identifiers": _ablate_header_identifiers,
+    "dependency_locations": _ablate_dependency_locations,
+}
+
+
+_DEPENDENCY_ABLATION_EMPTIES = {
+    "export_table": ("symbols", "overload_stems"),
+    "public_origin": ("types", "typedefs", "symbols", "overload_stems"),
+    "header_identifiers": ("typedefs",),
+    "dependency_locations": ("types", "symbols", "overload_stems"),
+}
+
+
+@pytest.mark.parametrize("ablation", sorted(_DEPENDENCY_ABLATIONS))
+def test_dependency_internals_never_grow_under_ablation(ablation: str) -> None:
+    from test_header_dependency_internals import CASES, _snapshot
+
+    from abicheck.workflows.dump.dependency_internals import dependency_internals
+
+    grew = []
+    for layout, vec_named, binding, traits_named in CASES:
+        kwargs = {
+            "vec_named": vec_named,
+            "helper_binding": binding,
+            "traits_named": traits_named,
+        }
+        full = dependency_internals(_snapshot(layout, **kwargs))
+        snap = _snapshot(layout, **kwargs)
+        _DEPENDENCY_ABLATIONS[ablation](snap)
+        ablated = dependency_internals(snap)
+        for part in ("types", "typedefs", "symbols", "overload_stems"):
+            extra = getattr(ablated, part) - getattr(full, part)
+            if extra:
+                grew.append((layout.name, part, sorted(extra)))
+        # What each ablation removes is what that part's decision rests on.
+        emptied = _DEPENDENCY_ABLATION_EMPTIES[ablation]
+        assert all(not getattr(ablated, part) for part in emptied), (
+            layout.name,
+            ablated,
+        )
+    assert grew == []

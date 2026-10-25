@@ -327,6 +327,7 @@ EXTRACTION_BUG_CLASSES: tuple[BugClass, ...] = (
         fixed_by=(1775,),
         seed_tests=(
             "tests/test_header_dependency_internals.py",
+            "tests/test_family_f1_evidence_ablation.py",
             "tests/test_contract_dependency_origin.py",
             "tests/test_header_dependency_internals_integration.py",
             "tests/test_dwarf_dependency_scope_integration.py",

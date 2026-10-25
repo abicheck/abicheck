@@ -67,7 +67,9 @@ finding).
   dependency-only namespace) is reached when its name occurs in a public
   declaration's signature, field or default, or in the library's own header
   text (``AbiSnapshot.public_header_identifiers``). A member typedef of a
-  reached record follows the hidden-friend rule.
+  reached record follows the hidden-friend rule. Without that header-text
+  scan no typedef is classified: a name the headers spell could read
+  unreached.
 
 Findings name records and typedefs by bare name, so a bare name shared with
 one of the library's own entities is withheld: the finding could be either.
@@ -410,21 +412,27 @@ def _header_dependency_internals(snap: AbiSnapshot) -> DependencyInternals:
         )
         stems = _overload_stems(snap, name_of, symbols)
 
-    reference_text = kept_reference_text(
-        _kept_signature_haystack(root_functions, root_variables, root_types),
-        root_functions,
-        root_types,
-        root_enums,
-    )
-    referenced = set(_IDENTIFIER.findall(reference_text))
-    referenced |= snap.public_header_identifiers or frozenset()
-    typedefs = _internal_typedefs(
-        snap,
-        at_dependency_path,
-        own_records,
-        dep_only_namespaces,
-        referenced,
-    )
+    # A typedef is named by spelling, and the instantiation-independent
+    # spelling evidence is the library's own header text. Without that scan
+    # (not run, or it could not vouch for completeness) a dependency typedef
+    # the headers name could read unreached, so none is classified.
+    typedefs: frozenset[str] = frozenset()
+    if snap.public_header_identifiers is not None:
+        reference_text = kept_reference_text(
+            _kept_signature_haystack(root_functions, root_variables, root_types),
+            root_functions,
+            root_types,
+            root_enums,
+        )
+        referenced = set(_IDENTIFIER.findall(reference_text))
+        referenced |= snap.public_header_identifiers
+        typedefs = _internal_typedefs(
+            snap,
+            at_dependency_path,
+            own_records,
+            dep_only_namespaces,
+            referenced,
+        )
     return DependencyInternals(
         types=types, typedefs=typedefs, symbols=symbols, overload_stems=stems
     )
