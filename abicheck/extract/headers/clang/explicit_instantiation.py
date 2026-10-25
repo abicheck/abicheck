@@ -221,7 +221,7 @@ def _classify(
     for node, in_template, key in found:
         if key is None:
             if in_template:
-                facts[id(node)] = _unsupported("its enclosing scope is not spelled")
+                facts[id(node)] = _unsupported("its scope or type is not spelled")
             continue
         marker = dump.kinds.get(key)
         if key in dump.ambiguous or shared[key] > 1:

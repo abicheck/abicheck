@@ -94,7 +94,7 @@
       "abicheck/extract/headers/clang/context.py": "648411b558314ee3ba099c4ecbd302193535330c8dc85bb087ad8d2f967b76ec",
       "abicheck/extract/headers/clang/enums.py": "69f90fd8e342371d246a257f7ed4230d9a548173f856ec63776d6af12ee53644",
       "abicheck/extract/headers/clang/error_header_retry.py": "3153f727c9d1934783a51d6917727a48aeba31e68b3c2462aef6e6b2f489f690",
-      "abicheck/extract/headers/clang/explicit_instantiation.py": "167e9efc0d42dcb7731e1cede2b43fa2c44ea91160a2e42b79a40a543c37cb52",
+      "abicheck/extract/headers/clang/explicit_instantiation.py": "bf0178df431eef00d5ee5c9e918cba99a80fab226a68f7a179b2f1a36ab5da95",
       "abicheck/extract/headers/clang/expr.py": "5d8e1ef086c583db2557fd7fdb3fd5e4f51b55e4b556f120f624eea6875e8e6a",
       "abicheck/extract/headers/clang/function_template_defaults.py": "2867a70d0b85c891efbf80194ae147fd96429e9d51cdb93e029ff642be0bc780",
       "abicheck/extract/headers/clang/functions.py": "47f788f6f3225bf8ca25b2f19431a3da700f335f138e232c6fcc5c93db3903b8",
@@ -161,9 +161,9 @@
       "abicheck/symvers_metadata.py": "372737765cd132e6e87ed891dd465d2958e04debbef774e45212ceb3036871cb",
       "abicheck/type_metadata.py": "9997189de8dac522fd1db8be5ae491d811139503f83abaaded89038eb4aa9cdf"
     },
-    "fingerprint": "d2ceb4303784937cbe6f89b43242cb5ed2a3fc48599a774c0045e909fa7674f5",
+    "fingerprint": "512101ddd578393aa3dcfb4abf9a5ae3a3d7e72aa5e10942fe91afa40a820238",
     "generation": 19,
-    "reason": "clang records Function/Variable.explicit_instantiation_fact from a text AST pass (PR #1807); no existing fact's spelling changes"
+    "reason": "diagnostic wording only: an unjoinable instance's unsupported reason now names its scope or type; no fact value changes"
   },
   "resolver": {
     "files": {

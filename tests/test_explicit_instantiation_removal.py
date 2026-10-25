@@ -13,6 +13,7 @@ from __future__ import annotations
 import json
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -322,6 +323,10 @@ def _compare_case85(tmp_path: Path, frontend: str) -> dict:
 
 
 @pytest.mark.integration
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="case85 is an ELF fixture (linux and macos platforms)",
+)
 class TestCase85ThroughTheCli:
     def test_clang_lane_reports_the_removed_explicit_declaration(
         self, tmp_path: Path
@@ -379,3 +384,59 @@ class TestSnapshotRoundTrip:
             fn.pop("explicit_instantiation_fact", None)
         loaded = snapshot_from_dict(document).declarations.functions[0]
         assert loaded.explicit_instantiation_fact is None
+
+
+class TestEdgeShapes:
+    """Shapes the real dumps rarely hit: unnamed scopes, odd nodes, and joins
+    that must not be guessed. Each oracle is the dump or tree written here."""
+
+    def test_unnamed_scopes_and_nameless_declarations_do_not_crash(self) -> None:
+        text = (
+            "TranslationUnitDecl 0x1 <<invalid sloc>> <invalid sloc>\n"
+            "|-NamespaceDecl 0x2 <line:1:1, line:3:1>\n"
+            "| `-FunctionDecl 0x3 <line:2:1, col:9> col:3 f 'void (void)' "
+            "explicit_instantiation_definition\n"
+            "`-ClassTemplateSpecializationDecl 0x4 <line:4:1> col:1 "
+            "explicit_instantiation_declaration\n"
+            "  `-VarDecl 0x5 <col:2> col:3 v explicit_instantiation_declaration\n"
+            "`-FunctionDecl 0x6 <col:1> col:2 no_quoted_type\n"
+        )
+        dump = parse_explicit_dump(text)
+        assert dump.kinds[("", "f", "void(void)")] is (ExplicitInstantiation.DEFINITION)
+        assert ("", "no_quoted_type", "") not in dump.kinds
+
+    def test_a_template_instance_without_a_type_is_unsupported(self) -> None:
+        node = {"kind": "FunctionDecl", "name": "walk", "mangledName": "_Wx"}
+        pattern = {"kind": "FunctionTemplateDecl", "name": "walk", "inner": [node]}
+        root = {"kind": "TranslationUnitDecl", "inner": [_json_for("lib", pattern)]}
+        facts = explicit_instantiation_facts(root, parse_explicit_dump(_TEXT_DUMP))
+        assert facts[id(node)].status.value == "unsupported"
+
+    def test_a_non_dict_child_is_skipped(self) -> None:
+        root = {"kind": "TranslationUnitDecl", "inner": ["not a node", None]}
+        assert explicit_instantiation_facts(root, parse_explicit_dump("")) == {}
+
+    def test_two_json_nodes_sharing_a_key_are_both_unsupported(self) -> None:
+        first = _fn("walk", "float (float *, float *)", mangled="_W1")
+        second = _fn("walk", "float (float *, float *)", mangled="_W2")
+        pattern = {
+            "kind": "FunctionTemplateDecl",
+            "name": "walk",
+            "inner": [first, second],
+        }
+        root = {
+            "kind": "TranslationUnitDecl",
+            "inner": [_json_for("lib", _json_for("__detail", pattern))],
+        }
+        facts = explicit_instantiation_facts(root, parse_explicit_dump(_TEXT_DUMP))
+        assert facts[id(first)].status.value == "unsupported"
+        assert facts[id(second)].status.value == "unsupported"
+
+    def test_an_absent_instance_with_no_template_context_gets_no_fact(self) -> None:
+        plain = _fn("walk", "T (T *, T *)", mangled="_Wp")
+        root = {
+            "kind": "TranslationUnitDecl",
+            "inner": [_json_for("lib", _json_for("__detail", plain))],
+        }
+        facts = explicit_instantiation_facts(root, parse_explicit_dump(_TEXT_DUMP))
+        assert id(plain) not in facts
