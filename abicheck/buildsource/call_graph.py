@@ -61,8 +61,8 @@ from ..model.graph_vocabulary import (
 from ..model.name_decoration import macho_underscore as macho_decoration
 from ..model.source_graph import function_decl_identity
 from .call_decl_record import (
-    _OVERRIDE_MARKER_KINDS,
     _compact_decl_record,
+    _ref_is_virtual,
 )
 from .source_graph_build import project_source_files
 from .source_graph_build_source_abi import _file_in_project
@@ -278,52 +278,6 @@ def _resolve_ref_callee_identity(
     return indexed or _identity(ref)
 
 
-def _ref_is_virtual(ref: dict[str, Any]) -> bool:
-    """Whether *ref* — a resolved callee declaration node — is virtual, own or
-    inherited.
-
-    ``bool(ref.get("virtual"))`` alone under-classifies a real, common case
-    (Codex review, fresh evidence, verified against real Clang 17 output for
-    ``struct B { virtual void f(); }; struct D : B { void f() override; void
-    h(){ f(); } };``): clang repeats ``"virtual": true`` only on the slot's
-    *original* declaring ancestor (``B::f``), never on the override's own
-    ``CXXMethodDecl`` (``D::f``) — so when the resolved static target of a
-    member call *is itself* an override, reading only ``ref["virtual"]``
-    misclassified the call as ``CALL_KIND_DIRECT``/``RESOLUTION_EXACT``,
-    excluding a real further-derived-override chain from
-    ``VIRTUAL_CALL_MAY_DISPATCH_TO`` entirely — the opposite of the
-    over-approximation this classification exists to make honest.
-
-    Fixed locally (no cross-module dependency on ``override_graph.py``'s own
-    hierarchy-walking ``parse_clang_ast_virtual_methods`` — threading its
-    output through here as a precomputed set would make ``call_graph.py``
-    import from ``override_graph.py``, which already function-locally
-    imports several helpers *from* this module; the reverse edge forms a
-    real cycle the AI-readiness ``import-cycle-growth`` gate correctly
-    rejects, confirmed empirically against this exact change): clang always
-    marks a written ``override``/``final`` keyword with an ``OverrideAttr``/
-    ``FinalAttr`` child on the override's own declaration (verified against
-    the same real AST above — ``D::f`` carries no ``"virtual": true`` but
-    does carry an ``OverrideAttr`` child), and ``ref`` here is always the
-    *full* declaration node (not a compact stub) whenever this matters: the
-    only caller (``_classify_call``) only consults this for a
-    ``CXXMemberCallExpr``, whose target always resolves through
-    ``member_index`` (see ``_find_referenced_decl``), which stores full
-    nodes. A derived method that redeclares a virtual signature with
-    *neither* the ``override``/``final`` keyword *nor* a repeated
-    ``"virtual": true`` (legal but unusual C++ style) is a documented,
-    remaining false negative — the same conservative
-    false-negative-over-false-positive default this module already uses
-    throughout (ADR-028 D3).
-    """
-    if bool(ref.get("virtual")):
-        return True
-    return any(
-        isinstance(child, dict) and child.get("kind") in _OVERRIDE_MARKER_KINDS
-        for child in ref.get("inner", []) or []
-    )
-
-
 def _find_member_expr(node: dict[str, Any]) -> dict[str, Any] | None:
     """DFS for the first ``MemberExpr`` under *node* (mirrors
     ``_find_referenced_decl``'s shape, but returns the call-site's own
@@ -480,6 +434,7 @@ def _classify_call(
     call_node: dict[str, Any],
     ref: dict[str, Any] | None,
     id_index: Mapping[str, str],
+    member_index: Mapping[str, dict[str, Any]] | None = None,
 ) -> tuple[str, str, str]:
     """Return ``(callee_identity, call_kind, resolution)`` for one call site."""
     if ref is None:
@@ -495,7 +450,7 @@ def _classify_call(
     if call_node.get("kind") in (
         "CXXMemberCallExpr",
         "CXXOperatorCallExpr",
-    ) and _ref_is_virtual(ref):
+    ) and _ref_is_virtual(ref, member_index):
         # A virtual overloaded operator invoked through a base reference/
         # pointer (`B &b; b();`) is a CXXOperatorCallExpr, not a
         # CXXMemberCallExpr (Codex review, fresh evidence, verified against
@@ -599,7 +554,7 @@ def _append_call_edge(
 ) -> None:
     """Resolve one call expression's callee and append the edge (unresolved/self calls dropped)."""
     ref = _find_referenced_decl(node, member_index)
-    callee, call_kind, resolution = _classify_call(node, ref, id_index)
+    callee, call_kind, resolution = _classify_call(node, ref, id_index, member_index)
     if callee and callee != caller:
         edges.append(CallEdge(caller, callee, call_kind, resolution, caller_file))
 

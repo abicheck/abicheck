@@ -257,6 +257,12 @@ SPELLING_MIGRATIONS: Mapping[int, GenerationSpellingChange] = {
         "rewrite is needed -- an older clang snapshot simply names no "
         "alias/variable template-defaults gap"
     ),
+    24: GenerationSpellingChange(
+        "a header-graph call to a virtual method defined out of line is recorded "
+        "call_kind virtual / resolution overapprox (was direct / exact) and so "
+        "gains its VIRTUAL_CALL_MAY_DISPATCH_TO edges; graph edge attributes only, "
+        "no type or declaration spelling changes, so no rewrite is needed"
+    ),
 }
 
 #: Reasons that say nothing about what was audited; the bump gate refuses them.

@@ -38,6 +38,7 @@ real clang output rather than trusted.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from typing import Any
 
 #: clang AST node kinds that mark a method as overriding/finalizing a base
@@ -51,8 +52,9 @@ _OVERRIDE_MARKER_KINDS = frozenset({"OverrideAttr", "FinalAttr"})
 #: :func:`_find_referenced_decl`, whose result reaches exactly three
 #: consumers -- :func:`_resolve_ref_callee_identity` (``id``, then
 #: :func:`_identity`'s ``mangledName``/``name``), :func:`_classify_call`
-#: (``kind``), and :func:`_ref_is_virtual` (``virtual``, and its children's
-#: ``kind``). ``type`` and ``loc``/``range`` are kept although no current
+#: (``kind``), and :func:`_ref_is_virtual` (``virtual``, its children's
+#: ``kind``, and ``previousDecl`` -- followed back from an out-of-line
+#: definition to the in-class declaration that carries ``virtual``). ``type`` and ``loc``/``range`` are kept although no current
 #: consumer reads them off an *indexed* node: both are small, flat values,
 #: and ``_find_referenced_decl``'s own docstring names ``type.qualType`` as
 #: something the full node carries for these consumers -- keeping them costs
@@ -64,6 +66,7 @@ _MEMBER_INDEX_FIELDS: tuple[str, ...] = (
     "name",
     "mangledName",
     "virtual",
+    "previousDecl",
     "type",
     "loc",
     "range",
@@ -102,3 +105,68 @@ def _compact_decl_record(node: dict[str, Any]) -> dict[str, Any]:
     if markers:
         record["inner"] = markers
     return record
+
+
+def _ref_is_virtual(
+    ref: dict[str, Any],
+    member_index: Mapping[str, dict[str, Any]] | None = None,
+) -> bool:
+    """Whether *ref* — a resolved callee declaration node — is virtual, own or
+    inherited.
+
+    ``bool(ref.get("virtual"))`` alone under-classifies a real, common case
+    (Codex review, fresh evidence, verified against real Clang 17 output for
+    ``struct B { virtual void f(); }; struct D : B { void f() override; void
+    h(){ f(); } };``): clang repeats ``"virtual": true`` only on the slot's
+    *original* declaring ancestor (``B::f``), never on the override's own
+    ``CXXMethodDecl`` (``D::f``) — so when the resolved static target of a
+    member call *is itself* an override, reading only ``ref["virtual"]``
+    misclassified the call as ``CALL_KIND_DIRECT``/``RESOLUTION_EXACT``,
+    excluding a real further-derived-override chain from
+    ``VIRTUAL_CALL_MAY_DISPATCH_TO`` entirely — the opposite of the
+    over-approximation this classification exists to make honest.
+
+    Fixed locally (no cross-module dependency on ``override_graph.py``'s own
+    hierarchy-walking ``parse_clang_ast_virtual_methods`` — threading its
+    output through here as a precomputed set would make ``call_graph.py``
+    import from ``override_graph.py``, which already function-locally
+    imports several helpers *from* this module; the reverse edge forms a
+    real cycle the AI-readiness ``import-cycle-growth`` gate correctly
+    rejects, confirmed empirically against this exact change): clang always
+    marks a written ``override``/``final`` keyword with an ``OverrideAttr``/
+    ``FinalAttr`` child on the override's own declaration (verified against
+    the same real AST above — ``D::f`` carries no ``"virtual": true`` but
+    does carry an ``OverrideAttr`` child), and ``ref`` here is always the
+    *full* declaration node (not a compact stub) whenever this matters: the
+    only caller (``_classify_call``) only consults this for a
+    ``CXXMemberCallExpr``, whose target always resolves through
+    ``member_index`` (see ``_find_referenced_decl``), which stores full
+    nodes. A derived method that redeclares a virtual signature with
+    *neither* the ``override``/``final`` keyword *nor* a repeated
+    ``"virtual": true`` (legal but unusual C++ style) is a documented,
+    remaining false negative — the same conservative
+    false-negative-over-false-positive default this module already uses
+    throughout (ADR-028 D3).
+
+    Virtual-ness is a property of the method, not of one redeclaration:
+    clang's ``referencedMemberDecl`` for a call to a method *defined out of
+    line* (``double Shape::area() const { ... }``) names the definition,
+    which carries neither ``"virtual": true`` nor the ``override`` marker
+    (verified against real Clang 18 output). The definition's
+    ``previousDecl`` points back to the in-class declaration, so the whole
+    redeclaration chain is consulted through *member_index* (cycle-guarded).
+    """
+    seen: set[str] = set()
+    cur: dict[str, Any] | None = ref
+    while cur is not None:
+        if bool(cur.get("virtual")) or any(
+            isinstance(child, dict) and child.get("kind") in _OVERRIDE_MARKER_KINDS
+            for child in cur.get("inner", []) or []
+        ):
+            return True
+        prev = str(cur.get("previousDecl") or "")
+        if not prev or prev in seen or member_index is None:
+            return False
+        seen.add(prev)
+        cur = member_index.get(prev)
+    return False
