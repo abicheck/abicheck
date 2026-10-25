@@ -227,6 +227,12 @@ def macho_from_dict(macho: dict[str, Any], schema_version: int) -> Any:
         install_name=macho.get("install_name", ""),
         dependent_libs=macho.get("dependent_libs", []),
         reexported_libs=macho.get("reexported_libs", []),
+        # Tri-state: absent key (legacy snapshot) stays None ("not captured").
+        weak_dependent_libs=macho.get("weak_dependent_libs"),
+        # The schema_version weak_dependent_libs_fact started being persisted at.
+        weak_dependent_libs_fact=decode_fact(
+            macho.get("weak_dependent_libs_fact"), schema_version, min_schema_version=65
+        ),
         exports=exports,
         imported_symbols=macho.get("imported_symbols", []),
         current_version=macho.get("current_version", ""),

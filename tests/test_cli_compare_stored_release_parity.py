@@ -313,7 +313,7 @@ _RELEASE_BLOCK_SCHEMA = {
         "public_surface",
     ],
     "properties": {
-        "release_schema_version": {"const": "2.3"},
+        "release_schema_version": {"const": "2.4"},
         "effective_config_source": {"const": "reconstructed_from_stored_facts"},
         "public_surface": {"$ref": "#/$defs/unavailable"},
         "libraries": {

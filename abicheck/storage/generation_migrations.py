@@ -246,6 +246,11 @@ SPELLING_MIGRATIONS: Mapping[int, GenerationSpellingChange] = {
         "now uses the dialect and target flags the binary was built with"
     ),
     22: GenerationSpellingChange(
+        "Mach-O LC_LOAD_WEAK_DYLIB install names are recorded as weak_dependent_libs, "
+        "a new fact rather than a spelling: no stored type or declaration spelling "
+        "changes, so no rewrite is needed and a stored snapshot reads as before"
+    ),
+    23: GenerationSpellingChange(
         "clang runs set template_default_header_scan when a parsed public header "
         "declares an alias or variable template with a default template argument "
         "(was None for every clang run); no type or name spelling changes, so no "

@@ -210,7 +210,7 @@ _PARAM_FACT_KEYS = (
 )
 
 _PE_FACT_KEYS = ("delay_imports_fact",)
-_MACHO_FACT_KEYS = ("rpaths_fact",)
+_MACHO_FACT_KEYS = ("rpaths_fact", "weak_dependent_libs_fact")
 
 
 def encode_fact_fields(d: dict[str, Any]) -> None:
