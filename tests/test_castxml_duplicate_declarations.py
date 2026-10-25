@@ -26,6 +26,7 @@ from xml.etree.ElementTree import Element, SubElement
 
 import pytest
 
+from abicheck.extract.declaration_provenance import is_system_header
 from abicheck.extract.headers.castxml.duplicate_declarations import (
     collapse_benign_duplicates,
 )
@@ -255,7 +256,9 @@ def test_catalog_case_dump_logs_no_first_wins_duplicate(
     lib = _build(src / f"{v}.cpp", tmp_path / f"lib{v}.so", src)
     snap, first_wins = _dump_and_index_first_wins(lib, src / f"{v}.h")
     groups = _same_key_groups(snap)
-    assert first_wins == [], pprint.pformat(groups, width=120)
+    assert first_wins == [], pprint.pformat(
+        {"ast_producer": snap.ast_producer, "groups": groups}, width=120
+    )
     assert groups == {}
 
 
@@ -276,6 +279,7 @@ def _same_key_groups(snap: AbiSnapshot) -> dict[str, list[tuple[object, ...]]]:
                 f.exception_spec,
                 f.source_header,
                 str(f.origin),
+                is_system_header(f.source_header),
             )
             for f in funcs
         ]  # fmt: skip
