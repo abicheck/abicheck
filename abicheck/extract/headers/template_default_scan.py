@@ -123,6 +123,10 @@ _NOT_ALIAS_OR_VARIABLE = frozenset(
     {"class", "struct", "union", "enum", "concept", "friend", "template"}
 )
 _WORD = re.compile(r"[A-Za-z_]\w*")
+#: A parenthesised type specifier ending just before a ``(``.
+_TYPE_SPECIFIER_CALL = re.compile(
+    r"\b(?:decltype|typeof|__typeof__|alignas|_Alignas|__attribute__|__declspec)\s*\Z"
+)
 
 
 def _declares_alias_or_variable(text: str, end: int) -> bool:
@@ -145,11 +149,18 @@ def _declares_alias_or_variable(text: str, end: int) -> bool:
         if word.group() in _NOT_ALIAS_OR_VARIABLE:
             return False
     angle = parens = 0
-    for i in range(end, len(text)):
+    i = end - 1
+    while i + 1 < len(text):
+        i += 1
         c = text[i]
         if c == "(":
             if parens == 0 and angle == 0:
-                return False
+                if _TYPE_SPECIFIER_CALL.search(text, end, i) is None:
+                    return False
+                # ``decltype(...)``/``alignas(...)`` belong to the type, not
+                # a function declarator.
+                i = _skip_balanced(text, i, "(", ")") - 1
+                continue
             parens += 1
         elif c == ")":
             parens = max(parens - 1, 0)

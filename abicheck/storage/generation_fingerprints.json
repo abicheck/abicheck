@@ -118,7 +118,7 @@
       "abicheck/extract/headers/manifest.py": "b44a66dc760b0fd39e671876615d1e846433b2d76cb050be39749c5740c942bf",
       "abicheck/extract/headers/scope_segments.py": "d413edec257eb1334c829263770b66dc2eda3d263c765f699eac9f7e3ace9e65",
       "abicheck/extract/headers/sysinc.py": "1c25ee983ff10085afca9bdd0686b8177da252920a130cb2959c435065a9e51b",
-      "abicheck/extract/headers/template_default_scan.py": "9bc1b485a742c445b876dc58968cb5929f93ee2c26492da45ec5aa3eeb7af9d8",
+      "abicheck/extract/headers/template_default_scan.py": "fe065581b3e2ea03a2d1ad4193b9cbbd01ae586845e4ec548bd3ff8c120b8b99",
       "abicheck/extract/headers/toolchain.py": "be0be05950476ff2c0cb168727ebcde4859cc634c258f5ff23b1af1d2c50b754",
       "abicheck/extract/library_export_facts.py": "071b2a58f284753b57fa2e374680a57e9ce6897877b65a84fb92f420e7cf2ab7",
       "abicheck/extract/macho_build_signals.py": "c277bfdd55f26aae61af66c8fa6c5cdc5fa45acc49a3ae513af5899417db88bb",
@@ -160,9 +160,9 @@
       "abicheck/symvers_metadata.py": "372737765cd132e6e87ed891dd465d2958e04debbef774e45212ceb3036871cb",
       "abicheck/type_metadata.py": "9997189de8dac522fd1db8be5ae491d811139503f83abaaded89038eb4aa9cdf"
     },
-    "fingerprint": "890fb30e3e3f3f5f20b7ec283bfcf2300675bb129eff5da7baea2ce3407611ab",
+    "fingerprint": "311373897188c92387d4ed25729f98a27c93c4f4301c65adcf1c73e1434a6f48",
     "generation": 19,
-    "reason": "clang alias/variable template-default scan (PR 1801), renumbered after main took 18"
+    "reason": "Review fix inside the unreleased generation 19 (same PR): the alias/variable scan skips decltype/alignas type-specifier parentheses"
   },
   "resolver": {
     "files": {
