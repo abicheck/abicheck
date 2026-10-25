@@ -36,6 +36,7 @@ verdict -- exit 0 must mean a real comparison found nothing broken.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
@@ -45,11 +46,9 @@ from ....model.sided_inputs import compose_sided_paths
 
 # Via `report`, which re-exports it: `frontends -> policy` is forbidden
 # (`architecture/modules.yaml`), even for a signature's own annotation.
-from ....report.comparison_scope import ComparisonScopeTerms, comparison_scope_terms
-from ....report.release_assurance_section import ReleaseAssuranceDecision
+from ....report.comparison_scope import comparison_scope_terms
 from ....report.release_document import (
     ReleaseEvaluation,
-    StoredReleaseEvaluation,
     build_release_report,
     stored_reported_verdict,
 )
@@ -57,7 +56,6 @@ from ....report.release_formats import STORED_RELEASE_FORMATS
 from ....report.render_release_report import (
     render_release_text,
     render_stored_release_json,
-    render_stored_release_markdown,
 )
 from ....workflows.bundle_facts_stored_compare import (
     execute_bundle_facts_compare,
@@ -68,8 +66,10 @@ from ....workflows.bundle_facts_stored_request import (
     BundleFactsCompareRequest,
     reject_explicit_compile_config,
 )
-from ....workflows.gate import resolve_scope_decision
-from .compare_bundle_facts_release import stored_release_evaluation
+from .compare_bundle_facts_release import (
+    stored_document_details,
+    stored_release_evaluation,
+)
 
 
 def _click_error(exc: BundleFactsCompareError) -> click.ClickException:
@@ -365,6 +365,7 @@ def dispatch(
     result = outcome.result
     # One live-shaped evaluation for every format of this run: the receipt is
     # resolved once, from the same policy flags the stored run was given.
+    details = stored_document_details(result, new_is_stored=new_is_stored)
     release = stored_release_evaluation(
         result,
         worst_verdict=stored_reported_verdict(result),
@@ -377,16 +378,7 @@ def dispatch(
         ),
         effective_config=_stored_effective_config(kwargs),
     )
-    text = _render(
-        result,
-        request.fmt,
-        old_facts_path=request.old_facts_path,
-        new_dir=request.new_input,
-        new_is_stored=new_is_stored,
-        scope_terms=scope_terms,
-        assurance_decision=outcome.assurance_decision,
-        release=release,
-    )
+    text = _render(request.fmt, release, details)
     if request.output is not None:
         _safe_write_output(request.output, text)
     else:
@@ -396,16 +388,7 @@ def dispatch(
         # dropped -- re-rendered since a secondary format can differ.
         _safe_write_output(
             Path(secondary_output),
-            _render(
-                result,
-                secondary_fmt,
-                old_facts_path=request.old_facts_path,
-                new_dir=request.new_input,
-                new_is_stored=new_is_stored,
-                scope_terms=scope_terms,
-                assurance_decision=outcome.assurance_decision,
-                release=release,
-            ),
+            _render(secondary_fmt, release, details),
         )
     if request.output_dir is not None:
         # NEW_INPUT is a release-style operand, so --output-dir writes one
@@ -448,41 +431,15 @@ def _stored_effective_config(kwargs: dict[str, Any]) -> tuple[str, dict[str, str
     )
 
 
-def _render(
-    result: Any,
-    fmt: str,
-    *,
-    old_facts_path: Path,
-    new_dir: Path,
-    new_is_stored: bool = False,
-    scope_terms: ComparisonScopeTerms | None = None,
-    assurance_decision: ReleaseAssuranceDecision | None = None,
-    release: ReleaseEvaluation | None = None,
-) -> str:
-    """Render the stored-operand comparison as *fmt*. ``junit``, ``oneline``
-    and ``html`` go through the live release renderer on *release*; ``markdown``
-    and JSON go through the stored document builder, which carries *release* as
-    its additive ``release`` block. With no *scope_terms*, the default
-    ``scope.on_incomplete`` policy is applied to *result*'s own scope record."""
-    if scope_terms is None:
-        scope_terms = comparison_scope_terms(
-            resolve_scope_decision(getattr(result, "scope_record", None), None)
-        )
-    if fmt in ("junit", "oneline", "html"):
-        if release is None:
-            raise ValueError(f"-o {fmt}= renders the live release evaluation")
-        return render_release_text(fmt, build_release_report(release), demangle=False)
-    report = build_release_report(
-        StoredReleaseEvaluation(
-            result=result,
-            old_facts_path=old_facts_path,
-            new_dir=new_dir,
-            scope_terms=scope_terms,
-            new_is_stored=new_is_stored,
-            assurance_decision=assurance_decision,
-            release=release,
-        )
+def _render(fmt: str, release: ReleaseEvaluation, details: Mapping[str, object]) -> str:
+    """Render the stored comparison's *release* evaluation as *fmt*.
+
+    JSON is the stored release document (the live release document with its
+    stored markers); every other format is the live release renderer's
+    projection of the same evaluation, so the formats share one document.
+    """
+    if fmt == "json":
+        return render_stored_release_json(release, details=details)
+    return render_release_text(
+        fmt, build_release_report(release), demangle=fmt == "markdown"
     )
-    if fmt == "markdown":
-        return render_stored_release_markdown(report)
-    return render_stored_release_json(report)

@@ -40,8 +40,43 @@ from click.testing import CliRunner
 
 from abicheck.cli import main
 from abicheck.cli_resolve import _resolve_input
+from abicheck.schemas.release_schema import RELEASE_SCHEMA_VERSION
 from abicheck.serialization import save_bundle_facts
 from abicheck.workflows.bundle_facts_capture import capture_bundle_facts
+
+
+def _release(result: object) -> object:
+    """The release evaluation the stored CLI builds for *result*."""
+    from abicheck.frontends.cli.commands.compare_bundle_facts_release import (
+        stored_release_evaluation,
+    )
+    from abicheck.report.comparison_scope import comparison_scope_terms
+    from abicheck.report.release_document import stored_reported_verdict
+    from abicheck.workflows.gate import resolve_scope_decision
+
+    return stored_release_evaluation(
+        result,
+        worst_verdict=stored_reported_verdict(result),
+        old_facts_path=Path("old.bundlefacts.json"),
+        new_dir=Path("new"),
+        scope_terms=comparison_scope_terms(resolve_scope_decision(None, None)),
+        assurance_decision=None,
+        require_complete_analysis=False,
+        effective_config=("sha256:test", {"policy.base": "strict_abi"}),
+    )
+
+
+def _details(result: object) -> dict:
+    """The stored run's own keys for *result*, as the CLI passes them."""
+    from abicheck.frontends.cli.commands.compare_bundle_facts_release import (
+        stored_document_details,
+    )
+
+    return stored_document_details(result, new_is_stored=False)
+
+
+def _member(doc: dict, name: str) -> dict:
+    return next(entry for entry in doc["libraries"] if entry["library"] == name)
 
 
 def _invoke(*args: str) -> tuple[int, str]:
@@ -130,11 +165,11 @@ class TestCompareOldBundleFacts:
 
         assert code == 4, out
         payload = json.loads(out)
-        assert payload["mode"] == "bundle_facts"
+        assert payload["release_schema_version"] == RELEASE_SCHEMA_VERSION
         assert payload["verdict"] == "BREAKING"
-        lib = payload["libraries"]["libreal.so"]
+        lib = _member(payload, "libreal.so")
         assert lib["verdict"] == "BREAKING"
-        assert any(c["kind"] == "func_params_changed" for c in lib["changes"])
+        assert any(c["kind"] == "func_params_changed" for c in lib["findings"])
 
     def test_project_config_policy_override_is_honored(self, tmp_path: Path) -> None:
         """Codex review, round 9: this dispatcher bypasses ``run_compare``
@@ -175,7 +210,7 @@ class TestCompareOldBundleFacts:
 
         assert code == 0, out
         payload = json.loads(out)
-        lib = payload["libraries"]["libreal.so"]
+        lib = _member(payload, "libreal.so")
         assert lib["verdict"] != "BREAKING"
 
     def test_malformed_project_config_policy_override_is_a_clean_usage_error(
@@ -259,7 +294,7 @@ class TestCompareOldBundleFacts:
         )
 
         assert code == 0, out
-        assert "Bundle-facts comparison" in out
+        assert "# ABI Release Comparison" in out
         assert "libreal.so" in out
 
     def test_suppress_flows_through_to_the_per_library_diff(
@@ -301,8 +336,9 @@ class TestCompareOldBundleFacts:
         assert code == 0, out
         payload = json.loads(out)
         assert payload["verdict"] == "NO_CHANGE"
-        lib = payload["libraries"]["libreal.so"]
-        assert lib["suppression"]["suppressed_count"] == 1
+        lib = _member(payload, "libreal.so")
+        # The suppressed change never reaches the member's findings.
+        assert lib.get("findings", []) == [], lib
 
     def test_max_json_object_nodes_override_is_honored(self, tmp_path: Path) -> None:
         """Phase 7g (one-comparison-product.md §4.1/§3 #21): the former
@@ -664,9 +700,9 @@ class TestCompareOldBundleFacts:
         assert code == 4, out
         payload = json.loads(out)
         assert payload["verdict"] == "BREAKING"
-        lib = payload["libraries"]["libreal.so"]
+        lib = _member(payload, "libreal.so")
         assert lib["verdict"] == "BREAKING"
-        assert any(c["kind"] == "func_params_changed" for c in lib["changes"])
+        assert any(c["kind"] == "func_params_changed" for c in lib["findings"])
 
     def test_write_secondary_output_renders_and_writes(self, tmp_path: Path) -> None:
         # Codex review: --write FORMAT=PATH was accepted but this dispatcher
@@ -697,7 +733,7 @@ class TestCompareOldBundleFacts:
         assert code == 0, out
         json.loads(out)
         assert secondary_path.exists()
-        assert "Bundle-facts comparison" in secondary_path.read_text()
+        assert "# ABI Release Comparison" in secondary_path.read_text()
 
     def test_zero_matched_libraries_is_rejected(self, tmp_path: Path) -> None:
         # Codex review: an empty NEW_INPUT means nothing matches any key in
@@ -1017,10 +1053,9 @@ class TestRenderJsonCarriesRunOutcome:
         from abicheck.frontends.cli.commands.compare_bundle_facts import _render
 
         out = _render(
-            self._result(Verdict.BREAKING),
             "json",
-            old_facts_path=tmp_path / "old.bundlefacts.json",
-            new_dir=tmp_path / "new",
+            _release(self._result(Verdict.BREAKING)),
+            _details(self._result(Verdict.BREAKING)),
         )
         payload = json.loads(out)
         run_outcome = payload["run_outcome"]
@@ -1033,10 +1068,9 @@ class TestRenderJsonCarriesRunOutcome:
         from abicheck.frontends.cli.commands.compare_bundle_facts import _render
 
         out = _render(
-            self._result(Verdict.NO_CHANGE),
             "json",
-            old_facts_path=tmp_path / "old.bundlefacts.json",
-            new_dir=tmp_path / "new",
+            _release(self._result(Verdict.NO_CHANGE)),
+            _details(self._result(Verdict.NO_CHANGE)),
         )
         payload = json.loads(out)
         run_outcome = payload["run_outcome"]
@@ -1074,10 +1108,9 @@ class TestBundleFactsRendererCarriesEnvMatrixDigest:
         from abicheck.frontends.cli.commands.compare_bundle_facts import _render
 
         out = _render(
-            self._result(env_matrix_source_sha256="sha256:" + "ab" * 32),
             "json",
-            old_facts_path=tmp_path / "old.bundlefacts.json",
-            new_dir=tmp_path / "new",
+            _release(self._result(env_matrix_source_sha256="sha256:" + "ab" * 32)),
+            _details(self._result(env_matrix_source_sha256="sha256:" + "ab" * 32)),
         )
         payload = json.loads(out)
         assert payload["env_matrix_source_sha256"] == "sha256:" + "ab" * 32
@@ -1086,10 +1119,9 @@ class TestBundleFactsRendererCarriesEnvMatrixDigest:
         from abicheck.frontends.cli.commands.compare_bundle_facts import _render
 
         out = _render(
-            self._result(env_matrix_source_sha256=None),
             "json",
-            old_facts_path=tmp_path / "old.bundlefacts.json",
-            new_dir=tmp_path / "new",
+            _release(self._result(env_matrix_source_sha256=None)),
+            _details(self._result(env_matrix_source_sha256=None)),
         )
         payload = json.loads(out)
         assert "env_matrix_source_sha256" not in payload
@@ -1100,10 +1132,9 @@ class TestBundleFactsRendererCarriesEnvMatrixDigest:
         )
 
         text = _render(
-            self._result(env_matrix_source_sha256="sha256:" + "cd" * 32),
             "markdown",
-            old_facts_path=tmp_path / "old.bundlefacts.json",
-            new_dir=tmp_path / "new",
+            _release(self._result(env_matrix_source_sha256="sha256:" + "cd" * 32)),
+            _details(self._result(env_matrix_source_sha256="sha256:" + "cd" * 32)),
         )
         assert "sha256:" + "cd" * 32 in text
 
@@ -1113,9 +1144,8 @@ class TestBundleFactsRendererCarriesEnvMatrixDigest:
         )
 
         text = _render(
-            self._result(env_matrix_source_sha256=None),
             "markdown",
-            old_facts_path=tmp_path / "old.bundlefacts.json",
-            new_dir=tmp_path / "new",
+            _release(self._result(env_matrix_source_sha256=None)),
+            _details(self._result(env_matrix_source_sha256=None)),
         )
         assert "Deployment floor digest" not in text

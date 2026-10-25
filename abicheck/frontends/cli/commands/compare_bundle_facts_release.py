@@ -150,4 +150,31 @@ def stored_release_evaluation(
         bundle_result=result,
         require_complete_analysis=require_complete_analysis,
         effective_config=effective_config,
+        env_matrix_source_sha256=result.env_matrix_source_sha256,
     )
+
+
+def stored_document_details(result: Any, *, new_is_stored: bool) -> dict[str, object]:
+    """The stored comparison's own keys beside the live release document: the
+    operand kind, and the members a stored run could not compare or resolve,
+    each named with its reason. Present only when active, like every other
+    release key; ``new_is_stored`` always, since it names the operand."""
+    details: dict[str, object] = {"new_is_stored": new_is_stored}
+    failures = dict(getattr(result, "extraction_failures", {}) or {})
+    if failures:
+        details["extraction_failures"] = failures
+    not_comparable = dict(getattr(result, "not_comparable_members", {}) or {})
+    if not_comparable:
+        details["not_comparable_members"] = {
+            name: {"kind": kind, "message": message}
+            for name, (kind, message) in not_comparable.items()
+        }
+    not_applicable = dict(
+        getattr(result, "resolution_not_applicable_members", {}) or {}
+    )
+    if not_applicable:
+        details["resolution_not_applicable_members"] = {
+            name: {"artifact_kind": kind, "resolution": "not_applicable"}
+            for name, kind in sorted(not_applicable.items())
+        }
+    return details
