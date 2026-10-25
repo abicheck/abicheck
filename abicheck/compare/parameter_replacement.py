@@ -115,7 +115,12 @@ def _return_types_disagree(old_fn: Function, new_fn: Function) -> bool:
 def _declaring_header(fn: Function) -> str:
     """Basename of the header *fn* is declared in (``""`` when unknown): the
     two sides are parsed from different trees, so only the name compares."""
-    path = (fn.source_location or "").rpartition(":")[0] or (fn.source_location or "")
+    location = fn.source_location or ""
+    path, sep, line = location.rpartition(":")
+    # Only a trailing ``:line`` is stripped: a bare Windows path's drive
+    # colon (``C:\inc\api.h``) is part of the path.
+    if not (sep and line.isdigit()):
+        path = location
     return path.replace("\\", "/").rpartition("/")[2]
 
 
@@ -144,7 +149,12 @@ class _HeaderEvidence:
     def typedef_target_changed(self, spelling: str, stem: str) -> bool:
         """Whether *spelling* names a typedef, visible from *stem*'s scope,
         whose target differs between the sides. The innermost scope that
-        declares the name on either side is the one the spelling resolves to."""
+        declares the name on either side is the one the spelling resolves to.
+
+        Only a spelling that reduces to one name is read: a typedef inside a
+        template argument (``std::span<V>``) or a function-pointer declarator
+        is not, and such a retype pairs only when the resolved identities
+        differ (``docs/contribute/known-gaps.md``)."""
         # The one name left once cv and declarator sigils are stripped, as
         # typedef_respelling._core_leaf reads it, but with its scope kept.
         tokens = spelling.replace("*", " ").replace("&", " ").split()
