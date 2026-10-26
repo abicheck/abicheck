@@ -369,6 +369,7 @@ DETECTOR_INPUTS: dict[str, DetectorInputs] = {
             "canonical_ir": _CANONICAL,
             "declarations.typedefs": _LOOKUP,
             "declarations.types": _LOOKUP,
+            "from_headers": _FROM_HEADERS,
         },
     ),
     "method_qualifiers": DetectorInputs(
