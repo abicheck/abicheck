@@ -74,7 +74,7 @@ Each entry's status line says what is still open. A PARTIAL entry's write-up als
 
 #### The legacy gate counts a redundant finding the review groups omit (2026-10-23)
 
-**Status (2026-10-23): OPEN — gate-semantics decision needed.** A finding folded out as redundant but kept for the verdict is `gating` under the legacy scheme and `non_gating` under a severity config, so "retained" and "gating" are not nested. [Full write-up](known-gaps/legacy-gate-counts-a-redundant-finding-the-review-groups-omit.md)
+**Status (2026-10-26): OPEN — gate-semantics decision needed.** A finding folded out as redundant but kept for the verdict is `gating` under the legacy scheme and `non_gating` under a severity config. `result_counts.gating_retained` now partitions the retained findings and the summary names the folded one, so the counts no longer contradict each other; the scheme disagreement remains. [Full write-up](known-gaps/legacy-gate-counts-a-redundant-finding-the-review-groups-omit.md)
 
 ### Source-replay twin pairing (L4/L2 Phase 8)
 

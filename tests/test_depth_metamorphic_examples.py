@@ -155,6 +155,58 @@ def test_depth_violations_flags_an_invented_lower_rung_removal() -> None:
     ]
 
 
+#: Kinds the header model alone can establish (its own declarations, enum
+#: members and underlying types), so dropping the debug layout must not lose
+#: them. A kind only DWARF can see (member offsets, padding) is out of scope.
+HEADER_OBSERVABLE_KINDS = frozenset(
+    {
+        "enum_underlying_size_changed",
+        "enum_member_removed",
+        "enum_member_value_changed",
+        "enum_member_added",
+        "func_removed",
+        "var_removed",
+        "func_params_changed",
+        "func_return_changed",
+    }
+)
+
+
+def lost_without_debug_layout(
+    with_debug: set[Finding], without_debug: set[Finding]
+) -> set[Finding]:
+    """Header-observable findings the debug-layout run reports on a symbol
+    the run with the layout dropped reports *nothing* about (bug class
+    ``evidence.header_observable_fact_compared_only_from_debug_info``). The
+    same symbol judged under another kind is a spelling, not a loss."""
+    judged = {sym for _, sym in without_debug}
+    judged |= {_unqualified(sym) for sym in judged}
+    return {
+        (kind, sym)
+        for kind, sym in with_debug
+        if kind in HEADER_OBSERVABLE_KINDS
+        and sym not in judged
+        and _unqualified(sym) not in judged
+    }
+
+
+def test_lost_without_debug_layout_flags_a_debug_only_header_fact() -> None:
+    full = {("enum_underlying_size_changed", "E"), ("type_field_offset_changed", "S")}
+    assert lost_without_debug_layout(full, set()) == {
+        ("enum_underlying_size_changed", "E")
+    }
+    assert (
+        lost_without_debug_layout(full, {("enum_underlying_size_changed", "E")})
+        == set()
+    )
+    assert (
+        lost_without_debug_layout(
+            {("func_removed", "f")}, {("func_removed_elf_only", "f")}
+        )
+        == set()
+    )
+
+
 def test_depth_rungs_are_the_public_ladder() -> None:
     assert _DEPTHS == ("binary", "headers", "build", "source")
 
@@ -196,3 +248,18 @@ def test_lower_depth_never_invents_a_removal(
         kinds_by_depth[depth] = _findings(compare(p_old, p_new).changes)
 
     assert depth_violations(kinds_by_depth) == [], kinds_by_depth
+
+    # Second relation: the header model's own facts survive dropping the
+    # debug layout (the same headers, DWARF read for presence only). A
+    # binary-only case has no header model to keep them.
+    if not v1_hdr or not v2_hdr:
+        return
+    old_l2 = dump(
+        v1_lib, headers=_header_list(v1_hdr), version="v1", debug_presence_only=True
+    )
+    new_l2 = dump(
+        v2_lib, headers=_header_list(v2_hdr), version="v2", debug_presence_only=True
+    )
+    with_debug = _findings(compare(old, new).changes)
+    without_debug = _findings(compare(old_l2, new_l2).changes)
+    assert lost_without_debug_layout(with_debug, without_debug) == set(), without_debug

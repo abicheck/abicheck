@@ -28,6 +28,8 @@ from typing import Any
 
 from abicheck.model import ParamKind
 
+from .ast_inner import ast_inner
+
 
 def param_kind(type_str: str) -> ParamKind:
     """Best-effort top-level indirection kind from a written type spelling.
@@ -95,5 +97,5 @@ def param_has_default(param: dict[str, Any]) -> bool:
         return True
     return any(
         isinstance(c, dict) and not str(c.get("kind", "")).endswith(("Attr", "Comment"))
-        for c in param.get("inner", []) or []
+        for c in ast_inner(param)
     )

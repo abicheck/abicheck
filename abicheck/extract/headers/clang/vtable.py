@@ -191,6 +191,7 @@ from typing import Any
 
 from ....model.signature_normalization import canonicalize_function_signature_param_type
 from ....name_classification import strip_anonymous_type_location
+from .ast_inner import ast_inner
 
 
 def is_record_definition(node: dict[str, Any]) -> bool:
@@ -206,7 +207,7 @@ def is_record_definition(node: dict[str, Any]) -> bool:
     return any(
         isinstance(c, dict)
         and c.get("kind") in ("FieldDecl", "AccessSpecDecl", "CXXMethodDecl")
-        for c in node.get("inner", []) or []
+        for c in ast_inner(node)
     )
 
 
@@ -292,7 +293,7 @@ def _method_signature_key(node: dict[str, Any]) -> _Signature | None:
         return None
     params = tuple(
         canonicalize_function_signature_param_type(_param_type_spelling(child))
-        for child in node.get("inner", []) or []
+        for child in ast_inner(node)
         if isinstance(child, dict) and child.get("kind") == "ParmVarDecl"
     )
     type_obj = node.get("type")
@@ -378,7 +379,7 @@ def _top_level_param_list_close(qual_type: str) -> int:
 def _has_override_attr(node: dict[str, Any]) -> bool:
     return any(
         isinstance(child, dict) and child.get("kind") == "OverrideAttr"
-        for child in node.get("inner", []) or []
+        for child in ast_inner(node)
     )
 
 
@@ -485,7 +486,7 @@ def _collect_virtual_slots(
         records_by_qualname.get(bq) is None for bq in base_qualnames
     )
 
-    for child in node.get("inner", []) or []:
+    for child in ast_inner(node):
         if not isinstance(child, dict):
             continue
         kind = child.get("kind")

@@ -219,6 +219,9 @@ def emulation_arguments(
             if translated is not None:
                 kept.append(translated)
             index += 1
+        elif _value_flag_kept(cc_id) and token.startswith("-x") and len(token) > 2:
+            kept.append(token)  # joined -xc / -xc++ (the separate form is above)
+            index += 1
         else:
             if _single_argument_kept(token, cc_id=cc_id, clang_family=clang_family):
                 kept.append(token)

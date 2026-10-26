@@ -23,6 +23,10 @@ class ResultCounts:
     retained: int
     gating: int
     non_gating: int
+    #: The retained findings that gate (the review groups' sum); ``gating``
+    #: may exceed it by redundant findings folded out of the findings but
+    #: still scored by the legacy verdict (see :func:`held_out_note`).
+    gating_retained: int
     review_groups: int
     gating_review_groups: int
     public_additions: int
@@ -87,12 +91,13 @@ def compute_result_counts(
             if key not in detected_keys:
                 detected_keys.add(key)
                 detected_operations[operation] += 1
-    gating = audit.effective_total
+    gating_retained = sum(group.gating_findings for group in groups)
     return ResultCounts(
         raw_detected=audit.detected_total,
         retained=retained,
-        gating=gating,
-        non_gating=max(0, retained - gating),
+        gating=audit.effective_total,
+        non_gating=retained - gating_retained,
+        gating_retained=gating_retained,
         review_groups=len(groups),
         gating_review_groups=sum(group.gating_findings > 0 for group in groups),
         public_additions=operations["added"],
@@ -123,12 +128,29 @@ def held_out_non_gating(counts: Mapping[str, int], audit: DispositionAudit) -> i
     return max(0, audited - int(counts.get("non_gating", 0)))
 
 
+def held_out_gating(counts: Mapping[str, int]) -> int:
+    """Gating findings folded out of the retained findings: a redundant
+    finding the legacy verdict still scores (ledger ``application_point:
+    redundancy_filter_scored``). Without this the line read "4 retained
+    (5 gating, 0 non-gating)", a gating count larger than its population."""
+    retained_gating = int(counts.get("gating_retained", counts.get("gating", 0)))
+    return max(0, int(counts.get("gating", 0)) - retained_gating)
+
+
 def held_out_note(counts: Mapping[str, int], audit: DispositionAudit | None) -> str:
-    """``" + 10 non-gating held out of the findings (see the disposition
-    audit)"`` when the two counts differ, else ``""``."""
-    if audit is None:
-        return ""
-    held = held_out_non_gating(counts, audit)
-    if not held:
-        return ""
-    return f" + {held} non-gating held out of the findings (see the disposition audit)"
+    """``" + 1 gating folded into another finding (still scored by the
+    verdict) + 10 non-gating held out of the findings (see the disposition
+    audit)"`` for whichever held-out population is nonzero, else ``""``."""
+    note = ""
+    folded = held_out_gating(counts)
+    if folded:
+        note += (
+            f" + {folded} gating folded into another finding "
+            "(still scored by the verdict)"
+        )
+    held = held_out_non_gating(counts, audit) if audit is not None else 0
+    if held:
+        note += (
+            f" + {held} non-gating held out of the findings (see the disposition audit)"
+        )
+    return note

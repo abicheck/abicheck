@@ -69,6 +69,7 @@ from typing import Any
 
 from ....model import Function
 from ....model.identity import Anonymous, Record, ScopePath
+from .ast_inner import ast_inner
 
 __all__ = [
     "encloses_class_scope",
@@ -148,7 +149,7 @@ _NON_BODY_CHILD_SUFFIXES = ("Decl", "Attr", "Initializer", "Comment", "Argument"
 
 def _has_body(node: dict[str, Any]) -> bool:
     """Whether *node* carries a real function body in its ``inner`` list."""
-    inner = node.get("inner") or []
+    inner = ast_inner(node)
     return any(
         isinstance(child, dict)
         and isinstance(child.get("kind"), str)

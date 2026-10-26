@@ -22,6 +22,7 @@ from collections.abc import Collection, Mapping
 from .compare.base_class_diff import diff_bases as _diff_bases
 from .compare.embedded_growth_shift import stamp_embedded_growth_shifts
 from .compare.enum_sentinel import is_confirmed_enum_sentinel
+from .compare.enum_underlying import enum_underlying_size_changes
 from .compare.fact_gate import both_facts_present
 from .compare.field_addition import new_field_change_kind
 from .compare.public_surface import (
@@ -1125,10 +1126,10 @@ def _diff_enums(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
                     )
                 )
             continue
-        # Per-enum key, not a whole-snapshot gate: supports --ast-frontend
-        # hybrid (G28 Phase 3); both backends populate is_scoped (G31 Phase C).
+        # Per-enum gate (hybrid --ast-frontend, G28 P3; is_scoped: G31 P-C).
         if both_facts_present(e_old, e_new, "is_scoped", name):
             _append_enum_scoped_changes(changes, name, e_old, e_new)
+        changes.extend(enum_underlying_size_changes(e_old, e_new, old, new))
         old_members = {m.name: m.value for m in e_old.members}
         new_members = {m.name: m.value for m in e_new.members}
         # Build inverse map: new_value → new_name for values that are "new" (not in old names).
@@ -1178,8 +1179,7 @@ def _diff_enums(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
                     )
                 )
 
-        # Skip additions whose values exist in the old enum:
-        # those will be handled as ENUM_MEMBER_RENAMED by _diff_enum_renames,
+        # (Such additions are ENUM_MEMBER_RENAMED, from _diff_enum_renames.)
         # Skip additions whose value matches a removed old member (likely a rename).
         # Use only *removed* old member values — if the old member still exists under
         # the same name, the new member is a genuine addition (alias/duplicate), not

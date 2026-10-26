@@ -1,3 +1,5 @@
+import pytest
+
 from abicheck.checker_policy import ChangeKind, CrossSourceEvolution, Verdict
 from abicheck.model.change import Change
 from abicheck.policy.disposition_ledger import Disposition
@@ -29,7 +31,10 @@ def test_populations_distinguish_surface_runtime_hygiene_and_groups() -> None:
         observed_changes=[finding.change for finding in findings],
     )
     assert counts.raw_detected == 5
-    assert (counts.retained, counts.gating, counts.non_gating) == (3, 1, 2)
+    # None of the three retained findings gates (the review groups say so);
+    # the audit's one gating finding is therefore a folded one.
+    assert (counts.retained, counts.gating, counts.non_gating) == (3, 1, 3)
+    assert counts.gating_retained == 0
     assert counts.public_additions == 1
     assert counts.runtime_dependency == 1
     assert counts.hygiene_persistent == 1
@@ -140,3 +145,39 @@ def test_evidence_summary_handles_a_result_with_no_layer_coverage() -> None:
 
     text = compact_evidence_summary(_Bare())
     assert "recorded snapshot facts" in text
+
+
+@pytest.mark.parametrize(
+    ("retained_gating", "retained_other", "folded"),
+    [(r, o, f) for r in range(3) for o in range(3) for f in range(3)],
+)
+def test_retained_population_is_partitioned_and_folded_gating_is_named(
+    retained_gating: int, retained_other: int, folded: int
+) -> None:
+    """Every split of retained gating / non-gating and folded redundants:
+    ``gating_retained + non_gating == retained`` and the rendered note names
+    exactly the folded gating findings (the old ``max(0, retained - gating)``
+    read "4 retained (5 gating, 0 non-gating)")."""
+    from abicheck.report.result_counts import held_out_note
+
+    findings = [
+        ReportFinding(
+            Change(ChangeKind.FUNC_REMOVED, "f", "removed"),
+            Verdict.BREAKING,
+            IssueCategory.ABI_BREAKING,
+        )
+        for _ in range(retained_gating)
+    ]
+    findings += [_f(ChangeKind.FUNC_ADDED) for _ in range(retained_other)]
+    for index, finding in enumerate(findings):
+        finding.change.symbol = f"s{index}"
+    groups = build_review_groups(findings)
+    gating = retained_gating + folded
+    audit = DispositionAudit(
+        gating + retained_other, gating, ((Disposition.GATING.value, gating),), (), ()
+    )
+    counts = compute_result_counts(findings, groups, audit).to_dict()
+    assert counts["gating_retained"] == retained_gating
+    assert counts["gating_retained"] + counts["non_gating"] == counts["retained"]
+    note = held_out_note(counts, None)
+    assert (f"+ {folded} gating folded" in note) == (folded > 0)
