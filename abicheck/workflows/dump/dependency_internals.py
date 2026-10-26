@@ -53,16 +53,19 @@ finding).
   and stays in contract, layout and presence; ``simd_fixed_size_abi<8>``,
   reachable only as its template argument, is not.
 * A dependency **function or variable** is the library's only when the
-  library's own binary defines it: a ``GLOBAL`` ELF export (any export on PE
-  and Mach-O, which record no binding). A hidden friend of a reached record is
+  library's own binary defines it: a ``GLOBAL`` ELF export, a Mach-O export
+  that is not a weak definition, any PE export (a PE export directory records
+  no binding, so on PE the dependency's exported instances stay in contract:
+  ADR-089's PE limit). A hidden friend of a reached record is
   no exception: it is the dependency's API on that type, compiled into every
   consumer from the dependency's own header, and the library promises nothing
   about it. What the library does promise about the type -- its identity, size
   and layout wherever its declarations use it -- keeps gating through the
-  record's own findings. A ``WEAK``/``GNU_UNIQUE`` export is a COMDAT copy of
-  such an entity, so it does not make one the library's, and one declared in a
-  dependency-only namespace is internal even when no header declaration names
-  it (``fakesimd::reduce<float>``, emitted by the library's own build).
+  record's own findings. A ``WEAK``/``GNU_UNIQUE`` ELF export or a Mach-O weak
+  definition is a COMDAT copy of such an entity, so it does not make one the
+  library's, and one declared in a dependency-only namespace is internal even
+  when no header declaration names it (``fakesimd::reduce<float>``, emitted by
+  the library's own build).
 * A dependency **typedef** (a member of a dependency record, or one in a
   dependency-only namespace) is reached when its name occurs in a public
   declaration's signature, field or default, or in the library's own header
@@ -229,26 +232,48 @@ def _top_namespace(qualified: str) -> str:
 
 def _library_provided_names(snap: AbiSnapshot) -> frozenset[str] | None:
     """The names *snap*'s binary defines as its own, or ``None`` when it has
-    no export table (a symbol's non-export cannot be proven then)."""
+    no export table (a symbol's non-export cannot be proven then).
+
+    A coalesced (COMDAT) export is not one of them: :func:`_coalesced_export_names`.
+    """
     elf = snap.elf
     if elf is not None and elf.symbols:
         return frozenset(
             s.name for s in elf.symbols if s.binding is SymbolBinding.GLOBAL
         )
     index = build_raw_export_index(snap)
-    return linked_export_names(index) if index is not None else None
+    if index is None:
+        return None
+    return linked_export_names(index) - _coalesced_export_names(snap)
+
+
+def _coalesced_export_names(snap: AbiSnapshot) -> frozenset[str]:
+    """Exports *snap*'s binary marks as a coalesced definition, which every
+    translation unit that uses the entity may emit: an ELF ``WEAK``/
+    ``GNU_UNIQUE`` binding, a Mach-O weak definition (``N_WEAK_DEF``, the
+    export trie's ``EXPORT_SYMBOL_FLAGS_WEAK_DEFINITION``). A PE export
+    directory records no such flag (the linker resolved COMDAT selection
+    away), so none is read there: ADR-089's PE limit.
+    """
+    if snap.elf is not None:
+        return frozenset(
+            s.name
+            for s in snap.elf.symbols
+            if s.binding in (SymbolBinding.WEAK, SymbolBinding.UNIQUE)
+        )
+    if snap.macho is not None:
+        return frozenset(e.name for e in snap.macho.exports if e.is_weak)
+    return frozenset()
 
 
 def _weak_exports_in(snap: AbiSnapshot, namespaces: set[str]) -> frozenset[str]:
-    """Weak/unique ELF exports declared in one of *namespaces*."""
-    elf = snap.elf
-    if elf is None or not namespaces:
+    """Coalesced exports declared in one of *namespaces*."""
+    if not namespaces:
         return frozenset()
     return frozenset(
-        s.name
-        for s in elf.symbols
-        if s.binding in (SymbolBinding.WEAK, SymbolBinding.UNIQUE)
-        and itanium_top_namespace(s.name) in namespaces
+        name
+        for name in _coalesced_export_names(snap)
+        if itanium_top_namespace(name) in namespaces
     )
 
 

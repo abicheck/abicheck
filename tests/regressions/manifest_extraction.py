@@ -316,7 +316,8 @@ EXTRACTION_BUG_CLASSES: tuple[BugClass, ...] = (
             "friends included) or a variable declared by a dependency's "
             "header, or a weak template instance in a dependency-only "
             "namespace -- that no public declaration of the library names and "
-            "the library's binary does not define (a GLOBAL export) is "
+            "the library's binary does not define (a GLOBAL ELF export, a "
+            "Mach-O export that is not a weak definition, any PE export) is "
             "recorded but out of contract (dependency_internal_unreachable), "
             "on a DWARF-only and on a header-derived snapshot alike; one the "
             "library names or defines stays in contract. A header-only SIMD "
@@ -324,7 +325,7 @@ EXTRACTION_BUG_CLASSES: tuple[BugClass, ...] = (
             "a header compare on ~90 of its own instances while the library's "
             "own break was 6 findings."
         ),
-        fixed_by=(1775, 1813),
+        fixed_by=(1775, 1813, 1818),
         seed_tests=(
             "tests/test_header_dependency_internals.py",
             "tests/test_family_f1_evidence_ablation.py",
@@ -347,6 +348,7 @@ EXTRACTION_BUG_CLASSES: tuple[BugClass, ...] = (
                 "nested_include_root",
                 "no_recorded_include_root",
             ),
+            "export_table": ("elf", "macho", "pe"),
         },
     ),
     BugClass(

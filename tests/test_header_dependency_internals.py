@@ -9,12 +9,16 @@ moves the findings on them out of contract (ADR-089's 2026-10-25 amendment).
 The bug class: a dependency's entities (records, hidden friends and other
 functions, inline variables, member typedefs, weak template instances) gate a
 comparison the library did not change. The invariant, stated over an
-exhaustive small domain of library/dependency layouts and relations: an
-entity is internal exactly when its declaring header is classifiable as a
-dependency's, its namespace is not the library's, and the library neither
-names it in a public declaration nor defines it in its binary. The oracle is
-that truth table, written here from the layout, never from the
-implementation's own helpers.
+exhaustive small domain of library/dependency layouts, relations and export
+table formats: an entity is internal exactly when its declaring header is
+classifiable as a dependency's, its namespace is not the library's, and the
+library neither names it in a public declaration nor defines it in its
+binary. "Defines" is read from the export table: an ELF ``GLOBAL`` binding, a
+Mach-O export that is not a weak definition, any PE export (a PE export
+directory records no coalescing, so there the dependency's exported
+instances stay the library's: ADR-089's PE limit). The oracle is that truth
+table, written here from the layout, never from the implementation's own
+helpers.
 """
 
 from __future__ import annotations
@@ -38,6 +42,8 @@ from abicheck.model import (
 from abicheck.model.change import Change
 from abicheck.model.change_catalog.kinds import ChangeKind
 from abicheck.model.elf_facts import ElfMetadata, ElfSymbol, SymbolBinding
+from abicheck.model.macho_facts import MachoExport, MachoMetadata, MachoSymbolType
+from abicheck.model.pe_facts import PeExport, PeMetadata
 from abicheck.policy.contract_dependency_origin import (
     DEPENDENCY_INTERNAL_UNREACHABLE_REASON,
     exclude_unreachable_dependency_findings,
@@ -93,14 +99,44 @@ LAYOUTS = (
 )
 
 BINDINGS = ("global", "weak", "absent")
+#: Export-table formats, and whether each records a coalesced (COMDAT)
+#: definition: ELF's WEAK binding, Mach-O's weak-definition flag; PE none.
+FORMATS = {"elf": True, "macho": True, "pe": False}
 
 
 def _mangled(namespace: str, name: str, suffix: str = "Ev") -> str:
     return f"_ZN{len(namespace)}{namespace}{len(name)}{name}{suffix}"
 
 
+def _export_table(fmt: str, exports: list[tuple[str, bool]]) -> dict:
+    """``AbiSnapshot`` keyword for *exports* (``(name, weak)``) read as *fmt*
+    would record them."""
+    if fmt == "elf":
+        symbols = [
+            ElfSymbol(name=n, binding=SymbolBinding.WEAK if w else SymbolBinding.GLOBAL)
+            for n, w in exports
+        ]
+        return {"elf": ElfMetadata(soname="lib.so", needed=[], symbols=symbols)}
+    if fmt == "macho":
+        rows = [
+            MachoExport(
+                name=n,
+                sym_type=MachoSymbolType.WEAK if w else MachoSymbolType.EXPORTED,
+                is_weak=w,
+            )
+            for n, w in exports
+        ]
+        return {"macho": MachoMetadata(install_name="@rpath/lib.dylib", exports=rows)}
+    return {"pe": PeMetadata(exports=[PeExport(name=n) for n, _ in exports])}
+
+
 def _snapshot(
-    layout: Layout, *, vec_named: bool, helper_binding: str, traits_named: bool
+    layout: Layout,
+    *,
+    vec_named: bool,
+    helper_binding: str,
+    traits_named: bool,
+    fmt: str = "elf",
 ) -> AbiSnapshot:
     ns, header = layout.namespace, layout.header
     state_fields = [("acc", f"{ns}::Vec" if vec_named else "int"), ("n", "int")]
@@ -108,9 +144,10 @@ def _snapshot(
     table = f"_ZN{len(ns)}{ns}5tableE"
     fill = _mangled(ns, "fill", "IfEEvv")  # a weak instance no header declares
     own_fn = _mangled("lib", "f")
-    symbols = [ElfSymbol(name=own_fn), ElfSymbol(name=fill, binding=SymbolBinding.WEAK)]
+    own_inline = _mangled("lib", "inl")  # the library's own coalesced inline
+    exports = [(own_fn, False), (own_inline, True), (fill, True)]
     if helper_binding != "absent":
-        symbols.append(ElfSymbol(name=helper, binding=SymbolBinding(helper_binding)))
+        exports.append((helper, helper_binding == "weak"))
     return AbiSnapshot(
         library="lib.so",
         version="1",
@@ -122,6 +159,14 @@ def _snapshot(
                 mangled=own_fn,
                 return_type="void",
                 params=[Param(name="s", type="lib::State*")],
+                visibility=Visibility.PUBLIC,
+                source_header=API,
+                origin=ScopeOrigin.PUBLIC_HEADER,
+            ),
+            Function(
+                name="inl",
+                mangled=own_inline,
+                return_type="void",
                 visibility=Visibility.PUBLIC,
                 source_header=API,
                 origin=ScopeOrigin.PUBLIC_HEADER,
@@ -170,44 +215,65 @@ def _snapshot(
         public_header_identifiers=frozenset(
             {"lib", "State", "f"} | ({"traits"} if traits_named else set())
         ),
-        elf=ElfMetadata(soname="lib.so", needed=[], symbols=symbols, imports=[]),
+        **_export_table(fmt, exports),
     )
 
 
 def _oracle(
-    layout: Layout, *, vec_named: bool, helper_binding: str, traits_named: bool
+    layout: Layout,
+    *,
+    vec_named: bool,
+    helper_binding: str,
+    traits_named: bool,
+    fmt: str = "elf",
 ) -> dict[str, bool]:
     """Entity -> internal?, from the layout alone."""
     dep = layout.classifiable
     ns = layout.namespace
+    coalesced = FORMATS[fmt]
+    # The library defines the helper when its binary exports it as its own: a
+    # coalesced export is a COMDAT copy, where the format records one.
+    helper_defined = helper_binding == "global" or (
+        helper_binding == "weak" and not coalesced
+    )
     return {
         "Tag": dep,
         "Vec": dep and not vec_named,
         "traits": dep and not traits_named,
-        _mangled(ns, "helper"): dep and helper_binding != "global",
+        _mangled(ns, "helper"): dep and not helper_defined,
         f"_ZN{len(ns)}{ns}5tableE": dep,
-        _mangled(ns, "fill", "IfEEvv"): dep,
+        # No header declares it: only a recorded coalesced export names it.
+        _mangled(ns, "fill", "IfEEvv"): dep and coalesced,
         _mangled("lib", "f"): False,
+        _mangled("lib", "inl"): False,
         "State": False,
     }
 
 
-CASES = list(itertools.product(LAYOUTS, (True, False), BINDINGS, (True, False)))
+CASES = list(
+    itertools.product(LAYOUTS, (True, False), BINDINGS, (True, False), FORMATS)
+)
 
 
 def _id(case: tuple) -> str:
-    layout, vec_named, binding, traits_named = case
-    return f"{layout.name}-vec{'+' if vec_named else '-'}-{binding}-traits{'+' if traits_named else '-'}"
+    layout, vec_named, binding, traits_named, fmt = case
+    return f"{fmt}-{layout.name}-vec{'+' if vec_named else '-'}-{binding}-traits{'+' if traits_named else '-'}"
+
+
+def _kwargs(case: tuple) -> dict:
+    _, vec_named, binding, traits_named, fmt = case
+    return {
+        "vec_named": vec_named,
+        "helper_binding": binding,
+        "traits_named": traits_named,
+        "fmt": fmt,
+    }
 
 
 @pytest.mark.parametrize("case", CASES, ids=[_id(c) for c in CASES])
 def test_internal_entities_match_the_layout_truth_table(case: tuple) -> None:
-    layout, vec_named, binding, traits_named = case
-    kwargs = {
-        "vec_named": vec_named,
-        "helper_binding": binding,
-        "traits_named": traits_named,
-    }
+    layout = case[0]
+    kwargs = _kwargs(case)
     internals = dependency_internals(_snapshot(layout, **kwargs))
     named = internals.types | internals.typedefs | internals.symbols
     expected = _oracle(layout, **kwargs)
@@ -226,6 +292,7 @@ _FINDINGS = (
     (ChangeKind.VAR_ADDED, "table"),
     (ChangeKind.FUNC_REMOVED_ELF_ONLY, "fill"),
     (ChangeKind.FUNC_REMOVED, "f"),
+    (ChangeKind.FUNC_REMOVED, "inl"),
     (ChangeKind.TYPE_SIZE_CHANGED, "Tag"),
 )
 
@@ -234,12 +301,8 @@ _FINDINGS = (
 def test_findings_leave_the_contract_exactly_when_their_entity_is_internal(
     case: tuple,
 ) -> None:
-    layout, vec_named, binding, traits_named = case
-    kwargs = {
-        "vec_named": vec_named,
-        "helper_binding": binding,
-        "traits_named": traits_named,
-    }
+    layout = case[0]
+    kwargs = _kwargs(case)
     internals = dependency_internals(_snapshot(layout, **kwargs))
     expected = _oracle(layout, **kwargs)
     ns = layout.namespace
@@ -248,6 +311,7 @@ def test_findings_leave_the_contract_exactly_when_their_entity_is_internal(
         "table": f"_ZN{len(ns)}{ns}5tableE",
         "fill": _mangled(ns, "fill", "IfEEvv"),
         "f": _mangled("lib", "f"),
+        "inl": _mangled("lib", "inl"),
     }
     changes = [
         Change(kind=kind, symbol=symbol_of.get(entity, entity), description="")

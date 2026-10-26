@@ -33,7 +33,12 @@ from abicheck.cli import main
 
 pytestmark = [
     pytest.mark.integration,
-    pytest.mark.skipif(sys.platform != "linux", reason="builds an ELF .so"),
+    # PE records no coalesced (COMDAT) export, so on Windows the dependency's
+    # exported instances stay in contract: ADR-089's PE limit.
+    pytest.mark.skipif(
+        sys.platform not in ("linux", "darwin"),
+        reason="needs an export table that records weak definitions (ELF, Mach-O)",
+    ),
     pytest.mark.skipif(
         shutil.which("g++") is None or shutil.which("castxml") is None,
         reason="needs g++ and castxml",
@@ -98,6 +103,13 @@ def _build(side: str, tmp: Path, *, library_break: bool) -> tuple[Path, Path]:
             str(src / "api.cpp"),
             "-o",
             str(lib),
+            # One install name for both sides: Mach-O otherwise records each
+            # side's own output path, a soname change no source made.
+            *(
+                ["-Wl,-install_name,@rpath/libapi.so"]
+                if sys.platform == "darwin"
+                else []
+            ),
         ],
         check=True,
         capture_output=True,
