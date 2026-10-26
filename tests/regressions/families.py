@@ -308,6 +308,7 @@ _F1 = (
     "evidence.depth_projection_diverges_from_shallow_dump",
     "evidence.container_presence_read_as_evidence_content",
     "evidence.silent_degradation_to_clean_verdict",
+    "evidence.header_observable_fact_compared_only_from_debug_info",
     "evidence.export_presence_as_declaration_presence",
     "evidence.richer_model_hides_weaker_observation",
     "evidence.operand_shape_silently_unresolved",

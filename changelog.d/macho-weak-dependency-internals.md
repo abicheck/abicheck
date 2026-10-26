@@ -1,0 +1,3 @@
+### Fixed
+
+- **A header-only dependency's template instances stay out of contract on macOS too** — on a compare with headers, a dependency's hidden friends and template instances that the library's dylib exports as Mach-O weak definitions (`N_WEAK_DEF`, the export trie's weak-definition flag) are now read as the dependency's COMDAT copies, as ELF `WEAK` exports already were, so an `-mavx2` against `-mavx512f` rebuild no longer gates as `BREAKING` on them. PE/COFF DLLs record no such flag, so on Windows those findings still stay in contract; ADR-089 and `docs/contribute/known-gaps.md` record the limit.

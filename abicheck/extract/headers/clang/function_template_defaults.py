@@ -28,6 +28,7 @@ from collections.abc import Mapping
 from typing import Any
 
 from ....model import Fact
+from .ast_inner import ast_inner
 from .template_default_spelling import _template_param_default_spellings
 from .template_param_indexes import _source_span_reader
 
@@ -64,7 +65,7 @@ def function_template_default_index(
         node = stack.pop()
         if not isinstance(node, dict):
             continue
-        children = node.get("inner") or []
+        children = ast_inner(node)
         if node.get("kind") == "FunctionTemplateDecl":
             spelled = _template_param_default_spellings(node, span)
             for child in children:

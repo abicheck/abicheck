@@ -156,6 +156,7 @@ DETECTOR_KINDS: Mapping[str, frozenset[str]] = MappingProxyType(
                 "enum_member_added",
                 "enum_member_removed",
                 "enum_member_value_changed",
+                "enum_underlying_size_changed",
                 "type_removed",
             }
         ),

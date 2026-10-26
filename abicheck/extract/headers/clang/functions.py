@@ -67,6 +67,7 @@ from ....model.identity import (
     entity_id_for_function,
 )
 from ..scope_segments import strip_record_scopes
+from .ast_inner import ast_inner
 from .attributes import clang_contract_attributes as _clang_contract_attributes
 from .constraints import FunctionConstraintIndex
 from .context import (
@@ -386,7 +387,7 @@ def _template_param_kinds_from_node(
     kinds: list[str] = []
     type_param_names: list[str] = list(enclosing_type_param_names)
     own_type_param_names: list[str] = []
-    for child in node.get("inner", []) or []:
+    for child in ast_inner(node):
         if not isinstance(child, dict):
             continue
         kind = child.get("kind")
@@ -582,7 +583,7 @@ def parse_functions(
                 if _param_has_default(p)
                 else None,
             )
-            for p in node.get("inner", []) or []
+            for p in ast_inner(node)
             if isinstance(p, dict) and p.get("kind") == "ParmVarDecl"
         ]
         kind = node.get("kind")

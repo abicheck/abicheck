@@ -74,7 +74,7 @@
       ],
       "external_graph_refs": [],
       "extractor_passes": {},
-      "graph_id": "sha256:353e295e1bb144971cd95ca3cf692f8ca241a1a681d724998a88d00bbb8a33e0",
+      "graph_id": "sha256:ba5f9d4407a4a1895886ec855ec98f571d04448dcbc4ce3da5bad8be88b3fbb0",
       "indexes": {
         "by_binary_symbol": {},
         "by_file": {},
@@ -142,7 +142,7 @@
           }
         }
       ],
-      "schema_version": 2
+      "schema_version": 3
     }
   },
   "build_source_pack": null,
@@ -166,18 +166,27 @@
   "elf": null,
   "elf_only_mode": false,
   "enums": [],
+  "excluded_header_matching": "glob",
+  "excluded_header_patterns": [],
+  "fact_generations": {
+    "extractor": 26,
+    "resolver": 2,
+    "source": 10
+  },
   "fact_provenance": {},
   "from_headers": false,
   "frontend_context_kind": null,
   "functions": [
     {
       "access": "public",
+      "binary_exported_fact": null,
       "contract_attributes": null,
       "contract_attributes_fact": {
         "diagnostics": [],
         "status": "not_collected",
         "value": null
       },
+      "declared_in_headers_fact": null,
       "deleted_from_dwarf": false,
       "deprecated": null,
       "deprecated_fact": {
@@ -204,6 +213,7 @@
         "status": "not_collected",
         "value": null
       },
+      "in_public_contract_fact": null,
       "is_compiler_generated": null,
       "is_compiler_generated_fact": {
         "diagnostics": [],
@@ -226,6 +236,11 @@
         "value": null
       },
       "is_inline": false,
+      "is_inline_fact": {
+        "diagnostics": [],
+        "status": "not_collected",
+        "value": null
+      },
       "is_noexcept": false,
       "is_override": null,
       "is_override_fact": {
@@ -262,12 +277,14 @@
     },
     {
       "access": "public",
+      "binary_exported_fact": null,
       "contract_attributes": null,
       "contract_attributes_fact": {
         "diagnostics": [],
         "status": "not_collected",
         "value": null
       },
+      "declared_in_headers_fact": null,
       "deleted_from_dwarf": false,
       "deprecated": null,
       "deprecated_fact": {
@@ -294,6 +311,7 @@
         "status": "not_collected",
         "value": null
       },
+      "in_public_contract_fact": null,
       "is_compiler_generated": null,
       "is_compiler_generated_fact": {
         "diagnostics": [],
@@ -316,6 +334,11 @@
         "value": null
       },
       "is_inline": false,
+      "is_inline_fact": {
+        "diagnostics": [],
+        "status": "not_collected",
+        "value": null
+      },
       "is_noexcept": false,
       "is_override": null,
       "is_override_fact": {
@@ -355,6 +378,7 @@
   "git_tag": null,
   "header_cv_facts_reliable": true,
   "header_only": false,
+  "inline_facts_reliable": true,
   "kabi": null,
   "language_profile": null,
   "library": "libdemo.so.1",
@@ -366,13 +390,14 @@
   "platform": null,
   "python_api": null,
   "python_ext": null,
-  "schema_version": 45,
+  "schema_version": 66,
   "scope_fallback": null,
   "source_mtime": null,
   "source_mtime_epoch": false,
   "source_path": null,
   "source_size": null,
   "sycl": null,
+  "template_default_header_scan": null,
   "typedef_entity_ids": {},
   "typedefs": {},
   "typedefs_qualified": {},

@@ -82,6 +82,7 @@ from typing import Any
 
 from ....model import Fact, RecordType, TypeField
 from ....model.identity import entity_id_for_type
+from .ast_inner import ast_inner
 from .context import (
     _Decl,
     access_level,
@@ -393,7 +394,7 @@ def _collect_fields(
     nested: bool = False,
 ) -> list[TypeField]:
     fields: list[TypeField] = []
-    for child in node.get("inner", []) or []:
+    for child in ast_inner(node):
         if not isinstance(child, dict):
             continue
         kind = child.get("kind")
@@ -484,7 +485,7 @@ def _clang_record_is_final(node: dict[str, Any]) -> bool:
     """
     return any(
         isinstance(child, dict) and child.get("kind") == "FinalAttr"
-        for child in node.get("inner", []) or []
+        for child in ast_inner(node)
     )
 
 
@@ -494,7 +495,7 @@ def _bitfield_width(
     """``(width, is_bitfield)`` for a ``FieldDecl`` (width from its inner expr)."""
     if not field.get("isBitfield"):
         return None, False
-    for child in field.get("inner", []) or []:
+    for child in ast_inner(field):
         if isinstance(child, dict):
             return evaluate_bitfield_int(child), True
     return None, True
@@ -508,7 +509,7 @@ def _anonymous_member_names(node: dict[str, Any]) -> set[str]:
     of the anonymous record's fields belong to this record's surface.
     """
     names: set[str] = set()
-    for child in node.get("inner", []) or []:
+    for child in ast_inner(node):
         if isinstance(child, dict) and child.get("kind") == "IndirectFieldDecl":
             name = child.get("name")
             if name:
@@ -556,7 +557,7 @@ def _owned_tag_id(typedef_node: dict[str, Any]) -> str:
         owned = node.get("ownedTagDecl")
         if isinstance(owned, dict) and isinstance(owned.get("id"), str):
             return str(owned["id"])
-        for child in node.get("inner", []) or []:
+        for child in ast_inner(node):
             found = _scan(child)
             if found:
                 return found

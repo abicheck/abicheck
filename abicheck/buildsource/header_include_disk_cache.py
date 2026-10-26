@@ -58,6 +58,7 @@ from functools import partial
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from ..extract.compiler_driver import ENV_INCLUDE_VARS as _ENV_INCLUDE_VARS
 from ..model.execution_cache_scoped import DiskCache
 from ..model.graph_identity import header_node_id
 from ..storage.ast_cache_budget import note_use
@@ -110,12 +111,6 @@ def file_digest(path: str) -> str | None:
     except OSError:
         return None
     return digest.hexdigest()
-
-
-#: Environment variables the compiler reads extra include directories from.
-#: They are searched after the ``-I``/``-isystem`` roots, so they change a
-#: result as much as a flag does and are keyed and witnessed the same way.
-_ENV_INCLUDE_VARS = ("CPATH", "C_INCLUDE_PATH", "CPLUS_INCLUDE_PATH")
 
 
 def environment_include_dirs() -> list[str]:

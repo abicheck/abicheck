@@ -58,6 +58,12 @@ from pathlib import Path
 from .._compiler_options import split_gcc_options
 from ..errors import AstContextMissingError, SnapshotError
 
+#: Environment variables the compiler reads extra include directories from.
+#: They are searched after the ``-I``/``-isystem`` roots, so they change a
+#: parse as much as a flag does. Keyed by the dump cache and witnessed by the
+#: header include disk cache.
+ENV_INCLUDE_VARS: tuple[str, ...] = ("CPATH", "C_INCLUDE_PATH", "CPLUS_INCLUDE_PATH")
+
 __all__ = [
     "clang_available",
     "clang_bin_is_explicitly_configured",

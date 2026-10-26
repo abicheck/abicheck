@@ -432,4 +432,41 @@ ANALYSIS_2_BUG_CLASSES: tuple[BugClass, ...] = (
             ),
         ),
     ),
+    BugClass(
+        id="evidence.header_observable_fact_compared_only_from_debug_info",
+        invariant=(
+            "A fact the header model carries is compared by the header tier "
+            "too, so dropping the debug layout never loses a finding the "
+            "header evidence alone establishes. ENUM_UNDERLYING_SIZE_CHANGED "
+            "came only from the DWARF layout pass: a headers-plus-binary "
+            "compare without debug info read a widened by-value enum "
+            "(unsigned char -> unsigned int, or a C enum forced to long) as "
+            "NO_CHANGE. The relation is checked over the whole catalog by "
+            "re-dumping each case with debug_presence_only and requiring "
+            "every header-observable finding of the full-evidence run to "
+            "survive; the size table is checked against ctypes."
+        ),
+        fixed_by=(1821,),
+        seed_tests=(
+            "tests/test_depth_metamorphic_examples.py",
+            "tests/unit/compare/test_enum_underlying_size.py",
+            "tests/test_generated_position_matrix.py",
+            "tests/test_family_f1_evidence_ablation.py",
+        ),
+        public_surfaces=("cli",),
+        axes={
+            "evidence": ("headers", "headers+dwarf", "debug_presence_only"),
+            "data_model": ("LP64", "ILP32", "LLP64"),
+        },
+        known_gaps=(
+            KnownGap(
+                description=(
+                    "HEADER_OBSERVABLE_KINDS is a hand-kept list; a header "
+                    "fact compared only by DWARF for a kind outside it is "
+                    "not caught by the metamorphic relation."
+                ),
+                reference="PR #1821",
+            ),
+        ),
+    ),
 )

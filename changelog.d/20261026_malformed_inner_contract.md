@@ -1,0 +1,3 @@
+### Fixed
+
+- **Malformed clang AST `inner` is refused, not read as an empty surface** — the clang header backend's readers (enums, records, functions, templates, vtables, expressions, attributes and their helpers) coerced a present `inner` that was a dict, string or number to an empty child list with `or []`. A tree like that produced a complete-looking, empty declaration set. All of these readers now share one `ast_inner` contract: a missing or `null` `inner` is a leaf, any other non-list value raises `MalformedClangAstError`. A static guard under `tests/unit/extract/` keeps the `or []` default out of `abicheck/extract/`.

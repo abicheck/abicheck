@@ -24,6 +24,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from .ast_inner import ast_inner
+
 #: Shared with ``dumper_clang._ClangAstParser._walk``'s own public-surface
 #: qualified-name building and ``dumper_clang_expr.py``'s own scope
 #: tracking (both import it back from here) — kept as ONE definition
@@ -60,7 +62,7 @@ def class_template_decls(root: dict[str, Any]) -> ClassTemplateDecls:
         if kind == "ClassTemplateDecl" and name:
             out.append(("::".join((*scope, name)) if scope else name, node))
         child_scope = (*scope, name) if kind in _SCOPE_NODE_KINDS and name else scope
-        for child in node.get("inner", []) or []:
+        for child in ast_inner(node):
             walk(child, child_scope)
 
     walk(root, ())

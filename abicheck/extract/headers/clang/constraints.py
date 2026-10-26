@@ -51,6 +51,7 @@ from __future__ import annotations
 from typing import Any
 
 from ....model.identity import canonicalize_type_param_references
+from .ast_inner import ast_inner
 from .function_template_defaults import FUNCTION_NODE_KINDS
 
 __all__ = ["FunctionConstraintIndex"]
@@ -112,7 +113,7 @@ class FunctionConstraintIndex:
             if not isinstance(node, dict):
                 continue
             kind = node.get("kind")
-            children = node.get("inner") or []
+            children = ast_inner(node)
             if kind == "ConceptDecl":
                 self._record_concept(node, ns)
                 continue
@@ -148,7 +149,7 @@ class FunctionConstraintIndex:
             if kind in _TEMPLATE_PARAM_KINDS:
                 found.extend(
                     (f"param{position}", c)
-                    for c in child.get("inner") or []
+                    for c in ast_inner(child)
                     if isinstance(c, dict)
                     and c.get("kind") == "ConceptSpecializationExpr"
                 )
@@ -180,7 +181,7 @@ class FunctionConstraintIndex:
         if not isinstance(node, dict):
             return ""
         kind = str(node.get("kind", ""))
-        inner = [c for c in node.get("inner") or [] if isinstance(c, dict)]
+        inner = [c for c in ast_inner(node) if isinstance(c, dict)]
         if kind == "ParenExpr" and len(inner) == 1:
             return self._serialize(inner[0], names)
         if kind == "TemplateTypeParmType":
@@ -190,9 +191,7 @@ class FunctionConstraintIndex:
                 if child.get("kind") == "ImplicitConceptSpecializationDecl":
                     # Its arguments are written in canonical
                     # `type-parameter-D-I` form, independent of renames.
-                    args = ",".join(
-                        self._serialize(a, names) for a in child.get("inner") or []
-                    )
+                    args = ",".join(self._serialize(a, names) for a in ast_inner(child))
                     return f"concept {self._concept_name(child)}<{args}>"
         parts = [kind]
         for key, value in node.items():

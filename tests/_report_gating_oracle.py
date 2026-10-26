@@ -129,6 +129,10 @@ def assert_gating_consistent(
     counts = document["result_counts"]
     held_out = 0 if severity_config is not None else document.get("redundant_count", 0)
     assert total <= counts["gating"] <= total + held_out
+    # The retained population is partitioned exactly: its gating part is the
+    # review groups' sum, and gating beyond it is only the folded redundants.
+    assert counts["gating_retained"] == total
+    assert counts["gating_retained"] + counts["non_gating"] == counts["retained"]
     assert counts["gating_review_groups"] == gating_groups
     assert document["disposition_audit"]["effective_total"] == counts["gating"]
     if severity_config is not None:
@@ -152,5 +156,5 @@ def assert_gating_consistent(
         assert review == (total, gating_groups, len(groups))
     populations = _one(_POPULATIONS, digest)
     if populations is not None:
-        assert populations[0] == counts["gating"]
+        assert populations[0] == counts["gating_retained"]
     return total

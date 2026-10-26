@@ -36,6 +36,8 @@ import re
 from collections.abc import Callable
 from typing import Any
 
+from .ast_inner import ast_inner
+
 __all__ = ["_template_param_default_spellings"]
 
 
@@ -66,7 +68,7 @@ def _expression_spelling(node: dict[str, Any]) -> str | None:
     as a type spelling is: a changed constant with an unchanged name is not seen.
     """
     kind = node.get("kind")
-    operands = [c for c in node.get("inner", []) or [] if isinstance(c, dict)]
+    operands = [c for c in ast_inner(node) if isinstance(c, dict)]
     if kind in _LITERAL_EXPR_KINDS:
         value = node.get("value")
         if isinstance(value, bool):
@@ -146,7 +148,7 @@ def _template_param_default_spellings(
     recorded that way would read as a change or a match it is not.
     """
     defaults: list[str | None] = []
-    for child in class_template_decl.get("inner", []) or []:
+    for child in ast_inner(class_template_decl):
         if not isinstance(child, dict):
             continue
         kind = child.get("kind")
@@ -166,7 +168,7 @@ def _template_param_default_spellings(
             continue
         arguments = [
             c
-            for c in child.get("inner", []) or []
+            for c in ast_inner(child)
             if isinstance(c, dict) and c.get("kind") == "TemplateArgument"
         ]
         if not arguments:
@@ -175,7 +177,7 @@ def _template_param_default_spellings(
         # its default argument, so the default is the last TemplateArgument.
         arg = arguments[-1]
         if kind == "NonTypeTemplateParmDecl":
-            operands = [c for c in arg.get("inner", []) or [] if isinstance(c, dict)]
+            operands = [c for c in ast_inner(arg) if isinstance(c, dict)]
             spelled = _expression_spelling(operands[0]) if operands else None
         else:
             spelled = _template_name_spelling(arg, source_span)

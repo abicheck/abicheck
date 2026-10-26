@@ -28,6 +28,7 @@ import re
 from typing import Any
 from xml.etree.ElementTree import Element
 
+from ..clang.ast_inner import ast_inner
 from .context import CastxmlParserContext
 
 __all__ = [
@@ -136,7 +137,7 @@ def clang_vector_spellings(clang_root: dict[str, Any]) -> dict[str, str]:
             return
         kind = node.get("kind")
         name = node.get("name") or ""
-        inner = node.get("inner") or []
+        inner = ast_inner(node)
         if kind == "TypedefDecl" and name:
             spelling = parse_vector_qualtype(
                 (node.get("type") or {}).get("qualType", "")
@@ -172,7 +173,7 @@ def clang_vector_spellings(clang_root: dict[str, Any]) -> dict[str, str]:
             return
         walk(inner, scope, function)
 
-    walk(clang_root.get("inner") or [], [], None)
+    walk(ast_inner(clang_root), [], None)
     out = dict(keyed)
     # ``typedef:`` entries are authoritative for the typedef name only.
     return out

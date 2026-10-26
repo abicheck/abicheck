@@ -46,6 +46,7 @@ from collections.abc import Callable
 from typing import Any
 
 from ....model.mangled_name import itanium_scope_components
+from .ast_inner import ast_inner
 
 # Canonical definition moved to ``extract.headers.clang.templates`` (ADR-061
 # Phase 5 item 1): that package's own ``build_specialization_index`` and its
@@ -102,6 +103,9 @@ def _unwrap_expr(node: dict[str, Any]) -> dict[str, Any]:
     A malformed/adversarial ``inner`` (present but not a list, e.g. a bare
     int or dict) degrades to no children, same as a missing key -- it used
     to raise ``TypeError`` iterating it directly (Codex review, PR #888).
+    The one deliberate exception to :func:`ast_inner`'s refusal: this is a
+    local descent to spell one initializer, not a surface read, and
+    ``tests/test_ast_wrapper_chain_properties.py`` pins that it stops.
     """
     cur = node
     while isinstance(cur, dict) and cur.get("kind") in _WRAPPER_EXPR_KINDS:
@@ -117,7 +121,7 @@ def _init_expr(node: dict[str, Any]) -> dict[str, Any] | None:
     """The initializer expression child of a Var/Field decl, or ``None``."""
     candidates = [
         c
-        for c in node.get("inner", []) or []
+        for c in ast_inner(node)
         if isinstance(c, dict)
         and not str(c.get("kind", "")).endswith(("Decl", "Attr", "Comment"))
     ]
@@ -219,7 +223,7 @@ def _is_func_or_var_template_specialization(node: dict[str, Any]) -> bool:
     if kind == "FunctionDecl":
         return any(
             isinstance(c, dict) and c.get("kind") == "TemplateArgument"
-            for c in node.get("inner", []) or []
+            for c in ast_inner(node)
         )
     return False
 
@@ -312,7 +316,7 @@ def _index_decl_id_qualified_names(root: dict[str, Any]) -> dict[str, str]:
             scope_name = name
         scope_forming = kind in _SCOPE_NODE_KINDS or is_specialization
         child_scope = (*scope, scope_name) if scope_forming and scope_name else scope
-        for child in node.get("inner", []) or []:
+        for child in ast_inner(node):
             walk(child, child_scope)
 
     walk(root, ())
@@ -359,7 +363,7 @@ def _specialization_scope_key(node: dict[str, Any]) -> str:
     gap" reasoning AGENTS.md already records for the sibling MSVC
     toolchain-profile gap).
     """
-    for child in node.get("inner", []) or []:
+    for child in ast_inner(node):
         if not isinstance(child, dict):
             continue
         mangled = child.get("mangledName")

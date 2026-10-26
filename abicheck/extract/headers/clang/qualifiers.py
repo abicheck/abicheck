@@ -43,6 +43,8 @@ from __future__ import annotations
 import re
 from typing import Any
 
+from .ast_inner import ast_inner
+
 
 def desugared_qualtype(node: dict[str, Any]) -> str:
     """The fully-desugared type spelling, when clang provides one.
@@ -471,7 +473,7 @@ def clang_method_is_override(node: dict[str, Any]) -> bool:
     """
     return any(
         isinstance(child, dict) and child.get("kind") == "OverrideAttr"
-        for child in node.get("inner", []) or []
+        for child in ast_inner(node)
     )
 
 

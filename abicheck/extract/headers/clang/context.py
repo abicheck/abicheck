@@ -56,6 +56,7 @@ from ....model.name_decoration import macho_underscore as macho_decoration
 from ....name_classification import strip_anonymous_type_location
 from ...declaration_provenance import classify_origin, header_from_location
 from ...surface_fact_producers import header_ast_surface_facts
+from .ast_inner import ast_inner
 from .template_param_indexes import TemplateParamIndex
 from .templates import build_specialization_index
 from .vtable import build_vtable, is_record_definition
@@ -266,7 +267,7 @@ def clang_deprecated_message(node: dict[str, Any]) -> str | None:
     ``DeprecatedAttr`` node carries no ``message`` key at all, not an empty
     string).
     """
-    for child in node.get("inner", []) or []:
+    for child in ast_inner(node):
         if isinstance(child, dict) and child.get("kind") == "DeprecatedAttr":
             return str(child.get("message", ""))
     return None
@@ -389,7 +390,7 @@ def has_explicit_asm_label(node: dict[str, Any]) -> bool:
     """
     return any(
         isinstance(child, dict) and child.get("kind") == "AsmLabelAttr"
-        for child in node.get("inner", []) or []
+        for child in ast_inner(node)
     )
 
 

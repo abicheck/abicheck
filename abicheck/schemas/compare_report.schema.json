@@ -883,6 +883,7 @@
         "retained": {"type": "integer", "minimum": 0},
         "gating": {"type": "integer", "minimum": 0},
         "non_gating": {"type": "integer", "minimum": 0},
+        "gating_retained": {"type": "integer", "minimum": 0, "description": "Gating findings among the retained ones (the review groups' sum); gating minus this counts redundant findings folded out of the findings but still scored by the legacy verdict."},
         "review_groups": {"type": "integer", "minimum": 0},
         "gating_review_groups": {"type": "integer", "minimum": 0},
         "public_additions": {"type": "integer", "minimum": 0},

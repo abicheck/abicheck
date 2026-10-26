@@ -37,6 +37,7 @@ from typing import Any
 
 from ....model import EnumMember, EnumType, Fact
 from ....model.identity import entity_id_for_enum
+from .ast_inner import ast_inner
 from .context import (
     _Decl,
     clang_deprecated_message,
@@ -62,7 +63,7 @@ def parse_enums(
         typedef_name = str(node.get("name", ""))
         if not typedef_name:
             continue
-        for child in node.get("inner", []) or []:
+        for child in ast_inner(node):
             if not isinstance(child, dict):
                 continue
             owned = child.get("ownedTagDecl") or {}
@@ -84,7 +85,7 @@ def parse_enums(
         # clang's JSON only carries the value on an explicit ConstantExpr, so
         # reconstruct the implicit ones here.
         next_value = 0
-        for child in node.get("inner", []) or []:
+        for child in ast_inner(node):
             if not isinstance(child, dict) or child.get("kind") != "EnumConstantDecl":
                 continue
             explicit = _enum_constant_value(child, evaluate_int)
@@ -137,7 +138,7 @@ def _enum_constant_value(
     node: dict[str, Any], evaluate_int: IntEvaluator
 ) -> int | None:
     """The explicit value of an ``EnumConstantDecl``, or ``None`` if implicit."""
-    for child in node.get("inner", []) or []:
+    for child in ast_inner(node):
         if not isinstance(child, dict):
             continue
         value = evaluate_int(child)

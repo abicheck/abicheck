@@ -7,6 +7,8 @@ from __future__ import annotations
 import re
 from typing import Any
 
+from .ast_inner import ast_inner
+
 
 def _follows_type_operator(qualtype: str, paren_index: int) -> bool:
     """Whether a parenthesized group is a ``typeof``-like type operand."""
@@ -95,15 +97,15 @@ def _clang_attr_arg_tokens(child: dict[str, Any]) -> list[str]:
                 continue
             value = sub.get("value")
             if isinstance(value, bool):
-                _walk(sub.get("inner", []))
+                _walk(ast_inner(sub))
             elif isinstance(value, int):
                 args.append(str(value))
             elif isinstance(value, str) and value:
                 args.append(value.strip('"'))
             else:
-                _walk(sub.get("inner", []))
+                _walk(ast_inner(sub))
 
-    _walk(child.get("inner", []))
+    _walk(ast_inner(child))
     return args
 
 
@@ -143,7 +145,7 @@ def clang_contract_attributes(
     the old private name (Codex review, PR #940).
     """
     tokens: set[str] = set()
-    for child in node.get("inner", []) or []:
+    for child in ast_inner(node):
         if not isinstance(child, dict):
             continue
         token = _CLANG_ATTR_TOKENS.get(str(child.get("kind", "")))

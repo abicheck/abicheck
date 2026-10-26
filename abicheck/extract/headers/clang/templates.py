@@ -99,6 +99,7 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping, Sequence
 from typing import Any
 
+from .ast_inner import ast_inner
 from .template_decl_walk import (
     _SCOPE_NODE_KINDS as _SCOPE_NODE_KINDS,
     ClassTemplateDecls as ClassTemplateDecls,
@@ -150,7 +151,7 @@ def _template_param_kinds(class_template_decl: dict[str, Any]) -> list[str | Non
     the pattern's own body/specializations in ``inner`` order.
     """
     kinds: list[str | None] = []
-    for child in class_template_decl.get("inner", []) or []:
+    for child in ast_inner(class_template_decl):
         if not isinstance(child, dict):
             continue
         kind = child.get("kind")
@@ -330,7 +331,7 @@ def _template_param_defaults(class_template_decl: dict[str, Any]) -> list[str | 
     identical unreliable-printing risk this doesn't attempt to solve here).
     """
     defaults: list[str | None] = []
-    for child in class_template_decl.get("inner", []) or []:
+    for child in ast_inner(class_template_decl):
         if not isinstance(child, dict):
             continue
         kind = child.get("kind")
@@ -444,7 +445,7 @@ def _template_param_names(class_template_decl: dict[str, Any]) -> list[str | Non
     argument like ``"double"``).
     """
     names: list[str | None] = []
-    for child in class_template_decl.get("inner", []) or []:
+    for child in ast_inner(class_template_decl):
         if not isinstance(child, dict):
             continue
         kind = child.get("kind")
@@ -542,7 +543,7 @@ def _specialization_spelling(
     from ....name_classification import strip_anonymous_type_location as strip_loc
 
     args, idx = [], 0  # type args drop a lambda's checkout dir, like `_qualtype`
-    for child in node.get("inner", []) or []:
+    for child in ast_inner(node):
         if not isinstance(child, dict) or child.get("kind") != "TemplateArgument":
             continue
         type_obj = child.get("type")
@@ -776,7 +777,7 @@ def build_specialization_index(
         else:
             child_scope = scope
             child_lookup_scope = lookup_scope
-        for child in node.get("inner", []) or []:
+        for child in ast_inner(node):
             walk(child, child_scope, child_lookup_scope)
 
     walk(root, (), ())

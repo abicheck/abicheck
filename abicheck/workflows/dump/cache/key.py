@@ -26,6 +26,7 @@ from pathlib import Path
 from typing import Any
 
 from ....extract.cache_header_scan import iter_cache_header_files
+from ....extract.compiler_driver import ENV_INCLUDE_VARS
 from ....storage.code_identity import abicheck_code_fingerprint
 from . import salt
 
@@ -432,7 +433,21 @@ def _dump_cache_extra_key(
             str(lang_explicit),
             _public_include_search_dirs_key_field(public_include_search_dirs, sep),
             compile_field,
+            env_include_cache_field(),
         ]
+    )
+
+
+def env_include_cache_field() -> str:
+    """Key material for the environment include variables (``ENV_INCLUDE_VARS``).
+
+    The castxml run inherits the process environment (its ``run_castxml`` passes
+    no ``env=``), so ``CPATH``/``C_INCLUDE_PATH``/``CPLUS_INCLUDE_PATH`` add
+    search directories to the parse without appearing in any argument the key
+    hashes. An unset variable and an empty one add nothing, so both key as "".
+    """
+    return "env:" + "\x00".join(
+        f"{var}={os.environ.get(var, '')}" for var in ENV_INCLUDE_VARS
     )
 
 

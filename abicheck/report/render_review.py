@@ -165,7 +165,8 @@ def render_review_digest(digest: ReviewDigest) -> str:
         lines += [
             "**Count populations:** "
             f"{counts['raw_detected']} detected; {counts['retained']} retained "
-            f"({counts['gating']} gating, {counts['non_gating']} non-gating)"
+            f"({counts.get('gating_retained', counts['gating'])} gating, "
+            f"{counts['non_gating']} non-gating)"
             f"{held_out_note(counts, digest.disposition_audit)}; "
             f"{counts['review_groups']} review group(s).",
             "",
@@ -313,7 +314,7 @@ def render_terminal_digest(digest: ReviewDigest) -> str:
         c = digest.result_counts
         lines += [
             f"Findings: {c['raw_detected']} detected; {c['retained']} retained "
-            f"({c['gating']} gating, {c['non_gating']} non-gating)"
+            f"({c.get('gating_retained', c['gating'])} gating, {c['non_gating']} non-gating)"
             f"{held_out_note(c, digest.disposition_audit)}; "
             f"{c['review_groups']} review groups.",
             f"Public surface: {c['public_additions']} additions, "

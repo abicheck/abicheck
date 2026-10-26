@@ -42,8 +42,11 @@ Which findings a side's :class:`DependencyInternals` can move:
   layout change on the same type is not presence evidence and keeps its own
   rule. An ``INTERNAL_TYPE_LEAKS_VIA_PUBLIC_API`` raised on such a record
   restates that record's own finding through the dependency's own
-  declarations (its implicit members), so it follows the record, judged on
-  either side;
+  declarations (its implicit members), so it follows the record's presence:
+  a record one side does not declare is judged on the side that does, and a
+  record both sides declare must be internal on both. A record internal on
+  one side and reached on the other is a leak the release made (or undid)
+  through a public declaration, and stays in contract;
 * a **typedef**'s presence or target (``TYPEDEF_REMOVED``,
   ``TYPEDEF_BASE_CHANGED``). A typedef has no layout of its own; its target is
   all it states;
@@ -91,12 +94,17 @@ class DependencyInternals:
     ``symbols`` are the mangled names of functions and variables;
     ``overload_stems`` are the qualified names, template arguments stripped,
     under which every function of the side is one of ``symbols``.
+
+    ``record_names`` are the bare names of every record and enum the side
+    declares, internal or not, or ``None`` when the side was not read. It is
+    presence evidence, not an internal set: it moves nothing on its own.
     """
 
     types: frozenset[str] = frozenset()
     typedefs: frozenset[str] = frozenset()
     symbols: frozenset[str] = frozenset()
     overload_stems: frozenset[str] = frozenset()
+    record_names: frozenset[str] | None = None
 
     def __bool__(self) -> bool:
         return bool(self.types or self.typedefs or self.symbols or self.overload_stems)
@@ -172,6 +180,22 @@ def _on_sides(
     return old_name in old_names and new_name in new_names
 
 
+def _record_on_sides(
+    name: str, old: DependencyInternals, new: DependencyInternals
+) -> bool:
+    """Whether the record *name* is internal on every side that declares it.
+
+    A side proves the record absent only when it was read (``record_names``
+    is not ``None``); an unread side is assumed to declare it, so it must be
+    internal there too.
+    """
+    if old.record_names is not None and name not in old.record_names:
+        return name in new.types
+    if new.record_names is not None and name not in new.record_names:
+        return name in old.types
+    return name in old.types and name in new.types
+
+
 def _is_unreachable_dependency_finding(
     change: Any, old: DependencyInternals, new: DependencyInternals
 ) -> bool:
@@ -188,7 +212,7 @@ def _is_unreachable_dependency_finding(
             _TYPE_PRESENCE_KINDS[kind], symbol, new_name, old.types, new.types
         )
     if kind in _RECORD_DERIVED_KINDS:
-        return symbol in old.types or symbol in new.types
+        return _record_on_sides(symbol, old, new)
     if kind in _TYPEDEF_KINDS:
         return _on_sides(
             _TYPEDEF_KINDS[kind], symbol, symbol, old.typedefs, new.typedefs
