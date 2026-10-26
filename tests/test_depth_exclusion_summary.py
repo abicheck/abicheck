@@ -3,8 +3,10 @@ not an evidence gap.
 
 They collapse into one ``coverage_warnings`` summary line, stay listed one by
 one in ``detectors[]`` (``excluded_by_depth``), are not a PR-comment
-limitation, and do not lower confidence or analysis assurance below a
-comparison of snapshots that never had headers. A detector disabled for any
+limitation, and do not lower confidence below a comparison of snapshots that
+never had headers. (Analysis assurance does drop to ``partial`` when the
+projected snapshots carried debug info the projection cannot rebuild.) A
+detector disabled for any
 other reason keeps its own line.
 """
 
@@ -13,6 +15,7 @@ from __future__ import annotations
 import json
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -189,11 +192,27 @@ def test_binary_depth_on_header_snapshots_matches_binary_only(tmp_path: Path) ->
     assert md.count(DEPTH_EXCLUSION_PREFIX) == 1
     assert "not available at depth" not in md
 
-    # Not an evidence gap: no lower than never having had headers at all.
+    # The excluded detectors are scope, not an evidence gap. What does lower
+    # assurance is the debug info (``-g``) the binary-only oracle reads and the
+    # header snapshot's projection cannot rebuild: that run reads ``partial``
+    # and names it (known-gaps: depth-binary projection), never a clean claim
+    # stronger than the oracle's.
     assert exit_depth == exit_oracle
-    assert (
-        depth["analysis_assurance"]["status"] == oracle["analysis_assurance"]["status"]
+    projection_gap = any(
+        n.startswith("not assessed at depth binary:")
+        for n in depth["analysis_assurance"]["notes"]
     )
+    if sys.platform == "linux":
+        # ELF keeps the DWARF in the library, so the oracle reads it.
+        assert oracle["analysis_assurance"]["status"] == "complete"
+        assert projection_gap
+    if projection_gap:
+        assert depth["analysis_assurance"]["status"] == "partial"
+    else:
+        assert (
+            depth["analysis_assurance"]["status"]
+            == oracle["analysis_assurance"]["status"]
+        )
     assert depth["confidence"] == oracle["confidence"]
     assert depth.get("scope_resolved", True) and depth.get(
         "manual_review_required"

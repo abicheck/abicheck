@@ -39,6 +39,7 @@ from ._comparability import (
     is_comparability_bounded,
 )
 from ._context import _dwarf_context_status, _header_context_status, _l3_context_status
+from ._depth_projection import depth_projection_gap
 from ._export_accounting import _export_accounting
 from ._fact_set import _fact_set_comparability
 from ._graph_completeness import _graph_completeness
@@ -200,6 +201,8 @@ def compute_analysis_assurance(
     notes.extend(graph_notes)
     template_defaults_gap, template_notes = template_default_gap(old, new)
     notes.extend(template_notes)
+    projection_gap, projection_notes = depth_projection_gap(old, new)
+    notes.extend(projection_notes)
 
     # -- manifest-level layer incompleteness ----------------------------------
     # The one check below that reads the pack MANIFEST directly (D7/D8's own
@@ -260,6 +263,7 @@ def compute_analysis_assurance(
         or target_unresolved
         or is_comparability_bounded(result.comparability_assurance)
         or template_defaults_gap
+        or projection_gap
     ):
         status = "partial"
     elif nothing_requested:

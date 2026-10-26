@@ -16,6 +16,25 @@ re-verification status line (2026-10-09, `456989f`). Do not re-open an
 entry from here without reproducing it on current `main`; record a new
 gap on the main page instead.
 
+### A large export shrink with no declared surface emitted no finding in header mode (closed 2026-10-24)
+
+**Status (re-verified 2026-10-25): CLOSED (no longer reproduces; pinned).** The premise was wrong: header-aware dumps already report each lost undeclared export as `func_removed_elf_only`/`var_removed_elf_only` (`compare.undeclared_exports._export_only_removals`, #1308), BREAKING by default per ADR-063. Now pinned by `tests/test_undeclared_export_shrink.py` and its `_integration` sibling. [Full write-up](../known-gaps/a-large-export-shrink-with-no-declared-surface-emits-nothing.md)
+
+CJM: trust stage ([cjm.md](../cjm.md)) — use case UC-WF-analysis-assurance (G47); priority: L2 Linux ELF.
+
+### A binary-gate demotion did not state a coverage gap (ADR-084) (closed 2026-10-21)
+
+**Status (re-verified 2026-10-25): CLOSED.** A demotion now adds an `analysis_assurance.notes` entry naming each demoted claim (`policy/binary_gate_marker.binary_gate_assurance_notes`, called from `policy/analysis_assurance/_compute.py`), which is a changed analysis-assurance record in the sense `tests/test_family_f1_evidence_ablation.py` requires; the F1 cell `pimpl_inline_body_renamed` / `RecordType.source_header_fact` passes.
+
+CJM: trust stage ([cjm.md](../cjm.md)) — use case UC-WF-analysis-assurance (G47); priority: L2 Linux ELF.
+
+### EntityId scope collisions in template declarations (closed 2026-10-25)
+
+**Status (2026-10-25): CLOSED.** Both halves are fixed on the clang header path. (a) `extract/headers/clang/constraints.py` (`FunctionConstraintIndex`) adds a tagged constraint signature (`param<i>`/`requires`/`trailing`) to `entity_id_for_function`'s `("requires", ...)` block. It resolves each concept from the `ImplicitConceptSpecializationDecl`'s `loc`, which clang sets to the `ConceptDecl`'s own location, so no header text is read. (b) `extract/headers/clang/redeclarations.py` gives an out-of-line function or static data member definition (one with both `parentDeclContextId` and `previousDecl`) the `EntityId` of the in-class declaration it redeclares. Unconstrained declarations keep their identities. `EXTRACTOR_GENERATION` 25. Tests: `tests/test_entity_id_constraints_and_redeclarations.py` checks, over nine sibling groups, that two declarations share an `EntityId` exactly when clang's own `previousDecl` chain links them. Residuals: a concept use whose location matches no `ConceptDecl` (or two differently-named ones) reads `concept ?`, so such overloads can still collide. An out-of-line definition whose in-class declaration was not parsed (builtin or dependency-filtered) keeps its lexical scope. Only the `EntityId` is unified; the out-of-line `Function`'s lexical `scope` used for display and owner lookup is unchanged.
+
+- [Two function/method template overloads distinguished only by a `requires`-clause](../known-gaps/two-functionmethod-template-overloads-distinguished-only-by-a.md)
+- [Out-of-line member template definition gets a different EntityId scope](../known-gaps/out-of-line-member-template-definition-gets-a-different.md)
+
 ### The Action does not recognize the `unused_rules` exit-1 axis (closed 2026-10-22)
 
 **Status (2026-10-22): CLOSED.** `action/run.sh` has `_unused_rules_gated()`, which reads `action/report_query.py`'s `unused_rules_contribution` query: `exit.unused_rules_contribution` on a two-sided `compare`, `exit_axes.unused_rules` on `compare --no-baseline` (the exit fold's own fields, so an older audit whose `disposition_audit.unused_rules_review.gate_contribution` was not folded into its exit is not misread). The exit-1 dispatch publishes `verdict=RULES_UNUSED` when it is the only axis that fired, emits an "also reports" warning when it co-fires, renders a job-summary line, and fails the step unconditionally. `ADDITIONS_UNACKNOWLEDGED` is now chosen only when the additions axis itself gated. `action.yml`'s `verdict`/`exit-code` descriptions and the generated `docs/reference/github-action-inputs.md` list the axis. Regression: `tests/test_action_unused_rules_verdict.py`.

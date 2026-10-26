@@ -45,7 +45,6 @@ __all__ = [
     "SpecialMemberOwner",
     "is_mangled_identity",
     "itanium_class_metadata_owner",
-    "itanium_declaring_class_path",
     "itanium_special_member_owner",
     "itanium_special_name_owner_identifiers",
     "itanium_special_name_owner_scope_components",
@@ -301,32 +300,6 @@ def itanium_class_metadata_owner(mangled: str) -> str | None:
     if templated_positions or not components:
         return None
     return "::".join(_strip_abi_tag_suffixes(c) for c in components)
-
-
-def itanium_declaring_class_path(mangled: str) -> str | None:
-    """The exact scope path of the class a mangled member function is declared in.
-
-    ``_ZNK3svs7runtime2v015DynamicIVFIndex4sizeEv`` is ``size`` declared in
-    ``svs::runtime::v0::DynamicIVFIndex``: the path is the function's own
-    enclosing scope, with the function's leaf dropped, and inline namespaces
-    are kept because the mangling spells them.
-
-    Returns ``None`` when the path is not a non-template scope this parser can
-    read exactly -- a template-specialization component anywhere in it, a name
-    too short to have an enclosing scope, or an unparseable name. The caller
-    decides what the path proves; this only reads it.
-    """
-    scope = itanium_scope_components_with_template_positions(mangled)
-    if scope is None:
-        return None
-    components, templated_positions = scope
-    if len(components) < 2:
-        return None
-    # Only the leaf may carry template arguments (a function template); any
-    # templated *scope* component means the path names a specialization.
-    if any(index in templated_positions for index in range(len(components) - 1)):
-        return None
-    return "::".join(_strip_abi_tag_suffixes(c) for c in components[:-1])
 
 
 @dataclass(frozen=True)

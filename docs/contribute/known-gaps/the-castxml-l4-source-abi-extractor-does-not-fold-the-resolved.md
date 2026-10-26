@@ -11,7 +11,7 @@ generated: false
 
 Index: [Known gaps](../known-gaps.md)
 
-**Status (re-verified 2026-10-09 at `456989f`): OPEN.** buildsource/source_extractors/castxml.py:700-738 still resolves cc_bin. compiler_version is _castxml_identity_with_stat_fallback(self.castxml_bin), and the comment at line 734 says a `cc_bin --version` probe is still future work.
+**Status (re-verified 2026-10-25): OPEN.** buildsource/source_extractors/castxml.py still resolves cc_bin. compiler_version is _castxml_identity_with_stat_fallback(self.castxml_bin) (line 723), and the comment at line 719 says a `cc_bin --version` probe is still future work.
 
 castxml shells
 out to the emulated compiler (`cc_bin`, resolved per compile unit by

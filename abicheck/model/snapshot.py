@@ -582,6 +582,15 @@ class AbiSnapshot:
     projection_unavailable: tuple[str, frozenset[str]] | None = field(
         default=None, repr=False, compare=False, kw_only=True
     )
+    # Runtime-only, like `projection_unavailable`: the evidence a depth
+    # projection could not reproduce from what this snapshot stored (a
+    # header-built snapshot projected to `binary` has no persisted debug-info
+    # subprogram/variable or record-relation facts). Read by
+    # `policy/analysis_assurance/_depth_projection.py`, which lowers the run
+    # to `partial` and names each item. Never serialized.
+    projection_evidence_gaps: tuple[str, ...] = field(
+        default=(), repr=False, compare=False, kw_only=True
+    )
     # Runtime-only, like `load_notices`: {guard macro: function names} the
     # castxml parse could not see because they sit in a preprocessor branch
     # its configuration excluded -- decided by that run's own `-E -dD` output

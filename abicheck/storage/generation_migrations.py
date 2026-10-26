@@ -257,6 +257,19 @@ SPELLING_MIGRATIONS: Mapping[int, GenerationSpellingChange] = {
         "rewrite is needed -- an older clang snapshot simply names no "
         "alias/variable template-defaults gap"
     ),
+    24: GenerationSpellingChange(
+        "a header-graph call to a virtual method defined out of line is recorded "
+        "call_kind virtual / resolution overapprox (was direct / exact) and so "
+        "gains its VIRTUAL_CALL_MAY_DISPATCH_TO edges; graph edge attributes only, "
+        "no type or declaration spelling changes, so no rewrite is needed"
+    ),
+    25: GenerationSpellingChange(
+        "clang function EntityIds gain a ('requires', ...) constraint block for "
+        "a requires-clause/type-constraint, and an out-of-line member/static "
+        "data member definition takes its in-class declaration's EntityId; no "
+        "type or name spelling changes, so no rewrite is needed -- an older "
+        "clang snapshot keeps the colliding/split identities it recorded"
+    ),
 }
 
 #: Reasons that say nothing about what was audited; the bump gate refuses them.
