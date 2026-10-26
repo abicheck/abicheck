@@ -32,10 +32,13 @@ the byte sizes the DWARF pass reports, so when both tiers see the change
 
 from __future__ import annotations
 
+from collections.abc import Callable
+
 from ..diff_helpers import make_change
 from ..model.change import Change
 from ..model.change_catalog.kinds import ChangeKind
 from ..model.entities import EnumType
+from ..model.execution_cache import memoized
 from ..model.snapshot import AbiSnapshot
 
 #: Target-independent byte sizes of the integer spellings an enum's
@@ -63,6 +66,14 @@ _UNDERLYING_BYTE_SIZE: dict[str, int] = {
     ),
     **dict.fromkeys(("__int128", "unsigned __int128", "__int128 unsigned"), 16),
 }
+#: The ``<cstdint>`` names also spelled through ``std::``.
+_UNDERLYING_BYTE_SIZE.update(
+    {
+        f"std::{name}": _UNDERLYING_BYTE_SIZE[name]
+        for name in ("int8_t", "uint8_t", "int16_t", "uint16_t")
+        + ("int32_t", "uint32_t", "int64_t", "uint64_t")
+    }
+)
 
 
 #: The ``long`` spellings, whose size is the data model's ``long`` width.
@@ -89,35 +100,38 @@ def long_byte_size(snapshot: AbiSnapshot | None) -> int | None:
     return None
 
 
+@memoized(maxsize=256)
 def underlying_byte_size(spelling: str, long_size: int | None = None) -> int | None:
     """The byte size of an underlying-type *spelling*, or ``None`` when it is
     not an integer spelling this table knows (*long_size* sizes ``long``)."""
     text = " ".join(spelling.replace("const", " ").replace("volatile", " ").split())
-    if text.startswith("std::"):
-        text = text[len("std::") :]
     if text in _LONG_SPELLINGS:
         return long_size
     return _UNDERLYING_BYTE_SIZE.get(text)
 
 
-def enum_underlying_size_changes(
-    e_old: EnumType,
-    e_new: EnumType,
-    old: AbiSnapshot | None = None,
-    new: AbiSnapshot | None = None,
-) -> list[Change]:
-    """One ``ENUM_UNDERLYING_SIZE_CHANGED`` when both sides' underlying types
-    resolve to known, different byte sizes; otherwise nothing."""
-    old_size = underlying_byte_size(e_old.underlying_type, long_byte_size(old))
-    new_size = underlying_byte_size(e_new.underlying_type, long_byte_size(new))
-    if old_size is None or new_size is None or old_size == new_size:
-        return []
-    return [
-        make_change(
-            ChangeKind.ENUM_UNDERLYING_SIZE_CHANGED,
-            symbol=e_old.name,
-            name=e_old.name,
-            old=str(old_size),
-            new=str(new_size),
-        )
-    ]
+def enum_underlying_size_detector(
+    old: AbiSnapshot | None, new: AbiSnapshot | None
+) -> Callable[[EnumType, EnumType], list[Change]]:
+    """The per-enum comparison for one snapshot pair, with each side's
+    ``sizeof(long)`` resolved once rather than per enum."""
+    old_long, new_long = long_byte_size(old), long_byte_size(new)
+
+    def changes(e_old: EnumType, e_new: EnumType) -> list[Change]:
+        """One ``ENUM_UNDERLYING_SIZE_CHANGED`` when both sides' underlying
+        types resolve to known, different byte sizes; otherwise nothing."""
+        old_size = underlying_byte_size(e_old.underlying_type, old_long)
+        new_size = underlying_byte_size(e_new.underlying_type, new_long)
+        if old_size is None or new_size is None or old_size == new_size:
+            return []
+        return [
+            make_change(
+                ChangeKind.ENUM_UNDERLYING_SIZE_CHANGED,
+                symbol=e_old.name,
+                name=e_old.name,
+                old=str(old_size),
+                new=str(new_size),
+            )
+        ]
+
+    return changes

@@ -123,17 +123,14 @@ def test_reader_refuses_malformed_inner(
 
 
 @pytest.mark.parametrize("reader, node", READERS)
-def test_reader_accepts_absent_inner(
+def test_null_inner_reads_like_absent_and_empty_inner(
     reader: Callable[[dict[str, Any]], object], node: dict[str, Any]
 ) -> None:
-    assert reader(dict(node)) is not None
-
-
-@pytest.mark.parametrize("reader, node", READERS)
-def test_reader_accepts_null_inner(
-    reader: Callable[[dict[str, Any]], object], node: dict[str, Any]
-) -> None:
-    assert reader({**node, "inner": None}) is not None
+    """A ``null`` or ``[]`` ``inner`` is the same leaf as a missing key: the
+    reader returns the identical result for all three, and does not raise."""
+    absent = reader(dict(node))
+    assert reader({**node, "inner": None}) == absent
+    assert reader({**node, "inner": []}) == absent
 
 
 def test_enum_with_absent_inner_parses_as_enum() -> None:

@@ -22,7 +22,7 @@ from collections.abc import Collection, Mapping
 from .compare.base_class_diff import diff_bases as _diff_bases
 from .compare.embedded_growth_shift import stamp_embedded_growth_shifts
 from .compare.enum_sentinel import is_confirmed_enum_sentinel
-from .compare.enum_underlying import enum_underlying_size_changes
+from .compare.enum_underlying import enum_underlying_size_detector
 from .compare.fact_gate import both_facts_present
 from .compare.field_addition import new_field_change_kind
 from .compare.public_surface import (
@@ -1106,11 +1106,11 @@ def _diff_enums(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
         if not _is_non_abi_surface_type(e.name, exclude_stdlib_namespaces=excl)
     )
     # A wholly-removed enum is stored in snap.enums, NOT snap.types, so the
-    # TYPE_REMOVED loop in _diff_types() never sees it — the old "TYPE_REMOVED
-    # covers this" comment was wrong and the removal went silently undetected
-    # (case78). Emit it here, guarded by the same stripped-binary suppression
+    # TYPE_REMOVED loop in _diff_types() never sees it, so the removal went
+    # silently undetected (case78). Emit it here, guarded by the same stripped-binary suppression
     # _diff_types uses so a stripped new side can't manufacture phantom removals.
     suppress_removed = _removals_are_unconfirmed(old, new)
+    underlying_size_changes = enum_underlying_size_detector(old, new)
 
     for e_old in old_map.values():
         name = e_old.name
@@ -1129,7 +1129,7 @@ def _diff_enums(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
         # Per-enum gate (hybrid --ast-frontend, G28 P3; is_scoped: G31 P-C).
         if both_facts_present(e_old, e_new, "is_scoped", name):
             _append_enum_scoped_changes(changes, name, e_old, e_new)
-        changes.extend(enum_underlying_size_changes(e_old, e_new, old, new))
+        changes.extend(underlying_size_changes(e_old, e_new))
         old_members = {m.name: m.value for m in e_old.members}
         new_members = {m.name: m.value for m in e_new.members}
         # Build inverse map: new_value → new_name for values that are "new" (not in old names).
