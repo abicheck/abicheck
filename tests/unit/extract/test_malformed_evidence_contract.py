@@ -319,3 +319,36 @@ def test_a_corrupt_companion_package_is_named_corrupt(
         ReleaseOperandContentError, match="corrupt or truncated archive"
     ):
         _extract(primary, **{role: bad})
+
+
+def _real_zip(path: Path) -> Path:
+    import zipfile
+
+    with zipfile.ZipFile(path, "w") as zf:
+        zf.writestr("usr/lib/libx.so", "x")
+    return path
+
+
+@pytest.mark.parametrize(
+    ("make", "name"),
+    [
+        (_real_tar, "pkg.zip"),
+        (_real_tar, "pkg.whl"),
+        (_real_zip, "pkg.tar.gz"),
+        (_real_zip, "pkg.tar"),
+        (_real_zip, "pkg.tgz"),
+    ],
+)
+def test_a_readable_archive_is_never_corrupt_whatever_its_name(
+    tmp_path: Path, make: Any, name: str
+) -> None:
+    """A file readable as zip or tar is never reported corrupt, even when its
+    suffix names the other format; the same bytes truncated under the same
+    name still are."""
+    good = make(tmp_path / name)
+    require_readable_archive(good)
+    bad = tmp_path / "bad" / name
+    bad.parent.mkdir()
+    bad.write_bytes(good.read_bytes()[:40])
+    with pytest.raises(CorruptPackageArchiveError):
+        require_readable_archive(bad)

@@ -123,10 +123,11 @@ def require_readable_archive(path: Path) -> None:
     A file that is neither zip- nor tar-shaped passes silently. A zip-shaped
     file must list its members; a tar-shaped file (tar-family name) must be
     readable by :mod:`tarfile` (``.tar.zst``, which it has no codec for, is
-    not checked rather than misreported). Called by the release-input
+    not checked rather than misreported). A file readable as either zip or
+    tar is never corrupt, whatever its name says. Called by the release-input
     resolver after every extractor declined, so it never changes detection.
     """
-    if not path.is_file():
+    if not path.is_file() or zipfile.is_zipfile(path) or _readable_tar(path):
         return
     _zip_entry_names(path)
     name = path.name.lower()
