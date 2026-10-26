@@ -449,21 +449,17 @@ def looks_like_zip(path: Path) -> bool:
     return zipfile.is_zipfile(path)
 
 
-def _zip_entry_names(path: Path) -> list[str]:
-    """Every member name of a zip container; ``[]`` if unreadable.
+from .archive_integrity import (  # noqa: E402
+    CorruptPackageArchiveError,
+    _zip_entry_names,
+)
 
-    Deliberately uncapped. An earlier revision read only the first 200
-    names, which made detection depend on where a builder happened to place
-    the metadata directory: wheel tools commonly append `*.dist-info/` after
-    the package payload, so a large wheel's own marker fell outside the
-    window and the archive was rejected (Codex review, PR #1253). The whole
-    list is the zip's already-parsed central directory -- bounded by member
-    count, not by uncompressed size -- so there is nothing to bound here.
-    """
+
+def _zip_members_for_sniff(path: Path) -> list[str]:
+    """Zip member names for a detection predicate: ``[]`` when corrupt."""
     try:
-        with zipfile.ZipFile(path) as zf:
-            return zf.namelist()
-    except (OSError, zipfile.BadZipFile, ValueError):
+        return _zip_entry_names(path)
+    except CorruptPackageArchiveError:
         return []
 
 
@@ -1023,7 +1019,7 @@ class CondaExtractor:
         """
         if not looks_like_zip(pkg_path):
             return False
-        names = _zip_entry_names(pkg_path)
+        names = _zip_members_for_sniff(pkg_path)
         return "metadata.json" in names and any(
             n.startswith(("pkg-", "info-")) and n.endswith(".tar.zst") for n in names
         )
@@ -1164,7 +1160,7 @@ class WheelExtractor:
         # wheel whose entries this sniff happens not to reach.
         if not looks_like_zip(pkg_path):
             return False
-        return any(".dist-info/" in n for n in _zip_entry_names(pkg_path))
+        return any(".dist-info/" in n for n in _zip_members_for_sniff(pkg_path))
 
     def extract(self, pkg_path: Path, target_dir: Path) -> ExtractResult:
         _log.info("Extracting wheel: %s", pkg_path)

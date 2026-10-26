@@ -15,6 +15,7 @@
       "abicheck/extract/__init__.py": "011ec37fad96ea2035983eaaedeba0976940a570900f85db8c03bb7369af742a",
       "abicheck/extract/ar_archive.py": "6fdab7ed7390a20f087f9407eaa3988c0f8c658400bc0ea8c7e193271923956d",
       "abicheck/extract/ar_archive_format.py": "38a51cae7762eb269af3788d5dca9cfe50de38d9b315f34fa31427f791cb7e62",
+      "abicheck/extract/archive_integrity.py": "df8f375ed95bbc97792f5298f0251d7d06c81959cb80705ff53e000d32517ad2",
       "abicheck/extract/binary_dialect.py": "5c0d98fe9e4b05b031450f4ce37bae6b7f922e801936129ba19b887f6738dad7",
       "abicheck/extract/binary_format.py": "4b9f591077fa5c90d2e3a767343d92b098061870403d431694470bc05e5468b3",
       "abicheck/extract/binary_identity.py": "4645eaf3dddd0a2230a5c694882548476406c57514275fa4c8c1bc152607ca88",
@@ -136,7 +137,7 @@
       "abicheck/extract/occurrence_dependency_scope.py": "d28ca573fecaecec3c67b784c9d44d516d039824e744179f852f5a89dc135d8e",
       "abicheck/extract/ownership.py": "9285bfc00b5dc3948749004cbe9881b5eb034696b59d405bd0e579f9664fb036",
       "abicheck/extract/ownership_stamp.py": "07e5714eac1e1770aa53f09479b7ae240f2f123ee2b7bf223241f6880233d8d7",
-      "abicheck/extract/packages.py": "def26e37a91e8ab50f55c713869cee57be87030e088b57cf85a7ff6ba98e190a",
+      "abicheck/extract/packages.py": "0cc9caa6a067114f3dfb426b8ac3b8fb712bc82737ca1fadf357273ab1955d90",
       "abicheck/extract/parse_failures.py": "bda173aab4aca1e83b716569a8cf863e7214215108bae1bffd65406a93fb371b",
       "abicheck/extract/path_aliases.py": "e4df448bdadc691475adfca99c567df6aa76e5cb421d6faf5de1307d368d1560",
       "abicheck/extract/path_segments.py": "c96f59df6fc126e26c6ca2052c6040d3180aa49f6c1265029eeb7206f0466b22",
@@ -168,9 +169,9 @@
       "abicheck/symvers_metadata.py": "372737765cd132e6e87ed891dd465d2958e04debbef774e45212ceb3036871cb",
       "abicheck/type_metadata.py": "9997189de8dac522fd1db8be5ae491d811139503f83abaaded89038eb4aa9cdf"
     },
-    "fingerprint": "82a14593cd832fe2ef27f60f4fc5d3f8e959bcf820d831f56de8bfb5e467e1ac",
+    "fingerprint": "c43cbc4998434634dfe51dff42970efa8408855d802033943dfe415d030e1870",
     "generation": 27,
-    "reason": "separate --target/-target triple is carried into castxml emulation for clang-family compilers"
+    "reason": "package archive integrity checks moved to extract/archive_integrity.py; error reporting only, no recorded fact changes"
   },
   "resolver": {
     "files": {

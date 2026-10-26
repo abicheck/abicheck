@@ -32,6 +32,10 @@ from typing import Any
 
 import pytest
 
+from abicheck.extract.archive_integrity import (
+    CorruptPackageArchiveError,
+    require_readable_archive,
+)
 from abicheck.extract.headers.clang.ast_inner import MalformedClangAstError, ast_inner
 from abicheck.extract.headers.clang.context import _Decl
 from abicheck.extract.headers.clang.enums import parse_enums
@@ -172,14 +176,64 @@ def test_corrupt_zip_is_not_detected_as_a_package(
     assert detect_extractor(pkg) is None
 
 
-@pytest.mark.parametrize("payload", _CORRUPT_ZIPS)
-@pytest.mark.xfail(
-    strict=True,
-    reason="known gap: _zip_entry_names returns [] on a corrupt archive; "
-    "its callers read that as no members",
-)
-def test_corrupt_zip_entry_listing_raises(tmp_path: Path, payload: bytes) -> None:
-    pkg = tmp_path / "broken.zip"
+_CORRUPT_ARCHIVES: list[Any] = [
+    pytest.param(b"PK\x03\x04" + b"\x00" * 26, "broken.zip", id="truncated-zip"),
+    pytest.param(b"PK\x05\x06" + b"\x00" * 10, "broken.whl", id="short-eocd-whl"),
+    pytest.param(b"not a zip at all", "broken.zip", id="random-bytes-zip-suffix"),
+    pytest.param(b"not a zip at all", "broken.whl", id="random-bytes-whl-suffix"),
+]
+
+
+@pytest.mark.parametrize("payload, name", _CORRUPT_ARCHIVES)
+def test_corrupt_zip_entry_listing_raises(
+    tmp_path: Path, payload: bytes, name: str
+) -> None:
+    pkg = tmp_path / name
     pkg.write_bytes(payload)
-    with pytest.raises((OSError, ValueError)):
+    with pytest.raises(
+        CorruptPackageArchiveError, match="corrupt or truncated archive"
+    ):
         _zip_entry_names(pkg)
+
+
+@pytest.mark.parametrize("payload, name", _CORRUPT_ARCHIVES)
+def test_corrupt_archive_is_reported_as_corrupt_on_release_path(
+    tmp_path: Path, payload: bytes, name: str
+) -> None:
+    pkg = tmp_path / name
+    pkg.write_bytes(payload)
+    with pytest.raises(
+        CorruptPackageArchiveError, match="corrupt or truncated archive"
+    ):
+        require_readable_archive(pkg)
+
+
+def test_random_txt_is_unrecognized_not_corrupt(tmp_path: Path) -> None:
+    pkg = tmp_path / "notes.txt"
+    pkg.write_bytes(b"not a zip at all")
+    assert _zip_entry_names(pkg) == []
+    require_readable_archive(pkg)
+    assert detect_extractor(pkg) is None
+
+
+def test_valid_empty_zip_is_not_corrupt(tmp_path: Path) -> None:
+    import zipfile
+
+    pkg = tmp_path / "empty.zip"
+    with zipfile.ZipFile(pkg, "w"):
+        pass
+    assert _zip_entry_names(pkg) == []
+    require_readable_archive(pkg)
+
+
+@pytest.mark.parametrize("name", ["broken.tar.gz", "broken.tar"])
+def test_corrupt_tar_family_archive_is_reported_as_corrupt(
+    tmp_path: Path, name: str
+) -> None:
+    pkg = tmp_path / name
+    pkg.write_bytes(b"\x1f\x8b\x08 not really gzip at all")
+    assert detect_extractor(pkg) is None
+    with pytest.raises(
+        CorruptPackageArchiveError, match="corrupt or truncated archive"
+    ):
+        require_readable_archive(pkg)

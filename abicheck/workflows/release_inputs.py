@@ -58,6 +58,10 @@ from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
 from ..errors import ReleaseOperandContentError, ReleaseOperandUsageError
+from ..extract.archive_integrity import (
+    CorruptPackageArchiveError,
+    require_readable_archive,
+)
 from ..model.sided_inputs import compose_sided_paths
 
 if TYPE_CHECKING:
@@ -198,6 +202,13 @@ def extract_if_package(
     header_dir: Path | None = None
     symbols_file: Path | None = None
     container_complete = False
+
+    # A corrupt archive is claimed by no extractor, so it would otherwise read
+    # as a plain directory or as an unrecognized format. Name the real cause.
+    try:
+        require_readable_archive(input_path)
+    except CorruptPackageArchiveError as exc:
+        raise ReleaseOperandContentError(str(exc)) from exc
 
     if is_package(input_path):
         extractor = detect_extractor(input_path)

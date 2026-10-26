@@ -731,12 +731,16 @@ class TestContentSniffsDegradeGracefully:
     unreadable or unsupported operand must answer "not this format" rather
     than propagate out and abort dispatch to every other extractor."""
 
-    def test_an_unreadable_zip_yields_no_members(self, tmp_path: Path) -> None:
-        from abicheck.extract.packages import _zip_entry_names
+    def test_an_unreadable_zip_is_corrupt_not_empty(self, tmp_path: Path) -> None:
+        from abicheck.extract.packages import (
+            CorruptPackageArchiveError,
+            _zip_entry_names,
+        )
 
         broken = tmp_path / "broken"
         broken.write_bytes(b"PK\x03\x04 truncated right here")
-        assert _zip_entry_names(broken) == []
+        with pytest.raises(CorruptPackageArchiveError):
+            _zip_entry_names(broken)
         assert not is_package(broken)
 
     def test_a_corrupt_zstd_stream_is_not_a_tar(self, tmp_path: Path) -> None:
