@@ -15,6 +15,7 @@ from __future__ import annotations
 import json
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -197,12 +198,21 @@ def test_binary_depth_on_header_snapshots_matches_binary_only(tmp_path: Path) ->
     # and names it (known-gaps: depth-binary projection), never a clean claim
     # stronger than the oracle's.
     assert exit_depth == exit_oracle
-    assert oracle["analysis_assurance"]["status"] == "complete"
-    assert depth["analysis_assurance"]["status"] == "partial"
-    assert any(
+    projection_gap = any(
         n.startswith("not assessed at depth binary:")
         for n in depth["analysis_assurance"]["notes"]
     )
+    if sys.platform == "linux":
+        # ELF keeps the DWARF in the library, so the oracle reads it.
+        assert oracle["analysis_assurance"]["status"] == "complete"
+        assert projection_gap
+    if projection_gap:
+        assert depth["analysis_assurance"]["status"] == "partial"
+    else:
+        assert (
+            depth["analysis_assurance"]["status"]
+            == oracle["analysis_assurance"]["status"]
+        )
     assert depth["confidence"] == oracle["confidence"]
     assert depth.get("scope_resolved", True) and depth.get(
         "manual_review_required"
