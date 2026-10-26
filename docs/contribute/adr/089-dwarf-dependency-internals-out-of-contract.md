@@ -1,7 +1,7 @@
 # ADR-089: A DWARF Declaration's File Is Read Correctly, and a Dependency's Unreachable Internals Are Out of Contract
 
 **Date:** 2026-10-23
-**Status:** Accepted (2026-10-23) — implemented for binary + DWARF compares without headers; amended 2026-10-25 for compares with headers (see the amendment below).
+**Status:** Accepted (2026-10-23) — implemented for binary + DWARF compares without headers; amended 2026-10-25 for compares with headers and 2026-10-26 for the leak finding's sides (see the amendments below).
 
 Governed by: [ADR-061](061-responsibility-package-architecture.md) (owner of each stage), [ADR-062](062-project-snapshot-storage-v2.md) (extractor generation), [ADR-065](065-comparison-scope-selection-and-completeness.md) (absent is not removed), [ADR-067](067-change-intent-acknowledgment-and-disposition-audit.md) (record before disposing).
 
@@ -87,7 +87,7 @@ D5's last paragraph assumed a header-derived snapshot was already scoped. It is 
 - **Hidden friends of a reached dependency record are out of contract.** They are the dependency's API on that type, compiled into every consumer from the dependency's header and not defined by the library. What the library promises about the type (identity, size, layout wherever its declarations use it) keeps gating through the record's own findings. A friend the library exports as `GLOBAL` stays in contract. The same rule applies to a reached record's member typedefs.
 - A typedef (member of a dependency record, or in a dependency-only namespace) is reached when its name occurs in a public declaration's signature, field or default, or in the library's own header text. Without that header-text scan (`public_header_identifiers` absent) no typedef is classified.
 
-**A4. The rule's kinds.** Added: judged on the new side; removed: on the old; modified: on both. Records: `TYPE_ADDED`, `TYPE_REMOVED`, `TAG_TYPE_RENAMED` (both names), and `INTERNAL_TYPE_LEAKS_VIA_PUBLIC_API` raised on such a record (either side). Typedefs: `TYPEDEF_REMOVED`, `TYPEDEF_BASE_CHANGED`. Any function- or variable-entity kind on an internal symbol; `OVERLOAD_SET_REROUTED` when the stem's overloads are all internal on both sides. Layout kinds on records stay out of the rule (D5).
+**A4. The rule's kinds.** Added: judged on the new side; removed: on the old; modified: on both. Records: `TYPE_ADDED`, `TYPE_REMOVED`, `TAG_TYPE_RENAMED` (both names), and `INTERNAL_TYPE_LEAKS_VIA_PUBLIC_API` raised on such a record (either side). *(Superseded by the 2026-10-26 amendment: the leak follows the record's presence, and a record both sides declare must be internal on both.)* Typedefs: `TYPEDEF_REMOVED`, `TYPEDEF_BASE_CHANGED`. Any function- or variable-entity kind on an internal symbol; `OVERLOAD_SET_REROUTED` when the stem's overloads are all internal on both sides. Layout kinds on records stay out of the rule (D5).
 
 **A5. Only a caller's declaration keeps a finding in contract.** D5 skipped any decision with reason `public_root_membership`, assuming it meant "declared public". The header domain stamps that reason on its whole closure, which runs through the dependency's headers, so under the default public contract the rule never fired. The rule now skips only a finding the caller declared public (`--public-symbol`, a post-manifest commitment), the two overlays `contract_evaluation` trusts outright.
 
@@ -105,3 +105,30 @@ D5's last paragraph assumed a header-derived snapshot was already scoped. It is 
 
 `tests/test_header_dependency_internals.py` (an exhaustive layout × relation domain against a truth table: sibling, nested and unrecorded include roots, the library's own generated header; named/unnamed records and typedefs; GLOBAL/WEAK/absent exports; through the policy rule), `tests/test_contract_dependency_origin.py` (each kind's sides), `tests/test_family_f1_evidence_ablation.py::test_dependency_internals_never_grow_under_ablation` (losing the export table, the public-header origin, the header-text scan or a declaration's location never grows any internal set), `tests/test_header_dependency_internals_integration.py` and the field shape `tests/field_shapes/header_only_dependency_internals` (g++ + castxml, stored and live, with and without a library break).
 
+## Amendment (2026-10-26): a leak on a dependency record is judged on the sides that declare it
+
+### Context
+
+A4 moved an `INTERNAL_TYPE_LEAKS_VIA_PUBLIC_API` raised on a record out of contract when the record was a dependency internal on **either** side. That contradicts A4's own rule that a modified finding must be internal on both sides, and it hides a real break: when a release makes a public declaration start naming a dependency record (internal on the old side, reached on the new), the record's layout change now propagates to consumers through that declaration, yet the leak read `dependency_internal_unreachable` and did not gate. The mirror (reached on the old side, internal on the new) is the same: consumers built against the old declaration still see the change.
+
+"Either side" was chosen for the field report's shape. There the leak is raised on a record only one side declares: `detail::vec_traits<x86_avx2_tag, float, 8>` exists in the `-mavx2` build and `vec_traits<x86_avx512_tag, float, 16>` in the `-mavx512f` build, each an internal reached by no public declaration, through the dependency's own implicit members. A plain "both sides" rule puts that leak back in contract (`tests/test_header_dependency_internals_integration.py` fails on it), although no side's public surface reaches the record.
+
+### Decision
+
+**A6. The leak follows the record's presence.** `DependencyInternals` carries `record_names`: every record and enum name the side declares, internal or not, filled by `dependency_internals` for both the DWARF-only and the header path (`None` when a side was not read). The leak is then judged like the record's own presence finding:
+
+- declared only on the new side: internal on the new side (as `TYPE_ADDED`);
+- declared only on the old side: internal on the old side (as `TYPE_REMOVED`);
+- declared on both: internal on **both**, as every modified finding;
+- a side with no presence evidence (`record_names` is `None`) is assumed to declare the record, so the record must be listed internal there. Listing it internal is itself a declaration, and the leak is then judged as above. The only unread side in production, `NO_DEPENDENCY_INTERNALS`, lists nothing, so there the leak stays in contract.
+
+A record internal on one side and reached on the other keeps its leak in contract, and the leak gates.
+
+### Consequences
+
+- A **default change**, narrow: a leak on a dependency record reached on one side and internal on the other gates again. The field report's leaks (records each declared on one side only) stay out of contract; its counts are unchanged.
+- `record_names` is presence evidence only. It never moves a finding by itself and does not make `DependencyInternals` truthy, so a side with no internals still skips the rule.
+
+### Verification
+
+`tests/test_contract_dependency_origin.py::test_internal_type_leak_follows_the_record_on_each_side` (every pair of absent / reached / internal / unread, against a hand-written truth table), `tests/test_dependency_record_leak_integration.py` (the corpus shape with a `vec_traits` whose size the library picks and a public function naming it on one side, both directions, stored and live, through the CLI) and the unchanged `tests/test_header_dependency_internals_integration.py`.

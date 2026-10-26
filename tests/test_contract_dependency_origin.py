@@ -49,12 +49,14 @@ _OLD = DependencyInternals(
     typedefs=frozenset({"td_old", "td_shared"}),
     symbols=frozenset({"_Zold", "_Zshared"}),
     overload_stems=frozenset({"stem"}),
+    record_names=frozenset({"tag_old", "shared"}),
 )
 _NEW = DependencyInternals(
     types=frozenset({"tag_new", "shared"}),
     typedefs=frozenset({"td_new", "td_shared"}),
     symbols=frozenset({"_Znew", "_Zshared"}),
     overload_stems=frozenset({"stem"}),
+    record_names=frozenset({"tag_new", "shared"}),
 )
 
 
@@ -75,6 +77,7 @@ _MOVED = [
     _Change(ChangeKind.TYPE_REMOVED, "tag_old"),
     _Change(ChangeKind.TAG_TYPE_RENAMED, "tag_old", new_value="tag_new"),
     _Change(ChangeKind.INTERNAL_TYPE_LEAKS_VIA_PUBLIC_API, "tag_old"),
+    _Change(ChangeKind.INTERNAL_TYPE_LEAKS_VIA_PUBLIC_API, "shared"),
     _Change(ChangeKind.TYPEDEF_REMOVED, "td_old"),
     _Change(ChangeKind.TYPEDEF_BASE_CHANGED, "td_shared"),
     _Change(ChangeKind.HIDDEN_FRIEND_ADDED, "_Znew"),
@@ -143,3 +146,97 @@ def test_an_already_excluded_finding_keeps_its_reason() -> None:
     )
     out = _run([_Change(ChangeKind.TYPE_ADDED, "tag_new")], [toolchain])
     assert out == [toolchain]
+
+
+# --- INTERNAL_TYPE_LEAKS_VIA_PUBLIC_API: the record's state on each side ----
+#
+# A side states one of: ``absent`` (read, does not declare the record),
+# ``reached`` (declares it, a public declaration reaches it), ``internal``
+# (declares it, nothing public reaches it) or ``unread`` (no presence
+# evidence). The leak follows the record: out of contract only when every
+# side that declares it has it internal and no side is unread. Written out
+# by hand, not derived from the rule.
+_LEAK_TRUTH_TABLE = {
+    ("absent", "absent"): False,
+    ("absent", "reached"): False,
+    ("absent", "internal"): True,
+    ("absent", "unread"): False,
+    ("reached", "absent"): False,
+    ("reached", "reached"): False,
+    # The mirror: a release stops naming the record publicly.
+    ("reached", "internal"): False,
+    ("reached", "unread"): False,
+    ("internal", "absent"): True,
+    # A release makes a public declaration start naming a dependency record.
+    ("internal", "reached"): False,
+    ("internal", "internal"): True,
+    ("internal", "unread"): False,
+    ("unread", "absent"): False,
+    ("unread", "reached"): False,
+    ("unread", "internal"): False,
+    ("unread", "unread"): False,
+}
+
+_RECORD = "basic_vec<float, abi8>"
+
+
+def _side(state: str) -> DependencyInternals:
+    # Other names on the side keep the sets non-empty so the rule runs.
+    other = frozenset({"unrelated"})
+    if state == "unread":
+        return DependencyInternals(types=other)
+    declared = other if state == "absent" else other | {_RECORD}
+    internal = other | {_RECORD} if state == "internal" else other
+    return DependencyInternals(types=internal, record_names=declared)
+
+
+def test_leak_truth_table_covers_every_state_pair() -> None:
+    states = ("absent", "reached", "internal", "unread")
+    assert set(_LEAK_TRUTH_TABLE) == {(o, n) for o in states for n in states}
+
+
+@pytest.mark.parametrize(
+    ("old_state", "new_state", "moved"),
+    [(o, n, moved) for (o, n), moved in _LEAK_TRUTH_TABLE.items()],
+)
+def test_internal_type_leak_follows_the_record_on_each_side(
+    old_state: str, new_state: str, moved: bool
+) -> None:
+    original = _in_contract("public_root_membership")
+    out = exclude_unreachable_dependency_findings(
+        [_Change(ChangeKind.INTERNAL_TYPE_LEAKS_VIA_PUBLIC_API, _RECORD)],
+        [original],
+        old=_side(old_state),
+        new=_side(new_state),
+    )
+    if moved:
+        assert out[0].relevance is ContractRelevance.PROVEN_OUT_OF_CONTRACT
+        assert out[0].reason_code == DEPENDENCY_INTERNAL_UNREACHABLE_REASON
+    else:
+        # Still in contract with its own reason, so it gates.
+        assert out == [original]
+
+
+@pytest.mark.parametrize(
+    ("other_state", "moved"),
+    [("absent", True), ("internal", True), ("reached", False)],
+)
+def test_an_unread_side_listing_the_record_internal_declares_it(
+    other_state: str, moved: bool
+) -> None:
+    # No presence evidence, but the side lists the record among its
+    # internals: an internal record is a declared one, so the leak is judged
+    # as if that side were read and "internal".
+    unread_internal = DependencyInternals(types=frozenset({_RECORD}))
+    original = _in_contract()
+    for old, new in (
+        (unread_internal, _side(other_state)),
+        (_side(other_state), unread_internal),
+    ):
+        out = exclude_unreachable_dependency_findings(
+            [_Change(ChangeKind.INTERNAL_TYPE_LEAKS_VIA_PUBLIC_API, _RECORD)],
+            [original],
+            old=old,
+            new=new,
+        )
+        assert (out[0].relevance is ContractRelevance.PROVEN_OUT_OF_CONTRACT) is moved
