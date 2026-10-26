@@ -54,7 +54,8 @@ _OVERRIDE_MARKER_KINDS = frozenset({"OverrideAttr", "FinalAttr"})
 #: :func:`_identity`'s ``mangledName``/``name``), :func:`_classify_call`
 #: (``kind``), and :func:`_ref_is_virtual` (``virtual``, its children's
 #: ``kind``, and ``previousDecl`` -- followed back from an out-of-line
-#: definition to the in-class declaration that carries ``virtual``). ``type`` and ``loc``/``range`` are kept although no current
+#: definition to the in-class declaration that carries ``virtual``).
+#: ``type`` and ``loc``/``range`` are kept although no current
 #: consumer reads them off an *indexed* node: both are small, flat values,
 #: and ``_find_referenced_decl``'s own docstring names ``type.qualType`` as
 #: something the full node carries for these consumers -- keeping them costs
