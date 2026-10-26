@@ -18,8 +18,8 @@ A clang AST node whose ``inner`` is present but not a list must raise
 :class:`MalformedClangAstError` from every clang reader that walks it. The
 old ``node.get("inner", []) or []`` coerced a dict or string to an empty walk,
 so the reader returned a complete-looking, empty result. A missing ``inner`` is
-a leaf and must keep parsing; ``null`` is refused, as the header-graph
-projection's ``validate_ast_shape`` already rules.
+a leaf and must keep parsing, and so is ``null`` (the readers' existing tests
+pin it; the header-graph projection refuses it earlier on its own path).
 
 Zip side: a corrupt archive must not read as an empty member list.
 """
@@ -44,7 +44,6 @@ MALFORMED_INNER: list[Any] = [
     pytest.param({"kind": "ParmVarDecl"}, id="dict"),
     pytest.param("abc", id="str"),
     pytest.param(3, id="int"),
-    pytest.param(None, id="null"),
 ]
 
 _FILE = "/usr/include/api.h"
@@ -125,12 +124,14 @@ def test_reader_refuses_malformed_inner(
 
 
 @pytest.mark.parametrize("reader, node", READERS)
-def test_empty_inner_reads_like_absent_inner(
+def test_null_and_empty_inner_read_like_absent_inner(
     reader: Callable[[dict[str, Any]], object], node: dict[str, Any]
 ) -> None:
-    """An ``[]`` ``inner`` is the same leaf as a missing key: the reader
-    returns the identical result for both, and does not raise."""
-    assert reader({**node, "inner": []}) == reader(dict(node))
+    """A ``null`` or ``[]`` ``inner`` is the same leaf as a missing key: the
+    reader returns the identical result for all three, and does not raise."""
+    absent = reader(dict(node))
+    assert reader({**node, "inner": None}) == absent
+    assert reader({**node, "inner": []}) == absent
 
 
 def test_enum_with_absent_inner_parses_as_enum() -> None:
@@ -150,6 +151,7 @@ def test_ast_inner_returns_list_and_empty_for_leaf() -> None:
     children = [{"kind": "ParmVarDecl"}]
     assert ast_inner({"inner": children}) == children
     assert ast_inner({}) == []
+    assert ast_inner({"inner": None}) == []
 
 
 _CORRUPT_ZIPS: list[Any] = [

@@ -14,9 +14,11 @@
 
 """The one shape contract for a clang AST node's ``inner`` children.
 
-Every clang-backend reader walks ``node["inner"]`` as a list. An absent key
-is a leaf and reads as no children. A key that is present with any other
-JSON type -- ``null`` included, which clang never emits -- is malformed: ``or []`` would coerce a string or a
+Every clang-backend reader walks ``node["inner"]`` as a list. An absent or
+``null`` key is a leaf and reads as no children (the readers' tests pin
+``null`` as a leaf; the header-graph projection's stricter
+``validate_ast_shape`` refuses it before any reader runs on that path). A
+key that is present with any other JSON type is malformed: ``or []`` would coerce a string or a
 mapping to an empty walk, and the projection would then read as a complete,
 empty surface (ADR-028 D3: failed evidence is an explicit failure, never an
 empty one). :func:`ast_inner` raises instead.
@@ -32,19 +34,19 @@ class MalformedClangAstError(ValueError):
     (``inner`` present but not a list, or a child that is not an object).
 
     One type for the header readers and the header-graph projection
-    (``buildsource.header_graph_ast_projection.validate_ast_shape``), which
-    apply the same rule, so every refusal path catches both."""
+    (``buildsource.header_graph_ast_projection.validate_ast_shape``), so
+    every refusal path catches both."""
 
 
 def ast_inner(node: Any) -> list[Any]:
     """Return the children of *node*, or ``[]`` when it has no ``inner`` key.
 
-    Raises :class:`MalformedClangAstError` when ``inner`` is present and not
-    a list (``null`` included, as ``validate_ast_shape`` rules).
+    Raises :class:`MalformedClangAstError` when ``inner`` is present, not
+    ``null``, and not a list.
     """
-    if "inner" not in node:
+    children = node.get("inner")
+    if children is None:
         return []
-    children = node["inner"]
     if not isinstance(children, list):
         raise MalformedClangAstError(
             f"clang AST node {node.get('kind')!r} has 'inner' of type "
