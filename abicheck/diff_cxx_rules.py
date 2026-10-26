@@ -62,7 +62,7 @@ from .model.mangled_name import (
 # `type_reachability_spelling.py`, which re-exports it by value for
 # back-compat and cannot be imported from here at all (it already imports
 # this module at its own top level).
-from .model.namespace_spelling import _namespace_suffix_spellings
+from .model.namespace_spelling import namespace_suffix_spellings
 
 
 def itanium_qualified_name(mangled: str) -> str | None:
@@ -1209,7 +1209,7 @@ def virtual_method_addition(
             old_funcs,
             new_funcs,
             owner_class_of=owner_class_of,
-            namespace_suffix_spellings=_namespace_suffix_spellings,
+            namespace_suffix_spellings=namespace_suffix_spellings,
         ):
             return None  # TYPE_VTABLE_CHANGED covers this case -- verified, not assumed
         # No evidence behind the raw array difference (or `TYPE_VTABLE_

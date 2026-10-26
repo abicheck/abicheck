@@ -40,11 +40,11 @@ from pathlib import Path
 import pytest
 from click.testing import CliRunner
 
-from abicheck.change_registry import REGISTRY
 from abicheck.checker_types import Change
 from abicheck.cli import main
 from abicheck.detector_registry import _DetectorEntry, registry
 from abicheck.model import AbiSnapshot, Function, Visibility
+from abicheck.model.change_catalog.assembled import REGISTRY
 from abicheck.model.change_catalog.kinds import ChangeKind
 from abicheck.model.change_catalog.registry import (
     ChangeKindMeta,
@@ -271,7 +271,7 @@ def test_no_severity_config_gates_an_informational_kind(kind: str) -> None:
 
 def test_policy_raising_an_informational_kind_is_still_honoured() -> None:
     """Policy decides acceptance (ADR-066): a promotion to BREAKING gates."""
-    from abicheck.change_registry import (
+    from abicheck.model.change_catalog.assembled import (
         API_BREAK_KINDS,
         BREAKING_KINDS,
         COMPATIBLE_KINDS,

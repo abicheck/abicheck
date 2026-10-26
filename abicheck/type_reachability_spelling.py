@@ -41,17 +41,9 @@ from .compare.spelling_pattern import (
 )
 from .diff_cxx_rules import itanium_qualified_name, msvc_qualified_name
 from .model import ScopeOrigin
-from .model.namespace_spelling import (
-    # Re-exported (`as`-aliased) by value -- moved to `model/` (ADR-063
-    # Track 2, 5B closure) so `compare/vtable_evidence.py` can depend on it
-    # without importing this module (which imports `diff_cxx_rules` at
-    # module scope, so the reverse import would be a cycle). Every existing
-    # `from .type_reachability_spelling import _namespace_suffix_spellings`
-    # call site keeps resolving. See `model/namespace_spelling.py`'s own
-    # module docstring for the full accounting.
-    _namespace_suffix_spellings as _namespace_suffix_spellings,
-)
+from .model.namespace_spelling import namespace_suffix_spellings
 from .model.surface_facts import in_public_surface
+from .model.vocabulary import NON_PUBLIC_ORIGINS
 from .name_classification import STDLIB_TYPE_NAMESPACE_PREFIXES
 
 if TYPE_CHECKING:
@@ -85,18 +77,6 @@ _finditer_allow_nested = finditer_allow_nested
 # resolves to the bare ``"basic_string<...>"`` (no ``__cxx11::`` at all).
 _STDLIB_ABI_NAMESPACE_MARKERS: tuple[str, ...] = ("__1::", "__ndk1::", "__cxx11::")
 
-# Provenance origins that are confidently NOT part of the public header
-# surface (same set as idioms.py's _NON_PUBLIC_ORIGINS, ADR-024/027) -- a
-# function retained from one of these headers is not a public reachability
-# root even when Visibility.PUBLIC (linkage and origin are independent axes;
-# Codex review). EXPORT_ONLY/UNKNOWN are deliberately not included here:
-# EXPORT_ONLY means "exported, no header at all" rather than "confidently
-# private", and UNKNOWN is the no-public-header-set default that must stay
-# inclusive so this degrades to the pre-provenance behaviour.
-_NON_PUBLIC_ORIGINS = frozenset(
-    {ScopeOrigin.PRIVATE_HEADER, ScopeOrigin.SYSTEM_HEADER, ScopeOrigin.GENERATED}
-)
-
 
 def _record_identity(name: str, qualified_name: str | None) -> str:
     """The best available fully-qualified spelling for a record: the
@@ -107,7 +87,7 @@ def _record_identity(name: str, qualified_name: str | None) -> str:
     return qualified_name or name
 
 
-def _stripped_signature_spelling(identity: str) -> str | None:
+def stripped_signature_spelling(identity: str) -> str | None:
     """The namespace-prefix-stripped spelling a real dumper backend's own
     ``Function.return_type``/``Param.type``/``TypeField.type`` strings
     actually use for *identity*, or ``None`` if *identity* carries no
@@ -154,11 +134,11 @@ def _stripped_signature_spelling(identity: str) -> str | None:
 
 def _bare_type_name(identity: str) -> str:
     """*identity* with its outer namespace-qualification fully stripped —
-    the innermost suffix from :func:`_namespace_suffix_spellings` (the
+    the innermost suffix from :func:`namespace_suffix_spellings` (the
     fully bare leaf), keeping any inner qualified template arguments
     intact. See that function's docstring for the full rationale.
     """
-    return _namespace_suffix_spellings(identity)[-1]
+    return namespace_suffix_spellings(identity)[-1]
 
 
 def _non_stdlib_signature_spellings(
@@ -166,7 +146,7 @@ def _non_stdlib_signature_spellings(
 ) -> frozenset[str]:
     """Every spelling a real dumper backend could use in a signature to
     name *some* non-stdlib record: its full identity, plus every
-    namespace-suffix spelling from :func:`_namespace_suffix_spellings`
+    namespace-suffix spelling from :func:`namespace_suffix_spellings`
     (not just the fully bare leaf).
 
     Deliberately broader than :func:`_spelling_index`'s own ``record_index``
@@ -188,7 +168,7 @@ def _non_stdlib_signature_spellings(
     """
     spellings: set[str] = set()
     for identity in non_stdlib_identities:
-        spellings.update(_namespace_suffix_spellings(identity))
+        spellings.update(namespace_suffix_spellings(identity))
     return frozenset(spellings)
 
 
@@ -234,7 +214,7 @@ def _spelling_index(
     bare form) — every one of them is recorded, not just the first.
 
     A non-stdlib record's own namespace-suffix spelling (see
-    :func:`_namespace_suffix_spellings` — every suffix obtainable by
+    :func:`namespace_suffix_spellings` — every suffix obtainable by
     dropping some prefix of its scope chain, not just the fully bare
     leaf) is dropped instead of recorded when it is ambiguous — shared by
     two or more *different* non-stdlib records (Codex review, fresh
@@ -294,7 +274,7 @@ def _spelling_index(
     stdlib_index: dict[str, set[str]] = {}
     for identity in stdlib_identities:
         stdlib_index.setdefault(identity, set()).add(identity)
-        stripped = _stripped_signature_spelling(identity)
+        stripped = stripped_signature_spelling(identity)
         if stripped is not None and stripped not in non_stdlib_spellings:
             stdlib_index.setdefault(stripped, set()).add(identity)
 
@@ -329,7 +309,7 @@ def _spelling_index(
             identity, identity
         ):
             record_index.setdefault(identity, set()).add(identity)
-        for suffix in _namespace_suffix_spellings(identity)[1:]:
+        for suffix in namespace_suffix_spellings(identity)[1:]:
             generic_bare.setdefault(suffix, set()).add(identity)
     for bare, ids in generic_bare.items():
         if (
@@ -356,7 +336,7 @@ def _spelling_index(
             # (not just refusing to add the *other* record's candidates) is
             # required, not merely safe (Codex review, fresh evidence):
             # direct-clang's own "drop the enclosing namespace" convention
-            # (see _namespace_suffix_spellings) means a signature declared
+            # (see namespace_suffix_spellings) means a signature declared
             # *inside* namespace api can spell api::Inner bare as "Inner"
             # too, so leaving record_index["Inner"] pointing at the
             # unrelated global Inner would misattribute that signature to
@@ -383,7 +363,7 @@ def _typedef_spelling_targets(
     ``std::string`` parameter): ``snapshot.typedefs["std::string"]``
     resolves to the bare ``"basic_string<char, std::char_traits<char>,
     std::allocator<char> >"`` (matching the real ``RecordType``'s identity
-    after :func:`_stripped_signature_spelling`), but the typedef *key*
+    after :func:`stripped_signature_spelling`), but the typedef *key*
     itself is the fully-qualified ``"std::string"`` while the DWARF
     backend's own signature spelling is the bare ``"string"`` — the exact
     same bare-vs-qualified split ``_spelling_index`` already handles for
@@ -411,7 +391,7 @@ def _typedef_spelling_targets(
     ``RecordType`` identity. Without this, a public signature using the
     bare alias never resolves through this typedef target at all, silently
     missing a stdlib field reachable through it. Reuses
-    :func:`_namespace_suffix_spellings` (every suffix, not just the fully
+    :func:`namespace_suffix_spellings` (every suffix, not just the fully
     bare leaf — already correct for qualified template arguments and for
     a partially-qualified nested-class spelling) rather than a separate
     stdlib-only stripper, since this case has nothing to do with stdlib
@@ -456,8 +436,8 @@ def _typedef_spelling_targets(
         candidates = {
             c
             for c in (
-                _stripped_signature_spelling(key),
-                *_namespace_suffix_spellings(key),
+                stripped_signature_spelling(key),
+                *namespace_suffix_spellings(key),
             )
             if c is not None and c != key
         }
@@ -508,8 +488,8 @@ def _typedef_candidate_spellings(
         if key not in non_stdlib_spellings:
             candidates.add(key)
         for form in (
-            _stripped_signature_spelling(key),
-            *_namespace_suffix_spellings(key),
+            stripped_signature_spelling(key),
+            *namespace_suffix_spellings(key),
         ):
             if form is not None and form != key and form not in non_stdlib_spellings:
                 candidates.add(form)
@@ -547,8 +527,8 @@ def _raw_typedef_spellings(typedefs: dict[str, str]) -> dict[str, frozenset[str]
     for key, target in typedefs.items():
         targets.setdefault(key, set()).add(target)
         for form in (
-            _stripped_signature_spelling(key),
-            *_namespace_suffix_spellings(key),
+            stripped_signature_spelling(key),
+            *namespace_suffix_spellings(key),
         ):
             if form is not None:
                 targets.setdefault(form, set()).add(target)
@@ -656,7 +636,7 @@ def _is_public_non_stdlib_declaration(
         return False
     if not in_public_surface(decl):
         return False
-    if decl.origin in _NON_PUBLIC_ORIGINS:
+    if decl.origin in NON_PUBLIC_ORIGINS:
         return False
     if exclude_export_only and decl.origin is ScopeOrigin.EXPORT_ONLY:
         return False

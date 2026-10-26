@@ -245,7 +245,7 @@ Follow the pointer whose trigger matches your task:
    (ELF/PE/Mach-O, DWARF presence, versioning, SYCL), `build.py` (L3, bundle,
    wheel), `source.py` (L4/L5, surface reconciliation). The `*_KINDS` sets in
    `checker_policy.py` are derived from `default_verdict` — edit the registry
-   entry, never the sets; `change_registry.py` holds no entries.
+   entry, never the sets; `model/change_catalog/assembled.py` holds no entries.
 3. Implement detection in the matching diff module with
    `@registry.detector("...")`, like its neighbors.
 4. Add a unit test.

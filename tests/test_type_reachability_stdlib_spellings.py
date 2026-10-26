@@ -1422,7 +1422,7 @@ class TestTypedefResolvingToTheSameRecordIsNotACollision:
 
 class TestTypedefTargetMustMatchTheCapturedIdentityNotJustItsStrippedForm:
     """Codex review, fresh evidence: comparing a colliding typedef's target
-    against `identity` via `_stripped_signature_spelling` on *both* sides
+    against `identity` via `stripped_signature_spelling` on *both* sides
     (an earlier revision of the collision-exception check) also strips
     inline ABI-tag namespaces (`__cxx11::`, `__1::`, `__ndk1::`) -- so a
     typedef whose real target names a *different*, differently-ABI-tagged
@@ -1436,7 +1436,7 @@ class TestTypedefTargetMustMatchTheCapturedIdentityNotJustItsStrippedForm:
     differently-ABI-tagged sibling be confirmed against the wrong,
     captured record. The fix requires either an exact target match or a
     genuine structural namespace-suffix spelling of `identity` itself
-    (`_namespace_suffix_spellings`, which can never manufacture this
+    (`namespace_suffix_spellings`, which can never manufacture this
     ABI-tag coincidence)."""
 
     def test_a_typedef_targeting_a_differently_abi_tagged_uncaptured_sibling_is_a_real_collision(
@@ -1499,7 +1499,7 @@ class TestTypedefTargetMustMatchTheCapturedIdentityNotJustItsStrippedForm:
 
 class TestTypedefTargetSuffixMustNotBeARealCapturedIdentityElsewhere:
     """Codex review, fresh evidence: the structural namespace-suffix
-    exception above (`_namespace_suffix_spellings`) is itself not safe
+    exception above (`namespace_suffix_spellings`) is itself not safe
     unqualified -- a typedef target string can equal one of `identity`'s
     own structural suffixes while *also* being the real, distinct identity
     of an unrelated non-stdlib record/enum captured in this same snapshot.

@@ -39,7 +39,6 @@ import re
 from collections.abc import Callable, Iterable, Mapping
 from typing import Any, TypeVar, cast
 
-from .change_registry import REGISTRY
 from .compare.dedup_key import hashable_value
 from .compare.type_map_pair import Q, Side, TypeMap, TypeMapPair
 from .fact_provenance import (
@@ -47,13 +46,11 @@ from .fact_provenance import (
 )
 from .model import AbiSnapshot
 from .model.change import Change
+from .model.change_catalog.assembled import REGISTRY
 from .model.change_catalog.kinds import ChangeKind
 
 # Imported directly from the canonical model-layer location (ADR-061 D9's
-# target owner for this catalog logic) rather than via change_registry's own
-# re-export, so this doesn't grow change_registry.py past its 2000-line
-# adoption-debt ceiling for a name nothing external currently imports
-# through that path.
+# target owner for this catalog logic).
 from .model.change_catalog.registry import TEMPLATE_VOCAB as TEMPLATE_VOCAB
 from .model.execution_cache import memoized
 from .model.identity import EntityId
@@ -79,7 +76,7 @@ def make_change(
 
     The C6 *change factory*: a thin wrapper over the :class:`Change` dataclass
     that keeps a kind's description wording next to its verdict/impact in
-    ``change_registry`` instead of hand-rolled at the call site.
+    ``change_catalog.assembled`` instead of hand-rolled at the call site.
 
     * When ``description`` is given it is used verbatim — the *bespoke* path,
       first-class for findings whose text embeds computed offsets, demangled

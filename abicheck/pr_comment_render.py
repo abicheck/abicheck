@@ -173,7 +173,7 @@ def _flat_row(f: Finding) -> str:
     evidence in the Detail column — a maintainer thinks in the signature,
     not the mangled name, but the mangled form is still the real linker
     fact behind a binary-level finding. Full-detail rows also carry the
-    report's own `impact` field (`change_registry.py`'s per-kind `impact=`
+    report's own `impact` field (`model/change_catalog/assembled.py`'s per-kind `impact=`
     template) when present, labelled **Impact:** — deliberately not
     "**Fix:**" (Codex review): an `impact=` entry is a free-form
     explanation of consequences, not a guaranteed repair step — e.g.

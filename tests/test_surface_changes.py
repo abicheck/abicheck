@@ -472,7 +472,7 @@ def test_every_change_entity_is_classified_as_surface_or_non_surface() -> None:
     (`tests/regressions/manifest.py`): a missing classification that fails
     nothing. Adding a member must force a decision here.
     """
-    from abicheck.change_registry import ChangeEntity
+    from abicheck.model.change_catalog.registry import ChangeEntity
     from abicheck.report.surface_changes import (
         _NON_SURFACE_ENTITIES,
         _PUBLIC_SURFACE_ENTITIES,

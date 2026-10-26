@@ -349,7 +349,7 @@ _EQUIVALENT_CHANGE_CATEGORIES = {
 
 # Kinds whose old_value/new_value (and, for a handful, description) genuinely
 # hold a C/C++ type spelling -- verified individually against each kind's
-# emission call site and change_registry.py description_template, not
+# emission call site and model/change_catalog/assembled.py description_template, not
 # guessed. Used only by _change_discriminator's canonicalize_values=True path
 # (report_canonical_finding_id) to decide which findings need
 # canonicalize_type_name normalization at all (Codex review, PR #753, two
@@ -358,7 +358,7 @@ _EQUIVALENT_CHANGE_CATEGORIES = {
 # whitespace is semantically meaningful), and unconditionally dropping
 # description to avoid that same corruption instead collided distinct
 # findings that share kind+symbol+old+new and differ only by a per-item
-# identity description embeds via change_registry's `{detail}` (e.g.
+# identity description embeds via change_catalog.assembled's `{detail}` (e.g.
 # TYPE_FIELD_TYPE_CHANGED's own sibling struct_field_type_changed embeds a
 # field name this way). Deliberately not exhaustive -- every kind here was
 # checked against a real call site; a kind absent from this set still has
@@ -405,7 +405,7 @@ _TYPE_BEARING_DISCRIMINATOR_KINDS = frozenset(
         "template_return_type_changed",
         # diff_atomic.py/diff_char8t.py/diff_bit_int.py: old_value/new_value
         # are iter_type_slot_changes()'s raw type-slot spellings, and
-        # `detail` (folded into `description` via change_registry's
+        # `detail` (folded into `description` via change_catalog.assembled's
         # `{detail}` placeholder) is always a fixed direction string, never
         # a per-item identity -- see this set's own comment above.
         "atomic_qualifier_changed",
@@ -428,7 +428,7 @@ _TYPE_BEARING_DISCRIMINATOR_KINDS = frozenset(
     }
 )
 
-#: Kinds whose ``change_registry`` ``description_template`` embeds the raw
+#: Kinds whose ``change_catalog.assembled`` ``description_template`` embeds the raw
 #: ``{old}``/``{new}`` type spelling verbatim, NOT at the start of the
 #: sentence (Codex review, fresh evidence): ``struct_field_type_changed``
 #: ("Field type changed: {name}::{detail} {old} → {new}"),
@@ -441,7 +441,7 @@ _TYPE_BEARING_DISCRIMINATOR_KINDS = frozenset(
 #: canonicalized. ``atomic_qualifier_changed``/``char8t_migration``/
 #: ``bit_int_width_changed`` have the identical shape --
 #: ``"_Atomic {detail} on {name}: {old} → {new}. ..."`` and siblings
-#: (``change_registry.py``) all embed ``{old} → {new}`` after a leading
+#: (``model/change_catalog/assembled.py``) all embed ``{old} → {new}`` after a leading
 #: ``{detail}`` clause, never at sentence start. The remaining allowlisted
 #: kinds' templates never embed {old}/{new} at all (`"Return type changed:
 #: {name}"` and siblings), so this set is still narrower than

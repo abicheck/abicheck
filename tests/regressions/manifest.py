@@ -68,7 +68,7 @@ __all__ = ["BUG_CLASSES", "BugClass", "KnownGap", "all_ids", "get"]
 
 #: The whole registry: this module's analysis classes plus each per-axis
 #: sibling's own list. An assembly point, the shape `abicheck/
-#: change_registry.py` already uses -- adding a class to a sibling needs no
+#: model/change_catalog/assembled.py` already uses -- adding a class to a sibling needs no
 #: edit here.
 BUG_CLASSES: tuple[BugClass, ...] = (
     ANALYSIS_1_BUG_CLASSES

@@ -128,7 +128,7 @@ def _non_declaration_kind_slugs() -> frozenset[str]:
     contract-coverage exit (``toolchain_flag_drift``, the ``bundle_*`` and
     ``sycl_*`` families, ``imported_symbol_*`` in the SVS report).
     """
-    from .change_registry import REGISTRY
+    from .model.change_catalog.assembled import REGISTRY
     from .model.change_catalog.dimensions import ContractSubject
 
     return REGISTRY.contract_subject_kinds(
@@ -363,12 +363,12 @@ def _decision_for_surface_reason(
 
 # Genuine "a wholly new entity/commitment appears" kinds that `ADDITION_KINDS`
 # misses purely because that set is scoped to *compatible* additions
-# (`change_registry.py`'s `default_verdict`, a verdict-category concern) --
+# (`model/change_catalog/assembled.py`'s `default_verdict`, a verdict-category concern) --
 # not because these kinds are shaped any differently. Each is the direct
 # breaking/risky sibling of an addition shape already recognized:
 # `type_field_added` is `type_field_added_compatible`'s same "a new field
 # appears" shape, just breaking when the class isn't guaranteed final
-# (`change_registry.py`: "New field shifts subsequent fields"); mirroring
+# (`model/change_catalog/assembled.py`: "New field shifts subsequent fields"); mirroring
 # `virtual_method_added`'s own registry impact text ("A new virtual method
 # was added to a class that already exists"), it is unambiguously a new
 # member appearing, not an existing member gaining a property, the same

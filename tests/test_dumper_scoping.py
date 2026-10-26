@@ -841,7 +841,7 @@ class TestEndToEndCompareAfterScoping:
     identically). A dependency type that *is* directly referenced by a kept
     public signature (e.g. ``std::string`` taken by a public function) is
     retained precisely so a real layout drift on it is not silently lost --
-    see ``_directly_referenced_dependency_names``."""
+    see ``directly_referenced_dependency_names``."""
 
     def test_own_library_break_detected_dependency_noise_excluded(self):
         from abicheck.change_registry_types import Verdict

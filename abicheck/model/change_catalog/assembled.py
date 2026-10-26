@@ -12,7 +12,13 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Single-declaration ChangeKind registry — colocated metadata.
+"""The assembled production ``ChangeKind`` registry and its default-verdict sets.
+
+The model-layer owner of ``REGISTRY`` (ADR-061 D9): ``policy``, ``compare``,
+``report`` and the root legacy modules import it, and the derived
+``BREAKING_KINDS``/``API_BREAK_KINDS``/``COMPATIBLE_KINDS``/``RISK_KINDS``,
+from here. It replaced the root ``abicheck/change_registry.py``, which had
+become this assembly point with nothing else in it.
 
 Each ChangeKind declares ALL its metadata in one place:
   - default_verdict (BREAKING / API_BREAK / COMPATIBLE / COMPATIBLE_WITH_RISK)
@@ -42,22 +48,15 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from .model.change_catalog.build import BUILD_ENTRIES
-from .model.change_catalog.disposition import DISPOSITION_ENTRIES
-from .model.change_catalog.kinds import ChangeKind
-from .model.change_catalog.platform import PLATFORM_ENTRIES
-from .model.change_catalog.registry import (  # noqa: F401
-    ChangeEntity as ChangeEntity,
-    ChangeKindMeta as ChangeKindMeta,
-    ChangeKindRegistry as ChangeKindRegistry,
-    ChangeOperation as ChangeOperation,
-    ContractSubject as ContractSubject,
-    Verdict as Verdict,
-)
-from .model.change_catalog.source import SOURCE_ENTRIES
-from .model.change_catalog.source_graph_risk import SOURCE_GRAPH_RISK_ENTRIES
-from .model.change_catalog.symbols import SYMBOLS_ENTRIES
-from .model.change_catalog.types import TYPES_ENTRIES
+from .build import BUILD_ENTRIES
+from .disposition import DISPOSITION_ENTRIES
+from .kinds import ChangeKind
+from .platform import PLATFORM_ENTRIES
+from .registry import ChangeKindRegistry, Verdict
+from .source import SOURCE_ENTRIES
+from .source_graph_risk import SOURCE_GRAPH_RISK_ENTRIES
+from .symbols import SYMBOLS_ENTRIES
+from .types import TYPES_ENTRIES
 
 if TYPE_CHECKING:
     from collections.abc import Iterable

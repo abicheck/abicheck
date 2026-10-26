@@ -27,7 +27,7 @@ Split out of ``manifest.py`` when that module hit its
 ``manifest.py`` keeps the registry's behavior -- ``get``/``all_ids``, the
 id-uniqueness and seed-test-existence checks -- and becomes an assembly
 point over per-axis entry lists, the same shape ``abicheck/
-change_registry.py`` already has over ``model/change_catalog/``'s taxonomy
+model/change_catalog/assembled.py`` already has over ``model/change_catalog/``'s taxonomy
 modules. Adding a class here needs no edit to ``manifest.py`` at all.
 """
 

@@ -152,7 +152,7 @@ class TestMachoNormalizesFunctionAndVariableOccurrences:
     Mach-O ``mangledName`` carries the Darwin linker's leading underscore
     (``"__Z..."``) that castxml's own spelling never does (``"_Z..."``) --
     already handled for the flat ``functions``/``variables`` lists via
-    ``_macho_normalize_mangled``, but the identical rewrite was missing for
+    ``macho_normalize_mangled``, but the identical rewrite was missing for
     ``semantic_ir`` until this round, so an affected declaration was
     retained TWICE in the merged IR (once under each spelling) while the
     flat snapshot had it once, correctly normalized.
@@ -262,7 +262,7 @@ class TestHybridDropsUnmatchedConstantOccurrences:
     field's own comment in ``merge_snapshots()``), but ``merge_semantic_ir``
     is generic over every ``EntityKind`` and would otherwise append an
     unmatched clang-only ``CONSTANT`` occurrence into the merged IR
-    unconditionally -- ``_drop_unmatched_constant_occurrences`` closes that
+    unconditionally -- ``drop_unmatched_constant_occurrences`` closes that
     gap so ``semantic_ir`` never names a constant the rest of the snapshot
     does not know exists.
     """

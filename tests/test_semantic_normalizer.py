@@ -303,7 +303,7 @@ def test_normalize_header_ast_includes_synthetic_ctor_key_functions() -> None:
     -- not a stable cross-backend identity, and one `dumper_hybrid.
     _merge_functions` can later rewrite it to a real clang-matched mangled
     name/entity_id during a hybrid merge. That rewrite is now propagated
-    into `semantic_ir` too (`dumper_hybrid._rewrite_semantic_ir_entity_ids`),
+    into `semantic_ir` too (`dumper_hybrid.rewrite_semantic_ir_entity_ids`),
     so this per-backend normalizer no longer needs to guess and exclude --
     a single-backend (non-hybrid) dump has no rewrite step at all, and this
     occurrence is exactly as real as any other function's (Codex review,

@@ -61,7 +61,7 @@ Core pipeline (in order of data flow):
    `semantic_ir`, including through `--ast-frontend hybrid`'s
    reconciliation (`workflows/dump/hybrid_merge.py`'s own Mach-O mangled-name and
    ctor/dtor synthetic-key identity rewrites are propagated into
-   `semantic_ir` via `_rewrite_semantic_ir_entity_ids`, so a hybrid merge
+   `semantic_ir` via `rewrite_semantic_ir_entity_ids`, so a hybrid merge
    never leaves one representation keyed under a retired identity another
    already moved past). **Fourth slice landed:** constants too — both
    backends already attach a real `entity_id` to every public constant
@@ -664,7 +664,6 @@ Core pipeline (in order of data flow):
    - `binder.py` — symbol binding logic
    - `resolver.py` — symbol resolution
    - `type_metadata.py`, `dwarf_utils.py` — shared type helpers
-   - `change_registry.py` — change kind registry
    - `service.py` — service layer (Python API). One typed request/result pair:
      `CompareRequest` -> `CompareResult` and `DumpRequest`. ADR-068 Phase 4's
      typed-API slice retired `ScanRequest`/`ScanResult` (and `run_scan`/
@@ -797,7 +796,7 @@ cover the surrounding first-party trees this file doesn't detail.
      public/private surface reconciliation, declaration identity
      (`buildsource/source_diff.py` and siblings)
 
-   `abicheck/change_registry.py` is now a pure assembly point (imports each
+   `abicheck/model/change_catalog/assembled.py` is now a pure assembly point (imports each
    taxonomy's entry list, constructs the single production `REGISTRY`) — it
    holds no `ChangeKindMeta` entries itself; don't add one there. `impact`
    must be non-empty — `ChangeKindRegistry` rejects an entry with no

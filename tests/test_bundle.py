@@ -1076,7 +1076,7 @@ class TestIntraDepSignatureChanged:
         # BREAKING bundle finding. The promotable set must be a strict,
         # proper subset of the confirmed set (bundle_signature_evidence's
         # own suppression set), and every kind promoted to BREAKING must
-        # itself carry default_verdict=BREAKING in change_registry.py.
+        # itself carry default_verdict=BREAKING in model/change_catalog/assembled.py.
         from abicheck.bundle_models import (
             CONFIRMED_C_BOUNDARY_SIGNATURE_BREAK_KINDS,
             PROMOTABLE_C_BOUNDARY_SIGNATURE_BREAK_KINDS,
@@ -1084,8 +1084,8 @@ class TestIntraDepSignatureChanged:
         from abicheck.bundle_signature_evidence import (
             _CONFIRMED_SIGNATURE_CHANGE_KINDS,
         )
-        from abicheck.change_registry import REGISTRY
         from abicheck.checker_policy import Verdict
+        from abicheck.model.change_catalog.assembled import REGISTRY
 
         assert PROMOTABLE_C_BOUNDARY_SIGNATURE_BREAK_KINDS < (
             CONFIRMED_C_BOUNDARY_SIGNATURE_BREAK_KINDS
@@ -1486,7 +1486,7 @@ class TestIntraDepSignatureChanged:
     def test_plugin_abi_policy_suppresses_calling_convention_promotion(self) -> None:
         # G38 stabilization (Codex review, fresh evidence): CALLING_
         # CONVENTION_CHANGED is COMPATIBLE under the plugin_abi policy
-        # (change_registry.py's own policy_overrides), but the original
+        # (model/change_catalog/assembled.py's own policy_overrides), but the original
         # fix promoted it to an unconditionally-BREAKING
         # BUNDLE_INTRA_DEP_SIGNATURE_CHANGED regardless of policy --
         # defeating the exact override compute_verdict(policy="plugin_abi")

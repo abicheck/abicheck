@@ -21,7 +21,7 @@ uninstantiated templates, source/symbol mapping loss, ODR conflicts, and
 generated-header changes.
 
 Per ADR-028 D3 / ADR-030 D6 these findings are never ``BREAKING`` on their own
-(the partition is fixed in ``change_registry.py``: each is ``API_BREAK`` or
+(the partition is fixed in ``model/change_catalog/assembled.py``: each is ``API_BREAK`` or
 ``RISK``). Each finding's ``source_location`` carries the explicit L4 evidence
 boundary (ADR-030 D10) so a source/API risk is never read as a proven shipped
 binary break.

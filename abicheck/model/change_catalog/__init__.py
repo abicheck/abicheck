@@ -20,7 +20,7 @@ and the catalog-validation logic D9 assigns to the assembled registry. The
 397-entry data table itself is fully repartitioned by taxonomy into five
 sibling modules — ``symbols.py``, ``types.py``, ``platform.py``,
 ``build.py``, ``source.py`` (see each module's own docstring for its scope
-and categorization methodology) — which ``abicheck/change_registry.py``
+and categorization methodology) — which the sibling ``assembled.py``
 imports and concatenates into the single production ``REGISTRY``.
 """
 

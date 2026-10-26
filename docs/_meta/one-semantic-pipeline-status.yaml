@@ -343,7 +343,7 @@ concepts:
       all still falls through to the spelling tier unconditionally (no
       identity for strict to narrow). type_reachability.py's own
       spelling-matching machinery
-      (_spelling_index/_stripped_signature_spelling/
+      (_spelling_index/stripped_signature_spelling/
       _non_stdlib_signature_spellings and _record_identity's three call
       sites) is deliberately NOT migrated: those strings are spellings
       that must appear inside a rendered Function.return_type/Param.type,
@@ -420,8 +420,8 @@ concepts:
       compare/opaque_types.py stay spelling-based too. Re-audited
       type_reachability.py in the same pass and found nothing further to
       migrate: its own remaining string-based machinery
-      (_spelling_index/_stripped_signature_spelling/
-      _typedef_spelling_targets/_namespace_suffix_spellings) was already
+      (_spelling_index/stripped_signature_spelling/
+      _typedef_spelling_targets/namespace_suffix_spellings) was already
       investigated and deliberately left on raw strings across three
       prior slices (ninth, twelfth, fourteenth) for the reason already
       recorded above -- those strings must appear inside rendered

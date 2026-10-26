@@ -316,25 +316,31 @@ EXTRACTION_BUG_CLASSES: tuple[BugClass, ...] = (
             "friends included) or a variable declared by a dependency's "
             "header, or a weak template instance in a dependency-only "
             "namespace -- that no public declaration of the library names and "
-            "the library's binary does not define (a GLOBAL export) is "
+            "the library's binary does not define (a GLOBAL ELF export, a "
+            "Mach-O export that is not a weak definition, any PE export) is "
             "recorded but out of contract (dependency_internal_unreachable), "
             "on a DWARF-only and on a header-derived snapshot alike; one the "
             "library names or defines stays in contract. A header-only SIMD "
             "dependency (intel/xvec) rebuilt -mavx2 against -mavx512f gated "
             "a header compare on ~90 of its own instances while the library's "
-            "own break was 6 findings."
+            "own break was 6 findings. A finding raised on a record follows the "
+            "record's presence: judged on the side that declares it when only "
+            "one does, internal on both when both do, so a record a release "
+            "starts (or stops) naming publicly keeps its leak in contract."
         ),
-        fixed_by=(1775, 1813),
+        fixed_by=(1775, 1813, 1819),
         seed_tests=(
             "tests/test_header_dependency_internals.py",
             "tests/test_family_f1_evidence_ablation.py",
             "tests/test_contract_dependency_origin.py",
             "tests/test_header_dependency_internals_integration.py",
             "tests/test_dwarf_dependency_scope_integration.py",
+            "tests/test_dependency_record_leak_integration.py",
         ),
         public_surfaces=("cli",),
         axes={
             "evidence": ("dwarf_only", "headers_stored", "headers_live"),
+            "record_state_per_side": ("absent", "reached", "internal", "unread"),
             "entity": (
                 "record",
                 "typedef",
@@ -347,6 +353,7 @@ EXTRACTION_BUG_CLASSES: tuple[BugClass, ...] = (
                 "nested_include_root",
                 "no_recorded_include_root",
             ),
+            "export_table": ("elf", "macho", "pe"),
         },
     ),
     BugClass(

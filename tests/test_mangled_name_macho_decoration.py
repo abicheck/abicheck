@@ -17,7 +17,7 @@
 canonical ``"__Z..."`` -> ``"_Z..."`` structural check three call sites
 share (``extract.headers.clang.context.strip_darwin_itanium_decoration``,
 ``model.mangled_name._itanium_strip_prefix``, ``dumper_hybrid.
-_macho_normalize_mangled``) -- plus a real-compiler-independent property
+macho_normalize_mangled``) -- plus a real-compiler-independent property
 suite over the *shape* invariant it states, and a direct unit check on
 ``extract.headers.clang.context.is_darwin_target``'s ``sys.platform``
 probe-failure fallback (bug class ``extraction.

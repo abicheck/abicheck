@@ -1921,9 +1921,9 @@ typedef key is `"std::string"` and the record is
 `std::__cxx11::basic_string<...>` — exactly the bare-vs-qualified gap
 `AGENTS.md` documents at length for `type_reachability.py`. Resolving it is
 what the implemented guard does: `_resolvable_type_spellings` reuses that
-module's `_namespace_suffix_spellings` (partial qualification —
+module's `namespace_suffix_spellings` (partial qualification —
 direct-clang prints `api::Outer::Inner` as `"Outer::Inner"`) and
-`_stripped_signature_spelling` (the stdlib namespace and `__cxx11::`/`__1::`
+`stripped_signature_spelling` (the stdlib namespace and `__cxx11::`/`__1::`
 inline-ABI markers) over every record, enum, and typedef key, rather than
 matching index keys literally.
 

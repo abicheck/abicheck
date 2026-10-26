@@ -47,22 +47,25 @@ finding).
 **What "reached" means, entity by entity.**
 
 * A dependency **record** is reached when a public declaration of the library
-  names it directly (``dependency_retention._directly_referenced_dependency_names``,
+  names it directly (``dependency_retention.directly_referenced_dependency_names``,
   the single-hop walk dump-time scoping already applies, typedef aliases
   resolved). ``basic_vec<float>`` named by ``State::acc``'s ``V`` is reached
   and stays in contract, layout and presence; ``simd_fixed_size_abi<8>``,
   reachable only as its template argument, is not.
 * A dependency **function or variable** is the library's only when the
-  library's own binary defines it: a ``GLOBAL`` ELF export (any export on PE
-  and Mach-O, which record no binding). A hidden friend of a reached record is
+  library's own binary defines it: a ``GLOBAL`` ELF export, a Mach-O export
+  that is not a weak definition, any PE export (a PE export directory records
+  no binding, so on PE the dependency's exported instances stay in contract:
+  ADR-089's PE limit). A hidden friend of a reached record is
   no exception: it is the dependency's API on that type, compiled into every
   consumer from the dependency's own header, and the library promises nothing
   about it. What the library does promise about the type -- its identity, size
   and layout wherever its declarations use it -- keeps gating through the
-  record's own findings. A ``WEAK``/``GNU_UNIQUE`` export is a COMDAT copy of
-  such an entity, so it does not make one the library's, and one declared in a
-  dependency-only namespace is internal even when no header declaration names
-  it (``fakesimd::reduce<float>``, emitted by the library's own build).
+  record's own findings. A ``WEAK``/``GNU_UNIQUE`` ELF export or a Mach-O weak
+  definition is a COMDAT copy of such an entity, so it does not make one the
+  library's, and one declared in a dependency-only namespace is internal even
+  when no header declaration names it (``fakesimd::reduce<float>``, emitted by
+  the library's own build).
 * A dependency **typedef** (a member of a dependency record, or one in a
   dependency-only namespace) is reached when its name occurs in a public
   declaration's signature, field or default, or in the library's own header
@@ -80,6 +83,7 @@ from __future__ import annotations
 import posixpath
 import re
 from collections.abc import Callable, Sequence
+from dataclasses import replace
 from typing import TypeVar
 
 from ...compare.template_surface import qualified_name_lookup, strip_template_args
@@ -90,12 +94,12 @@ from ...model.elf_facts import SymbolBinding
 from ...model.export_index import build_raw_export_index, linked_export_names
 from ...model.surface_facts import in_public_surface
 from ...model.synthetic_key import synthetic_ctor_owner
+from ...model.vocabulary import NON_PUBLIC_ORIGINS
 from ...policy.contract_dependency_origin import DependencyInternals
-from ...type_reachability import _NON_PUBLIC_ORIGINS
 from .dependency_retention import (
-    _candidate_identity,
-    _directly_referenced_dependency_names,
-    _kept_signature_haystack,
+    candidate_spelling,
+    directly_referenced_dependency_names,
+    kept_signature_haystack,
 )
 from .dwarf_dependency_types import unreachable_dependency_type_names
 
@@ -114,11 +118,16 @@ def dependency_internals(snap: AbiSnapshot) -> DependencyInternals:
     """*snap*'s dependency internals no public declaration reaches.
 
     Empty when the snapshot cannot tell its own declarations from a
-    dependency's.
+    dependency's. ``record_names`` is always filled: it is the side's
+    presence evidence for a finding raised on a record, internal or not.
     """
     if not snap.from_headers:
-        return DependencyInternals(types=unreachable_dependency_type_names(snap))
-    return _header_dependency_internals(snap)
+        internals = DependencyInternals(types=unreachable_dependency_type_names(snap))
+    else:
+        internals = _header_dependency_internals(snap)
+    decls = snap.declarations
+    records: list[RecordType | EnumType] = [*decls.types, *decls.enums]
+    return replace(internals, record_names=frozenset(r.name for r in records))
 
 
 def include_roots(compile_args: Sequence[str]) -> tuple[str, ...]:
@@ -229,26 +238,46 @@ def _top_namespace(qualified: str) -> str:
 
 def _library_provided_names(snap: AbiSnapshot) -> frozenset[str] | None:
     """The names *snap*'s binary defines as its own, or ``None`` when it has
-    no export table (a symbol's non-export cannot be proven then)."""
+    no export table (a symbol's non-export cannot be proven then).
+
+    A coalesced (COMDAT) export is not one of them: :func:`_coalesced_export_names`.
+    """
     elf = snap.elf
     if elf is not None and elf.symbols:
         return frozenset(
             s.name for s in elf.symbols if s.binding is SymbolBinding.GLOBAL
         )
     index = build_raw_export_index(snap)
-    return linked_export_names(index) if index is not None else None
+    if index is None:
+        return None
+    return linked_export_names(index) - _coalesced_export_names(snap)
+
+
+def _coalesced_export_names(snap: AbiSnapshot) -> frozenset[str]:
+    """Exports *snap*'s binary marks as a coalesced definition, which every
+    translation unit that uses the entity may emit: an ELF ``WEAK``/
+    ``GNU_UNIQUE`` binding, a Mach-O weak definition (``N_WEAK_DEF``, the
+    export trie's ``EXPORT_SYMBOL_FLAGS_WEAK_DEFINITION``). A PE export
+    directory records no such flag (the linker resolved COMDAT selection
+    away), so none is read there: ADR-089's PE limit.
+    """
+    if snap.elf is not None:
+        return frozenset(
+            s.name
+            for s in snap.elf.symbols
+            if s.binding in (SymbolBinding.WEAK, SymbolBinding.UNIQUE)
+        )
+    if snap.macho is not None:
+        return frozenset(e.name for e in snap.macho.exports if e.is_weak)
+    return frozenset()
 
 
 def _weak_exports_in(snap: AbiSnapshot, namespaces: set[str]) -> frozenset[str]:
-    """Weak/unique ELF exports declared in one of *namespaces*."""
-    elf = snap.elf
-    if elf is None or not namespaces:
-        return frozenset()
+    """Coalesced exports declared in one of *namespaces*."""
     return frozenset(
-        s.name
-        for s in elf.symbols
-        if s.binding in (SymbolBinding.WEAK, SymbolBinding.UNIQUE)
-        and itanium_top_namespace(s.name) in namespaces
+        name
+        for name in _coalesced_export_names(snap)
+        if itanium_top_namespace(name) in namespaces
     )
 
 
@@ -297,7 +326,7 @@ def _internal_typedefs(
 ) -> frozenset[str]:
     """Bare names of the dependency typedefs no public declaration names."""
     qualified = snap.declarations.typedefs_qualified
-    own_scopes = {_candidate_identity(r) for r in own_records}
+    own_scopes = {candidate_spelling(r) for r in own_records}
 
     def is_dependency_typedef(key: str) -> bool:
         if _top_namespace(key) not in dep_only_namespaces:
@@ -339,7 +368,7 @@ def _header_dependency_internals(snap: AbiSnapshot) -> DependencyInternals:
     def namespace(decl: _Declaration) -> str:
         if isinstance(decl, Function | Variable):
             return _declaration_namespace(decl, name_of)
-        return _top_namespace(_candidate_identity(decl))
+        return _top_namespace(candidate_spelling(decl))
 
     own_namespaces = {
         namespace(d) for d in every if not at_dependency_path(d.source_header)
@@ -368,24 +397,24 @@ def _header_dependency_internals(snap: AbiSnapshot) -> DependencyInternals:
     root_functions = [
         f
         for f in own_functions
-        if in_public_surface(f) and f.origin not in _NON_PUBLIC_ORIGINS
+        if in_public_surface(f) and f.origin not in NON_PUBLIC_ORIGINS
     ]
     root_variables = [
         v
         for v in own_variables
-        if in_public_surface(v) and v.origin not in _NON_PUBLIC_ORIGINS
+        if in_public_surface(v) and v.origin not in NON_PUBLIC_ORIGINS
     ]
     root_types = [
         t
         for t in own_records
-        if isinstance(t, RecordType) and t.origin not in _NON_PUBLIC_ORIGINS
+        if isinstance(t, RecordType) and t.origin not in NON_PUBLIC_ORIGINS
     ]
     root_enums = [
         e
         for e in own_records
-        if isinstance(e, EnumType) and e.origin not in _NON_PUBLIC_ORIGINS
+        if isinstance(e, EnumType) and e.origin not in NON_PUBLIC_ORIGINS
     ]
-    reached = _directly_referenced_dependency_names(
+    reached = directly_referenced_dependency_names(
         root_functions,
         root_variables,
         root_types,
@@ -397,7 +426,7 @@ def _header_dependency_internals(snap: AbiSnapshot) -> DependencyInternals:
     types = frozenset(
         r.name
         for r in dep_records
-        if _candidate_identity(r) not in reached and r.name not in own_names
+        if candidate_spelling(r) not in reached and r.name not in own_names
     )
 
     symbols: frozenset[str] = frozenset()
@@ -419,7 +448,7 @@ def _header_dependency_internals(snap: AbiSnapshot) -> DependencyInternals:
     typedefs: frozenset[str] = frozenset()
     if snap.public_header_identifiers is not None:
         reference_text = kept_reference_text(
-            _kept_signature_haystack(root_functions, root_variables, root_types),
+            kept_signature_haystack(root_functions, root_variables, root_types),
             root_functions,
             root_types,
             root_enums,

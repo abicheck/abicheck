@@ -82,7 +82,7 @@ topics:
   verdicts:
     canonical_page: learn/verdicts.md
     fact_sources:
-      - abicheck/change_registry.py
+      - abicheck/model/change_catalog/assembled.py
       - abicheck/checker_policy.py
       - abicheck/policy/classification.py
       - abicheck/model/evidence_status.py
@@ -148,7 +148,7 @@ topics:
   change-kinds:
     canonical_page: reference/change-kinds.md
     fact_sources:
-      - abicheck/change_registry.py
+      - abicheck/model/change_catalog/assembled.py
       - abicheck/checker_policy.py
       - abicheck/policy/classification.py
     reference_page: reference/detector-spec.md

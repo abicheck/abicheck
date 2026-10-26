@@ -189,7 +189,7 @@ def test_castxml_free_verdict_matches_ground_truth(
     if expected == "API_BREAK" and got == "COMPATIBLE_WITH_RISK":
         # ADR-084: no header or source producer ran, so the canonical source-level
         # claim is demoted, and each API_BREAK-kind finding records the rule.
-        from abicheck.change_registry import API_BREAK_KINDS
+        from abicheck.model.change_catalog.assembled import API_BREAK_KINDS
         from abicheck.policy.binary_gated_contract import BINARY_GATE_RULE_ID
 
         claims = [c for c in result.changes if c.kind in API_BREAK_KINDS]

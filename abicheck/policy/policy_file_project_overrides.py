@@ -37,8 +37,8 @@ from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
-from ..change_registry_types import Verdict
 from ..model.change_catalog.kinds import ChangeKind
+from ..model.change_catalog.registry import Verdict
 
 
 def resolve_project_config_policy_overrides(

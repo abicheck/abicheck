@@ -311,7 +311,7 @@ class TestDirectlyReferencedDependencyRetention:
         stored already namespace/ABI-tag-stripped (`basic_string<...>`),
         while the record's own identity is the full, qualified spelling
         (`std::__cxx11::basic_string<...>`) -- these must still resolve via
-        `_stripped_signature_spelling`, not just exact string equality."""
+        `stripped_signature_spelling`, not just exact string equality."""
         snap = AbiSnapshot(
             library="libfoo.so",
             version="1.0",

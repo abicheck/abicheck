@@ -37,7 +37,7 @@ from typing import Any
 
 import pytest
 
-from abicheck.change_registry import API_BREAK_KINDS
+from abicheck.model.change_catalog.assembled import API_BREAK_KINDS
 from abicheck.policy.binary_gated_contract import (
     BINARY_GATED,
     HEADER_OR_SOURCE_GATED,

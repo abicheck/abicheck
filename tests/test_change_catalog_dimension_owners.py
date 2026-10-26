@@ -31,7 +31,7 @@ Every one of these came from reading the emitting code, not the kind's name
 
 from __future__ import annotations
 
-from abicheck.change_registry import REGISTRY
+from abicheck.model.change_catalog.assembled import REGISTRY
 from abicheck.report.view import ShowOnlyFilter
 
 
@@ -51,8 +51,8 @@ class TestASymbolTableFactIsNotClaimedAsAFunction:
     """
 
     def _entity(self, kind_name):
-        from abicheck.change_registry import REGISTRY
         from abicheck.checker_policy import ChangeKind
+        from abicheck.model.change_catalog.assembled import REGISTRY
 
         return REGISTRY.entity_for(ChangeKind(kind_name))
 
@@ -92,8 +92,8 @@ class TestAPersistingCallableWithAChangedSignatureIsModified:
     """
 
     def _operation(self, kind_name):
-        from abicheck.change_registry import REGISTRY
         from abicheck.checker_policy import ChangeKind
+        from abicheck.model.change_catalog.assembled import REGISTRY
 
         return REGISTRY.operation_for(ChangeKind(kind_name))
 
@@ -147,7 +147,7 @@ class TestAnOverlayKindTakesItsEntityFromWhatTriggeredIt:
     """
 
     def _entity(self, kinds):
-        from abicheck.change_registry import unanimous_entity_for
+        from abicheck.model.change_catalog.assembled import unanimous_entity_for
 
         return unanimous_entity_for(kinds)
 
@@ -165,7 +165,7 @@ class TestAnOverlayKindTakesItsEntityFromWhatTriggeredIt:
         """The oracle is the catalog itself, swept over every kind that can
         actually trigger this detector -- so the helper cannot drift from
         what the registry says about those same kinds."""
-        from abicheck.change_registry import BREAKING_KINDS, REGISTRY
+        from abicheck.model.change_catalog.assembled import BREAKING_KINDS, REGISTRY
 
         disagreeing = {}
         for kind in BREAKING_KINDS:
@@ -177,13 +177,13 @@ class TestAnOverlayKindTakesItsEntityFromWhatTriggeredIt:
         assert not disagreeing, disagreeing
 
     def test_the_sweep_is_not_vacuous(self):
-        from abicheck.change_registry import BREAKING_KINDS
+        from abicheck.model.change_catalog.assembled import BREAKING_KINDS
 
         assert len(BREAKING_KINDS) > 50
 
     def test_the_catalog_declares_the_kind_polymorphic(self):
         """Without this the discriminator the detector sets is ignored."""
-        from abicheck.change_registry import REGISTRY
+        from abicheck.model.change_catalog.assembled import REGISTRY
 
         assert (
             REGISTRY.entity_from_field_for("internal_symbol_required_by_public_api")
@@ -226,8 +226,8 @@ class TestJUnitClassnamesComeFromTheCatalog:
         """The claim worth pinning: one taxonomy, not two that happen to
         agree today. Swept over the whole catalog against the same resolver
         `--view show=` uses."""
-        from abicheck.change_registry import REGISTRY
         from abicheck.checker_policy import ChangeKind
+        from abicheck.model.change_catalog.assembled import REGISTRY
 
         mapping = {
             "function": "functions",
@@ -539,7 +539,7 @@ class TestAnInlineBodyChangeIsAFunctionFinding:
     """
 
     def test_the_catalog_declares_it_a_function(self):
-        from abicheck.change_registry import ChangeEntity
+        from abicheck.model.change_catalog.registry import ChangeEntity
 
         assert REGISTRY.entity_for("inline_body_changed") is ChangeEntity.FUNCTION
 

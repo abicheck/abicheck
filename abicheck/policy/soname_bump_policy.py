@@ -25,10 +25,10 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
-from ..change_registry import BREAKING_KINDS
 from ..diff_helpers import make_change
 from ..model.binary_naming import strip_vendor_hash
 from ..model.change import Change
+from ..model.change_catalog.assembled import BREAKING_KINDS
 from ..model.change_catalog.kinds import ChangeKind
 from ..model.change_catalog.registry import Verdict
 from ..model.elf_facts import ElfMetadata

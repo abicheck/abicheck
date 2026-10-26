@@ -11713,7 +11713,7 @@ opaque identity would be meaningless.
 *What was investigated and deliberately not migrated.* The rest of
 `type_reachability.py`/`type_reachability_spelling.py` — `_record_identity`'s
 three call sites, `_spelling_index`, `_typedef_spelling_targets`,
-`_namespace_suffix_spellings`, `_stripped_signature_spelling` — stays on raw
+`namespace_suffix_spellings`, `stripped_signature_spelling` — stays on raw
 strings, which is the identical conclusion the **ninth slice** reached and
 recorded, re-verified here rather than taken on trust. Those strings are not
 opaque identities: they must appear *inside* a rendered
@@ -14982,7 +14982,7 @@ dodging it in the normalizer**: `_merge_functions` now returns (via an
 output-param dict) every `old_entity_id -> new_entity_id` substitution its
 own ctor/dtor structural match makes, and `dumper_hybrid.merge_snapshots()`
 applies the identical substitution to `castxml_snap.semantic_ir` (through
-`_rewrite_semantic_ir_entity_ids`, the same primitive the Mach-O
+`rewrite_semantic_ir_entity_ids`, the same primitive the Mach-O
 mangled-name fix below introduces) *before* reconciling it with clang's --
 so a matched declaration is never left keyed under its retired synthetic
 identity in one representation while `merged_functions` already carries the
@@ -15163,7 +15163,7 @@ clang-only function/variable/type/enum (all of which genuinely ARE unioned
 into their own flat fields, unlike constants). Left unfiltered, a
 clang-only constant would surface through `semantic_ir` with no
 corresponding entry in `merged.constants`/`constant_entity_ids` at all --
-`dumper_hybrid._drop_unmatched_constant_occurrences` closes the gap,
+`dumper_hybrid.drop_unmatched_constant_occurrences` closes the gap,
 filtering the merged IR's `CONSTANT` occurrences (and their conflict-key
 entries) to the identical kept-entity-id set `constant_entity_ids`'s own
 union-then-filter already computes. (2) `dumper_clang_expr._expr_
@@ -15390,7 +15390,7 @@ retained it TWICE in the merged `semantic_ir`, even though the flat
 `functions`/`variables` lists (matched on the bare mangled string, not
 `EntityId`, via `dumper_hybrid._merge_functions`'s own `clang_by_mangled`
 lookup) already unified it. `dumper_hybrid.py`'s own Mach-O
-underscore-stripping rewrite (`_macho_normalize_semantic_ir`) could not
+underscore-stripping rewrite (`macho_normalize_semantic_ir`) could not
 have closed this even in principle: it only re-spells the `"mangled"`
 tag's VALUE, never its KIND, so a `("mangled", "_foo")` identity stays
 tagged `"mangled"` no matter how the trailing string is normalized. The
@@ -17476,8 +17476,8 @@ not new design.
   distinction `find_by_value_types` already draws. Re-verified, not
   re-litigated, the three prior slices' (ninth/twelfth/fourteenth)
   finding that the rest of `type_reachability.py`'s own machinery
-  (`_spelling_index`/`_stripped_signature_spelling`/
-  `_typedef_spelling_targets`/`_namespace_suffix_spellings`) stays on raw
+  (`_spelling_index`/`stripped_signature_spelling`/
+  `_typedef_spelling_targets`/`namespace_suffix_spellings`) stays on raw
   strings by design: those strings must appear inside rendered signature
   text rather than stand for an entity, and the module performs no
   cross-snapshot pairing at all, so there is no old/new identity question

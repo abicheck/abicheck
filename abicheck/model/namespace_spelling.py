@@ -13,7 +13,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""``_namespace_suffix_spellings`` -- every suffix spelling of a qualified
+"""``namespace_suffix_spellings`` -- every suffix spelling of a qualified
 identity obtainable by dropping some prefix of its namespace/class-scope
 chain (ADR-063 Track 2, 5B closure).
 
@@ -46,7 +46,7 @@ scope parsers for the identical reason.
 from __future__ import annotations
 
 
-def _namespace_suffix_spellings(identity: str) -> list[str]:
+def namespace_suffix_spellings(identity: str) -> list[str]:
     """Every suffix spelling of *identity* obtainable by dropping some
     prefix of its namespace/class-scope chain, at each ``"::"`` boundary
     that occurs at template-argument bracket depth zero — from the full

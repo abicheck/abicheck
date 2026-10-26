@@ -73,12 +73,8 @@ serialization/`isinstance`/pickling-by-qualified-reference are all still
 identical to the original class-based enum).
 
 ``checker_policy.py`` re-exports ``ChangeKind`` from here (``from
-.model.change_catalog.kinds import ChangeKind as ChangeKind``) rather than
-routing it through ``change_registry.py``'s existing re-export point,
-mirroring that module's own precedent for ``VALID_BASE_POLICIES``: nothing
-outside `checker_policy.py` currently imports `ChangeKind` via
-`change_registry`, so there is no reason to grow that file for a path
-nothing uses. Every one of the ~220 existing ``from .checker_policy import
+.model.change_catalog.kinds import ChangeKind as ChangeKind``), its owner,
+the same way it re-exports ``VALID_BASE_POLICIES`` from ``registry.py``. Every one of the ~220 existing ``from .checker_policy import
 ChangeKind`` call sites keeps working unchanged.
 
 Leaf module: no internal imports beyond its three sibling data files
@@ -110,7 +106,7 @@ ChangeKind = StrEnum(
 )
 ChangeKind.__doc__ = (
     "One kind of detected ABI/API change (397 members).\n\n"
-    "See ``abicheck/change_registry.py`` for the single-declaration metadata "
+    "See ``abicheck/model/change_catalog/assembled.py`` for the single-declaration metadata "
     "registry (impact text, default verdict, policy overrides) each member "
     "here has exactly one corresponding entry in -- this enum carries only "
     "identity (name + serialized value), never classification."

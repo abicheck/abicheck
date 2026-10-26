@@ -912,7 +912,7 @@ def test_header_declaration_ablation_never_hides_an_export_removal(
 # a declaration's location. Losing one may only keep more findings in
 # contract: every internal set under ablation is a subset of the full one.
 def _ablate_export_table(snap):
-    snap.elf = None
+    snap.elf = snap.macho = snap.pe = None
 
 
 def _ablate_public_origin(snap):
@@ -951,17 +951,13 @@ _DEPENDENCY_ABLATION_EMPTIES = {
 
 @pytest.mark.parametrize("ablation", sorted(_DEPENDENCY_ABLATIONS))
 def test_dependency_internals_never_grow_under_ablation(ablation: str) -> None:
-    from test_header_dependency_internals import CASES, _snapshot
+    from test_header_dependency_internals import CASES, _kwargs, _snapshot
 
     from abicheck.workflows.dump.dependency_internals import dependency_internals
 
     grew = []
-    for layout, vec_named, binding, traits_named in CASES:
-        kwargs = {
-            "vec_named": vec_named,
-            "helper_binding": binding,
-            "traits_named": traits_named,
-        }
+    for case in CASES:
+        layout, kwargs = case[0], _kwargs(case)
         full = dependency_internals(_snapshot(layout, **kwargs))
         snap = _snapshot(layout, **kwargs)
         _DEPENDENCY_ABLATIONS[ablation](snap)
