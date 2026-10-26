@@ -403,3 +403,22 @@ def test_a_declined_primary_package_names_why(
             lambda _path: True,  # a package sniff that claims it
             detect_extractor,
         )
+
+
+@pytest.mark.parametrize("name", ["pkg.zip", "pkg.whl", "pkg.tar.gz"])
+def test_a_zip_with_a_damaged_central_directory_is_corrupt(
+    tmp_path: Path, name: str
+) -> None:
+    """The end record alone (what ``zipfile.is_zipfile`` checks) does not make
+    a zip readable: a damaged central directory is corruption, under any
+    name."""
+    import zipfile
+
+    pkg = _real_zip(tmp_path / name)
+    data = bytearray(pkg.read_bytes())
+    central = data.rindex(b"PK\x01\x02")
+    data[central : central + 4] = b"XXXX"
+    pkg.write_bytes(bytes(data))
+    assert zipfile.is_zipfile(pkg)
+    with pytest.raises(CorruptPackageArchiveError):
+        require_readable_archive(pkg)

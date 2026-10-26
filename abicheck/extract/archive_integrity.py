@@ -115,9 +115,11 @@ def require_readable_archive(path: Path) -> None:
     tar is never corrupt, whatever its name says. Called by the release-input
     resolver after every extractor declined, so it never changes detection.
     """
-    if not path.is_file() or zipfile.is_zipfile(path) or _readable_tar(path):
+    if not path.is_file() or _readable_tar(path):
         return
     _zip_entry_names(path)
+    if zipfile.is_zipfile(path):
+        return  # a zip whose member list reads, whatever its suffix says
     name = path.name.lower()
     if (
         name.endswith(_TAR_FAMILY_SUFFIXES)
