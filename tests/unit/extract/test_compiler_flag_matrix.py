@@ -70,8 +70,8 @@ ROWS = [
     ("gnu -I is structured", GCC, ["-I", "inc"], False, False, False),
     ("msvc /I separate", MSVC, ["/I", "inc"], False, False, True),
     ("msvc /I under gcc", GCC, ["/I", "inc"], False, False, False),
-    ("msvc /external:I separate", MSVC, ["/external:I", "inc"], False, False, False),
-    ("msvc /external:I joined", MSVC, ["/external:Iinc"], False, False, False),
+    ("msvc /external:I separate", MSVC, ["/external:I", "inc"], False, False, True),
+    ("msvc /external:I joined", MSVC, ["/external:Iinc"], False, False, True),
     ("msvc /external:I under gcc", GCC, ["/external:I", "inc"], False, False, False),
     ("gnu -include forced", GCC, ["-include", "cfg.h"], False, False, True),
     ("msvc /FI forced", MSVC, ["/FI", "cfg.h"], False, False, True),
@@ -108,13 +108,28 @@ def test_joined_x_keeps_the_exact_token() -> None:
     assert emulation_arguments(["-xc++"], cc_bin="g++", cc_id="gnu") == ["-xc++"]
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="known gap: /external:I is not carried into the replayed argv "
-    "(test_external_include_does_not_change_the_rendered_replay pins it out)",
+@pytest.mark.parametrize(
+    ("argv", "expected"),
+    [
+        pytest.param(
+            ["/external:I", "inc"], ["/external:I", "inc"], id="slash-separate"
+        ),
+        pytest.param(["/external:Iinc"], ["/external:Iinc"], id="slash-joined"),
+        pytest.param(
+            ["-external:I", "inc"], ["-external:I", "inc"], id="dash-separate"
+        ),
+        pytest.param(["-external:Iinc"], ["-external:Iinc"], id="dash-joined"),
+        pytest.param(
+            ["/EXTERNAL:i", "inc"], ["/EXTERNAL:i", "inc"], id="case-separate"
+        ),
+        pytest.param(["/External:Iinc"], ["/External:Iinc"], id="case-joined"),
+        # Other /external: options keep their existing (not carried) handling.
+        pytest.param(["/external:W3"], [], id="external-W-not-carried"),
+        pytest.param(["/external:anglebrackets"], [], id="anglebrackets-not-carried"),
+        pytest.param(["/external:env:INCLUDE"], [], id="env-not-carried"),
+    ],
 )
-def test_msvc_external_include_operand_is_carried_with_its_directory() -> None:
-    assert _scan_argv_for_extra_flags(["/external:I", "inc"], "msvc") == [
-        "/external:I",
-        "inc",
-    ]
+def test_external_include_spellings_are_carried_with_their_directory(
+    argv: list[str], expected: list[str]
+) -> None:
+    assert _scan_argv_for_extra_flags(argv, "msvc") == expected

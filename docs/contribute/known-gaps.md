@@ -232,12 +232,6 @@ current emitter, which is unchanged.
 
 **Status (2026-10-16): OPEN.** The root Action now says which baseline it compared against, in its `baseline-source`, `baseline-asset-name`, `baseline-project-ref`, `baseline-generation` and `baseline-profile` outputs and in a "Baseline source" step-summary block. The JSON report, which a downstream consumer reads on its own, does not carry that provenance, so it cannot tell a legacy asset from a baseline-set, or which `project_ref` was checked. The nearest existing owner is ADR-065's acquisition record (`abicheck/model/scope_acquisition.py`). It records a per-member *state* (`available`, `failed`, `expected_not_produced`, and so on), not the artifact or revision a member was read from, so it does not already carry this. Adding the fields there is a report-schema change with its own decision and golden updates, so it is not made here.
 
-#### MSVC/clang-cl include operands reach the public-root probe, not the replayed argv (2026-10-23)
-
-**Status (2026-10-23): PARTIAL.** `parse_compile_invocation` reads `/I`, `-I` and `/external:I` (separate and joined spellings) from a CL-mode argv into `CompilerInvocation.replayed_include_dirs`, which `clang_public_roots` probes, so a `/external:I` root that holds the public headers is no longer missed. Still open: those operands are not rendered into the AST-dump argv (only `/I` is carried today), so a declaration that comes only through a `-I` or `/external:I` include is not replayed. `/imsvc` (a system bucket) is not probed at all.
-
-`false-clean` — A public header reached only through a `-I` or `/external:I` include under clang-cl is probed as a public root, but the replayed AST dump does not search that directory, so a declaration that comes only through it is not replayed. An MSVC `/imsvc` include tree is never a probed public root.
-
 ### False-positive risk
 
 #### A typedef retargeted inside a template argument still reads as a removal plus an addition under headers (2026-10-25)

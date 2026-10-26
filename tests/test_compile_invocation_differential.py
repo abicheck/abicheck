@@ -372,9 +372,12 @@ def test_external_include_is_a_public_root_candidate(tmp_path: Path) -> None:
     assert [raw for raw, _ in _compile_unit_include_roots(cu)] == ["ext"]
 
 
-def test_external_include_does_not_change_the_rendered_replay(tmp_path: Path) -> None:
-    # The typed probe field widens; the replayed argv does not. ``/external:I``
-    # reaches the probe only, so its rendered replay is unchanged by this change.
+def test_external_include_is_carried_into_the_rendered_replay(tmp_path: Path) -> None:
+    # Formerly pinned the opposite (``/external:I`` reached the probe only).
+    # The replay driver is clang in ``--driver-mode=cl``, which accepts
+    # ``/external:I`` itself, so the operand is carried verbatim with its
+    # directory, as ``/I`` is. Without it the replay searched a different
+    # directory set than the real compile (the system-include headers went
+    # missing or resolved differently).
     cu = _single_unit(tmp_path, "clang-cl /c /external:I ext src.cpp")
-    assert "/external:I" not in replayed_tokens_for(cu)
-    assert "ext" not in replayed_tokens_for(cu)
+    assert replayed_tokens_for(cu) == ["/external:I", "ext"]

@@ -452,13 +452,26 @@ def _match_gnu_include_search(tok: str, argv: list[str], i: int, out: list[str])
     return i
 
 
+def _is_external_include_option(tok: str) -> bool:
+    """True when *tok* is ``/external:I`` or ``-external:I``, in either spelling.
+
+    MSVC option names are case-insensitive, so ``/EXTERNAL:i`` matches too. A
+    joined form carries its directory after the option name; the bare option
+    name and ``/external:I`` followed by a longer suffix are the only matches.
+    Other ``/external:`` options (``W<n>``, ``anglebrackets``, ``env:``) are not.
+    """
+    head = tok.lower()
+    return head.startswith(("/external:i", "-external:i"))
+
+
 def _match_msvc_include_search(
     tok: str, argv: list[str], i: int, out: list[str]
 ) -> int:
-    """Try to match an MSVC ``/I`` include-search token (MSVC mode only).
+    """Try to match an MSVC include-search token (MSVC mode only).
 
-    Returns the new ``i`` after consumption, or the original ``i`` if no match.
-    Both the separate (``/I dir``) and joined (``/Idir``) spellings are handled.
+    Handles ``/I``, ``/Idir`` and the ``/external:I`` / ``-external:I`` family,
+    each in its separate (``/I dir``) or joined (``/Idir``) spelling. Returns
+    the new ``i`` after consumption, or the original ``i`` if no match.
     """
     if tok == "/I" and i + 1 < len(argv):
         out += [tok, argv[i + 1]]  # MSVC /I dir (separate operand)
@@ -466,6 +479,17 @@ def _match_msvc_include_search(
     if len(tok) > 2 and tok.startswith("/I"):
         out.append(tok)  # MSVC /Idir (joined)
         return i + 1
+    if _is_external_include_option(tok):
+        # Carried verbatim: the replay driver is clang in ``--driver-mode=cl``,
+        # which accepts ``/external:I`` itself, so no translation to ``-I`` or
+        # ``-isystem`` is needed.
+        option_length = len("/external:I")
+        if len(tok) == option_length and i + 1 < len(argv):
+            out += [tok, argv[i + 1]]  # /external:I dir (separate operand)
+            return i + 2
+        if len(tok) > option_length:
+            out.append(tok)  # /external:Idir (joined)
+            return i + 1
     return i
 
 
