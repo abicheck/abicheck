@@ -352,3 +352,54 @@ def test_a_readable_archive_is_never_corrupt_whatever_its_name(
     bad.write_bytes(good.read_bytes()[:40])
     with pytest.raises(CorruptPackageArchiveError):
         require_readable_archive(bad)
+
+
+def test_unreadable_paths_are_never_archives(tmp_path: Path) -> None:
+    """A path that cannot be opened as a file (here a directory with an
+    archive name) is neither zip- nor tar-readable, and a non-file operand is
+    left to the caller rather than called corrupt."""
+    from abicheck.extract.archive_integrity import _head_bytes, _readable_tar
+
+    d = tmp_path / "pkg.tar.gz"
+    d.mkdir()
+    assert _head_bytes(d, 4) == b""
+    assert _readable_tar(d) is False
+    require_readable_archive(d)
+
+
+def test_a_truncated_wheel_is_declined_by_detection(tmp_path: Path) -> None:
+    bad = tmp_path / "x-1.0-py3-none-any.whl"
+    bad.write_bytes(b"PK\x03\x04truncated")
+    assert detect_extractor(bad) is None
+
+
+@pytest.mark.parametrize(
+    ("payload", "message"),
+    [
+        (b"PK\x03\x04truncated", "corrupt or truncated archive"),
+        (None, "Unrecognized package format"),
+    ],
+)
+def test_a_declined_primary_package_names_why(
+    tmp_path: Path, payload: bytes | None, message: str
+) -> None:
+    """A primary operand no extractor accepts is reported corrupt when its
+    bytes are an unreadable archive, and unrecognized when they are a
+    readable one no extractor claims."""
+    from abicheck.errors import ReleaseOperandContentError
+    from abicheck.workflows.release_inputs import extract_if_package
+
+    pkg = tmp_path / "x-1.0-py3-none-any.whl"
+    if payload is None:
+        _real_zip(pkg)
+    else:
+        pkg.write_bytes(payload)
+    with pytest.raises(ReleaseOperandContentError, match=message):
+        extract_if_package(
+            pkg,
+            None,
+            None,
+            lambda prefix: tmp_path / prefix,
+            lambda _path: True,  # a package sniff that claims it
+            detect_extractor,
+        )

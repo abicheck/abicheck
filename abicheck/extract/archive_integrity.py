@@ -97,18 +97,6 @@ def _zip_entry_names(path: Path) -> list[str]:
         ) from exc
 
 
-def _zip_members_for_sniff(path: Path) -> list[str]:
-    """:func:`_zip_entry_names` for a detection predicate: ``[]`` when corrupt.
-
-    ``detect()`` is a bool contract; a corrupt archive is answered "not mine"
-    here and reported by :func:`require_readable_archive` on the release path.
-    """
-    try:
-        return _zip_entry_names(path)
-    except CorruptPackageArchiveError:
-        return []
-
-
 def _readable_tar(path: Path) -> bool:
     """Whether :mod:`tarfile` recognises *path* (plain, gzip, bzip2 or xz)."""
     try:
