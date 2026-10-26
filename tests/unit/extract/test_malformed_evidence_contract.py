@@ -264,3 +264,58 @@ def test_compare_cli_names_a_corrupt_archive_operand(
     assert result.exit_code != 0
     assert ("corrupt or truncated archive" in result.output) is corrupt
     assert ("Cannot detect format" in result.output) is not corrupt
+
+
+def _real_tar(path: Path) -> Path:
+    import io
+    import tarfile
+
+    with tarfile.open(path, "w") as tf:
+        data = b"x"
+        info = tarfile.TarInfo("usr/lib/libx.so")
+        info.size = len(data)
+        tf.addfile(info, io.BytesIO(data))
+    return path
+
+
+def _extract(
+    primary: Path, debug_pkg: Path | None = None, devel_pkg: Path | None = None
+) -> Any:
+    import tempfile
+
+    from abicheck.extract.packages import is_package
+    from abicheck.workflows.release_inputs import extract_if_package
+
+    return extract_if_package(
+        primary,
+        debug_pkg,
+        devel_pkg,
+        lambda prefix: Path(tempfile.mkdtemp(prefix=prefix)),
+        is_package,
+        detect_extractor,
+    )
+
+
+def test_a_readable_archive_under_a_misleading_name_is_not_corrupt(
+    tmp_path: Path,
+) -> None:
+    """Content decides: a valid tar named ``.zip`` is extracted by the tar
+    extractor, never reported corrupt by the suffix-based integrity check."""
+    pkg = _real_tar(tmp_path / "pkg.zip")
+    lib_dir, *_ = _extract(pkg)
+    assert any(p.name == "libx.so" for p in lib_dir.rglob("*"))
+
+
+@pytest.mark.parametrize("role", ["debug_pkg", "devel_pkg"])
+def test_a_corrupt_companion_package_is_named_corrupt(
+    tmp_path: Path, role: str
+) -> None:
+    from abicheck.errors import ReleaseOperandContentError
+
+    primary = _real_tar(tmp_path / "pkg.tar")
+    bad = tmp_path / "companion.whl"
+    bad.write_bytes(b"PK\x03\x04truncated")
+    with pytest.raises(
+        ReleaseOperandContentError, match="corrupt or truncated archive"
+    ):
+        _extract(primary, **{role: bad})

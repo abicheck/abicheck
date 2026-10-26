@@ -138,3 +138,14 @@ def test_external_include_spellings_are_carried_with_their_directory(
     argv: list[str], expected: list[str]
 ) -> None:
     assert _scan_argv_for_extra_flags(argv, "msvc") == expected
+
+
+@pytest.mark.parametrize("family", [GCC, CLANG], ids=["gcc", "clang"])
+@pytest.mark.parametrize("target", ["--target", "-target"])
+def test_target_never_swallows_a_following_flag(
+    family: tuple[str, str], target: str
+) -> None:
+    """``--target -m32``: the next token is a flag, not a triple, so only the
+    bare target option is dropped and ``-m32`` is read on its own."""
+    kept = emulation_arguments([target, "-m32"], cc_bin=family[0], cc_id=family[1])
+    assert kept == ["-m32"]

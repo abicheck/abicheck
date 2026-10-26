@@ -222,9 +222,16 @@ def emulation_arguments(
             if _value_flag_kept(cc_id):
                 kept += [token, tokens[index + 1]]
             index += 2
-        elif token in _TARGET_SEPARATE_FLAGS and index + 1 < len(tokens):
+        elif token in _TARGET_SEPARATE_FLAGS:
+            # A triple never starts with "-": a following flag is not this
+            # option's operand, so only the bare option is dropped and the
+            # flag is read on its own (``--target -m32``).
+            operand = tokens[index + 1] if index + 1 < len(tokens) else ""
+            if not operand or operand.startswith("-"):
+                index += 1
+                continue
             if clang_family:
-                kept += [token, tokens[index + 1]]
+                kept += [token, operand]
             index += 2
         elif cc_id == "msvc" and token.startswith("-std="):
             translated = _msvc_std_for_emulation(token)
