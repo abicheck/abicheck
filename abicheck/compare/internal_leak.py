@@ -346,7 +346,7 @@ def detect_call_graph_leaks(
     Requires an embedded L5 graph on at least one snapshot (see
     :func:`compute_call_graph_leak_paths`); returns ``[]`` otherwise.
     """
-    from ..change_registry import BREAKING_KINDS
+    from ..model.change_catalog.assembled import BREAKING_KINDS
 
     internal_set = tuple(internal_namespaces)
     triggering_kinds = BREAKING_KINDS

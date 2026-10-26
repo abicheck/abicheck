@@ -430,7 +430,7 @@ def normalize_header_ast(
         # dodge a real hazard in `dumper_hybrid.merge_snapshots()` -- that
         # hazard is now closed AT THE SOURCE instead: `_merge_functions`'s
         # own ctor/dtor identity rewrite is propagated into the `semantic_ir`
-        # merge too, via `_rewrite_semantic_ir_entity_ids`, so this
+        # merge too, via `rewrite_semantic_ir_entity_ids`, so this
         # per-backend normalizer no longer needs to guess which functions a
         # LATER hybrid step might rewrite. A single-backend (non-hybrid)
         # dump has no such rewrite step at all, so excluding them there was

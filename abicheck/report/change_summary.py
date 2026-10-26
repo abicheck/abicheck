@@ -41,7 +41,7 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 
-from ..change_registry import ChangeEntity, ChangeOperation
+from ..model.change_catalog.registry import ChangeEntity, ChangeOperation
 from .change_operation import entity_for_kind, operation_for_kind
 
 #: Display label per canonical :class:`ChangeEntity`. Plural, because a row

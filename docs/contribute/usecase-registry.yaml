@@ -53,7 +53,7 @@ use_cases:
     journey_stages: [pr_review, trust]
     adrs: [ADR-010, ADR-011]
     evidence:
-      modules: [abicheck/change_registry.py, abicheck/checker_policy.py]
+      modules: [abicheck/model/change_catalog/assembled.py, abicheck/checker_policy.py]
       tests: [tests/test_changekind_completeness.py]
       examples: [catalog/ground_truth.json]
 

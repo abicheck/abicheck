@@ -43,7 +43,7 @@ class Finding:
     # not a "source API break" (Codex review, PR #595).
     severity: str = ""
     # Free-form consequence text, sourced verbatim from the report's own
-    # `impact` field (`change_registry.py`'s `impact=` on the matching
+    # `impact` field (`model/change_catalog/assembled.py`'s `impact=` on the matching
     # `ChangeKindMeta` entry) when present. Rendered under the finding's own
     # row as "**Impact:** ..." (`_flat_row`) whenever non-empty — not every
     # entry is an actionable remediation step, so it is never labelled "Fix".

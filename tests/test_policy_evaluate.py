@@ -13,10 +13,10 @@ from __future__ import annotations
 
 import pytest
 
-from abicheck.change_registry import REGISTRY
 from abicheck.checker_types import DiffResult
 from abicheck.contract_relevance_types import ContractRelevance
 from abicheck.model.change import Change
+from abicheck.model.change_catalog.assembled import REGISTRY
 from abicheck.model.change_catalog.kinds import ChangeKind
 from abicheck.model.change_catalog.registry import Verdict
 from abicheck.policy.evaluate import (

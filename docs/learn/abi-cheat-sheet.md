@@ -6,7 +6,7 @@ level: beginner
 summarizes:
   - verdicts
 depends_on:
-  - abicheck/change_registry.py
+  - abicheck/model/change_catalog/assembled.py
 lifecycle: active
 generated: false
 ---

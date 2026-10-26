@@ -12,7 +12,6 @@ partition, without needing a compiler.
 
 from __future__ import annotations
 
-from abicheck.change_registry import REGISTRY, Verdict
 from abicheck.checker import ChangeKind, compare
 from abicheck.checker_policy import BREAKING_KINDS
 from abicheck.dwarf_advanced import (
@@ -21,6 +20,8 @@ from abicheck.dwarf_advanced import (
     _parse_producer,
 )
 from abicheck.model import AbiSnapshot, Function, Visibility
+from abicheck.model.change_catalog.assembled import REGISTRY
+from abicheck.model.change_catalog.registry import Verdict
 
 
 def _snap(vector_abi_flags: set[str]) -> AbiSnapshot:

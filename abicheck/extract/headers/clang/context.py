@@ -435,7 +435,7 @@ def strip_darwin_itanium_decoration(
     name_decoration.macho.decode_itanium` for the shape test itself,
     the single canonical home for that structural check (also used by
     ``model.mangled_name``'s own Itanium-scope parsing and
-    ``dumper_hybrid._macho_normalize_mangled``) -- but only calls it once
+    ``dumper_hybrid.macho_normalize_mangled``) -- but only calls it once
     ``is_darwin_target`` has already confirmed the platform.
 
     Both gates lean on the SAME ``is_darwin_target`` check for their

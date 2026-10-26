@@ -46,7 +46,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
-from ..change_registry import ChangeEntity
+from ..model.change_catalog.registry import ChangeEntity
 from ..policy.evaluate import effective_kind_sets
 from .change_operation import entity_for_change, operation_for_kind
 from .finding import ReportFinding, build_report_findings, report_findings_for

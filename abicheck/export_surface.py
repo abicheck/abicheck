@@ -74,6 +74,7 @@ from .elf_symbol_filter import is_abi_relevant_elf_symbol
 from .model import AbiSnapshot, EnumType, Function, RecordType
 from .model.graph_entity_identity import GraphEntityIdentity
 from .model.graph_join import JoinState
+from .model.namespace_spelling import namespace_suffix_spellings
 from .model.type_identifiers import (
     IDENT_RE as _IDENT_RE,
     TYPE_NOISE as _TYPE_NOISE,
@@ -90,10 +91,7 @@ from .policy.public_surface_index import (
     _is_real_type,
     _symbol_keys,
 )
-from .type_reachability import (
-    _namespace_suffix_spellings,
-    _stripped_signature_spelling,
-)
+from .type_reachability_spelling import stripped_signature_spelling
 
 
 @dataclass
@@ -621,10 +619,10 @@ def _resolvable_type_spellings(
     machinery ``type_reachability.py`` built for that problem is reused
     rather than re-derived:
 
-    - :func:`~abicheck.type_reachability._namespace_suffix_spellings` for
+    - :func:`~abicheck.model.namespace_spelling.namespace_suffix_spellings` for
       partial qualification -- direct-clang prints ``api::Outer::Inner`` as
       ``"Outer::Inner"``, neither the full identity nor the bare leaf;
-    - :func:`~abicheck.type_reachability._stripped_signature_spelling` for
+    - :func:`~abicheck.type_reachability_spelling.stripped_signature_spelling` for
       the stdlib namespace and inline ABI-tag markers -- the DWARF backend
       spells a ``std::string`` parameter as the bare ``"string"`` while
       ``snap.typedefs``' key is the qualified ``"std::string"``, so without
@@ -672,11 +670,11 @@ def _register_spellings(
 ) -> None:
     """Record *identity*, and every equivalent spelling of it, as naming
     *node_id* in the in-progress *spellings* index."""
-    for form in (identity, _stripped_signature_spelling(identity)):
+    for form in (identity, stripped_signature_spelling(identity)):
         if not form:
             continue
         spellings.setdefault(form, set()).add(node_id)
-        for suffix in _namespace_suffix_spellings(form):
+        for suffix in namespace_suffix_spellings(form):
             spellings.setdefault(suffix, set()).add(node_id)
 
 
@@ -740,7 +738,7 @@ def _unscoped_identities(snap: AbiSnapshot) -> frozenset[str]:
     ]
     identities += [(en.name, en.qualified_name) for en in snap.declarations.enums]
     scoped_leaves = {
-        _namespace_suffix_spellings(qualified)[-1]
+        namespace_suffix_spellings(qualified)[-1]
         for name, qualified in identities
         if qualified and qualified != name
     }
@@ -874,7 +872,7 @@ def _named_nodes(tok: str, index: _SpellingIndex) -> frozenset[str]:
     # reach -- so the edge counted as resolved while the typedef it really
     # names was never followed. It is only a guess where the snapshot left a
     # gap; where the token matches outright there is no gap to guess about.
-    leaf = _namespace_suffix_spellings(tok)[-1]
+    leaf = namespace_suffix_spellings(tok)[-1]
     if leaf != tok and leaf in index.unscoped_leaves:
         named |= set(index.nodes_by_spelling.get(leaf, ()))
     return frozenset(named)

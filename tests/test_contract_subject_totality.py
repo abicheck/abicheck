@@ -28,7 +28,6 @@ import functools
 import pytest
 
 from abicheck.build_mode import BuildMode, StdlibFamily
-from abicheck.change_registry import REGISTRY
 from abicheck.checker import compare
 from abicheck.checker_policy import ChangeKind
 from abicheck.compatibility_evaluation_config import ValueProvenance
@@ -40,6 +39,7 @@ from abicheck.contract_relevance_types import (
 )
 from abicheck.model import AbiSnapshot, Function, ScopeOrigin, Visibility
 from abicheck.model.change import Change
+from abicheck.model.change_catalog.assembled import REGISTRY
 from abicheck.model.change_catalog.dimensions import (
     ChangeEntity,
     ChangeOperation,

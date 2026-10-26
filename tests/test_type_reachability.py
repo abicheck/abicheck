@@ -40,11 +40,11 @@ from abicheck.type_reachability import (
     _compile_spelling_pattern,
     _finditer_allow_nested,
     _non_stdlib_signature_spellings,
-    _stripped_signature_spelling,
     _typedef_spelling_targets,
     directly_referenced_stdlib_type_spellings,
     directly_referenced_stdlib_types,
 )
+from abicheck.type_reachability_spelling import stripped_signature_spelling
 
 
 def _fn(
@@ -655,13 +655,13 @@ class TestDirectlyReferencedStdlibTypes:
 
 class TestStrippedSignatureSpelling:
     def test_no_stdlib_prefix_returns_none(self) -> None:
-        assert _stripped_signature_spelling("MyNamespace::Widget") is None
+        assert stripped_signature_spelling("MyNamespace::Widget") is None
 
     def test_plain_std_prefix_stripped(self) -> None:
-        assert _stripped_signature_spelling("std::vector<int>") == "vector<int>"
+        assert stripped_signature_spelling("std::vector<int>") == "vector<int>"
 
     def test_libcxx_inline_namespace_stripped(self) -> None:
-        assert _stripped_signature_spelling("std::__1::vector<int>") == "vector<int>"
+        assert stripped_signature_spelling("std::__1::vector<int>") == "vector<int>"
 
 
 class TestCompileSpellingPattern:

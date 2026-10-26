@@ -1037,7 +1037,7 @@ def test_full_detail_expands_all_sections():
 
 
 def test_breaking_finding_renders_impact_field():
-    # A breaking finding's `impact` field (change_registry.py's per-kind
+    # A breaking finding's `impact` field (model/change_catalog/assembled.py's per-kind
     # consequence text, already emitted by reporter.py) answers "what does
     # this actually do" — the comment must surface it, not just the raw
     # kind/description. Labelled "Impact:", not "Fix:" (Codex review: not

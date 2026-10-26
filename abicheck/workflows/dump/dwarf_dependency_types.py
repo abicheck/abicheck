@@ -41,7 +41,7 @@ What the snapshot can say, and what it cannot:
   size, so every dependency record of that size is kept. An unresolved pointer
   or reference could name any dependency type, so none is excluded.
 
-Reachability reuses :func:`dependency_retention._directly_referenced_dependency_names`,
+Reachability reuses :func:`dependency_retention.directly_referenced_dependency_names`,
 the same single-hop walk the header-AST path applies: a dependency type named
 by a kept signature, field or base is reached; one reachable only through
 another dependency's own internals is not.
@@ -60,8 +60,8 @@ from ...extract.dependency_header_roots import is_dependency_header
 from ...model import AbiSnapshot, EnumType, RecordType
 from ...model.dwarf_facts import StructLayout
 from .dependency_retention import (
-    _candidate_identity,
-    _directly_referenced_dependency_names,
+    candidate_identity,
+    directly_referenced_dependency_names,
 )
 
 __all__ = ["unreachable_dependency_type_names"]
@@ -295,7 +295,7 @@ def unreachable_dependency_type_names(snap: AbiSnapshot) -> frozenset[str]:
     known = {r.name for r in records} | exported_base | _BUILTIN_WORDS
     unbounded, alias_sizes = _unresolved_alias_bounds(snap, own_types, known)
 
-    reached = _directly_referenced_dependency_names(
+    reached = directly_referenced_dependency_names(
         decls.functions,
         decls.variables,
         [_alias_resolved(t, targets) for t in own_types],
@@ -305,13 +305,13 @@ def unreachable_dependency_type_names(snap: AbiSnapshot) -> frozenset[str]:
     )
     for record in dependency:
         if record.name in exported_full:
-            reached.add(_candidate_identity(record))
+            reached.add(candidate_identity(record))
         if unbounded or _record_size_bytes(snap, record) in alias_sizes:
-            reached.add(_candidate_identity(record))
+            reached.add(candidate_identity(record))
 
     own_names = {r.name for r in records if id(r) not in dependency_ids}
     return frozenset(
         r.name
         for r in dependency
-        if _candidate_identity(r) not in reached and r.name not in own_names
+        if candidate_identity(r) not in reached and r.name not in own_names
     )

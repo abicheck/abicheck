@@ -7,7 +7,7 @@ level: intermediate
 canonical_for:
   - verdicts
 depends_on:
-  - abicheck/change_registry.py
+  - abicheck/model/change_catalog/assembled.py
   - abicheck/checker_policy.py
   - abicheck/policy/classification.py
   - abicheck/model/evidence_status.py

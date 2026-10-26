@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Regression coverage for ``dumper_hybrid._macho_normalize_mangled``'s
+"""Regression coverage for ``dumper_hybrid.macho_normalize_mangled``'s
 idempotence on an already-normalized Itanium mangled name.
 
 Split out of ``tests/test_dumper_hybrid.py`` (that file is already at its
@@ -29,7 +29,7 @@ undecorated ``Function.mangled``/``Variable.mangled`` too -- previously
 only the castxml+clang hybrid-merge path below normalized it). That means
 a clang-side ``Function``/``Variable`` reaching ``merge_snapshots`` is now
 ordinarily **already** in castxml's pure ``"_Z..."`` form, not the
-Mach-O-decorated ``"__Z..."`` shape ``_macho_normalize_mangled`` was
+Mach-O-decorated ``"__Z..."`` shape ``macho_normalize_mangled`` was
 originally written to expect -- so its old *unconditional* single-
 underscore strip would corrupt an already-pure name into ``"Z..."``,
 leaving it forever unmatched against castxml's own identical spelling.

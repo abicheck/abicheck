@@ -47,7 +47,7 @@ finding).
 **What "reached" means, entity by entity.**
 
 * A dependency **record** is reached when a public declaration of the library
-  names it directly (``dependency_retention._directly_referenced_dependency_names``,
+  names it directly (``dependency_retention.directly_referenced_dependency_names``,
   the single-hop walk dump-time scoping already applies, typedef aliases
   resolved). ``basic_vec<float>`` named by ``State::acc``'s ``V`` is reached
   and stays in contract, layout and presence; ``simd_fixed_size_abi<8>``,
@@ -90,12 +90,12 @@ from ...model.elf_facts import SymbolBinding
 from ...model.export_index import build_raw_export_index, linked_export_names
 from ...model.surface_facts import in_public_surface
 from ...model.synthetic_key import synthetic_ctor_owner
+from ...model.vocabulary import NON_PUBLIC_ORIGINS
 from ...policy.contract_dependency_origin import DependencyInternals
-from ...type_reachability import _NON_PUBLIC_ORIGINS
 from .dependency_retention import (
-    _candidate_identity,
-    _directly_referenced_dependency_names,
-    _kept_signature_haystack,
+    candidate_identity,
+    directly_referenced_dependency_names,
+    kept_signature_haystack,
 )
 from .dwarf_dependency_types import unreachable_dependency_type_names
 
@@ -297,7 +297,7 @@ def _internal_typedefs(
 ) -> frozenset[str]:
     """Bare names of the dependency typedefs no public declaration names."""
     qualified = snap.declarations.typedefs_qualified
-    own_scopes = {_candidate_identity(r) for r in own_records}
+    own_scopes = {candidate_identity(r) for r in own_records}
 
     def is_dependency_typedef(key: str) -> bool:
         if _top_namespace(key) not in dep_only_namespaces:
@@ -339,7 +339,7 @@ def _header_dependency_internals(snap: AbiSnapshot) -> DependencyInternals:
     def namespace(decl: _Declaration) -> str:
         if isinstance(decl, Function | Variable):
             return _declaration_namespace(decl, name_of)
-        return _top_namespace(_candidate_identity(decl))
+        return _top_namespace(candidate_identity(decl))
 
     own_namespaces = {
         namespace(d) for d in every if not at_dependency_path(d.source_header)
@@ -368,24 +368,24 @@ def _header_dependency_internals(snap: AbiSnapshot) -> DependencyInternals:
     root_functions = [
         f
         for f in own_functions
-        if in_public_surface(f) and f.origin not in _NON_PUBLIC_ORIGINS
+        if in_public_surface(f) and f.origin not in NON_PUBLIC_ORIGINS
     ]
     root_variables = [
         v
         for v in own_variables
-        if in_public_surface(v) and v.origin not in _NON_PUBLIC_ORIGINS
+        if in_public_surface(v) and v.origin not in NON_PUBLIC_ORIGINS
     ]
     root_types = [
         t
         for t in own_records
-        if isinstance(t, RecordType) and t.origin not in _NON_PUBLIC_ORIGINS
+        if isinstance(t, RecordType) and t.origin not in NON_PUBLIC_ORIGINS
     ]
     root_enums = [
         e
         for e in own_records
-        if isinstance(e, EnumType) and e.origin not in _NON_PUBLIC_ORIGINS
+        if isinstance(e, EnumType) and e.origin not in NON_PUBLIC_ORIGINS
     ]
-    reached = _directly_referenced_dependency_names(
+    reached = directly_referenced_dependency_names(
         root_functions,
         root_variables,
         root_types,
@@ -397,7 +397,7 @@ def _header_dependency_internals(snap: AbiSnapshot) -> DependencyInternals:
     types = frozenset(
         r.name
         for r in dep_records
-        if _candidate_identity(r) not in reached and r.name not in own_names
+        if candidate_identity(r) not in reached and r.name not in own_names
     )
 
     symbols: frozenset[str] = frozenset()
@@ -419,7 +419,7 @@ def _header_dependency_internals(snap: AbiSnapshot) -> DependencyInternals:
     typedefs: frozenset[str] = frozenset()
     if snap.public_header_identifiers is not None:
         reference_text = kept_reference_text(
-            _kept_signature_haystack(root_functions, root_variables, root_types),
+            kept_signature_haystack(root_functions, root_variables, root_types),
             root_functions,
             root_types,
             root_enums,

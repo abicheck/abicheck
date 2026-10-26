@@ -31,7 +31,7 @@ module stays only until the public surface is retired.
 
 from __future__ import annotations
 
-from .change_registry import (
+from .model.change_catalog.assembled import (
     API_BREAK_KINDS as API_BREAK_KINDS,
     BREAKING_KINDS as BREAKING_KINDS,
     COMPATIBLE_KINDS as COMPATIBLE_KINDS,

@@ -73,6 +73,19 @@ class ScopeOrigin(StrEnum):
     UNKNOWN = "unknown"  # no public set, or no source location
 
 
+#: Origins that are confidently NOT part of the public header surface
+#: (ADR-024/027): a declaration defined only in one of these is the
+#: library's private implementation, and is not a public reachability root
+#: even when ``Visibility.PUBLIC`` (linkage and origin are independent axes).
+#: ``EXPORT_ONLY``/``UNKNOWN`` are deliberately absent: ``EXPORT_ONLY`` means
+#: "exported, no header at all" rather than "confidently private", and
+#: ``UNKNOWN`` is the no-public-header-set default that must stay inclusive
+#: so consumers degrade to the pre-provenance behaviour.
+NON_PUBLIC_ORIGINS: frozenset[ScopeOrigin] = frozenset(
+    {ScopeOrigin.PRIVATE_HEADER, ScopeOrigin.SYSTEM_HEADER, ScopeOrigin.GENERATED}
+)
+
+
 #: Valid ``Change.evidence_provenance`` entries (G39). A bare
 #: ``tuple[str, ...]`` field deliberately stays untyped (see the plan's own
 #: Phase 0 section for why: a bespoke enum-per-field would compete with the

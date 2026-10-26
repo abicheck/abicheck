@@ -14,7 +14,7 @@
 
 """ADR-084: which ``API_BREAK`` kinds a binary-only run may keep as ``API_BREAK``.
 
-Every kind in :data:`~abicheck.change_registry.API_BREAK_KINDS` is a claim
+Every kind in :data:`~abicheck.model.change_catalog.assembled.API_BREAK_KINDS` is a claim
 about the *source* contract. Some of those kinds can be produced from binary
 or debug-info input alone (``type_removed`` from DWARF, ``field_renamed``,
 ``mandatory_template_param_added`` from exported names). For those, a run
@@ -53,7 +53,7 @@ from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from ..change_registry import API_BREAK_KINDS
+from ..model.change_catalog.assembled import API_BREAK_KINDS
 from ..model.change_catalog.kinds import ChangeKind
 from ..model.source_contract_evidence import (
     has_observed_source_contract_evidence,

@@ -45,7 +45,7 @@ fan-out) discovers, matches and diffs the libraries, then calls
 :func:`compare_bundle`.
 
 Bundle findings use the ``ChangeKind.BUNDLE_*`` values registered in
-:mod:`abicheck.change_registry`. They participate in policy classification,
+:mod:`abicheck.model.change_catalog.assembled`. They participate in policy classification,
 suppression, severity, and reporter machinery identically to per-library
 ``Change`` entries.
 

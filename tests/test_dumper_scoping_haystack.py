@@ -75,10 +75,10 @@ class TestSignatureHaystackIsDeduplicated:
     @staticmethod
     def _haystack(functions=(), variables=(), types=()):
         from abicheck.workflows.dump.dependency_retention import (
-            _kept_signature_haystack,
+            kept_signature_haystack,
         )
 
-        return _kept_signature_haystack(list(functions), list(variables), list(types))
+        return kept_signature_haystack(list(functions), list(variables), list(types))
 
     def test_a_spelling_shared_by_many_declarations_appears_once(self) -> None:
         shared = "const ns::Thing &"

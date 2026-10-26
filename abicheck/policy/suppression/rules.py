@@ -39,8 +39,8 @@ from pathlib import Path
 
 import yaml
 
-from ...change_registry import API_BREAK_KINDS, BREAKING_KINDS
 from ...model.change import Change
+from ...model.change_catalog.assembled import API_BREAK_KINDS, BREAKING_KINDS
 from ...model.change_catalog.kinds import ChangeKind
 from ...model.evidence_status import ReachabilityState
 from ..classification import Verdict

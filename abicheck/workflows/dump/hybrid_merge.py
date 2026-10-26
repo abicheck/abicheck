@@ -136,14 +136,14 @@ from ...model.synthetic_key import (
     is_synthetic_dtor_key,
 )
 from .hybrid_identity import (
-    _backfill_function_facts,
-    _ctor_dtor_scope,
-    _drop_unmatched_constant_occurrences,
-    _macho_normalize_mangled,
-    _macho_normalize_semantic_ir,
-    _match_synthetic_ctor_dtor,
-    _normalize_scope_for_matching,
-    _rewrite_semantic_ir_entity_ids,
+    backfill_function_facts,
+    ctor_dtor_scope,
+    drop_unmatched_constant_occurrences,
+    macho_normalize_mangled,
+    macho_normalize_semantic_ir,
+    match_synthetic_ctor_dtor,
+    normalize_scope_for_matching,
+    rewrite_semantic_ir_entity_ids,
 )
 
 log = logging.getLogger(__name__)
@@ -159,22 +159,22 @@ def _merge_functions(
     ``old_entity_id -> new_entity_id`` substitution made below for a
     castxml synthetic ctor/dtor key matched to a real clang mangled name --
     the caller applies the identical rewrite to `castxml_snap.semantic_ir`
-    (:func:`_rewrite_semantic_ir_entity_ids`) so that representation isn't
+    (:func:`rewrite_semantic_ir_entity_ids`) so that representation isn't
     left keyed under the stale synthetic identity this function just
     retired from the flat `functions` list (Codex review, ADR-063 Phase 6
     third slice, fresh evidence)."""
     clang_ctor_dtor: dict[tuple[str, str], list[Function]] = {}
     for cf in clang_funcs:
-        scope = _ctor_dtor_scope(cf.mangled)
+        scope = ctor_dtor_scope(cf.mangled)
         if scope is not None:
             marker, scope_str = scope
-            key = (marker, _normalize_scope_for_matching(scope_str))
+            key = (marker, normalize_scope_for_matching(scope_str))
             clang_ctor_dtor.setdefault(key, []).append(cf)
 
     merged: list[Function] = []
     for f in castxml_funcs:
         if is_synthetic_ctor_key(f.mangled) or is_synthetic_dtor_key(f.mangled):
-            match = _match_synthetic_ctor_dtor(f, clang_ctor_dtor)
+            match = match_synthetic_ctor_dtor(f, clang_ctor_dtor)
             if match is not None:
                 if (
                     entity_id_rewrites is not None
@@ -188,7 +188,7 @@ def _merge_functions(
 
     clang_by_mangled = {cf.mangled: cf for cf in clang_funcs}
     merged = [
-        _backfill_function_facts(f, clang_by_mangled.get(f.mangled), provenance)
+        backfill_function_facts(f, clang_by_mangled.get(f.mangled), provenance)
         for f in merged
     ]
     # Every function actually present in castxml_funcs is castxml-backed for
@@ -453,7 +453,7 @@ def merge_snapshots(castxml_snap: AbiSnapshot, clang_snap: AbiSnapshot) -> AbiSn
 
     # Mach-O: normalize clang's mangled names to castxml's prefix-free
     # convention BEFORE any mangled-keyed matching/dedup below (functions AND
-    # variables) -- see _macho_normalize_mangled's docstring. Type/enum
+    # variables) -- see macho_normalize_mangled's docstring. Type/enum
     # merges key on the source-level NAME, not a mangled linker symbol, so
     # they carry no such platform-specific decoration and need no change.
     # entity_id's "mangled" tag is re-spelled too (Codex review).
@@ -464,20 +464,20 @@ def merge_snapshots(castxml_snap: AbiSnapshot, clang_snap: AbiSnapshot) -> AbiSn
         clang_functions = [
             replace(cf, mangled=nm, entity_id=with_mangled_name(cf.entity_id, nm))
             for cf in clang_functions
-            for nm in (_macho_normalize_mangled(cf.mangled),)
+            for nm in (macho_normalize_mangled(cf.mangled),)
         ]
         clang_variables = [
             replace(cv, mangled=nm, entity_id=with_mangled_name(cv.entity_id, nm))
             for cv in clang_variables
-            for nm in (_macho_normalize_mangled(cv.mangled),)
+            for nm in (macho_normalize_mangled(cv.mangled),)
         ]
         # ADR-063 Phase 6 third slice (Codex review, fresh evidence): the
         # identical rewrite must reach `semantic_ir` too, or its FUNCTION/
         # VARIABLE occurrences stay keyed under clang's un-normalized
         # mangled name while the flat lists above (and castxml's own side)
-        # use the normalized one -- see `_macho_normalize_semantic_ir`'s
+        # use the normalized one -- see `macho_normalize_semantic_ir`'s
         # own docstring for the exact double-counting this produced.
-        clang_semantic_ir = _macho_normalize_semantic_ir(clang_semantic_ir)
+        clang_semantic_ir = macho_normalize_semantic_ir(clang_semantic_ir)
 
     # Keyed by type_map_key (namespace-qualified identity), not the bare
     # RecordType.name/EnumType.name: two distinct types sharing only a bare
@@ -592,14 +592,14 @@ def merge_snapshots(castxml_snap: AbiSnapshot, clang_snap: AbiSnapshot) -> AbiSn
     # `semantic_ir` too, or a matched castxml declaration stays keyed under
     # its retired synthetic identity there while `merged_functions` already
     # carries the real one (Codex review, fresh evidence).
-    castxml_semantic_ir = _rewrite_semantic_ir_entity_ids(
+    castxml_semantic_ir = rewrite_semantic_ir_entity_ids(
         castxml_snap.canonical_ir, ctor_dtor_entity_id_rewrites
     )
     merged_ir, ir_conflicts = merge_semantic_ir(castxml_semantic_ir, clang_semantic_ir)
     # `merged.constants` deliberately stays castxml-only (see that field's
     # own comment below) -- `merged_constant_entity_ids` is exactly its
     # sidecar, computed here rather than inline in `replace()` below so
-    # `_drop_unmatched_constant_occurrences` can use the identical kept-id
+    # `drop_unmatched_constant_occurrences` can use the identical kept-id
     # set to filter `merged_ir`'s own CONSTANT occurrences to match, instead
     # of a clang-only constant occurrence surviving in `semantic_ir` with no
     # corresponding flat entry at all (Codex review, fresh evidence).
@@ -611,7 +611,7 @@ def merge_snapshots(castxml_snap: AbiSnapshot, clang_snap: AbiSnapshot) -> AbiSn
         }.items()
         if key in castxml_snap.declarations.constants
     }
-    merged_ir, ir_conflicts = _drop_unmatched_constant_occurrences(
+    merged_ir, ir_conflicts = drop_unmatched_constant_occurrences(
         merged_ir, ir_conflicts, set(merged_constant_entity_ids.values())
     )
 

@@ -47,7 +47,7 @@ That predicate -- ``vtable_transition_is_evidenced`` (moved here from
 ``diff_types_vtable._vtable_transition_is_evidenced`` verbatim, plus its
 ``_owned_virtual_signatures`` helper) -- itself needs an owner-name
 resolver (``diff_cxx_rules.owner_class_of``) and a namespace-suffix
-matcher (``type_reachability_spelling._namespace_suffix_spellings``). Both
+matcher (``model.namespace_spelling.namespace_suffix_spellings``). Both
 of those already sit *above* this candidate leaf in the dependency graph
 (``type_reachability_spelling`` itself imports ``diff_cxx_rules``), so
 importing either one here would recreate the identical cycle one level

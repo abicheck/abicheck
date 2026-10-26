@@ -58,7 +58,7 @@ _CALLING_CONVENTION_ATTRIBUTES = frozenset({"ms_abi", "sysv_abi"})
 log = logging.getLogger(__name__)
 
 
-def _ctor_dtor_scope(mangled: str) -> tuple[str, str] | None:
+def ctor_dtor_scope(mangled: str) -> tuple[str, str] | None:
     """``(marker, qualified_scope)`` for a REAL Itanium-mangled ctor/dtor, or
     None if *mangled* isn't one (parsed structurally — see
     ``model.mangled_name.itanium_scope_components``, which returns the ctor/dtor
@@ -99,7 +99,7 @@ def _split_top_level_commas(s: str) -> list[str]:
     return parts
 
 
-def _macho_normalize_mangled(mangled: str) -> str:
+def macho_normalize_mangled(mangled: str) -> str:
     """Strip a still-present Darwin linker-symbol leading underscore,
     matching castxml's prefix-free convention on the same platform.
 
@@ -116,7 +116,7 @@ def _macho_normalize_mangled(mangled: str) -> str:
     return macho_decoration.decode_c(mangled) or mangled
 
 
-def _rewrite_semantic_ir_entity_ids(
+def rewrite_semantic_ir_entity_ids(
     ir: SemanticIR | None, rewrites: Mapping[EntityId, EntityId]
 ) -> SemanticIR | None:
     """*ir* with every occurrence whose ``EntityId`` appears as a key in
@@ -126,7 +126,7 @@ def _rewrite_semantic_ir_entity_ids(
     The shared primitive both this module's identity-rewrite sites reduce
     to: an occurrence built from one backend's own parse can have its
     identity superseded LATER, by a decision this module itself makes
-    (:func:`_macho_normalize_mangled`'s Darwin-underscore strip;
+    (:func:`macho_normalize_mangled`'s Darwin-underscore strip;
     :func:`_merge_functions`'s castxml-synthetic-ctor/dtor-to-real-clang-
     mangled-name match) -- a rewrite the per-backend `semantic_ir`
     construction (`extract.semantic_normalizer.normalize_header_ast`, which
@@ -167,9 +167,9 @@ def _rewrite_semantic_ir_entity_ids(
     return SemanticIR(occurrences=rewritten)
 
 
-def _macho_normalize_semantic_ir(ir: SemanticIR | None) -> SemanticIR | None:
+def macho_normalize_semantic_ir(ir: SemanticIR | None) -> SemanticIR | None:
     """*ir* with every ``FUNCTION``/``VARIABLE`` occurrence's ``EntityId``
-    re-spelled through :func:`_macho_normalize_mangled`, mirroring the
+    re-spelled through :func:`macho_normalize_mangled`, mirroring the
     identical rewrite this module already applies to *clang_functions*/
     *clang_variables* above (Codex review, ADR-063 Phase 6 third slice,
     fresh evidence).
@@ -199,14 +199,14 @@ def _macho_normalize_semantic_ir(ir: SemanticIR | None) -> SemanticIR | None:
             and entity_id.extra[0] == "mangled"
         ):
             new_entity_id = with_mangled_name(
-                entity_id, _macho_normalize_mangled(entity_id.extra[1])
+                entity_id, macho_normalize_mangled(entity_id.extra[1])
             )
             if new_entity_id is not None and new_entity_id != entity_id:
                 rewrites[entity_id] = new_entity_id
-    return _rewrite_semantic_ir_entity_ids(ir, rewrites)
+    return rewrite_semantic_ir_entity_ids(ir, rewrites)
 
 
-def _drop_unmatched_constant_occurrences(
+def drop_unmatched_constant_occurrences(
     ir: SemanticIR | None,
     conflicts: dict[str, str],
     kept_entity_ids: set[EntityId],
@@ -326,7 +326,7 @@ def _split_top_level_scope(scope: str) -> list[str]:
     return parts
 
 
-def _normalize_scope_for_matching(scope: str) -> str:
+def normalize_scope_for_matching(scope: str) -> str:
     """Reduce a qualified ctor/dtor scope to a template-argument-free form
     comparable across both producers.
 
@@ -376,7 +376,7 @@ def _synthetic_ctor_dtor_scope(key: str) -> tuple[str, str, str] | None:
     return None
 
 
-def _match_synthetic_ctor_dtor(
+def match_synthetic_ctor_dtor(
     castxml_f: Function,
     clang_ctor_dtor: dict[tuple[str, str], list[Function]],
 ) -> Function | None:
@@ -392,7 +392,7 @@ def _match_synthetic_ctor_dtor(
     surviving all checks) yields None rather than guessing.
 
     **Known residual limitation** (Codex review): the scope key is
-    normalized template-argument-free (see ``_normalize_scope_for_matching``),
+    normalized template-argument-free (see ``normalize_scope_for_matching``),
     so TWO OR MORE distinct instantiations of the same template that both
     declare a default (no-parameter) constructor, or both have a destructor,
     collide under the identical normalized ``(marker, scope)`` key with
@@ -412,7 +412,7 @@ def _match_synthetic_ctor_dtor(
     if parsed is None:
         return None
     marker, scope, param_sig = parsed
-    candidates = clang_ctor_dtor.get((marker, _normalize_scope_for_matching(scope)), [])
+    candidates = clang_ctor_dtor.get((marker, normalize_scope_for_matching(scope)), [])
     if marker == _DTOR_MARKER:
         if len(candidates) == 1 and candidates[0].access == castxml_f.access:
             return candidates[0]
@@ -432,7 +432,7 @@ def _match_synthetic_ctor_dtor(
     return matches[0] if len(matches) == 1 else None
 
 
-def _backfill_function_facts(
+def backfill_function_facts(
     f: Function, clang_f: Function | None, provenance: dict[str, str]
 ) -> Function:
     updates: dict[str, Any] = {}

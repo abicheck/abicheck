@@ -18,7 +18,7 @@ computation (ADR-061 gap B).
 
 Classification sets (``BREAKING_KINDS``, ``COMPATIBLE_KINDS``, etc.) and
 ``IMPACT_TEXT`` are DERIVED from the single-declaration registry in
-``change_registry.py``. Adding a new ``ChangeKind`` requires only one entry
+``model/change_catalog/assembled.py``. Adding a new ``ChangeKind`` requires only one entry
 there — no shotgun surgery.
 
 Hierarchy (5-tier)::
@@ -51,16 +51,18 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 
-from ..change_registry import (
+from ..model.change_catalog.assembled import (
     API_BREAK_KINDS,
     BREAKING_KINDS,
     COMPATIBLE_KINDS,
     REGISTRY as _REGISTRY,
     RISK_KINDS,
-    Verdict as Verdict,
 )
 from ..model.change_catalog.kinds import ChangeKind as ChangeKind, HasKind as HasKind
-from ..model.change_catalog.registry import VALID_BASE_POLICIES as VALID_BASE_POLICIES
+from ..model.change_catalog.registry import (
+    VALID_BASE_POLICIES as VALID_BASE_POLICIES,
+    Verdict as Verdict,
+)
 from ..model.evidence_status import (
     EvidenceStatus,
     has_binary_evidence,
@@ -70,14 +72,14 @@ from ..model.execution_cache import memoized
 from .binary_gate_marker import is_binary_gate_demoted
 
 # ---------------------------------------------------------------------------
-# Classification sets — DERIVED from change_registry.py (single source of truth)
+# Classification sets — DERIVED from model/change_catalog/assembled.py (single source of truth)
 # ---------------------------------------------------------------------------
 # These sets are computed from the registry entries. To add a new ChangeKind,
-# add ONE entry in change_registry.py — these sets update automatically.
+# add ONE entry in model/change_catalog/assembled.py — these sets update automatically.
 
 
 # The four default-verdict sets are catalog facts owned by
-# ``change_registry`` (model); this module builds the policy-aware sets below
+# ``change_catalog.assembled`` (model); this module builds the policy-aware sets below
 # on top of them.
 
 # ---------------------------------------------------------------------------
@@ -103,7 +105,7 @@ QUALITY_KINDS: frozenset[ChangeKind] = frozenset(
 )
 
 # ---------------------------------------------------------------------------
-# Policy-specific downgrade sets — DERIVED from change_registry policy_overrides
+# Policy-specific downgrade sets — DERIVED from change_catalog.assembled policy_overrides
 # ---------------------------------------------------------------------------
 
 
@@ -223,7 +225,7 @@ class PolicyEntry:
     impact: str = ""  # human-readable impact explanation
 
 
-# Impact explanations — DERIVED from change_registry.py
+# Impact explanations — DERIVED from model/change_catalog/assembled.py
 IMPACT_TEXT: dict[ChangeKind, str] = {
     ChangeKind(k): v for k, v in _REGISTRY.impact_text().items()
 }

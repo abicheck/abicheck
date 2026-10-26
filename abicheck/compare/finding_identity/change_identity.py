@@ -210,7 +210,7 @@ def _change_discriminator(
     revision of this fix did, and review found real collisions: several
     kinds -- e.g. ``struct_field_type_changed``'s own sibling
     ``type_field_type_changed`` -- embed a per-item identity, such as a
-    field name, in ``description`` via ``change_registry``'s ``{detail}``
+    field name, in ``description`` via ``change_catalog.assembled``'s ``{detail}``
     template placeholder, with no other structured field carrying it;
     dropping description collapsed two distinct findings differing only by
     which field/parameter changed). Canonicalizing the whole sentence for

@@ -20,20 +20,17 @@ the registry container that derives the classification sets, plus the
 catalog-validation logic D9 assigns to the assembled registry. This is the
 target owner ADR-061 names for this logic — it used to live in the legacy
 flat ``abicheck/change_registry_types.py``, which now re-exports every name
-here unchanged (``from abicheck.change_registry_types import Verdict`` and
-the transitive ``from abicheck.change_registry import Verdict`` are both
+here unchanged (``from abicheck.change_registry_types import Verdict`` is
 still valid). The 397-entry data table itself is fully repartitioned into
 five sibling taxonomy modules in this same package — ``symbols.py``,
 ``types.py``, ``platform.py``, ``build.py``, ``source.py`` — which this
 module's own ``ChangeKindMeta``/``Verdict`` back, and which
-``abicheck/change_registry.py`` imports and concatenates into the single
+sibling ``assembled.py`` imports and concatenates into the single
 production ``REGISTRY``.
 
 This module has zero internal imports (a true leaf, per ADR-061's ``model``
 layer contract of ``may_import: []``), which is what lets both
-``checker_policy.py`` (imports ``REGISTRY`` from ``change_registry.py``,
-which imports this module directly) and ``diff_helpers.py`` (same shape)
-import ``VALID_BASE_POLICIES``/``TEMPLATE_VOCAB`` from here without an
+``assembled.py`` and ``diff_helpers.py`` import from here without an
 import cycle.
 """
 

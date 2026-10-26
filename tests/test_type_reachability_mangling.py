@@ -31,9 +31,9 @@ from abicheck.model import (
     TypeField,
     Variable,
 )
+from abicheck.model.namespace_spelling import namespace_suffix_spellings
 from abicheck.type_reachability import (
     _bare_type_name,
-    _namespace_suffix_spellings,
     _typedef_spelling_targets,
     directly_referenced_stdlib_types,
 )
@@ -54,14 +54,14 @@ def _fn(
 
 class TestNamespaceSuffixSpellings:
     def test_full_identity_and_bare_leaf_are_both_present(self) -> None:
-        suffixes = _namespace_suffix_spellings("api::Outer::Inner")
+        suffixes = namespace_suffix_spellings("api::Outer::Inner")
         assert suffixes == ["api::Outer::Inner", "Outer::Inner", "Inner"]
 
     def test_no_depth_zero_separator_returns_single_element_list(self) -> None:
-        assert _namespace_suffix_spellings("Inner") == ["Inner"]
+        assert namespace_suffix_spellings("Inner") == ["Inner"]
 
     def test_template_argument_colon_colon_is_not_a_split_point(self) -> None:
-        assert _namespace_suffix_spellings("api::Wrapper<dep::Tag>") == [
+        assert namespace_suffix_spellings("api::Wrapper<dep::Tag>") == [
             "api::Wrapper<dep::Tag>",
             "Wrapper<dep::Tag>",
         ]

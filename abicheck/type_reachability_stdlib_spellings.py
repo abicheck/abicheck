@@ -36,15 +36,15 @@ from __future__ import annotations
 from collections.abc import Iterable, Mapping
 from typing import TYPE_CHECKING
 
+from .model.namespace_spelling import namespace_suffix_spellings
 from .type_reachability import _merged_typedefs, _run_stdlib_reference_scan
 from .type_reachability_spelling import (
-    _namespace_suffix_spellings,
     _non_stdlib_signature_spellings,
     _partition_snapshot_types,
     _record_identity,
-    _stripped_signature_spelling,
     _typedef_candidate_spellings,
     _typedef_spelling_targets,
+    stripped_signature_spelling,
 )
 
 if TYPE_CHECKING:
@@ -97,18 +97,18 @@ def _stripped_spelling_index(
     stripped_by_identity: dict[str, str] = {}
     stripped_counts: dict[str, int] = {}
     for identity in set(all_stdlib_identities):
-        stripped = _stripped_signature_spelling(identity)
+        stripped = stripped_signature_spelling(identity)
         if not stripped or stripped in non_stdlib_spellings:
             continue
         if stripped in typedef_candidate_spellings:
             typedef_target = typedef_spelling_targets.get(stripped)
             # A typedef target naming this exact identity -- spelled fully
             # qualified, or as one of its own *structural* namespace-suffix
-            # spellings (`_namespace_suffix_spellings`, which only ever
+            # spellings (`namespace_suffix_spellings`, which only ever
             # drops a namespace/class-scope prefix `identity` itself
             # already carries) -- genuinely refers to the same entity and
             # is not a collision. An earlier revision instead compared via
-            # `_stripped_signature_spelling(typedef_target)` -- rejected
+            # `stripped_signature_spelling(typedef_target)` -- rejected
             # (Codex review, fresh evidence): that normalization also
             # strips inline ABI-tag namespaces (`__cxx11::`, `__1::`,
             # `__ndk1::`), so a target naming a *different*, differently
@@ -135,7 +135,7 @@ def _stripped_spelling_index(
             # reopening the ABI-tag coincidence above, since an *exact*
             # match against `identity` is still accepted unconditionally.
             suffix_match = (
-                typedef_target in _namespace_suffix_spellings(identity)
+                typedef_target in namespace_suffix_spellings(identity)
                 and typedef_target not in non_stdlib_identities
             )
             if typedef_target != identity and not suffix_match:
@@ -222,7 +222,7 @@ def directly_referenced_stdlib_type_spellings(
     identity (DWARF bakes the qualified form directly into ``name``) or the
     namespace-prefix-stripped form a signature actually spells it with
     (castxml/direct-clang keep ``name`` bare) -- see
-    :func:`_stripped_signature_spelling`'s own docstring for the empirical
+    :func:`stripped_signature_spelling`'s own docstring for the empirical
     basis. Returning the union of both forms for every identity, rather than
     picking one, means a caller does not have to know which backend
     produced the snapshot it's matching against.
@@ -233,7 +233,7 @@ def directly_referenced_stdlib_type_spellings(
     deliberately excludes stdlib types as non-ABI-surface toolchain
     internals) is why this exists as a public, separately-tested function
     rather than an inline transform at the call site: reusing
-    :func:`_stripped_signature_spelling` here is what keeps the two stdlib
+    :func:`stripped_signature_spelling` here is what keeps the two stdlib
     spelling normalizations (the one this module's own signature-matching
     index already performs internally, and the one a caller outside this
     module needs) from silently drifting apart.

@@ -26,12 +26,6 @@ from . import (
     diff_integer_model,  # noqa: F401 — triggers detector registration
     diff_symbols as _diff_symbols,  # noqa: F401 — triggers detector registration
 )
-from .change_registry import (
-    API_BREAK_KINDS as _API_BREAK_KINDS,
-    BREAKING_KINDS as _BREAKING_KINDS,
-    COMPATIBLE_KINDS as _COMPATIBLE_KINDS,
-    RISK_KINDS as _RISK_KINDS,
-)
 from .checker_types import DiffResult
 from .comparability import check_contracts_comparable, comparability_outcome
 from .compare.debug_layout_view import (
@@ -121,6 +115,12 @@ from .dwarf_advanced import (
 )
 from .model import AbiSnapshot
 from .model.change import Change, DetectorSpec, LibraryMetadata
+from .model.change_catalog.assembled import (
+    API_BREAK_KINDS as _API_BREAK_KINDS,
+    BREAKING_KINDS as _BREAKING_KINDS,
+    COMPATIBLE_KINDS as _COMPATIBLE_KINDS,
+    RISK_KINDS as _RISK_KINDS,
+)
 from .model.change_catalog.kinds import ChangeKind
 from .model.evidence_status import EvidenceTier, is_cross_source_resolved
 from .model.extraction_scope import snapshot_scope_identity

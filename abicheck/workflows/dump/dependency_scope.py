@@ -52,7 +52,7 @@ throw that fact away before ``compare`` ever gets to see it -- unlike
 is single-hop only: a directly-referenced dependency type's *own* fields
 are not chased for further dependency references, so its private internals
 (``_Alloc_hider`` and the like) stay excluded even though the type that
-embeds them is kept. See :func:`_directly_referenced_dependency_names`.
+embeds them is kept. See :func:`directly_referenced_dependency_names`.
 
 **Remaining trade-off, by design (CodeRabbit review):** a genuine
 ABI-relevant layout change confined entirely to a dependency type that is
@@ -106,15 +106,13 @@ from ...model.dwarf_facts import AdvancedDwarfMetadata, DwarfMetadata
 from ...model.header_parse_coverage import AllBut, header_parse_excluded
 from ...model.semantic_ir import SemanticIR, semantic_ir_conflict_key
 from ...model.surface_facts import in_public_surface
-from ...type_reachability import (
-    _NON_PUBLIC_ORIGINS,
-)
+from ...model.vocabulary import NON_PUBLIC_ORIGINS
 from .dependency_retention import (
-    _candidate_identity,
-    _directly_referenced_dependency_names,
-    _kept_identifiers,
-    _kept_signature_haystack,
-    _name_matches,
+    candidate_identity,
+    directly_referenced_dependency_names,
+    kept_identifier_set,
+    kept_signature_haystack,
+    name_matches,
 )
 
 
@@ -130,20 +128,20 @@ def _scoped_dwarf(
     return dataclasses.replace(
         dwarf,
         structs={
-            k: v for k, v in dwarf.structs.items() if _name_matches(k, kept_identifiers)
+            k: v for k, v in dwarf.structs.items() if name_matches(k, kept_identifiers)
         },
         enums={
-            k: v for k, v in dwarf.enums.items() if _name_matches(k, kept_identifiers)
+            k: v for k, v in dwarf.enums.items() if name_matches(k, kept_identifiers)
         },
         struct_odr_conflicts={
             k: v
             for k, v in dwarf.struct_odr_conflicts.items()
-            if _name_matches(k, kept_identifiers)
+            if name_matches(k, kept_identifiers)
         },
         enum_odr_conflicts={
             k: v
             for k, v in dwarf.enum_odr_conflicts.items()
-            if _name_matches(k, kept_identifiers)
+            if name_matches(k, kept_identifiers)
         },
     )
 
@@ -155,7 +153,7 @@ def _scoped_dwarf_advanced(
 ) -> AdvancedDwarfMetadata | None:
     """Filter Sprint-4 advanced DWARF metadata the same way: type-keyed
     collections (``packed_structs``/``all_struct_names``) via
-    :func:`_name_matches`, function-keyed collections (keyed by mangled
+    :func:`name_matches`, function-keyed collections (keyed by mangled
     ``linkage_name``) by dropping only *excluded_symbols* -- every
     dependency-header function's own ``mangled`` spelling -- rather than
     requiring a match against the kept set (Codex review). The two
@@ -209,10 +207,10 @@ def _scoped_dwarf_advanced(
             k for k in adv.return_memory_classified if k not in excluded_symbols
         },
         packed_structs={
-            k for k in adv.packed_structs if _name_matches(k, kept_identifiers)
+            k for k in adv.packed_structs if name_matches(k, kept_identifiers)
         },
         all_struct_names={
-            k for k in adv.all_struct_names if _name_matches(k, kept_identifiers)
+            k for k in adv.all_struct_names if name_matches(k, kept_identifiers)
         },
     )
 
@@ -383,7 +381,7 @@ def scope_snapshot_excluding_dependencies(
         # declaration's own removal causing the same drop is not a false
         # positive by the same reasoning -- the public surface's real
         # dependency on that type has genuinely ended. Reuses
-        # type_reachability._NON_PUBLIC_ORIGINS, the same public-surface
+        # model.vocabulary.NON_PUBLIC_ORIGINS, the same public-surface
         # predicate its own directly_referenced_stdlib_types() already
         # applies for the identical reason. RecordType/EnumType have no
         # `visibility` field, but both do carry `origin` (ADR-015, schema
@@ -399,20 +397,20 @@ def scope_snapshot_excluding_dependencies(
         public_root_functions = [
             f
             for f in kept_functions
-            if in_public_surface(f) and f.origin not in _NON_PUBLIC_ORIGINS
+            if in_public_surface(f) and f.origin not in NON_PUBLIC_ORIGINS
         ]
         public_root_variables = [
             v
             for v in kept_variables
-            if in_public_surface(v) and v.origin not in _NON_PUBLIC_ORIGINS
+            if in_public_surface(v) and v.origin not in NON_PUBLIC_ORIGINS
         ]
         public_root_types = [
-            t for t in kept_types if t.origin not in _NON_PUBLIC_ORIGINS
+            t for t in kept_types if t.origin not in NON_PUBLIC_ORIGINS
         ]
         public_root_enums = [
-            e for e in kept_enums if e.origin not in _NON_PUBLIC_ORIGINS
+            e for e in kept_enums if e.origin not in NON_PUBLIC_ORIGINS
         ]
-        directly_referenced = _directly_referenced_dependency_names(
+        directly_referenced = directly_referenced_dependency_names(
             public_root_functions,
             public_root_variables,
             public_root_types,
@@ -422,13 +420,13 @@ def scope_snapshot_excluding_dependencies(
         )
         if directly_referenced:
             kept_types = kept_types + [
-                t for t in dep_types if _candidate_identity(t) in directly_referenced
+                t for t in dep_types if candidate_identity(t) in directly_referenced
             ]
             kept_enums = kept_enums + [
-                e for e in dep_enums if _candidate_identity(e) in directly_referenced
+                e for e in dep_enums if candidate_identity(e) in directly_referenced
             ]
 
-    kept_identifiers = _kept_identifiers(
+    kept_identifiers = kept_identifier_set(
         {t.name for t in kept_types} | {e.name for e in kept_enums},
         {t.qualified_name for t in kept_types if t.qualified_name}
         | {e.qualified_name for e in kept_enums if e.qualified_name},
@@ -439,7 +437,7 @@ def scope_snapshot_excluding_dependencies(
     deps: list[RecordType | EnumType] = [*dep_types, *dep_enums]
     dwarf_ids = (
         AllBut(
-            ({_candidate_identity(t) for t in deps} | {t.name for t in deps})
+            ({candidate_identity(t) for t in deps} | {t.name for t in deps})
             - kept_identifiers
         )
         if header_parse_excluded(snap)
@@ -483,7 +481,7 @@ def scope_snapshot_excluding_dependencies(
         snap,
         _is_dep,
         kept_reference_text(
-            _kept_signature_haystack(kept_functions, kept_variables, kept_types),
+            kept_signature_haystack(kept_functions, kept_variables, kept_types),
             kept_functions,
             kept_types,
             kept_enums,

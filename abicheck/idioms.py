@@ -36,10 +36,11 @@ import re
 from dataclasses import dataclass, field
 from enum import StrEnum
 
-from .model import ParamKind, RecordType, ScopeOrigin, resolved_fact_value
+from .model import ParamKind, RecordType, resolved_fact_value
 from .model.change_catalog.kinds import ChangeKind
 from .model.evidence_status import Confidence
 from .model.surface_facts import in_public_surface
+from .model.vocabulary import NON_PUBLIC_ORIGINS
 from .policy.public_use_index import (
     PublicUseIndex,
     build_public_use_index,
@@ -47,12 +48,6 @@ from .policy.public_use_index import (
 )
 from .policy.type_spelling import strip_ptr as _strip_ptr
 from .surface_graph import SurfaceGraph
-
-# Provenance origins that are NOT part of the public ABI surface — a type defined
-# only in one of these is the library's private implementation (ADR-024/027).
-_NON_PUBLIC_ORIGINS = frozenset(
-    {ScopeOrigin.PRIVATE_HEADER, ScopeOrigin.SYSTEM_HEADER, ScopeOrigin.GENERATED}
-)
 
 
 class Idiom(StrEnum):
@@ -645,7 +640,7 @@ def _collect_base_targets(
     """
     base_targets: set[str] = set()
     for rec in graph.snapshot.declarations.types:
-        if rec.origin in _NON_PUBLIC_ORIGINS:
+        if rec.origin in NON_PUBLIC_ORIGINS:
             continue
         bases = resolved_fact_value(rec.bases_fact, [])
         for b in bases:

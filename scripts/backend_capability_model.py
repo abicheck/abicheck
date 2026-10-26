@@ -114,7 +114,7 @@ def hybrid_capability(row: FactRow) -> Capability:
 
     ``workflows.dump.hybrid_merge.merge_snapshots`` is castxml-based by construction: it
     walks castxml's declarations and takes clang's value only for the specific
-    facts its backfill lists name (``_backfill_function_facts``,
+    facts its backfill lists name (``backfill_function_facts``,
     ``_merge_variable``, ``_merge_field``, ``_merge_record_type``'s
     ``_LAYOUT_SCALAR_ATTRS``, ``_merge_enum_type``). So:
 

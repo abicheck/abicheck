@@ -95,6 +95,7 @@ from typing import TYPE_CHECKING
 from .diff_cxx_rules import owner_class_of
 from .model import ScopeOrigin
 from .model.identity_tiers import SnapshotLocalIdentity, snapshot_local_identity
+from .model.vocabulary import NON_PUBLIC_ORIGINS
 
 # Every name below is imported with the redundant `as X` self-alias, the
 # standard ruff/mypy-recognized "this import is an intentional re-export"
@@ -106,18 +107,15 @@ from .model.identity_tiers import SnapshotLocalIdentity, snapshot_local_identity
 # forwarding import for any name a *different* module then imports back out
 # of this one.
 from .type_reachability_spelling import (
-    _NON_PUBLIC_ORIGINS as _NON_PUBLIC_ORIGINS,
     _bare_type_name as _bare_type_name,
     _compile_spelling_pattern as _compile_spelling_pattern,
     _finditer_allow_nested as _finditer_allow_nested,
     _is_public_non_stdlib_declaration as _is_public_non_stdlib_declaration,
-    _namespace_suffix_spellings as _namespace_suffix_spellings,
     _non_stdlib_signature_spellings as _non_stdlib_signature_spellings,
     _partition_snapshot_types as _partition_snapshot_types,
     _raw_typedef_spellings as _raw_typedef_spellings,
     _record_identity as _record_identity,
     _spelling_index as _spelling_index,
-    _stripped_signature_spelling as _stripped_signature_spelling,
     _typedef_candidate_spellings as _typedef_candidate_spellings,
     _typedef_spelling_targets as _typedef_spelling_targets,
     spelling_matches as spelling_matches,
@@ -250,7 +248,7 @@ class _StdlibReferenceScan:
         # token queued, popped, and looked up, never matched against
         # rendered signature text. That is what separates them from the
         # *spelling* domain this module's `_spelling_index`/
-        # `_stripped_signature_spelling` machinery operates in, which is why
+        # `stripped_signature_spelling` machinery operates in, which is why
         # only these migrated -- see this class's own note below.
         #
         # Snapshot-local, not stable, by construction and not by omission:
@@ -891,7 +889,7 @@ def _walk_reached_records(
             return
         is_direct, typedef_origins = scan.record_provenance(identity)
         for rec in non_stdlib_records[identity]:
-            if rec.origin in _NON_PUBLIC_ORIGINS:
+            if rec.origin in NON_PUBLIC_ORIGINS:
                 continue
             if exclude_export_only and rec.origin is ScopeOrigin.EXPORT_ONLY:
                 continue
@@ -1035,7 +1033,7 @@ def _directly_referenced_stdlib_types_uncached(
     leaf in ``name`` and the namespace-qualified spelling separately in
     ``qualified_name``, so ``name`` alone never carries a ``std::`` prefix
     for those two backends and this helper would silently find nothing. See
-    :func:`_stripped_signature_spelling`/:func:`_spelling_index` for how the
+    :func:`stripped_signature_spelling`/:func:`_spelling_index` for how the
     resulting identity is matched back against the (differently-spelled,
     possibly ambiguous) signature type strings, and
     :func:`_compile_spelling_pattern` for why the matching itself is one

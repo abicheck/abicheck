@@ -22,14 +22,14 @@ from __future__ import annotations
 from collections import deque
 from collections.abc import Container, Mapping, Sequence, Set as AbstractSet
 
-from ...model import EnumType, Function, RecordType, Variable
-from ...type_reachability import (
-    _compile_spelling_pattern,
-    _namespace_suffix_spellings,
-    _stripped_signature_spelling,
+from ...compare.spelling_pattern import (
+    compile_spelling_pattern,
     spelling_matches,
     spellings_possible_in,
 )
+from ...model import EnumType, Function, RecordType, Variable
+from ...model.namespace_spelling import namespace_suffix_spellings
+from ...type_reachability_spelling import stripped_signature_spelling
 
 
 def _typedef_alias_reachability(
@@ -69,7 +69,7 @@ def _typedef_alias_reachability(
 
     *interesting_keys* is deliberately one flat set covering both
     dependency-candidate matching keys and kept-type/enum spellings: the
-    caller (:func:`_directly_referenced_dependency_names`) tells which
+    caller (:func:`directly_referenced_dependency_names`) tells which
     category a given reached key belongs to via simple set intersection
     against its own ``key_owners``/``kept_spellings`` -- this function
     only computes *reachability*, not what a reached key means.
@@ -78,7 +78,7 @@ def _typedef_alias_reachability(
         return {}
 
     typedef_keys = set(typedefs)
-    combined_pattern = _compile_spelling_pattern(
+    combined_pattern = compile_spelling_pattern(
         spellings_possible_in(typedef_keys | interesting_keys, typedefs.values())
     )
     if combined_pattern is None:
@@ -145,12 +145,12 @@ def _typedef_alias_reachability(
 #: Elaborated-type-specifier keywords a ``RecordType.kind``/``EnumType``
 #: spelling is prefixed with (``struct``/``class``/``union Foo``, ``enum
 #: Foo``) -- see the elaborated-spelling generation in
-#: ``_directly_referenced_dependency_names`` and its nested-match
+#: ``directly_referenced_dependency_names`` and its nested-match
 #: suppression at the end of that function.
 _TAG_KEYWORDS = frozenset({"struct", "class", "union", "enum"})
 
 
-def _kept_identifiers(names: set[str], qualified_names: set[str]) -> set[str]:
+def kept_identifier_set(names: set[str], qualified_names: set[str]) -> set[str]:
     return names | qualified_names
 
 
@@ -174,13 +174,13 @@ def _elaborated_tag_keywords(record_or_enum: RecordType | EnumType) -> frozenset
     return frozenset({"enum"})
 
 
-def _candidate_identity(candidate: RecordType | EnumType) -> str:
+def candidate_identity(candidate: RecordType | EnumType) -> str:
     """The most specific spelling identifying *candidate*: its fully-qualified
     name when the producer populated one, else its bare ``name``."""
     return getattr(candidate, "qualified_name", None) or candidate.name
 
 
-def _kept_signature_haystack(
+def kept_signature_haystack(
     kept_functions: Sequence[Function],
     kept_variables: Sequence[Variable],
     kept_types: Sequence[RecordType],
@@ -228,12 +228,12 @@ def _kept_type_spellings(
     """
     spellings: set[str] = set()
     for rec in kept_types:
-        suffixes = _namespace_suffix_spellings(_candidate_identity(rec))
+        suffixes = namespace_suffix_spellings(candidate_identity(rec))
         spellings.update(suffixes)
         for keyword in _elaborated_tag_keywords(rec):
             spellings.update(f"{keyword} {s}" for s in suffixes)
     for enum in kept_enums:
-        suffixes = _namespace_suffix_spellings(_candidate_identity(enum))
+        suffixes = namespace_suffix_spellings(candidate_identity(enum))
         spellings.update(suffixes)
         spellings.update(f"enum {s}" for s in suffixes)
     return spellings
@@ -273,8 +273,8 @@ def _raw_candidate_spellings(
     identity/suffix string a colliding typedef alias name could match), so they
     naturally fall outside every typedef-alias veto without special-casing.
     """
-    stripped = _stripped_signature_spelling(identity)
-    spellings = {identity, *_namespace_suffix_spellings(identity)}
+    stripped = stripped_signature_spelling(identity)
+    spellings = {identity, *namespace_suffix_spellings(identity)}
     if stripped:
         spellings.add(stripped)
     spellings.add(f"::{identity}")
@@ -321,7 +321,7 @@ def _kept_touched_alias_names(
     for alias, reached in reachable_by_alias.items():
         if reached & kept_spellings:
             names.add(alias)
-            names.update(_namespace_suffix_spellings(alias)[1:])
+            names.update(namespace_suffix_spellings(alias)[1:])
     return names
 
 
@@ -355,7 +355,7 @@ def _typedef_alias_name_spellings(typedefs: dict[str, str]) -> set[str]:
     for alias in typedefs:
         names.add(alias)
         names.add(f"::{alias}")
-        names.update(_namespace_suffix_spellings(alias)[1:])
+        names.update(namespace_suffix_spellings(alias)[1:])
     return names
 
 
@@ -420,7 +420,7 @@ def _alias_spelling_owners(
     """
     sources: dict[str, set[str]] = {}
     for alias in typedefs:
-        for spelling in {alias, f"::{alias}", *_namespace_suffix_spellings(alias)[1:]}:
+        for spelling in {alias, f"::{alias}", *namespace_suffix_spellings(alias)[1:]}:
             sources.setdefault(spelling, set()).add(alias)
     owners: dict[str, set[str]] = {}
     for spelling, aliases in sources.items():
@@ -489,7 +489,7 @@ def _referenced_from_haystack(
     """Scan *haystack* once and collect every identity its spellings name.
 
     One compiled multi-spelling pattern
-    (:func:`abicheck.type_reachability._compile_spelling_pattern`) rather than
+    (:func:`abicheck.compare.spelling_pattern.compile_spelling_pattern`) rather than
     re-scanning once per candidate spelling (Codex review: the naive
     per-spelling scan is O(candidate count x signature size), which becomes
     seconds-to-minutes on the large transitive dependency surfaces --
@@ -508,7 +508,7 @@ def _referenced_from_haystack(
     match's alias resolution incorrectly pulled in the typedef's unrelated
     target alongside the correctly-resolved tag.
     """
-    pattern = _compile_spelling_pattern(
+    pattern = compile_spelling_pattern(
         spellings_possible_in(spelling_index, (haystack,))
     )
     if pattern is None:
@@ -528,7 +528,7 @@ def _referenced_from_haystack(
     return referenced
 
 
-def _directly_referenced_dependency_names(
+def directly_referenced_dependency_names(
     kept_functions: Sequence[Function],
     kept_variables: Sequence[Variable],
     kept_types: Sequence[RecordType],
@@ -554,7 +554,7 @@ def _directly_referenced_dependency_names(
     implementation closure (e.g. ``std::string``'s own
     ``_Alloc_hider`` field) this scoping exists to drop.
 
-    Returns each retained candidate's :func:`_candidate_identity` (not its
+    Returns each retained candidate's :func:`candidate_identity` (not its
     bare ``name``): two dependency candidates can share the same bare name
     under different fully-qualified identities (``std::Thing`` vs.
     ``vendor::Thing``), and returning bare names would let one's match
@@ -562,11 +562,11 @@ def _directly_referenced_dependency_names(
 
     Every spelling that could name a candidate -- **including its own full
     identity**, a namespace-suffix spelling from
-    :func:`abicheck.type_reachability._namespace_suffix_spellings` (e.g. a
+    :func:`abicheck.model.namespace_spelling.namespace_suffix_spellings` (e.g. a
     direct-clang backend's partially-qualified ``Outer::Inner`` for a
     nested ``vendor::Outer::Inner``, or the fully bare leaf), a
     stdlib-stripped spelling from
-    :func:`abicheck.type_reachability._stripped_signature_spelling``, or a
+    :func:`abicheck.type_reachability_spelling.stripped_signature_spelling``, or a
     ``typedefs``-resolved alias pointing at any of those -- goes through
     the *same* two collision guards before being trusted: it is dropped if
     it collides with any *kept_types*/*kept_enums* spelling, and dropped if
@@ -633,7 +633,7 @@ def _directly_referenced_dependency_names(
     like an ambiguous bare identity suffix.
 
     Scans the joined signature text with one compiled multi-spelling
-    pattern (:func:`abicheck.type_reachability._compile_spelling_pattern`)
+    pattern (:func:`abicheck.compare.spelling_pattern.compile_spelling_pattern`)
     rather than re-scanning it once per candidate spelling (Codex review:
     the naive per-spelling scan is O(candidate count x signature size),
     which becomes seconds-to-minutes on the large transitive dependency
@@ -680,7 +680,7 @@ def _directly_referenced_dependency_names(
     ``parse_typedefs()`` root cause, same declined fix, same blast radius
     as above.
     """
-    haystack = _kept_signature_haystack(kept_functions, kept_variables, kept_types)
+    haystack = kept_signature_haystack(kept_functions, kept_variables, kept_types)
     typedefs = typedefs or {}
     kept_spellings = _kept_type_spellings(kept_types, kept_enums)
 
@@ -697,7 +697,7 @@ def _directly_referenced_dependency_names(
     # (this preliminary map only feeds the reachability computation).
     prelim_key_owners: dict[str, set[str]] = {}
     for candidate in dep_candidates:
-        identity = _candidate_identity(candidate)
+        identity = candidate_identity(candidate)
         identity_of[id(candidate)] = identity
         spellings = _raw_candidate_spellings(candidate, identity)
         raw_own_spellings_of[id(candidate)] = spellings
@@ -737,7 +737,7 @@ def _directly_referenced_dependency_names(
     return _referenced_from_haystack(haystack, spelling_index)
 
 
-def _name_matches(name: str, kept_identifiers: Container[str]) -> bool:
+def name_matches(name: str, kept_identifiers: Container[str]) -> bool:
     """Exact-only match against the kept types'/enums' own spellings.
 
     Deliberately does **not** fall back to bare-tail matching (a DWARF key

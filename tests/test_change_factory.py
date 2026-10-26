@@ -14,7 +14,7 @@
 
 """Tests for the C6 change factory (``diff_helpers.make_change``).
 
-The factory keeps a kind's description wording in ``change_registry`` instead
+The factory keeps a kind's description wording in ``change_catalog.assembled`` instead
 of hand-rolled f-strings at the call site. These tests lock two things:
 
 * the factory mechanics (template formatting, bespoke override, field
@@ -30,10 +30,10 @@ import string
 
 import pytest
 
-from abicheck.change_registry import REGISTRY
 from abicheck.checker_policy import ChangeKind
 from abicheck.diff_helpers import TEMPLATE_VOCAB, make_change
 from abicheck.model.change import Change
+from abicheck.model.change_catalog.assembled import REGISTRY
 
 
 def _template_fields(template: str) -> set[str]:
