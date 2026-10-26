@@ -20,7 +20,7 @@
       "abicheck/extract/binary_identity.py": "4645eaf3dddd0a2230a5c694882548476406c57514275fa4c8c1bc152607ca88",
       "abicheck/extract/build_mode_capture.py": "7a46c5babcc5bf770a1a38d5a5d3abb49a2b7d9575bda2b210d2e2861ebfb51f",
       "abicheck/extract/cache_header_scan.py": "4a944a4e6eff6b10de32c6aec2ad939b78e9ffc96e725791247431a0cc870684",
-      "abicheck/extract/castxml_compiler_emulation.py": "3bfd81f905f074af995d48dddb98e279315820fc1fdda81189948edb323dc26c",
+      "abicheck/extract/castxml_compiler_emulation.py": "6db7b7e929e932e8fefac5fa66f06a643720fa16f76a101d51703d9091b548a3",
       "abicheck/extract/castxml_header_compat.py": "d0e78b90ad113be1cb89f05465f77fa9d9fc9546608275707cd7d15f18e2f518",
       "abicheck/extract/compile_header_inputs.py": "38655d35c5309694ebf12be60e5e4fcd3fa5c8ea7eb8a73a9b4ab2fcf46338b9",
       "abicheck/extract/compiler_driver.py": "0e41639ac1aa87e1bc625b756703e88bb053d92c1d2a2bed5f15ebeccbb4a4e1",
@@ -168,9 +168,9 @@
       "abicheck/symvers_metadata.py": "372737765cd132e6e87ed891dd465d2958e04debbef774e45212ceb3036871cb",
       "abicheck/type_metadata.py": "9997189de8dac522fd1db8be5ae491d811139503f83abaaded89038eb4aa9cdf"
     },
-    "fingerprint": "56d5a8f7d98157a1e44c3720795ea11c72c152efd5bb731e0bf2eb438fe5d1dc",
-    "generation": 26,
-    "reason": "restores generation 26's documented reader behaviour: a null clang inner reads as a leaf and _unwrap_expr degrades a non-list inner, as the readers' existing tests pin"
+    "fingerprint": "82a14593cd832fe2ef27f60f4fc5d3f8e959bcf820d831f56de8bfb5e467e1ac",
+    "generation": 27,
+    "reason": "separate --target/-target triple is carried into castxml emulation for clang-family compilers"
   },
   "resolver": {
     "files": {

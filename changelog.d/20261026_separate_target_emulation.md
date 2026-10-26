@@ -1,0 +1,3 @@
+### Fixed
+
+- **Separate `--target <triple>` and `-target <triple>` are carried into castxml compiler emulation** — for a Clang-family compiler, the two-token spelling was dropped, so castxml emulated the host target and header ABI facts (pointer size, predefined macros) were read for the wrong platform. The joined `--target=<triple>` already worked. The pair is now copied together, and a missing trailing operand is never consumed. GCC-family emulation still drops both tokens, since GCC rejects them. Dumps whose flags name the target as a separate operand change, so the extractor generation is bumped to 27.

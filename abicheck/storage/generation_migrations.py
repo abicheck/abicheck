@@ -278,6 +278,15 @@ SPELLING_MIGRATIONS: Mapping[int, GenerationSpellingChange] = {
         "read as no children. No type or name spelling changes, so no rewrite "
         "is needed"
     ),
+    27: GenerationSpellingChange(
+        "castxml compiler emulation keeps a separate --target <triple> and "
+        "-target <triple> (both copied as a pair for a clang-family emulated "
+        "compiler, dropped for GCC), so a dump whose compile flags name the "
+        "target as a separate operand now probes the emulated compiler for that "
+        "target instead of the host; header ABI facts (pointer size, predefined "
+        "macros) change for those dumps. No type or name spelling changes, so no "
+        "rewrite is needed"
+    ),
 }
 
 #: Reasons that say nothing about what was audited; the bump gate refuses them.

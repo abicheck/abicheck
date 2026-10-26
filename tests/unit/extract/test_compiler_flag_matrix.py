@@ -28,11 +28,6 @@ GCC = ("g++", "gnu")
 CLANG = ("clang++", "gnu")
 MSVC = ("cl", "msvc")
 
-_TARGET_SEPARATE_GAP = pytest.mark.xfail(
-    strict=True,
-    reason="known gap: separate --target is not a separate-value flag in emulation",
-)
-
 # (label, cc family, tokens, abi, emu, scan)
 ROWS = [
     ("std joined", GCC, ["-std=c++17"], True, True, False),
@@ -44,16 +39,26 @@ ROWS = [
     ("m32", GCC, ["-m32"], True, True, False),
     ("target joined clang", CLANG, ["--target=x86_64-linux-gnu"], True, True, False),
     ("target joined gcc", GCC, ["--target=x86_64-linux-gnu"], True, False, False),
-    pytest.param(
+    (
         "target separate clang",
         CLANG,
         ["--target", "x86_64-linux-gnu"],
         None,
         True,
         None,
-        marks=_TARGET_SEPARATE_GAP,
-        id="target separate clang",
     ),
+    ("target separate gcc", GCC, ["--target", "x86_64-linux-gnu"], None, False, None),
+    ("target separate missing operand", CLANG, ["--target"], None, False, None),
+    (
+        "-target separate clang",
+        CLANG,
+        ["-target", "x86_64-linux-gnu"],
+        None,
+        True,
+        None,
+    ),
+    ("-target separate gcc", GCC, ["-target", "x86_64-linux-gnu"], None, False, None),
+    ("-target separate missing operand", CLANG, ["-target"], None, False, None),
     ("fno-exceptions", GCC, ["-fno-exceptions"], True, True, False),
     ("fexceptions under cl", MSVC, ["-fexceptions"], True, False, False),
     ("x joined c", GCC, ["-xc"], False, True, False),

@@ -97,6 +97,12 @@ _CLANG_ONLY_PREFIXES: tuple[str, ...] = ("--target=", "-stdlib=")
 #: Flags that take their value as the *next* argument.
 _SEPARATE_VALUE_FLAGS: frozenset[str] = frozenset({"-x", "--sysroot", "-isysroot"})
 
+#: Clang-driver target spellings with the triple as the *next* argument
+#: (``--target <triple>``, ``-target <triple>``). Copied as a pair only for a
+#: Clang-family emulated compiler; GCC rejects both, so for GCC the pair is
+#: consumed and dropped together, never leaving the operand to be read alone.
+_TARGET_SEPARATE_FLAGS: frozenset[str] = frozenset({"--target", "-target"})
+
 #: Clang-driver flags whose operand is the *next* argument and which only
 #: castxml's parser should see: ``-mllvm <backend-option>`` (it would
 #: otherwise match the ``-m*`` target-flag rule and reach GCC without its
@@ -200,7 +206,9 @@ def emulation_arguments(
     follows the emulation group), in order. Order is preserved, so a later
     ``-std=`` still wins inside the group exactly as it does outside it. A
     separate-value flag (``-x c``, ``--sysroot DIR``) is copied together with
-    its value.
+    its value, and a separate ``--target``/``-target`` triple is copied as a
+    pair for a Clang-family compiler only. A trailing flag with no operand is
+    dropped, as the joined-only rules would drop it.
     """
     clang_family = _is_clang_family(cc_bin)
     kept: list[str] = []
@@ -212,6 +220,10 @@ def emulation_arguments(
             index += 2
         elif token in _SEPARATE_VALUE_FLAGS and index + 1 < len(tokens):
             if _value_flag_kept(cc_id):
+                kept += [token, tokens[index + 1]]
+            index += 2
+        elif token in _TARGET_SEPARATE_FLAGS and index + 1 < len(tokens):
+            if clang_family:
                 kept += [token, tokens[index + 1]]
             index += 2
         elif cc_id == "msvc" and token.startswith("-std="):
