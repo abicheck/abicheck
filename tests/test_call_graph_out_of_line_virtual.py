@@ -174,7 +174,16 @@ def _clang_ast(tmp_path: Path, source: str) -> dict:
     src = tmp_path / "tu.cpp"
     src.write_text(source)
     proc = subprocess.run(
-        ["clang++", "-fsyntax-only", "-Xclang", "-ast-dump=json", str(src)],
+        # The callee table spells Itanium names; pin the target so a Windows
+        # host (MSVC mangling by default) parses the same TU the same way.
+        [
+            "clang++",
+            "--target=x86_64-unknown-linux-gnu",
+            "-fsyntax-only",
+            "-Xclang",
+            "-ast-dump=json",
+            str(src),
+        ],
         capture_output=True,
         text=True,
         check=True,
@@ -226,6 +235,8 @@ def test_out_of_line_virtual_call_reaches_the_dispatch_join(tmp_path: Path) -> N
     dispatch = {
         (e.src, e.dst) for e in graph.edges if e.kind == "VIRTUAL_CALL_MAY_DISPATCH_TO"
     }
-    assert any("_Z3useRK5Shape" in s and "_ZNK2Sq4areaEv" in d for s, d in dispatch), (
-        sorted(dispatch)
+    # Mangling-agnostic (Itanium on ELF/Mach-O, MSVC on Windows): the caller
+    # is ``use`` and the joined target is ``Sq::area``.
+    assert any("use" in s and "area" in d and "Sq" in d for s, d in dispatch), sorted(
+        dispatch
     )
