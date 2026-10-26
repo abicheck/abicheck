@@ -944,9 +944,10 @@ class TestStoredLiveExtractionFailureIsAnOperationalError:
         # consumer keyed on it (the aggregate loader, the Action's fallback)
         # keeps exit 4; the real compared result stays on its own axes.
         assert doc["verdict"] == "ERROR"
-        assert doc["per_library_verdict"] == "NO_CHANGE"
+        verdicts = {entry["library"]: entry["verdict"] for entry in doc["libraries"]}
+        assert verdicts["libok.so"] == "NO_CHANGE"
+        assert verdicts["libbad.so"] == "ERROR"
         assert doc["run_outcome"]["compatibility"] == "NO_CHANGE"
-        assert list(doc["libraries"]) == ["libok.so"]
         assert list(doc["extraction_failures"]) == ["libbad.so"]
         assert doc["comparison_scope"]["unchecked"] == ["libbad.so"]
         assert doc["comparison_scope"]["counts"]["failed"] == 1
@@ -1005,27 +1006,27 @@ class TestStoredLiveExtractionFailureIsAnOperationalError:
 
     def test_render_json_states_the_operational_axis(self, tmp_path: Path) -> None:
         from abicheck.bundle_models import BundleDiffResult
-        from abicheck.frontends.cli.commands.compare_bundle_facts import _render
+        from tests._stored_render import render_stored
 
         result = BundleDiffResult(old_root=tmp_path, new_root=tmp_path)
         clean = json.loads(
-            _render(result, "json", old_facts_path=tmp_path, new_dir=tmp_path)
+            render_stored(result, "json", old_facts_path=tmp_path, new_dir=tmp_path)
         )
         assert clean["run_outcome"]["operational"] == "none"
         assert clean["extraction_failures"] == {}
         result.extraction_failures = {"libbad.so": "boom"}
         doc = json.loads(
-            _render(result, "json", old_facts_path=tmp_path, new_dir=tmp_path)
+            render_stored(result, "json", old_facts_path=tmp_path, new_dir=tmp_path)
         )
         assert doc["run_outcome"]["operational"] == "extraction_error"
         assert doc["extraction_failures"] == {"libbad.so": "boom"}
         assert clean["verdict"] == "NO_CHANGE" and doc["verdict"] == "ERROR"
-        from abicheck.frontends.cli.commands.compare_bundle_facts import (
-            _render,
-        )
+        from tests._stored_render import render_stored
 
-        md = _render(result, "markdown", old_facts_path=tmp_path, new_dir=tmp_path)
-        assert "- **Verdict:** `ERROR`" in md
+        md = render_stored(
+            result, "markdown", old_facts_path=tmp_path, new_dir=tmp_path
+        )
+        assert "**Verdict** | " in md and "`ERROR`" in md
 
 
 class TestGhostMarkerInAStoredPackageIsRefused:

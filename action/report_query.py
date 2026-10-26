@@ -499,19 +499,6 @@ def assurance_axis(report: dict[str, Any]) -> str:
             if version >= threshold:
                 return "contradictory"
             return "absent_legacy_schema"
-    # An *unversioned* shape that still emits the pair under one `if`: the
-    # stored-BundleFacts comparison (`frontends/cli/commands/
-    # compare_bundle_facts.py`'s JSON summary) stamps none of the three schema
-    # keys above, so the loop fell through to `absent_legacy_schema` and a
-    # provably broken pair read as an old report (Codex review, P2).
-    #
-    # The version threshold exists to answer "was a contribution owed here"; for
-    # a shape that has no version to ask, the shape itself answers it, because
-    # that emitter has *always* written both keys together. Recognized by its own
-    # `mode` discriminator rather than by giving it a version it does not carry,
-    # which would be inventing a field to reason about.
-    if report.get("mode") == "bundle_facts":
-        return "contradictory"
     return "absent_legacy_schema"
 
 
@@ -732,10 +719,9 @@ def answer(report: dict[str, Any], query: str, arg: str = "") -> str | None:
         # (an older abicheck, or a scalar report), so this is CannotTell
         # rather than a `0` that would read as "did not fire".
         #
-        # The stored-baseline dispatch (`compare_bundle_facts.py`) emits no
-        # root `exit` block; its `comparison_scope` section carries the same
-        # two contributions under the `*_exit_contribution` names, so that
-        # is the second source before "cannot tell".
+        # A `comparison_scope` section may carry the same two contributions under
+        # the `*_exit_contribution` names; that is the second source before
+        # "cannot tell".
         block = _either("exit", {})
         block = block if isinstance(block, dict) else {}
         scope = report.get("comparison_scope")

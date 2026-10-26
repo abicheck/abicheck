@@ -468,7 +468,8 @@ class TestStoredDispatchShapeAndAcceptedGaps:
         expected_exit = 1 if policy == "block" else 0
         assert result.exit_code == expected_exit, result.output
         doc = json.loads((reports / f"abi-report-{LINUX}.json").read_text())
-        assert "exit" not in doc  # the stored dispatcher's own shape
+        # The stored document is the live release document (schema 2.5).
+        assert "release_schema_version" in doc
         agg = aggregate_reports_dir(reports, expected=_expect(LINUX))
         assert agg.scope_completeness_exit == expected_exit
         assert agg.scope_completeness_targets == (LINUX,)

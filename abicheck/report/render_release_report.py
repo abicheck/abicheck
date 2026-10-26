@@ -16,10 +16,9 @@
 """Thin renderers of the one release report (:mod:`.release_document`).
 
 Every function here reads a finished :class:`~.release_document.ReleaseReport`
-or :class:`~.release_document.StoredReleaseReport` and formats it: no
-verdict, gate, filter or count is resolved here. :func:`render_release_text`
-is the one per-format dispatch for the live release; the stored operand has
-its own two renderers because its document shape differs.
+and formats it: no verdict, gate, filter or count is resolved here.
+:func:`render_release_text` is the one per-format dispatch for every release,
+live or stored; a stored comparison's JSON differs only by its stored markers.
 
 *demangle* applies to the human formats only (Markdown); JSON/JUnit keep the
 raw mangled symbol a machine consumer matches on, as single-pair ``compare``
@@ -30,12 +29,13 @@ impact table is prose with no ``<testsuite>``/``<testcase>`` projection.
 from __future__ import annotations
 
 import json
+from collections.abc import Mapping
 
 from .release_document import (
+    ReleaseEvaluation,
     ReleaseReport,
-    StoredReleaseReport,
     release_json_document,
-    stored_release_json_document,
+    stored_release_document,
 )
 
 __all__ = [
@@ -44,7 +44,6 @@ __all__ = [
     "render_release_markdown_report",
     "render_release_text",
     "render_stored_release_json",
-    "render_stored_release_markdown",
 ]
 
 _VERDICT_EMOJI = {
@@ -247,55 +246,11 @@ def render_release_text(fmt: str, report: ReleaseReport, *, demangle: bool) -> s
     return render_release_markdown_report(report, demangle=demangle)
 
 
-def render_stored_release_json(report: StoredReleaseReport) -> str:
-    """The stored-``BundleFacts`` comparison's JSON text."""
-    return json.dumps(stored_release_json_document(report).to_mapping(), indent=2)
-
-
-def render_stored_release_markdown(report: StoredReleaseReport) -> str:
-    """The stored-``BundleFacts`` comparison's Markdown text.
-
-    Markdown is a human format, so it is demangled (``demangle_text``
-    rewrites only Itanium tokens and keeps the exact spelling beside them).
-    """
-    from ..bundle import render_bundle_findings_markdown
-    from ..demangle import demangle_text
-    from .release_stored_scope import markdown_scope_lines
-    from .release_stored_sections import public_surface_markdown_lines
-
-    ev = report.evaluation
-    result = ev.result
-    new_label = "stored facts" if ev.new_is_stored else "release directory"
-    lines = [
-        "# Bundle-facts comparison",
-        "",
-        f"- OLD (stored facts): `{ev.old_facts_path}`",
-        f"- NEW ({new_label}): `{ev.new_dir}`",
-        f"- **Verdict:** `{report.reported_verdict}`",
-        f"- Per-library verdict: `{result.per_library_verdict.value}`",
-        f"- Bundle verdict: `{result.bundle_verdict.value}`",
-        "",
-    ]
-    if result.env_matrix_source_sha256 is not None:
-        lines.append(f"- Deployment floor digest: `{result.env_matrix_source_sha256}`")
-        lines.append("")
-    lines += markdown_scope_lines(ev.scope_terms)
-    if result.analysis_errors:
-        lines.append("## Bundle analysis errors")
-        lines += [f"- {msg}" for msg in result.analysis_errors]
-        lines.append("")
-    lines.append("## Per-library results")
-    lines.append("")
-    lines.append("| Library | Verdict |")
-    lines.append("|---|---|")
-    for diff in result.per_library:
-        lines.append(f"| {diff.library} | `{diff.verdict.value}` |")
-    lines.append("")
-    lines += public_surface_markdown_lines(result)
-    lines.append("## Bundle findings")
-    lines.append("")
-    bundle_lines = render_bundle_findings_markdown(result.bundle_findings)
-    lines += bundle_lines if bundle_lines else ["(none)"]
-    from .markdown_budget import DEMANGLED_NAME_LIMIT
-
-    return demangle_text("\n".join(lines) + "\n", max_demangled=DEMANGLED_NAME_LIMIT)
+def render_stored_release_json(
+    evaluation: ReleaseEvaluation, *, details: Mapping[str, object] | None = None
+) -> str:
+    """The stored ``BundleFacts`` comparison's JSON text: the live release
+    document with its stored markers and the stored run's *details*
+    (:func:`stored_release_document`)."""
+    document = stored_release_document(evaluation, details=details)
+    return json.dumps(document.to_mapping(), indent=2)

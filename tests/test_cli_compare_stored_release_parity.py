@@ -42,6 +42,7 @@ from defusedxml.ElementTree import fromstring as xml_fromstring
 
 from abicheck.cli import main
 from abicheck.cli_resolve import _resolve_input
+from abicheck.schemas.release_schema import RELEASE_SCHEMA_VERSION
 from abicheck.serialization import save_bundle_facts
 from abicheck.workflows.bundle_facts_capture import capture_bundle_facts
 
@@ -313,7 +314,7 @@ _RELEASE_BLOCK_SCHEMA = {
         "public_surface",
     ],
     "properties": {
-        "release_schema_version": {"const": "2.4"},
+        "release_schema_version": {"const": RELEASE_SCHEMA_VERSION},
         "effective_config_source": {"const": "reconstructed_from_stored_facts"},
         "public_surface": {"$ref": "#/$defs/unavailable"},
         "libraries": {
@@ -359,7 +360,7 @@ def test_stored_release_block_agrees_with_live_on_shared_fields(
     case: str, tmp_path: Path
 ) -> None:
     code, live, stored = _stored_json(tmp_path, case)
-    release = stored["release"]
+    release = stored
 
     assert release["verdict"] == live["verdict"]
     assert release["exit"] == live["exit"]
@@ -375,13 +376,13 @@ def test_stored_release_block_satisfies_its_schema(case: str, tmp_path: Path) ->
 
     _code, _live, stored = _stored_json(tmp_path, case)
 
-    validate_instance(stored["release"], _RELEASE_BLOCK_SCHEMA)
+    validate_instance(stored, _RELEASE_BLOCK_SCHEMA)
 
 
 @pytest.mark.parametrize("case", sorted(_CASES))
 def test_every_unavailable_field_states_a_reason(case: str, tmp_path: Path) -> None:
     _code, _live, stored = _stored_json(tmp_path, case)
-    release = stored["release"]
+    release = stored
 
     markers = [release["public_surface"]] + [
         entry[field] for entry in release["libraries"] for field in _UNAVAILABLE_FIELDS
@@ -411,20 +412,3 @@ def test_stored_html_carries_the_same_verdict_and_exit_as_live(
     shown = lambda html: {token for token in vocabulary if token in html}  # noqa: E731
     assert shown(stored_html) == shown(live_html)
     assert shown(live_html), "the live HTML states a verdict"
-
-
-@pytest.mark.parametrize("fmt", ["junit", "oneline", "html"])
-def test_live_formats_refuse_a_render_without_a_release_evaluation(
-    fmt: str, tmp_path: Path
-) -> None:
-    """The live-renderer formats need the stored run's release evaluation; a
-    caller without one gets a stated error, not a silent fallback."""
-    from abicheck.frontends.cli.commands.compare_bundle_facts import _render
-
-    with pytest.raises(ValueError, match=rf"-o {fmt}= renders the live release"):
-        _render(
-            object(),
-            fmt,
-            old_facts_path=tmp_path / "old.bundlefacts.json",
-            new_dir=tmp_path / "new",
-        )

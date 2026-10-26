@@ -140,9 +140,16 @@ class TestNotComparableMemberIsRecordedNotRaised:
         doc = json.loads(out[out.index("{") :])
         assert doc["verdict"] == "not_comparable"
         assert doc["run_outcome"]["operational"] == "not_comparable"
-        assert doc["run_outcome"]["compatibility"] is None
+        # Compatibility is the verdict of the members that were compared; the
+        # not-comparable member is its own operational axis (exit 16), never
+        # a null compatibility (ADR-065: completeness and compatibility are
+        # separate axes).
+        assert doc["run_outcome"]["compatibility"] == "NO_CHANGE"
         assert doc["run_outcome"]["scope"] == "incomplete"
-        assert list(doc["libraries"]) == ["libok.so"]
+        assert [entry["library"] for entry in doc["libraries"]] == [
+            "libok.so",
+            "libmix.so",
+        ]
         assert doc["not_comparable_members"]["libmix.so"]["kind"] == "scope_mismatch"
         members = {m["member"]: m for m in doc["comparison_scope"]["members"]}
         assert members["libmix.so"]["state"] == "failed"
@@ -178,7 +185,7 @@ class TestZeroOverlapPairRendersItsScope:
         assert scope["proven_removed"] == ["libold.so"]
         assert scope["proven_added"] == ["libnew.so"]
         assert doc["run_outcome"]["operational"] == "no_comparison_completed"
-        assert doc["libraries"] == {}
+        assert doc["libraries"] == []
 
     def test_markdown_warns_and_exits_1(self, tmp_path: Path) -> None:
         old = tmp_path / "old.bundlefacts.json"
@@ -192,3 +199,69 @@ class TestZeroOverlapPairRendersItsScope:
         code, out = _invoke("compare", str(old), str(new), "-o", "markdown=-")
         assert code == 1, out
         assert "no comparison completed" in out
+
+
+class TestANotComparableMemberIsVisibleInEveryFormat:
+    """A not-comparable member must never render as a clean pass. The overall
+    verdict names it in every format, and the JSON lists it with its state and
+    reason."""
+
+    def _result(self) -> object:
+        from abicheck.bundle_models import BundleDiffResult
+        from abicheck.change_registry_types import Verdict
+        from abicheck.checker_types import DiffResult
+
+        clean = DiffResult(
+            old_version="old",
+            new_version="new",
+            library="libok.so",
+            changes=[],
+            verdict=Verdict.NO_CHANGE,
+        )
+        return BundleDiffResult(
+            old_root=Path("/old"),
+            new_root=Path("/new"),
+            per_library=[clean],
+            not_comparable_members={
+                "libmix.so": ("scope_mismatch", "member is not comparable")
+            },
+        )
+
+    def test_json_lists_the_member_with_its_state_and_reason(
+        self, tmp_path: Path
+    ) -> None:
+        from tests._stored_render import render_stored
+
+        doc = json.loads(
+            render_stored(
+                self._result(),
+                "json",
+                old_facts_path=tmp_path,
+                new_dir=tmp_path,
+            )
+        )
+        member = next(e for e in doc["libraries"] if e["library"] == "libmix.so")
+        assert member["verdict"] == "not_comparable"
+        assert member["not_comparable"] == {
+            "kind": "scope_mismatch",
+            "message": "member is not comparable",
+        }
+        assert doc["verdict"] == "not_comparable"
+
+    @pytest.mark.parametrize("fmt", ["markdown", "html", "oneline"])
+    def test_the_overall_verdict_names_it(self, fmt: str, tmp_path: Path) -> None:
+        from tests._stored_render import render_stored
+
+        text = render_stored(
+            self._result(), fmt, old_facts_path=tmp_path, new_dir=tmp_path
+        )
+        assert "not_comparable" in text, text[:400]
+
+    def test_junit_keeps_the_reason(self, tmp_path: Path) -> None:
+        from tests._stored_render import render_stored
+
+        text = render_stored(
+            self._result(), "junit", old_facts_path=tmp_path, new_dir=tmp_path
+        )
+        # Oracle: the reason the stored run recorded for the member.
+        assert "member is not comparable" in text, text[:400]

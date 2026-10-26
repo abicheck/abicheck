@@ -43,6 +43,7 @@ from click.testing import CliRunner
 from abicheck.cli import main
 from abicheck.elf_metadata import ElfMetadata, ElfSymbol
 from abicheck.model import AbiSnapshot, Function, Visibility
+from abicheck.schemas.release_schema import RELEASE_SCHEMA_VERSION
 from abicheck.serialization import save_bundle_facts
 from abicheck.workflows.bundle_facts_capture import capture_bundle_facts
 
@@ -526,10 +527,10 @@ class TestStoredPairEndToEnd:
         code, out = _invoke("compare", str(old_path), str(new_path), "-o", "json=-")
 
         data = json.loads(out)
-        assert data["mode"] == "bundle_facts"
+        assert data["release_schema_version"] == RELEASE_SCHEMA_VERSION
         assert data["new_is_stored"] is True
         assert data["new_dir"] == str(new_path)
-        assert "libcore.so" in data["libraries"]
+        assert "libcore.so" in {e["library"] for e in data["libraries"]}
         assert code != 0
 
     def test_unchanged_pair_is_a_clean_exit(self, tmp_path: Path) -> None:
@@ -596,7 +597,7 @@ class TestStoredPairEndToEnd:
             "compare", str(old_path), str(new_path), "-o", "markdown=-"
         )
 
-        assert "NEW (stored facts)" in out
+        assert "# ABI Release Comparison" in out
 
     def test_mismatched_variant_is_refused_through_the_real_cli(
         self, tmp_path: Path
@@ -789,7 +790,7 @@ class TestStoredPairEndToEnd:
         assert "not comparable" in out
         start = out.index("{")
         document = json.loads(out[start:])
-        assert document["mode"] == "bundle_facts"
+        assert document["release_schema_version"] == RELEASE_SCHEMA_VERSION
         # Since ADR-065 S2 the refusal is recorded per member on the
         # ordinary document (the fan-out's own shape) rather than a
         # separate envelope: the run's verdict is `not_comparable`, the

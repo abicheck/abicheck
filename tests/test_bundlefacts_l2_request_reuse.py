@@ -538,13 +538,11 @@ class TestBundleFactsLiveRouteReuse:
 
         # Vacuity guard: the two assertions below quantify over `libraries`,
         # so an empty map would satisfy both while checking nothing.
-        assert len(payload["libraries"]) == len(MEMBERS), payload["libraries"].keys()
+        assert len(payload["libraries"]) == len(MEMBERS), payload["libraries"]
 
         # No resolved member is re-parsed for bundle topology on this path.
-        for name in {d["library"] for d in payload["libraries"].values()} | set(
-            payload["libraries"]
-        ):
-            assert counters.topology_elf_reads[name] == 0
+        for lib in payload["libraries"]:
+            assert counters.topology_elf_reads[lib["library"]] == 0
 
         # Cross-library attribution and assurance survive -- the fields a
         # reviewer actually reads, not just the top-line verdict.
@@ -552,7 +550,7 @@ class TestBundleFactsLiveRouteReuse:
             f.get("provider_library") and f.get("consumer_library")
             for f in payload["bundle_findings"]
         ), payload["bundle_findings"]
-        assert all("analysis_assurance" in lib for lib in payload["libraries"].values())
+        assert all("analysis_assurance" in lib for lib in payload["libraries"])
 
     def test_an_unsupported_member_is_classified_separately_from_a_failure(
         self, release: dict, monkeypatch: pytest.MonkeyPatch

@@ -283,4 +283,13 @@ __all__ = ["RELEASE_SCHEMA_VERSION"]
 #:       dependencies". A side with no format metadata likewise carries that
 #:       ``state``. Additive for ELF documents, except that ``format`` is new
 #:       on every side and ``state`` replaces the absent block.
-RELEASE_SCHEMA_VERSION = "2.4"
+#: - ``2.5`` (BREAKING for the stored ``BundleFacts`` document) retires its flat
+#:       ``mode: "bundle_facts"`` shape. A stored comparison's JSON is now the
+#:       live release document itself (``release_schema_version`` and every
+#:       live key at the top level), with its receipt marked
+#:       ``effective_config_source: "reconstructed_from_stored_facts"`` and its
+#:       unknown fields as explicit ``unavailable`` markers. Consumers that read
+#:       the old keys (``mode``, ``libraries`` as a keyed object,
+#:       ``per_library_verdict``, ``old_bundle_facts``, ``new_is_stored``) must
+#:       read the live keys instead. The live document's own content is unchanged.
+RELEASE_SCHEMA_VERSION = "2.5"

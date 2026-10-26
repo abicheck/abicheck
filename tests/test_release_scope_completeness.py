@@ -1075,7 +1075,7 @@ class TestStoredBaselineGating:
         assert doc["run_outcome"]["scope"] == "incomplete"
         assert doc["comparison_scope"]["unchecked"] == ["libdeg.so"]
         assert doc["comparison_scope"]["counts"]["failed"] == 1
-        assert list(doc["libraries"]) == ["libok.so"]
+        assert [entry["library"] for entry in doc["libraries"]] == ["libok.so"]
         cfg = _release_config(tmp_path, on_incomplete_scope="block")
         code, doc = _invoke_json("compare", str(old), str(new), "--config", str(cfg))
         assert code == 1

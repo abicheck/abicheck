@@ -25,12 +25,13 @@ module computes all of it **once**:
   hands over (live fan-out). Anything only a frontend can resolve -- the
   effective-config receipt reloads ``--policy-file``/``--suppress`` -- is
   passed in already resolved.
-* :class:`StoredReleaseEvaluation` is the same hand-over for the stored
-  ``BundleFacts`` operand (``compare OLD.bundle-facts.json NEW``).
-* :func:`build_release_report` takes either operand to its typed view
-  (:class:`ReleaseReport` / :class:`StoredReleaseReport`), and
-  :func:`release_json_document` / :func:`stored_release_json_document` to the
-  immutable :class:`~abicheck.report.document.ReportDocument`.
+* A stored ``BundleFacts`` comparison (``compare OLD.bundle-facts.json NEW``)
+  is handed over as a :class:`ReleaseEvaluation` too: its frontend builds the
+  live evaluation from the stored facts, so both operands share one view.
+* :func:`build_release_report` takes that evaluation to its typed view
+  (:class:`ReleaseReport`), and :func:`release_json_document` /
+  :func:`stored_release_document` to the immutable
+  :class:`~abicheck.report.document.ReportDocument`.
 
 Verdicts are never re-derived here: the release fold is
 ``policy.release_outcome``'s (reached through ``workflows.gate``), the exit
@@ -44,7 +45,7 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, overload
+from typing import TYPE_CHECKING, Any
 
 from ..schemas.release_schema import RELEASE_SCHEMA_VERSION
 from ..workflows.gate import (
@@ -57,7 +58,7 @@ from . import release_change_inventory as _inventory
 from .comparison_scope import ComparisonScopeTerms
 from .document import ReportDocument
 from .release_assurance_section import ReleaseAssuranceTerms
-from .release_surface_changes import live_surface_changes, stored_surface_changes
+from .release_surface_changes import live_surface_changes
 
 if TYPE_CHECKING:
     from ..bundle_models import BundleDiffResult, BundleFinding
@@ -65,20 +66,17 @@ if TYPE_CHECKING:
     from ..model.change import Change
     from ..workflows.gate import SeverityConfig
     from .junit_inventory import JunitOldOperand
-    from .release_assurance_section import ReleaseAssuranceDecision
     from .release_public_surface_section import ReleasePublicSurfaceTerms
 
 __all__ = [
     "ReleaseEvaluation",
     "ReleaseReport",
-    "StoredReleaseEvaluation",
-    "StoredReleaseReport",
     "build_release_report",
     "evidence_contract_error_entries",
     "release_disposition_audit_block",
     "release_findings_for_render",
     "release_json_document",
-    "stored_release_json_document",
+    "stored_release_document",
     "stored_reported_verdict",
 ]
 
@@ -145,36 +143,6 @@ class ReleaseReport:
     #: The live ``surface_changes`` block, folded once here so both the
     #: JSON document and the Markdown projection read the same value.
     surface_changes: dict[str, object]
-
-
-@dataclass(frozen=True)
-class StoredReleaseEvaluation:
-    """A completed stored-``BundleFacts`` comparison (``compare
-    OLD.bundle-facts.json NEW``), as its frontend hands it over.
-
-    *result* is the ``BundleFactsComparisonResult``; *scope_terms* is
-    already resolved (``report.release_stored_scope.scope_terms_for``).
-    """
-
-    result: Any
-    old_facts_path: Path
-    new_dir: Path
-    scope_terms: ComparisonScopeTerms
-    new_is_stored: bool = False
-    assurance_decision: ReleaseAssuranceDecision | None = None
-    #: The live-shaped release evaluation the frontend built from this same
-    #: comparison (see ``frontends/cli/commands/compare_bundle_facts_release``);
-    #: its JSON becomes the additive ``release`` block. ``None`` when a caller
-    #: has no receipt to build it with.
-    release: ReleaseEvaluation | None = None
-
-
-@dataclass(frozen=True)
-class StoredReleaseReport:
-    """The typed view of a stored-operand release comparison."""
-
-    evaluation: StoredReleaseEvaluation
-    reported_verdict: str
 
 
 def release_findings_for_render(
@@ -444,33 +412,16 @@ def stored_reported_verdict(result: Any) -> str:
     return fold_release_outcome(sentinels, [result.verdict.value]).reported_verdict
 
 
-@overload
 def build_release_report(
-    operand: ReleaseEvaluation, *, show_only: str | None = None
-) -> ReleaseReport: ...
-@overload
-def build_release_report(
-    operand: StoredReleaseEvaluation, *, show_only: str | None = None
-) -> StoredReleaseReport: ...
-def build_release_report(
-    operand: ReleaseEvaluation | StoredReleaseEvaluation,
-    *,
-    show_only: str | None = None,
-) -> ReleaseReport | StoredReleaseReport:
-    """Build the one release report view for either operand.
+    evaluation: ReleaseEvaluation, *, show_only: str | None = None
+) -> ReleaseReport:
+    """Build the one release report view of a live release evaluation.
 
-    The live fan-out and the stored ``BundleFacts`` operand both come through
-    here; each yields its own typed view because the two documents differ in
-    shape today (``docs/contribute/known-gaps.md``, "Release report: live and
-    stored operands render different documents"). *show_only* applies to the
-    live operand only -- the stored path has no ``--view show=`` projection.
+    A stored ``BundleFacts`` comparison reaches the same view: its frontend
+    builds a live :class:`ReleaseEvaluation` from the stored facts, and
+    :func:`stored_release_document` adds the stored-specific markers.
     """
-    if isinstance(operand, StoredReleaseEvaluation):
-        return StoredReleaseReport(
-            evaluation=operand,
-            reported_verdict=stored_reported_verdict(operand.result),
-        )
-    return _build_live(operand, show_only)
+    return _build_live(evaluation, show_only)
 
 
 def _release_json_scope(scoped_libs: list[dict[str, object]]) -> dict[str, object]:
@@ -655,79 +606,52 @@ def _stored_release_block(release: ReleaseEvaluation) -> dict[str, object]:
     return block
 
 
-def stored_release_json_document(report: StoredReleaseReport) -> ReportDocument:
-    """The stored-``BundleFacts`` comparison's JSON document (``mode:
-    bundle_facts``) -- a different shape from :func:`release_json_document`;
-    see :func:`build_release_report`."""
-    from ..reporter import (
-        to_json,
-    )
-    from .change_json import (
-        prewarm_change_demangling,
-        resolve_demangled_symbol as _resolve_demangled_symbol,
-    )
-    from .release_stored_scope import json_scope_fields
-    from .release_stored_sections import assurance_sections, public_surface_terms
-    from .run_outcome import run_outcome_dict_for_diff_result
+def _add_bundle_demangled_names(
+    block: dict[str, object], release: ReleaseEvaluation
+) -> None:
+    """Carry each bundle finding's demangled name beside its raw symbol, as the
+    stored document always did (a JSON projection; the raw symbol is kept)."""
+    from .change_json import prewarm_change_demangling, resolve_demangled_symbol
 
-    ev = report.evaluation
-    result = ev.result
-    # One batched demangle for the whole findings list: without it a host
-    # with no in-process `cxxfilt` forks a subprocess per distinct symbol.
+    bundle = release.bundle_result
+    rows = block.get("bundle_findings")
+    if bundle is None or not isinstance(rows, list) or not bundle.bundle_findings:
+        return
     prewarm_change_demangling(
-        type("_Findings", (), {"changes": list(result.bundle_findings)})()
+        type("_Findings", (), {"changes": list(bundle.bundle_findings)})()
     )
-    import json
+    names: dict[tuple[object, object], str] = {}
+    for finding in bundle.bundle_findings:
+        demangled = resolve_demangled_symbol(finding)
+        if demangled:
+            names[(finding.kind.value, finding.symbol)] = demangled
+    for row in rows:
+        demangled = names.get((row.get("kind"), row.get("symbol")))
+        if demangled:
+            row["demangled_symbol"] = demangled
 
-    _require = bool(ev.assurance_decision and ev.assurance_decision.require_complete)
-    # perf-ok: to_json is the canonical per-library serializer; one round trip per library
-    libraries = {
-        diff.library: json.loads(to_json(diff, require_complete_analysis=_require))
-        for diff in result.per_library
-    }
-    run_outcome = run_outcome_dict_for_diff_result(result, None, None)
-    summary: dict[str, object] = {
-        "mode": "bundle_facts",
-        "old_bundle_facts": str(ev.old_facts_path),
-        # `new_dir` keeps its key even when NEW is itself stored;
-        # `new_is_stored` is the additive signal telling the shapes apart.
-        "new_dir": str(ev.new_dir),
-        "new_is_stored": ev.new_is_stored,
-        "verdict": report.reported_verdict,
-        "per_library_verdict": result.per_library_verdict.value,
-        "bundle_verdict": result.bundle_verdict.value,
-        **json_scope_fields(ev.scope_terms, run_outcome, result),
-        "libraries": libraries,
-        # Every machine projection carries both names (Codex review, PR #1284).
-        "bundle_findings": [
-            {
-                "kind": f.kind.value,
-                "symbol": f.symbol,
-                **(
-                    {"demangled_symbol": demangled}
-                    if (demangled := _resolve_demangled_symbol(f))
-                    else {}
-                ),
-                "consumer_library": f.consumer_library,
-                "provider_library": f.provider_library,
-                "description": f.description,
-                "old_value": f.old_value,
-                "new_value": f.new_value,
-                "affected_libraries": list(f.affected_libraries),
-            }
-            for f in result.bundle_findings
-        ],
-        "analysis_errors": list(result.analysis_errors),
-    }
-    summary.update(assurance_sections(ev.assurance_decision))
-    if ev.release is not None:
-        summary["release"] = _stored_release_block(ev.release)
-    if (_surface := public_surface_terms(result)) is not None:
-        summary["public_surface_reconciliation"] = _surface.to_dict()
-    if result.env_matrix_source_sha256 is not None:
-        summary["env_matrix_source_sha256"] = result.env_matrix_source_sha256
-    # Schema 2.2: the same block the live operand carries (both build it here).
-    summary["surface_changes"] = stored_surface_changes(
-        result.per_library, ev.scope_terms.record
+
+def stored_release_document(
+    release: ReleaseEvaluation, *, details: Mapping[str, object] | None = None
+) -> ReportDocument:
+    """The JSON document of a stored ``BundleFacts`` comparison: the live
+    release document of *release*, with its receipt marked as reconstructed
+    from the stored facts, its unknown release-level field marked
+    ``unavailable`` (see :func:`_stored_release_block`), and the stored run's
+    own *details* (operand kind, unresolved members) beside them."""
+    block = _stored_release_block(release)
+    _add_bundle_demangled_names(block, release)
+    # The NEW side's header reconciliation is computed by the stored driver and
+    # carried on the stored result; the old flat document projected it here.
+    reconciliation = getattr(
+        release.bundle_result, "public_surface_reconciliation", None
     )
-    return ReportDocument.from_mapping(summary)
+    if reconciliation is not None:
+        from .release_public_surface_section import compute_release_public_surface
+
+        surface = compute_release_public_surface(
+            reconciliation, acquisition={}, shared_findings=()
+        )
+        block["public_surface_reconciliation"] = surface.to_dict()
+    block.update(details or {})
+    return ReportDocument.from_mapping(block)

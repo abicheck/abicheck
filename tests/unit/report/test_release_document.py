@@ -6,12 +6,10 @@ own helper:
 * every live-release format is a projection of one built view: rendering the
   same view repeatedly, in any format order, yields identical bytes, and the
   decision functions run once, at build time, never during a render;
-* the live and stored (``BundleFacts``) operands both go through
-  ``build_release_report`` and agree on every semantic field both documents
-  carry (verdict, bundle verdict, per-library verdicts, bundle findings);
-* the two documents still differ in *shape* -- recorded in
-  ``docs/contribute/known-gaps.md``; the pin below fails when they converge,
-  so the entry gets closed rather than left stale.
+* a stored (``BundleFacts``) comparison's JSON is the live release document
+  itself, with its stored markers: every live key survives, and the shared
+  semantic fields (verdict, per-library verdicts, bundle findings) agree with
+  the inputs, not with either renderer.
 """
 
 from __future__ import annotations
@@ -30,11 +28,9 @@ from abicheck.model.change import Change
 from abicheck.report import release_document as rd
 from abicheck.report.comparison_scope import comparison_scope_terms
 from abicheck.report.release_assurance_section import release_assurance_terms
-from abicheck.report.release_stored_scope import scope_terms_for
 from abicheck.report.render_release_report import (
     render_release_text,
     render_stored_release_json,
-    render_stored_release_markdown,
 )
 from abicheck.workflows.gate import (
     resolve_release_assurance_decision,
@@ -95,15 +91,6 @@ def _live_evaluation(result: BundleDiffResult) -> rd.ReleaseEvaluation:
     )
 
 
-def _stored_evaluation(result: BundleDiffResult) -> rd.StoredReleaseEvaluation:
-    return rd.StoredReleaseEvaluation(
-        result=result,
-        old_facts_path=Path("/old.bundle-facts.json"),
-        new_dir=Path("/new"),
-        scope_terms=scope_terms_for(result, {}),
-    )
-
-
 _CASES = [
     ([Verdict.NO_CHANGE], 0),
     ([Verdict.BREAKING, Verdict.NO_CHANGE], 0),
@@ -137,54 +124,37 @@ def test_live_formats_are_order_independent_projections(
 
 
 @pytest.mark.parametrize(("verdicts", "n_bundle"), _CASES)
-def test_live_and_stored_operands_agree_on_shared_semantics(
+def test_stored_document_is_the_live_document_with_its_markers(
     verdicts: list[Verdict], n_bundle: int
 ) -> None:
     result = _stored_result(verdicts, n_bundle)
+    evaluation = _live_evaluation(result)
     live = json.loads(
-        render_release_text(
-            "json", rd.build_release_report(_live_evaluation(result)), demangle=False
-        )
+        render_release_text("json", rd.build_release_report(evaluation), demangle=False)
     )
-    stored = json.loads(
-        render_stored_release_json(rd.build_release_report(_stored_evaluation(result)))
-    )
+    stored = json.loads(render_stored_release_json(evaluation))
     # Oracle: the inputs themselves, not either document.
     expected_members = {d.library: d.verdict.value for d in result.per_library}
-    assert {e["library"]: e["verdict"] for e in live["libraries"]} == expected_members
-    assert {
-        name: doc["verdict"] for name, doc in stored["libraries"].items()
-    } == expected_members
-    assert live["verdict"] == stored["verdict"]
-    assert live["bundle_verdict"] == stored["bundle_verdict"]
-    assert live["bundle_verdict"] == result.bundle_verdict.value
+    assert {e["library"]: e["verdict"] for e in stored["libraries"]} == expected_members
+    assert stored["verdict"] == live["verdict"]
     project = lambda findings: [(f["kind"], f["symbol"]) for f in findings]  # noqa: E731
-    assert project(live["bundle_findings"]) == project(stored["bundle_findings"])
-    assert project(live["bundle_findings"]) == [
+    assert project(stored["bundle_findings"]) == [
         (f.kind.value, f.symbol) for f in result.bundle_findings
     ]
+    assert project(stored["bundle_findings"]) == project(live["bundle_findings"])
+    # Every live key survives; the stored document only adds its markers.
+    assert set(live) <= set(stored)
+    assert stored["effective_config_source"] == "reconstructed_from_stored_facts"
+    assert stored["public_surface"]["state"] == "unavailable"
+    assert "mode" not in stored
 
 
-def test_stored_and_live_documents_still_differ_in_shape() -> None:
-    """Pins the recorded divergence (known-gaps: "Release report: live and
-    stored operands render different documents"). When the two converge this
-    fails -- close the known-gaps entry then."""
-    result = _stored_result([Verdict.BREAKING], 1)
-    live = json.loads(
-        render_release_text(
-            "json", rd.build_release_report(_live_evaluation(result)), demangle=False
-        )
+def test_stored_markdown_is_the_live_release_markdown() -> None:
+    evaluation = _live_evaluation(_stored_result([Verdict.BREAKING], 1))
+    text = render_release_text(
+        "markdown", rd.build_release_report(evaluation), demangle=True
     )
-    stored_report = rd.build_release_report(_stored_evaluation(result))
-    stored = json.loads(render_stored_release_json(stored_report))
-    assert "release_schema_version" in live
-    assert "release_schema_version" not in stored
-    assert stored["mode"] == "bundle_facts"
-    assert isinstance(live["libraries"], list)
-    assert isinstance(stored["libraries"], dict)
-    assert render_stored_release_markdown(stored_report).startswith(
-        "# Bundle-facts comparison"
-    )
+    assert text.startswith("# ABI Release Comparison")
 
 
 def test_json_document_requires_the_frontend_resolved_receipt() -> None:
@@ -209,3 +179,40 @@ def test_release_findings_for_render_never_leaks_private_keys() -> None:
         (projected,) = rd.release_findings_for_render([entry], show)
         assert private.isdisjoint(projected)
     assert private <= set(entry)  # the shared input is never mutated
+
+
+@pytest.mark.parametrize("n_bundle", [0, 1])
+def test_stored_document_names_nothing_it_cannot_demangle(n_bundle: int) -> None:
+    stored = json.loads(
+        render_stored_release_json(
+            _live_evaluation(_stored_result([Verdict.BREAKING], n_bundle))
+        )
+    )
+    assert len(stored["bundle_findings"]) == n_bundle
+    assert all("demangled_symbol" not in f for f in stored["bundle_findings"])
+    assert "public_surface_reconciliation" not in stored
+
+
+def test_stored_document_projects_the_stored_reconciliation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from abicheck.report import release_public_surface_section as surface_section
+
+    reconciliation = object()
+    seen: list[object] = []
+
+    class _Projection:
+        def to_dict(self) -> dict[str, object]:
+            return {"evaluated": True}
+
+    def _project(recon: object, **_kw: object) -> _Projection:
+        seen.append(recon)
+        return _Projection()
+
+    monkeypatch.setattr(surface_section, "compute_release_public_surface", _project)
+    result = _stored_result([Verdict.BREAKING], 0)
+    result.public_surface_reconciliation = reconciliation
+    document = rd.stored_release_document(_live_evaluation(result), details={})
+    # Oracle: the reconciliation the stored driver recorded, handed through as is.
+    assert seen == [reconciliation]
+    assert document.to_mapping()["public_surface_reconciliation"] == {"evaluated": True}

@@ -42,7 +42,7 @@ from ....report.release_assurance_section import (
 )
 from ....report.release_document import ReleaseEvaluation
 from ....report.release_findings import project_release_library_results
-from ....report.release_member_entry import stamp_member_counts
+from ....report.release_member_entry import stamp_member_assurance, stamp_member_counts
 from ....report.release_member_summary import add_member_review_summary
 from ....report.release_surface_changes import attach_member_surface_changes
 from ....workflows.gate import resolve_release_assurance_decision
@@ -92,6 +92,7 @@ def stored_library_entries(
             entry["coverage_warnings"] = list(diff.coverage_warnings)
         if diff.env_matrix_source_sha256 is not None:
             entry["env_matrix_source_sha256"] = diff.env_matrix_source_sha256
+        stamp_member_assurance(entry, diff)
         add_member_review_summary(entry, diff, None)
         stamp_member_exit_contributions(
             entry,
@@ -131,6 +132,7 @@ def stored_release_evaluation(
     entries = stored_library_entries(
         result, require_complete_analysis=require_complete_analysis
     )
+    entries.extend(_unresolved_member_entries(result))
     # The per-member steps of the live projection that read each DiffResult,
     # in the live order: the surface block first, then findings and the strip
     # of private keys. The release-level public-surface fold needs the live
@@ -150,4 +152,52 @@ def stored_release_evaluation(
         bundle_result=result,
         require_complete_analysis=require_complete_analysis,
         effective_config=effective_config,
+        env_matrix_source_sha256=result.env_matrix_source_sha256,
     )
+
+
+def _unresolved_member_entries(result: Any) -> list[dict[str, object]]:
+    """One release entry per member the stored run could not compare
+    (``not_comparable``) or extract (``ERROR``), named with its reason."""
+    entries: list[dict[str, object]] = []
+    not_comparable = dict(getattr(result, "not_comparable_members", {}) or {})
+    for name, (kind, message) in not_comparable.items():
+        entries.append(
+            {
+                "library": name,
+                "verdict": "not_comparable",
+                "reason": message,
+                "not_comparable": {"kind": kind, "message": message},
+            }
+        )
+    failures = dict(getattr(result, "extraction_failures", {}) or {})
+    for name, message in failures.items():
+        entries.append({"library": name, "verdict": "ERROR", "error": message})
+    return entries
+
+
+def stored_document_details(result: Any, *, new_is_stored: bool) -> dict[str, object]:
+    """The stored comparison's own keys beside the live release document: the
+    operand kind, the analysis errors, and the members a stored run could not
+    compare, extract or resolve, each named with its reason. The maps the stored
+    document always carried are present, possibly empty; the resolution map was
+    present only when non-empty, and stays so."""
+    not_comparable = dict(getattr(result, "not_comparable_members", {}) or {})
+    details: dict[str, object] = {
+        "new_is_stored": new_is_stored,
+        "analysis_errors": list(getattr(result, "analysis_errors", []) or []),
+        "extraction_failures": dict(getattr(result, "extraction_failures", {}) or {}),
+        "not_comparable_members": {
+            name: {"kind": kind, "message": message}
+            for name, (kind, message) in not_comparable.items()
+        },
+    }
+    not_applicable = dict(
+        getattr(result, "resolution_not_applicable_members", {}) or {}
+    )
+    if not_applicable:
+        details["resolution_not_applicable_members"] = {
+            name: {"artifact_kind": kind, "resolution": "not_applicable"}
+            for name, kind in sorted(not_applicable.items())
+        }
+    return details
