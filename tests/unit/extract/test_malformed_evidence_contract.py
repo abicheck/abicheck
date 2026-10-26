@@ -237,3 +237,30 @@ def test_corrupt_tar_family_archive_is_reported_as_corrupt(
         CorruptPackageArchiveError, match="corrupt or truncated archive"
     ):
         require_readable_archive(pkg)
+
+
+@pytest.mark.parametrize(
+    ("name", "payload", "corrupt"),
+    [
+        ("lib.whl", b"PK\x03\x04truncated", True),
+        ("lib.zip", b"\x00" * 64, True),
+        ("lib.tar.gz", b"not a gzip stream", True),
+        ("lib.bin", b"\x00" * 64, False),
+    ],
+)
+def test_compare_cli_names_a_corrupt_archive_operand(
+    tmp_path: Path, name: str, payload: bytes, corrupt: bool
+) -> None:
+    """Through the public ``abicheck compare``: a zip/tar-shaped operand that
+    cannot be read is reported as corrupt, not as an undetectable format; an
+    ordinary unknown file keeps the format message."""
+    from click.testing import CliRunner
+
+    from abicheck.cli import main
+
+    operand = tmp_path / name
+    operand.write_bytes(payload)
+    result = CliRunner().invoke(main, ["compare", str(operand), str(operand)])
+    assert result.exit_code != 0
+    assert ("corrupt or truncated archive" in result.output) is corrupt
+    assert ("Cannot detect format" in result.output) is not corrupt
