@@ -40,6 +40,7 @@ from ..model.change_catalog.kinds import ChangeKind
 from ..model.entities import EnumType
 from ..model.execution_cache import memoized
 from ..model.snapshot import AbiSnapshot
+from ..model.snapshot_reliability import both_header_aware
 
 #: Target-independent byte sizes of the integer spellings an enum's
 #: underlying type can resolve to. ``long`` is in :data:`_LONG_SPELLINGS`
@@ -111,13 +112,14 @@ def underlying_byte_size(spelling: str, long_size: int | None = None) -> int | N
 
 
 def enum_underlying_size_detector(
-    old: AbiSnapshot | None, new: AbiSnapshot | None, header_aware: bool = True
+    old: AbiSnapshot, new: AbiSnapshot
 ) -> Callable[[EnumType, EnumType], list[Change]]:
     """The per-enum comparison for one snapshot pair, with each side's
-    ``sizeof(long)`` resolved once rather than per enum. *header_aware* is
-    ``both_header_aware(old, new)``: without confirmed header evidence on
-    both sides ``underlying_type`` may be the ``"int"`` default, so nothing
-    is compared (the DWARF layout pass still covers debug-info snapshots)."""
+    ``sizeof(long)`` resolved once rather than per enum. Without confirmed
+    header evidence on both sides (``both_header_aware``) ``underlying_type``
+    may be the ``"int"`` default, so nothing is compared (the DWARF layout
+    pass still covers debug-info snapshots)."""
+    header_aware = both_header_aware(old, new)
     old_long, new_long = long_byte_size(old), long_byte_size(new)
 
     def changes(e_old: EnumType, e_new: EnumType) -> list[Change]:
