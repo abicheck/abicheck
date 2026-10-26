@@ -24,6 +24,7 @@ the real cause.
 
 from __future__ import annotations
 
+import tarfile
 import zipfile
 from pathlib import Path
 
@@ -108,23 +109,32 @@ def _zip_members_for_sniff(path: Path) -> list[str]:
         return []
 
 
+def _readable_tar(path: Path) -> bool:
+    """Whether :mod:`tarfile` recognises *path* (plain, gzip, bzip2 or xz)."""
+    try:
+        return tarfile.is_tarfile(path)
+    except (OSError, EOFError, tarfile.TarError, ValueError):
+        return False
+
+
 def require_readable_archive(path: Path) -> None:
     """Raise :class:`CorruptPackageArchiveError` if *path* is a corrupt archive.
 
     A file that is neither zip- nor tar-shaped passes silently. A zip-shaped
     file must list its members; a tar-shaped file (tar-family name) must be
-    recognised by :func:`looks_like_tar_container`. Called by the release-input
+    readable by :mod:`tarfile` (``.tar.zst``, which it has no codec for, is
+    not checked rather than misreported). Called by the release-input
     resolver after every extractor declined, so it never changes detection.
     """
     if not path.is_file():
         return
     _zip_entry_names(path)
     name = path.name.lower()
-    from .packages import (
-        looks_like_tar_container,
-    )  # function-local: packages imports this module
-
-    if name.endswith(_TAR_FAMILY_SUFFIXES) and not looks_like_tar_container(path):
+    if (
+        name.endswith(_TAR_FAMILY_SUFFIXES)
+        and not name.endswith(".tar.zst")
+        and not _readable_tar(path)
+    ):
         raise CorruptPackageArchiveError(
             f"{path} is a corrupt or truncated archive: not readable as tar"
         )
