@@ -166,6 +166,7 @@ def _unresolved_member_entries(result: Any) -> list[dict[str, object]]:
             {
                 "library": name,
                 "verdict": "not_comparable",
+                "reason": message,
                 "not_comparable": {"kind": kind, "message": message},
             }
         )

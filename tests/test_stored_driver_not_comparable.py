@@ -256,3 +256,12 @@ class TestANotComparableMemberIsVisibleInEveryFormat:
             self._result(), fmt, old_facts_path=tmp_path, new_dir=tmp_path
         )
         assert "not_comparable" in text, text[:400]
+
+    def test_junit_keeps_the_reason(self, tmp_path: Path) -> None:
+        from tests._stored_render import render_stored
+
+        text = render_stored(
+            self._result(), "junit", old_facts_path=tmp_path, new_dir=tmp_path
+        )
+        # Oracle: the reason the stored run recorded for the member.
+        assert "member is not comparable" in text, text[:400]

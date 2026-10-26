@@ -368,13 +368,12 @@ Two predicates close that without weakening anything above:
   freshness is a property each requested artifact needs and not only the ones
   that can become the verdict source.
 
-  **An unversioned shape can still owe its contribution.** The
-  stored-BundleFacts summary emits the assurance pair under one `if` and stamps
-  no schema-version key at all, so the threshold loop fell through to
-  `absent_legacy_schema` and a provably broken pair read as an old report. The
-  threshold exists to answer "was a contribution owed here"; where there is no
-  version to ask, the shape's own `mode` discriminator answers it. Recognize the
-  shape — never invent a version the emitter does not write.
+  **A shape with no version key gets no contribution threshold.** The
+  threshold loop in `report_query.py` checks only the keys in
+  `ASSURANCE_CONTRIBUTION_SINCE`. A report with none of those keys reads as
+  `absent_legacy_schema`. Do not restore a `mode` discriminator for a retired
+  shape. Give a new shape its own version key and threshold, and never invent a
+  version the emitter does not write.
 
   **Each report shape's version key gets its own threshold.** Three sequences
   reach the reader — `report_schema_version` (2.40),
