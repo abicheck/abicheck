@@ -215,3 +215,28 @@ def test_internal_type_leak_follows_the_record_on_each_side(
     else:
         # Still in contract with its own reason, so it gates.
         assert out == [original]
+
+
+@pytest.mark.parametrize(
+    ("other_state", "moved"),
+    [("absent", True), ("internal", True), ("reached", False)],
+)
+def test_an_unread_side_listing_the_record_internal_declares_it(
+    other_state: str, moved: bool
+) -> None:
+    # No presence evidence, but the side lists the record among its
+    # internals: an internal record is a declared one, so the leak is judged
+    # as if that side were read and "internal".
+    unread_internal = DependencyInternals(types=frozenset({_RECORD}))
+    original = _in_contract()
+    for old, new in (
+        (unread_internal, _side(other_state)),
+        (_side(other_state), unread_internal),
+    ):
+        out = exclude_unreachable_dependency_findings(
+            [_Change(ChangeKind.INTERNAL_TYPE_LEAKS_VIA_PUBLIC_API, _RECORD)],
+            [original],
+            old=old,
+            new=new,
+        )
+        assert (out[0].relevance is ContractRelevance.PROVEN_OUT_OF_CONTRACT) is moved

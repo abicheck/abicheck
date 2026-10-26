@@ -120,7 +120,7 @@ A4 moved an `INTERNAL_TYPE_LEAKS_VIA_PUBLIC_API` raised on a record out of contr
 - declared only on the new side: internal on the new side (as `TYPE_ADDED`);
 - declared only on the old side: internal on the old side (as `TYPE_REMOVED`);
 - declared on both: internal on **both**, as every modified finding;
-- a side with no presence evidence (`record_names` is `None`) is assumed to declare the record, so the record must be internal there, which an unread side never states: the leak stays in contract.
+- a side with no presence evidence (`record_names` is `None`) is assumed to declare the record, so the record must be listed internal there. Listing it internal is itself a declaration, and the leak is then judged as above. The only unread side in production, `NO_DEPENDENCY_INTERNALS`, lists nothing, so there the leak stays in contract.
 
 A record internal on one side and reached on the other keeps its leak in contract, and the leak gates.
 
