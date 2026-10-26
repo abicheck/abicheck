@@ -325,7 +325,7 @@ EXTRACTION_BUG_CLASSES: tuple[BugClass, ...] = (
             "a header compare on ~90 of its own instances while the library's "
             "own break was 6 findings."
         ),
-        fixed_by=(1775, 1813, 1818),
+        fixed_by=(1775, 1813, 1819),
         seed_tests=(
             "tests/test_header_dependency_internals.py",
             "tests/test_family_f1_evidence_ablation.py",
