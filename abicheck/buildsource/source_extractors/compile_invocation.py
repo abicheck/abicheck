@@ -464,16 +464,40 @@ def _is_external_include_option(tok: str) -> bool:
     return head.startswith(("/external:i", "-external:i"))
 
 
+def _is_msvc_include_operand(argv: list[str], j: int) -> bool:
+    """Whether ``argv[j]`` can be a separate include-search operand.
+
+    A following option (``-x``, ``@file``, ``/FI``, ``/I`` or another
+    ``/external:I``) is never one: consuming it as a directory would drop that
+    option, and its own operand, from replay. A POSIX absolute directory such
+    as ``/usr/include`` still is.
+    """
+    if j >= len(argv):
+        return False
+    nxt = argv[j]
+    return not (
+        not nxt
+        or nxt.startswith(("-", "@"))
+        or nxt.upper().startswith("/FI")
+        or nxt.startswith("/I")
+        or _is_external_include_option(nxt)
+    )
+
+
 def _match_msvc_include_search(
     tok: str, argv: list[str], i: int, out: list[str]
 ) -> int:
     """Try to match an MSVC include-search token (MSVC mode only).
 
     Handles ``/I``, ``/Idir`` and the ``/external:I`` / ``-external:I`` family,
-    each in its separate (``/I dir``) or joined (``/Idir``) spelling. Returns
-    the new ``i`` after consumption, or the original ``i`` if no match.
+    each in its separate (``/I dir``) or joined (``/Idir``) spelling. A
+    separate spelling whose operand is missing or is another option is dropped
+    alone, so the following option is still scanned. Returns the new ``i``
+    after consumption, or the original ``i`` if no match.
     """
-    if tok == "/I" and i + 1 < len(argv):
+    if tok == "/I":
+        if not _is_msvc_include_operand(argv, i + 1):
+            return i + 1
         out += [tok, argv[i + 1]]  # MSVC /I dir (separate operand)
         return i + 2
     if len(tok) > 2 and tok.startswith("/I"):
@@ -484,7 +508,9 @@ def _match_msvc_include_search(
         # which accepts ``/external:I`` itself, so no translation to ``-I`` or
         # ``-isystem`` is needed.
         option_length = len("/external:I")
-        if len(tok) == option_length and i + 1 < len(argv):
+        if len(tok) == option_length:
+            if not _is_msvc_include_operand(argv, i + 1):
+                return i + 1
             out += [tok, argv[i + 1]]  # /external:I dir (separate operand)
             return i + 2
         if len(tok) > option_length:

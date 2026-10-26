@@ -381,3 +381,34 @@ def test_external_include_is_carried_into_the_rendered_replay(tmp_path: Path) ->
     # missing or resolved differently).
     cu = _single_unit(tmp_path, "clang-cl /c /external:I ext src.cpp")
     assert replayed_tokens_for(cu) == ["/external:I", "ext"]
+
+
+@pytest.mark.parametrize("option", ["/I", "/external:I", "-external:I", "/EXTERNAL:i"])
+@pytest.mark.parametrize(
+    ("following", "expected"),
+    [
+        pytest.param("/FI cfg.h", ["/FI", "cfg.h"], id="forced-include"),
+        pytest.param("/Ficfg.h", [], id="joined-forced-include-not-replayed"),
+        pytest.param("/I inc", ["/I", "inc"], id="another-I"),
+        pytest.param("/external:I ext", ["/external:I", "ext"], id="another-external"),
+        pytest.param("-DX", [], id="dash-option"),
+    ],
+)
+def test_a_separate_include_option_never_swallows_a_following_option(
+    tmp_path: Path, option: str, following: str, expected: list[str]
+) -> None:
+    """A bare include-search option whose next token is another option has no
+    operand: it is dropped alone, and the following option replays exactly as
+    it would without it."""
+    cu = _single_unit(tmp_path, f"clang-cl /c {option} {following} src.cpp")
+    (tmp_path / "alone").mkdir()
+    alone = _single_unit(tmp_path / "alone", f"clang-cl /c {following} src.cpp")
+    assert replayed_tokens_for(cu) == replayed_tokens_for(alone) == expected
+
+
+@pytest.mark.parametrize("option", ["/I", "/external:I"])
+def test_a_posix_absolute_directory_is_still_an_include_operand(
+    tmp_path: Path, option: str
+) -> None:
+    cu = _single_unit(tmp_path, f"clang-cl /c {option} /usr/include src.cpp")
+    assert replayed_tokens_for(cu) == [option, "/usr/include"]
