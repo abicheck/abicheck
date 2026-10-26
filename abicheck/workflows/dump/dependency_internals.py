@@ -268,8 +268,6 @@ def _coalesced_export_names(snap: AbiSnapshot) -> frozenset[str]:
 
 def _weak_exports_in(snap: AbiSnapshot, namespaces: set[str]) -> frozenset[str]:
     """Coalesced exports declared in one of *namespaces*."""
-    if not namespaces:
-        return frozenset()
     return frozenset(
         name
         for name in _coalesced_export_names(snap)
