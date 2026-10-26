@@ -35,7 +35,7 @@ from __future__ import annotations
 
 import re
 
-from .change_registry import API_BREAK_KINDS, BREAKING_KINDS, RISK_KINDS
+from .model.change_catalog.assembled import API_BREAK_KINDS, BREAKING_KINDS, RISK_KINDS
 from .model.change_catalog.kinds import ChangeKind
 from .policy.classification import ADDITION_KINDS, INFORMATIONAL_KINDS
 from .report.pr_comment_model import (

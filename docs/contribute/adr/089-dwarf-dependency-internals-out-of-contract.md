@@ -35,7 +35,7 @@ Own roots are the directories of non-template records that an exported parameter
 A dependency record is *reached* when:
 
 - an exported parameter names it exactly (full spelling), or
-- a kept own record names it in a field, base or signature, through the existing single-hop walk (`dependency_retention._directly_referenced_dependency_names`), with typedef aliases resolved where the snapshot carries a typedef map, or
+- a kept own record names it in a field, base or signature, through the existing single-hop walk (`dependency_retention.directly_referenced_dependency_names`), with typedef aliases resolved where the snapshot carries a typedef map, or
 - an own field spells an **unresolved** by-value alias (a bare name that is no known type and carries no qualifier), in which case its target must have that field's DWARF byte size, so every dependency record of that size is reached; an unresolved pointer or reference could name any dependency type, so every dependency record is reached.
 
 Anything not reached is unreachable. Unreachable names are returned, except a name that is also the name of an own record, which could be either.

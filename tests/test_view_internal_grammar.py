@@ -48,12 +48,12 @@ import textwrap
 
 import pytest
 
-from abicheck.change_registry import REGISTRY
 from abicheck.frontends.cli.options.compare_view import (
     REPORT_MODES,
     RETIRED_TOKENS,
     parse_view_tokens,
 )
+from abicheck.model.change_catalog.assembled import REGISTRY
 from abicheck.model.change_catalog.kinds import ChangeKind
 from abicheck.model.change_catalog.registry import (
     ChangeEntity,

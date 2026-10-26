@@ -26,14 +26,14 @@ import pickle
 
 import pytest
 
-from abicheck.change_registry import (
+from abicheck.model.change_catalog.dimensions import ContractSubject
+from abicheck.model.change_catalog.registry import (
     ChangeEntity,
     ChangeKindMeta,
     ChangeKindRegistry,
     ChangeOperation,
     Verdict,
 )
-from abicheck.model.change_catalog.dimensions import ContractSubject
 
 
 def test_registry_pickle_revalidates_on_load():

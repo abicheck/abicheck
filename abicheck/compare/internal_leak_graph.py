@@ -27,8 +27,8 @@ import collections
 from collections.abc import Iterable
 from typing import TYPE_CHECKING
 
-from ..change_registry import unanimous_entity_for
 from ..model.change import Change
+from ..model.change_catalog.assembled import unanimous_entity_for
 from ..model.change_catalog.kinds import ChangeKind
 from ..model.evidence_status import ReachabilityState
 from .call_graph_walk import (

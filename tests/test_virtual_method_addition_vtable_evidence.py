@@ -40,7 +40,7 @@ from __future__ import annotations
 from abicheck.compare.vtable_evidence import vtable_transition_is_evidenced
 from abicheck.diff_cxx_rules import owner_class_of, virtual_method_addition
 from abicheck.model import Fact, Function, RecordType, Visibility
-from abicheck.type_reachability_spelling import _namespace_suffix_spellings
+from abicheck.model.namespace_spelling import namespace_suffix_spellings
 
 OWNER = "Widget"
 MANGLED = "_ZN6Widget6resizeEv"
@@ -80,7 +80,7 @@ def _is_evidenced(
         old_funcs,
         new_funcs,
         owner_class_of=owner_class_of,
-        namespace_suffix_spellings=_namespace_suffix_spellings,
+        namespace_suffix_spellings=namespace_suffix_spellings,
     )
 
 

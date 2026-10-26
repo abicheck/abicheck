@@ -743,7 +743,7 @@ def check_future_annotations(f: Findings) -> None:
 
 def check_changekind_partition(f: Findings) -> None:
     try:
-        from abicheck.change_registry import (
+        from abicheck.model.change_catalog.assembled import (
             API_BREAK_KINDS,
             BREAKING_KINDS,
             COMPATIBLE_KINDS,

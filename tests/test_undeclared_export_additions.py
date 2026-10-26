@@ -78,8 +78,8 @@ class TestGainedUndeclaredExportIsAnAddition:
         """The point of the kind: it has to reach the addition count and the
         MINOR-bump recommendation, which a RISK-category hygiene finding does
         not."""
-        from abicheck.change_registry import REGISTRY
         from abicheck.checker_policy import Verdict
+        from abicheck.model.change_catalog.assembled import REGISTRY
 
         meta = REGISTRY.get("func_added_elf_only")
         assert meta is not None

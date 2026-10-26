@@ -38,9 +38,9 @@ from typing import Any
 
 from click.testing import CliRunner
 
-from abicheck.change_registry import REGISTRY
 from abicheck.checker_policy import ChangeKind
 from abicheck.cli import main as abicheck_main
+from abicheck.model.change_catalog.assembled import REGISTRY
 
 
 @dataclass(frozen=True)
@@ -85,7 +85,7 @@ def severity_for_kind(kind_value: str) -> str:
     JSON report's ``changes[]`` entries carry the same ``ChangeKind``
     vocabulary, so this is a single, side-independent severity axis: it
     doesn't depend on which tool computed the finding, only on what kind it
-    is (``abicheck/change_registry.py``'s ``ChangeKindMeta.default_verdict``).
+    is (``abicheck/model/change_catalog/assembled.py``'s ``ChangeKindMeta.default_verdict``).
     """
     try:
         meta = REGISTRY.get(ChangeKind(kind_value))

@@ -247,7 +247,7 @@ from .diff_helpers import make_change
 from .model import Function, RecordType, resolved_fact_value
 from .model.change import Change
 from .model.change_catalog.kinds import ChangeKind
-from .type_reachability_spelling import _namespace_suffix_spellings
+from .model.namespace_spelling import namespace_suffix_spellings
 
 
 def _owned_virtual_signatures(name: str, funcs: Mapping[str, Function]) -> set[str]:
@@ -270,7 +270,7 @@ def _owned_virtual_signatures(name: str, funcs: Mapping[str, Function]) -> set[s
         name,
         funcs,
         owner_class_of=owner_class_of,
-        namespace_suffix_spellings=_namespace_suffix_spellings,
+        namespace_suffix_spellings=namespace_suffix_spellings,
     )
 
 
@@ -297,7 +297,7 @@ def _vtable_transition_is_evidenced(
         old_funcs,
         new_funcs,
         owner_class_of=owner_class_of,
-        namespace_suffix_spellings=_namespace_suffix_spellings,
+        namespace_suffix_spellings=namespace_suffix_spellings,
     )
 
 

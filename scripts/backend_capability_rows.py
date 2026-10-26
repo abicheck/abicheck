@@ -47,7 +47,7 @@ LEADING_ROWS: tuple[FactRow, ...] = (
             "castxml cannot always recover a real mangled name for a "
             "constructor/destructor and synthesizes a placeholder key; a "
             "hybrid merge reconciles those against clang's real Itanium name "
-            "(`workflows.dump.hybrid_identity._match_synthetic_ctor_dtor`)."
+            "(`workflows.dump.hybrid_identity.match_synthetic_ctor_dtor`)."
         ),
     ),
     FactRow("Function", "return_type", _FULL, _FULL),

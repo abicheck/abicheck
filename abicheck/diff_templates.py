@@ -1244,7 +1244,7 @@ def detect_missing_instantiations(
 # ---------------------------------------------------------------------------
 
 #: Kinds this demotion may touch. All four are only ever BREAKING/API_BREAK
-#: (see ``change_registry.py``): a function-level finding whose subject is a
+#: (see ``model/change_catalog/assembled.py``): a function-level finding whose subject is a
 #: template instantiated over a local lambda closure type, where the
 #: *symbol* itself is what changed spelling purely from an unrelated
 #: source-line shift (see :func:`demote_lambda_closure_unexported_findings`'s
@@ -1331,7 +1331,6 @@ def demote_lambda_closure_unexported_findings(
     missing ELF evidence on either side fails closed. Mutates and returns
     ``changes``.
     """
-    from .change_registry import API_BREAK_KINDS, BREAKING_KINDS
     from .compare.finding_identity.ctor_dtor import (
         itanium_source_name_token,
         itanium_standard_substitution_token,
@@ -1339,6 +1338,7 @@ def demote_lambda_closure_unexported_findings(
     )
     from .compare.public_surface import reconciled_function_surfaces
     from .elf_symbol_filter import FUNCTION_SYMBOL_TYPES, exported_symbol_names
+    from .model.change_catalog.assembled import API_BREAK_KINDS, BREAKING_KINDS
     from .model.change_catalog.registry import Verdict
     from .model.synthetic_key import is_synthetic_ctor_key, is_synthetic_dtor_key
 

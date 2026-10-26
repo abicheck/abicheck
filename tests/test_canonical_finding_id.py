@@ -163,7 +163,7 @@ class TestCanonicalFindingIdScopedCanonicalization:
     values, and unconditionally dropping description (the first attempted
     fix for that) collided distinct findings that differ only by a
     per-item identity (e.g. a field/parameter name) description embeds via
-    ``change_registry``'s ``{detail}`` template placeholder.
+    ``change_catalog.assembled``'s ``{detail}`` template placeholder.
     """
 
     def test_distinct_parameters_on_the_same_function_stay_distinct(self):

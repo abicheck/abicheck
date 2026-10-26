@@ -267,7 +267,7 @@ class TestIntraDepRemovedRequiresAnOldInBundleProvider:
         }
         assert ChangeKind.BUNDLE_UNRESOLVED_INTRA_DEPENDENCY in kinds
         assert ChangeKind.BUNDLE_INTRA_DEP_REMOVED not in kinds
-        from abicheck.change_registry import REGISTRY
+        from abicheck.model.change_catalog.assembled import REGISTRY
 
         meta = REGISTRY.get(ChangeKind.BUNDLE_UNRESOLVED_INTRA_DEPENDENCY.value)
         assert meta is not None

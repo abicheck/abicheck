@@ -16,7 +16,7 @@ make both agree on a wrong answer.
 
 These tests use an **independent** reference matcher (``_reference_match``
 below, hand-written from a simple segment-tuple model, never calling
-``_namespace_suffix_spellings`` or ``owner_class_of``) and inject fake
+``namespace_suffix_spellings`` or ``owner_class_of``) and inject fake
 ``owner_class_of``/``namespace_suffix_spellings`` callables built from that
 same segment-tuple model -- exercising the primitive's real eager-matching
 *logic* directly, decoupled from the production string parsers under test
@@ -33,7 +33,7 @@ from abicheck.model import Function, Visibility
 
 # A simple, template-free identity model: a tuple of plain identifier
 # segments, e.g. ("ns", "Outer", "Inner"). Deliberately excludes template
-# arguments/operator spellings -- the real _namespace_suffix_spellings'
+# arguments/operator spellings -- the real namespace_suffix_spellings'
 # depth-tracking behavior for those is that function's own contract, tested
 # directly in test_type_reachability_stdlib_spellings.py; this primitive's
 # own contract is just "do two suffix-spelling sets intersect".
@@ -48,7 +48,7 @@ def _spelling(segments: tuple[str, ...]) -> str:
 def _suffix_spellings(segments: tuple[str, ...]) -> list[str]:
     """Every suffix of *segments*, spelled -- the reference model's own
     ``namespace_suffix_spellings`` implementation, independent of
-    ``model.namespace_spelling._namespace_suffix_spellings``'s char-by-char
+    ``model.namespace_spelling.namespace_suffix_spellings``'s char-by-char
     depth-tracking parser."""
     return [_spelling(segments[i:]) for i in range(len(segments))]
 

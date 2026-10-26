@@ -65,7 +65,7 @@ SURFACE_ROOTS: tuple[Path, ...] = (
     Path("abicheck/cli_options.py"),
     Path("abicheck/frontends/cli/options/inventory.py"),
     Path("abicheck/schemas"),
-    Path("abicheck/change_registry.py"),
+    Path("abicheck/model/change_catalog/assembled.py"),
     Path("abicheck/checker_policy.py"),
     # ADR-061 gap B: checker_policy.py's real verdict-classification logic
     # (what docs/reference/detector-spec.json is generated from) moved to

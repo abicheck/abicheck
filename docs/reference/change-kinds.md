@@ -6,7 +6,7 @@ level: intermediate
 canonical_for:
   - change-kinds
 depends_on:
-  - abicheck/change_registry.py
+  - abicheck/model/change_catalog/assembled.py
   - abicheck/checker_policy.py
   - abicheck/policy/classification.py
 lifecycle: active

@@ -478,7 +478,7 @@ class TestCrossProducerUnmangledIdentityKnownLimitation:
     Phase 3 shipped (``--ast-frontend hybrid``,
     ``dumper_hybrid.merge_snapshots``) — but its reconciliation only runs
     WITHIN one hybrid dump invocation, matching that SAME call's own two
-    sub-dumps (``dumper_hybrid._match_synthetic_ctor_dtor``) before the
+    sub-dumps (``dumper_hybrid.match_synthetic_ctor_dtor``) before the
     merged snapshot is ever handed to a comparison. It has no way to
     retroactively reconcile a DIFFERENT, already-persisted snapshot from an
     earlier, separate invocation — so comparing an existing plain-castxml

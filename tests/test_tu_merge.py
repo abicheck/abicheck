@@ -35,7 +35,6 @@ from pathlib import Path
 
 import pytest
 
-from abicheck.change_registry import REGISTRY
 from abicheck.checker_policy import ChangeKind
 from abicheck.errors import TuMergeError
 from abicheck.model import (
@@ -47,6 +46,7 @@ from abicheck.model import (
     TypeField,
     Variable,
 )
+from abicheck.model.change_catalog.assembled import REGISTRY
 from abicheck.tu_fragment import MergedTuFragments, TuFragment
 from abicheck.tu_merge import (
     _HETEROGENEOUS_LANG_MODE,

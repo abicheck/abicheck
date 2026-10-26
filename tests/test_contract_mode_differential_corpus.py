@@ -51,8 +51,8 @@ import pytest
 from click.testing import CliRunner
 
 import tests.test_example_autodiscovery as corpus
-from abicheck.change_registry import REGISTRY
 from abicheck.cli import main
+from abicheck.model.change_catalog.assembled import REGISTRY
 from abicheck.model.change_catalog.dimensions import ContractSubject
 
 pytestmark = [

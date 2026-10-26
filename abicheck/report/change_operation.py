@@ -41,7 +41,8 @@ mistake).
 
 from __future__ import annotations
 
-from ..change_registry import REGISTRY, ChangeEntity, ChangeOperation
+from ..model.change_catalog.assembled import REGISTRY
+from ..model.change_catalog.registry import ChangeEntity, ChangeOperation
 
 #: CLI ``--view show=`` element tokens -> the canonical
 #: :class:`~abicheck.model.change_catalog.registry.ChangeEntity` each names.

@@ -30,10 +30,10 @@ from enum import StrEnum
 from pathlib import Path
 
 from .binder import BindingStatus, SymbolBinding, compute_bindings
-from .change_registry import BREAKING_KINDS
 from .checker import DiffResult
 from .errors import ProfileMismatchError, ScopeMismatchError, UnsupportedArtifactError
 from .model.change import Change
+from .model.change_catalog.assembled import BREAKING_KINDS
 from .policy.exit_decision import ExitDecision, resolve_exit_decision
 from .stack_binding_diff import diff_runtime_bindings
 from .workflows.elf_dependency_resolver import DependencyGraph, resolve_dependencies

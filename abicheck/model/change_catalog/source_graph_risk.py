@@ -18,7 +18,7 @@
 approximate joins, never an artifact-proven break (G29 Phase 6).
 
 Kept beside ``source.py`` so that module stays under its line cap. The entries
-are registered in :mod:`abicheck.change_registry` with the other taxonomy
+are registered in :mod:`abicheck.model.change_catalog.assembled` with the other taxonomy
 modules.
 """
 

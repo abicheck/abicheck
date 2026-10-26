@@ -265,7 +265,7 @@ def _split_synthetic_ctor_key_body(body: str) -> tuple[str, str] | None:
     naive ``body.find("(")`` would misfire if *scope* itself were ever a
     template instantiation containing a literal ``(`` -- not currently
     possible for a class name, but this scans depth-aware over ``<``/``>``
-    the same way ``type_reachability_spelling._namespace_suffix_spellings``
+    the same way ``model.namespace_spelling.namespace_suffix_spellings``
     does, so the split stays correct even if that ever changed, and finds
     the first ``(`` at template-bracket depth zero as the scope/params
     boundary.

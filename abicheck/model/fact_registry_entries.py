@@ -15,7 +15,7 @@
 
 """The fact/capability registry's assembled entry list (ADR-063 D7, Phase 5).
 
-A pure assembly point, the same shape ``change_registry.py`` already is for
+A pure assembly point, the same shape ``model/change_catalog/assembled.py`` already is for
 ``ChangeKindMeta``: the real ``FactDefinition`` entries live in three
 owner-family sibling modules (``fact_registry_entries_types.py``,
 ``_symbols.py``, ``_platform.py``), and this module only concatenates them

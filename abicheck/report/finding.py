@@ -35,9 +35,9 @@ from dataclasses import dataclass
 from datetime import date
 from typing import cast
 
-from ..change_registry import REGISTRY
 from ..checker_types import DiffResult
 from ..model.change import Change
+from ..model.change_catalog.assembled import REGISTRY
 from ..model.change_catalog.kinds import HasKind
 from ..policy.classification import evidence_status_for_result, impact_for
 from ..policy.evaluate import effective_kind_sets
@@ -64,7 +64,7 @@ class ReportFinding:
 
     ``bucket`` is the *effective* display bucket (``added``/``removed``/
     ``changed``, see :func:`effective_bucket`), ``entity`` the canonical
-    :class:`~abicheck.change_registry.ChangeEntity` value (``None`` for an
+    :class:`~abicheck.model.change_catalog.assembled.ChangeEntity` value (``None`` for an
     unregistered kind), and ``reclassified_by`` the deciding
     ``reclassify:`` rule's audit label -- the same value the JSON report
     stamps on the change -- or ``None``. Resolved here once so HTML,

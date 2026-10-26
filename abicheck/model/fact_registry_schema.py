@@ -23,7 +23,7 @@ case-(a)/case-(b) unconverted-field allowlists, split out of
 entry list) and ``fact_registry.py`` (the facade) both import from this
 module; this module imports from neither, so there is no cycle.
 
-Generalizes ``change_registry.py``'s single-declaration ``ChangeKindMeta``
+Generalizes ``model/change_catalog/assembled.py``'s single-declaration ``ChangeKindMeta``
 pattern (already required for every ``ChangeKind``) from change *kinds* to
 *facts*: every ``Fact[T]``-typed model field is declared exactly once —
 value type, producing backends, persistence/identity/comparability/

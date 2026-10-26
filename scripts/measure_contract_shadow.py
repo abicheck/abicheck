@@ -84,7 +84,7 @@ from contract_platform_corpus import (  # noqa: E402
     lane_of,
 )
 
-from abicheck.change_registry import API_BREAK_KINDS, BREAKING_KINDS
+from abicheck.model.change_catalog.assembled import API_BREAK_KINDS, BREAKING_KINDS
 from abicheck.checker import compare  # noqa: E402
 from abicheck.checker_types import DiffResult  # noqa: E402
 from abicheck.compare.finding_identity import report_finding_id as _finding_id

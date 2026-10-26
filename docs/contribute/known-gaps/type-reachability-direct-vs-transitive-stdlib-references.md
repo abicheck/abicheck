@@ -192,7 +192,7 @@ namespace (`api::`) while keeping the class-nesting qualifier
 (`Outer::`). Neither the full-identity match nor the single
 fully-bare-leaf match (`_bare_type_name`) covered this partial
 qualification. Generalized `_bare_type_name` into
-`_namespace_suffix_spellings()`, returning every suffix obtainable by
+`namespace_suffix_spellings()`, returning every suffix obtainable by
 dropping some prefix of the scope chain at each depth-zero `"::"`
 boundary, and updated all three call sites to register every suffix
 (same ambiguity-drop collision guard extended to each). (2)
@@ -224,7 +224,7 @@ an enclosing *class* or just an enclosing *namespace* (Codex review,
 fresh evidence, confirmed with a minimal repro): a public namespace
 function `api::run()` makes `owner_class_of` return the bare namespace
 fragment `"api"`, which the general suffix-matching mechanism
-(`_namespace_suffix_spellings`, added for the first finding above) could
+(`namespace_suffix_spellings`, added for the first finding above) could
 then coincidentally match against an unrelated internal record's own
 bare-suffix spelling (e.g. `other::api`), wrongly walking that record's
 fields and unfiltering its layout churn. Fixed by seeding an owner only
@@ -290,7 +290,7 @@ candidates into the pre-existing `record_index["Inner"]` entry still
 left that entry pointing at the unrelated global `"Inner"` record
 (Codex review, fresh evidence, confirmed with a minimal repro):
 direct-clang's own "drop the enclosing namespace" convention (the same
-mechanism `_namespace_suffix_spellings` models for the `Outer::Inner`
+mechanism `namespace_suffix_spellings` models for the `Outer::Inner`
 finding above) means a signature declared *inside* namespace `api` can
 spell `api::Inner` bare as `"Inner"` too — not just a partially-qualified
 form. A public `api::f()` returning (bare-spelled) `api::Inner` would

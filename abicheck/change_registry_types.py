@@ -20,8 +20,7 @@ The real implementation (``Verdict``, ``ChangeKindMeta``,
 D9 catalog-validation logic) moved to ``abicheck.model.change_catalog.registry``
 (ADR-061 Phase 5, D9's target owner for this logic) — this module re-exports
 every name unchanged so every existing import path
-(``from abicheck.change_registry_types import Verdict``, and the transitive
-``from abicheck.change_registry import Verdict``) keeps working. New callers
+(``from abicheck.change_registry_types import Verdict``) keeps working. New callers
 should import from ``abicheck.model.change_catalog.registry`` directly rather
 than through this shim.
 """

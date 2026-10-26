@@ -22,13 +22,13 @@ import pytest
 
 from abicheck.buildsource.pack import BuildSourcePack
 from abicheck.buildsource.source_abi import SourceAbiSurface, SourceEntity
-from abicheck.change_registry import API_BREAK_KINDS
 from abicheck.checker import compare
 from abicheck.compare.namespace_shape_detectors import _build_std_reexport_change
 from abicheck.diff_cpp_patterns import _find_tag_rename_for_removed
 from abicheck.diff_helpers import make_change
 from abicheck.model import AbiSnapshot, Function, RecordType, Visibility
 from abicheck.model.change import Change
+from abicheck.model.change_catalog.assembled import API_BREAK_KINDS
 from abicheck.model.change_catalog.kinds import ChangeKind
 from abicheck.model.change_catalog.registry import Verdict
 from abicheck.model.evidence_status import EvidenceStatus, ReachabilityState

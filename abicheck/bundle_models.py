@@ -132,7 +132,7 @@ DEFAULT_SYSTEM_PROVIDERS: frozenset[str] = frozenset(
 #: to serve both with a single 12-kind set shared by `bundle.py`'s
 #: promotion path and `bundle_signature_evidence.py`'s suppression path —
 #: which was wrong in a concrete, checkable way: `FUNC_NOEXCEPT_ADDED`'s
-#: own registry entry (`change_registry.py`) has `default_verdict=
+#: own registry entry (`model/change_catalog/assembled.py`) has `default_verdict=
 #: COMPATIBLE`, and `FUNC_NOEXCEPT_REMOVED`/`FUNC_EXCEPTION_SPEC_CHANGED`
 #: are `COMPATIBLE_WITH_RISK` with an explicit "not a binary break"
 #: rationale — promoting either to a BREAKING
@@ -211,7 +211,7 @@ CONFIRMED_C_BOUNDARY_SIGNATURE_BREAK_KINDS: frozenset[ChangeKind] = frozenset(
 
 #: The narrow, promotion-only subset of the set above — see that constant's
 #: own docstring for the full reasoning. Every member has
-#: `default_verdict=BREAKING` in `change_registry.py` *and* describes a
+#: `default_verdict=BREAKING` in `model/change_catalog/assembled.py` *and* describes a
 #: direct call-boundary mismatch, not a vtable-layout or policy-adjustable
 #: source-level concern. `FUNC_NOEXCEPT_ADDED`/`FUNC_NOEXCEPT_REMOVED`/
 #: `FUNC_EXCEPTION_SPEC_CHANGED` (COMPATIBLE/RISK, explicitly "not a binary

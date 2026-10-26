@@ -64,12 +64,12 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass, replace
 from typing import Any
 
-from ..change_registry import REGISTRY
 from ..contract_relevance_types import (
     NON_ENTITY_RELEVANCE,
     ContractAssurance,
     ContractRelevance,
 )
+from ..model.change_catalog.assembled import REGISTRY
 from ..model.change_catalog.dimensions import ChangeEntity, ChangeOperation
 from ..model.change_catalog.kinds import ChangeKind
 
