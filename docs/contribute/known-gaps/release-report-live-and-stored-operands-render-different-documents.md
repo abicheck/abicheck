@@ -11,6 +11,20 @@ generated: false
 
 Index: [Known gaps](../known-gaps.md)
 
+**Status (2026-10-26): CLOSED** by #1814 (release schema `2.5`, ADR-068's
+2026-10-26 amendment). A stored `BundleFacts` comparison now renders the live
+release document: `release_schema_version`, `libraries` as a list, `exit`,
+the receipt (marked `effective_config_source:
+"reconstructed_from_stored_facts"`) and explicit `unavailable` markers for
+fields a stored comparison cannot compute. The flat `mode: "bundle_facts"`
+shape is retired, and every format comes from one `ReleaseEvaluation`.
+
+Still different by nature, not by shape: the stored operand has no old-side
+inventory, so its JUnit omits the passing testcase per unchanged symbol, and
+it has no HTML or `--view show=` projection.
+
+The record below is the gap as it stood before the fix.
+
 **Status (updated 2026-10-24): PARTIAL.** Both operands now go through one
 builder, `report.release_document.build_release_report`, but each still
 yields its own document shape. They agree on every semantic field both carry
