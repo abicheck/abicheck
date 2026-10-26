@@ -92,7 +92,7 @@
       "abicheck/extract/headers/castxml/vector_join.py": "043e4a849bbc324568e240d4a94323b0952583678ec2ca0a62c81515a1798db0",
       "abicheck/extract/headers/castxml/vector_spellings.py": "95368cac86a4100e3c0e832814ccd96c53e1edbf930f680044533812a05923ec",
       "abicheck/extract/headers/clang/__init__.py": "538add12f3ff39e1c1b39e6f5def93b50a584b78b30c4e7e59058207222757d0",
-      "abicheck/extract/headers/clang/ast_inner.py": "520d85f0431a915f82e9ac949a7dd86886813e66f9e8ea1c5213f6b2a1f3f93f",
+      "abicheck/extract/headers/clang/ast_inner.py": "f695f5bb01048fa924a1b67acbbcc29630c871607f1a3b4329ec781133f296f8",
       "abicheck/extract/headers/clang/attributes.py": "4f35afe72ef319265695d3e199e10c9ef0076db4a5238161b33a076fd3a599fe",
       "abicheck/extract/headers/clang/backend.py": "5025e5d53c93c90daa08f8962f6a44ae593185d7a6446b10b7303987b044fd6b",
       "abicheck/extract/headers/clang/constraints.py": "bb7cf73353226075aa3f723af93b8a9b1d646de964954f820745bccfb9917a8c",
@@ -100,7 +100,7 @@
       "abicheck/extract/headers/clang/enums.py": "87ee0817b89dd1483a48e5912602d8d02b84e1c0aa1671d0f32c1fd306b686b9",
       "abicheck/extract/headers/clang/error_header_retry.py": "3153f727c9d1934783a51d6917727a48aeba31e68b3c2462aef6e6b2f489f690",
       "abicheck/extract/headers/clang/explicit_instantiation.py": "359b71f36e304c2c1226ca35a65c1969989195dabc070a8035354caaef501663",
-      "abicheck/extract/headers/clang/expr.py": "1dfaf11721341b4f2e1c709602b769c9448d98219546bed349aabf2d57e68d6e",
+      "abicheck/extract/headers/clang/expr.py": "f57a21644e45ce3672e6f4943135ed12794d28f71b0ad961e0f5a1ca4f6353f7",
       "abicheck/extract/headers/clang/function_template_defaults.py": "af4a42ea00a91238ef8f111fe05c4b6aa625b84fd2fd4e39230b48953ebaf566",
       "abicheck/extract/headers/clang/functions.py": "532de267a0cfde9bb81982de01aa2c76f68b953962492303e3d749d5399e7b56",
       "abicheck/extract/headers/clang/inline_semantics.py": "8284b543b4fa45da23c50fee0f16fd11dab8c43cf43f1cf07334572a822ad04d",
@@ -168,9 +168,9 @@
       "abicheck/symvers_metadata.py": "372737765cd132e6e87ed891dd465d2958e04debbef774e45212ceb3036871cb",
       "abicheck/type_metadata.py": "9997189de8dac522fd1db8be5ae491d811139503f83abaaded89038eb4aa9cdf"
     },
-    "fingerprint": "9253183c2f31d9e9533fcfd72ab3a7535d38ee3e9132e052b944457a26488321",
+    "fingerprint": "56d5a8f7d98157a1e44c3720795ea11c72c152efd5bb731e0bf2eb438fe5d1dc",
     "generation": 26,
-    "reason": "bumped to 26 for a semantic change"
+    "reason": "restores generation 26's documented reader behaviour: a null clang inner reads as a leaf and _unwrap_expr degrades a non-list inner, as the readers' existing tests pin"
   },
   "resolver": {
     "files": {

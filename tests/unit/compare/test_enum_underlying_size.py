@@ -152,3 +152,29 @@ def test_long_is_sized_by_the_targets_data_model(
 
 def test_long_without_a_known_data_model_never_reports() -> None:
     assert _underlying_kinds("int", "long") == []
+
+
+@pytest.mark.parametrize(
+    ("cpu_type", "expected"),
+    [
+        ("ARM64", 8),
+        ("x86_64", 8),
+        ("PowerPC64", 8),
+        ("i386", 4),
+        ("ARM", 4),
+        ("", None),
+        ("0x99", None),
+    ],
+)
+def test_macho_long_follows_the_selected_slice(
+    cpu_type: str, expected: int | None
+) -> None:
+    """A thin 32-bit Mach-O image has a 4-byte ``long``; an unknown slice
+    sizes nothing, so it can never manufacture a break."""
+    from abicheck.compare.enum_underlying import long_byte_size
+    from abicheck.model.macho_facts import MachoMetadata
+
+    snap = _snap("1", "int")
+    snap.platform = "macho"
+    snap.macho = MachoMetadata(cpu_type=cpu_type)
+    assert long_byte_size(snap) == expected

@@ -84,9 +84,17 @@ _LONG_SPELLINGS = frozenset(
 )
 
 
+#: ``sizeof(long)`` by Mach-O slice name (``macholib``'s ``CPU_TYPE_NAMES``).
+_MACHO_LONG_SIZE: dict[str, int] = {
+    **dict.fromkeys(("x86_64", "arm64", "powerpc64"), 8),
+    **dict.fromkeys(("i386", "arm", "powerpc"), 4),
+}
+
+
 def long_byte_size(snapshot: AbiSnapshot | None) -> int | None:
     """``sizeof(long)`` on *snapshot*'s target: 4 under LLP64 (PE), the ELF
-    pointer size under ILP32/LP64, 8 on Mach-O; ``None`` when unknown."""
+    pointer size under ILP32/LP64, the Mach-O slice's word size; ``None``
+    when unknown."""
     if snapshot is None:
         return None
     if getattr(snapshot, "platform", None) == "pe" or getattr(snapshot, "pe", None):
@@ -94,10 +102,11 @@ def long_byte_size(snapshot: AbiSnapshot | None) -> int | None:
     elf = getattr(snapshot, "elf", None)
     if elf is not None:
         return int(elf.pointer_size)
-    if getattr(snapshot, "platform", None) == "macho" or getattr(
-        snapshot, "macho", None
-    ):
-        return 8
+    macho = getattr(snapshot, "macho", None)
+    if macho is not None or getattr(snapshot, "platform", None) == "macho":
+        # The selected slice names the word size; a thin 32-bit image has a
+        # 4-byte ``long``. An unknown or missing slice compares nothing.
+        return _MACHO_LONG_SIZE.get(str(getattr(macho, "cpu_type", "")).lower())
     return None
 
 
