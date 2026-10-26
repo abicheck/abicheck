@@ -95,7 +95,7 @@
       "abicheck/extract/headers/clang/attributes.py": "7e32c123c19fa5cad688760325bd17199dd42d0cc58a0b92360349403003f1e9",
       "abicheck/extract/headers/clang/backend.py": "5025e5d53c93c90daa08f8962f6a44ae593185d7a6446b10b7303987b044fd6b",
       "abicheck/extract/headers/clang/constraints.py": "824b871e3b2eefe9e0970cf847c190eb0a4546757f002a4ab77704bdbeec1db7",
-      "abicheck/extract/headers/clang/context.py": "648411b558314ee3ba099c4ecbd302193535330c8dc85bb087ad8d2f967b76ec",
+      "abicheck/extract/headers/clang/context.py": "db41557dcc16e9560453d4a169fb957e7188490dee1e3c4d3ca42b804bd2a63c",
       "abicheck/extract/headers/clang/enums.py": "69f90fd8e342371d246a257f7ed4230d9a548173f856ec63776d6af12ee53644",
       "abicheck/extract/headers/clang/error_header_retry.py": "3153f727c9d1934783a51d6917727a48aeba31e68b3c2462aef6e6b2f489f690",
       "abicheck/extract/headers/clang/explicit_instantiation.py": "bf0178df431eef00d5ee5c9e918cba99a80fab226a68f7a179b2f1a36ab5da95",
@@ -145,7 +145,7 @@
       "abicheck/extract/public_root_ownership.py": "c5c72f76093e4dedfcc6d6d838b0ca2df47ce44dcbb81d65469ccf8b1dc857f2",
       "abicheck/extract/quoted_include_expansion.py": "d26085d7fdde4ce88a5245e00af377d0431d24e651c9274ad70a457bf8bde762",
       "abicheck/extract/semantic_ir_merge.py": "250830d3bd6a06c18bcd79abb90011cceaabe875581172047c2b20688edbc203",
-      "abicheck/extract/semantic_normalizer.py": "d7fb1ef96f74b9052a94a6877211f68488d2b317dd9651ab0e5425df94ed8910",
+      "abicheck/extract/semantic_normalizer.py": "ddbbba743b7630a47494ae298468357ff1187b9812d2affa4a3bcbdad4f91f60",
       "abicheck/extract/semantic_normalizer_dwarf.py": "d092c309a8e349f9b699e5931456188485670ef05a8048783496d915fe7a7a83",
       "abicheck/extract/semantic_normalizer_template_args.py": "9e07ae6b02395411ad22cbd02e2acbe3f9d70b5a33283b606a9296ba9d55b1b2",
       "abicheck/extract/stdlib_local_origin.py": "5ba2ab65b5d264138e07adfa3506ade7706239bcc07cc04e3fb75596ec7b4358",
@@ -167,9 +167,9 @@
       "abicheck/symvers_metadata.py": "372737765cd132e6e87ed891dd465d2958e04debbef774e45212ceb3036871cb",
       "abicheck/type_metadata.py": "9997189de8dac522fd1db8be5ae491d811139503f83abaaded89038eb4aa9cdf"
     },
-    "fingerprint": "e2c2802b667367c533abeff50a444013eb4d0e772926d475400df14ad849f423",
+    "fingerprint": "981ad9d63ab956be4d4c9dcb029c00ab7cb42a077e69e3e254615d278d03c923",
     "generation": 25,
-    "reason": "bumped to 25 for a semantic change"
+    "reason": "comment-only: renamed helper names in docstrings (refactor, no behaviour change)"
   },
   "resolver": {
     "files": {
@@ -181,15 +181,15 @@
       "abicheck/policy/use_case_reachability.py": "e21d1b32773ce42e458ec8dfe34d86c3a5c48732a829b4e985ec739cae594bc1",
       "abicheck/post_processing_reachability.py": "47692d1cf654f668d170be08b81bbb528799abdf4562413599a0ffc6bb23b88a",
       "abicheck/storage/native_identity_aliases.py": "061e634659b371f1688cfcd4845fdcbe6147b9c2cfddaa4285dd34c757ca80ef",
-      "abicheck/type_reachability.py": "89d8db3c507a58004fd6b38ad4fee5ea6c9b40a9da97f34d8067ae440aa9e9bb",
-      "abicheck/type_reachability_spelling.py": "4262f30db17f2a4c5ba2a4341b8eed9f1408e335825644845e10cb08838995cb",
-      "abicheck/type_reachability_stdlib_spellings.py": "0cc608abede4a96a81172caf237e1bb813100a22642d6a828838e4cd60e992ae",
+      "abicheck/type_reachability.py": "1fe18d38eef5ebed444a3aac59247f72bbef677755652be333cb631dceaeb0c2",
+      "abicheck/type_reachability_spelling.py": "1bd700f854cf9021fc30b577f4ddf3d22095c07b0c7a9bd90c497f8a8eb018a7",
+      "abicheck/type_reachability_stdlib_spellings.py": "e20c1ffc6055602a97021b50fc496bd9892231bf6b437fb2a8e319cc3535f470",
       "abicheck/workflows/compare/resolve.py": "dc0381227c9e8dacaa39858d3f534ff45cbb3177f9b8645a8728c3f25c460793",
       "abicheck/workflows/elf_dependency_resolver.py": "18524281e550a7f25225441cd063de58ec33281e7bacf65fef98d1fefb101426"
     },
-    "fingerprint": "1746ea87424e9b91785555a49fab5634033df0e30981fffdfac6ba1f91a25630",
+    "fingerprint": "b962521c095f9678b21de0b2f2f0027f8043b1a1c57b509656df6d232b3b71e5",
     "generation": 2,
-    "reason": "merge of the gen-24 call-graph fix and the gen-25 EntityId fix; this axis's own code is unchanged by the EntityId fix"
+    "reason": "import/rename-only refactor: _NON_PUBLIC_ORIGINS -> model.vocabulary.NON_PUBLIC_ORIGINS, private spelling helpers made public; no behaviour change"
   },
   "source": {
     "files": {

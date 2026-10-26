@@ -93,7 +93,7 @@ from ...model.synthetic_key import synthetic_ctor_owner
 from ...model.vocabulary import NON_PUBLIC_ORIGINS
 from ...policy.contract_dependency_origin import DependencyInternals
 from .dependency_retention import (
-    candidate_identity,
+    candidate_spelling,
     directly_referenced_dependency_names,
     kept_signature_haystack,
 )
@@ -297,7 +297,7 @@ def _internal_typedefs(
 ) -> frozenset[str]:
     """Bare names of the dependency typedefs no public declaration names."""
     qualified = snap.declarations.typedefs_qualified
-    own_scopes = {candidate_identity(r) for r in own_records}
+    own_scopes = {candidate_spelling(r) for r in own_records}
 
     def is_dependency_typedef(key: str) -> bool:
         if _top_namespace(key) not in dep_only_namespaces:
@@ -339,7 +339,7 @@ def _header_dependency_internals(snap: AbiSnapshot) -> DependencyInternals:
     def namespace(decl: _Declaration) -> str:
         if isinstance(decl, Function | Variable):
             return _declaration_namespace(decl, name_of)
-        return _top_namespace(candidate_identity(decl))
+        return _top_namespace(candidate_spelling(decl))
 
     own_namespaces = {
         namespace(d) for d in every if not at_dependency_path(d.source_header)
@@ -397,7 +397,7 @@ def _header_dependency_internals(snap: AbiSnapshot) -> DependencyInternals:
     types = frozenset(
         r.name
         for r in dep_records
-        if candidate_identity(r) not in reached and r.name not in own_names
+        if candidate_spelling(r) not in reached and r.name not in own_names
     )
 
     symbols: frozenset[str] = frozenset()

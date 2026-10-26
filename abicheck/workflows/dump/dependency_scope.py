@@ -108,7 +108,7 @@ from ...model.semantic_ir import SemanticIR, semantic_ir_conflict_key
 from ...model.surface_facts import in_public_surface
 from ...model.vocabulary import NON_PUBLIC_ORIGINS
 from .dependency_retention import (
-    candidate_identity,
+    candidate_spelling,
     directly_referenced_dependency_names,
     kept_identifier_set,
     kept_signature_haystack,
@@ -420,10 +420,10 @@ def scope_snapshot_excluding_dependencies(
         )
         if directly_referenced:
             kept_types = kept_types + [
-                t for t in dep_types if candidate_identity(t) in directly_referenced
+                t for t in dep_types if candidate_spelling(t) in directly_referenced
             ]
             kept_enums = kept_enums + [
-                e for e in dep_enums if candidate_identity(e) in directly_referenced
+                e for e in dep_enums if candidate_spelling(e) in directly_referenced
             ]
 
     kept_identifiers = kept_identifier_set(
@@ -437,7 +437,7 @@ def scope_snapshot_excluding_dependencies(
     deps: list[RecordType | EnumType] = [*dep_types, *dep_enums]
     dwarf_ids = (
         AllBut(
-            ({candidate_identity(t) for t in deps} | {t.name for t in deps})
+            ({candidate_spelling(t) for t in deps} | {t.name for t in deps})
             - kept_identifiers
         )
         if header_parse_excluded(snap)

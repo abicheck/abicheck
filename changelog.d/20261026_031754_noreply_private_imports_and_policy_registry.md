@@ -11,7 +11,7 @@
   `idioms.py` and `type_reachability_spelling.py` each defined separately, is
   now one public `abicheck.model.vocabulary.NON_PUBLIC_ORIGINS`. The
   dependency-retention and hybrid-identity helpers that sibling modules import
-  (`candidate_identity`, `directly_referenced_dependency_names`,
+  (`candidate_spelling`, `directly_referenced_dependency_names`,
   `kept_signature_haystack`, `macho_normalize_mangled`, ...) and the spelling
   helpers `namespace_suffix_spellings` / `stripped_signature_spelling` are
   public in their owner modules, with no `_`-prefixed alias left behind.

@@ -6725,7 +6725,7 @@
   "abicheck/workflows/dump/dependency_retention.py::_resolve_spelling_index",
   "abicheck/workflows/dump/dependency_retention.py::_typedef_alias_name_spellings",
   "abicheck/workflows/dump/dependency_retention.py::_typedef_alias_reachability",
-  "abicheck/workflows/dump/dependency_retention.py::candidate_identity",
+  "abicheck/workflows/dump/dependency_retention.py::candidate_spelling",
   "abicheck/workflows/dump/dependency_retention.py::directly_referenced_dependency_names",
   "abicheck/workflows/dump/dependency_retention.py::kept_identifier_set",
   "abicheck/workflows/dump/dependency_retention.py::kept_signature_haystack",

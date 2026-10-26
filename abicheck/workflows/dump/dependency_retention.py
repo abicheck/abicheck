@@ -174,7 +174,7 @@ def _elaborated_tag_keywords(record_or_enum: RecordType | EnumType) -> frozenset
     return frozenset({"enum"})
 
 
-def candidate_identity(candidate: RecordType | EnumType) -> str:
+def candidate_spelling(candidate: RecordType | EnumType) -> str:
     """The most specific spelling identifying *candidate*: its fully-qualified
     name when the producer populated one, else its bare ``name``."""
     return getattr(candidate, "qualified_name", None) or candidate.name
@@ -228,12 +228,12 @@ def _kept_type_spellings(
     """
     spellings: set[str] = set()
     for rec in kept_types:
-        suffixes = namespace_suffix_spellings(candidate_identity(rec))
+        suffixes = namespace_suffix_spellings(candidate_spelling(rec))
         spellings.update(suffixes)
         for keyword in _elaborated_tag_keywords(rec):
             spellings.update(f"{keyword} {s}" for s in suffixes)
     for enum in kept_enums:
-        suffixes = namespace_suffix_spellings(candidate_identity(enum))
+        suffixes = namespace_suffix_spellings(candidate_spelling(enum))
         spellings.update(suffixes)
         spellings.update(f"enum {s}" for s in suffixes)
     return spellings
@@ -554,7 +554,7 @@ def directly_referenced_dependency_names(
     implementation closure (e.g. ``std::string``'s own
     ``_Alloc_hider`` field) this scoping exists to drop.
 
-    Returns each retained candidate's :func:`candidate_identity` (not its
+    Returns each retained candidate's :func:`candidate_spelling` (not its
     bare ``name``): two dependency candidates can share the same bare name
     under different fully-qualified identities (``std::Thing`` vs.
     ``vendor::Thing``), and returning bare names would let one's match
@@ -697,7 +697,7 @@ def directly_referenced_dependency_names(
     # (this preliminary map only feeds the reachability computation).
     prelim_key_owners: dict[str, set[str]] = {}
     for candidate in dep_candidates:
-        identity = candidate_identity(candidate)
+        identity = candidate_spelling(candidate)
         identity_of[id(candidate)] = identity
         spellings = _raw_candidate_spellings(candidate, identity)
         raw_own_spellings_of[id(candidate)] = spellings

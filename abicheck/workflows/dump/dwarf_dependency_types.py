@@ -60,7 +60,7 @@ from ...extract.dependency_header_roots import is_dependency_header
 from ...model import AbiSnapshot, EnumType, RecordType
 from ...model.dwarf_facts import StructLayout
 from .dependency_retention import (
-    candidate_identity,
+    candidate_spelling,
     directly_referenced_dependency_names,
 )
 
@@ -305,13 +305,13 @@ def unreachable_dependency_type_names(snap: AbiSnapshot) -> frozenset[str]:
     )
     for record in dependency:
         if record.name in exported_full:
-            reached.add(candidate_identity(record))
+            reached.add(candidate_spelling(record))
         if unbounded or _record_size_bytes(snap, record) in alias_sizes:
-            reached.add(candidate_identity(record))
+            reached.add(candidate_spelling(record))
 
     own_names = {r.name for r in records if id(r) not in dependency_ids}
     return frozenset(
         r.name
         for r in dependency
-        if candidate_identity(r) not in reached and r.name not in own_names
+        if candidate_spelling(r) not in reached and r.name not in own_names
     )
