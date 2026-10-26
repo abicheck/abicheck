@@ -80,6 +80,7 @@ from __future__ import annotations
 import posixpath
 import re
 from collections.abc import Callable, Sequence
+from dataclasses import replace
 from typing import TypeVar
 
 from ...compare.template_surface import qualified_name_lookup, strip_template_args
@@ -114,11 +115,16 @@ def dependency_internals(snap: AbiSnapshot) -> DependencyInternals:
     """*snap*'s dependency internals no public declaration reaches.
 
     Empty when the snapshot cannot tell its own declarations from a
-    dependency's.
+    dependency's. ``record_names`` is always filled: it is the side's
+    presence evidence for a finding raised on a record, internal or not.
     """
     if not snap.from_headers:
-        return DependencyInternals(types=unreachable_dependency_type_names(snap))
-    return _header_dependency_internals(snap)
+        internals = DependencyInternals(types=unreachable_dependency_type_names(snap))
+    else:
+        internals = _header_dependency_internals(snap)
+    decls = snap.declarations
+    records: list[RecordType | EnumType] = [*decls.types, *decls.enums]
+    return replace(internals, record_names=frozenset(r.name for r in records))
 
 
 def include_roots(compile_args: Sequence[str]) -> tuple[str, ...]:
