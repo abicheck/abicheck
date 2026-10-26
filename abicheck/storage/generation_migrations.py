@@ -270,6 +270,14 @@ SPELLING_MIGRATIONS: Mapping[int, GenerationSpellingChange] = {
         "type or name spelling changes, so no rewrite is needed -- an older "
         "clang snapshot keeps the colliding/split identities it recorded"
     ),
+    26: GenerationSpellingChange(
+        "castxml compiler emulation keeps a joined -xc/-xc++ language flag "
+        "(only the separate -x c form was carried), so a dump whose compile "
+        "flags spell the language joined now probes the emulated compiler in "
+        "that language; a malformed clang AST 'inner' is refused instead of "
+        "read as no children. No type or name spelling changes, so no rewrite "
+        "is needed"
+    ),
 }
 
 #: Reasons that say nothing about what was audited; the bump gate refuses them.

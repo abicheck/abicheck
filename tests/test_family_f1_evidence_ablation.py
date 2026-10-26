@@ -977,3 +977,49 @@ def test_dependency_internals_never_grow_under_ablation(ablation: str) -> None:
             ablated,
         )
     assert grew == []
+
+
+@pytest.mark.parametrize(
+    ("old_type", "new_type"),
+    [
+        ("unsigned char", "unsigned int"),
+        ("short", "long long"),
+        ("int", "unsigned char"),
+    ],
+)
+def test_ablating_debug_info_keeps_a_header_visible_enum_widening(
+    old_type: str, new_type: str
+) -> None:
+    """Bug class ``evidence.header_observable_fact_compared_only_from_debug_info``:
+    an enum underlying-size change the header model alone carries stays a
+    BREAKING finding when the debug layout is ablated (no DWARF enums). The
+    pre-fix pipeline compared the size only from DWARF and read NO_CHANGE."""
+    from abicheck.checker import compare
+    from abicheck.model.declarations import Function, Param
+    from abicheck.model.entities import EnumMember, EnumType
+    from abicheck.model.snapshot import AbiSnapshot
+
+    def side(version: str, underlying: str) -> AbiSnapshot:
+        return AbiSnapshot(
+            library="libe.so",
+            version=version,
+            from_headers=True,
+            functions=[
+                Function(
+                    name="f",
+                    mangled="f",
+                    return_type="void",
+                    params=[Param(name="e", type="E")],
+                )
+            ],
+            enums=[
+                EnumType(
+                    name="E", members=[EnumMember("A", 0)], underlying_type=underlying
+                )
+            ],
+        )
+
+    result = compare(side("1", old_type), side("2", new_type))
+    kinds = {c.kind.value for c in result.changes}
+    assert "enum_underlying_size_changed" in kinds
+    assert result.verdict.value == "BREAKING"

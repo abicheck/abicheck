@@ -1,0 +1,16 @@
+{
+  "description": "An enum's fixed underlying type widens (unsigned char -> unsigned int) and the enum is passed by value. Built without debug info, so only the header model sees the change: it must read as one enum_underlying_size_changed, not NO_CHANGE. Before the fix the size change came only from the DWARF layout pass.",
+  "field_report": "test-pattern review 2026-10-26: L2 false clean found by the debug-presence-only metamorphic relation",
+  "bug_class": "evidence.header_observable_fact_compared_only_from_debug_info",
+  "related_tests": [
+    "tests/unit/compare/test_enum_underlying_size.py",
+    "tests/test_depth_metamorphic_examples.py"
+  ],
+  "depths": [
+    "headers"
+  ],
+  "expected": "BREAKING",
+  "expected_kinds": [
+    "enum_underlying_size_changed"
+  ]
+}

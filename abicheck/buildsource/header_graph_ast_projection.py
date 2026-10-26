@@ -88,6 +88,9 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, TypeVar
 
 from ..errors import SnapshotError
+from ..extract.headers.clang.ast_inner import (
+    MalformedClangAstError as MalformedClangAstError,
+)
 from ..model import ScopeOrigin
 from ..model.execution_cache import request_key
 from ..model.execution_cache_scoped import ScopedCache
@@ -185,16 +188,8 @@ class HeaderGraphAstProjection:
     function_bodies: frozenset[str] = frozenset()
 
 
-class MalformedClangAstError(ValueError):
-    """A clang AST whose container shapes the header-graph readers assume are violated.
-
-    The readers walk every node's ``inner`` as a list of objects. A value of
-    another JSON type either raises partway through a walk, or -- for a string
-    or a mapping, which iterate without error -- yields no children at all. The
-    projection would then read as a complete, empty surface, so a malformed
-    tree is rejected before any reader sees it (ADR-028 D3: failed evidence is
-    an explicit fact, never an empty one).
-    """
+# MalformedClangAstError: one type with the clang header readers' own
+# ``ast_inner`` check, so every refusal path catches both (imported above).
 
 
 def validate_ast_shape(ast_root: object) -> None:

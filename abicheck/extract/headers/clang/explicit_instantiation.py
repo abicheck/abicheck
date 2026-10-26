@@ -48,6 +48,7 @@ from typing import Any
 
 from ....model import Fact
 from ....model.explicit_instantiation import ExplicitInstantiation
+from .ast_inner import ast_inner
 
 #: ``extern template`` and ``template <decl>;`` (no ``<`` after the keyword),
 #: and ``template<>`` (an explicit specialization). A template declaration
@@ -198,7 +199,7 @@ def explicit_instantiation_facts(
             child_template = True
         elif kind in DECL_KINDS and node.get("mangledName"):
             found.append((node, in_template, _key_of(node, scope)))
-        for child in node.get("inner") or []:
+        for child in ast_inner(node):
             stack.append((child, child_scope, child_template))
     return _classify(found, dump)
 
