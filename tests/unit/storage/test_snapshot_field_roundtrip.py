@@ -515,7 +515,9 @@ def test_every_reachable_field_is_synthesizable() -> None:
 def test_known_lossy_is_a_real_field_list_and_only_shrinks() -> None:
     stale = sorted(set(KNOWN_LOSSY) - _ALL_IDS)
     assert not stale, f"KNOWN_LOSSY names no enumerated field: {stale}"
-    assert len(KNOWN_LOSSY) <= _KNOWN_LOSSY_CEILING
+    assert len(KNOWN_LOSSY) == _KNOWN_LOSSY_CEILING, (
+        f"KNOWN_LOSSY has {len(KNOWN_LOSSY)} entries; lower _KNOWN_LOSSY_CEILING to match"
+    )
 
 
 def test_field_coverage_is_substantial() -> None:

@@ -111,15 +111,20 @@ def underlying_byte_size(spelling: str, long_size: int | None = None) -> int | N
 
 
 def enum_underlying_size_detector(
-    old: AbiSnapshot | None, new: AbiSnapshot | None
+    old: AbiSnapshot | None, new: AbiSnapshot | None, header_aware: bool = True
 ) -> Callable[[EnumType, EnumType], list[Change]]:
     """The per-enum comparison for one snapshot pair, with each side's
-    ``sizeof(long)`` resolved once rather than per enum."""
+    ``sizeof(long)`` resolved once rather than per enum. *header_aware* is
+    ``both_header_aware(old, new)``: without confirmed header evidence on
+    both sides ``underlying_type`` may be the ``"int"`` default, so nothing
+    is compared (the DWARF layout pass still covers debug-info snapshots)."""
     old_long, new_long = long_byte_size(old), long_byte_size(new)
 
     def changes(e_old: EnumType, e_new: EnumType) -> list[Change]:
         """One ``ENUM_UNDERLYING_SIZE_CHANGED`` when both sides' underlying
         types resolve to known, different byte sizes; otherwise nothing."""
+        if not header_aware:
+            return []
         old_size = underlying_byte_size(e_old.underlying_type, old_long)
         new_size = underlying_byte_size(e_new.underlying_type, new_long)
         if old_size is None or new_size is None or old_size == new_size:

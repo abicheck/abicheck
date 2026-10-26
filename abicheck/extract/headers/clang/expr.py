@@ -100,13 +100,17 @@ _IdIndexProvider = Callable[[], dict[str, str]]
 def _unwrap_expr(node: dict[str, Any]) -> dict[str, Any]:
     """Descend through single-child wrapper expressions (casts, ConstantExpr…).
 
-    A present ``inner`` that is not a list (a bare int, string or dict) raises
-    :class:`MalformedClangAstError` via :func:`ast_inner`; a missing key is a
-    leaf and ends the descent.
+    A malformed/adversarial ``inner`` (present but not a list, e.g. a bare
+    int or dict) degrades to no children, same as a missing key -- it used
+    to raise ``TypeError`` iterating it directly (Codex review, PR #888).
+    The one deliberate exception to :func:`ast_inner`'s refusal: this is a
+    local descent to spell one initializer, not a surface read, and
+    ``tests/test_ast_wrapper_chain_properties.py`` pins that it stops.
     """
     cur = node
     while isinstance(cur, dict) and cur.get("kind") in _WRAPPER_EXPR_KINDS:
-        inner = [c for c in ast_inner(cur) if isinstance(c, dict)]
+        raw = cur.get("inner")
+        inner = [c for c in raw if isinstance(c, dict)] if isinstance(raw, list) else []
         if len(inner) != 1:
             break
         cur = inner[0]

@@ -110,7 +110,7 @@ from .model.change import Change
 from .model.change_catalog.kinds import ChangeKind
 from .model.identity import EntityId, EntityKind
 from .model.semantic_ir_legacy_adapter import semantic_ir_covers_kind
-from .model.snapshot_reliability import family_reliable
+from .model.snapshot_reliability import both_header_aware, family_reliable
 
 #: Back-compat alias: the ADR-063 Phase 6 typedef cutover moved this
 #: predicate into ``diff_typedefs.py`` with the rest of its family, but
@@ -1110,7 +1110,9 @@ def _diff_enums(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     # silently undetected (case78). Emit it here, guarded by the same stripped-binary suppression
     # _diff_types uses so a stripped new side can't manufacture phantom removals.
     suppress_removed = _removals_are_unconfirmed(old, new)
-    underlying_size_changes = enum_underlying_size_detector(old, new)
+    underlying_size_changes = enum_underlying_size_detector(
+        old, new, both_header_aware(old, new)
+    )
 
     for e_old in old_map.values():
         name = e_old.name

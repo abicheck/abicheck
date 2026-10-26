@@ -27,7 +27,7 @@ the verdict (ledger `application_point: redundancy_filter_scored`).
 
 - Under the legacy verdict scheme the ledger records it `gating`, because the
   verdict really is computed over `kept + verdict_redundant`. `result_counts`
-  then reads, e.g. on `case45_multi_dim_array_change`,
+  then read, before `gating_retained`, e.g. on `case45_multi_dim_array_change`,
   "5 retained (6 gating, 0 non-gating)", and the review groups (built from the
   5 retained findings) sum to 5.
 - Under any severity configuration, `DispositionLedger.with_gate` relabels the
