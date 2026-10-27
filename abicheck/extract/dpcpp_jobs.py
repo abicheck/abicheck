@@ -78,9 +78,9 @@ def _host_only_single_pass(
 def _driver_jobs(cmd: list[str]) -> list[list[str]] | None:
     """The jobs *cmd* would run (``-###``), each as an argv; ``None`` when
     the driver cannot be asked."""
-    import shlex
     import subprocess
 
+    from .._compiler_options import split_command_line
     from ..deadline import run_bounded
 
     try:
@@ -90,7 +90,9 @@ def _driver_jobs(cmd: list[str]) -> list[list[str]] | None:
     except (OSError, subprocess.TimeoutExpired):
         return None
     return [
-        shlex.split(line) for line in proc.stderr.splitlines() if line.startswith(' "')
+        split_command_line(line)
+        for line in proc.stderr.splitlines()
+        if line.startswith(' "')
     ]
 
 

@@ -60,11 +60,10 @@ from __future__ import annotations
 
 import json
 import re
-import shlex
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from ._compiler_options import split_gcc_options
+from ._compiler_options import split_command_line, split_gcc_options
 
 if TYPE_CHECKING:
     from collections.abc import Iterable, Iterator
@@ -225,7 +224,7 @@ def _split_command(command: object) -> list[str]:
     if not isinstance(command, str):
         return []
     try:
-        return shlex.split(command)
+        return split_command_line(command)
     except ValueError:
         return []
 

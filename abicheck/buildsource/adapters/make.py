@@ -40,10 +40,10 @@ from __future__ import annotations
 
 import os
 import re
-import shlex
 import stat as stat_module
 from pathlib import Path
 
+from ..._compiler_options import split_command_line
 from ...build_context import _extract_flags
 from ..build_evidence import BuildEvidence, CompileUnit, Generator, LinkUnit
 from ..redaction import DEFAULT_REDACTION, RedactionPolicy
@@ -323,7 +323,7 @@ def _split_recipe(line: str) -> list[str]:
     if not stripped:
         return []
     try:
-        return shlex.split(stripped, posix=os.name != "nt")
+        return split_command_line(stripped)
     except ValueError:
         return []  # unbalanced quotes / non-command line — skip
 
@@ -377,7 +377,7 @@ def _expand_response_files(
             expanded.append(arg)
             continue
         try:
-            expanded.extend(shlex.split(text, posix=os.name != "nt"))
+            expanded.extend(split_command_line(text))
             changed = True
         except ValueError:
             expanded.append(arg)

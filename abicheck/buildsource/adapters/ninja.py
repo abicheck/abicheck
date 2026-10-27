@@ -34,6 +34,7 @@ import shutil
 import subprocess
 from pathlib import Path
 
+from ..._compiler_options import split_command_line
 from ...build_context import _extract_flags
 from ...deadline import run_bounded
 from ..build_evidence import BuildEvidence, CompileUnit, Generator
@@ -187,15 +188,12 @@ class NinjaAdapter:
 
 
 def _argv_of(raw: dict[str, object]) -> list[str]:
-    import os
-    import shlex
-
     args = raw.get("arguments")
     if isinstance(args, list):
         return [str(a) for a in args]
     command = raw.get("command")
     if isinstance(command, str):
-        return shlex.split(command, posix=os.name != "nt")
+        return split_command_line(command)
     return []
 
 

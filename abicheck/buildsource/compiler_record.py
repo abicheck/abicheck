@@ -32,15 +32,14 @@ wrapper degrades gracefully (diagnostic, empty evidence) on any read failure.
 
 from __future__ import annotations
 
-import os
 import re
-import shlex
 from pathlib import Path
 from typing import Any
 
 from elftools.common.exceptions import ELFError
 from elftools.elf.elffile import ELFFile
 
+from .._compiler_options import split_command_line
 from ..build_context import _extract_flags
 from .adapters.adapter_shared import (
     compile_unit_id,
@@ -138,7 +137,7 @@ def _collect_command_line(elf: Any, ev: BuildEvidence, red: RedactionPolicy) -> 
     parsed: list[CompileUnit] = []
     for command in parse_gcc_command_line(section.data()):
         try:
-            argv = shlex.split(command, posix=os.name != "nt")
+            argv = split_command_line(command)
         except ValueError:
             continue
         if not argv:

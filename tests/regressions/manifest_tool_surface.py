@@ -620,7 +620,15 @@ TOOL_SURFACE_BUG_CLASSES: tuple[BugClass, ...] = (
         # API path) and on `comment_id` (which selects the comment a PATCH
         # rewrites), none of which had a test that would have failed anywhere.
         fixed_by=(1311,),
-        seed_tests=("tests/test_action_shell_field_records.py",),
+        seed_tests=(
+            "tests/test_action_shell_field_records.py",
+            # Compiler-command tokenization is the same class: one host-dependent
+            # convention, restated per call site, is N places to diverge. The
+            # parity test pins every site to the canonical splitter; the repo scan
+            # keeps a new site from reintroducing its own.
+            "tests/test_compiler_command_split_host_parity.py",
+            "tests/test_compiler_command_split_is_canonical.py",
+        ),
         public_surfaces=("action",),
         axes={
             "value_shape": ("string", "integer", "boolean", "null", "absent"),

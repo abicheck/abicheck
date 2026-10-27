@@ -160,12 +160,41 @@ def split_gcc_options(text: str) -> list[str]:
     the same way ``shlex.split`` does -- callers that need to tolerate
     that already catch it.
     """
-    if os.name == "nt":
-        return _split_gcc_options_windows(text)
+    return split_command_line(text)
+
+
+def split_command_line(
+    text: str, *, cl_style: bool | None = None, strict: bool = True
+) -> list[str]:
+    """Tokenize a compiler command line or one ``@response-file`` body.
+
+    The single owner of compiler-command tokenization: every site that splits
+    a compile-database ``command``, a make/ninja recipe, a compiler-recorded
+    command line, or a ``-###`` job line routes here, so the same text cannot
+    parse differently between two call sites on one host. The old
+    ``shlex.split(text, posix=os.name != "nt")`` pattern is retired in favour
+    of this function; ``build_context`` no longer keeps its own MSVC tokenizer.
+
+    *cl_style* picks the quoting convention: ``True`` for MSVC/``cl.exe``
+    argv rules (:func:`_split_gcc_options_windows`), ``False`` for POSIX
+    shell quoting (``shlex.split(text, posix=True)``). ``None`` (the default)
+    picks by ``os.name`` -- the convention of the host whose build system
+    wrote the text, which is what make/ninja transcripts and compile
+    databases use. Choosing by the *invoked driver* (``clang-cl`` vs.
+    ``clang++``) is the caller's job, not this function's.
+
+    *strict* only affects the MSVC branch: ``False`` closes an unterminated
+    quote instead of raising ``ValueError``. The POSIX branch always raises
+    ``ValueError`` on malformed quoting, the way ``shlex`` does.
+    """
+    if cl_style is None:
+        cl_style = os.name == "nt"
+    if cl_style:
+        return _split_gcc_options_windows(text, strict=strict)
     return shlex.split(text, posix=True)
 
 
-def _split_gcc_options_windows(text: str) -> list[str]:
+def _split_gcc_options_windows(text: str, *, strict: bool = True) -> list[str]:
     """The Windows-only half of :func:`split_gcc_options` -- see that
     function's docstring (item #4) for why this exists as a separate,
     platform-gated branch rather than applying everywhere.
@@ -284,7 +313,7 @@ def _split_gcc_options_windows(text: str) -> list[str]:
         current.append(ch)
         have_current = True
         i += 1
-    if in_quotes:
+    if in_quotes and strict:
         raise ValueError("No closing quotation")
     if have_current:
         tokens.append("".join(current))
