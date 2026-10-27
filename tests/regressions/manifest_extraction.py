@@ -555,6 +555,9 @@ EXTRACTION_BUG_CLASSES: tuple[BugClass, ...] = (
             "tests/test_phase3_dwarf_helpers.py",
             # F1 harness cell: a malformed member location reads as unknown.
             "tests/test_family_f1_evidence_ablation.py",
+            # A header that is not text is refused; a header that parses to zero
+            # declarations is named per side, never a silent empty surface.
+            "tests/test_cli_header_input_text_and_empty_surface.py",
         ),
         known_gaps=(
             KnownGap(
