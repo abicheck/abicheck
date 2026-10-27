@@ -39,7 +39,10 @@ from ..castxml_header_compat import (
     PREAMBLE_FILENAME,
     castxml_aggregate_text,
 )
-from ..header_ast_cache_producers import clang_ast_output_fingerprint
+from ..header_ast_cache_producers import (
+    castxml_ast_output_fingerprint,
+    clang_ast_output_fingerprint,
+)
 from .clang_header_argv import HeaderCompileContext, render_clang_header_argv
 
 #: Bumped once (Codex review, fresh evidence, P2): a pre-existing on-disk
@@ -298,9 +301,16 @@ def _castxml_store_key(
     mtime, and the whole key is one :func:`~..storage.tu_parse_store.content_key`
     over ordered parts. ``frontend_context`` is not folded: castxml only ever runs
     in the host context, so the value was constant.
+
+    The stored document is castxml's XML plus the preprocessed text and the
+    preprocessor-excluded scan abicheck splices into it, so the key also folds
+    :func:`castxml_ast_output_fingerprint` -- the source of the modules that
+    compute those payloads -- rather than trusting the hand-bumped schema
+    constant alone.
     """
     parts = [
         f"castxml_cache_schema={_CASTXML_CACHE_SCHEMA_VERSION}",
+        f"castxml_output_code={castxml_ast_output_fingerprint()}",
         f"frontend_identity={frontend_identity}",
         f"compiler_identity={compiler_identity}",
         f"compiler={compiler}",
