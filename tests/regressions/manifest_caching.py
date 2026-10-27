@@ -183,10 +183,12 @@ CACHING_BUG_CLASSES: tuple[BugClass, ...] = (
             "`storage.code_identity.abicheck_code_fingerprint()`, so any "
             "package edit misses and reverting it hits again. An external "
             "tool's output (the castxml/clang header AST) is keyed by the exact "
-            "aggregate header and command line abicheck generates, plus -- for "
-            "clang, whose stored entry abicheck shapes -- the source of the "
-            "modules that shape it. Every `DiskCache` in the package is "
-            "classified as one or the other."
+            "aggregate header and command line abicheck generates, plus the "
+            "source of the modules that shape what is stored: abicheck splices "
+            "its own payload into a castxml document and selects or compacts a "
+            "clang one, so each backend has its own list "
+            "(`CASTXML_AST_OUTPUT_MODULES`, `CLANG_AST_OUTPUT_MODULES`). Every "
+            "`DiskCache` in the package is classified as one of these."
         ),
         fixed_by=(1466, 1476),
         seed_tests=(
