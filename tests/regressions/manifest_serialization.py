@@ -96,7 +96,12 @@ SERIALIZATION_BUG_CLASSES: tuple[BugClass, ...] = (
             "a status away: a comparison that maps every "
             "`AdvancedExtractionStatus` to one value, or excludes a field, "
             "hides the drop it is meant to catch. Each lossy case is a named "
-            "entry with its reason, and each entry must still be lossy."
+            "entry with its reason, and each entry must still be lossy. "
+            "The same holds for the stored section-version "
+            "inventory (`section_schema_versions`): a version the writer "
+            "records must be read back against this build's registry, or a "
+            "too-new section (`binary` at 99 on a v1 section) decodes "
+            "silently while the top-level schema_version is refused."
         ),
         fixed_by=(1442,),
         seed_tests=(
@@ -104,6 +109,7 @@ SERIALIZATION_BUG_CLASSES: tuple[BugClass, ...] = (
             "tests/test_family_f2_route_parity.py",
             "tests/unit/storage/test_snapshot_field_roundtrip.py",
             "tests/unit/storage/test_source_abi_surface_roundtrip.py",
+            "tests/unit/storage/test_section_schema_version_gate.py",
         ),
         known_gaps=(
             KnownGap(

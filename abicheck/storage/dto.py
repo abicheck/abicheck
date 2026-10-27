@@ -355,6 +355,11 @@ class SectionDTO:
         )
 
 
+def migration_source_versions(section_kind: str) -> frozenset[int]:
+    """The versions *section_kind* has a registered migration step *from*."""
+    return frozenset(_MIGRATIONS.get(section_kind, {}))
+
+
 def migrate_section_dto(dto: SectionDTO) -> SectionDTO:
     """*dto*, advanced to its section kind's current version via the
     registered migration chain — a no-op if it is already current.
