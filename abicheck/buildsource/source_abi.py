@@ -455,6 +455,29 @@ class SourceAbiTu:
         )
 
 
+#: The keys a linked surface's ``roots``/``mappings``/``unmatched`` may hold.
+#: ``from_dict`` copies only the keys a document states, and ``to_dict``
+#: writes only the keys a surface holds.
+_SURFACE_ROOT_KEYS: tuple[str, ...] = (
+    "exported_symbols",
+    "public_header_declarations",
+    "forced_public",
+)
+_SURFACE_MAPPING_KEYS: tuple[str, ...] = (
+    "source_decl_to_binary_symbol",
+    "source_type_to_debug_type",
+    "public_header_to_target",
+    "synthesized_symbol_to_owner",
+    "template_instantiation_symbol_to_decl",
+    "allocator_interposer_symbol_to_owner",
+    "non_public_symbol_to_reason",
+)
+_SURFACE_UNMATCHED_KEYS: tuple[str, ...] = (
+    "symbols_without_decl",
+    "decls_without_symbol",
+)
+
+
 @dataclass
 class SourceAbiSurface:
     """Linked per-library source ABI surface — ``source/source_abi.json`` (D5).
@@ -544,33 +567,18 @@ class SourceAbiSurface:
             "library": self.library,
             "target_id": self.target_id,
             "roots": {k: list(v) for k, v in self.roots.items()},
+            # Only the keys this surface holds: a document that omits a key
+            # (an older producer) must re-encode without it, not with a
+            # default `[]`/`{}` the document never said (storage invariant 3).
             "reachable_source_surface": {
                 name: [e.to_dict() for e in bucket]
                 for name, bucket in self.reachable_buckets().items()
             },
             "source_edges": list(self.source_edges),
             "mappings": {
-                "source_decl_to_binary_symbol": dict(
-                    self.mappings.get("source_decl_to_binary_symbol", {})
-                ),
-                "source_type_to_debug_type": dict(
-                    self.mappings.get("source_type_to_debug_type", {})
-                ),
-                "public_header_to_target": dict(
-                    self.mappings.get("public_header_to_target", {})
-                ),
-                "synthesized_symbol_to_owner": dict(
-                    self.mappings.get("synthesized_symbol_to_owner", {})
-                ),
-                "template_instantiation_symbol_to_decl": dict(
-                    self.mappings.get("template_instantiation_symbol_to_decl", {})
-                ),
-                "allocator_interposer_symbol_to_owner": dict(
-                    self.mappings.get("allocator_interposer_symbol_to_owner", {})
-                ),
-                "non_public_symbol_to_reason": dict(
-                    self.mappings.get("non_public_symbol_to_reason", {})
-                ),
+                k: dict(self.mappings[k])
+                for k in _SURFACE_MAPPING_KEYS
+                if k in self.mappings
             },
             "odr_conflicts": list(self.odr_conflicts),
             "identity_collisions": list(self.identity_collisions),
@@ -585,42 +593,20 @@ class SourceAbiSurface:
         def _ents(key: str) -> list[SourceEntity]:
             return [SourceEntity.from_dict(e) for e in surface.get(key, [])]
 
+        # Only the keys the document states: an absent root, mapping or
+        # unmatched bucket stays absent, so a re-encode does not add one the
+        # producer never wrote. Readers use `.get(key, default)`.
         roots_raw = d.get("roots", {})
-        roots = {
-            "exported_symbols": list(roots_raw.get("exported_symbols", [])),
-            "public_header_declarations": list(
-                roots_raw.get("public_header_declarations", [])
-            ),
-            "forced_public": list(roots_raw.get("forced_public", [])),
-        }
+        roots = {k: list(roots_raw[k]) for k in _SURFACE_ROOT_KEYS if k in roots_raw}
         mappings_raw = d.get("mappings", {})
         mappings = {
-            "source_decl_to_binary_symbol": dict(
-                mappings_raw.get("source_decl_to_binary_symbol", {})
-            ),
-            "source_type_to_debug_type": dict(
-                mappings_raw.get("source_type_to_debug_type", {})
-            ),
-            "public_header_to_target": dict(
-                mappings_raw.get("public_header_to_target", {})
-            ),
-            "synthesized_symbol_to_owner": dict(
-                mappings_raw.get("synthesized_symbol_to_owner", {})
-            ),
-            "template_instantiation_symbol_to_decl": dict(
-                mappings_raw.get("template_instantiation_symbol_to_decl", {})
-            ),
-            "allocator_interposer_symbol_to_owner": dict(
-                mappings_raw.get("allocator_interposer_symbol_to_owner", {})
-            ),
-            "non_public_symbol_to_reason": dict(
-                mappings_raw.get("non_public_symbol_to_reason", {})
-            ),
+            k: dict(mappings_raw[k]) for k in _SURFACE_MAPPING_KEYS if k in mappings_raw
         }
         unmatched_raw = d.get("unmatched", {})
         unmatched = {
-            "symbols_without_decl": list(unmatched_raw.get("symbols_without_decl", [])),
-            "decls_without_symbol": list(unmatched_raw.get("decls_without_symbol", [])),
+            k: list(unmatched_raw[k])
+            for k in _SURFACE_UNMATCHED_KEYS
+            if k in unmatched_raw
         }
         return cls(
             schema_version=int(d.get("schema_version", SOURCE_ABI_VERSION)),
