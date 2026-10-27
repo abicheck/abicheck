@@ -91,12 +91,17 @@ SERIALIZATION_BUG_CLASSES: tuple[BugClass, ...] = (
             "ElfSymbol.origin_lib erased every dependency-leak finding on "
             "a cache hit. The test derives the field list from "
             "dataclasses.fields, so a field added later is covered without "
-            "editing the test."
+            "editing the test. The same holds for the stored section-version "
+            "inventory (`section_schema_versions`): a version the writer "
+            "records must be read back against this build's registry, or a "
+            "too-new section (`binary` at 99 on a v1 section) decodes "
+            "silently while the top-level schema_version is refused."
         ),
         fixed_by=(1442,),
         seed_tests=(
             "tests/test_elf_symbol_roundtrip_and_origin.py",
             "tests/test_family_f2_route_parity.py",
+            "tests/unit/storage/test_section_schema_version_gate.py",
         ),
     ),
     BugClass(

@@ -58,8 +58,9 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
+from ..errors import IncompatibleSnapshotSchemaError
 from .canonical import CAPTURE_METADATA_KEY
-from .dto import SECTION_SCHEMA_VERSIONS
+from .dto import SECTION_SCHEMA_VERSIONS, migration_source_versions
 from .import_v1 import export_legacy_sections, legacy_section_dtos
 
 __all__ = [
@@ -165,6 +166,109 @@ def to_sectioned_document(
     }
 
 
+def _check_section_version_readable(section_kind: str, version: int) -> None:
+    """Raise `ValueError` unless this build can decode *version* of
+    *section_kind*: it is the current version, or the registered migration
+    steps reach the current version from it.
+
+    A pure check that decodes nothing. Versions newer than this build are
+    refused here too, but the load paths raise the upgrade-specific
+    `IncompatibleSnapshotSchemaError` (see `check_stated_section_version`)
+    before they reach this function.
+    """
+    current = SECTION_SCHEMA_VERSIONS.get(section_kind)
+    if current is None:
+        raise ValueError(
+            f"no DTO version is registered for section kind {section_kind!r}"
+        )
+    if version > current:
+        raise ValueError(
+            f"section kind {section_kind!r} version {version} is newer than this "
+            f"build's version {current} -- this build cannot read it"
+        )
+    steps = migration_source_versions(section_kind)
+    reached = version
+    while reached < current:
+        if reached not in steps:
+            raise ValueError(
+                f"section kind {section_kind!r} version {version} has no registered "
+                f"migration to {current} — this build cannot read it"
+            )
+        reached += 1
+
+
+def check_stated_section_version(section_kind: str, stated: object) -> None:
+    """Refuse an inventory-stated *stated* version of a registered
+    *section_kind* that this build cannot read.
+
+    A stated version newer than this build raises
+    `IncompatibleSnapshotSchemaError` with the same upgrade wording the
+    top-level `schema_version` check uses. An older one is accepted only if
+    `_check_section_version_readable` reaches the current version from it.
+
+    *section_kind* must be registered in `SECTION_SCHEMA_VERSIONS`. What an
+    unregistered kind means is the caller's decision: a package manifest may
+    legitimately name a variant-level kind this registry does not hold.
+    """
+    current = SECTION_SCHEMA_VERSIONS.get(section_kind)
+    if current is None:
+        raise ValueError(
+            f"no DTO version is registered for section kind {section_kind!r}"
+        )
+    if not isinstance(stated, int) or isinstance(stated, bool):
+        raise ValueError(
+            f"section {section_kind!r} schema version must be an int, got {stated!r}"
+        )
+    if stated > current:
+        raise IncompatibleSnapshotSchemaError(
+            f"Snapshot section {section_kind!r} is written at section schema "
+            f"version {stated}, which requires abicheck supporting at least that "
+            f"version (this reader supports up to section schema version "
+            f"{current}). Upgrade abicheck to read this snapshot."
+        )
+    _check_section_version_readable(section_kind, stated)
+
+
+def _check_section_versions(
+    stated_sections: Mapping[str, Any], sections_raw: Mapping[str, Any]
+) -> None:
+    """Refuse a section version this build cannot read, before any decode.
+
+    The inventory (`SECTION_SCHEMA_VERSIONS_KEY`) is the writer's own claim of
+    which version each section was written under, and each section DTO also
+    carries that version. Neither was checked against this build's registry,
+    so `{"binary": 99}` on a v1 `binary` section was decoded silently (the
+    migration chain only ever sees the DTO's own version, and that one was
+    current). Each stated version goes through
+    `check_stated_section_version`: a newer one is refused with the upgrade error, an older one must
+    be reachable through the registered migration chain. That check runs
+    eagerly for every kind, since `graph` decodes lazily and would otherwise
+    fail on first access. The section's own DTO version must also agree with
+    the inventory: a document that contradicts itself is corrupt.
+    """
+    for section_kind, stated_version in stated_sections.items():
+        if section_kind not in SECTION_SCHEMA_VERSIONS:
+            raise ValueError(
+                f"sectioned document advertises section kind {section_kind!r} "
+                f"in {SECTION_SCHEMA_VERSIONS_KEY!r}, which this build does not "
+                "know"
+            )
+        check_stated_section_version(section_kind, stated_version)
+        section = sections_raw[section_kind]
+        own_version = (
+            section.get("section_schema_version")
+            if isinstance(section, Mapping)
+            else None
+        )
+        if own_version != stated_version:
+            raise ValueError(
+                f"sectioned document section {section_kind!r} carries "
+                f"section_schema_version {own_version!r} but "
+                f"{SECTION_SCHEMA_VERSIONS_KEY!r} states {stated_version!r} -- the "
+                "document is corrupted or was hand-edited"
+            )
+
+
 def from_sectioned_document(
     document: Mapping[str, Any], *, defer_graph: bool = False
 ) -> dict[str, Any]:
@@ -232,6 +336,7 @@ def from_sectioned_document(
             "the document is truncated or was hand-edited; refusing to merge "
             "unaccounted-for section content"
         )
+    _check_section_versions(stated_sections, sections_raw)
     # Straight to the section decoder, not through a content-addressed
     # store: every section is already in hand, so hashing each one only to
     # fetch it back by that digest bought nothing and cost a full
