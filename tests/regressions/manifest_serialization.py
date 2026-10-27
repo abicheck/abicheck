@@ -91,12 +91,52 @@ SERIALIZATION_BUG_CLASSES: tuple[BugClass, ...] = (
             "ElfSymbol.origin_lib erased every dependency-leak finding on "
             "a cache hit. The test derives the field list from "
             "dataclasses.fields, so a field added later is covered without "
-            "editing the test."
+            "editing the test. The same test must also name every member of "
+            "an enum or status field, not sample one, and must not normalize "
+            "a status away: a comparison that maps every "
+            "`AdvancedExtractionStatus` to one value, or excludes a field, "
+            "hides the drop it is meant to catch. Each lossy case is a named "
+            "entry with its reason, and each entry must still be lossy."
         ),
         fixed_by=(1442,),
         seed_tests=(
             "tests/test_elf_symbol_roundtrip_and_origin.py",
             "tests/test_family_f2_route_parity.py",
+            "tests/unit/storage/test_snapshot_field_roundtrip.py",
+            "tests/unit/storage/test_source_abi_surface_roundtrip.py",
+        ),
+        known_gaps=(
+            KnownGap(
+                description=(
+                    "A stored snapshot does not keep the advanced-DWARF "
+                    "extraction status: the encoder drops it, so NOT_RUN, "
+                    "COMPLETED and FAILED all read back as UNRECORDED and a "
+                    "failed parse falls back to the payload inference. "
+                    "Pinned by the KNOWN_LOSSY entries named "
+                    "`AdvancedDwarfMetadata.extraction[...]` and "
+                    "`Declarations.debug_advanced`; persisting it needs "
+                    "ADR-080's decision."
+                ),
+                reference=(
+                    "docs/contribute/known-gaps/"
+                    "advanced-facts-collected-infers-advanced-dwarf-extraction-ran.md"
+                ),
+            ),
+            KnownGap(
+                description=(
+                    "An ownership_fact is persisted only as a PRESENT decision "
+                    "inside an extraction_scope. Every other status reads back "
+                    "as None, and a PRESENT fact set without a scope is dropped. "
+                    "Pinned by the KNOWN_LOSSY entries named "
+                    "`ownership_fact[...]`; ownership_of() treats all of them as "
+                    "unknown, so no verdict changes, but the Fact is not "
+                    "round-tripped. Persisting the status is a schema change."
+                ),
+                reference=(
+                    "docs/contribute/known-gaps/"
+                    "ownership-fact-persists-only-a-present-decision.md"
+                ),
+            ),
         ),
     ),
     BugClass(
