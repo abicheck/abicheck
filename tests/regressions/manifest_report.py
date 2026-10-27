@@ -177,6 +177,15 @@ REPORT_BUG_CLASSES: tuple[BugClass, ...] = (
             # count with the JSON's per-finding field and the ledger.
             "tests/unit/report/test_report_gating_consistency.py",
             "tests/test_report_gating_consistency_examples.py",
+            # Every dispatch format (`_PROJECTIONS` plus `oneline`) rendered
+            # from one finding set over four scenarios (mixed breaking,
+            # compatible, suppressed, scope-excluded and acknowledged names
+            # with Markdown-special characters; a 300-row overflow; a fully
+            # suppressed run; a clean run), checked against the JSON oracle:
+            # stated verdict and counts, itemised gating lists, and the
+            # omission count of every truncated list. Formats come from the
+            # dispatch table, so a new one fails until it has an extractor.
+            "tests/unit/report/test_renderer_parity_matrix.py",
         ),
         axes={
             # Only what a seed test really drives -- and *all* of it. This
@@ -186,8 +195,20 @@ REPORT_BUG_CLASSES: tuple[BugClass, ...] = (
             # `oneline`, which includes it. Understating coverage sends a
             # contributor to write a test that already exists, the mirror of
             # the overstating case the known gap below describes (Codex
-            # review, P2).
-            "renderer": ("json", "markdown", "sarif", "junit", "pr-comment"),
+            # review, P2). The renderer-parity matrix drives every dispatch
+            # format, so `html`, `review`, `terminal` and `oneline` join the
+            # list the other seed tests already cover.
+            "renderer": (
+                "json",
+                "markdown",
+                "sarif",
+                "junit",
+                "pr-comment",
+                "html",
+                "review",
+                "terminal",
+                "oneline",
+            ),
             "record": (
                 "suppression-provenance",
                 "exit-axis",
@@ -197,6 +218,12 @@ REPORT_BUG_CLASSES: tuple[BugClass, ...] = (
                 "finding-value",
                 "entity-operation-rollup",
                 "gating-count",
+                # The renderer-parity matrix: every dispatch format states
+                # each disposition count, itemises gating findings it shows
+                # intact, and states the omission count of a truncated list.
+                "disposition-counts",
+                "gating-symbol",
+                "truncated-list",
             ),
             "gate_scheme": ("legacy", "severity-error", "severity-demoted"),
             "contract": ("none", "in", "out", "mixed"),
@@ -253,6 +280,27 @@ REPORT_BUG_CLASSES: tuple[BugClass, ...] = (
                     "as the audit now does."
                 ),
                 reference="docs/contribute/known-gaps.md",
+            ),
+            KnownGap(
+                description=(
+                    "The renderer-parity matrix found three residual "
+                    "between-formats defects, each a strict xfail cell there. "
+                    "(1) Markdown and the review digest show a gating symbol "
+                    "containing '<name>' and a backtick as 'weird&\"*_x': the "
+                    "raw '<name>' in prose is inline HTML a CommonMark reader "
+                    "drops, and the backtick closes the code span around it "
+                    "(the Breaking Changes list, the review Examples line, and "
+                    "the bold review heading). Only table cells are escaped; "
+                    "fixing prose and span escaping changes rendered bytes for "
+                    "every template-named symbol and needs its own golden "
+                    "update. (2) JUnit, the terminal Audit line and the HTML "
+                    "disposition line omit the acknowledged count that Markdown, "
+                    "the review digest and the one-line summary state, so a "
+                    "reader of those formats cannot see that some gating breaks "
+                    "were acknowledged (ADR-067 D5)."
+                ),
+                reference="docs/contribute/known-gaps.md",
+                canary_test="tests/unit/report/test_renderer_parity_matrix.py",
             ),
         ),
     ),
