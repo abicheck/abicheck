@@ -17,6 +17,7 @@ from __future__ import annotations
 import io
 import json
 import tarfile
+import zipfile
 from pathlib import Path
 from unittest.mock import patch
 
@@ -819,3 +820,37 @@ class TestCompareReleaseErrorPaths:
             )
         assert result.exit_code != 0
         assert "Unrecognized package format" in result.output
+
+    @pytest.mark.parametrize("suffix", [".whl", ".zip"])
+    def test_release_operand_corrupt_archive_is_named_corrupt(
+        self, tmp_path: Path, suffix: str
+    ) -> None:
+        """A truncated archive reaches the release workflow entry point with
+        its real `is_package`/`detect_extractor`, and is reported as corrupt,
+        never as an unrecognized format. No patches: the real detection runs."""
+        from abicheck.extract.packages import detect_extractor, is_package
+        from abicheck.workflows.release_inputs import extract_if_package
+
+        good = tmp_path / "good.zip"
+        with zipfile.ZipFile(good, "w") as zf:
+            zf.writestr("pkg/__init__.py", "")
+            zf.writestr("pkg-1.0.dist-info/METADATA", "Name: pkg\n")
+        broken = tmp_path / f"broken{suffix}"
+        broken.write_bytes(good.read_bytes()[:-40])  # cut the central directory
+
+        target_root = tmp_path / "targets"
+        target_root.mkdir()
+
+        def make_temp_dir(prefix: str) -> Path:
+            d = target_root / prefix
+            d.mkdir()
+            return d
+
+        with pytest.raises(ReleaseOperandContentError) as excinfo:
+            extract_if_package(
+                broken, None, None, make_temp_dir, is_package, detect_extractor
+            )
+        message = str(excinfo.value)
+        assert "corrupt or truncated archive" in message
+        assert str(broken) in message
+        assert "Unrecognized package format" not in message

@@ -55,9 +55,13 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, NoReturn, cast
 
 from ..errors import ReleaseOperandContentError, ReleaseOperandUsageError
+from ..extract.archive_integrity import (
+    CorruptPackageArchiveError,
+    require_readable_archive,
+)
 from ..model.sided_inputs import compose_sided_paths
 
 if TYPE_CHECKING:
@@ -202,9 +206,7 @@ def extract_if_package(
     if is_package(input_path):
         extractor = detect_extractor(input_path)
         if extractor is None:
-            raise ReleaseOperandContentError(
-                f"Unrecognized package format: {input_path}"
-            )
+            _raise_declined(input_path, "package")
         target = make_temp_dir("abicheck_pkg_")
         result = extractor.extract(input_path, target)
         lib_dir = result.lib_dir
@@ -212,13 +214,15 @@ def extract_if_package(
         header_dir = result.header_dir
         symbols_file = result.symbols_file
         container_complete = result.container_complete
+    else:
+        # Content detection declined it; a zip/tar-shaped file here is corrupt,
+        # not a plain directory operand. A readable archive never reaches this.
+        _raise_if_corrupt(input_path)
 
     if debug_pkg is not None:
         dbg_ext = detect_extractor(debug_pkg)
         if dbg_ext is None:
-            raise ReleaseOperandContentError(
-                f"Unrecognized debug package format: {debug_pkg}"
-            )
+            _raise_declined(debug_pkg, "debug package")
         dbg_target = make_temp_dir("abicheck_dbg_")
         dbg_result = dbg_ext.extract(debug_pkg, dbg_target)
         debug_dir = dbg_result.debug_dir or dbg_result.lib_dir
@@ -226,14 +230,30 @@ def extract_if_package(
     if devel_pkg is not None:
         dev_ext = detect_extractor(devel_pkg)
         if dev_ext is None:
-            raise ReleaseOperandContentError(
-                f"Unrecognized devel package format: {devel_pkg}"
-            )
+            _raise_declined(devel_pkg, "devel package")
         dev_target = make_temp_dir("abicheck_dev_")
         dev_result = dev_ext.extract(devel_pkg, dev_target)
         header_dir = dev_result.header_dir or dev_result.lib_dir
 
     return lib_dir, debug_dir, header_dir, symbols_file, container_complete
+
+
+def _raise_if_corrupt(path: Path) -> None:
+    """Raise ``ReleaseOperandContentError`` naming *path* as corrupt when it
+    is zip/tar-shaped but unreadable. Called only after every extractor
+    declined the content, so a readable archive under any name is never
+    reported corrupt."""
+    try:
+        require_readable_archive(path)
+    except CorruptPackageArchiveError as exc:
+        raise ReleaseOperandContentError(str(exc)) from exc
+
+
+def _raise_declined(path: Path, what: str) -> NoReturn:
+    """No extractor accepted *path*: corrupt if it is an unreadable archive,
+    otherwise an unrecognized *what* format."""
+    _raise_if_corrupt(path)
+    raise ReleaseOperandContentError(f"Unrecognized {what} format: {path}")
 
 
 def debian_symbols_warning(

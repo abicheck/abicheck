@@ -714,6 +714,16 @@ def _resolve_input_impl(
             "object files or the shared library built from them instead."
         )
 
+    # A zip/tar-shaped operand no format accepted is corrupt, not unknown.
+    from ..extract.archive_integrity import (
+        CorruptPackageArchiveError,
+        require_readable_archive,
+    )
+
+    try:
+        require_readable_archive(path)
+    except CorruptPackageArchiveError as exc:
+        raise ValidationError(str(exc)) from exc
     raise ValidationError(
         f"Cannot detect format of '{path}'. "
         "Expected: ELF (.so), PE (.dll), Mach-O (.dylib), or JSON snapshot."

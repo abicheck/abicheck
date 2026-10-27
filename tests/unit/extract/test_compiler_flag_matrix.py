@@ -28,11 +28,6 @@ GCC = ("g++", "gnu")
 CLANG = ("clang++", "gnu")
 MSVC = ("cl", "msvc")
 
-_TARGET_SEPARATE_GAP = pytest.mark.xfail(
-    strict=True,
-    reason="known gap: separate --target is not a separate-value flag in emulation",
-)
-
 # (label, cc family, tokens, abi, emu, scan)
 ROWS = [
     ("std joined", GCC, ["-std=c++17"], True, True, False),
@@ -44,16 +39,26 @@ ROWS = [
     ("m32", GCC, ["-m32"], True, True, False),
     ("target joined clang", CLANG, ["--target=x86_64-linux-gnu"], True, True, False),
     ("target joined gcc", GCC, ["--target=x86_64-linux-gnu"], True, False, False),
-    pytest.param(
+    (
         "target separate clang",
         CLANG,
         ["--target", "x86_64-linux-gnu"],
         None,
         True,
         None,
-        marks=_TARGET_SEPARATE_GAP,
-        id="target separate clang",
     ),
+    ("target separate gcc", GCC, ["--target", "x86_64-linux-gnu"], None, False, None),
+    ("target separate missing operand", CLANG, ["--target"], None, False, None),
+    (
+        "-target separate clang",
+        CLANG,
+        ["-target", "x86_64-linux-gnu"],
+        None,
+        True,
+        None,
+    ),
+    ("-target separate gcc", GCC, ["-target", "x86_64-linux-gnu"], None, False, None),
+    ("-target separate missing operand", CLANG, ["-target"], None, False, None),
     ("fno-exceptions", GCC, ["-fno-exceptions"], True, True, False),
     ("fexceptions under cl", MSVC, ["-fexceptions"], True, False, False),
     ("x joined c", GCC, ["-xc"], False, True, False),
@@ -70,8 +75,8 @@ ROWS = [
     ("gnu -I is structured", GCC, ["-I", "inc"], False, False, False),
     ("msvc /I separate", MSVC, ["/I", "inc"], False, False, True),
     ("msvc /I under gcc", GCC, ["/I", "inc"], False, False, False),
-    ("msvc /external:I separate", MSVC, ["/external:I", "inc"], False, False, False),
-    ("msvc /external:I joined", MSVC, ["/external:Iinc"], False, False, False),
+    ("msvc /external:I separate", MSVC, ["/external:I", "inc"], False, False, True),
+    ("msvc /external:I joined", MSVC, ["/external:Iinc"], False, False, True),
     ("msvc /external:I under gcc", GCC, ["/external:I", "inc"], False, False, False),
     ("gnu -include forced", GCC, ["-include", "cfg.h"], False, False, True),
     ("msvc /FI forced", MSVC, ["/FI", "cfg.h"], False, False, True),
@@ -108,13 +113,39 @@ def test_joined_x_keeps_the_exact_token() -> None:
     assert emulation_arguments(["-xc++"], cc_bin="g++", cc_id="gnu") == ["-xc++"]
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="known gap: /external:I is not carried into the replayed argv "
-    "(test_external_include_does_not_change_the_rendered_replay pins it out)",
+@pytest.mark.parametrize(
+    ("argv", "expected"),
+    [
+        pytest.param(
+            ["/external:I", "inc"], ["/external:I", "inc"], id="slash-separate"
+        ),
+        pytest.param(["/external:Iinc"], ["/external:Iinc"], id="slash-joined"),
+        pytest.param(
+            ["-external:I", "inc"], ["-external:I", "inc"], id="dash-separate"
+        ),
+        pytest.param(["-external:Iinc"], ["-external:Iinc"], id="dash-joined"),
+        pytest.param(
+            ["/EXTERNAL:i", "inc"], ["/EXTERNAL:i", "inc"], id="case-separate"
+        ),
+        pytest.param(["/External:Iinc"], ["/External:Iinc"], id="case-joined"),
+        # Other /external: options keep their existing (not carried) handling.
+        pytest.param(["/external:W3"], [], id="external-W-not-carried"),
+        pytest.param(["/external:anglebrackets"], [], id="anglebrackets-not-carried"),
+        pytest.param(["/external:env:INCLUDE"], [], id="env-not-carried"),
+    ],
 )
-def test_msvc_external_include_operand_is_carried_with_its_directory() -> None:
-    assert _scan_argv_for_extra_flags(["/external:I", "inc"], "msvc") == [
-        "/external:I",
-        "inc",
-    ]
+def test_external_include_spellings_are_carried_with_their_directory(
+    argv: list[str], expected: list[str]
+) -> None:
+    assert _scan_argv_for_extra_flags(argv, "msvc") == expected
+
+
+@pytest.mark.parametrize("family", [GCC, CLANG], ids=["gcc", "clang"])
+@pytest.mark.parametrize("target", ["--target", "-target"])
+def test_target_never_swallows_a_following_flag(
+    family: tuple[str, str], target: str
+) -> None:
+    """``--target -m32``: the next token is a flag, not a triple, so only the
+    bare target option is dropped and ``-m32`` is read on its own."""
+    kept = emulation_arguments([target, "-m32"], cc_bin=family[0], cc_id=family[1])
+    assert kept == ["-m32"]

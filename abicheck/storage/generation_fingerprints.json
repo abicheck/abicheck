@@ -15,12 +15,13 @@
       "abicheck/extract/__init__.py": "011ec37fad96ea2035983eaaedeba0976940a570900f85db8c03bb7369af742a",
       "abicheck/extract/ar_archive.py": "6fdab7ed7390a20f087f9407eaa3988c0f8c658400bc0ea8c7e193271923956d",
       "abicheck/extract/ar_archive_format.py": "38a51cae7762eb269af3788d5dca9cfe50de38d9b315f34fa31427f791cb7e62",
+      "abicheck/extract/archive_integrity.py": "8d2b9fb73980bf646972da75431adf6437335bd83aa7b14678d531b1084995cb",
       "abicheck/extract/binary_dialect.py": "5c0d98fe9e4b05b031450f4ce37bae6b7f922e801936129ba19b887f6738dad7",
       "abicheck/extract/binary_format.py": "4b9f591077fa5c90d2e3a767343d92b098061870403d431694470bc05e5468b3",
       "abicheck/extract/binary_identity.py": "4645eaf3dddd0a2230a5c694882548476406c57514275fa4c8c1bc152607ca88",
       "abicheck/extract/build_mode_capture.py": "7a46c5babcc5bf770a1a38d5a5d3abb49a2b7d9575bda2b210d2e2861ebfb51f",
       "abicheck/extract/cache_header_scan.py": "4a944a4e6eff6b10de32c6aec2ad939b78e9ffc96e725791247431a0cc870684",
-      "abicheck/extract/castxml_compiler_emulation.py": "3bfd81f905f074af995d48dddb98e279315820fc1fdda81189948edb323dc26c",
+      "abicheck/extract/castxml_compiler_emulation.py": "da713be283b31c31ab8c4c5486f0c70d4adf403365f630f88b718589ed03f763",
       "abicheck/extract/castxml_header_compat.py": "d0e78b90ad113be1cb89f05465f77fa9d9fc9546608275707cd7d15f18e2f518",
       "abicheck/extract/compile_header_inputs.py": "38655d35c5309694ebf12be60e5e4fcd3fa5c8ea7eb8a73a9b4ab2fcf46338b9",
       "abicheck/extract/compiler_driver.py": "0e41639ac1aa87e1bc625b756703e88bb053d92c1d2a2bed5f15ebeccbb4a4e1",
@@ -136,7 +137,7 @@
       "abicheck/extract/occurrence_dependency_scope.py": "d28ca573fecaecec3c67b784c9d44d516d039824e744179f852f5a89dc135d8e",
       "abicheck/extract/ownership.py": "9285bfc00b5dc3948749004cbe9881b5eb034696b59d405bd0e579f9664fb036",
       "abicheck/extract/ownership_stamp.py": "07e5714eac1e1770aa53f09479b7ae240f2f123ee2b7bf223241f6880233d8d7",
-      "abicheck/extract/packages.py": "def26e37a91e8ab50f55c713869cee57be87030e088b57cf85a7ff6ba98e190a",
+      "abicheck/extract/packages.py": "0cc9caa6a067114f3dfb426b8ac3b8fb712bc82737ca1fadf357273ab1955d90",
       "abicheck/extract/parse_failures.py": "bda173aab4aca1e83b716569a8cf863e7214215108bae1bffd65406a93fb371b",
       "abicheck/extract/path_aliases.py": "e4df448bdadc691475adfca99c567df6aa76e5cb421d6faf5de1307d368d1560",
       "abicheck/extract/path_segments.py": "c96f59df6fc126e26c6ca2052c6040d3180aa49f6c1265029eeb7206f0466b22",
@@ -168,9 +169,9 @@
       "abicheck/symvers_metadata.py": "372737765cd132e6e87ed891dd465d2958e04debbef774e45212ceb3036871cb",
       "abicheck/type_metadata.py": "9997189de8dac522fd1db8be5ae491d811139503f83abaaded89038eb4aa9cdf"
     },
-    "fingerprint": "bc0e8e83e28608bc8823a0cd47048c9312064fa79adb31ba392d5eb9ebe9350e",
-    "generation": 26,
-    "reason": "comment-only/refactor: helper renames, no behaviour change"
+    "fingerprint": "5661e5eadcd4c4eb6b34cee7e12b2ccda9e831fcffa8848cff5be800fd6f1c02",
+    "generation": 27,
+    "reason": "merge main: comment-only/refactor changes from main, no behaviour change"
   },
   "resolver": {
     "files": {
@@ -190,7 +191,7 @@
     },
     "fingerprint": "b962521c095f9678b21de0b2f2f0027f8043b1a1c57b509656df6d232b3b71e5",
     "generation": 2,
-    "reason": "comment-only/refactor: helper renames, no behaviour change"
+    "reason": "merge main: comment-only/refactor changes from main, no behaviour change"
   },
   "source": {
     "files": {
@@ -222,7 +223,7 @@
       "abicheck/buildsource/source_extractors/clang_public_roots.py": "c1752f2798886c97716c2361c2fe772defa2b6170104b8486871ecbc7beb3ba3",
       "abicheck/buildsource/source_extractors/clang_source_edges.py": "c9b8c3daacd02c4913b486a6ac658b435744243ed4433f14792588f67ef800e9",
       "abicheck/buildsource/source_extractors/compile_action.py": "2712bfa332f110f9fbd623531d4ccab7bfec7749c3fc70ae91887b5988205c40",
-      "abicheck/buildsource/source_extractors/compile_invocation.py": "0cdd61a5f994beb08a250d8a59c05141f910088c3d1a12aa9171ef136e0bc0ce",
+      "abicheck/buildsource/source_extractors/compile_invocation.py": "5e83959c3a8a156837d4766fe41406bb09933779d430ca8b188ee4b0881acf0a",
       "abicheck/buildsource/source_extractors/launcher_env.py": "a84547b10b80a8d02c07c5f2a1949fdf661afc0abeaf7dae486e3a1d7762b470",
       "abicheck/buildsource/source_extractors/launcher_env_path.py": "9f746dd8170e1c6d2ff7289998e0e8738fe0bdc4c35edb06c39db2a5ebd5c16d",
       "abicheck/buildsource/source_graph.py": "28cb2b485ffcf276e9c751b99261cc2d3f4ab2ad440612ddb3111bc307372652",
@@ -238,8 +239,8 @@
       "abicheck/buildsource/type_graph.py": "a028a875057cd0cbf2930a431bfa1e579f7b770e0d124cbcfe715724e89d12e5",
       "abicheck/buildsource/type_graph_index.py": "7375f7baec7ceb3dd4a52a489b89e5a3571750dffca7490d1c5870301d55202d"
     },
-    "fingerprint": "be14c2e0edc25f585da25f2ebb7cedb8ec6646298674f6b8e84822a90938520f",
-    "generation": 10,
-    "reason": "merge of the gen-24 call-graph fix and the gen-25 EntityId fix; this axis's own code is unchanged by the EntityId fix"
+    "fingerprint": "f931b9c3e0a46c5bc6858c5febf560857bf8570acf2dc76c97a683e6b70b777f",
+    "generation": 11,
+    "reason": "generation 11 (this unreleased bump): a separate /I or /external:I never swallows a following option as its operand"
   }
 }

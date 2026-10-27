@@ -102,6 +102,12 @@
       "compiler": "g++ (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0",
       "snapshot": "gen25/corpus.json.gz"
     },
+    "26": {
+      "castxml": "castxml version 0.7.0",
+      "commit": "28ade9b26f55",
+      "compiler": "g++ (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0",
+      "snapshot": "gen26/corpus.json.gz"
+    },
     "3": {
       "castxml": "castxml version 0.7.0",
       "commit": "2019836cc92a",
