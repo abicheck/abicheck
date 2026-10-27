@@ -15,18 +15,34 @@ non-default value would pass it. This module instead enumerates every
    required fields, every other field at its dataclass default),
 3. asserts ``dump -> load -> dump`` is byte-identical and the value survives.
 
+Enum-valued status fields are not sampled by one synthesized value: each
+member gets its own case (:data:`_STATUS_CASES`), so a member that the codec
+drops is named, not hidden behind the first member that happened to be
+picked. ``ownership_fact`` is enumerated like any other field, inside an
+``extraction_scope`` (the only place ADR-075 persists it), and every
+non-``PRESENT`` status is its own case as well.
+
 Fields the encoder does not persist by design (the ``_``-prefixed lookup
 caches and the ``snapshot_encode._SNAPSHOT_SKIP_FIELDS`` owners) are imported
 from the encoder rather than hard-coded, and are not enumerated.
 
-Known lossy fields live in :data:`KNOWN_LOSSY` and are ``xfail(strict=True)``:
-fixing one makes its test XPASS, which fails the suite until the entry is
-removed. :data:`_KNOWN_LOSSY_CEILING` ratchets the table so it may only shrink.
+Known lossy cases live in :data:`KNOWN_LOSSY`, keyed by field id
+(``Class.field``) or by status case (``Class.field[member]``, or
+``ownership_fact[...]``). Each is ``xfail(strict=True)``: fixing one makes its
+test XPASS, which fails the suite until the entry is removed. Two further
+tests keep the table honest: :func:`test_every_known_lossy_entry_is_lossy`
+re-runs each entry's own case and requires it to still be lossy (so an entry
+whose defect was fixed by a path that the strict xfail does not reach still
+fails), and :data:`_KNOWN_LOSSY_CEILING` ratchets the table so it may only
+shrink.
 
-Normalization allowlist (applied to both sides before comparison, and only
-for things JSON cannot distinguish): ``tuple``/``list`` are the same sequence,
+Normalization (applied to both sides before comparison, and only for things
+JSON cannot distinguish): ``tuple``/``list`` are the same sequence,
 ``set``/``frozenset`` compare as multisets, dict order is ignored, enums
 compare by member name, ``Fact`` compares status, value and diagnostics.
+One further equivalence is documented in :func:`_norm_slot`: an absent
+``Fact`` slot reads back as ``NOT_COLLECTED``. It does not apply to
+``ownership_fact``, whose decoder reads an absent entry as ``None``.
 """
 
 from __future__ import annotations
@@ -49,18 +65,47 @@ import pytest
 import abicheck.buildsource as _buildsource
 import abicheck.model as _model_pkg
 from abicheck.checker import compare
-from abicheck.model import AbiSnapshot, Function, Param
+from abicheck.model import (
+    AbiSnapshot,
+    EnumType,
+    Function,
+    Param,
+    RecordType,
+    Variable,
+)
 from abicheck.model.availability import FactStatus
 from abicheck.model.declaration_store import Declarations
-from abicheck.model.dwarf_facts import AdvancedExtractionStatus
+from abicheck.model.dwarf_facts import AdvancedDwarfMetadata, AdvancedExtractionStatus
+from abicheck.model.extraction_scope import EntityOwnership, ExtractionScope
 from abicheck.model.fact import Fact
 from abicheck.model.header_exclusion_record import KNOWN_MATCHING_RULES
 from abicheck.model.snapshot_reliability import FACT_FAMILIES
 from abicheck.serialization import snapshot_from_dict, snapshot_to_json
 from abicheck.storage.snapshot_encode import _SNAPSHOT_SKIP_FIELDS
 
-#: Field id -> reason it does not round-trip today. Each entry is an
-#: ``xfail(strict=True)`` real bug; remove it when the codec is fixed.
+_ADVANCED_STATUS_REASON = (
+    "dwarf_advanced.extraction is dropped by the encoder "
+    "(snapshot_encode._drop_advanced_extraction_status) because persisting it "
+    "adds a snapshot key, a schema change that ADR-080 (Proposed) has not "
+    "decided. Every status reads back as UNRECORDED, so a stored snapshot falls "
+    "back to the payload inference; see known-gaps/"
+    "advanced-facts-collected-infers-advanced-dwarf-extraction-ran.md"
+)
+_OWNERSHIP_STATUS_REASON = (
+    "ownership_fact is persisted only as a PRESENT decision inside the "
+    "extraction_scope block (ADR-075): the decision table holds classified "
+    "(owner, contract, rule) triples and nothing else, so any other status is "
+    "written as unclassified and reads back as None. ownership_of() folds both "
+    "to 'unknown', so no verdict changes, but the Fact itself is not "
+    "round-tripped; closing it needs a per-entry status encoding (a schema "
+    "change). See known-gaps/ownership-fact-persists-only-a-present-decision.md"
+)
+
+#: Case id -> reason it does not round-trip today. An id is either a field
+#: (``Class.field``, the enumerated value is lossy) or one member of an enum
+#: or status field (``Class.field[member]`` / ``ownership_fact[member]``).
+#: Each is an ``xfail(strict=True)`` real defect, or a deliberate limitation
+#: named here with its reason; remove the entry when the codec is fixed.
 KNOWN_LOSSY: dict[str, str] = {
     "AbiSnapshot.from_headers_inferred": "dump is not byte-stable: the loaded snapshot re-emits from_headers=false, which the first dump omitted",
     "AbiSnapshot.fact_generations": "dump is not byte-stable: the second dump adds a key (source) absent from the first",
@@ -69,10 +114,29 @@ KNOWN_LOSSY: dict[str, str] = {
     "EnumInfo.decl_file": "decl_file reads back as null",
     "StructLayout.decl_file": "decl_file reads back as null",
     "MachoExport.is_data": "a True is_data reads back as False",
+    "Declarations.debug_advanced": (
+        "the synthesized AdvancedDwarfMetadata carries extraction=NOT_RUN, which "
+        "the encoder drops; the per-status cases below name each status"
+    ),
+    "AdvancedDwarfMetadata.extraction[not_run]": _ADVANCED_STATUS_REASON,
+    "AdvancedDwarfMetadata.extraction[completed]": _ADVANCED_STATUS_REASON,
+    "AdvancedDwarfMetadata.extraction[failed]": _ADVANCED_STATUS_REASON,
+    "ownership_fact[partial]": _OWNERSHIP_STATUS_REASON,
+    "ownership_fact[not_collected]": _OWNERSHIP_STATUS_REASON,
+    "ownership_fact[unsupported]": _OWNERSHIP_STATUS_REASON,
+    "ownership_fact[failed]": _OWNERSHIP_STATUS_REASON,
+    "ownership_fact[not_applicable]": _OWNERSHIP_STATUS_REASON,
+    "ownership_fact[no_extraction_scope]": (
+        "encode_extraction_scope writes decisions only inside an extraction_scope "
+        "block; a snapshot without one loads extraction_scope=None and no decisions "
+        "(ADR-075: an unrecorded scope is never read as recorded), so a PRESENT "
+        "ownership fact set without a scope is dropped. stamp_ownership always "
+        "records the scope with its decisions, so no producer reaches this state"
+    ),
 }
 
 #: Ratchet: ``KNOWN_LOSSY`` may only shrink. Lower this when entries are removed.
-_KNOWN_LOSSY_CEILING = 7
+_KNOWN_LOSSY_CEILING = 17
 
 #: Fields the encoder deliberately never persists (documented in the model as
 #: "Runtime-only ... never serialized"). Not enumerated.
@@ -89,16 +153,16 @@ _RUNTIME_ONLY: frozenset[str] = frozenset(
 #: value is intentionally not written, so the field is not enumerated.
 _BY_DESIGN: dict[str, str] = {
     "AbiSnapshot.spellings_generation": "written only when it exceeds the extractor generation (generation_migrations.encode_fact_generations)",
-    "Function.ownership_fact": "ownership is persisted by position through the extraction-scope codec (ADR-075), not per entity",
-    "RecordType.ownership_fact": "ownership is persisted by position through the extraction-scope codec (ADR-075), not per entity",
-    "EnumType.ownership_fact": "ownership is persisted by position through the extraction-scope codec (ADR-075), not per entity",
-    "Variable.ownership_fact": "ownership is persisted by position through the extraction-scope codec (ADR-075), not per entity",
-    "EntityOwnership.owner": "reachable only through an ownership_fact that is persisted by position",
-    "EntityOwnership.contract": "reachable only through an ownership_fact that is persisted by position",
-    "EntityOwnership.rule_id": "reachable only through an ownership_fact that is persisted by position",
     "ExtractionScope.ownership_rules": "ownership rules are persisted by the extraction-scope codec (ADR-075)",
     "OwnershipRules.dependency_evidence": "persisted by the extraction-scope codec (ADR-075)",
 }
+
+#: Fields replaced by per-member status cases (:data:`_STATUS_CASES`) instead of
+#: one synthesized value, so every member is named rather than one sampled.
+_EXPANDED_FIELDS: frozenset[str] = frozenset({"AdvancedDwarfMetadata.extraction"})
+
+#: Field whose value is persisted only inside an ``extraction_scope`` block.
+_OWNERSHIP_FIELD = "ownership_fact"
 
 _MAX_DEPTH = 6
 
@@ -384,6 +448,8 @@ def _enumerated_fields() -> list[tuple[type, str]]:
                 continue
             if _field_id(cls, f.name) in _BY_DESIGN:
                 continue
+            if _field_id(cls, f.name) in _EXPANDED_FIELDS:
+                continue
             out.append((cls, f.name))
     return sorted(out, key=lambda cf: (cf[0].__qualname__, cf[1]))
 
@@ -392,19 +458,47 @@ def _field_id(cls: type, fname: str) -> str:
     return f"{cls.__qualname__}.{fname}"
 
 
-def _build_case(cls: type, fname: str) -> tuple[AbiSnapshot, list[_Edge], Any]:
-    """Place a leaf ``cls`` with ``fname`` non-default inside an AbiSnapshot."""
+def _needs_scope(cls: type, fname: str, path: list[_Edge]) -> bool:
+    """Whether the case can only be persisted inside an ``extraction_scope``.
+
+    ADR-075 writes ``ownership_fact`` only inside the scope block, so a case
+    that places one (the field itself, or anything reached through it) must
+    record a scope, or it tests the documented drop rather than the codec.
+    """
+    return (
+        fname == _OWNERSHIP_FIELD
+        or cls is EntityOwnership
+        or any(edge[1] == _OWNERSHIP_FIELD for edge in path)
+    )
+
+
+def _build_case(
+    cls: type, fname: str, value: Any = _NO_AVOID
+) -> tuple[AbiSnapshot, list[_Edge], Any]:
+    """Place a leaf ``cls`` with ``fname`` set inside an AbiSnapshot.
+
+    ``value`` defaults to a synthesized non-default value; a status case passes
+    the member it is testing.
+    """
     path = _PATHS[cls]
-    leaf = _construct(cls, {fname: _nondefault_value(cls, fname)})
-    value: Any = leaf
+    if value is _NO_AVOID:
+        value = _nondefault_value(cls, fname)
+    leaf = _construct(cls, {fname: value})
+    result: Any = leaf
+    snap: AbiSnapshot | None = None
     for parent, fld, chain, _child in reversed(path):
         if parent is AbiSnapshot and fld == _DECLARATIONS:
             snap = _construct(AbiSnapshot, {})
             for df in dataclasses.fields(Declarations):
-                setattr(snap.declarations, df.name, getattr(value, df.name))
-            return snap, path, leaf
-        value = _construct(parent, {fld: _wrap(chain, value)})
-    return value, path, leaf
+                setattr(snap.declarations, df.name, getattr(result, df.name))
+            break
+        result = _construct(parent, {fld: _wrap(chain, result)})
+    if snap is None:
+        assert isinstance(result, AbiSnapshot)
+        snap = result
+    if _needs_scope(cls, fname, path):
+        snap.extraction_scope = ExtractionScope()
+    return snap, path, leaf
 
 
 def _navigate(root: AbiSnapshot, path: list[_Edge]) -> Any:
@@ -426,13 +520,18 @@ def _is_fact_slot(hint: Any) -> bool:
     return bool(chain) and chain[0][0] == "fact"
 
 
-def _norm_slot(hint: Any, value: Any) -> Any:
-    """Allowlisted: a ``Fact``-typed slot holding ``None`` is ``NOT_COLLECTED``.
+def _norm_slot(hint: Any, value: Any, name: str) -> Any:
+    """Documented absence equivalence: a ``Fact`` slot holding ``None`` is
+    ``NOT_COLLECTED``.
 
-    The encoder writes an absent fact as the not-collected value, so the
-    loaded side reads back ``Fact(NOT_COLLECTED)`` where the leaf held ``None``.
+    The decoder reads an absent ``Fact`` key back as ``NOT_COLLECTED``
+    (``fact_codec``), so a leaf's ``None`` in such a slot and a loaded
+    ``Fact(NOT_COLLECTED)`` are the same absence. This is the one status-level
+    equivalence the comparison makes, and it is not applied to
+    ``ownership_fact``: that decoder reads an absent entry as ``None``, so a
+    leaf ``NOT_COLLECTED`` there must not compare equal to what loads.
     """
-    if value is None and _is_fact_slot(hint):
+    if value is None and _is_fact_slot(hint) and name != _OWNERSHIP_FIELD:
         return ("Fact", FactStatus.NOT_COLLECTED.name, None, ())
     return _norm(value)
 
@@ -445,15 +544,10 @@ def _norm(value: Any) -> Any:
         return (
             type(value).__qualname__,
             tuple(
-                (f.name, _norm_slot(hints[f.name], getattr(value, f.name)))
+                (f.name, _norm_slot(hints[f.name], getattr(value, f.name), f.name))
                 for f in dataclasses.fields(value)
             ),
         )
-    if isinstance(value, AdvancedExtractionStatus):
-        # Allowlisted: the encoder drops the advanced-extraction status
-        # (encoder _drop_advanced_extraction_status), so NOT_RUN reads back as
-        # UNRECORDED (ADR-080). Both sides compare as UNRECORDED.
-        return (type(value).__qualname__, AdvancedExtractionStatus.UNRECORDED.name)
     if isinstance(value, enum.Enum):
         return (type(value).__qualname__, value.name)
     if isinstance(value, (list, tuple)):
@@ -468,42 +562,150 @@ def _norm(value: Any) -> Any:
     return value
 
 
-# --------------------------------------------------------------------------
-# Parametrization.
-# --------------------------------------------------------------------------
+def _norm_attr(owner: Any, fname: str) -> Any:
+    hints = _hints(type(owner))
+    return _norm_slot(hints[fname], getattr(owner, fname), fname)
 
 
-def _collect() -> tuple[list[Any], list[str]]:
-    params: list[Any] = []
+# --------------------------------------------------------------------------
+# Cases: one id per field, per enum member, and per ownership status.
+# --------------------------------------------------------------------------
+
+#: One check: ``(locate, expected_owner, attribute)``. ``locate`` finds the
+#: object on the *loaded* snapshot; ``expected_owner`` is the leaf it was
+#: built from; the attribute is compared under :func:`_norm_attr`.
+_Check = tuple[Callable[[AbiSnapshot], Any], Any, str]
+_CaseBuilder = Callable[[], tuple[AbiSnapshot, list[_Check]]]
+
+
+def _field_case(cls: type, fname: str) -> tuple[AbiSnapshot, list[_Check]]:
+    snap, path, leaf = _build_case(cls, fname)
+    return snap, [(lambda s, p=path: _navigate(s, p), leaf, fname)]
+
+
+def _enum_member_case(
+    cls: type, fname: str, member: enum.Enum
+) -> tuple[AbiSnapshot, list[_Check]]:
+    snap, path, leaf = _build_case(cls, fname, member)
+    return snap, [(lambda s, p=path: _navigate(s, p), leaf, fname)]
+
+
+#: Sample owner for a ``PRESENT`` ownership decision.
+_OWNERSHIP_SAMPLE = EntityOwnership("synth-owner", "synth-contract", "synth-rule")
+
+
+def _ownership_case(
+    status: FactStatus, *, scoped: bool
+) -> tuple[AbiSnapshot, list[_Check]]:
+    """One declaration of each ownership-bearing kind, all carrying *status*.
+
+    The four lists share one codec, so one snapshot checks all four kinds. The
+    ``scoped`` flag decides whether the snapshot records an ``extraction_scope``.
+    """
+    fact = (
+        Fact.present(_OWNERSHIP_SAMPLE)
+        if status is FactStatus.PRESENT
+        else Fact(status=status)
+    )
+    snap = _construct(AbiSnapshot, {})
+    checks: list[_Check] = []
+    for list_name, cls in (
+        ("functions", Function),
+        ("variables", Variable),
+        ("types", RecordType),
+        ("enums", EnumType),
+    ):
+        decl = _construct(cls, {_OWNERSHIP_FIELD: fact})
+        setattr(snap.declarations, list_name, [decl])
+        checks.append(
+            (
+                lambda s, n=list_name: getattr(s.declarations, n)[0],
+                decl,
+                _OWNERSHIP_FIELD,
+            )
+        )
+    if scoped:
+        snap.extraction_scope = ExtractionScope()
+    return snap, checks
+
+
+def _collect() -> tuple[dict[str, _CaseBuilder], list[str]]:
+    builders: dict[str, _CaseBuilder] = {}
     unsynth: list[str] = []
     for cls, fname in _enumerated_fields():
-        fid = _field_id(cls, fname)
         try:
             _build_case(cls, fname)
         except _Unsynthesizable as exc:
-            unsynth.append(f"{fid}: {exc}")
+            unsynth.append(f"{_field_id(cls, fname)}: {exc}")
             continue
-        marks = ()
-        if fid in KNOWN_LOSSY:
-            marks = (pytest.mark.xfail(strict=True, reason=KNOWN_LOSSY[fid]),)
-        params.append(pytest.param(cls, fname, id=fid, marks=marks))
-    return params, unsynth
+        builders[_field_id(cls, fname)] = functools.partial(_field_case, cls, fname)
+    for member in AdvancedExtractionStatus:
+        builders[f"AdvancedDwarfMetadata.extraction[{member.value}]"] = (
+            functools.partial(
+                _enum_member_case, AdvancedDwarfMetadata, "extraction", member
+            )
+        )
+    for status in FactStatus:
+        builders[f"ownership_fact[{status.value}]"] = functools.partial(
+            _ownership_case, status, scoped=True
+        )
+    builders["ownership_fact[no_extraction_scope]"] = functools.partial(
+        _ownership_case, FactStatus.PRESENT, scoped=False
+    )
+    return builders, unsynth
 
 
-_PARAMS, _UNSYNTHESIZABLE = _collect()
-_ALL_IDS = {_field_id(c, f) for c, f in _enumerated_fields()}
+_CASE_BUILDERS, _UNSYNTHESIZABLE = _collect()
 
 
-@pytest.mark.parametrize(("cls", "fname"), _PARAMS)
-def test_field_survives_dump_load_dump(cls: type, fname: str) -> None:
-    snap, path, leaf = _build_case(cls, fname)
+def _round_trip_defects(snap: AbiSnapshot, checks: list[_Check]) -> list[str]:
+    """Every way a dump -> load -> dump fails to keep the case; empty if none."""
     first = snapshot_to_json(snap)
     loaded = snapshot_from_dict(json.loads(first))
-    assert snapshot_to_json(loaded) == first, (
-        "dump -> load -> dump is not byte-identical"
+    defects: list[str] = []
+    if snapshot_to_json(loaded) != first:
+        defects.append("dump -> load -> dump is not byte-identical")
+    for locate, leaf, fname in checks:
+        label = f"{type(leaf).__qualname__}.{fname}"
+        try:
+            got = locate(loaded)
+        except (AttributeError, IndexError, TypeError):
+            defects.append(f"{label}: owner absent after load")
+            continue
+        if _norm_attr(got, fname) != _norm_attr(leaf, fname):
+            defects.append(f"{label} differs after load")
+    return defects
+
+
+_CASE_PARAMS = [
+    pytest.param(
+        cid,
+        id=cid,
+        marks=(pytest.mark.xfail(strict=True, reason=KNOWN_LOSSY[cid]),)
+        if cid in KNOWN_LOSSY
+        else (),
     )
-    got = _navigate(loaded, path)
-    assert _norm(getattr(got, fname)) == _norm(getattr(leaf, fname))
+    for cid in sorted(_CASE_BUILDERS)
+]
+
+
+@pytest.mark.parametrize("case_id", _CASE_PARAMS)
+def test_case_survives_dump_load_dump(case_id: str) -> None:
+    snap, checks = _CASE_BUILDERS[case_id]()
+    defects = _round_trip_defects(snap, checks)
+    assert not defects, defects
+
+
+@pytest.mark.parametrize("case_id", sorted(KNOWN_LOSSY))
+def test_every_known_lossy_entry_is_lossy(case_id: str) -> None:
+    # The strict xfail above only fails once a case stops failing. This asserts
+    # the entry is still a live defect now, so a stale entry (a case that never
+    # tested the loss, or a loss that was fixed) fails with its own name.
+    assert case_id in _CASE_BUILDERS, f"KNOWN_LOSSY names no case: {case_id}"
+    snap, checks = _CASE_BUILDERS[case_id]()
+    assert _round_trip_defects(snap, checks), (
+        f"{case_id} round-trips faithfully now; remove its KNOWN_LOSSY entry"
+    )
 
 
 def test_every_reachable_field_is_synthesizable() -> None:
@@ -512,9 +714,9 @@ def test_every_reachable_field_is_synthesizable() -> None:
     )
 
 
-def test_known_lossy_is_a_real_field_list_and_only_shrinks() -> None:
-    stale = sorted(set(KNOWN_LOSSY) - _ALL_IDS)
-    assert not stale, f"KNOWN_LOSSY names no enumerated field: {stale}"
+def test_known_lossy_is_a_real_case_list_and_only_shrinks() -> None:
+    stale = sorted(set(KNOWN_LOSSY) - set(_CASE_BUILDERS))
+    assert not stale, f"KNOWN_LOSSY names no case: {stale}"
     assert len(KNOWN_LOSSY) == _KNOWN_LOSSY_CEILING, (
         f"KNOWN_LOSSY has {len(KNOWN_LOSSY)} entries; lower _KNOWN_LOSSY_CEILING to match"
     )
@@ -522,7 +724,7 @@ def test_known_lossy_is_a_real_field_list_and_only_shrinks() -> None:
 
 def test_field_coverage_is_substantial() -> None:
     # Guards against the walker silently collapsing to a handful of classes.
-    assert len(_PARAMS) >= 400, len(_PARAMS)
+    assert len(_CASE_PARAMS) >= 400, len(_CASE_PARAMS)
 
 
 def _verdict_view(result: Any) -> tuple[str, list[str]]:

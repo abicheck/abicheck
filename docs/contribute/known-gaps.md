@@ -550,6 +550,12 @@ Do not re-attempt token-claiming. A header's export tokens cannot tell whether i
 **Status (2026-10-12): OPEN.** `test_manifest_base_commit_exists_in_history` runs `git cat-file -e` only; a manifest pinned to a fetchable but unmerged commit passes.  
 `hygiene` — The test named "exists in history" does not check that a task's `base_commit` is reachable from the default branch. [Full write-up](known-gaps/agent-eval-base-commit-test-checks-presence-not-ancestry.md)
 
+
+#### An `ownership_fact` is persisted only as a PRESENT decision (2026-10-27)
+
+**Status (2026-10-27): OPEN, deliberate.** Every non-`PRESENT` status reads back as `None`, and a `PRESENT` fact on a snapshot with no `extraction_scope` is dropped. `ownership_of()` folds both to unknown, so no verdict changes; the loss is in the `Fact` object only. Pinned, not fixed: a per-entry status is a schema change.
+`hygiene` — The round-trip is pinned as named `KNOWN_LOSSY` cases in `tests/unit/storage/test_snapshot_field_roundtrip.py`. Closing it needs a `SCHEMA_VERSION` bump and a reader-compatibility decision. [Full write-up](known-gaps/ownership-fact-persists-only-a-present-decision.md)
+
 ## Do not re-attempt
 
 Approaches that were tried, measured or reviewed and did not help. Their value is stopping a re-attempt; read the write-up before trying anything similar.

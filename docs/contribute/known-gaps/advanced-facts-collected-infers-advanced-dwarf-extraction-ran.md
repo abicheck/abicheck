@@ -17,6 +17,8 @@ Index: [Known gaps](../known-gaps.md)
 
 **Still open.** The status is not persisted. `storage/snapshot_encode.py` drops it, so the stored document is byte-identical to v58 and a snapshot decoded from a file reads `unrecorded`, which keeps the inference. Persisting it adds a snapshot-schema key and needs [ADR-080](../adr/080-persisting-the-advanced-dwarf-extraction-status.md) (drafted, Proposed). The inference's one unsound shape, a completed empty parse with an empty `target_arch`, therefore still applies to stored snapshots only.
 
+**Measured (2026-10-27).** A round trip through `snapshot_to_json` / `snapshot_from_dict` reads every status back as `unrecorded`: `not_run`, `completed` and `failed` alike. So a `FAILED` extraction is no longer distinguishable from a parse that never ran once the snapshot is written to a file, and `advanced_facts_collected` answers from the payload alone. The loss is pinned, not hidden: `tests/unit/storage/test_snapshot_field_roundtrip.py` has one case per status, and its `KNOWN_LOSSY` entries `AdvancedDwarfMetadata.extraction[not_run|completed|failed]` and `Declarations.debug_advanced` name it, with the same reason, until ADR-080 is decided.
+
 **Historical note (2026-10-09, `456989f`):** the paragraphs below describe the state before the in-memory fix.
 
 The predicate answers by checking
