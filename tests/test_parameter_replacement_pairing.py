@@ -64,8 +64,9 @@ def test_replaced_non_template_is_one_params_change() -> None:
     )
     assert change.kind == ChangeKind.FUNC_PARAMS_CHANGED
     assert change.symbol == OLD_SCALE
-    assert change.old_value == "(vec<float, abi<8, t8> >, float)"
-    assert change.new_value == "(vec<float, abi<16, t16> >, float)"
+    # GNU spells a closing template pair "> >", LLVM (macOS) ">>".
+    assert change.old_value.replace("> >", ">>") == "(vec<float, abi<8, t8>>, float)"
+    assert change.new_value.replace("> >", ">>") == "(vec<float, abi<16, t16>>, float)"
     assert NEW_SCALE in change.description
 
 
