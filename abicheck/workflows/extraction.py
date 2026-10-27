@@ -126,6 +126,7 @@ from ..extract.compiler_driver import (
 from ..extract.declaration_provenance import apply_provenance
 from ..extract.dependency_exclusion import dependency_exclusion_scope
 from ..extract.dump_manifest_roots import dump_manifest_header_roots
+from ..extract.header_text import non_text_header_message
 from ..extract.headers.clang.layout_tool import attach_clang_layout
 from ..extract.headers.clang.streaming import suppress_streaming_prune
 from ..extract.packages import (
@@ -236,6 +237,7 @@ __all__ = [
     "is_package",
     "is_supported_compare_input",
     "iter_directory_headers",
+    "non_text_header_message",
     "load_bindings_file",
     "load_build_config",
     "load_build_config_with_digest",

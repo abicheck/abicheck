@@ -36,7 +36,11 @@ from typing import TYPE_CHECKING, Any
 import click
 
 from .errors import SnapshotError
-from .workflows.extraction import PRUNED_HEADER_DIR_SEGMENTS, iter_directory_headers
+from .workflows.extraction import (
+    PRUNED_HEADER_DIR_SEGMENTS,
+    iter_directory_headers,
+    non_text_header_message,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -99,6 +103,10 @@ def _expand_header_inputs(inputs: list[Path]) -> list[Path]:
             continue
         seen.add(k)
         deduped.append(h)
+    for h in deduped:
+        problem = non_text_header_message(h)
+        if problem is not None:
+            raise click.BadParameter(problem)
     return deduped
 
 

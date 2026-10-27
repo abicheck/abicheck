@@ -1,0 +1,3 @@
+### Fixed
+
+- **An empty, comment-only or non-text `--header` no longer reads as a silent empty API** — a header set that parses to zero public declarations is now named per side in `coverage_warnings` (and so in the JSON report and CLI warnings) as "zero public declarations", and the removals or additions it causes are still reported, since an emptied header really is an API change. A header holding a NUL byte is an input error (exit `64`) instead of being parsed to nothing: a file of only NUL bytes was read as an empty tar archive, so its side lost its header evidence without a word. Header files and directory members are both checked.

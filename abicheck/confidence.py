@@ -408,9 +408,11 @@ def compute_confidence_and_census(
     warnings.extend(depth_exclusion_summary(depth_excluded))
 
     warnings.extend(header_exclusion_warnings(old, new))
+    from .model.empty_header_surface import empty_header_surface_warnings
     from .model.header_exclusion_record import unparseable_header_warnings
 
     warnings.extend(unparseable_header_warnings(old, new))
+    warnings.extend(empty_header_surface_warnings(old, new))
     warnings.extend(extraction_scope_notes(old, new))  # ADR-075 D3
     warnings.extend(snapshot_load_notices(old, new))  # ADR-062 D2
     censuses = undeclared_export_censuses(old, new)  # field report H5
