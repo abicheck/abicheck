@@ -19,6 +19,7 @@ recorded from ``origin/main``; the ``after`` section is what this module asserts
 from __future__ import annotations
 
 import json
+import sys
 from dataclasses import asdict
 from pathlib import Path
 from typing import Any
@@ -28,6 +29,13 @@ from test_compile_invocation_differential import _render_unit
 
 from abicheck.buildsource.adapters.compile_db import CompileDbAdapter
 from abicheck.buildsource.source_extractors.compile_action import parse_gnu_operands
+
+# The corpus and golden pin POSIX working directories ("/work"); Windows
+# absolutizes them onto the current drive ("D:/work"), so the recorded paths,
+# unit ids and renderings cannot match there.
+pytestmark = pytest.mark.skipif(
+    sys.platform == "win32", reason="golden pins POSIX absolute paths"
+)
 
 _DATA = Path(__file__).parent / "data" / "compile_invocation"
 _CORPUS = _DATA / "multi_source_compile_commands.json"
