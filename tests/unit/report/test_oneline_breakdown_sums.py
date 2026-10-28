@@ -35,6 +35,11 @@ from abicheck.checker_policy import ChangeKind, CrossSourceEvolution, Verdict
 from abicheck.contract_relevance_types import CompatibilityEvaluationStatus
 from abicheck.model.change import Change
 from abicheck.model.change_catalog.assembled import REGISTRY
+from abicheck.policy.reclassify import ReclassifyRule
+from abicheck.policy_file import PolicyFile
+from abicheck.report.release_change_inventory import release_inventory_counters
+from abicheck.report.release_member_entry import stamp_member_counts
+from abicheck.report.release_member_summary import add_member_review_summary
 from abicheck.report.release_oneline import (
     format_release_oneline,
     release_global_counts,
@@ -383,3 +388,223 @@ def test_release_global_findings_split_like_member_findings(bucket: str) -> None
     assert counts[bucket] == 1, counts
     assert sum(counts[k] for k in _BUCKET_KEYS) == 1
     assert counts["total"] == 1
+
+
+# --- Release one-line total against real member entries (CodeRabbit, PR #1828)
+#
+# The release one-line is folded from the entries the fan-out really writes:
+# each member is projected by ``stamp_member_counts`` +
+# ``add_member_review_summary`` (the same two calls ``ReleaseMemberEntryProjection``
+# makes), and the oracle for the total is each member's own JSON
+# ``summary.total_changes`` -- never a count the renderer derives for itself.
+
+
+def _json_total(changes: list[Change]) -> int:
+    return json.loads(to_json(_result(changes)))["summary"]["total_changes"]
+
+
+def _release_member_entry(name: str, changes: list[Change]) -> dict[str, object]:
+    result = DiffResult(
+        old_version="1.0", new_version="2.0", library=name, changes=changes
+    )
+    entry: dict[str, object] = {"library": name, "verdict": "BREAKING"}
+    stamp_member_counts(entry, result)
+    add_member_review_summary(entry, result, None)
+    return entry
+
+
+def _release_line(entries: list[dict[str, object]]) -> str:
+    return format_release_oneline(
+        "BREAKING",
+        entries,
+        change_inventory=release_inventory_counters(entries),
+    )
+
+
+@pytest.mark.parametrize(
+    "stamp",
+    [None, CrossSourceEvolution.NOT_EVALUATED, CrossSourceEvolution.PERSISTENT],
+    ids=["unstamped", "stamped-not-evaluated", "stamped-persistent"],
+)
+def test_release_line_states_an_unscored_finding_in_its_total(
+    stamp: CrossSourceEvolution | None,
+) -> None:
+    """A finding contract evaluation left NOT_EVALUATED is counted in the total
+    and named as ``not evaluated`` -- with or without a standing stamp. The
+    release line used to drop it (``0 total``) or state a negative count
+    (``-1 not evaluated``) beside the JSON's ``total_changes: 1``."""
+    changes = [_change("func_removed", stamp, scored=False)]
+    entry = _release_member_entry("libdemo.so", changes)
+
+    line = _release_line([entry])
+    parts, total = _parse_headline(line)
+
+    assert total == _json_total(changes) == 1, line
+    assert sum(parts.values()) == total, line
+    expected = {"hygiene": 1} if stamp is not None else {"not_evaluated": 1}
+    assert parts == expected, line
+    assert "-" not in line.split(": ", 1)[1], line
+
+
+def test_release_line_keeps_a_member_entry_without_an_inventory_block() -> None:
+    """A release-support-promise entry carries bucket counts but no
+    ``change_inventory`` block. Beside a member that does carry one, the
+    inventory replaces the breakdown, so the block-less entry's break must be
+    folded in, not silently dropped from both parts and total."""
+    member = _release_member_entry(
+        "libdemo.so",
+        [
+            _change("func_removed", None, scored=True),
+            _change(
+                "exported_not_public", CrossSourceEvolution.PERSISTENT, scored=True
+            ),
+        ],
+    )
+    promise = {
+        "library": "libpromised.so",
+        "verdict": "BREAKING",
+        "breaking": 1,
+        "source_breaks": 0,
+        "risk_changes": 0,
+        "compatible_additions": 0,
+        "quality_issues": 0,
+        "informational": 0,
+    }
+
+    parts, total = _parse_headline(_release_line([member, promise]))
+
+    assert parts == {"breaking": 2, "hygiene": 1}
+    assert total == 3
+
+
+@settings(max_examples=100, deadline=None)
+@given(
+    members=st.lists(
+        st.lists(
+            st.tuples(
+                st.sampled_from(_KIND_VALUES),
+                st.sampled_from(_STAMPS),
+                st.booleans(),
+            ),
+            max_size=6,
+        ),
+        max_size=4,
+    )
+)
+def test_release_line_from_real_member_entries_adds_up_to_json(
+    members: list[list[tuple[str, CrossSourceEvolution | None, bool]]],
+) -> None:
+    """Release lines built from real member projections (stamped hygiene in
+    every state, scored and unscored findings, any kind) state the JSON
+    population: the total is the sum of members' JSON ``total_changes`` and the
+    parts are the one-line oracle over every change, as in the single-pair test."""
+    entries: list[dict[str, object]] = []
+    all_changes: list[Change] = []
+    json_total = 0
+    for index, specs in enumerate(members):
+        changes = [_change(kind, stamp, scored=scored) for kind, stamp, scored in specs]
+        entries.append(_release_member_entry(f"lib{index}.so", changes))
+        all_changes.extend(changes)
+        json_total += _json_total(changes)
+
+    line = _release_line(entries)
+    parts, total = _parse_headline(line)
+
+    assert total == json_total == len(all_changes), line
+    assert sum(parts.values()) == total, line
+    assert parts == {
+        k: v for k, v in _expected(all_changes, observed_only=True).items() if v
+    }, line
+
+
+#: A reclassify rule that demotes a removal whose symbol matches ``demoted_``
+#: to COMPATIBLE. ``to: ignore`` is the policy spelling of COMPATIBLE.
+_DEMOTE_REMOVALS = PolicyFile(
+    reclassify=[
+        ReclassifyRule(
+            to_verdict=Verdict.COMPATIBLE,
+            to="ignore",
+            change_kind="func_removed",
+            symbol_pattern="demoted_.*",
+        )
+    ]
+)
+
+_SUMMARY_BUCKETS = (
+    "breaking",
+    "source_breaks",
+    "risk_changes",
+    "compatible_additions",
+    "quality_issues",
+    "informational",
+    "total_changes",
+)
+
+
+def _scoped_summary(changes: list[Change]) -> dict[str, object]:
+    """The summary of a run with a supplied consumer scope (``used_by``) attached.
+
+    An empty ``used_by`` is enough: the scoped fold recomputes the summary
+    buckets from the rendered ``changes`` entries whenever the attribute is
+    present, which is the path the policy-demoted bug lives on.
+    """
+    result = DiffResult(
+        old_version="1.0",
+        new_version="2.0",
+        library="libdemo.so",
+        changes=changes,
+        policy_file=_DEMOTE_REMOVALS,
+    )
+    result.used_by = []  # type: ignore[attr-defined]
+    return json.loads(to_json(result))["summary"]
+
+
+def _full_summary(changes: list[Change]) -> dict[str, object]:
+    """The oracle: the same run with no consumer scope attached."""
+    result = DiffResult(
+        old_version="1.0",
+        new_version="2.0",
+        library="libdemo.so",
+        changes=changes,
+        policy_file=_DEMOTE_REMOVALS,
+    )
+    return json.loads(to_json(result))["summary"]
+
+
+def test_scoped_summary_buckets_match_full_summary_for_a_policy_demoted_break() -> None:
+    """A removal the policy demotes to COMPATIBLE is a quality issue in the full
+    summary (``build_summary`` classifies by effective category). Under a
+    consumer scope the raw-kind check reclassified it as an addition, so the
+    scoped summary counted one more addition and one less quality issue."""
+    changes = [
+        Change(ChangeKind.FUNC_REMOVED, "demoted_api", "demoted_api"),
+        Change(ChangeKind.FUNC_REMOVED, "real_api", "real_api"),
+        Change(ChangeKind.FUNC_ADDED, "new_api", "new_api"),
+    ]
+    full = _full_summary(changes)
+    scoped = _scoped_summary(changes)
+
+    assert full["quality_issues"] == 1
+    for key in _SUMMARY_BUCKETS:
+        assert scoped[key] == full[key], key
+
+
+@settings(max_examples=100, deadline=None)
+@given(
+    specs=st.lists(
+        st.tuples(
+            st.sampled_from(["demoted_a", "demoted_b", "kept_a"]),
+            st.sampled_from(["func_removed", "func_added", "func_params_changed"]),
+        ),
+        min_size=1,
+        max_size=8,
+    )
+)
+def test_scoped_summary_matches_full_summary_for_any_demoted_mix(
+    specs: list[tuple[str, str]],
+) -> None:
+    changes = [Change(ChangeKind(kind), symbol, symbol) for symbol, kind in specs]
+    full = _full_summary(changes)
+    scoped = _scoped_summary(changes)
+    for key in _SUMMARY_BUCKETS:
+        assert scoped[key] == full[key], (key, specs)

@@ -131,12 +131,17 @@ def _summary_bucket_for_entry(entry: Any) -> str | None:
     """The summary-block key a rendered change entry contributes to.
 
     ``compatible`` covers every COMPATIBLE finding, so an entry carrying it is
-    split by its kind into the same three buckets the full summary uses
+    split into the same three buckets the full summary uses
     (``report_summary.build_summary``): a quality issue, an informational
-    outcome, or an addition. The kind is read from the registry's own sets
-    rather than re-derived. A scoped finding that counted as an addition
-    while the full summary counted it as quality would make the two disagree
-    on the same run.
+    outcome, or an addition. A quality issue is read from the entry's
+    ``recommended_action``, which ``change_json.recommended_action_for_change``
+    derives from the *effective* category build_summary counts: a
+    policy-demoted break is COMPATIBLE with a quality category, though its raw
+    kind is a removal. Testing the raw kind against ``QUALITY_KINDS`` instead
+    counted that finding as an addition, so the scoped summary disagreed with
+    the full summary on the same run (CodeRabbit review on PR #1828). The
+    informational test is on the raw kind, as ``classify_effective_change``
+    decides it.
     """
     if not isinstance(entry, dict):
         return None
@@ -145,12 +150,13 @@ def _summary_bucket_for_entry(entry: Any) -> str | None:
         return None
     bucket = _SEVERITY_TO_SUMMARY_BUCKET.get(severity)
     if bucket == "compatible_additions":
-        from ..policy.classification import INFORMATIONAL_KINDS, QUALITY_KINDS
+        from ..policy.classification import INFORMATIONAL_KINDS
 
         kind = entry.get("kind")
         if kind in {k.value for k in INFORMATIONAL_KINDS}:
             return "informational"
-        if kind in {k.value for k in QUALITY_KINDS}:
+        # A missing-contract entry carries no recommended_action and is an addition.
+        if entry.get("recommended_action") == "review_recommended":
             return "quality_issues"
     return bucket
 
