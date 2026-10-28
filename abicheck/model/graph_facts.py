@@ -37,6 +37,7 @@ identity on top of it (D1). See ADR-046 and
 
 from __future__ import annotations
 
+import copy
 import hashlib
 import json
 from collections.abc import Sequence
@@ -102,7 +103,9 @@ class GraphFact:
         return {
             "producer": self.producer,
             "confidence": self.confidence,
-            "attrs": dict(self.attrs),
+            # A deep copy, not `dict(...)`: a shallow copy shares every nested
+            # value, so editing the returned document reached the fact itself.
+            "attrs": copy.deepcopy(self.attrs),
         }
 
     @classmethod
@@ -110,7 +113,7 @@ class GraphFact:
         return cls(
             producer=str(d.get("producer", "")),
             confidence=str(d.get("confidence", CONF_UNKNOWN)),
-            attrs=dict(d.get("attrs", {})),
+            attrs=copy.deepcopy(dict(d.get("attrs", {}))),
         )
 
 
@@ -132,9 +135,9 @@ class FactConflict:
     def to_dict(self) -> dict[str, Any]:
         return {
             "key": self.key,
-            "winning_value": self.winning_value,
+            "winning_value": copy.deepcopy(self.winning_value),
             "winning_producer": self.winning_producer,
-            "losing_value": self.losing_value,
+            "losing_value": copy.deepcopy(self.losing_value),
             "losing_producer": self.losing_producer,
         }
 
@@ -142,9 +145,9 @@ class FactConflict:
     def from_dict(cls, d: dict[str, Any]) -> FactConflict:
         return cls(
             key=str(d.get("key", "")),
-            winning_value=d.get("winning_value"),
+            winning_value=copy.deepcopy(d.get("winning_value")),
             winning_producer=str(d.get("winning_producer", "")),
-            losing_value=d.get("losing_value"),
+            losing_value=copy.deepcopy(d.get("losing_value")),
             losing_producer=str(d.get("losing_producer", "")),
         )
 
@@ -264,11 +267,11 @@ class GraphNode:
             "id": self.id,
             "kind": self.kind,
             "label": self.label,
-            "attrs": dict(self.attrs),
+            "attrs": copy.deepcopy(self.attrs),
             "provenance": self.provenance,
             "confidence": self.confidence,
             "facts": [f.to_dict() for f in self.facts],
-            "resolved": dict(self.resolved),
+            "resolved": copy.deepcopy(self.resolved),
             "conflicts": [c.to_dict() for c in self.conflicts],
         }
 
@@ -300,7 +303,7 @@ class GraphNode:
             id=_normalize_if_decl_or_type(str(d["id"])),
             kind=str(d.get("kind", "file")),
             label=str(d.get("label", "")),
-            attrs=dict(d.get("attrs", {})),
+            attrs=copy.deepcopy(dict(d.get("attrs", {}))),
             provenance=str(d.get("provenance", "")),
             confidence=str(d.get("confidence", CONF_UNKNOWN)),
             facts=[GraphFact.from_dict(f) for f in d.get("facts", [])],
@@ -368,9 +371,9 @@ class GraphEdge:
             "dst": self.dst,
             "provenance": self.provenance,
             "confidence": self.confidence,
-            "attrs": dict(self.attrs),
+            "attrs": copy.deepcopy(self.attrs),
             "facts": [f.to_dict() for f in self.facts],
-            "resolved": dict(self.resolved),
+            "resolved": copy.deepcopy(self.resolved),
             "conflicts": [c.to_dict() for c in self.conflicts],
             "occurrences": list(self.occurrences),
         }
@@ -387,7 +390,7 @@ class GraphEdge:
             kind=str(d.get("edge", d.get("kind", ""))),
             provenance=str(d.get("provenance", "")),
             confidence=str(d.get("confidence", CONF_UNKNOWN)),
-            attrs=dict(d.get("attrs", {})),
+            attrs=copy.deepcopy(dict(d.get("attrs", {}))),
             facts=[GraphFact.from_dict(f) for f in d.get("facts", [])],
         )
         ensure_facts_and_resolve(edge)
