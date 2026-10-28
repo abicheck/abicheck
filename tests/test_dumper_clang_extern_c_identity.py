@@ -50,7 +50,7 @@ tolerant-match helper ``visibility()`` already uses for the identical
 Mach-O underscore quirk) is reused rather than re-implemented, in both
 ``extract.headers.clang.functions.parse_functions`` and
 ``dumper_clang._ClangAstParser.parse_variables`` -- but gated on
-``extract.headers.clang.context.is_darwin_target`` (sixteenth round, fresh
+``model.name_decoration.macho_underscore.is_darwin_target`` (sixteenth round, fresh
 evidence): on a non-Darwin target, ``raw_mangled == "_" + name`` is not a
 linker-decoration artifact at all -- it is exactly what a real, explicit
 ``asm("_foo")`` label looks like, a genuinely distinct mangled identity
@@ -94,7 +94,7 @@ from __future__ import annotations
 import pytest
 
 from abicheck.dumper_clang import _ClangAstParser
-from abicheck.extract.headers.clang.context import is_darwin_target
+from abicheck.model.name_decoration.macho_underscore import is_darwin_target
 
 _DARWIN_TRIPLE = "arm64-apple-darwin"
 _LINUX_TRIPLE = "x86_64-unknown-linux-gnu"
@@ -173,7 +173,7 @@ def test_parse_functions_extern_c_via_macho_leading_underscore() -> None:
     # confirmed True, the raw Darwin-decorated `mangled` field itself
     # must also normalize to the bare name -- disagreeing with the
     # binary's own already-stripped export table otherwise (see
-    # `context.strip_darwin_itanium_decoration`'s docstring).
+    # `macho_underscore.strip_darwin_itanium_decoration`'s docstring).
     assert fn.mangled == "c_api"
 
 

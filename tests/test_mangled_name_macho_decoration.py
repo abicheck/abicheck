@@ -15,11 +15,11 @@
 
 """``model.mangled_name.strip_macho_itanium_decoration`` -- the single
 canonical ``"__Z..."`` -> ``"_Z..."`` structural check three call sites
-share (``extract.headers.clang.context.strip_darwin_itanium_decoration``,
+share (``model.name_decoration.macho_underscore.strip_darwin_itanium_decoration``,
 ``model.mangled_name._itanium_strip_prefix``, ``dumper_hybrid.
 macho_normalize_mangled``) -- plus a real-compiler-independent property
 suite over the *shape* invariant it states, and a direct unit check on
-``extract.headers.clang.context.is_darwin_target``'s ``sys.platform``
+``model.name_decoration.macho_underscore.is_darwin_target``'s ``sys.platform``
 probe-failure fallback (bug class ``extraction.
 macho_mangled_identity_normalization``, ``tests/regressions/manifest.py``).
 
@@ -67,7 +67,7 @@ class TestStripMachoItaniumDecorationExamples:
         with a real, distinct ``asm("_foo")`` label -- resolving it needs
         extra evidence (``is_extern_c``) this shape-only helper doesn't
         have, so it must never touch this shape at all. See
-        ``extract.headers.clang.context.strip_darwin_itanium_decoration``
+        ``model.name_decoration.macho_underscore.strip_darwin_itanium_decoration``
         for the narrower, evidence-gated case that DOES resolve it."""
         assert strip_macho_itanium_decoration("_foo") == "_foo"
         assert strip_macho_itanium_decoration("_c_func") == "_c_func"
@@ -176,11 +176,11 @@ class TestIsDarwinTargetNeverGuessesFromBareNone:
     def test_bare_none_or_empty_is_always_false(
         self, monkeypatch: pytest.MonkeyPatch, running_platform: str
     ) -> None:
-        import abicheck.extract.headers.clang.context as _context
+        import abicheck.model.name_decoration.macho_underscore as _macho
 
         monkeypatch.setattr(sys, "platform", running_platform)
-        assert _context.is_darwin_target(None) is False
-        assert _context.is_darwin_target("") is False
+        assert _macho.is_darwin_target(None) is False
+        assert _macho.is_darwin_target("") is False
 
     def test_explicit_non_darwin_triple_is_never_overridden_by_host_platform(
         self, monkeypatch: pytest.MonkeyPatch
@@ -188,7 +188,7 @@ class TestIsDarwinTargetNeverGuessesFromBareNone:
         """A triple that was actually probed and says "linux" must never
         be second-guessed by the host OS, even if this test suite
         happened to be running on a real Darwin machine."""
-        import abicheck.extract.headers.clang.context as _context
+        import abicheck.model.name_decoration.macho_underscore as _macho
 
         monkeypatch.setattr(sys, "platform", "darwin")
-        assert _context.is_darwin_target("x86_64-unknown-linux-gnu") is False
+        assert _macho.is_darwin_target("x86_64-unknown-linux-gnu") is False

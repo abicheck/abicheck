@@ -282,7 +282,7 @@ def source_abi_from_clang_ast(
         validate_ast_shape(ast_root)
     except MalformedClangAstError as exc:
         raise SourceExtractionError(f"clang AST is malformed: {exc}") from exc
-    ctx = _ClassifyContext(public_header_roots)
+    ctx = _ClassifyContext.for_unit(public_header_roots, compile_unit)
     tu = SourceAbiTu(
         tu_id=compile_unit.id,
         target_id=target_id or compile_unit.target_id,
@@ -350,7 +350,7 @@ def _emit_node(
         _emit_function(node, ctx, tu, scope, file)
     elif _is_constexpr_var_node(kind, name, node, accessible):
         _emit_constexpr(node, ctx, tu, scope, file)
-    elif _is_variable_node(kind, name, node, accessible, enclosing_kind):
+    elif _is_variable_node(kind, name, node, accessible, enclosing_kind, ctx):
         _emit_variable(node, ctx, tu, scope, file)
     elif _is_type_node(kind, name, accessible):
         _emit_type(node, ctx, tu, scope, file)
@@ -521,7 +521,7 @@ def _emit_function(
         return
     name = _qualified(scope, str(node.get("name", "")))
     sig = _signature(node)
-    mangled = _mangled(node)
+    mangled = _mangled(node, ctx.target_triple, is_cxx=ctx.is_cxx)
     loc = _location(file, _node_line(node), origin)
     relations = {
         str(k): str(v) for k, v in dict(node.get("_abicheck_relations", {})).items()
@@ -537,7 +537,7 @@ def _emit_function(
             mangled_name=mangled,
             signature_hash=_hash("sig", sig),
             value=_default_arg_repr(node),
-            names=_entity_names(name, mangled, node),
+            names=ctx.entity_names(name, mangled, node),
             relations=relations,
             ownership=_entity_ownership(visibility, origin),
             source_location=loc,
@@ -565,7 +565,7 @@ def _emit_function(
                 qualified_name=name,
                 mangled_name=mangled,
                 signature_hash=_hash("sig", sig),
-                names=_entity_names(name, mangled, node),
+                names=ctx.entity_names(name, mangled, node),
                 relations=relations,
                 ownership=_entity_ownership(visibility, origin),
                 # Alpha-rename the function's parameters together with the body so
@@ -682,7 +682,7 @@ def _emit_constexpr(
     name = _qualified(scope, str(node.get("name", "")))
     init = _init_expr(node)
     value = _expr_value(init) if init is not None else _subtree_hash(node)
-    mangled = _mangled(node)
+    mangled = _mangled(node, ctx.target_triple, is_cxx=ctx.is_cxx)
     tu.constexpr_values.append(
         SourceEntity(
             id=_hash("constexpr", name, value),
@@ -690,7 +690,7 @@ def _emit_constexpr(
             qualified_name=name,
             mangled_name=mangled,
             value=value,
-            names=_entity_names(name, mangled, node),
+            names=ctx.entity_names(name, mangled, node),
             ownership=_entity_ownership(visibility, origin),
             source_location=_location(file, _node_line(node), origin),
             visibility=visibility,
@@ -719,7 +719,7 @@ def _emit_variable(
         return
     name = _qualified(scope, str(node.get("name", "")))
     type_repr = _signature(node)
-    mangled = _mangled(node)
+    mangled = _mangled(node, ctx.target_triple, is_cxx=ctx.is_cxx)
     tu.variables.append(
         SourceEntity(
             id=_hash("variable", mangled or name, type_repr),
@@ -727,7 +727,7 @@ def _emit_variable(
             qualified_name=name,
             mangled_name=mangled,
             type_hash=_hash("type", type_repr),
-            names=_entity_names(name, mangled, node),
+            names=ctx.entity_names(name, mangled, node),
             ownership=_entity_ownership(visibility, origin),
             source_location=_location(file, _node_line(node), origin),
             visibility=visibility,

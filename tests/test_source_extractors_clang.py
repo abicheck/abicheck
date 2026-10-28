@@ -1381,10 +1381,8 @@ def test_mangled_strips_macos_mach_o_underscore() -> None:
     # different node ids on macOS, breaking the --sources/--build-info
     # path's public-entry reachability the same way the header-only path
     # was broken before that fix.
-    assert (
-        _mangled({"mangledName": "__ZN4demo9configureEPvE", "name": "configure"})
-        == "_ZN4demo9configureEPvE"
-    )
+    decorated = {"mangledName": "__ZN4demo9configureEPvE", "name": "configure"}
+    assert _mangled(decorated, "x86_64-apple-darwin") == "_ZN4demo9configureEPvE"
     # No-op when there's no macOS decoration to strip (Linux/Windows clang,
     # or a name that already omits it).
     assert (

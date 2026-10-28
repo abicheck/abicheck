@@ -80,7 +80,7 @@
       "abicheck/extract/headers/castxml/dumper.py": "3d97df75930f3897b4acde5cc9a95d694b0bc6e3ad18cab27848736aa48b1c51",
       "abicheck/extract/headers/castxml/duplicate_declarations.py": "977b85a15408fa9877b9b686f0bd913af9442e4da5b1d9292975bda7eff424f7",
       "abicheck/extract/headers/castxml/enums.py": "e616c768543061d71812378dd92cbcb7b8d00afbb734bcb7b4b5334ee34042aa",
-      "abicheck/extract/headers/castxml/functions.py": "f62f5549a9602089d682c1627d3d2c546ae48a842944735b3cd3ecbb7f867593",
+      "abicheck/extract/headers/castxml/functions.py": "128de0b76f5f400987e3dfa9f515bc868fcf9f200eb3e9e426218c9b2ef5b7b6",
       "abicheck/extract/headers/castxml/hidden_declarations.py": "500abf62faa042e1c33a3ef3897557e263f0c7b1060b60c323d8d34895f5b057",
       "abicheck/extract/headers/castxml/location.py": "a5469fedb2774dfdf1b87a49ddc713471c088ecee6ea5ccbfe4d9764012c97e6",
       "abicheck/extract/headers/castxml/names.py": "038abc55f72f11185c0a5ec48d57bff95a1ab894380f7978b6187cd76b044796",
@@ -101,13 +101,13 @@
       "abicheck/extract/headers/clang/attributes.py": "4f35afe72ef319265695d3e199e10c9ef0076db4a5238161b33a076fd3a599fe",
       "abicheck/extract/headers/clang/backend.py": "5025e5d53c93c90daa08f8962f6a44ae593185d7a6446b10b7303987b044fd6b",
       "abicheck/extract/headers/clang/constraints.py": "bb7cf73353226075aa3f723af93b8a9b1d646de964954f820745bccfb9917a8c",
-      "abicheck/extract/headers/clang/context.py": "8d4301115471fd1b8ee41ebc2937d71f0f72a982b1a1711b98e64b889f93ea45",
+      "abicheck/extract/headers/clang/context.py": "f05bec9396a8cf29953268c0872bd0760a2f57896bd5185ed06be2b3d810730d",
       "abicheck/extract/headers/clang/enums.py": "87ee0817b89dd1483a48e5912602d8d02b84e1c0aa1671d0f32c1fd306b686b9",
       "abicheck/extract/headers/clang/error_header_retry.py": "3153f727c9d1934783a51d6917727a48aeba31e68b3c2462aef6e6b2f489f690",
       "abicheck/extract/headers/clang/explicit_instantiation.py": "359b71f36e304c2c1226ca35a65c1969989195dabc070a8035354caaef501663",
       "abicheck/extract/headers/clang/expr.py": "f57a21644e45ce3672e6f4943135ed12794d28f71b0ad961e0f5a1ca4f6353f7",
       "abicheck/extract/headers/clang/function_template_defaults.py": "af4a42ea00a91238ef8f111fe05c4b6aa625b84fd2fd4e39230b48953ebaf566",
-      "abicheck/extract/headers/clang/functions.py": "532de267a0cfde9bb81982de01aa2c76f68b953962492303e3d749d5399e7b56",
+      "abicheck/extract/headers/clang/functions.py": "cad4eadbf9b4e6afb23807721678545dd72d2b8073c2400ab814a056db5376f2",
       "abicheck/extract/headers/clang/inline_semantics.py": "8284b543b4fa45da23c50fee0f16fd11dab8c43cf43f1cf07334572a822ad04d",
       "abicheck/extract/headers/clang/layout_tool.py": "84fe5c86af2f0ae7486012297356d18046345a9ec5c0bbab1b8ec0a59645a2fe",
       "abicheck/extract/headers/clang/locations.py": "d4292c937fb928268132c6a3f21a35a5d7576b8164416648ef73815cd07fcddf",
@@ -173,9 +173,9 @@
       "abicheck/symvers_metadata.py": "372737765cd132e6e87ed891dd465d2958e04debbef774e45212ceb3036871cb",
       "abicheck/type_metadata.py": "9997189de8dac522fd1db8be5ae491d811139503f83abaaded89038eb4aa9cdf"
     },
-    "fingerprint": "df48e2436223483f5b1771b6b6a1d8e40b2924bdd751ee55fcdb545551532afa",
+    "fingerprint": "f7bfcf8b609e59923f3d83608f3e18237ee65bd82f008b375b5d41c1f0eafe70",
     "generation": 28,
-    "reason": "loader-view export read (R8) only reads binaries generation 28 refused; packages.py gains bounded waits (R6); facts of every binary 28 read are unchanged"
+    "reason": "Darwin C-linkage helpers moved to model/name_decoration/macho_underscore.py; header backends call the same rule with identical semantics (comment/import changes only)"
   },
   "resolver": {
     "files": {
@@ -217,12 +217,12 @@
       "abicheck/buildsource/source_extractors/android.py": "61dbcff2cb35c7d2ad1bb4a7e441acc43ec0791e1905ef7e4eb65a202ceaeb7b",
       "abicheck/buildsource/source_extractors/base.py": "6e58567edf53d8883f749828e0ab12be61ed2a3a18369023e6e5ba38d5e3c1ce",
       "abicheck/buildsource/source_extractors/castxml.py": "e5b1bf7a41586604209573cab6302a5e26a25d0c074a4234456abe2faf681785",
-      "abicheck/buildsource/source_extractors/clang.py": "e19bb4a8a7737303249a051c958830a208459c2c45ced3aa7b22ee5c17e1d3d8",
-      "abicheck/buildsource/source_extractors/clang_command.py": "89f97ac025b8f1fc0cbbedcd972e9885c9f18504fd700752150858d9bfcb7560",
+      "abicheck/buildsource/source_extractors/clang.py": "b1927d8d9c6a368c3a6bb28d7898d925389ebd3efcd622a1f857cfd292fcda47",
+      "abicheck/buildsource/source_extractors/clang_command.py": "fa04145ed260344b32417a674a1bc2ac96cfffb79485911f154b62bc4cadebac",
       "abicheck/buildsource/source_extractors/clang_dump_errors.py": "ddb47a07d6258b83da0986248ece68fc6e737eb25dc7d90a141d4e1833dc1dd7",
       "abicheck/buildsource/source_extractors/clang_macros.py": "a1970f60666e573bda375ea9017705b0ad9d43838524d617b0f4ee60a009bbe3",
-      "abicheck/buildsource/source_extractors/clang_node_predicates.py": "1e9556dab627cac4da137bf0f34b858f6e76b194f932aeb92ffe4ba8f07bb7bf",
-      "abicheck/buildsource/source_extractors/clang_nodes.py": "9463fbac6fe36203c29f20ab3203791e3b558f21f4ebf66ee732f39aaf912c9b",
+      "abicheck/buildsource/source_extractors/clang_node_predicates.py": "81693b56490679a96262bc802cdab93d04ef57fdf611ae0e1d3b3333ffffe131",
+      "abicheck/buildsource/source_extractors/clang_nodes.py": "94a9f60e83fd42ccf0e50bb266d2e6efd050d4ef544e08910129982742b8b80f",
       "abicheck/buildsource/source_extractors/clang_projection.py": "7d731ca0551bec84372d4c57bdb31af143220e99bbf04e7417cc34a9f851fc6f",
       "abicheck/buildsource/source_extractors/clang_public_roots.py": "c1752f2798886c97716c2361c2fe772defa2b6170104b8486871ecbc7beb3ba3",
       "abicheck/buildsource/source_extractors/clang_source_edges.py": "c9b8c3daacd02c4913b486a6ac658b435744243ed4433f14792588f67ef800e9",
@@ -243,8 +243,8 @@
       "abicheck/buildsource/type_graph.py": "a028a875057cd0cbf2930a431bfa1e579f7b770e0d124cbcfe715724e89d12e5",
       "abicheck/buildsource/type_graph_index.py": "7375f7baec7ceb3dd4a52a489b89e5a3571750dffca7490d1c5870301d55202d"
     },
-    "fingerprint": "76d6f6285fb2a9c492539302af791cd050bede85151967a23b1d83a3d0c422a9",
-    "generation": 11,
-    "reason": "generation 11 (this unreleased bump): a separate /I or /external:I never swallows a following option as its operand. Source fingerprint re-recorded without a bump: SourceAbiSurface decode keeps only the keys a document states; re-encoding a loaded surface changes, no extraction fact changes, and no reader treats an absent key as required."
+    "fingerprint": "9680b9ad4f6b892f2208acdbc4f0c3a16bacbeb8b5c3db78b1b381b0dafeb21b",
+    "generation": 12,
+    "reason": "bumped to 12 for a semantic change"
   }
 }
