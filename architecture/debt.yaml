@@ -784,7 +784,7 @@
     },
     {
       "path": "abicheck/sarif.py",
-      "baseline_lines": 1251,
+      "baseline_lines": 1249,
       "target": "report",
       "rule": "no_growth",
       "disposition": "migrate",
