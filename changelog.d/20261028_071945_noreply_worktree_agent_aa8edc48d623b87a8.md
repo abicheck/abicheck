@@ -1,0 +1,3 @@
+### Fixed
+
+- **Callback and generation-drift checks match the castxml opaque `FunctionType` tag as a whole token, not a substring** — `idioms._is_callback_type` and `policy.generation_drift_demotion` used `"FunctionType" in <spelling>`, so real types such as `MyFunctionTypeWrapper*`, `FunctionTypeT` and `struct FunctionTypeHelper&` were taken for castxml's opaque fallback. Both now use the anchored predicate `model.castxml_spelling_artifacts.is_castxml_opaque_function_type`, or the new whole-word `mentions_function_type_tag`, the same predicate the semantic normalizer already used. A repo-scan gate keeps the substring pattern out of `abicheck/`.
