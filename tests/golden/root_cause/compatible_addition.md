@@ -48,7 +48,7 @@
 
 **Additions** (1)
 
-- **_Z6helperi** — `helper`
+- **\_Z6helperi** — `helper`
 
 **Removals** (0)
 

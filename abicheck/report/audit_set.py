@@ -48,7 +48,7 @@ from typing import TYPE_CHECKING, Any
 from ..policy.outcome import OperationalStatus, PolicyGateDecision, RunOutcome
 from ..policy.scope_completeness import resolve_scope_decision
 from .comparison_scope import build_comparison_scope_section, comparison_scope_notice
-from .markdown_text import md_cell
+from .markdown_text import md_text
 from .no_baseline import (
     compute_no_baseline_document,
     no_baseline_report_document,
@@ -409,9 +409,9 @@ def render_no_baseline_set_markdown(doc: NoBaselineSetDocument) -> str:
             else "-"
         )
         lines.append(
-            f"| `{md_cell(m.display_name)}` | "
-            f"{md_cell(_STATE_LABEL.get(m.acquisition_state, m.acquisition_state))} | "
-            f"{'yes' if m.required else 'no'} | {count} | {md_cell(m.reason)} |"
+            f"| {md_text(m.display_name, code=True, table=True)} | "
+            f"{md_text(_STATE_LABEL.get(m.acquisition_state, m.acquisition_state), table=True)} | "
+            f"{'yes' if m.required else 'no'} | {count} | {md_text(m.reason, table=True)} |"
         )
     notice = comparison_scope_notice(doc.comparison_scope)
     if notice:
@@ -419,7 +419,7 @@ def render_no_baseline_set_markdown(doc: NoBaselineSetDocument) -> str:
     for m in doc.members:
         if m.document is None:
             continue
-        lines += ["", f"## Member `{md_cell(m.display_name)}`", ""]
+        lines += ["", f"## Member {md_text(m.display_name, code=True)}", ""]
         lines += _demoted(render_no_baseline_markdown(m.document))
     contributing = [
         _AUDIT_SET_EXIT_AXIS_NOTICES[key]

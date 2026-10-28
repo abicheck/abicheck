@@ -69,6 +69,7 @@ from .disposition_audit import (
     render_disposition_audit_section,
 )
 from .document import ReportDocument
+from .markdown_text import md_text
 from .pattern_modulations_markdown import (
     render_pattern_modulations_from_mapping,
 )
@@ -112,8 +113,8 @@ def _render_view_preamble(d: Mapping[str, Any]) -> list[str]:
         "",
         "| | |",
         "|---|---|",
-        f"| **Old version** | `{d['old_version']}` |",
-        f"| **New version** | `{d['new_version']}` |",
+        f"| **Old version** | {md_text(d['old_version'], code=True, table=True)} |",
+        f"| **New version** | {md_text(d['new_version'], code=True, table=True)} |",
         f"| **Verdict** | {d['verdict_emoji']} `{d['verdict_label']}` |",
         "",
     ]
@@ -131,7 +132,7 @@ def _render_view_preamble(d: Mapping[str, Any]) -> list[str]:
         # internal group as its own `--view show=...` token.
         cli_hint = render_show_only_cli_hint(note["show_only"])
         lines.append(
-            f"> Filtered by: `{cli_hint}` "
+            f"> Filtered by: {md_text(cli_hint, code=True)} "
             f"({note['shown']} of {note['total']} changes shown)"
         )
         lines.append("")

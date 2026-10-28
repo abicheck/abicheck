@@ -62,6 +62,10 @@ REPORT_BUG_CLASSES: tuple[BugClass, ...] = (
         seed_tests=(
             "tests/test_markdown_cell.py",
             "tests/test_no_baseline_report_formats.py",
+            # The renderer-parity matrix reads every Markdown and review
+            # rendering back as a CommonMark reader sees it (prose, code
+            # spans, table cells, demangled names).
+            "tests/unit/report/test_renderer_parity_matrix.py",
         ),
         # `()` and not `("cli",)`: both seed tests call the renderers and the
         # escaper directly, never through Click or `abicheck.service`. A
@@ -76,12 +80,13 @@ REPORT_BUG_CLASSES: tuple[BugClass, ...] = (
                 "backtick",
                 "newline",
                 "control",
+                "angle-bracket",
             ),
             # Only what a seed test really renders. The scope table shares
             # the escaper but no seed test drives a hostile value through
             # it, so listing it here would overstate coverage -- recorded as
             # a known gap below instead (CodeRabbit review).
-            "renderer": ("audit-findings-table",),
+            "renderer": ("audit-findings-table", "markdown", "review"),
         },
         known_gaps=(
             KnownGap(
@@ -283,27 +288,20 @@ REPORT_BUG_CLASSES: tuple[BugClass, ...] = (
             ),
             KnownGap(
                 description=(
-                    "The renderer-parity matrix found three residual "
-                    "between-formats defects, each a strict xfail cell there. "
-                    "(1) Markdown and the review digest show a gating symbol "
-                    "containing '<name>' and a backtick as 'weird&\"*_x': the "
-                    "raw '<name>' in prose is inline HTML a CommonMark reader "
-                    "drops, and the backtick closes the code span around it "
-                    "(the Breaking Changes list, the review Examples line, and "
-                    "the bold review heading). Only table cells are escaped; "
-                    "fixing prose and span escaping changes rendered bytes for "
-                    "every template-named symbol and needs its own golden "
-                    "update. (2) JUnit, the terminal Audit line and the HTML "
-                    "disposition line omit the acknowledged count that Markdown, "
-                    "the review digest and the one-line summary state, so a "
-                    "reader of those formats cannot see that some gating breaks "
-                    "were acknowledged (ADR-067 D5)."
+                    "FIXED (2026-10-28, see the write-up): the three residuals "
+                    "the renderer-parity matrix pinned are closed. (1) Markdown "
+                    "and the review digest escape symbol and type names in prose "
+                    "and in code spans (`md_text`, plus the demangle pass), so "
+                    "'<name>' and a backtick in a gating symbol read back intact. "
+                    "(2) JUnit, the terminal Audit line and the HTML disposition "
+                    "line state the acknowledged count (ADR-067 D5). The matrix's "
+                    "cells are plain assertions now, so a regression fails them "
+                    "directly; no separate canary remains for these residuals."
                 ),
                 reference=(
                     "docs/contribute/known-gaps/"
                     "renderer-parity-escaping-and-acknowledged-count.md"
                 ),
-                canary_test="tests/unit/report/test_renderer_parity_matrix.py",
             ),
         ),
     ),

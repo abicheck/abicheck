@@ -96,8 +96,13 @@ def to_markdown(
         # modulation ledger, the headline/severity tables), and a demangled
         # operator name can carry a `|` into a row that was already built and
         # correctly escaped (Codex review, PR #1284).
+        from .markdown_text import md_text
+
         return demangle_text(
-            text, escape_table_pipes=True, max_demangled=DEMANGLED_NAME_LIMIT
+            text,
+            escape_table_pipes=True,
+            max_demangled=DEMANGLED_NAME_LIMIT,
+            markdown=md_text,
         )
 
     alternate = _markdown_alternate_rendering(

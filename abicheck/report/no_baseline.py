@@ -66,7 +66,7 @@ from .cross_source_evolution import (
 )
 from .document import ReportDocument
 from .finding import build_report_findings
-from .markdown_text import md_cell
+from .markdown_text import md_text
 from .no_baseline_document import (
     AUDIT_REPORT_SCHEMA_VERSION as AUDIT_REPORT_SCHEMA_VERSION,
     NO_BASELINE_EXIT_AXIS_LABELS as NO_BASELINE_EXIT_AXIS_LABELS,
@@ -569,7 +569,7 @@ def render_no_baseline_markdown(doc: NoBaselineDocument) -> str:
         "of the candidate build alone, not a compatibility comparison. No "
         "additions, removals, or compatibility verdict are reported.",
         "",
-        f"- Candidate version: `{doc.new_version or '(unspecified)'}`",
+        f"- Candidate version: {md_text(doc.new_version or '(unspecified)', code=True)}",
         f"- Acquisition state (OLD): `{doc.old_acquisition_state}`",
         f"- Evidence tiers: {', '.join(doc.evidence_tiers) or '(none recorded)'}",
     ]
@@ -596,10 +596,10 @@ def render_no_baseline_markdown(doc: NoBaselineDocument) -> str:
             change = finding.change
             state = change_cross_source_evolution_field(change) or "candidate-side"
             lines.append(
-                f"| `{md_cell(change.kind.value)}` | `{md_cell(change.symbol or '-')}` | "
-                f"{md_cell(finding.category.value)} | "
-                f"{md_cell(_EVOLUTION_NOTE.get(state, state))} | "
-                f"{md_cell(change.description or '')} |"
+                f"| {md_text(change.kind.value, code=True, table=True)} | {md_text(change.symbol or '-', code=True, table=True)} | "
+                f"{md_text(finding.category.value, table=True)} | "
+                f"{md_text(_EVOLUTION_NOTE.get(state, state), table=True)} | "
+                f"{md_text(change.description or '', table=True)} |"
             )
     if doc.suppressed:
         lines += [
@@ -635,10 +635,10 @@ def render_no_baseline_markdown(doc: NoBaselineDocument) -> str:
             source = prov.get("source_file") or "(not recorded)"
             expires = prov.get("expires") or "(never)"
             lines.append(
-                f"| `{md_cell(change.kind.value)}` | `{md_cell(change.symbol or '-')}` | "
-                f"{md_cell(finding.category.value)} | {md_cell(rule)} | "
-                f"{md_cell(str(reason))} | `{md_cell(str(source))}` | "
-                f"{md_cell(str(expires))} |"
+                f"| {md_text(change.kind.value, code=True, table=True)} | {md_text(change.symbol or '-', code=True, table=True)} | "
+                f"{md_text(finding.category.value, table=True)} | {md_text(rule, table=True)} | "
+                f"{md_text(str(reason), table=True)} | {md_text(str(source), code=True, table=True)} | "
+                f"{md_text(str(expires), table=True)} |"
             )
     lines += _exit_axis_notice_lines(doc)
     return "\n".join(lines) + "\n"

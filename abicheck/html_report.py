@@ -171,6 +171,7 @@ def compute_summary_table(
         effective_total=getattr(audit, "effective_total", None),
         disposition_counts=getattr(audit, "counts", ()),
         policy_overlays=int(getattr(audit, "policy_overlays", 0) or 0),
+        acknowledged_total=int(getattr(audit, "acknowledged_total", 0) or 0),
         # Formatted here, compute-side: the renderer decides nothing, and a
         # rule line is one already-resolved sentence either way.
         disposition_rules=tuple(

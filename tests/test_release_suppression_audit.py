@@ -155,7 +155,9 @@ def test_release_markdown_names_every_audited_rule(
     assert ("High-risk matches" in md) is high_risk
     if high_risk:
         # The symbol tail is demangled; the rule label above stayed verbatim.
-        assert "suppressed func_removed: foo()" in md
+        # The symbol is a code span (md_text), its demangled name kept beside
+        # the mangled spelling.
+        assert "suppressed func_removed: `foo() [_Z3foov]`" in md
     assert ("Stale rules" in md) is stale
 
 
@@ -225,8 +227,8 @@ def test_renderer_keeps_symbols_mangled_when_demangling_is_off() -> None:
     ]
     off = "\n".join(_release_md_suppression_audit(libs, demangle=False))
     on = "\n".join(_release_md_suppression_audit(libs, demangle=True))
-    assert "suppressed func_removed: _Z3foov" in off
-    assert "suppressed func_removed: foo()" in on
+    assert "suppressed func_removed: `_Z3foov`" in off
+    assert "suppressed func_removed: `foo() [_Z3foov]`" in on
     # The rule label is never demangled.
     assert "`r (symbol=_Z3foov)`" in off and "`r (symbol=_Z3foov)`" in on
 

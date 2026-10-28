@@ -27,7 +27,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
-from .markdown_text import md_cell
+from .markdown_text import md_text
 
 
 def render_pattern_modulations_from_mapping(
@@ -79,8 +79,8 @@ def render_pattern_modulations_from_mapping(
     ]
     for m in rows:
         lines.append(
-            f"| `{md_cell(m.get('symbol', '?'))}` "
-            f"| `{md_cell(m.get('rule_id', '?'))}` "
-            f"| {md_cell(m.get('reason', ''))} |"
+            f"| {md_text(m.get('symbol', '?'), code=True, table=True)} "
+            f"| {md_text(m.get('rule_id', '?'), code=True, table=True)} "
+            f"| {md_text(m.get('reason', ''), table=True)} |"
         )
     return lines

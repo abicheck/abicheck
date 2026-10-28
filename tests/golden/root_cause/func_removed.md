@@ -52,7 +52,7 @@
 
 **Removals** (1)
 
-- **_Z6helperi** — `helper`
+- **\_Z6helperi** — `helper`
 
 **Modifications** (0)
 

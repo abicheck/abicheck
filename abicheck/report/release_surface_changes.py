@@ -45,6 +45,7 @@ from dataclasses import replace
 from typing import TYPE_CHECKING
 
 from ..model.scope_acquisition import AcquisitionState
+from .markdown_text import md_text
 from .surface_changes import (
     SurfaceChangeEntry,
     SurfaceChangeSection,
@@ -212,11 +213,6 @@ def live_surface_changes(
     return release_surface_changes(sections, record, promise)
 
 
-def _md_cell(value: object) -> str:
-    """One Markdown table cell's text: no pipe, no line break."""
-    return " ".join(str(value).replace("|", "\\|").split())
-
-
 def render_release_surface_lines(block: Mapping[str, object]) -> list[str]:
     """The Markdown ``## Surface changes`` section of a release document.
 
@@ -247,8 +243,8 @@ def render_release_surface_lines(block: Mapping[str, object]) -> list[str]:
         lines += ["**Libraries present on one side only**", ""]
         lines += ["| Library | State | Reason |", "|---|---|---|"]
         lines += [
-            f"| `{_md_cell(row['library']).replace('`', chr(39))}` "
-            f"| {_md_cell(row['state'])} | {_md_cell(row.get('reason') or '')} |"
+            f"| {md_text(row['library'], code=True, table=True)} "
+            f"| {md_text(row['state'], table=True)} | {md_text(row.get('reason') or '', table=True)} |"
             for row in states
         ]
         lines.append("")

@@ -260,7 +260,9 @@ def test_markdown_state_table_escapes_pipes_and_line_breaks() -> None:
         line for line in render_release_surface_lines(block) if line.startswith("| `")
     ]
 
-    assert rows == ["| `lib'x\\|y.so` | unproven | a \\| b c |"]
+    # The backtick stays in the name: a double fence holds it, so the code span
+    # reads back as the library name instead of a `'` substitute.
+    assert rows == ["| ``lib`x\\|y.so`` | unproven | a \\| b c |"]
 
 
 def _member(name: str, state, old: bool, new: bool, reason: str = ""):

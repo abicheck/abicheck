@@ -48,6 +48,8 @@ from __future__ import annotations
 from collections.abc import Iterable, Sequence
 from typing import TypeVar
 
+from .markdown_text import md_text
+
 _T = TypeVar("_T")
 
 #: Characters of one entity name shown.
@@ -126,7 +128,7 @@ def example_names(
     """
     shown = [str(name) for name in names]
     count = len(shown) if total is None else total
-    text = ", ".join(f"`{clip_name(name)}`" for name in shown[:limit])
+    text = ", ".join(md_text(clip_name(name), code=True) for name in shown[:limit])
     more = count - min(len(shown), limit)
     if more > 0:
         text += f" … and {more} more"
