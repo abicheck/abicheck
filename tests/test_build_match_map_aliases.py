@@ -15,9 +15,16 @@ import pytest
 from abicheck.binary_utils import build_match_map
 
 
+def _symlink(link: Path, target: str) -> None:
+    try:
+        link.symlink_to(target)
+    except OSError as exc:  # e.g. Windows without symlink privilege
+        pytest.skip(f"symlinks unavailable: {exc}")
+
+
 def _alias(kind: str, target: Path, link: Path) -> None:
     if kind == "symlink":
-        link.symlink_to(target.name)
+        _symlink(link, target.name)
     else:
         os.link(target, link)
 
@@ -55,7 +62,25 @@ def test_distinct_files_still_warn(tmp_path: Path) -> None:
 
 def test_alias_plus_distinct_file_still_warns(tmp_path: Path) -> None:
     (tmp_path / "libfoo.so.2").write_bytes(b"v2")
-    (tmp_path / "libfoo.so").symlink_to("libfoo.so.2")
+    _symlink(tmp_path / "libfoo.so", "libfoo.so.2")
     (tmp_path / "libfoo.so.1").write_bytes(b"v1")
+    _, warnings = build_match_map(sorted(tmp_path.iterdir()))
+    assert len(warnings) == 1
+
+
+def test_zero_inode_is_not_an_identity(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    (tmp_path / "libfoo.so").write_bytes(b"old")
+    (tmp_path / "libfoo.so.2").write_bytes(b"new")
+    real_stat = Path.stat
+
+    def fake_stat(self: Path, *a: object, **k: object) -> os.stat_result:
+        st = real_stat(self, *a, **k)
+        fields = list(st)
+        fields[1] = 0  # st_ino
+        return os.stat_result(fields)
+
+    monkeypatch.setattr(Path, "stat", fake_stat)
     _, warnings = build_match_map(sorted(tmp_path.iterdir()))
     assert len(warnings) == 1

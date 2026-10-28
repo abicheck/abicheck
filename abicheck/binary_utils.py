@@ -443,15 +443,18 @@ def _distinct_file_count(paths: list[Path]) -> int:
     library under two names, not a choice between versions: folding by
     ``(st_dev, st_ino)`` keeps the "Ambiguous match" warning for genuinely
     different files only. A path that cannot be stat'ed counts as its own
-    file, so an unreadable candidate never hides a real ambiguity.
+    file (as does a zero inode), so an unidentifiable candidate never hides
+    a real ambiguity.
     """
     identities: set[object] = set()
     for p in paths:
         try:
             st = p.stat()
-            identities.add((st.st_dev, st.st_ino))
         except OSError:
             identities.add(p)
+            continue
+        # st_ino == 0 means the filesystem has no stable identity to offer.
+        identities.add((st.st_dev, st.st_ino) if st.st_ino else p)
     return len(identities)
 
 
