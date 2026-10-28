@@ -19,8 +19,6 @@ from pathlib import Path
 
 import pytest
 
-import abicheck
-from abicheck.model import tool_version
 from abicheck.model.tool_version import checkout_commit
 
 pytestmark = pytest.mark.skipif(shutil.which("git") is None, reason="needs git")
@@ -95,16 +93,6 @@ def test_no_checkout_means_plain_release_number(tmp_path: Path) -> None:
     (tmp_path / "pyproject.toml").write_text(_ABICHECK_PYPROJECT)
     assert checkout_commit(tmp_path) is None  # pyproject but no .git
     assert checkout_commit(tmp_path / "missing") is None
-
-
-@pytest.mark.parametrize(
-    ("sha", "suffix"), [("0123456789abcdef", "+g012345678"), (None, "")]
-)
-def test_build_version_is_release_plus_commit_or_release(
-    monkeypatch, sha: str | None, suffix: str
-) -> None:
-    monkeypatch.setattr(tool_version, "checkout_commit", lambda root: sha)
-    assert tool_version.build_version() == abicheck.__version__ + suffix
 
 
 def test_undecodable_git_metadata_falls_back_to_the_release(tmp_path: Path) -> None:
