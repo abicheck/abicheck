@@ -6,6 +6,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, cast
 
+from ..policy.acknowledgment_breaks import accepted_break_ids
 from .review_groups import build_review_groups
 
 if TYPE_CHECKING:
@@ -22,9 +23,12 @@ def review_groups_for(
 ) -> tuple[dict[str, object], ...]:
     """Review groups over *findings*, gated under *envelope*'s own scheme."""
     config = None if envelope is None else envelope.severity_config
+    accepted = frozenset() if envelope is None else accepted_break_ids(envelope.result)
     return tuple(
         group.to_dict()
-        for group in build_review_groups(findings, severity_config=config)
+        for group in build_review_groups(
+            findings, severity_config=config, accepted=accepted
+        )
     )
 
 

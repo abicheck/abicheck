@@ -50,13 +50,20 @@ from .edge_coverage_section import (
 )
 from .envelope import ReportEnvelope, resolved_document
 from .finding import ReportFinding, build_report_findings
+from .gating_budget import non_gating_change_ids
 from .not_evaluated_section import compute_not_evaluated
-from .policy_facts import evidence_status_of, impact_text_for, kind_sets_for
+from .policy_facts import (
+    accepted_break_ids,
+    evidence_status_of,
+    impact_text_for,
+    kind_sets_for,
+)
 from .review_digest_document import (
     build_review_digest_document as build_review_digest_document,
     render_review_digest_document as render_review_digest_document,
 )
 from .review_groups import build_review_groups
+from .root_cause_section import compute_root_cause_section
 from .section_notes import (
     compute_out_of_surface_note,
     compute_redundancy_note,
@@ -450,6 +457,7 @@ def build_markdown_document(
                     if envelope is None
                     else envelope.findings_for(changes),
                     severity_config=severity_config,
+                    accepted=accepted_break_ids(result),
                 )
             ]
         ),
@@ -566,7 +574,19 @@ def build_root_cause_document(
         result, severity_config, show_only
     )
 
-    root_cause_section = rm.compute_root_cause_section(
+    # The findings the gate does not count are the only ones the size budget
+    # may summarise in this view (report/gating_budget.py).
+    root_cause_findings = (
+        build_report_findings(
+            changes,
+            policy=result.policy,
+            kind_sets=kind_sets_for(result),
+            policy_file=result.policy_file,
+        )
+        if envelope is None
+        else envelope.findings_for(changes)
+    )
+    root_cause_section = compute_root_cause_section(
         changes,
         scoped_only,
         missing_labels,
@@ -574,6 +594,9 @@ def build_root_cause_document(
         missing_kind,
         contract_evaluation=contract_evaluation,
         evidence_tiers=result.evidence_tiers,
+        non_gating=non_gating_change_ids(
+            root_cause_findings, severity_config, accepted_break_ids(result)
+        ),
     )
     has_root_cause_entries = root_cause_section is not None
 

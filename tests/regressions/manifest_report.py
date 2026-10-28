@@ -186,6 +186,11 @@ REPORT_BUG_CLASSES: tuple[BugClass, ...] = (
             # omission count of every truncated list. Formats come from the
             # dispatch table, so a new one fails until it has an extractor.
             "tests/unit/report/test_renderer_parity_matrix.py",
+            # An acknowledged break that `breaks: accept` removes from the gate,
+            # under a severity config that demotes an ABI break: the severity
+            # block, the ledger, the review groups and every format's gating
+            # line must state the count the process exit was decided by.
+            "tests/unit/report/test_accepted_break_gating_surfaces.py",
         ),
         axes={
             # Only what a seed test really drives -- and *all* of it. This
@@ -225,7 +230,14 @@ REPORT_BUG_CLASSES: tuple[BugClass, ...] = (
                 "gating-symbol",
                 "truncated-list",
             ),
-            "gate_scheme": ("legacy", "severity-error", "severity-demoted"),
+            "gate_scheme": (
+                "legacy",
+                "severity-error",
+                "severity-demoted",
+                # ADR-067 `breaks: accept`: an accepted break is off the gate in
+                # every surface (test_accepted_break_gating_surfaces.py).
+                "accepted-break",
+            ),
             "contract": ("none", "in", "out", "mixed"),
         },
         known_gaps=(
@@ -810,6 +822,13 @@ REPORT_BUG_CLASSES: tuple[BugClass, ...] = (
             "tests/unit/report/test_review_group_bounds.py",
             "tests/unit/report/test_contract_conflicts_markdown_budget.py",
             "tests/test_report_kind_rollup.py",
+            # Every human renderer of one 5,000-finding set (the HTML and the
+            # root-cause Markdown view were unbounded): each stays under the
+            # PR-comment budget and states the count of every finding it does
+            # not itemise. Machine formats carry all of them.
+            "tests/unit/report/test_renderer_size_budget.py",
+            # The `--no-baseline` audit's findings and suppressed tables.
+            "tests/unit/report/test_no_baseline_size_budget.py",
         ),
         axes={
             "section": (
@@ -821,8 +840,12 @@ REPORT_BUG_CLASSES: tuple[BugClass, ...] = (
                 "contract_conflicts",
                 "review_groups",
                 "review_digest",
+                "html",
+                "root_cause",
+                "no_baseline_findings",
+                "no_baseline_suppressed",
             ),
-            "finding_count": ("10", "500", "3000"),
+            "finding_count": ("10", "500", "3000", "5000"),
         },
         known_gaps=(
             KnownGap(

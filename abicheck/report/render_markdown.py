@@ -97,7 +97,7 @@ def _format_change_md(c: object, impact: str | None = None) -> str:
     already-resolved display string, never a registry lookup made here
     (Codex review: ``report/AGENTS.md`` L78-L89 treats ``impact_for()``
     itself as a report decision, not a render-side formatting choice).
-    Resolved by ``reporter_markdown.compute_root_cause_section``, matching
+    Resolved by ``report.root_cause_section.compute_root_cause_section``, matching
     every other projection's ``row["impact"]`` shape.
     """
     kind = getattr(c, "kind", None)
@@ -174,25 +174,45 @@ class RootCauseGroupData:
     root_display: str
     count: int
     finding_lines: tuple[str, ...]
+    #: Non-gating findings of this root cause left out by the shared budget.
+    omitted: int = 0
 
 
 @dataclass(frozen=True, slots=True)
 class RootCauseSectionData:
     groups: tuple[RootCauseGroupData, ...]
+    #: Root causes with nothing itemised (non-gating findings only, all cut).
+    omitted_groups: int = 0
+    #: Findings under those omitted root causes.
+    omitted_findings: int = 0
 
 
 def render_root_cause_section(data: RootCauseSectionData | None) -> list[str]:
     if data is None:
         return []
-    lines: list[str] = [f"## Root Causes ({len(data.groups)})", ""]
-    # Every finding stays listed (a root may carry a break); only names and
-    # lines are clipped to the shared Markdown budget.
+    shown_groups = len(data.groups) + data.omitted_groups
+    lines: list[str] = [f"## Root Causes ({shown_groups})", ""]
+    # Gating findings stay listed (a root may carry a break); only names and
+    # lines are clipped to the shared Markdown budget. Non-gating findings past
+    # the budget are counted, and the count is stated under their root cause.
     for group in data.groups:
         plural = "" if group.count == 1 else "s"
         root = clip_name(group.root_display)
         lines.append(f"### `{root}` ({group.count} finding{plural})")
         lines.append("")
         lines.extend(clip(line) for line in group.finding_lines)
+        if group.omitted:
+            lines.append(
+                f"- … and {group.omitted} more non-gating finding(s) under this "
+                "root cause not itemised; see the JSON `changes`."
+            )
+        lines.append("")
+    if data.omitted_groups:
+        lines.append(
+            f"_{data.omitted_groups} more root cause(s) holding "
+            f"{data.omitted_findings} non-gating finding(s) not itemised; every "
+            "finding is in the JSON `changes`._"
+        )
         lines.append("")
     return lines
 
