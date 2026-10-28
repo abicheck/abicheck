@@ -39,6 +39,7 @@ import re
 __all__ = [
     "has_unresolved_component",
     "is_castxml_opaque_function_type",
+    "mentions_function_type_tag",
     "CLANG_EXPR_FINGERPRINT_RE",
 ]
 
@@ -216,6 +217,26 @@ def is_castxml_opaque_function_type(raw_type: str, producer: str) -> bool:
     return producer == "castxml" and bool(
         _CASTXML_OPAQUE_FUNCTION_TYPE_RE.match(raw_type)
     )
+
+
+#: The bare ``FunctionType`` identifier as a whole word: not glued to a longer
+#: identifier on either side (``MyFunctionTypeWrapper``, ``FunctionTypeT``,
+#: ``FunctionType_t``, ``1FunctionType``).
+_FUNCTION_TYPE_TAG_TOKEN_RE = re.compile(r"(?<!\w)FunctionType(?!\w)")
+
+
+def mentions_function_type_tag(spelling: str) -> bool:
+    """Whether *spelling* contains the castxml opaque tag ``FunctionType`` as
+    a whole token, anywhere in the string.
+
+    Use this when the question is "does this spelling mention the tag at
+    all" (for example, a declarator that embeds a callback parameter). Use
+    :func:`is_castxml_opaque_function_type` when the question is "is this
+    spelling exactly the opaque fallback". A bare ``"FunctionType" in s``
+    test is wrong for both: it also matches real names such as
+    ``MyFunctionTypeWrapper*``.
+    """
+    return _FUNCTION_TYPE_TAG_TOKEN_RE.search(spelling) is not None
 
 
 def has_unresolved_component(raw_type: str) -> bool:

@@ -45,7 +45,10 @@ from __future__ import annotations
 import re
 from collections.abc import Iterable
 
-from ..model.castxml_spelling_artifacts import is_castxml_opaque_function_type
+from ..model.castxml_spelling_artifacts import (
+    is_castxml_opaque_function_type,
+    mentions_function_type_tag,
+)
 from ..model.change import Change
 from ..model.change_catalog.kinds import ChangeKind
 from ..model.change_catalog.registry import Verdict
@@ -179,9 +182,11 @@ def _is_opaque_callback_respelled(old: str, new: str, declared: frozenset[str]) 
     """
     if (
         "FunctionType" in declared
-        or "FunctionType" in new
-        or "_Atomic" in old
+        or mentions_function_type_tag(new)
         or not is_castxml_opaque_function_type(old, "castxml")
+        # Reached only for a spelling the anchored predicate accepted, where
+        # ``_Atomic`` can only be the castxml wrapper, never part of a name.
+        or "_Atomic" in old
     ):
         return False
     declarator = _FUNCTION_DECLARATOR.match(new)
