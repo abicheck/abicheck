@@ -1,0 +1,4 @@
+### Added
+
+- The Markdown "Breaking Changes" and "Source-Level Breaks" sections now say how many removed exports were WEAK-bound when any were (e.g. "1744 of 1744 removed export(s) with an observed binding were WEAK"). Template instantiations and inline functions are typical examples. The note explains when such a removal does and does not break a consumer. The verdict is unchanged: a weak removal stays breaking, because `extern template` consumers rely on the library's definition. The JSON report already carries `symbol_binding` on each finding.
+- When abicheck runs from a source checkout, `abicheck --version` and the SARIF `tool.driver.version` now append the commit, e.g. `0.7.0+g0101b71ab`. Before this, every commit after a release reported the release number. Installed wheels still report the plain release number.

@@ -49,7 +49,7 @@ from ..model.scope_acquisition import (
 )
 from ..policy.outcome import ScopeCompleteness
 from ..policy.scope_completeness import ScopeDecision
-from .markdown_text import md_cell
+from .markdown_text import md_text
 
 __all__ = [
     "ComparisonScopeTerms",
@@ -150,13 +150,6 @@ def build_comparison_scope_section(decision: ScopeDecision) -> dict[str, Any]:
     return section
 
 
-#: This module's long-standing spelling of the shared escaping rule, kept as
-#: a name so every call site below stays unchanged; the rule itself now lives
-#: in :mod:`abicheck.report.markdown_text` so ``no_baseline.py``'s finding
-#: tables apply the identical one rather than a second copy.
-_md_cell = md_cell
-
-
 def _unchecked_rows(section: Mapping[str, Any]) -> list[Mapping[str, Any]]:
     """The member rows the unchecked list renders: exactly the section's own
     resolved ``unchecked`` names, never re-derived from acquisition state.
@@ -182,7 +175,7 @@ def comparison_scope_notice(section: Mapping[str, Any]) -> str | None:
         return None
     rows = _unchecked_rows(section)
     names = ", ".join(
-        f"{_md_cell(m.get('name'))} ({_STATE_LABEL.get(str(m.get('state')), m.get('state'))})"
+        f"{md_text(m.get('name'), table=True)} ({_STATE_LABEL.get(str(m.get('state')), m.get('state'))})"
         for m in rows
     )
     # D7 first: a zero-comparison run fails under either policy (its own
@@ -227,7 +220,7 @@ def render_comparison_scope_markdown(section: Mapping[str, Any]) -> list[str]:
     lines.insert(len(lines) - 1, "| | |")
     lines.insert(len(lines) - 1, "|---|---|")
     lines.append(
-        f"| **Selection** | {_md_cell(section.get('selection_reason') or section.get('selection'))} |"
+        f"| **Selection** | {md_text(section.get('selection_reason') or section.get('selection'), table=True)} |"
     )
     lines.append(
         f"| **Policy** | `scope.on_incomplete: {section.get('policy', 'warn')}` "
@@ -251,9 +244,9 @@ def render_comparison_scope_markdown(section: Mapping[str, Any]) -> list[str]:
         ]
         for m in rows:
             lines.append(
-                f"| `{_md_cell(m.get('name'))}` | {_STATE_LABEL.get(str(m.get('state')), m.get('state'))} "
+                f"| {md_text(m.get('name'), code=True, table=True)} | {_STATE_LABEL.get(str(m.get('state')), m.get('state'))} "
                 f"| {'✓' if m.get('old_present') else '—'} | {'✓' if m.get('new_present') else '—'} "
-                f"| {_md_cell(m.get('reason', ''))} |"
+                f"| {md_text(m.get('reason', ''), table=True)} |"
             )
     for key, title in (
         ("proven_removed", "Removed libraries (inventory-proven)"),
@@ -263,6 +256,6 @@ def render_comparison_scope_markdown(section: Mapping[str, Any]) -> list[str]:
         if isinstance(names, list) and names:
             lines += [
                 "",
-                f"**{title}:** " + ", ".join(f"`{_md_cell(n)}`" for n in names),
+                f"**{title}:** " + ", ".join(md_text(n, code=True) for n in names),
             ]
     return lines

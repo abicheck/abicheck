@@ -48,6 +48,7 @@ from typing import Any
 from ..model.change import Change
 from .kind_rollup import KindRollup
 from .markdown_budget import NOTE_ITEM_LIMIT, clip, clip_name, more_line, split_items
+from .markdown_text import md_text
 
 
 def _contract_decision_text(
@@ -85,7 +86,7 @@ def _format_change_md_oneline(c: object) -> str:
     kind = getattr(c, "kind", None)
     kind_val = kind.value if kind else ""
     desc = getattr(c, "description", "")
-    line = f"- **{kind_val}**: {desc}"
+    line = f"- **{kind_val}**: {md_text(desc)}"
     correlated = getattr(c, "correlated_change_kind", None)
     if correlated:
         line += f"\n  > See also: `{correlated}` finding for the same symbol"
@@ -97,7 +98,7 @@ def _format_change_md(c: object, impact: str | None = None) -> str:
     already-resolved display string, never a registry lookup made here
     (Codex review: ``report/AGENTS.md`` L78-L89 treats ``impact_for()``
     itself as a report decision, not a render-side formatting choice).
-    Resolved by ``reporter_markdown.compute_root_cause_section``, matching
+    Resolved by ``report.root_cause_section.compute_root_cause_section``, matching
     every other projection's ``row["impact"]`` shape.
     """
     kind = getattr(c, "kind", None)
@@ -112,16 +113,16 @@ def _format_change_md(c: object, impact: str | None = None) -> str:
     # Base line
     old_new = ""
     if old_val is not None and new_val is not None:
-        old_new = f" (`{old_val}` → `{new_val}`)"
+        old_new = f" ({md_text(old_val, code=True)} → {md_text(new_val, code=True)})"
     elif old_val is not None:
-        old_new = f" (`{old_val}`)"
+        old_new = f" ({md_text(old_val, code=True)})"
     elif new_val is not None:
-        old_new = f" (`{new_val}`)"
-    line = f"- **{kind_val}**: {desc}{old_new}"
+        old_new = f" ({md_text(new_val, code=True)})"
+    line = f"- **{kind_val}**: {md_text(desc)}{old_new}"
 
     # Source location
     if loc:
-        line += f" — `{loc}`"
+        line += f" — {md_text(loc, code=True)}"
 
     # Impact
     if impact:
@@ -133,7 +134,7 @@ def _format_change_md(c: object, impact: str | None = None) -> str:
 
     # Affected functions
     if affected:
-        names = ", ".join(f"`{s}`" for s in affected[:5])
+        names = ", ".join(md_text(s, code=True) for s in affected[:5])
         suffix = f" (+{len(affected) - 5} more)" if len(affected) > 5 else ""
         line += f"\n  > Affected symbols: {names}{suffix}"
 
@@ -174,25 +175,45 @@ class RootCauseGroupData:
     root_display: str
     count: int
     finding_lines: tuple[str, ...]
+    #: Non-gating findings of this root cause left out by the shared budget.
+    omitted: int = 0
 
 
 @dataclass(frozen=True, slots=True)
 class RootCauseSectionData:
     groups: tuple[RootCauseGroupData, ...]
+    #: Root causes with nothing itemised (non-gating findings only, all cut).
+    omitted_groups: int = 0
+    #: Findings under those omitted root causes.
+    omitted_findings: int = 0
 
 
 def render_root_cause_section(data: RootCauseSectionData | None) -> list[str]:
     if data is None:
         return []
-    lines: list[str] = [f"## Root Causes ({len(data.groups)})", ""]
-    # Every finding stays listed (a root may carry a break); only names and
-    # lines are clipped to the shared Markdown budget.
+    shown_groups = len(data.groups) + data.omitted_groups
+    lines: list[str] = [f"## Root Causes ({shown_groups})", ""]
+    # Gating findings stay listed (a root may carry a break); only names and
+    # lines are clipped to the shared Markdown budget. Non-gating findings past
+    # the budget are counted, and the count is stated under their root cause.
     for group in data.groups:
         plural = "" if group.count == 1 else "s"
         root = clip_name(group.root_display)
-        lines.append(f"### `{root}` ({group.count} finding{plural})")
+        lines.append(f"### {md_text(root, code=True)} ({group.count} finding{plural})")
         lines.append("")
         lines.extend(clip(line) for line in group.finding_lines)
+        if group.omitted:
+            lines.append(
+                f"- … and {group.omitted} more non-gating finding(s) under this "
+                "root cause not itemised; see the JSON `changes`."
+            )
+        lines.append("")
+    if data.omitted_groups:
+        lines.append(
+            f"_{data.omitted_groups} more root cause(s) holding "
+            f"{data.omitted_findings} non-gating finding(s) not itemised; every "
+            "finding is in the JSON `changes`._"
+        )
         lines.append("")
     return lines
 
@@ -285,7 +306,7 @@ def render_suppression_note(note: SuppressionNote | None) -> list[str]:
     # Suppressed findings never gate: bounded like any non-gating list.
     shown, hidden = split_items(note.entries, NOTE_ITEM_LIMIT)
     for entry in shown:
-        line = f">   - `{clip_name(entry.symbol)}` — {entry.description}"
+        line = f">   - {md_text(clip_name(entry.symbol), code=True)} — {md_text(entry.description)}"
         if entry.contract_text is not None:
             line += f" [contract: {entry.contract_text}]"
         lines.append(clip(line))
@@ -431,7 +452,7 @@ def render_library_files_section(
         "",
         "| | Old | New |",
         "|---|---|---|",
-        f"| **Path** | `{section.old_path}` | `{section.new_path}` |",
+        f"| **Path** | {md_text(section.old_path, code=True, table=True)} | {md_text(section.new_path, code=True, table=True)} |",
         f"| **SHA-256** | `{section.old_sha}…` | `{section.new_sha}…` |",
         f"| **Size** | {section.old_size} | {section.new_size} |",
         "",
@@ -494,7 +515,7 @@ def render_environment_drift_section(
     # Every entry is also itemised (or counted) in its severity section.
     shown, hidden = split_items(section.entries, NOTE_ITEM_LIMIT)
     for entry in shown:
-        lines.append(clip(f"- **{entry.kind}**: {entry.description}"))
+        lines.append(clip(f"- **{entry.kind}**: {md_text(entry.description)}"))
     if (more := more_line(hidden, "changes")) is not None:
         lines.append(more)
     lines.append("")
@@ -676,8 +697,8 @@ def render_headline_table(table: HeadlineTable) -> list[str]:
         "",
         "| | |",
         "|---|---|",
-        f"| **Old version** | `{table.old_version}` |",
-        f"| **New version** | `{table.new_version}` |",
+        f"| **Old version** | {md_text(table.old_version, code=True, table=True)} |",
+        f"| **New version** | {md_text(table.new_version, code=True, table=True)} |",
         f"| **Verdict** | {table.verdict_emoji} `{table.verdict_label}` |",
         f"| Breaking changes | {table.breaking} |",
         f"| Source-level breaks | {table.source_breaks} |",

@@ -21,7 +21,7 @@ The oracle is the JSON report of the same completed comparison, read through
 * the per-group lists of the review digest and terminal output account for
   every retained group, with an explicit omission count when truncated;
 * the disposition counts every format is expected to state are present
-  (the mixed scenario), with a strict xfail cell wherever a format drops one;
+  (the mixed scenario);
 * a gating symbol a format itemises is visible to a reader of that format,
   so a Markdown renderer that hides a name inside a raw-HTML tag or a broken
   code span is caught.
@@ -320,7 +320,7 @@ def _extract_junit(text: str) -> Stated:
         non_gating=int(props["abicheck.disposition.non_gating"]),
         suppressed=int(props["abicheck.disposition.suppressed"]),
         excluded=int(props["abicheck.disposition.out_of_contract"]),
-        acknowledged=None,
+        acknowledged=int(props["abicheck.disposition.acknowledged"]),
         listed_gating=frozenset(c.get("name") or "" for c in failing),
         visible="\n".join(strings),
     )
@@ -359,7 +359,7 @@ def _extract_html(text: str) -> Stated:
     for piece in pieces:
         for part in piece.split(", "):
             match = re.search(
-                r"(\d+) (detected|gating|non gating|suppressed|out of contract)$",
+                r"(\d+) (detected|gating|non gating|acknowledged|suppressed|out of contract)$",
                 part.strip(),
             )
             assert match is not None, f"unrecognised HTML disposition item: {part!r}"
@@ -371,7 +371,7 @@ def _extract_html(text: str) -> Stated:
         non_gating=items.get("non gating", 0),
         suppressed=items.get("suppressed", 0),
         excluded=items.get("out of contract", 0),
-        acknowledged=None,
+        acknowledged=items.get("acknowledged", 0),
         visible=visible,
     )
 
@@ -423,8 +423,11 @@ def _markdown_breaking_symbols(text: str) -> frozenset[str]:
             continue
         # "- **kind**: <description> (`<old> → <new>` or `<symbol>`)": the
         # description's last ": " separates the kind text from the symbol.
-        body = line.split("**: ", 1)[1]
-        head = body.split(" (`", 1)[0]
+        # The body is read as a reader sees it (escapes resolved, code spans
+        # unwrapped), so an escaped `\<name\>` in prose reads back as `<name>`.
+        body = _markdown_visible(line.split("**: ", 1)[1]).strip()
+        # The trailing parenthetical is the symbol (or "old → new"): cut there.
+        head = body[: body.rfind(" (")] if body.endswith(")") and " (" in body else body
         assert ": " in head, f"Breaking line has no description: {line!r}"
         symbols.add(head.rsplit(": ", 1)[1])
     return frozenset(symbols)
@@ -468,7 +471,8 @@ def _extract_terminal(text: str) -> Stated:
         text,
     )
     audit = re.search(
-        r"Audit: \d+ detected; \d+ gating; (\d+) suppressed; \d+ rule\(s\) applied; (\d+) scope-excluded",
+        r"Audit: \d+ detected; \d+ gating; (\d+) acknowledged; (\d+) suppressed; "
+        r"\d+ rule\(s\) applied; (\d+) scope-excluded",
         text,
     )
     assert counts is not None and audit is not None, (
@@ -480,8 +484,9 @@ def _extract_terminal(text: str) -> Stated:
         detected=int(counts.group(1)),
         gating=int(counts.group(2)),
         non_gating=int(counts.group(3)),
-        suppressed=int(audit.group(1)),
-        excluded=int(audit.group(2)),
+        acknowledged=int(audit.group(1)),
+        suppressed=int(audit.group(2)),
+        excluded=int(audit.group(3)),
         group_rows=len(rows),
         group_omitted=_int(r"\.\.\. (\d+) more groups? omitted", text),
         visible=text,
@@ -519,53 +524,6 @@ EXTRACTORS: dict[str, Callable[[str], Stated]] = {
 #: Formats whose text shows finding names a reader can check for presence.
 #: The one-line summary deliberately carries counts only.
 SHOWS_SYMBOLS: frozenset[str] = DISPATCH_FORMATS - {ONELINE_FORMAT}
-
-#: Cells that are known-defective. Each is strict: once the defect is fixed the
-#: XPASS fails the test and the entry must be removed in the same change.
-KNOWN_DISPOSITION_GAPS: dict[tuple[str, str], str] = {
-    ("junit", "acknowledged"): (
-        "JUnit publishes the disposition counts as properties but not the "
-        "acknowledgment overlay (acknowledged_total), so a CI reader of the "
-        "XML cannot see that some failing breaks were acknowledged (they keep "
-        "their verdict class and gate contribution, ADR-067 D5)."
-    ),
-    ("html", "acknowledged"): (
-        "The HTML disposition line states detected/gating/non-gating/suppressed/"
-        "out-of-contract but omits the acknowledged count that Markdown and the "
-        "review digest state (ADR-067 D5)."
-    ),
-    ("terminal", "acknowledged"): (
-        "The terminal Audit line omits the acknowledged count that Markdown, the "
-        "review digest and the one-line summary state, so an acknowledged break "
-        "is invisible to a terminal reader (ADR-067 D5)."
-    ),
-}
-
-#: Verified against a CommonMark parser (``_markdown_visible``): the symbol
-#: ``weird<name>&"`*_x`` reads back as ``weird&"*_x``. Two causes, both unescaped
-#: values: the raw ``<name>`` in prose is inline HTML and is dropped, and a
-#: backtick inside the symbol closes the code span that wraps it. The same
-#: happens in the Markdown "Examples" line. The fix (escape prose and pick a
-#: code-span fence longer than any backtick run) changes rendered bytes for
-#: every template-named symbol, so it is recorded here rather than made under
-#: this harness; it needs its own golden-output update.
-KNOWN_RENDER_DEFECTS: dict[tuple[str, str], str] = {
-    **{
-        (fmt, WEIRD): (
-            "Markdown shows the symbol as 'weird&\"*_x': the raw '<name>' in the "
-            "Breaking Changes prose is inline HTML and is dropped, and the "
-            "backtick in the symbol closes the code span that wraps it. Values "
-            "are not escaped for prose or code spans (only table cells are)."
-        )
-        for fmt in ("markdown", "md")
-    },
-    ("review", WEIRD): (
-        "The review digest prints the symbol bold, '**weird<name>&\"`*_x**'. "
-        "The raw '<name>' is inline HTML and is dropped by a CommonMark reader, "
-        "so the name reads back as 'weird&\"*_x'."
-    ),
-}
-
 
 # ---------------------------------------------------------------------------
 # Fixtures: render every scenario through every dispatch format, once.
@@ -724,18 +682,7 @@ def test_format_agrees_with_json_oracle(
 @pytest.mark.parametrize(
     ("fmt", "field"),
     [
-        pytest.param(
-            fmt,
-            field,
-            id=f"{fmt}-{field}",
-            marks=(
-                pytest.mark.xfail(
-                    strict=True, reason=KNOWN_DISPOSITION_GAPS[(fmt, field)]
-                )
-                if (fmt, field) in KNOWN_DISPOSITION_GAPS
-                else ()
-            ),
-        )
+        pytest.param(fmt, field, id=f"{fmt}-{field}")
         for fmt in sorted(DISPATCH_FORMATS)
         for field in DISPOSITION_FIELDS
     ],
@@ -761,18 +708,7 @@ def test_format_states_each_disposition_count(
 @pytest.mark.parametrize(
     ("fmt", "symbol"),
     [
-        pytest.param(
-            fmt,
-            symbol,
-            id=f"{fmt}-{symbol}",
-            marks=(
-                pytest.mark.xfail(
-                    strict=True, reason=KNOWN_RENDER_DEFECTS[(fmt, symbol)]
-                )
-                if (fmt, symbol) in KNOWN_RENDER_DEFECTS
-                else ()
-            ),
-        )
+        pytest.param(fmt, symbol, id=f"{fmt}-{symbol}")
         for fmt in sorted(SHOWS_SYMBOLS)
         for symbol in (WEIRD, UNICODE, PIPE, "removed_a", "ack_removed")
     ],

@@ -70,7 +70,7 @@ Each entry's status line says what is still open. A PARTIAL entry's write-up als
 
 #### Markdown/review lose `<…>` and backticks in symbol names; three formats omit the acknowledged count (2026-10-28)
 
-**Status (2026-10-28): OPEN.** The renderer-parity matrix pins both as strict xfail cells: prose and code spans are not escaped outside table cells, and JUnit, the terminal Audit line and the HTML disposition line do not state the acknowledged count. [Full write-up](known-gaps/renderer-parity-escaping-and-acknowledged-count.md)
+**Status (2026-10-28): FIXED.** Prose, code spans and table cells are escaped by one helper (`md_text`), and the demangle pass escapes the names it inserts. JUnit, the terminal Audit line and the HTML disposition line state the acknowledged count. The renderer-parity matrix's strict xfail cells are now plain assertions. [Full write-up](known-gaps/renderer-parity-escaping-and-acknowledged-count.md)
 
 #### The Markdown "Additions" section is one row per finding, so it grows linearly (2026-10-22)
 
@@ -117,7 +117,7 @@ current emitter, which is unchanged.
 
 #### A readable but corrupted `.dynsym` entry can still read as a clean compare (2026-10-27)
 
-**Status (2026-10-27): PARTIAL.** A binary whose export table is structurally unreadable (zeroed or unreachable section header table, no `.dynsym`, a `.dynsym` filled with `0xff`, truncated, or exported entries with no resolvable name) is now refused at dump with exit 1 (`tests/test_export_table_unreadable_matrix.py`, OLD/NEW/both). Residual: corruption that leaves every entry structurally valid is read as the table it now says. Random byte flips inside `.dynsym` (`st_info`, `st_shndx`, `st_value`, or a `st_name` that still lands on a non-empty string) and garbage bytes in `.dynstr` that still yield non-empty names parse without a failure. On one side the result is a fabricated `BREAKING`; on the corrupted side of a pair it can be `COMPATIBLE` (exit 0, removals hidden) or, with both sides identically corrupted, `NO_CHANGE`. No reader can tell these from a legitimate table without a checksum.
+**Status (2026-10-28): PARTIAL.** A shared object whose section header table is zeroed, absent or stripped (`sstrip`, `e_shoff`/`e_shnum` cleared) is no longer refused: the loader's view of the dynamic table (`PT_DYNAMIC`, `DT_SYMTAB`/`DT_STRTAB`/`DT_STRSZ`/`DT_SYMENT`, the `DT_GNU_HASH` or `DT_HASH` count, `DT_VERSYM`/`DT_VERDEF`/`DT_VERNEED`) yields the same exports, bindings, visibility and versions as the intact build (`abicheck/extract/elf_loader_view.py`, `tests/test_dynamic_table_loader_view.py`). An export table that is itself unreadable (no `PT_DYNAMIC`, a `.dynsym` filled with `0xff`, truncated, or exported entries with no resolvable name) is still refused at dump with exit 1 (`tests/test_export_table_unreadable_matrix.py`, OLD/NEW/both). Residual: corruption that leaves every entry structurally valid is read as the table it now says. Random byte flips inside `.dynsym` (`st_info`, `st_shndx`, `st_value`, or a `st_name` that still lands on a non-empty string) and garbage bytes in `.dynstr` that still yield non-empty names parse without a failure. On one side the result is a fabricated `BREAKING`; on the corrupted side of a pair it can be `COMPATIBLE` (exit 0, removals hidden) or, with both sides identically corrupted, `NO_CHANGE`. No reader can tell these from a legitimate table without a checksum.
 
 `false-clean` — `compare` of a library whose `.dynsym` content is corrupted but structurally valid can exit 0 with `COMPATIBLE` or `NO_CHANGE`.
 
@@ -435,6 +435,11 @@ Do not re-attempt token-claiming. A header's export tokens cannot tell whether i
 
 ### Hygiene
 
+#### A forked child that is alive but never answers blocks the parent's pipe read
+
+**Status (recorded 2026-10-28): OPEN.** The side-isolation receive (`side_isolation._run_children`, `recv.recv()`), the release member pool's receive (`keyed_process_pool`, `recv.recv()` and `wait_ready()`) and the release admission budget wait (`release_admission`, `self._cond.wait()`) return only when the child answers or its pipe reaches EOF. A child that is alive, deadlocked (for example on a lock its fork copied held) and never exits or closes its pipe therefore hangs the run when no `--budget` is set. The EOF and completed-child reap paths are bounded (R6, 2026-10-28), and `tests/test_unbounded_wait_gate.py` pins these three sites as the only unbounded waits left under `abicheck/`. Bounding them needs a time policy for an unbudgeted side (a maintainer decision). Under `--budget` the active deadline could bound them, but `workflows` may not import the unclassified `deadline` module yet (`architecture/dispositions.yaml`).  
+`hygiene` — A hang here is silent: the run neither fails nor finishes. Decide the unbudgeted time limit, then route these reads through the deadline.
+
 #### `--required-symbol @FILE` read errors are checked on the CLI route only
 
 **Status (recorded 2026-10-22): OPEN.** An unreadable `@FILE` is refused as a typed `CompareSettingsError` (exit 64, path named) by `workflows/compare_configuration.load_required_symbols`, pinned on the CLI and the typed function in `tests/test_compare_settings_cli_translation.py`. No bug-class harness covers it: the typed `CompareRequest` API does not accept `@FILE` required symbols, so there is no second route to compare against, and family F2's route-parity matrix has nothing to attach to.
@@ -565,6 +570,11 @@ Do not re-attempt token-claiming. A header's export tokens cannot tell whether i
 
 **Status (2026-10-27): OPEN, deliberate.** Every non-`PRESENT` status reads back as `None`, and a `PRESENT` fact on a snapshot with no `extraction_scope` is dropped. `ownership_of()` folds both to unknown, so no verdict changes; the loss is in the `Fact` object only. Pinned, not fixed: a per-entry status is a schema change.
 `hygiene` — The round-trip is pinned as named `KNOWN_LOSSY` cases in `tests/unit/storage/test_snapshot_field_roundtrip.py`. Closing it needs a `SCHEMA_VERSION` bump and a reader-compatibility decision. [Full write-up](known-gaps/ownership-fact-persists-only-a-present-decision.md)
+
+#### Release fan-out cannot pair a stored snapshot directory with a live one
+
+**Status (recorded 2026-10-28): OPEN.** A directory compare pairs members by library key, the file name, so a stored `libfoo.json` directory against a live `libfoo.so` directory completes zero comparisons and exits 1 (`no_comparison_completed`). The same bytes compared as scalar operands compare normally. Pinned by the strict-xfail cells `release@mixed_old` and `release@mixed_new` in `tests/test_family_f2_live_route_matrix.py`.
+`hygiene` — Closing it needs a member-identity rule for a stored snapshot and the live binary it came from, which changes which members pair in existing directory compares. [Full write-up](known-gaps/release-fan-out-cannot-pair-a-stored-snapshot-directory-with-a-live-one.md)
 
 ## Do not re-attempt
 

@@ -771,15 +771,26 @@ def _resolve_stranded_library(
         resolved = resolve_dump_request(dump_request)
         return StrandedLibraryResolution(execute_dump_request(resolved).snapshot)
     except Exception as exc:
+        from ..elf_metadata import ElfMetadata
+        from ..extract.parse_failures import recording_export_read_failures
+
         reporter.notice(f"{old_path.name}: ELF-only ({exc})")
+        with recording_export_read_failures() as export_failures:
+            elf = extraction.parse_elf_metadata(old_path)
+        failure = f"ELF-only degraded capture: {exc}"
+        if export_failures:
+            # The same rule the dump applies: a table that was not read is
+            # not persisted as a partial one. The member keeps an unread
+            # export table, which every reader already treats as FAILED.
+            elf = ElfMetadata()
+            reasons = "; ".join(dict.fromkeys(export_failures))
+            failure += f"; export table not read: {reasons}"
         snapshot: AbiSnapshot = new_snapshot(
             library=old_path.name,
             version="",
-            elf=extraction.parse_elf_metadata(old_path),
+            elf=elf,
             # ADR-065 D8: no header/DWARF evidence at all -- every detector
             # that special-cases elf_only_mode must see the reduced tier.
             elf_only_mode=True,
         )
-        return StrandedLibraryResolution(
-            snapshot, failure=f"ELF-only degraded capture: {exc}"
-        )
+        return StrandedLibraryResolution(snapshot, failure=failure)

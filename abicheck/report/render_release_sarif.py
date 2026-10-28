@@ -35,6 +35,7 @@ from collections.abc import Mapping
 from typing import TYPE_CHECKING, Any
 
 from ..sarif import to_sarif
+from .markdown_text import md_text
 
 if TYPE_CHECKING:
     from .release_document import ReleaseReport
@@ -102,7 +103,7 @@ def render_release_review(document: Mapping[str, Any]) -> str:
     libraries = [lib for lib in document.get("libraries", []) if isinstance(lib, dict)]
     for lib in libraries:
         lines.append(
-            f"| `{lib.get('library', '?')}` | `{lib.get('verdict', '?')}` "
+            f"| {md_text(lib.get('library', '?'), code=True, table=True)} | `{lib.get('verdict', '?')}` "
             f"| {lib.get('breaking', 0)} | {lib.get('source_breaks', 0)} "
             f"| {lib.get('risk_changes', 0)} | {lib.get('compatible_additions', 0)} |"
         )
@@ -113,11 +114,12 @@ def render_release_review(document: Mapping[str, Any]) -> str:
         for lib in breaking_members:
             findings = [f for f in lib.get("findings") or [] if isinstance(f, dict)]
             breaking = [f for f in findings if f.get("bucket") == "breaking"]
-            lines.append(f"### `{lib.get('library', '?')}`")
+            lines.append(f"### {md_text(lib.get('library', '?'), code=True)}")
             lines.append("")
             for finding in breaking[:_REVIEW_FINDINGS_PER_MEMBER]:
                 lines.append(
-                    f"- `{finding.get('kind', '?')}` `{finding.get('symbol', '')}`"
+                    f"- {md_text(finding.get('kind', '?'), code=True)} "
+                    f"{md_text(finding.get('symbol', ''), code=True)}"
                 )
             hidden = len(breaking) - _REVIEW_FINDINGS_PER_MEMBER
             if hidden > 0:

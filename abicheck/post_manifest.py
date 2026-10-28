@@ -515,15 +515,17 @@ def _exported_names_for_binary(so_path: Path) -> tuple[set[str], str]:
     if binary_fmt is None:
         binary_fmt = detect_binary_format(normalized_path)
 
+    from .extract.export_table_read import read_exports_or_fail
+
     if binary_fmt == "elf":
         from .elf_metadata import parse_elf_metadata
 
-        elf_meta = parse_elf_metadata(normalized_path)
+        elf_meta = read_exports_or_fail(normalized_path, parse_elf_metadata)
         return _exported_symbol_names(elf_meta), elf_meta.soname or "UNKNOWN"
     if binary_fmt == "pe":
         from .pe_metadata import parse_pe_metadata
 
-        pe_meta = parse_pe_metadata(normalized_path)
+        pe_meta = read_exports_or_fail(normalized_path, parse_pe_metadata)
         # NOTE: unlike ELF (STT_OBJECT) and Mach-O (__DATA / is_data), the PE
         # export directory carries no data-vs-function type information — it is a
         # flat list of name/ordinal → RVA with no symbol type. So there is no
@@ -536,7 +538,7 @@ def _exported_names_for_binary(so_path: Path) -> tuple[set[str], str]:
     if binary_fmt in ("macho", "mach-o"):
         from .macho_metadata import parse_macho_metadata
 
-        macho_meta = parse_macho_metadata(normalized_path)
+        macho_meta = read_exports_or_fail(normalized_path, parse_macho_metadata)
         # Exclude __DATA globals (is_data) for parity with the ELF OBJECT filter:
         # a data symbol named `pp_foo` does not satisfy a client compiled to call
         # the callable POST wrapper `pp_foo(...)` (`model.export_index.

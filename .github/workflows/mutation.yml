@@ -357,7 +357,10 @@ jobs:
           # silently ignored). An unpinned install is how this lane could go
           # from "gating" to "crashing before the first mutant" without any
           # change to this repository.
-          pip install -e ".[dev]" 'mutmut>=3.7,<4'
+          # pytest is capped for this lane only: every mutmut 3.x aborts its
+          # stats run under pytest 9.2 ("'Function' object has no ...") before
+          # a single mutant is measured; 9.1 runs it.
+          pip install -e ".[dev]" 'mutmut>=3.7,<4' 'pytest<9.2'
       - name: Verify the parser against a real mutmut run
         # Once, not per shard: it measures the parser, not this commit's mutants.
         if: matrix.shard == 1

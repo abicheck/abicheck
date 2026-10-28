@@ -1,0 +1,4 @@
+### Fixed
+
+- **Same-named typedefs, namespaced records and embedded records no longer hide each other** — several readers keyed a declaration by its bare name and let the last entry win, so a second entity with the same name was never seen. `diff_time64` now reaches a namespaced record's `time_t`/`off_t` fields and follows typedefs through `typedefs_qualified`, so a `TIME64_ABI_CHANGED` roll-up is no longer lost behind a colliding member alias. The public-surface exclusion check (`exclusion_is_provable`) now follows typedefs through the same resolver as the closure, so a dangling target behind a colliding alias is reported as an unresolved edge instead of letting a type read as provably out of contract. Embedded-growth shift attribution (`offset_shift_cause`) now finds records by qualified identity, so a namespaced owner or member gets its cause instead of none. A bare name shared by two scopes resolves to nothing rather than to whichever record came first.
+

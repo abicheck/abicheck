@@ -29,9 +29,8 @@ import os
 import pickle
 import re
 import stat
-from collections.abc import Callable
 from pathlib import Path
-from typing import IO
+from typing import IO, Any
 
 from elftools.common.exceptions import ELFError
 from elftools.elf.dynamic import DynamicSection, DynamicTag
@@ -45,6 +44,7 @@ from elftools.elf.sections import SymbolTableSection
 
 from .extract.elf_abi_flags import _decode_abi_flags as _decode_abi_flags
 from .extract.elf_code_hash import CodeHasher
+from .extract.elf_loader_view import read_loader_view
 from .extract.elf_notes import (
     NT_GNU_ABI_TAG_NAMES,
     decode_abi_tag_desc,
@@ -57,20 +57,15 @@ from .extract.elf_static_tls import has_static_tls_relocation
 # parses into them and re-exports them so the historical
 # ``from abicheck.elf_metadata import ElfImport`` spelling keeps resolving.
 from .extract.elf_string_table import buffered_string_table, string_table_of
+from .extract.elf_symbol_origin import guess_symbol_origin as _guess_symbol_origin
 from .extract.elf_symbol_versions import (
     build_verdef_index,
     correlate_symbol_versions,
     symbols_of,
 )
-from .extract.mangled_foreign_template_args import has_foreign_template_argument
 from .extract.parse_failures import (
     note_export_read_failure,
     recording_export_read_failures,
-)
-from .extract.stdlib_local_origin import (
-    find_cxx_stdlib as _find_cxx_stdlib,
-    find_libcxx as _find_libcxx,
-    stdlib_local_static_origin,
 )
 from .model.elf_facts import (
     ElfImport as ElfImport,
@@ -416,11 +411,15 @@ def _parse_all_sections(
                 note_export_read_failure(f"malformed {section.name} section: {exc}")
 
     # Relocatable objects (ET_REL `.o`, e.g. a probe-built object) carry no
-    # `.dynsym` — their symbol surface lives in `.symtab`. Fall back to it so the
+    # `.dynsym` -- their symbol surface lives in `.symtab`. Fall back to it so the
     # defined GLOBAL/WEAK symbols of a `.o` are captured (the same classification
-    # `_parse_dynsym` applies to a `.dynsym`). A normal shared library always has
-    # `.dynsym`, so this never alters DSO parsing.
-    if dynsym_section is None and symtab_section is not None:
+    # `_parse_dynsym` applies to a `.dynsym`). A shared object never takes this
+    # path: its `.symtab` is link-time, not the export table.
+    if (
+        dynsym_section is None
+        and symtab_section is not None
+        and not _is_shared_object(elf)
+    ):
         try:
             _parse_dynsym(symtab_section, meta)
         except Exception as exc:  # noqa: BLE001
@@ -429,21 +428,74 @@ def _parse_all_sections(
             )
             note_export_read_failure(f"malformed .symtab section: {exc}")
 
-    # A shared object (ET_DYN, static-pie included) always carries a .dynsym.
-    # One without it (a zeroed or unreadable section header table, a section
-    # name that no longer resolves) has no dynamic symbol table this parse
-    # could read; the .symtab fallback is for relocatable objects and would
-    # read link-time globals as exports. Say so, rather than returning a
-    # symbol list that looks like the export table (extract/parse_failures.py).
+    # A shared object (ET_DYN, static-pie included) always carries a .dynsym,
+    # but the section header table is a link-time index the loader never reads:
+    # a zeroed, absent or stripped one (sstrip) still has its dynamic table.
+    # Read that table through PT_DYNAMIC instead; the .symtab fallback is for
+    # relocatable objects and would read link-time globals as exports.
     if dynsym_section is None and _is_shared_object(elf):
-        note_export_read_failure(
-            "no readable .dynsym section in a shared object (dynamic symbol table not read)"
+        ver_sym_section, dynsym_section = _parse_loader_view(
+            elf, meta, so_path, ver_sym_section, verdef_index_map, verneed_index_map
         )
 
     # Merge: verdef entries take priority over verneed on index collision.
     ver_index_map: _VerIndexMap = {**verneed_index_map, **verdef_index_map}
 
     return ver_sym_section, dynsym_section, ver_index_map
+
+
+def _parse_loader_view(
+    elf: ELFFile,
+    meta: ElfMetadata,
+    so_path: Path,
+    ver_sym_section: Any,
+    verdef_index_map: _VerIndexMap,
+    verneed_index_map: _VerIndexMap,
+) -> tuple[Any, Any]:
+    """Parse a shared object's dynamic symbol table from its ``PT_DYNAMIC`` view.
+
+    Reached only when the section table gave no ``.dynsym``. Each piece is taken
+    from its section when the section table has one, and from its dynamic tag
+    otherwise, so an intact file is parsed exactly as before. Returns
+    ``(ver_sym, dynsym)`` for the version correlation that follows; ``dynsym``
+    is ``None`` (and a refusal is recorded) when the dynamic table is unreadable.
+    """
+    try:
+        view = read_loader_view(elf)
+    except Exception as exc:  # noqa: BLE001 - an unreadable table is the refusal
+        log.warning(
+            "parse_elf_metadata: dynamic table of %s unreadable: %s", so_path, exc
+        )
+        note_export_read_failure(
+            "no readable .dynsym section in a shared object (dynamic symbol table "
+            f"not read: PT_DYNAMIC unreadable: {exc})"
+        )
+        return ver_sym_section, None
+    sections = list(elf.iter_sections())
+    try:
+        if not any(isinstance(s, DynamicSection) for s in sections):
+            _parse_dynamic(view.dynamic, meta)
+        if view.verdef is not None and not any(
+            isinstance(s, GNUVerDefSection) for s in sections
+        ):
+            _parse_version_def(view.verdef, meta)
+            build_verdef_index(view.verdef, verdef_index_map)
+        if view.verneed is not None and not any(
+            isinstance(s, GNUVerNeedSection) for s in sections
+        ):
+            _parse_version_need(view.verneed, meta)
+            _build_verneed_index(view.verneed, verneed_index_map)
+        meta.hash_styles = meta.hash_styles | view.hash_styles
+        _parse_dynsym_entries(view.symbols, meta, CodeHasher(elf, by_segment=True))
+    except Exception as exc:  # noqa: BLE001
+        log.warning(
+            "parse_elf_metadata: dynamic table of %s not read: %s", so_path, exc
+        )
+        note_export_read_failure(f"malformed dynamic table (PT_DYNAMIC): {exc}")
+        return ver_sym_section, None
+    return (
+        ver_sym_section if ver_sym_section is not None else view.versym
+    ), view.symbols
 
 
 def _is_shared_object(elf: ELFFile) -> bool:
@@ -729,198 +781,6 @@ def _parse_version_need(section: GNUVerNeedSection, meta: ElfMetadata) -> None:
             ver = vernaux.name
             if ver and ver not in meta.versions_required[lib]:
                 meta.versions_required[lib].append(ver)
-
-
-def _find_fundamental_cxx_rtti_runtime(needed_libs: list[str]) -> str | None:
-    """Find the C++ runtime that owns fundamental RTTI, excluding libc++abi."""
-    for lib in needed_libs:
-        if "stdc++" in os.path.basename(lib):
-            return lib
-    for lib in needed_libs:
-        if os.path.basename(lib).startswith("libc++."):
-            return lib
-    return None
-
-
-def _is_libmvec_vector_symbol(name: str) -> bool:
-    """Return true for glibc libmvec vector ABI symbols, not C++ guard vars."""
-    if not name.startswith("_ZGV"):
-        return False
-    if name.startswith("_ZGVZ"):
-        return False
-    return len(name) > 4 and name[4] in {"b", "c", "d", "e", "n", "s"}
-
-
-# Lookup table: (prefix_tuple, finder_fn_or_None, default_if_no_finder_match)
-# When finder_fn is None, default is returned unconditionally.
-_FinderFn = Callable[[list[str]], str | None]
-_ORIGIN_PREFIX_TABLE: list[tuple[tuple[str, ...], _FinderFn | None, str]] = [
-    # libc++ inline namespace __1 — must be checked BEFORE generic _ZNSt
-    (("_ZNSt3__1", "_ZNKSt3__1"), _find_libcxx, "libc++.so.1"),
-    # C++ stdlib symbols (libstdc++ / libc++)
-    (
-        (
-            "_ZNSt",
-            "_ZNKSt",
-            "_ZSt",
-            "_ZTISt",
-            "_ZTSSt",
-            "_ZTVSt",
-            "_ZTIS",
-            "_ZTSS",
-            "_ZTVS",
-            "_ZTINSt",
-            "_ZTSNSt",
-            "_ZTVNSt",
-            "_ZTIN9__gnu_cxx",
-            "_ZTSN9__gnu_cxx",
-            "_ZTVN9__gnu_cxx",
-            "_ZTIN10__cxxabiv",
-            "_ZTSN10__cxxabiv",
-            "_ZTVN10__cxxabiv",
-            # Guard variables of std static members (``_ZGVNSt5ctype...2idE``).
-            "_ZGVNSt",
-            "_ZGVN9__gnu_cxx",
-            "_ZGVN10__cxxabiv",
-        ),
-        _find_cxx_stdlib,
-        "libstdc++.so.6",
-    ),
-    # C++ operator new / delete (Itanium ABI)
-    (
-        ("_Znwm", "_Znwj", "_Znam", "_Znaj", "_ZdlPv", "_ZdaPv", "_ZnwmSt", "_ZnamSt"),
-        _find_cxx_stdlib,
-        "libstdc++.so.6",
-    ),
-    # Intel SVML
-    (("__svml_",), None, "<intel-compiler-rt>"),
-    # x87 math helpers (libgcc.a static)
-    (("ix86_",), None, "libgcc.a (static)"),
-    # libm SIMD helpers
-    (("__libm_sse2_", "__libm_avx_"), None, "libm.so.6"),
-    # GCC runtime support
-    (("__cpu_model", "__cpu_features"), None, "libgcc_s.so.1"),
-    # GNU libc internal
-    (("__libc_", "__glibc_"), None, "libc.so.6"),
-]
-
-
-_FUNDAMENTAL_CXX_RTTI_SINGLE_CHAR_TYPE_CODES: frozenset[str] = frozenset(
-    {
-        "v",  # void
-        "w",  # wchar_t
-        "b",  # bool
-        "c",  # char
-        "a",  # signed char
-        "h",  # unsigned char
-        "s",  # short
-        "t",  # unsigned short
-        "i",  # int
-        "j",  # unsigned int
-        "l",  # long
-        "m",  # unsigned long
-        "x",  # long long
-        "y",  # unsigned long long
-        "n",  # __int128
-        "o",  # unsigned __int128
-        "f",  # float
-        "d",  # double
-        "e",  # long double
-        "g",  # __float128
-        "z",  # ellipsis
-    }
-)
-
-_FUNDAMENTAL_CXX_RTTI_MULTI_CHAR_TYPE_CODES: frozenset[str] = frozenset(
-    {
-        "Dn",  # std::nullptr_t
-        "Du",  # char8_t
-        "Di",  # char32_t
-        "Ds",  # char16_t
-        "Dh",  # half-precision floating point
-        "Df",  # decimal32
-        "Dd",  # decimal64
-        "De",  # decimal128
-    }
-)
-
-_CXX_SIZED_FLOAT_TYPE_CODE_RE = re.compile(r"DF[0-9]+(?:_|[A-Za-z]+)")
-
-_FUNDAMENTAL_CXX_RTTI_TYPE_MODIFIERS: frozenset[str] = frozenset(
-    {
-        "P",  # pointer
-        "R",  # lvalue reference
-        "O",  # rvalue reference
-        "K",  # const qualifier
-        "V",  # volatile qualifier
-        "r",  # restrict qualifier
-    }
-)
-
-
-def _is_fundamental_cxx_type_encoding(encoding: str) -> bool:
-    """Return True for builtin Itanium C++ type encodings and simple wrappers."""
-    while encoding:
-        if encoding in _FUNDAMENTAL_CXX_RTTI_SINGLE_CHAR_TYPE_CODES:
-            return True
-        if encoding in _FUNDAMENTAL_CXX_RTTI_MULTI_CHAR_TYPE_CODES:
-            return True
-        if _CXX_SIZED_FLOAT_TYPE_CODE_RE.fullmatch(encoding):
-            return True
-        if encoding[0] not in _FUNDAMENTAL_CXX_RTTI_TYPE_MODIFIERS:
-            return False
-        encoding = encoding[1:]
-    return False
-
-
-def _is_fundamental_cxx_rtti_symbol(name: str) -> bool:
-    """Return True for libstdc++ RTTI/typeinfo-name symbols for builtin types."""
-    if not (name.startswith("_ZTI") or name.startswith("_ZTS")):
-        return False
-    return _is_fundamental_cxx_type_encoding(name[4:])
-
-
-def _guess_symbol_origin(name: str, needed_libs: list[str]) -> str | None:
-    """Guess which dependency library a symbol likely originates from.
-
-    Analyses the symbol's mangled name prefix to determine whether it is likely
-    exported by a well-known runtime dependency (libstdc++, libgcc, libc) rather
-    than natively defined by the library being inspected.
-
-    Returns a library name hint (e.g. ``'libstdc++.so.6'``) or ``None`` if the
-    symbol appears to be native to this library.
-
-    This is a heuristic — false positives are possible for symbols that happen to
-    share a prefix with standard-library symbols but are defined by the library
-    itself.  The result is used to annotate the ``origin_lib`` field of
-    :class:`ElfSymbol`; it is informational and never suppresses real changes.
-    """
-    if _is_fundamental_cxx_rtti_symbol(name):
-        return _find_fundamental_cxx_rtti_runtime(needed_libs) or "libstdc++.so.6"
-
-    if _is_libmvec_vector_symbol(name):
-        return "libmvec.so.1"
-
-    # A std template instantiated over one of this library's own types
-    # (``std::_Sp_counted_deleter<dnnl_stream*, ...>``) is emitted by this
-    # library, not exported by the C++ runtime -- which never saw the type.
-    if has_foreign_template_argument(name):
-        return None
-
-    # Function-local std template statics (``_ZZNSt...``): see stdlib_local_origin.
-    local_static_origin = stdlib_local_static_origin(name, needed_libs)
-    if local_static_origin is not None:
-        return local_static_origin
-
-    for prefixes, finder_fn, default in _ORIGIN_PREFIX_TABLE:
-        if name.startswith(prefixes):
-            if finder_fn is not None:
-                found = finder_fn(needed_libs)
-                if found is not None:
-                    return found
-            return default
-
-    return None  # likely native to this library
 
 
 # Alignment derived from a symbol address is only meaningful up to the page

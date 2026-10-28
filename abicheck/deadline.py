@@ -56,6 +56,7 @@ from __future__ import annotations
 
 import contextvars
 import os
+import queue
 import signal
 import subprocess
 import threading
@@ -373,6 +374,31 @@ def terminate_process_tree(proc: subprocess.Popen[Any]) -> None:
     _kill_process_tree(proc, os.name == "posix")
 
 
+def drain_reader_queue(
+    chunk_queue: queue.Queue[bytes | None | Exception],
+    reader_thread: threading.Thread,
+    timeout: float,
+) -> None:
+    """Unblock a streaming reader thread that may be stuck in ``put()`` on its
+    now-full bounded queue after the consumer stopped draining it mid-abort.
+
+    Keeps pulling items until the reader finishes on its own (its producer, a
+    killed or exhausted child, closes its pipe quickly) rather than leaking a
+    permanently blocked daemon thread and its queued chunks. *timeout* is a
+    bound on that wait, not the expected case, so the drain never hangs.
+    """
+    end = time.monotonic() + timeout
+    while reader_thread.is_alive():
+        remaining = end - time.monotonic()
+        if remaining <= 0:
+            break
+        try:
+            chunk_queue.get(timeout=min(remaining, 0.1))
+        except queue.Empty:
+            continue
+    reader_thread.join(timeout=max(0.0, end - time.monotonic()))
+
+
 def run_bounded(
     cmd: list[str],
     *,
@@ -519,14 +545,20 @@ def _kill_process_tree(proc: subprocess.Popen[Any], use_pgroup: bool) -> None:
     """
     if not use_pgroup:
         proc.kill()
-        proc.wait()
+        try:
+            proc.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            pass
         return
     pgid = proc.pid
     try:
         os.killpg(pgid, signal.SIGTERM)
     except (ProcessLookupError, PermissionError, OSError):
         proc.kill()
-        proc.wait()
+        try:
+            proc.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            pass
         return
     try:
         proc.wait(timeout=5)

@@ -37,7 +37,7 @@ split of what used to be ``reporter_markdown._view_preamble`` (title/verdict
 table, coverage-warning banner, optional recommendation section, the
 ``--show-only`` filter note); that pre-split function is retired, since
 nothing calls it any more. ``root-cause`` mode's own grouping
-(``reporter_markdown.compute_root_cause_section`` -> ``RootCauseSectionData``)
+(``report.root_cause_section.compute_root_cause_section`` -> ``RootCauseSectionData``)
 was already JSON-safe before this change (every finding is pre-formatted to
 a plain string at compute time), so its document fold is a direct
 ``dataclasses.asdict()`` with no new row type of its own --
@@ -69,6 +69,7 @@ from .disposition_audit import (
     render_disposition_audit_section,
 )
 from .document import ReportDocument
+from .markdown_text import md_text
 from .pattern_modulations_markdown import (
     render_pattern_modulations_from_mapping,
 )
@@ -112,8 +113,8 @@ def _render_view_preamble(d: Mapping[str, Any]) -> list[str]:
         "",
         "| | |",
         "|---|---|",
-        f"| **Old version** | `{d['old_version']}` |",
-        f"| **New version** | `{d['new_version']}` |",
+        f"| **Old version** | {md_text(d['old_version'], code=True, table=True)} |",
+        f"| **New version** | {md_text(d['new_version'], code=True, table=True)} |",
         f"| **Verdict** | {d['verdict_emoji']} `{d['verdict_label']}` |",
         "",
     ]
@@ -131,7 +132,7 @@ def _render_view_preamble(d: Mapping[str, Any]) -> list[str]:
         # internal group as its own `--view show=...` token.
         cli_hint = render_show_only_cli_hint(note["show_only"])
         lines.append(
-            f"> Filtered by: `{cli_hint}` "
+            f"> Filtered by: {md_text(cli_hint, code=True)} "
             f"({note['shown']} of {note['total']} changes shown)"
         )
         lines.append("")
@@ -165,9 +166,12 @@ def _root_cause_section_from_mapping(
                 root_display=g["root_display"],
                 count=g["count"],
                 finding_lines=tuple(g["finding_lines"]),
+                omitted=g.get("omitted", 0),
             )
             for g in d["groups"]
-        )
+        ),
+        omitted_groups=d.get("omitted_groups", 0),
+        omitted_findings=d.get("omitted_findings", 0),
     )
 
 

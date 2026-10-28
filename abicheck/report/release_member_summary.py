@@ -19,6 +19,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from ..policy.acknowledgment_breaks import accepted_break_ids
 from .change_inventory import render_change_inventory_json
 from .disposition_audit import compute_disposition_audit
 from .finding import report_findings_for
@@ -38,7 +39,11 @@ def add_member_review_summary(
     from ..report_summary import build_summary
 
     findings = report_findings_for(result)
-    groups = build_review_groups(findings, severity_config=severity_config)
+    groups = build_review_groups(
+        findings,
+        severity_config=severity_config,
+        accepted=accepted_break_ids(result),
+    )
     audit = compute_disposition_audit(result, severity_config)
     entry["disposition_audit"] = audit.to_dict()
     entry["review_groups"] = [group.to_dict() for group in groups]

@@ -54,7 +54,7 @@
 > loading on older systems (e.g. a new GLIBC version requirement). Verify
 > your target environment before deploying.
 
-- **symbol_leaked_from_dependency_changed**: Symbol '_ZNSt6thread8_M_startEv' was removed but appears to originate from 'libstdc++.so.6' (a dependency of this library). This is a real ABI change — the library is leaking dependency symbols into its public ABI surface. Consider applying -fvisibility=hidden.
+- **symbol_leaked_from_dependency_changed**: Symbol '\_ZNSt6thread8_M_startEv' was removed but appears to originate from 'libstdc++.so.6' (a dependency of this library). This is a real ABI change — the library is leaking dependency symbols into its public ABI surface. Consider applying -fvisibility=hidden.
 
 
 ## Disposition audit

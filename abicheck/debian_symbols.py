@@ -43,6 +43,7 @@ from pathlib import Path
 
 from .demangle import demangle
 from .elf_metadata import ElfMetadata, ElfSymbol, SymbolType, parse_elf_metadata
+from .extract.export_table_read import read_exports_or_fail
 
 _log = logging.getLogger(__name__)
 
@@ -351,7 +352,7 @@ def generate_from_binary(
 
     Convenience wrapper around ``parse_elf_metadata`` + ``generate_symbols_file``.
     """
-    elf_meta = parse_elf_metadata(so_path)
+    elf_meta = read_exports_or_fail(so_path, parse_elf_metadata)
     return generate_symbols_file(
         elf_meta,
         package=package,
@@ -483,7 +484,7 @@ def validate_from_binary(
     symbols_path: Path,
 ) -> ValidationResult:
     """Validate a symbols file against a binary (convenience wrapper)."""
-    elf_meta = parse_elf_metadata(so_path)
+    elf_meta = read_exports_or_fail(so_path, parse_elf_metadata)
     symbols_file = load_symbols_file(symbols_path)
     return validate_symbols(elf_meta, symbols_file)
 

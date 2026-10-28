@@ -50,7 +50,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import IO, TYPE_CHECKING, Any, Protocol, runtime_checkable
 
-from ..deadline import run_bounded
+from ..deadline import drain_reader_queue, run_bounded
 from ..errors import ExtractionSecurityError, SnapshotError
 
 if TYPE_CHECKING:
@@ -371,31 +371,6 @@ _ZSTD_CLI_TIMEOUT_S = 120
 
 #: Bound on the reader-thread-to-main-thread chunk queue in the external `zstd` CLI fallback (each chunk is at most 1 MiB). Keeps the reader thread from racing arbitrarily far ahead of the main thread's own decompression-bomb size check -- an unbounded queue could otherwise buffer gigabytes of already-decoded data before total_bytes is ever compared against the limit (Codex review, fresh evidence). A small bound still allows real streaming throughput while keeping the in-memory decoded backlog to a fixed, small multiple of the chunk size.
 _ZSTD_READER_QUEUE_MAXSIZE = 8
-
-
-def _drain_reader_queue(
-    chunk_queue: queue.Queue[bytes | None | Exception],
-    reader_thread: threading.Thread,
-    timeout: float,
-) -> None:
-    """Unblock a `_safe_extract_zst_tar` reader thread possibly stuck in
-    `put()` on the now-full bounded queue after the consumer stopped
-    draining it mid-abort -- keeps pulling items until the reader finishes
-    on its own (its producer, the killed/exhausted zstd process, closes
-    its pipe quickly) rather than leaking a permanently-blocked daemon
-    thread and its queued chunks (Codex review, fresh evidence). *timeout*
-    is a backstop, not the expected case.
-    """
-    deadline = time.monotonic() + timeout
-    while reader_thread.is_alive():
-        remaining = deadline - time.monotonic()
-        if remaining <= 0:
-            break
-        try:
-            chunk_queue.get(timeout=min(remaining, 0.1))
-        except queue.Empty:
-            continue
-    reader_thread.join(timeout=max(0.0, deadline - time.monotonic()))
 
 
 #: Zstandard frame magic (RFC 8478 §3.1.1) -- the one compressed tar codec
@@ -752,7 +727,7 @@ class TarExtractor:
                         proc.kill()
                         proc.wait(timeout=_ZSTD_CLI_TIMEOUT_S)
                     # An abort (timeout, the size limit above, a reader exception) can leave _reader blocked in put() on the now-full bounded queue -- the consumer stopped draining it the moment it raised, so killing the process alone doesn't unblock a reader stuck on a full queue rather than its own read() call. Leaks a daemon thread and its queued chunks for the life of a long-running process otherwise (Codex review, fresh evidence). Cheap no-op on the success path, where the reader already finished before the terminal None was consumed.
-                    _drain_reader_queue(chunk_queue, reader_thread, _ZSTD_CLI_TIMEOUT_S)
+                    drain_reader_queue(chunk_queue, reader_thread, _ZSTD_CLI_TIMEOUT_S)
             TarExtractor._safe_extract(tar_path, target_dir)
         finally:
             shutil.rmtree(staging, ignore_errors=True)
@@ -819,8 +794,13 @@ class RpmExtractor:
         except subprocess.TimeoutExpired as exc:
             cpio_proc.kill()
             rpm2cpio_proc.kill()
-            cpio_proc.wait()
-            rpm2cpio_proc.wait()
+            for stage in (cpio_proc, rpm2cpio_proc):
+                # Bounded like every other wait here: a stage that will not
+                # reap must not replace the timeout error with a hang.
+                try:
+                    stage.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    pass
             raise SnapshotError(
                 f"RPM extraction timed out after {_EXTRACT_TIMEOUT}s"
             ) from exc
@@ -829,7 +809,10 @@ class RpmExtractor:
             rpm2cpio_proc.wait(timeout=_EXTRACT_TIMEOUT)
         except subprocess.TimeoutExpired as exc:
             rpm2cpio_proc.kill()
-            rpm2cpio_proc.wait()
+            try:
+                rpm2cpio_proc.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                pass
             raise SnapshotError(
                 f"rpm2cpio timed out after {_EXTRACT_TIMEOUT}s"
             ) from exc

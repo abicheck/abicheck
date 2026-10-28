@@ -8,6 +8,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from .disposition_audit import DispositionAudit, render_disposition_audit_lines
+from .markdown_text import md_text
 from .result_counts import held_out_note
 from .review_groups import gating_totals
 from .surface_changes import SurfaceChangeSection, render_surface_changes_lines
@@ -87,10 +88,10 @@ def render_review_digest(digest: ReviewDigest) -> str:
         return text if len(text) <= limit else text[: limit - 1] + "…"
 
     lines: list[str] = [
-        f"## ABI review — `{digest.library}` {digest.old_version} → {digest.new_version}",
+        f"## ABI review — {md_text(digest.library, code=True)} {digest.old_version} → {digest.new_version}",
         "",
         f"**Verdict:** {digest.verdict_emoji} `{digest.verdict_label}` — {digest.effect}",
-        f"**Policy:** `{digest.policy}` · **Gate:** "
+        f"**Policy:** {md_text(digest.policy, code=True)} · **Gate:** "
         + (
             "not configured"
             if digest.gate_exit_code is None
@@ -126,7 +127,7 @@ def render_review_digest(digest: ReviewDigest) -> str:
         shown = digest.review_groups[:8]
         for number, group in enumerate(shown, 1):
             lines += [
-                f"{number}. **{compact(group['display_name'])}** — {compact(group['transition'], 240)}",
+                f"{number}. **{md_text(compact(group['display_name']))}** — {compact(group['transition'], 240)}",
                 f"   {compact(group['consequence'], 240)}",
                 f"   Action: {compact(group['action'], 200)}",
                 f"   Findings: {compact(', '.join(group['member_kinds']), 240)}",
@@ -258,7 +259,7 @@ def render_review_digest(digest: ReviewDigest) -> str:
         lines += ["**Top impacted symbols:**", ""]
         for sym in digest.impacted[:MAX_REVIEW_IMPACTED_SYMBOLS]:
             note = f" (affects: {', '.join(sym.use_cases)})" if sym.use_cases else ""
-            lines.append(f"- `{sym.symbol}` — {sym.kind}{note}")
+            lines.append(f"- {md_text(sym.symbol, code=True)} — {sym.kind}{note}")
         if len(digest.impacted) > MAX_REVIEW_IMPACTED_SYMBOLS:
             lines.append(
                 f"- … and {len(digest.impacted) - MAX_REVIEW_IMPACTED_SYMBOLS} more"
@@ -360,6 +361,7 @@ def render_terminal_digest(digest: ReviewDigest) -> str:
         lines += [
             "",
             f"Audit: {audit.detected_total} detected; {audit.effective_total} gating; "
+            f"{audit.acknowledged_total} acknowledged; "
             f"{counts.get('suppressed', 0)} suppressed; {len(disposing)} rule(s) applied; "
             f"{counts.get('out_of_contract', 0) + counts.get('unresolved_relevance', 0)} scope-excluded.",
         ]

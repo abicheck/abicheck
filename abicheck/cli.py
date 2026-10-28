@@ -43,18 +43,21 @@ import click
 # panels (and RichGroup.command produces RichCommand subcommands). Fall back to
 # plain click.Group if rich-click is somehow unavailable so the CLI never
 # hard-fails.
-from . import __version__ as _abicheck_version, deadline
+from . import deadline
 from .frontends.cli import help as cli_help
 from .frontends.cli.runtime import _AbicheckGroup
+from .model.tool_version import build_version as _build_version
 
 __all__ = ["main"]
+
+_ABICHECK_VERSION: str = _build_version()  # release number + checkout commit
 
 cli_help.configure_rich_help()  # register --help option-group panels (G21.8 / M1)
 
 
 @click.group(cls=_AbicheckGroup)
 @click.version_option(
-    version=_abicheck_version,
+    version=_ABICHECK_VERSION,
     prog_name="abicheck",
     message="%(prog)s %(version)s (abicheck/abicheck)",
 )

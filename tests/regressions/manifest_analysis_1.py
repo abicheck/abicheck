@@ -651,12 +651,21 @@ ANALYSIS_1_BUG_CLASSES: tuple[BugClass, ...] = (
             # (parse failure, skipped .dynsym, parse-failed stored block)
             # read as "exports nothing" -> every required symbol "missing".
             "tests/unit/extract/test_library_export_read_failures.py",
-            # An ELF/PE/Mach-O whose export table could not be read (zeroed
-            # section table, no .dynsym, unnamed exports) dumped to an empty
+            # An ELF/PE/Mach-O whose export table could not be read (corrupt
+            # .dynsym, unnamed exports, no PT_DYNAMIC) dumped to an empty
             # surface: a compare against it read every export as added, or
             # COMPATIBLE / NO_CHANGE with exit 0. Refused at the dump, across
-            # the CLI, for OLD, NEW and both sides.
+            # the CLI, for OLD, NEW and both sides. A stripped object (zeroed
+            # or sstripped section table) is read through PT_DYNAMIC and must
+            # yield the intact build's export set, not a refusal.
             "tests/test_export_table_unreadable_matrix.py",
+            # The verdict-affecting callers of the platform parsers outside the
+            # dump's guard (package-contract generation and validation, manifest
+            # validation, bundle members, dependency graphs, stranded-library
+            # snapshots): each refuses or reports an unread export table
+            # rather than reading the parser's empty result as "exports nothing".
+            "tests/test_export_read_verdict_callers.py",
+            "tests/test_dynamic_table_loader_view.py",
             # A clang AST whose `inner` is a number, string, mapping or null
             # (or holds non-object children) read as "call graph ran, found
             # nothing": the readers treat a wrong-typed container as empty.
@@ -677,8 +686,14 @@ ANALYSIS_1_BUG_CLASSES: tuple[BugClass, ...] = (
             "tests/test_undeclared_sycl_census_integration.py",
             "tests/test_sycl_stub_parse_integration.py",
             "tests/test_field_shapes.py",
+            # A development package given to a single-pair compare is named,
+            # not dropped; a header set that declared nothing is reduced in the
+            # evidence-coverage table, not shown as high-confidence evidence.
+            "tests/test_cli_single_pair_devel_package_warning.py",
+            "tests/test_cli_header_input_text_and_empty_surface.py",
+            "tests/test_empty_header_surface_counts.py",
         ),
-        # Only the two consumer-scoping seeds reach a public surface: their integration tests drive `abicheck compare --used-by` end to end.
+        # Only the consumer-scoping and CLI header-input seeds reach a public surface: their integration tests drive `abicheck compare` end to end.
         public_surfaces=("cli",),
         known_gaps=(
             KnownGap(

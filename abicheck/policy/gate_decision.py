@@ -42,6 +42,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from .acknowledgment_breaks import gate_population
 from .evaluate import effective_kind_sets
 from .severity import GateDecision, SeverityConfig, compute_gate_decision
 
@@ -61,8 +62,8 @@ def gate_decision_for_result(
 
     Returns ``None`` when no severity gate is configured, matching every
     existing call site's ``severity_config is None`` branch (the legacy,
-    verdict-only exit-code scheme). Always evaluated over ``result.changes``
-    -- the full, unfiltered set -- so a display-only filter such as
+    verdict-only exit-code scheme). Always evaluated over the gate population
+    (``result.changes`` minus accepted breaks) -- the full, unfiltered set -- so a display-only filter such as
     ``--show-only`` can never change the exit code a report's gate reflects.
 
     *today* (ADR-061 gap C): an envelope-driven caller passes the exact date
@@ -73,8 +74,12 @@ def gate_decision_for_result(
     """
     if severity_config is None:
         return None
+    # The population the process exit is decided over: `result.changes` minus
+    # the breaks an `acknowledgment.breaks: accept` run accepted (ADR-067 D5),
+    # the same population `exit_decision` folds, so the report's severity block
+    # cannot state an exit the process did not take.
     return compute_gate_decision(
-        result.changes,
+        gate_population(result),
         severity_config,
         policy=result.policy,
         kind_sets=effective_kind_sets(result),

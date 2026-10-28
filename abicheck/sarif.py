@@ -27,7 +27,6 @@ SARIF spec: https://docs.oasis-open.org/sarif/sarif/v2.1.0/sarif-v2.1.0.html
 
 from __future__ import annotations
 
-from importlib.metadata import version as _pkg_version
 from typing import TYPE_CHECKING, Any
 
 from abicheck.checker import Change, ChangeKind, DiffResult
@@ -83,10 +82,9 @@ _BREAKING_SEVERITY = "error"
 
 
 def _tool_version() -> str:
-    try:
-        return _pkg_version("abicheck")
-    except Exception:  # noqa: BLE001
-        return "unknown"
+    from .model.tool_version import build_version
+
+    return build_version()
 
 
 # Canonical verdict→SARIF-level map lives in report_model (ADR-036), imported

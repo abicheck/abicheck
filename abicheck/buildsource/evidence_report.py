@@ -48,6 +48,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from ..model.debug_evidence import debug_info_evidence
+from .coverage_confidence import header_layer_coverage, side_status_label
 from .evidence_policy import (
     apply_evidence_policy,
     evidence_coverage_metrics,
@@ -208,11 +209,10 @@ def intrinsic_coverage(snap: AbiSnapshot) -> list[LayerCoverage]:
     # Content, not object presence: every ELF dump attaches a metadata
     # object even when it collected nothing (see `debug_info_present`).
     has_debug = debug_info_evidence(snap).any
-    has_headers = bool(snap.from_headers and not snap.from_headers_inferred)
     return [
         row("L0", bool(snap.elf or snap.pe or snap.macho), snap.platform or ""),
         row("L1", has_debug, "DWARF" if has_debug else ""),
-        row("L2", has_headers, "header-scoped" if has_headers else ""),
+        header_layer_coverage(snap),
     ]
 
 
@@ -281,8 +281,8 @@ def compare_side_coverage_lines(
     for layer, name in LAYER_NAMES.items():
         old = old_by_layer.get(layer)
         new = new_by_layer.get(layer)
-        old_status = old.status.value if old is not None else "not_collected"
-        new_status = new.status.value if new is not None else "not_collected"
+        old_status = side_status_label(old)
+        new_status = side_status_label(new)
         marker = " (asymmetric)" if old_status != new_status else ""
         lines.append(f"  {name:<26} old={old_status:<13} new={new_status}{marker}")
     return lines

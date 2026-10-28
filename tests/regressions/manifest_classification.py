@@ -716,6 +716,7 @@ CLASSIFICATION_BUG_CLASSES: tuple[BugClass, ...] = (
             "tests/test_model_warning_hygiene.py",
             "tests/test_field_shapes.py",
             "tests/test_family_f3_identity.py",
+            "tests/test_bare_key_identity_collision.py",
         ),
         axes={
             "scope": (

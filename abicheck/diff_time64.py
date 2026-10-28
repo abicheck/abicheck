@@ -30,7 +30,9 @@ carries no ``typedefs`` map, so the detector is naturally silent there.
 from __future__ import annotations
 
 import re
+from collections.abc import Iterable
 
+from .compare.typedef_spelling_keys import typedef_spelling_index, typedef_target
 from .detector_registry import registry
 from .diff_helpers import make_change
 from .diff_integer_model import _int_width_bucket
@@ -180,26 +182,60 @@ def _expand_reachable_types(snap: AbiSnapshot, tokens: set[str]) -> None:
     # is keyed "stat") — without resolving the alias the record's fields would
     # never be visited (Codex review #510, round 5).
     #
-    # Reachability is exact-name matching only: the tokenizer keeps qualified
-    # spellings whole, so `ns::Event` in a public signature reaches the record
-    # keyed `ns::Event` — and an unrelated private `other::Event` does NOT
-    # ride along on the shared basename (Codex review #510, round 7). The
-    # accepted limitation: a dumper that spells a type unqualified while
-    # keying the record qualified will miss the roll-up, but the ordinary
-    # per-typedef/per-field findings still report that change.
-    remaining_aliases = dict(snap.declarations.typedefs)
-    remaining_records = {rec.name: rec for rec in snap.declarations.types if rec.name}
-    changed = True
-    while changed and (remaining_aliases or remaining_records):
-        changed = False
-        for alias in list(remaining_aliases):
-            if alias in tokens:
-                _add_tokens(tokens, remaining_aliases.pop(alias))
-                changed = True
-        for name in list(remaining_records):
-            if name in tokens:
-                _fold_record_tokens(tokens, remaining_records.pop(name))
-                changed = True
+    # Reachability follows the same spelling rules the public-surface closure
+    # uses, so the roll-up cannot disagree with it about what a signature
+    # reaches:
+    #
+    # - A typedef spelling resolves through ``typedefs_qualified`` (the
+    #   bare ``typedefs`` dict keeps only one of two classes' colliding
+    #   ``value_type`` aliases, last wins). A qualified spelling reaches its
+    #   exact key; a bare one reaches every qualified typedef with that tail.
+    # - A record is keyed by its qualified identity, and also by its bare
+    #   leaf (castxml's ``RecordType.name`` is the leaf). A qualified token
+    #   such as ``ns::Event`` reaches only ``ns::Event`` -- an unrelated
+    #   private ``other::Event`` does not ride along on the shared basename
+    #   (Codex review #510, round 7). A bare token reaches every record with
+    #   that leaf, the anti-hiding rule the closure applies to record tails.
+    #
+    # Keying the record map on ``name`` alone, as this used to, made a
+    # namespaced record unreachable and let two same-leaf records collapse
+    # onto one entry.
+    typedef_keys = typedef_spelling_index(snap)
+    records_by_key = _record_lookup_keys(snap.declarations.types)
+    folded_keys: set[str] = set()
+    folded_records: set[int] = set()
+    # Worklist over newly reached tokens: each token is looked up once, and
+    # each typedef key / record is folded at most once.
+    pending = list(tokens)
+    while pending:
+        tok = pending.pop()
+        fresh: set[str] = set()
+        for key in typedef_keys.keys_for(tok):
+            if key not in folded_keys:
+                folded_keys.add(key)
+                _add_tokens(fresh, typedef_target(snap, key))
+        for rec in records_by_key.get(tok, ()):
+            if id(rec) not in folded_records:
+                folded_records.add(id(rec))
+                _fold_record_tokens(fresh, rec)
+        new = fresh - tokens
+        tokens |= new
+        pending.extend(new)
+
+
+def _record_lookup_keys(types: Iterable[RecordType]) -> dict[str, list[RecordType]]:
+    """Spelling -> every record it can name: the qualified identity
+    (``qualified_name``, else ``name``) and the bare ``name`` leaf.
+
+    A leaf is shared by records in different scopes, so each key maps to a
+    list rather than one record; reaching the key folds all of them.
+    """
+    by_key: dict[str, list[RecordType]] = {}
+    for rec in types:
+        for key in {rec.qualified_name or rec.name, rec.name}:
+            if key:
+                by_key.setdefault(key, []).append(rec)
+    return by_key
 
 
 def _public_surface_tokens(snap: AbiSnapshot) -> set[str]:

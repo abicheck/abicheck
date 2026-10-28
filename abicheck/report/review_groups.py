@@ -194,13 +194,17 @@ def build_review_groups(
     findings: Sequence[ReportFinding],
     *,
     severity_config: SeverityConfig | None = None,
+    accepted: frozenset[int] = frozenset(),
 ) -> tuple[ReviewGroup, ...]:
     """Group only structurally identical, explicitly-correlatable findings.
 
     A group's ``gating_findings`` counts the members whose ADR-049 D1
     ``gate_contribution`` is nonzero under the run's own gate scheme --
     *severity_config*, ``None`` for the legacy verdict scheme -- so it agrees
-    with the JSON per-finding field and with the exit code.
+    with the JSON per-finding field and with the exit code. *accepted* is the
+    ``id()`` of every break an ``acknowledgment.breaks: accept`` run accepted
+    (:func:`~abicheck.policy.acknowledgment_breaks.accepted_break_ids`): an
+    accepted member is not on the gate, so it never counts as gating.
     """
     from .change_inventory import is_background_hygiene
 
@@ -270,7 +274,8 @@ def build_review_groups(
         # verdict as a label but contributes nothing (SVS field report), and a
         # category the severity config does not set to `error` gates nothing.
         gating = sum(
-            resolved_gate_contribution(
+            id(m.change) not in accepted
+            and resolved_gate_contribution(
                 m.change, severity_config, verdict=m.verdict, category=m.category
             )
             > 0

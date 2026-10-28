@@ -61,6 +61,7 @@ from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 from .change_summary import ChangeSummary, fold_change_summaries
+from .markdown_text import md_text
 from .pr_comment_members import (
     MAX_FOLDED_TARGETS,
     MemberReportRefused,
@@ -156,7 +157,7 @@ def _target_limitations(target: Mapping[str, object]) -> list[Finding]:
         out.append(
             _limitation(
                 tid,
-                f"This target reported `{named}` — it never reached a "
+                f"This target reported {md_text(named, code=True)} — it never reached a "
                 f"comparison, so nothing about its compatibility was "
                 f"established. {reason or ''}".strip(),
             )

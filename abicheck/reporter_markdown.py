@@ -32,14 +32,15 @@ from .report.change_operation import (
     operation_for_change as operation_for_change,
 )
 from .report.kind_rollup import roll_up_large_kinds
+from .report.markdown_budget import ITEM_LIMIT as ITEM_LIMIT
 from .report.not_evaluated_section import (
     compute_not_evaluated as compute_not_evaluated,
 )
 from .report.policy_facts import (
     ENVIRONMENT_DRIFT_KINDS,
     classification_for,
-    evidence_status_of,
-    impact_text_for,
+    evidence_status_of as evidence_status_of,
+    impact_text_for as impact_text_for,
     kind_sets_for,
     reclassify_rules_in_effect,
     release_recommendation_for,
@@ -47,10 +48,10 @@ from .report.policy_facts import (
 )
 from .report.view import (
     apply_show_only,
-    finding_id,
-    group_changes_by_root_cause,
+    finding_id as finding_id,
+    group_changes_by_root_cause as group_changes_by_root_cause,
     root_cause_id_for_key,
-    root_cause_key_and_display,
+    root_cause_key_and_display as root_cause_key_and_display,
     show_only_matches,
 )
 
@@ -69,16 +70,14 @@ from .checker import (
     Verdict,
 )
 from .model.contract_finding_relevance import is_evaluated
-from .model.evidence_status import EvidenceStatus
+from .model.evidence_status import EvidenceStatus as EvidenceStatus
 from .report import (
     change_inventory as _inventory,
     contract_conflicts_markdown as _ccm,
     render_markdown as _rmd,
     render_review as _review,
     review_compute as _review_compute,
-)
-from .report.cross_source_evolution import (
-    cross_source_evolution_md_suffix as _cross_source_evolution_md_suffix,
+    weak_removals as _weak,
 )
 from .report.disposition_audit import (
     disposition_audit_reusing_document,
@@ -425,146 +424,6 @@ def root_cause_evidence_lookup_for_changes(
     return lookup
 
 
-def compute_root_cause_section(
-    changes: list[Change],
-    scoped_only: list[Change],
-    missing_labels: list[str],
-    blocks: bool,
-    missing_kind: str,
-    *,
-    contract_evaluation: bool,
-    evidence_tiers: Sequence[str] = (),
-) -> _rmd.RootCauseSectionData | None:
-    """The structured intermediate for ``--report-mode root-cause``'s
-    "## Root Causes" section.
-
-    Groups *changes* + *scoped_only* by root cause (:func:`group_changes_by_root_cause`)
-    and merges each *missing_labels* entry into a matching group -- or starts
-    a new singleton group -- by the identical key
-    :func:`root_cause_key_and_display` computes. Returns ``None`` (no
-    section at all) only when there is neither a real group nor a missing
-    label to show.
-
-    *evidence_tiers* (``DiffResult.evidence_tiers``), when given, lets this
-    function qualify an ``UNATTRIBUTED`` finding's impact text here too
-    (Codex review, fresh evidence: this root-cause path kept the
-    unconditional text even after the full/leaf Markdown views were
-    fixed). The resolved impact string -- not just the evidence status --
-    is computed here and handed to ``_format_change_md`` as a plain
-    value: the earlier fix passed a resolved ``EvidenceStatus`` in and let
-    the renderer call ``impact_for()`` itself, which still left that
-    registry lookup on the render side (Codex review, fresh evidence --
-    ``report/AGENTS.md``'s compute/render split treats a per-change
-    ``impact_for()`` call as a report decision the compute half owes the
-    renderer, not a formatting choice).
-
-    A *scoped_only* member keeps its ``EvidenceStatus.CONSUMER_PROVEN``
-    override rather than being re-scored from *evidence_tiers* like an
-    ordinary comparison finding -- JSON (``reporter.to_json``'s
-    ``_scoped_only_change_dict``) and SARIF already stamp scoped_only
-    findings this way (they are proven by the supplied consumer's own
-    import table, independent of what evidence the library-to-library
-    comparison itself carries), so recomputing via
-    ``evidence_status_for_result`` here would contradict those two formats
-    and could demote a consumer-proven finding to "plausible, not
-    confirmed" (Codex review, fresh evidence).
-    """
-    groups = group_changes_by_root_cause(changes + scoped_only)
-    if not groups and not missing_labels:
-        return None
-
-    scoped_only_ids = {finding_id(c) for c in scoped_only}
-
-    order: list[str] = []
-    root_by_key: dict[str, str] = {}
-    finding_lines_by_key: dict[str, list[str]] = {}
-    count_by_key: dict[str, int] = {}
-
-    def _resolved_impact(c: Change) -> str | None:
-        kind = getattr(c, "kind", None)
-        if kind is None:
-            return None
-        evidence_status = (
-            EvidenceStatus.CONSUMER_PROVEN
-            if finding_id(c) in scoped_only_ids
-            else evidence_status_of(c, evidence_tiers)
-        )
-        return impact_text_for(kind, evidence_status)
-
-    for key, root_display, group_changes in groups:
-        order.append(key)
-        root_by_key[key] = root_display
-        finding_lines_by_key[key] = [
-            _format_change_md(c, _resolved_impact(c))
-            + _cross_source_evolution_md_suffix(c)
-            for c in group_changes
-        ]
-        count_by_key[key] = len(group_changes)
-
-    if missing_labels:
-        referenced_causes = frozenset(
-            c.caused_by_type for c in changes + scoped_only if c.caused_by_type
-        )
-        severity_tag = "breaking" if blocks else "compatible"
-        for label in missing_labels:
-            key, root_display = root_cause_key_and_display(
-                None,
-                label,
-                missing_kind,
-                label,
-                referenced_causes=referenced_causes,
-            )
-            line = (
-                f"- `{label}` is required but missing from the new "
-                f"library ({severity_tag})"
-            )
-            # ADR-049 Phase 3 (Codex review, fresh evidence): the
-            # non-root-cause markdown/text/review fold-in
-            # (cli_compare_fold._fold_scoped_compat_into_text) already
-            # tags a missing-contract label with its stamped decision;
-            # this root-cause path builds the identical label shape
-            # independently and was missing the same treatment, so
-            # --report-mode root-cause silently dropped the contract
-            # decision for this one finding shape. A missing-contract
-            # label has no Change object of its own to read an
-            # already-stamped decision off of (unlike scoped_only,
-            # rendered via _format_change_md above), so unlike every
-            # other contract-rendering site in this fix, this one
-            # genuinely needs the caller's own --contract
-            # intent threaded through explicitly.
-            if contract_evaluation:
-                from .contract_scoped_promotion import (
-                    stamp_explicit_scope_contract_evaluation,
-                )
-
-                label_decision: dict[str, object] = {}
-                stamp_explicit_scope_contract_evaluation(label_decision)
-                line += (
-                    f" [contract: {label_decision['contract_relevance']} "
-                    f"({label_decision['contract_reason_code']}), "
-                    f"assurance: {label_decision['contract_assurance']}]"
-                )
-            if key in finding_lines_by_key:
-                finding_lines_by_key[key].append(line)
-                count_by_key[key] += 1
-            else:
-                order.append(key)
-                root_by_key[key] = root_display
-                finding_lines_by_key[key] = [line]
-                count_by_key[key] = 1
-
-    return _rmd.RootCauseSectionData(
-        groups=tuple(
-            _rmd.RootCauseGroupData(
-                root_display=root_by_key[key],
-                count=count_by_key[key],
-                finding_lines=tuple(finding_lines_by_key[key]),
-            )
-            for key in order
-        )
-    )
-
-
 # ---------------------------------------------------------------------------
 # Markdown output
 # ---------------------------------------------------------------------------
@@ -786,6 +645,7 @@ def compute_severity_sections(
                 heading=f"## {_BREAKING_ICON} Breaking Changes{sev_label}",
                 changes=tuple(breaking),
                 oneline=False,
+                note_lines=_weak.weak_removal_note_lines(breaking),
             )
         )
 
@@ -796,6 +656,7 @@ def compute_severity_sections(
                 heading=f"## {_SOURCE_BREAK_ICON} Source-Level Breaks{sev_label}",
                 changes=tuple(source_breaks),
                 oneline=False,
+                note_lines=_weak.weak_removal_note_lines(source_breaks),
             )
         )
 
@@ -1089,8 +950,9 @@ def compute_headline_table(
 ) -> _rmd.HeadlineTable:
     """The structured intermediate for the report's headline summary table.
 
-    ADR-049 D1/D11: counts are over *evaluated* findings; stamped hygiene
-    risk gets its own row (``change_inventory.headline_hygiene_fields``).
+    ADR-049 D1/D11: counts are over *evaluated* findings (a populated "Not
+    Evaluated" section gets its reconciling row); stamped hygiene risk gets
+    its own row (``change_inventory.headline_hygiene_fields``).
     """
     classified = classification_for(result)
     return _rmd.HeadlineTable(

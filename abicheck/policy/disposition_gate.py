@@ -33,6 +33,7 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING
 
+from .acknowledgment_breaks import ACCEPTED_BREAK_APPLICATION_POINT
 from .disposition_types import Disposition
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
@@ -184,6 +185,12 @@ def regate_record(
     """One record's label under the resolved gate. See :meth:`with_gate`."""
     if record.disposition in _POLICY_TERMINAL_DISPOSITIONS:
         # D2: policy already disposed of these, and no gate scores them.
+        return record
+    if record.application_point == ACCEPTED_BREAK_APPLICATION_POINT:
+        # ADR-067 D5 `breaks: accept`: the acknowledgment already recorded this
+        # break as non-gating under every gate scheme. Re-answering it here by
+        # kind would promote it back to `gating` under a severity config, so
+        # the report counted an accepted break the exit decision never scored.
         return record
     if record.scope_decided:
         # A scoped run gates on the consumer's own relevant set, so

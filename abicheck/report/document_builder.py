@@ -49,6 +49,7 @@ from typing import TYPE_CHECKING
 
 from ..model.change import Change
 from ..model.plain_copy import plain_deepcopy
+from ..policy.acknowledgment_breaks import accepted_break_ids
 from ..policy.evaluate import effective_kind_sets
 from .document import ReportDocument
 from .envelope import RenderOptions, ReportEnvelope
@@ -219,11 +220,12 @@ def build_report_document(
         if show_only
         else all_findings
     )
+    accepted = accepted_break_ids(result)
     review_groups = build_review_groups(
-        displayed_findings, severity_config=severity_config
+        displayed_findings, severity_config=severity_config, accepted=accepted
     )
     all_review_groups = build_review_groups(
-        all_findings, severity_config=severity_config
+        all_findings, severity_config=severity_config, accepted=accepted
     )
     d["review_groups"] = [group.to_dict() for group in review_groups]
     audit_value = d["disposition_audit"]

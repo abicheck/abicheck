@@ -1,0 +1,3 @@
+### Fixed
+
+- **A forked child that never exits no longer hangs the run** — the parent's waits on side-resolution and release-member children were unbounded in three places: the join after a child closed its result pipe, the reap of a child whose result had already arrived, and the post-SIGKILL waits of the RPM extraction and the process-tree teardown. Every one is now bounded by the existing grace period, and a child still alive after it is SIGKILLed, so a SIGTERM-proof child can no longer stall a comparison. Waits on child pipes that stay open while the child is alive are still unbounded when no `--budget` is set; that gap is recorded in the known-gaps page, not fixed here.
