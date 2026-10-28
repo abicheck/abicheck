@@ -55,6 +55,32 @@ _DIGEST_SIZE = 16
 _EM_ARM = "EM_ARM"
 
 
+def _load_segments(elf: Any) -> list[tuple[int, int, int]]:
+    """``(p_vaddr, p_offset, p_filesz)`` of each ``PT_LOAD`` segment, or ``[]``."""
+    try:
+        return [
+            (
+                int(seg.header.p_vaddr),
+                int(seg.header.p_offset),
+                int(seg.header.p_filesz),
+            )
+            for seg in elf.iter_segments(type="PT_LOAD")
+        ]
+    except (IndexError, KeyError, ValueError, OSError, ELFError, ConstructError) as exc:
+        log.debug("elf_code_hash: program headers unreadable: %s", exc)
+        return []
+
+
+def _containing(
+    segments: list[tuple[int, int, int]], addr: int, size: int
+) -> tuple[int, int, int] | None:
+    """The one ``PT_LOAD`` file image that holds ``[addr, addr + size)``."""
+    for vaddr, offset, filesz in segments:
+        if vaddr <= addr and addr + size <= vaddr + filesz:
+            return vaddr, offset, filesz
+    return None
+
+
 class CodeHasher:
     """Hashes function bytes out of one open ELF file.
 
@@ -62,7 +88,7 @@ class CodeHasher:
     are read straight from the file stream at the symbol's file offset.
     """
 
-    def __init__(self, elf: Any) -> None:
+    def __init__(self, elf: Any, *, by_segment: bool = False) -> None:
         # ``None`` (a section carrying no ELF file, as a synthetic test
         # section does) yields a hasher that hashes nothing.
         self._elf = elf
@@ -72,6 +98,13 @@ class CodeHasher:
         # byte lower.
         self._thumb = machine == _EM_ARM
         self._sections: dict[int, tuple[int, int, int] | None] = {}
+        # ``by_segment``: bound each function by its ``PT_LOAD`` segment instead
+        # of a section. The loader's view (``extract/elf_loader_view.py``) has
+        # no section headers to name; the same bytes are mapped at the same
+        # addresses, so the hash is the one the section path gives.
+        self._segments: list[tuple[int, int, int]] | None = (
+            _load_segments(elf) if by_segment else None
+        )
 
     def _section(self, shndx: int) -> tuple[int, int, int] | None:
         if shndx not in self._sections:
@@ -106,11 +139,14 @@ class CodeHasher:
             return ""
         if self._stream is None:
             return ""
-        section = self._section(shndx)
-        if section is None:
-            return ""
-        sec_addr, sec_offset, sec_size = section
         addr = st_value & ~1 if self._thumb else st_value
+        if self._segments is not None:
+            region = _containing(self._segments, addr, st_size)
+        else:
+            region = self._section(shndx)
+        if region is None:
+            return ""
+        sec_addr, sec_offset, sec_size = region
         offset = addr - sec_addr
         if offset < 0 or offset + st_size > sec_size:
             return ""

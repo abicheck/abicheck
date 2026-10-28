@@ -131,7 +131,7 @@ _STD_OWNER_NAMESPACES = frozenset({"__cxx11", "__gnu_cxx", "__cxxabiv1"})
 #: Vendored third-party libraries keyed by their **owner namespace** (the demangled
 #: top-level namespace, e.g. ``fmt``). These commonly get statically linked and
 #: re-exported while shipping no ``DT_NEEDED`` of their own, so
-#: :func:`~abicheck.elf_metadata._guess_symbol_origin` cannot see them.
+#: :func:`~abicheck.extract.elf_symbol_origin.guess_symbol_origin` cannot see them.
 _VENDORED_OWNER_NAMESPACES: dict[str, str] = {
     "fmt": "{fmt} (vendored third-party)",
     "boost": "Boost (vendored third-party)",
@@ -192,9 +192,9 @@ def _origin_from_prefix_table(
 
     A non-sentinel return (``None`` or a lib name) is authoritative.
     """
-    from ..elf_metadata import _guess_symbol_origin
+    from ..extract.elf_symbol_origin import guess_symbol_origin
 
-    lib = _guess_symbol_origin(symbol, needed_libs)
+    lib = guess_symbol_origin(symbol, needed_libs)
     if lib is None:
         return _PREFIX_NO_MATCH
     # libc++abi is the ABI support library, not libc++ itself. If the prefix
@@ -282,7 +282,7 @@ def _external_dependency_origin(
     """Name the external dependency *symbol* leaked from, or ``None`` if native.
 
     Two signals, cheapest first: the shared
-    :func:`~abicheck.elf_metadata._guess_symbol_origin` runtime-prefix table
+    :func:`~abicheck.extract.elf_symbol_origin.guess_symbol_origin` runtime-prefix table
     (libc/libgcc/libmvec/fundamental-RTTI/``operator new`` and the ``_ZNSt``/
     ``_ZTVSt`` std prefixes) via :func:`_origin_from_prefix_table`, then an
     **owner-namespace** check that also covers the leaked-definition forms the

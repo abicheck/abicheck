@@ -651,11 +651,13 @@ ANALYSIS_1_BUG_CLASSES: tuple[BugClass, ...] = (
             # (parse failure, skipped .dynsym, parse-failed stored block)
             # read as "exports nothing" -> every required symbol "missing".
             "tests/unit/extract/test_library_export_read_failures.py",
-            # An ELF/PE/Mach-O whose export table could not be read (zeroed
-            # section table, no .dynsym, unnamed exports) dumped to an empty
+            # An ELF/PE/Mach-O whose export table could not be read (corrupt
+            # .dynsym, unnamed exports, no PT_DYNAMIC) dumped to an empty
             # surface: a compare against it read every export as added, or
             # COMPATIBLE / NO_CHANGE with exit 0. Refused at the dump, across
-            # the CLI, for OLD, NEW and both sides.
+            # the CLI, for OLD, NEW and both sides. A stripped object (zeroed
+            # or sstripped section table) is read through PT_DYNAMIC and must
+            # yield the intact build's export set, not a refusal.
             "tests/test_export_table_unreadable_matrix.py",
             # The verdict-affecting callers of the platform parsers outside the
             # dump's guard (package-contract generation and validation, manifest
@@ -663,6 +665,7 @@ ANALYSIS_1_BUG_CLASSES: tuple[BugClass, ...] = (
             # snapshots): each refuses or reports an unread export table
             # rather than reading the parser's empty result as "exports nothing".
             "tests/test_export_read_verdict_callers.py",
+            "tests/test_dynamic_table_loader_view.py",
             # A clang AST whose `inner` is a number, string, mapping or null
             # (or holds non-object children) read as "call graph ran, found
             # nothing": the readers treat a wrong-typed container as empty.
