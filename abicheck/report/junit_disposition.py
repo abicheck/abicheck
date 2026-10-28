@@ -64,6 +64,9 @@ def add_disposition_audit_properties(
     _prop("abicheck.effective_total", str(audit.effective_total))
     for name, count in audit.counts:
         _prop(f"abicheck.disposition.{name}", str(count))
+    # ADR-067 D5: acknowledged breaks keep their verdict class and gate
+    # contribution, so a reader must see the count beside the gating one.
+    _prop("abicheck.disposition.acknowledged", str(audit.acknowledged_total))
     for rule in audit.rules:
         _prop(
             f"abicheck.disposition_rule.{rule.rule_id or 'rule'}",

@@ -31,6 +31,7 @@ from __future__ import annotations
 import json
 from collections.abc import Mapping
 
+from .markdown_text import md_text
 from .release_document import (
     ReleaseEvaluation,
     ReleaseReport,
@@ -130,8 +131,8 @@ def _markdown_body(report: ReleaseReport) -> str:
         "",
         "| | |",
         "|---|---|",
-        f"| **Old** | `{ev.old_dir}` |",
-        f"| **New** | `{ev.new_dir}` |",
+        f"| **Old** | {md_text(ev.old_dir, code=True, table=True)} |",
+        f"| **New** | {md_text(ev.new_dir, code=True, table=True)} |",
         f"| **Verdict** | {verdict_cell} |",
     ]
     bundle_result = ev.bundle_result
@@ -150,7 +151,7 @@ def _markdown_body(report: ReleaseReport) -> str:
         cli_hint = render_show_only_cli_hint(report.show_only)
         lines.append("")
         lines.append(
-            f"> Filtered by: `{cli_hint}` "
+            f"> Filtered by: {md_text(cli_hint, code=True)} "
             f"({counts['displayed']} of {counts['total']} findings shown)"
         )
         lines.append("")

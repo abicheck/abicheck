@@ -55,6 +55,7 @@ from typing import TYPE_CHECKING, Any
 from ..policy.audit_gate_exit import (
     audit_gate_enabled_for_severity_preset as audit_gate_enabled_for_severity_preset,
 )
+from ..policy.classification import Verdict
 from ..policy.evaluate import effective_kind_sets
 from ..policy.outcome import OperationalStatus, PolicyGateDecision, RunOutcome
 from ..policy.scope_completeness import resolve_scope_decision
@@ -66,7 +67,9 @@ from .cross_source_evolution import (
 )
 from .document import ReportDocument
 from .finding import build_report_findings
-from .markdown_text import md_cell
+from .gating_budget import cap_non_gating, more_non_gating_line
+from .markdown_budget import NOTE_ITEM_LIMIT
+from .markdown_text import md_text
 from .no_baseline_document import (
     AUDIT_REPORT_SCHEMA_VERSION as AUDIT_REPORT_SCHEMA_VERSION,
     NO_BASELINE_EXIT_AXIS_LABELS as NO_BASELINE_EXIT_AXIS_LABELS,
@@ -554,6 +557,9 @@ def no_baseline_report_document(doc: NoBaselineDocument) -> ReportDocument:
     return ReportDocument.from_mapping(_document_json(doc))
 
 
+#: The verdicts the audit gate can fire on (policy/audit_gate_exit._gates).
+_AUDIT_GATING_VERDICTS = frozenset({Verdict.BREAKING, Verdict.API_BREAK})
+
 _EVOLUTION_NOTE = {
     "persistent": "present in this build",
     "not_evaluated": "not evaluated (insufficient evidence)",
@@ -569,7 +575,7 @@ def render_no_baseline_markdown(doc: NoBaselineDocument) -> str:
         "of the candidate build alone, not a compatibility comparison. No "
         "additions, removals, or compatibility verdict are reported.",
         "",
-        f"- Candidate version: `{doc.new_version or '(unspecified)'}`",
+        f"- Candidate version: {md_text(doc.new_version or '(unspecified)', code=True)}",
         f"- Acquisition state (OLD): `{doc.old_acquisition_state}`",
         f"- Evidence tiers: {', '.join(doc.evidence_tiers) or '(none recorded)'}",
     ]
@@ -592,15 +598,27 @@ def render_no_baseline_markdown(doc: NoBaselineDocument) -> str:
             "| Finding | Symbol | Severity | State | Detail |",
             "| --- | --- | --- | --- | --- |",
         ]
-        for finding in doc.findings:
+        # The audit gate fires only on a BREAKING/API_BREAK verdict (see
+        # policy/audit_gate_exit._gates), whatever its preset, so every other
+        # finding is non-gating and may be summarised past the shared budget.
+        shown_findings, cut_findings = cap_non_gating(
+            doc.findings,
+            frozenset(
+                id(f) for f in doc.findings if f.verdict not in _AUDIT_GATING_VERDICTS
+            ),
+        )
+        for finding in shown_findings:
             change = finding.change
             state = change_cross_source_evolution_field(change) or "candidate-side"
             lines.append(
-                f"| `{md_cell(change.kind.value)}` | `{md_cell(change.symbol or '-')}` | "
-                f"{md_cell(finding.category.value)} | "
-                f"{md_cell(_EVOLUTION_NOTE.get(state, state))} | "
-                f"{md_cell(change.description or '')} |"
+                f"| {md_text(change.kind.value, code=True, table=True)} | {md_text(change.symbol or '-', code=True, table=True)} | "
+                f"{md_text(finding.category.value, table=True)} | "
+                f"{md_text(_EVOLUTION_NOTE.get(state, state), table=True)} | "
+                f"{md_text(change.description or '', table=True)} |"
             )
+        disclosure = more_non_gating_line(cut_findings, json_field="findings")
+        if disclosure is not None:
+            lines += ["", disclosure]
     if doc.suppressed:
         lines += [
             "",
@@ -614,7 +632,14 @@ def render_no_baseline_markdown(doc: NoBaselineDocument) -> str:
             "| Finding | Symbol | Severity | Suppressed by | Reason | Source | Expires |",
             "| --- | --- | --- | --- | --- | --- | --- |",
         ]
-        for entry in doc.suppressed:
+        # A suppressed finding is a disposition that gates nothing, so every
+        # row past the note budget is counted rather than itemised.
+        shown_suppressed, cut_suppressed = cap_non_gating(
+            doc.suppressed,
+            frozenset(id(entry) for entry in doc.suppressed),
+            limit=NOTE_ITEM_LIMIT,
+        )
+        for entry in shown_suppressed:
             finding = entry
             change = entry.change
             # A reader deciding whether the waiver still applies needs the
@@ -635,11 +660,16 @@ def render_no_baseline_markdown(doc: NoBaselineDocument) -> str:
             source = prov.get("source_file") or "(not recorded)"
             expires = prov.get("expires") or "(never)"
             lines.append(
-                f"| `{md_cell(change.kind.value)}` | `{md_cell(change.symbol or '-')}` | "
-                f"{md_cell(finding.category.value)} | {md_cell(rule)} | "
-                f"{md_cell(str(reason))} | `{md_cell(str(source))}` | "
-                f"{md_cell(str(expires))} |"
+                f"| {md_text(change.kind.value, code=True, table=True)} | {md_text(change.symbol or '-', code=True, table=True)} | "
+                f"{md_text(finding.category.value, table=True)} | {md_text(rule, table=True)} | "
+                f"{md_text(str(reason), table=True)} | {md_text(str(source), code=True, table=True)} | "
+                f"{md_text(str(expires), table=True)} |"
             )
+        disclosure = more_non_gating_line(
+            cut_suppressed, json_field="suppressed_findings"
+        )
+        if disclosure is not None:
+            lines += ["", disclosure]
     lines += _exit_axis_notice_lines(doc)
     return "\n".join(lines) + "\n"
 

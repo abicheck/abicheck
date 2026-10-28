@@ -117,6 +117,7 @@ from .markdown_budget import (
     more_line,
     split_items,
 )
+from .markdown_text import md_text
 from .pattern_modulations_markdown import render_pattern_modulations_from_mapping
 from .render_edge_coverage import render_edge_coverage_markdown
 from .render_markdown import (
@@ -206,12 +207,12 @@ def _row_symbol_suffix(row: Mapping[str, Any]) -> str:
     every finding's symbol still appears."""
     symbol = row.get("symbol")
     if symbol and symbol not in row["description"]:
-        return f" — `{clip_name(symbol)}`"
+        return f" — {md_text(clip_name(symbol), code=True)}"
     return ""
 
 
 def _render_change_row_oneline(row: Mapping[str, Any]) -> str:
-    line = clip(f"- **{row['kind']}**: {row['description']}")
+    line = clip(f"- **{row['kind']}**: {md_text(row['description'])}")
     line += _row_symbol_suffix(row)
     correlated = row.get("correlated_change_kind")
     if correlated:
@@ -228,16 +229,16 @@ def _render_change_row(row: Mapping[str, Any]) -> str:
         new_val = clip_name(new_val)
     old_new = ""
     if old_val is not None and new_val is not None:
-        old_new = f" (`{old_val}` → `{new_val}`)"
+        old_new = f" ({md_text(old_val, code=True)} → {md_text(new_val, code=True)})"
     elif old_val is not None:
-        old_new = f" (`{old_val}`)"
+        old_new = f" ({md_text(old_val, code=True)})"
     elif new_val is not None:
-        old_new = f" (`{new_val}`)"
-    line = f"- **{row['kind']}**: {clip(row['description'])}{old_new}"
+        old_new = f" ({md_text(new_val, code=True)})"
+    line = f"- **{row['kind']}**: {md_text(clip(row['description']))}{old_new}"
     line += _row_symbol_suffix(row)
     loc = row.get("source_location")
     if loc:
-        line += f" — `{clip_name(loc)}`"
+        line += f" — {md_text(clip_name(loc), code=True)}"
     impact = row.get("impact")
     if impact:
         line += f"\n  > {impact}"
@@ -246,7 +247,9 @@ def _render_change_row(row: Mapping[str, Any]) -> str:
         line += f"\n  > {caused_count} derived change(s) collapsed"
     affected = row.get("affected_symbols")
     if affected:
-        names = ", ".join(f"`{clip_name(s)}`" for s in affected[:EXAMPLE_LIMIT])
+        names = ", ".join(
+            md_text(clip_name(s), code=True) for s in affected[:EXAMPLE_LIMIT]
+        )
         hidden = len(affected) - EXAMPLE_LIMIT
         suffix = f" (+{hidden} more)" if hidden > 0 else ""
         line += f"\n  > Affected symbols: {names}{suffix}"
@@ -440,7 +443,9 @@ def _render_review_groups_from_mapping(value: Any) -> list[str]:
             # small report reads the same; only a family of several is folded.
             group = family["first"]
             lines += [
-                clip(f"### {index}. `{clip_name(group.get('display_name', '?'))}`"),
+                clip(
+                    f"### {index}. {md_text(clip_name(group.get('display_name', '?')), code=True)}"
+                ),
                 "",
                 clip(f"- **Observed:** {transition}"),
                 clip(f"- **Implication:** {family['consequence']}"),
@@ -460,7 +465,7 @@ def _render_review_groups_from_mapping(value: Any) -> list[str]:
             consequence = action = "varies by member; see the JSON `review_groups`"
         lines += [
             clip(
-                f"### {index}. `{clip_name(root)}` "
+                f"### {index}. {md_text(clip_name(root), code=True)} "
                 f"({family['groups']} group(s), {family['members']} member finding(s))"
             ),
             "",
@@ -559,7 +564,7 @@ def render_markdown_document(doc: ReportDocument) -> str:
         # echoing the raw internal separator into a suggested invocation.
         cli_hint = render_show_only_cli_hint(note["show_only"])
         lines.append(
-            f"> Filtered by: `{cli_hint}` "
+            f"> Filtered by: {md_text(cli_hint, code=True)} "
             f"({note['shown']} of {note['total']} changes shown)"
         )
         lines.append("")
@@ -610,7 +615,10 @@ def render_markdown_document(doc: ReportDocument) -> str:
     if d["demangle"]:
         from ..demangle import demangle_text
 
-        text = demangle_text(  # escape: Foo::operator|
-            text, escape_table_pipes=True, max_demangled=DEMANGLED_NAME_LIMIT
+        text = demangle_text(
+            text,
+            escape_table_pipes=True,
+            max_demangled=DEMANGLED_NAME_LIMIT,
+            markdown=md_text,
         )
     return text

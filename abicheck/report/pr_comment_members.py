@@ -37,6 +37,7 @@ from collections.abc import Callable, Mapping
 from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import TypeVar
 
+from .markdown_text import md_text
 from .pr_comment_model import CommentModel, Finding
 
 #: How many targets one document may have folded. Real fan-outs are a build
@@ -121,12 +122,12 @@ def _reject_absolute(raw: str) -> None:
     """
     if PurePosixPath(raw).is_absolute() or PureWindowsPath(raw).is_absolute():
         raise MemberReportRefused(
-            f"its report_path `{raw}` is absolute; member reports are read only "
+            f"its report_path {md_text(raw, code=True)} is absolute; member reports are read only "
             "from the aggregate document's own directory"
         )
     if PureWindowsPath(raw).drive:
         raise MemberReportRefused(
-            f"its report_path `{raw}` names a drive; member reports are read "
+            f"its report_path {md_text(raw, code=True)} names a drive; member reports are read "
             "only from the aggregate document's own directory"
         )
 
@@ -156,18 +157,20 @@ def resolve_member_path(base_dir: Path, raw: str) -> Path:
     parts = [p for p in PurePosixPath(raw.replace("\\", "/")).parts if p != "."]
     if any(part == ".." for part in parts):
         raise MemberReportRefused(
-            f"its report_path `{raw}` traverses out of the aggregate document's "
+            f"its report_path {md_text(raw, code=True)} traverses out of the aggregate document's "
             "directory"
         )
     if not parts:
-        raise MemberReportRefused(f"its report_path `{raw}` names no file")
+        raise MemberReportRefused(
+            f"its report_path {md_text(raw, code=True)} names no file"
+        )
     current = base_dir
     for part in parts:
         current = current / part
         if current.is_symlink():
             raise MemberReportRefused(
-                f"its report_path `{raw}` passes through the symlink "
-                f"`{part}`; member reports must be plain files under the "
+                f"its report_path {md_text(raw, code=True)} passes through the symlink "
+                f"{md_text(part, code=True)}; member reports must be plain files under the "
                 "aggregate document's directory"
             )
     try:
@@ -176,7 +179,7 @@ def resolve_member_path(base_dir: Path, raw: str) -> Path:
         resolved.relative_to(resolved_base)
     except (OSError, ValueError) as exc:
         raise MemberReportRefused(
-            f"its report_path `{raw}` does not resolve inside the aggregate "
+            f"its report_path {md_text(raw, code=True)} does not resolve inside the aggregate "
             "document's directory"
         ) from exc
     return current
@@ -201,27 +204,31 @@ def load_member_report(
         stat = path.stat()
     except OSError as exc:
         raise MemberReportRefused(
-            f"its report `{raw}` could not be read ({exc.strerror or exc})"
+            f"its report {md_text(raw, code=True)} could not be read ({exc.strerror or exc})"
         ) from exc
     if not path.is_file():
-        raise MemberReportRefused(f"its report_path `{raw}` is not a regular file")
+        raise MemberReportRefused(
+            f"its report_path {md_text(raw, code=True)} is not a regular file"
+        )
     if stat.st_size > max_bytes:
         raise MemberReportRefused(
-            f"its report `{raw}` is {stat.st_size} bytes, over the "
+            f"its report {md_text(raw, code=True)} is {stat.st_size} bytes, over the "
             f"{max_bytes}-byte member-report limit"
         )
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, UnicodeDecodeError) as exc:
         raise MemberReportRefused(
-            f"its report `{raw}` could not be read ({exc})"
+            f"its report {md_text(raw, code=True)} could not be read ({exc})"
         ) from exc
     except json.JSONDecodeError as exc:
         raise MemberReportRefused(
-            f"its report `{raw}` is not valid JSON ({exc})"
+            f"its report {md_text(raw, code=True)} is not valid JSON ({exc})"
         ) from exc
     if not isinstance(data, dict):
-        raise MemberReportRefused(f"its report `{raw}` is not a JSON object")
+        raise MemberReportRefused(
+            f"its report {md_text(raw, code=True)} is not a JSON object"
+        )
     return data
 
 

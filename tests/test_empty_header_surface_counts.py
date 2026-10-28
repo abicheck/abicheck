@@ -58,3 +58,37 @@ def test_a_binary_only_side_is_not_named() -> None:
     snap = AbiSnapshot(library="libx", version="1")
     snap.from_headers = False
     assert empty_header_surface_warnings(None, snap) == []
+
+
+def _l2_row(snap: AbiSnapshot) -> tuple[str, str, str]:
+    from abicheck.buildsource.evidence_report import intrinsic_coverage
+
+    (row,) = (c for c in intrinsic_coverage(snap) if c.layer == "L2")
+    return row.status.value, row.confidence.value, row.detail
+
+
+@pytest.mark.parametrize("kind", sorted(set(DECLARATION_KINDS) - _SIDECARS))
+def test_one_declaration_of_any_kind_keeps_the_l2_row_at_high_confidence(
+    kind: str,
+) -> None:
+    snap = _header_snapshot()
+    store = getattr(snap.declarations, kind)
+    if isinstance(store, dict):
+        store["x"] = "1"
+    else:
+        store.append(object())
+    assert _l2_row(snap) == ("present", "high", "header-scoped")
+
+
+def test_a_header_side_with_nothing_lowers_the_l2_row_to_reduced() -> None:
+    assert _l2_row(_header_snapshot()) == (
+        "present",
+        "reduced",
+        "header-scoped, zero public declarations",
+    )
+
+
+def test_a_binary_only_side_leaves_the_l2_row_not_collected() -> None:
+    snap = AbiSnapshot(library="libx", version="1")
+    snap.from_headers = False
+    assert _l2_row(snap) == ("not_collected", "unknown", "")

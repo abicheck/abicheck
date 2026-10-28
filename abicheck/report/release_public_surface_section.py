@@ -51,6 +51,7 @@ from ..policy.release_contract_reconciliation import (
     ReleaseReconciliation,
     SideReconciliation,
 )
+from .markdown_text import md_text
 
 #: Bumped when this section's own wire shape changes.
 RELEASE_PUBLIC_SURFACE_SECTION_VERSION = 1
@@ -244,10 +245,12 @@ def render_release_public_surface_markdown(terms: ReleasePublicSurfaceTerms) -> 
             continue
         if not rec.get("surface_resolvable"):
             reason = rec.get("coverage_reason") or "not acquired"
-            lines.append(f"- **{name}**: public surface unresolved — {reason}")
+            lines.append(
+                f"- **{md_text(name)}**: public surface unresolved — {md_text(reason)}"
+            )
             continue
         lines.append(
-            f"- **{name}**: "
+            f"- **{md_text(name)}**: "
             f"{rec['public_declarations_with_export_obligation']} public declaration(s) "
             f"with an export obligation, "
             f"{rec['satisfied_by_bundle_exports']} satisfied by bundle exports, "
@@ -264,7 +267,10 @@ def render_release_public_surface_markdown(terms: ReleasePublicSurfaceTerms) -> 
         for finding in terms.missing_exports[:limit]:
             state = finding.get("cross_source_evolution")
             suffix = f" ({state})" if state else ""
-            lines.append(f"- `{finding['symbol']}`{suffix} — {finding['description']}")
+            lines.append(
+                f"- {md_text(finding['symbol'], code=True)}{suffix} — "
+                f"{md_text(finding['description'])}"
+            )
         lines += _omitted_line(len(terms.missing_exports), limit)
     if terms.shared_findings:
         lines += [
@@ -275,7 +281,8 @@ def render_release_public_surface_markdown(terms: ReleasePublicSurfaceTerms) -> 
         limit = terms.markdown_item_limit
         for shared in terms.shared_findings[:limit]:
             lines.append(
-                f"- `{shared.symbol}` [{shared.kind}] — {shared.description} "
+                f"- {md_text(shared.symbol, code=True)} [{shared.kind}] — "
+                f"{md_text(shared.description)} "
                 f"({_attribution_text(shared)})"
             )
         lines += _omitted_line(len(terms.shared_findings), limit)

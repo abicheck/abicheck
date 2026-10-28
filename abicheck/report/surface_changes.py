@@ -51,6 +51,7 @@ from ..policy.evaluate import effective_kind_sets
 from .change_operation import entity_for_change, operation_for_kind
 from .finding import ReportFinding, build_report_findings, report_findings_for
 from .markdown_budget import clip, clip_name
+from .markdown_text import md_text
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from ..checker_types import DiffResult
@@ -272,16 +273,24 @@ def _declaration_line(entry: SurfaceChangeEntry) -> str:
     old = entry.old_declaration and clip_name(entry.old_declaration)
     new = entry.new_declaration and clip_name(entry.new_declaration)
     if old and new and entry.old_declaration != entry.new_declaration:
-        decl = f"`{old}` → `{new}`"
+        decl = f"{md_text(old, code=True)} → {md_text(new, code=True)}"
     elif new:
-        decl = f"`{new}`"
+        decl = md_text(new, code=True)
     elif old:
-        decl = f"`{old}`"
+        decl = md_text(old, code=True)
     else:
-        decl = entry.description
-    loc = f" ({clip_name(entry.source_location)})" if entry.source_location else ""
-    member = f"`{clip_name(entry.library)}` · " if entry.library is not None else ""
-    return clip(f"- {member}**{clip_name(entry.symbol)}** — {decl}{loc}")
+        decl = md_text(entry.description)
+    loc = (
+        f" ({md_text(clip_name(entry.source_location))})"
+        if entry.source_location
+        else ""
+    )
+    member = (
+        f"{md_text(clip_name(entry.library), code=True)} · "
+        if entry.library is not None
+        else ""
+    )
+    return clip(f"- {member}**{md_text(clip_name(entry.symbol))}** — {decl}{loc}")
 
 
 #: Per-group cap on the compact/bounded rendering of this section.

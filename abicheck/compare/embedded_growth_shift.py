@@ -32,12 +32,19 @@ change or shrink leaves the finding unstamped.
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Mapping
+from collections.abc import Iterable
+from typing import NamedTuple
 
 from ..model import RecordType, TypeField
 from ..model.change import Change
 from ..model.change_catalog.kinds import ChangeKind
-from ..model.declaration_store import Declarations
+from ..model.snapshot import AbiSnapshot
+from ..model.snapshot_index import record_lookup_index
+from .typedef_spelling_keys import (
+    TypedefSpellingIndex,
+    typedef_spelling_index,
+    typedef_target,
+)
 
 #: ``review_evidence`` key this module writes and the policy selector reads.
 OFFSET_SHIFT_CAUSE_KEY = "offset_shift_cause"
@@ -47,25 +54,47 @@ _NOT_BY_VALUE = frozenset("*&[(")
 _MAX_TYPEDEF_HOPS = 16
 
 
-def _side(decls: Declarations) -> tuple[dict[str, RecordType], Mapping[str, str]]:
-    records = {t.name: t for t in decls.types if t.kind != "union"}
-    return records, decls.typedefs
+class _Side(NamedTuple):
+    """One snapshot's records and typedefs, each looked up the way the closure spells them."""
+
+    records: dict[str, RecordType]
+    snap: AbiSnapshot
+    typedefs: TypedefSpellingIndex
 
 
-def _resolve_by_value_record(
-    spelling: str, records: Mapping[str, RecordType], typedefs: Mapping[str, str]
-) -> RecordType | None:
-    """The record a by-value member of type *spelling* embeds, else ``None``."""
+def _side(snap: AbiSnapshot) -> _Side:
+    """Index one side's records by qualified identity and its typedefs by the
+    closure's resolver.
+
+    ``RecordType.name`` is the castxml leaf, so keying on it merged ``a::Box``
+    with ``b::Box`` (last one wins) and never matched a qualified spelling.
+    The qualified-identity index keeps both, and gives a bare alias only to a
+    leaf that names exactly one record.
+    """
+    records = record_lookup_index(
+        t for t in snap.declarations.types if t.kind != "union"
+    )
+    return _Side(records, snap, typedef_spelling_index(snap))
+
+
+def _resolve_by_value_record(spelling: str, side: _Side) -> RecordType | None:
+    """The record a by-value member of type *spelling* embeds, else ``None``.
+
+    A spelling that names several things resolves to nothing: a bare name two
+    scopes declare, or a typedef key shared by colliding member aliases. No
+    size is claimed for a record that may not be the embedded one.
+    """
     name = spelling
     for _ in range(_MAX_TYPEDEF_HOPS):
         if any(ch in _NOT_BY_VALUE for ch in name):
             return None
         name = " ".join(w for w in name.split() if w not in _TAG_OR_CV_WORDS)
-        if name in records:
-            return records[name]
-        if name not in typedefs:
+        if name in side.records:
+            return side.records[name]
+        keys = side.typedefs.keys_for(name)
+        if len(keys) != 1:
             return None
-        name = typedefs[name]
+        name = typedef_target(side.snap, keys[0])
     return None
 
 
@@ -73,8 +102,8 @@ def _explained_shift(
     old_rec: RecordType,
     new_rec: RecordType,
     field_name: str,
-    old_side: tuple[dict[str, RecordType], Mapping[str, str]],
-    new_side: tuple[dict[str, RecordType], Mapping[str, str]],
+    old_side: _Side,
+    new_side: _Side,
 ) -> list[dict[str, object]] | None:
     """Grown members that exactly explain *field_name*'s shift, else ``None``."""
     old_fields, new_fields = old_rec.fields, new_rec.fields
@@ -91,8 +120,8 @@ def _explained_shift(
     for f_old, f_new in zip(old_fields[:idx], new_fields[:idx], strict=True):
         if not _same_member(f_old, f_new) or f_old.is_bitfield:
             return None
-        rec_old = _resolve_by_value_record(f_old.type, *old_side)
-        rec_new = _resolve_by_value_record(f_new.type, *new_side)
+        rec_old = _resolve_by_value_record(f_old.type, old_side)
+        rec_new = _resolve_by_value_record(f_new.type, new_side)
         if rec_old is None or rec_new is None:
             continue
         if rec_old.size_bits is None or rec_new.size_bits is None:
@@ -113,7 +142,7 @@ def _same_member(a: TypeField, b: TypeField) -> bool:
 
 
 def stamp_embedded_growth_shifts(
-    changes: Iterable[Change], old: Declarations, new: Declarations
+    changes: Iterable[Change], old: AbiSnapshot, new: AbiSnapshot
 ) -> list[Change]:
     """Stamp each offset shift fully explained by embedded growth; return *changes*."""
     out = list(changes)
@@ -126,8 +155,8 @@ def stamp_embedded_growth_shifts(
         return out
     old_side, new_side = _side(old), _side(new)
     for c in shifts:
-        old_rec = old_side[0].get(c.symbol)
-        new_rec = new_side[0].get(c.symbol)
+        old_rec = old_side.records.get(c.symbol)
+        new_rec = new_side.records.get(c.symbol)
         if old_rec is None or new_rec is None or c.field_name is None:
             continue
         grown = _explained_shift(old_rec, new_rec, c.field_name, old_side, new_side)

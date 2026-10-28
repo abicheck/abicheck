@@ -1022,7 +1022,7 @@ class TestEveryMarkdownDemanglePassEscapesTablePipes:
     stated as a sweep over the passes rather than a test per pass. A
     whole-document demangle runs *after* the rows were built and correctly
     escaped, so the pipe inside `Foo::operator|(Foo const&)` does not exist
-    yet when `md_cell` sees the cell — escaping the raw value cannot protect
+    yet when `md_text` sees the cell — escaping the raw value cannot protect
     a delimiter that demangling introduces later.
 
     `report.dispatch_markdown` and the release renderer were fixed first;

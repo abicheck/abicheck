@@ -1060,12 +1060,14 @@ class TestScopeMarkdownEscapesUncontrolledValues:
             ln.startswith("| forged") or ln.startswith("| injected") for ln in lines
         )
         rows = [ln for ln in lines if ln.startswith("| `")]
-        assert len(rows) == 1 and rows[0].count("`") == 2
+        # The name's own backtick stays literal inside one code span: the
+        # span's fence is longer than any backtick run the value carries.
+        assert len(rows) == 1 and rows[0].startswith("| ``lib`x.so")
         # Every pipe the value carried is escaped, so the row still has its
         # five cells once escaped pipes are discounted.
         unescaped = rows[0].replace("\\|", "")
         assert len([c for c in unescaped.split("|") if c.strip()]) == 5
-        assert "lib'x.so" in rows[0] and "boom '" in rows[0]
+        assert "boom \\`" in rows[0]
         removed = next(ln for ln in lines if "Removed libraries" in ln)
         assert "`libgone.so`" in removed
         selection = next(ln for ln in lines if "**Selection**" in ln)
@@ -1081,5 +1083,6 @@ class TestScopeMarkdownEscapesUncontrolledValues:
         assert terms.section is not None
         notice = comparison_scope_notice(terms.section)
         assert notice is not None
-        assert "\n" not in notice and "`" not in notice
-        assert "lib'x.so" in notice and "\\|" in notice
+        # One line, and no backtick a Markdown reader would act on.
+        assert "\n" not in notice and "`" not in notice.replace("\\`", "")
+        assert "lib\\`x.so" in notice and "\\|" in notice

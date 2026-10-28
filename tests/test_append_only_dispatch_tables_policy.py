@@ -307,5 +307,5 @@ def test_shift_not_equal_to_growth_is_not_stamped(extra_pad: int) -> None:
         if c.kind == ChangeKind.TYPE_FIELD_OFFSET_CHANGED and c.symbol == _AGG
     ]
     assert shifts
-    stamp_embedded_growth_shifts(shifts, old.declarations, new.declarations)
+    stamp_embedded_growth_shifts(shifts, old, new)
     assert not any((c.review_evidence or {}).get("offset_shift_cause") for c in shifts)

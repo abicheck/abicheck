@@ -188,7 +188,14 @@ CONCURRENCY_BUG_CLASSES: tuple[BugClass, ...] = (
             "reaping must never depend on SIGTERM alone."
         ),
         fixed_by=(1395,),
-        seed_tests=("tests/test_side_isolation.py",),
+        seed_tests=(
+            "tests/test_side_isolation.py",
+            # Every other parent wait on a forked child (EOF join, completed
+            # reap, RPM and process-tree post-kill waits) must be bounded too;
+            # the AST gate keeps new unbounded waits out of abicheck/.
+            "tests/test_forked_child_bounded_reap.py",
+            "tests/test_unbounded_wait_gate.py",
+        ),
         public_surfaces=("cli",),
         axes={
             "block": ("sleep", "send", "lock"),

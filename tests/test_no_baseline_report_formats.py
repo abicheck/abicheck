@@ -456,7 +456,7 @@ def _cell_count(row: str) -> int:
     """Cells in a Markdown table *row*, honoring backslash-escaped pipes.
 
     A deliberately independent oracle: it counts unescaped ``|`` separators
-    from the rendered text rather than reusing ``md_cell``'s own escaping,
+    from the rendered text rather than reusing ``md_text``'s own escaping,
     so a bug in that helper cannot make this measurement agree with it.
     """
     count = 0

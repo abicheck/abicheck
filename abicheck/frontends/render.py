@@ -417,7 +417,7 @@ def _project_terminal(envelope: ReportEnvelope) -> str:
         envelope.old.dependency_info or (envelope.new and envelope.new.dependency_info)
     ):
         text += _render_deps_section(envelope.old, envelope.new, _PLAIN_DEPS_STYLE)
-    return _demangled(text, envelope, escape_table_pipes=False)
+    return _demangled(text, envelope, markdown=False)
 
 
 def _project_markdown(envelope: ReportEnvelope) -> str:
@@ -457,35 +457,33 @@ def _project_markdown(envelope: ReportEnvelope) -> str:
     return _demangled(md, envelope)
 
 
-def _demangled(
-    text: str, envelope: ReportEnvelope, *, escape_table_pipes: bool = True
-) -> str:
+def _demangled(text: str, envelope: ReportEnvelope, *, markdown: bool = True) -> str:
     """Apply the human-facing ``demangle`` presentation option to *text*.
 
-    ``escape_table_pipes=True`` because both callers render Markdown
-    (:func:`_project_markdown` and :func:`_project_review`) and this is a
-    *whole-document* pass over rows that were already built and correctly
-    escaped: a symbol only becomes ``Foo::operator|(Foo const&)`` here, so
-    the pipe it introduces lands inside a finished table cell and GFM reads
-    an extra column. Measured before the fix, a modulation row rendered
-    through ``render_output("markdown", ...)`` had four columns in a
-    three-column table (Codex review, PR #1284).
+    ``markdown=True`` because both Markdown projections (:func:`_project_markdown`
+    and :func:`_project_review`) run this as a *whole-document* pass over rows
+    that were already built and escaped. A demangled name is inserted into
+    that finished text, so :func:`abicheck.demangle.demangle_text` escapes it
+    for the context its token sits in: as prose (``std::vector<int>`` would
+    otherwise lose ``<int>`` as HTML), or literally inside a code span with a
+    table pipe escaped (``Foo::operator|`` would otherwise add a column).
 
     The sibling passes in ``report.dispatch_markdown`` and the release
-    renderer already escape; this one is the third, and the one every CLI
-    and typed ``render_output`` Markdown render actually goes through --
-    ``to_markdown`` is called from :func:`_project_markdown` without
-    ``demangle=``, so its own escaped pass never runs on this path.
+    renderer use the same flag; this one is the one every CLI and typed
+    ``render_output`` Markdown render goes through, since ``to_markdown`` is
+    called from :func:`_project_markdown` without ``demangle=``.
     """
     if not envelope.options.demangle:
         return text
     from ..demangle import demangle_text
     from ..report.markdown_budget import DEMANGLED_NAME_LIMIT
+    from ..report.markdown_text import md_text
 
     return demangle_text(
         text,
-        escape_table_pipes=escape_table_pipes,
+        escape_table_pipes=markdown,
         max_demangled=DEMANGLED_NAME_LIMIT,
+        markdown=md_text if markdown else None,
     )
 
 

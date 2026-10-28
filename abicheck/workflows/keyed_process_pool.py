@@ -45,7 +45,7 @@ from typing import TYPE_CHECKING, Any, TypeVar
 
 from ..errors import SnapshotError
 from . import memory_trace
-from .side_isolation import fork_child, reap_child
+from .side_isolation import _TERMINATE_GRACE_SECONDS, fork_child, reap_child
 
 if TYPE_CHECKING:
     from .release_admission import MemoryAdmission
@@ -80,7 +80,9 @@ def _receive(recv: Any, proc: Any) -> tuple[str, Any]:
         with gc_paused():
             status, value = recv.recv()
     except EOFError:
-        proc.join()
+        # Bounded: a child that closed its pipe may still be alive; reap_child
+        # in _settle (or the caller's finally) escalates to SIGKILL.
+        proc.join(_TERMINATE_GRACE_SECONDS)
         return "err", SnapshotError(
             f"member process exited with status {proc.exitcode} without "
             "returning a result"

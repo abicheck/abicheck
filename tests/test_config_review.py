@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import inspect
 import json
+from collections.abc import Callable
 from pathlib import Path
 
 import pytest
@@ -118,6 +119,7 @@ class TestDemangleTriState:
             *,
             escape_table_pipes: bool = False,
             max_demangled: int | None = None,
+            markdown: Callable[..., str] | None = None,
         ) -> str:
             return text.replace("_Z3foov", "foo() [_Z3foov]")
 
