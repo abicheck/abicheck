@@ -338,3 +338,87 @@ def test_empty_header_directory_stays_an_input_error(
     assert exit_code == 64, output
     assert report is None
     assert "contains no supported header files" in output
+
+
+# ---------------------------------------------------------------------------
+# The evidence-coverage table: a zero-declaration side is not "high confidence".
+# ---------------------------------------------------------------------------
+
+_HIGH_L2_LINE = "L2 public header AST       present, high confidence: header-scoped"
+_REDUCED_L2_LINE = (
+    "L2 public header AST       present, reduced confidence: "
+    "header-scoped, zero public declarations"
+)
+
+
+def _l2_layer_row(report: dict[str, object]) -> dict[str, object]:
+    rows = report.get("layer_coverage", [])
+    assert isinstance(rows, list)
+    (row,) = (r for r in rows if isinstance(r, dict) and r.get("layer") == "L2")
+    return row
+
+
+@pytest.mark.parametrize("variant", sorted(_EMPTY_SURFACE_HEADERS))
+def test_new_side_with_zero_declarations_is_reduced_in_the_coverage_table(
+    libs: tuple[Path, Path], tmp_path: Path, variant: str
+) -> None:
+    """The new side is the table's headline row: an emptied header set reads
+    ``reduced``, not ``high``, in both the text table and the JSON row."""
+    full = _write_header(tmp_path / "full", "api.h", _FULL_HEADER)
+    empty = _write_header(tmp_path / "empty", "api.h", _EMPTY_SURFACE_HEADERS[variant])
+
+    _, report, output = _compare(libs, tmp_path, _side_header_args("new", empty, full))
+
+    assert report is not None, output
+    assert _REDUCED_L2_LINE in output, output
+    assert _HIGH_L2_LINE not in output, output
+    row = _l2_layer_row(report)
+    assert row["status"] == "present"
+    assert row["confidence"] == "reduced"
+
+
+@pytest.mark.parametrize("variant", sorted(_EMPTY_SURFACE_HEADERS))
+def test_old_side_with_zero_declarations_is_reduced_in_the_per_side_table(
+    libs: tuple[Path, Path], tmp_path: Path, variant: str
+) -> None:
+    """The old side has no headline row, so its reduced L2 shows in the per-side
+    table; the new side, fully declared, keeps its own high-confidence row."""
+    full = _write_header(tmp_path / "full", "api.h", _FULL_HEADER)
+    empty = _write_header(tmp_path / "empty", "api.h", _EMPTY_SURFACE_HEADERS[variant])
+
+    _, report, output = _compare(libs, tmp_path, _side_header_args("old", empty, full))
+
+    assert report is not None, output
+    assert _HIGH_L2_LINE in output, output
+    assert "L2 public header AST       old=present (reduced) new=present" in output
+    assert _l2_layer_row(report)["confidence"] == "high"
+
+
+def test_both_sides_with_zero_declarations_are_both_reduced(
+    libs: tuple[Path, Path], tmp_path: Path
+) -> None:
+    empty = _write_header(tmp_path / "empty", "api.h", "")
+
+    _, report, output = _compare(libs, tmp_path, ["--header", str(empty)])
+
+    assert report is not None, output
+    assert "old=present (reduced) new=present (reduced)" in output, output
+    assert _l2_layer_row(report)["confidence"] == "reduced"
+
+
+def test_fully_declared_headers_keep_the_l2_row_at_high_confidence(
+    libs: tuple[Path, Path], tmp_path: Path
+) -> None:
+    """Negative control: a header set that declares the surface is unchanged."""
+    full = _write_header(tmp_path / "full", "api.h", _FULL_HEADER)
+    full_new = _write_header(tmp_path / "full_new", "api.h", _FULL_HEADER)
+
+    _, report, output = _compare(
+        libs, tmp_path, _side_header_args("new", full_new, full)
+    )
+
+    assert report is not None, output
+    assert _HIGH_L2_LINE in output, output
+    assert _REDUCED_L2_LINE not in output, output
+    assert "L2 public header AST       old=present (reduced)" not in output, output
+    assert _l2_layer_row(report)["confidence"] == "high"

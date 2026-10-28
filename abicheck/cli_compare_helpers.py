@@ -34,10 +34,7 @@ from typing import TYPE_CHECKING, Any
 import click
 
 from . import cli_resolve
-from .cli_compare_fold import (
-    _exit_on_budget_overflow,
-    report_not_comparable_and_exit,
-)
+from .cli_compare_fold import _exit_on_budget_overflow, report_not_comparable_and_exit
 from .cli_compare_options import (
     _NormalizedCompareOptions,
     _reject_bundle_facts_out_for_single_pair,
@@ -50,10 +47,7 @@ from .cli_options import (
     resolve_contract_domain,
     resolve_contract_evaluation,
 )
-from .cli_resolve import (
-    _resolve_compare_pair,
-    resolve_directory_compile_context,
-)
+from .cli_resolve import _resolve_compare_pair, resolve_directory_compile_context
 from .errors import (
     ProfileMismatchError,
     ScopeMismatchError,
@@ -96,7 +90,10 @@ from .frontends.cli.contract_overlays import (
     note_unapplied_post_manifest,
     post_manifest_allowlist_for,
 )
-from .frontends.cli.ignored_flag_warnings import _warn_ignored_flags
+from .frontends.cli.ignored_flag_warnings import (
+    _warn_ignored_development_packages,
+    _warn_ignored_flags,
+)
 from .frontends.cli.options.params import _load_suppression_and_policy
 from .frontends.cli.ownership_config import project_ownership_request
 from .frontends.cli.project_config import (
@@ -104,10 +101,7 @@ from .frontends.cli.project_config import (
     fold_project_policy_overrides_for_cli,
     resolve_project_compare_config,
 )
-from .frontends.cli.runtime import (
-    _log_debug_resolution,
-    _setup_verbosity,
-)
+from .frontends.cli.runtime import _log_debug_resolution, _setup_verbosity
 from .frontends.render import resolve_demangle_for_format
 from .model.sided_inputs import resolve_per_side_inputs
 from .report.report_modes import normalize_report_mode
@@ -134,9 +128,7 @@ from .workflows.operand_rules import (
     reject_manifest_non_elf,
 )
 from .workflows.ownership_request import project_ownership_scope
-from .workflows.public_header_boundary import (
-    project_config_public_header_dirs,
-)
+from .workflows.public_header_boundary import project_config_public_header_dirs
 
 if TYPE_CHECKING:
     from .model.consumer_spec import ConsumerAppInput
@@ -905,6 +897,7 @@ def run_compare(
         old_includes_only,
         new_includes_only,
     )
+    _warn_ignored_development_packages(devel_pkg1, devel_pkg2)
 
     _log_debug_resolution(
         old_input,

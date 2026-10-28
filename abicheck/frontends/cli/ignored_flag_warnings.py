@@ -13,12 +13,14 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Terminal warning for dump-only flags given alongside two snapshot inputs.
+"""Terminal warnings for compare inputs a single-pair run cannot honour.
 
 ``compare`` accepts the header and include options only when an operand is a
 binary or a source tree; when both operands are snapshots they have no effect,
-and this warning says so on stderr. It is the CLI's only terminal-writing
-helper for that path -- the rest of the compare/dump helper logic is owned by
+and this warning says so on stderr. A development package given through
+``-H/--header`` is read only by the release fan-out, and is named here when a
+single-pair run drops it. These are the CLI's only terminal-writing helpers for
+that path -- the rest of the compare/dump helper logic is owned by
 :mod:`abicheck.workflows`.
 """
 
@@ -54,5 +56,31 @@ def _warn_ignored_flags(
     if ignored_flags:
         click.echo(
             f"Warning: {', '.join(ignored_flags)} ignored when both inputs are snapshots.",
+            err=True,
+        )
+
+
+def _warn_ignored_development_packages(
+    devel_pkg1: Path | None, devel_pkg2: Path | None
+) -> None:
+    """Name each development package a single-pair compare was given and cannot read.
+
+    A ``-H/--header`` operand that is a development package is consumed only by
+    the release fan-out. A single-pair compare has no extraction for it, so the
+    package would otherwise drop out with nothing but a "no headers provided"
+    note per library. One warning per distinct package, naming the side(s) it
+    was given for.
+    """
+    sides_by_package: dict[Path, list[str]] = {}
+    for side, package in (("old", devel_pkg1), ("new", devel_pkg2)):
+        if package is not None:
+            sides_by_package.setdefault(package, []).append(side)
+    for package, sides in sides_by_package.items():
+        scope = "both sides" if len(sides) == 2 else f"{sides[0]} side"
+        click.echo(
+            f"Warning: development package '{package}' ignored for the {scope}: a "
+            "single-pair compare does not read headers from a development "
+            "package. Extract it and pass its include directory with -H, or "
+            "compare the release directories.",
             err=True,
         )
