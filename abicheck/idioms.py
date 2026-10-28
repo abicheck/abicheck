@@ -37,6 +37,7 @@ from dataclasses import dataclass, field
 from enum import StrEnum
 
 from .model import ParamKind, RecordType, resolved_fact_value
+from .model.castxml_spelling_artifacts import is_castxml_opaque_function_type
 from .model.change_catalog.kinds import ChangeKind
 from .model.evidence_status import Confidence
 from .model.surface_facts import in_public_surface
@@ -341,6 +342,20 @@ def _recognise_create_destroy(graph: SurfaceGraph) -> dict[str, IdiomTag]:
     return out
 
 
+def _is_opaque_callback_tag(spelling: str) -> bool:
+    """Whether *spelling* is castxml's opaque ``FunctionType`` tag, possibly
+    wrapped in pointer/reference/cv/array syntax.
+
+    Anchored to the whole spelling, not a substring test: a real type such as
+    ``MyFunctionTypeWrapper*``, ``FunctionTypeT`` or ``struct FunctionTypeHelper&``
+    must not be read as the tag. Delegates to the predicate the semantic
+    normalizer uses for the same castxml artifact
+    (``model.castxml_spelling_artifacts``). Only castxml emits the tag, so the
+    producer is fixed here.
+    """
+    return is_castxml_opaque_function_type(spelling, "castxml")
+
+
 def _is_callback_type(type_str: str, typedefs: dict[str, str]) -> bool:
     """True when *type_str* is (or resolves to) a function-pointer parameter.
 
@@ -352,14 +367,14 @@ def _is_callback_type(type_str: str, typedefs: dict[str, str]) -> bool:
     - a typedef'd callback, where the parameter names an alias whose target is
       itself a function pointer (resolved through the typedef map).
     """
-    if _FUNC_PTR_RE.search(type_str) or "FunctionType" in type_str:
+    if _FUNC_PTR_RE.search(type_str) or _is_opaque_callback_tag(type_str):
         return True
     base = _strip_ptr(type_str)
     seen: set[str] = set()
     while base in typedefs and base not in seen:
         seen.add(base)
         target = typedefs[base]
-        if _FUNC_PTR_RE.search(target) or "FunctionType" in target:
+        if _FUNC_PTR_RE.search(target) or _is_opaque_callback_tag(target):
             return True
         base = _strip_ptr(target)
     return False
