@@ -195,6 +195,15 @@ def split_command_line(
 
 
 def _split_gcc_options_windows(text: str, *, strict: bool = True) -> list[str]:
+    """Tokenize *text* by :func:`_tokenize_windows`'s rule; an unterminated
+    quote raises ``ValueError`` when *strict*, else closes at end of text."""
+    tokens, unterminated = _tokenize_windows(text)
+    if unterminated and strict:
+        raise ValueError("No closing quotation")
+    return tokens
+
+
+def _tokenize_windows(text: str) -> tuple[list[str], bool]:
     """The Windows-only half of :func:`split_gcc_options` -- see that
     function's docstring (item #4) for why this exists as a separate,
     platform-gated branch rather than applying everywhere.
@@ -313,11 +322,9 @@ def _split_gcc_options_windows(text: str, *, strict: bool = True) -> list[str]:
         current.append(ch)
         have_current = True
         i += 1
-    if in_quotes and strict:
-        raise ValueError("No closing quotation")
     if have_current:
         tokens.append("".join(current))
-    return tokens
+    return tokens, in_quotes
 
 
 def has_explicit_std(

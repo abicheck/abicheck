@@ -34,7 +34,6 @@ from __future__ import annotations
 
 import json
 import re
-import xml.etree.ElementTree as ET
 from collections.abc import Callable
 from dataclasses import dataclass
 from html.parser import HTMLParser
@@ -42,6 +41,7 @@ from pathlib import Path
 
 import pytest
 from click.testing import CliRunner
+from defusedxml.ElementTree import fromstring as xml_fromstring
 from markdown_it import MarkdownIt
 
 from abicheck.checker import compare
@@ -302,7 +302,7 @@ def _extract_sarif(text: str) -> Stated:
 
 
 def _extract_junit(text: str) -> Stated:
-    root = ET.fromstring(text)
+    root = xml_fromstring(text)
     suite = root.find("testsuite")
     assert suite is not None, "JUnit output has no testsuite"
     props = {p.get("name"): p.get("value") for p in suite.iter("property")}
