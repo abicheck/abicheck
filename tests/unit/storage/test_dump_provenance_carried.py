@@ -49,8 +49,20 @@ def test_present_provenance_round_trips_through_the_document(encode: str) -> Non
     assert loaded.dump_provenance == _PROVENANCE
 
 
-def test_non_object_provenance_is_refused_not_dropped() -> None:
+@pytest.mark.parametrize(
+    ("value", "type_name"),
+    [("clang", "str"), (["clang"], "list"), (3, "int")],
+)
+def test_non_object_provenance_is_refused_not_dropped(
+    value: object, type_name: str
+) -> None:
     doc = snapshot_to_dict(_snap())
-    doc["dump_provenance"] = "clang"
-    with pytest.raises(SnapshotError, match="dump_provenance must be a JSON object"):
+    doc["dump_provenance"] = value
+    # The whole message, not a fragment: the refusal names the offending type,
+    # so a message that drops or misnames it is a different contract.
+    expected = (
+        f"snapshot document's dump_provenance must be a JSON object, got {type_name}"
+    )
+    with pytest.raises(SnapshotError) as excinfo:
         snapshot_from_dict(doc)
+    assert str(excinfo.value) == expected
