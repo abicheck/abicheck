@@ -630,7 +630,7 @@
     },
     {
       "path": "abicheck/export_surface.py",
-      "baseline_lines": 1244,
+      "baseline_lines": 1242,
       "target": "see ADR-061 ownership map",
       "rule": "no_growth",
       "disposition": "migrate",

@@ -69,6 +69,11 @@ from typing import NamedTuple
 
 from .compare.export_join import ExportJoin, export_tables, join_exports
 from .compare.surface_graph import referenced_identifiers_by_node
+from .compare.typedef_spelling_keys import (
+    TypedefSpellingIndex,
+    is_tag_self_alias,
+    typedef_target,
+)
 from .diff_cxx_rules import owner_class_of
 from .elf_symbol_filter import is_abi_relevant_elf_symbol
 from .model import AbiSnapshot, EnumType, Function, RecordType
@@ -582,7 +587,9 @@ class _SpellingIndex(NamedTuple):
     #: Lookup key -> the node identities
     #: :func:`~abicheck.policy.public_surface_closure._walk_type_closure` actually reaches through
     #: it. Exactly the walk's own indexes: a record/enum by its name or bare
-    #: ``::`` tail, a typedef by its exact key only.
+    #: ``::`` tail, a typedef by the spellings
+    #: :meth:`~abicheck.compare.typedef_spelling_keys.TypedefSpellingIndex.keys_for`
+    #: resolves (its exact qualified key, or every qualified key with a bare tail).
     nodes_by_walk_key: dict[str, frozenset[str]]
     #: Bare identities of nodes carrying no scope of their own -- the only
     #: ones a *more*-qualified token may fall back to naming.
@@ -592,6 +599,9 @@ class _SpellingIndex(NamedTuple):
     #: are not judged, for the same reason a toolchain record's own fields
     #: are not (see :func:`_followed_typedef_aliases`).
     toolchain_alias_keys: frozenset[str]
+    #: The closure's typedef resolver; the bare ``typedefs`` dict collapses
+    #: colliding member aliases (last wins), so the walk follows typedefs here.
+    typedef_keys: TypedefSpellingIndex
 
 
 #: A typedef's node identity. Prefixed so an alias can never be confused with
@@ -605,6 +615,7 @@ def _resolvable_type_spellings(
     snap: AbiSnapshot,
     record_by_name: dict[str, list[RecordType]],
     enum_by_name: dict[str, list[EnumType]],
+    typedef_keys: TypedefSpellingIndex,
 ) -> _SpellingIndex:
     """Build the :class:`_SpellingIndex` for this snapshot's known nodes.
 
@@ -634,6 +645,7 @@ def _resolvable_type_spellings(
         _nodes_by_walk_key(snap, record_by_name, enum_by_name),
         _unscoped_identities(snap),
         _toolchain_owned_aliases(snap, record_by_name, enum_by_name),
+        typedef_keys,
     )
 
 
@@ -662,6 +674,10 @@ def _nodes_by_spelling(
             _register_spellings(spellings, qualified, name)
     for alias in snap.declarations.typedefs:
         _register_spellings(spellings, alias, _typedef_node_id(alias))
+    # Qualified typedef keys are nodes too, or their spellings read as unresolved.
+    for key, target in snap.declarations.typedefs_qualified.items():
+        if target:
+            _register_spellings(spellings, key, _typedef_node_id(key))
     return {k: frozenset(v) for k, v in spellings.items()}
 
 
@@ -710,8 +726,9 @@ def _nodes_by_walk_key(
 ) -> dict[str, frozenset[str]]:
     """Lookup key -> node identities the walk reaches through it: the two index
     dicts (whose keys ``_index_surface_types`` builds as each node's own name
-    plus, for a namespaced one, its bare ``::`` tail) and ``snap.typedefs`` by
-    *exact* key, with no tail tolerance of its own."""
+    plus, for a namespaced one, its bare ``::`` tail) and the typedef keys
+    :meth:`TypedefSpellingIndex.keys_for` resolves -- a qualified key by its
+    exact spelling, and every qualified key by its bare tail."""
     by_key: dict[str, set[str]] = {}
     for key, rec_nodes in record_by_name.items():
         by_key.setdefault(key, set()).update(r.name for r in rec_nodes)
@@ -719,6 +736,11 @@ def _nodes_by_walk_key(
         by_key.setdefault(key, set()).update(e.name for e in en_nodes)
     for alias in snap.declarations.typedefs:
         by_key.setdefault(alias, set()).add(_typedef_node_id(alias))
+    for key, target in snap.declarations.typedefs_qualified.items():
+        if target:
+            node = _typedef_node_id(key)
+            by_key.setdefault(key, set()).add(node)
+            by_key.setdefault(key.rsplit("::", 1)[-1], set()).add(node)
     return {k: frozenset(v) for k, v in by_key.items()}
 
 
@@ -892,21 +914,22 @@ def _walk_reached_nodes(tok: str, index: _SpellingIndex) -> frozenset[str]:
     return frozenset(reached)
 
 
-def _followed_typedef_aliases(
-    type_str: str | None, snap: AbiSnapshot, index: _SpellingIndex
-) -> set[str]:
+def _followed_typedef_aliases(type_str: str | None, index: _SpellingIndex) -> set[str]:
     """Typedef keys named by *type_str* whose target is worth scanning too.
 
-    A token is resolved to the alias key the closure *actually traversed*,
-    via :func:`~abicheck.policy.public_surface_index._type_identifiers` -- the same function the
-    walk queues from -- rather than matched against ``snap.typedefs``
-    literally (Codex review, confirmed empirically). The direct-clang
-    backend stores a typedef under its bare ``node["name"]`` (the
-    producer-side scope loss ``AGENTS.md`` records) while a signature can
-    spell it qualified, so the walk followed the bare ``Alias`` while this
-    scan looked up only ``ns::Alias``, found no typedef, and never inspected
-    the target: an alias pointing at an absent type left
-    ``unresolved_type_edges`` empty and unrelated types provable-out.
+    A token is resolved to the typedef keys the closure *actually traversed*,
+    via :func:`~abicheck.policy.public_surface_index._type_identifiers` and
+    :meth:`~abicheck.compare.typedef_spelling_keys.TypedefSpellingIndex.keys_for`
+    -- the same resolver ``_walk_type_closure`` follows typedefs through --
+    rather than matched against the bare ``snap.typedefs`` dict. That dict
+    keeps only one of two classes' colliding member aliases (``Foo::value_type``
+    and ``Bar::value_type`` share the key ``value_type``, last wins), so a
+    scan keyed on it followed the surviving target and never looked at the
+    other one: a dangling target behind the lost alias left
+    ``unresolved_type_edges`` empty and exclusion reported provable.
+    The direct-clang backend stores a typedef under its bare ``node["name"]``
+    (the producer-side scope loss ``AGENTS.md`` records) while a signature can
+    spell it qualified, which ``keys_for`` also resolves.
 
     An ambiguous key -- one a record or enum also owns, such as libstdc++'s
     bare-key alias templates ``"vector"``/``"basic_string"`` -- is **not**
@@ -915,10 +938,10 @@ def _followed_typedef_aliases(
     the alias rather than the same-named record"). That reasoning is right
     for *membership* and wrong for *completeness* (Codex review, confirmed
     empirically): ``_walk_type_closure`` does not choose between the two
-    meanings, it follows **both** -- an unconditional ``snap.typedefs.get``
-    plus the record lookup -- so a dangling target behind an ambiguous alias
-    is a hole the closure really has. Skipping it left
-    ``unresolved_type_edges`` empty and unrelated types provable-out.
+    meanings, it follows **both** -- the typedef resolver plus the record
+    lookup -- so a dangling target behind an ambiguous alias is a hole the
+    closure really has. Skipping it left ``unresolved_type_edges`` empty and
+    unrelated types provable-out.
 
     The libstdc++ noise that guard *was* aimed at is real, and dropping the
     ambiguity condition alone brought it straight back -- measured, not
@@ -943,11 +966,11 @@ def _followed_typedef_aliases(
         if tok in _TYPE_NOISE or _is_dependent_token(match.start(), spans):
             continue
         for ident in _type_identifiers(tok):
-            if (
-                ident in snap.declarations.typedefs
-                and ident not in index.toolchain_alias_keys
-            ):
-                aliases.add(ident)
+            for key in index.typedef_keys.keys_for(ident):
+                # A key whose tail is a toolchain alias key is libstdc++'s
+                # bare-key template, judged elsewhere (see toolchain_alias_keys).
+                if key.rsplit("::", 1)[-1] not in index.toolchain_alias_keys:
+                    aliases.add(key)
     return aliases
 
 
@@ -1032,14 +1055,14 @@ def _unresolved_type_edges(
             if (hit := judged.get(current)) is None:
                 hit = judged[current] = (
                     _edge_is_unresolved(current, index),
-                    _followed_typedef_aliases(current, snap, index),
+                    _followed_typedef_aliases(current, index),
                 )
             unresolved.update(hit[0])
-            for alias in hit[1]:
-                if alias in seen_aliases:
+            for key in hit[1]:
+                if key in seen_aliases:
                     continue
-                seen_aliases.add(alias)
-                pending.append(snap.declarations.typedefs[alias])
+                seen_aliases.add(key)
+                pending.append(typedef_target(snap, key))
 
     for fn in snap.declarations.functions:
         if _linker_identity(fn.name, fn.mangled) not in root_identities:
@@ -1060,33 +1083,6 @@ def _unresolved_type_edges(
         for base in (*rec.resolved_bases(), *rec.resolved_virtual_bases()):
             scan(base)
     return frozenset(unresolved)
-
-
-#: Elaborated-type keywords a C/C++ typedef target may spell its tag with.
-_TAG_KEYWORDS = ("struct ", "union ", "enum ", "class ")
-
-
-def _is_tag_self_alias(
-    alias: str,
-    target: str,
-    record_by_name: dict[str, list[RecordType]],
-    enum_by_name: dict[str, list[EnumType]],
-) -> bool:
-    """Whether typedef *alias* -> *target* names the alias's own single tag.
-
-    True only when the target, with an optional elaborated-type keyword
-    removed, is spelled exactly *alias* **and** exactly one record/enum is
-    indexed under that name -- so the alias and the tag cannot resolve to
-    two different nodes. Any other shape stays ambiguous.
-    """
-    spelled = " ".join(target.split())
-    for keyword in _TAG_KEYWORDS:
-        if spelled.startswith(keyword):
-            spelled = spelled[len(keyword) :].strip()
-            break
-    if spelled != alias:
-        return False
-    return len(record_by_name.get(alias, ())) + len(enum_by_name.get(alias, ())) == 1
 
 
 def compute_export_surface(snap: AbiSnapshot) -> ExportSurface:
@@ -1164,7 +1160,7 @@ def compute_export_surface(snap: AbiSnapshot) -> ExportSurface:
         alias
         for alias, target in snap.declarations.typedefs.items()
         if (alias in record_by_name or alias in enum_by_name)
-        and not _is_tag_self_alias(alias, target, record_by_name, enum_by_name)
+        and not is_tag_self_alias(alias, target, record_by_name, enum_by_name)
     }
 
     join = join_exports(snap)
@@ -1239,6 +1235,8 @@ def compute_export_surface(snap: AbiSnapshot) -> ExportSurface:
         surface,
         surface.export_types,
         roots.root_identities,
-        _resolvable_type_spellings(snap, record_by_name, enum_by_name),
+        _resolvable_type_spellings(
+            snap, record_by_name, enum_by_name, refs.typedef_spellings
+        ),
     )
     return surface
