@@ -52,6 +52,7 @@ RUN_SH = Path(__file__).resolve().parents[1] / "action" / "run.sh"
 _EXIT_TRAP_LINE = re.compile(r"^trap '.*STDERR_FILE.*' EXIT$", re.MULTILINE)
 _JSON_REPORT_SRC_START_MARKER = "_json_report_src() {"
 _JSON_REPORT_SRC_END_MARKER = "\n}\n"
+_HELPERS_MARKER = "# Build the abicheck command"
 _FUNCS_START_MARKER = "_can_reuse_primary_json() {"
 _FUNCS_END_MARKER = "_maybe_post_pr_comment() {"
 _FRAGMENT_START_MARKER = 'echo "::group::abicheck PR comment"'
@@ -78,11 +79,17 @@ def _json_report_src_region() -> str:
 
 
 def _funcs_region() -> str:
-    """``_can_reuse_primary_json``/``_build_json_cmd`` — self-contained,
-    balanced function defs, extracted verbatim from run.sh."""
+    """``_can_reuse_primary_json``/``_build_json_cmd``, extracted verbatim from
+    run.sh, preceded by run.sh's helper region. `_build_json_cmd` calls the
+    spelling matcher (`_export_flag_spelling`) and `_token_takes_next_value`,
+    which live in that helper region, so the helper region must be sourced
+    too -- otherwise those calls fail as "command not found" and every export
+    in the rebuilt command is kept."""
     text = RUN_SH.read_text(encoding="utf-8")
+    helpers = text[: text.index(_HELPERS_MARKER)]
     return (
-        _json_report_src_region()
+        helpers
+        + _json_report_src_region()
         + "\n"
         + text[text.index(_FUNCS_START_MARKER) : text.index(_FUNCS_END_MARKER)]
     )
