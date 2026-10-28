@@ -37,6 +37,7 @@ and castxml: the live matrix is marked ``integration``.
 from __future__ import annotations
 
 import dataclasses
+import sys
 from collections.abc import Callable, Mapping
 from pathlib import Path
 
@@ -259,6 +260,8 @@ def test_live_route_matrix(
     """Routes (1)-(3) of the matrix: a live compare, its stored-dump
     equivalent, the one-member directory of each, and the two mixed
     (one-side-stored) shapes, all decide alike under every axis."""
+    if case == "undeclared_export_churn" and sys.platform != "linux":
+        pytest.skip("the undeclared-export oracle reads an ELF export table")
     a = AXES_BY_NAME[axis]
     outs = _run_live_matrix(live_builds(case), a, tmp_path / "run")
     required = {"cli", "api", "cli@live", "cli@mixed_old", "cli@mixed_new"}
