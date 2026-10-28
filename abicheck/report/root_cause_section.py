@@ -163,7 +163,7 @@ def compute_root_cause_section(
             # genuinely needs the caller's own --contract
             # intent threaded through explicitly.
             if contract_evaluation:
-                from .contract_scoped_promotion import (
+                from ..contract_scoped_promotion import (
                     stamp_explicit_scope_contract_evaluation,
                 )
 
