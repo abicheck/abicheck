@@ -32,6 +32,7 @@ from _production_scale_snapshot import (
     graph_heavy_snapshot as _graph_heavy_snapshot,
     graph_heavy_snapshot_at_scale_flat_json_bytes,
 )
+from _snapshot_document_reader import read_snapshot_document
 
 from abicheck.errors import SnapshotError
 from abicheck.model import (
@@ -45,7 +46,6 @@ from abicheck.model import (
 from abicheck.serialization import (
     load_snapshot,
     save_snapshot,
-    snapshot_from_dict,
     snapshot_to_dict,
     write_snapshot,
 )
@@ -1372,27 +1372,26 @@ def test_graph_heavy_snapshot_round_trips_and_compresses_well(tmp_path):
 
 
 def test_dump_provenance_survives_load_save_round_trip(tmp_path):
-    """dump_provenance (folded into the payload dict by cli_dump_helpers, not
-    an AbiSnapshot field) is opaque top-level JSON -- verify the storage layer
-    itself doesn't drop or corrupt an arbitrary extra top-level key across
-    every encoding, independent of the CLI fold step."""
+    """A document carrying the dump's ``dump_provenance`` block keeps it
+    through the public ``load_snapshot`` -> ``save_snapshot`` path, in every
+    encoding. Reading the bytes back raw would not exercise the typed model,
+    which is where the block used to be dropped."""
     snap = _sample_snapshot()
     payload = snapshot_to_dict(snap)
-    payload["dump_provenance"] = {
+    provenance = {
         "requested_depth": "headers",
         "effective_depth": "headers",
         "degraded": False,
         "frontend": "clang",
     }
-    text = json.dumps(payload, indent=2)
+    payload["dump_provenance"] = provenance
+    src = tmp_path / "src.abicheck.json"
+    write_snapshot_text(json.dumps(payload, indent=2), src)
     for suffix in (".abicheck.json", ".abicheck.json.gz", ".abicheck.json.zst"):
-        p = tmp_path / f"prov{suffix}"
-        write_snapshot_text(text, p)
-        loaded_bytes = read_snapshot_bytes(p)
-        loaded_payload = json.loads(loaded_bytes)
-        assert loaded_payload["dump_provenance"]["frontend"] == "clang"
-        # snapshot_from_dict must not choke on the unknown extra key either.
-        assert snapshot_from_dict(loaded_payload).library == snap.library
+        out = tmp_path / f"prov{suffix}"
+        save_snapshot(load_snapshot(src), out)
+        assert read_snapshot_document(out)["dump_provenance"] == provenance
+        assert load_snapshot(out).library == snap.library
 
 
 def test_pre_compression_fixture_still_loads(tmp_path):

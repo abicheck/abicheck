@@ -699,11 +699,10 @@ class ProvenanceSection(_SparseSectionMixin):
     )
     #: `.language_profile`/`.git_commit`/`.git_tag`/`.created_at` are
     #: `str | None`; `.dependency_info` is `DependencyInfo | None`.
-    #: `.dump_provenance` is not an `AbiSnapshot` field at all -- it's
-    #: unconditionally assigned a `dict` literal by `cli_dump_helpers
-    #: .fold_dump_provenance_into_dict` whenever it adds the key at all
-    #: (`legacy_sections._SECTION_FIELDS`'s own comment on this key), so it
-    #: is always a mapping, never `None`.
+    #: `.dump_provenance` is a `dict` (or absent): `cli_dump_helpers
+    #: .fold_dump_provenance_into_dict` assigns it a `dict` literal, and the
+    #: model carries it through a load -> save (`AbiSnapshot.dump_provenance`).
+    #: Never `None` in a document: the encoder omits the key instead.
     OPTIONAL_FIELD_SHAPES: ClassVar[Mapping[str, str]] = {
         "language_profile": _STR_OR_NONE,
         "dependency_info": _MAPPING_OR_NONE,

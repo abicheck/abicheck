@@ -556,6 +556,15 @@ class AbiSnapshot:
     spellings_generation: int | None = field(
         default=None, repr=False, compare=False, kw_only=True
     )
+    # The ``dump_provenance`` block the ``dump`` write path folds into the
+    # document (``cli_dump_helpers.fold_dump_provenance_into_dict``): how this
+    # snapshot was produced -- requested/effective depth, frontend, toolchain.
+    # Carried on the model so ``load_snapshot`` -> ``save_snapshot`` keeps it
+    # verbatim (ADR-066: the snapshot carries this block; a re-save never
+    # re-stamps it). ``None`` for a snapshot no ``dump`` produced.
+    dump_provenance: dict[str, object] | None = field(
+        default=None, repr=False, compare=False, kw_only=True
+    )
     # Runtime-only, like `live_source_evidence`: True when the export table
     # (`elf`) was read from a static archive's own symbol index (ADR-086),
     # not from a linked image -- so the dynamic-section facts (SONAME,
