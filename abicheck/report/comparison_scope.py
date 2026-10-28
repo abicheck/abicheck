@@ -175,7 +175,7 @@ def comparison_scope_notice(section: Mapping[str, Any]) -> str | None:
         return None
     rows = _unchecked_rows(section)
     names = ", ".join(
-        f"{md_text(m.get('name'))} ({_STATE_LABEL.get(str(m.get('state')), m.get('state'))})"
+        f"{md_text(m.get('name'), table=True)} ({_STATE_LABEL.get(str(m.get('state')), m.get('state'))})"
         for m in rows
     )
     # D7 first: a zero-comparison run fails under either policy (its own
