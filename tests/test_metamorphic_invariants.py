@@ -78,7 +78,8 @@ pytestmark = [
 
 #: Catalog cases exercised by every relation: a function removal and an enum
 #: member removal (the two removal kinds the reversal relation checks), and a
-#: C++ vtable change, which is also one of the oneline-total gaps. Each case
+#: C++ vtable change, which carries a standing hygiene finding the oneline
+#: total must count. Each case
 #: costs eight CLI invocations of about 2.4 CPU-seconds each, almost all of it
 #: interpreter start-up and analysis, and the CI sandbox does not run them in
 #: parallel, so three cases is what fits the module into about a minute.
@@ -121,20 +122,6 @@ FORMAT_FILES: dict[str, str] = {
     "junit": "xml",
     "review": "md",
     "oneline": "txt",
-}
-
-#: Oneline total that omits hygiene-disposition findings. The JSON and SARIF
-#: counts include them, so the two disagree on these cases. Each entry is a
-#: strict xfail on the oneline total only, so a fix turns it into a visible
-#: XPASS to remove the mark. The same gap shows on ``case07_struct_layout``
-#: (oneline 4, JSON 6) and ``case15_noexcept_change`` (oneline 8, JSON 9) in a
-#: survey of the full catalog run, but those cases are outside the subset.
-ONELINE_TOTAL_GAPS: dict[str, str] = {
-    "case09_cpp_vtable": (
-        "oneline says '(4 total)' but JSON and SARIF count 5 changes: the "
-        "exported_not_public finding is a hygiene disposition that oneline drops "
-        "from its total"
-    ),
 }
 
 
@@ -549,23 +536,9 @@ def test_json_and_sarif_count_the_same_findings(case: str, lab: _Lab) -> None:
     )
 
 
-def _oneline_total_params() -> list[Any]:
-    params: list[Any] = []
-    for case in CASES:
-        marks: list[Any] = []
-        if case in ONELINE_TOTAL_GAPS:
-            marks.append(
-                pytest.mark.xfail(
-                    strict=True,
-                    reason=f"oneline total mismatch: {ONELINE_TOTAL_GAPS[case]}",
-                )
-            )
-        params.append(pytest.param(case, marks=marks, id=case))
-    return params
-
-
-@pytest.mark.parametrize("case", _oneline_total_params())
+@pytest.mark.parametrize("case", CASES)
 def test_oneline_total_counts_the_same_findings(case: str, lab: _Lab) -> None:
+    """The oneline total is the JSON ``total_changes`` population, hygiene included."""
     run = lab.live(case)
     json_total = len(run.json()["changes"])
     text = run.files["oneline"].read_text(encoding="utf-8")

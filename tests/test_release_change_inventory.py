@@ -377,16 +377,30 @@ class TestRenderersAgree:
 
     @staticmethod
     def _library_results() -> list[dict[str, object]]:
+        # The member's outcome buckets are the JSON summary's own, read from
+        # the same result the inventory is computed from: a hand-written
+        # bucket block that disagrees with the inventory is not a population
+        # any real member emits, and the line's total is their sum.
+        from abicheck.reporter import to_json
+
+        result = _mixed_result()
+        summary = json.loads(to_json(result))["summary"]
         entry: dict[str, object] = {
             "library": "libx.so",
             "verdict": "NO_CHANGE",
-            "breaking": 0,
-            "source_breaks": 0,
-            "risk_changes": 5,
-            "compatible_additions": 0,
-            "quality_issues": 0,
+            **{
+                key: summary[key]
+                for key in (
+                    "breaking",
+                    "source_breaks",
+                    "risk_changes",
+                    "compatible_additions",
+                    "quality_issues",
+                    "informational",
+                )
+            },
         }
-        add_member_review_summary(entry, _mixed_result(), None)
+        add_member_review_summary(entry, result, None)
         return [entry]
 
     def test_oneline_states_hygiene_separately_from_observed_changes(self) -> None:
@@ -403,8 +417,12 @@ class TestRenderersAgree:
         # (found in review), which is the same "asserts nothing" failure the
         # inventory itself was introduced to fix.
         observed = inventory["compatibility_changes"]
+        standing = inventory["hygiene_total"]
         assert f"{inventory['hygiene_persistent']} persistent" in line
-        assert f"{observed} total" in line
+        # The total is the JSON population: observed findings plus standing
+        # inventory, which is named in its own clause.
+        assert f"{observed + standing} total" in line
+        assert f"{standing} header/binary consistency" in line
         assert f"{inventory['hygiene_introduced']} introduced" in line
         assert f"{inventory['hygiene_resolved']} resolved" in line
         # ...and the standing inventory is not counted as observed risk: the
@@ -451,7 +469,8 @@ class TestRenderersAgree:
         # The hygiene clause is still stated separately, unchanged.
         assert f"{inventory['hygiene_persistent']} persistent" in line
         # And the observed total accounts for the release-global finding.
-        expected_total = inventory["compatibility_changes"] + 1
+        standing = inventory["hygiene_total"]
+        expected_total = inventory["compatibility_changes"] + standing + 1
         assert f"{expected_total} total" in line, line
         # Vacuity guard: the merge must actually be adding something, i.e.
         # the fixture's own member inventory is not already the total.
