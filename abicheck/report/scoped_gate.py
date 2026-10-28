@@ -83,9 +83,14 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from ..policy.evaluate import effective_kind_sets
+from .render_text import OUTCOME_BUCKETS
 
 if TYPE_CHECKING:
     from datetime import date
+
+#: The summary-block keys the scoped fold recounts: every outcome bucket the
+#: one-line summary names (see ``render_text.OUTCOME_BUCKETS``).
+_OUTCOME_KEYS = tuple(key for key, _noun in OUTCOME_BUCKETS)
 
 
 @dataclass(frozen=True)
@@ -120,6 +125,40 @@ _SEVERITY_TO_SUMMARY_BUCKET = {
     "risk": "risk_changes",
     "compatible": "compatible_additions",
 }
+
+
+def _summary_bucket_for_entry(entry: Any) -> str | None:
+    """The summary-block key a rendered change entry contributes to.
+
+    ``compatible`` covers every COMPATIBLE finding, so an entry carrying it is
+    split into the same three buckets the full summary uses
+    (``report_summary.build_summary``): a quality issue, an informational
+    outcome, or an addition. A quality issue is read from the entry's
+    ``recommended_action``, which ``change_json.recommended_action_for_change``
+    derives from the *effective* category build_summary counts: a
+    policy-demoted break is COMPATIBLE with a quality category, though its raw
+    kind is a removal. Testing the raw kind against ``QUALITY_KINDS`` instead
+    counted that finding as an addition, so the scoped summary disagreed with
+    the full summary on the same run (CodeRabbit review on PR #1828). The
+    informational test is on the raw kind, as ``classify_effective_change``
+    decides it.
+    """
+    if not isinstance(entry, dict):
+        return None
+    severity = entry.get("severity")
+    if not isinstance(severity, str):
+        return None
+    bucket = _SEVERITY_TO_SUMMARY_BUCKET.get(severity)
+    if bucket == "compatible_additions":
+        from ..policy.classification import INFORMATIONAL_KINDS
+
+        kind = entry.get("kind")
+        if kind in {k.value for k in INFORMATIONAL_KINDS}:
+            return "informational"
+        # A missing-contract entry carries no recommended_action and is an addition.
+        if entry.get("recommended_action") == "review_recommended":
+            return "quality_issues"
+    return bucket
 
 
 def _scoped_verdict_value(result: Any) -> Any:
@@ -454,19 +493,9 @@ def _fold_findings_into_changes(
     # surface and are left as-is -- recomputing them for the consumer-scoped
     # subset would need old_symbol_count context this fold-in doesn't have.
     if isinstance(full_summary, dict):
-        bucket_counts = {
-            "breaking": 0,
-            "source_breaks": 0,
-            "risk_changes": 0,
-            "compatible_additions": 0,
-        }
+        bucket_counts = dict.fromkeys(_OUTCOME_KEYS, 0)
         for entry in changes_list:
-            severity = entry.get("severity") if isinstance(entry, dict) else None
-            bucket = (
-                _SEVERITY_TO_SUMMARY_BUCKET.get(severity, "")
-                if isinstance(severity, str)
-                else None
-            )
+            bucket = _summary_bucket_for_entry(entry)
             if bucket:
                 bucket_counts[bucket] += 1
         payload["summary"] = {
@@ -505,12 +534,7 @@ def _fold_findings_into_stat_summary(
     )
     if scoped_only or missing_labels:
         eff_sets = effective_kind_sets(result)
-        added_counts = {
-            "breaking": 0,
-            "source_breaks": 0,
-            "risk_changes": 0,
-            "compatible_additions": 0,
-        }
+        added_counts = dict.fromkeys(_OUTCOME_KEYS, 0)
         for c in scoped_only:
             entry = _change_to_dict(
                 c,
@@ -521,12 +545,7 @@ def _fold_findings_into_stat_summary(
                 evidence_status_override=EvidenceStatus.CONSUMER_PROVEN,
                 today=today,
             )
-            severity = entry.get("severity")
-            bucket = (
-                _SEVERITY_TO_SUMMARY_BUCKET.get(severity)
-                if isinstance(severity, str)
-                else None
-            )
+            bucket = _summary_bucket_for_entry(entry)
             if bucket:
                 added_counts[bucket] += 1
         for _label in missing_labels:

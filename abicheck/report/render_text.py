@@ -51,6 +51,12 @@ _HYGIENE_CLAUSE_ORDER: tuple[tuple[str, str], ...] = (
 )
 
 
+#: The clause noun a one-line summary gives standing cross-source hygiene
+#: findings in its breakdown. The report's own vocabulary for the same
+#: population (``render_review``'s "Header/binary consistency" section).
+HYGIENE_CLAUSE_NOUN = "header/binary consistency"
+
+
 def format_hygiene_note(inventory: Mapping[str, int] | None) -> str:
     """``"; hygiene: 32 persistent"`` for a run carrying standing inventory.
 
@@ -70,13 +76,40 @@ def format_hygiene_note(inventory: Mapping[str, int] | None) -> str:
     return "; hygiene: " + ", ".join(parts)
 
 
+def hygiene_total(inventory: Mapping[str, int] | None) -> int:
+    """Every stamped (cross-source hygiene) finding, in any evolution state.
+
+    The complement of ``compatibility_changes`` within the JSON
+    ``summary.total_changes``: the four ``hygiene_*`` counters of
+    ``report/change_inventory.py`` partition it.
+    """
+    if not inventory:
+        return 0
+    return sum(int(inventory.get(key, 0)) for key, _label in _HYGIENE_CLAUSE_ORDER)
+
+
+#: Every outcome bucket a one-line summary states, as ``(summary key, clause
+#: noun)``, in display order. The keys are the ``summary`` block's own JSON
+#: names, and every bucket the report counts appears here exactly once: the
+#: breakdown is a projection of this table, never a hand-kept subset of it.
+#: ``tests/unit/report/test_oneline_breakdown_sums.py`` pins this table
+#: against the JSON summary's bucket keys. A count the JSON reports but this
+#: table omits is the ``report.headline_breakdown_drift`` bug class: the
+#: headline's parts no longer add up to its total.
+OUTCOME_BUCKETS: tuple[tuple[str, str], ...] = (
+    ("breaking", "breaking"),
+    ("source_breaks", "source-level breaks"),
+    ("risk_changes", "risk"),
+    ("compatible_additions", "compatible"),
+    ("quality_issues", "quality"),
+    ("informational", "informational"),
+)
+
+
 def format_stat_line(
     label: str,
     *,
-    breaking: int,
-    source_breaks: int,
-    risk_count: int,
-    compatible_additions: int,
+    outcomes: Mapping[str, int],
     total_changes: int,
     redundant_count: int = 0,
     gate_note: str = "",
@@ -85,6 +118,21 @@ def format_stat_line(
     change_inventory: Mapping[str, int] | None = None,
 ) -> str:
     """Render already-resolved counts/label as the one-line summary.
+
+    *outcomes* maps every :data:`OUTCOME_BUCKETS` key to its count. A missing
+    key raises ``KeyError`` rather than defaulting to zero: a silent zero is
+    exactly how a bucket drops out of the parts while its findings stay in
+    the total.
+
+    The breakdown always adds up to *total_changes*, which is the JSON
+    ``summary.total_changes`` population (ADR-067: a finding is recorded
+    before any disposition acts on it, so standing hygiene findings are
+    counted, not dropped). Whatever the compatibility buckets do not name is
+    a finding the compatibility policy did not score (``NOT_EVALUATED``,
+    ADR-049 D1); it is stated as ``N not evaluated`` rather than dropped, so
+    "5 breaking (6 total)" can never be the line for a run that observed six
+    findings. Standing hygiene findings (*change_inventory*'s ``hygiene_*``
+    counters) are stated as their own ``N header/binary consistency`` clause.
 
     *audit_note* is ADR-067 D3's raw-versus-effective suffix, already
     formatted by ``report.disposition_audit.render_disposition_audit_note``.
@@ -100,31 +148,51 @@ def format_stat_line(
     ``deployment:`` contract governed this comparison.
     """
     hygiene_note = format_hygiene_note(change_inventory)
-    if hygiene_note and change_inventory is not None:
-        # Standing inventory is not what this comparison observed, so the
-        # headline counts only what it did observe and states the inventory
-        # separately. Without this a byte-identical rebuild announced
-        # "NO_CHANGE: 32 risk (32 total)" -- a verdict and a count
-        # contradicting each other in one line.
-        breaking = change_inventory.get("compatibility_breaking", breaking)
-        source_breaks = change_inventory.get(
-            "compatibility_source_breaks", source_breaks
+    standing = hygiene_total(change_inventory)
+    counts = {key: outcomes[key] for key, _noun in OUTCOME_BUCKETS}
+    if standing and change_inventory is not None:
+        # Standing hygiene inventory is still a finding the JSON summary
+        # counts, so the total below stays the JSON ``total_changes``; it is
+        # not dropped from the total. The compatibility buckets, though, must
+        # not carry it: the JSON bucket counts fold a persistent finding into
+        # its verdict's bucket (a PERSISTENT ``exported_not_public`` is
+        # ``risk_changes``), which would announce ``NO_CHANGE: 32 risk`` for a
+        # byte-identical rebuild. So the compatibility clauses are the
+        # observed subset the inventory block states, and the standing
+        # findings get their own clause.
+        #
+        # The inventory block does not split observed compatible findings
+        # into additions / quality / informational (its JSON shape is fixed),
+        # so in this mode the whole observed COMPATIBLE verdict is the
+        # ``compatible`` clause and the two finer clauses are zero. Recorded
+        # as a gap in docs/contribute/known-gaps.md.
+        counts = dict.fromkeys(counts, 0)
+        counts["breaking"] = change_inventory.get(
+            "compatibility_breaking", outcomes["breaking"]
         )
-        risk_count = change_inventory.get("compatibility_risk", risk_count)
-        total_changes = change_inventory.get("compatibility_changes", total_changes)
-    parts = []
-    if breaking:
-        parts.append(f"{breaking} breaking")
-    if source_breaks:
-        parts.append(f"{source_breaks} source-level breaks")
-    if risk_count:
-        parts.append(f"{risk_count} risk")
-    if compatible_additions:
-        parts.append(f"{compatible_additions} compatible")
+        counts["source_breaks"] = change_inventory.get(
+            "compatibility_source_breaks", outcomes["source_breaks"]
+        )
+        counts["risk_changes"] = change_inventory.get(
+            "compatibility_risk", outcomes["risk_changes"]
+        )
+        counts["compatible_additions"] = change_inventory.get(
+            "compatibility_compatible", outcomes["compatible_additions"]
+        )
+    parts = [f"{counts[key]} {noun}" for key, noun in OUTCOME_BUCKETS if counts[key]]
+    # What no compatibility bucket names, and is not standing inventory, is a
+    # finding the compatibility policy did not score (ADR-049 D1).
+    not_evaluated = total_changes - sum(counts.values()) - standing
+    if not_evaluated:
+        parts.append(f"{not_evaluated} not evaluated")
+    if standing:
+        if not parts:
+            parts.append("no compatibility changes")
+        parts.append(f"{standing} {HYGIENE_CLAUSE_NOUN}")
     if parts:
         detail = ", ".join(parts)
     else:
-        detail = "no compatibility changes" if hygiene_note else "no changes"
+        detail = "no changes"
     redundant_note = (
         f" [{redundant_count} redundant hidden]" if redundant_count > 0 else ""
     )
@@ -139,8 +207,8 @@ def render_stat_document(document: ReportDocument) -> str:
 
     Expects the document's root to carry ``verdict_label`` (a pre-resolved
     display label, not the raw ``Verdict`` value), a ``summary`` object with
-    ``breaking``/``source_breaks``/``risk_changes``/``compatible_additions``/
-    ``total_changes``, an optional top-level ``redundant_count``, and an
+    every :data:`OUTCOME_BUCKETS` key plus ``total_changes``, an optional
+    top-level ``redundant_count``, and an
     optional ``severity`` object with ``exit_code`` — the same shape
     :func:`abicheck.reporter.to_stat_json`'s severity block already carries,
     so a future caller building one document for both the JSON and text
@@ -172,10 +240,7 @@ def render_stat_document(document: ReportDocument) -> str:
     deployment_note = f"; deployment floor {digest}" if digest is not None else ""
     return format_stat_line(
         str(d["verdict_label"]),
-        breaking=summary["breaking"],
-        source_breaks=summary["source_breaks"],
-        risk_count=summary["risk_changes"],
-        compatible_additions=summary["compatible_additions"],
+        outcomes={key: summary[key] for key, _noun in OUTCOME_BUCKETS},
         total_changes=summary["total_changes"],
         redundant_count=redundant_count,
         gate_note=gate_note,

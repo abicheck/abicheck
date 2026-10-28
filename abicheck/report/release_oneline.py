@@ -35,32 +35,29 @@ the per-library counts into one set.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from typing import TYPE_CHECKING
 
-from .render_text import format_stat_line
+from .render_text import OUTCOME_BUCKETS, format_stat_line, hygiene_total
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping, Sequence
+    from collections.abc import Sequence
 
     from ..model.change import Change
 
 __all__ = ["format_release_oneline", "release_global_counts"]
 
-#: The per-library count keys this fold reads, mapped to the
-#: :func:`format_stat_line` argument each contributes to. ``quality_issues``
-#: deliberately has no slot: the single-pair line has no "quality" clause
-#: either, and inventing one here is exactly the kind of divergence reusing
-#: that function is meant to prevent. It still reaches ``total_changes``
-#: below, so a release whose only findings are quality issues reads
-#: "no changes (3 total)" rather than claiming nothing happened -- the same
-#: way the single-pair line does.
-_COUNT_KEYS = ("breaking", "source_breaks", "risk_changes", "compatible_additions")
+#: Every outcome bucket a member entry carries (the release JSON's own keys),
+#: read from the one table the single-pair line also projects. A release
+#: breakdown therefore names exactly the buckets a single-pair one does.
+_OUTCOME_KEYS = tuple(key for key, _noun in OUTCOME_BUCKETS)
 
 
 #: A release-global finding's effective verdict -> the oneline bucket it
-#: contributes to. ``NO_CHANGE`` contributes to none (it is not a finding's
-#: verdict in practice; kept out rather than folded into ``compatible``,
-#: which would report it as an observed compatible change).
+#: contributes to. ``COMPATIBLE`` is split further by category in
+#: :func:`release_global_counts`. ``NO_CHANGE`` contributes to none (it is not
+#: a finding's verdict in practice; kept out rather than folded into
+#: ``compatible``, which would report it as an observed compatible change).
 _VERDICT_BUCKET = {
     "BREAKING": "breaking",
     "API_BREAK": "source_breaks",
@@ -69,33 +66,44 @@ _VERDICT_BUCKET = {
 }
 
 
-#: How a release-global finding's own bucket maps onto the inventory's
-#: compatibility counters. Release-global (bundle-coherence, probe-matrix)
-#: findings carry no cross-source evolution stamp, so every one of them is
-#: an *observed* compatibility change, never standing inventory.
+#: How an outcome bucket maps onto the inventory's compatibility counters.
+#: Release-global (bundle-coherence, probe-matrix) findings carry no
+#: cross-source evolution stamp, so every one of them is an *observed*
+#: compatibility change, never standing inventory. The inventory does not
+#: split observed compatible findings, so all three compatible-family buckets
+#: land on ``compatibility_compatible``.
 _GLOBAL_TO_INVENTORY = {
     "breaking": "compatibility_breaking",
     "source_breaks": "compatibility_source_breaks",
     "risk_changes": "compatibility_risk",
     "compatible_additions": "compatibility_compatible",
+    "quality_issues": "compatibility_compatible",
+    "informational": "compatibility_compatible",
 }
 
 
-def _inventory_including_release_global(
+def _line_inventory(
     change_inventory: Mapping[str, int] | None,
+    library_results: Sequence[Mapping[str, object]],
     release_global: Mapping[str, int] | None,
 ) -> dict[str, int] | None:
-    """Fold bundle/probe-matrix findings into the inventory's observed half.
+    """The release's inventory-shaped counts, covering every finding the line states.
 
-    Necessary because :func:`format_stat_line` *replaces* its headline
-    counts with the inventory's ``compatibility_*`` values whenever standing
-    hygiene is present -- so passing a members-only inventory silently
-    discarded the release-global findings that were already folded into
-    those counts. A release with standing hygiene whose only break was a
-    bundle finding then printed "no compatibility changes (0 total)" beside
-    a BREAKING verdict: the same verdict-versus-count contradiction the
-    inventory was introduced to remove, reintroduced one level up (found in
-    review).
+    The members' inventory block covers only the members that carry one.
+    Two kinds of finding it does not cover are folded into the observed half
+    here, as observed compatibility changes:
+
+    * bundle/probe-matrix findings (*release_global*): without them a release
+      whose only break was a bundle finding printed "no compatibility changes
+      (0 total)" beside a BREAKING verdict (found in review);
+    * a ``library_results`` entry with no ``change_inventory`` block, such as
+      a release-support-promise entry. :func:`format_stat_line` replaces its
+      breakdown with the inventory's values whenever standing hygiene is
+      present, so such an entry's findings were otherwise dropped from both
+      the parts and the total.
+
+    :func:`format_release_oneline` takes its total from this inventory, so each
+    finding folded in here is counted in that total as well.
 
     The members-only view stays the one the JSON document reports, because
     there a reader has the bundle and matrix sections separately; it is only
@@ -105,15 +113,21 @@ def _inventory_including_release_global(
     if change_inventory is None:
         return None
     merged = dict(change_inventory)
-    if not release_global:
-        return merged
-    for global_key, inventory_key in _GLOBAL_TO_INVENTORY.items():
-        merged[inventory_key] = merged.get(inventory_key, 0) + _count(
-            release_global, global_key
+    uncovered: list[Mapping[str, object]] = [
+        entry
+        for entry in library_results
+        if not isinstance(entry.get("change_inventory"), Mapping)
+    ]
+    if release_global:
+        uncovered.append(release_global)
+    for source in uncovered:
+        for global_key, inventory_key in _GLOBAL_TO_INVENTORY.items():
+            merged[inventory_key] = merged.get(inventory_key, 0) + _count(
+                source, global_key
+            )
+        merged["compatibility_changes"] = merged.get("compatibility_changes", 0) + sum(
+            _count(source, key) for key in _OUTCOME_KEYS
         )
-    merged["compatibility_changes"] = merged.get("compatibility_changes", 0) + _count(
-        release_global, "total"
-    )
     return merged
 
 
@@ -145,21 +159,34 @@ def release_global_counts(
     ``DiffResult`` whose own ``policy``/``policy_file`` govern it, and
     ``bundle_result`` carries the pair it was analysed under.
     """
+    from ..policy.classification import Verdict
     from ..policy.reclassify import effective_verdict_for_change
+    from ..policy.severity import IssueCategory, classify_effective_change
 
-    counts = {bucket: 0 for bucket in _VERDICT_BUCKET.values()}
-    total = 0
+    counts = dict.fromkeys(_OUTCOME_KEYS, 0)
 
     def _fold(changes: Sequence[Change], policy: object, policy_file: object) -> None:
-        nonlocal total
+        policy_name = policy if isinstance(policy, str) else None
         for change in changes:
-            total += 1
             verdict = effective_verdict_for_change(
                 change,
-                policy=policy if isinstance(policy, str) else None,
+                policy=policy_name,
                 policy_file=policy_file,
             )
             bucket = _VERDICT_BUCKET.get(verdict.name)
+            if bucket == "compatible_additions":
+                # Same split the per-library entries carry: a COMPATIBLE
+                # finding is an addition, a quality issue, or informational.
+                category = classify_effective_change(
+                    change,
+                    policy=policy_name,
+                    policy_file=policy_file,
+                    verdict=Verdict.COMPATIBLE,
+                )
+                if category is IssueCategory.QUALITY_ISSUES:
+                    bucket = "quality_issues"
+                elif category is IssueCategory.INFORMATIONAL:
+                    bucket = "informational"
             if bucket is not None:
                 counts[bucket] += 1
 
@@ -177,7 +204,10 @@ def release_global_counts(
             getattr(matrix_result, "policy", None),
             getattr(matrix_result, "policy_file", None),
         )
-    counts["total"] = total
+    # The total is the sum of the buckets, not a separate count of the
+    # findings folded in: the parts and the total come from one place, so a
+    # finding that resolves to no bucket cannot inflate one without the other.
+    counts["total"] = sum(counts[key] for key in _OUTCOME_KEYS)
     return counts
 
 
@@ -216,18 +246,25 @@ def format_release_oneline(
     versus-count contradiction the scalar line already stopped making.
     ``None`` (the default) renders exactly as this function always did.
     """
-    counts = {key: 0 for key in _COUNT_KEYS}
-    total = 0
+    counts = dict.fromkeys(_OUTCOME_KEYS, 0)
     for entry in library_results:
-        for key in _COUNT_KEYS:
+        for key in _OUTCOME_KEYS:
             counts[key] += _count(entry, key)
-        total += sum(_count(entry, key) for key in _COUNT_KEYS)
-        total += _count(entry, "quality_issues")
-        total += _count(entry, "informational")
     if release_global:
-        for key in _COUNT_KEYS:
+        for key in _OUTCOME_KEYS:
             counts[key] += _count(release_global, key)
-        total += _count(release_global, "total")
+    line_inventory = _line_inventory(change_inventory, library_results, release_global)
+    if line_inventory is not None:
+        # The total is the JSON population the inventory partitions: the
+        # observed compatibility changes plus every stamped hygiene finding.
+        # Summing the outcome buckets instead drops a finding no bucket names
+        # (a NOT_EVALUATED one), which then prints as a negative "not evaluated"
+        # count or as "0 total" against the JSON's ``total_changes``.
+        total = line_inventory["compatibility_changes"] + hygiene_total(line_inventory)
+    else:
+        # No inventory: the parts are the only account of the findings, so
+        # their sum is the total (report.headline_breakdown_drift).
+        total = sum(counts.values())
     plural = "library" if len(library_results) == 1 else "libraries"
     gate_note = (
         f"; gate: exit {severity_exit_code}"
@@ -241,14 +278,9 @@ def format_release_oneline(
     )
     return format_stat_line(
         f"{len(library_results)} {plural} — {worst_verdict}",
-        breaking=counts["breaking"],
-        source_breaks=counts["source_breaks"],
-        risk_count=counts["risk_changes"],
-        compatible_additions=counts["compatible_additions"],
+        outcomes=counts,
         total_changes=total,
         gate_note=gate_note,
         deployment_note=deployment_note,
-        change_inventory=_inventory_including_release_global(
-            change_inventory, release_global
-        ),
+        change_inventory=line_inventory,
     )
