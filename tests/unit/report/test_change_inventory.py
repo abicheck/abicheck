@@ -115,7 +115,8 @@ def test_headline_states_persistent_inventory_separately() -> None:
         change_inventory=render_change_inventory_json(split),
     )
     assert (
-        line == "NO_CHANGE: no compatibility changes (0 total); hygiene: 32 persistent"
+        line
+        == "NO_CHANGE: no compatibility changes, 32 header/binary consistency (32 total); hygiene: 32 persistent"
     )
     assert "32 risk" not in line
 
@@ -190,7 +191,7 @@ class TestStatDocumentProjection:
             "change_inventory": render_change_inventory_json(split),
         }
         assert render_stat_document(_stat_document(summary)) == (
-            "NO_CHANGE: no compatibility changes (0 total); hygiene: 32 persistent"
+            "NO_CHANGE: no compatibility changes, 32 header/binary consistency (32 total); hygiene: 32 persistent"
         )
 
     @pytest.mark.parametrize("absent", [None, "not-an-object", 7, []])

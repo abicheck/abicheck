@@ -51,6 +51,12 @@ _HYGIENE_CLAUSE_ORDER: tuple[tuple[str, str], ...] = (
 )
 
 
+#: The clause noun a one-line summary gives standing cross-source hygiene
+#: findings in its breakdown. The report's own vocabulary for the same
+#: population (``render_review``'s "Header/binary consistency" section).
+HYGIENE_CLAUSE_NOUN = "header/binary consistency"
+
+
 def format_hygiene_note(inventory: Mapping[str, int] | None) -> str:
     """``"; hygiene: 32 persistent"`` for a run carrying standing inventory.
 
@@ -68,6 +74,18 @@ def format_hygiene_note(inventory: Mapping[str, int] | None) -> str:
     if not parts:
         return ""
     return "; hygiene: " + ", ".join(parts)
+
+
+def hygiene_total(inventory: Mapping[str, int] | None) -> int:
+    """Every stamped (cross-source hygiene) finding, in any evolution state.
+
+    The complement of ``compatibility_changes`` within the JSON
+    ``summary.total_changes``: the four ``hygiene_*`` counters of
+    ``report/change_inventory.py`` partition it.
+    """
+    if not inventory:
+        return 0
+    return sum(int(inventory.get(key, 0)) for key, _label in _HYGIENE_CLAUSE_ORDER)
 
 
 #: Every outcome bucket a one-line summary states, as ``(summary key, clause
@@ -106,11 +124,15 @@ def format_stat_line(
     exactly how a bucket drops out of the parts while its findings stay in
     the total.
 
-    The breakdown always adds up to *total_changes*. Whatever the buckets do
-    not name is a finding the compatibility policy did not score
-    (``NOT_EVALUATED``, ADR-049 D1); it is stated as ``N not evaluated``
-    rather than dropped, so "5 breaking (6 total)" can never be the line for
-    a run that observed six findings.
+    The breakdown always adds up to *total_changes*, which is the JSON
+    ``summary.total_changes`` population (ADR-067: a finding is recorded
+    before any disposition acts on it, so standing hygiene findings are
+    counted, not dropped). Whatever the compatibility buckets do not name is
+    a finding the compatibility policy did not score (``NOT_EVALUATED``,
+    ADR-049 D1); it is stated as ``N not evaluated`` rather than dropped, so
+    "5 breaking (6 total)" can never be the line for a run that observed six
+    findings. Standing hygiene findings (*change_inventory*'s ``hygiene_*``
+    counters) are stated as their own ``N header/binary consistency`` clause.
 
     *audit_note* is ADR-067 D3's raw-versus-effective suffix, already
     formatted by ``report.disposition_audit.render_disposition_audit_note``.
@@ -126,13 +148,18 @@ def format_stat_line(
     ``deployment:`` contract governed this comparison.
     """
     hygiene_note = format_hygiene_note(change_inventory)
+    standing = hygiene_total(change_inventory)
     counts = {key: outcomes[key] for key, _noun in OUTCOME_BUCKETS}
-    if hygiene_note and change_inventory is not None:
-        # Standing inventory is not what this comparison observed, so the
-        # headline counts only what it did observe and states the inventory
-        # separately. Without this a byte-identical rebuild announced
-        # "NO_CHANGE: 32 risk (32 total)" -- a verdict and a count
-        # contradicting each other in one line.
+    if standing and change_inventory is not None:
+        # Standing hygiene inventory is still a finding the JSON summary
+        # counts, so the total below stays the JSON ``total_changes``; it is
+        # not dropped from the total. The compatibility buckets, though, must
+        # not carry it: the JSON bucket counts fold a persistent finding into
+        # its verdict's bucket (a PERSISTENT ``exported_not_public`` is
+        # ``risk_changes``), which would announce ``NO_CHANGE: 32 risk`` for a
+        # byte-identical rebuild. So the compatibility clauses are the
+        # observed subset the inventory block states, and the standing
+        # findings get their own clause.
         #
         # The inventory block does not split observed compatible findings
         # into additions / quality / informational (its JSON shape is fixed),
@@ -152,15 +179,20 @@ def format_stat_line(
         counts["compatible_additions"] = change_inventory.get(
             "compatibility_compatible", outcomes["compatible_additions"]
         )
-        total_changes = change_inventory.get("compatibility_changes", total_changes)
     parts = [f"{counts[key]} {noun}" for key, noun in OUTCOME_BUCKETS if counts[key]]
-    not_evaluated = total_changes - sum(counts.values())
+    # What no compatibility bucket names, and is not standing inventory, is a
+    # finding the compatibility policy did not score (ADR-049 D1).
+    not_evaluated = total_changes - sum(counts.values()) - standing
     if not_evaluated:
         parts.append(f"{not_evaluated} not evaluated")
+    if standing:
+        if not parts:
+            parts.append("no compatibility changes")
+        parts.append(f"{standing} {HYGIENE_CLAUSE_NOUN}")
     if parts:
         detail = ", ".join(parts)
     else:
-        detail = "no compatibility changes" if hygiene_note else "no changes"
+        detail = "no changes"
     redundant_note = (
         f" [{redundant_count} redundant hidden]" if redundant_count > 0 else ""
     )

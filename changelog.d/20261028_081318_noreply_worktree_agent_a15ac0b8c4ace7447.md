@@ -1,0 +1,3 @@
+### Fixed
+
+- **The one-line summary's total counts the same findings as the JSON report** — `compare -o oneline=...` (and `--stat`) left standing cross-source hygiene findings out of its total while the JSON `summary.total_changes` counted them, so a run with one persistent `exported_not_public` printed `2 breaking, 2 compatible (4 total)` beside a JSON total of 5. Those findings are now a `N header/binary consistency` clause within the breakdown, so the parts add up to the same total the JSON reports. The `; hygiene: ...` suffix still names their states. Text output only; the JSON report is unchanged.

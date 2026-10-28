@@ -288,11 +288,13 @@ a finding was never evaluated. A CI gate that should not fail on
 pre-existing debt reads `compatibility_changes`; the debt itself stays fully
 listed in `changes[]` and in `cross_source_evolution`, per the record-before-disposing rule.
 
-The `--stat`/`-o oneline=` one-line summary follows the same split: it
-counts only the observed subset and states the inventory in its own clause.
+The `--stat`/`-o oneline=` one-line summary uses the same population: its
+total is `total_changes`, and the standing inventory is its own
+`header/binary consistency` clause, so the parts add up to the total. The
+`; hygiene: ...` suffix names the states.
 
 ```text
-NO_CHANGE: no compatibility changes (0 total); hygiene: 32 persistent
+NO_CHANGE: no compatibility changes, 32 header/binary consistency (32 total); hygiene: 32 persistent
 ```
 
 ## `--view root-cause`
