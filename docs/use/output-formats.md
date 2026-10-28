@@ -238,7 +238,7 @@ summary in a CI log, use `-o oneline=...`:
 
 ```bash
 $ abicheck compare old.json new.json -o oneline=-
-BREAKING: 3 breaking, 1 risk (42 total) [12 redundant hidden]
+BREAKING: 3 breaking, 1 risk, 38 compatible (42 total) [12 redundant hidden]
 ```
 
 (This used to be reachable only via the built-in `quick` `--profile`;
