@@ -11,7 +11,7 @@
       "abicheck/dwarf_snapshot_datasources.py": "e337f8be3a8ae16350c0639d0be10670d4d5d1197108659fa210fcbbf8a5bdde",
       "abicheck/dwarf_unified.py": "9ecb70b59bb26674ac98ba14ad1211b4103e3a78426a91ed7901e59f1a7d9cdf",
       "abicheck/dwarf_utils.py": "18a0d5ce15b7d72aead50bd9771112a2a19e5058501cca3e52253323434ff646",
-      "abicheck/elf_metadata.py": "966d07059c070998ac19822dcfcef5ed68067fea63fee491cfe114797baa9290",
+      "abicheck/elf_metadata.py": "74ff1a0749e190ed4602666bab646921266a27657a8a27feb4c10b4fcd8e19af",
       "abicheck/extract/__init__.py": "011ec37fad96ea2035983eaaedeba0976940a570900f85db8c03bb7369af742a",
       "abicheck/extract/ar_archive.py": "6fdab7ed7390a20f087f9407eaa3988c0f8c658400bc0ea8c7e193271923956d",
       "abicheck/extract/ar_archive_format.py": "38a51cae7762eb269af3788d5dca9cfe50de38d9b315f34fa31427f791cb7e62",
@@ -47,12 +47,14 @@
       "abicheck/extract/dwarf_vptr_resolution.py": "756dfe22e692c77de3b06fa3d86959b4e1c1bdd0d3729fae66743e923bbc2a68",
       "abicheck/extract/dwarf_vtable_completeness.py": "8a03fbbb12c5dfd13598251e6dbf8b58ff015e538fb0635f4afbfdb754d054da",
       "abicheck/extract/elf_abi_flags.py": "426d6d97328e32071a84422c130bdefebe31cee85a91146efe8c01f7ce97d87f",
-      "abicheck/extract/elf_code_hash.py": "d372796f5325c91f4c20cbe23a60e2f3bc62fd9c6423812269e4857d4916d489",
+      "abicheck/extract/elf_code_hash.py": "99cfa984364e0345077bf7bf960337a41f5a8eff887f6f7eb1138ec305e74258",
+      "abicheck/extract/elf_loader_view.py": "8222fbd3a329cd2c1227d14674350ddcf65dd1e7da11b552847e1f5d175ee4db",
       "abicheck/extract/elf_notes.py": "25ccf019332d620f847414e3b56149ef52e0d8f5d088b3d34a03a897a3940ecf",
       "abicheck/extract/elf_static_tls.py": "3d35ff8a14ab97e6991cb4afab62a61703a1ce8d5af99e9c7f957783153b5d1d",
       "abicheck/extract/elf_string_table.py": "8348fa460902944419d2f9fe0918d05d232dc0a6ebce3d606e1b1fcb68c69337",
       "abicheck/extract/elf_symbol_classify.py": "9fb3aefc0c2b337c089b594374b5db026e3061e43ecf35be89947f0fb02d99f1",
       "abicheck/extract/elf_symbol_fastpath.py": "9731dd43e2a99edd25f70a77c3c1fa02612d0de537cc73a98ea90b79167b1c21",
+      "abicheck/extract/elf_symbol_origin.py": "3408f0fdb9d3ce98eff14007012ac4bf844256f6628d127c4853ef8b6c20dac4",
       "abicheck/extract/elf_symbol_tables.py": "20aad46c8363b26b371f367dae054f96c92773551b1adec67628348613f4401f",
       "abicheck/extract/elf_symbol_versions.py": "b2aa29df27ed51b9cbe3f6b94e9c99e391036216621fa35cb72dc922ecf39786",
       "abicheck/extract/env_flags.py": "6a1343268cdfcd4b2ccaf91008d96b611973bf5cab04467c2585f012e1f5466c",
@@ -139,7 +141,7 @@
       "abicheck/extract/occurrence_dependency_scope.py": "d28ca573fecaecec3c67b784c9d44d516d039824e744179f852f5a89dc135d8e",
       "abicheck/extract/ownership.py": "9285bfc00b5dc3948749004cbe9881b5eb034696b59d405bd0e579f9664fb036",
       "abicheck/extract/ownership_stamp.py": "07e5714eac1e1770aa53f09479b7ae240f2f123ee2b7bf223241f6880233d8d7",
-      "abicheck/extract/packages.py": "0cc9caa6a067114f3dfb426b8ac3b8fb712bc82737ca1fadf357273ab1955d90",
+      "abicheck/extract/packages.py": "d91e6b264cbfee8f0486f19b84d998d41fa84e905d8562ef2ceb8366f5f57700",
       "abicheck/extract/parse_failures.py": "2e87216b3af05b90487355abfe32f966cec0206e2ba1467005348994264abea4",
       "abicheck/extract/path_aliases.py": "e4df448bdadc691475adfca99c567df6aa76e5cb421d6faf5de1307d368d1560",
       "abicheck/extract/path_segments.py": "c96f59df6fc126e26c6ca2052c6040d3180aa49f6c1265029eeb7206f0466b22",
@@ -171,9 +173,9 @@
       "abicheck/symvers_metadata.py": "372737765cd132e6e87ed891dd465d2958e04debbef774e45212ceb3036871cb",
       "abicheck/type_metadata.py": "9997189de8dac522fd1db8be5ae491d811139503f83abaaded89038eb4aa9cdf"
     },
-    "fingerprint": "6af80fd2b037439e1ed497cd6aa017efb9503ee47e18d039ef27cbee66e32068",
+    "fingerprint": "df48e2436223483f5b1771b6b6a1d8e40b2924bdd751ee55fcdb545551532afa",
     "generation": 28,
-    "reason": "review fixes on this PR's own generation-28 change: ELF .dynsym required for ET_DYN, oversized Mach-O trie refused, castxml producer list; the same PR's bump covers them"
+    "reason": "loader-view export read (R8) only reads binaries generation 28 refused; packages.py gains bounded waits (R6); facts of every binary 28 read are unchanged"
   },
   "resolver": {
     "files": {
@@ -189,11 +191,11 @@
       "abicheck/type_reachability_spelling.py": "1bd700f854cf9021fc30b577f4ddf3d22095c07b0c7a9bd90c497f8a8eb018a7",
       "abicheck/type_reachability_stdlib_spellings.py": "e20c1ffc6055602a97021b50fc496bd9892231bf6b437fb2a8e319cc3535f470",
       "abicheck/workflows/compare/resolve.py": "dc0381227c9e8dacaa39858d3f534ff45cbb3177f9b8645a8728c3f25c460793",
-      "abicheck/workflows/elf_dependency_resolver.py": "18524281e550a7f25225441cd063de58ec33281e7bacf65fef98d1fefb101426"
+      "abicheck/workflows/elf_dependency_resolver.py": "33679ec7d2b95891a9f265e79be05542b061ecaa83a7f769614aaa8b443b0f32"
     },
-    "fingerprint": "b962521c095f9678b21de0b2f2f0027f8043b1a1c57b509656df6d232b3b71e5",
+    "fingerprint": "1f07f343badc76d088e56b1fc60d8c0e84e89e091f85a33e83f0ecb4ead92377",
     "generation": 2,
-    "reason": "merge main: comment-only/refactor changes from main, no behaviour change"
+    "reason": "the resolver refuses a DSO whose export table was not read instead of resolving against an empty table; resolutions of readable DSOs are unchanged"
   },
   "source": {
     "files": {
