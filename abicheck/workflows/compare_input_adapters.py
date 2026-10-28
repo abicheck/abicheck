@@ -155,9 +155,15 @@ def compare_request_inputs(
     and for the same reason (see ``_apply_contract_evaluation_shadow``'s
     ``scope_public_headers_is_explicit=True``).
 
-    ``severity_preset`` forwards too, else this receipt's ``gate.*`` block
-    could disagree with ``CompareResult.exit_decision``; with no
-    per-category or pack field it resolves like a CLI run stating none.
+    ``severity_preset`` and the four per-category fields
+    (``severity_abi_breaking``, ``severity_potential_breaking``,
+    ``severity_quality_issues``, ``severity_addition``) forward too, else this
+    receipt's ``gate.*`` block could disagree with
+    ``CompareResult.exit_decision`` and record a stated level as
+    ``built_in_default``. The CLI's ``severity.<category>`` config keys reach
+    the resolver the same way (``project_config`` tier), so the two front ends
+    record the same provenance kind. ``--pack`` contributions are not a
+    ``CompareRequest`` severity field: they arrive through ``pack_paths``.
     ``policy_file_path``/``suppress`` are loaded from the request unless the
     caller passes them already loaded. ``policy_base`` goes through
     :func:`stated_policy_base` (an unknown name beside a valid file is
@@ -183,6 +189,10 @@ def compare_request_inputs(
         public_symbols=tuple(sorted(request.force_public_symbols or ())),
         suppression=suppression,
         severity_preset=request.severity_preset,
+        severity_abi_breaking=request.severity_abi_breaking,
+        severity_potential_breaking=request.severity_potential_breaking,
+        severity_quality_issues=request.severity_quality_issues,
+        severity_addition=request.severity_addition,
         pack_paths=tuple(str(p) for p in request.pack_paths),
         header_dirs=header_dir_spellings(
             (*request.new.headers, *request.new.public_header_dirs)
