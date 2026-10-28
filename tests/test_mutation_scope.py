@@ -41,6 +41,7 @@ def _load(name: str):
 scope = _load("mutation_scope")
 gate = _load("check_mutation_score")
 results = _load("mutation_results")
+hunk_bodies = _load("diff_hunk_bodies")
 
 
 @pytest.mark.parametrize(
@@ -836,11 +837,11 @@ def test_hunk_body_lines_spelled_like_file_headers_stay_body(
         ("abicheck/x.py", "abicheck/x.py")
     ]
     body = set(diff.splitlines()[5:])
-    assert body.isdisjoint(scope.diff_lines_outside_hunk_bodies(diff))
+    assert body.isdisjoint(hunk_bodies.diff_lines_outside_hunk_bodies(diff))
 
 
 def test_a_malformed_hunk_body_still_reaches_the_unrecognized_check() -> None:
     """The count ends at a line that cannot be body, which is then yielded."""
     diff = _header_like_body_diff("old", "new").replace(" keep\n", "garbage\n", 1)
-    assert "garbage" in list(scope.diff_lines_outside_hunk_bodies(diff))
+    assert "garbage" in list(hunk_bodies.diff_lines_outside_hunk_bodies(diff))
     assert gate.diff_has_unrecognized_content(diff)

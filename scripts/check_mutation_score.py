@@ -79,6 +79,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+from diff_hunk_bodies import diff_lines_outside_hunk_bodies  # noqa: E402
 from mutation_results import (  # noqa: E402
     # Re-exported for tests/test_mutation_score_gate.py, which reads it as
     # `gate.MODULE_SCOPE`; `as` keeps `ruff --fix` from stripping it as unused.
@@ -98,7 +99,6 @@ from mutation_results import (  # noqa: E402
 from mutation_scope import (  # noqa: E402
     NOTHING_MATCHES_MARKER,
     TIMED_OUT_RC,
-    diff_lines_outside_hunk_bodies,
     diff_only_stop,
     function_run_scope,
     function_scope_pattern,
