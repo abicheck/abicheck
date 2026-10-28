@@ -36,7 +36,7 @@
       "abicheck/extract/dependency_header_roots.py": "1eaf11025d92166b6c05dfbc73e52eb859225dc33200905fbf179f2fb61b789a",
       "abicheck/extract/detached_debug.py": "bcf76b2771ba0697d1630af33f4fb87b36be9913538f7eed104673390a1d7106",
       "abicheck/extract/digest_memo.py": "babd25889fb4ac54b8defd27ea009fc2e125085c5692f5a4d864aec5491fbee9",
-      "abicheck/extract/dpcpp_jobs.py": "7e30f36f5a4ccaf84aa9abe6ed7958d23ce5c43dbb9f6504b9921502c99fad08",
+      "abicheck/extract/dpcpp_jobs.py": "97dcedd95fc15c58cbaf83e6acb935eb0b87f24117d40407658a9657f48519a5",
       "abicheck/extract/dump_manifest_roots.py": "b616e45b7eafdd2dd4c69c1031f9a5c8b54973633aa3e9057edc60525ea0d15a",
       "abicheck/extract/dwarf_decl_file.py": "a585b6e38dc879b04db4b3d70a8b7131774a8b735df1068e6baafcaac934af42",
       "abicheck/extract/dwarf_layout_backfill.py": "3dcc9efb8907b6b3419b09b1c262f64403a5162148bc3be0a5d51e112ef69a4d",
@@ -60,13 +60,14 @@
       "abicheck/extract/export_table_read.py": "0d9ec9fb81165d7ea765beae3d90f2d51dd5dbd5c1ede00c6ea322cc4a30c771",
       "abicheck/extract/flat_map_dependency_scope.py": "5fa66ab2f8ebdbc37d735e3dbad3b6fe1ae3907d7a98eab5c6e6257842e2ea07",
       "abicheck/extract/header_ast_backend.py": "1f5b15c126b139c49b702b69a4f626ed7d30f8294e15ad116d61387e96d31f16",
-      "abicheck/extract/header_ast_cache_producers.py": "b20f72d82c73d0f82a91bf53b32edf673a043aae5f68eec9c38d6d7ad9c7b63a",
+      "abicheck/extract/header_ast_cache_producers.py": "2177504bb1c45869578142eba8e74fd789403f052e851215afe8a7e05c19c6f9",
       "abicheck/extract/header_ast_fields.py": "436f6feaed4da7566a551fa44d3e102d28964fecc57a22821111d7f63c6f5840",
       "abicheck/extract/header_exclusions.py": "254ca6e4ccf7366b9db516183d6814cb865c279845abe7d05051ac2f72bf0884",
       "abicheck/extract/header_order_witness.py": "6a1cfce946826fa540a0601ebeefa02a8973ba6e8cd5d8287f6c1e7badc3d53a",
       "abicheck/extract/header_scan_memo.py": "56f79b5316354b938b08a5f29779c3aaf40481892d947784ec2adb48ab5e83fb",
+      "abicheck/extract/header_text.py": "b43a88d7bf1d2e601bb908c78f04cb07e552f9c59f03b678ecc85788b3d146e4",
       "abicheck/extract/headers/__init__.py": "70af0d3a16882783444077004b7a434a295505579fbbca219ce103f72074ad03",
-      "abicheck/extract/headers/ast_config.py": "95fa895316e40c9f84569d79a46f784336f00ca7edf8f0e8cf36646f79df2c67",
+      "abicheck/extract/headers/ast_config.py": "9e101646e3b0db82596f9cc6fd1f72017a9301d1072a7014f264de2d45dc81db",
       "abicheck/extract/headers/ast_config_cpp20_chains.py": "ceeadbcb1d8e2eaac5eb325a3fb7c668614ce605bc04bb03835fcc4957e53c97",
       "abicheck/extract/headers/backend_plan.py": "1f02babf0ead52a65e4fa08dff8ce5b2a9d60feb1d02d22e7db30ee050cf8717",
       "abicheck/extract/headers/backend_protocol.py": "144cbe76456b6bceaf56f0edd0f3398f171178a222c8b968d53f8a17ee05a21b",
@@ -170,9 +171,9 @@
       "abicheck/symvers_metadata.py": "372737765cd132e6e87ed891dd465d2958e04debbef774e45212ceb3036871cb",
       "abicheck/type_metadata.py": "9997189de8dac522fd1db8be5ae491d811139503f83abaaded89038eb4aa9cdf"
     },
-    "fingerprint": "71958f6bde1a500b7d599c12ed3dc7e47da007e77d56514faec15d06886c997e",
+    "fingerprint": "9ba8c4f51eb9b05bad948e22dc84e46edc60034a76b28cc8f96859a1c1d9f475",
     "generation": 28,
-    "reason": "a dump whose export table cannot be read (zeroed section table, no .dynsym, unnamed exports, unreadable Mach-O export table) now fails instead of recording an empty export surface"
+    "reason": "re-record after merging this PR's T2/T4/T6 extract edits onto the T1 generation-28 bump; the same PR's bump covers them"
   },
   "resolver": {
     "files": {
