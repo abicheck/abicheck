@@ -24,6 +24,7 @@ from abicheck.report.change_inventory import (
 )
 from abicheck.report.document import ReportDocument
 from abicheck.report.render_text import (
+    OUTCOME_BUCKETS,
     format_hygiene_note,
     format_stat_line,
     render_stat_document,
@@ -109,10 +110,7 @@ def test_headline_states_persistent_inventory_separately() -> None:
     )
     line = format_stat_line(
         "NO_CHANGE",
-        breaking=0,
-        source_breaks=0,
-        risk_count=32,
-        compatible_additions=0,
+        outcomes=_outcomes(risk_changes=32),
         total_changes=32,
         change_inventory=render_change_inventory_json(split),
     )
@@ -128,10 +126,9 @@ def test_headline_is_byte_identical_without_hygiene_findings() -> None:
         [_change(None)], [_change(None)], lambda _c: Verdict.BREAKING
     )
     kwargs = dict(
-        breaking=2,
-        source_breaks=1,
-        risk_count=3,
-        compatible_additions=4,
+        outcomes=_outcomes(
+            breaking=2, source_breaks=1, risk_changes=3, compatible_additions=4
+        ),
         total_changes=10,
     )
     assert format_stat_line("BREAKING", **kwargs) == format_stat_line(
@@ -153,11 +150,13 @@ def test_hygiene_note_orders_what_changed_before_what_did_not() -> None:
     assert format_hygiene_note({"hygiene_persistent": 0}) == ""
 
 
+def _outcomes(**counts: int) -> dict[str, int]:
+    """Every outcome bucket the one-line summary names, zero unless given."""
+    return {key: counts.get(key, 0) for key, _noun in OUTCOME_BUCKETS}
+
+
 _BASE_SUMMARY = {
-    "breaking": 0,
-    "source_breaks": 0,
-    "risk_changes": 32,
-    "compatible_additions": 0,
+    **_outcomes(risk_changes=32),
     "total_changes": 32,
 }
 

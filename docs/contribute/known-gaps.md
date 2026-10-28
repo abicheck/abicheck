@@ -59,6 +59,14 @@ Each entry's status line says what is still open. A PARTIAL entry's write-up als
 
 ### Report and detector coverage
 
+#### The standing-inventory headline folds observed compatible findings into one clause (2026-10-28)
+
+**Status (2026-10-28): OPEN.** A one-line summary with standing cross-source inventory states the observed COMPATIBLE verdict as a single `compatible` clause, so an informational or quality finding is counted there, not named. The `summary.change_inventory` block has no additions/quality/informational split and its JSON shape is fixed, so the split needs an additive field and its schema ruling. The parts still add up to the total. Owner: `report/change_inventory.py`, `report/render_text.py`.
+
+#### Contract-unscored findings are not named by the JSON summary or the release line (2026-10-28)
+
+**Status (2026-10-28): OPEN.** A finding the compatibility policy left `NOT_EVALUATED` is in `summary.total_changes` and in no bucket, and the JSON names it nowhere except as that surplus; its per-change status is emitted only under a stamped contract relevance. The one-line summary states it as `N not evaluated`. The release line's total is the sum of member buckets, so unscored release findings are absent from it. Owner: `report/release_oneline.py`, `report/json_sections.py`.
+
 #### case98 release-headers is refused as a profile mismatch since 44473ffcb (2026-10-25)
 
 **Status (2026-10-25): OPEN.** Since #1778 the release-headers compare of case98 returns no verdict (`profile_mismatch`) instead of the documented `NO_CHANGE`; the guard accepts a declared-gap no-verdict row, so the job is green but the change is unruled. [Full write-up](known-gaps/case98-release-headers-is-refused-as-profile-mismatch-since-44473ffcb.md)

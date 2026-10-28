@@ -1993,7 +1993,7 @@ class TestUsedByScoping:
         # than weakening the assertion, matching this same PR's own fix
         # pattern for the other surface-metrics-affected tests in this file.
         # public_surface_shrank is QUALITY_ISSUES, not an addition (defect 4).
-        assert result.stdout.strip().startswith("BREAKING: 1 breaking (2 total)")
+        assert "BREAKING: 1 breaking, 1 informational (2 total)" in result.stdout
         # D-S1: the audit counts what the full-library exit (4) is decided on.
         assert "2 detected, 1 gating, 1 non_gating" in result.stdout
 
@@ -2152,7 +2152,7 @@ class TestUsedByScoping:
         )
         assert result.exit_code == 4
         # Same defect-4 reasoning as the sibling test above.
-        assert result.stdout.strip().startswith("BREAKING: 1 breaking (2 total)")
+        assert "BREAKING: 1 breaking, 1 informational (2 total)" in result.stdout
         assert "2 detected, 1 gating, 1 non_gating" in result.stdout
 
     def test_markdown_scoped_banner_states_actual_exit_under_severity_scheme(
