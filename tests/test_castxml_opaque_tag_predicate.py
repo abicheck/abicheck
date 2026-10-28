@@ -278,6 +278,24 @@ def test_callback_idiom_follows_typedef_target_by_whole_tag(
     assert _is_callback_type("cb_t*", typedefs) is expected
 
 
+@pytest.mark.parametrize(
+    ("typedefs", "expected"),
+    [
+        # Two hops: the middle alias is not a callback itself, so the walk
+        # must continue past it to reach the function pointer.
+        ({"outer_t": "inner_t", "inner_t": "void (*)(int)"}, True),
+        ({"outer_t": "inner_t*", "inner_t": "FunctionType*"}, True),
+        ({"outer_t": "inner_t", "inner_t": "MyFunctionTypeWrapper*"}, False),
+        ({"outer_t": "inner_t", "inner_t": "int"}, False),
+    ],
+)
+def test_callback_idiom_follows_a_multi_hop_typedef_chain(
+    typedefs: dict[str, str], expected: bool
+) -> None:
+    assert _is_callback_type("outer_t", typedefs) is expected
+    assert _is_callback_type("outer_t*", typedefs) is expected
+
+
 @given(prefix=identifier_part, suffix=identifier_part)
 @settings(max_examples=300, deadline=None)
 def test_callback_idiom_rejects_identifiers_glued_to_tag(
