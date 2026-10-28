@@ -677,8 +677,14 @@ ANALYSIS_1_BUG_CLASSES: tuple[BugClass, ...] = (
             "tests/test_undeclared_sycl_census_integration.py",
             "tests/test_sycl_stub_parse_integration.py",
             "tests/test_field_shapes.py",
+            # A development package given to a single-pair compare is named,
+            # not dropped; a header set that declared nothing is reduced in the
+            # evidence-coverage table, not shown as high-confidence evidence.
+            "tests/test_cli_single_pair_devel_package_warning.py",
+            "tests/test_cli_header_input_text_and_empty_surface.py",
+            "tests/test_empty_header_surface_counts.py",
         ),
-        # Only the two consumer-scoping seeds reach a public surface: their integration tests drive `abicheck compare --used-by` end to end.
+        # Only the consumer-scoping and CLI header-input seeds reach a public surface: their integration tests drive `abicheck compare` end to end.
         public_surfaces=("cli",),
         known_gaps=(
             KnownGap(

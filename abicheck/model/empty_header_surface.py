@@ -31,7 +31,11 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from .snapshot import AbiSnapshot
 
-__all__ = ["EMPTY_HEADER_SURFACE_MARKER", "empty_header_surface_warnings"]
+__all__ = [
+    "EMPTY_HEADER_SURFACE_MARKER",
+    "empty_header_surface_warnings",
+    "header_surface_declares_nothing",
+]
 
 #: Substring every empty-header-surface warning shares, so a consumer can
 #: filter ``coverage_warnings`` for this one.
@@ -57,6 +61,16 @@ def _declaration_count(snap: AbiSnapshot) -> int:
     )
 
 
+def header_surface_declares_nothing(snap: AbiSnapshot) -> bool:
+    """Whether *snap*'s declaration stores hold no header-level declaration.
+
+    Only meaningful for a snapshot whose surface came from headers; the caller
+    decides that. Shared by the warning below and the evidence-coverage table so
+    both name the same condition.
+    """
+    return _declaration_count(snap) == 0
+
+
 def empty_header_surface_warnings(
     old: AbiSnapshot | None, new: AbiSnapshot
 ) -> list[str]:
@@ -70,7 +84,7 @@ def empty_header_surface_warnings(
     for side, snap in (("old", old), ("new", new)):
         if snap is None or not getattr(snap, "from_headers", False):
             continue
-        if _declaration_count(snap) > 0:
+        if not header_surface_declares_nothing(snap):
             continue
         warnings.append(
             f"{side}: the {side} header set produced "
