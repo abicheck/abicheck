@@ -201,7 +201,7 @@ def build_report_document(
     )
     add_suppression(d, result)
     _add_disposition_audit(d, result, severity_config, today=today)
-    _add_surface_changes(d, result, changes, severity_config)
+    _add_surface_changes(d, result, changes, severity_config, today=today)
     all_findings = findings or build_report_findings(
         result.changes,
         policy=result.policy,

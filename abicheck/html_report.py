@@ -634,7 +634,9 @@ def build_html_document(
             ),
             "impact": dataclasses.asdict(impact) if impact is not None else None,
             "versioning_policy": compute_versioning_policy(result),
-            "surface_changes": _surface_changes(result, display_changes, envelope),
+            "surface_changes": _surface_changes(
+                result, display_changes, envelope, severity_config
+            ),
             "use_case_impact": compute_use_case_impact(
                 result, display_changes if show_only else None
             ),
@@ -698,7 +700,10 @@ def generate_html_report(
 
 
 def _surface_changes(
-    result: object, changes: list[object], envelope: ReportEnvelope | None
+    result: object,
+    changes: list[object],
+    envelope: ReportEnvelope | None,
+    severity_config: object | None = None,
 ) -> dict[str, object] | None:
     """Additions/removals/modifications over the displayed changes (``None``
     for a duck-typed result that carries no policy to resolve them with).
@@ -711,8 +716,16 @@ def _surface_changes(
         return None
     if envelope is not None:
         findings = envelope.findings_for(changes)  # type: ignore[arg-type]
-        return compute_surface_changes(result, findings).to_dict()  # type: ignore[arg-type]
-    return compute_surface_changes(result, changes=changes).to_dict()  # type: ignore[arg-type]
+        return compute_surface_changes(
+            result,
+            findings,  # type: ignore[arg-type]
+            severity_config=envelope.severity_config,
+        ).to_dict()
+    return compute_surface_changes(
+        result,
+        changes=changes,  # type: ignore[arg-type]
+        severity_config=severity_config,  # type: ignore[arg-type]
+    ).to_dict()
 
 
 def compute_use_case_impact(

@@ -159,3 +159,38 @@ def test_surface_fallback_omits_what_review_groups_omit(gates: bool) -> None:
             "## What changed" not in surface
             or "PersistentOdrType" not in (surface.split("## What changed")[1])
         )
+
+
+@pytest.mark.parametrize("gates", [True, False])
+def test_json_and_html_surface_changes_agree_under_the_runs_severity(
+    gates: bool,
+) -> None:
+    """HTML resolves the same severity config as JSON, so a non-gating
+    persistent finding is absent from both (and a gating one present in
+    both), never only one of them via a legacy-scheme fallback."""
+    from abicheck.html_report import build_html_document
+
+    level = SeverityLevel.ERROR if gates else SeverityLevel.INFO
+    config = SeverityConfig(potential_breaking=level)
+    result = DiffResult(
+        old_version="1",
+        new_version="2",
+        library="libx.so",
+        changes=[
+            Change(
+                kind=ChangeKind.ODR_TYPE_VARIANT,
+                symbol="PersistentOdrType",
+                description="d",
+                cross_source_evolution=CrossSourceEvolution.PERSISTENT,
+            )
+        ],
+        verdict=Verdict.API_BREAK,
+    )
+    json_mods = json.loads(to_json(result, severity_config=config))["surface_changes"][
+        "modifications"
+    ]
+    html = build_html_document(result, severity_config=config).to_mapping()
+    html_mods = html["surface_changes"]["modifications"]
+    expected = ["PersistentOdrType"] if gates else []
+    assert [m["symbol"] for m in json_mods] == expected
+    assert [m["symbol"] for m in html_mods] == expected

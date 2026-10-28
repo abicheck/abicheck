@@ -55,6 +55,8 @@ from .markdown_budget import clip, clip_name
 from .markdown_text import md_text
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
+    from datetime import date
+
     from ..checker_types import DiffResult
     from ..model.change import Change
     from ..policy.severity import SeverityConfig
@@ -200,6 +202,7 @@ def compute_surface_changes(
     *,
     changes: Sequence[Change] | None = None,
     severity_config: SeverityConfig | None = None,
+    today: date | None = None,
 ) -> SurfaceChangeSection:
     """Group *result*'s findings into additions/removals/modifications.
 
@@ -217,7 +220,8 @@ def compute_surface_changes(
 
     Non-gating PERSISTENT hygiene is left out under *severity_config*, as in
     review groups (``change_inventory.is_background_hygiene``), so the
-    Markdown fallback never lists what the groups omit.
+    Markdown fallback never lists what the groups omit. *today* resolves dated
+    ``reclassify`` rules exactly as the review groups beside it do.
     """
     if findings is not None:
         resolved = findings
@@ -227,6 +231,7 @@ def compute_surface_changes(
             policy=result.policy,
             kind_sets=effective_kind_sets(result),
             policy_file=result.policy_file,
+            today=today,
         )
     else:
         resolved = report_findings_for(result)
@@ -263,6 +268,7 @@ def add_surface_changes(
     result: DiffResult,
     changes: Sequence[Change] | None = None,
     severity_config: SeverityConfig | None = None,
+    today: date | None = None,
 ) -> None:
     """Attach the ``surface_changes`` block to a JSON report (schema 3.9).
 
@@ -276,7 +282,7 @@ def add_surface_changes(
     the caller has no filtering of its own to honor.
     """
     d["surface_changes"] = compute_surface_changes(
-        result, changes=changes, severity_config=severity_config
+        result, changes=changes, severity_config=severity_config, today=today
     ).to_dict()
 
 
