@@ -696,7 +696,7 @@
     },
     {
       "path": "abicheck/extract/packages.py",
-      "baseline_lines": 1730,
+      "baseline_lines": 1713,
       "target": "storage",
       "rule": "no_growth",
       "disposition": "migrate",

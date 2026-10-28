@@ -336,7 +336,8 @@ def test_kill_process_tree_without_pgroup_kills_direct_process_only() -> None:
     proc = _FakeProc()
     deadline._kill_process_tree(proc, use_pgroup=False)
     assert proc.killed == 1
-    assert proc.waits == [None]
+    # Bounded: a SIGKILLed child that will not reap must not hang the caller.
+    assert proc.waits == [5]
 
 
 def test_kill_process_tree_reaches_group_after_wrapper_already_exited(
@@ -378,7 +379,8 @@ def test_kill_process_tree_sigterm_killpg_failure_falls_back_to_direct_kill(
     monkeypatch.setattr(os, "killpg", _boom)
     deadline._kill_process_tree(proc, use_pgroup=True)
     assert proc.killed == 1
-    assert proc.waits == [None]
+    # Bounded post-SIGKILL reap, as in the group path.
+    assert proc.waits == [5]
 
 
 def test_kill_process_tree_escalates_to_sigkill_after_double_wait_timeout(

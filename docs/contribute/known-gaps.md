@@ -435,6 +435,11 @@ Do not re-attempt token-claiming. A header's export tokens cannot tell whether i
 
 ### Hygiene
 
+#### A forked child that is alive but never answers blocks the parent's pipe read
+
+**Status (recorded 2026-10-28): OPEN.** The side-isolation receive (`side_isolation._run_children`, `recv.recv()`), the release member pool's receive (`keyed_process_pool`, `recv.recv()` and `wait_ready()`) and the release admission budget wait (`release_admission`, `self._cond.wait()`) return only when the child answers or its pipe reaches EOF. A child that is alive, deadlocked (for example on a lock its fork copied held) and never exits or closes its pipe therefore hangs the run when no `--budget` is set. The EOF and completed-child reap paths are bounded (R6, 2026-10-28), and `tests/test_unbounded_wait_gate.py` pins these three sites as the only unbounded waits left under `abicheck/`. Bounding them needs a time policy for an unbudgeted side (a maintainer decision). Under `--budget` the active deadline could bound them, but `workflows` may not import the unclassified `deadline` module yet (`architecture/dispositions.yaml`).  
+`hygiene` — A hang here is silent: the run neither fails nor finishes. Decide the unbudgeted time limit, then route these reads through the deadline.
+
 #### `--required-symbol @FILE` read errors are checked on the CLI route only
 
 **Status (recorded 2026-10-22): OPEN.** An unreadable `@FILE` is refused as a typed `CompareSettingsError` (exit 64, path named) by `workflows/compare_configuration.load_required_symbols`, pinned on the CLI and the typed function in `tests/test_compare_settings_cli_translation.py`. No bug-class harness covers it: the typed `CompareRequest` API does not accept `@FILE` required symbols, so there is no second route to compare against, and family F2's route-parity matrix has nothing to attach to.

@@ -277,7 +277,10 @@ def _run_children(ctx: Any, fns: list[Callable[[], _T]]) -> list[_T]:
                 with gc_paused():
                     status, value = recv.recv()
             except EOFError:
-                proc.join()
+                # The child closed its end without answering. Bounded: it may
+                # still be alive (SIGTERM-proof, deadlocked); the finally
+                # below terminates and escalates whatever is left.
+                proc.join(_TERMINATE_GRACE_SECONDS)
                 status, value = "died", None
             except OSError as exc:
                 # A partially written frame: the child died mid-transfer.
@@ -319,21 +322,20 @@ def _run_children(ctx: Any, fns: list[Callable[[], _T]]) -> list[_T]:
 _TERMINATE_GRACE_SECONDS = 5.0
 
 
-def reap_child(proc: Any, *, escalate: bool) -> None:
-    """Join *proc*; for an abandoned child, never wait on SIGTERM alone.
+def reap_child(proc: Any, *, escalate: bool) -> None:  # noqa: ARG001 -- one bound for both paths; kept for callers
+    """Join *proc* within the grace period; SIGKILL it if it outlives that.
 
     A forked child inherits the parent's signal dispositions, including the
     Python-level SIGTERM handler ``cli.main`` installs, and that handler can
     block on a lock the fork copied in its held state. SIGTERM is then a
     request the child cannot honour, and an unbounded ``join`` hangs the
-    parent forever -- so an abandoned child that outlives the grace period is
-    killed. A child whose result was fully received has already sent it and
-    is exiting on its own, so it is joined without escalation.
+    parent forever -- so no join here is unbounded, and a child still alive
+    after the grace period is killed. *escalate* marks an abandoned child,
+    whose caller has already sent SIGTERM; both paths now share the bound
+    (a child whose result was read has nothing left to lose by the kill), so
+    the flag is accepted for the callers' contract rather than acted on.
     """
-    if not escalate:
-        proc.join()
-        return
     proc.join(_TERMINATE_GRACE_SECONDS)
     if proc.is_alive():
         proc.kill()
-        proc.join()
+        proc.join(_TERMINATE_GRACE_SECONDS)
