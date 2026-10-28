@@ -608,3 +608,30 @@ def test_scoped_summary_matches_full_summary_for_any_demoted_mix(
     scoped = _scoped_summary(changes)
     for key in _SUMMARY_BUCKETS:
         assert scoped[key] == full[key], (key, specs)
+
+
+@pytest.mark.parametrize(
+    ("entry", "expected"),
+    [
+        ("not-a-dict", None),
+        ({"kind": "func_removed"}, None),
+        ({"kind": "func_removed", "severity": 4}, None),
+        ({"kind": "func_removed", "severity": "breaking"}, "breaking"),
+        ({"kind": "public_surface_grew", "severity": "compatible"}, "informational"),
+        (
+            {
+                "kind": "func_removed",
+                "severity": "compatible",
+                "recommended_action": "review_recommended",
+            },
+            "quality_issues",
+        ),
+        ({"kind": "func_added", "severity": "compatible"}, "compatible_additions"),
+    ],
+)
+def test_scoped_summary_bucket_for_each_entry_shape(
+    entry: object, expected: str | None
+) -> None:
+    from abicheck.report.scoped_gate import _summary_bucket_for_entry
+
+    assert _summary_bucket_for_entry(entry) == expected
