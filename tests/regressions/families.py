@@ -72,6 +72,7 @@ FAMILIES: dict[str, Family] = {
             ),
             harness_tests=(
                 "tests/test_family_f2_route_parity.py",
+                "tests/test_family_f2_live_route_matrix.py",
                 "tests/test_family_f2_release_member_parity.py",
             ),
         ),

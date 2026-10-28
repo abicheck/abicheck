@@ -33,6 +33,7 @@ from __future__ import annotations
 
 import dataclasses
 import json
+import subprocess
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -193,6 +194,26 @@ class Operands:
     new: Path
     old_dir: Path
     new_dir: Path
+    #: Live sides only (a ``.so`` operand): the public header parsed with the
+    #: binary, and the version the dump was stamped with. A stored snapshot
+    #: side carries both inside the JSON, so it leaves them unset.
+    old_header: Path | None = None
+    new_header: Path | None = None
+    old_version: str = ""
+    new_version: str = ""
+
+    def side_args(self) -> list[str]:
+        """The per-side CLI spelling of a live side's header and version."""
+        args: list[str] = []
+        for label, header, version in (
+            ("old", self.old_header, self.old_version),
+            ("new", self.new_header, self.new_version),
+        ):
+            if header is not None:
+                args += ["-H", f"{label}={header}"]
+            if version:
+                args += ["--version", f"{label}={version}"]
+        return args
 
 
 def write_operands(tmp: Path, case: str) -> Operands:
@@ -426,6 +447,9 @@ class Outcome:
 #: Marker key for a route whose native spelling of "not comparable" is not a
 #: full report (a raised exception, a release summary entry).
 NOT_COMPARABLE_KEY = "__not_comparable__"
+
+#: The verdict a release run reports when it paired no member at all.
+NO_COMPARISON_COMPLETED = "no_comparison_completed"
 _COMPARABILITY_ERRORS = tuple(set(_MISMATCH_ERRORS.values()))
 
 
@@ -434,8 +458,24 @@ def _invoke(args: list[str]) -> Any:
 
 
 def run_cli(ops: Operands, axis: Axis, tmp: Path) -> Outcome:
-    r = _invoke(["compare", str(ops.old), str(ops.new), *axis.cli(tmp), "-o", "json=-"])
+    r = _invoke(
+        [
+            "compare",
+            str(ops.old),
+            str(ops.new),
+            *ops.side_args(),
+            *axis.cli(tmp),
+            "-o",
+            "json=-",
+        ]
+    )
     return Outcome("cli", json.loads(r.stdout), r.exit_code)
+
+
+def _input_spec(path: Path, header: Path | None, version: str) -> InputSpec:
+    return InputSpec(
+        path=path, headers=(header,) if header is not None else (), version=version
+    )
 
 
 def run_api(
@@ -450,7 +490,9 @@ def run_api(
     # therefore pattern_verdicts=True, and the API cell states it.
     kwargs: dict[str, Any] = {"pattern_verdicts": True, **axis.api(tmp)}
     req = request_factory(
-        old=InputSpec(path=ops.old), new=InputSpec(path=ops.new), **kwargs
+        old=_input_spec(ops.old, ops.old_header, ops.old_version),
+        new=_input_spec(ops.new, ops.new_header, ops.new_version),
+        **kwargs,
     )
     try:
         res = run_compare_request(req)
@@ -480,6 +522,7 @@ def run_release_member(ops: Operands, axis: Axis, tmp: Path) -> Outcome:
             str(ops.old_dir),
             str(ops.new_dir),
             *axis.cli(tmp),
+            *ops.side_args(),
             "-o",
             f"json={summary}",
             "-o",
@@ -487,6 +530,16 @@ def run_release_member(ops: Operands, axis: Axis, tmp: Path) -> Outcome:
         ]
     )
     doc = json.loads(summary.read_text(encoding="utf-8"))
+    if not doc["libraries"]:
+        # No member paired on the two sides (e.g. a stored .json directory
+        # against a live .so directory): the release run completed zero
+        # comparisons. Its own outcome, never an assertion failure.
+        return Outcome(
+            "release",
+            {"verdict": NO_COMPARISON_COMPLETED, "run_outcome": doc.get("run_outcome")},
+            r.exit_code,
+            {"summary": doc},
+        )
     assert len(doc["libraries"]) == 1, doc
     lib = doc["libraries"][0]
     if lib.get("verdict") == "not_comparable":
@@ -500,11 +553,256 @@ def run_release_member(ops: Operands, axis: Axis, tmp: Path) -> Outcome:
     return Outcome("release", member, r.exit_code, {"summary": doc, "library": lib})
 
 
-ROUTES: dict[str, Callable[[Operands, Axis, Path], Outcome]] = {
+# ── operand forms and the derived route matrix ───────────────────────────
+#
+# A *route* is one entry point (``ENTRY_POINTS``) reading one operand form
+# (``OPERAND_FORMS``). The matrix is the product minus ``ROUTE_EXCEPTIONS``,
+# so adding an entry point or a form adds its routes without touching the
+# matrix tests, and a cell a route cannot take is declared with its reason
+# rather than silently absent.
+
+#: Operand forms. ``stored``: both sides ``abicheck dump`` snapshots. ``live``:
+#: both sides the binary plus its header. ``mixed_old``/``mixed_new``: one side
+#: stored, the other live (the stored/live split the #1236/#1715 classes
+#: broke on, one side at a time).
+OPERAND_FORMS: tuple[str, ...] = ("stored", "live", "mixed_old", "mixed_new")
+
+#: Entry point name -> the runner that takes :class:`Operands`.
+ENTRY_POINTS: dict[str, Callable[[Operands, Axis, Path], Outcome]] = {
     "cli": run_cli,
     "api": run_api,
     "release": run_release_member,
 }
+
+#: ``(entry point, operand form)`` cells that entry point cannot take, each
+#: with the reason. Empty: every entry point accepts every form.
+ROUTE_EXCEPTIONS: dict[tuple[str, str], str] = {}
+
+
+@dataclass(frozen=True)
+class Route:
+    entry: str
+    form: str
+    run: Callable[[Operands, Axis, Path], Outcome]
+
+    @property
+    def name(self) -> str:
+        return self.entry if self.form == "stored" else f"{self.entry}@{self.form}"
+
+
+#: Every route, keyed by its name. ``cli``/``api``/``release`` (the stored
+#: form) keep their historical names.
+ROUTE_MATRIX: dict[str, Route] = {
+    route.name: route
+    for route in (
+        Route(entry, form, run)
+        for entry, run in ENTRY_POINTS.items()
+        for form in OPERAND_FORMS
+        if (entry, form) not in ROUTE_EXCEPTIONS
+    )
+}
+
+#: Route cells that diverge from the stored CLI reference and are not fixed:
+#: ``route name -> explanation``. Each is left out of the live matrix and
+#: pinned by its own ``xfail(strict=True)`` cell in the test module, so a fix
+#: turns that cell XPASS -> failure and forces the entry's removal.
+KNOWN_ROUTE_DIVERGENCES: dict[str, str] = {
+    "release@mixed_old": "the release fan-out pairs directory members by file "
+    "name, so a stored libfoo.json in OLD never pairs with a live libfoo.so in "
+    "NEW: the run completes zero comparisons and exits 1 "
+    "(no_comparison_completed), where the scalar route compares the same bytes "
+    "(known-gaps: release-fan-out-cannot-pair-a-stored-snapshot-directory-with-a-live-one)",
+    "release@mixed_new": "the mirror of release@mixed_old: a live libfoo.so "
+    "directory in OLD against a stored libfoo.json directory in NEW pairs no "
+    "member, exits 1 (no_comparison_completed), and the scalar route compares "
+    "the same bytes (known-gaps: release-fan-out-cannot-pair-a-stored-snapshot-directory-with-a-live-one)",
+}
+
+
+#: The stored-form routes, as ``name -> runner`` (the historical view).
+ROUTES: dict[str, Callable[[Operands, Axis, Path], Outcome]] = {
+    name: route.run for name, route in ROUTE_MATRIX.items() if route.form == "stored"
+}
+
+
+# ── live operands: real gcc + castxml builds ─────────────────────────────
+
+_BASE_H = "int foo(void);\nint bar(int);\n"
+_BASE_C = "int foo(void){return 1;}\nint bar(int x){return x;}\n"
+
+#: Live corpus: per corpus case, ``((old header, old source), (new header,
+#: new source))``. Each pair is built with gcc into a real shared library and
+#: dumped with castxml; the stored form is the ``abicheck dump`` of the same
+#: binary, so a live cell and its stored cell share every input bit.
+LIVE_SOURCES: dict[str, tuple[tuple[str, str], tuple[str, str]]] = {
+    "identical": ((_BASE_H, _BASE_C), (_BASE_H, _BASE_C)),
+    "removal_and_addition": (
+        (_BASE_H, _BASE_C),
+        (
+            "int bar(int);\nint baz(void);\n",
+            "int bar(int x){return x;}\nint baz(void){return 2;}\n",
+        ),
+    ),
+    "addition_only": (
+        (_BASE_H, _BASE_C),
+        (
+            _BASE_H + "int qux(void);\n",
+            _BASE_C + "int qux(void){return 3;}\n",
+        ),
+    ),
+    "signature_change": (
+        (_BASE_H, _BASE_C),
+        (
+            "long foo(void);\nint bar(int, int);\n",
+            "long foo(void){return 1;}\nint bar(int a, int b){return a+b;}\n",
+        ),
+    ),
+    "variable_removed": (
+        (
+            _BASE_H + "extern int gv;\nextern int keep;\n",
+            _BASE_C + "int gv;\nint keep;\n",
+        ),
+        (_BASE_H + "extern int keep;\n", _BASE_C + "int keep;\n"),
+    ),
+    # Exports no header declares: one appears, one disappears, one persists
+    # (the live twin of the stored ``undeclared_export_churn`` case). C names
+    # are used so castxml and the ELF table agree without mangling.
+    "undeclared_export_churn": (
+        (
+            "void init_fn(void);\n",
+            "void init_fn(void){}\nvoid removed_helper(void){}\nvoid persistent_helper(void){}\n",
+        ),
+        (
+            "void init_fn(void);\n",
+            "void init_fn(void){}\nvoid leaky_fn(void){}\nvoid persistent_helper(void){}\n",
+        ),
+    ),
+    # A C++ header whose only C++ constructs are a non-const reference and a
+    # default argument: the #1565 shape, where the header parse must follow the
+    # binary's resolved language (C++) or the declaration-only graph is lost.
+    "cxx_reference_header": (
+        (
+            "int foo(int& v);\nvoid bar(const char* s, int n = 3);\n",
+            "int foo(int& v){return v + 1;}\nvoid bar(const char* s, int n){(void)s;(void)n;}\n",
+        ),
+        (
+            "int foo(int& v);\nvoid bar(const char* s, long n = 3);\n",
+            "int foo(int& v){return v + 2;}\nvoid bar(const char* s, long n){(void)s;(void)n;}\n",
+        ),
+    ),
+}
+
+#: Live cases built as C++ (g++); every other case is C (gcc).
+LIVE_CXX_CASES = frozenset({"cxx_reference_header"})
+
+#: The live undeclared-export case's names for :data:`UNDECLARED_*`.
+LIVE_UNDECLARED_NAMES = {
+    "added": "leaky_fn",
+    "removed": "removed_helper",
+    "persistent": "persistent_helper",
+}
+
+
+@dataclass(frozen=True)
+class LiveBuild:
+    """One live corpus case built and dumped under ``root``."""
+
+    root: Path
+    old_so: Path
+    new_so: Path
+    old_header: Path
+    new_header: Path
+    old_json: Path
+    new_json: Path
+
+
+def write_live_build(root: Path, case: str) -> LiveBuild:
+    """Build both sides of *case* with gcc and dump each with ``abicheck dump``.
+
+    A dump failure fails the build: an uncompilable or unparseable fixture
+    is a broken corpus, never a route divergence.
+    """
+    paths: dict[str, Path] = {}
+    for side, version, (header_text, source_text) in zip(
+        ("old", "new"), ("1.0", "2.0"), LIVE_SOURCES[case]
+    ):
+        # The header sits beside its binary: the include root the dump
+        # derives is then the side's own directory, the layout a real build
+        # tree has (a header tree elsewhere changes ``include_sequence``).
+        so_dir = root / side
+        so_dir.mkdir(parents=True, exist_ok=True)
+        header = so_dir / "foo.h"
+        header.write_text(header_text, encoding="utf-8")
+        cxx = case in LIVE_CXX_CASES
+        source = root / f"{side}.{'cpp' if cxx else 'c'}"
+        source.write_text(source_text, encoding="utf-8")
+        so = so_dir / "libfoo.so"
+        subprocess.run(
+            [
+                "g++" if cxx else "gcc",
+                "-shared",
+                "-fPIC",
+                "-g",
+                "-o",
+                str(so),
+                str(source),
+            ],
+            check=True,
+        )
+        stored_dir = root / f"{side}-stored"
+        stored_dir.mkdir(parents=True, exist_ok=True)
+        snapshot = stored_dir / "libfoo.json"
+        dumped = _invoke(
+            [
+                "dump",
+                str(so),
+                "-H",
+                str(header),
+                "--version",
+                version,
+                "-o",
+                str(snapshot),
+            ]
+        )
+        assert dumped.exit_code == 0, dumped.output
+        paths.update(
+            {f"{side}_so": so, f"{side}_header": header, f"{side}_json": snapshot}
+        )
+    return LiveBuild(
+        root=root,
+        old_so=paths["old_so"],
+        new_so=paths["new_so"],
+        old_header=paths["old_header"],
+        new_header=paths["new_header"],
+        old_json=paths["old_json"],
+        new_json=paths["new_json"],
+    )
+
+
+#: form -> (old side is live, new side is live).
+_LIVENESS: dict[str, tuple[bool, bool]] = {
+    "stored": (False, False),
+    "live": (True, True),
+    "mixed_old": (False, True),
+    "mixed_new": (True, False),
+}
+
+
+def live_operands(build: LiveBuild, form: str) -> Operands:
+    """The operands of *build* in operand *form*. Each side's directory holds
+    only its own operand, so a directory operand is a one-member release."""
+    old_live, new_live = _LIVENESS[form]
+    root = build.root
+    return Operands(
+        old=build.old_so if old_live else build.old_json,
+        new=build.new_so if new_live else build.new_json,
+        old_dir=root / ("old" if old_live else "old-stored"),
+        new_dir=root / ("new" if new_live else "new-stored"),
+        old_header=build.old_header if old_live else None,
+        new_header=build.new_header if new_live else None,
+        old_version="1.0" if old_live else "",
+        new_version="2.0" if new_live else "",
+    )
 
 
 # ── oracle ───────────────────────────────────────────────────────────────
@@ -594,7 +892,9 @@ def release_finding_entry_violations(cli: Outcome, release: Outcome) -> list[str
     must name the same findings as the scalar report's ``changes`` and must
     agree on every field the two entry shapes share."""
     out: list[str] = []
-    if cli.not_comparable is not None:
+    if cli.not_comparable is not None or "library" not in release.extra:
+        # A release run that paired no member has no per-library entry to
+        # compare; the report-level parity check reports that run instead.
         return out
     summary_findings = release.extra["library"].get("findings", [])
     changes = cli.report["changes"]
@@ -611,3 +911,55 @@ def release_finding_entry_violations(cli: Outcome, release: Outcome) -> list[str
             if entry[f] != scalar[f]:
                 out.append(f"{key(entry)}.{f}: {entry[f]!r} != {scalar[f]!r}")
     return out
+
+
+# ── undeclared-export event oracle ───────────────────────────────────────
+
+_EXISTENCE_KINDS = {
+    "func_added_elf_only": "added",
+    "func_removed_elf_only": "removed",
+    "var_added_elf_only": "added",
+    "var_removed_elf_only": "removed",
+}
+
+
+#: The stored corpus's names for the three undeclared exports.
+_STORED_UNDECLARED_NAMES = {
+    "added": UNDECLARED_ADDED,
+    "removed": UNDECLARED_REMOVED,
+    "persistent": UNDECLARED_PERSISTENT,
+}
+
+
+def export_event_violations(
+    out: Outcome, names: Mapping[str, str] = _STORED_UNDECLARED_NAMES
+) -> list[str]:
+    """Manifest class ``report.cross_producer_disagreement_on_one_symbol``:
+    on every route, an undeclared export that appeared or disappeared is ONE
+    existence finding in the right direction, and its ``exported_not_public``
+    twin is not reported beside it. The oracle is the corpus construction
+    (which symbol was added/removed/kept), not the shared fold under test.
+    ``names`` maps ``added``/``removed``/``persistent`` to the case's symbols."""
+    expected = {names["added"]: "added", names["removed"]: "removed"}
+    persistent = names["persistent"]
+    changes = out.report.get("changes", [])
+    v: list[str] = []
+    for sym, direction in expected.items():
+        existence = [
+            c
+            for c in changes
+            if c.get("symbol") == sym and c.get("kind") in _EXISTENCE_KINDS
+        ]
+        if [_EXISTENCE_KINDS[c["kind"]] for c in existence] != [direction]:
+            v.append(f"{out.route}: {sym} existence findings {existence!r}")
+        if any(
+            c.get("symbol") == sym and c.get("kind") == "exported_not_public"
+            for c in changes
+        ):
+            v.append(f"{out.route}: {sym} reported twice (hygiene twin kept)")
+    if any(
+        c.get("symbol") == persistent and c.get("kind") in _EXISTENCE_KINDS
+        for c in changes
+    ):
+        v.append(f"{out.route}: persistent export {persistent} read as an event")
+    return v

@@ -566,6 +566,11 @@ Do not re-attempt token-claiming. A header's export tokens cannot tell whether i
 **Status (2026-10-27): OPEN, deliberate.** Every non-`PRESENT` status reads back as `None`, and a `PRESENT` fact on a snapshot with no `extraction_scope` is dropped. `ownership_of()` folds both to unknown, so no verdict changes; the loss is in the `Fact` object only. Pinned, not fixed: a per-entry status is a schema change.
 `hygiene` — The round-trip is pinned as named `KNOWN_LOSSY` cases in `tests/unit/storage/test_snapshot_field_roundtrip.py`. Closing it needs a `SCHEMA_VERSION` bump and a reader-compatibility decision. [Full write-up](known-gaps/ownership-fact-persists-only-a-present-decision.md)
 
+#### Release fan-out cannot pair a stored snapshot directory with a live one
+
+**Status (recorded 2026-10-28): OPEN.** A directory compare pairs members by library key, the file name, so a stored `libfoo.json` directory against a live `libfoo.so` directory completes zero comparisons and exits 1 (`no_comparison_completed`). The same bytes compared as scalar operands compare normally. Pinned by the strict-xfail cells `release@mixed_old` and `release@mixed_new` in `tests/test_family_f2_live_route_matrix.py`.
+`hygiene` — Closing it needs a member-identity rule for a stored snapshot and the live binary it came from, which changes which members pair in existing directory compares. [Full write-up](known-gaps/release-fan-out-cannot-pair-a-stored-snapshot-directory-with-a-live-one.md)
+
 ## Do not re-attempt
 
 Approaches that were tried, measured or reviewed and did not help. Their value is stopping a re-attempt; read the write-up before trying anything similar.
