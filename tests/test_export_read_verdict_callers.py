@@ -118,11 +118,19 @@ def _build_app(directory: Path, lib: Path) -> Path:
 
 
 def _zero_section_table(data: bytes) -> bytes:
-    """Zero every section header: the export table can no longer be located."""
+    """Zero every section header and drop PT_DYNAMIC: neither the section
+    table nor the loader's own view can locate the export table any more
+    (a zeroed section table alone is still read through PT_DYNAMIC)."""
     shoff = struct.unpack_from("<Q", data, 0x28)[0]
     entsize, count = struct.unpack_from("<HH", data, 0x3A)
     out = bytearray(data)
     out[shoff : shoff + entsize * count] = b"\0" * (entsize * count)
+    phoff = struct.unpack_from("<Q", data, 0x20)[0]
+    phentsize, phnum = struct.unpack_from("<HH", data, 0x36)
+    for i in range(phnum):
+        at = phoff + i * phentsize
+        if struct.unpack_from("<I", out, at)[0] == 2:  # PT_DYNAMIC
+            struct.pack_into("<I", out, at, 0)  # PT_NULL
     return bytes(out)
 
 
@@ -389,7 +397,9 @@ def test_corrupt_fixture_really_loses_the_export_table(
     with recording_export_read_failures() as failures:
         corrupt = parse_elf_metadata(libraries["corrupt"])
     assert corrupt.symbols == []
-    assert failures, "a zeroed section table must record an export-read failure"
+    assert failures, (
+        "a zeroed section table without PT_DYNAMIC must record an export-read failure"
+    )
 
     intact = parse_elf_metadata(libraries["intact"])
     assert sorted(s.name for s in intact.symbols) == ["bar", "foo"]
