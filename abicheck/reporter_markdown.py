@@ -72,6 +72,7 @@ from .checker import (
 from .model.contract_finding_relevance import is_evaluated
 from .model.evidence_status import EvidenceStatus as EvidenceStatus
 from .report import (
+    change_inventory as _inventory,
     contract_conflicts_markdown as _ccm,
     render_markdown as _rmd,
     render_review as _review,
@@ -923,7 +924,9 @@ def compute_review_digest(
         disposition_audit=disposition_audit_reusing_document(
             result, envelope.severity_config, envelope.document
         ),
-        surface_changes=compute_surface_changes(result, findings),
+        surface_changes=compute_surface_changes(
+            result, findings, severity_config=envelope.severity_config
+        ),
         env_matrix_source_sha256=result.env_matrix_source_sha256,
         pattern_modulations=tuple(getattr(result, "pattern_modulations", ()) or ()),
         review_groups=groups,
@@ -945,12 +948,7 @@ def compute_review_digest(
 def compute_headline_table(
     result: DiffResult, emoji: str, label: str
 ) -> _rmd.HeadlineTable:
-    """The structured intermediate for the report's headline summary table.
-
-    ADR-049 D1/D11: the four counts are over *evaluated* findings only, so a
-    `NO_CHANGE` beside a populated "Not Evaluated" section gets the count
-    reconciling them (row absent unless contract evaluation opted in).
-    """
+    """Headline table intermediate: evaluated-only counts (ADR-049 D1/D11), hygiene on its own row."""
     classified = classification_for(result)
     return _rmd.HeadlineTable(
         library=result.library,
@@ -960,9 +958,10 @@ def compute_headline_table(
         verdict_label=label,
         breaking=len(classified.breaking),
         source_breaks=len(classified.source_breaks),
-        risk=len(classified.risk),
+        risk=len(_inventory.unstamped(classified.risk)),
         compatible=len(classified.compatible),
         not_evaluated=len(result.not_evaluated),
+        **_inventory.headline_hygiene_fields(classified.risk),
     )
 
 

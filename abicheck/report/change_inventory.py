@@ -38,9 +38,14 @@ from ..model.evidence_status import CrossSourceEvolution
 if TYPE_CHECKING:
     from ..model.change import Change
     from ..policy.classification import Verdict
+    from ..policy.severity import SeverityConfig
+    from .finding import ReportFinding
 
 __all__ = [
     "ChangeInventorySplit",
+    "headline_hygiene_fields",
+    "is_background_hygiene",
+    "unstamped",
     "compute_change_inventory",
     "render_change_inventory_json",
 ]
@@ -160,3 +165,50 @@ def render_change_inventory_json(split: ChangeInventorySplit) -> dict[str, int]:
         "hygiene_persistent": split.hygiene_persistent,
         "hygiene_not_evaluated": split.hygiene_not_evaluated,
     }
+
+
+def unstamped(changes: Sequence[Change]) -> list[Change]:
+    """*changes* minus the evolution-stamped cross-source hygiene findings."""
+    return [c for c in changes if getattr(c, "cross_source_evolution", None) is None]
+
+
+def headline_hygiene_fields(risk_bucket: Sequence[Change]) -> dict[str, int]:
+    """``HeadlineTable``'s hygiene row: the stamped findings of *risk_bucket*.
+
+    Exactly the findings :func:`unstamped` removes from the deployment-risk
+    row, so no finding is counted on two headline rows; a stamped finding in
+    another verdict bucket (e.g. an API_BREAK ``odr_type_variant``) stays in
+    that bucket's row.
+    """
+    states = [
+        s
+        for c in risk_bucket
+        if (s := getattr(c, "cross_source_evolution", None)) is not None
+    ]
+    return {
+        "hygiene_total": len(states),
+        "hygiene_introduced": states.count(CrossSourceEvolution.INTRODUCED),
+    }
+
+
+def is_background_hygiene(
+    finding: ReportFinding, severity_config: SeverityConfig | None
+) -> bool:
+    """A PERSISTENT cross-source finding the gate does not count.
+
+    It already existed on the OLD side: standing inventory, not something
+    this change asks a reviewer to look at, so review groups and the
+    surface-change view leave it out. It stays in ``changes``, the hygiene
+    section and every count. One that gates keeps its place everywhere.
+    """
+    from ..policy.gate_contribution import resolved_gate_contribution
+
+    change = finding.change
+    return (
+        getattr(change, "cross_source_evolution", None)
+        == CrossSourceEvolution.PERSISTENT
+        and resolved_gate_contribution(
+            change, severity_config, verdict=finding.verdict, category=finding.category
+        )
+        == 0
+    )

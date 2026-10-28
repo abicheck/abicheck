@@ -436,6 +436,28 @@ def _version_sort_key(
     return parsed, lower
 
 
+def _distinct_file_count(paths: list[Path]) -> int:
+    """Count distinct on-disk files among *paths*.
+
+    A dev symlink ``libfoo.so -> libfoo.so.2`` (or a hard link) is one
+    library under two names, not a choice between versions: folding by
+    ``(st_dev, st_ino)`` keeps the "Ambiguous match" warning for genuinely
+    different files only. A path that cannot be stat'ed counts as its own
+    file (as does a zero inode), so an unidentifiable candidate never hides
+    a real ambiguity.
+    """
+    identities: set[object] = set()
+    for p in paths:
+        try:
+            st = p.stat()
+        except OSError:
+            identities.add(p)
+            continue
+        # st_ino == 0 means the filesystem has no stable identity to offer.
+        identities.add((st.st_dev, st.st_ino) if st.st_ino else p)
+    return len(identities)
+
+
 def build_match_map(paths: list[Path]) -> tuple[dict[str, Path], list[str]]:
     """Build key->path map with version-aware duplicate resolution.
 
@@ -486,7 +508,7 @@ def build_match_map(paths: list[Path]) -> tuple[dict[str, Path], list[str]]:
             )
         selected = ordered[-1]
         mapping[key] = selected
-        if len(ordered) > 1:
+        if _distinct_file_count(ordered) > 1:
             warnings.append(
                 f"Ambiguous match for '{key}': {[v.name for v in ordered]}; using '{selected.name}'"
             )

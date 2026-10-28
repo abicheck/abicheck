@@ -331,7 +331,7 @@ def _to_json_root_cause(
         d["pattern_modulations"] = result.pattern_modulations
     add_suppression(d, result)
     _add_disposition_audit(d, result, severity_config)
-    _add_surface_changes(d, result, changes)
+    _add_surface_changes(d, result, changes, severity_config)
     _add_finding_evolution(d, result)
     add_surface_scope(d, result)
     add_reconciled(d, result)

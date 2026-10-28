@@ -41,6 +41,7 @@ from typing import Any
 # it always had, just resolved through this module-level import.
 import abicheck.reporter_markdown as _reporter_markdown_module
 
+from .change_inventory import headline_hygiene_fields, unstamped
 from .disposition_audit import (
     disposition_audit_dict_reusing_document,
 )
@@ -361,14 +362,18 @@ def build_markdown_document(
     if envelope is not None:
         ev = envelope.findings
         overrides = {id(c): f.verdict for c, f in zip(result.changes, ev)}
-        hb, hsb, hr, hc = (
-            len(b)
-            for b in ReportModel.classify(
-                list(result.changes), result, verdict_overrides=overrides
-            )
+        hb_, hsb_, hr_, hc_ = ReportModel.classify(
+            list(result.changes), result, verdict_overrides=overrides
         )
+        hygiene = headline_hygiene_fields(hr_)
         headline_table = replace(
-            headline_table, breaking=hb, source_breaks=hsb, risk=hr, compatible=hc
+            headline_table,
+            breaking=len(hb_),
+            source_breaks=len(hsb_),
+            risk=len(unstamped(hr_)),
+            hygiene_total=hygiene["hygiene_total"],
+            hygiene_introduced=hygiene["hygiene_introduced"],
+            compatible=len(hc_),
         )
 
     d: dict[str, object] = {
@@ -441,6 +446,7 @@ def build_markdown_document(
             result,
             None if envelope is None else envelope.findings_for(changes),
             changes=changes,
+            severity_config=severity_config,
         ).to_dict(),
         "review_groups": (
             shared_document.to_mapping().get("review_groups", [])
@@ -535,6 +541,7 @@ def _view_preamble_mapping(
             result,
             None if envelope is None else envelope.findings_for(changes),
             changes=changes,
+            severity_config=severity_config,
         ).to_dict(),
     }
     return d, changes

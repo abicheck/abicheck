@@ -206,9 +206,13 @@ def build_review_groups(
     (:func:`~abicheck.policy.acknowledgment_breaks.accepted_break_ids`): an
     accepted member is not on the gate, so it never counts as gating.
     """
+    from .change_inventory import is_background_hygiene
+
     buckets: dict[tuple[str, str, str], list[ReportFinding]] = {}
     for finding in findings:
         change = finding.change
+        if is_background_hygiene(finding, severity_config):
+            continue
         kind = change.kind.value
         family = _family(kind)
         if family == "export" and kind == "func_visibility_changed":
