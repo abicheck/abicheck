@@ -75,6 +75,7 @@ from .report import (
     render_markdown as _rmd,
     render_review as _review,
     review_compute as _review_compute,
+    weak_removals as _weak,
 )
 from .report.cross_source_evolution import (
     cross_source_evolution_md_suffix as _cross_source_evolution_md_suffix,
@@ -785,6 +786,7 @@ def compute_severity_sections(
                 heading=f"## {_BREAKING_ICON} Breaking Changes{sev_label}",
                 changes=tuple(breaking),
                 oneline=False,
+                note_lines=_weak.weak_removal_note_lines(breaking),
             )
         )
 
@@ -795,6 +797,7 @@ def compute_severity_sections(
                 heading=f"## {_SOURCE_BREAK_ICON} Source-Level Breaks{sev_label}",
                 changes=tuple(source_breaks),
                 oneline=False,
+                note_lines=_weak.weak_removal_note_lines(source_breaks),
             )
         )
 
@@ -1086,12 +1089,9 @@ def compute_headline_table(
 ) -> _rmd.HeadlineTable:
     """The structured intermediate for the report's headline summary table.
 
-    ADR-049 D1/D11: when contract evaluation excluded findings from the
-    compatibility axis, say so in the headline table. The four counts above
-    are now over the *evaluated* findings only, so a reader who sees a
-    `NO_CHANGE` verdict beside a populated "Not Evaluated" section has the
-    count that reconciles them rather than an apparent contradiction. The
-    row is absent for every run that did not opt in, where it is always 0.
+    ADR-049 D1/D11: the four counts are over *evaluated* findings only, so a
+    `NO_CHANGE` beside a populated "Not Evaluated" section gets the count
+    reconciling them (row absent unless contract evaluation opted in).
     """
     classified = classification_for(result)
     return _rmd.HeadlineTable(
