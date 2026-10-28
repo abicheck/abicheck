@@ -111,6 +111,12 @@ current emitter, which is unchanged.
 
 ### False-clean risk
 
+#### A readable but corrupted `.dynsym` entry can still read as a clean compare (2026-10-27)
+
+**Status (2026-10-27): PARTIAL.** A binary whose export table is structurally unreadable (zeroed or unreachable section header table, no `.dynsym`, a `.dynsym` filled with `0xff`, truncated, or exported entries with no resolvable name) is now refused at dump with exit 1 (`tests/test_export_table_unreadable_matrix.py`, OLD/NEW/both). Residual: corruption that leaves every entry structurally valid is read as the table it now says. Random byte flips inside `.dynsym` (`st_info`, `st_shndx`, `st_value`, or a `st_name` that still lands on a non-empty string) and garbage bytes in `.dynstr` that still yield non-empty names parse without a failure. On one side the result is a fabricated `BREAKING`; on the corrupted side of a pair it can be `COMPATIBLE` (exit 0, removals hidden) or, with both sides identically corrupted, `NO_CHANGE`. No reader can tell these from a legitimate table without a checksum.
+
+`false-clean` — `compare` of a library whose `.dynsym` content is corrupted but structurally valid can exit 0 with `COMPATIBLE` or `NO_CHANGE`.
+
 #### `--depth binary` on a header-built snapshot misses debug-only declaration findings (2026-10-25)
 
 **Status (2026-10-25): PARTIAL — no longer a false clean; the findings themselves are still missing.** A header snapshot does not persist debug-info subprogram/variable records or record relations, so its `--depth binary` projection cannot report the signature, typedef, vtable or base findings a binary-only dump reports. Fixed 2026-10-25: such a projection (header-built side with debug info) now reads `analysis_assurance` `partial` and names both missing evidence families (`policy/depth_projection_gaps.py`, `policy/analysis_assurance/_depth_projection.py`; `tests/test_depth_projection_declaration_gap.py`). Residual: the findings are not reported; each is named in `tests/test_depth_projection_matches_shallow_dump.py`.

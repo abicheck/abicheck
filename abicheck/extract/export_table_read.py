@@ -26,12 +26,38 @@ from the read itself rather than from "a binary was supplied"; see
 
 from __future__ import annotations
 
+from collections.abc import Callable
+from pathlib import Path
+from typing import TypeVar
+
 from ..model import AbiSnapshot, Function, Variable, Visibility
 from ..model.export_index import ExportTableState, snapshot_export_table_state
 from ..storage import closure_identity
+from .parse_failures import export_table_read_required
 from .surface_fact_producers import reconcile_export_absence, unread_export_fact
 
-__all__ = ["finish_binary_snapshot", "reconcile_snapshot_export_absence"]
+_Metadata = TypeVar("_Metadata")
+
+__all__ = [
+    "finish_binary_snapshot",
+    "read_exports_or_fail",
+    "reconcile_snapshot_export_absence",
+]
+
+
+def read_exports_or_fail(
+    binary: Path, reader: Callable[[Path], _Metadata]
+) -> _Metadata:
+    """``reader(binary)`` -- a platform parser's metadata -- refused when the
+    parse swallowed a failure that lost export-table facts.
+
+    The dump's ELF/PE/Mach-O builders read their binary through this, so an
+    unreadable table is an error (the exit-1 failure a truncated binary gets)
+    rather than an empty export surface. See
+    :func:`~abicheck.extract.parse_failures.export_table_read_required`.
+    """
+    with export_table_read_required(binary):
+        return reader(binary)
 
 
 def reconcile_snapshot_export_absence(snapshot: AbiSnapshot) -> int:

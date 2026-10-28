@@ -287,6 +287,15 @@ SPELLING_MIGRATIONS: Mapping[int, GenerationSpellingChange] = {
         "macros) change for those dumps. No type or name spelling changes, so no "
         "rewrite is needed"
     ),
+    28: GenerationSpellingChange(
+        "an ELF, PE or Mach-O dump whose export table could not be read (zeroed "
+        "section header table, no .dynsym, unnamed exported entries, a Mach-O "
+        "dylib with no export trie or symbol table) is refused with an error "
+        "instead of recording an empty export surface. Dumps that read their "
+        "export table are unchanged; no type or name spelling changes, so no "
+        "rewrite is needed (a baseline from an unreadable binary must be "
+        "re-dumped, not rewritten)"
+    ),
 }
 
 #: Reasons that say nothing about what was audited; the bump gate refuses them.
