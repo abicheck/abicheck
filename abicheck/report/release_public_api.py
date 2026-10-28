@@ -42,6 +42,7 @@ from typing import TYPE_CHECKING, Any
 
 from ..model.symbol_ownership import symbol_origin
 from .change_operation import entity_for_change, operation_for_kind
+from .markdown_text import md_text
 from .surface_changes import PUBLIC_SURFACE_ENTITIES
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
@@ -118,7 +119,7 @@ def stamp_member_public_api(entry: dict[str, object], result: DiffResult) -> Non
 def _group_lines(label: str, symbols: Sequence[str], internal: int) -> list[str]:
     lines = [f"**{label}** ({len(symbols)} public)", ""]
     shown = list(symbols[:MAX_PUBLIC_API_ITEMS])
-    lines += [f"- `{s}`" for s in shown]
+    lines += [f"- {md_text(s, code=True)}" for s in shown]
     if not shown:
         lines.append("- none")
     if len(symbols) > len(shown):
@@ -148,7 +149,7 @@ def render_release_public_api_markdown(
         removed_int = int(omitted.get("removed", 0) or 0)
         if not (added or removed or added_int or removed_int):
             continue
-        out += ["", f"### `{lib.get('library')}`", ""]
+        out += ["", f"### {md_text(lib.get('library'), code=True)}", ""]
         out += _group_lines("Added", added, added_int)
         out += _group_lines("Removed", removed, removed_int)
     return ["", "## Public API changes", *out] if out else []

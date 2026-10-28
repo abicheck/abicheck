@@ -1232,7 +1232,7 @@ class TestMarkdownReporter:
         )
         old = AbiSnapshot(library="libtest.so.1", version="1.0")
         out_on = render_output("review", result, old, demangle=True)
-        assert "foo() [_Z3foov]" in out_on
+        assert "foo() [_Z3foov]" in out_on.replace("\\_", "_")
         out_off = render_output("review", result, old, demangle=False)
         assert "_Z3foov" in out_off
 

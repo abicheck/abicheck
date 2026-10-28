@@ -29,6 +29,7 @@ import re
 from dataclasses import dataclass
 
 from .markdown_budget import NAME_LIMIT, clip, more_line
+from .markdown_text import md_text
 
 
 @dataclass(frozen=True, slots=True)
@@ -121,7 +122,9 @@ def render_contract_conflicts_section(
     for row in ordered[:CONFLICT_ROW_LIMIT]:
         side_suffix = f" ({row.side})" if row.side else ""
         entity = clip(row.entity, CONFLICT_NAME_LIMIT)
-        lines.append(f"- **{row.conflict_kind}**{side_suffix}: `{entity}`")
+        lines.append(
+            f"- **{row.conflict_kind}**{side_suffix}: {md_text(entity, code=True)}"
+        )
         for src_line in row.source_lines:
             lines.append(f"  - {clip(src_line, CONFLICT_SOURCE_LINE_LIMIT)}")
     hidden = len(section.rows) - CONFLICT_ROW_LIMIT

@@ -592,14 +592,24 @@ def base_name(symbol: str) -> str:
 # unavoidable one and makes it this PR's to fix. The right edge needs no such
 # guard: `[A-Za-z0-9_$]+` is greedy, so a trailing run is swallowed into the
 # token and simply fails to demangle, leaving the text untouched.
+# A Markdown-escaped spelling is matched too: prose escapes a boundary
+# underscore as ``\_`` (``\_ZNSt6thread8_M_startEv``, ``S\_``), so the escaping
+# backslash belongs to the token and the demangled name replaces it whole.
 _MANGLED_TOKEN_RE = re.compile(
-    r"(?<![A-Za-z0-9_$.])_{1,2}Z[A-Za-z0-9_$]+(?:\.[A-Za-z0-9_$]+)*"
+    r"(?<![A-Za-z0-9_$.\\])\\?_{1,2}Z(?:[A-Za-z0-9_$]|\\_)+(?:\.[A-Za-z0-9_$]+)*"
 )
+
+
+def _canonical_token(raw: str) -> str:
+    """The mangled spelling a matched token stands for: no escaping backslash."""
+    if raw.startswith("\\"):
+        raw = raw[1:]
+    return raw.replace("\\_", "_")
 
 
 def extract_mangled_tokens(text: str) -> set[str]:
     """Return every Itanium-mangled symbol token embedded in *text*."""
-    return set(_MANGLED_TOKEN_RE.findall(text))
+    return {_canonical_token(raw) for raw in _MANGLED_TOKEN_RE.findall(text)}
 
 
 def prewarm_demangle_batch(
@@ -663,11 +673,30 @@ def prewarm_demangle_from_json_value(value: object) -> None:
         demangle_batch(sorted(tokens), accept_macho_prefix=True)
 
 
+def _inside_code_span(text: str, start: int) -> bool:
+    """Whether *start* falls inside a backtick code span on its own line.
+
+    A run of backticks opens a span and the next run of the same length
+    closes it; a backtick escaped with a backslash is prose and opens nothing.
+    Renderers emit one span per line, so the scan stops at the line start.
+    """
+    line_start = text.rfind("\n", 0, start) + 1
+    open_run = 0
+    for run in re.finditer(r"(?<!\\)`+", text[line_start:start]):
+        length = len(run.group())
+        if open_run == 0:
+            open_run = length
+        elif open_run == length:
+            open_run = 0
+    return open_run != 0
+
+
 def demangle_text(
     text: str,
     *,
     escape_table_pipes: bool = False,
     max_demangled: int | None = None,
+    markdown: Callable[..., str] | None = None,
 ) -> str:
     """Demangle every Itanium-mangled symbol token embedded in *text*.
 
@@ -694,7 +723,13 @@ def demangle_text(
 
     *max_demangled* clips the demangled half of each annotation to that many
     characters (ending in ``…``); the bracketed mangled spelling is never
-    clipped. Size-bounded Markdown passes it: a libstdc++ template
+    clipped. *markdown* is the Markdown escaper (``md_text`` from
+    :mod:`abicheck.report.markdown_text`, passed in so this module does not
+    import the report package). When given, each demangled name is escaped for
+    the context its token sits in -- prose, or a code span, where only a pipe
+    in a table row needs escaping. Text and HTML callers leave it ``None`` and
+    keep the raw name.
+    Size-bounded Markdown passes it: a libstdc++ template
     instantiation demangles to several KB, and this pass runs after every
     section has clipped its own names, so without it a clipped mangled name
     grew back into a multi-KB line here (SVS field report).
@@ -705,7 +740,8 @@ def demangle_text(
     mapping = demangle_batch(sorted(tokens), accept_macho_prefix=True)
 
     def _repl(m: re.Match[str]) -> str:
-        tok = m.group(0)
+        raw = m.group(0)
+        tok = _canonical_token(raw)
         # Idempotence: this function annotates as `name [tok]`, so a token
         # already sitting inside those brackets has been annotated already and
         # must be left alone. Without this a second pass produced
@@ -721,20 +757,30 @@ def demangle_text(
             and end < len(text)
             and text[end] == "]"
         ):
-            return tok
+            return raw
         demangled = mapping.get(tok)
         if not demangled or demangled == tok:
-            return tok
+            return raw
         if max_demangled is not None and len(demangled) > max_demangled:
             demangled = demangled[: max_demangled - 1] + "…"
+        if markdown is not None:
+            # This substitution runs over an already-rendered Markdown
+            # document, so the demangled name must be escaped for the context
+            # the token sits in: literal inside a code span (only a pipe in a
+            # table row needs escaping), otherwise as prose, where a template
+            # argument such as `<int>` would be read as inline HTML and dropped
+            # (`std::vector<int>`). A demangled name can also carry a pipe --
+            # `_ZN3FooorERKS_` is `Foo::operator|(Foo const&)` -- which is why
+            # the table case is handled here and not left to the caller's own
+            # escaping (CodeRabbit review, PR #1284).
+            if _inside_code_span(text, start):
+                if escape_table_pipes:
+                    demangled = demangled.replace("|", "\\|")
+                return f"{demangled} [{tok}]"
+            # The bracketed mangled spelling is prose too: a leading and a
+            # trailing `_` (`[_ZN3FooorERKS_]`) would open and close emphasis.
+            return f"{markdown(demangled, table=escape_table_pipes)} [{markdown(tok)}]"
         if escape_table_pipes:
-            # A demangled name can *contain* a pipe -- `_ZN3FooorERKS_` is
-            # `Foo::operator|(Foo const&)` -- and this substitution runs over
-            # an already-rendered document, so a caller that escaped its cells
-            # beforehand cannot have escaped a delimiter this pass introduces
-            # (CodeRabbit review, PR #1284). Escaping here is the only point
-            # that can: GFM renders `\|` as a literal pipe, so a bullet or
-            # paragraph reads identically while a table row keeps its columns.
             demangled = demangled.replace("|", "\\|")
         return f"{demangled} [{tok}]"
 

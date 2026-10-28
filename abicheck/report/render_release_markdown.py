@@ -41,6 +41,7 @@ from ..bundle import render_bundle_findings_markdown
 from ..bundle_models import BundleDiffResult
 from ..checker_types import DiffResult
 from ..model.change import Change
+from .markdown_text import md_text
 from .release_change_inventory import release_inventory_counters
 from .render_text import format_hygiene_note
 
@@ -91,7 +92,7 @@ def _release_md_libraries_table(
     for lib in library_results:
         em = emoji.get(str(lib["verdict"]), "?")
         lines.append(
-            f"| `{lib['library']}` | {em} `{lib['verdict']}` "
+            f"| {md_text(lib['library'], code=True, table=True)} | {em} `{lib['verdict']}` "
             f"| {lib.get('breaking', '—')} | {lib.get('source_breaks', '—')} "
             f"| {lib.get('risk_changes', '—')} | {lib.get('compatible_additions', '—')} "
             f"| {lib.get('surface_removals', '—')} | {lib.get('surface_modifications', '—')} |"
@@ -120,7 +121,7 @@ def _release_md_coverage_warnings(
 ) -> list[str]:
     """Per-library `coverage_warnings` (e.g. same-binary) -- absent when none carry any (Codex review: the release table alone omits this signal)."""
     entries = [
-        f"- `{lib['library']}`: {w}"
+        f"- {md_text(lib['library'], code=True)}: {w}"
         for lib in library_results
         for w in cast(list[str], lib.get("coverage_warnings") or [])
     ]
@@ -159,7 +160,7 @@ def _release_md_pattern_modulations(
             lib.get("pattern_modulations"), include_heading=False
         )
         if rows:
-            out += ["", f"### `{lib['library']}`", *rows]
+            out += ["", f"### {md_text(lib['library'], code=True)}", *rows]
     return ["", "## 🎚️ Pattern-Modulated Findings", *out] if out else []
 
 
@@ -187,13 +188,11 @@ def _release_md_disposed_findings(
     """
     # Two independent ways a cell can break this table, so both are handled:
     # a *raw* pipe in a free-form suppression reason or a symbol, escaped here
-    # by `md_cell`; and a pipe that does not exist yet at this point because
+    # by `md_text`; and a pipe that does not exist yet at this point because
     # the whole-document demangle pass introduces it later
     # (`Foo::operator|`), handled by that pass's own `escape_table_pipes`
     # (CodeRabbit review, PR #1284). Escaping here alone cannot cover the
     # second, which is the subtlety worth naming.
-    from .markdown_text import md_cell
-
     rows: list[str] = []
     for lib in library_results:
         name = lib["library"]
@@ -204,8 +203,8 @@ def _release_md_disposed_findings(
             rule = cast("dict[str, object]", entry.get("rule") or {})
             why = rule.get("reason") or rule.get("id") or "suppressed"
             rows.append(
-                f"| `{md_cell(name)}` | suppressed | `{md_cell(entry.get('kind', '?'))}` "
-                f"| `{md_cell(entry.get('symbol', '?'))}` | {md_cell(why)} |"
+                f"| {md_text(name, code=True, table=True)} | suppressed | {md_text(entry.get('kind', '?'), code=True, table=True)} "
+                f"| {md_text(entry.get('symbol', '?'), code=True, table=True)} | {md_text(why, table=True)} |"
             )
         scope = cast("dict[str, object]", lib.get("surface_scope") or {})
         for entry in cast(
@@ -213,8 +212,8 @@ def _release_md_disposed_findings(
         ):
             why = entry.get("reason") or "outside the public surface"
             rows.append(
-                f"| `{md_cell(name)}` | scoped out | `{md_cell(entry.get('kind', '?'))}` "
-                f"| `{md_cell(entry.get('symbol', '?'))}` | {md_cell(why)} |"
+                f"| {md_text(name, code=True, table=True)} | scoped out | {md_text(entry.get('kind', '?'), code=True, table=True)} "
+                f"| {md_text(entry.get('symbol', '?'), code=True, table=True)} | {md_text(why, table=True)} |"
             )
         # The third disposition, and the one this section shipped without:
         # a release can clear its entire breaking set through ADR-039
@@ -227,8 +226,8 @@ def _release_md_disposed_findings(
         for entry in cast("list[dict[str, object]]", reconciled.get("changes") or []):
             why = entry.get("reason") or "reconciled against build context"
             rows.append(
-                f"| `{md_cell(name)}` | reconciled | `{md_cell(entry.get('kind', '?'))}` "
-                f"| `{md_cell(entry.get('symbol', '?'))}` | {md_cell(why)} |"
+                f"| {md_text(name, code=True, table=True)} | reconciled | {md_text(entry.get('kind', '?'), code=True, table=True)} "
+                f"| {md_text(entry.get('symbol', '?'), code=True, table=True)} | {md_text(why, table=True)} |"
             )
     if not rows:
         return []
@@ -266,7 +265,7 @@ def _release_md_evidence_contract(
     for the same reason.
     """
     affected = [
-        f"- `{lib['library']}`"
+        f"- {md_text(lib['library'], code=True)}"
         for lib in library_results
         if lib.get("evidence_contract_error_contribution")
     ]
@@ -294,10 +293,10 @@ def _release_md_changed_libraries(
     lines: list[str] = []
     if removed_keys:
         lines += ["", "## ⚠️ Removed Libraries", ""]
-        lines += [f"- `{old_map[k].name}`" for k in removed_keys]
+        lines += [f"- {md_text(old_map[k].name, code=True)}" for k in removed_keys]
     if added_keys:
         lines += ["", "## ℹ️ Added Libraries", ""]
-        lines += [f"- `{new_map[k].name}`" for k in added_keys]
+        lines += [f"- {md_text(new_map[k].name, code=True)}" for k in added_keys]
     return lines
 
 
@@ -352,7 +351,8 @@ def _release_md_matrix_findings(
     lines = ["", "## 🛠️ Build-Configuration (Matrix) Findings", ""]
     for c in changes:
         lines.append(
-            f"- **{c.kind.value}**" + (f" — `{c.symbol}`" if c.symbol else ""),
+            f"- **{c.kind.value}**"
+            + (f" — {md_text(c.symbol, code=True)}" if c.symbol else ""),
         )
         lines.append(f"  - {c.description}")
     return lines
@@ -381,11 +381,14 @@ def _release_md_suppression_audit(
     """
 
     def _sym(text: str) -> str:
-        if not demangle:
-            return text
-        from ..demangle import demangle_text
+        # A symbol in a bullet is a code span; the demangled spelling, when
+        # there is one, is spanned with its mangled name as demangle_text
+        # annotates it.
+        if demangle:
+            from ..demangle import demangle_text
 
-        return demangle_text(text)
+            text = demangle_text(text)
+        return md_text(text, code=True)
 
     out: list[str] = []
     for lib in library_results:
@@ -400,12 +403,16 @@ def _release_md_suppression_audit(
         ):
             labels = audit.get(key) or []
             if labels:
-                rows += ["", f"{heading}:", *(f"- `{label}`" for label in labels)]
+                rows += [
+                    "",
+                    f"{heading}:",
+                    *(f"- {md_text(label, code=True)}" for label in labels),
+                ]
         matches = audit.get("high_risk_matches") or []
         if matches:
             rows += ["", "High-risk matches (suppressed a BREAKING change):"]
             rows += [
-                f"- `{m.get('rule', '?')}` suppressed {m.get('kind', '?')}: "
+                f"- {md_text(m.get('rule', '?'), code=True)} suppressed {m.get('kind', '?')}: "
                 f"{_sym(str(m.get('symbol', '?')))}"
                 for m in matches
             ]
@@ -413,7 +420,7 @@ def _release_md_suppression_audit(
             total = audit.get("total_rules", 0)
             out += [
                 "",
-                f"### `{lib['library']}`",
+                f"### {md_text(lib['library'], code=True)}",
                 "",
                 f"{total} rule(s) audited.",
                 *rows,
@@ -437,7 +444,10 @@ def finish_release_markdown(
         from .markdown_budget import DEMANGLED_NAME_LIMIT
 
         md = demangle_text(
-            md, escape_table_pipes=True, max_demangled=DEMANGLED_NAME_LIMIT
+            md,
+            escape_table_pipes=True,
+            max_demangled=DEMANGLED_NAME_LIMIT,
+            markdown=md_text,
         )
     audit_lines = _release_md_suppression_audit(library_results, demangle=demangle)
     return md + "\n".join(audit_lines) if audit_lines else md
@@ -477,7 +487,7 @@ def release_md_library_findings(
         has_impact = bool(impact_root_entries) or bool(impact_direct_removals)
         if not findings and not has_impact:
             continue
-        lines += ["", f"### `{lib['library']}` Findings", ""]
+        lines += ["", f"### {md_text(lib['library'], code=True)} Findings", ""]
         all_findings = cast(list[dict[str, object]], findings or [])
         # The presentation cap lives here, at render time, not in the
         # projection every format shares: a human summary may be bounded, a
@@ -489,7 +499,8 @@ def release_md_library_findings(
         for f in shown:
             symbol = f.get("symbol")
             lines.append(
-                f"- **{f.get('kind')}**" + (f" — `{symbol}`" if symbol else "")
+                f"- **{f.get('kind')}**"
+                + (f" — {md_text(symbol, code=True)}" if symbol else "")
             )
             lines.extend(release_finding_detail_lines(f))
         if rendered_truncated or lib.get("findings_truncated"):
@@ -502,7 +513,7 @@ def release_md_library_findings(
             complete_report = lib.get("complete_report")
             if lib.get("findings_truncated"):
                 where = (
-                    f"`{complete_report}`"
+                    md_text(complete_report, code=True)
                     if complete_report
                     else "a per-component export (`-o json=DIR/`), or compare this library individually"
                 )
@@ -523,10 +534,10 @@ def release_md_library_findings(
             # single-pair `compare` report, rendered per library here since
             # a release has one impact table per library, not one overall.
             lines.append("")
-            lines.append(f"**Impact** for `{lib['library']}`:")
+            lines.append(f"**Impact** for {md_text(lib['library'], code=True)}:")
             for entry in impact_root_entries:
                 lines.append(
-                    f"- `{entry.get('symbol')}` ({entry.get('kind')}): "
+                    f"- {md_text(entry.get('symbol'), code=True)} ({entry.get('kind')}): "
                     f"{entry.get('iface_count', 0)} interface(s), "
                     f"{entry.get('caused', 0)} caused change(s)"
                 )

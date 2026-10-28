@@ -334,6 +334,9 @@ class SummaryTableData:
     #: Diagnostics the gate can score that are not observations -- in the
     #: effective total, in neither the detected total nor the counts.
     policy_overlays: int = 0
+    #: ADR-067 D5: findings an acknowledgment covered, the same count the
+    #: JSON report and the Markdown disposition table state.
+    acknowledged_total: int = 0
     #: Names of detectors that did not run. Carried separately from the
     #: counts because it is the one audit fact that can be non-empty while
     #: every count is zero — exactly the case (a zero-delta comparison with a
@@ -382,6 +385,8 @@ def render_summary_table(data: SummaryTableData) -> str:
             if count and name != "gating"
         )
         detail = html.escape(detail)
+        if data.acknowledged_total:
+            detail += f"{', ' if detail else ''}{data.acknowledged_total} acknowledged"
         if data.policy_overlays:
             detail += (
                 f"{', ' if detail else ''}{data.policy_overlays} policy overlay(s)"

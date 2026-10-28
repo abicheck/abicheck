@@ -70,7 +70,7 @@ Each entry's status line says what is still open. A PARTIAL entry's write-up als
 
 #### Markdown/review lose `<…>` and backticks in symbol names; three formats omit the acknowledged count (2026-10-28)
 
-**Status (2026-10-28): OPEN.** The renderer-parity matrix pins both as strict xfail cells: prose and code spans are not escaped outside table cells, and JUnit, the terminal Audit line and the HTML disposition line do not state the acknowledged count. [Full write-up](known-gaps/renderer-parity-escaping-and-acknowledged-count.md)
+**Status (2026-10-28): FIXED.** Prose, code spans and table cells are escaped by one helper (`md_text`), and the demangle pass escapes the names it inserts. JUnit, the terminal Audit line and the HTML disposition line state the acknowledged count. The renderer-parity matrix's strict xfail cells are now plain assertions. [Full write-up](known-gaps/renderer-parity-escaping-and-acknowledged-count.md)
 
 #### The Markdown "Additions" section is one row per finding, so it grows linearly (2026-10-22)
 

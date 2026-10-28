@@ -141,6 +141,7 @@ def _summary_table_from_mapping(d: Mapping[str, Any]) -> SummaryTableData:
         # summary -- "1 detected · 1 gating · 1 non gating" with nothing
         # explaining the difference (Codex review).
         policy_overlays=int(d.get("policy_overlays") or 0),
+        acknowledged_total=int(d.get("acknowledged_total") or 0),
     )
 
 

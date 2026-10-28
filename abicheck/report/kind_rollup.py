@@ -41,6 +41,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from .markdown_budget import EXAMPLE_LIMIT, ITEM_LIMIT, clip_name
+from .markdown_text import md_text
 
 if TYPE_CHECKING:
     from ..model.change import Change
@@ -92,7 +93,7 @@ def render_kind_rollups(rollups: tuple[KindRollup, ...]) -> list[str]:
         return []
     lines: list[str] = []
     for r in rollups:
-        shown = ", ".join(f"`{clip_name(s)}`" for s in r.sample_symbols)
+        shown = ", ".join(md_text(clip_name(s), code=True) for s in r.sample_symbols)
         remaining = r.count - len(r.sample_symbols)
         more = f", and {remaining:,} more" if remaining > 0 else ""
         lines.append(

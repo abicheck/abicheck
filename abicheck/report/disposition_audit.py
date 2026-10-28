@@ -44,6 +44,7 @@ from __future__ import annotations
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from datetime import date
+from functools import partial
 from typing import TYPE_CHECKING, Any, cast
 
 from ..policy.disposition_close import (
@@ -81,6 +82,10 @@ from .disposition_rule_rows import (
     suppression_row_json,
 )
 from .document import ReportDocument
+from .markdown_text import md_text
+
+#: A code span holding one value the report does not control (see md_text).
+_code = partial(md_text, code=True)
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from ..checker_types import DiffResult
@@ -614,10 +619,10 @@ def render_disposition_audit_lines(audit: DispositionAudit) -> list[str]:
         lines.append("")
         for rule in active[:_REVIEW_RULE_CAP]:
             detail = rule.reason or rule.label or "no reason given"
-            source = f" (`{rule.source_file}`)" if rule.source_file else ""
+            source = f" ({_code(rule.source_file)})" if rule.source_file else ""
             expiry = f", expires {rule.expires.isoformat()}" if rule.expires else ""
             lines.append(
-                f"- `{rule.rule_id or 'rule'}`{source} — {detail} "
+                f"- {_code(rule.rule_id or 'rule')}{source} — {md_text(detail)} "
                 f"[intent: {rule.intent}{expiry}] — {rule.matched_count} finding(s)"
             )
         if len(active) > _REVIEW_RULE_CAP:
@@ -628,7 +633,7 @@ def render_disposition_audit_lines(audit: DispositionAudit) -> list[str]:
         lines.append("")
     idle = [row for row in audit.rules if row.matched_count == 0]
     if idle:
-        names = ", ".join(f"`{row.rule_id}`" for row in idle[:_REVIEW_RULE_CAP])
+        names = ", ".join(_code(row.rule_id) for row in idle[:_REVIEW_RULE_CAP])
         more = (
             f", … and {len(idle) - _REVIEW_RULE_CAP} more"
             if len(idle) > _REVIEW_RULE_CAP
@@ -652,13 +657,13 @@ def render_disposition_audit_lines(audit: DispositionAudit) -> list[str]:
         )
         lines.append("")
         for row in reclass_active:
-            lines.append(f"- `{row.rule_id}` — {row.matched_count} finding(s)")
+            lines.append(f"- {_code(row.rule_id)} — {row.matched_count} finding(s)")
         lines.append("")
     if audit.scope_reasons:
         lines.append("**Out-of-contract/scope reasons:**")
         lines.append("")
         for reason, count in audit.scope_reasons:
-            lines.append(f"- `{reason}` — {count} finding(s)")
+            lines.append(f"- {_code(reason)} — {count} finding(s)")
         lines.append("")
     ack_active = _active_rules(audit.acknowledgments)
     if ack_active:
@@ -668,7 +673,7 @@ def render_disposition_audit_lines(audit: DispositionAudit) -> list[str]:
         )
         lines.append("")
         for row in ack_active[:_REVIEW_RULE_CAP]:
-            lines.append(f"- `{row.rule_id}` — {row.matched_count} finding(s)")
+            lines.append(f"- {_code(row.rule_id)} — {row.matched_count} finding(s)")
         if len(ack_active) > _REVIEW_RULE_CAP:
             lines.append(f"- … {len(ack_active) - _REVIEW_RULE_CAP} more omitted")
         lines.append("")
@@ -685,7 +690,7 @@ def render_disposition_audit_lines(audit: DispositionAudit) -> list[str]:
             lines.append("")
             for entry in unacked[:_REVIEW_RULE_CAP]:
                 symbol = entry.get("symbol") or "?"
-                lines.append(f"- `{entry.get('kind')}`: `{symbol}`")
+                lines.append(f"- {_code(entry.get('kind'))}: {_code(symbol)}")
             if len(unacked) > _REVIEW_RULE_CAP:
                 lines.append(f"- … {len(unacked) - _REVIEW_RULE_CAP} more omitted")
             lines.append("")
@@ -698,7 +703,7 @@ def render_disposition_audit_lines(audit: DispositionAudit) -> list[str]:
         )
         lines.append("")
         for name in unused[:_REVIEW_RULE_CAP]:
-            lines.append(f"- `{name}`")
+            lines.append(f"- {_code(name)}")
         if len(unused) > _REVIEW_RULE_CAP:
             lines.append(f"- … {len(unused) - _REVIEW_RULE_CAP} more omitted")
         lines.append("")
@@ -708,7 +713,7 @@ def render_disposition_audit_lines(audit: DispositionAudit) -> list[str]:
         # count in every view, and each detector's own reason is already the
         # ``detectors`` block's ``coverage_gap``.
         names = ", ".join(
-            f"`{det.name}`"
+            _code(det.name)
             for det in audit.not_evaluated_detectors[:_NOT_EVALUATED_ROW_CAP]
         )
         remaining = len(audit.not_evaluated_detectors) - _NOT_EVALUATED_ROW_CAP
@@ -766,9 +771,9 @@ def render_disposition_audit_comment_lines(audit: DispositionAudit) -> list[str]
     active = _active_rules(audit.rules)
     for rule in active[:_COMMENT_RULE_CAP]:
         detail = rule.reason or rule.label or "no reason given"
-        source = f" (`{rule.source_file}`)" if rule.source_file else ""
+        source = f" ({_code(rule.source_file)})" if rule.source_file else ""
         lines.append(
-            f"> · `{rule.rule_id or 'rule'}`{source} — {detail} "
+            f"> · {_code(rule.rule_id or 'rule')}{source} — {md_text(detail)} "
             f"[intent: {rule.intent}] — {rule.matched_count} finding(s)"
         )
     remaining = len(active) - _COMMENT_RULE_CAP
