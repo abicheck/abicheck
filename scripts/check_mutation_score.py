@@ -98,6 +98,7 @@ from mutation_results import (  # noqa: E402
 from mutation_scope import (  # noqa: E402
     NOTHING_MATCHES_MARKER,
     TIMED_OUT_RC,
+    diff_lines_outside_hunk_bodies,
     diff_only_stop,
     function_run_scope,
     function_scope_pattern,
@@ -150,7 +151,6 @@ DEFAULT_BASELINE_FILE = REPO_ROOT / "mutation-baseline.json"
 # without eating into it.
 MUTMUT_RUN_TIMEOUT_SECONDS = 20_700
 
-#: ``@@ -old,cnt +new,cnt @@`` — we only need the new-side range.
 _HUNK = re.compile(r"^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@")
 
 #: ``Binary files a/<path> and b/<path> differ`` — GNU diffutils' own binary
@@ -419,7 +419,7 @@ def _hunk_file_targets(diff_text: str) -> set[str]:
     old_target: str | None = None
     new_target: str | None = None
     targets: set[str] = set()
-    for line in diff_text.splitlines():
+    for line in diff_lines_outside_hunk_bodies(diff_text):
         if line.startswith("diff --git "):
             old_target = new_target = None
             continue
@@ -507,7 +507,7 @@ def diff_has_unrecognized_content(diff_text: str) -> bool:
     """
     in_hunk = False
     in_entry_metadata_zone = False
-    for line in diff_text.splitlines():
+    for line in diff_lines_outside_hunk_bodies(diff_text):
         if not line:
             return True
         if line.startswith("diff --git "):
@@ -902,7 +902,7 @@ def _hunks(
     """
     old_path: str | None = None
     new_path: str | None = None
-    for line in diff_text.splitlines():
+    for line in diff_lines_outside_hunk_bodies(diff_text):
         if line.startswith("diff --git "):
             old_path = new_path = None
             continue

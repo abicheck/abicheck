@@ -797,3 +797,50 @@ def test_a_mutant_no_shard_covers_fails_the_shard(
         gate.main(["--run", "--shard", "1/2", "--baseline-file", str(repo / "n")]) == 1
     )
     assert "abicheck/diff_types.py::Ghost.m" in capsys.readouterr().out
+
+
+def _header_like_body_diff(removed: str, added: str) -> str:
+    """A real-shaped git diff whose hunk body removes *removed* and adds
+    *added*, two source lines that start like a file header once prefixed."""
+    return (
+        "diff --git a/abicheck/x.py b/abicheck/x.py\n"
+        "index 1111111..2222222 100644\n"
+        "--- a/abicheck/x.py\n"
+        "+++ b/abicheck/x.py\n"
+        "@@ -1,3 +1,3 @@\n"
+        " keep\n"
+        f"-{removed}\n"
+        f"+{added}\n"
+        " keep\n"
+    )
+
+
+@pytest.mark.parametrize(
+    ("removed", "added"),
+    [
+        ("-- a docstring dash line", "new"),
+        ("old", "++ an added plus line"),
+        ("-- both", "++ both"),
+        ("--- even three", "+++ even three"),
+    ],
+)
+def test_hunk_body_lines_spelled_like_file_headers_stay_body(
+    removed: str, added: str
+) -> None:
+    """A body line ``--- x``/``+++ x`` is not a file header: the hunk's own
+    line counts say it is body, so every diff reader keeps the real path."""
+    diff = _header_like_body_diff(removed, added)
+    assert not gate.diff_lacks_git_headers_for_its_hunks(diff)
+    assert gate._hunk_file_targets(diff) == {"abicheck/x.py"}
+    assert [(o, n) for o, n, _old, _new in gate._hunks(diff)] == [
+        ("abicheck/x.py", "abicheck/x.py")
+    ]
+    body = set(diff.splitlines()[5:])
+    assert body.isdisjoint(scope.diff_lines_outside_hunk_bodies(diff))
+
+
+def test_a_malformed_hunk_body_still_reaches_the_unrecognized_check() -> None:
+    """The count ends at a line that cannot be body, which is then yielded."""
+    diff = _header_like_body_diff("old", "new").replace(" keep\n", "garbage\n", 1)
+    assert "garbage" in list(scope.diff_lines_outside_hunk_bodies(diff))
+    assert gate.diff_has_unrecognized_content(diff)
