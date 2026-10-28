@@ -948,12 +948,7 @@ def compute_review_digest(
 def compute_headline_table(
     result: DiffResult, emoji: str, label: str
 ) -> _rmd.HeadlineTable:
-    """The structured intermediate for the report's headline summary table.
-
-    ADR-049 D1/D11: counts are over *evaluated* findings (a populated "Not
-    Evaluated" section gets its reconciling row); stamped hygiene risk gets
-    its own row (``change_inventory.headline_hygiene_fields``).
-    """
+    """Headline table intermediate: evaluated-only counts (ADR-049 D1/D11), hygiene on its own row."""
     classified = classification_for(result)
     return _rmd.HeadlineTable(
         library=result.library,
