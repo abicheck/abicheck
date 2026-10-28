@@ -54,10 +54,11 @@ def extract_macho(
     When *headers* are supplied the ABI surface is scoped to declarations in
     those public headers via castxml; otherwise the full export table is used.
     """
+    from ...extract.export_table_read import read_exports_or_fail
     from ...macho_metadata import parse_macho_metadata
 
     try:
-        macho_meta = parse_macho_metadata(path)
+        macho_meta = read_exports_or_fail(path, parse_macho_metadata)
     except (RuntimeError, OSError, ValueError) as exc:
         raise SnapshotError(f"Failed to parse Mach-O '{path}': {exc}") from exc
 

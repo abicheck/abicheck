@@ -85,10 +85,11 @@ def extract_pe(
     castxml is unavailable or no header declaration matches an exported symbol,
     scoping is skipped (with a warning) and the full export table is used.
     """
+    from ...extract.export_table_read import read_exports_or_fail
     from ...pe_metadata import parse_pe_metadata
 
     try:
-        pe_meta = parse_pe_metadata(path)
+        pe_meta = read_exports_or_fail(path, parse_pe_metadata)
     except ImportError as exc:
         raise SnapshotError(str(exc)) from exc
     except (RuntimeError, OSError, ValueError) as exc:

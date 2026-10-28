@@ -82,7 +82,7 @@ from .extract.export_symbol_identity import (
     itanium_export_variable as _itanium_export_variable,
     msvc_export_function as _msvc_export_function,
 )
-from .extract.export_table_read import finish_binary_snapshot
+from .extract.export_table_read import finish_binary_snapshot, read_exports_or_fail
 from .extract.header_ast_backend import (
     HEADER_BACKENDS as HEADER_BACKENDS,
     _is_hybrid_request,
@@ -681,7 +681,7 @@ def _dump_elf(
     exported_dynamic, exported_static = _pyelftools_exported_symbols(so_path)
     from .elf_metadata import parse_elf_metadata
 
-    elf_meta = parse_elf_metadata(so_path)
+    elf_meta = read_exports_or_fail(so_path, parse_elf_metadata)
     memory_trace.mark("dump.elf.symbols:done")
     (
         exported_dynamic,
@@ -915,7 +915,7 @@ def _dump_macho(
         )
     from .macho_metadata import parse_macho_metadata
 
-    macho_meta = parse_macho_metadata(dylib_path)
+    macho_meta = read_exports_or_fail(dylib_path, parse_macho_metadata)
     # Build exported symbol set from Mach-O export table
     exported_dynamic: set[str] = {
         exp.name
@@ -1082,7 +1082,7 @@ def _dump_pe(
         )
     from .pe_metadata import parse_pe_metadata
 
-    pe_meta = parse_pe_metadata(dll_path)
+    pe_meta = read_exports_or_fail(dll_path, parse_pe_metadata)
     exported_dynamic: set[str] = {
         (exp.name or f"ordinal:{exp.ordinal}") for exp in pe_meta.exports
     }

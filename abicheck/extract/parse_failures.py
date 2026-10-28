@@ -29,6 +29,9 @@ from __future__ import annotations
 from collections.abc import Iterator
 from contextlib import contextmanager
 from contextvars import ContextVar
+from typing import Any
+
+from ..errors import SnapshotError
 
 _SINK: ContextVar[list[str] | None] = ContextVar(
     "abicheck_export_read_failures", default=None
@@ -51,3 +54,22 @@ def recording_export_read_failures() -> Iterator[list[str]]:
         yield sink
     finally:
         _SINK.reset(token)
+
+
+@contextmanager
+def export_table_read_required(binary: Any) -> Iterator[None]:
+    """Refuse to produce a snapshot from a binary whose export table was not read.
+
+    A parser that swallowed a failure returns whatever it managed to read, and
+    an unreadable export table looks like one that exports nothing; a dump
+    built on that becomes a clean baseline or a clean comparison. Wrap the
+    dump's reads of *binary* in this block: any failure noted inside it
+    raises :class:`~abicheck.errors.SnapshotError` (the same exit-1 error a
+    truncated binary gets) instead of producing an empty surface. An
+    exception raised by the body propagates unchanged.
+    """
+    with recording_export_read_failures() as failures:
+        yield
+    if failures:
+        reasons = "; ".join(dict.fromkeys(failures))
+        raise SnapshotError(f"export table of {binary} was not read: {reasons}")

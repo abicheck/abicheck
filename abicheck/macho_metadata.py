@@ -450,6 +450,18 @@ def _parse(dylib_path: Path) -> MachoMetadata:
     # Merge dyld export-trie facts (trie-only exports, weak/re-export flags).
     _parse_export_trie(dylib_path, header, meta)
 
+    # A dylib carries an export trie (LC_DYLD_INFO*/LC_DYLD_EXPORTS_TRIE) or,
+    # from older toolchains, a symbol table (LC_SYMTAB). Neither present means
+    # the export table was never located (a zeroed load-command area), not that
+    # the library exports nothing.
+    if meta.filetype == "MH_DYLIB" and not any(
+        lc.cmd in (LC_DYLD_INFO, LC_DYLD_INFO_ONLY, _LC_DYLD_EXPORTS_TRIE, LC_SYMTAB)
+        for lc, _cmd, _data in header.commands
+    ):
+        note_export_read_failure(
+            "Mach-O: dylib has neither an export trie nor a symbol table"
+        )
+
     return meta
 
 
