@@ -66,6 +66,10 @@ from ....model.identity import (
     canonicalize_type_param_references,
     entity_id_for_function,
 )
+from ....model.name_decoration.macho_underscore import (
+    is_c_linkage_mangling as _is_c_linkage_mangling,
+    strip_darwin_itanium_decoration as _strip_darwin_itanium_decoration,
+)
 from ..scope_segments import strip_record_scopes
 from .ast_inner import ast_inner
 from .attributes import clang_contract_attributes as _clang_contract_attributes
@@ -76,12 +80,9 @@ from .context import (
     clang_deprecated_message as _clang_deprecated_message,
     has_explicit_asm_label as _has_explicit_asm_label,
     is_builtin_file,
-    is_darwin_target as _is_darwin_target,
     qualtype as _qualtype,
     qualtype_desugared as _qualtype_desugared,
     source_location as _source_location,
-    strip_darwin_itanium_decoration as _strip_darwin_itanium_decoration,
-    symbol_candidates as _symbol_candidates,
     visibility_and_surface_facts as _visibility_and_surface_facts,
 )
 from .function_template_defaults import function_template_defaults_fact
@@ -540,16 +541,13 @@ def parse_functions(
         # ACTUALLY produced this AST -- is the disambiguator: only in C++
         # mode does an asm label's spelling carry that implication.
         has_asm_label = _has_explicit_asm_label(node)
-        is_extern_c = (
-            entry.extern_c
-            or raw_mangled == name
-            or (
-                raw_mangled is not None
-                and not entry.scope
-                and _is_darwin_target(target_triple)
-                and not (has_asm_label and is_cxx)
-                and name in _symbol_candidates(raw_mangled)
-            )
+        is_extern_c = entry.extern_c or _is_c_linkage_mangling(
+            raw_mangled,
+            name,
+            target_triple,
+            unscoped=not entry.scope,
+            has_asm_label=has_asm_label,
+            is_cxx=is_cxx,
         )
         mangled = _strip_darwin_itanium_decoration(
             raw_mangled,

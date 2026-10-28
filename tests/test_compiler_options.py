@@ -400,7 +400,7 @@ class TestExplicitTargetTriple:
     fallback (Codex review, fresh evidence): when a live ``clang
     -print-target-triple`` probe fails, it must recover an explicitly
     requested ``-target``/``--target=`` value rather than losing it --
-    extract.headers.clang.context.is_darwin_target's own sys.platform
+    model.name_decoration.macho_underscore.is_darwin_target's own sys.platform
     fallback for a bare None is only safe when NO explicit target was
     requested at all."""
 

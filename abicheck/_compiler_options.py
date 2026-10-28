@@ -459,7 +459,7 @@ def explicit_target_triple(
     runner, a compiler build that doesn't support the flag): a probe
     failure on its own carries no information about whether the caller
     requested a specific (possibly non-native) target at all, and
-    ``extract.headers.clang.context.is_darwin_target``'s own
+    ``model.name_decoration.macho_underscore.is_darwin_target``'s own
     ``sys.platform`` fallback for a probe failure is only safe when NO
     explicit ``--target=`` was requested — an explicit, non-Darwin
     cross-target (e.g. ``--target=x86_64-unknown-linux-gnu`` run on a

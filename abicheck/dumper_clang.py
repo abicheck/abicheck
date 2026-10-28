@@ -165,6 +165,7 @@ from .model.identity import (
     entity_id_for_typedef,
     entity_id_for_variable,
 )
+from .model.name_decoration import macho_underscore as _macho
 from .storage import header_ast_cache as dumper_cache
 
 #: Clang AST node kinds for the function-like declarations we emit. Includes the
@@ -1015,19 +1016,16 @@ class _ClangAstParser:
             # declaration down the mangled-identity path, breaking
             # self-comparison of an unchanged plain-C header.
             has_asm_label = _clang_context.has_explicit_asm_label(node)
-            is_extern_c = (
-                entry.extern_c
-                or raw_mangled == name
-                or (
-                    raw_mangled is not None
-                    and not entry.scope
-                    and _clang_context.is_darwin_target(self._target_triple)
-                    and not (has_asm_label and self._is_cxx)
-                    and name in _clang_context.symbol_candidates(raw_mangled)
-                )
+            is_extern_c = entry.extern_c or _macho.is_c_linkage_mangling(
+                raw_mangled,
+                name,
+                self._target_triple,
+                unscoped=not entry.scope,
+                has_asm_label=has_asm_label,
+                is_cxx=self._is_cxx,
             )
-            # See `context.strip_darwin_itanium_decoration`'s docstring.
-            mangled = _clang_context.strip_darwin_itanium_decoration(
+            # See `macho_underscore.strip_darwin_itanium_decoration`'s docstring.
+            mangled = _macho.strip_darwin_itanium_decoration(
                 raw_mangled,
                 raw_mangled or name,
                 self._target_triple,

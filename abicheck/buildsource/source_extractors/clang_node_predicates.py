@@ -21,13 +21,16 @@ from __future__ import annotations
 
 from typing import Any
 
+from ..build_evidence import CompileUnit
 from ..source_abi import (
     SourceLocation,
 )
 from ._argv import (
     split_public_roots,
 )
+from .clang_command import dump_linkage_context
 from .clang_nodes import (
+    _entity_names,
     _mangled,
     _signature,
     _signature_desugared,
@@ -102,8 +105,19 @@ _SCOPE_NODE_KINDS = frozenset(
 class _ClassifyContext:
     """Public-surface classification for clang file paths (ADR-024 / ADR-030)."""
 
-    def __init__(self, public_header_roots: list[str]) -> None:
+    def __init__(
+        self,
+        public_header_roots: list[str],
+        *,
+        target_triple: str | None = None,
+        is_cxx: bool = False,
+    ) -> None:
         from ...extract.declaration_provenance import build_public_set
+
+        # The triple and language the AST dump ran under: they decide the
+        # Darwin-aware C-linkage rule for every declaration's linker name.
+        self.target_triple = target_triple
+        self.is_cxx = is_cxx
 
         # A public root may be a *directory* (`--headers include/`). Feeding it to
         # build_public_set as a header file would never match a decl under it
@@ -114,6 +128,23 @@ class _ClassifyContext:
         self.exact_header_segs = [seg for seg in self.exact_header_segs if seg]
         _, self.dir_segs, self.have_set = build_public_set([], dir_roots)
         self.have_set = self.have_set or bool(self.exact_header_segs)
+
+    @classmethod
+    def for_unit(
+        cls, public_header_roots: list[str], compile_unit: CompileUnit
+    ) -> _ClassifyContext:
+        """The context of one compile unit's AST dump: the triple and language the
+        dump ran under decide the Darwin-aware C-linkage rule."""
+        target_triple, is_cxx = dump_linkage_context(compile_unit)
+        return cls(public_header_roots, target_triple=target_triple, is_cxx=is_cxx)
+
+    def entity_names(
+        self, name: str, mangled: str, node: dict[str, Any]
+    ) -> dict[str, str]:
+        """A declaration's ``names``, linker identity included."""
+        return _entity_names(
+            name, mangled, node, self.target_triple, is_cxx=self.is_cxx
+        )
 
     def classify(self, file: str) -> tuple[str, str, bool]:
         """Return ``(visibility, origin_label, api_relevant)`` for a file.
@@ -288,6 +319,7 @@ def _is_variable_node(
     node: dict[str, Any],
     accessible: bool,
     enclosing_kind: str | None,
+    ctx: _ClassifyContext,
 ) -> bool:
     """Return ``True`` for a named, accessible **externally-linked** data variable.
 
@@ -314,7 +346,7 @@ def _is_variable_node(
         return False
     if enclosing_kind not in _VARIABLE_SCOPE_KINDS:
         return False
-    mangled = _mangled(node)
+    mangled = _mangled(node, ctx.target_triple, is_cxx=ctx.is_cxx)
     if _mangled_has_internal_linkage(mangled):
         return False
     # C / extern "C" file-scope static: no mangled name carries the marker, so

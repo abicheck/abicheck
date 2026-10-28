@@ -183,7 +183,7 @@ def test_probe_failure_with_no_explicit_target_falls_back_to_sys_platform(
 ) -> None:
     """The genuinely-ambiguous case (no explicit --target=, probe failed)
     must reach the parser as a real, sys.platform-based triple string --
-    NOT bare None. extract.headers.clang.context.is_darwin_target itself
+    NOT bare None. model.name_decoration.macho_underscore.is_darwin_target itself
     never guesses from a bare None (that shape also serves direct,
     no-pipeline unit-test construction of the parser, which must stay
     conservative regardless of host OS); only this real pipeline call

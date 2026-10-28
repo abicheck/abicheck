@@ -50,13 +50,13 @@ from typing import Any
 import abicheck.checker as checker_mod
 import abicheck.compare.finding_identity as finding_mod
 import abicheck.extract.export_symbol_identity as export_ident_mod
-import abicheck.extract.headers.clang.context as clang_ctx_mod
 import abicheck.model.export_index as export_index_mod
 import abicheck.model.graph_entity_identity as gei_mod
 import abicheck.model.graph_identity as gid_mod
 import abicheck.model.identity as ident_mod
 import abicheck.model.name_decoration.elf_version as elf_codec
 import abicheck.model.name_decoration.macho_underscore as macho_codec
+import abicheck.model.name_decoration.macho_underscore as macho_mod
 import abicheck.model.name_decoration.pe_x86 as pe_codec
 import abicheck.model.source_graph as sg_mod
 import abicheck.model.special_member_identity as smi_mod
@@ -412,8 +412,8 @@ def macho_decoders() -> dict[str, Callable[[str, str, bool], str]]:
                 gei_mod.declaration_identity(linker_name=s, plain_name=plain).node_id
             )
         ),
-        "abicheck.extract.headers.clang.context:strip_darwin_itanium_decoration": (
-            lambda s, plain, c: clang_ctx_mod.strip_darwin_itanium_decoration(
+        "abicheck.model.name_decoration.macho_underscore:strip_darwin_itanium_decoration": (
+            lambda s, plain, c: macho_mod.strip_darwin_itanium_decoration(
                 s, s, DARWIN_TRIPLE, name=plain, is_extern_c=c
             )
         ),
