@@ -34,6 +34,7 @@ this module only holds the result.
 
 from __future__ import annotations
 
+import copy
 import hashlib
 import json
 from collections.abc import Mapping
@@ -141,7 +142,8 @@ class ExtractionScope:
         return {
             "ownership_rules": _canonical_rules(self.ownership_rules),
             "dependency_evidence": self.dependency_evidence,
-            "prefilter": dict(self.prefilter) if self.prefilter is not None else None,
+            # A deep copy: `dict(...)` shares the nested values with the scope.
+            "prefilter": copy.deepcopy(self.prefilter),
         }
 
     @property
@@ -185,10 +187,16 @@ class ExtractionScope:
             # Kept verbatim, even a value this build cannot produce: a
             # snapshot a later build narrowed under `referenced` must be
             # refused against a `full` one, not relabelled `full`.
-            dependency_evidence=str(
-                data.get("dependency_evidence") or DEPENDENCY_EVIDENCE_FULL
+            dependency_evidence=(
+                DEPENDENCY_EVIDENCE_FULL
+                if data.get("dependency_evidence") is None
+                else str(data["dependency_evidence"])
             ),
-            prefilter=dict(prefilter) if isinstance(prefilter, Mapping) else None,
+            prefilter=(
+                copy.deepcopy(dict(prefilter))
+                if isinstance(prefilter, Mapping)
+                else None
+            ),
             diagnostics=strs(data.get("diagnostics")),
         )
 

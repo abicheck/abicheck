@@ -281,7 +281,9 @@ class ReleasePublicSurface:
             header_count=_as_int(data.get("header_count", 0)),
             type_names=tuple(str(t) for t in _as_sequence(type_names)),
             resolvable=bool(data.get("resolvable", True)),
-            unresolved_reason=str(reason) if reason else None,
+            # Mirrors `to_dict`, which writes the key whenever the reason is
+            # not None: an empty reason is a stated value, not an absent one.
+            unresolved_reason=None if reason is None else str(reason),
         )
 
 
