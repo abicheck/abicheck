@@ -69,8 +69,9 @@ from .checker import (
     Verdict,
 )
 from .model.contract_finding_relevance import is_evaluated
-from .model.evidence_status import CrossSourceEvolution, EvidenceStatus
+from .model.evidence_status import EvidenceStatus
 from .report import (
+    change_inventory as _inventory,
     contract_conflicts_markdown as _ccm,
     render_markdown as _rmd,
     render_review as _review,
@@ -1086,22 +1087,12 @@ def compute_headline_table(
 ) -> _rmd.HeadlineTable:
     """The structured intermediate for the report's headline summary table.
 
-    ADR-049 D1/D11: when contract evaluation excluded findings from the
-    compatibility axis, say so in the headline table. The four counts above
-    are now over the *evaluated* findings only, so a reader who sees a
-    `NO_CHANGE` verdict beside a populated "Not Evaluated" section has the
-    count that reconciles them rather than an apparent contradiction. The
-    row is absent for every run that did not opt in, where it is always 0.
+    ADR-049 D1/D11: the four counts are over the *evaluated* findings only,
+    so a `NO_CHANGE` verdict beside a populated "Not Evaluated" section gets
+    the reconciling count (row absent unless contract evaluation opted in).
+    Stamped cross-source hygiene is counted on its own row, not as risk.
     """
     classified = classification_for(result)
-    deployment_risk = [
-        c for c in classified.risk if getattr(c, "cross_source_evolution", None) is None
-    ]
-    hygiene = [
-        c
-        for c in result.changes
-        if getattr(c, "cross_source_evolution", None) is not None
-    ]
     return _rmd.HeadlineTable(
         library=result.library,
         old_version=result.old_version,
@@ -1110,15 +1101,10 @@ def compute_headline_table(
         verdict_label=label,
         breaking=len(classified.breaking),
         source_breaks=len(classified.source_breaks),
-        risk=len(deployment_risk),
+        risk=len(_inventory.unstamped(classified.risk)),
         compatible=len(classified.compatible),
         not_evaluated=len(result.not_evaluated),
-        hygiene_total=len(hygiene),
-        hygiene_introduced=sum(
-            1
-            for c in hygiene
-            if c.cross_source_evolution == CrossSourceEvolution.INTRODUCED
-        ),
+        **_inventory.headline_hygiene_fields(result.changes),
     )
 
 

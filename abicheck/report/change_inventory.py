@@ -41,6 +41,8 @@ if TYPE_CHECKING:
 
 __all__ = [
     "ChangeInventorySplit",
+    "headline_hygiene_fields",
+    "unstamped",
     "compute_change_inventory",
     "render_change_inventory_json",
 ]
@@ -159,4 +161,22 @@ def render_change_inventory_json(split: ChangeInventorySplit) -> dict[str, int]:
         "hygiene_resolved": split.hygiene_resolved,
         "hygiene_persistent": split.hygiene_persistent,
         "hygiene_not_evaluated": split.hygiene_not_evaluated,
+    }
+
+
+def unstamped(changes: Sequence[Change]) -> list[Change]:
+    """*changes* minus the evolution-stamped cross-source hygiene findings."""
+    return [c for c in changes if getattr(c, "cross_source_evolution", None) is None]
+
+
+def headline_hygiene_fields(changes: Sequence[Change]) -> dict[str, int]:
+    """``HeadlineTable``'s ``hygiene_total``/``hygiene_introduced`` fields."""
+    states = [
+        s
+        for c in changes
+        if (s := getattr(c, "cross_source_evolution", None)) is not None
+    ]
+    return {
+        "hygiene_total": len(states),
+        "hygiene_introduced": states.count(CrossSourceEvolution.INTRODUCED),
     }

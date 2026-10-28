@@ -41,6 +41,7 @@ from typing import Any
 # it always had, just resolved through this module-level import.
 import abicheck.reporter_markdown as _reporter_markdown_module
 
+from .change_inventory import unstamped
 from .disposition_audit import (
     disposition_audit_dict_reusing_document,
 )
@@ -357,13 +358,11 @@ def build_markdown_document(
         hb_, hsb_, hr_, hc_ = ReportModel.classify(
             list(result.changes), result, verdict_overrides=overrides
         )
-        # Cross-source hygiene has its own headline row (compute_headline_table).
-        hr = sum(1 for c in hr_ if getattr(c, "cross_source_evolution", None) is None)
         headline_table = replace(
             headline_table,
             breaking=len(hb_),
             source_breaks=len(hsb_),
-            risk=hr,
+            risk=len(unstamped(hr_)),
             compatible=len(hc_),
         )
 
