@@ -16,6 +16,7 @@ from abicheck.compare.embedded_growth_shift import (
     OFFSET_SHIFT_CAUSE_KEY,
     _explained_shift,
     _resolve_by_value_record,
+    _side,
     stamp_embedded_growth_shifts,
 )
 from abicheck.model import RecordType, TypeField
@@ -40,8 +41,22 @@ def _agg(
     )
 
 
-def _sides() -> tuple[tuple, tuple]:
-    return ({"_sub_t": _SUB_OLD}, _TYPEDEFS), ({"_sub_t": _SUB_NEW}, _TYPEDEFS)
+def _side_of(records: dict[str, RecordType], typedefs: dict[str, str]) -> object:
+    """One side built the way ``stamp_embedded_growth_shifts`` builds it."""
+    return _side(
+        SimpleNamespace(
+            declarations=SimpleNamespace(
+                types=list(records.values()), typedefs=typedefs, typedefs_qualified={}
+            )
+        )
+    )
+
+
+def _sides() -> tuple[object, object]:
+    return (
+        _side_of({"_sub_t": _SUB_OLD}, _TYPEDEFS),
+        _side_of({"_sub_t": _SUB_NEW}, _TYPEDEFS),
+    )
 
 
 @pytest.mark.parametrize(
@@ -58,12 +73,13 @@ def _sides() -> tuple[tuple, tuple]:
     ],
 )
 def test_resolve_by_value_record(spelling: str, found: bool) -> None:
-    rec = _resolve_by_value_record(spelling, {"_sub_t": _SUB_OLD}, _TYPEDEFS)
+    side = _side_of({"_sub_t": _SUB_OLD}, _TYPEDEFS)
+    rec = _resolve_by_value_record(spelling, side)
     assert (rec is _SUB_OLD) is found
 
 
 def test_typedef_cycle_terminates() -> None:
-    assert _resolve_by_value_record("a", {}, {"a": "b", "b": "a"}) is None
+    assert _resolve_by_value_record("a", _side_of({}, {"a": "b", "b": "a"})) is None
 
 
 @pytest.mark.parametrize(
@@ -117,7 +133,7 @@ def test_unexplained_shapes() -> None:
         is None
     )
     # Unknown size, and a shrink.
-    unsized = (
+    unsized = _side_of(
         {"_sub_t": RecordType(name="_sub_t", kind="struct", size_bits=None, fields=[])},
         _TYPEDEFS,
     )
@@ -137,7 +153,11 @@ def _shift_change(symbol: str = "_agg_t", field: str | None = "tail") -> Change:
 
 
 def _decls(sub: RecordType, agg: RecordType) -> SimpleNamespace:
-    return SimpleNamespace(types=[sub, agg], typedefs=_TYPEDEFS)
+    return SimpleNamespace(
+        declarations=SimpleNamespace(
+            types=[sub, agg], typedefs=_TYPEDEFS, typedefs_qualified={}
+        )
+    )
 
 
 def test_stamp_writes_evidence_and_keeps_other_findings() -> None:

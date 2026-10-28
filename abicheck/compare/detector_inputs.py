@@ -279,6 +279,7 @@ DETECTOR_INPUTS: dict[str, DetectorInputs] = {
     "time64_abi": DetectorInputs(
         tolerates={
             "declarations.typedefs": _LOOKUP,
+            "declarations.typedefs_qualified": _LOOKUP,
             "declarations.types": _LOOKUP,
         },
     ),

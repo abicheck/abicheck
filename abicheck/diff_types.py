@@ -385,7 +385,7 @@ def _diff_types(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
                 )
             )
 
-    return stamp_embedded_growth_shifts(changes, od, nd)
+    return stamp_embedded_growth_shifts(changes, old, new)
 
 
 def _overload_group_key(f: Function) -> str:

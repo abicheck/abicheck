@@ -305,7 +305,7 @@ HEURISTICS: dict[str, str] = {
     "abicheck.diff_wheel_deployment::_armv7l_abi_violation::affix.startswith:'eabi'": "grammar",
     "abicheck.diff_wheel_deployment::_is_origin_relative_entry::affix.startswith:('$ORIGIN/', '${ORIGIN}/')": "platform",
     "abicheck.export_surface::<module>::re:'\\\\b(?:typename|template)\\\\b'": "spelling",
-    "abicheck.export_surface::_is_tag_self_alias::affix.startswith:keyword": "spelling",
+    "abicheck.compare.typedef_spelling_keys::is_tag_self_alias::affix.startswith:keyword": "spelling",
     "abicheck.export_surface::_toolchain_owned_aliases::affix.startswith:STDLIB_TYPE_NAMESPACE_PREFIXES": "platform",
     "abicheck.export_surface::_unresolved_type_edges::affix.startswith:STDLIB_TYPE_NAMESPACE_PREFIXES": "platform",
     "abicheck.compare.internal_leak_names::<module>::re:'(\\\\*|&{1,2}|\\\\[\\\\d*\\\\]|\\\\bconst\\\\b|\\\\bvolatile\\\\b)'": "spelling",

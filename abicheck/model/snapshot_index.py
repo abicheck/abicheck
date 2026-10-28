@@ -33,7 +33,7 @@ from typing import TYPE_CHECKING
 from .first_wins_index import build_first_wins_index, warn_dropped
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Iterable, Sequence
 
     from .declarations import Function, Variable
     from .entities import RecordType
@@ -77,6 +77,24 @@ def build_snapshot_indexes(
     warn_dropped(_log, "type names", owner, type_index.dropped)
 
     return func_index.mapping, var_index.mapping, _with_bare_aliases(type_index.mapping)
+
+
+def record_lookup_index(types: Iterable[RecordType]) -> dict[str, RecordType]:
+    """The type index :func:`build_snapshot_indexes` builds for records, for a
+    caller that holds only the record collection (no owner to name in a drop
+    warning).
+
+    Keyed on the qualified identity, with a bare-``name`` alias for every
+    record whose bare name belongs to exactly one identity. A bare spelling
+    shared by several scopes is absent, so a lookup through it misses rather
+    than answering with whichever record came first.
+    """
+    by_qualified: dict[str, RecordType] = {}
+    for rec in types:
+        # The key _qualified_key computes, first wins, inlined: the snapshot's
+        # own index already calls that helper on these same records.
+        by_qualified.setdefault(rec.qualified_name or rec.name, rec)
+    return _with_bare_aliases(by_qualified)
 
 
 def _qualified_key(t: RecordType) -> str:
