@@ -429,12 +429,13 @@ def _parse_all_sections(
             )
             note_export_read_failure(f"malformed .symtab section: {exc}")
 
-    # A shared object (ET_DYN) always carries a .dynsym. One with neither a
-    # .dynsym nor the .symtab fallback above (a zeroed or unreadable section
-    # header table, a section name that no longer resolves) has no symbol
-    # table this parse could read. Say so, rather than returning an empty
-    # symbol list that looks like "exports nothing" (extract/parse_failures.py).
-    if dynsym_section is None and symtab_section is None and _is_shared_object(elf):
+    # A shared object (ET_DYN, static-pie included) always carries a .dynsym.
+    # One without it (a zeroed or unreadable section header table, a section
+    # name that no longer resolves) has no dynamic symbol table this parse
+    # could read; the .symtab fallback is for relocatable objects and would
+    # read link-time globals as exports. Say so, rather than returning a
+    # symbol list that looks like the export table (extract/parse_failures.py).
+    if dynsym_section is None and _is_shared_object(elf):
         note_export_read_failure(
             "no readable .dynsym section in a shared object (dynamic symbol table not read)"
         )

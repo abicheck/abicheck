@@ -84,7 +84,23 @@ def _elf_library(
         b"\x7fELF"
         + bytes([2, 1, 1, 0])
         + b"\0" * 8
-        + struct.pack("<HHIQQQIHHHHHH", 3, 62, 1, 0, 0, shoff, 0, 64, 0, 0, 64, 4, 1)
+        # ET_REL for the .symtab fallback (a relocatable object), else ET_DYN.
+        + struct.pack(
+            "<HHIQQQIHHHHHH",
+            1 if symtab else 3,
+            62,
+            1,
+            0,
+            0,
+            shoff,
+            0,
+            64,
+            0,
+            0,
+            64,
+            4,
+            1,
+        )
     )
 
     def shdr(name, kind, off, size, link=0, info=0, entsize=0):

@@ -16,8 +16,8 @@ The oracle is the JSON report of the same completed comparison, read through
 
 * every fact a format *states* equals the JSON value (verdict, detected,
   gating, non-gating, suppressed, excluded-by-scope, acknowledged);
-* every gating finding a format itemises is a JSON gating finding, and a
-  list that leaves rows out says how many (``omitted + shown == total``);
+* every gating finding a format itemises is a JSON gating finding, and an
+  itemised gating list is complete (no format truncates one today);
 * the per-group lists of the review digest and terminal output account for
   every retained group, with an explicit omission count when truncated;
 * the disposition counts every format is expected to state are present
@@ -201,7 +201,6 @@ class Stated:
     #: Gating findings the format itemises by symbol; ``None`` if it does not.
     listed_gating: frozenset[str] | None = None
     #: Gating rows the format states it left out of ``listed_gating``.
-    gating_omitted: int | None = None
     #: Per-group rows the format itemises (review digest, terminal); ``None`` if none.
     group_rows: int | None = None
     #: Group rows the format states it left out.
@@ -709,18 +708,11 @@ def test_format_agrees_with_json_oracle(
         assert stated.listed_gating <= oracle.listed_gating, (
             f"{fmt} lists as gating what JSON does not: {sorted(stated.listed_gating - oracle.listed_gating)}"
         )
-        unlisted = oracle.listed_gating - stated.listed_gating
-        assert (
-            len(stated.listed_gating) + (stated.gating_omitted or 0) == stated.gating
-        ), (
-            f"{fmt} itemises {len(stated.listed_gating)} gating finding(s), states "
-            f"{stated.gating_omitted or 0} omitted, and {stated.gating} gating in total"
+        assert len(stated.listed_gating) == stated.gating, (
+            f"{fmt} itemises {len(stated.listed_gating)} gating finding(s) of "
+            f"{stated.gating}; a format that truncates this list needs an "
+            "omission count here and an extractor that reads it"
         )
-        if unlisted:
-            assert stated.gating_omitted == len(unlisted), (
-                f"{fmt} leaves {len(unlisted)} gating finding(s) out of its list without saying so "
-                f"(states omitted={stated.gating_omitted})"
-            )
 
     if stated.group_rows is not None:
         assert stated.group_rows + (stated.group_omitted or 0) == oracle.group_rows, (
@@ -824,7 +816,6 @@ def test_untruncated_formats_list_every_gating_finding(
         assert stated.listed_gating == oracle.listed_gating, (
             f"{fmt} dropped gating findings"
         )
-        assert stated.gating_omitted in (None, 0)
 
 
 def test_scope_excluded_and_suppressed_are_not_listed_as_gating(

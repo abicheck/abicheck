@@ -115,6 +115,21 @@ def _dynsym_truncated(data: bytes) -> bytes:
     return data[: hdr.sh_offset + hdr.sh_size // 2]
 
 
+def _dynsym_lost_symtab_kept(data: bytes) -> bytes:
+    """.dynsym's name no longer resolves; the link-time .symtab stays.
+
+    Its .symtab globals are not the export table, so the fallback that reads
+    .symtab for a relocatable object must not stand in for it here.
+    """
+    assert any(s.name == ".symtab" for s in ELFFile(io.BytesIO(data)).iter_sections())
+    shstr = _section(data, ".shstrtab")
+    out = bytearray(data)
+    names = out[shstr.sh_offset : shstr.sh_offset + shstr.sh_size]
+    at = names.index(b".dynsym\0")
+    out[shstr.sh_offset + at : shstr.sh_offset + at + 7] = b".dynsxm"
+    return bytes(out)
+
+
 #: Each way the export table can be lost while the file still starts as an ELF.
 MUTATIONS: dict[str, Callable[[bytes], bytes]] = {
     "section_table_zeroed": _zero_section_table,
@@ -124,6 +139,7 @@ MUTATIONS: dict[str, Callable[[bytes], bytes]] = {
     "dynsym_filled_with_ff": _dynsym_filled,
     "dynsym_names_outside_dynstr": _dynsym_names_outside_dynstr,
     "dynsym_truncated": _dynsym_truncated,
+    "dynsym_lost_symtab_kept": _dynsym_lost_symtab_kept,
 }
 
 

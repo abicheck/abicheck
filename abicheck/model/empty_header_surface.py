@@ -37,9 +37,17 @@ __all__ = ["EMPTY_HEADER_SURFACE_MARKER", "empty_header_surface_warnings"]
 #: filter ``coverage_warnings`` for this one.
 EMPTY_HEADER_SURFACE_MARKER = "zero public declarations"
 
-#: The declaration stores a parsed header surface populates (the same set the
-#: evidence-tier detection reads when it asks whether declarations exist).
-_HEADER_DECLARATION_FIELDS = ("functions", "variables", "types", "enums", "typedefs")
+#: The declaration stores a parsed header surface populates: every declaration
+#: kind but the entity-id sidecars, which only annotate entries counted here.
+_HEADER_DECLARATION_FIELDS = (
+    "functions",
+    "variables",
+    "types",
+    "enums",
+    "typedefs",
+    "typedefs_qualified",
+    "constants",
+)
 
 
 def _declaration_count(snap: AbiSnapshot) -> int:

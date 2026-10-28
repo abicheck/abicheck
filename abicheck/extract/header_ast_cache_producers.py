@@ -57,6 +57,11 @@ CASTXML_AST_OUTPUT_MODULES: tuple[str, ...] = (
     # Decides which declarations spell a calling convention (the splice's
     # trigger for the preprocessed text).
     "abicheck.extract.headers.castxml.calling_convention",
+    # The attribute vocabulary that module matches against (a constant read,
+    # which a call trace cannot observe).
+    "abicheck.model.cc_attributes",
+    # The toolchain-metadata key probe.py writes the excluded-header list under.
+    "abicheck.model.header_exclusion_record",
     # The serialized preprocessor-excluded scan the document carries.
     "abicheck.extract.headers.castxml.hidden_declarations",
     # Computes that scan from the preprocessed run.
@@ -101,6 +106,7 @@ NON_SHAPING_MODULES: dict[str, str] = {
     "abicheck.storage.ast_size_observer": "size telemetry",
     "abicheck.workflows.memory_trace": "memory telemetry, called through the size observer's hook when installed",
     "abicheck.storage.cache_integrity": "digests the written entry for read-time verification",
+    "abicheck.storage.ast_cache_location": "names where the cache lives, not what an entry holds",
     "abicheck.storage.derived_ast": "offers the on-disk document to a derived consumer",
     # Resolves the clang binary and SYCL mode before clang runs; the failing-header
     # retry re-resolves the same inputs. The resolved binary is already keyed by

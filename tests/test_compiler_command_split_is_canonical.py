@@ -71,21 +71,28 @@ _REVIEWED_NON_COMPILER_TEXT: dict[tuple[str, str], str] = {
 _HOST_DEPENDENT_POSIX = re.compile(r"os\.name|sys\.platform")
 
 
-def _is_shlex_split(call: ast.Call, split_imported: bool) -> bool:
+def _shlex_names(tree: ast.AST) -> tuple[set[str], set[str]]:
+    """Names bound to the ``shlex`` module and to ``shlex.split``, aliases included."""
+    modules: set[str] = set()
+    splits: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            modules |= {a.asname or a.name for a in node.names if a.name == "shlex"}
+        elif isinstance(node, ast.ImportFrom) and node.module == "shlex":
+            splits |= {a.asname or a.name for a in node.names if a.name == "split"}
+    return modules, splits
+
+
+def _is_shlex_split(call: ast.Call, modules: set[str], splits: set[str]) -> bool:
     func = call.func
     if isinstance(func, ast.Attribute) and func.attr == "split":
-        return isinstance(func.value, ast.Name) and func.value.id == "shlex"
-    return split_imported and isinstance(func, ast.Name) and func.id == "split"
+        return isinstance(func.value, ast.Name) and func.value.id in modules
+    return isinstance(func, ast.Name) and func.id in splits
 
 
 def _shlex_split_calls(tree: ast.AST) -> list[tuple[ast.Call, str]]:
     """Every ``shlex.split`` call, paired with its innermost enclosing function."""
-    split_imported = any(
-        isinstance(node, ast.ImportFrom)
-        and node.module == "shlex"
-        and any(alias.name == "split" for alias in node.names)
-        for node in ast.walk(tree)
-    )
+    modules, splits = _shlex_names(tree)
     found: list[tuple[ast.Call, str]] = []
 
     def visit(node: ast.AST, enclosing: str) -> None:
@@ -95,7 +102,7 @@ def _shlex_split_calls(tree: ast.AST) -> list[tuple[ast.Call, str]]:
                 if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef))
                 else enclosing
             )
-            if isinstance(child, ast.Call) and _is_shlex_split(child, split_imported):
+            if isinstance(child, ast.Call) and _is_shlex_split(child, modules, splits):
                 found.append((child, scope))
             visit(child, scope)
 
@@ -189,6 +196,16 @@ def test_reviewed_allowlist_entries_are_live() -> None:
         ),
         (
             "from shlex import split\ndef f(command):\n    return split(command)\n",
+            "direct shlex.split outside the canonical helper",
+        ),
+        (
+            "import shlex as lexer\ndef f(command):\n    return lexer.split(command)\n",
+            "direct shlex.split outside the canonical helper",
+        ),
+        (
+            "from shlex import split as tokenize\n"
+            "def f(command):\n"
+            "    return tokenize(command)\n",
             "direct shlex.split outside the canonical helper",
         ),
     ],

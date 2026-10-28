@@ -299,7 +299,10 @@ REPORT_BUG_CLASSES: tuple[BugClass, ...] = (
                     "reader of those formats cannot see that some gating breaks "
                     "were acknowledged (ADR-067 D5)."
                 ),
-                reference="docs/contribute/known-gaps.md",
+                reference=(
+                    "docs/contribute/known-gaps/"
+                    "renderer-parity-escaping-and-acknowledged-count.md"
+                ),
                 canary_test="tests/unit/report/test_renderer_parity_matrix.py",
             ),
         ),

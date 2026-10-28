@@ -11,7 +11,7 @@
       "abicheck/dwarf_snapshot_datasources.py": "e337f8be3a8ae16350c0639d0be10670d4d5d1197108659fa210fcbbf8a5bdde",
       "abicheck/dwarf_unified.py": "9ecb70b59bb26674ac98ba14ad1211b4103e3a78426a91ed7901e59f1a7d9cdf",
       "abicheck/dwarf_utils.py": "18a0d5ce15b7d72aead50bd9771112a2a19e5058501cca3e52253323434ff646",
-      "abicheck/elf_metadata.py": "8861cc5cf80fb1c02acbc4cc2fc414883e2c59966d16c68627a1d413fd156c08",
+      "abicheck/elf_metadata.py": "966d07059c070998ac19822dcfcef5ed68067fea63fee491cfe114797baa9290",
       "abicheck/extract/__init__.py": "011ec37fad96ea2035983eaaedeba0976940a570900f85db8c03bb7369af742a",
       "abicheck/extract/ar_archive.py": "6fdab7ed7390a20f087f9407eaa3988c0f8c658400bc0ea8c7e193271923956d",
       "abicheck/extract/ar_archive_format.py": "38a51cae7762eb269af3788d5dca9cfe50de38d9b315f34fa31427f791cb7e62",
@@ -60,7 +60,7 @@
       "abicheck/extract/export_table_read.py": "0d9ec9fb81165d7ea765beae3d90f2d51dd5dbd5c1ede00c6ea322cc4a30c771",
       "abicheck/extract/flat_map_dependency_scope.py": "5fa66ab2f8ebdbc37d735e3dbad3b6fe1ae3907d7a98eab5c6e6257842e2ea07",
       "abicheck/extract/header_ast_backend.py": "1f5b15c126b139c49b702b69a4f626ed7d30f8294e15ad116d61387e96d31f16",
-      "abicheck/extract/header_ast_cache_producers.py": "2177504bb1c45869578142eba8e74fd789403f052e851215afe8a7e05c19c6f9",
+      "abicheck/extract/header_ast_cache_producers.py": "96b4a3ab3f35c195834e5946591405dad0453b01166534f35a1c36495166f1c4",
       "abicheck/extract/header_ast_fields.py": "436f6feaed4da7566a551fa44d3e102d28964fecc57a22821111d7f63c6f5840",
       "abicheck/extract/header_exclusions.py": "254ca6e4ccf7366b9db516183d6814cb865c279845abe7d05051ac2f72bf0884",
       "abicheck/extract/header_order_witness.py": "6a1cfce946826fa540a0601ebeefa02a8973ba6e8cd5d8287f6c1e7badc3d53a",
@@ -161,7 +161,7 @@
       "abicheck/extract/tu_jobs.py": "6ed530395738f83bc46664a6ae9e91fa7286a2a6bb81e4fbb723447f6524b070",
       "abicheck/extract/unparseable_header_fallback.py": "a9aae1490ad88bb1f1bd9ddfe96681d4a3b9558436446305c66fb44f0003c2f6",
       "abicheck/extract/wheel_tags.py": "0a6eff34860223c9efb0fc2d62469804d50d59ae1825c726abafaf7c898789db",
-      "abicheck/macho_metadata.py": "5c52cee671b781cbffb7a9db501f16a02057f62f5dd406dc1d6d33a5295a10b2",
+      "abicheck/macho_metadata.py": "5b81975242e679583bae9d09618b63ca329b7bae1b04dce64b7cac824cf79be4",
       "abicheck/pdb_metadata.py": "79beb794904dd26afaf7d1fa8e9fdf74d4d4dfd21f5c09b9764c45b253a2dc1f",
       "abicheck/pdb_model.py": "d79ccfac86f4889d8d9b2c745ee2dacd6132c1789c0ca77988aaf53bd50aea8a",
       "abicheck/pdb_parser.py": "0e36976c17fbea1c7cfe98f9ede5713418624c69821eb9ce12cac6c9a736543f",
@@ -171,9 +171,9 @@
       "abicheck/symvers_metadata.py": "372737765cd132e6e87ed891dd465d2958e04debbef774e45212ceb3036871cb",
       "abicheck/type_metadata.py": "9997189de8dac522fd1db8be5ae491d811139503f83abaaded89038eb4aa9cdf"
     },
-    "fingerprint": "9ba8c4f51eb9b05bad948e22dc84e46edc60034a76b28cc8f96859a1c1d9f475",
+    "fingerprint": "6af80fd2b037439e1ed497cd6aa017efb9503ee47e18d039ef27cbee66e32068",
     "generation": 28,
-    "reason": "re-record after merging this PR's T2/T4/T6 extract edits onto the T1 generation-28 bump; the same PR's bump covers them"
+    "reason": "review fixes on this PR's own generation-28 change: ELF .dynsym required for ET_DYN, oversized Mach-O trie refused, castxml producer list; the same PR's bump covers them"
   },
   "resolver": {
     "files": {

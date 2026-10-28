@@ -76,3 +76,31 @@ def test_dylib_without_export_trie_or_symbol_table_is_refused(tmp_path: Path) ->
         SnapshotError, match="neither an export trie nor a symbol table"
     ):
         read_exports_or_fail(dylib, parse_macho_metadata)
+
+
+def test_dylib_whose_export_trie_exceeds_the_read_limit_is_refused(
+    tmp_path: Path,
+) -> None:
+    """A trie the reader skips for size is unread, not an empty export list."""
+    dyld_info = struct.pack(
+        "<12I",
+        0x80000022,  # LC_DYLD_INFO_ONLY
+        48,  # cmdsize
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,  # rebase/bind/weak_bind/lazy_bind
+        32 + 48,  # export_off: just past the load commands
+        64 * 1024 * 1024 + 1,  # export_size: one byte over the limit
+    )
+    header = struct.pack(
+        "<IIIIIIII", 0xFEEDFACF, 0x01000007, 0x00000003, 0x00000006, 1, 48, 0, 0
+    )
+    dylib = tmp_path / "libhuge.dylib"
+    dylib.write_bytes(header + dyld_info)
+    with pytest.raises(SnapshotError, match="exceeds the 64 MiB read limit"):
+        read_exports_or_fail(dylib, parse_macho_metadata)

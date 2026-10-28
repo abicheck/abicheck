@@ -27,6 +27,8 @@ different input.
 
 from __future__ import annotations
 
+import ast
+import importlib.util
 import shutil
 import sys
 import threading
@@ -545,3 +547,48 @@ def test_projection_sidecar_rejects_another_builds_projection(monkeypatch) -> No
     assert pc.decode_projection(blob) == projection
     monkeypatch.setattr(pc, "abicheck_code_fingerprint", lambda: "code-B")
     assert pc.decode_projection(blob) is None
+
+
+def _constants_imported_from_abicheck(module: str) -> set[str]:
+    """abicheck modules *module* imports an UPPER_CASE constant from.
+
+    A constant read never shows up as a call event, so the traced-output tests
+    above cannot see this dependency; it has to be read from the source.
+    """
+    path = module_source_path(PACKAGE_ROOT, module)
+    assert path is not None, module
+    tree = ast.parse(path.read_text(encoding="utf-8"))
+    found: set[str] = set()
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.ImportFrom):
+            continue
+        if not any(alias.name.isupper() for alias in node.names):
+            continue
+        package = module if path.name == "__init__.py" else module.rpartition(".")[0]
+        target = (
+            importlib.util.resolve_name("." * node.level + (node.module or ""), package)
+            if node.level
+            else (node.module or "")
+        )
+        if target.startswith("abicheck."):
+            found.add(target)
+    return found
+
+
+@pytest.mark.parametrize(
+    "listed",
+    [producers.CASTXML_AST_OUTPUT_MODULES, producers.CLANG_AST_OUTPUT_MODULES],
+    ids=["castxml", "clang"],
+)
+def test_constant_vocabularies_of_output_modules_are_listed(
+    listed: tuple[str, ...],
+) -> None:
+    """A constant an output module matches against shapes the entry too."""
+    classified = set(listed) | set(producers.NON_SHAPING_MODULES)
+    missing = {
+        f"{module} reads a constant from {source}"
+        for module in listed
+        for source in _constants_imported_from_abicheck(module)
+        if source not in classified
+    }
+    assert missing == set()

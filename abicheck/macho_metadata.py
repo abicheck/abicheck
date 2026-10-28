@@ -242,7 +242,13 @@ def _parse_export_trie(dylib_path: Path, header: Any, meta: MachoMetadata) -> No
             export_off = int(getattr(cmd, "dataoff", 0))
             export_size = int(getattr(cmd, "datasize", 0))
             break
-    if not export_off or not export_size or export_size > 64 * 1024 * 1024:
+    if not export_off or not export_size:
+        return
+    if export_size > 64 * 1024 * 1024:
+        # Refused, not read: an export table this parse skipped is unread.
+        note_export_read_failure(
+            f"Mach-O export trie of {export_size} bytes exceeds the 64 MiB read limit"
+        )
         return
     try:
         with open(dylib_path, "rb") as f:

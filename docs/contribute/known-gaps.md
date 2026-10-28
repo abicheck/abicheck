@@ -68,6 +68,10 @@ Each entry's status line says what is still open. A PARTIAL entry's write-up als
 **Status (2026-10-25): OPEN, deliberate split.** The census of exports declared only under an excluded `#ifdef` (`extract/headers/preprocessor_branches.py`, reported per macro in `coverage_warnings` and `undeclared_export_census.by_guard`, report schema 6.7) is computed from the castxml run's own `-E -dD` output and kept on `AbiSnapshot.live_preprocessor_hidden`, which `storage/snapshot_encode.py` drops. A compare of `abicheck dump` outputs, a stored baseline, a clang-frontend parse and a multi-TU manifest therefore carry no scan and use the `sycl::` name rule only, so a generic `#ifdef FOO` export reads as unattributed there. Persisting it is the follow-up: a new snapshot fact, which needs its `SCHEMA_VERSION` ruling, an `EXTRACTOR_GENERATION` bump with a `SPELLING_MIGRATIONS` row, and a generation-corpus freeze. Also open: the census reads only the ELF export table, and matches an export to a hidden declaration by function name only (no variables, no signature check).
 `hygiene` — A stored-snapshot compare under-reports why exports are undeclared; it never fabricates a finding. Owner: `confidence.undeclared_export_censuses`.
 
+#### Markdown/review lose `<…>` and backticks in symbol names; three formats omit the acknowledged count (2026-10-28)
+
+**Status (2026-10-28): OPEN.** The renderer-parity matrix pins both as strict xfail cells: prose and code spans are not escaped outside table cells, and JUnit, the terminal Audit line and the HTML disposition line do not state the acknowledged count. [Full write-up](known-gaps/renderer-parity-escaping-and-acknowledged-count.md)
+
 #### The Markdown "Additions" section is one row per finding, so it grows linearly (2026-10-22)
 
 **Status (2026-10-22): OPEN.** The review-group section is bounded; the per-finding Additions rows are not. [Full write-up](known-gaps/the-additions-markdown-section-is-one-row-per-finding.md)
