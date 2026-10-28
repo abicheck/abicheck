@@ -31,6 +31,7 @@ from ..model.evidence_status import EvidenceStatus
 from ..reporter_markdown import _format_change_md
 from .cross_source_evolution import cross_source_evolution_md_suffix
 from .markdown_budget import ITEM_LIMIT
+from .markdown_text import md_text
 from .policy_facts import evidence_status_of, impact_text_for
 from .render_markdown import RootCauseGroupData, RootCauseSectionData
 from .view import finding_id, group_changes_by_root_cause, root_cause_key_and_display
@@ -144,7 +145,7 @@ def compute_root_cause_section(
                 referenced_causes=referenced_causes,
             )
             line = (
-                f"- `{label}` is required but missing from the new "
+                f"- {md_text(label, code=True)} is required but missing from the new "
                 f"library ({severity_tag})"
             )
             # ADR-049 Phase 3 (Codex review, fresh evidence): the
