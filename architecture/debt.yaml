@@ -3,7 +3,7 @@
   "files": [
     {
       "path": "abicheck/build_context.py",
-      "baseline_lines": 1443,
+      "baseline_lines": 1386,
       "target": "see ADR-061 ownership map",
       "rule": "no_growth",
       "disposition": "migrate",
@@ -619,7 +619,7 @@
     },
     {
       "path": "abicheck/elf_metadata.py",
-      "baseline_lines": 1079,
+      "baseline_lines": 1045,
       "target": "see ADR-061 ownership map",
       "rule": "no_growth",
       "disposition": "migrate",
@@ -652,7 +652,7 @@
     },
     {
       "path": "abicheck/header_conditionals.py",
-      "baseline_lines": 1370,
+      "baseline_lines": 1369,
       "target": "see ADR-061 ownership map",
       "rule": "no_growth",
       "disposition": "migrate",

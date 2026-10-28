@@ -43,6 +43,7 @@ from elftools.elf.gnuversions import (
 )
 from elftools.elf.sections import SymbolTableSection
 
+from .extract.elf_abi_flags import _decode_abi_flags as _decode_abi_flags
 from .extract.elf_code_hash import CodeHasher
 from .extract.elf_notes import (
     NT_GNU_ABI_TAG_NAMES,
@@ -216,59 +217,6 @@ def _read_pointer_size(elf: ELFFile, so_path: Path) -> int:
             "parse_elf_metadata: failed to read ELF class from %s: %s", so_path, exc
         )
         return 8
-
-
-# ── ELF identity / per-arch ABI-flag decoding (G23-A3) ──────────────────────
-# Only the bits that select an *incompatible* calling convention are decoded;
-# unknown architectures fall back to reporting the raw e_flags value.
-_EF_ARM_ABI_FLOAT_HARD = 0x00000400
-_EF_ARM_ABI_FLOAT_SOFT = 0x00000200
-_EF_ARM_EABI_MASK = 0xFF000000
-_EF_RISCV_FLOAT_ABI_MASK = 0x0006  # 0=soft, 2=single, 4=double, 6=quad
-# EF_RISCV_RVE (0x8) reduces the integer register file 32→16 and changes the
-# calling convention, so it IS ABI-selecting. EF_RISCV_RVC (0x1, compressed
-# instructions) is an ISA-encoding choice with no calling-convention effect, so
-# it is deliberately NOT decoded — toggling it must not report an ABI break.
-_EF_RISCV_RVE = 0x0008
-_EF_MIPS_ABI_MASK = 0x0000F000
-_RISCV_FLOAT_ABI_NAMES = {
-    0x0: "float-soft",
-    0x2: "float-single",
-    0x4: "float-double",
-    0x6: "float-quad",
-}
-
-
-def _decode_abi_flags(machine: str, e_flags: int) -> frozenset[str]:
-    """Decode the ABI-selecting bits of ``e_flags`` for architectures we know.
-
-    Returns a set of human-readable tokens whose *change* between two versions
-    signals a calling-convention-incompatible rebuild (float ABI, EABI version).
-    Unknown architectures return an empty set; the raw ``e_flags`` value is
-    diffed separately so drift is still caught, just without a decoded label.
-    """
-    tokens: set[str] = set()
-    if machine in ("EM_ARM",):
-        if e_flags & _EF_ARM_ABI_FLOAT_HARD:
-            tokens.add("float-hard")
-        elif e_flags & _EF_ARM_ABI_FLOAT_SOFT:
-            tokens.add("float-soft")
-        eabi = (e_flags & _EF_ARM_EABI_MASK) >> 24
-        if eabi:
-            tokens.add(f"eabi{eabi}")
-    elif machine in ("EM_RISCV",):
-        tokens.add(
-            _RISCV_FLOAT_ABI_NAMES.get(
-                e_flags & _EF_RISCV_FLOAT_ABI_MASK, "float-unknown"
-            )
-        )
-        if e_flags & _EF_RISCV_RVE:
-            tokens.add("rve")
-    elif machine in ("EM_MIPS",):
-        abi = e_flags & _EF_MIPS_ABI_MASK
-        if abi:
-            tokens.add(f"mips-abi-{abi:#x}")
-    return frozenset(tokens)
 
 
 def _read_identity(elf: ELFFile, meta: ElfMetadata, so_path: Path) -> None:
@@ -481,10 +429,29 @@ def _parse_all_sections(
             )
             note_export_read_failure(f"malformed .symtab section: {exc}")
 
+    # A shared object (ET_DYN, static-pie included) always carries a .dynsym.
+    # One without it (a zeroed or unreadable section header table, a section
+    # name that no longer resolves) has no dynamic symbol table this parse
+    # could read; the .symtab fallback is for relocatable objects and would
+    # read link-time globals as exports. Say so, rather than returning a
+    # symbol list that looks like the export table (extract/parse_failures.py).
+    if dynsym_section is None and _is_shared_object(elf):
+        note_export_read_failure(
+            "no readable .dynsym section in a shared object (dynamic symbol table not read)"
+        )
+
     # Merge: verdef entries take priority over verneed on index collision.
     ver_index_map: _VerIndexMap = {**verneed_index_map, **verdef_index_map}
 
     return ver_sym_section, dynsym_section, ver_index_map
+
+
+def _is_shared_object(elf: ELFFile) -> bool:
+    """True for an ELF whose header says ``ET_DYN`` (shared object or PIE)."""
+    try:
+        return str(elf.header["e_type"]) == "ET_DYN"
+    except Exception:  # noqa: BLE001 — header already parsed; treat as not-DSO
+        return False
 
 
 def _process_section(
@@ -1034,6 +1001,12 @@ def _parse_dynsym_entries(
             continue
 
         sym_type = _TYPE_MAP.get(type_str, SymbolType.OTHER)
+        if not name:
+            # A defined, global, visible entry with no name is a corrupt
+            # .dynsym entry (its st_name points outside .dynstr), not an export.
+            note_export_read_failure(
+                "malformed .dynsym entry: exported symbol has no name"
+            )
 
         # NOTE: pyelftools does NOT embed version suffixes (@@/@ notation) in
         # sym.name — that's a readelf text-output artifact. Symbol version info

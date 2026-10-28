@@ -3,7 +3,7 @@
     "files": {
       "abicheck/btf_metadata.py": "614321e6140b32e7518deb3991dc9b9421107688c952542808ec4da88a17dc73",
       "abicheck/ctf_metadata.py": "42d3f588c6c4567c2a9d43a3ef5b886a753c37dd5357a4199d81d7ffc60d2109",
-      "abicheck/dumper.py": "e2bb875088ef947a707162982592ebe4c7468e53651993c83c398a3ce3981991",
+      "abicheck/dumper.py": "34f781feddf07eede82334c69c9025e8cac7cd4f21fbd0e5b40932100922f47a",
       "abicheck/dwarf_advanced.py": "91cfc7f410a37e7d7ba3ec922ff2944b81253fde3dcfdb806be032087822b339",
       "abicheck/dwarf_metadata.py": "2973de51a3d75c63a5364cc0381e9d020ada5e1a1a54bd78b20458ee07581e20",
       "abicheck/dwarf_presence.py": "7e73580ec7a02fdf24e3815cb89e42aa6fe00e46e8cda6b7fe9d547f06ac3f06",
@@ -11,7 +11,7 @@
       "abicheck/dwarf_snapshot_datasources.py": "e337f8be3a8ae16350c0639d0be10670d4d5d1197108659fa210fcbbf8a5bdde",
       "abicheck/dwarf_unified.py": "9ecb70b59bb26674ac98ba14ad1211b4103e3a78426a91ed7901e59f1a7d9cdf",
       "abicheck/dwarf_utils.py": "18a0d5ce15b7d72aead50bd9771112a2a19e5058501cca3e52253323434ff646",
-      "abicheck/elf_metadata.py": "43f4f804a24e2a0d9a4dca59772ecbfe1a6e70cd6c4d05c9f22efb469b2ab92f",
+      "abicheck/elf_metadata.py": "966d07059c070998ac19822dcfcef5ed68067fea63fee491cfe114797baa9290",
       "abicheck/extract/__init__.py": "011ec37fad96ea2035983eaaedeba0976940a570900f85db8c03bb7369af742a",
       "abicheck/extract/ar_archive.py": "6fdab7ed7390a20f087f9407eaa3988c0f8c658400bc0ea8c7e193271923956d",
       "abicheck/extract/ar_archive_format.py": "38a51cae7762eb269af3788d5dca9cfe50de38d9b315f34fa31427f791cb7e62",
@@ -36,7 +36,7 @@
       "abicheck/extract/dependency_header_roots.py": "1eaf11025d92166b6c05dfbc73e52eb859225dc33200905fbf179f2fb61b789a",
       "abicheck/extract/detached_debug.py": "bcf76b2771ba0697d1630af33f4fb87b36be9913538f7eed104673390a1d7106",
       "abicheck/extract/digest_memo.py": "babd25889fb4ac54b8defd27ea009fc2e125085c5692f5a4d864aec5491fbee9",
-      "abicheck/extract/dpcpp_jobs.py": "7e30f36f5a4ccaf84aa9abe6ed7958d23ce5c43dbb9f6504b9921502c99fad08",
+      "abicheck/extract/dpcpp_jobs.py": "97dcedd95fc15c58cbaf83e6acb935eb0b87f24117d40407658a9657f48519a5",
       "abicheck/extract/dump_manifest_roots.py": "b616e45b7eafdd2dd4c69c1031f9a5c8b54973633aa3e9057edc60525ea0d15a",
       "abicheck/extract/dwarf_decl_file.py": "a585b6e38dc879b04db4b3d70a8b7131774a8b735df1068e6baafcaac934af42",
       "abicheck/extract/dwarf_layout_backfill.py": "3dcc9efb8907b6b3419b09b1c262f64403a5162148bc3be0a5d51e112ef69a4d",
@@ -46,6 +46,7 @@
       "abicheck/extract/dwarf_subtree_index.py": "45ffbba03c1eeb9f8a1d9ed54ab3f3e2492363d4b56e16944f326154c7654aa9",
       "abicheck/extract/dwarf_vptr_resolution.py": "756dfe22e692c77de3b06fa3d86959b4e1c1bdd0d3729fae66743e923bbc2a68",
       "abicheck/extract/dwarf_vtable_completeness.py": "8a03fbbb12c5dfd13598251e6dbf8b58ff015e538fb0635f4afbfdb754d054da",
+      "abicheck/extract/elf_abi_flags.py": "426d6d97328e32071a84422c130bdefebe31cee85a91146efe8c01f7ce97d87f",
       "abicheck/extract/elf_code_hash.py": "d372796f5325c91f4c20cbe23a60e2f3bc62fd9c6423812269e4857d4916d489",
       "abicheck/extract/elf_notes.py": "25ccf019332d620f847414e3b56149ef52e0d8f5d088b3d34a03a897a3940ecf",
       "abicheck/extract/elf_static_tls.py": "3d35ff8a14ab97e6991cb4afab62a61703a1ce8d5af99e9c7f957783153b5d1d",
@@ -56,16 +57,17 @@
       "abicheck/extract/elf_symbol_versions.py": "b2aa29df27ed51b9cbe3f6b94e9c99e391036216621fa35cb72dc922ecf39786",
       "abicheck/extract/env_flags.py": "6a1343268cdfcd4b2ccaf91008d96b611973bf5cab04467c2585f012e1f5466c",
       "abicheck/extract/export_symbol_identity.py": "2146bd67207411943258124a24271542c8b9767344c1b404aaa9133c0358ff00",
-      "abicheck/extract/export_table_read.py": "7783c3baba176ef8b47cb99361f389984bb1797c37ba5d9120866359f60c3601",
+      "abicheck/extract/export_table_read.py": "0d9ec9fb81165d7ea765beae3d90f2d51dd5dbd5c1ede00c6ea322cc4a30c771",
       "abicheck/extract/flat_map_dependency_scope.py": "5fa66ab2f8ebdbc37d735e3dbad3b6fe1ae3907d7a98eab5c6e6257842e2ea07",
       "abicheck/extract/header_ast_backend.py": "1f5b15c126b139c49b702b69a4f626ed7d30f8294e15ad116d61387e96d31f16",
-      "abicheck/extract/header_ast_cache_producers.py": "b20f72d82c73d0f82a91bf53b32edf673a043aae5f68eec9c38d6d7ad9c7b63a",
+      "abicheck/extract/header_ast_cache_producers.py": "96b4a3ab3f35c195834e5946591405dad0453b01166534f35a1c36495166f1c4",
       "abicheck/extract/header_ast_fields.py": "436f6feaed4da7566a551fa44d3e102d28964fecc57a22821111d7f63c6f5840",
       "abicheck/extract/header_exclusions.py": "254ca6e4ccf7366b9db516183d6814cb865c279845abe7d05051ac2f72bf0884",
       "abicheck/extract/header_order_witness.py": "6a1cfce946826fa540a0601ebeefa02a8973ba6e8cd5d8287f6c1e7badc3d53a",
       "abicheck/extract/header_scan_memo.py": "56f79b5316354b938b08a5f29779c3aaf40481892d947784ec2adb48ab5e83fb",
+      "abicheck/extract/header_text.py": "b43a88d7bf1d2e601bb908c78f04cb07e552f9c59f03b678ecc85788b3d146e4",
       "abicheck/extract/headers/__init__.py": "70af0d3a16882783444077004b7a434a295505579fbbca219ce103f72074ad03",
-      "abicheck/extract/headers/ast_config.py": "95fa895316e40c9f84569d79a46f784336f00ca7edf8f0e8cf36646f79df2c67",
+      "abicheck/extract/headers/ast_config.py": "9e101646e3b0db82596f9cc6fd1f72017a9301d1072a7014f264de2d45dc81db",
       "abicheck/extract/headers/ast_config_cpp20_chains.py": "ceeadbcb1d8e2eaac5eb325a3fb7c668614ce605bc04bb03835fcc4957e53c97",
       "abicheck/extract/headers/backend_plan.py": "1f02babf0ead52a65e4fa08dff8ce5b2a9d60feb1d02d22e7db30ee050cf8717",
       "abicheck/extract/headers/backend_protocol.py": "144cbe76456b6bceaf56f0edd0f3398f171178a222c8b968d53f8a17ee05a21b",
@@ -138,7 +140,7 @@
       "abicheck/extract/ownership.py": "9285bfc00b5dc3948749004cbe9881b5eb034696b59d405bd0e579f9664fb036",
       "abicheck/extract/ownership_stamp.py": "07e5714eac1e1770aa53f09479b7ae240f2f123ee2b7bf223241f6880233d8d7",
       "abicheck/extract/packages.py": "0cc9caa6a067114f3dfb426b8ac3b8fb712bc82737ca1fadf357273ab1955d90",
-      "abicheck/extract/parse_failures.py": "bda173aab4aca1e83b716569a8cf863e7214215108bae1bffd65406a93fb371b",
+      "abicheck/extract/parse_failures.py": "2e87216b3af05b90487355abfe32f966cec0206e2ba1467005348994264abea4",
       "abicheck/extract/path_aliases.py": "e4df448bdadc691475adfca99c567df6aa76e5cb421d6faf5de1307d368d1560",
       "abicheck/extract/path_segments.py": "c96f59df6fc126e26c6ca2052c6040d3180aa49f6c1265029eeb7206f0466b22",
       "abicheck/extract/pdb_scope.py": "d5c551c9ceec500c76670cf9ecf4a76f844e4aad2c4ed37f91ab7fc630988753",
@@ -159,7 +161,7 @@
       "abicheck/extract/tu_jobs.py": "6ed530395738f83bc46664a6ae9e91fa7286a2a6bb81e4fbb723447f6524b070",
       "abicheck/extract/unparseable_header_fallback.py": "a9aae1490ad88bb1f1bd9ddfe96681d4a3b9558436446305c66fb44f0003c2f6",
       "abicheck/extract/wheel_tags.py": "0a6eff34860223c9efb0fc2d62469804d50d59ae1825c726abafaf7c898789db",
-      "abicheck/macho_metadata.py": "e4d71d4885ce9f95fb0e2cf5be0a9f391b18ac5f031249eb331d4e20dc4a3deb",
+      "abicheck/macho_metadata.py": "5b81975242e679583bae9d09618b63ca329b7bae1b04dce64b7cac824cf79be4",
       "abicheck/pdb_metadata.py": "79beb794904dd26afaf7d1fa8e9fdf74d4d4dfd21f5c09b9764c45b253a2dc1f",
       "abicheck/pdb_model.py": "d79ccfac86f4889d8d9b2c745ee2dacd6132c1789c0ca77988aaf53bd50aea8a",
       "abicheck/pdb_parser.py": "0e36976c17fbea1c7cfe98f9ede5713418624c69821eb9ce12cac6c9a736543f",
@@ -169,9 +171,9 @@
       "abicheck/symvers_metadata.py": "372737765cd132e6e87ed891dd465d2958e04debbef774e45212ceb3036871cb",
       "abicheck/type_metadata.py": "9997189de8dac522fd1db8be5ae491d811139503f83abaaded89038eb4aa9cdf"
     },
-    "fingerprint": "5661e5eadcd4c4eb6b34cee7e12b2ccda9e831fcffa8848cff5be800fd6f1c02",
-    "generation": 27,
-    "reason": "merge main: comment-only/refactor changes from main, no behaviour change"
+    "fingerprint": "6af80fd2b037439e1ed497cd6aa017efb9503ee47e18d039ef27cbee66e32068",
+    "generation": 28,
+    "reason": "review fixes on this PR's own generation-28 change: ELF .dynsym required for ET_DYN, oversized Mach-O trie refused, castxml producer list; the same PR's bump covers them"
   },
   "resolver": {
     "files": {
@@ -205,7 +207,7 @@
       "abicheck/buildsource/macro_graph.py": "fa410a488ba4986365705ffb34e3201c643a946b2c31383442c7c740a169b8cf",
       "abicheck/buildsource/override_graph.py": "0503453212b0604119db1ecf845b629a4e9f790566258855eeddf417f8cb21a7",
       "abicheck/buildsource/semantic_fact_folds.py": "38f3a5be0b70d62ab840a4bfcd8352abaeeabdfe7553e400c1dca8cdee71c070",
-      "abicheck/buildsource/source_abi.py": "eddec617eb412f2c27ab395c533a5d367b06f2e68c3ee2d981aa6dc37f4dfe4f",
+      "abicheck/buildsource/source_abi.py": "e2aa5f24a956d5b68bc57716b987f3844c08786173b80f3befb2b58075544d6f",
       "abicheck/buildsource/source_extractors/__init__.py": "e9e5ede124cabdf4ec712339609cc91450a8e5fcb261dfb9f49a4de60c0d45c2",
       "abicheck/buildsource/source_extractors/_argv.py": "8b39e16d1b4d4fddb48b11fbb31a1a151cd5807c0c5de7caa25834d93d350aa1",
       "abicheck/buildsource/source_extractors/_argv_shortopts.py": "91f82c52eb97ade36878250f90d098e4c8925ec0454732717be7f7cc0c4da41f",
@@ -239,8 +241,8 @@
       "abicheck/buildsource/type_graph.py": "a028a875057cd0cbf2930a431bfa1e579f7b770e0d124cbcfe715724e89d12e5",
       "abicheck/buildsource/type_graph_index.py": "7375f7baec7ceb3dd4a52a489b89e5a3571750dffca7490d1c5870301d55202d"
     },
-    "fingerprint": "f931b9c3e0a46c5bc6858c5febf560857bf8570acf2dc76c97a683e6b70b777f",
+    "fingerprint": "76d6f6285fb2a9c492539302af791cd050bede85151967a23b1d83a3d0c422a9",
     "generation": 11,
-    "reason": "generation 11 (this unreleased bump): a separate /I or /external:I never swallows a following option as its operand"
+    "reason": "generation 11 (this unreleased bump): a separate /I or /external:I never swallows a following option as its operand. Source fingerprint re-recorded without a bump: SourceAbiSurface decode keeps only the keys a document states; re-encoding a loaded surface changes, no extraction fact changes, and no reader treats an absent key as required."
   }
 }

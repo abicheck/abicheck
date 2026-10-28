@@ -11,11 +11,12 @@ different input.
 * ``TestInvocationIsInTheKey`` -- every independently generated piece of the
   frontend's input changes the key, the key is independent of the per-run
   temporary paths, and a probe key (no ``invocation_tool``) is unaffected.
-* ``TestClangOutputCode`` -- the code that shapes a stored clang entry is in
-  the clang key and not in the castxml key; the module list names real modules.
-* ``test_traced_clang_output_path_is_classified`` (integration) -- traces a
-  real clang header dump and fails if any abicheck module runs between
-  clang's exit and the cache write without being classified, so the list
+* ``TestOutputCodeIsPerBackend`` -- the code that shapes a stored entry is in
+  that backend's key and not the other's; the module lists name real modules.
+* ``test_traced_clang_output_path_is_classified`` and
+  ``test_traced_castxml_output_path_is_classified`` (integration) -- trace a
+  real clang / castxml dump and fail if any abicheck module runs between the
+  tool's exit and the cache write without being classified, so the lists
   cannot silently go stale.
 * ``TestRealDumpsMissOnGeneratedInputChange`` (integration) -- the real
   castxml/clang dump hits its own entry, and misses after the generated input
@@ -26,6 +27,8 @@ different input.
 
 from __future__ import annotations
 
+import ast
+import importlib.util
 import shutil
 import sys
 import threading
@@ -191,24 +194,31 @@ class TestInvocationIsInTheKey:
         assert _key(tmp_path, "castxml", tool=()) == before
 
 
-class TestClangOutputCode:
-    def test_only_the_clang_key_carries_output_code(
-        self, tmp_path, monkeypatch
+class TestOutputCodeIsPerBackend:
+    @pytest.mark.parametrize("backend", ["castxml", "clang"])
+    def test_each_key_carries_only_its_own_output_code(
+        self, tmp_path, monkeypatch, backend
     ) -> None:
-        castxml, clang = _key(tmp_path, "castxml"), _key(tmp_path, "clang")
-        monkeypatch.setattr(
-            cfg, "clang_ast_output_fingerprint", lambda: "different-code"
-        )
-        assert _key(tmp_path, "castxml") == castxml
-        assert _key(tmp_path, "clang") != clang
+        other = "clang" if backend == "castxml" else "castxml"
+        fingerprint = {
+            "castxml": "castxml_ast_output_fingerprint",
+            "clang": "clang_ast_output_fingerprint",
+        }
+        own, foreign = _key(tmp_path, backend), _key(tmp_path, other)
+        monkeypatch.setattr(cfg, fingerprint[backend], lambda: "different-code")
+        assert _key(tmp_path, backend) != own
+        assert _key(tmp_path, other) == foreign
 
     def test_listed_modules_exist_and_lists_are_disjoint(self) -> None:
-        listed = set(producers.CLANG_AST_OUTPUT_MODULES) | set(
-            producers.NON_SHAPING_MODULES
-        )
-        assert not set(producers.CLANG_AST_OUTPUT_MODULES) & set(
-            producers.NON_SHAPING_MODULES
-        )
+        shaping = {
+            "clang": set(producers.CLANG_AST_OUTPUT_MODULES),
+            "castxml": set(producers.CASTXML_AST_OUTPUT_MODULES),
+        }
+        non_shaping = set(producers.NON_SHAPING_MODULES)
+        assert not shaping["clang"] & shaping["castxml"]
+        for names in shaping.values():
+            assert not names & non_shaping
+        listed = shaping["clang"] | shaping["castxml"] | non_shaping
         missing = sorted(
             m for m in listed if module_source_path(PACKAGE_ROOT, m) is None
         )
@@ -334,6 +344,85 @@ def test_traced_clang_output_path_is_classified(
     )
 
 
+#: A castxml scenario that reaches every splice path: a calling-convention
+#: declaration (the preprocessed-text table) and a preprocessor-guarded
+#: declaration (the excluded-declaration scan).
+_CASTXML_SPLICES = {
+    "api.h": "#ifdef FOO\nint hidden_fn(int);\n#endif\n__stdcall void f(int);\nint g(int);\n",
+}
+_CASTXML_PLAIN = {"api.h": "struct S { int a; };\nint f(struct S*);\n"}
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize(
+    "scenario", [_CASTXML_PLAIN, _CASTXML_SPLICES], ids=["plain", "splices"]
+)
+def test_traced_castxml_output_path_is_classified(
+    tmp_path, monkeypatch, scenario
+) -> None:
+    if not shutil.which("castxml"):
+        pytest.skip("castxml not on PATH")
+    from abicheck.extract.headers.castxml import backend as castxml_backend
+    from abicheck.extract.headers.castxml.probe import run_castxml
+
+    _isolated_cache(monkeypatch, tmp_path)
+    headers = []
+    for name, text in scenario.items():
+        (tmp_path / name).write_text(text)
+        headers.append(tmp_path / name)
+    seen: set[str] = set()
+    depth = [0]
+
+    def profiler(frame, event, _arg):
+        if event == "call" and depth[0]:
+            name = frame.f_globals.get("__name__", "")
+            if name.startswith("abicheck"):
+                seen.add(name)
+
+    def traced(fn):
+        # Everything from castxml's exit to the cache write: validation, the
+        # splice of the preprocessed run, and the publish.
+        def wrapped(*a, **k):
+            depth[0] += 1
+            sys.setprofile(profiler)
+            threading.setprofile(profiler)
+            try:
+                return fn(*a, **k)
+            finally:
+                sys.setprofile(None)
+                threading.setprofile(None)
+                depth[0] -= 1
+
+        return wrapped
+
+    for name in (
+        "_validate_castxml_output",
+        "_record_calling_convention_macros",
+        "_write_castxml_cache",
+    ):
+        monkeypatch.setattr(
+            castxml_backend, name, traced(getattr(castxml_backend, name))
+        )
+    castxml_backend.castxml_dump(headers, [], "cc", lang="c", run=run_castxml)
+
+    assert "abicheck.extract.headers.castxml.backend" in seen, (
+        "the trace did not observe the output path at all"
+    )
+    if scenario is _CASTXML_SPLICES:
+        assert "abicheck.extract.headers.castxml.preprocessed_text" in seen, (
+            "the splice scenario did not reach the preprocessed-text splice"
+        )
+    unclassified = sorted(
+        seen
+        - set(producers.CASTXML_AST_OUTPUT_MODULES)
+        - set(producers.NON_SHAPING_MODULES)
+    )
+    assert unclassified == [], (
+        "these modules run between castxml's exit and the cache write: list each in "
+        "CASTXML_AST_OUTPUT_MODULES (shapes the stored entry) or NON_SHAPING_MODULES (with why)"
+    )
+
+
 @pytest.mark.integration
 class TestRealDumpsMissOnGeneratedInputChange:
     def _castxml_or_skip(self):
@@ -368,6 +457,33 @@ class TestRealDumpsMissOnGeneratedInputChange:
         )
         castxml_dump([header], [], "cc", lang="c", run=run)
         assert castxml_runs() == 2, "a changed generated input must re-run castxml"
+
+    def test_castxml_output_code_change_misses(self, tmp_path, monkeypatch) -> None:
+        self._castxml_or_skip()
+        from abicheck.extract.headers.castxml.backend import castxml_dump
+
+        _isolated_cache(monkeypatch, tmp_path)
+        runs, run = _recording_castxml_runner()
+        header = tmp_path / "api.h"
+        header.write_text("struct S { int a; };\nint f(struct S*);\n")
+
+        def castxml_runs() -> int:
+            return sum(
+                1 for c in runs if "castxml" in Path(c[0]).name and "-dD" not in c
+            )
+
+        castxml_dump([header], [], "cc", lang="c", run=run)
+        castxml_dump([header], [], "cc", lang="c", run=run)
+        assert castxml_runs() == 1
+        # The stored document carries the splice this code produced: changing
+        # the code that produces it must re-run castxml, not replay it.
+        monkeypatch.setattr(
+            cfg, "castxml_ast_output_fingerprint", lambda: "different-code"
+        )
+        castxml_dump([header], [], "cc", lang="c", run=run)
+        assert castxml_runs() == 2, (
+            "a changed splice-producing module must miss the castxml entry"
+        )
 
     def test_clang(self, tmp_path, monkeypatch) -> None:
         if not shutil.which("clang++"):
@@ -431,3 +547,48 @@ def test_projection_sidecar_rejects_another_builds_projection(monkeypatch) -> No
     assert pc.decode_projection(blob) == projection
     monkeypatch.setattr(pc, "abicheck_code_fingerprint", lambda: "code-B")
     assert pc.decode_projection(blob) is None
+
+
+def _constants_imported_from_abicheck(module: str) -> set[str]:
+    """abicheck modules *module* imports an UPPER_CASE constant from.
+
+    A constant read never shows up as a call event, so the traced-output tests
+    above cannot see this dependency; it has to be read from the source.
+    """
+    path = module_source_path(PACKAGE_ROOT, module)
+    assert path is not None, module
+    tree = ast.parse(path.read_text(encoding="utf-8"))
+    found: set[str] = set()
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.ImportFrom):
+            continue
+        if not any(alias.name.isupper() for alias in node.names):
+            continue
+        package = module if path.name == "__init__.py" else module.rpartition(".")[0]
+        target = (
+            importlib.util.resolve_name("." * node.level + (node.module or ""), package)
+            if node.level
+            else (node.module or "")
+        )
+        if target.startswith("abicheck."):
+            found.add(target)
+    return found
+
+
+@pytest.mark.parametrize(
+    "listed",
+    [producers.CASTXML_AST_OUTPUT_MODULES, producers.CLANG_AST_OUTPUT_MODULES],
+    ids=["castxml", "clang"],
+)
+def test_constant_vocabularies_of_output_modules_are_listed(
+    listed: tuple[str, ...],
+) -> None:
+    """A constant an output module matches against shapes the entry too."""
+    classified = set(listed) | set(producers.NON_SHAPING_MODULES)
+    missing = {
+        f"{module} reads a constant from {source}"
+        for module in listed
+        for source in _constants_imported_from_abicheck(module)
+        if source not in classified
+    }
+    assert missing == set()

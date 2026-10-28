@@ -43,6 +43,7 @@ from .project_snapshot_store import (
     read_variant_ref,
     write_project_manifest,
 )
+from .storage.dto import SECTION_SCHEMA_VERSIONS
 from .storage.import_v1 import export_legacy_snapshot, import_legacy_snapshot
 from .storage.package import (
     ArtifactRef,
@@ -51,6 +52,7 @@ from .storage.package import (
     PackageManifest,
     VariantRef,
 )
+from .storage.sectioned_document import check_stated_section_version
 from .storage.versioning import FactGenerations
 
 __all__ = [
@@ -267,6 +269,14 @@ def read_legacy_snapshot_document(
                 "ref is stale or corrupted; refusing to merge unaccounted-for "
                 "section content"
             )
+    # The manifest's inventory is read back against this build's registry for
+    # every registered kind, whatever the artifact count (T5: the same gap as
+    # the single-file reader, where `{"binary": 99}` was decoded silently).
+    # Unregistered kinds are variant-level evidence another owner versions
+    # (e.g. `bundle_variant_spec`), so they are not this reader's to refuse.
+    for kind, stated in summary.versions.section_schema_versions.items():
+        if kind in SECTION_SCHEMA_VERSIONS:
+            check_stated_section_version(kind, stated)
     store = DirectoryObjectStore(root)
     return export_legacy_snapshot(
         artifact,

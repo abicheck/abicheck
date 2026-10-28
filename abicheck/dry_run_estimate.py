@@ -51,6 +51,7 @@ from .cxx20_pair_dialect import (
     pair_wide_cxx20_std_override as pair_wide_cxx20_std_override,
 )
 from .errors import ValidationError
+from .extract.header_text import non_text_header_message
 from .header_utils import HEADER_SUFFIXES, iter_directory_headers
 
 if TYPE_CHECKING:
@@ -105,6 +106,12 @@ def expand_header_inputs(inputs: list[Path]) -> list[Path]:
             continue
         seen.add(k)
         deduped.append(h)
+    # A header that is not text is an input error, not an empty surface: it
+    # would otherwise parse to zero declarations and read as removals.
+    for h in deduped:
+        problem = non_text_header_message(h)
+        if problem is not None:
+            raise ValidationError(problem)
     return deduped
 
 

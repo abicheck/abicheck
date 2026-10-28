@@ -68,6 +68,10 @@ Each entry's status line says what is still open. A PARTIAL entry's write-up als
 **Status (2026-10-25): OPEN, deliberate split.** The census of exports declared only under an excluded `#ifdef` (`extract/headers/preprocessor_branches.py`, reported per macro in `coverage_warnings` and `undeclared_export_census.by_guard`, report schema 6.7) is computed from the castxml run's own `-E -dD` output and kept on `AbiSnapshot.live_preprocessor_hidden`, which `storage/snapshot_encode.py` drops. A compare of `abicheck dump` outputs, a stored baseline, a clang-frontend parse and a multi-TU manifest therefore carry no scan and use the `sycl::` name rule only, so a generic `#ifdef FOO` export reads as unattributed there. Persisting it is the follow-up: a new snapshot fact, which needs its `SCHEMA_VERSION` ruling, an `EXTRACTOR_GENERATION` bump with a `SPELLING_MIGRATIONS` row, and a generation-corpus freeze. Also open: the census reads only the ELF export table, and matches an export to a hidden declaration by function name only (no variables, no signature check).
 `hygiene` — A stored-snapshot compare under-reports why exports are undeclared; it never fabricates a finding. Owner: `confidence.undeclared_export_censuses`.
 
+#### Markdown/review lose `<…>` and backticks in symbol names; three formats omit the acknowledged count (2026-10-28)
+
+**Status (2026-10-28): OPEN.** The renderer-parity matrix pins both as strict xfail cells: prose and code spans are not escaped outside table cells, and JUnit, the terminal Audit line and the HTML disposition line do not state the acknowledged count. [Full write-up](known-gaps/renderer-parity-escaping-and-acknowledged-count.md)
+
 #### The Markdown "Additions" section is one row per finding, so it grows linearly (2026-10-22)
 
 **Status (2026-10-22): OPEN.** The review-group section is bounded; the per-finding Additions rows are not. [Full write-up](known-gaps/the-additions-markdown-section-is-one-row-per-finding.md)
@@ -110,6 +114,12 @@ current emitter, which is unchanged.
 **Status (2026-10-22): OPEN.** `signature_hash` differs on 1374 of 1531 paired functions, record `type_hash` on 290 of 290, and typedef `type_hash` on 22 of 22. The inputs differ (L4 hashes its own `_signature(node)` string, `base.py` hashes `return(params)`), so the hashes cannot show the underlying types are equal. The default-argument `value` differs on 18 pairs: L4 spells `p0=sha256:…` and the projection spells `max_threads=expr:…`. A pinned set cannot include these fields until both producers use one canonical spelling.
 
 ### False-clean risk
+
+#### A readable but corrupted `.dynsym` entry can still read as a clean compare (2026-10-27)
+
+**Status (2026-10-27): PARTIAL.** A binary whose export table is structurally unreadable (zeroed or unreachable section header table, no `.dynsym`, a `.dynsym` filled with `0xff`, truncated, or exported entries with no resolvable name) is now refused at dump with exit 1 (`tests/test_export_table_unreadable_matrix.py`, OLD/NEW/both). Residual: corruption that leaves every entry structurally valid is read as the table it now says. Random byte flips inside `.dynsym` (`st_info`, `st_shndx`, `st_value`, or a `st_name` that still lands on a non-empty string) and garbage bytes in `.dynstr` that still yield non-empty names parse without a failure. On one side the result is a fabricated `BREAKING`; on the corrupted side of a pair it can be `COMPATIBLE` (exit 0, removals hidden) or, with both sides identically corrupted, `NO_CHANGE`. No reader can tell these from a legitimate table without a checksum.
+
+`false-clean` — `compare` of a library whose `.dynsym` content is corrupted but structurally valid can exit 0 with `COMPATIBLE` or `NO_CHANGE`.
 
 #### `--depth binary` on a header-built snapshot misses debug-only declaration findings (2026-10-25)
 
@@ -549,6 +559,12 @@ Do not re-attempt token-claiming. A header's export tokens cannot tell whether i
 
 **Status (2026-10-12): OPEN.** `test_manifest_base_commit_exists_in_history` runs `git cat-file -e` only; a manifest pinned to a fetchable but unmerged commit passes.  
 `hygiene` — The test named "exists in history" does not check that a task's `base_commit` is reachable from the default branch. [Full write-up](known-gaps/agent-eval-base-commit-test-checks-presence-not-ancestry.md)
+
+
+#### An `ownership_fact` is persisted only as a PRESENT decision (2026-10-27)
+
+**Status (2026-10-27): OPEN, deliberate.** Every non-`PRESENT` status reads back as `None`, and a `PRESENT` fact on a snapshot with no `extraction_scope` is dropped. `ownership_of()` folds both to unknown, so no verdict changes; the loss is in the `Fact` object only. Pinned, not fixed: a per-entry status is a schema change.
+`hygiene` — The round-trip is pinned as named `KNOWN_LOSSY` cases in `tests/unit/storage/test_snapshot_field_roundtrip.py`. Closing it needs a `SCHEMA_VERSION` bump and a reader-compatibility decision. [Full write-up](known-gaps/ownership-fact-persists-only-a-present-decision.md)
 
 ## Do not re-attempt
 

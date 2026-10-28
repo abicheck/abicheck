@@ -252,29 +252,62 @@ class TestCachesMissAcrossCodeIdentity:
         assert a and b and a != b
         assert key() == a
 
+    def test_header_ast_key_follows_its_producer_code(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Each backend's header-AST key folds the source of the modules that
+        shape its stored entry (``producer-code``), and reverting that source
+        hits the original entry again."""
+        import abicheck.extract.headers.ast_config as cfg
+
+        header = tmp_path / "api.h"
+        header.write_text("struct S { int a; };\n")
+
+        def keys() -> dict[str, str]:
+            return {
+                backend: cfg._cache_key(
+                    [header], [], "cc", backend=backend, force_cpp=False
+                )
+                for backend in ("castxml", "clang")
+            }
+
+        before = keys()
+        monkeypatch.setattr(cfg, "castxml_ast_output_fingerprint", lambda: "code-B")
+        monkeypatch.setattr(cfg, "clang_ast_output_fingerprint", lambda: "code-B")
+        changed = keys()
+        assert changed["castxml"] != before["castxml"]
+        assert changed["clang"] != before["clang"]
+        monkeypatch.undo()
+        assert keys() == before
+
 
 # -- exhaustiveness: no disk cache escapes classification ---------------------
 
 #: Every ``DiskCache`` in the package, by registered name. ``"code-identity"``
 #: means its entries are abicheck-computed output and its key folds
-#: :func:`abicheck_code_fingerprint` (proved per cache above); anything else names
-#: why the identity does not apply.
+#: :func:`abicheck_code_fingerprint` (proved per cache above). ``"producer-code"``
+#: means the entry is an external tool's output that abicheck also shapes before
+#: it is stored, so its key folds the source of exactly those modules
+#: (:func:`~abicheck.extract.header_ast_cache_producers.castxml_ast_output_fingerprint`,
+#: ``clang_ast_output_fingerprint``) -- narrower on purpose, so an unrelated edit
+#: does not discard a header parse that takes seconds to minutes to redo. Proved
+#: below and by tests/test_header_ast_cache_key_inputs.py, which traces a real
+#: dump to keep each module list complete.
 DISK_CACHE_CLASSIFICATION = {
     "abicheck.snapshot_cache.disk": "code-identity",
     "abicheck.buildsource.build_cache.disk": "code-identity",
     "abicheck.buildsource.source_replay.disk": "code-identity",
     "abicheck.buildsource.header_include_disk": "code-identity",
-    "abicheck.storage.header_ast_cache.ast_disk": (
-        "external-tool output: keyed by the exact aggregate header and command "
-        "line abicheck generates, plus the source of the modules that shape a "
-        "stored clang entry (tests/test_header_ast_cache_key_inputs.py)"
-    ),
+    "abicheck.storage.header_ast_cache.ast_disk": "producer-code",
 }
 _PROVED = {
     "abicheck.snapshot_cache.disk": "test_snapshot_cache",
     "abicheck.buildsource.build_cache.disk": "test_build_evidence_cache_key",
     "abicheck.buildsource.source_replay.disk": "test_source_abi_tu_cache_key",
     "abicheck.buildsource.header_include_disk": "test_header_include_disk_cache_key",
+    "abicheck.storage.header_ast_cache.ast_disk": (
+        "test_header_ast_key_follows_its_producer_code"
+    ),
 }
 
 
@@ -302,7 +335,8 @@ def test_every_disk_cache_is_classified() -> None:
         "classify every DiskCache in DISK_CACHE_CLASSIFICATION: a cache of "
         "abicheck-computed output must fold abicheck_code_fingerprint() into its key"
     )
-    keyed = {n for n, c in DISK_CACHE_CLASSIFICATION.items() if c == "code-identity"}
+    assert set(DISK_CACHE_CLASSIFICATION.values()) <= {"code-identity", "producer-code"}
+    keyed = set(DISK_CACHE_CLASSIFICATION)
     assert keyed == set(_PROVED)
     for test_name in _PROVED.values():
         assert hasattr(TestCachesMissAcrossCodeIdentity, test_name)

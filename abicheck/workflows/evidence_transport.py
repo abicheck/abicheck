@@ -57,6 +57,8 @@ from collections.abc import Iterable
 from enum import Enum
 from pathlib import Path
 
+from ..extract.header_text import is_all_nul
+
 #: The ``schema`` discriminator a probe-matrix snapshot carries from Phase 7n
 #: on. Older, tagless snapshots stay readable -- see
 #: :func:`is_probe_matrix_document`.
@@ -219,7 +221,10 @@ def classify_header_transport(path: Path) -> HeaderTransport:
     """
     if path.is_dir() or not path.exists():
         return HeaderTransport.HEADERS
-    if is_evidence_package(path):
+    # A file of only NUL bytes is a valid *empty* tar archive to the package
+    # sniffer. Classed as a package it unpacks to zero headers and the header
+    # evidence silently vanishes; as a header it is rejected as not valid text.
+    if not is_all_nul(path) and is_evidence_package(path):
         return HeaderTransport.PACKAGE
     return HeaderTransport.HEADERS
 

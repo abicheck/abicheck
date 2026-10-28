@@ -1,0 +1,3 @@
+### Fixed
+
+- **A cached castxml header AST is no longer replayed after the code that spliced into it changed.** The castxml entry is castxml's XML plus two payloads abicheck writes into it after castxml exits (the preprocessed text of calling-convention declarations, and the preprocessor-excluded declaration scan), but its key trusted only a hand-bumped schema constant. Editing those producers with no bump served the previous scan from the cache. The key now also folds `castxml_ast_output_fingerprint()`, the source of the modules that compute those payloads, the same way the clang key already folds its own list. Unrelated edits still keep the cache.

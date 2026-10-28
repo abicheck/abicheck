@@ -35,11 +35,11 @@ import json
 import logging
 import os
 import re
-import shlex
 from dataclasses import dataclass, field
 from fnmatch import fnmatch
 from pathlib import Path
 
+from ._compiler_options import split_command_line
 from .errors import ValidationError
 
 _logger = logging.getLogger(__name__)
@@ -140,65 +140,12 @@ _MAX_RESPONSE_FILE_BYTES = 1024 * 1024
 
 
 def _split_windows_command_line(text: str) -> list[str]:
-    """Tokenize a command line / response-file body using Windows/MSVC argv
-    rules (the same backslash-before-quote escaping ``CommandLineToArgvW``
-    and ``cl.exe`` use), instead of ``shlex.split(text, posix=False)`` —
-    which implements POSIX-shell quoting, not MSVC's, so a quoted path like
-    ``-I"C:\\Program Files\\SDK"`` gets split mid-path on the embedded space
-    (Codex review).
-
-    Rules (Microsoft's documented C runtime argv-parsing convention):
-    whitespace (space/tab/newline) delimits arguments unless inside a
-    double-quoted span; a run of N backslashes immediately followed by a
-    double-quote emits ``N // 2`` literal backslashes, and if N is odd the
-    final backslash escapes the quote (a literal ``"`` is emitted, the
-    quoted-span state is untouched) while an even N instead toggles the
-    quoted-span state; a run of backslashes NOT followed by a double-quote
-    is emitted literally. Never raises — unlike ``shlex.split``, malformed
-    quoting has no invalid state under these rules.
+    """MSVC/``CommandLineToArgvW`` argv tokenization that never raises on an
+    unterminated quote. The implementation is
+    :func:`abicheck._compiler_options.split_command_line` (``strict=False``);
+    this name stays for the callers that already import it.
     """
-    args: list[str] = []
-    current: list[str] = []
-    in_quotes = False
-    seen_token = False
-    i = 0
-    n = len(text)
-    while i < n:
-        c = text[i]
-        if not in_quotes and c in " \t\r\n":
-            if seen_token:
-                args.append("".join(current))
-                current = []
-                seen_token = False
-            i += 1
-            continue
-        seen_token = True
-        if c == "\\":
-            j = i
-            while j < n and text[j] == "\\":
-                j += 1
-            num_backslashes = j - i
-            if j < n and text[j] == '"':
-                current.append("\\" * (num_backslashes // 2))
-                if num_backslashes % 2 == 1:
-                    current.append('"')
-                    j += 1
-                else:
-                    in_quotes = not in_quotes
-                    j += 1
-            else:
-                current.append("\\" * num_backslashes)
-            i = j
-            continue
-        if c == '"':
-            in_quotes = not in_quotes
-            i += 1
-            continue
-        current.append(c)
-        i += 1
-    if seen_token:
-        args.append("".join(current))
-    return args
+    return split_command_line(text, cl_style=True, strict=False)
 
 
 #: Compiler-driver stems that use MSVC/``CommandLineToArgvW`` response-file
@@ -261,11 +208,7 @@ def _split_command_line(text: str, *, cl_style: bool | None = None) -> list[str]
     ``C:mingw64bing++.exe`` for exactly the GNU-driver-on-Windows case this
     would have tried to "fix" (Codex review).
     """
-    if cl_style is None:
-        cl_style = os.name == "nt"
-    if cl_style:
-        return _split_windows_command_line(text)
-    return shlex.split(text, posix=True)
+    return split_command_line(text, cl_style=cl_style, strict=False)
 
 
 def _safe_resolve(path: Path) -> Path | None:

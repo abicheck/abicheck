@@ -524,8 +524,10 @@ class TestBundleArchivePreflightFailsClosedOnIoErrors:
         def _failing_fstat(fd: int) -> os.stat_result:
             raise OSError(errno.EIO, "simulated transient I/O error")
 
-        with open(path, "rb") as f:
-            monkeypatch.setattr(cd_guard_module.os, "fstat", _failing_fstat)
+        # Scope the patch to the call: os.fstat is process-wide, and pytest's
+        # own output capture fstat()s its tmpfile before monkeypatch teardown.
+        with open(path, "rb") as f, monkeypatch.context() as patch:
+            patch.setattr(cd_guard_module.os, "fstat", _failing_fstat)
             with pytest.raises(SnapshotError, match="could not stat the archive"):
                 cd_guard_module.reject_absurd_central_directory(f, path, max_entries=1)
 
