@@ -39,6 +39,7 @@ from __future__ import annotations
 import json
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -53,6 +54,7 @@ pytestmark = [
         shutil.which("g++") is None or shutil.which("castxml") is None,
         reason="needs g++ to build the fixture libraries and castxml to parse headers",
     ),
+    pytest.mark.skipif(sys.platform != "linux", reason="builds an ELF .so"),
 ]
 
 #: The full public header of the old library. The new library drops

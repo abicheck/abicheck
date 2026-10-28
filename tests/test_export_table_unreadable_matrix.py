@@ -35,6 +35,7 @@ from elftools.elf.elffile import ELFFile
 pytestmark = [
     pytest.mark.integration,
     pytest.mark.skipif(shutil.which("gcc") is None, reason="gcc required"),
+    pytest.mark.skipif(sys.platform != "linux", reason="corrupts an ELF .so"),
 ]
 
 _V1 = (
