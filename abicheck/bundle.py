@@ -102,6 +102,8 @@ from .bundle_models import (  # noqa: F401  (re-exported for back-compat)
 from .bundle_soname import hard_link_alias_basenames
 from .checker_types import DiffResult
 from .elf_metadata import ElfMetadata, parse_elf_metadata
+from .errors import SnapshotError
+from .extract.export_table_read import read_exports_or_fail
 from .model import AbiSnapshot
 
 if TYPE_CHECKING:
@@ -177,14 +179,11 @@ def build_bundle_snapshot(libraries: dict[str, Path]) -> BundleSnapshot:
             log.debug("bundle: skipping non-ELF input %s", path)
             continue
         try:
-            meta = parse_elf_metadata(path)
-        except (
-            Exception
-        ) as exc:  # pragma: no cover — parse_elf_metadata already swallows most
+            meta = read_exports_or_fail(path, parse_elf_metadata)
+        except SnapshotError:
+            raise  # an unread export table is refused; a skipped member vanishes
+        except Exception as exc:  # pragma: no cover — parse_elf_metadata swallows most
             log.warning("bundle: failed to parse %s: %s", path, exc)
-            continue
-        if meta is None:
-            log.debug("bundle: skipping non-ELF input %s", path)
             continue
         metadata[name] = meta
 

@@ -175,16 +175,26 @@ def debian_symbols_binary_conflict_lines(
     try:
         from ..debian_symbols import load_symbols_file
         from ..elf_metadata import parse_elf_metadata
+        from ..extract.parse_failures import recording_export_read_failures
 
         parsed = load_symbols_file(symbols_file)
         so_path = _find_declared_symbols_binary(lib_dir, parsed.library)
         if so_path is None:
             return []
-        elf_meta = parse_elf_metadata(so_path)
+        with recording_export_read_failures() as export_failures:
+            elf_meta = parse_elf_metadata(so_path)
     except Exception:
         # Advisory only (see docstring) -- any parse/lookup failure here
         # must never interrupt the release compare it's merely annotating.
         return []
+    if export_failures:
+        # An unread table is not an empty one: every declared symbol would
+        # read as "lacking in the binary". Say the check did not run instead.
+        reasons = "; ".join(dict.fromkeys(export_failures))
+        return [
+            f"Package metadata vs. contained binary ({so_path.name}): not "
+            f"checked, its export table was not read ({reasons})."
+        ]
     conflicts = detect_package_binary_mismatch(parsed, elf_meta)
     if not conflicts:
         return []

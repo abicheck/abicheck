@@ -566,9 +566,19 @@ class TestDefaultedEnvironmentRoot:
         binary.write_bytes(b"\x7fELF" + b"\x00" * 60)
         return binary
 
-    def test_single_env_result_records_the_defaulted_root(self, tmp_path) -> None:
+    def test_single_env_result_records_the_defaulted_root(
+        self, tmp_path, monkeypatch
+    ) -> None:
+        from abicheck.elf_metadata import ElfMetadata
         from abicheck.stack_checker import check_single_env
 
+        # A hand-written ELF stub whose export table cannot be read is refused
+        # by the resolver now; this test is about the root labelling, so give
+        # the resolver a readable (empty) parse of it.
+        monkeypatch.setattr(
+            "abicheck.workflows.elf_dependency_resolver.parse_elf_metadata",
+            lambda path: ElfMetadata(soname=path.name),
+        )
         binary = self._elf(tmp_path)
         defaulted = check_single_env(binary)
         assert defaulted.baseline_env == "/"
