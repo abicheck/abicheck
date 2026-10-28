@@ -47,6 +47,7 @@ from typing import Any
 
 from .. import serialization
 from ..elf_metadata import parse_elf_metadata
+from ..extract.export_table_read import read_exports_or_fail
 
 #: The only ``manifest_version`` ``actions/baseline/build_manifest.py`` has
 #: ever emitted. A resolver that doesn't recognize the value on a real
@@ -928,15 +929,14 @@ def _not_elf_issue(member: str, binary_path: Path) -> str | None:
             "member would otherwise vanish from the bundle comparison."
         )
     try:
-        meta = parse_elf_metadata(binary_path)
+        meta = read_exports_or_fail(binary_path, parse_elf_metadata)
     except Exception as exc:
         return (
             f"bundle member {member!r}'s staged binary {binary_path.name!r} "
             f"starts with the ELF magic but could not be parsed as a valid "
             f"ELF file ({exc}) -- it is truncated or corrupted, and "
-            "build_bundle_snapshot() would silently skip it, so this "
-            "member would vanish from the bundle comparison despite "
-            "resolve-baseline reporting success."
+            "build_bundle_snapshot() refuses or skips it, so this member "
+            "cannot be resolved despite resolve-baseline reporting success."
         )
     if meta is None or (
         not meta.soname and not meta.symbols and not meta.imports and not meta.needed

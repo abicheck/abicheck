@@ -657,6 +657,12 @@ ANALYSIS_1_BUG_CLASSES: tuple[BugClass, ...] = (
             # COMPATIBLE / NO_CHANGE with exit 0. Refused at the dump, across
             # the CLI, for OLD, NEW and both sides.
             "tests/test_export_table_unreadable_matrix.py",
+            # The verdict-affecting callers of the platform parsers outside the
+            # dump's guard (package-contract generation and validation, manifest
+            # validation, bundle members, dependency graphs, stranded-library
+            # snapshots): each refuses or reports an unread export table
+            # rather than reading the parser's empty result as "exports nothing".
+            "tests/test_export_read_verdict_callers.py",
             # A clang AST whose `inner` is a number, string, mapping or null
             # (or holds non-object children) read as "call graph ran, found
             # nothing": the readers treat a wrong-typed container as empty.

@@ -34,6 +34,7 @@ from click.core import ParameterSource
 from .cli import main
 from .cli_options import export_options, verbose_option
 from .cli_resolve import _detect_binary_format
+from .errors import SnapshotError
 from .frontends.cli.options.export import ExportSet, reject_dry_run_with_exports
 from .frontends.cli.runtime import _setup_verbosity, emit_export_set
 from .report.stack import DEFAULTED_ROOT_NOTE, environment_root_label
@@ -150,12 +151,17 @@ def deps_tree_cmd(
     from .stack_checker import check_single_env, exit_decision_for_stack_tree
     from .stack_report import stack_to_json, stack_to_markdown
 
-    result = check_single_env(
-        binary,
-        search_paths=list(search_paths) or None,
-        sysroot=sysroot,
-        ld_library_path=ld_library_path,
-    )
+    try:
+        result = check_single_env(
+            binary,
+            search_paths=list(search_paths) or None,
+            sysroot=sysroot,
+            ld_library_path=ld_library_path,
+        )
+    except SnapshotError as exc:
+        # An unreadable DSO export table in the closure: the binding status
+        # would otherwise read every symbol it provides as missing.
+        raise click.ClickException(str(exc)) from exc
 
     def _render(fmt: str) -> str:
         if fmt == "json":
@@ -317,15 +323,19 @@ def deps_compare_cmd(
     from .stack_checker import check_stack, exit_decision_for_stack_compare
     from .stack_report import stack_to_json, stack_to_markdown
 
-    result = check_stack(
-        binary,
-        baseline_root=old_root,
-        candidate_root=new_root,
-        ld_library_path=ld_library_path,
-        search_paths=list(search_paths) or None,
-        baseline_root_defaulted=old_root_defaulted,
-        candidate_root_defaulted=new_root_defaulted,
-    )
+    try:
+        result = check_stack(
+            binary,
+            baseline_root=old_root,
+            candidate_root=new_root,
+            ld_library_path=ld_library_path,
+            search_paths=list(search_paths) or None,
+            baseline_root_defaulted=old_root_defaulted,
+            candidate_root_defaulted=new_root_defaulted,
+        )
+    except SnapshotError as exc:
+        # An unreadable DSO export table in either root's closure.
+        raise click.ClickException(str(exc)) from exc
 
     def _render(fmt: str) -> str:
         if fmt == "json":

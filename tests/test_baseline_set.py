@@ -1783,7 +1783,7 @@ def test_resolve_bundle_rejects_truncated_elf_binary(
         required=True,
     )
     assert result.outcome == ResolveOutcome.AMBIGUOUS
-    assert "essentially empty ELF file" in result.message
+    assert "export table of" in result.message and "was not read" in result.message
 
 
 def test_resolve_bundle_binary_digest_os_error_is_ambiguous(

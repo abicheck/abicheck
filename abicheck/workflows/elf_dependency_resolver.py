@@ -36,6 +36,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from ..elf_metadata import ElfMetadata, parse_elf_metadata
+from ..extract.export_table_read import read_exports_or_fail
 
 log = logging.getLogger(__name__)
 
@@ -254,7 +255,7 @@ def _register_resolved_dso(
     lib_token: str,
 ) -> None:
     """Parse a newly resolved DSO, add it to the graph, and enqueue its children."""
-    meta = parse_elf_metadata(resolved_path)
+    meta = read_exports_or_fail(resolved_path, parse_elf_metadata)
     node = ResolvedDSO(
         path=resolved_path,
         soname=meta.soname or soname,
@@ -324,7 +325,7 @@ def _seed_root(
         log.warning("resolve_dependencies: root binary not found: %s", root_path)
         return None
 
-    root_meta = parse_elf_metadata(root_path)
+    root_meta = read_exports_or_fail(root_path, parse_elf_metadata)
     root_key = str(root_path)
     root_soname = root_meta.soname or root_path.name
 
