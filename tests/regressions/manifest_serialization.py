@@ -109,6 +109,7 @@ SERIALIZATION_BUG_CLASSES: tuple[BugClass, ...] = (
             "tests/test_family_f2_route_parity.py",
             "tests/unit/storage/test_snapshot_field_roundtrip.py",
             "tests/unit/storage/test_source_abi_surface_roundtrip.py",
+            "tests/test_storage_roundtrip_sweep.py",
             "tests/unit/storage/test_section_schema_version_gate.py",
         ),
         known_gaps=(

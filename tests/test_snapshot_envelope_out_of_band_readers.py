@@ -247,11 +247,6 @@ _SCANNED_ROOTS = ("actions", "contrib", "scripts", "skills-src/evaluation", "tes
 #: one ``path::function``; each is a reviewed decision, not a mute.
 _NOT_SNAPSHOT_DOCUMENT_READERS = frozenset(
     {
-        # Writes the flat document itself and reads back its own bytes to
-        # prove the *storage* layer preserves an unknown top-level key across
-        # encodings. Never sees an envelope, by construction.
-        "tests/test_snapshot_compression.py::"
-        "test_dump_provenance_survives_load_save_round_trip",
         # Unit tests asserting on `snapshot_to_dict()`'s own in-memory flat
         # output — the function under test returns the flat shape by
         # definition, so there is no envelope to unwrap.

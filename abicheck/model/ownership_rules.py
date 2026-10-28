@@ -124,7 +124,15 @@ class OwnershipRules:
             dependencies=deps,
             private_headers=strs(data.get("private_headers")),
             private_namespaces=strs(data.get("private_namespaces")),
-            dependency_evidence=str(data.get("dependency_evidence") or "full"),
+            # Kept verbatim, "" included: `or "full"` read a stated empty value
+            # as the wider default, so a default stood in for evidence the
+            # document never claimed (the writer emitted "" and the reader
+            # returned "full").
+            dependency_evidence=(
+                "full"
+                if data.get("dependency_evidence") is None
+                else str(data["dependency_evidence"])
+            ),
         )
 
     def is_configured(self) -> bool:

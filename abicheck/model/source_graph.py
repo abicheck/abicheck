@@ -30,6 +30,7 @@ not-yet-attempted follow-up slice of the same item.
 
 from __future__ import annotations
 
+import copy
 import hashlib
 import json
 from collections.abc import Iterable
@@ -589,11 +590,15 @@ class SourceGraphSummary:
         d: dict[str, Any] = {
             "schema_version": self.schema_version,
             "graph_id": self.graph_id or self.compute_graph_id(),
-            "coverage": dict(self.coverage),
+            # Deep copies throughout: a shallow `dict(...)` shares the nested
+            # values (coverage's per-kind counts) with the summary itself.
+            "coverage": copy.deepcopy(self.coverage),
             "nodes": [n.to_dict() for n in self.nodes],
             "edges": [e.to_dict() for e in self.edges],
             "indexes": self.indexes(),
-            "external_graph_refs": [dict(r) for r in self.external_graph_refs],
+            "external_graph_refs": copy.deepcopy(
+                [dict(r) for r in self.external_graph_refs]
+            ),
             "extractor_passes": dict(self.extractor_passes),
             "narrowed_passes": dict(self.narrowed_passes),
             "narrowed_scope": {k: sorted(v) for k, v in self.narrowed_scope.items()},
@@ -640,8 +645,12 @@ class SourceGraphSummary:
         obj = cls(
             schema_version=int(d.get("schema_version", SOURCE_GRAPH_VERSION)),
             graph_id=str(d.get("graph_id", "")),
-            coverage=dict(d.get("coverage", {})),
-            external_graph_refs=[dict(r) for r in d.get("external_graph_refs", [])],
+            # Deep copies: the object must not keep references into the caller's
+            # document, or a later edit to that document reaches the summary.
+            coverage=copy.deepcopy(dict(d.get("coverage", {}))),
+            external_graph_refs=copy.deepcopy(
+                [dict(r) for r in d.get("external_graph_refs", [])]
+            ),
             extractor_passes={
                 str(k): bool(v) for k, v in dict(d.get("extractor_passes", {})).items()
             },
