@@ -663,6 +663,11 @@ class HeadlineTable:
     risk: int
     compatible: int
     not_evaluated: int
+    # Cross-source hygiene (evolution-stamped) findings are standing
+    # inventory, not OLD->NEW changes: counted on their own row so a
+    # byte-identical self-compare never reads "43490 deployment risk changes".
+    hygiene_total: int = 0
+    hygiene_introduced: int = 0
 
 
 def render_headline_table(table: HeadlineTable) -> list[str]:
@@ -679,6 +684,11 @@ def render_headline_table(table: HeadlineTable) -> list[str]:
         f"| Deployment risk changes | {table.risk} |",
         f"| Compatible changes | {table.compatible} |",
     ]
+    if table.hygiene_total:
+        lines.append(
+            f"| Cross-source hygiene (standing, not changes) | {table.hygiene_total}"
+            f" ({table.hygiene_introduced} introduced) |"
+        )
     if table.not_evaluated:
         lines.append(f"| Not evaluated (contract) | {table.not_evaluated} |")
     lines.append("")

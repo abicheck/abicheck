@@ -354,14 +354,17 @@ def build_markdown_document(
     if envelope is not None:
         ev = envelope.findings
         overrides = {id(c): f.verdict for c, f in zip(result.changes, ev)}
-        hb, hsb, hr, hc = (
-            len(b)
-            for b in ReportModel.classify(
-                list(result.changes), result, verdict_overrides=overrides
-            )
+        hb_, hsb_, hr_, hc_ = ReportModel.classify(
+            list(result.changes), result, verdict_overrides=overrides
         )
+        # Cross-source hygiene has its own headline row (compute_headline_table).
+        hr = sum(1 for c in hr_ if getattr(c, "cross_source_evolution", None) is None)
         headline_table = replace(
-            headline_table, breaking=hb, source_breaks=hsb, risk=hr, compatible=hc
+            headline_table,
+            breaking=len(hb_),
+            source_breaks=len(hsb_),
+            risk=hr,
+            compatible=len(hc_),
         )
 
     d: dict[str, object] = {

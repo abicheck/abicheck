@@ -69,7 +69,7 @@ from .checker import (
     Verdict,
 )
 from .model.contract_finding_relevance import is_evaluated
-from .model.evidence_status import EvidenceStatus
+from .model.evidence_status import CrossSourceEvolution, EvidenceStatus
 from .report import (
     contract_conflicts_markdown as _ccm,
     render_markdown as _rmd,
@@ -1094,6 +1094,14 @@ def compute_headline_table(
     row is absent for every run that did not opt in, where it is always 0.
     """
     classified = classification_for(result)
+    deployment_risk = [
+        c for c in classified.risk if getattr(c, "cross_source_evolution", None) is None
+    ]
+    hygiene = [
+        c
+        for c in result.changes
+        if getattr(c, "cross_source_evolution", None) is not None
+    ]
     return _rmd.HeadlineTable(
         library=result.library,
         old_version=result.old_version,
@@ -1102,9 +1110,15 @@ def compute_headline_table(
         verdict_label=label,
         breaking=len(classified.breaking),
         source_breaks=len(classified.source_breaks),
-        risk=len(classified.risk),
+        risk=len(deployment_risk),
         compatible=len(classified.compatible),
         not_evaluated=len(result.not_evaluated),
+        hygiene_total=len(hygiene),
+        hygiene_introduced=sum(
+            1
+            for c in hygiene
+            if c.cross_source_evolution == CrossSourceEvolution.INTRODUCED
+        ),
     )
 
 
