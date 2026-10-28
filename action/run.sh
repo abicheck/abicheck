@@ -2320,18 +2320,17 @@ _extra_args_options() {
 # conventions prefer a here-string over process substitution where one
 # works, for the stock bash 3.2 contributors and macOS runners carry.
 _extra_args_exports() {
-  local _name _value _operand _fmt _dest
+  local _name _value _spelling _operand _fmt _dest
   while IFS=$'\t' read -r _name _value; do
+    # Which tokens are exports is decided by `_export_flag_spelling` alone,
+    # shared with `_build_json_cmd`. Only the operand's source differs here:
+    # a bare spelling's operand is the tokenizer's value, an attached one is
+    # inside the token.
     _operand=""
-    case "$_name" in
-      --output | -o) _operand="$_value" ;;
-      -*)
-        if _operand="$(_attached_output_value "$_name")"; then
-          :
-        else
-          _operand=""
-        fi
-        ;;
+    _spelling="$(_export_flag_spelling "$_name")" || continue
+    case "$_spelling" in
+      bare) _operand="$_value" ;;
+      attached*) _operand="${_spelling#*$'\t'}" ;;
     esac
     [[ -n "$_operand" ]] || continue
     # Split on the FIRST '=' only, the same rule the CLI's own parser uses,
@@ -2651,6 +2650,60 @@ _attached_output_value() {
   done
   [[ "$_rest" == o?* ]] || return 1
   printf '%s' "${_rest#o}"
+}
+
+# The one spelling matcher for the CLI's report-output flag (`-o FORMAT=DEST`),
+# shared by `_extra_args_exports` (extra-args rows from `_extra_args_options`)
+# and `_build_json_cmd` (the assembled CMD array), so the two cannot disagree
+# about which tokens are exports. Classifies ONE raw argv token: prints `bare`
+# when the operand is the NEXT token, or `attached<TAB>OPERAND` when the
+# operand travels inside this token, and returns 0; returns 1 for any other
+# token.
+#
+# The spellings are the ones Click's parser accepts for `-o/--output`
+# (tests/test_action_run_sh_output_spellings.py checks every one against the
+# live CLI, and checks that the names it derives from Click are all matched):
+#   bare      -o V    --output V    -vo V    -vvo V
+#   attached  --output=V    -oV    -voV    -vvoV
+# `--output-file`, `--out` and `--outp` are not spellings at all: Click
+# rejects them, so the primary run fails before any rerun could happen.
+_export_flag_spelling() {
+  local _tok="${1:-}" _operand
+  case "$_tok" in
+    -o | --output)
+      printf 'bare\n'
+      return 0
+      ;;
+    --output=*)
+      printf 'attached\t%s\n' "${_tok#--output=}"
+      return 0
+      ;;
+  esac
+  if _operand="$(_attached_output_value "$_tok")"; then
+    printf 'attached\t%s\n' "$_operand"
+    return 0
+  fi
+  # Bare cluster of boolean `-v`s then `o`: `-vo`, `-vvo`. Only the `o` is
+  # the export; the operand is the next token.
+  case "$_tok" in
+    -v*o)
+      if [[ "${_tok//v/}" == "-o" ]]; then
+        printf 'bare\n'
+        return 0
+      fi
+      ;;
+  esac
+  return 1
+}
+
+# Whether TOKEN, as Click parses it, consumes the NEXT token as its own value:
+# a value-taking option, or a cluster of boolean `-v`s ending in one (`-vH` is
+# `-v -H`). Reads the same derived option table `_extra_args_options` reads.
+_token_takes_next_value() {
+  _extra_args_is_value_option "$1" && return 0
+  local _expanded
+  _expanded="$(_extra_args_expand_short_clusters "$1")" || return 1
+  _extra_args_is_value_option "${_expanded##*$'\n'}"
 }
 
 # ---------------------------------------------------------------------------
@@ -6342,30 +6395,36 @@ _can_reuse_primary_json() {
 
 _build_json_cmd() {
   PR_CMD_JSON=()
-  local i
+  local i _tok _spelling
   for ((i = 0; i < ${#CMD[@]}; i++)); do
-    case "${CMD[$i]}" in
-      -o | --output | --output-file)
-        # Plan slice 7m: one export flag, so one case. Every export from
-        # the primary run is dropped and replaced by this rerun's single
-        # `-o json=$PR_JSON` below -- both the format half and the
-        # destination half now travel in the same operand, so there is no
-        # longer a separate `--format` (or `--write`) occurrence to strip.
-        #
-        # Dropping *every* export, not just the primary one, matters
-        # (Codex review, fresh evidence): this function is only ever
-        # reached after the caller's "$PR_JSON already populated" check
-        # came back empty, i.e. the primary run aborted before writing it
-        # (NOT_COMPARABLE and other early refusals render nothing --
-        # confirmed live). Keeping the primary run's own `-o
-        # json=$PR_JSON` sidecar would re-add the identical destination
-        # this rerun also targets, which the CLI hard-rejects as an export
-        # collision, so the rerun always failed and the comment was
-        # silently skipped with a misleading "no JSON report produced"
-        # warning. An export to some other path is equally pointless to
-        # keep for a run whose only output anyone reads is $PR_JSON.
-        ((i++))  # skip the flag's value too
-        ;;
+    _tok="${CMD[$i]}"
+    # Plan slice 7m: one export flag, so one matcher. Every export from the
+    # primary run is dropped and replaced by this rerun's single
+    # `-o json=$PR_JSON` below. The matcher is `_export_flag_spelling`, the
+    # same one `_extra_args_exports` reads extra-args with, so every spelling
+    # the CLI accepts -- `-o X`, `--output X`, `--output=X`, `-oX`, `-voX` --
+    # is dropped here, not only the separate-token forms.
+    #
+    # Dropping *every* export, not just the primary one, matters
+    # (Codex review, fresh evidence): this function is only ever
+    # reached after the caller's "$PR_JSON already populated" check
+    # came back empty, i.e. the primary run aborted before writing it
+    # (NOT_COMPARABLE and other early refusals render nothing --
+    # confirmed live). Keeping the primary run's own `-o
+    # json=$PR_JSON` sidecar would re-add the identical destination
+    # this rerun also targets, which the CLI hard-rejects as an export
+    # collision, so the rerun always failed and the comment was
+    # silently skipped with a misleading "no JSON report produced"
+    # warning. An export to some other path is equally pointless to
+    # keep for a run whose only output anyone reads is $PR_JSON.
+    if _spelling="$(_export_flag_spelling "$_tok")"; then
+      # A bare spelling's operand is the next token, so drop that too.
+      if [[ "$_spelling" == bare ]]; then
+        i=$((i + 1))
+      fi
+      continue
+    fi
+    case "$_tok" in
       --view)
         # ADR-068 D4/Phase 5: --show-only's replacement token. A
         # `--view show=...` occurrence is a display filter ("limit
@@ -6374,21 +6433,26 @@ _build_json_cmd() {
         # fails red, so drop it (and its value) so the comment sees the
         # full change set the gate acted on. Every other --view token
         # (impact/root-cause -- plan slice 7o retired the rest) changes
-        # no content, only how it's grouped, so it is kept -- the loop
-        # below falls through to the default case for it.
+        # no content, only how it's grouped, so it is kept.
         if [[ "${CMD[$((i + 1))]:-}" == show=* ]]; then
-          ((i++))  # drop the token and its value
-        else
-          PR_CMD_JSON+=("${CMD[$i]}")
+          i=$((i + 1))  # drop the token and its value
+          continue
         fi
         ;;
       --view=show=*)
-        : # same display filter, inline value form — drop it for the re-run.
-        ;;
-      *)
-        PR_CMD_JSON+=("${CMD[$i]}")
+        # same display filter, inline value form — drop it for the re-run.
+        continue
         ;;
     esac
+    PR_CMD_JSON+=("$_tok")
+    # A value-taking option keeps its own value verbatim, even when that
+    # value is spelled like an export: `--suppress -o` names `-o` as
+    # --suppress's argument, not as an export. `_extra_args_options` reads
+    # the same way.
+    if _token_takes_next_value "$_tok" && [[ $((i + 1)) -lt ${#CMD[@]} ]]; then
+      i=$((i + 1))
+      PR_CMD_JSON+=("${CMD[$i]}")
+    fi
   done
   PR_CMD_JSON+=(-o "json=$PR_JSON")
 }
