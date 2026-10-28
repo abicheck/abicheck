@@ -529,6 +529,12 @@ def _snapshot_to_dict(snap: AbiSnapshot, encode: Any) -> dict[str, Any]:
         else this_build_generations(carries_source_facts=snap.build_source is not None),
         snap.spellings_generation if snap.fact_generations is not None else None,
     )
+    # The dump's own provenance block (model/snapshot.py): persisted verbatim
+    # when the snapshot carries one, and absent otherwise, so a snapshot no
+    # `dump` produced encodes exactly as it always did (no ``null`` key).
+    d.pop("dump_provenance", None)
+    if snap.dump_provenance is not None:
+        d["dump_provenance"] = encode(snap.dump_provenance)
     d.pop("static_archive", None)  # runtime-only, as above (ADR-086)
     d.pop("header_declaration_ids", None)  # runtime-only, depth projection
     d.pop("projection_unavailable", None)  # runtime-only, depth projection

@@ -165,6 +165,13 @@ UNCOVERED: dict[str, str] = {
         "stored. Covered by test_depth_detector_input_contract.py at every "
         "rung"
     ),
+    "AbiSnapshot.dump_provenance": (
+        "the dump's own provenance stamp (requested/effective depth, frontend, "
+        "toolchain): how the snapshot was produced, not an observed ABI fact, "
+        "and no comparison or policy code reads it. Carried only so a load -> "
+        "save keeps it; covered by test_dump_provenance_carried.py and "
+        "test_dump_document_key_roundtrip.py"
+    ),
     "RecordType.template_param_defaults_fact": (
         "read only by compare/template_param_defaults, whose unit tests "
         "(test_template_param_defaults.py) cover both recorded, UNKNOWN and "

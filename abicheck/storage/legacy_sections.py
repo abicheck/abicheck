@@ -193,11 +193,10 @@ _SECTION_FIELDS: Mapping[str, tuple[str, ...]] = {
         "git_commit",
         "git_tag",
         "created_at",
-        # Not an `AbiSnapshot` dataclass field at all -- `cli_dump_helpers
-        # .fold_dump_provenance_into_dict` adds this key to the *document*
-        # dict a real `dump` invocation writes, after `snapshot_to_dict()`
-        # already ran, so any document a real `dump` produces carries it.
-        # It records exactly the same category of fact ("what/how this was
+        # `AbiSnapshot.dump_provenance` (model/snapshot.py): written by
+        # `cli_dump_helpers.fold_dump_provenance_into_dict` into a real
+        # `dump`'s document, and carried on the model so a load -> save keeps
+        # it. It records the same category of fact ("what/how this was
         # produced") every other key in this section does, so it belongs
         # here rather than forcing a new, one-key section kind.
         "dump_provenance",

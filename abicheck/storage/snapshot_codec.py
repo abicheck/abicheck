@@ -575,8 +575,27 @@ def decode_snapshot(
     finalize_snapshot_semantic_ir(snap)
     snap.fact_generations = _fact_generations
     snap.spellings_generation = _spellings_generation
+    snap.dump_provenance = _decode_dump_provenance(d)
     snap.load_notices = (*snap.load_notices, *_generation_notices)
     return snap, _schema_version
+
+
+def _decode_dump_provenance(d: dict[str, Any]) -> dict[str, object] | None:
+    """The document's ``dump_provenance`` block, or ``None`` when absent.
+
+    Refused, not coerced, when present but not an object: a block a decision
+    could read as "no depth stamp" must not reach the model as a silent
+    ``None``.
+    """
+    value = d.get("dump_provenance")
+    if value is None:
+        return None
+    if not isinstance(value, dict):
+        raise SnapshotError(
+            "snapshot document's dump_provenance must be a JSON object, got "
+            f"{type(value).__name__}"
+        )
+    return value
 
 
 def finalize_snapshot(snap: AbiSnapshot) -> AbiSnapshot:
