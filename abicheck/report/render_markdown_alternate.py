@@ -37,7 +37,7 @@ split of what used to be ``reporter_markdown._view_preamble`` (title/verdict
 table, coverage-warning banner, optional recommendation section, the
 ``--show-only`` filter note); that pre-split function is retired, since
 nothing calls it any more. ``root-cause`` mode's own grouping
-(``reporter_markdown.compute_root_cause_section`` -> ``RootCauseSectionData``)
+(``report.root_cause_section.compute_root_cause_section`` -> ``RootCauseSectionData``)
 was already JSON-safe before this change (every finding is pre-formatted to
 a plain string at compute time), so its document fold is a direct
 ``dataclasses.asdict()`` with no new row type of its own --
@@ -165,9 +165,12 @@ def _root_cause_section_from_mapping(
                 root_display=g["root_display"],
                 count=g["count"],
                 finding_lines=tuple(g["finding_lines"]),
+                omitted=g.get("omitted", 0),
             )
             for g in d["groups"]
-        )
+        ),
+        omitted_groups=d.get("omitted_groups", 0),
+        omitted_findings=d.get("omitted_findings", 0),
     )
 
 

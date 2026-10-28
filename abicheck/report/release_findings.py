@@ -355,7 +355,7 @@ def project_release_library_results(
         diff = entry.get("_diff_result")
         if isinstance(diff, DiffResult):
             display_buckets = release_display_buckets(diff, severity_config)
-            total_gating = sum(len(cat_changes) for _, cat_changes in display_buckets)
+            total_findings = sum(len(cat_changes) for _, cat_changes in display_buckets)
             findings, _cut_kinds = release_finding_dicts(
                 diff, severity_config, None, uncapped=uncapped
             )
@@ -367,17 +367,17 @@ def project_release_library_results(
             # under-reports once a library crosses the resolved cap (e.g. 25
             # findings reports as 10 under the default). This is the one
             # place the real, uncapped
-            # `total_gating` is still available before `diff` is discarded
+            # `total_findings` is still available before `diff` is discarded
             # below; a private, `findings_view`-shaped key (popped by
             # `release_findings_for_render`, never rendered) so
             # `release_json_document`'s `filtered_summary`-equivalent totals
             # can read the true pre-filter count instead of re-deriving it
             # from the already-capped display list.
-            entry["findings_total_count"] = total_gating
+            entry["findings_total_count"] = total_findings
             if show_only:
                 # The filtered *view*, alongside (never instead of) the full
                 # projection above -- see this function's own docstring.
-                total_gating_view = sum(
+                total_findings_view = sum(
                     len(
                         apply_show_only(
                             cat_changes,
@@ -395,7 +395,7 @@ def project_release_library_results(
                 entry["findings_view"] = findings_view
                 # The filtered counterpart of `findings_total_count` above --
                 # same rationale, same private/popped contract.
-                entry["findings_total_count_view"] = total_gating_view
+                entry["findings_total_count_view"] = total_findings_view
             # CLI cleanup phase two, PR E: the uncapped, always-classified
             # counterpart to the capped `findings` list above -- the exact
             # same shape single-library `compare -o json=...` persists at

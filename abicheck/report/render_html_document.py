@@ -255,10 +255,23 @@ def _render_native_html_document(d: Mapping[str, Any]) -> str:
         if kind == "changes":
             rows = _change_rows_from_mapping(section["rows"])
             tbl = render_changes_table(rows, demangle)
+            # `total` counts every finding in the section; `rows` holds the
+            # gating ones plus the non-gating ones within the size budget, and
+            # `omitted` says how many of the rest were cut (report/gating_budget.py).
+            total = section.get("total", len(rows))
+            omitted = section.get("omitted", 0)
+            note = (
+                f"<p class='empty'>… and {omitted} more non-gating finding(s) not "
+                "itemised here; every finding is in the machine-readable report "
+                "(JSON <code>changes</code>).</p>"
+                if omitted
+                else ""
+            )
             section_htmls.append(
                 f"<div class='section {section['css_class']}' id='{section['anchor']}'>"
-                f"<h3>{section['title']} ({len(rows)})</h3>"
+                f"<h3>{section['title']} ({total})</h3>"
                 f"{tbl}"
+                f"{note}"
                 f"</div>"
             )
         elif kind == "suppressed_placeholder":

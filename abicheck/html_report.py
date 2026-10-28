@@ -29,7 +29,7 @@ No external CSS/JS dependencies — fully self-contained single HTML file.
 from __future__ import annotations
 
 import dataclasses
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable
 from typing import TYPE_CHECKING, Any, cast
 
 # Page chrome (DOCTYPE/head/stylesheet/body frame, verdict palette, footer) now
@@ -63,8 +63,15 @@ from .report.finding import (
     effective_bucket,
     kind_sets_for_result,
 )
-from .report.html_change_rows import compute_full_change_rows
-from .report.policy_facts import compatibility_metrics, kind_str
+from .report.gating_budget import non_gating_change_ids
+from .report.html_change_rows import (
+    compute_full_change_rows as compute_full_change_rows,
+)
+from .report.html_sections import (
+    build_sections_data,
+    compute_not_evaluated_section as compute_not_evaluated_section,
+)
+from .report.policy_facts import accepted_break_ids, compatibility_metrics, kind_str
 from .report.redundancy_reasons import redundancy_reason_text
 from .report.render_html import (
     ConfidenceData,
@@ -73,8 +80,6 @@ from .report.render_html import (
     ImpactData,
     ImpactEntry,
     NavBarData,
-    NotEvaluatedRow,
-    NotEvaluatedSectionData,
     ScopedVerdictData,
     SummaryCategoryRow,
     SummaryTableData,
@@ -429,6 +434,9 @@ def build_html_document(
     def _entity_of(change: object) -> str | None:
         return entity_for_change(change, kind_str(change))
 
+    # The findings the gate does not count: the only rows the size cap may
+    # summarise (a stub result has none, so every row is itemised as before).
+    non_gating: frozenset[int] = frozenset()
     if isinstance(result, DiffResult):
         from .report.finding import build_report_findings, findings_by_change_id
 
@@ -452,6 +460,11 @@ def build_html_document(
                 policy_file=result.policy_file,
             )
         _findings_by_id = findings_by_change_id(_resolved_findings)
+        non_gating = non_gating_change_ids(
+            _resolved_findings,
+            severity_config,
+            accepted_break_ids(result),
+        )
 
         def _lookup_bucket(change: object) -> str:
             return _findings_by_id[id(change)].bucket
@@ -547,7 +560,7 @@ def build_html_document(
     # of a render that always follows in the same process via
     # `generate_html_report`, would just be redundant cache-hit work.
 
-    sections = _build_sections_data(
+    sections = build_sections_data(
         removed,
         changed,
         added,
@@ -557,6 +570,7 @@ def build_html_document(
         relevance_of=contract_relevance_of,
         evidence_tiers=getattr(result, "evidence_tiers", None) or (),
         use_cases=use_cases_by_finding_for(result),
+        non_gating=non_gating,
     )
 
     empty_state: dict[str, object] | None = None
@@ -707,92 +721,3 @@ def compute_use_case_impact(
     from .report.use_case_impact_render import use_case_impact_block
 
     return use_case_impact_block(result, displayed)  # type: ignore[return-value]
-
-
-def compute_not_evaluated_section(
-    not_evaluated: list[object],
-    relevance_of: Callable[[object], object] | None = None,
-) -> NotEvaluatedSectionData:
-    """Collect the rows of the ADR-049 D1 "Not Evaluated (Contract)" table.
-
-    Resolving each finding's contract relevance is the caller's own predicate
-    (``contract_finding_relevance.contract_relevance_of``), threaded in rather than
-    imported here so this stays a plain projection of already-decided facts.
-    """
-    rows = []
-    for ch in not_evaluated:
-        relevance = relevance_of(ch) if relevance_of is not None else None
-        rows.append(
-            NotEvaluatedRow(
-                symbol=getattr(ch, "symbol", "") or "",
-                kind_value=str(getattr(getattr(ch, "kind", None), "value", "")),
-                relevance=str(getattr(relevance, "value", "") or ""),
-                reason=str(getattr(ch, "contract_reason_code", "") or ""),
-                correlated=str(getattr(ch, "correlated_change_kind", None) or ""),
-            )
-        )
-    return NotEvaluatedSectionData(rows=tuple(rows))
-
-
-def _build_sections_data(
-    removed: list[object],
-    changed: list[object],
-    added: list[object],
-    suppressed: list[object],
-    suppressed_count: int,
-    *,
-    not_evaluated: list[object] | None = None,
-    relevance_of: Callable[[object], object] | None = None,
-    evidence_tiers: Sequence[str] = (),
-    use_cases: Mapping[str, tuple[str, ...]] | None = None,
-) -> list[dict[str, object]]:
-    """Build the ordered list of section facts for the native HTML report
-    body -- the JSON-shaped counterpart of the pre-split
-    ``_build_sections_html``, which built markup directly. Each entry names
-    its own ``kind`` so ``report.render_html.render_html_document`` can
-    dispatch without making any decision of its own.
-
-    *not_evaluated* (ADR-049 D1) renders last, in its own non-verdict
-    section: those findings were never scored by compatibility policy, so
-    filing them under Removed/Changed/Added would contradict the verdict
-    banner at the top of the same page. Defaults to nothing, so a run without
-    `--contract` produces the identical document it always did.
-
-    *evidence_tiers* is threaded into `compute_full_change_rows` so an
-    UNATTRIBUTED finding's impact text carries the same evidence caveat the
-    JSON/Markdown views already do (Codex review).
-    """
-    sections: list[dict[str, object]] = []
-    for title, anchor, css_class, items in (
-        ("⛔ Removed Symbols", "removed", "section-removed", removed),
-        ("⚠️ Changed Symbols", "changed", "section-changed", changed),
-        ("✅ Added Symbols", "added", "section-added", added),
-        ("🔕 Suppressed Changes", "suppressed", "section-suppressed", suppressed),
-    ):
-        if items:
-            sections.append(
-                {
-                    "kind": "changes",
-                    "title": title,
-                    "anchor": anchor,
-                    "css_class": css_class,
-                    "rows": [
-                        dataclasses.asdict(row)
-                        for row in compute_full_change_rows(
-                            items, evidence_tiers, use_cases
-                        )
-                    ],
-                }
-            )
-    if suppressed_count and not suppressed:
-        sections.append({"kind": "suppressed_placeholder", "count": suppressed_count})
-    if not_evaluated:
-        sections.append(
-            {
-                "kind": "not_evaluated",
-                "data": dataclasses.asdict(
-                    compute_not_evaluated_section(not_evaluated, relevance_of)
-                ),
-            }
-        )
-    return sections

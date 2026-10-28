@@ -35,6 +35,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
+from ..policy.acknowledgment_breaks import accepted_break_ids as accepted_break_ids
 from ..policy.classification import evidence_status_for_result, impact_for
 from ..policy.evaluate import effective_kind_sets, evaluate
 from ..policy.gate_decision import gate_decision_for_result
