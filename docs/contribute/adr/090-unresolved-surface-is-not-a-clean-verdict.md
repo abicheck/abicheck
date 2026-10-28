@@ -116,16 +116,16 @@ Proposed. Nothing below is implemented.
 A comparison is **unconfirmed** when all of the following hold:
 
 - **(a)** The change-derived verdict is `NO_CHANGE`, `COMPATIBLE` or `COMPATIBLE_WITH_RISK`. An observed `API_BREAK` or `BREAKING` is never downgraded or overridden by this rule.
-- **(b)** Type-level evidence is **absent on at least one compared side**. Type-level evidence means either a DWARF type/layout section or a header AST for that side.
-- **(c)** The two operands are **not byte-identical** (equal SHA-256). Identical operands are a fact (`NO_CHANGE` by construction), not an evidence gap, so they are exempt.
+- **(b)** Type-level evidence is **absent on at least one compared side**. A side has type-level evidence when any supported backend parsed usable type/layout data for it, or a header AST was parsed for it. The backends are DWARF; PDB for PE (`pdb_metadata.parse_pdb_debug_info`); BTF and CTF for ELF (their `to_dwarf_metadata()`, which sets `has_dwarf` when the section parsed); and the header AST (`from_headers`). A side with only a symbol or export table has none of these.
+- **(c)** The run is **not an exempt identical pair**. A pair is exempt only when the two binaries have equal SHA-256 *and* the effective comparison inputs are identical on both sides: the same type-level sources (no headers on either side, or the same header set) and the same debug-artifact selection, including a PE's external PDB and a detached debug file. Identical bytes do not make the comparison identical. An identical binary with a header on only one side has different effective inputs, and its one-sided evidence gap is real. An exempt pair is `NO_CHANGE` by construction, not an evidence gap.
 
 The public surface being unresolved (`scope.resolved: false`) is recorded as a reason in the notes but is **not** a required conjunct. The brief proposed "public surface unresolved AND type-level evidence absent on either side". The mixed run in the matrix above (one side DWARF, one side stripped, no headers) is the reason for dropping the conjunct: it has a resolved scope, has type-level evidence missing on one side, and reads `COMPATIBLE`/0 with the enum removal unreported. Keeping the conjunct would leave that case as a clean-looking pass.
 
 Under D1, the table of cells is:
 
-- Both sides have DWARF, or both have headers: not triggered.
-- One side has headers and the other is stripped with no headers: triggered (the stripped side has no type-level evidence).
-- Both sides stripped, no headers: triggered.
+- Both sides have type-level evidence, from the same backend or different ones (DWARF, PDB, BTF/CTF, or headers): not triggered. This includes a headerless PE with PDB layouts on both sides and an ELF with BTF or CTF layouts on both sides.
+- One side has type-level evidence and the other has none (for example, headers on one side and a stripped binary with no headers on the other, or a PE with a PDB on one side only): triggered.
+- Both sides stripped, no headers, and not an exempt identical pair under (c): triggered.
 
 ### D2. The outcome
 
@@ -148,7 +148,7 @@ Where the value lives: `Verdict` (`abicheck/model/change_catalog/registry.py`) i
 - Stages (pre-1.0; the surface reset precedent is [ADR-043](043-cli-pre-1.0-surface-reset.md)):
   - **Stage 0** (this ADR accepted): no behaviour change; the design is recorded and the test matrix below is built, with the oracle described there.
   - **Stage 1** (next minor release): the `UNCONFIRMED` label ships in the headline, JSON, SARIF and Markdown, with exit still 0. stderr notice names the stage-2 exit change and the `assurance.unconfirmed` key. Changelog fragment (`scriv create`) marks it a behaviour change, because any consumer matching `verdict == "NO_CHANGE"` on a stripped run will see it change.
-  - **Stage 2** (the following minor release): default exit becomes 1 (`assurance.unconfirmed: fail`). Changelog fragment, `docs/reference/exit-codes.md` migration note, and the known-gap entry from 2026-10-15 closed.
+  - **Stage 2** (the following minor release): default exit becomes 1 (`assurance.unconfirmed: fail`). Changelog fragment, `docs/reference/exit-codes.md` migration note, and the headline known-gap entry from 2026-10-15 closed (the alignment-noise entry stays open).
 - Release (directory/package) fan-out: each member's own triggered contribution folds with `max`, the same pattern as ADR-071.
 
 ### D5. Remedy wording
@@ -204,17 +204,17 @@ Exact list for the implementation PR. Each item needs a check, not just a text u
 **Docs**
 - `docs/reference/exit-codes.md`: the exit-1 row, the analysis-assurance section, and the "Exit `0` covers `NO_CHANGE`, `COMPATIBLE`, and `COMPATIBLE_WITH_RISK`" warning, which needs `UNCONFIRMED` added as a non-zero case.
 - `docs/learn/verdicts.md`: the verdict-to-exit chain.
-- `docs/contribute/known-gaps.md`: the 2026-10-15 Rust entry and its write-up, closed at stage 2.
+- `docs/contribute/known-gaps.md`: the headline Rust entry dated 2026-10-15 is closed at stage 2, and section 1 of its write-up is marked closed. The separate alignment-noise entry dated 2026-10-15 stays OPEN, and section 2 of the write-up is left as it is.
 
 ## Consequences
 
 - **Stripped and debug-less libraries stop passing by default.** A `compare` with no type-level evidence on a side exits 1 from stage 2. That is the point of the change, and it is the largest population affected. Default `cargo build --release` artifacts are the known case; the blast radius across other ecosystems is not measured.
-- **Byte-identical stripped inputs are the exception that matters for CI.** Under D1(c) they remain `NO_CHANGE`, because they are provably the same. Without that exemption, `compare same.so same.so` on stripped artifacts would fail, which is absurd.
+- **Identical stripped inputs are the exception that matters for CI.** Under D1(c), a pair with equal SHA-256 and identical effective inputs on both sides (for example, `compare same.so same.so` with no headers or debug artifacts on either side) remains `NO_CHANGE`, because it is provably the same comparison. Without that exemption, `compare same.so same.so` on stripped artifacts would fail, which is absurd. The exemption does not extend to a byte-identical pair whose sides differ in headers or debug artifacts; that pair is `UNCONFIRMED` (matrix row 17).
 - **Consumers that match on `verdict` see a new value.** Stage 1 exists so this breaks with a warning first. Any consumer that enumerates verdicts exhaustively needs `UNCONFIRMED` added.
 - **The standalone-binary promise is preserved as admission, not acceptance.** `vision.md` says "standalone binaries are first-class inputs, even stripped ones" and "debug information is consumed when present and is never a prerequisite". This ADR does not make stripped binaries inputs that are refused. It changes what a clean result on them may claim. The vision's own wording ("the coverage stated") supports that reading, but a maintainer should confirm it, because it is the strongest tension with the vision.
 - **Header-less exit changes have a precedent in both directions.** [ADR-084](084-binary-depth-source-contract-gate.md) lowered a header-less exit from 2 to 0, with maintainer approval. This ADR raises a header-less exit from 0 to 1, and it needs the same kind of approval.
 - **The one-sided DWARF case must not depend on scope.** Because D1 does not require `scope.resolved: false`, the mixed run stops being a clean pass. It also means `scope.resolved` no longer carries the whole burden of the trigger.
-- **Known-gap closure.** The 2026-10-15 Rust entry is closed at stage 2 and its write-up is updated.
+- **Known-gap closure, headline only.** The headline entry dated 2026-10-15 ("A default release-profile Rust run without headers reports `NO_CHANGE ... ACCEPTED` while its own warnings say the result is unconfirmed") is closed at stage 2, and section 1 of its write-up is marked closed. The alignment-noise entry dated 2026-10-15 ("Header-less runs flag `exported_object_alignment_reduced` on an unrelated exported static") shares that write-up, and this ADR does not fix it. It stays OPEN, and section 2 of the write-up is left as it is. Under D1, a header-less Rust run that also carries the alignment finding reads `UNCONFIRMED`, and that finding stays in the report. This ADR does not suppress it.
 - **Traceability.** `docs/contribute/adr/adr-surface-registry.yaml` gets a `gap` entry for this ADR, following ADR-079 and ADR-083, because nothing is shipped yet.
 
 ## Alternatives considered
@@ -233,9 +233,9 @@ Exact list for the implementation PR. Each item needs a check, not just a text u
 
 ## Test matrix
 
-The test matrix is the proof this ADR asks for. Its oracle is not the implementation's own helper. The oracle is: (i) `catalog/cases/case19_enum_member_removed` as ground truth (`enum_member_removed` is BREAKING, exit 4, when type-level evidence is present on both sides); (ii) the rule "a triggered comparison must never read `NO_CHANGE`, `COMPATIBLE` or `COMPATIBLE_WITH_RISK` with exit 0 in any surface"; and (iii) byte-identity, which is decided by the operands' hashes, not by the implementation under test.
+The test matrix is the proof this ADR asks for. Its oracle is not the implementation's own helper. The oracle is: (i) `catalog/cases/case19_enum_member_removed` as ground truth (`enum_member_removed` is BREAKING, exit 4, when type-level evidence is present on both sides); (ii) the rule "a triggered comparison must never read `NO_CHANGE`, `COMPATIBLE` or `COMPATIBLE_WITH_RISK` with exit 0 in any surface"; and (iii) the identical-pair exemption, which is decided by the operands' hashes and the effective input configuration recorded per side, not by the implementation under test.
 
-Dimensions: stripped (`strip --strip-debug`) versus unstripped (`-g`), per side (both, and the mixed cases in both orientations); headers none versus per-side `-H`; C versus C++; live versus stored (`dump` then `compare`); gcc and clang. Plus release fan-out with one stripped member, and identical-input cases.
+Dimensions: stripped (`strip --strip-debug`) versus unstripped (`-g`), per side (both, and the mixed cases in both orientations); the type-level backend per side (DWARF, PDB, BTF, CTF, headers, or none); headers none versus per-side `-H`; C versus C++; live versus stored (`dump` then `compare`); gcc and clang. Plus release fan-out with one stripped member, and identical-input cases.
 
 | # | Operands | Headers | Language | Live / stored | Expected after implementation | Observed today |
 |---|---|---|---|---|---|---|
@@ -247,17 +247,23 @@ Dimensions: stripped (`strip --strip-debug`) versus unstripped (`-g`), per side 
 | 6 | unstripped both | per-side | C | live | BREAKING / 4 | BREAKING / 4 (verified) |
 | 7 | old unstripped, new stripped | none | C | live | UNCONFIRMED / 1 (verdict is `COMPATIBLE` today) | COMPATIBLE / 0, enum removal not reported (verified) |
 | 8 | old stripped, new unstripped | none | C | live | UNCONFIRMED / 1 | not run |
-| 9 | old unstripped, new stripped | `-H` on the new side only | C | live | UNCONFIRMED / 1 if no change is observed (the old side still has no type-level evidence); BREAKING if the change is observed | not run |
-| 10 | stripped both, byte-identical | none | C | live | NO_CHANGE / 0 (exempt by D1(c)) | not run |
+| 9 | old stripped (no headers), new stripped with `-H` on the new side only | C | live | UNCONFIRMED / 1 if no change is observed. For case 19 the old side cannot show `Status::FOO`, so the removal is not observed and the result is UNCONFIRMED / 1. BREAKING if a change is observed through the evidence both sides have | not run |
+| 10 | stripped both, byte-identical, no headers or debug artifacts on either side | none | C | live | NO_CHANGE / 0 (exempt by D1(c): identical inputs) | not run |
 | 11 | stripped both | none | C++ | live and stored | UNCONFIRMED / 1 | not run |
 | 12 | stripped both | per-side | C++ | live | BREAKING where the change is header-visible | not run |
-| 13 | rows 1–9 | — | clang | live and stored | same as gcc | not run |
+| 13 | rows 1–9 and 16–21 | — | clang | live and stored | same as gcc | not run |
 | 14 | release directory, one stripped member | none | C | release fan-out | release exit = max of member contributions; the member reads UNCONFIRMED | not run |
-| 15 | default `cargo build --release` cdylib with a return-type change | none | Rust | live | BREAKING if observed, otherwise UNCONFIRMED / 1 (closes the 2026-10-15 gap) | NO_CHANGE / 0 (documented in the known-gap write-up, not re-run here) |
+| 15 | default `cargo build --release` cdylib with a return-type change | none | Rust | live | BREAKING if observed, otherwise UNCONFIRMED / 1 (closes the headline portion of the 2026-10-15 gap; the alignment-noise portion is not covered) | NO_CHANGE / 0 (documented in the known-gap write-up, not re-run here) |
+| 16 | old unstripped (`-g`), new stripped with `-H` on the new side only | C | live | Not triggered: both sides have type-level evidence. Negative control. BREAKING / 4 for case 19 (the removal is seen through the old side's DWARF); never UNCONFIRMED | not run |
+| 17 | stripped both, byte-identical, `-H` on the new side only | C | live | UNCONFIRMED / 1 when no change is observed. The effective inputs differ, so D1(c) does not exempt the pair. An observed break stays BREAKING per D1(a) | not run |
+| 18 | headerless PE, PDB layouts on both sides, a struct layout change | C | live | Not UNCONFIRMED: PDB gives type-level evidence on both sides. Negative control. BREAKING / 4 where the layout change is observed through the PDBs | not run |
+| 19 | headerless PE, PDB on the new side only, no change observed | C | live | UNCONFIRMED / 1 (the old side has no type-level evidence) | not run |
+| 20 | ELF stripped of DWARF with a `.BTF` section on both sides, a struct layout change | C | live | Not UNCONFIRMED: BTF gives type-level evidence on both sides. Negative control. BREAKING / 4 where the layout change is observed through BTF | not run |
+| 21 | ELF stripped of DWARF with a `.ctf` or `.SUNW_ctf` section on both sides, a struct layout change | C | live | Same as row 20, through CTF | not run |
 
 Assertions required across every surface in the Surfaces list, not only the CLI: the JSON `verdict`, `run_outcome.compatibility`, `exit.code`, `release_recommendation.version_bump`; the SARIF and JUnit output; the Markdown and HTML headline; the Action outputs; the typed `CompareRequest` result; the `aggregate` roll-up. Each must agree with the others for a given cell. A `NO_CHANGE` or `COMPATIBLE` with exit 0 on any row where D1's trigger holds fails the matrix.
 
-Negative controls: rows 1, 2, 5 and 6 must keep their current verdict and exit. Any change on those rows is over-triggering.
+Negative controls: rows 1, 2, 5, 6, 16, 18 and 20 must not be `UNCONFIRMED` and must keep their observed verdict and exit. Any change on those rows is over-triggering.
 
 Per the repository's bug-class rule, the regression test exercises the invariant with more than the reported input: at least the rows above plus a generated set of stripped-versus-unstripped pairs, against the oracle, not against the trigger helper.
 
@@ -265,7 +271,7 @@ Per the repository's bug-class rule, the regression test exercises the invariant
 
 1. **Trigger breadth.** D1 includes `COMPATIBLE_WITH_RISK`. Should risk-only results on a debug-less side be `UNCONFIRMED`, or should only `NO_CHANGE` and `COMPATIBLE` be triggered? Including it is the rule as written; excluding it is narrower and would still leave the case-19 defect fixed.
 2. **Verdict enum versus compatibility field.** D2 adds `UNCONFIRMED` to the report's verdict vocabulary. The change-kind `Verdict` enum stays unchanged. Confirm this split is acceptable to the `*_KINDS` derivation and to ADR-042.
-3. **Stored-snapshot decidability.** D1(b) must be decidable from a stored snapshot. The stored stripped run is `partial` and `elf_only`, so the fact is at least partly recorded. It has not been confirmed which snapshot field records per-side DWARF or header presence, and the implementation must check that before stage 1.
+3. **Stored-snapshot decidability.** D1(b) must be decidable from a stored snapshot. The stored stripped run is `partial` and `elf_only`, so the fact is at least partly recorded. It has not been confirmed which snapshot field records per-side type-level evidence from each backend (DWARF, PDB, BTF, CTF, headers). `abicheck/confidence.py` collapses these to the `has_dwarf`, `has_dwarf_advanced` and `has_headers` booleans, so per-backend provenance may not be stored. The implementation must check that before stage 1.
 4. **Stage 1 label change.** Should the label ship with exit 0 for one release (as proposed), or should label and exit move together? The first is gentler; the second is one fewer release of a known-wrong label.
 5. **SARIF level.** What SARIF `level` and notification shape does `UNCONFIRMED` take? Using `note` would repeat the clean-looking mistake; `warning` is proposed.
 6. **Blast radius of `require_complete`.** Measure how many current `partial` runs (across the catalog and the test corpus) would newly exit 1 under the alternative in Alternatives 3, so that the trade-off is recorded with numbers rather than by argument.
