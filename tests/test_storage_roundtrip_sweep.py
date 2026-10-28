@@ -397,6 +397,14 @@ def _dataclass_strategy(cls: type) -> st.SearchStrategy[Any]:
     return built if canonical is None else built.map(canonical)
 
 
+_SCALARS: dict[Any, st.SearchStrategy[Any]] = {
+    bool: st.booleans(),
+    int: _INT,
+    float: _FLOAT,
+    str: _TEXT,
+}
+
+
 def _strategy(tp: Any) -> st.SearchStrategy[Any]:
     """A strategy of values of type ``tp``, or ``TypeError`` if none is known.
 
@@ -410,21 +418,27 @@ def _strategy(tp: Any) -> st.SearchStrategy[Any]:
     if tp is type(None):
         return st.none()
 
-    origin = typing.get_origin(tp)
-    args = typing.get_args(tp)
-
-    if origin is typing.Union or origin is types.UnionType:
-        return st.one_of(*(_strategy(arg) for arg in args))
+    if tp in _SCALARS:
+        return _SCALARS[tp]
     if inspect.isclass(tp) and issubclass(tp, enum.Enum):
         return st.sampled_from(list(tp))
-    if tp is bool:
-        return st.booleans()
-    if tp is int:
-        return _INT
-    if tp is float:
-        return _FLOAT
-    if tp is str:
-        return _TEXT
+    container = _container_strategy(tp)
+    if container is not None:
+        return container
+    if inspect.isclass(tp) and dataclasses.is_dataclass(tp):
+        return _dataclass_strategy(tp)
+    raise TypeError(
+        f"the round-trip sweep cannot generate values of type {tp!r}; add a "
+        "strategy here, a builder in _BUILDERS, or a justified _SKIPPED entry"
+    )
+
+
+def _container_strategy(tp: Any) -> st.SearchStrategy[Any] | None:
+    """A strategy for a union or generic container type, else ``None``."""
+    origin = typing.get_origin(tp)
+    args = typing.get_args(tp)
+    if origin is typing.Union or origin is types.UnionType:
+        return st.one_of(*(_strategy(arg) for arg in args))
     if origin is tuple:
         if len(args) == 2 and args[1] is Ellipsis:
             return st.lists(_strategy(args[0]), max_size=_MAX_CONTAINER).map(tuple)
@@ -439,12 +453,7 @@ def _strategy(tp: Any) -> st.SearchStrategy[Any]:
         )
     if origin is collections.abc.Sequence:
         return st.lists(_strategy(args[0]), max_size=_MAX_CONTAINER)
-    if inspect.isclass(tp) and dataclasses.is_dataclass(tp):
-        return _dataclass_strategy(tp)
-    raise TypeError(
-        f"the round-trip sweep cannot generate values of type {tp!r}; add a "
-        "strategy here, a builder in _BUILDERS, or a justified _SKIPPED entry"
-    )
+    return None
 
 
 def _class_strategy(cls: type) -> st.SearchStrategy[Any]:
