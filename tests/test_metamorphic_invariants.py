@@ -51,7 +51,6 @@ import shutil
 import subprocess
 import sys
 import tempfile
-import xml.etree.ElementTree as ET
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
@@ -59,6 +58,7 @@ from typing import Any
 
 import example_catalog
 import pytest
+from defusedxml.ElementTree import parse as defused_parse
 
 from abicheck.model.change_catalog.assembled import REGISTRY
 from abicheck.model.change_catalog.dimensions import ChangeOperation
@@ -555,7 +555,7 @@ def test_junit_gate_matches_gating_findings(case: str, lab: _Lab) -> None:
     when the JSON report has gating findings."""
     run = lab.live(case)
     gating = run.json()["result_counts"]["gating"]
-    root = ET.parse(run.files["junit"]).getroot()
+    root = defused_parse(run.files["junit"]).getroot()
     props: dict[str, str] = {}
     for prop in root.iter("property"):
         props.setdefault(prop.get("name", ""), prop.get("value", ""))
