@@ -1063,7 +1063,9 @@ def compute_review_digest(
         disposition_audit=disposition_audit_reusing_document(
             result, envelope.severity_config, envelope.document
         ),
-        surface_changes=compute_surface_changes(result, findings),
+        surface_changes=compute_surface_changes(
+            result, findings, severity_config=envelope.severity_config
+        ),
         env_matrix_source_sha256=result.env_matrix_source_sha256,
         pattern_modulations=tuple(getattr(result, "pattern_modulations", ()) or ()),
         review_groups=groups,
@@ -1087,10 +1089,8 @@ def compute_headline_table(
 ) -> _rmd.HeadlineTable:
     """The structured intermediate for the report's headline summary table.
 
-    ADR-049 D1/D11: the four counts are over the *evaluated* findings only,
-    so a `NO_CHANGE` verdict beside a populated "Not Evaluated" section gets
-    the reconciling count (row absent unless contract evaluation opted in).
-    Stamped cross-source hygiene is counted on its own row, not as risk.
+    ADR-049 D1/D11: counts are over *evaluated* findings; stamped hygiene
+    risk gets its own row (``change_inventory.headline_hygiene_fields``).
     """
     classified = classification_for(result)
     return _rmd.HeadlineTable(
@@ -1104,7 +1104,7 @@ def compute_headline_table(
         risk=len(_inventory.unstamped(classified.risk)),
         compatible=len(classified.compatible),
         not_evaluated=len(result.not_evaluated),
-        **_inventory.headline_hygiene_fields(result.changes),
+        **_inventory.headline_hygiene_fields(classified.risk),
     )
 
 

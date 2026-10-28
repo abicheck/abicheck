@@ -686,7 +686,7 @@ def render_headline_table(table: HeadlineTable) -> list[str]:
     ]
     if table.hygiene_total:
         lines.append(
-            f"| Cross-source hygiene (standing, not changes) | {table.hygiene_total}"
+            f"| Cross-source hygiene findings (not counted above) | {table.hygiene_total}"
             f" ({table.hygiene_introduced} introduced) |"
         )
     if table.not_evaluated:

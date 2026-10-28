@@ -48,6 +48,7 @@ from typing import TYPE_CHECKING, Any
 
 from ..model.change_catalog.registry import ChangeEntity
 from ..policy.evaluate import effective_kind_sets
+from .change_inventory import is_background_hygiene
 from .change_operation import entity_for_change, operation_for_kind
 from .finding import ReportFinding, build_report_findings, report_findings_for
 from .markdown_budget import clip, clip_name
@@ -55,6 +56,7 @@ from .markdown_budget import clip, clip_name
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from ..checker_types import DiffResult
     from ..model.change import Change
+    from ..policy.severity import SeverityConfig
 
 
 @dataclass(frozen=True, slots=True)
@@ -196,6 +198,7 @@ def compute_surface_changes(
     findings: Sequence[ReportFinding] | None = None,
     *,
     changes: Sequence[Change] | None = None,
+    severity_config: SeverityConfig | None = None,
 ) -> SurfaceChangeSection:
     """Group *result*'s findings into additions/removals/modifications.
 
@@ -210,6 +213,10 @@ def compute_surface_changes(
     section would show a finding the rest of the same view just filtered
     out (workstream G's "rendering never changes a gate" invariant is about
     verdicts/exit codes, not about which findings a filtered view lists).
+
+    Non-gating PERSISTENT hygiene is left out under *severity_config*, as in
+    review groups (``change_inventory.is_background_hygiene``), so the
+    Markdown fallback never lists what the groups omit.
     """
     if findings is not None:
         resolved = findings
@@ -226,6 +233,8 @@ def compute_surface_changes(
     removals: list[SurfaceChangeEntry] = []
     modifications: list[SurfaceChangeEntry] = []
     for finding in resolved:
+        if is_background_hygiene(finding, severity_config):
+            continue
         kind = finding.change.kind
         kind_value = kind.value if hasattr(kind, "value") else str(kind)
         if (
@@ -252,6 +261,7 @@ def add_surface_changes(
     d: dict[str, object],
     result: DiffResult,
     changes: Sequence[Change] | None = None,
+    severity_config: SeverityConfig | None = None,
 ) -> None:
     """Attach the ``surface_changes`` block to a JSON report (schema 3.9).
 
@@ -264,7 +274,9 @@ def add_surface_changes(
     filtered list (see :func:`compute_surface_changes`); omit it only when
     the caller has no filtering of its own to honor.
     """
-    d["surface_changes"] = compute_surface_changes(result, changes=changes).to_dict()
+    d["surface_changes"] = compute_surface_changes(
+        result, changes=changes, severity_config=severity_config
+    ).to_dict()
 
 
 def _declaration_line(entry: SurfaceChangeEntry) -> str:

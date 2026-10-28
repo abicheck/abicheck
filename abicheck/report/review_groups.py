@@ -202,28 +202,12 @@ def build_review_groups(
     *severity_config*, ``None`` for the legacy verdict scheme -- so it agrees
     with the JSON per-finding field and with the exit code.
     """
-    from ..model.evidence_status import CrossSourceEvolution
+    from .change_inventory import is_background_hygiene
 
     buckets: dict[tuple[str, str, str], list[ReportFinding]] = {}
     for finding in findings:
         change = finding.change
-        # PERSISTENT cross-source hygiene already existed on the OLD side: it
-        # is standing inventory, not something this change asks a reviewer
-        # to look at. It stays in `changes` and the hygiene section/counts;
-        # grouping it gave one "modified" group per symbol (43k on MKL). A
-        # persistent finding the gate still counts (e.g. every category set
-        # to `error`) keeps its group: groups must cover every gating finding.
-        if (
-            getattr(change, "cross_source_evolution", None)
-            == CrossSourceEvolution.PERSISTENT
-            and resolved_gate_contribution(
-                change,
-                severity_config,
-                verdict=finding.verdict,
-                category=finding.category,
-            )
-            == 0
-        ):
+        if is_background_hygiene(finding, severity_config):
             continue
         kind = change.kind.value
         family = _family(kind)
