@@ -19,6 +19,7 @@ the per-TU argv builders that turn a ``CompileUnit`` into a ``clang``
 from __future__ import annotations
 
 import shutil
+import sys
 from pathlib import Path
 
 from ..._compiler_options import clang_ast_dump_tail
@@ -262,3 +263,18 @@ def build_clang_macro_command(
     else:
         preprocess = ["-E", "-dD"]
     return [clang_bin, *cmd, *preprocess, "-ferror-limit=0", str(source)]
+
+
+def dump_linkage_context(compile_unit: CompileUnit) -> tuple[str | None, bool]:
+    """The ``(target_triple, is_cxx)`` the AST dump runs under, for the
+    Darwin-aware C-linkage rule.
+
+    An explicit triple on the unit wins. Otherwise the dump passes no
+    ``--target`` (:func:`build_clang_command`) and clang uses the host default,
+    which on a Darwin host is Darwin, so a plain ``clang++ -c`` build on macOS
+    keeps its leading-underscore handling. Off a Darwin host an unspecified
+    target stays unknown (``None``) rather than guessed.
+    """
+    invocation = parse_compile_invocation(compile_unit)
+    fallback = "unknown-apple-darwin" if sys.platform == "darwin" else None
+    return invocation.target_triple or fallback, invocation.language == "c++"

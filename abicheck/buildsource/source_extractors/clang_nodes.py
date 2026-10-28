@@ -43,6 +43,10 @@ import json
 from typing import Any
 
 from ...model.graph_identity import checkout_stable_spelling
+from ...model.name_decoration.macho_underscore import (
+    is_c_linkage_mangling,
+    strip_darwin_itanium_decoration,
+)
 
 #: Literal nodes whose ``value`` is a stable, human-meaningful constexpr value.
 _LITERAL_NODE_KINDS = frozenset(
@@ -441,43 +445,106 @@ def _signature_desugared(node: dict[str, Any]) -> str:
     return ""
 
 
-def _mangled(node: dict[str, Any]) -> str:
+def _has_asm_label(node: dict[str, Any]) -> bool:
+    """Whether *node* carries an explicit ``asm("...")`` label: clang's own
+    ``AsmLabelAttr`` child, the same signal the header-AST backend reads."""
+    children = node.get("inner")
+    return isinstance(children, list) and any(
+        isinstance(child, dict) and child.get("kind") == "AsmLabelAttr"
+        for child in children
+    )
+
+
+def _is_c_linkage(
+    node: dict[str, Any], target_triple: str | None, is_cxx: bool
+) -> bool:
+    """Whether *node* has C linkage, by the one Darwin-aware rule.
+
+    Delegates to ``model.name_decoration.macho_underscore.is_c_linkage_mangling``,
+    the test the header-AST backend also applies, so the two backends agree on
+    every spelling. ``mangledName`` absent or empty is never C linkage (the
+    guard keeps an empty spelling from matching an empty name).
+    """
+    mangled = node.get("mangledName")
+    if not isinstance(mangled, str) or not mangled:
+        return False
+    return is_c_linkage_mangling(
+        mangled,
+        str(node.get("name", "")),
+        target_triple,
+        has_asm_label=_has_asm_label(node),
+        is_cxx=is_cxx,
+    )
+
+
+def _mangled(
+    node: dict[str, Any], target_triple: str | None = None, *, is_cxx: bool = False
+) -> str:
+    """The C++ mangled name of *node*, or ``""`` when it has none.
+
+    A C-linkage declaration (plain C or ``extern "C"``) carries no mangling:
+    its ``mangledName`` is the bare name, or on Darwin that name with the
+    linker's leading underscore. Either way it is not reported as ``mangled``
+    (see :func:`_c_linkage_name` for its linker identity). On Darwin a
+    compiler-produced ``__Z...`` name is stripped to ``_Z...``, the same
+    spelling the header backend's ``Function.mangled`` carries; an explicit
+    ``asm`` label is never stripped.
+    """
     mangled = node.get("mangledName")
     name = node.get("name", "")
-    if isinstance(mangled, str) and mangled and mangled != name:
-        return (
-            mangled[1:] if mangled.startswith("__Z") else mangled
-        )  # macOS ABI underscore (Codex review)
+    if not isinstance(mangled, str) or not mangled or mangled == name:
+        return ""
+    if _is_c_linkage(node, target_triple, is_cxx):
+        return ""
+    return strip_darwin_itanium_decoration(
+        mangled,
+        mangled,
+        target_triple,
+        name=str(name),
+        is_extern_c=False,
+        has_asm_label=_has_asm_label(node),
+    )
+
+
+def _c_linkage_name(
+    node: dict[str, Any], target_triple: str | None = None, *, is_cxx: bool = False
+) -> str:
+    """The linker identity of a C-linkage declaration, or ``""``.
+
+    Returns the bare C name: the decoration-free spelling the L2 header graph
+    keys the same declaration on (``Function.mangled`` is the stripped name on
+    every platform). On Darwin clang reports ``_name`` for it, and the Mach-O
+    symbol is that ``_name``, but the identity both graphs join on drops the
+    leading underscore, so this returns ``name`` on every platform. Kept as
+    ``names["linker"]`` so the L5 graph can key the declaration on the same
+    name the L2 header graph uses (evidence-entity-model invariant I1).
+    """
+    if _is_c_linkage(node, target_triple, is_cxx):
+        return str(node.get("name", ""))
     return ""
-
-
-def _c_linkage_name(node: dict[str, Any]) -> str:
-    """The observed linker symbol of a C-linkage declaration -- clang reports
-    ``mangledName == name`` there, which :func:`_mangled` deliberately treats
-    as "no mangling". Kept as the ``names["linker"]`` identity so the L5 graph
-    can key the declaration on the same linker name the L2 header graph
-    uses (evidence-entity-model invariant I1)."""
-    mangled = node.get("mangledName")
-    name = node.get("name", "")
-    if isinstance(mangled, str) and mangled and mangled == name:
-        return mangled
-    return ""
-
-
-def _qualified(scope: list[str], name: str) -> str:
-    return "::".join([*scope, name]) if scope else name
 
 
 def _entity_names(
-    name: str, mangled: str = "", node: dict[str, Any] | None = None
+    name: str,
+    mangled: str = "",
+    node: dict[str, Any] | None = None,
+    target_triple: str | None = None,
+    *,
+    is_cxx: bool = False,
 ) -> dict[str, str]:
     names = {"source_qualified": name}
     if mangled:
         names["mangled"] = mangled
-    linker = _c_linkage_name(node) if node is not None else ""
+    linker = (
+        _c_linkage_name(node, target_triple, is_cxx=is_cxx) if node is not None else ""
+    )
     if linker:
         names["linker"] = linker
     return names
+
+
+def _qualified(scope: list[str], name: str) -> str:
+    return "::".join([*scope, name]) if scope else name
 
 
 def _entity_ownership(visibility: str, origin: str) -> dict[str, str]:

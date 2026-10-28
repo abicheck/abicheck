@@ -554,7 +554,7 @@ COVERAGE: dict[str, str] = {
     "abicheck.compare.elf_capture_identity:both_captured_elf_identity": "G23 ELF capture gate (tests/test_g23_elf_facts.py legacy-baseline cases)",
     "abicheck.model.source_graph:function_decl_identity": "string probe x path transforms",
     "abicheck.model.name_decoration.macho_underscore:decode_itanium": "Mach-O codec; mutant M2",
-    "abicheck.extract.headers.clang.context:strip_darwin_itanium_decoration": "Mach-O codec",
+    "abicheck.model.name_decoration.macho_underscore:strip_darwin_itanium_decoration": "Mach-O codec",
     "abicheck.extract.export_symbol_identity:msvc_export_function": "x86 PE codec",
     "abicheck.model.special_member_identity:special_member_variant_aliases": "ctor/dtor codec; mutant M6",
     "abicheck.compare.finding_identity.declaration_identity:resolve_function_identity": "string probe + snapshot level",

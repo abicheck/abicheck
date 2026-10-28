@@ -454,7 +454,7 @@ def parse_function_element(
     # Itanium spelling even under an explicit Darwin `--target=` (unlike
     # clang's own `-ast-dump=json` `mangledName`, which genuinely does
     # carry Darwin's extra linker-decoration underscore -- see
-    # `extract.headers.clang.context.strip_darwin_itanium_decoration`'s
+    # `model.name_decoration.macho_underscore.strip_darwin_itanium_decoration`'s
     # docstring) -- confirmed by direct experimentation, not assumed.
     # Deliberately NOT run through `name_decoration.macho.decode_itanium` here
     # the way the clang backend is: unlike clang's decoration, a castxml
