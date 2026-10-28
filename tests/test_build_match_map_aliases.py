@@ -84,3 +84,20 @@ def test_zero_inode_is_not_an_identity(
     monkeypatch.setattr(Path, "stat", fake_stat)
     _, warnings = build_match_map(sorted(tmp_path.iterdir()))
     assert len(warnings) == 1
+
+
+def test_unstatable_candidate_counts_as_its_own_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    (tmp_path / "libfoo.so").write_bytes(b"x")
+    (tmp_path / "libfoo.so.2").write_bytes(b"y")
+    real_stat = Path.stat
+
+    def fake_stat(self: Path, *a: object, **k: object) -> os.stat_result:
+        if self.name == "libfoo.so":
+            raise PermissionError(self)
+        return real_stat(self, *a, **k)
+
+    monkeypatch.setattr(Path, "stat", fake_stat)
+    _, warnings = build_match_map(sorted(tmp_path.iterdir()))
+    assert len(warnings) == 1
