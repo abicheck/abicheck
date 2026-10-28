@@ -82,7 +82,7 @@ _BREAKING_SEVERITY = "error"
 
 
 def _tool_version() -> str:
-    from . import build_version
+    from .model.tool_version import build_version
 
     return build_version()
 

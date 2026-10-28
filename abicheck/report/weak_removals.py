@@ -50,9 +50,11 @@ def weak_removal_note_lines(changes: Sequence[Change]) -> tuple[str, ...]:
         return ()
     return (
         f"> **{weak} of {removed} removed export(s) with an observed binding "
-        "were WEAK** (vague linkage: template instantiations, inline functions).",
+        "were WEAK** -- often vague linkage (template instantiations, inline",
+        "> functions), though an explicitly weak definition binds the same way.",
         "> They stay breaking: a consumer that relied on the library's",
-        "> definition (`extern template`, explicit instantiation) fails to link",
-        "> or load. One that compiled its own copy is unaffected -- check which",
+        "> definition (`extern template`, explicit instantiation) can fail to",
+        "> link or load, and one holding a weak reference may resolve it to null.",
+        "> A consumer that compiled its own copy is unaffected -- check which",
         "> applies before suppressing with a `binding: weak` rule.",
     )

@@ -43,9 +43,10 @@ import click
 # panels (and RichGroup.command produces RichCommand subcommands). Fall back to
 # plain click.Group if rich-click is somehow unavailable so the CLI never
 # hard-fails.
-from . import build_version as _build_version, deadline
+from . import deadline
 from .frontends.cli import help as cli_help
 from .frontends.cli.runtime import _AbicheckGroup
+from .model.tool_version import build_version as _build_version
 
 __all__ = ["main"]
 

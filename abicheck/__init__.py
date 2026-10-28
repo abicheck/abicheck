@@ -15,55 +15,11 @@
 """abicheck — ABI compatibility checker."""
 
 from importlib.metadata import PackageNotFoundError, version as _pkg_version
-from pathlib import Path
 
 try:
     __version__: str = _pkg_version("abicheck")
 except PackageNotFoundError:
     __version__ = "0.0.0.dev0"  # running from source without install
-
-
-def build_version() -> str:
-    """``__version__``, plus ``+g<sha>`` when running from an abicheck checkout.
-
-    ``pyproject.toml`` carries a hand-bumped release number, so every commit
-    after a release reports that release (e.g. ``0.7.0`` on main, months
-    later). A source checkout appends its commit so a field report names the
-    code it ran. Only the checkout this package was imported from counts --
-    its parent holds both ``.git`` and abicheck's ``pyproject.toml`` -- so a
-    wheel installed inside some other repository never borrows that
-    repository's commit. Read from ``.git`` directly (a few small file reads,
-    no ``git`` subprocess), so it is cheap enough to call uncached.
-    """
-    sha = _checkout_commit(Path(__file__).resolve().parent.parent)
-    return f"{__version__}+g{sha[:9]}" if sha else __version__
-
-
-def _checkout_commit(root: Path) -> str | None:
-    """The commit *root* (an abicheck source checkout) has checked out."""
-    try:
-        if 'name = "abicheck"' not in (root / "pyproject.toml").read_text("utf-8"):
-            return None
-        git = root / ".git"
-        if git.is_file():  # a worktree: "gitdir: <path>"
-            git = (root / git.read_text("utf-8").split(":", 1)[1].strip()).resolve()
-        head = (git / "HEAD").read_text("utf-8").strip()
-        if not head.startswith("ref: "):
-            return head or None  # detached HEAD
-        ref = head[5:]
-        common = git
-        if (git / "commondir").is_file():  # worktree refs live in the main repo
-            common = (git / (git / "commondir").read_text("utf-8").strip()).resolve()
-        for base in (git, common):
-            if (base / ref).is_file():
-                return (base / ref).read_text("utf-8").strip() or None
-        for line in (common / "packed-refs").read_text("utf-8").splitlines():
-            if line.endswith(" " + ref):
-                return line.split(" ", 1)[0]
-    except (OSError, IndexError):
-        return None
-    return None
-
 
 # Initialize the ``model`` package before any other abicheck module can run.
 # ``model`` (its ``__init__`` and several submodules) imports the root-level,
