@@ -35,12 +35,13 @@ the per-library counts into one set.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from typing import TYPE_CHECKING
 
-from .render_text import OUTCOME_BUCKETS, format_stat_line
+from .render_text import OUTCOME_BUCKETS, format_stat_line, hygiene_total
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping, Sequence
+    from collections.abc import Sequence
 
     from ..model.change import Change
 
@@ -81,21 +82,28 @@ _GLOBAL_TO_INVENTORY = {
 }
 
 
-def _inventory_including_release_global(
+def _line_inventory(
     change_inventory: Mapping[str, int] | None,
+    library_results: Sequence[Mapping[str, object]],
     release_global: Mapping[str, int] | None,
 ) -> dict[str, int] | None:
-    """Fold bundle/probe-matrix findings into the inventory's observed half.
+    """The release's inventory-shaped counts, covering every finding the line states.
 
-    Necessary because :func:`format_stat_line` *replaces* its headline
-    counts with the inventory's ``compatibility_*`` values whenever standing
-    hygiene is present -- so passing a members-only inventory silently
-    discarded the release-global findings that were already folded into
-    those counts. A release with standing hygiene whose only break was a
-    bundle finding then printed "no compatibility changes (0 total)" beside
-    a BREAKING verdict: the same verdict-versus-count contradiction the
-    inventory was introduced to remove, reintroduced one level up (found in
-    review).
+    The members' inventory block covers only the members that carry one.
+    Two kinds of finding it does not cover are folded into the observed half
+    here, as observed compatibility changes:
+
+    * bundle/probe-matrix findings (*release_global*): without them a release
+      whose only break was a bundle finding printed "no compatibility changes
+      (0 total)" beside a BREAKING verdict (found in review);
+    * a ``library_results`` entry with no ``change_inventory`` block, such as
+      a release-support-promise entry. :func:`format_stat_line` replaces its
+      breakdown with the inventory's values whenever standing hygiene is
+      present, so such an entry's findings were otherwise dropped from both
+      the parts and the total.
+
+    :func:`format_release_oneline` takes its total from this inventory, so each
+    finding folded in here is counted in that total as well.
 
     The members-only view stays the one the JSON document reports, because
     there a reader has the bundle and matrix sections separately; it is only
@@ -105,15 +113,21 @@ def _inventory_including_release_global(
     if change_inventory is None:
         return None
     merged = dict(change_inventory)
-    if not release_global:
-        return merged
-    for global_key, inventory_key in _GLOBAL_TO_INVENTORY.items():
-        merged[inventory_key] = merged.get(inventory_key, 0) + _count(
-            release_global, global_key
+    uncovered: list[Mapping[str, object]] = [
+        entry
+        for entry in library_results
+        if not isinstance(entry.get("change_inventory"), Mapping)
+    ]
+    if release_global:
+        uncovered.append(release_global)
+    for source in uncovered:
+        for global_key, inventory_key in _GLOBAL_TO_INVENTORY.items():
+            merged[inventory_key] = merged.get(inventory_key, 0) + _count(
+                source, global_key
+            )
+        merged["compatibility_changes"] = merged.get("compatibility_changes", 0) + sum(
+            _count(source, key) for key in _OUTCOME_KEYS
         )
-    merged["compatibility_changes"] = merged.get("compatibility_changes", 0) + sum(
-        _count(release_global, key) for key in _OUTCOME_KEYS
-    )
     return merged
 
 
@@ -239,9 +253,18 @@ def format_release_oneline(
     if release_global:
         for key in _OUTCOME_KEYS:
             counts[key] += _count(release_global, key)
-    # The total is the sum of the same buckets the breakdown names, so the
-    # parts always add up to it (report.headline_breakdown_drift).
-    total = sum(counts.values())
+    line_inventory = _line_inventory(change_inventory, library_results, release_global)
+    if line_inventory is not None:
+        # The total is the JSON population the inventory partitions: the
+        # observed compatibility changes plus every stamped hygiene finding.
+        # Summing the outcome buckets instead drops a finding no bucket names
+        # (a NOT_EVALUATED one), which then prints as a negative "not evaluated"
+        # count or as "0 total" against the JSON's ``total_changes``.
+        total = line_inventory["compatibility_changes"] + hygiene_total(line_inventory)
+    else:
+        # No inventory: the parts are the only account of the findings, so
+        # their sum is the total (report.headline_breakdown_drift).
+        total = sum(counts.values())
     plural = "library" if len(library_results) == 1 else "libraries"
     gate_note = (
         f"; gate: exit {severity_exit_code}"
@@ -259,7 +282,5 @@ def format_release_oneline(
         total_changes=total,
         gate_note=gate_note,
         deployment_note=deployment_note,
-        change_inventory=_inventory_including_release_global(
-            change_inventory, release_global
-        ),
+        change_inventory=line_inventory,
     )
