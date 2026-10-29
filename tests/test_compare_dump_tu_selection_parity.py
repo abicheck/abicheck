@@ -26,7 +26,9 @@ from pathlib import Path
 
 import pytest
 
-from abicheck.frontends.cli.inline_evidence_routing import inline_dump_evidence_routing
+from abicheck.workflows.compare.inline_evidence_routing import (
+    inline_dump_evidence_routing,
+)
 
 _SHAPES = ("absent", "raw", "pack")
 

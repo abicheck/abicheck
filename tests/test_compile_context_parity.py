@@ -15,7 +15,7 @@
 
 """compare↔dump L2 compile-context parity + threading (ADR-037 D3 / ADR-035).
 
-The project ``compile:`` block is folded in by the one shared resolver (``cli_options.merge_compile_config`` /
+The project ``compile:`` block is folded in by the one shared resolver (``workflows.compile_config.merge_compile_config`` /
 ``resolve_compile_context``). This guards that ``compare``/``dump`` never
 drift in their shared *absence* of the family as real CLI flags (Phase 7b,
 ADR-037 D8.1 -- ``compile.*`` config keys are the only spelling now on
@@ -25,7 +25,7 @@ config context to *both* sides while the per-side
 suite's third leg -- the one command that still carried the family as real
 CLI flags, and the one caller of ``cli_scan``'s own
 ``_merge_compile_config`` (a plain re-export of
-``cli_options.merge_compile_config``, the same shared resolver every
+``workflows.compile_config.merge_compile_config``, the same shared resolver every
 surviving test below still exercises through its live import path) -- and
 was deleted outright with the ``scan`` command (ADR-068 Phase 6); only its
 own scan-CLI-specific parity tests went with it.
@@ -39,7 +39,6 @@ import sys
 from pathlib import Path
 from typing import Any
 
-import click
 import pytest
 from _dump_format_fakes import fake_format_adapter
 from click.testing import CliRunner
@@ -49,6 +48,9 @@ from abicheck.dry_run_estimate import CompileContext
 from abicheck.frontends.cli.commands.compare import compare_cmd
 from abicheck.frontends.cli.commands.dump import dump_cmd
 from abicheck.model import AbiSnapshot
+from abicheck.workflows.compile_config import (
+    merge_compile_config as _merge_compile_config,
+)
 
 #: The dest names the compile-context family contributes (dump↔scan parity).
 #: The ``gcc_*`` dests are deliberately absent: --gcc-options was removed as a
@@ -261,7 +263,6 @@ def test_buildconfig_accepts_hybrid_compile_frontend() -> None:
 
 
 def test_merge_compile_config_cli_wins_over_config(tmp_path: Path) -> None:
-    from abicheck.cli_options import merge_compile_config as _merge_compile_config
 
     cfg = tmp_path / ".abicheck.yml"
     cfg.write_text(
@@ -290,7 +291,6 @@ def test_merge_compile_config_include_dirs_resolve_against_project_root_for_dot_
     root, not against `.github/` itself (Codex review on PR #828 —
     `merge_compile_config` used to resolve against `cfg.parent`, which is
     wrong once a config can live somewhere other than the project root)."""
-    from abicheck.cli_options import merge_compile_config as _merge_compile_config
 
     github_dir = tmp_path / ".github"
     github_dir.mkdir()
@@ -305,7 +305,6 @@ def test_merge_compile_config_include_dirs_resolve_against_project_root_for_dot_
 def test_merge_compile_config_include_dirs_resolve_against_project_root_for_dot_github_abicheck_config(
     tmp_path: Path,
 ) -> None:
-    from abicheck.cli_options import merge_compile_config as _merge_compile_config
 
     subdir = tmp_path / ".github" / "abicheck"
     subdir.mkdir(parents=True)
@@ -324,7 +323,6 @@ def test_merge_compile_config_cli_token_wins_over_config_std(tmp_path: Path) -> 
     explicit CLI -std= once --gcc-options (which used to suppress config
     synthesis entirely) was removed. Config tokens must come first so a
     compiler's own last-flag-wins semantics still resolve to the CLI value."""
-    from abicheck.cli_options import merge_compile_config as _merge_compile_config
 
     cfg = tmp_path / ".abicheck.yml"
     cfg.write_text("compile:\n  std: c++20\n  defines: [CFG=1]\n")
@@ -337,7 +335,6 @@ def test_merge_compile_config_cli_token_wins_over_config_std(tmp_path: Path) -> 
 
 
 def test_merge_compile_config_uses_config_when_cli_unset(tmp_path: Path) -> None:
-    from abicheck.cli_options import merge_compile_config as _merge_compile_config
 
     cfg = tmp_path / ".abicheck.yml"
     cfg.write_text("compile:\n  std: c++20\n  defines: [A, B=2]\n  frontend: clang\n")
@@ -350,7 +347,6 @@ def test_merge_compile_config_uses_config_when_cli_unset(tmp_path: Path) -> None
 
 
 def test_merge_compile_config_keeps_config_values_literal(tmp_path: Path) -> None:
-    from abicheck.cli_options import merge_compile_config as _merge_compile_config
 
     # Each compile config scalar reaches gcc_option_tokens as ONE literal token
     # (`-std=<v>` / `-D<v>`), not shell-split. The define carries embedded quotes
@@ -376,7 +372,6 @@ def test_merge_compile_config_keeps_config_values_literal(tmp_path: Path) -> Non
 
 
 def test_merge_compile_config_noop_without_path() -> None:
-    from abicheck.cli_options import merge_compile_config as _merge_compile_config
 
     cli = CompileContext(gcc_options="-DX")
     merged, includes = _merge_compile_config(cli, (Path("a"),), None)
@@ -392,7 +387,6 @@ def test_merge_compile_config_autodiscovers_from_sources(tmp_path: Path) -> None
     (src / ".abicheck.yml").write_text(
         "compile:\n  std: c++20\n  include_dirs: [include]\n", encoding="utf-8"
     )
-    from abicheck.cli_options import merge_compile_config as _merge_compile_config
 
     merged, includes = _merge_compile_config(CompileContext(), (), None, sources=src)
     assert merged.gcc_options is None
@@ -408,7 +402,6 @@ def test_merge_compile_config_explicit_config_beats_autodiscovery(
     (src / ".abicheck.yml").write_text("compile:\n  std: c++11\n", encoding="utf-8")
     explicit = tmp_path / "explicit.yml"
     explicit.write_text("compile:\n  std: c++23\n", encoding="utf-8")
-    from abicheck.cli_options import merge_compile_config as _merge_compile_config
 
     merged, _ = _merge_compile_config(CompileContext(), (), explicit, sources=src)
     assert merged.gcc_options is None
@@ -944,7 +937,6 @@ def test_merge_compile_config_explicit_auto_beats_config(tmp_path: Path) -> None
     # config frontend (Codex review).
     cfg = tmp_path / ".abicheck.yml"
     cfg.write_text("compile:\n  frontend: clang\n", encoding="utf-8")
-    from abicheck.cli_options import merge_compile_config as _merge_compile_config
 
     # Default 'auto' (not explicit) inherits config 'clang'.
     inherit, _ = _merge_compile_config(CompileContext(), (), cfg)
@@ -960,11 +952,14 @@ def test_merge_compile_config_explicit_malformed_fails_loud(tmp_path) -> None:
     # An *explicit* --config (build_config not None) that won't parse must fail
     # loudly, not silently drop the compile: settings (Codex review).
 
-    from abicheck.cli_options import merge_compile_config as _merge_compile_config
+    from abicheck.workflows.compile_config import (
+        CompileConfigError,
+        merge_compile_config as _merge_compile_config,
+    )
 
     bad = tmp_path / ".abicheck.yml"
     bad.write_text("compile: [unterminated\n", encoding="utf-8")
-    with pytest.raises(click.ClickException, match="cannot parse build config"):
+    with pytest.raises(CompileConfigError, match="cannot parse build config"):
         _merge_compile_config(CompileContext(gcc_options="-DX"), (), bad)
 
 
@@ -983,7 +978,6 @@ def test_merge_compile_config_autodiscovered_malformed_warns(tmp_path, capsys) -
 def _merge_compile_config_autodiscover(
     cli: CompileContext, src: Path
 ) -> tuple[CompileContext, tuple[Path, ...]]:
-    from abicheck.cli_options import merge_compile_config as _merge_compile_config
 
     return _merge_compile_config(cli, (), None, sources=src)
 
@@ -1046,7 +1040,6 @@ def test_merge_compile_config_nostdinc_precedence(tmp_path: Path) -> None:
     # --no-nostdinc (nostdinc_explicit, value False) overrides it (Codex review).
     cfg = tmp_path / ".abicheck.yml"
     cfg.write_text("compile:\n  nostdinc: true\n", encoding="utf-8")
-    from abicheck.cli_options import merge_compile_config as _merge_compile_config
 
     # Default (not explicit) inherits config True.
     inherit, _ = _merge_compile_config(CompileContext(), (), cfg)
@@ -1518,7 +1511,7 @@ def _request_reaching_resolution(
 ) -> Any:
     """The ``CompareRequest`` the real ``compare`` CLI hands the shared
     resolution (stopped there)."""
-    import abicheck.service as service
+    import abicheck.workflows.compare.resolve as resolve_mod
 
     seen: list[Any] = []
 
@@ -1529,7 +1522,7 @@ def _request_reaching_resolution(
         seen.append(request)
         raise _Stop
 
-    monkeypatch.setattr(service, "resolve_compare_request", _capture)
+    monkeypatch.setattr(resolve_mod, "resolve_compare_request", _capture)
     with pytest.raises(_Stop):
         CliRunner().invoke(main, ["compare", *args], catch_exceptions=False)
     (request,) = seen

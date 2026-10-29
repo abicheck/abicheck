@@ -913,14 +913,15 @@ class TestTheTypedApiDemanglesAutomaticallyToo:
         typed API's -- both go through
         `service_render.resolve_demangle_for_format`, which is why this
         slice moved it out of `cli_compare_options` (Codex review, PR
-        #1284)."""
+        #1284). The single-pair `compare` command resolves none at all
+        any more: it renders through `frontends.render`, which asks the
+        owner per format."""
+        import abicheck.cli_compare_helpers as compare_helpers
         import abicheck.cli_compare_options as cli_options
-        from abicheck.cli_compare_helpers import resolve_demangle_for_format as via_cli
-        from abicheck.frontends.render import resolve_demangle_for_format
 
         assert not hasattr(cli_options, "_resolve_demangle")
         assert not hasattr(cli_options, "HUMAN_FORMATS")
-        assert via_cli is resolve_demangle_for_format
+        assert "resolve_demangle_for_format" not in vars(compare_helpers)
 
 
 class TestEveryAliasOfAHumanFormatDemanglesLikeItsTarget:

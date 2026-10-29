@@ -159,7 +159,7 @@ def _compile_options(
     if tokens:
         pairs.append(("gcc_option_tokens", "\x00".join(str(t) for t in tokens)))
     # ADR-074's `-D/--define`. Normally redundant with `gcc_option_tokens`,
-    # since `cli_options.merge_compile_config` renders every definition into
+    # since `workflows.compile_config.merge_compile_config` renders every definition into
     # that tail -- but only a context that went through the fold has them
     # rendered. One built directly with `defines=` and handed straight to the
     # fan-out would otherwise key identically to one with no macros at all,

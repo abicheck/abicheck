@@ -18,7 +18,7 @@ composition-only contract directly (construct a few contexts by hand), the
 way ``model/semantic_ir.py`` was pinned before any consumer migrated onto it.
 ``workflows.compare.resolve.resolve_compare_request`` is now the first real
 call site (see ``TestResolvedExecutionContextWiring`` in
-``tests/test_service_compare_pipeline.py``); these tests still cover the
+``tests/test_compare_resolve_sides_sequentially.py``); these tests still cover the
 primitive directly, unit-style, rather than only through that one caller.
 """
 

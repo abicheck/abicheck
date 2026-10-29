@@ -1030,7 +1030,7 @@ class TestDumpDryRunBuildQueryTrust:
     ) -> None:
         # CodeRabbit/Codex review, fresh evidence, verified end-to-end
         # against the real CLI: an *explicit* --config is validated
-        # unconditionally by `cli_options.merge_compile_config` regardless
+        # unconditionally by `workflows.compile_config.merge_compile_config` regardless
         # of --sources/--build-info/--depth -- even `dump --config bad.yml
         # --depth binary` with no --sources/--build-info at all exits 64.
         cfg = tmp_path / "bad.yml"

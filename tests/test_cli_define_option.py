@@ -525,7 +525,7 @@ class TestDefinesSurviveTheFoldsOtherBranches:
 
     @staticmethod
     def _merged(cli_ctx, *, build_config=None, **kwargs):
-        from abicheck.cli_options import merge_compile_config
+        from abicheck.workflows.compile_config import merge_compile_config
 
         context, _includes = merge_compile_config(cli_ctx, (), build_config, **kwargs)
         return define_spellings_from_tokens(context.gcc_option_tokens)
