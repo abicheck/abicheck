@@ -101,6 +101,11 @@ KIND_NAMES_1: tuple[tuple[str, str, str | None], ...] = (
     ("TYPE_FIELD_ADDED", "type_field_added", "if in non-final class, may be BREAKING"),
     ("TYPE_FIELD_OFFSET_CHANGED", "type_field_offset_changed", "→ BREAKING"),
     ("TYPE_FIELD_TYPE_CHANGED", "type_field_type_changed", "→ BREAKING"),
+    (
+        "ABI_EQUIVALENT_TYPE_CHANGED",
+        "abi_equivalent_type_changed",
+        "retype between ABI-identical fundamental types (same size, alignment and register class) → COMPATIBLE_WITH_RISK",
+    ),
     ("TYPE_BASE_CHANGED", "type_base_changed", "inheritance change → BREAKING"),
     ("TYPE_VTABLE_CHANGED", "type_vtable_changed", "→ BREAKING"),
     ("TYPE_ADDED", "type_added", "new type → COMPATIBLE"),

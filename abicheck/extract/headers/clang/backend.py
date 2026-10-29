@@ -60,6 +60,7 @@ from ....storage.header_ast_cache import (
     run_ast_acquisition_offering_entry,
     store_cached_ast,
 )
+from ...builtin_abi import probe_builtin_abi
 from ...compiler_driver import (
     clang_bin_is_explicitly_configured as _clang_bin_is_explicitly_configured,
     is_cl_style_driver_name,
@@ -601,6 +602,9 @@ class ClangBackend:
             target_triple=target_triple,
             no_binary_evidence=r.no_binary_evidence,
             is_cxx=resolved_force_cpp,
+        )
+        parser.builtin_abi = probe_builtin_abi(
+            str(clang_bin), tuple(r.gcc_option_tokens)
         )
         if resolved_kind is None:  # a DPC++ dump keeps its facts unset
             parser.explicit_instantiations = _explicit_instantiation_facts(

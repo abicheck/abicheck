@@ -35,8 +35,10 @@ from typing import Any
 
 from ..model import AbiSnapshot, FactStatus
 from ..model.declaration_store import STORE_ATTRIBUTE
+from ..model.dwarf_facts import AdvancedExtractionStatus
 from ..model.snapshot_reliability import FACT_FAMILIES, flag_name
 from .acyclic_json import gc_paused
+from .dwarf_layout_facts import drop_uncaptured_dwarf_layout_facts
 from .entity_id_codec import encode_entity_ids, encode_sidecar_entity_ids
 from .enum_codec import encode_platform_enums
 from .extraction_scope_codec import encode_extraction_scope
@@ -410,14 +412,22 @@ _RETURN_TYPE_IDENTITY_KEY = "return_type_identities_fact"
 _SPECIALIZATION_KEY = "specialization_declared_fact"
 _TEMPLATE_PARAM_DEFAULTS_KEY = "template_param_defaults_fact"
 _EXPLICIT_INSTANTIATION_KEY = "explicit_instantiation_fact"
+#: Schema v69: a fundamental-typed slot's ABI fact, written only where a producer
+#: determined it (model/abi_fundamental.py).
+_TYPE_ABI_KEY = "type_abi_fact"
+_RETURN_TYPE_ABI_KEY = "return_type_abi_fact"
 
 
-def _drop_advanced_extraction_status(d: dict[str, Any]) -> None:
-    # AdvancedDwarfMetadata.extraction is in-memory only: persisting it would
-    # add a key to every stored document, which is a snapshot-schema change
-    # (docs/contribute/adr/080-*). A decoded snapshot reads UNRECORDED instead.
+def _encode_advanced_extraction_status(d: dict[str, Any]) -> None:
+    """``dwarf_advanced.extraction`` (schema v68, ADR-080) is written only when
+    the extraction recorded an outcome. ``unrecorded`` -- a hand-built object,
+    or a BTF/CTF/PDB producer -- writes no key, so those documents encode
+    exactly as v67 did and a missing key decodes back to ``unrecorded``.
+    """
     dwarf_advanced = d.get("dwarf_advanced")
-    if isinstance(dwarf_advanced, dict):
+    if not isinstance(dwarf_advanced, dict):
+        return
+    if dwarf_advanced.get("extraction") in (None, AdvancedExtractionStatus.UNRECORDED):
         dwarf_advanced.pop("extraction", None)
 
 
@@ -445,14 +455,18 @@ def _drop_uncaptured_type_identities(d: dict[str, Any]) -> None:
         _drop_uncaptured(fn, _TEMPLATE_PARAM_DEFAULTS_KEY)
         # Schema v65: written only when the clang text pass recorded the kind.
         _drop_uncaptured(fn, _EXPLICIT_INSTANTIATION_KEY)
+        _drop_uncaptured(fn, _RETURN_TYPE_ABI_KEY)
         for param in fn.get("params", ()):
             _drop_uncaptured(param, _TYPE_IDENTITY_KEY)
+            _drop_uncaptured(param, _TYPE_ABI_KEY)
     for var in d.get("variables", ()):
         _drop_uncaptured(var, _TYPE_IDENTITY_KEY)
         _drop_uncaptured(var, _EXPLICIT_INSTANTIATION_KEY)
+        _drop_uncaptured(var, _TYPE_ABI_KEY)
     for rec in d.get("types", ()):
         for fld in rec.get("fields", ()):
             _drop_uncaptured(fld, _TYPE_IDENTITY_KEY)
+            _drop_uncaptured(fld, _TYPE_ABI_KEY)
         # Schema v61: written only when captured, so a record from any other
         # producer (or no specialization) encodes exactly as v60.
         _drop_uncaptured(rec, _SPECIALIZATION_KEY)
@@ -520,6 +534,14 @@ def _snapshot_to_dict(snap: AbiSnapshot, encode: Any) -> dict[str, Any]:
     # encodes exactly as it did before v67.
     if d.get("live_preprocessor_hidden") is None:
         d.pop("live_preprocessor_hidden", None)
+    # Schema v69: the typedef target facts, written only when a producer captured
+    # some; a status is written as its string, as encode_fact_fields does.
+    typedef_facts = d.get("typedef_abi_facts")
+    if not typedef_facts:
+        d.pop("typedef_abi_facts", None)
+    else:
+        for fact in typedef_facts.values():
+            fact["status"] = getattr(fact["status"], "value", fact["status"])
     # ADR-062 D2: the producing build's generations, never re-dated on re-save.
     d.pop("fact_generations", None)
     d.pop("spellings_generation", None)  # folded into the stamp below
@@ -549,9 +571,10 @@ def _snapshot_to_dict(snap: AbiSnapshot, encode: Any) -> dict[str, Any]:
     # ElfMetadata/PeMetadata/MachoMetadata enums -> strings (storage/enum_codec.py).
     encode_platform_enums(d)
     _drop_unobserved_odr_conflicts(d)
-    _drop_advanced_extraction_status(d)
+    _encode_advanced_extraction_status(d)
     _compact_elf_symbols(d)
     _drop_uncaptured_type_identities(d)
+    drop_uncaptured_dwarf_layout_facts(d)
 
     # ADR-063 Phase 0 (schema v26): see storage/fact_codec.py.
     encode_fact_fields(d)

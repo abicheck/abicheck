@@ -77,6 +77,7 @@ from .model.acknowledgment_policy import (
     AcknowledgmentPolicy,
     built_in_default_acknowledgment_policy,
 )
+from .model.change_catalog.kind_variants import expand_variant_overrides
 from .model.change_catalog.kinds import ChangeKind
 from .model.change_catalog.registry import VALID_BASE_POLICIES
 from .policy.classification import Verdict, compute_verdict, policy_kind_sets
@@ -354,8 +355,8 @@ def _resolve_change_verdict(
        Consulted ahead of the kind-global ``overrides:`` entry for the same
        kind since a rule scoped to a selector is strictly more specific than
        one scoped to a bare kind (see ``abicheck/policy/reclassify.py``).
-    3. ``overrides[kind]`` — per-kind policy override (frozen-namespace floor
-       still applied; downgrades on frozen symbols are silently rejected).
+    3. ``overrides[kind]`` — per-kind policy override, which a base kind also
+       covers for its ``*_elf_only`` variant (frozen-namespace floor applied).
     4. Base policy verdict.
     """
     from .policy.reclassify import first_matching_reclassify_verdict
@@ -379,8 +380,7 @@ def _resolve_change_verdict(
             return base_v
         return reclass_v
 
-    if kind in overrides:
-        override_v = overrides[kind]
+    if (override_v := expand_variant_overrides(overrides).get(kind)) is not None:
         if frozen and _VERDICT_ORDER.index(override_v) < _VERDICT_ORDER.index(base_v):
             return base_v
         return override_v

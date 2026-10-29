@@ -51,12 +51,17 @@ from .fact_backfill import (
     apply_legacy_fact_backfill as apply_legacy_fact_backfill,
     evidenced_producers as evidenced_producers,
 )
+from .fact_decode import (
+    _build_fact,
+    abi_fundamental_from_json,
+    decode_fact,
+    decode_fact_with_legacy_presence,
+)
 from .fact_payload_validation import (
     validated_identities,
     validated_template_param_defaults,
 )
 from .fact_schema_versions import (
-    _FACT_FIELDS_SCHEMA_VERSION,
     _MIN_SCHEMA_VERSION_FOR_DEPRECATION_FACTS,
     _MIN_SCHEMA_VERSION_FOR_ENUMTYPE_FACTS,
     _MIN_SCHEMA_VERSION_FOR_EXPLICIT_INSTANTIATION_FACT,
@@ -72,12 +77,12 @@ from .fact_schema_versions import (
     _MIN_SCHEMA_VERSION_FOR_SPECIALIZATION_FACT as _MIN_SPEC_FACT,
     _MIN_SCHEMA_VERSION_FOR_SURFACE_FACTS,
     _MIN_SCHEMA_VERSION_FOR_TEMPLATE_PARAM_DEFAULTS,
+    _MIN_SCHEMA_VERSION_FOR_TYPE_ABI_FACTS,
     _MIN_SCHEMA_VERSION_FOR_TYPE_IDENTITY_FACTS,
     _MIN_SCHEMA_VERSION_FOR_TYPEFIELD_CV_FACTS,
     _MIN_SCHEMA_VERSION_FOR_TYPEFIELD_VALUE_FACTS,
     _MIN_SCHEMA_VERSION_FOR_VARIABLE_CASE_B_FACTS,
 )
-from .guards import provenance_text
 
 if TYPE_CHECKING:
     pass
@@ -128,6 +133,7 @@ _FIELD_FACT_KEYS = (
     "default_fact",
     "deprecated_fact",
     "type_identities_fact",
+    "type_abi_fact",
 )
 
 # ADR-063 Phase 5 (third batch): EnumType's own qualified_name_fact/
@@ -160,6 +166,7 @@ _VARIABLE_FACT_KEYS = (
     "binary_exported_fact",
     "type_identities_fact",
     "explicit_instantiation_fact",
+    "type_abi_fact",
 )
 
 # ADR-063 Phase 5 (fifth batch): Function's own ten case-(b) *_fact
@@ -184,6 +191,7 @@ _FUNCTION_FACT_KEYS = (
     "binary_exported_fact",
     "return_type_identities_fact",
     "is_inline_fact",
+    "return_type_abi_fact",
 )
 
 # ADR-063 Phase 5 (seventh batch): the three binary-format metadata blocks'
@@ -207,6 +215,7 @@ _PARAM_FACT_KEYS = (
     # ADR-063 Phase 5 (eleventh batch): kind_fact.
     "kind_fact",
     "type_identities_fact",
+    "type_abi_fact",
 )
 
 _PE_FACT_KEYS = ("delay_imports_fact",)
@@ -279,58 +288,6 @@ def _encode_one(fact_dict: dict[str, Any] | None) -> None:
     # omit-when-unset rule for the same reason.
     if fact_dict.get("producer") is None:
         fact_dict.pop("producer", None)
-
-
-def decode_fact(
-    raw: Any, schema_version: int, min_schema_version: int = _FACT_FIELDS_SCHEMA_VERSION
-) -> Fact[Any] | None:
-    """Reconstruct a ``Fact[T]`` from its serialized dict form, or ``None``.
-
-    A missing key means one of two different things depending on whether
-    ``schema_version`` reaches ``min_schema_version`` — the schema_version
-    *this field's own* ``*_fact`` sibling started being unconditionally
-    persisted at (``_FACT_FIELDS_SCHEMA_VERSION`` for the five siblings
-    Phase 0 introduced; a later, field-specific threshold for anything a
-    later phase adds, since that field's sibling genuinely didn't exist in
-    the document format before its own conversion, independent of when the
-    *first* ``Fact[T]`` sibling shipped) — and conflating them would misread
-    absent evidence as confirmed. Below ``min_schema_version``, a missing key
-    means "this snapshot predates this field's Fact[T] conversion" —
-    returning ``None`` here lets the owning dataclass's own
-    ``__post_init__`` bridge (or, for the original four fields,
-    :func:`apply_legacy_fact_backfill`'s reliability-aware correction) derive
-    the right ``Fact[T]`` from the legacy value instead. At or above it, the
-    document already commits to serializing this sibling whenever the owning
-    dataclass emits one, so a missing key means a malformed/truncated/
-    hand-authored document — returning ``None`` here would let the owning
-    dataclass's ``__post_init__`` bridge read the caller-supplied legacy
-    default (e.g. ``bases=[]`` from ``t.get("bases", [])``) as a confirmed,
-    freshly-supplied value rather than missing evidence (Codex review), so
-    this returns :meth:`Fact.not_collected` explicitly instead.
-    """
-    if not raw:
-        return Fact.not_collected() if schema_version >= min_schema_version else None
-    # Repeat simple shapes come from `decode_memo` (same value as a fresh
-    # build); `Fact._make` shares one instance per common valueless shape.
-    return memo_fact(raw, _build_fact)
-
-
-def _build_fact(raw: Any) -> Fact[Any]:
-    return Fact._make(
-        FactStatus(raw["status"]),
-        raw.get("value"),
-        tuple(raw.get("diagnostics") or ()),
-        # T9: additive, unversioned field -- absent reads as `None`. Rejected
-        # rather than coerced if not a string (`str(7)` and `str("7")` would
-        # otherwise deserialize identically), the same discipline every other
-        # provenance-shaped field here applies; `None` is the legitimate "no
-        # attribution recorded" value and bypasses `provenance_text`.
-        (
-            None
-            if raw.get("producer") is None
-            else provenance_text(raw["producer"], "fact producer")
-        ),
-    )
 
 
 def decode_record_facts(t: dict[str, Any], schema_version: int) -> dict[str, Any]:
@@ -526,6 +483,12 @@ def decode_variable_facts(v: dict[str, Any], schema_version: int) -> dict[str, A
                 schema_version,
                 min_schema_version=_MIN_SCHEMA_VERSION_FOR_SURFACE_FACTS,
             ),
+            "type_abi_fact": decode_fact(
+                v.get("type_abi_fact"),
+                schema_version,
+                min_schema_version=_MIN_SCHEMA_VERSION_FOR_TYPE_ABI_FACTS,
+                value_decoder=abi_fundamental_from_json,
+            ),
             "type_identities_fact": validated_identities(
                 decode_fact(
                     v.get("type_identities_fact"),
@@ -646,6 +609,12 @@ def decode_function_facts(f: dict[str, Any], schema_version: int) -> dict[str, A
                     min_schema_version=_MIN_SCHEMA_VERSION_FOR_TYPE_IDENTITY_FACTS,
                 )
             ),
+            "return_type_abi_fact": decode_fact(
+                f.get("return_type_abi_fact"),
+                schema_version,
+                min_schema_version=_MIN_SCHEMA_VERSION_FOR_TYPE_ABI_FACTS,
+                value_decoder=abi_fundamental_from_json,
+            ),
             "template_param_defaults_fact": validated_template_param_defaults(
                 decode_fact(
                     f.get("template_param_defaults_fact"),
@@ -706,31 +675,6 @@ def _with_frozenset_value(fact: Fact[Any] | None) -> Fact[Any] | None:
     return dataclasses.replace(fact, value=frozenset(fact.value))
 
 
-def decode_fact_with_legacy_presence(
-    owner_dict: dict[str, Any],
-    legacy_key: str,
-    schema_version: int,
-    min_schema_version: int,
-) -> Fact[Any] | None:
-    """:func:`decode_fact` for a case-(a) field, honouring the *legacy* key too.
-
-    A case-(a) field's own resting value (``False``, ``AccessLevel.PUBLIC``)
-    is a legitimate value, so a document that omits the legacy key entirely
-    is genuinely saying "no evidence", not "confirmed false" — but the
-    caller's own ``f.get("is_const", False)`` default hands the owning
-    dataclass a real ``False`` regardless, which its ``__post_init__``
-    bridge then reads as an explicitly-supplied value and backfills to
-    ``Fact.present(False)``. Returning :meth:`Fact.not_collected` here for
-    that case is what keeps "the document never carried this fact" from
-    being laundered into a confirmed one. Every other case defers to
-    :func:`decode_fact` unchanged.
-    """
-    raw = owner_dict.get(f"{legacy_key}_fact")
-    if not raw and schema_version < min_schema_version and legacy_key not in owner_dict:
-        return Fact.not_collected()
-    return decode_fact(raw, schema_version, min_schema_version=min_schema_version)
-
-
 def _build_kind_fact(raw: Any) -> Fact[Any]:
     fact = _build_fact(raw)
     return fact if fact.value is None else replace(fact, value=ParamKind(fact.value))
@@ -773,6 +717,12 @@ def decode_param_facts(p: dict[str, Any], schema_version: int) -> dict[str, Any]
                 schema_version,
                 min_schema_version=_MIN_SCHEMA_VERSION_FOR_TYPE_IDENTITY_FACTS,
             )
+        ),
+        "type_abi_fact": decode_fact(
+            p.get("type_abi_fact"),
+            schema_version,
+            min_schema_version=_MIN_SCHEMA_VERSION_FOR_TYPE_ABI_FACTS,
+            value_decoder=abi_fundamental_from_json,
         ),
     }
 
@@ -830,5 +780,11 @@ def decode_field_facts(fld: dict[str, Any], schema_version: int) -> dict[str, An
                 schema_version,
                 min_schema_version=_MIN_SCHEMA_VERSION_FOR_TYPE_IDENTITY_FACTS,
             )
+        ),
+        "type_abi_fact": decode_fact(
+            fld.get("type_abi_fact"),
+            schema_version,
+            min_schema_version=_MIN_SCHEMA_VERSION_FOR_TYPE_ABI_FACTS,
+            value_decoder=abi_fundamental_from_json,
         ),
     }

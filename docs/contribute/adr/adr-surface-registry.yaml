@@ -701,10 +701,8 @@ adrs:
 
   - id: ADR-080
     file: 080-persisting-the-advanced-dwarf-extraction-status.md
-    disposition: gap
-    use_cases: []
-    surfaces: []
-    missing: Proposed, not yet implemented; the advanced-DWARF extraction status is in memory only and is not persisted.
+    disposition: internal
+    reason: Persists the advanced-DWARF extraction status as the optional dwarf_advanced.extraction key (schema v68) so a stored snapshot reads the status a live run recorded. Users reach it only through dump/compare; the one report-visible change is an assurance note for a mixed-provenance pair, not a flag, field, or exit code.
 
   - id: ADR-082
     file: 082-declared-header-order-independent-extraction.md

@@ -84,6 +84,7 @@ from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
 from typing import Protocol
 
+from ..model.change_catalog.kind_variants import kind_match_set
 from ..model.change_catalog.kinds import ChangeKind
 from ..model.elf_facts import SymbolBinding
 from ..model.execution_cache import memoized
@@ -415,7 +416,9 @@ def _matches_type_pattern(
     )
     if not compiled.fullmatch(match_symbol):
         return False
-    if change_kind_filter is not None and change.kind.value != change_kind_filter:
+    if change_kind_filter is not None and (
+        change.kind.value not in kind_match_set(change_kind_filter)
+    ):
         return False
     return True
 
@@ -688,6 +691,8 @@ class SelectorSet:
             )
         if not _matches_symbol(self.symbol, self._compiled_pattern, change):
             return False
-        if self.change_kind is not None and change.kind.value != self.change_kind:
+        if self.change_kind is not None and (
+            change.kind.value not in kind_match_set(self.change_kind)
+        ):
             return False
         return True

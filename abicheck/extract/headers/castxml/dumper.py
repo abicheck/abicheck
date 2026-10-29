@@ -77,6 +77,7 @@ from ....model import (
     Variable,
     Visibility,
 )
+from ....model.abi_fundamental import AbiFundamental
 from ....model.declaration_headers import attributed
 from ....model.export_index import ExportMatch
 from ....model.identity import (
@@ -102,6 +103,7 @@ from . import (
     type_resolution as _castxml_type_resolution,
     typedef_parsing as _typedefs_helpers,
 )
+from .abi_fundamental import castxml_type_abi_fact
 from .function_type_cc import load_function_type_cc
 from .inline_variables import declared_inline
 from .names import (
@@ -133,6 +135,7 @@ class _CastxmlParser:
         public_header_paths: list[str] | None = None,
         public_dir_paths: list[str] | None = None,
         no_binary_evidence: bool = False,
+        plain_char_unsigned: bool | None = None,
     ):
         # All parser state now lives on a shared context object (ADR-061 D9
         # "context.py") so entity-parsing modules under
@@ -149,6 +152,7 @@ class _CastxmlParser:
             no_binary_evidence=no_binary_evidence,
         )
         self._ctx.build_id_map()
+        self._ctx.plain_char_unsigned = plain_char_unsigned
         self._ctx.vector_spellings = load_vector_spellings(self._ctx)
         self._ctx.function_type_cc = load_function_type_cc(self._ctx.root)
 
@@ -424,6 +428,8 @@ class _CastxmlParser:
                             self._ctx, el.get("type", "")
                         )
                     ),
+                    # Schema v69 -- see Param.type_abi_fact.
+                    type_abi_fact=castxml_type_abi_fact(self._ctx, el.get("type", "")),
                     # ADR-063 Phase 2 -- see symbol_is_bare_name above.
                     entity_id=entity_id_for_variable(
                         self._scope_path(el),
@@ -593,6 +599,19 @@ class _CastxmlParser:
             self._qualified_name,
             self._declaring_header,
         )
+
+    def parse_typedef_abi_facts(self) -> dict[str, Fact[AbiFundamental]]:
+        """Schema v69: each typedef's target ABI fact, keyed like
+        :meth:`parse_typedefs_qualified` (a typedef with no fundamental target
+        has no entry)."""
+        facts: dict[str, Fact[AbiFundamental]] = {}
+        for el, _ in _typedefs_helpers.iter_typedef_entries(
+            self._typedef_els, self._is_builtin_element, self._underlying_type_name
+        ):
+            fact = castxml_type_abi_fact(self._ctx, el.get("type", ""))
+            if fact is not None:
+                facts[self._qualified_name(el)] = fact
+        return facts
 
     def parse_typedef_entity_ids(self) -> dict[str, EntityId]:
         """``EntityId`` sidecar for :meth:`parse_typedefs_qualified` (ADR-063

@@ -330,6 +330,22 @@ SPELLING_MIGRATIONS: Mapping[int, GenerationSpellingChange] = {
         "double _Complex compared equal. A stored Unimplemented cannot say which "
         "type it was, so no rewrite is sound and a baseline holding one is re-dumped"
     ),
+    32: GenerationSpellingChange(
+        "the generation-32 ABI-fact change (model/abi_fundamental.py): DWARF "
+        "(extract/dwarf_abi_fact.py) and castxml (extract/headers/castxml/"
+        "abi_fundamental.py) record a fundamental slot's encoding class, size, "
+        "alignment and vector lanes as type_abi_fact/return_type_abi_fact -- a "
+        "new fact, not a spelling: no stored type spelling changes, so no rewrite "
+        "is needed. The DWARF layout (DwarfMetadata.structs/struct_odr_conflicts "
+        "FieldInfo) records the same fact per member as type_abi_fact, read from "
+        "the member DIE, so the depth projection keeps it. A generation-31 or "
+        "pre-v69 document carries no fact, so its slots keep the name-based verdict "
+        "(an unset fact never proves two slots equal). A DWARF pointer declared restrict is now one level deep (it was "
+        "zero: DW_TAG_restrict_type was not unwrapped), so a generation-31 DWARF "
+        "baseline holding a restrict pointer parameter stores its pointer depth as "
+        "zero and reads as a pointer-level change against a fresh dump; a re-dump "
+        "is the fix for that baseline"
+    ),
 }
 
 #: Reasons that say nothing about what was audited; the bump gate refuses them.

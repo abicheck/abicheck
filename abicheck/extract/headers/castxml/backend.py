@@ -68,6 +68,7 @@ from ..toolchain import (
     _tool_identity,
     _tool_identity_metadata,
 )
+from .abi_fundamental import probe_plain_char_unsigned
 from .calling_convention import calling_conventions_in
 from .dumper import _CastxmlParser
 from .hidden_declarations import attach_hidden_declarations
@@ -604,6 +605,9 @@ class CastxmlBackend:
             )
         except SnapshotError as exc:
             raise CastxmlRunError(exc) from exc
+        plain_char = probe_plain_char_unsigned(
+            r.compiler, r.gcc_path, r.gcc_prefix, tuple(r.gcc_option_tokens)
+        )
         parser = _CastxmlParser(
             xml_root,
             r.exported_dynamic,
@@ -611,6 +615,7 @@ class CastxmlBackend:
             public_header_paths=r.public_header_paths,
             public_dir_paths=r.public_dir_paths,
             no_binary_evidence=r.no_binary_evidence,
+            plain_char_unsigned=plain_char,
         )
         setattr(
             parser,
@@ -622,6 +627,7 @@ class CastxmlBackend:
                 public_header_paths=r.public_header_paths,
                 public_dir_paths=r.public_dir_paths,
                 no_binary_evidence=False,
+                plain_char_unsigned=plain_char,
             ),
         )
         meta = selected_meta[0] if selected_meta else (None, None)

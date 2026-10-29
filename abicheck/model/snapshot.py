@@ -26,6 +26,7 @@ from __future__ import annotations
 from dataclasses import InitVar, dataclass, field
 from typing import TYPE_CHECKING
 
+from .abi_fundamental import AbiFundamental
 from .declaration_store import (
     NOT_GIVEN,
     Declarations,
@@ -609,6 +610,12 @@ class AbiSnapshot:
     # `None`: no scan ran (a non-castxml producer, a multi-TU manifest, or a
     # pre-v67 document).
     live_preprocessor_hidden: dict[str, tuple[str, ...]] | None = field(
+        default=None, repr=False, compare=False, kw_only=True
+    )
+    # Schema v69: each typedef's target ABI fact (model/abi_fundamental.py),
+    # keyed like `typedefs_qualified`. `None`: the producer captured none. A
+    # typedef with no entry has no fact (its target is not a fundamental).
+    typedef_abi_facts: dict[str, Fact[AbiFundamental]] | None = field(
         default=None, repr=False, compare=False, kw_only=True
     )
 

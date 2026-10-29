@@ -8,8 +8,8 @@ Which public surface reaches each ADR, which use cases it serves, and whether a 
 |---|---|
 | surfaced | 48 |
 | partial | 14 |
-| gap | 9 |
-| internal | 21 |
+| gap | 8 |
+| internal | 22 |
 
 ## ADRs
 
@@ -100,7 +100,7 @@ Which public surface reaches each ADR, which use cases it serves, and whether a 
 | [ADR-085](../adr/085-template-parameter-default-arguments.md) | gap | — | — | Proposed, not accepted or implemented; no template-parameter default fact, TEMPLATE_PARAM_DEFAULT_CHANGED kind, or castxml coverage gap exists. |
 | [ADR-078](../adr/078-informational-severity-category.md) | surfaced | UC-WF-compare | `cli: compare --severity-preset`<br>`report: compare_report.summary`<br>`report: compare_report.severity` | — |
 | [ADR-079](../adr/079-partial-export-table-read-in-the-stored-snapshot.md) | gap | — | — | Proposed, not yet implemented; no per-platform export_read snapshot field exists. |
-| [ADR-080](../adr/080-persisting-the-advanced-dwarf-extraction-status.md) | gap | — | — | Proposed, not yet implemented; the advanced-DWARF extraction status is in memory only and is not persisted. |
+| [ADR-080](../adr/080-persisting-the-advanced-dwarf-extraction-status.md) | internal | — | — | Persists the advanced-DWARF extraction status as the optional dwarf_advanced.extraction key (schema v68) so a stored snapshot reads the status a live run recorded. Users reach it only through dump/compare; the one report-visible change is an assurance note for a mixed-provenance pair, not a flag, field, or exit code. |
 | [ADR-082](../adr/082-declared-header-order-independent-extraction.md) | internal | — | — | Dump-time proof of declared-header order and the stored header_canonical contract field; users reach it only through dump/compare, and the change is a schema v59 contract field, not a flag, report field or exit code. |
 | [ADR-089](../adr/089-dwarf-dependency-internals-out-of-contract.md) | internal | — | — | The DWARF declaration-file fix is extractor-internal, and the contract rule adds a reason value to the existing contract_reason_code field and scope_reasons, with no new flag, report field or exit code. The 2026-10-25 amendment extends the same rule to header-derived snapshots, again with no new flag, field or exit code. |
 | [ADR-090](../adr/090-unresolved-surface-is-not-a-clean-verdict.md) | gap | — | — | Proposed, not yet implemented; would add an UNCONFIRMED compatibility outcome, a default exit 1 and an assurance.unconfirmed config key, changing verdict, exit codes and the CLI, Action and report surfaces, pending acceptance. |

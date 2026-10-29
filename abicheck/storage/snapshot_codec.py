@@ -91,6 +91,7 @@ from .fact_codec import (
     decode_snapshot_facts,
     evidenced_producers,
 )
+from .fact_decode import decode_abi_slot_fact
 from .generation_migrations import migrate_and_describe
 from .sectioned_document import from_sectioned_document, is_sectioned_document
 from .semantic_ir_codec import decode_semantic_ir
@@ -577,8 +578,23 @@ def decode_snapshot(
     snap.spellings_generation = _spellings_generation
     snap.dump_provenance = _decode_dump_provenance(d)
     snap.live_preprocessor_hidden = _decode_preprocessor_hidden(d)
+    snap.typedef_abi_facts = _decode_typedef_abi_facts(d, _schema_version)
     snap.load_notices = (*snap.load_notices, *_generation_notices)
     return snap, _schema_version
+
+
+def _decode_typedef_abi_facts(
+    d: dict[str, Any], schema_version: int
+) -> dict[str, Any] | None:
+    """The document's ``typedef_abi_facts`` (schema v69), or ``None`` when the
+    producer captured none -- what every pre-v69 document reads as."""
+    raw = d.get("typedef_abi_facts")
+    if raw is None:
+        return None
+    if not isinstance(raw, dict):
+        raise SnapshotError("snapshot document's typedef_abi_facts must be a mapping")
+    facts = {str(k): decode_abi_slot_fact(v, schema_version) for k, v in raw.items()}
+    return {k: f for k, f in facts.items() if f is not None}
 
 
 def _decode_preprocessor_hidden(d: dict[str, Any]) -> dict[str, tuple[str, ...]] | None:

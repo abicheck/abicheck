@@ -77,7 +77,9 @@ from .dwarf_utils import (
 # Fact dataclasses live in the model package (ADR-061 Phase 5): this module
 # parses into them and re-exports them so the historical
 # ``from abicheck.dwarf_metadata import DwarfMetadata`` spelling keeps resolving.
+from .extract.dwarf_abi_fact import dwarf_type_abi_fact
 from .extract.dwarf_subtree_index import open_indexed_dwarf_info
+from .model.abi_fundamental import AbiFundamental
 from .model.availability import FactStatus
 from .model.dwarf_facts import (
     DwarfMetadata as DwarfMetadata,
@@ -413,9 +415,16 @@ def _expand_anonymous_member(
                 byte_size=fi.byte_size,
                 bit_offset=fi.bit_offset,
                 bit_size=fi.bit_size,
+                type_abi_fact=fi.type_abi_fact,
             )
         )
     return Fact.present(fields)
+
+
+def _member_abi_fundamental(die: Any, CU: Any) -> AbiFundamental | None:
+    """The member's ABI fundamental (schema v69), or ``None`` when DWARF states none."""
+    fact = dwarf_type_abi_fact(die, CU)
+    return None if fact is None else fact.value
 
 
 class _UnevaluableMemberLocation(Exception):
@@ -464,6 +473,10 @@ def _process_member(
         byte_size=field_byte_size,
         bit_offset=bit_offset,
         bit_size=bit_size,
+        # Schema v69: the same member-DIE fact the binary-only dump's TypeField
+        # reads (dwarf_snapshot.py), so the layout the depth projection rebuilds
+        # from carries it too.
+        type_abi_fact=_member_abi_fundamental(die, CU),
     )
 
 

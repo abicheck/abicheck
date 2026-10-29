@@ -129,6 +129,10 @@ from dataclasses import dataclass, field
 from datetime import date, datetime
 from typing import Any, TypeVar, cast
 
+from ..model.change_catalog.kind_variants import (
+    expand_variant_overrides,
+    kind_match_set,
+)
 from ..model.change_catalog.kinds import ChangeKind, HasKind
 from ..model.execution_cache import MemoryCache, request_key
 from ..model.policy_file_protocol import ReclassifyRuleProtocol
@@ -461,10 +465,13 @@ def reclassify_rules_for_kind(rules: Sequence[_R], kind_value: str) -> Sequence[
         kinds = [_matched_kind(rule) for rule in rules]
         for kind in kinds:
             if kind is not None:
-                buckets.setdefault(kind, [])
+                for matched in kind_match_set(kind):
+                    buckets.setdefault(matched, [])
         for rule, kind in zip(rules, kinds, strict=True):
             for bucket_kind, bucket in buckets.items():
-                if kind is None or kind == bucket_kind:
+                if kind is None or (
+                    bucket_kind is not None and bucket_kind in kind_match_set(kind)
+                ):
                     bucket.append(rule)
         return tuple(rules), {k: tuple(v) for k, v in buckets.items()}
 
@@ -665,9 +672,7 @@ def _policy_chain_verdict(
                 return base_v
             return reclass_v
 
-    overrides = (
-        getattr(policy_file, "overrides", None) if policy_file is not None else None
-    )
+    overrides = expand_variant_overrides(getattr(policy_file, "overrides", None))
     if overrides and kind in overrides:
         base_v = effective_category(change, *base_sets)
         override_v = cast(Verdict, overrides[kind])
@@ -743,9 +748,7 @@ def reclassify_rule_for_change(
     base_policy = getattr(policy_file, "base_policy", None)
     base_sets = resolve_kind_sets(base_policy, None)
     base_v = effective_category(change, *base_sets)
-    overrides = (
-        getattr(policy_file, "overrides", None) if policy_file is not None else None
-    )
+    overrides = expand_variant_overrides(getattr(policy_file, "overrides", None))
     kind = change.kind
     # The verdict that would apply if *this* reclassify rule didn't exist --
     # the next step down the same precedence chain effective_verdict_for_change

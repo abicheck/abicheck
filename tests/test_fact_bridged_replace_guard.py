@@ -67,6 +67,11 @@ _NAMED_CALL_ALLOWLIST: dict[tuple[str, str, str], str] = {
     ("abicheck/dwarf_snapshot.py", "_flatten_anonymous_member", "access"): (
         "Receiver is a TypeField; only Variable.access is bridged."
     ),
+    (
+        "abicheck/compare/abi_equivalent_retype.py",
+        "refine_abi_equivalent_retypes",
+        "kind",
+    ): ("Receiver is a Change, not a declaration: Change.kind is not a bridged field."),
     ("abicheck/tu_merge.py", "_merge_functions", "default"): (
         "Receiver is a Param; only TypeField.default is bridged."
     ),

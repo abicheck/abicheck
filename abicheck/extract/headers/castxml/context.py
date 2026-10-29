@@ -97,6 +97,10 @@ class CastxmlParserContext:
         #: Vector ``Unimplemented`` node id -> clang-derived spelling
         #: (``vector_spellings``); empty when no vector node was resolved.
         self.vector_spellings: dict[str, str] = {}
+        #: Schema v69: whether a plain ``char`` is unsigned under the compiler
+        #: the header parse used (``abi_fundamental.probe_plain_char_unsigned``);
+        #: None when unprobed, which leaves every plain ``char`` without a fact.
+        self.plain_char_unsigned: bool | None = None
         #: ``FunctionType`` node id -> calling-convention name clang spells on
         #: the declaration reaching it (``ms_abi``); castxml drops it from the
         #: XML (``function_type_cc``). Empty when no convention was joined.

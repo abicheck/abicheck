@@ -439,6 +439,7 @@ DETECTOR_KINDS: Mapping[str, frozenset[str]] = MappingProxyType(
 #: workflow or bundle/build/source path produces them.
 NON_DETECTOR_KINDS: frozenset[str] = frozenset(
     {
+        "abi_equivalent_type_changed",
         "abi_relevant_build_flag_changed",
         "api_depends_on_consumer_env",
         "behavioural_default_changed",

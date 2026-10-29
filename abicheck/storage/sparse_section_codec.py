@@ -458,6 +458,8 @@ class DeclarationsSection(_SparseSectionMixin):
         {
             "typedefs_qualified",
             "typedef_entity_ids",
+            # Schema v69: {typedef qualified name: fact}, absent when none captured.
+            "typedef_abi_facts",
             "constants",
             "constant_entity_ids",
             "python_ext",
@@ -473,6 +475,7 @@ class DeclarationsSection(_SparseSectionMixin):
     OPTIONAL_FIELD_SHAPES: ClassVar[Mapping[str, str]] = {
         "typedefs_qualified": _MAPPING,
         "typedef_entity_ids": _MAPPING,
+        "typedef_abi_facts": _MAPPING_OR_NONE,
         "constants": _MAPPING,
         "constant_entity_ids": _MAPPING,
         "python_ext": _MAPPING_OR_NONE,
