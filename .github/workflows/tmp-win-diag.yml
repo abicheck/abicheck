@@ -25,9 +25,11 @@ jobs:
           cache: 'pip'
       - run: pip install -e ".[dev]"
       - name: tool locations
+        shell: bash
         run: |
-          where.exe gcc g++ clang clang++ castxml cl
-          Measure-Command { g++ -E -x c++ -v - 2>&1 < NUL | Out-Null }
+          which -a gcc g++ clang clang++ castxml cl || true
+          time (for i in 1 2 3 4 5; do g++ -E -x c++ -v - </dev/null >/dev/null 2>&1; done)
+          time (for i in 1 2 3 4 5; do castxml --version >/dev/null 2>&1; done)
       - name: one-cell profile (serial)
         shell: bash
         env:
