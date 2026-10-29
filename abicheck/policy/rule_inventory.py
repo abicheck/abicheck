@@ -62,6 +62,7 @@ from dataclasses import dataclass
 from datetime import date
 from typing import Any, cast
 
+from ..model.change_catalog.kind_variants import kind_match_set
 from ..model.change_catalog.kinds import ChangeKind
 from .detector_kind_map import DETECTOR_KINDS
 from .rule_identity import readable_identity_of, rule_id_of
@@ -180,15 +181,17 @@ class RuleAuditRow:
 def _kind_selector(value: object) -> frozenset[str] | None:
     """A rule's ``kind``/``change_kind`` selector as ``ChangeKind`` values.
 
-    ``None`` (no kind selector) stays ``None``: every kind. An unrecognised
-    spelling is kept verbatim, so no detector produces it and the rule reads
-    ``not_evaluated`` rather than being guessed at.
+    ``None`` (no kind selector) stays ``None``: every kind. A base kind also
+    stands for its ``*_elf_only`` variant, the kinds the selector matches
+    (:func:`~abicheck.model.change_catalog.kind_variants.kind_match_set`). An
+    unrecognised spelling is kept verbatim, so no detector produces it and the
+    rule reads ``not_evaluated`` rather than being guessed at.
     """
     if value is None:
         return None
     text = str(value)
     try:
-        return frozenset({ChangeKind(text).value})
+        return kind_match_set(ChangeKind(text).value)
     except ValueError:
         return frozenset({text})
 

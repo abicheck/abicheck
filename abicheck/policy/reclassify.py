@@ -129,6 +129,7 @@ from dataclasses import dataclass, field
 from datetime import date, datetime
 from typing import Any, TypeVar, cast
 
+from ..model.change_catalog.kind_variants import kind_match_set
 from ..model.change_catalog.kinds import ChangeKind, HasKind
 from ..model.execution_cache import MemoryCache, request_key
 from ..model.policy_file_protocol import ReclassifyRuleProtocol
@@ -461,10 +462,13 @@ def reclassify_rules_for_kind(rules: Sequence[_R], kind_value: str) -> Sequence[
         kinds = [_matched_kind(rule) for rule in rules]
         for kind in kinds:
             if kind is not None:
-                buckets.setdefault(kind, [])
+                for matched in kind_match_set(kind):
+                    buckets.setdefault(matched, [])
         for rule, kind in zip(rules, kinds, strict=True):
             for bucket_kind, bucket in buckets.items():
-                if kind is None or kind == bucket_kind:
+                if kind is None or (
+                    bucket_kind is not None and bucket_kind in kind_match_set(kind)
+                ):
                     bucket.append(rule)
         return tuple(rules), {k: tuple(v) for k, v in buckets.items()}
 

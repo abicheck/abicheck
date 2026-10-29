@@ -68,7 +68,7 @@ suppressions:
 | `symbol_pattern` | regex string | Fullmatch regex against symbol |
 | `type_pattern` | regex string | Fullmatch regex for type-level changes |
 | `member_name` | regex string | Fullmatch regex against the last `::`-segment of the symbol |
-| `change_kind` | string | Restrict suppression to a specific change kind |
+| `change_kind` | string | Restrict suppression to a specific change kind. A base kind also matches its `*_elf_only` variant (`func_removed` matches `func_removed_elf_only`, and likewise for `func_added`, `var_removed`, `var_added`); see below |
 | `source_location` | glob string | `fnmatch`-style match against `change.source_location` |
 | `namespace` (alias: `entity_namespace`) | glob string | Match the change's own `symbol`/qualified name against a `::`-namespace glob (`**` = any depth) |
 | `cause_namespace` | glob string | Match the change's `caused_by_type` (its documented *cause*, when different from its own subject) against a namespace glob |
@@ -102,7 +102,9 @@ Rules are evaluated with **AND** logic:
   that namespace;
 - if `symbol` or `symbol_pattern` is present, symbol must match;
 - if `type_pattern` is present, change must be a type-level change and pattern must match;
-- if `change_kind` is present, kind must match.
+- if `change_kind` is present, kind must match, with one deliberate widening:
+  a rule naming a base kind also matches that kind's `*_elf_only` variant
+  (see [`change_kind` and ELF-only variants](#change_kind-and-elf-only-variants)).
 
 So `source_location` does **not** bypass symbol/type selectors.
 
@@ -122,6 +124,31 @@ cause happens to live there — use `cause_namespace` for that instead:
 # finding's own (possibly public) subject. Use deliberately — see below.
 - cause_namespace: "myns::internal::*"
 ```
+
+---
+
+## `change_kind` and ELF-only variants
+
+A removal or addition that the ELF export table shows but no supplied header
+declares is classified with an `*_elf_only` kind: `func_removed_elf_only`
+rather than `func_removed`, and likewise `func_added_elf_only`,
+`var_removed_elf_only` and `var_added_elf_only`. Which kind a change gets
+depends on whether headers were supplied to the run, not on the change
+itself. So a rule that names the base kind matches both:
+
+```yaml
+- change_kind: func_removed     # matches func_removed AND func_removed_elf_only
+  symbol: foo_legacy_api
+  reason: "Removed on purpose in 3.0; consumers were migrated."
+```
+
+The rule is one-directional. A rule that names a `*_elf_only` kind matches only
+that kind, so a waiver written for the ELF-only case stays narrow. The pairs are
+derived from the change catalog, not maintained by hand. A finding hidden this
+way records the match in its disposition's rule provenance as
+`matched_via_kind` (the base kind the rule named), next to the observed kind
+(see [disposition audit](disposition-audit.md)). The field is present only for
+a variant match.
 
 ---
 

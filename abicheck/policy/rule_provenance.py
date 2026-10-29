@@ -27,9 +27,11 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+from ..model.change_catalog.kind_variants import matched_via_variant
 from .rule_identity import readable_identity_of, rule_id_of
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
+    from ..model.change_catalog.kinds import HasKind
     from .suppression.rules import Suppression
 
 
@@ -59,6 +61,11 @@ class RuleProvenance:
     #: Canonical JSON identity of an id-less rule; ``None`` when the rule has
     #: a user ``id:``. Emitted only when set.
     rule_identity: str | None = None
+    #: The rule's ``change_kind`` when the finding it disposed of matched only
+    #: through that kind's ``*_elf_only`` variant (a ``func_removed`` rule that
+    #: hid a ``func_removed_elf_only`` finding). ``None`` for an exact-kind
+    #: match. Emitted only when set, so every existing row keeps its shape.
+    matched_via_kind: str | None = None
 
     def to_dict(self) -> dict[str, object]:
         """JSON-safe mapping; ``None`` fields are emitted so the ledger's rows
@@ -76,6 +83,11 @@ class RuleProvenance:
                 {}
                 if self.rule_identity is None
                 else {"rule_identity": self.rule_identity}
+            ),
+            **(
+                {}
+                if self.matched_via_kind is None
+                else {"matched_via_kind": self.matched_via_kind}
             ),
         }
 
@@ -95,19 +107,27 @@ def rule_provenance(
     *,
     source_file: str | None = None,
     entry_index: int | None = None,
+    change: HasKind | None = None,
 ) -> RuleProvenance | None:
     """Project one suppression *rule* onto :class:`RuleProvenance`.
 
     Duck-typed (``getattr``) rather than importing ``Suppression``, keeping
     this module a leaf; ``None`` in, ``None`` out, which is the honest answer
     for a change whose matching rule was not recorded (a ``DiffResult``
-    reconstructed from JSON, for instance).
+    reconstructed from JSON, for instance). Given the disposed *change*, the
+    projection also records whether the rule matched only through that
+    change's ``*_elf_only`` variant (see
+    :func:`~abicheck.model.change_catalog.kind_variants.matched_via_variant`).
     """
     if rule is None:
         return None
     expires = getattr(rule, "expires", None)
     label = getattr(rule, "label", None)
     reason = getattr(rule, "reason", None)
+    selector_kind: str | None = getattr(rule, "change_kind", None)
+    via_variant = change is not None and matched_via_variant(
+        selector_kind, change.kind.value
+    )
     return RuleProvenance(
         rule_id=rule_id_of(rule),
         rule_identity=readable_identity_of(rule),
@@ -117,4 +137,5 @@ def rule_provenance(
         expires=expires.isoformat() if expires is not None else None,
         allow_public_break=bool(getattr(rule, "allow_public_break", False)),
         entry_index=entry_index,
+        matched_via_kind=selector_kind if via_variant else None,
     )

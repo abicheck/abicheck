@@ -256,7 +256,7 @@ class DispositionLedger:
             Disposition.SUPPRESSED,
             application_point=application_point,
             rule=rule_provenance(
-                rule, source_file=source_file, entry_index=entry_index
+                rule, source_file=source_file, entry_index=entry_index, change=change
             ),
             dedupe_key=dedupe_key,
             shadowed_refs=shadowed_refs,
