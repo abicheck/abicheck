@@ -869,7 +869,7 @@ def _dump_elf(
             lang=lang,
         ),
     )
-    _populate_elf_visibility(snapshot)
+    _populate_elf_visibility(snapshot, so_path)
     return finish_binary_snapshot(snapshot)
 
 
