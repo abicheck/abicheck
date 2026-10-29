@@ -56,8 +56,7 @@ RUNTIME_ONLY_SNAPSHOT_FIELDS: Final[Mapping[str, str]] = MappingProxyType(
             "the snapshot carries"
         ),
         "static_archive": (
-            "ADR-086: whether this run read the export table from an archive's "
-            "own symbol index"
+            "whether this run read the export table from an archive's own symbol index"
         ),
         "header_declaration_ids": (
             "the L2 node ids a depth projection kept for this run; ids only, so "

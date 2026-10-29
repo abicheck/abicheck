@@ -28,6 +28,7 @@ from xml.etree.ElementTree import Element, SubElement
 from ....errors import SnapshotError
 from ....storage.ast_cache_location import ast_cache_store
 from ...arithmetic_type_spellings import is_arithmetic_spelling
+from ..clang.ast_inner import ast_inner
 from ..clang.backend import clang_header_dump
 from ..clang.expr import _initializer_value
 
@@ -115,11 +116,11 @@ def clang_const_variable_templates(
         pos.advance((node.get("range") or {}).get("begin"))
         kind = node.get("kind")
         if kind == "NamespaceDecl" and node.get("name"):
-            visit(node.get("inner", []), (*scope, node["name"]), pos)
+            visit(ast_inner(node), (*scope, node["name"]), pos)
         elif kind == "VarTemplateDecl":
             _maybe_record(node, scope, pos, wanted, out)
         else:
-            visit(node.get("inner", []), scope, pos)
+            visit(ast_inner(node), scope, pos)
 
     visit(clang_root, (), _Position())
     return out
@@ -133,7 +134,7 @@ def _maybe_record(
     out: list[dict[str, Any]],
 ) -> None:
     decl = next(
-        (c for c in node.get("inner", []) or [] if c.get("kind") == "VarDecl"),
+        (c for c in ast_inner(node) if c.get("kind") == "VarDecl"),
         None,
     )
     if decl is None or not decl.get("name") or pos.file is None:

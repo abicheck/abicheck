@@ -51,13 +51,11 @@ def msvc_data_qualified_name(mangled: str) -> str | None:
     where the storage class digit goes, so it is rejected here rather than
     spelled as a variable.
     """
-    if not mangled.startswith("?"):
-        return None
-    end = mangled.find("@@")
-    if end == -1 or end + 2 >= len(mangled) or not mangled[end + 2].isdigit():
-        return None
     components = msvc_scope_components(mangled)
     if components is None:
+        return None
+    end = mangled.find("@@")
+    if end + 2 >= len(mangled) or not mangled[end + 2].isdigit():
         return None
     return "::".join(components)
 

@@ -22,6 +22,7 @@ from abicheck.model import AbiSnapshot, Function
 from abicheck.model.elf_facts import SymbolBinding
 from abicheck.model.macho_facts import MachoExport, MachoMetadata, macho_export_linkage
 from abicheck.serialization import load_snapshot
+from abicheck.storage.sectioned_document import is_sectioned_document
 from abicheck.storage.snapshot_load_normalization import (
     backfill_missing_elf_binding,
     stamp_macho_elf_binding,
@@ -96,6 +97,14 @@ def test_load_backfill_recovers_binding_for_an_archived_macho_snapshot() -> None
     assert by_name["strong_fn"].elf_binding is SymbolBinding.GLOBAL
 
 
+def _strip_stored_binding(doc: dict) -> None:
+    """Drop the binding keys from a sectioned dump document's functions, the
+    shape an archived baseline written before the field existed has."""
+    for decl in doc["sections"]["declarations"]["payload"]["functions"]:
+        decl.pop("elf_binding", None)
+        decl.pop("elf_binding_fact", None)
+
+
 def test_dump_cli_stamps_linkage_and_archived_baseline_recovers_it(
     tmp_path: Path,
 ) -> None:
@@ -115,9 +124,8 @@ def test_dump_cli_stamps_linkage_and_archived_baseline_recovers_it(
     # An archived baseline written before the field existed carries no
     # elf_binding key; the load recovers it from the stored export table.
     doc = json.loads(out.read_text())
-    for decl in doc["sections"]["declarations"]["payload"]["functions"]:
-        decl.pop("elf_binding", None)
-        decl.pop("elf_binding_fact", None)
+    assert is_sectioned_document(doc)
+    _strip_stored_binding(doc)
     out.write_text(json.dumps(doc))
     archived = {
         f.name: f.elf_binding for f in load_snapshot(out).declarations.functions
