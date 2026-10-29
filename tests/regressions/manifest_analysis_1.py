@@ -348,6 +348,10 @@ ANALYSIS_1_BUG_CLASSES: tuple[BugClass, ...] = (
             "tests/test_source_replay_twin_table.py",
             "tests/test_one_change_one_finding_matrix.py",
             "tests/test_variable_identity_dedup.py",
+            # The dedup merge rules as properties: oracle agreement, idempotence,
+            # order independence and conservation over generated finding lists,
+            # plus the must-merge / must-not-merge pairs by name and value.
+            "tests/test_finding_dedup_properties.py",
             "tests/unit/compare/test_dedup_key.py",
             "tests/test_diff_namespaces.py",
             # workflows/cross_source_hygiene.py's own per-side OLD/NEW
