@@ -10,10 +10,10 @@ generation-drift rule that demotes a respelling across an older baseline.
 from __future__ import annotations
 
 import json
-import xml.etree.ElementTree as ET
 from types import SimpleNamespace
 
 import pytest
+from defusedxml.ElementTree import fromstring
 
 from abicheck.dwarf_utils import (
     DW_CC_TYPE_CONVENTIONS,
@@ -72,7 +72,7 @@ _XML = """<CastXML>
 
 
 def test_castxml_keys_reach_the_function_type_through_declarators() -> None:
-    root = ET.fromstring(_XML)
+    root = fromstring(_XML)
     keys = castxml_function_type_keys(root)
     assert keys == {
         "_4": "param:_Z1fPFviE#0",
@@ -123,7 +123,7 @@ def test_clang_join_keys_each_declaration_with_its_convention() -> None:
 
 
 def test_carried_map_round_trips_and_leaves_the_tree_unwritten() -> None:
-    root = ET.fromstring(_XML)
+    root = fromstring(_XML)
     carried = with_function_type_cc(root, {"_4": "ms_abi"})
     assert json.loads(carried.get(FUNCTION_CC_ATTR, "{}")) == {"_4": "ms_abi"}
     assert load_function_type_cc(carried) == {"_4": "ms_abi"}

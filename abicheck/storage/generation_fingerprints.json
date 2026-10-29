@@ -82,7 +82,7 @@
       "abicheck/extract/headers/castxml/dumper.py": "dc28398e08932705d22199edd1b38d78faa677859d043b14f5943efdbf9c4988",
       "abicheck/extract/headers/castxml/duplicate_declarations.py": "977b85a15408fa9877b9b686f0bd913af9442e4da5b1d9292975bda7eff424f7",
       "abicheck/extract/headers/castxml/enums.py": "e616c768543061d71812378dd92cbcb7b8d00afbb734bcb7b4b5334ee34042aa",
-      "abicheck/extract/headers/castxml/function_type_cc.py": "6e1b1701fe6eaf6ab4d50f1ecba2becebf4c725392b2aadfb9bc5e06502a5ed3",
+      "abicheck/extract/headers/castxml/function_type_cc.py": "4260c246490b0dfd53a0ee29ba278f903023014d2c3db2ceb3f2ad212f3bbe79",
       "abicheck/extract/headers/castxml/functions.py": "128de0b76f5f400987e3dfa9f515bc868fcf9f200eb3e9e426218c9b2ef5b7b6",
       "abicheck/extract/headers/castxml/hidden_declarations.py": "500abf62faa042e1c33a3ef3897557e263f0c7b1060b60c323d8d34895f5b057",
       "abicheck/extract/headers/castxml/inline_variables.py": "60ee92e7a810d81f113a6f5fb4f218ea6287258948dc9a838fbdef37ef37ea32",
@@ -179,9 +179,9 @@
       "abicheck/symvers_metadata.py": "372737765cd132e6e87ed891dd465d2958e04debbef774e45212ceb3036871cb",
       "abicheck/type_metadata.py": "9997189de8dac522fd1db8be5ae491d811139503f83abaaded89038eb4aa9cdf"
     },
-    "fingerprint": "1a2886406d4227b6932df4bdcf6901dba608b75a16a72d3c2e17abfda8be2d65",
+    "fingerprint": "106668bc707d8353f4bc00aa49b665eddf163ac8f19466b9c8bd0c84605993c5",
     "generation": 31,
-    "reason": "castxml clang-pass gate narrowed to translation units whose files spell a calling convention; a unit that spells none had no convention to join, so the recorded spelling is unchanged"
+    "reason": "function_type_cc: clang_function_type_cc split into helpers for complexity, same keys"
   },
   "resolver": {
     "files": {

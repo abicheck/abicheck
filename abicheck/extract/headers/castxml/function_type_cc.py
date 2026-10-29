@@ -189,6 +189,50 @@ def has_function_type_nodes(root: Element) -> bool:
     return bool(castxml_function_type_keys(root))
 
 
+def _record_function(
+    node: dict[str, Any], scope: list[str], out: dict[str, str]
+) -> str:
+    """Key a function's returned and parameter conventions; return its key."""
+    qual_type = (node.get("type") or {}).get("qualType", "")
+    fn_key = node.get("mangledName") or _clang_qualified(scope, node["name"])
+    # A function that returns a function pointer carries the pointee's
+    # convention as its trailing attribute too (``void (*(void))(int)
+    # __attribute__((ms_abi))``); the ``(*`` before it marks that case.
+    ret_cc = trailing_calling_convention(qual_type)
+    if ret_cc is not None and "(*" in qual_type:
+        out.setdefault(f"return:{fn_key}", ret_cc)
+    params = [
+        c
+        for c in ast_inner(node)
+        if isinstance(c, dict) and c.get("kind") == "ParmVarDecl"
+    ]
+    for index, child in enumerate(params):
+        cc = trailing_calling_convention((child.get("type") or {}).get("qualType", ""))
+        if cc is not None:
+            out.setdefault(f"param:{fn_key}#{index}", cc)
+    return fn_key
+
+
+def _record_declaration(
+    node: dict[str, Any], scope: list[str], function: str | None, out: dict[str, str]
+) -> None:
+    """Key a typedef's or a member field's own trailing convention."""
+    kind, name = node.get("kind"), node.get("name") or ""
+    if not name or kind not in ("TypedefDecl", "FieldDecl"):
+        return
+    if kind == "FieldDecl" and function is not None:
+        return
+    cc = trailing_calling_convention((node.get("type") or {}).get("qualType", ""))
+    if cc is None:
+        return
+    key = (
+        f"typedef:{name}"
+        if kind == "TypedefDecl"
+        else f"field:{_clang_qualified(scope, '')}::{name}"
+    )
+    out.setdefault(key, cc)
+
+
 def clang_function_type_cc(clang_root: dict[str, Any]) -> dict[str, str]:
     """Declaration key -> calling convention, from a clang ``-ast-dump=json`` root.
 
@@ -205,41 +249,15 @@ def clang_function_type_cc(clang_root: dict[str, Any]) -> dict[str, str]:
             return
         if not isinstance(node, dict):
             return
-        kind = node.get("kind")
-        name = node.get("name") or ""
-        inner = ast_inner(node)
-        qual_type = (node.get("type") or {}).get("qualType", "")
-        if kind == "TypedefDecl" and name:
-            cc = trailing_calling_convention(qual_type)
-            if cc is not None:
-                out.setdefault(f"typedef:{name}", cc)
-        elif kind == "FieldDecl" and name and function is None:
-            cc = trailing_calling_convention(qual_type)
-            if cc is not None:
-                out.setdefault(f"field:{_clang_qualified(scope, '')}::{name}", cc)
-        elif kind == "FunctionDecl" and name:
-            fn_key = node.get("mangledName") or _clang_qualified(scope, name)
-            # A function that returns a function pointer carries the pointee's
-            # convention as its trailing attribute too (``void (*(void))(int)
-            # __attribute__((ms_abi))``); the ``(*`` before it marks that case.
-            ret_cc = trailing_calling_convention(qual_type)
-            if ret_cc is not None and "(*" in qual_type:
-                out.setdefault(f"return:{fn_key}", ret_cc)
-            index = 0
-            for child in inner:
-                if isinstance(child, dict) and child.get("kind") == "ParmVarDecl":
-                    cc = trailing_calling_convention(
-                        (child.get("type") or {}).get("qualType", "")
-                    )
-                    if cc is not None:
-                        out.setdefault(f"param:{fn_key}#{index}", cc)
-                    index += 1
-            walk(inner, scope, fn_key)
+        kind, name = node.get("kind"), node.get("name") or ""
+        if kind == "FunctionDecl" and name:
+            walk(ast_inner(node), scope, _record_function(node, scope, out))
             return
+        _record_declaration(node, scope, function, out)
         if kind in ("NamespaceDecl", "RecordDecl", "CXXRecordDecl") and name:
-            walk(inner, [*scope, name], None)
+            walk(ast_inner(node), [*scope, name], None)
             return
-        walk(inner, scope, function)
+        walk(ast_inner(node), scope, function)
 
     walk(ast_inner(clang_root), [], None)
     return out
