@@ -254,7 +254,6 @@ def _reject_flags_unsupported_for_set_inputs(
     diagnostic_comparison: bool,
     include_labels: dict[Path, str] | None,
     use_cases_manifest: Path | None = None,
-    suppress: Path | tuple[Path, ...] | None = None,
     budget: str | None = None,
     pdb_path: Path | None = None,
 ) -> str | None:
@@ -282,7 +281,6 @@ def _reject_flags_unsupported_for_set_inputs(
         required_symbols=required_symbols,
         use_cases_manifest=use_cases_manifest,
         diagnostic_comparison=diagnostic_comparison,
-        suppress=suppress,
         include_labels=include_labels,
         budget=budget,
         pdb_path=pdb_path,

@@ -575,7 +575,7 @@
     },
     {
       "path": "abicheck/dumper_clang.py",
-      "baseline_lines": 1389,
+      "baseline_lines": 1387,
       "target": "see ADR-061 ownership map",
       "rule": "no_growth",
       "disposition": "migrate",
@@ -619,7 +619,7 @@
     },
     {
       "path": "abicheck/export_surface.py",
-      "baseline_lines": 1242,
+      "baseline_lines": 1240,
       "target": "see ADR-061 ownership map",
       "rule": "no_growth",
       "disposition": "migrate",
@@ -663,7 +663,7 @@
     },
     {
       "path": "abicheck/junit_report.py",
-      "baseline_lines": 1183,
+      "baseline_lines": 1167,
       "target": "report",
       "rule": "no_growth",
       "disposition": "migrate",
@@ -1521,7 +1521,7 @@
     },
     {
       "path": "tests/test_internal_leak.py",
-      "baseline_lines": 1933,
+      "baseline_lines": 1929,
       "target": "tests/unit-or-contract ownership matching production migration",
       "rule": "no_growth",
       "disposition": "migrate",

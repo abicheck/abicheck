@@ -68,7 +68,6 @@ def _reject_set_input_flags(
     required_symbols: tuple[str, ...] = (),
     use_cases_manifest: Path | None = None,
     diagnostic_comparison: bool = False,
-    suppress: Path | tuple[Path, ...] | None = None,
     include_labels: dict[Path, str] | None = None,
     budget: str | None = None,
     pdb_path: Path | None = None,

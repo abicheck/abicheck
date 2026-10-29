@@ -211,7 +211,7 @@ def _walk_die_iter(
             if die_name:
                 next_scope = qualified  # nested types use this as their scope
         elif tag == "DW_TAG_enumeration_type":
-            _process_enum(die, meta, CU, scope_prefix=scope)
+            _process_enum(die, meta, scope_prefix=scope)
         elif tag == "DW_TAG_typedef":
             _process_typedef(die, meta, CU, type_cache)
         elif tag == "DW_TAG_base_type" and die_name:
@@ -253,7 +253,7 @@ def _process_typedef(
             )
     elif tag == "DW_TAG_enumeration_type":
         if not target_name and typedef_name not in meta.enums:
-            _process_enum_named(target, meta, CU, override_name=typedef_name)
+            _process_enum_named(target, meta, override_name=typedef_name)
 
 
 # ---------------------------------------------------------------------------
@@ -488,20 +488,18 @@ def _process_member(
 def _process_enum(
     die: Any,
     meta: DwarfMetadata,
-    CU: Any,
     scope_prefix: str = "",
 ) -> None:
     name = _attr_str(die, "DW_AT_name")
     if not name:
         return  # anonymous — handled via typedef in _process_typedef
     qualified = f"{scope_prefix}::{name}" if scope_prefix else name
-    _process_enum_named(die, meta, CU, override_name=qualified)
+    _process_enum_named(die, meta, override_name=qualified)
 
 
 def _process_enum_named(
     die: Any,
     meta: DwarfMetadata,
-    CU: Any,
     override_name: str | None,
 ) -> None:
     name = override_name or _attr_str(die, "DW_AT_name")
@@ -594,7 +592,7 @@ def _compute_type_info(
         )
 
     if tag in ("DW_TAG_structure_type", "DW_TAG_class_type", "DW_TAG_union_type"):
-        return _compute_record_type_info(die, tag)
+        return _compute_record_type_info(die)
 
     if tag == "DW_TAG_enumeration_type":
         name = _attr_str(die, "DW_AT_name") or "<enum>"
@@ -643,7 +641,7 @@ def _compute_type_info(
     return _compute_fallback_type_info(die, tag)
 
 
-def _compute_record_type_info(die: Any, tag: str) -> tuple[str, int]:
+def _compute_record_type_info(die: Any) -> tuple[str, int]:
     name = _attr_str(die, "DW_AT_name") or "<anon>"
     # Use bare names for struct/class/union to match castxml naming.
     # Prefixes like "struct Foo" vs "Foo" can cause false type-drift reports

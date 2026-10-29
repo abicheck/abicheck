@@ -1344,7 +1344,7 @@ def compare_bundle(
 
     # 4. bundle_intra_type_changed: a type_*_changed touches a type that
     #    appears in a public symbol of a sibling library.
-    findings.extend(_detect_intra_type_changed(old, new, diff_by_library))
+    findings.extend(_detect_intra_type_changed(new, diff_by_library))
 
     # 5. bundle_provider_changed: same mangled name appears as func_removed
     #    in library A's diff AND func_added in library B's diff.

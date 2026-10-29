@@ -527,7 +527,7 @@ def close_consumer_scope(
     # into the contract but not used by this consumer is still excluded.
     ledger.refresh_promoted(result)
     if scope_decides_exit:
-        ledger.apply_scope(result, gating)
+        ledger.apply_scope(gating)
     else:
         exclude_from_gate(ledger, CONSUMER_ONLY_APPLICATION_POINTS)
     ledger.resolve_verdict_classes(result)

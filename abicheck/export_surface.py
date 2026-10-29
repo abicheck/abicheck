@@ -976,7 +976,6 @@ def _followed_typedef_aliases(type_str: str | None, index: _SpellingIndex) -> se
 
 def _unresolved_type_edges(
     snap: AbiSnapshot,
-    surface: ExportSurface,
     reached_types: set[str],
     root_identities: set[str],
     index: _SpellingIndex,
@@ -1232,7 +1231,6 @@ def compute_export_surface(snap: AbiSnapshot) -> ExportSurface:
     # After the walk, so only edges the closure actually reached are scanned.
     surface.unresolved_type_edges = _unresolved_type_edges(
         snap,
-        surface,
         surface.export_types,
         roots.root_identities,
         _resolvable_type_spellings(

@@ -577,7 +577,7 @@ def include_dependencies_option(func: F) -> F:
     return func
 
 
-def _define_callback(
+def _define_callback(  # noqa: ARG001 -- click option callback signature (ctx, param, value)
     ctx: click.Context, param: click.Parameter, value: tuple[str, ...]
 ) -> tuple[str, ...]:
     """Validate every ``-D/--define`` operand eagerly, at parse time, and

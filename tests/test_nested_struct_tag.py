@@ -35,7 +35,7 @@ class TestComputeRecordTypeInfo:
         )
 
         die = self._make_die("DW_TAG_structure_type", "Inner", 8)
-        name, _ = _compute_record_type_info(die, "DW_TAG_structure_type")
+        name, _ = _compute_record_type_info(die)
         assert name == "Inner", f"Expected 'Inner', got {name!r}"
         assert not name.startswith("struct "), "struct prefix must NOT be added"
 
@@ -46,7 +46,7 @@ class TestComputeRecordTypeInfo:
         )
 
         die = self._make_die("DW_TAG_class_type", "Foo", 16)
-        name, _ = _compute_record_type_info(die, "DW_TAG_class_type")
+        name, _ = _compute_record_type_info(die)
         assert name == "Foo", f"Expected 'Foo', got {name!r}"
 
 
