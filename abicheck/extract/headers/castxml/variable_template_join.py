@@ -173,7 +173,7 @@ def valid_sidecar(payload: Any) -> list[dict[str, Any]] | None:
     """The stored entries, or ``None`` if the payload is not a well-formed list."""
     if not isinstance(payload, dict) or not isinstance(payload.get("templates"), list):
         return None
-    entries = payload["templates"]
+    entries: list[dict[str, Any]] = payload["templates"]
     for entry in entries:
         if not (
             isinstance(entry, dict)
@@ -209,14 +209,15 @@ class _Builder:
         self._root = root
         self._next = 0
         self._ids = {el.get("id") for el in root.iter() if el.get("id")}
-        self._global = next(
+        global_ns = next(
             (el for el in root if el.tag == "Namespace" and el.get("name") == "::"),
             None,
         )
-        if self._global is None:
-            self._global = SubElement(
+        if global_ns is None:
+            global_ns = SubElement(
                 root, "Namespace", {"id": self._new_id("ns"), "name": "::"}
             )
+        self._global = global_ns
         self._types: dict[str, str] = {}
         self._consts: set[tuple[str, ...]] = set()
         for el in root.iter("Variable"):

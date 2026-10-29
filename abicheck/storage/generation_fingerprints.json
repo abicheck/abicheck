@@ -61,7 +61,7 @@
       "abicheck/extract/elf_symbol_versions.py": "b2aa29df27ed51b9cbe3f6b94e9c99e391036216621fa35cb72dc922ecf39786",
       "abicheck/extract/env_flags.py": "6a1343268cdfcd4b2ccaf91008d96b611973bf5cab04467c2585f012e1f5466c",
       "abicheck/extract/export_symbol_identity.py": "2146bd67207411943258124a24271542c8b9767344c1b404aaa9133c0358ff00",
-      "abicheck/extract/export_table_read.py": "0d9ec9fb81165d7ea765beae3d90f2d51dd5dbd5c1ede00c6ea322cc4a30c771",
+      "abicheck/extract/export_table_read.py": "17bb4dd37c45886a9cf7c3e74355b9fe8b7c3f7d6bed338165e71397dfedd654",
       "abicheck/extract/flat_map_dependency_scope.py": "5fa66ab2f8ebdbc37d735e3dbad3b6fe1ae3907d7a98eab5c6e6257842e2ea07",
       "abicheck/extract/header_ast_backend.py": "1f5b15c126b139c49b702b69a4f626ed7d30f8294e15ad116d61387e96d31f16",
       "abicheck/extract/header_ast_cache_producers.py": "96b4a3ab3f35c195834e5946591405dad0453b01166534f35a1c36495166f1c4",
@@ -76,7 +76,7 @@
       "abicheck/extract/headers/backend_plan.py": "1f02babf0ead52a65e4fa08dff8ce5b2a9d60feb1d02d22e7db30ee050cf8717",
       "abicheck/extract/headers/backend_protocol.py": "144cbe76456b6bceaf56f0edd0f3398f171178a222c8b968d53f8a17ee05a21b",
       "abicheck/extract/headers/castxml/__init__.py": "cebb319d35840200904dde9fe4ad16489124b02327a50d8351b086844ee19943",
-      "abicheck/extract/headers/castxml/backend.py": "2b0439666288ce34a6265413812251574165ce365ee765cdb3c96b7f80f5e163",
+      "abicheck/extract/headers/castxml/backend.py": "2f9b1dfc17b3b0badb2739ab724a376ac32bc3d4a0b0c8908a3558468fb573f4",
       "abicheck/extract/headers/castxml/calling_convention.py": "ab4cd4474d11eb0da2216b29393e9daf1dbcf94226204237fd4c0381adacbcbb",
       "abicheck/extract/headers/castxml/context.py": "bd4a6165d45d4fc754f472b4537d9224009493369d9053ae99ff7659cf8d660d",
       "abicheck/extract/headers/castxml/dumper.py": "008b0e7819c342882785aba3d4f0f28e5b0aa3a1a08fda29be0e0d3b8017f584",
@@ -97,6 +97,7 @@
       "abicheck/extract/headers/castxml/specialization.py": "3f9f021672df1b84de42bc8de5f3c915508b3f3850e0a8acbaa80a3dee04c6f3",
       "abicheck/extract/headers/castxml/type_resolution.py": "dba855d77fb5e32a63977fe03e219712bb3d40cc8afad6ca35517ac564318fb1",
       "abicheck/extract/headers/castxml/typedef_parsing.py": "332587638d5d4b7caebbc20fa44b69c314771fffa5839a15dec59eaba3caaf93",
+      "abicheck/extract/headers/castxml/variable_template_join.py": "842f091ddee47a4b35ce0db670b4bb63201ece1603dd5a65447fd62d516cd44c",
       "abicheck/extract/headers/castxml/vector_join.py": "043e4a849bbc324568e240d4a94323b0952583678ec2ca0a62c81515a1798db0",
       "abicheck/extract/headers/castxml/vector_spellings.py": "95368cac86a4100e3c0e832814ccd96c53e1edbf930f680044533812a05923ec",
       "abicheck/extract/headers/clang/__init__.py": "538add12f3ff39e1c1b39e6f5def93b50a584b78b30c4e7e59058207222757d0",
@@ -166,7 +167,7 @@
       "abicheck/extract/tu_jobs.py": "6ed530395738f83bc46664a6ae9e91fa7286a2a6bb81e4fbb723447f6524b070",
       "abicheck/extract/unparseable_header_fallback.py": "a9aae1490ad88bb1f1bd9ddfe96681d4a3b9558436446305c66fb44f0003c2f6",
       "abicheck/extract/wheel_tags.py": "0a6eff34860223c9efb0fc2d62469804d50d59ae1825c726abafaf7c898789db",
-      "abicheck/macho_metadata.py": "5b81975242e679583bae9d09618b63ca329b7bae1b04dce64b7cac824cf79be4",
+      "abicheck/macho_metadata.py": "9b3fa13cbbc127fcf981289c4b15ff2aaabc6dfd10d7747a7262fd3cfda3e69e",
       "abicheck/pdb_metadata.py": "79beb794904dd26afaf7d1fa8e9fdf74d4d4dfd21f5c09b9764c45b253a2dc1f",
       "abicheck/pdb_model.py": "d79ccfac86f4889d8d9b2c745ee2dacd6132c1789c0ca77988aaf53bd50aea8a",
       "abicheck/pdb_parser.py": "0e36976c17fbea1c7cfe98f9ede5713418624c69821eb9ce12cac6c9a736543f",
@@ -176,9 +177,9 @@
       "abicheck/symvers_metadata.py": "372737765cd132e6e87ed891dd465d2958e04debbef774e45212ceb3036871cb",
       "abicheck/type_metadata.py": "9997189de8dac522fd1db8be5ae491d811139503f83abaaded89038eb4aa9cdf"
     },
-    "fingerprint": "0bbb621802cf534c82fcf8adfc5e81d1a8d841527b29394a1450f1b60190e7cc",
+    "fingerprint": "732f9cb488ffd71f3c12f6207ddaf059a17176cac97a51ad0bdd3ce501c18d42",
     "generation": 29,
-    "reason": "same-PR refinement of the generation-29 change: the value channel is limited to inline arithmetic non-const variables (castxml inline_variables, clang inline flag, arithmetic_type_spellings); the generation stays 29"
+    "reason": "same-PR change within generation 29: type annotations and a local for mypy in the variable-template join; no recorded fact changes"
   },
   "resolver": {
     "files": {
