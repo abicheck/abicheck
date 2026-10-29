@@ -30,6 +30,7 @@ import os
 import re
 import shutil
 import subprocess
+import sys
 import tempfile
 from dataclasses import dataclass
 from functools import cache
@@ -39,7 +40,13 @@ import pytest
 
 from tests._abicheck_subprocess import abicheck_command
 
-pytestmark = pytest.mark.integration
+pytestmark = [
+    pytest.mark.integration,
+    pytest.mark.skipif(
+        not sys.platform.startswith("linux"),
+        reason="builds ELF shared objects with GNU ld options",
+    ),
+]
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 _WORK = Path(tempfile.mkdtemp(prefix="typespell-matrix-"))

@@ -31,6 +31,7 @@ from __future__ import annotations
 import json
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -63,8 +64,10 @@ FORMATS = ("elf", "macho", "pe")
 _REMOVAL_KINDS = frozenset({"func_removed", "func_removed_elf_only"})
 
 _needs_gcc = pytest.mark.skipif(
-    not (shutil.which("gcc") and shutil.which("g++")),
-    reason="needs gcc to build an ELF twin",
+    not (
+        sys.platform.startswith("linux") and shutil.which("gcc") and shutil.which("g++")
+    ),
+    reason="needs gcc on Linux to build an ELF twin",
 )
 
 

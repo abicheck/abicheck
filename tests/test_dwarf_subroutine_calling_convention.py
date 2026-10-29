@@ -21,13 +21,20 @@ import json
 import os
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
 
 from tests._abicheck_subprocess import abicheck_command
 
-pytestmark = pytest.mark.integration
+pytestmark = [
+    pytest.mark.integration,
+    pytest.mark.skipif(
+        not sys.platform.startswith("linux"),
+        reason="builds ELF shared objects with GNU ld options",
+    ),
+]
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
