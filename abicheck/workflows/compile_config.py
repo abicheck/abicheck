@@ -47,8 +47,8 @@ from ..model.macro_definition import (
 )
 
 if TYPE_CHECKING:
-    from .extraction import BuildConfig
     from ..dry_run_estimate import CompileContext
+    from .extraction import BuildConfig
 
 __all__ = [
     "CompileConfigError",

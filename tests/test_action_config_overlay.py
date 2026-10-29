@@ -42,8 +42,8 @@ from abicheck.action_config_overlay import (
     strip_untrusted_execution_keys,
     validate_base_config,
 )
-from abicheck.workflows.compile_config import merge_compile_config
 from abicheck.dry_run_estimate import CompileContext
+from abicheck.workflows.compile_config import merge_compile_config
 
 
 class TestStripUntrustedExecutionKeys:

@@ -908,20 +908,19 @@ def run_compare(
         debuginfod_url=debuginfod_url,
     )
 
-    # A raw --old/new-sources checkout or --build-info build dir (not a pack)
-    # is collected by the shared resolution itself, at the run's collect
-    # mode, under the config/compile/execution decisions `dump` would make for
-    # it (`frontends.cli.compare_inline_evidence`); prebuilt packs it does not
-    # consume stay on the out-of-band path below.
-    from .frontends.cli.compare_inline_evidence import (
-        InlineEvidence,
-        InlineEvidenceRun,
-    )
-    from .frontends.cli.dump_debug_config import DumpDebugConfig
+    # A raw --sources/--build-info tree (not a pack) is collected by the shared
+    # resolution under the decisions `dump` would make for it
+    # (`workflows.compare.inline_evidence`); packs go out-of-band below.
+    from .workflows.compare.inline_evidence import InlineEvidence, InlineEvidenceRun
+    from .workflows.dump.project_config import DumpDebugConfig
 
     _inline = InlineEvidence(old_sources, old_build_info, new_sources, new_build_info)
     _inline_run = InlineEvidenceRun(
-        ctx=ctx,
+        on_close=ctx.call_on_close,
+        nostdinc_explicit=(
+            ctx.get_parameter_source("nostdinc")
+            == click.core.ParameterSource.COMMANDLINE
+        ),
         compile_context=compile_context,
         old_header_backend=old_header_backend,
         new_header_backend=new_header_backend,

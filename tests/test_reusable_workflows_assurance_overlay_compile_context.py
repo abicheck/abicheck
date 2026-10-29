@@ -37,8 +37,8 @@ from pathlib import Path
 from _assurance_overlay_exec import _run_overlay, _written_overlay
 from _workflow_exec import make_workspace, requires_newline_in_filenames
 
-from abicheck.workflows.compile_config import merge_compile_config
 from abicheck.dry_run_estimate import CompileContext
+from abicheck.workflows.compile_config import merge_compile_config
 
 
 class TestAssuranceOverlayPromotesSourcesRootCompileSourceDebugBlocks:

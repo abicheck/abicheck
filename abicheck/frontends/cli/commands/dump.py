@@ -37,7 +37,6 @@ from ....cli_dump_helpers import (
 )
 from ....cli_options import (
     LANG_DEFAULT,
-    apply_compile_config_env_toggles,
     build_source_dump_options,
     define_option,
     dump_header_input_options,
@@ -56,10 +55,7 @@ from ....service_compare_evidence import (
     dump_cli_compile_db_path,
 )
 from .. import help as cli_help
-from ..dump_debug_config import (
-    resolve_dump_compile_context,
-    resolve_dump_project_config,
-)
+from ..dump_debug_config import resolve_dump_compile_context
 from ..options.params import (
     _load_suppression_and_policy as _load_suppression_and_policy,  # noqa: F401  — re-exported to keep cli import sites (test suite) stable
 )
@@ -293,19 +289,22 @@ def dump_cmd(
     reject_snapshot_compression_conflict(output, snapshot_compression)
     _setup_verbosity(verbose)
 
-    # One config selection feeds every config-sourced field (and, below,
-    # the pipeline): --config > --sources root > nearest config above cwd.
-    _project = resolve_dump_project_config(
-        click.get_current_context(),
-        build_config=build_config,
-        sources=sources,
-        lang=None,
-        lang_default=LANG_DEFAULT,
-        apply_env_toggles=apply_compile_config_env_toggles,
-        exclude_headers=tuple(exclude_headers),
-        resolved_debug=None,
-        debug_roots=debug_roots,
-    )
+    # One config selection (--config > --sources root > above cwd) feeds all.
+    from ....workflows.dump import project_config as _dump_project
+
+    try:
+        _project = _dump_project.resolve_dump_project_config(
+            click.get_current_context().call_on_close,
+            build_config=build_config,
+            sources=sources,
+            lang=None,
+            lang_default=LANG_DEFAULT,
+            exclude_headers=tuple(exclude_headers),
+            resolved_debug=None,
+            debug_roots=debug_roots,
+        )
+    except _dump_project.DebugOperandError as exc:
+        raise click.UsageError(str(exc)) from exc
     config_path, lang, _config_lang_explicit = (
         _project.path,
         _project.lang,
@@ -336,9 +335,8 @@ def dump_cmd(
     # bookkeeping, and threaded through so the primary snapshot pass and the
     # header-graph pass agree on the same explicit-vs-auto-detected decision.
     #
-    # `--lang` has no CLI spelling on `dump` (Phase 7):
-    # `resolve_dump_lang_and_env_toggles` above is the only source of an
-    # explicit request (`compile.lang`).
+    # `--lang` has no CLI spelling on `dump` (Phase 7): `compile.lang`
+    # (`workflows.dump.project_config`) is the only explicit request.
     lang_explicit = _config_lang_explicit
 
     # ADR-050 D3: parsed before the collect/compile-context resolution below so

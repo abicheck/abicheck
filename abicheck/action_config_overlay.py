@@ -169,7 +169,7 @@ own document, unlike ``compile:``'s genuine two-stage merge. So for a
 caller whose single-sided resolution is `dump`/`scan`'s shape
 (``merge_compile=False``) is different again: there, ``source:``/
 ``debug:`` genuinely ARE a single-document selection off the ``--sources``
-tree's own config (``frontends/cli/dump_debug_config.
+tree's own config (``workflows/dump/project_config.
 resolve_dump_debug_config``'s own ``build_config or
 discover_build_config(sources)``), so *blocks* may include them there,
 exactly as the four-block claim above originally stated. Each caller must
@@ -614,7 +614,7 @@ def apply_sources_root_config_blocks(
     selection off the sources-root document -- but ONLY for a caller whose
     single-sided resolution is `dump`/`scan`'s shape (``merge_compile=
     False``): ``resolved_cfg``/``project_cfg``'s single load in
-    ``cli_compare_helpers.py``/``frontends/cli/dump_debug_config.py``
+    ``cli_compare_helpers.py``/``workflows/dump/project_config.py``
     resolves them from `dump`/`scan`'s OWN ``build_config or
     discover_build_config(sources)`` selection, the identical shape
     ``build:``/``sources:`` use. For a ``merge_compile=True`` caller

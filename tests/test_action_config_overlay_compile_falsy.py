@@ -46,8 +46,8 @@ from pathlib import Path
 import yaml
 
 from abicheck.action_config_overlay import apply_sources_root_config_blocks
-from abicheck.workflows.compile_config import merge_compile_config
 from abicheck.dry_run_estimate import CompileContext
+from abicheck.workflows.compile_config import merge_compile_config
 
 
 def _real_two_stage_sysroot(

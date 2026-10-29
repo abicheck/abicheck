@@ -42,15 +42,15 @@ import pytest
 from click.testing import CliRunner
 
 from abicheck.dry_run_estimate import CompileContext
-from abicheck.frontends.cli.compare_inline_evidence import (
+from abicheck.model import AbiSnapshot, Function, Visibility
+from abicheck.serialization import snapshot_to_json
+from abicheck.service_compare_evidence import without_unusable_raw_evidence
+from abicheck.workflows.compare.inline_evidence import (
     InlineEvidence,
     InlineEvidenceRun,
     OutOfBandPacks,
 )
-from abicheck.frontends.cli.dump_debug_config import DumpDebugConfig
-from abicheck.model import AbiSnapshot, Function, Visibility
-from abicheck.serialization import snapshot_to_json
-from abicheck.service_compare_evidence import without_unusable_raw_evidence
+from abicheck.workflows.dump.project_config import DumpDebugConfig
 from abicheck.workflows.request_inputs import InputSpec
 from abicheck.workflows.service_requests import CompareRequest
 
@@ -68,7 +68,8 @@ def _ctx() -> click.Context:
 
 def _run(ctx: click.Context, **overrides: object) -> InlineEvidenceRun:
     fields: dict[str, object] = {
-        "ctx": ctx,
+        "on_close": ctx.call_on_close,
+        "nostdinc_explicit": False,
         "compile_context": CompileContext(frontend="auto"),
         "old_header_backend": None,
         "new_header_backend": None,

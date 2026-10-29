@@ -34,7 +34,7 @@ from .workflows.compile_config import merge_compile_std_fields
 #: reads from a *second*, ``sources=``-supplied document at all -- each is
 #: consumed exactly once, from the single already-resolved project config
 #: (``resolved_cfg``/``project_cfg`` in ``cli_compare_helpers.py``/
-#: ``frontends/cli/dump_debug_config.py``, and ``apply_compile_config_env_
+#: ``workflows/dump/project_config.py``, and ``apply_compile_config_env_
 #: toggles``'s own single ``bc`` parameter), the same one-document-only
 #: shape ``source:``/``debug:`` have (see the module-level note on
 #: ``_COMPILE_SOURCES_ONLY_KEYS`` below). Promoting one of these three from
