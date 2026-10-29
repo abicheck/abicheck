@@ -16,7 +16,8 @@
 """``scripts/verify_stream.run_streaming``: a step's output reaches the log
 while the step is still running.
 
-Bug class: diagnostic output held until a child exits is lost whenever the
+Bug class ``test_harness.step_output_released_only_on_exit``: diagnostic
+output held until a child exits is lost whenever the
 child never exits on its own (a hung test, a CI job limit). The Windows
 integration lane ran 37 minutes with an empty log because ``verify.py``
 captured pytest's output and only printed it after the exit that the job

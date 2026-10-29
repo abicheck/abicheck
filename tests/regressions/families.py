@@ -463,6 +463,9 @@ _F7 = (
     "test_fixture.host_artifact_assumed_capability",
     "test_harness.destructive_reset_of_a_caller_supplied_path",
     "test_harness.git_inherits_developer_signing_config",
+    # verify.py held a step's output until the child exited, so a lane that
+    # stalled could not show which test it was running.
+    "test_harness.step_output_released_only_on_exit",
     "test_harness.nested_session_prunes_outer_temp_root",
     "test_infra.autouse_allocator_cannot_recover",
     "test_infra.caller_owned_directory_fabricated",

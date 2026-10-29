@@ -340,6 +340,35 @@ TEST_HARNESS_BUG_CLASSES: tuple[BugClass, ...] = (
         ),
     ),
     BugClass(
+        id="test_harness.step_output_released_only_on_exit",
+        invariant=(
+            "A CI step's diagnostic output reaches the log while the step "
+            "runs, not only after its child process exits. `verify.py` ran "
+            "each step with `capture_output=True` and printed the text after "
+            "the exit, so a step that never exited on its own -- a hung test, "
+            "a lane cancelled at its job limit -- left an empty log: the "
+            "Windows integration lane ran 37 minutes with no output, and the "
+            "pytest-timeout traceback that would have named the stuck test "
+            "sat in the never-printed buffer. Capturing is fine; holding "
+            "until exit is the defect, because the exit is exactly what a "
+            "stuck step never reaches."
+        ),
+        fixed_by=(1842,),
+        seed_tests=("tests/test_verify_stream.py",),
+        # The seed test drives `verify_stream.run_streaming` and reads
+        # `verify.run_step`'s source; it runs no workflow step.
+        public_surfaces=(),
+        axes={
+            "stream": ("stdout", "stderr", "both-interleaved"),
+            "line_shape": (
+                "newline-terminated",
+                "no-trailing-newline",
+                "undecodable-bytes",
+            ),
+            "exit": ("zero", "nonzero"),
+        },
+    ),
+    BugClass(
         id="test_harness.git_inherits_developer_signing_config",
         invariant=(
             "A git commit a test makes succeeds whatever the developer's "
