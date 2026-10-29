@@ -49,7 +49,7 @@ from click.testing import CliRunner
 
 from abicheck.cli import main
 from abicheck.model.sided_inputs import compose_sided_paths, resolve_per_side_inputs
-from abicheck.workflows.release_inputs import resolve_release_headers
+from abicheck.workflows.release_inputs import release_side_headers
 
 
 def _p(*names: str) -> list[Path]:
@@ -123,35 +123,21 @@ class TestResolvePerSideOptionsIsAdditive:
         assert new_inc == _p("new", "extra")
 
 
-class TestResolveReleaseHeaders:
+class TestReleaseSideHeaders:
     """The release/directory fan-out applies the identical composition."""
 
     def test_header_dir_used_when_no_per_side(self, tmp_path: Path) -> None:
         hd_old = tmp_path / "old-hdr"
         hd_new = tmp_path / "new-hdr"
-        old_h, new_h = resolve_release_headers(
-            (),
-            (),
-            (),
-            hd_old,
-            hd_new,
-        )
-        assert old_h == [hd_old]
-        assert new_h == [hd_new]
+        assert release_side_headers((), (), hd_old) == [hd_old]
+        assert release_side_headers((), (), hd_new) == [hd_new]
 
     def test_per_side_composes_with_header_dir(self, tmp_path: Path) -> None:
         """A `--header old=` entry is searched before the package's own
         extracted header tree, which stays available underneath."""
         oh = (tmp_path / "old.h",)
         hd_old = tmp_path / "old-hdr"
-        old_h, new_h = resolve_release_headers(
-            (),
-            oh,
-            (),
-            hd_old,
-            None,
-        )
-        assert old_h == [*oh, hd_old]
+        assert release_side_headers((), oh, hd_old) == [*oh, hd_old]
 
     def test_shared_header_survives_a_side_specific_one(self, tmp_path: Path) -> None:
         """The defect this composition exists to close: a shared `--header`
@@ -159,9 +145,15 @@ class TestResolveReleaseHeaders:
         shared = (tmp_path / "shared.h",)
         oh = (tmp_path / "old.h",)
         nh = (tmp_path / "new.h",)
-        old_h, new_h = resolve_release_headers(shared, oh, nh, None, None)
-        assert old_h == [*oh, *shared]
-        assert new_h == [*nh, *shared]
+        assert release_side_headers(shared, oh, None) == [*oh, *shared]
+        assert release_side_headers(shared, nh, None) == [*nh, *shared]
+
+    def test_header_dir_replaces_the_shared_header(self, tmp_path: Path) -> None:
+        """An extracted devel-package header tree is the side's whole tree,
+        so it replaces (not extends) the both-sides `--header`."""
+        shared = (tmp_path / "shared.h",)
+        hd = tmp_path / "hdr"
+        assert release_side_headers(shared, (), hd) == [hd]
 
 
 class TestDryRunReceiptRendersEachSidesEffectiveHeaders:

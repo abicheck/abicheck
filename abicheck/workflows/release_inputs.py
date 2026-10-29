@@ -65,7 +65,7 @@ from ..extract.archive_integrity import (
 from ..model.sided_inputs import compose_sided_paths
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Iterable
 
     from ..environment_matrix import EnvironmentMatrix
     from ..model.package_inventory import PackageInventory
@@ -80,7 +80,7 @@ __all__ = [
     "extract_if_package",
     "match_release_keys",
     "prepare_release_inputs",
-    "resolve_release_headers",
+    "release_side_headers",
     "resolve_release_package_side",
     "resolve_release_side",
     "wheel_release_env_matrix",
@@ -294,14 +294,12 @@ def debian_symbols_warning(
     return "Debian symbols contract changed:\n" + format_diff_report(diff)
 
 
-def resolve_release_headers(
-    headers: tuple[Path, ...],
-    old_headers_only: tuple[Path, ...],
-    new_headers_only: tuple[Path, ...],
-    old_header_dir: Path | None,
-    new_header_dir: Path | None,
-) -> tuple[list[Path], list[Path]]:
-    """Resolve each side's headers for a release comparison.
+def release_side_headers(
+    headers: Iterable[Path],
+    side_headers_only: Iterable[Path],
+    header_dir: Path | None,
+) -> list[Path]:
+    """Resolve one side's headers for a release comparison.
 
     ``--header old=`` *adds to* the both-sides ``--header`` rather than
     replacing it (:mod:`abicheck.model.sided_inputs`), so a shared header
@@ -314,13 +312,9 @@ def resolve_release_headers(
     that side's own explicit ``--header old=`` entries the same additive
     way everything else does.
     """
-    old_h = compose_sided_paths(headers, old_headers_only)
-    new_h = compose_sided_paths(headers, new_headers_only)
-    if old_header_dir:
-        old_h = compose_sided_paths([old_header_dir], old_headers_only)
-    if new_header_dir:
-        new_h = compose_sided_paths([new_header_dir], new_headers_only)
-    return old_h, new_h
+    if header_dir:
+        return compose_sided_paths([header_dir], side_headers_only)
+    return compose_sided_paths(headers, side_headers_only)
 
 
 def discover_include_roots(header_dir: Path | None) -> list[Path]:
@@ -549,11 +543,7 @@ def resolve_release_side(
         f"[{side}] {line}"
         for line in debian_symbols_binary_conflict_lines(symbols_file, lib_dir)
     ]
-    side_headers = compose_sided_paths(headers, side_headers_only)
-    if header_dir:
-        # An extracted devel-package header directory replaces the uniform
-        # value on this side -- see `resolve_release_headers`.
-        side_headers = compose_sided_paths([header_dir], side_headers_only)
+    side_headers = release_side_headers(headers, side_headers_only, header_dir)
     # `--include old=` adds to the both-sides `--include` rather than
     # replacing it (`model.sided_inputs`), so config_includes -- the project
     # .abicheck.yml compile.include_dirs suffix, already folded into

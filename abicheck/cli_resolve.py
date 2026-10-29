@@ -157,40 +157,6 @@ def _resolve_linker_script(path: Path) -> tuple[Path | None, bool]:
     return resolve_linker_script(path)
 
 
-def _maybe_follow_linker_script(path: Path) -> Path:
-    """Return the linker-script target if *path* is a resolvable GNU ld script.
-
-    Emits a one-line note when it follows a script; otherwise returns *path*
-    unchanged. Used by entry points that dispatch on binary format directly
-    (e.g. ``dump``) rather than through :func:`_resolve_input`.
-    """
-    target, is_ld = _resolve_linker_script(path)
-    if is_ld and target is not None and target.resolve() != path.resolve():
-        click.echo(
-            f"Note: '{path}' is a GNU ld linker script; following its "
-            f"INPUT()/GROUP() directive to '{target}'.",
-            err=True,
-        )
-        return target
-    return path
-
-
-def _normalize_binary_input(path: Path) -> tuple[Path, str | None]:
-    """Detect a binary input's format, following GNU ld linker scripts.
-
-    Returns ``(resolved_path, format)``. When *path* is a linker script that
-    resolves to a real shared library, the resolved path and *its* format are
-    returned so downstream metadata collection and dependency analysis operate
-    on the actual DSO rather than the text script.
-    """
-    fmt = _detect_binary_format(path)
-    if fmt is None:
-        resolved = _maybe_follow_linker_script(path)
-        if resolved != path:
-            return resolved, _detect_binary_format(resolved)
-    return path, fmt
-
-
 def _apply_native_provenance(
     snap: AbiSnapshot,
     public_headers: list[Path] | None,
@@ -387,7 +353,9 @@ def classify_compare_operand(path: Path) -> str:
         return "directory" if not _is_pkg(path) or _multi(path) else "file"
     if is_package(path):
         return "package"
-    norm, fmt = _normalize_binary_input(path)
+    from .workflows.extraction import follow_linker_script
+
+    norm, fmt = follow_linker_script(path, _click_notify)
     if fmt == "elf" and _looks_like_application(norm):
         return "app"
     return "file"

@@ -67,7 +67,6 @@ __all__ = [
     "compare_release_member",
     "compare_release_members",
     "dispose_release_unreached_types",
-    "normalize_member_operand",
     "release_owned_crosschecks",
     "release_parent_request",
     "suppress_lockstep_soname_findings",
@@ -119,26 +118,6 @@ def release_parent_request(
     )
 
 
-def normalize_member_operand(path: Path, notice: Callable[[str], None]) -> Path:
-    """*path*, or the shared library a GNU ld linker script at *path* names.
-
-    Followed up front so metadata/dependency analysis use the resolved DSO,
-    not the text script; *notice* receives the one-line note that says so.
-    """
-    from .extraction import detect_binary_format, resolve_linker_script
-
-    if detect_binary_format(path) is not None:
-        return path
-    target, is_ld = resolve_linker_script(path)
-    if is_ld and target is not None and target.resolve() != path.resolve():
-        notice(
-            f"Note: '{path}' is a GNU ld linker script; following its "
-            f"INPUT()/GROUP() directive to '{target}'."
-        )
-        return target
-    return path
-
-
 def compare_member_pair(
     request: ReleaseMemberCompareRequest,
     pack_application: PackApplication | None = None,
@@ -149,11 +128,13 @@ def compare_member_pair(
     :func:`~abicheck.workflows.member_compare.compare_member` -- the
     per-member primitive the scalar compare's ``run_compare_request`` shares.
     """
+    from .extraction import follow_linker_script
+
     assert request.old_input is not None and request.new_input is not None
     request = dataclasses.replace(
         request,
-        old_input=normalize_member_operand(request.old_input, notice),
-        new_input=normalize_member_operand(request.new_input, notice),
+        old_input=follow_linker_script(request.old_input, notice)[0],
+        new_input=follow_linker_script(request.new_input, notice)[0],
     )
     return compare_member(request, pack_application)
 
