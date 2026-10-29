@@ -95,12 +95,31 @@ def _side(draw: Any) -> _SideSpec:
 @st.composite
 def _pair(draw: Any) -> tuple[_SideSpec, _SideSpec]:
     old = draw(_side())
-    # Bias towards related sides: half the time NEW is OLD with some
-    # members perturbed, so modifications (not only add/remove) are drawn.
-    if draw(st.booleans()):
+    # Three shapes, a third each: an unrelated NEW (add/remove), OLD with
+    # members perturbed (modifications), and OLD plus members it lacks
+    # (pure additions -- an unrelated draw is almost never a superset, so
+    # without this shape a COMPATIBLE pair is only reached by luck).
+    shape = draw(st.integers(0, 2))
+    if shape == 0:
         return old, draw(_side())
-    funcs = tuple(draw(_function(f[0])) if draw(st.booleans()) else f for f in old[0])
-    return old, (funcs, old[1])
+    if shape == 1:
+        funcs = tuple(
+            draw(_function(f[0])) if draw(st.booleans()) else f for f in old[0]
+        )
+        return old, (funcs, old[1])
+    have_f = {f[0] for f in old[0]}
+    have_v = {v[0] for v in old[1]}
+    extra_f = tuple(
+        draw(_function(n))
+        for n in _FUNC_NAMES
+        if n not in have_f and draw(st.booleans())
+    )
+    extra_v = tuple(
+        (n, draw(st.sampled_from(_TYPES)))
+        for n in _VAR_NAMES
+        if n not in have_v and draw(st.booleans())
+    )
+    return old, (old[0] + extra_f, old[1] + extra_v)
 
 
 def _snapshot(spec: _SideSpec, version: str) -> AbiSnapshot:
