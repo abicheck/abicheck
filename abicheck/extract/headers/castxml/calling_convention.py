@@ -192,6 +192,14 @@ _POINTER_RETURN_DECLARATOR = re.compile(
 )
 
 
+def _leading_conventions(text: str) -> set[str]:
+    """Conventions in the declaration text before a name's declarator, from the
+    last statement boundary on (an earlier declaration's attributes are not
+    this one's)."""
+    boundary = max(text.rfind(";"), text.rfind("{"), text.rfind("}"))
+    return calling_conventions_in(text[boundary + 1 :])
+
+
 def source_calling_conventions(
     ctx: CastxmlParserContext, el: Element, name: str
 ) -> set[str]:
@@ -212,11 +220,15 @@ def source_calling_conventions(
     found: set[str] = set()
     pattern = re.compile(rf"(?<![\w:]){re.escape(name)}\s*\(")
     for match in pattern.finditer(window, line_start, line_end):
-        if _POINTER_RETURN_DECLARATOR.search(window[: match.start()]):
+        before = window[: match.start()]
+        returned = _POINTER_RETURN_DECLARATOR.search(before)
+        if returned is not None:
             # ``void (__attribute__((ms_abi)) *f(void))(int)``: the convention
-            # sits in the declarator of the *returned* function type, not on f.
-            # castxml's return:<f> join carries it on that type; reading it here
-            # as f's own convention reported the return as a convention change.
+            # inside the returned declarator's parentheses (and the tail after
+            # its parameter list) is the *returned* function type's, which the
+            # return:<f> join carries. Only what precedes that declarator is f's
+            # own: ``__attribute__((ms_abi)) void (*f(void))(int)`` is f's.
+            found |= _leading_conventions(before[: returned.start()])
             continue
         found |= calling_conventions_in(
             _declaration_outside_params(window, name, match.start())
