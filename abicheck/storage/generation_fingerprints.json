@@ -77,7 +77,7 @@
       "abicheck/extract/headers/backend_protocol.py": "144cbe76456b6bceaf56f0edd0f3398f171178a222c8b968d53f8a17ee05a21b",
       "abicheck/extract/headers/castxml/__init__.py": "cebb319d35840200904dde9fe4ad16489124b02327a50d8351b086844ee19943",
       "abicheck/extract/headers/castxml/backend.py": "2f9b1dfc17b3b0badb2739ab724a376ac32bc3d4a0b0c8908a3558468fb573f4",
-      "abicheck/extract/headers/castxml/calling_convention.py": "38db6aede90a97c6065beba27f0060776bedcbcc872ab3e9f60a166f963ed76f",
+      "abicheck/extract/headers/castxml/calling_convention.py": "147c4be1a5b417eb4a67156e92e8f03f09eef3b7b34703ac22a98ad86d5dde1d",
       "abicheck/extract/headers/castxml/context.py": "c4ecf8b6af95562a5d5c32eea8de28565a74cd35514f4f675059af493b0ad641",
       "abicheck/extract/headers/castxml/dumper.py": "dc28398e08932705d22199edd1b38d78faa677859d043b14f5943efdbf9c4988",
       "abicheck/extract/headers/castxml/duplicate_declarations.py": "977b85a15408fa9877b9b686f0bd913af9442e4da5b1d9292975bda7eff424f7",
@@ -98,9 +98,9 @@
       "abicheck/extract/headers/castxml/specialization.py": "3f9f021672df1b84de42bc8de5f3c915508b3f3850e0a8acbaa80a3dee04c6f3",
       "abicheck/extract/headers/castxml/type_resolution.py": "3527318ed7d36b2b557c447c9fa0807deec9c594a7f481cf36c860859062552f",
       "abicheck/extract/headers/castxml/typedef_parsing.py": "332587638d5d4b7caebbc20fa44b69c314771fffa5839a15dec59eaba3caaf93",
-      "abicheck/extract/headers/castxml/variable_template_join.py": "cffad5b204cddf53337897381cd54d11e6e1784a69948a519a31a222d3441fa7",
+      "abicheck/extract/headers/castxml/variable_template_join.py": "050cf1d22616ca29757539f870a6fc4b2489966613fcc978ddac34efc43b9225",
       "abicheck/extract/headers/castxml/vector_join.py": "59ab2e8577af20a5a67227978b1a7d63c8ac6ce6b766a841725d998515205ede",
-      "abicheck/extract/headers/castxml/vector_spellings.py": "bce2046c1422dd294c3f9370143a3b7b1f268629696c46b3ed0bb81c9f707d1f",
+      "abicheck/extract/headers/castxml/vector_spellings.py": "1048c21245235f6857beacf4668fc888bea7117c88c18300aae666a90aac763d",
       "abicheck/extract/headers/clang/__init__.py": "538add12f3ff39e1c1b39e6f5def93b50a584b78b30c4e7e59058207222757d0",
       "abicheck/extract/headers/clang/ast_inner.py": "f695f5bb01048fa924a1b67acbbcc29630c871607f1a3b4329ec781133f296f8",
       "abicheck/extract/headers/clang/attributes.py": "4f35afe72ef319265695d3e199e10c9ef0076db4a5238161b33a076fd3a599fe",
@@ -179,9 +179,9 @@
       "abicheck/symvers_metadata.py": "372737765cd132e6e87ed891dd465d2958e04debbef774e45212ceb3036871cb",
       "abicheck/type_metadata.py": "9997189de8dac522fd1db8be5ae491d811139503f83abaaded89038eb4aa9cdf"
     },
-    "fingerprint": "b4bd8a53122c45d304ad1ca90acadf9460b9ee7432867cc23969f25191934a04",
+    "fingerprint": "2973f58948d4c9c34c25e5d329e57fd18e3de131c9110e7c1d3a2a670993eae2",
     "generation": 31,
-    "reason": "castxml complex, bit-precise integer, and pointer/array/typedef-wrapped element types join their clang spelling instead of the literal Unimplemented; the clang join's cache schema is 10"
+    "reason": "PR follow-up: linear pointer-return declarator scan (same matches as the balanced grammar), ast_inner in the variable-template join, removal of a test-only wrapper; no change to what is recorded"
   },
   "resolver": {
     "files": {
