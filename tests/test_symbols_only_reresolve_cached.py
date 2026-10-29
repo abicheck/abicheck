@@ -35,13 +35,11 @@ sequence, counted independently of the cache.
 from __future__ import annotations
 
 import itertools
-import shutil
-import subprocess
-import sys
 from pathlib import Path
 from typing import Any
 
 import pytest
+from _pe_build import build_pe_dll
 from click.testing import CliRunner
 
 from abicheck.model import AbiSnapshot
@@ -110,37 +108,6 @@ def test_a_changed_binary_is_re_extracted_symbols_only(
 # ── public workflow: two `compare` runs of one PE pair ─────────────────────
 
 
-def _build_pe(out: Path, source: Path) -> bool:
-    """Build *source* into a PE DLL at *out*: MinGW gcc on Windows, clang +
-    lld targeting windows-gnu elsewhere. ``False`` only when neither
-    toolchain is present; a toolchain that runs and fails is a failure."""
-    if sys.platform == "win32" and shutil.which("gcc"):
-        cmd = ["gcc", "-shared", "-o", str(out), str(source)]
-    elif shutil.which("clang") and shutil.which("ld.lld"):
-        entry = out.with_suffix(".entry.c")
-        entry.write_text(
-            "int DllMainCRTStartup(void *a, unsigned b, void *c) { return 1; }\n",
-            encoding="utf-8",
-        )
-        cmd = [
-            "clang",
-            "--target=x86_64-windows-gnu",
-            "-shared",
-            "-nostdlib",
-            "-fuse-ld=lld",
-            "-Wl,--export-all-symbols",
-            "-o",
-            str(out),
-            str(source),
-            str(entry),
-        ]
-    else:
-        return False
-    proc = subprocess.run(cmd, capture_output=True, text=True)
-    assert proc.returncode == 0, (cmd, proc.stderr)
-    return True
-
-
 @pytest.mark.integration
 def test_repeat_pe_compare_extracts_nothing_new(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -161,7 +128,7 @@ def test_repeat_pe_compare_extracts_nothing_new(
         (d / "foo.h").write_text("int foo(void);\nint bar(int);\n", encoding="utf-8")
         (d / "foo.c").write_text(body, encoding="utf-8")
         dll = d / "foo.dll"
-        if not _build_pe(dll, d / "foo.c"):
+        if not build_pe_dll(dll, d / "foo.c"):
             pytest.skip("no PE toolchain (MinGW gcc, or clang + ld.lld)")
         sides[side] = (dll, d / "foo.h")
 

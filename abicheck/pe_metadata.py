@@ -32,6 +32,7 @@ import pefile  # type: ignore[import-untyped]
 # parses into them and re-exports them so the historical
 # ``from abicheck.pe_metadata import PeExport`` spelling keeps resolving.
 from .extract.parse_failures import note_export_read_failure
+from .extract.pe_image import open_pe
 from .model.fact import sync_present_facts
 from .model.pe_facts import (
     PeExport as PeExport,
@@ -165,8 +166,7 @@ def _parse_pe_version_resource(pe: Any, meta: PeMetadata) -> None:
 
 def _parse(dll_path: Path) -> PeMetadata:
     """Parse PE metadata from *dll_path* using pefile."""
-    pe = pefile.PE(str(dll_path), fast_load=True)
-    try:
+    with open_pe(dll_path) as pe:
         pe.parse_data_directories(
             directories=[
                 pefile.DIRECTORY_ENTRY[key]
@@ -200,5 +200,3 @@ def _parse(dll_path: Path) -> PeMetadata:
         sync_present_facts(meta, "delay_imports")
 
         return meta
-    finally:
-        pe.close()
