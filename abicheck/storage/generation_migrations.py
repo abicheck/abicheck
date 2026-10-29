@@ -309,6 +309,18 @@ SPELLING_MIGRATIONS: Mapping[int, GenerationSpellingChange] = {
         "generations differ, is demoted as drift. A baseline holding callbacks is "
         "re-dumped"
     ),
+    30: GenerationSpellingChange(
+        "a non-const variable declared inline with an arithmetic type "
+        "(inline int x = 1;) records its initializer as its value on both "
+        "frontends, and a const integral global the header declares without an "
+        "initializer (extern const int k; defined in a .cpp) takes its value from "
+        "the exported object's bytes. A header whose only C++ signal is an inline "
+        "variable is parsed as C++, not rejected as C. A const variable template "
+        "(template <class T> inline constexpr int vt = 1;) is joined from the clang "
+        "AST onto the castxml root. A baseline from an earlier generation has no "
+        "value for these variables, so a value change is not compared until it is "
+        "re-dumped; no type or name spelling changes, so no rewrite is needed"
+    ),
 }
 
 #: Reasons that say nothing about what was audited; the bump gate refuses them.

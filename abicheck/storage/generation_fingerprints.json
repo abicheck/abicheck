@@ -178,8 +178,8 @@
       "abicheck/type_metadata.py": "9997189de8dac522fd1db8be5ae491d811139503f83abaaded89038eb4aa9cdf"
     },
     "fingerprint": "732f9cb488ffd71f3c12f6207ddaf059a17176cac97a51ad0bdd3ce501c18d42",
-    "generation": 29,
-    "reason": "same-PR change within generation 29: type annotations and a local for mypy in the variable-template join; no recorded fact changes"
+    "generation": 30,
+    "reason": "bumped to 30 for a semantic change"
   },
   "resolver": {
     "files": {
