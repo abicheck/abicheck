@@ -88,31 +88,15 @@ from abicheck.storage.snapshot_encode import (
 )
 from abicheck.storage.versioning import EXTRACTOR_GENERATION, this_build_generations
 
-_ADVANCED_STATUS_REASON = (
-    "dwarf_advanced.extraction is dropped by the encoder "
-    "(snapshot_encode._drop_advanced_extraction_status) because persisting it "
-    "adds a snapshot key, a schema change that ADR-080 (Proposed) has not "
-    "decided. Every status reads back as UNRECORDED, so a stored snapshot falls "
-    "back to the payload inference; see known-gaps/"
-    "advanced-facts-collected-infers-advanced-dwarf-extraction-ran.md"
-)
 #: Case id -> reason it does not round-trip today. An id is either a field
 #: (``Class.field``, the enumerated value is lossy) or one member of an enum
 #: or status field (``Class.field[member]`` / ``ownership_fact[member]``).
 #: Each is an ``xfail(strict=True)`` real defect, or a deliberate limitation
 #: named here with its reason; remove the entry when the codec is fixed.
-KNOWN_LOSSY: dict[str, str] = {
-    "Declarations.debug_advanced": (
-        "the synthesized AdvancedDwarfMetadata carries extraction=NOT_RUN, which "
-        "the encoder drops; the per-status cases below name each status"
-    ),
-    "AdvancedDwarfMetadata.extraction[not_run]": _ADVANCED_STATUS_REASON,
-    "AdvancedDwarfMetadata.extraction[completed]": _ADVANCED_STATUS_REASON,
-    "AdvancedDwarfMetadata.extraction[failed]": _ADVANCED_STATUS_REASON,
-}
+KNOWN_LOSSY: dict[str, str] = {}
 
 #: Ratchet: ``KNOWN_LOSSY`` may only shrink. Lower this when entries are removed.
-_KNOWN_LOSSY_CEILING = 4
+_KNOWN_LOSSY_CEILING = 0
 
 #: Fields the encoder deliberately never persists. Read from the encoder's
 #: own declaration (each with its reason there), never copied here.

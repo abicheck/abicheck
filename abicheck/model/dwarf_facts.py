@@ -177,11 +177,12 @@ class AdvancedDwarfMetadata:
     # All struct/class names seen (for cross-referencing in diff to avoid
     # false "packing removed" when a struct was simply deleted)
     all_struct_names: set[str] = field(default_factory=set)
-    # What the extraction did; see AdvancedExtractionStatus. In memory only:
-    # snapshot_encode drops it, so the stored document is unchanged and a
-    # decoded snapshot reads UNRECORDED (docs/contribute/known-gaps/
+    # What the extraction did; see AdvancedExtractionStatus. Persisted as the
+    # document's dwarf_advanced.extraction key since schema v68 (ADR-080), and
+    # omitted while UNRECORDED, so a pre-v68 document decodes to UNRECORDED and
+    # reads through the payload inference (docs/contribute/known-gaps/
     # advanced-facts-collected-infers-advanced-dwarf-extraction-ran.md).
-    # compare=False: a decoded snapshot never carries it, so equality must not
+    # compare=False: a status is provenance, not content, so equality must not
     # read a recorded status as a content difference.
     extraction: AdvancedExtractionStatus = field(
         default=AdvancedExtractionStatus.UNRECORDED, compare=False

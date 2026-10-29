@@ -35,6 +35,7 @@ from typing import Any
 
 from ..model import AbiSnapshot, FactStatus
 from ..model.declaration_store import STORE_ATTRIBUTE
+from ..model.dwarf_facts import AdvancedExtractionStatus
 from ..model.snapshot_reliability import FACT_FAMILIES, flag_name
 from .acyclic_json import gc_paused
 from .entity_id_codec import encode_entity_ids, encode_sidecar_entity_ids
@@ -416,12 +417,16 @@ _TYPE_ABI_KEY = "type_abi_fact"
 _RETURN_TYPE_ABI_KEY = "return_type_abi_fact"
 
 
-def _drop_advanced_extraction_status(d: dict[str, Any]) -> None:
-    # AdvancedDwarfMetadata.extraction is in-memory only: persisting it would
-    # add a key to every stored document, which is a snapshot-schema change
-    # (docs/contribute/adr/080-*). A decoded snapshot reads UNRECORDED instead.
+def _encode_advanced_extraction_status(d: dict[str, Any]) -> None:
+    """``dwarf_advanced.extraction`` (schema v68, ADR-080) is written only when
+    the extraction recorded an outcome. ``unrecorded`` -- a hand-built object,
+    or a BTF/CTF/PDB producer -- writes no key, so those documents encode
+    exactly as v67 did and a missing key decodes back to ``unrecorded``.
+    """
     dwarf_advanced = d.get("dwarf_advanced")
-    if isinstance(dwarf_advanced, dict):
+    if not isinstance(dwarf_advanced, dict):
+        return
+    if dwarf_advanced.get("extraction") in (None, AdvancedExtractionStatus.UNRECORDED):
         dwarf_advanced.pop("extraction", None)
 
 
@@ -557,7 +562,7 @@ def _snapshot_to_dict(snap: AbiSnapshot, encode: Any) -> dict[str, Any]:
     # ElfMetadata/PeMetadata/MachoMetadata enums -> strings (storage/enum_codec.py).
     encode_platform_enums(d)
     _drop_unobserved_odr_conflicts(d)
-    _drop_advanced_extraction_status(d)
+    _encode_advanced_extraction_status(d)
     _compact_elf_symbols(d)
     _drop_uncaptured_type_identities(d)
 
