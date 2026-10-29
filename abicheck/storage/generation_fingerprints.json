@@ -21,7 +21,7 @@
       "abicheck/extract/binary_format.py": "4b9f591077fa5c90d2e3a767343d92b098061870403d431694470bc05e5468b3",
       "abicheck/extract/binary_identity.py": "4645eaf3dddd0a2230a5c694882548476406c57514275fa4c8c1bc152607ca88",
       "abicheck/extract/build_mode_capture.py": "7a46c5babcc5bf770a1a38d5a5d3abb49a2b7d9575bda2b210d2e2861ebfb51f",
-      "abicheck/extract/builtin_abi.py": "5613a5f9d48cb556514c35bf55f6449d3195e01eb474e6666235042c3f9690bb",
+      "abicheck/extract/builtin_abi.py": "aad1229f3a899920a43a88aff31b91904f37ef938480754382c34584d4e3315e",
       "abicheck/extract/cache_header_scan.py": "4a944a4e6eff6b10de32c6aec2ad939b78e9ffc96e725791247431a0cc870684",
       "abicheck/extract/castxml_compiler_emulation.py": "da713be283b31c31ab8c4c5486f0c70d4adf403365f630f88b718589ed03f763",
       "abicheck/extract/castxml_header_compat.py": "d0e78b90ad113be1cb89f05465f77fa9d9fc9546608275707cd7d15f18e2f518",
@@ -184,9 +184,9 @@
       "abicheck/symvers_metadata.py": "372737765cd132e6e87ed891dd465d2958e04debbef774e45212ceb3036871cb",
       "abicheck/type_metadata.py": "9997189de8dac522fd1db8be5ae491d811139503f83abaaded89038eb4aa9cdf"
     },
-    "fingerprint": "5f10d77fcc10744976b689d0db86e6fc23629b8a09c2bd29fb40112704cae36f",
+    "fingerprint": "d6a215762340d96fbfbe074b234326c564c832ffe1073898e437269060306bbd",
     "generation": 32,
-    "reason": "DWARF layout members (FieldInfo.type_abi_fact) carry the generation-32 ABI fact as a plain AbiFundamental value that the projection wraps as a present fact; no spelling changes, generation 32 is unreleased from this PR, so no bump"
+    "reason": "builtin_abi: malformed probe output now yields no fact instead of raising; real compiler output is unchanged"
   },
   "resolver": {
     "files": {
