@@ -38,8 +38,7 @@ jobs:
         run: |
           python -m cProfile -o cell.prof -m pytest -p subproc_timing -p no:xdist -p no:cacheprovider -q --durations=10 \
             "tests/test_family_f2_live_route_matrix.py::test_live_route_matrix[addition_only-default]" \
-            "tests/test_family_f2_live_route_matrix.py::test_live_route_matrix[addition_only-suppress_strict]" \
-            "tests/test_family_f2_live_route_matrix.py::test_live_route_matrix[addition_only-policy_file]"
-          cat serial-*.txt
+            "tests/test_family_f2_live_route_matrix.py::test_live_route_matrix[addition_only-suppress_strict]"
+          cat serial-*.txt; echo ===CACHE===; cat serial-cache-*.txt
           python -c "import pstats; pstats.Stats('cell.prof').sort_stats('cumulative').print_stats(45)" | head -120
           python -c "import pstats; pstats.Stats('cell.prof').sort_stats('tottime').print_stats(25)" | head -60

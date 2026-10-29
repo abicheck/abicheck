@@ -56,3 +56,47 @@ def _report():
 
 
 atexit.register(_report)
+
+
+# --- dump-cache diagnostics -------------------------------------------------
+import logging
+
+_cache_log = []
+
+
+class _H(logging.Handler):
+    def emit(self, record):
+        msg = record.getMessage()
+        if record.exc_info:
+            msg += "\n" + "".join(traceback.format_exception(*record.exc_info))[-3000:]
+        _cache_log.append(f"{record.name}: {msg}")
+
+
+_h = _H(level=logging.DEBUG)
+for _name in ("abicheck.cache", "abicheck.workflows.dump.cache.store", "abicheck.workflows.dump.cache.api",
+              "abicheck.workflows.dump.cache", "abicheck.storage.disk_cache"):
+    _lg = logging.getLogger(_name)
+    _lg.setLevel(logging.DEBUG)
+    _lg.addHandler(_h)
+
+import abicheck.workflows.dump.cache.api as _api  # noqa: E402
+
+_orig_key_for = _api._cache_key_for
+
+
+def _key_for(req):
+    k = _orig_key_for(req)
+    _cache_log.append(f"KEY {req.path.name} {req.path.parent.name} -> {k[:16]!r}")
+    return k
+
+
+_api._cache_key_for = _key_for
+
+
+def _report_cache():
+    path = os.environ.get("DIAG_OUT", "diag")
+    with open(f"{path}-cache-{os.getpid()}.txt", "w", encoding="utf-8") as fh:
+        fh.write("\n".join(_cache_log[:400]))
+
+
+atexit.register(_report_cache)
