@@ -15,10 +15,9 @@ binary with DWARF), and ``dump+compare`` (``abicheck dump`` each side, then
 ``abicheck compare`` the two snapshots). Every lane runs the public CLI in a
 subprocess with the checkout under test on ``PYTHONPATH`` and a private cache.
 
-Forms that also report a ``var_value_changed`` alongside ``constant_changed``
-(a namespace or class constant whose header initializer feeds both channels)
-assert ``>= 1``: the duplicate is owned by the dedup task. Tightening those to
-exactly one is recorded there, not here.
+Every form, the variable template included, must yield exactly one finding that
+names the qualified entity: the constant channel and the value channel for the
+same declaration are one observation (``compare.finding_dedup``).
 """
 
 from __future__ import annotations
@@ -58,11 +57,6 @@ class Form:
     expr: str  # C++ expression whose value the probe prints
     fmt: str  # printf conversion for expr
     values: tuple[str, str]  # (old, new)
-    #: "single": exactly one finding names the entity.
-    #: "dedup": ``>= 1``; exactly-one is enforced by the dedup task.
-    expect: str = "single"
-    #: A form abicheck does not yet see under the default castxml frontend.
-    castxml_gap: str = ""
 
 
 FORMS: tuple[Form, ...] = (
@@ -74,7 +68,6 @@ FORMS: tuple[Form, ...] = (
         expr="ns::kLimit",
         fmt="%d",
         values=("1", "2"),
-        expect="dedup",
     ),
     Form(
         key="static_constexpr_member",
@@ -84,7 +77,6 @@ FORMS: tuple[Form, ...] = (
         expr="Cfg::kMax",
         fmt="%d",
         values=("1", "2"),
-        expect="dedup",
     ),
     Form(
         key="inline_var",
@@ -103,7 +95,6 @@ FORMS: tuple[Form, ...] = (
         expr="icv",
         fmt="%d",
         values=("1", "2"),
-        expect="dedup",
     ),
     Form(
         key="extern_const_defined_in_cpp",
@@ -134,7 +125,6 @@ FORMS: tuple[Form, ...] = (
         expr="a::b::kDeep",
         fmt="%d",
         values=("1", "2"),
-        expect="dedup",
     ),
     Form(
         key="variable_template",
@@ -144,11 +134,6 @@ FORMS: tuple[Form, ...] = (
         expr="vt<int>",
         fmt="%d",
         values=("1", "2"),
-        castxml_gap=(
-            "castxml emits no element for a variable template, so the header "
-            "tier cannot read its initializer; the clang frontend reports it. "
-            "See docs/contribute/known-gaps.md (variable templates under castxml)."
-        ),
     ),
     Form(
         key="enum_class_constexpr",
@@ -163,7 +148,6 @@ FORMS: tuple[Form, ...] = (
         expr="static_cast<int>(ns::kColor)",
         fmt="%d",
         values=("1", "2"),
-        expect="dedup",
     ),
     Form(
         key="const_char_ptr_const",
@@ -173,26 +157,12 @@ FORMS: tuple[Form, ...] = (
         expr="ns::kName",
         fmt="%s",
         values=("one", "two"),
-        expect="dedup",
     ),
 )
 
 
-def _form_param(form: Form, lane: str, case: str) -> object:
-    """A parametrize case; the castxml gap is a strict xfail on the changed pair."""
-    if case == "changed" and form.castxml_gap:
-        return pytest.param(
-            form,
-            lane,
-            case,
-            marks=pytest.mark.xfail(strict=True, reason=form.castxml_gap),
-            id=f"{form.key}-{lane}-{case}",
-        )
-    return pytest.param(form, lane, case, id=f"{form.key}-{lane}-{case}")
-
-
 _CASES = [
-    _form_param(form, lane, case)
+    pytest.param(form, lane, case, id=f"{form.key}-{lane}-{case}")
     for form in FORMS
     for lane in _LANES
     for case in ("changed", "identical")
@@ -338,9 +308,6 @@ def test_value_change_is_reported_once_and_identical_value_is_not(
     matched = _findings_naming(_compare(form, lane, d, old, new), form.qualified)
     if case == "identical":
         assert matched == [], f"identical value reported: {matched}"
-    elif form.expect == "dedup":
-        # exactly-one enforced by dedup task
-        assert len(matched) >= 1, f"no finding names {form.qualified}"
     else:
         assert len(matched) == 1, (
             f"expected exactly one finding naming {form.qualified}, got {matched}"

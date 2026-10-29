@@ -635,6 +635,12 @@ ANALYSIS_1_BUG_CLASSES: tuple[BugClass, ...] = (
         fixed_by=(834, 838, 860, 883, 932),
         seed_tests=(
             "tests/test_fact_conservation_properties.py",
+            # A changed value on a form the header tier skipped (inline or
+            # extern const, variable template) must surface as a finding, not
+            # read as a clean compare. Oracle: the compiler's probe.
+            "tests/test_value_bearing_declaration_forms.py",
+            "tests/test_elf_data_initializer.py",
+            "tests/test_clang_non_const_variable_value.py",
             "tests/test_bundle_side_input.py",
             "tests/test_contract_adaptive_default_fallback.py",
             # ADR-049 Phase 7's evidence-adaptive default: a finding no

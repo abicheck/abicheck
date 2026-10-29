@@ -228,6 +228,10 @@ ANALYSIS_2_BUG_CLASSES: tuple[BugClass, ...] = (
             # both frontends, C controls) and its two seams, compiler-free.
             "tests/test_header_graph_language_mode.py",
             "tests/test_header_graph_language_mode_unit.py",
+            # A header whose only C++ signal is a C++17 inline variable
+            # (`inline int x = 1;`) has no structural C++ syntax for the
+            # heuristic to key on, so it was parsed as C and its value lost.
+            "tests/test_inline_variable_cpp_detection.py",
         ),
         public_surfaces=("python-api", "cli"),
         axes={
