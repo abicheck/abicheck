@@ -26,7 +26,7 @@ keys survive outside enum kinds") -- this is exactly the enum bridge
 kinds, which had no equivalent bridge at all before this fix: neither
 ``finding_dedup._dedup_cross_kind``'s exact ``(kind, symbol)`` match nor
 ``_deduplicate_cross_detector``'s identity-keyed dedup (which never even
-included these kinds in ``_DEDUP_CATEGORIES``) could recognize a
+included these kinds in ``DEDUP_CATEGORY_BY_KIND``) could recognize a
 namespaced struct's two differently-qualified spellings as the same
 finding.
 """

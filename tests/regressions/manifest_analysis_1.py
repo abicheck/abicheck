@@ -366,6 +366,14 @@ ANALYSIS_1_BUG_CLASSES: tuple[BugClass, ...] = (
             # depending on run; pinned under permuted edges/inputs and
             # several PYTHONHASHSEED values.
             "tests/test_graph_reconcile_order_invariance.py",
+            # An acknowledgment's matcher counted a dedup twin pair (a header
+            # removal and its ELF-only copy, one dedup identity) as two
+            # observations, so a `symbol:` record over `-H` raised
+            # AmbiguousAcknowledgmentError. The matcher now keys candidates on
+            # the dedup pass's own identity; two genuinely different findings
+            # under one record still raise. Pinned at the CLI and as a unit.
+            "tests/test_acknowledgment_twin_e2e.py",
+            "tests/test_acknowledgment_twin_identity.py",
         ),
         public_surfaces=("cli",),
         # Phase 5's own two originally-tracked gaps here (a compare()-level

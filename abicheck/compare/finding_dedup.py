@@ -500,6 +500,53 @@ def _drop_deletion_consequences(changes: list[Change]) -> list[Change]:
     ]
 
 
+#: The kinds whose cross-detector duplicates share one dedup identity, mapped
+#: to their category label. :func:`deduplicate_cross_detector` collapses on
+#: this table through :func:`dedup_identity_key`, and acknowledgment matching
+#: (``policy.disposition_acknowledgment``) reads the same key, so the two agree
+#: on which findings are one observation.
+DEDUP_CATEGORY_BY_KIND: dict[ChangeKind, str] = {
+    ChangeKind.FUNC_REMOVED: "func_removal",
+    ChangeKind.FUNC_REMOVED_ELF_ONLY: "func_removal",
+    ChangeKind.FUNC_ADDED: "func_addition",
+    # Same category as `FUNC_ADDED`, mirroring the `func_removal` pair
+    # above: the two are the same observation at two evidence tiers, so a
+    # symbol that somehow reached both detectors must dedup to one
+    # finding rather than be counted as two additions.
+    ChangeKind.FUNC_ADDED_ELF_ONLY: "func_addition",
+    ChangeKind.VAR_REMOVED: "var_removal",
+    # Same category as `VAR_REMOVED`, mirroring the `func_removal` pair
+    # above: the two are the same observation at two evidence tiers.
+    ChangeKind.VAR_REMOVED_ELF_ONLY: "var_removal",
+    ChangeKind.VAR_ADDED: "var_addition",
+    # Version node removal and version definition removal both fire for
+    # the same version string.  Keep the more specific node-level change.
+    ChangeKind.SYMBOL_VERSION_NODE_REMOVED: "version_def_removal",
+    ChangeKind.SYMBOL_VERSION_DEFINED_REMOVED: "version_def_removal",
+    # L1 (DWARF)/L2 (header) enum detectors independently report the
+    # same ChangeKind for the same member change; resolve_change_identity
+    # already self-maps these four kinds -- missing was including them
+    # here, so identity resolution (and dedup) is even attempted.
+    ChangeKind.ENUM_MEMBER_REMOVED: "enum_member_removed",
+    ChangeKind.ENUM_MEMBER_VALUE_CHANGED: "enum_member_value_changed",
+    ChangeKind.ENUM_LAST_MEMBER_VALUE_CHANGED: "enum_last_member_value_changed",
+    ChangeKind.ENUM_UNDERLYING_SIZE_CHANGED: "enum_underlying_size_changed",
+}
+
+
+def dedup_identity_key(change: Change) -> str | None:
+    """The identity :func:`deduplicate_cross_detector` collapses *change* on.
+
+    ``None`` for a kind outside :data:`DEDUP_CATEGORY_BY_KIND`: this pass never
+    collapses it, so it has no duplicate to share an identity with. Acknowledgment
+    matching uses this key so a deduplicated twin and its surviving finding count
+    as one observed change.
+    """
+    if change.kind not in DEDUP_CATEGORY_BY_KIND:
+        return None
+    return resolve_change_identity(change).primary_id
+
+
 def deduplicate_cross_detector(
     changes: list[Change],
     old: AbiSnapshot | None = None,
@@ -544,33 +591,6 @@ def deduplicate_cross_detector(
     Within each category, the first occurrence wins (preserving detector
     priority order from the ``compare()`` spec list).
     """
-    _DEDUP_CATEGORIES: dict[ChangeKind, str] = {
-        ChangeKind.FUNC_REMOVED: "func_removal",
-        ChangeKind.FUNC_REMOVED_ELF_ONLY: "func_removal",
-        ChangeKind.FUNC_ADDED: "func_addition",
-        # Same category as `FUNC_ADDED`, mirroring the `func_removal` pair
-        # above: the two are the same observation at two evidence tiers, so a
-        # symbol that somehow reached both detectors must dedup to one
-        # finding rather than be counted as two additions.
-        ChangeKind.FUNC_ADDED_ELF_ONLY: "func_addition",
-        ChangeKind.VAR_REMOVED: "var_removal",
-        # Same category as `VAR_REMOVED`, mirroring the `func_removal` pair
-        # above: the two are the same observation at two evidence tiers.
-        ChangeKind.VAR_REMOVED_ELF_ONLY: "var_removal",
-        ChangeKind.VAR_ADDED: "var_addition",
-        # Version node removal and version definition removal both fire for
-        # the same version string.  Keep the more specific node-level change.
-        ChangeKind.SYMBOL_VERSION_NODE_REMOVED: "version_def_removal",
-        ChangeKind.SYMBOL_VERSION_DEFINED_REMOVED: "version_def_removal",
-        # L1 (DWARF)/L2 (header) enum detectors independently report the
-        # same ChangeKind for the same member change; resolve_change_identity
-        # already self-maps these four kinds -- missing was including them
-        # here, so identity resolution (and dedup) is even attempted.
-        ChangeKind.ENUM_MEMBER_REMOVED: "enum_member_removed",
-        ChangeKind.ENUM_MEMBER_VALUE_CHANGED: "enum_member_value_changed",
-        ChangeKind.ENUM_LAST_MEMBER_VALUE_CHANGED: "enum_last_member_value_changed",
-        ChangeKind.ENUM_UNDERLYING_SIZE_CHANGED: "enum_underlying_size_changed",
-    }
     # A symbol-version-node bump (e.g. LLVM_17 -> LLVM_18.1 on every symbol in a major release) makes BOTH version detectors fire per symbol with the same old->new transition: SYMBOL_MOVED_VERSION_NODE (node label moved) and SYMBOL_VERSION_ALIAS_CHANGED (default version changed, old not retained as an alias). Drop the alias-change duplicate where a node move already covers the same (symbol, old -> new) -- halves the version-bump noise on real libraries (libLLVM 17->18: ~46k instead of ~92k risk findings). Matches on (symbol, old_value, new_value); if that ever diverges the dedup simply no-ops (both findings kept).
     moved_transitions: set[tuple[str, str | None, str | None]] = {
         (c.symbol, c.old_value, c.new_value)
@@ -619,8 +639,8 @@ def deduplicate_cross_detector(
             and (c.symbol, c.old_value, c.new_value) in moved_transitions
         ):
             continue
-        if c.kind in _DEDUP_CATEGORIES:
-            identity_key = resolve_change_identity(c).primary_id
+        identity_key = dedup_identity_key(c)
+        if identity_key is not None:
             if identity_key in seen:
                 continue
             seen.add(identity_key)
