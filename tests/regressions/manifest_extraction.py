@@ -619,15 +619,6 @@ EXTRACTION_BUG_CLASSES: tuple[BugClass, ...] = (
         known_gaps=(
             KnownGap(
                 description=(
-                    "Mach-O exports are the union of the nlist and the dyld "
-                    "export trie; the trie is not treated as the sole authority, "
-                    "so a defined external the nlist marks N_EXT (without "
-                    "N_PEXT) but the trie omits is still reported as an export."
-                ),
-                reference="abicheck/macho_metadata.py",
-            ),
-            KnownGap(
-                description=(
                     "A PE export carries no linkage flag, so its binding stays "
                     "unknown: `binding: weak` never matches a PE removal, by "
                     "design (fail closed), and `binding: global` does not "

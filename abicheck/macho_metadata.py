@@ -228,10 +228,12 @@ def _walk_export_trie(data: bytes) -> list[tuple[str, int]]:
 
 
 def _parse_export_trie(dylib_path: Path, header: Any, meta: MachoMetadata) -> None:
-    """Merge dyld-export-trie facts into *meta.exports*.
+    """Make the dyld export trie *meta.exports* when the image has one.
 
-    Adds trie-only exports the classic symbol table missed and upgrades the
-    weak / re-export flags of exports already seen there.
+    The trie is authoritative (see the body): exports the nlist carries but the
+    trie does not list are dropped, trie-only exports are added, and the trie's
+    weak and re-export flags replace the nlist's. An image with no trie keeps
+    its nlist exports untouched.
     """
     export_off = export_size = 0
     for lc, cmd, _data in header.commands:
@@ -263,21 +265,25 @@ def _parse_export_trie(dylib_path: Path, header: Any, meta: MachoMetadata) -> No
         note_export_read_failure(f"Mach-O export trie unreadable: {exc}")
         return
 
-    by_name = {e.name: e for e in meta.exports if e.name}
+    # The trie is the image's export table, as dyld reads it: a name it does not
+    # list is not exported, whatever its nlist says (a defined external the
+    # linker kept local, or a stale nlist entry). So nlist-derived exports are
+    # pruned to the trie's names, and the trie's own flags decide weak and
+    # re-export. A name the nlist alone carries (stripped trie-less image) is
+    # never reached here: this path runs only when a trie is present.
+    trie_flags: dict[str, int] = {}
     for raw_name, flags in entries:
         name = raw_name[1:] if raw_name.startswith("_") else raw_name
-        if not name:
-            continue
+        if name:
+            trie_flags.setdefault(name, flags)
+
+    kept: dict[str, MachoExport] = {}
+    for export in meta.exports:
+        if export.name in trie_flags:
+            kept.setdefault(export.name, export)
+    for name, flags in trie_flags.items():
         is_weak = bool(flags & _EXPORT_SYMBOL_FLAGS_WEAK_DEFINITION)
         is_reexport = bool(flags & _EXPORT_SYMBOL_FLAGS_REEXPORT)
-        existing = by_name.get(name)
-        if existing is not None:
-            if is_weak and not existing.is_weak:
-                existing.is_weak = True
-                existing.sym_type = MachoSymbolType.WEAK
-            if is_reexport:
-                existing.sym_type = MachoSymbolType.REEXPORT
-            continue
         sym_type = (
             MachoSymbolType.REEXPORT
             if is_reexport
@@ -285,9 +291,13 @@ def _parse_export_trie(dylib_path: Path, header: Any, meta: MachoMetadata) -> No
             if is_weak
             else MachoSymbolType.EXPORTED
         )
-        export = MachoExport(name=name, sym_type=sym_type, is_weak=is_weak)
-        meta.exports.append(export)
-        by_name[name] = export
+        existing = kept.get(name)
+        if existing is not None:
+            existing.is_weak = is_weak
+            existing.sym_type = sym_type
+            continue
+        kept[name] = MachoExport(name=name, sym_type=sym_type, is_weak=is_weak)
+    meta.exports[:] = list(kept.values())
 
 
 # ---------------------------------------------------------------------------
@@ -454,7 +464,8 @@ def _parse(dylib_path: Path) -> MachoMetadata:
         macho, header, _build_section_segment_map(header), meta, dylib_path
     )
 
-    # Merge dyld export-trie facts (trie-only exports, weak/re-export flags).
+    # The dyld export trie, when present, is the export table (see
+    # _parse_export_trie); without one the nlist's exports stand.
     _parse_export_trie(dylib_path, header, meta)
 
     # A dylib carries an export trie (LC_DYLD_INFO*/LC_DYLD_EXPORTS_TRIE) or,
