@@ -33,6 +33,7 @@ Every mapping here was verified against the live detectors before being asserted
 
 from __future__ import annotations
 
+import re
 from collections.abc import Callable
 
 from abicheck.checker_policy import ChangeKind
@@ -49,6 +50,8 @@ from abicheck.model import (
     Variable,
     Visibility,
 )
+from abicheck.model.change_catalog.assembled import REGISTRY
+from abicheck.model.change_catalog.dimensions import ChangeOperation
 
 # Context identifiers are prefixed so they can never collide with a mutation's
 # target identifiers ("tgt"/"Tgt"); used by the false-positive guard.
@@ -466,6 +469,38 @@ def _m_executable_stack_removed(tag: int):
         ChangeKind.EXECUTABLE_STACK_REMOVED,
         False,
     )
+
+
+def registry_twins() -> dict[str, str]:
+    """Map each removed kind to its added twin, read from the ChangeKind registry.
+
+    A removed kind's twin is the registered kind named by swapping its one
+    ``removed`` token for ``added``, provided it has the same entity. The
+    registry's ``operation`` is not the filter: trait-gained kinds such as
+    ``type_field_added`` are declared ``MODIFIED`` because the entity persists.
+    """
+    entries = {str(getattr(k, "value", k)): e for k, e in REGISTRY.entries.items()}
+    twins: dict[str, str] = {}
+    for name, entry in entries.items():
+        if entry.operation != ChangeOperation.REMOVED:
+            continue
+        twin = re.sub(
+            r"(^|_)removed(?=_|$)",
+            lambda m: m.group(1) + "added",
+            name,
+            count=1,
+        )
+        other = entries.get(twin)
+        if other is not None and other.entity == entry.entity:
+            twins[name] = twin
+    return twins
+
+
+def registry_operations() -> dict[str, ChangeOperation]:
+    """Each registered kind's catalog ``operation``, keyed by kind value."""
+    return {
+        str(getattr(k, "value", k)): e.operation for k, e in REGISTRY.entries.items()
+    }
 
 
 # Mutations whose reverse is legitimately a non-change, so touched-symbol

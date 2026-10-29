@@ -73,7 +73,7 @@ Each entry's status line says what is still open. A PARTIAL entry's write-up als
 
 #### The `#ifdef` guard census is runtime-only, so stored snapshots fall back to the `sycl::` name rule (2026-10-25)
 
-**Status (2026-10-25): OPEN, deliberate split.** The census of exports declared only under an excluded `#ifdef` (`extract/headers/preprocessor_branches.py`, reported per macro in `coverage_warnings` and `undeclared_export_census.by_guard`, report schema 6.7) is computed from the castxml run's own `-E -dD` output and kept on `AbiSnapshot.live_preprocessor_hidden`, which `storage/snapshot_encode.py` drops. A compare of `abicheck dump` outputs, a stored baseline, a clang-frontend parse and a multi-TU manifest therefore carry no scan and use the `sycl::` name rule only, so a generic `#ifdef FOO` export reads as unattributed there. Persisting it is the follow-up: a new snapshot fact, which needs its `SCHEMA_VERSION` ruling, an `EXTRACTOR_GENERATION` bump with a `SPELLING_MIGRATIONS` row, and a generation-corpus freeze. Also open: the census reads only the ELF export table, and matches an export to a hidden declaration by function name only (no variables, no signature check).
+**Status (2026-10-29): FIXED for persistence (schema v67).** The census of exports declared only under an excluded `#ifdef` (`extract/headers/preprocessor_branches.py`, reported per macro in `coverage_warnings` and `undeclared_export_census.by_guard`, report schema 6.7) is computed from the castxml run's own `-E -dD` output and is now persisted on `AbiSnapshot.live_preprocessor_hidden` as the document key of the same name. A compare of stored snapshots attributes a generic `#ifdef FOO` export to `FOO` exactly as a live compare does (`tests/test_live_stored_census_parity.py`, `tests/test_preprocessor_hidden_census_integration.py`). A pre-v67 snapshot carries no scan and uses the `sycl::` name rule only, and a clang-frontend parse and a multi-TU manifest still carry no scan. No `EXTRACTOR_GENERATION` bump: the scan's content is unchanged, only its persistence, which the `SCHEMA_VERSION` bump to 67 covers. Also open: the census reads only the ELF export table, and matches an export to a hidden declaration by function name only (no variables, no signature check).
 `hygiene` — A stored-snapshot compare under-reports why exports are undeclared; it never fabricates a finding. Owner: `confidence.undeclared_export_censuses`.
 
 #### Markdown/review lose `<…>` and backticks in symbol names; three formats omit the acknowledged count (2026-10-28)
@@ -576,8 +576,7 @@ Do not re-attempt token-claiming. A header's export tokens cannot tell whether i
 
 #### An `ownership_fact` is persisted only as a PRESENT decision (2026-10-27)
 
-**Status (2026-10-27): OPEN, deliberate.** Every non-`PRESENT` status reads back as `None`, and a `PRESENT` fact on a snapshot with no `extraction_scope` is dropped. `ownership_of()` folds both to unknown, so no verdict changes; the loss is in the `Fact` object only. Pinned, not fixed: a per-entry status is a schema change.
-`hygiene` — The round-trip is pinned as named `KNOWN_LOSSY` cases in `tests/unit/storage/test_snapshot_field_roundtrip.py`. Closing it needs a `SCHEMA_VERSION` bump and a reader-compatibility decision. [Full write-up](known-gaps/ownership-fact-persists-only-a-present-decision.md)
+**Status (2026-10-29): FIXED (schema v67).** Non-`PRESENT` statuses and the decisions of a snapshot with no recorded scope are now persisted (`entity_ownership.statuses`, `ownership_without_scope`). The round-trip is pinned in `tests/unit/storage/test_snapshot_field_roundtrip.py`. [Write-up](known-gaps/ownership-fact-persists-only-a-present-decision.md)
 
 #### Release fan-out cannot pair a stored snapshot directory with a live one
 

@@ -81,7 +81,12 @@ from abicheck.model.fact import Fact
 from abicheck.model.header_exclusion_record import KNOWN_MATCHING_RULES
 from abicheck.model.snapshot_reliability import FACT_FAMILIES
 from abicheck.serialization import snapshot_from_dict, snapshot_to_json
-from abicheck.storage.snapshot_encode import _SNAPSHOT_SKIP_FIELDS
+from abicheck.storage.snapshot_encode import (
+    _SNAPSHOT_SKIP_FIELDS,
+    RUNTIME_ONLY_SNAPSHOT_FIELDS,
+    snapshot_to_dict,
+)
+from abicheck.storage.versioning import EXTRACTOR_GENERATION, this_build_generations
 
 _ADVANCED_STATUS_REASON = (
     "dwarf_advanced.extraction is dropped by the encoder "
@@ -91,29 +96,12 @@ _ADVANCED_STATUS_REASON = (
     "back to the payload inference; see known-gaps/"
     "advanced-facts-collected-infers-advanced-dwarf-extraction-ran.md"
 )
-_OWNERSHIP_STATUS_REASON = (
-    "ownership_fact is persisted only as a PRESENT decision inside the "
-    "extraction_scope block (ADR-075): the decision table holds classified "
-    "(owner, contract, rule) triples and nothing else, so any other status is "
-    "written as unclassified and reads back as None. ownership_of() folds both "
-    "to 'unknown', so no verdict changes, but the Fact itself is not "
-    "round-tripped; closing it needs a per-entry status encoding (a schema "
-    "change). See known-gaps/ownership-fact-persists-only-a-present-decision.md"
-)
-
 #: Case id -> reason it does not round-trip today. An id is either a field
 #: (``Class.field``, the enumerated value is lossy) or one member of an enum
 #: or status field (``Class.field[member]`` / ``ownership_fact[member]``).
 #: Each is an ``xfail(strict=True)`` real defect, or a deliberate limitation
 #: named here with its reason; remove the entry when the codec is fixed.
 KNOWN_LOSSY: dict[str, str] = {
-    "AbiSnapshot.from_headers_inferred": "dump is not byte-stable: the loaded snapshot re-emits from_headers=false, which the first dump omitted",
-    "AbiSnapshot.fact_generations": "dump is not byte-stable: the second dump adds a key (source) absent from the first",
-    "AdvancedDwarfMetadata.toolchain": "ToolchainInfo.wchar_flags is dropped on load",
-    "ToolchainInfo.wchar_flags": "list of wchar_flags is dropped on load",
-    "EnumInfo.decl_file": "decl_file reads back as null",
-    "StructLayout.decl_file": "decl_file reads back as null",
-    "MachoExport.is_data": "a True is_data reads back as False",
     "Declarations.debug_advanced": (
         "the synthesized AdvancedDwarfMetadata carries extraction=NOT_RUN, which "
         "the encoder drops; the per-status cases below name each status"
@@ -121,38 +109,19 @@ KNOWN_LOSSY: dict[str, str] = {
     "AdvancedDwarfMetadata.extraction[not_run]": _ADVANCED_STATUS_REASON,
     "AdvancedDwarfMetadata.extraction[completed]": _ADVANCED_STATUS_REASON,
     "AdvancedDwarfMetadata.extraction[failed]": _ADVANCED_STATUS_REASON,
-    "ownership_fact[partial]": _OWNERSHIP_STATUS_REASON,
-    "ownership_fact[not_collected]": _OWNERSHIP_STATUS_REASON,
-    "ownership_fact[unsupported]": _OWNERSHIP_STATUS_REASON,
-    "ownership_fact[failed]": _OWNERSHIP_STATUS_REASON,
-    "ownership_fact[not_applicable]": _OWNERSHIP_STATUS_REASON,
-    "ownership_fact[no_extraction_scope]": (
-        "encode_extraction_scope writes decisions only inside an extraction_scope "
-        "block; a snapshot without one loads extraction_scope=None and no decisions "
-        "(ADR-075: an unrecorded scope is never read as recorded), so a PRESENT "
-        "ownership fact set without a scope is dropped. stamp_ownership always "
-        "records the scope with its decisions, so no producer reaches this state"
-    ),
 }
 
 #: Ratchet: ``KNOWN_LOSSY`` may only shrink. Lower this when entries are removed.
-_KNOWN_LOSSY_CEILING = 17
+_KNOWN_LOSSY_CEILING = 4
 
-#: Fields the encoder deliberately never persists (documented in the model as
-#: "Runtime-only ... never serialized"). Not enumerated.
-_RUNTIME_ONLY: frozenset[str] = frozenset(
-    {
-        "live_source_evidence",
-        "live_preprocessor_clang_bin",
-        "load_notices",
-        "static_archive",
-    }
-)
+#: Fields the encoder deliberately never persists. Read from the encoder's
+#: own declaration (each with its reason there), never copied here.
+_RUNTIME_ONLY: frozenset[str] = frozenset(RUNTIME_ONLY_SNAPSHOT_FIELDS)
 
 #: Fields persisted only through a dedicated, conditional codec. A standalone
 #: value is intentionally not written, so the field is not enumerated.
 _BY_DESIGN: dict[str, str] = {
-    "AbiSnapshot.spellings_generation": "written only when it exceeds the extractor generation (generation_migrations.encode_fact_generations)",
+    "AbiSnapshot.spellings_generation": "a value at or below the extractor generation is not a migration marker and is not written (generation_migrations.encode_fact_generations); the recorded values are enumerated by _spellings_case",
     "ExtractionScope.ownership_rules": "ownership rules are persisted by the extraction-scope codec (ADR-075)",
     "OwnershipRules.dependency_evidence": "persisted by the extraction-scope codec (ADR-075)",
 }
@@ -324,6 +293,8 @@ def _default_of(f: dataclasses.Field[Any]) -> Any:
 def _nondefault_value(cls: type, fname: str) -> Any:
     f = next(x for x in dataclasses.fields(cls) if x.name == fname)
     avoid = _default_of(f)
+    if fname == "fact_generations":
+        return this_build_generations()
     if fname == "stale_fact_families":
         return frozenset({sorted(FACT_FAMILIES)[0]})
     if fname in _STR_DOMAINS:
@@ -629,6 +600,19 @@ def _ownership_case(
     return snap, checks
 
 
+def _spellings_case(*, stamped: bool) -> tuple[AbiSnapshot, list[_Check]]:
+    """A recorded spelling generation above this build's extractor generation.
+
+    Loading a migrated document records one; a re-save must keep it, with or
+    without a fact-generation stamp carried alongside (the stamp is only the
+    producing build's triple, so an unstamped snapshot must not drop it).
+    """
+    snap = _construct(AbiSnapshot, {"spellings_generation": EXTRACTOR_GENERATION + 1})
+    if stamped:
+        snap.fact_generations = this_build_generations()
+    return snap, [(lambda s: s, snap, "spellings_generation")]
+
+
 def _collect() -> tuple[dict[str, _CaseBuilder], list[str]]:
     builders: dict[str, _CaseBuilder] = {}
     unsynth: list[str] = []
@@ -648,6 +632,10 @@ def _collect() -> tuple[dict[str, _CaseBuilder], list[str]]:
     for status in FactStatus:
         builders[f"ownership_fact[{status.value}]"] = functools.partial(
             _ownership_case, status, scoped=True
+        )
+    for stamped in (False, True):
+        builders[f"AbiSnapshot.spellings_generation[stamped={stamped}]"] = (
+            functools.partial(_spellings_case, stamped=stamped)
         )
     builders["ownership_fact[no_extraction_scope]"] = functools.partial(
         _ownership_case, FactStatus.PRESENT, scoped=False
@@ -774,3 +762,54 @@ def test_compare_live_and_stored_agree(mutation: str) -> None:
     )
     assert _verdict_view(live) == _verdict_view(stored)
     assert live.changes, "mutation should produce at least one change"
+
+
+@pytest.mark.parametrize("name", sorted(RUNTIME_ONLY_SNAPSHOT_FIELDS))
+def test_runtime_only_field_never_reaches_the_document(name: str) -> None:
+    # The encoder's own declaration is the source of truth: each listed field
+    # must be a real AbiSnapshot field, carry its reason, and stay out of the
+    # encoded document even when set to a non-default value.
+    assert name in {f.name for f in dataclasses.fields(AbiSnapshot)}
+    assert RUNTIME_ONLY_SNAPSHOT_FIELDS[name].strip(), (
+        "runtime-only field needs a reason"
+    )
+    snap = _construct(AbiSnapshot, {name: _nondefault_value(AbiSnapshot, name)})
+    doc = snapshot_to_dict(snap)
+    assert name not in doc
+
+
+def test_legacy_from_headers_is_reinferred_on_load_not_persisted() -> None:
+    # A legacy document without the explicit ``from_headers`` key: the header
+    # provenance is a guess, so the load marks it inferred, and re-saving must
+    # not promote the guess to explicit provenance.
+    legacy = _construct(AbiSnapshot, {"functions": [], "from_headers": False})
+    doc = snapshot_to_dict(legacy)
+    doc.pop("from_headers", None)
+    doc.pop("schema_version", None)
+    doc["functions"] = [
+        {"name": "f", "mangled": "_Zf", "return_type": "int", "params": []}
+    ]
+    first = snapshot_from_dict(json.loads(json.dumps(doc)))
+    assert first.from_headers is True
+    assert first.from_headers_inferred is True
+    again = snapshot_to_dict(first)
+    assert "from_headers" not in again
+    second = snapshot_from_dict(json.loads(json.dumps(again)))
+    assert second.from_headers_inferred is True
+    assert snapshot_to_json(second) == snapshot_to_json(first)
+
+
+def test_old_spelling_stamp_is_migrated_once_then_stable() -> None:
+    # A stamp older than this build is migrated on load (the spellings are
+    # rewritten and the migration is recorded). That is the one documented
+    # non-identity of dump -> load -> dump, so pin its shape: the loaded
+    # snapshot records this build's spelling generation, and a second re-save
+    # is byte-identical to the first (the migration is never run twice).
+    snap = _construct(AbiSnapshot, {})
+    snap.fact_generations = (EXTRACTOR_GENERATION - 1, 0, 0)
+    first_doc = snapshot_to_json(snap)
+    loaded = snapshot_from_dict(json.loads(first_doc))
+    assert loaded.spellings_generation == EXTRACTOR_GENERATION
+    once = snapshot_to_json(loaded)
+    twice = snapshot_to_json(snapshot_from_dict(json.loads(once)))
+    assert once == twice
