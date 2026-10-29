@@ -1670,7 +1670,7 @@ concepts:
       None outstanding. Markdown's leaf/root-cause render modes have
       since converged onto ReportDocument too
       (report/render_markdown_alternate.py's build_leaf_document/
-      build_root_cause_document, reached from reporter_markdown.py's
+      build_root_cause_document, reached from report/markdown_compute.py's
       _to_markdown_leaf/_to_markdown_root_cause) -- ADR-061's own item 1
       is now closed for every renderer/format (JSON/SARIF/JUnit/--stat,
       HTML, and every Markdown mode). Not currently assigned to a

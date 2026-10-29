@@ -22,7 +22,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from abicheck.checker import Verdict, compare
 from abicheck.dumper import dump
 from abicheck.model import Function, Visibility
-from abicheck.reporter import to_markdown
+from abicheck.report.dispatch_markdown import to_markdown
 from abicheck.serialization import load_snapshot, save_snapshot
 
 ZLIB_SO = Path("/usr/lib/x86_64-linux-gnu/libz.so.1.3")

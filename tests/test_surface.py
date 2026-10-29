@@ -1033,7 +1033,7 @@ class TestSurfaceLedgerOutput:
     def test_json_includes_surface_scope_ledger(self):
         import json
 
-        from abicheck.reporter import to_json
+        from abicheck.report.diff_report import to_json
 
         d = json.loads(to_json(self._scoped_result()))
         assert "surface_scope" in d
@@ -1052,7 +1052,7 @@ class TestSurfaceLedgerOutput:
         # ledger must be present there too, not just in the full report.
         import json
 
-        from abicheck.reporter import to_json
+        from abicheck.report.diff_report import to_json
 
         d = json.loads(to_json(self._scoped_result(), report_mode="root-cause"))
         assert "surface_scope" in d
@@ -1076,7 +1076,7 @@ class TestSurfaceLedgerOutput:
     def test_ledger_absent_when_scoping_off(self):
         import json
 
-        from abicheck.reporter import to_json
+        from abicheck.report.diff_report import to_json
         from abicheck.sarif import to_sarif
 
         old = AbiSnapshot(library="lib", version="1", functions=[_fn("public_api")])

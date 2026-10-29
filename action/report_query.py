@@ -123,7 +123,7 @@ VALIDITY_NO_RESULT = "no_result"
 #: why "non-empty string verdict" alone would fail working runs:
 #:
 #: * a two-sided ``compare`` report: ``verdict`` is a string from
-#:   ``KNOWN_VERDICTS`` below (``reporter.py``), as is a release envelope's
+#:   ``KNOWN_VERDICTS`` below (``report/diff_report.py``), as is a release envelope's
 #:   own sentinel. Membership, not non-emptiness: an arbitrary string is a
 #:   document that parsed and still says nothing any caller can act on;
 #: * a not-comparable report: ``verdict`` is ``null`` beside a ``reason``
@@ -165,7 +165,7 @@ VALIDITY_NO_RESULT = "no_result"
 #: * ``policy.release_outcome.RELEASE_VERDICT_ORDER`` plus
 #:   ``workflows/release_scope.py`` -- a release envelope's per-library rollup
 #:   adds ``ERROR``, ``not_comparable``, ``unsupported`` and ``failed``;
-#: * ``reporter.py``'s appcompat document -- ``UNKNOWN`` when no verdict was
+#: * ``report/diff_report.py``'s appcompat document -- ``UNKNOWN`` when no verdict was
 #:   computed.
 #:
 #: Checked rather than "any non-empty string", because the latter admitted
@@ -208,7 +208,7 @@ KNOWN_VERDICTS = frozenset(
 #: ``run_outcome.compatibility`` because that axis is separate from the
 #: release's own rolled-up ``verdict``, where an operational failure
 #: deliberately dominates. ``UNKNOWN`` joins them from a different emitter --
-#: ``reporter.py``'s appcompat document, where it means "no verdict was
+#: ``report/diff_report.py``'s appcompat document, where it means "no verdict was
 #: computed".
 #:
 #: Why it matters here: ``_resolve_clean_exit_verdict`` acts on the break and
@@ -476,7 +476,7 @@ def assurance_axis(report: dict[str, Any]) -> str:
       not a passing assurance check.
 
     **The contribution is not owed unconditionally**, and getting this wrong
-    fails green runs rather than red ones. ``reporter.py`` emits
+    fails green runs rather than red ones. ``report/diff_report.py`` emits
     ``analysis_assurance`` and ``analysis_assurance_exit_contribution`` under
     one ``if`` -- the block is attached only when the result carries a real
     ``AnalysisAssurance`` -- so a current-schema report legitimately omits
@@ -509,7 +509,7 @@ def _assurance_was_evaluated(report: dict[str, Any]) -> bool:
     the first let an audit report's lost contribution read as legacy:
 
     * a two-sided ``compare`` document's top-level ``analysis_assurance``
-      block (``reporter.py``),
+      block (``report/diff_report.py``),
     * the same block under ``diff``, for the nested shape every other query
       reaches through ``_either``,
     * ``run_outcome.assurance`` -- the placement an audit-only document uses

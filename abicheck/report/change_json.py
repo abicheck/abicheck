@@ -265,7 +265,7 @@ def change_to_dict(
     :func:`~abicheck.impact.engine.assess_change` so
     ``impact_assessment.root_cause_id`` is populated. Callers resolve this
     once per report via
-    :func:`~abicheck.reporter_markdown.root_cause_lookup_for_changes` rather
+    :func:`~abicheck.report.root_cause_lookup.root_cause_lookup_for_changes` rather
     than recomputing it per change. ``root_cause_evidence`` (G29 Phase 6) is
     the analogous per-change entry from
     :func:`~abicheck.impact.correlation.correlate_root_causes`, resolved the

@@ -40,12 +40,6 @@ from ..checker import Change, DiffResult, Verdict
 from ..model.change import validate_check_id, validate_evidence_depth
 from ..policy.disposition_close import ledger_for
 from ..report_summary import build_summary, surface_breakdown
-from ..reporter_contract_blocks import add_env_matrix_digest
-from ..reporter_markdown import (
-    root_cause_evidence_lookup_for_changes as root_cause_evidence_lookup_for_changes,
-    root_cause_for_change as root_cause_for_change,
-    root_cause_lookup_for_changes as root_cause_lookup_for_changes,
-)
 from ..root_cause_evidence import (
     entry_root_cause_evidence,
     fold_evidence_summaries,
@@ -57,8 +51,14 @@ from ..root_cause_evidence import (
 from ..schemas import REPORT_SCHEMA_VERSION
 from ..semver import recommend_release_for_report
 from .change_inventory import render_change_inventory_json
+from .contract_blocks import add_env_matrix_digest
 from .contract_fields import (
     add_contract_evaluation_fields as _add_contract_evaluation_fields,
+)
+from .root_cause_lookup import (
+    root_cause_evidence_lookup_for_changes as root_cause_evidence_lookup_for_changes,
+    root_cause_for_change as root_cause_for_change,
+    root_cause_lookup_for_changes as root_cause_lookup_for_changes,
 )
 from .scoped_gate import ScopedGateChangeHelpers
 from .view import (

@@ -298,7 +298,7 @@ class TestRequestedDepthPropagationSharedPipeline:
         ``validate_evidence_depth()`` (every JSON reporter) raised
         ``ValueError`` outright. This must fail against the pre-fix code."""
         from abicheck.model.change import validate_evidence_depth
-        from abicheck.reporter import to_json
+        from abicheck.report.diff_report import to_json
         from abicheck.service import CompareRequest, InputSpec, run_compare_request
 
         old_p, new_p = self._snapshot_files(tmp_path)

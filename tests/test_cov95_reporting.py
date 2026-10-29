@@ -16,7 +16,7 @@
 
 Targets uncovered branches in:
 
-* ``abicheck.reporter``
+* ``abicheck.report.diff_report``
 * ``abicheck.post_processing``
 * ``abicheck.compare.internal_leak``
 * ``abicheck.stack_report``
@@ -312,7 +312,7 @@ class TestReporterChangeToDict:
 class TestReporterJsonLeaf:
     def test_root_cause_json_severity_from_sets(self) -> None:
         # Lines 471-481: _severity_from_sets covers breaking/api_break/risk/compatible.
-        from abicheck.reporter import to_json
+        from abicheck.report.diff_report import to_json
 
         # All four are *root type* change kinds → rendered via _severity_from_sets.
         changes = [
@@ -337,7 +337,7 @@ class TestReporterJsonLeaf:
         # hand-rolled _leaf_entry, not change_to_dict — it needs its own
         # copy of the same structured reachability fields, since this is
         # exactly the category the layout-reachability walk tags most often.
-        from abicheck.reporter import to_json
+        from abicheck.report.diff_report import to_json
 
         c = _change(
             ChangeKind.TYPE_SIZE_CHANGED,
@@ -357,7 +357,7 @@ class TestReporterJsonLeaf:
         )
 
     def test_root_cause_json_omits_reachability_fields_when_unset(self) -> None:
-        from abicheck.reporter import to_json
+        from abicheck.report.diff_report import to_json
 
         result = _diff_result(
             [_change(ChangeKind.TYPE_SIZE_CHANGED, "ns::T")], verdict=Verdict.BREAKING
@@ -371,7 +371,7 @@ class TestReporterJsonLeaf:
     def test_root_cause_json_unknown_severity_with_override(self) -> None:
         # Line 481: a kind moved out of all sets via policy override → "unknown".
         from abicheck.policy_file import PolicyFile
-        from abicheck.reporter import to_json
+        from abicheck.report.diff_report import to_json
 
         # Override TYPE_SIZE_CHANGED to NO_CHANGE so it leaves all four sets.
         pf = PolicyFile(overrides={ChangeKind.TYPE_SIZE_CHANGED: Verdict.NO_CHANGE})
@@ -387,13 +387,13 @@ class TestReporterJsonLeaf:
 class TestReporterMarkdown:
     def test_markdown_no_changes(self) -> None:
         # Line 411: "_No ABI changes detected._" path in full markdown.
-        from abicheck.reporter import to_markdown
+        from abicheck.report.dispatch_markdown import to_markdown
 
         md = to_markdown(_diff_result([], verdict=Verdict.NO_CHANGE))
         assert "_No ABI changes detected._" in md
 
     def test_markdown_with_changes_renders(self) -> None:
-        from abicheck.reporter import to_markdown
+        from abicheck.report.dispatch_markdown import to_markdown
 
         changes = [
             _change(ChangeKind.TYPE_SIZE_CHANGED, "ns::T"),
@@ -404,7 +404,7 @@ class TestReporterMarkdown:
 
     def test_markdown_root_cause_no_changes(self) -> None:
         # Line 411: leaf-mode markdown "_No ABI changes detected._".
-        from abicheck.reporter import to_markdown
+        from abicheck.report.dispatch_markdown import to_markdown
 
         md = to_markdown(
             _diff_result([], verdict=Verdict.NO_CHANGE), report_mode="root-cause"
@@ -413,7 +413,7 @@ class TestReporterMarkdown:
         assert "ABI Report" in md
 
     def test_markdown_root_cause_with_type_changes(self) -> None:
-        from abicheck.reporter import to_markdown
+        from abicheck.report.dispatch_markdown import to_markdown
 
         changes = [
             _change(ChangeKind.TYPE_SIZE_CHANGED, "ns::T"),
@@ -428,7 +428,9 @@ class TestReporterMarkdown:
 class TestReporterSectionSeverityLabel:
     def test_section_severity_label_none_level(self) -> None:
         # Line 816: severity_config present but the category attr is None.
-        from abicheck.reporter import _section_severity_label
+        from abicheck.report.outcome_summary import (
+            section_severity_label as _section_severity_label,
+        )
 
         class _Cfg:
             some_category = None
@@ -436,7 +438,9 @@ class TestReporterSectionSeverityLabel:
         assert _section_severity_label(_Cfg(), "some_category") == ""
 
     def test_section_severity_label_with_level(self) -> None:
-        from abicheck.reporter import _section_severity_label
+        from abicheck.report.outcome_summary import (
+            section_severity_label as _section_severity_label,
+        )
 
         class _Level:
             value = "error"
@@ -448,14 +452,16 @@ class TestReporterSectionSeverityLabel:
         assert "ERROR" in label
 
     def test_section_severity_label_no_config(self) -> None:
-        from abicheck.reporter import _section_severity_label
+        from abicheck.report.outcome_summary import (
+            section_severity_label as _section_severity_label,
+        )
 
         assert _section_severity_label(None, "cat") == ""
 
 
 def _confidence_lines(result):
+    from abicheck.report.markdown_sections import compute_confidence_section
     from abicheck.report.render_markdown import render_confidence_section
-    from abicheck.reporter_markdown import compute_confidence_section
 
     return render_confidence_section(compute_confidence_section(result))
 

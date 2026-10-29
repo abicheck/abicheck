@@ -116,7 +116,7 @@ class Suppression:
     new ``Suppression`` instead of mutating one in place if a rule's
     selectors need to change. (Some *non-selector* fields, e.g. ``reason``/
     ``label``, remain safely mutable, since nothing reads them through
-    ``_selector`` -- see :mod:`abicheck.reporter_contract_blocks`'s
+    ``_selector`` -- see :mod:`abicheck.report.contract_blocks`'s
     ``suppression_rule_label``, which deliberately reads via ``getattr``
     rather than through this class's own matching path.)
     """

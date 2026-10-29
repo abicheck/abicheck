@@ -19,7 +19,8 @@ import pytest
 from abicheck.checker_policy import ChangeKind, Verdict
 from abicheck.checker_types import DiffResult
 from abicheck.model.change import Change
-from abicheck.reporter import to_json, to_markdown
+from abicheck.report.diff_report import to_json
+from abicheck.report.dispatch_markdown import to_markdown
 
 # The renderer's documented per-line cap, written as a literal so this test is
 # an independent oracle rather than a re-read of the implementation's constant.

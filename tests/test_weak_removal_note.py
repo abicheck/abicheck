@@ -24,8 +24,8 @@ import pytest
 from abicheck.checker_policy import ChangeKind, Verdict
 from abicheck.checker_types import DiffResult
 from abicheck.model.change import Change
+from abicheck.report.dispatch_markdown import to_markdown
 from abicheck.report.weak_removals import weak_removal_counts, weak_removal_note_lines
-from abicheck.reporter import to_markdown
 
 _BINDINGS = ("weak", "global", "unique", None)
 _KINDS = (

@@ -18,6 +18,7 @@ from abicheck.policy.analysis_assurance import (
 from abicheck.policy.evaluate import effective_kind_sets
 from abicheck.policy.gate_decision import gate_decision_for_result
 from abicheck.policy.severity import SeverityConfig, SeverityLevel
+from abicheck.report.diff_report import to_json, to_stat_json
 from abicheck.report.policy_facts import (
     kind_sets_for,
     policy_facts_for,
@@ -26,7 +27,6 @@ from abicheck.report.policy_facts import (
     summary_for,
 )
 from abicheck.report_summary import build_summary
-from abicheck.reporter import to_json, to_stat_json
 from abicheck.semver import recommend_release_for_report
 from tests._report_test_helpers import stat_line
 

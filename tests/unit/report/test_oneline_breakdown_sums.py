@@ -37,6 +37,7 @@ from abicheck.model.change import Change
 from abicheck.model.change_catalog.assembled import REGISTRY
 from abicheck.policy.reclassify import ReclassifyRule
 from abicheck.policy_file import PolicyFile
+from abicheck.report.diff_report import to_json
 from abicheck.report.release_change_inventory import release_inventory_counters
 from abicheck.report.release_member_entry import stamp_member_counts
 from abicheck.report.release_member_summary import add_member_review_summary
@@ -44,7 +45,6 @@ from abicheck.report.release_oneline import (
     format_release_oneline,
     release_global_counts,
 )
-from abicheck.reporter import to_json
 from abicheck.workflows.cross_source_hygiene import CROSS_SOURCE_EVOLUTION_CHECKS
 from tests._report_test_helpers import stat_line
 

@@ -39,11 +39,11 @@ from typing import TYPE_CHECKING, Any, cast
 # longer touches ``_VERDICT_STYLE``/``render_document``/``render_footer``
 # directly -- those moved into ``report/render_html.py`` alongside the rest
 # of this module's formatting responsibility (ADR-061 Phase 2 item 1).
-from .checker_types import DiffResult
-from .html_template import _CSS as _CSS
-from .model.change_catalog.kinds import HasKind
-from .report.change_operation import entity_for_change
-from .report.change_summary import ENTITY_LABELS, UNCLASSIFIED_LABEL
+from ..checker_types import DiffResult
+from ..html_template import _CSS as _CSS
+from ..model.change_catalog.kinds import HasKind
+from .change_operation import entity_for_change
+from .change_summary import ENTITY_LABELS, UNCLASSIFIED_LABEL
 
 # ADR-061 Phase 2 item 1: the pure HTML projection half of this module.
 # Every ``compute_*`` below returns one of these frozen structs (or, for the
@@ -54,27 +54,27 @@ from .report.change_summary import ENTITY_LABELS, UNCLASSIFIED_LABEL
 # than leaving them here, is what avoids a same-layer import cycle) -- every
 # existing caller and its direct test coverage resolves through these
 # aliases unchanged.
-from .report.disposition_audit import disposition_audit_reusing_document
-from .report.document import ReportDocument
-from .report.edge_coverage_section import compute_edge_coverage_section
-from .report.envelope import ReportEnvelope, resolved_document
-from .report.finding import (
+from .disposition_audit import disposition_audit_reusing_document
+from .document import ReportDocument
+from .edge_coverage_section import compute_edge_coverage_section
+from .envelope import ReportEnvelope, resolved_document
+from .finding import (
     active_reclassify_labels,
     effective_bucket,
     kind_sets_for_result,
 )
-from .report.gating_budget import non_gating_change_ids
-from .report.html_change_rows import (
+from .gating_budget import non_gating_change_ids
+from .html_change_rows import (
     compute_full_change_rows as compute_full_change_rows,
 )
-from .report.html_sections import (
+from .html_sections import (
     build_sections_data,
     compute_not_evaluated_section as compute_not_evaluated_section,
 )
-from .report.outcome_summary import project_outcome
-from .report.policy_facts import accepted_break_ids, compatibility_metrics, kind_str
-from .report.redundancy_reasons import redundancy_reason_text
-from .report.render_html import (
+from .outcome_summary import project_outcome
+from .policy_facts import accepted_break_ids, compatibility_metrics, kind_str
+from .redundancy_reasons import redundancy_reason_text
+from .render_html import (
     ConfidenceData,
     FileMetadataTable,
     GateCardData,
@@ -85,9 +85,9 @@ from .report.render_html import (
     SummaryCategoryRow,
     SummaryTableData,
 )
-from .report.render_html_document import render_html_document
-from .report.use_case_impact_render import use_cases_by_finding_for
-from .report.versioning_policy_section import compute_versioning_policy
+from .render_html_document import render_html_document
+from .use_case_impact_render import use_cases_by_finding_for
+from .versioning_policy_section import compute_versioning_policy
 
 if TYPE_CHECKING:
     from datetime import date
@@ -264,7 +264,7 @@ def compute_impact(
     carried separately to avoid double-counting. ``None`` when no root change
     reaches anything, which renders no section.
     """
-    from .checker import _ROOT_TYPE_CHANGE_KINDS
+    from ..checker import _ROOT_TYPE_CHANGE_KINDS
 
     entries: list[ImpactEntry] = []
     changes = (
@@ -402,8 +402,8 @@ def build_html_document(
 
     # Apply show_only filter (display-only, does not affect metrics)
     if show_only:
-        from .checker import Change as _Change
-        from .report.view import display_changes as _display_changes
+        from ..checker import Change as _Change
+        from .view import display_changes as _display_changes
 
         typed_changes = [c for c in all_changes if isinstance(c, _Change)]
         filtered = _display_changes(
@@ -441,7 +441,7 @@ def build_html_document(
     # summarise (a stub result has none, so every row is itemised as before).
     non_gating: frozenset[int] = frozenset()
     if isinstance(result, DiffResult):
-        from .report.finding import build_report_findings, findings_by_change_id
+        from .finding import build_report_findings, findings_by_change_id
 
         # ADR-061 gap C: the envelope resolved these once for the whole
         # render (over the same `result.changes`); resolve them here only for
@@ -483,7 +483,7 @@ def build_html_document(
     # effective verdict rendered it under the red "Changed Symbols (1)"
     # heading on a page whose banner reads NO_CHANGE (Codex review). It
     # gets its own section below instead. Empty without `--contract`.
-    from .model.contract_finding_relevance import contract_relevance_of, is_evaluated
+    from ..model.contract_finding_relevance import contract_relevance_of, is_evaluated
 
     not_evaluated = [ch for ch in display_changes if not is_evaluated(ch)]
     scored_changes = [ch for ch in display_changes if is_evaluated(ch)]
@@ -712,7 +712,7 @@ def _surface_changes(
 
     Reads the envelope's already-resolved findings when one is given, so the
     projection never resolves a verdict a second time."""
-    from .report.surface_changes import compute_surface_changes
+    from .surface_changes import compute_surface_changes
 
     if not isinstance(result, DiffResult):
         return None
@@ -734,6 +734,6 @@ def compute_use_case_impact(
     result: object, displayed: list[object] | None
 ) -> dict[str, object] | None:
     """``compare --use-cases``'s attribution, projected onto what is shown."""
-    from .report.use_case_impact_render import use_case_impact_block
+    from .use_case_impact_render import use_case_impact_block
 
     return use_case_impact_block(result, displayed)  # type: ignore[return-value]

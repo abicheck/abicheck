@@ -18,7 +18,7 @@ the ``compare`` command's rendered report text.
 
 Size-split from :mod:`abicheck.cli_compare_helpers` (AI-readiness file-size
 cap). These functions only reach leaf report-formatting modules
-(:mod:`abicheck.reporter`, :mod:`abicheck.reporter_markdown`,
+(:mod:`abicheck.report.diff_report`, :mod:`abicheck.report.markdown_sections`,
 :mod:`abicheck.policy.severity`, :mod:`abicheck.checker_policy`) -- none of them
 touch ``cli_dump_helpers``/``cli_buildsource_helpers``, so this module does
 not join the CLI-registration import-cycle SCC those do (CLAUDE.md "What NOT
@@ -60,7 +60,7 @@ calls. This closes this half of item 5 without changing where in the
 pipeline any fold-in runs. ``into_json``/``into_oneline`` are unaffected --
 JSON/one-line output carries raw symbol data by design.
 :func:`_fold_suppression_audit_into_text` demangles less than the other
-two: a rule's own :func:`~abicheck.reporter_contract_blocks.
+two: a rule's own :func:`~abicheck.report.contract_blocks.
 suppression_rule_label` selector echo is never demangled, only the
 free-standing symbol prose around it -- see that function's own docstring
 for why (two distinct selectors can demangle to the same display string).
@@ -575,7 +575,7 @@ def _fold_suppression_audit_into_text(
     if audit is None:
         return text
 
-    from .reporter_contract_blocks import (
+    from .report.contract_blocks import (
         suppression_rule_label as _suppression_rule_label,
     )
 

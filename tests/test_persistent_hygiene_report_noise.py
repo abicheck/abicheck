@@ -26,8 +26,8 @@ from abicheck.checker_policy import ChangeKind, CrossSourceEvolution, Verdict
 from abicheck.checker_types import DiffResult
 from abicheck.model.change import Change
 from abicheck.policy.severity import SeverityConfig, SeverityLevel
-from abicheck.report.dispatch_markdown import to_markdown as markdown_for
-from abicheck.reporter import to_json, to_markdown
+from abicheck.report.diff_report import to_json
+from abicheck.report.dispatch_markdown import to_markdown, to_markdown as markdown_for
 
 _STATES = (*CrossSourceEvolution, None)
 _KINDS = (ChangeKind.EXPORTED_NOT_PUBLIC, ChangeKind.PUBLIC_NOT_EXPORTED)
@@ -168,7 +168,7 @@ def test_json_and_html_surface_changes_agree_under_the_runs_severity(
     """HTML resolves the same severity config as JSON, so a non-gating
     persistent finding is absent from both (and a gating one present in
     both), never only one of them via a legacy-scheme fallback."""
-    from abicheck.html_report import build_html_document
+    from abicheck.report.html_compute import build_html_document
 
     level = SeverityLevel.ERROR if gates else SeverityLevel.INFO
     config = SeverityConfig(potential_breaking=level)

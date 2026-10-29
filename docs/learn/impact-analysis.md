@@ -133,7 +133,7 @@ while the report grouping leaves it ungrouped). Where both are set they are
 equal, since both hash the same grouping key. Computing `root_cause_id` needs whole-`DiffResult` context (which
 findings elsewhere reference this one) that a single finding's read view
 can't see on its own — the caller resolves it per report/scope
-(`reporter_markdown.root_cause_lookup_for_changes`) and passes it in; see
+(`report/root_cause_lookup.root_cause_lookup_for_changes`) and passes it in; see
 the [Detector Impact Contract](../contribute/detector-impact-contract.md)
 for why the underlying grouping stays a report-level decision
 (`--view root-cause` above) rather than something a detector sets

@@ -972,7 +972,7 @@ class TestEveryRendererTellsTheSameStory:
         left the finding under the red "Changed Symbols (1)" heading beside a
         NO_CHANGE banner and 100% compatibility, with the relevance nowhere on
         the page (Codex review)."""
-        from abicheck.html_report import generate_html_report
+        from abicheck.report.html_compute import generate_html_report
 
         page = generate_html_report(self._excluded())
         assert "Changed Symbols" not in page
@@ -982,7 +982,7 @@ class TestEveryRendererTellsTheSameStory:
         assert "PROVEN_OUT_OF_CONTRACT" in page
 
     def test_the_html_report_keeps_a_scored_finding_in_its_section(self) -> None:
-        from abicheck.html_report import generate_html_report
+        from abicheck.report.html_compute import generate_html_report
 
         page = generate_html_report(self._scored())
         assert "Changed Symbols" in page
@@ -992,7 +992,7 @@ class TestEveryRendererTellsTheSameStory:
         """`--show-only` builds a second set of counters over the *displayed*
         changes, so the main summary read `breaking: 0` beside
         `filtered_summary.breaking: 1` in one document (Codex review)."""
-        from abicheck.reporter import to_json
+        from abicheck.report.diff_report import to_json
 
         report = json.loads(to_json(self._excluded(), show_only="breaking"))
         assert report["summary"]["breaking"] == 0
@@ -1137,7 +1137,7 @@ class TestAnExcludedFindingCannotLaunderItselfBack:
     def test_the_html_percentages_exclude_it_too(self) -> None:
         """The HTML renderer computes its own metrics rather than reading
         `build_summary`, so it needs the same filter or the two disagree."""
-        from abicheck.html_report import generate_html_report
+        from abicheck.report.html_compute import generate_html_report
 
         result = _compare(
             _unreached_public_type_pair(),
@@ -1189,7 +1189,7 @@ class TestEveryReportModeStatesTheSameGateContribution:
     def test_a_gating_finding_states_its_real_contribution(
         self, report_mode: str
     ) -> None:
-        from abicheck import reporter
+        from abicheck.report import diff_report as reporter
 
         result = _compare(
             self._reachable_type_pair(),

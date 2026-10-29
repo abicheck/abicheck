@@ -136,7 +136,7 @@ def assess_change(
     :func:`~abicheck.impact.correlation.correlate_root_causes` — computed by
     the caller the same way *root_cause* is (whole-``DiffResult`` context
     this function doesn't have), via
-    :func:`~abicheck.reporter_markdown.root_cause_evidence_lookup_for_changes`.
+    :func:`~abicheck.report.root_cause_lookup.root_cause_evidence_lookup_for_changes`.
     ``None`` leaves :attr:`~abicheck.impact.assessment.ImpactAssessment.
     root_cause_evidence` unset, same as any caller with no correlator
     context to offer.

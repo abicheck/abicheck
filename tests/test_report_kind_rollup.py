@@ -23,7 +23,9 @@ from abicheck.report.kind_rollup import (
     roll_up_large_kinds,
     section_is_gating,
 )
-from abicheck.reporter_markdown import _section_severity_level
+from abicheck.report.outcome_summary import (
+    section_severity_level as _section_severity_level,
+)
 
 
 def _changes(kind: ChangeKind, n: int, prefix: str = "s") -> list[Change]:
@@ -143,7 +145,7 @@ class TestMachineOutputIsUnaffected:
         never notice.
         """
         from abicheck.checker_types import DiffResult
-        from abicheck.reporter import to_json
+        from abicheck.report.diff_report import to_json
 
         changes = _changes(ChangeKind.EXPORTED_NOT_PUBLIC, 200)
         for c in changes:

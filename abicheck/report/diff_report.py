@@ -19,18 +19,14 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, cast
 
-from .report.change_json import (
+from .change_json import (
     change_to_dict,
     prewarm_change_demangling,
     reclassified_by_for_change,
     scope_dict,
 )
-from .report.change_operation import (
-    entity_for_change as entity_for_change,
-    operation_for_kind as operation_for_kind,
-)
-from .report.document_builder import build_report_document
-from .report.json_sections import (
+from .document_builder import build_report_document
+from .json_sections import (
     SCOPED_GATE_HELPERS,
     add_abi_surface_breakdown,
     add_check_identity,
@@ -49,53 +45,91 @@ from .report.json_sections import (
 )
 
 if TYPE_CHECKING:
-    from .policy.severity import SeverityConfig
-from . import reporter_contract_blocks as _reporter_contract_blocks
-from .checker import Change, DiffResult
-from .report.change_inventory import render_change_inventory_json
-from .report.dispatch_markdown import (
-    _to_markdown_root_cause as _to_markdown_root_cause,
-    to_markdown as to_markdown,
-    to_review_digest as to_review_digest,
+    from ..policy.severity import SeverityConfig
+    from .envelope import ReportEnvelope
+from ..checker import Change, DiffResult
+from ..root_cause_evidence import (
+    root_cause_group_evidence,
+    scoped_only_evidence_lookup,
+    scoped_only_impact_group_lookup,
 )
-from .report.disposition_audit import add_disposition_audit as _add_disposition_audit
-from .report.finding_evolution_section import (
+from ..schemas import REPORT_SCHEMA_VERSION
+from . import contract_blocks as _reporter_contract_blocks
+from .change_inventory import render_change_inventory_json
+from .contract_blocks import add_contract_context as _add_contract_context
+from .disposition_audit import (
+    add_disposition_audit as _add_disposition_audit,
+    disposition_audit_reusing_document,
+    render_disposition_audit_note,
+)
+from .finding_evolution_section import (
     add_finding_evolution as _add_finding_evolution,
 )
-from .report.policy_facts import policy_facts_for, stat_facts_for
-from .report.render_json import render_json
-from .report.surface_changes import add_surface_changes as _add_surface_changes
-from .report.view import (
+from .outcome_summary import (
+    project_outcome,
+)
+from .policy_facts import policy_facts_for, stat_facts_for, summary_for
+from .render_json import render_json
+from .root_cause_lookup import (
+    root_cause_lookup_for_changes,
+)
+from .surface_changes import add_surface_changes as _add_surface_changes
+from .view import (
     display_changes,
     finding_id,
     group_changes_by_root_cause,
     root_cause_id_for_key,
 )
-from .reporter_contract_blocks import add_contract_context as _add_contract_context
 
-# Markdown rendering is a leaf; names stay importable here for compatibility.
-from .reporter_markdown import (
-    _ADDITION_ICON as _ADDITION_ICON,
-    _BREAKING_ICON as _BREAKING_ICON,
-    _BUMP_EMOJI as _BUMP_EMOJI,
-    _QUALITY_ICON as _QUALITY_ICON,
-    _RISK_ICON as _RISK_ICON,
-    _SOURCE_BREAK_ICON as _SOURCE_BREAK_ICON,
-    _fmt_size as _fmt_size,
-    _format_change_md as _format_change_md,
-    _section_severity_label as _section_severity_label,
-    entity_for_kind as entity_for_kind,
-    root_cause_evidence_lookup_for_changes as root_cause_evidence_lookup_for_changes,
-    root_cause_for_change as root_cause_for_change,
-    root_cause_lookup_for_changes as root_cause_lookup_for_changes,
-    to_stat as to_stat,
-)
-from .root_cause_evidence import (
-    root_cause_group_evidence,
-    scoped_only_evidence_lookup,
-    scoped_only_impact_group_lookup,
-)
-from .schemas import REPORT_SCHEMA_VERSION
+
+def to_stat(result: DiffResult, *, envelope: ReportEnvelope) -> str:
+    """One-line summary for CI gates.
+
+    *envelope* is the completed evaluation this line projects (ADR-061 gap C).
+    When it carries a severity gate, the line appends a ``gate: PASS|FAIL``
+    suffix reflecting the actual severity-aware exit code -- without it,
+    ``--stat`` output has historically bypassed severity handling entirely,
+    so the verdict label alone could misreport whether the run actually
+    blocks CI. The disposition note is read from the envelope's shared
+    document, not recomputed from the ledger.
+    """
+    from .change_inventory import render_change_inventory_json
+    from .document import ReportDocument
+    from .render_text import render_stat_document
+
+    # The envelope's own snapshot is authoritative for every result-derived
+    # field, so a caller's ``result`` cannot be mixed with the envelope's audit.
+    result = envelope.result
+    summary = summary_for(result, findings=envelope.findings)
+    outcome = project_outcome(result, envelope=envelope)
+    d: dict[str, object] = {
+        "verdict_label": outcome.verdict_label,
+        "summary": {
+            "breaking": summary.breaking,
+            "source_breaks": summary.source_breaks,
+            "risk_changes": summary.risk_count,
+            "compatible_additions": summary.compatible_additions,
+            "quality_issues": summary.quality_issues,
+            "informational": summary.informational,
+            "total_changes": summary.total_changes,
+            "change_inventory": render_change_inventory_json(summary.inventory),
+        },
+        "redundant_count": result.redundant_count,
+        # ADR-067 D3: even the one-line view carries the raw-versus-effective
+        # counts -- a fully-suppressed comparison must not read as "no
+        # changes".
+        "disposition_audit_note": render_disposition_audit_note(
+            disposition_audit_reusing_document(
+                result, envelope.severity_config, envelope.document
+            )
+        ),
+    }
+    # Codex review: oneline/`--stat` lacked the deployment digest.
+    if (_dig := getattr(result, "env_matrix_source_sha256", None)) is not None:
+        d["env_matrix_source_sha256"] = _dig
+    if outcome.gate is not None:
+        d["severity"] = {"exit_code": outcome.gate.exit_code}
+    return render_stat_document(ReportDocument.from_mapping(d))
 
 
 def to_stat_json(
@@ -176,7 +210,7 @@ def to_stat_json(
         d["analysis_assurance"] = block
         # Same persistence `add_contract_context` does for the full JSON path, which `--stat` bypasses entirely (Codex review).
         d["analysis_assurance_exit_contribution"] = exit_contribution
-    from .reporter_contract_blocks import add_effective_config_digest
+    from .contract_blocks import add_effective_config_digest
 
     add_effective_config_digest(
         d,
@@ -429,7 +463,7 @@ def disposition_ledger_blocks(result: DiffResult) -> dict[str, object]:
     # the release fan-out still carried only as stderr text. Same builder and
     # shape as the scalar JSON's `suppression_audit`; self-gating, absent
     # when no audit was attached (release schema 1.12).
-    from .reporter_contract_blocks import add_suppression_audit
+    from .contract_blocks import add_suppression_audit
 
     add_suppression_audit(blocks, result)
     return blocks
@@ -453,7 +487,7 @@ def to_json(
     # (report/report_modes.py): enforcing the ``leaf`` retirement only in
     # `service_render` left this one silently rendering a *full* report for
     # a retired mode (CodeRabbit review, PR #1284).
-    from .report.report_modes import normalize_report_mode
+    from .report_modes import normalize_report_mode
 
     report_mode, show_impact = normalize_report_mode(report_mode, show_impact)
     if report_mode == "root-cause":

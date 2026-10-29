@@ -63,7 +63,7 @@ from abicheck.policy.exit_decision_precedence import (
     resolve_release_exit_decision,
     resolve_scan_exit_decision,
 )
-from abicheck.reporter import to_json
+from abicheck.report.diff_report import to_json
 from abicheck.serialization import snapshot_to_json
 
 

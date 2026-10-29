@@ -16,7 +16,8 @@ from abicheck.checker import Change, ChangeKind, DiffResult, Verdict, compare
 from abicheck.model import AbiSnapshot, Function, Param, Variable
 from abicheck.policy.suppression.rules import SuppressionList
 from abicheck.policy_file import PolicyFile
-from abicheck.reporter import to_json, to_markdown, to_stat_json
+from abicheck.report.diff_report import to_json, to_stat_json
+from abicheck.report.dispatch_markdown import to_markdown
 from abicheck.serialization import load_snapshot, snapshot_from_dict
 from tests._report_test_helpers import stat_line
 

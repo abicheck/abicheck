@@ -26,7 +26,7 @@ from pathlib import Path
 import pytest
 
 import abicheck
-from abicheck.reporter import to_json
+from abicheck.report.diff_report import to_json
 from abicheck.workflows.compare.execute import run_compare_request
 from abicheck.workflows.compare_input_adapters import (
     compare_request_inputs,

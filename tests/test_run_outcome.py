@@ -968,11 +968,11 @@ class TestRunOutcomeSchemaValidation:
         removed full_run_outcome field)."""
         from pathlib import Path
 
-        from abicheck import reporter
         from abicheck.change_registry_types import Verdict
         from abicheck.checker_types import DiffResult
         from abicheck.model import AbiSnapshot
         from abicheck.policy.analysis_assurance import compute_analysis_assurance
+        from abicheck.report import diff_report as reporter
 
         old = AbiSnapshot(library="libfoo", version="1.0")
         new = AbiSnapshot(library="libfoo", version="1.1")
@@ -1006,11 +1006,11 @@ class TestRunOutcomeSchemaValidation:
     def test_fresh_compare_report_validates_against_the_published_schema_mirror(self):
         from pathlib import Path
 
-        from abicheck import reporter
         from abicheck.change_registry_types import Verdict
         from abicheck.checker_types import DiffResult
         from abicheck.model import AbiSnapshot
         from abicheck.policy.analysis_assurance import compute_analysis_assurance
+        from abicheck.report import diff_report as reporter
 
         old = AbiSnapshot(library="libfoo", version="1.0")
         new = AbiSnapshot(library="libfoo", version="1.1")

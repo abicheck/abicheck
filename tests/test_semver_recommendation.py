@@ -25,7 +25,8 @@ from abicheck.checker_policy import ChangeKind, Verdict
 from abicheck.checker_types import DiffResult
 from abicheck.model import AbiSnapshot, Function, Visibility
 from abicheck.model.change import Change
-from abicheck.reporter import to_json, to_markdown
+from abicheck.report.diff_report import to_json
+from abicheck.report.dispatch_markdown import to_markdown
 from abicheck.semver import (
     ReleaseRecommendation,
     ReleaseRecommendationState,

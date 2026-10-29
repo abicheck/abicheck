@@ -24,8 +24,8 @@ import pytest
 from abicheck.checker_policy import ChangeKind, Verdict
 from abicheck.checker_types import DiffResult
 from abicheck.model.change import Change
+from abicheck.report.dispatch_markdown import to_markdown
 from abicheck.report.kind_rollup import KIND_ROLLUP_THRESHOLD
-from abicheck.reporter import to_markdown
 
 # Non-gating kinds from each rolled-up section: deployment risk and quality.
 _KINDS = (

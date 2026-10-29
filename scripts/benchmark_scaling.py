@@ -174,7 +174,6 @@ from abicheck.elf_metadata import (  # noqa: E402
     SymbolBinding,
     SymbolType,
 )
-from abicheck.html_report import generate_html_report  # noqa: E402
 from abicheck.junit_report import to_junit_xml  # noqa: E402
 from abicheck.macho_metadata import (  # noqa: E402
     MachoExport,
@@ -193,6 +192,7 @@ from abicheck.model import (  # noqa: E402
 )
 from abicheck.pe_metadata import PeExport, PeMetadata  # noqa: E402
 from abicheck.policy.severity import categorize_changes  # noqa: E402
+from abicheck.report.html_compute import generate_html_report  # noqa: E402
 from abicheck.sarif import to_sarif_str  # noqa: E402
 from abicheck.serialization import (  # noqa: E402
     snapshot_from_dict,

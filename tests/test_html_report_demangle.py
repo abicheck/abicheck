@@ -5,7 +5,7 @@ architecture gate's per-test-module line cap (AGENTS.md's
 
 from __future__ import annotations
 
-from abicheck.html_report import generate_html_report
+from abicheck.report.html_compute import generate_html_report
 
 # ---------------------------------------------------------------------------
 # Real demangling through the actual Change dataclass (item 8 of the abicheck

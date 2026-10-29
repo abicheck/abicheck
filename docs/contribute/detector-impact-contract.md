@@ -119,7 +119,7 @@ A new detector should:
   on `ImpactAssessment` (ADR-052 Slice 7), but correctly computing either
   needs whole-`DiffResult` context (which findings elsewhere reference this
   one) a single `Change`'s read view can't see — the report-level caller
-  (`reporter_markdown.root_cause_lookup_for_changes`, and
+  (`report/root_cause_lookup.root_cause_lookup_for_changes`, and
   `impact_group_lookup_for_changes` for the correlator-derived
   `impact_group_id`) resolves them and passes the values into `assess_change`,
   not the detector. A new detector

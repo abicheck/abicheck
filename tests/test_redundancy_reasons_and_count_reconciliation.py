@@ -25,6 +25,7 @@ from abicheck.checker_types import DiffResult
 from abicheck.model.change import Change
 from abicheck.policy.disposition_close import ledger_for
 from abicheck.policy.disposition_types import Disposition
+from abicheck.report.diff_report import to_json
 from abicheck.report.disposition_audit import DispositionAudit
 from abicheck.report.redundancy_reasons import (
     redundancy_reason_counts,
@@ -32,7 +33,6 @@ from abicheck.report.redundancy_reasons import (
 )
 from abicheck.report.result_counts import held_out_non_gating
 from abicheck.report.section_notes import compute_redundancy_note
-from abicheck.reporter import to_json
 from tests.test_export_existence_reconciliation import _run
 
 _EXISTENCE = "folded into their symbol's existence finding"

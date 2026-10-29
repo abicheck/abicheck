@@ -207,7 +207,7 @@ character substitution still produce distinct files — needed because
 flat directory), starting from whatever the
 underlying `compare` run already produced and layering on the
 fields below. For a normal single-library `compare` (the common case),
-that starting shape is `abicheck/reporter.py`'s existing compare-report
+that starting shape is `abicheck/report/diff_report.py`'s existing compare-report
 shape (the one carrying `report_schema_version` — see
 [Output formats](../use/output-formats.md#json-schema-and-stability-guarantees) for that contract and
 `abicheck.schemas.current("compare")` for the version this build emits).

@@ -36,7 +36,7 @@ from _family_f2_routes import (
     parity_violations,
 )
 
-from abicheck.reporter import to_json
+from abicheck.report.diff_report import to_json
 from abicheck.serialization import snapshot_to_json
 from abicheck.service import CompareRequest, InputSpec
 from abicheck.workflows.compare.execute import run_compare_request

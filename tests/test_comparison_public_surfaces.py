@@ -28,7 +28,7 @@ import pytest
 import abicheck.policy.public_surface_closure as closure
 from abicheck.checker import compare
 from abicheck.policy.public_surface_query import ComparisonPublicSurfaces
-from abicheck.reporter import to_json
+from abicheck.report.diff_report import to_json
 from abicheck.workflows.compare_policy import compare_snapshots
 
 sys.path.insert(0, str(Path(__file__).parent))

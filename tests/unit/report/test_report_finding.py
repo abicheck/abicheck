@@ -28,12 +28,12 @@ from abicheck.junit_report import _is_failure, to_junit_xml
 from abicheck.policy.evaluate import effective_kind_sets
 from abicheck.policy.reclassify import effective_verdict_for_change
 from abicheck.policy.severity import classify_effective_change
+from abicheck.report.diff_report import to_json
 from abicheck.report.finding import (
     build_report_findings,
     findings_by_change_id,
     report_findings_for,
 )
-from abicheck.reporter import to_json
 
 _BREAKING = Change(ChangeKind.FUNC_REMOVED, "_Z3foov", "removed: foo")
 _POTENTIAL = Change(ChangeKind.ENUM_MEMBER_RENAMED, "Color::RED", "enum member renamed")

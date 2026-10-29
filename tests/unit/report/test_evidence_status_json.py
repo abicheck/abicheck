@@ -15,7 +15,7 @@ import json
 from abicheck.checker_policy import ChangeKind, Verdict
 from abicheck.checker_types import DiffResult
 from abicheck.model.change import Change
-from abicheck.reporter import to_json
+from abicheck.report.diff_report import to_json
 
 
 def _result(verdict: Verdict, changes: list[Change]) -> DiffResult:

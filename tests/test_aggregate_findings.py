@@ -1178,7 +1178,7 @@ class TestDisplayFilteredReports:
         ``impact`` takes its place so this still sweeps every supported
         mode rather than shrinking to two."""
         from abicheck.checker import Change, ChangeKind, DiffResult, Verdict
-        from abicheck.reporter import to_json
+        from abicheck.report.diff_report import to_json
 
         def _result() -> DiffResult:
             return DiffResult(

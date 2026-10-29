@@ -10,9 +10,9 @@ import pytest
 
 from abicheck.checker import compare
 from abicheck.model import AbiSnapshot
+from abicheck.report.diff_report import to_json, to_stat_json
 from abicheck.report.document import FrozenObject, ReportDocument
 from abicheck.report.render_json import render_json
-from abicheck.reporter import to_json, to_stat_json
 
 
 def test_document_takes_an_immutable_defensive_snapshot() -> None:

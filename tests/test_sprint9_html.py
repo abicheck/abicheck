@@ -7,7 +7,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from abicheck.html_report import generate_html_report
+from abicheck.report.html_compute import generate_html_report
 
 # ---------------------------------------------------------------------------
 # Helpers
