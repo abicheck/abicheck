@@ -33,7 +33,6 @@ Complex and bit-precise types are not joined, so they carry no fact.
 
 from __future__ import annotations
 
-import functools
 import os
 import re
 import shutil
@@ -41,7 +40,9 @@ import subprocess
 from typing import Any
 from xml.etree.ElementTree import Element
 
+from ....deadline import run_bounded
 from ....model.abi_fundamental import AbiFundamental, FundamentalEncoding
+from ....model.execution_cache import memoized
 from ....model.fact import Fact
 from ..ast_config import _resolve_compiler_binary
 from .vector_spellings import _ELEMENT_BYTES
@@ -108,7 +109,7 @@ _VECTOR_SPELLING = re.compile(
 _MAX_DEPTH = 16
 
 
-@functools.cache
+@memoized
 def plain_char_is_unsigned(cc_bin: str, option_tokens: tuple[str, ...]) -> bool | None:
     """Whether a plain ``char`` is unsigned under *cc_bin* with *option_tokens*.
 
@@ -118,9 +119,7 @@ def plain_char_is_unsigned(cc_bin: str, option_tokens: tuple[str, ...]) -> bool 
     """
     argv = [cc_bin, *option_tokens, "-dM", "-E", "-x", "c", os.devnull]
     try:
-        proc = subprocess.run(
-            argv, capture_output=True, text=True, timeout=60, check=False
-        )
+        proc = run_bounded(argv, timeout=60, capture_output=True, text=True)
     except (OSError, subprocess.SubprocessError):
         return None
     if proc.returncode != 0:
