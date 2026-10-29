@@ -69,7 +69,6 @@ if TYPE_CHECKING:
     from ...workflows.gate import (
         EffectiveGate,
         ReleaseAssuranceDecision,
-        SeverityConfig,
     )
 
 
@@ -494,7 +493,6 @@ def _finalize_compare_result(
     result: DiffResult,
     *,
     show_redundant: bool,
-    severity_config: SeverityConfig | None = None,
     contract_evaluation: bool = False,
 ) -> None:
     """Emit redundancy/filter/suppression output for a classified result.

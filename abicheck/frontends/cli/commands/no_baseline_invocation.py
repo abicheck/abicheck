@@ -502,7 +502,6 @@ def load_policy_documents(
     rejects."""
     return _load_suppression_and_policy(
         kwargs.get("suppress"),
-        kwargs.get("policy") or "strict_abi",
         kwargs.get("policy_file_path"),
         strict_suppressions=inv.suppression.strict_suppressions,
         require_justification=inv.suppression.require_justification,

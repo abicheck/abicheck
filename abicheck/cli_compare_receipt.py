@@ -350,7 +350,7 @@ def _release_summary_effective_config_block(
     from .frontends.cli.options.params import _load_suppression_and_policy
     from .workflows.gate import EffectiveGate
 
-    suppression, pf = _load_suppression_and_policy(suppress, policy, policy_file_path)
+    suppression, pf = _load_suppression_and_policy(suppress, policy_file_path)
     if pack_application is not None:
         from dataclasses import replace as _replace
 

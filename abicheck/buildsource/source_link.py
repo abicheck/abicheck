@@ -337,7 +337,6 @@ def _build_exact_index(exported: set[str]) -> dict[str, str]:
 
 def _match_export(
     export_sym: str,
-    exported: set[str],
     ctor_dtor_index: dict[str, list[str]],
     exact_index: dict[str, str],
 ) -> tuple[str, list[str]]:
@@ -1261,7 +1260,7 @@ def link_source_abi(
             if _is_duplicate_entity(entity, state):
                 continue
             state.public_decl_ids.append(entity.id)
-            _route_entity(entity, surface, state, exported)
+            _route_entity(entity, surface, state)
     surface.source_edges = source_edges
     surface.roots["public_header_declarations"] = sorted(set(state.public_decl_ids))
     # Second tier: rescue decls whose mangled name differs textually from the export
@@ -1414,10 +1413,8 @@ def relink_surface_exports(
     # every declaration (kept unconditionally here -- see rematch_declarations' own docstring for why).
     kept, mapping, matched, identity_to_qname = ctor_export_match.rematch_declarations(
         surface.reachable_declarations,
-        exported,
         export_index,
         exact_index,
-        ctor_dtor_owner_index,
         _match_export,
     )
     surface.reachable_declarations = kept
@@ -1558,7 +1555,6 @@ def _route_entity(
     entity: SourceEntity,
     surface: SourceAbiSurface,
     state: _LinkState,
-    exported: set[str],
 ) -> None:
     """Place one public entity into the right reachable bucket of the surface."""
     if entity.kind in _TYPE_KINDS:
@@ -1570,7 +1566,7 @@ def _route_entity(
     elif entity.kind in _INLINE_KINDS:
         surface.reachable_inline_bodies.append(entity)
     else:
-        _route_declaration(entity, surface, state, exported)
+        _route_declaration(entity, surface, state)
 
 
 def _route_type(
@@ -1622,7 +1618,6 @@ def _route_declaration(
     entity: SourceEntity,
     surface: SourceAbiSurface,
     state: _LinkState,
-    exported: set[str],
 ) -> None:
     """Record a declaration and map it to its exported binary symbol (D5).
 
@@ -1636,9 +1631,7 @@ def _route_declaration(
     second-tier pass has had its own chance to rescue it -- not here (PR
     #930, Codex review) -- so it is always appended below, matched or not."""
     export_sym = entity.mangled_name or entity.qualified_name
-    primary, variants = _match_export(
-        export_sym, exported, state.export_index, state.exact_index
-    )
+    primary, variants = _match_export(export_sym, state.export_index, state.exact_index)
     surface.reachable_declarations.append(entity)
     key = entity.identity()
     if not key:

@@ -507,7 +507,7 @@ class TestReleaseOutputDirSummaryCarriesDigest:
     def test_output_dir_summary_carries_digest(self, tmp_path):
         from abicheck.frontends.cli.release_summary import _write_release_summary_file
 
-        _write_release_summary_file(tmp_path, "NO_CHANGE", [], [], [], {}, {})
+        _write_release_summary_file(tmp_path, "NO_CHANGE", [], [])
         data = json.loads((tmp_path / "summary.json").read_text())
         assert data["effective_config_digest"].startswith("sha256:")
         assert data["effective_config_fields"]["_tier"] == "baseline"
@@ -520,7 +520,7 @@ class TestReleaseOutputDirSummaryCarriesDigest:
 
         severity = resolve_severity_config("strict")
         _write_release_summary_file(
-            tmp_path, "NO_CHANGE", [], [], [], {}, {}, severity_config=severity
+            tmp_path, "NO_CHANGE", [], [], severity_config=severity
         )
         output_dir_data = json.loads((tmp_path / "summary.json").read_text())
         primary_data = json.loads(
