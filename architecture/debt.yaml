@@ -333,7 +333,7 @@
     },
     {
       "path": "abicheck/cli_options.py",
-      "baseline_lines": 1528,
+      "baseline_lines": 1114,
       "target": "workflows-or-frontends",
       "rule": "no_growth",
       "disposition": "migrate",
@@ -1202,7 +1202,7 @@
     },
     {
       "path": "tests/test_compile_context_parity.py",
-      "baseline_lines": 1614,
+      "baseline_lines": 1607,
       "target": "tests/unit-or-contract ownership matching production migration",
       "rule": "no_growth",
       "disposition": "migrate",

@@ -46,7 +46,7 @@ from pathlib import Path
 import yaml
 
 from abicheck.action_config_overlay import apply_sources_root_config_blocks
-from abicheck.cli_options import merge_compile_config
+from abicheck.workflows.compile_config import merge_compile_config
 from abicheck.dry_run_estimate import CompileContext
 
 
@@ -203,7 +203,7 @@ class TestFrontendContextNullOverwriteRegression:
     ``_COMPILE_SOURCES_WINS_KEYS`` field, not an
     ``_COMPILE_EMPTY_STRING_UNSET_KEYS`` one (see the sibling class above),
     but the real resolver's precedence is the identical falsy-is-unset
-    shape: ``cli_options.merge_compile_config``'s ``frontend_context =
+    shape: ``workflows.compile_config.merge_compile_config``'s ``frontend_context =
     cli_ctx.frontend_context if frontend_context_explicit else
     (bc.compile_frontend_context or cli_ctx.frontend_context)`` -- a falsy
     sources-root value falls back to the checkout value. Before the fix,

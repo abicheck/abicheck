@@ -42,7 +42,7 @@ from abicheck.action_config_overlay import (
     strip_untrusted_execution_keys,
     validate_base_config,
 )
-from abicheck.cli_options import merge_compile_config
+from abicheck.workflows.compile_config import merge_compile_config
 from abicheck.dry_run_estimate import CompileContext
 
 
@@ -583,7 +583,7 @@ class TestApplySourcesRootConfigBlocksCompileMerge:
     being REPLACED wholesale by ``apply_sources_root_config_blocks``, the
     same treatment correct for ``build:``/``sources:``/``source:``/
     ``debug:`` above but wrong for ``compile:`` specifically, since
-    ``cli_options.merge_compile_config`` folds a sources-root document's
+    ``workflows.compile_config.merge_compile_config`` folds a sources-root document's
     ``compile:`` block onto an ALREADY-resolved checkout-config context,
     field by field, rather than selecting one document's block exclusively.
     These are direct unit tests for that per-field merge, at the raw
@@ -703,7 +703,7 @@ class TestApplySourcesRootConfigBlocksCompileMerge:
         ``frontend_context`` (below), but ``nostdinc``'s actual two-call
         shape (``cli_compare_helpers.py``'s ``nostdinc_explicit=
         _nostdinc_explicit or compile_context.nostdinc`` feeding
-        ``cli_options.merge_compile_config``) combines the checkout and
+        ``workflows.compile_config.merge_compile_config``) combines the checkout and
         sources-root values with OR semantics: an already-``True`` value
         from EITHER document always survives. This parametrization is the
         full 2x2 truth table verified directly against the real
@@ -790,7 +790,7 @@ class TestApplySourcesRootConfigBlocksCompileMerge:
         "checkout already set this key blocks sources" default rule, which
         is right for a genuinely *unset* checkout value but wrong for
         ``frontend``'s own semantic-default sentinel ``"auto"`` -- the real
-        ``cli_options.merge_compile_config`` checks for the literal string
+        ``workflows.compile_config.merge_compile_config`` checks for the literal string
         ``"auto"`` explicitly (``cli_ctx.frontend != "auto"``), so a
         checkout ``compile.frontend: auto`` must be treated exactly like an
         absent key: the sources-root document's value should win. This

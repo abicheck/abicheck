@@ -116,7 +116,7 @@ sources-root ``.abicheck.yml``'s own ``build:``/``sources:`` settings
 moment ``build-config`` was omitted. ``compile:`` (for a genuinely
 single-sided caller) is promoted too, but -- PR #1222 fourth round, Codex
 review -- as a real per-field MERGE, not a wholesale block replace:
-``cli_options.merge_compile_config`` folds a sources-root document's
+``workflows.compile_config.merge_compile_config`` folds a sources-root document's
 ``compile:`` on top of an ALREADY-resolved checkout-config-derived context,
 field by field, so replacing the whole block silently drops any
 checkout-only ``compile:`` setting the sources-root document doesn't happen
@@ -545,7 +545,7 @@ def apply_sources_root_config_blocks(
     *merge_compile* selects which of the two real ``compile:`` resolution
     shapes a ``"compile"`` entry in *blocks* should reproduce for the
     *particular command* the caller is building an overlay for --
-    ``cli_options.merge_compile_config`` is NOT one shape for every caller
+    ``workflows.compile_config.merge_compile_config`` is NOT one shape for every caller
     (Codex review, fresh evidence, PR #1222 fourth round, second finding on
     this same fix): a bare ``dump``/``scan --against`` invocation resolves
     ``compile:`` with exactly ONE ``merge_compile_config`` call, where

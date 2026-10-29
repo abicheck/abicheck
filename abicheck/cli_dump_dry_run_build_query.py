@@ -1124,7 +1124,7 @@ def add_build_query_dry_run_section(
 
     # An *explicit* --config is validated unconditionally by `dump_cmd`
     # itself, before this function is ever called: `resolve_dump_compile_
-    # context()`/`cli_options.merge_compile_config()` -- the L2 compile-
+    # context()`/`workflows.compile_config.merge_compile_config()` -- the L2 compile-
     # context resolver every `dump` invocation runs, regardless of build-
     # source collection, and unconditionally before the `--dry-run` branch
     # -- already raises `click.UsageError` for a malformed *explicit*

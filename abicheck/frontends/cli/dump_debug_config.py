@@ -62,7 +62,7 @@ def resolve_dump_debug_config(
 ) -> DumpDebugConfig:
     """Resolve ``dump``'s debug-resolution config from ``.abicheck.yml``.
 
-    Same discovery precedence :func:`abicheck.cli_options.merge_compile_config`
+    Same discovery precedence :func:`abicheck.workflows.compile_config.merge_compile_config`
     uses for the ``compile:`` block: an explicit ``--config``, else the
     ``.abicheck.yml`` auto-discovered at the ``--sources`` tree root. A
     missing/unparseable config resolves to every field's built-in default --

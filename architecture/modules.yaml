@@ -323,6 +323,7 @@
         "abicheck/header_only_dump.py",
         "abicheck/service_header_graph_attach.py",
         "abicheck/dry_run_estimate.py",
+        "abicheck/config_paths.py",
         "abicheck/stack_checker.py",
         "abicheck/pack_application.py"
       ]
@@ -394,7 +395,6 @@
         "abicheck/cli_resolve.py",
         "abicheck/cli_stack.py",
         "abicheck/dry_run.py",
-        "abicheck/config_paths.py",
         "abicheck/__main__.py",
         "abicheck/service.py"
       ]

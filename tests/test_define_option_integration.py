@@ -436,7 +436,7 @@ class TestTypedApiParity:
     """ADR-074 through the *typed Python API*, not only the CLI.
 
     AGENTS.md requires a change to be proven through every public workflow,
-    and this one was not: `cli_options.merge_compile_config` renders the
+    and this one was not: `workflows.compile_config.merge_compile_config` renders the
     logical `defines` into the frontend argv tail, and that is a CLI
     function. A caller constructing
     `InputSpec(compile=CompileContext(defines=(...)))` therefore had its

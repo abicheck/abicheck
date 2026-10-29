@@ -24,7 +24,7 @@ process (a Clang/GCC plugin, or an ``-Xclang``-smuggled equivalent) have no
 legitimate use case for header-ABI extraction, so they are rejected outright
 in ``compile.options`` regardless of whether the surrounding
 ``.abicheck.yml`` is trusted (an explicit ``--config``) or auto-discovered
--- unlike ``compile.compiler`` (see ``cli_options.merge_compile_config``),
+-- unlike ``compile.compiler`` (see ``workflows.compile_config.merge_compile_config``),
 this isn't a trust-tier question: nothing downstream needs the ability at
 all. ``build_config._safe_compile_atom`` already rejects whitespace inside
 ONE list item (blocking a single ``"-Xclang -load evil.so"`` atom), but a

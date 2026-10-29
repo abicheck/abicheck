@@ -20,7 +20,7 @@ Split out of ``action_config_overlay.py`` (ADR-061's new-file line ceiling)
 rather than trimmed to fit -- see that module's own docstring for the full
 trust-boundary context this rule set lives inside; this file holds only the
 ``compile:``-specific per-field precedence, reproducing
-``cli_options.merge_compile_config``'s own two-stage (checkout, then
+``workflows.compile_config.merge_compile_config``'s own two-stage (checkout, then
 sources-root) fold over the raw ``compile:`` mapping rather than a real
 ``CompileContext`` round-trip (see :func:`merge_compile_block`'s own
 docstring for why).
@@ -28,9 +28,9 @@ docstring for why).
 
 from __future__ import annotations
 
-from .cli_options import merge_compile_std_fields
+from .workflows.compile_config import merge_compile_std_fields
 
-#: ``compile:`` sub-keys that ``cli_options.merge_compile_config`` never
+#: ``compile:`` sub-keys that ``workflows.compile_config.merge_compile_config`` never
 #: reads from a *second*, ``sources=``-supplied document at all -- each is
 #: consumed exactly once, from the single already-resolved project config
 #: (``resolved_cfg``/``project_cfg`` in ``cli_compare_helpers.py``/
@@ -68,7 +68,7 @@ _COMPILE_SOURCES_WINS_KEYS = frozenset({"frontend_context"})
 #: ``compile.nostdinc: false`` silently clear a checkout ``compile.
 #: nostdinc: true``). ``nostdinc``'s real two-call shape is
 #: ``cli_compare_helpers.py``'s ``nostdinc_explicit=_nostdinc_explicit or
-#: compile_context.nostdinc`` feeding ``cli_options.merge_compile_config``'s
+#: compile_context.nostdinc`` feeding ``workflows.compile_config.merge_compile_config``'s
 #: ``nostdinc = cli_ctx.nostdinc if nostdinc_explicit else bool(bc.
 #: compile_nostdinc)`` for the second (sources-root) fold, where
 #: ``cli_ctx`` is the already-resolved checkout-stage context and ``bc`` is
@@ -158,7 +158,7 @@ def _lower_config_str(value: object) -> object:
 #: than raw argv tokens, so these stay legible document keys instead of
 #: ``compile.options`` token soup. Correct only when at most one document
 #: sets any of ``std``/``defines``/``options`` -- see
-#: :func:`cli_options.merge_compile_std_fields` (PR #1222).
+#: :func:`workflows.compile_config.merge_compile_std_fields` (PR #1222).
 _COMPILE_SOURCES_FIRST_LIST_KEYS = frozenset({"defines", "options"})
 _COMPILE_CHECKOUT_FIRST_LIST_KEYS = frozenset({"include_dirs"})
 
@@ -167,7 +167,7 @@ def merge_compile_block(
     checkout_blk: dict[str, object], sources_blk: dict[str, object]
 ) -> dict[str, object]:
     """Merge a checkout-root and a sources-root ``compile:`` block the way
-    ``cli_options.merge_compile_config`` folds a ``sources=``-supplied
+    ``workflows.compile_config.merge_compile_config`` folds a ``sources=``-supplied
     document on top of an already-resolved (CLI + checkout-config)
     ``CompileContext`` -- see that function's own precedence for each
     field, and the key-bucket constants above for the exact rule

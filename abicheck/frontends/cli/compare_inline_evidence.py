@@ -31,7 +31,7 @@ side's ``InputSpec``:
 * **that config's passive settings** -- ``scope.exclude_headers`` and
   ``build.compile_db_filter`` when the run states none;
 * **the tree's ``compile:`` block**, merged over the run's compile context
-  with the CLI winning (``cli_options.merge_compile_config``);
+  with the CLI winning (``workflows.compile_config.merge_compile_config``);
 * **``dump``'s execution plan** -- the ``-p`` compile-database match, the L2
   seed run at the collect mode, the L4 replay on the folded compiler, and
   the changed-path seed;
@@ -221,14 +221,11 @@ def _side(
         return dataclasses.replace(
             side, sources=_raw(sources), build_info=_raw(build_info)
         )
-    from ...cli_options import (
-        LANG_DEFAULT,
-        apply_compile_config_env_toggles,
-        merge_compile_config,
-    )
+    from ...cli_options import LANG_DEFAULT, apply_compile_config_env_toggles
     from ...service_compare_evidence import SideEvidence, dump_cli_compile_db_path
     from ...workflows.artifact.dump_execution_options import DumpExecutionOptions
     from ...workflows.artifact.resolve import reject_hybrid_source_frontend
+    from ...workflows.compile_config import merge_compile_config
     from .dump_debug_config import resolve_dump_project_config
 
     project = resolve_dump_project_config(
