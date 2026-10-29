@@ -50,14 +50,16 @@ from __future__ import annotations
 import logging
 from collections.abc import Callable, Sequence
 from concurrent.futures import as_completed
-from dataclasses import dataclass, replace as _dataclasses_replace
+from dataclasses import dataclass, field, replace as _dataclasses_replace
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import abicheck.deadline as deadline
 
 from ...dump_manifest import DumpManifest, IncludeEntry, TranslationUnit
 from ...model import EnumType, Function, RecordType, Variable
+from ...model.abi_fundamental import AbiFundamental
+from ...model.fact import Fact
 from ...model.identity import EntityId
 from ...model.semantic_ir import SemanticIR
 from ...process_resources import BudgetedExecutor
@@ -200,6 +202,7 @@ def run_tu_fragment(
         typedefs_qualified=fields.typedefs_qualified,
         constants=fields.constants,
         typedef_entity_ids=fields.typedef_entity_ids,
+        typedef_abi_facts=fields.typedef_abi_facts,
         constant_entity_ids=fields.constant_entity_ids,
         ast_producer=producer,
         ast_toolchain=_parser_ast_toolchain(parser),
@@ -549,6 +552,9 @@ class ElfHeaderAstResult:
     typedef_entity_ids: dict[str, EntityId]
     constant_entity_ids: dict[str, EntityId]
     ast_producer: str
+    typedef_abi_facts: dict[str, Fact[AbiFundamental]] = field(
+        default_factory=dict, kw_only=True
+    )
     ast_toolchain: dict[str, str]
     ast_fallback_reason: str | None
     ast_toolchain_supported: bool | None
@@ -565,6 +571,15 @@ class ElfHeaderAstResult:
     # `extract/semantic_normalizer.py`'s own docstring for each slice's scope.
     semantic_ir: SemanticIR | None = None
     preprocessor_hidden: dict[str, tuple[str, ...]] | None = None
+
+    def typedef_snapshot_fields(self) -> dict[str, Any]:
+        """The typedef maps a snapshot carries, under their snapshot field names."""
+        return {
+            "typedefs": self.typedefs,
+            "typedefs_qualified": self.typedefs_qualified,
+            "typedef_entity_ids": self.typedef_entity_ids,
+            "typedef_abi_facts": self.typedef_abi_facts,
+        }
 
 
 def resolve_header_ast_result(
@@ -690,6 +705,7 @@ def resolve_header_ast_result(
             typedefs_qualified=fragment.typedefs_qualified,
             constants=fragment.constants,
             typedef_entity_ids=fragment.typedef_entity_ids,
+            typedef_abi_facts=fragment.typedef_abi_facts,
             constant_entity_ids=fragment.constant_entity_ids,
             ast_producer=fragment.ast_producer,
             ast_toolchain=fragment.ast_toolchain,
@@ -711,6 +727,7 @@ def resolve_header_ast_result(
         typedefs_qualified=merged.typedefs_qualified,
         constants=merged.constants,
         typedef_entity_ids=merged.typedef_entity_ids,
+        typedef_abi_facts=merged.typedef_abi_facts,
         constant_entity_ids=merged.constant_entity_ids,
         ast_producer=merged.ast_producer,
         ast_toolchain=merged.ast_toolchain,

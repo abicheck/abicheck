@@ -101,6 +101,7 @@ PROVENANCE_PER_FINDING: frozenset[str] = frozenset()
 #: any kind yet). See the module docstring.
 PROVENANCE_UNVERIFIED = frozenset(
     {
+        "abi_equivalent_type_changed",
         "abi_relevant_build_flag_changed",
         "abi_surface_explosion",
         "abi_tag_changed",

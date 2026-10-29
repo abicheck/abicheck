@@ -136,6 +136,18 @@ _DECLARATION_PROJECTION = (
     "own field, which H1 ablates; no producer persists this fact any more"
 )
 
+#: Schema v69's ABI facts (model/abi_fundamental.py) are recorded only for a
+#: fundamental-typed slot, and the H1 corpus has no operand pair whose slot
+#: spelling differs while the slot is ABI-equal. The rule itself is covered by
+#: tests/test_abi_fundamental.py and the retype refinement by
+#: tests/test_abi_equivalent_retype.py.
+_ABI_FACT_UNCOVERED = (
+    "persisted Fact[AbiFundamental] sibling added in schema v69; the H1 corpus "
+    "has no fundamental-typed slot pair whose spelling differs while the ABI "
+    "agrees, so the ablation cannot reach it. Covered by tests/test_abi_fundamental.py "
+    "and tests/test_abi_equivalent_retype.py"
+)
+
 UNCOVERED: dict[str, str] = {
     "MachoMetadata.weak_dependent_libs_fact": (
         "read only by the release dependency graph's Mach-O facts "
@@ -201,6 +213,16 @@ UNCOVERED: dict[str, str] = {
     "CanonicalEntity.is_extern_c": _DECLARATION_PROJECTION,
     "CanonicalEntity.is_hidden_friend": _DECLARATION_PROJECTION,
     "CanonicalEntity.is_inline": _DECLARATION_PROJECTION,
+    "Param.type_abi_fact": _ABI_FACT_UNCOVERED,
+    "TypeField.type_abi_fact": _ABI_FACT_UNCOVERED,
+    "Variable.type_abi_fact": _ABI_FACT_UNCOVERED,
+    "Function.return_type_abi_fact": _ABI_FACT_UNCOVERED,
+    "AbiSnapshot.typedef_abi_facts": (
+        "persisted typedef-target Fact[AbiFundamental] map (schema v69); the H1 "
+        "corpus has no typedef whose target spelling differs while the ABI agrees, "
+        "so the ablation cannot reach it. Covered by tests/test_abi_equivalent_retype.py "
+        "and tests/test_abi_retype_lanes.py"
+    ),
     "Function.is_inline_fact": (
         "persisted Fact[bool] sibling added in schema v60; the H1 corpus has no "
         "inline-linkage pair that differs across its operands, so the ablation "

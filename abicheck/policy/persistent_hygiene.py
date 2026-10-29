@@ -47,6 +47,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from ..model.change_catalog.kind_variants import expand_variant_overrides
 from .classification import (
     excluded_from_verdict_as_persistent_hygiene,
     policy_kind_sets,
@@ -125,7 +126,8 @@ def policy_governs(change: Change, policy_file: PolicyFile | None) -> bool:
     """
     if policy_file is None:
         return False
-    if change.kind in (getattr(policy_file, "overrides", {}) or {}):
+    overrides = expand_variant_overrides(getattr(policy_file, "overrides", None))
+    if change.kind in overrides:
         return True
     rules = getattr(policy_file, "reclassify", ()) or ()
     return any(

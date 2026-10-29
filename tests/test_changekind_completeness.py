@@ -30,6 +30,7 @@ from abicheck.model import (
 # corresponding scenario) must be updated – the meta-test below will fail
 # until that happens.
 ASSERTED_CHANGE_KINDS: set[ChangeKind] = {
+    ChangeKind.ABI_EQUIVALENT_TYPE_CHANGED,
     ChangeKind.ABI_RELEVANT_BUILD_FLAG_CHANGED,
     ChangeKind.ANON_FIELD_CHANGED,
     ChangeKind.BASE_CLASS_POSITION_CHANGED,

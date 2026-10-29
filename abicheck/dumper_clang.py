@@ -86,6 +86,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from .extract.builtin_abi import BuiltinAbi, builtin_type_fact
 from .extract.declaration_provenance import build_public_set
 from .extract.dependency_exclusion import active_dependency_predicate
 from .extract.headers.clang import (
@@ -137,6 +138,8 @@ from .extract.headers.clang.qualifiers import (  # noqa: F401  (compatibility re
     _last_top_level_ptr_end,
     _record_kind,
     _reduce_opaque_kind_set,
+    clang_exception_spec as _clang_exception_spec,
+    is_noexcept_qualifier as _is_noexcept_qualifier,
 )
 from .extract.headers.clang.redeclarations import RedeclarationIdentity
 from .extract.headers.clang.return_type import return_type as _clang_return_type
@@ -145,6 +148,10 @@ from .extract.headers.clang.template_param_indexes import (
     build_template_param_indexes,
 )
 from .extract.headers.clang.templates import _specialization_spelling
+from .extract.headers.clang.typedefs import (
+    typedef_abi_facts as _typedef_abi_facts,
+    typedef_underlying as _typedef_underlying,
+)
 from .extract.headers.scope_segments import record_segment as _record_scope_segment
 from .extract.surface_fact_producers import header_ast_surface_facts
 from .model import (
@@ -158,6 +165,7 @@ from .model import (
     Variable,
     Visibility,
 )
+from .model.abi_fundamental import AbiFundamental
 from .model.declaration_headers import attributed
 from .model.identity import (
     EntityId,
@@ -190,25 +198,9 @@ def _return_type(qualtype: str) -> str:
     return _clang_return_type(qualtype)
 
 
-def _is_noexcept_qualifier(quals: str) -> bool:
-    """See ``extract.headers.clang.functions._is_noexcept_qualifier`` (the
-    canonical implementation this delegates to) for the full contract."""
-    return _clang_functions._is_noexcept_qualifier(quals)
-
-
-def _clang_exception_spec(quals: str) -> str:
-    """See ``extract.headers.clang.functions._clang_exception_spec`` (the
-    canonical implementation this delegates to) for the full contract."""
-    return _clang_functions._clang_exception_spec(quals)
-
-
-def _clang_deprecated_message(node: dict[str, Any]) -> str | None:
-    """Deprecation message for *node*, or ``None`` if not deprecated.
-
-    See ``extract.headers.clang.context.clang_deprecated_message`` (the
-    canonical implementation this delegates to) for the full contract.
-    """
-    return _clang_context.clang_deprecated_message(node)
+# Deprecation message for a node, or None: see
+# extract.headers.clang.context.clang_deprecated_message for the contract.
+_clang_deprecated_message = _clang_context.clang_deprecated_message
 
 
 def _clang_var_alignment_bits(node: dict[str, Any]) -> int | None:
@@ -309,6 +301,8 @@ class _ClangAstParser:
     walk (in ``__init__``) categorizes the public declarations; the ``parse_*``
     methods are cheap transforms over that cached walk.
     """
+
+    builtin_abi: BuiltinAbi | None = None
 
     def __init__(
         self,
@@ -946,6 +940,7 @@ class _ClangAstParser:
         """
         return _clang_functions.parse_functions(
             self._functions,
+            builtin_abi=self.builtin_abi,
             exported_dynamic=self._exported_dynamic,
             exported_static=self._exported_static,
             virtual_mangled_names=self._virtual_mangled_names(),
@@ -1042,6 +1037,9 @@ class _ClangAstParser:
                     name=name,
                     mangled=mangled,
                     type=type_name,
+                    type_abi_fact=builtin_type_fact(
+                        _clang_context.qualtype_desugared(node), self.builtin_abi
+                    ),
                     visibility=self._visibility(mangled, name),
                     # See model/surface_facts.py: the export lookup is one
                     # fact, the header declaration another. ``None`` for a
@@ -1159,6 +1157,7 @@ class _ClangAstParser:
         return _clang_records.parse_types(
             self._records,
             self._typedefs,
+            builtin_abi=self.builtin_abi,
             pub_header_segs=self._pub_header_segs,
             pub_dir_segs=self._pub_dir_segs,
             have_public_set=self._have_public_set,
@@ -1276,6 +1275,9 @@ class _ClangAstParser:
             out[self._qualified(entry)] = entity_id_for_typedef(entry.scope_path, name)
         return out
 
+    def parse_typedef_abi_facts(self) -> dict[str, Fact[AbiFundamental]]:
+        return _typedef_abi_facts(self)
+
 
 # ─── pure node helpers (module-level so they are unit-testable on their own) ──
 
@@ -1313,19 +1315,13 @@ def _node_file(node: dict[str, Any], current: str) -> str:
     return current
 
 
-def _node_line(node: dict[str, Any]) -> int:
-    """See ``extract.headers.clang.context.node_line``."""
-    return _clang_context.node_line(node)
+_node_line = _clang_context.node_line
 
 
-def _is_builtin_file(file: str) -> bool:
-    return _clang_context.is_builtin_file(file)
+_is_builtin_file = _clang_context.is_builtin_file
 
 
-def _default_record_access(node: dict[str, Any]) -> str:
-    """See ``extract.headers.clang.context.default_record_access`` (the
-    canonical implementation this delegates to) for the full contract."""
-    return _clang_context.default_record_access(node)
+_default_record_access = _clang_context.default_record_access
 
 
 def _evaluated_int_value(node: dict[str, Any]) -> int | None:
@@ -1391,11 +1387,3 @@ def _owned_tag_id(typedef_node: dict[str, Any]) -> str:
     """See ``extract.headers.clang.records._owned_tag_id`` (the canonical
     implementation this delegates to) for the full contract."""
     return _clang_records._owned_tag_id(typedef_node)
-
-
-def _typedef_underlying(node: dict[str, Any]) -> str:
-    """The written underlying type of a typedef/alias (``qualType``, then sugar)."""
-    type_obj = node.get("type")
-    if not isinstance(type_obj, dict):
-        return ""
-    return str(type_obj.get("qualType") or type_obj.get("desugaredQualType") or "")

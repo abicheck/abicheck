@@ -303,7 +303,7 @@ def missing_contract_gate_contribution(severity_config: Any, blocks: bool) -> in
     """What a missing-contract label contributes to the exit code.
 
     One derivation for the CLI and the MCP tool, mirroring the floor
-    ``_scoped_exit_code`` applies in each: under a severity gate it is
+    ``resolve_scoped_exit_code`` applies in each: under a severity gate it is
     ``severity.missing_contract_exit_code``; under the legacy scheme a
     missing required symbol/version/entrypoint is a hard break, so it is the
     same ``4`` that scheme maps ``BREAKING`` to. ``0`` when the resolved gate

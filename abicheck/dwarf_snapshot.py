@@ -28,6 +28,7 @@ included (DWARF × ELF intersection).
 from __future__ import annotations
 
 import collections
+import dataclasses
 import logging
 from dataclasses import dataclass, replace
 from pathlib import Path
@@ -56,6 +57,7 @@ from .dwarf_utils import (
 )
 from .elf_symbol_filter import is_abi_relevant_elf_symbol
 from .extract import dwarf_vtable_completeness as _dvc
+from .extract.dwarf_abi_fact import dwarf_type_abi_fact as _type_abi_fact
 from .extract.dwarf_decl_file import decl_header_location
 from .extract.dwarf_records import (
     access_from_dwarf as _access_from_dwarf,
@@ -73,6 +75,7 @@ from .extract.dwarf_scope import (
     variable_entity_id as _dwarf_variable_entity_id,
 )
 from .extract.dwarf_subtree_index import open_indexed_dwarf_info
+from .extract.dwarf_type_names import strip_type_decorators as _strip_type_decorators
 from .extract.dwarf_vptr_resolution import finalize_vptr_offsets
 from .extract.surface_fact_producers import debug_info_surface_facts
 from .model import (
@@ -91,6 +94,7 @@ from .model import (
     is_cxx_runtime_library,
     record_layout_facts,
 )
+from .model.abi_fundamental import AbiFundamental
 from .model.export_index import ExportMatch, match_export
 from .model.identity import (
     EntityId,
@@ -124,6 +128,10 @@ class DwarfDeclarations:
     enums: list[EnumType]
     typedefs: dict[str, str]
     typedef_entity_ids: dict[str, EntityId]
+    #: Schema v69: each typedef's target ABI fact (see AbiSnapshot.typedef_abi_facts).
+    typedef_abi_facts: dict[str, Fact[AbiFundamental]] = dataclasses.field(
+        default_factory=dict
+    )
 
 
 def extract_dwarf_declarations(
@@ -155,6 +163,7 @@ def extract_dwarf_declarations(
         enums=builder.enums,
         typedefs=builder.typedefs,
         typedef_entity_ids=builder.typedef_entity_ids,
+        typedef_abi_facts=builder.typedef_abi_facts,
     )
 
 
@@ -244,6 +253,8 @@ class _DwarfSnapshotBuilder:
         # counterpart to constant_entity_ids: constexpr constants are a
         # header-AST-only concept DWARF doesn't carry.
         self.typedef_entity_ids: dict[str, EntityId] = {}
+        # Schema v69: each typedef's target ABI fact, first wins like typedefs.
+        self.typedef_abi_facts: dict[str, Fact[AbiFundamental]] = {}
 
         # Type resolution cache: (cu_offset, die_offset) -> (name, byte_size)
         self._type_cache: dict[tuple[int, int], tuple[str, int]] = {}
@@ -654,6 +665,7 @@ class _DwarfSnapshotBuilder:
             name=qualified_name if scope else name,
             mangled=mangled,
             return_type=ret_type,
+            return_type_abi_fact=_type_abi_fact(die, CU),
             params=params,
             visibility=visibility,
             **debug_info_surface_facts(exported=exported),
@@ -719,6 +731,7 @@ class _DwarfSnapshotBuilder:
             kind=kind,
             pointer_depth=ptr_depth,
             is_va_list_fact=Fact.unsupported(),
+            type_abi_fact=_type_abi_fact(die, CU),
         )
 
     # -------------------------------------------------------------------
@@ -767,6 +780,7 @@ class _DwarfSnapshotBuilder:
                 visibility=Visibility.PUBLIC,
                 **debug_info_surface_facts(exported=var_export),
                 is_const=is_const,
+                type_abi_fact=_type_abi_fact(die, CU),
                 # ADR-063 Phase 2 -- see dwarf_scope.variable_entity_id.
                 entity_id=_dwarf_variable_entity_id(
                     scope_path, name, mangled, bool(linkage_name)
@@ -1190,6 +1204,7 @@ class _DwarfSnapshotBuilder:
                 bitfield_bits=bitfield_bits,
                 is_const=is_const,
                 is_volatile=is_volatile,
+                type_abi_fact=_type_abi_fact(die, CU),
                 access=access,
                 # ADR-063 Phase 5 (eighth batch): DWARF resolves const/
                 # volatile from the member's own type DIE (above), but has
@@ -1454,6 +1469,10 @@ class _DwarfSnapshotBuilder:
         # dumper_castxml.py's/dumper_clang.py's parse_typedef_entity_ids).
         self.typedef_entity_ids[qualified] = entity_id_for_typedef(scope_path, name)
 
+        if qualified not in self.typedef_abi_facts:
+            target_fact = _type_abi_fact(die, CU)
+            if target_fact is not None:
+                self.typedef_abi_facts[qualified] = target_fact
         if qualified in self.typedefs:
             return  # first wins
 
@@ -1678,6 +1697,9 @@ class _DwarfSnapshotBuilder:
         if type_die.tag in (
             "DW_TAG_const_type",
             "DW_TAG_volatile_type",
+            # restrict is a qualifier of the pointer, not a level of indirection:
+            # `int *restrict` is depth 1 (castxml and clang agree).
+            "DW_TAG_restrict_type",
             "DW_TAG_typedef",
         ):
             return self._count_pointer_depth(type_die, CU, depth + 1)
@@ -1687,31 +1709,3 @@ class _DwarfSnapshotBuilder:
 # ---------------------------------------------------------------------------
 # Utilities
 # ---------------------------------------------------------------------------
-
-
-def _strip_type_decorators(type_name: str) -> str:
-    """Strip pointer/reference/const/volatile/array suffixes from a type name.
-
-    Used for reachability analysis — we need the base type name to follow
-    type references transitively.
-    """
-    name = type_name.strip()
-    # Remove trailing array brackets
-    while name.endswith("[]"):
-        name = name[:-2].strip()
-    # Remove trailing pointer/reference markers
-    while name.endswith(("*", "&", "&&")):
-        if name.endswith("&&"):
-            name = name[:-2].strip()
-        else:
-            name = name[:-1].strip()
-    # Remove leading qualifiers (loop until none remain)
-    _qualifiers = ("const ", "volatile ", "restrict ")
-    changed = True
-    while changed:
-        changed = False
-        for prefix in _qualifiers:
-            if name.startswith(prefix):
-                name = name[len(prefix) :]
-                changed = True
-    return name.strip()

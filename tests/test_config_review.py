@@ -726,7 +726,7 @@ class TestCompareReleaseExitFloors:
     def test_error_verdict_floors_severity_exit(self):
         import pytest
 
-        from abicheck.frontends.cli.release_exit import _exit_compare_release
+        from abicheck.frontends.cli.runtime import _exit_compare_release
 
         # A per-library ERROR (failed dump/extract) produces no changes, so the
         # severity aggregation sees 0 — but it must still exit 4, not 0.
@@ -737,7 +737,7 @@ class TestCompareReleaseExitFloors:
     def test_removed_library_precedence_under_severity(self):
         import pytest
 
-        from abicheck.frontends.cli.release_exit import _exit_compare_release
+        from abicheck.frontends.cli.runtime import _exit_compare_release
 
         with pytest.raises(SystemExit) as exc:
             _exit_compare_release("BREAKING", True, ["libgone"], severity_exit_code=0)
@@ -746,14 +746,14 @@ class TestCompareReleaseExitFloors:
     def test_severity_code_passthrough(self):
         import pytest
 
-        from abicheck.frontends.cli.release_exit import _exit_compare_release
+        from abicheck.frontends.cli.runtime import _exit_compare_release
 
         with pytest.raises(SystemExit) as exc:
             _exit_compare_release("API_BREAK", False, [], severity_exit_code=2)
         assert exc.value.code == 2
 
     def test_clean_severity_does_not_exit(self):
-        from abicheck.frontends.cli.release_exit import _exit_compare_release
+        from abicheck.frontends.cli.runtime import _exit_compare_release
 
         # severity says clean and no operational error -> returns without exiting.
         assert (

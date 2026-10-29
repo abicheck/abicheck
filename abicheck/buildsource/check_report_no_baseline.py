@@ -162,7 +162,7 @@ def classify_no_baseline_verdict(
     neither `LEGACY_VERDICT_VALUES` nor `OPERATIONAL_ERROR_VERDICT` and
     fell through to the generic `scan_guard_triggered` branch,
     misclassifying every no-baseline audit -- including a clean,
-    zero-finding one -- as an operational failure. `final_exit_code()`
+    zero-finding one -- as an operational failure. `resolve_gate_mode_exit_code()`
     treats any `operational_errors` entry as unconditional exit 1, ignoring
     `gate-mode: advisory`/`deferred` entirely, so this silently failed
     every `check-target` single-build audit using the audit-only shape

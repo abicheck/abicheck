@@ -53,11 +53,13 @@ from ..model.cc_attributes import CC_ATTRIBUTE_BASES
 from ..model.change import Change
 from ..model.change_catalog.kinds import ChangeKind
 from ..model.change_catalog.registry import Verdict
+from ..model.declarations import Param
 from ..model.name_heuristics import (
     NameHeuristicEffect,
     StructuralFact,
     register_name_heuristic,
 )
+from ..model.restrict_qualifier import strip_restrict
 from ..model.snapshot import AbiSnapshot
 
 __all__ = [
@@ -408,5 +410,92 @@ def demote_generation_spelling_drift(
             f"{GENERATION_DRIFT_REASON} (old operand extractor generation "
             f"{old_generation or 'unstated'}, new {new_generation or 'unstated'}; "
             f"{cause})"
+        )
+    return changes
+
+
+#: The extractor generation that stopped DWARF hiding a restrict-qualified
+#: pointer's indirection: before it, ``int *restrict`` was recorded at depth 0,
+#: from generation 32 at depth 1 (extract/dwarf_snapshot's pointer-depth walk).
+RESTRICT_DEPTH_GENERATION = 32
+
+_RESTRICT_DEPTH_KINDS = frozenset(
+    {ChangeKind.FUNC_PARAMS_CHANGED, ChangeKind.PARAM_POINTER_LEVEL_CHANGED}
+)
+
+
+def _restrict_depth_position(stale: Param, live: Param) -> bool:
+    """Whether a parameter pair differs only by the pre-32 restrict depth.
+
+    *stale* is the operand whose generation predates
+    :data:`RESTRICT_DEPTH_GENERATION`: it recorded a restrict pointer at depth
+    0, where the live operand records depth 1 and the same spelling otherwise.
+    Equal parameters are also accepted, so a function with one artifact
+    position and otherwise equal parameters is judged on that position alone.
+    """
+    if stale.type == live.type and stale.pointer_depth == live.pointer_depth:
+        return True
+    return (
+        stale.pointer_depth == 0
+        and live.pointer_depth == 1
+        and "restrict" in live.type
+        and strip_restrict(stale.type) == strip_restrict(live.type)
+    )
+
+
+def demote_restrict_depth_drift(
+    changes: list[Change],
+    old: AbiSnapshot,
+    new: AbiSnapshot,
+    old_generation: int,
+    new_generation: int,
+) -> list[Change]:
+    """Annotate a restrict-depth artifact between operands of different
+    extractor generations as ``COMPATIBLE_WITH_RISK``.
+
+    A parameter-level finding is demoted only when the operand that predates
+    :data:`RESTRICT_DEPTH_GENERATION` is the one that recorded the restrict
+    pointer at depth 0, and every differing parameter of its function is that
+    artifact, with the return type unchanged. Anything else stays as it was.
+    """
+    if old_generation == new_generation:
+        return changes
+    if old_generation < RESTRICT_DEPTH_GENERATION <= new_generation:
+        stale, live, stale_is_old = old, new, True
+    elif new_generation < RESTRICT_DEPTH_GENERATION <= old_generation:
+        stale, live, stale_is_old = new, old, False
+    else:
+        return changes
+    for change in changes:
+        if (
+            change.effective_verdict is not None
+            or change.kind not in _RESTRICT_DEPTH_KINDS
+        ):
+            continue
+        stale_fn = stale.function_map.get(change.symbol)
+        live_fn = live.function_map.get(change.symbol)
+        if (
+            stale_fn is None
+            or live_fn is None
+            or len(stale_fn.params) != len(live_fn.params)
+        ):
+            continue
+        if stale_fn.return_type != live_fn.return_type:
+            continue
+        pairs = list(zip(stale_fn.params, live_fn.params))
+        if not all(_restrict_depth_position(a, b) for a, b in pairs):
+            continue
+        if all(
+            a.pointer_depth == b.pointer_depth and a.type == b.type for a, b in pairs
+        ):
+            continue  # no artifact position: not this cause
+        change.effective_verdict = Verdict.COMPATIBLE_WITH_RISK
+        change.modulation_rule = GENERATION_DRIFT_RULE
+        change.modulation_reason = (
+            f"{GENERATION_DRIFT_REASON} (old operand extractor generation "
+            f"{old_generation or 'unstated'}, new {new_generation or 'unstated'}; "
+            f"a restrict-qualified pointer parameter was recorded at depth "
+            f"{0 if stale_is_old else 1} by the older extractor and at depth "
+            f"{1 if stale_is_old else 0} now)"
         )
     return changes

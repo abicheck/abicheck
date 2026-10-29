@@ -96,6 +96,11 @@ Matching is strict, so an acknowledgment accepts exactly what it names:
   every change on that symbol — a return-type change and a parameter change,
   say — including ones the author never reviewed. The loader refuses it. Use
   `finding_id` to name one finding without a kind.
+- **A base `change_kind` also accepts its `*_elf_only` variant.** A record
+  naming `func_removed` accepts a `func_removed_elf_only` finding too: the
+  variant is chosen by whether headers were supplied, not by the change. A
+  record naming the `*_elf_only` kind accepts only that kind. See
+  [`change_kind` and ELF-only variants](suppressions.md#change_kind-and-elf-only-variants).
 - **A record matches one finding per run.** A `finding_id` is not unique per
   finding by design, so one record can, in principle, match two distinct
   findings in the same run. That is a hard error, never a silent double

@@ -383,6 +383,9 @@ INTEGRATION_BUG_CLASSES: tuple[BugClass, ...] = (
             # Catalog-wide: identity over binary-only pairs (exact), and
             # header->binary parity with every residual rule named.
             "tests/test_depth_projection_matches_shallow_dump.py",
+            # Schema v69: a DWARF layout member carries its type's ABI fact,
+            # so a projected record field keeps the fact a binary-only dump reads.
+            "tests/unit/storage/test_dwarf_layout_abi_fact.py",
             # Mechanisms: every Function/Variable field against the
             # binary-only dumper's export constructor, header-only attribute
             # changes x binary depth, undeclared export loss, layout records.

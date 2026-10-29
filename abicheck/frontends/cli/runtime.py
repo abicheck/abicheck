@@ -23,11 +23,12 @@ typed API reaches the same code: snapshot provenance in
 :mod:`abicheck.workflows.provenance`, operand metadata and the same-binary
 note in :mod:`abicheck.workflows.compare_classify`.
 
-The exit path is the one worth reading: ``_exit_with_severity_or_verdict``
-folds three orthogonal axes -- the compatibility verdict, the ADR-049
-contract-coverage floor, and the assurance floor -- and reaches all three
-through :mod:`abicheck.workflows.gate` rather than importing the policy layer
-directly, so a command cannot pick up one axis and silently forget another.
+The exit path is the one worth reading. A single-pair ``compare`` exits
+through ``_exit_with_severity_or_verdict`` and a directory/package one through
+``_exit_compare_release``. Neither decides anything: each reads one
+``ExitDecision`` from ``policy.exit_decision_precedence`` (through
+:mod:`abicheck.workflows.gate`, since ``frontends -> policy`` is forbidden),
+prints the notices that explain it, and turns it into a process status.
 """
 
 from __future__ import annotations
@@ -65,7 +66,11 @@ from .options.params import (
 
 if TYPE_CHECKING:
     from ...model.change import Change
-    from ...workflows.gate import EffectiveGate, SeverityConfig
+    from ...workflows.gate import (
+        EffectiveGate,
+        ReleaseAssuranceDecision,
+        SeverityConfig,
+    )
 
 
 _logger = logging.getLogger("abicheck")
@@ -393,6 +398,7 @@ def _exit_with_severity_or_verdict(
     from ...workflows.gate import (
         announce_coverage_floor,
         assurance_floor_diagnostic,
+        compare_assurance_notice_base_exit,
         resolve_compare_exit_decision_with_abort_axes,
     )
 
@@ -403,25 +409,83 @@ def _exit_with_severity_or_verdict(
         fmt=fmt,
         secondary_fmts=secondary_fmts,
     )
-    # The pre-assurance exit is what the diagnostic's own wording describes
-    # ("floored to"/"contributes, below the compatibility axis's own exit"),
-    # so it excludes the assurance contribution itself rather than reading
-    # `decision.code` (which, when assurance is the winning axis, would be
-    # self-referential).
-    pre_assurance_exit = max(
-        decision.compatibility_contribution,
-        decision.contract_coverage_contribution,
-    )
     diagnostic = assurance_floor_diagnostic(
         result,
         require_complete=gate.require_complete_analysis,
-        base_exit=pre_assurance_exit,
+        base_exit=compare_assurance_notice_base_exit(decision),
     )
     if diagnostic is not None:
         click.echo(diagnostic, err=True)
     # ADR-067 D6's additions-review axis is one of the decision's own
     # contributions, so the process exit and the report's `exit.code` are
     # the same number.
+    if decision.code != 0:
+        sys.exit(decision.code)
+
+
+def _exit_compare_release(
+    worst_verdict: str,
+    fail_on_removed: bool,
+    removed_keys: list[str],
+    severity_exit_code: int | None = None,
+    *,
+    contract_coverage_exit_contribution: int = 0,
+    library_results: list[dict[str, object]] | None = None,
+    release_global_verdict: str = "NO_CHANGE",
+    incomplete_scope_exit_contribution: int = 0,
+    no_comparison_completed_exit_contribution: int = 0,
+    assurance_decision: ReleaseAssuranceDecision | None = None,
+) -> None:
+    """Exit a directory/package ``compare`` with the release's own status code.
+
+    Resolves nothing itself: every axis and the precedence over them belong
+    to ``policy.exit_decision_precedence``'s release resolver
+    (:func:`~abicheck.workflows.gate.resolve_release_exit_decision_with_
+    assurance`), the same resolution the persisted ``exit`` block is built
+    from, so the process status and the report agree by construction. The
+    arguments are that resolver's own; see it for what each means.
+
+    Exits only for a nonzero code, so a clean release returns.
+    """
+    from ...report.release_assurance_section import release_assurance_notice
+    from ...workflows.gate import (
+        release_evidence_contract_contribution,
+        resolve_release_exit_decision_with_assurance,
+    )
+    from .release_evidence_contract import evidence_contract_notice
+
+    decision = resolve_release_exit_decision_with_assurance(
+        worst_verdict,
+        fail_on_removed,
+        removed_keys,
+        severity_exit_code,
+        contract_coverage_exit_contribution=contract_coverage_exit_contribution,
+        library_results=library_results,
+        release_global_verdict=release_global_verdict,
+        incomplete_scope_exit_contribution=incomplete_scope_exit_contribution,
+        no_comparison_completed_exit_contribution=no_comparison_completed_exit_contribution,
+        assurance_decision=assurance_decision,
+    )
+    # ADR-071's assurance notice is worded against every *other* axis ("floored
+    # to 1" vs. "below ... exit N, which stands"), which only the resolved
+    # decision knows: under a dominant 16/8/7 the compatibility axis alone can
+    # read 0 while the run exits 16 (Codex review, P2).
+    if assurance_decision is not None:
+        assurance_notice = release_assurance_notice(
+            assurance_decision,
+            base_exit=decision.exit_without_analysis_assurance(),
+        )
+        if assurance_notice:
+            click.echo(assurance_notice, err=True)
+    # Emitted at the exit rather than by each caller: the fan-out has already
+    # discarded every member's `DiffResult`, so nothing downstream can explain
+    # a bare exit 7, and `compare --bundle-facts` would otherwise never emit it.
+    members = list(library_results or [])
+    notice = evidence_contract_notice(
+        members, release_evidence_contract_contribution(members)
+    )
+    if notice:
+        click.echo(notice, err=True)
     if decision.code != 0:
         sys.exit(decision.code)
 

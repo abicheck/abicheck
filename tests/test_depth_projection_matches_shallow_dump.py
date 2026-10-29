@@ -336,11 +336,24 @@ def _unexplained(projected_run: Run, oracle_run: Run) -> dict[str, list[Finding]
     }
 
 
+def _record_field_subject(symbol: str, oracle: Run) -> bool:
+    """Whether *symbol* names a record (or ``Record::field``) in the binary-only run.
+
+    A func/var/typedef subject is a mangled export or a typedef name, never a
+    record's name, so this separates a record-field finding from the others.
+    """
+    owner = symbol.rpartition("::")[0]
+    return any(symbol in side or owner in side for side in oracle.types)
+
+
 def _binary_only_reason(finding: Finding, projected: Run, oracle: Run) -> str | None:
     """Why the projection may lack *finding*, or ``None``."""
     kind, sym = finding
     if kind in ONLY_BINARY_DUMP:
         return ONLY_BINARY_DUMP[kind]
+    # The re-kinded form of a func/var/typedef retype (ABI-equal, schema v69): same DWARF-declaration evidence; a record field must agree.
+    if kind == "abi_equivalent_type_changed" and not _record_field_subject(sym, oracle):
+        return _DEBUG_DECLARATIONS
     if finding in projected.out_of_surface:
         return _SURFACE_SCOPE
     if kind in LAYOUT_PRESENCE_KINDS and _one_sided(sym, oracle.types):
