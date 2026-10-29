@@ -47,7 +47,6 @@ from abicheck.storage.package import SECTION_KINDS
 #: `projection_unavailable`: the facts it cleared; `projection_evidence_gaps`:
 #: the debug-info evidence it could not rebuild. `spellings_generation` is
 #: persisted only inside the `fact_generations` stamp, never as its own key.
-#: And `live_preprocessor_hidden`: what *this run's* castxml preprocessing excluded.
 _NEVER_IN_A_DOCUMENT = (
     "semantic_ir",
     "semantic_ir_conflicts",
@@ -59,7 +58,6 @@ _NEVER_IN_A_DOCUMENT = (
     "header_declaration_ids",
     "projection_unavailable",
     "projection_evidence_gaps",
-    "live_preprocessor_hidden",
     "spellings_generation",
     "_func_by_mangled",
     "_var_by_mangled",
@@ -73,7 +71,12 @@ _NEVER_IN_A_DOCUMENT = (
 #: schema-v7-or-older document can carry it instead, even though this
 #: build's own `snapshot_to_dict()` never writes it. (`dump_provenance` was
 #: listed here until it became a real `AbiSnapshot` field.)
-_DOCUMENT_ONLY_KEYS = ("evidence_pack",)
+_DOCUMENT_ONLY_KEYS = (
+    "evidence_pack",
+    # Schema v67: the ownership decisions of a snapshot with no recorded
+    # extraction scope; not a dataclass field, a key of extraction_scope_codec.
+    "ownership_without_scope",
+)
 
 
 def _abi_snapshot_field_names() -> set[str]:
