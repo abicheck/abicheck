@@ -297,12 +297,17 @@ SPELLING_MIGRATIONS: Mapping[int, GenerationSpellingChange] = {
         "re-dumped, not rewritten)"
     ),
     29: GenerationSpellingChange(
-        "castxml complex and bit-precise integer types (``float _Complex``, "
-        "``_BitInt(N)``) resolve to their clang spelling from the clang AST, where "
-        "they were the literal 'Unimplemented' -- one spelling shared by every such "
-        "type, so a 'float _Complex' -> 'double _Complex' change compared equal. A "
-        "stored 'Unimplemented' cannot say which type it was, so no rewrite is sound "
-        "and a baseline holding one is re-dumped"
+        "function types spell their calling convention and full signature: a "
+        "clang-written DW_AT_calling_convention on a DWARF subroutine type "
+        "(ms_abi) and the castxml FunctionType node joined from the clang AST "
+        "(castxml drops ms_abi/sysv_abi from its XML) now spell "
+        "'void (*)(int) __attribute__((ms_abi))', and a DWARF subroutine type "
+        "spells 'ret (*)(params)' where it spelled the opaque 'fn(...)'. The stored "
+        "'fn(...)' cannot be rewritten to a signature, so no rewrite is sound; "
+        "policy/generation_drift_demotion.py demotes a stored 'fn(...)' against a "
+        "fresh declarator, and a convention present on one side only, when the "
+        "generations differ, is demoted as drift. A baseline holding callbacks is "
+        "re-dumped"
     ),
 }
 

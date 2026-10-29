@@ -41,6 +41,7 @@ from abicheck.checker_policy import API_BREAK_KINDS, ChangeKind
 from abicheck.model import AbiSnapshot
 from abicheck.model.elf_facts import ElfMetadata, ElfSymbol, ElfVersionBinding
 from abicheck.serialization import snapshot_from_dict, snapshot_to_dict
+from tests._abicheck_subprocess import abicheck_command
 
 _B = ElfVersionBinding
 
@@ -323,7 +324,7 @@ def _objdump_bindings(lib: Path) -> dict[str, ElfVersionBinding]:
 def _audit(lib: Path) -> list[str]:
     """``unversioned_exported_symbol`` findings of ``compare LIB LIB``."""
     proc = subprocess.run(
-        [sys.executable, "-m", "abicheck", "compare", str(lib), str(lib)]
+        abicheck_command("compare", str(lib), str(lib))
         + ["-o", "json=-"],
         capture_output=True,
         text=True,
@@ -394,7 +395,7 @@ def test_a_stored_dump_keeps_the_binding(tmp_path: Path) -> None:
     _bind_to_local(lib, "other_fn")
     snap = tmp_path / "stored.abi.json"
     proc = subprocess.run(
-        [sys.executable, "-m", "abicheck", "dump", str(lib), "-o", str(snap)],
+        abicheck_command("dump", str(lib), "-o", str(snap)),
         capture_output=True,
         text=True,
         check=False,

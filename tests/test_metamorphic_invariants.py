@@ -67,6 +67,7 @@ from tests.test_example_autodiscovery import (
     _find_sources,
     _header_list,
 )
+from tests._abicheck_subprocess import abicheck_command
 
 pytestmark = [
     pytest.mark.integration,
@@ -193,7 +194,7 @@ def _headers(side: str, headers: tuple[Path, ...]) -> list[str]:
 def _cli(args: list[str], cache: Path) -> subprocess.CompletedProcess[str]:
     env = dict(os.environ, XDG_CACHE_HOME=str(cache))
     return subprocess.run(
-        [sys.executable, "-m", "abicheck.cli", *args],
+        abicheck_command(*args),
         capture_output=True,
         text=True,
         check=False,

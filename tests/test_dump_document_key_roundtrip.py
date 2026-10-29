@@ -25,6 +25,7 @@ import pytest
 from _snapshot_document_reader import read_snapshot_document
 
 from abicheck.serialization import load_snapshot, save_snapshot
+from tests._abicheck_subprocess import abicheck_command
 
 pytestmark = [
     pytest.mark.integration,
@@ -102,7 +103,7 @@ def _build_and_dump(tmp_path: Path, name: str) -> Path:
         text=True,
     )
     dumped = tmp_path / f"{name}.abicheck.json"
-    cmd = [sys.executable, "-m", "abicheck", "dump", str(so), "--version", "1.0"]
+    cmd = abicheck_command("dump", str(so), "--version", "1.0")
     if header is not None:
         header_file = tmp_path / f"{name}.h"
         header_file.write_text(header, encoding="utf-8")

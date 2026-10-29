@@ -14,6 +14,7 @@ import sys
 from pathlib import Path
 
 import pytest
+from tests._abicheck_subprocess import abicheck_command
 
 pytestmark = [
     pytest.mark.integration,
@@ -63,18 +64,14 @@ def _compare(
     old_so, old_h = old
     new_so, new_h = new
     return subprocess.run(
-        [
-            sys.executable,
-            "-m",
-            "abicheck",
-            "compare",
+        abicheck_command("compare",
             str(old_so),
             str(new_so),
             "-H",
             f"old={old_h}",
             "-H",
             f"new={new_h}",
-        ],
+        ),
         capture_output=True,
         text=True,
         timeout=300,

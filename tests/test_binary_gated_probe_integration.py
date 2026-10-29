@@ -43,6 +43,7 @@ from abicheck.policy.binary_gated_contract import (
     HEADER_OR_SOURCE_GATED,
     OUT_OF_AXIS,
 )
+from tests._abicheck_subprocess import abicheck_command
 
 pytestmark = [
     pytest.mark.integration,
@@ -465,16 +466,12 @@ def _compare(
     headers: tuple[Path, Path] | None,
     extra: list[str] | None = None,
 ) -> list[dict]:
-    cmd = [
-        sys.executable,
-        "-m",
-        "abicheck",
-        "compare",
+    cmd = abicheck_command("compare",
         str(old),
         str(new),
         "-o",
         f"json={report}",
-    ]
+    )
     if headers is not None:
         cmd += ["--header", f"old={headers[0]}", "--header", f"new={headers[1]}"]
     cmd += extra or []

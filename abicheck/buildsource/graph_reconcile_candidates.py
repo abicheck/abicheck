@@ -34,6 +34,24 @@ RECONCILABLE_KINDS: frozenset[str] = frozenset(
 )
 
 
+#: Layout facts a record node carries when the header graph recorded them.
+_LAYOUT_ATTRS: tuple[str, ...] = ("size_bits", "alignment_bits")
+
+
+def layout_contradicts(old: GraphNode, new: GraphNode) -> bool:
+    """Whether two nodes' recorded layouts differ, so they cannot be one declaration.
+
+    A rename or move never changes a record's size or alignment. Only a fact both
+    sides recorded is compared: a layout one side did not collect proves nothing.
+    """
+    for attr in _LAYOUT_ATTRS:
+        old_value = old.attrs.get(attr)
+        new_value = new.attrs.get(attr)
+        if old_value is not None and new_value is not None and old_value != new_value:
+            return True
+    return False
+
+
 def is_reconcilable_candidate(node: GraphNode) -> bool:
     """Whether *node* can ever be a rename/move candidate.
 

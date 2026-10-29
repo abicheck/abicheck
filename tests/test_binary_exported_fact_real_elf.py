@@ -24,6 +24,7 @@ import sys
 from pathlib import Path
 
 import pytest
+from tests._abicheck_subprocess import abicheck_command
 
 pytestmark = [
     pytest.mark.integration,
@@ -46,7 +47,7 @@ SOURCE = {
 
 def _abicheck(args: list[str], cwd: Path) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
-        [sys.executable, "-m", "abicheck", *args],
+        abicheck_command(*args),
         cwd=cwd,
         # A private cache: a whole-snapshot cache hit from another build of
         # this code would hand back facts this run's producer never computed.

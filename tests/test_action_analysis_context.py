@@ -65,7 +65,7 @@ BASE = "3" * 40
 
 def _cli(*args: str, **kwargs: Any) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
-        [sys.executable, "-m", "abicheck.frontends.action.cli", *args],
+        abicheck_module_command("abicheck.frontends.action.cli", *args),
         capture_output=True,
         text=True,
         **kwargs,
@@ -254,17 +254,13 @@ class TestTheProducerWritesWhatTheConsumerReads:
         reports.mkdir(exist_ok=True)
         manifest = tmp_path / "manifest.json"
         _write_manifest(manifest)
-        args = [
-            sys.executable,
-            "-m",
-            "abicheck",
-            "aggregate",
+        args = abicheck_command("aggregate",
             ".",
             "--manifest",
             str(manifest),
             "-o",
             "json=aggregate.json",
-        ]
+        )
         if context is not None:
             args += ["--analysis-context", str(context)]
         proc = subprocess.run(args, capture_output=True, text=True, cwd=reports)
@@ -622,16 +618,12 @@ class TestTheAggregateActionRecordsIt:
             encoding="utf-8",
         )
         proc = subprocess.run(
-            [
-                sys.executable,
-                "-m",
-                "abicheck",
-                "aggregate",
+            abicheck_command("aggregate",
                 ".",
                 "--discovered-only",
                 "-o",
                 "json=agg.json",
-            ],
+            ),
             capture_output=True,
             text=True,
             cwd=reports,
@@ -655,6 +647,7 @@ class TestTheAggregateActionRecordsIt:
 #: across commands. Imported rather than written as a literal so a change to
 #: that convention is one edit, not a hunt through test files.
 from abicheck.frontends.cli.runtime import _EXIT_USAGE_ERROR  # noqa: E402
+from tests._abicheck_subprocess import abicheck_module_command
 
 
 class TestTheAggregateOptionAndRenderer:

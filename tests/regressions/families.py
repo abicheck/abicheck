@@ -142,7 +142,10 @@ FAMILIES: dict[str, Family] = {
                 "target-specific evidence may add facts, never remove or "
                 "relocate the library's own."
             ),
-            harness_tests=("tests/test_family_f8_target_parity.py",),
+            harness_tests=(
+                "tests/test_family_f8_target_parity.py",
+                "tests/test_family_f8_symbol_rule_parity.py",
+            ),
         ),
         Family(
             key="F9",
@@ -248,12 +251,8 @@ FAMILIES: dict[str, Family] = {
                 "declaration and never collapses to an opaque tag, so a header "
                 "comparison sees the change."
             ),
-            harness_tests=(),
-            planned_reason=(
-                "The vector, complex/bit-int and FunctionType classes share this "
-                "invariant; a family harness that enumerates all of them and their "
-                "sites is planned."
-            ),
+            harness_tests=("tests/test_type_spelling_differential_matrix.py",),
+            planned_reason="",
         ),
         Family(
             key="F14",
@@ -264,12 +263,8 @@ FAMILIES: dict[str, Family] = {
                 "spelling: a vector never collapses onto a plain array's T[] "
                 "spelling, so a same-size vector-versus-array change is reported."
             ),
-            harness_tests=(),
-            planned_reason=(
-                "One class so far; revisit when a second attribute-determined "
-                "type (for example a sized or address-space-qualified type) "
-                "collapses the same way and the two share one mechanism."
-            ),
+            harness_tests=("tests/test_type_spelling_differential_matrix.py",),
+            planned_reason="",
         ),
         Family(
             key="F16",
@@ -397,7 +392,6 @@ _F3 = (
     "templates.parameter_template_args_read_as_family_membership",
     "identity.header_declaration_retype_read_as_removal",
     "identity.benign_duplicate_declaration_key",
-    "identity.fundamental_type_paired_as_declaration_rename",
 )
 _F4 = (
     "classification.name_shape_as_contract_membership",
@@ -453,6 +447,7 @@ _F8 = (
     "extraction.emulated_compiler_builtin_absent_from_frontend",
     "extraction.linker_summary_flag_read_as_the_fact",
     "scoping.system_header_layout_unrecognized",
+    "symbol_rule.single_object_format",
 )
 _F7 = (
     # Masked by suite-wide shared interpreter state: passed in a full run,
@@ -492,7 +487,6 @@ _F14 = ("extraction.vector_type_collapsed_to_plain_array",)
 _F15 = (
     "extraction.castxml_vector_element_not_modelled",
     "extraction.castxml_function_type_collapsed_to_opaque_tag",
-    "extraction.castxml_complex_and_bitint_collapsed_to_unimplemented",
 )
 _F16 = (
     "report.shared_display_budget_starvation",

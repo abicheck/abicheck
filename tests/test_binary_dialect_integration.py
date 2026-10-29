@@ -18,6 +18,7 @@ from pathlib import Path
 import pytest
 
 from abicheck.serialization import load_snapshot
+from tests._abicheck_subprocess import abicheck_command
 
 pytestmark = [
     pytest.mark.integration,
@@ -92,11 +93,7 @@ def _build(root: Path, std: str) -> Path:
 def _dump(so: Path, out: Path, cwd: Path) -> subprocess.CompletedProcess[str]:
     include = so.parent / "inc"
     return subprocess.run(
-        [
-            sys.executable,
-            "-m",
-            "abicheck",
-            "dump",
+        abicheck_command("dump",
             str(so),
             "-H",
             str(include / "xv" / "simd.h"),
@@ -104,7 +101,7 @@ def _dump(so: Path, out: Path, cwd: Path) -> subprocess.CompletedProcess[str]:
             str(include),
             "-o",
             str(out),
-        ],
+        ),
         capture_output=True,
         text=True,
         cwd=cwd,

@@ -23,6 +23,7 @@ from abicheck.snapshot_io import (
     read_snapshot_bytes,
     write_snapshot_bytes,
 )
+from tests._abicheck_subprocess import abicheck_command
 
 
 class TestAtomicDestination:
@@ -161,7 +162,7 @@ class TestCliOutputContract:
 
         so, include = self._library(tmp_path)
         proc = subprocess.run(
-            [sys.executable, "-m", "abicheck", "dump", str(so), "-H", str(include)],
+            abicheck_command("dump", str(so), "-H", str(include)),
             capture_output=True,
             check=True,
         )

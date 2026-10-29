@@ -37,6 +37,7 @@ from abicheck.extract import castxml_header_compat as compat
 from abicheck.extract.headers.castxml.location import is_builtin_element
 from abicheck.model import AbiSnapshot
 from abicheck.serialization import load_snapshot
+from tests._abicheck_subprocess import abicheck_command
 
 # -- Guard semantics, exhaustively, under the real preprocessor -------------
 
@@ -164,17 +165,13 @@ def _dump(
     monkeypatch.setenv("XDG_CACHE_HOME", str(tmp / "cache"))
     out = tmp / f"{lib.stem}.json"
     subprocess.run(
-        [
-            sys.executable,
-            "-m",
-            "abicheck",
-            "dump",
+        abicheck_command("dump",
             str(lib),
             "-H",
             str(header),
             "-o",
             str(out),
-        ],
+        ),
         check=True,
         capture_output=True,
         env=os.environ.copy(),

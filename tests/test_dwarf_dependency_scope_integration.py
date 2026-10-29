@@ -27,6 +27,7 @@ import sys
 from pathlib import Path
 
 import pytest
+from tests._abicheck_subprocess import abicheck_command
 
 pytestmark = [
     pytest.mark.skipif(sys.platform != "linux", reason="builds an ELF .so"),
@@ -140,16 +141,12 @@ def _build_so(root: Path, isa_flag: str, out: Path) -> Path:
 
 def _compare(old: Path, new: Path, report: Path) -> dict:
     subprocess.run(
-        [
-            sys.executable,
-            "-m",
-            "abicheck",
-            "compare",
+        abicheck_command("compare",
             str(old),
             str(new),
             "-o",
             f"json={report}",
-        ],
+        ),
         check=False,
         capture_output=True,
         timeout=600,

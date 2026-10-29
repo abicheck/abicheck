@@ -24,6 +24,7 @@ _REPO = Path(__file__).resolve().parent.parent
 if str(_REPO / "scripts") not in sys.path:
     sys.path.insert(0, str(_REPO / "scripts"))
 import example_catalog  # noqa: E402
+from tests._abicheck_subprocess import abicheck_command
 
 _GBR_PATH = _REPO / "scripts" / "generate_benchmark_report.py"
 
@@ -292,14 +293,14 @@ def test_status_counts_tallies_non_verdict_outcomes() -> None:
 
 def test_cache_state_for_live_tool_is_live() -> None:
     bc_args = gbr.bc.parse_args([])
-    bc_args.tools = ["abicheck"]
-    state = gbr.cache_state_for(bc_args, ["abicheck"])
+    bc_args.tools = abicheck_command()
+    state = gbr.cache_state_for(bc_args, abicheck_command())
     assert state["abicheck"] == "live"
 
 
 def test_cache_state_for_absent_tool_is_n_a() -> None:
     bc_args = gbr.bc.parse_args([])
-    bc_args.tools = ["abicheck"]
+    bc_args.tools = abicheck_command()
     state = gbr.cache_state_for(bc_args, ["a_tool_that_does_not_exist"])
     assert state["a_tool_that_does_not_exist"] == "n/a"
 
@@ -310,7 +311,7 @@ def test_cache_state_for_stale_frozen_digest_is_n_a(monkeypatch) -> None:
     refuses to merge that stale data into the run's results at all, so
     claiming frozen provenance here would describe data that isn't there."""
     bc_args = gbr.bc.parse_args([])
-    bc_args.tools = ["abicheck"]
+    bc_args.tools = abicheck_command()
     monkeypatch.setattr(
         gbr.bc,
         "_load_frozen",
@@ -328,7 +329,7 @@ def test_cache_state_for_stale_frozen_digest_is_n_a(monkeypatch) -> None:
 
 def test_cache_state_for_matching_frozen_digest_is_frozen(monkeypatch) -> None:
     bc_args = gbr.bc.parse_args([])
-    bc_args.tools = ["abicheck"]
+    bc_args.tools = abicheck_command()
     monkeypatch.setattr(
         gbr.bc,
         "_load_frozen",

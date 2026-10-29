@@ -170,8 +170,12 @@ def _seed_flat_type_node(
     kind: str,
     origin: ScopeOrigin,
     source_header: str | None,
+    layout: dict[str, int] | None = None,
 ) -> None:
     """Seed one record/enum type node straight from its own snapshot entry.
+
+    *layout* carries the record's known ``size_bits``/``alignment_bits``; a
+    graph reconciler refuses to pair two records whose known layout differs.
 
     Unlike the AST path above, ``RecordType``/``EnumType`` already carry their
     own ``origin``/``source_header`` (ADR-015 provenance, populated by
@@ -184,6 +188,7 @@ def _seed_flat_type_node(
         {"visibility": origin.value} if origin != ScopeOrigin.UNKNOWN else {}
     )
     attrs.update(_identity_attrs(ident))
+    attrs.update(layout or {})
     graph.add_node(
         GraphNode(
             id=node_id,
@@ -349,6 +354,14 @@ def _seed_flat_graph(
             "record_type",
             rt.origin,
             rt.source_header,
+            layout={
+                key: value
+                for key, value in (
+                    ("size_bits", rt.size_bits),
+                    ("alignment_bits", rt.alignment_bits),
+                )
+                if value is not None
+            },
         )
     for en, ident in zip(snapshot.declarations.enums, ids.enums):
         _seed_flat_type_node(

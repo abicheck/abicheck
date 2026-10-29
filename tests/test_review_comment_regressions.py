@@ -12,6 +12,7 @@ from pathlib import Path
 from types import ModuleType
 
 import pytest
+from tests._abicheck_subprocess import abicheck_command
 
 
 def _load_script(relpath: str) -> ModuleType:
@@ -336,10 +337,10 @@ def test_run_json_command_rejects_non_object_json_root(
     """A CLI that emits valid-but-non-object JSON must fail the case, not crash on .get()."""
     special = _load_validation_script("run_special_cli_examples.py")
     completed = subprocess.CompletedProcess(
-        args=["abicheck", "compare"], returncode=0, stdout=stdout, stderr=""
+        args=abicheck_command("compare"), returncode=0, stdout=stdout, stderr=""
     )
     monkeypatch.setattr(special.subprocess, "run", lambda *_args, **_kwargs: completed)
-    result = special._run_json_command(["abicheck", "compare"], timeout=10)
+    result = special._run_json_command(abicheck_command("compare"), timeout=10)
     assert result["payload"] is None
     assert "object" in result["message"]
 

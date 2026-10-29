@@ -39,6 +39,7 @@ import sys
 from pathlib import Path
 
 import pytest
+from tests._abicheck_subprocess import abicheck_command
 
 pytestmark = [
     pytest.mark.integration,
@@ -195,7 +196,7 @@ def _compare(
     intercepting ``sys.exit`` is one indirection away from the thing being
     asserted.
     """
-    cmd = [sys.executable, "-m", "abicheck", "compare", *args, "-o", f"{fmt}=-"]
+    cmd = abicheck_command("compare", *args, "-o", f"{fmt}=-")
     for lib in headers_for:
         cmd += [
             "--header",

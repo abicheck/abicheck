@@ -79,6 +79,7 @@ import example_catalog  # noqa: E402
 from abicheck.workflows.dump.cache import (
     api as dump_cache_api,
 )
+from tests._abicheck_subprocess import abicheck_command
 
 # ── coverage table: every inventoried site -> the cell that bypasses it ─────
 #
@@ -922,7 +923,7 @@ _SUBPROCESS_CASES = (
 
 def _cli_report(args: tuple[str, ...], env: dict[str, str]) -> str:
     res = subprocess.run(
-        [sys.executable, "-m", "abicheck", "compare", *args, "-o", "json=-"],
+        abicheck_command("compare", *args, "-o", "json=-"),
         capture_output=True,
         text=True,
         env=env,

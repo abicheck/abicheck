@@ -41,6 +41,7 @@ from pathlib import Path
 
 import pytest
 from elftools.elf.elffile import ELFFile
+from tests._abicheck_subprocess import abicheck_command
 
 pytestmark = [
     pytest.mark.integration,
@@ -177,7 +178,7 @@ REFUSED: dict[str, Callable[[bytes], bytes]] = {
 
 def _compare(old: Path, new: Path) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
-        [sys.executable, "-m", "abicheck", "compare", str(old), str(new)],
+        abicheck_command("compare", str(old), str(new)),
         capture_output=True,
         text=True,
         timeout=300,
@@ -186,7 +187,7 @@ def _compare(old: Path, new: Path) -> subprocess.CompletedProcess[str]:
 
 def _dump(binary: Path, out: Path) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
-        [sys.executable, "-m", "abicheck", "dump", str(binary), "-o", str(out)],
+        abicheck_command("dump", str(binary), "-o", str(out)),
         capture_output=True,
         text=True,
         timeout=300,

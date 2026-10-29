@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import logging
 import os
+from collections.abc import Callable
 from typing import Any
 
 from .extract.dwarf_subtree_index import drop_index
@@ -158,6 +159,98 @@ def array_type_info(die: Any, inner: tuple[str, int] | None) -> tuple[str, int]:
     else:
         size = attr_int(die, "DW_AT_byte_size")
     return (array_type_spelling(element_name, size, is_vector), size)
+
+
+#: ``DW_AT_calling_convention`` values a compiler writes on a
+#: ``DW_TAG_subroutine_type`` for a non-default x86 convention, mapped to the
+#: attribute spelling the source uses. Clang writes these (LLVM's vendor codes;
+#: the x86-32 stdcall/fastcall codes are LLVM's Borland-range values). GCC
+#: writes none of them for ``ms_abi``, so a GCC-built function pointer carries
+#: no convention in DWARF and the header lanes are the only evidence for it.
+DW_CC_TYPE_CONVENTIONS: dict[int, str] = {
+    0xB1: "stdcall",
+    0xB3: "fastcall",
+    0xC0: "vectorcall",
+    0xC1: "ms_abi",
+}
+
+
+def subroutine_calling_convention(die: Any) -> str | None:
+    """The source spelling of a subroutine type's non-default convention, or None."""
+    if "DW_AT_calling_convention" not in die.attributes:
+        return None
+    return DW_CC_TYPE_CONVENTIONS.get(attr_int(die, "DW_AT_calling_convention"))
+
+
+def subroutine_type_spelling(
+    die: Any,
+    return_name: str,
+    param_names: list[str],
+    *,
+    varargs: bool,
+    pointer: bool,
+) -> str:
+    """Spell a subroutine type the way the header backends spell a function type.
+
+    ``int (*)(int, void *)`` for a pointer to one, ``int (int)`` for the bare
+    type, a variadic ``...`` last, ``void`` for an empty list, and a trailing
+    ``__attribute__((ms_abi))`` for a non-default convention. The shape matches
+    castxml's and clang's, so a DWARF signature change reads like a header one.
+    """
+    params = [*param_names, "..."] if varargs else list(param_names)
+    params_text = ", ".join(params) if params else "void"
+    cc = subroutine_calling_convention(die)
+    suffix = f" __attribute__(({cc}))" if cc else ""
+    if pointer:
+        return f"{return_name} (*)({params_text}){suffix}"
+    return f"{return_name} ({params_text}){suffix}"
+
+
+def subroutine_spelling(
+    die: Any, resolve_name: Callable[[Any], str | None], *, pointer: bool
+) -> str:
+    """Spell a DW_TAG_subroutine_type: return, parameters, convention.
+
+    *resolve_name* gives a DIE's type spelling (its ``DW_AT_type``), so each
+    reader resolves through its own, depth-limited speller.
+    """
+    return_name = resolve_name(die) or "void"
+    params: list[str] = []
+    varargs = False
+    for child in die.iter_children():
+        if child.tag == "DW_TAG_formal_parameter":
+            params.append(resolve_name(child) or "?")
+        elif child.tag == "DW_TAG_unspecified_parameters":
+            varargs = True
+    return subroutine_type_spelling(
+        die, return_name, params, varargs=varargs, pointer=pointer
+    )
+
+
+def pointee_subroutine(die: Any, CU: Any) -> Any | None:
+    """The DW_TAG_subroutine_type a pointer DIE points to, or None."""
+    target = resolve_type_die(die, CU)
+    if target is not None and target.tag == "DW_TAG_subroutine_type":
+        return target
+    return None
+
+
+def pointer_or_subroutine_spelling(
+    die: Any, CU: Any, resolve_name: Callable[[Any], str | None]
+) -> str:
+    """Spell a DW_TAG_pointer_type or DW_TAG_subroutine_type DIE.
+
+    A pointer to a subroutine is ``ret (*)(params)``; a bare subroutine is
+    ``ret (params)``; any other pointer is ``T *`` (``void *`` when its target
+    is unnamed). *resolve_name* resolves a DIE's ``DW_AT_type``.
+    """
+    if die.tag == "DW_TAG_subroutine_type":
+        return subroutine_spelling(die, resolve_name, pointer=False)
+    target = pointee_subroutine(die, CU)
+    if target is not None:
+        return subroutine_spelling(target, resolve_name, pointer=True)
+    inner = resolve_name(die)
+    return f"{inner} *" if inner else "void *"
 
 
 def resolve_die_ref(die: Any, attr_name: str, CU: Any) -> Any:

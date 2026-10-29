@@ -42,6 +42,7 @@ import sys
 from pathlib import Path
 
 import pytest
+from tests._abicheck_subprocess import abicheck_command
 
 pytestmark = [
     pytest.mark.integration,
@@ -115,11 +116,7 @@ def _run_compare(tmp_path: Path, grown: str, *, operand: str) -> tuple[int, dict
     # very fix (`snapshot_cache._SNAPSHOT_CACHE_VERSION`'s v33 note).
     env = {**os.environ, "XDG_CACHE_HOME": str(tmp_path / "cache")}
     proc = subprocess.run(
-        [
-            sys.executable,
-            "-m",
-            "abicheck",
-            "compare",
+        abicheck_command("compare",
             str(old_op),
             str(new_op),
             "--header",
@@ -130,7 +127,7 @@ def _run_compare(tmp_path: Path, grown: str, *, operand: str) -> tuple[int, dict
             "public",
             "-o",
             f"json={report}",
-        ],
+        ),
         capture_output=True,
         check=False,
         env=env,

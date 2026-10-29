@@ -29,10 +29,8 @@ from collections import Counter
 
 import pytest
 
-from abicheck.compare.finding_dedup import (
-    _drop_source_replay_typedef_duplicates,
-    deduplicate_cross_detector,
-)
+from abicheck.compare.finding_dedup import deduplicate_cross_detector
+from abicheck.compare.source_replay_twins import drop_replay_twins
 from abicheck.model.change import Change
 from abicheck.model.change_catalog.kinds import ChangeKind
 from abicheck.model.identity import EntityId, EntityKind, Namespace
@@ -73,6 +71,7 @@ def _replay_removed(qualified: str) -> Change:
         description=f"Public typedef {qualified!r} was removed",
         old_value="int",
         new_value="",
+        evidence_category="source_only",
     )
 
 
@@ -83,6 +82,7 @@ def _replay_retarget(qualified: str) -> Change:
         description=f"Public typedef {qualified!r} now resolves elsewhere",
         old_value="int",
         new_value="long",
+        evidence_category="source_only",
     )
 
 
@@ -244,7 +244,7 @@ def test_typedef_pairing_oracle_over_exhaustive_domain() -> None:
     replay-kind findings are ever dropped, and nothing is lost in total.
     """
     for changes, expected_header, expected_replay in _DOMAIN:
-        result = _drop_source_replay_typedef_duplicates(changes)
+        result = drop_replay_twins(changes)
         kept = Counter((c.kind.value, c.symbol) for c in result)
         for header_kind, replay_kind in ((h, r) for _, _, h, r in _PAIRS):
             # A header-tier finding's symbol is the bare alias, so names that
@@ -272,12 +272,8 @@ def test_typedef_pairing_oracle_over_exhaustive_domain() -> None:
 
 def test_typedef_pairing_is_input_order_invariant() -> None:
     for changes, _, _ in _DOMAIN:
-        forward = Counter(
-            (c.kind.value, c.symbol)
-            for c in _drop_source_replay_typedef_duplicates(changes)
-        )
+        forward = Counter((c.kind.value, c.symbol) for c in drop_replay_twins(changes))
         backward = Counter(
-            (c.kind.value, c.symbol)
-            for c in _drop_source_replay_typedef_duplicates(list(reversed(changes)))
+            (c.kind.value, c.symbol) for c in drop_replay_twins(list(reversed(changes)))
         )
         assert forward == backward

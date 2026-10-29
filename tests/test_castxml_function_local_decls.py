@@ -25,6 +25,7 @@ from pathlib import Path
 import pytest
 
 from abicheck.extract.headers.castxml.context import FUNCTION_TAGS, CastxmlParserContext
+from tests._abicheck_subprocess import abicheck_command
 
 _GROUPED_TAGS = (
     "Struct",
@@ -170,7 +171,7 @@ def _dump_with(frontend: str, lib: Path, header: Path, tmp_path: Path) -> Path:
     config = tmp_path / f"{frontend}.yml"
     config.write_text(f"compile:\n  std: c++20\n  frontend: {frontend}\n")
     out = tmp_path / f"{frontend}.json"
-    argv = ["abicheck", "dump", str(lib), "-H", str(header)]
+    argv = abicheck_command("dump", str(lib), "-H", str(header))
     argv += ["--config", str(config), "-o", str(out)]
     result = subprocess.run(argv, capture_output=True, text=True)  # nosec B603 - fixed argv, no shell
     assert result.returncode == 0, result.stderr[-2000:]

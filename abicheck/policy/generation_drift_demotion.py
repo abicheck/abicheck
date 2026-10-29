@@ -49,6 +49,7 @@ from ..model.castxml_spelling_artifacts import (
     is_castxml_opaque_function_type,
     mentions_function_type_tag,
 )
+from ..model.cc_attributes import CC_ATTRIBUTE_BASES
 from ..model.change import Change
 from ..model.change_catalog.kinds import ChangeKind
 from ..model.change_catalog.registry import Verdict
@@ -155,6 +156,14 @@ def is_spelling_only_drift(old: str, new: str, old_declared: Iterable[str]) -> b
     declared = frozenset(old_declared)
     if _is_opaque_callback_respelled(old, new, declared):
         return True
+    if _conflicting_calling_conventions(old, new):
+        # ms_abi against sysv_abi is a real change of the argument registers,
+        # not an identifier respelling: the generic rule below must not see it.
+        return False
+    if _is_subroutine_respelled(old, new) or _is_calling_convention_respelled(old, new):
+        return True
+    if _is_calling_convention_respelled(new, old):
+        return True
     old_t, new_t = _TOKEN.findall(old), _TOKEN.findall(new)
     if len(old_t) != len(new_t) or old_t == new_t:
         return False
@@ -201,6 +210,55 @@ def _is_opaque_callback_respelled(old: str, new: str, declared: frozenset[str]) 
 _FUNCTION_DECLARATOR = re.compile(r"^[^()]*\(([^()]*)\)\s*\(")
 _OPAQUE_CV_PREFIX = re.compile(r"^(?:(?:const|volatile)\s+)*")
 _WRAPPER_TOKEN = re.compile(r"[*&]|\[\d*\]|\bconst\b|\bvolatile\b")
+
+
+#: The DWARF spelling of a subroutine type before generation 29.
+_DWARF_SUBROUTINE_TAG = "fn(...)"
+#: A trailing ``__attribute__((name))`` a function type spells for a
+#: non-default calling convention.
+_CC_SUFFIX = re.compile(r"\s__attribute__\(\((?P<body>[^()]*(?:\([^()]*\))?)\)\)$")
+
+
+def _is_subroutine_respelled(old: str, new: str) -> bool:
+    """Whether *old* is a stored DWARF ``fn(...)`` (generation 28 and older) and
+    *new* a full declarator with the same wrappers (``fn(...)*`` vs
+    ``void (*)(int)``). The stored tag dropped the signature, so the pair says
+    nothing about whether the signature changed."""
+    if _DWARF_SUBROUTINE_TAG not in old or _DWARF_SUBROUTINE_TAG in new:
+        return False
+    declarator = _FUNCTION_DECLARATOR.match(new)
+    if declarator is None:
+        return False
+    stored = old.replace(_DWARF_SUBROUTINE_TAG, "", 1)
+    return _wrapper_shape(stored) == _wrapper_shape(declarator.group(1))
+
+
+def _calling_convention_suffix(spelling: str) -> str | None:
+    match = _CC_SUFFIX.search(spelling)
+    if match is None:
+        return None
+    return match.group("body").strip()
+
+
+def _conflicting_calling_conventions(old: str, new: str) -> bool:
+    """Both spell a convention and the two conventions differ."""
+    old_cc = _calling_convention_suffix(old)
+    new_cc = _calling_convention_suffix(new)
+    return old_cc is not None and new_cc is not None and old_cc != new_cc
+
+
+def _is_calling_convention_respelled(old: str, new: str) -> bool:
+    """Whether *new* is *old* plus one trailing calling-convention attribute.
+
+    A generation before 29 dropped ``ms_abi``/``sysv_abi`` from castxml's
+    function types and from DWARF's subroutine types, so the older baseline
+    lacks a convention the fresh read spells. Only the suffix may differ: the
+    signature before it is compared as written."""
+    match = _CC_SUFFIX.search(new)
+    if match is None or _CC_SUFFIX.search(old):
+        return False
+    base = match.group("body").split("(", 1)[0].strip()
+    return base in CC_ATTRIBUTE_BASES and new[: match.start()] == old
 
 
 def _wrapper_shape(declarator: str) -> tuple[str, ...]:
@@ -270,6 +328,8 @@ GENERATION_SPELLING_DRIFT = register_name_heuristic(
         is_spelling_only_drift,
         _declared_names,
         _is_opaque_callback_respelled,
+        _is_subroutine_respelled,
+        _is_calling_convention_respelled,
         _wrapper_shape,
     ),
     vocabularies=("_BUILTINS",),
@@ -279,6 +339,7 @@ GENERATION_SPELLING_DRIFT = register_name_heuristic(
         _FUNCTION_DECLARATOR,
         _OPAQUE_CV_PREFIX,
         _WRAPPER_TOKEN,
+        _CC_SUFFIX,
     ),
 )
 

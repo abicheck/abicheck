@@ -32,6 +32,7 @@ from abicheck.extract.public_header_identifiers import identifiers_in_kept_heade
 from abicheck.model import AbiSnapshot
 from abicheck.model.declaration_headers import attributed
 from abicheck.model.identity import ScopePath, entity_id_for_typedef
+from tests._abicheck_subprocess import abicheck_command
 
 SYS = "/usr/include/stddef.h"
 OWN = "/proj/t.h"
@@ -156,17 +157,15 @@ def _build(root: Path, *, uses_set_arrays: bool, own_typedef: bool) -> Path:
 
 def _typedef_kinds(old: Path, new: Path, depth: str) -> set[tuple[str, str]]:
     snap = old / "old.abicheck.json"
-    dump = [
-        sys.executable, "-m", "abicheck", "dump", str(old / "libt.so"),
+    dump = abicheck_command("dump", str(old / "libt.so"),
         "-H", str(old / "api.h"), "-I", str(old), "-o", str(snap),
-    ]  # fmt: skip
+    )  # fmt: skip
     proc = subprocess.run(dump, capture_output=True, text=True)
     assert proc.returncode == 0, proc.stderr[-2000:]
-    cmd = [
-        sys.executable, "-m", "abicheck", "compare", str(snap), str(new / "libt.so"),
+    cmd = abicheck_command("compare", str(snap), str(new / "libt.so"),
         "--header", f"new={new / 'api.h'}", "--include", f"new={new}",
         "--depth", depth, "-o", "json=-",
-    ]  # fmt: skip
+    )  # fmt: skip
     proc = subprocess.run(cmd, capture_output=True, text=True)
     report = json.loads(proc.stdout)
     return {

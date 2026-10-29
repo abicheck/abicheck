@@ -14,6 +14,7 @@ import sys
 from pathlib import Path
 
 import pytest
+from tests._abicheck_subprocess import abicheck_command
 
 pytestmark = [
     pytest.mark.integration,
@@ -25,7 +26,7 @@ pytestmark = [
 
 def _run_abicheck(args: list[str]) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
-        [sys.executable, "-m", "abicheck.cli", *args],
+        abicheck_command(*args),
         capture_output=True,
         text=True,
         check=False,

@@ -62,12 +62,15 @@ because "exported" was never evidence of a header declaration.
 
 from __future__ import annotations
 
-from typing import Protocol
+from typing import TYPE_CHECKING, Protocol
 
 from .availability import FactStatus
 from .export_index import ExportMatch
 from .fact import Fact
 from .vocabulary import ScopeOrigin, Visibility
+
+if TYPE_CHECKING:
+    from .snapshot import AbiSnapshot
 
 __all__ = [
     "DERIVED_FROM_LEGACY",
@@ -568,3 +571,11 @@ def visibility_label(decl: SurfaceFactBearing) -> str:
     """
     vis: Visibility = getattr(decl, "visibility", Visibility.PUBLIC)
     return vis.value
+
+
+def old_public_symbol_count(old: AbiSnapshot) -> int | None:
+    """The count of public-visibility symbols in *old*, or None if zero."""
+    count = sum(1 for f in old.declarations.functions if is_abi_visible(f)) + sum(
+        1 for v in old.declarations.variables if is_abi_visible(v)
+    )
+    return count if count > 0 else None

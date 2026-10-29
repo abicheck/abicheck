@@ -33,6 +33,7 @@ from abicheck.model import (
     Function,
     Variable,
 )
+from tests._abicheck_subprocess import abicheck_command
 
 _HEADER = """\
 #pragma once
@@ -300,11 +301,7 @@ def _compare_case85(tmp_path: Path, frontend: str) -> dict:
     config.write_text(f"compile:\n  frontend: {frontend}\n  lang: c++\n")
     out = tmp_path / f"out-{frontend}.json"
     subprocess.run(
-        [
-            sys.executable,
-            "-m",
-            "abicheck.cli",
-            "compare",
+        abicheck_command("compare",
             str(tmp_path / "libfoo_v1.so"),
             str(tmp_path / "libfoo_v2.so"),
             "-H",
@@ -315,7 +312,7 @@ def _compare_case85(tmp_path: Path, frontend: str) -> dict:
             str(config),
             "-o",
             f"json={out}",
-        ],
+        ),
         capture_output=True,
         text=True,
     )

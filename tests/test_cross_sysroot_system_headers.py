@@ -37,6 +37,7 @@ from abicheck.extract.declaration_provenance import (
     is_system_header,
 )
 from abicheck.serialization import load_snapshot
+from tests._abicheck_subprocess import abicheck_command
 
 #: Real Debian cross-toolchain triples (``gcc-<ver>-<triple>`` package names).
 _DEBIAN_CROSS_TRIPLES = (
@@ -152,17 +153,13 @@ def test_cross_target_dump_keeps_what_the_host_dump_keeps(tmp_path: Path) -> Non
             env["PATH"] = f"{path_prefix}{os.pathsep}{env['PATH']}"
         out = tmp_path / f"{tag}.json"
         subprocess.run(
-            [
-                sys.executable,
-                "-m",
-                "abicheck",
-                "dump",
+            abicheck_command("dump",
                 str(lib),
                 "-H",
                 str(header),
                 "-o",
                 str(out),
-            ],
+            ),
             check=True,
             capture_output=True,
             env=env,

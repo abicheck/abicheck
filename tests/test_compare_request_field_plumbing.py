@@ -34,6 +34,7 @@ from abicheck.workflows.compare_input_adapters import (
 )
 from abicheck.workflows.request_inputs import InputSpec
 from abicheck.workflows.service_requests import CompareRequest
+from tests._abicheck_subprocess import abicheck_command
 
 _PACKAGE_PARENT = Path(abicheck.__file__).resolve().parents[1]
 
@@ -404,11 +405,7 @@ def _cli_config_run(
     report = workdir / f"cli-{category}-{level}.json"
     env = {**os.environ, "PYTHONPATH": str(_PACKAGE_PARENT)}
     proc = subprocess.run(
-        [
-            sys.executable,
-            "-m",
-            "abicheck",
-            "compare",
+        abicheck_command("compare",
             str(old),
             str(new),
             "--config",
@@ -417,7 +414,7 @@ def _cli_config_run(
             "all",
             "-o",
             f"json={report}",
-        ],
+        ),
         capture_output=True,
         text=True,
         env=env,

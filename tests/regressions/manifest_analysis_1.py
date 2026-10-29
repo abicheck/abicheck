@@ -342,6 +342,12 @@ ANALYSIS_1_BUG_CLASSES: tuple[BugClass, ...] = (
             # replay). Same name-level, one-for-one pairing as the inline pair.
             "tests/test_constexpr_constant_dedup.py",
             "tests/test_constexpr_constant_source_replay_e2e.py",
+            # The replay-twin table is the one owner of every source-replay
+            # duplicate pair; a new replay kind must be classified in it. The
+            # guard reads the emitter modules by AST scan, not a list.
+            "tests/test_source_replay_twin_table.py",
+            "tests/test_one_change_one_finding_matrix.py",
+            "tests/test_variable_identity_dedup.py",
             "tests/unit/compare/test_dedup_key.py",
             "tests/test_diff_namespaces.py",
             # workflows/cross_source_hygiene.py's own per-side OLD/NEW

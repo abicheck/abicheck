@@ -21,6 +21,7 @@ REPO_DIR = Path(__file__).resolve().parent.parent
 if str(REPO_DIR / "scripts") not in sys.path:
     sys.path.insert(0, str(REPO_DIR / "scripts"))
 import example_catalog  # noqa: E402
+from tests._abicheck_subprocess import abicheck_command
 
 EXAMPLES_DIR = example_catalog.CASES_DIR
 
@@ -343,7 +344,7 @@ def _run_dump(
     entirely rather than pointed at a nonexistent path, so the dump falls
     back to DWARF/symbol-only evidence.
     """
-    cmd = [sys.executable, "-m", "abicheck.cli", "dump", str(lib)]
+    cmd = abicheck_command("dump", str(lib))
     if header is not None:
         cmd += ["-H", str(header)]
     cmd += ["-o", str(snap)]
@@ -369,16 +370,12 @@ def _run_compare_and_assert(
 ) -> None:
     """Run abicheck compare and assert the verdict matches."""
     rc = subprocess.run(
-        [
-            sys.executable,
-            "-m",
-            "abicheck.cli",
-            "compare",
+        abicheck_command("compare",
             str(snap1),
             str(snap2),
             "-o",
             "json=-",
-        ],
+        ),
         capture_output=True,
         text=True,
         check=False,

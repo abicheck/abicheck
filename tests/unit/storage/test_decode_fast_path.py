@@ -39,6 +39,7 @@ from abicheck.storage.sectioned_document import (
 )
 from abicheck.storage.types_section_codec import TypesSection
 from tests.test_property_based import snapshot_st
+from tests._abicheck_subprocess import abicheck_command
 
 _FIXTURES = Path(__file__).resolve().parents[2] / "fixtures"
 _CORPUS = sorted((_FIXTURES / "schema").glob("v*.json")) + sorted(
@@ -135,11 +136,7 @@ def test_fast_path_matches_slow_path_on_a_real_header_graph_dump(
         pytest.skip("needs libz, zlib.h and castxml")
     out = tmp_path / "z.json"
     subprocess.run(
-        [
-            sys.executable,
-            "-m",
-            "abicheck",
-            "dump",
+        abicheck_command("dump",
             str(lib),
             "-H",
             str(header),
@@ -147,7 +144,7 @@ def test_fast_path_matches_slow_path_on_a_real_header_graph_dump(
             "headers",
             "-o",
             str(out),
-        ],
+        ),
         check=True,
         capture_output=True,
     )

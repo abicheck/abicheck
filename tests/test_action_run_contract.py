@@ -36,6 +36,7 @@ from pathlib import Path
 
 import _yaml_fast
 import pytest
+from tests._abicheck_subprocess import abicheck_command
 
 RUN_SH = Path(__file__).resolve().parents[1] / "action" / "run.sh"
 ACTION_YML = Path(__file__).resolve().parents[1] / "action.yml"
@@ -106,7 +107,7 @@ def _valid_flags(subcommand: str) -> set[str]:
     # don't have the curated/full split, so they keep plain --help.
     help_flag = "--help-all" if subcommand in ("compare", "dump", "scan") else "--help"
     out = subprocess.run(
-        [sys.executable, "-m", "abicheck", *parts, help_flag],
+        abicheck_command(*parts, help_flag),
         capture_output=True,
         text=True,
         check=True,

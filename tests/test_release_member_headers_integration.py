@@ -20,6 +20,7 @@ import sys
 from pathlib import Path
 
 import pytest
+from tests._abicheck_subprocess import abicheck_command
 
 pytestmark = [
     pytest.mark.integration,
@@ -69,11 +70,7 @@ def _build(
 def _compare(root: Path) -> tuple[int, dict, str]:
     out = root / "report.json"
     proc = subprocess.run(
-        [
-            sys.executable,
-            "-m",
-            "abicheck",
-            "compare",
+        abicheck_command("compare",
             str(root / "old/lib"),
             str(root / "new/lib"),
             "--header",
@@ -82,7 +79,7 @@ def _compare(root: Path) -> tuple[int, dict, str]:
             f"new={root / 'new/include'}",
             "-o",
             f"json={out}",
-        ],
+        ),
         env={**os.environ, "ABICHECK_AST_FRONTEND": "castxml"},
         capture_output=True,
         text=True,

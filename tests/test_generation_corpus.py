@@ -46,6 +46,7 @@ from abicheck.storage.versioning import (
     GENERATION_DRIFT_NOTICE_MARKER,
     RESOLVER_GENERATION,
 )
+from tests._abicheck_subprocess import abicheck_command
 
 CORPUS_ROOT = Path(__file__).parent / "fixtures" / "generations"
 #: The checkout under test. The subprocesses below run from a temp or fixture
@@ -285,11 +286,7 @@ def fresh_dump(tmp_path_factory: pytest.TempPathFactory) -> Path:
         pytest.fail(f"{' '.join(cmd)} failed:\n{built.stderr}")
     out = work / "fresh.json"
     dumped = subprocess.run(
-        [
-            sys.executable,
-            "-m",
-            "abicheck.cli",
-            "dump",
+        abicheck_command("dump",
             str(lib),
             "-H",
             str(SOURCES / "corpus.h"),
@@ -297,7 +294,7 @@ def fresh_dump(tmp_path_factory: pytest.TempPathFactory) -> Path:
             "1",
             "-o",
             str(out),
-        ],
+        ),
         capture_output=True,
         text=True,
         cwd=work,
@@ -338,15 +335,11 @@ def test_every_respelling_against_fresh_dump_is_a_declared_migration(
 def test_require_same_generation_refuses_a_frozen_baseline(fresh_dump: Path) -> None:
     baseline = CORPUS_ROOT / MANIFEST["entries"][str(max(FROZEN))]["snapshot"]
     refused = subprocess.run(
-        [
-            sys.executable,
-            "-m",
-            "abicheck.cli",
-            "compare",
+        abicheck_command("compare",
             str(baseline),
             str(fresh_dump),
             "--require-same-generation",
-        ],
+        ),
         capture_output=True,
         text=True,
         env=_ABICHECK_ENV,
@@ -354,15 +347,11 @@ def test_require_same_generation_refuses_a_frozen_baseline(fresh_dump: Path) -> 
     assert refused.returncode == 64, refused.stderr
     assert "re-dump baseline" in refused.stderr
     same = subprocess.run(
-        [
-            sys.executable,
-            "-m",
-            "abicheck.cli",
-            "compare",
+        abicheck_command("compare",
             str(fresh_dump),
             str(fresh_dump),
             "--require-same-generation",
-        ],
+        ),
         capture_output=True,
         text=True,
         env=_ABICHECK_ENV,

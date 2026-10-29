@@ -65,10 +65,9 @@ graph nodes):
   add + true remove in the flat diff, at reduced confidence.
 - **true add / true remove** — no candidate at all.
 
-**Not a candidate: fundamental types.** Before any tier runs, a node must name a
-user-declared entity (:func:`~.graph_reconcile_candidates.is_reconcilable_candidate`).
-A builtin such as ``float _Complex`` has no declaration, so it is never paired as
-a rename or move, however its parent position lines up: it is a true add/remove.
+**Not a candidate: fundamental types, or records of another layout.** A node must
+name a user-declared entity; ``float _Complex`` is never a rename or move, and records
+whose recorded size or alignment differ are not one declaration.
 
 **Reachability note: ``OUTCOME_MOVED`` needs a compound edit, not a pure
 move.** Every graph-node-id constructor across ``abicheck/buildsource/``
@@ -121,7 +120,7 @@ from ..model.source_graph_query import (
     decl_declaring_file_sets,
     representative_declaring_files,
 )
-from .graph_reconcile_candidates import is_reconcilable_candidate
+from .graph_reconcile_candidates import is_reconcilable_candidate, layout_contradicts
 from .graph_reconcile_outcome import (
     _OUTCOME_PROSE,
     COORDINATE_EVIDENCE_PARTIAL_DECLARING_FILE,
@@ -437,6 +436,8 @@ class _Reconciler:
         """
         oid = old_node.id
         new_node = next(n for n in kind_pass.new_list if n.id == new_id)
+        if layout_contradicts(old_node, new_node):
+            return
         old_files = self.old_declaring_files.get(oid, ())
         new_files = self.new_declaring_files.get(new_id, ())
         old_edge_file, new_edge_file = representative_declaring_files(
@@ -645,9 +646,8 @@ def _group_reconcilable_by_kind(
 ) -> dict[str, list[GraphNode]]:
     """Bucket *nodes* by kind, diverting every non-candidate.
 
-    A node that :func:`~.graph_reconcile_candidates.is_reconcilable_candidate`
-    rejects goes straight into *unreconcilable* (the result's true-added or
-    true-removed list): no tier ever sees it.
+    A node :func:`~.graph_reconcile_candidates.is_reconcilable_candidate` rejects
+    goes straight into *unreconcilable*: no tier sees it.
     """
     by_kind: dict[str, list[GraphNode]] = {}
     for n in nodes:

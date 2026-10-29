@@ -21,6 +21,7 @@ import pytest
 
 from abicheck.extract.headers.castxml.vector_spellings import (
     UNEXPRESSIBLE_TYPE_CLASSES,
+    castxml_declaration_keys,
     castxml_vector_spellings,
     clang_vector_spellings,
     has_vector_nodes,
@@ -157,3 +158,80 @@ def test_complex_typedef_and_field_join_to_clang_spelling() -> None:
     assert castxml_vector_spellings(root) == {"_6": "typedef:cf", "_7": "field:S::c"}
     resolved = resolve_vector_spellings(root, _CLANG_TYPEDEF_FIELD)
     assert resolved == {"_6": "_Complex float", "_7": "_Complex double"}
+
+
+# A complex element type reached through a pointer, an array and a typedef
+# chain. castxml wraps the one Unimplemented node in PointerType / ArrayType /
+# Typedef nodes; the declarations keyed here are the parameters and the return.
+_CASTXML_DECLARATORS = """\
+<CastXML>
+  <Namespace id="_0" name="::"/>
+  <Unimplemented id="_1" type_class="Complex"/>
+  <Typedef id="_2" name="cf" type="_1" context="_0"/>
+  <PointerType id="_3" type="_1"/>
+  <Typedef id="_4" name="cfp" type="_3" context="_0"/>
+  <ArrayType id="_5" type="_1" max="3"/>
+  <Function id="_6" name="h" returns="_1" mangled="h" context="_0">
+    <Argument name="p" type="_3"/>
+    <Argument name="q" type="_4"/>
+    <Argument name="a" type="_5"/>
+  </Function>
+</CastXML>
+"""
+
+_CLANG_DECLARATORS = {
+    "kind": "TranslationUnitDecl",
+    "inner": [
+        {"kind": "TypedefDecl", "name": "cf", "type": {"qualType": "_Complex float"}},
+        {
+            "kind": "TypedefDecl",
+            "name": "cfp",
+            "type": {"qualType": "_Complex float *"},
+        },
+        {
+            "kind": "FunctionDecl",
+            "name": "h",
+            "mangledName": "h",
+            "type": {
+                "qualType": "_Complex float (_Complex float *, cfp, _Complex float [4])"
+            },
+            "inner": [
+                {
+                    "kind": "ParmVarDecl",
+                    "name": "p",
+                    "type": {"qualType": "_Complex float *"},
+                },
+                {"kind": "ParmVarDecl", "name": "q", "type": {"qualType": "cfp"}},
+                {
+                    "kind": "ParmVarDecl",
+                    "name": "a",
+                    "type": {"qualType": "_Complex float [4]"},
+                },
+            ],
+        },
+    ],
+}
+
+
+def test_complex_pointer_array_and_typedef_chain_reach_the_element_node() -> None:
+    root = ET.fromstring(_CASTXML_DECLARATORS)
+    keys = castxml_declaration_keys(root)
+    # Every declaration that wraps the element node names it, in document order.
+    assert keys == {
+        "_1": [
+            "typedef:cf",
+            "typedef:cfp",
+            "param:h#0",
+            "param:h#1",
+            "param:h#2",
+            "return:h",
+        ]
+    }
+
+
+def test_pointer_array_and_typedef_spellings_resolve_to_the_element_spelling() -> None:
+    root = ET.fromstring(_CASTXML_DECLARATORS)
+    resolved = resolve_vector_spellings(root, _CLANG_DECLARATORS)
+    # One Unimplemented node, one spelling: the element type's, whichever
+    # declarator (pointer, typedef, array) the first known key came through.
+    assert resolved == {"_1": "_Complex float"}

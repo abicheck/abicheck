@@ -57,6 +57,7 @@ REPO_DIR = Path(__file__).resolve().parent.parent
 if str(REPO_DIR / "scripts") not in sys.path:
     sys.path.insert(0, str(REPO_DIR / "scripts"))
 import example_catalog  # noqa: E402
+from tests._abicheck_subprocess import abicheck_command
 
 EXAMPLES_DIR = example_catalog.CASES_DIR
 
@@ -194,17 +195,13 @@ def test_header_graph_reproduces_documented_finding(
         (libv2, "v2.h", new_json),
     ):
         result = subprocess.run(
-            [
-                sys.executable,
-                "-m",
-                "abicheck.cli",
-                "dump",
+            abicheck_command("dump",
                 str(lib),
                 "--header",
                 str(case_dir / header),
                 "-o",
                 str(out),
-            ],
+            ),
             cwd=REPO_DIR,
             capture_output=True,
             text=True,
@@ -213,16 +210,12 @@ def test_header_graph_reproduces_documented_finding(
 
     report_path = tmp_path / "report.json"
     result = subprocess.run(
-        [
-            sys.executable,
-            "-m",
-            "abicheck.cli",
-            "compare",
+        abicheck_command("compare",
             str(old_json),
             str(new_json),
             "-o",
             f"json={report_path}",
-        ],
+        ),
         cwd=REPO_DIR,
         capture_output=True,
         text=True,

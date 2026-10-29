@@ -24,6 +24,7 @@ import pytest
 from abicheck.model import AbiSnapshot, Fact, Function
 from abicheck.model.availability import FactStatus
 from abicheck.serialization import snapshot_from_dict, snapshot_to_dict
+from tests._abicheck_subprocess import abicheck_command
 
 pytestmark = pytest.mark.integration
 
@@ -73,7 +74,7 @@ def _require_castxml() -> None:
 
 def _run_abicheck(*args: str) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
-        [sys.executable, "-m", "abicheck", *args],
+        abicheck_command(*args),
         capture_output=True,
         text=True,
         check=False,

@@ -44,6 +44,7 @@ from abicheck.model.identity import EntityId
 from abicheck.policy.analysis_assurance._template_defaults import (
     template_default_gap,
 )
+from tests._abicheck_subprocess import abicheck_command
 
 _GAP = "template-parameter defaults"
 
@@ -289,11 +290,7 @@ def _compare(tmp: Path, backend: str, old_body: str, new_body: str) -> dict[str,
         header.write_text(_HEADER.format(body=body))
         out = tmp / f"{tag}.json"
         r = subprocess.run(
-            [
-                sys.executable,
-                "-m",
-                "abicheck",
-                "dump",
+            abicheck_command("dump",
                 "-H",
                 str(header),
                 "--config",
@@ -302,7 +299,7 @@ def _compare(tmp: Path, backend: str, old_body: str, new_body: str) -> dict[str,
                 "headers",
                 "-o",
                 str(out),
-            ],
+            ),
             capture_output=True,
             text=True,
             check=False,
@@ -311,16 +308,12 @@ def _compare(tmp: Path, backend: str, old_body: str, new_body: str) -> dict[str,
         snaps.append(out)
     report = tmp / "report.json"
     subprocess.run(
-        [
-            sys.executable,
-            "-m",
-            "abicheck",
-            "compare",
+        abicheck_command("compare",
             str(snaps[0]),
             str(snaps[1]),
             "-o",
             f"json={report}",
-        ],
+        ),
         capture_output=True,
         text=True,
         check=False,

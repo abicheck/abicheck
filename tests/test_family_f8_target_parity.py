@@ -64,6 +64,7 @@ from pathlib import Path
 import pytest
 
 from abicheck.serialization import load_snapshot
+from tests._abicheck_subprocess import abicheck_command
 
 _CASTXML = shutil.which("castxml")
 _CROSS = {
@@ -149,17 +150,13 @@ def _dump(tmp: Path, hs: HeaderSet, target: str | None, mutant: str | None = Non
         env["PYTHONPATH"] = f"{site}{os.pathsep}{env.get('PYTHONPATH', '')}"
     out = work / "snap.json"
     r = subprocess.run(
-        [
-            sys.executable,
-            "-m",
-            "abicheck",
-            "dump",
+        abicheck_command("dump",
             str(lib),
             "-H",
             str(header),
             "-o",
             str(out),
-        ],
+        ),
         capture_output=True,
         text=True,
         env=env,
@@ -386,17 +383,13 @@ def _dump_dir(tmp: Path, target: str | None, mutant: str | None = None):
         env["PYTHONPATH"] = f"{site}{os.pathsep}{env.get('PYTHONPATH', '')}"
     out = work / "snap.json"
     r = subprocess.run(
-        [
-            sys.executable,
-            "-m",
-            "abicheck",
-            "dump",
+        abicheck_command("dump",
             str(lib),
             "-H",
             str(include),
             "-o",
             str(out),
-        ],
+        ),
         capture_output=True,
         text=True,
         env=env,

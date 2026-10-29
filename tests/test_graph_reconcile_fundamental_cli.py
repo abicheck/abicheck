@@ -24,6 +24,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import pytest
+from tests._abicheck_subprocess import abicheck_command
 
 pytestmark = [
     pytest.mark.integration,
@@ -68,6 +69,36 @@ _SHAPES: dict[str, _Shape] = {
         new_body="_Complex double r(void) { return 0; }\n",
         expected_kind="func_return_changed",
     ),
+    # The element type reached through a pointer, an array, a return pointer and
+    # a typedef chain: castxml wraps the Unimplemented node in these declarators.
+    "pointer_param": _Shape(
+        old_header="void f(_Complex float *p);\n",
+        old_body="void f(_Complex float *p) { (void)p; }\n",
+        new_header="void f(_Complex double *p);\n",
+        new_body="void f(_Complex double *p) { (void)p; }\n",
+        expected_kind="func_params_changed",
+    ),
+    "array_field": _Shape(
+        old_header="struct S { _Complex float c[4]; int m; };\nvoid g(struct S *s);\n",
+        old_body="void g(struct S *s) { (void)s; }\n",
+        new_header="struct S { _Complex double c[4]; int m; };\nvoid g(struct S *s);\n",
+        new_body="void g(struct S *s) { (void)s; }\n",
+        expected_kind="type_field_type_changed",
+    ),
+    "pointer_return": _Shape(
+        old_header="_Complex float *r(void);\n",
+        old_body="_Complex float *r(void) { static _Complex float v; return &v; }\n",
+        new_header="_Complex double *r(void);\n",
+        new_body="_Complex double *r(void) { static _Complex double v; return &v; }\n",
+        expected_kind="func_return_changed",
+    ),
+    "typedef_chain_param": _Shape(
+        old_header="typedef _Complex float cf;\ntypedef cf *cfp;\nvoid f(cfp p);\n",
+        old_body="void f(cfp p) { (void)p; }\n",
+        new_header="typedef _Complex double cf;\ntypedef cf *cfp;\nvoid f(cfp p);\n",
+        new_body="void f(cfp p) { (void)p; }\n",
+        expected_kind="typedef_base_changed",
+    ),
 }
 
 _BACKENDS = {
@@ -110,11 +141,7 @@ def _compare(
         ),
     }
     result = subprocess.run(
-        [
-            sys.executable,
-            "-m",
-            "abicheck",
-            "compare",
+        abicheck_command("compare",
             str(old[0]),
             str(new[0]),
             "-H",
@@ -123,7 +150,7 @@ def _compare(
             f"new={new[1]}",
             "-o",
             f"json={report}",
-        ],
+        ),
         capture_output=True,
         text=True,
         timeout=300,

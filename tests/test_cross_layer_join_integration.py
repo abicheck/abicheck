@@ -31,6 +31,7 @@ import sys
 from pathlib import Path
 
 import pytest
+from tests._abicheck_subprocess import abicheck_command
 
 pytestmark = [
     pytest.mark.integration,
@@ -100,9 +101,7 @@ def dumps(tmp_path_factory: pytest.TempPathFactory) -> dict[str, Path]:
         )
         target = d / "snap.json"
         proc = _run(
-            [
-                "abicheck",
-                "dump",
+            abicheck_command("dump",
                 "liba.so",
                 "-H",
                 "a.h",
@@ -112,7 +111,7 @@ def dumps(tmp_path_factory: pytest.TempPathFactory) -> dict[str, Path]:
                 "--include-system-declarations",
                 "-o",
                 str(target),
-            ],
+            ),
             cwd=d,
         )
         assert proc.returncode == 0, proc.stderr
@@ -185,15 +184,13 @@ class TestDebugTypeJoinOnStoredDump:
 class TestCompareUsesTheJoins:
     def _compare(self, dumps: dict[str, Path], *extra: str) -> dict:
         proc = _run(
-            [
-                "abicheck",
-                "compare",
+            abicheck_command("compare",
                 str(dumps["v1"]),
                 str(dumps["v2"]),
                 "-o",
                 "json=-",
                 *extra,
-            ],
+            ),
             cwd=dumps["v1"].parent,
         )
         assert proc.returncode in (0, 2, 4), proc.stderr

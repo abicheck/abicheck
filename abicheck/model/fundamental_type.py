@@ -71,10 +71,12 @@ FUNDAMENTAL_KEYWORDS: frozenset[str] = frozenset(
         "__int128_t",
         "__uint128_t",
         "_BitInt",
+        "nullptr_t",
     }
 )
 
-_CV_TOKENS: frozenset[str] = frozenset(
+#: cv-qualifier keywords a declarator may carry around a fundamental type.
+CV_QUALIFIER_TOKENS: frozenset[str] = frozenset(
     {"const", "volatile", "restrict", "__restrict", "__restrict__"}
 )
 
@@ -112,7 +114,7 @@ def is_fundamental_type_spelling(spelling: str | None) -> bool:
         text = text[: text.index("(")]
     text = _ARRAY_RE.sub(" ", text)
     text = text.replace("*", " ").replace("&", " ")
-    tokens = [tok for tok in text.split() if tok not in _CV_TOKENS]
+    tokens = [tok for tok in text.split() if tok not in CV_QUALIFIER_TOKENS]
     if not tokens:
         return False
     if len(tokens) == 1 and _SIMD_TYPEDEF_RE.fullmatch(tokens[0]):
