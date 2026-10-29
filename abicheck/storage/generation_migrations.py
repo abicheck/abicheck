@@ -296,6 +296,17 @@ SPELLING_MIGRATIONS: Mapping[int, GenerationSpellingChange] = {
         "rewrite is needed (a baseline from an unreadable binary must be "
         "re-dumped, not rewritten)"
     ),
+    29: GenerationSpellingChange(
+        "a non-const variable declared inline with an arithmetic type "
+        "(inline int x = 1;) now records its initializer as its value, on both "
+        "frontends, and a const integral global the header declares without an "
+        "initializer (extern const int k; defined in a .cpp) takes its value from "
+        "the exported object's bytes. A header whose only C++ signal is an inline "
+        "variable is parsed as C++, not rejected as C. A baseline from an earlier "
+        "generation has no value for these variables, so a value change is not "
+        "compared until it is re-dumped; no type or name spelling changes, so no "
+        "rewrite is needed"
+    ),
 }
 
 #: Reasons that say nothing about what was audited; the bump gate refuses them.
