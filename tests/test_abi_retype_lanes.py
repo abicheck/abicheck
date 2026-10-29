@@ -63,7 +63,8 @@ _CLANG = {"ABICHECK_AST_FRONTEND": "clang"}
 #: (case id, old spelling, new spelling, ABI-identical). A spelling that starts
 #: with ``typedef `` declares ``tdef_t`` over the rest and is used by that name.
 CASES = [
-    ("vec8f_vs_double", "float __attribute__((vector_size(8)))", "double", True),
+    # One SSE register, but the callee reads two floats' bits as a double.
+    ("vec8f_vs_double", "float __attribute__((vector_size(8)))", "double", False),
     ("char_vs_schar", "char", "signed char", True),
     ("long_vs_llong", "long", "long long", True),
     ("i128_vs_u128", "__int128", "unsigned __int128", True),

@@ -55,9 +55,9 @@ def _oracle(a: AbiFundamental, b: AbiFundamental) -> bool:
         # Below 8 bytes a caller extends the value by the type's signedness.
         return a.encoding is b.encoding or a.size >= 8
     if cls == "vector":
-        # Any two vector-register values of one size agree: the lane split is
-        # not part of the register class.
-        return True
+        # One register, but the callee reads the caller's lanes as its own
+        # element type: a float4 passed where an int4 is read is wrong values.
+        return a.lanes == b.lanes and a.encoding is b.encoding
     # boolean: only the same boolean; opaque: only an identical fact (handled above).
     return cls == "boolean" and a.encoding is b.encoding
 
@@ -112,9 +112,11 @@ def test_equivalence_is_symmetric_and_reflexive_over_the_domain() -> None:
         (AbiFundamental(_S, 16, 16), AbiFundamental(_U, 16, 16), True),  # __int128
         (AbiFundamental(_S, 1, 1), AbiFundamental(_S, 1, 1), True),  # char/signed char
         (AbiFundamental(_U, 4, 4), AbiFundamental(_U, 4, 4), True),  # enum -> unsigned
-        # A float vector of 8 bytes and a double pass in the same register.
-        (AbiFundamental(_F, 8, 8, 2), AbiFundamental(_F, 8, 8), True),
-        (AbiFundamental(_S, 16, 16, 4), AbiFundamental(_F, 16, 16, 4), True),
+        # One vector register, but the callee reads the lanes as its own type:
+        # float2 bits read as a double, int4 bits read as float4, are wrong values.
+        (AbiFundamental(_F, 8, 8, 2), AbiFundamental(_F, 8, 8), False),
+        (AbiFundamental(_S, 16, 16, 4), AbiFundamental(_F, 16, 16, 4), False),
+        (AbiFundamental(_S, 16, 16, 4), AbiFundamental(_S, 16, 16, 8), False),
         # Sign at 4 or 1 or 2 bytes changes how a caller extends it: a break.
         (AbiFundamental(_S, 4, 4), AbiFundamental(_U, 4, 4), False),  # int/unsigned
         (

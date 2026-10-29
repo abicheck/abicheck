@@ -39,7 +39,9 @@ the level a caller can observe:
   differently from a 4-byte ``int``). An 8- or 16-byte scalar is the same
   register image either way.
 * ``SSE`` -- a float of 4 or 8 bytes, and a vector of at most 16 bytes. Both
-  travel in a vector register; the lane split is not part of the class.
+  travel in a vector register. Two vectors are equal only with the same lane
+  count and element encoding: ``float4`` and ``int4`` share the register, but
+  the callee reads the caller's float bits as integers.
 * ``BOOLEAN`` -- ``_Bool``. Its callers normalise the value to 0 or 1, so it
   is never equal to an integer, not even an unsigned char of the same size.
 * ``OPAQUE`` -- an x87 or quad float (16 bytes), or a vector over 16 bytes.
@@ -120,7 +122,8 @@ def abi_equivalent(old: AbiFundamental, new: AbiFundamental) -> bool:
 
     Identical facts are equal. Otherwise both must have the same size and
     alignment and the same register class; within ``INTEGER`` the signedness
-    must also match unless the size is 8 bytes or more.
+    must also match unless the size is 8 bytes or more, and within ``SSE`` the
+    lane count and element encoding must match.
     """
     if old == new:
         return True
@@ -132,7 +135,7 @@ def abi_equivalent(old: AbiFundamental, new: AbiFundamental) -> bool:
     if old_class is RegisterClass.INTEGER:
         return old.encoding is new.encoding or old.size >= 8
     if old_class is RegisterClass.SSE:
-        return True
+        return old.lanes == new.lanes and old.encoding is new.encoding
     # BOOLEAN with the same size and alignment is the same fact apart from
     # lanes, which a boolean scalar does not have; OPAQUE only matches itself.
     return old_class is RegisterClass.BOOLEAN and old.encoding is new.encoding
