@@ -27,6 +27,7 @@ from collections.abc import Callable
 from typing import Any
 
 from .extract.dwarf_subtree_index import drop_index
+from .model.cc_attributes import function_type_text
 
 log = logging.getLogger(__name__)
 
@@ -190,20 +191,14 @@ def subroutine_type_spelling(
     varargs: bool,
     pointer: bool,
 ) -> str:
-    """Spell a subroutine type the way the header backends spell a function type.
-
-    ``int (*)(int, void *)`` for a pointer to one, ``int (int)`` for the bare
-    type, a variadic ``...`` last, ``void`` for an empty list, and a trailing
-    ``__attribute__((ms_abi))`` for a non-default convention. The shape matches
-    castxml's and clang's, so a DWARF signature change reads like a header one.
-    """
-    params = [*param_names, "..."] if varargs else list(param_names)
-    params_text = ", ".join(params) if params else "void"
-    cc = subroutine_calling_convention(die)
-    suffix = f" __attribute__(({cc}))" if cc else ""
-    if pointer:
-        return f"{return_name} (*)({params_text}){suffix}"
-    return f"{return_name} ({params_text}){suffix}"
+    """Spell a DWARF subroutine type (see :func:`function_type_text`)."""
+    return function_type_text(
+        return_name,
+        param_names,
+        varargs=varargs,
+        pointer=pointer,
+        convention=subroutine_calling_convention(die),
+    )
 
 
 def subroutine_spelling(

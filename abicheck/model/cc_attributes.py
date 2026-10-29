@@ -48,3 +48,27 @@ CC_ATTRIBUTE_BASES = frozenset(
 
 def is_cc_attribute(token: str) -> bool:
     return token.split("(", 1)[0] in CC_ATTRIBUTE_BASES
+
+
+def function_type_text(
+    return_name: str,
+    param_names: list[str],
+    *,
+    varargs: bool,
+    pointer: bool,
+    convention: str | None,
+) -> str:
+    """Spell a function type the way the header backends spell one.
+
+    ``int (*)(int, void *)`` for a pointer to one, ``int (int)`` for the bare
+    type, a variadic ``...`` last, ``void`` for an empty list, and a trailing
+    ``__attribute__((ms_abi))`` for a non-default *convention*. Every reader
+    (castxml, clang, DWARF, PDB) spells a function type through this one shape,
+    so a signature change reads the same whichever backend found it.
+    """
+    params = [*param_names, "..."] if varargs else list(param_names)
+    params_text = ", ".join(params) if params else "void"
+    suffix = f" __attribute__(({convention}))" if convention else ""
+    if pointer:
+        return f"{return_name} (*)({params_text}){suffix}"
+    return f"{return_name} ({params_text}){suffix}"

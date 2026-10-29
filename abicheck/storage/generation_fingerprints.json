@@ -10,7 +10,7 @@
       "abicheck/dwarf_snapshot.py": "88b71da45c6583a1762e32cf54e0467db85f1f731c7cf8a6dc471deb00299130",
       "abicheck/dwarf_snapshot_datasources.py": "e337f8be3a8ae16350c0639d0be10670d4d5d1197108659fa210fcbbf8a5bdde",
       "abicheck/dwarf_unified.py": "9ecb70b59bb26674ac98ba14ad1211b4103e3a78426a91ed7901e59f1a7d9cdf",
-      "abicheck/dwarf_utils.py": "7bb1775eb0ebab1ee71835fda4505130d6d6c4d4f1dcdba8416036c744347d8d",
+      "abicheck/dwarf_utils.py": "faa6be4a5de6e58b3c6ba139dc6983b0c6404ed69c348f19d724fc56aa70f5d7",
       "abicheck/elf_metadata.py": "74ff1a0749e190ed4602666bab646921266a27657a8a27feb4c10b4fcd8e19af",
       "abicheck/extract/__init__.py": "011ec37fad96ea2035983eaaedeba0976940a570900f85db8c03bb7369af742a",
       "abicheck/extract/ar_archive.py": "6fdab7ed7390a20f087f9407eaa3988c0f8c658400bc0ea8c7e193271923956d",
@@ -82,7 +82,7 @@
       "abicheck/extract/headers/castxml/dumper.py": "dc28398e08932705d22199edd1b38d78faa677859d043b14f5943efdbf9c4988",
       "abicheck/extract/headers/castxml/duplicate_declarations.py": "977b85a15408fa9877b9b686f0bd913af9442e4da5b1d9292975bda7eff424f7",
       "abicheck/extract/headers/castxml/enums.py": "e616c768543061d71812378dd92cbcb7b8d00afbb734bcb7b4b5334ee34042aa",
-      "abicheck/extract/headers/castxml/function_type_cc.py": "13950bec3f153d3284e776c2a4d699e405283be338e329e9a61ebd546637173d",
+      "abicheck/extract/headers/castxml/function_type_cc.py": "4630d0378646f0d841d0b0f40cf7def08921b067056d002878d246060f35ea5c",
       "abicheck/extract/headers/castxml/functions.py": "128de0b76f5f400987e3dfa9f515bc868fcf9f200eb3e9e426218c9b2ef5b7b6",
       "abicheck/extract/headers/castxml/hidden_declarations.py": "500abf62faa042e1c33a3ef3897557e263f0c7b1060b60c323d8d34895f5b057",
       "abicheck/extract/headers/castxml/inline_variables.py": "60ee92e7a810d81f113a6f5fb4f218ea6287258948dc9a838fbdef37ef37ea32",
@@ -150,6 +150,7 @@
       "abicheck/extract/parse_failures.py": "2e87216b3af05b90487355abfe32f966cec0206e2ba1467005348994264abea4",
       "abicheck/extract/path_aliases.py": "e4df448bdadc691475adfca99c567df6aa76e5cb421d6faf5de1307d368d1560",
       "abicheck/extract/path_segments.py": "c96f59df6fc126e26c6ca2052c6040d3180aa49f6c1265029eeb7206f0466b22",
+      "abicheck/extract/pdb_procedure_spelling.py": "d433e3dfc1d264011b6456345d96966effa2386b12ab9629c2c055f92d393f9a",
       "abicheck/extract/pdb_scope.py": "d5c551c9ceec500c76670cf9ecf4a76f844e4aad2c4ed37f91ab7fc630988753",
       "abicheck/extract/progress.py": "69e7aed5482c82b2b2206ac0055631d2338c427c27064c64d6865041207bafc8",
       "abicheck/extract/public_header_identifiers.py": "274a3587f65239a214aa57b5f782fc1d06ab61637af54f219fe713d2ade486af",
@@ -171,16 +172,16 @@
       "abicheck/macho_metadata.py": "9b3fa13cbbc127fcf981289c4b15ff2aaabc6dfd10d7747a7262fd3cfda3e69e",
       "abicheck/pdb_metadata.py": "79beb794904dd26afaf7d1fa8e9fdf74d4d4dfd21f5c09b9764c45b253a2dc1f",
       "abicheck/pdb_model.py": "d79ccfac86f4889d8d9b2c745ee2dacd6132c1789c0ca77988aaf53bd50aea8a",
-      "abicheck/pdb_parser.py": "0e36976c17fbea1c7cfe98f9ede5713418624c69821eb9ce12cac6c9a736543f",
+      "abicheck/pdb_parser.py": "d03dd27cd9945b26a76d7169d1b0aa509b718791ee8d7a3a7eb7a693d035aca1",
       "abicheck/pdb_utils.py": "2ceeb517717a38b7bb5b024be589808e2251e797d80f405fea307b1f826a3d66",
       "abicheck/pe_metadata.py": "ac8e51fbc885e00c3e2201e66f869cbb62921898c1d685c0b1692430f0a3dc6d",
       "abicheck/sycl_metadata.py": "10d6bb8dbd898b6f43c66f898fd1a964790705cadb5addac9d5801e47b341758",
       "abicheck/symvers_metadata.py": "372737765cd132e6e87ed891dd465d2958e04debbef774e45212ceb3036871cb",
       "abicheck/type_metadata.py": "9997189de8dac522fd1db8be5ae491d811139503f83abaaded89038eb4aa9cdf"
     },
-    "fingerprint": "cf783509d48cefb16e93ca226756ca4b68053f12ac9fdbf72cbabc5ebc673cf2",
+    "fingerprint": "0f8458c974799cbd439a4397355fc9c45db4c471d539a7fe15f80e01a335e18d",
     "generation": 30,
-    "reason": "merge of the generation-29 branch tip 9cf35915a into the value-channel branch; generation 30 is this branch's bump, recorded over the merged sources"
+    "reason": "merge of the final generation-29 branch tip 88ceed912 into the value-channel branch; generation 30 is this branch's bump, recorded over the merged sources"
   },
   "resolver": {
     "files": {
