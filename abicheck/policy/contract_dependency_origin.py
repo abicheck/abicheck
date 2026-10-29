@@ -98,6 +98,12 @@ class DependencyInternals:
     ``record_names`` are the bare names of every record and enum the side
     declares, internal or not, or ``None`` when the side was not read. It is
     presence evidence, not an internal set: it moves nothing on its own.
+
+    ``types_read`` is false when the side's dependency types could not be
+    classified at all (no readable own root, e.g. a PE image's decorated
+    exports). Its empty ``types`` then means "not classified", not "nothing
+    is internal": the same findings stay in contract, but the two states are
+    distinct facts and a reader must not present the unread one as a result.
     """
 
     types: frozenset[str] = frozenset()
@@ -105,6 +111,7 @@ class DependencyInternals:
     symbols: frozenset[str] = frozenset()
     overload_stems: frozenset[str] = frozenset()
     record_names: frozenset[str] | None = None
+    types_read: bool = True
 
     def __bool__(self) -> bool:
         return bool(self.types or self.typedefs or self.symbols or self.overload_stems)

@@ -41,6 +41,7 @@ from ..model.build_mode_facts import (
 )
 from ..model.extraction_contract import ExtractionContract
 from ..model.fact import Fact
+from ..model.macho_facts import macho_export_linkage
 from ..name_classification import (
     has_anonymous_type_location,
     strip_anonymous_type_location,
@@ -61,6 +62,7 @@ from .closure_marking import (
 from .guards import decision_key, identity_text, mapping as _mapping_guard, strict_int
 
 if TYPE_CHECKING:
+    from ..model.declarations import Function, Variable
     from ..model.snapshot import AbiSnapshot
 
 
@@ -175,6 +177,33 @@ def _has_disagreeing_aliases(elf: Any, name: str) -> bool:
     return bool(elf.symbol_aliases.get(name)) and elf.unambiguous_symbol(name) is None
 
 
+def stamp_macho_elf_binding(snap: AbiSnapshot) -> None:
+    """Fill Function/Variable.elf_binding from the Mach-O export table.
+
+    A Mach-O export's linkage (weak definition or strong) is the same fact an
+    ELF symbol's binding is, so it fills the same field
+    (:func:`abicheck.model.macho_facts.macho_export_linkage`). Only a ``None``
+    is filled, and a name whose export linkage is itself unknown stays
+    ``None``. Used at dump time for a fresh Mach-O snapshot and on load for an
+    archived one that predates the field; the export table is stored in the
+    same snapshot, so the value is recovered rather than assumed.
+    """
+    macho = snap.macho
+    if macho is None:
+        return
+    linkage = macho_export_linkage(macho.exports)
+    decls: list[Function | Variable] = [
+        *snap.declarations.functions,
+        *snap.declarations.variables,
+    ]
+    for decl in decls:
+        if decl.elf_binding is None:
+            value = linkage.get(decl.mangled)
+            if value is not None:
+                decl.elf_binding = value
+                decl.elf_binding_fact = Fact.present(value)
+
+
 def backfill_missing_elf_binding(snap: AbiSnapshot) -> None:
     """Backfill Function/Variable.elf_binding from an already-loaded
     ``elf.symbols`` for a snapshot serialized before this field existed
@@ -201,6 +230,7 @@ def backfill_missing_elf_binding(snap: AbiSnapshot) -> None:
     answer for such a name, so the stored value is not kept.
     """
     if snap.elf is None:
+        stamp_macho_elf_binding(snap)
         return
     elf = snap.elf
     _clear_ambiguous_elf_facts(snap, elf)

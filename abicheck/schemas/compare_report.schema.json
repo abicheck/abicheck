@@ -1724,6 +1724,11 @@
         "type": "string"
       }
     },
+    "dependency_types_read": {
+      "type": "object",
+      "description": "Per binary-only side (`old`/`new`; a header-derived side is not listed), whether that side's dependency-internal types were classified (`true`) or could not be read (`false`). An unread side excludes nothing, so a `false` means the dependency-internal classification is unknown, never that nothing is internal. The matching coverage note is in `coverage_warnings`. Omitted when no side is binary only. Informational: never affects `verdict`, `severity` or any exit code.",
+      "additionalProperties": {"type": "boolean"}
+    },
     "undeclared_export_census": {
       "type": "object",
       "description": "Schema 6.7: per side (`old`/`new`), the census behind the undeclared-export coverage_warnings lines -- exported symbols the parsed headers did not declare, attributed to the guard macro of a preprocessor branch the parse excluded (`by_guard`, decided by the castxml run's own `-E -dD` output; only for a side whose headers were parsed in this run, since the scan is never stored in a snapshot) or else to a named cause (`by_cause`, the `sycl` name rule). A guard macro is one whose definition would enable the branch; an export under `defined(A) && defined(B)` counts for both. Emitted only when at least one export on some side is attributed. Informational: never affects `verdict`, `severity` or any exit code.",
