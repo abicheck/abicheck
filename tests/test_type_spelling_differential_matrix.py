@@ -246,7 +246,7 @@ IDENTICAL_CELLS: frozenset[tuple[str, str]] = frozenset(
 #: Identical cells whose spelling changes and that every lane must re-kind to
 #: ``abi_equivalent_type_changed`` (schema v69), never a break.
 _RETYPE_KEYS = frozenset(
-    {"char_vs_schar", "long_vs_llong", "i128_vs_u128", "enum_vs_uint", "atomic_int"}
+    {"char_vs_schar", "long_vs_llong", "i128_vs_u128", "enum_vs_uint"}
 )
 #: The kinds an ABI-identical retype must not carry: the break kinds it would
 #: be reported as without the fact (a spelling change at the slot).
@@ -259,6 +259,11 @@ _BREAK_RETYPE_KINDS = frozenset(
         "atomic_qualifier_changed",
     }
 )
+
+#: Layout-identical cells that are still a contract break: the oracle sees the
+#: same code, but atomicity is part of the interface (catalog case116), so the
+#: qualifier change must be reported as atomic_qualifier_changed and gate.
+_CONTRACT_BREAK_KEYS = frozenset({"atomic_int"})
 
 #: Pairs whose convention is carried by a returned function pointer.
 _RETURNED_CONVENTION_PAIRS = frozenset(
@@ -680,6 +685,12 @@ def test_matrix_cell(key: str, site: str, lane: str) -> None:
                 f"{key} return lane {lane}: the returned type's convention is "
                 f"reported as f's own convention: {kinds}"
             )
+        return
+    kinds = {change.get("kind") for change in changes}
+    if key in _CONTRACT_BREAK_KEYS:
+        assert code == 4 and "atomic_qualifier_changed" in kinds, (
+            f"{key} {site} lane {lane}: atomicity change not gated: {code} {kinds}"
+        )
         return
     # Negative half: an ABI-identical cell is never an ABI break.
     assert code != 4, (

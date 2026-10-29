@@ -28,11 +28,9 @@ import re
 from .detector_registry import registry
 from .diff_helpers import make_change
 from .diff_type_spellings import iter_type_slot_changes
-from .model import AbiSnapshot, FactStatus
-from .model.abi_fundamental import AbiFundamental, abi_equivalent
+from .model import AbiSnapshot
 from .model.change import Change
 from .model.change_catalog.kinds import ChangeKind
-from .model.fact import Fact
 
 # Match the _Atomic qualifier in either spelling: `_Atomic(T)` or `_Atomic T`.
 _ATOMIC_RE = re.compile(r"\b_Atomic\b")
@@ -40,22 +38,6 @@ _ATOMIC_RE = re.compile(r"\b_Atomic\b")
 
 def _has_atomic(type_str: str) -> bool:
     return bool(_ATOMIC_RE.search(type_str))
-
-
-def _abi_identical(
-    old_fact: Fact[AbiFundamental] | None, new_fact: Fact[AbiFundamental] | None
-) -> bool:
-    """Whether both slot facts are PRESENT and ABI-equal."""
-    if old_fact is None or new_fact is None:
-        return False
-    if (
-        old_fact.status is not FactStatus.PRESENT
-        or new_fact.status is not FactStatus.PRESENT
-        or old_fact.value is None
-        or new_fact.value is None
-    ):
-        return False
-    return abi_equivalent(old_fact.value, new_fact.value)
 
 
 @registry.detector("atomic_qualifier")
@@ -68,28 +50,6 @@ def _diff_atomic(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
         if old_a == new_a:
             continue
         direction = "qualifier added" if new_a else "qualifier removed"
-        if _abi_identical(ch.old_abi_fact, ch.new_abi_fact):
-            # Schema v69: both sides' slot facts are the same size, alignment and
-            # register class, so the qualifier changes no compiled interface
-            # (a source-level change only). Without facts on both sides the
-            # qualifier keeps its break, as before.
-            changes.append(
-                make_change(
-                    ChangeKind.ABI_EQUIVALENT_TYPE_CHANGED,
-                    symbol=ch.symbol,
-                    entity_discriminator=ch.owner,
-                    name=f"{ch.slot} of '{ch.symbol}'",
-                    detail=direction,
-                    old=ch.old_type,
-                    new=ch.new_type,
-                    description=(
-                        f"_Atomic {direction} on {ch.slot} of '{ch.symbol}': "
-                        f"{ch.old_type} -> {ch.new_type} (same size, alignment and "
-                        f"register class; a source-level change only)"
-                    ),
-                )
-            )
-            continue
         changes.append(
             make_change(
                 ChangeKind.ATOMIC_QUALIFIER_CHANGED,

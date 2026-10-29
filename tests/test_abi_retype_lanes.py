@@ -68,7 +68,9 @@ CASES = [
     ("long_vs_llong", "long", "long long", True),
     ("i128_vs_u128", "__int128", "unsigned __int128", True),
     ("enum_vs_uint", "enum PE_E", "unsigned int", True),
-    ("atomic_vs_int", "_Atomic int", "int", True),
+    # _Atomic is part of the interface contract (catalog case116): the
+    # qualifier change stays a break even where the layout is identical.
+    ("atomic_vs_int", "_Atomic int", "int", False),
     ("int_vs_uint", "int", "unsigned int", False),
     ("char_vs_uchar", "char", "unsigned char", False),
     ("bool_vs_uchar", "_Bool", "unsigned char", False),
