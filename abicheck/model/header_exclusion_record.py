@@ -95,7 +95,6 @@ def record_header_exclusions(
     exclude_headers: Sequence[str],
     *,
     extracted_now: bool = True,
-    matching: str = GLOB_MATCHING,
 ) -> AbiSnapshot:
     """*snapshot* carrying the ``--exclude-header`` patterns it was built under.
 
@@ -115,7 +114,7 @@ def record_header_exclusions(
     if not exclude_headers or not extracted_now:
         return snapshot
     snapshot.excluded_header_patterns = tuple(exclude_headers)
-    snapshot.excluded_header_matching = matching
+    snapshot.excluded_header_matching = GLOB_MATCHING
     return snapshot
 
 

@@ -42,12 +42,6 @@ from typing import Any
 import click
 
 
-def _param_from_cli(name: str) -> bool:
-    """True when parameter *name*'s value came from the command line (not default)."""
-    src = click.get_current_context().get_parameter_source(name)
-    return bool(src == click.core.ParameterSource.COMMANDLINE)
-
-
 def stated_options(ctx: click.Context) -> frozenset[str]:
     """The parameter names *ctx*'s invocation stated on the command line.
 

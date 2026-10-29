@@ -113,7 +113,7 @@ ChangeKind.__doc__ = (
 )
 
 
-def _changekind_missing(cls: type[ChangeKind], value: object) -> ChangeKind | None:
+def _changekind_missing(cls: type[ChangeKind], value: object) -> ChangeKind | None:  # noqa: ARG001 -- Enum._missing_ classmethod protocol
     # Back-compat: accept the pre-rename serialized value so reports and
     # policy files written before the evidence→buildsource rename still
     # deserialize. ``evidence_coverage_asymmetric`` was renamed to

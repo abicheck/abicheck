@@ -144,10 +144,11 @@ class LazyGraphField:
     def __init__(self, name: str) -> None:
         self._name = name
 
-    def __set_name__(self, owner: type, name: str) -> None:
+    def __set_name__(self, owner: type, name: str) -> None:  # noqa: ARG002 -- descriptor protocol
+
         self._name = name
 
-    def __get__(self, obj: Any, objtype: type | None = None) -> Any:
+    def __get__(self, obj: Any, objtype: type | None = None) -> Any:  # noqa: ARG002 -- descriptor protocol
         if obj is None:
             return None  # the dataclass field's own default
         value = obj.__dict__.get(self._name)

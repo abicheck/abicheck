@@ -95,9 +95,7 @@ def cap_non_gating(
     return shown, omitted
 
 
-def more_non_gating_line(
-    omitted: int, *, json_field: str = "changes", prefix: str = ""
-) -> str | None:
+def more_non_gating_line(omitted: int, *, json_field: str = "changes") -> str | None:
     """The disclosure for *omitted* non-gating findings, or ``None`` when none were cut.
 
     *json_field* names the machine-readable list that holds every finding.
@@ -105,7 +103,7 @@ def more_non_gating_line(
     if omitted <= 0:
         return None
     return (
-        f"{prefix}… and {omitted} more non-gating finding(s) not itemised here; "
+        f"… and {omitted} more non-gating finding(s) not itemised here; "
         f"every finding is in the machine-readable report (JSON `{json_field}`)."
     )
 

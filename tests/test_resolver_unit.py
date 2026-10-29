@@ -212,7 +212,6 @@ class TestBuildSearchOrder:
             depth=0,
         )
         result = _build_search_order(
-            soname="libfoo.so",
             requester_node=node,
             requester_dir=Path("/usr/bin"),
             propagated_rpaths=[],
@@ -236,7 +235,6 @@ class TestBuildSearchOrder:
             depth=0,
         )
         result = _build_search_order(
-            soname="libfoo.so",
             requester_node=node,
             requester_dir=Path("/usr/bin"),
             propagated_rpaths=[],
@@ -250,7 +248,6 @@ class TestBuildSearchOrder:
 
     def test_with_ld_library_path(self):
         result = _build_search_order(
-            soname="libfoo.so",
             requester_node=None,
             requester_dir=Path("/usr/bin"),
             propagated_rpaths=[],
@@ -264,7 +261,6 @@ class TestBuildSearchOrder:
 
     def test_with_sysroot_prefix(self):
         result = _build_search_order(
-            soname="libfoo.so",
             requester_node=None,
             requester_dir=Path("/usr/bin"),
             propagated_rpaths=[],
@@ -278,7 +274,6 @@ class TestBuildSearchOrder:
 
     def test_with_extra_dirs(self):
         result = _build_search_order(
-            soname="libfoo.so",
             requester_node=None,
             requester_dir=Path("/usr/bin"),
             propagated_rpaths=[],
@@ -301,7 +296,6 @@ class TestBuildSearchOrder:
             depth=0,
         )
         result = _build_search_order(
-            soname="libfoo.so",
             requester_node=node,
             requester_dir=Path("/usr/bin"),
             propagated_rpaths=["/propagated/dir"],
