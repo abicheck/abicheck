@@ -77,7 +77,7 @@
       "abicheck/extract/headers/backend_protocol.py": "144cbe76456b6bceaf56f0edd0f3398f171178a222c8b968d53f8a17ee05a21b",
       "abicheck/extract/headers/castxml/__init__.py": "cebb319d35840200904dde9fe4ad16489124b02327a50d8351b086844ee19943",
       "abicheck/extract/headers/castxml/backend.py": "2f9b1dfc17b3b0badb2739ab724a376ac32bc3d4a0b0c8908a3558468fb573f4",
-      "abicheck/extract/headers/castxml/calling_convention.py": "ab4cd4474d11eb0da2216b29393e9daf1dbcf94226204237fd4c0381adacbcbb",
+      "abicheck/extract/headers/castxml/calling_convention.py": "38db6aede90a97c6065beba27f0060776bedcbcc872ab3e9f60a166f963ed76f",
       "abicheck/extract/headers/castxml/context.py": "c4ecf8b6af95562a5d5c32eea8de28565a74cd35514f4f675059af493b0ad641",
       "abicheck/extract/headers/castxml/dumper.py": "dc28398e08932705d22199edd1b38d78faa677859d043b14f5943efdbf9c4988",
       "abicheck/extract/headers/castxml/duplicate_declarations.py": "977b85a15408fa9877b9b686f0bd913af9442e4da5b1d9292975bda7eff424f7",
@@ -179,9 +179,9 @@
       "abicheck/symvers_metadata.py": "372737765cd132e6e87ed891dd465d2958e04debbef774e45212ceb3036871cb",
       "abicheck/type_metadata.py": "9997189de8dac522fd1db8be5ae491d811139503f83abaaded89038eb4aa9cdf"
     },
-    "fingerprint": "0f8458c974799cbd439a4397355fc9c45db4c471d539a7fe15f80e01a335e18d",
+    "fingerprint": "8ac562c8bdf58a1e5884b303d58dc9baaaca75ae8cd5469e2f429de5ae84d9a4",
     "generation": 30,
-    "reason": "merge of the final generation-29 branch tip 88ceed912 into the value-channel branch; generation 30 is this branch's bump, recorded over the merged sources"
+    "reason": "generation 29 was the unreleased spelling generation; the heuristic that attributes a convention to the declaring function is narrowed to the returned declarator (calling_convention.py); the constant stays at 30 and the record follows the final source"
   },
   "resolver": {
     "files": {
