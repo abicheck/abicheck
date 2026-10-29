@@ -31,6 +31,10 @@ from collections.abc import Callable
 from dataclasses import replace
 from typing import TYPE_CHECKING
 
+from ..model.change_catalog.kind_variants import (
+    ROLLUP_MEMBER_KINDS,
+    rollup_member_kinds,
+)
 from .acknowledgment_breaks import (
     ACCEPTABLE_BREAK_VERDICTS,
     ACCEPTED_BREAK_APPLICATION_POINT,
@@ -146,6 +150,37 @@ def resolve_acknowledgments(
             ledger._records[index] = replace(  # noqa: SLF001
                 record, acknowledged_by=acknowledged_by, acknowledgment_rule=covered
             )
+    _carry_rollup_acknowledgments(ledger)
+
+
+def _carry_rollup_acknowledgments(ledger: DispositionLedger) -> None:
+    """Acknowledge each roll-up whose covered removals are all acknowledged.
+
+    A roll-up (``public_surface_shrank``) has no symbol a record can name, so
+    it cannot be acknowledged directly. It is acknowledged exactly when every
+    removal it summarises (the covered members, variants included, that were
+    not suppressed) carries an acknowledgment, and then it takes the first
+    covered removal's record. Acknowledgment never hides a finding, so the
+    roll-up stays visible with its verdict class; only its record changes.
+    """
+    records = ledger._records  # noqa: SLF001
+    for index, record in enumerate(records):
+        if record.kind not in ROLLUP_MEMBER_KINDS or record.acknowledged_by is not None:
+            continue
+        members = rollup_member_kinds(record.kind)
+        covered = [
+            r
+            for r in records
+            if r.kind in members and r.disposition is not Disposition.SUPPRESSED
+        ]
+        if not covered or any(r.acknowledged_by is None for r in covered):
+            continue
+        first = covered[0]
+        records[index] = replace(
+            record,
+            acknowledged_by=first.acknowledged_by,
+            acknowledgment_rule=first.acknowledgment_rule,
+        )
 
 
 def _changes_matched_by_ambiguous_records(
