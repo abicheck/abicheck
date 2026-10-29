@@ -118,7 +118,7 @@ class FunctionConstraintIndex:
                 self._record_concept(node, ns)
                 continue
             if kind == "FunctionTemplateDecl":
-                self._record_template(node, children)
+                self._record_template(children)
             elif kind in FUNCTION_NODE_KINDS:
                 trailing = [("trailing", c) for c in children if _is_expression(c)]
                 if trailing:
@@ -139,7 +139,7 @@ class FunctionConstraintIndex:
         else:
             self._concepts[key] = name
 
-    def _record_template(self, node: dict[str, Any], children: list[Any]) -> None:
+    def _record_template(self, children: list[Any]) -> None:
         found: list[tuple[str, dict[str, Any]]] = []
         position = 0
         for child in children:

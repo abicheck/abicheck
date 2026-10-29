@@ -281,7 +281,7 @@ class ResolvedArtifactPlan:
     def __enter__(self) -> ResolvedArtifactPlan:
         return self
 
-    def __exit__(
+    def __exit__(  # noqa: ARG002 -- context-manager protocol
         self,
         exc_type: type[BaseException] | None,
         exc: BaseException | None,

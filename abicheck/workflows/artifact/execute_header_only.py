@@ -72,7 +72,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from ...errors import ValidationError
-from .dump_execution_options import DumpExecutionOptions, _DumpAssuranceView
+from .dump_execution_options import _DumpAssuranceView
 from .dump_request import ResolvedDumpRequest
 from .execute import enforce_requested_depth
 
@@ -123,7 +123,7 @@ class HeaderOnlyDumpOutcome:
 
 
 def execute_header_only_dump_request(
-    resolved: ResolvedDumpRequest, options: DumpExecutionOptions
+    resolved: ResolvedDumpRequest,
 ) -> HeaderOnlyDumpOutcome:
     """Execute a binary-less, headers-only :class:`ResolvedDumpRequest`.
 
@@ -132,14 +132,6 @@ def execute_header_only_dump_request(
     :class:`~abicheck.model.AbiSnapshot` with ``platform=None`` (no ELF/PE/
     Mach-O metadata), ``from_headers=True``, and ``header_only=True`` --
     see that function's own docstring for the parse itself.
-
-    *options* is accepted for the identical reason
-    :func:`~abicheck.workflows.artifact.execute_source_only.
-    execute_source_only_dump_request` takes it -- parity of signature with
-    that sibling, even though a headers-only parse needs none of its
-    build/source-evidence fields today (``build_config``/``build_query``/
-    ``build_compile_db``/``changed_paths`` are all L3 concerns this path
-    does not reach).
 
     Raises:
         ValidationError: If neither a resolved header nor a

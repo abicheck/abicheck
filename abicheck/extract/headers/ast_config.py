@@ -761,7 +761,7 @@ def _build_castxml_command(
     ]
 
 
-def _build_clang_header_command(
+def _build_clang_header_command(  # noqa: ARG001 -- positional signature shared with _build_castxml_command; ~25 callers and cache-key tests patch it
     cc_bin: str,
     cc_id: str,
     extra_includes: list[Path],

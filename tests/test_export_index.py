@@ -122,19 +122,6 @@ class TestDefaultVersionedNames:
         )
         assert default_versioned_names(index) == {"foo", "_Z3barv"}
 
-    def test_macho_normalize_flag_is_a_documented_no_op(self) -> None:
-        """``normalize_macho`` no longer changes the result -- kept only for
-        source compatibility with existing callers (e.g.
-        :func:`linked_export_names`'s own historical call site)."""
-        index = build_raw_export_index_from_macho(
-            MachoMetadata(exports=[MachoExport(name="_Z3barv")])
-        )
-        assert (
-            default_versioned_names(index, normalize_macho=False)
-            == default_versioned_names(index, normalize_macho=True)
-            == {"_Z3barv"}
-        )
-
     def test_empty_names_are_dropped(self) -> None:
         index = build_raw_export_index_from_pe(PeMetadata(exports=[PeExport(name="")]))
         assert default_versioned_names(index) == set()

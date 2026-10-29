@@ -299,14 +299,14 @@ def _drop_one_twin(changes: list[Change], twin: ReplayTwin) -> list[Change]:
 
 
 def drop_replay_twins(
-    changes: Iterable[Change], twins: tuple[ReplayTwin, ...] = REPLAY_TWINS
+    changes: Iterable[Change],
 ) -> list[Change]:
     """Drop each source-replay copy that a header/binary finding already reports.
 
-    Applies every duplicate pair in *twins* in turn. A non-replay finding is
+    Applies every duplicate pair in :data:`REPLAY_TWINS` in turn. A non-replay finding is
     never dropped, and a replay finding with no twin is kept.
     """
     result = list(changes)
-    for twin in twins:
+    for twin in REPLAY_TWINS:
         result = _drop_one_twin(result, twin)
     return result
