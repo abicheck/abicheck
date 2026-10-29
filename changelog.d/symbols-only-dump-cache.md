@@ -1,0 +1,3 @@
+### Fixed
+
+- **A PE or Mach-O `compare` no longer re-extracts both binaries on every run** — the hard-removal export probe (`fold_l0_hard_removals`) re-resolves each side symbols-only whenever the snapshot carries no ELF symbol table, and the whole-snapshot cache refused every symbols-only dump, so each PE/Mach-O compare extracted both binaries a second time, cache or not. A symbols-only dump is now cached under its own key (`symbols_only` is folded into it, so it never shares an entry with a full dump of the same file), and a repeated compare of an unchanged pair extracts nothing. On the Windows integration lane this repeated work had pushed the job past its 40-minute limit.
