@@ -27,6 +27,7 @@ import sys
 from pathlib import Path
 
 import pytest
+
 from tests._abicheck_subprocess import abicheck_command
 
 pytestmark = [
@@ -141,7 +142,8 @@ def _build_so(root: Path, isa_flag: str, out: Path) -> Path:
 
 def _compare(old: Path, new: Path, report: Path) -> dict:
     subprocess.run(
-        abicheck_command("compare",
+        abicheck_command(
+            "compare",
             str(old),
             str(new),
             "-o",

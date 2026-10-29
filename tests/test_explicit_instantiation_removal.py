@@ -301,7 +301,8 @@ def _compare_case85(tmp_path: Path, frontend: str) -> dict:
     config.write_text(f"compile:\n  frontend: {frontend}\n  lang: c++\n")
     out = tmp_path / f"out-{frontend}.json"
     subprocess.run(
-        abicheck_command("compare",
+        abicheck_command(
+            "compare",
             str(tmp_path / "libfoo_v1.so"),
             str(tmp_path / "libfoo_v2.so"),
             "-H",

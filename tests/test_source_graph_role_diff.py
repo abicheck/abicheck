@@ -338,7 +338,8 @@ def test_cli_compare_reports_public_role_change(
         )
         out = tmp_path / f"{side}.json"
         dump = subprocess.run(
-            abicheck_command("dump",
+            abicheck_command(
+                "dump",
                 str(lib),
                 "--header",
                 str(header),
@@ -354,7 +355,8 @@ def test_cli_compare_reports_public_role_change(
 
     report = tmp_path / "report.json"
     result = subprocess.run(
-        abicheck_command("compare",
+        abicheck_command(
+            "compare",
             *map(str, dumps),
             "-o",
             f"json={report}",

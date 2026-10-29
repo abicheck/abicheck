@@ -51,6 +51,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+
 from tests._abicheck_subprocess import abicheck_command
 
 pytestmark = [

@@ -55,7 +55,8 @@ from example_case_runner import (  # noqa: E402
     run_ordered,
 )
 from source_smoke import SourceSmokeSpec, run_source_smoke  # noqa: E402
-from tests._abicheck_subprocess import abicheck_command
+
+from tests._abicheck_subprocess import abicheck_command  # noqa: E402
 
 EXAMPLES_DIR = (
     example_catalog.CASES_DIR
@@ -703,7 +704,8 @@ def _build_compare_cmd(
     counterparts when the respective build-source paths are provided, and
     always sets the scoping flag explicitly so verdicts are deterministic.
     """
-    cmd = abicheck_command("compare",
+    cmd = abicheck_command(
+        "compare",
         str(snap1),
         str(snap2),
         "-o",
@@ -770,7 +772,8 @@ def _build_compare_direct_cmd(
     not the dump/compare work itself, dominates wall time for small examples —
     this removes two of those three process starts per case.
     """
-    cmd = abicheck_command("compare",
+    cmd = abicheck_command(
+        "compare",
         str(v1_so),
         str(v2_so),
         "-o",

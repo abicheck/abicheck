@@ -34,7 +34,6 @@ from __future__ import annotations
 
 import json
 import subprocess
-import sys
 from pathlib import Path
 
 from abicheck.checker import compare
@@ -196,7 +195,8 @@ def main() -> int:
     old, new = load_snapshot(HERE / "old.json"), load_snapshot(HERE / "new.json")
     for mode in MODES:
         proc = subprocess.run(
-            abicheck_command("compare",
+            abicheck_command(
+                "compare",
                 str(HERE / "old.json"),
                 str(HERE / "new.json"),
                 "--contract",

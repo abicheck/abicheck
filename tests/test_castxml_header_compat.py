@@ -27,7 +27,6 @@ import os
 import platform
 import shutil
 import subprocess
-import sys
 from pathlib import Path
 from xml.etree.ElementTree import Element
 
@@ -165,7 +164,8 @@ def _dump(
     monkeypatch.setenv("XDG_CACHE_HOME", str(tmp / "cache"))
     out = tmp / f"{lib.stem}.json"
     subprocess.run(
-        abicheck_command("dump",
+        abicheck_command(
+            "dump",
             str(lib),
             "-H",
             str(header),

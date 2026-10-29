@@ -40,6 +40,7 @@ import sys
 from pathlib import Path
 
 import pytest
+
 from tests._abicheck_subprocess import abicheck_command
 
 pytestmark = [
@@ -105,9 +106,7 @@ def _build(tmp: Path, name: str, idx: int) -> tuple[Path, Path]:
 
 
 def _abicheck(*args: str) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(
-        abicheck_command(*args), capture_output=True, text=True
-    )
+    return subprocess.run(abicheck_command(*args), capture_output=True, text=True)
 
 
 def _dump(lib: Path, out: Path, header: Path | None) -> Path:

@@ -57,7 +57,6 @@ from __future__ import annotations
 import os
 import shutil
 import subprocess
-import sys
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -150,7 +149,8 @@ def _dump(tmp: Path, hs: HeaderSet, target: str | None, mutant: str | None = Non
         env["PYTHONPATH"] = f"{site}{os.pathsep}{env.get('PYTHONPATH', '')}"
     out = work / "snap.json"
     r = subprocess.run(
-        abicheck_command("dump",
+        abicheck_command(
+            "dump",
             str(lib),
             "-H",
             str(header),
@@ -383,7 +383,8 @@ def _dump_dir(tmp: Path, target: str | None, mutant: str | None = None):
         env["PYTHONPATH"] = f"{site}{os.pathsep}{env.get('PYTHONPATH', '')}"
     out = work / "snap.json"
     r = subprocess.run(
-        abicheck_command("dump",
+        abicheck_command(
+            "dump",
             str(lib),
             "-H",
             str(include),

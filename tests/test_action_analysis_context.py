@@ -42,7 +42,6 @@ from __future__ import annotations
 import json
 import os
 import subprocess
-import sys
 from pathlib import Path
 from typing import Any
 
@@ -254,7 +253,8 @@ class TestTheProducerWritesWhatTheConsumerReads:
         reports.mkdir(exist_ok=True)
         manifest = tmp_path / "manifest.json"
         _write_manifest(manifest)
-        args = abicheck_command("aggregate",
+        args = abicheck_command(
+            "aggregate",
             ".",
             "--manifest",
             str(manifest),
@@ -618,7 +618,8 @@ class TestTheAggregateActionRecordsIt:
             encoding="utf-8",
         )
         proc = subprocess.run(
-            abicheck_command("aggregate",
+            abicheck_command(
+                "aggregate",
                 ".",
                 "--discovered-only",
                 "-o",
@@ -647,7 +648,10 @@ class TestTheAggregateActionRecordsIt:
 #: across commands. Imported rather than written as a literal so a change to
 #: that convention is one edit, not a hunt through test files.
 from abicheck.frontends.cli.runtime import _EXIT_USAGE_ERROR  # noqa: E402
-from tests._abicheck_subprocess import abicheck_module_command
+from tests._abicheck_subprocess import (  # noqa: E402
+    abicheck_command,
+    abicheck_module_command,
+)
 
 
 class TestTheAggregateOptionAndRenderer:

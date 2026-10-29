@@ -21,7 +21,8 @@ REPO_DIR = Path(__file__).resolve().parent.parent
 if str(REPO_DIR / "scripts") not in sys.path:
     sys.path.insert(0, str(REPO_DIR / "scripts"))
 import example_catalog  # noqa: E402
-from tests._abicheck_subprocess import abicheck_command
+
+from tests._abicheck_subprocess import abicheck_command  # noqa: E402
 
 EXAMPLES_DIR = example_catalog.CASES_DIR
 
@@ -370,7 +371,8 @@ def _run_compare_and_assert(
 ) -> None:
     """Run abicheck compare and assert the verdict matches."""
     rc = subprocess.run(
-        abicheck_command("compare",
+        abicheck_command(
+            "compare",
             str(snap1),
             str(snap2),
             "-o",

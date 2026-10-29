@@ -71,7 +71,7 @@
       "abicheck/extract/header_scan_memo.py": "56f79b5316354b938b08a5f29779c3aaf40481892d947784ec2adb48ab5e83fb",
       "abicheck/extract/header_text.py": "b43a88d7bf1d2e601bb908c78f04cb07e552f9c59f03b678ecc85788b3d146e4",
       "abicheck/extract/headers/__init__.py": "70af0d3a16882783444077004b7a434a295505579fbbca219ce103f72074ad03",
-      "abicheck/extract/headers/ast_config.py": "de5ece7dd88114d4407382c6e34fbfaad5fb92920189ea7583212c814e6f737e",
+      "abicheck/extract/headers/ast_config.py": "da30f9b6338f13162854aeafcade5ffd2435a52c3d3ceaf30399b76aa98e71ea",
       "abicheck/extract/headers/ast_config_cpp20_chains.py": "ceeadbcb1d8e2eaac5eb325a3fb7c668614ce605bc04bb03835fcc4957e53c97",
       "abicheck/extract/headers/backend_plan.py": "1f02babf0ead52a65e4fa08dff8ce5b2a9d60feb1d02d22e7db30ee050cf8717",
       "abicheck/extract/headers/backend_protocol.py": "144cbe76456b6bceaf56f0edd0f3398f171178a222c8b968d53f8a17ee05a21b",
@@ -179,7 +179,7 @@
       "abicheck/symvers_metadata.py": "372737765cd132e6e87ed891dd465d2958e04debbef774e45212ceb3036871cb",
       "abicheck/type_metadata.py": "9997189de8dac522fd1db8be5ae491d811139503f83abaaded89038eb4aa9cdf"
     },
-    "fingerprint": "aa1bcdd9fe3531d562ceb081c77d28e9d9fe8475cd6434d0bf3515baf2fa0cd7",
+    "fingerprint": "b4bd8a53122c45d304ad1ca90acadf9460b9ee7432867cc23969f25191934a04",
     "generation": 31,
     "reason": "castxml complex, bit-precise integer, and pointer/array/typedef-wrapped element types join their clang spelling instead of the literal Unimplemented; the clang join's cache schema is 10"
   },

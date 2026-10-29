@@ -12,6 +12,7 @@ from pathlib import Path
 from types import ModuleType
 
 import pytest
+
 from tests._abicheck_subprocess import abicheck_command
 
 

@@ -77,11 +77,8 @@ _CLANG_CACHE_SCHEMA_VERSION = 4
 #: resolved inline vector returns: a sidecar from before this is keyed wrongly.
 #: Bumped to 8 when the cached document started carrying the preprocessor-
 #: excluded declaration scan (`extract.headers.preprocessor_branches`).
-#: Bumped to 9 when the clang join also spells complex and bit-precise integer
-#: types (castxml's ``Complex``/``BitInt`` ``Unimplemented``): an entry written
-#: before this left them as the one literal ``Unimplemented`` spelling.
-#: Bumped to 10 when the clang join also resolves a pointer, reference, array or
-#: typedef chain around such an element type (keys the element node).
+#: Bumped to 9 for complex/bit-int types, and to 10 for their pointer, array and
+#: typedef-chain forms: entries before them left those as ``Unimplemented``.
 _CASTXML_CACHE_SCHEMA_VERSION = 10
 
 #: Which module constant salts each backend's header-parse cache key. Named,

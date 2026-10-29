@@ -25,9 +25,7 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
 
-def abicheck_module_command(
-    module: str, *args: str | os.PathLike[str]
-) -> list[str]:
+def abicheck_module_command(module: str, *args: str | os.PathLike[str]) -> list[str]:
     """The argv that runs ``python -m <module>`` of this interpreter with *args*.
 
     For a package entry point other than the CLI (``abicheck.frontends.action.cli``).

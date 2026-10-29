@@ -54,7 +54,6 @@ from __future__ import annotations
 
 import pathlib
 import subprocess
-import sys
 
 import pytest
 from click.testing import CliRunner

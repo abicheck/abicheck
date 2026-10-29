@@ -38,10 +38,10 @@ import json
 import os
 import shutil
 import subprocess
-import sys
 from pathlib import Path
 
 import pytest
+
 from tests._abicheck_subprocess import abicheck_command
 
 pytestmark = [
@@ -116,7 +116,8 @@ def _run_compare(tmp_path: Path, grown: str, *, operand: str) -> tuple[int, dict
     # very fix (`snapshot_cache._SNAPSHOT_CACHE_VERSION`'s v33 note).
     env = {**os.environ, "XDG_CACHE_HOME": str(tmp_path / "cache")}
     proc = subprocess.run(
-        abicheck_command("compare",
+        abicheck_command(
+            "compare",
             str(old_op),
             str(new_op),
             "--header",

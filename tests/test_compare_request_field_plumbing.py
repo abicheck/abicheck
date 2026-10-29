@@ -405,7 +405,8 @@ def _cli_config_run(
     report = workdir / f"cli-{category}-{level}.json"
     env = {**os.environ, "PYTHONPATH": str(_PACKAGE_PARENT)}
     proc = subprocess.run(
-        abicheck_command("compare",
+        abicheck_command(
+            "compare",
             str(old),
             str(new),
             "--config",

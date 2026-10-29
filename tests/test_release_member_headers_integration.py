@@ -20,6 +20,7 @@ import sys
 from pathlib import Path
 
 import pytest
+
 from tests._abicheck_subprocess import abicheck_command
 
 pytestmark = [
@@ -70,7 +71,8 @@ def _build(
 def _compare(root: Path) -> tuple[int, dict, str]:
     out = root / "report.json"
     proc = subprocess.run(
-        abicheck_command("compare",
+        abicheck_command(
+            "compare",
             str(root / "old/lib"),
             str(root / "new/lib"),
             "--header",

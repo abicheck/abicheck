@@ -33,6 +33,7 @@ from pathlib import Path
 
 import pytest
 from elftools.elf.elffile import ELFFile
+
 from tests._abicheck_subprocess import abicheck_command
 
 pytestmark = [

@@ -33,6 +33,7 @@ import sys
 from pathlib import Path
 
 import pytest
+
 from tests._abicheck_subprocess import abicheck_command
 
 _SCRIPTS = Path(__file__).resolve().parent.parent / "scripts"
@@ -320,7 +321,6 @@ class TestMeasuredSubprocessesGetANeutralCwd:
         # unverified. A package named `abicheck` in the cwd wins over the
         # installed one.
         import subprocess
-        import sys
 
         pkg = tmp_path / "abicheck"
         pkg.mkdir()

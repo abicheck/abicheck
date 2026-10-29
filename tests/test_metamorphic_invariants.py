@@ -61,13 +61,13 @@ import pytest
 from defusedxml.ElementTree import parse as defused_parse
 
 from abicheck.model.change_catalog.assembled import REGISTRY
+from tests._abicheck_subprocess import abicheck_command
 from tests._detector_mutations import registry_twins
 from tests.test_example_autodiscovery import (
     _build_libs_for_case,
     _find_sources,
     _header_list,
 )
-from tests._abicheck_subprocess import abicheck_command
 
 pytestmark = [
     pytest.mark.integration,

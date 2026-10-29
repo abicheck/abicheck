@@ -24,7 +24,8 @@ _REPO = Path(__file__).resolve().parent.parent
 if str(_REPO / "scripts") not in sys.path:
     sys.path.insert(0, str(_REPO / "scripts"))
 import example_catalog  # noqa: E402
-from tests._abicheck_subprocess import abicheck_command
+
+from tests._abicheck_subprocess import abicheck_command  # noqa: E402
 
 _GBR_PATH = _REPO / "scripts" / "generate_benchmark_report.py"
 

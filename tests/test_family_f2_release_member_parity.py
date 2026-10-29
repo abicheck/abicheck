@@ -28,10 +28,10 @@ import json
 import os
 import shutil
 import subprocess
-import sys
 from pathlib import Path
 
 import pytest
+
 from tests._abicheck_subprocess import abicheck_command
 
 _A_H = "#pragma once\nint a_fn(int v);\n"

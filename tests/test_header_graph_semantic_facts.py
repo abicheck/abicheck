@@ -46,6 +46,7 @@ import sys
 from pathlib import Path
 
 import pytest
+
 from tests._abicheck_subprocess import abicheck_command
 
 pytestmark = [
@@ -215,7 +216,8 @@ def _dump_header_graph(d: Path, lib: Path, header: Path, *, streamed: bool):
         "ABICHECK_HEADER_GRAPH_STREAM_MIN_MIB": "0" if streamed else "100000",
     }
     proc = subprocess.run(
-        abicheck_command("dump",
+        abicheck_command(
+            "dump",
             str(lib),
             "-H",
             str(header),

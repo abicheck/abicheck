@@ -31,7 +31,6 @@ import os
 import re
 import shutil
 import subprocess
-import sys
 from pathlib import Path
 from typing import Any
 
@@ -286,7 +285,8 @@ def fresh_dump(tmp_path_factory: pytest.TempPathFactory) -> Path:
         pytest.fail(f"{' '.join(cmd)} failed:\n{built.stderr}")
     out = work / "fresh.json"
     dumped = subprocess.run(
-        abicheck_command("dump",
+        abicheck_command(
+            "dump",
             str(lib),
             "-H",
             str(SOURCES / "corpus.h"),
@@ -335,7 +335,8 @@ def test_every_respelling_against_fresh_dump_is_a_declared_migration(
 def test_require_same_generation_refuses_a_frozen_baseline(fresh_dump: Path) -> None:
     baseline = CORPUS_ROOT / MANIFEST["entries"][str(max(FROZEN))]["snapshot"]
     refused = subprocess.run(
-        abicheck_command("compare",
+        abicheck_command(
+            "compare",
             str(baseline),
             str(fresh_dump),
             "--require-same-generation",
@@ -347,7 +348,8 @@ def test_require_same_generation_refuses_a_frozen_baseline(fresh_dump: Path) -> 
     assert refused.returncode == 64, refused.stderr
     assert "re-dump baseline" in refused.stderr
     same = subprocess.run(
-        abicheck_command("compare",
+        abicheck_command(
+            "compare",
             str(fresh_dump),
             str(fresh_dump),
             "--require-same-generation",

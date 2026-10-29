@@ -39,6 +39,7 @@ import sys
 from pathlib import Path
 
 import pytest
+
 from tests._abicheck_subprocess import abicheck_command
 
 pytestmark = [
@@ -113,7 +114,8 @@ def _dump(
     )
     out = d / "snap.json"
     proc = subprocess.run(
-        abicheck_command("dump",
+        abicheck_command(
+            "dump",
             str(lib),
             "-H",
             str(header),

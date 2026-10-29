@@ -145,7 +145,8 @@ def test_case89_finding_is_independent_of_debug_evidence(tmp_path: Path) -> None
                 # Apple's strip accepts; -g exists only in GNU strip.
                 subprocess.run(["strip", "-S", str(lib)], check=True)
             subprocess.run(
-                abicheck_command("dump",
+                abicheck_command(
+                    "dump",
                     str(lib),
                     "-H",
                     str(_CASE / f"{v}.h"),
@@ -156,7 +157,8 @@ def test_case89_finding_is_independent_of_debug_evidence(tmp_path: Path) -> None
                 capture_output=True,
             )
         out = subprocess.run(
-            abicheck_command("compare",
+            abicheck_command(
+                "compare",
                 str(work / "v1.json"),
                 str(work / "v2.json"),
                 "-o",

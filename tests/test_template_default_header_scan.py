@@ -210,7 +210,6 @@ _GAP = "template-parameter defaults (castxml cannot record them)"
 
 def _compare_cli(tmp_path, old: AbiSnapshot, new: AbiSnapshot, *formats: str) -> Path:
     import subprocess
-    import sys
 
     old_path = tmp_path / "old.json"
     new_path = tmp_path / "new.json"
@@ -218,7 +217,8 @@ def _compare_cli(tmp_path, old: AbiSnapshot, new: AbiSnapshot, *formats: str) ->
     new_path.write_text(snapshot_to_json(new), encoding="utf-8")
     out = tmp_path / "report.json"
     subprocess.run(
-        abicheck_command("compare",
+        abicheck_command(
+            "compare",
             str(old_path),
             str(new_path),
             "-o",

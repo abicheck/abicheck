@@ -17,6 +17,7 @@ import sys
 from pathlib import Path
 
 import pytest
+
 from tests._abicheck_subprocess import abicheck_command
 
 pytestmark = [
@@ -135,7 +136,8 @@ def test_callback_signature_change_is_reported_through_headers(
     new_so, new_hp = _build(tmp_path / "new", "api", new_h, defs)
     report = tmp_path / "report.json"
     proc = subprocess.run(
-        abicheck_command("compare",
+        abicheck_command(
+            "compare",
             str(old_so),
             str(new_so),
             "-H",

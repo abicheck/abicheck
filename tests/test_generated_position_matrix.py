@@ -24,6 +24,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import pytest
+
 from tests._abicheck_subprocess import abicheck_command
 
 pytestmark = [
@@ -128,7 +129,8 @@ def _run_compare(workdir: Path, change: str, position: str, level: str) -> CellR
     new_lib, new_h = _write_version(workdir, change, position, 2, level)
     report = workdir / f"report_{change}_{position}_{level.replace('-', '')}.json"
     proc = subprocess.run(
-        abicheck_command("compare",
+        abicheck_command(
+            "compare",
             str(old_lib),
             str(new_lib),
             "--header",

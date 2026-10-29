@@ -14,6 +14,7 @@ import sys
 from pathlib import Path
 
 import pytest
+
 from tests._abicheck_subprocess import abicheck_command
 
 pytestmark = [
@@ -64,7 +65,8 @@ def _compare(
     old_so, old_h = old
     new_so, new_h = new
     return subprocess.run(
-        abicheck_command("compare",
+        abicheck_command(
+            "compare",
             str(old_so),
             str(new_so),
             "-H",

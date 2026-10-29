@@ -33,7 +33,6 @@ from __future__ import annotations
 import json
 import shutil
 import subprocess
-import sys
 from pathlib import Path
 from typing import Any
 
@@ -290,7 +289,8 @@ def _compare(tmp: Path, backend: str, old_body: str, new_body: str) -> dict[str,
         header.write_text(_HEADER.format(body=body))
         out = tmp / f"{tag}.json"
         r = subprocess.run(
-            abicheck_command("dump",
+            abicheck_command(
+                "dump",
                 "-H",
                 str(header),
                 "--config",
@@ -308,7 +308,8 @@ def _compare(tmp: Path, backend: str, old_body: str, new_body: str) -> dict[str,
         snaps.append(out)
     report = tmp / "report.json"
     subprocess.run(
-        abicheck_command("compare",
+        abicheck_command(
+            "compare",
             str(snaps[0]),
             str(snaps[1]),
             "-o",

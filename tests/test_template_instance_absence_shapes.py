@@ -41,7 +41,6 @@ import itertools
 import json
 import shutil
 import subprocess
-import sys
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -220,7 +219,8 @@ def _build(root: Path, *, overloads: int, uses: bool, keep_first: bool = True) -
     proc = subprocess.run(cmd, capture_output=True, text=True)
     assert proc.returncode == 0, (cmd, proc.stderr)
     out = root / "snap.json"
-    dump = abicheck_command("dump",
+    dump = abicheck_command(
+        "dump",
         str(root / "libt.so"),
         "-H",
         str(root / "api.h"),
@@ -233,7 +233,8 @@ def _build(root: Path, *, overloads: int, uses: bool, keep_first: bool = True) -
 
 
 def _compare_kinds(old: Path, new: Path, depth: str) -> set[str]:
-    cmd = abicheck_command("compare",
+    cmd = abicheck_command(
+        "compare",
         str(old),
         str(new),
         "--depth",

@@ -93,7 +93,8 @@ def _build(root: Path, std: str) -> Path:
 def _dump(so: Path, out: Path, cwd: Path) -> subprocess.CompletedProcess[str]:
     include = so.parent / "inc"
     return subprocess.run(
-        abicheck_command("dump",
+        abicheck_command(
+            "dump",
             str(so),
             "-H",
             str(include / "xv" / "simd.h"),

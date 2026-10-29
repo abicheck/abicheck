@@ -32,6 +32,8 @@ from pathlib import Path
 
 import pytest
 
+from tests._abicheck_subprocess import abicheck_command
+
 pytestmark = [
     pytest.mark.integration,
     pytest.mark.skipif(not sys.platform.startswith("linux"), reason="g++ ELF fixture"),
@@ -243,33 +245,24 @@ def _compare(
     if lane == "dump+compare":
         for name, header, so in (("old", old_h, old_so), ("new", new_h, new_so)):
             dumped = _run(
-                [
-                    sys.executable,
-                    "-m",
-                    "abicheck",
+                abicheck_command(
                     "dump",
                     str(so),
                     "-H",
                     str(header),
                     "-o",
                     str(d / f"{name}.json"),
-                ],
+                ),
                 d,
             )
             assert dumped.returncode == 0, dumped.stderr
-        args = [
-            sys.executable,
-            "-m",
-            "abicheck",
+        args = abicheck_command(
             "compare",
             str(d / "old.json"),
             str(d / "new.json"),
-        ]
+        )
     else:
-        args = [
-            sys.executable,
-            "-m",
-            "abicheck",
+        args = abicheck_command(
             "compare",
             str(old_so),
             str(new_so),
@@ -277,7 +270,7 @@ def _compare(
             f"old={old_h}",
             "-H",
             f"new={new_h}",
-        ]
+        )
     out = d / "report.json"
     result = _run([*args, "-o", f"json={out}"], d)
     assert out.exists(), result.stderr[-800:]

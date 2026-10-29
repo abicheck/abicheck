@@ -31,6 +31,7 @@ import sys
 from pathlib import Path
 
 import pytest
+
 from tests._abicheck_subprocess import abicheck_command
 
 pytestmark = [
@@ -101,7 +102,8 @@ def dumps(tmp_path_factory: pytest.TempPathFactory) -> dict[str, Path]:
         )
         target = d / "snap.json"
         proc = _run(
-            abicheck_command("dump",
+            abicheck_command(
+                "dump",
                 "liba.so",
                 "-H",
                 "a.h",
@@ -184,7 +186,8 @@ class TestDebugTypeJoinOnStoredDump:
 class TestCompareUsesTheJoins:
     def _compare(self, dumps: dict[str, Path], *extra: str) -> dict:
         proc = _run(
-            abicheck_command("compare",
+            abicheck_command(
+                "compare",
                 str(dumps["v1"]),
                 str(dumps["v2"]),
                 "-o",

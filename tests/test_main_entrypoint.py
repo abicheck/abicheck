@@ -9,6 +9,7 @@ import subprocess
 import sys
 
 import pytest
+
 from tests._abicheck_subprocess import abicheck_command
 
 
@@ -56,7 +57,7 @@ def test_run_as_module_invokes_cli(monkeypatch: pytest.MonkeyPatch) -> None:
     ``--help`` makes Click exit cleanly with SystemExit(0), which exercises
     the ``if __name__ == "__main__": main()`` guard.
     """
-    monkeypatch.setattr(sys, "argv", abicheck_command("--help"))
+    monkeypatch.setattr(sys, "argv", ["abicheck", "--help"])
     # Drop the cached submodule so run_module executes it fresh as __main__
     # without the "found in sys.modules" RuntimeWarning.
     monkeypatch.delitem(sys.modules, "abicheck.__main__", raising=False)

@@ -31,11 +31,11 @@ from __future__ import annotations
 import os
 import re
 import subprocess
-import sys
 from pathlib import Path
 
 import _yaml_fast
 import pytest
+
 from tests._abicheck_subprocess import abicheck_command
 
 RUN_SH = Path(__file__).resolve().parents[1] / "action" / "run.sh"

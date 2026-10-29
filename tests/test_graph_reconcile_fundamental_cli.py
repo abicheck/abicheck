@@ -24,6 +24,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import pytest
+
 from tests._abicheck_subprocess import abicheck_command
 
 pytestmark = [
@@ -141,7 +142,8 @@ def _compare(
         ),
     }
     result = subprocess.run(
-        abicheck_command("compare",
+        abicheck_command(
+            "compare",
             str(old[0]),
             str(new[0]),
             "-H",

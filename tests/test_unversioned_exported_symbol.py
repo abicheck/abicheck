@@ -324,8 +324,7 @@ def _objdump_bindings(lib: Path) -> dict[str, ElfVersionBinding]:
 def _audit(lib: Path) -> list[str]:
     """``unversioned_exported_symbol`` findings of ``compare LIB LIB``."""
     proc = subprocess.run(
-        abicheck_command("compare", str(lib), str(lib))
-        + ["-o", "json=-"],
+        abicheck_command("compare", str(lib), str(lib)) + ["-o", "json=-"],
         capture_output=True,
         text=True,
         check=False,

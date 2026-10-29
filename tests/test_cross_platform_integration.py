@@ -18,6 +18,7 @@ import tempfile
 from pathlib import Path
 
 import pytest
+
 from tests._abicheck_subprocess import abicheck_command
 
 # ---------------------------------------------------------------------------
@@ -279,7 +280,8 @@ class TestMachoIntegration:
             # Dump both
             for lib, out in [(old, "old.json"), (new, "new.json")]:
                 r = subprocess.run(
-                    abicheck_command("dump",
+                    abicheck_command(
+                        "dump",
                         str(lib),
                         "-o",
                         str(td_path / out),
@@ -292,7 +294,8 @@ class TestMachoIntegration:
 
             # Compare
             cmp = subprocess.run(
-                abicheck_command("compare",
+                abicheck_command(
+                    "compare",
                     str(td_path / "old.json"),
                     str(td_path / "new.json"),
                     "-o",
@@ -476,7 +479,8 @@ class TestPeIntegration:
             # Dump both
             for lib, out in [(old, "old.json"), (new, "new.json")]:
                 r = subprocess.run(
-                    abicheck_command("dump",
+                    abicheck_command(
+                        "dump",
                         str(lib),
                         "-o",
                         str(td_path / out),
@@ -492,7 +496,8 @@ class TestPeIntegration:
             # encoding="utf-8" so the *parent* decodes the pipe correctly.
             env = {**subprocess.os.environ, "PYTHONUTF8": "1"}
             cmp = subprocess.run(
-                abicheck_command("compare",
+                abicheck_command(
+                    "compare",
                     str(td_path / "old.json"),
                     str(td_path / "new.json"),
                     "-o",

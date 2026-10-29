@@ -26,6 +26,7 @@ import sys
 from pathlib import Path
 
 import pytest
+
 from tests._abicheck_subprocess import abicheck_command
 
 pytestmark = [
@@ -144,7 +145,8 @@ def test_c_surface_return_change_detected_with_header(
     base_h.write_text(_header(bits=32))
     new_h = rust_root / "ret.h"
     new_h.write_text(_header(bits=64))
-    cmd = abicheck_command("compare",
+    cmd = abicheck_command(
+        "compare",
         str(base_so),
         str(new),
         "-H",

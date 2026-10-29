@@ -25,7 +25,6 @@ from __future__ import annotations
 import os
 import shutil
 import subprocess
-import sys
 from pathlib import Path
 
 import pytest
@@ -153,7 +152,8 @@ def test_cross_target_dump_keeps_what_the_host_dump_keeps(tmp_path: Path) -> Non
             env["PATH"] = f"{path_prefix}{os.pathsep}{env['PATH']}"
         out = tmp_path / f"{tag}.json"
         subprocess.run(
-            abicheck_command("dump",
+            abicheck_command(
+                "dump",
                 str(lib),
                 "-H",
                 str(header),

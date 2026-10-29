@@ -30,13 +30,13 @@ import os
 import re
 import shutil
 import subprocess
-import sys
 import tempfile
 from dataclasses import dataclass
 from functools import cache
 from pathlib import Path
 
 import pytest
+
 from tests._abicheck_subprocess import abicheck_command
 
 pytestmark = pytest.mark.integration

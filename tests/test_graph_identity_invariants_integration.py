@@ -32,6 +32,7 @@ import sys
 from pathlib import Path
 
 import pytest
+
 from tests._abicheck_subprocess import abicheck_command
 
 pytestmark = [
@@ -92,7 +93,8 @@ def dumps(tmp_path_factory: pytest.TempPathFactory) -> dict[str, Path]:
     for fe in FRONTENDS:
         target = d / f"{fe}.json"
         proc = subprocess.run(
-            abicheck_command("dump",
+            abicheck_command(
+                "dump",
                 str(d / "liba.so"),
                 "-H",
                 str(d / "a.hpp"),

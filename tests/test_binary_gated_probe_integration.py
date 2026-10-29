@@ -466,7 +466,8 @@ def _compare(
     headers: tuple[Path, Path] | None,
     extra: list[str] | None = None,
 ) -> list[dict]:
-    cmd = abicheck_command("compare",
+    cmd = abicheck_command(
+        "compare",
         str(old),
         str(new),
         "-o",

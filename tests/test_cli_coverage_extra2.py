@@ -543,13 +543,13 @@ def test_relocated_snapshot_helpers_resolve_under_direct_module_execution(
     caught it because in-process imports always see the fully-executed module.
     """
     import subprocess
-    import sys
 
     src = tmp_path / "src"
     src.mkdir()
     (src / "foo.h").write_text("int foo(void);\n")
     proc = subprocess.run(
-        abicheck_command("dump",
+        abicheck_command(
+            "dump",
             "--sources",
             str(src),
             "-o",

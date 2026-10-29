@@ -1,7 +1,7 @@
 """Tests for naming collision clarity (6a-6c)."""
 
 import subprocess
-import sys
+
 from tests._abicheck_subprocess import abicheck_command
 
 

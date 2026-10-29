@@ -23,6 +23,7 @@ import sys
 from pathlib import Path
 
 import pytest
+
 from tests._abicheck_subprocess import abicheck_command
 
 pytestmark = [
@@ -80,7 +81,8 @@ def _tree(root: Path, members: tuple[str, ...], *, config: bool) -> Path:
 def _compare(root: Path, *operands: str) -> dict:
     out = root / "report.json"
     result = subprocess.run(
-        abicheck_command("compare",
+        abicheck_command(
+            "compare",
             *operands,
             "-H",
             "include",

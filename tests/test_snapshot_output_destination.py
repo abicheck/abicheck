@@ -158,7 +158,6 @@ class TestCliOutputContract:
         """Redirection is a supported transport, not a mistake -- so this must
         keep holding, and the docs may keep showing `| jq` examples."""
         import subprocess
-        import sys
 
         so, include = self._library(tmp_path)
         proc = subprocess.run(
