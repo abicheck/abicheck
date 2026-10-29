@@ -23,8 +23,8 @@
     "abicheck/compare/edge_query.py(export_coverage_records)": 70,
     "abicheck/compare/edge_query.py(header_coverage_record)": 112,
     "abicheck/compare/enum_sentinel.py(identifier_tokens)": 36,
-    "abicheck/compare/fact_comparison.py(_comparability_side)": 2059,
-    "abicheck/compare/fact_comparison.py(compare_facts)": 920,
+    "abicheck/compare/fact_comparison.py(_comparability_side)": 2837,
+    "abicheck/compare/fact_comparison.py(compare_facts)": 1305,
     "abicheck/compare/finding_dedup.py(_dedup_enum_same_kind.<locals>._key)": 40,
     "abicheck/compare/finding_dedup.py(enum_canonical_names)": 28,
     "abicheck/compare/finding_identity/change_kinds.py(_is_symbol_level_kind)": 145,
@@ -161,6 +161,7 @@
     "abicheck/fact_provenance.py(func_fact_key)": 318,
     "abicheck/model/castxml_spelling_artifacts.py(has_unresolved_component)": 3431,
     "abicheck/model/castxml_spelling_artifacts.py(is_castxml_opaque_function_type)": 78,
+    "abicheck/model/change_catalog/kind_variants.py(expand_variant_overrides)": 742,
     "abicheck/model/change_catalog/registry.py(ChangeKindRegistry.description_template_for)": 620,
     "abicheck/model/comparison_memo.py(comparison_memo_active)": 200,
     "abicheck/model/contract_finding_relevance.py(contract_relevance_of)": 756,
@@ -235,9 +236,10 @@
     "abicheck/model/signature_normalization.py(canonicalize_function_signature_param_type)": 563,
     "abicheck/model/snapshot.py(AbiSnapshot.canonical_ir)": 488,
     "abicheck/model/snapshot.py(AbiSnapshot.declarations)": 4675,
-    "abicheck/model/snapshot.py(AbiSnapshot.function_map)": 186,
+    "abicheck/model/snapshot.py(AbiSnapshot.function_map)": 570,
     "abicheck/model/snapshot.py(AbiSnapshot.index)": 196,
-    "abicheck/model/snapshot.py(AbiSnapshot.variable_map)": 28,
+    "abicheck/model/snapshot.py(AbiSnapshot.type_by_name)": 312,
+    "abicheck/model/snapshot.py(AbiSnapshot.variable_map)": 108,
     "abicheck/model/snapshot_identity_table.py(identities_for_snapshot)": 56,
     "abicheck/model/snapshot_reliability.py(both_header_aware)": 126,
     "abicheck/model/snapshot_reliability.py(family_reliable)": 218,
@@ -305,5 +307,5 @@
   },
   "mode": "default",
   "n": 40,
-  "total": 237400
+  "total": 240081
 }

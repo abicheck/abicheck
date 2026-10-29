@@ -120,6 +120,7 @@ _SECTION_FIELDS: Mapping[str, tuple[str, ...]] = {
         "typedefs",
         "typedefs_qualified",
         "typedef_entity_ids",
+        "typedef_abi_facts",
         "constants",
         "constant_entity_ids",
         "sycl",

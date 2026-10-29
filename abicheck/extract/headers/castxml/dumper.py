@@ -77,6 +77,7 @@ from ....model import (
     Variable,
     Visibility,
 )
+from ....model.abi_fundamental import AbiFundamental
 from ....model.declaration_headers import attributed
 from ....model.export_index import ExportMatch
 from ....model.identity import (
@@ -598,6 +599,19 @@ class _CastxmlParser:
             self._qualified_name,
             self._declaring_header,
         )
+
+    def parse_typedef_abi_facts(self) -> dict[str, Fact[AbiFundamental]]:
+        """Schema v69: each typedef's target ABI fact, keyed like
+        :meth:`parse_typedefs_qualified` (a typedef with no fundamental target
+        has no entry)."""
+        facts: dict[str, Fact[AbiFundamental]] = {}
+        for el, _ in _typedefs_helpers.iter_typedef_entries(
+            self._typedef_els, self._is_builtin_element, self._underlying_type_name
+        ):
+            fact = castxml_type_abi_fact(self._ctx, el.get("type", ""))
+            if fact is not None:
+                facts[self._qualified_name(el)] = fact
+        return facts
 
     def parse_typedef_entity_ids(self) -> dict[str, EntityId]:
         """``EntityId`` sidecar for :meth:`parse_typedefs_qualified` (ADR-063

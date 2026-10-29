@@ -15,4 +15,9 @@
   older baseline classifies as before. A DWARF pointer declared `restrict` is also
   no longer counted one level deeper, and a restrict-only difference is no longer
   reported as a parameter change. The extractor generation is 32 and the snapshot
-  schema is 69.
+  schema is 69. A typedef retargeted between ABI-identical types is refined the
+  same way (`typedef_base_changed` becomes the compatible retype), and the clang
+  frontend (`ABICHECK_AST_FRONTEND=clang`, and the castxml sidecar) records the same
+  facts from its builtin types. A `restrict` qualifier on a parameter stays a
+  header-tier finding (`param_restrict_added` / `param_restrict_changed`): DWARF
+  does not report it, since the declared interface is only in the headers.

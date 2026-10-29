@@ -168,36 +168,28 @@ PAIRS: dict[str, Pair] = {
         # LP64): the same size and register, and the widening probe agrees.
         # Their spelling changes, so every lane must classify them as a
         # source-level retype, never an ABI break (schema v69).
-        # The typedef site is not legal for these retypes: a typedef's own
-        # retarget is typedef_base_changed, which carries no slot fact (the
-        # schema-v69 facts are on params, fields, returns and variables only), so
-        # it stays a break. Recorded in docs/contribute/known-gaps.
         Pair(
             "char_vs_schar",
             "char {n}",
             "signed char {n}",
-            sites=("param", "field", "return"),
             integral=True,
         ),
         Pair(
             "long_vs_llong",
             "long {n}",
             "long long {n}",
-            sites=("param", "field", "return"),
             integral=True,
         ),
         Pair(
             "i128_vs_u128",
             "__int128 {n}",
             "unsigned __int128 {n}",
-            sites=("param", "field", "return"),
             integral=True,
         ),
         Pair(
             "enum_vs_uint",
             "enum PE_E {n}",
             "unsigned int {n}",
-            sites=("param", "field", "return"),
             pre1="enum PE_E { PE_A, PE_B };",
             integral=True,
         ),
@@ -244,6 +236,10 @@ IDENTICAL_CELLS: frozenset[tuple[str, str]] = frozenset(
         ("enum_vs_uint", "param"),
         ("enum_vs_uint", "field"),
         ("enum_vs_uint", "return"),
+        ("char_vs_schar", "typedef"),
+        ("long_vs_llong", "typedef"),
+        ("i128_vs_u128", "typedef"),
+        ("enum_vs_uint", "typedef"),
     }
 )
 

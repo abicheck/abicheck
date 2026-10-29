@@ -2,10 +2,11 @@
 
 # Detector specification matrix
 
-One row per `ChangeKind` (423 total). Columns fuse the verdict partition (`checker_policy`), default policy (`policy_for`), the weakest evidence layer at which the kind becomes detectable (`scripts/evidence_tiers`), and the example case(s) that demonstrate the kind (`catalog/ground_truth.json`). The **Examples** column is capped at 4 links per kind; the full mapping is in `detector-spec.json`.
+One row per `ChangeKind` (424 total). Columns fuse the verdict partition (`checker_policy`), default policy (`policy_for`), the weakest evidence layer at which the kind becomes detectable (`scripts/evidence_tiers`), and the example case(s) that demonstrate the kind (`catalog/ground_truth.json`). The **Examples** column is capped at 4 links per kind; the full mapping is in `detector-spec.json`.
 
 | ChangeKind | Category | Default verdict | Severity | Min evidence | Doc slug | Examples |
 |---|---|---|---|---|---|---|
+| `abi_equivalent_type_changed` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L1 | `abi_equivalent_type_changed` | — |
 | `abi_relevant_build_flag_changed` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L3 | `abi_relevant_build_flag_changed` | [case98](examples/case98_cxx_standard_floor_raised.md) |
 | `abi_surface_explosion` | quality | `COMPATIBLE` | `warning` | unspecified | `abi_surface_explosion` | — |
 | `abi_tag_changed` | breaking | `BREAKING` | `error` | L0 | `abi_tag_changed` | [case113](examples/case113_abi_tag_changed.md) |

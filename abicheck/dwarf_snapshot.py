@@ -28,6 +28,7 @@ included (DWARF × ELF intersection).
 from __future__ import annotations
 
 import collections
+import dataclasses
 import logging
 from dataclasses import dataclass, replace
 from pathlib import Path
@@ -93,6 +94,7 @@ from .model import (
     is_cxx_runtime_library,
     record_layout_facts,
 )
+from .model.abi_fundamental import AbiFundamental
 from .model.export_index import ExportMatch, match_export
 from .model.identity import (
     EntityId,
@@ -126,6 +128,10 @@ class DwarfDeclarations:
     enums: list[EnumType]
     typedefs: dict[str, str]
     typedef_entity_ids: dict[str, EntityId]
+    #: Schema v69: each typedef's target ABI fact (see AbiSnapshot.typedef_abi_facts).
+    typedef_abi_facts: dict[str, Fact[AbiFundamental]] = dataclasses.field(
+        default_factory=dict
+    )
 
 
 def extract_dwarf_declarations(
@@ -157,6 +163,7 @@ def extract_dwarf_declarations(
         enums=builder.enums,
         typedefs=builder.typedefs,
         typedef_entity_ids=builder.typedef_entity_ids,
+        typedef_abi_facts=builder.typedef_abi_facts,
     )
 
 
@@ -246,6 +253,8 @@ class _DwarfSnapshotBuilder:
         # counterpart to constant_entity_ids: constexpr constants are a
         # header-AST-only concept DWARF doesn't carry.
         self.typedef_entity_ids: dict[str, EntityId] = {}
+        # Schema v69: each typedef's target ABI fact, first wins like typedefs.
+        self.typedef_abi_facts: dict[str, Fact[AbiFundamental]] = {}
 
         # Type resolution cache: (cu_offset, die_offset) -> (name, byte_size)
         self._type_cache: dict[tuple[int, int], tuple[str, int]] = {}
@@ -1460,6 +1469,10 @@ class _DwarfSnapshotBuilder:
         # dumper_castxml.py's/dumper_clang.py's parse_typedef_entity_ids).
         self.typedef_entity_ids[qualified] = entity_id_for_typedef(scope_path, name)
 
+        if qualified not in self.typedef_abi_facts:
+            target_fact = _type_abi_fact(die, CU)
+            if target_fact is not None:
+                self.typedef_abi_facts[qualified] = target_fact
         if qualified in self.typedefs:
             return  # first wins
 

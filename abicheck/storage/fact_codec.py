@@ -51,7 +51,12 @@ from .fact_backfill import (
     apply_legacy_fact_backfill as apply_legacy_fact_backfill,
     evidenced_producers as evidenced_producers,
 )
-from .fact_decode import _build_fact, decode_abi_slot_fact, decode_fact
+from .fact_decode import (
+    _build_fact,
+    abi_fundamental_from_json,
+    decode_fact,
+    decode_fact_with_legacy_presence,
+)
 from .fact_payload_validation import (
     validated_identities,
     validated_template_param_defaults,
@@ -72,6 +77,7 @@ from .fact_schema_versions import (
     _MIN_SCHEMA_VERSION_FOR_SPECIALIZATION_FACT as _MIN_SPEC_FACT,
     _MIN_SCHEMA_VERSION_FOR_SURFACE_FACTS,
     _MIN_SCHEMA_VERSION_FOR_TEMPLATE_PARAM_DEFAULTS,
+    _MIN_SCHEMA_VERSION_FOR_TYPE_ABI_FACTS,
     _MIN_SCHEMA_VERSION_FOR_TYPE_IDENTITY_FACTS,
     _MIN_SCHEMA_VERSION_FOR_TYPEFIELD_CV_FACTS,
     _MIN_SCHEMA_VERSION_FOR_TYPEFIELD_VALUE_FACTS,
@@ -477,8 +483,11 @@ def decode_variable_facts(v: dict[str, Any], schema_version: int) -> dict[str, A
                 schema_version,
                 min_schema_version=_MIN_SCHEMA_VERSION_FOR_SURFACE_FACTS,
             ),
-            "type_abi_fact": decode_abi_slot_fact(
-                v.get("type_abi_fact"), schema_version
+            "type_abi_fact": decode_fact(
+                v.get("type_abi_fact"),
+                schema_version,
+                min_schema_version=_MIN_SCHEMA_VERSION_FOR_TYPE_ABI_FACTS,
+                value_decoder=abi_fundamental_from_json,
             ),
             "type_identities_fact": validated_identities(
                 decode_fact(
@@ -600,8 +609,11 @@ def decode_function_facts(f: dict[str, Any], schema_version: int) -> dict[str, A
                     min_schema_version=_MIN_SCHEMA_VERSION_FOR_TYPE_IDENTITY_FACTS,
                 )
             ),
-            "return_type_abi_fact": decode_abi_slot_fact(
-                f.get("return_type_abi_fact"), schema_version
+            "return_type_abi_fact": decode_fact(
+                f.get("return_type_abi_fact"),
+                schema_version,
+                min_schema_version=_MIN_SCHEMA_VERSION_FOR_TYPE_ABI_FACTS,
+                value_decoder=abi_fundamental_from_json,
             ),
             "template_param_defaults_fact": validated_template_param_defaults(
                 decode_fact(
@@ -663,31 +675,6 @@ def _with_frozenset_value(fact: Fact[Any] | None) -> Fact[Any] | None:
     return dataclasses.replace(fact, value=frozenset(fact.value))
 
 
-def decode_fact_with_legacy_presence(
-    owner_dict: dict[str, Any],
-    legacy_key: str,
-    schema_version: int,
-    min_schema_version: int,
-) -> Fact[Any] | None:
-    """:func:`decode_fact` for a case-(a) field, honouring the *legacy* key too.
-
-    A case-(a) field's own resting value (``False``, ``AccessLevel.PUBLIC``)
-    is a legitimate value, so a document that omits the legacy key entirely
-    is genuinely saying "no evidence", not "confirmed false" — but the
-    caller's own ``f.get("is_const", False)`` default hands the owning
-    dataclass a real ``False`` regardless, which its ``__post_init__``
-    bridge then reads as an explicitly-supplied value and backfills to
-    ``Fact.present(False)``. Returning :meth:`Fact.not_collected` here for
-    that case is what keeps "the document never carried this fact" from
-    being laundered into a confirmed one. Every other case defers to
-    :func:`decode_fact` unchanged.
-    """
-    raw = owner_dict.get(f"{legacy_key}_fact")
-    if not raw and schema_version < min_schema_version and legacy_key not in owner_dict:
-        return Fact.not_collected()
-    return decode_fact(raw, schema_version, min_schema_version=min_schema_version)
-
-
 def _build_kind_fact(raw: Any) -> Fact[Any]:
     fact = _build_fact(raw)
     return fact if fact.value is None else replace(fact, value=ParamKind(fact.value))
@@ -731,7 +718,12 @@ def decode_param_facts(p: dict[str, Any], schema_version: int) -> dict[str, Any]
                 min_schema_version=_MIN_SCHEMA_VERSION_FOR_TYPE_IDENTITY_FACTS,
             )
         ),
-        "type_abi_fact": decode_abi_slot_fact(p.get("type_abi_fact"), schema_version),
+        "type_abi_fact": decode_fact(
+            p.get("type_abi_fact"),
+            schema_version,
+            min_schema_version=_MIN_SCHEMA_VERSION_FOR_TYPE_ABI_FACTS,
+            value_decoder=abi_fundamental_from_json,
+        ),
     }
 
 
@@ -789,5 +781,10 @@ def decode_field_facts(fld: dict[str, Any], schema_version: int) -> dict[str, An
                 min_schema_version=_MIN_SCHEMA_VERSION_FOR_TYPE_IDENTITY_FACTS,
             )
         ),
-        "type_abi_fact": decode_abi_slot_fact(fld.get("type_abi_fact"), schema_version),
+        "type_abi_fact": decode_fact(
+            fld.get("type_abi_fact"),
+            schema_version,
+            min_schema_version=_MIN_SCHEMA_VERSION_FOR_TYPE_ABI_FACTS,
+            value_decoder=abi_fundamental_from_json,
+        ),
     }

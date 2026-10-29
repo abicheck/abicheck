@@ -59,7 +59,6 @@ Each entry's status line says what is still open. A PARTIAL entry's write-up als
 
 ### Report and detector coverage
 
-- [A typedef retargeted between ABI-identical fundamentals stays a break; the clang frontend records no fundamental ABI fact](known-gaps/a-typedef-retarget-between-abi-identical-types-stays-a-break.md) — PARTIAL: schema v69 classifies a parameter, field, return or variable retype as a source-level change; a typedef retarget and the clang frontend keep their break/name verdict.
 
 #### The standing-inventory headline folds observed compatible findings into one clause (2026-10-28)
 

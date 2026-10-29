@@ -33,17 +33,15 @@ Complex and bit-precise types are not joined, so they carry no fact.
 
 from __future__ import annotations
 
-import os
 import re
 import shutil
-import subprocess
 from typing import Any
 from xml.etree.ElementTree import Element
 
-from ....deadline import run_bounded
 from ....model.abi_fundamental import AbiFundamental, FundamentalEncoding
 from ....model.execution_cache import memoized
 from ....model.fact import Fact
+from ...builtin_abi import BUILTIN_ENCODING as _BUILTIN_ENCODING, plain_char_is_unsigned
 from ..ast_config import _resolve_compiler_binary
 from .vector_spellings import _ELEMENT_BYTES
 
@@ -58,49 +56,6 @@ _SIGNED = FundamentalEncoding.SIGNED
 _UNSIGNED = FundamentalEncoding.UNSIGNED
 _FLOAT = FundamentalEncoding.FLOAT
 
-#: The closed set of C/C++ builtin spellings castxml writes for a fundamental
-#: (its canonical names), with the spellings clang writes in a vector element.
-#: ``char`` is absent: its encoding is the target's, see
-#: :func:`_builtin_encoding`. ``wchar_t`` is absent too: it is a typedef in C and
-#: its signedness is the target's, so it carries no fact.
-_BUILTIN_ENCODING: dict[str, FundamentalEncoding] = {
-    "signed char": _SIGNED,
-    "unsigned char": _UNSIGNED,
-    "short int": _SIGNED,
-    "short": _SIGNED,
-    "int": _SIGNED,
-    "signed int": _SIGNED,
-    "long int": _SIGNED,
-    "long": _SIGNED,
-    "long long int": _SIGNED,
-    "long long": _SIGNED,
-    "__int128": _SIGNED,
-    "short unsigned int": _UNSIGNED,
-    "unsigned short": _UNSIGNED,
-    "unsigned int": _UNSIGNED,
-    "unsigned": _UNSIGNED,
-    "long unsigned int": _UNSIGNED,
-    "unsigned long": _UNSIGNED,
-    "long long unsigned int": _UNSIGNED,
-    "unsigned long long": _UNSIGNED,
-    "unsigned __int128": _UNSIGNED,
-    "char16_t": _UNSIGNED,
-    "char32_t": _UNSIGNED,
-    "char8_t": _UNSIGNED,
-    "_Bool": FundamentalEncoding.BOOLEAN,
-    "bool": FundamentalEncoding.BOOLEAN,
-    "float": _FLOAT,
-    "double": _FLOAT,
-    "long double": _FLOAT,
-    "_Float16": _FLOAT,
-    "_Float32": _FLOAT,
-    "_Float64": _FLOAT,
-    "_Float128": _FLOAT,
-    "_Float32x": _FLOAT,
-    "_Float64x": _FLOAT,
-    "__float128": _FLOAT,
-}
-
 _VECTOR_SPELLING = re.compile(
     r"^\s*(?P<element>.+?)\s*__attribute__\(\(vector_size\((?P<bytes>\d+)\)\)\)\s*$"
 )
@@ -110,23 +65,6 @@ _MAX_DEPTH = 16
 
 
 @memoized
-def plain_char_is_unsigned(cc_bin: str, option_tokens: tuple[str, ...]) -> bool | None:
-    """Whether a plain ``char`` is unsigned under *cc_bin* with *option_tokens*.
-
-    The compiler's own predefined macro (``__CHAR_UNSIGNED__``, defined by GCC
-    and Clang exactly when plain ``char`` is unsigned). ``None`` when the
-    compiler does not run: then no ``char`` carries a fact.
-    """
-    argv = [cc_bin, *option_tokens, "-dM", "-E", "-x", "c", os.devnull]
-    try:
-        proc = run_bounded(argv, timeout=60, capture_output=True, text=True)
-    except (OSError, subprocess.SubprocessError):
-        return None
-    if proc.returncode != 0:
-        return None
-    return "#define __CHAR_UNSIGNED__" in proc.stdout
-
-
 def _builtin_encoding(
     name: str, plain_char_unsigned: bool | None
 ) -> FundamentalEncoding | None:

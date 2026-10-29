@@ -669,4 +669,19 @@ LEADING_ROWS: tuple[FactRow, ...] = (
 #: One row per field of every class in :data:`COVERED_MODEL_CLASSES`, in
 #: declaration order. Verified against the two parsers by
 #: :func:`scan_backend_evidence` (see this module's docstring).
-FACT_ROWS: tuple[FactRow, ...] = (*LEADING_ROWS, *RECORD_AND_LATER_ROWS)
+_ABI_SLOT_NOTE = (
+    "Schema v69 Fact[AbiFundamental] sibling: the fundamental ABI fact (encoding, "
+    "size, alignment, lanes) of this slot. Both header backends record it for "
+    "builtins only; a non-fundamental type stays NOT_COLLECTED."
+)
+_ABI_SLOT_ROWS = (
+    FactRow("Param", "type_abi_fact", _PARTIAL, _PARTIAL, note=_ABI_SLOT_NOTE),
+    FactRow("Function", "return_type_abi_fact", _PARTIAL, _PARTIAL, note=_ABI_SLOT_NOTE),
+    FactRow("Variable", "type_abi_fact", _PARTIAL, _PARTIAL, note=_ABI_SLOT_NOTE),
+    FactRow("TypeField", "type_abi_fact", _PARTIAL, _PARTIAL, note=_ABI_SLOT_NOTE),
+)
+FACT_ROWS: tuple[FactRow, ...] = (
+    *LEADING_ROWS,
+    *RECORD_AND_LATER_ROWS,
+    *_ABI_SLOT_ROWS,
+)
