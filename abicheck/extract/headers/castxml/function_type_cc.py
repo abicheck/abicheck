@@ -131,6 +131,9 @@ def castxml_function_type_keys(root: Element) -> dict[str, str]:
                 target = _function_type_id(index, arg.get("type", ""))
                 if target:
                     keyed.setdefault(target, f"param:{fn_key}#{position}")
+            target = _function_type_id(index, el.get("returns", ""))
+            if target:
+                keyed.setdefault(target, f"return:{fn_key}")
     return keyed
 
 
@@ -173,6 +176,12 @@ def clang_function_type_cc(clang_root: dict[str, Any]) -> dict[str, str]:
                 out.setdefault(f"field:{_clang_qualified(scope, '')}::{name}", cc)
         elif kind == "FunctionDecl" and name:
             fn_key = node.get("mangledName") or _clang_qualified(scope, name)
+            # A function that returns a function pointer carries the pointee's
+            # convention as its trailing attribute too (``void (*(void))(int)
+            # __attribute__((ms_abi))``); the ``(*`` before it marks that case.
+            ret_cc = trailing_calling_convention(qual_type)
+            if ret_cc is not None and "(*" in qual_type:
+                out.setdefault(f"return:{fn_key}", ret_cc)
             index = 0
             for child in inner:
                 if isinstance(child, dict) and child.get("kind") == "ParmVarDecl":

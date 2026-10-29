@@ -59,6 +59,9 @@ EXTRACTION_BUG_CLASSES: tuple[BugClass, ...] = (
         seed_tests=(
             "tests/test_castxml_function_pointer_spelling.py",
             "tests/test_castxml_function_pointer_integration.py",
+            "tests/test_function_type_calling_convention.py",
+            "tests/test_dwarf_subroutine_calling_convention.py",
+            "tests/test_type_spelling_differential_matrix.py",
         ),
         axes={
             "signature_part": ("arity", "param_type", "return", "variadic", "cc"),
