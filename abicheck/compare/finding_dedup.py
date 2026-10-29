@@ -301,8 +301,26 @@ def _dedup_enum_same_kind(
     return result
 
 
+def _ast_qualified_hint(c: Change, ambiguous: Mapping[EntityId, str]) -> str | None:
+    """The qualified spelling an AST-tier record finding is known by, if any.
+
+    The header tier labels a record finding with its bare leaf. When that leaf
+    is shared by several declarations, :func:`record_canonical_names` declines
+    to bridge it, so the finding would be unpairable with its DWARF copy
+    (``a::Ctx``) and the record would be reported twice. Its own entity names
+    the qualified spelling; a producer-stamped ``qualified_name`` takes priority.
+    """
+    if c.qualified_name is not None:
+        return c.qualified_name
+    if c.entity_id is not None:
+        return ambiguous.get(c.entity_id)
+    return None
+
+
 def _dedup_cross_kind(
-    changes: list[Change], record_names: dict[str, str] | None = None
+    changes: list[Change],
+    record_names: dict[str, str] | None = None,
+    ambiguous: Mapping[EntityId, str] | None = None,
 ) -> list[Change]:
     """Pass 3: drop a DWARF finding when an equivalent AST finding exists.
 
@@ -319,19 +337,30 @@ def _dedup_cross_kind(
     itself, e.g. a stale header vs. inconsistent extractor evidence. Only indexes the AST-tier kinds this dedup ever looks up (``_DWARF_TO_AST_EQUIV``'s values) -- indexing every kind unconditionally crashed on a kind (e.g. ``PYTHON_STABLE_ABI_VIOLATION``) whose ``old_value``/``new_value`` is a list, unhashable for the transition-agreement set below (Codex review).
     """
     names = record_names or {}
+    known_ambiguous = ambiguous or {}
     _Transition = tuple[object, object] | None
     ast_findings: dict[tuple[str, str], set[_Transition]] = {}
     ast_field_findings: dict[tuple[str, str, str], set[_Transition]] = {}
     _relevant_ast = {ak for aks in _DWARF_TO_AST_EQUIV.values() for ak in aks}
     for c in (c for c in changes if c.kind in _relevant_ast):
         canon = canonicalize_record_symbol(
-            c.symbol, names, c.qualified_name, c.field_name
+            c.symbol,
+            names,
+            _ast_qualified_hint(c, known_ambiguous),
+            c.field_name,
         )
         transition = cross_tier_transition(c)
         ast_findings.setdefault((c.kind.value, canon), set()).add(transition)
         if c.field_name is not None:
+            # Keyed by the parent record alone, the spelling the DWARF lookup
+            # below derives from its own field symbol. ``canon`` already carries
+            # ``::field``, so keying by it never matched and let a nested record
+            # ``P::x``'s field ``x`` absorb field ``x`` of its enclosing ``P``.
+            parent = canonicalize_record_symbol(
+                c.symbol, names, _ast_qualified_hint(c, known_ambiguous)
+            )
             ast_field_findings.setdefault(
-                (c.kind.value, canon, c.field_name), set()
+                (c.kind.value, parent, c.field_name), set()
             ).add(transition)
 
     def _matches(
@@ -407,7 +436,7 @@ def deduplicate_ast_dwarf(
     stage1 = _dedup_exact(changes, ambiguous)
     stage2 = _dedup_enum_same_kind(stage1, ambiguous)
     record_names = {**record_canonical_names(old), **record_canonical_names(new)}
-    return _dedup_cross_kind(stage2, record_names)
+    return _dedup_cross_kind(stage2, record_names, ambiguous)
 
 
 #: An ELF-only removal and a header-aware visibility finding name one export
