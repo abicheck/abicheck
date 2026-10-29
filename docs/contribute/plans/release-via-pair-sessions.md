@@ -11,10 +11,11 @@ generated: false
 belongs in `workflows/`), [ADR-063](../adr/063-one-semantic-pipeline.md)
 ("one model, any cardinality"), [ADR-065](../adr/065-comparison-scope-selection-and-completeness.md)
 (membership, scope selection and completeness).
-**Depends on:** the `ExitDecision` owner refactor (branch `refactor/exit-decision-owner`) and the
-compare-session refactor (branch `refactor/compare-session`, continuing
+**Depends on:** the `ExitDecision` owner refactor (PR #1838, merged; it left every
+release site cited below unchanged) and the compare-session refactor (PR #1840, branch
+`refactor/compare-session`, continuing
 [Compare orchestration out of the CLI](compare-orchestration-workflow-seam.md), whose slice S4
-also covers release dispatch and dry-run). Phase 2 starts only after both have merged.
+also covers release dispatch and dry-run). Phase 2 starts only after #1840 merges.
 **Status:** Phase 1 done: this mapping and the cardinality property test. Phase 2 not started.
 **Effort:** L · **Risk:** high. `compare DIR DIR` gates releases. Every slice must leave
 outputs and exit codes byte-identical.
