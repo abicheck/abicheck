@@ -215,7 +215,7 @@ def test_resolve_compare_snapshots_resolves_old_and_new_sequentially(
     front end, including ``run_compare_request``, which reaches a
     manifest-driven dump through ``InputSpec.dump_manifest`` and would
     otherwise have had the very risk this test was written about
-    (``TestResolveSidesSequentially`` in ``tests/test_service_compare_pipeline.py``).
+    (``TestResolveSidesSequentially`` in ``tests/test_compare_resolve_sides_sequentially.py``).
     """
     import time
 

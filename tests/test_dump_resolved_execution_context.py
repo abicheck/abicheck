@@ -15,7 +15,7 @@
 
 """One Semantic Pipeline plan, sub-phase 4B, ``dump``'s own slice.
 
-Mirrors ``test_service_compare_pipeline.py::TestResolvedExecutionContextWiring``
+Mirrors ``test_compare_resolve_sides_sequentially.py::TestResolvedExecutionContextWiring``
 for :func:`abicheck.workflows.dump.request.resolve_dump_request` /
 :func:`abicheck.workflows.dump.request.execute_dump_request`: both closed the
 identical "no real caller" gap ``ResolvedComparePair.resolved_execution_context``
