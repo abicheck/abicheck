@@ -338,7 +338,11 @@ SPELLING_MIGRATIONS: Mapping[int, GenerationSpellingChange] = {
         "new fact, not a spelling: no stored type spelling changes, so no rewrite "
         "is needed. A generation-31 or pre-v69 document carries no fact, so its "
         "slots keep the name-based verdict (an unset fact never proves two slots "
-        "equal)"
+        "equal). A DWARF pointer declared restrict is now one level deep (it was "
+        "zero: DW_TAG_restrict_type was not unwrapped), so a generation-31 DWARF "
+        "baseline holding a restrict pointer parameter stores its pointer depth as "
+        "zero and reads as a pointer-level change against a fresh dump; a re-dump "
+        "is the fix for that baseline"
     ),
 }
 

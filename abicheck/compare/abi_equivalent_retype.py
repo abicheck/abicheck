@@ -59,6 +59,9 @@ _RETYPE_KINDS = frozenset(
         ChangeKind.FUNC_PARAMS_CHANGED,
         ChangeKind.FUNC_RETURN_CHANGED,
         ChangeKind.TYPE_FIELD_TYPE_CHANGED,
+        # The DWARF layout tier's spelling of a field retype (type_layout_diff):
+        # its change names the record and the field the same way.
+        ChangeKind.STRUCT_FIELD_TYPE_CHANGED,
         ChangeKind.VAR_TYPE_CHANGED,
     }
 )
@@ -117,7 +120,11 @@ def _function_retype(change: Change, old: AbiSnapshot, new: AbiSnapshot) -> bool
 
 
 def _field_retype(change: Change, old: AbiSnapshot, new: AbiSnapshot) -> bool:
+    # TYPE_FIELD_TYPE_CHANGED names the record in ``symbol``; the DWARF layout tier's
+    # STRUCT_FIELD_TYPE_CHANGED names ``record::field`` there.
     name = change.qualified_name or change.symbol
+    if change.kind is ChangeKind.STRUCT_FIELD_TYPE_CHANGED and "::" in name:
+        name = name.rsplit("::", 1)[0]
     old_rec: RecordType | None = old.type_by_name(name)
     new_rec: RecordType | None = new.type_by_name(name)
     if old_rec is None or new_rec is None or not change.field_name:
@@ -147,7 +154,10 @@ def _variable_retype(change: Change, old: AbiSnapshot, new: AbiSnapshot) -> bool
 def _retyped(change: Change, old: AbiSnapshot, new: AbiSnapshot) -> bool:
     if change.kind in (ChangeKind.FUNC_PARAMS_CHANGED, ChangeKind.FUNC_RETURN_CHANGED):
         return _function_retype(change, old, new)
-    if change.kind is ChangeKind.TYPE_FIELD_TYPE_CHANGED:
+    if change.kind in (
+        ChangeKind.TYPE_FIELD_TYPE_CHANGED,
+        ChangeKind.STRUCT_FIELD_TYPE_CHANGED,
+    ):
         return _field_retype(change, old, new)
     return _variable_retype(change, old, new)
 

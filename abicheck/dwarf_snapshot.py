@@ -1684,6 +1684,9 @@ class _DwarfSnapshotBuilder:
         if type_die.tag in (
             "DW_TAG_const_type",
             "DW_TAG_volatile_type",
+            # restrict is a qualifier of the pointer, not a level of indirection:
+            # `int *restrict` is depth 1 (castxml and clang agree).
+            "DW_TAG_restrict_type",
             "DW_TAG_typedef",
         ):
             return self._count_pointer_depth(type_die, CU, depth + 1)

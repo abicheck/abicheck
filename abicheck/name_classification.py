@@ -1203,7 +1203,21 @@ def cv_qualifiers_only_differ(old_type: str, new_type: str) -> bool:
         return False
     if co == cn:
         return False
-    return _strip_cv_qualifiers(co) == _strip_cv_qualifiers(cn)
+    # ``restrict`` on a pointer is a qualifier of the pointer with no calling-
+    # convention effect (castxml records it apart from the type), so a restrict-
+    # only difference is the same kind of no-op as a const one (DWARF spells it).
+    return _strip_cv_qualifiers(_strip_restrict(co)) == _strip_cv_qualifiers(
+        _strip_restrict(cn)
+    )
+
+
+_RESTRICT_TOKEN_RE = re.compile(r"\b(?:restrict|__restrict__|__restrict)\b")
+
+
+def _strip_restrict(name: str) -> str:
+    """*name* with ``restrict`` tokens removed and sigil spacing normalised."""
+    stripped = _MULTI_SPACE_RE.sub(" ", _RESTRICT_TOKEN_RE.sub("", name))
+    return re.sub(r"\s*([*&])\s*", r" \1", stripped).strip()
 
 
 def func_signature_cv_only_differ(old_type: str, new_type: str) -> bool:

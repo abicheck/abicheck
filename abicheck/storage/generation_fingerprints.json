@@ -7,7 +7,7 @@
       "abicheck/dwarf_advanced.py": "91cfc7f410a37e7d7ba3ec922ff2944b81253fde3dcfdb806be032087822b339",
       "abicheck/dwarf_metadata.py": "708db5f586ed5e56342f45f019cbc4174a894a8ec3899edfe3b85facee5b871b",
       "abicheck/dwarf_presence.py": "7e73580ec7a02fdf24e3815cb89e42aa6fe00e46e8cda6b7fe9d547f06ac3f06",
-      "abicheck/dwarf_snapshot.py": "32ffaed318b0cfad6fc0460e81c5cf6e8e14efdf952adc8ee9e4684ba063add6",
+      "abicheck/dwarf_snapshot.py": "0cc4168c87a9ad16907e7498e00d470c6bb8ec0231c09a9e8ebe4e2725fb8a12",
       "abicheck/dwarf_snapshot_datasources.py": "e337f8be3a8ae16350c0639d0be10670d4d5d1197108659fa210fcbbf8a5bdde",
       "abicheck/dwarf_unified.py": "9ecb70b59bb26674ac98ba14ad1211b4103e3a78426a91ed7901e59f1a7d9cdf",
       "abicheck/dwarf_utils.py": "faa6be4a5de6e58b3c6ba139dc6983b0c6404ed69c348f19d724fc56aa70f5d7",
@@ -182,9 +182,9 @@
       "abicheck/symvers_metadata.py": "372737765cd132e6e87ed891dd465d2958e04debbef774e45212ceb3036871cb",
       "abicheck/type_metadata.py": "9997189de8dac522fd1db8be5ae491d811139503f83abaaded89038eb4aa9cdf"
     },
-    "fingerprint": "7c2cfccf17f330500c3fec388aa92fd2a43da0bd4b1f39850017eaf05e9e30c9",
+    "fingerprint": "839df605ac44b8fb236551bf8220e4483c6262724342bd4e7ca0835d12f3b589",
     "generation": 32,
-    "reason": "generation 32 ABI-fact change: scoped extractor modules gained the type_abi_fact recording (extract/dwarf_abi_fact.py, castxml/abi_fundamental.py, dwarf_snapshot, castxml builders); the generation was bumped to 32 and the SPELLING_MIGRATIONS row records why no rewrite is needed"
+    "reason": "generation 32 ABI-fact change, final: DWARF restrict_type is transparent to pointer depth (dwarf_snapshot), the restrict-only qualifier comparison (name_classification), and the ABI-fact modules; the SPELLING_MIGRATIONS row 32 records the restrict depth effect"
   },
   "resolver": {
     "files": {

@@ -59,6 +59,8 @@ Each entry's status line says what is still open. A PARTIAL entry's write-up als
 
 ### Report and detector coverage
 
+- [A typedef retargeted between ABI-identical fundamentals stays a break; the clang frontend records no fundamental ABI fact](known-gaps/a-typedef-retarget-between-abi-identical-types-stays-a-break.md) — PARTIAL: schema v69 classifies a parameter, field, return or variable retype as a source-level change; a typedef retarget and the clang frontend keep their break/name verdict.
+
 #### The standing-inventory headline folds observed compatible findings into one clause (2026-10-28)
 
 **Status (2026-10-28): OPEN.** A one-line summary with standing cross-source inventory states the observed COMPATIBLE verdict as a single `compatible` clause, so an informational or quality finding is counted there, not named. The `summary.change_inventory` block has no additions/quality/informational split and its JSON shape is fixed, so the split needs an additive field and its schema ruling. The parts still add up to the total. Owner: `report/change_inventory.py`, `report/render_text.py`.
