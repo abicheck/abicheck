@@ -233,8 +233,12 @@ class Function:
     hidden_friend_owner: str | None = None
     # ELF symbol *linkage* (st_info.bind — GLOBAL/WEAK/LOCAL/UNIQUE/OTHER),
     # populated from .dynsym the same way elf_visibility is (see
-    # dumper_elf_symbols._populate_elf_visibility). None on a non-ELF
-    # platform, an older snapshot predating this field, or a declaration with
+    # dumper_elf_symbols._populate_elf_visibility). A Mach-O export carries
+    # the same fact (N_WEAK_DEF / the export trie's weak flag -> WEAK, any
+    # other export -> GLOBAL; storage's stamp_macho_elf_binding) so the
+    # field, and a binding: selector on it, is platform-neutral. None on
+    # a PE image (its export directory carries no linkage flag), an older
+    # snapshot predating this field, or a declaration with
     # no matching exported symbol (e.g. a public header-only inline that
     # never made it into the dynamic symbol table). Distinguishes a WEAK
     # COMDAT definition (e.g. an in-class-defined/`inline` member) from a

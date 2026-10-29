@@ -24,17 +24,23 @@ presence findings out of contract with a visible reason.
 
 What the snapshot can say, and what it cannot:
 
-* The public surface is the **ELF export table**, read through each exported
-  symbol's demangled parameter list. A DWARF-only snapshot does not carry the
-  exported functions' parameters itself (the DWARF function DIEs are
-  declarations the extractor does not keep), so the mangled name is the record.
+* The public surface is the **export table**, read through each exported
+  symbol's demangled parameter list. Itanium-spelled exports are read from an
+  ELF ``.dynsym`` or a Mach-O export trie. A PE export directory carries MSVC
+  decorations this module does not demangle, so a PE side is not readable
+  here: its result is reported as unknown, never as an empty set. A
+  DWARF-only snapshot does not carry the exported functions' parameters itself
+  (the DWARF function DIEs are declarations the extractor does not keep), so
+  the mangled name is the record.
   Only top-level parameters are named by a signature; a template argument is
   reached through its template.
 * "Dependency" means the declaring file (``source_location``, resolved for
   DWARF 4 and 5) is a toolchain/system header, or lies outside every *own*
   root. Own roots are the directories of non-template records an exported
   parameter names directly: the library's own declarations. With no own root
-  nothing is classified (weaker evidence keeps the finding).
+  nothing is classified, and the result says so (``read`` is false): weaker
+  evidence keeps the finding, and an unread side is not the same fact as a
+  side with no unreachable internal.
 * A field can name a typedef alias (``V`` for ``lib::V``). The DWARF-only
   fallback keeps no typedef map, so the alias target is unknown. An unresolved
   by-value alias is bounded by its DWARF byte size: its target must have that
@@ -53,6 +59,7 @@ import copy
 import posixpath
 import re
 from collections.abc import Iterable, Mapping, Sequence
+from typing import NamedTuple
 
 from ...demangle import demangle
 from ...extract.declaration_provenance import header_from_location
@@ -64,7 +71,11 @@ from .dependency_retention import (
     directly_referenced_dependency_names,
 )
 
-__all__ = ["unreachable_dependency_type_names"]
+__all__ = [
+    "UnreachableDependencyTypes",
+    "unreachable_dependency_type_names",
+    "unreachable_dependency_type_reading",
+]
 
 _BUILTIN_WORDS = frozenset(
     {
@@ -157,15 +168,24 @@ def _exported_parameter_lists(symbols: Iterable[str]) -> list[str]:
     return lists
 
 
-def _exported_names(snap: AbiSnapshot) -> tuple[set[str], set[str]]:
+def _exported_names(snap: AbiSnapshot) -> tuple[set[str], set[str]] | None:
     """``(full, base)`` names of the top-level parameter types of every
     exported C++ function: the full spelling keeps its template arguments, the
-    base name drops them."""
+    base name drops them. ``None`` when the side's export names are not
+    Itanium-spelled (a PE image), so no parameter can be read from them."""
     full: set[str] = set()
     base: set[str] = set()
-    elf = snap.elf
-    symbols = elf.symbols if elf is not None else []
-    for arguments in _exported_parameter_lists(sym.name for sym in symbols):
+    if snap.pe is not None:
+        return None
+    if snap.elf is not None:
+        names: Iterable[str] = (sym.name for sym in snap.elf.symbols)
+    elif snap.macho is not None:
+        # Mach-O names are already normalized (leading underscore stripped
+        # once, by macho_metadata), so an Itanium ``_Z`` name reads as-is.
+        names = (e.name for e in snap.macho.exports if e.name)
+    else:
+        names = ()
+    for arguments in _exported_parameter_lists(names):
         for parameter in _split_top_level(arguments, ","):
             spelled = _strip_qualifiers(parameter)
             if not spelled or spelled == "void":
@@ -260,33 +280,59 @@ def _unresolved_alias_bounds(
     return unbounded, sizes
 
 
-def unreachable_dependency_type_names(snap: AbiSnapshot) -> frozenset[str]:
+class UnreachableDependencyTypes(NamedTuple):
+    """One side's classification of its dependency-internal record names.
+
+    ``read`` is false when the side could not be classified at all (its
+    exports cannot name its own roots); ``names`` is then empty for lack of
+    evidence, not because nothing is internal.
+    """
+
+    names: frozenset[str]
+    read: bool
+
+
+_NOTHING_TO_CLASSIFY = UnreachableDependencyTypes(frozenset(), True)
+_UNREAD = UnreachableDependencyTypes(frozenset(), False)
+
+
+def unreachable_dependency_type_reading(
+    snap: AbiSnapshot,
+) -> UnreachableDependencyTypes:
     """Bare names of *snap*'s dependency-internal records no public declaration
-    reaches. Empty when the snapshot is header-derived (already scoped by
-    :func:`resolve_dependency_scope`) or when no own root can be established.
+    reaches, and whether that classification could be read at all.
+
+    Header-derived snapshots are already scoped by
+    :func:`resolve_dependency_scope` and carry no classification to read; a
+    snapshot with no located records has nothing to classify. Both are read,
+    with no names. A side with located records but no readable own root (no
+    exports, or a PE image whose names are not Itanium-spelled) is unread.
 
     Names are returned, not identities, because the presence findings the
     policy rule matches carry only the bare ``symbol``. A name that is also
     the name of an own record is withheld: the finding could be either.
     """
     if snap.from_headers:
-        return frozenset()
+        return _NOTHING_TO_CLASSIFY
     decls = snap.declarations
     records: list[RecordType | EnumType] = [*decls.types, *decls.enums]
     located = [r for r in records if r.source_location]
     if not located:
-        return frozenset()
+        return _NOTHING_TO_CLASSIFY
 
-    exported_full, exported_base = _exported_names(snap)
+    exported = _exported_names(snap)
+    if exported is None:
+        return _UNREAD
+    exported_full, exported_base = exported
     own_dirs = sorted(_own_directories(located, exported_base))
     if not own_dirs:
-        return frozenset()
+        return _UNREAD
 
     dependency: list[RecordType | EnumType] = [
         r for r in located if _is_dependency_location(r.source_location, own_dirs)
     ]
     if not dependency:
-        return frozenset()
+        return _NOTHING_TO_CLASSIFY
     dependency_ids = {id(r) for r in dependency}
     own_types = [t for t in decls.types if id(t) not in dependency_ids]
     own_enums = [e for e in decls.enums if id(e) not in dependency_ids]
@@ -310,8 +356,16 @@ def unreachable_dependency_type_names(snap: AbiSnapshot) -> frozenset[str]:
             reached.add(candidate_spelling(record))
 
     own_names = {r.name for r in records if id(r) not in dependency_ids}
-    return frozenset(
+    names = frozenset(
         r.name
         for r in dependency
         if candidate_spelling(r) not in reached and r.name not in own_names
     )
+    return UnreachableDependencyTypes(names, True)
+
+
+def unreachable_dependency_type_names(snap: AbiSnapshot) -> frozenset[str]:
+    """The names of :func:`unreachable_dependency_type_reading`, without its
+    read flag: empty both when nothing is internal and when the side is unread.
+    Callers that must tell those apart read the reading instead."""
+    return unreachable_dependency_type_reading(snap).names

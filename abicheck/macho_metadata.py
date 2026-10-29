@@ -44,6 +44,7 @@ from macholib.mach_o import (  # type: ignore[import-untyped]
     LC_SYMTAB,
     LC_VERSION_MIN_MACOSX,
     N_EXT,
+    N_PEXT,
     N_TYPE,
     N_UNDF,
     N_WEAK_DEF,
@@ -508,6 +509,13 @@ def _parse_macho_symbols(
                 # Undefined external symbol → an import (what this dylib requires).
                 if name:
                     meta.imported_symbols.append(name)
+                continue
+
+            # A private extern (N_PEXT, set with N_EXT when the linker kept it
+            # as an external) is linked into the image but not exported: the
+            # dyld export trie never lists it, so it is not an export surface.
+            # The same as ELF STV_HIDDEN/STV_INTERNAL (elf_symbol_classify).
+            if n_type & N_PEXT:
                 continue
 
             is_weak = bool(n_desc & N_WEAK_DEF)

@@ -142,7 +142,10 @@ FAMILIES: dict[str, Family] = {
                 "target-specific evidence may add facts, never remove or "
                 "relocate the library's own."
             ),
-            harness_tests=("tests/test_family_f8_target_parity.py",),
+            harness_tests=(
+                "tests/test_family_f8_target_parity.py",
+                "tests/test_family_f8_symbol_rule_parity.py",
+            ),
         ),
         Family(
             key="F9",
@@ -451,6 +454,7 @@ _F8 = (
     "extraction.emulated_compiler_builtin_absent_from_frontend",
     "extraction.linker_summary_flag_read_as_the_fact",
     "scoping.system_header_layout_unrecognized",
+    "symbol_rule.single_object_format",
 )
 _F7 = (
     # Masked by suite-wide shared interpreter state: passed in a full run,

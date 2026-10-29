@@ -101,7 +101,7 @@ from .dependency_retention import (
     directly_referenced_dependency_names,
     kept_signature_haystack,
 )
-from .dwarf_dependency_types import unreachable_dependency_type_names
+from .dwarf_dependency_types import unreachable_dependency_type_reading
 
 __all__ = ["dependency_internals", "include_roots", "itanium_top_namespace"]
 
@@ -122,7 +122,8 @@ def dependency_internals(snap: AbiSnapshot) -> DependencyInternals:
     presence evidence for a finding raised on a record, internal or not.
     """
     if not snap.from_headers:
-        internals = DependencyInternals(types=unreachable_dependency_type_names(snap))
+        reading = unreachable_dependency_type_reading(snap)
+        internals = DependencyInternals(types=reading.names, types_read=reading.read)
     else:
         internals = _header_dependency_internals(snap)
     decls = snap.declarations

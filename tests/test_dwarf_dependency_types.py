@@ -15,7 +15,9 @@ from abicheck.model import AbiSnapshot
 from abicheck.model.dwarf_facts import DwarfMetadata, FieldInfo, StructLayout
 from abicheck.model.elf_facts import ElfMetadata, ElfSymbol
 from abicheck.model.entities import RecordType, TypeField
+from abicheck.workflows.dump.dependency_internals import dependency_internals
 from abicheck.workflows.dump.dwarf_dependency_types import (
+    UnreachableDependencyTypes,
     _alias_resolved,
     _alias_targets,
     _base_name,
@@ -23,6 +25,7 @@ from abicheck.workflows.dump.dwarf_dependency_types import (
     _split_top_level,
     _strip_qualifiers,
     unreachable_dependency_type_names,
+    unreachable_dependency_type_reading,
 )
 
 API = "/src/lib/api.h"
@@ -243,3 +246,91 @@ def test_alias_resolved_copies_and_leaves_the_original_unchanged() -> None:
     assert [f.type for f in record.fields] == ["V", "int"]
     untouched = _record("lib::Plain", f"{API}:9", fields=[("n", "int")])
     assert _alias_resolved(untouched, {"V": "x"}) is untouched
+
+
+# -- Unread vs. read-and-empty -------------------------------------------------
+#
+# A side whose export names cannot establish its own roots is *unread*: its
+# empty result means "not classified", which is not the same fact as "no
+# dependency type is internal". The reading carries that distinction.
+
+
+def _macho_twin(symbols: list[str], types: list[RecordType]) -> AbiSnapshot:
+    """The Mach-O twin of :func:`_snapshot`: the same records and export names,
+    carried by the Mach-O export table instead of ``.dynsym``."""
+    from abicheck.model.macho_facts import MachoExport, MachoMetadata
+
+    return AbiSnapshot(
+        library="lib",
+        version="1",
+        types=types,
+        macho=MachoMetadata(exports=[MachoExport(name=s) for s in symbols]),
+        platform="macho",
+    )
+
+
+def _pe_twin(types: list[RecordType]) -> AbiSnapshot:
+    """A PE image's export directory: MSVC-decorated names this module does not
+    read, so no own root can be established from it."""
+    from abicheck.model.pe_facts import PeExport, PeMetadata
+
+    return AbiSnapshot(
+        library="lib.dll",
+        version="1",
+        types=types,
+        pe=PeMetadata(exports=[PeExport(name="?scale@lib@@YAMXZ")]),
+        platform="pe",
+    )
+
+
+def _vector_types() -> list[RecordType]:
+    return [
+        _record("lib::State", f"{API}:5", fields=[("acc", "V"), ("n", "int")]),
+        _record("fakevec::simd::avx512_tag", f"{DEP}:6", size_bits=8),
+        _record(VECTOR, f"{DEP}:7", size_bits=256),
+        _record("fakevec::simd::scratch_pad<float>", f"{DEP}:22", size_bits=128),
+    ]
+
+
+def test_macho_twin_classifies_exactly_like_its_elf_twin() -> None:
+    # Parity: the same library's Itanium export names give the same answer
+    # whichever object format carries them.
+    layouts = [_layout("lib::State", {"acc": 32, "n": 4}, 40)]
+    elf_twin = _snapshot(types=_vector_types(), symbols=[SUM, SCALE], layouts=layouts)
+    macho_twin = _macho_twin([SUM, SCALE], _vector_types())
+    macho_twin.declarations.debug_layout = elf_twin.declarations.debug_layout
+    expected = frozenset(
+        {"fakevec::simd::avx512_tag", "fakevec::simd::scratch_pad<float>"}
+    )
+    assert unreachable_dependency_type_names(elf_twin) == expected
+    assert unreachable_dependency_type_reading(
+        macho_twin
+    ) == UnreachableDependencyTypes(expected, True)
+
+
+def test_pe_side_is_unread_not_read_as_empty() -> None:
+    reading = unreachable_dependency_type_reading(_pe_twin(_vector_types()))
+    assert reading == UnreachableDependencyTypes(frozenset(), False)
+    assert dependency_internals(_pe_twin(_vector_types())).types_read is False
+
+
+def test_elf_side_without_an_own_root_is_unread() -> None:
+    types = [_record("fakevec::simd::avx512_tag", f"{DEP}:6", size_bits=8)]
+    reading = unreachable_dependency_type_reading(
+        _snapshot(types=types, symbols=[SCALE])
+    )
+    assert reading == UnreachableDependencyTypes(frozenset(), False)
+
+
+def test_side_with_no_located_records_is_read_and_empty() -> None:
+    snap = _pe_twin([_record("lib::State", "", fields=[])])
+    assert unreachable_dependency_type_reading(snap) == UnreachableDependencyTypes(
+        frozenset(), True
+    )
+
+
+def test_read_side_with_nothing_internal_reports_read() -> None:
+    snap = _snapshot(types=_vector_types(), symbols=[SUM, SCALE])
+    reading = unreachable_dependency_type_reading(snap)
+    assert reading.read is True
+    assert dependency_internals(snap).types_read is True
