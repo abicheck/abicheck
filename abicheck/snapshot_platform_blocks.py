@@ -216,6 +216,7 @@ def macho_from_dict(macho: dict[str, Any], schema_version: int) -> Any:
             name=x["name"],
             sym_type=MachoSymbolType(x.get("sym_type", "exported")),
             is_weak=x.get("is_weak", False),
+            is_data=x.get("is_data", False),
         )
         for x in macho.get("exports", [])
     ]
@@ -268,6 +269,7 @@ def dwarf_from_dict(d: dict[str, Any]) -> Any:
                 for f in s.get("fields", [])
             ],
             is_union=s.get("is_union", False),
+            decl_file=s.get("decl_file"),
         )
 
     def _enum(name: str, e: dict[str, Any]) -> EnumInfo:
@@ -275,6 +277,7 @@ def dwarf_from_dict(d: dict[str, Any]) -> Any:
             name=e.get("name", name),
             underlying_byte_size=e.get("underlying_byte_size", 0),
             members=e.get("members", {}),
+            decl_file=e.get("decl_file"),
         )
 
     return DwarfMetadata(
@@ -306,6 +309,7 @@ def dwarf_advanced_from_dict(d: dict[str, Any]) -> Any:
         version=tc.get("version", ""),
         abi_flags=set(tc.get("abi_flags", [])),
         vector_abi_flags=set(tc.get("vector_abi_flags", [])),
+        wchar_flags=set(tc.get("wchar_flags", [])),
     )
     return AdvancedDwarfMetadata(
         has_dwarf=d.get("has_dwarf", False),
