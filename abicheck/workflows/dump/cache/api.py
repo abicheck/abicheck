@@ -59,10 +59,10 @@ def _dump_is_cacheable(req: DumpCacheRequest) -> bool:
     through to a live dump rather than risk serving a stale/mismatched
     snapshot.
 
-    A symbols-only dump *is* cached: it reads nothing but the binary (its
-    headers are ignored), and ``symbols_only`` is folded into the key
-    (:func:`_cache_key_for`), so it never shares an entry with a full dump of
-    the same file. Gating it re-extracted every PE/Mach-O side twice per
+    A symbols-only dump *is* cached: it reads the binary and, for PE, the PDB
+    found beside it -- both content-hashed (:func:`_pe_debug_sidecar`) -- and
+    ``symbols_only`` is folded into the key (:func:`_cache_key_for`), so it
+    never shares an entry with a full dump of the same file. Gating it re-extracted every PE/Mach-O side twice per
     compare: ``l0_export_delta.fold_l0_hard_removals`` re-resolves a side
     symbols-only whenever it has no captured ELF table to build the view from.
 

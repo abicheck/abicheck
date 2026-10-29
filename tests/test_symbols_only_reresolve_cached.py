@@ -116,16 +116,22 @@ def test_a_pe_dump_misses_when_its_pdb_changes(
     pdb = tmp_path / "lib.pdb"
     calls: list[bool] = []
     written: bytes | None = None
-    for content in (None, None, b"pdb one", b"pdb one", b"pdb two"):
+    # None: no PDB beside the image. It appears, changes, and is removed again.
+    for content in (None, None, b"pdb one", b"pdb one", b"pdb two", None, None):
         # Written only when it changes: the key also treats a touched file as
         # changed (its mtime is hashed with its content).
-        if content is not None and content != written:
-            pdb.write_bytes(content)
+        if content != written:
+            if content is None:
+                pdb.unlink()
+            else:
+                pdb.write_bytes(content)
             written = content
         cached_run_dump(
             _fake_dump(calls), binary, "pe", [], [], symbols_only=symbols_only
         )
-    assert len(calls) == 3  # no PDB, then each distinct PDB, once
+    # No PDB, each distinct PDB, then no PDB again -- whose entry is the first
+    # one, so removal returns to it instead of extracting a fourth time.
+    assert len(calls) == 3
 
 
 def test_an_elf_dump_ignores_a_same_named_pdb(tmp_path: Path) -> None:
