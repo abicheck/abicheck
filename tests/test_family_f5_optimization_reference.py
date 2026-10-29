@@ -79,6 +79,7 @@ import example_catalog  # noqa: E402
 from abicheck.workflows.dump.cache import (
     api as dump_cache_api,
 )
+from tests._abicheck_subprocess import abicheck_command
 
 # ── coverage table: every inventoried site -> the cell that bypasses it ─────
 #
@@ -96,6 +97,10 @@ COVERAGE: dict[str, str] = {
     # ---- memoized functions ----
     "abicheck.storage.code_identity::memoized::abicheck_code_fingerprint": B,
     "abicheck.buildsource.export_declaration_evidence::memoized::_leaf_declaration_re": "UNCOVERED: pure compile of a regex from a symbol leaf; no cell runs cross-source export accounting with headers. Its equivalence is pinned by tests/test_textual_declaration_hint_compile_bound.py (character-scan oracle)",
+    "abicheck.extract.builtin_abi::memoized::plain_char_is_unsigned": "UNCOVERED: a compiler predefined-macro probe memoized on (compiler binary, option tokens); no cell varies the compiler within one process. Its answer is pinned by the castxml fundamental-fact tests and by tests/test_abi_retype_lanes.py across the three lanes",
+    "abicheck.extract.builtin_abi::memoized::probe_builtin_abi": "UNCOVERED: a compiler layout probe memoized on (compiler binary, option tokens); no cell varies the compiler within one process. Its answers are pinned by tests/test_abi_retype_lanes.py across the three header lanes and by tests/test_abi_fundamental.py",
+    "abicheck.extract.headers.castxml.abi_fundamental::memoized::_builtin_encoding": "UNCOVERED: a pure builtin-spelling to encoding lookup; no cell varies a spelling outside the closed builtin table. Pinned by tests/test_abi_fundamental.py",
+    "abicheck.extract.headers.castxml.function_type_cc::memoized::_file_mentions_calling_convention": "UNCOVERED: a per-file text scan memoized on (mtime, size); no cell edits a header between two dumps in one process. The gate it feeds is pinned by tests/test_function_type_calling_convention.py::test_clang_pass_gate_reads_every_castxml_file",
     "abicheck.compare.enum_underlying::memoized::underlying_byte_size": "UNCOVERED: pure table lookup of an integer spelling (and the side's long width); no cell compares header enums whose underlying types differ. Its values are pinned against ctypes by tests/unit/compare/test_enum_underlying_size.py",
     "abicheck.policy.selectors::memoized::_ns_forms": "UNCOVERED: pure function of a symbol name (demangle + template-argument strip); no cell runs a namespace suppression rule. Its equivalence is pinned by tests/test_disposition_hot_path_equivalence.py",
     "abicheck.model.semantic_ir_function_signature::memoized::_shared_present": B,
@@ -922,7 +927,7 @@ _SUBPROCESS_CASES = (
 
 def _cli_report(args: tuple[str, ...], env: dict[str, str]) -> str:
     res = subprocess.run(
-        [sys.executable, "-m", "abicheck", "compare", *args, "-o", "json=-"],
+        abicheck_command("compare", *args, "-o", "json=-"),
         capture_output=True,
         text=True,
         env=env,

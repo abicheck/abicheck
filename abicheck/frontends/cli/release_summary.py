@@ -45,9 +45,8 @@ from ...workflows.gate import (
 )
 from ...workflows.release_exit_fold import release_compatibility_base_exit
 from .options.params import DEFAULT_POLICY_PROFILE
-from .release_exit import _exit_compare_release
 from .release_report import render_release_summary
-from .runtime import _safe_write_output, _write_or_echo
+from .runtime import _exit_compare_release, _safe_write_output, _write_or_echo
 
 if TYPE_CHECKING:
     from ...model.symbol_inventory import SymbolInventory

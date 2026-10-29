@@ -52,6 +52,8 @@ from typing import Any
 
 import pytest
 
+from tests._abicheck_subprocess import abicheck_command
+
 pytestmark = [
     pytest.mark.integration,
     pytest.mark.skipif(
@@ -101,7 +103,7 @@ def _require_tools(*tools: str) -> None:
 def _run_abicheck(*args: str) -> subprocess.CompletedProcess[str]:
     """Run ``python -m abicheck`` with *args* and capture its output."""
     return subprocess.run(
-        [sys.executable, "-m", "abicheck", *args],
+        abicheck_command(*args),
         capture_output=True,
         text=True,
         check=False,

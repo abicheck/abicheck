@@ -53,6 +53,7 @@ import click
 import pytest
 
 from abicheck.frontends.action.cli import action_cli
+from tests._abicheck_subprocess import abicheck_module_command
 
 #: Every field the two Actions' shells actually read back, with a value of
 #: the shape that field really carries. Read off `actions/*/run.sh` -- this
@@ -81,12 +82,7 @@ def emit(document: Path, *fields: str, tolerant: bool = False) -> bytes:
     test. A test that could not observe the regression would pass against
     the bug.
     """
-    argv = [
-        sys.executable,
-        "-m",
-        "abicheck.frontends.action.cli",
-        "emit-fields",
-    ]
+    argv = abicheck_module_command("abicheck.frontends.action.cli", "emit-fields")
     if tolerant:
         argv.append("--tolerant")
     argv.extend([str(document), *fields])
@@ -324,14 +320,9 @@ class TestFlattenPages:
         source.write_text(raw, encoding="utf-8")
         out = tmp_path / "pulls.json"
         subprocess.run(
-            [
-                sys.executable,
-                "-m",
-                "abicheck.frontends.action.cli",
-                "flatten-pages",
-                str(source),
-                str(out),
-            ],
+            abicheck_module_command(
+                "abicheck.frontends.action.cli", "flatten-pages", source, out
+            ),
             capture_output=True,
             check=True,
         )

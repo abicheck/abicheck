@@ -156,6 +156,9 @@ class _Stub:
     def parse_typedef_entity_ids(self):
         return {}
 
+    def parse_typedef_abi_facts(self):
+        return {}
+
     def parse_constant_entity_ids(self):
         return {}
 

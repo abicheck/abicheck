@@ -296,6 +296,56 @@ SPELLING_MIGRATIONS: Mapping[int, GenerationSpellingChange] = {
         "rewrite is needed (a baseline from an unreadable binary must be "
         "re-dumped, not rewritten)"
     ),
+    29: GenerationSpellingChange(
+        "function types spell their calling convention and full signature: a "
+        "clang-written DW_AT_calling_convention on a DWARF subroutine type "
+        "(ms_abi), the castxml FunctionType node joined from the clang AST for a "
+        "field, typedef, parameter or return (castxml drops ms_abi/sysv_abi from "
+        "its XML), and a CodeView LF_PROCEDURE now spell "
+        "'void (*)(int) __attribute__((ms_abi))', and a DWARF or PDB procedure "
+        "spells 'ret (*)(params)' where it spelled the opaque 'fn(...)'. The stored "
+        "'fn(...)' cannot be rewritten to a signature, so no rewrite is sound; "
+        "policy/generation_drift_demotion.py demotes a stored 'fn(...)' against a "
+        "fresh declarator, and a convention present on one side only, when the "
+        "generations differ, is demoted as drift. A baseline holding callbacks is "
+        "re-dumped"
+    ),
+    30: GenerationSpellingChange(
+        "a non-const variable declared inline with an arithmetic type "
+        "(inline int x = 1;) records its initializer as its value on both "
+        "frontends, and a const integral global the header declares without an "
+        "initializer (extern const int k; defined in a .cpp) takes its value from "
+        "the exported object's bytes. A header whose only C++ signal is an inline "
+        "variable is parsed as C++, not rejected as C. A const variable template "
+        "(template <class T> inline constexpr int vt = 1;) is joined from the clang "
+        "AST onto the castxml root. A baseline from an earlier generation has no "
+        "value for these variables, so a value change is not compared until it is "
+        "re-dumped; no type or name spelling changes, so no rewrite is needed"
+    ),
+    31: GenerationSpellingChange(
+        "castxml complex and bit-precise integer types (float _Complex, _BitInt(N)) "
+        "and a pointer, reference, array or typedef chain around one resolve to the "
+        "element type's clang spelling, where castxml left the one literal "
+        "Unimplemented -- a spelling shared by every such type, so float _Complex -> "
+        "double _Complex compared equal. A stored Unimplemented cannot say which "
+        "type it was, so no rewrite is sound and a baseline holding one is re-dumped"
+    ),
+    32: GenerationSpellingChange(
+        "the generation-32 ABI-fact change (model/abi_fundamental.py): DWARF "
+        "(extract/dwarf_abi_fact.py) and castxml (extract/headers/castxml/"
+        "abi_fundamental.py) record a fundamental slot's encoding class, size, "
+        "alignment and vector lanes as type_abi_fact/return_type_abi_fact -- a "
+        "new fact, not a spelling: no stored type spelling changes, so no rewrite "
+        "is needed. The DWARF layout (DwarfMetadata.structs/struct_odr_conflicts "
+        "FieldInfo) records the same fact per member as type_abi_fact, read from "
+        "the member DIE, so the depth projection keeps it. A generation-31 or "
+        "pre-v69 document carries no fact, so its slots keep the name-based verdict "
+        "(an unset fact never proves two slots equal). A DWARF pointer declared restrict is now one level deep (it was "
+        "zero: DW_TAG_restrict_type was not unwrapped), so a generation-31 DWARF "
+        "baseline holding a restrict pointer parameter stores its pointer depth as "
+        "zero and reads as a pointer-level change against a fresh dump; a re-dump "
+        "is the fix for that baseline"
+    ),
 }
 
 #: Reasons that say nothing about what was audited; the bump gate refuses them.

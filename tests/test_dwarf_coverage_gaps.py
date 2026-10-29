@@ -1735,7 +1735,7 @@ class TestDwarfSnapshotFallbacks:
         )
         cu = MockCU(cu_offset=0)
         name, size = builder._die_to_type_name(die, cu, depth=0)
-        assert name == "fn(...)"
+        assert name == "void (void)"
 
     def test_compute_type_name_fallback(self):
         from abicheck.dwarf_snapshot import _DwarfSnapshotBuilder

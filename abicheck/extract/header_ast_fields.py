@@ -42,10 +42,12 @@ Protocol structurally, so no change is needed on their side.
 from __future__ import annotations
 
 from collections.abc import Iterable
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from typing import Protocol
 
 from ..model import EnumType, Function, RecordType, Variable
+from ..model.abi_fundamental import AbiFundamental
+from ..model.fact import Fact
 from ..model.identity import EntityId
 from ..model.semantic_ir import SemanticIR
 from ..storage.header_ast_cache import (
@@ -77,6 +79,7 @@ class _HeaderAstParser(Protocol):
     def parse_typedefs_qualified(self) -> dict[str, str]: ...
     def parse_constants(self) -> dict[str, str]: ...
     def parse_typedef_entity_ids(self) -> dict[str, EntityId]: ...
+    def parse_typedef_abi_facts(self) -> dict[str, Fact[AbiFundamental]]: ...
     def parse_constant_entity_ids(self) -> dict[str, EntityId]: ...
 
 
@@ -97,6 +100,10 @@ class HeaderAstFields:
     typedef_entity_ids: dict[str, EntityId]
     constant_entity_ids: dict[str, EntityId]
     semantic_ir: SemanticIR
+    #: Schema v69: each typedef's target ABI fact (see AbiSnapshot.typedef_abi_facts).
+    typedef_abi_facts: dict[str, Fact[AbiFundamental]] = field(
+        default_factory=dict, kw_only=True
+    )
 
 
 def parse_header_ast_fields(
@@ -172,6 +179,7 @@ def _parse_header_ast_legacy(parser: _HeaderAstParser) -> HeaderAstFields:
         typedefs_qualified=typedefs_qualified,
         constants=constants,
         typedef_entity_ids=typedef_entity_ids,
+        typedef_abi_facts=parser.parse_typedef_abi_facts(),
         constant_entity_ids=constant_entity_ids,
         # Replaced before this private intermediate leaves this module.
         semantic_ir=SemanticIR(),

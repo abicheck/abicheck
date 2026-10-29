@@ -20,6 +20,7 @@ from __future__ import annotations
 from dataclasses import InitVar, dataclass, field
 from typing import cast
 
+from .abi_fundamental import AbiFundamental
 from .elf_facts import SymbolBinding
 from .explicit_instantiation import ExplicitInstantiation
 from .extraction_scope import EntityOwnership
@@ -109,6 +110,13 @@ class Param:
     # ``NOT_COLLECTED`` (clang JSON, DWARF, a pre-v54 snapshot). Provenance,
     # not ABI content, hence ``compare=False``.
     type_identities_fact: Fact[tuple[str, ...]] | None = field(
+        default=None, kw_only=True, compare=False
+    )
+    # Schema v69: the ABI fact of this slot's type when it is a fundamental
+    # (or an enum, _Atomic or vector of one) -- see model/abi_fundamental.py.
+    # Absent (None) for every other type, and for a producer that did not
+    # record it; an absent fact never proves two slots equal.
+    type_abi_fact: Fact[AbiFundamental] | None = field(
         default=None, kw_only=True, compare=False
     )
 
@@ -233,8 +241,12 @@ class Function:
     hidden_friend_owner: str | None = None
     # ELF symbol *linkage* (st_info.bind — GLOBAL/WEAK/LOCAL/UNIQUE/OTHER),
     # populated from .dynsym the same way elf_visibility is (see
-    # dumper_elf_symbols._populate_elf_visibility). None on a non-ELF
-    # platform, an older snapshot predating this field, or a declaration with
+    # dumper_elf_symbols._populate_elf_visibility). A Mach-O export carries
+    # the same fact (N_WEAK_DEF / the export trie's weak flag -> WEAK, any
+    # other export -> GLOBAL; storage's stamp_macho_elf_binding) so the
+    # field, and a binding: selector on it, is platform-neutral. None on
+    # a PE image (its export directory carries no linkage flag), an older
+    # snapshot predating this field, or a declaration with
     # no matching exported symbol (e.g. a public header-only inline that
     # never made it into the dynamic symbol table). Distinguishes a WEAK
     # COMDAT definition (e.g. an in-class-defined/`inline` member) from a
@@ -285,6 +297,10 @@ class Function:
     # The return type's resolved identities -- see
     # ``Param.type_identities_fact``.
     return_type_identities_fact: Fact[tuple[str, ...]] | None = field(
+        default=None, kw_only=True, compare=False
+    )
+    # Schema v69: the ABI fact of the return type (see Param.type_abi_fact).
+    return_type_abi_fact: Fact[AbiFundamental] | None = field(
         default=None, kw_only=True, compare=False
     )
     # ADR-085 D1 for a function template: the spelled default of each template
@@ -465,6 +481,10 @@ class Variable:
     )
     # See ``Param.type_identities_fact``.
     type_identities_fact: Fact[tuple[str, ...]] | None = field(
+        default=None, kw_only=True, compare=False
+    )
+    # Schema v69: the ABI fact of the variable's type -- see Param.type_abi_fact.
+    type_abi_fact: Fact[AbiFundamental] | None = field(
         default=None, kw_only=True, compare=False
     )
     # ADR-063 Phase 2 identity carrier (persisted since schema v28) -- see

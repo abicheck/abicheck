@@ -951,6 +951,10 @@
                     "type": "string",
                     "description": "Schema 6.6: the canonical JSON identity behind an id-less rule's `rule_id`; absent when the rule has a user `id:`."
                   },
+                  "matched_via_kind": {
+                    "type": "string",
+                    "description": "The rule's `change_kind` (a base kind such as `func_removed`) when the disposed finding matched only through that kind's `*_elf_only` variant (`func_removed_elf_only`); absent for an exact-kind match. Additive and emitted only when set, so readers that ignore unknown keys are unaffected."
+                  },
                   "source_file": {
                     "type": [
                       "string",
@@ -1723,6 +1727,11 @@
       "items": {
         "type": "string"
       }
+    },
+    "dependency_types_read": {
+      "type": "object",
+      "description": "Per binary-only side (`old`/`new`; a header-derived side is not listed), whether that side's dependency-internal types were classified (`true`) or could not be read (`false`). An unread side excludes nothing, so a `false` means the dependency-internal classification is unknown, never that nothing is internal. The matching coverage note is in `coverage_warnings`. Omitted when no side is binary only. Informational: never affects `verdict`, `severity` or any exit code.",
+      "additionalProperties": {"type": "boolean"}
     },
     "undeclared_export_census": {
       "type": "object",

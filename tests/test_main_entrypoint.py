@@ -10,6 +10,8 @@ import sys
 
 import pytest
 
+from tests._abicheck_subprocess import abicheck_command
+
 
 def test_run_as_cli_module_registers_sibling_commands() -> None:
     """``python -m abicheck.cli`` (distinct from the documented ``python -m
@@ -30,7 +32,7 @@ def test_run_as_cli_module_registers_sibling_commands() -> None:
     review).
     """
     result = subprocess.run(
-        [sys.executable, "-m", "abicheck.cli", "--help"],
+        abicheck_command("--help"),
         capture_output=True,
         text=True,
         encoding="utf-8",

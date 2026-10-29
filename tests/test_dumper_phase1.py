@@ -47,6 +47,7 @@ class _FakeParser:
         public_header_paths=None,
         public_dir_paths=None,
         no_binary_evidence=False,
+        plain_char_unsigned=False,
     ):
         assert root.tag == "GCC_XML"
         assert exported_dynamic == {"pub"}
@@ -71,6 +72,9 @@ class _FakeParser:
         return {"SizeT": "unsigned long"}
 
     def parse_typedef_entity_ids(self):
+        return {}
+
+    def parse_typedef_abi_facts(self):
         return {}
 
     def parse_constants(self):

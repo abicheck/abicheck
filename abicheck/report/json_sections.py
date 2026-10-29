@@ -149,6 +149,11 @@ def add_confidence_evidence(d: dict[str, object], result: DiffResult) -> None:
     # Schema 6.7: the structured form of the undeclared-export coverage line.
     if result.undeclared_export_census:
         d["undeclared_export_census"] = result.undeclared_export_census
+    # Per binary-only side, whether its dependency-internal types were read; a
+    # ``false`` is "not classified", never "nothing internal" (the matching
+    # coverage note is in ``coverage_warnings``).
+    if result.dependency_types_read is not None:
+        d["dependency_types_read"] = dict(result.dependency_types_read)
     # ADR-050 D2 (schema 2.17) — report-level comparability metadata, never a
     # Change/ChangeKind finding, so it stays unreachable by severity promotion.
     # Omitted entirely (not emitted as null) when unset, matching every other

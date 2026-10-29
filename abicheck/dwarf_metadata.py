@@ -69,13 +69,17 @@ from .dwarf_utils import (
     base_type_name as _base_type_name,
     decode_member_location as _decode_member_location,
     has_real_dwarf_info,
+    pointee_subroutine,
     resolve_die_ref as _resolve_ref,
+    subroutine_spelling,
 )
 
 # Fact dataclasses live in the model package (ADR-061 Phase 5): this module
 # parses into them and re-exports them so the historical
 # ``from abicheck.dwarf_metadata import DwarfMetadata`` spelling keeps resolving.
+from .extract.dwarf_abi_fact import dwarf_type_abi_fact
 from .extract.dwarf_subtree_index import open_indexed_dwarf_info
+from .model.abi_fundamental import AbiFundamental
 from .model.availability import FactStatus
 from .model.dwarf_facts import (
     DwarfMetadata as DwarfMetadata,
@@ -411,9 +415,16 @@ def _expand_anonymous_member(
                 byte_size=fi.byte_size,
                 bit_offset=fi.bit_offset,
                 bit_size=fi.bit_size,
+                type_abi_fact=fi.type_abi_fact,
             )
         )
     return Fact.present(fields)
+
+
+def _member_abi_fundamental(die: Any, CU: Any) -> AbiFundamental | None:
+    """The member's ABI fundamental (schema v69), or ``None`` when DWARF states none."""
+    fact = dwarf_type_abi_fact(die, CU)
+    return None if fact is None else fact.value
 
 
 class _UnevaluableMemberLocation(Exception):
@@ -462,6 +473,10 @@ def _process_member(
         byte_size=field_byte_size,
         bit_offset=bit_offset,
         bit_size=bit_size,
+        # Schema v69: the same member-DIE fact the binary-only dump's TypeField
+        # reads (dwarf_snapshot.py), so the layout the depth projection rebuilds
+        # from carries it too.
+        type_abi_fact=_member_abi_fundamental(die, CU),
     )
 
 
@@ -586,6 +601,14 @@ def _compute_type_info(
         return (f"enum {name}", _attr_int(die, "DW_AT_byte_size"))
 
     if tag == "DW_TAG_pointer_type":
+        target = pointee_subroutine(die, CU)
+        if target is not None:
+            spelled = subroutine_spelling(
+                target,
+                lambda d: _resolve_inner_type_name(d, CU, depth, cache),
+                pointer=True,
+            )
+            return (spelled, _attr_int(die, "DW_AT_byte_size") or 0)
         return _compute_pointer_like_info(
             die, CU, depth, cache, suffix=" *", fallback="void *"
         )
@@ -612,7 +635,10 @@ def _compute_type_info(
         return _compute_array_type_info(die, CU, depth, cache)
 
     if tag == "DW_TAG_subroutine_type":
-        return ("fn(...)", _attr_int(die, "DW_AT_byte_size"))
+        spelled = subroutine_spelling(
+            die, lambda d: _resolve_inner_type_name(d, CU, depth, cache), pointer=False
+        )
+        return (spelled, _attr_int(die, "DW_AT_byte_size"))
 
     return _compute_fallback_type_info(die, tag)
 

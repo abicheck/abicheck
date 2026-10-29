@@ -20,9 +20,11 @@ no parsing logic (ADR-061 Phase 5)."""
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from enum import StrEnum
 
+from .elf_facts import SymbolBinding
 from .execution_cache import memoized_property
 from .fact import Fact, bridge_legacy_and_fact
 
@@ -124,3 +126,25 @@ class MachoMetadata:
     def export_map(self) -> dict[str, MachoExport]:
         """Name → MachoExport mapping (built once, cached on first access)."""
         return {e.name: e for e in self.exports if e.name}
+
+
+def macho_export_linkage(
+    exports: Iterable[MachoExport],
+) -> dict[str, SymbolBinding | None]:
+    """Each exported name's linkage, in the ELF vocabulary ``elf_binding`` uses.
+
+    A Mach-O weak definition (``N_WEAK_DEF`` in the nlist, or the export
+    trie's weak-definition flag) is coalesced the way an ELF ``WEAK`` symbol
+    is, so it reads :attr:`SymbolBinding.WEAK`; any other export is a strong
+    definition, :attr:`SymbolBinding.GLOBAL`. A name exported more than once
+    with disagreeing linkage reads ``None``: unknown, never the last entry's
+    value (the same fail-closed rule the ELF alias path applies).
+    """
+    linkage: dict[str, SymbolBinding | None] = {}
+    for export in exports:
+        if not export.name:
+            continue
+        value = SymbolBinding.WEAK if export.is_weak else SymbolBinding.GLOBAL
+        previous = linkage.get(export.name, value)
+        linkage[export.name] = value if previous is value else None
+    return linkage

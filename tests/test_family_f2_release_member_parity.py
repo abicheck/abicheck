@@ -28,10 +28,11 @@ import json
 import os
 import shutil
 import subprocess
-import sys
 from pathlib import Path
 
 import pytest
+
+from tests._abicheck_subprocess import abicheck_command
 
 _A_H = "#pragma once\nint a_fn(int v);\n"
 _B_H = "#pragma once\nint b_fn(int v);\n"
@@ -40,7 +41,7 @@ _B_H = "#pragma once\nint b_fn(int v);\n"
 def _cli_compare(args: list[str], out: Path) -> tuple[int, dict]:
     env = {**os.environ, "ABICHECK_AST_FRONTEND": "castxml"}
     proc = subprocess.run(
-        [sys.executable, "-m", "abicheck", "compare", *args, "-o", f"json={out}"],
+        abicheck_command("compare", *args, "-o", f"json={out}"),
         env=env,
         capture_output=True,
         text=True,

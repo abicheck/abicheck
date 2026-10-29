@@ -42,6 +42,7 @@ or a CLI flag directly is in the wrong layer.
   `SeverityConfig`, `SeverityLevel`, ...).
 - `exit_decision.py` — `ExitDecision`/`ExitReason`, the orthogonal-axis
   exit-code fold shared by `compare`/`scan`.
+- `exit_decision_precedence.py` — the one owner of every `compare` exit decision (pair, release via `release_exit_decision.py`, scoped consumer, `check-target` gate mode); a new exit axis or precedence rule goes here, never in a frontend or renderer.
 - `finding_disposition/` — what happens to a finding after diff (ADR-067 record-before-disposing): `dispose_findings` runs the default step order with an always-present ledger; `dispose_by_suppression` is the one suppression primitive.
 - `use_case_reachability.py` — `explain_use_case_impact()` (G29 Phase 4): use-case
   entrypoint reachability over `compare/call_graph_walk.py`; called directly.

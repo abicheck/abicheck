@@ -336,6 +336,12 @@ _EQUIVALENT_CHANGE_CATEGORIES = {
     # already do; see finding_dedup.deduplicate_cross_detector's own
     # docstring for the qualified-name bridge this also depends on.
     "enum_underlying_size_changed": "enum_underlying_size_changed",
+    # Schema v69: a retype between ABI-identical types (compare/abi_equivalent_
+    # retype.py and diff_atomic.py) is one slot observed the same way by every
+    # producer; its old/new spellings are the backend's own spelling of one type,
+    # so its discriminator must not vary with them. Self-mapped, as the enum
+    # kinds are.
+    "abi_equivalent_type_changed": "abi_equivalent_type_changed",
     # diff_symbols._detect_newly_deleted_functions emits FUNC_DELETED
     # (castxml is_deleted attribute) or FUNC_DELETED_DWARF (DWARF
     # DW_AT_deleted) for the same symbol/callable->deleted transition --

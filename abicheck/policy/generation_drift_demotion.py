@@ -49,14 +49,17 @@ from ..model.castxml_spelling_artifacts import (
     is_castxml_opaque_function_type,
     mentions_function_type_tag,
 )
+from ..model.cc_attributes import CC_ATTRIBUTE_BASES
 from ..model.change import Change
 from ..model.change_catalog.kinds import ChangeKind
 from ..model.change_catalog.registry import Verdict
+from ..model.declarations import Param
 from ..model.name_heuristics import (
     NameHeuristicEffect,
     StructuralFact,
     register_name_heuristic,
 )
+from ..model.restrict_qualifier import strip_restrict
 from ..model.snapshot import AbiSnapshot
 
 __all__ = [
@@ -155,6 +158,14 @@ def is_spelling_only_drift(old: str, new: str, old_declared: Iterable[str]) -> b
     declared = frozenset(old_declared)
     if _is_opaque_callback_respelled(old, new, declared):
         return True
+    if _conflicting_calling_conventions(old, new):
+        # ms_abi against sysv_abi is a real change of the argument registers,
+        # not an identifier respelling: the generic rule below must not see it.
+        return False
+    if _is_subroutine_respelled(old, new) or _is_calling_convention_respelled(old, new):
+        return True
+    if _is_calling_convention_respelled(new, old):
+        return True
     old_t, new_t = _TOKEN.findall(old), _TOKEN.findall(new)
     if len(old_t) != len(new_t) or old_t == new_t:
         return False
@@ -201,6 +212,55 @@ def _is_opaque_callback_respelled(old: str, new: str, declared: frozenset[str]) 
 _FUNCTION_DECLARATOR = re.compile(r"^[^()]*\(([^()]*)\)\s*\(")
 _OPAQUE_CV_PREFIX = re.compile(r"^(?:(?:const|volatile)\s+)*")
 _WRAPPER_TOKEN = re.compile(r"[*&]|\[\d*\]|\bconst\b|\bvolatile\b")
+
+
+#: The DWARF spelling of a subroutine type before generation 29.
+_DWARF_SUBROUTINE_TAG = "fn(...)"
+#: A trailing ``__attribute__((name))`` a function type spells for a
+#: non-default calling convention.
+_CC_SUFFIX = re.compile(r"\s__attribute__\(\((?P<body>[^()]*(?:\([^()]*\))?)\)\)$")
+
+
+def _is_subroutine_respelled(old: str, new: str) -> bool:
+    """Whether *old* is a stored DWARF ``fn(...)`` (generation 28 and older) and
+    *new* a full declarator with the same wrappers (``fn(...)*`` vs
+    ``void (*)(int)``). The stored tag dropped the signature, so the pair says
+    nothing about whether the signature changed."""
+    if _DWARF_SUBROUTINE_TAG not in old or _DWARF_SUBROUTINE_TAG in new:
+        return False
+    declarator = _FUNCTION_DECLARATOR.match(new)
+    if declarator is None:
+        return False
+    stored = old.replace(_DWARF_SUBROUTINE_TAG, "", 1)
+    return _wrapper_shape(stored) == _wrapper_shape(declarator.group(1))
+
+
+def _calling_convention_suffix(spelling: str) -> str | None:
+    match = _CC_SUFFIX.search(spelling)
+    if match is None:
+        return None
+    return match.group("body").strip()
+
+
+def _conflicting_calling_conventions(old: str, new: str) -> bool:
+    """Both spell a convention and the two conventions differ."""
+    old_cc = _calling_convention_suffix(old)
+    new_cc = _calling_convention_suffix(new)
+    return old_cc is not None and new_cc is not None and old_cc != new_cc
+
+
+def _is_calling_convention_respelled(old: str, new: str) -> bool:
+    """Whether *new* is *old* plus one trailing calling-convention attribute.
+
+    A generation before 29 dropped ``ms_abi``/``sysv_abi`` from castxml's
+    function types and from DWARF's subroutine types, so the older baseline
+    lacks a convention the fresh read spells. Only the suffix may differ: the
+    signature before it is compared as written."""
+    match = _CC_SUFFIX.search(new)
+    if match is None or _CC_SUFFIX.search(old):
+        return False
+    base = match.group("body").split("(", 1)[0].strip()
+    return base in CC_ATTRIBUTE_BASES and new[: match.start()] == old
 
 
 def _wrapper_shape(declarator: str) -> tuple[str, ...]:
@@ -270,6 +330,8 @@ GENERATION_SPELLING_DRIFT = register_name_heuristic(
         is_spelling_only_drift,
         _declared_names,
         _is_opaque_callback_respelled,
+        _is_subroutine_respelled,
+        _is_calling_convention_respelled,
         _wrapper_shape,
     ),
     vocabularies=("_BUILTINS",),
@@ -279,6 +341,7 @@ GENERATION_SPELLING_DRIFT = register_name_heuristic(
         _FUNCTION_DECLARATOR,
         _OPAQUE_CV_PREFIX,
         _WRAPPER_TOKEN,
+        _CC_SUFFIX,
     ),
 )
 
@@ -347,5 +410,92 @@ def demote_generation_spelling_drift(
             f"{GENERATION_DRIFT_REASON} (old operand extractor generation "
             f"{old_generation or 'unstated'}, new {new_generation or 'unstated'}; "
             f"{cause})"
+        )
+    return changes
+
+
+#: The extractor generation that stopped DWARF hiding a restrict-qualified
+#: pointer's indirection: before it, ``int *restrict`` was recorded at depth 0,
+#: from generation 32 at depth 1 (extract/dwarf_snapshot's pointer-depth walk).
+RESTRICT_DEPTH_GENERATION = 32
+
+_RESTRICT_DEPTH_KINDS = frozenset(
+    {ChangeKind.FUNC_PARAMS_CHANGED, ChangeKind.PARAM_POINTER_LEVEL_CHANGED}
+)
+
+
+def _restrict_depth_position(stale: Param, live: Param) -> bool:
+    """Whether a parameter pair differs only by the pre-32 restrict depth.
+
+    *stale* is the operand whose generation predates
+    :data:`RESTRICT_DEPTH_GENERATION`: it recorded a restrict pointer at depth
+    0, where the live operand records depth 1 and the same spelling otherwise.
+    Equal parameters are also accepted, so a function with one artifact
+    position and otherwise equal parameters is judged on that position alone.
+    """
+    if stale.type == live.type and stale.pointer_depth == live.pointer_depth:
+        return True
+    return (
+        stale.pointer_depth == 0
+        and live.pointer_depth == 1
+        and "restrict" in live.type
+        and strip_restrict(stale.type) == strip_restrict(live.type)
+    )
+
+
+def demote_restrict_depth_drift(
+    changes: list[Change],
+    old: AbiSnapshot,
+    new: AbiSnapshot,
+    old_generation: int,
+    new_generation: int,
+) -> list[Change]:
+    """Annotate a restrict-depth artifact between operands of different
+    extractor generations as ``COMPATIBLE_WITH_RISK``.
+
+    A parameter-level finding is demoted only when the operand that predates
+    :data:`RESTRICT_DEPTH_GENERATION` is the one that recorded the restrict
+    pointer at depth 0, and every differing parameter of its function is that
+    artifact, with the return type unchanged. Anything else stays as it was.
+    """
+    if old_generation == new_generation:
+        return changes
+    if old_generation < RESTRICT_DEPTH_GENERATION <= new_generation:
+        stale, live, stale_is_old = old, new, True
+    elif new_generation < RESTRICT_DEPTH_GENERATION <= old_generation:
+        stale, live, stale_is_old = new, old, False
+    else:
+        return changes
+    for change in changes:
+        if (
+            change.effective_verdict is not None
+            or change.kind not in _RESTRICT_DEPTH_KINDS
+        ):
+            continue
+        stale_fn = stale.function_map.get(change.symbol)
+        live_fn = live.function_map.get(change.symbol)
+        if (
+            stale_fn is None
+            or live_fn is None
+            or len(stale_fn.params) != len(live_fn.params)
+        ):
+            continue
+        if stale_fn.return_type != live_fn.return_type:
+            continue
+        pairs = list(zip(stale_fn.params, live_fn.params))
+        if not all(_restrict_depth_position(a, b) for a, b in pairs):
+            continue
+        if all(
+            a.pointer_depth == b.pointer_depth and a.type == b.type for a, b in pairs
+        ):
+            continue  # no artifact position: not this cause
+        change.effective_verdict = Verdict.COMPATIBLE_WITH_RISK
+        change.modulation_rule = GENERATION_DRIFT_RULE
+        change.modulation_reason = (
+            f"{GENERATION_DRIFT_REASON} (old operand extractor generation "
+            f"{old_generation or 'unstated'}, new {new_generation or 'unstated'}; "
+            f"a restrict-qualified pointer parameter was recorded at depth "
+            f"{0 if stale_is_old else 1} by the older extractor and at depth "
+            f"{1 if stale_is_old else 0} now)"
         )
     return changes

@@ -22,6 +22,8 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from abicheck.checker import Verdict, compare
 from abicheck.dumper import dump
 from abicheck.model import Function, Visibility
+from abicheck.model.abi_fundamental import AbiFundamental, FundamentalEncoding
+from abicheck.model.fact import Fact
 from abicheck.report.dispatch_markdown import to_markdown
 from abicheck.serialization import load_snapshot, save_snapshot
 
@@ -84,7 +86,12 @@ def main() -> None:
         # Breaking: change return type of zlibCompileFlags
         for f in snap_v2.declarations.functions:
             if f.name == "zlibCompileFlags":
-                f.return_type = "unsigned long"  # was uLong (typedef for unsigned long, but new name)
+                # uLong is unsigned long (8 bytes on LP64); unsigned int is 4,
+                # so callers read a truncated value.
+                f.return_type = "unsigned int"
+                f.return_type_abi_fact = Fact.present(
+                    AbiFundamental(FundamentalEncoding.UNSIGNED, 4, 4)
+                )
 
         # Compatible: add new function
         snap_v2.declarations.functions.append(
@@ -105,7 +112,7 @@ def main() -> None:
         snap2_path = tmp / "libz-1.4.json"
         save_snapshot(snap_v2, snap2_path)
         print(f"  Removed : {removed}")
-        print("  Changed return type: zlibCompileFlags uLong → unsigned long")
+        print("  Changed return type: zlibCompileFlags uLong → unsigned int")
         print("  Added   : deflate2")
         print(f"  Saved → {snap2_path}\n")
 

@@ -36,7 +36,7 @@ named sections.
 
 ```json
 {
-  "schema_version": 66,
+  "schema_version": 69,
   "sections": {
     "binary":       {"section_kind": "binary",       "section_schema_version": 1, "payload": {"...": "..."}},
     "declarations": {"section_kind": "declarations", "section_schema_version": 1, "payload": {"...": "..."}},
@@ -124,7 +124,7 @@ abicheck, rather than round-tripped.
 ## Schema version history
 
 `schema_version` is a single integer, not `MAJOR.MINOR`.
-The current value is **`66`**. See
+The current value is **`69`**. See
 `abicheck/storage/snapshot_schema_versions.py`'s `SCHEMA_VERSION` for the
 authoritative, up-to-date value and the full per-version comment.
 
@@ -341,6 +341,12 @@ with `odr_conflicts_observed` false: its lack of conflicts means "not looked
 for", never "none". The debug-type join (`compare/debug_type_join.py`)
 reports a conflicted name as ambiguous rather than trusting the first
 definition.
+
+(v68) `dwarf_advanced.extraction` -- how the advanced-DWARF extraction that produced the `dwarf_advanced` block ended: `not_run` (a presence-only lookup, no payload parsed), `completed` (the parse ran to the end; an empty payload is a real result) or `failed` (the extraction errored; the payload is not usable). Written only when the status is recorded, so a BTF/CTF/PDB object or a hand-built one (`unrecorded`) writes no key and encodes exactly as v67. A DWARF dump always records `completed` or `failed`. A pre-v68 document, or a v68 one without the key, decodes to `unrecorded`: the reader keeps the payload inference, never reads the block as `completed`. A pre-v68 reader drops the key silently and reads that same inference, so the key adds no reader-side hard rejection. Because the content digest covers the encoded document, DWARF-derived snapshot digests change once at this bump.
+
+(v69) `Param`/`TypeField`/`Variable.type_abi_fact` and `Function.return_type_abi_fact` -- the ABI fact of a slot whose type is a fundamental, an enum, an `_Atomic` or a vector of one: The same fact is written per member of the `dwarf` layout (`structs[*].fields[*].type_abi_fact`, and the `struct_odr_conflicts` variants), where DWARF states one: the depth projection rebuilds its fields from that layout, so without it a projected retype read as a break. its encoding class (signed, unsigned, boolean or float), byte size, alignment and vector lane count (`abicheck/model/abi_fundamental.py`). DWARF and castxml record it; the clang frontend does not, so its slots carry no fact. Written only where a producer determined it, so every other slot encodes exactly as v68. A pre-v69 document, or a v69 one without the key, decodes to an unset fact, which never proves two slots equal: an old baseline keeps its name-based verdict. A pre-v69 reader drops the facts silently and reads a retype between ABI-identical types as an ABI break, so the bump is not additive for that reader's verdicts.
+
+(v67) `live_preprocessor_hidden` -- the castxml run's `-E -dD` branch scan, `{guard macro: [function names]}`, the declarations a header parse's configuration excluded. It attributes an export that no parsed declaration names to the macro its declaration sits under (`undeclared_export_census.by_guard`). Written only when a scan ran, so a snapshot without one encodes exactly as v66; a pre-v67 snapshot reads it as absent, and the census falls back to the named-cause rule for it.
 
 (v66) `macho.weak_dependent_libs` and `macho.weak_dependent_libs_fact` -- the install names of a Mach-O image's `LC_LOAD_WEAK_DYLIB` loads, kept apart from `macho.dependent_libs` so a weak load never reads as a change to the hard dependency set. Written only on a Mach-O snapshot, so every other snapshot encodes exactly as v65. A pre-v66 snapshot decodes the fact as not collected, and the release dependency graph marks that side's Mach-O facts incomplete rather than reading it as "no weak loads".
 
@@ -634,7 +640,7 @@ unknown.
 | `pe` | object \| null | PE/COFF metadata (Windows DLL exports, machine, characteristics). |
 | `macho` | object \| null | Mach-O metadata (dylib exports, CPU slices, install name). |
 | `dwarf` | object \| null | Debug struct/enum layout (v51: plus ODR conflicts, see above) — from DWARF, or BTF/CTF/PDB reduced to the same shape. In memory this is the IR store's `declarations.debug_layout`; the key keeps its historical name. |
-| `dwarf_advanced` | object \| null | Toolchain, calling conventions, value-ABI traits (in memory: `declarations.debug_advanced`). |
+| `dwarf_advanced` | object \| null | Toolchain, calling conventions, value-ABI traits (in memory: `declarations.debug_advanced`). `extraction` (schema v68, optional): `not_run` / `completed` / `failed`; absent reads as `unrecorded`. |
 | `sycl` | object \| null | SYCL plugin-interface metadata. |
 | `dependency_info` | object \| null | Resolved dependency graph (nodes, edges, unresolved). |
 | `build_mode` | object \| null | Normalized compiler/stdlib/standard capture (ADR build-mode work). No dump path writes it today; it is read back only from a document that carries one (see `known-gaps.md`). |

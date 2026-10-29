@@ -36,6 +36,8 @@ from pathlib import Path
 
 import pytest
 
+from tests._abicheck_subprocess import abicheck_command
+
 pytestmark = [
     pytest.mark.integration,
     pytest.mark.skipif(
@@ -76,7 +78,7 @@ def _dump(tmp_path: Path, headers: dict[str, str]):
         cwd=tmp_path,
     )
     out = tmp_path / "snap.json"
-    argv = [sys.executable, "-m", "abicheck", "dump", str(lib), "-o", str(out)]
+    argv = abicheck_command("dump", str(lib), "-o", str(out))
     for name in headers:
         argv += ["-H", str(tmp_path / name)]
     proc = subprocess.run(

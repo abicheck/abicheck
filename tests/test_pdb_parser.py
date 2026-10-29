@@ -1111,7 +1111,7 @@ class TestTypeDatabaseExtended:
 
     def test_type_name_procedure(self) -> None:
         db = self._make_db([(LF_PROCEDURE, _make_lf_procedure(0x74, 0, 0, 0))])
-        assert db.type_name(0x1000) == "fn(...)"
+        assert db.type_name(0x1000) == "int (void)"
 
     def test_type_name_mfunction(self) -> None:
         db = self._make_db([(LF_MFUNCTION, _make_lf_mfunction(0x74, 0, 0, 0, 0, 0))])

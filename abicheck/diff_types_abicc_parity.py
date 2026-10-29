@@ -36,6 +36,7 @@ from collections import defaultdict
 
 from .compare.public_surface import reconciled_variable_surfaces
 from .compare.template_surface import reconciled_abi_visible_functions
+from .compare.variable_names import qualified_variable_name
 from .detector_registry import registry
 from .diff_helpers import (
     lookup_matched_type as _lookup_matched_type,
@@ -78,7 +79,13 @@ def _diff_var_values(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
                 make_change(
                     ChangeKind.VAR_VALUE_CHANGED,
                     symbol=mangled,
-                    name=v_old.name,
+                    # The qualified name, not the leaf: a class-static
+                    # `K_S::K_V` is reported as `K_S::K_V` (see
+                    # compare.variable_names).
+                    name=qualified_variable_name(
+                        v_old.entity_id, v_old.name, mangled=mangled
+                    ),
+                    entity_id=v_old.entity_id,
                     old=repr(v_old.value),
                     new=repr(v_new.value),
                     old_value=v_old.value,

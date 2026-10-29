@@ -47,6 +47,7 @@ from abicheck.model.source_graph_coverage import ROLE_COVERAGE_MATRIX
 from abicheck.policy.classification import Verdict, compute_verdict
 from abicheck.policy.severity import PRESET_DEFAULT, compute_exit_code
 from abicheck.policy.source_graph_role_findings import role_change_findings
+from tests._abicheck_subprocess import abicheck_command
 
 REPO_DIR = Path(__file__).resolve().parent.parent
 
@@ -337,17 +338,14 @@ def test_cli_compare_reports_public_role_change(
         )
         out = tmp_path / f"{side}.json"
         dump = subprocess.run(
-            [
-                sys.executable,
-                "-m",
-                "abicheck.cli",
+            abicheck_command(
                 "dump",
                 str(lib),
                 "--header",
                 str(header),
                 "-o",
                 str(out),
-            ],
+            ),
             cwd=REPO_DIR,
             capture_output=True,
             text=True,
@@ -357,15 +355,12 @@ def test_cli_compare_reports_public_role_change(
 
     report = tmp_path / "report.json"
     result = subprocess.run(
-        [
-            sys.executable,
-            "-m",
-            "abicheck.cli",
+        abicheck_command(
             "compare",
             *map(str, dumps),
             "-o",
             f"json={report}",
-        ],
+        ),
         cwd=REPO_DIR,
         capture_output=True,
         text=True,

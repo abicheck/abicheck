@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Vector-type spellings castxml cannot express, joined from the clang AST.
+"""Fundamental types castxml cannot express, joined from the clang AST.
 
 castxml's XML renders a GCC/Clang vector type (``vector_size``, ``__m256``,
 ``ext_vector_type``) as ``<Unimplemented type_class="Vector"/>``: no element
@@ -8,6 +8,13 @@ three, so this module reads the clang JSON AST and produces the spelling
 ``T __attribute__((vector_size(N)))`` -- the spelling the DWARF path records
 (:func:`abicheck.dwarf_utils.array_type_spelling`), so both backends agree on
 one vector type.
+
+castxml does the same for a complex type (``type_class="Complex"``, e.g.
+``float _Complex``) and a bit-precise integer (``type_class="BitInt"``, e.g.
+``_BitInt(8)``). Each is returned as clang spells it. Without the join, every
+such parameter, field or return was the one literal ``Unimplemented`` spelling,
+so ``float _Complex`` -> ``double _Complex`` compared equal and was a false
+clean on the default header lane.
 
 Keys, one per declaration whose type is a vector:
 
@@ -28,15 +35,17 @@ import re
 from typing import Any
 from xml.etree.ElementTree import Element
 
+from ....model.fundamental_type import is_fundamental_type_spelling
 from ..clang.ast_inner import ast_inner
 from .context import CastxmlParserContext
 
 __all__ = [
     "VECTOR_SPELLINGS_ATTR",
     "resolve_vector_spellings",
-    "castxml_vector_spellings",
     "clang_vector_spellings",
     "has_vector_nodes",
+    "UNEXPRESSIBLE_TYPE_CLASSES",
+    "parse_unexpressible_qualtype",
     "parse_vector_qualtype",
     "with_vector_spellings",
 ]
@@ -44,6 +53,14 @@ __all__ = [
 #: The attribute :func:`with_vector_spellings` carries the mapping under, on a
 #: copy of the parsed root. The parsed tree itself is never written.
 VECTOR_SPELLINGS_ATTR = "abicheck-vector-spellings"
+
+#: castxml ``type_class`` values of an ``Unimplemented`` node that is a
+#: fundamental type castxml cannot spell: a vector (``Vector``), a complex
+#: number (``Complex``: ``float _Complex``), and a bit-precise integer
+#: (``BitInt``: ``_BitInt(N)``). Each is joined from the clang AST, so none is
+#: left as the literal ``Unimplemented`` -- a spelling every such type shares,
+#: which made ``float _Complex`` and ``double _Complex`` parameters compare equal.
+UNEXPRESSIBLE_TYPE_CLASSES: frozenset[str] = frozenset({"Vector", "Complex", "BitInt"})
 
 #: Byte size of each element type a vector may carry (LP64 / common ABIs). An
 #: element type missing here yields no spelling, so the node keeps its
@@ -115,15 +132,90 @@ def parse_vector_qualtype(qual_type: str) -> str | None:
     return None
 
 
+#: clang's bit-precise integer spelling: ``_BitInt(8)`` / ``unsigned _BitInt(16)``.
+_BITINT_RE = re.compile(r"(?:(?:un)?signed\s+)?_BitInt\(\s*\d+\s*\)")
+_COMPLEX_KEYWORDS = frozenset({"_Complex", "__complex__"})
+
+
+def parse_unexpressible_qualtype(qual_type: str) -> str | None:
+    """The spelling of a clang type castxml leaves ``Unimplemented``, or ``None``.
+
+    A vector goes through :func:`parse_vector_qualtype`. A complex type
+    (``_Complex float``, ``long double _Complex``) or a bit-precise integer
+    (``_BitInt(8)``) is returned as clang spells it: it has no element or lane
+    data to rebuild, so the spelling is the whole answer. A pointer, array or
+    function-declarator form is not returned (its inner node is not keyed).
+    """
+    vector = parse_vector_qualtype(qual_type)
+    if vector is not None:
+        return vector
+    text = " ".join(qual_type.split())
+    if _BITINT_RE.fullmatch(text):
+        return text
+    if not text or any(ch in text for ch in "*&[]()"):
+        return None
+    if _COMPLEX_KEYWORDS.isdisjoint(text.split()):
+        return None
+    return text if is_fundamental_type_spelling(text) else None
+
+
 def _clang_qualified(stack: list[str], name: str) -> str:
     return "::".join([*stack, name]) if name else "::".join(stack)
 
 
+_QUALIFIER_SUFFIX_RE = re.compile(
+    r"\s*\b(?:const|volatile|restrict|__restrict__|__restrict)\s*$"
+)
+_ARRAY_SUFFIX_RE = re.compile(r"\s*\[[^\[\]]*\]\s*$")
+_POINTER_SUFFIX_RE = re.compile(r"\s*(?:&&|&|\*)\s*$")
+_LEADING_CV_RE = re.compile(r"^\s*(?:const|volatile)\s+")
+
+
+def _strip_pointer_array_cv(text: str) -> str:
+    """*text* without its trailing pointer, reference, array and cv declarators.
+
+    ``_Complex float *const[4]`` -> ``_Complex float``. A function declarator
+    (``void (*)(int)``) is left as it is: its trailing ``)`` is not stripped.
+    """
+    while True:
+        previous = text
+        text = _LEADING_CV_RE.sub("", text)
+        text = _QUALIFIER_SUFFIX_RE.sub("", text)
+        text = _ARRAY_SUFFIX_RE.sub("", text)
+        text = _POINTER_SUFFIX_RE.sub("", text)
+        if text == previous:
+            return text.strip()
+
+
+def _declared_spelling(qual_type: str, typedefs: dict[str, str]) -> str | None:
+    """The unexpressible spelling of a declaration's type, or ``None``.
+
+    The type may be the complex, bit-int or vector spelling itself, a typedef
+    name of one, or a pointer, reference, array or cv form of either. castxml
+    leaves the element type ``Unimplemented``, so its spelling is the base's,
+    whatever declarator wraps it.
+    """
+    text = " ".join(qual_type.split())
+    if not text:
+        return None
+    if text in typedefs:
+        return typedefs[text]
+    direct = parse_unexpressible_qualtype(text)
+    if direct is not None:
+        return direct
+    base = _strip_pointer_array_cv(text)
+    if not base or base == text:
+        return None
+    if base in typedefs:
+        return typedefs[base]
+    return parse_unexpressible_qualtype(base)
+
+
 def clang_vector_spellings(clang_root: dict[str, Any]) -> dict[str, str]:
-    """Vector spellings by declaration key, from a clang ``-ast-dump=json`` root.
+    """Unexpressible-type spellings by declaration key, from a clang ``-ast-dump=json`` root.
 
     Typedefs are collected first so a parameter or field spelled by typedef name
-    (``f8 x``) resolves through the typedef's own vector spelling.
+    (``f8 x``) resolves through the typedef's own spelling.
     """
     typedefs: dict[str, str] = {}
     keyed: list[tuple[str, str]] = []
@@ -139,15 +231,15 @@ def clang_vector_spellings(clang_root: dict[str, Any]) -> dict[str, str]:
         name = node.get("name") or ""
         inner = ast_inner(node)
         if kind == "TypedefDecl" and name:
-            spelling = parse_vector_qualtype(
-                (node.get("type") or {}).get("qualType", "")
+            spelling = _declared_spelling(
+                (node.get("type") or {}).get("qualType", ""), typedefs
             )
             if spelling is not None:
                 typedefs[name] = spelling
                 keyed.append((f"typedef:{name}", spelling))
         elif kind == "FieldDecl" and name and function is None:
             qual_type = (node.get("type") or {}).get("qualType", "")
-            spelling = typedefs.get(qual_type) or parse_vector_qualtype(qual_type)
+            spelling = _declared_spelling(qual_type, typedefs)
             if spelling is not None and qual_type not in typedefs:
                 keyed.append((f"field:{_clang_qualified(scope, '')}::{name}", spelling))
         elif kind == "FunctionDecl" and name:
@@ -160,9 +252,7 @@ def clang_vector_spellings(clang_root: dict[str, Any]) -> dict[str, str]:
             for child in inner:
                 if isinstance(child, dict) and child.get("kind") == "ParmVarDecl":
                     qual_type = (child.get("type") or {}).get("qualType", "")
-                    spelling = typedefs.get(qual_type) or parse_vector_qualtype(
-                        qual_type
-                    )
+                    spelling = _declared_spelling(qual_type, typedefs)
                     if spelling is not None and qual_type not in typedefs:
                         keyed.append((f"param:{fn_key}#{index}", spelling))
                     index += 1
@@ -174,9 +264,7 @@ def clang_vector_spellings(clang_root: dict[str, Any]) -> dict[str, str]:
         walk(inner, scope, function)
 
     walk(ast_inner(clang_root), [], None)
-    out = dict(keyed)
-    # ``typedef:`` entries are authoritative for the typedef name only.
-    return out
+    return dict(keyed)
 
 
 def _before_parameter_list(qual_type: str) -> str:
@@ -201,12 +289,12 @@ def _before_parameter_list(qual_type: str) -> str:
 def _vector_of_function_return(
     node: dict[str, Any], typedefs: dict[str, str]
 ) -> str | None:
-    """The vector return spelling of a function, from its ``T (args)`` qualType."""
+    """The unexpressible return spelling of a function, from its ``T (args)`` qualType."""
     qual_type = (node.get("type") or {}).get("qualType", "")
     head = _before_parameter_list(qual_type)
     if not head:
         return None
-    return typedefs.get(head) or parse_vector_qualtype(head)
+    return _declared_spelling(head, typedefs)
 
 
 def _castxml_scope(el: Element, ctx_index: dict[str, Element]) -> str:
@@ -226,41 +314,78 @@ def _castxml_scope(el: Element, ctx_index: dict[str, Element]) -> str:
     return "::".join(reversed(names))
 
 
-def castxml_vector_spellings(root: Element) -> dict[str, str]:
-    """castxml declaration keys for every vector ``Unimplemented`` node in *root*.
+#: castxml nodes a declared type may wrap around the element type it names.
+_DECLARATOR_TAGS = frozenset(
+    {
+        "PointerType",
+        "ReferenceType",
+        "RValueReferenceType",
+        "ArrayType",
+        "CvQualifiedType",
+        "Typedef",
+    }
+)
 
-    Maps the node id of each vector node to the key of the declaration that
-    references it, in the same key grammar :func:`clang_vector_spellings` uses.
-    A node reached through a typedef is keyed by the typedef name. A vector node
-    referenced directly (inline) is keyed by its field or parameter.
+
+def _unexpressible_under(
+    type_id: str, index: dict[str, Element], unexpressible: frozenset[str]
+) -> str | None:
+    """The unexpressible node a declared type reaches through its declarators.
+
+    Walks ``type`` attributes through pointer, reference, array, cv and typedef
+    nodes; returns the first unexpressible ``Unimplemented`` node reached.
+    """
+    current = type_id
+    seen: set[str] = set()
+    while current and current not in seen:
+        seen.add(current)
+        if current in unexpressible:
+            return current
+        node = index.get(current)
+        if node is None or node.tag not in _DECLARATOR_TAGS:
+            return None
+        current = node.get("type", "")
+    return None
+
+
+def castxml_declaration_keys(root: Element) -> dict[str, list[str]]:
+    """Every declaration key that reaches each unexpressible node, in document order.
+
+    Keys use the grammar :func:`clang_vector_spellings` uses. A node is reached
+    by each declaration whose type wraps it: a typedef, a field or parameter
+    (directly or through a pointer, array or typedef chain), or a return. Several
+    keys may name one node; the resolver takes the first one clang knows.
     """
     index: dict[str, Element] = {el.get("id", ""): el for el in root.iter()}
-    vector_ids = {
+    unexpressible = frozenset(
         el.get("id", "")
         for el in root.iter()
-        if el.tag == "Unimplemented" and el.get("type_class") == "Vector"
-    }
-    keyed: dict[str, str] = {}
+        if el.tag == "Unimplemented"
+        and el.get("type_class") in UNEXPRESSIBLE_TYPE_CLASSES
+    )
+    keys: dict[str, list[str]] = {}
+
+    def add(type_id: str, key: str) -> None:
+        node = _unexpressible_under(type_id, index, unexpressible)
+        if node is None:
+            return
+        found = keys.setdefault(node, [])
+        if key not in found:
+            found.append(key)
+
     for el in root.iter():
-        if el.tag == "Typedef":
-            target = el.get("type", "")
-            if target in vector_ids and el.get("name"):
-                keyed.setdefault(target, f"typedef:{el.get('name')}")
-        elif el.tag == "Field":
-            target = el.get("type", "")
-            if target in vector_ids and el.get("name"):
-                scope = _castxml_scope(el, index)
-                keyed.setdefault(target, f"field:{scope}::{el.get('name')}")
+        if el.tag == "Typedef" and el.get("name"):
+            add(el.get("type", ""), f"typedef:{el.get('name')}")
+        elif el.tag == "Field" and el.get("name"):
+            scope = _castxml_scope(el, index)
+            add(el.get("type", ""), f"field:{scope}::{el.get('name')}")
         elif el.tag == "Function":
             fn_key = _castxml_function_key(el, index)
             arguments = [child for child in el if child.tag == "Argument"]
             for position, arg in enumerate(arguments):
-                if arg.get("type", "") in vector_ids:
-                    keyed.setdefault(arg.get("type", ""), f"param:{fn_key}#{position}")
-            ret = el.get("returns", "")
-            if ret in vector_ids:
-                keyed.setdefault(ret, f"return:{fn_key}")
-    return keyed
+                add(arg.get("type", ""), f"param:{fn_key}#{position}")
+            add(el.get("returns", ""), f"return:{fn_key}")
+    return keys
 
 
 def _castxml_function_key(el: Element, index: dict[str, Element]) -> str:
@@ -276,14 +401,20 @@ def _castxml_function_key(el: Element, index: dict[str, Element]) -> str:
 def resolve_vector_spellings(
     root: Element, clang_root: dict[str, Any]
 ) -> dict[str, str]:
-    """Map castxml's vector nodes to clang spellings. Writes nothing.
+    """Map castxml's unexpressible nodes to clang spellings. Writes nothing.
 
-    Returns the node-id -> spelling mapping. Vector nodes with no clang
-    declaration keep their ``Unimplemented`` status (the mapping omits them).
+    A node takes the spelling of the first of its declaration keys that clang
+    knows. A node no clang declaration names keeps its ``Unimplemented`` status
+    (the mapping omits it).
     """
-    keys = castxml_vector_spellings(root)
     by_key = clang_vector_spellings(clang_root)
-    return {node: by_key[key] for node, key in keys.items() if key in by_key}
+    resolved: dict[str, str] = {}
+    for node, candidates in castxml_declaration_keys(root).items():
+        for key in candidates:
+            if key in by_key:
+                resolved[node] = by_key[key]
+                break
+    return resolved
 
 
 def with_vector_spellings(root: Element, spellings: dict[str, str]) -> Element:
@@ -303,7 +434,7 @@ def with_vector_spellings(root: Element, spellings: dict[str, str]) -> Element:
 def has_vector_nodes(root: Element) -> bool:
     """Whether castxml emitted any vector ``Unimplemented`` node in *root*."""
     return any(
-        el.tag == "Unimplemented" and el.get("type_class") == "Vector"
+        el.tag == "Unimplemented" and el.get("type_class") in UNEXPRESSIBLE_TYPE_CLASSES
         for el in root.iter()
     )
 

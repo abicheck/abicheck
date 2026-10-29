@@ -70,6 +70,7 @@ from ....model.name_decoration.macho_underscore import (
     is_c_linkage_mangling as _is_c_linkage_mangling,
     strip_darwin_itanium_decoration as _strip_darwin_itanium_decoration,
 )
+from ...builtin_abi import BuiltinAbi, builtin_type_fact
 from ..scope_segments import strip_record_scopes
 from .ast_inner import ast_inner
 from .attributes import clang_contract_attributes as _clang_contract_attributes
@@ -94,9 +95,11 @@ from .param_kind import (
 )
 from .qualifiers import (
     OVERRIDE_ELIGIBLE_KINDS as _OVERRIDE_ELIGIBLE_KINDS,
+    clang_exception_spec as _clang_exception_spec,
     clang_method_is_override as _clang_method_is_override,
     clang_param_is_restrict as _clang_param_is_restrict,
     clang_param_is_va_list as _clang_param_is_va_list,
+    is_noexcept_qualifier as _is_noexcept_qualifier,
 )
 from .redeclarations import RedeclarationIdentity
 from .restrict_spelling import without_top_level_restrict
@@ -127,38 +130,6 @@ def _pointer_depth(type_str: str) -> int:
         elif ch == "*" and bracket == 0:
             depth += 1
     return depth
-
-
-def _is_noexcept_qualifier(quals: str) -> bool:
-    """Whether a function's trailing qualifiers denote a *non-throwing* spec.
-
-    A bare ``noexcept`` (and ``noexcept(true)`` / ``noexcept(1)``) is
-    non-throwing; ``noexcept(false)`` / ``noexcept(0)`` is *throwing* and must
-    not be treated as ``noexcept`` — since C++17 the exception specification is
-    part of the function type, so conflating the two would hide a real ABI break
-    (CodeRabbit review). A dependent ``noexcept(expr)`` keeps its conservative
-    "non-throwing" reading (the spelling is all the header AST exposes).
-    """
-    m = re.search(r"\bnoexcept(?:\s*\(([^)]*)\))?", quals)
-    if m is None:
-        return False
-    expr = m.group(1)
-    if expr is None:
-        return True
-    return expr.strip() not in ("false", "0")
-
-
-def _clang_exception_spec(quals: str) -> str:
-    """The dynamic exception-specification spelling from trailing qualifiers.
-
-    ``""`` when the function has no ``throw(...)`` spec (noexcept is handled
-    separately by :func:`_is_noexcept_qualifier`).
-    """
-    m = re.search(r"\bthrow\s*\(([^)]*)\)", quals)
-    if m is None:
-        return ""
-    inner = ", ".join(p.strip() for p in m.group(1).split(",") if p.strip())
-    return f"throw({inner})"
 
 
 def _function_qualifiers(qualtype: str) -> str:
@@ -441,6 +412,7 @@ def parse_functions(
     | None = None,
     explicit_facts: Mapping[int, Fact[ExplicitInstantiation]] | None = None,
     function_constraints: FunctionConstraintIndex | None = None,
+    builtin_abi: BuiltinAbi | None = None,
 ) -> list[Function]:
     funcs: list[Function] = []
     redeclared = RedeclarationIdentity()  # out-of-line def -> in-class identity
@@ -568,6 +540,7 @@ def parse_functions(
                 # spells its `qualType` as the bare alias name, with no `&`/`*` token for the spelling heuristic to find --
                 # see `context.qualtype_desugared`'s own docstring (Codex review, PR #1200).
                 kind=_param_kind(_qualtype_desugared(p)),
+                type_abi_fact=builtin_type_fact(_qualtype_desugared(p), builtin_abi),
                 pointer_depth=_pointer_depth(_qualtype(p)),
                 # G31 Phase C: castxml was the ONLY producer of this fact (`_resolve_cv_restrict`), so a castxml-vs-clang comparison of unchanged headers reported PARAM_RESTRICT_CHANGED for every restrict-qualified parameter -- the detector compares the two bools directly, with no producer gate to decline on (unlike `deprecated`/`is_scoped` before this phase).
                 is_restrict=_clang_param_is_restrict(p),
@@ -615,6 +588,9 @@ def parse_functions(
                 name=name,
                 mangled=mangled,
                 return_type=ret_type,
+                return_type_abi_fact=builtin_type_fact(
+                    _return_type(_qualtype_desugared(entry.node)), builtin_abi
+                ),
                 params=params,
                 visibility=vis,
                 **surface_facts,

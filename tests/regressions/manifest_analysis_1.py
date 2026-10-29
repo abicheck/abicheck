@@ -342,6 +342,12 @@ ANALYSIS_1_BUG_CLASSES: tuple[BugClass, ...] = (
             # replay). Same name-level, one-for-one pairing as the inline pair.
             "tests/test_constexpr_constant_dedup.py",
             "tests/test_constexpr_constant_source_replay_e2e.py",
+            # The replay-twin table is the one owner of every source-replay
+            # duplicate pair; a new replay kind must be classified in it. The
+            # guard reads the emitter modules by AST scan, not a list.
+            "tests/test_source_replay_twin_table.py",
+            "tests/test_one_change_one_finding_matrix.py",
+            "tests/test_variable_identity_dedup.py",
             "tests/unit/compare/test_dedup_key.py",
             "tests/test_diff_namespaces.py",
             # workflows/cross_source_hygiene.py's own per-side OLD/NEW
@@ -635,6 +641,12 @@ ANALYSIS_1_BUG_CLASSES: tuple[BugClass, ...] = (
         fixed_by=(834, 838, 860, 883, 932),
         seed_tests=(
             "tests/test_fact_conservation_properties.py",
+            # A changed value on a form the header tier skipped (inline or
+            # extern const, variable template) must surface as a finding, not
+            # read as a clean compare. Oracle: the compiler's probe.
+            "tests/test_value_bearing_declaration_forms.py",
+            "tests/test_elf_data_initializer.py",
+            "tests/test_clang_non_const_variable_value.py",
             "tests/test_bundle_side_input.py",
             "tests/test_contract_adaptive_default_fallback.py",
             # ADR-049 Phase 7's evidence-adaptive default: a finding no

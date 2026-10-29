@@ -27,6 +27,7 @@ import pytest
 from hypothesis import given, strategies as st
 
 from abicheck.compare.record_qualified_name import qualify_record_name
+from tests._abicheck_subprocess import abicheck_command
 
 
 @dataclass(frozen=True)
@@ -144,31 +145,25 @@ def test_case89_finding_is_independent_of_debug_evidence(tmp_path: Path) -> None
                 # Apple's strip accepts; -g exists only in GNU strip.
                 subprocess.run(["strip", "-S", str(lib)], check=True)
             subprocess.run(
-                [
-                    sys.executable,
-                    "-m",
-                    "abicheck",
+                abicheck_command(
                     "dump",
                     str(lib),
                     "-H",
                     str(_CASE / f"{v}.h"),
                     "-o",
                     str(work / f"{v}.json"),
-                ],
+                ),
                 check=True,
                 capture_output=True,
             )
         out = subprocess.run(
-            [
-                sys.executable,
-                "-m",
-                "abicheck",
+            abicheck_command(
                 "compare",
                 str(work / "v1.json"),
                 str(work / "v2.json"),
                 "-o",
                 "json=-",
-            ],
+            ),
             capture_output=True,
             text=True,
         ).stdout

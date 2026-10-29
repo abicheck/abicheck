@@ -36,6 +36,7 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from typing import TYPE_CHECKING, Any
 
+from ..model.availability import FactStatus
 from ..model.extraction_scope import EntityOwnership, ExtractionScope, ownership_of
 from ..model.fact import Fact
 
@@ -47,19 +48,36 @@ __all__ = ["decode_extraction_scope", "encode_extraction_scope"]
 _LISTS = ("functions", "variables", "types", "enums")
 _FIELD = "ownership_fact"
 _KEY = "extraction_scope"
+#: Schema v67: the per-entity decisions of a snapshot with no recorded scope.
+#: Written only in that case, never as a scope: ADR-075 reads an unrecorded
+#: scope as unrecorded, and a decision without one must not change that.
+_UNSCOPED_KEY = "ownership_without_scope"
 
 
 def encode_extraction_scope(d: dict[str, Any], snap: AbiSnapshot) -> None:
     """Rewrite *d* (the encoded *snap*) in place: strip per-entity facts,
-    write the interned block, or drop the key for an unrecorded snapshot."""
+    write the interned block, or -- with no recorded scope -- the decisions
+    under :data:`_UNSCOPED_KEY` (and no scope key at all)."""
     for name in _LISTS:
         for entry in d.get(name) or ():
             if isinstance(entry, dict):
                 entry.pop(_FIELD, None)
+    ownership = _ownership_block(snap)
     scope = snap.extraction_scope
     if scope is None:
         d.pop(_KEY, None)
+        if ownership is not None:
+            d[_UNSCOPED_KEY] = {"entity_ownership": ownership}
         return
+    block = scope.to_dict()
+    if ownership is not None:
+        block["entity_ownership"] = ownership
+    d[_KEY] = block
+
+
+def _ownership_block(snap: AbiSnapshot) -> dict[str, Any] | None:
+    """The interned decision table, per-list indices and non-PRESENT statuses
+    of *snap*'s declarations; ``None`` when no declaration carries a fact."""
     table: dict[tuple[str, str, str], int] = {}
     per_list: dict[str, list[int]] = {}
     for name in _LISTS:
@@ -73,21 +91,56 @@ def encode_extraction_scope(d: dict[str, Any], snap: AbiSnapshot) -> None:
             indices.append(table.setdefault(key, len(table)))
         if any(i >= 0 for i in indices):
             per_list[name] = indices
-    block = scope.to_dict()
-    block["entity_ownership"] = {
+    statuses = _encode_statuses(snap)
+    if not per_list and not statuses:
+        return None
+    ownership: dict[str, Any] = {
         "decisions": [list(k) for k in table],
         **per_list,
     }
-    d[_KEY] = block
+    if statuses:
+        ownership["statuses"] = statuses
+    return ownership
+
+
+def _encode_statuses(snap: AbiSnapshot) -> dict[str, list[list[Any]]]:
+    """Each declaration whose ``ownership_fact`` is a non-``PRESENT`` ``Fact``:
+    ``[position, status, producer, diagnostics]``, per declaration list.
+
+    A ``PRESENT`` decision is the interned triple above and never appears here;
+    an unset (``None``) fact is absent, which is what a decoder reads back.
+    Persisting the status (schema v67) is what lets a stored ``PARTIAL`` or
+    ``FAILED`` decision stay the decision it was, instead of reading as
+    unclassified.
+    """
+    out: dict[str, list[list[Any]]] = {}
+    for name in _LISTS:
+        rows: list[list[Any]] = []
+        for index, decl in enumerate(getattr(snap.declarations, name)):
+            fact = getattr(decl, _FIELD, None)
+            if not isinstance(fact, Fact) or fact.status is FactStatus.PRESENT:
+                continue
+            rows.append(
+                [index, fact.status.value, fact.producer, list(fact.diagnostics)]
+            )
+        if rows:
+            out[name] = rows
+    return out
 
 
 def decode_extraction_scope(d: Mapping[str, Any], snap: AbiSnapshot) -> None:
     """Attach the recorded scope and per-entity decisions to *snap*."""
     block = d.get(_KEY)
-    if not isinstance(block, Mapping):
+    if isinstance(block, Mapping):
+        snap.extraction_scope = ExtractionScope.from_dict(block)
+        _attach_ownership(block.get("entity_ownership"), snap)
         return
-    snap.extraction_scope = ExtractionScope.from_dict(block)
-    ownership = block.get("entity_ownership")
+    unscoped = d.get(_UNSCOPED_KEY)
+    if isinstance(unscoped, Mapping):
+        _attach_ownership(unscoped.get("entity_ownership"), snap)
+
+
+def _attach_ownership(ownership: Any, snap: AbiSnapshot) -> None:
     if not isinstance(ownership, Mapping):
         return
     decisions: list[Fact[EntityOwnership]] = []
@@ -117,3 +170,37 @@ def decode_extraction_scope(d: Mapping[str, Any], snap: AbiSnapshot) -> None:
                 and 0 <= index < len(decisions)
             ):
                 decl.ownership_fact = decisions[index]
+    _decode_statuses(ownership.get("statuses"), snap)
+
+
+def _decode_statuses(raw: Any, snap: AbiSnapshot) -> None:
+    """Attach the recorded non-``PRESENT`` facts; a malformed row is skipped
+    (the declaration stays unset, which every reader treats as unknown)."""
+    if not isinstance(raw, Mapping):
+        return
+    for name in _LISTS:
+        rows = raw.get(name)
+        decls = getattr(snap.declarations, name)
+        if not isinstance(rows, Sequence) or isinstance(rows, (str, bytes)):
+            continue
+        for row in rows:
+            if not (
+                isinstance(row, Sequence) and not isinstance(row, str) and len(row) == 4
+            ):
+                continue
+            index, status, producer, diagnostics = row
+            if not (isinstance(index, int) and not isinstance(index, bool)):
+                continue
+            if not (0 <= index < len(decls)):
+                continue
+            try:
+                member = FactStatus(status)
+            except ValueError:
+                continue
+            if member is FactStatus.PRESENT or not isinstance(diagnostics, list):
+                continue
+            decls[index].ownership_fact = Fact(
+                status=member,
+                diagnostics=tuple(str(x) for x in diagnostics),
+                producer=producer if isinstance(producer, str) else None,
+            )

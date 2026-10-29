@@ -56,6 +56,7 @@ from typing import Any
 from ....model import Fact, RecordType, TypeField
 from ....model.identity import entity_id_for_type
 from ....name_classification import strip_anonymous_type_location
+from .abi_fundamental import castxml_type_abi_fact
 from .context import CastxmlParserContext
 from .location import (
     access_level,
@@ -298,6 +299,7 @@ def parse_record_fields(ctx: CastxmlParserContext, el: Any) -> list[TypeField]:
                 # See RecordType.deprecated for the message-text convention.
                 deprecated=_deprecation_marker(child),
                 type_identities_fact=Fact.present(type_identities(ctx, field_type_id)),
+                type_abi_fact=castxml_type_abi_fact(ctx, field_type_id),
             )
         )
     return fields
@@ -375,6 +377,7 @@ def expand_anonymous_field(
                 default=inner.get("init"),
                 deprecated=_deprecation_marker(inner),
                 type_identities_fact=Fact.present(type_identities(ctx, inner_type_id)),
+                type_abi_fact=castxml_type_abi_fact(ctx, inner_type_id),
             )
         )
     return result

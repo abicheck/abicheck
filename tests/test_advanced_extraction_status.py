@@ -182,23 +182,140 @@ def test_failed_side_reads_as_asymmetric_not_as_no_debug_info():
     assert "new side" in failed_notes[0]
 
 
-def test_status_is_not_persisted_so_the_stored_document_is_unchanged():
-    recorded = _snap(
+def test_mixed_provenance_is_a_note_that_leaves_status_and_verdict_alone():
+    # ADR-080 D4: a recorded completed side against a stored, unrecorded one.
+    # The detector still runs on both sides; the assurance output names the
+    # inferred side in a note, and adds no gate.
+    recorded = _recorded(S.COMPLETED)
+    stored = _snap(
         dwarf_advanced=AdvancedDwarfMetadata(
-            has_dwarf=True, target_arch="x86_64", extraction=S.COMPLETED
+            has_dwarf=True, target_arch="x86_64", **_PAYLOAD
         )
     )
+    mixed = compute_analysis_assurance(compare(recorded, stored), recorded, stored)
+    assert mixed.dwarf_context_status == "clean"
+    notes = [n for n in mixed.notes if "mixed provenance" in n]
+    assert len(notes) == 1, mixed.notes
+    assert "new side" in notes[0]
+
+    both = compute_analysis_assurance(
+        compare(recorded, _recorded(S.COMPLETED)), recorded, _recorded(S.COMPLETED)
+    )
+    assert not [n for n in both.notes if "mixed provenance" in n]
+    assert (
+        compare(recorded, stored).verdict
+        == compare(recorded, _recorded(S.COMPLETED)).verdict
+    )
+
+
+def _recorded(status: AdvancedExtractionStatus) -> AbiSnapshot:
+    return _snap(
+        dwarf_advanced=AdvancedDwarfMetadata(
+            has_dwarf=True, target_arch="x86_64", extraction=status, **_PAYLOAD
+        )
+    )
+
+
+def _without_extraction_key(node: object) -> object:
+    """A v67 document: the same JSON with every ``extraction`` key removed
+    from the advanced-DWARF block (it is the one that carries
+    ``calling_conventions``), and the schema version set back to 67."""
+    if isinstance(node, dict):
+        out = {
+            k: _without_extraction_key(v)
+            for k, v in node.items()
+            if not (k == "extraction" and "calling_conventions" in node)
+        }
+        return out
+    if isinstance(node, list):
+        return [_without_extraction_key(v) for v in node]
+    return node
+
+
+@pytest.mark.parametrize("status", [S.COMPLETED, S.FAILED, S.NOT_RUN])
+def test_recorded_status_is_persisted_and_survives_a_load(
+    status: AdvancedExtractionStatus,
+):
+    snap = _recorded(status)
+    document = json.loads(snapshot_to_json(snap))
+    assert _find_extraction(document) == status.value
+
+    loaded = snapshot_from_dict(document)
+    assert loaded.declarations.debug_advanced is not None
+    assert loaded.declarations.debug_advanced.extraction is status
+    assert snapshot_to_json(loaded) == snapshot_to_json(snap)
+
+
+def test_unrecorded_status_writes_no_key_so_the_document_is_v67_shaped():
     unrecorded = _snap(
         dwarf_advanced=AdvancedDwarfMetadata(has_dwarf=True, target_arch="x86_64")
     )
-    assert snapshot_to_json(recorded) == snapshot_to_json(unrecorded)
-    assert snapshot_content_digest(recorded) == snapshot_content_digest(unrecorded)
+    document = json.loads(snapshot_to_json(unrecorded))
+    assert _find_extraction(document) is None
 
-    loaded = snapshot_from_dict(json.loads(snapshot_to_json(recorded)))
+
+def test_recorded_and_unrecorded_documents_have_different_digests():
+    completed = _recorded(S.COMPLETED)
+    unrecorded = _snap(
+        dwarf_advanced=AdvancedDwarfMetadata(
+            has_dwarf=True, target_arch="x86_64", **_PAYLOAD
+        )
+    )
+    assert snapshot_content_digest(completed) != snapshot_content_digest(unrecorded)
+    # Two identical recorded documents agree: the digest is over content.
+    assert snapshot_content_digest(completed) == snapshot_content_digest(
+        _recorded(S.COMPLETED)
+    )
+
+
+def test_pre_v68_document_decodes_to_unrecorded_never_completed():
+    # The same payload as a v67 writer produced it: no extraction key, and the
+    # schema version the old writer stamped. It must read as unrecorded.
+    document = json.loads(snapshot_to_json(_recorded(S.COMPLETED)))
+    v67 = _without_extraction_key(document)
+    v67["schema_version"] = 67
+    assert _find_extraction(v67) is None
+
+    loaded = snapshot_from_dict(v67)
     assert loaded.declarations.debug_advanced is not None
     assert loaded.declarations.debug_advanced.extraction is S.UNRECORDED
-    # Provenance, not content: the decoded copy still compares equal.
-    assert loaded.declarations.debug_advanced == recorded.declarations.debug_advanced
+
+
+def test_garbled_recorded_status_is_refused_not_read_as_completed():
+    from abicheck.errors import SnapshotError
+
+    document = json.loads(snapshot_to_json(_recorded(S.COMPLETED)))
+    _set_extraction(document, "completed-ish")
+    with pytest.raises(SnapshotError, match="extraction"):
+        snapshot_from_dict(document)
+
+
+def _find_extraction(node: object) -> object:
+    """The ``extraction`` value of the advanced-DWARF block, or ``None``."""
+    if isinstance(node, dict):
+        if "calling_conventions" in node and "has_dwarf" in node:
+            return node.get("extraction")
+        for value in node.values():
+            found = _find_extraction(value)
+            if found is not None:
+                return found
+    elif isinstance(node, list):
+        for value in node:
+            found = _find_extraction(value)
+            if found is not None:
+                return found
+    return None
+
+
+def _set_extraction(node: object, value: str) -> bool:
+    if isinstance(node, dict):
+        if "calling_conventions" in node and "has_dwarf" in node:
+            node["extraction"] = value
+            return True
+        return any(_set_extraction(v, value) for v in node.values())
+    if isinstance(node, list):
+        return any(_set_extraction(v, value) for v in node)
+    return False
 
 
 def test_non_regular_path_records_not_run():

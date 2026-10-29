@@ -34,7 +34,6 @@ from __future__ import annotations
 
 import json
 import subprocess
-import sys
 from pathlib import Path
 
 from abicheck.checker import compare
@@ -60,6 +59,7 @@ from abicheck.model import (
     Visibility,
 )
 from abicheck.serialization import load_snapshot, snapshot_to_json
+from tests._abicheck_subprocess import abicheck_command
 
 HERE = Path(__file__).parent
 PUB = {"visibility": Visibility.PUBLIC, "origin": ScopeOrigin.PUBLIC_HEADER}
@@ -195,10 +195,7 @@ def main() -> int:
     old, new = load_snapshot(HERE / "old.json"), load_snapshot(HERE / "new.json")
     for mode in MODES:
         proc = subprocess.run(
-            [
-                sys.executable,
-                "-m",
-                "abicheck",
+            abicheck_command(
                 "compare",
                 str(HERE / "old.json"),
                 str(HERE / "new.json"),
@@ -206,7 +203,7 @@ def main() -> int:
                 mode,
                 "-o",
                 f"json={HERE / f'report_{mode}.json'}",
-            ],
+            ),
             capture_output=True,
             text=True,
             check=False,

@@ -1,12 +1,13 @@
 # ADR-080: Persisting the Advanced-DWARF Extraction Status
 
 **Date:** 2026-10-12
-**Status:** Proposed — the in-memory status is implemented; persistence is not.
+**Status:** Accepted — implemented. The in-memory status was implemented
+earlier; the status is now persisted as `dwarf_advanced.extraction` in schema
+v68 (from v67), with the maintainer's decisions D3 (one-time digest change at
+the bump) and D4 (a mixed-provenance note, not a gate) recorded below.
 Drafted for the known gap
-[`advanced-facts-collected-infers-advanced-dwarf-extraction-ran`](../known-gaps/advanced-facts-collected-infers-advanced-dwarf-extraction-ran.md).
-Proposes one snapshot field, shared with ADR-079 in a single schema bump from
-v58 to v59, and two decisions for the maintainer (D3, D4). Nothing in the
-stored format changes until these are accepted.
+[`advanced-facts-collected-infers-advanced-dwarf-extraction-ran`](../known-gaps/advanced-facts-collected-infers-advanced-dwarf-extraction-ran.md),
+which is now FIXED.
 
 ## Context
 
@@ -17,7 +18,7 @@ completed parse that found nothing is distinguishable from a run that never
 happened, and a failed read is never reported as an empty surface. That part is
 live for every snapshot built in the same process as its compare.
 
-It is not persisted. `storage/snapshot_encode.py` drops the key
+It was not persisted as of 2026-10-12 (schema v67): `storage/snapshot_encode.py` dropped the key
 (`_drop_advanced_extraction_status`). The reason is the rule in AGENTS.md and
 the known-gaps write-up: the encoder walks every dataclass field, so adding the
 field without dropping it would add a key to every stored document, and that is
@@ -43,7 +44,7 @@ sides without saying why.
    Rejected. It would make `target_arch` carry a second meaning, which is the
    inference the known gap exists to remove, moved to a different field.
 
-## Decision (proposed)
+## Decision (accepted 2026-10-29)
 
 **D1. One persisted key.** `dwarf_advanced` gains `extraction`, written only
 when the status is not `unrecorded`. A DWARF dump always records `completed`
@@ -56,11 +57,12 @@ without the key, decodes to `unrecorded`. The reader then uses the existing
 inference, so a stored snapshot changes its reading only when it carries a
 recorded status. This is the same convention ADR-079 uses for `export_read`.
 
-**D3. Snapshot digests change once (maintainer decision).** The content digest
-covers the encoded document, so every DWARF snapshot's digest changes at the
-v59 bump. Snapshot caches are keyed by schema version, so this invalidates them
-once rather than producing a silent mismatch. The maintainer must confirm that
-a one-time digest change at the bump is acceptable.
+**D3. Snapshot digests change once (accepted).** The content digest covers the
+encoded document, so every DWARF snapshot's digest changes at the bump.
+Snapshot caches are keyed by schema version, so this invalidates them once
+rather than producing a silent mismatch. **Maintainer decision: accepted.** The
+bump is v67 to v68 (the schema version this repository is at; the v58 to v59
+numbering in the draft is stale).
 
 **D4. Comparability when the two sides disagree (maintainer decision).** A
 stored `completed` side paired with a legacy `unrecorded` side is compared the
@@ -70,17 +72,26 @@ detector to run. The open question is whether a pair where one side is
 output as a mixed-provenance comparison. The proposal is a note, not a gate and
 not a new exit code.
 
+**Chosen: the note.** The recommended option is taken as proposed. A pair with
+one side `unrecorded` and the other `completed`, with both sides carrying
+advanced DWARF, keeps the detector running on both sides (no gate, no exit
+code change). `analysis_assurance`'s DWARF-context notes name the
+`unrecorded` side in a `mixed provenance` note, and the context status stays
+`clean`, since nothing was skipped. Implemented in
+`policy/analysis_assurance/_context.py` (`_advanced_provenance_notes`).
+
 ## Migration and compatibility
 
-- Shared with ADR-079: schema v58 to v59, one reader-compatibility decision,
-  one `_MIN_SCHEMA_VERSION_REQUIRING_HARD_REJECTION` decision.
-- A pre-v59 reader drops the `extraction` key silently and reads the
-  inference, the same result as today. So an old reader is not made less
-  correct by the new key.
-- No default, exit code, CLI flag or report field changes. The reading change
-  is limited to a stored snapshot whose recorded status differs from the
-  inference, and the change is toward the status the extraction actually
-  recorded.
+- Schema v67 to v68, one additive nested key (`dwarf_advanced.extraction`). No
+  top-level key is added, so the section allowlists (`legacy_sections`,
+  `sparse_section_codec`) do not change. ADR-079, which drafted a shared v59
+  bump, is still Proposed and did not take a bump, so v68 carries only this
+  field.
+- A pre-v68 reader drops the `extraction` key silently and reads the inference,
+  the same result as before. So an old reader is not made less correct, and the
+  key needs no `_MIN_SCHEMA_VERSION_REQUIRING_HARD_REJECTION` entry.
+- No default, exit code, CLI flag or report field changes. The one report
+  change is the D4 note, which only appears for a mixed-provenance pair.
 
 ## What this ADR does not decide
 
@@ -90,14 +101,16 @@ not a new exit code.
   `completed` today, because the parse walked the file. Recording a partial
   parse would be a fourth status and is a separate decision.
 
-## Verification plan (once accepted)
+## Verification (done)
 
-- Round-trip per status across several payload shapes: `completed` with an
-  empty payload and an empty arch, `completed` with a populated payload,
-  `failed`, `not_run`. Each must decode to the status it was encoded with, and
-  `unrecorded` must write no key.
-- A digest test: a v59 `completed` snapshot and the same snapshot with
-  `unrecorded` differ, while two identical `completed` snapshots agree.
-- A reader test: a v58 document decodes to `unrecorded` and reads the same
-  collected/not-collected answer as before the bump, over the set of payload
-  shapes already covered by `tests/test_debug_evidence_presence.py`.
+- Round trip per status, `completed`/`failed`/`not_run`, as a case of
+  `tests/unit/storage/test_snapshot_field_roundtrip.py` (`KNOWN_LOSSY` is now
+  empty, ceiling 0); `unrecorded` writes no key
+  (`tests/test_advanced_extraction_status.py`).
+- Digest: a recorded `completed` snapshot and its `unrecorded` twin differ;
+  two identical `completed` snapshots agree
+  (`tests/test_advanced_extraction_status.py`).
+- Reader: a pre-v68 document (no key, schema 67) decodes to `unrecorded`, and
+  a garbled status is refused (`tests/test_advanced_extraction_status.py`).
+- Live versus stored: `tests/test_live_stored_advanced_dwarf_parity.py`, a
+  real `gcc -g` pair.

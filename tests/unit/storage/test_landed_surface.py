@@ -65,6 +65,7 @@ _MODULES = (
 #: from the documented surface.
 _INTERNAL_MODULES = (
     "abicheck.storage.fact_payload_validation",
+    "abicheck.storage.fact_decode",
     "abicheck.storage.guards",
     "abicheck.storage.availability_status",
     "abicheck.storage.entity_ids",
@@ -82,6 +83,8 @@ _INTERNAL_MODULES = (
     "abicheck.storage.atomic_file",
     "abicheck.storage.project_package_archive",
     "abicheck.storage.zip_member",
+    "abicheck.storage.snapshot_runtime_only",
+    "abicheck.storage.dwarf_layout_facts",
     "abicheck.storage.generation_scope",
     "abicheck.storage.generation_migrations",
     "abicheck.storage.castxml_array_migration",

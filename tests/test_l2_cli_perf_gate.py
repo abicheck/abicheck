@@ -40,6 +40,8 @@ from pathlib import Path
 
 import pytest
 
+from tests._abicheck_subprocess import abicheck_command
+
 _SCRIPTS = Path(__file__).resolve().parent.parent / "scripts"
 if str(_SCRIPTS) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS))
@@ -779,7 +781,7 @@ class TestDryRunArgv:
         # compare rejects --dry-run together with -o (exit 64); the first version
         # of this harness tripped exactly that.
         argv = harness._dry_run_argv(
-            ["abicheck", "compare", "a", "b", "-o", "/out.json"]
+            abicheck_command("compare", "a", "b", "-o", "/out.json")
         )
         assert "-o" not in argv and "/out.json" not in argv
         assert argv[-1] == "--dry-run"

@@ -61,7 +61,8 @@ import pytest
 from defusedxml.ElementTree import parse as defused_parse
 
 from abicheck.model.change_catalog.assembled import REGISTRY
-from abicheck.model.change_catalog.dimensions import ChangeOperation
+from tests._abicheck_subprocess import abicheck_command
+from tests._detector_mutations import registry_twins
 from tests.test_example_autodiscovery import (
     _build_libs_for_case,
     _find_sources,
@@ -125,32 +126,7 @@ FORMAT_FILES: dict[str, str] = {
 }
 
 
-def _registry_twins() -> dict[str, str]:
-    """Map each removed kind to its added twin, read from the ChangeKind registry.
-
-    A removed kind's twin is the registered kind named by swapping its one
-    ``removed`` token for ``added``, provided it has the same entity. The
-    registry's ``operation`` is not the filter: trait-gained kinds such as
-    ``type_field_added`` are declared ``MODIFIED`` because the entity persists.
-    """
-    entries = {str(getattr(k, "value", k)): e for k, e in REGISTRY.entries.items()}
-    twins: dict[str, str] = {}
-    for name, entry in entries.items():
-        if entry.operation != ChangeOperation.REMOVED:
-            continue
-        twin = re.sub(
-            r"(^|_)removed(?=_|$)",
-            lambda m: m.group(1) + "added",
-            name,
-            count=1,
-        )
-        other = entries.get(twin)
-        if other is not None and other.entity == entry.entity:
-            twins[name] = twin
-    return twins
-
-
-REMOVED_TO_ADDED: dict[str, str] = _registry_twins()
+REMOVED_TO_ADDED: dict[str, str] = registry_twins()
 
 
 # ---------------------------------------------------------------------------
@@ -193,7 +169,7 @@ def _headers(side: str, headers: tuple[Path, ...]) -> list[str]:
 def _cli(args: list[str], cache: Path) -> subprocess.CompletedProcess[str]:
     env = dict(os.environ, XDG_CACHE_HOME=str(cache))
     return subprocess.run(
-        [sys.executable, "-m", "abicheck.cli", *args],
+        abicheck_command(*args),
         capture_output=True,
         text=True,
         check=False,

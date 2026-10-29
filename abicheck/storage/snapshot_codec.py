@@ -91,6 +91,7 @@ from .fact_codec import (
     decode_snapshot_facts,
     evidenced_producers,
 )
+from .fact_decode import decode_abi_slot_fact
 from .generation_migrations import migrate_and_describe
 from .sectioned_document import from_sectioned_document, is_sectioned_document
 from .semantic_ir_codec import decode_semantic_ir
@@ -576,8 +577,45 @@ def decode_snapshot(
     snap.fact_generations = _fact_generations
     snap.spellings_generation = _spellings_generation
     snap.dump_provenance = _decode_dump_provenance(d)
+    snap.live_preprocessor_hidden = _decode_preprocessor_hidden(d)
+    snap.typedef_abi_facts = _decode_typedef_abi_facts(d, _schema_version)
     snap.load_notices = (*snap.load_notices, *_generation_notices)
     return snap, _schema_version
+
+
+def _decode_typedef_abi_facts(
+    d: dict[str, Any], schema_version: int
+) -> dict[str, Any] | None:
+    """The document's ``typedef_abi_facts`` (schema v69), or ``None`` when the
+    producer captured none -- what every pre-v69 document reads as."""
+    raw = d.get("typedef_abi_facts")
+    if raw is None:
+        return None
+    if not isinstance(raw, dict):
+        raise SnapshotError("snapshot document's typedef_abi_facts must be a mapping")
+    facts = {str(k): decode_abi_slot_fact(v, schema_version) for k, v in raw.items()}
+    return {k: f for k, f in facts.items() if f is not None}
+
+
+def _decode_preprocessor_hidden(d: dict[str, Any]) -> dict[str, tuple[str, ...]] | None:
+    """The document's ``live_preprocessor_hidden`` scan (schema v67), or ``None``
+    when absent -- no scan ran, which is what every pre-v67 document reads as.
+
+    Refused, not coerced, when present but malformed: a scan a census reads
+    as "these names sit under this guard" must not reach the model garbled.
+    """
+    value = d.get("live_preprocessor_hidden")
+    if value is None:
+        return None
+    if not isinstance(value, dict) or not all(
+        isinstance(names, list) and all(isinstance(n, str) for n in names)
+        for names in value.values()
+    ):
+        raise SnapshotError(
+            "snapshot document's live_preprocessor_hidden must map guard macros "
+            "to lists of function names"
+        )
+    return {str(macro): tuple(names) for macro, names in value.items()}
 
 
 def _decode_dump_provenance(d: dict[str, Any]) -> dict[str, object] | None:

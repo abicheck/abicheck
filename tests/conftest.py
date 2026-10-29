@@ -16,6 +16,11 @@ from typing import Any
 import pytest
 
 from abicheck.workflows.dump.cache import store as dump_cache_store
+from tests._abicheck_subprocess import pin_repo_on_path
+
+# Every subprocess of this session imports the checkout under test, not an
+# installed abicheck (F7; see tests/_abicheck_subprocess.py).
+pin_repo_on_path()
 
 try:
     import filelock  # explicit dev dependency; used for xdist cmake locking

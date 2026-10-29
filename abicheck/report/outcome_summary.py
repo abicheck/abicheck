@@ -26,8 +26,10 @@ here is fixed in every format.
 
 Exit data is *read*, never derived: the full-library gate is the envelope's
 :class:`~abicheck.policy.severity.GateDecision`, and the consumer's scoped exit
-code is the envelope's :class:`~abicheck.report.scoped_gate_facts.ScopedGateFacts`.
-Nothing here maps a verdict to an exit code.
+code is the envelope's :class:`~abicheck.report.scoped_gate_facts.ScopedGateFacts`,
+which carries the code ``policy.exit_decision_precedence.resolve_scoped_exit_code``
+decided. Nothing here maps a verdict to an exit code or restates a precedence
+rule.
 
 The tables are plain data so a format can share the glyphs without sharing the
 rest (the release and PR-comment tables extend :data:`VERDICT_EMOJI` with

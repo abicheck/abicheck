@@ -46,7 +46,7 @@ __all__ = [
     # handed without importing `policy` directly (forbidden by
     # `architecture/modules.yaml`; `frontends -> report` is the sanctioned
     # seam). This module already depends on it for every signature below, so
-    # the re-export adds no new edge -- see `release_exit.py`'s own use.
+    # the re-export adds no new edge -- see `frontends/cli/runtime.py`'s `_exit_compare_release`.
     "ReleaseAssuranceDecision",
     "ReleaseAssuranceTerms",
     "build_release_assurance_section",

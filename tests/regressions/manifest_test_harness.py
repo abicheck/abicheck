@@ -348,10 +348,17 @@ TEST_HARNESS_BUG_CLASSES: tuple[BugClass, ...] = (
             "git process the suite starts, without replacing the rest of "
             "the user's config; a control shows the same commit fails "
             "without them. 22 tests failed at once when a signing helper "
-            "went missing."
+            "went missing. The same environment-leak shape: a test that spawns "
+            "`abicheck` runs whatever abicheck the interpreter or PATH resolves to "
+            "(an installed copy, not the checkout under test), so every such spawn "
+            "goes through tests/_abicheck_subprocess.py, which pins PYTHONPATH to "
+            "this checkout, and a repo scan rejects a literal abicheck argv."
         ),
         fixed_by=(1421,),
-        seed_tests=("tests/test_hermetic_git.py",),
+        seed_tests=(
+            "tests/test_hermetic_git.py",
+            "tests/test_abicheck_subprocess_routing.py",
+        ),
         public_surfaces=(),
         axes={"scope": ("commit", "tag")},
     ),

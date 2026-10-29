@@ -25,8 +25,8 @@ from __future__ import annotations
 from abicheck.buildsource.check_report import (
     augment_report,
     derive_effective_depth,
-    final_exit_code,
 )
+from abicheck.policy.exit_decision_precedence import resolve_gate_mode_exit_code
 
 
 class TestDeriveEffectiveDepthNoBaseline:
@@ -92,7 +92,7 @@ class TestAugmentReportNoBaseline:
         report's `verdict` is always `null` -- neither a legacy compatibility
         verdict nor the `"ERROR"` sentinel -- so it previously fell through
         to the generic `scan_guard_triggered` operational-error branch,
-        which `final_exit_code()` fails unconditionally regardless of
+        which `resolve_gate_mode_exit_code()` fails unconditionally regardless of
         gate-mode. A clean, zero-finding audit must classify as no
         operational error at all."""
         out = augment_report(
@@ -105,7 +105,7 @@ class TestAugmentReportNoBaseline:
         )
         assert out.get("operational_errors") == []
         assert (
-            final_exit_code(
+            resolve_gate_mode_exit_code(
                 "advisory",
                 real_exit_code=0,
                 operational_error=bool(out["operational_errors"]),
@@ -136,7 +136,7 @@ class TestAugmentReportNoBaseline:
         assert out.get("operational_errors")
         assert out["operational_errors"][0]["kind"] == "evidence_contract_error"
         assert (
-            final_exit_code(
+            resolve_gate_mode_exit_code(
                 "advisory",
                 real_exit_code=0,
                 operational_error=bool(out["operational_errors"]),
