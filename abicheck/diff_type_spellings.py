@@ -34,10 +34,12 @@ from .compare.template_surface import reconciled_public_function_maps
 from .diff_helpers import build_type_map, lookup_matched_type
 from .model import (
     AbiSnapshot,
+    Fact,
     Function,
     is_abi_surface_type_name,
     stdlib_namespaces_excluded,
 )
+from .model.abi_fundamental import AbiFundamental
 
 
 @dataclass(frozen=True)
@@ -56,6 +58,10 @@ class TypeSlotChange:
     #: was declared a *type* finding and `--view show=functions` dropped it
     #: (Codex review, PR #1284).
     owner: str = "type"
+    #: Schema v69: the ABI fact each side's slot carries (None when none), so a
+    #: detector can tell an ABI-identical retype from a real change to the slot.
+    old_abi_fact: Fact[AbiFundamental] | None = None
+    new_abi_fact: Fact[AbiFundamental] | None = None
 
 
 def _spelling_differ(a: object, b: object) -> bool:
@@ -68,7 +74,13 @@ def _emit_function_slot_changes(of: Function, nf: Function) -> Iterator[TypeSlot
     """Yield changed return-type / parameter-type slots for a matched pair."""
     if _spelling_differ(of.return_type, nf.return_type):
         yield TypeSlotChange(
-            of.name, "return type", of.return_type, nf.return_type, owner="function"
+            of.name,
+            "return type",
+            of.return_type,
+            nf.return_type,
+            owner="function",
+            old_abi_fact=of.return_type_abi_fact,
+            new_abi_fact=nf.return_type_abi_fact,
         )
     for op, npm in zip(of.params, nf.params):
         if _spelling_differ(op.type, npm.type):
@@ -79,6 +91,8 @@ def _emit_function_slot_changes(of: Function, nf: Function) -> Iterator[TypeSlot
                 op.type,
                 npm.type,
                 owner="function",
+                old_abi_fact=op.type_abi_fact,
+                new_abi_fact=npm.type_abi_fact,
             )
 
 
@@ -167,6 +181,8 @@ def _match_record_fields(
                     ofield.type,
                     nfield.type,
                     owner="type",
+                    old_abi_fact=ofield.type_abi_fact,
+                    new_abi_fact=nfield.type_abi_fact,
                 )
 
 

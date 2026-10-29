@@ -74,6 +74,9 @@ class Pair:
     call: str = ""
     cxx: bool = False
     bitfield: bool = False
+    #: An integer type. Its oracle also compiles a widening probe, ``(long)p``,
+    #: which is where a sign-extending and a zero-extending convention differ.
+    integral: bool = False
 
 
 PAIRS: dict[str, Pair] = {
@@ -161,6 +164,52 @@ PAIRS: dict[str, Pair] = {
         Pair("const_pointee", "const int *{n}", "int *{n}", sites=("param",)),
         Pair("restrict_ptr", "int *restrict {n}", "int *{n}", sites=("param",)),
         Pair("fnptr_same", "void (*{n})(int)", "void (*{n})(int)", call="p(v);"),
+        # Integer retypes the convention does not distinguish (SysV x86-64,
+        # LP64): the same size and register, and the widening probe agrees.
+        # Their spelling changes, so every lane must classify them as a
+        # source-level retype, never an ABI break (schema v69).
+        # The typedef site is not legal for these retypes: a typedef's own
+        # retarget is typedef_base_changed, which carries no slot fact (the
+        # schema-v69 facts are on params, fields, returns and variables only), so
+        # it stays a break. Recorded in docs/contribute/known-gaps.
+        Pair(
+            "char_vs_schar",
+            "char {n}",
+            "signed char {n}",
+            sites=("param", "field", "return"),
+            integral=True,
+        ),
+        Pair(
+            "long_vs_llong",
+            "long {n}",
+            "long long {n}",
+            sites=("param", "field", "return"),
+            integral=True,
+        ),
+        Pair(
+            "i128_vs_u128",
+            "__int128 {n}",
+            "unsigned __int128 {n}",
+            sites=("param", "field", "return"),
+            integral=True,
+        ),
+        Pair(
+            "enum_vs_uint",
+            "enum PE_E {n}",
+            "unsigned int {n}",
+            sites=("param", "field", "return"),
+            pre1="enum PE_E { PE_A, PE_B };",
+            integral=True,
+        ),
+        # Sign-extended against zero-extended: a break. The widening probe is
+        # where the disassembly shows the two conventions differ.
+        Pair("int_vs_uint", "int {n}", "unsigned int {n}", integral=True),
+        Pair("char_vs_uchar", "char {n}", "unsigned char {n}", integral=True),
+        # Not pinned here: a float vector and a double of one size pass in one
+        # vector register, but the probe's store (movlps against movsd) and a
+        # wrapper's movq round trip through %rax read as code differences, which
+        # the oracle cannot tell from a convention difference. The lane test
+        # tests/test_abi_retype_lanes.py pins this pair in all three lanes.
     )
 }
 
@@ -183,6 +232,35 @@ IDENTICAL_CELLS: frozenset[tuple[str, str]] = frozenset(
         ("fnptr_same", "return"),
         ("noexcept_fnptr", "field"),
         ("noexcept_fnptr", "return"),
+        ("char_vs_schar", "param"),
+        ("char_vs_schar", "field"),
+        ("char_vs_schar", "return"),
+        ("long_vs_llong", "param"),
+        ("long_vs_llong", "field"),
+        ("long_vs_llong", "return"),
+        ("i128_vs_u128", "param"),
+        ("i128_vs_u128", "field"),
+        ("i128_vs_u128", "return"),
+        ("enum_vs_uint", "param"),
+        ("enum_vs_uint", "field"),
+        ("enum_vs_uint", "return"),
+    }
+)
+
+#: Identical cells whose spelling changes and that every lane must re-kind to
+#: ``abi_equivalent_type_changed`` (schema v69), never a break.
+_RETYPE_KEYS = frozenset(
+    {"char_vs_schar", "long_vs_llong", "i128_vs_u128", "enum_vs_uint", "atomic_int"}
+)
+#: The kinds an ABI-identical retype must not carry: the break kinds it would
+#: be reported as without the fact (a spelling change at the slot).
+_BREAK_RETYPE_KINDS = frozenset(
+    {
+        "func_params_changed",
+        "func_return_changed",
+        "type_field_type_changed",
+        "var_type_changed",
+        "atomic_qualifier_changed",
     }
 )
 
@@ -199,38 +277,14 @@ _GCC_DWARF_CC_XFAIL = (
     "DWARF cannot observe it in a GCC build, the header lanes can"
 )
 
-#: ABI-identical cells every lane reports as a break today: ``_Atomic`` is
-#: spelled and compared by name, so ``_Atomic int`` against ``int`` is a
-#: finding in DWARF and in both header lanes. Recorded in ``results.md``; the
-#: brief for this change does not fix over-reports, so these are not asserted.
-_OVER_REPORTED_IDENTICAL = frozenset({("atomic_int", "param"), ("atomic_int", "field")})
-
-#: ABI-identical cells lane A reports precisely today. Lane A over-reports the
-#: name-identity pairs (char/signed char, long/long long, _Bool, enum/unsigned,
-#: __int128 signedness, vector float/long, restrict); those are listed in the
-#: final report, not asserted here.
-_LANE_A_PRECISE_IDENTICAL = frozenset(
-    {
-        ("volatile_int", "param"),
-        ("volatile_int", "field"),
-        ("const_pointee", "param"),
-        ("fnptr_same", "param"),
-        ("fnptr_same", "field"),
-        ("fnptr_same", "typedef"),
-        ("fnptr_same", "return"),
-        ("noexcept_fnptr", "field"),
-        ("noexcept_fnptr", "return"),
-    }
-)
-
 #: Which probe functions carry each site's ABI, and which layout tokens it reads
 #: from the sizes program (P size/align; struct size/align/offsetof).
 #: A function-pointer type's call code is part of every site that holds one.
 _SITE_PROBES = {
-    "param": ("probe_param", "probe_call"),
-    "typedef": ("probe_param", "probe_call"),
-    "field": ("probe_fcall", "probe_call"),
-    "return": ("probe_retcall", "probe_call"),
+    "param": ("probe_param", "probe_call", "probe_widen"),
+    "typedef": ("probe_param", "probe_call", "probe_widen"),
+    "field": ("probe_fcall", "probe_call", "probe_fwiden"),
+    "return": ("probe_retcall", "probe_call", "probe_retwiden"),
 }
 _SITE_LAYOUT = {
     # A parameter, typedef or return is passed by value: its ABI is the size
@@ -410,6 +464,17 @@ def _probe_bodies(pair: Pair, side: str) -> str:
                 f"{link}P probe_ret(void);",
                 f"{link}P probe_retcall(void) {{ return probe_ret(); }}",
             ]
+    if pair.integral and not pair.bitfield:
+        # Sign or zero extension of a sub-word integer is a caller's and a callee's
+        # convention, visible only where the value is widened.
+        lines.append(f"{link}long probe_widen(P p) {{ return (long)p; }}")
+        lines.append(
+            f"{link}long probe_fwiden(struct probe_s *s) {{ return (long)s->m; }}"
+        )
+        if "[" not in pair.v1 and "[" not in pair.v2:
+            lines.append(
+                f"{link}long probe_retwiden(void) {{ return (long)probe_ret(); }}"
+            )
     if pair.call:
         # The call takes a variable so an int/long width shows in the code.
         lines.append(f"{link}void probe_call(P p, long v) {{ {pair.call} }}")
@@ -620,10 +685,17 @@ def test_matrix_cell(key: str, site: str, lane: str) -> None:
                 f"reported as f's own convention: {kinds}"
             )
         return
-    if (key, site) in _OVER_REPORTED_IDENTICAL:
-        pytest.skip(f"{key} {site}: every lane reports the identical type (listed)")
-    if lane == "A" and (key, site) not in _LANE_A_PRECISE_IDENTICAL:
-        pytest.skip(f"{key} {site} lane A over-reports an ABI-identical type (listed)")
+    # Negative half: an ABI-identical cell is never an ABI break.
     assert code != 4, (
         f"{key} {site} lane {lane}: ABI-identical type read as an ABI break"
     )
+    kinds = {change.get("kind") for change in changes}
+    if key in _RETYPE_KEYS:
+        # A spelling change the ABI does not see is a source-level retype, and
+        # the finding must say so: the kind, not a break kind.
+        assert "abi_equivalent_type_changed" in kinds, (
+            f"{key} {site} lane {lane}: no source-level retype finding: {kinds}"
+        )
+        assert not (kinds & _BREAK_RETYPE_KINDS), (
+            f"{key} {site} lane {lane}: retype still reported as a break kind: {kinds}"
+        )
