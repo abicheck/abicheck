@@ -248,6 +248,7 @@ def run_pair_session(
     )
     inline_run = InlineEvidenceRun(
         on_close=host.on_close,
+        notify=host.notify,
         nostdinc_explicit="nostdinc" in request.stated_options,
         compile_context=compile_context,
         old_header_backend=request.compile.old_header_backend,

@@ -71,6 +71,9 @@ class InlineEvidenceRun:
     #: Registers a restoration to run when the invocation closes (the CLI
     #: passes ``ctx.call_on_close``): the tree config's compile env toggles.
     on_close: Callable[[Callable[[], None]], object]
+    #: A user-facing note (the session host's ``notify``): the tree config's
+    #: compile warnings go here rather than to the process stderr.
+    notify: Callable[[str], None]
     #: Whether ``nostdinc`` was stated on the command line.
     nostdinc_explicit: bool
     #: The run's compile context *with* its frontend (the side's own
@@ -253,6 +256,7 @@ def _side(
         sources=dump_sources,
         frontend_explicit=header_backend_override is not None,
         nostdinc_explicit=nostdinc_explicit or run.compile_context.nostdinc,
+        notify=run.notify,
     )
     collected = dataclasses.replace(side, sources=dump_sources)
     reject_hybrid_source_frontend(
