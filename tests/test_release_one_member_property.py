@@ -260,6 +260,7 @@ def test_property_draws_every_verdict(verdict: str) -> None:
             database=None,
             verbosity=Verbosity.quiet,
             phases=[Phase.generate],
+            derandomize=True,
         ),
     )
     with tempfile.TemporaryDirectory() as tmp:
