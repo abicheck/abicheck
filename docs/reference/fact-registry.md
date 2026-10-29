@@ -48,6 +48,7 @@ Phase 5 section for the design this page's data comes from.
 | `Function.is_override` | `bool \| None` | castxml, clang | persisted | ✅ | — | ✅ | — | ✅ |
 | `Function.is_variadic` | `bool \| None` | castxml, clang | persisted | ✅ | — | ✅ | — | ✅ |
 | `Function.ownership` | `EntityOwnership` | castxml, clang | persisted | ✅ | — | — | — | ✅ |
+| `Function.return_type_abi` | `AbiFundamental` | castxml, clang, dwarf | consumed | ✅ | — | ✅ | — | ✅ |
 | `Function.return_type_identities` | `tuple[str, ...]` | castxml | consumed | ✅ | — | — | — | — |
 | `Function.source_header` | `str \| None` | castxml, clang | persisted | ✅ | — | ✅ | — | ✅ |
 | `Function.template_param_defaults` | `tuple[str \| None, ...]` | clang | consumed | ✅ | — | ✅ | — | — |
@@ -56,6 +57,7 @@ Phase 5 section for the design this page's data comes from.
 | `Param.is_restrict` | `bool` | castxml, clang | consumed | ✅ | — | ✅ | — | ✅ |
 | `Param.is_va_list` | `bool` | clang | consumed | ✅ | — | ✅ | — | ✅ |
 | `Param.kind` | `ParamKind` | castxml, clang, dwarf | consumed | ✅ | — | ✅ | — | ✅ |
+| `Param.type_abi` | `AbiFundamental` | castxml, clang, dwarf | consumed | ✅ | — | ✅ | — | ✅ |
 | `Param.type_identities` | `tuple[str, ...]` | castxml | consumed | ✅ | — | — | — | — |
 | `PeMetadata.delay_imports` | `dict[str, list[str]] \| None` | pe | persisted | ✅ | — | ✅ | — | ✅ |
 | `RecordType.bases` | `list[str]` | castxml, clang, dwarf | consumed | ✅ | — | ✅ | — | ✅ |
@@ -78,6 +80,7 @@ Phase 5 section for the design this page's data comes from.
 | `TypeField.is_const` | `bool` | castxml, clang, dwarf | consumed | ✅ | — | ✅ | — | ✅ |
 | `TypeField.is_mutable` | `bool` | castxml, clang | consumed | ✅ | — | ✅ | — | ✅ |
 | `TypeField.is_volatile` | `bool` | castxml, clang, dwarf | consumed | ✅ | — | ✅ | — | ✅ |
+| `TypeField.type_abi` | `AbiFundamental` | castxml, clang, dwarf | consumed | ✅ | — | ✅ | — | ✅ |
 | `TypeField.type_identities` | `tuple[str, ...]` | castxml | consumed | ✅ | — | — | — | — |
 | `Variable.access` | `AccessLevel` | castxml | consumed | ✅ | — | ✅ | — | ✅ |
 | `Variable.alignment_bits` | `int \| None` | castxml, clang | persisted | ✅ | — | ✅ | — | ✅ |
@@ -89,6 +92,7 @@ Phase 5 section for the design this page's data comes from.
 | `Variable.in_public_contract` | `bool` | castxml, clang | persisted | ✅ | — | ✅ | — | ✅ |
 | `Variable.ownership` | `EntityOwnership` | castxml, clang | persisted | ✅ | — | — | — | ✅ |
 | `Variable.source_header` | `str \| None` | castxml, clang | persisted | ✅ | — | ✅ | — | ✅ |
+| `Variable.type_abi` | `AbiFundamental` | castxml, clang, dwarf | consumed | ✅ | — | ✅ | — | ✅ |
 | `Variable.type_identities` | `tuple[str, ...]` | castxml | consumed | ✅ | — | — | — | — |
 
 ## Reliability-flag coverage (case (a))

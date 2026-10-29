@@ -773,4 +773,66 @@ CLASSIFICATION_BUG_CLASSES: tuple[BugClass, ...] = (
             "frontend": ("castxml",),
         },
     ),
+    BugClass(
+        id="evidence.spelling_used_as_a_semantic_model",
+        invariant=(
+            "A property of a declaration that the ABI encodes -- linkage, "
+            "template-ness, mangling shape -- is read from the encoding, "
+            "not from how a display name happens to be spelled. A backend "
+            "may report a bare display name for an entity whose mangling "
+            "says otherwise, so any check keyed on the spelling silently "
+            "misses exactly the population it was written to cover: "
+            "`is_specified` spelled bare, mangled "
+            "`_Z12is_specifiedI12OptionalBoolEbT_`, acquired an "
+            "unconditional dynamic-export obligation although a consumer "
+            "taking its address links and runs with no library at all. "
+            "Where the encoding cannot answer (a non-Itanium spelling, an "
+            "unmodelled production), the fallback's answer is 'unknown', "
+            "never a confident negative. The same holds for *which* record "
+            "a type slot names: `api()` spelled `Cache *` with "
+            "`ns1::Cache` and `ns2::Cache` both declared is answered by the "
+            "header backend's type graph (schema v54 slot identities), not "
+            "by the bare spelling; a slot with no captured identity leaves "
+            "the contract decision unresolved rather than confirming either "
+            "same-leaf record."
+        ),
+        fixed_by=(1308,),
+        seed_tests=(
+            "tests/test_export_reconciliation_and_obligations.py",
+            "tests/test_contract_type_identities.py",
+            # Schema v69: a type slot's ABI fact, not its spelling, decides an
+            # ABI-identical retype (`long` against `long long`). The lane tests
+            # run the real castxml and clang backends through the CLI.
+            "tests/test_abi_equivalent_retype.py",
+            "tests/test_abi_retype_lanes.py",
+            "tests/test_restrict_lanes.py",
+        ),
+        axes={"frontend": ("castxml", "clang")},
+        known_gaps=(
+            KnownGap(
+                description=(
+                    "The clang JSON header backend records no slot "
+                    "identities -- its `qualType` carries no declaration "
+                    "reference -- so under `--ast-frontend clang` (and for "
+                    "DWARF or pre-v54 snapshots) a same-leaf record's break "
+                    "stays UNKNOWN_UNRESOLVED and only raises the coverage "
+                    "floor."
+                ),
+                reference="docs/contribute/known-gaps.md",
+            ),
+            KnownGap(
+                description=(
+                    "Covers the export-obligation call sites (function and "
+                    "variable) only. Other checks in this repository still "
+                    "read display spellings for semantic questions -- "
+                    "`_looks_templated` survives as the documented "
+                    "fallback, and the MSVC path has no structural parser "
+                    "at all, so for a PE/COFF mangling the spelling "
+                    "heuristic remains the whole answer rather than a "
+                    "fallback."
+                ),
+                reference="docs/contribute/known-gaps.md",
+            ),
+        ),
+    ),
 )

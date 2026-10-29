@@ -574,3 +574,35 @@ def clang_record_type_traits(node: dict[str, Any]) -> tuple[bool | None, bool | 
 
 #: Back-compat alias -- see :func:`clang_record_type_traits`'s own docstring.
 _clang_record_type_traits = clang_record_type_traits
+
+
+def is_noexcept_qualifier(quals: str) -> bool:
+    """Whether a function's trailing qualifiers denote a *non-throwing* spec.
+
+    A bare ``noexcept`` (and ``noexcept(true)`` / ``noexcept(1)``) is
+    non-throwing; ``noexcept(false)`` / ``noexcept(0)`` is *throwing* and must
+    not be treated as ``noexcept`` — since C++17 the exception specification is
+    part of the function type, so conflating the two would hide a real ABI break
+    (CodeRabbit review). A dependent ``noexcept(expr)`` keeps its conservative
+    "non-throwing" reading (the spelling is all the header AST exposes).
+    """
+    m = re.search(r"\bnoexcept(?:\s*\(([^)]*)\))?", quals)
+    if m is None:
+        return False
+    expr = m.group(1)
+    if expr is None:
+        return True
+    return expr.strip() not in ("false", "0")
+
+
+def clang_exception_spec(quals: str) -> str:
+    """The dynamic exception-specification spelling from trailing qualifiers.
+
+    ``""`` when the function has no ``throw(...)`` spec (noexcept is handled
+    separately by :func:`is_noexcept_qualifier`).
+    """
+    m = re.search(r"\bthrow\s*\(([^)]*)\)", quals)
+    if m is None:
+        return ""
+    inner = ", ".join(p.strip() for p in m.group(1).split(",") if p.strip())
+    return f"throw({inner})"

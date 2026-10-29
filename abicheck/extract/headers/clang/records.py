@@ -82,6 +82,7 @@ from typing import Any
 
 from ....model import Fact, RecordType, TypeField
 from ....model.identity import entity_id_for_type
+from ...builtin_abi import BuiltinAbi, builtin_type_fact
 from .ast_inner import ast_inner
 from .context import (
     _Decl,
@@ -127,6 +128,7 @@ def parse_types(
     evaluate_bitfield_int: IntEvaluator,
     field_default_value: FieldDefaultValueEvaluator,
     template_param_defaults: Mapping[str, Sequence[str | None]] | None = None,
+    builtin_abi: BuiltinAbi | None = None,
 ) -> list[RecordType]:
     anon_names = _anon_typedef_names(typedefs)
     best: dict[str, tuple[_Decl, str]] = {}
@@ -185,6 +187,7 @@ def parse_types(
                 dep_msg=deprecated.get(identity),
                 override_kind=reduce_opaque_kind_set(opaque_kind_sets.get(identity)),
                 template_param_defaults=row if rec[0].in_template else None,
+                builtin_abi=builtin_abi,
             )
         )
     return out
@@ -214,6 +217,7 @@ def _build_record(
     dep_msg: str | None = None,
     override_kind: str | None = None,
     template_param_defaults: Sequence[str | None] | None = None,
+    builtin_abi: BuiltinAbi | None = None,
 ) -> RecordType:
     node = entry.node
     kind = override_kind if is_opaque and override_kind else record_kind(node)
@@ -268,7 +272,9 @@ def _build_record(
             # cannot say whether a segment was a namespace or a record).
             entity_id=entity_id_for_type(entry.scope_path, own_name),
         )
-    fields = _parse_fields(node, evaluate_bitfield_int, field_default_value)
+    fields = _parse_fields(
+        node, evaluate_bitfield_int, field_default_value, builtin_abi
+    )
     bases, virtual_bases, _base_access = _parse_bases(node)
     injected = _anonymous_member_names(node)
     is_standard_layout, is_trivially_copyable = clang_record_type_traits(node)
@@ -369,6 +375,7 @@ def _parse_fields(
     node: dict[str, Any],
     evaluate_bitfield_int: IntEvaluator,
     field_default_value: FieldDefaultValueEvaluator,
+    builtin_abi: BuiltinAbi | None = None,
 ) -> list[TypeField]:
     # Members injected from an anonymous struct/union are referenced by
     # ``IndirectFieldDecl`` siblings; collect their names so the anonymous
@@ -381,6 +388,7 @@ def _parse_fields(
         injected,
         evaluate_bitfield_int,
         field_default_value,
+        builtin_abi,
     )
 
 
@@ -390,6 +398,7 @@ def _collect_fields(
     injected: set[str],
     evaluate_bitfield_int: IntEvaluator,
     field_default_value: FieldDefaultValueEvaluator,
+    builtin_abi: BuiltinAbi | None = None,
     *,
     nested: bool = False,
 ) -> list[TypeField]:
@@ -413,6 +422,7 @@ def _collect_fields(
                     injected,
                     evaluate_bitfield_int,
                     field_default_value,
+                    builtin_abi,
                     nested=True,
                 )
             )
@@ -433,6 +443,7 @@ def _collect_fields(
                 child.get("access", running),
                 evaluate_bitfield_int,
                 field_default_value,
+                builtin_abi,
             )
         )
     return fields
@@ -443,6 +454,7 @@ def _make_field(
     access: str,
     evaluate_bitfield_int: IntEvaluator,
     field_default_value: FieldDefaultValueEvaluator,
+    builtin_abi: BuiltinAbi | None = None,
 ) -> TypeField:
     ftype = qualtype(child)
     cv_type = field_own_cv_source(desugared_qualtype(child))
@@ -450,6 +462,7 @@ def _make_field(
     return TypeField(
         name=str(child.get("name", "")),
         type=ftype,
+        type_abi_fact=builtin_type_fact(desugared_qualtype(child), builtin_abi),
         offset_bits=None,
         is_bitfield=is_bitfield,
         bitfield_bits=bits,

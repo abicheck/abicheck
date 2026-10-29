@@ -42,8 +42,8 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import replace
+from typing import cast
 
-from ..model import FactStatus
 from ..model.abi_fundamental import AbiFundamental, abi_equivalent
 from ..model.change import Change
 from ..model.change_catalog.kinds import ChangeKind
@@ -51,6 +51,7 @@ from ..model.declarations import Function, Param, Variable
 from ..model.entities import RecordType, TypeField
 from ..model.fact import Fact
 from ..model.snapshot import AbiSnapshot
+from .fact_comparison import FactComparison, compare_facts
 
 __all__ = ["refine_abi_equivalent_retypes"]
 
@@ -63,26 +64,23 @@ _RETYPE_KINDS = frozenset(
         # its change names the record and the field the same way.
         ChangeKind.STRUCT_FIELD_TYPE_CHANGED,
         ChangeKind.VAR_TYPE_CHANGED,
+        ChangeKind.TYPEDEF_BASE_CHANGED,
     }
 )
 
 
-def _present_value(fact: Fact[AbiFundamental] | None) -> AbiFundamental | None:
-    """The ABI fact a slot carries when it is PRESENT, else None (unknown)."""
-    if fact is None or fact.status is not FactStatus.PRESENT:
-        return None
-    return fact.value
+#: ``compare_facts``'s ``default``. It is read only for a PARTIAL fact's value,
+#: which :func:`_comparable_equal` rejects, so no value is ever taken from it.
+_UNREAD_DEFAULT: AbiFundamental = cast(AbiFundamental, None)
 
 
-def _slot_equal(
-    old_fact: Fact[AbiFundamental] | None, new_fact: Fact[AbiFundamental] | None
-) -> bool:
-    """Whether two slots whose spellings differ are ABI-equal by their facts."""
-    old_value = _present_value(old_fact)
-    new_value = _present_value(new_fact)
-    if old_value is None or new_value is None:
+def _comparable_equal(comparison: FactComparison[AbiFundamental]) -> bool:
+    """Whether a comparable, fully PRESENT pair of slots is ABI-equal."""
+    if not comparison.is_comparable or comparison.degraded:
         return False
-    return abi_equivalent(old_value, new_value)
+    if comparison.old_value is None or comparison.new_value is None:
+        return False
+    return abi_equivalent(comparison.old_value, comparison.new_value)
 
 
 def _params_retyped_only(
@@ -101,7 +99,9 @@ def _params_retyped_only(
             return False
         if old_p.type == new_p.type:
             continue
-        if not _slot_equal(old_p.type_abi_fact, new_p.type_abi_fact):
+        if not _comparable_equal(
+            compare_facts(old_p.type_abi_fact, new_p.type_abi_fact, _UNREAD_DEFAULT)
+        ):
             return False
         differing = True
     return differing
@@ -113,8 +113,12 @@ def _function_retype(change: Change, old: AbiSnapshot, new: AbiSnapshot) -> bool
     if old_fn is None or new_fn is None:
         return False
     if change.kind is ChangeKind.FUNC_RETURN_CHANGED:
-        return old_fn.return_type != new_fn.return_type and _slot_equal(
-            old_fn.return_type_abi_fact, new_fn.return_type_abi_fact
+        return old_fn.return_type != new_fn.return_type and _comparable_equal(
+            compare_facts(
+                old_fn.return_type_abi_fact,
+                new_fn.return_type_abi_fact,
+                _UNREAD_DEFAULT,
+            )
         )
     return _params_retyped_only(old_fn.params, new_fn.params)
 
@@ -133,7 +137,9 @@ def _field_retype(change: Change, old: AbiSnapshot, new: AbiSnapshot) -> bool:
     new_f = _field_named(new_rec, change.field_name)
     if old_f is None or new_f is None or old_f.type == new_f.type:
         return False
-    return _slot_equal(old_f.type_abi_fact, new_f.type_abi_fact)
+    return _comparable_equal(
+        compare_facts(old_f.type_abi_fact, new_f.type_abi_fact, _UNREAD_DEFAULT)
+    )
 
 
 def _field_named(record: RecordType, field_name: str) -> TypeField | None:
@@ -148,10 +154,42 @@ def _variable_retype(change: Change, old: AbiSnapshot, new: AbiSnapshot) -> bool
     new_var: Variable | None = new.var_by_mangled(change.symbol)
     if old_var is None or new_var is None or old_var.type == new_var.type:
         return False
-    return _slot_equal(old_var.type_abi_fact, new_var.type_abi_fact)
+    return _comparable_equal(
+        compare_facts(old_var.type_abi_fact, new_var.type_abi_fact, _UNREAD_DEFAULT)
+    )
+
+
+def _typedef_fact(snap: AbiSnapshot, bare: str) -> Fact[AbiFundamental] | None:
+    """The target fact of the one typedef named *bare* (any scope), or None.
+
+    A bare name shared by two typedefs is not one slot, so it reads no fact.
+    """
+    names = {
+        q
+        for q in (*snap.declarations.typedefs_qualified, *snap.declarations.typedefs)
+        if q.rsplit("::", 1)[-1] == bare
+    }
+    if len(names) != 1:
+        return None
+    (name,) = names
+    return (snap.typedef_abi_facts or {}).get(name)
+
+
+def _typedef_retype(change: Change, old: AbiSnapshot, new: AbiSnapshot) -> bool:
+    if change.old_value == change.new_value:
+        return False
+    return _comparable_equal(
+        compare_facts(
+            _typedef_fact(old, change.symbol),
+            _typedef_fact(new, change.symbol),
+            _UNREAD_DEFAULT,
+        )
+    )
 
 
 def _retyped(change: Change, old: AbiSnapshot, new: AbiSnapshot) -> bool:
+    if change.kind is ChangeKind.TYPEDEF_BASE_CHANGED:
+        return _typedef_retype(change, old, new)
     if change.kind in (ChangeKind.FUNC_PARAMS_CHANGED, ChangeKind.FUNC_RETURN_CHANGED):
         return _function_retype(change, old, new)
     if change.kind in (

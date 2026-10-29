@@ -23,6 +23,7 @@ keeps its name.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import replace
 from typing import Any
 
@@ -35,11 +36,20 @@ from .fact_schema_versions import (
 )
 from .guards import provenance_text
 
-__all__ = ["decode_abi_slot_fact", "decode_fact"]
+__all__ = [
+    "abi_fundamental_from_json",
+    "decode_abi_slot_fact",
+    "decode_fact",
+    "decode_fact_with_legacy_presence",
+]
 
 
 def decode_fact(
-    raw: Any, schema_version: int, min_schema_version: int = _FACT_FIELDS_SCHEMA_VERSION
+    raw: Any,
+    schema_version: int,
+    min_schema_version: int = _FACT_FIELDS_SCHEMA_VERSION,
+    *,
+    value_decoder: Callable[[Any], Any] | None = None,
 ) -> Fact[Any] | None:
     """Reconstruct a ``Fact[T]`` from its serialized dict form, or ``None``.
 
@@ -65,6 +75,21 @@ def decode_fact(
     freshly-supplied value rather than missing evidence (Codex review), so
     this returns :meth:`Fact.not_collected` explicitly instead.
     """
+    if value_decoder is None:
+        return _decode_raw(raw, schema_version, min_schema_version)
+    fact = _decode_raw(raw, schema_version, min_schema_version)
+    if fact is None or fact.value is None:
+        return fact
+    try:
+        rebuilt = value_decoder(fact.value)
+    except (KeyError, TypeError, ValueError):
+        return Fact.not_collected("malformed fact value")
+    return replace(fact, value=rebuilt)
+
+
+def _decode_raw(
+    raw: Any, schema_version: int, min_schema_version: int
+) -> Fact[Any] | None:
     if not raw:
         return Fact.not_collected() if schema_version >= min_schema_version else None
     # Repeat simple shapes come from `decode_memo` (same value as a fresh
@@ -90,25 +115,49 @@ def _build_fact(raw: Any) -> Fact[Any]:
     )
 
 
+def abi_fundamental_from_json(value: Any) -> AbiFundamental:
+    """The :class:`AbiFundamental` a snapshot's JSON mapping spells."""
+    return AbiFundamental(
+        FundamentalEncoding(value["encoding"]),
+        int(value["size"]),
+        int(value["align"]),
+        int(value.get("lanes", 0)),
+    )
+
+
 def decode_abi_slot_fact(raw: Any, schema_version: int) -> Fact[AbiFundamental] | None:
     """A slot's ``type_abi_fact``/``return_type_abi_fact`` as an
-    :class:`AbiFundamental` fact (JSON carries a plain mapping). A missing key is
-    unset before v69 and NOT_COLLECTED from it on. A value that does not rebuild
-    is malformed evidence and reads as NOT_COLLECTED, which never proves two
-    slots equal."""
-    fact = decode_fact(
-        raw, schema_version, min_schema_version=_MIN_SCHEMA_VERSION_FOR_TYPE_ABI_FACTS
+    :class:`AbiFundamental` fact. A missing key is unset before v69 and
+    NOT_COLLECTED from it on; a value that does not rebuild is malformed
+    evidence and reads as NOT_COLLECTED, which never proves two slots equal."""
+    return decode_fact(
+        raw,
+        schema_version,
+        min_schema_version=_MIN_SCHEMA_VERSION_FOR_TYPE_ABI_FACTS,
+        value_decoder=abi_fundamental_from_json,
     )
-    if fact is None or fact.value is None or isinstance(fact.value, AbiFundamental):
-        return fact
-    value = fact.value
-    try:
-        rebuilt = AbiFundamental(
-            FundamentalEncoding(value["encoding"]),
-            int(value["size"]),
-            int(value["align"]),
-            int(value.get("lanes", 0)),
-        )
-    except (KeyError, TypeError, ValueError):
-        return Fact.not_collected("malformed type_abi_fact value")
-    return replace(fact, value=rebuilt)
+
+
+def decode_fact_with_legacy_presence(
+    owner_dict: dict[str, Any],
+    legacy_key: str,
+    schema_version: int,
+    min_schema_version: int,
+) -> Fact[Any] | None:
+    """:func:`decode_fact` for a case-(a) field, honouring the *legacy* key too.
+
+    A case-(a) field's own resting value (``False``, ``AccessLevel.PUBLIC``)
+    is a legitimate value, so a document that omits the legacy key entirely
+    is genuinely saying "no evidence", not "confirmed false" — but the
+    caller's own ``f.get("is_const", False)`` default hands the owning
+    dataclass a real ``False`` regardless, which its ``__post_init__``
+    bridge then reads as an explicitly-supplied value and backfills to
+    ``Fact.present(False)``. Returning :meth:`Fact.not_collected` here for
+    that case is what keeps "the document never carried this fact" from
+    being laundered into a confirmed one. Every other case defers to
+    :func:`decode_fact` unchanged.
+    """
+    raw = owner_dict.get(f"{legacy_key}_fact")
+    if not raw and schema_version < min_schema_version and legacy_key not in owner_dict:
+        return Fact.not_collected()
+    return decode_fact(raw, schema_version, min_schema_version=min_schema_version)

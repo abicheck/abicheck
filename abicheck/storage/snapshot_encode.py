@@ -533,6 +533,14 @@ def _snapshot_to_dict(snap: AbiSnapshot, encode: Any) -> dict[str, Any]:
     # encodes exactly as it did before v67.
     if d.get("live_preprocessor_hidden") is None:
         d.pop("live_preprocessor_hidden", None)
+    # Schema v69: the typedef target facts, written only when a producer captured
+    # some; a status is written as its string, as encode_fact_fields does.
+    typedef_facts = d.get("typedef_abi_facts")
+    if not typedef_facts:
+        d.pop("typedef_abi_facts", None)
+    else:
+        for fact in typedef_facts.values():
+            fact["status"] = getattr(fact["status"], "value", fact["status"])
     # ADR-062 D2: the producing build's generations, never re-dated on re-save.
     d.pop("fact_generations", None)
     d.pop("spellings_generation", None)  # folded into the stamp below

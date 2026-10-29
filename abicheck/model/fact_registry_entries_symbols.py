@@ -78,6 +78,25 @@ SYMBOL_FACTS: list[FactDefinition] = [
     # ── Phase 5's fourth batch: Variable's own case-(b) fields ─────────
     _E(
         owner="Variable",
+        field="type_abi",
+        value_type="AbiFundamental",
+        producing_backends=("castxml", "clang", "dwarf"),
+        persisted=True,
+        identity_relevant=False,
+        comparable=True,
+        suppressible=False,
+        reportable=True,
+        lifecycle=FactLifecycle.CONSUMED,
+        consumed_by=("abicheck.compare.abi_equivalent_retype:_variable_retype",),
+        notes=(
+            "Schema v69: the ABI fact (size, alignment, register class) of a "
+            "fundamental type. abi_equivalent_retype reads it: a retype between "
+            "ABI-equal slots is a source-level change, not a break. Absent for "
+            "non-fundamental types."
+        ),
+    ),
+    _E(
+        owner="Variable",
         field="source_header",
         value_type="str | None",
         producing_backends=("castxml", "clang"),
@@ -147,6 +166,25 @@ SYMBOL_FACTS: list[FactDefinition] = [
         ),
     ),
     # ── Phase 5's fifth batch: Function's own ten case-(b) fields ──────
+    _E(
+        owner="Function",
+        field="return_type_abi",
+        value_type="AbiFundamental",
+        producing_backends=("castxml", "clang", "dwarf"),
+        persisted=True,
+        identity_relevant=False,
+        comparable=True,
+        suppressible=False,
+        reportable=True,
+        lifecycle=FactLifecycle.CONSUMED,
+        consumed_by=("abicheck.compare.abi_equivalent_retype:_function_retype",),
+        notes=(
+            "Schema v69: the ABI fact (size, alignment, register class) of a "
+            "fundamental type. abi_equivalent_retype reads it: a retype between "
+            "ABI-equal slots is a source-level change, not a break. Absent for "
+            "non-fundamental types."
+        ),
+    ),
     _E(
         owner="Function",
         field="contract_attributes",
@@ -413,6 +451,25 @@ SYMBOL_FACTS: list[FactDefinition] = [
             '"not restrict" from "never determined" -- a pre-v22 clang '
             "snapshot reported False for every parameter, which "
             "the stale 'clang_restrict' fact family (model.snapshot_reliability) is what marks."
+        ),
+    ),
+    _E(
+        owner="Param",
+        field="type_abi",
+        value_type="AbiFundamental",
+        producing_backends=("castxml", "clang", "dwarf"),
+        persisted=True,
+        identity_relevant=False,
+        comparable=True,
+        suppressible=False,
+        reportable=True,
+        lifecycle=FactLifecycle.CONSUMED,
+        consumed_by=("abicheck.compare.abi_equivalent_retype:_params_retyped_only",),
+        notes=(
+            "Schema v69: the ABI fact (size, alignment, register class) of a "
+            "fundamental type. abi_equivalent_retype reads it: a retype between "
+            "ABI-equal slots is a source-level change, not a break. Absent for "
+            "non-fundamental types."
         ),
     ),
     _E(

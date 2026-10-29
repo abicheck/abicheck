@@ -75,6 +75,7 @@ def build_snapshot_from_dwarf(
         enums=decls.enums,
         typedefs=decls.typedefs,
         typedef_entity_ids=decls.typedef_entity_ids,
+        typedef_abi_facts=decls.typedef_abi_facts,
         elf=elf_meta,
         dwarf=dwarf_meta,
         dwarf_advanced=dwarf_adv,

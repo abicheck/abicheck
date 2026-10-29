@@ -217,6 +217,12 @@ UNCOVERED: dict[str, str] = {
     "TypeField.type_abi_fact": _ABI_FACT_UNCOVERED,
     "Variable.type_abi_fact": _ABI_FACT_UNCOVERED,
     "Function.return_type_abi_fact": _ABI_FACT_UNCOVERED,
+    "AbiSnapshot.typedef_abi_facts": (
+        "persisted typedef-target Fact[AbiFundamental] map (schema v69); the H1 "
+        "corpus has no typedef whose target spelling differs while the ABI agrees, "
+        "so the ablation cannot reach it. Covered by tests/test_abi_equivalent_retype.py "
+        "and tests/test_abi_retype_lanes.py"
+    ),
     "Function.is_inline_fact": (
         "persisted Fact[bool] sibling added in schema v60; the H1 corpus has no "
         "inline-linkage pair that differs across its operands, so the ablation "

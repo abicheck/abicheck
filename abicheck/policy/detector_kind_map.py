@@ -39,7 +39,9 @@ DETECTOR_KINDS: Mapping[str, frozenset[str]] = MappingProxyType(
             }
         ),
         "anon_fields": frozenset({"anon_field_changed"}),
-        "atomic_qualifier": frozenset({"atomic_qualifier_changed"}),
+        "atomic_qualifier": frozenset(
+            {"abi_equivalent_type_changed", "atomic_qualifier_changed"}
+        ),
         "bit_int_width": frozenset({"bit_int_width_changed"}),
         "char8t_migration": frozenset({"char8t_migration"}),
         "const_overloads": frozenset({"removed_const_overload"}),
