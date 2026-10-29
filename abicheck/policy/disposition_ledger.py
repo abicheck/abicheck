@@ -256,7 +256,7 @@ class DispositionLedger:
             Disposition.SUPPRESSED,
             application_point=application_point,
             rule=rule_provenance(
-                rule, source_file=source_file, entry_index=entry_index
+                rule, source_file=source_file, entry_index=entry_index, change=change
             ),
             dedupe_key=dedupe_key,
             shadowed_refs=shadowed_refs,
@@ -694,16 +694,14 @@ class DispositionLedger:
     def rules(self) -> tuple[tuple[RuleProvenance, int], ...]:
         """Distinct rule provenances with the number of changes each disposed
         of, ordered by first appearance so the audit reads deterministically."""
-        ordered: list[RuleProvenance] = []
+        # Keyed on the rule itself, not its match mode: one rule that hid
+        # findings both exactly and through a variant is one entry.
         tally: dict[RuleProvenance, int] = {}
         for record in self._records:
-            if record.rule is None:
-                continue
-            if record.rule not in tally:
-                ordered.append(record.rule)
-                tally[record.rule] = 0
-            tally[record.rule] += 1
-        return tuple((rule, tally[rule]) for rule in ordered)
+            if record.rule is not None:
+                key = record.rule.without_match_mode()
+                tally[key] = tally.get(key, 0) + 1
+        return tuple(tally.items())
 
     @property
     def policy_overlay_total(self) -> int:
