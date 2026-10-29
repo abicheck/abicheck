@@ -57,7 +57,7 @@ from .report.change_summary import ENTITY_LABELS, UNCLASSIFIED_LABEL
 from .report.disposition_audit import disposition_audit_reusing_document
 from .report.document import ReportDocument
 from .report.edge_coverage_section import compute_edge_coverage_section
-from .report.envelope import ReportEnvelope, resolved_document, resolved_gate
+from .report.envelope import ReportEnvelope, resolved_document
 from .report.finding import (
     active_reclassify_labels,
     effective_bucket,
@@ -71,6 +71,7 @@ from .report.html_sections import (
     build_sections_data,
     compute_not_evaluated_section as compute_not_evaluated_section,
 )
+from .report.outcome_summary import project_outcome
 from .report.policy_facts import accepted_break_ids, compatibility_metrics, kind_str
 from .report.redundancy_reasons import redundancy_reason_text
 from .report.render_html import (
@@ -313,7 +314,9 @@ def compute_gate_card(
     """
     # ADR-061 gap C: read the gate the render already resolved when this is a
     # projection of a `ReportEnvelope`; resolve one only for a direct caller.
-    full_gate = resolved_gate(envelope, result, severity_config)
+    full_gate = project_outcome(
+        result, envelope=envelope, severity_config=severity_config
+    ).gate
     if full_gate is None:
         return None
     return GateCardData(
@@ -325,7 +328,9 @@ def compute_gate_card(
     )
 
 
-def compute_scoped_verdict(result: DiffResult) -> ScopedVerdictData | None:
+def compute_scoped_verdict(
+    result: DiffResult, *, envelope: ReportEnvelope | None = None
+) -> ScopedVerdictData | None:
     """Collect the ``--used-by``/``--required-symbol(s)`` scoped-verdict box
     (ADR-043), or ``None`` when no consumer was supplied.
 
@@ -336,17 +341,14 @@ def compute_scoped_verdict(result: DiffResult) -> ScopedVerdictData | None:
     result, so a reader can see the two without either one overriding the
     other (mirrors the human-format banner, ``_fold_scoped_compat_into_text``).
     """
-    scoped_verdict = getattr(result, "scoped_verdict", None)
-    if scoped_verdict is None:
+    scoped = project_outcome(result, envelope=envelope).scoped_gate
+    if scoped is None:
         return None
+    scheme = scoped.gate_exit_code_scheme
     return ScopedVerdictData(
-        verdict_value=(
-            scoped_verdict.value
-            if hasattr(scoped_verdict, "value")
-            else str(scoped_verdict)
-        ),
-        exit_code=getattr(result, "scoped_exit_code", None),
-        exit_code_scheme=getattr(result, "scoped_exit_code_scheme", None),
+        verdict_value=scoped.gate_verdict,
+        exit_code=scoped.gate_exit_code,
+        exit_code_scheme=None if scheme is None else str(scheme),
     )
 
 
@@ -589,7 +591,7 @@ def build_html_document(
         result, today=None if envelope is None else envelope.resolved_today
     )
     gate_card = compute_gate_card(result, severity_config, envelope=envelope)
-    scoped_verdict = compute_scoped_verdict(result)
+    scoped_verdict = compute_scoped_verdict(result, envelope=envelope)
     impact = compute_impact(result, display_changes) if show_impact else None
 
     return ReportDocument.from_mapping(

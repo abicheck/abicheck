@@ -61,6 +61,7 @@ _SOURCE_MODULES = (
     "reporter.py",
     "reporter_markdown.py",
     "report/markdown_compute.py",
+    "report/outcome_summary.py",
 )
 
 _RECORDED_POLICY_IMPORTS: dict[str, frozenset[str]] = {
@@ -74,11 +75,13 @@ _RECORDED_POLICY_IMPORTS: dict[str, frozenset[str]] = {
     # counts are no longer computed here: they arrive as precomputed counts from
     # the envelope's findings (``report/markdown_compute.py``).
     "reporter_markdown.py": frozenset({"policy.classification", "policy.severity"}),
-    # Compute side, not a renderer: ``gate_eligible_changes`` is the one
-    # predicate choosing which findings the gate scores, for the ``Exit Impact``
-    # column. Per-category counts are tallied from each finding's resolved
-    # category, never re-classified here.
-    "markdown_compute.py": frozenset({"policy.severity"}),
+    # The shared outcome projection, not a renderer: ``gate_eligible_changes``
+    # is the one predicate choosing which findings the gate scores, for the
+    # severity table's ``Exit Impact`` column, and ``SeverityLevel`` labels
+    # its rows. Per-category counts are tallied from each finding's resolved
+    # category, never re-classified here; ``markdown_compute.py`` reads the
+    # table from here and no longer reaches policy at all.
+    "outcome_summary.py": frozenset({"policy.severity"}),
 }
 _RECORDED_DISPOSITION_COMPUTE: dict[str, frozenset[str]] = {
     # The envelope-driven renders (every ``render_*`` module, the one-line

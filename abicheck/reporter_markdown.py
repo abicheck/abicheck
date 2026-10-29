@@ -22,7 +22,7 @@ so it stays a leaf; ``reporter`` re-exports these names for backward compat.
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Sequence
 from typing import TYPE_CHECKING, Any
 
 from .report.change_operation import (
@@ -83,29 +83,18 @@ from .report.disposition_audit import (
     disposition_audit_reusing_document,
     render_disposition_audit_note,
 )
+from .report.outcome_summary import (
+    compute_severity_summary as compute_severity_summary,
+    project_outcome,
+    section_severity_label as _section_severity_label,
+    section_severity_level as _section_severity_level,
+)
 from .report.render_markdown import (
     _contract_decision_text as _contract_decision_text,
     _format_change_md as _format_change_md,
     _format_change_md_oneline as _format_change_md_oneline,
 )
 from .report.use_case_impact_render import use_cases_by_finding_for
-
-_VERDICT_EMOJI = {
-    Verdict.NO_CHANGE: "✅",
-    Verdict.COMPATIBLE: "✅",
-    Verdict.COMPATIBLE_WITH_RISK: "⚠️",
-    Verdict.API_BREAK: "⚠️",
-    Verdict.BREAKING: "❌",
-}
-
-_VERDICT_LABEL = {
-    Verdict.NO_CHANGE: "NO_CHANGE",
-    Verdict.COMPATIBLE: "COMPATIBLE",
-    Verdict.COMPATIBLE_WITH_RISK: "COMPATIBLE_WITH_RISK",
-    Verdict.API_BREAK: "API_BREAK",
-    Verdict.BREAKING: "BREAKING",
-}
-
 
 # ---------------------------------------------------------------------------
 # Stat mode (text)
@@ -131,8 +120,9 @@ def to_stat(result: DiffResult, *, envelope: ReportEnvelope) -> str:
     # field, so a caller's ``result`` cannot be mixed with the envelope's audit.
     result = envelope.result
     summary = summary_for(result, findings=envelope.findings)
+    outcome = project_outcome(result, envelope=envelope)
     d: dict[str, object] = {
-        "verdict_label": _VERDICT_LABEL[result.verdict],
+        "verdict_label": outcome.verdict_label,
         "summary": {
             "breaking": summary.breaking,
             "source_breaks": summary.source_breaks,
@@ -156,8 +146,8 @@ def to_stat(result: DiffResult, *, envelope: ReportEnvelope) -> str:
     # Codex review: oneline/`--stat` lacked the deployment digest.
     if (_dig := getattr(result, "env_matrix_source_sha256", None)) is not None:
         d["env_matrix_source_sha256"] = _dig
-    if envelope.gate is not None:
-        d["severity"] = {"exit_code": envelope.gate.exit_code}
+    if outcome.gate is not None:
+        d["severity"] = {"exit_code": outcome.gate.exit_code}
     return render_stat_document(ReportDocument.from_mapping(d))
 
 
@@ -473,130 +463,6 @@ def _hygiene_evolution_counts_line(hygiene: list[Change]) -> str:
     )
 
 
-_SEVERITY_EMOJI = {
-    "error": "❌",  # ❌
-    "warning": "⚠️",  # ⚠️
-    "info": "ℹ️",  # ℹ️
-}
-
-
-def _section_severity_level(
-    severity_config: SeverityConfig | None, category_attr: str
-) -> object | None:
-    """That section's own resolved severity level, or ``None`` when no
-    severity setting is in effect.
-
-    The value half of :func:`_section_severity_label`, which renders the
-    same lookup for a heading. Split out because the rollup needs to *act*
-    on the level (a gating section is never summarised) and parsing it back
-    out of a rendered label would be exactly the kind of second derivation
-    this codebase keeps getting bitten by.
-    """
-    if severity_config is None:
-        return None
-    return getattr(severity_config, category_attr, None)
-
-
-def _section_severity_label(
-    severity_config: SeverityConfig | None, category_attr: str
-) -> str:
-    """Return a severity label suffix like ' [ERROR]' for a report section header."""
-    if severity_config is None:
-        return ""
-    level = getattr(severity_config, category_attr, None)
-    if level is None:
-        return ""
-    level_val = level.value if hasattr(level, "value") else str(level)
-    emoji = _SEVERITY_EMOJI.get(level_val, "")
-    return f" {emoji} `{level_val.upper()}`"
-
-
-def compute_severity_summary(
-    severity_config: SeverityConfig,
-    *,
-    counts: Mapping[str, int],
-    exit_counts: Mapping[str, int],
-    scoped_counts: dict[str, int] | None = None,
-    scoped_blocking_categories: tuple[str, ...] | None = None,
-) -> _rmd.SeveritySummary:
-    """Build the severity configuration summary table's structured intermediate.
-
-    *counts* are the per-category totals over the (possibly ``--show-only``-
-    filtered) changes shown in the ``Count`` column; *exit_counts* are the
-    per-category totals over the set the gate scores (ADR-049 D1), which
-    drives the ``Exit Impact`` column so filtering the display cannot make
-    this table claim "no exit impact" for a category that still fails the
-    real gate. Both are keyed by :class:`~abicheck.policy.severity.IssueCategory`
-    value and are resolved by the caller from the completed envelope's
-    findings -- this function classifies nothing itself.
-
-    *scoped_counts*/*scoped_blocking_categories* (Codex review), when given
-    (from ``result.scoped_severity_counts``/``scoped_blocking_categories``
-    on a ``--used-by``/``--required-symbol`` run), override both columns
-    with the scoped gate's own numbers -- otherwise this table always
-    reflects the full-library changes, so a scoped run whose only gating
-    issue is a scoped-only change or missing-contract label (neither of which
-    is in ``result.changes``) would show every category at 0 and "no exit
-    impact" while the report elsewhere names a real, blocking finding.
-    """
-    from .policy.severity import SeverityLevel
-
-    _CATEGORY_INFO: list[tuple[str, str]] = [
-        ("ABI/API Incompatibilities", "abi_breaking"),
-        ("Potential Incompatibilities", "potential_breaking"),
-        ("Quality Issues", "quality_issues"),
-        ("Additions", "addition"),
-    ]
-
-    rows: list[_rmd.SeverityRow] = []
-    for label, attr in _CATEGORY_INFO:
-        level = getattr(severity_config, attr, SeverityLevel.INFO)
-        level_val = level.value if hasattr(level, "value") else str(level)
-        emoji = _SEVERITY_EMOJI.get(level_val, "")
-        count = (
-            scoped_counts.get(attr, 0)
-            if scoped_counts is not None
-            else counts.get(attr, 0)
-        )
-        impact = (
-            "causes non-zero exit"
-            if (
-                attr in scoped_blocking_categories
-                if scoped_blocking_categories is not None
-                else level_val == "error" and exit_counts.get(attr, 0) > 0
-            )
-            else "no exit impact"
-        )
-        rows.append(
-            _rmd.SeverityRow(
-                label=label,
-                emoji=emoji,
-                level_upper=level_val.upper(),
-                count=count,
-                impact=impact,
-            )
-        )
-    # ADR-078: the informational category has no configurable level and
-    # never gates; it gets a row only when it holds something to disclose.
-    info_count = (
-        scoped_counts.get("informational", 0)
-        if scoped_counts is not None
-        else counts.get("informational", 0)
-    )
-    if info_count:
-        rows.append(
-            _rmd.SeverityRow(
-                label="Informational (no material change)",
-                emoji=_SEVERITY_EMOJI.get(SeverityLevel.INFO.value, ""),
-                level_upper=SeverityLevel.INFO.value.upper(),
-                count=info_count,
-                impact="no exit impact",
-            )
-        )
-
-    return _rmd.SeveritySummary(rows=tuple(rows))
-
-
 def compute_library_files(
     old_meta: LibraryMetadata | None, new_meta: LibraryMetadata | None
 ) -> _rmd.LibraryFilesSection | None:
@@ -790,23 +656,6 @@ def compute_environment_drift(
     )
 
 
-# Verdict -> short merge-effect phrase for the reviewer digest.
-_VERDICT_MERGE_EFFECT = {
-    Verdict.NO_CHANGE: "no ABI/API change — safe to merge",
-    Verdict.COMPATIBLE: "backward-compatible — safe to merge",
-    Verdict.COMPATIBLE_WITH_RISK: "compatible but carries deployment risk — review advised",
-    Verdict.API_BREAK: "source-level (API) break — consumers must recompile",
-    Verdict.BREAKING: "binary (ABI) break — blocks merge under a strict gate",
-}
-
-
-def _merge_effect_from_exit_code(exit_code: int) -> str:
-    """The two merge-effect phrases, keyed by the resolved severity exit code."""
-    if exit_code == 0:
-        return "no error-level findings under the configured severity policy — safe to merge"
-    return "blocked by severity policy — review required before merge"
-
-
 def compute_review_digest(
     result: DiffResult,
     *,
@@ -833,15 +682,8 @@ def compute_review_digest(
     # its input), so the digest reads them rather than the caller's ``result``.
     result = envelope.result
     findings = envelope.findings
-    gate = envelope.gate
     summary = summary_for(result, findings=findings)
-    v = result.verdict
-    emoji = _VERDICT_EMOJI.get(v, "?")
-    label = _VERDICT_LABEL.get(v, v.value)
-    if gate is not None:
-        effect = _merge_effect_from_exit_code(gate.exit_code)
-    else:
-        effect = _VERDICT_MERGE_EFFECT.get(v, "")
+    outcome = project_outcome(result, envelope=envelope)
 
     # Manual-review banner: scoping requested but the public surface could not
     # be confirmed, so compatibility is unconfirmed (don't overclaim).
@@ -891,9 +733,9 @@ def compute_review_digest(
         library=result.library,
         old_version=result.old_version,
         new_version=result.new_version,
-        verdict_emoji=emoji,
-        verdict_label=label,
-        effect=effect,
+        verdict_emoji=outcome.verdict_emoji,
+        verdict_label=outcome.verdict_label,
+        effect=outcome.merge_effect,
         manual_review_banner=manual_review_banner,
         coverage_warnings=coverage_warnings,
         additions_label=additions_label,
@@ -933,7 +775,9 @@ def compute_review_digest(
         review_group_use_cases=_review_compute.use_cases_by_group(groups, uc),
         result_counts=result_counts or {},
         policy=result.policy or "strict_abi",
-        gate_exit_code=gate.exit_code if gate is not None else gate_exit_code,
+        gate_exit_code=(
+            outcome.gate_exit_code if outcome.gate is not None else gate_exit_code
+        ),
         evidence_summary=_review_compute.compact_evidence_summary(result),
         show_release_recommendation=bool(
             result.policy_file is not None

@@ -34,14 +34,13 @@ carries or falls through; none infers a clean result from an empty bucket.
 
 from __future__ import annotations
 
+from .outcome_summary import VERDICT_EMOJI
 from .pr_comment_model import CommentModel
 
+# The five comparison verdicts share the pair reports' glyphs
+# (outcome_summary); the non-comparison states below are this table's own.
 _VERDICT_EMOJI = {
-    "BREAKING": "❌",
-    "API_BREAK": "⚠️",
-    "COMPATIBLE_WITH_RISK": "⚠️",
-    "COMPATIBLE": "✅",
-    "NO_CHANGE": "✅",
+    **{verdict.value: glyph for verdict, glyph in VERDICT_EMOJI.items()},
     "ERROR": "🛑",
     "unsupported": "🚫",
     # `aggregate`'s two non-comparison states (see

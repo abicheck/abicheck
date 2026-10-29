@@ -50,9 +50,10 @@ from .edge_coverage_section import (
     compute_edge_coverage_section,
 )
 from .envelope import ReportEnvelope, resolved_document
-from .finding import ReportFinding, build_report_findings
+from .finding import build_report_findings
 from .gating_budget import non_gating_change_ids
 from .not_evaluated_section import compute_not_evaluated
+from .outcome_summary import VERDICT_EMOJI, VERDICT_LABEL, severity_summary_mapping
 from .policy_facts import (
     accepted_break_ids,
     evidence_status_of,
@@ -87,78 +88,6 @@ def _reporter_markdown() -> Any:
 
 def _opt_asdict(value: Any) -> dict[str, Any] | None:
     return None if value is None else asdict(value)
-
-
-def _severity_counts_for(
-    result: Any,
-    changes: list[Any],
-    envelope: ReportEnvelope | None,
-) -> tuple[dict[str, int], dict[str, int]]:
-    """Per-category totals for the severity table: ``(displayed, exit)``.
-
-    *displayed* counts *changes* (the ``--show-only``-filtered set the ``Count``
-    column reports); *exit* counts the set the gate scores (ADR-049 D1), which
-    drives ``Exit Impact``. Both read each change's already-resolved
-    :class:`~abicheck.report.finding.ReportFinding` category, so the table
-    never classifies a change itself. A direct caller with no envelope resolves
-    the findings here through the same primitive the envelope uses.
-    """
-    from ..policy.severity import gate_eligible_changes
-
-    def findings_for(cs: Sequence[Any]) -> Sequence[ReportFinding]:
-        if envelope is not None:
-            return envelope.findings_for(list(cs))
-        return build_report_findings(
-            list(cs),
-            policy=result.policy,
-            kind_sets=kind_sets_for(result),
-            policy_file=result.policy_file,
-        )
-
-    def tally(findings: Sequence[ReportFinding]) -> dict[str, int]:
-        counts: dict[str, int] = {}
-        for finding in findings:
-            key = finding.category.value
-            counts[key] = counts.get(key, 0) + 1
-        return counts
-
-    return (
-        tally(findings_for(changes)),
-        tally(findings_for(gate_eligible_changes(list(result.changes)))),
-    )
-
-
-def _severity_summary_mapping(
-    result: Any,
-    changes: list[Any],
-    severity_config: Any,
-    envelope: ReportEnvelope | None,
-    *,
-    scoped_gate: bool,
-) -> dict[str, Any] | None:
-    """The severity table as a JSON-safe mapping, or ``None`` with no severity config.
-
-    *scoped_gate* is the root-cause view's opt-in to the ``--used-by`` /
-    ``--required-symbol`` gate numbers; the full view never reads them.
-    """
-    if severity_config is None:
-        return None
-    displayed, exit_counts = _severity_counts_for(result, changes, envelope)
-    return asdict(
-        _reporter_markdown().compute_severity_summary(
-            severity_config,
-            counts=displayed,
-            exit_counts=exit_counts,
-            scoped_counts=(
-                getattr(result, "scoped_severity_counts", None) if scoped_gate else None
-            ),
-            scoped_blocking_categories=(
-                getattr(result, "scoped_blocking_categories", None)
-                if scoped_gate
-                else None
-            ),
-        )
-    )
 
 
 def _resolve_displayed_changes(
@@ -306,8 +235,8 @@ def build_markdown_document(
     rm = _reporter_markdown()
     shared_document = resolved_document(envelope)
     verdict = result.verdict
-    emoji = rm._VERDICT_EMOJI[verdict]
-    label = rm._VERDICT_LABEL[verdict]
+    emoji = VERDICT_EMOJI[verdict]
+    label = VERDICT_LABEL[verdict]
 
     old_meta = getattr(result, "old_metadata", None)
     new_meta = getattr(result, "new_metadata", None)
@@ -392,7 +321,7 @@ def build_markdown_document(
             if show_recommendation
             else None
         ),
-        "severity_summary": _severity_summary_mapping(
+        "severity_summary": severity_summary_mapping(
             result, changes, severity_config, envelope, scoped_gate=False
         ),
         "show_only_note": show_only_note,
@@ -517,8 +446,8 @@ def _view_preamble_mapping(
         "view_label": view_label,
         "old_version": result.old_version,
         "new_version": result.new_version,
-        "verdict_emoji": rm._VERDICT_EMOJI[result.verdict],
-        "verdict_label": rm._VERDICT_LABEL[result.verdict],
+        "verdict_emoji": VERDICT_EMOJI[result.verdict],
+        "verdict_label": VERDICT_LABEL[result.verdict],
         "coverage_warnings": (
             list(result.coverage_warnings) if result.coverage_warnings else []
         ),
@@ -617,7 +546,7 @@ def build_root_cause_document(
         # nor the reason (Codex review, PR #1284). Same key and same rows as
         # the full document, so the two projections cannot disagree.
         "pattern_modulations": list(getattr(result, "pattern_modulations", ()) or ()),
-        "severity_summary": _severity_summary_mapping(
+        "severity_summary": severity_summary_mapping(
             result, changes, severity_config, envelope, scoped_gate=True
         ),
         "root_cause": (
