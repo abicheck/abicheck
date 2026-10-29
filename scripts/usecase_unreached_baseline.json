@@ -4,7 +4,7 @@
   "scenarios"
  ],
  "revision": "375a1acf4bfa928476befd10191ad68dd15b359b",
- "count": 7097,
+ "count": 7094,
  "unreached": [
   "abicheck/_compiler_options.py::_forwarded_driver_mode_override",
   "abicheck/_compiler_options.py::_opaque_option_source_tokens",
