@@ -31,6 +31,7 @@ from typing import TYPE_CHECKING, Any
 from ..elf_symbol_filter import is_abi_relevant_elf_symbol
 from ..errors import SnapshotError
 from ..model import AbiSnapshot, ElfVisibility, Fact, is_cxx_runtime_library
+from .elf_data_initializer import populate_const_integral_values
 
 if TYPE_CHECKING:
     from ..elf_metadata import ElfMetadata
@@ -43,7 +44,7 @@ _ELF_VIS_MAP: dict[str, ElfVisibility] = {
 }
 
 
-def _populate_elf_visibility(snap: AbiSnapshot) -> None:
+def _populate_elf_visibility(snap: AbiSnapshot, so_path: Path | None = None) -> None:
     """Populate elf_visibility/elf_binding on Function/Variable from ELF metadata symbols.
 
     ``elf_binding`` is ``elf_sym.binding`` unchanged — unlike
@@ -54,7 +55,13 @@ def _populate_elf_visibility(snap: AbiSnapshot) -> None:
     A name whose versioned aliases disagree on binding or visibility gets
     neither field set: ``unambiguous_symbol`` returns None, so the
     declaration never inherits the last alias's value.
+
+    With *so_path*, a const integral variable the header left without an
+    initializer (``extern const int k;`` defined in a ``.cpp``) gets its value
+    from the defining object's bytes (``extract/elf_data_initializer.py``).
     """
+    if so_path is not None:
+        populate_const_integral_values(snap, so_path)
     if snap.elf is None:
         return
     elf = snap.elf

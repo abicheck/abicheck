@@ -86,6 +86,7 @@ from ....model.identity import (
     entity_id_for_typedef,
     entity_id_for_variable,
 )
+from ...arithmetic_type_spellings import is_arithmetic_spelling
 from ...declaration_provenance import header_from_location
 from ...surface_fact_producers import header_ast_surface_facts
 from ..scope_segments import (
@@ -102,6 +103,7 @@ from . import (
     typedef_parsing as _typedefs_helpers,
 )
 from .function_type_cc import load_function_type_cc
+from .inline_variables import declared_inline
 from .names import (
     _SYNTHETIC_DTOR_KEY_PREFIX as _SYNTHETIC_DTOR_KEY_PREFIX,
     SYNTHETIC_CTOR_KEY_PREFIX as SYNTHETIC_CTOR_KEY_PREFIX,
@@ -216,17 +218,27 @@ class _CastxmlParser:
         return _castxml_location.access_level(el)
 
     def _variable_value_eligible(self, el: Element) -> bool:
-        """``init`` eligible for ``Variable.value``? Mirrors
-        ``_iter_public_constants`` below (Codex review, 3 rounds): top-level
-        constness (not the loose whole-spelling ``is_const``), public
-        access, public header provenance if configured -- but not gated on
-        ``_have_public_set`` outright, unlike that opt-in-only method.
+        """``init`` eligible for ``Variable.value``?
+
+        Public access and header provenance (when configured) gate the value,
+        as ``_iter_public_constants`` does, without its ``_have_public_set``
+        opt-in. A const variable keeps its value as before (the constant
+        channel and the value channel both read it). A non-const variable is
+        eligible only when it is declared ``inline`` (``inline int x = 1;``, a
+        C++17 definition every TU shares, read by ``castxml/inline_variables``)
+        and its type is arithmetic: a pointer, class, or other spelling is not
+        a number a consumer observes (``extract/arithmetic_type_spellings.py``).
+        A non-inline non-const global carries no value, as before.
         """
         if el.get("access") in ("private", "protected"):
             return False
         if self._have_public_set and not self._decl_is_public(el):
             return False
-        return self._resolve_cv_restrict(el.get("type", ""))[0]
+        if self._resolve_cv_restrict(el.get("type", ""))[0]:
+            return True
+        return is_arithmetic_spelling(
+            self._type_name(el.get("type", ""))
+        ) and declared_inline(self._source_location(el), el.get("name", ""))
 
     def _visibility(self, mangled: str, name: str = "") -> Visibility:
         """Determine visibility based on ELF symbol tables."""
