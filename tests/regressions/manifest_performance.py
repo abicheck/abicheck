@@ -516,11 +516,6 @@ PERFORMANCE_BUG_CLASSES: tuple[BugClass, ...] = (
         # `dumper_elf_symbols._pyelftools_exported_symbols` -- which builds
         # its own `ELFFile` and walks BOTH `.dynsym` and `.symtab` -- kept
         # resolving every `Symbol.name` with one seek-and-read per name.
-        # #1842: `l0_export_delta.symbols_only_view` reuses the captured ELF
-        # table, but a PE/Mach-O side re-resolved its binary symbols-only --
-        # a shape the whole-snapshot cache refused -- so every such compare
-        # extracted both binaries again; the Windows integration lane timed
-        # out on the repeated work.
         fixed_by=(1331, 1842),
         seed_tests=(
             "tests/test_dumper_elf_symbols_buffering.py",

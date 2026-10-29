@@ -249,18 +249,32 @@ def test_warm_snapshot_cache_hit_keeps_the_header_graph(
     cold = _graphs_attached(monkeypatch, argv)
     assert cold.get("libfoo.so"), cold
 
-    hits: list[tuple[str, ...]] = []
+    # Each hit is judged against the cold dump of its own request shape. A
+    # PE/Mach-O compare also re-resolves each side symbols-only for the L0
+    # export probe (l0_export_delta), and that shape ignores headers, so its
+    # cold dump -- and therefore its hit -- carries no header graph.
+    hits: list[tuple[bool, tuple[str, ...]]] = []
+    shape = {"symbols_only": False}
+    real_key_for = dump_cache_api._cache_key_for
     real_lookup = dump_cache_api._lookup_key
+
+    def _recording_key_for(req: object) -> str:
+        shape["symbols_only"] = bool(getattr(req, "symbols_only", False))
+        return real_key_for(req)
 
     def _recording_lookup(*args: object, **kwargs: object) -> object:
         snap = real_lookup(*args, **kwargs)
         if snap is not None:
             graph = getattr(snap, "surface_graph", None)
-            hits.append(tuple(sorted(n.id for n in graph.nodes)) if graph else ())
+            ids = tuple(sorted(n.id for n in graph.nodes)) if graph else ()
+            hits.append((shape["symbols_only"], ids))
         return snap
 
     # Same (now warm) cache directory as the cold run above.
+    monkeypatch.setattr(dump_cache_api, "_cache_key_for", _recording_key_for)
     monkeypatch.setattr(dump_cache_api, "_lookup_key", _recording_lookup)
     CliRunner().invoke(main, argv)
-    assert hits, "the second run never hit the cache, so nothing was compared"
-    assert all(ids == cold["libfoo.so"] for ids in hits), hits
+    full_hits = [ids for symbols_only, ids in hits if not symbols_only]
+    assert full_hits, "the second run never hit the cache, so nothing was compared"
+    assert all(ids == cold["libfoo.so"] for ids in full_hits), hits
+    assert all(ids == () for symbols_only, ids in hits if symbols_only), hits
