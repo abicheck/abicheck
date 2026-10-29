@@ -46,7 +46,6 @@ from .frontends.cli.options.params import (
 )
 from .workflows.compile_config import (
     CompileConfigError,
-    merge_compile_config,
     scope_compile_config_env_toggles,
     set_env_flag_until,
 )
@@ -811,15 +810,14 @@ def resolve_compile_context(
     # chosen (Codex review, fresh evidence — real finding on PR #1154).
     config_explicit: bool | None = None,
 ) -> tuple[CompileContext, tuple[Path, ...]]:
-    """Build the CLI :class:`CompileContext` and fold the config ``compile:`` block in.
+    """The Click adapter over ``workflows.compile_config.resolve_compile_context``.
 
-    The single entry point the compile-context option family resolves to
-    (ADR-037 D3): construct a :class:`~abicheck.dry_run_estimate.CompileContext` from
-    the decorator's flags, then delegate to :func:`merge_compile_config` with the
-    ``--ast-frontend`` / ``--nostdinc`` explicitness read from the Click parameter
-    source (so an explicitly-typed value — even a default-looking ``auto`` — beats
-    a pinned config one). ``compare`` / ``dump`` / ``scan`` all call this so their
-    L2 compile context cannot drift.
+    That function is the one L2 compile-context resolution (ADR-037 D3); this
+    adapter reads the ``--nostdinc``/``--frontend-context`` explicitness off
+    the Click parameter source (so an explicitly-typed value — even a
+    default-looking one — beats a pinned config one) and renders an unusable
+    named config as a usage error. ``compare``'s single-pair session calls
+    the same function with explicitness from its stated options.
 
     ``compiler_path``/``compiler_prefix``/``compiler_option_tokens`` are the
     ``--compiler``/``--compiler-prefix``/``--compiler-option`` values; they map
@@ -836,18 +834,8 @@ def resolve_compile_context(
     ``AstContextAmbiguousError`` in ``sycl_context``), not from a blanket
     reject here.
     """
-    from .dry_run_estimate import CompileContext
-
-    cli_ctx = CompileContext(
-        gcc_path=compiler_path,
-        gcc_prefix=compiler_prefix,
-        gcc_options=gcc_options,
-        gcc_option_tokens=tuple(compiler_option_tokens),
-        defines=tuple(defines),
-        sysroot=sysroot,
-        nostdinc=nostdinc,
-        frontend=header_backend,
-        frontend_context=frontend_context,
+    from .workflows.compile_config import (
+        resolve_compile_context as _resolve_compile_context,
     )
 
     def _explicit(param: str) -> bool:
@@ -856,19 +844,26 @@ def resolve_compile_context(
         )
 
     try:
-        return merge_compile_config(
-            cli_ctx,
-            tuple(includes),
-            build_config,
+        return _resolve_compile_context(
+            sysroot=sysroot,
+            nostdinc=nostdinc,
+            header_backend=header_backend,
+            includes=includes,
+            build_config=build_config,
             sources=sources,
-            frontend_explicit=False,
+            frontend_context=frontend_context,
+            compiler_path=compiler_path,
+            compiler_prefix=compiler_prefix,
+            compiler_option_tokens=compiler_option_tokens,
+            defines=defines,
+            gcc_options=gcc_options,
+            config_explicit=config_explicit,
             nostdinc_explicit=_explicit("nostdinc"),
             # `_explicit` reads `ctx.get_parameter_source`, which safely answers
             # "not COMMANDLINE" for a parameter name a command no longer
             # declares at all (compare/dump, Phase 7) rather than raising, so
             # this always resolves False there and the config value applies.
             frontend_context_explicit=_explicit("frontend_context"),
-            config_explicit=config_explicit,
         )
     except CompileConfigError as exc:
         raise click.UsageError(str(exc)) from exc

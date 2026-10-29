@@ -28,6 +28,7 @@ the typed API and MCP tool run, ADR-055 D1).
 
 from __future__ import annotations
 
+import dataclasses
 import json
 import time
 from pathlib import Path
@@ -530,3 +531,56 @@ def test_a_linker_script_operand_is_followed_to_its_library(tmp_path: Path) -> N
     notes.clear()
     assert normalize_operand(lib, notes.append) == (lib, "elf")
     assert notes == []
+
+
+@pytest.mark.parametrize(
+    "compile_block",
+    [
+        None,
+        "compile:\n  std: c++17\n  defines: [A=1, B]\n  include_dirs: [inc]\n",
+        "compile:\n  sysroot: /opt/sysroot\n  nostdinc: true\n  frontend: clang\n",
+        "compile:\n  compiler: /opt/cross/bin/gcc\n  options: [-fno-rtti]\n",
+    ],
+)
+@pytest.mark.parametrize("named", [True, False])
+@pytest.mark.parametrize("defines", [(), ("A=2", "C")])
+def test_dry_run_and_session_resolve_one_compile_context(
+    tmp_path: Path, compile_block: str | None, named: bool, defines: tuple
+) -> None:
+    """The ``--dry-run`` receipt (``cli_options.resolve_compile_context``)
+    and the session resolve the L2 context through one function, so for the
+    same knobs and config they agree -- including the ``compile.compiler``
+    trust gate, which turns on whether the config was named."""
+    from abicheck.cli_options import resolve_compile_context as cli_resolve
+    from abicheck.workflows.compare.session_inputs import resolve_compile_context
+
+    cfg = None
+    if compile_block is not None:
+        cfg = tmp_path / ".abicheck.yml"
+        cfg.write_text(compile_block, encoding="utf-8")
+    includes = (tmp_path / "cli-inc",)
+    request = pair_session_request(
+        tmp_path / "old.json",
+        tmp_path / "new.json",
+        config=cfg if named else None,
+        headers={"includes": includes},
+        compile={"defines": defines},
+    )
+    if not named:  # a discovered config: selected, but not named
+        request = dataclasses.replace(
+            request, project=dataclasses.replace(request.project, path=cfg)
+        )
+    session_notes: list[str] = []
+    via_session = resolve_compile_context(request, session_notes.append)
+    ctx = click.Context(click.Command("compare"))
+    via_cli = cli_resolve(
+        ctx,
+        sysroot=None,
+        nostdinc=False,
+        header_backend="auto",
+        includes=includes,
+        build_config=cfg,
+        defines=defines,
+        config_explicit=named,
+    )
+    assert via_session == via_cli

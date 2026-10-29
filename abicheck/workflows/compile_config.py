@@ -56,6 +56,7 @@ __all__ = [
     "compile_config_argv_tokens",
     "merge_compile_config",
     "merge_compile_std_fields",
+    "resolve_compile_context",
     "scope_compile_config_env_toggles",
     "set_env_flag_until",
 ]
@@ -508,3 +509,59 @@ def merge_compile_config(
         for p in bc.compile_include_dirs
     )
     return merged, includes
+
+
+def resolve_compile_context(
+    *,
+    sysroot: Path | None,
+    nostdinc: bool,
+    header_backend: str,
+    includes: tuple[Path, ...],
+    build_config: Path | None,
+    sources: Path | None = None,
+    frontend_context: str = "host",
+    compiler_path: str | None = None,
+    compiler_prefix: str | None = None,
+    compiler_option_tokens: tuple[str, ...] = (),
+    defines: tuple[str, ...] = (),
+    gcc_options: str | None = None,
+    config_explicit: bool | None = None,
+    nostdinc_explicit: bool = False,
+    frontend_context_explicit: bool = False,
+    notify: Callable[[str], None] | None = None,
+) -> tuple[CompileContext, tuple[Path, ...]]:
+    """The run's L2 compile context from its compile knobs, ``compile:`` folded in.
+
+    The one resolution the compile-context family reaches (ADR-037 D3):
+    ``compare``'s single-pair session, its ``--dry-run`` receipt, ``dump``
+    and the release fan-out all call this, so their L2 context cannot drift.
+    ``compiler_path``/``compiler_prefix``/``compiler_option_tokens`` map onto
+    ``CompileContext``'s ``gcc_path``/``gcc_prefix``/``gcc_option_tokens``.
+    The two ``*_explicit`` flags say the value was stated by the caller
+    rather than defaulted (the CLI reads them off the Click parameter
+    source); ``frontend_explicit`` is never set here, since no caller has a
+    per-run ``--ast-frontend`` left to state.
+    """
+    from ..dry_run_estimate import CompileContext as _CompileContext
+
+    return merge_compile_config(
+        _CompileContext(
+            gcc_path=compiler_path,
+            gcc_prefix=compiler_prefix,
+            gcc_options=gcc_options,
+            gcc_option_tokens=tuple(compiler_option_tokens),
+            defines=tuple(defines),
+            sysroot=sysroot,
+            nostdinc=nostdinc,
+            frontend=header_backend,
+            frontend_context=frontend_context,
+        ),
+        tuple(includes),
+        build_config,
+        sources=sources,
+        frontend_explicit=False,
+        nostdinc_explicit=nostdinc_explicit,
+        frontend_context_explicit=frontend_context_explicit,
+        config_explicit=config_explicit,
+        notify=notify,
+    )

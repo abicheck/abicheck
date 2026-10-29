@@ -56,35 +56,32 @@ def resolve_compile_context(
 ) -> tuple[CompileContext, tuple[Path, ...]]:
     """The run's both-sides L2 compile context, ``compile:`` folded in (ADR-037 D3).
 
-    The same fold ``dump`` and the ``--dry-run`` receipt run, with
-    explicitness read from the options the invocation stated (ADR-074's
-    defines fold by macro name). ``cfg.path`` is the selected config --
+    ``workflows.compile_config.resolve_compile_context`` -- the resolution
+    the ``--dry-run`` receipt and ``dump`` run too -- with explicitness read
+    from the options the invocation stated (ADR-074's defines fold by macro
+    name). ``cfg.path`` is the selected config --
     possibly auto-discovered -- so ``config_explicit`` keeps an
     auto-discovered ``compile.compiler`` behind the trust gate (PR #1154).
     """
-    from ...dry_run_estimate import CompileContext
-    from ..compile_config import CompileConfigError, merge_compile_config
+    from ..compile_config import CompileConfigError, resolve_compile_context as _resolve
 
     c = request.compile
     try:
-        return merge_compile_config(
-            CompileContext(
-                gcc_path=c.compiler_path,
-                gcc_prefix=c.compiler_prefix,
-                gcc_options=c.gcc_options,
-                gcc_option_tokens=tuple(c.compiler_option_tokens),
-                defines=tuple(c.defines),
-                sysroot=c.sysroot,
-                nostdinc=c.nostdinc,
-                frontend=c.header_backend,
-                frontend_context=c.frontend_context,
-            ),
-            tuple(request.headers.includes),
-            request.project.path,
-            frontend_explicit=False,
+        return _resolve(
+            sysroot=c.sysroot,
+            nostdinc=c.nostdinc,
+            header_backend=c.header_backend,
+            includes=tuple(request.headers.includes),
+            build_config=request.project.path,
+            frontend_context=c.frontend_context,
+            compiler_path=c.compiler_path,
+            compiler_prefix=c.compiler_prefix,
+            compiler_option_tokens=c.compiler_option_tokens,
+            defines=c.defines,
+            gcc_options=c.gcc_options,
+            config_explicit=request.project.config_explicit,
             nostdinc_explicit="nostdinc" in request.stated_options,
             frontend_context_explicit="frontend_context" in request.stated_options,
-            config_explicit=request.project.config_explicit,
             notify=notify,
         )
     except CompileConfigError as exc:

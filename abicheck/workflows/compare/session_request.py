@@ -156,7 +156,9 @@ class PairPolicyInputs:
     policy_selected_path: Path | None = None
     policy_selected_sha: str | None = None
     contract_mode: str | None = None
-    contract_evaluation: bool = False
+    #: ADR-049: the evaluator always runs since Phase 7 (the CLI's own answer,
+    #: and ``CompareRequest``'s default).
+    contract_evaluation: bool = True
     #: ``--acknowledgments``; ``acknowledgment.file`` is the config spelling.
     acknowledgments: Path | None = None
     diagnostic_comparison: bool = False

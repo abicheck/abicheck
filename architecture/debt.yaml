@@ -333,7 +333,7 @@
     },
     {
       "path": "abicheck/cli_options.py",
-      "baseline_lines": 1095,
+      "baseline_lines": 1090,
       "target": "workflows-or-frontends",
       "rule": "no_growth",
       "disposition": "migrate",
