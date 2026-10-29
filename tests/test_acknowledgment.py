@@ -991,12 +991,27 @@ def test_one_record_matching_two_findings_in_a_run_is_ambiguous(
     from abicheck.policy.disposition_close import finalize_ledger
     from abicheck.policy.disposition_ledger import DispositionLedger
 
+    # Two field-level findings of one type: same symbol and kind, different
+    # field. The dedup identity tells them apart (unlike two removals of one
+    # function, which are one finding by definition: see the twin tests).
     p = tmp_path / "ack.yml"
     p.write_text(
-        "version: 1\nacknowledgments:\n  - symbol: foo\n    change_kind: func_removed\n    reason: 'x'\n"
+        "version: 1\nacknowledgments:\n  - symbol: foo\n    change_kind: type_field_type_changed\n    reason: 'x'\n"
     )
-    change_a = Change(kind=ChangeKind.FUNC_REMOVED, symbol="foo", description="a")
-    change_b = Change(kind=ChangeKind.FUNC_REMOVED, symbol="foo", description="b")
+    change_a = Change(
+        kind=ChangeKind.TYPE_FIELD_TYPE_CHANGED,
+        symbol="foo",
+        description="field a",
+        old_value="int",
+        new_value="long",
+    )
+    change_b = Change(
+        kind=ChangeKind.TYPE_FIELD_TYPE_CHANGED,
+        symbol="foo",
+        description="field b",
+        old_value="int",
+        new_value="long",
+    )
     diff = DiffResult(
         changes=[change_a, change_b],
         old_version="1",

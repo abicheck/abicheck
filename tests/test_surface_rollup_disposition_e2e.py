@@ -231,13 +231,12 @@ def test_every_removal_suppressed_hides_the_roll_up(
     assert report["disposition_audit"]["counts"]["suppressed"] == 3
 
 
+@pytest.mark.parametrize("with_headers", [False, True], ids=["headerless", "headers"])
 def test_acknowledged_removal_acknowledges_the_roll_up(
-    tmp_path: Path, libs: dict[str, Path]
+    tmp_path: Path, libs: dict[str, Path], with_headers: bool
 ) -> None:
-    # Headerless only: with -H a `symbol:` record matches the header removal and
-    # its deduplicated DWARF twin, and raises AmbiguousAcknowledgmentError. That
-    # is a separate, pre-existing acknowledgment issue, not this roll-up's.
-    with_headers = False
+    # With -H the header removal and its deduplicated twin are one observation
+    # (the twin-identity matcher); see tests/test_acknowledgment_twin_e2e.py.
     ack = _write(
         tmp_path,
         "ack",

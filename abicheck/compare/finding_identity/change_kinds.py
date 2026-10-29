@@ -256,7 +256,7 @@ def _is_batch_shaped_change(change: Change, kind_value: str) -> bool:
 #: one-way: ``diff_filtering`` depends on this module for its
 #: ``_deduplicate_cross_detector`` dedup key, ADR-049 Phase 2 wiring, not the
 #: reverse). Keep in sync with the two mappings this generalizes:
-#: ``_deduplicate_cross_detector``'s local ``_DEDUP_CATEGORIES``
+#: ``finding_dedup.DEDUP_CATEGORY_BY_KIND``
 #: (rich-vs-L0 function/variable add/remove, symbol-version-node pairs --
 #: wired) and module-level ``_DWARF_TO_AST_EQUIV``'s two *whole-type* pairs
 #: (``STRUCT_SIZE_CHANGED``/``TYPE_SIZE_CHANGED``,

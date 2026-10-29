@@ -69,7 +69,7 @@ _ENUM_DEDUP_KINDS = frozenset(
 )
 
 
-#: The four enum kinds the bare/qualified bridge (`enum_canonical_names`/`canonicalize_enum_symbol`) applies to -- deliberately a NARROWER set than `_DEDUP_CATEGORIES` (which also covers function/variable/version dedup categories unrelated to enums). Codex review, fresh evidence: an earlier revision gated the bridging on `c.kind in _DEDUP_CATEGORIES` directly, so an unrelated symbol from any OTHER category whose spelling happened to coincide with a registered enum alias (e.g. an extern-C `FUNC_REMOVED` named "Color" when a `detail::Color` enum exists) had its `Change.qualified_name` incorrectly rewritten to the enum's qualified spelling -- corrupting an unrelated finding's identity, and doing so permanently, since the later `EnrichSourceLocations` step refuses to overwrite an already-populated `qualified_name`.
+#: The four enum kinds the bare/qualified bridge (`enum_canonical_names`/`canonicalize_enum_symbol`) applies to -- deliberately a NARROWER set than `DEDUP_CATEGORY_BY_KIND` (which also covers function/variable/version dedup categories unrelated to enums). Codex review, fresh evidence: an earlier revision gated the bridging on `c.kind in DEDUP_CATEGORY_BY_KIND` directly, so an unrelated symbol from any OTHER category whose spelling happened to coincide with a registered enum alias (e.g. an extern-C `FUNC_REMOVED` named "Color" when a `detail::Color` enum exists) had its `Change.qualified_name` incorrectly rewritten to the enum's qualified spelling -- corrupting an unrelated finding's identity, and doing so permanently, since the later `EnrichSourceLocations` step refuses to overwrite an already-populated `qualified_name`.
 ENUM_QUALIFICATION_KINDS = frozenset(
     {
         ChangeKind.ENUM_MEMBER_REMOVED,
@@ -502,11 +502,58 @@ def _drop_deletion_consequences(changes: list[Change]) -> list[Change]:
 
 #: Within a dedup category, a lower value wins over a higher one; ties go to the
 #: first occurrence. ``SYMBOL_VERSION_NODE_REMOVED`` is the more specific of the
-#: two version-removal kinds (see ``_DEDUP_CATEGORIES``), so it must win whatever
+#: two version-removal kinds (see :data:`DEDUP_CATEGORY_BY_KIND`), so it must win whatever
 #: order the detectors ran in.
 _DEDUP_PREFERENCE: dict[ChangeKind, int] = {
     ChangeKind.SYMBOL_VERSION_NODE_REMOVED: 0,
 }
+
+
+#: The kinds whose cross-detector duplicates share one dedup identity, mapped
+#: to their category label. :func:`deduplicate_cross_detector` collapses on
+#: this table through :func:`dedup_identity_key`, and acknowledgment matching
+#: (``policy.disposition_acknowledgment``) reads the same key, so the two agree
+#: on which findings are one observation.
+DEDUP_CATEGORY_BY_KIND: dict[ChangeKind, str] = {
+    ChangeKind.FUNC_REMOVED: "func_removal",
+    ChangeKind.FUNC_REMOVED_ELF_ONLY: "func_removal",
+    ChangeKind.FUNC_ADDED: "func_addition",
+    # Same category as `FUNC_ADDED`, mirroring the `func_removal` pair
+    # above: the two are the same observation at two evidence tiers, so a
+    # symbol that somehow reached both detectors must dedup to one
+    # finding rather than be counted as two additions.
+    ChangeKind.FUNC_ADDED_ELF_ONLY: "func_addition",
+    ChangeKind.VAR_REMOVED: "var_removal",
+    # Same category as `VAR_REMOVED`, mirroring the `func_removal` pair
+    # above: the two are the same observation at two evidence tiers.
+    ChangeKind.VAR_REMOVED_ELF_ONLY: "var_removal",
+    ChangeKind.VAR_ADDED: "var_addition",
+    # Version node removal and version definition removal both fire for
+    # the same version string.  Keep the more specific node-level change.
+    ChangeKind.SYMBOL_VERSION_NODE_REMOVED: "version_def_removal",
+    ChangeKind.SYMBOL_VERSION_DEFINED_REMOVED: "version_def_removal",
+    # L1 (DWARF)/L2 (header) enum detectors independently report the
+    # same ChangeKind for the same member change; resolve_change_identity
+    # already self-maps these four kinds -- missing was including them
+    # here, so identity resolution (and dedup) is even attempted.
+    ChangeKind.ENUM_MEMBER_REMOVED: "enum_member_removed",
+    ChangeKind.ENUM_MEMBER_VALUE_CHANGED: "enum_member_value_changed",
+    ChangeKind.ENUM_LAST_MEMBER_VALUE_CHANGED: "enum_last_member_value_changed",
+    ChangeKind.ENUM_UNDERLYING_SIZE_CHANGED: "enum_underlying_size_changed",
+}
+
+
+def dedup_identity_key(change: Change) -> str | None:
+    """The identity :func:`deduplicate_cross_detector` collapses *change* on.
+
+    ``None`` for a kind outside :data:`DEDUP_CATEGORY_BY_KIND`: this pass never
+    collapses it, so it has no duplicate to share an identity with. Acknowledgment
+    matching uses this key so a deduplicated twin and its surviving finding count
+    as one observed change.
+    """
+    if change.kind not in DEDUP_CATEGORY_BY_KIND:
+        return None
+    return resolve_change_identity(change).primary_id
 
 
 def deduplicate_cross_detector(
@@ -554,33 +601,6 @@ def deduplicate_cross_detector(
     priority order from the ``compare()`` spec list), except that a kind named
     in :data:`_DEDUP_PREFERENCE` beats the others regardless of position.
     """
-    _DEDUP_CATEGORIES: dict[ChangeKind, str] = {
-        ChangeKind.FUNC_REMOVED: "func_removal",
-        ChangeKind.FUNC_REMOVED_ELF_ONLY: "func_removal",
-        ChangeKind.FUNC_ADDED: "func_addition",
-        # Same category as `FUNC_ADDED`, mirroring the `func_removal` pair
-        # above: the two are the same observation at two evidence tiers, so a
-        # symbol that somehow reached both detectors must dedup to one
-        # finding rather than be counted as two additions.
-        ChangeKind.FUNC_ADDED_ELF_ONLY: "func_addition",
-        ChangeKind.VAR_REMOVED: "var_removal",
-        # Same category as `VAR_REMOVED`, mirroring the `func_removal` pair
-        # above: the two are the same observation at two evidence tiers.
-        ChangeKind.VAR_REMOVED_ELF_ONLY: "var_removal",
-        ChangeKind.VAR_ADDED: "var_addition",
-        # Version node removal and version definition removal both fire for
-        # the same version string.  Keep the more specific node-level change.
-        ChangeKind.SYMBOL_VERSION_NODE_REMOVED: "version_def_removal",
-        ChangeKind.SYMBOL_VERSION_DEFINED_REMOVED: "version_def_removal",
-        # L1 (DWARF)/L2 (header) enum detectors independently report the
-        # same ChangeKind for the same member change; resolve_change_identity
-        # already self-maps these four kinds -- missing was including them
-        # here, so identity resolution (and dedup) is even attempted.
-        ChangeKind.ENUM_MEMBER_REMOVED: "enum_member_removed",
-        ChangeKind.ENUM_MEMBER_VALUE_CHANGED: "enum_member_value_changed",
-        ChangeKind.ENUM_LAST_MEMBER_VALUE_CHANGED: "enum_last_member_value_changed",
-        ChangeKind.ENUM_UNDERLYING_SIZE_CHANGED: "enum_underlying_size_changed",
-    }
     # A symbol-version-node bump (e.g. LLVM_17 -> LLVM_18.1 on every symbol in a major release) makes BOTH version detectors fire per symbol with the same old->new transition: SYMBOL_MOVED_VERSION_NODE (node label moved) and SYMBOL_VERSION_ALIAS_CHANGED (default version changed, old not retained as an alias). Drop the alias-change duplicate where a node move already covers the same (symbol, old -> new) -- halves the version-bump noise on real libraries (libLLVM 17->18: ~46k instead of ~92k risk findings). Matches on (symbol, old_value, new_value); if that ever diverges the dedup simply no-ops (both findings kept).
     moved_transitions: set[tuple[str, str | None, str | None]] = {
         (c.symbol, c.old_value, c.new_value)
@@ -635,9 +655,9 @@ def deduplicate_cross_detector(
     identity_keys: dict[int, str] = {}
     winners: dict[str, tuple[int, int]] = {}
     for i, c in candidates:
-        if c.kind not in _DEDUP_CATEGORIES:
+        identity_key = dedup_identity_key(c)
+        if identity_key is None:
             continue
-        identity_key = resolve_change_identity(c).primary_id
         identity_keys[i] = identity_key
         rank = (_DEDUP_PREFERENCE.get(c.kind, 1), i)
         if identity_key not in winners or rank < winners[identity_key]:

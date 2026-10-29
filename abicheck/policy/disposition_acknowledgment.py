@@ -31,6 +31,8 @@ from collections.abc import Callable
 from dataclasses import replace
 from typing import TYPE_CHECKING
 
+from ..compare.finding_dedup import dedup_identity_key
+from ..model.change import Change
 from ..model.change_catalog.kind_variants import (
     ROLLUP_MEMBER_KINDS,
     rollup_member_kinds,
@@ -104,13 +106,22 @@ def resolve_acknowledgments(
     unresolvable = _changes_matched_by_ambiguous_records(
         ledger, acknowledgments, scope=scope, strict=strict
     )
-    for index, (record, change) in enumerate(
-        zip(ledger._records, ledger._anchors)  # noqa: SLF001
-    ):
+    folded = _folded_duplicate_indices(ledger)
+    # A folded duplicate is acknowledged only through the surviving finding that
+    # shares its identity, so survivors are visited first and a duplicate can see
+    # which identities already carry a record.
+    acknowledged_identities: set[str] = set()
+    order = sorted(range(len(ledger._records)), key=lambda i: i in folded)  # noqa: SLF001
+    for index in order:
+        record = ledger._records[index]  # noqa: SLF001
+        change = ledger._anchors[index]  # noqa: SLF001
         if record.acknowledged_by is not None:
             continue  # already resolved (e.g. a re-closed scoped record)
         if id(change) in unresolvable:
             continue  # non-strict only: see _changes_matched_by_ambiguous_records
+        identity = _dedup_identity(change)
+        if index in folded and identity in acknowledged_identities:
+            continue  # carried by the surviving finding that already has its record
         try:
             ack = evaluate(change, **scope)
         except AmbiguousAcknowledgmentError:
@@ -119,6 +130,8 @@ def resolve_acknowledgments(
             continue  # unresolved -- see the docstring's non-strict note above
         if ack is None:
             continue
+        if index not in folded and identity is not None:
+            acknowledged_identities.add(identity)
         record_id_fn = getattr(ack, "record_id", None)
         acknowledged_by = record_id_fn() if callable(record_id_fn) else str(ack)
         covered = RuleRef(
@@ -164,14 +177,17 @@ def _carry_rollup_acknowledgments(ledger: DispositionLedger) -> None:
     roll-up stays visible with its verdict class; only its record changes.
     """
     records = ledger._records  # noqa: SLF001
+    folded = _folded_duplicate_indices(ledger)
     for index, record in enumerate(records):
         if record.kind not in ROLLUP_MEMBER_KINDS or record.acknowledged_by is not None:
             continue
         members = rollup_member_kinds(record.kind)
         covered = [
             r
-            for r in records
-            if r.kind in members and r.disposition is not Disposition.SUPPRESSED
+            for i, r in enumerate(records)
+            if r.kind in members
+            and r.disposition is not Disposition.SUPPRESSED
+            and i not in folded
         ]
         if not covered or any(r.acknowledged_by is None for r in covered):
             continue
@@ -215,20 +231,60 @@ def _changes_matched_by_ambiguous_records(
     ]
     unresolvable: set[int] = set()
     for ack_record in records:
-        matched = {
-            id(change) for change in observed if ack_record.matches(change, **scope)
-        }
-        if len(matched) <= 1:
+        matched = [change for change in observed if ack_record.matches(change, **scope)]
+        identities = {_observation_identity(change) for change in matched}
+        if len(identities) <= 1:
             continue
         if strict:
             raise AmbiguousAcknowledgmentError(
-                f"acknowledgment {ack_record.record_id()} matches {len(matched)} "
+                f"acknowledgment {ack_record.record_id()} matches {len(identities)} "
                 "changes in this run: its finding_id (or symbol) is shared by "
                 "more than one finding. A record must match exactly one finding "
                 "per run; narrow it with change_kind, component or candidate."
             )
-        unresolvable |= matched
+        unresolvable |= {id(change) for change in matched}
     return unresolvable
+
+
+def _dedup_identity(change: object) -> str | None:
+    """The dedup identity of *change*; ``None`` for anything that is not a Change."""
+    return dedup_identity_key(change) if isinstance(change, Change) else None
+
+
+def _observation_identity(change: object) -> object:
+    """What one observed change is, for acknowledgment matching.
+
+    The dedup pass collapses twins onto one :func:`dedup_identity_key`, so a
+    twin pair is one observation. A change with no dedup identity is its own.
+    """
+    key = _dedup_identity(change)
+    return ("dedup", key) if key is not None else ("object", id(change))
+
+
+def _folded_duplicate_indices(ledger: DispositionLedger) -> set[int]:
+    """Indices of deduplicated records that duplicate a surviving finding.
+
+    The dedup pass records the loser of a collapse as ``deduplicated`` and
+    keeps the survivor. A loser whose dedup identity is held by a surviving
+    record is the same observation, so it is not an acknowledgment target of
+    its own (ADR-067: one observed change, one record of its disposition).
+    """
+    survivors: set[str] = set()
+    pairs = list(zip(ledger._records, ledger._anchors))  # noqa: SLF001
+    for record, change in pairs:
+        if record.disposition is Disposition.DEDUPLICATED:
+            continue
+        key = _dedup_identity(change)
+        if key is not None:
+            survivors.add(key)
+    folded: set[int] = set()
+    for index, (record, change) in enumerate(pairs):
+        if record.disposition is not Disposition.DEDUPLICATED:
+            continue
+        key = _dedup_identity(change)
+        if key is not None and key in survivors:
+            folded.add(index)
+    return folded
 
 
 def break_verdict_reader(
