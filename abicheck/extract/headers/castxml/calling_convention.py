@@ -184,6 +184,22 @@ def _code_window(lines: list[str], line_no: int) -> tuple[str, int, int]:
     return window, line_start, len(window) if line_end == -1 else line_end
 
 
+#: The text right before a function name when the name is declared through a
+#: pointer declarator, ``(``[attributes] ``*`` -- a function returning a
+#: function pointer, whose declarator opens before the name.
+_POINTER_RETURN_DECLARATOR = re.compile(
+    r"\(\s*(?:__attribute__\s*\(\(.*?\)\)\s*)*\*\s*$", re.DOTALL
+)
+
+
+def _leading_conventions(text: str) -> set[str]:
+    """Conventions in the declaration text before a name's declarator, from the
+    last statement boundary on (an earlier declaration's attributes are not
+    this one's)."""
+    boundary = max(text.rfind(";"), text.rfind("{"), text.rfind("}"))
+    return calling_conventions_in(text[boundary + 1 :])
+
+
 def source_calling_conventions(
     ctx: CastxmlParserContext, el: Element, name: str
 ) -> set[str]:
@@ -204,6 +220,16 @@ def source_calling_conventions(
     found: set[str] = set()
     pattern = re.compile(rf"(?<![\w:]){re.escape(name)}\s*\(")
     for match in pattern.finditer(window, line_start, line_end):
+        before = window[: match.start()]
+        returned = _POINTER_RETURN_DECLARATOR.search(before)
+        if returned is not None:
+            # ``void (__attribute__((ms_abi)) *f(void))(int)``: the convention
+            # inside the returned declarator's parentheses (and the tail after
+            # its parameter list) is the *returned* function type's, which the
+            # return:<f> join carries. Only what precedes that declarator is f's
+            # own: ``__attribute__((ms_abi)) void (*f(void))(int)`` is f's.
+            found |= _leading_conventions(before[: returned.start()])
+            continue
         found |= calling_conventions_in(
             _declaration_outside_params(window, name, match.start())
         )

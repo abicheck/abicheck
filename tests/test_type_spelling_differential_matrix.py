@@ -179,6 +179,11 @@ IDENTICAL_CELLS: frozenset[tuple[str, str]] = frozenset(
     }
 )
 
+#: Pairs whose convention is carried by a returned function pointer.
+_RETURNED_CONVENTION_PAIRS = frozenset(
+    {"ms_abi_fnptr", "sysv_vs_ms_fnptr", "fnptr_return_change"}
+)
+
 #: GCC writes no DW_AT_calling_convention for ms_abi/sysv_abi on a subroutine
 #: type, so a GCC -g build cannot show the convention (verified with readelf);
 #: the header lanes carry it.
@@ -595,6 +600,18 @@ def test_matrix_cell(key: str, site: str, lane: str) -> None:
         assert _mentions_entity(changes), (
             f"{key} {site} lane {lane}: no change names the entity (exit {code}): {changes}"
         )
+        if site == "return" and key in _RETURNED_CONVENTION_PAIRS:
+            # The convention belongs to the returned function type: the finding
+            # must be the return-type change, and f's own convention must not be
+            # reported as changed (that was the presentation bug).
+            kinds = {change.get("kind") for change in changes}
+            assert "func_return_changed" in kinds, (
+                f"{key} return lane {lane}: no return-type finding: {kinds}"
+            )
+            assert "calling_convention_changed" not in kinds, (
+                f"{key} return lane {lane}: the returned type's convention is "
+                f"reported as f's own convention: {kinds}"
+            )
         return
     if (key, site) in _OVER_REPORTED_IDENTICAL:
         pytest.skip(f"{key} {site}: every lane reports the identical type (listed)")
