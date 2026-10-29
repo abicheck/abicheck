@@ -168,3 +168,28 @@ def test_variant_match_is_recorded_on_the_disposition(base: str, variant: str) -
     assert by_kind[base].rule is not None
     assert by_kind[base].rule.matched_via_kind is None
     assert "matched_via_kind" not in by_kind[base].rule.to_dict()
+
+
+@pytest.mark.parametrize(("base", "variant"), _PAIRS)
+def test_one_rule_matching_both_ways_is_one_tally_entry(
+    base: str, variant: str
+) -> None:
+    """The variant marker is per finding; the rule's tally identity ignores it."""
+    suppression = SuppressionList(
+        suppressions=[Suppression(change_kind=base, symbol="_Z3foov", reason="t")]
+    )
+    ledger = DispositionLedger()
+    dispose_by_suppression(
+        [_change(base), _change(variant), _change(base)],
+        suppression,
+        ledger=ledger,
+        application_point="apply_suppression",
+    )
+    tallies = ledger.rules()
+    assert len(tallies) == 1
+    rule, count = tallies[0]
+    assert count == 3
+    assert rule.matched_via_kind is None
+    # The per-finding record still says which match was the variant one.
+    via = [r.rule.matched_via_kind for r in ledger.records]
+    assert via == [None, base, None]

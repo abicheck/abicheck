@@ -31,17 +31,21 @@ still matches only the variant, so a deliberately ELF-only waiver stays narrow.
 This module is the one owner of the relation; every matcher that compares a
 selector's ``change_kind`` against an observed kind routes through
 :func:`kind_match_set` (suppression, reclassification, acknowledgment, and the
-rule-inventory bookkeeping that mirrors them).
+rule-inventory bookkeeping that mirrors them). A kind-keyed ``overrides:`` map
+routes through :func:`expand_variant_overrides` for the same reason.
 """
 
 from __future__ import annotations
 
 from collections.abc import Mapping
 from types import MappingProxyType
+from typing import TypeVar
 
 from .kinds import ChangeKind
 
 ELF_ONLY_SUFFIX = "_elf_only"
+
+_V = TypeVar("_V")
 
 
 def _derive_elf_only_variants(values: frozenset[str]) -> Mapping[str, str]:
@@ -85,3 +89,32 @@ def matched_via_variant(selector_kind: str | None, observed_kind: str) -> bool:
     if selector_kind is None or observed_kind == selector_kind:
         return False
     return observed_kind in kind_match_set(selector_kind)
+
+
+def expand_variant_overrides(
+    overrides: Mapping[ChangeKind, _V] | None,
+) -> dict[ChangeKind, _V]:
+    """A kind-keyed verdict map with each base kind's verdict also covering its variant.
+
+    ``overrides:`` in a policy file pins a verdict per ``ChangeKind``. A base
+    entry (``func_removed: break``) is read as covering the ELF-only variant
+    too, for the same reason a base selector does: the variant is chosen by
+    the evidence supplied, not by the change. The variant is covered only
+    when the mapping does not name it itself, so an explicit
+    ``func_removed_elf_only`` entry always wins over the base entry. The
+    relation is one-directional: a variant entry never covers its base.
+
+    Returns a new dict; *overrides* is not modified. ``None`` (no policy
+    file) yields an empty dict.
+    """
+    if not overrides:
+        return {}
+    expanded: dict[ChangeKind, _V] = dict(overrides)
+    for base, verdict in overrides.items():
+        variant_value = ELF_ONLY_VARIANT_OF.get(base.value)
+        if variant_value is None:
+            continue
+        variant = type(base)(variant_value)
+        if variant not in overrides:
+            expanded[variant] = verdict
+    return expanded

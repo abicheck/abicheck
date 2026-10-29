@@ -24,7 +24,7 @@ the gate -- which is also why the ledger imports it and never the reverse.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING
 
 from ..model.change_catalog.kind_variants import matched_via_variant
@@ -90,6 +90,15 @@ class RuleProvenance:
                 else {"matched_via_kind": self.matched_via_kind}
             ),
         }
+
+    def without_match_mode(self) -> RuleProvenance:
+        """This rule with its per-match variant marker cleared.
+
+        The identity a rule is tallied under (``DispositionLedger.rules``):
+        ``matched_via_kind`` describes one finding's match, not the rule, so
+        it must not split a rule that matched both ways into two entries.
+        """
+        return replace(self, matched_via_kind=None)
 
     def readable_name(self) -> str:
         """``rule_id`` for a reader: a user id as is; an id-less rule's

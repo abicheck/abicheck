@@ -148,7 +148,17 @@ derived from the change catalog, not maintained by hand. A finding hidden this
 way records the match in its disposition's rule provenance as
 `matched_via_kind` (the base kind the rule named), next to the observed kind
 (see [disposition audit](disposition-audit.md)). The field is present only for
-a variant match.
+a variant match. The disposition audit tallies each rule once, however many of
+its findings matched exactly and however many through the variant.
+
+The same rule applies to a policy file's kind-keyed `overrides:` (see
+[policies](policies.md)). `overrides: {func_removed: ignore}` also sets the
+verdict of `func_removed_elf_only`, so a headerless run and a header-backed run
+get the same verdict for one removal. An entry naming the variant explicitly
+(`func_removed_elf_only: break`) wins over the base entry for that variant. A
+variant entry never changes its base kind. The per-kind `overrides:` mapping as
+written is what reports echo back; the variant coverage is applied when the
+verdict is computed.
 
 ---
 

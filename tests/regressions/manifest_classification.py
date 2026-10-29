@@ -529,9 +529,10 @@ CLASSIFICATION_BUG_CLASSES: tuple[BugClass, ...] = (
             "several removed members must not read as one member's linkage: "
             "it reports 'weak' only when every member is WEAK, and None when "
             "any member's binding is unknown (fail closed). The same holds "
-            "for `change_kind:`: a base kind names its `*_elf_only` variant "
-            "too, since the variant is chosen by whether headers were "
-            "supplied, so a rule's acceptance never depends on that evidence."
+            "for `change_kind:` and `overrides:`: a base kind names its "
+            "`*_elf_only` variant too, since the variant is chosen by whether "
+            "headers were supplied, so a rule's or verdict's outcome never "
+            "depends on that evidence."
         ),
         fixed_by=(1630,),
         seed_tests=(
@@ -540,6 +541,7 @@ CLASSIFICATION_BUG_CLASSES: tuple[BugClass, ...] = (
             "tests/test_family_f1_evidence_ablation.py",
             "tests/test_suppression_elf_only_variant.py",
             "tests/test_suppression_elf_only_variant_e2e.py",
+            "tests/test_override_elf_only_variant.py",
         ),
         public_surfaces=("reclassify", "json_report"),
         axes={"evidence": ("header", "elf")},

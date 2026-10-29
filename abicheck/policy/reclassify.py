@@ -129,7 +129,10 @@ from dataclasses import dataclass, field
 from datetime import date, datetime
 from typing import Any, TypeVar, cast
 
-from ..model.change_catalog.kind_variants import kind_match_set
+from ..model.change_catalog.kind_variants import (
+    expand_variant_overrides,
+    kind_match_set,
+)
 from ..model.change_catalog.kinds import ChangeKind, HasKind
 from ..model.execution_cache import MemoryCache, request_key
 from ..model.policy_file_protocol import ReclassifyRuleProtocol
@@ -669,9 +672,7 @@ def _policy_chain_verdict(
                 return base_v
             return reclass_v
 
-    overrides = (
-        getattr(policy_file, "overrides", None) if policy_file is not None else None
-    )
+    overrides = expand_variant_overrides(getattr(policy_file, "overrides", None))
     if overrides and kind in overrides:
         base_v = effective_category(change, *base_sets)
         override_v = cast(Verdict, overrides[kind])
@@ -747,9 +748,7 @@ def reclassify_rule_for_change(
     base_policy = getattr(policy_file, "base_policy", None)
     base_sets = resolve_kind_sets(base_policy, None)
     base_v = effective_category(change, *base_sets)
-    overrides = (
-        getattr(policy_file, "overrides", None) if policy_file is not None else None
-    )
+    overrides = expand_variant_overrides(getattr(policy_file, "overrides", None))
     kind = change.kind
     # The verdict that would apply if *this* reclassify rule didn't exist --
     # the next step down the same precedence chain effective_verdict_for_change

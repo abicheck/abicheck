@@ -152,3 +152,63 @@ def test_elf_only_rule_hides_only_the_headerless_removal(
     assert code != 0
     assert _removal_kinds(report) == []
     assert "func_removed" in {c["kind"] for c in report["changes"]}
+
+
+def _policy(tmp: Path, name: str, body: str) -> Path:
+    path = tmp / f"policy-{name}.yml"
+    path.write_text(body)
+    return path
+
+
+def _verdict_run(
+    tmp: Path, pair: dict[str, Path], *, with_headers: bool, policy: Path | None
+) -> tuple[int, str]:
+    report = tmp / f"verdict-{with_headers}-{policy.stem if policy else 'none'}.json"
+    args: list[str] = [
+        "compare",
+        str(pair["old_lib"]),
+        str(pair["new_lib"]),
+        "-o",
+        f"json={report}",
+    ]
+    if policy is not None:
+        args += ["--policy", str(policy)]
+    if with_headers:
+        args += ["-H", f"old={pair['old_h']}", "-H", f"new={pair['new_h']}"]
+    proc = subprocess.run(
+        abicheck_command(*args),
+        capture_output=True,
+        text=True,
+        env=abicheck_env(),
+        check=False,
+    )
+    return proc.returncode, json.loads(report.read_text())["verdict"]
+
+
+def test_base_override_sets_the_verdict_of_the_headerless_removal(
+    tmp_path: Path, pair: dict[str, Path]
+) -> None:
+    ignore_base = _policy(tmp_path, "base", "overrides:\n  func_removed: ignore\n")
+    # Without the override the removal is breaking, with or without headers.
+    code, verdict = _verdict_run(tmp_path, pair, with_headers=False, policy=None)
+    assert (code, verdict) == (4, "BREAKING")
+    # The base entry pins the headerless removal too.
+    code, verdict = _verdict_run(tmp_path, pair, with_headers=False, policy=ignore_base)
+    assert (code, verdict) == (0, "COMPATIBLE")
+    # And the header-backed removal, which the same entry always covered.
+    code, verdict = _verdict_run(tmp_path, pair, with_headers=True, policy=ignore_base)
+    assert (code, verdict) == (0, "COMPATIBLE")
+
+
+def test_explicit_variant_override_wins_over_the_base_entry(
+    tmp_path: Path, pair: dict[str, Path]
+) -> None:
+    policy = _policy(
+        tmp_path,
+        "explicit",
+        "overrides:\n  func_removed: ignore\n  func_removed_elf_only: break\n",
+    )
+    code, verdict = _verdict_run(tmp_path, pair, with_headers=False, policy=policy)
+    assert (code, verdict) == (4, "BREAKING")
+    code, verdict = _verdict_run(tmp_path, pair, with_headers=True, policy=policy)
+    assert (code, verdict) == (0, "COMPATIBLE")
