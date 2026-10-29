@@ -69,7 +69,8 @@ def test_show_only_copies_still_build_review_groups_in_json_and_markdown() -> No
     from abicheck.checker_policy import ChangeKind, Verdict
     from abicheck.checker_types import DiffResult
     from abicheck.model.change import Change
-    from abicheck.reporter import to_json, to_markdown
+    from abicheck.report.diff_report import to_json
+    from abicheck.report.dispatch_markdown import to_markdown
 
     layout = Change(
         ChangeKind.LAYOUT_UNVERIFIABLE,

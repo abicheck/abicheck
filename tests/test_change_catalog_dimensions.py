@@ -275,7 +275,7 @@ class TestAPolymorphicKindTakesItsEntityFromTheFinding:
 
         from abicheck.change_registry_types import Verdict
         from abicheck.checker_types import DiffResult
-        from abicheck.reporter import to_json
+        from abicheck.report.diff_report import to_json
 
         for (kind, expected), changes in self._real_findings().items():
             relevant = [c for c in changes if c.kind.value == kind]

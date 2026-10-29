@@ -140,7 +140,7 @@ def _process_exit(result: DiffResult, gate: EffectiveGate) -> int:
 
 
 def test_every_consumer_reads_the_same_gate() -> None:
-    from abicheck.reporter_contract_blocks import add_contract_context
+    from abicheck.report.contract_blocks import add_contract_context
 
     disagreements = []
     legacy_seen: set[int] = set()

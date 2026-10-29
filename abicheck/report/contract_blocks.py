@@ -15,7 +15,7 @@
 
 """The report-level blocks every JSON path attaches after the findings.
 
-Split out of :mod:`abicheck.reporter`, which is at the 2000-line hard cap --
+Split out of :mod:`abicheck.report.diff_report`, which is at the 2000-line hard cap --
 same reason ``reporter_markdown``/``report_summary`` live beside it. Every
 import here is function-local for the reason the original site documented:
 ``contract_evidence``/``contract_context_io`` reach
@@ -27,18 +27,18 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from .report.document import ReportDocument
-from .report.render_json import render_json
-from .report.use_case_impact_render import add_use_case_impact
+from .document import ReportDocument
+from .render_json import render_json
+from .use_case_impact_render import add_use_case_impact
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
     from datetime import date
 
-    from .checker_types import DiffResult
-    from .model.change import Change
-    from .policy.severity import GateDecision, SeverityConfig
-    from .report.scoped_gate import ScopedGateChangeHelpers
+    from ..checker_types import DiffResult
+    from ..model.change import Change
+    from ..policy.severity import GateDecision, SeverityConfig
+    from .scoped_gate import ScopedGateChangeHelpers
 
 
 def add_env_matrix_digest(d: dict[str, Any], result: DiffResult) -> None:
@@ -91,7 +91,7 @@ def add_contract_context(
     :func:`add_annotations`, keeps both agreeing with an already-frozen
     ``ReportEnvelope`` (Codex review, fresh evidence).
     """
-    from .policy.analysis_assurance import (
+    from ..policy.analysis_assurance import (
         analysis_assurance_exit_contribution,
         analysis_assurance_report_dict,
     )
@@ -129,8 +129,8 @@ def add_contract_context(
     # one-comparison-product.md P3: the abort-axes-aware wrapper, not the
     # bare ordinary fold -- see its own docstring in
     # policy/exit_decision_precedence.py for why it lives there.
-    from .policy.effective_gate import EffectiveGate
-    from .policy.exit_decision_precedence import (
+    from ..policy.effective_gate import EffectiveGate
+    from ..policy.exit_decision_precedence import (
         resolve_compare_exit_decision_with_abort_axes,
     )
 
@@ -153,8 +153,8 @@ def add_contract_context(
     ctx = result.contract_context
     if ctx is None:
         return
-    from .contract_context_io import persisted_context_to_dict
-    from .contract_evidence import PersistedContractContext
+    from ..contract_context_io import persisted_context_to_dict
+    from ..contract_evidence import PersistedContractContext
 
     # `DiffResult.contract_context` is typed `object` (its real type reaches
     # `compatibility_evaluation_config` -> `checker_policy`, which every
@@ -184,8 +184,8 @@ def add_contract_context(
     # enforce. Emitted as `[]` rather than omitted when there are none: an
     # empty ledger is the real, checkable answer "this domain closed", which
     # an absent key could not distinguish from "not computed".
-    from .policy.contract_coverage_exit import coverage_exit_for_context
-    from .policy.coverage_ledger import coverage_failures_for_context
+    from ..policy.contract_coverage_exit import coverage_exit_for_context
+    from ..policy.coverage_ledger import coverage_failures_for_context
 
     failures = coverage_failures_for_context(ctx)
     d["contract_coverage_failures"] = [f.to_dict() for f in failures]
@@ -209,7 +209,7 @@ def add_effective_config_digest(
     "one effective configuration ... with the same effective-config digest
     recorded in every report", computed identically for `compare` (via
     :func:`add_contract_context`), the directory/package release fan-out
-    (same call), :func:`~abicheck.reporter.to_stat_json` (which bypasses
+    (same call), :func:`~abicheck.report.diff_report.to_stat_json` (which bypasses
     :func:`add_contract_context` entirely, so it calls this directly), and
     the retired `scan --against` (``cli_scan_baseline``, same function).
     :func:`~abicheck.effective_config_digest.effective_config_fields` itself
@@ -232,7 +232,7 @@ def add_effective_config_digest(
     rather than silently absent from the fingerprint (Codex review,
     PR #803, fresh evidence).
     """
-    from .effective_config_digest import (
+    from ..effective_config_digest import (
         effective_config_digest,
         effective_config_fields_from_raw,
     )
@@ -350,14 +350,14 @@ def add_suppression_audit(d: dict[str, Any], result: DiffResult) -> None:
     ``--audit-suppressions``) omits the key entirely, matching the
     pre-existing behavior exactly.
     """
-    from .policy.disposition_rules import configured_rule_rows
-    from .policy.rule_inventory import (
+    from ..policy.disposition_rules import configured_rule_rows
+    from ..policy.rule_inventory import (
         KIND_SUPPRESSION,
         STATUS_NOT_EVALUATED,
         STATUS_SHADOWED_ONLY,
         STATUS_UNUSED,
     )
-    from .policy.suppression.rules import SuppressionAudit
+    from ..policy.suppression.rules import SuppressionAudit
 
     audit = result.suppression_audit
     if not isinstance(audit, SuppressionAudit):
@@ -367,7 +367,7 @@ def add_suppression_audit(d: dict[str, Any], result: DiffResult) -> None:
     # A rule that disposed of nothing is stale: unused, only shadowed by an
     # earlier rule, or not_evaluated (it matched nothing, and a detector of
     # this run did not run, so the block keeps reporting it as it always has).
-    from .policy.disposition_close import ledger_for
+    from ..policy.disposition_close import ledger_for
 
     ledger = ledger_for(result)
     # A rule the suppression pass matched -- including on a consumer-scoped
@@ -379,7 +379,7 @@ def add_suppression_audit(d: dict[str, Any], result: DiffResult) -> None:
     # disposition-audit row carries), and a rule with a user ``id:`` by that
     # id. ``stale_rule_ids`` is the parallel list of ``rule_id``s, so a reader
     # joins a stale entry to its ``disposition_audit.rules`` row by id.
-    from .policy.rule_identity import rule_id_of
+    from ..policy.rule_identity import rule_id_of
 
     stale_rows = [
         row
@@ -539,12 +539,12 @@ def build_report_document_with_side_facts(
     a scoped-only finding agreeing with an already-frozen ``ReportEnvelope``
     (Codex review, fresh evidence).
     """
-    from .report.cross_source_evolution import (
+    from .cross_source_evolution import (
         compute_cross_source_evolution_summary,
         render_cross_source_evolution_json,
     )
-    from .report.run_outcome import run_outcome_dict_for_diff_result
-    from .report.scoped_gate import apply_scoped_gate
+    from .run_outcome import run_outcome_dict_for_diff_result
+    from .scoped_gate import apply_scoped_gate
 
     d["run_outcome"] = run_outcome_dict_for_diff_result(result, severity_config, gate)
     add_suppression_audit(d, result)
@@ -591,7 +591,7 @@ def add_annotations(
     when that answer is ``[]``, so there's no opt-in flag gating this key
     the way `contract_context` stays opt-in on `--contract`.
     """
-    from .annotations import annotation_report_entries
+    from ..annotations import annotation_report_entries
 
     d["annotations"] = annotation_report_entries(
         result, severity_config=severity_config, today=today

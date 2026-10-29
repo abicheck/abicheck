@@ -14,7 +14,7 @@ from abicheck.report.cross_source_evolution import (
     compute_cross_source_evolution_summary,
     render_cross_source_evolution_json,
 )
-from abicheck.reporter import to_json
+from abicheck.report.diff_report import to_json
 
 
 def _evolved_change(evolution: CrossSourceEvolution, symbol: str) -> Change:

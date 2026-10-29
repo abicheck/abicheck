@@ -29,7 +29,7 @@ a same-layer import cycle between the two modules.
 ``reporter_markdown.py`` re-exports all three under their original names
 (``from .report.render_markdown import _format_change_md as
 _format_change_md``, ...) so every existing call site --
-including ``abicheck.reporter``'s own re-export and its direct test
+including ``abicheck.report.diff_report``'s own re-export and its direct test
 coverage -- resolves unchanged.
 
 Every ``render_*`` function here is behavior-preserving by construction: each

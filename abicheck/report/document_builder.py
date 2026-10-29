@@ -18,7 +18,7 @@ document does not yet carry should get that data added *here*, never
 recomputed locally in the format's own renderer.
 
 This is the ``report_mode="full"`` build formerly inlined in
-``abicheck.reporter.to_json`` -- moved here (rather than kept as a sibling
+``abicheck.report.diff_report.to_json`` -- moved here (rather than kept as a sibling
 function in ``reporter.py``) purely to stay clear of that file's ADR-061
 ``no_growth`` architecture-debt baseline (``architecture/debt.yaml``); the
 logic is otherwise unchanged from what ``to_json`` used to run inline. This
@@ -110,11 +110,11 @@ def build_report_document(
     (Codex review, fresh evidence).
     """
     from ..policy.gate_decision import gate_decision_for_result
-    from ..reporter_contract_blocks import (
+    from .change_json import prewarm_change_demangling
+    from .contract_blocks import (
         add_contract_context as _add_contract_context,
         build_report_document_with_side_facts,
     )
-    from .change_json import prewarm_change_demangling
     from .disposition_audit import (
         DispositionAudit,
         add_disposition_audit as _add_disposition_audit,

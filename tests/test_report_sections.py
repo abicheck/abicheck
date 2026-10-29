@@ -22,9 +22,9 @@ import pytest
 
 from abicheck.checker import compare
 from abicheck.checker_policy import Verdict
-from abicheck.html_report import generate_html_report
 from abicheck.model import AbiSnapshot, Function, Visibility
-from abicheck.reporter import to_markdown
+from abicheck.report.dispatch_markdown import to_markdown
+from abicheck.report.html_compute import generate_html_report
 
 
 def _snap(ver: str, funcs: list[Function]) -> AbiSnapshot:

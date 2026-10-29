@@ -31,11 +31,11 @@ from collections.abc import Iterable, Sequence
 from typing import TYPE_CHECKING, cast
 
 from .policy.evaluate import effective_kind_sets
-from .report.view import apply_show_only, finding_id
-from .reporter_markdown import (
+from .report.root_cause_lookup import (
     root_cause_evidence_lookup_for_changes,
     root_cause_lookup_for_changes,
 )
+from .report.view import apply_show_only, finding_id
 
 if TYPE_CHECKING:
     from .checker_types import DiffResult
@@ -86,7 +86,7 @@ def impact_group_lookup_for_changes(changes: list[Change]) -> dict[str, str]:
     same ``caused_by_type``-else-``symbol`` key as the report-level grouping, so
     it agrees with ``root_cause_id`` whenever both are set. It differs by
     presence: a bare-symbol ``--used-by`` pair with no ``caused_by_type`` is one
-    correlator group that :func:`~abicheck.reporter_markdown.root_cause_for_change`
+    correlator group that :func:`~abicheck.report.root_cause_lookup.root_cause_for_change`
     leaves ungrouped. Built over the real ``Change`` objects, so a scoped-only
     sibling must be included in *changes* by the caller.
     """

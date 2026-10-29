@@ -132,7 +132,7 @@ def stat_facts_for(
     *,
     require_complete_analysis: bool = False,
 ) -> StatFacts:
-    """Resolve every fact :func:`abicheck.reporter.to_stat_json` consumes."""
+    """Resolve every fact :func:`abicheck.report.diff_report.to_stat_json` consumes."""
     from ..policy.analysis_assurance import (
         analysis_assurance_exit_contribution,
         analysis_assurance_report_dict,

@@ -118,7 +118,7 @@ def _poly(vtable_fact: Fact | None, extra_virtual: bool) -> RecordType:
 
 def test_compare_reports_the_decline_and_leaves_findings_unchanged():
     from abicheck.checker import compare
-    from abicheck.reporter import to_json
+    from abicheck.report.diff_report import to_json
 
     old = AbiSnapshot(library="l.so", version="1", types=[_poly(None, False)])
     new = AbiSnapshot(

@@ -526,7 +526,7 @@ class TestHeaderOnlyReportContract:
         # so the test exercises the same path a real report does.
         import json
 
-        from abicheck.reporter import to_json
+        from abicheck.report.diff_report import to_json
 
         doc = json.loads(to_json(result))
         rec = doc["release_recommendation"]

@@ -381,7 +381,7 @@ class TestRenderersAgree:
         # the same result the inventory is computed from: a hand-written
         # bucket block that disagrees with the inventory is not a population
         # any real member emits, and the line's total is their sum.
-        from abicheck.reporter import to_json
+        from abicheck.report.diff_report import to_json
 
         result = _mixed_result()
         summary = json.loads(to_json(result))["summary"]

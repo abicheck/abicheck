@@ -13,7 +13,6 @@ import pytest
 from _perf_scaling import measure_scaling_exponent
 
 from abicheck.checker import Change, ChangeKind, DiffResult, Verdict, compare
-from abicheck.html_report import generate_html_report
 from abicheck.model import (
     AbiSnapshot,
     Function,
@@ -23,7 +22,9 @@ from abicheck.model import (
     Visibility,
 )
 from abicheck.policy.suppression.rules import Suppression, SuppressionList
-from abicheck.reporter import to_json, to_markdown
+from abicheck.report.diff_report import to_json
+from abicheck.report.dispatch_markdown import to_markdown
+from abicheck.report.html_compute import generate_html_report
 from abicheck.sarif import to_sarif_str
 from abicheck.serialization import snapshot_from_dict, snapshot_to_json
 

@@ -61,7 +61,8 @@ from abicheck.ctf_metadata import (  # noqa: E402
     parse_ctf_from_bytes,
 )
 from abicheck.model import AbiSnapshot  # noqa: E402
-from abicheck.reporter import to_json, to_markdown  # noqa: E402
+from abicheck.report.diff_report import to_json  # noqa: E402
+from abicheck.report.dispatch_markdown import to_markdown  # noqa: E402
 from abicheck.sycl_metadata import SyclMetadata, SyclPluginInfo  # noqa: E402
 
 # ── BTF blob builder (minimal, self-contained) ───────────────────────────────

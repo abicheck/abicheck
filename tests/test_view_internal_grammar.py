@@ -60,13 +60,13 @@ from abicheck.model.change_catalog.registry import (
     ChangeOperation,
     ContractSubject,
 )
-from abicheck.report.change_operation import operation_for_kind
-from abicheck.report.view import SHOW_ONLY_GROUP_SEP, ShowOnlyFilter
-from abicheck.reporter_markdown import (
+from abicheck.report.change_operation import (
     ACTION_TOKEN_OPERATIONS,
     ELEMENT_TOKEN_ENTITIES,
     entity_for_kind,
+    operation_for_kind,
 )
+from abicheck.report.view import SHOW_ONLY_GROUP_SEP, ShowOnlyFilter
 
 # ── Shared real-binary corpus ───────────────────────────────────────────────
 
@@ -134,7 +134,7 @@ def _compare(old, new):
 
 
 def _json_doc(result, **kwargs):
-    from abicheck import reporter
+    from abicheck.report import diff_report as reporter
 
     return json.loads(reporter.to_json(result, **kwargs))
 
@@ -215,14 +215,16 @@ class TestDisplayDimensionsComeFromTheCatalog:
         A prefix/suffix table left in place beside the catalog is exactly
         how the two drifted apart in the first place.
         """
-        import abicheck.reporter_markdown as rm
+        import abicheck.report.change_operation as change_operation
+        import abicheck.report.markdown_sections as markdown_sections
 
-        for name in (
-            "_ADDED_SUFFIXES",
-            "_REMOVED_SUFFIXES",
-            "_OPERATION_OVERRIDES",
-        ):
-            assert not hasattr(rm, name), name
+        for module in (change_operation, markdown_sections):
+            for name in (
+                "_ADDED_SUFFIXES",
+                "_REMOVED_SUFFIXES",
+                "_OPERATION_OVERRIDES",
+            ):
+                assert not hasattr(module, name), (module.__name__, name)
 
     def test_a_new_kind_lands_in_its_dimension_with_one_registration(self):
         from abicheck.model.change_catalog.registry import (
@@ -645,7 +647,7 @@ class TestDemanglingIsPrewarmedOnEveryProjection:
         assert max(calls) >= 12, calls
 
     def test_the_root_cause_projection_prewarms_too(self, monkeypatch):
-        from abicheck import reporter
+        from abicheck.report import diff_report as reporter
 
         result = self._result_with_mangled_findings(12)
         calls = self._count_batches(

@@ -27,7 +27,7 @@ from abicheck.model import (
 )
 from abicheck.model.change import Change
 from abicheck.policy.public_surface_closure import resolve_public_surface
-from abicheck.reporter import to_json
+from abicheck.report.diff_report import to_json
 from abicheck.sarif import to_sarif
 from abicheck.surface import (
     REASON_NO_PROVENANCE,

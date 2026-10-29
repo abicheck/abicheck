@@ -291,7 +291,7 @@ def _result_for(
     *impact_root_cause_evidence* (G29 Phase 6 follow-up) is *change*'s own
     entry from :func:`~abicheck.impact.correlation.correlate_root_causes`,
     resolved once per document via
-    :func:`~abicheck.reporter_markdown.root_cause_evidence_lookup_for_changes`
+    :func:`~abicheck.report.root_cause_lookup.root_cause_evidence_lookup_for_changes`
     — feeds ``impactAssessment.root_cause_evidence``, unconditionally (any
     *report_mode*), mirroring *impact_root_cause* above.
 

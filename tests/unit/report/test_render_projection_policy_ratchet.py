@@ -14,13 +14,14 @@ on any change in either direction:
 The import list is what changes when a renderer starts deciding, so it is
 the thing to assert on; the rendered text is identical either way.
 
-The same ratchet covers the compute half modules (``html_report.py``,
-``reporter.py``, ``reporter_markdown.py`` and ``report/markdown_compute.py``).
+The same ratchet covers the compute half modules (``html_compute.py``,
+``diff_report.py``, the four modules the retired root ``reporter_markdown.py``
+split into, ``markdown_compute.py`` and ``outcome_summary.py``).
 They are *source* modules, not renderers, so they may read a ``DiffResult``;
 their kind sets, impact text, reclassify rules, exit codes and classification
 resolve through ``report/policy_facts.py``. What remains recorded below is
 the decision that still lives in the compute half and is not yet routed:
-the severity categorisation in ``reporter_markdown.py``, the disposition-audit
+the severity categorisation in ``markdown_sections.py``, the disposition-audit
 fallbacks for direct callers that pass no envelope, and the type-only
 ``policy.severity`` annotations.
 """
@@ -48,44 +49,50 @@ _POLICY_HEADS = frozenset(
 #: document's ``disposition_audit`` instead of recomputing it).
 _DISPOSITION_COMPUTE = frozenset({"compute_disposition_audit", "add_disposition_audit"})
 
-#: Compute-half source modules the ratchet also covers. ``reporter.py`` (the
-#: ``--stat`` and root-cause JSON path), ``reporter_markdown.py`` (the Markdown
-#: compute functions) and ``html_report.py`` (the HTML compute half) are source
-#: modules outside ``report/``: they may read a ``DiffResult`` and take their
-#: kind sets, run summary, release recommendation and decisions from
+#: Compute-half source modules the ratchet also covers. ``diff_report.py`` (the
+#: ``--stat`` and root-cause JSON path), the Markdown compute modules split out
+#: of the retired root ``reporter_markdown.py`` and ``html_compute.py`` (the
+#: HTML compute half) are source modules: they may read a ``DiffResult`` and
+#: take their kind sets, run summary, release recommendation and decisions from
 #: ``report/policy_facts.py``. ``report/markdown_compute.py`` is the compute
 #: half of both Markdown projections: the render modules consume its document,
 #: so the decisions it still makes are recorded here rather than inside them.
 _SOURCE_MODULES = (
-    "html_report.py",
-    "reporter.py",
-    "reporter_markdown.py",
-    "report/markdown_compute.py",
+    "html_compute.py",
+    "diff_report.py",
+    "markdown_sections.py",
+    "review_digest_compute.py",
+    "root_cause_lookup.py",
+    "release_view_filters.py",
+    "markdown_compute.py",
+    "outcome_summary.py",
 )
 
 _RECORDED_POLICY_IMPORTS: dict[str, frozenset[str]] = {
     # ``policy.severity`` here is the ``TYPE_CHECKING``-only ``SeverityConfig``
     # annotation: a type, not a decision. Nothing else in the module reaches policy.
-    "reporter.py": frozenset({"policy.severity"}),
+    "diff_report.py": frozenset({"policy.severity"}),
     # Two runtime reads remain here, not decisions: ``SeverityLevel`` (an enum
     # the summary table labels rows with) and the ``ADDITION_KINDS`` /
     # ``INFORMATIONAL_KINDS`` sets of the compatible-quality list in
     # ``compute_severity_sections``. The severity *categories* the summary table
     # counts are no longer computed here: they arrive as precomputed counts from
     # the envelope's findings (``report/markdown_compute.py``).
-    "reporter_markdown.py": frozenset({"policy.classification", "policy.severity"}),
-    # Compute side, not a renderer: ``gate_eligible_changes`` is the one
-    # predicate choosing which findings the gate scores, for the ``Exit Impact``
-    # column. Per-category counts are tallied from each finding's resolved
-    # category, never re-classified here.
-    "markdown_compute.py": frozenset({"policy.severity"}),
+    "markdown_sections.py": frozenset({"policy.classification", "policy.severity"}),
+    # The shared outcome projection, not a renderer: ``gate_eligible_changes``
+    # is the one predicate choosing which findings the gate scores, for the
+    # severity table's ``Exit Impact`` column, and ``SeverityLevel`` labels
+    # its rows. Per-category counts are tallied from each finding's resolved
+    # category, never re-classified here; ``markdown_compute.py`` reads the
+    # table from here and no longer reaches policy at all.
+    "outcome_summary.py": frozenset({"policy.severity"}),
 }
 _RECORDED_DISPOSITION_COMPUTE: dict[str, frozenset[str]] = {
     # The envelope-driven renders (every ``render_*`` module, the one-line
     # ``to_stat`` and the review digest) read the audit their envelope's shared
-    # ``ReportDocument`` holds. ``reporter.py``'s JSON helpers (``to_stat_json``,
+    # ``ReportDocument`` holds. ``diff_report.py``'s JSON helpers (``to_stat_json``,
     # root-cause JSON) take no envelope and compute it once for a direct caller.
-    "reporter.py": frozenset({"add_disposition_audit"}),
+    "diff_report.py": frozenset({"add_disposition_audit"}),
 }
 
 
@@ -97,8 +104,7 @@ def _render_modules() -> list[Path]:
 
 def _ratchet_modules() -> list[Path]:
     package_dir = Path(next(iter(report_package.__path__)))
-    source_dir = package_dir.parent
-    return [*_render_modules(), *(source_dir / name for name in _SOURCE_MODULES)]
+    return [*_render_modules(), *(package_dir / name for name in _SOURCE_MODULES)]
 
 
 def _observed() -> tuple[dict[str, frozenset[str]], dict[str, frozenset[str]]]:
@@ -149,7 +155,7 @@ def test_render_modules_call_disposition_compute_only_as_recorded() -> None:
 
 def test_render_html_modules_stay_policy_free() -> None:
     """The HTML render modules are already clean; they must never be added to
-    the allowlist. ``html_report.py`` is a source module, asserted above."""
+    the allowlist. ``html_compute.py`` is a source module, asserted above."""
     policy, disposition = _observed()
     html_renderers = [name for name in policy if name.startswith("render_html")]
     assert html_renderers == []

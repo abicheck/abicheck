@@ -41,6 +41,7 @@ from abicheck.policy.disposition_ledger import DispositionLedger
 from abicheck.policy.reclassify import ReclassifyRule
 from abicheck.policy.severity import SeverityConfig, SeverityLevel
 from abicheck.policy_file import PolicyFile
+from abicheck.report.diff_report import to_json
 from abicheck.report.disposition_audit import compute_disposition_audit
 from abicheck.report.document import ReportDocument
 from abicheck.report.document_builder import (
@@ -50,7 +51,6 @@ from abicheck.report.document_builder import (
 )
 from abicheck.report.envelope import RenderOptions, ReportEnvelope
 from abicheck.report.render_json import render_json
-from abicheck.reporter import to_json
 from abicheck.sarif import to_sarif, to_sarif_str
 
 
@@ -146,7 +146,7 @@ class TestBuildCalledExactlyOnce:
         default (``report_mode="full"``) JSON render -- only the shared
         document build may.
         """
-        with mock.patch("abicheck.reporter.to_json") as legacy:
+        with mock.patch("abicheck.report.diff_report.to_json") as legacy:
             rendered = render_output(
                 "json", _result([_BREAKING]), _snapshot("1.0"), _snapshot("2.0")
             )

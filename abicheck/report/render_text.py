@@ -210,7 +210,7 @@ def render_stat_document(document: ReportDocument) -> str:
     every :data:`OUTCOME_BUCKETS` key plus ``total_changes``, an optional
     top-level ``redundant_count``, and an
     optional ``severity`` object with ``exit_code`` — the same shape
-    :func:`abicheck.reporter.to_stat_json`'s severity block already carries,
+    :func:`abicheck.report.diff_report.to_stat_json`'s severity block already carries,
     so a future caller building one document for both the JSON and text
     stat outputs only has to supply these fields once. The ``gate:``
     suffix is pure formatting of that already-resolved ``exit_code``, not a

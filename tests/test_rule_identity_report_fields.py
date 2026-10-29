@@ -22,7 +22,7 @@ import pytest
 from abicheck.checker import compare
 from abicheck.model import AbiSnapshot, Function, Visibility
 from abicheck.policy.suppression.rules import Suppression, SuppressionList
-from abicheck.reporter import to_json
+from abicheck.report.diff_report import to_json
 from abicheck.semver import recommend_release
 from abicheck.workflows.suppression_audit_attach import attach_suppression_audit
 

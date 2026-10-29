@@ -567,7 +567,7 @@ def test_reconciled_findings_disclosed_in_json_sarif_and_cli(capsys):
     import json as _json
 
     from abicheck.cli_audit import echo_reconciled
-    from abicheck.reporter import to_json
+    from abicheck.report.diff_report import to_json
     from abicheck.sarif import to_sarif
 
     old, new = _fp_pair()
@@ -590,7 +590,7 @@ def test_reconciled_findings_disclosed_in_json_sarif_and_cli(capsys):
 def test_json_omits_reconciled_block_when_nothing_cleared():
     import json as _json
 
-    from abicheck.reporter import to_json
+    from abicheck.report.diff_report import to_json
 
     old, new = _fp_pair()
     result = compare(old, new, scope_to_public_surface=True)  # no reconciliation

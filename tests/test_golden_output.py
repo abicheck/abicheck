@@ -29,7 +29,7 @@ from abicheck.model import (
     TypeField,
     Visibility,
 )
-from abicheck.reporter import to_markdown
+from abicheck.report.dispatch_markdown import to_markdown
 
 # ---------------------------------------------------------------------------
 # Paths

@@ -22,8 +22,9 @@ from abicheck.compare.finding_redundancy import (
 )
 from abicheck.diff_filtering import _filter_reserved_field_renames
 from abicheck.policy.evaluate import effective_kind_sets
+from abicheck.report.diff_report import to_json, to_stat_json
+from abicheck.report.dispatch_markdown import to_markdown
 from abicheck.report.view import ShowOnlyFilter, apply_show_only
-from abicheck.reporter import to_json, to_markdown, to_stat_json
 from tests._report_test_helpers import stat_line
 
 # ---------------------------------------------------------------------------
@@ -928,7 +929,7 @@ class TestSarifRedundancy:
 
 class TestHtmlRedundancy:
     def test_html_redundancy_note(self):
-        from abicheck.html_report import generate_html_report
+        from abicheck.report.html_compute import generate_html_report
 
         result = _make_result(
             changes=[Change(ChangeKind.TYPE_SIZE_CHANGED, "T", "size")],
@@ -939,7 +940,7 @@ class TestHtmlRedundancy:
         assert "scope.show_redundant" in html
 
     def test_html_caused_count_displayed(self):
-        from abicheck.html_report import generate_html_report
+        from abicheck.report.html_compute import generate_html_report
 
         c = Change(ChangeKind.TYPE_SIZE_CHANGED, "Config", "size changed")
         c.caused_count = 7
@@ -948,7 +949,7 @@ class TestHtmlRedundancy:
         assert "7 derived change(s) collapsed" in html
 
     def test_html_show_only_filter(self):
-        from abicheck.html_report import generate_html_report
+        from abicheck.report.html_compute import generate_html_report
 
         result = _make_result(
             changes=[
@@ -961,7 +962,7 @@ class TestHtmlRedundancy:
         assert "1 of 2 changes shown" in html
 
     def test_html_show_impact(self):
-        from abicheck.html_report import generate_html_report
+        from abicheck.report.html_compute import generate_html_report
 
         c = Change(
             ChangeKind.TYPE_SIZE_CHANGED,

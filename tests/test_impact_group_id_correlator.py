@@ -21,12 +21,12 @@ import hashlib
 import json
 import random
 
-from abicheck import reporter
 from abicheck.checker_policy import ChangeKind, Verdict
 from abicheck.checker_types import DiffResult
 from abicheck.impact import ImpactAssessment
 from abicheck.impact.engine import assess_change
 from abicheck.model.change import Change
+from abicheck.report import diff_report as reporter
 from abicheck.report.view import finding_id
 from abicheck.root_cause_evidence import (
     impact_assessment_lookups,

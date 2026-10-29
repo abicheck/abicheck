@@ -197,9 +197,9 @@ class TestVersioningPolicyAcrossViews:
         # API_BREAK and the risk tier have no cheap CLI fixture; the compute
         # half reads only the verdict, so a real DiffResult is enough.
         from abicheck.checker_types import DiffResult
-        from abicheck.html_report import compute_versioning_policy
         from abicheck.policy.classification import Verdict
         from abicheck.policy_file import PolicyFile
+        from abicheck.report.versioning_policy_section import compute_versioning_policy
 
         path = tmp_path / "policy.yaml"
         path.write_text(

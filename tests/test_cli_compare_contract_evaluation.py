@@ -231,7 +231,7 @@ class TestEndToEndJsonReport:
             RecordType as _Rec,
             ScopeOrigin as _Origin,
         )
-        from abicheck.reporter import to_json as _to_json
+        from abicheck.report.diff_report import to_json as _to_json
 
         pub = _Rec(
             name="Pub", kind="struct", size_bits=64, origin=_Origin.PUBLIC_HEADER

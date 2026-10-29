@@ -201,7 +201,7 @@ def test_surface_change_section_round_trips_through_to_dict() -> None:
 
 
 def test_json_report_carries_the_surface_changes_block() -> None:
-    from abicheck import reporter
+    from abicheck.report import diff_report as reporter
 
     old, new = _snapshots()
     result = compare(old, new)
@@ -242,7 +242,7 @@ def test_surface_changes_honors_show_only_like_every_other_section() -> None:
     not reappear in ``surface_changes`` -- the section must group the same
     *displayed* findings the rest of the view shows, not the raw
     ``result.changes``."""
-    from abicheck import reporter
+    from abicheck.report import diff_report as reporter
     from abicheck.report.dispatch_markdown import (
         _to_markdown_root_cause,
         to_markdown,
