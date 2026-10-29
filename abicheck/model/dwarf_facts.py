@@ -24,6 +24,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from enum import StrEnum
 
+from .abi_fundamental import AbiFundamental
+
 
 @dataclass
 class FieldInfo:
@@ -35,6 +37,11 @@ class FieldInfo:
     byte_size: int  # size of the field's type (0 if unknown)
     bit_offset: int = 0  # for bitfields: normalised bit offset from LSB
     bit_size: int = 0  # for bitfields: width in bits (0 = not a bitfield)
+    # Schema v69: the ABI fact of the member's type (model/abi_fundamental.py),
+    # read from the member DIE by extract/dwarf_abi_fact.py -- the same fact a
+    # binary-only dump's TypeField carries. ``None`` when DWARF states no
+    # fundamental for the type (a pointer, a struct), and on a pre-v69 load.
+    type_abi_fact: AbiFundamental | None = None
 
     @property
     def is_vptr_member(self) -> bool:
