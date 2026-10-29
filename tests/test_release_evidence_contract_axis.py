@@ -293,7 +293,7 @@ class TestTheExitAndTheReportComeFromOneResolution:
     def test_every_reachable_release_state_agrees(self) -> None:
         import itertools
 
-        from abicheck.frontends.cli.release_exit import _exit_compare_release
+        from abicheck.frontends.cli.runtime import _exit_compare_release
         from abicheck.policy.exit_decision_precedence import (
             resolve_release_exit_decision_for_report,
         )

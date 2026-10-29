@@ -170,7 +170,7 @@ def test_pre_1_22_not_comparable_scan_diff_gets_a_synthesized_exit_block() -> No
 
 def test_advisory_preserves_operational_error_contribution_in_the_exit_block() -> None:
     """Codex review: `_neutralize_gate`'s advisory rewrite must not wipe
-    `operational_error_contribution` -- `final_exit_code`'s own docstring
+    `operational_error_contribution` -- `resolve_gate_mode_exit_code`'s own docstring
     says operational errors fail every gate mode, including `advisory`, so
     zeroing this axis in the persisted `exit` block would make it falsely
     claim a clean pass while the job's real exit code still fails.
@@ -214,7 +214,7 @@ def test_advisory_preserves_not_comparable_contribution_in_a_scan_diff_exit_bloc
 ):
     """Codex review, fresh evidence, second round: `_classify_verdict`
     treats a `NOT_COMPARABLE` scan verdict identically to a genuine
-    operational error (both fail every gate mode per `final_exit_code`),
+    operational error (both fail every gate mode per `resolve_gate_mode_exit_code`),
     but the first advisory-preservation fix only carried over
     `operational_error_contribution` -- a `NOT_COMPARABLE` report's own
     signal lives in `not_comparable_contribution` instead, so it was still

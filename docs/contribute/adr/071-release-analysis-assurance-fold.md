@@ -18,7 +18,7 @@ its orthogonal completeness axis. Owners:
 `abicheck/policy/release_exit_decision.py`,
 `abicheck/workflows/release_assurance_members.py`,
 `abicheck/cli_compare_release_pairwise.py`,
-`abicheck/frontends/cli/release_exit.py`,
+`abicheck/frontends/cli/runtime.py`,
 `abicheck/frontends/cli/release_summary.py`.
 
 ## Relationship to PR #1238
@@ -238,7 +238,7 @@ about the fold, not about evidence parity between operand shapes.
 
 **D9 — Every document a run publishes carries the axis, and the notice is
 formatted where the real code is known.** Three places build a
-release `ExitDecision` — the process exit (`release_exit.py`), the primary
+release `ExitDecision` — the process exit (`frontends/cli/runtime.py`), the primary
 report (`report.release_document.release_json_document`), and the
 `--output-dir` sidecar (`release_summary._write_release_summary_file`) — and
 all three fold it. The sidecar is the one worth naming: it resolves its own

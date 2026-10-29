@@ -42,10 +42,10 @@ from abicheck.cli_resolve import (
 from abicheck.elf_metadata import ElfMetadata, ElfSymbol
 from abicheck.frontends.cli.ignored_flag_warnings import _warn_ignored_flags
 from abicheck.frontends.cli.options.params import _load_suppression_and_policy
-from abicheck.frontends.cli.release_exit import _exit_compare_release
 from abicheck.frontends.cli.release_report import render_release_summary
 from abicheck.frontends.cli.runtime import (
     _announce_exit_scheme,
+    _exit_compare_release,
     _exit_with_severity_or_verdict,
     _load_probe_matrix_changes,
     _safe_write_output,

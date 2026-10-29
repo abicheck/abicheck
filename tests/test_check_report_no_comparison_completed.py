@@ -26,7 +26,8 @@ from __future__ import annotations
 
 import pytest
 
-from abicheck.buildsource.check_report import augment_report, final_exit_code
+from abicheck.buildsource.check_report import augment_report
+from abicheck.policy.exit_decision_precedence import resolve_gate_mode_exit_code
 
 
 class TestAugmentReportNoComparisonCompleted:
@@ -36,7 +37,7 @@ class TestAugmentReportNoComparisonCompleted:
     library sets) so older readers still parse it. Before this fix,
     ``_classify_verdict`` read only that raw ``verdict`` string, so
     ``gate-mode: advisory``/``deferred`` classified it as an ordinary clean
-    compatibility pass instead of an operational failure -- `final_exit_code`
+    compatibility pass instead of an operational failure -- `resolve_gate_mode_exit_code`
     silently returned 0 for a release that completed zero comparisons.
     ``gate-mode: local`` was unaffected (it reads the real ``exit_code``,
     which already carries the contribution)."""
@@ -95,7 +96,7 @@ class TestAugmentReportNoComparisonCompleted:
             }
         ]
         assert (
-            final_exit_code(
+            resolve_gate_mode_exit_code(
                 gate_mode,
                 real_exit_code=0,
                 operational_error=bool(out["operational_errors"]),

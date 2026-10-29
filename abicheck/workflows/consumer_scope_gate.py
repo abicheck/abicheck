@@ -15,8 +15,10 @@
 
 """ADR-043 scoped gate: ``--used-by`` / ``--required-symbol(s)`` computation.
 
-Owns the worst-wins scoping passes, the scoped exit code they produce, and the
-choice of which pass applies (:func:`apply_scoped_gating`). Input refusals are
+Owns the worst-wins scoping passes and the choice of which pass applies
+(:func:`apply_scoped_gating`); the scoped exit code each pass reports is
+decided by ``policy.exit_decision_precedence.resolve_scoped_exit_code``,
+the one owner of every ``compare`` exit decision. Input refusals are
 typed :class:`ScopedGateError` subclasses; the CLI adapter renders them as
 click errors, it does not decide them.
 """
@@ -31,6 +33,7 @@ from typing import TYPE_CHECKING, Any
 from ..compare.finding_identity import report_finding_id
 from ..model.consumer_requirements import LibraryExportsUnreadableError
 from ..model.consumer_spec import ConsumerUnreadableError
+from ..policy.exit_decision_precedence import resolve_scoped_exit_code
 from .gate import consumer_verdict_rank, effective_kind_sets
 from .input_resolution import detect_binary_format
 
@@ -240,53 +243,6 @@ def _plugin_contract_summary(result: PluginHostContractResult) -> dict[str, Any]
     }
 
 
-def _scoped_exit_code(
-    scoped: Any,
-    relevant_changes: list[Any],
-    result: Any,
-    severity: Any,
-    policy: str,
-    policy_file: PolicyFile | None,
-    *,
-    has_missing_contract: bool = False,
-) -> int:
-    """Compute a scoped result's exit code under the active exit-code scheme.
-
-    ADR-043's --used-by/--required-symbol(s) floor the exit code on the
-    *scoped* verdict rather than the full library's -- but that floor must
-    still respect ``--exit-code-scheme severity``/``--severity-preset``: without
-    this, a scoped compare silently reverted to the legacy 0/2/4 mapping no
-    matter what severity configuration the caller passed, because the scoped
-    branch returned straight to ``sys.exit`` before the severity-aware exit
-    handler ever ran.
-
-    *has_missing_contract* (a required symbol/version/entrypoint absent from
-    the new library) floors the severity-scheme exit code separately from
-    *relevant_changes*: a missing contract symbol is BREAKING but is not a
-    diff ``Change``, so ``compute_exit_code`` never sees it and would
-    otherwise return 0 (Codex review).
-
-    *severity* is the run's ``EffectiveGate.severity``: ``None`` exactly when
-    the legacy scheme is in effect, so the scheme is never passed beside it.
-    """
-    if severity is not None:
-        from .gate import compute_exit_code, missing_contract_exit_code
-
-        code = compute_exit_code(
-            relevant_changes,
-            severity,
-            policy=policy,
-            kind_sets=effective_kind_sets(result),
-            policy_file=policy_file,
-        )
-        if has_missing_contract:
-            code = max(code, missing_contract_exit_code(severity))
-        return code
-    from .gate import legacy_exit_code
-
-    return legacy_exit_code(scoped.verdict)
-
-
 def _scoped_severity_summary(
     relevant_changes: list[Any],
     missing: Iterable[str],
@@ -297,7 +253,7 @@ def _scoped_severity_summary(
 ) -> tuple[tuple[str, ...], dict[str, int]]:
     """(blocking_categories, per-category counts) for one scoped result.
 
-    Mirrors ``_scoped_exit_code``'s missing-contract floor: a missing
+    Mirrors ``resolve_scoped_exit_code``'s missing-contract floor: a missing
     symbol/version/entrypoint with no matching diff Change is folded into
     ``abi_breaking`` directly here -- both into the blocking-categories set
     (when abi_breaking is severity-configured as error, matching the exit
@@ -455,8 +411,8 @@ def _apply_used_by_scoping(
                 scoped.breaking_for_app,
             )
         )
-        exit_code = _scoped_exit_code(
-            scoped,
+        exit_code = resolve_scoped_exit_code(
+            scoped.verdict,
             scoped.breaking_for_app,
             result,
             severity,
@@ -610,8 +566,8 @@ def _apply_required_symbol_scoping(
         scope_decides_exit=False,
     )
 
-    exit_code = _scoped_exit_code(
-        scoped,
+    exit_code = resolve_scoped_exit_code(
+        scoped.verdict,
         scoped.breaking_for_host,
         result,
         severity,
