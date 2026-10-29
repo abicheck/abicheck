@@ -106,9 +106,10 @@
       "abicheck/extract/headers/castxml/vector_join.py": "e46414e04addf1031399c30f0901d3eb6ab9c48a271a55724aa445f0d12ff879",
       "abicheck/extract/headers/castxml/vector_spellings.py": "1048c21245235f6857beacf4668fc888bea7117c88c18300aae666a90aac763d",
       "abicheck/extract/headers/clang/__init__.py": "538add12f3ff39e1c1b39e6f5def93b50a584b78b30c4e7e59058207222757d0",
+      "abicheck/extract/headers/clang/abi_target.py": "6748bde7fe2e6bd79d20ae9208dcbd7b41e5e33f1f8cd7a5972127973b07d5d0",
       "abicheck/extract/headers/clang/ast_inner.py": "f695f5bb01048fa924a1b67acbbcc29630c871607f1a3b4329ec781133f296f8",
       "abicheck/extract/headers/clang/attributes.py": "4f35afe72ef319265695d3e199e10c9ef0076db4a5238161b33a076fd3a599fe",
-      "abicheck/extract/headers/clang/backend.py": "3a84f1c93c75c8dcb5676bc33538dc30b55a23e9380f1a56a09c52b8e5effc21",
+      "abicheck/extract/headers/clang/backend.py": "8fb4911e07454a99940ff990e489afc6a3f08f3e83c3d682eccd96579a4a7299",
       "abicheck/extract/headers/clang/constraints.py": "bb7cf73353226075aa3f723af93b8a9b1d646de964954f820745bccfb9917a8c",
       "abicheck/extract/headers/clang/context.py": "f05bec9396a8cf29953268c0872bd0760a2f57896bd5185ed06be2b3d810730d",
       "abicheck/extract/headers/clang/enums.py": "87ee0817b89dd1483a48e5912602d8d02b84e1c0aa1671d0f32c1fd306b686b9",
@@ -140,7 +141,7 @@
       "abicheck/extract/headers/manifest.py": "4f0e740bfeb88aa4363176f2defe422826a9e2cd91b03cd317f6f86f4eec5066",
       "abicheck/extract/headers/preprocessor_branches.py": "d3a409d126b0dd1b19a634d4aad25660d372dad931b310cfbaaefc9d769b244d",
       "abicheck/extract/headers/scope_segments.py": "d413edec257eb1334c829263770b66dc2eda3d263c765f699eac9f7e3ace9e65",
-      "abicheck/extract/headers/sysinc.py": "1c25ee983ff10085afca9bdd0686b8177da252920a130cb2959c435065a9e51b",
+      "abicheck/extract/headers/sysinc.py": "3a87c8a2cfcb4952d3bb47643e894293e19a800c30d30a5d5237d043a205e8f0",
       "abicheck/extract/headers/template_default_scan.py": "3b56f9307028934aa2126de14fa9847333bdc990f0943445604b255e494060e8",
       "abicheck/extract/headers/toolchain.py": "be0be05950476ff2c0cb168727ebcde4859cc634c258f5ff23b1af1d2c50b754",
       "abicheck/extract/library_export_facts.py": "071b2a58f284753b57fa2e374680a57e9ce6897877b65a84fb92f420e7cf2ab7",
@@ -185,9 +186,9 @@
       "abicheck/symvers_metadata.py": "372737765cd132e6e87ed891dd465d2958e04debbef774e45212ceb3036871cb",
       "abicheck/type_metadata.py": "9997189de8dac522fd1db8be5ae491d811139503f83abaaded89038eb4aa9cdf"
     },
-    "fingerprint": "3c1acd033c1d9d5246b3ac01d8d74d66b963221e1712455115676b1ba2ae9cb8",
-    "generation": 32,
-    "reason": "PE images are opened through extract.pe_image.open_pe (read-only mmap passed to pefile as data) instead of pefile's own name-based open/close; the parsed exports, imports, PDB reference and version fields are byte-identical"
+    "fingerprint": "9f004a657e216e3a66eb2c2ea81fa38d673d1f65722c5f7a4f113194533b135c",
+    "generation": 33,
+    "reason": "bumped to 33 for a semantic change"
   },
   "resolver": {
     "files": {

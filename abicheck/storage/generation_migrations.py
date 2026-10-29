@@ -346,6 +346,18 @@ SPELLING_MIGRATIONS: Mapping[int, GenerationSpellingChange] = {
         "zero and reads as a pointer-level change against a fresh dump; a re-dump "
         "is the fix for that baseline"
     ),
+    33: GenerationSpellingChange(
+        "the clang header frontend parses a Windows binary's headers for the C++ "
+        "ABI its exports are mangled for (extract/headers/clang/abi_target.py): "
+        "a MinGW (Itanium) DLL under a clang whose default is *-windows-msvc is "
+        "parsed for *-windows-gnu, and an MSVC DLL under a MinGW-default clang for "
+        "*-windows-msvc. Declarations that were mangled for the other ABI -- and "
+        "so matched no export and were dropped as out of contract -- are now "
+        "recorded. Only that Windows clang-frontend case changes; ELF, Mach-O, a "
+        "C-only DLL and the castxml frontend record what they did. A stored "
+        "generation-32 snapshot of such a DLL lacks those declarations, which no "
+        "rewrite can supply, so it is re-dumped"
+    ),
 }
 
 #: Reasons that say nothing about what was audited; the bump gate refuses them.

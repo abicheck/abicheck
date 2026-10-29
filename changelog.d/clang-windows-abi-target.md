@@ -1,0 +1,3 @@
+### Fixed
+
+- **`--ast-frontend clang` on Windows now parses a MinGW DLL's headers for the MinGW ABI** — a Windows clang defaults to `x86_64-pc-windows-msvc`, so the headers of a MinGW-built (Itanium-ABI) DLL were parsed for MSVC. Every C++ declaration was then mangled `?…`, matched no export, and was dropped as out of contract, so a compare reported nothing at all. The clang frontend now reads the C++ ABI off the binary's exports and parses for it (`*-windows-gnu` or `*-windows-msvc`; the same MinGW driver's system headers are kept). A C-only DLL, a non-Windows target, and an explicit `--target` are unchanged. Extractor generation 32 → 33: a stored generation-32 snapshot of such a DLL lacks those declarations and should be re-dumped.
