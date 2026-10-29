@@ -463,7 +463,7 @@ def _drop_constant_value_restatements(changes: list[Change]) -> list[Change]:
     )
     result: list[Change] = []
     for c in changes:
-        if c.kind is ChangeKind.VAR_VALUE_CHANGED and c.entity_id is not None:
+        if c.kind is ChangeKind.VAR_VALUE_CHANGED:
             key = (
                 qualified_variable_name(c.entity_id, c.symbol, mangled=c.symbol),
                 hashable_value(c.old_value),
@@ -498,6 +498,15 @@ def _drop_deletion_consequences(changes: list[Change]) -> list[Change]:
         for c in changes
         if not (c.kind in _DELETION_CONSEQUENCE_KINDS and c.symbol in deleted)
     ]
+
+
+#: Within a dedup category, a lower value wins over a higher one; ties go to the
+#: first occurrence. ``SYMBOL_VERSION_NODE_REMOVED`` is the more specific of the
+#: two version-removal kinds (see ``_DEDUP_CATEGORIES``), so it must win whatever
+#: order the detectors ran in.
+_DEDUP_PREFERENCE: dict[ChangeKind, int] = {
+    ChangeKind.SYMBOL_VERSION_NODE_REMOVED: 0,
+}
 
 
 def deduplicate_cross_detector(
@@ -542,7 +551,8 @@ def deduplicate_cross_detector(
       always the "first occurrence" kept below.
 
     Within each category, the first occurrence wins (preserving detector
-    priority order from the ``compare()`` spec list).
+    priority order from the ``compare()`` spec list), except that a kind named
+    in :data:`_DEDUP_PREFERENCE` beats the others regardless of position.
     """
     _DEDUP_CATEGORIES: dict[ChangeKind, str] = {
         ChangeKind.FUNC_REMOVED: "func_removal",
@@ -609,20 +619,31 @@ def deduplicate_cross_detector(
     changes = _drop_deletion_consequences(changes)
     changes = _drop_constant_value_restatements(changes)
     changes = drop_replay_twins(changes)
-    seen: set[str] = set()
-    result: list[Change] = []
-    for c in changes:
-        # Only collapse the alias-change into a co-reported node-move when the old default version is NOT retained as an alias — the case the node-move already fully describes. When the alias IS retained it carries distinct, compatible information the node-move's wording would otherwise misrepresent, so it must survive.
-        if (
+    # Only collapse the alias-change into a co-reported node-move when the old default version is NOT retained as an alias — the case the node-move already fully describes. When the alias IS retained it carries distinct, compatible information the node-move's wording would otherwise misrepresent, so it must survive.
+    candidates = [
+        (i, c)
+        for i, c in enumerate(changes)
+        if not (
             c.kind is ChangeKind.SYMBOL_VERSION_ALIAS_CHANGED
             and SYMBOL_VERSION_ALIAS_NOT_RETAINED_MARKER in (c.description or "")
             and (c.symbol, c.old_value, c.new_value) in moved_transitions
-        ):
+        )
+    ]
+    # One winner per identity key: the lowest (preference, position). Position
+    # alone would make the survivor depend on detector order whenever two kinds
+    # of one category collide and prefer different members.
+    identity_keys: dict[int, str] = {}
+    winners: dict[str, tuple[int, int]] = {}
+    for i, c in candidates:
+        if c.kind not in _DEDUP_CATEGORIES:
             continue
-        if c.kind in _DEDUP_CATEGORIES:
-            identity_key = resolve_change_identity(c).primary_id
-            if identity_key in seen:
-                continue
-            seen.add(identity_key)
-        result.append(c)
-    return result
+        identity_key = resolve_change_identity(c).primary_id
+        identity_keys[i] = identity_key
+        rank = (_DEDUP_PREFERENCE.get(c.kind, 1), i)
+        if identity_key not in winners or rank < winners[identity_key]:
+            winners[identity_key] = rank
+    return [
+        c
+        for i, c in candidates
+        if i not in identity_keys or winners[identity_keys[i]][1] == i
+    ]

@@ -1,0 +1,4 @@
+### Fixed
+
+- **A variable copy of a constant pairs with it whether or not the variable has an entity id** — `compare.finding_dedup` dropped the `VAR_VALUE_CHANGED` copy of a `CONSTANT_CHANGED` only when the variable carried an entity id, so a variable without one reported the same value change twice. The pair now merges on its qualified name and old/new values alone, as its docstring already states.
+- **The node-level version removal survives the definition removal in any detector order** — `SYMBOL_VERSION_NODE_REMOVED` and `SYMBOL_VERSION_DEFINED_REMOVED` share one dedup category, and the first occurrence won, so the less specific `SYMBOL_VERSION_DEFINED_REMOVED` survived whenever it was listed first. The node-level finding now wins, as the category's comment states; the verdict is unchanged.

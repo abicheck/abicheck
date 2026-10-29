@@ -116,12 +116,15 @@ def test_constant_value_change_keeps_one_owner(
 
 def test_dropped_replay_copy_is_the_only_finding_removed() -> None:
     # The surviving header finding keeps its own facts; no other kind moves.
+    # The variable here moves to 30, not 20: at 20 it restates the constant
+    # (same qualified name and values), which is merged by
+    # test_finding_dedup_properties.py's must-merge pair, not an unrelated finding.
     other = Change(
         kind=ChangeKind.VAR_VALUE_CHANGED,
         symbol="_ZN4demoL6kLimitE",
-        description="Global data value changed: kLimit ('10' → '20')",
+        description="Global data value changed: kLimit ('10' → '30')",
         old_value="10",
-        new_value="20",
+        new_value="30",
     )
     kept = deduplicate_cross_detector(
         [other, _header("demo::kLimit"), _replay("demo::kLimit")]
