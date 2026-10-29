@@ -111,7 +111,7 @@ class DetachedDebugFileResolver:
     to hold -- that is what naming it means.
 
     **DWARF only, deliberately.** A named ``.pdb`` or ``.dwp`` is refused at
-    the front end (``options/evidence_roles.unsupported_detached_debug``)
+    the front end (``workflows.evidence_transport.unsupported_detached_debug``)
     rather than resolved here, because no extraction path consumes one: the
     ELF dump reads ``DebugArtifact.dwarf_path`` and nothing else, and the PE
     dump never consults ``debug_roots`` at all. Returning one would have

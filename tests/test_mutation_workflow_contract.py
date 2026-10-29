@@ -704,6 +704,9 @@ _ACCEPTED_KILL_LOSS = {
             "abicheck.policy.classification",
             "abicheck.policy.selectors",
             "abicheck.policy.selectors_namespace_glob",
+            # The single-pair compare session's import set reaches the
+            # snapshot loader too (workflows/compare/session.py).
+            "abicheck.snapshot_io",
             "abicheck.storage.snapshot_encode",
             "abicheck.storage.snapshot_schema_versions",
             "abicheck.policy.suppression.rules",

@@ -224,7 +224,7 @@ from .compare_routing import _RELEASE_FORMATS
 # been unconditional since ADR-067 S1, so `--view filtered` is its spelling.
 # One-comparison-product Phase 9d: --post-manifest is gone. A POST manifest
 # is a stable project property: .abicheck.yml's contract.overlays.
-# post_manifest (Phase 9c, frontends/cli/contract_overlays.py) is its only
+# post_manifest (Phase 9c, workflows/compare/project_inputs.py) is its only
 # spelling.
 # one-comparison-product.md Phase 7n: --probe-matrix is gone. A probe-matrix
 # snapshot is build evidence, so it is one of --build-info's operands now,
@@ -414,9 +414,9 @@ def compare_cmd(ctx: click.Context, /, **kwargs: Any) -> None:
 
 
 def _compare_cmd(ctx: click.Context, /, **kwargs: Any) -> None:
-    # Options are parsed by the click wrapper above; the full compare flow lives
-    # in cli_compare_helpers.run_compare (size-split from cli.py to keep this
-    # module under the AI-readiness file-size cap). Click collects every declared
+    # Options are parsed by the click wrapper above; the two-operand flow is
+    # cli_compare_helpers.run_compare (preflight, then the single-pair session
+    # in workflows/compare/session.py). Click collects every declared
     # option/argument into **kwargs, so forwarding it verbatim keeps behaviour —
     # and the exit-code matrix — identical while the single typed signature lives
     # only on run_compare (no duplicated 56-line parameter list; CodeFactor).

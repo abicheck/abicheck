@@ -48,6 +48,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
+import click
+
 if TYPE_CHECKING:
     from pathlib import Path
 
@@ -153,11 +155,14 @@ def build_compare_dry_run_result(
     """
     from ...dry_run import DryRunResult, tool_status
     from ...workflows.changed_paths import localized_collect_mode, replay_scope
-    from .compare_enrichment import resolve_compare_changed_seed
+    from ...workflows.compare.enrichment import resolve_compare_changed_seed
 
     result = DryRunResult(command="compare")
     seed = resolve_compare_changed_seed(
-        since, changed_paths_opt, new_sources or old_sources
+        since,
+        changed_paths_opt,
+        new_sources or old_sources,
+        notify=lambda message: click.echo(message, err=True),
     )
     collect_mode = localized_collect_mode(collect_mode, seed.paths)
     from ...model.sided_inputs import compose_sided_paths

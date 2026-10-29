@@ -679,7 +679,7 @@ exists and has no CLI-comparable rendering path here. The sibling
 | `abicheck/mcp_server.py` | `abi_compare` builds a `CompareRequest` and calls `run_compare_request`; no local resolve, no policy/suppression load, no `compare_snapshots` import (D4) |
 | `docs/reference/python-api-reference.md`, `docs/reference/mcp-tools-reference.md` | Regenerated (generated files) |
 | `tests/test_api_types.py` | Field defaults for D1/D4; `TestCompareResult` (D2) |
-| `tests/test_service_compare_evidence_adr055.py`, `tests/test_service_compare_pipeline_unit.py`, `tests/test_service_compare_pipeline.py` | `TestCompareRequestAdr055Evidence` (D1, in the first); `TestRunCompareRequestTypedResult` (D2, incl. per-side `follow_linker_scripts`, in the second); `TestComparePipelinePhases` (second) + `TestResolveSidesSequentially` (third) (D1 structural half) |
+| `tests/test_service_compare_evidence_adr055.py`, `tests/test_workflows_compare_execute.py`, `tests/test_compare_resolve_sides_sequentially.py` | `TestCompareRequestAdr055Evidence` (D1, in the first); `TestRunCompareRequestTypedResult` (D2, incl. per-side `follow_linker_scripts`, in the second); `TestComparePipelinePhases` (second) + `TestResolveSidesSequentially` (third) (D1 structural half) |
 | `tests/test_compare_dispatch.py` | `TestCompareCliSharesServiceResolution`: the CLI really delegates, and still translates the service errors into the `click` exceptions `_resolve_input` promised |
 | `tests/test_mcp_server_unit.py` | `TestAbiCompareCliParity`: the source-level D4 gate plus CLI-parity over a flag matrix |
 | `tests/test_mcp_server_coverage.py` | `TestAbiCompareTool` repointed to the service-layer names `abi_compare` now reaches |
@@ -728,7 +728,7 @@ independently shippable and lowest-risk — it has landed
 (`abicheck/schemas/__init__.py`'s `current()`). D1 is the larger
 slice (needs `DumpManifest`/`CompileContext` per-side wiring in
 `run_compare_request`, plus the policy/suppression fields D4 needs) and
-should land behind its own parity test (`tests/test_service_compare_pipeline_unit.py`, above)
+should land behind its own parity test (`tests/test_workflows_compare_execute.py`, above)
 before D2's wrapper type is worth adding. D4 (the `abi_compare` rewrite) is
 deliberately last and gated on D1: rewriting the MCP tool before
 `CompareRequest` can express its full parameter set would either lose

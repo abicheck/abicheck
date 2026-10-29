@@ -42,15 +42,15 @@ import pytest
 from click.testing import CliRunner
 
 from abicheck.dry_run_estimate import CompileContext
-from abicheck.frontends.cli.compare_inline_evidence import (
+from abicheck.model import AbiSnapshot, Function, Visibility
+from abicheck.serialization import snapshot_to_json
+from abicheck.service_compare_evidence import without_unusable_raw_evidence
+from abicheck.workflows.compare.inline_evidence import (
     InlineEvidence,
     InlineEvidenceRun,
     OutOfBandPacks,
 )
-from abicheck.frontends.cli.dump_debug_config import DumpDebugConfig
-from abicheck.model import AbiSnapshot, Function, Visibility
-from abicheck.serialization import snapshot_to_json
-from abicheck.service_compare_evidence import without_unusable_raw_evidence
+from abicheck.workflows.dump.project_config import DumpDebugConfig
 from abicheck.workflows.request_inputs import InputSpec
 from abicheck.workflows.service_requests import CompareRequest
 
@@ -68,7 +68,9 @@ def _ctx() -> click.Context:
 
 def _run(ctx: click.Context, **overrides: object) -> InlineEvidenceRun:
     fields: dict[str, object] = {
-        "ctx": ctx,
+        "on_close": ctx.call_on_close,
+        "notify": lambda _msg: None,
+        "nostdinc_explicit": False,
         "compile_context": CompileContext(frontend="auto"),
         "old_header_backend": None,
         "new_header_backend": None,
@@ -257,6 +259,40 @@ def test_the_trees_compile_block_merges_under_the_cli(
     assert compile_of(old_header_backend="castxml").frontend == "castxml"
     kept = compile_of(compile_context=CompileContext(frontend="auto", nostdinc=True))
     assert kept.nostdinc is True
+
+
+@pytest.mark.parametrize(
+    ("body", "note"),
+    [
+        ("compile:\n  compiler: /opt/evil/gcc\n", "compile.compiler ignored"),
+        ("compile: [unterminated\n", "could not parse auto-discovered"),
+    ],
+)
+def test_the_trees_compile_warnings_reach_the_runs_notify_not_stderr(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    body: str,
+    note: str,
+) -> None:
+    """A warning from the tree root's ``compile:`` block is a session note: a
+    typed caller collecting ``SessionHost.notify`` sees it, and nothing is
+    written to the process stderr behind the host's back."""
+    monkeypatch.chdir(tmp_path)
+    tree = tmp_path / "src"
+    tree.mkdir()
+    (tree / ".abicheck.yml").write_text(body, encoding="utf-8")
+    notes: list[str] = []
+    ctx = _ctx()
+    _apply(
+        ctx,
+        InputSpec(path=_operand(tmp_path, "elf")),
+        tree,
+        None,
+        _run(ctx, notify=notes.append),
+    )
+    assert [n for n in notes if note in n], notes
+    assert note not in capsys.readouterr().err
 
 
 def test_the_execution_plan_is_the_nested_dumps(

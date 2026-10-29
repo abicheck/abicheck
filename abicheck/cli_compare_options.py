@@ -37,7 +37,7 @@ modules deliberately stayed behind.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, NamedTuple
+from typing import Any
 
 import click
 
@@ -46,6 +46,21 @@ def _param_from_cli(name: str) -> bool:
     """True when parameter *name*'s value came from the command line (not default)."""
     src = click.get_current_context().get_parameter_source(name)
     return bool(src == click.core.ParameterSource.COMMANDLINE)
+
+
+def stated_options(ctx: click.Context) -> frozenset[str]:
+    """The parameter names *ctx*'s invocation stated on the command line.
+
+    What a typed request carries in place of the Click context: a workflow
+    asks "was *name* stated?" as membership, which answers exactly what
+    ``ctx.get_parameter_source(name)`` answered, ``False`` for a name the
+    command does not declare included.
+    """
+    return frozenset(
+        name
+        for name in ctx.params
+        if ctx.get_parameter_source(name) == click.core.ParameterSource.COMMANDLINE
+    )
 
 
 def _reject_set_input_flags(
@@ -326,17 +341,6 @@ def _reject_bundle_facts_out_for_single_pair(bundle_facts_out: Path | None) -> N
             "OLD-side library map to persist. Compare a directory or "
             "package pair to use it."
         )
-
-
-class _NormalizedCompareOptions(NamedTuple):
-    collect_mode: str
-    headers: tuple[Path, ...]
-    old_headers_only: tuple[Path, ...]
-    new_headers_only: tuple[Path, ...]
-    effective_debug_format: str | None
-    demangle: bool
-    report_mode: str
-    show_impact: bool
 
 
 def _set_input_flags_used(ctx: click.Context, flags: dict[str, str]) -> list[str]:

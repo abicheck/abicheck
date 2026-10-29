@@ -13,15 +13,16 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""``compare``'s two Phase-2c/2d inputs, resolved at the CLI boundary
-(``docs/contribute/plans/one-comparison-product.md`` §6 Phase 2c/2d).
+"""``compare``'s two Phase-2c/2d inputs
+(``docs/contribute/plans/one-comparison-product.md`` §6 Phase 2c/2d), as the
+``compare`` session resolves them before extraction.
 
-Lives here rather than inside ``cli_compare_helpers.run_compare`` for the
-usual reason this package exists -- that module is at its no-growth
-baseline -- and because both halves are boundary translation, not analysis:
-the *rules* live in :mod:`abicheck.workflows.changed_paths` and
+Both halves are input resolution, not analysis: the *rules* live in
+:mod:`abicheck.workflows.changed_paths` and
 :mod:`abicheck.workflows.abi3_audit`, which the typed API reaches without
-any of this.
+any of this. ``compare --dry-run`` reads the same seed
+(:func:`resolve_compare_changed_seed`), so the dry run reports the source
+scope the run will replay.
 
 ADR-068 D5, applied per flag:
 
@@ -37,17 +38,17 @@ ADR-068 D5, applied per flag:
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-import click
-
-from ...workflows.changed_paths import (
+from ..changed_paths import (
     ChangedPathSeed,
     localized_collect_mode,
     resolve_changed_seed,
 )
+from ..run_input_errors import RunInputError
 
 
 @dataclass(frozen=True)
@@ -73,9 +74,13 @@ class CompareEnrichmentInputs:
 
 
 def resolve_compare_changed_seed(
-    since: str | None, changed_paths_opt: tuple[str, ...], sources: Path | None
+    since: str | None,
+    changed_paths_opt: tuple[str, ...],
+    sources: Path | None,
+    *,
+    notify: Callable[[str], None],
 ) -> ChangedPathSeed:
-    """``compare``'s changed-path seed, warning on ``stderr`` when it fails.
+    """``compare``'s changed-path seed, warning through *notify* when it fails.
 
     The one resolution the run and ``compare --dry-run`` both read, so the
     dry run reports the source scope the run will replay. *sources* is the
@@ -86,7 +91,7 @@ def resolve_compare_changed_seed(
         changed_paths_opt,
         since,
         sources,
-        notify=lambda message: click.echo(message, err=True),
+        notify=notify,
     )
 
 
@@ -97,16 +102,17 @@ def resolve_compare_enrichment_inputs(
     abi3: str | None,
     project_cfg: Any | None,
     sources: Path | None,
+    notify: Callable[[str], None],
 ) -> CompareEnrichmentInputs:
-    """Resolve both inputs, warning through ``click.echo`` on a failed seed.
+    """Resolve both inputs, warning through *notify* on a failed seed.
 
     *sources* is the tree the seed's ``git diff`` runs in
     (:func:`resolve_compare_changed_seed`). *project_cfg* is the loaded ``.abicheck.yml``, consulted only for the
     ``--abi3`` floor's D5 config default.
     """
-    from ...cli_options import parse_abi3_floor
-
-    seed = resolve_compare_changed_seed(since, changed_paths_opt, sources)
+    seed = resolve_compare_changed_seed(
+        since, changed_paths_opt, sources, notify=notify
+    )
     floor = parse_abi3_floor(abi3)
     if floor is None:
         # D5: the project's declared floor, when the run did not state one.
@@ -114,9 +120,18 @@ def resolve_compare_enrichment_inputs(
     return CompareEnrichmentInputs(seed.paths, seed.source, floor)
 
 
-def echo_abi3_evidence_contract_error(failure: str | None) -> None:
-    """Say on stderr that ``--abi3``'s precondition failed (so the message
-    survives ``-o json=...`` on stdout). The shared classification already
-    recorded ADR-064's exit-7 axis on the result."""
-    if failure is not None:
-        click.echo(f"error: {failure}", err=True)
+def parse_abi3_floor(value: str | None) -> tuple[int, int] | None:
+    """Parse a ``--abi3 VERSION`` ``Py_LIMITED_API`` floor, ``None`` when off.
+
+    The one accepted spelling for the flag and ``.abicheck.yml``'s
+    ``python.abi3_floor``, so an invalid floor (non-3 major, implausible
+    minor, trailing junk) is the same usage error from either source.
+    """
+    if value is None:
+        return None
+    from ...stable_abi import parse_abi3_version
+
+    floor = parse_abi3_version(value)
+    if floor is None:
+        raise RunInputError.parameter(f"invalid --abi3 version: {value!r}")
+    return floor

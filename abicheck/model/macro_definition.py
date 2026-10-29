@@ -16,7 +16,7 @@
 """ADR-074: the logical preprocessor macro definition behind ``-D/--define``.
 
 A leaf module (stdlib only) so every layer that needs it -- the Click option
-(``cli_options``), the one canonical fold (``cli_options.merge_compile_config``),
+(``cli_options``), the one canonical fold (``workflows.compile_config.merge_compile_config``),
 and the frontend argv translation -- shares ONE parser, ONE merge rule and ONE
 emitter instead of re-deriving ``NAME``/``VALUE`` from a raw string at each
 site.
@@ -231,7 +231,7 @@ def define_spellings_from_tokens(tokens: Iterable[str]) -> tuple[str, ...]:
 
     The inverse of :func:`macro_definition_tokens`, over the effective
     ``CompileContext.gcc_option_tokens`` -- i.e. after
-    ``cli_options.merge_compile_config`` folded config and CLI together. The
+    ``workflows.compile_config.merge_compile_config`` folded config and CLI together. The
     ``--dry-run`` receipt reports this rather than the raw ``-D/--define``
     values so it states what the frontend will actually be given, config
     contributions included, and so it cannot drift from the real run.
@@ -304,7 +304,7 @@ def tokens_with_defines(
 
     That idempotence is what lets one rule serve both front ends. The CLI
     folds ``compile.defines`` and ``-D`` together in
-    ``cli_options.merge_compile_config`` and renders them there, at a
+    ``workflows.compile_config.merge_compile_config`` and renders them there, at a
     position chosen so a CLI definition wins against a raw ``-DNAME`` in
     ``compile.options``. A typed-API caller constructing
     ``CompileContext(defines=...)`` by hand never goes near that function --

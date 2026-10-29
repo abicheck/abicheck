@@ -1,19 +1,24 @@
 """Operand refusals: one owner decides, each frontend words its own refusal.
 
-The rules live in :mod:`abicheck.workflows.operand_rules`. The ``compare`` CLI
-renders them through ``frontends.cli.compare_input_validation.operand_rule_errors`` and must keep
-its exact wording and error class; the typed API keeps the ``debug_format=``
-wording. These tests pin both, so moving a rule cannot silently re-word a flag
+The rules live in :mod:`abicheck.workflows.operand_rules`. The ``compare``
+session words them (``workflows.compare.session_inputs.operand_rule_refusals``)
+and the CLI renders that refusal (``frontends.cli.run_input_errors``); together
+they must keep ``compare``'s exact wording and error class. The typed API keeps
+the ``debug_format=`` wording. These tests pin both, so moving a rule cannot silently re-word a flag
 message or swap a usage error for a bad-parameter one.
 """
 
 from __future__ import annotations
 
+from collections.abc import Iterator
+from contextlib import contextmanager
+
 import click
 import pytest
 
 from abicheck.errors import ValidationError
-from abicheck.frontends.cli.compare_input_validation import operand_rule_errors
+from abicheck.frontends.cli.run_input_errors import click_input_errors
+from abicheck.workflows.compare.session_inputs import operand_rule_refusals
 from abicheck.workflows.operand_rules import (
     DebugFormatNotElfError,
     ManifestOperandError,
@@ -22,6 +27,13 @@ from abicheck.workflows.operand_rules import (
     reject_manifest_header_conflicts,
     reject_manifest_non_elf,
 )
+
+
+@contextmanager
+def operand_rule_errors() -> Iterator[None]:
+    """The refusal as ``compare`` prints it: the session's wording, the CLI's class."""
+    with click_input_errors(), operand_rule_refusals():
+        yield
 
 
 class TestDebugFormatRule:

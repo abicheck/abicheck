@@ -315,7 +315,7 @@ suppression list. Without it the MCP server would have kept a
 `SuppressionList.load` call solely to re-derive what the service had already
 loaded — the duplication Phase 4 removes, reintroduced by the shape chosen to
 enable removing it. Tests: `TestCompareResult` (`tests/test_api_types.py`),
-`TestRunCompareRequestV2` (`tests/test_service_compare_pipeline_unit.py`).
+`TestRunCompareRequestV2` (`tests/test_workflows_compare_execute.py`).
 
 ### Phase 4 — route `abi_compare` through `run_compare_request` (ADR-055 D4)
 

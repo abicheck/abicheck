@@ -1122,7 +1122,7 @@ Behaviour is otherwise unchanged: a declared runtime floor still reaches
 classification and still flags `platform_baseline_floor_raised`, through
 both `resolve_compare_request()`/`classify_compare_pair()` and a
 caller-built `ResolvedComparePair` —
-`tests/test_service_compare_pipeline.py::TestRequestEnvMatrixReachesClassification`
+`tests/test_compare_resolve_sides_sequentially.py::TestRequestEnvMatrixReachesClassification`
 and `tests/test_api_types.py::TestCompareRequestEnvMatrix`.
 
 

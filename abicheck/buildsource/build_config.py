@@ -556,7 +556,7 @@ class BuildConfig:
     #: --abi3`` acting as the per-run override on top of it. ``None`` = unset
     #: (no audit unless the flag asks for one). Kept as the raw spelling the
     #: flag accepts, validated at the same place the flag is
-    #: (``cli_options.parse_abi3_floor``), so config and CLI cannot accept
+    #: (``workflows.compare.enrichment.parse_abi3_floor``), so config and CLI cannot accept
     #: different version syntaxes.
     python_abi3_floor: str | None = None
     #: ``gate:`` — Phase 7d (one-comparison-product.md §4.1): CI gate policy

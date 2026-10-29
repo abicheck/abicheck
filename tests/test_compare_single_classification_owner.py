@@ -224,23 +224,26 @@ def test_out_of_band_packs_attach_to_a_copy(monkeypatch: pytest.MonkeyPatch) -> 
     """An explicit ``--build-info``/``--sources`` pack rides on a *copy* of
     its side, before projection, and a side with neither flag is untouched
     -- the resolved snapshot itself is never mutated."""
-    import abicheck.cli_buildsource_helpers as helpers
+    import abicheck.buildsource.evidence_report as evidence_report
     from abicheck.model import AbiSnapshot
+    from abicheck.workflows.compare.inline_evidence import OutOfBandPacks
+    from abicheck.workflows.compare.session import with_out_of_band_packs
     from tests._fake_compare_resolution import fake_resolved_pair
 
     sentinel = object()
     seen: list[tuple[Any, Any, Any]] = []
 
-    def _fake_side_pack(build_info: Any, sources: Any, snap: Any) -> Any:
+    def _fake_side_pack(build_info: Any, sources: Any, snap: Any, **_kw: Any) -> Any:
         seen.append((build_info, sources, snap))
         return sentinel
 
-    monkeypatch.setattr(helpers, "_resolve_side_pack", _fake_side_pack)
+    monkeypatch.setattr(evidence_report, "resolve_side_pack", _fake_side_pack)
     old = AbiSnapshot(library="libfoo.so", version="1")
     new = AbiSnapshot(library="libfoo.so", version="2")
     _, pair = fake_resolved_pair(old, new)
 
-    out = helpers._with_out_of_band_packs(pair, None, None, Path("bi"), None)
+    packs = OutOfBandPacks(None, None, Path("bi"), None)
+    out = with_out_of_band_packs(pair, packs, lambda _note: None)
 
     assert out.old is old  # no flag: the resolved side itself
     assert out.new is not new and out.new.build_source is sentinel

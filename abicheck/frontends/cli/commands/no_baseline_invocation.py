@@ -347,12 +347,13 @@ def resolve_no_baseline_invocation(
         config=kwargs.get("config"),
         severity_preset=None,
     )
-    from ..contract_overlays import note_unapplied_post_manifest
+    from ....workflows.compare.project_inputs import note_unapplied_post_manifest
 
     note_unapplied_post_manifest(
         _project_cfg,
         route="a --no-baseline audit",
         reason="an overlay scopes a contract across two sides",
+        notify=lambda message: click.echo(message, err=True),
     )
     # The config-only settings, read by the one function two-sided `compare`
     # reads them through, so the two shapes cannot differ. `--lang`, the

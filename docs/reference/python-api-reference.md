@@ -349,7 +349,7 @@ Expand header inputs where each item can be a file or a directory.
 
 ## `load_suppression_and_policy`
 
-Load suppression list and policy file from paths.
+Load suppression list and policy file from paths (the typed API's wording).
 
 | Parameter | Type | Default |
 |---|---|---|

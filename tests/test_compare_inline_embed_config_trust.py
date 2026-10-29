@@ -46,7 +46,7 @@ def _side_execution_of_compare(
 ):
     """Drive `compare --sources old=<tree>` through the real CLI up to the
     shared resolution, returning the old side's execution plan."""
-    import abicheck.service as service
+    import abicheck.workflows.compare.resolve as resolve_mod
 
     src = tmp_path / "src"
     src.mkdir(exist_ok=True)
@@ -62,7 +62,7 @@ def _side_execution_of_compare(
         captured.append(request)
         raise _Stop
 
-    monkeypatch.setattr(service, "resolve_compare_request", _capture)
+    monkeypatch.setattr(resolve_mod, "resolve_compare_request", _capture)
 
     with pytest.raises(_Stop):
         CliRunner().invoke(

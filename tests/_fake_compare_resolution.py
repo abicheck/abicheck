@@ -1,7 +1,9 @@
-"""A stand-in for ``cli_resolve._resolve_compare_pair``'s answer.
+"""A stand-in for the compare session's resolution step's answer.
 
-The native ``compare`` CLI resolves a pair through ``_resolve_compare_pair``
-and classifies it through the shared ``workflows.compare_classify`` core,
+The native ``compare`` session resolves a pair through
+``workflows.compare.session_inputs.resolve_pair`` (patch it where the session
+reads it: ``workflows.compare.session.resolve_pair``) and classifies it
+through the shared ``workflows.compare_classify`` core,
 which needs the ``CompareRequest`` the pair was resolved from as well as the
 two snapshots. A test that fakes resolution returns this pair instead of a
 bare ``(old, new)`` tuple.

@@ -184,7 +184,7 @@ def detached_debug_kind(path: Path) -> str | None:
     section/magic reading. It exists because ADR-061 does not let a
     ``frontends`` module import ``extract``, and the CLI needs this answer
     to refuse a transport no extraction path can consume
-    (``options/evidence_roles.unsupported_detached_debug``) -- so the
+    (:func:`unsupported_detached_debug`) -- so the
     dependency runs through this layer, the same way every other
     classification in this module does.
     """
@@ -260,6 +260,86 @@ def all_probe_matrices(paths: Iterable[Path]) -> bool:
     )
 
 
+def unsupported_detached_debug(paths: Iterable[Path]) -> tuple[tuple[Path, str], ...]:
+    """Named debug artifacts no extraction path can consume, with their kind.
+
+    ``--debug-info`` accepts a detached debug file, and for DWARF that file
+    is resolved and parsed. A named ``.pdb`` or ``.dwp`` is a different
+    story: the ELF dump reads only ``DebugArtifact.dwarf_path`` and the PE
+    dump never consults ``debug_roots`` at all, so accepting one would mean
+    a stripped binary compared with none of the debug evidence the user
+    asked for -- a clean result that is not true (Codex review, PR #1253).
+    Named here so a front end can refuse it and say where the capability *does*
+    live, rather than let it through as a silent no-op (ADR-068 D4).
+
+    The directory form is unaffected *as an input* -- ``--debug-info
+    old=<dir>`` still reaches ``PDBResolver``/``SplitDwarfResolver``
+    exactly as ``--debug-root`` always did -- but note that what those
+    resolvers return is itself dropped further down for these two kinds,
+    which is a pre-existing gap this slice does not close and therefore
+    must not recommend as a workaround (see the error text below).
+    """
+    out: list[tuple[Path, str]] = []
+    for path in paths:
+        if classify_debug_transport(path) is not DebugTransport.DETACHED_FILE:
+            continue
+        kind = detached_debug_kind(path)
+        if kind in ("pdb", "dwp"):
+            out.append((path, kind))
+    return tuple(out)
+
+
+def unsupported_detached_debug_message(paths: Iterable[Path]) -> str | None:
+    """The usage-error text for each artifact :func:`unsupported_detached_debug`
+    names, or ``None`` when there is none. Front ends raise it as a usage
+    error (exit 64)."""
+    unsupported = unsupported_detached_debug(paths)
+    if not unsupported:
+        return None
+    named = ", ".join(f"{p} ({kind.upper()})" for p, kind in unsupported)
+    kinds = {kind for _p, kind in unsupported}
+    # Name only a spelling that is actually *consumed*. `debug.pdb_path` is,
+    # via `locate_pdb(pdb_path_override=...)` on the PE dump path. A
+    # directory is NOT, for either kind: `_dump_pe` is never passed
+    # `debug_roots` at all, and `_dump_elf` uses only
+    # `DebugArtifact.dwarf_path`, so a PDB or DWP the resolver finds in a
+    # root is dropped just as silently (Codex review, PR #1253 -- the first
+    # version of this message recommended exactly that dead end). See
+    # known-gaps.md, "A resolved PDB/DWP/dSYM artifact reaches no dump path".
+    remedy = (
+        " Set debug.pdb_path in .abicheck.yml instead, which the PE dump path "
+        "does read."
+        if kinds == {"pdb"}
+        else (
+            " abicheck has no input that feeds a DWARF package to the dump "
+            "path today; build without split DWARF, or link the .dwo files "
+            "back in, to compare with debug evidence."
+            if kinds == {"dwp"}
+            else " Set debug.pdb_path in .abicheck.yml for the PDB; a DWARF "
+            "package has no consuming input today."
+        )
+    )
+    return (
+        f"--debug-info {named}: naming a PDB or DWARF-package file directly is "
+        "not supported -- no extraction path reads one, so it would be accepted "
+        "and silently ignored." + remedy
+    )
+
+
+def unsided_debug_packages(paths: Iterable[Path]) -> tuple[Path, ...]:
+    """Those *paths* that are package archives -- ``dump``'s rejection set.
+
+    ``dump``'s operand is one binary, with no release fan-out and so no
+    package-extraction stage to hand a debug package to -- which is why a
+    package is a usage error there rather than a fourth silent no-op. Its
+    directories and detached files both go straight to the resolver chain,
+    as ``--debug-root``'s values always did.
+    """
+    return tuple(
+        p for p in paths if classify_debug_transport(p) is DebugTransport.PACKAGE
+    )
+
+
 __all__ = [
     "PROBE_MATRIX_SCHEMA",
     "BuildInfoTransport",
@@ -272,4 +352,7 @@ __all__ = [
     "detached_debug_kind",
     "is_evidence_package",
     "is_probe_matrix_document",
+    "unsided_debug_packages",
+    "unsupported_detached_debug",
+    "unsupported_detached_debug_message",
 ]
