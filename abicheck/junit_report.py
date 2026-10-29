@@ -628,7 +628,7 @@ def _build_testsuite(
     missing_labels = getattr(result, "scoped_missing_labels", ()) or ()
     # The missing-contract failure decision must follow the same severity
     # decision as the gate's own exit code (severity.missing_contract_exit_code,
-    # which _scoped_exit_code floors on): under the legacy scheme (no
+    # which resolve_scoped_exit_code floors on): under the legacy scheme (no
     # severity_config) a missing contract member is unconditionally BREAKING,
     # but under a scheme that demotes abi_breaking the scoped exit code can be
     # 0 for the same missing member -- unconditionally failing here would mark

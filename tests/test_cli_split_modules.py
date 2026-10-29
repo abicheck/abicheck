@@ -515,14 +515,14 @@ class TestCompareReleaseErrorPaths:
 
     def test_exit_compare_release_breaking(self) -> None:
         """_exit_compare_release maps BREAKING verdict to exit 4."""
-        from abicheck.frontends.cli.release_exit import _exit_compare_release
+        from abicheck.frontends.cli.runtime import _exit_compare_release
 
         with pytest.raises(SystemExit) as exc_info:
             _exit_compare_release("BREAKING", fail_on_removed=False, removed_keys=[])
         assert exc_info.value.code == 4
 
     def test_exit_compare_release_api_break(self) -> None:
-        from abicheck.frontends.cli.release_exit import _exit_compare_release
+        from abicheck.frontends.cli.runtime import _exit_compare_release
 
         with pytest.raises(SystemExit) as exc_info:
             _exit_compare_release("API_BREAK", fail_on_removed=False, removed_keys=[])
@@ -531,7 +531,7 @@ class TestCompareReleaseErrorPaths:
     def test_exit_compare_release_removed_library_fail(self) -> None:
         """When --fail-on-removed-library is set and a library was removed,
         exit with code 8 even if the verdict itself is compatible."""
-        from abicheck.frontends.cli.release_exit import _exit_compare_release
+        from abicheck.frontends.cli.runtime import _exit_compare_release
 
         with pytest.raises(SystemExit) as exc_info:
             _exit_compare_release(

@@ -38,7 +38,6 @@ from abicheck.buildsource.check_report import (
     build_new_target_report,
     build_operational_error_report,
     derive_effective_depth,
-    final_exit_code,
     validate_identifier,
 )
 from abicheck.policy.exit_decision import ExitDecision
@@ -321,7 +320,7 @@ class TestAugmentReport:
     def test_analysis_exit_code_overrides_a_clean_severity_block(self):
         """The exact Codex-flagged gap: --fail-on-removed-library on a
         directory/package compare makes the CLI process exit 8 "in
-        preference to the severity code" (frontends/cli/release_exit.py's
+        preference to the severity code" (frontends/cli/runtime.py's
         _exit_compare_release), so a bundle report's own severity.exit_code
         can read 0/COMPATIBLE_WITH_RISK even though the real process exited
         nonzero. analysis_exit_code must win via max() so the gate doesn't
@@ -1204,23 +1203,3 @@ class TestBuildNewTargetReport:
         assert "base_ref" not in report
         assert "tool_version" not in report
         assert "action_version" not in report
-
-
-class TestFinalExitCode:
-    def test_local_reflects_real_exit_code(self):
-        assert final_exit_code("local", real_exit_code=4, operational_error=False) == 4
-        assert final_exit_code("local", real_exit_code=0, operational_error=False) == 0
-
-    @pytest.mark.parametrize("gate_mode", ["deferred", "advisory"])
-    def test_deferred_and_advisory_never_fail_on_a_real_finding(self, gate_mode):
-        assert (
-            final_exit_code(gate_mode, real_exit_code=4, operational_error=False) == 0
-        )
-
-    @pytest.mark.parametrize("gate_mode", ["local", "deferred", "advisory"])
-    def test_operational_error_always_fails_regardless_of_gate_mode(self, gate_mode):
-        assert final_exit_code(gate_mode, real_exit_code=0, operational_error=True) == 1
-
-    def test_rejects_unknown_gate_mode(self):
-        with pytest.raises(ValueError):
-            final_exit_code("bogus", real_exit_code=0, operational_error=False)

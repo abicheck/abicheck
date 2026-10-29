@@ -13,34 +13,33 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""ADR-064's additive scan/release exit-decision resolvers.
+"""The one owner of the ``compare`` exit decision, pair and release alike.
 
-Split out of :mod:`abicheck.policy.exit_decision` (Codex review: the
-combined module grew to 824 lines against this package's 800-line
-production cap -- `abicheck/policy/AGENTS.md`'s own "Conventions" section).
-New module, not a moved flat-path one: these functions did not exist
-before ADR-064, so callers import them from here directly.
+Every exit code a ``compare`` run can end with is decided here (or in
+:mod:`.release_exit_decision`, this module's release-input adapter, whose
+public names this module re-exports lazily below):
 
-See ``exit_decision.py``'s own module docstring for what ADR-064 is and
-what stage this additive work belongs to; this module implements the same
-stage 1a resolvers, just physically split for the line-count cap. Stage 1b
-has since wired `resolve_scan_exit_decision` into real call sites --
-the since-retired `scan_engine.py`'s `NOT_COMPARABLE` outcome and (via
-`abicheck.workflows.scan_abort_result`) its `_BudgetOverflow`/
-`_EvidenceContractError` aborts -- so this module is no longer additive-only
-dead code the way it was when first split out.
+- the single-pair path: :func:`resolve_compare_exit_decision_with_abort_axes`
+  (the ordinary gate/coverage/assurance fold plus ADR-064's abort axes) and
+  :func:`compare_assurance_notice_base_exit`, the number the pair's
+  assurance notice is worded against;
+- a supplied ``--used-by``/``--required-symbol(s)`` consumer's own scoped
+  code: :func:`resolve_scoped_exit_code` (ADR-043, informational since
+  workstream D-S1 -- it never replaces the full-library decision);
+- the directory/package release: :func:`resolve_release_exit_decision` and
+  its input adapters ``resolve_release_exit_decision_for_report`` /
+  ``resolve_release_exit_decision_with_assurance``;
+- ``scan``'s legacy abort axes: :func:`resolve_scan_exit_decision`;
+- ``check-target``'s ``gate-mode`` composition: :func:`resolve_gate_mode_exit_code`.
 
-`docs/contribute/plans/one-comparison-product.md` Phase 8 (ADR-068 D6):
-`deps compare`/`deps tree` needed no new resolver *here* -- unlike `scan`'s
-axes, `deps`'s "not comparable" case (ADR-050 D2's profile/scope mismatch,
-surfaced as `StackChange.not_comparable_reason`) and its independent
-loadability axis both fold through the sibling `exit_decision.
-resolve_exit_decision`'s existing generic contribution parameters
-(`not_comparable_contribution`, the new `loadability_contribution`) with no
-`_dominant_decision`-style override needed, since `deps`'s own numbers
-(0/1/4/5) already sort correctly under a plain tie-inclusive `max()` fold.
-See `stack_checker.exit_decision_for_stack_compare`/
-`exit_decision_for_stack_tree` for the two call sites.
+Frontends read one :class:`ExitDecision` (through ``workflows.gate``) and
+translate it to a process status; renderers read the decision already
+stored on the result or report. Neither restates a precedence rule.
+
+``deps compare``/``deps tree`` need no resolver here: their not-comparable
+and loadability axes fold through ``exit_decision.resolve_exit_decision``'s
+generic contribution parameters with a plain ``max()`` (see
+``stack_checker.exit_decision_for_stack_compare``).
 """
 
 from __future__ import annotations
@@ -54,7 +53,11 @@ if TYPE_CHECKING:
     from datetime import date
 
     from ..checker_types import DiffResult
+    from ..model.change import Change
+    from ..model.change_catalog.registry import Verdict
+    from ..policy_file import PolicyFile
     from .effective_gate import EffectiveGate
+    from .severity import SeverityConfig
 
 #: Which of :class:`ExitDecision`'s four ADR-064 fields corresponds to each
 #: dominant :class:`ExitReason`. `_dominant_decision` uses this so exactly
@@ -125,15 +128,9 @@ def _dominant_decision(
     compatibility contribution of `4`). Fail loudly instead.
     """
     dominant_field = _DOMINANT_FIELD[reason]
-    # One mapping built once, then used for *both* the guard's `preserved`
-    # tuple and the constructed `ExitDecision`, so the two cannot disagree
-    # about which axes this decision carries. Two earlier revisions listed
-    # them separately and a field added to the signature reached neither
-    # (Codex review, twice: `evidence_contract_error_contribution`, then
-    # `removed_required_library_contribution`) -- accepted as a keyword,
-    # silently dropped from the result, and invisible to the guard that is
-    # supposed to catch exactly that. A field added to the signature from
-    # here on has to be added to this mapping to be accepted at all.
+    # One mapping feeds both the guard's `preserved` tuple and the built
+    # `ExitDecision`, so the two cannot disagree about which axes it carries
+    # (two earlier revisions listed them separately and dropped a field).
     raw: dict[str, int] = {
         "compatibility_contribution": compatibility_contribution,
         "contract_coverage_contribution": contract_coverage_contribution,
@@ -400,16 +397,15 @@ def resolve_release_exit_decision(
     additions_review_contribution: int = 0,
     unused_rules_contribution: int = 0,
 ) -> ExitDecision:
-    """ADR-064's precedence for a directory/package release comparison,
-    reproducing `frontends.cli.release_exit._exit_compare_release` exactly
-    -- including the one asymmetry that function's own two branches encode,
+    """ADR-064's precedence for a directory/package release comparison
+    -- the one both its process exit and its persisted ``exit`` block read,
+    including the one asymmetry the two schemes' branches encode,
     which a flat `max()` over contributions cannot express (this is exactly
     why ADR-064 calls removed-required-library's rank "mode-dependent, not
     a fixed slot" rather than folding it into `resolve_exit_decision`):
 
     - `not_comparable` dominates everything, in both schemes (mirrors
-      native `compare`'s own `16`, and release's `_exit_compare_release`
-      checking `worst_verdict == "not_comparable"` first, unconditionally).
+      native `compare`'s own `16`; checked first, unconditionally).
     - **Severity-aware scheme** (`severity_scheme_active=True`):
       `removed_required_library` wins *outright* over the aggregated
       verdict/severity code -- including over `contract_coverage_
@@ -477,9 +473,9 @@ def resolve_release_exit_decision(
     pure resolver can manufacture from an input its real caller does not
     yet compute.
 
-    Pure, additive logic (ADR-064's first stage): not yet called from the release fan-out (`frontends/cli/release_exit.py`, formerly the retired `cli_compare_release_helpers.py`), so no existing release comparison's
-    actually-returned exit code changes because this function exists. The
-    two dominant codes are :data:`EXIT_RELEASE_NOT_COMPARABLE` and
+    The release's process exit (``frontends.cli.runtime._exit_compare_release``)
+    reaches this through ``release_exit_decision.resolve_release_exit_decision_
+    with_assurance``. The two dominant codes are :data:`EXIT_RELEASE_NOT_COMPARABLE` and
     :data:`EXIT_REMOVED_REQUIRED_LIBRARY`.
 
     *evidence_contract_error_contribution* (PR #1195) is a member's pinned
@@ -701,6 +697,88 @@ def resolve_release_exit_decision(
     )
 
 
+def compare_assurance_notice_base_exit(decision: ExitDecision) -> int:
+    """The single-pair exit the ADR-071 assurance notice is worded against.
+
+    The notice says "floored to 1" or "contributes, below the compatibility
+    axis's own exit N", so its base is the exit *without* the assurance axis.
+    For a pair that is the compatibility and contract-coverage axes only
+    (the release uses :meth:`ExitDecision.exit_without_analysis_assurance`).
+    """
+    return max(
+        decision.compatibility_contribution,
+        decision.contract_coverage_contribution,
+    )
+
+
+def resolve_scoped_exit_code(
+    scoped_verdict: Verdict,
+    relevant_changes: list[Change],
+    result: DiffResult,
+    severity: SeverityConfig | None,
+    policy: str,
+    policy_file: PolicyFile | None,
+    *,
+    has_missing_contract: bool = False,
+) -> int:
+    """One ``--used-by``/``--required-symbol(s)`` consumer's own exit code.
+
+    ADR-043's scoped code, informational since workstream D-S1: it is
+    reported beside the full-library decision and never replaces it. It
+    still honours the run's exit-code scheme -- *severity* is the run's
+    ``EffectiveGate.severity``, ``None`` exactly when the legacy 0/2/4
+    verdict mapping is in effect.
+
+    *has_missing_contract* floors the severity-scheme code: a required
+    symbol/version/entrypoint absent from the new library is BREAKING but is
+    no diff ``Change``, so ``compute_exit_code`` never sees it.
+    """
+    from .evaluate import effective_kind_sets
+    from .severity import (
+        compute_exit_code,
+        legacy_exit_code,
+        missing_contract_exit_code,
+    )
+
+    if severity is None:
+        return legacy_exit_code(scoped_verdict)
+    code = compute_exit_code(
+        relevant_changes,
+        severity,
+        policy=policy,
+        kind_sets=effective_kind_sets(result),
+        policy_file=policy_file,
+    )
+    if has_missing_contract:
+        code = max(code, missing_contract_exit_code(severity))
+    return code
+
+
+#: ``check-target``'s ``gate-mode`` values (ADR-047 §7).
+GATE_MODES = ("local", "deferred", "advisory")
+
+
+def resolve_gate_mode_exit_code(
+    gate_mode: str, *, real_exit_code: int, operational_error: bool
+) -> int:
+    """``check-target``'s own composite exit code (ADR-047 §7).
+
+    Operational errors (a hard ``resolve-baseline`` failure, or the analysis
+    step itself erroring out on bad config -- never a genuine ABI/API
+    finding) always fail the job regardless of ``gate-mode``: ``deferred``
+    only defers the *compatibility* verdict's effect on the exit code, never
+    an operational error, and ``advisory`` never degrades one to a pass
+    either. *real_exit_code* is the analysis step's own resolved exit.
+    """
+    if gate_mode not in GATE_MODES:
+        raise ValueError(f"gate_mode must be one of {GATE_MODES}, got {gate_mode!r}")
+    if operational_error:
+        return 1
+    if gate_mode == "local":
+        return real_exit_code
+    return 0
+
+
 def __getattr__(name: str) -> object:
     """Re-export the release *adapter* half, which now lives next door.
 
@@ -713,6 +791,7 @@ def __getattr__(name: str) -> object:
     if name in {
         "release_evidence_contract_contribution",
         "resolve_release_exit_decision_for_report",
+        "resolve_release_exit_decision_with_assurance",
     }:
         from importlib import import_module
 

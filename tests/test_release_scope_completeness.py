@@ -339,7 +339,7 @@ class TestZeroPairRelease:
         assert doc["run_outcome"]["operational"] == "no_comparison_completed"
 
     def test_exit_function_folds_the_axis_like_coverage(self) -> None:
-        from abicheck.frontends.cli.release_exit import _exit_compare_release
+        from abicheck.frontends.cli.runtime import _exit_compare_release
 
         with pytest.raises(SystemExit) as info:
             _exit_compare_release(

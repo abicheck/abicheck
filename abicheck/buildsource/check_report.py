@@ -44,11 +44,10 @@ how ``abicheck.buildsource.baseline_set`` backs
   ran (§7: "a report can be fully computed and still fail to publish" — the
   converse also matters here: a check can fail to ever start comparing and
   must still produce a typed, consumable report).
-- :func:`final_exit_code` — ``check-target``'s own composite exit code:
-  ``gate-mode: local`` reflects the real outcome; ``deferred``/``advisory``
-  are 0 unless an operational error occurred (operational errors always
-  fail the job, regardless of gate-mode — resolve-baseline's failure
-  taxonomy is never silently degraded to a compatibility verdict).
+- ``check-target``'s own composite exit code (``gate-mode``) is decided by
+  :func:`abicheck.policy.exit_decision_precedence.resolve_gate_mode_exit_code`,
+  the one owner of every ``compare`` exit decision; this module only
+  projects the analysis step's real exit into the report.
 
 Pure: no file I/O, no subprocess. The CLI wrapper handles reading/writing
 JSON and printing ``GITHUB_OUTPUT`` lines.
@@ -62,6 +61,7 @@ from typing import Any
 
 from ..evidence_depth import DEPTH_RANK, weaker_depth
 from ..model.change import validate_check_id, validate_evidence_depth
+from ..policy.exit_decision_precedence import EXIT_REMOVED_REQUIRED_LIBRARY, GATE_MODES
 from ..policy.outcome import OperationalStatus, PolicyGateDecision, TargetLifecycle
 from ..schemas import REPORT_SCHEMA_VERSION
 from . import check_report_no_baseline as _no_baseline
@@ -133,15 +133,6 @@ NEW_TARGET_VERDICT = "NEW_TARGET"
 #: which made a real ``check-target`` propagation of that outcome fall
 #: through to a usage error instead of a structured ``ERROR`` report).
 RESOLVE_FAILURE_OUTCOMES = ALL_OUTCOMES - {ResolveOutcome.RESOLVED}
-
-GATE_MODES = ("local", "deferred", "advisory")
-
-#: ``frontends.cli.release_exit._exit_compare_release``'s dedicated
-#: ``--fail-on-removed-library`` exit code -- applied "in preference to the
-#: severity code," so it's the one value the analysis step's real exit code
-#: can carry that the persisted ``severity`` block never independently
-#: reflects.
-_REMOVED_LIBRARY_EXIT_CODE = 8
 
 
 def validate_identifier(field_name: str, value: str) -> None:
@@ -284,7 +275,7 @@ def _neutralize_gate(report: dict[str, Any]) -> None:
         }
     elif "scan_schema_version" in report and "exit_code" in report:
         report["exit_code"] = 0
-    # ADR-063 Phase 7: zero `run_outcome.gate` too, never `.operational` (see `final_exit_code`'s invariant).
+    # ADR-063 Phase 7: zero `run_outcome.gate` too, never `.operational` (see `resolve_gate_mode_exit_code`'s invariant).
     run_outcome = report.get("run_outcome")
     if isinstance(run_outcome, dict):
         report["run_outcome"] = {**run_outcome, "gate": PolicyGateDecision.NONE.value}
@@ -373,7 +364,7 @@ def _neutralize_gate(report: dict[str, Any]) -> None:
         # evidence_contract_error/budget_overflow/not_comparable/
         # no_comparison_completed_contribution (mutually exclusive per
         # `resolve_scan_exit_decision`'s docstring) -- are carried over, not
-        # zeroed: each fails every gate mode per `final_exit_code`, so
+        # zeroed: each fails every gate mode per `resolve_gate_mode_exit_code`, so
         # zeroing any would claim a clean pass the job doesn't give (Codex
         # review, fresh evidence, two rounds).
         old_exit = node.get("exit")
@@ -486,7 +477,7 @@ def _stamp_schema_version(out: dict[str, Any], report: dict[str, Any]) -> None:
 def _escalate_removed_library_severity(out: dict[str, Any]) -> None:
     """Fold ``--fail-on-removed-library``'s exit 8 into the severity block.
 
-    Exit 8 is the *only* value ``frontends.cli.release_exit._exit_compare_release`` applies "in preference to the severity code" --
+    Exit 8 is the *only* value ``frontends.cli.runtime._exit_compare_release`` applies "in preference to the severity code" --
     every other severity-aware exit path there emits ``severity_exit_code``
     directly, so 8 is the sole case where the real outcome can diverge from
     what is already persisted. Escalating ``policy_gate_decision``/
@@ -645,7 +636,7 @@ def augment_report(
     raw_verdict = report.get("verdict")
     real_exit_code = max(_real_exit_code(report), analysis_exit_code or 0)
     out["policy_gate_decision"] = "fail" if real_exit_code != 0 else "pass"
-    if analysis_exit_code == _REMOVED_LIBRARY_EXIT_CODE:
+    if analysis_exit_code == EXIT_REMOVED_REQUIRED_LIBRARY:
         _escalate_removed_library_severity(out)
     _classify_verdict(out, report, raw_verdict)
     # check-target's own nested analysis step always disables add-job-summary/
@@ -844,25 +835,3 @@ def build_new_target_report(
         lifecycle=TargetLifecycle.NEW_TARGET,
         **locals(),  # every keyword argument, forwarded unchanged
     )
-
-
-def final_exit_code(
-    gate_mode: str, *, real_exit_code: int, operational_error: bool
-) -> int:
-    """``check-target``'s own composite exit code (ADR-047 §7).
-
-    Operational errors (a hard ``resolve-baseline`` failure, or the analysis
-    step itself erroring out on bad config -- never a genuine ABI/API
-    finding) always fail the job regardless of ``gate-mode`` -- "``deferred``
-    only defers the *compatibility* verdict's effect on exit code, never
-    operational errors" (§7), applied identically to ``advisory`` since
-    resolve-baseline's failure taxonomy is never silently degraded to a
-    passing/neutral outcome either.
-    """
-    if gate_mode not in GATE_MODES:
-        raise ValueError(f"gate_mode must be one of {GATE_MODES}, got {gate_mode!r}")
-    if operational_error:
-        return 1
-    if gate_mode == "local":
-        return real_exit_code
-    return 0

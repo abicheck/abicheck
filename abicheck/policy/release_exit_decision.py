@@ -28,7 +28,8 @@ past `architecture/modules.yaml`'s 800-line production maximum. The split is
 along a real seam rather than a convenient line number: everything here
 reads *release-shaped reported input*, and everything left there is pure
 arithmetic over already-resolved integers. It is also the half both
-consumers now share -- ``frontends.cli.release_exit`` for the process status
+consumers now share -- ``frontends.cli.runtime._exit_compare_release`` for
+the process status (via :func:`resolve_release_exit_decision_with_assurance`)
 and ``report.release_document.release_json_document`` for the persisted
 ``exit`` block -- so giving it its own name makes "one resolution, two
 readers" legible instead of implied.
@@ -39,15 +40,21 @@ Re-exported from :mod:`abicheck.policy.exit_decision_precedence` and
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from .exit_decision import ExitDecision
 from .exit_decision_precedence import (
     resolve_release_exit_decision,
 )
 
+if TYPE_CHECKING:
+    from .release_assurance import ReleaseAssuranceDecision
+
 __all__ = [
     "release_analysis_assurance_contribution",
     "release_evidence_contract_contribution",
     "resolve_release_exit_decision_for_report",
+    "resolve_release_exit_decision_with_assurance",
 ]
 
 
@@ -281,38 +288,16 @@ def resolve_release_exit_decision_for_report(
     every compared member by ``policy.release_assurance``; ``0`` whenever the
     setting is off, which is every pre-existing invocation.
 
-    Reproduces ``frontends.cli.release_exit._exit_compare_release``'s own
-    precedence via :func:`resolve_release_exit_decision`, for **report
-    purposes only** -- this function never calls ``sys.exit`` and is not
-    itself called from ``_exit_compare_release``, which keeps computing the
-    real process exit code exactly the way it always has (`tests/
-    test_exit_code_integrity.py` pins that function's own signature and
-    numeric outputs; rewriting it in place to delegate here risked exactly
-    the kind of silent exit-code regression ADR-064 exists to prevent, for
-    a function CI gates directly depend on).
-
-    ``.code`` is nonetheless *provably* always equal to what
-    ``_exit_compare_release`` sys.exits with, given the same inputs -- not
-    merely "expected to agree": every legacy-scheme code
-    :func:`_compute_release_legacy_exit_code` can produce caps at ``4``
-    (``legacy_exit_code(BREAKING)``), which is also the fixed floor
-    ``_exit_compare_release`` applies for an operational ``"ERROR"``
-    sentinel (``max(4, ...)``), so the two can never diverge numerically --
-    only in which reasons/contributions the returned :class:`ExitDecision`
-    records. Concretely, a release with one ``BREAKING`` library and a
-    second, unrelated library that failed to compare (an ``"ERROR"``
-    verdict) collapses to ``worst_verdict == "ERROR"`` in today's
-    ``release_outcome.RELEASE_VERDICT_ORDER`` rollup (ADR-050 D2's ``"not_comparable"``
-    ranks higher still, but is handled by its own dominant branch below) --
-    ``_exit_compare_release`` never even computes the ``BREAKING``
-    library's own code in that case, since its ``ERROR`` short-circuit
-    fires first, while this function still finds it via
-    :func:`_compute_release_legacy_exit_code` and names both
-    ``COMPATIBILITY_GATE`` and ``OPERATIONAL_ERROR`` in ``reasons`` -- both
-    tied at ``4``. `tests/test_exit_code_integrity.py`'s
-    `TestReleaseExitDecisionForReportAgreesWithRealExit` proves the
-    numeric-agreement claim across the same input matrix
-    ``_exit_compare_release``'s own tests already cover.
+    The one release resolution: the persisted ``exit`` block reads it, and
+    the process status reads it through
+    :func:`resolve_release_exit_decision_with_assurance`, so the two agree by
+    construction. A release with one ``BREAKING`` library and a second,
+    unrelated library that failed to compare (an ``"ERROR"`` verdict)
+    collapses to ``worst_verdict == "ERROR"`` in
+    ``release_outcome.RELEASE_VERDICT_ORDER``; this function still finds the
+    ``BREAKING`` member via :func:`_compute_release_legacy_exit_code` and
+    names both ``COMPATIBILITY_GATE`` and ``OPERATIONAL_ERROR`` in
+    ``reasons``, tied at ``4``.
 
     *library_results* alone does not capture a bundle/probe-matrix-only
     break (no library's own verdict changes) -- see
@@ -324,7 +309,7 @@ def resolve_release_exit_decision_for_report(
     the very same ``worst_verdict`` collapse.
 
     *severity_exit_code* being not ``None`` is what "severity scheme
-    active" means, matching ``_exit_compare_release``'s own check.
+    active" means.
     *operational_error_contribution* is the **union** of the aggregate
     ``worst_verdict == "ERROR"`` and a direct scan of *library_results* --
     either alone loses a real operational failure. The scan was added
@@ -340,8 +325,7 @@ def resolve_release_exit_decision_for_report(
     --bundle-facts``, whose whole release is one already-folded result --
     carries the ``"ERROR"`` sentinel *only* in *worst_verdict*, and
     scanning an empty *library_results* would silently drop its exit ``4``
-    to ``0`` (found by the reachable-state parity harness while routing
-    ``_exit_compare_release`` through this resolver).
+    to ``0`` (found by the reachable-state parity harness).
     """
     not_comparable = worst_verdict == "not_comparable"
     severity_scheme_active = severity_exit_code is not None
@@ -383,4 +367,55 @@ def resolve_release_exit_decision_for_report(
             library_results
         ),
         unused_rules_contribution=release_unused_rules_contribution(library_results),
+    )
+
+
+def resolve_release_exit_decision_with_assurance(
+    worst_verdict: str,
+    fail_on_removed: bool,
+    removed_keys: list[str],
+    severity_exit_code: int | None = None,
+    *,
+    contract_coverage_exit_contribution: int = 0,
+    library_results: list[dict[str, object]] | None = None,
+    release_global_verdict: str = "NO_CHANGE",
+    incomplete_scope_exit_contribution: int = 0,
+    no_comparison_completed_exit_contribution: int = 0,
+    assurance_decision: ReleaseAssuranceDecision | None = None,
+) -> ExitDecision:
+    """The release decision a directory/package ``compare`` exits on.
+
+    :func:`resolve_release_exit_decision_for_report` over the run's own
+    inputs, with ADR-071's assurance axis taken from *assurance_decision*
+    (``.abicheck.yml``'s ``assurance.require_complete`` plus the per-member
+    statuses behind it) rather than a bare flag, so a caller cannot state a
+    ``require_complete`` its members contradict.
+
+    ``compare --bundle-facts`` has no per-member *library_results* (its
+    release arrives as one folded document) but does have a real
+    ``AnalysisAssurance`` per member (ADR-071 D8). The resolver reads that
+    axis off per-member rows, so rows carrying only the one key it reads are
+    synthesized here; every other per-member axis reads its own keys with a
+    defaulting ``.get``, so such a row contributes ``0`` to each of them. Its
+    ``"ERROR"`` sentinel reaches the resolver through *worst_verdict*.
+    """
+    members = list(library_results or [])
+    if assurance_decision is not None and not members:
+        members = [
+            {"library": m.name, "analysis_assurance_status": m.status}
+            for m in assurance_decision.members
+        ]
+    return resolve_release_exit_decision_for_report(
+        worst_verdict,
+        fail_on_removed,
+        removed_keys,
+        severity_exit_code,
+        contract_coverage_exit_contribution,
+        members,
+        release_global_verdict,
+        incomplete_scope_contribution=incomplete_scope_exit_contribution,
+        no_comparison_completed_contribution=no_comparison_completed_exit_contribution,
+        require_complete_analysis=bool(
+            assurance_decision is not None and assurance_decision.require_complete
+        ),
     )
