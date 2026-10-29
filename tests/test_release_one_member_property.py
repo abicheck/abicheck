@@ -37,8 +37,17 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
+import pytest
 from _family_f2_routes import Outcome, _invoke, parity_violations
-from hypothesis import HealthCheck, given, settings, strategies as st
+from hypothesis import (
+    HealthCheck,
+    Phase,
+    Verbosity,
+    find,
+    given,
+    settings,
+    strategies as st,
+)
 
 from abicheck.model import AbiSnapshot, Function, Param, Variable, Visibility
 from abicheck.serialization import snapshot_to_json
@@ -58,52 +67,63 @@ _FUNC_NAMES = ("foo", "bar", "baz", "qux", "quux")
 _VAR_NAMES = ("gv", "gw", "gx")
 
 
-@st.composite
-def _function(draw: Any, name: str) -> Function:
-    params = draw(st.lists(st.sampled_from(_TYPES), max_size=2))
-    return Function(
-        name=name,
-        mangled=name,
-        return_type=draw(st.sampled_from(_TYPES)),
-        params=[Param(name=f"p{i}", type=t) for i, t in enumerate(params)],
-        visibility=Visibility.PUBLIC,
+#: A side is drawn as plain data -- ``(functions, variables)`` with each
+#: function ``(name, return type, param types)`` and each variable
+#: ``(name, type)`` -- and only built into an :class:`AbiSnapshot` by
+#: :func:`_snapshot`, so Hypothesis can print any example it reports.
+_FuncSpec = tuple[str, str, tuple[str, ...]]
+_SideSpec = tuple[tuple[_FuncSpec, ...], tuple[tuple[str, str], ...]]
+
+
+def _function(name: str) -> st.SearchStrategy[_FuncSpec]:
+    return st.tuples(
+        st.just(name),
+        st.sampled_from(_TYPES),
+        st.lists(st.sampled_from(_TYPES), max_size=2).map(tuple),
     )
 
 
 @st.composite
-def _side(draw: Any, version: str) -> AbiSnapshot:
-    funcs = [draw(_function(name)) for name in _FUNC_NAMES if draw(st.booleans())]
-    vars_ = [
-        Variable(
-            name=name,
-            mangled=name,
-            type=draw(st.sampled_from(_TYPES)),
-            visibility=Visibility.PUBLIC,
-        )
-        for name in _VAR_NAMES
-        if draw(st.booleans())
-    ]
-    return AbiSnapshot(
-        library="libone.so",
-        version=version,
-        functions=funcs,
-        variables=vars_,
-        from_headers=True,
+def _side(draw: Any) -> _SideSpec:
+    funcs = tuple(draw(_function(n)) for n in _FUNC_NAMES if draw(st.booleans()))
+    vars_ = tuple(
+        (n, draw(st.sampled_from(_TYPES))) for n in _VAR_NAMES if draw(st.booleans())
     )
+    return funcs, vars_
 
 
 @st.composite
-def _pair(draw: Any) -> tuple[AbiSnapshot, AbiSnapshot]:
-    old = draw(_side("1.0"))
+def _pair(draw: Any) -> tuple[_SideSpec, _SideSpec]:
+    old = draw(_side())
     # Bias towards related sides: half the time NEW is OLD with some
     # members perturbed, so modifications (not only add/remove) are drawn.
     if draw(st.booleans()):
-        return old, draw(_side("2.0"))
-    funcs = [
-        draw(_function(f.name)) if draw(st.booleans()) else f
-        for f in old.declarations.functions
-    ]
-    return old, dataclasses.replace(old, version="2.0", functions=funcs)
+        return old, draw(_side())
+    funcs = tuple(draw(_function(f[0])) if draw(st.booleans()) else f for f in old[0])
+    return old, (funcs, old[1])
+
+
+def _snapshot(spec: _SideSpec, version: str) -> AbiSnapshot:
+    funcs, vars_ = spec
+    return AbiSnapshot(
+        library="libone.so",
+        version=version,
+        functions=[
+            Function(
+                name=name,
+                mangled=name,
+                return_type=ret,
+                params=[Param(name=f"p{i}", type=t) for i, t in enumerate(params)],
+                visibility=Visibility.PUBLIC,
+            )
+            for name, ret, params in funcs
+        ],
+        variables=[
+            Variable(name=n, mangled=n, type=t, visibility=Visibility.PUBLIC)
+            for n, t in vars_
+        ],
+        from_headers=True,
+    )
 
 
 def _strip_library(entries: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -183,46 +203,50 @@ def one_member_violations(root: Path, old: AbiSnapshot, new: AbiSnapshot) -> lis
 )
 @given(pair=_pair())
 def test_one_member_release_equals_scalar_compare(
-    pair: tuple[AbiSnapshot, AbiSnapshot],
+    pair: tuple[_SideSpec, _SideSpec],
 ) -> None:
-    old, new = pair
+    old, new = _snapshot(pair[0], "1.0"), _snapshot(pair[1], "2.0")
     with tempfile.TemporaryDirectory() as tmp:
         problems = one_member_violations(Path(tmp), old, new)
     assert not problems, "\n".join(problems)
 
 
-def test_property_draws_every_verdict() -> None:
-    """Guard against a vacuous strategy: the generator reaches a breaking, a
-    compatible-addition and a no-change pair (examples pinned, not drawn)."""
-    base = [
-        Function(
-            name="foo", mangled="foo", return_type="int", visibility=Visibility.PUBLIC
-        )
-    ]
-    snap = AbiSnapshot(
-        library="libone.so", version="1.0", functions=base, from_headers=True
-    )
-    added = dataclasses.replace(
-        snap,
-        version="2.0",
-        functions=[
-            *base,
-            Function(
-                name="bar",
-                mangled="bar",
-                return_type="int",
-                visibility=Visibility.PUBLIC,
-            ),
-        ],
-    )
-    removed = dataclasses.replace(snap, version="2.0", functions=[])
-    verdicts = set()
-    for i, new in enumerate((snap, added, removed)):
+@pytest.mark.parametrize("verdict", ["NO_CHANGE", "COMPATIBLE", "BREAKING"])
+def test_property_draws_every_verdict(verdict: str) -> None:
+    """Guard against a vacuous strategy: ``_pair()`` itself must generate a
+    pair whose scalar compare reaches each verdict, so a strategy change
+    that loses one fails here rather than silently narrowing the property."""
+
+    def reaches(pair: tuple[_SideSpec, _SideSpec]) -> bool:
         with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            assert not one_member_violations(root, snap, new)
-            verdicts.add(json.loads((root / "summary.json").read_text())["verdict"])
-    assert verdicts == {"NO_CHANGE", "COMPATIBLE", "BREAKING"}
+            paths = []
+            for side, spec, version in (
+                ("old", pair[0], "1.0"),
+                ("new", pair[1], "2.0"),
+            ):
+                path = Path(tmp) / f"{side}.json"
+                path.write_text(
+                    snapshot_to_json(_snapshot(spec, version)), encoding="utf-8"
+                )
+                paths.append(path)
+            r = _invoke(["compare", str(paths[0]), str(paths[1]), "-o", "json=-"])
+            return json.loads(r.stdout)["verdict"] == verdict
+
+    old, new = find(
+        _pair(),
+        reaches,
+        settings=settings(
+            max_examples=300,
+            deadline=None,
+            database=None,
+            verbosity=Verbosity.quiet,
+            phases=[Phase.generate],
+        ),
+    )
+    with tempfile.TemporaryDirectory() as tmp:
+        assert not one_member_violations(
+            Path(tmp), _snapshot(old, "1.0"), _snapshot(new, "2.0")
+        )
 
 
 def test_mutant_release_rescoring_a_member_is_caught(monkeypatch: Any) -> None:
