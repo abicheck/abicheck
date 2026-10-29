@@ -213,7 +213,7 @@ def test_no_suppression_flag_when_not_provided() -> None:
 
 
 def test_markdown_footer_with_suppressions(tmp_path: Path) -> None:
-    from abicheck.reporter import to_markdown
+    from abicheck.report.dispatch_markdown import to_markdown
 
     yaml_path = write_yaml(
         tmp_path,
@@ -232,7 +232,7 @@ def test_markdown_footer_with_suppressions(tmp_path: Path) -> None:
 
 
 def test_markdown_footer_zero_suppressed(tmp_path: Path) -> None:
-    from abicheck.reporter import to_markdown
+    from abicheck.report.dispatch_markdown import to_markdown
 
     yaml_path = write_yaml(tmp_path, "version: 1\nsuppressions: []\n")
     sl = SuppressionList.load(yaml_path)
@@ -248,7 +248,7 @@ def test_markdown_footer_zero_suppressed(tmp_path: Path) -> None:
 def test_json_includes_suppression_section(tmp_path: Path) -> None:
     import json
 
-    from abicheck.reporter import to_json
+    from abicheck.report.diff_report import to_json
 
     yaml_path = write_yaml(
         tmp_path,

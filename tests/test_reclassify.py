@@ -717,7 +717,7 @@ def test_active_reclassify_rules_are_disclosed_in_the_standard_report(
     import json
 
     from abicheck.checker_types import DiffResult
-    from abicheck.reporter import to_json
+    from abicheck.report.diff_report import to_json
     from abicheck.schemas import REPORT_SCHEMA_VERSION
 
     p = tmp_path / "policy.yaml"
@@ -763,7 +763,7 @@ def test_policy_reclassify_absent_without_any_configured_rule(tmp_path: Path) ->
     import json
 
     from abicheck.checker_types import DiffResult
-    from abicheck.reporter import to_json
+    from abicheck.report.diff_report import to_json
 
     p = tmp_path / "policy.yaml"
     p.write_text("overrides:\n  enum_member_renamed: ignore\n", encoding="utf-8")
@@ -838,7 +838,7 @@ def test_reclassify_markdown_disclosure_is_code_span_wrapped(
 
 
 def test_reclassify_disclosed_in_html_report(tmp_path: Path) -> None:
-    from abicheck.html_report import generate_html_report
+    from abicheck.report.html_compute import generate_html_report
 
     diff = _reclassify_diff_and_policy_path(tmp_path)
     html_out = generate_html_report(diff)
@@ -925,7 +925,7 @@ def test_expired_reclassify_rule_absent_from_json_report(tmp_path: Path) -> None
     still active."""
     import json
 
-    from abicheck.reporter import to_json
+    from abicheck.report.diff_report import to_json
 
     diff = _expired_reclassify_diff(tmp_path)
     d = json.loads(to_json(diff))
@@ -940,7 +940,7 @@ def test_expired_reclassify_rule_absent_from_markdown_report(tmp_path: Path) -> 
 
 
 def test_expired_reclassify_rule_absent_from_html_report(tmp_path: Path) -> None:
-    from abicheck.html_report import generate_html_report
+    from abicheck.report.html_compute import generate_html_report
 
     diff = _expired_reclassify_diff(tmp_path)
     assert "Policy reclassify" not in generate_html_report(diff)
@@ -1567,7 +1567,7 @@ def test_reclassified_by_stamped_in_the_standard_report(tmp_path: Path) -> None:
     import json
 
     from abicheck.checker_types import DiffResult
-    from abicheck.reporter import to_json
+    from abicheck.report.diff_report import to_json
     from abicheck.schemas import REPORT_SCHEMA_VERSION
 
     p = tmp_path / "policy.yaml"
@@ -1600,7 +1600,7 @@ def test_reclassified_by_absent_when_no_rule_matches(tmp_path: Path) -> None:
     import json
 
     from abicheck.checker_types import DiffResult
-    from abicheck.reporter import to_json
+    from abicheck.report.diff_report import to_json
 
     p = tmp_path / "policy.yaml"
     p.write_text(
@@ -1634,7 +1634,7 @@ def test_reclassified_by_absent_for_a_kind_global_override(tmp_path: Path) -> No
     import json
 
     from abicheck.checker_types import DiffResult
-    from abicheck.reporter import to_json
+    from abicheck.report.diff_report import to_json
 
     p = tmp_path / "policy.yaml"
     p.write_text("overrides:\n  func_removed: ignore\n", encoding="utf-8")
@@ -1662,7 +1662,7 @@ def test_reclassified_by_absent_for_a_no_op_reclassify_rule(tmp_path: Path) -> N
     import json
 
     from abicheck.checker_types import DiffResult
-    from abicheck.reporter import to_json
+    from abicheck.report.diff_report import to_json
 
     p = tmp_path / "policy.yaml"
     p.write_text(
@@ -1702,7 +1702,7 @@ def test_reclassified_by_falls_back_to_to_verdict_for_a_directly_constructed_rul
     import json
 
     from abicheck.checker_types import DiffResult
-    from abicheck.reporter import to_json
+    from abicheck.report.diff_report import to_json
 
     # `to=""` (the dataclass default) -- as a direct Python construction
     # would leave it if the caller only set to_verdict.
@@ -1737,7 +1737,7 @@ def test_reclassified_by_and_policy_reclassify_present_in_root_cause_mode(
     import json
 
     from abicheck.checker_types import DiffResult
-    from abicheck.reporter import to_json
+    from abicheck.report.diff_report import to_json
 
     p = tmp_path / "policy.yaml"
     p.write_text(
@@ -1792,7 +1792,7 @@ def test_policy_reclassify_to_field_validates_against_the_published_schema(
     import jsonschema
 
     from abicheck.checker_types import DiffResult
-    from abicheck.reporter import to_json
+    from abicheck.report.diff_report import to_json
 
     p = tmp_path / "policy.yaml"
     p.write_text(

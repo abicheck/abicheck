@@ -87,7 +87,7 @@ class TestRenderOutput:
         format returned a summary instead of raising. The document it reached
         is unchanged and is asserted here directly, at the function that owns
         it."""
-        from abicheck.reporter import to_stat_json
+        from abicheck.report.diff_report import to_stat_json
 
         d = json.loads(to_stat_json(diff_result))
         assert "changes" not in d
@@ -100,7 +100,7 @@ class TestRenderOutput:
         Asserted against ``to_stat_json`` directly now that ``render_output``
         has no ``stat`` keyword to forward through."""
         from abicheck.policy.analysis_assurance import AnalysisAssurance
-        from abicheck.reporter import to_stat_json
+        from abicheck.report.diff_report import to_stat_json
 
         diff_result.analysis_assurance = AnalysisAssurance(status="partial")
         d = json.loads(to_stat_json(diff_result, require_complete_analysis=True))

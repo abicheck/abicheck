@@ -16,7 +16,8 @@ import tempfile
 from pathlib import Path
 
 from abicheck.checker import Change, ChangeKind, DiffResult, LibraryMetadata, Verdict
-from abicheck.reporter import to_json, to_markdown
+from abicheck.report.diff_report import to_json
+from abicheck.report.dispatch_markdown import to_markdown
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -315,14 +316,14 @@ class TestSarifMetadata:
 
 class TestHtmlMetadata:
     def test_no_metadata_no_table(self):
-        from abicheck.html_report import generate_html_report
+        from abicheck.report.html_compute import generate_html_report
 
         r = _result(verdict=Verdict.NO_CHANGE, changes=[])
         html = generate_html_report(r)
         assert "Library Files" not in html
 
     def test_metadata_table_present(self):
-        from abicheck.html_report import generate_html_report
+        from abicheck.report.html_compute import generate_html_report
 
         r = _result(
             verdict=Verdict.NO_CHANGE,
@@ -341,7 +342,7 @@ class TestHtmlMetadata:
 
 class TestHtmlEnrichments:
     def test_impact_in_html(self):
-        from abicheck.html_report import generate_html_report
+        from abicheck.report.html_compute import generate_html_report
 
         c = Change(ChangeKind.FUNC_REMOVED, "foo", "Public function removed: foo")
         r = _result(changes=[c])
@@ -350,7 +351,7 @@ class TestHtmlEnrichments:
         assert "💡" in html
 
     def test_affected_symbols_in_html(self):
-        from abicheck.html_report import generate_html_report
+        from abicheck.report.html_compute import generate_html_report
 
         c = Change(
             ChangeKind.TYPE_SIZE_CHANGED,
@@ -364,7 +365,7 @@ class TestHtmlEnrichments:
         assert "api_call" in html
 
     def test_source_location_in_html(self):
-        from abicheck.html_report import generate_html_report
+        from abicheck.report.html_compute import generate_html_report
 
         c = Change(
             ChangeKind.FUNC_REMOVED, "foo", "removed", source_location="foo.h:42"

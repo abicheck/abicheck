@@ -340,7 +340,7 @@ class TestNoBaselineReportEnvMatrixDigest:
 
         from abicheck.checker import compare
         from abicheck.environment_matrix import EnvironmentMatrix
-        from abicheck.reporter import to_json
+        from abicheck.report.diff_report import to_json
         from abicheck.workflows.no_baseline_compare import run_no_baseline_compare
 
         matrix = EnvironmentMatrix(runtime_floors={"GLIBC": "2.28"})

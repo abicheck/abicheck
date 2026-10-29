@@ -640,7 +640,7 @@ class TestEveryHtmlPathCarriesTheAudit:
 
     def test_a_fully_suppressed_run_never_renders_as_clean(self):
         """The raw total and the rule reach the page."""
-        from abicheck.html_report import generate_html_report
+        from abicheck.report.html_compute import generate_html_report
 
         result = self._suppressed_run()
         assert result.changes == [], "the fixture's point: the gate is clean"

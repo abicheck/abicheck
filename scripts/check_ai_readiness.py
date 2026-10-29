@@ -218,8 +218,6 @@ LARGE_FILE_ALLOWLIST: frozenset[str] = frozenset(
         "abicheck/cli_compare_helpers.py",
         "abicheck/compatibility_evaluation_frontend.py",
         "abicheck/dumper.py",
-        "abicheck/reporter.py",
-        "abicheck/reporter_markdown.py",
         "tests/test_dumper_unit.py",
     }
 )
@@ -2229,7 +2227,6 @@ _PRINT_ALLOWED: frozenset[str] = frozenset(
         "abicheck/cli_baseline.py",
         "abicheck/cli_compare_release.py",
         "abicheck/cli_debian_symbols.py",
-        "abicheck/reporter.py",
     }
 )
 

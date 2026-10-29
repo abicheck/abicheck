@@ -17,12 +17,12 @@ from typing import TYPE_CHECKING
 
 from abicheck.checker import Change, DiffResult, Verdict
 from abicheck.model import AbiSnapshot
+from abicheck.report.diff_report import to_stat
 from abicheck.report.dispatch_markdown import to_review_digest
 from abicheck.report.document_builder import build_report_envelope
 from abicheck.report.envelope import RenderOptions, ReportEnvelope
 from abicheck.report.render_markdown_document import build_review_digest_document
-from abicheck.reporter import to_stat
-from abicheck.reporter_markdown import compute_review_digest
+from abicheck.report.review_digest_compute import compute_review_digest
 
 if TYPE_CHECKING:
     from abicheck.checker import Change, DiffResult, Verdict

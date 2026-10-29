@@ -385,7 +385,7 @@ Two predicates close that without weakening anything above:
   `ASSURANCE_CONTRIBUTION_SINCE`, never a fallback.
 - `_assurance_axis_contradictory` catches the one absence that *is* provably
   wrong: an `analysis_assurance` block on a schema ≥ 2.40 with no
-  `analysis_assurance_exit_contribution` beside it. `reporter.py` emits those
+  `analysis_assurance_exit_contribution` beside it. `report/diff_report.py` emits those
   two under one `if`, so a half-present pair is an inconsistent report. A
   report carrying **neither** key is normal and must stay accepted — inferring
   the contradiction from the schema version alone fails ordinary green runs,

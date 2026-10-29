@@ -25,7 +25,7 @@ Pipeline order (data flow):
    `checker.py`, `checker_types.py`, `checker_policy.py`).
 5. **Policy / suppression** (`policy_file.py`, `policy/suppression/rules.py`,
    `severity.py`).
-6. **Report** (`reporter.py`, `html_report.py`, `sarif.py`,
+6. **Report** (`report/`, `sarif.py`,
    `junit_report.py`).
 
 ## When adding code here

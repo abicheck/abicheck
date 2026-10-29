@@ -1820,7 +1820,7 @@ class TestCase170Example:
 
 class TestDriftReportSection:
     def test_drift_section_lists_environment_findings(self) -> None:
-        from abicheck.reporter import to_markdown
+        from abicheck.report.dispatch_markdown import to_markdown
 
         old = _snap(
             _elf(
@@ -1841,7 +1841,7 @@ class TestDriftReportSection:
         assert "dt_relr_introduced" in md
 
     def test_no_drift_no_section(self) -> None:
-        from abicheck.reporter import to_markdown
+        from abicheck.report.dispatch_markdown import to_markdown
 
         snap = _snap(_elf())
         md = to_markdown(compare(snap, snap))

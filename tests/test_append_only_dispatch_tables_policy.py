@@ -25,7 +25,7 @@ from abicheck.model import (
     Visibility,
 )
 from abicheck.policy_file import PolicyFile, builtin_policy_path
-from abicheck.reporter import to_json
+from abicheck.report.diff_report import to_json
 
 _PTR_BITS = 64
 

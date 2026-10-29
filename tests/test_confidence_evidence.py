@@ -9,7 +9,6 @@ from __future__ import annotations
 import copy
 import json
 
-from abicheck import reporter
 from abicheck.checker import Verdict, compare
 from abicheck.checker_policy import Confidence, EvidenceTier
 from abicheck.dwarf_metadata import DwarfMetadata, StructLayout
@@ -20,6 +19,8 @@ from abicheck.model import (
     RecordType,
     Visibility,
 )
+from abicheck.report import diff_report as reporter
+from abicheck.report.dispatch_markdown import to_markdown
 
 
 def _snap(
@@ -297,7 +298,7 @@ class TestCanonicalEvidenceTier:
         """Markdown confidence section surfaces the canonical tier."""
         f = _pub_func("api", "_Z3apiv")
         r = compare(_snap(functions=[f]), _snap(functions=[f]))
-        md = reporter.to_markdown(r)
+        md = to_markdown(r)
         assert "Evidence tier" in md
         assert "header_aware" in md
 

@@ -37,8 +37,8 @@ from pathlib import Path
 from _assurance_overlay_exec import _run_overlay, _written_overlay
 from _workflow_exec import make_workspace, requires_newline_in_filenames
 
-from abicheck.cli_options import merge_compile_config
 from abicheck.dry_run_estimate import CompileContext
+from abicheck.workflows.compile_config import merge_compile_config
 
 
 class TestAssuranceOverlayPromotesSourcesRootCompileSourceDebugBlocks:
@@ -688,7 +688,7 @@ class TestAssuranceOverlayDoesNotDoubleFoldRepeatSensitiveCompileFlags:
     It doesn't: ``frontends/cli/compare_inline_evidence.py``'s
     ``_side`` performs that second stage
     UNCONDITIONALLY whenever ``--new-sources`` names a raw tree, via its
-    own ``cli_options.merge_compile_config`` call, regardless of whether
+    own ``workflows.compile_config.merge_compile_config`` call, regardless of whether
     ``--config``/``build-config`` was explicit. So the old overlay-level
     merge folded the SAME sources-root document's ``compile:`` block in
     TWICE -- once via the overlay's own promotion, once again inside
@@ -703,7 +703,7 @@ class TestAssuranceOverlayDoesNotDoubleFoldRepeatSensitiveCompileFlags:
     the real pipeline, not structural text" principle root ``AGENTS.md``
     states): first the step's real Python body generates the overlay
     (exactly as ``TestAssuranceOverlayPromotesSourcesRootCompileSourceDebugBlocks``
-    above does), then the REAL ``cli_options.merge_compile_config`` --
+    above does), then the REAL ``workflows.compile_config.merge_compile_config`` --
     the exact function both ``resolve_compile_context`` (stage 1, the
     checkout side) and ``compare_inline_evidence._side`` (stage 2, the
     sources-root side) call -- is invoked twice against that generated

@@ -23,8 +23,8 @@ from typing import TYPE_CHECKING, Any
 
 from abicheck.contract_relevance_types import ContractRelevance, evaluation_status_for
 from abicheck.policy.severity import SeverityConfig, SeverityLevel
+from abicheck.report.diff_report import to_json
 from abicheck.report.dispatch_markdown import to_markdown, to_review_digest
-from abicheck.reporter import to_json
 from tests._report_test_helpers import envelope_for
 
 if TYPE_CHECKING:

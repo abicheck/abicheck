@@ -521,7 +521,7 @@ topics:
       - abicheck/policy/disposition_acknowledgment.py
       - abicheck/policy_file_acknowledgment.py
       - abicheck/workflows/acknowledgment_inputs.py
-      - abicheck/frontends/cli/acknowledgment_config.py
+      - abicheck/workflows/compare/project_inputs.py
     allowed_summaries:
       - use/suppressions.md
       - use/disposition-audit.md
@@ -536,7 +536,7 @@ topics:
     canonical_page: use/annotations.md
     fact_sources:
       - abicheck/annotations.py
-      - abicheck/reporter_contract_blocks.py
+      - abicheck/report/contract_blocks.py
       - abicheck/cli_compare_release.py
       - abicheck/schemas/compare_report.schema.json
       - action/run.sh
@@ -547,8 +547,8 @@ topics:
   output-formats:
     canonical_page: use/output-formats.md
     fact_sources:
-      - abicheck/reporter.py
-      - abicheck/html_report.py
+      - abicheck/report/diff_report.py
+      - abicheck/report/html_compute.py
       - abicheck/sarif.py
       - abicheck/junit_report.py
       - abicheck/schemas/__init__.py

@@ -63,7 +63,6 @@ from abicheck.frontends.cli.options.evidence_roles import (
     split_build_evidence,
     split_debug_evidence,
     split_header_evidence,
-    unsided_debug_packages,
 )
 from abicheck.model import AbiSnapshot, Function, Visibility
 from abicheck.serialization import snapshot_to_json
@@ -75,6 +74,7 @@ from abicheck.workflows.evidence_transport import (
     classify_build_info_transport,
     classify_debug_transport,
     classify_header_transport,
+    unsided_debug_packages,
 )
 
 # ── shape builders: content only, the caller picks the name ──────────────────

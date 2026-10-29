@@ -296,58 +296,29 @@ def _load_suppression_and_policy(
 ) -> tuple[SuppressionList | None, PolicyFile | None]:
     """Load suppression list and policy file from CLI arguments.
 
-    Shared by ``compare`` (`cli`), ``compare-release``, ``appcompat`` and the
-    plugin command — kept here, next to ``POLICY_FILE_PARAM``, rather than in the
-    oversized ``cli.py`` so the cross-command resolution logic has one home.
+    Shared by ``compare``'s release fan-out, ``--no-baseline``, the stored
+    bundle dispatch and ``project``. The loader is
+    ``workflows.compare_policy.load_policy_inputs`` (shared with the
+    ``compare`` session and the typed API); this adapter renders its refusal
+    as the Click error it names and echoes the policy's pending
+    ``validate_overrides()`` warnings -- a policy override that downgrades a
+    critical or otherwise-BREAKING kind -- to stderr, routed through
+    ``pending_validate_overrides_warnings`` so a
+    ``dedup_validate_overrides_warnings()`` scope collapses a warning repeated
+    across several loads.
     """
-    from ....workflows.compare_policy import strict_expiry_message
-    from ....workflows.policy_file import (
-        PolicyFile,
-        pending_validate_overrides_warnings,
-    )
-    from ....workflows.suppression_input import (
-        load_suppression_files,
-    )
+    from ....workflows.compare_policy import load_policy_inputs
+    from ....workflows.policy_file import pending_validate_overrides_warnings
+    from ..run_input_errors import click_input_errors
 
-    suppression: SuppressionList | None = None
-    if suppress is not None:
-        try:
-            suppression = load_suppression_files(
-                suppress,
-                require_justification=require_justification,
-            )
-        except OSError as e:
-            raise click.BadParameter(str(e), param_hint="--suppress") from e
-        except ValueError as e:
-            msg = str(e)
-            if "no 'reason' field" in msg:
-                raise click.ClickException(msg) from e
-            raise click.BadParameter(msg, param_hint="--suppress") from e
-        expired_message = strict_expiry_message(suppression, strict_suppressions)
-        if expired_message:
-            raise click.ClickException(expired_message)
-
-    pf: PolicyFile | None = None
-    if policy_file_path is not None:
-        try:
-            pf = PolicyFile.load(policy_file_path)
-        except ImportError as e:
-            raise click.ClickException(str(e)) from e
-        except (ValueError, OSError) as e:
-            raise click.BadParameter(str(e), param_hint="--policy") from e
-        # A policy override that downgrades a critical or otherwise-BREAKING
-        # kind is exactly the kind of mistake `validate_overrides()` exists to
-        # catch -- but the method was previously dead code, called from
-        # nowhere in the CLI, so nobody ever saw its warnings. Surface them
-        # here, the one place every policy-document consumer (`compare`,
-        # `compare-release`, `scan --against`, `appcompat`) already funnels
-        # through, so a risky override is flagged regardless of which command
-        # loaded it. Routed through `pending_validate_overrides_warnings`
-        # (not `pf.validate_overrides()` directly) so a
-        # `dedup_validate_overrides_warnings()` scope -- e.g. `compare-
-        # release` wrapping its whole run -- collapses a warning repeated
-        # across several loads (here and in `service.
-        # load_suppression_and_policy`) down to one (Codex review).
+    with click_input_errors():
+        suppression, pf = load_policy_inputs(
+            suppress,
+            policy_file_path,
+            strict_suppressions=strict_suppressions,
+            require_justification=require_justification,
+        )
+    if pf is not None:
         for warning in pending_validate_overrides_warnings(pf):
             click.echo(f"Warning: {warning}", err=True)
     return suppression, pf

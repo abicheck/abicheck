@@ -61,8 +61,8 @@ class TestEveryPublicRendererRejectsARetiredMode:
 
     def _entry_points(self):
         from abicheck.junit_report import to_junit_xml
+        from abicheck.report.diff_report import to_json
         from abicheck.report.dispatch_markdown import to_markdown
-        from abicheck.reporter import to_json
         from abicheck.sarif import to_sarif
 
         return {
@@ -136,7 +136,7 @@ class TestEveryPublicRendererRejectsARetiredMode:
 
     def test_the_retired_message_names_the_replacement(self):
         from abicheck.errors import ValidationError
-        from abicheck.reporter import to_json
+        from abicheck.report.diff_report import to_json
 
         with pytest.raises(ValidationError, match="root-cause"):
             to_json(self._result(), report_mode="leaf")
@@ -512,10 +512,10 @@ class TestTheDispositionLedgersWarmTheirOwnDemangleCache:
     """
 
     def test_building_the_blocks_prewarms_once(self, monkeypatch):
-        from abicheck import reporter
         from abicheck.change_registry_types import Verdict
         from abicheck.checker_types import DiffResult
         from abicheck.model.change import Change
+        from abicheck.report import diff_report as reporter
 
         calls = []
         monkeypatch.setattr(
@@ -824,8 +824,8 @@ class TestImpactModeIsFoldedAtTheSharedBoundary:
         covered by the retired-mode sweep above instead.
         """
         from abicheck.frontends.render import render_output
+        from abicheck.report.diff_report import to_json
         from abicheck.report.dispatch_markdown import to_markdown
-        from abicheck.reporter import to_json
 
         return {
             "to_markdown": lambda result, **kw: to_markdown(result, **kw),

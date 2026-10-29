@@ -470,7 +470,7 @@ def release_md_library_findings(
     from ``cli_compare_receipt`` with its siblings when the release report
     got one builder (``report.release_document``).
     """
-    from ..reporter import release_finding_detail_lines
+    from .diff_report import release_finding_detail_lines
 
     lines: list[str] = []
     for lib in library_results:

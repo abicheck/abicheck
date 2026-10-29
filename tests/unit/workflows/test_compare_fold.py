@@ -154,47 +154,30 @@ def test_preflight_renders_pack_error_as_usage_error(monkeypatch) -> None:
 # --- Configuration fold: the CLI adapter and the workflow function ---------
 
 
-def _evaluation_config(**overrides):
-    from abicheck.frontends.cli.compare_preflight import _resolve_evaluation_config
-
-    kwargs = dict(
-        headers=(),
-        resolved_cfg=object(),
-        project_cfg=None,
-        cfg_path=None,
-        cfg_sha=None,
-        config_explicit=False,
-        policy="strict_abi",
-        policy_file_path=None,
-        policy_file=None,
-        suppression=None,
-        suppress=None,
-        symbols_list=None,
-        contract_mode=None,
-        contract_evaluation=False,
-        require_justification=False,
-        severity_preset=None,
-        pack_paths=(),
-        policy_selected_by=None,
-        policy_selected_path=None,
-        policy_selected_sha=None,
-    )
-    kwargs.update(overrides)
-    with click.Context(click.Command("compare")) as ctx:
-        return _resolve_evaluation_config(ctx, **kwargs)
-
-
 @pytest.mark.parametrize(
-    ("error", "expected_type", "expected_hint"),
+    ("error", "refusal", "expected_hint", "expected_type"),
     [
-        ("ConfigurationConflictError", click.UsageError, None),
-        ("ProjectPolicyOverridesError", click.BadParameter, "--policy"),
+        ("ConfigurationConflictError", "USAGE", None, click.UsageError),
+        ("ProjectPolicyOverridesError", "PARAMETER", "--policy", click.BadParameter),
     ],
 )
-def test_config_wrapper_renders_typed_refusals(
-    monkeypatch, error: str, expected_type: type, expected_hint: str | None
+def test_session_states_typed_configuration_refusals(
+    monkeypatch,
+    tmp_path,
+    error: str,
+    refusal: str,
+    expected_hint: str | None,
+    expected_type: type,
 ) -> None:
+    """The compare session states the configuration fold's typed refusals as
+    the exit class the CLI has always printed (a conflict is a usage error;
+    a bad ``policy.overrides`` is a bad ``--policy`` value)."""
+    from abicheck.frontends.cli.run_input_errors import as_click_error
+    from abicheck.model import AbiSnapshot
+    from abicheck.serialization import snapshot_to_json
     from abicheck.workflows import compare_configuration as cc
+    from abicheck.workflows.run_input_errors import InputRefusal, RunInputError
+    from tests._pair_session import pair_session_request, run_session
 
     def refuse(*_args, **_kwargs):
         raise getattr(cc, error)("refused")
@@ -203,10 +186,19 @@ def test_config_wrapper_renders_typed_refusals(
         "abicheck.workflows.compare.configuration.resolve_evaluation_configuration",
         refuse,
     )
-    with pytest.raises(expected_type, match="refused") as info:
-        _evaluation_config()
-    if expected_hint is not None:
-        assert info.value.param_hint == expected_hint
+    sides = []
+    for version in ("1.0", "2.0"):
+        path = tmp_path / f"{version}.json"
+        path.write_text(
+            snapshot_to_json(AbiSnapshot(library="libfoo.so", version=version)),
+            encoding="utf-8",
+        )
+        sides.append(path)
+    with pytest.raises(RunInputError, match="refused") as info:
+        run_session(pair_session_request(*sides))
+    assert info.value.refusal is InputRefusal[refusal]
+    assert info.value.param_hint == expected_hint
+    assert type(as_click_error(info.value)) is expected_type
 
 
 def _fake_configuration(pack_application):

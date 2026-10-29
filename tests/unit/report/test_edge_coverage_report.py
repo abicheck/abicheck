@@ -10,18 +10,19 @@ from __future__ import annotations
 
 import json
 
-from abicheck import reporter
 from abicheck.checker import compare
 from abicheck.elf_metadata import ElfMetadata, ElfSymbol
-from abicheck.html_report import generate_html_report
 from abicheck.model import AbiSnapshot, Function, RecordType
 from abicheck.model.dwarf_facts import DwarfMetadata, StructLayout
 from abicheck.model.extraction_scope import ExtractionScope
 from abicheck.model.ownership_rules import OwnershipRules
+from abicheck.report import diff_report as reporter
+from abicheck.report.dispatch_markdown import to_markdown
 from abicheck.report.edge_coverage_section import (
     compute_edge_coverage_section,
     edge_coverage_section_from_mapping,
 )
+from abicheck.report.html_compute import generate_html_report
 from abicheck.schemas import REPORT_SCHEMA_VERSION, load_compare_report_schema
 from tests.schema_validation import validate_instance
 
@@ -126,14 +127,14 @@ def test_section_lists_only_the_unknown_relationships():
 def test_fully_covered_comparison_states_so():
     section = compute_edge_coverage_section(compare(*_full_pair()))
     assert section is not None and section.rows == ()
-    md = reporter.to_markdown(compare(*_full_pair()))
+    md = to_markdown(compare(*_full_pair()))
     assert "## Relationship Coverage" in md
     assert "each reported absence is proven" in md
 
 
 def test_markdown_and_html_render_unknown_rows():
     result = compare(*_degraded_pair())
-    md = reporter.to_markdown(result)
+    md = to_markdown(result)
     assert "## Relationship Coverage" in md
     assert "| new | `exports` (resolved_join) | declarations | 0 | 0 | 1 |" in md
     assert "export_table[elf]: failed (export_table_not_read)" in md
@@ -154,7 +155,7 @@ def test_hand_built_result_renders_no_section():
         verdict=Verdict.NO_CHANGE,
     )
     assert compute_edge_coverage_section(result) is None
-    assert "Relationship Coverage" not in reporter.to_markdown(result)
+    assert "Relationship Coverage" not in to_markdown(result)
 
 
 def test_section_round_trips_through_its_mapping():

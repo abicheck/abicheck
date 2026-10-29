@@ -53,19 +53,6 @@ from abicheck.contract_relevance_types import (
     ContractAssurance,
     ContractRelevance,
 )
-from abicheck.html_report import (
-    build_html_document,
-    compute_confidence,
-    compute_file_metadata,
-    compute_full_change_rows,
-    compute_gate_card,
-    compute_impact,
-    compute_nav_bar,
-    compute_not_evaluated_section,
-    compute_scoped_verdict,
-    compute_summary_table,
-    generate_html_report,
-)
 from abicheck.model import AbiSnapshot
 from abicheck.policy.gate_decision import gate_decision_for_result
 from abicheck.policy.reclassify import ReclassifyRule
@@ -74,6 +61,19 @@ from abicheck.policy_file import PolicyFile
 from abicheck.report.document import ReportDocument
 from abicheck.report.document_builder import build_report_envelope
 from abicheck.report.envelope import RenderOptions
+from abicheck.report.html_change_rows import compute_full_change_rows
+from abicheck.report.html_compute import (
+    build_html_document,
+    compute_confidence,
+    compute_file_metadata,
+    compute_gate_card,
+    compute_impact,
+    compute_nav_bar,
+    compute_scoped_verdict,
+    compute_summary_table,
+    generate_html_report,
+)
+from abicheck.report.html_sections import compute_not_evaluated_section
 from abicheck.report.render_html_document import render_html_document
 
 # One marker per injectable field, all distinct, each shaped like a real

@@ -29,7 +29,7 @@ default view), and `render_markdown_alternate.py` (Markdown's `--report-mode lea
 **Every format now crosses the canonical `ReportDocument` boundary — ADR-061
 Phase 2's Markdown item is closed in full.** JSON, SARIF, JUnit, `--stat`,
 HTML, and every Markdown view (default, review digest, leaf, root-cause)
-construct a `ReportDocument` and project it purely; `reporter_markdown.py`
+construct a `ReportDocument` and project it purely; `markdown_sections.py`
 renders no report section: its `compute_*` functions return section data
 only, and the per-mode glue (`_to_markdown_root_cause` and friends) lives in
 `dispatch_markdown.py`. Markdown's per-`Change` sections
@@ -62,18 +62,18 @@ indexes by `id(change)` for O(1) lookup within one render only (`Change` has
 no `__hash__`).
 `view.py` is the shared presentation view (show-only filter, `display_changes`, `finding_id`, root-cause keys).
 
-`envelope.py` is gap C's closure and the whole-*render* counterpart to `document.py`'s whole-report value: `ReportEnvelope` holds one completed evaluation's finalized decisions — the shared `ReportDocument`, the severity `GateDecision`, one `ReportFinding` per `Change` (`scoped_only_changes` included) — plus presentation-only `RenderOptions`. `report.document_builder.build_report_envelope` builds it once above format selection (there, not here, so `envelope.py` stays a leaf: an `envelope -> build` edge closes a real cycle through `reporter.py`); `service_render.render_envelope(fmt, envelope)` projects it. A renderer takes an `envelope` parameter and *reads* decisions from it — `resolved_gate`/`resolved_document` keep a direct Tier-2/test caller without one working as before. **Never resolve a gate, a verdict, or a document inside a renderer handed an envelope.** `sarif_invocation.py` (SARIF's published invocation exit code — an exit decision, not a rendering choice) and `junit_disposition.py` moved out of the legacy monoliths for this; read `envelope.py`'s own docstring before adding a projection.
+`envelope.py` is gap C's closure and the whole-*render* counterpart to `document.py`'s whole-report value: `ReportEnvelope` holds one completed evaluation's finalized decisions — the shared `ReportDocument`, the severity `GateDecision`, one `ReportFinding` per `Change` (`scoped_only_changes` included) — plus presentation-only `RenderOptions`. `report.document_builder.build_report_envelope` builds it once above format selection (there, not here, so `envelope.py` stays a leaf: an `envelope -> build` edge closes a real cycle through `diff_report.py`); `service_render.render_envelope(fmt, envelope)` projects it. A renderer takes an `envelope` parameter and *reads* decisions from it — `resolved_gate`/`resolved_document` keep a direct Tier-2/test caller without one working as before. **Never resolve a gate, a verdict, or a document inside a renderer handed an envelope.** `sarif_invocation.py` (SARIF's published invocation exit code — an exit decision, not a rendering choice) and `junit_disposition.py` moved out of the legacy monoliths for this; read `envelope.py`'s own docstring before adding a projection.
 
 `release_document.py` is the release (directory/package) counterpart: `build_release_report` takes a `ReleaseEvaluation` to one typed view (a stored `BundleFacts` comparison's frontend builds one from its facts, so both operands share it), and `render_release_report.py` projects every release format from it. Add a release field or format there, never in the CLI helpers. The frontend resolves the effective-config receipt before calling, because it reloads policy files.
 `render_markdown.py` and `render_html.py`/`render_html_document.py` are the
 prose/markup projections, and they follow one shape you should copy for any
-new format: the *source* module (`reporter_markdown.py`, `html_report.py`)
+new format: the *source* module (`markdown_sections.py`, `html_compute.py`)
 keeps a `compute_*` function per section that reads the `DiffResult`/`Change`
 sequence and returns a small frozen struct of plain values — never a
 pre-built string or markup fragment — and this package holds the matching
 `render_*` that formats it and decides nothing. A section that does not
 exist is a `None` from `compute_*`, which is not the same as an empty one.
-HTML's whole-page assembly (`html_report.build_html_document`) folds every
+HTML's whole-page assembly (`html_compute.build_html_document`) folds every
 section's struct into one JSON-shaped mapping before wrapping it as a
 `ReportDocument` — the per-section split still holds one level down.
 
@@ -81,7 +81,7 @@ section's struct into one JSON-shaped mapping before wrapping it as a
 easy to get wrong because the rendered output is identical either way: a
 per-change `category()`/`severity()`/`impact_for()`/`kind_str()` call is a
 decision the compute half owes the renderer, not a formatting choice, and
-`html_report.py`'s `compute_full_change_rows` -> `ChangeRow` (and Markdown's
+`html_change_rows.py`'s `compute_full_change_rows` -> `ChangeRow` (and Markdown's
 `render_markdown_document._change_row`) is the shape to copy: a JSON-safe
 row carrying every registry-lookup result plus raw display field a table
 row needs. `tests/unit/report/test_render_html.py`'s
@@ -101,13 +101,11 @@ caller moved onto the new `build_*_document`/`ChangeRow`-shaped path (see git
 history); a name with a real surviving caller (e.g. `_abbr_symbol_text`/
 `_changes_table`, the former `appcompat_html.py`'s) stays.
 
-ADR-061 Phase 2 item 5 is closed: `scoped_gate.py`'s `apply_scoped_gate`
-folds scoped-gate JSON natively (pre-render), not a render -> parse -> patch
--> render pass. Legacy `reporter_markdown` is imported at module level by
-`render_markdown_document.py` and `review_digest_document.py`, and
-function-locally by `scoped_gate.py`; no `importlib` load remains. That is
-acyclic only while `reporter_markdown.py` never imports them back
-(`modules.yaml`'s `frozen_root_families` forbids a new `abicheck/reporter_*.py`).
+ADR-061 Phase 2 item 5 is closed: `scoped_gate.py`'s `apply_scoped_gate` folds scoped-gate JSON natively (pre-render), not a render -> parse -> patch -> render pass.
+
+**Outcome.** `outcome_summary.py` is the one outcome projection every pair format reads: `project_outcome` gives the verdict glyph/label, merge-effect phrase, severity `GateDecision` and the consumer's `ScopedGateFacts`, all read from the envelope and never derived from a verdict; `severity_summary_mapping` is the severity table. Read the outcome there rather than re-deriving it in a format; a release or PR-comment glyph table extends its `VERDICT_EMOJI`.
+
+The root `reporter*.py`/`html_report.py` modules are retired into this package: `diff_report.py`, `contract_blocks.py`, `html_compute.py`, and `reporter_markdown.py`'s split into `markdown_sections.py`, `review_digest_compute.py`, `root_cause_lookup.py` and `release_view_filters.py`. The empty `reporter_` entry in `modules.yaml`'s `frozen_root_families` keeps a new root `reporter_*.py` out.
 
 ## Tests
 

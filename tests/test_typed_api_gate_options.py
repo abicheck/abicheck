@@ -698,7 +698,7 @@ class TestCompareResultSeverityConfigRenderingParity:
             severity_preset="info-only",
         )
         assert result.exit_decision.code == 0
-        from abicheck.reporter import to_json
+        from abicheck.report.diff_report import to_json
 
         report = json.loads(to_json(result.diff))
         assert report["exit"]["code"] == 4
@@ -713,7 +713,7 @@ class TestCompareResultSeverityConfigRenderingParity:
             new,
             severity_preset="info-only",
         )
-        from abicheck.reporter import to_json
+        from abicheck.report.diff_report import to_json
 
         report = json.loads(
             to_json(result.diff, severity_config=result.severity_config)

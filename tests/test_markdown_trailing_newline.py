@@ -40,7 +40,7 @@ from abicheck.model import (
     RecordType,
     Visibility,
 )
-from abicheck.reporter import to_markdown
+from abicheck.report.dispatch_markdown import to_markdown
 from tests._report_test_helpers import review_digest
 
 

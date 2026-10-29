@@ -28,7 +28,7 @@ from pathlib import Path
 import pytest
 
 from abicheck.buildsource.build_config import BuildConfig
-from abicheck.frontends.cli.dump_debug_config import resolve_dump_scope_exclude_headers
+from abicheck.workflows.dump.project_config import resolve_dump_scope_exclude_headers
 
 
 def _cfg(tmp_path: Path, doc: dict) -> Path:

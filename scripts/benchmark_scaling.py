@@ -149,6 +149,7 @@ from perf_baseline import (  # noqa: E402
     total_memory_points_compared,
 )
 from perf_cache_reset import clear_process_caches as _clear_process_caches  # noqa: E402
+from perf_html_report import generate_html_report  # noqa: E402
 from perf_measurement import (  # noqa: E402
     EXPONENT_FLOOR_SECONDS,
     SampleStats,
@@ -174,7 +175,6 @@ from abicheck.elf_metadata import (  # noqa: E402
     SymbolBinding,
     SymbolType,
 )
-from abicheck.html_report import generate_html_report  # noqa: E402
 from abicheck.junit_report import to_junit_xml  # noqa: E402
 from abicheck.macho_metadata import (  # noqa: E402
     MachoExport,

@@ -201,7 +201,7 @@ class TestEvidenceDepthAndSuppressionAuditJsonByteParity:
         return DiffResult(old_version="1.0", new_version="2.0", library="libfoo.so")
 
     def test_evidence_depth_matches_reconstructed_old_fold(self) -> None:
-        from abicheck.reporter import to_json
+        from abicheck.report.diff_report import to_json
 
         result = self._base_result()
         base_text = to_json(result)  # neither field set -> pre-fold document
@@ -225,8 +225,8 @@ class TestEvidenceDepthAndSuppressionAuditJsonByteParity:
     def test_suppression_audit_matches_reconstructed_old_fold(self) -> None:
         from abicheck.policy.rule_identity import rule_id_of
         from abicheck.policy.suppression.rules import Suppression, SuppressionAudit
-        from abicheck.reporter import to_json
-        from abicheck.reporter_contract_blocks import suppression_rule_label
+        from abicheck.report.contract_blocks import suppression_rule_label
+        from abicheck.report.diff_report import to_json
 
         result = self._base_result()
         base_text = to_json(result)
@@ -266,7 +266,7 @@ class TestEvidenceDepthAndSuppressionAuditJsonByteParity:
         end), so the new mechanism must attach/emit them in the same
         relative order to stay byte-identical when both are present."""
         from abicheck.policy.suppression.rules import Suppression, SuppressionAudit
-        from abicheck.reporter import to_json
+        from abicheck.report.diff_report import to_json
 
         result = self._base_result()
         base_text = to_json(result)
@@ -312,7 +312,7 @@ class TestStatJsonIncludesSideFacts:
         return DiffResult(old_version="1.0", new_version="2.0", library="libfoo.so")
 
     def test_evidence_depth_present_in_stat_json(self) -> None:
-        from abicheck.reporter import to_stat_json
+        from abicheck.report.diff_report import to_stat_json
 
         result = self._base_result()
         result.old_evidence_depth = "build"
@@ -324,7 +324,7 @@ class TestStatJsonIncludesSideFacts:
 
     def test_suppression_audit_present_in_stat_json(self) -> None:
         from abicheck.policy.suppression.rules import Suppression, SuppressionAudit
-        from abicheck.reporter import to_stat_json
+        from abicheck.report.diff_report import to_stat_json
 
         result = self._base_result()
         rule = Suppression(symbol="never_matches_anything", reason="workaround")
@@ -343,7 +343,7 @@ class TestStatJsonIncludesSideFacts:
     def test_absent_by_default(self) -> None:
         """Negative control: neither field set -> neither key present,
         matching the other three JSON builders' pre-existing behavior."""
-        from abicheck.reporter import to_stat_json
+        from abicheck.report.diff_report import to_stat_json
 
         payload = json.loads(to_stat_json(self._base_result()))
 
@@ -375,7 +375,7 @@ class TestSuppressionRuleLabelFallbacks:
 
     def test_label_only_no_selectors_returns_bare_label(self) -> None:
         from abicheck.policy.suppression.rules import Suppression
-        from abicheck.reporter_contract_blocks import suppression_rule_label
+        from abicheck.report.contract_blocks import suppression_rule_label
 
         rule = Suppression(symbol="placeholder", label="workaround")
         rule.symbol = None
@@ -383,7 +383,7 @@ class TestSuppressionRuleLabelFallbacks:
 
     def test_no_label_no_selectors_falls_back_to_bucket_index(self) -> None:
         from abicheck.policy.suppression.rules import Suppression
-        from abicheck.reporter_contract_blocks import suppression_rule_label
+        from abicheck.report.contract_blocks import suppression_rule_label
 
         rule = Suppression(symbol="placeholder")
         rule.symbol = None

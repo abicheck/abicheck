@@ -32,6 +32,7 @@ import json
 from collections.abc import Mapping
 
 from .markdown_text import md_text
+from .outcome_summary import VERDICT_EMOJI
 from .release_document import (
     ReleaseEvaluation,
     ReleaseReport,
@@ -47,12 +48,10 @@ __all__ = [
     "render_stored_release_json",
 ]
 
+# The five comparison verdicts share the pair reports' glyphs
+# (outcome_summary); the release states beyond them are this table's own.
 _VERDICT_EMOJI = {
-    "NO_CHANGE": "✅",
-    "COMPATIBLE": "✅",
-    "COMPATIBLE_WITH_RISK": "⚠️",
-    "API_BREAK": "⚠️",
-    "BREAKING": "❌",
+    **{verdict.value: glyph for verdict, glyph in VERDICT_EMOJI.items()},
     "ERROR": "💥",
     "not_comparable": "❓",
     "unsupported": "🚫",

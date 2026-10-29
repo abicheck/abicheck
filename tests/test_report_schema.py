@@ -33,7 +33,6 @@ import json
 
 import pytest
 
-from abicheck import reporter
 from abicheck.checker import compare
 from abicheck.contract_pipeline import ContractEvaluationStage
 from abicheck.model import (
@@ -47,6 +46,8 @@ from abicheck.model import (
     Visibility,
 )
 from abicheck.policy.severity import SeverityConfig
+from abicheck.report import diff_report as reporter
+from abicheck.report.dispatch_markdown import to_markdown
 from abicheck.schemas import (
     AGGREGATE_REPORT_SCHEMA_PATH,
     COMPARE_REPORT_SCHEMA_PATH,
@@ -429,8 +430,8 @@ class TestReportValidatesAgainstSchema:
         # --contract` run (default markdown format) was
         # byte-for-byte identical to one without the flag.
         old, new = _breaking_pair()
-        md_with = reporter.to_markdown(compare(old, new, contract_evaluation=True))
-        md_without = reporter.to_markdown(compare(old, new))
+        md_with = to_markdown(compare(old, new, contract_evaluation=True))
+        md_without = to_markdown(compare(old, new))
         assert md_with != md_without
         assert "Contract:" in md_with
         assert "Contract:" not in md_without
@@ -460,7 +461,7 @@ class TestReportValidatesAgainstSchema:
         assert type_changes, "fixture must produce a Result type-size finding"
         assert any(c.contract_relevance is not None for c in type_changes)
 
-        md = reporter.to_markdown(result, report_mode="root-cause")
+        md = to_markdown(result, report_mode="root-cause")
         assert "Result" in md
         assert "Contract:" in md
 
@@ -502,7 +503,7 @@ class TestReportValidatesAgainstSchema:
         result = compare(old, new, suppression=suppression, contract_evaluation=True)
         assert result.suppressed_changes, "fixture must produce a suppressed finding"
 
-        md = reporter.to_markdown(result)
+        md = to_markdown(result)
         assert "suppressed via suppression file" in md
         assert "[contract:" in md
 

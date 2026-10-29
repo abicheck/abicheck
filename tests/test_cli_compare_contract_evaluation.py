@@ -17,7 +17,7 @@
 flag.
 
 ``service.compare_snapshots``/``run_compare_request``/``service.run_compare``
-already forward a ``contract_evaluation`` keyword (``tests/test_service_compare_pipeline_unit.py``'s ``TestContractEvaluationThreading``) and the MCP ``abi_compare`` tool
+already forward a ``contract_evaluation`` keyword (``tests/test_workflows_compare_execute.py``'s ``TestContractEvaluationThreading``) and the MCP ``abi_compare`` tool
 already exposes it, but until now no CLI front end did — ``cli.py`` was at
 its 2000-line AI-readiness hard cap, blocking a new ``@click.option`` (see
 ``docs/contribute/plans/public-contract-default.md`` Phase 3). Extracting the
@@ -231,7 +231,7 @@ class TestEndToEndJsonReport:
             RecordType as _Rec,
             ScopeOrigin as _Origin,
         )
-        from abicheck.reporter import to_json as _to_json
+        from abicheck.report.diff_report import to_json as _to_json
 
         pub = _Rec(
             name="Pub", kind="struct", size_bits=64, origin=_Origin.PUBLIC_HEADER

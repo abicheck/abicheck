@@ -367,7 +367,7 @@ def root_cause_key_and_display(
     first-slice contract is that only ``caused_by_type`` correlates
     findings). Otherwise a unique per-finding key, with the symbol (or, if
     empty, the kind) still used as the *display* root. Shared by
-    :func:`abicheck.reporter._to_json_root_cause`, :func:`_to_markdown_root_cause`,
+    :func:`abicheck.report.diff_report._to_json_root_cause`, :func:`_to_markdown_root_cause`,
     and the scoped-gate fold-in in ``cli_compare_fold.py``, which appends
     synthetic findings afterwards.
     """

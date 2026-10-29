@@ -39,14 +39,14 @@ from typing import TYPE_CHECKING, Any, cast
 
 from ..annotations import annotation_report_entries
 from ..checker import Change, DiffResult
-from ..reporter import release_finding_entry
-from ..reporter_markdown import compute_impact_table
 from ..workflows.gate import (
     apply_removed_member_floor,
     categorize_changes,
     effective_kind_sets,
     evaluate,
 )
+from .diff_report import release_finding_entry
+from .markdown_sections import compute_impact_table
 from .release_display_limits import MAX_RELEASE_FINDINGS_PER_LIBRARY
 from .view import apply_show_only
 
@@ -201,7 +201,7 @@ def release_finding_dicts(
 
     Each dict also carries ``reclassified_by`` (schema 2.31) when a
     ``reclassify:`` rule decided the change's effective verdict, via
-    :func:`abicheck.reporter.release_finding_entry` -- the identical
+    :func:`abicheck.report.diff_report.release_finding_entry` -- the identical
     resolution `compare`'s ``changes[]``/``scan --against`` use, so the
     three can't drift on which rule fired for a shared finding.
 
@@ -319,7 +319,7 @@ def project_release_library_results(
     *show_impact* (Codex review, PR #1154 follow-up: "Reject unsupported
     impact views instead of silently dropping them" -- ``compare --view
     impact`` on a directory/package input) computes each library's own
-    impact-summary table (:func:`abicheck.reporter_markdown.
+    impact-summary table (:func:`abicheck.report.markdown_sections.
     compute_impact_table`, the identical helper a single-pair `compare`
     report's own impact table uses) from the same full display pool
     :func:`release_display_buckets` builds, stashed as ``entry[

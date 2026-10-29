@@ -151,7 +151,7 @@ class TestReportSurfacing:
     def test_json_carries_demangled_symbol_for_an_elf_only_removal(
         self, deterministic_demangle
     ) -> None:
-        from abicheck.reporter import to_json
+        from abicheck.report.diff_report import to_json
 
         old = _snapshot(
             [
@@ -183,7 +183,7 @@ class TestReportSurfacing:
         removal with the mangled name and no way to show a human one. Both
         names now travel together on every machine projection, which is
         what makes the human side's automatic demangling lossless."""
-        from abicheck.reporter import to_json
+        from abicheck.report.diff_report import to_json
 
         old = _snapshot(
             [
@@ -263,7 +263,7 @@ class TestSchema:
         new = _snapshot([])
         result = compare(old, new)
 
-        from abicheck.reporter import to_json
+        from abicheck.report.diff_report import to_json
 
         report = json.loads(to_json(result))
         validate_instance(report, schema)
@@ -395,7 +395,7 @@ class TestSuppressedRemovalCarriesDemangledSymbol:
         self, deterministic_demangle
     ) -> None:
         from abicheck.policy.suppression.rules import Suppression, SuppressionList
-        from abicheck.reporter import to_json
+        from abicheck.report.diff_report import to_json
 
         old = _snapshot(
             [

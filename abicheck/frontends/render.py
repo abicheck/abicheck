@@ -27,16 +27,16 @@ from typing import TYPE_CHECKING
 
 from ..errors import ValidationError
 from ..model import AbiSnapshot
+from ..report.diff_report import (
+    to_json,
+    to_stat as to_stat,  # re-exported; see service.py's own note
+    to_stat_json as to_stat_json,  # likewise
+)
+from ..report.dispatch_markdown import to_markdown
 from ..report.document_builder import build_report_envelope
 from ..report.envelope import RenderOptions, ReportEnvelope
 from ..report.report_modes import (
     normalize_report_mode as _normalize_report_mode,
-)
-from ..reporter import (
-    to_json,
-    to_markdown,
-    to_stat as to_stat,  # re-exported; see service.py's own note
-    to_stat_json as to_stat_json,  # likewise
 )
 from ..workflows import memory_trace
 
@@ -120,7 +120,7 @@ def render_output(
     rendering option -- "ignore the format I passed and render a different
     document" -- and each of its three outcomes already has a direct public
     spelling: :data:`ONELINE_FORMAT` for the one-line summary,
-    :func:`~abicheck.reporter.to_stat_json` for the summary-only JSON, and
+    :func:`~abicheck.report.diff_report.to_stat_json` for the summary-only JSON, and
     plain ``fmt="junit"`` for JUnit. It also sat *above*
     ``_reject_unsupported_format``, so ``render_output("nonsense", stat=True)``
     returned a summary instead of raising :class:`ValidationError`. Call the
@@ -342,7 +342,7 @@ def _project_html(envelope: ReportEnvelope) -> str:
     the CI-gate card's gate and each row's verdict -- now read the envelope's
     ``gate`` and ``findings``.
     """
-    from ..html_report import generate_html_report
+    from ..report.html_compute import generate_html_report
 
     return generate_html_report(
         envelope.result,
@@ -385,7 +385,7 @@ def _project_junit(envelope: ReportEnvelope) -> str:
 
 def _project_review(envelope: ReportEnvelope) -> str:
     """The compact review digest (unconditional-recommendation Markdown)."""
-    from ..reporter import to_review_digest
+    from ..report.dispatch_markdown import to_review_digest
 
     text = to_review_digest(envelope.result, envelope=envelope)
     # Pre-existing gap, surfaced by the cross-projection test rather than by

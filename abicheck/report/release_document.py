@@ -334,11 +334,11 @@ def _junit_error_libraries(
 
 
 def _build_live(evaluation: ReleaseEvaluation, show_only: str | None) -> ReleaseReport:
-    from ..reporter_markdown import (
+    from ..workflows.release_scope import release_global_ran
+    from .release_view_filters import (
         release_bundle_findings_for_view,
         release_matrix_changes_for_view,
     )
-    from ..workflows.release_scope import release_global_ran
 
     ev = evaluation
     library_results = ev.library_results

@@ -42,11 +42,12 @@ from _compare_workloads import WORKLOADS
 
 from abicheck.checker import compare
 from abicheck.elf_metadata import ElfMetadata, ElfSymbol
-from abicheck.html_report import generate_html_report
 from abicheck.junit_report import to_junit_xml
 from abicheck.model import AbiSnapshot, Function, ScopeOrigin
 from abicheck.model.change_catalog.kinds import ChangeKind
-from abicheck.reporter import to_json, to_markdown
+from abicheck.report.diff_report import to_json
+from abicheck.report.dispatch_markdown import to_markdown
+from abicheck.report.html_compute import generate_html_report
 from abicheck.sarif import to_sarif_str
 from abicheck.serialization import snapshot_from_dict, snapshot_to_json
 from abicheck.workflows.release_public_surface import reconcile_member_sets

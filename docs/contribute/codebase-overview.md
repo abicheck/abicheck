@@ -55,7 +55,7 @@ contract and its enforcement gate.
 | Policy and classification | `checker_policy.py`, `model/change_catalog/assembled.py`, `severity.py`, `policy_file.py`, `report_classifications.py` | `ChangeKind` catalog, built-in/custom policies, severity mappings, verdicts, and classification summaries. |
 | Post-processing/scope | `diff_filtering.py`, `post_processing.py`, `surface.py`, `surface_graph.py`, `compare/internal_leak.py`, `idioms.py`, `elf_symbol_filter.py` | Public-surface resolution, evidence tiers, redundancy filtering, reachability, idiom recognition, and false-positive controls. |
 | Workflows | `cli.py`, `cli_compare_release.py`, `cli_appcompat.py`, `cli_stack.py`, `cli_baseline.py`, `cli_plugin.py`, `cli_probe.py`, `cli_surface.py`, `package.py`, `baseline.py`, `bundle.py`, `appcompat.py`, `stack_checker.py`, `resolver.py`, `binder.py`, `debian_symbols.py` | User-facing commands and higher-level workflows beyond a single pairwise compare. |
-| Reporting | `reporter.py`, `html_report.py`, `sarif.py`, `junit_report.py`, `stack_report.py`, `stack_html.py`, `appcompat_html.py`, `report_summary.py`, `annotations.py` | Markdown/JSON/SARIF/HTML/JUnit reports, CI annotations, and workflow-specific renderers. |
+| Reporting | `report/diff_report.py`, `report/html_compute.py`, `sarif.py`, `junit_report.py`, `stack_report.py`, `stack_html.py`, `appcompat_html.py`, `report_summary.py`, `annotations.py` | Markdown/JSON/SARIF/HTML/JUnit reports, CI annotations, and workflow-specific renderers. |
 
 ---
 

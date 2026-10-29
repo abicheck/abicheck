@@ -50,7 +50,7 @@ from abicheck.effective_config_digest import (
 from abicheck.policy.reclassify import ReclassifyRule
 from abicheck.policy.severity import resolve_severity_config
 from abicheck.policy_file import PolicyFile
-from abicheck.reporter import to_json
+from abicheck.report.diff_report import to_json
 
 
 def _identity(

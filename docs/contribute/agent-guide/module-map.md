@@ -456,7 +456,7 @@ Core pipeline (in order of data flow):
      one place suppression is applied — cannot see one;
      `suppression_reaches_coverage_failures()` is the executable *proof* of
      that, not its enforcement. `coverage_exit_contribution()` states §6.1's
-     `0`/`1`. Emitted by `reporter.py` under `--contract`
+     `0`/`1`. Emitted by `report/diff_report.py` under `--contract`
      (report schema 2.26), `[]` rather than omitted when a domain closed
    - `contract_coverage_exit.py` — ADR-049 Phase 7: the step that turns the
      ledger's `0`/`1` into a real exit code. Deliberately the *only* place
@@ -471,7 +471,7 @@ Core pipeline (in order of data flow):
      one path and not the other is exactly §6.4's cross-command divergence. `contract.unresolved=warn`
      (D9) zeroes the floor and changes nothing else — the failures stay
      listed and unsuppressible, because accepting incomplete assurance is
-     not hiding it. `reporter.py` emits *this* function's answer as
+     not hiding it. `report/diff_report.py` emits *this* function's answer as
      `contract_coverage_exit_contribution`, so the number a user reads is
      the one that gated them. `0` whenever no contract context exists (evaluation
      explicitly disabled); since Phase 7 every CLI run has one, and the
@@ -480,7 +480,7 @@ Core pipeline (in order of data flow):
      — ADR-049 Phase 4's assembly, JSON round-trip, and the two procedures
      D6 names. `checker.compare(..., contract_evaluation=True)` returns a
      `PersistedContractContext` on `DiffResult.contract_context`, which
-     `reporter.py` emits as the report's `contract_context` block (all three
+     `report/diff_report.py` emits as the report's `contract_context` block (all three
      JSON paths). `replay_original_decisions()` reproduces a recorded
      decision from the receipt *alone* — this build's provider defaults
      cannot alter it — while `reevaluate_from_evidence()` re-decides
@@ -571,8 +571,8 @@ Core pipeline (in order of data flow):
    many providers".
 
 6. **Reporting** — output results
-   - `reporter.py` — JSON/Markdown/text output
-   - `html_report.py` — HTML reports
+   - `report/diff_report.py` — JSON/Markdown/text output
+   - `report/html_compute.py` — HTML reports
    - `sarif.py` — SARIF 2.1.0 output
    - `junit_report.py` — JUnit XML output
    - `report_summary.py`, `report_classifications.py` — report helpers
@@ -580,7 +580,7 @@ Core pipeline (in order of data flow):
      projection every format now goes through (`render_json.py` covers
      SARIF too; also `render_xml.py`, `render_text.py`, `render_markdown.py`,
      `render_html.py`). Markdown/HTML split two ways: a `compute_*` half in
-     `reporter_markdown.py`/`html_report.py` returning frozen structs of
+     `report/markdown_sections.py`/`report/html_compute.py` returning frozen structs of
      plain values, a `render_*` half here that formats and decides nothing —
      **add a report section to that pair, never to a renderer alone**
      (`abicheck/report/AGENTS.md`)
@@ -682,6 +682,13 @@ Core pipeline (in order of data flow):
      `ABICHECK_PARALLEL_EXTRACTION=0`, forces sequential — a manifest dump
      sizes its per-TU pool off a live `MemAvailable` reading, so two at once
      jointly overcommit)
+   - `workflows/compare/session.py` (+ `session_inputs.py`, `session_request.py`)
+     — the native single-pair `compare`: one `PairSessionRequest` (resolved
+     options, the project config, the stated option names) in, one
+     `PairSessionOutcome` out; collect fold, compile context, operands,
+     resolution, policy inputs and classification in that order. Refusals
+     are `workflows/run_input_errors.RunInputError`; the CLI renders the
+     outcome
    - `service_input_resolution.py` — G33 Phase 5: the per-*input* primitives
      `compare` and `dump` share (`resolve_side_snapshot`,
      `embed_side_build_source`, `enforce_requested_depth`,
