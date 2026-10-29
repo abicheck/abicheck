@@ -27,6 +27,7 @@ from __future__ import annotations
 import gzip
 import hashlib
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -47,6 +48,15 @@ from abicheck.storage.versioning import (
 )
 
 CORPUS_ROOT = Path(__file__).parent / "fixtures" / "generations"
+#: The checkout under test. The subprocesses below run from a temp or fixture
+#: directory, where ``python -m abicheck`` would otherwise import whatever
+#: ``abicheck`` is installed, not this tree (so a generation bump would compare
+#: the installed generation against itself).
+_REPO_ROOT = Path(__file__).resolve().parents[1]
+_ABICHECK_ENV = {
+    **os.environ,
+    "PYTHONPATH": str(_REPO_ROOT),
+}
 SOURCES = CORPUS_ROOT / "corpus"
 MANIFEST: dict[str, Any] = json.loads(
     (CORPUS_ROOT / "manifest.json").read_text(encoding="utf-8")
@@ -291,6 +301,7 @@ def fresh_dump(tmp_path_factory: pytest.TempPathFactory) -> Path:
         capture_output=True,
         text=True,
         cwd=work,
+        env=_ABICHECK_ENV,
     )
     if dumped.returncode != 0:
         pytest.fail(f"abicheck dump failed:\n{dumped.stderr}")
@@ -338,6 +349,7 @@ def test_require_same_generation_refuses_a_frozen_baseline(fresh_dump: Path) -> 
         ],
         capture_output=True,
         text=True,
+        env=_ABICHECK_ENV,
     )
     assert refused.returncode == 64, refused.stderr
     assert "re-dump baseline" in refused.stderr
@@ -353,5 +365,6 @@ def test_require_same_generation_refuses_a_frozen_baseline(fresh_dump: Path) -> 
         ],
         capture_output=True,
         text=True,
+        env=_ABICHECK_ENV,
     )
     assert same.returncode == 0, same.stderr

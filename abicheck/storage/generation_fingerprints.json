@@ -69,7 +69,7 @@
       "abicheck/extract/header_scan_memo.py": "56f79b5316354b938b08a5f29779c3aaf40481892d947784ec2adb48ab5e83fb",
       "abicheck/extract/header_text.py": "b43a88d7bf1d2e601bb908c78f04cb07e552f9c59f03b678ecc85788b3d146e4",
       "abicheck/extract/headers/__init__.py": "70af0d3a16882783444077004b7a434a295505579fbbca219ce103f72074ad03",
-      "abicheck/extract/headers/ast_config.py": "9e101646e3b0db82596f9cc6fd1f72017a9301d1072a7014f264de2d45dc81db",
+      "abicheck/extract/headers/ast_config.py": "c3f57bd62c1472f5d4e3666233543404eabc65e8b7b4e4265dc432aa2b9326c6",
       "abicheck/extract/headers/ast_config_cpp20_chains.py": "ceeadbcb1d8e2eaac5eb325a3fb7c668614ce605bc04bb03835fcc4957e53c97",
       "abicheck/extract/headers/backend_plan.py": "1f02babf0ead52a65e4fa08dff8ce5b2a9d60feb1d02d22e7db30ee050cf8717",
       "abicheck/extract/headers/backend_protocol.py": "144cbe76456b6bceaf56f0edd0f3398f171178a222c8b968d53f8a17ee05a21b",
@@ -92,10 +92,10 @@
       "abicheck/extract/headers/castxml/records.py": "9093c5648bbe60334f4f3cbdd13e6e7d0eece582cbff9ef8a16aeb8096473cd6",
       "abicheck/extract/headers/castxml/scope.py": "41cecc8dd996c10a58c022e5dca4003cce9d7775adf674b339cc199fb59297c7",
       "abicheck/extract/headers/castxml/specialization.py": "3f9f021672df1b84de42bc8de5f3c915508b3f3850e0a8acbaa80a3dee04c6f3",
-      "abicheck/extract/headers/castxml/type_resolution.py": "dba855d77fb5e32a63977fe03e219712bb3d40cc8afad6ca35517ac564318fb1",
+      "abicheck/extract/headers/castxml/type_resolution.py": "105748beff190fbde393a5e68ff9857508b5bef0b0daad6569134508f507d395",
       "abicheck/extract/headers/castxml/typedef_parsing.py": "332587638d5d4b7caebbc20fa44b69c314771fffa5839a15dec59eaba3caaf93",
       "abicheck/extract/headers/castxml/vector_join.py": "043e4a849bbc324568e240d4a94323b0952583678ec2ca0a62c81515a1798db0",
-      "abicheck/extract/headers/castxml/vector_spellings.py": "95368cac86a4100e3c0e832814ccd96c53e1edbf930f680044533812a05923ec",
+      "abicheck/extract/headers/castxml/vector_spellings.py": "0a1292d18581ffe5a40bdf4c974e5337dfd10a1eecac540330ede07248db4560",
       "abicheck/extract/headers/clang/__init__.py": "538add12f3ff39e1c1b39e6f5def93b50a584b78b30c4e7e59058207222757d0",
       "abicheck/extract/headers/clang/ast_inner.py": "f695f5bb01048fa924a1b67acbbcc29630c871607f1a3b4329ec781133f296f8",
       "abicheck/extract/headers/clang/attributes.py": "4f35afe72ef319265695d3e199e10c9ef0076db4a5238161b33a076fd3a599fe",
@@ -173,17 +173,20 @@
       "abicheck/symvers_metadata.py": "372737765cd132e6e87ed891dd465d2958e04debbef774e45212ceb3036871cb",
       "abicheck/type_metadata.py": "9997189de8dac522fd1db8be5ae491d811139503f83abaaded89038eb4aa9cdf"
     },
-    "fingerprint": "f7bfcf8b609e59923f3d83608f3e18237ee65bd82f008b375b5d41c1f0eafe70",
-    "generation": 28,
-    "reason": "Darwin C-linkage helpers moved to model/name_decoration/macho_underscore.py; header backends call the same rule with identical semantics (comment/import changes only)"
+    "fingerprint": "fd09879cf2ae179af78fe61ca0b06979ef9da28bce66b241cd3d8a38ae549bc9",
+    "generation": 29,
+    "reason": "castxml complex (float _Complex) and bit-precise integer (_BitInt(N)) types join their clang spelling instead of the literal Unimplemented; the clang join's cache schema is 9"
   },
   "resolver": {
     "files": {
+      "abicheck/buildsource/graph_reconcile.py": "273685cd5d5f3a470d4fa8a3ef7232b925191fee5e66458534f0e93c65c58ede",
+      "abicheck/buildsource/graph_reconcile_candidates.py": "3f036fa81594f383831fd00c6207a60b42144b060aa1286d84980d200e224776",
       "abicheck/buildsource/providers.py": "3600c12dcfa6320f22624685931fd3b21cc9e3c41fd37fb7cfc78b7cee5216ff",
       "abicheck/buildsource/source_extractors/resolver.py": "ca778b1305f4ecf6d591c166853a33a7c66d442bffd701b091f8f52378f66730",
       "abicheck/bundle_resolution_reachability.py": "7d60ccf82fe98a12c7c81ac02d2c920492c8c20c52f0b13398195c4590615c08",
       "abicheck/compare/export_owner_resolution.py": "e9108cbdf0459cb8171f63ca328138558cfd032bff9124e4b9bd0fd5bf8553c8",
       "abicheck/debug_resolver.py": "cdcc4f72bd8fb5304fe030b3e1365da488ad009397e014ba56931a3f311cf1f3",
+      "abicheck/model/fundamental_type.py": "b9e569100278b8de64866bfc4dec6dbe9018735d22f6e907c156c075a7c4db5e",
       "abicheck/policy/use_case_reachability.py": "e21d1b32773ce42e458ec8dfe34d86c3a5c48732a829b4e985ec739cae594bc1",
       "abicheck/post_processing_reachability.py": "47692d1cf654f668d170be08b81bbb528799abdf4562413599a0ffc6bb23b88a",
       "abicheck/storage/native_identity_aliases.py": "061e634659b371f1688cfcd4845fdcbe6147b9c2cfddaa4285dd34c757ca80ef",
@@ -193,9 +196,9 @@
       "abicheck/workflows/compare/resolve.py": "dc0381227c9e8dacaa39858d3f534ff45cbb3177f9b8645a8728c3f25c460793",
       "abicheck/workflows/elf_dependency_resolver.py": "33679ec7d2b95891a9f265e79be05542b061ecaa83a7f769614aaa8b443b0f32"
     },
-    "fingerprint": "1f07f343badc76d088e56b1fc60d8c0e84e89e091f85a33e83f0ecb4ead92377",
-    "generation": 2,
-    "reason": "the resolver refuses a DSO whose export table was not read instead of resolving against an empty table; resolutions of readable DSOs are unchanged"
+    "fingerprint": "dadc5ece143c7ed2c8c09114778d0341bb69827a059fcd9cab9b5f9d44026be8",
+    "generation": 3,
+    "reason": "graph reconciliation never pairs a fundamental-type node (int, float _Complex, __int128, vector, SIMD) as a declaration rename or move; new modules model/fundamental_type.py and buildsource/graph_reconcile_candidates.py"
   },
   "source": {
     "files": {

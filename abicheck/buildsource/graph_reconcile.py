@@ -65,6 +65,11 @@ graph nodes):
   add + true remove in the flat diff, at reduced confidence.
 - **true add / true remove** — no candidate at all.
 
+**Not a candidate: fundamental types.** Before any tier runs, a node must name a
+user-declared entity (:func:`~.graph_reconcile_candidates.is_reconcilable_candidate`).
+A builtin such as ``float _Complex`` has no declaration, so it is never paired as
+a rename or move, however its parent position lines up: it is a true add/remove.
+
 **Reachability note: ``OUTCOME_MOVED`` needs a compound edit, not a pure
 move.** Every graph-node-id constructor across ``abicheck/buildsource/``
 (``header_graph.py``'s ``_decl_identity``, ``source_graph.py``'s
@@ -116,6 +121,7 @@ from ..model.source_graph_query import (
     decl_declaring_file_sets,
     representative_declaring_files,
 )
+from .graph_reconcile_candidates import is_reconcilable_candidate
 from .graph_reconcile_outcome import (
     _OUTCOME_PROSE,
     COORDINATE_EVIDENCE_PARTIAL_DECLARING_FILE,
@@ -139,14 +145,6 @@ if TYPE_CHECKING:
 _MATCH_KIND_CANONICAL_ID = "canonical_id"
 _MATCH_KIND_ALIAS = "alias"
 _MATCH_KIND_STRUCTURAL_CONTEXT = "structural_context"
-
-#: Node kinds a rename/move reconciliation applies to — declarations and
-#: types (the same set ``source_graph.DECL_NODE_KINDS`` already uses for
-#: visibility classification); file/build/link-graph nodes are structural
-#: build facts, not "the same entity renamed" candidates.
-_RECONCILABLE_KINDS: frozenset[str] = frozenset(
-    {"source_decl", "record_type", "enum_type", "typedef"}
-)
 
 
 @dataclass(frozen=True)
@@ -645,15 +643,15 @@ class _Reconciler:
 def _group_reconcilable_by_kind(
     nodes: list[GraphNode], unreconcilable: list[GraphNode]
 ) -> dict[str, list[GraphNode]]:
-    """Bucket *nodes* by kind, diverting kinds that are never reconciled.
+    """Bucket *nodes* by kind, diverting every non-candidate.
 
-    A node of an unreconcilable kind goes straight into *unreconcilable* (the
-    result's own true-added/true-removed list) — it is not a rename candidate
-    at all, so no tier ever sees it.
+    A node that :func:`~.graph_reconcile_candidates.is_reconcilable_candidate`
+    rejects goes straight into *unreconcilable* (the result's true-added or
+    true-removed list): no tier ever sees it.
     """
     by_kind: dict[str, list[GraphNode]] = {}
     for n in nodes:
-        if n.kind in _RECONCILABLE_KINDS:
+        if is_reconcilable_candidate(n):
             by_kind.setdefault(n.kind, []).append(n)
         else:
             unreconcilable.append(n)

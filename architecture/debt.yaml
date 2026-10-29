@@ -102,7 +102,7 @@
     },
     {
       "path": "abicheck/buildsource/graph_reconcile.py",
-      "baseline_lines": 910,
+      "baseline_lines": 908,
       "target": "extract/build-or-source",
       "rule": "no_growth",
       "disposition": "migrate",

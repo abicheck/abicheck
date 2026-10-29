@@ -250,8 +250,9 @@ FAMILIES: dict[str, Family] = {
             ),
             harness_tests=(),
             planned_reason=(
-                "The vector and FunctionType classes share this invariant; a family "
-                "harness that enumerates both node types and their sites is planned."
+                "The vector, complex/bit-int and FunctionType classes share this "
+                "invariant; a family harness that enumerates all of them and their "
+                "sites is planned."
             ),
         ),
         Family(
@@ -396,6 +397,7 @@ _F3 = (
     "templates.parameter_template_args_read_as_family_membership",
     "identity.header_declaration_retype_read_as_removal",
     "identity.benign_duplicate_declaration_key",
+    "identity.fundamental_type_paired_as_declaration_rename",
 )
 _F4 = (
     "classification.name_shape_as_contract_membership",
@@ -490,6 +492,7 @@ _F14 = ("extraction.vector_type_collapsed_to_plain_array",)
 _F15 = (
     "extraction.castxml_vector_element_not_modelled",
     "extraction.castxml_function_type_collapsed_to_opaque_tag",
+    "extraction.castxml_complex_and_bitint_collapsed_to_unimplemented",
 )
 _F16 = (
     "report.shared_display_budget_starvation",

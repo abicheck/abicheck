@@ -36,6 +36,7 @@ from ....name_classification import (
 )
 from ...castxml_header_compat import FLOAT128_SPELLING, FLOAT128_STANDIN
 from .context import CastxmlParserContext
+from .vector_spellings import UNEXPRESSIBLE_TYPE_CLASSES
 
 
 def type_name(ctx: CastxmlParserContext, id_: str, depth: int = 0) -> str:
@@ -152,9 +153,10 @@ def type_name_uncached(ctx: CastxmlParserContext, id_: str, depth: int = 0) -> s
         except ValueError:
             return f"{base}[{max_}]"
         return f"{base}[{max(count, 0)}]"
-    if tag == "Unimplemented" and el.get("type_class") == "Vector":
-        # castxml drops a vector's element and lane count; the clang join
-        # (``vector_spellings``) supplies the spelling, or the node stays unresolved.
+    if tag == "Unimplemented" and el.get("type_class") in UNEXPRESSIBLE_TYPE_CLASSES:
+        # castxml drops a vector's element and lane count, and a complex or
+        # bit-precise integer's spelling; the clang join (``vector_spellings``)
+        # supplies it, or the node stays unresolved.
         return ctx.vector_spellings.get(id_, "Unimplemented")
     if tag == "AtomicType" or (
         tag == "Unimplemented" and el.get("type_class") == "Atomic"

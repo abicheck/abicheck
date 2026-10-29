@@ -591,4 +591,49 @@ EXTRACTION_BUG_CLASSES: tuple[BugClass, ...] = (
         public_surfaces=("cli",),
         axes={"dialect": ("c++17", "c++20", "c++23")},
     ),
+    BugClass(
+        id="identity.fundamental_type_paired_as_declaration_rename",
+        invariant=(
+            "Graph reconciliation pairs two removed/added nodes as a rename or a "
+            "move only when both name a user-declared entity. A fundamental type "
+            "(int, float _Complex, __int128, a vector or SIMD type, and any "
+            "pointer, cv or array form of one) is never a rename candidate, so a "
+            "change of builtin type (float _Complex -> double _Complex) is a "
+            "true add and remove, never 'the same declaration, renamed'."
+        ),
+        # PLACEHOLDER: the PR number is not known yet; set it when the PR opens.
+        fixed_by=(1835,),
+        seed_tests=(
+            "tests/test_graph_reconcile_fundamental.py",
+            "tests/test_graph_reconcile_fundamental_cli.py",
+            "tests/test_family_f3_identity.py",
+        ),
+        public_surfaces=("cli",),
+        axes={
+            "entity": ("fundamental", "user_declared"),
+            "shape": ("param", "field", "return"),
+            "backend": ("castxml", "clang"),
+        },
+    ),
+    BugClass(
+        id="extraction.castxml_complex_and_bitint_collapsed_to_unimplemented",
+        invariant=(
+            "A castxml complex (float _Complex) or bit-precise integer (_BitInt(N)) "
+            "node resolves to the spelling clang gives for the same declaration, or "
+            "stays unresolved; it is never the one literal 'Unimplemented' spelling "
+            "shared by every such type, which hid a same-size element change from "
+            "the header comparison."
+        ),
+        # PLACEHOLDER: the PR number is not known yet; set it when the PR opens.
+        fixed_by=(1835,),
+        seed_tests=(
+            "tests/test_castxml_complex_spelling.py",
+            "tests/test_graph_reconcile_fundamental_cli.py",
+        ),
+        public_surfaces=("cli",),
+        axes={
+            "type_class": ("Complex", "BitInt"),
+            "site": ("param", "field", "return", "typedef"),
+        },
+    ),
 )

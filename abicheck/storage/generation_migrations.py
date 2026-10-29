@@ -296,6 +296,14 @@ SPELLING_MIGRATIONS: Mapping[int, GenerationSpellingChange] = {
         "rewrite is needed (a baseline from an unreadable binary must be "
         "re-dumped, not rewritten)"
     ),
+    29: GenerationSpellingChange(
+        "castxml complex and bit-precise integer types (``float _Complex``, "
+        "``_BitInt(N)``) resolve to their clang spelling from the clang AST, where "
+        "they were the literal 'Unimplemented' -- one spelling shared by every such "
+        "type, so a 'float _Complex' -> 'double _Complex' change compared equal. A "
+        "stored 'Unimplemented' cannot say which type it was, so no rewrite is sound "
+        "and a baseline holding one is re-dumped"
+    ),
 }
 
 #: Reasons that say nothing about what was audited; the bump gate refuses them.

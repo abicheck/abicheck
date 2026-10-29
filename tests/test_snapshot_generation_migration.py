@@ -39,6 +39,7 @@ from abicheck.storage.generation_migrations import (
 from abicheck.storage.versioning import (
     EXTRACTOR_GENERATION,
     GENERATION_DRIFT_NOTICE_MARKER,
+    RESOLVER_GENERATION,
 )
 
 _SPELLING_INTRODUCED_AT = 6  # castxml AutoType -> auto
@@ -132,7 +133,11 @@ def test_current_generation_spelling_is_not_migrated(spelling: str) -> None:
     the generation that changed the spelling keeps what it says. This is the
     control showing the oracle above would catch a missing migration."""
     fresh = _fresh("return", spelling)
-    stamp = {"extractor": EXTRACTOR_GENERATION, "resolver": 2, "source": 0}
+    stamp = {
+        "extractor": EXTRACTOR_GENERATION,
+        "resolver": RESOLVER_GENERATION,
+        "source": 0,
+    }
     old = snapshot_from_dict(_as_old_generation(snapshot_to_dict(fresh), stamp))
     result = compare(old, snapshot_from_dict(snapshot_to_dict(fresh)))
     assert result.changes, "an unmigrated AutoType spelling must still diff"
