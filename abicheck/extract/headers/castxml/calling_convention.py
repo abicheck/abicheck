@@ -184,6 +184,14 @@ def _code_window(lines: list[str], line_no: int) -> tuple[str, int, int]:
     return window, line_start, len(window) if line_end == -1 else line_end
 
 
+#: The text right before a function name when the name is declared through a
+#: pointer declarator, ``(``[attributes] ``*`` -- a function returning a
+#: function pointer, whose declarator opens before the name.
+_POINTER_RETURN_DECLARATOR = re.compile(
+    r"\(\s*(?:__attribute__\s*\(\(.*?\)\)\s*)*\*\s*$", re.DOTALL
+)
+
+
 def source_calling_conventions(
     ctx: CastxmlParserContext, el: Element, name: str
 ) -> set[str]:
@@ -204,6 +212,12 @@ def source_calling_conventions(
     found: set[str] = set()
     pattern = re.compile(rf"(?<![\w:]){re.escape(name)}\s*\(")
     for match in pattern.finditer(window, line_start, line_end):
+        if _POINTER_RETURN_DECLARATOR.search(window[: match.start()]):
+            # ``void (__attribute__((ms_abi)) *f(void))(int)``: the convention
+            # sits in the declarator of the *returned* function type, not on f.
+            # castxml's return:<f> join carries it on that type; reading it here
+            # as f's own convention reported the return as a convention change.
+            continue
         found |= calling_conventions_in(
             _declaration_outside_params(window, name, match.start())
         )

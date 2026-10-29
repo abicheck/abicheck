@@ -75,7 +75,7 @@
       "abicheck/extract/headers/backend_protocol.py": "144cbe76456b6bceaf56f0edd0f3398f171178a222c8b968d53f8a17ee05a21b",
       "abicheck/extract/headers/castxml/__init__.py": "cebb319d35840200904dde9fe4ad16489124b02327a50d8351b086844ee19943",
       "abicheck/extract/headers/castxml/backend.py": "2b0439666288ce34a6265413812251574165ce365ee765cdb3c96b7f80f5e163",
-      "abicheck/extract/headers/castxml/calling_convention.py": "ab4cd4474d11eb0da2216b29393e9daf1dbcf94226204237fd4c0381adacbcbb",
+      "abicheck/extract/headers/castxml/calling_convention.py": "668a3306167dd7381c4cdc5f72ba83e364bc88ac62a9a19dfd1d55b9f9a3fa78",
       "abicheck/extract/headers/castxml/context.py": "c4ecf8b6af95562a5d5c32eea8de28565a74cd35514f4f675059af493b0ad641",
       "abicheck/extract/headers/castxml/dumper.py": "0e5033634f2b1805f0d0c2ebedb24eac3de572a1a6d4c11a826f10ce4c48f9de",
       "abicheck/extract/headers/castxml/duplicate_declarations.py": "977b85a15408fa9877b9b686f0bd913af9442e4da5b1d9292975bda7eff424f7",
@@ -175,9 +175,9 @@
       "abicheck/symvers_metadata.py": "372737765cd132e6e87ed891dd465d2958e04debbef774e45212ceb3036871cb",
       "abicheck/type_metadata.py": "9997189de8dac522fd1db8be5ae491d811139503f83abaaded89038eb4aa9cdf"
     },
-    "fingerprint": "fd26adc078bfc34b115059531778c1362b96e5abf873b27156b0d7d2524b0558",
+    "fingerprint": "75365dcb9765debf689d392a59c2255b617e70c90810ddb23bf768071f83c611",
     "generation": 29,
-    "reason": "generation 29 is unreleased in this branch: the return-site convention join, the PDB procedure spelling (extract/pdb_procedure_spelling.py) and the migration row's wording were settled within it; the constant stays at 29"
+    "reason": "generation 29 is unreleased in this branch: the returned-function-pointer convention is no longer attributed to the declaring function (castxml calling_convention.py) within it; the constant stays at 29"
   },
   "resolver": {
     "files": {
