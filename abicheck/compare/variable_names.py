@@ -26,16 +26,40 @@ way the entity id spells it.
 The entity id does not always carry the scope: a variable with a real Itanium
 mangling is keyed by that mangling alone (``extra=("mangled", ...)``, no
 scope segments), so for those the qualified spelling is the demangled symbol
-(``_ZN3K_S3K_VE`` -> ``K_S::K_V``). A variable with neither a scope-bearing
-entity id nor a C++ mangling (a C global, a DWARF-only declaration) falls back
-to the leaf, the only spelling that producer has.
+(``_ZN3K_S3K_VE`` -> ``K_S::K_V``), or for an MSVC mangling the same way
+(``?K_V@K_S@@2HB`` -> ``K_S::K_V``, see :func:`msvc_data_qualified_name`). A
+variable with none of these (a C global, a template-argument scope, a DWARF-only
+declaration) falls back to the leaf, the only spelling that is certain.
 """
 
 from __future__ import annotations
 
 from ..demangle import demangle
 from ..model.identity import EntityId
+from ..model.mangled_name import msvc_scope_components
 from ..model.semantic_ir_legacy_adapter import render_display_name_or_leaf
+
+
+def msvc_data_qualified_name(mangled: str) -> str | None:
+    """The qualified spelling of an MSVC-mangled *data* symbol, else ``None``.
+
+    A data symbol is ``?<leaf>@<scope>...@@<storage-class digit><type>``
+    (``?K_V@K_S@@2HB`` is ``K_S::K_V``; ``?g@ns@@3HA`` is ``ns::g``). The scope
+    chain is :func:`msvc_scope_components`' own, which already returns ``None``
+    for a template-argument scope (``?$``), an anonymous namespace (``?A``), or a
+    backreference (a digit component). A function or special member has a letter
+    where the storage class digit goes, so it is rejected here rather than
+    spelled as a variable.
+    """
+    if not mangled.startswith("?"):
+        return None
+    end = mangled.find("@@")
+    if end == -1 or end + 2 >= len(mangled) or not mangled[end + 2].isdigit():
+        return None
+    components = msvc_scope_components(mangled)
+    if components is None:
+        return None
+    return "::".join(components)
 
 
 def qualified_variable_name(
@@ -53,4 +77,7 @@ def qualified_variable_name(
         # spelling is not a variable's name, so it is not used.
         if demangled and "(" not in demangled:
             return demangled
+        msvc = msvc_data_qualified_name(mangled)
+        if msvc is not None:
+            return msvc
     return leaf
