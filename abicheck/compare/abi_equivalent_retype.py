@@ -123,7 +123,9 @@ def _function_retype(change: Change, old: AbiSnapshot, new: AbiSnapshot) -> bool
     return _params_retyped_only(old_fn.params, new_fn.params)
 
 
-def _field_retype(change: Change, old: AbiSnapshot, new: AbiSnapshot) -> bool:
+def _field_retype(
+    change: Change, old: AbiSnapshot, new: AbiSnapshot, index: _Index
+) -> bool:
     # TYPE_FIELD_TYPE_CHANGED names the record in ``symbol``; the DWARF layout tier's
     # STRUCT_FIELD_TYPE_CHANGED names ``record::field`` there.
     name = change.qualified_name or change.symbol
@@ -133,8 +135,8 @@ def _field_retype(change: Change, old: AbiSnapshot, new: AbiSnapshot) -> bool:
     new_rec: RecordType | None = new.type_by_name(name)
     if old_rec is None or new_rec is None or not change.field_name:
         return False
-    old_f = _field_named(old_rec, change.field_name)
-    new_f = _field_named(new_rec, change.field_name)
+    old_f = index.field(old_rec, change.field_name)
+    new_f = index.field(new_rec, change.field_name)
     if old_f is None or new_f is None or old_f.type == new_f.type:
         return False
     return _comparable_equal(
@@ -142,11 +144,37 @@ def _field_retype(change: Change, old: AbiSnapshot, new: AbiSnapshot) -> bool:
     )
 
 
-def _field_named(record: RecordType, field_name: str) -> TypeField | None:
-    for fld in record.fields:
-        if fld.name == field_name:
-            return fld
-    return None
+class _Index:
+    """Per-call lookup tables, built on first use, so a pass over n changes
+    stays linear: a record's fields by name, and each side's typedefs by bare
+    name (a name shared by two typedefs maps to None: not one slot)."""
+
+    def __init__(self) -> None:
+        self._fields: dict[int, dict[str, TypeField]] = {}
+        self._typedefs: dict[int, dict[str, str | None]] = {}
+
+    def field(self, record: RecordType, field_name: str) -> TypeField | None:
+        by_name = self._fields.get(id(record))
+        if by_name is None:
+            by_name = {}
+            for fld in record.fields:
+                by_name.setdefault(fld.name, fld)
+            self._fields[id(record)] = by_name
+        return by_name.get(field_name)
+
+    def typedef_name(self, snap: AbiSnapshot, bare: str) -> str | None:
+        by_bare = self._typedefs.get(id(snap))
+        if by_bare is None:
+            seen: dict[str, set[str]] = {}
+            decls = snap.declarations
+            for q in (*decls.typedefs_qualified, *decls.typedefs):
+                seen.setdefault(q.rsplit("::", 1)[-1], set()).add(q)
+            by_bare = {
+                b: (next(iter(names)) if len(names) == 1 else None)
+                for b, names in seen.items()
+            }
+            self._typedefs[id(snap)] = by_bare
+        return by_bare.get(bare)
 
 
 def _variable_retype(change: Change, old: AbiSnapshot, new: AbiSnapshot) -> bool:
@@ -159,44 +187,43 @@ def _variable_retype(change: Change, old: AbiSnapshot, new: AbiSnapshot) -> bool
     )
 
 
-def _typedef_fact(snap: AbiSnapshot, bare: str) -> Fact[AbiFundamental] | None:
+def _typedef_fact(
+    snap: AbiSnapshot, bare: str, index: _Index
+) -> Fact[AbiFundamental] | None:
     """The target fact of the one typedef named *bare* (any scope), or None.
 
     A bare name shared by two typedefs is not one slot, so it reads no fact.
     """
-    names = {
-        q
-        for q in (*snap.declarations.typedefs_qualified, *snap.declarations.typedefs)
-        if q.rsplit("::", 1)[-1] == bare
-    }
-    if len(names) != 1:
+    name = index.typedef_name(snap, bare)
+    if name is None:
         return None
-    (name,) = names
     return (snap.typedef_abi_facts or {}).get(name)
 
 
-def _typedef_retype(change: Change, old: AbiSnapshot, new: AbiSnapshot) -> bool:
+def _typedef_retype(
+    change: Change, old: AbiSnapshot, new: AbiSnapshot, index: _Index
+) -> bool:
     if change.old_value == change.new_value:
         return False
     return _comparable_equal(
         compare_facts(
-            _typedef_fact(old, change.symbol),
-            _typedef_fact(new, change.symbol),
+            _typedef_fact(old, change.symbol, index),
+            _typedef_fact(new, change.symbol, index),
             _UNREAD_DEFAULT,
         )
     )
 
 
-def _retyped(change: Change, old: AbiSnapshot, new: AbiSnapshot) -> bool:
+def _retyped(change: Change, old: AbiSnapshot, new: AbiSnapshot, index: _Index) -> bool:
     if change.kind is ChangeKind.TYPEDEF_BASE_CHANGED:
-        return _typedef_retype(change, old, new)
+        return _typedef_retype(change, old, new, index)
     if change.kind in (ChangeKind.FUNC_PARAMS_CHANGED, ChangeKind.FUNC_RETURN_CHANGED):
         return _function_retype(change, old, new)
     if change.kind in (
         ChangeKind.TYPE_FIELD_TYPE_CHANGED,
         ChangeKind.STRUCT_FIELD_TYPE_CHANGED,
     ):
-        return _field_retype(change, old, new)
+        return _field_retype(change, old, new, index)
     return _variable_retype(change, old, new)
 
 
@@ -210,8 +237,9 @@ def refine_abi_equivalent_retypes(
     old/new spellings; only its kind and description change.
     """
     result: list[Change] = []
+    index = _Index()
     for change in changes:
-        if change.kind in _RETYPE_KINDS and _retyped(change, old, new):
+        if change.kind in _RETYPE_KINDS and _retyped(change, old, new, index):
             result.append(
                 replace(
                     change,
