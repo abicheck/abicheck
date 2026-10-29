@@ -180,7 +180,7 @@ def test_a_real_comparison_keeps_its_full_finding_set_under_reuse(
     import json as _json
 
     from abicheck import dumper_clang
-    from abicheck.reporter import to_json
+    from abicheck.report.diff_report import to_json
 
     builds: dict[bool, int] = {}
 

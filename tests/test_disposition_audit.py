@@ -154,7 +154,7 @@ class TestHundredSuppressedRemovals:
         assert rule.intent == "unspecified"
 
     def test_rule_provenance_reaches_the_json_suppression_ledger(self, result) -> None:
-        from abicheck import reporter
+        from abicheck.report import diff_report as reporter
 
         report = json.loads(reporter.to_json(result))
         entries = report["suppression"]["suppressed_changes"]
@@ -179,8 +179,8 @@ class TestHundredSuppressedRemovals:
     def test_every_projection_states_the_counts(self, result) -> None:
         """Workstream G's report invariant: collapsing detail is fine,
         dropping the counts is not."""
-        from abicheck import reporter
         from abicheck.pr_comment import build_model, render_comment
+        from abicheck.report import diff_report as reporter
 
         one_line = stat_line(result)
         assert "100 detected" in one_line and "0 gating" in one_line
@@ -208,8 +208,8 @@ class TestHundredSuppressedRemovals:
         assert "0 gating" in comment
         assert "bulk internal churn" in comment
 
-        from abicheck.html_report import generate_html_report
         from abicheck.junit_report import to_junit_xml
+        from abicheck.report.html_compute import generate_html_report
         from abicheck.sarif import to_sarif
 
         audit = to_sarif(result)["runs"][0]["properties"]["dispositionAudit"]
@@ -1182,9 +1182,9 @@ def test_the_pr_comment_and_html_state_a_support_gap_on_a_zero_change_run() -> N
     that most needs the caveat."""
     import json as _json
 
-    from abicheck import reporter
-    from abicheck.html_report import generate_html_report
     from abicheck.pr_comment import build_model, render_comment
+    from abicheck.report import diff_report as reporter
+    from abicheck.report.html_compute import generate_html_report
 
     old, new = _snapshots()
     result = compare(old, new)

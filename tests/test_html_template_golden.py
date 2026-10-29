@@ -27,11 +27,11 @@ from abicheck.contract_relevance_types import (
     ContractAssurance,
     ContractRelevance,
 )
-from abicheck.html_report import generate_html_report
 from abicheck.model.change import Change
 from abicheck.policy.reclassify import ReclassifyRule
 from abicheck.policy.severity import SeverityConfig
 from abicheck.policy_file import PolicyFile
+from abicheck.report.html_compute import generate_html_report
 from abicheck.stack_checker import StackCheckResult, StackVerdict
 from abicheck.stack_html import stack_to_html
 

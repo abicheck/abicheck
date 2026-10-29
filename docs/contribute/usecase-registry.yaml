@@ -718,7 +718,7 @@ use_cases:
     journey_stages: [adopt_ci]
     adrs: [ADR-004, ADR-014]
     evidence:
-      modules: [abicheck/reporter.py, abicheck/schemas/__init__.py]
+      modules: [abicheck/report/diff_report.py, abicheck/schemas/__init__.py]
       tests: [tests/test_reporter.py, tests/test_report_schema.py]
 
   - id: UC-REP-sarif
@@ -756,7 +756,7 @@ use_cases:
       escaping is asserted in tests/test_report_sections.py; appcompat and
       stack-check render paths are exercised by the workflow E2E tests.
     evidence:
-      modules: [abicheck/reporter.py, abicheck/html_report.py]
+      modules: [abicheck/report/diff_report.py, abicheck/report/html_compute.py]
       tests: [tests/test_sprint9_html.py, tests/test_report_sections.py]
 
   # ── toolchain / language standard ───────────────────────────────────────────

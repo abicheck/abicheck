@@ -5,7 +5,9 @@ import json
 import pytest
 
 from abicheck.checker import Change, ChangeKind, DiffResult, Verdict
-from abicheck.reporter import to_json, to_markdown, to_stat_json
+from abicheck.checker_policy import Confidence
+from abicheck.report.diff_report import to_json, to_stat_json
+from abicheck.report.dispatch_markdown import to_markdown
 from tests._report_test_helpers import make_result as _result, review_digest
 
 
@@ -1662,7 +1664,6 @@ class TestConfidenceInJson:
         assert "coverage_warnings" not in d  # omitted when empty
 
     def test_confidence_with_tiers(self):
-        from abicheck.checker_policy import Confidence
 
         r = _result(
             Verdict.BREAKING,
@@ -1700,7 +1701,6 @@ class TestConfidenceInMarkdown:
     """Markdown report must include Analysis Confidence section."""
 
     def test_confidence_section_present(self):
-        from abicheck.checker_policy import Confidence
 
         r = _result(
             Verdict.COMPATIBLE,
@@ -1752,7 +1752,6 @@ class TestStatJsonConfidence:
         assert "coverage_warnings" not in d
 
     def test_stat_json_with_confidence(self):
-        from abicheck.checker_policy import Confidence
 
         r = _result(
             Verdict.BREAKING,

@@ -393,7 +393,7 @@ def dispatch(
         # NEW_INPUT is a release-style operand, so --output-dir writes one
         # `{library}.json` per matched library, mirroring the live release
         # fan-out's own layout.
-        from ....reporter import to_json
+        from ....report.diff_report import to_json
 
         for diff in result.per_library:
             _safe_write_output(

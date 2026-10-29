@@ -33,8 +33,10 @@ from abicheck.model import (
     Variable,
     Visibility,
 )
+from abicheck.report.diff_report import to_json, to_stat_json
+from abicheck.report.dispatch_markdown import to_markdown
+from abicheck.report.render_markdown import _format_change_md
 from abicheck.report.view import ShowOnlyFilter, apply_show_only
-from abicheck.reporter import to_json, to_markdown, to_stat_json
 from tests._report_test_helpers import make_diff as _make_diff, stat_line
 
 # ---------------------------------------------------------------------------
@@ -657,8 +659,8 @@ class TestApplyShowOnly:
 
 
 def _impact_table_lines(result, displayed_changes=None):
+    from abicheck.report.markdown_sections import compute_impact_table
     from abicheck.report.render_markdown import render_impact_table
-    from abicheck.reporter_markdown import compute_impact_table
 
     return render_impact_table(compute_impact_table(result, displayed_changes))
 
@@ -981,7 +983,6 @@ class TestFormatChangeMd:
     """Exercise _format_change_md edge cases."""
 
     def test_change_with_all_metadata(self):
-        from abicheck.reporter import _format_change_md
 
         c = Change(
             kind=ChangeKind.FUNC_REMOVED,
@@ -999,7 +1000,6 @@ class TestFormatChangeMd:
         assert "+1 more" in line  # 6 affected, show 5
 
     def test_change_with_new_value_only(self):
-        from abicheck.reporter import _format_change_md
 
         c = Change(
             kind=ChangeKind.FUNC_ADDED,
@@ -1011,7 +1011,6 @@ class TestFormatChangeMd:
         assert "`void bar()`" in line
 
     def test_change_with_both_values(self):
-        from abicheck.reporter import _format_change_md
 
         c = Change(
             kind=ChangeKind.FUNC_RETURN_CHANGED,

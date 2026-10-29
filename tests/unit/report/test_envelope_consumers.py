@@ -18,8 +18,9 @@ from abicheck.checker import Change, ChangeKind, Verdict
 from abicheck.frontends.render import render_output
 from abicheck.model import AbiSnapshot
 from abicheck.policy.severity import PRESET_STRICT
+from abicheck.report.diff_report import to_stat
 from abicheck.report.dispatch_markdown import to_markdown
-from abicheck.reporter_markdown import compute_severity_summary, to_stat
+from abicheck.report.outcome_summary import compute_severity_summary
 from tests._report_test_helpers import envelope_for, make_result
 
 _SNAP = AbiSnapshot(library="libtest.so.1", version="1.0")

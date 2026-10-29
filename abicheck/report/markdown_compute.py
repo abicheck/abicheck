@@ -34,13 +34,6 @@ from collections.abc import Mapping, Sequence
 from dataclasses import asdict, replace
 from typing import Any
 
-# ADR-063 T10: static now that `reporter_markdown.py` no longer imports
-# anything from this module (see this module's own docstring) -- the
-# `_reporter_markdown()` importlib indirection this file used to need is
-# retired; every call site below keeps the same `rm.compute_*(...)` shape
-# it always had, just resolved through this module-level import.
-import abicheck.reporter_markdown as _reporter_markdown_module
-
 from .change_inventory import headline_hygiene_fields, unstamped
 from .disposition_audit import (
     disposition_audit_dict_reusing_document,
@@ -50,9 +43,21 @@ from .edge_coverage_section import (
     compute_edge_coverage_section,
 )
 from .envelope import ReportEnvelope, resolved_document
-from .finding import ReportFinding, build_report_findings
+from .finding import build_report_findings
 from .gating_budget import non_gating_change_ids
+from .markdown_sections import (
+    compute_confidence_section,
+    compute_contract_conflicts_section,
+    compute_environment_drift,
+    compute_headline_table,
+    compute_impact_table,
+    compute_library_files,
+    compute_policy_section,
+    compute_recommendation_section,
+    compute_severity_sections,
+)
 from .not_evaluated_section import compute_not_evaluated
+from .outcome_summary import VERDICT_EMOJI, VERDICT_LABEL, severity_summary_mapping
 from .policy_facts import (
     accepted_break_ids,
     evidence_status_of,
@@ -74,91 +79,12 @@ from .section_notes import (
 from .surface_changes import (
     compute_surface_changes,
 )
+from .use_case_impact_render import use_cases_by_finding_for
 from .view import display_changes, resolve_scoped_gate_findings
-
-
-def _reporter_markdown() -> Any:
-    """``abicheck.reporter_markdown`` -- kept as a function for a minimal
-    diff against every existing ``rm = _reporter_markdown()`` call site
-    below (ADR-063 T10 made the underlying import static; this wrapper is
-    not itself dynamic any more)."""
-    return _reporter_markdown_module
 
 
 def _opt_asdict(value: Any) -> dict[str, Any] | None:
     return None if value is None else asdict(value)
-
-
-def _severity_counts_for(
-    result: Any,
-    changes: list[Any],
-    envelope: ReportEnvelope | None,
-) -> tuple[dict[str, int], dict[str, int]]:
-    """Per-category totals for the severity table: ``(displayed, exit)``.
-
-    *displayed* counts *changes* (the ``--show-only``-filtered set the ``Count``
-    column reports); *exit* counts the set the gate scores (ADR-049 D1), which
-    drives ``Exit Impact``. Both read each change's already-resolved
-    :class:`~abicheck.report.finding.ReportFinding` category, so the table
-    never classifies a change itself. A direct caller with no envelope resolves
-    the findings here through the same primitive the envelope uses.
-    """
-    from ..policy.severity import gate_eligible_changes
-
-    def findings_for(cs: Sequence[Any]) -> Sequence[ReportFinding]:
-        if envelope is not None:
-            return envelope.findings_for(list(cs))
-        return build_report_findings(
-            list(cs),
-            policy=result.policy,
-            kind_sets=kind_sets_for(result),
-            policy_file=result.policy_file,
-        )
-
-    def tally(findings: Sequence[ReportFinding]) -> dict[str, int]:
-        counts: dict[str, int] = {}
-        for finding in findings:
-            key = finding.category.value
-            counts[key] = counts.get(key, 0) + 1
-        return counts
-
-    return (
-        tally(findings_for(changes)),
-        tally(findings_for(gate_eligible_changes(list(result.changes)))),
-    )
-
-
-def _severity_summary_mapping(
-    result: Any,
-    changes: list[Any],
-    severity_config: Any,
-    envelope: ReportEnvelope | None,
-    *,
-    scoped_gate: bool,
-) -> dict[str, Any] | None:
-    """The severity table as a JSON-safe mapping, or ``None`` with no severity config.
-
-    *scoped_gate* is the root-cause view's opt-in to the ``--used-by`` /
-    ``--required-symbol`` gate numbers; the full view never reads them.
-    """
-    if severity_config is None:
-        return None
-    displayed, exit_counts = _severity_counts_for(result, changes, envelope)
-    return asdict(
-        _reporter_markdown().compute_severity_summary(
-            severity_config,
-            counts=displayed,
-            exit_counts=exit_counts,
-            scoped_counts=(
-                getattr(result, "scoped_severity_counts", None) if scoped_gate else None
-            ),
-            scoped_blocking_categories=(
-                getattr(result, "scoped_blocking_categories", None)
-                if scoped_gate
-                else None
-            ),
-        )
-    )
 
 
 def _resolve_displayed_changes(
@@ -303,11 +229,10 @@ def build_markdown_document(
     -- an arrangement of already-decided findings, not a second opinion about
     them.
     """
-    rm = _reporter_markdown()
     shared_document = resolved_document(envelope)
     verdict = result.verdict
-    emoji = rm._VERDICT_EMOJI[verdict]
-    label = rm._VERDICT_LABEL[verdict]
+    emoji = VERDICT_EMOJI[verdict]
+    label = VERDICT_LABEL[verdict]
 
     old_meta = getattr(result, "old_metadata", None)
     new_meta = getattr(result, "new_metadata", None)
@@ -345,8 +270,8 @@ def build_markdown_document(
     # `compare --use-cases`: the per-finding inverse of the attached
     # `UseCaseImpact` (reached through the result, since `report` may not
     # import the unclassified `impact` package); `None` when none ran.
-    use_cases = rm.use_cases_by_finding_for(result)
-    severity_data = rm.compute_severity_sections(
+    use_cases = use_cases_by_finding_for(result)
+    severity_data = compute_severity_sections(
         breaking, source_breaks, risk, compatible, severity_config=severity_config
     )
     not_evaluated = compute_not_evaluated(model.not_evaluated)
@@ -358,7 +283,7 @@ def build_markdown_document(
     # table` independently call `policy.evaluate.effective_verdict`
     # fresh a second time, which could disagree with the envelope once a
     # dated `PolicyFile.reclassify` rule expires (Codex review, evidence).
-    headline_table = rm.compute_headline_table(result, emoji, label)
+    headline_table = compute_headline_table(result, emoji, label)
     if envelope is not None:
         ev = envelope.findings
         overrides = {id(c): f.verdict for c, f in zip(result.changes, ev)}
@@ -381,23 +306,21 @@ def build_markdown_document(
         "demangle": demangle,
         "headline": asdict(headline_table),
         "rtti_note": _opt_asdict(compute_rtti_note(breaking)),
-        "confidence": _opt_asdict(rm.compute_confidence_section(result)),
+        "confidence": _opt_asdict(compute_confidence_section(result)),
         "edge_coverage": _opt_asdict(compute_edge_coverage_section(result)),
-        "contract_conflicts": _opt_asdict(
-            rm.compute_contract_conflicts_section(result)
-        ),
-        "policy": asdict(rm.compute_policy_section(result, today=resolved_today)),
+        "contract_conflicts": _opt_asdict(compute_contract_conflicts_section(result)),
+        "policy": asdict(compute_policy_section(result, today=resolved_today)),
         "recommendation": (
-            asdict(rm.compute_recommendation_section(result))
+            asdict(compute_recommendation_section(result))
             if show_recommendation
             else None
         ),
-        "severity_summary": _severity_summary_mapping(
+        "severity_summary": severity_summary_mapping(
             result, changes, severity_config, envelope, scoped_gate=False
         ),
         "show_only_note": show_only_note,
         "library_files": (
-            asdict(rm.compute_library_files(old_meta, new_meta))
+            asdict(compute_library_files(old_meta, new_meta))
             if (old_meta or new_meta)
             else None
         ),
@@ -416,7 +339,7 @@ def build_markdown_document(
             for g in severity_data.groups
         ],
         "not_evaluated": _not_evaluated_mapping(not_evaluated, result.evidence_tiers),
-        "environment_drift": _opt_asdict(rm.compute_environment_drift(changes)),
+        "environment_drift": _opt_asdict(compute_environment_drift(changes)),
         "empty_message": (
             None
             if changes
@@ -473,7 +396,7 @@ def build_markdown_document(
         "show_impact": show_impact,
         "impact_table": (
             _opt_asdict(
-                rm.compute_impact_table(
+                compute_impact_table(
                     result,
                     displayed_changes=changes,
                     findings=None
@@ -504,7 +427,6 @@ def _view_preamble_mapping(
     (possibly filtered) changes to render -- the compute half of
     ``reporter_markdown._view_preamble``'s split. See
     :func:`_render_view_preamble` for the render half."""
-    rm = _reporter_markdown()
 
     changes, show_only_note = _resolve_displayed_changes(
         result,
@@ -517,13 +439,13 @@ def _view_preamble_mapping(
         "view_label": view_label,
         "old_version": result.old_version,
         "new_version": result.new_version,
-        "verdict_emoji": rm._VERDICT_EMOJI[result.verdict],
-        "verdict_label": rm._VERDICT_LABEL[result.verdict],
+        "verdict_emoji": VERDICT_EMOJI[result.verdict],
+        "verdict_label": VERDICT_LABEL[result.verdict],
         "coverage_warnings": (
             list(result.coverage_warnings) if result.coverage_warnings else []
         ),
         "recommendation": (
-            asdict(rm.compute_recommendation_section(result))
+            asdict(compute_recommendation_section(result))
             if show_recommendation
             else None
         ),
@@ -562,7 +484,6 @@ def build_root_cause_document(
     ``compute_root_cause_section``'s own ``RootCauseSectionData`` is already
     JSON-safe (every finding is pre-formatted to a plain string at compute
     time), so this fold needs no new row type of its own."""
-    rm = _reporter_markdown()
     preamble, changes = _view_preamble_mapping(
         result,
         "root-cause view",
@@ -617,7 +538,7 @@ def build_root_cause_document(
         # nor the reason (Codex review, PR #1284). Same key and same rows as
         # the full document, so the two projections cannot disagree.
         "pattern_modulations": list(getattr(result, "pattern_modulations", ()) or ()),
-        "severity_summary": _severity_summary_mapping(
+        "severity_summary": severity_summary_mapping(
             result, changes, severity_config, envelope, scoped_gate=True
         ),
         "root_cause": (
@@ -641,7 +562,7 @@ def build_root_cause_document(
         "out_of_surface_note": _opt_asdict(compute_out_of_surface_note(result)),
         "show_impact": show_impact,
         "impact_table": (
-            _opt_asdict(rm.compute_impact_table(result, displayed_changes=changes))
+            _opt_asdict(compute_impact_table(result, displayed_changes=changes))
             if show_impact
             else None
         ),

@@ -516,7 +516,7 @@ class TestStatKeepsItsSummaryOnlyShape:
 
         from abicheck.checker import Verdict
         from abicheck.checker_types import DiffResult
-        from abicheck.reporter import to_stat_json
+        from abicheck.report.diff_report import to_stat_json
 
         result = DiffResult(
             old_version="1",

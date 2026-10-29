@@ -73,8 +73,8 @@ class ReleaseMemberEntryProjection(SilentReleaseReporter):
         self.severity_config = severity_config
 
     def project(self, entry: dict[str, object], member: ComparedMember) -> None:
-        from ..reporter import disposition_ledger_blocks
         from ..workflows.release_dependency_facts import member_dependency_facts
+        from .diff_report import disposition_ledger_blocks
         from .release_member_summary import add_member_review_summary
 
         compared = member.compared
@@ -98,7 +98,7 @@ class ReleaseMemberEntryProjection(SilentReleaseReporter):
     def reproject(
         self, entry: dict[str, object], result: DiffResult, *, scope_changed: bool
     ) -> None:
-        from ..reporter import disposition_ledger_blocks
+        from .diff_report import disposition_ledger_blocks
         from .release_member_summary import add_member_review_summary
 
         stamp_member_counts(entry, result)

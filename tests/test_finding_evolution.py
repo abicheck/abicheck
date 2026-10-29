@@ -347,7 +347,7 @@ class TestReconcilesWithChangeInventory:
         block's own summation."""
         import json
 
-        from abicheck.reporter import to_json
+        from abicheck.report.diff_report import to_json
 
         doc = json.loads(to_json(result))
         evo = doc["finding_evolution"]

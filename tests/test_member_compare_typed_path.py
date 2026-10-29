@@ -34,7 +34,7 @@ from abicheck.change_registry_types import Verdict
 from abicheck.checker_policy import ChangeKind
 from abicheck.compile_context import CompileContext
 from abicheck.environment_matrix import EnvironmentMatrix
-from abicheck.reporter import to_json
+from abicheck.report.diff_report import to_json
 from abicheck.serialization import snapshot_to_json
 from abicheck.workflows.compare import (
     execute as compare_execute,

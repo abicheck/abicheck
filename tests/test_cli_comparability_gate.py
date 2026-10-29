@@ -40,7 +40,7 @@ from abicheck.checker import DiffResult, Verdict
 from abicheck.cli import main
 from abicheck.errors import ProfileMismatchError, ScopeMismatchError
 from abicheck.model import AbiSnapshot
-from abicheck.reporter import to_json
+from abicheck.report.diff_report import to_json
 from abicheck.serialization import snapshot_to_json
 from tests._fake_compare_resolution import fake_resolved_pair
 

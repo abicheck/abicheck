@@ -34,13 +34,13 @@ import pytest
 
 from abicheck.checker import Change, ChangeKind, DiffResult, Verdict
 from abicheck.frontends.render import render_envelope
-from abicheck.html_report import build_html_document
 from abicheck.model import AbiSnapshot
 from abicheck.policy.reclassify import ReclassifyRule
 from abicheck.policy_file import PolicyFile
 from abicheck.pr_comment import build_model
 from abicheck.report.document_builder import build_report_envelope
 from abicheck.report.envelope import RenderOptions, ReportEnvelope
+from abicheck.report.html_compute import build_html_document
 
 _RULE_LABEL = "accepted-removal"
 

@@ -319,7 +319,7 @@ def test_html_report_impact_carries_the_unattributed_caveat() -> None:
     """Codex review, fresh evidence: the HTML renderer's `compute_full_change_rows`
     was still called with no `evidence_tiers` after JSON/Markdown were fixed,
     leaving the overclaim in HTML reports."""
-    from abicheck.html_report import build_html_document
+    from abicheck.report.html_compute import build_html_document
     from abicheck.report.render_html_document import render_html_document
 
     c = _change(ChangeKind.FUNC_REMOVED)  # symbol_binding left unset

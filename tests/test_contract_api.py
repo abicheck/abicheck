@@ -30,7 +30,8 @@ from abicheck.model import (
     Visibility,
 )
 from abicheck.policy.evaluate import evaluate
-from abicheck.reporter import to_json, to_markdown
+from abicheck.report.diff_report import to_json
+from abicheck.report.dispatch_markdown import to_markdown
 from abicheck.sarif import to_sarif_str
 from abicheck.serialization import (
     load_snapshot,

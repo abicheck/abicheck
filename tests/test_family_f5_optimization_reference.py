@@ -671,7 +671,7 @@ def test_binary_parallel_sides_match_sequential(
     always resolves sequentially, so this cell goes through
     ``run_compare_request``); ``ABICHECK_PARALLEL_EXTRACTION=0`` is the
     reference."""
-    from abicheck.reporter import to_json
+    from abicheck.report.diff_report import to_json
     from abicheck.service import CompareRequest, InputSpec
     from abicheck.workflows.compare.execute import run_compare_request
 

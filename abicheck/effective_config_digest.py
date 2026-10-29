@@ -41,7 +41,7 @@ therefore honest about two tiers rather than pretending one:
   overrides/reclassify-rules/internal-namespaces/public-surface-scoping
   (``DiffResult.policy``/``policy_file``/``scope_to_public_surface``), and
   the resolved severity/exit-code-scheme gate (the same ``SeverityConfig``
-  /``exit_code_scheme`` pair :mod:`abicheck.reporter_contract_blocks`
+  /``exit_code_scheme`` pair :mod:`abicheck.report.contract_blocks`
   already threads through ``add_contract_context`` for the ``exit`` block).
 
 Both tiers hash through :func:`effective_config_digest`, so two runs that
@@ -594,7 +594,7 @@ def effective_config_fields_from_diff_result(
     (Codex review, PR #1192's follow-up finding -- see
     :func:`effective_config_fields_from_full_config`'s identical note for
     the full rationale), the same object
-    :mod:`abicheck.reporter_contract_blocks`'s ``add_contract_context``
+    :mod:`abicheck.report.contract_blocks`'s ``add_contract_context``
     already builds for the ``exit`` block (``gate.severity is None`` when no
     severity setting is in effect) -- read here, never re-derived from the
     raw inputs a second time. ``gate.require_complete_analysis`` mirrors

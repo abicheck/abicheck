@@ -38,8 +38,6 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any, cast
 
-import abicheck.reporter_markdown as _reporter_markdown_module
-
 from .disposition_audit import DispositionAudit
 from .document import ReportDocument
 from .envelope import ReportEnvelope
@@ -49,20 +47,11 @@ from .render_review import (
     render_review_digest,
     render_terminal_digest,
 )
+from .review_digest_compute import compute_review_digest
 from .surface_changes import SurfaceChangeSection
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
-
-
-def _reporter_markdown() -> Any:
-    """The ``reporter_markdown`` module, as this file's compute side.
-
-    The same accessor ``render_markdown_document`` keeps, duplicated here
-    rather than imported from it, so this module does not import back into
-    the file it was split out of.
-    """
-    return _reporter_markdown_module
 
 
 def build_review_digest_document(
@@ -76,13 +65,13 @@ def build_review_digest_document(
     (ADR-061 gap C). Its shared ``report_mode="full"`` document supplies the
     disposition audit, review groups, result counts and exit code, and the
     envelope itself supplies the gate and per-finding verdicts; see
-    :func:`~abicheck.reporter_markdown.compute_review_digest` for what each
+    :func:`~abicheck.report.review_digest_compute.compute_review_digest` for what each
     one drives.
     """
     shared_mapping = envelope.document.to_mapping()
     exit_value = shared_mapping.get("exit")
     exit_code = exit_value.get("code") if isinstance(exit_value, dict) else None
-    digest = _reporter_markdown().compute_review_digest(
+    digest = compute_review_digest(
         result,
         envelope=envelope,
         review_groups=cast("Any", shared_mapping.get("review_groups")),

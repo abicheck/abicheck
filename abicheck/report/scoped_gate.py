@@ -35,7 +35,7 @@ into the payload, since those are real, additional facts worth surfacing --
 just never in place of the global result.
 
 Applied by :func:`apply_scoped_gate` from inside
-:func:`abicheck.reporter_contract_blocks.render_json_with_side_facts` --
+:func:`abicheck.report.contract_blocks.render_json_with_side_facts` --
 before the payload is rendered, never as a render -> ``json.loads`` ->
 patch -> ``json.dumps`` pass over already-serialized text.
 
@@ -59,7 +59,7 @@ Lives in this package, not as a new flat ``abicheck/reporter_*.py`` sibling:
 report-construction logic goes to its real responsibility-package owner --
 ``report/``.
 
-ADR-063 T10: this module used to resolve ``abicheck.reporter`` via
+ADR-063 T10: this module used to resolve ``abicheck.report.diff_report`` via
 ``importlib`` (``_reporter()``) purely to reach six small per-change
 helpers still defined in ``reporter.py``/``reporter_markdown.py``
 (``_change_to_dict``, ``_add_entries_to_root_causes``, ``_finding_id``,
@@ -306,8 +306,8 @@ def _fold_findings_into_changes(
     summary counts are recomputed afterwards from the now-complete array.
     """
     from ..model.evidence_status import EvidenceStatus, ReachabilityState
-    from ..reporter_markdown import root_cause_evidence_lookup_for_changes
     from ..root_cause_evidence import impact_group_lookup_for_changes
+    from .root_cause_lookup import root_cause_evidence_lookup_for_changes
     from .view import apply_show_only
 
     _add_entries_to_root_causes = helpers.add_entries_to_root_causes

@@ -132,7 +132,7 @@ class CliReleaseReporter(ReleaseMemberEntryProjection):
     def persist(self, entry: dict[str, object], result: DiffResult) -> None:
         if self.output_dir is None:
             return
-        from ...reporter import to_json
+        from ...report.diff_report import to_json
 
         path = member_report_path(self.output_dir, entry)
         _safe_write_output(

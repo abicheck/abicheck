@@ -69,7 +69,7 @@ class TestTheReleaseLedgersCarryEveryDisposition:
         return result
 
     def _blocks(self, result):
-        from abicheck.reporter import disposition_ledger_blocks
+        from abicheck.report.diff_report import disposition_ledger_blocks
 
         return disposition_ledger_blocks(result)
 
@@ -135,7 +135,7 @@ class TestTheReleaseLedgersCarryEveryDisposition:
         """
         import json
 
-        from abicheck.reporter import to_json
+        from abicheck.report.diff_report import to_json
 
         result = self._result_with_all_three_dispositions()
         scalar = json.loads(to_json(result))
@@ -219,7 +219,7 @@ class TestTheReleaseCarriesItsPatternModulations:
         return result
 
     def _library_entry(self):
-        from abicheck.reporter import disposition_ledger_blocks
+        from abicheck.report.diff_report import disposition_ledger_blocks
 
         return {"library": "libfoo.so", **disposition_ledger_blocks(self._result())}
 

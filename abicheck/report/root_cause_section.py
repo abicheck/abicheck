@@ -28,12 +28,11 @@ from collections.abc import Sequence
 from typing import TYPE_CHECKING
 
 from ..model.evidence_status import EvidenceStatus
-from ..reporter_markdown import _format_change_md
 from .cross_source_evolution import cross_source_evolution_md_suffix
 from .markdown_budget import ITEM_LIMIT
 from .markdown_text import md_text
 from .policy_facts import evidence_status_of, impact_text_for
-from .render_markdown import RootCauseGroupData, RootCauseSectionData
+from .render_markdown import RootCauseGroupData, RootCauseSectionData, _format_change_md
 from .view import finding_id, group_changes_by_root_cause, root_cause_key_and_display
 
 if TYPE_CHECKING:

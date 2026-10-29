@@ -25,8 +25,8 @@ from click.testing import CliRunner
 from abicheck.checker import Change, ChangeKind, DiffResult, Verdict
 from abicheck.model import AbiSnapshot, Function, Visibility
 from abicheck.policy_file import PolicyFile
+from abicheck.report.diff_report import to_json
 from abicheck.report_summary import compatibility_metrics
-from abicheck.reporter import to_json
 from abicheck.serialization import snapshot_to_json
 from abicheck.storage.tu_parse_store import TuParseStore
 

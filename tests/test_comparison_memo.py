@@ -43,7 +43,7 @@ from abicheck.model.comparison_memo import (
     comparison_memo_scope,
     comparison_memoized,
 )
-from abicheck.reporter import to_json
+from abicheck.report.diff_report import to_json
 from abicheck.workflows import compare_policy
 
 

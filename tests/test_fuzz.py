@@ -193,7 +193,8 @@ def test_suppression_pattern_fuzz(
 # ---------------------------------------------------------------------------
 from abicheck.checker import Change, DiffResult  # noqa: E402
 from abicheck.checker_policy import Verdict  # noqa: E402
-from abicheck.reporter import to_json, to_markdown  # noqa: E402
+from abicheck.report.diff_report import to_json  # noqa: E402
+from abicheck.report.dispatch_markdown import to_markdown  # noqa: E402
 
 
 @settings(max_examples=50)

@@ -145,7 +145,7 @@ class TestNotEvaluatedDetectors:
         assert not any(d.not_evaluated for d in ran)
 
     def test_the_state_reaches_the_report(self) -> None:
-        from abicheck import reporter
+        from abicheck.report import diff_report as reporter
 
         old, new = _snapshots(removed=1)
         report = json.loads(reporter.to_json(compare(old, new)))

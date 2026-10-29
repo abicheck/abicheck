@@ -172,7 +172,7 @@ def test_native_channels_agree_on_breaking_boundary() -> None:
 
 
 def test_json_severity_matches_canonical_label() -> None:
-    from abicheck.reporter import to_json
+    from abicheck.report.diff_report import to_json
 
     result = _result()
     model = ReportModel.from_result(result)

@@ -648,7 +648,7 @@ class TestCoverageFailuresValidateAgainstTheSchema:
     """
 
     def _report(self, **kwargs) -> dict:
-        from abicheck.reporter import to_json
+        from abicheck.report.diff_report import to_json
 
         old, new = _pair_without_export_table()
         result = compare(

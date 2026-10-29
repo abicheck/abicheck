@@ -32,7 +32,8 @@ from abicheck.checker_types import DiffResult
 from abicheck.contract_relevance_types import ContractRelevance
 from abicheck.model.change import Change
 from abicheck.model.evidence_status import CrossSourceEvolution
-from abicheck.reporter import to_json, to_markdown
+from abicheck.report.diff_report import to_json
+from abicheck.report.dispatch_markdown import to_markdown
 
 #: The documented budget for a report with no gating finding: well under a
 #: GitHub PR comment (64 KiB), whatever the finding count. Written as a

@@ -25,11 +25,12 @@ from __future__ import annotations
 import json
 
 from abicheck.checker import Change, ChangeKind, DiffResult, Verdict
+from abicheck.report.diff_report import to_json
+from abicheck.report.dispatch_markdown import to_markdown
 from abicheck.report_summary import (
     classify_symbol_origin,
     surface_breakdown,
 )
-from abicheck.reporter import to_json, to_markdown
 
 
 def _result(changes, verdict=Verdict.BREAKING):

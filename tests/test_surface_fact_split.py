@@ -265,7 +265,7 @@ class TestTheQuestionDecidesTheFact:
         point of the block is that a *reader* can tell the three apart."""
         import json
 
-        from abicheck.reporter import to_json
+        from abicheck.report.diff_report import to_json
 
         declared = {
             "declared_in_headers_fact": _TRUE,

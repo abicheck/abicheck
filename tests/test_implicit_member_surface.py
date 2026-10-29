@@ -43,8 +43,8 @@ from abicheck.model import AbiSnapshot, Fact, RecordType
 from abicheck.model.change_catalog.kinds import ChangeKind
 from abicheck.model.declarations import Function, Param, Visibility
 from abicheck.model.synthetic_key import SYNTHETIC_CTOR_KEY_PREFIX
+from abicheck.report.diff_report import to_json
 from abicheck.report.dispatch_markdown import to_markdown
-from abicheck.reporter import to_json
 from abicheck.sarif import to_sarif_str
 
 

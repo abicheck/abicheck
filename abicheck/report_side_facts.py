@@ -36,7 +36,7 @@ from dataclasses import dataclass, field
 class ReportSideFacts:
     """Report-only facts a ``compare`` run resolves once and attaches to
     its ``DiffResult`` before rendering, so a JSON builder in
-    :mod:`abicheck.reporter`/:mod:`abicheck.reporter_contract_blocks` reads
+    :mod:`abicheck.report.diff_report`/:mod:`abicheck.report.contract_blocks` reads
     them directly instead of a renderer re-parsing its own already-rendered
     JSON text to splice them in afterwards (the "post-render mutation" ADR-061
     Phase 2 item 5 names). None of these three ever feed a verdict, a gate,
