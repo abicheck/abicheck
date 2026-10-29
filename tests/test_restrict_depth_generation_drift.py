@@ -151,8 +151,14 @@ def test_fresh_dump_against_stored_generation_31_is_not_a_break(
         assert change.get("modulation_rule") == GENERATION_DRIFT_RULE, change
 
 
-def test_the_generation_constant_is_the_one_that_fixed_the_depth() -> None:
-    assert RESTRICT_DEPTH_GENERATION == 32
+def test_a_baseline_from_the_fixing_generation_is_not_demoted() -> None:
+    gen = RESTRICT_DEPTH_GENERATION
+    old = _snap(gen, _fn("f", _stale_param()))
+    new = _snap(gen, _fn("f", _live_param()))
+    kept = demote_restrict_depth_drift(_change("f"), old, new, gen, gen)
+    assert [c.effective_verdict for c in kept] == [
+        c.effective_verdict for c in _change("f")
+    ]
 
 
 def test_a_stale_restrict_pointer_is_demoted_in_either_operand_order() -> None:
