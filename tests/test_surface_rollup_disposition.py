@@ -9,17 +9,23 @@ file proves the same thing through the CLI with real libraries.
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
+from abicheck.model import AbiSnapshot, Function, ScopeOrigin, Visibility
 from abicheck.model.change import Change
 from abicheck.model.change_catalog.kind_variants import (
     ROLLUP_MEMBER_KINDS,
     rollup_member_kinds,
 )
 from abicheck.model.change_catalog.kinds import ChangeKind
+from abicheck.policy.acknowledgment import AcknowledgmentList
+from abicheck.policy.disposition_acknowledgment import resolve_acknowledgments
 from abicheck.policy.disposition_ledger import Disposition, DispositionLedger
 from abicheck.policy.finding_disposition.rollup import (
     SURFACE_ROLLUP_APPLICATION_POINT,
+    dispose_surface_metric_rollups,
     dispose_surface_rollups,
 )
 from abicheck.policy.rule_provenance import RuleProvenance
@@ -159,3 +165,162 @@ def test_a_non_roll_up_finding_passes_through_untouched() -> None:
 
     assert visible == [removal]
     assert suppressed == []
+
+
+def _surface(names: list[str]) -> AbiSnapshot:
+    functions = [
+        Function(
+            name=name,
+            mangled=name,
+            return_type="void",
+            params=[],
+            visibility=Visibility.PUBLIC,
+            origin=ScopeOrigin.PUBLIC_HEADER,
+        )
+        for name in names
+    ]
+    return AbiSnapshot(
+        library="lib", version="1", from_headers=True, functions=functions
+    )
+
+
+def test_roll_up_from_real_surfaces_is_hidden_when_every_removal_is_suppressed() -> (
+    None
+):
+    """Two public functions removed, both suppressed: the derived roll-up is hidden."""
+    old = _surface(["keep", "gone_b", "gone_c"])
+    new = _surface(["keep"])
+    suppressed = [
+        _hidden_by("rule-a", _change(ChangeKind.FUNC_REMOVED, "gone_b")),
+        _hidden_by("rule-a", _change(ChangeKind.FUNC_REMOVED, "gone_c")),
+    ]
+
+    visible = dispose_surface_metric_rollups(
+        old,
+        new,
+        None,
+        kept=[],
+        verdict_redundant=[],
+        suppressed=suppressed,
+        ledger=None,
+    )
+
+    assert visible == []
+    assert [c.kind for c in suppressed] == [
+        ChangeKind.FUNC_REMOVED,
+        ChangeKind.FUNC_REMOVED,
+        ChangeKind.PUBLIC_SURFACE_SHRANK,
+    ]
+    rollup = suppressed[-1]
+    assert rollup.suppression_rule == "rule-a"
+    assert rollup.description.endswith(
+        "(derived: 2 suppressed removal(s) of gone_b, gone_c)"
+    )
+
+
+def test_roll_up_from_real_surfaces_stays_visible_beside_a_kept_removal() -> None:
+    old = _surface(["keep", "gone_b", "gone_c"])
+    new = _surface(["keep"])
+    suppressed = [_hidden_by("rule-a", _change(ChangeKind.FUNC_REMOVED, "gone_b"))]
+    kept = [_change(ChangeKind.FUNC_REMOVED, "gone_c")]
+
+    visible = dispose_surface_metric_rollups(
+        old,
+        new,
+        None,
+        kept=kept,
+        verdict_redundant=[],
+        suppressed=suppressed,
+        ledger=None,
+    )
+
+    assert [c.kind for c in visible] == [ChangeKind.PUBLIC_SURFACE_SHRANK]
+    assert visible[0].suppression_rule is None
+    assert [c.kind for c in suppressed] == [ChangeKind.FUNC_REMOVED]
+
+
+_ACK_REASON = "    reason: 'deliberate'\n"
+
+
+def _removal_acks(tmp_path: Path, symbols: list[str]) -> AcknowledgmentList:
+    body = "".join(
+        f"  - symbol: {symbol}\n    change_kind: func_removed\n{_ACK_REASON}"
+        for symbol in symbols
+    )
+    path = tmp_path / "ack.yml"
+    path.write_text("version: 1\nacknowledgments:\n" + body)
+    return AcknowledgmentList.load(path)
+
+
+@pytest.mark.parametrize(
+    ("removals", "expect_acknowledged"),
+    [
+        pytest.param(
+            [
+                ("gone_b", Disposition.GATING, True),
+                ("gone_c", Disposition.GATING, True),
+            ],
+            True,
+            id="every-covered-removal-acknowledged",
+        ),
+        pytest.param(
+            [
+                ("gone_b", Disposition.GATING, True),
+                ("gone_c", Disposition.GATING, False),
+            ],
+            False,
+            id="partially-acknowledged-stays-open",
+        ),
+        pytest.param(
+            [
+                ("gone_a", Disposition.SUPPRESSED, False),
+                ("gone_b", Disposition.GATING, True),
+                ("gone_c", Disposition.GATING, True),
+            ],
+            True,
+            id="suppressed-removal-is-not-covered",
+        ),
+        pytest.param(
+            [("gone_a", Disposition.SUPPRESSED, False)],
+            False,
+            id="no-covered-removal-leaves-roll-up-open",
+        ),
+    ],
+)
+def test_roll_up_is_acknowledged_only_when_its_covered_removals_all_are(
+    tmp_path: Path,
+    removals: list[tuple[str, Disposition, bool]],
+    expect_acknowledged: bool,
+) -> None:
+    acks = _removal_acks(
+        tmp_path, [symbol for symbol, _, acknowledged in removals if acknowledged]
+    )
+    ledger = DispositionLedger()
+    records: dict[str, Change] = {}
+    for symbol, disposition, _ in removals:
+        removal = Change(
+            kind=ChangeKind.FUNC_REMOVED, symbol=symbol, description=symbol
+        )
+        ledger.record(removal, disposition, application_point="apply_suppression")
+        records[symbol] = removal
+    rollup = _change(_ROLLUP, "<surface>")
+    ledger.record(rollup, Disposition.NON_GATING, application_point="finalize")
+
+    resolve_acknowledgments(ledger, acks, strict=True)
+
+    rollup_record = ledger.record_for(rollup)
+    assert rollup_record is not None
+    if not expect_acknowledged:
+        assert rollup_record.acknowledged_by is None
+        return
+    # The roll-up takes the first covered removal's acknowledgment, so a
+    # suppressed removal (never covered) cannot be the source.
+    first_covered = next(
+        symbol
+        for symbol, disposition, _ in removals
+        if disposition is not Disposition.SUPPRESSED
+    )
+    first_record = ledger.record_for(records[first_covered])
+    assert first_record is not None
+    assert rollup_record.acknowledged_by == first_record.acknowledged_by
+    assert rollup_record.acknowledgment_rule == first_record.acknowledgment_rule

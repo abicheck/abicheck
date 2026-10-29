@@ -41,9 +41,14 @@ from abicheck.model.change_catalog.assembled import (
 from abicheck.model.change_catalog.kinds import ChangeKind
 from abicheck.model.snapshot import AbiSnapshot
 from abicheck.policy.acknowledgment import AcknowledgmentList
+from abicheck.policy.dedup_survivors import (
+    dedup_survivor,
+    deduplicate_recording_survivors,
+)
 from abicheck.policy.disposition_acknowledgment import resolve_acknowledgments
 from abicheck.policy.disposition_ledger import Disposition, DispositionLedger
 from abicheck.policy.finding_disposition.pipeline import DispositionPipeline
+from abicheck.policy.finding_disposition.run_state import PipelineContext
 from abicheck.post_processing import DeduplicateCrossDetector
 from abicheck.workflows.snapshot_factory import absent_baseline
 
@@ -286,3 +291,38 @@ def test_names_that_do_not_match_never_pair() -> None:
     changes = _pair(twin.replay, header_kind)
     changes[1].symbol = _NAME + "_other"
     assert replay_twin_pairs(changes, (twin,)) == []
+
+
+def _first_paired_twin() -> tuple[ReplayTwin, ChangeKind]:
+    twin = next(
+        t for t in REPLAY_TWINS if t.replay is ChangeKind.CONSTEXPR_VALUE_CHANGED
+    )
+    return twin, sorted(twin.header, key=lambda k: k.name)[0]
+
+
+def test_dropped_twin_names_its_survivor_only_once_the_survivor_is_recorded() -> None:
+    """Before the survivor has a ledger record the twin is its own observation."""
+    twin, header_kind = _first_paired_twin()
+    changes = _pair(twin.replay, header_kind)
+    kept, ledger = _run_dedup(changes)
+    (survivor,) = kept
+    dropped = next(c for c in changes if c is not survivor)
+
+    assert dedup_survivor(ledger, dropped) is None
+
+    _keep_on_ledger(ledger, kept)
+    linked = dedup_survivor(ledger, dropped)
+    assert linked is not None
+    assert linked[1] is survivor
+
+
+def test_dedup_without_a_ledger_keeps_the_same_survivor() -> None:
+    """With no ledger the pair is still collapsed onto the kind the table names."""
+    twin, header_kind = _first_paired_twin()
+    changes = _pair(twin.replay, header_kind)
+    ctx = PipelineContext(old=None, new=_NEW, absent_baseline=absent_baseline("lib"))
+
+    kept = deduplicate_recording_survivors(list(changes), ctx)
+
+    assert [c.kind for c in kept] == [_expected_survivor(twin, header_kind)]
+    assert ctx.disposition_ledger is None

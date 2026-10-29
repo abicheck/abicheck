@@ -27,6 +27,7 @@ from abicheck.policy.acknowledgment import (
     AcknowledgmentList,
     AmbiguousAcknowledgmentError,
 )
+from abicheck.policy.acknowledgment_breaks import ACCEPTED_BREAK_APPLICATION_POINT
 from abicheck.policy.disposition_acknowledgment import resolve_acknowledgments
 from abicheck.policy.disposition_ledger import Disposition, DispositionLedger
 
@@ -183,3 +184,49 @@ def test_genuinely_different_findings_are_left_unresolved_when_not_strict(
         record = ledger.record_for(change)
         assert record is not None
         assert record.acknowledged_by is None
+
+
+@pytest.mark.parametrize(
+    ("verdict", "disposition"),
+    [("BREAKING", Disposition.NON_GATING), ("COMPATIBLE", Disposition.GATING)],
+    ids=["break-verdict-accepted", "non-break-verdict-stays-gating"],
+)
+def test_accepted_break_is_stamped_on_the_surviving_twin_only(
+    tmp_path: Path, verdict: str, disposition: Disposition
+) -> None:
+    """``breaks: accept`` decides on the survivor, the one observation of the pair.
+
+    A break verdict moves the survivor to non-gating under the acceptance
+    application point and stamps its verdict class. A verdict that is not a
+    break is acknowledged but keeps its gate and carries no stamp. The dropped
+    twin is untouched either way.
+    """
+    acks = _acks(tmp_path, _REMOVAL_RECORD)
+    survivor = Change(kind=ChangeKind.FUNC_REMOVED, symbol="gone_fn", description="s")
+    twin = Change(
+        kind=ChangeKind.FUNC_REMOVED_ELF_ONLY, symbol="gone_fn", description="t"
+    )
+    ledger = DispositionLedger()
+    ledger.record(survivor, Disposition.GATING, application_point=_APP)
+    ledger.record(twin, Disposition.DEDUPLICATED, application_point=_APP)
+
+    resolve_acknowledgments(
+        ledger,
+        acks,
+        strict=True,
+        breaks="accept",
+        verdict_class_of=lambda _change: verdict,
+    )
+
+    kept = ledger.record_for(survivor)
+    folded = ledger.record_for(twin)
+    assert kept is not None and folded is not None
+    assert kept.disposition is disposition
+    assert kept.acknowledged_by is not None
+    assert kept.verdict_class == (
+        verdict if disposition is Disposition.NON_GATING else None
+    )
+    if disposition is Disposition.NON_GATING:
+        assert kept.application_point == ACCEPTED_BREAK_APPLICATION_POINT
+    assert folded.disposition is Disposition.DEDUPLICATED
+    assert folded.acknowledged_by is None
