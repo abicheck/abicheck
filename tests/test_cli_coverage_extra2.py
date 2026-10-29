@@ -40,6 +40,7 @@ from abicheck.frontends.cli.runtime import (
 )
 from abicheck.model import AbiSnapshot
 from abicheck.workflows.provenance import stamp_provenance
+from tests._abicheck_subprocess import abicheck_command
 
 # ---------------------------------------------------------------------------
 # _expand_header_inputs
@@ -542,22 +543,18 @@ def test_relocated_snapshot_helpers_resolve_under_direct_module_execution(
     caught it because in-process imports always see the fully-executed module.
     """
     import subprocess
-    import sys
 
     src = tmp_path / "src"
     src.mkdir()
     (src / "foo.h").write_text("int foo(void);\n")
     proc = subprocess.run(
-        [
-            sys.executable,
-            "-m",
-            "abicheck.cli",
+        abicheck_command(
             "dump",
             "--sources",
             str(src),
             "-o",
             str(tmp_path / "out.json"),
-        ],
+        ),
         capture_output=True,
         text=True,
     )

@@ -81,6 +81,7 @@ from .probe import (
     record_unparseable_headers,
     run_castxml,
 )
+from .variable_template_join import join_variable_templates
 from .vector_join import join_vector_spellings
 
 # The orchestrator's logger name, kept from before the move.
@@ -270,8 +271,26 @@ def castxml_dump(
     key = _make_key()
 
     def _with_vectors(root: Element) -> Element:
-        return join_vector_spellings(
+        joined = join_vector_spellings(
             root,
+            key,
+            headers=headers,
+            extra_includes=extra_includes,
+            compiler=compiler,
+            gcc_path=gcc_path,
+            gcc_prefix=gcc_prefix,
+            gcc_options=gcc_options,
+            gcc_option_tokens=gcc_option_tokens,
+            sysroot=sysroot,
+            nostdinc=nostdinc,
+            lang=lang,
+            extra_hash_dirs=extra_hash_dirs,
+            exported_symbols=exported_symbols,
+        )
+        # castxml has no element for a variable template; clang's const ones
+        # are written in as Variable elements (see variable_template_join).
+        return join_variable_templates(
+            joined,
             key,
             headers=headers,
             extra_includes=extra_includes,

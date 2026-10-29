@@ -48,6 +48,8 @@ sys.path.insert(0, str(EVAL_DIR))
 from graders import claim as claim_mod  # noqa: E402
 from graders.dimensions import grade_run  # noqa: E402
 
+from tests._abicheck_subprocess import abicheck_command  # noqa: E402
+
 _spec = importlib.util.spec_from_file_location(
     "skill_eval_runner_diag", EVAL_DIR / "runners" / "claude_code.py"
 )
@@ -319,8 +321,7 @@ def test_fixture_reproduces_its_symptom_and_ground_truth(tmp_path, scenario):
     loaded, loaded_header = _loaded_library(fixture)
     report = tmp_path / "compare.json"
     subprocess.run(
-        [
-            "abicheck",
+        abicheck_command(
             "compare",
             str(fixture / "env" / "sdk" / "libwidget.so.1"),
             str(loaded),
@@ -329,7 +330,7 @@ def test_fixture_reproduces_its_symptom_and_ground_truth(tmp_path, scenario):
             *(["--header", f"new={loaded_header}"] if loaded_header else []),
             "-o",
             f"json={report}",
-        ],
+        ),
         capture_output=True,
     )
     assert (
@@ -342,8 +343,7 @@ def test_fixture_reproduces_its_symptom_and_ground_truth(tmp_path, scenario):
         # adds to it.
         reverse = tmp_path / "reverse.json"
         subprocess.run(
-            [
-                "abicheck",
+            abicheck_command(
                 "compare",
                 str(loaded),
                 str(fixture / "env" / "sdk" / "libwidget.so.1"),
@@ -352,7 +352,7 @@ def test_fixture_reproduces_its_symptom_and_ground_truth(tmp_path, scenario):
                 f"new={fixture / 'sdk' / 'widget.h'}",
                 "-o",
                 f"json={reverse}",
-            ],
+            ),
             capture_output=True,
         )
         assert (

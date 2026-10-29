@@ -741,6 +741,60 @@ def test_mutant_m7_checkout_prefix_kept_in_path_identity_is_caught(
     assert any(cat.path_violations(p, relocate) for p in cat._path_probes())
 
 
+def _builtin_pair_reconciles() -> bool:
+    """Whether ``float _Complex`` -> ``double _Complex`` at one structural
+    position reconciles as a rename. The oracle is the two spellings, not the
+    candidate predicate under test."""
+    from abicheck.buildsource.graph_reconcile import reconcile_added_removed
+    from abicheck.buildsource.source_graph import (
+        GraphEdge,
+        GraphNode,
+        SourceGraphSummary,
+    )
+
+    def holder_graph(child: GraphNode) -> SourceGraphSummary:
+        parent = GraphNode(id="type://holder", kind="record_type", label="holder")
+        g = SourceGraphSummary()
+        g.add_node(parent)
+        g.add_node(child)
+        g.add_edge(
+            GraphEdge(
+                src=parent.id,
+                dst=child.id,
+                kind="TYPE_HAS_FIELD_TYPE",
+                attrs={"role": "field"},
+            )
+        )
+        return g.finalize()
+
+    old = GraphNode(
+        id="type://float _Complex", kind="record_type", label="float _Complex"
+    )
+    new = GraphNode(
+        id="type://double _Complex", kind="record_type", label="double _Complex"
+    )
+    result = reconcile_added_removed([old], [new], holder_graph(old), holder_graph(new))
+    return bool(result.reconciled)
+
+
+def test_mutant_m8_builtin_type_as_rename_candidate_is_caught(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Pre-fix: any record_type node was a rename candidate, so a builtin
+    parameter's size change (8 -> 16 bytes) reconciled as the same declaration,
+    renamed. Distinct entities stay distinct: a fundamental type is not one."""
+    from abicheck.buildsource import graph_reconcile as gr
+    from abicheck.buildsource.graph_reconcile_candidates import RECONCILABLE_KINDS
+
+    assert not _builtin_pair_reconciles()
+    monkeypatch.setattr(
+        gr,
+        "is_reconcilable_candidate",
+        lambda node: node.kind in RECONCILABLE_KINDS,
+    )
+    assert _builtin_pair_reconciles()
+
+
 def test_parameter_template_args_do_not_join_a_template_family() -> None:
     """Distinct entities stay distinct: a non-template function whose parameter
     type is a class template is not a member of a function-template family,

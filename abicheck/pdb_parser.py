@@ -40,6 +40,7 @@ from pathlib import Path
 from typing import Any
 
 from .errors import ValidationError
+from .extract.pdb_procedure_spelling import _CC_NAMES, procedure_spelling
 
 log = logging.getLogger(__name__)
 
@@ -111,25 +112,6 @@ CV_CALL_THISCALL = 0x0B
 CV_CALL_CLRCALL = 0x16
 CV_CALL_INLINE = 0x17
 CV_CALL_NEAR_VECTOR = 0x18
-
-_CC_NAMES: dict[int, str] = {
-    0x00: "cdecl",
-    0x01: "far_cdecl",
-    0x02: "pascal",
-    0x03: "far_pascal",
-    0x04: "fastcall",
-    0x05: "far_fastcall",
-    0x07: "stdcall",
-    0x08: "far_stdcall",
-    0x09: "syscall",
-    0x0A: "far_syscall",
-    0x0B: "thiscall",
-    0x0D: "generic",
-    0x11: "armcall",
-    0x16: "clrcall",
-    0x17: "inline",
-    0x18: "vectorcall",
-}
 
 # CV_prop_t flags
 _PROP_FORWARD_REF = 0x0080
@@ -1274,8 +1256,11 @@ class TypeDatabase:
 
         p = self._pointers.get(ti)
         if p:
-            ref_name = self.type_name(p.referent_ti, depth + 1)
             mode = (p.attrs >> 5) & 0x07
+            proc = self._procedures.get(p.referent_ti)
+            if proc is not None and mode not in (1, 4):
+                return self._procedure_spelling(proc, depth, pointer=True)
+            ref_name = self.type_name(p.referent_ti, depth + 1)
             if mode == 1:  # LValueReference
                 return f"{ref_name} &"
             if mode == 4:  # RValueReference
@@ -1303,13 +1288,25 @@ class TypeDatabase:
 
         proc = self._procedures.get(ti)
         if proc:
-            return "fn(...)"
+            return self._procedure_spelling(proc, depth, pointer=False)
 
         mf = self._mfunctions.get(ti)
         if mf:
             return "fn(...)"
 
         return f"<ti:0x{ti:04x}>"
+
+    def _procedure_spelling(
+        self, proc: CvProcedure, depth: int, *, pointer: bool
+    ) -> str:
+        """Spell an LF_PROCEDURE the way the header readers spell a function type."""
+        return procedure_spelling(
+            self.type_name(proc.return_type_ti, depth + 1),
+            proc.calling_convention,
+            self._arglists.get(proc.arglist_ti),
+            lambda ti: self.type_name(ti, depth + 1),
+            pointer=pointer,
+        )
 
     def _resolve_type_size(self, ti: int, depth: int) -> int:
         if ti < _TI_BASE:

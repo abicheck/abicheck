@@ -77,7 +77,9 @@ _CLANG_CACHE_SCHEMA_VERSION = 4
 #: resolved inline vector returns: a sidecar from before this is keyed wrongly.
 #: Bumped to 8 when the cached document started carrying the preprocessor-
 #: excluded declaration scan (`extract.headers.preprocessor_branches`).
-_CASTXML_CACHE_SCHEMA_VERSION = 8
+#: Bumped to 9 for complex/bit-int types, and to 10 for their pointer, array and
+#: typedef-chain forms: entries before them left those as ``Unimplemented``.
+_CASTXML_CACHE_SCHEMA_VERSION = 10
 
 #: Which module constant salts each backend's header-parse cache key. Named,
 #: not copied, so the key always reads the constant's current value.
@@ -456,6 +458,15 @@ _CPP_ONLY_PATTERNS = (
     re.compile(rb"\bnullptr\b"),  # C++ nullptr
     re.compile(rb"\bnoexcept\b"),  # C++ noexcept
     re.compile(rb"\boverride\b"),  # C++ override specifier
+    # C++17 inline *variable* (``inline int x = 1;``, ``static inline const T
+    # y;``). C99/C11 allow ``inline`` only on functions, so a valid C header
+    # never declares one; the declaration has no parenthesis (a function
+    # declarator would), and ends in an initializer, a semicolon or an array
+    # bound. Without this a header whose only C++ signal is such a variable
+    # was auto-detected as C, and both frontends rejected it.
+    re.compile(
+        rb"^\s*(?:(?:static|extern)\s+)?inline\s+(?!.*\()[^;{}]*?\b\w+\s*(?:=|;|\[)"
+    ),
 )
 
 # Full set used for auto language-mode detection (lang unspecified) and the

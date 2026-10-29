@@ -385,8 +385,10 @@ LEADING_ROWS: tuple[FactRow, ...] = (
         "Variable",
         "value",
         _PARTIAL,
-        _NONE,
+        _PARTIAL,
         note=(
+            "clang side: const initializers, plus inline arithmetic "
+            "variables (VarDecl.inline), extractor generation 30. "
             "castxml side wired in G31 Phase C continued (schema v24), "
             "restricted to `is_const` (mirroring `_iter_public_constants`'s "
             "own filter a few methods below — an unevaluated, non-const "

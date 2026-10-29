@@ -18,11 +18,12 @@ from __future__ import annotations
 import json
 import shutil
 import subprocess
-import sys
 from collections import Counter
 from pathlib import Path
 
 import pytest
+
+from tests._abicheck_subprocess import abicheck_command
 
 pytestmark = pytest.mark.integration
 
@@ -66,14 +67,11 @@ def _build(root: Path, *, cxx: bool, bad_declares_exports: bool) -> None:
 
 
 def _compare(root: Path, name: str, headers: list[str]) -> dict:
-    args = [
-        sys.executable,
-        "-m",
-        "abicheck",
+    args = abicheck_command(
         "compare",
         str(root / "v1/libx.so"),
         str(root / "v2/libx.so"),
-    ]
+    )
     for side, v in (("old", 1), ("new", 2)):
         for h in headers:
             args += ["-H", f"{side}={root / f'v{v}' / h}"]

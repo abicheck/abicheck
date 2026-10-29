@@ -69,7 +69,9 @@ from .dwarf_utils import (
     base_type_name as _base_type_name,
     decode_member_location as _decode_member_location,
     has_real_dwarf_info,
+    pointee_subroutine,
     resolve_die_ref as _resolve_ref,
+    subroutine_spelling,
 )
 
 # Fact dataclasses live in the model package (ADR-061 Phase 5): this module
@@ -586,6 +588,14 @@ def _compute_type_info(
         return (f"enum {name}", _attr_int(die, "DW_AT_byte_size"))
 
     if tag == "DW_TAG_pointer_type":
+        target = pointee_subroutine(die, CU)
+        if target is not None:
+            spelled = subroutine_spelling(
+                target,
+                lambda d: _resolve_inner_type_name(d, CU, depth, cache),
+                pointer=True,
+            )
+            return (spelled, _attr_int(die, "DW_AT_byte_size") or 0)
         return _compute_pointer_like_info(
             die, CU, depth, cache, suffix=" *", fallback="void *"
         )
@@ -612,7 +622,10 @@ def _compute_type_info(
         return _compute_array_type_info(die, CU, depth, cache)
 
     if tag == "DW_TAG_subroutine_type":
-        return ("fn(...)", _attr_int(die, "DW_AT_byte_size"))
+        spelled = subroutine_spelling(
+            die, lambda d: _resolve_inner_type_name(d, CU, depth, cache), pointer=False
+        )
+        return (spelled, _attr_int(die, "DW_AT_byte_size"))
 
     return _compute_fallback_type_info(die, tag)
 

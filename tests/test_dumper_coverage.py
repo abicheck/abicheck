@@ -1051,7 +1051,7 @@ class TestFromHeadersProvenance:
             patch.object(
                 castxml_backend, "_CastxmlParser", return_value=self._mock_parser()
             ),
-            patch.object(dumper, "_populate_elf_visibility", lambda snap: None),
+            patch.object(dumper, "_populate_elf_visibility", lambda snap, *_: None),
         ):
             snap = dumper._dump_elf(
                 so, [tmp_path / "h.h"], [], "1.0", "c++", header_backend="castxml"
@@ -1270,7 +1270,7 @@ class TestDwarfLayoutCoherencePopulation:
                 dumper, "dwarf_layout_types_or_empty", return_value=["placeholder"]
             ),
             patch.object(dumper, "backfill_dwarf_layout", return_value=([], coherence)),
-            patch.object(dumper, "_populate_elf_visibility", lambda snap: None),
+            patch.object(dumper, "_populate_elf_visibility", lambda snap, *_: None),
         ):
             snap = dumper._dump_elf(
                 so, [tmp_path / "h.h"], [], "1.0", "c++", header_backend="clang"
@@ -1334,7 +1334,7 @@ class TestDwarfLayoutCoherencePopulation:
             patch.object(
                 dumper, "dwarf_layout_types_or_empty"
             ) as mock_dwarf_layout_types,
-            patch.object(dumper, "_populate_elf_visibility", lambda snap: None),
+            patch.object(dumper, "_populate_elf_visibility", lambda snap, *_: None),
         ):
             snap = dumper._dump_elf(
                 so,

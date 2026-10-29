@@ -84,7 +84,6 @@ parsing, was not itself split out.
 
 from __future__ import annotations
 
-import re
 from typing import Any
 
 from .extract.declaration_provenance import build_public_set
@@ -115,6 +114,8 @@ from .extract.headers.clang.expr import (  # noqa: F401  (some re-exported for t
     _normalize_qual_type,
     _specialization_scope_key,
     _unwrap_expr,
+    is_const_variable,
+    non_const_variable_value,
 )
 from .extract.headers.clang.function_template_defaults import (
     FUNCTION_NODE_KINDS as _FUNCTION_NODE_KINDS,
@@ -1055,8 +1056,10 @@ class _ClangAstParser:
                         ),
                         producer="clang",
                     ),
-                    is_const=bool(node.get("constexpr"))
-                    or bool(re.search(r"\bconst\b", type_name)),
+                    is_const=is_const_variable(node, type_name),
+                    value=non_const_variable_value(
+                        node, type_name, entry.access, self._id_index
+                    ),
                     source_location=self._source_location(entry),
                     alignment_bits=_clang_var_alignment_bits(node),
                     deprecated=_clang_deprecated_message(node),
@@ -1125,10 +1128,7 @@ class _ClangAstParser:
             if entry.access in ("private", "protected"):
                 continue
             type_name = _qualtype(node)
-            is_const = bool(node.get("constexpr")) or bool(
-                re.search(r"\bconst\b", type_name)
-            )
-            if not is_const:
+            if not is_const_variable(node, type_name):
                 continue
             value = _initializer_value(node)
             if value is None:

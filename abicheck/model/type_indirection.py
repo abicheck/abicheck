@@ -49,6 +49,7 @@ import re
 from dataclasses import dataclass
 
 from .castxml_spelling_artifacts import has_unresolved_component
+from .fundamental_type import CV_QUALIFIER_TOKENS, FUNDAMENTAL_KEYWORDS
 
 __all__ = [
     "IndirectionShape",
@@ -58,32 +59,10 @@ __all__ = [
     "unresolved_pair_verdict",
 ]
 
-#: Tokens that, alone or combined, spell a C/C++ fundamental type. Such a
-#: core can never hide a further indirection level.
-_BUILTIN_TOKENS = frozenset(
-    {
-        "void",
-        "bool",
-        "_Bool",
-        "char",
-        "wchar_t",
-        "char8_t",
-        "char16_t",
-        "char32_t",
-        "short",
-        "int",
-        "long",
-        "signed",
-        "unsigned",
-        "float",
-        "double",
-        "__int128",
-        "_Float16",
-        "__bf16",
-        "nullptr_t",
-    }
-)
-_CV_TOKENS = frozenset({"const", "volatile", "restrict", "__restrict", "__restrict__"})
+#: The fundamental-type keywords and cv qualifiers are owned by
+#: :mod:`abicheck.model.fundamental_type` (one source of truth for "closed").
+_BUILTIN_TOKENS = FUNDAMENTAL_KEYWORDS
+_CV_TOKENS = CV_QUALIFIER_TOKENS
 _TRAILING_CV_RE = re.compile(
     r"(?:\s+|^)(?:const|volatile|restrict|__restrict__|__restrict)\s*$"
 )

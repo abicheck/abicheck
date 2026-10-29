@@ -24,6 +24,8 @@ from pathlib import Path
 
 import pytest
 
+from tests._abicheck_subprocess import abicheck_command
+
 pytestmark = [
     pytest.mark.integration,
     pytest.mark.skipif(not sys.platform.startswith("linux"), reason="ELF fixture"),
@@ -79,17 +81,14 @@ def _tree(root: Path, members: tuple[str, ...], *, config: bool) -> Path:
 def _compare(root: Path, *operands: str) -> dict:
     out = root / "report.json"
     result = subprocess.run(
-        [
-            sys.executable,
-            "-m",
-            "abicheck",
+        abicheck_command(
             "compare",
             *operands,
             "-H",
             "include",
             "-o",
             f"json={out}",
-        ],
+        ),
         cwd=root,
         env={**os.environ, "ABICHECK_AST_FRONTEND": "castxml"},
         capture_output=True,

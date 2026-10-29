@@ -32,12 +32,13 @@ import json
 import os
 import re
 import subprocess
-import sys
 from pathlib import Path
 
 import _yaml_fast
 import pytest
 from _workflow_exec import bash_executable, require_bash
+
+from tests._abicheck_subprocess import abicheck_module_command
 
 ACTION_DIR = Path(__file__).resolve().parents[1] / "actions" / "aggregate"
 RUN_SH = ACTION_DIR / "run.sh"
@@ -342,7 +343,7 @@ class TestActionCliSurface:
 
     def test_every_command_is_listed(self) -> None:
         listing = subprocess.run(
-            [sys.executable, "-m", "abicheck.frontends.action.cli", "--help"],
+            abicheck_module_command("abicheck.frontends.action.cli", "--help"),
             capture_output=True,
             text=True,
             check=True,
@@ -358,7 +359,7 @@ class TestActionCliSurface:
         exits 2 with "No such command".
         """
         result = subprocess.run(
-            [sys.executable, "-m", "abicheck.frontends.action.cli", command, "--help"],
+            abicheck_module_command("abicheck.frontends.action.cli", command, "--help"),
             capture_output=True,
             text=True,
             check=False,

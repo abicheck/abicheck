@@ -40,6 +40,8 @@ from pathlib import Path
 
 import pytest
 
+from tests._abicheck_subprocess import abicheck_command
+
 pytestmark = [
     pytest.mark.integration,
     pytest.mark.skipif(
@@ -112,17 +114,14 @@ def _dump(
     )
     out = d / "snap.json"
     proc = subprocess.run(
-        [
-            sys.executable,
-            "-m",
-            "abicheck",
+        abicheck_command(
             "dump",
             str(lib),
             "-H",
             str(header),
             "-o",
             str(out),
-        ],
+        ),
         cwd=d,
         env={
             **os.environ,

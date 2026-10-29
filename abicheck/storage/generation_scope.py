@@ -91,6 +91,11 @@ RESOLVER_SEMANTIC_FILES: tuple[str, ...] = (
     "abicheck/compare/export_owner_resolution.py",
     "abicheck/storage/native_identity_aliases.py",
     "abicheck/workflows/compare/resolve.py",
+    # Graph reconciliation: which removed/added pairs are one renamed
+    # declaration, and which are never candidates (fundamental types).
+    "abicheck/buildsource/graph_reconcile.py",
+    "abicheck/buildsource/graph_reconcile_candidates.py",
+    "abicheck/model/fundamental_type.py",
 )
 
 #: The directory whose every module is in the source-tier scope: the L4 source
