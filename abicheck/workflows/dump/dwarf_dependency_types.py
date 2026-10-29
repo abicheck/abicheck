@@ -73,7 +73,6 @@ from .dependency_retention import (
 
 __all__ = [
     "UnreachableDependencyTypes",
-    "unreachable_dependency_type_names",
     "unreachable_dependency_type_reading",
 ]
 
@@ -362,10 +361,3 @@ def unreachable_dependency_type_reading(
         if candidate_spelling(r) not in reached and r.name not in own_names
     )
     return UnreachableDependencyTypes(names, True)
-
-
-def unreachable_dependency_type_names(snap: AbiSnapshot) -> frozenset[str]:
-    """The names of :func:`unreachable_dependency_type_reading`, without its
-    read flag: empty both when nothing is internal and when the side is unread.
-    Callers that must tell those apart read the reading instead."""
-    return unreachable_dependency_type_reading(snap).names

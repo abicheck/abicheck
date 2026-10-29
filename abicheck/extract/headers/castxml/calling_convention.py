@@ -187,9 +187,38 @@ def _code_window(lines: list[str], line_no: int) -> tuple[str, int, int]:
 #: The text right before a function name when the name is declared through a
 #: pointer declarator, ``(``[attributes] ``*`` -- a function returning a
 #: function pointer, whose declarator opens before the name.
-_POINTER_RETURN_DECLARATOR = re.compile(
-    r"\(\s*(?:__attribute__\s*\(\(.*?\)\)\s*)*\*\s*$", re.DOTALL
-)
+_ATTRIBUTE_KEYWORD = "__attribute__"
+
+
+def _pointer_return_declarator_start(text: str) -> int | None:
+    """Offset of the ``(`` opening a pointer declarator that ends *text*, or None.
+
+    A right-to-left scan, linear in ``len(text)``: a regex with a lazy group
+    under ``*`` backtracks exponentially on repeated attribute groups.
+    """
+    i = len(text.rstrip())
+    if i == 0 or text[i - 1] != "*":
+        return None
+    i = len(text[: i - 1].rstrip())
+    while i and text[i - 1] == ")":
+        depth, j = 0, i
+        while j:
+            j -= 1
+            if text[j] == ")":
+                depth += 1
+            elif text[j] == "(":
+                depth -= 1
+                if depth == 0:
+                    break
+        if depth != 0:
+            return None
+        head = text[:j].rstrip()
+        if not head.endswith(_ATTRIBUTE_KEYWORD):
+            break
+        i = len(head[: -len(_ATTRIBUTE_KEYWORD)].rstrip())
+    if i and text[i - 1] == "(":
+        return i - 1
+    return None
 
 
 def _leading_conventions(text: str) -> set[str]:
@@ -221,14 +250,14 @@ def source_calling_conventions(
     pattern = re.compile(rf"(?<![\w:]){re.escape(name)}\s*\(")
     for match in pattern.finditer(window, line_start, line_end):
         before = window[: match.start()]
-        returned = _POINTER_RETURN_DECLARATOR.search(before)
+        returned = _pointer_return_declarator_start(before)
         if returned is not None:
             # ``void (__attribute__((ms_abi)) *f(void))(int)``: the convention
             # inside the returned declarator's parentheses (and the tail after
             # its parameter list) is the *returned* function type's, which the
             # return:<f> join carries. Only what precedes that declarator is f's
             # own: ``__attribute__((ms_abi)) void (*f(void))(int)`` is f's.
-            found |= _leading_conventions(before[: returned.start()])
+            found |= _leading_conventions(before[:returned])
             continue
         found |= calling_conventions_in(
             _declaration_outside_params(window, name, match.start())

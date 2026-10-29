@@ -35,7 +35,6 @@ from abicheck.compare.source_replay_twins import (
     REPLAY_TWINS,
     SOURCE_REPLAY_EVIDENCE,
     drop_replay_twins,
-    replay_kinds_covered,
 )
 from abicheck.model.change import Change
 from abicheck.model.change_catalog.kinds import ChangeKind
@@ -77,7 +76,11 @@ def test_scan_reaches_the_known_replay_emitters() -> None:
 
 def test_every_replay_kind_is_classified_and_no_stale_entry_remains() -> None:
     scanned = _scanned_replay_kinds()
-    covered = replay_kinds_covered()
+    covered = frozenset(
+        {t.replay for t in REPLAY_TWINS}
+        | {f.replay for f in DISTINCT_FACETS}
+        | set(REPLAY_ONLY)
+    )
     unclassified = sorted(k.name for k in scanned - covered)
     stale = sorted(k.name for k in covered - scanned)
     assert unclassified == [], (

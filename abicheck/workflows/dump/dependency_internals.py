@@ -14,7 +14,7 @@ findings out of contract with a visible reason. Nothing is dropped here: the
 snapshot stays whole.
 
 * A **DWARF-only** snapshot has no header attribution;
-  :func:`~abicheck.workflows.dump.dwarf_dependency_types.unreachable_dependency_type_names`
+  :func:`~abicheck.workflows.dump.dwarf_dependency_types.unreachable_dependency_type_reading`
   answers for its records (ADR-089 D2-D4).
 * A **header-derived** snapshot is answered here (ADR-089's 2026-10-25
   amendment). Dump-time scoping (``resolve_dependency_scope``) drops only

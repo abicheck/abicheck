@@ -22,7 +22,6 @@ import pytest
 from abicheck.extract.headers.castxml.vector_spellings import (
     UNEXPRESSIBLE_TYPE_CLASSES,
     castxml_declaration_keys,
-    castxml_vector_spellings,
     clang_vector_spellings,
     has_vector_nodes,
     parse_unexpressible_qualtype,
@@ -63,6 +62,10 @@ def test_unexpressible_types_keep_the_clang_spelling(
 )
 def test_other_types_are_not_joined(qual_type: str) -> None:
     assert parse_unexpressible_qualtype(qual_type) is None
+
+
+def _first_keys(root):
+    return {node: found[0] for node, found in castxml_declaration_keys(root).items()}
 
 
 def test_the_three_unimplemented_classes_are_the_ones_castxml_cannot_name() -> None:
@@ -110,7 +113,7 @@ _CLANG_COMPLEX = {
 def test_castxml_complex_parameter_and_return_join_to_clang_spelling() -> None:
     root = ET.fromstring(_CASTXML_COMPLEX)
     assert has_vector_nodes(root)
-    keys = castxml_vector_spellings(root)
+    keys = _first_keys(root)
     assert keys == {"_1": "param:f#0", "_2": "return:g"}
     resolved = resolve_vector_spellings(root, _CLANG_COMPLEX)
     # The parameter gets clang's spelling; the return of ``g`` is keyed by the
@@ -155,7 +158,7 @@ _CLANG_TYPEDEF_FIELD = {
 
 def test_complex_typedef_and_field_join_to_clang_spelling() -> None:
     root = ET.fromstring(_CASTXML_TYPEDEF_FIELD)
-    assert castxml_vector_spellings(root) == {"_6": "typedef:cf", "_7": "field:S::c"}
+    assert _first_keys(root) == {"_6": "typedef:cf", "_7": "field:S::c"}
     resolved = resolve_vector_spellings(root, _CLANG_TYPEDEF_FIELD)
     assert resolved == {"_6": "_Complex float", "_7": "_Complex double"}
 

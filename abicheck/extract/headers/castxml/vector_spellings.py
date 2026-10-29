@@ -42,7 +42,6 @@ from .context import CastxmlParserContext
 __all__ = [
     "VECTOR_SPELLINGS_ATTR",
     "resolve_vector_spellings",
-    "castxml_vector_spellings",
     "clang_vector_spellings",
     "has_vector_nodes",
     "UNEXPRESSIBLE_TYPE_CLASSES",
@@ -387,15 +386,6 @@ def castxml_declaration_keys(root: Element) -> dict[str, list[str]]:
                 add(arg.get("type", ""), f"param:{fn_key}#{position}")
             add(el.get("returns", ""), f"return:{fn_key}")
     return keys
-
-
-def castxml_vector_spellings(root: Element) -> dict[str, str]:
-    """The first declaration key for each unexpressible node in *root*.
-
-    Kept for callers that want one key per node; :func:`resolve_vector_spellings`
-    uses every key :func:`castxml_declaration_keys` finds.
-    """
-    return {node: found[0] for node, found in castxml_declaration_keys(root).items()}
 
 
 def _castxml_function_key(el: Element, index: dict[str, Element]) -> str:

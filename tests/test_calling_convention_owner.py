@@ -10,12 +10,16 @@ entity fails here without a toolchain.
 
 from __future__ import annotations
 
+import itertools
+import re
+import time
 from types import SimpleNamespace
 from xml.etree.ElementTree import Element
 
 import pytest
 
 from abicheck.extract.headers.castxml.calling_convention import (
+    _pointer_return_declarator_start,
     source_calling_conventions,
 )
 
@@ -99,3 +103,37 @@ def test_convention_is_owned_by_the_entity_it_is_written_on(
     placement: str, lines: list[str], line_no: int, owned_by_f: set[str]
 ) -> None:
     assert _owner_set(lines, line_no) == owned_by_f, placement
+
+
+#: Reference grammar with balanced attribute arguments (one nesting level).
+#: The retired lazy ``.*?`` also spanned an unbalanced ``)``, accepting
+#: ``(__attribute__((x)))*``, which is not a pointer declarator.
+_OLD_POINTER_RETURN = re.compile(
+    r"\(\s*(?:__attribute__\s*\(\((?:[^()]|\([^()]*\))*\)\)\s*)*\*\s*$"
+)
+_PIECES = (
+    "(",
+    " ",
+    "*",
+    "__attribute__((ms_abi))",
+    "__attribute__((a(b)))",
+    ")",
+    "void",
+    "x",
+)
+
+
+@pytest.mark.parametrize("parts", list(itertools.product(_PIECES, repeat=4)))
+def test_pointer_return_scan_matches_reference_regex(parts: tuple[str, ...]) -> None:
+    """Exhaustive small-domain equivalence with a balanced reference grammar
+    (the retired regex backtracked exponentially, flagged by CodeQL)."""
+    text = "".join(parts)
+    ref = _OLD_POINTER_RETURN.search(text)
+    assert _pointer_return_declarator_start(text) == (ref.start() if ref else None)
+
+
+def test_pointer_return_scan_is_linear_on_repeated_attributes() -> None:
+    text = "(__attribute__((" + "))__attribute__((" * 20000
+    start = time.perf_counter()
+    assert _pointer_return_declarator_start(text) is None
+    assert time.perf_counter() - start < 1.0

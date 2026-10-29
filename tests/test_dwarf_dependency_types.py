@@ -1,4 +1,4 @@
-"""Unit tests for :func:`unreachable_dependency_type_names` on constructed snapshots.
+"""Unit tests for :func:`unreachable_dependency_type_reading` on constructed snapshots.
 
 The classifier decides which DWARF-only records are dependency internals that no
 public declaration reaches. These tests build the snapshot directly, so each
@@ -24,7 +24,6 @@ from abicheck.workflows.dump.dwarf_dependency_types import (
     _exported_parameter_lists,
     _split_top_level,
     _strip_qualifiers,
-    unreachable_dependency_type_names,
     unreachable_dependency_type_reading,
 )
 
@@ -112,7 +111,7 @@ def test_fallback_shape_keeps_the_vector_by_size_and_excludes_tag_and_scratch() 
     # with the alias (``V``), so the vector is reached through the field's
     # 32-byte size, and the 8-bit tag and 128-bit scratch are not.
     snap = _library_with_vector_state(with_scale=True)
-    assert unreachable_dependency_type_names(snap) == {
+    assert unreachable_dependency_type_reading(snap).names == {
         "fakevec::simd::avx512_tag",
         "fakevec::simd::scratch_pad<float>",
     }
@@ -124,7 +123,7 @@ def test_resolved_alias_names_its_template_arguments_as_reached() -> None:
     # reached, template arguments included. The tag is then kept; the scratch,
     # named nowhere in the public surface, is still excluded.
     snap = _library_with_vector_state(with_scale=False, typedefs={"lib::V": VECTOR})
-    assert unreachable_dependency_type_names(snap) == {
+    assert unreachable_dependency_type_reading(snap).names == {
         "fakevec::simd::scratch_pad<float>"
     }
 
@@ -141,18 +140,18 @@ def test_pointer_alias_is_unbounded_and_excludes_nothing() -> None:
         symbols=[SUM],
         layouts=[_layout("lib::State", {"acc": 8, "n": 4}, 16)],
     )
-    assert unreachable_dependency_type_names(snap) == frozenset()
+    assert unreachable_dependency_type_reading(snap).names == frozenset()
 
 
 def test_header_derived_snapshot_is_already_scoped_and_classified_nothing() -> None:
     snap = _library_with_vector_state(with_scale=True)
     snap.from_headers = True
-    assert unreachable_dependency_type_names(snap) == frozenset()
+    assert unreachable_dependency_type_reading(snap).names == frozenset()
 
 
 def test_no_located_records_classifies_nothing() -> None:
     snap = _snapshot(types=[_record("lib::State", "", fields=[])], symbols=[SUM])
-    assert unreachable_dependency_type_names(snap) == frozenset()
+    assert unreachable_dependency_type_reading(snap).names == frozenset()
 
 
 def test_without_an_exported_own_record_there_is_no_own_root() -> None:
@@ -160,7 +159,7 @@ def test_without_an_exported_own_record_there_is_no_own_root() -> None:
     # exists and nothing is classified: weaker evidence keeps the finding.
     types = [_record("fakevec::simd::avx512_tag", f"{DEP}:6", size_bits=8)]
     snap = _snapshot(types=types, symbols=[SCALE])
-    assert unreachable_dependency_type_names(snap) == frozenset()
+    assert unreachable_dependency_type_reading(snap).names == frozenset()
 
 
 def test_a_name_shared_with_an_own_record_is_withheld() -> None:
@@ -172,7 +171,7 @@ def test_a_name_shared_with_an_own_record_is_withheld() -> None:
         _record("Tag", f"{DEP}:6", size_bits=8),
     ]
     snap = _snapshot(types=types, symbols=[SUM])
-    assert "Tag" not in unreachable_dependency_type_names(snap)
+    assert "Tag" not in unreachable_dependency_type_reading(snap).names
 
 
 def test_exported_full_spelling_reaches_a_dependency_record_directly() -> None:
@@ -183,7 +182,10 @@ def test_exported_full_spelling_reaches_a_dependency_record_directly() -> None:
         _record("fakevec::simd::avx512_tag", f"{DEP}:6", size_bits=8),
     ]
     snap = _snapshot(types=types, symbols=["_ZN3lib5tagerEN7fakevec4simd10avx512_tagE"])
-    assert "fakevec::simd::avx512_tag" not in unreachable_dependency_type_names(snap)
+    assert (
+        "fakevec::simd::avx512_tag"
+        not in unreachable_dependency_type_reading(snap).names
+    )
 
 
 def test_split_top_level_respects_template_and_paren_depth() -> None:
@@ -302,7 +304,7 @@ def test_macho_twin_classifies_exactly_like_its_elf_twin() -> None:
     expected = frozenset(
         {"fakevec::simd::avx512_tag", "fakevec::simd::scratch_pad<float>"}
     )
-    assert unreachable_dependency_type_names(elf_twin) == expected
+    assert unreachable_dependency_type_reading(elf_twin).names == expected
     assert unreachable_dependency_type_reading(
         macho_twin
     ) == UnreachableDependencyTypes(expected, True)

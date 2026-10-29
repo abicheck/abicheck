@@ -18,7 +18,7 @@ from abicheck.extract.headers.castxml.vector_join import (
 )
 from abicheck.extract.headers.castxml.vector_spellings import (
     VECTOR_SPELLINGS_ATTR,
-    castxml_vector_spellings,
+    castxml_declaration_keys,
     clang_vector_spellings,
     has_vector_nodes,
     parse_vector_qualtype,
@@ -63,6 +63,10 @@ def test_non_vector_or_unknown_element_has_no_spelling(qual_type: str) -> None:
 
 
 # ── clang declaration keys (unit) ────────────────────────────────────────────
+
+
+def _first_keys(root):
+    return {node: found[0] for node, found in castxml_declaration_keys(root).items()}
 
 
 def _clang_tree() -> dict:
@@ -138,13 +142,13 @@ def _castxml_with_param() -> Element:
 
 
 def test_castxml_vector_nodes_are_keyed_by_their_declaration() -> None:
-    keys = castxml_vector_spellings(_castxml_with_param())
+    keys = _first_keys(_castxml_with_param())
     assert keys == {"_26": "param:take#0"}
 
 
 def test_typedef_and_shared_inline_field_resolve_to_one_node() -> None:
     root = _castxml_root()
-    keys = castxml_vector_spellings(root)
+    keys = _first_keys(root)
     # The typedef claims node _19; the inline field shares it, so it is one key.
     assert keys["_19"] == "typedef:f8"
 
@@ -345,7 +349,7 @@ def test_castxml_overloads_key_by_mangled_name() -> None:
         fn = Element("Function", id=fn_id, name="ov", mangled=mangled, context="_1")
         fn.append(Element("Argument", id=f"{arg_id}a", name="p", type=arg_id))
         root.append(fn)
-    keys = castxml_vector_spellings(root)
+    keys = _first_keys(root)
     assert keys == {"_16": "param:_Z2ovDv4_f#0", "_17": "param:_Z2ovDv4_i#0"}
 
 

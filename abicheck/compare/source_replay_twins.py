@@ -258,15 +258,6 @@ REPLAY_ONLY: dict[ChangeKind, str] = {
 }
 
 
-def replay_kinds_covered() -> frozenset[ChangeKind]:
-    """Every replay kind the table accounts for, by any of its three roles."""
-    return frozenset(
-        {t.replay for t in REPLAY_TWINS}
-        | {f.replay for f in DISTINCT_FACETS}
-        | set(REPLAY_ONLY)
-    )
-
-
 def _severity(kind: ChangeKind) -> int:
     """The default verdict rank of *kind* (4 = BREAKING ... 1 = COMPATIBLE)."""
     if kind in BREAKING_KINDS:
