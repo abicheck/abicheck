@@ -44,6 +44,7 @@ from .fact_codec import encode_fact_fields
 from .generation_migrations import FACT_GENERATIONS_KEY, encode_fact_generations
 from .sectioned_document import to_sectioned_document
 from .semantic_ir_codec import encode_semantic_ir
+from .snapshot_runtime_only import RUNTIME_ONLY_SNAPSHOT_FIELDS
 from .snapshot_schema_versions import SCHEMA_VERSION
 from .surface_graph_codec import encode_surface_graph
 from .versioning import this_build_generations
@@ -315,23 +316,18 @@ def _encode_dataclass_skipping(
     }
 
 
-# Fields of ``AbiSnapshot`` the generic walk above must never descend into.
-# Each is either a runtime-only lookup cache, or a field whose persisted form
-# is owned by a dedicated codec that reprojects it from the still-typed
-# object further down (never from this recursion's output).
+#: ``AbiSnapshot`` fields the generic walk above must never descend into.
+#: Each is a lazy lookup cache, a runtime-only field (see
+#: :data:`RUNTIME_ONLY_SNAPSHOT_FIELDS`), or a field whose persisted form is
+#: owned by a dedicated codec that reprojects it from the still-typed object
+#: further down (never from this recursion's output).
+_SNAPSHOT_CACHE_FIELDS = frozenset(
+    {"_func_by_mangled", "_var_by_mangled", "_type_by_name"}
+)
 _SNAPSHOT_SKIP_FIELDS = frozenset(
     {
-        # Lazy lookup caches -- recursively copying them would cost the size
-        # of the snapshot again for something that is never persisted.
-        "_func_by_mangled",
-        "_var_by_mangled",
-        "_type_by_name",
-        # Runtime-only L2 ids a depth projection kept; never persisted.
-        "header_declaration_ids",
-        "projection_unavailable",
-        "projection_evidence_gaps",
-        # Runtime-only preprocessor-excluded declaration scan; never persisted.
-        "live_preprocessor_hidden",
+        *_SNAPSHOT_CACHE_FIELDS,
+        *RUNTIME_ONLY_SNAPSHOT_FIELDS,
         # Owned by encode_surface_graph() below, which unconditionally
         # replaces the key with the graph codec's own to_dict()
         # (Codex review, PR #962).
@@ -517,17 +513,24 @@ def _snapshot_to_dict(snap: AbiSnapshot, encode: Any) -> dict[str, Any]:
     # defect ``buildsource/source_inputs.py``'s contract forbids: a recorded
     # path is provenance, not a licence. A loaded snapshot therefore always
     # comes back with the field at its deny-by-default ``False``.
-    d.pop("live_source_evidence", None)
-    d.pop("live_preprocessor_clang_bin", None)  # runtime-only, as above
-    d.pop("load_notices", None)  # runtime-only, as above
+    for name in RUNTIME_ONLY_SNAPSHOT_FIELDS:
+        d.pop(name, None)
+    # The -E -dD branch scan (schema v67) is walked like any persisted field,
+    # but a run that made no scan leaves it out, so a document without one
+    # encodes exactly as it did before v67.
+    if d.get("live_preprocessor_hidden") is None:
+        d.pop("live_preprocessor_hidden", None)
     # ADR-062 D2: the producing build's generations, never re-dated on re-save.
     d.pop("fact_generations", None)
     d.pop("spellings_generation", None)  # folded into the stamp below
+    # A recorded spelling generation is kept whether or not a stamp was carried:
+    # with no stamp it is written against this build's generations, so the
+    # migrated-once marker is never lost on a re-save.
     d[FACT_GENERATIONS_KEY] = encode_fact_generations(
         snap.fact_generations
         if snap.fact_generations is not None
         else this_build_generations(carries_source_facts=snap.build_source is not None),
-        snap.spellings_generation if snap.fact_generations is not None else None,
+        snap.spellings_generation,
     )
     # The dump's own provenance block (model/snapshot.py): persisted verbatim
     # when the snapshot carries one, and absent otherwise, so a snapshot no
@@ -535,10 +538,6 @@ def _snapshot_to_dict(snap: AbiSnapshot, encode: Any) -> dict[str, Any]:
     d.pop("dump_provenance", None)
     if snap.dump_provenance is not None:
         d["dump_provenance"] = encode(snap.dump_provenance)
-    d.pop("static_archive", None)  # runtime-only, as above (ADR-086)
-    d.pop("header_declaration_ids", None)  # runtime-only, depth projection
-    d.pop("projection_unavailable", None)  # runtime-only, depth projection
-    d.pop("projection_evidence_gaps", None)  # runtime-only, depth projection
     # If ``from_headers`` was only *inferred* (a legacy snapshot loaded without
     # the explicit key), do not persist it as explicit provenance: drop the key
     # so a reload re-runs the same inference and re-marks it inferred, rather

@@ -101,12 +101,22 @@ SERIALIZATION_BUG_CLASSES: tuple[BugClass, ...] = (
             "inventory (`section_schema_versions`): a version the writer "
             "records must be read back against this build's registry, or a "
             "too-new section (`binary` at 99 on a v1 section) decodes "
-            "silently while the top-level schema_version is refused."
+            "silently while the top-level schema_version is refused. A "
+            "field a stored snapshot must carry to reproduce a live result "
+            "is persisted, never declared runtime-only: the branch scan that "
+            "attributes an undeclared export to its guard macro was "
+            "runtime-only until schema v67, so the same two libraries read "
+            "live and read stored disagreed on the census. The encoder's "
+            "runtime-only declaration is the single list the round-trip "
+            "test reads, and a recorded spelling generation is written "
+            "whether or not a fact-generation stamp was carried."
         ),
         fixed_by=(1442,),
         seed_tests=(
             "tests/test_elf_symbol_roundtrip_and_origin.py",
             "tests/test_family_f2_route_parity.py",
+            "tests/test_live_stored_census_parity.py",
+            "tests/test_preprocessor_hidden_census_integration.py",
             "tests/unit/storage/test_snapshot_field_roundtrip.py",
             "tests/unit/storage/test_source_abi_surface_roundtrip.py",
             "tests/test_storage_roundtrip_sweep.py",
@@ -127,21 +137,6 @@ SERIALIZATION_BUG_CLASSES: tuple[BugClass, ...] = (
                 reference=(
                     "docs/contribute/known-gaps/"
                     "advanced-facts-collected-infers-advanced-dwarf-extraction-ran.md"
-                ),
-            ),
-            KnownGap(
-                description=(
-                    "An ownership_fact is persisted only as a PRESENT decision "
-                    "inside an extraction_scope. Every other status reads back "
-                    "as None, and a PRESENT fact set without a scope is dropped. "
-                    "Pinned by the KNOWN_LOSSY entries named "
-                    "`ownership_fact[...]`; ownership_of() treats all of them as "
-                    "unknown, so no verdict changes, but the Fact is not "
-                    "round-tripped. Persisting the status is a schema change."
-                ),
-                reference=(
-                    "docs/contribute/known-gaps/"
-                    "ownership-fact-persists-only-a-present-decision.md"
                 ),
             ),
         ),

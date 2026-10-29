@@ -74,6 +74,9 @@ FAMILIES: dict[str, Family] = {
                 "tests/test_family_f2_route_parity.py",
                 "tests/test_family_f2_live_route_matrix.py",
                 "tests/test_family_f2_release_member_parity.py",
+                "tests/test_metamorphic_snapshot_relations.py",
+                "tests/test_metamorphic_source_relations.py",
+                "tests/test_live_stored_census_parity.py",
             ),
         ),
         Family(

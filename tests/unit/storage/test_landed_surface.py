@@ -82,6 +82,7 @@ _INTERNAL_MODULES = (
     "abicheck.storage.atomic_file",
     "abicheck.storage.project_package_archive",
     "abicheck.storage.zip_member",
+    "abicheck.storage.snapshot_runtime_only",
     "abicheck.storage.generation_scope",
     "abicheck.storage.generation_migrations",
     "abicheck.storage.castxml_array_migration",
