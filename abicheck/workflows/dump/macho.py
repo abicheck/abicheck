@@ -28,6 +28,7 @@ from typing import TYPE_CHECKING
 from ...errors import SnapshotError
 from ...extract.surface_fact_producers import export_table_surface_facts
 from ...model import AbiSnapshot, Function, Visibility
+from ...storage.snapshot_load_normalization import stamp_macho_elf_binding
 from ..snapshot_factory import new_snapshot
 from .scoped import try_header_scoped_dump
 
@@ -105,7 +106,7 @@ def extract_macho(
         for exp in macho_meta.exports
         if exp.name
     ]
-    return new_snapshot(
+    snapshot = new_snapshot(
         library=path.name,
         version=version,
         functions=funcs,
@@ -113,3 +114,5 @@ def extract_macho(
         platform="macho",
         scope_fallback=scope_fallback,
     )
+    stamp_macho_elf_binding(snapshot)
+    return snapshot

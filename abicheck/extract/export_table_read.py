@@ -33,6 +33,7 @@ from typing import TypeVar
 from ..model import AbiSnapshot, Function, Variable, Visibility
 from ..model.export_index import ExportTableState, snapshot_export_table_state
 from ..storage import closure_identity
+from ..storage.snapshot_load_normalization import stamp_macho_elf_binding
 from .parse_failures import export_table_read_required
 from .surface_fact_producers import reconcile_export_absence, unread_export_fact
 
@@ -107,7 +108,9 @@ def reconcile_snapshot_export_absence(snapshot: AbiSnapshot) -> int:
 
 def finish_binary_snapshot(snapshot: AbiSnapshot) -> AbiSnapshot:
     """The ELF/PE/Mach-O builders' shared tail: withdraw unsupported export
-    absences (:func:`reconcile_snapshot_export_absence`), then renumber
-    anonymous closure identities."""
+    absences (:func:`reconcile_snapshot_export_absence`), stamp a Mach-O
+    export's linkage onto its declarations (ELF's is stamped by the ELF
+    builder itself), then renumber anonymous closure identities."""
+    stamp_macho_elf_binding(snapshot)
     reconcile_snapshot_export_absence(snapshot)
     return closure_identity.renumber_anonymous_closure_identities(snapshot)
