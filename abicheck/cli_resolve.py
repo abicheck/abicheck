@@ -144,19 +144,6 @@ def _detect_binary_format(path: Path) -> str | None:
     return detect_binary_format(path)
 
 
-def _resolve_linker_script(path: Path) -> tuple[Path | None, bool]:
-    """Resolve a GNU ld linker script to the shared library it points at.
-
-    Returns ``(resolved_path, is_linker_script)``. ``is_linker_script`` is True
-    when *path* looks like a GNU ld script (so callers can emit a targeted hint
-    even when no target file could be located); ``resolved_path`` is the first
-    ``INPUT()``/``GROUP()`` member that exists next to the script, or *None*.
-    """
-    from .workflows.extraction import resolve_linker_script
-
-    return resolve_linker_script(path)
-
-
 def _apply_native_provenance(
     snap: AbiSnapshot,
     public_headers: list[Path] | None,

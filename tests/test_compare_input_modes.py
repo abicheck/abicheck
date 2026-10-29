@@ -243,7 +243,9 @@ class TestLinkerScriptInput:
     follow it to the real shared library instead of failing."""
 
     def test_follows_input_directive(self, tmp_path):
-        from abicheck.cli_resolve import _resolve_linker_script
+        from abicheck.binary_utils import (
+            resolve_linker_script as _resolve_linker_script,
+        )
 
         target = _write_fake_elf(tmp_path / "libfoo.so.1")
         script = tmp_path / "libfoo.so"
@@ -253,7 +255,9 @@ class TestLinkerScriptInput:
         assert resolved == target
 
     def test_follows_group_with_comment_and_as_needed(self, tmp_path):
-        from abicheck.cli_resolve import _resolve_linker_script
+        from abicheck.binary_utils import (
+            resolve_linker_script as _resolve_linker_script,
+        )
 
         target = _write_fake_elf(tmp_path / "libbar.so.6")
         script = tmp_path / "libbar.so"
@@ -266,7 +270,9 @@ class TestLinkerScriptInput:
         assert resolved == target
 
     def test_follows_absolute_path_target(self, tmp_path):
-        from abicheck.cli_resolve import _resolve_linker_script
+        from abicheck.binary_utils import (
+            resolve_linker_script as _resolve_linker_script,
+        )
 
         target = _write_fake_elf(tmp_path / "libabs.so.2")
         script = tmp_path / "libabs.so"
@@ -276,7 +282,9 @@ class TestLinkerScriptInput:
         assert resolved == target
 
     def test_plain_text_is_not_a_linker_script(self, tmp_path):
-        from abicheck.cli_resolve import _resolve_linker_script
+        from abicheck.binary_utils import (
+            resolve_linker_script as _resolve_linker_script,
+        )
 
         p = tmp_path / "notes.txt"
         p.write_text("this is just text, not a script", encoding="utf-8")

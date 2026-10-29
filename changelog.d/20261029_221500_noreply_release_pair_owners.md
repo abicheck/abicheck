@@ -7,8 +7,9 @@
   and `dump`, with `linker_script_note` as the one wording `resolve_input`
   also uses; `release_members.normalize_member_operand`,
   `workflows.compare.session_inputs.normalize_operand`,
-  `cli_resolve._maybe_follow_linker_script` and
-  `cli_resolve._normalize_binary_input` are deleted. The ADR-050 refusal kind
+  `cli_resolve._maybe_follow_linker_script`,
+  `cli_resolve._normalize_binary_input` and the now test-only
+  `cli_resolve._resolve_linker_script` are deleted. The ADR-050 refusal kind
   is a class attribute, `ProfileMismatchError`/`ScopeMismatchError.not_comparable_kind`,
   replacing `workflows.release_scope.mismatch_kind` and its two inline copies.
   A release side's headers are composed by `release_inputs.release_side_headers`
