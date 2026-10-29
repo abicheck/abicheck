@@ -59,6 +59,9 @@ EXTRACTION_BUG_CLASSES: tuple[BugClass, ...] = (
         seed_tests=(
             "tests/test_castxml_function_pointer_spelling.py",
             "tests/test_castxml_function_pointer_integration.py",
+            "tests/test_function_type_calling_convention.py",
+            "tests/test_dwarf_subroutine_calling_convention.py",
+            "tests/test_type_spelling_differential_matrix.py",
         ),
         axes={
             "signature_part": ("arity", "param_type", "return", "variadic", "cc"),
@@ -590,5 +593,42 @@ EXTRACTION_BUG_CLASSES: tuple[BugClass, ...] = (
         seed_tests=("tests/test_binary_dialect_integration.py",),
         public_surfaces=("cli",),
         axes={"dialect": ("c++17", "c++20", "c++23")},
+    ),
+    BugClass(
+        id="symbol_rule.single_object_format",
+        invariant=(
+            "A symbol-level rule -- what an object exports (a hidden/private "
+            "symbol is not an export), a symbol's linkage (a removed weak "
+            "export carries it, so `binding: weak` applies), or whether an "
+            "unread side's dependency types were classified -- must reach the "
+            "same finding-class outcome on every object format for its twin "
+            "input. A fact a format cannot supply is reported unknown (None, "
+            "unread), never silently set to the value another format's "
+            "default happens to be. Written for ELF (STV_HIDDEN, STB_WEAK, "
+            ".dynsym) and implemented for ELF alone, the Mach-O side took "
+            "N_PEXT exports as public, stamped no linkage (so `binding: weak` "
+            "never matched a Mach-O removal), and read an unread side as an "
+            "empty classification."
+        ),
+        fixed_by=(1629, 1630, 1819),
+        seed_tests=(
+            "tests/test_family_f8_symbol_rule_parity.py",
+            "tests/test_macho_private_extern_export.py",
+            "tests/test_macho_export_linkage_binding.py",
+            "tests/test_dwarf_dependency_types.py",
+        ),
+        public_surfaces=("cli",),
+        axes={"object_format": ("elf", "macho", "pe")},
+        known_gaps=(
+            KnownGap(
+                description=(
+                    "A PE export carries no linkage flag, so its binding stays "
+                    "unknown: `binding: weak` never matches a PE removal, by "
+                    "design (fail closed), and `binding: global` does not "
+                    "either. A PE COMDAT-level weakness is not visible."
+                ),
+                reference="abicheck/workflows/dump/dependency_internals.py",
+            ),
+        ),
     ),
 )

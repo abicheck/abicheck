@@ -179,12 +179,15 @@ def test_constant_value_change_is_reported_once(
     assert report["verdict"] == "API_BREAK"
     assert report["_exit_code"] == 2
     assert _kinds(report, "constant_changed") == [qualified]
-    # Only C++ constexpr reaches the replay kind; for the other forms there is
-    # nothing to drop, so the ledger counts no deduplication.
+    # The header variable's own value finding (VAR_VALUE_CHANGED, mangled
+    # symbol) restates the same constant: it is dropped, and the constant is
+    # the one finding. Only C++ constexpr also reaches the replay kind, which
+    # is a second copy dropped the same way.
     replay_copies = _kinds(report, "constexpr_value_changed")
     assert replay_copies == []
+    assert _kinds(report, "var_value_changed") == []
     audit = report["disposition_audit"]
-    expected_dedup = 1 if form.startswith("cxx-constexpr") else 0
+    expected_dedup = 2 if form.startswith("cxx-constexpr") else 1
     assert audit["counts"]["deduplicated"] == expected_dedup, audit["counts"]
 
 
@@ -192,15 +195,16 @@ def test_plain_const_is_reported_once_and_untouched(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     # A plain ``const`` is not a C++ ``constexpr`` variable, so the L4 replay
-    # never emits CONSTEXPR_VALUE_CHANGED for it. The header tier's finding is
-    # the only one, and nothing is deduplicated.
+    # never emits CONSTEXPR_VALUE_CHANGED for it. The header tier's constant is
+    # the one finding; the variable's VAR_VALUE_CHANGED restatement is dropped.
     monkeypatch.chdir(tmp_path)
     monkeypatch.delenv("ABICHECK_AST_FRONTEND", raising=False)
     report = _compare(tmp_path, "cxx-const-namespace", 10, 20)
 
     assert _kinds(report, "constant_changed") == ["demo::kLimit"]
     assert _kinds(report, "constexpr_value_changed") == []
-    assert report["disposition_audit"]["counts"]["deduplicated"] == 0
+    assert _kinds(report, "var_value_changed") == []
+    assert report["disposition_audit"]["counts"]["deduplicated"] == 1
 
 
 def test_unchanged_constexpr_value_reports_nothing(
