@@ -15,9 +15,8 @@ not output of the code under test.
 
 from __future__ import annotations
 
-import xml.etree.ElementTree as ET
-
 import pytest
+from defusedxml.ElementTree import fromstring
 
 from abicheck.extract.headers.castxml.vector_spellings import (
     UNEXPRESSIBLE_TYPE_CLASSES,
@@ -111,7 +110,7 @@ _CLANG_COMPLEX = {
 
 
 def test_castxml_complex_parameter_and_return_join_to_clang_spelling() -> None:
-    root = ET.fromstring(_CASTXML_COMPLEX)
+    root = fromstring(_CASTXML_COMPLEX)
     assert has_vector_nodes(root)
     keys = _first_keys(root)
     assert keys == {"_1": "param:f#0", "_2": "return:g"}
@@ -157,7 +156,7 @@ _CLANG_TYPEDEF_FIELD = {
 
 
 def test_complex_typedef_and_field_join_to_clang_spelling() -> None:
-    root = ET.fromstring(_CASTXML_TYPEDEF_FIELD)
+    root = fromstring(_CASTXML_TYPEDEF_FIELD)
     assert _first_keys(root) == {"_6": "typedef:cf", "_7": "field:S::c"}
     resolved = resolve_vector_spellings(root, _CLANG_TYPEDEF_FIELD)
     assert resolved == {"_6": "_Complex float", "_7": "_Complex double"}
@@ -217,7 +216,7 @@ _CLANG_DECLARATORS = {
 
 
 def test_complex_pointer_array_and_typedef_chain_reach_the_element_node() -> None:
-    root = ET.fromstring(_CASTXML_DECLARATORS)
+    root = fromstring(_CASTXML_DECLARATORS)
     keys = castxml_declaration_keys(root)
     # Every declaration that wraps the element node names it, in document order.
     assert keys == {
@@ -233,7 +232,7 @@ def test_complex_pointer_array_and_typedef_chain_reach_the_element_node() -> Non
 
 
 def test_pointer_array_and_typedef_spellings_resolve_to_the_element_spelling() -> None:
-    root = ET.fromstring(_CASTXML_DECLARATORS)
+    root = fromstring(_CASTXML_DECLARATORS)
     resolved = resolve_vector_spellings(root, _CLANG_DECLARATORS)
     # One Unimplemented node, one spelling: the element type's, whichever
     # declarator (pointer, typedef, array) the first known key came through.
