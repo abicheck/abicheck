@@ -196,6 +196,8 @@ def probe_builtin_abi(cc_bin: str, option_tokens: tuple[str, ...]) -> BuiltinAbi
         if len(parts) != 3:
             return None
         name, size, align = parts
+        if not (size.isdigit() and align.isdigit()):
+            return None
         layout[name] = (int(size), int(align))
     return BuiltinAbi(plain_char_unsigned=plain_char, layout=layout)
 
@@ -257,7 +259,7 @@ def _vector_bytes(expr: str, abi: BuiltinAbi) -> int | None:
         return None
     try:
         return _arithmetic(ast.parse(text, mode="eval").body)
-    except ValueError:
+    except (ValueError, SyntaxError):
         return None
 
 
