@@ -38,6 +38,7 @@ from ..model.declaration_store import STORE_ATTRIBUTE
 from ..model.dwarf_facts import AdvancedExtractionStatus
 from ..model.snapshot_reliability import FACT_FAMILIES, flag_name
 from .acyclic_json import gc_paused
+from .dwarf_layout_facts import drop_uncaptured_dwarf_layout_facts
 from .entity_id_codec import encode_entity_ids, encode_sidecar_entity_ids
 from .enum_codec import encode_platform_enums
 from .extraction_scope_codec import encode_extraction_scope
@@ -573,6 +574,7 @@ def _snapshot_to_dict(snap: AbiSnapshot, encode: Any) -> dict[str, Any]:
     _encode_advanced_extraction_status(d)
     _compact_elf_symbols(d)
     _drop_uncaptured_type_identities(d)
+    drop_uncaptured_dwarf_layout_facts(d)
 
     # ADR-063 Phase 0 (schema v26): see storage/fact_codec.py.
     encode_fact_fields(d)

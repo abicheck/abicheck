@@ -251,6 +251,7 @@ def macho_from_dict(macho: dict[str, Any], schema_version: int) -> Any:
 
 def dwarf_from_dict(d: dict[str, Any]) -> Any:
     from .model.dwarf_facts import DwarfMetadata, EnumInfo, FieldInfo, StructLayout
+    from .storage.dwarf_layout_facts import decode_dwarf_member_abi
 
     def _struct(name: str, s: dict[str, Any]) -> StructLayout:
         return StructLayout(
@@ -265,6 +266,8 @@ def dwarf_from_dict(d: dict[str, Any]) -> Any:
                     byte_size=f.get("byte_size", 0),
                     bit_offset=f.get("bit_offset", 0),
                     bit_size=f.get("bit_size", 0),
+                    # Schema v69: a pre-v69 member decodes to an unset fact.
+                    type_abi_fact=decode_dwarf_member_abi(f),
                 )
                 for f in s.get("fields", [])
             ],

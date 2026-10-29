@@ -5,7 +5,7 @@
       "abicheck/ctf_metadata.py": "42d3f588c6c4567c2a9d43a3ef5b886a753c37dd5357a4199d81d7ffc60d2109",
       "abicheck/dumper.py": "5b861344a920e378b9fa5eb2973478a6e72e5a245eceae9b3400df7e8b98fb6e",
       "abicheck/dwarf_advanced.py": "91cfc7f410a37e7d7ba3ec922ff2944b81253fde3dcfdb806be032087822b339",
-      "abicheck/dwarf_metadata.py": "708db5f586ed5e56342f45f019cbc4174a894a8ec3899edfe3b85facee5b871b",
+      "abicheck/dwarf_metadata.py": "f8dc46bff63790e39ad2df6aaf64d026704ea707dbd28830cc5a4eb75af79e65",
       "abicheck/dwarf_presence.py": "7e73580ec7a02fdf24e3815cb89e42aa6fe00e46e8cda6b7fe9d547f06ac3f06",
       "abicheck/dwarf_snapshot.py": "f0e8fce9495c762539ffa051662dc2bd5a375817f8b8c6f648a2135ceebf59eb",
       "abicheck/dwarf_snapshot_datasources.py": "e337f8be3a8ae16350c0639d0be10670d4d5d1197108659fa210fcbbf8a5bdde",
@@ -184,9 +184,9 @@
       "abicheck/symvers_metadata.py": "372737765cd132e6e87ed891dd465d2958e04debbef774e45212ceb3036871cb",
       "abicheck/type_metadata.py": "9997189de8dac522fd1db8be5ae491d811139503f83abaaded89038eb4aa9cdf"
     },
-    "fingerprint": "aec7e5fcdbbc8093caa693f8be1d0be70a5182f31a912acd62903831bc591ea3",
+    "fingerprint": "5f10d77fcc10744976b689d0db86e6fc23629b8a09c2bd29fb40112704cae36f",
     "generation": 32,
-    "reason": "Generation 32 is unreleased on this branch: the same bump re-records after the clang builtin/variable/typedef fact wiring and the typedef and restrict refinements landed within it (no further bump, per the coordinator)"
+    "reason": "DWARF layout members (FieldInfo.type_abi_fact) carry the generation-32 ABI fact as a plain AbiFundamental value that the projection wraps as a present fact; no spelling changes, generation 32 is unreleased from this PR, so no bump"
   },
   "resolver": {
     "files": {
