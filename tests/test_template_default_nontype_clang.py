@@ -30,11 +30,12 @@ from __future__ import annotations
 import json
 import shutil
 import subprocess
-import sys
 from pathlib import Path
 from typing import Any
 
 import pytest
+
+from tests._abicheck_subprocess import abicheck_command
 
 pytestmark = pytest.mark.integration
 
@@ -94,7 +95,7 @@ def _require_clang() -> None:
 
 def _run_abicheck(*args: str) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
-        [sys.executable, "-m", "abicheck", *args],
+        abicheck_command(*args),
         capture_output=True,
         text=True,
         check=False,

@@ -102,7 +102,7 @@
     },
     {
       "path": "abicheck/buildsource/graph_reconcile.py",
-      "baseline_lines": 910,
+      "baseline_lines": 908,
       "target": "extract/build-or-source",
       "rule": "no_growth",
       "disposition": "migrate",
@@ -1928,7 +1928,7 @@
     },
     {
       "path": "tests/validate_examples.py",
-      "baseline_lines": 1872,
+      "baseline_lines": 1868,
       "target": "tests/unit-or-contract ownership matching production migration",
       "rule": "no_growth",
       "disposition": "migrate",

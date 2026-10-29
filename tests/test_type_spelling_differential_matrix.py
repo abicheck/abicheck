@@ -30,13 +30,14 @@ import os
 import re
 import shutil
 import subprocess
-import sys
 import tempfile
 from dataclasses import dataclass
 from functools import cache
 from pathlib import Path
 
 import pytest
+
+from tests._abicheck_subprocess import abicheck_command
 
 pytestmark = pytest.mark.integration
 
@@ -183,9 +184,6 @@ _RETURNED_CONVENTION_PAIRS = frozenset(
     {"ms_abi_fnptr", "sysv_vs_ms_fnptr", "fnptr_return_change"}
 )
 
-#: The float _Complex parameter in the header lanes is fixed by the
-#: graph-reconcile change; these cells flip when that merges.
-_COMPLEX_XFAIL = "fixed by complex-reconcile task"
 #: GCC writes no DW_AT_calling_convention for ms_abi/sysv_abi on a subroutine
 #: type, so a GCC -g build cannot show the convention (verified with readelf);
 #: the header lanes carry it.
@@ -492,7 +490,7 @@ def abi_differs(key: str, site: str) -> bool:
 
 
 def _abicheck(*args: str) -> subprocess.CompletedProcess[str]:
-    return _run([sys.executable, "-m", "abicheck.cli", *args], REPO_ROOT)
+    return _run(abicheck_command(*args), REPO_ROOT)
 
 
 def _lane_result(key: str, site: str, lane: str) -> tuple[int, list[dict]]:
@@ -584,17 +582,6 @@ def _matrix_cells() -> list:
     for key, site in _legal_cells():
         for lane in _LANES:
             marks = []
-            if (
-                key == "fcomplex_vs_dcomplex"
-                and lane in "BC"
-                and site
-                in (
-                    "param",
-                    "typedef",
-                    "return",
-                )
-            ):
-                marks.append(pytest.mark.xfail(strict=True, reason=_COMPLEX_XFAIL))
             if key in ("ms_abi_fnptr", "sysv_vs_ms_fnptr") and lane == "A":
                 marks.append(pytest.mark.xfail(strict=True, reason=_GCC_DWARF_CC_XFAIL))
             cells.append(

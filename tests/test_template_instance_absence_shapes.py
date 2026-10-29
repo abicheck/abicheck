@@ -41,7 +41,6 @@ import itertools
 import json
 import shutil
 import subprocess
-import sys
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -58,6 +57,7 @@ from abicheck.model.declarations import Function, Visibility
 from abicheck.model.elf_facts import SymbolBinding, SymbolType
 from abicheck.model.fact import Fact
 from abicheck.policy.depth_projection import project_pair_to_depth
+from tests._abicheck_subprocess import abicheck_command
 
 _REMOVAL_KINDS = {"func_removed", "inline_function_removed", "func_removed_elf_only"}
 _DEPTHS = ("headers", "source")
@@ -219,27 +219,21 @@ def _build(root: Path, *, overloads: int, uses: bool, keep_first: bool = True) -
     proc = subprocess.run(cmd, capture_output=True, text=True)
     assert proc.returncode == 0, (cmd, proc.stderr)
     out = root / "snap.json"
-    dump = [
-        sys.executable,
-        "-m",
-        "abicheck",
+    dump = abicheck_command(
         "dump",
         str(root / "libt.so"),
         "-H",
         str(root / "api.h"),
         "-o",
         str(out),
-    ]
+    )
     proc = subprocess.run(dump, capture_output=True, text=True)
     assert proc.returncode == 0, (dump, proc.stderr[-2000:])
     return out
 
 
 def _compare_kinds(old: Path, new: Path, depth: str) -> set[str]:
-    cmd = [
-        sys.executable,
-        "-m",
-        "abicheck",
+    cmd = abicheck_command(
         "compare",
         str(old),
         str(new),
@@ -247,7 +241,7 @@ def _compare_kinds(old: Path, new: Path, depth: str) -> set[str]:
         depth,
         "-o",
         "json=-",
-    ]
+    )
     proc = subprocess.run(cmd, capture_output=True, text=True)
     report = json.loads(proc.stdout)
     return {

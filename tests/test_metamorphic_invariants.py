@@ -61,6 +61,7 @@ import pytest
 from defusedxml.ElementTree import parse as defused_parse
 
 from abicheck.model.change_catalog.assembled import REGISTRY
+from tests._abicheck_subprocess import abicheck_command
 from tests._detector_mutations import registry_twins
 from tests.test_example_autodiscovery import (
     _build_libs_for_case,
@@ -168,7 +169,7 @@ def _headers(side: str, headers: tuple[Path, ...]) -> list[str]:
 def _cli(args: list[str], cache: Path) -> subprocess.CompletedProcess[str]:
     env = dict(os.environ, XDG_CACHE_HOME=str(cache))
     return subprocess.run(
-        [sys.executable, "-m", "abicheck.cli", *args],
+        abicheck_command(*args),
         capture_output=True,
         text=True,
         check=False,

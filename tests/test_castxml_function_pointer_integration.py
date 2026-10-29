@@ -18,6 +18,8 @@ from pathlib import Path
 
 import pytest
 
+from tests._abicheck_subprocess import abicheck_command
+
 pytestmark = [
     pytest.mark.integration,
     pytest.mark.skipif(sys.platform != "linux", reason="gcc emits ELF on Linux only"),
@@ -134,10 +136,7 @@ def test_callback_signature_change_is_reported_through_headers(
     new_so, new_hp = _build(tmp_path / "new", "api", new_h, defs)
     report = tmp_path / "report.json"
     proc = subprocess.run(
-        [
-            sys.executable,
-            "-m",
-            "abicheck",
+        abicheck_command(
             "compare",
             str(old_so),
             str(new_so),
@@ -147,7 +146,7 @@ def test_callback_signature_change_is_reported_through_headers(
             f"new={new_hp}",
             "-o",
             f"json={report}",
-        ],
+        ),
         capture_output=True,
         text=True,
         timeout=300,

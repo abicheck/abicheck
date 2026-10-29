@@ -34,12 +34,18 @@ EXTRACTION_BUG_CLASSES: tuple[BugClass, ...] = (
     BugClass(
         id="extraction.castxml_vector_element_not_modelled",
         invariant=(
-            "A castxml vector node resolves to the spelling clang gives for the same "
-            "declaration, or stays unresolved; it is never a shared opaque spelling "
-            "that hides a same-size element change through a header comparison."
+            "A castxml vector node, and a complex (float _Complex) or bit-precise "
+            "integer (_BitInt(N)) node castxml cannot name, resolves to the spelling "
+            "clang gives for the same declaration, or stays unresolved; it is never "
+            "a shared opaque spelling (such as the literal 'Unimplemented') that "
+            "hides a same-size element change through a header comparison."
         ),
         fixed_by=(1791,),
-        seed_tests=("tests/test_castxml_vector_integration.py",),
+        seed_tests=(
+            "tests/test_castxml_vector_integration.py",
+            "tests/test_castxml_complex_spelling.py",
+            "tests/test_graph_reconcile_fundamental_cli.py",
+        ),
         axes={
             "backend": ("castxml", "clang"),
             "vector_shape": ("typedef", "inline_field", "inline_param", "return"),
@@ -514,7 +520,11 @@ EXTRACTION_BUG_CLASSES: tuple[BugClass, ...] = (
             "a parameter written the same resolves to a different type (its "
             "resolved record/enum, that record's layout, or a typedef's target "
             "changed). A changed written signature, or a mangling change the "
-            "header evidence does not explain, stays a removal and an addition."
+            "header evidence does not explain, stays a removal and an addition. "
+            "A fundamental type (float _Complex, __int128, a vector or SIMD type, "
+            "or a pointer, cv or array of one) is never paired as a rename or "
+            "move: a builtin change is a true removal and addition, not 'the same "
+            "declaration, renamed'."
         ),
         fixed_by=(1779, 1812),
         seed_tests=(
@@ -522,6 +532,8 @@ EXTRACTION_BUG_CLASSES: tuple[BugClass, ...] = (
             "tests/test_header_param_change_pairing_integration.py",
             "tests/test_closure_param_churn_pipeline.py",
             "tests/test_family_f3_identity.py",
+            "tests/test_graph_reconcile_fundamental.py",
+            "tests/test_graph_reconcile_fundamental_cli.py",
         ),
     ),
     BugClass(

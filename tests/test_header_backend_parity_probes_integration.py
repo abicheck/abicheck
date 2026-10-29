@@ -28,6 +28,8 @@ from pathlib import Path
 
 import pytest
 
+from tests._abicheck_subprocess import abicheck_command
+
 pytestmark = [
     pytest.mark.integration,
     pytest.mark.skipif(
@@ -75,12 +77,11 @@ def _build(
 def _compare(old: Path, new: Path, backend: str, cache: Path) -> tuple[int, set[str]]:
     out = new.parent / f"{old.name}-{new.name}-{backend}.json"
     r = subprocess.run(
-        [
-            sys.executable, "-m", "abicheck", "compare",
+        abicheck_command("compare",
             str(old / "libx.so"), str(new / "libx.so"),
             "--header", f"old={old / 'lib.h'}", "--header", f"new={new / 'lib.h'}",
             "-o", f"json={out}",
-        ],
+        ),
         env={
             **os.environ,
             "ABICHECK_AST_FRONTEND": backend,

@@ -25,6 +25,8 @@ from pathlib import Path
 
 import pytest
 
+from tests._abicheck_subprocess import abicheck_command
+
 pytestmark = [
     pytest.mark.integration,
     pytest.mark.skipif(
@@ -127,10 +129,7 @@ def _run_compare(workdir: Path, change: str, position: str, level: str) -> CellR
     new_lib, new_h = _write_version(workdir, change, position, 2, level)
     report = workdir / f"report_{change}_{position}_{level.replace('-', '')}.json"
     proc = subprocess.run(
-        [
-            sys.executable,
-            "-m",
-            "abicheck",
+        abicheck_command(
             "compare",
             str(old_lib),
             str(new_lib),
@@ -140,7 +139,7 @@ def _run_compare(workdir: Path, change: str, position: str, level: str) -> CellR
             f"new={new_h}",
             "-o",
             f"json={report}",
-        ],
+        ),
         capture_output=True,
         text=True,
         cwd=workdir,

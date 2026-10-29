@@ -34,6 +34,8 @@ from pathlib import Path
 import pytest
 from elftools.elf.elffile import ELFFile
 
+from tests._abicheck_subprocess import abicheck_command
+
 pytestmark = [
     pytest.mark.integration,
     pytest.mark.skipif(shutil.which("gcc") is None, reason="gcc required"),
@@ -159,7 +161,7 @@ def _variants(tmp_path: Path) -> dict[str, Callable[[bytes], bytes]]:
 
 def _dump(binary: Path, out: Path) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
-        [sys.executable, "-m", "abicheck", "dump", str(binary), "-o", str(out)],
+        abicheck_command("dump", str(binary), "-o", str(out)),
         capture_output=True,
         text=True,
         timeout=300,

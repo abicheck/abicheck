@@ -21,10 +21,11 @@ import json
 import os
 import shutil
 import subprocess
-import sys
 from pathlib import Path
 
 import pytest
+
+from tests._abicheck_subprocess import abicheck_command
 
 pytestmark = pytest.mark.integration
 
@@ -71,16 +72,13 @@ def _compare(old: Path, new: Path, report: Path) -> tuple[int, list[dict]]:
     env = dict(os.environ)
     env["PYTHONPATH"] = str(REPO_ROOT)
     proc = subprocess.run(
-        [
-            sys.executable,
-            "-m",
-            "abicheck.cli",
+        abicheck_command(
             "compare",
             str(old),
             str(new),
             "-o",
             f"json={report}",
-        ],
+        ),
         cwd=REPO_ROOT,
         env=env,
         capture_output=True,
