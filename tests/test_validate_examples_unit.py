@@ -14,6 +14,8 @@ from unittest.mock import patch
 
 import pytest
 
+from tests._abicheck_subprocess import abicheck_command
+
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from _legacy_scope import NO_SCOPE_CONFIG  # noqa: E402
@@ -900,7 +902,7 @@ class TestBuildCompareDirectCmd:
         )
 
         assert cmd[:2] == [sys.executable, "-m"]
-        assert cmd[2:6] == ["abicheck", "compare", str(v1_so), str(v2_so)]
+        assert cmd[:6] == abicheck_command("compare", str(v1_so), str(v2_so))
         assert "-o" in cmd and cmd[cmd.index("-o") + 1] == "json=-"
         assert "-H" in cmd
         h_values = [cmd[i + 1] for i, a in enumerate(cmd) if a == "-H"]
