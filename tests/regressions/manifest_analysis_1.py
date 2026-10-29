@@ -346,6 +346,12 @@ ANALYSIS_1_BUG_CLASSES: tuple[BugClass, ...] = (
             # duplicate pair; a new replay kind must be classified in it. The
             # guard reads the emitter modules by AST scan, not a list.
             "tests/test_source_replay_twin_table.py",
+            # A replay twin the dedup pass drops is one observation with its
+            # survivor for acknowledgment matching: a same-kind pair (the
+            # INLINE_FUNCTION_REMOVED row) must count once, and a dropped copy
+            # is acknowledged only through the finding it folded into.
+            "tests/test_replay_twin_acknowledgment.py",
+            "tests/test_replay_twin_acknowledgment_e2e.py",
             "tests/test_one_change_one_finding_matrix.py",
             "tests/test_variable_identity_dedup.py",
             # The dedup merge rules as properties: oracle agreement, idempotence,

@@ -589,6 +589,8 @@ def deduplicate_cross_detector(
     changes: list[Change],
     old: AbiSnapshot | None = None,
     new: AbiSnapshot | None = None,
+    *,
+    replay_twin_pairs: list[tuple[Change, Change]] | None = None,
 ) -> list[Change]:
     """Remove cross-detector duplicates that the per-detector guards may miss.
 
@@ -629,6 +631,10 @@ def deduplicate_cross_detector(
     Within each category, the first occurrence wins (preserving detector
     priority order from the ``compare()`` spec list), except that a kind named
     in :data:`_DEDUP_PREFERENCE` beats the others regardless of position.
+
+    *replay_twin_pairs*, when given, receives the ``(dropped, survivor)`` pairs of
+    the source-replay twin pass (:func:`abicheck.compare.source_replay_twins.replay_twin_pairs`),
+    so the caller can record which kept finding each dropped copy folded into.
     """
     # A symbol-version-node bump (e.g. LLVM_17 -> LLVM_18.1 on every symbol in a major release) makes BOTH version detectors fire per symbol with the same old->new transition: SYMBOL_MOVED_VERSION_NODE (node label moved) and SYMBOL_VERSION_ALIAS_CHANGED (default version changed, old not retained as an alias). Drop the alias-change duplicate where a node move already covers the same (symbol, old -> new) -- halves the version-bump noise on real libraries (libLLVM 17->18: ~46k instead of ~92k risk findings). Matches on (symbol, old_value, new_value); if that ever diverges the dedup simply no-ops (both findings kept).
     moved_transitions: set[tuple[str, str | None, str | None]] = {
@@ -667,7 +673,9 @@ def deduplicate_cross_detector(
     changes = _drop_elf_only_duplicates_of_visibility(changes)
     changes = _drop_deletion_consequences(changes)
     changes = _drop_constant_value_restatements(changes)
-    changes = drop_replay_twins(changes)
+    # ``replay_twin_pairs`` receives the (dropped, survivor) pairs this pass acts
+    # on, so the disposition pipeline can name each dropped copy's survivor.
+    changes = drop_replay_twins(changes, pairs_out=replay_twin_pairs)
     # Only collapse the alias-change into a co-reported node-move when the old default version is NOT retained as an alias — the case the node-move already fully describes. When the alias IS retained it carries distinct, compatible information the node-move's wording would otherwise misrepresent, so it must survive.
     candidates = [
         (i, c)

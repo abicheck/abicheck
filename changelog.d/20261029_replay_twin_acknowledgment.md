@@ -1,0 +1,3 @@
+### Fixed
+
+- Acknowledgment over a source-replay twin: a record that covers a header finding and its L4 replay copy of the same kind (an `INLINE_FUNCTION_REMOVED` pair) no longer raises `AmbiguousAcknowledgmentError` as if two findings matched. The replay copy the dedup pass drops is now linked to the finding it folded into (`compare.source_replay_twins` exposes the pairing, `policy.dedup_survivors` records it on the ledger), so the pair counts as one observation. The dropped copy stays on the ledger as `deduplicated`, and an acknowledgment that covers it is taken through the surviving finding. Distinct-facet and replay-only kinds are still never folded.

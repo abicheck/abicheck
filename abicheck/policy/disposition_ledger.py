@@ -45,14 +45,13 @@ exactly *one* terminal disposition (:class:`Disposition`), so the
 per-disposition counts sum to the detected total by construction —
 :func:`DispositionLedger.counts` and :attr:`DispositionLedger.detected_total`
 cannot disagree. Transformations that are *not* alternatives to a
-disposition (``reclassified`` today; ``acknowledged`` once ADR-067 D5 lands
-in S3) are recorded as independent overlay attributes on the same record and
-are deliberately **not** added into the disposition counts.
+disposition (``reclassified``, ``acknowledged``) are recorded as independent
+overlay attributes on the same record and are deliberately **not** added into
+the disposition counts.
 
 This module is a leaf: it imports only ``model``-layer vocabulary and reads
-every finding-shaped input through duck typing, so the four flat-root
-application points above can route through it without any of them growing a
-new dependency on the report or gate layers.
+every finding-shaped input through duck typing, so the application points above
+can route through it without growing a dependency on the report or gate layers.
 """
 
 from __future__ import annotations
@@ -126,6 +125,7 @@ class DispositionLedger:
         # identity keys above cannot be recycled by the allocator while the
         # ledger is still being appended to.
         self._anchors: list[object] = []
+        self._dedup_survivors: dict[int, tuple[object, object]] = {}  # dedup_survivors
         #: Aliased changes (see ``dedupe_key``): kept alive, never zipped.
         self._aliases: list[object] = []
         #: Loaded suppression lists registered as this run's rule inventory
