@@ -28,9 +28,15 @@ from typing import Any
 
 import pytest
 
-from abicheck.extract.dwarf_abi_fact import dwarf_abi_fundamental, dwarf_type_abi_fact
+from abicheck.extract.dwarf_abi_fact import _fact as _resolve_fact, dwarf_type_abi_fact
 from abicheck.model.abi_fundamental import AbiFundamental, FundamentalEncoding
 from abicheck.model.fact import Fact
+
+
+def dwarf_abi_fundamental(type_die: Any, cu: Any) -> Any:
+    """The ABI fact of the DIE a slot's ``DW_AT_type`` names."""
+    return _resolve_fact(type_die, cu, 0)
+
 
 _S = FundamentalEncoding.SIGNED
 _U = FundamentalEncoding.UNSIGNED

@@ -36,7 +36,7 @@ from ..dwarf_utils import attr_int, resolve_type_die, vector_byte_size
 from ..model.abi_fundamental import AbiFundamental, FundamentalEncoding
 from ..model.fact import Fact
 
-__all__ = ["dwarf_abi_fundamental", "dwarf_type_abi_fact"]
+__all__ = ["dwarf_type_abi_fact"]
 
 #: DW_ATE encodings a calling convention can distinguish, mapped to the
 #: encoding class. ``DW_ATE_signed_char``/``unsigned_char`` carry the signedness
@@ -65,11 +65,6 @@ _TRANSPARENT_TAGS = frozenset(
 
 #: A type chain deeper than this is not a fundamental this module reads.
 _MAX_DEPTH = 16
-
-
-def dwarf_abi_fundamental(type_die: Any, cu: Any) -> AbiFundamental | None:
-    """The ABI fact of *type_die* (the DIE a slot's ``DW_AT_type`` names), or None."""
-    return _fact(type_die, cu, 0)
 
 
 def dwarf_type_abi_fact(die: Any, cu: Any) -> Fact[AbiFundamental] | None:
