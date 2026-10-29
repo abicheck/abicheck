@@ -26,7 +26,10 @@ is not keyed again (the walk stops at a ``Typedef``).
 from __future__ import annotations
 
 import json
+import os
 import re
+from functools import lru_cache
+from pathlib import Path
 from typing import Any
 from xml.etree.ElementTree import Element
 
@@ -135,6 +138,46 @@ def castxml_function_type_keys(root: Element) -> dict[str, str]:
             if target:
                 keyed.setdefault(target, f"return:{fn_key}")
     return keyed
+
+
+def _cc_spelling_re() -> re.Pattern[str]:
+    bases = "|".join(sorted(re.escape(b) for b in CC_ATTRIBUTE_BASES))
+    return re.compile(
+        rf"\b_*(?:{bases})_*\b|\b__(?:cdecl|stdcall|fastcall|thiscall|vectorcall)\b"
+    )
+
+
+_CC_SPELLING_RE = _cc_spelling_re()
+
+
+@lru_cache(maxsize=4096)
+def _file_mentions_calling_convention(path: str, mtime_ns: int, size: int) -> bool:
+    try:
+        text = Path(path).read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return True  # unreadable: cannot rule a convention out
+    return _CC_SPELLING_RE.search(text) is not None
+
+
+def files_mention_calling_convention(root: Element) -> bool:
+    """Whether any file castxml read for *root* spells a calling convention.
+
+    A function type can carry a convention only if some header (or a macro
+    defined in one) names it, so a translation unit none of whose files does
+    never needs the clang pass for conventions. Unreadable files count as a
+    mention: the gate may only skip work it can prove is unnecessary.
+    """
+    for el in root.iter("File"):
+        name = el.get("name") or ""
+        if not name or name.startswith("<"):
+            continue
+        try:
+            st = os.stat(name)
+        except OSError:
+            return True
+        if _file_mentions_calling_convention(name, st.st_mtime_ns, st.st_size):
+            return True
+    return False
 
 
 def has_function_type_nodes(root: Element) -> bool:

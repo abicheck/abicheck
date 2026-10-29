@@ -227,3 +227,33 @@ def test_older_baseline_respelling_is_demoted(old: str, new: str) -> None:
 )
 def test_real_callback_change_is_not_demoted(old: str, new: str) -> None:
     assert not is_spelling_only_drift(old, new, frozenset())
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        ("typedef void (*cb)(int);\n", False),
+        ("void f(void (*p)(int));\n// mentions abi in prose only\n", False),
+        ("void f(void (__attribute__((ms_abi)) *p)(int));\n", True),
+        ("#define CB __attribute__((sysv_abi))\n", True),
+        ("void __stdcall g(void);\n", True),
+        ("void f(void (__attribute__((__vectorcall__)) *p)(int));\n", True),
+    ],
+)
+def test_clang_pass_gate_reads_every_castxml_file(tmp_path, text, expected) -> None:
+    """The clang pass for conventions runs only when some file castxml read
+    spells one; an unreadable file never lets the gate skip."""
+    from xml.etree.ElementTree import Element, SubElement
+
+    from abicheck.extract.headers.castxml.function_type_cc import (
+        files_mention_calling_convention,
+    )
+
+    header = tmp_path / "h.h"
+    header.write_text(text)
+    root = Element("CastXML")
+    SubElement(root, "File", name="<builtin>")
+    SubElement(root, "File", name=str(header))
+    assert files_mention_calling_convention(root) is expected
+    SubElement(root, "File", name=str(tmp_path / "missing.h"))
+    assert files_mention_calling_convention(root) is True

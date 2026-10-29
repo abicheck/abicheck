@@ -22,6 +22,7 @@ from ....errors import SnapshotError
 from ....storage.ast_cache_location import ast_cache_store
 from ..clang.backend import clang_header_dump
 from .function_type_cc import (
+    files_mention_calling_convention,
     has_function_type_nodes,
     resolve_function_type_cc,
     with_function_type_cc,
@@ -84,12 +85,14 @@ def join_vector_spellings(
     """Return *root* carrying the clang-derived vector spellings and function-type
     calling conventions, using the sidecar.
 
-    A root with neither a vector node nor a function-type declaration is
-    returned untouched and costs nothing. A clang failure leaves those nodes
+    A root with neither a vector node nor a function-type declaration whose
+    files spell some calling convention is returned untouched and costs nothing. A clang failure leaves those nodes
     as castxml wrote them and is logged; nothing is published for it, so the
     next run tries again.
     """
-    if not has_vector_nodes(root) and not has_function_type_nodes(root):
+    if not has_vector_nodes(root) and not (
+        has_function_type_nodes(root) and files_mention_calling_convention(root)
+    ):
         return root
     store = ast_cache_store(key, VECTOR_SIDECAR_BACKEND)
     cached = _valid_sidecar(store.lookup(key))
