@@ -58,6 +58,7 @@ from ..model.change_catalog.assembled import (
     REGISTRY as _REGISTRY,
     RISK_KINDS,
 )
+from ..model.change_catalog.kind_variants import expand_variant_overrides
 from ..model.change_catalog.kinds import ChangeKind as ChangeKind, HasKind as HasKind
 from ..model.change_catalog.registry import (
     VALID_BASE_POLICIES as VALID_BASE_POLICIES,
@@ -413,7 +414,8 @@ def apply_policy_file_overrides(
         Verdict.COMPATIBLE_WITH_RISK: 3,
     }
     sets = [b, a, c, r]
-    for kind, verdict in overrides.items():
+    # A base entry also pins its ELF-only variant; an explicit variant entry wins.
+    for kind, verdict in expand_variant_overrides(overrides).items():
         for s in sets:
             s.discard(kind)
         idx = verdict_to_set_idx.get(verdict)

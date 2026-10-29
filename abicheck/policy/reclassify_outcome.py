@@ -29,6 +29,7 @@ from dataclasses import dataclass
 from datetime import date
 from typing import cast
 
+from ..model.change_catalog.kind_variants import expand_variant_overrides
 from ..model.change_catalog.kinds import HasKind
 from .classification import Verdict, effective_category
 from .reclassify import (
@@ -105,7 +106,7 @@ def _next_priority_verdict(change: HasKind, policy_file: object | None) -> Verdi
     ``overrides:`` entry (frozen-namespace floored), else the base policy."""
     base_policy = getattr(policy_file, "base_policy", None)
     base_v = effective_category(change, *resolve_kind_sets(base_policy, None))
-    overrides = getattr(policy_file, "overrides", None)
+    overrides = expand_variant_overrides(getattr(policy_file, "overrides", None))
     if overrides and change.kind in overrides:
         override_v = cast(Verdict, overrides[change.kind])
         if _has_frozen_namespace_violation(change) and compatibility_rank(
