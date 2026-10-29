@@ -342,7 +342,7 @@ class TestActionCliSurface:
 
     def test_every_command_is_listed(self) -> None:
         listing = subprocess.run(
-            [sys.executable, "-m", "abicheck.frontends.action.cli", "--help"],
+            abicheck_module_command("abicheck.frontends.action.cli", "--help"),
             capture_output=True,
             text=True,
             check=True,

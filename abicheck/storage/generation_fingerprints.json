@@ -71,7 +71,7 @@
       "abicheck/extract/header_scan_memo.py": "56f79b5316354b938b08a5f29779c3aaf40481892d947784ec2adb48ab5e83fb",
       "abicheck/extract/header_text.py": "b43a88d7bf1d2e601bb908c78f04cb07e552f9c59f03b678ecc85788b3d146e4",
       "abicheck/extract/headers/__init__.py": "70af0d3a16882783444077004b7a434a295505579fbbca219ce103f72074ad03",
-      "abicheck/extract/headers/ast_config.py": "e8750aeccc3065adf91df9385dac658d987935650abc319f38e3f11e8f5477cf",
+      "abicheck/extract/headers/ast_config.py": "de5ece7dd88114d4407382c6e34fbfaad5fb92920189ea7583212c814e6f737e",
       "abicheck/extract/headers/ast_config_cpp20_chains.py": "ceeadbcb1d8e2eaac5eb325a3fb7c668614ce605bc04bb03835fcc4957e53c97",
       "abicheck/extract/headers/backend_plan.py": "1f02babf0ead52a65e4fa08dff8ce5b2a9d60feb1d02d22e7db30ee050cf8717",
       "abicheck/extract/headers/backend_protocol.py": "144cbe76456b6bceaf56f0edd0f3398f171178a222c8b968d53f8a17ee05a21b",
@@ -96,11 +96,11 @@
       "abicheck/extract/headers/castxml/records.py": "9093c5648bbe60334f4f3cbdd13e6e7d0eece582cbff9ef8a16aeb8096473cd6",
       "abicheck/extract/headers/castxml/scope.py": "41cecc8dd996c10a58c022e5dca4003cce9d7775adf674b339cc199fb59297c7",
       "abicheck/extract/headers/castxml/specialization.py": "3f9f021672df1b84de42bc8de5f3c915508b3f3850e0a8acbaa80a3dee04c6f3",
-      "abicheck/extract/headers/castxml/type_resolution.py": "19abbab2c0968d0341f5102f83739a0706edfcb45e98404810b798b21daedb68",
+      "abicheck/extract/headers/castxml/type_resolution.py": "3527318ed7d36b2b557c447c9fa0807deec9c594a7f481cf36c860859062552f",
       "abicheck/extract/headers/castxml/typedef_parsing.py": "332587638d5d4b7caebbc20fa44b69c314771fffa5839a15dec59eaba3caaf93",
       "abicheck/extract/headers/castxml/variable_template_join.py": "cffad5b204cddf53337897381cd54d11e6e1784a69948a519a31a222d3441fa7",
       "abicheck/extract/headers/castxml/vector_join.py": "59ab2e8577af20a5a67227978b1a7d63c8ac6ce6b766a841725d998515205ede",
-      "abicheck/extract/headers/castxml/vector_spellings.py": "95368cac86a4100e3c0e832814ccd96c53e1edbf930f680044533812a05923ec",
+      "abicheck/extract/headers/castxml/vector_spellings.py": "bce2046c1422dd294c3f9370143a3b7b1f268629696c46b3ed0bb81c9f707d1f",
       "abicheck/extract/headers/clang/__init__.py": "538add12f3ff39e1c1b39e6f5def93b50a584b78b30c4e7e59058207222757d0",
       "abicheck/extract/headers/clang/ast_inner.py": "f695f5bb01048fa924a1b67acbbcc29630c871607f1a3b4329ec781133f296f8",
       "abicheck/extract/headers/clang/attributes.py": "4f35afe72ef319265695d3e199e10c9ef0076db4a5238161b33a076fd3a599fe",
@@ -179,17 +179,20 @@
       "abicheck/symvers_metadata.py": "372737765cd132e6e87ed891dd465d2958e04debbef774e45212ceb3036871cb",
       "abicheck/type_metadata.py": "9997189de8dac522fd1db8be5ae491d811139503f83abaaded89038eb4aa9cdf"
     },
-    "fingerprint": "0f8458c974799cbd439a4397355fc9c45db4c471d539a7fe15f80e01a335e18d",
-    "generation": 30,
-    "reason": "merge of the final generation-29 branch tip 88ceed912 into the value-channel branch; generation 30 is this branch's bump, recorded over the merged sources"
+    "fingerprint": "2f0e29526b60b790b2237b460953a4cc1364de60eaba52aab811e471fca7011e",
+    "generation": 31,
+    "reason": "castxml complex, bit-precise integer, and pointer/array/typedef-wrapped element types join their clang spelling instead of the literal Unimplemented; the clang join's cache schema is 10"
   },
   "resolver": {
     "files": {
+      "abicheck/buildsource/graph_reconcile.py": "cf30e08971e29884bcdd7315e9f5b08d821f403989f97e3a757fda4bb8874e7a",
+      "abicheck/buildsource/graph_reconcile_candidates.py": "23f4564b0e61c7658ee86df1bb3f7af5ec023ae1c20d20711a5fe5eaa5ed0f5e",
       "abicheck/buildsource/providers.py": "3600c12dcfa6320f22624685931fd3b21cc9e3c41fd37fb7cfc78b7cee5216ff",
       "abicheck/buildsource/source_extractors/resolver.py": "ca778b1305f4ecf6d591c166853a33a7c66d442bffd701b091f8f52378f66730",
       "abicheck/bundle_resolution_reachability.py": "7d60ccf82fe98a12c7c81ac02d2c920492c8c20c52f0b13398195c4590615c08",
       "abicheck/compare/export_owner_resolution.py": "e9108cbdf0459cb8171f63ca328138558cfd032bff9124e4b9bd0fd5bf8553c8",
       "abicheck/debug_resolver.py": "cdcc4f72bd8fb5304fe030b3e1365da488ad009397e014ba56931a3f311cf1f3",
+      "abicheck/model/fundamental_type.py": "c97bb2038bafedf3f21e5819df1d8e1be5bf97adbbb0fca5a16f49287b0aec0a",
       "abicheck/policy/use_case_reachability.py": "e21d1b32773ce42e458ec8dfe34d86c3a5c48732a829b4e985ec739cae594bc1",
       "abicheck/post_processing_reachability.py": "47692d1cf654f668d170be08b81bbb528799abdf4562413599a0ffc6bb23b88a",
       "abicheck/storage/native_identity_aliases.py": "061e634659b371f1688cfcd4845fdcbe6147b9c2cfddaa4285dd34c757ca80ef",
@@ -199,9 +202,9 @@
       "abicheck/workflows/compare/resolve.py": "dc0381227c9e8dacaa39858d3f534ff45cbb3177f9b8645a8728c3f25c460793",
       "abicheck/workflows/elf_dependency_resolver.py": "33679ec7d2b95891a9f265e79be05542b061ecaa83a7f769614aaa8b443b0f32"
     },
-    "fingerprint": "1f07f343badc76d088e56b1fc60d8c0e84e89e091f85a33e83f0ecb4ead92377",
-    "generation": 2,
-    "reason": "the resolver refuses a DSO whose export table was not read instead of resolving against an empty table; resolutions of readable DSOs are unchanged"
+    "fingerprint": "7091c996ea84eccad8a9aedda19fecbd1271cad86ca84a6127d4f04921e6519e",
+    "generation": 3,
+    "reason": "generation 3 covers the fundamental-type candidate gate and the recorded-layout guard in graph reconciliation (unreleased on this branch)"
   },
   "source": {
     "files": {

@@ -179,9 +179,6 @@ IDENTICAL_CELLS: frozenset[tuple[str, str]] = frozenset(
     }
 )
 
-#: The float _Complex parameter in the header lanes is fixed by the
-#: graph-reconcile change; these cells flip when that merges.
-_COMPLEX_XFAIL = "fixed by complex-reconcile task"
 #: GCC writes no DW_AT_calling_convention for ms_abi/sysv_abi on a subroutine
 #: type, so a GCC -g build cannot show the convention (verified with readelf);
 #: the header lanes carry it.
@@ -580,17 +577,6 @@ def _matrix_cells() -> list:
     for key, site in _legal_cells():
         for lane in _LANES:
             marks = []
-            if (
-                key == "fcomplex_vs_dcomplex"
-                and lane in "BC"
-                and site
-                in (
-                    "param",
-                    "typedef",
-                    "return",
-                )
-            ):
-                marks.append(pytest.mark.xfail(strict=True, reason=_COMPLEX_XFAIL))
             if key in ("ms_abi_fnptr", "sysv_vs_ms_fnptr") and lane == "A":
                 marks.append(pytest.mark.xfail(strict=True, reason=_GCC_DWARF_CC_XFAIL))
             cells.append(

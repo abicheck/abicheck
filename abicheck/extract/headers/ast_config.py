@@ -80,7 +80,9 @@ _CLANG_CACHE_SCHEMA_VERSION = 4
 #: Bumped to 9 when the clang join also spells complex and bit-precise integer
 #: types (castxml's ``Complex``/``BitInt`` ``Unimplemented``): an entry written
 #: before this left them as the one literal ``Unimplemented`` spelling.
-_CASTXML_CACHE_SCHEMA_VERSION = 9
+#: Bumped to 10 when the clang join also resolves a pointer, reference, array or
+#: typedef chain around such an element type (keys the element node).
+_CASTXML_CACHE_SCHEMA_VERSION = 10
 
 #: Which module constant salts each backend's header-parse cache key. Named,
 #: not copied, so the key always reads the constant's current value.
