@@ -103,7 +103,12 @@ from .dependency_retention import (
 )
 from .dwarf_dependency_types import unreachable_dependency_type_reading
 
-__all__ = ["dependency_internals", "include_roots", "itanium_top_namespace"]
+__all__ = [
+    "dependency_internals",
+    "dependency_types_report",
+    "include_roots",
+    "itanium_top_namespace",
+]
 
 #: Longest first, so ``-isystem`` is not read as ``-i`` + ``system``.
 _INCLUDE_FLAGS = ("-idirafter", "-isystem", "-iquote", "-I")
@@ -112,6 +117,50 @@ _LENGTH = re.compile(r"\d+")
 
 _Declaration = Function | Variable | RecordType | EnumType
 _D = TypeVar("_D", Function, Variable, RecordType | EnumType)
+
+
+def _exports_cxx_names(snap: AbiSnapshot) -> bool:
+    """Whether *snap*'s export table names any C++ entity: an Itanium ``_Z``
+    name (ELF, Mach-O) or an MSVC ``?`` name (PE). A library exporting only C
+    has no dependency-internal C++ types to classify, so its unread state is
+    not a finding to report."""
+    if snap.pe is not None:
+        return any(e.name.startswith("?") for e in snap.pe.exports)
+    if snap.elf is not None:
+        return any(s.name.startswith("_Z") for s in snap.elf.symbols)
+    if snap.macho is not None:
+        return any(e.name.startswith("_Z") for e in snap.macho.exports)
+    return False
+
+
+def dependency_types_report(
+    old: AbiSnapshot | None, new: AbiSnapshot
+) -> tuple[dict[str, bool] | None, tuple[str, ...]]:
+    """Each binary-only side's dependency-type read state, and a coverage note
+    for every side that could not be classified and exports C++ names.
+
+    Returns ``(state, notes)``: ``state`` maps ``"old"``/``"new"`` to whether
+    that side's dependency types were read (``None`` when no side is binary
+    only, so the report carries no key); ``notes`` are the coverage lines for
+    the unread sides, which the report renders beside its other coverage
+    warnings. An unread side excludes nothing, so no finding is moved by it.
+    """
+    state: dict[str, bool] = {}
+    notes: list[str] = []
+    for side, snap in (("old", old), ("new", new)):
+        if snap is None or snap.from_headers:
+            continue
+        read = unreachable_dependency_type_reading(snap).read
+        state[side] = read
+        if not read and _exports_cxx_names(snap):
+            notes.append(
+                f"dependency-internal types were not classified for the {side} "
+                "side: its exported names do not establish the library's own "
+                "headers (a PE export directory's decorated names are not read "
+                "here), so findings on dependency-internal types on that side "
+                "stay in contract"
+            )
+    return (state or None), tuple(notes)
 
 
 def dependency_internals(snap: AbiSnapshot) -> DependencyInternals:

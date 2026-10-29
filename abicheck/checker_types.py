@@ -414,6 +414,14 @@ class DiffResult(ReportSideFacts):
     # exit code. Appended at the true end, same positional-field-safety
     # convention as every other block above.
     pattern_preprocessor_scan: object | None = field(default=None, kw_only=True)
+    # Per binary-only side (``"old"``/``"new"``; a header-derived side is not
+    # listed), whether its dependency-internal types were classified (``True``)
+    # or could not be read at all (``False``). ``None`` when no side is binary
+    # only, so a run that could never ask the question carries no key. An
+    # unread side excludes nothing: the report says so instead of reading the
+    # empty classification as "nothing is internal"
+    # (``workflows.dump.dependency_internals.dependency_types_report``).
+    dependency_types_read: dict[str, bool] | None = field(default=None, kw_only=True)
 
     @property
     def not_evaluated(self) -> list[Change]:

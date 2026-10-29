@@ -1168,6 +1168,13 @@ def compare(
 
     coverage_warnings = [*coverage_warnings, *scope_note_coverage_warnings(scope_notes)]
 
+    # Binary-only sides whose dependency-internal types could not be read: the
+    # report says so (the per-side state and a coverage note) rather than
+    # reading an empty classification as "nothing is internal".
+    from .workflows.dump.dependency_internals import dependency_types_report
+
+    dependency_types_read, dependency_notes = dependency_types_report(old, new)
+
     # A POST manifest allowlist scopes the comparison just as much as header
     # scoping does — it moves non-committed findings to `out_of_surface`. Mark
     # scoping active whenever *either* is in effect so the report always emits
@@ -1325,7 +1332,10 @@ def compare(
         old_symbol_count=(_old_public_symbol_count(old) if old is not None else None),
         confidence=confidence,
         evidence_tiers=evidence_tiers,
-        coverage_warnings=coverage_warnings + comparability_warnings,
+        coverage_warnings=coverage_warnings
+        + comparability_warnings
+        + list(dependency_notes),
+        dependency_types_read=dependency_types_read,
         out_of_surface_changes=out_of_surface,
         out_of_surface_count=len(out_of_surface),
         reconciled_changes=reconciled,
