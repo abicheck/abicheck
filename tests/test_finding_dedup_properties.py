@@ -1042,11 +1042,18 @@ def test_ast_side_qualified_spelling_pairs_a_bare_header_type_with_its_dwarf_cop
 def test_enum_bridge_runs_with_only_one_snapshot_supplied() -> None:
     # A caller that has the old snapshot alone still gets the bare-to-qualified
     # bridge: the dedup must not need both sides to be present.
+    # Fresh findings per call: the bridge writes qualified_name onto the
+    # Change objects it sees, so a reused pair would hide a skipped bridge.
     snap = _snap_with_enums(("Color", "ns::Color"))
-    header = Change(K.ENUM_MEMBER_REMOVED, "Color::RED", "header tier")
-    dwarf = Change(K.ENUM_MEMBER_REMOVED, "ns::Color::RED", "dwarf tier")
-    assert len(deduplicate_cross_detector([header, dwarf], snap, None)) == 1
-    assert len(deduplicate_cross_detector([header, dwarf], None, snap)) == 1
+
+    def pair() -> list[Change]:
+        return [
+            Change(K.ENUM_MEMBER_REMOVED, "Color::RED", "header tier"),
+            Change(K.ENUM_MEMBER_REMOVED, "ns::Color::RED", "dwarf tier"),
+        ]
+
+    assert len(deduplicate_cross_detector(pair(), snap, None)) == 1
+    assert len(deduplicate_cross_detector(pair(), None, snap)) == 1
 
 
 def test_variable_copy_qualifies_by_its_entity_scope() -> None:
@@ -1064,3 +1071,66 @@ def test_variable_copy_qualifies_by_its_entity_scope() -> None:
     assert [c.kind for c in deduplicate_cross_detector([constant, variable])] == [
         K.CONSTANT_CHANGED
     ]
+
+
+@pytest.mark.parametrize(
+    "evidenced",
+    [
+        pytest.param(
+            Change(K.ENUM_MEMBER_VALUE_CHANGED, "Color::RED", "x", "0", None),
+            id="old-value-only-arriving-second",
+        ),
+        pytest.param(
+            Change(K.ENUM_MEMBER_VALUE_CHANGED, "Color::RED", "x", None, "1"),
+            id="new-value-only-arriving-second",
+        ),
+    ],
+)
+def test_one_sided_enum_value_beats_a_longer_bare_copy_in_either_order(
+    evidenced: Change,
+) -> None:
+    bare = Change(K.ENUM_MEMBER_VALUE_CHANGED, "Color::RED", "a much longer wording")
+    assert [c.description for c in deduplicate_ast_dwarf([bare, evidenced])] == ["x"]
+    assert [c.description for c in deduplicate_ast_dwarf([evidenced, bare])] == ["x"]
+
+
+def test_alias_change_without_a_node_move_is_kept() -> None:
+    # The alias drop needs a co-reported node move for the same transition; an
+    # alias change alone is the only finding and must stay visible.
+    alias = Change(
+        K.SYMBOL_VERSION_ALIAS_CHANGED, "f_a", _ALIAS_NOT_RETAINED, "LIB_1", "LIB_2"
+    )
+    assert _survivor_kinds([alias]) == [K.SYMBOL_VERSION_ALIAS_CHANGED]
+
+
+def test_dwarf_only_global_enum_blocks_the_bare_bridge_of_a_namespaced_one() -> None:
+    # A global enum "Color" (DWARF only) and "ns::Color" (header): the bare name
+    # "Color" is ambiguous, so it must not bridge to "ns::Color".
+    snap = AbiSnapshot(
+        library="lib.so",
+        version="1",
+        enums=[
+            EnumType(
+                name="Color",
+                qualified_name="ns::Color",
+                members=[EnumMember(name="RED", value=0)],
+                underlying_type="int",
+            )
+        ],
+        dwarf=DwarfMetadata(
+            has_dwarf=True,
+            enums={
+                "Color": EnumInfo(
+                    name="Color", underlying_byte_size=4, members={"RED": 0}
+                ),
+            },
+        ),
+    )
+    assert enum_canonical_names(snap) == {"ns::Color": "ns::Color"}
+
+
+def test_non_enum_symbol_named_like_an_enum_keeps_its_own_spelling() -> None:
+    snap = _snap_with_enums(("Color", "ns::Color"))
+    function = Change(K.FUNC_REMOVED, "Color", "function removed")
+    survivors = deduplicate_cross_detector([function], snap, snap)
+    assert [(c.symbol, c.qualified_name) for c in survivors] == [("Color", None)]
