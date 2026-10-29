@@ -26,10 +26,16 @@ The end-to-end cell is ``test_one_change_one_finding_matrix.py``.
 
 from __future__ import annotations
 
+import shutil
+import subprocess
+
 import pytest
 
 from abicheck.compare.finding_dedup import deduplicate_cross_detector
-from abicheck.compare.variable_names import qualified_variable_name
+from abicheck.compare.variable_names import (
+    msvc_data_qualified_name,
+    qualified_variable_name,
+)
 from abicheck.model.change import Change
 from abicheck.model.change_catalog.kinds import ChangeKind
 from abicheck.model.identity import EntityId, EntityKind, Namespace
@@ -161,3 +167,85 @@ def test_plain_removal_keeps_its_visibility_finding() -> None:
         [_deletion(ChangeKind.FUNC_VISIBILITY_CHANGED, "_Z5f_fnv")]
     )
     assert [c.kind for c in kept] == [ChangeKind.FUNC_VISIBILITY_CHANGED]
+
+
+# -- MSVC data symbols ------------------------------------------------------------
+#
+# The mangled spellings are what clang's MSVC-target AST records for these
+# declarations (``clang++ -target x86_64-pc-windows-msvc -ast-dump=json``), so
+# the oracle is the compiler, not the parser. The ``None`` rows are shapes the
+# parser must refuse, leaving the caller to use the leaf.
+
+
+@pytest.mark.parametrize(
+    ("mangled", "expected"),
+    [
+        pytest.param("?K_V@K_S@@2HB", "K_S::K_V", id="class-static-const"),
+        pytest.param("?s@K_S@@2HA", "K_S::s", id="class-static"),
+        pytest.param("?g2@@3HA", "g2", id="global-no-scope"),
+        pytest.param("?g@ns@@3HA", "ns::g", id="namespace-variable"),
+        pytest.param(
+            "?v@Inner@Outer@ns@@2HB",
+            "ns::Outer::Inner::v",
+            id="nested-class-in-namespace",
+        ),
+        pytest.param("?qv@?$Q@D@ns@@2HA", None, id="template-argument-scope-refused"),
+        pytest.param("?tv@?$Tpl@H@@2HB", None, id="template-class-static-refused"),
+        pytest.param(
+            "?anon@?A0xAEC70B0F@ns@@3HA", None, id="anonymous-namespace-refused"
+        ),
+        pytest.param("?v@1@@3HA", None, id="backreference-component-refused"),
+        pytest.param("?f@@YAXH@Z", None, id="free-function-is-not-data"),
+        pytest.param("?run@Foo@@QEAAXXZ", None, id="member-function-is-not-data"),
+        pytest.param("??0Widget@@QEAA@XZ", None, id="constructor-is-not-data"),
+        pytest.param("?x@@", None, id="no-type-encoding"),
+        pytest.param("_ZN3K_S3K_VE", None, id="itanium-is-not-msvc"),
+        pytest.param("g_var", None, id="c-name"),
+    ],
+)
+def test_msvc_data_symbol_scope(mangled: str, expected: str | None) -> None:
+    assert msvc_data_qualified_name(mangled) == expected
+
+
+@pytest.mark.parametrize(
+    ("mangled", "leaf", "expected"),
+    [
+        pytest.param("?K_V@K_S@@2HB", "K_V", "K_S::K_V", id="class-static-named"),
+        pytest.param("?qv@?$Q@D@ns@@2HA", "qv", "qv", id="template-scope-keeps-leaf"),
+        pytest.param(
+            "?anon@?A0xAEC70B0F@ns@@3HA", "anon", "anon", id="anonymous-keeps-leaf"
+        ),
+    ],
+)
+def test_msvc_variable_uses_qualified_name_or_leaf(
+    mangled: str, leaf: str, expected: str
+) -> None:
+    assert qualified_variable_name(None, leaf, mangled=mangled) == expected
+
+
+@pytest.mark.parametrize(
+    "mangled",
+    ["?K_V@K_S@@2HB", "?s@K_S@@2HA", "?g@ns@@3HA", "?v@Inner@Outer@ns@@2HB"],
+)
+def test_msvc_name_is_contained_in_the_undname_spelling(mangled: str) -> None:
+    # Oracle: LLVM's own demangler. The qualified name we return must appear in
+    # the spelling it produces, so a wrong scope order or a dropped component
+    # would fail here.
+    undname = shutil.which("llvm-undname") or shutil.which("llvm-undname-18")
+    if undname is None:
+        pytest.skip("llvm-undname not installed")
+    spelled = subprocess.run(
+        [undname, mangled], capture_output=True, text=True, check=True
+    ).stdout
+    qualified = msvc_data_qualified_name(mangled)
+    assert qualified is not None
+    assert qualified in spelled
+
+
+def test_msvc_static_member_value_restatement_collapses() -> None:
+    # The same restatement on a PE/COFF target: the variable's symbol is the
+    # MSVC spelling, so only the MSVC scope parse can pair it with the constant.
+    kept = deduplicate_cross_detector(
+        [_constant("K_S::K_V", "1", "2"), _variable("?K_V@K_S@@2HB", "1", "2")]
+    )
+    assert [c.kind for c in kept] == [ChangeKind.CONSTANT_CHANGED]
