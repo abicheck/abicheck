@@ -97,6 +97,10 @@ class CastxmlParserContext:
         #: Vector ``Unimplemented`` node id -> clang-derived spelling
         #: (``vector_spellings``); empty when no vector node was resolved.
         self.vector_spellings: dict[str, str] = {}
+        #: ``FunctionType`` node id -> calling-convention name clang spells on
+        #: the declaration reaching it (``ms_abi``); castxml drops it from the
+        #: XML (``function_type_cc``). Empty when no convention was joined.
+        self.function_type_cc: dict[str, str] = {}
         self.virtual_methods_by_class: dict[str, list[Element]] = {}
         self.source_lines_cache: dict[str, list[str]] = {}
         #: Preprocessed declaration text and the target's default calling

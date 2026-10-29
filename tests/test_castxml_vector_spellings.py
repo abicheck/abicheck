@@ -186,15 +186,28 @@ def test_vector_node_without_a_clang_declaration_stays_unresolved() -> None:
         {"spellings": "not a dict"},
         {"spellings": {"_1": 7}},
         {"spellings": {1: "float"}},
+        # Written before the function-type convention map existed: a miss.
+        {"spellings": {"_19": _F8}},
+        {"spellings": {"_19": _F8}, "function_cc": {"_35": 7}},
     ],
-    ids=["none", "str", "empty", "non_dict_spellings", "non_str_value", "non_str_key"],
+    ids=[
+        "none",
+        "str",
+        "empty",
+        "non_dict_spellings",
+        "non_str_value",
+        "non_str_key",
+        "pre_convention_sidecar",
+        "non_str_convention",
+    ],
 )
 def test_malformed_sidecar_is_not_a_hit(payload: object) -> None:
     assert _valid_sidecar(payload) is None
 
 
 def test_well_formed_sidecar_is_a_hit() -> None:
-    assert _valid_sidecar({"spellings": {"_19": _F8}}) == {"_19": _F8}
+    payload = {"spellings": {"_19": _F8}, "function_cc": {"_35": "ms_abi"}}
+    assert _valid_sidecar(payload) == ({"_19": _F8}, {"_35": "ms_abi"})
 
 
 # ── sidecar hit / miss / corrupt through the join (unit, hermetic) ───────────
@@ -249,7 +262,7 @@ def _join(monkeypatch: pytest.MonkeyPatch, store: _FakeStore, calls: list[int]):
 
 def test_sidecar_hit_skips_clang(monkeypatch: pytest.MonkeyPatch) -> None:
     calls: list[int] = []
-    store = _FakeStore({"spellings": {"_19": _F8}})
+    store = _FakeStore({"spellings": {"_19": _F8}, "function_cc": {}})
     root = _join(monkeypatch, store, calls)
     assert calls == []
     assert root.get(VECTOR_SPELLINGS_ATTR) is not None
@@ -262,17 +275,21 @@ def test_missing_sidecar_runs_clang_and_publishes(
     store = _FakeStore(None)
     _join(monkeypatch, store, calls)
     assert calls == [1]
-    assert store.published == [{"spellings": {"_19": _F8, "_26": _F8}}]
+    assert store.published == [
+        {"spellings": {"_19": _F8, "_26": _F8}, "function_cc": {}}
+    ]
 
 
 def test_corrupt_sidecar_is_a_miss_that_reruns_clang(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     calls: list[int] = []
-    store = _FakeStore({"spellings": {"_19": 7}})
+    store = _FakeStore({"spellings": {"_19": 7}, "function_cc": {}})
     _join(monkeypatch, store, calls)
     assert calls == [1]
-    assert store.published == [{"spellings": {"_19": _F8, "_26": _F8}}]
+    assert store.published == [
+        {"spellings": {"_19": _F8, "_26": _F8}, "function_cc": {}}
+    ]
 
 
 def test_sidecar_namespace_is_distinct_from_the_xml_entry() -> None:
