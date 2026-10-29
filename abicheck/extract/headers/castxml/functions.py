@@ -42,6 +42,7 @@ from ....model.cc_attributes import is_cc_attribute
 from ....model.export_index import ExportMatch
 from ....model.identity import entity_id_for_function
 from ...surface_fact_producers import header_ast_surface_facts
+from .abi_fundamental import castxml_type_abi_fact
 from .calling_convention import source_calling_conventions
 from .context import CastxmlParserContext
 from .duplicate_declarations import collapse_benign_duplicates
@@ -284,6 +285,7 @@ def parse_function_params(
                     # CastXML never determines va_list-ness at all -- UNSUPPORTED says so plainly, stronger than the omission bridge's NOT_COLLECTED ("not this time" vs. "never from this producer").
                     is_va_list_fact=Fact.unsupported(),
                     type_identities_fact=Fact.present(type_identities(ctx, p_type_id)),
+                    type_abi_fact=castxml_type_abi_fact(ctx, p_type_id),
                 )
             )
             ctor_identity_types.append(ctor_param_identity_type(ctx, p_type_id))
@@ -614,6 +616,7 @@ def parse_function_element(
         return_type_identities_fact=Fact.present(
             type_identities(ctx, ret_id) if ret_id else ()
         ),
+        return_type_abi_fact=castxml_type_abi_fact(ctx, ret_id) if ret_id else None,
         params=params,
         visibility=visibility_,
         **header_ast_surface_facts(

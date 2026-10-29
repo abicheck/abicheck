@@ -67,6 +67,23 @@ TYPES_ENTRIES_1: list[ChangeKindMeta] = [
         operation=_OP.MODIFIED,
     ),
     _E(
+        "abi_equivalent_type_changed",
+        _R,
+        impact="A parameter, return, field or variable was retyped between two "
+        "types the compiler passes, stores and returns identically (same size, "
+        "alignment and register class: long -> long long on LP64, char -> signed "
+        "char, an enum -> its unsigned underlying integer, __int128 -> "
+        "unsigned __int128, a float vector -> a double of the same size). The "
+        "compiled ABI is unchanged, so an existing binary keeps working. The "
+        "declared type is different, though: a source that overloads on it, a "
+        "template instantiated over it, or a function pointer of the old type "
+        "can see the difference, so the change is recorded as a source-level risk.",
+        description_template="Type spelling changed between ABI-identical types: {name} {old} -> {new}",
+        entity=_ENT.TYPE,
+        contract_subject=_CS.DECLARATION,
+        operation=_OP.MODIFIED,
+    ),
+    _E(
         "base_class_offset_changed",
         _B,
         impact="A base-class subobject moved to a different offset within the derived "

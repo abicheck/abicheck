@@ -20,6 +20,7 @@ from __future__ import annotations
 from dataclasses import InitVar, dataclass, field
 from typing import cast
 
+from .abi_fundamental import AbiFundamental
 from .elf_facts import SymbolBinding
 from .explicit_instantiation import ExplicitInstantiation
 from .extraction_scope import EntityOwnership
@@ -109,6 +110,13 @@ class Param:
     # ``NOT_COLLECTED`` (clang JSON, DWARF, a pre-v54 snapshot). Provenance,
     # not ABI content, hence ``compare=False``.
     type_identities_fact: Fact[tuple[str, ...]] | None = field(
+        default=None, kw_only=True, compare=False
+    )
+    # Schema v69: the ABI fact of this slot's type when it is a fundamental
+    # (or an enum, _Atomic or vector of one) -- see model/abi_fundamental.py.
+    # Absent (None) for every other type, and for a producer that did not
+    # record it; an absent fact never proves two slots equal.
+    type_abi_fact: Fact[AbiFundamental] | None = field(
         default=None, kw_only=True, compare=False
     )
 
@@ -291,6 +299,10 @@ class Function:
     return_type_identities_fact: Fact[tuple[str, ...]] | None = field(
         default=None, kw_only=True, compare=False
     )
+    # Schema v69: the ABI fact of the return type (see Param.type_abi_fact).
+    return_type_abi_fact: Fact[AbiFundamental] | None = field(
+        default=None, kw_only=True, compare=False
+    )
     # ADR-085 D1 for a function template: the spelled default of each template
     # parameter of the ``FunctionTemplateDecl`` this declaration is the pattern
     # of, in declaration order (``None`` for a parameter with no default). Set
@@ -469,6 +481,10 @@ class Variable:
     )
     # See ``Param.type_identities_fact``.
     type_identities_fact: Fact[tuple[str, ...]] | None = field(
+        default=None, kw_only=True, compare=False
+    )
+    # Schema v69: the ABI fact of the variable's type -- see Param.type_abi_fact.
+    type_abi_fact: Fact[AbiFundamental] | None = field(
         default=None, kw_only=True, compare=False
     )
     # ADR-063 Phase 2 identity carrier (persisted since schema v28) -- see

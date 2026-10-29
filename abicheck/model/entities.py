@@ -20,6 +20,7 @@ from __future__ import annotations
 from dataclasses import InitVar, dataclass, field
 from typing import Any, cast
 
+from .abi_fundamental import AbiFundamental
 from .extraction_scope import EntityOwnership
 from .fact import (
     Fact,
@@ -107,6 +108,10 @@ class TypeField:
     deprecated_fact: Fact[str | None] | None = field(default=None, kw_only=True)
     # See ``model.declarations.Param.type_identities_fact`` (schema v54).
     type_identities_fact: Fact[tuple[str, ...]] | None = field(
+        default=None, kw_only=True, compare=False
+    )
+    # Schema v69: the ABI fact of this field's type -- see Param.type_abi_fact.
+    type_abi_fact: Fact[AbiFundamental] | None = field(
         default=None, kw_only=True, compare=False
     )
 

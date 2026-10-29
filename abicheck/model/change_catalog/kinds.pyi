@@ -47,6 +47,7 @@ class ChangeKind(StrEnum):
     TYPE_FIELD_ADDED = 'type_field_added'
     TYPE_FIELD_OFFSET_CHANGED = 'type_field_offset_changed'
     TYPE_FIELD_TYPE_CHANGED = 'type_field_type_changed'
+    ABI_EQUIVALENT_TYPE_CHANGED = 'abi_equivalent_type_changed'
     TYPE_BASE_CHANGED = 'type_base_changed'
     TYPE_VTABLE_CHANGED = 'type_vtable_changed'
     TYPE_ADDED = 'type_added'

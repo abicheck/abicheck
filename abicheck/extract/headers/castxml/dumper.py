@@ -102,6 +102,7 @@ from . import (
     type_resolution as _castxml_type_resolution,
     typedef_parsing as _typedefs_helpers,
 )
+from .abi_fundamental import castxml_type_abi_fact
 from .function_type_cc import load_function_type_cc
 from .inline_variables import declared_inline
 from .names import (
@@ -133,6 +134,7 @@ class _CastxmlParser:
         public_header_paths: list[str] | None = None,
         public_dir_paths: list[str] | None = None,
         no_binary_evidence: bool = False,
+        plain_char_unsigned: bool | None = None,
     ):
         # All parser state now lives on a shared context object (ADR-061 D9
         # "context.py") so entity-parsing modules under
@@ -149,6 +151,7 @@ class _CastxmlParser:
             no_binary_evidence=no_binary_evidence,
         )
         self._ctx.build_id_map()
+        self._ctx.plain_char_unsigned = plain_char_unsigned
         self._ctx.vector_spellings = load_vector_spellings(self._ctx)
         self._ctx.function_type_cc = load_function_type_cc(self._ctx.root)
 
@@ -424,6 +427,8 @@ class _CastxmlParser:
                             self._ctx, el.get("type", "")
                         )
                     ),
+                    # Schema v69 -- see Param.type_abi_fact.
+                    type_abi_fact=castxml_type_abi_fact(self._ctx, el.get("type", "")),
                     # ADR-063 Phase 2 -- see symbol_is_bare_name above.
                     entity_id=entity_id_for_variable(
                         self._scope_path(el),

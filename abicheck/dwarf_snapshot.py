@@ -56,6 +56,7 @@ from .dwarf_utils import (
 )
 from .elf_symbol_filter import is_abi_relevant_elf_symbol
 from .extract import dwarf_vtable_completeness as _dvc
+from .extract.dwarf_abi_fact import dwarf_type_abi_fact as _type_abi_fact
 from .extract.dwarf_decl_file import decl_header_location
 from .extract.dwarf_records import (
     access_from_dwarf as _access_from_dwarf,
@@ -73,6 +74,7 @@ from .extract.dwarf_scope import (
     variable_entity_id as _dwarf_variable_entity_id,
 )
 from .extract.dwarf_subtree_index import open_indexed_dwarf_info
+from .extract.dwarf_type_names import strip_type_decorators as _strip_type_decorators
 from .extract.dwarf_vptr_resolution import finalize_vptr_offsets
 from .extract.surface_fact_producers import debug_info_surface_facts
 from .model import (
@@ -654,6 +656,7 @@ class _DwarfSnapshotBuilder:
             name=qualified_name if scope else name,
             mangled=mangled,
             return_type=ret_type,
+            return_type_abi_fact=_type_abi_fact(die, CU),
             params=params,
             visibility=visibility,
             **debug_info_surface_facts(exported=exported),
@@ -719,6 +722,7 @@ class _DwarfSnapshotBuilder:
             kind=kind,
             pointer_depth=ptr_depth,
             is_va_list_fact=Fact.unsupported(),
+            type_abi_fact=_type_abi_fact(die, CU),
         )
 
     # -------------------------------------------------------------------
@@ -767,6 +771,7 @@ class _DwarfSnapshotBuilder:
                 visibility=Visibility.PUBLIC,
                 **debug_info_surface_facts(exported=var_export),
                 is_const=is_const,
+                type_abi_fact=_type_abi_fact(die, CU),
                 # ADR-063 Phase 2 -- see dwarf_scope.variable_entity_id.
                 entity_id=_dwarf_variable_entity_id(
                     scope_path, name, mangled, bool(linkage_name)
@@ -1190,6 +1195,7 @@ class _DwarfSnapshotBuilder:
                 bitfield_bits=bitfield_bits,
                 is_const=is_const,
                 is_volatile=is_volatile,
+                type_abi_fact=_type_abi_fact(die, CU),
                 access=access,
                 # ADR-063 Phase 5 (eighth batch): DWARF resolves const/
                 # volatile from the member's own type DIE (above), but has
@@ -1687,31 +1693,3 @@ class _DwarfSnapshotBuilder:
 # ---------------------------------------------------------------------------
 # Utilities
 # ---------------------------------------------------------------------------
-
-
-def _strip_type_decorators(type_name: str) -> str:
-    """Strip pointer/reference/const/volatile/array suffixes from a type name.
-
-    Used for reachability analysis — we need the base type name to follow
-    type references transitively.
-    """
-    name = type_name.strip()
-    # Remove trailing array brackets
-    while name.endswith("[]"):
-        name = name[:-2].strip()
-    # Remove trailing pointer/reference markers
-    while name.endswith(("*", "&", "&&")):
-        if name.endswith("&&"):
-            name = name[:-2].strip()
-        else:
-            name = name[:-1].strip()
-    # Remove leading qualifiers (loop until none remain)
-    _qualifiers = ("const ", "volatile ", "restrict ")
-    changed = True
-    while changed:
-        changed = False
-        for prefix in _qualifiers:
-            if name.startswith(prefix):
-                name = name[len(prefix) :]
-                changed = True
-    return name.strip()
