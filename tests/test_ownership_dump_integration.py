@@ -32,6 +32,7 @@ import pytest
 
 from abicheck.model.extraction_scope import ownership_of
 from abicheck.serialization import load_snapshot
+from tests._abicheck_subprocess import abicheck_command
 
 pytestmark = [
     pytest.mark.integration,
@@ -47,7 +48,7 @@ def _require(*tools: str) -> None:
 
 def _abicheck(args: list[str], cwd: Path) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
-        [sys.executable, "-m", "abicheck", *args],
+        abicheck_command(*args),
         cwd=cwd,
         env={**os.environ, "ABICHECK_AST_FRONTEND": "castxml"},
         capture_output=True,

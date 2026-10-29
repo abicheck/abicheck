@@ -133,12 +133,18 @@ _SECTION_FIELDS: Mapping[str, tuple[str, ...]] = {
         "dwarf_layout_coherence_mismatches",
         "scope_fallback",
         "conditional_fields",
+        # Schema v67: the castxml run's -E -dD branch scan (the guard macro
+        # each undeclared export sits under), persisted when a scan ran.
+        "live_preprocessor_hidden",
         "contract",
         "dependency_scope",
         "header_only",
         "excluded_header_patterns",
         "excluded_header_matching",
         "extraction_scope",
+        # Schema v67: the ownership decisions of a snapshot with no recorded
+        # scope (storage/extraction_scope_codec.py), written only then.
+        "ownership_without_scope",
         "public_header_identifiers",
         "public_header_identifiers_fact",
     ),

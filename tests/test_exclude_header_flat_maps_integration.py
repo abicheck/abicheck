@@ -18,6 +18,7 @@ from pathlib import Path
 import pytest
 
 from abicheck.serialization import load_snapshot
+from tests._abicheck_subprocess import abicheck_command
 
 pytestmark = [
     pytest.mark.integration,
@@ -52,7 +53,7 @@ def _build(root: Path, value: int, api: int = 3) -> Path:
 def _run(*args: str, frontend: str) -> subprocess.CompletedProcess[str]:
     env = {**os.environ, "ABICHECK_AST_FRONTEND": frontend}
     return subprocess.run(
-        [sys.executable, "-m", "abicheck", *args],
+        abicheck_command(*args),
         capture_output=True,
         text=True,
         env=env,

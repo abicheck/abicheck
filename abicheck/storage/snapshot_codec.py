@@ -576,8 +576,30 @@ def decode_snapshot(
     snap.fact_generations = _fact_generations
     snap.spellings_generation = _spellings_generation
     snap.dump_provenance = _decode_dump_provenance(d)
+    snap.live_preprocessor_hidden = _decode_preprocessor_hidden(d)
     snap.load_notices = (*snap.load_notices, *_generation_notices)
     return snap, _schema_version
+
+
+def _decode_preprocessor_hidden(d: dict[str, Any]) -> dict[str, tuple[str, ...]] | None:
+    """The document's ``live_preprocessor_hidden`` scan (schema v67), or ``None``
+    when absent -- no scan ran, which is what every pre-v67 document reads as.
+
+    Refused, not coerced, when present but malformed: a scan a census reads
+    as "these names sit under this guard" must not reach the model garbled.
+    """
+    value = d.get("live_preprocessor_hidden")
+    if value is None:
+        return None
+    if not isinstance(value, dict) or not all(
+        isinstance(names, list) and all(isinstance(n, str) for n in names)
+        for names in value.values()
+    ):
+        raise SnapshotError(
+            "snapshot document's live_preprocessor_hidden must map guard macros "
+            "to lists of function names"
+        )
+    return {str(macro): tuple(names) for macro, names in value.items()}
 
 
 def _decode_dump_provenance(d: dict[str, Any]) -> dict[str, object] | None:

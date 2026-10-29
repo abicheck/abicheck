@@ -296,6 +296,40 @@ SPELLING_MIGRATIONS: Mapping[int, GenerationSpellingChange] = {
         "rewrite is needed (a baseline from an unreadable binary must be "
         "re-dumped, not rewritten)"
     ),
+    29: GenerationSpellingChange(
+        "function types spell their calling convention and full signature: a "
+        "clang-written DW_AT_calling_convention on a DWARF subroutine type "
+        "(ms_abi), the castxml FunctionType node joined from the clang AST for a "
+        "field, typedef, parameter or return (castxml drops ms_abi/sysv_abi from "
+        "its XML), and a CodeView LF_PROCEDURE now spell "
+        "'void (*)(int) __attribute__((ms_abi))', and a DWARF or PDB procedure "
+        "spells 'ret (*)(params)' where it spelled the opaque 'fn(...)'. The stored "
+        "'fn(...)' cannot be rewritten to a signature, so no rewrite is sound; "
+        "policy/generation_drift_demotion.py demotes a stored 'fn(...)' against a "
+        "fresh declarator, and a convention present on one side only, when the "
+        "generations differ, is demoted as drift. A baseline holding callbacks is "
+        "re-dumped"
+    ),
+    30: GenerationSpellingChange(
+        "a non-const variable declared inline with an arithmetic type "
+        "(inline int x = 1;) records its initializer as its value on both "
+        "frontends, and a const integral global the header declares without an "
+        "initializer (extern const int k; defined in a .cpp) takes its value from "
+        "the exported object's bytes. A header whose only C++ signal is an inline "
+        "variable is parsed as C++, not rejected as C. A const variable template "
+        "(template <class T> inline constexpr int vt = 1;) is joined from the clang "
+        "AST onto the castxml root. A baseline from an earlier generation has no "
+        "value for these variables, so a value change is not compared until it is "
+        "re-dumped; no type or name spelling changes, so no rewrite is needed"
+    ),
+    31: GenerationSpellingChange(
+        "castxml complex and bit-precise integer types (float _Complex, _BitInt(N)) "
+        "and a pointer, reference, array or typedef chain around one resolve to the "
+        "element type's clang spelling, where castxml left the one literal "
+        "Unimplemented -- a spelling shared by every such type, so float _Complex -> "
+        "double _Complex compared equal. A stored Unimplemented cannot say which "
+        "type it was, so no rewrite is sound and a baseline holding one is re-dumped"
+    ),
 }
 
 #: Reasons that say nothing about what was audited; the bump gate refuses them.

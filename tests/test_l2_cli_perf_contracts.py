@@ -34,6 +34,8 @@ from pathlib import Path
 
 import pytest
 
+from tests._abicheck_subprocess import abicheck_command
+
 _SCRIPTS = Path(__file__).resolve().parent.parent / "scripts"
 if str(_SCRIPTS) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS))
@@ -319,14 +321,13 @@ class TestMeasuredSubprocessesGetANeutralCwd:
         # unverified. A package named `abicheck` in the cwd wins over the
         # installed one.
         import subprocess
-        import sys
 
         pkg = tmp_path / "abicheck"
         pkg.mkdir()
         (pkg / "__init__.py").write_text("", encoding="utf-8")
         (pkg / "__main__.py").write_text("print('SHADOW')\n", encoding="utf-8")
         shadowed = subprocess.run(
-            [sys.executable, "-m", "abicheck"],
+            abicheck_command(),
             cwd=tmp_path,
             capture_output=True,
             text=True,
@@ -337,7 +338,7 @@ class TestMeasuredSubprocessesGetANeutralCwd:
         neutral = tmp_path / "neutral"
         neutral.mkdir()
         installed = subprocess.run(
-            [sys.executable, "-m", "abicheck", "--version"],
+            abicheck_command("--version"),
             cwd=neutral,
             capture_output=True,
             text=True,

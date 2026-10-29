@@ -19,6 +19,8 @@ from pathlib import Path
 
 import pytest
 
+from tests._abicheck_subprocess import abicheck_command
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -246,7 +248,7 @@ class TestMachoIntegration:
         with tempfile.TemporaryDirectory() as td:
             dylib = _compile_dylib(src, "libcli.dylib", Path(td))
             result = subprocess.run(
-                [sys.executable, "-m", "abicheck.cli", "dump", str(dylib)],
+                abicheck_command("dump", str(dylib)),
                 capture_output=True,
                 text=True,
                 check=False,
@@ -278,15 +280,12 @@ class TestMachoIntegration:
             # Dump both
             for lib, out in [(old, "old.json"), (new, "new.json")]:
                 r = subprocess.run(
-                    [
-                        sys.executable,
-                        "-m",
-                        "abicheck.cli",
+                    abicheck_command(
                         "dump",
                         str(lib),
                         "-o",
                         str(td_path / out),
-                    ],
+                    ),
                     capture_output=True,
                     text=True,
                     check=False,
@@ -295,16 +294,13 @@ class TestMachoIntegration:
 
             # Compare
             cmp = subprocess.run(
-                [
-                    sys.executable,
-                    "-m",
-                    "abicheck.cli",
+                abicheck_command(
                     "compare",
                     str(td_path / "old.json"),
                     str(td_path / "new.json"),
                     "-o",
                     "markdown=-",
-                ],
+                ),
                 capture_output=True,
                 text=True,
                 check=False,
@@ -333,7 +329,7 @@ class TestMachoIntegration:
                 "int other_fn(void){return 2;}", "libnew.dylib", td_path
             )
             cmp = subprocess.run(
-                [sys.executable, "-m", "abicheck.cli", "compare", str(old), str(new)],
+                abicheck_command("compare", str(old), str(new)),
                 capture_output=True,
                 text=True,
                 check=False,
@@ -356,7 +352,7 @@ class TestMachoIntegration:
             a = _compile_dylib(src, "liba.dylib", td_path, extra_flags=same_id)
             b = _compile_dylib(src, "libb.dylib", td_path, extra_flags=same_id)
             cmp = subprocess.run(
-                [sys.executable, "-m", "abicheck.cli", "compare", str(a), str(b)],
+                abicheck_command("compare", str(a), str(b)),
                 capture_output=True,
                 text=True,
                 check=False,
@@ -450,7 +446,7 @@ class TestPeIntegration:
         with tempfile.TemporaryDirectory() as td:
             dll = _compile_dll(src, "cli.dll", Path(td))
             result = subprocess.run(
-                [sys.executable, "-m", "abicheck.cli", "dump", str(dll)],
+                abicheck_command("dump", str(dll)),
                 capture_output=True,
                 text=True,
                 check=False,
@@ -483,15 +479,12 @@ class TestPeIntegration:
             # Dump both
             for lib, out in [(old, "old.json"), (new, "new.json")]:
                 r = subprocess.run(
-                    [
-                        sys.executable,
-                        "-m",
-                        "abicheck.cli",
+                    abicheck_command(
                         "dump",
                         str(lib),
                         "-o",
                         str(td_path / out),
-                    ],
+                    ),
                     capture_output=True,
                     text=True,
                     check=False,
@@ -503,16 +496,13 @@ class TestPeIntegration:
             # encoding="utf-8" so the *parent* decodes the pipe correctly.
             env = {**subprocess.os.environ, "PYTHONUTF8": "1"}
             cmp = subprocess.run(
-                [
-                    sys.executable,
-                    "-m",
-                    "abicheck.cli",
+                abicheck_command(
                     "compare",
                     str(td_path / "old.json"),
                     str(td_path / "new.json"),
                     "-o",
                     "markdown=-",
-                ],
+                ),
                 capture_output=True,
                 encoding="utf-8",
                 check=False,
@@ -542,7 +532,7 @@ class TestPeIntegration:
                 td_path,
             )
             cmp = subprocess.run(
-                [sys.executable, "-m", "abicheck.cli", "compare", str(old), str(new)],
+                abicheck_command("compare", str(old), str(new)),
                 capture_output=True,
                 encoding="utf-8",
                 check=False,
@@ -565,7 +555,7 @@ class TestPeIntegration:
             a = _compile_dll(src, "a.dll", td_path)
             b = _compile_dll(src, "b.dll", td_path)
             cmp = subprocess.run(
-                [sys.executable, "-m", "abicheck.cli", "compare", str(a), str(b)],
+                abicheck_command("compare", str(a), str(b)),
                 capture_output=True,
                 encoding="utf-8",
                 check=False,

@@ -34,12 +34,18 @@ EXTRACTION_BUG_CLASSES: tuple[BugClass, ...] = (
     BugClass(
         id="extraction.castxml_vector_element_not_modelled",
         invariant=(
-            "A castxml vector node resolves to the spelling clang gives for the same "
-            "declaration, or stays unresolved; it is never a shared opaque spelling "
-            "that hides a same-size element change through a header comparison."
+            "A castxml vector node, and a complex (float _Complex) or bit-precise "
+            "integer (_BitInt(N)) node castxml cannot name, resolves to the spelling "
+            "clang gives for the same declaration, or stays unresolved; it is never "
+            "a shared opaque spelling (such as the literal 'Unimplemented') that "
+            "hides a same-size element change through a header comparison."
         ),
         fixed_by=(1791,),
-        seed_tests=("tests/test_castxml_vector_integration.py",),
+        seed_tests=(
+            "tests/test_castxml_vector_integration.py",
+            "tests/test_castxml_complex_spelling.py",
+            "tests/test_graph_reconcile_fundamental_cli.py",
+        ),
         axes={
             "backend": ("castxml", "clang"),
             "vector_shape": ("typedef", "inline_field", "inline_param", "return"),
@@ -59,6 +65,9 @@ EXTRACTION_BUG_CLASSES: tuple[BugClass, ...] = (
         seed_tests=(
             "tests/test_castxml_function_pointer_spelling.py",
             "tests/test_castxml_function_pointer_integration.py",
+            "tests/test_function_type_calling_convention.py",
+            "tests/test_dwarf_subroutine_calling_convention.py",
+            "tests/test_type_spelling_differential_matrix.py",
         ),
         axes={
             "signature_part": ("arity", "param_type", "return", "variadic", "cc"),
@@ -511,7 +520,11 @@ EXTRACTION_BUG_CLASSES: tuple[BugClass, ...] = (
             "a parameter written the same resolves to a different type (its "
             "resolved record/enum, that record's layout, or a typedef's target "
             "changed). A changed written signature, or a mangling change the "
-            "header evidence does not explain, stays a removal and an addition."
+            "header evidence does not explain, stays a removal and an addition. "
+            "A fundamental type (float _Complex, __int128, a vector or SIMD type, "
+            "or a pointer, cv or array of one) is never paired as a rename or "
+            "move: a builtin change is a true removal and addition, not 'the same "
+            "declaration, renamed'."
         ),
         fixed_by=(1779, 1812),
         seed_tests=(
@@ -519,6 +532,8 @@ EXTRACTION_BUG_CLASSES: tuple[BugClass, ...] = (
             "tests/test_header_param_change_pairing_integration.py",
             "tests/test_closure_param_churn_pipeline.py",
             "tests/test_family_f3_identity.py",
+            "tests/test_graph_reconcile_fundamental.py",
+            "tests/test_graph_reconcile_fundamental_cli.py",
         ),
     ),
     BugClass(
@@ -590,5 +605,42 @@ EXTRACTION_BUG_CLASSES: tuple[BugClass, ...] = (
         seed_tests=("tests/test_binary_dialect_integration.py",),
         public_surfaces=("cli",),
         axes={"dialect": ("c++17", "c++20", "c++23")},
+    ),
+    BugClass(
+        id="symbol_rule.single_object_format",
+        invariant=(
+            "A symbol-level rule -- what an object exports (a hidden/private "
+            "symbol is not an export), a symbol's linkage (a removed weak "
+            "export carries it, so `binding: weak` applies), or whether an "
+            "unread side's dependency types were classified -- must reach the "
+            "same finding-class outcome on every object format for its twin "
+            "input. A fact a format cannot supply is reported unknown (None, "
+            "unread), never silently set to the value another format's "
+            "default happens to be. Written for ELF (STV_HIDDEN, STB_WEAK, "
+            ".dynsym) and implemented for ELF alone, the Mach-O side took "
+            "N_PEXT exports as public, stamped no linkage (so `binding: weak` "
+            "never matched a Mach-O removal), and read an unread side as an "
+            "empty classification."
+        ),
+        fixed_by=(1629, 1630, 1819),
+        seed_tests=(
+            "tests/test_family_f8_symbol_rule_parity.py",
+            "tests/test_macho_private_extern_export.py",
+            "tests/test_macho_export_linkage_binding.py",
+            "tests/test_dwarf_dependency_types.py",
+        ),
+        public_surfaces=("cli",),
+        axes={"object_format": ("elf", "macho", "pe")},
+        known_gaps=(
+            KnownGap(
+                description=(
+                    "A PE export carries no linkage flag, so its binding stays "
+                    "unknown: `binding: weak` never matches a PE removal, by "
+                    "design (fail closed), and `binding: global` does not "
+                    "either. A PE COMDAT-level weakness is not visible."
+                ),
+                reference="abicheck/workflows/dump/dependency_internals.py",
+            ),
+        ),
     ),
 )

@@ -125,7 +125,6 @@ from .model.change_catalog.kinds import ChangeKind
 from .model.evidence_status import EvidenceTier, is_cross_source_resolved
 from .model.extraction_scope import snapshot_scope_identity
 from .model.header_exclusion_record import comparison_exclusion_identity
-from .model.surface_facts import is_abi_visible
 from .policy.classification import Verdict, compute_verdict
 from .policy.disposition_close import finalize_ledger
 from .policy.disposition_ledger import DispositionLedger
@@ -587,14 +586,6 @@ def _compute_scope_confidence(
         surf_new=pp_ctx.surf_new or resolve(new),
         demoted=pp_ctx.out_of_surface,
     )
-
-
-def _old_public_symbol_count(old: AbiSnapshot) -> int | None:
-    """Return the count of public-visibility symbols in *old*, or None if zero."""
-    count = sum(1 for f in old.declarations.functions if is_abi_visible(f)) + sum(
-        1 for v in old.declarations.variables if is_abi_visible(v)
-    )
-    return count if count > 0 else None
 
 
 def _contract_coverage_status(
@@ -1164,9 +1155,14 @@ def compare(
     scope_confidence, scope_notes = _compute_scope_confidence(
         old if old is not None else new, new, scope_to_public_surface, pp_ctx
     )
+    from .model.surface_facts import old_public_symbol_count
     from .surface import scope_note_coverage_warnings
 
     coverage_warnings = [*coverage_warnings, *scope_note_coverage_warnings(scope_notes)]
+
+    from .workflows.dump.dependency_internals import dependency_types_report
+
+    dependency_types_read, dependency_notes = dependency_types_report(old, new)
 
     # A POST manifest allowlist scopes the comparison just as much as header
     # scoping does — it moves non-committed findings to `out_of_surface`. Mark
@@ -1322,10 +1318,13 @@ def compare(
         policy_file=policy_file,
         redundant_changes=redundant_for_report,
         redundant_count=true_redundant_count,
-        old_symbol_count=(_old_public_symbol_count(old) if old is not None else None),
+        old_symbol_count=(old_public_symbol_count(old) if old is not None else None),
         confidence=confidence,
         evidence_tiers=evidence_tiers,
-        coverage_warnings=coverage_warnings + comparability_warnings,
+        coverage_warnings=coverage_warnings
+        + comparability_warnings
+        + list(dependency_notes),
+        dependency_types_read=dependency_types_read,
         out_of_surface_changes=out_of_surface,
         out_of_surface_count=len(out_of_surface),
         reconciled_changes=reconciled,

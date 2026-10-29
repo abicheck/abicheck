@@ -27,12 +27,13 @@ and their demangled spellings, count them and attribute each to
 1. a **guard macro**, when this run's parse of the side scanned which
    public-header declarations its preprocessor configuration excluded
    (``AbiSnapshot.live_preprocessor_hidden``, decided by the compiler's own
-   ``-E`` run in ``extract/headers/preprocessor_branches.py``) and the
-   export's function name is one of those declared under the macro; else
+   ``-E`` run in ``extract/headers/preprocessor_branches.py``, persisted since
+   schema v67) and the export's function name is one of those declared under
+   the macro; else
 2. a **named cause** (:data:`CONDITIONAL_DECLARATION_CAUSES`), whose
    signature names a recognizable conditionally-compiled API. This is the
-   fallback for a side with no scan: a stored snapshot (the scan is
-   runtime-only, never persisted), or a non-castxml parse.
+   fallback for a side with no scan: a pre-v67 stored snapshot, or a
+   non-castxml parse.
 
 It creates no finding and decides nothing -- the caller renders the result
 as coverage lines (``confidence.undeclared_export_warnings``) and a

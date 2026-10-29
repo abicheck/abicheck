@@ -54,7 +54,6 @@ from __future__ import annotations
 
 import pathlib
 import subprocess
-import sys
 
 import pytest
 from click.testing import CliRunner
@@ -62,6 +61,7 @@ from click.testing import CliRunner
 from abicheck import cli
 from abicheck.cli import main
 from abicheck.frontends.cli.runtime import RETIRED_ROOT_COMMANDS
+from tests._abicheck_subprocess import abicheck_command
 
 _PUBLIC_COMMANDS = frozenset(
     {
@@ -178,7 +178,7 @@ def test_python_dash_m_abicheck_shows_public_commands() -> None:
     """``python -m abicheck --help`` (the documented entry point) surfaces the
     same public commands as in-process ``main.commands`` introspection."""
     result = subprocess.run(
-        [sys.executable, "-m", "abicheck", "--help"],
+        abicheck_command("--help"),
         capture_output=True,
         text=True,
         encoding="utf-8",
@@ -220,14 +220,14 @@ def test_python_dash_m_abicheck_cli_matches_python_dash_m_abicheck() -> None:
     a past bug made the sibling-module commands silently vanish under this
     invocation path (see test_main_entrypoint.py)."""
     via_package = subprocess.run(
-        [sys.executable, "-m", "abicheck", "--help"],
+        abicheck_command("--help"),
         capture_output=True,
         text=True,
         encoding="utf-8",
         check=True,
     ).stdout
     via_module = subprocess.run(
-        [sys.executable, "-m", "abicheck.cli", "--help"],
+        abicheck_command("--help"),
         capture_output=True,
         text=True,
         encoding="utf-8",

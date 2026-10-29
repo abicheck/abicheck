@@ -27,10 +27,10 @@ from __future__ import annotations
 import gzip
 import hashlib
 import json
+import os
 import re
 import shutil
 import subprocess
-import sys
 from pathlib import Path
 from typing import Any
 
@@ -45,8 +45,18 @@ from abicheck.storage.versioning import (
     GENERATION_DRIFT_NOTICE_MARKER,
     RESOLVER_GENERATION,
 )
+from tests._abicheck_subprocess import abicheck_command
 
 CORPUS_ROOT = Path(__file__).parent / "fixtures" / "generations"
+#: The checkout under test. The subprocesses below run from a temp or fixture
+#: directory, where ``python -m abicheck`` would otherwise import whatever
+#: ``abicheck`` is installed, not this tree (so a generation bump would compare
+#: the installed generation against itself).
+_REPO_ROOT = Path(__file__).resolve().parents[1]
+_ABICHECK_ENV = {
+    **os.environ,
+    "PYTHONPATH": str(_REPO_ROOT),
+}
 SOURCES = CORPUS_ROOT / "corpus"
 MANIFEST: dict[str, Any] = json.loads(
     (CORPUS_ROOT / "manifest.json").read_text(encoding="utf-8")
@@ -275,10 +285,7 @@ def fresh_dump(tmp_path_factory: pytest.TempPathFactory) -> Path:
         pytest.fail(f"{' '.join(cmd)} failed:\n{built.stderr}")
     out = work / "fresh.json"
     dumped = subprocess.run(
-        [
-            sys.executable,
-            "-m",
-            "abicheck.cli",
+        abicheck_command(
             "dump",
             str(lib),
             "-H",
@@ -287,10 +294,11 @@ def fresh_dump(tmp_path_factory: pytest.TempPathFactory) -> Path:
             "1",
             "-o",
             str(out),
-        ],
+        ),
         capture_output=True,
         text=True,
         cwd=work,
+        env=_ABICHECK_ENV,
     )
     if dumped.returncode != 0:
         pytest.fail(f"abicheck dump failed:\n{dumped.stderr}")
@@ -327,31 +335,27 @@ def test_every_respelling_against_fresh_dump_is_a_declared_migration(
 def test_require_same_generation_refuses_a_frozen_baseline(fresh_dump: Path) -> None:
     baseline = CORPUS_ROOT / MANIFEST["entries"][str(max(FROZEN))]["snapshot"]
     refused = subprocess.run(
-        [
-            sys.executable,
-            "-m",
-            "abicheck.cli",
+        abicheck_command(
             "compare",
             str(baseline),
             str(fresh_dump),
             "--require-same-generation",
-        ],
+        ),
         capture_output=True,
         text=True,
+        env=_ABICHECK_ENV,
     )
     assert refused.returncode == 64, refused.stderr
     assert "re-dump baseline" in refused.stderr
     same = subprocess.run(
-        [
-            sys.executable,
-            "-m",
-            "abicheck.cli",
+        abicheck_command(
             "compare",
             str(fresh_dump),
             str(fresh_dump),
             "--require-same-generation",
-        ],
+        ),
         capture_output=True,
         text=True,
+        env=_ABICHECK_ENV,
     )
     assert same.returncode == 0, same.stderr

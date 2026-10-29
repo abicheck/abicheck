@@ -49,6 +49,7 @@ from .dwarf_utils import (
     free_cu_die_cache,
     has_real_dwarf_info,
     member_offset_bits as _member_offset_bits,
+    pointer_or_subroutine_spelling,
     resolve_die_ref as _resolve_ref,
     resolve_type_die as _resolve_type_die,
     unwrap_cv_typedef as _unwrap_cv_typedef,
@@ -1603,10 +1604,11 @@ class _DwarfSnapshotBuilder:
             name = _attr_str(die, "DW_AT_name") or "<enum>"
             return (f"enum {name}", _attr_int(die, "DW_AT_byte_size"))
 
-        if tag == "DW_TAG_pointer_type":
-            inner = self._resolve_inner_name(die, CU, depth)
-            size = _attr_int(die, "DW_AT_byte_size") or 0
-            return (f"{inner} *" if inner else "void *", size)
+        if tag in ("DW_TAG_pointer_type", "DW_TAG_subroutine_type"):
+            spelled = pointer_or_subroutine_spelling(
+                die, CU, lambda d: self._resolve_inner_name(d, CU, depth)
+            )
+            return (spelled, _attr_int(die, "DW_AT_byte_size") or 0)
 
         if tag == "DW_TAG_reference_type":
             inner = self._resolve_inner_name(die, CU, depth)
@@ -1642,9 +1644,6 @@ class _DwarfSnapshotBuilder:
 
         if tag == "DW_TAG_array_type":
             return array_type_info(die, self._resolve_inner_info(die, CU, depth))
-
-        if tag == "DW_TAG_subroutine_type":
-            return ("fn(...)", _attr_int(die, "DW_AT_byte_size"))
 
         # Fallback
         name = _attr_str(die, "DW_AT_name")

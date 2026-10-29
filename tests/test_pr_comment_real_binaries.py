@@ -36,13 +36,13 @@ from __future__ import annotations
 import json
 import shutil
 import subprocess
-import sys
 from pathlib import Path
 
 import pytest
 
 from abicheck.pr_comment import build_model, should_post
 from abicheck.pr_comment_render import render_comment
+from tests._abicheck_subprocess import abicheck_command
 
 pytestmark = pytest.mark.integration
 
@@ -102,7 +102,7 @@ def _compare(tmp_path: Path, *args: str) -> dict:
         # `sys.executable`, not "python": a valid environment does not
         # guarantee a command by that name exists, or that it resolves to
         # the interpreter running pytest (CodeRabbit review).
-        [sys.executable, "-m", "abicheck", "compare", *args, "-o", f"json={out}"],
+        abicheck_command("compare", *args, "-o", f"json={out}"),
         capture_output=True,
         text=True,
     )

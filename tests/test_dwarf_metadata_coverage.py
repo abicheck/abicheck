@@ -618,7 +618,7 @@ class TestComputeTypeInfo:
 
     def test_subroutine_type(self):
         die = _Die("DW_TAG_subroutine_type", {"DW_AT_byte_size": 8})
-        assert _compute_type_info(die, _CU(), 0, {}) == ("fn(...)", 8)
+        assert _compute_type_info(die, _CU(), 0, {}) == ("void (void)", 8)
 
     def test_record_struct(self):
         die = _Die(
