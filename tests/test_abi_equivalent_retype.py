@@ -37,8 +37,11 @@ def _param(spelling: str, fact: AbiFundamental | None, kind=None) -> Param:
 
 def _snap(*, functions=(), variables=(), types=()) -> AbiSnapshot:
     return AbiSnapshot(
-        library="l", version="1", functions=list(functions),
-        variables=list(variables), types=list(types),
+        library="l",
+        version="1",
+        functions=list(functions),
+        variables=list(variables),
+        types=list(types),
     )
 
 
@@ -53,7 +56,9 @@ def _fn(name: str, *params: Param, ret: str = "void", ret_fact=None) -> Function
 
 
 def _change(kind: ChangeKind, symbol: str, old: str, new: str, **kw) -> Change:
-    return Change(kind=kind, symbol=symbol, description="x", old_value=old, new_value=new, **kw)
+    return Change(
+        kind=kind, symbol=symbol, description="x", old_value=old, new_value=new, **kw
+    )
 
 
 def _kinds(changes: list[Change]) -> list[ChangeKind]:
@@ -89,7 +94,10 @@ def test_refined_change_keeps_symbol_names_and_spellings() -> None:
     change = _change(ChangeKind.FUNC_PARAMS_CHANGED, "f", "(char)", "(signed char)")
     (out,) = refine_abi_equivalent_retypes([change], old, new)
     assert (out.kind, out.symbol, out.old_value, out.new_value) == (
-        _RETYPED, "f", "(char)", "(signed char)",
+        _RETYPED,
+        "f",
+        "(char)",
+        "(signed char)",
     )
     assert "ABI-identical" in out.description
 
@@ -102,8 +110,12 @@ def test_one_unproven_slot_keeps_the_whole_break() -> None:
     """A pointer beside an equal retype is still a break: every differing slot
     must be proven, not just most of them."""
     old = _snap(functions=[_fn("f", _param("long", _LONG), _param("int *", None))])
-    new = _snap(functions=[_fn("f", _param("long long", _LLONG), _param("long *", None))])
-    change = _change(ChangeKind.FUNC_PARAMS_CHANGED, "f", "(long, int *)", "(long long, long *)")
+    new = _snap(
+        functions=[_fn("f", _param("long long", _LLONG), _param("long *", None))]
+    )
+    change = _change(
+        ChangeKind.FUNC_PARAMS_CHANGED, "f", "(long, int *)", "(long long, long *)"
+    )
     (out,) = refine_abi_equivalent_retypes([change], old, new)
     assert out.kind is ChangeKind.FUNC_PARAMS_CHANGED
 
@@ -112,7 +124,9 @@ def test_a_pointer_kind_change_is_never_refined() -> None:
     from abicheck.model.vocabulary import ParamKind
 
     old = _snap(functions=[_fn("f", _param("long", _LONG))])
-    new = _snap(functions=[_fn("f", _param("long long", _LLONG, kind=ParamKind.POINTER))])
+    new = _snap(
+        functions=[_fn("f", _param("long long", _LLONG, kind=ParamKind.POINTER))]
+    )
     change = _change(ChangeKind.FUNC_PARAMS_CHANGED, "f", "(long)", "(long long)")
     (out,) = refine_abi_equivalent_retypes([change], old, new)
     assert out.kind is ChangeKind.FUNC_PARAMS_CHANGED
@@ -135,15 +149,25 @@ def test_return_retype_with_a_sign_change_at_four_bytes_stays_a_break() -> None:
 
 
 def test_field_retype_is_refined_by_record_and_field_name() -> None:
-    old_rec = RecordType(name="S", kind="struct", fields=[
-        TypeField(name="m", type="enum E", type_abi_fact=_present(_UINT))
-    ])
-    new_rec = RecordType(name="S", kind="struct", fields=[
-        TypeField(name="m", type="unsigned int", type_abi_fact=_present(_UINT))
-    ])
+    old_rec = RecordType(
+        name="S",
+        kind="struct",
+        fields=[TypeField(name="m", type="enum E", type_abi_fact=_present(_UINT))],
+    )
+    new_rec = RecordType(
+        name="S",
+        kind="struct",
+        fields=[
+            TypeField(name="m", type="unsigned int", type_abi_fact=_present(_UINT))
+        ],
+    )
     change = _change(
-        ChangeKind.TYPE_FIELD_TYPE_CHANGED, "S", "enum E", "unsigned int",
-        qualified_name="S", field_name="m",
+        ChangeKind.TYPE_FIELD_TYPE_CHANGED,
+        "S",
+        "enum E",
+        "unsigned int",
+        qualified_name="S",
+        field_name="m",
     )
     (out,) = refine_abi_equivalent_retypes(
         [change], _snap(types=[old_rec]), _snap(types=[new_rec])
@@ -152,8 +176,18 @@ def test_field_retype_is_refined_by_record_and_field_name() -> None:
 
 
 def test_variable_retype_is_refined_on_equal_facts() -> None:
-    old = _snap(variables=[Variable(name="v", mangled="v", type="long", type_abi_fact=_present(_LONG))])
-    new = _snap(variables=[Variable(name="v", mangled="v", type="long long", type_abi_fact=_present(_LLONG))])
+    old = _snap(
+        variables=[
+            Variable(name="v", mangled="v", type="long", type_abi_fact=_present(_LONG))
+        ]
+    )
+    new = _snap(
+        variables=[
+            Variable(
+                name="v", mangled="v", type="long long", type_abi_fact=_present(_LLONG)
+            )
+        ]
+    )
     change = _change(ChangeKind.VAR_TYPE_CHANGED, "v", "long", "long long")
     (out,) = refine_abi_equivalent_retypes([change], old, new)
     assert out.kind is _RETYPED

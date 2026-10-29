@@ -51,7 +51,14 @@ def test_an_absent_fact_is_not_written() -> None:
     snap = AbiSnapshot(
         library="l",
         version="1",
-        functions=[Function(name="g", mangled="g", return_type="void", params=[Param(name="p", type="int *")])],
+        functions=[
+            Function(
+                name="g",
+                mangled="g",
+                return_type="void",
+                params=[Param(name="p", type="int *")],
+            )
+        ],
     )
     doc = snapshot_to_dict(snap)
     fn = next(f for f in _functions(doc) if f["name"] == "g")
@@ -68,8 +75,13 @@ def _functions(doc: dict) -> list[dict]:
 
 def test_a_pre_v69_document_decodes_the_fact_as_unset() -> None:
     """A stored baseline from before schema 69 has no fact, so it proves nothing."""
-    raw = {"status": "present", "value": {"encoding": "signed", "size": 8, "align": 8, "lanes": 0}}
-    assert decode_abi_slot_fact(raw, 68) is not None  # present keys are read at any schema
+    raw = {
+        "status": "present",
+        "value": {"encoding": "signed", "size": 8, "align": 8, "lanes": 0},
+    }
+    assert (
+        decode_abi_slot_fact(raw, 68) is not None
+    )  # present keys are read at any schema
     assert decode_abi_slot_fact(None, 68) is None  # absent at an old schema: unset
     absent = decode_abi_slot_fact(None, SCHEMA_VERSION)
     assert absent is not None and absent.status is FactStatus.NOT_COLLECTED
@@ -105,7 +117,12 @@ def test_a_stored_document_without_the_fact_keeps_its_break() -> None:
     new.declarations.functions[0].params[0] = Param(
         name="p", type="long long", type_abi_fact=Fact.present(_LONG)
     )
-    change = Change(kind=ChangeKind.FUNC_PARAMS_CHANGED, symbol="f", description="x",
-                    old_value="(long)", new_value="(long long)")
+    change = Change(
+        kind=ChangeKind.FUNC_PARAMS_CHANGED,
+        symbol="f",
+        description="x",
+        old_value="(long)",
+        new_value="(long long)",
+    )
     (out,) = refine_abi_equivalent_retypes([change], old, new)
     assert out.kind is ChangeKind.FUNC_PARAMS_CHANGED

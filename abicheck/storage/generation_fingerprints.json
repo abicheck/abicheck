@@ -184,7 +184,7 @@
     },
     "fingerprint": "839df605ac44b8fb236551bf8220e4483c6262724342bd4e7ca0835d12f3b589",
     "generation": 32,
-    "reason": "generation 32 ABI-fact change, final: DWARF restrict_type is transparent to pointer depth (dwarf_snapshot), the restrict-only qualifier comparison (name_classification), and the ABI-fact modules; the SPELLING_MIGRATIONS row 32 records the restrict depth effect"
+    "reason": "generation 32 ABI-fact change, final after the merge: the restrict helper moved to model/restrict_qualifier.py; the SPELLING_MIGRATIONS row 32 records the restrict depth effect"
   },
   "resolver": {
     "files": {

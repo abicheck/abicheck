@@ -51,6 +51,7 @@ from collections.abc import Callable
 from typing import ClassVar
 
 from .model.execution_cache import memoized
+from .model.restrict_qualifier import strip_restrict as _strip_restrict
 
 __all__ = [
     "ITANIUM_RTTI_PREFIXES",
@@ -1194,8 +1195,6 @@ def cv_qualifiers_only_differ(old_type: str, new_type: str) -> bool:
     False
     >>> cv_qualifiers_only_differ("int *", "long *")
     False
-    >>> cv_qualifiers_only_differ("Foo *", "Foo *")
-    False
     """
     co = canonicalize_type_name(old_type)
     cn = canonicalize_type_name(new_type)
@@ -1203,21 +1202,8 @@ def cv_qualifiers_only_differ(old_type: str, new_type: str) -> bool:
         return False
     if co == cn:
         return False
-    # ``restrict`` on a pointer is a qualifier of the pointer with no calling-
-    # convention effect (castxml records it apart from the type), so a restrict-
-    # only difference is the same kind of no-op as a const one (DWARF spells it).
-    return _strip_cv_qualifiers(_strip_restrict(co)) == _strip_cv_qualifiers(
-        _strip_restrict(cn)
-    )
-
-
-_RESTRICT_TOKEN_RE = re.compile(r"\b(?:restrict|__restrict__|__restrict)\b")
-
-
-def _strip_restrict(name: str) -> str:
-    """*name* with ``restrict`` tokens removed and sigil spacing normalised."""
-    stripped = _MULTI_SPACE_RE.sub(" ", _RESTRICT_TOKEN_RE.sub("", name))
-    return re.sub(r"\s*([*&])\s*", r" \1", stripped).strip()
+    co, cn = _strip_restrict(co), _strip_restrict(cn)
+    return _strip_cv_qualifiers(co) == _strip_cv_qualifiers(cn)
 
 
 def func_signature_cv_only_differ(old_type: str, new_type: str) -> bool:

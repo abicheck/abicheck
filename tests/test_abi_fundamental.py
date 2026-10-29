@@ -104,7 +104,11 @@ def test_equivalence_is_symmetric_and_reflexive_over_the_domain() -> None:
     [
         # Same bytes, same class, different name: equal.
         (AbiFundamental(_S, 8, 8), AbiFundamental(_S, 8, 8), True),
-        (AbiFundamental(_S, 8, 8), AbiFundamental(_U, 8, 8), True),  # long/unsigned long
+        (
+            AbiFundamental(_S, 8, 8),
+            AbiFundamental(_U, 8, 8),
+            True,
+        ),  # long/unsigned long
         (AbiFundamental(_S, 16, 16), AbiFundamental(_U, 16, 16), True),  # __int128
         (AbiFundamental(_S, 1, 1), AbiFundamental(_S, 1, 1), True),  # char/signed char
         (AbiFundamental(_U, 4, 4), AbiFundamental(_U, 4, 4), True),  # enum -> unsigned
@@ -113,14 +117,22 @@ def test_equivalence_is_symmetric_and_reflexive_over_the_domain() -> None:
         (AbiFundamental(_S, 16, 16, 4), AbiFundamental(_F, 16, 16, 4), True),
         # Sign at 4 or 1 or 2 bytes changes how a caller extends it: a break.
         (AbiFundamental(_S, 4, 4), AbiFundamental(_U, 4, 4), False),  # int/unsigned
-        (AbiFundamental(_S, 1, 1), AbiFundamental(_U, 1, 1), False),  # char/unsigned char
+        (
+            AbiFundamental(_S, 1, 1),
+            AbiFundamental(_U, 1, 1),
+            False,
+        ),  # char/unsigned char
         (AbiFundamental(_S, 2, 2), AbiFundamental(_U, 2, 2), False),  # short/unsigned
         # A boolean is never an integer, not even an unsigned char.
         (AbiFundamental(_B, 1, 1), AbiFundamental(_U, 1, 1), False),
         # Integer and float of one size are different register classes.
         (AbiFundamental(_S, 4, 4), AbiFundamental(_F, 4, 4), False),  # int/float
         (AbiFundamental(_S, 8, 8), AbiFundamental(_F, 8, 8), False),  # long/double
-        (AbiFundamental(_S, 16, 16), AbiFundamental(_F, 16, 16), False),  # __int128/ldouble
+        (
+            AbiFundamental(_S, 16, 16),
+            AbiFundamental(_F, 16, 16),
+            False,
+        ),  # __int128/ldouble
         # Different size or alignment: never equal.
         (AbiFundamental(_S, 4, 4), AbiFundamental(_S, 8, 8), False),
         (AbiFundamental(_S, 4, 4), AbiFundamental(_S, 4, 2), False),

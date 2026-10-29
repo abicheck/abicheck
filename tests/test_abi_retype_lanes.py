@@ -84,8 +84,19 @@ def _build(work: Path, case: str, side: str, spelling: str, debug: bool) -> Path
         encoding="utf-8",
     )
     lib = work / f"{case}_{side}_{'g' if debug else 'n'}.so"
-    argv = [cc, *(["-g"] if debug else []), "-O0", "-shared", "-fPIC",
-            "-Wl,-soname,libx.so.1", "-I", str(work), str(src), "-o", str(lib)]
+    argv = [
+        cc,
+        *(["-g"] if debug else []),
+        "-O0",
+        "-shared",
+        "-fPIC",
+        "-Wl,-soname,libx.so.1",
+        "-I",
+        str(work),
+        str(src),
+        "-o",
+        str(lib),
+    ]
     proc = subprocess.run(argv, capture_output=True, text=True, check=False)
     if proc.returncode != 0:
         pytest.fail(f"compile failed: {' '.join(argv)}\n{proc.stderr}")
@@ -94,13 +105,19 @@ def _build(work: Path, case: str, side: str, spelling: str, debug: bool) -> Path
 
 def _run(*args: str) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
-        abicheck_command(*args), capture_output=True, text=True, check=False,
+        abicheck_command(*args),
+        capture_output=True,
+        text=True,
+        check=False,
         cwd=REPO_ROOT,
     )
 
 
 def _kinds(report: Path) -> set[str]:
-    return {c.get("kind") for c in json.loads(report.read_text(encoding="utf-8")).get("changes", [])}
+    return {
+        c.get("kind")
+        for c in json.loads(report.read_text(encoding="utf-8")).get("changes", [])
+    }
 
 
 def _lane(work: Path, case: str, lane: str, old: str, new: str) -> tuple[int, set[str]]:
@@ -113,34 +130,56 @@ def _lane(work: Path, case: str, lane: str, old: str, new: str) -> tuple[int, se
         lib_old = _build(work, case, "1", old, False)
         lib_new = _build(work, case, "2", new, False)
         proc = _run(
-            "compare", str(lib_old), str(lib_new),
-            "-H", f"old={work / f'{case}_1.h'}", "-H", f"new={work / f'{case}_2.h'}",
-            "-o", f"json={report}",
+            "compare",
+            str(lib_old),
+            str(lib_new),
+            "-H",
+            f"old={work / f'{case}_1.h'}",
+            "-H",
+            f"new={work / f'{case}_2.h'}",
+            "-o",
+            f"json={report}",
         )
     else:
         snaps = []
         for side, spelling in (("1", old), ("2", new)):
             lib = _build(work, case, side, spelling, True)
             snap = work / f"{case}_{side}.snap.json"
-            dump = _run("dump", str(lib), "-H", str(work / f"{case}_{side}.h"), "-o", str(snap))
+            dump = _run(
+                "dump", str(lib), "-H", str(work / f"{case}_{side}.h"), "-o", str(snap)
+            )
             assert dump.returncode == 0, dump.stderr
             snaps.append(snap)
         proc = _run("compare", str(snaps[0]), str(snaps[1]), "-o", f"json={report}")
     if not report.exists():
-        pytest.fail(f"lane {lane} wrote no report (exit {proc.returncode}):\n{proc.stderr}")
+        pytest.fail(
+            f"lane {lane} wrote no report (exit {proc.returncode}):\n{proc.stderr}"
+        )
     return proc.returncode, _kinds(report)
 
 
 @pytest.mark.parametrize("lane", ["A", "B", "C"])
-@pytest.mark.parametrize(("case", "old", "new", "identical"), CASES, ids=[c[0] for c in CASES])
-def test_retype_in_every_lane(tmp_path: Path, case: str, old: str, new: str, identical: bool, lane: str) -> None:
+@pytest.mark.parametrize(
+    ("case", "old", "new", "identical"), CASES, ids=[c[0] for c in CASES]
+)
+def test_retype_in_every_lane(
+    tmp_path: Path, case: str, old: str, new: str, identical: bool, lane: str
+) -> None:
     if lane != "A":
         _need("castxml")
     code, kinds = _lane(tmp_path, case, lane, old, new)
     if identical:
-        assert code != 4, f"{case} lane {lane}: ABI-identical retype read as a break: {kinds}"
-        assert _RETYPE in kinds, f"{case} lane {lane}: no source-level retype finding: {kinds}"
-        assert not (kinds & _BREAK_KINDS), f"{case} lane {lane}: break kind kept: {kinds}"
+        assert code != 4, (
+            f"{case} lane {lane}: ABI-identical retype read as a break: {kinds}"
+        )
+        assert _RETYPE in kinds, (
+            f"{case} lane {lane}: no source-level retype finding: {kinds}"
+        )
+        assert not (kinds & _BREAK_KINDS), (
+            f"{case} lane {lane}: break kind kept: {kinds}"
+        )
     else:
-        assert code == 4, f"{case} lane {lane}: ABI-different retype not a break (exit {code}): {kinds}"
+        assert code == 4, (
+            f"{case} lane {lane}: ABI-different retype not a break (exit {code}): {kinds}"
+        )
         assert kinds & _BREAK_KINDS, f"{case} lane {lane}: no break finding: {kinds}"
