@@ -50,6 +50,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
+from operator import attrgetter
 from typing import Literal
 
 from ..demangle import demangle
@@ -76,8 +77,7 @@ REPLAY_EMITTER_MODULES: tuple[str, ...] = (
 KeyOf = Callable[[Change], str | None]
 
 
-def _symbol(change: Change) -> str:
-    return change.symbol
+_symbol: KeyOf = attrgetter("symbol")
 
 
 def _binary_symbol_of_mapping(change: Change) -> str | None:
