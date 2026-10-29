@@ -149,6 +149,7 @@ from perf_baseline import (  # noqa: E402
     total_memory_points_compared,
 )
 from perf_cache_reset import clear_process_caches as _clear_process_caches  # noqa: E402
+from perf_html_report import generate_html_report  # noqa: E402
 from perf_measurement import (  # noqa: E402
     EXPONENT_FLOOR_SECONDS,
     SampleStats,
@@ -192,7 +193,6 @@ from abicheck.model import (  # noqa: E402
 )
 from abicheck.pe_metadata import PeExport, PeMetadata  # noqa: E402
 from abicheck.policy.severity import categorize_changes  # noqa: E402
-from abicheck.report.html_compute import generate_html_report  # noqa: E402
 from abicheck.sarif import to_sarif_str  # noqa: E402
 from abicheck.serialization import (  # noqa: E402
     snapshot_from_dict,
