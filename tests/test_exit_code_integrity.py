@@ -357,6 +357,24 @@ class TestReleaseAssuranceDecisionInput:
         assert got.analysis_assurance_contribution == decision.exit_contribution
         assert got.code == decision.exit_contribution
 
+    @pytest.mark.parametrize(("worst", "base"), [("NO_CHANGE", 0), ("BREAKING", 4)])
+    def test_the_process_exit_words_its_notice_against_the_other_axes(
+        self, capsys: pytest.CaptureFixture[str], worst: str, base: int
+    ) -> None:
+        """The notice is worded against every axis but assurance: "floored to
+        1" on a clean run, "which stands" beside a real exit 4."""
+        from abicheck.frontends.cli.runtime import _exit_compare_release
+        from abicheck.policy.release_assurance import release_assurance_diagnostic
+
+        decision = self._decision(True, "partial")
+        code = _exit_code_of(
+            _exit_compare_release, worst, False, [], assurance_decision=decision
+        )
+        assert code == max(base, 1)
+        expected = release_assurance_diagnostic(decision, base_exit=base)
+        assert expected is not None
+        assert expected in capsys.readouterr().err
+
     def test_member_rows_win_over_the_synthesized_ones(self) -> None:
         # Real rows say the member is complete, so no floor applies even
         # though the decision object alone would floor it.
