@@ -115,30 +115,14 @@ SERIALIZATION_BUG_CLASSES: tuple[BugClass, ...] = (
         seed_tests=(
             "tests/test_elf_symbol_roundtrip_and_origin.py",
             "tests/test_family_f2_route_parity.py",
+            "tests/test_advanced_extraction_status.py",
+            "tests/test_live_stored_advanced_dwarf_parity.py",
             "tests/test_live_stored_census_parity.py",
             "tests/test_preprocessor_hidden_census_integration.py",
             "tests/unit/storage/test_snapshot_field_roundtrip.py",
             "tests/unit/storage/test_source_abi_surface_roundtrip.py",
             "tests/test_storage_roundtrip_sweep.py",
             "tests/unit/storage/test_section_schema_version_gate.py",
-        ),
-        known_gaps=(
-            KnownGap(
-                description=(
-                    "A stored snapshot does not keep the advanced-DWARF "
-                    "extraction status: the encoder drops it, so NOT_RUN, "
-                    "COMPLETED and FAILED all read back as UNRECORDED and a "
-                    "failed parse falls back to the payload inference. "
-                    "Pinned by the KNOWN_LOSSY entries named "
-                    "`AdvancedDwarfMetadata.extraction[...]` and "
-                    "`Declarations.debug_advanced`; persisting it needs "
-                    "ADR-080's decision."
-                ),
-                reference=(
-                    "docs/contribute/known-gaps/"
-                    "advanced-facts-collected-infers-advanced-dwarf-extraction-ran.md"
-                ),
-            ),
         ),
     ),
     BugClass(
