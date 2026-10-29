@@ -171,7 +171,7 @@ def _try_dwarf_snapshot(
                 "No headers provided — using DWARF debug info as primary data source. "
                 "#define constants and default parameter values will be unavailable."
             )
-        _populate_elf_visibility(snap)
+        _populate_elf_visibility(snap, so_path)
         snap.semantic_ir = _dwarf_semantic_ir(snap)
         return snap, []
     # DWARF snapshot had no symbols of its own (often the case when
@@ -261,7 +261,7 @@ def _build_symbol_only_snapshot(
         platform="elf",
         language_profile=profile_hint,
     )
-    _populate_elf_visibility(snapshot)
+    _populate_elf_visibility(snapshot, so_path)
     if dwarf_only_types:
         snapshot.semantic_ir = _dwarf_types_semantic_ir(dwarf_only_types)
     elif resolved_debug_format in ("btf", "ctf") and dwarf_meta.has_dwarf:
