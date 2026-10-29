@@ -119,6 +119,7 @@ COVERAGE: dict[str, str] = {
     "abicheck.demangle::memoized::demangle": R,
     "abicheck.diff_helpers::memoized::depth_aware_bare_name": B,
     "abicheck.diff_symbols_renames::memoized::_rename_name_parse": "UNCOVERED: rename heuristics need a removed+added pair with matching fingerprints; no cell fixture has one",
+    "abicheck.extract.headers.clang.abi_target::memoized::_default_triple": "UNCOVERED: clang's default -print-target-triple, memoized on (executable, content digest); no cell varies the clang binary within one process. The rule it feeds is pinned by tests/test_clang_binary_abi_target.py, which re-probes a Windows-default clang through the real CLI",
     "abicheck.extract.headers.toolchain::memoized::_executable_sha256": H,
     "abicheck.extract.headers.toolchain::memoized::_probe_default_language_standard": H,
     "abicheck.extract.headers.toolchain::memoized::_tool_target_triple": H,
