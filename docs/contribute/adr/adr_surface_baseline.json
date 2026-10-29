@@ -718,7 +718,7 @@
       "use_cases": []
     },
     "ADR-080": {
-      "disposition": "gap",
+      "disposition": "internal",
       "surfaces": [],
       "use_cases": []
     },

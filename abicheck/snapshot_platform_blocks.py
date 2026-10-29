@@ -299,6 +299,26 @@ def dwarf_from_dict(d: dict[str, Any]) -> Any:
     )
 
 
+def _advanced_extraction_from_dict(value: Any) -> Any:
+    """``dwarf_advanced.extraction`` (schema v68, ADR-080). An absent key is
+    ``unrecorded`` -- what every pre-v68 document reads as, and never
+    ``completed``. A present value must name a status: a garbled one is refused
+    rather than read as a parse that ran.
+    """
+    from .errors import SnapshotError
+    from .model.dwarf_facts import AdvancedExtractionStatus
+
+    if value is None:
+        return AdvancedExtractionStatus.UNRECORDED
+    try:
+        return AdvancedExtractionStatus(value)
+    except ValueError as exc:
+        raise SnapshotError(
+            f"snapshot document's dwarf_advanced.extraction {value!r} is not an "
+            "advanced-DWARF extraction status"
+        ) from exc
+
+
 def dwarf_advanced_from_dict(d: dict[str, Any]) -> Any:
     from .model.dwarf_facts import AdvancedDwarfMetadata, ToolchainInfo
 
@@ -321,6 +341,7 @@ def dwarf_advanced_from_dict(d: dict[str, Any]) -> Any:
         return_memory_classified=set(d.get("return_memory_classified", [])),
         packed_structs=set(d.get("packed_structs", [])),
         all_struct_names=set(d.get("all_struct_names", [])),
+        extraction=_advanced_extraction_from_dict(d.get("extraction")),
     )
 
 

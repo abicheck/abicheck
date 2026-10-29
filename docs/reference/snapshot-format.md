@@ -36,7 +36,7 @@ named sections.
 
 ```json
 {
-  "schema_version": 67,
+  "schema_version": 68,
   "sections": {
     "binary":       {"section_kind": "binary",       "section_schema_version": 1, "payload": {"...": "..."}},
     "declarations": {"section_kind": "declarations", "section_schema_version": 1, "payload": {"...": "..."}},
@@ -124,7 +124,7 @@ abicheck, rather than round-tripped.
 ## Schema version history
 
 `schema_version` is a single integer, not `MAJOR.MINOR`.
-The current value is **`67`**. See
+The current value is **`68`**. See
 `abicheck/storage/snapshot_schema_versions.py`'s `SCHEMA_VERSION` for the
 authoritative, up-to-date value and the full per-version comment.
 
@@ -341,6 +341,8 @@ with `odr_conflicts_observed` false: its lack of conflicts means "not looked
 for", never "none". The debug-type join (`compare/debug_type_join.py`)
 reports a conflicted name as ambiguous rather than trusting the first
 definition.
+
+(v68) `dwarf_advanced.extraction` -- how the advanced-DWARF extraction that produced the `dwarf_advanced` block ended: `not_run` (a presence-only lookup, no payload parsed), `completed` (the parse ran to the end; an empty payload is a real result) or `failed` (the extraction errored; the payload is not usable). Written only when the status is recorded, so a BTF/CTF/PDB object or a hand-built one (`unrecorded`) writes no key and encodes exactly as v67. A DWARF dump always records `completed` or `failed`. A pre-v68 document, or a v68 one without the key, decodes to `unrecorded`: the reader keeps the payload inference, never reads the block as `completed`. A pre-v68 reader drops the key silently and reads that same inference, so the key adds no reader-side hard rejection. Because the content digest covers the encoded document, DWARF-derived snapshot digests change once at this bump.
 
 (v67) `live_preprocessor_hidden` -- the castxml run's `-E -dD` branch scan, `{guard macro: [function names]}`, the declarations a header parse's configuration excluded. It attributes an export that no parsed declaration names to the macro its declaration sits under (`undeclared_export_census.by_guard`). Written only when a scan ran, so a snapshot without one encodes exactly as v66; a pre-v67 snapshot reads it as absent, and the census falls back to the named-cause rule for it.
 
@@ -636,7 +638,7 @@ unknown.
 | `pe` | object \| null | PE/COFF metadata (Windows DLL exports, machine, characteristics). |
 | `macho` | object \| null | Mach-O metadata (dylib exports, CPU slices, install name). |
 | `dwarf` | object \| null | Debug struct/enum layout (v51: plus ODR conflicts, see above) — from DWARF, or BTF/CTF/PDB reduced to the same shape. In memory this is the IR store's `declarations.debug_layout`; the key keeps its historical name. |
-| `dwarf_advanced` | object \| null | Toolchain, calling conventions, value-ABI traits (in memory: `declarations.debug_advanced`). |
+| `dwarf_advanced` | object \| null | Toolchain, calling conventions, value-ABI traits (in memory: `declarations.debug_advanced`). `extraction` (schema v68, optional): `not_run` / `completed` / `failed`; absent reads as `unrecorded`. |
 | `sycl` | object \| null | SYCL plugin-interface metadata. |
 | `dependency_info` | object \| null | Resolved dependency graph (nodes, edges, unresolved). |
 | `build_mode` | object \| null | Normalized compiler/stdlib/standard capture (ADR build-mode work). No dump path writes it today; it is read back only from a document that carries one (see `known-gaps.md`). |

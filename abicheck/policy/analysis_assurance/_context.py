@@ -164,7 +164,40 @@ def _dwarf_context_status(old: AbiSnapshot, new: AbiSnapshot) -> tuple[str, list
         )
     if notes:
         return "asymmetric", notes
+    if old_advanced and new_advanced:
+        return "clean", _advanced_provenance_notes(old, new)
     return "clean", []
+
+
+def _advanced_provenance_notes(old: AbiSnapshot, new: AbiSnapshot) -> list[str]:
+    """ADR-080 D4: a note, never a gate, when both sides carry advanced DWARF
+    but one side's extraction status was recorded and the other's is
+    ``unrecorded`` (a document written before schema v68, read by payload
+    inference). The detector runs on both sides, as it did before the status
+    was persisted, so the status and the verdict are unchanged; the note only
+    says one side's "collected" answer is an inference.
+    """
+    from ...model.dwarf_facts import AdvancedExtractionStatus
+
+    def status(snap: AbiSnapshot) -> AdvancedExtractionStatus | None:
+        adv = snap.declarations.debug_advanced
+        return None if adv is None else adv.extraction
+
+    old_status, new_status = status(old), status(new)
+    unrecorded, completed = (
+        AdvancedExtractionStatus.UNRECORDED,
+        AdvancedExtractionStatus.COMPLETED,
+    )
+    if {old_status, new_status} != {unrecorded, completed}:
+        return []
+    side = "old" if old_status is unrecorded else "new"
+    return [
+        "mixed provenance on the dwarf_advanced channel: the "
+        f"{side} side's extraction status is unrecorded (a document from before "
+        "schema v68, read by payload inference), while the other side recorded "
+        "completed; the comparison ran under the same rule and this note does "
+        "not change its verdict"
+    ]
 
 
 def _l3_context_status(
