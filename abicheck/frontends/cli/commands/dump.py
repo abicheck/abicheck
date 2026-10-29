@@ -273,7 +273,7 @@ def dump_cmd(
     )
     from ....cli_dump_request import build_dump_request
     from ....dry_run import emit_dry_run, reject_dry_run_with_output
-    from ..ownership_config import dump_ownership_request
+    from ....workflows.ownership_request import dump_ownership_request
 
     # Phase 7f: already validated eagerly by the option's own callback.
     _prov = parse_provenance_tokens(provenance)

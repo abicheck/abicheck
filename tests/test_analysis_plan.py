@@ -781,45 +781,28 @@ class TestPlanningErrorShape:
 
 
 class TestPlanningErrorCliTranslation:
-    def test_native_compare_cli_maps_planning_error_to_usage_error(self, monkeypatch):
-        """The native ``compare`` CLI's own resolution boundary
-        (``cli_resolve._resolve_compare_snapshots``) must translate a
-        ``PlanningError`` from ``service.resolve_compare_request`` into a
-        ``click.UsageError`` (exit 64, AGENTS.md's documented usage-error
-        contract) -- not let it propagate as a raw, untranslated exception,
-        and not the operational-failure ``click.ClickException`` (exit 1)
-        the same boundary maps a ``SnapshotError`` to. No real Bazel input
-        is needed here: the boundary's own translation is what's under
-        test, so ``service.resolve_compare_request`` is monkeypatched to
-        raise directly."""
+    def test_native_compare_cli_maps_planning_error_to_usage_error(
+        self, monkeypatch, tmp_path
+    ):
+        """The native ``compare`` session's resolution boundary must state a
+        ``PlanningError`` from the shared ``resolve_compare_request`` as a
+        usage refusal (exit 64, AGENTS.md's documented usage-error contract)
+        -- not let it propagate raw, and not as the operational refusal
+        (exit 1) the same boundary states a ``SnapshotError`` as. No real
+        Bazel input is needed: the boundary's own translation is under test,
+        so the shared resolution is monkeypatched to raise directly."""
         import click
 
-        from abicheck import service
-        from abicheck.cli_resolve import _resolve_compare_snapshots
+        import abicheck.workflows.compare.resolve as _resolve
+        from abicheck.frontends.cli.run_input_errors import as_click_error
+        from abicheck.workflows.run_input_errors import InputRefusal, RunInputError
+        from tests._pair_session import pair_session_request, run_session
 
         def _raise(*args, **kwargs):
             raise PlanningError((PlanningFailure("build_targets=['//:lib']", "boom"),))
 
-        monkeypatch.setattr(service, "resolve_compare_request", _raise)
-        with pytest.raises(click.UsageError, match="boom"):
-            _resolve_compare_snapshots(
-                old_input=Path("old.so"),
-                new_input=Path("new.so"),
-                old_fmt="elf",
-                new_fmt="elf",
-                old_h=[],
-                new_h=[],
-                old_inc=[],
-                new_inc=[],
-                old_version="",
-                new_version="",
-                lang="c++",
-                pdb_path=None,
-                old_pdb_path=None,
-                new_pdb_path=None,
-                dwarf_only=False,
-                debug_format=None,
-                follow_deps=False,
-                search_paths=(),
-                ld_library_path="",
-            )
+        monkeypatch.setattr(_resolve, "resolve_compare_request", _raise)
+        with pytest.raises(RunInputError, match="boom") as info:
+            run_session(pair_session_request(tmp_path / "old.so", tmp_path / "new.so"))
+        assert info.value.refusal is InputRefusal.USAGE
+        assert isinstance(as_click_error(info.value), click.UsageError)

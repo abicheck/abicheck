@@ -521,7 +521,7 @@ topics:
       - abicheck/policy/disposition_acknowledgment.py
       - abicheck/policy_file_acknowledgment.py
       - abicheck/workflows/acknowledgment_inputs.py
-      - abicheck/frontends/cli/acknowledgment_config.py
+      - abicheck/workflows/compare/project_inputs.py
     allowed_summaries:
       - use/suppressions.md
       - use/disposition-audit.md

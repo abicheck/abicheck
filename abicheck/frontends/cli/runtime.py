@@ -56,7 +56,6 @@ except ImportError:  # pragma: no cover - rich-click is a declared dependency
 # import for two value types.
 from ...checker_types import DiffResult
 from ...cli_audit import echo_filtered_surface, echo_reconciled
-from ...cli_resolve import _detect_binary_format
 from ...workflows.compare_finalize import _merge_redundant_changes
 from . import help as cli_help
 from .options.export import ExportSet
@@ -425,57 +424,6 @@ def _exit_with_severity_or_verdict(
     # the same number.
     if decision.code != 0:
         sys.exit(decision.code)
-
-
-def _log_one_side_debug(
-    label: str,
-    binary: Path,
-    droots: list[Path],
-    *,
-    debuginfod: bool,
-    debuginfod_url: str | None,
-) -> None:
-    """Resolve and log debug info for a single binary side, if applicable."""
-    if _detect_binary_format(binary) is None or not (droots or debuginfod):
-        return
-    from ...workflows.extraction import resolve_debug_info
-
-    artifact = resolve_debug_info(
-        binary,
-        debug_roots=droots or None,
-        enable_debuginfod=debuginfod,
-        debuginfod_urls=[debuginfod_url] if debuginfod_url else None,
-    )
-    if artifact:
-        click.echo(f"Debug info ({label}): {artifact.source}", err=True)
-
-
-def _log_debug_resolution(
-    old_input: Path,
-    new_input: Path,
-    resolved_old_debug: list[Path],
-    resolved_new_debug: list[Path],
-    *,
-    debuginfod: bool,
-    debuginfod_url: str | None,
-) -> None:
-    """Resolve and log per-side debug info (debug roots / debuginfod), if any."""
-    if not (resolved_old_debug or resolved_new_debug or debuginfod):
-        return
-    _log_one_side_debug(
-        "old",
-        old_input,
-        resolved_old_debug,
-        debuginfod=debuginfod,
-        debuginfod_url=debuginfod_url,
-    )
-    _log_one_side_debug(
-        "new",
-        new_input,
-        resolved_new_debug,
-        debuginfod=debuginfod,
-        debuginfod_url=debuginfod_url,
-    )
 
 
 def _finalize_compare_result(

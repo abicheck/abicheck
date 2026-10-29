@@ -1511,7 +1511,7 @@ def _request_reaching_resolution(
 ) -> Any:
     """The ``CompareRequest`` the real ``compare`` CLI hands the shared
     resolution (stopped there)."""
-    import abicheck.service as service
+    import abicheck.workflows.compare.resolve as resolve_mod
 
     seen: list[Any] = []
 
@@ -1522,7 +1522,7 @@ def _request_reaching_resolution(
         seen.append(request)
         raise _Stop
 
-    monkeypatch.setattr(service, "resolve_compare_request", _capture)
+    monkeypatch.setattr(resolve_mod, "resolve_compare_request", _capture)
     with pytest.raises(_Stop):
         CliRunner().invoke(main, ["compare", *args], catch_exceptions=False)
     (request,) = seen

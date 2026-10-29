@@ -50,11 +50,10 @@ __all__ = [
     "record_abi3_evidence_contract_error",
 ]
 
-# Parsing the ``--abi3 VERSION`` spelling itself is a *front-end* concern and
-# lives with the shared Click option (``cli_options.parse_abi3_floor``): this
-# layer may not import ``abicheck.stable_abi``, which carries no ADR-061
-# classification of its own (``scripts/check_architecture.py``). This module
-# takes an already-parsed ``(major, minor)`` floor.
+# Parsing the ``--abi3 VERSION`` spelling itself is the compare session's
+# input resolution (``workflows.compare.enrichment.parse_abi3_floor``, one
+# spelling for the flag and ``python.abi3_floor``). This module takes an
+# already-parsed ``(major, minor)`` floor.
 
 
 def abi3_precondition_failure(

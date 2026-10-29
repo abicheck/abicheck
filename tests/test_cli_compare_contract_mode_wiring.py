@@ -17,7 +17,7 @@
 independently re-deriving ``contract.mode`` once it already resolved an
 ADR-049 D7 ``CompatibilityEvaluationConfig`` for this invocation.
 
-Before this migration, ``cli_compare_helpers.run_compare`` always passed the
+Before this migration, the native ``compare`` path always passed the
 raw, pre-resolution ``contract_mode`` local (``None`` whenever no explicit
 ``--contract`` was typed) into ``compare_snapshots``/``checker.compare``, so
 ``contract_pipeline.build_contract_stage`` re-derived the identical domain a
@@ -39,7 +39,7 @@ from pathlib import Path
 
 from click.testing import CliRunner
 
-import abicheck.cli_compare_helpers as cch
+import abicheck.workflows.compare.session as session
 from abicheck.cli import main
 from abicheck.contract_relevance_types import ContractMode
 from abicheck.model import AbiSnapshot, Function, Visibility
@@ -80,13 +80,14 @@ class TestResolvedContractModeWiring:
         resolved ``contract.mode`` -- not the raw, pre-resolution local --
         so a caller holding the already-resolved config never has that
         answer silently second-guessed one layer down.
-        ``_resolve_evaluation_config`` is stubbed to return a config whose
+        The session's ``_evaluation_configuration`` step is wrapped to
+        return a config whose
         ``contract.mode`` deliberately disagrees with the raw ``--contract``
         value this invocation types, so this fails immediately if a future
         edit reverts to threading the stale local through instead.
         """
         old_p, new_p = _write_pair(tmp_path)
-        real_resolve = cch._resolve_evaluation_config
+        real_resolve = session._evaluation_configuration
 
         def _diverging_resolve(*args, **kwargs):
             evaluation_config, pf, resolved_cfg = real_resolve(*args, **kwargs)
@@ -98,7 +99,7 @@ class TestResolvedContractModeWiring:
             )
             return diverged, pf, resolved_cfg
 
-        monkeypatch.setattr(cch, "_resolve_evaluation_config", _diverging_resolve)
+        monkeypatch.setattr(session, "_evaluation_configuration", _diverging_resolve)
 
         captured: dict[str, object] = {}
         from abicheck.service import compare_snapshots as _real_compare_snapshots

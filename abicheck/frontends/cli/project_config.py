@@ -34,7 +34,7 @@ from __future__ import annotations
 from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 import click
 
@@ -46,39 +46,8 @@ if TYPE_CHECKING:
 __all__ = [
     "compare_settings_usage_errors",
     "enter_performance_profile",
-    "fold_project_policy_overrides_for_cli",
     "resolve_project_compare_config",
 ]
-
-
-def fold_project_policy_overrides_for_cli(
-    pf: Any, project_cfg: object, cfg_path: Path | None, policy: str
-) -> Any:
-    """ADR-068 §3 #23 / ADR-049 D7: fold ``.abicheck.yml``'s ``policy.overrides``
-    into the run's policy file at the PROJECT_CONFIG tier, and echo its warnings.
-
-    Moved out of ``cli_compare_helpers.run_compare`` (that module is at its
-    architecture debt ceiling); the behaviour, the ``--policy`` usage error and
-    the warning wording are unchanged.
-    """
-    from ...workflows.compare_configuration import (
-        CompareConfigurationError,
-        fold_project_policy_overrides,
-        project_policy_overrides,
-    )
-
-    try:
-        project_fold = fold_project_policy_overrides(
-            pf,
-            project_policy_overrides(project_cfg, cfg_path),
-            base_policy=policy,
-            project_path=cfg_path,
-        )
-    except CompareConfigurationError as e:
-        raise click.BadParameter(str(e), param_hint="--policy") from e
-    for w in project_fold.warnings:
-        click.echo(f"Warning: {w}", err=True)
-    return project_fold.policy_file
 
 
 @contextmanager

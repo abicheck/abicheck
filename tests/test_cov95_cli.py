@@ -40,7 +40,6 @@ from abicheck.cli_resolve import (
     _sniff_text_format,
 )
 from abicheck.elf_metadata import ElfMetadata, ElfSymbol
-from abicheck.frontends.cli.ignored_flag_warnings import _warn_ignored_flags
 from abicheck.frontends.cli.options.params import _load_suppression_and_policy
 from abicheck.frontends.cli.release_exit import _exit_compare_release
 from abicheck.frontends.cli.release_report import render_release_summary
@@ -515,28 +514,6 @@ class TestSmallHelpers:
         # full/symbols/graph are rejected outright -- no alias, no --max shorthand.
         rejected = runner.invoke(main, ["dump", "--depth", "full"])
         assert rejected.exit_code != 0
-
-
-# ── _warn_ignored_flags (frontends/cli/ignored_flag_warnings.py) ──────────────────────────────────────
-
-
-class TestWarnIgnoredFlags:
-    def test_binary_input_no_warning(self, capsys) -> None:
-        _warn_ignored_flags(True, False, (Path("h.h"),), (), (), (), (), ())
-        assert capsys.readouterr().err == ""
-
-    def test_snapshot_inputs_warns(self, capsys) -> None:
-        _warn_ignored_flags(
-            False,
-            False,
-            (Path("h.h"),),
-            (Path("i"),),
-            (),
-            (),
-            (),
-            (),
-        )
-        assert "ignored when both inputs are snapshots" in capsys.readouterr().err
 
 
 # ── _load_suppression_and_policy error/warn paths (cli.py:986-1034) ───────────
@@ -3017,61 +2994,6 @@ class TestUsedByScopingWithSnapshotInputs:
 # _finalize_compare_result comment.
 
 
-# ── cli.py: _log_one_side_debug / _log_debug_resolution (1435-1465) ───────────
-
-
-class TestLogDebugResolution:
-    def test_non_binary_no_droots_noop(self, tmp_path, capsys) -> None:
-        from abicheck.frontends.cli.runtime import _log_one_side_debug
-
-        f = tmp_path / "snap.json"
-        f.write_text("{}")
-        # Not a binary AND no debug roots → returns before resolving anything.
-        _log_one_side_debug("old", f, [], debuginfod=False, debuginfod_url=None)
-        assert capsys.readouterr().err == ""
-
-    def test_resolution_skipped_when_nothing_requested(self, tmp_path, capsys) -> None:
-        from abicheck.frontends.cli.runtime import _log_debug_resolution
-
-        old = tmp_path / "old.json"
-        new = tmp_path / "new.json"
-        old.write_text("{}")
-        new.write_text("{}")
-        _log_debug_resolution(
-            old,
-            new,
-            [],
-            [],
-            debuginfod=False,
-            debuginfod_url=None,
-        )
-        assert capsys.readouterr().err == ""
-
-    def test_log_one_side_emits_when_artifact_resolved(
-        self, tmp_path, monkeypatch, capsys
-    ) -> None:
-        # Force a binary format and a resolved artifact so the echo branch runs.
-        from types import SimpleNamespace
-
-        import abicheck.frontends.cli.runtime as cli_mod
-
-        binary = tmp_path / "lib.so"
-        binary.write_bytes(b"\x7fELF" + b"\x00" * 50)
-        monkeypatch.setattr(cli_mod, "_detect_binary_format", lambda p: "elf")
-        monkeypatch.setattr(
-            "abicheck.workflows.extraction.resolve_debug_info",
-            lambda *a, **k: SimpleNamespace(source="/path/to/lib.debug"),
-        )
-        cli_mod._log_one_side_debug(
-            "old",
-            binary,
-            [tmp_path],
-            debuginfod=False,
-            debuginfod_url=None,
-        )
-        assert "Debug info (old)" in capsys.readouterr().err
-
-
 # ── cli_compare_release: markdown/json with bundle + matrix findings ──────────
 
 
@@ -3364,34 +3286,3 @@ class TestLinkerScriptKeywordSkip:
         resolved, is_ld = _resolve_linker_script(script)
         assert is_ld is True
         assert resolved is None
-
-
-# ── cli.py: _log_debug_resolution drives both sides when requested ────────────
-
-
-class TestLogDebugResolutionBothSides:
-    def test_both_sides_logged(self, tmp_path, monkeypatch, capsys) -> None:
-        from types import SimpleNamespace
-
-        import abicheck.frontends.cli.runtime as cli_mod
-
-        old_b = tmp_path / "old.so"
-        new_b = tmp_path / "new.so"
-        old_b.write_bytes(b"\x7fELF" + b"\x00" * 50)
-        new_b.write_bytes(b"\x7fELF" + b"\x00" * 50)
-        monkeypatch.setattr(cli_mod, "_detect_binary_format", lambda p: "elf")
-        monkeypatch.setattr(
-            "abicheck.workflows.extraction.resolve_debug_info",
-            lambda *a, **k: SimpleNamespace(source="art"),
-        )
-        cli_mod._log_debug_resolution(
-            old_b,
-            new_b,
-            [tmp_path],
-            [tmp_path],
-            debuginfod=False,
-            debuginfod_url=None,
-        )
-        err = capsys.readouterr().err
-        assert "Debug info (old)" in err
-        assert "Debug info (new)" in err

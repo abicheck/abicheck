@@ -168,9 +168,7 @@ tests/test_cli_compare_release_depth.py
 tests/test_cli_compare_release_evidence_preservation.py
 tests/test_cli_compare_release_export_uniformity.py
 tests/test_cli_compare_release_markdown_findings.py
-tests/test_release_compare_matrix_project_overrides.py
 tests/test_cli_compare_release_package_resolution.py
-tests/test_release_member_summary_parity.py
 tests/test_cli_compare_release_policy_provenance.py
 tests/test_cli_compare_release_project_snapshot_package.py
 tests/test_cli_compare_release_single_pair_parity.py
@@ -229,6 +227,7 @@ tests/test_compare_request_configuration_parity.py
 tests/test_compare_request_inline_evidence.py
 tests/test_compare_request_probe_matrix.py
 tests/test_compare_request_suppression_strictness.py
+tests/test_compare_resolve_sides_sequentially.py
 tests/test_compare_settings_cli_translation.py
 tests/test_compare_single_classification_owner.py
 tests/test_compare_surface_graph.py
@@ -642,6 +641,7 @@ tests/test_recordtype_case_b_facts.py
 tests/test_recordtype_is_final_fact.py
 tests/test_redundancy_reasons_and_count_reconciliation.py
 tests/test_release_change_inventory.py
+tests/test_release_compare_matrix_project_overrides.py
 tests/test_release_compare_request.py
 tests/test_release_compare_workflow.py
 tests/test_release_discovery_name_vs_content.py
@@ -650,6 +650,7 @@ tests/test_release_evaluation_config.py
 tests/test_release_header_exclusions.py
 tests/test_release_html_report.py
 tests/test_release_member_processes.py
+tests/test_release_member_summary_parity.py
 tests/test_release_member_type_attribution.py
 tests/test_release_obligation_standing.py
 tests/test_release_outcome.py
@@ -714,8 +715,6 @@ tests/test_serialization.py
 tests/test_serialization_function_compiler_generated.py
 tests/test_serialization_roundtrip.py
 tests/test_service_compare_evidence_adr055.py
-tests/test_compare_resolve_sides_sequentially.py
-tests/test_workflows_compare_execute.py
 tests/test_service_dump_cache.py
 tests/test_service_dump_cache_compile_context.py
 tests/test_service_dump_cache_key_audit.py
@@ -848,6 +847,7 @@ tests/test_wheel_declared_contract.py
 tests/test_windows_toolchain_smoke.py
 tests/test_workflow_kernel_accel.py
 tests/test_workflow_scenarios.py
+tests/test_workflows_compare_execute.py
 tests/test_workflows_history.py
 tests/test_xcheck_scenarios.py
 tests/test_zstd_multithread_determinism.py

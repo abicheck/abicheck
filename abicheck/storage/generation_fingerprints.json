@@ -34,7 +34,7 @@
       "abicheck/extract/declaration_provenance.py": "d38155682d9404806a2c0beee1b8685eacb4a0964b3eee1cb4e2ca939d126004",
       "abicheck/extract/dependency_exclusion.py": "0df4685014893a9b463aeda47c08fca3b0244455325e96f2991e0cdd506287dc",
       "abicheck/extract/dependency_header_roots.py": "1eaf11025d92166b6c05dfbc73e52eb859225dc33200905fbf179f2fb61b789a",
-      "abicheck/extract/detached_debug.py": "bcf76b2771ba0697d1630af33f4fb87b36be9913538f7eed104673390a1d7106",
+      "abicheck/extract/detached_debug.py": "c20829397d3ac53e2e1dd3f4bc23a92098daadc566c745458aac94a7f6ce0c3a",
       "abicheck/extract/digest_memo.py": "babd25889fb4ac54b8defd27ea009fc2e125085c5692f5a4d864aec5491fbee9",
       "abicheck/extract/dpcpp_jobs.py": "97dcedd95fc15c58cbaf83e6acb935eb0b87f24117d40407658a9657f48519a5",
       "abicheck/extract/dump_manifest_roots.py": "b616e45b7eafdd2dd4c69c1031f9a5c8b54973633aa3e9057edc60525ea0d15a",
@@ -173,9 +173,9 @@
       "abicheck/symvers_metadata.py": "372737765cd132e6e87ed891dd465d2958e04debbef774e45212ceb3036871cb",
       "abicheck/type_metadata.py": "9997189de8dac522fd1db8be5ae491d811139503f83abaaded89038eb4aa9cdf"
     },
-    "fingerprint": "f7bfcf8b609e59923f3d83608f3e18237ee65bd82f008b375b5d41c1f0eafe70",
+    "fingerprint": "ef840eee763fef339cb9a2ae7e3468b760a3685d9eb093dce14e97b234b1b01e",
     "generation": 28,
-    "reason": "Darwin C-linkage helpers moved to model/name_decoration/macho_underscore.py; header backends call the same rule with identical semantics (comment/import changes only)"
+    "reason": "docstring cross-reference only: extract/detached_debug.py names the front-end refusal's new owner (workflows.evidence_transport.unsupported_detached_debug); no code changed"
   },
   "resolver": {
     "files": {

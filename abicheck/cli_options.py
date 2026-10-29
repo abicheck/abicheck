@@ -950,25 +950,6 @@ def changed_path_options(func: F) -> F:
     return func
 
 
-def parse_abi3_floor(value: str | None) -> tuple[int, int] | None:
-    """Parse a ``--abi3 VERSION`` ``Py_LIMITED_API`` floor, ``None`` when off.
-
-    The front-end half of the audit (the engine half is
-    :mod:`abicheck.workflows.abi3_audit`, which may not import
-    ``abicheck.stable_abi``): one accepted spelling for both ``compare`` and
-    ``scan``, so an invalid floor (non-3 major, implausible minor, trailing
-    junk) is the same usage error on either command.
-    """
-    if value is None:
-        return None
-    from . import stable_abi
-
-    floor = stable_abi.parse_abi3_version(value)
-    if floor is None:
-        raise click.BadParameter(f"invalid --abi3 version: {value!r}")
-    return floor
-
-
 def abi3_option(func: F) -> F:
     """The ``--abi3 VERSION`` stable-ABI audit floor (ADR-068 D3, plan §3 #15).
 

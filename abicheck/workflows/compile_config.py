@@ -66,7 +66,7 @@ class CompileConfigError(ValidationError):
 
 
 def _stderr(message: str) -> None:
-    print(message, file=sys.stderr)
+    sys.stderr.write(f"{message}\n")
 
 
 def set_env_flag_until(

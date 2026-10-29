@@ -682,6 +682,13 @@ Core pipeline (in order of data flow):
      `ABICHECK_PARALLEL_EXTRACTION=0`, forces sequential — a manifest dump
      sizes its per-TU pool off a live `MemAvailable` reading, so two at once
      jointly overcommit)
+   - `workflows/compare/session.py` (+ `session_inputs.py`, `session_request.py`)
+     — the native single-pair `compare`: one `PairSessionRequest` (resolved
+     options, the project config, the stated option names) in, one
+     `PairSessionOutcome` out; collect fold, compile context, operands,
+     resolution, policy inputs and classification in that order. Refusals
+     are `workflows/run_input_errors.RunInputError`; the CLI renders the
+     outcome
    - `service_input_resolution.py` — G33 Phase 5: the per-*input* primitives
      `compare` and `dump` share (`resolve_side_snapshot`,
      `embed_side_build_source`, `enforce_requested_depth`,

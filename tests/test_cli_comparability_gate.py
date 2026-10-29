@@ -248,8 +248,8 @@ class TestNotComparableExitCode:
     def test_labeled_include_reaches_snapshot_resolution(self, tmp_path, monkeypatch):
         """A labeled ``--include old:LABEL=PATH``/``new:LABEL=PATH`` (ADR-050
         D1, ``SidedIncludePathParam``) must reach
-        ``cli_resolve._resolve_compare_snapshots`` as a real
-        ``include_labels`` keyword — the CLI-parsing glue that was, until
+        the compare session's resolution request as its real
+        ``include_labels`` — the CLI-parsing glue that was, until
         this test, the last unverified hop between the Click option and
         ``dumper_contract._attach_extraction_contract`` (see
         ``tests/test_dumper_contract.py::TestExtraIncludeLabels`` for the
@@ -263,12 +263,14 @@ class TestNotComparableExitCode:
         captured: dict[str, object] = {}
         snap = AbiSnapshot(library="libfoo.so.1", version="1.0")
 
-        def _fake_resolve(*_a, **kw):
-            captured["include_labels"] = kw.get("include_labels")
-            return fake_resolved_pair(snap, operands=(_a[0], _a[1]))
+        def _fake_resolve(request, _prepare, _notify):
+            captured["include_labels"] = dict(request.include_labels)
+            return fake_resolved_pair(
+                snap, operands=(request.old.path, request.new.path)
+            )
 
         monkeypatch.setattr(
-            "abicheck.cli_compare_helpers._resolve_compare_pair", _fake_resolve
+            "abicheck.workflows.compare.session.resolve_pair", _fake_resolve
         )
         monkeypatch.setattr(
             "abicheck.workflows.compare_policy.compare_snapshots",
@@ -309,7 +311,7 @@ class TestNotComparableExitCode:
         ``dump`` that never received ``include_labels``. The tree is now
         collected by the shared resolution itself, from the same request that
         carries the labels, so this pins that one request carries both."""
-        import abicheck.service as service
+        import abicheck.workflows.compare.resolve as _resolve
 
         _, new_p = _write_placeholder_inputs(tmp_path)
         old_p = tmp_path / "libfoo.so.1"  # a native operand: the tree is collected
@@ -328,7 +330,7 @@ class TestNotComparableExitCode:
             captured.append(request)
             raise _Stop
 
-        monkeypatch.setattr(service, "resolve_compare_request", _capture)
+        monkeypatch.setattr(_resolve, "resolve_compare_request", _capture)
 
         with pytest.raises(_Stop):
             CliRunner().invoke(
