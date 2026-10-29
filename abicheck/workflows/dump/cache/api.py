@@ -261,7 +261,7 @@ def _cache_key_for(req: DumpCacheRequest) -> str:
     cc_inputs = compile_context_header_inputs(req.compile)
     if cc_inputs is None:  # guarded by _dump_is_cacheable; defensive
         return ""
-    cache_headers = [*cache_headers, *cc_inputs[0]]
+    cache_headers = [*cache_headers, *cc_inputs[0], *_pe_debug_sidecar(req)]
     cache_includes = [*cache_includes, *cc_inputs[1]]
 
     base = _dump_cache_extra_key(
@@ -289,6 +289,23 @@ def _cache_key_for(req: DumpCacheRequest) -> str:
     return _cache_key(
         req.path, cache_headers, cache_includes, req.version, req.lang, extra=extra
     )
+
+
+def _pe_debug_sidecar(req: DumpCacheRequest) -> list[Path]:
+    """The PDB a PE dump will read on its own, as a content-hashed key input.
+
+    ``extract_pe`` auto-discovers a PDB (the CodeView path in the image, then
+    ``<name>.pdb`` beside it) and attaches its debug info, full dump and
+    symbols-only alike; an explicit ``pdb_path`` is gated out of the cache
+    (:func:`_dump_is_cacheable`). Hashing it like a header means an edited or
+    replaced PDB misses; a DLL with no PDB keeps the key it had.
+    """
+    if req.binary_fmt != "pe":
+        return []
+    from ....pdb_utils import locate_pdb
+
+    found = locate_pdb(req.path, allow_network=False)
+    return [found] if found is not None else []
 
 
 def cached_run_dump(

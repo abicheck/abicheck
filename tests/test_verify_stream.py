@@ -22,11 +22,12 @@ child never exits on its own (a hung test, a CI job limit). The Windows
 integration lane ran 37 minutes with an empty log because ``verify.py``
 captured pytest's output and only printed it after the exit that the job
 cancellation pre-empted. The invariant here is stated over several child
-shapes (stdout only, stderr only, both interleaved, no trailing newline,
-undecodable bytes, a nonzero exit): every line the child wrote is in the
-parent's stream *before the child is released*, and the returned text equals
-what the child wrote (the oracle is the child's own payload, not this
-module's helper).
+shapes (stdout only, stderr only, both interleaved, a fragment with no
+newline, CRLF endings, undecodable and non-ASCII bytes, a nonzero exit):
+everything the child flushed is in the parent's stream *before the child is
+released*, and the text equals what ``subprocess.run(capture_output=True,
+text=True)`` makes of the same child -- the standard library is the oracle
+for the host's pipe encoding and newline translation, not this module.
 """
 
 from __future__ import annotations
@@ -63,26 +64,30 @@ class _Recorder(io.StringIO):
             return self.getvalue()
 
 
-#: (out lines, err lines, exit code). Each line is written and flushed, then
-#: the child blocks until the test releases it.
+#: (out lines, err lines, exit code, line ending). Each piece is written and
+#: flushed, then the child blocks until the test releases it.
 _SHAPES = {
-    "stdout_only": (["first line", "second line"], [], 0),
-    "stderr_only": ([], ["a warning", "a traceback line"], 0),
-    "interleaved": (["out 1", "out 2"], ["err 1", "err 2"], 1),
-    "no_trailing_newline": (["partial"], [], 0),
-    "undecodable_bytes": (["bad \udcff byte"], [], 3),
+    "stdout_only": (["first line", "second line"], [], 0, "\n"),
+    "stderr_only": ([], ["a warning", "a traceback line"], 0, "\n"),
+    "interleaved": (["out 1", "out 2"], ["err 1", "err 2"], 1, "\n"),
+    # pytest -v without xdist prints a node id and then, on the same line,
+    # its verdict: the id alone is what a hung test leaves.
+    "no_trailing_newline": (["tests/test_x.py::test_y "], [], 0, ""),
+    "crlf_line_endings": (["windows line 1", "windows line 2"], [], 0, "\r\n"),
+    "undecodable_bytes": (["bad \udcff byte"], [], 3, "\n"),
+    "non_ascii": (["caf\u00e9 \u2211"], [], 0, "\n"),
     "timeout_traceback": (
-        ["tests/test_x.py::test_y "],
+        ["[gw0] [ 98%] PASSED tests/test_a.py::test_b"],
         ["+++++ Timeout +++++", '  File "x.py", line 1, in wait'],
         1,
+        "\n",
     ),
 }
 
 _CHILD = r"""
 import os, sys, time
-out, err, code, sentinel, trailing = eval(sys.argv[1])
-for i, line in enumerate(out):
-    end = "" if (i == len(out) - 1 and not trailing) else "\n"
+out, err, code, sentinel, end = eval(sys.argv[1])
+for line in out:
     sys.stdout.buffer.write(line.encode("utf-8", "surrogateescape") + end.encode())
     sys.stdout.buffer.flush()
 for line in err:
@@ -94,50 +99,54 @@ while not os.path.exists(sentinel) and time.monotonic() < deadline:
 sys.exit(code)
 """
 
+_ENV = {"PATH": "", "SYSTEMROOT": os.environ.get("SYSTEMROOT", "")}
 
-def _expected(lines: list[str], trailing: bool) -> str:
-    text = "\n".join(lines)
-    if lines and trailing:
-        text += "\n"
-    return text.encode("utf-8", "surrogateescape").decode("utf-8", "replace")
+
+def _child(shape: str, sentinel: Path) -> list[str]:
+    out, err, code, end = _SHAPES[shape]
+    return [sys.executable, "-c", _CHILD, repr((out, err, code, str(sentinel), end))]
+
+
+def _oracle(shape: str, tmp_path: Path) -> subprocess.CompletedProcess[str]:
+    """What ``subprocess.run(capture_output=True, text=True)`` -- the shape
+    ``run_streaming`` replaces -- makes of the same child: the host's pipe
+    encoding and newline translation, applied by the standard library."""
+    released = tmp_path / "already-released"
+    released.write_text("go", encoding="utf-8")
+    return subprocess.run(
+        _child(shape, released),
+        cwd=tmp_path,
+        env=_ENV,
+        capture_output=True,
+        text=True,
+        errors="replace",
+        timeout=60,
+    )
 
 
 @pytest.mark.parametrize("shape", sorted(_SHAPES))
 def test_output_reaches_the_log_before_the_child_exits(
     shape: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    out, err, code = _SHAPES[shape]
-    trailing = shape != "no_trailing_newline"
+    want = _oracle(shape, tmp_path)
     sentinel = tmp_path / "release"
     out_log, err_log = _Recorder(), _Recorder()
     monkeypatch.setattr(sys, "stdout", out_log)
     monkeypatch.setattr(sys, "stderr", err_log)
-    want_out, want_err = _expected(out, trailing), _expected(err, True)
 
     result: list[subprocess.CompletedProcess[str]] = []
     runner = threading.Thread(
         target=lambda: result.append(
-            run_streaming(
-                [
-                    sys.executable,
-                    "-c",
-                    _CHILD,
-                    repr((out, err, code, str(sentinel), trailing)),
-                ],
-                cwd=tmp_path,
-                env={"PATH": "", "SYSTEMROOT": os.environ.get("SYSTEMROOT", "")},
-            )
+            run_streaming(_child(shape, sentinel), cwd=tmp_path, env=_ENV)
         ),
         daemon=True,
     )
     runner.start()
-    # The child is blocked on the sentinel: everything it wrote must already
-    # be visible. A line without its newline is only complete at EOF, so
-    # that one shape is checked for everything up to its last line.
-    visible_out = want_out if trailing else want_out.rpartition("\n")[0]
+    # The child is blocked on the sentinel: everything it flushed -- a
+    # fragment with no newline included -- must already be visible.
     deadline = time.monotonic() + 20
     while time.monotonic() < deadline:
-        if out_log.text() == visible_out and err_log.text() == want_err:
+        if (out_log.text(), err_log.text()) == (want.stdout, want.stderr):
             break
         time.sleep(0.02)
     seen = (out_log.text(), err_log.text())
@@ -146,11 +155,15 @@ def test_output_reaches_the_log_before_the_child_exits(
     runner.join(60)
 
     assert still_running, "the child exited before it was released"
-    assert seen == (visible_out, want_err), "output held back while the child ran"
+    assert seen == (want.stdout, want.stderr), "output held back while the child ran"
     assert not runner.is_alive()
     (proc,) = result
-    assert (proc.returncode, proc.stdout, proc.stderr) == (code, want_out, want_err)
-    assert (out_log.text(), err_log.text()) == (want_out, want_err)
+    assert (proc.returncode, proc.stdout, proc.stderr) == (
+        want.returncode,
+        want.stdout,
+        want.stderr,
+    )
+    assert (out_log.text(), err_log.text()) == (want.stdout, want.stderr)
 
 
 def test_verify_run_step_streams_through_run_streaming() -> None:

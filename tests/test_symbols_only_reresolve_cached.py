@@ -105,6 +105,40 @@ def test_a_changed_binary_is_re_extracted_symbols_only(
     assert calls == [True, True]
 
 
+@pytest.mark.parametrize("symbols_only", [False, True], ids=["full", "symbols-only"])
+def test_a_pe_dump_misses_when_its_pdb_changes(
+    symbols_only: bool, tmp_path: Path
+) -> None:
+    """A PE dump reads the PDB beside the image on its own, so that PDB is a
+    key input: an edited PDB re-extracts, an unchanged one hits."""
+    binary = tmp_path / "lib.dll"
+    binary.write_bytes(_MAGIC["pe"] + b" payload")
+    pdb = tmp_path / "lib.pdb"
+    calls: list[bool] = []
+    written: bytes | None = None
+    for content in (None, None, b"pdb one", b"pdb one", b"pdb two"):
+        # Written only when it changes: the key also treats a touched file as
+        # changed (its mtime is hashed with its content).
+        if content is not None and content != written:
+            pdb.write_bytes(content)
+            written = content
+        cached_run_dump(
+            _fake_dump(calls), binary, "pe", [], [], symbols_only=symbols_only
+        )
+    assert len(calls) == 3  # no PDB, then each distinct PDB, once
+
+
+def test_an_elf_dump_ignores_a_same_named_pdb(tmp_path: Path) -> None:
+    """Negative control: only a PE dump reads a PDB sidecar."""
+    binary = tmp_path / "lib.so"
+    binary.write_bytes(_MAGIC["elf"] + b" payload")
+    calls: list[bool] = []
+    for content in (b"pdb one", b"pdb two"):
+        (tmp_path / "lib.pdb").write_bytes(content)
+        cached_run_dump(_fake_dump(calls), binary, "elf", [], [])
+    assert len(calls) == 1
+
+
 # ── public workflow: two `compare` runs of one PE pair ─────────────────────
 
 
