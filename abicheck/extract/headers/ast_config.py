@@ -456,6 +456,15 @@ _CPP_ONLY_PATTERNS = (
     re.compile(rb"\bnullptr\b"),  # C++ nullptr
     re.compile(rb"\bnoexcept\b"),  # C++ noexcept
     re.compile(rb"\boverride\b"),  # C++ override specifier
+    # C++17 inline *variable* (``inline int x = 1;``, ``static inline const T
+    # y;``). C99/C11 allow ``inline`` only on functions, so a valid C header
+    # never declares one; the declaration has no parenthesis (a function
+    # declarator would), and ends in an initializer, a semicolon or an array
+    # bound. Without this a header whose only C++ signal is such a variable
+    # was auto-detected as C, and both frontends rejected it.
+    re.compile(
+        rb"^\s*(?:(?:static|extern)\s+)?inline\s+(?!.*\()[^;{}]*?\b\w+\s*(?:=|;|\[)"
+    ),
 )
 
 # Full set used for auto language-mode detection (lang unspecified) and the
