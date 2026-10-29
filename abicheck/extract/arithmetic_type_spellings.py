@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 """Which declared types' initializers are numbers a consumer observes.
 
 A non-const header variable carries its initializer as ``Variable.value`` only

@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 """Whether a castxml ``Variable`` is declared ``inline`` (a C++17 inline variable).
 
 castxml gives a function its ``inline`` attribute but emits none for a variable,

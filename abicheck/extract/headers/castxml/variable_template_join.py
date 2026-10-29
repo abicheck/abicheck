@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 """Join clang's const variable templates onto a castxml root, cached as a sidecar.
 
 castxml's XML has no element for a variable template (``template <class T>

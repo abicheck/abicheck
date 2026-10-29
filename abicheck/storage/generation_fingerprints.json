@@ -16,7 +16,7 @@
       "abicheck/extract/ar_archive.py": "6fdab7ed7390a20f087f9407eaa3988c0f8c658400bc0ea8c7e193271923956d",
       "abicheck/extract/ar_archive_format.py": "38a51cae7762eb269af3788d5dca9cfe50de38d9b315f34fa31427f791cb7e62",
       "abicheck/extract/archive_integrity.py": "8d2b9fb73980bf646972da75431adf6437335bd83aa7b14678d531b1084995cb",
-      "abicheck/extract/arithmetic_type_spellings.py": "e3f1028eb79005d83da3b588e4c7f0f0cb9d78283d192aae8d1bb2fda72e8bed",
+      "abicheck/extract/arithmetic_type_spellings.py": "790e6049cf5607e20d987d2151bacc4ba331f76e24c486b0305102f79f4ae726",
       "abicheck/extract/binary_dialect.py": "5c0d98fe9e4b05b031450f4ce37bae6b7f922e801936129ba19b887f6738dad7",
       "abicheck/extract/binary_format.py": "4b9f591077fa5c90d2e3a767343d92b098061870403d431694470bc05e5468b3",
       "abicheck/extract/binary_identity.py": "4645eaf3dddd0a2230a5c694882548476406c57514275fa4c8c1bc152607ca88",
@@ -49,7 +49,7 @@
       "abicheck/extract/dwarf_vtable_completeness.py": "8a03fbbb12c5dfd13598251e6dbf8b58ff015e538fb0635f4afbfdb754d054da",
       "abicheck/extract/elf_abi_flags.py": "426d6d97328e32071a84422c130bdefebe31cee85a91146efe8c01f7ce97d87f",
       "abicheck/extract/elf_code_hash.py": "99cfa984364e0345077bf7bf960337a41f5a8eff887f6f7eb1138ec305e74258",
-      "abicheck/extract/elf_data_initializer.py": "f6624901eed48512ae61fbbfc8637a46348f3ffda4980c213bf4b85c61a34c7d",
+      "abicheck/extract/elf_data_initializer.py": "adc4a4dfac61e35334e81e2ac000f173c049fb06bfc87a31ec40b29eb50dd42f",
       "abicheck/extract/elf_loader_view.py": "8222fbd3a329cd2c1227d14674350ddcf65dd1e7da11b552847e1f5d175ee4db",
       "abicheck/extract/elf_notes.py": "25ccf019332d620f847414e3b56149ef52e0d8f5d088b3d34a03a897a3940ecf",
       "abicheck/extract/elf_static_tls.py": "3d35ff8a14ab97e6991cb4afab62a61703a1ce8d5af99e9c7f957783153b5d1d",
@@ -84,7 +84,7 @@
       "abicheck/extract/headers/castxml/enums.py": "e616c768543061d71812378dd92cbcb7b8d00afbb734bcb7b4b5334ee34042aa",
       "abicheck/extract/headers/castxml/functions.py": "128de0b76f5f400987e3dfa9f515bc868fcf9f200eb3e9e426218c9b2ef5b7b6",
       "abicheck/extract/headers/castxml/hidden_declarations.py": "500abf62faa042e1c33a3ef3897557e263f0c7b1060b60c323d8d34895f5b057",
-      "abicheck/extract/headers/castxml/inline_variables.py": "ca586c0cb815373ef1c9d88ad5679a8d22b009318e8722ddcccc1e269e64a5fe",
+      "abicheck/extract/headers/castxml/inline_variables.py": "60ee92e7a810d81f113a6f5fb4f218ea6287258948dc9a838fbdef37ef37ea32",
       "abicheck/extract/headers/castxml/location.py": "a5469fedb2774dfdf1b87a49ddc713471c088ecee6ea5ccbfe4d9764012c97e6",
       "abicheck/extract/headers/castxml/names.py": "038abc55f72f11185c0a5ec48d57bff95a1ab894380f7978b6187cd76b044796",
       "abicheck/extract/headers/castxml/out_of_line_inline.py": "7f8a77d82dd9f87865163ffda63e6c5a762887800886ea9f70dae40e378cbd89",
@@ -97,7 +97,7 @@
       "abicheck/extract/headers/castxml/specialization.py": "3f9f021672df1b84de42bc8de5f3c915508b3f3850e0a8acbaa80a3dee04c6f3",
       "abicheck/extract/headers/castxml/type_resolution.py": "dba855d77fb5e32a63977fe03e219712bb3d40cc8afad6ca35517ac564318fb1",
       "abicheck/extract/headers/castxml/typedef_parsing.py": "332587638d5d4b7caebbc20fa44b69c314771fffa5839a15dec59eaba3caaf93",
-      "abicheck/extract/headers/castxml/variable_template_join.py": "842f091ddee47a4b35ce0db670b4bb63201ece1603dd5a65447fd62d516cd44c",
+      "abicheck/extract/headers/castxml/variable_template_join.py": "cffad5b204cddf53337897381cd54d11e6e1784a69948a519a31a222d3441fa7",
       "abicheck/extract/headers/castxml/vector_join.py": "043e4a849bbc324568e240d4a94323b0952583678ec2ca0a62c81515a1798db0",
       "abicheck/extract/headers/castxml/vector_spellings.py": "95368cac86a4100e3c0e832814ccd96c53e1edbf930f680044533812a05923ec",
       "abicheck/extract/headers/clang/__init__.py": "538add12f3ff39e1c1b39e6f5def93b50a584b78b30c4e7e59058207222757d0",
@@ -177,9 +177,9 @@
       "abicheck/symvers_metadata.py": "372737765cd132e6e87ed891dd465d2958e04debbef774e45212ceb3036871cb",
       "abicheck/type_metadata.py": "9997189de8dac522fd1db8be5ae491d811139503f83abaaded89038eb4aa9cdf"
     },
-    "fingerprint": "732f9cb488ffd71f3c12f6207ddaf059a17176cac97a51ad0bdd3ce501c18d42",
+    "fingerprint": "61b44828d059ade2be53f0307b22f1583bc9033c495cdb275579cc15c3eeefcf",
     "generation": 30,
-    "reason": "bumped to 30 for a semantic change"
+    "reason": "license header lines added to four new modules; no recorded fact changes"
   },
   "resolver": {
     "files": {
