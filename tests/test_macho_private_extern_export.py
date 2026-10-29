@@ -21,6 +21,7 @@ from abicheck.cli import main
 from abicheck.macho_metadata import parse_macho_metadata
 from abicheck.serialization import load_snapshot
 from tests._macho_synthetic import (
+    EXPORT_WEAK_DEFINITION,
     N_EXT,
     N_PEXT,
     N_SECT,
@@ -92,3 +93,71 @@ def test_dump_cli_omits_the_private_extern_from_the_snapshot(tmp_path: Path) -> 
     assert result.exit_code == 0, result.output
     snap = load_snapshot(out)
     assert [f.name for f in snap.declarations.functions] == ["public_api"]
+
+
+# -- The dyld export trie is the export table when the image has one ---------
+#
+# dyld binds only what the export trie lists. An nlist entry the trie omits is
+# not an export (a stale or kept-local external), and a trie entry the nlist
+# lacks (a stripped symbol table) is one. Without a trie the nlist stands alone.
+
+_NLIST = [
+    MachoSymbol("_public", N_SECT | N_EXT),
+    MachoSymbol("_weak", N_SECT | N_EXT, n_desc=N_WEAK_DEF),
+    MachoSymbol("_nlist_only", N_SECT | N_EXT),  # defined external, not in trie
+    MachoSymbol("_private", N_SECT | N_EXT | N_PEXT),
+]
+_TRIE = [
+    ("_public", 0),
+    ("_weak", EXPORT_WEAK_DEFINITION),
+    ("_trie_only", 0),
+]
+
+
+def test_trie_lists_the_exports_and_a_nlist_only_external_is_dropped(
+    tmp_path: Path,
+) -> None:
+    lib = write_dylib(tmp_path / "libtrie.dylib", _NLIST, export_trie=_TRIE)
+    by_name = {e.name: e for e in parse_macho_metadata(lib).exports}
+    assert set(by_name) == {"public", "weak", "trie_only"}
+    assert by_name["weak"].is_weak is True
+    assert by_name["public"].is_weak is False
+
+
+def test_without_a_trie_the_nlist_is_the_export_table(tmp_path: Path) -> None:
+    lib = write_dylib(tmp_path / "libnotrie.dylib", _NLIST)
+    names = {e.name for e in parse_macho_metadata(lib).exports}
+    assert names == {"public", "weak", "nlist_only"}
+
+
+@pytest.mark.parametrize(
+    ("nlist_weak", "trie_flags", "expected_weak"),
+    [
+        pytest.param(True, 0, False, id="nlist-weak-trie-strong"),
+        pytest.param(False, EXPORT_WEAK_DEFINITION, True, id="nlist-strong-trie-weak"),
+    ],
+)
+def test_trie_flags_decide_linkage_over_the_nlist(
+    tmp_path: Path, nlist_weak: bool, trie_flags: int, expected_weak: bool
+) -> None:
+    lib = write_dylib(
+        tmp_path / "liblink.dylib",
+        [MachoSymbol("_probe", N_SECT | N_EXT, n_desc=N_WEAK_DEF if nlist_weak else 0)],
+        export_trie=[("_probe", trie_flags)],
+    )
+    (probe,) = parse_macho_metadata(lib).exports
+    assert probe.name == "probe"
+    assert probe.is_weak is expected_weak
+
+
+def test_dump_cli_exports_follow_the_trie(tmp_path: Path) -> None:
+    lib = write_dylib(tmp_path / "libclitrie.dylib", _NLIST, export_trie=_TRIE)
+    out = tmp_path / "snap.json"
+    result = CliRunner().invoke(main, ["dump", str(lib), "-o", str(out)])
+    assert result.exit_code == 0, result.output
+    snap = load_snapshot(out)
+    assert {f.name for f in snap.declarations.functions} == {
+        "public",
+        "weak",
+        "trie_only",
+    }
