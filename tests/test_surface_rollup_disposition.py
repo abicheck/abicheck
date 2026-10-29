@@ -322,5 +322,6 @@ def test_roll_up_is_acknowledged_only_when_its_covered_removals_all_are(
     )
     first_record = ledger.record_for(records[first_covered])
     assert first_record is not None
+    assert rollup_record.acknowledged_by is not None
     assert rollup_record.acknowledged_by == first_record.acknowledged_by
     assert rollup_record.acknowledgment_rule == first_record.acknowledgment_rule
