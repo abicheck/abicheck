@@ -180,7 +180,9 @@ jobs:
         env:
           # The Mach-O/PE subset counts are not pinned, so the step default
           # "> 0" floor catches a missing toolchain without platform guesswork.
-          PYTEST_ADDOPTS: -n auto --dist worksteal
+          # `-v` names each test as it finishes: verify.py streams it, so a
+          # stalled or cancelled leg still shows which tests were running.
+          PYTEST_ADDOPTS: -n auto --dist worksteal -v
         run: python scripts/verify.py --profile full --only integration --require-complete
       - name: Native PE/Mach-O compare workflows
         # Formerly the `cross-platform-e2e` job. Apple clang -> .dylib,
