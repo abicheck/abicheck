@@ -152,6 +152,11 @@ def _layout_record(name: str, layout: StructLayout) -> RecordType:
                 is_mutable_fact=Fact.unsupported(),
                 default_fact=Fact.unsupported(),
                 deprecated_fact=Fact.unsupported(),
+                # The member's ABI fact is debug-info evidence the layout
+                # carries (schema v69); a field without one stays unset.
+                type_abi_fact=(
+                    None if fi.type_abi_fact is None else Fact.present(fi.type_abi_fact)
+                ),
             )
             for fi in layout.fields
             if not fi.is_vptr_member

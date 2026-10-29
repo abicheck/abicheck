@@ -100,6 +100,7 @@ from ..policy.exit_decision import (
 )
 from ..policy.exit_decision_precedence import (
     EXIT_EVIDENCE_CONTRACT_ERROR,
+    compare_assurance_notice_base_exit,
     resolve_compare_exit_decision_with_abort_axes,
     resolve_release_exit_decision,
 )
@@ -121,6 +122,7 @@ from ..policy.release_assurance import (
 from ..policy.release_exit_decision import (
     release_evidence_contract_contribution,
     resolve_release_exit_decision_for_report,
+    resolve_release_exit_decision_with_assurance,
 )
 from ..policy.release_gate_options import (
     GateOptions,
@@ -223,6 +225,7 @@ __all__ = [
     "release_evidence_contract_contribution",
     "resolve_compare_exit_decision",
     "resolve_compare_exit_decision_with_abort_axes",
+    "compare_assurance_notice_base_exit",
     "resolve_exit_decision",
     "release_assurance_diagnostic",
     "release_assurance_exit_contribution",
@@ -230,6 +233,7 @@ __all__ = [
     "resolve_release_assurance_decision",
     "resolve_release_exit_decision",
     "resolve_release_exit_decision_for_report",
+    "resolve_release_exit_decision_with_assurance",
     "resolve_release_gate_options",
     "resolve_scope_decision",
     "resolve_severity_config",

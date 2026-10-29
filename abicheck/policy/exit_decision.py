@@ -56,7 +56,7 @@ and :func:`~abicheck.policy.exit_decision_precedence.
 resolve_release_exit_decision` are pure functions reproducing today's exact
 precedence for `scan` and the directory/package release fan-out
 respectively (verified against `scan_engine.py`/
-the retired `cli_compare_release_helpers.py` (now `frontends/cli/release_exit.py`) at the commit that added them) -- neither
+the retired `cli_compare_release_helpers.py` at the commit that added them) -- neither
 is wired into any call site's *actually returned* exit code yet, exactly
 the same "wraps the existing behaviour, doesn't call it yet" scoping PR G1
 itself used for the three axes above. Split into its own module purely for
@@ -68,11 +68,9 @@ landed *partially*: :meth:`ExitDecision.to_dict` now serializes all five
 ADR-064 fields (report schema 2.47/1.22), `scan`'s `NOT_COMPARABLE` outcome
 persists a real `diff.exit` block via `resolve_scan_exit_decision`, and the
 release fan-out's JSON summary gains an `exit` block via
-`resolve_release_exit_decision`, verified to always agree numerically with
-`frontends.cli.release_exit._exit_compare_release`'s own, independently
-computed and heavily pinned exit code (`tests/test_exit_code_integrity.py`'s
-`TestReleaseExitDecisionForReportAgreesWithRealExit`) without changing that
-function itself. `scan`'s `_BudgetOverflow`/`_EvidenceContractError` abort
+`resolve_release_exit_decision` -- the same resolution the release's
+process exit (`frontends.cli.runtime._exit_compare_release`) now reads,
+pinned by `tests/test_exit_code_integrity.py`. `scan`'s `_BudgetOverflow`/`_EvidenceContractError` abort
 points (`scan_engine.py`), which raise before any report exists, have since
 landed too: the typed `dry_run_estimate.ScanResult` API persists a real
 `ExitDecision` into `report["exit"]` for both

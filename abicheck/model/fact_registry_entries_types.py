@@ -280,6 +280,25 @@ TYPE_FACTS: list[FactDefinition] = [
     ),
     _E(
         owner="TypeField",
+        field="type_abi",
+        value_type="AbiFundamental",
+        producing_backends=("castxml", "clang", "dwarf"),
+        persisted=True,
+        identity_relevant=False,
+        comparable=True,
+        suppressible=False,
+        reportable=True,
+        lifecycle=FactLifecycle.CONSUMED,
+        consumed_by=("abicheck.compare.abi_equivalent_retype:_field_retype",),
+        notes=(
+            "Schema v69: the ABI fact (size, alignment, register class) of a "
+            "fundamental type. abi_equivalent_retype reads it: a retype between "
+            "ABI-equal slots is a source-level change, not a break. Absent for "
+            "non-fundamental types."
+        ),
+    ),
+    _E(
+        owner="TypeField",
         field="is_const",
         value_type="bool",
         producing_backends=("castxml", "clang", "dwarf"),

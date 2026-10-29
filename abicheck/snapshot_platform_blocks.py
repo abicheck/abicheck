@@ -216,6 +216,7 @@ def macho_from_dict(macho: dict[str, Any], schema_version: int) -> Any:
             name=x["name"],
             sym_type=MachoSymbolType(x.get("sym_type", "exported")),
             is_weak=x.get("is_weak", False),
+            is_data=x.get("is_data", False),
         )
         for x in macho.get("exports", [])
     ]
@@ -250,6 +251,7 @@ def macho_from_dict(macho: dict[str, Any], schema_version: int) -> Any:
 
 def dwarf_from_dict(d: dict[str, Any]) -> Any:
     from .model.dwarf_facts import DwarfMetadata, EnumInfo, FieldInfo, StructLayout
+    from .storage.dwarf_layout_facts import decode_dwarf_member_abi
 
     def _struct(name: str, s: dict[str, Any]) -> StructLayout:
         return StructLayout(
@@ -264,10 +266,13 @@ def dwarf_from_dict(d: dict[str, Any]) -> Any:
                     byte_size=f.get("byte_size", 0),
                     bit_offset=f.get("bit_offset", 0),
                     bit_size=f.get("bit_size", 0),
+                    # Schema v69: a pre-v69 member decodes to an unset fact.
+                    type_abi_fact=decode_dwarf_member_abi(f),
                 )
                 for f in s.get("fields", [])
             ],
             is_union=s.get("is_union", False),
+            decl_file=s.get("decl_file"),
         )
 
     def _enum(name: str, e: dict[str, Any]) -> EnumInfo:
@@ -275,6 +280,7 @@ def dwarf_from_dict(d: dict[str, Any]) -> Any:
             name=e.get("name", name),
             underlying_byte_size=e.get("underlying_byte_size", 0),
             members=e.get("members", {}),
+            decl_file=e.get("decl_file"),
         )
 
     return DwarfMetadata(
@@ -296,6 +302,26 @@ def dwarf_from_dict(d: dict[str, Any]) -> Any:
     )
 
 
+def _advanced_extraction_from_dict(value: Any) -> Any:
+    """``dwarf_advanced.extraction`` (schema v68, ADR-080). An absent key is
+    ``unrecorded`` -- what every pre-v68 document reads as, and never
+    ``completed``. A present value must name a status: a garbled one is refused
+    rather than read as a parse that ran.
+    """
+    from .errors import SnapshotError
+    from .model.dwarf_facts import AdvancedExtractionStatus
+
+    if value is None:
+        return AdvancedExtractionStatus.UNRECORDED
+    try:
+        return AdvancedExtractionStatus(value)
+    except ValueError as exc:
+        raise SnapshotError(
+            f"snapshot document's dwarf_advanced.extraction {value!r} is not an "
+            "advanced-DWARF extraction status"
+        ) from exc
+
+
 def dwarf_advanced_from_dict(d: dict[str, Any]) -> Any:
     from .model.dwarf_facts import AdvancedDwarfMetadata, ToolchainInfo
 
@@ -306,6 +332,7 @@ def dwarf_advanced_from_dict(d: dict[str, Any]) -> Any:
         version=tc.get("version", ""),
         abi_flags=set(tc.get("abi_flags", [])),
         vector_abi_flags=set(tc.get("vector_abi_flags", [])),
+        wchar_flags=set(tc.get("wchar_flags", [])),
     )
     return AdvancedDwarfMetadata(
         has_dwarf=d.get("has_dwarf", False),
@@ -317,6 +344,7 @@ def dwarf_advanced_from_dict(d: dict[str, Any]) -> Any:
         return_memory_classified=set(d.get("return_memory_classified", [])),
         packed_structs=set(d.get("packed_structs", [])),
         all_struct_names=set(d.get("all_struct_names", [])),
+        extraction=_advanced_extraction_from_dict(d.get("extraction")),
     )
 
 

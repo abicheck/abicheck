@@ -51,6 +51,7 @@ import threading
 from collections.abc import Callable
 from typing import TYPE_CHECKING
 
+from .compare.abi_equivalent_retype import refine_abi_equivalent_retypes
 from .compare.declined_comparisons import declined_scope
 from .compare.detector_inputs import depth_gap_reason, unavailable_required_facts
 from .detectors import DetectorResult
@@ -320,7 +321,12 @@ class DetectorRegistry:
         from .compare.detection_memo import detection_memo_scope
 
         with detection_memo_scope():
-            return self._run_all(old, new)
+            changes, results = self._run_all(old, new)
+        # Schema v69: a retype between ABI-identical fundamental types is re-kinded
+        # from the slot facts both sides carry, once every detector has emitted
+        # (compare/abi_equivalent_retype.py). It reads both declarations, so it
+        # runs here, after the detectors, and never inside one.
+        return refine_abi_equivalent_retypes(changes, old, new), results
 
     def run_one_sided(
         self,

@@ -171,3 +171,13 @@ _MIN_SCHEMA_VERSION_FOR_FUNCTION_TEMPLATE_PARAM_DEFAULTS = 64
 # that read it; castxml and every pre-v65 document carry no key, which reads as
 # NOT_COLLECTED at this version and above and as unset below.
 _MIN_SCHEMA_VERSION_FOR_EXPLICIT_INSTANTIATION_FACT = 65
+
+# Schema v69: ``Param``/``TypeField``/``Variable.type_abi_fact`` and
+# ``Function.return_type_abi_fact`` -- the ABI fact (encoding class, size,
+# alignment, vector lanes) of a slot whose type is a fundamental, an enum, an
+# _Atomic or a vector of one (model/abi_fundamental.py). Written only where a
+# producer determined it (DWARF; castxml); every other slot and every pre-v69
+# document carries no key, which reads as NOT_COLLECTED at this version and
+# above and as unset below. An absent fact never proves two slots equal, so an
+# old baseline keeps its pre-v69 classification.
+_MIN_SCHEMA_VERSION_FOR_TYPE_ABI_FACTS = 69

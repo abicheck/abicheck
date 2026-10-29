@@ -57,6 +57,7 @@ from typing import Any
 
 from ...deadline import run_bounded
 from ...extract.compiler_driver import is_intel_sycl_driver
+from ...extract.headers.clang.typedefs import typedef_underlying as _typedef_underlying
 from ...model.execution_cache import memoized, path_witness
 from ..build_evidence import CompileUnit
 from ..clang_ast_run import (
@@ -768,21 +769,6 @@ def _emit_type(
             confidence=LayerConfidence.HIGH,
         )
     )
-
-
-def _typedef_underlying(node: dict[str, Any]) -> str:
-    """The underlying type a typedef/alias resolves to, build-root-stable.
-
-    clang records the aliased spelling in ``type.qualType`` — the same key the
-    rest of this extractor reads for signatures (``typedef int32_t handle_t;`` →
-    ``"int32_t"`` as written). The written spelling is what matters for a
-    source/API change, so use it verbatim; fall back to ``desugaredQualType``
-    only when the spelling is absent.
-    """
-    type_obj = node.get("type")
-    if not isinstance(type_obj, dict):
-        return ""
-    return str(type_obj.get("qualType") or type_obj.get("desugaredQualType") or "")
 
 
 def _emit_typedef(

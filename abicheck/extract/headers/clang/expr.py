@@ -46,6 +46,7 @@ from collections.abc import Callable
 from typing import Any
 
 from ....model.mangled_name import itanium_scope_components
+from ...arithmetic_type_spellings import is_arithmetic_spelling
 from .ast_inner import ast_inner
 
 # Canonical definition moved to ``extract.headers.clang.templates`` (ADR-061
@@ -152,6 +153,33 @@ def _initializer_value(
     if core.get("kind") in _LITERAL_NODE_KINDS and "value" in core:
         return str(core["value"])
     return _expr_fingerprint(init, id_index)
+
+
+def is_const_variable(node: dict[str, Any], type_name: str) -> bool:
+    """Whether a variable is ``constexpr`` or const-qualified: a constant, whose
+    initializer the constant channel (``parse_constants``) carries."""
+    return bool(node.get("constexpr")) or bool(re.search(r"\bconst\b", type_name))
+
+
+def non_const_variable_value(
+    node: dict[str, Any],
+    type_name: str,
+    access: str | None,
+    id_index: _IdIndexProvider | None = None,
+) -> str | None:
+    """``Variable.value`` for a non-const, non-private ``inline`` arithmetic variable.
+
+    The clang twin of the castxml rule (``_variable_value_eligible``). An inline
+    non-const header definition (``inline int x = 1;``) is defined by its
+    initializer, and the value channel is the only one that carries it. A const
+    variable is the constant channel's, so it gets no value here, and neither
+    does a non-inline global or a pointer, class, or other non-arithmetic type.
+    """
+    if access in ("private", "protected") or is_const_variable(node, type_name):
+        return None
+    if not node.get("inline") or not is_arithmetic_spelling(type_name):
+        return None
+    return _initializer_value(node, id_index)
 
 
 def _field_initializer_value(

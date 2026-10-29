@@ -6,9 +6,10 @@ Sources: ``field_shapes/ifdef_generic_guard`` (v1 exports ``foo_one`` and
 ``#ifdef SYCL_LANGUAGE_VERSION``; v2 drops ``foo_two``).
 
 Oracle: the fixture's own per-guard list of hidden functions, cross-checked
-against ``nm -D`` -- never the scanner's helpers. The census is runtime-only:
-a live compare (both libraries parsed in this run) attributes by guard; a
-compare of stored snapshots falls back to the ``sycl::`` name rule.
+against ``nm -D`` -- never the scanner's helpers. The branch scan is persisted
+(schema v67), so a compare of stored snapshots attributes by guard exactly as a
+live compare does; a pre-v67 stored snapshot carries no scan and falls back to
+the ``sycl::`` name rule.
 """
 
 from __future__ import annotations
@@ -163,11 +164,37 @@ def test_defining_the_guard_clears_its_count_and_reports_the_removal(
     assert report["verdict"] == "BREAKING"
 
 
-def test_stored_snapshots_fall_back_to_the_sycl_name_rule(
-    libs: dict[str, Path], tmp_path: Path
-) -> None:
-    snaps = {}
-    for label, side in (("old", "v1"), ("new", "v2")):
+_SCAN_KEY = "live_preprocessor_hidden"
+
+
+def _find_scan(node: object) -> list[object]:
+    """Every value stored under the scan key, wherever the document's section
+    layout places it (a sectioned document nests keys one level down)."""
+    found: list[object] = []
+    if isinstance(node, dict):
+        for key, value in node.items():
+            if key == _SCAN_KEY:
+                found.append(value)
+            found.extend(_find_scan(value))
+    elif isinstance(node, list):
+        for item in node:
+            found.extend(_find_scan(item))
+    return found
+
+
+def _strip_scan(node: object) -> None:
+    if isinstance(node, dict):
+        node.pop(_SCAN_KEY, None)
+        for value in node.values():
+            _strip_scan(value)
+    elif isinstance(node, list):
+        for item in node:
+            _strip_scan(item)
+
+
+def _dump_sides(libs: dict[str, Path], tmp_path: Path) -> dict[str, Path]:
+    snaps: dict[str, Path] = {}
+    for side in ("v1", "v2"):
         snaps[side] = tmp_path / f"{side}.json"
         result = CliRunner().invoke(
             main,
@@ -182,8 +209,45 @@ def test_stored_snapshots_fall_back_to_the_sycl_name_rule(
             catch_exceptions=False,
         )
         assert result.exit_code == 0, result.output
-        # The scan is runtime-only: nothing of it reaches the document.
-        assert "live_preprocessor_hidden" not in snaps[side].read_text("utf-8")
+    return snaps
+
+
+def test_stored_snapshots_attribute_hidden_exports_like_live(
+    libs: dict[str, Path], tmp_path: Path
+) -> None:
+    # Schema v67: the scan is stored with the snapshot, so the stored census is
+    # the live census -- same guard attribution, same verdict, same findings.
+    snaps = _dump_sides(libs, tmp_path)
+    for label, side in snaps.items():
+        stored_scan = _find_scan(json.loads(side.read_text("utf-8")))
+        # The scan names functions by base name; _HIDDEN holds their signatures.
+        expected = {
+            macro: sorted(sig.split("(", 1)[0] for sig in sigs)
+            for macro, sigs in _HIDDEN[label].items()
+        }
+        assert stored_scan == [expected]
+    live = _compare(libs["v1"], libs["v2"], tmp_path / "live", *_live_args())
+    stored = _compare(snaps["v1"], snaps["v2"], tmp_path / "stored")
+    assert _guard_counts(stored) == _guard_counts(live) != {}
+    assert stored["undeclared_export_census"] == live["undeclared_export_census"]
+    assert stored["verdict"] == live["verdict"]
+    assert sorted((c["kind"], c["symbol"]) for c in stored["changes"]) == sorted(
+        (c["kind"], c["symbol"]) for c in live["changes"]
+    )
+    assert stored["confidence"] == live["confidence"]
+
+
+def test_pre_v67_stored_snapshots_fall_back_to_the_sycl_name_rule(
+    libs: dict[str, Path], tmp_path: Path
+) -> None:
+    # A pre-v67 document carries no scan (the key is absent), so the census
+    # cannot attribute by guard and must fall back to the named cause.
+    snaps = _dump_sides(libs, tmp_path)
+    for side in snaps.values():
+        doc = json.loads(side.read_text("utf-8"))
+        _strip_scan(doc)
+        assert not _find_scan(doc)
+        side.write_text(json.dumps(doc), encoding="utf-8")
     report = _compare(snaps["v1"], snaps["v2"], tmp_path)
     assert _guard_counts(report) == {}
     fallback = [
@@ -194,3 +258,6 @@ def test_stored_snapshots_fall_back_to_the_sycl_name_rule(
     block = report["undeclared_export_census"]
     assert block["old"]["by_cause"] == [{"cause": "sycl", "count": 1}]
     assert block["old"]["by_guard"] == []
+    # Informational only: the census adds no finding of its own.
+    kinds = {c["kind"] for c in report["changes"]}
+    assert kinds <= {"exported_not_public", "func_removed_elf_only"}

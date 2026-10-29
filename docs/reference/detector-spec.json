@@ -1,7 +1,16 @@
 {
   "description": "Formal detector specification matrix (generated).",
-  "count": 423,
+  "count": 424,
   "detectors": [
+    {
+      "kind": "abi_equivalent_type_changed",
+      "category": "risk",
+      "default_verdict": "COMPATIBLE_WITH_RISK",
+      "severity": "warning",
+      "min_evidence": "L1",
+      "doc_slug": "abi_equivalent_type_changed",
+      "examples": ""
+    },
     {
       "kind": "abi_relevant_build_flag_changed",
       "category": "risk",

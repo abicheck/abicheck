@@ -27,6 +27,8 @@ from pathlib import Path
 
 import pytest
 
+from tests._abicheck_subprocess import abicheck_command
+
 pytestmark = [
     pytest.mark.integration,
     pytest.mark.skipif(
@@ -111,7 +113,7 @@ def _build_cdylib(root: Path, name: str, src: str) -> Path:
 
 
 def _compare(old: Path, new: Path, out: Path, *headers: str) -> dict:
-    cmd = ["abicheck", "compare", str(old), str(new), "-o", f"json={out}"]
+    cmd = abicheck_command("compare", str(old), str(new), "-o", f"json={out}")
     for h in headers:
         cmd += ["-H", h]
     subprocess.run(cmd, check=False, capture_output=True, text=True, timeout=600)
@@ -143,8 +145,7 @@ def test_c_surface_return_change_detected_with_header(
     base_h.write_text(_header(bits=32))
     new_h = rust_root / "ret.h"
     new_h.write_text(_header(bits=64))
-    cmd = [
-        "abicheck",
+    cmd = abicheck_command(
         "compare",
         str(base_so),
         str(new),
@@ -154,7 +155,7 @@ def test_c_surface_return_change_detected_with_header(
         f"new={new_h}",
         "-o",
         f"json={rust_root / 'ret.json'}",
-    ]
+    )
     subprocess.run(cmd, check=False, capture_output=True, text=True, timeout=600)
     report = json.loads((rust_root / "ret.json").read_text())
     assert report["verdict"] == "BREAKING"

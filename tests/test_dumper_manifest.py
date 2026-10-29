@@ -272,17 +272,17 @@ class _StubParser:
     def parse_typedefs(self):
         return {}
 
-    def parse_typedefs_qualified(self):
-        return {}
+    parse_typedefs_qualified = parse_typedefs
 
     def parse_typedef_entity_ids(self):
         return {}
 
+    parse_typedef_abi_facts = parse_typedef_entity_ids
+
     def parse_constants(self):
         return {}
 
-    def parse_constant_entity_ids(self):
-        return {}
+    parse_constant_entity_ids = parse_constants
 
 
 def _make_stub_header_ast_parser(calls: list, *, fail_for: frozenset = frozenset()):

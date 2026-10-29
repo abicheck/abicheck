@@ -458,6 +458,8 @@ class DeclarationsSection(_SparseSectionMixin):
         {
             "typedefs_qualified",
             "typedef_entity_ids",
+            # Schema v69: {typedef qualified name: fact}, absent when none captured.
+            "typedef_abi_facts",
             "constants",
             "constant_entity_ids",
             "python_ext",
@@ -473,6 +475,7 @@ class DeclarationsSection(_SparseSectionMixin):
     OPTIONAL_FIELD_SHAPES: ClassVar[Mapping[str, str]] = {
         "typedefs_qualified": _MAPPING,
         "typedef_entity_ids": _MAPPING,
+        "typedef_abi_facts": _MAPPING_OR_NONE,
         "constants": _MAPPING,
         "constant_entity_ids": _MAPPING,
         "python_ext": _MAPPING_OR_NONE,
@@ -523,8 +526,10 @@ class LayoutSection(_SparseSectionMixin):
             "excluded_header_patterns",
             "excluded_header_matching",
             "extraction_scope",
+            "ownership_without_scope",
             "public_header_identifiers",
             "public_header_identifiers_fact",
+            "live_preprocessor_hidden",
         }
     )
     #: `.dwarf_layout_coherence`/`.scope_fallback`/`.dependency_scope` are
@@ -547,8 +552,11 @@ class LayoutSection(_SparseSectionMixin):
         "excluded_header_patterns": _LIST,
         "excluded_header_matching": _STR,
         "extraction_scope": _MAPPING_OR_NONE,
+        "ownership_without_scope": _MAPPING_OR_NONE,
         "public_header_identifiers": _UNORDERED_LIST,
         "public_header_identifiers_fact": _MAPPING_OR_NONE,
+        # Schema v67: {guard macro: [function names]}, absent when no scan ran.
+        "live_preprocessor_hidden": _MAPPING_OR_NONE,
     }
 
     extra: Mapping[str, Any] = field(default_factory=dict)

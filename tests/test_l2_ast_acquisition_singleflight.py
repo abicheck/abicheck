@@ -244,6 +244,9 @@ def test_normalized_header_evidence_is_shared_after_per_binary_parsing() -> None
         def parse_typedef_entity_ids(self) -> dict[str, object]:
             return {}
 
+        def parse_typedef_abi_facts(self) -> dict[str, object]:
+            return {}
+
         def parse_constant_entity_ids(self) -> dict[str, object]:
             return {}
 

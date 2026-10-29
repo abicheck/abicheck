@@ -31,9 +31,8 @@ it. Moved out of the legacy ``diff_filtering.py`` (ADR-061).
 from __future__ import annotations
 
 from collections import Counter
-from collections.abc import Callable, Mapping
+from collections.abc import Mapping
 
-from ..demangle import demangle
 from ..diff_helpers import (
     canonicalize_record_symbol,
     cross_tier_transition,
@@ -46,6 +45,8 @@ from ..model.change_catalog.kinds import ChangeKind
 from ..model.identity import EntityId
 from .dedup_key import hashable_value
 from .finding_identity import resolve_change_identity
+from .source_replay_twins import drop_replay_twins
+from .variable_names import qualified_variable_name
 
 # Mapping from DWARF change kinds to their AST equivalents for deduplication.
 _DWARF_TO_AST_EQUIV: dict[ChangeKind, set[ChangeKind]] = {
@@ -443,153 +444,60 @@ def _drop_elf_only_duplicates_of_visibility(changes: list[Change]) -> list[Chang
     return [c for c in changes if (c.kind, c.symbol) not in covered]
 
 
-#: The evidence bucket the L4 source replay tags its findings with (set by
-#: ``buildsource.evidence_report`` before the disposition pipeline runs).
-_SOURCE_REPLAY_EVIDENCE = "source_only"
+def _drop_constant_value_restatements(changes: list[Change]) -> list[Change]:
+    """Drop a ``VAR_VALUE_CHANGED`` that restates a ``CONSTANT_CHANGED``.
 
-
-def _inline_removal_name(change: Change) -> str:
-    """The bare qualified name an inline-removal finding is about.
-
-    The header tier names the function by its mangled symbol. Its demangled form
-    (``demo::f(int)``) is filled in by enrichment that runs only after this step,
-    so it is demangled here. The source replay names the function by qualified
-    name (``demo::f``). Stripping the parameter list lines the two up.
+    A ``const``/``constexpr`` variable with a compile-time initializer is one
+    observation at two header-tier detectors: ``compare.constants`` reports the
+    qualified constant (``K_S::K_V``), and ``diff_types_abicc_parity`` reports the
+    same variable's value as ``VAR_VALUE_CHANGED`` under its mangled symbol. The
+    constant is kept: it is the declaration-level owner (qualified name, raw
+    values) and the finding the clang frontend emits alone. The variable copy is
+    matched on its qualified name and its old/new value, one for one, so a
+    different variable with the same bare name never pairs.
     """
-    name = change.demangled_symbol or demangle(change.symbol) or change.symbol
-    return name.split("(", 1)[0]
+    constant_values: Counter[tuple[str, object, object]] = Counter(
+        (c.symbol, c.old_value, c.new_value)
+        for c in changes
+        if c.kind is ChangeKind.CONSTANT_CHANGED
+    )
+    result: list[Change] = []
+    for c in changes:
+        if c.kind is ChangeKind.VAR_VALUE_CHANGED and c.entity_id is not None:
+            key = (
+                qualified_variable_name(c.entity_id, c.symbol, mangled=c.symbol),
+                hashable_value(c.old_value),
+                hashable_value(c.new_value),
+            )
+            if constant_values[key] > 0:
+                constant_values[key] -= 1
+                continue
+        result.append(c)
+    return result
 
 
-def _constant_name(change: Change) -> str:
-    """The qualified name a constant finding is about.
-
-    Both tiers spell a namespace-scope constant by its qualified name
-    (``demo::kLimit``), so the symbol is the key with no normalization.
-    """
-    return change.symbol
-
-
-#: (source-replay kind, header-tier kind, name key) for each observation the
-#: header tier and the L4 replay both report. The header tier is the owner in
-#: every pair: it is artifact-anchored (ADR-028 D3) and carries the
-#: declaration's own facts, which the replay copy does not.
-_SOURCE_REPLAY_TWINS: tuple[
-    tuple[ChangeKind, ChangeKind, Callable[[Change], str]], ...
-] = (
-    (
-        ChangeKind.INLINE_FUNCTION_REMOVED,
-        ChangeKind.INLINE_FUNCTION_REMOVED,
-        _inline_removal_name,
-    ),
-    # L4 emits CONSTEXPR_VALUE_CHANGED only for C++ constexpr variables
-    # (clang_node_predicates: VarDecl with ``constexpr``). Plain ``const`` and
-    # all of C reach the header tier alone.
-    (
-        ChangeKind.CONSTEXPR_VALUE_CHANGED,
-        ChangeKind.CONSTANT_CHANGED,
-        _constant_name,
-    ),
+#: A deleted function is implicitly inline ([dcl.fct.def.delete]/4) and its
+#: export is gone. Both facts are consequences of the one deletion that
+#: ``FUNC_DELETED`` already reports, so they do not stand as separate findings.
+_DELETION_CONSEQUENCE_KINDS = frozenset(
+    {ChangeKind.FUNC_VISIBILITY_CHANGED, ChangeKind.FUNC_BECAME_INLINE}
+)
+_DELETION_PRIMARY_KINDS = frozenset(
+    {ChangeKind.FUNC_DELETED, ChangeKind.FUNC_DELETED_DWARF}
 )
 
 
-def _drop_source_replay_twins(
-    changes: list[Change],
-    replay_kind: ChangeKind,
-    header_kind: ChangeKind,
-    name_of: Callable[[Change], str],
-) -> list[Change]:
-    """Drop a source-replay ``replay_kind`` finding the header tier reports too.
-
-    The header tier's finding and the L4 replay's finding are one observation
-    with different descriptions, so the exact and identity keys above never see
-    them as equal. The header-tier finding is kept.
-
-    Matched one for one by name, so an extra replay finding with no header-tier
-    twin (say, a second overload the header tier did not see) stays visible.
-    Every dropped finding is recorded as ``deduplicated`` by the disposition
-    pipeline, so the raw total still counts it (ADR-067).
-    """
-    header_tier = Counter(
-        name_of(c)
+def _drop_deletion_consequences(changes: list[Change]) -> list[Change]:
+    """Fold the export-loss and became-inline findings of a deleted function
+    into its ``FUNC_DELETED`` finding, matched on the mangled symbol."""
+    deleted = {c.symbol for c in changes if c.kind in _DELETION_PRIMARY_KINDS}
+    if not deleted:
+        return changes
+    return [
+        c
         for c in changes
-        if c.kind is header_kind and c.evidence_category != _SOURCE_REPLAY_EVIDENCE
-    )
-    result: list[Change] = []
-    for c in changes:
-        if (
-            c.kind is replay_kind
-            and c.evidence_category == _SOURCE_REPLAY_EVIDENCE
-            and header_tier[name_of(c)] > 0
-        ):
-            header_tier[name_of(c)] -= 1
-            continue
-        result.append(c)
-    return result
-
-
-#: A typedef removed or retargeted is one observation at two tiers. The header
-#: tier (``compare.typedefs``) emits the L2 kind; the L4 source replay
-#: (``buildsource.source_diff._diff_typedefs``) emits its ``PUBLIC_`` twin.
-_TYPEDEF_REPLAY_TWIN: dict[ChangeKind, ChangeKind] = {
-    ChangeKind.TYPEDEF_REMOVED: ChangeKind.PUBLIC_TYPEDEF_REMOVED,
-    ChangeKind.TYPEDEF_BASE_CHANGED: ChangeKind.PUBLIC_TYPEDEF_TARGET_CHANGED,
-}
-_TYPEDEF_REPLAY_KINDS = frozenset(_TYPEDEF_REPLAY_TWIN.values())
-
-
-def _typedef_header_name(change: Change) -> str:
-    """The qualified name a header-tier typedef finding is about.
-
-    The header tier names the alias by its bare spelling (``old_t``) and keeps
-    the namespace in its entity id; the replay names it by qualified name
-    (``demo::old_t``). Rendering the entity id gives the replay's spelling. A
-    finding with no entity id falls back to its symbol, so it can still pair
-    with a replay finding that spells the same name.
-    """
-    from ..model.semantic_ir_legacy_adapter import render_display_name_or_leaf
-
-    if change.entity_id is None:
-        return change.symbol
-    return render_display_name_or_leaf(change.entity_id)
-
-
-def _drop_source_replay_typedef_duplicates(changes: list[Change]) -> list[Change]:
-    """Drop a source-replay typedef finding the header tier already reports.
-
-    A typedef removed from the headers, or retargeted, is reported by the header
-    tier (``TYPEDEF_REMOVED`` / ``TYPEDEF_BASE_CHANGED``) and by the L4 replay
-    (``PUBLIC_TYPEDEF_REMOVED`` / ``PUBLIC_TYPEDEF_TARGET_CHANGED``). The kinds
-    differ, so the exact and identity keys never see the pair as equal. The
-    header-tier finding is kept: it is the artifact-anchored owner (ADR-028 D3),
-    and it is the copy that the typedef cutover (ADR-063) models.
-
-    Matched one for one on the qualified name, so a second replay finding with
-    no header-tier twin stays visible. The value spellings are not compared: the
-    header tier prints the canonical type and the replay prints the source
-    spelling (``long int`` vs ``long``), so a value check would miss real pairs.
-    Every dropped finding is recorded as ``deduplicated`` by the disposition
-    pipeline, so the raw total still counts it (ADR-067).
-    """
-    header_tier = Counter(
-        (_TYPEDEF_REPLAY_TWIN[c.kind], _typedef_header_name(c))
-        for c in changes
-        if c.kind in _TYPEDEF_REPLAY_TWIN
-    )
-    result: list[Change] = []
-    for c in changes:
-        if c.kind in _TYPEDEF_REPLAY_KINDS and header_tier[(c.kind, c.symbol)] > 0:
-            header_tier[(c.kind, c.symbol)] -= 1
-            continue
-        result.append(c)
-    return result
-
-
-def _drop_source_replay_duplicates(changes: list[Change]) -> list[Change]:
-    """Apply :func:`_drop_source_replay_twins` for every pair in
-    :data:`_SOURCE_REPLAY_TWINS`."""
-    for replay_kind, header_kind, name_of in _SOURCE_REPLAY_TWINS:
-        changes = _drop_source_replay_twins(changes, replay_kind, header_kind, name_of)
-    return changes
+        if not (c.kind in _DELETION_CONSEQUENCE_KINDS and c.symbol in deleted)
+    ]
 
 
 def deduplicate_cross_detector(
@@ -698,8 +606,9 @@ def deduplicate_cross_detector(
                     c.qualified_name = qual
 
     changes = _drop_elf_only_duplicates_of_visibility(changes)
-    changes = _drop_source_replay_duplicates(changes)
-    changes = _drop_source_replay_typedef_duplicates(changes)
+    changes = _drop_deletion_consequences(changes)
+    changes = _drop_constant_value_restatements(changes)
+    changes = drop_replay_twins(changes)
     seen: set[str] = set()
     result: list[Change] = []
     for c in changes:

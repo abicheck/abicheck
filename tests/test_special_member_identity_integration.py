@@ -19,6 +19,8 @@ from pathlib import Path
 
 import pytest
 
+from tests._abicheck_subprocess import abicheck_command
+
 pytestmark = [
     pytest.mark.integration,
     pytest.mark.skipif(
@@ -75,7 +77,7 @@ EXPECTED = {
 def _dump(d: Path, frontend: str) -> Path:
     target = d / f"{frontend}.json"
     proc = subprocess.run(
-        ["abicheck", "dump", "liba.so", "-H", "a.h", "-o", str(target)],
+        abicheck_command("dump", "liba.so", "-H", "a.h", "-o", str(target)),
         cwd=d,
         env={**os.environ, "ABICHECK_AST_FRONTEND": frontend},
         capture_output=True,

@@ -30,6 +30,7 @@ from .compare.declaration_facts import alignment_changes
 from .compare.elf_only_demangle import (
     elf_only_demangled_name as _elf_only_demangled_name,
 )
+from .compare.variable_names import qualified_variable_name
 from .compare.variables import (
     VariableTypeIndex,
     variable_type_changes,
@@ -76,7 +77,7 @@ def _var_removed(mangled: str, v_old: Variable) -> list[Change]:
         make_change(
             ChangeKind.VAR_REMOVED,
             symbol=mangled,
-            name=v_old.name,
+            name=qualified_variable_name(v_old.entity_id, v_old.name, mangled=mangled),
             # See Change.symbol_binding's docstring - None when not captured.
             symbol_binding=v_old.elf_binding.value if v_old.elf_binding else None,
             entity_id=v_old.entity_id,
@@ -193,7 +194,7 @@ def _var_added(mangled: str, v_new: Variable) -> list[Change]:
         make_change(
             ChangeKind.VAR_ADDED,
             symbol=mangled,
-            name=v_new.name,
+            name=qualified_variable_name(v_new.entity_id, v_new.name, mangled=mangled),
             entity_id=v_new.entity_id,
             **addition_evidence(v_new, "variable"),
         )

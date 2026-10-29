@@ -33,6 +33,8 @@ from pathlib import Path
 
 import pytest
 
+from tests._abicheck_subprocess import abicheck_command
+
 pytestmark = [
     pytest.mark.integration,
     # The fixture is an ELF shared object and the oracle names Itanium
@@ -91,15 +93,14 @@ def dumps(tmp_path_factory: pytest.TempPathFactory) -> dict[str, Path]:
     for fe in FRONTENDS:
         target = d / f"{fe}.json"
         proc = subprocess.run(
-            [
-                "abicheck",
+            abicheck_command(
                 "dump",
                 str(d / "liba.so"),
                 "-H",
                 str(d / "a.hpp"),
                 "-o",
                 str(target),
-            ],
+            ),
             cwd=d,
             env={**os.environ, "ABICHECK_AST_FRONTEND": fe},
             capture_output=True,

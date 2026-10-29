@@ -56,6 +56,8 @@ from example_case_runner import (  # noqa: E402
 )
 from source_smoke import SourceSmokeSpec, run_source_smoke  # noqa: E402
 
+from tests._abicheck_subprocess import abicheck_command  # noqa: E402
+
 EXAMPLES_DIR = (
     example_catalog.CASES_DIR
 )  # monkeypatch seam: test_validate_examples_unit.py
@@ -671,7 +673,7 @@ def _build_dump_cmd(
     and ``--compile-db`` spellings were removed -- so an explicit
     *build_info* wins over it rather than both being passed.
     """
-    cmd = [sys.executable, "-m", "abicheck.cli", "dump", str(so), "-o", str(snap)]
+    cmd = abicheck_command("dump", str(so), "-o", str(snap))
     effective_build_info = build_info
     if hdr and Path(hdr).exists():
         cmd += ["-H", str(hdr)]
@@ -702,16 +704,13 @@ def _build_compare_cmd(
     counterparts when the respective build-source paths are provided, and
     always sets the scoping flag explicitly so verdicts are deterministic.
     """
-    cmd = [
-        sys.executable,
-        "-m",
-        "abicheck.cli",
+    cmd = abicheck_command(
         "compare",
         str(snap1),
         str(snap2),
         "-o",
         "json=-",
-    ]
+    )
     if old_build_source is not None:
         cmd += [
             "--build-info",
@@ -773,16 +772,13 @@ def _build_compare_direct_cmd(
     not the dump/compare work itself, dominates wall time for small examples —
     this removes two of those three process starts per case.
     """
-    cmd = [
-        sys.executable,
-        "-m",
-        "abicheck.cli",
+    cmd = abicheck_command(
         "compare",
         str(v1_so),
         str(v2_so),
         "-o",
         "json=-",
-    ]
+    )
     if v1_hdr and v1_hdr.exists():
         cmd += ["-H", "old=" + str(v1_hdr)]
     if v2_hdr and v2_hdr.exists():

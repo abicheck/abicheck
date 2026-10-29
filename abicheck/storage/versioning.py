@@ -81,12 +81,12 @@ COMPARISON_CONTRACT_VERSION = 1
 #: every package this build writes and passed by every reader, so a package
 #: produced under different extraction semantics is reported, never refused.
 #: Bump it when what an extractor records for the same input changes.
-EXTRACTOR_GENERATION = 28
+EXTRACTOR_GENERATION = 32
 
 #: This build's resolution semantics generation (ADR-062 D2): provider
 #: selection, alias normalization, symbol-version handling, reachability.
 #: Bump it when a graph derived from the same stored facts would change.
-RESOLVER_GENERATION = 2
+RESOLVER_GENERATION = 3
 
 #: This build's source-tier semantics generation (ADR-062 D2 amendment): what
 #: the L4 source extractors and the L5 graph passes record for the same build

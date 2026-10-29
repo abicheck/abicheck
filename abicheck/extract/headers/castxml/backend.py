@@ -68,6 +68,7 @@ from ..toolchain import (
     _tool_identity,
     _tool_identity_metadata,
 )
+from .abi_fundamental import probe_plain_char_unsigned
 from .calling_convention import calling_conventions_in
 from .dumper import _CastxmlParser
 from .hidden_declarations import attach_hidden_declarations
@@ -81,6 +82,7 @@ from .probe import (
     record_unparseable_headers,
     run_castxml,
 )
+from .variable_template_join import join_variable_templates
 from .vector_join import join_vector_spellings
 
 # The orchestrator's logger name, kept from before the move.
@@ -270,8 +272,26 @@ def castxml_dump(
     key = _make_key()
 
     def _with_vectors(root: Element) -> Element:
-        return join_vector_spellings(
+        joined = join_vector_spellings(
             root,
+            key,
+            headers=headers,
+            extra_includes=extra_includes,
+            compiler=compiler,
+            gcc_path=gcc_path,
+            gcc_prefix=gcc_prefix,
+            gcc_options=gcc_options,
+            gcc_option_tokens=gcc_option_tokens,
+            sysroot=sysroot,
+            nostdinc=nostdinc,
+            lang=lang,
+            extra_hash_dirs=extra_hash_dirs,
+            exported_symbols=exported_symbols,
+        )
+        # castxml has no element for a variable template; clang's const ones
+        # are written in as Variable elements (see variable_template_join).
+        return join_variable_templates(
+            joined,
             key,
             headers=headers,
             extra_includes=extra_includes,
@@ -585,6 +605,9 @@ class CastxmlBackend:
             )
         except SnapshotError as exc:
             raise CastxmlRunError(exc) from exc
+        plain_char = probe_plain_char_unsigned(
+            r.compiler, r.gcc_path, r.gcc_prefix, tuple(r.gcc_option_tokens)
+        )
         parser = _CastxmlParser(
             xml_root,
             r.exported_dynamic,
@@ -592,6 +615,7 @@ class CastxmlBackend:
             public_header_paths=r.public_header_paths,
             public_dir_paths=r.public_dir_paths,
             no_binary_evidence=r.no_binary_evidence,
+            plain_char_unsigned=plain_char,
         )
         setattr(
             parser,
@@ -603,6 +627,7 @@ class CastxmlBackend:
                 public_header_paths=r.public_header_paths,
                 public_dir_paths=r.public_dir_paths,
                 no_binary_evidence=False,
+                plain_char_unsigned=plain_char,
             ),
         )
         meta = selected_meta[0] if selected_meta else (None, None)

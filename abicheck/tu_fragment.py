@@ -33,6 +33,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 from .model import EnumType, Function, RecordType, Variable
+from .model.abi_fundamental import AbiFundamental
+from .model.fact import Fact
 from .model.identity import EntityId
 from .model.semantic_ir import SemanticIR
 
@@ -69,6 +71,8 @@ class TuFragment:
     # v31 — see ``AbiSnapshot.typedef_entity_ids``), carried per-fragment for
     # the same reason ``typedefs_qualified`` is.
     typedef_entity_ids: dict[str, EntityId] = field(default_factory=dict)
+    # Schema v69: each typedef's target ABI fact, carried like the sidecars above.
+    typedef_abi_facts: dict[str, Fact[AbiFundamental]] = field(default_factory=dict)
     constant_entity_ids: dict[str, EntityId] = field(default_factory=dict)
     ast_producer: str = "castxml"
     ast_toolchain: dict[str, str] = field(default_factory=dict)
@@ -103,6 +107,9 @@ class MergedTuFragments:
     typedefs_qualified: dict[str, str]
     constants: dict[str, str]
     typedef_entity_ids: dict[str, EntityId]
+    typedef_abi_facts: dict[str, Fact[AbiFundamental]] = field(
+        default_factory=dict, kw_only=True
+    )
     constant_entity_ids: dict[str, EntityId]
     ast_producer: str
     ast_toolchain: dict[str, str]

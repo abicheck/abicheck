@@ -49,9 +49,9 @@ from abicheck.buildsource.check_report import (
     build_bootstrap_report,
     build_new_target_report,
     build_operational_error_report,
-    final_exit_code,
 )
 from abicheck.buildsource.check_report_build_system import stamp_profile_build_system
+from abicheck.policy.exit_decision_precedence import resolve_gate_mode_exit_code
 
 #: Usage error, matching the repo-wide convention documented in AGENTS.md
 #: ("64 = usage error (bad flags/inputs)").
@@ -267,7 +267,7 @@ def main(argv: list[str] | None = None) -> int:
         elif isinstance(report.get("exit_code"), int):
             real_exit_code = report["exit_code"]  # type: ignore[assignment]
         # Same fold augment_report already applied for policy_gate_decision
-        # -- keep this local real_exit_code (used for final_exit_code below)
+        # -- keep this local real_exit_code (used for resolve_gate_mode_exit_code below)
         # consistent with it, not just the persisted report field.
         real_exit_code = max(real_exit_code, args.analysis_exit_code)
 
@@ -282,7 +282,7 @@ def main(argv: list[str] | None = None) -> int:
     if output_status != 0:
         return output_status
 
-    exit_code = final_exit_code(
+    exit_code = resolve_gate_mode_exit_code(
         args.gate_mode,
         real_exit_code=real_exit_code,
         operational_error=operational_error,
