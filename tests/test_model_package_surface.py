@@ -32,7 +32,6 @@ from pathlib import Path
 import pytest
 
 import abicheck.model as model
-from tests._abicheck_subprocess import abicheck_command
 
 MODEL_DIR = Path(model.__file__).parent
 
@@ -174,7 +173,7 @@ class TestModelStaysTheInnermostRing:
             elif isinstance(node, ast.Import):
                 for alias in node.names:
                     parts = alias.name.split(".")
-                    if parts[:1] == abicheck_command() and len(parts) > 1:
+                    if parts[:1] == ["abicheck"] and len(parts) > 1:
                         assert parts[1] not in self.FORBIDDEN, alias.name
 
     def test_every_module_stays_within_the_production_ceiling(self) -> None:
