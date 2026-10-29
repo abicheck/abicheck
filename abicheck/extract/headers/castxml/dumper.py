@@ -102,6 +102,7 @@ from . import (
     type_resolution as _castxml_type_resolution,
     typedef_parsing as _typedefs_helpers,
 )
+from .function_type_cc import load_function_type_cc
 from .inline_variables import declared_inline
 from .names import (
     _SYNTHETIC_DTOR_KEY_PREFIX as _SYNTHETIC_DTOR_KEY_PREFIX,
@@ -149,6 +150,7 @@ class _CastxmlParser:
         )
         self._ctx.build_id_map()
         self._ctx.vector_spellings = load_vector_spellings(self._ctx)
+        self._ctx.function_type_cc = load_function_type_cc(self._ctx.root)
 
     # ── shared-context state, exposed for methods not yet migrated ─────────
 
