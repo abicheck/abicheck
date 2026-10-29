@@ -65,13 +65,10 @@ def _attach_use_case_impact(
 
 
 def _report_compare_result(
-    ctx: click.Context,
     result: Any,
     old: Any,
     new: Any,
     *,
-    old_input: Path,
-    new_input: Path,
     resolved_cfg: Any,
     evaluation_config: Any,
     report_severity: Any,
@@ -144,7 +141,6 @@ def _report_compare_result(
     _finalize_compare_result(
         result,
         show_redundant=show_redundant,
-        severity_config=report_severity,
         contract_evaluation=contract_evaluation,
     )
 

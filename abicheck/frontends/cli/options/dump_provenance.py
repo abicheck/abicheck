@@ -125,7 +125,7 @@ def _example_for(key: str) -> str:
     }[key]
 
 
-def validate_provenance(
+def validate_provenance(  # noqa: ARG001 -- click callback(ctx, param, value) signature
     ctx: click.Context, param: click.Parameter, value: tuple[str, ...]
 ) -> tuple[str, ...]:
     """Eagerly validate ``--provenance`` tokens -- the exact shape

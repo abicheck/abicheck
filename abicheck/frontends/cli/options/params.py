@@ -275,7 +275,7 @@ class SidedStrParam(click.ParamType):
 SIDED_STR_PARAM = SidedStrParam()
 
 
-def normalize_suppress_callback(ctx: Any, param: Any, value: Any) -> Any:
+def normalize_suppress_callback(ctx: Any, param: Any, value: Any) -> Any:  # noqa: ARG001 -- click callback(ctx, param, value) signature
     """``--suppress`` (repeatable) as ``None``, one ``Path``, or a tuple of them.
 
     One file stays a bare ``Path`` so a one-file invocation is unchanged; the
@@ -288,7 +288,6 @@ def normalize_suppress_callback(ctx: Any, param: Any, value: Any) -> Any:
 
 def _load_suppression_and_policy(
     suppress: SuppressPaths | None,
-    policy: str,
     policy_file_path: Path | None,
     *,
     strict_suppressions: bool = False,

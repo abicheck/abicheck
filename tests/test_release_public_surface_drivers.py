@@ -556,9 +556,6 @@ class TestTheOutputDirectorySummaryCarriesTheContract:
             "NO_CHANGE",
             [],
             [],
-            [],
-            {},
-            {},
             public_surface=terms,
         )
         return json.loads((tmp_path / "summary.json").read_text())
@@ -699,9 +696,7 @@ class TestAnUnresolvedContractIsStatedNotOmitted:
 
         from abicheck.frontends.cli.release_summary import _write_release_summary_file
 
-        _write_release_summary_file(
-            tmp_path, "NO_CHANGE", [], [], [], {}, {}, public_surface=terms
-        )
+        _write_release_summary_file(tmp_path, "NO_CHANGE", [], [], public_surface=terms)
         return json.loads((tmp_path / "summary.json").read_text())
 
     def test_an_unresolved_surface_is_still_emitted(self, tmp_path) -> None:
