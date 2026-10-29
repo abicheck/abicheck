@@ -21,6 +21,11 @@ from xml.etree.ElementTree import Element
 from ....errors import SnapshotError
 from ....storage.ast_cache_location import ast_cache_store
 from ..clang.backend import clang_header_dump
+from .function_type_cc import (
+    has_function_type_nodes,
+    resolve_function_type_cc,
+    with_function_type_cc,
+)
 from .vector_spellings import (
     has_vector_nodes,
     resolve_vector_spellings,
@@ -33,19 +38,30 @@ log = logging.getLogger(__name__)
 VECTOR_SIDECAR_BACKEND = "castxml-vectors"
 
 
-def _valid_sidecar(payload: Any) -> dict[str, str] | None:
-    """The stored node-id -> spelling mapping, or ``None`` if it is not one."""
+def _string_map(payload: Any) -> dict[str, str] | None:
     if not isinstance(payload, dict):
-        return None
-    spellings = payload.get("spellings")
-    if not isinstance(spellings, dict):
         return None
     if not all(
         isinstance(node, str) and isinstance(text, str)
-        for node, text in spellings.items()
+        for node, text in payload.items()
     ):
         return None
-    return spellings
+    return payload
+
+
+def _valid_sidecar(payload: Any) -> tuple[dict[str, str], dict[str, str]] | None:
+    """The stored (spellings, function-type conventions), or ``None`` if not valid.
+
+    A sidecar written before the convention map existed has no ``function_cc``
+    key, so it is a miss: clang runs again and the entry is replaced.
+    """
+    if not isinstance(payload, dict):
+        return None
+    spellings = _string_map(payload.get("spellings"))
+    conventions = _string_map(payload.get("function_cc"))
+    if spellings is None or conventions is None:
+        return None
+    return spellings, conventions
 
 
 def join_vector_spellings(
@@ -65,18 +81,23 @@ def join_vector_spellings(
     extra_hash_dirs: tuple[Path, ...],
     exported_symbols: frozenset[str],
 ) -> Element:
-    """Return *root* carrying the clang-derived vector spellings, using the sidecar.
+    """Return *root* carrying the clang-derived vector spellings and function-type
+    calling conventions, using the sidecar.
 
-    A root with no vector node is returned untouched and costs nothing. A clang
-    failure leaves the vector nodes ``Unimplemented`` and is logged; nothing is
-    published for it, so the next run tries again.
+    A root with neither a vector node nor a function-type declaration is
+    returned untouched and costs nothing. A clang failure leaves those nodes
+    as castxml wrote them and is logged; nothing is published for it, so the
+    next run tries again.
     """
-    if not has_vector_nodes(root):
+    if not has_vector_nodes(root) and not has_function_type_nodes(root):
         return root
     store = ast_cache_store(key, VECTOR_SIDECAR_BACKEND)
     cached = _valid_sidecar(store.lookup(key))
     if cached is not None:
-        return with_vector_spellings(root, cached)
+        spellings, conventions = cached
+        return with_function_type_cc(
+            with_vector_spellings(root, spellings), conventions
+        )
     try:
         clang_root, _kind, _force_cpp = clang_header_dump(
             headers,
@@ -94,11 +115,13 @@ def join_vector_spellings(
         )
     except (SnapshotError, OSError) as exc:
         log.warning(
-            "clang could not parse the header(s) for vector spellings (%s); "
-            "vector types stay unresolved",
+            "clang could not parse the header(s) for vector spellings and "
+            "function-type calling conventions (%s); those types stay as castxml "
+            "wrote them",
             exc,
         )
         return root
     resolved = resolve_vector_spellings(root, clang_root)
-    store.publish(key, {"spellings": resolved}, ())
-    return with_vector_spellings(root, resolved)
+    conventions = resolve_function_type_cc(root, clang_root)
+    store.publish(key, {"spellings": resolved, "function_cc": conventions}, ())
+    return with_function_type_cc(with_vector_spellings(root, resolved), conventions)

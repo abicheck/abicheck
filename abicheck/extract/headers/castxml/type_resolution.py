@@ -241,7 +241,11 @@ def _function_declarator_spelling(
     if any(child.tag == "Ellipsis" for child in node):
         args.append("...")
     params = ", ".join(args) if args else "void"
-    attrs = (node.get("attributes") or "").strip()
+    # castxml's own ``attributes`` (x86-32 conventions) wins; a convention it
+    # dropped (GNU ``ms_abi``/``sysv_abi`` on x86-64) is joined from clang.
+    attrs = (node.get("attributes") or "").strip() or ctx.function_type_cc.get(
+        node.get("id", ""), ""
+    )
     suffix = f" __attribute__(({attrs}))" if attrs else ""
     if not declarator:
         return f"{ret} ({params}){suffix}"

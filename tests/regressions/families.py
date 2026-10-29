@@ -248,11 +248,8 @@ FAMILIES: dict[str, Family] = {
                 "declaration and never collapses to an opaque tag, so a header "
                 "comparison sees the change."
             ),
-            harness_tests=(),
-            planned_reason=(
-                "The vector and FunctionType classes share this invariant; a family "
-                "harness that enumerates both node types and their sites is planned."
-            ),
+            harness_tests=("tests/test_type_spelling_differential_matrix.py",),
+            planned_reason="",
         ),
         Family(
             key="F14",
@@ -263,12 +260,8 @@ FAMILIES: dict[str, Family] = {
                 "spelling: a vector never collapses onto a plain array's T[] "
                 "spelling, so a same-size vector-versus-array change is reported."
             ),
-            harness_tests=(),
-            planned_reason=(
-                "One class so far; revisit when a second attribute-determined "
-                "type (for example a sized or address-space-qualified type) "
-                "collapses the same way and the two share one mechanism."
-            ),
+            harness_tests=("tests/test_type_spelling_differential_matrix.py",),
+            planned_reason="",
         ),
         Family(
             key="F16",
