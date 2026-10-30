@@ -29,7 +29,7 @@ own input names, and it forwards them to the Action under the new names:
 `requested-depth` → `depth`, `contract-file` → `contract`, `ast-frontend` →
 `frontend`, `gcc-path` and `gcc-prefix` → `compiler`, `gcc-options` →
 `compile-options`, `analysis-assurance-complete` → `require-complete`, and
-`policy-file` → `policy`. The workflow inputs are not renamed by ADR-091. See
+`policy-file` → `policy`. The workflow inputs keep their names. See
 the [check-target page](check-target.md) for the full rationale behind each
 one. Outputs are `check-target`'s own six
 outputs, forwarded unchanged, plus `report-artifact-name`.

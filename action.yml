@@ -1002,91 +1002,91 @@ inputs:
   # ── Retired inputs (ADR-091 renames) ────────────────────────────────────
   ast-frontend:
     description: >
-      RETIRED (ADR-091, no transition period): renamed to `frontend`.
+      RETIRED (no transition period): renamed to `frontend`.
       Setting this input fails the run before any analysis with an
       `::error::` naming `frontend`. Replace `ast-frontend` with `frontend`, then
       remove `ast-frontend`.
     required: false
   gcc-path:
     description: >
-      RETIRED (ADR-091, no transition period): renamed to `compiler`.
+      RETIRED (no transition period): renamed to `compiler`.
       Setting this input fails the run before any analysis with an
       `::error::` naming `compiler`. Replace `gcc-path` with `compiler`, then
       remove `gcc-path`.
     required: false
   gcc-options:
     description: >
-      RETIRED (ADR-091, no transition period): renamed to `compile-options`.
+      RETIRED (no transition period): renamed to `compile-options`.
       Setting this input fails the run before any analysis with an
       `::error::` naming `compile-options`. Replace `gcc-options` with `compile-options`, then
       remove `gcc-options`.
     required: false
   analysis-assurance-complete:
     description: >
-      RETIRED (ADR-091, no transition period): renamed to `require-complete`.
+      RETIRED (no transition period): renamed to `require-complete`.
       Setting this input fails the run before any analysis with an
       `::error::` naming `require-complete`. Replace `analysis-assurance-complete` with `require-complete`, then
       remove `analysis-assurance-complete`.
     required: false
   public-header-dir:
     description: >
-      RETIRED (ADR-091, no transition period): renamed to `public-header-dirs`.
+      RETIRED (no transition period): renamed to `public-header-dirs`.
       Setting this input fails the run before any analysis with an
       `::error::` naming `public-header-dirs`. Replace `public-header-dir` with `public-header-dirs`, then
       remove `public-header-dir`.
     required: false
   debug-info1:
     description: >
-      RETIRED (ADR-091, no transition period): renamed to `old-debug-info`.
+      RETIRED (no transition period): renamed to `old-debug-info`.
       Setting this input fails the run before any analysis with an
       `::error::` naming `old-debug-info`. Replace `debug-info1` with `old-debug-info`, then
       remove `debug-info1`.
     required: false
   debug-info2:
     description: >
-      RETIRED (ADR-091, no transition period): renamed to `new-debug-info`.
+      RETIRED (no transition period): renamed to `new-debug-info`.
       Setting this input fails the run before any analysis with an
       `::error::` naming `new-debug-info`. Replace `debug-info2` with `new-debug-info`, then
       remove `debug-info2`.
     required: false
   old-version:
     description: >
-      RETIRED (ADR-091, no transition period): renamed to `old-label`.
+      RETIRED (no transition period): renamed to `old-label`.
       Setting this input fails the run before any analysis with an
       `::error::` naming `old-label`. Replace `old-version` with `old-label`, then
       remove `old-version`.
     required: false
   new-version:
     description: >
-      RETIRED (ADR-091, no transition period): renamed to `new-label`.
+      RETIRED (no transition period): renamed to `new-label`.
       Setting this input fails the run before any analysis with an
       `::error::` naming `new-label`. Replace `new-version` with `new-label`, then
       remove `new-version`.
     required: false
   policy-file:
     description: >
-      RETIRED (ADR-091, no transition period): renamed to `policy`.
+      RETIRED (no transition period): renamed to `policy`.
       Setting this input fails the run before any analysis with an
       `::error::` naming `policy`. Replace `policy-file` with `policy`, then
       remove `policy-file`.
     required: false
   gcc-prefix:
     description: >
-      RETIRED (ADR-091, no transition period): renamed to `compiler`.
+      RETIRED (no transition period): renamed to `compiler`.
       Setting this input fails the run before any analysis with an
       `::error::` naming `compiler`. Replace `gcc-prefix` with `compiler`, then
       remove `gcc-prefix`.
     required: false
   devel-pkg1:
     description: >
-      RETIRED (ADR-091, no transition period): renamed to `old-header`.
+      RETIRED (no transition period): renamed to `old-header`.
       Setting this input fails the run before any analysis with an
       `::error::` naming `old-header`. Replace `devel-pkg1` with `old-header`, then
       remove `devel-pkg1`.
     required: false
   devel-pkg2:
     description: >
-      RETIRED (ADR-091, no transition period): renamed to `new-header`.
+      RETIRED (no transition period): renamed to `new-header`.
       Setting this input fails the run before any analysis with an
       `::error::` naming `new-header`. Replace `devel-pkg2` with `new-header`, then
       remove `devel-pkg2`.

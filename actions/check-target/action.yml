@@ -403,56 +403,56 @@ inputs:
   # ── Retired inputs (ADR-091 renames) ────────────────────────────────────
   requested-depth:
     description: >
-      RETIRED (ADR-091, no transition period): renamed to `depth`.
+      RETIRED (no transition period): renamed to `depth`.
       Setting this input fails the run before any analysis with an
       `::error::` naming `depth`. Replace `requested-depth` with `depth`, then
       remove `requested-depth`.
     required: false
   contract-file:
     description: >
-      RETIRED (ADR-091, no transition period): renamed to `contract`.
+      RETIRED (no transition period): renamed to `contract`.
       Setting this input fails the run before any analysis with an
       `::error::` naming `contract`. Replace `contract-file` with `contract`, then
       remove `contract-file`.
     required: false
   ast-frontend:
     description: >
-      RETIRED (ADR-091, no transition period): renamed to `frontend`.
+      RETIRED (no transition period): renamed to `frontend`.
       Setting this input fails the run before any analysis with an
       `::error::` naming `frontend`. Replace `ast-frontend` with `frontend`, then
       remove `ast-frontend`.
     required: false
   gcc-path:
     description: >
-      RETIRED (ADR-091, no transition period): renamed to `compiler`.
+      RETIRED (no transition period): renamed to `compiler`.
       Setting this input fails the run before any analysis with an
       `::error::` naming `compiler`. Replace `gcc-path` with `compiler`, then
       remove `gcc-path`.
     required: false
   gcc-options:
     description: >
-      RETIRED (ADR-091, no transition period): renamed to `compile-options`.
+      RETIRED (no transition period): renamed to `compile-options`.
       Setting this input fails the run before any analysis with an
       `::error::` naming `compile-options`. Replace `gcc-options` with `compile-options`, then
       remove `gcc-options`.
     required: false
   analysis-assurance-complete:
     description: >
-      RETIRED (ADR-091, no transition period): renamed to `require-complete`.
+      RETIRED (no transition period): renamed to `require-complete`.
       Setting this input fails the run before any analysis with an
       `::error::` naming `require-complete`. Replace `analysis-assurance-complete` with `require-complete`, then
       remove `analysis-assurance-complete`.
     required: false
   gcc-prefix:
     description: >
-      RETIRED (ADR-091, no transition period): renamed to `compiler`.
+      RETIRED (no transition period): renamed to `compiler`.
       Setting this input fails the run before any analysis with an
       `::error::` naming `compiler`. Replace `gcc-prefix` with `compiler`, then
       remove `gcc-prefix`.
     required: false
   policy-file:
     description: >
-      RETIRED (ADR-091, no transition period): renamed to `policy`.
+      RETIRED (no transition period): renamed to `policy`.
       Setting this input fails the run before any analysis with an
       `::error::` naming `policy`. Replace `policy-file` with `policy`, then
       remove `policy-file`.

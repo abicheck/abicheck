@@ -289,7 +289,7 @@ The Action's per-side inputs (`old-header`, `new-header`, `old-label`,
 `new-label`, `old-debug-info`, `new-debug-info`, …) were **unaffected** by the
 side-aware-flags change above — the wrapper maps them to the new side-aware
 flags internally. No workflow edits were needed for Action users at the time.
-(Those Action inputs were renamed later, under ADR-091; the old spellings
+(Those Action inputs were renamed later; the old spellings
 `old-version`, `new-version`, `debug-info1`, `debug-info2`, `devel-pkg1` and
 `devel-pkg2` are retired. See [GitHub Action](github-action.md).)
 
