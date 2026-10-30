@@ -29,7 +29,6 @@ REMOVED_IN_0_7: tuple[tuple[str, tuple[str, ...], frozenset[str]], ...] = (
         " R1/R2/R3/R7/R8/R9/R10/R18 and removed outright by its D7 amendment (the"
         " old spelling raises TypeError; `policy` takes a profile or a document)",
         (
-            "policy_file_path=",
             "contract_evaluation=",
             "contract_mode=",
             "acknowledgments_path=",
@@ -43,15 +42,22 @@ REMOVED_IN_0_7: tuple[tuple[str, tuple[str, ...], frozenset[str]], ...] = (
         ),
         # The explicit-inputs example in compatibility-evaluation-config.md names the
         # internal ExplicitCompatibilityInputs, whose contract_mode field is not a
-        # typed-request spelling. python-api.md's load_suppression_and_policy example
-        # keeps its own policy_file_path keyword.
+        # typed-request spelling.
         frozenset(
             {
                 "start/upgrading-to-0.7.md",
                 "reference/compatibility-evaluation-config.md",
-                "use/python-api.md",
             }
         ),
+    ),
+    (
+        # python-api.md documents load_suppression_and_policy, which keeps its
+        # policy_file_path keyword. Its own entry, so the other spellings above stay
+        # checked on that page.
+        "typed Python API `policy_file_path=` (the keyword of the documented"
+        " load_suppression_and_policy helper; the typed request's field is `policy`)",
+        ("policy_file_path=",),
+        frozenset({"start/upgrading-to-0.7.md", "use/python-api.md"}),
     ),
     (
         "compare/dump/project history --version (the per-side version label,"
