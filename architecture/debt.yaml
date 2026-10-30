@@ -872,7 +872,7 @@
     },
     {
       "path": "tests/test_action_compile_context_parity.py",
-      "baseline_lines": 1582,
+      "baseline_lines": 1580,
       "target": "tests/unit-or-contract ownership matching production migration",
       "rule": "no_growth",
       "disposition": "migrate",
