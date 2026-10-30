@@ -373,7 +373,7 @@ add_sided_flag() {
 # label like "1.0 (release build)" previously lost everything but its last
 # whitespace-separated word when routed through add_sided_flag's word-split.
 # Whether `extra-args` already names a version label. The Action's own
-# `old-version`/`new-version` defaults ('old'/'new') would otherwise be forwarded
+# `old-label`/`new-label` defaults ('old'/'new') would otherwise be forwarded
 # as `--label` next to it, and the CLI refuses the retired `--version` beside
 # `--label` for the same option (exit 64). A label the user passed through
 # extra-args wins instead, as the last value does on the CLI.
@@ -1404,11 +1404,11 @@ add_compile_context_flags() {
   # review, PR #1233; its own stated mechanism, a `compile.lang: c++` in
   # the overlay, is not what this produced -- the empty overlay and the
   # `--config` it carries are).
-  local _ast_frontend_requested="${INPUT_AST_FRONTEND:-}"
+  local _ast_frontend_requested="${INPUT_FRONTEND:-}"
   if [[ "$_ast_frontend_requested" == "auto" ]]; then
     _ast_frontend_requested=""
   fi
-  if [[ -z "${_ast_frontend_requested}${INPUT_GCC_PATH:-}${INPUT_GCC_PREFIX:-}${INPUT_GCC_OPTIONS:-}${INPUT_SYSROOT:-}" \
+  if [[ -z "${_ast_frontend_requested}${INPUT_COMPILER:-}${INPUT_COMPILE_OPTIONS:-}${INPUT_SYSROOT:-}" \
         && "${INPUT_NOSTDINC:-false}" != "true" \
         && ( "$include_lang" != "true" || -z "${INPUT_LANG:-}" || "${INPUT_LANG:-}" == "c++" ) ]]; then
     return 0
@@ -1489,16 +1489,14 @@ import sys
     lang,
     frontend,
     gcc_path,
-    gcc_prefix,
     gcc_options,
     sysroot,
     nostdinc,
-) = sys.stdin.buffer.read().split(b"\0")[:8]
+) = sys.stdin.buffer.read().split(b"\0")[:7]
 include_lang = include_lang.decode("utf-8")
 lang = lang.decode("utf-8")
 frontend = frontend.decode("utf-8")
 gcc_path = gcc_path.decode("utf-8")
-gcc_prefix = gcc_prefix.decode("utf-8")
 gcc_options = gcc_options.decode("utf-8")
 sysroot = sysroot.decode("utf-8")
 nostdinc = nostdinc.decode("utf-8")
@@ -1509,11 +1507,9 @@ if include_lang == "true":
         compile_blk["lang"] = lang
 if frontend and frontend != "auto":
     compile_blk["frontend"] = frontend
-# compile.compiler merges the former --compiler/--compiler-prefix pair
-# (Phase 7 -- one-comparison-product.md §4.1's "MERGE" disposition for
-# --compiler-prefix): a full compiler path is the more specific of the two,
-# so it wins on the rare workflow that names both.
-compiler = gcc_path or gcc_prefix
+# compile.compiler is the Action's `compiler` input (ADR-091 R5). It replaced
+# the gcc-path/gcc-prefix pair; gcc-prefix is a retired tombstone.
+compiler = gcc_path
 if compiler:
     compile_blk["compiler"] = compiler
 if gcc_options:
@@ -1547,9 +1543,9 @@ if nostdinc == "true":
 json.dump({"compile": compile_blk}, sys.stdout)
 PYEOF
     local _compile_overlay_json
-    _compile_overlay_json=$(printf '%s\0%s\0%s\0%s\0%s\0%s\0%s\0%s\0' \
-      "$include_lang" "${INPUT_LANG:-}" "${INPUT_AST_FRONTEND:-}" "${INPUT_GCC_PATH:-}" \
-      "${INPUT_GCC_PREFIX:-}" "${INPUT_GCC_OPTIONS:-}" "${INPUT_SYSROOT:-}" "${INPUT_NOSTDINC:-false}" |
+    _compile_overlay_json=$(printf '%s\0%s\0%s\0%s\0%s\0%s\0%s\0' \
+      "$include_lang" "${INPUT_LANG:-}" "${INPUT_FRONTEND:-}" "${INPUT_COMPILER:-}" \
+      "${INPUT_COMPILE_OPTIONS:-}" "${INPUT_SYSROOT:-}" "${INPUT_NOSTDINC:-false}" |
     (cd "$_PY_SAFE_DIR" && PYTHONPATH= "$_PY_BIN" "$_compile_context_helper_py"))
     # $? (not PIPESTATUS -- this script's own `set -uo pipefail`, already in
     # effect for the whole file, already makes the pipeline's exit status
@@ -1631,7 +1627,7 @@ PYEOF
 add_release_topology_config_flags() {
   # $1 (optional): "scalar" for the single-pair and audit-only compare shapes.
   # Those have no directory/package fan-out, so the only key that applies to
-  # them is assurance.require_complete (analysis-assurance-complete); the
+  # them is assurance.require_complete (require-complete); the
   # release-only inputs are neither read nor written for them. Omitted (or any
   # other value) is the directory/package release shape, which writes every
   # key this function knows about. Both shapes overlay the same --config file,
@@ -1643,7 +1639,7 @@ add_release_topology_config_flags() {
     _include_private_dso="${INPUT_INCLUDE_PRIVATE_DSO:-}"
     _fail_on_removed_library="${INPUT_FAIL_ON_REMOVED_LIBRARY:-}"
   fi
-  local _analysis_assurance_complete="${INPUT_ANALYSIS_ASSURANCE_COMPLETE:-}"
+  local _analysis_assurance_complete="${INPUT_REQUIRE_COMPLETE:-}"
   # dso-only/include-private-dso/fail-on-removed-library deliberately carry
   # no declared default in action.yml (Codex review, fresh evidence): an
   # explicit `false` from the workflow must be able to override a
@@ -1773,7 +1769,7 @@ if release_blk:
 _fail_on_removed = os.environ.get("ABICHECK_GATE_FAIL_ON_REMOVED_LIBRARY", "")
 if _fail_on_removed:
     doc["gate"] = {"fail_on_removed_library": _fail_on_removed == "true"}
-# analysis-assurance-complete: the tri-state per-job override of
+# require-complete: the tri-state per-job override of
 # assurance.require_complete. Same rule as every key above: written only when
 # given, so "omitted" leaves the base config's own value standing, and an
 # explicit "false" overrides a discovered "true" (the one direction the old
@@ -2988,7 +2984,7 @@ fi
 # comment above claims was true only for `mode: compare` -- a direct
 # `mode: dump` run with the input set proceeded to analyse (Codex review).
 if [[ "${INPUT_REQUIRE_COMPLETE_ANALYSIS:-false}" != "false" ]]; then
-  _error_annotation "require-complete-analysis ('${INPUT_REQUIRE_COMPLETE_ANALYSIS}') was removed and is no longer forwarded — set assurance.require_complete: true in your .abicheck.yml and pass that file as build-config instead, then remove this input."
+  _error_annotation "require-complete-analysis ('${INPUT_REQUIRE_COMPLETE_ANALYSIS}') was removed. Its replacement is require-complete, the per-job override of assurance.require_complete. Set assurance.require_complete: true in your .abicheck.yml and pass that file as build-config instead, or use require-complete, then remove this input."
   exit 1
 fi
 
@@ -3754,10 +3750,10 @@ if [[ "$MODE" == "dump" ]]; then
   # `public-header-dir` has no dedicated dump flag any more -- `dump` derives
   # declaration provenance from -H/--header itself (a directory entry tags
   # everything under it public), so forward it as one more -H root.
-  add_flag "-H" "${INPUT_PUBLIC_HEADER_DIR:-}"
+  add_flag "-H" "${INPUT_PUBLIC_HEADER_DIRS:-}"
   add_flag "-I" "${INPUT_INCLUDE:-}"
   add_flag "-I" "${INPUT_NEW_INCLUDE:-}"
-  _extra_args_names_label || add_single_flag "--label" "${INPUT_NEW_VERSION:-}"
+  _extra_args_names_label || add_single_flag "--label" "${INPUT_NEW_LABEL:-}"
   add_compile_context_flags true
 
   if [[ "${INPUT_FOLLOW_DEPS:-false}" == "true" ]]; then
@@ -3852,12 +3848,12 @@ elif [[ "$MODE" == "compare" ]]; then
       echo "::error::mode: compare without a baseline (old-library/abi-baseline both omitted) does not support old-header/old-include -- there is no OLD side for this evidence to describe, and the CLI rejects an explicitly OLD-scoped --header/--include outright rather than silently dropping it (abicheck/frontends/cli/commands/no_baseline_rulings.py's _reject_old_sided_inputs). Set old-library (or abi-baseline) to run a real two-sided comparison, which supports old-header/old-include, or drop these inputs for this audit-only run."
       exit 1
     fi
-    # old-version's Action-level default is the literal placeholder 'old'
+    # old-label's Action-level default is the literal placeholder 'old'
     # (action.yml), always present even when the caller never set it --
     # inert here, not a usage error, same as validate-inputs.sh's mirror
     # check (Codex review, PR #1223, round 11).
-    if [[ -n "${INPUT_OLD_VERSION:-}" && "${INPUT_OLD_VERSION}" != "old" ]]; then
-      echo "::error::mode: compare without a baseline (old-library/abi-baseline both omitted) does not support old-version -- there is no OLD side to label, and the CLI rejects an explicitly OLD-scoped --version outright rather than silently dropping it (abicheck/frontends/cli/commands/no_baseline_rulings.py's _reject_old_sided_inputs). Set old-library (or abi-baseline) to run a real two-sided comparison, which supports old-version, or drop old-version for this audit-only run."
+    if [[ -n "${INPUT_OLD_LABEL:-}" && "${INPUT_OLD_LABEL}" != "old" ]]; then
+      echo "::error::mode: compare without a baseline (old-library/abi-baseline both omitted) does not support old-label -- there is no OLD side to label, and the CLI rejects an explicitly OLD-scoped --version outright rather than silently dropping it (abicheck/frontends/cli/commands/no_baseline_rulings.py's _reject_old_sided_inputs). Set old-library (or abi-baseline) to run a real two-sided comparison, which supports old-label, or drop old-label for this audit-only run."
       exit 1
     fi
   fi
@@ -3880,15 +3876,15 @@ elif [[ "$MODE" == "compare" ]]; then
   # silently dropped here. public-header-dir has no dedicated `compare`
   # flag (unlike legacy `scan`) -- it folds into -H, the same directory
   # provenance-and-extraction-scope role a bare -H root already plays.
-  # old-version is rejected upfront above too, same as old-header/
-  # old-include -- only new-version is forwarded on this shape.
+  # old-label is rejected upfront above too, same as old-header/
+  # old-include -- only new-label is forwarded on this shape.
   if [[ "$_NO_BASELINE" == "true" ]]; then
     add_flag "-H" "${INPUT_HEADER:-}"
     add_flag "-H" "${INPUT_NEW_HEADER:-}"
-    add_flag "-H" "${INPUT_PUBLIC_HEADER_DIR:-}"
+    add_flag "-H" "${INPUT_PUBLIC_HEADER_DIRS:-}"
     add_flag "-I" "${INPUT_INCLUDE:-}"
     add_flag "-I" "${INPUT_NEW_INCLUDE:-}"
-    _extra_args_names_label || add_sided_scalar_flag "--label" "new" "${INPUT_NEW_VERSION:-}"
+    _extra_args_names_label || add_sided_scalar_flag "--label" "new" "${INPUT_NEW_LABEL:-}"
   else
     add_flag "-H" "${INPUT_HEADER:-}"
     add_sided_flag "--header" "old" "${INPUT_OLD_HEADER:-}"
@@ -3896,8 +3892,8 @@ elif [[ "$MODE" == "compare" ]]; then
     add_flag "-I" "${INPUT_INCLUDE:-}"
     add_sided_flag "--include" "old" "${INPUT_OLD_INCLUDE:-}"
     add_sided_flag "--include" "new" "${INPUT_NEW_INCLUDE:-}"
-    _extra_args_names_label || add_sided_scalar_flag "--label" "old" "${INPUT_OLD_VERSION:-}"
-    _extra_args_names_label || add_sided_scalar_flag "--label" "new" "${INPUT_NEW_VERSION:-}"
+    _extra_args_names_label || add_sided_scalar_flag "--label" "old" "${INPUT_OLD_LABEL:-}"
+    _extra_args_names_label || add_sided_scalar_flag "--label" "new" "${INPUT_NEW_LABEL:-}"
   fi
   # The L2 compile-context inputs (lang/ast-frontend/gcc-*/sysroot/nostdinc)
   # reach the CLI as a synthesized `--config` `compile:` overlay (Phase 7
@@ -4149,11 +4145,10 @@ elif [[ "$MODE" == "compare" ]]; then
     fi
   fi
 
-  # `--policy` takes both operands now: a built-in profile name, or a policy
-  # document (a path, or a packaged built-in like `security`). A policy-file
-  # input therefore *is* the policy for this run and outranks the profile,
-  # exactly as the removed `--policy-file` flag did.
-  add_single_flag "--policy" "${INPUT_POLICY_FILE:-${INPUT_POLICY:-}}"
+  # `--policy` takes both operands: a built-in profile name, or a policy
+  # document (a path, or a packaged built-in like `security`). The `policy`
+  # input carries either one (ADR-091 R2; the policy-file input is retired).
+  add_single_flag "--policy" "${INPUT_POLICY:-}"
   add_line_flags "--suppress" "${INPUT_SUPPRESS:-}"
   # ADR-067 D5: this run's acknowledgment records. Operator-named, like
   # `suppress`, so the CLI trusts it to supply records (a discovered
@@ -4208,17 +4203,8 @@ elif [[ "$MODE" == "compare" ]]; then
   # than left to the CLI's own single-file warning.
   if _is_release_style_operand "${INPUT_OLD_LIBRARY:-}" \
      || _is_release_style_operand "${INPUT_NEW_LIBRARY:-}"; then
-    add_sided_flag "--debug-info" "old" "${INPUT_DEBUG_INFO1:-}"
-    add_sided_flag "--debug-info" "new" "${INPUT_DEBUG_INFO2:-}"
-    # one-comparison-product.md Phase 7n: the CLI's own --devel-pkg is gone --
-    # a development package is one of -H/--header's transports now, recognised
-    # from the operand's own package content rather than its name. The
-    # Action's devel-pkg1/devel-pkg2 *inputs* are unchanged (an Action input
-    # name is its own contract, ADR-068's Action-input-lifecycle amendment);
-    # only their translation to the CLI moves, the same shape as
-    # required-symbols above.
-    add_sided_flag "--header" "old" "${INPUT_DEVEL_PKG1:-}"
-    add_sided_flag "--header" "new" "${INPUT_DEVEL_PKG2:-}"
+    add_sided_flag "--debug-info" "old" "${INPUT_OLD_DEBUG_INFO:-}"
+    add_sided_flag "--debug-info" "new" "${INPUT_NEW_DEBUG_INFO:-}"
 
     # Phase 7d: --dso-only/--include-private-dso/--fail-on-removed-library
     # are gone from the CLI -- synthesized into a --config overlay instead
@@ -4338,7 +4324,7 @@ if [[ -n "${INPUT_EXTRA_ARGS:-}" ]]; then
   # account. Caught here, once, right before the append that would create
   # the collision.
   if _cmd_has_config_flag && _extra_args_has_config_flag; then
-    echo "::error::extra-args passes its own --config, which conflicts with the --config this Action already synthesized from a dso-only/fail-on-removed-library/include-private-dso/analysis-assurance-complete/compile-context input (both cannot be honored -- Click keeps only the last one, silently dropping the other). Use the 'build-config' input instead of 'extra-args: --config ...' when combining a synthesized setting with a project config file; it merges with, rather than replaces, the synthesized overlay."
+    echo "::error::extra-args passes its own --config, which conflicts with the --config this Action already synthesized from a dso-only/fail-on-removed-library/include-private-dso/require-complete/compile-context input (both cannot be honored -- Click keeps only the last one, silently dropping the other). Use the 'build-config' input instead of 'extra-args: --config ...' when combining a synthesized setting with a project config file; it merges with, rather than replaces, the synthesized overlay."
     exit 1
   fi
   # A flag `compare` genuinely lacks -- `--pattern-verdicts` included --
@@ -6294,8 +6280,8 @@ if [[ "${INPUT_ADD_JOB_SUMMARY:-true}" == "true" && "$MODE" != "dump" ]]; then
       fi
       printf '%s\n' "| Depth | $(_sanitize_annotation "${INPUT_DEPTH:-headers}") |"
     elif [[ "$MODE" == "compare" ]]; then
-      echo "| Old | \`${INPUT_OLD_LIBRARY:-}\` (${INPUT_OLD_VERSION:-old}) |"
-      echo "| New | \`${INPUT_NEW_LIBRARY:-}\` (${INPUT_NEW_VERSION:-new}) |"
+      echo "| Old | \`${INPUT_OLD_LIBRARY:-}\` (${INPUT_OLD_LABEL:-old}) |"
+      echo "| New | \`${INPUT_NEW_LIBRARY:-}\` (${INPUT_NEW_LABEL:-new}) |"
       echo "| Policy | ${INPUT_POLICY:-strict_abi} |"
     elif [[ "$MODE" == "deps-compare" ]]; then
       echo "| Binary | \`${INPUT_NEW_LIBRARY:-}\` |"

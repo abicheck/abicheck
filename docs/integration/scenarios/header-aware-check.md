@@ -16,14 +16,14 @@ comparison.
 
 ## The check
 
-Set `requested-depth: headers` (or the equivalent `--depth headers` on the
+Set `depth: headers` (or the equivalent `--depth headers` on the
 CLI/root Action) and point at your header root:
 
 ```yaml
 - uses: abicheck/abicheck/actions/check-target@c9e135a3233b6d45e9571533f71293fde458a469  # not yet in a tagged release; pin main or newer
   with:
     name: libfoo
-    requested-depth: headers
+    depth: headers
     header: include/
     # ... baseline/candidate inputs per your channel, see the other scenarios ...
 ```

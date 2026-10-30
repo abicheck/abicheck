@@ -110,7 +110,7 @@ from `action.yml`), see the
     The Action drives the same [five-layer evidence
     model](../learn/evidence-and-detectability.md) as the CLI. The inputs
     above cover **L0** (`old-library`/`new-library`), **L1** (debug info —
-    embedded, or `debug-info1`/`debug-info2` packages when `old-library`/
+    embedded, or `old-debug-info`/`new-debug-info` packages when `old-library`/
     `new-library` are directories or packages), and **L2** (`header`/`include`).
 
     The deeper layers — **L3** build context, **L4** source-ABI replay, and
@@ -151,20 +151,19 @@ of a real library, not headers-only).
 
 | Input | Default | Description |
 |-------|---------|-------------|
-| `old-version` | `old` | Version label for old library |
-| `new-version` | `new` | Version label for new library |
+| `old-label` | `old` | Version label for the old library (embedded in reports). Replaces the retired `old-version`. |
+| `new-label` | `new` | Version label for the new library (embedded in reports). Replaces the retired `new-version`. |
 
 ### Language and compiler
 
 | Input | Default | Description |
 |-------|---------|-------------|
 | `lang` | `c++` | Language mode for the header backend: `c++` or `c` |
-| `ast-frontend` | `auto` (resolves to castxml, fail-closed) | L2 header-AST frontend (dump mode, and compare mode on any operand shape — single-pair two-sided, audit-only, and directory/package release alike): `auto`, `castxml`, `clang`, or `hybrid`. Like `dump` and single-pair `compare`, this Action folds it into a synthesized `.abicheck.yml` `compile:` block forwarded via `--config` instead (along with gcc-path/gcc-prefix/gcc-options/sysroot/nostdinc/lang, when any of those are also set — combining this group with `build-config` is supported: the synthesized `compile:` block merges into a copy of the named build-config, and this Action's input wins on a key conflict). Pass `--allow-ast-frontend-fallback`/`--frontend-context` via `extra-args` for the opt-in castxml→clang fallback or SYCL/DPC++ device context on any mode (set `.abicheck.yml`'s `compile.ast_frontend_fallback`/`compile.frontend_context` directly instead if `extra-args` isn't reaching the mode you need — those two flags have no CLI of their own on any mode). Same as `ABICHECK_AST_FRONTEND`. See [Header-Backend Capabilities](../reference/header-backend-capabilities.md) for the full resolution contract (fallback triggers, the device-context exception, and how an env pin interacts with both). |
-| `gcc-path` | — | Path to cross-compiler binary (dump and compare modes, any operand shape) — see `ast-frontend` above for how this reaches every mode now that the underlying `--compiler` CLI flag is gone from all of them |
-| `gcc-prefix` | — | Cross-toolchain prefix, e.g. `aarch64-linux-gnu-` (dump and compare modes, any operand shape) — same note as gcc-path above; a full gcc-path wins if both are set, since the merged `compile.compiler` config key can only hold one |
-| `gcc-options` | — | Extra flags for the header frontend (dump and compare modes, any operand shape) — folds into the same synthesized `compile:` block `ast-frontend` above describes. A whitespace-containing flag (e.g. `-DMSG="hello world"`) is rejected with a clear error, since a raw CLI arg isn't subject to `compile.options`' own one-atom-per-entry, whitespace-free contract. |
-| `sysroot` | — | Alternative system root (dump/deps-tree modes, and compare mode on any operand shape) — same note as gcc-path above for dump/compare; `deps-tree` keeps its own direct `--root` forwarding, unaffected (it is not part of this compile-context group at all) |
-| `nostdinc` | `false` | Skip standard include paths (dump and compare modes, any operand shape) — same note as gcc-path above |
+| `frontend` | `auto` (resolves to castxml, fail-closed) | L2 header-AST frontend (dump mode, and compare mode on any operand shape — single-pair two-sided, audit-only, and directory/package release alike): `auto`, `castxml`, `clang`, or `hybrid`. Like `dump` and single-pair `compare`, this Action folds it into a synthesized `.abicheck.yml` `compile:` block forwarded via `--config` instead (along with compiler/compile-options/sysroot/nostdinc/lang, when any of those are also set — combining this group with `build-config` is supported: the synthesized `compile:` block merges into a copy of the named build-config, and this Action's input wins on a key conflict). Pass `--allow-ast-frontend-fallback`/`--frontend-context` via `extra-args` for the opt-in castxml→clang fallback or SYCL/DPC++ device context on any mode (set `.abicheck.yml`'s `compile.ast_frontend_fallback`/`compile.frontend_context` directly instead if `extra-args` isn't reaching the mode you need — those two flags have no CLI of their own on any mode). Same as `ABICHECK_AST_FRONTEND`. See [Header-Backend Capabilities](../reference/header-backend-capabilities.md) for the full resolution contract (fallback triggers, the device-context exception, and how an env pin interacts with both). |
+| `compiler` | — | Path to the cross-compiler binary, or a cross-toolchain prefix such as `aarch64-linux-gnu-` (a trailing `-` is read as a prefix, anything else as a path). Dump and compare modes, any operand shape — see `frontend` above for how this reaches every mode. Replaces the retired `gcc-path` and `gcc-prefix` inputs. |
+| `compile-options` | — | Extra flags for the header frontend (dump and compare modes, any operand shape) — folds into the same synthesized `compile:` block `frontend` above describes. Replaces the retired `gcc-options`. A whitespace-containing flag (e.g. `-DMSG="hello world"`) is rejected with a clear error, since a raw CLI arg isn't subject to `compile.options`' own one-atom-per-entry, whitespace-free contract. |
+| `sysroot` | — | Alternative system root (dump/deps-tree modes, and compare mode on any operand shape) — same note as `compiler` above for dump/compare; `deps-tree` keeps its own direct `--root` forwarding, unaffected (it is not part of this compile-context group at all) |
+| `nostdinc` | `false` | Skip standard include paths (dump and compare modes, any operand shape) — same note as `compiler` above |
 
 A directory/package (release/bundle) `compare` operand supports these six
 inputs too: the per-library fan-out threads this both-sides L2 compile
@@ -231,8 +230,7 @@ degrades gracefully and L0–L2 stay authoritative.
 | `dry-run` | `false` | Resolve inputs/config and print what the run would do, without analyzing anything or writing output. Exits 0 for a resolvable preview — but an invalid flag combination or an unsatisfiable requested depth/evidence contract still exits nonzero, same as the real run would (see the [inputs reference](../reference/github-action-inputs.md) for the one deliberate exception, an unresolved baseline). Maps to `--dry-run`; supported by every mode, including compare's audit-only shape. |
 | `estimate` | — | **Retired** (0.6, hard removal): this applied only to the now-removed `mode: scan`, as a `dry-run` alias. Use `dry-run: 'true'` instead, which applies to every mode. Setting `estimate` is now a hard error naming that replacement. |
 | `audit` | — | **Retired** (0.6, hard removal): this applied only to the now-removed `mode: scan`, forcing a one-build audit-only run. Under `mode: compare`, simply omit `old-library`/`abi-baseline` to run an audit-only `compare --no-baseline`; set `severity-preset` (e.g. `default`) if this job should still gate on a `BREAKING`/`API_BREAK`-classified finding the way `mode: scan`'s own audit mode always did. Setting `audit` is now a hard error naming that replacement. |
-| `policy` | `strict_abi` | Built-in policy: `strict_abi`, `sdk_vendor`, `plugin_abi` |
-| `policy-file` | — | Custom YAML policy file |
+| `policy` | `strict_abi` | Policy for the run: a built-in profile name (`strict_abi`, `sdk_vendor`, `plugin_abi`, or a packaged one such as `security`) or the path to a YAML policy file. Replaces the retired `policy-file`. |
 | `suppress` | — | YAML suppression file (supports `label`, `source_location`, `expires`); one path per line for several files |
 | `verbose` | `false` | Enable debug output |
 
@@ -377,10 +375,10 @@ operands themselves, so there is no separate mode to select.
 
 | Input | Default | Description |
 |-------|---------|-------------|
-| `debug-info1` | — | Debug info package for old side (RPM/Deb/tar) |
-| `debug-info2` | — | Debug info package for new side (RPM/Deb/tar) |
-| `devel-pkg1` | — | Development package with headers for old side |
-| `devel-pkg2` | — | Development package with headers for new side |
+| `old-debug-info` | — | Debug info package for old side (RPM/Deb/tar) |
+| `new-debug-info` | — | Debug info package for new side (RPM/Deb/tar) |
+| `old-header` | — | Header file(s), or a development package (RPM/Deb/tar) with headers, for old side. Replaces the retired `devel-pkg1`. |
+| `new-header` | — | Header file(s), or a development package (RPM/Deb/tar) with headers, for new side. Replaces the retired `devel-pkg2`. |
 | `dso-only` | `false` | Only compare shared objects, skip executables |
 | `include-private-dso` | `false` | Include private (non-public) shared objects |
 | `fail-on-removed-library` | `false` | Exit 8 when a library present in old is *proven* removed in new (NEW must be a stored `ProjectSnapshot` package or bundle-facts document whose capture asserted a complete inventory, `inventory_complete`); an unmatched library under an unproven inventory is an incomplete scope instead, governed by `.abicheck.yml`'s `scope.on_incomplete` key |
@@ -420,7 +418,7 @@ jobs:
           old-library: abi-baseline.json  # committed to repo
           new-library: build/libfoo.so
           new-header: include/foo.h
-          new-version: pr-${{ github.event.pull_request.number }}
+          new-label: pr-${{ github.event.pull_request.number }}
 ```
 
 ### Save a baseline on release
@@ -449,7 +447,7 @@ jobs:
           mode: dump
           new-library: build/libfoo.so
           header: include/foo.h
-          new-version: ${{ github.ref_name }}
+          new-label: ${{ github.ref_name }}
           output-file: abi-baseline.json
 
       - name: Upload baseline as release asset

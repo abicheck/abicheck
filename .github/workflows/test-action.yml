@@ -99,8 +99,8 @@ jobs:
           mode: compare
           old-library: tests/fixtures/action/action_test_v1.json
           new-library: tests/fixtures/action/action_test_v2.json
-          old-version: '1.0'
-          new-version: '2.0'
+          old-label: '1.0'
+          new-label: '2.0'
           format: markdown
           install-deps: false
           fail-on-breaking: false  # don't fail the test job
@@ -128,8 +128,8 @@ jobs:
         with:
           old-library: tests/fixtures/action/action_test_v1.json
           new-library: tests/fixtures/action/action_test_v1_compat.json
-          old-version: '1.0'
-          new-version: '1.1'
+          old-label: '1.0'
+          new-label: '1.1'
           install-deps: false
 
       - name: '[compare-compatible] Verify verdict is COMPATIBLE'
@@ -241,8 +241,8 @@ jobs:
         with:
           old-library: tests/fixtures/action/action_test_v1.json
           new-library: tests/fixtures/action/action_test_v2.json
-          old-version: '1.0'
-          new-version: '2.0'
+          old-label: '1.0'
+          new-label: '2.0'
           format: json
           output-file: test-output.json
           policy: strict_abi
@@ -602,7 +602,7 @@ jobs:
           profile: linux-x86_64-gcc-test
           baseline-channel: accepted-main
           baseline-path: /tmp/baseline-set
-          requested-depth: headers
+          depth: headers
           gate-mode: deferred
           new-library: tests/fixtures/action/action_test_v2.json
           install-deps: false
@@ -767,9 +767,9 @@ jobs:
           new-library: catalog/cases/case01_symbol_removal/libv2.so
           old-header: catalog/cases/case01_symbol_removal/v1.h
           new-header: catalog/cases/case01_symbol_removal/v2.h
-          old-version: '1.0'
-          new-version: '1.1'
-          policy-file: versioning-policy.yml
+          old-label: '1.0'
+          new-label: '1.1'
+          policy: versioning-policy.yml
           extra-args: --use-cases impact-use-cases.yaml -o json=policy-report.json -o markdown=policy-report.md -o html=policy-report.html
           fail-on-breaking: false
 
@@ -782,8 +782,8 @@ jobs:
           new-library: catalog/cases/case01_symbol_removal/libv2.so
           old-header: catalog/cases/case01_symbol_removal/v1.h
           new-header: catalog/cases/case01_symbol_removal/v2.h
-          old-version: '1.0'
-          new-version: '1.1'
+          old-label: '1.0'
+          new-label: '1.1'
           format: json
           output-file: baseline-report.json
           fail-on-breaking: false

@@ -21,12 +21,12 @@ check can run entirely offline/elsewhere, decoupled as two separate steps.
 - uses: abicheck/abicheck/actions/check-target@c9e135a3233b6d45e9571533f71293fde458a469  # not yet in a tagged release; pin main or newer
   with:
     name: libfoo
-    gcc-prefix: arm-linux-gnueabihf-   # or gcc-path: /opt/cross/bin/arm-linux-gnueabihf-gcc
+    compiler: arm-linux-gnueabihf-   # or compiler: /opt/cross/bin/arm-linux-gnueabihf-gcc
     sysroot: /opt/cross/arm-sysroot
     # ... rest of the check as in any other scenario ...
 ```
 
-`gcc-path`/`gcc-prefix`/`gcc-options`/`sysroot` are forwarded straight
+`compiler`/`compile-options`/`sysroot` are forwarded straight
 through to the analysis step in every mode (`compare`/`dump`) — see
 the [`check-target` reference](../../reference/check-target.md) for the full
 input list.
@@ -35,7 +35,7 @@ input list.
 
 - **You're not actually cross-compiling, just building on a different
   distro/toolchain version of the same architecture** → plain
-  [S3](existing-build-artifact.md) already covers that; `gcc-prefix`/
+  [S3](existing-build-artifact.md) already covers that; `compiler`/
   `sysroot` are for when the *target* platform genuinely differs from the
   build host's own.
 - **The cross-compiled binary is one member of a multi-profile matrix**

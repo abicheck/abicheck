@@ -54,7 +54,7 @@ ABICHECK_USES = re.compile(r"^abicheck/abicheck@(?P<ref>\S+)$")
 _SHA = re.compile(r"^[0-9a-f]{40}$")
 _EXACT_TAG = re.compile(r"^v\d+\.\d+\.\d+$")
 RETIRED_INPUTS = ("against", "audit", "estimate", "crosscheck", "risk-rules")
-HEADER_INPUTS = ("header", "new-header", "old-header", "public-header-dir")
+HEADER_INPUTS = ("header", "new-header", "old-header", "public-header-dirs")
 LIBRARY_INPUTS = ("old-library", "new-library", "abi-baseline")
 
 
@@ -789,7 +789,7 @@ def _cross(ctx: Context) -> tuple[bool, str]:
         if s.is_cli:
             ok = bool(re.search(r"aarch64-linux-gnu", s.job.workflow.text + _repo_config(ctx)))
         else:
-            ok = any(k in s.inputs for k in ("gcc-prefix", "gcc-path")) or "aarch64" in str(s.inputs.get("build-config", ""))
+            ok = any(k in s.inputs for k in ("compiler",)) or "aarch64" in str(s.inputs.get("build-config", ""))
             if not ok:
                 ok = any(re.search(r"aarch64-linux-gnu", str(d.get("compile") or "")) for _, d in _configs(ctx))
         if not ok:

@@ -297,16 +297,16 @@ case "$MODE" in
       if [[ -n "${INPUT_OLD_HEADER:-}" || -n "${INPUT_OLD_INCLUDE:-}" ]]; then
         _fail "mode: compare without a baseline (old-library/abi-baseline both omitted) does not support old-header/old-include -- there is no OLD side for this evidence to describe, and the CLI rejects an explicitly OLD-scoped --header/--include outright rather than silently dropping it (abicheck/frontends/cli/commands/no_baseline_rulings.py's _reject_old_sided_inputs). Set old-library (or abi-baseline) to run a real two-sided comparison, which supports old-header/old-include, or drop these inputs for this audit-only run."
       fi
-      # old-version's Action-level default is the literal placeholder
+      # old-label's Action-level default is the literal placeholder
       # 'old' (action.yml), always present even when the caller never set
       # it -- indistinguishable from "not typed", so it is inert here
       # exactly as the CLI's own _SIDED_DEFAULTS treats it, not a usage
       # error. Only a real, non-default value is rejected (Codex review,
       # PR #1223, round 11: the unconditional truthiness check below this
       # comment previously rejected every audit-only invocation, since
-      # INPUT_OLD_VERSION is never actually empty).
-      if [[ -n "${INPUT_OLD_VERSION:-}" && "${INPUT_OLD_VERSION}" != "old" ]]; then
-        _fail "mode: compare without a baseline (old-library/abi-baseline both omitted) does not support old-version -- there is no OLD side to label, and the CLI rejects an explicitly OLD-scoped --version outright rather than silently dropping it (abicheck/frontends/cli/commands/no_baseline_rulings.py's _reject_old_sided_inputs). Set old-library (or abi-baseline) to run a real two-sided comparison, which supports old-version, or drop old-version for this audit-only run."
+      # INPUT_OLD_LABEL is never actually empty).
+      if [[ -n "${INPUT_OLD_LABEL:-}" && "${INPUT_OLD_LABEL}" != "old" ]]; then
+        _fail "mode: compare without a baseline (old-library/abi-baseline both omitted) does not support old-label -- there is no OLD side to label, and the CLI rejects an explicitly OLD-scoped --version outright rather than silently dropping it (abicheck/frontends/cli/commands/no_baseline_rulings.py's _reject_old_sided_inputs). Set old-library (or abi-baseline) to run a real two-sided comparison, which supports old-label, or drop old-label for this audit-only run."
       fi
     fi
     # compare's full renderable-format set (behind `-o FORMAT=DESTINATION`)
@@ -381,17 +381,15 @@ if { [[ -n "$NEW_LIBRARY" ]] && _is_release_style_operand "$NEW_LIBRARY"; } \
   _RELEASE_STYLE_OPERAND=true
 fi
 
-# debug-info1/2, devel-pkg1/2, dso-only, include-private-dso,
+# old-debug-info/new-debug-info, dso-only, include-private-dso,
 # fail-on-removed-library: compare mode, directory/package operands only
 # (action/run.sh's `_is_release_style_operand()` guard). Name/value kept as
 # separate parallel arrays (not a single colon-joined string) since these
 # values are often paths and may legitimately contain a colon themselves.
-_pkg_input_names=(debug-info1 debug-info2 devel-pkg1 devel-pkg2)
+_pkg_input_names=(old-debug-info new-debug-info)
 _pkg_input_values=(
-  "${INPUT_DEBUG_INFO1:-}"
-  "${INPUT_DEBUG_INFO2:-}"
-  "${INPUT_DEVEL_PKG1:-}"
-  "${INPUT_DEVEL_PKG2:-}"
+  "${INPUT_OLD_DEBUG_INFO:-}"
+  "${INPUT_NEW_DEBUG_INFO:-}"
 )
 for _i in "${!_pkg_input_names[@]}"; do
   if [[ -n "${_pkg_input_values[$_i]}" ]] && { [[ "$MODE" != "compare" ]] || [[ "$_RELEASE_STYLE_OPERAND" != "true" ]]; }; then
@@ -411,18 +409,18 @@ for _i in "${!_bool_input_names[@]}"; do
   fi
 done
 
-# analysis-assurance-complete: a tri-state, per-job override of
+# require-complete: a tri-state, per-job override of
 # assurance.require_complete (action.yml's own description has the full
 # account). Unset inherits the config; 'true' and 'false' both overlay it, in
 # either direction. Any other value is refused outright, rather than reading
 # as "inherit" the way an unrecognized value would. compare mode only: that is
 # the only shape whose exit code carries the assurance floor.
-case "${INPUT_ANALYSIS_ASSURANCE_COMPLETE:-}" in
+case "${INPUT_REQUIRE_COMPLETE:-}" in
   '' | true | false) ;;
-  *) _fail "analysis-assurance-complete '${INPUT_ANALYSIS_ASSURANCE_COMPLETE}' is not recognized. Use 'true' or 'false' to override assurance.require_complete for this run, or leave it unset to inherit .abicheck.yml." ;;
+  *) _fail "require-complete '${INPUT_REQUIRE_COMPLETE}' is not recognized. Use 'true' or 'false' to override assurance.require_complete for this run, or leave it unset to inherit .abicheck.yml." ;;
 esac
-if [[ -n "${INPUT_ANALYSIS_ASSURANCE_COMPLETE:-}" && "$MODE" != "compare" ]]; then
-  _warn "analysis-assurance-complete is set but has no effect: it only applies to mode: compare (mode is '$MODE')."
+if [[ -n "${INPUT_REQUIRE_COMPLETE:-}" && "$MODE" != "compare" ]]; then
+  _warn "require-complete is set but has no effect: it only applies to mode: compare (mode is '$MODE')."
 fi
 
 # used-by/required-symbol/required-symbols: compare mode only
@@ -563,7 +561,7 @@ fi
 # legacy `scan`'s identical audit-only shape did. run.sh's other branches
 # never forward it, so a caller setting it there would have the input
 # silently discarded without this warning (Codex review).
-_PUBLIC_HEADER_DIR="${INPUT_PUBLIC_HEADER_DIR:-}"
+_PUBLIC_HEADER_DIR="${INPUT_PUBLIC_HEADER_DIRS:-}"
 _COMPARE_NO_BASELINE=false
 if [[ "$MODE" == "compare" && -z "$OLD_LIBRARY" && -z "${INPUT_ABI_BASELINE:-}" ]]; then
   _COMPARE_NO_BASELINE=true
@@ -642,6 +640,30 @@ fi
 if [[ -n "${INPUT_BUNDLE_SYSTEM_PROVIDERS:-}" ]]; then
   _fail "bundle-system-providers ('${INPUT_BUNDLE_SYSTEM_PROVIDERS}') was removed and is no longer forwarded — leaving it set would silently analyse with a different system-provider allow-list than you asked for. Move the list to your .abicheck.yml's \`bundle.system_providers:\` block and pass that file as build-config, then remove this input."
 fi
+# ADR-091 renames (2026-10-30, no transition period): each old Action input
+# is a RETIRED tombstone that fails the run before any analysis and names its
+# replacement. Consumed only here (action.yml never forwards them to run.sh).
+_renamed_inputs=(
+  "policy-file:INPUT_POLICY_FILE:policy"
+  "ast-frontend:INPUT_AST_FRONTEND:frontend"
+  "gcc-path:INPUT_GCC_PATH:compiler"
+  "gcc-prefix:INPUT_GCC_PREFIX:compiler"
+  "gcc-options:INPUT_GCC_OPTIONS:compile-options"
+  "analysis-assurance-complete:INPUT_ANALYSIS_ASSURANCE_COMPLETE:require-complete"
+  "public-header-dir:INPUT_PUBLIC_HEADER_DIR:public-header-dirs"
+  "debug-info1:INPUT_DEBUG_INFO1:old-debug-info"
+  "debug-info2:INPUT_DEBUG_INFO2:new-debug-info"
+  "devel-pkg1:INPUT_DEVEL_PKG1:old-header"
+  "devel-pkg2:INPUT_DEVEL_PKG2:new-header"
+  "old-version:INPUT_OLD_VERSION:old-label"
+  "new-version:INPUT_NEW_VERSION:new-label"
+)
+for _entry in "${_renamed_inputs[@]}"; do
+  IFS=: read -r _old_name _old_var _new_name <<<"$_entry"
+  if [[ -n "${!_old_var:-}" ]]; then
+    _fail "${_old_name} is RETIRED and no longer accepted: it was renamed to ${_new_name} (ADR-091). Replace ${_old_name} with ${_new_name} in your workflow, then remove ${_old_name}."
+  fi
+done
 # require-complete-analysis: RETIRED (rulings.py deferred-option followup --
 # hard removal, no deprecation window, no config-overlay synthesis the way
 # dso-only/fail-on-removed-library got, since the CLI-side flag itself is
@@ -650,7 +672,7 @@ fi
 # set would silently drop the requested orthogonal exit-1 assurance floor
 # rather than actually enforcing it, so this is a hard error, not a warning.
 if [[ "${INPUT_REQUIRE_COMPLETE_ANALYSIS:-false}" != "false" ]]; then
-  _fail "require-complete-analysis ('${INPUT_REQUIRE_COMPLETE_ANALYSIS}') was removed and is no longer forwarded — leaving it set would silently analyse without the orthogonal exit-1 assurance floor you asked for. Set \`assurance.require_complete: true\` in your .abicheck.yml and pass that file as build-config instead, then remove this input."
+  _fail "require-complete-analysis ('${INPUT_REQUIRE_COMPLETE_ANALYSIS}') was removed. Its replacement is require-complete, the per-job override of assurance.require_complete. Set assurance.require_complete: true in your .abicheck.yml and pass that file as build-config instead, or use require-complete, then remove this input."
 fi
 
 if [[ "$UPLOAD_SARIF" == "true" && "$MODE" != "compare" ]]; then

@@ -63,8 +63,8 @@ jobs:
           old-header: old/<public-headers>
           new-header: new/<public-headers>
           lang: <lang>
-          old-version: ${{ github.event.pull_request.base.sha }}
-          new-version: ${{ github.event.pull_request.head.sha }}
+          old-label: ${{ github.event.pull_request.base.sha }}
+          new-label: ${{ github.event.pull_request.head.sha }}
           fail-on-breaking: 'true'
 ```
 

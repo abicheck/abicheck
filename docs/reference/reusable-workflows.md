@@ -261,7 +261,7 @@ profile that sets no `frontend:` falls back to the global input unchanged.
 
 **`kind: bundle` cells are excluded from this override.** A bundle cell's
 operand is the `bundle-staging` *directory* it stages its members into, and
-the root Action rejects every non-`auto` `ast-frontend` for a
+the root Action rejects every non-`auto` `frontend` for a
 directory/package operand outright — the per-library fan-out never threads an
 L2 compile context to each pair's header dump, so the requested frontend
 could not be applied and silently dropping it would parse headers under the

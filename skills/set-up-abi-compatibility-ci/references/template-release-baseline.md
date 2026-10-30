@@ -57,7 +57,7 @@ jobs:
           new-library: <lib-path>
           header: <public-headers>
           lang: <lang>
-          new-version: ${{ env.TAG }}
+          new-label: ${{ env.TAG }}
           output-file: <lib>.abicheck.json
 
       - name: Attach snapshot to the release (write-once)
@@ -119,7 +119,7 @@ jobs:
           new-library: <lib-path>
           new-header: <public-headers>
           lang: <lang>
-          new-version: ${{ github.event.pull_request.head.sha || github.sha }}
+          new-label: ${{ github.event.pull_request.head.sha || github.sha }}
           # Advisory during rollout; flip to the label expression when blocking:
           #   ${{ !contains(github.event.pull_request.labels.*.name, 'abi-break-approved') }}
           fail-on-breaking: 'false'
@@ -202,7 +202,7 @@ root Action reads the target's snapshot out of the release archive:
           new-library: <lib-path>
           new-header: <public-headers>
           lang: <lang>
-          new-version: ${{ github.event.pull_request.head.sha || github.sha }}
+          new-label: ${{ github.event.pull_request.head.sha || github.sha }}
           fail-on-breaking: 'false'
           fail-on-api-break: 'false'
 ```
@@ -240,7 +240,7 @@ as an empty or stale baseline), then compare against the snapshot it returns:
           new-library: <lib-path>
           new-header: <public-headers>
           lang: <lang>
-          new-version: ${{ github.event.pull_request.head.sha || github.sha }}
+          new-label: ${{ github.event.pull_request.head.sha || github.sha }}
           fail-on-breaking: 'false'
           fail-on-api-break: 'false'
 ```

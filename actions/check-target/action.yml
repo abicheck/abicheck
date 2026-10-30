@@ -132,7 +132,7 @@ inputs:
       docstring).
     required: false
     default: 'false'
-  requested-depth:
+  depth:
     description: 'Evidence-depth this check asks for: binary, headers, build, or source.'
     required: true
   explicit-id:
@@ -140,7 +140,7 @@ inputs:
       This check's checks[].id (G42 "Explicit check identifiers"), if the
       project declared one -- folded into check_id's '~<explicit_id>' tail
       so two checks[] entries sharing (name, profile, baseline-channel,
-      requested-depth) but declaring different analysis: each produce a
+      depth) but declaring different analysis: each produce a
       distinct, non-colliding check_id/report. Omit (default) for the
       pre-G42, unqualified check_id shape.
     required: false
@@ -222,16 +222,13 @@ inputs:
     description: 'Language mode for header AST parsing: "c++" or "c". Forwarded to the internal analysis step.'
     required: false
     default: 'c++'
-  ast-frontend:
+  frontend:
     description: 'L2 header-AST frontend: auto, castxml, clang, or hybrid. Forwarded to the internal analysis step.'
     required: false
-  gcc-path:
+  compiler:
     description: 'Path to GCC/G++ cross-compiler binary (the CLI --compiler). Forwarded to the internal analysis step.'
     required: false
-  gcc-prefix:
-    description: 'Cross-toolchain prefix, e.g. aarch64-linux-gnu- (the CLI --compiler-prefix). Forwarded to the internal analysis step.'
-    required: false
-  gcc-options:
+  compile-options:
     description: 'Extra compiler flags passed through to the header frontend (the CLI --compiler-option). Forwarded to the internal analysis step.'
     required: false
   consumer-ast-frontend:
@@ -278,16 +275,13 @@ inputs:
   consumer-binary:
     description: 'target-kind: app-consumer only. Consumer binary/binaries whose imports scope the comparison (forwarded as --used-by).'
     required: false
-  contract-file:
+  contract:
     description: 'target-kind: plugin-contract only. A .syms file (one required linker symbol per line, # comments allowed), forwarded as --required-symbols.'
     required: false
   policy:
     description: 'Built-in policy profile: strict_abi (default), sdk_vendor, plugin_abi. Forwarded to the internal analysis step.'
     required: false
     default: 'strict_abi'
-  policy-file:
-    description: 'Path to a YAML policy file with per-kind verdict overrides. Forwarded to the internal analysis step.'
-    required: false
   suppress:
     description: 'Path to a YAML suppression file to filter known/intentional changes. Forwarded to the internal analysis step.'
     required: false
@@ -316,16 +310,16 @@ inputs:
       `.abicheck.yml`'s `assurance.require_complete: true`, with no CLI or
       Action-input override. Still declared so a workflow that sets it
       gets an explicit `::error::` instead of a silently-ignored input.
-      See `analysis-assurance-complete` below for how
+      See `require-complete` below for how
       `checks[].analysis.assurance: complete` (product-gaps audit §3) is
       now enforced instead.
     required: false
     default: 'false'
-  analysis-assurance-complete:
+  require-complete:
     description: >
       Tri-state per-job override of `.abicheck.yml`'s
       `assurance.require_complete`, mirroring the root Action's own
-      `analysis-assurance-complete` input. 'true' is what a cell that declared
+      `require-complete` input. 'true' is what a cell that declared
       `checks[].analysis.assurance: complete` (RunPlanCheck.analysis_assurance,
       validated at run-plan generation time by project_targets.py's
       analysis_assurance_gate.py, which still accepts only 'complete') forwards:
@@ -399,6 +393,64 @@ inputs:
     required: false
     default: ''
 
+  # ── Retired inputs (ADR-091 renames) ────────────────────────────────────
+  requested-depth:
+    description: >
+      RETIRED (ADR-091, no transition period): renamed to `depth`.
+      Setting this input fails the run before any analysis with an
+      `::error::` naming `depth`. Replace `requested-depth` with `depth`, then
+      remove `requested-depth`.
+    required: false
+  contract-file:
+    description: >
+      RETIRED (ADR-091, no transition period): renamed to `contract`.
+      Setting this input fails the run before any analysis with an
+      `::error::` naming `contract`. Replace `contract-file` with `contract`, then
+      remove `contract-file`.
+    required: false
+  ast-frontend:
+    description: >
+      RETIRED (ADR-091, no transition period): renamed to `frontend`.
+      Setting this input fails the run before any analysis with an
+      `::error::` naming `frontend`. Replace `ast-frontend` with `frontend`, then
+      remove `ast-frontend`.
+    required: false
+  gcc-path:
+    description: >
+      RETIRED (ADR-091, no transition period): renamed to `compiler`.
+      Setting this input fails the run before any analysis with an
+      `::error::` naming `compiler`. Replace `gcc-path` with `compiler`, then
+      remove `gcc-path`.
+    required: false
+  gcc-options:
+    description: >
+      RETIRED (ADR-091, no transition period): renamed to `compile-options`.
+      Setting this input fails the run before any analysis with an
+      `::error::` naming `compile-options`. Replace `gcc-options` with `compile-options`, then
+      remove `gcc-options`.
+    required: false
+  analysis-assurance-complete:
+    description: >
+      RETIRED (ADR-091, no transition period): renamed to `require-complete`.
+      Setting this input fails the run before any analysis with an
+      `::error::` naming `require-complete`. Replace `analysis-assurance-complete` with `require-complete`, then
+      remove `analysis-assurance-complete`.
+    required: false
+  gcc-prefix:
+    description: >
+      RETIRED (ADR-091, no transition period): renamed to `compiler`.
+      Setting this input fails the run before any analysis with an
+      `::error::` naming `compiler`. Replace `gcc-prefix` with `compiler`, then
+      remove `gcc-prefix`.
+    required: false
+  policy-file:
+    description: >
+      RETIRED (ADR-091, no transition period): renamed to `policy`.
+      Setting this input fails the run before any analysis with an
+      `::error::` naming `policy`. Replace `policy-file` with `policy`, then
+      remove `policy-file`.
+    required: false
+
 outputs:
   outcome:
     description: 'resolve-baseline outcome (resolved, not_found, ambiguous, wrong_profile, stale_schema, incompatible_evidence, wrong_project_ref, stale_generation, new_target), or "skipped" when baseline-channel is none.'
@@ -425,6 +477,15 @@ runs:
     - name: Validate check-target inputs
       shell: bash
       env:
+        # Retired inputs (ADR-091 renames): tombstones rejected in validate-inputs.sh.
+        INPUT_REQUESTED_DEPTH: ${{ inputs.requested-depth }}
+        INPUT_CONTRACT_FILE: ${{ inputs.contract-file }}
+        INPUT_AST_FRONTEND: ${{ inputs.ast-frontend }}
+        INPUT_GCC_PATH: ${{ inputs.gcc-path }}
+        INPUT_GCC_PREFIX: ${{ inputs.gcc-prefix }}
+        INPUT_GCC_OPTIONS: ${{ inputs.gcc-options }}
+        INPUT_POLICY_FILE: ${{ inputs.policy-file }}
+        INPUT_ANALYSIS_ASSURANCE_COMPLETE: ${{ inputs.analysis-assurance-complete }}
         INPUT_KIND: ${{ inputs.kind }}
         INPUT_TARGET_KIND: ${{ inputs.target-kind }}
         INPUT_NAME: ${{ inputs.name }}
@@ -433,13 +494,13 @@ runs:
         INPUT_BASELINE_CHANNEL: ${{ inputs.baseline-channel }}
         INPUT_BASELINE_PATH: ${{ inputs.baseline-path }}
         INPUT_GATE_MODE: ${{ inputs.gate-mode }}
-        INPUT_REQUESTED_DEPTH: ${{ inputs.requested-depth }}
+        INPUT_DEPTH: ${{ inputs.depth }}
         INPUT_EVIDENCE_PRODUCER: ${{ inputs.evidence-producer }}
         INPUT_CONSUMER_BINARY: ${{ inputs.consumer-binary }}
-        INPUT_CONTRACT_FILE: ${{ inputs.contract-file }}
+        INPUT_CONTRACT: ${{ inputs.contract }}
         INPUT_ALLOW_NEW_TARGET: ${{ inputs.allow-new-target }}
         INPUT_REQUIRE_COMPLETE_ANALYSIS: ${{ inputs.require-complete-analysis }}
-        INPUT_ANALYSIS_ASSURANCE_COMPLETE: ${{ inputs.analysis-assurance-complete }}
+        INPUT_REQUIRE_COMPLETE: ${{ inputs.require-complete }}
       run: bash "${{ github.action_path }}/validate-inputs.sh"
 
     # ── Capture this Action's own identity before any nested `uses:` step ──
@@ -615,16 +676,15 @@ runs:
         header: ${{ inputs.new-header != '' && inputs.new-header || inputs.header }}
         include: ${{ inputs.new-include != '' && inputs.new-include || inputs.include }}
         lang: ${{ inputs.lang }}
-        ast-frontend: ${{ inputs.consumer-ast-frontend }}
-        gcc-path: ${{ inputs.consumer-gcc-path }}
-        gcc-prefix: ${{ inputs.gcc-prefix }}
-        gcc-options: ${{ inputs.consumer-gcc-options }}
+        frontend: ${{ inputs.consumer-ast-frontend }}
+        compiler: ${{ inputs.consumer-gcc-path }}
+        compile-options: ${{ inputs.consumer-gcc-options }}
         sysroot: ${{ inputs.sysroot }}
         sources: ${{ inputs.sources != '' && inputs.sources || (inputs.evidence-producer == 'replay' && '.' || '') }}
         build-info: ${{ (inputs.evidence-producer == 'wrapper' || inputs.evidence-producer == 'clang-plugin') && inputs.evidence-pack-path || inputs.build-info }}
         compile-db: ${{ inputs.compile-db }}
         build-config: ${{ inputs.build-config }}
-        depth: ${{ inputs.requested-depth }}
+        depth: ${{ inputs.depth }}
         output-file: check-target-consumer.abi.json
         add-job-summary: 'false'
         install-deps: ${{ inputs.install-deps }}
@@ -659,7 +719,7 @@ runs:
     # ── Assurance overlay: config-overlay replacement for the retired ───────
     # require-complete-analysis input/flag (see that input's own docstring
     # above), analogous to the CLI's own release-topology inputs
-    # (dso-only/fail-on-removed-library). `analysis-assurance-complete`
+    # (dso-only/fail-on-removed-library). `require-complete`
     # carries `checks[].analysis.assurance == 'complete'` (RunPlanCheck.
     # analysis_assurance) forwarded from check-project.yml's own run-plan
     # cell; since P0.4's ANALYSIS_INCOMPLETE axis is config-only now (no CLI
@@ -681,7 +741,7 @@ runs:
     # so it does not need that same adjacency guarantee.
     - name: Generate assurance-overlay config
       id: assurance_overlay
-      if: inputs.analysis-assurance-complete != ''
+      if: inputs.require-complete != ''
       continue-on-error: true
       shell: bash
       env:
@@ -690,7 +750,7 @@ runs:
         # for ''). Read by the python below, which writes it verbatim as
         # assurance.require_complete -- 'false' included, so the step can lift a
         # floor the discovered config sets.
-        ANALYSIS_ASSURANCE_COMPLETE: ${{ inputs.analysis-assurance-complete }}
+        ANALYSIS_ASSURANCE_COMPLETE: ${{ inputs.require-complete }}
         # Codex review (P1), fresh evidence, PR #1222: needed so this step
         # can detect a caller's own `extra-args: --config <path>` (used
         # instead of the `build-config` input) and fold it into the
@@ -701,7 +761,7 @@ runs:
         # collide with action/run.sh's `_cmd_has_config_flag &&
         # _extra_args_has_config_flag` guard as TWO irreconcilable
         # `--config` values and fail a check that worked before
-        # `analysis-assurance-complete` was enabled. See the "extra-args
+        # `require-complete` was enabled. See the "extra-args
         # --config extraction" block below for the full mechanism.
         EXTRA_ARGS: ${{ inputs.extra-args }}
         # The effective --sources root this run's own "Run analysis" step
@@ -885,7 +945,7 @@ runs:
         # otherwise-supported, independent ways to name a project config)
         # used to reach the nested Action's own `extra-args` untouched,
         # since this step forwarded an EMPTY `build-config` whenever
-        # `analysis-assurance-complete` was false. Now that this step
+        # `require-complete` was false. Now that this step
         # forwards a real overlay as `build-config` instead (see that
         # input's own forwarding below), the nested Action's compare CLI
         # would see BOTH an overlay `--config` (from `build-config`) and
@@ -1301,7 +1361,7 @@ runs:
             # ["require_complete"] = True` merge further down. Both turn a
             # config a direct `compare --config <file>` invocation would
             # refuse outright into a silently-accepted run purely because
-            # `analysis-assurance-complete` happened to be enabled. Validating
+            # `require-complete` happened to be enabled. Validating
             # here, before any stripping/merge happens, surfaces the identical
             # error the user would see running abicheck directly against this
             # file. Shared with action/run.sh's own equivalent merge helper
@@ -1423,7 +1483,7 @@ runs:
             # folding it in, a sources-root `.abicheck.yml`'s own build:/
             # sources: settings (compile-DB selection, build-system targets,
             # graph-detail settings) would be silently shadowed the moment
-            # `analysis-assurance-complete` synthesizes this overlay --
+            # `require-complete` synthesizes this overlay --
             # purely an artifact of how the overlay is generated, not
             # anything the caller asked for. `discover_build_config` (never
             # `discover_project_config`) is the correct lookup here --
@@ -1684,7 +1744,7 @@ runs:
             # compile.compiler into that trusted, executable-authorized
             # status the moment a PR merely declares
             # `analysis.assurance: complete` (or, on this Action's own
-            # `analysis-assurance-complete` input, any project using this
+            # `require-complete` input, any project using this
             # check without an explicit build-config), a privilege-
             # escalation / command-injection path. Strip/cap exactly the
             # fields action/run.sh's own equivalent merge withholds from an
@@ -1838,10 +1898,9 @@ runs:
         old-include: ${{ inputs.old-include }}
         new-include: ${{ steps.consumer_context.outcome == 'success' && '' || inputs.new-include }}
         lang: ${{ inputs.lang }}
-        ast-frontend: ${{ steps.consumer_context.outcome == 'success' && '' || inputs.ast-frontend }}
-        gcc-path: ${{ steps.consumer_context.outcome == 'success' && '' || inputs.gcc-path }}
-        gcc-prefix: ${{ inputs.gcc-prefix }}
-        gcc-options: ${{ steps.consumer_context.outcome == 'success' && '' || inputs.gcc-options }}
+        frontend: ${{ steps.consumer_context.outcome == 'success' && '' || inputs.frontend }}
+        compiler: ${{ steps.consumer_context.outcome == 'success' && '' || inputs.compiler }}
+        compile-options: ${{ steps.consumer_context.outcome == 'success' && '' || inputs.compile-options }}
         sysroot: ${{ inputs.sysroot }}
         # collect-facts' own replay phase defaults an empty `sources` to '.'
         # internally (run.sh: `SOURCES="${INPUT_SOURCES:-.}"`) but never
@@ -1852,22 +1911,21 @@ runs:
         # entirely (it omits the flag for an empty value), so a replay check
         # with sources: left unset would pass the collect-facts step but then
         # run compare with NO source evidence at all -- silently missing
-        # source-only findings at requested-depth: build/source (Codex
+        # source-only findings at depth: build/source (Codex
         # review). Mirror collect-facts' own default here so the analysis
         # step sees the same directory replay validated.
         sources: ${{ steps.consumer_context.outcome == 'success' && '' || (inputs.sources != '' && inputs.sources || (inputs.evidence-producer == 'replay' && '.' || '')) }}
         build-info: ${{ steps.consumer_context.outcome == 'success' && '' || ((inputs.evidence-producer == 'wrapper' || inputs.evidence-producer == 'clang-plugin') && inputs.evidence-pack-path || inputs.build-info) }}
         compile-db: ${{ steps.consumer_context.outcome == 'success' && '' || inputs.compile-db }}
         # "Generate assurance-overlay config" above (this step is skipped
-        # entirely when analysis-assurance-complete is unset (''), in which case
+        # entirely when require-complete is unset (''), in which case
         # its own outcome reads 'skipped' and this falls back to the plain
         # build-config input unchanged).
         build-config: ${{ steps.assurance_overlay.outcome == 'success' && steps.assurance_overlay.outputs.config-path || inputs.build-config }}
-        depth: ${{ inputs.requested-depth }}
+        depth: ${{ inputs.depth }}
         used-by: ${{ inputs.target-kind == 'app-consumer' && inputs.consumer-binary || '' }}
-        required-symbols: ${{ inputs.target-kind == 'plugin-contract' && inputs.contract-file || '' }}
+        required-symbols: ${{ inputs.target-kind == 'plugin-contract' && inputs.contract || '' }}
         policy: ${{ inputs.policy }}
-        policy-file: ${{ inputs.policy-file }}
         suppress: ${{ inputs.suppress }}
         severity-preset: ${{ inputs.severity-preset }}
         # require-complete-analysis: RETIRED -- this Action's own input (see
@@ -1876,7 +1934,7 @@ runs:
         # gone too, so there is nothing left to forward here.
         #
         # "Generate assurance-overlay config" above (this step is skipped
-        # entirely when analysis-assurance-complete is unset (''), in which case
+        # entirely when require-complete is unset (''), in which case
         # its own outcome reads 'skipped' and this falls back to the plain
         # extra-args input unchanged) may have consumed a caller's own
         # `extra-args: --config <path>` into the `build-config` overlay
@@ -1905,7 +1963,7 @@ runs:
         INPUT_NAME: ${{ inputs.name }}
         INPUT_PROFILE: ${{ inputs.profile }}
         INPUT_BASELINE_CHANNEL: ${{ inputs.baseline-channel }}
-        INPUT_REQUESTED_DEPTH: ${{ inputs.requested-depth }}
+        INPUT_DEPTH: ${{ inputs.depth }}
         INPUT_EXPLICIT_ID: ${{ inputs.explicit-id }}
         INPUT_BUILD_SYSTEM: ${{ inputs.build-system }}
         INPUT_BUILD_GENERATOR: ${{ inputs.build-generator }}
