@@ -758,7 +758,7 @@ def write_live_build(root: Path, case: str) -> LiveBuild:
                 str(so),
                 "-H",
                 str(header),
-                "--version",
+                "--label",
                 version,
                 "-o",
                 str(snapshot),

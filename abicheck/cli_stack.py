@@ -36,7 +36,6 @@ from .cli_resolve import _detect_binary_format
 from .errors import SnapshotError
 from .frontends.cli.options.export import ExportSet, reject_dry_run_with_exports
 from .frontends.cli.options.params import SidedPathParam
-from .frontends.cli.options.renamed import Legacy, renamed_option
 from .frontends.cli.runtime import _setup_verbosity, emit_export_set
 from .report.stack import DEFAULTED_ROOT_NOTE, environment_root_label
 from .stack_checker import under_sysroot
@@ -62,10 +61,9 @@ def deps_group() -> None:
     type=click.Path(exists=True, path_type=Path),
     help="Additional directory to search for shared libraries.",
 )
-@renamed_option(
+@click.option(
     "--root",
     "sysroot",
-    legacy=(Legacy("--sysroot", "--root PATH"),),
     type=click.Path(exists=True, path_type=Path),
     default=None,
     help="Sysroot prefix for cross/container analysis.",
@@ -187,13 +185,9 @@ def deps_tree_cmd(
 
 @deps_group.command("compare")
 @click.argument("binary", type=click.Path(path_type=Path))
-@renamed_option(
+@click.option(
     "--root",
     "root",
-    legacy=(
-        Legacy("--old-root", "--root old=PATH", translate=lambda v: f"old={v}"),
-        Legacy("--new-root", "--root new=PATH", translate=lambda v: f"new={v}"),
-    ),
     type=SidedPathParam(exists=True),
     multiple=True,
     metavar="[old=|new=]PATH",

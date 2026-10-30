@@ -186,6 +186,20 @@ Behavior unifications (D2) that change a result rather than a name need their
 own ADR; R11 and R15 are checked for this with a differential test before they
 land (plan Phase 3).
 
+**Amendment (2026-10-30, maintainer decision): no transition window.** The
+one-release alias window above is withdrawn. A renamed CLI flag, Python
+argument or field, or config key is renamed outright in the same change that
+lands it, and its old spelling is deleted: the CLI fails as an unknown option
+(exit 64), Python raises an unexpected-keyword `TypeError`, and a config file
+fails the strict schema's unknown-key error. The single exception is the
+GitHub Action. An old Action input becomes a RETIRED tombstone that fails the
+run before analysis and names the replacement, because GitHub silently drops an
+undeclared input and a narrower analysis would otherwise pass as clean
+(`tests/test_action_retired_inputs_contract.py` owns that rule). Each removed
+spelling is recorded in the retired-surface registry (`scripts/retired_surfaces.py`)
+and in a row of the newest `docs/start/upgrading-*.md` table. The plan's
+Phase 6 (alias removal) therefore collapses into each rename's own phase.
+
 ## Consequences
 
 - One vocabulary to learn and document: `config-keys-reference.md`,

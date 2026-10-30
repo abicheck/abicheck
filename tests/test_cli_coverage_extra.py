@@ -121,7 +121,7 @@ class TestDumpNativeBinary:
                 [
                     "dump",
                     str(pe_file),
-                    "--version",
+                    "--label",
                     "1.0",
                     "--follow-deps",
                 ],
@@ -171,7 +171,7 @@ class TestDumpNativeBinary:
                 [
                     "dump",
                     str(pe_file),
-                    "--version",
+                    "--label",
                     "1.0",
                 ],
             )
@@ -193,7 +193,7 @@ class TestDumpNativeBinary:
             [
                 "dump",
                 str(pe_file),
-                "--version",
+                "--label",
                 "1.0",
                 "--header-graph",
                 "--header-graph-includes",
@@ -236,7 +236,7 @@ class TestDumpNativeBinary:
                 [
                     "dump",
                     str(pe_file),
-                    "--version",
+                    "--label",
                     "1.0",
                     "-o",
                     str(out_file),

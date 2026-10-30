@@ -308,7 +308,7 @@ def _reject_single_pair_flags_for_set_inputs(ctx: click.Context) -> None:
         + ("is" if len(used) == 1 else "are")
         + " not supported for directory/package (release) comparisons: "
         "--since/--changed-path scope one library's own source-evidence "
-        "replay, and --abi3 audits one candidate extension module. Compare "
+        "replay, and --abi3-floor audits one candidate extension module. Compare "
         "the library (or the extension module) individually to use them."
     )
 

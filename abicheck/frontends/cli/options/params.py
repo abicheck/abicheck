@@ -250,7 +250,7 @@ SIDED_INCLUDE_PATH_PARAM = SidedIncludePathParam()
 
 
 class SidedStrParam(click.ParamType):
-    """Side-aware *string* option (ADR-040 Lever 1) — e.g. ``--version``.
+    """Side-aware *string* option (ADR-040 Lever 1) — e.g. ``--label``.
 
     Same ``old=`` / ``new=`` / ``both=`` prefix convention as
     :class:`SidedPathParam`, but the value stays a bare ``str`` (a version label,
@@ -271,7 +271,7 @@ class SidedStrParam(click.ParamType):
         return "[old=|new=]LABEL"
 
 
-#: Shared instance for sided string options (``--version``).
+#: Shared instance for sided string options (``--label``).
 SIDED_STR_PARAM = SidedStrParam()
 
 
