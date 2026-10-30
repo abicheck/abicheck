@@ -35,10 +35,9 @@ container's own composition facts to a new `VariantRef.sections` field.
 Of the 2026-10-30 amendment's data-evolution rules, D17 is implemented
 (package format v2: content-addressed ref objects, an atomic
 `manifest.json` commit, refused concurrent writers —
-`abicheck/storage/package_publish.py`), D15 and D16 partially (a pinned
-per-section wire contract; a separate `evidence` digest beside the
-unchanged `publication` digest, `abicheck/storage/snapshot_digests.py`), and
-D14 and D18 are not implemented; see the plan's per-item status.
+`abicheck/storage/package_publish.py`), D15 partially (a pinned
+per-section wire contract), and D14, D16 and D18 are not implemented; see
+the plan's per-item status.
 
 **This is now wired into `dump`/`compare`/`scan` as the default, single-file
 shape (Phase 8 redesign).** The directory-backed package this ADR

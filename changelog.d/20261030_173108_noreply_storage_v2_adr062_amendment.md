@@ -10,6 +10,4 @@
   and a second concurrent writer to one package root is refused
   (`ConcurrentPublishError`). v1 packages stay readable; an older abicheck
   refuses a v2 package through the fail-closed `package_format_version`
-  axis. `storage.snapshot_digests` adds the D16 `evidence` digest (ignores
-  `created_at`/`source_mtime` and the order of unordered collections) beside
-  the unchanged `publication` digest.
+  axis.

@@ -852,17 +852,15 @@ item. Open items are also listed in
   serialized/refused concurrent writers. Residual: superseded ref and
   section objects are never collected, and without `fcntl` (Windows) the
   lock is an `O_EXCL` file a crashed writer leaves behind.
-- **D16, digest roles: partially implemented.** `storage/snapshot_digests.py`
-  names the existing `snapshot_content_digest` as the `publication` digest
-  (unchanged bytes and meaning) and adds a separate `evidence` digest over
-  the D5 form: `created_at`/`source_mtime` excluded, the top-level
-  function/variable/type/enum lists and the ELF symbol/import lists sorted.
-  `tests/unit/storage/test_snapshot_digest_roles.py` checks every
-  permutation of each of those collections against `compare` reporting no
-  change. Open: no consumer reads the evidence digest yet (the
-  same-snapshot coverage note and the caches still use the publication
-  digest), nested unordered collections are not declared, and the
-  `transport` and `comparison_input` roles have no snapshot-level function.
+- **D16, digest roles: not implemented; design recorded.** The one
+  snapshot digest (`snapshot_content_digest`, a sha256 of the written JSON)
+  keeps its meaning and is the `publication` role. A separate `evidence`
+  digest needs a consumer before it ships, and its natural one (the
+  same-snapshot coverage note via `workflows/gate.snapshot_identity_digest`)
+  shares a run-scoped memo and a `created_at` prefilter with
+  `same_persisted_content`. Adding it there would double whole-snapshot
+  serialization on the path `perf.pure_content_digest_recomputed_per_consumer`
+  bounds. See the known-gaps entry.
 - **D15, wire contract: partially implemented.**
   `tests/unit/storage/test_wire_contract.py` pins each section's field
   inventory and canonical sha256 for a fixed corpus
@@ -989,7 +987,6 @@ satisfies for the one domain type it actually sections today
 | `abicheck/storage/atomic_file.py` | `atomic_write` — write a cache file through a same-directory temp file and `os.replace`, so a concurrent reader sees either no file or a complete one, never a torn one. Moved unchanged from `dumper_cache.py`; its stream-copy sibling was removed in dead-code-and-single-owner Stage G. Internal, not re-exported by the package |
 | `abicheck/storage/project_package_archive.py` | `pack_project_package`, `unpack_project_package`, `is_project_package_archive`, `MIMETYPE` — A1.1's one-file zip transport of a package directory; unpacking refuses any non-layout, symlinked, compressed, duplicate or over-budget member before writing. Internal, reached through `workflows.storage` |
 | `abicheck/storage/package_publish.py` | `PUBLISH_LOCK_NAME`, `REF_DIGEST_FIELDS`, `ConcurrentPublishError`, `publish_lock`, `ref_digest_map` — ADR-062 D17's publication rules: the non-blocking per-root writer lock that refuses a concurrent publisher, and the package-format-v2 `manifest.json` maps naming each ref record by content digest. Internal, not re-exported by the package |
-| `abicheck/storage/snapshot_digests.py` | `UNORDERED_COLLECTIONS`, `VOLATILE_CAPTURE_FIELDS`, `evidence_form`, `snapshot_evidence_digest`, `snapshot_publication_digest` — ADR-062 D16's digest roles for one snapshot: the publication role is the historical snapshot content digest under an explicit name (exact written JSON), the evidence role is a new semantic digest over the D5-normalized facts (capture timestamps excluded, declared unordered collections sorted). Internal, not re-exported by the package |
 | `abicheck/storage/zip_member.py` | `deterministic_zipinfo` — the pinned zip member header shared by G40's bundle archive and the package transport. Internal, not re-exported by the package |
 | `abicheck/storage/snapshot_runtime_only.py` | `RUNTIME_ONLY_SNAPSHOT_FIELDS` — the one declaration of the AbiSnapshot fields a single run sets and the document never carries, each with its reason. The snapshot encoder drops exactly these keys and the field round-trip test reads this mapping instead of keeping a copy. Internal, not re-exported by the package |
 | `abicheck/storage/dwarf_layout_facts.py` | `decode_dwarf_member_abi`, `drop_uncaptured_dwarf_layout_facts`, `dwarf_layout_dicts` — schema v69: encode and decode `FieldInfo.type_abi_fact`, the fundamental-type ABI fact of each persisted DWARF layout member (`dwarf.structs` and the ODR variants), so a stored header snapshot's depth projection carries the fact a binary-only dump reads from the member DIE. Written only when present; a pre-v69 document decodes it as None. Internal, not re-exported by the package |

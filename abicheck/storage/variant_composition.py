@@ -56,7 +56,8 @@ def _read_variant_composition(
     root: str | Path, variant_id: str
 ) -> dict[str, Any] | None:
     """*variant_id*'s own decoded `BUNDLE_COMPOSITION_SECTION_KIND` payload,
-    `None` if genuinely absent (no readable variant, no section). Shared by
+    `None` if genuinely absent (no readable manifest, an unpublished
+    variant, no section). Shared by
     the two readers below; a decode failure once the section is *present*
     raises rather than degrading to `None` (CodeRabbit, security finding).
 
@@ -67,12 +68,21 @@ def _read_variant_composition(
     same guard `bundle_facts_store.py`'s own now-retired project-level
     reader needed; Codex review, fresh evidence).
     """
-    from ..project_snapshot_store import DirectoryObjectStore, read_variant_ref
+    from ..project_snapshot_store import (
+        DirectoryObjectStore,
+        read_manifest_summary,
+        read_variant_ref,
+    )
 
     try:
-        variant = read_variant_ref(root, variant_id)
+        summary = read_manifest_summary(root)
     except Exception:
         return None
+    if variant_id not in summary.variant_ids:
+        return None
+    # A *published* variant whose ref cannot be read (a ref object failing
+    # its digest, ADR-062 D17) is a corrupted package, not an absent one.
+    variant = read_variant_ref(root, variant_id, summary=summary)
     composition_ref = variant.sections.get(BUNDLE_COMPOSITION_SECTION_KIND)
     if composition_ref is None:
         return None

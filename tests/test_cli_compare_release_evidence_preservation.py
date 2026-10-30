@@ -65,6 +65,7 @@ class TestMaterializationObjectScoping:
     def test_only_this_artifacts_own_objects_are_materialized(
         self, tmp_path: Path
     ) -> None:
+        from abicheck.project_snapshot_store import read_manifest_summary
         from abicheck.workflows.release_package import resolve_release_package_map
         from tests._project_manifest_reader import read_project_manifest
 
@@ -98,6 +99,11 @@ class TestMaterializationObjectScoping:
             expected_digests |= {
                 ref.digest for ref in sub_manifest.project_sections.values()
             }
+            # Package format v2 (ADR-062 D17): the two ref records are
+            # content-addressed objects too.
+            summary = read_manifest_summary(sub_dir)
+            for kind in ("variant", "artifact"):
+                expected_digests |= set(summary.ref_digests[kind].values())
             assert expected_digests
             assert len(_object_files(sub_dir)) == len(expected_digests)
 
@@ -665,9 +671,10 @@ class TestMalformedEmbeddedManifestRaises:
         pkg_manifest = write_bundle_facts_package(facts, store=store, variant_id="v1")
         write_project_manifest(pkg, pkg_manifest)
 
-        # This zero-artifact package's own manifest is its only stored
-        # object -- corrupt it in place so DirectoryObjectStore.get()'s own
-        # digest check fails, simulating a corrupted/hand-edited package.
+        # Corrupt every stored object in place -- the composition section
+        # and the variant's own ref object (package format v2) -- so
+        # DirectoryObjectStore.get()'s digest check fails, simulating a
+        # corrupted/hand-edited package. Neither may read as "absent".
         object_files = [p for p in (pkg / "objects").rglob("*") if p.is_file()]
         assert object_files
         for object_file in object_files:
@@ -761,10 +768,11 @@ class TestMismatchedManifestRefKindRaises:
         pkg_manifest = write_bundle_facts_package(facts, store=store, variant_id="v1")
         write_project_manifest(pkg, pkg_manifest)
 
-        variant_ref_json = pkg / "refs" / "variants" / "v1.json"
-        doc = json.loads(variant_ref_json.read_text())
+        from tests._project_manifest_reader import ref_document, rewrite_ref
+
+        doc = ref_document(pkg, "variant", "v1")
         doc["sections"]["bundle_composition"]["kind"] = "something_else"
-        variant_ref_json.write_text(json.dumps(doc))
+        rewrite_ref(pkg, "variant", "v1", doc)
 
         with pytest.raises(ValueError, match="kind"):
             read_embedded_manifest(pkg, "v1")

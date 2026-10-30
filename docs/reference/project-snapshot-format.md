@@ -67,7 +67,7 @@ separate object too, referenced by digest. A package format v1 package
 kept each ref at a mutable `refs/variants/<id>.json`/
 `refs/artifacts/<id>.json` path instead; it is still read.
 
-**Publication is atomic (ADR-062 D17).** A writer verifies every section
+**Publication is atomic.** A writer verifies every section
 object, writes the ref objects, and only then replaces `manifest.json` in
 one atomic rename — the commit point. Ref objects are never overwritten, so
 a publish that fails or is interrupted, including a republish of changed

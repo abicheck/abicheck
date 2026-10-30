@@ -254,7 +254,8 @@ current emitter, which is unchanged.
 #### ADR-062 D14-D18 data-evolution rules are partly implemented (2026-10-30)
 
 **Status (2026-10-30): PARTIAL.** D17 (immutable refs, atomic publication,
-refused concurrent writers) is implemented; the rest is open. Owner:
+refused concurrent writers) is implemented, and D15 is guarded by a pinned
+wire contract; the rest is open. Owner:
 `storage/`; per-item status in the
 [storage format v2 plan](plans/storage-format-v2.md).
 
@@ -272,14 +273,26 @@ refused concurrent writers) is implemented; the rest is open. Owner:
   already defines. Strict `xfail` probes in
   `tests/unit/storage/test_extension_preservation_gap.py` pin both
   behaviors and will start failing once one is fixed.
-- **D16 (partial).** The `evidence` digest exists
-  (`storage/snapshot_digests.py`), but nothing reads it yet. Wiring it into
-  the same-snapshot coverage note
-  (`workflows/gate.snapshot_identity_digest`) changes a user-visible
-  warning, and `persisted_content_provably_differs`' prefilter must then
-  ignore volatile fields too. Nested unordered collections are not yet
-  declared, so a nested reorder still changes the evidence digest. That
-  is the safe direction: a missed equality, never a false one.
+- **D16 (open).** `snapshot_content_digest` changes when only
+  `created_at` differs or only the function order differs, although
+  `compare` reports no change. That digest is correct for the
+  `publication` role and keeps its meaning. The fix is a separate
+  `evidence` digest over the D5 form: drop `created_at`/`source_mtime`
+  and sort the identity-matched record lists (top-level
+  functions/variables/types/enums, ELF symbols/imports). Do not sort
+  parameters, fields, bases or `DT_NEEDED`, whose order is semantic. It
+  was prototyped and verified (every permutation of each list against
+  `compare(...).changes == []`), then withdrawn because nothing could
+  consume it cheaply. Its consumer is the same-snapshot coverage note
+  (`workflows/gate.snapshot_identity_digest`). That note shares
+  `storage/snapshot_digest_cache`'s memo, which is keyed by snapshot only
+  and would need a role key. It also shares the `created_at` prefilter
+  (`persisted_content_provably_differs`). Computing a second digest there
+  doubles serialization on the path the
+  `perf.pure_content_digest_recomputed_per_consumer` bound protects. The
+  alternative is to let `same_persisted_content` answer from the evidence
+  digest, which changes what that function decides. Either is a design
+  decision, not a mechanical fix.
 - **D15 (partial).** Section keys still come from model field names. The
   pinned-bytes test catches a field rename, but the codec does not prevent
   one.
