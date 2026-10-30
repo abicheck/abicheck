@@ -59,10 +59,19 @@ if TYPE_CHECKING:  # pragma: no cover - typing only
     from ..model.snapshot import AbiSnapshot
 
 __all__ = [
+    "PUBLICATION",
+    "EVIDENCE",
     "digest_scope",
     "memoized_digest",
+    "peek_digest",
     "run_scoped_digest_cache",
 ]
+
+#: ADR-062 D16 digest roles this memo holds. The key carries the role, so a
+#: snapshot's `publication` and `evidence` digests never answer for each
+#: other.
+PUBLICATION = "publication"
+EVIDENCE = "evidence"
 
 _SCOPE = ScopedCache("abicheck.storage.snapshot_digest_cache")
 
@@ -83,11 +92,23 @@ def digest_scope() -> Iterator[None]:
         yield
 
 
-def memoized_digest(snap: AbiSnapshot, compute: Callable[[AbiSnapshot], str]) -> str:
-    """*compute(snap)*, at most once per snapshot per open scope."""
+def memoized_digest(
+    snap: AbiSnapshot,
+    compute: Callable[[AbiSnapshot], str],
+    *,
+    role: str = PUBLICATION,
+) -> str:
+    """*compute(snap)*, at most once per snapshot and role per open scope."""
     return _SCOPE.get_or_compute(
-        request_key(snapshot=id(snap)), lambda: compute(snap), pin=snap
+        request_key(snapshot=id(snap), role=role), lambda: compute(snap), pin=snap
     )
+
+
+def peek_digest(snap: AbiSnapshot, *, role: str = PUBLICATION) -> str | None:
+    """*snap*'s *role* digest if this scope already computed it, else
+    ``None`` -- never serializes."""
+    value = _SCOPE.peek(request_key(snapshot=id(snap), role=role), pin=snap)
+    return value if isinstance(value, str) else None
 
 
 _F = TypeVar("_F", bound=Callable[..., Any])

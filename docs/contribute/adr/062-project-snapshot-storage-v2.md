@@ -36,8 +36,10 @@ Of the 2026-10-30 amendment's data-evolution rules (plan item A1.9), D17
 is implemented (package format v2: immutable `refs/<kind>/<id>/<ref-digest>.json`
 documents named by `{id, ref_digest}` in `manifest.json`, an atomic manifest
 commit, serialized writers — `abicheck/storage/package_publish.py`), D15
-partially (a pinned per-section wire contract), and D14, D16 and D18 are
-not implemented; see the plan's per-item status.
+partially (a pinned per-section wire contract), D16 partially (the
+`evidence` digest, persisted as `ArtifactRef.evidence_digest` and read by
+the same-snapshot coverage note; `comparison_input` and `transport` are
+not), and D14 and D18 are not implemented; see the plan's per-item status.
 
 **This is now wired into `dump`/`compare`/`scan` as the default, single-file
 shape (Phase 8 redesign).** The directory-backed package this ADR
@@ -687,8 +689,8 @@ requirements to it:
 |---|---|---|
 | `transport` | the exact stored file bytes, after compression | not implemented: no current path hashes the compressed bytes |
 | `publication` | the exact published snapshot, including capture metadata such as `created_at` | `snapshot_content_digest`, unchanged |
-| `evidence` | D5-normalized facts, excluding volatile metadata and the order of unordered collections | basis: `storage.canonical.semantic_digest`; not persisted yet |
-| `comparison_input` | the `evidence` digests plus the contract and policy inputs one comparison read | not implemented |
+| `evidence` | D5-normalized facts, excluding volatile metadata and the order of unordered collections | `storage/evidence_digest.py`; persisted as the optional `ArtifactRef.evidence_digest` |
+| `comparison_input` | the `evidence` digests plus the contract and policy inputs one comparison read | not implemented: no comparison-result cache exists to consume it |
 
 Each role answers one question:
 

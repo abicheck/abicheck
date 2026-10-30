@@ -148,6 +148,7 @@ from .dto import (
     types_from_dto,
     types_to_dto,
 )
+from .evidence_digest import evidence_digest_of_document
 from .graph_section_codec import GraphSection
 from .guards import mapping as _mapping
 from .legacy_sections import (
@@ -307,6 +308,9 @@ def import_legacy_snapshot(
         variant_id=variant_id,
         kind=artifact_kind,
         sections=sections,
+        # ADR-062 D16: recorded beside the sections, never folded into a
+        # stored digest; its consumer is the same-snapshot coverage note.
+        evidence_digest=evidence_digest_of_document(legacy_document),
     )
     variant = VariantRef(variant_id=variant_id, artifact_ids=(artifact_id,))
     # *generations*: the producer's pair when the caller knows it (a fresh

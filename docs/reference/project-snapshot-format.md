@@ -67,6 +67,11 @@ its `ref_digest` is the semantic digest of the whole document; a reader
 recomputes it and refuses a document that does not match. Section content
 (declarations, types, layout, ...) is never embedded in a ref — it is a
 separate, content-addressed object under `objects/`, referenced by digest.
+An artifact ref may carry `evidence_digest`: the evidence
+digest of the artifact's snapshot document (capture metadata such as
+`created_at` excluded, identity-matched record lists in a stable order). It
+is optional; a reader that does not know it ignores it, and it is covered
+by `ref_digest` like every other field.
 A package format v1 package kept each ref at a mutable
 `refs/variants/<id>.json`/`refs/artifacts/<id>.json` path and listed bare
 ids; it is still read.

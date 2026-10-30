@@ -807,8 +807,9 @@ listing/report, even where no resolution graph can place it.
     byte-identity test. The inventory is not yet generated from the
     `SectionDTO` encoders, and there are no section-header availability
     entries yet.
-  - D16, not implemented: persisted `evidence` and `comparison_input`
-    digests.
+  - D16, partially implemented: the `evidence` digest, persisted on
+    `ArtifactRef` and consumed by the same-snapshot coverage note.
+    `comparison_input` and `transport` are not implemented.
   - D18, not implemented beyond the `graph` section's deferred decode.
   - Exit: one regression test per amendment probe (D17's exist; D14's are
     strict `xfail` probes), the oneDAL/MKL corpus, Windows and macOS, and
@@ -882,13 +883,41 @@ A1.9), item by item. Open items are also listed in
 
   Residual: superseded refs and objects are never collected, and the
   amendment's oneDAL/MKL, Windows and macOS validation has not been run.
-- **D16, digest roles: not implemented; design recorded.**
-  `snapshot_content_digest` is the `publication` digest and is unchanged.
-  The `created_at` probe is that digest working as designed. The reorder
-  probe does reproduce on a `semantic_digest` of the snapshot document,
-  because the top-level record lists keep producer order. The `evidence`
-  digest needs a consumer before it ships; see the known-gaps entry. The
-  `transport` and `comparison_input` roles are not implemented.
+- **D16, digest roles: partially implemented.** `snapshot_content_digest`
+  is the `publication` digest and is unchanged. The `evidence` digest
+  (`storage/evidence_digest.py`, `evidence_digest_of_document`) is
+  `semantic_digest` over the `snapshot_to_dict()` document with the
+  volatile capture fields dropped (`created_at`, `source_mtime`,
+  `source_mtime_epoch`, `source_path`, `build_id`) and the identity-matched
+  record lists (top-level functions/variables/types/enums, ELF
+  symbols/imports) stably sorted by the identity `compare` matches on, so
+  records sharing one identity keep their order (`index()` is first-wins).
+  Parameters, fields, bases, enum members and `DT_NEEDED` are never
+  sorted. An `EVIDENCE_FORM_VERSION` is hashed in.
+  - Persistence: `import_legacy_snapshot` records it as the optional
+    `ArtifactRef.evidence_digest`, written only when set. No
+    `ref_schema_version` bump: a reader that predates the field ignores it
+    and still verifies it through `ref_digest`, and a ref without it keeps
+    its exact bytes. A bump would make every such reader refuse the
+    package for a field it can ignore (D14: neither mechanism is needed).
+  - Consumer: the same-snapshot coverage note
+    (`workflows.gate.snapshot_identity_digests`, now owned by
+    `storage.snapshot_digest_cache.evidence_identity_digests`). It answers
+    "same evidence?", so two dumps differing only in capture metadata or
+    list order now get the note. The memo is keyed by role. The order of
+    work keeps the bounded path at one serialization per snapshot: both
+    persisted digests; a declared-field or record-count prefilter; an
+    equal publication pair already computed; a different publication pair
+    with nothing the evidence form normalizes differing (decided from the
+    model, no serialization); otherwise the evidence digests, lazily.
+    `same_persisted_content` is unchanged.
+  - Tests: `tests/unit/storage/test_evidence_digest.py` (every permutation
+    of every unordered list, and each volatile field, against
+    `compare(...).changes == []`; real changes including ordered-list
+    reorders), the F3 harness cell, and the per-role bound in
+    `tests/test_snapshot_digest_recomputation.py`.
+  - Open: `comparison_input` has no consumer (no comparison-result cache
+    exists), and no path hashes compressed bytes for `transport`.
 - **D15, wire contract: partially implemented.**
   `tests/unit/storage/test_wire_contract.py` pins each section's field
   inventory and canonical sha256 for a fixed corpus
@@ -1016,6 +1045,7 @@ satisfies for the one domain type it actually sections today
 | `abicheck/storage/castxml_xml.py` | `parse_castxml_xml` and `parse_castxml_text` — parse a castxml XML document from a path or from text (a cached L2 header-AST payload or fresh castxml output) through defusedxml's parser with a tree builder that stores one object per distinct attribute value, cutting the parsed tree by about a third, and that keeps only `ARGUMENT_ATTRIBUTES_READ` on each Argument element and shares one element per distinct parameter spelling (116 → 26 MiB live on a 26 MB MKL header dump). Internal, not re-exported by the package |
 | `abicheck/storage/atomic_file.py` | `atomic_write` — write a cache file through a same-directory temp file and `os.replace`, so a concurrent reader sees either no file or a complete one, never a torn one. Moved unchanged from `dumper_cache.py`; its stream-copy sibling was removed in dead-code-and-single-owner Stage G. Internal, not re-exported by the package |
 | `abicheck/storage/project_package_archive.py` | `pack_project_package`, `unpack_project_package`, `is_project_package_archive`, `MIMETYPE` — A1.1's one-file zip transport of a package directory; unpacking refuses any non-layout, symlinked, compressed, duplicate or over-budget member before writing. Internal, reached through `workflows.storage` |
+| `abicheck/storage/evidence_digest.py` | `EVIDENCE_FORM_VERSION`, `UNORDERED_LISTS`, `VOLATILE_CAPTURE_FIELDS`, `evidence_digest_of_document` — ADR-062 D16's evidence digest over a snapshot document: volatile capture metadata dropped, identity-matched record lists stably sorted by identity, semantically ordered lists untouched, the form version hashed in. Internal, not re-exported by the package |
 | `abicheck/storage/package_publish.py` | `REF_DIRS`, `REF_ENTRY_FIELDS`, `REF_SCHEMA_VERSION`, `REF_SCHEMA_VERSION_KEY`, `publish_lock_name`, `ref_digest_entries`, `ref_digest_of`, `ref_document`, `ref_record`, `versioned_ref_relpath` — ADR-062 D17's ref layout (amends D6): the immutable refs/&lt;kind&gt;/&lt;id&gt;/&lt;ref-digest&gt;.json path, the ref document with its own layout version, its ref digest (the semantic digest of the whole document), the package-format-v2 manifest entries naming each ref by id and ref digest, and the cross-process lock name serializing writers. Internal, not re-exported by the package |
 | `abicheck/storage/zip_member.py` | `deterministic_zipinfo` — the pinned zip member header shared by G40's bundle archive and the package transport. Internal, not re-exported by the package |
 | `abicheck/storage/snapshot_runtime_only.py` | `RUNTIME_ONLY_SNAPSHOT_FIELDS` — the one declaration of the AbiSnapshot fields a single run sets and the document never carries, each with its reason. The snapshot encoder drops exactly these keys and the field round-trip test reads this mapping instead of keeping a copy. Internal, not re-exported by the package |

@@ -250,4 +250,37 @@ SERIALIZATION_BUG_CLASSES: tuple[BugClass, ...] = (
             ),
         ),
     ),
+    BugClass(
+        id="storage.digest_answers_the_wrong_question",
+        invariant=(
+            "Each stored-content digest answers exactly one ADR-062 D16 "
+            "question. The `evidence` digest is equal for every pair "
+            "`compare` reports no change for because only capture metadata "
+            "(created_at, source path/mtime, CI build id) or the producer "
+            "order of an identity-matched record list differs, and differs "
+            "for a real change, including a reordering of a semantically "
+            "ordered list (parameters, fields, enum members, DT_NEEDED) or of "
+            "records sharing one identity. The `publication` digest keeps "
+            "its exact meaning, and a consumer asking the evidence question "
+            "never answers it from the publication digest's inequality."
+        ),
+        # ADR-062's 2026-10-30 amendment (#1858) records the probes (D16).
+        fixed_by=(1858,),
+        seed_tests=(
+            "tests/unit/storage/test_evidence_digest.py",
+            "tests/test_snapshot_digest_prefilter.py",
+            "tests/test_family_f3_identity.py",
+        ),
+        public_surfaces=("cli",),
+        axes={
+            "difference": (
+                "volatile-capture",
+                "unordered-permutation",
+                "ordered-reorder",
+                "duplicate-identity-order",
+                "real-change",
+            ),
+            "digest_source": ("computed", "persisted"),
+        },
+    ),
 )

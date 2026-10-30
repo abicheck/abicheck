@@ -83,6 +83,7 @@ _INTERNAL_MODULES = (
     "abicheck.storage.atomic_file",
     "abicheck.storage.project_package_archive",
     "abicheck.storage.package_publish",
+    "abicheck.storage.evidence_digest",
     "abicheck.storage.zip_member",
     "abicheck.storage.snapshot_runtime_only",
     "abicheck.storage.dwarf_layout_facts",

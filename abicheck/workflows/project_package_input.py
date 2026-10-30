@@ -74,12 +74,13 @@ def _resolve_project_snapshot_directory(
     -- the identical translation every other `resolve_input` branch applies
     at its own boundary.
     """
-    from ..project_snapshot_legacy import read_legacy_snapshot_document
+    from ..project_snapshot_legacy import read_stored_snapshot_document
     from ..project_snapshot_store import read_manifest_summary
     from ..serialization import snapshot_from_dict
+    from ..storage.snapshot_evidence import record_stored_evidence_digest
 
     try:
-        document = read_legacy_snapshot_document(path)
+        document, artifact = read_stored_snapshot_document(path)
     except (SnapshotError, OSError, KeyError, ValueError, TypeError) as exc:
         raise SnapshotError(
             f"Failed to load ProjectSnapshot package '{path}': {exc}"
@@ -90,6 +91,10 @@ def _resolve_project_snapshot_directory(
         raise SnapshotError(
             f"Failed to decode ProjectSnapshot package '{path}': {exc}"
         ) from exc
+    # ADR-062 D16: the persisted `evidence` digest of exactly this document,
+    # so the same-snapshot note need not re-serialize a stored operand.
+    if artifact.evidence_digest is not None:
+        record_stored_evidence_digest(snapshot, artifact.evidence_digest)
     # ADR-062 D2: a package produced under a different extractor/resolver
     # generation is read, never refused -- but the run that loaded it says so.
     # `read_legacy_snapshot_document` above already validated the manifest.

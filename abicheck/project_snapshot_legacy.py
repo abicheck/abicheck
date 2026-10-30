@@ -162,7 +162,15 @@ def write_legacy_snapshot_package(
 def read_legacy_snapshot_document(
     root: str | Path, *, artifact_id: str | None = None
 ) -> dict[str, Any]:
-    """The inverse of `write_legacy_snapshot_package`: the single artifact's
+    """:func:`read_stored_snapshot_document`'s document alone."""
+    return read_stored_snapshot_document(root, artifact_id=artifact_id)[0]
+
+
+def read_stored_snapshot_document(
+    root: str | Path, *, artifact_id: str | None = None
+) -> tuple[dict[str, Any], ArtifactRef]:
+    """The selected artifact's document and its verified `ArtifactRef` (whose
+    `evidence_digest`, ADR-062 D16, describes that document). The inverse of `write_legacy_snapshot_package`: the single artifact's
     document (`serialization.snapshot_from_dict()`-shaped), read back from a
     real directory-backed `ProjectSnapshot` package at *root*.
 
@@ -268,11 +276,12 @@ def read_legacy_snapshot_document(
         if kind in SECTION_SCHEMA_VERSIONS:
             check_stated_section_version(kind, stated)
     store = DirectoryObjectStore(root)
-    return export_legacy_snapshot(
+    document = export_legacy_snapshot(
         artifact,
         store=store,
         source_schema_version=summary.versions.source_schema_version,
     )
+    return document, artifact
 
 
 def _materialize_referenced_objects(

@@ -95,6 +95,17 @@ class ScopedCache:
     def active(self) -> bool:
         return self._var.get() is not None
 
+    def peek(self, key: RequestKey, *, pin: object = None) -> Any:
+        """The value stored for *key* and *pin* in the open scope, or
+        ``None`` (no scope, reference mode, or nothing stored) -- never
+        computes."""
+        s = self._var.get()
+        if s is None or reference_mode():
+            return None
+        with s.lock:
+            hit = s.values.get(key)
+        return hit[1] if hit is not None and hit[0] is pin else None
+
     def get_or_compute(
         self, key: RequestKey, compute: Callable[[], _T], *, pin: object = None
     ) -> _T:

@@ -441,8 +441,16 @@ class ArtifactRef:
     kind: str
     native_identity: Mapping[str, str] = field(default_factory=dict)
     sections: Mapping[str, ObjectRef] = field(default_factory=dict)
+    #: ADR-062 D16's `evidence` digest of the document these sections hold
+    #: (`storage.evidence_digest`), or `None` when the writer recorded none.
+    #: Optional and ignorable: written only when set, so a ref without it
+    #: keeps its exact bytes and `ref_digest`; a reader that predates it
+    #: ignores the key (and still verifies it, through `ref_digest`).
+    evidence_digest: str | None = None
 
     def __post_init__(self) -> None:
+        if self.evidence_digest is not None:
+            object_relpath(self.evidence_digest)  # refuses a malformed digest
         # `_safe_ref_id`, not `_identity_text`: both ids become literal
         # filenames (this artifact's own `artifact_ref_relpath`, and its
         # owning variant's `variant_ref_relpath`), so a value either helper
@@ -476,6 +484,8 @@ class ArtifactRef:
             out["native_identity"] = dict(self.native_identity)
         if self.sections:
             out["sections"] = {k: v.to_dict() for k, v in self.sections.items()}
+        if self.evidence_digest is not None:
+            out["evidence_digest"] = self.evidence_digest
         return out
 
     @classmethod
@@ -492,6 +502,7 @@ class ArtifactRef:
             kind=_required_field(data, "kind", "an artifact reference"),
             native_identity=data.get("native_identity", {}),
             sections=sections,
+            evidence_digest=data.get("evidence_digest"),
         )
 
 

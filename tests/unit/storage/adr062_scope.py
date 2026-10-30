@@ -139,6 +139,9 @@ NON_ADR062_MODULES = frozenset(
         "snapshot_decode_declarations",
         "snapshot_reliability_flags",
         "snapshot_digest_cache",
+        # ADR-062 D16's evidence role for an `AbiSnapshot` (memo, persisted
+        # digest side table, order of work): rides with `snapshot_digest_cache`.
+        "snapshot_evidence",
         "json_stream",
         # A GC-paused `json.loads` for AST/projection documents: a parse
         # helper beside json_stream, not an ADR-062 Phase 0 primitive.

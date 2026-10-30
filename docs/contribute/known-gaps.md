@@ -255,7 +255,8 @@ current emitter, which is unchanged.
 
 **Status (2026-10-30): PARTIAL.** D17 (immutable digest-named refs, atomic
 publication, serialized writers) is implemented, and D15 is guarded by a
-pinned wire contract; the rest of plan item A1.9 is open. Owner:
+pinned wire contract, and D16's `evidence` digest is implemented and
+consumed; the rest of plan item A1.9 is open. Owner:
 `storage/`; per-item status in the
 [storage format v2 plan](plans/storage-format-v2.md).
 
@@ -276,26 +277,16 @@ pinned wire contract; the rest of plan item A1.9 is open. Owner:
   Strict `xfail` probes in
   `tests/unit/storage/test_extension_preservation_gap.py` pin today's
   behavior, and will fail once either behavior is fixed.
-- **D16 (open).** `snapshot_content_digest` changes when only
-  `created_at` differs or only the function order differs, although
-  `compare` reports no change. That digest is correct for the
-  `publication` role and keeps its meaning. The fix is a separate
-  `evidence` digest over the D5 form: drop `created_at`/`source_mtime`
-  and sort the identity-matched record lists (top-level
-  functions/variables/types/enums, ELF symbols/imports). Do not sort
-  parameters, fields, bases or `DT_NEEDED`, whose order is semantic. It
-  was prototyped and verified (every permutation of each list against
-  `compare(...).changes == []`), then withdrawn because nothing could
-  consume it cheaply. Its consumer is the same-snapshot coverage note
-  (`workflows/gate.snapshot_identity_digest`). That note shares
-  `storage/snapshot_digest_cache`'s memo, which is keyed by snapshot only
-  and would need a role key. It also shares the `created_at` prefilter
-  (`persisted_content_provably_differs`). Computing a second digest there
-  doubles serialization on the path the
-  `perf.pure_content_digest_recomputed_per_consumer` bound protects. The
-  alternative is to let `same_persisted_content` answer from the evidence
-  digest, which changes what that function decides. Either is a design
-  decision, not a mechanical fix.
+- **D16 (partial).** The `evidence` digest is implemented
+  (`storage/evidence_digest.py`), persisted as the optional
+  `ArtifactRef.evidence_digest`, and read by the same-snapshot coverage
+  note, without a second serialization on the bounded compare path (see
+  the plan's A1.9 status). Still open: `comparison_input`, which has no
+  consumer because no comparison-result cache exists, and `transport`. A
+  persisted evidence digest is used only against another persisted one: a
+  snapshot decoded from the stored document can differ from it after
+  load-time backfill, so mixing the two would read as "different" (the safe
+  direction).
 - **D15 (partial).** Section keys still come from model field names. The
   pinned-bytes test catches a field rename, but the codec does not prevent
   one. The section-header `FactAvailability` table (`not_collected`/
