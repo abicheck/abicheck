@@ -149,6 +149,10 @@ argument. `--help-all` keeps listing everything.
 | R16 | deps roots | `deps compare --old-root`/`--new-root` → `--root [old=\|new=]PATH`; `deps tree --sysroot` → `--root PATH`, the same concept. |
 | R17 | numeric sides | Action `debug-info1`/`debug-info2` → `old-debug-info`/`new-debug-info`; `devel-pkg1`/`devel-pkg2` already forward as `--header old=`/`new=`, so they fold into `old-header`/`new-header`. |
 | R18 | stray spellings | `actions/check-target` `requested-depth` → `depth`, `contract-file` → `contract`; `run_dump(header_backend)` → `frontend`; `run_dump(public_headers)` is reviewed against `headers` in Phase 4. |
+| R19 | Python names (Phase 1 finding) | Request fields and `run_compare`/`run_dump` shim parameters whose spelling breaks D1 and that no row above renames: flattened full paths (`pack_*`, `severity_preset`, `debug_format`) and sided or suffixed shim names (`old_pdb_path`, `budget_s`, `compile_context`). Each takes the D1 spelling: the flattened path on the request, the snake leaf on the shim. Phase 4 (Python). |
+| R20 | Action names (Phase 1 finding) | Action inputs that break D1's kebab-leaf rule and no row above renames: `include` → `include-dirs`, `build-config`/`build-system`, `changed-path` → `changed-paths`, `used-by-manifest`, `search-path` → `search-paths`, `snapshot-compression`, and `operands`' `old-library`/`new-library` (D3 qualifiers on `library`). Phase 4 (Action). |
+| R21 | CLI names (Phase 1 finding) | Visible CLI options that break D1 and no row above renames: `compare --include` → `--include-dir`; `--used-by-manifest`, a second file-valued spelling beside `--used-by` that Phase 0 grouped under `used_by`, which Phase 4 either folds into `--used-by` or gives its own concept; `--instantiation-manifest` and the `--bundle-facts-*` family, which Phase 0 grouped under `bundle`. Phase 4 (CLI). |
+| R22 | surface budget (Phase 1 finding, D4) | `compare --help` shows 20 core options (D4 budget 15) and the root `action.yml` has 53 analysis inputs (budget 25). The recorded counts may only fall; Phase 5 moves options to the config tier until both are within budget. |
 
 ### D6 — One registry and a parity gate
 
