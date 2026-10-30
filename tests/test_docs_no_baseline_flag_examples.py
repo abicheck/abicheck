@@ -316,7 +316,7 @@ def test_yaml_folded_block_scalar_flow_entry_is_caught() -> None:
         ("--view root-cause", "view-token"),
         ("--header old=include/foo.h", "old-sided (bare-table)"),
         ("--sources old=./src", "old-sided (sided-single-table)"),
-        ("--version old=1.2", "old-sided (sided-label-table)"),
+        ("--label old=1.2", "old-sided (sided-label-table)"),
         ("--variant v1", "context-stashed"),
     ],
 )
@@ -354,7 +354,7 @@ def test_unsupported_options_table_is_non_empty() -> None:
     actually checking anything. Pins that each table/mechanism this test
     drives off keeps naming real, rejected flags."""
     assert len(_UNSUPPORTED_SPELLINGS) >= 20
-    assert "--abi3" in _UNSUPPORTED_SPELLINGS
+    assert "--abi3-floor" in _UNSUPPORTED_SPELLINGS
     assert "--budget" in _UNSUPPORTED_SPELLINGS
     assert "--since" in _UNSUPPORTED_SPELLINGS
     # 7, not 8: plan Phase 7n merged `--devel-pkg` into `-H/--header`, so
@@ -364,7 +364,7 @@ def test_unsupported_options_table_is_non_empty() -> None:
     assert len(_OLD_SIDED_SPELLINGS) >= 7
     assert "--header old=" in _OLD_SIDED_SPELLINGS
     assert "--sources old=" in _OLD_SIDED_SPELLINGS
-    assert "--version old=" in _OLD_SIDED_SPELLINGS
+    assert "--label old=" in _OLD_SIDED_SPELLINGS
     assert _VIEW_SPELLING in _ALL_REJECTED_SPELLINGS
     assert _VARIANT_SPELLING in _ALL_REJECTED_SPELLINGS
     # The combined set must be strictly larger than any one table alone --

@@ -250,7 +250,7 @@ def validate_bundle_facts_request(request: BundleFactsCompareRequest) -> Any:
         )
     if request.old_version not in (None, "", "old"):
         raise BundleFactsCompareError(
-            "--version old=... is not supported together with "
+            "--label old=... is not supported together with "
             "a stored-bundle-facts OLD_INPUT: OLD_FACTS's own per-library "
             "snapshots already carry whatever version they were captured with.",
             usage=True,
@@ -543,7 +543,7 @@ def _reject_new_side_extraction_options(
         )
     if request.new_version not in (None, "", "new"):
         raise BundleFactsCompareError(
-            "--version new=... is not supported when both OLD_INPUT and "
+            "--label new=... is not supported when both OLD_INPUT and "
             "NEW_INPUT are stored BundleFacts documents: NEW_INPUT's own "
             "per-library snapshots already carry whatever version they "
             "were captured with.",

@@ -303,7 +303,7 @@ class TestStoredPairEarlyRejections:
         )
 
         assert code == 64
-        assert "--version" in out
+        assert "--label" in out
 
     def test_explicit_old_version_is_rejected(self, tmp_path: Path) -> None:
         old_path, new_path = self._both_stored(tmp_path)
@@ -313,7 +313,7 @@ class TestStoredPairEarlyRejections:
         )
 
         assert code == 64
-        assert "--version" in out
+        assert "--label" in out
 
     def test_include_system_declarations_is_rejected(self, tmp_path: Path) -> None:
         old_path, new_path = self._both_stored(tmp_path)
