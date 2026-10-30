@@ -105,7 +105,13 @@ class OutputSpec:
 
 
 #: The immutable default of ``config_overrides`` (no overrides).
-_EMPTY_OVERRIDES: Mapping[str, object] = MappingProxyType({})
+def _no_overrides() -> Mapping[str, object]:
+    """The immutable default of ``config_overrides`` (no overrides).
+
+    A ``default_factory`` rather than a mapping-proxy default: Python 3.11's
+    dataclass check rejects an unhashable instance as a field default.
+    """
+    return MappingProxyType({})
 
 
 @dataclass(frozen=True)
@@ -167,7 +173,9 @@ class CompareRequest:
     # collapse_versioned_symbols, force_public_symbols, severity_*), which is
     # where the CLI's resolved config reaches a comparison; an explicit field
     # value here is indistinguishable from the default and so is not overridden.
-    config_overrides: Mapping[str, object] = field(default=_EMPTY_OVERRIDES, hash=False)
+    config_overrides: Mapping[str, object] = field(
+        default_factory=_no_overrides, hash=False
+    )
     # ADR-020b: declared deployment constraints (EnvironmentMatrix YAML).
     # When its ``runtime_floors`` are set, new symbol-version requirements
     # classify against the declared floors (≤ floor → COMPATIBLE, > floor →
