@@ -55,6 +55,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from _abicheck_subprocess import abicheck_command
 from _action_run_sh_harness import annotation_helpers_source
 from _workflow_exec import bash_executable, require_bash
 
@@ -1295,10 +1296,7 @@ class TestCompileContextPreservesUsableDiscoveredCompileDb:
         )
         out = tmp_path / "out.json"
         result = subprocess.run(
-            [
-                sys.executable,
-                "-m",
-                "abicheck",
+            abicheck_command(
                 "dump",
                 str(lib),
                 "--sources",
@@ -1309,7 +1307,7 @@ class TestCompileContextPreservesUsableDiscoveredCompileDb:
                 'compile.compiler="gcc"',
                 "-o",
                 str(out),
-            ],
+            ),
             cwd=tmp_path,
             capture_output=True,
             text=True,

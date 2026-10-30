@@ -33,6 +33,7 @@ import sys
 from pathlib import Path
 
 import pytest
+from _abicheck_subprocess import abicheck_command
 from _action_run_sh_harness import (
     REQUIRES_POSIX_SHELL,
     _stub_abicheck,
@@ -161,16 +162,9 @@ def test_action_discovered_config_cannot_load_records_into_overlay(
     old = _lib(tmp_path / "old.so", "int f(int x){return x+1;}\n")
     new = _lib(tmp_path / "new.so", "int f(int x){return x+1;}\n")
     result = subprocess.run(
-        [
-            sys.executable,
-            "-m",
-            "abicheck",
-            "compare",
-            str(old),
-            str(new),
-            "--set",
-            'compile.frontend="castxml"',
-        ],
+        abicheck_command(
+            "compare", str(old), str(new), "--set", 'compile.frontend="castxml"'
+        ),
         cwd=tmp_path,
         capture_output=True,
         text=True,

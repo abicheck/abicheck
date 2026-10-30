@@ -32,10 +32,10 @@ from __future__ import annotations
 
 import shutil
 import subprocess
-import sys
 from pathlib import Path
 
 import pytest
+from _abicheck_subprocess import abicheck_command
 
 from abicheck.buildsource.build_config import BuildConfig, load_build_config
 from abicheck.config_paths import discover_build_config
@@ -59,10 +59,7 @@ def _lib(tmp_path: Path) -> Path:
 
 def _dump(cwd: Path, lib: Path, *extra: str) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
-        [
-            sys.executable,
-            "-m",
-            "abicheck",
+        abicheck_command(
             "dump",
             str(lib),
             *extra,
@@ -70,7 +67,7 @@ def _dump(cwd: Path, lib: Path, *extra: str) -> subprocess.CompletedProcess[str]
             _SET_COMPILER,
             "-o",
             str(cwd / "out.json"),
-        ],
+        ),
         cwd=cwd,
         capture_output=True,
         text=True,
