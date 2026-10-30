@@ -105,7 +105,7 @@ class TestAuditOnlyComparePublicHeaderDirForwardedAsDashH:
             {
                 "INPUT_MODE": "compare",
                 "INPUT_NEW_LIBRARY": "lib.so",
-                "INPUT_PUBLIC_HEADER_DIR": "include",
+                "INPUT_PUBLIC_HEADER_DIRS": "include",
                 "INPUT_DEPTH": "headers",
             }
         )
@@ -141,7 +141,7 @@ class TestTwoSidedComparePublicHeaderDirIsNeverForwarded:
                 "INPUT_MODE": "compare",
                 "INPUT_OLD_LIBRARY": "old.so",
                 "INPUT_NEW_LIBRARY": "lib.so",
-                "INPUT_PUBLIC_HEADER_DIR": "include",
+                "INPUT_PUBLIC_HEADER_DIRS": "include",
                 "INPUT_DEPTH": "headers",
             }
         )
@@ -202,7 +202,7 @@ class TestDumpPublicHeaderDirUnaffected:
             {
                 "INPUT_MODE": "dump",
                 "INPUT_NEW_LIBRARY": "lib.so",
-                "INPUT_PUBLIC_HEADER_DIR": "include",
+                "INPUT_PUBLIC_HEADER_DIRS": "include",
             }
         )
         assert "dump" in cmd

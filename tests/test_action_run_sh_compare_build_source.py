@@ -224,9 +224,9 @@ class TestAuditOnlyCompareForwardsCrossCompilerFlags:
         result, captured, captured_config = _run_baseline_compare_raw(
             {
                 "INPUT_OLD_LIBRARY": "",
-                "INPUT_GCC_PATH": "/opt/cross/bin/aarch64-linux-gnu-g++",
+                "INPUT_COMPILER": "/opt/cross/bin/aarch64-linux-gnu-g++",
                 "INPUT_GCC_PREFIX": "aarch64-linux-gnu-",
-                "INPUT_GCC_OPTIONS": "-D__ARM_NEON",
+                "INPUT_COMPILE_OPTIONS": "-D__ARM_NEON",
                 "INPUT_SYSROOT": "/opt/sysroots/aarch64",
             },
             tmp_path,
@@ -270,7 +270,7 @@ class TestAuditOnlyCompareForwardsCrossCompilerFlags:
         result, _captured, captured_config = _run_baseline_compare_raw(
             {
                 "INPUT_OLD_LIBRARY": "",
-                "INPUT_GCC_OPTIONS": '-DMSG="hello world"',
+                "INPUT_COMPILE_OPTIONS": '-DMSG="hello world"',
             },
             tmp_path,
         )
@@ -291,9 +291,9 @@ class TestCompareModeForwardsCrossCompilerFlags:
     def test_all_four_reach_the_cli(self, tmp_path: Path) -> None:
         cmd = _run_compare(
             {
-                "INPUT_GCC_PATH": "/opt/cross/bin/aarch64-linux-gnu-g++",
+                "INPUT_COMPILER": "/opt/cross/bin/aarch64-linux-gnu-g++",
                 "INPUT_GCC_PREFIX": "aarch64-linux-gnu-",
-                "INPUT_GCC_OPTIONS": "-D__ARM_NEON",
+                "INPUT_COMPILE_OPTIONS": "-D__ARM_NEON",
                 "INPUT_SYSROOT": "/opt/sysroots/aarch64",
             },
             tmp_path,
@@ -325,7 +325,7 @@ class TestCompareModeForwardsCrossCompilerFlags:
         one at parse time. `TestScanModeForwardsCrossCompilerFlags.
         test_quoted_whitespace_atom_matches_compare_mode_synthesis` above
         proves `scan` now produces the identical overlay."""
-        cmd = _run_compare({"INPUT_GCC_OPTIONS": '-DMSG="hello world"'}, tmp_path)
+        cmd = _run_compare({"INPUT_COMPILE_OPTIONS": '-DMSG="hello world"'}, tmp_path)
         compile_blk = _compile_overlay_from_cmd(cmd, tmp_path)
         assert compile_blk["options"] == ["-DMSG=hello world"]
 
@@ -636,7 +636,7 @@ class TestBaselineCompareTranslationPreservesMergedConfig:
         result, captured, captured_config = _run_baseline_compare_raw(
             {
                 "INPUT_BUILD_CONFIG": str(build_config),
-                "INPUT_GCC_PATH": "/opt/cross/bin/aarch64-linux-gnu-g++",
+                "INPUT_COMPILER": "/opt/cross/bin/aarch64-linux-gnu-g++",
             },
             tmp_path,
         )
@@ -672,7 +672,7 @@ class TestBaselineCompareTranslationPreservesMergedConfig:
         confirming the guard doesn't newly suppress the no-collision case.
         """
         result, captured, captured_config = _run_baseline_compare_raw(
-            {"INPUT_GCC_PATH": "/opt/cross/bin/aarch64-linux-gnu-g++"}, tmp_path
+            {"INPUT_COMPILER": "/opt/cross/bin/aarch64-linux-gnu-g++"}, tmp_path
         )
         assert result.returncode == 0, result.stdout + result.stderr
         cmd = captured.read_text(encoding="utf-8").strip()

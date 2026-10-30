@@ -80,10 +80,10 @@ VALIDATE_SH = Path(__file__).resolve().parents[1] / "action" / "validate-inputs.
 #: closes named this exact family, so the family is what gets enumerated.
 _COMPILE_CONTEXT_INPUTS: tuple[tuple[str, str], ...] = (
     ("INPUT_LANG", "c"),
-    ("INPUT_AST_FRONTEND", "clang"),
-    ("INPUT_GCC_PATH", "/opt/gcc-14/bin/g++"),
+    ("INPUT_FRONTEND", "clang"),
+    ("INPUT_COMPILER", "/opt/gcc-14/bin/g++"),
     ("INPUT_GCC_PREFIX", "aarch64-linux-gnu-"),
-    ("INPUT_GCC_OPTIONS", "-DFOO=1"),
+    ("INPUT_COMPILE_OPTIONS", "-DFOO=1"),
     ("INPUT_SYSROOT", "/opt/sysroot"),
     ("INPUT_NOSTDINC", "true"),
 )
@@ -352,7 +352,7 @@ class TestReleaseOperandConfigOverlayStaysSingular:
         cmd, doc = _compare_result(
             {
                 "INPUT_BUILD_CONFIG": str(build_config),
-                "INPUT_GCC_OPTIONS": "-DFOO=1",
+                "INPUT_COMPILE_OPTIONS": "-DFOO=1",
                 "INPUT_FAIL_ON_REMOVED_LIBRARY": "true",
                 **_operand_env(shape, tmp_path),
             },
@@ -405,7 +405,7 @@ class TestReleaseOperandHostileInputHasNoSideEffect:
     """
 
     @pytest.mark.parametrize(
-        "var", ["INPUT_DEPTH", "INPUT_SYSROOT", "INPUT_GCC_OPTIONS", "INPUT_GCC_PATH"]
+        "var", ["INPUT_DEPTH", "INPUT_SYSROOT", "INPUT_COMPILE_OPTIONS", "INPUT_COMPILER"]
     )
     @pytest.mark.parametrize("shape", _RELEASE_OPERAND_SHAPES)
     @pytest.mark.parametrize(
@@ -430,7 +430,7 @@ class TestReleaseOperandHostileInputHasNoSideEffect:
         )
 
     @pytest.mark.parametrize(
-        "var", ["INPUT_DEPTH", "INPUT_SYSROOT", "INPUT_GCC_OPTIONS"]
+        "var", ["INPUT_DEPTH", "INPUT_SYSROOT", "INPUT_COMPILE_OPTIONS"]
     )
     # "single" is in this matrix deliberately: the mechanism (a value
     # reaching `CMD` and then the "Command:" job-log line) is not specific
@@ -532,7 +532,7 @@ class TestNoOpInputsSynthesizeNoOverlay:
     #: `lang: c++` is action.yml's own declared default, so an omitted
     #: `lang` arrives as this and must not count as a request either.
     _NO_OP_INPUTS: tuple[tuple[str, str], ...] = (
-        ("INPUT_AST_FRONTEND", "auto"),
+        ("INPUT_FRONTEND", "auto"),
         ("INPUT_LANG", "c++"),
     )
 
@@ -565,6 +565,6 @@ class TestNoOpInputsSynthesizeNoOverlay:
     ) -> None:
         """The companion: only the documented no-op spelling is exempt."""
         _, doc = _compare_result(
-            {"INPUT_AST_FRONTEND": "clang", **_operand_env(shape, tmp_path)}, tmp_path
+            {"INPUT_FRONTEND": "clang", **_operand_env(shape, tmp_path)}, tmp_path
         )
         assert doc["compile"]["frontend"] == "clang"

@@ -61,7 +61,7 @@ from _workflow_exec import bash_executable, require_bash
 RUN_SH = Path(__file__).resolve().parents[1] / "action" / "run.sh"
 
 _DUMP_MODE_MARKER = 'if [[ "$MODE" == "dump" ]]; then'
-_COMPILE_CONTEXT_START = 'add_single_flag "--ast-frontend" "${INPUT_AST_FRONTEND:-}"'
+_COMPILE_CONTEXT_START = 'add_single_flag "--ast-frontend" "${INPUT_FRONTEND:-}"'
 _DUMP_COMPILE_CONTEXT_START = "add_compile_context_flags true"
 _DUMP_COMPILE_CONTEXT_END = "add_compile_context_flags true"
 
@@ -305,7 +305,7 @@ class TestMergeConfigOverlayValidatesBaseConfigBeforeStripping:
         )
         result = _run_region_raw_with_cwd(
             _DUMP_MODE_MARKER,
-            {"INPUT_GCC_PATH": "/opt/gcc-14/bin/g++"},
+            {"INPUT_COMPILER": "/opt/gcc-14/bin/g++"},
             tmp_path,
             _DUMP_COMPILE_CONTEXT_START,
         )
@@ -327,7 +327,7 @@ class TestMergeConfigOverlayValidatesBaseConfigBeforeStripping:
         result = _run_region_raw_with_cwd(
             _DUMP_MODE_MARKER,
             {
-                "INPUT_GCC_PATH": "/opt/gcc-14/bin/g++",
+                "INPUT_COMPILER": "/opt/gcc-14/bin/g++",
                 "INPUT_BUILD_CONFIG": str(build_config),
             },
             tmp_path,
@@ -345,7 +345,7 @@ class TestMergeConfigOverlayValidatesBaseConfigBeforeStripping:
         )
         cmd, _ = _run_region_with_cwd(
             _DUMP_MODE_MARKER,
-            {"INPUT_GCC_PATH": "/opt/gcc-14/bin/g++"},
+            {"INPUT_COMPILER": "/opt/gcc-14/bin/g++"},
             tmp_path,
             _DUMP_COMPILE_CONTEXT_START,
         )
@@ -384,7 +384,7 @@ class TestMergeConfigOverlayClearsSourcesRootBlocksWhenNoSourcesConfigExists:
         sources-root-exclusive here, so all five must clear to defaults
         when the ``--sources`` tree has no config of its own. The
         overlay's own synthesized ``compile.compiler`` (from
-        ``INPUT_GCC_PATH``) still applies afterwards -- clearing the
+        ``INPUT_COMPILER``) still applies afterwards -- clearing the
         checkout's own ``compile:`` block does not remove the overlay's own
         contribution to that same key."""
         (tmp_path / ".abicheck.yml").write_text(
@@ -402,7 +402,7 @@ class TestMergeConfigOverlayClearsSourcesRootBlocksWhenNoSourcesConfigExists:
         cmd, _ = _run_region_with_cwd(
             _DUMP_MODE_MARKER,
             {
-                "INPUT_GCC_PATH": "/opt/gcc-14/bin/g++",
+                "INPUT_COMPILER": "/opt/gcc-14/bin/g++",
                 "INPUT_SOURCES": str(src_dir),
             },
             tmp_path,

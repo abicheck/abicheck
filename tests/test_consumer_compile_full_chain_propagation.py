@@ -25,7 +25,7 @@ fixture never set ``consumer_compile.frontend`` at all, so
 ``consumer-ast-frontend`` was only ever evaluated as an empty string and
 never carried to hop 4's ``--ast-frontend`` argument or checked against the
 root-action env mapping. A regression in ``consumer-ast-frontend``'s own
-expression, or a swap of ``INPUT_AST_FRONTEND`` with another declared
+expression, or a swap of ``INPUT_FRONTEND`` with another declared
 input, could therefore have gone undetected by this file even though
 ``frontend`` is part of the concern the registry now declares closed. Fixed
 by threading a second, distinct sentinel for ``frontend`` through the
@@ -58,7 +58,7 @@ from `check-project.yml`/`check-target/action.yml`, chained:
          resolved to their real INPUT_* env var names via the real
          "Run abicheck" step's own, isolated env block
          (test_action_run_contract.py's `_step_env_mapping`) -- never a
-         hardcoded `INPUT_GCC_PATH` guess
+         hardcoded `INPUT_COMPILER` guess
       -> root action.yml's run.sh [real bash execution, via the existing
          test_action_compile_context_parity.py harness]
 
@@ -72,7 +72,7 @@ the first cut evaluated only the consumer-context step's `with:` values,
 never its own `if:` scheduling guard -- a `||`-to-`&&` regression in that
 guard would still leave every `with:`-level assertion green while the
 step (and therefore the whole consumer-context dump) silently never runs
-at all. (2) the first cut also hardcoded `INPUT_GCC_PATH`/`INPUT_GCC_
+at all. (2) the first cut also hardcoded `INPUT_COMPILER`/`INPUT_GCC_
 OPTIONS` as the env var names fed to `run.sh`, disconnecting hop 3 (the
 resolved `inputs.gcc-path`/`inputs.gcc-options` values) from hop 4 (which
 env vars `run.sh` actually reads) -- a swap of those two mappings in root
@@ -814,8 +814,8 @@ def _assert_reaches_real_dump_cli_invocation(
     """Hop 4: the values resolved at the end of hops 1-3, mapped to their REAL
     INPUT_* env var names via root action.yml's own "Run abicheck" step's
     OWN, isolated `env:` block (`_step_env_mapping("Run abicheck")`, from
-    test_action_run_contract.py -- never a hardcoded `INPUT_GCC_PATH`/
-    `INPUT_AST_FRONTEND` guess, so a swap of that mapping would be caught
+    test_action_run_contract.py -- never a hardcoded `INPUT_COMPILER`/
+    `INPUT_FRONTEND` guess, so a swap of that mapping would be caught
     here). Deliberately the step-scoped mapping, not the whole-file
     `_action_yml_env_mapping()`: action.yml's earlier "Validate mode/input
     combination" step duplicates some of these same INPUT_* names in its

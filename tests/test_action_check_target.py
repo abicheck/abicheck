@@ -149,7 +149,7 @@ class TestValidateInputs:
         matches any case pattern, so it falls through to that branch's
         catch-all arm)."""
         env = dict(_BASE_IDENTITY)
-        del env["INPUT_REQUESTED_DEPTH"]
+        del env["INPUT_DEPTH"]
         result = _run(VALIDATE_SH, env, tmp_path)
         assert result.returncode == 64
         assert "::error::requested-depth input is required." in result.stdout
@@ -192,7 +192,7 @@ class TestValidateInputs:
             VALIDATE_SH,
             {
                 **_BASE_IDENTITY,
-                "INPUT_REQUESTED_DEPTH": "bogus",
+                "INPUT_DEPTH": "bogus",
                 "INPUT_BASELINE_PATH": "./b",
             },
             tmp_path,
@@ -222,7 +222,7 @@ class TestValidateInputs:
             {
                 **_BASE_IDENTITY,
                 "INPUT_KIND": "bundle",
-                "INPUT_REQUESTED_DEPTH": "build",
+                "INPUT_DEPTH": "build",
                 "INPUT_BASELINE_PATH": "./b",
                 "INPUT_BUNDLE_MEMBERS": '["libpvxs", "libpvxsIoc"]',
             },
@@ -236,7 +236,7 @@ class TestValidateInputs:
             {
                 **_BASE_IDENTITY,
                 "INPUT_KIND": "bundle",
-                "INPUT_REQUESTED_DEPTH": "source",
+                "INPUT_DEPTH": "source",
                 "INPUT_BASELINE_PATH": "./b",
                 "INPUT_BUNDLE_MEMBERS": '["libpvxs", "libpvxsIoc"]',
             },
@@ -256,7 +256,7 @@ class TestValidateInputs:
             {
                 **_BASE_IDENTITY,
                 "INPUT_KIND": "bundle",
-                "INPUT_REQUESTED_DEPTH": "headers",
+                "INPUT_DEPTH": "headers",
                 "INPUT_BASELINE_PATH": "./b",
                 "INPUT_BUNDLE_MEMBERS": '["libpvxs", "libpvxsIoc"]',
             },
@@ -279,7 +279,7 @@ class TestValidateInputs:
             {
                 **_BASE_IDENTITY,
                 "INPUT_KIND": "bundle",
-                "INPUT_REQUESTED_DEPTH": "binary",
+                "INPUT_DEPTH": "binary",
                 "INPUT_BASELINE_PATH": "./b",
                 "INPUT_BUNDLE_MEMBERS": '["libpvxs", "libpvxsIoc"]',
             },
@@ -402,7 +402,7 @@ class TestValidateInputs:
                 **_BASE_IDENTITY,
                 "INPUT_BASELINE_CHANNEL": "none",
                 "INPUT_TARGET_KIND": "plugin-contract",
-                "INPUT_CONTRACT_FILE": "./contract.syms",
+                "INPUT_CONTRACT": "./contract.syms",
             },
             tmp_path,
         )
@@ -869,7 +869,7 @@ class TestFinalizeEvidenceDegradation:
         result, outputs = _run_finalize(
             {
                 **_BASE_IDENTITY,
-                "INPUT_REQUESTED_DEPTH": "source",
+                "INPUT_DEPTH": "source",
                 "RESOLVE_RAN": "true",
                 "RESOLVE_OUTCOME": "resolved",
                 "ANALYSIS_RAN": "true",
@@ -897,7 +897,7 @@ class TestFinalizeEvidenceDegradation:
         result, outputs = _run_finalize(
             {
                 **_BASE_IDENTITY,
-                "INPUT_REQUESTED_DEPTH": "source",
+                "INPUT_DEPTH": "source",
                 "RESOLVE_RAN": "true",
                 "RESOLVE_OUTCOME": "resolved",
                 "ANALYSIS_RAN": "true",
@@ -927,7 +927,7 @@ class TestFinalizeEvidenceDegradation:
         result, outputs = _run_finalize(
             {
                 **_BASE_IDENTITY,
-                "INPUT_REQUESTED_DEPTH": "source",
+                "INPUT_DEPTH": "source",
                 "RESOLVE_RAN": "true",
                 "RESOLVE_OUTCOME": "resolved",
                 "ANALYSIS_RAN": "true",

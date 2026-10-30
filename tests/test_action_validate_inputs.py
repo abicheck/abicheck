@@ -52,11 +52,11 @@ _VALIDATOR_INPUT_VARS = (
     "INPUT_OLD_LIBRARY",
     "INPUT_OLD_HEADER",
     "INPUT_OLD_INCLUDE",
-    "INPUT_OLD_VERSION",
+    "INPUT_OLD_LABEL",
     "INPUT_FORMAT",
     "INPUT_UPLOAD_SARIF",
-    "INPUT_DEBUG_INFO1",
-    "INPUT_DEBUG_INFO2",
+    "INPUT_OLD_DEBUG_INFO",
+    "INPUT_NEW_DEBUG_INFO",
     "INPUT_DEVEL_PKG1",
     "INPUT_DEVEL_PKG2",
     "INPUT_DSO_ONLY",
@@ -80,17 +80,17 @@ _VALIDATOR_INPUT_VARS = (
     "INPUT_REQUIRED_SYMBOL",
     "INPUT_REQUIRED_SYMBOLS",
     "INPUT_LANG",
-    "INPUT_AST_FRONTEND",
-    "INPUT_GCC_PATH",
+    "INPUT_FRONTEND",
+    "INPUT_COMPILER",
     "INPUT_GCC_PREFIX",
-    "INPUT_GCC_OPTIONS",
+    "INPUT_COMPILE_OPTIONS",
     "INPUT_SYSROOT",
     "INPUT_NOSTDINC",
     "INPUT_SNAPSHOT_COMPRESSION",
     "INPUT_BUILD_INFO",
     "INPUT_COMPILE_DB",
     "INPUT_BUILD_TARGET",
-    "INPUT_PUBLIC_HEADER_DIR",
+    "INPUT_PUBLIC_HEADER_DIRS",
     "INPUT_REQUIRE_COMPLETE_ANALYSIS",
     "INPUT_JOBS",
     "INPUT_BUNDLE_SYSTEM_PROVIDERS",
@@ -704,10 +704,10 @@ class TestCompareAcceptsCompileContextForDirectoryOrPackage:
         "var,value",
         [
             ("INPUT_LANG", "c"),
-            ("INPUT_AST_FRONTEND", "clang"),
-            ("INPUT_GCC_PATH", "/opt/gcc-14/bin/g++"),
+            ("INPUT_FRONTEND", "clang"),
+            ("INPUT_COMPILER", "/opt/gcc-14/bin/g++"),
             ("INPUT_GCC_PREFIX", "aarch64-linux-gnu-"),
-            ("INPUT_GCC_OPTIONS", "-DFOO=1"),
+            ("INPUT_COMPILE_OPTIONS", "-DFOO=1"),
             ("INPUT_SYSROOT", "/opt/sysroot"),
             ("INPUT_NOSTDINC", "true"),
         ],
@@ -738,7 +738,7 @@ class TestCompareAcceptsCompileContextForDirectoryOrPackage:
                 "INPUT_MODE": "compare",
                 "INPUT_OLD_LIBRARY": str(lib_dir),
                 "INPUT_NEW_LIBRARY": "new.so",
-                "INPUT_GCC_PATH": "/opt/gcc-14/bin/g++",
+                "INPUT_COMPILER": "/opt/gcc-14/bin/g++",
             }
         )
         assert result.returncode == 0, result.stdout + result.stderr
@@ -749,7 +749,7 @@ class TestCompareAcceptsCompileContextForDirectoryOrPackage:
                 "INPUT_MODE": "compare",
                 "INPUT_OLD_LIBRARY": "old.so",
                 "INPUT_NEW_LIBRARY": "new.so",
-                "INPUT_GCC_PATH": "/opt/gcc-14/bin/g++",
+                "INPUT_COMPILER": "/opt/gcc-14/bin/g++",
             }
         )
         assert result.returncode == 0, result.stdout + result.stderr
@@ -909,8 +909,8 @@ class TestModeScopedInputWarnings:
     @pytest.mark.parametrize(
         "env_name",
         [
-            "INPUT_DEBUG_INFO1",
-            "INPUT_DEBUG_INFO2",
+            "INPUT_OLD_DEBUG_INFO",
+            "INPUT_NEW_DEBUG_INFO",
             "INPUT_DEVEL_PKG1",
             "INPUT_DEVEL_PKG2",
         ],
@@ -927,7 +927,7 @@ class TestModeScopedInputWarnings:
                 "INPUT_MODE": "compare",
                 "INPUT_OLD_LIBRARY": "old.so",
                 "INPUT_NEW_LIBRARY": "new.so",
-                "INPUT_DEBUG_INFO1": "old-debuginfo.rpm",
+                "INPUT_OLD_DEBUG_INFO": "old-debuginfo.rpm",
             }
         )
         assert result.returncode == 0, result.stdout + result.stderr
@@ -943,7 +943,7 @@ class TestModeScopedInputWarnings:
                 "INPUT_MODE": "compare",
                 "INPUT_OLD_LIBRARY": str(lib_dir),
                 "INPUT_NEW_LIBRARY": "new.so",
-                "INPUT_DEBUG_INFO1": "old-debuginfo.rpm",
+                "INPUT_OLD_DEBUG_INFO": "old-debuginfo.rpm",
             }
         )
         assert result.returncode == 0, result.stdout + result.stderr
@@ -996,7 +996,7 @@ class TestModeScopedInputWarnings:
     @pytest.mark.parametrize("mode", ["deps-tree", "deps-compare"])
     def test_public_header_dir_warns_outside_dump_and_compare(self, mode: str) -> None:
         result = _run_validate(
-            {"INPUT_MODE": mode, "INPUT_PUBLIC_HEADER_DIR": "include/"}
+            {"INPUT_MODE": mode, "INPUT_PUBLIC_HEADER_DIRS": "include/"}
         )
         assert result.returncode == 0, result.stdout + result.stderr
         assert "::warning::" in result.stdout
@@ -1010,7 +1010,7 @@ class TestModeScopedInputWarnings:
                 "INPUT_MODE": "compare",
                 "INPUT_OLD_LIBRARY": "old.so",
                 "INPUT_NEW_LIBRARY": "new.so",
-                "INPUT_PUBLIC_HEADER_DIR": "include/",
+                "INPUT_PUBLIC_HEADER_DIRS": "include/",
             }
         )
         assert result.returncode == 0, result.stdout + result.stderr
@@ -1018,7 +1018,7 @@ class TestModeScopedInputWarnings:
 
     def test_public_header_dir_silent_on_dump(self) -> None:
         result = _run_validate(
-            {"INPUT_MODE": "dump", "INPUT_PUBLIC_HEADER_DIR": "include/"}
+            {"INPUT_MODE": "dump", "INPUT_PUBLIC_HEADER_DIRS": "include/"}
         )
         assert result.returncode == 0, result.stdout + result.stderr
         assert "::warning::" not in result.stdout
@@ -1028,7 +1028,7 @@ class TestModeScopedInputWarnings:
             {
                 "INPUT_MODE": "compare",
                 "INPUT_NEW_LIBRARY": "new.so",
-                "INPUT_PUBLIC_HEADER_DIR": "include/",
+                "INPUT_PUBLIC_HEADER_DIRS": "include/",
             }
         )
         assert result.returncode == 0, result.stdout + result.stderr

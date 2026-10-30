@@ -154,7 +154,7 @@ def test_action_discovered_config_cannot_load_records_into_overlay(
     )
     capture = tmp_path / "captured-overlay.yml"
     bindir = _capture_stub(tmp_path, capture)
-    env = {**_compare_env(tmp_path), "INPUT_AST_FRONTEND": "castxml"}
+    env = {**_compare_env(tmp_path), "INPUT_FRONTEND": "castxml"}
 
     _run_action(tmp_path, env, bindir)
 
