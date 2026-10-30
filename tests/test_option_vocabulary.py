@@ -203,6 +203,11 @@ def _claims(registry: dict) -> dict[tuple[str, str], str]:
     }
 
 
+#: ADR-091 D4: `--set`/`set:` is the one generic spelling of the config tier,
+#: not a concept's own option, so it counts toward neither surface's budget.
+GENERIC_OVERRIDE = "config.override"
+
+
 def _visible_budget(registry: dict, inventory: dict) -> tuple[list[str], list[str]]:
     """Core ``compare`` options that plain ``--help`` shows, and root Action analysis inputs."""
     tier = {c["concept"]: c["tier"] for c in registry["concepts"]}
@@ -220,6 +225,7 @@ def _visible_budget(registry: dict, inventory: dict) -> tuple[list[str], list[st
         if r["action"] == "action"
         and tier.get(claims.get(("action", r["id"]), ""), "")
         not in {"action", "retired"}
+        and claims.get(("action", r["id"])) != GENERIC_OVERRIDE
     ]
     return core, analysis
 
@@ -434,6 +440,23 @@ def test_surface_budget_holds_or_is_recorded(registry: dict, inventory: dict) ->
             f"{surface} surface grew to {live} (recorded {exc['recorded']}); the budget is no-growth"
         )
         assert exc["rename"] in RENAMES_FOR_BUDGET, exc
+
+
+def test_budget_excludes_only_the_generic_override() -> None:
+    """The override input is not counted; any other analysis input still is."""
+    registry = {
+        "concepts": [
+            {"concept": GENERIC_OVERRIDE, "tier": "config", "action": ["action:set"]},
+            {"concept": "compile.lang", "tier": "config", "action": ["action:lang"]},
+            {"concept": "action.runtime", "tier": "action", "action": ["action:mode"]},
+        ]
+    }
+    rows = [
+        {"id": f"action:{n}", "action": "action", "input": n}
+        for n in ("set", "lang", "mode")
+    ]
+    _, analysis = _visible_budget(registry, {"cli": [], "action": rows})
+    assert analysis == ["action:lang"]
 
 
 def test_every_exception_is_well_formed(registry: dict, inventory: dict) -> None:

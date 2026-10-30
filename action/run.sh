@@ -432,6 +432,20 @@ add_single_flag() {
   fi
 }
 
+# `set:` (ADR-091 D4): one `PATH=VALUE` per line, forwarded verbatim as its
+# own `--set`. The Action does not validate the keys -- the CLI owns the
+# config schema and answers with exit 64 (the `_is_cli_error` arm). Only
+# blank and `#`-comment lines are skipped, since they name no override.
+add_set_flags() {
+  local item
+  [[ -n "${INPUT_SET:-}" ]] || return 0
+  while IFS= read -r item; do
+    item="${item%$'\r'}"
+    [[ "$item" =~ ^[[:space:]]*(#|$) ]] && continue
+    CMD+=(--set "$item")
+  done <<< "$INPUT_SET"
+}
+
 # The public evidence ladder, exactly as the CLI's own `DepthParam` accepts
 # it. `depth` is a raw, unvalidated workflow input and one of the few that
 # reach `CMD` as a *value* rather than a path, so it is validated here
@@ -2727,6 +2741,14 @@ CMD=(abicheck)
 
 MODE="${INPUT_MODE:-compare}"
 
+# `set:` is forwarded only by mode: compare. validate-inputs.sh refuses the
+# same combination in the workflow; this guard covers a direct run.sh call,
+# so an override can never be dropped silently.
+if [[ "$MODE" != "compare" ]] && [[ "${INPUT_SET:-}" =~ (^|$'\n')[[:space:]]*[^#[:space:]] ]]; then
+  _error_annotation "set: applies to mode: compare only, and mode: ${MODE} would ignore it. Remove set: from this step, or move the override into .abicheck.yml."
+  exit 1
+fi
+
 # Resolved once, up front, so every code path below (including the
 # baseline-set fallback further down, which needs it before this script's
 # own later _report_query definition would otherwise provide it) can use
@@ -4174,6 +4196,7 @@ elif [[ "$MODE" == "compare" ]]; then
   # (the dedicated input, `extra-args --severity-preset ...`, or neither),
   # and change nothing else.
   add_single_flag "--severity-preset" "${INPUT_SEVERITY_PRESET:-}"
+  add_set_flags
   # --budget: time guard (e.g. 15m, 900s, 1h); the step FAILS on overflow
   # (exit 5) -- a budget never silently shrinks scope. Baseline shape only --
   # rejected upstream for the audit-only shape (compare --no-baseline's
