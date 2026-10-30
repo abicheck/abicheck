@@ -53,7 +53,7 @@
    "is_flag": false,
    "type": "text",
    "choices": null,
-   "default": "Sentinel.UNSET"
+   "default": "<unset>"
   },
   {
    "id": "aggregate --verbose",
@@ -94,7 +94,7 @@
    "is_flag": false,
    "type": "text",
    "choices": null,
-   "default": "Sentinel.UNSET"
+   "default": "<unset>"
   },
   {
    "id": "compare --select-required",
@@ -107,7 +107,7 @@
    "is_flag": false,
    "type": "text",
    "choices": null,
-   "default": "Sentinel.UNSET"
+   "default": "<unset>"
   },
   {
    "id": "compare --bundle-facts-out",
@@ -159,7 +159,7 @@
    "is_flag": false,
    "type": "text",
    "choices": null,
-   "default": "Sentinel.UNSET"
+   "default": "<unset>"
   },
   {
    "id": "compare --header",
@@ -174,7 +174,7 @@
    "is_flag": false,
    "type": "sided-path",
    "choices": null,
-   "default": "Sentinel.UNSET"
+   "default": "<unset>"
   },
   {
    "id": "compare --include",
@@ -189,7 +189,7 @@
    "is_flag": false,
    "type": "sided-include-path",
    "choices": null,
-   "default": "Sentinel.UNSET"
+   "default": "<unset>"
   },
   {
    "id": "compare --version",
@@ -202,7 +202,7 @@
    "is_flag": false,
    "type": "sided-str",
    "choices": null,
-   "default": "Sentinel.UNSET"
+   "default": "<unset>"
   },
   {
    "id": "compare --dump-manifest",
@@ -215,7 +215,7 @@
    "is_flag": false,
    "type": "sided-path",
    "choices": null,
-   "default": "Sentinel.UNSET"
+   "default": "<unset>"
   },
   {
    "id": "compare --output",
@@ -230,7 +230,7 @@
    "is_flag": false,
    "type": "text",
    "choices": null,
-   "default": "Sentinel.UNSET"
+   "default": "<unset>"
   },
   {
    "id": "compare --view",
@@ -243,7 +243,7 @@
    "is_flag": false,
    "type": "text",
    "choices": null,
-   "default": "Sentinel.UNSET"
+   "default": "<unset>"
   },
   {
    "id": "compare --policy",
@@ -269,7 +269,7 @@
    "is_flag": false,
    "type": "path",
    "choices": null,
-   "default": "Sentinel.UNSET"
+   "default": "<unset>"
   },
   {
    "id": "compare --used-by",
@@ -282,7 +282,7 @@
    "is_flag": false,
    "type": "file",
    "choices": null,
-   "default": "Sentinel.UNSET"
+   "default": "<unset>"
   },
   {
    "id": "compare --required-symbol",
@@ -295,7 +295,7 @@
    "is_flag": false,
    "type": "text",
    "choices": null,
-   "default": "Sentinel.UNSET"
+   "default": "<unset>"
   },
   {
    "id": "compare --used-by-manifest",
@@ -308,7 +308,7 @@
    "is_flag": false,
    "type": "file",
    "choices": null,
-   "default": "Sentinel.UNSET"
+   "default": "<unset>"
   },
   {
    "id": "compare --severity-preset",
@@ -392,7 +392,7 @@
    "is_flag": false,
    "type": "text",
    "choices": null,
-   "default": "Sentinel.UNSET"
+   "default": "<unset>"
   },
   {
    "id": "compare --search-path",
@@ -405,7 +405,7 @@
    "is_flag": false,
    "type": "path",
    "choices": null,
-   "default": "Sentinel.UNSET"
+   "default": "<unset>"
   },
   {
    "id": "compare --ld-library-path",
@@ -431,7 +431,7 @@
    "is_flag": false,
    "type": "sided-path",
    "choices": null,
-   "default": "Sentinel.UNSET"
+   "default": "<unset>"
   },
   {
    "id": "compare --build-info",
@@ -444,7 +444,7 @@
    "is_flag": false,
    "type": "sided-path",
    "choices": null,
-   "default": "Sentinel.UNSET"
+   "default": "<unset>"
   },
   {
    "id": "compare --sources",
@@ -457,7 +457,7 @@
    "is_flag": false,
    "type": "sided-path",
    "choices": null,
-   "default": "Sentinel.UNSET"
+   "default": "<unset>"
   },
   {
    "id": "compare --depth",
@@ -496,7 +496,7 @@
    "is_flag": false,
    "type": "text",
    "choices": null,
-   "default": "Sentinel.UNSET"
+   "default": "<unset>"
   },
   {
    "id": "compare --abi3",
@@ -592,7 +592,7 @@
    "is_flag": false,
    "type": "file",
    "choices": null,
-   "default": "Sentinel.UNSET"
+   "default": "<unset>"
   },
   {
    "id": "compare --use-cases",
@@ -649,7 +649,7 @@
    "is_flag": false,
    "type": "sided-str",
    "choices": null,
-   "default": "Sentinel.UNSET"
+   "default": "<unset>"
   },
   {
    "id": "deps compare --old-root",
@@ -688,7 +688,7 @@
    "is_flag": false,
    "type": "path",
    "choices": null,
-   "default": "Sentinel.UNSET"
+   "default": "<unset>"
   },
   {
    "id": "deps compare --ld-library-path",
@@ -716,7 +716,7 @@
    "is_flag": false,
    "type": "text",
    "choices": null,
-   "default": "Sentinel.UNSET"
+   "default": "<unset>"
   },
   {
    "id": "deps compare --dry-run",
@@ -757,7 +757,7 @@
    "is_flag": false,
    "type": "path",
    "choices": null,
-   "default": "Sentinel.UNSET"
+   "default": "<unset>"
   },
   {
    "id": "deps tree --sysroot",
@@ -798,7 +798,7 @@
    "is_flag": false,
    "type": "text",
    "choices": null,
-   "default": "Sentinel.UNSET"
+   "default": "<unset>"
   },
   {
    "id": "deps tree --dry-run",
@@ -841,7 +841,7 @@
    "is_flag": false,
    "type": "path",
    "choices": null,
-   "default": "Sentinel.UNSET"
+   "default": "<unset>"
   },
   {
    "id": "dump --include",
@@ -856,7 +856,7 @@
    "is_flag": false,
    "type": "path",
    "choices": null,
-   "default": "Sentinel.UNSET"
+   "default": "<unset>"
   },
   {
    "id": "dump --exclude-header",
@@ -869,7 +869,7 @@
    "is_flag": false,
    "type": "text",
    "choices": null,
-   "default": "Sentinel.UNSET"
+   "default": "<unset>"
   },
   {
    "id": "dump --include-system-declarations",
@@ -897,7 +897,7 @@
    "is_flag": false,
    "type": "text",
    "choices": null,
-   "default": "Sentinel.UNSET"
+   "default": "<unset>"
   },
   {
    "id": "dump --version",
@@ -969,7 +969,7 @@
    "is_flag": false,
    "type": "path",
    "choices": null,
-   "default": "Sentinel.UNSET"
+   "default": "<unset>"
   },
   {
    "id": "dump --ld-library-path",
@@ -1008,7 +1008,7 @@
    "is_flag": false,
    "type": "path",
    "choices": null,
-   "default": "Sentinel.UNSET"
+   "default": "<unset>"
   },
   {
    "id": "dump --dump-manifest",
@@ -1049,7 +1049,7 @@
    "is_flag": false,
    "type": "text",
    "choices": null,
-   "default": "Sentinel.UNSET"
+   "default": "<unset>"
   },
   {
    "id": "dump --build-info",
@@ -1114,7 +1114,7 @@
    "is_flag": false,
    "type": "text",
    "choices": null,
-   "default": "Sentinel.UNSET"
+   "default": "<unset>"
   },
   {
    "id": "project capture-variants --package",
@@ -1127,7 +1127,7 @@
    "is_flag": false,
    "type": "directory",
    "choices": null,
-   "default": "Sentinel.UNSET"
+   "default": "<unset>"
   },
   {
    "id": "project capture-variants --config",
@@ -1153,7 +1153,7 @@
    "is_flag": false,
    "type": "text",
    "choices": null,
-   "default": "Sentinel.UNSET"
+   "default": "<unset>"
   },
   {
    "id": "project capture-variants --variant-include",
@@ -1166,7 +1166,7 @@
    "is_flag": false,
    "type": "text",
    "choices": null,
-   "default": "Sentinel.UNSET"
+   "default": "<unset>"
   },
   {
    "id": "project capture-variants --dry-run",
@@ -1179,7 +1179,7 @@
    "is_flag": true,
    "type": "boolean",
    "choices": null,
-   "default": "Sentinel.UNSET"
+   "default": "<unset>"
   },
   {
    "id": "project capture-variants --output",
@@ -1194,7 +1194,7 @@
    "is_flag": false,
    "type": "text",
    "choices": null,
-   "default": "Sentinel.UNSET"
+   "default": "<unset>"
   },
   {
    "id": "project history --version",
@@ -1207,7 +1207,7 @@
    "is_flag": false,
    "type": "text",
    "choices": null,
-   "default": "Sentinel.UNSET"
+   "default": "<unset>"
   },
   {
    "id": "project history --policy",
@@ -1235,7 +1235,7 @@
    "is_flag": false,
    "type": "text",
    "choices": null,
-   "default": "Sentinel.UNSET"
+   "default": "<unset>"
   },
   {
    "id": "project history --verbose",
@@ -1263,7 +1263,7 @@
    "is_flag": false,
    "type": "text",
    "choices": null,
-   "default": "Sentinel.UNSET"
+   "default": "<unset>"
   },
   {
    "id": "project plan --project",
@@ -1317,7 +1317,7 @@
    "is_flag": false,
    "type": "text",
    "choices": null,
-   "default": "Sentinel.UNSET"
+   "default": "<unset>"
   },
   {
    "id": "project plan --verbose",
@@ -1347,7 +1347,7 @@
    "is_flag": false,
    "type": "text",
    "choices": null,
-   "default": "Sentinel.UNSET"
+   "default": "<unset>"
   },
   {
    "id": "project validate --toolchain-bindings",

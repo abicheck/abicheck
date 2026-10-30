@@ -48,6 +48,11 @@ SHIM_OWNERS = {"run_compare", "run_dump"}
 #: D4 budgets. Exceptions record today's counts; they may only shrink.
 CORE_LIMIT = 15
 ACTION_LIMIT = 25
+#: Approved no-growth ceilings (ADR-091 R22). Lower these with the registry when
+#: the counts fall; a PR cannot raise them by editing the registry's `recorded`.
+SURFACE_BASELINE = {"compare": 20, "action": 53}
+#: The only concepts that may opt out of the D1 name rule (ADR-091 "Out of scope").
+OUT_OF_SCOPE_NAMING = {"aggregate", "project"}
 #: The rename ids allowed to carry a budget exception (ADR-091 D4 / Phase 5).
 RENAMES_FOR_BUDGET = {"R22"}
 
@@ -322,6 +327,7 @@ def test_out_of_scope_naming_is_the_adr_out_of_scope_surface(
         if c.get("naming") is None:
             continue
         assert c["naming"] == "out_of_scope", c["concept"]
+        assert c["concept"] in OUT_OF_SCOPE_NAMING, c["concept"]
         assert c.get("naming_reason"), c["concept"]
         for i in c.get("cli", []):
             command = cli[i]["command"]
@@ -386,6 +392,9 @@ def test_surface_budget_holds_or_is_recorded(registry: dict, inventory: dict) ->
             continue
         assert exc is not None, (
             f"{surface} surface has {live} options, over the D4 budget of {limit}"
+        )
+        assert exc["recorded"] <= SURFACE_BASELINE[surface], (
+            f"{surface} recorded count {exc['recorded']} exceeds the approved baseline {SURFACE_BASELINE[surface]}"
         )
         assert live <= exc["recorded"], (
             f"{surface} surface grew to {live} (recorded {exc['recorded']}); the budget is no-growth"

@@ -47,6 +47,10 @@ def _default_text(value: Any) -> str:
     """
     if value is inspect.Parameter.empty or value is dataclasses.MISSING:
         return "<required>"
+    if type(value).__name__ == "Sentinel":
+        # Click's "not given" marker: its class and repr moved between Click
+        # releases, so the inventory must not depend on the installed version.
+        return "<unset>"
     if isinstance(value, enum.Enum):
         return f"{type(value).__qualname__}.{value.name}"
     if value is None or isinstance(value, (bool, int, float, str)):
