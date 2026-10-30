@@ -53,6 +53,7 @@ nav:
       - 'Worked Example: Real Library': start/real-world-example.md
       - 'Checking a Conda-Forge Package': start/scanning-conda-packages.md
       - Upgrading to 0.6: start/upgrading-to-0.6.md
+      - Upgrading to 0.7: start/upgrading-to-0.7.md
     - Everyday Use:
       - CLI Usage: use/cli-usage.md
       - Evidence, Build-Context & Debug Flags: use/dump-compare-flags.md

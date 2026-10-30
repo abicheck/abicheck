@@ -133,5 +133,5 @@ def parse_abi3_floor(value: str | None) -> tuple[int, int] | None:
 
     floor = parse_abi3_version(value)
     if floor is None:
-        raise RunInputError.parameter(f"invalid --abi3 version: {value!r}")
+        raise RunInputError.parameter(f"invalid --abi3-floor version: {value!r}")
     return floor

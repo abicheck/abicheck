@@ -226,7 +226,7 @@ class TestHelpSurface:
 
     @pytest.mark.parametrize("sided", ["old=FOO", "new=FOO", "old:LABEL=FOO"])
     def test_no_per_side_define_form(self, sided: str) -> None:
-        """D1: unlike -H/-I/--version, -D has no `old=`/`new=` spelling. The
+        """D1: unlike -H/-I/--label, -D has no `old=`/`new=` spelling. The
         operand is taken verbatim as a macro definition, so a sided attempt is
         a loud usage error rather than a silent per-side macro context (which
         would compare two different public surfaces).

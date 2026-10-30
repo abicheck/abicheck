@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""``compare --since``/``--changed-path`` (Phase 2c) and ``compare --abi3``
+"""``compare --since``/``--changed-path`` (Phase 2c) and ``compare --abi3-floor``
 (Phase 2d) -- ``docs/contribute/plans/one-comparison-product.md`` §6.
 
 The invariants here are stated over the *primitives* (the seed resolver and
@@ -291,7 +291,11 @@ class TestReleaseOperandRejection:
 
     @pytest.mark.parametrize(
         ("flag", "value"),
-        [("--since", "origin/main"), ("--changed-path", "a.cc"), ("--abi3", "3.9")],
+        [
+            ("--since", "origin/main"),
+            ("--changed-path", "a.cc"),
+            ("--abi3-floor", "3.9"),
+        ],
     )
     def test_rejected_for_a_directory_operand(
         self, flag: str, value: str, tmp_path: Path
@@ -427,7 +431,8 @@ class TestCompareAbi3:
     ) -> None:
         path = _write(_abi3_snapshot(), tmp_path / "foo.abi3.so.abi.json")
         result = CliRunner().invoke(
-            main, ["compare", str(path), str(path), "--abi3", "3.9", "-o", "json=-"]
+            main,
+            ["compare", str(path), str(path), "--abi3-floor", "3.9", "-o", "json=-"],
         )
         assert result.exit_code == 0, result.output
         report = json.loads(result.stdout)
@@ -453,7 +458,7 @@ class TestCompareAbi3:
         )
         new = _write(clean, tmp_path / "new.abi.json")
         result = CliRunner().invoke(
-            main, ["compare", str(old), str(new), "--abi3", "3.9", "-o", "json=-"]
+            main, ["compare", str(old), str(new), "--abi3-floor", "3.9", "-o", "json=-"]
         )
         report = json.loads(result.stdout)
         assert not [
@@ -468,7 +473,8 @@ class TestCompareAbi3:
             AbiSnapshot(library="libfoo.so", version="1.0"), tmp_path / "s.json"
         )
         result = CliRunner().invoke(
-            main, ["compare", str(path), str(path), "--abi3", "3.9", "-o", "json=-"]
+            main,
+            ["compare", str(path), str(path), "--abi3-floor", "3.9", "-o", "json=-"],
         )
         assert result.exit_code == 7, result.output
         report = json.loads(result.stdout)
@@ -478,7 +484,7 @@ class TestCompareAbi3:
     def test_an_invalid_floor_is_a_usage_error(self, tmp_path: Path) -> None:
         path = _write(_abi3_snapshot(), tmp_path / "foo.abi3.so.abi.json")
         result = CliRunner().invoke(
-            main, ["compare", str(path), str(path), "--abi3", "nonsense"]
+            main, ["compare", str(path), str(path), "--abi3-floor", "nonsense"]
         )
         assert result.exit_code == 64, result.output
 
@@ -533,7 +539,7 @@ class TestAbi3FindingsReachPolicy:
                 "compare",
                 str(path),
                 str(path),
-                "--abi3",
+                "--abi3-floor",
                 "3.9",
                 "--policy",
                 str(self._policy(tmp_path, severity)),
@@ -551,7 +557,8 @@ class TestAbi3FindingsReachPolicy:
         policy in effect the same findings still gate nothing."""
         path = _write(_abi3_snapshot(), tmp_path / "foo.abi3.so.abi.json")
         result = CliRunner().invoke(
-            main, ["compare", str(path), str(path), "--abi3", "3.9", "-o", "json=-"]
+            main,
+            ["compare", str(path), str(path), "--abi3-floor", "3.9", "-o", "json=-"],
         )
         assert result.exit_code == 0, result.output
         assert json.loads(result.stdout)["verdict"] == "COMPATIBLE_WITH_RISK"
@@ -576,7 +583,7 @@ class TestAbi3FindingsReachPolicy:
                 "compare",
                 str(path),
                 str(path),
-                "--abi3",
+                "--abi3-floor",
                 "3.9",
                 "--suppress",
                 str(suppress),
@@ -647,7 +654,7 @@ class TestAbi3FloorConfigDefault:
                 str(path),
                 "--config",
                 str(cfg),
-                "--abi3",
+                "--abi3-floor",
                 "3.12",
                 "-o",
                 "json=-",

@@ -129,7 +129,7 @@ OPTION_GROUPS: dict[str, list[dict[str, object]]] = {
         {
             "name": "Per-side overrides",
             "options": [
-                "--version",
+                "--label",
             ],
         },
         # Phase 7n: the "Build-config matrix & idioms" panel is gone --
@@ -171,7 +171,7 @@ OPTION_GROUPS: dict[str, list[dict[str, object]]] = {
                 "--header",
                 "--include",
                 "--define",
-                "--version",
+                "--label",
             ],
         },
         {"name": "Output", "options": ["--output", "--dry-run", "--verbose"]},

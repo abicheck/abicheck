@@ -47,7 +47,7 @@ abicheck compare libfoo.so.1 libfoo.so.2 \
 abicheck compare libfoo.so.1 libfoo.so.2 \
   --header old=include/v1/foo.h --header old=include/v1/bar.h \
   --header new=include/v2/foo.h --header new=include/v2/bar.h \
-  -I include/ --version old=1.0 --version new=2.0
+  -I include/ --label old=1.0 --label new=2.0
 
 # Shorthand: -H applies the same header to both sides
 # (only when the header itself didn't change between versions)
@@ -100,8 +100,8 @@ When you want to cache ABI baselines as CI artifacts or commit them to the repo:
 
 ```bash
 # Step 1: Dump snapshots (each version uses its own header)
-abicheck dump libfoo.so.1 -H include/v1/foo.h --version 1.0 -o libfoo-1.0.json
-abicheck dump libfoo.so.2 -H include/v2/foo.h --version 2.0 -o libfoo-2.0.json
+abicheck dump libfoo.so.1 -H include/v1/foo.h --label 1.0 -o libfoo-1.0.json
+abicheck dump libfoo.so.2 -H include/v2/foo.h --label 2.0 -o libfoo-2.0.json
 
 # Step 2: Compare snapshots (no headers needed — already baked in)
 abicheck compare libfoo-1.0.json libfoo-2.0.json
@@ -188,11 +188,11 @@ and severity in `.abicheck.yml` instead of retyping a preset.
 ```bash
 # CI baseline snapshot vs current build
 abicheck compare baseline-1.0.json ./build/libfoo.so \
-  --header new=include/foo.h --version new=2.0-dev
+  --header new=include/foo.h --label new=2.0-dev
 
 # Live old build vs stored new snapshot
 abicheck compare ./build-old/libfoo.so new-release.json \
-  --header old=include/foo.h --version old=1.0-rc1
+  --header old=include/foo.h --label old=1.0-rc1
 ```
 
 ## Writing a snapshot: `-o/--output` versus shell redirection

@@ -53,7 +53,7 @@ normalized. Not fixed here, for the same reason as above: it needs the
 same graph-aware widening this entry already calls for, not a second,
 independent patch on the load side.
 
-- ~~Neither `scan`'s dry-run report validates `--abi3` applicability before
+- ~~Neither `scan`'s dry-run report validates `--abi3-floor` applicability before
 reporting success~~ **Fixed (CLI cleanup phase two, PR 5 follow-up).**
 Both `frontends.cli.scan_dry_run.render_scan_dry_run` (single-binary) and
 `frontends.cli.artifact_set_dry_run.render_artifact_set_dry_run`

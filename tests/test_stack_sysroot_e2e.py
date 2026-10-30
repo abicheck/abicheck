@@ -140,10 +140,10 @@ def test_stack_check_cli_reports_fail(tmp_path: Path) -> None:
             "deps",
             "compare",
             str(ROOT_REL),
-            "--old-root",
-            str(baseline),
-            "--new-root",
-            str(candidate),
+            "--root",
+            f"old={str(baseline)}",
+            "--root",
+            f"new={str(candidate)}",
         ],
     )
     # FAIL → exit code 4 (see cli_stack.py).

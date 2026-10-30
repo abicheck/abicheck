@@ -35,7 +35,7 @@ Both restrictions were load-bearing. The audit in
   next token, so a real flag after it is swallowed as a value.
 * **Four live options missing** because they belong to ``dump``
   (``--compression``, ``--provenance``) or ``deps compare``
-  (``--old-root``, ``--new-root``) rather than ``compare`` -- and the
+  (``--root``) rather than ``compare`` -- and the
   tokenizer runs for every mode, since ``_effective_format`` is evaluated
   after ``run.sh``'s mode dispatch.
 * ``_extra_args_expand_short_clusters``' terminal set listing ``j``, which
@@ -180,8 +180,8 @@ class TestRunShDerivesExactlyTheRealOptionSet:
         implied by a set difference."""
         assert "--compression" in _derived_options("dump")
         assert "--compression" not in _derived_options("compare")
-        assert "--old-root" in _derived_options("deps-compare")
-        assert "--old-root" not in _derived_options("compare")
+        assert "--root" in _derived_options("deps-compare")
+        assert "--root" not in _derived_options("compare")
 
     @pytest.mark.parametrize(
         "retired",

@@ -1047,12 +1047,12 @@ def test_disk_cache_version_label_alone_keys_apart(
     monkeypatch: pytest.MonkeyPatch, binaries: tuple[Path, Path], tmp_path: Path
 ) -> None:
     v1, v2 = binaries
-    base = (str(v1), str(v2), "--version", "new=2.0")
+    base = (str(v1), str(v2), "--label", "new=2.0")
     warm, fresh, spy = _warm_vs_fresh(
         monkeypatch,
         tmp_path,
-        (*base, "--version", "old=1.0"),
-        (*base, "--version", "old=9.0"),
+        (*base, "--label", "old=1.0"),
+        (*base, "--label", "old=9.0"),
     )
     assert spy.hits >= 1 and spy.misses >= 1, spy
     assert "9.0" in fresh, "the version label does not reach the report"

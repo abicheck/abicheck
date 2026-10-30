@@ -51,6 +51,25 @@ out_of_scope:
   - pattern: actions/verify-source-run:*
     reason: Producer-run verification (ADR-073), no CLI counterpart.
     until: permanent
+deprecated_aliases:
+  # ADR-091 D7: a renamed option's old spelling, hidden and accepted for one
+  # minor release with click's own DeprecationWarning naming `replaces`. Each
+  # is claimed here instead of in a concept, so it is never a second spelling
+  # of a core concept; Phase 6 deletes the entry with the option.
+  - id: compare --version
+    replaces: compare --label
+  - id: dump --version
+    replaces: dump --label
+  - id: project history --version
+    replaces: project history --label
+  - id: compare --abi3
+    replaces: compare --abi3-floor
+  - id: deps compare --old-root
+    replaces: deps compare --root
+  - id: deps compare --new-root
+    replaces: deps compare --root
+  - id: deps tree --sysroot
+    replaces: deps tree --root
 concepts:
   - concept: operands
     tier: core
@@ -91,9 +110,9 @@ concepts:
     renames:
       - R1
     cli:
-      - compare --version
-      - dump --version
-      - project history --version
+      - compare --label
+      - dump --label
+      - project history --label
     action:
       - action:old-version
       - action:new-version
@@ -103,9 +122,6 @@ concepts:
       - run_compare(new_version)
       - run_dump(version)
     exceptions:
-      - {id: compare --version, rule: name, rename: R1, note: cli spelling breaks D1; the leaf is `label`}
-      - {id: dump --version, rule: name, rename: R1, note: cli spelling breaks D1; the leaf is `label`}
-      - {id: project history --version, rule: name, rename: R1, note: cli spelling breaks D1; the leaf is `label`}
       - {id: 'action:old-version', rule: name, rename: R1, note: action spelling breaks D1; the leaf is `label`}
       - {id: 'action:new-version', rule: name, rename: R1, note: action spelling breaks D1; the leaf is `label`}
       - {id: InputSpec.version, rule: name, rename: R1, note: python spelling breaks D1; the leaf is `label`}
@@ -682,14 +698,11 @@ concepts:
     renames:
       - R16
     cli:
-      - deps compare --old-root
-      - deps compare --new-root
-      - deps tree --sysroot
+      - deps compare --root
+      - deps tree --root
     action:
       - action:old-root
       - action:new-root
-    exceptions:
-      - {id: deps tree --sysroot, rule: name, rename: R16, note: cli spelling breaks D1; the leaf is `root`}
   - concept: bundle
     tier: config
     renames: []
@@ -716,13 +729,11 @@ concepts:
     renames:
       - R12
     cli:
-      - compare --abi3
+      - compare --abi3-floor
     config:
       - python.abi3_floor
     python:
       - CompareRequest.abi3_floor
-    exceptions:
-      - {id: compare --abi3, rule: name, rename: R12, note: cli spelling breaks D1; the leaf is `abi3_floor`}
   - concept: deployment
     tier: config
     renames: []

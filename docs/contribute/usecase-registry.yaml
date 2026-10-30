@@ -624,11 +624,11 @@ use_cases:
       tests: [tests/test_python_ext.py]
     notes: >
       Capability is real and working (verified live: `compare foo.abi3.so
-      foo.abi3.so --abi3 3.9` against a snapshot carrying a stable-ABI
+      foo.abi3.so --abi3-floor 3.9` against a snapshot carrying a stable-ABI
       violation exits 0 and reports it as a `COMPATIBLE_WITH_RISK`
       deployment-risk finding). The `tests` evidence above is real, current
       proof of this, not stale: `test_python_ext.py`'s own `_compare_abi3()`
-      helper invokes `compare <path> <path> --abi3 ...` (self-compare), not
+      helper invokes `compare <path> <path> --abi3-floor ...` (self-compare), not
       the deleted `scan` command, and all 108 tests in the file pass
       (verified live, `pytest tests/test_python_ext.py -q`).
 
@@ -639,7 +639,7 @@ use_cases:
       for a target Py_LIMITED_API floor; diff_python raises
       PYTHON_STABLE_ABI_VIOLATION (a new private _Py* import in an abi3 module) at
       compare time. Interpreter-floor conformance is checked by the
-      `compare --abi3` audit (diff_python.audit_stable_abi_imports, run as a
+      `compare --abi3-floor` audit (diff_python.audit_stable_abi_imports, run as a
       candidate-side enrichment stage by workflows/abi3_audit.py since
       ADR-068 D3; the former `scan --abi3` was deleted outright in Phase 6 --
       the user supplies the target floor, which a bare .abi3.so does not
