@@ -119,7 +119,8 @@ def test_base_kind_rule_hides_the_removal_headerless(
     )
     assert code == 0
     assert _removal_kinds(report) == ["func_removed_elf_only"]
-    assert report["disposition_audit"]["counts"]["suppressed"] == 1
+    # The removal and its public_surface_shrank roll-up (ADR-067 derived).
+    assert report["disposition_audit"]["counts"]["suppressed"] == 2
     assert not [c for c in report["changes"] if c["kind"] in _REMOVAL_KINDS]
 
 
@@ -134,7 +135,8 @@ def test_base_kind_rule_hides_the_removal_with_headers(
     )
     assert code == 0
     assert _removal_kinds(report) == ["func_removed"]
-    assert report["disposition_audit"]["counts"]["suppressed"] == 1
+    # The removal and its public_surface_shrank roll-up (ADR-067 derived).
+    assert report["disposition_audit"]["counts"]["suppressed"] == 2
     assert not [c for c in report["changes"] if c["kind"] in _REMOVAL_KINDS]
 
 

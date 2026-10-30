@@ -859,8 +859,12 @@ _ACCEPTED_KILL_LOSS = {
     # now transitively reaches the five storage codec modules too.
     # Widened again (ADR-067 P1): the disposition audit's rule inventory reads
     # the suppression rule model, so this file's reach now includes it.
+    # Widened again: acknowledgment matching keys twins on
+    # compare.finding_dedup.dedup_identity_key, so the policy layer this file
+    # reaches now imports finding_dedup too.
     "tests/test_reusable_workflows_project_evidence.py": frozenset(
         {
+            "abicheck.compare.finding_dedup",
             "abicheck.policy.suppression.rules",
             "abicheck.policy.classification",
             "abicheck.model.evidence_status",

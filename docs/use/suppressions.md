@@ -160,6 +160,31 @@ variant entry never changes its base kind. The per-kind `overrides:` mapping as
 written is what reports echo back; the variant coverage is applied when the
 verdict is computed.
 
+## Removals and the public-surface roll-up
+
+Removing a public function, variable or type also lowers the public declaration
+count, so the run carries one `public_surface_shrank` finding (symbol
+`<surface>`) for those removals. It is a COMPATIBLE count, not a symbol, so no
+rule names it. Instead it follows the removals it summarises:
+
+- A suppression that hides **every** covered removal hides the roll-up too,
+  with the same rule. The report lists it under `suppression.suppressed_changes`
+  with that rule and the removals it covers, and the disposition audit counts it
+  as suppressed. A run whose only change was an accepted removal reads
+  `NO_CHANGE`, not a COMPATIBLE roll-up.
+- If any covered removal stays visible, the roll-up stays visible and
+  unchanged. Suppressing one of two removals leaves the roll-up in place.
+- An acknowledgment that covers every covered removal also acknowledges the
+  roll-up. Acknowledgment never hides, so both stay visible.
+- An `overrides:` or `reclassify:` rule changes the removal's verdict, not the
+  roll-up's: the roll-up is never a break, so a removal re-verdicted to `risk`
+  or `ignore` still leaves a COMPATIBLE roll-up next to it.
+
+The members are the removal kinds in `ROLLUP_MEMBER_KINDS`
+(`abicheck/model/change_catalog/kind_variants.py`): `func_removed`,
+`var_removed` and `type_removed`, with their `*_elf_only` variants where one
+exists.
+
 ---
 
 ## Reachability-aware suppression

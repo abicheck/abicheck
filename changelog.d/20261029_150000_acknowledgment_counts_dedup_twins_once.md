@@ -1,0 +1,3 @@
+### Fixed
+
+- **An acknowledgment over a removal no longer fails with `-H`** — a `symbol:` acknowledgment for a removed function or variable matched both the header-tier removal and its deduplicated ELF-only twin, which the dedup pass had already folded into one finding, so the matcher raised `AmbiguousAcknowledgmentError` and the run wrote no report. The matcher now counts candidates by the dedup pass's own identity (`finding_dedup.dedup_identity_key`), so the twin pair is one observed change: the removal is acknowledged with its roll-up, stays a gating break under `breaks: gate`, and the folded twin stays on the ledger as `deduplicated`. Headerless and `-H` runs now agree. A record that matches two genuinely different findings still raises.

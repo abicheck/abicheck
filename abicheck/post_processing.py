@@ -156,12 +156,12 @@ class DeduplicateCrossDetector:
     name = "deduplicate_cross_detector"
 
     def run(self, changes: list[Change], ctx: PipelineContext) -> list[Change]:
-        from .compare.finding_dedup import deduplicate_cross_detector
+        from .policy.dedup_survivors import deduplicate_recording_survivors
 
         # Pass the snapshots so the enum bare/qualified-name bridge can run
         # here (before EnrichSourceLocations, which runs later in this
         # pipeline) — see compare.finding_dedup.deduplicate_cross_detector's own docstring.
-        return deduplicate_cross_detector(changes, ctx.baseline_or_empty, ctx.new)
+        return deduplicate_recording_survivors(changes, ctx)
 
 
 class DowngradeOpaqueTypeChanges:

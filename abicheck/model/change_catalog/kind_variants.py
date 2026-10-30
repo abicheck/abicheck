@@ -91,6 +91,37 @@ def matched_via_variant(selector_kind: str | None, observed_kind: str) -> bool:
     return observed_kind in kind_match_set(selector_kind)
 
 
+#: Aggregate roll-up kinds and the removal kinds each one summarises.
+#:
+#: ``public_surface_shrank`` is computed from declaration *counts* (see
+#: :mod:`abicheck.diff_surface_metrics`), not emitted per symbol, so it has no
+#: symbol of its own to match a suppression against. It is the net count of
+#: public functions, variables, types and enums that went away, so every
+#: removal of one of those kinds contributes to it. A base removal kind here
+#: also covers its ``*_elf_only`` variant through :func:`kind_match_set`.
+#: Over-listing a kind is the safe direction (the roll-up then stays visible);
+#: under-listing would hide a roll-up that a live removal still feeds.
+ROLLUP_MEMBER_KINDS: Mapping[str, frozenset[str]] = MappingProxyType(
+    {
+        "public_surface_shrank": frozenset(
+            {"func_removed", "var_removed", "type_removed"}
+        ),
+    }
+)
+
+
+def rollup_member_kinds(kind: str) -> frozenset[str]:
+    """The observed kind values whose findings a roll-up *kind* summarises.
+
+    Empty for a kind that is not a roll-up. Variants are included through
+    :func:`kind_match_set`, so a headerless ``func_removed_elf_only`` counts.
+    """
+    members: set[str] = set()
+    for base in ROLLUP_MEMBER_KINDS.get(kind, frozenset()):
+        members |= kind_match_set(base)
+    return frozenset(members)
+
+
 def expand_variant_overrides(
     overrides: Mapping[ChangeKind, _V] | None,
 ) -> dict[ChangeKind, _V]:

@@ -346,8 +346,18 @@ ANALYSIS_1_BUG_CLASSES: tuple[BugClass, ...] = (
             # duplicate pair; a new replay kind must be classified in it. The
             # guard reads the emitter modules by AST scan, not a list.
             "tests/test_source_replay_twin_table.py",
+            # A replay twin the dedup pass drops is one observation with its
+            # survivor for acknowledgment matching: a same-kind pair (the
+            # INLINE_FUNCTION_REMOVED row) must count once, and a dropped copy
+            # is acknowledged only through the finding it folded into.
+            "tests/test_replay_twin_acknowledgment.py",
+            "tests/test_replay_twin_acknowledgment_e2e.py",
             "tests/test_one_change_one_finding_matrix.py",
             "tests/test_variable_identity_dedup.py",
+            # The dedup merge rules as properties: oracle agreement, idempotence,
+            # order independence and conservation over generated finding lists,
+            # plus the must-merge / must-not-merge pairs by name and value.
+            "tests/test_finding_dedup_properties.py",
             "tests/unit/compare/test_dedup_key.py",
             "tests/test_diff_namespaces.py",
             # workflows/cross_source_hygiene.py's own per-side OLD/NEW
@@ -366,6 +376,14 @@ ANALYSIS_1_BUG_CLASSES: tuple[BugClass, ...] = (
             # depending on run; pinned under permuted edges/inputs and
             # several PYTHONHASHSEED values.
             "tests/test_graph_reconcile_order_invariance.py",
+            # An acknowledgment's matcher counted a dedup twin pair (a header
+            # removal and its ELF-only copy, one dedup identity) as two
+            # observations, so a `symbol:` record over `-H` raised
+            # AmbiguousAcknowledgmentError. The matcher now keys candidates on
+            # the dedup pass's own identity; two genuinely different findings
+            # under one record still raise. Pinned at the CLI and as a unit.
+            "tests/test_acknowledgment_twin_e2e.py",
+            "tests/test_acknowledgment_twin_identity.py",
         ),
         public_surfaces=("cli",),
         # Phase 5's own two originally-tracked gaps here (a compare()-level

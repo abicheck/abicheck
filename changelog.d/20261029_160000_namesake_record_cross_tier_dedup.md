@@ -1,0 +1,4 @@
+### Fixed
+
+- Cross-tier dedup of namesake records: when two records share a leaf name in different namespaces (`a::Ctx`, `b::Ctx`) and a header finding for one of them does not carry its qualified name, that finding no longer fails to pair with its own DWARF copy, so the record was reported twice. The bare name also no longer absorbs the DWARF finding of an unrelated same-named record. The record's entity identity now supplies the qualified spelling for the pairing, as the enum bridge already does.
+- A removed or changed field `x` of a nested record `P::x` is no longer dropped as a duplicate of field `x` of its enclosing record `P`: the field match keyed the enclosing record's field by its `::x`-suffixed spelling and looked it up by the bare parent, so the two could collide. Findings whose leaf names are not shared, or that carry the qualified name, are unchanged.

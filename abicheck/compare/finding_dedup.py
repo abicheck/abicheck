@@ -69,7 +69,7 @@ _ENUM_DEDUP_KINDS = frozenset(
 )
 
 
-#: The four enum kinds the bare/qualified bridge (`enum_canonical_names`/`canonicalize_enum_symbol`) applies to -- deliberately a NARROWER set than `_DEDUP_CATEGORIES` (which also covers function/variable/version dedup categories unrelated to enums). Codex review, fresh evidence: an earlier revision gated the bridging on `c.kind in _DEDUP_CATEGORIES` directly, so an unrelated symbol from any OTHER category whose spelling happened to coincide with a registered enum alias (e.g. an extern-C `FUNC_REMOVED` named "Color" when a `detail::Color` enum exists) had its `Change.qualified_name` incorrectly rewritten to the enum's qualified spelling -- corrupting an unrelated finding's identity, and doing so permanently, since the later `EnrichSourceLocations` step refuses to overwrite an already-populated `qualified_name`.
+#: The four enum kinds the bare/qualified bridge (`enum_canonical_names`/`canonicalize_enum_symbol`) applies to -- deliberately a NARROWER set than `DEDUP_CATEGORY_BY_KIND` (which also covers function/variable/version dedup categories unrelated to enums). Codex review, fresh evidence: an earlier revision gated the bridging on `c.kind in DEDUP_CATEGORY_BY_KIND` directly, so an unrelated symbol from any OTHER category whose spelling happened to coincide with a registered enum alias (e.g. an extern-C `FUNC_REMOVED` named "Color" when a `detail::Color` enum exists) had its `Change.qualified_name` incorrectly rewritten to the enum's qualified spelling -- corrupting an unrelated finding's identity, and doing so permanently, since the later `EnrichSourceLocations` step refuses to overwrite an already-populated `qualified_name`.
 ENUM_QUALIFICATION_KINDS = frozenset(
     {
         ChangeKind.ENUM_MEMBER_REMOVED,
@@ -301,8 +301,26 @@ def _dedup_enum_same_kind(
     return result
 
 
+def _ast_qualified_hint(c: Change, ambiguous: Mapping[EntityId, str]) -> str | None:
+    """The qualified spelling an AST-tier record finding is known by, if any.
+
+    The header tier labels a record finding with its bare leaf. When that leaf
+    is shared by several declarations, :func:`record_canonical_names` declines
+    to bridge it, so the finding would be unpairable with its DWARF copy
+    (``a::Ctx``) and the record would be reported twice. Its own entity names
+    the qualified spelling; a producer-stamped ``qualified_name`` takes priority.
+    """
+    if c.qualified_name is not None:
+        return c.qualified_name
+    if c.entity_id is not None:
+        return ambiguous.get(c.entity_id)
+    return None
+
+
 def _dedup_cross_kind(
-    changes: list[Change], record_names: dict[str, str] | None = None
+    changes: list[Change],
+    record_names: dict[str, str] | None = None,
+    ambiguous: Mapping[EntityId, str] | None = None,
 ) -> list[Change]:
     """Pass 3: drop a DWARF finding when an equivalent AST finding exists.
 
@@ -319,19 +337,37 @@ def _dedup_cross_kind(
     itself, e.g. a stale header vs. inconsistent extractor evidence. Only indexes the AST-tier kinds this dedup ever looks up (``_DWARF_TO_AST_EQUIV``'s values) -- indexing every kind unconditionally crashed on a kind (e.g. ``PYTHON_STABLE_ABI_VIOLATION``) whose ``old_value``/``new_value`` is a list, unhashable for the transition-agreement set below (Codex review).
     """
     names = record_names or {}
+    known_ambiguous = ambiguous or {}
+    # One spelling per (symbol, hint, field) for this pass: many findings name
+    # the same record, and ``names`` is fixed for the call.
+    canonical: dict[tuple[str, str | None, str | None], str] = {}
+
+    # Looked up inline rather than through a helper, so the repeat audit sees
+    # one canonicalize_record_symbol call per distinct key.
+
     _Transition = tuple[object, object] | None
     ast_findings: dict[tuple[str, str], set[_Transition]] = {}
     ast_field_findings: dict[tuple[str, str, str], set[_Transition]] = {}
     _relevant_ast = {ak for aks in _DWARF_TO_AST_EQUIV.values() for ak in aks}
     for c in (c for c in changes if c.kind in _relevant_ast):
-        canon = canonicalize_record_symbol(
-            c.symbol, names, c.qualified_name, c.field_name
+        hint = _ast_qualified_hint(c, known_ambiguous)
+        key = (c.symbol, hint, c.field_name)
+        canon = canonical.get(key) or canonical.setdefault(
+            key, canonicalize_record_symbol(c.symbol, names, hint, c.field_name)
         )
         transition = cross_tier_transition(c)
         ast_findings.setdefault((c.kind.value, canon), set()).add(transition)
         if c.field_name is not None:
+            # Keyed by the parent record alone, the spelling the DWARF lookup
+            # below derives from its own field symbol. ``canon`` already carries
+            # ``::field``, so keying by it never matched and let a nested record
+            # ``P::x``'s field ``x`` absorb field ``x`` of its enclosing ``P``.
+            parent_key = (c.symbol, hint, None)
+            parent = canonical.get(parent_key) or canonical.setdefault(
+                parent_key, canonicalize_record_symbol(c.symbol, names, hint)
+            )
             ast_field_findings.setdefault(
-                (c.kind.value, canon, c.field_name), set()
+                (c.kind.value, parent, c.field_name), set()
             ).add(transition)
 
     def _matches(
@@ -353,8 +389,10 @@ def _dedup_cross_kind(
     for c in changes:
         equiv_ast_kinds = _DWARF_TO_AST_EQUIV.get(c.kind)
         if equiv_ast_kinds:
-            canon_symbol = canonicalize_record_symbol(
-                c.symbol, names, None, c.field_name
+            dwarf_key = (c.symbol, None, c.field_name)
+            canon_symbol = canonical.get(dwarf_key) or canonical.setdefault(
+                dwarf_key,
+                canonicalize_record_symbol(c.symbol, names, None, c.field_name),
             )
             dwarf_transition = cross_tier_transition(c)
 
@@ -407,7 +445,7 @@ def deduplicate_ast_dwarf(
     stage1 = _dedup_exact(changes, ambiguous)
     stage2 = _dedup_enum_same_kind(stage1, ambiguous)
     record_names = {**record_canonical_names(old), **record_canonical_names(new)}
-    return _dedup_cross_kind(stage2, record_names)
+    return _dedup_cross_kind(stage2, record_names, ambiguous)
 
 
 #: An ELF-only removal and a header-aware visibility finding name one export
@@ -463,7 +501,7 @@ def _drop_constant_value_restatements(changes: list[Change]) -> list[Change]:
     )
     result: list[Change] = []
     for c in changes:
-        if c.kind is ChangeKind.VAR_VALUE_CHANGED and c.entity_id is not None:
+        if c.kind is ChangeKind.VAR_VALUE_CHANGED:
             key = (
                 qualified_variable_name(c.entity_id, c.symbol, mangled=c.symbol),
                 hashable_value(c.old_value),
@@ -500,10 +538,68 @@ def _drop_deletion_consequences(changes: list[Change]) -> list[Change]:
     ]
 
 
+#: Within a dedup category, a lower value wins over a higher one; ties go to the
+#: first occurrence. ``SYMBOL_VERSION_NODE_REMOVED`` is the more specific of the
+#: two version-removal kinds (see :data:`DEDUP_CATEGORY_BY_KIND`), so it must win whatever
+#: order the detectors ran in.
+_DEDUP_PREFERENCE: dict[ChangeKind, int] = {
+    ChangeKind.SYMBOL_VERSION_NODE_REMOVED: 0,
+}
+
+
+#: The kinds whose cross-detector duplicates share one dedup identity, mapped
+#: to their category label. :func:`deduplicate_cross_detector` collapses on
+#: this table through :func:`dedup_identity_key`, and acknowledgment matching
+#: (``policy.disposition_acknowledgment``) reads the same key, so the two agree
+#: on which findings are one observation.
+DEDUP_CATEGORY_BY_KIND: dict[ChangeKind, str] = {
+    ChangeKind.FUNC_REMOVED: "func_removal",
+    ChangeKind.FUNC_REMOVED_ELF_ONLY: "func_removal",
+    ChangeKind.FUNC_ADDED: "func_addition",
+    # Same category as `FUNC_ADDED`, mirroring the `func_removal` pair
+    # above: the two are the same observation at two evidence tiers, so a
+    # symbol that somehow reached both detectors must dedup to one
+    # finding rather than be counted as two additions.
+    ChangeKind.FUNC_ADDED_ELF_ONLY: "func_addition",
+    ChangeKind.VAR_REMOVED: "var_removal",
+    # Same category as `VAR_REMOVED`, mirroring the `func_removal` pair
+    # above: the two are the same observation at two evidence tiers.
+    ChangeKind.VAR_REMOVED_ELF_ONLY: "var_removal",
+    ChangeKind.VAR_ADDED: "var_addition",
+    # Version node removal and version definition removal both fire for
+    # the same version string.  Keep the more specific node-level change.
+    ChangeKind.SYMBOL_VERSION_NODE_REMOVED: "version_def_removal",
+    ChangeKind.SYMBOL_VERSION_DEFINED_REMOVED: "version_def_removal",
+    # L1 (DWARF)/L2 (header) enum detectors independently report the
+    # same ChangeKind for the same member change; resolve_change_identity
+    # already self-maps these four kinds -- missing was including them
+    # here, so identity resolution (and dedup) is even attempted.
+    ChangeKind.ENUM_MEMBER_REMOVED: "enum_member_removed",
+    ChangeKind.ENUM_MEMBER_VALUE_CHANGED: "enum_member_value_changed",
+    ChangeKind.ENUM_LAST_MEMBER_VALUE_CHANGED: "enum_last_member_value_changed",
+    ChangeKind.ENUM_UNDERLYING_SIZE_CHANGED: "enum_underlying_size_changed",
+}
+
+
+def dedup_identity_key(change: Change) -> str | None:
+    """The identity :func:`deduplicate_cross_detector` collapses *change* on.
+
+    ``None`` for a kind outside :data:`DEDUP_CATEGORY_BY_KIND`: this pass never
+    collapses it, so it has no duplicate to share an identity with. Acknowledgment
+    matching uses this key so a deduplicated twin and its surviving finding count
+    as one observed change.
+    """
+    if change.kind not in DEDUP_CATEGORY_BY_KIND:
+        return None
+    return resolve_change_identity(change).primary_id
+
+
 def deduplicate_cross_detector(
     changes: list[Change],
     old: AbiSnapshot | None = None,
     new: AbiSnapshot | None = None,
+    *,
+    replay_twin_pairs: list[tuple[Change, Change]] | None = None,
 ) -> list[Change]:
     """Remove cross-detector duplicates that the per-detector guards may miss.
 
@@ -542,35 +638,13 @@ def deduplicate_cross_detector(
       always the "first occurrence" kept below.
 
     Within each category, the first occurrence wins (preserving detector
-    priority order from the ``compare()`` spec list).
+    priority order from the ``compare()`` spec list), except that a kind named
+    in :data:`_DEDUP_PREFERENCE` beats the others regardless of position.
+
+    *replay_twin_pairs*, when given, receives the ``(dropped, survivor)`` pairs of
+    the source-replay twin pass (:func:`abicheck.compare.source_replay_twins.replay_twin_pairs`),
+    so the caller can record which kept finding each dropped copy folded into.
     """
-    _DEDUP_CATEGORIES: dict[ChangeKind, str] = {
-        ChangeKind.FUNC_REMOVED: "func_removal",
-        ChangeKind.FUNC_REMOVED_ELF_ONLY: "func_removal",
-        ChangeKind.FUNC_ADDED: "func_addition",
-        # Same category as `FUNC_ADDED`, mirroring the `func_removal` pair
-        # above: the two are the same observation at two evidence tiers, so a
-        # symbol that somehow reached both detectors must dedup to one
-        # finding rather than be counted as two additions.
-        ChangeKind.FUNC_ADDED_ELF_ONLY: "func_addition",
-        ChangeKind.VAR_REMOVED: "var_removal",
-        # Same category as `VAR_REMOVED`, mirroring the `func_removal` pair
-        # above: the two are the same observation at two evidence tiers.
-        ChangeKind.VAR_REMOVED_ELF_ONLY: "var_removal",
-        ChangeKind.VAR_ADDED: "var_addition",
-        # Version node removal and version definition removal both fire for
-        # the same version string.  Keep the more specific node-level change.
-        ChangeKind.SYMBOL_VERSION_NODE_REMOVED: "version_def_removal",
-        ChangeKind.SYMBOL_VERSION_DEFINED_REMOVED: "version_def_removal",
-        # L1 (DWARF)/L2 (header) enum detectors independently report the
-        # same ChangeKind for the same member change; resolve_change_identity
-        # already self-maps these four kinds -- missing was including them
-        # here, so identity resolution (and dedup) is even attempted.
-        ChangeKind.ENUM_MEMBER_REMOVED: "enum_member_removed",
-        ChangeKind.ENUM_MEMBER_VALUE_CHANGED: "enum_member_value_changed",
-        ChangeKind.ENUM_LAST_MEMBER_VALUE_CHANGED: "enum_last_member_value_changed",
-        ChangeKind.ENUM_UNDERLYING_SIZE_CHANGED: "enum_underlying_size_changed",
-    }
     # A symbol-version-node bump (e.g. LLVM_17 -> LLVM_18.1 on every symbol in a major release) makes BOTH version detectors fire per symbol with the same old->new transition: SYMBOL_MOVED_VERSION_NODE (node label moved) and SYMBOL_VERSION_ALIAS_CHANGED (default version changed, old not retained as an alias). Drop the alias-change duplicate where a node move already covers the same (symbol, old -> new) -- halves the version-bump noise on real libraries (libLLVM 17->18: ~46k instead of ~92k risk findings). Matches on (symbol, old_value, new_value); if that ever diverges the dedup simply no-ops (both findings kept).
     moved_transitions: set[tuple[str, str | None, str | None]] = {
         (c.symbol, c.old_value, c.new_value)
@@ -608,21 +682,34 @@ def deduplicate_cross_detector(
     changes = _drop_elf_only_duplicates_of_visibility(changes)
     changes = _drop_deletion_consequences(changes)
     changes = _drop_constant_value_restatements(changes)
-    changes = drop_replay_twins(changes)
-    seen: set[str] = set()
-    result: list[Change] = []
-    for c in changes:
-        # Only collapse the alias-change into a co-reported node-move when the old default version is NOT retained as an alias — the case the node-move already fully describes. When the alias IS retained it carries distinct, compatible information the node-move's wording would otherwise misrepresent, so it must survive.
-        if (
+    # ``replay_twin_pairs`` receives the (dropped, survivor) pairs this pass acts
+    # on, so the disposition pipeline can name each dropped copy's survivor.
+    changes = drop_replay_twins(changes, pairs_out=replay_twin_pairs)
+    # Only collapse the alias-change into a co-reported node-move when the old default version is NOT retained as an alias — the case the node-move already fully describes. When the alias IS retained it carries distinct, compatible information the node-move's wording would otherwise misrepresent, so it must survive.
+    candidates = [
+        (i, c)
+        for i, c in enumerate(changes)
+        if not (
             c.kind is ChangeKind.SYMBOL_VERSION_ALIAS_CHANGED
             and SYMBOL_VERSION_ALIAS_NOT_RETAINED_MARKER in (c.description or "")
             and (c.symbol, c.old_value, c.new_value) in moved_transitions
-        ):
+        )
+    ]
+    # One winner per identity key: the lowest (preference, position). Position
+    # alone would make the survivor depend on detector order whenever two kinds
+    # of one category collide and prefer different members.
+    identity_keys: dict[int, str] = {}
+    winners: dict[str, tuple[int, int]] = {}
+    for i, c in candidates:
+        identity_key = dedup_identity_key(c)
+        if identity_key is None:
             continue
-        if c.kind in _DEDUP_CATEGORIES:
-            identity_key = resolve_change_identity(c).primary_id
-            if identity_key in seen:
-                continue
-            seen.add(identity_key)
-        result.append(c)
-    return result
+        identity_keys[i] = identity_key
+        rank = (_DEDUP_PREFERENCE.get(c.kind, 1), i)
+        if identity_key not in winners or rank < winners[identity_key]:
+            winners[identity_key] = rank
+    return [
+        c
+        for i, c in candidates
+        if i not in identity_keys or winners[identity_keys[i]][1] == i
+    ]
