@@ -153,23 +153,41 @@ class VariantCaptureResult:
         }
 
 
-def load_bundle_variants_config(path: Path) -> BundleVariantsConfig:
+#: The ``--set`` keys ``capture-variants`` applies (ADR-091 D4). Its only
+#: config read is the ``bundle_variants:`` block; each variant's dump runs
+#: through ``run_dump_request`` with no project config, so no other key reaches
+#: it. ``--set`` on any other key is refused by the CLI, not dropped.
+CAPTURE_APPLIED_PATHS: frozenset[str] = frozenset({BUNDLE_VARIANTS_KEY})
+
+
+def load_bundle_variants_config(
+    path: Path, *, config_overrides: Mapping[str, object] | None = None
+) -> BundleVariantsConfig:
     """The ``bundle_variants:`` block of the ``.abicheck.yml`` at *path*.
 
     The whole file goes through ``BuildConfig``'s own strict ingestion first,
     so an unrelated malformed key is reported the same way ``compare``
-    reports it. Raises :class:`VariantCaptureError` when the file has no
-    ``bundle_variants:`` block.
+    reports it. *config_overrides* (``--set``) are validated by that same
+    schema and laid over the file before the block is read, so the block that
+    is parsed is the one the run states. Raises :class:`VariantCaptureError`
+    when the file has no ``bundle_variants:`` block.
     """
     import yaml
 
-    from .extraction import load_build_config
+    from ..buildsource.build_config_io import raw_with_config_overrides
+    from .extraction import load_build_config_with_digest
 
     try:
-        load_build_config(path)  # the same strict gate every ingestion applies
+        # The same strict gate every ingestion applies, with the overrides
+        # validated against the same schema.
+        load_build_config_with_digest(path, config_overrides=config_overrides)
         raw = yaml.safe_load(path.read_text(encoding="utf-8"))
     except (OSError, ValueError, yaml.YAMLError) as exc:
         raise VariantCaptureError(f"{path}: {exc}") from exc
+    if config_overrides:
+        raw = raw_with_config_overrides(
+            raw if isinstance(raw, dict) else None, config_overrides
+        )
     if not isinstance(raw, dict) or BUNDLE_VARIANTS_KEY not in raw:
         raise VariantCaptureError(f"{path} declares no '{BUNDLE_VARIANTS_KEY}:' block")
     try:

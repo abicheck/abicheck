@@ -130,8 +130,9 @@ an unknown-key error.
 
 ---
 
-Any key below can also be set for one `compare` run with
-`--set PATH=VALUE`, validated by this same schema; see
+Any key below can also be set for one `compare`, `dump` or
+`project capture-variants` run with `--set PATH=VALUE`, validated by this same
+schema. Each command applies only the keys it reads and refuses the others; see
 [CLI usage](../use/cli-usage.md#overriding-one-config-key-for-one-run-set).
 
 ## Top-level keys

@@ -32,7 +32,7 @@ the invocation closes).
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -112,6 +112,9 @@ class PairCompileInputs:
     compiler_option_tokens: tuple[str, ...] = ()
     defines: tuple[str, ...] = ()
     frontend_context: str = "host"
+    #: ``compare --set`` overrides (ADR-091 D4) laid over ``.abicheck.yml``
+    #: before the ``compile:`` block is folded.
+    config_overrides: Mapping[str, object] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)

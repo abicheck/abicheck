@@ -282,6 +282,18 @@ FAMILIES: dict[str, Family] = {
             harness_tests=("tests/unit/report/test_markdown_report_budget.py",),
         ),
         Family(
+            key="F18",
+            title="A publish never exposes a half-written package",
+            invariant=(
+                "Whatever happens to a publish -- a failed check, an "
+                "interruption at any write, a concurrent writer, or a "
+                "successful republish under the same ids -- readers see either "
+                "the previous package or the new one, whole; no file a live "
+                "manifest names is ever rewritten in place."
+            ),
+            harness_tests=("tests/test_package_immutable_publication.py",),
+        ),
+        Family(
             key="OTHER",
             title="CI, tooling, storage and trust-boundary surfaces",
             invariant=(
@@ -554,6 +566,7 @@ for _key, _ids in (
     ("F15", _F15),
     ("F16", _F16),
     ("F17", _F17),
+    ("F18", ("storage.republish_overwrites_live_ref",)),
     ("OTHER", tuple(OTHER_REASONS)),
 ):
     for _id in _ids:

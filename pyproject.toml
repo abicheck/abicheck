@@ -468,26 +468,13 @@ only_mutate = [
     # has_binary_evidence: reporting/gate-contribution logic, not covered by
     # policy/classification.py above).
     "abicheck/model/evidence_status.py",
-    "abicheck/idioms.py",  # ADR-027 idiom & anti-pattern recognisers
-    "abicheck/pattern_verdicts.py",  # ADR-027 A4 verdict modulation
-    "abicheck/surface_graph.py",  # ADR-027 declaration-graph substrate
-    # canonical/normalized finding identity (the former finding_identity.py)
-    "abicheck/compare/finding_identity/mangled.py",
-    "abicheck/compare/finding_identity/declaration_identity.py",
-    "abicheck/compare/finding_identity/change_kinds.py",
-    "abicheck/compare/finding_identity/change_identity.py",
-    "abicheck/compare/finding_identity/report_ids.py",
-    "abicheck/name_classification.py",  # internal/public name classification
-    "abicheck/policy/suppression/rules.py",  # suppression rule matching
-    "abicheck/policy/selectors.py",  # ADR-063 D10: shared selector-matching grammar (moved out of suppression.py)
-    "abicheck/policy/selectors_namespace_glob.py",  # namespace-glob compile/match (moved out of suppression.py)
-    "abicheck/snapshot_io.py",  # ADR-059 storage envelope (gzip/zstd)
-    "abicheck/serialization.py",  # snapshot (de)serialization facade (orchestration/warning logic)
-    "abicheck/storage/snapshot_codec.py",  # ADR-061 gap E closure package 6: the real codec's decode orchestration/platform-block decode, moved out of serialization.py
-    "abicheck/storage/snapshot_schema_versions.py",  # SCHEMA_VERSION history/thresholds, moved out of serialization.py
-    "abicheck/storage/snapshot_encode.py",  # AbiSnapshot -> dict/JSON encode direction, moved out of serialization.py
-    "abicheck/storage/snapshot_decode_declarations.py",  # functions/variables/types/enums/typedefs decode, moved out of serialization.py
-    "abicheck/storage/snapshot_reliability_flags.py",  # the seven *_facts_reliable flag computations, moved out of serialization.py
+    # Scope is the detector core: the code whose surviving mutant means a
+    # missed ABI break. Identity, name/selector helpers, ADR-027 idioms and
+    # the snapshot codec were dropped from it (run 40977256931): they were
+    # 55% of the mutant population, sat under almost every test (one mutant
+    # ran hundreds of tests, 30-60 s each), produced most of the timeouts,
+    # and kept all 16 shards past the 5h45m cap. They stay covered by their
+    # own unit, round-trip and property tests.
 ]
 # The stats pass runs this selection serially under tracing -- most of every
 # mutation shard's wall time. Only tests that call only_mutate code in-process

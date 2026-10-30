@@ -39,6 +39,7 @@ import click
 
 from ...config_paths import discover_project_config
 from ...workflows.bundle_variants_capture import (
+    CAPTURE_APPLIED_PATHS,
     SkippedVariant,
     VariantCaptureError,
     VariantCaptureInput,
@@ -47,6 +48,7 @@ from ...workflows.bundle_variants_capture import (
     load_bundle_variants_config,
     plan_variant_capture,
 )
+from .options.config_set import config_set_option_for
 from .options.export import ExportSet, export_options
 
 __all__ = ["capture_variants_cmd", "parse_variant_assignments"]
@@ -213,6 +215,7 @@ def _warn_skipped(skipped: SkippedVariant) -> None:
         "input discoverable) and report it, without capturing or writing."
     ),
 )
+@config_set_option_for(CAPTURE_APPLIED_PATHS, "project capture-variants")
 @export_options(["text", "json"], default_format="text")
 def capture_variants_cmd(
     variants: tuple[str, ...],
@@ -222,6 +225,7 @@ def capture_variants_cmd(
     variant_includes: tuple[str, ...],
     dry_run: bool,
     exports: ExportSet,
+    config_overrides: dict[str, object] | None = None,
 ) -> None:
     """Capture every declared bundle variant into one ProjectSnapshot package.
 
@@ -256,7 +260,9 @@ def capture_variants_cmd(
         )
     inputs = _inputs(variants, variant_headers, variant_includes)
     try:
-        spec = load_bundle_variants_config(config_path)
+        spec = load_bundle_variants_config(
+            config_path, config_overrides=config_overrides
+        )
         plan = plan_variant_capture(spec, inputs)
         for skipped in plan.skipped:
             _warn_skipped(skipped)

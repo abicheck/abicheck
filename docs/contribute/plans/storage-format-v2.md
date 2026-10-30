@@ -186,8 +186,10 @@ See "Landed in Phase 1" below.
 
 ### Phase 2 — scale and performance
 
-- **A2.1** Section/chunk lazy loading; a comparison loads two manifests, all
-  L0 binary sections, then one library pair at a time.
+- **A2.1** Section lazy loading (size-bounded chunking withdrawn by ADR-062's 2026-10-30 amendment, D18); a comparison loads two manifests and
+  all L0 binary sections. It then opens only the sections the requested
+  analyses read, one matched library pair at a time, through a digest-keyed
+  (`evidence`) decoded-section cache.
 - **A2.2** Streaming object encoding replaces whole-document `asdict()` +
   one JSON string.
 - **A2.3** The snapshot cache moves onto the content-addressed store, keyed
@@ -793,10 +795,30 @@ excluded" half specifically — a PE/Mach-O/Python/header-only library
 survives a round trip through the package format and appears in a package
 listing/report, even where no resolution graph can place it.
 
+- **A1.9** ADR-062 2026-10-30 amendment (D14-D18). Partially implemented;
+  per-item detail under "ADR-062 amendment of 2026-10-30 (D14-D18): A1.9
+  status" below.
+  - D17, implemented: versioned immutable refs and an atomic manifest
+    publish, with the `package_format_version` bump to 2 and a D13 adapter
+    for the v1 id-path layout. Writers are serialized. This closes the
+    "third, deliberately deferred gap" below and its failed-check variant.
+  - D14, not implemented: `must_understand` and `extensions` carriers.
+  - D15, partially implemented: a pinned per-section field inventory and a
+    byte-identity test. The inventory is not yet generated from the
+    `SectionDTO` encoders, and there are no section-header availability
+    entries yet.
+  - D16, not implemented: persisted `evidence` and `comparison_input`
+    digests.
+  - D18, not implemented beyond the `graph` section's deferred decode.
+  - Exit: one regression test per amendment probe (D17's exist; D14's are
+    strict `xfail` probes), the oneDAL/MKL corpus, Windows and macOS, and
+    concurrent-publisher serialization (tested on Linux).
+
 ### Phase 2
 
 Lazy loading, streaming encode, cache migration, indexes, transport, and
-the measurement work that sets D8's chunk size and D12's level table.
+the measurement work that sets D12's level table (D8's chunk size was
+withdrawn by ADR-062 D18).
 
 **Status: A2.1 partially implemented — the `graph` section only**
 (evidence-entity-model Phase 5a, with 5b/5c's compact encoding of the same
@@ -819,8 +841,7 @@ mechanism:
   (`storage/graph_table_codec.py`, schema v49), holding observed evidence
   only: on real oneDAL `libonedal_core` it is ~10 MB instead of 79 MB.
 
-**Not implemented:** lazy loading of any other section, chunking (D8's
-bounded section size), per-library-pair release of sections in a project
+**Not implemented:** lazy loading of any other section, per-library-pair release of sections in a project
 comparison, A2.2 streaming object encoding, A2.3/A2.4, and the A2.5
 measurement for a *project* comparison. A default stored-vs-stored
 `compare` still reads both graphs (the L5 source-graph diff, cross-source
@@ -828,6 +849,64 @@ checks, assurance and the content digest all do), so on that path lazy
 loading saves no decode; ADR-062 D8's implementation note records why the
 L5 diff was not gated. Measurements: the evidence-entity-model plan's
 "Phase 5 follow-up measurements".
+
+### ADR-062 amendment of 2026-10-30 (D14-D18): A1.9 status
+
+The amendment's data-evolution, digest-role and publication rules (plan item
+A1.9), item by item. Open items are also listed in
+[known gaps](../known-gaps.md#adr-062-d14-d18-data-evolution-rules-are-partly-implemented-2026-10-30).
+
+- **D17, immutable refs and atomic publication: implemented.** Package
+  format v2 (`PACKAGE_FORMAT_VERSION = 2`) writes each `VariantRef`/
+  `ArtifactRef` document once to `refs/<kind>/<id>/<ref-digest>.json`
+  (`storage/package_publish.py`). The document carries its own
+  `ref_schema_version`; `ref_digest` is `semantic_digest` over the whole
+  document; `manifest.json` records `{id, ref_digest}` per ref in
+  `variant_refs`/`artifact_refs`. A reader recomputes `ref_digest` and fails
+  closed on a mismatch, or on a newer `ref_schema_version`.
+  `write_project_manifest` verifies every section object, writes the ref
+  documents, then replaces `manifest.json` by temp file plus atomic rename,
+  all under `storage/cross_process_lock.single_flight`, so writers to one
+  root are serialized. A v1 package's id-path layout (`refs/<kind>/<id>.json`
+  plus bare id lists) is still read: the D13 adapter. A v1-only reader
+  refuses a v2 package through D2's fail-closed `package_format_version`
+  axis. `tests/test_package_immutable_publication.py` covers these cases:
+  - a failed object check for each section owner;
+  - a crash at every write (each ref document, then the manifest);
+  - a changed-content republish under the same ids;
+  - a writer waiting on the lock holder;
+  - six concurrent writers with and without the lock (a package is never
+    mixed);
+  - malformed `{id, ref_digest}` entries, a tampered ref document and a newer
+    `ref_schema_version`.
+
+  Residual: superseded refs and objects are never collected, and the
+  amendment's oneDAL/MKL, Windows and macOS validation has not been run.
+- **D16, digest roles: not implemented; design recorded.**
+  `snapshot_content_digest` is the `publication` digest and is unchanged.
+  The `created_at` probe is that digest working as designed. The reorder
+  probe does reproduce on a `semantic_digest` of the snapshot document,
+  because the top-level record lists keep producer order. The `evidence`
+  digest needs a consumer before it ships; see the known-gaps entry. The
+  `transport` and `comparison_input` roles are not implemented.
+- **D15, wire contract: partially implemented.**
+  `tests/unit/storage/test_wire_contract.py` pins each section's field
+  inventory and canonical sha256 for a fixed corpus
+  (`tests/fixtures/wire_contract/sections.json`), so a byte change under an
+  unchanged `section_schema_version` fails. It also checks that a
+  runtime-only refactor (reordered fields, renamed class) keeps the bytes,
+  and that absent, present-empty and failed *fact families* round-trip
+  distinctly. Open: the inventory is recorded from the encoder's output,
+  not generated from the `SectionDTO` encoders, and section-level
+  `FactAvailability` header entries do not exist yet.
+- **D14, must-understand versus optional extensions: not implemented.** An
+  unknown field inside a record is dropped on re-save, and an unknown
+  section rejects the whole document. Both are pinned as strict `xfail`
+  probes in `tests/unit/storage/test_extension_preservation_gap.py`. The
+  carriers (`must_understand` list, `extensions` map) are specified by the
+  amendment but not built.
+- **D18, selective load: not implemented** beyond the `graph` section's
+  deferred decode described under Phase 2 above.
 
 ---
 
@@ -937,6 +1016,7 @@ satisfies for the one domain type it actually sections today
 | `abicheck/storage/castxml_xml.py` | `parse_castxml_xml` and `parse_castxml_text` — parse a castxml XML document from a path or from text (a cached L2 header-AST payload or fresh castxml output) through defusedxml's parser with a tree builder that stores one object per distinct attribute value, cutting the parsed tree by about a third, and that keeps only `ARGUMENT_ATTRIBUTES_READ` on each Argument element and shares one element per distinct parameter spelling (116 → 26 MiB live on a 26 MB MKL header dump). Internal, not re-exported by the package |
 | `abicheck/storage/atomic_file.py` | `atomic_write` — write a cache file through a same-directory temp file and `os.replace`, so a concurrent reader sees either no file or a complete one, never a torn one. Moved unchanged from `dumper_cache.py`; its stream-copy sibling was removed in dead-code-and-single-owner Stage G. Internal, not re-exported by the package |
 | `abicheck/storage/project_package_archive.py` | `pack_project_package`, `unpack_project_package`, `is_project_package_archive`, `MIMETYPE` — A1.1's one-file zip transport of a package directory; unpacking refuses any non-layout, symlinked, compressed, duplicate or over-budget member before writing. Internal, reached through `workflows.storage` |
+| `abicheck/storage/package_publish.py` | `REF_DIRS`, `REF_ENTRY_FIELDS`, `REF_SCHEMA_VERSION`, `REF_SCHEMA_VERSION_KEY`, `publish_lock_name`, `ref_digest_entries`, `ref_digest_of`, `ref_document`, `ref_record`, `versioned_ref_relpath` — ADR-062 D17's ref layout (amends D6): the immutable refs/&lt;kind&gt;/&lt;id&gt;/&lt;ref-digest&gt;.json path, the ref document with its own layout version, its ref digest (the semantic digest of the whole document), the package-format-v2 manifest entries naming each ref by id and ref digest, and the cross-process lock name serializing writers. Internal, not re-exported by the package |
 | `abicheck/storage/zip_member.py` | `deterministic_zipinfo` — the pinned zip member header shared by G40's bundle archive and the package transport. Internal, not re-exported by the package |
 | `abicheck/storage/snapshot_runtime_only.py` | `RUNTIME_ONLY_SNAPSHOT_FIELDS` — the one declaration of the AbiSnapshot fields a single run sets and the document never carries, each with its reason. The snapshot encoder drops exactly these keys and the field round-trip test reads this mapping instead of keeping a copy. Internal, not re-exported by the package |
 | `abicheck/storage/dwarf_layout_facts.py` | `decode_dwarf_member_abi`, `drop_uncaptured_dwarf_layout_facts`, `dwarf_layout_dicts` — schema v69: encode and decode `FieldInfo.type_abi_fact`, the fundamental-type ABI fact of each persisted DWARF layout member (`dwarf.structs` and the ODR variants), so a stored header snapshot's depth projection carries the fact a binary-only dump reads from the member DIE. Written only when present; a pre-v69 document decodes it as None. Internal, not re-exported by the package |
@@ -1043,7 +1123,10 @@ operating on an already-serialized document does not have. Real, separately-
 scoped future work for whichever caller has the binary in hand at import
 time.
 
-**A third, deliberately deferred gap**: `write_project_manifest` writes
+**A third, deliberately deferred gap — closed by A1.9 (ADR-062 D17)**: refs
+are now written once to digest-named paths and `manifest.json` is replaced
+atomically, so a republish never overwrites a live ref. The original
+record follows. `write_project_manifest` writes
 `refs/*.json` before `manifest.json` (the previous gap's own fix), which
 makes *first publication* of a set of ids safe but not *republishing
 changed content under ids that are already live* — a second call against

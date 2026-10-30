@@ -91,3 +91,16 @@ def load_build_config_with_digest(
 def validate_config_overrides(overrides: Mapping[str, object]) -> dict[str, Any]:
     """*overrides* checked against :data:`KEY_TABLE` (ADR-091 D4), as a nested mapping."""
     return validated_config_overrides(overrides, KEY_TABLE)
+
+
+def raw_with_config_overrides(
+    raw: dict[str, Any] | None, overrides: Mapping[str, object] | None
+) -> dict[str, Any]:
+    """The raw ``.abicheck.yml`` mapping *raw* with *overrides* laid over it.
+
+    For a reader that parses one block of the file itself (``capture-variants``
+    reads ``bundle_variants:``) and so cannot use :class:`BuildConfig`. The
+    overrides are validated against :data:`KEY_TABLE`, the same schema the file
+    passes, so the block read is the one the run states.
+    """
+    return apply_config_overrides(raw, overrides, KEY_TABLE)

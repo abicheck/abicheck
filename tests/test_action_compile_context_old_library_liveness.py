@@ -41,7 +41,6 @@ history.
 
 from __future__ import annotations
 
-import json
 import os
 import subprocess
 import tempfile
@@ -50,6 +49,14 @@ from typing import Any
 
 import pytest
 from _workflow_exec import bash_executable, require_bash
+from test_action_compile_context_parity import (
+    _read_compile_config_overlay,
+    _resolved_context,
+    _shared_context,
+    _sources_root_cfg,
+)
+
+from abicheck.buildsource.build_config import BuildConfig, load_build_config
 
 RUN_SH = Path(__file__).resolve().parents[1] / "action" / "run.sh"
 
@@ -82,8 +89,8 @@ _MODE_VALUE_FOR_MARKER: dict[str, str] = {
 # "parse the real file, don't hand-copy it" discipline as the rest of this
 # module (and its sibling). Its Python heredoc body contains no line
 # matching either boundary marker, so a plain substring search is safe.
-_COMPILE_CONTEXT_FN_START = '_COMPILE_CONTEXT_CONFIG_OVERLAY=""'
-_COMPILE_CONTEXT_FN_END = '\n  CMD+=(--config "$_COMPILE_CONTEXT_CONFIG_OVERLAY")\n}\n'
+_COMPILE_CONTEXT_FN_START = "_compile_set_string() {"
+_COMPILE_CONTEXT_FN_END = "    CMD+=(--set compile.nostdinc=true)\n  fi\n}\n"
 
 
 def _add_compile_context_flags_source() -> str:
@@ -153,13 +160,13 @@ def _py_bin_has_abicheck_source() -> str:
 # test_action_release_topology_config.py's own
 # `_merge_config_overlay_fn_source` uses.
 _MERGE_FN_START = "_merge_config_overlay_with_discovered_project_config() {"
-_MERGE_FN_END = "\n_COMPILE_CONTEXT_CONFIG_OVERLAY="
+_MERGE_FN_END = "\n}\n"
 
 
 def _merge_config_overlay_fn_source() -> str:
     text = RUN_SH.read_text(encoding="utf-8")
     start = text.index(_MERGE_FN_START)
-    end = text.index(_MERGE_FN_END, start)
+    end = text.index(_MERGE_FN_END, start) + len(_MERGE_FN_END)
     return text[start:end]
 
 
@@ -274,48 +281,33 @@ def _run_region_with_cwd(
 
 
 class TestCompileContextPairwiseOldLibraryClassification:
-    """``_compile_context_sources_pairwise()``/
-    ``_old_library_is_stored_snapshot()`` (PR #1171, sixth through eighth
-    review rounds): single-pair ``compare`` is pairwise -- excluding a
-    ``--sources`` tree's own ``compile:``/``source:``/``debug:`` blocks
-    from the sources-root block-replacement, since promoting a NEW-only
-    setting would silently apply it to OLD's own header parsing too --
-    only when OLD is a genuinely *live* binary. When OLD is a stored
-    snapshot or resolved ``--abi-baseline``, it does no header/debug
-    extraction of its own at all, so it has no "other side" for those
-    settings to leak into (the same shape as ``dump``/``scan --against``,
-    covered by the sibling module's
-    ``TestCompileContextDiscoversSourcesRootOwnConfig``).
+    """``_compile_context_sources_pairwise()`` / ``_old_library_is_stored_snapshot()``
+    (PR #1171): single-pair ``compare`` is pairwise, and a ``--sources`` tree's own
+    ``compile:``/``source:``/``debug:`` must not reach the context both sides
+    share, when OLD is a genuinely live binary. When OLD is a stored snapshot or
+    an ABI baseline it does no extraction of its own, so the sources root is not
+    the shared context either.
 
-    ``_old_library_is_stored_snapshot`` went through three rounds of
-    Codex review, each closing a real gap the previous round left open --
-    extension-only (sixth round) missed a live binary named e.g.
-    ``old.json``; content-sniffing by individual format (seventh round,
-    JSON/gzip/zstd magic only) missed a JSON snapshot with leading
-    whitespace and the Action's own documented ABICC-Perl-dump
-    old-library input. The eighth round collapsed the rule to its actual
-    invariant instead of adding a fourth format-specific case: NOT a
-    recognized live-binary format (ELF/PE/Mach-O magic) IS a stored
-    operand, full stop -- covering every non-binary shape
-    ``resolve_input()`` accepts without needing a dedicated branch per
-    format.
-    """
+    ADR-091 D4: the Action no longer writes the shared context. Its argv carries
+    only its own compile inputs as ``--set compile.*``, so the assertions check
+    (a) that argv is exactly the Action's input and (b) the shared context the
+    CLI resolves for compare (the checkout document, no ``--sources``), which is
+    what these tests were pinning."""
+
+    @staticmethod
+    def _pairwise_env(old_library: str, sources: str = "src") -> dict[str, str]:
+        return {
+            "INPUT_GCC_PATH": "/opt/gcc-14/bin/g++",
+            "INPUT_SOURCES": sources,
+            "INPUT_OLD_LIBRARY": old_library,
+        }
 
     def test_sources_root_compile_block_is_never_sourced_from_it_under_pairwise_compare(
         self, tmp_path: Path
     ) -> None:
-        """A genuinely live OLD operand keeps this pairwise: a --sources
-        tree's own compile:/source:(singular)/debug: blocks must NOT be
-        promoted into the single shared --config, since they are pair-wide
-        (resolve_compile_context "applies to both sides",
-        resolved_cfg.source_method, resolved_cfg.debug_format). Promoting
-        compile: here would silently apply a NEW-only compile context
-        (defines, include dirs, language) to OLD's own header parsing too.
-        An explicit old-library is required here (unlike an earlier
-        revision of this test): omitting it entirely is now the audit-only
-        shape (old-library/abi-baseline both omitted, ADR-068's
-        Action-input-lifecycle amendment), which is single-sided, not
-        pairwise -- see the sibling class below."""
+        """A live OLD operand keeps this pairwise: the shared context stays the
+        checkout document's, and the sources root's ``source:``/``debug:`` never
+        reach it (they would apply pair-wide)."""
         (tmp_path / ".abicheck.yml").write_text(
             "compile:\n  sysroot: /opt/checkout-sysroot\n", encoding="utf-8"
         )
@@ -329,36 +321,23 @@ class TestCompileContextPairwiseOldLibraryClassification:
         )
         cmd, _ = _run_region_with_cwd(
             _COMPARE_MODE_MARKER,
-            {
-                "INPUT_GCC_PATH": "/opt/gcc-14/bin/g++",
-                "INPUT_SOURCES": "src",
-                "INPUT_OLD_LIBRARY": "old.so",
-            },
+            self._pairwise_env("old.so"),
             tmp_path,
             _COMPARE_COMPILE_CONTEXT_START,
         )
-        doc = json.loads(
-            Path(cmd[cmd.index("--config") + 1]).read_text(encoding="utf-8")
-        )
-        # The checkout-root's own compile.sysroot survives -- the
-        # sources-root's own compile: block is never consulted.
-        assert doc["compile"]["sysroot"] == "/opt/checkout-sysroot"
-        # The sources-root's source:/debug: blocks never reach the shared
-        # config at all -- they would apply pair-wide if they did.
-        assert "source" not in doc
-        assert "debug" not in doc
+        assert _read_compile_config_overlay(cmd) == {"compiler": "/opt/gcc-14/bin/g++"}
+        checkout = tmp_path / ".abicheck.yml"
+        shared, _ = _shared_context(cmd, checkout)
+        assert shared.sysroot == Path("/opt/checkout-sysroot")
+        assert load_build_config(checkout).source_method is None
+        assert load_build_config(checkout).debug_format is None
 
     def test_sources_root_compile_block_survives_an_empty_sources_root_config_under_pairwise_compare(
         self, tmp_path: Path
     ) -> None:
-        """Companion to the dump-mode empty-config test in the sibling
-        module, for the pairwise (single-pair ``compare``) side: an empty
-        --sources-root config must NOT clear the checkout-root's own
-        pair-wide ``compile:`` block, since that block is never sourced
-        from (or cleared by) the sources root under pairwise mode in the
-        first place. An explicit old-library is required here for the same
-        reason as the sibling test above: omitting it is the audit-only
-        shape, not the pairwise one."""
+        """An empty sources-root file clears ``build:`` (exclusive selection), but
+        pairwise ``compile:`` stays the checkout document's own value, and this
+        Action's ``compile.compiler`` still applies on top."""
         (tmp_path / ".abicheck.yml").write_text(
             "severity:\n  abi_breaking: error\n"
             "build:\n  system: make\n"
@@ -370,119 +349,38 @@ class TestCompileContextPairwiseOldLibraryClassification:
         (src_dir / ".abicheck.yml").write_text("", encoding="utf-8")
         cmd, _ = _run_region_with_cwd(
             _COMPARE_MODE_MARKER,
-            {
-                "INPUT_GCC_PATH": "/opt/gcc-14/bin/g++",
-                "INPUT_SOURCES": "src",
-                "INPUT_OLD_LIBRARY": "old.so",
-            },
+            self._pairwise_env("old.so"),
             tmp_path,
             _COMPARE_COMPILE_CONTEXT_START,
         )
-        doc = json.loads(
-            Path(cmd[cmd.index("--config") + 1]).read_text(encoding="utf-8")
+        assert _read_compile_config_overlay(cmd) == {"compiler": "/opt/gcc-14/bin/g++"}
+        shared, _ = _shared_context(cmd, tmp_path / ".abicheck.yml")
+        assert shared.sysroot == Path("/opt/checkout-sysroot")
+        assert _sources_root_cfg(src_dir).system == BuildConfig().system
+        assert (
+            load_build_config(tmp_path / ".abicheck.yml").severity_abi_breaking
+            == "error"
         )
-        # build: is single-sided even under pairwise compare (embed_build_
-        # source()'s own selection is per-operand for L3-L5) -- cleared.
-        assert "build" not in doc
-        # compile.sysroot is pair-wide -- never touched by the (empty)
-        # sources-root config under pairwise mode.
-        assert doc["compile"]["sysroot"] == "/opt/checkout-sysroot"
-        assert doc["compile"]["compiler"] == "/opt/gcc-14/bin/g++"
-        assert doc["severity"] == {"abi_breaking": "error"}
 
     @pytest.mark.parametrize(
-        "old_library,content",
+        ("old_library", "content"),
         [
-            ("old.abicheck.json", b'{"schema_version": 1}'),
             ("old.json", b'{"schema_version": 1}'),
-            ("OLD.JSON", b'{"schema_version": 1}'),
-            # gzip magic (1f 8b) -- real gzip bytes aren't needed, only the
-            # magic prefix this classifier itself checks.
             ("baseline.json.gz", b"\x1f\x8b\x08\x00stub"),
-            # zstd magic (28 b5 2f fd).
-            ("baseline.json.zst", b"\x28\xb5\x2f\xfdstub"),
-            # A JSON snapshot with leading whitespace before the `{` --
-            # sniff_text_format() (abicheck/workflows/input_resolution.py)
-            # `.lstrip()`s before checking, so this is still a real JSON
-            # snapshot to the actual resolver (eighth round).
+            ("baseline.json.zst", b"(\xb5/\xfdstub"),
+            ("OLD.JSON", b'{"schema_version": 1}'),
+            ("old.abicheck.json", b'{"schema_version": 1}'),
             ("old_leading_whitespace.json", b'  \n\t{"schema_version": 1}'),
-            # An ABICC Perl dump ($VAR1 prefix, `compat/abicc_dump_import.py`
-            # `looks_like_perl_dump`) -- a documented old-library input
-            # (action.yml) this classifier explicitly punted on in the
-            # seventh round; the eighth round's "not a live binary" rule
-            # covers it without needing its own case (eighth round).
             ("old.dump", b"$VAR1 = {\n  'foo' => 'bar'\n};\n"),
-            # Content this classifier cannot identify at all -- still not a
-            # live binary by magic bytes, so still "stored" under the
-            # eighth round's collapsed rule (whatever `resolve_input()`
-            # itself eventually does with it -- likely a hard error -- it
-            # is not live header/debug extraction against a compile
-            # context, which is all this decision is about).
             ("old_unrecognized.bin", b"not a recognized format at all"),
         ],
     )
     def test_sources_root_compile_block_is_never_sourced_from_it_under_compare_with_stored_old_snapshot(
         self, tmp_path: Path, old_library: str, content: bytes
     ) -> None:
-        """A ``compare`` whose OLD operand is a stored snapshot (whatever a
-        prior ``abicheck dump -o ...`` named it -- a direct old-library
-        input, or what an ``abi-baseline`` auto-fetch always resolves
-        ``old-library`` to) has no "other side" for a --sources tree's
-        compile: to leak into: OLD does no header/debug extraction at all.
-        The earlier ``$MODE == "compare"`` check alone could not see this
-        and unconditionally treated every compare as pairwise, silently
-        discarding NEW's own sources-root compile: settings. Companion to
-        the dump-mode single-sided test in the sibling module, and the
-        negative (genuinely pairwise, live OLD) tests just above.
-
-        ``_old_library_is_stored_snapshot`` is content-sniffed and
-        simplified to its actual invariant (class docstring) -- so each
-        case here writes real bytes exercising that rule, not just a
-        suggestively-named, empty/nonexistent path.
-
-        ``compile:`` itself is NOT "the same single-sided promotion as
-        dump" (Codex review, fresh evidence, PR #1222 fourth round, second
-        finding -- corrected here, then corrected AGAIN by the eleventh
-        round below): unlike `dump`/`scan --against`'s genuine
-        single-document-exclusive ``compile:`` selection, ``compare``'s
-        own ``resolve_compile_context(..., build_config=cfg_path, ...)``
-        ALWAYS independently resolves the checkout-root document's
-        ``compile:`` block FIRST, unconditionally (confirmed by calling the
-        real function directly against fixtures shaped exactly like this
-        test's own), and NEW's own ``--sources`` tree only folds ON TOP of
-        that already-resolved context via a second ``merge_compile_config``
-        call inside ``frontends/cli/compare_inline_evidence.py``'s
-        ``_side`` -- but (P1 finding, Codex review,
-        fresh evidence, PR #1222 eleventh round) that second stage runs
-        UNCONDITIONALLY, regardless of whether ``--config``/
-        ``build-config`` was explicit, so THIS overlay-generation script
-        must NOT reproduce it: doing so would fold the sources-root
-        document's own ``compile:`` block in a SECOND time on top of what
-        the CLI is about to fold in on its own, applying a
-        repeat-sensitive flag twice. This overlay must therefore leave
-        ``compile:`` at EXACTLY the checkout document's own value --
-        NEW's sources-root ``sysroot`` (whether conflicting or not) is
-        never consulted here at all any more, left entirely for the CLI's
-        own single, unconditional fold when "Run analysis" actually runs.
-
-        ``source:``/``debug:`` are NOT the same shape as ``compile:``
-        here, despite both being "single-sided" in the pairwise sense (P1
-        finding, Codex review, fresh evidence, PR #1222 eighth round,
-        correcting this test's own previous assertion): unlike `dump`/
-        `scan --against`'s genuine single-document-exclusive resolution of
-        these two, `compare`'s own pipeline NEVER re-resolves `source:`/
-        `debug:` from NEW's ``--sources`` tree at all --
-        ``frontends/cli/compare_inline_evidence.py``'s
-        ``_side`` receives both as already-frozen
-        values (``InlineEvidenceRun.collect_mode``/``.debug``) computed
-        once from the CHECKOUT-side ``resolved_cfg``, before the
-        ``--sources`` tree is even considered. So the sources-root
-        document's own ``source:``/``debug:`` values below must be ignored
-        entirely for `compare` -- neither document here defines them at
-        the checkout level, so the real pipeline's own view has nothing
-        for either key, and the synthesized overlay must match that
-        (absent), not manufacture a value from NEW's tree the real
-        pipeline never reads."""
+        """A stored OLD operand does no extraction, so the sources root's own
+        ``compile:`` never becomes the shared context: the checkout document's
+        sysroot stands, and the sources-root sysroot is absent."""
         (tmp_path / ".abicheck.yml").write_text(
             "compile:\n  sysroot: /opt/checkout-sysroot\n", encoding="utf-8"
         )
@@ -497,86 +395,47 @@ class TestCompileContextPairwiseOldLibraryClassification:
         (tmp_path / old_library).write_bytes(content)
         cmd, _ = _run_region_with_cwd(
             _COMPARE_MODE_MARKER,
-            {
-                "INPUT_GCC_PATH": "/opt/gcc-14/bin/g++",
-                "INPUT_SOURCES": "src",
-                "INPUT_OLD_LIBRARY": old_library,
-            },
+            self._pairwise_env(old_library),
             tmp_path,
             _COMPARE_COMPILE_CONTEXT_START,
         )
-        doc = json.loads(
-            Path(cmd[cmd.index("--config") + 1]).read_text(encoding="utf-8")
-        )
-        # source:/debug: are NEVER sourced from NEW's --sources tree for
-        # `compare` -- neither document here sets them at the checkout
-        # level, so the real pipeline's own view (and this overlay) has
-        # nothing for either key.
-        assert "source" not in doc
-        assert "debug" not in doc
-        # compile: is left at exactly the checkout document's own value --
-        # the sources-root document's own (conflicting) sysroot is never
-        # consulted here at all, deferred entirely to the CLI's own,
-        # single, unconditional fold (see the docstring above).
-        assert doc["compile"] == {
-            "sysroot": "/opt/checkout-sysroot",
-            "compiler": "/opt/gcc-14/bin/g++",
-        }
+        assert _read_compile_config_overlay(cmd) == {"compiler": "/opt/gcc-14/bin/g++"}
+        checkout = tmp_path / ".abicheck.yml"
+        shared, _ = _shared_context(cmd, checkout)
+        assert shared.sysroot == Path("/opt/checkout-sysroot")
+        assert load_build_config(checkout).source_method is None
+        assert load_build_config(checkout).debug_format is None
 
     def test_sources_root_source_debug_never_leak_into_compare_with_stored_old_snapshot(
         self, tmp_path: Path
     ) -> None:
-        """Companion positive control for the fix above: when the
-        CHECKOUT document sets `source:`/`debug:`, those checkout values
-        must survive into the overlay UNCHANGED for `compare` against a
-        stored OLD snapshot -- even though NEW's own ``--sources`` tree
-        sets conflicting values of its own, which the real pipeline never
-        reads and this overlay must therefore ignore too."""
+        """The checkout's own ``source:``/``debug:`` are the shared ones; the
+        sources root's ``s6``/``dwarf`` never replace them."""
         (tmp_path / ".abicheck.yml").write_text(
-            "sources:\n  method: headers\ndebug:\n  format: btf\n",
-            encoding="utf-8",
+            "sources:\n  method: headers\ndebug:\n  format: btf\n", encoding="utf-8"
         )
         src_dir = tmp_path / "src"
         src_dir.mkdir()
         (src_dir / ".abicheck.yml").write_text(
-            "sources:\n  method: s6\ndebug:\n  format: dwarf\n",
-            encoding="utf-8",
+            "sources:\n  method: s6\ndebug:\n  format: dwarf\n", encoding="utf-8"
         )
         (tmp_path / "old.abicheck.json").write_bytes(b'{"schema_version": 1}')
         cmd, _ = _run_region_with_cwd(
             _COMPARE_MODE_MARKER,
-            {
-                "INPUT_GCC_PATH": "/opt/gcc-14/bin/g++",
-                "INPUT_SOURCES": "src",
-                "INPUT_OLD_LIBRARY": "old.abicheck.json",
-            },
+            self._pairwise_env("old.abicheck.json"),
             tmp_path,
             _COMPARE_COMPILE_CONTEXT_START,
         )
-        doc = json.loads(
-            Path(cmd[cmd.index("--config") + 1]).read_text(encoding="utf-8")
-        )
-        assert doc["sources"] == {"method": "headers"}
-        assert doc["debug"] == {"format": "btf"}
+        assert _read_compile_config_overlay(cmd) == {"compiler": "/opt/gcc-14/bin/g++"}
+        checkout_cfg = load_build_config(tmp_path / ".abicheck.yml")
+        assert checkout_cfg.source_method == "headers"
+        assert checkout_cfg.debug_format == "btf"
 
     def test_compile_disjoint_keys_do_not_merge_under_compare_with_stored_old_snapshot(
         self, tmp_path: Path
     ) -> None:
-        """P1 finding (Codex review, fresh evidence, PR #1222 eleventh
-        round): the disjoint-key (no conflict) sibling of the test above,
-        proving the overlay generator no longer merges at all -- not even
-        for keys that wouldn't conflict. The checkout document sets ONLY
-        ``compile.std``, the sources-root document sets ONLY
-        ``compile.include_dirs``: a previous round's own overlay merged
-        the two per-field here (reproducing what it believed was the real
-        pipeline's own second merge stage), but that stage already runs,
-        unconditionally, inside the CLI's own ``compare_inline_evidence._side``
-        when "Run analysis" actually invokes ``compare`` -- so this
-        overlay merging the two ITSELF would fold the sources-root
-        document's ``compile:`` block in a second, redundant time. The
-        generated overlay must therefore carry ONLY the checkout
-        document's own ``compile.std``, with no ``include_dirs`` key at
-        all."""
+        """Disjoint keys: the checkout's ``compile.std`` is shared; the sources
+        root's ``include_dirs`` is not merged into it."""
         (tmp_path / ".abicheck.yml").write_text(
             "compile:\n  std: c++20\n", encoding="utf-8"
         )
@@ -588,28 +447,26 @@ class TestCompileContextPairwiseOldLibraryClassification:
         (tmp_path / "old.abicheck.json").write_bytes(b'{"schema_version": 1}')
         cmd, _ = _run_region_with_cwd(
             _COMPARE_MODE_MARKER,
-            {
-                "INPUT_GCC_PATH": "/opt/gcc-14/bin/g++",
-                "INPUT_SOURCES": "src",
-                "INPUT_OLD_LIBRARY": "old.abicheck.json",
-            },
+            self._pairwise_env("old.abicheck.json"),
             tmp_path,
             _COMPARE_COMPILE_CONTEXT_START,
         )
-        doc = json.loads(
-            Path(cmd[cmd.index("--config") + 1]).read_text(encoding="utf-8")
-        )
-        assert doc["compile"] == {"std": "c++20", "compiler": "/opt/gcc-14/bin/g++"}
+        assert _read_compile_config_overlay(cmd) == {"compiler": "/opt/gcc-14/bin/g++"}
+        checkout = tmp_path / ".abicheck.yml"
+        assert load_build_config(checkout).compile_std == "c++20"
+        _shared_ctx, includes = _shared_context(cmd, checkout)
+        assert not any("foo" in str(path) for path in includes)
 
+    @pytest.mark.parametrize(
+        "old_library",
+        ["old.so", "old.json", "does-not-exist.json"],
+    )
     def test_sources_root_compile_block_stays_pairwise_when_old_library_is_a_live_binary(
-        self, tmp_path: Path
+        self, tmp_path: Path, old_library: str
     ) -> None:
-        """Negative control for the parametrized test above: a real live
-        binary (ELF magic bytes) stays on the pre-existing, safe pairwise
-        side even though this is the identical --sources/checkout-config
-        setup -- confirming the new exclusion is keyed on the operand's
-        actual content, not on merely setting old-library or on --sources
-        being present."""
+        """A live binary, a binary named like a snapshot, and an OLD that does not
+        exist yet all classify as pairwise (live-or-unknown is not a stored
+        snapshot), so the shared context stays the checkout's."""
         (tmp_path / ".abicheck.yml").write_text(
             "compile:\n  sysroot: /opt/checkout-sysroot\n", encoding="utf-8"
         )
@@ -621,111 +478,27 @@ class TestCompileContextPairwiseOldLibraryClassification:
             "debug:\n  format: dwarf\n",
             encoding="utf-8",
         )
-        (tmp_path / "old.so").write_bytes(b"\x7fELF\x02\x01\x01\x00" + b"\x00" * 8)
+        if old_library != "does-not-exist.json":
+            (tmp_path / old_library).write_bytes(
+                b"\x7fELF\x02\x01\x01\x00" + b"\x00" * 8
+            )
         cmd, _ = _run_region_with_cwd(
             _COMPARE_MODE_MARKER,
-            {
-                "INPUT_GCC_PATH": "/opt/gcc-14/bin/g++",
-                "INPUT_SOURCES": "src",
-                "INPUT_OLD_LIBRARY": "old.so",
-            },
+            self._pairwise_env(old_library),
             tmp_path,
             _COMPARE_COMPILE_CONTEXT_START,
         )
-        doc = json.loads(
-            Path(cmd[cmd.index("--config") + 1]).read_text(encoding="utf-8")
-        )
-        assert doc["compile"]["sysroot"] == "/opt/checkout-sysroot"
-        assert "source" not in doc
-        assert "debug" not in doc
-
-    def test_sources_root_compile_block_stays_pairwise_when_old_library_is_a_live_binary_named_like_a_snapshot(
-        self, tmp_path: Path
-    ) -> None:
-        """A live ELF binary literally named ``old.json`` (the extension-
-        only version of this check, sixth round, would have misclassified
-        it as a stored snapshot). ``resolve_input()`` checks binary magic
-        bytes BEFORE any JSON/text sniffing, so this operand is genuinely
-        live and pairwise, regardless of its filename;
-        ``_old_library_is_stored_snapshot`` must agree."""
-        (tmp_path / ".abicheck.yml").write_text(
-            "compile:\n  sysroot: /opt/checkout-sysroot\n", encoding="utf-8"
-        )
-        src_dir = tmp_path / "src"
-        src_dir.mkdir()
-        (src_dir / ".abicheck.yml").write_text(
-            "compile:\n  sysroot: /opt/new-side-only-sysroot\n"
-            "sources:\n  method: s6\n"
-            "debug:\n  format: dwarf\n",
-            encoding="utf-8",
-        )
-        (tmp_path / "old.json").write_bytes(b"\x7fELF\x02\x01\x01\x00" + b"\x00" * 8)
-        cmd, _ = _run_region_with_cwd(
-            _COMPARE_MODE_MARKER,
-            {
-                "INPUT_GCC_PATH": "/opt/gcc-14/bin/g++",
-                "INPUT_SOURCES": "src",
-                "INPUT_OLD_LIBRARY": "old.json",
-            },
-            tmp_path,
-            _COMPARE_COMPILE_CONTEXT_START,
-        )
-        doc = json.loads(
-            Path(cmd[cmd.index("--config") + 1]).read_text(encoding="utf-8")
-        )
-        assert doc["compile"]["sysroot"] == "/opt/checkout-sysroot"
-        assert "source" not in doc
-        assert "debug" not in doc
-
-    def test_sources_root_compile_block_stays_pairwise_when_old_library_does_not_exist_yet(
-        self, tmp_path: Path
-    ) -> None:
-        """An old-library path this classifier cannot open at all (does not
-        exist on disk at this point in the script) falls back to the
-        pre-existing, safe "pairwise" side rather than guessing -- matching
-        ``_is_release_style_operand``'s own identical `-f` fallback."""
-        (tmp_path / ".abicheck.yml").write_text(
-            "compile:\n  sysroot: /opt/checkout-sysroot\n", encoding="utf-8"
-        )
-        src_dir = tmp_path / "src"
-        src_dir.mkdir()
-        (src_dir / ".abicheck.yml").write_text(
-            "compile:\n  sysroot: /opt/new-side-only-sysroot\n"
-            "sources:\n  method: s6\n"
-            "debug:\n  format: dwarf\n",
-            encoding="utf-8",
-        )
-        cmd, _ = _run_region_with_cwd(
-            _COMPARE_MODE_MARKER,
-            {
-                "INPUT_GCC_PATH": "/opt/gcc-14/bin/g++",
-                "INPUT_SOURCES": "src",
-                "INPUT_OLD_LIBRARY": "does-not-exist.json",
-            },
-            tmp_path,
-            _COMPARE_COMPILE_CONTEXT_START,
-        )
-        doc = json.loads(
-            Path(cmd[cmd.index("--config") + 1]).read_text(encoding="utf-8")
-        )
-        assert doc["compile"]["sysroot"] == "/opt/checkout-sysroot"
-        assert "source" not in doc
-        assert "debug" not in doc
+        assert _read_compile_config_overlay(cmd) == {"compiler": "/opt/gcc-14/bin/g++"}
+        checkout = tmp_path / ".abicheck.yml"
+        shared, _ = _shared_context(cmd, checkout)
+        assert shared.sysroot == Path("/opt/checkout-sysroot")
+        assert load_build_config(checkout).source_method is None
+        assert load_build_config(checkout).debug_format is None
 
 
 class TestAuditOnlyCompareStaysSingleSidedUnconditionally:
-    """Codex review, PR #1171 (P1, fresh evidence, ninth AND tenth rounds) --
-    originally about legacy ``scan --against`` internally routed through
-    ``compare`` (ADR-068 D2). ``mode: scan`` is retired outright now
-    (ADR-068's Action-input-lifecycle amendment); the identical shape
-    survives as ``compare``'s own audit-only branch (old-library and
-    abi-baseline both omitted). There is no baseline operand at all in this
-    shape (not merely one whose liveness might vary), so a --sources
-    tree's own ``compile:``/``source:``/``debug:`` block is unconditionally
-    the intended, single source for the one audited artifact -- this is
-    now a structural fact of the shape, not a liveness-dependent
-    classification the way a two-sided ``compare``'s OLD/NEW distinction
-    is (see the sibling class above)."""
+    """With no OLD operand at all (the audit-only shape) the run is single-sided:
+    the sources root is the one source for ``compile:``/``source:``/``debug:``."""
 
     def test_audit_only_compare_is_single_sided(self, tmp_path: Path) -> None:
         (tmp_path / ".abicheck.yml").write_text(
@@ -741,19 +514,14 @@ class TestAuditOnlyCompareStaysSingleSidedUnconditionally:
         )
         cmd, _ = _run_region_with_cwd(
             _COMPARE_MODE_MARKER,
-            {
-                "INPUT_GCC_PATH": "/opt/gcc-14/bin/g++",
-                "INPUT_SOURCES": "src",
-            },
+            {"INPUT_GCC_PATH": "/opt/gcc-14/bin/g++", "INPUT_SOURCES": "src"},
             tmp_path,
             _COMPARE_COMPILE_CONTEXT_START,
         )
-        doc = json.loads(
-            Path(cmd[cmd.index("--config") + 1]).read_text(encoding="utf-8")
+        assert _read_compile_config_overlay(cmd) == {"compiler": "/opt/gcc-14/bin/g++"}
+        assert _resolved_context(cmd, sources=src_dir).sysroot == Path(
+            "/opt/sources-root-sysroot"
         )
-        # Single-sided: no old-library at all in this shape, so the
-        # sources-root's own compile:/source:/debug: are the intended,
-        # only source for the one audited artifact.
-        assert doc["compile"]["sysroot"] == "/opt/sources-root-sysroot"
-        assert doc["sources"] == {"method": "s6"}
-        assert doc["debug"] == {"format": "dwarf"}
+        cfg = _sources_root_cfg(src_dir)
+        assert cfg.source_method == "s6"
+        assert cfg.debug_format == "dwarf"

@@ -25,6 +25,7 @@ context: the compile-context adapter and the stored-bundle ``lang`` rule
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -98,11 +99,13 @@ def resolve_dump_compile_context(
     compiler_option_tokens: tuple[str, ...] = (),
     defines: tuple[str, ...] = (),
     config_explicit: bool | None = None,
+    config_overrides: Mapping[str, object] | None = None,
 ) -> tuple[CompileContext, tuple[Path, ...]]:
     """Resolve the L2 compile context for a dump, folding the config compile: block.
 
     Returns ``(compile_context, includes)``. *defines* is ADR-074's
-    ``-D/--define``, folded with ``compile.defines`` by macro name downstream."""
+    ``-D/--define``, folded with ``compile.defines`` by macro name downstream.
+    *config_overrides* is ``dump --set`` (ADR-091 D4)."""
     from ...cli_options import resolve_compile_context
 
     return resolve_compile_context(
@@ -120,4 +123,35 @@ def resolve_dump_compile_context(
         compiler_option_tokens=compiler_option_tokens,
         defines=defines,
         config_explicit=config_explicit,
+        config_overrides=config_overrides,
     )
+
+
+def resolve_and_check_dump_debug_format(
+    so_path: Path | None,
+    debug_format_opt: str | None,
+) -> str | None:
+    """Resolve the effective debug format and reject the usage error it implies.
+
+    A genuine usage error in the real run (exit 64), raised here -- before the
+    ``--dry-run`` branch -- so the dry run and the real run agree on it rather
+    than the dry run downgrading it into an evidence blocker. Returns ``None``
+    for a source-only dump, which has no binary to resolve a debug format
+    against.
+    """
+    if so_path is None:
+        return None
+    from ...cli_dump_helpers import (
+        check_dump_debug_format_error,
+        resolve_dump_debug_format,
+    )
+    from ...workflows.extraction import normalize_binary_input as _peek_binary_format
+
+    effective_debug_format = resolve_dump_debug_format(debug_format_opt)
+    _, dry_run_binary_fmt = _peek_binary_format(so_path)
+    debug_format_error = check_dump_debug_format_error(
+        effective_debug_format, dry_run_binary_fmt
+    )
+    if debug_format_error is not None:
+        raise click.BadParameter(debug_format_error)
+    return effective_debug_format

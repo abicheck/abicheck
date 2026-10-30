@@ -660,6 +660,9 @@ class DumpRequest:
     # same mode (Codex review). `None` (the default) means "derive from
     # `depth`".
     resolved_collect_mode: str | None = field(default=None, kw_only=True)
+    config_overrides: Mapping[str, object] = field(
+        default_factory=_no_overrides, hash=False, kw_only=True
+    )
 
     def validation_errors(self) -> list[str]:
         """Return a list of human-readable validation problems (empty == valid).

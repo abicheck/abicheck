@@ -73,7 +73,7 @@ class TestCompareReleaseStyleOperandCompileContext:
             _COMPARE_MODE_MARKER, env, _COMPARE_COMPILE_CONTEXT_START
         )
         assert "not support" not in stderr
-        assert "--config" in release_cmd
+        assert "--set" in release_cmd
         single_cmd, _ = _run_region(
             _COMPARE_MODE_MARKER,
             {**_FULL_ENV, "INPUT_OLD_LIBRARY": "old.so", "INPUT_NEW_LIBRARY": "new.so"},
@@ -97,7 +97,7 @@ class TestCompareReleaseStyleOperandCompileContext:
             _COMPARE_COMPILE_CONTEXT_START,
         )
         assert "not support" not in stderr
-        assert "--config" not in cmd
+        assert "--set" not in cmd
 
     def test_compare_release_style_ast_frontend_auto_synthesizes_nothing(
         self,
@@ -127,7 +127,7 @@ class TestCompareReleaseStyleOperandCompileContext:
             _COMPARE_COMPILE_CONTEXT_START,
         )
         assert "not support" not in stderr
-        assert "--config" not in release_cmd
+        assert "--set" not in release_cmd
         single_cmd, _ = _run_region(
             _COMPARE_MODE_MARKER,
             {
@@ -175,7 +175,7 @@ class TestCompareReleaseStyleOperandCompileContext:
             _COMPARE_COMPILE_CONTEXT_START,
         )
         assert "not support" not in stderr
-        assert "--config" not in cmd
+        assert "--set" not in cmd
 
     def test_compare_release_style_forwards_non_default_lang(self) -> None:
         """Companion: an actual, non-default lang choice reaches the

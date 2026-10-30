@@ -91,7 +91,7 @@ def _add_release_topology_config_flags_source() -> str:
 # extracted verbatim, since the release-topology function calls it instead
 # of writing its overlay directly.
 _MERGE_FN_START = "_merge_config_overlay_with_discovered_project_config() {"
-_MERGE_FN_END = "\n_COMPILE_CONTEXT_CONFIG_OVERLAY="
+_MERGE_FN_END = "\n# Script-global, so the EXIT trap can clean it up"
 
 
 def _merge_config_overlay_fn_source() -> str:

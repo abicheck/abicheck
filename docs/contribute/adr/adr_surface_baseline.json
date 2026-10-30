@@ -785,7 +785,9 @@
     "ADR-091": {
       "disposition": "surfaced",
       "surfaces": [
-        "cli: compare --set"
+        "cli: compare --set",
+        "cli: dump --set",
+        "cli: project capture-variants --set"
       ],
       "use_cases": []
     }
@@ -918,6 +920,8 @@
     "ADR-078 report: compare_report.summary",
     "ADR-084 report: compare_report.disposition_audit",
     "ADR-086 cli: compare --no-baseline",
-    "ADR-091 cli: compare --set"
+    "ADR-091 cli: compare --set",
+    "ADR-091 cli: dump --set",
+    "ADR-091 cli: project capture-variants --set"
   ]
 }
