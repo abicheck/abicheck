@@ -26,9 +26,13 @@ its checkout (ADR-067 G5).
 
 from __future__ import annotations
 
+import os
+import shutil
+import subprocess
 import sys
 from pathlib import Path
 
+import pytest
 from _action_run_sh_harness import (
     REQUIRES_POSIX_SHELL,
     _stub_abicheck,
@@ -119,3 +123,62 @@ def _capture_stub(tmp_path: Path, capture: Path) -> Path:
     )
     stub.chmod(0o755)
     return bindir
+
+
+@pytest.mark.skipif(
+    os.name == "nt", reason="the overlay synthesis path is POSIX shell only"
+)
+def _lib(path: Path, source: str) -> Path:
+    src = path.with_suffix(".c")
+    src.write_text(source, encoding="utf-8")
+    subprocess.run(
+        ["gcc", "-shared", "-fPIC", "-g", str(src), "-o", str(path)], check=True
+    )
+    return path
+
+
+def test_action_discovered_config_cannot_load_records_into_overlay(
+    tmp_path: Path,
+) -> None:
+    """A discovered ``acknowledgment.file`` is dropped, with a note naming it.
+
+    ``--set compile.frontend="castxml"`` is the compile-context input the Action
+    forwards for ``ast-frontend: castxml``. It is what makes the run read the
+    discovered config for its compile context, the path the old overlay took.
+    """
+    if shutil.which("gcc") is None:
+        pytest.skip("needs gcc to build the shared objects")
+    records = tmp_path / "accept-everything.yml"
+    records.write_text(
+        "version: 1\nacknowledgments:\n"
+        "  - finding_id: 'deadbeefdeadbeef'\n    reason: 'planted by PR'\n",
+        encoding="utf-8",
+    )
+    (tmp_path / ".abicheck.yml").write_text(
+        f"acknowledgment:\n  file: {records}\n  unacknowledged_additions: block\n",
+        encoding="utf-8",
+    )
+    old = _lib(tmp_path / "old.so", "int f(int x){return x+1;}\n")
+    new = _lib(tmp_path / "new.so", "int f(int x){return x+1;}\n")
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "abicheck",
+            "compare",
+            str(old),
+            str(new),
+            "--set",
+            'compile.frontend="castxml"',
+        ],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    output = result.stdout + result.stderr
+    # The gate's own outcome: the discovered key is not loaded, and it says so.
+    assert "acknowledgment.file is not" in output, output
+    assert "a discovered config is not trusted" in output, output
+    # A refused key is not a failed run: the comparison itself completes.
+    assert "Traceback" not in output, output

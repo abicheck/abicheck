@@ -1334,6 +1334,10 @@ add_compile_context_flags() {
     _options_json=$(printf '%s' "$INPUT_GCC_OPTIONS" | (cd "$_PY_SAFE_DIR" && PYTHONPATH= "$_PY_BIN" -c 'import json, shlex, sys
 text = sys.stdin.read()
 print(json.dumps([line for line in text.splitlines() if line] if "\n" in text else shlex.split(text)))')) || _options_rc=$?
+    # A Windows interpreter's print() ends its line with CRLF, and $(...)
+    # strips only the trailing LF, so a bare \r would otherwise reach
+    # `--set compile.options=` and corrupt the last JSON token.
+    _options_json=${_options_json//$'\r'/}
     if [[ "$_options_rc" -ne 0 || -z "$_options_json" ]]; then
       _error_annotation "mode: ${MODE} could not split gcc-options into compile.options (interpreter exit ${_options_rc}). Running without it would parse headers under the wrong compile context, so the step fails instead of continuing silently."
       exit 1
