@@ -341,6 +341,13 @@ inputs:
       short floors the whole bundle. It used to be rejected outright for a
       bundle (`validate-inputs.sh`), a guard that has since been retired.
     required: false
+  set:
+    description: >
+      Config overrides for the internal compare step, one `PATH=VALUE` per
+      line. Each non-blank, non-comment line is forwarded verbatim
+      as its own `--set`; the CLI validates the keys.
+    required: false
+    default: ''
   extra-args:
     description: 'Additional CLI arguments passed directly to the internal abicheck invocation.'
     required: false
@@ -1928,6 +1935,7 @@ runs:
         policy: ${{ inputs.policy }}
         suppress: ${{ inputs.suppress }}
         severity-preset: ${{ inputs.severity-preset }}
+        set: ${{ inputs.set }}
         # require-complete-analysis: RETIRED -- this Action's own input (see
         # its docstring above) is validated to 'false' before this step can
         # ever run, and the root Action's own input it used to forward to is

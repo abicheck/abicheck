@@ -1,6 +1,6 @@
 # Option vocabulary unification: implementation plan
 
-**Status:** Phase 0 done (2026-10-30); Phase 2 CLI and typed-API half for `compare` done, the rest of Phase 2 open; Phases 1 and 3–7 not started. Implements
+**Status:** Phases 0 and 1 done (Phase 0 2026-10-30; Phase 1 is #1850). Phase 2 is partly done: the CLI and typed-API half for `compare` (#1851), and the Action `set:` input (this PR); the `compile:` overlay replacement and the rest of Phase 2 are open. Phases 3–7 not started. Implements
 [ADR-091](../adr/091-one-option-vocabulary.md). Each phase is one PR, ordered
 so that the parity gate lands before any rename and every rename lands with
 its alias.
@@ -162,7 +162,20 @@ Still open in this phase: `--set` on `dump` (CLI and `DumpRequest.config_overrid
 `project plan` and `project capture-variants`, which read the file through about a dozen
 loaders that do not yet take an override; `project validate`, `project history`,
 `deps tree`, `deps compare` and `aggregate` read no `KEY_TABLE` key and take no `--set`.
-The Action half (`set:` input, `action/run.sh` `compile:` overlay) is not started.
+The Action `set:` input is in (root `action.yml` and `actions/check-target`):
+each non-blank, non-comment line forwards verbatim as `--set` on `mode: compare`
+only, and the CLI validates it. An effective `set:` on any other mode fails the
+step in `validate-inputs.sh`, because dump has no `--set` yet and an override
+must not drop silently. Both spellings are claimed under the generic-override
+concept with R23 exceptions. **The `compile:` overlay is not replaced.**
+`compare --set` still refuses every `compile.*` key (`compare does not apply
+compile.compiler yet`: the typed and CLI-only channels in
+`workflows/compare_configuration.py` carry no compile context), so forwarding
+them would fail every cross-compiler run. Until the CLI applies them, the
+Action still synthesizes the overlay in `add_compile_context_flags` for every
+mode (compare and dump), and `actions/check-target` keeps its assurance-overlay
+step. The `set:` input is applied after those overlays, so an explicit `set:`
+line wins over the overlay's keys once the CLI accepts them.
 
 ## Phase 3 — Behavior unifications (D2)
 
