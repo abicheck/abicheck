@@ -228,3 +228,63 @@ def test_a_policy_document_is_loaded_when_no_policy_file_is_given(
     inputs = compare_request_inputs(request)
     assert inputs.policy_file is not None
     assert inputs.policy_file.base_policy == "sdk_vendor"
+
+
+def _changed_pair(tmp_path: Path) -> tuple[Path, Path]:
+    from abicheck.model import AbiSnapshot, Function, Visibility
+    from abicheck.serialization import save_snapshot
+
+    def _snap(version: str, return_type: str) -> AbiSnapshot:
+        return AbiSnapshot(
+            library="libtest.so",
+            version=version,
+            functions=[
+                Function(
+                    name="f",
+                    mangled="f",
+                    return_type=return_type,
+                    visibility=Visibility.PUBLIC,
+                    is_extern_c=True,
+                )
+            ],
+        )
+
+    old_p = tmp_path / "old.json"
+    new_p = tmp_path / "new.json"
+    save_snapshot(_snap("1.0", "int"), old_p)
+    save_snapshot(_snap("2.0", "long"), new_p)
+    return old_p, new_p
+
+
+def test_the_new_default_contract_resolves_and_evaluates_as_the_old_default(
+    tmp_path: Path,
+) -> None:
+    # ADR-091 R10: the old default was contract_evaluation=True, contract_mode=None,
+    # which stamped every change with contract relevance. `contract=None` (the new
+    # default) and the CLI's `--contract auto` must resolve to the same request and
+    # stamp the same way.
+    from abicheck.workflows.compare.execute import run_compare
+    from abicheck.workflows.compare_input_adapters import compare_request_inputs
+
+    old_p, new_p = _changed_pair(tmp_path)
+    default_request = CompareRequest(
+        old=InputSpec(path=old_p), new=InputSpec(path=new_p)
+    )
+    auto_request = CompareRequest(
+        old=InputSpec(path=old_p), new=InputSpec(path=new_p), contract="auto"
+    )
+    assert default_request.contract is None
+    assert auto_request.contract is None
+    assert (
+        compare_request_inputs(default_request).contract_mode
+        == compare_request_inputs(auto_request).contract_mode
+        is None
+    )
+
+    default_result = run_compare(old_p, new_p)
+    auto_result = run_compare(old_p, new_p, contract="auto")
+    assert default_result.diff.changes
+    assert all(c.contract_relevance is not None for c in default_result.diff.changes)
+    assert [c.contract_relevance for c in default_result.diff.changes] == [
+        c.contract_relevance for c in auto_result.diff.changes
+    ]
