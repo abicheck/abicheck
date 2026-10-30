@@ -52,12 +52,12 @@ REMOVED_IN_0_7: tuple[tuple[str, tuple[str, ...], frozenset[str]], ...] = (
     ),
     (
         # python-api.md documents load_suppression_and_policy, which keeps its
-        # policy_file_path keyword. Its own entry, so the other spellings above stay
-        # checked on that page.
+        # policy_file_path keyword. Its own entry, pinned to that one example line
+        # so a stale policy_file_path= elsewhere on the page still surfaces.
         "typed Python API `policy_file_path=` (the keyword of the documented"
         " load_suppression_and_policy helper; the typed request's field is `policy`)",
         ("policy_file_path=",),
-        frozenset({"start/upgrading-to-0.7.md", "use/python-api.md"}),
+        frozenset({"start/upgrading-to-0.7.md", "use/python-api.md#L147"}),
     ),
     (
         "compare/dump/project history --version (the per-side version label,"
