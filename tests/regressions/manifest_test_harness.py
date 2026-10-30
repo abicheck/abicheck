@@ -369,6 +369,29 @@ TEST_HARNESS_BUG_CLASSES: tuple[BugClass, ...] = (
         },
     ),
     BugClass(
+        id="test_harness.suite_wide_measurement_under_a_fixed_budget",
+        invariant=(
+            "A gate that measures the whole suite stays inside its budget as "
+            "the suite grows, and reads the measurement it asked for. "
+            "`gen_repo_facts.py` counted the fast lane with one full `pytest "
+            "--collect-only` under a fixed 120 s timeout: 107 s on main's "
+            "GitHub runner, so a runner 10% slower failed it with no change to "
+            "any test. It now collects disjoint `--collect-partition` slices "
+            "at once and sums them, and the sum must equal one unpartitioned "
+            "collection. It also took the first 'N tests collected' in the "
+            "output, which a parametrized node id listed by `-q` can quote, "
+            "instead of pytest's closing summary."
+        ),
+        fixed_by=(1842,),
+        seed_tests=("tests/test_collect_partition.py",),
+        # The seed test runs pytest and the script's counter, not the CLI.
+        public_surfaces=(),
+        axes={
+            "slices": ("1", "2", "3", "4", "5", "6", "7", "8"),
+            "summary_shape": ("selected/total", "total", "none", "quoted-in-id"),
+        },
+    ),
+    BugClass(
         id="test_harness.git_inherits_developer_signing_config",
         invariant=(
             "A git commit a test makes succeeds whatever the developer's "

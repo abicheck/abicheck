@@ -53,6 +53,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import subprocess
 import sys
@@ -135,28 +136,87 @@ def _example_cases() -> int:
     return len(gt["verdicts"])
 
 
-def _fast_test_cases_collected() -> int:
-    proc = subprocess.run(
-        _isolated_module_command(
-            "pytest",
-            "tests/",
-            "-m",
-            _FAST_MARKER,
-            "--collect-only",
-            "-q",
-        ),
-        cwd=ROOT,
-        capture_output=True,
-        text=True,
-        timeout=120,
-    )
-    text = proc.stdout + proc.stderr
-    m = _COLLECTED_RE.search(text)
-    if not m:
-        raise SystemExit(
-            f"gen_repo_facts: could not parse pytest --collect-only output:\n{text[-500:]}"
+#: Upper bound on concurrent collection processes; each slice also pays a
+#: fixed import cost, so more slices than cores only adds overhead.
+_MAX_COLLECT_PARTITIONS = 8
+
+
+def _collected_in(text: str) -> int | None:
+    """The selected-test count pytest's ``--collect-only`` summary states:
+    ``X/Y tests collected`` or ``Y tests collected``; 0 for a slice whose
+    every test was deselected; ``None`` when there is no summary."""
+    # The last match: ``-q`` lists every node id first, and a parametrized
+    # id can itself contain "N tests collected" (this module's own tests do).
+    matches = list(_COLLECTED_RE.finditer(text))
+    if matches:
+        return int(matches[-1].group(1) or matches[-1].group(2))
+    return 0 if re.search(r"no tests (?:collected|ran)", text) else None
+
+
+def _settle_generated_skill_trees() -> None:
+    """Bring the generated agent-skill trees up to date before collecting.
+
+    Each pytest session re-renders them at configure time and rewrites any
+    tree that is stale (tests/conftest.py ``_materialize_generated_skill_trees``),
+    removing each skill directory before restoring it, and several modules
+    parametrize over those files at collection time. With stale trees, slices
+    starting together would each find them stale and one could collect while
+    another rewrites them. Settled here first, every slice finds them current
+    and none writes.
+    """
+    import gen_agent_skills as gen
+
+    rendered = gen.render_all()
+    if gen.check_trees(rendered):
+        gen.write_trees(rendered)
+
+
+def _fast_test_cases_collected(partitions: int | None = None) -> int:
+    """The fast lane's collected-test count, collected in *partitions*
+    disjoint slices at once (``--collect-partition``,
+    tests/pytest_collect_partition.py) and summed. One full collection took
+    107 s of a 120 s budget on a GitHub runner; each slice does ~1/N of it,
+    and 120 s stays a per-slice hang guard, not a budget the suite outgrows."""
+    n = partitions or max(1, min(_MAX_COLLECT_PARTITIONS, os.cpu_count() or 1))
+    _settle_generated_skill_trees()
+    procs = [
+        subprocess.Popen(
+            _isolated_module_command(
+                "pytest",
+                "tests/",
+                "-m",
+                _FAST_MARKER,
+                "--collect-only",
+                "-q",
+                f"--collect-partition={k}/{n}",
+            ),
+            cwd=ROOT,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
         )
-    return int(m.group(1) or m.group(2))
+        for k in range(1, n + 1)
+    ]
+    total = 0
+    try:
+        for k, proc in enumerate(procs, start=1):
+            text, _ = proc.communicate(timeout=120)
+            count = _collected_in(text)
+            if count is None or proc.returncode not in (0, 5):
+                raise SystemExit(
+                    f"gen_repo_facts: collection slice {k}/{n} failed "
+                    f"(exit {proc.returncode}):\n{text[-500:]}"
+                )
+            total += count
+    finally:
+        for proc in procs:
+            if proc.poll() is None:
+                proc.kill()
+                try:
+                    proc.wait(timeout=10)
+                except subprocess.TimeoutExpired:
+                    pass
+    return total
 
 
 def _git_commit() -> str:

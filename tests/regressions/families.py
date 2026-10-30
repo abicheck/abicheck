@@ -466,6 +466,9 @@ _F7 = (
     # verify.py held a step's output until the child exited, so a lane that
     # stalled could not show which test it was running.
     "test_harness.step_output_released_only_on_exit",
+    # gen_repo_facts counted the suite in one pass under a fixed 120 s cap
+    # (107 s on main) and read the first summary-shaped text, not pytest's.
+    "test_harness.suite_wide_measurement_under_a_fixed_budget",
     "test_harness.nested_session_prunes_outer_temp_root",
     "test_infra.autouse_allocator_cannot_recover",
     "test_infra.caller_owned_directory_fabricated",
