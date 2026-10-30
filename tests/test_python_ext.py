@@ -721,7 +721,7 @@ def test_scan_abi3_invalid_floor(tmp_path: object) -> None:
 
     result = _compare_abi3(path, "--abi3-floor", "not-a-version")
     assert result.exit_code == 64, result.output
-    assert "invalid --abi3" in result.output
+    assert "invalid --abi3-floor" in result.output
 
 
 def test_scan_abi3_flags_version_specific_artifact(tmp_path: object) -> None:

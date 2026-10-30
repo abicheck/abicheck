@@ -44,7 +44,6 @@ from .frontends.cli.options.params import (
     SIDED_PATH_PARAM,
     normalize_suppress_callback,
 )
-from .frontends.cli.options.renamed import Legacy, renamed_option
 from .workflows.compile_config import (
     CompileConfigError,
     scope_compile_config_env_toggles,
@@ -947,10 +946,9 @@ def abi3_option(func: F) -> F:
     ``python.abi3_floor`` supplies a default this flag overrides per run
     (ADR-068 D5).
     """
-    func = renamed_option(
+    func = click.option(
         "--abi3-floor",
         "abi3",
-        legacy=(Legacy("--abi3", "--abi3-floor"),),
         default=None,
         metavar="VERSION",
         help="Audit the candidate (NEW) against a Py_LIMITED_API floor, e.g. "

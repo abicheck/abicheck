@@ -16,24 +16,29 @@
 """The per-side version label, ``--label`` (ADR-091 D5 R1).
 
 ``compare``, ``dump`` and ``project history`` name the label of each side with
-``--label``; the retired ``--version`` is a hidden alias (see
-:mod:`.renamed`). Each command keeps its own dest and default, so the callback
-parameters did not move. Root ``abicheck --version`` is the tool version and is
-not this option.
+``--label``. The retired ``--version`` spelling was removed outright (ADR-091
+D7, no transition window): it now fails as an unknown option. Each command
+keeps its own dest and default, so the callback parameters did not move. Root
+``abicheck --version`` is the tool version and is not this option.
 """
 
 from __future__ import annotations
 
+from collections.abc import Callable
+from typing import Any, TypeVar
+
+import click
+
 from .params import SIDED_STR_PARAM
-from .renamed import F, Legacy, renamed_option
+
+F = TypeVar("F", bound=Callable[..., Any])
 
 
 def compare_label_option(func: F) -> F:
     """``compare``'s side-aware label: ``--label [old=|new=]LABEL``, repeatable."""
-    return renamed_option(
+    return click.option(
         "--label",
         "version",
-        legacy=(Legacy("--version", "--label", multiple=True),),
         multiple=True,
         type=SIDED_STR_PARAM,
         help="Version label used when an input is a bare .so file. Scope to one "
@@ -45,10 +50,9 @@ def compare_label_option(func: F) -> F:
 
 def dump_label_option(func: F) -> F:
     """``dump``'s single label, embedded in the snapshot."""
-    return renamed_option(
+    return click.option(
         "--label",
         "version",
-        legacy=(Legacy("--version", "--label"),),
         default="unknown",
         show_default=True,
         help="Library version string to embed in snapshot.",
@@ -57,10 +61,9 @@ def dump_label_option(func: F) -> F:
 
 def history_label_option(func: F) -> F:
     """``project history``'s per-snapshot label, one per SNAPSHOT, in order."""
-    return renamed_option(
+    return click.option(
         "--label",
         "versions",
-        legacy=(Legacy("--version", "--label", multiple=True),),
         multiple=True,
         metavar="LABEL",
         help=(

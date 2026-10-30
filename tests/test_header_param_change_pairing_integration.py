@@ -147,7 +147,7 @@ def _build_and_dump(case: Path, header: str, impl: str) -> Path:
             str(so),
             "-H",
             str(case / "lib.h"),
-            "--version",
+            "--label",
             case.name,
             "-o",
             str(out),

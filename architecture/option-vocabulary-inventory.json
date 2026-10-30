@@ -205,19 +205,6 @@
    "default": "<unset>"
   },
   {
-   "id": "compare --version",
-   "command": "compare",
-   "option": "--version",
-   "aliases": [],
-   "hidden": true,
-   "help_common": false,
-   "multiple": true,
-   "is_flag": false,
-   "type": "text",
-   "choices": null,
-   "default": "<unset>"
-  },
-  {
    "id": "compare --dump-manifest",
    "command": "compare",
    "option": "--dump-manifest",
@@ -538,19 +525,6 @@
    "default": "<unset>"
   },
   {
-   "id": "compare --abi3",
-   "command": "compare",
-   "option": "--abi3",
-   "aliases": [],
-   "hidden": true,
-   "help_common": false,
-   "multiple": false,
-   "is_flag": false,
-   "type": "text",
-   "choices": null,
-   "default": "<unset>"
-  },
-  {
    "id": "compare --budget",
    "command": "compare",
    "option": "--budget",
@@ -704,32 +678,6 @@
    "default": "<unset>"
   },
   {
-   "id": "deps compare --new-root",
-   "command": "deps compare",
-   "option": "--new-root",
-   "aliases": [],
-   "hidden": true,
-   "help_common": false,
-   "multiple": false,
-   "is_flag": false,
-   "type": "text",
-   "choices": null,
-   "default": "<unset>"
-  },
-  {
-   "id": "deps compare --old-root",
-   "command": "deps compare",
-   "option": "--old-root",
-   "aliases": [],
-   "hidden": true,
-   "help_common": false,
-   "multiple": false,
-   "is_flag": false,
-   "type": "text",
-   "choices": null,
-   "default": "<unset>"
-  },
-  {
    "id": "deps compare --search-path",
    "command": "deps compare",
    "option": "--search-path",
@@ -821,19 +769,6 @@
    "multiple": false,
    "is_flag": false,
    "type": "path",
-   "choices": null,
-   "default": "<unset>"
-  },
-  {
-   "id": "deps tree --sysroot",
-   "command": "deps tree",
-   "option": "--sysroot",
-   "aliases": [],
-   "hidden": true,
-   "help_common": false,
-   "multiple": false,
-   "is_flag": false,
-   "type": "text",
    "choices": null,
    "default": "<unset>"
   },
@@ -989,19 +924,6 @@
    "type": "text",
    "choices": null,
    "default": "'unknown'"
-  },
-  {
-   "id": "dump --version",
-   "command": "dump",
-   "option": "--version",
-   "aliases": [],
-   "hidden": true,
-   "help_common": false,
-   "multiple": false,
-   "is_flag": false,
-   "type": "text",
-   "choices": null,
-   "default": "<unset>"
   },
   {
    "id": "dump --output",
@@ -1307,19 +1229,6 @@
    "aliases": [],
    "hidden": false,
    "help_common": true,
-   "multiple": true,
-   "is_flag": false,
-   "type": "text",
-   "choices": null,
-   "default": "<unset>"
-  },
-  {
-   "id": "project history --version",
-   "command": "project history",
-   "option": "--version",
-   "aliases": [],
-   "hidden": true,
-   "help_common": false,
    "multiple": true,
    "is_flag": false,
    "type": "text",
