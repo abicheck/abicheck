@@ -607,6 +607,14 @@ DUMP_OPTION_RULINGS: dict[str, OptionRuling] = {
         "(`snapshot-compression`) therefore stays too, with something real "
         "to drive."
     ),
+    "--set": _deferred(
+        "ADR-091 D4's generic per-run override, the same spelling as `compare "
+        "--set PATH=VALUE`: one config key for this dump, validated by the "
+        "file's own schema. The keys dump applies are listed in cli-usage.md. "
+        "It stays deferred until ADR-091 is accepted, which is a maintainer "
+        "decision.",
+        blocker="ADR-091 acceptance (the guard-2 exception for the generic --set spelling)",
+    ),
 }
 
 

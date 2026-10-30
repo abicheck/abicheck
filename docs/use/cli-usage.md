@@ -243,12 +243,16 @@ example catalog is the
 
 ## Overriding one config key for one run: `--set`
 
-`compare` accepts `--set PATH=VALUE`, repeatable, to set one `.abicheck.yml`
-key for that run without editing the file:
+`compare`, `dump` and `project capture-variants` accept `--set PATH=VALUE`,
+repeatable, to set one `.abicheck.yml` key for that run without editing the
+file:
 
 ```bash
 abicheck compare libfoo.so.1 libfoo.so.2 -H include/foo.h \
   --set scope.show_redundant=true --set scope.public_symbols=[foo_init]
+
+abicheck dump libfoo.so.2 -H include/foo.h -o libfoo.json \
+  --set debug.dwarf_only=true
 ```
 
 `PATH` is the dotted config key and `VALUE` is read as YAML, so `true`, `3`
@@ -257,12 +261,29 @@ through the same schema as the file: an unknown key, a wrong type or a
 malformed assignment exits 64 and names the key. Precedence is explicit flag
 over `--set` over `.abicheck.yml` over the built-in default. A key that has its
 own flag (`compile.defines` is `--define`, `severity.preset` is
-`--severity-preset`, `contract` is `--contract`, and so on) is refused with the
-name of that flag, so each option keeps one spelling. `--set` does not yet
-reach `dump`, `project plan` or `project capture-variants`, and `compare` refuses
-the keys it does not yet apply (such as `compile.*`, `build.*` and `sources.*`)
-with exit 64 rather than dropping them, and a directory or package comparison refuses every key its members do not receive; the full key list is
-in [`config-keys-reference.md`](../reference/config-keys-reference.md).
+`--severity-preset`, `contract` is `--contract`, `scope.exclude_headers` is
+`--exclude-header`, and so on) is refused with the name of that flag, so each
+option keeps one spelling.
+
+Each command applies only the keys it reads, and refuses the rest with exit 64
+rather than dropping them:
+
+| Command | `--set` applies | Refused, exit 64 |
+|---|---|---|
+| `compare` | the keys its resolved config reaches (`compile.*`, `build.*` and `sources.*` are not yet applied) | every other key, naming the command |
+| `dump` | `compile.lang`, `build.compile_db_filter`, `debug.format`, `debug.dwarf_only`, `debug.debuginfod`, `debug.debuginfod_url`, and the two `compile.*` toggles `ast_frontend_fallback` and `allow_unsupported_castxml` (CLI only: the typed API refuses them, since each is a process-wide environment setting) | every other key, including `compile.std`, `compile.include_dirs` and the other `compile.*` keys its header path does not read yet |
+| `project capture-variants` | `bundle_variants` (the whole block) | every other key |
+
+`project plan` takes no `--set`: its config is the project-integration
+`targets:`/`profiles:`/`checks:` document, which no `--set` key reaches. Nor do
+`project validate`, `project history`, `deps tree`, `deps compare` or
+`aggregate`, which read no key a `--set` can set. A directory or package
+`compare` refuses every key its members do not receive. The full key list is in
+[`config-keys-reference.md`](../reference/config-keys-reference.md).
+
+In the typed API the same override is `config_overrides` on `CompareRequest`
+and `DumpRequest`, and on the `run_compare` and `run_dump` functions. An
+argument you set away from its default is kept, as an explicit flag is.
 
 ## Dependency-stack commands
 

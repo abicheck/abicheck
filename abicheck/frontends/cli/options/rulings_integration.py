@@ -24,7 +24,7 @@ the command's path below the root (``"project plan"``).
 
 from __future__ import annotations
 
-from .ruling_model import OptionRuling, _keep
+from .ruling_model import OptionRuling, _deferred, _keep
 
 _EXPORT_RULING = (
     "Plan slice 7m's one export request (`-o FORMAT=DESTINATION`, "
@@ -165,6 +165,14 @@ PROJECT_CAPTURE_VARIANTS_OPTION_RULINGS: dict[str, OptionRuling] = {
         "discoverable -- without capturing or writing."
     ),
     "--output": _keep(_EXPORT_RULING),
+    "--set": _deferred(
+        "ADR-091 D4's generic per-run override, the same spelling as `compare "
+        "--set PATH=VALUE`. For this command it applies the `bundle_variants:` "
+        "block only: each variant's dump reads no other config, so any other "
+        "key is refused. It stays deferred until ADR-091 is accepted, which is "
+        "a maintainer decision.",
+        blocker="ADR-091 acceptance (the guard-2 exception for the generic --set spelling)",
+    ),
 }
 
 

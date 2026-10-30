@@ -1,6 +1,6 @@
 # Option vocabulary unification: implementation plan
 
-**Status:** Phase 0 done (2026-10-30); Phase 2 CLI and typed-API half for `compare` done, the rest of Phase 2 open; Phases 1 and 3–7 not started. Implements
+**Status:** Phase 0 done (2026-10-30); Phase 1 done; Phase 2 CLI and typed-API half done for `compare`, `dump` and `project capture-variants` (the compile-path keys on `dump`, and the Action `set:` input, are open); Phases 3–7 not started. Implements
 [ADR-091](../adr/091-one-option-vocabulary.md). Each phase is one PR, ordered
 so that the parity gate lands before any rename and every rename lands with
 its alias.
@@ -148,21 +148,54 @@ move with it. No `verify.py` change was needed.
 Owner: `frontends/`, `workflows/compare/configuration.py`, `action/`.
 Size: M. Changelog fragment: Added.
 
-**Result (2026-10-30, partial).** The CLI and typed-API half for `compare`
-is in: `compare --set PATH=VALUE` (repeatable) and
-`CompareRequest.config_overrides` (typed; `run_compare(config_overrides=)`)
-share one validator (`abicheck/buildsource/build_config_overrides.py`, the
-file's own `KEY_TABLE`) and one loader (`load_build_config`,
-`load_build_config_with_digest`, `load_and_resolve_compare_config`). Precedence
-is explicit flag > override > file > default; core keys are refused with exit 64
-naming the flag (`CORE_CONFIG_FLAGS`, checked against the registry by
-`tests/test_config_overrides.py`). The typed override fills only the request fields the caller
-left at their default. The stored BundleFacts route refuses `--set` with exit 64.
-Still open in this phase: `--set` on `dump` (CLI and `DumpRequest.config_overrides`),
-`project plan` and `project capture-variants`, which read the file through about a dozen
-loaders that do not yet take an override; `project validate`, `project history`,
-`deps tree`, `deps compare` and `aggregate` read no `KEY_TABLE` key and take no `--set`.
-The Action half (`set:` input, `action/run.sh` `compile:` overlay) is not started.
+**Result (2026-10-30, partial; dump and capture-variants added).** The CLI and
+typed-API half is in for three commands. `compare --set PATH=VALUE` and
+`CompareRequest.config_overrides` (typed; `run_compare(config_overrides=)`) were
+the first slice. This slice adds `dump --set` (CLI), `DumpRequest.config_overrides`
+(typed; `with_dump_config_overrides`, run first in `resolve_dump_request`),
+`run_dump(config_overrides=)` and `project capture-variants --set`. All of them
+share one validator (`abicheck/buildsource/build_config_overrides.py`, the file's
+own `KEY_TABLE`), and each command passes its applied-key set to the one `--set`
+parser (`frontends/cli/options/config_set.py`, `config_set_option_for`).
+Precedence is explicit flag > override > file > default. Core keys are refused with
+exit 64 naming their flag (`CORE_CONFIG_FLAGS`; this includes `scope.exclude_headers`
+and `debug.pdb_path`, so no `dump` channel can reach them). Every key a command does
+not apply is refused with exit 64, not dropped. The registry claims the four new
+spellings under `config.override`; `tests/test_config_overrides_dump_project.py`
+checks precedence, refusals and CLI-vs-typed equivalence at the resolved config.
+
+- **dump** applies `compile.lang`, `build.compile_db_filter`, `debug.format`,
+  `debug.dwarf_only`, `debug.debuginfod`, `debug.debuginfod_url`, and the CLI-only
+  `compile.ast_frontend_fallback`/`compile.allow_unsupported_castxml` toggles
+  (the typed API refuses the toggles: they are process-wide env settings). Every
+  dump config resolver reads through one loader, `_dump_build_config`. With
+  overrides, a named file is read strictly, since a stated value must not be lost
+  to the lenient fallback (`DumpConfigError`, exit 64).
+- **Not yet applied on dump:** every other `compile.*` key (`compile.std`,
+  `compile.include_dirs`, `compile.frontend`, ...), `build.query`, `build.*`,
+  `sources.*`. `compile.*` is read by `workflows/compile_config.merge_compile_config`,
+  and `--sources`/`--build-info` re-read the file in `buildsource/embed.py` and
+  `l2_seed_args.py`; those loaders do not take an override yet. Until they do,
+  `--set` on these keys exits 64. This is the largest remaining gap in Phase 2.
+- **capture-variants** applies `bundle_variants` (the whole block). Its only config
+  read is that block; each variant's dump runs with no project config.
+- **project plan takes no `--set`.** The plan's premise was that it reads the config
+  through about a dozen loaders. It does not: `project plan` reads only
+  `ProjectTargetsConfig` (`targets:`/`profiles:`/`checks:`/`aggregate:`), which no
+  `KEY_TABLE` key reaches, so `--set` would refuse every key. The dozen loaders are
+  dump's and compare's. Adding a flag that always refuses would be noise, so the
+  flag is not added; `tests/test_config_overrides_dump_project.py` pins that
+  `project plan` has no `--set`.
+- **No `--set`:** `project validate`, `project history`, `deps tree`, `deps compare`
+  and `aggregate` read no `KEY_TABLE` key a `--set` can set, and the test pins that
+  as well.
+- **Typed `run_dump(config_overrides=)`** fills the `run_dump` keyword parameters
+  for `compile.lang` and the `debug.*` keys, through the dependency-scope wrapper
+  before the live extraction; the cache sits above that wrapper, so it keys on the
+  resolved values. It refuses `build.compile_db_filter`, which has no `run_dump`
+  parameter.
+- **Still open in this phase:** the Action `set:` input and the `action/run.sh`
+  `compile:` overlay replacement (not started), and the compile-path loaders above.
 
 ## Phase 3 — Behavior unifications (D2)
 
