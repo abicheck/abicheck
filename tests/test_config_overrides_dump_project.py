@@ -102,7 +102,10 @@ def test_dump_flag_beats_the_file_and_set_beats_the_file(tmp_path: Path) -> None
     assert resolved.debug.dwarf_only is False  # --set > file
 
 
-def test_dump_set_builds_the_config_when_there_is_no_file(tmp_path: Path) -> None:
+def test_dump_set_builds_the_config_when_there_is_no_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.chdir(tmp_path)  # no ambient .abicheck.yml above the test
     resolved = _resolve(None, overrides={"debug.format": "dwarf"})
     assert resolved.path is None
     assert resolved.debug.format == "dwarf"
