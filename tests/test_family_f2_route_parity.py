@@ -374,7 +374,11 @@ DEFAULT_UNMAPPED: dict[str, str] = {
 
 def _click_params() -> dict[str, click.Parameter]:
     # Hidden legacy aliases (ADR-091 D7) never reach the callback, so they have no route.
-    return {p.name: p for p in COMPARE.params if p.name and not p.name.startswith("_legacy_")}
+    return {
+        p.name: p
+        for p in COMPARE.params
+        if p.name and not p.name.startswith("_legacy_")
+    }
 
 
 def _request_fields() -> set[str]:

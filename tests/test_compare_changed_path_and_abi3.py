@@ -291,7 +291,11 @@ class TestReleaseOperandRejection:
 
     @pytest.mark.parametrize(
         ("flag", "value"),
-        [("--since", "origin/main"), ("--changed-path", "a.cc"), ("--abi3-floor", "3.9")],
+        [
+            ("--since", "origin/main"),
+            ("--changed-path", "a.cc"),
+            ("--abi3-floor", "3.9"),
+        ],
     )
     def test_rejected_for_a_directory_operand(
         self, flag: str, value: str, tmp_path: Path
@@ -427,7 +431,8 @@ class TestCompareAbi3:
     ) -> None:
         path = _write(_abi3_snapshot(), tmp_path / "foo.abi3.so.abi.json")
         result = CliRunner().invoke(
-            main, ["compare", str(path), str(path), "--abi3-floor", "3.9", "-o", "json=-"]
+            main,
+            ["compare", str(path), str(path), "--abi3-floor", "3.9", "-o", "json=-"],
         )
         assert result.exit_code == 0, result.output
         report = json.loads(result.stdout)
@@ -468,7 +473,8 @@ class TestCompareAbi3:
             AbiSnapshot(library="libfoo.so", version="1.0"), tmp_path / "s.json"
         )
         result = CliRunner().invoke(
-            main, ["compare", str(path), str(path), "--abi3-floor", "3.9", "-o", "json=-"]
+            main,
+            ["compare", str(path), str(path), "--abi3-floor", "3.9", "-o", "json=-"],
         )
         assert result.exit_code == 7, result.output
         report = json.loads(result.stdout)
@@ -551,7 +557,8 @@ class TestAbi3FindingsReachPolicy:
         policy in effect the same findings still gate nothing."""
         path = _write(_abi3_snapshot(), tmp_path / "foo.abi3.so.abi.json")
         result = CliRunner().invoke(
-            main, ["compare", str(path), str(path), "--abi3-floor", "3.9", "-o", "json=-"]
+            main,
+            ["compare", str(path), str(path), "--abi3-floor", "3.9", "-o", "json=-"],
         )
         assert result.exit_code == 0, result.output
         assert json.loads(result.stdout)["verdict"] == "COMPATIBLE_WITH_RISK"
