@@ -23,26 +23,25 @@ says lives outside `storage/` because that package may depend only on
 `model` (`storage/AGENTS.md`, "Permitted imports") and therefore cannot
 itself import `snapshot_io`.
 
-D6's layout, exactly:
+D6's layout as amended by D17 (package format v2):
 
     project.abicheck/
       manifest.json            # small; loads immediately
-      refs/variants/<variant-id>.json     # package format v1 only
-      refs/artifacts/<artifact-id>.json   # package format v1 only
+      refs/variants/<variant-id>/<ref-digest>.json
+      refs/artifacts/<artifact-id>/<ref-digest>.json
       objects/sha256/<aa>/<digest>.json.zst
 
-Package format v2 (D17) stores each ref record as an ordinary object under
-`objects/` and `manifest.json` names it by digest (`variant_refs`/
-`artifact_refs`), so republishing never overwrites a live ref; the `refs/`
-paths below describe the v1 layout this module still reads.
+A ref document is written once and never overwritten; `manifest.json`
+names it by `{id, ref_digest}`, so republishing never touches a live ref.
+A v1 package's refs at `refs/<kind>/<id>.json` are still read.
 
 `manifest.json` deliberately does **not** embed full `variant_refs`/
 `artifact_refs` records the way `PackageManifest.to_dict()` does — that
 in-memory convenience is explicitly what `package.py`'s own docstring flags
 as "premature" until a real writer exists to make the split meaningful. This
-module is that writer: `manifest.json` carries only `versions` plus the two
-id lists, and each variant/artifact's full record lives at its own
-`refs/*.json` path (`variant_ref_relpath`/`artifact_ref_relpath`), read
+module is that writer: `manifest.json` carries only `versions` plus one
+`{id, ref_digest}` entry per variant/artifact, and each full record lives
+at its own ref path, read
 lazily — `read_variant_ref`/`read_artifact_ref` load exactly one, and
 `read_manifest_summary` loads only the small root document, matching D8's
 "a project comparison loads two manifests... then one matched library pair
@@ -93,7 +92,15 @@ from .storage.package import (
     object_relpath,
     variant_ref_relpath,
 )
-from .storage.package_publish import REF_DIGEST_FIELDS, publish_lock, ref_digest_map
+from .storage.package_publish import (
+    REF_ENTRY_FIELDS,
+    publish_lock_name,
+    ref_digest_entries,
+    ref_digest_of,
+    ref_document,
+    ref_record,
+    versioned_ref_relpath,
+)
 from .storage.ref_ids import (
     reject_filesystem_collisions as _reject_filesystem_collisions,
     safe_ref_id as _safe_ref_id,
@@ -326,27 +333,26 @@ class DirectoryObjectStore:
 
 
 def write_project_manifest(root: str | Path, manifest: PackageManifest) -> None:
-    """Publish *manifest* at *root* (ADR-062 D17): every ref record as a
-    content-addressed object, then `manifest.json` -- naming each ref by
-    digest -- as the single, atomic commit point. Stamps the package format
-    this writer produces (`PACKAGE_FORMAT_VERSION`). Does not write section
-    objects: a caller `put()`s those first (`DirectoryObjectStore.put`).
+    """Publish *manifest* at *root* (ADR-062 D17, package format v2): verify
+    every section object, write each ref document once to its digest-named
+    path, then replace `manifest.json` -- `{id, ref_digest}` per ref -- by
+    temp file plus atomic rename, the single commit point. Section objects
+    are the caller's to `put()` first (`DirectoryObjectStore.put`).
 
-    Raises `ValueError` -- before writing anything -- if any section digest
-    of an artifact, variant or `project_sections` entry cannot be read back
-    valid via `DirectoryObjectStore.get()` (absent, or not matching its own
-    digest); a bare path check would let a corrupted object through.
-
-    A ref object is never overwritten (its path is its digest), so a publish
-    that fails, or is interrupted before the manifest replace, leaves the
-    previously published package fully readable, including a republish of
-    changed content under the same ids. Concurrent writers to one *root* are
-    refused with `ConcurrentPublishError` (`storage.package_publish`), never
-    interleaved. Superseded ref and section objects stay behind as unnamed
-    garbage; nothing reads an object no manifest names.
+    Raises `ValueError`, before writing anything, if any section digest
+    cannot be read back valid via `DirectoryObjectStore.get()`. No file the
+    live manifest names is ever rewritten, so a failed or interrupted
+    publish -- even a changed-content republish under the same ids -- leaves
+    the previous package readable. Writers to one *root* are serialized by
+    `cross_process_lock.single_flight`; where it cannot lock, interleaved
+    writers still cannot mix packages (one atomic rename over immutable refs
+    each). Superseded refs and objects stay behind as unnamed garbage.
     """
+    from .storage.cross_process_lock import single_flight
+
     root_path = Path(root)
-    with publish_lock(root_path):
+    root_path.mkdir(parents=True, exist_ok=True)
+    with single_flight(publish_lock_name(str(root_path.resolve()))):
         store = DirectoryObjectStore(root_path)
         owners = [
             (f"artifact {a.artifact_id!r}", a.sections) for a in manifest.artifact_refs
@@ -373,17 +379,21 @@ def write_project_manifest(root: str | Path, manifest: PackageManifest) -> None:
             )
         versions = manifest.versions.to_dict()
         versions["package_format_version"] = PACKAGE_FORMAT_VERSION
-        summary: dict[str, Any] = {
-            "versions": versions,
-            "variant_ids": [variant.variant_id for variant in manifest.variant_refs],
-            "artifact_ids": [a.artifact_id for a in manifest.artifact_refs],
-            REF_DIGEST_FIELDS["variant"]: {
-                v.variant_id: store.put(v.to_dict()) for v in manifest.variant_refs
-            },
-            REF_DIGEST_FIELDS["artifact"]: {
-                a.artifact_id: store.put(a.to_dict()) for a in manifest.artifact_refs
-            },
-        }
+        summary: dict[str, Any] = {"versions": versions}
+        for kind, refs in (
+            ("variant", [(v.variant_id, v.to_dict()) for v in manifest.variant_refs]),
+            (
+                "artifact",
+                [(a.artifact_id, a.to_dict()) for a in manifest.artifact_refs],
+            ),
+        ):
+            summary[REF_ENTRY_FIELDS[kind]] = [
+                {
+                    "id": ref_id,
+                    "ref_digest": _write_ref(root_path, kind, ref_id, record),
+                }
+                for ref_id, record in refs
+            ]
         # Omitted when empty: absent means no cross-artifact evidence.
         if manifest.project_sections:
             summary["project_sections"] = {
@@ -394,6 +404,39 @@ def write_project_manifest(root: str | Path, manifest: PackageManifest) -> None:
             root_path / MANIFEST_RELPATH,
             compression=SnapshotCompression.NONE,
         )
+
+
+def _write_ref(root: Path, kind: str, ref_id: str, record: dict[str, Any]) -> str:
+    """Store one ref document at its digest-named path, at most once, and
+    return its `ref_digest`. An existing file there is kept only if it
+    verifies; a corrupted one is replaced with the content it must hold."""
+    document = ref_document(record)
+    digest = ref_digest_of(document)
+    path = root / versioned_ref_relpath(kind, ref_id, digest)
+    try:
+        intact = _read_verified_ref(path, digest) == document
+    except (OSError, ValueError, SnapshotError):
+        intact = False
+    if not intact:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        _write_canonical_json_text(
+            canonical_json(document, indent=2),
+            path,
+            compression=SnapshotCompression.NONE,
+        )
+    return digest
+
+
+def _read_verified_ref(path: Path, digest: str) -> Any:
+    """The ref document at *path*, refused unless it hashes to *digest*."""
+    document = canonical_form(json.loads(read_snapshot_bytes(path)))
+    actual = ref_digest_of(document)
+    if actual != digest:
+        raise ValueError(
+            f"{path} does not match its ref_digest {digest!r} (recomputed "
+            f"{actual!r}) -- the package is corrupted or was hand-edited"
+        )
+    return document
 
 
 class ManifestSummary:
@@ -569,14 +612,17 @@ def read_manifest_summary(root: str | Path) -> ManifestSummary:
             f"{compatibility.reason}"
         )
     record = str(root_path / MANIFEST_RELPATH)
-    variant_ids = _required_string_id_list(data, "variant_ids", record)
-    artifact_ids = _required_string_id_list(data, "artifact_ids", record)
     ref_digests: Mapping[str, Mapping[str, str]] = MappingProxyType({})
+    id_lists: Mapping[str, Any] = data
     if versions.package_format_version >= 2:
+        # D17: `{id, ref_digest}` per ref; the id lists derive from them and
+        # pass the same guards a v1 manifest's bare id lists do.
         ref_digests = {
-            "variant": ref_digest_map(data, "variant", variant_ids, record),
-            "artifact": ref_digest_map(data, "artifact", artifact_ids, record),
+            kind: ref_digest_entries(data, kind, record) for kind in REF_ENTRY_FIELDS
         }
+        id_lists = {f"{kind}_ids": list(ref_digests[kind]) for kind in ref_digests}
+    variant_ids = _required_string_id_list(id_lists, "variant_ids", record)
+    artifact_ids = _required_string_id_list(id_lists, "artifact_ids", record)
     return ManifestSummary(
         versions=versions,
         variant_ids=variant_ids,
@@ -592,8 +638,9 @@ def read_manifest_summary(root: str | Path) -> ManifestSummary:
 def _ref_document(
     root: Path, kind: str, ref_id: str, summary: ManifestSummary | None
 ) -> Any:
-    """One ref record's JSON: the digest-verified object the manifest names
-    (format v2), or a v1 package's `refs/<kind>/<id>.json` file."""
+    """One ref record's JSON: the digest-verified document the manifest names
+    (format v2), or a v1 package's `refs/<kind>/<id>.json` file (the D13
+    adapter for the id-path layout)."""
     if summary is None:
         summary = read_manifest_summary(root)
     if summary.ref_digests:
@@ -602,7 +649,9 @@ def _ref_document(
             raise ValueError(
                 f"{ref_id!r} is not a {kind}_id published in {root / MANIFEST_RELPATH}"
             )
-        return DirectoryObjectStore(root).get(digests[ref_id])
+        digest = digests[ref_id]
+        path = root / versioned_ref_relpath(kind, ref_id, digest)
+        return ref_record(_read_verified_ref(path, digest), str(path))
     relpath = variant_ref_relpath if kind == "variant" else artifact_ref_relpath
     return json.loads(read_snapshot_bytes(root / relpath(ref_id)))
 
@@ -740,31 +789,12 @@ def read_variant_artifact_pair(
             f"{unpublished} that are not published in this package's "
             "manifest.json"
         )
-    # A known, deliberately deferred gap (Codex review, a fourth finding on
-    # this same function): `PackageManifest.__post_init__`'s `declared ==
-    # owned` invariant is checked in *both* directions there --
-    # `variant.artifact_ids` must be exactly the set of artifacts whose own
-    # `variant_id` names it, not merely a subset. Everything above checks
-    # the "declared" direction (every id `variant.artifact_ids` names is
-    # itself published and, for the one requested id, self-consistent);
-    # what remains unchecked is the reverse "owned" direction -- a
-    # *different* published artifact (say `b`) whose own `variant_id` also
-    # names this variant, but which `variant.artifact_ids` simply omits.
-    # Detecting that requires loading and inspecting *every* artifact ref
-    # in the package to find which ones claim this `variant_id`, since
-    # `manifest.json`'s own small summary records only the flat list of all
-    # artifact ids with no per-variant partition -- turning a bounded,
-    # one-pair lazy read into an O(published artifact count) one and
-    # defeating the entire performance reason this function (and the lazy
-    # primitives it is built from) exists instead of always calling
-    # `read_project_manifest`. `read_project_manifest` already closes this
-    # exact gap today, at its own, already-eager, cost -- a caller that
-    # needs the full-graph guarantee this function cannot cheaply provide
-    # should use it instead. Not fixed here because no real caller in this
-    # landing needs that guarantee from the lazy path specifically (every
-    # current caller either loads everything via `read_project_manifest`
-    # or a single pair via this function); revisit once a real multi-
-    # artifact lazy caller (A1.6/A1.7) makes the cost/correctness trade a
-    # decision with an actual caller to design against, rather than a
-    # guess.
+    # Deferred gap (Codex review): the reverse "owned" direction of
+    # `PackageManifest.__post_init__`'s `declared == owned` invariant -- a
+    # *different* published artifact naming this variant that
+    # `variant.artifact_ids` omits -- is not checked here. Finding it means
+    # loading every artifact ref (manifest.json has no per-variant
+    # partition), turning this bounded one-pair read into an O(artifacts)
+    # one. `read_project_manifest` checks it at its own eager cost; revisit
+    # once a real multi-artifact lazy caller needs the guarantee.
     return variant, artifact

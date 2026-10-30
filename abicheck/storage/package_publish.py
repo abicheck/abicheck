@@ -13,132 +13,131 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""ADR-062 D17's publication rules for a directory-backed package: one
-writer per root, and the manifest field that names each ref document by
-its content digest.
+"""ADR-062 D17's ref layout (amends D6): immutable, digest-named ref
+documents, and the `manifest.json` entries that name them.
 
-Package format v2 stores every `VariantRef`/`ArtifactRef` record as an
-ordinary content-addressed JSON object under `objects/`, and `manifest.json`
-maps each id to that object's digest (`variant_refs`/`artifact_refs`). A
-republish therefore writes new ref objects beside the old ones and never
-overwrites a file the live `manifest.json` names; the single atomic replace
-of `manifest.json` is the commit point. A v1 package (refs at the mutable
-`refs/<kind>/<id>.json` paths, no digest map) is still read.
+Package format v2 writes each `VariantRef`/`ArtifactRef` record to
+`refs/<kind>/<id>/<ref-digest-hex>.json` and never overwrites it.
+`manifest.json` records `{id, ref_digest}` per ref, so a republish writes
+new ref files beside the old ones and the single atomic replace of
+`manifest.json` stays the only commit point. `ref_digest` is
+`canonical.semantic_digest` over the complete ref document -- its id, its
+`ref_schema_version` and every object digest it names; a reader recomputes
+it and fails closed on a mismatch with the manifest entry or the path.
 
-The filesystem writer itself is `abicheck/project_snapshot_store.py`'s
+A v1 package (refs at the mutable `refs/<kind>/<id>.json`, bare id lists)
+is still read: that is the D13 adapter for the id-path layout. The
+filesystem writer itself is `abicheck/project_snapshot_store.py`'s
 `write_project_manifest`; this leaf holds the parts that need no envelope.
 """
 
 from __future__ import annotations
 
-import os
-from collections.abc import Iterator, Mapping, Sequence
-from contextlib import contextmanager
-from pathlib import Path
+from collections.abc import Mapping
 from typing import Any
 
+from .canonical import semantic_digest
+from .package import object_relpath
+from .ref_ids import REF_SUFFIX, safe_ref_id
+
 __all__ = [
-    "PUBLISH_LOCK_NAME",
-    "REF_DIGEST_FIELDS",
-    "ConcurrentPublishError",
-    "publish_lock",
-    "ref_digest_map",
+    "REF_DIRS",
+    "REF_ENTRY_FIELDS",
+    "REF_SCHEMA_VERSION",
+    "REF_SCHEMA_VERSION_KEY",
+    "publish_lock_name",
+    "ref_digest_entries",
+    "ref_digest_of",
+    "ref_document",
+    "ref_record",
+    "versioned_ref_relpath",
 ]
 
-#: The lock file a writer holds inside the package root for the whole
-#: publish. Not part of the D6 layout: the archive packer skips it.
-PUBLISH_LOCK_NAME = ".publish.lock"
+#: Layout version of one ref document, stored inside it (and so hashed).
+REF_SCHEMA_VERSION = 1
+REF_SCHEMA_VERSION_KEY = "ref_schema_version"
 
-#: `manifest.json` field per ref kind (package format v2 and later).
-REF_DIGEST_FIELDS = {"variant": "variant_refs", "artifact": "artifact_refs"}
+#: `manifest.json` field listing `{id, ref_digest}` per ref, by ref kind.
+REF_ENTRY_FIELDS = {"variant": "variant_refs", "artifact": "artifact_refs"}
 
-
-class ConcurrentPublishError(ValueError):
-    """Another writer holds this package root (D17: refused, never
-    interleaved)."""
+#: Package-relative directory holding each ref kind's documents.
+REF_DIRS = {"variant": "refs/variants", "artifact": "refs/artifacts"}
 
 
-def _refuse(root: Path, detail: str) -> ConcurrentPublishError:
-    return ConcurrentPublishError(
-        f"refusing to publish into {root}: another writer holds "
-        f"{root / PUBLISH_LOCK_NAME} ({detail}); concurrent publishers to one "
-        "package root are not supported"
+def ref_document(record: Mapping[str, Any]) -> dict[str, Any]:
+    """The stored ref document for a `VariantRef`/`ArtifactRef.to_dict()`
+    *record*: the record plus its own layout version."""
+    if REF_SCHEMA_VERSION_KEY in record:
+        raise ValueError(f"a ref record may not carry {REF_SCHEMA_VERSION_KEY!r}")
+    return {**record, REF_SCHEMA_VERSION_KEY: REF_SCHEMA_VERSION}
+
+
+def ref_digest_of(document: Mapping[str, Any]) -> str:
+    """`ref_digest`: `semantic_digest` over the whole ref document."""
+    return semantic_digest(document)
+
+
+def ref_record(document: Any, where: str) -> dict[str, Any]:
+    """The record inside a stored ref *document*, refusing one whose layout
+    version this build does not read -- never guessing at a newer layout."""
+    if not isinstance(document, dict):
+        raise ValueError(f"{where} is not a JSON object")
+    version = document.get(REF_SCHEMA_VERSION_KEY)
+    if version != REF_SCHEMA_VERSION or isinstance(version, bool):
+        raise ValueError(
+            f"{where} states {REF_SCHEMA_VERSION_KEY} {version!r}; this build "
+            f"reads only {REF_SCHEMA_VERSION}"
+        )
+    return {k: v for k, v in document.items() if k != REF_SCHEMA_VERSION_KEY}
+
+
+def versioned_ref_relpath(kind: str, ref_id: str, ref_digest: str) -> str:
+    """`refs/<kind>/<id>/<hex>.json` -- the immutable path a ref document is
+    stored at, derived from its own digest (validated like an object's)."""
+    object_relpath(ref_digest)  # refuses a malformed or unknown-algorithm digest
+    hexdigest = ref_digest.split(":", 1)[1]
+    return (
+        f"{REF_DIRS[kind]}/{safe_ref_id(ref_id, f'{kind}_id')}/{hexdigest}{REF_SUFFIX}"
     )
 
 
-@contextmanager
-def publish_lock(root: str | Path) -> Iterator[None]:
-    """Hold the exclusive writer lock on *root* for the block, refusing --
-    never waiting -- when another writer already holds it.
-
-    POSIX uses a non-blocking `flock`, which the OS releases when the holder
-    dies, so a crashed publish never leaves a stale lock. The lock file is
-    unlinked on release; a writer that opened the old inode before that
-    unlink re-checks that the path still names the inode it locked, so two
-    writers can never both believe they hold the lock. Without `fcntl`
-    (Windows) the lock is an `O_EXCL` create: a crash there leaves the file
-    behind, and the refusal names it so it can be removed by hand.
-    """
-    root_path = Path(root)
-    root_path.mkdir(parents=True, exist_ok=True)
-    lock_path = root_path / PUBLISH_LOCK_NAME
-    try:
-        import fcntl
-    except ImportError:  # pragma: no cover - exercised only on Windows
-        try:
-            fd = os.open(lock_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
-        except FileExistsError:
-            raise _refuse(root_path, "remove it if no publish is running") from None
-        try:
-            yield
-        finally:
-            os.close(fd)
-            lock_path.unlink(missing_ok=True)
-        return
-    fd = os.open(lock_path, os.O_CREAT | os.O_RDWR)
-    try:
-        try:
-            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except BlockingIOError:
-            raise _refuse(root_path, "a publish is in progress") from None
-        try:
-            same_inode = os.stat(lock_path).st_ino == os.fstat(fd).st_ino
-        except FileNotFoundError:
-            same_inode = False
-        if not same_inode:
-            raise _refuse(root_path, "the lock was released and re-taken meanwhile")
-        try:
-            yield
-        finally:
-            lock_path.unlink(missing_ok=True)
-    finally:
-        os.close(fd)
-
-
-def ref_digest_map(
-    data: Mapping[str, Any], kind: str, ids: Sequence[str], record: str
+def ref_digest_entries(
+    data: Mapping[str, Any], kind: str, record: str
 ) -> dict[str, str]:
-    """The `{id: digest}` map a v2 `manifest.json` states for *kind* refs,
-    required to name exactly *ids* -- the membership list the same document
-    states -- so no published member is left without a ref and no ref
-    names a member the manifest never published."""
-    field = REF_DIGEST_FIELDS[kind]
+    """`{id: ref_digest}`, in manifest order, from a v2 `manifest.json`'s
+    `{id, ref_digest}` list for *kind* -- the package's published membership
+    of that kind, each id named once with exactly one ref."""
+    field = REF_ENTRY_FIELDS[kind]
     if field not in data:
         raise ValueError(f"{record} is missing required field {field!r}")
     raw = data[field]
-    if not isinstance(raw, dict):
+    if not isinstance(raw, list):
         raise ValueError(
-            f"{record} {field} must be a JSON object, not {type(raw).__name__}"
+            f"{record} {field} must be a JSON array, not {type(raw).__name__}"
         )
-    for key, value in raw.items():
-        if not isinstance(value, str) or ":" not in value:
+    entries: dict[str, str] = {}
+    for index, entry in enumerate(raw):
+        if not isinstance(entry, dict) or set(entry) != {"id", "ref_digest"}:
             raise ValueError(
-                f"{record} {field}[{key!r}] must be an '<algorithm>:<hex>' digest "
-                f"string, got {value!r}"
+                f"{record} {field}[{index}] must be an object with exactly "
+                f"'id' and 'ref_digest', got {entry!r}"
             )
-    if set(raw) != set(ids):
-        raise ValueError(
-            f"{record} {field} names {sorted(raw)}, but the package publishes "
-            f"{sorted(ids)} -- every published {kind} needs exactly one ref"
-        )
-    return dict(raw)
+        ref_id, digest = entry["id"], entry["ref_digest"]
+        if not isinstance(ref_id, str) or ref_id in entries:
+            raise ValueError(
+                f"{record} {field}[{index}] repeats or misspells id {ref_id!r}"
+            )
+        if not isinstance(digest, str):
+            raise ValueError(f"{record} {field}[{index}] ref_digest must be a string")
+        try:
+            object_relpath(digest)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"{record} {field}[{index}] ref_digest: {exc}") from None
+        entries[ref_id] = digest
+    return entries
+
+
+def publish_lock_name(resolved_root: str) -> str:
+    """The `cross_process_lock.single_flight` name serializing writers to
+    one package root (D17)."""
+    return f"project-package-publish:{resolved_root}"

@@ -54,27 +54,30 @@ A package is a directory (D6):
 ```text
 project.abicheck/
   manifest.json            # small; loads immediately
+  refs/variants/<variant-id>/<ref-digest>.json
+  refs/artifacts/<artifact-id>/<ref-digest>.json
   objects/sha256/<aa>/<digest>.json.zst
 ```
 
-`manifest.json` carries only the package's version axes (see below), the
-list of variant/artifact ids, and — from package format v2 — the
-`variant_refs`/`artifact_refs` maps naming each id's ref record by content
-digest. Each variant's or artifact's own record is an ordinary
-content-addressed object under `objects/`, loaded lazily. Section content
+`manifest.json` carries only the package's version axes (see below) and one
+`{id, ref_digest}` entry per variant and per artifact (`variant_refs`/
+`artifact_refs`) — never a full record. Each record lives in its own ref
+document, loaded lazily. The document carries a `ref_schema_version`, and
+its `ref_digest` is the semantic digest of the whole document; a reader
+recomputes it and refuses a document that does not match. Section content
 (declarations, types, layout, ...) is never embedded in a ref — it is a
-separate object too, referenced by digest. A package format v1 package
-kept each ref at a mutable `refs/variants/<id>.json`/
-`refs/artifacts/<id>.json` path instead; it is still read.
+separate, content-addressed object under `objects/`, referenced by digest.
+A package format v1 package kept each ref at a mutable
+`refs/variants/<id>.json`/`refs/artifacts/<id>.json` path and listed bare
+ids; it is still read.
 
-**Publication is atomic.** A writer verifies every section
-object, writes the ref objects, and only then replaces `manifest.json` in
-one atomic rename — the commit point. Ref objects are never overwritten, so
-a publish that fails or is interrupted, including a republish of changed
-content under the same ids, leaves the previous package fully readable. A
-writer holds a `.publish.lock` file in the package root for the whole
-publish and refuses to start while another writer holds it; the lock file
-is not part of the package and is never packed.
+**Publication is atomic.** A writer verifies every section object, writes
+each ref document once to its digest-named path, and only then replaces
+`manifest.json` by temp file plus atomic rename — the commit point. A ref
+document is never overwritten, so a publish that fails or is interrupted,
+including a republish of changed content under the same ids, leaves the
+previous package fully readable. Writers to one package are serialized by a
+cross-process lock.
 
 A deterministic `.tar.zst` transport form is part of the design but **not
 yet implemented** — only the plain directory form exists today.
@@ -252,7 +255,7 @@ storage-format-v2 A1.1).
 - **Layout.** A stored `mimetype` member comes first
   (`application/vnd.abicheck.project-snapshot+zip`), so the file identifies
   itself without a suffix. The package's own paths follow in sorted order:
-  `manifest.json`, `refs/**` (a v1 package only), `objects/**`. Every member is stored
+  `manifest.json`, `refs/**`, `objects/**`. Every member is stored
   uncompressed, because objects are already `zstd`-compressed.
 - **Deterministic.** Every zip header field is pinned (`storage/zip_member.py`,
   shared with the G40 bundle archive), so the same package always packs to

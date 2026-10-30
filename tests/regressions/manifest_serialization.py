@@ -221,10 +221,10 @@ SERIALIZATION_BUG_CLASSES: tuple[BugClass, ...] = (
         id="storage.republish_overwrites_live_ref",
         invariant=(
             "Publishing a ProjectSnapshot package never rewrites a file the "
-            "live manifest.json names: ref records are content-addressed "
-            "objects, manifest.json is replaced atomically after every "
-            "section and ref object is durable and verified, and a second "
-            "writer to the same root is refused. So for every failure point "
+            "live manifest.json names: ref documents are written once to "
+            "digest-named paths, manifest.json is replaced atomically after "
+            "every section object and ref is durable and verified, and "
+            "writers to one root are serialized. So for every failure point "
             "(a failed object check of any section owner, an interruption at "
             "any ref write or at the manifest write) and for a successful "
             "republish of changed content under the same ids, the previously "
@@ -242,9 +242,9 @@ SERIALIZATION_BUG_CLASSES: tuple[BugClass, ...] = (
         known_gaps=(
             KnownGap(
                 description=(
-                    "Superseded ref/section objects are never collected, and "
-                    "without fcntl (Windows) the writer lock is an O_EXCL file "
-                    "a crashed writer leaves behind."
+                    "Superseded refs and section objects are never collected, "
+                    "and without fcntl (Windows) or in reference mode writers "
+                    "are not serialized (they still cannot mix packages)."
                 ),
                 reference="docs/contribute/known-gaps.md",
             ),

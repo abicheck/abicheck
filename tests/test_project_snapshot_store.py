@@ -36,6 +36,7 @@ from abicheck.storage.dto import (
 )
 from abicheck.storage.import_v1 import import_legacy_snapshot as _import_legacy_snapshot
 from abicheck.storage.package import ArtifactRef, ObjectRef, PackageManifest, VariantRef
+from abicheck.storage.package_publish import versioned_ref_relpath
 from abicheck.storage.versioning import StorageVersions
 from tests._project_manifest_reader import read_project_manifest
 
@@ -462,16 +463,20 @@ class TestManifestRoundTrip:
         write_project_manifest(tmp_path, manifest)
 
         assert (tmp_path / "manifest.json").is_file()
-        # Package format v2 (ADR-062 D17): ref records are content-addressed
-        # objects named by digest, never mutable `refs/<kind>/<id>.json` files.
-        assert not (tmp_path / "refs").exists()
+        # Package format v2 (ADR-062 D17): each ref is an immutable document
+        # at refs/<kind>/<id>/<ref-digest>.json, never the id-only v1 path.
         summary = read_manifest_summary(tmp_path)
-        assert set(summary.ref_digests["variant"]) == {"default"}
-        assert set(summary.ref_digests["artifact"]) == {"libfoo"}
-        store = DirectoryObjectStore(tmp_path)
-        assert store.get(summary.ref_digests["variant"]["default"]) == (
-            manifest.variant_refs[0].to_dict()
+        refs = sorted(
+            p.relative_to(tmp_path).as_posix()
+            for p in (tmp_path / "refs").rglob("*.json")
         )
+        assert refs == sorted(
+            versioned_ref_relpath(kind, ref_id, digest)
+            for kind in ("variant", "artifact")
+            for ref_id, digest in summary.ref_digests[kind].items()
+        )
+        assert [p.split("/")[2] for p in refs] == ["libfoo", "default"]
+        assert not (tmp_path / "refs" / "variants" / "default.json").exists()
         assert any((tmp_path / "objects").rglob("*.json.zst"))
 
 
@@ -481,7 +486,10 @@ class TestManifestRoundTrip:
 #: compatibility guard on an absent/unstated version axis first. Derived
 #: from `StorageVersions`' own defaults rather than hand-typed numbers, so
 #: it can't silently drift from what a real writer emits.
-_VALID_VERSIONS = StorageVersions().to_dict()
+# Package format v1: these tests write the v1 id-list manifest by hand and
+# exercise its guards (the D13 adapter); v2's `{id, ref_digest}` entries
+# pass the same guards (`tests/test_package_immutable_publication.py`).
+_VALID_VERSIONS = {**StorageVersions().to_dict(), "package_format_version": 1}
 
 
 class TestReadManifestSummaryValidation:
@@ -721,7 +729,7 @@ class TestReadVariantArtifactPair:
         (root / "manifest.json").write_text(
             json.dumps(
                 {
-                    "versions": {**_VALID_VERSIONS, "package_format_version": 1},
+                    "versions": _VALID_VERSIONS,
                     "variant_ids": variant_ids,
                     "artifact_ids": artifact_ids,
                 }
