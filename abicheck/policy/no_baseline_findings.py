@@ -100,13 +100,13 @@ def is_one_sided_finding(change: Change) -> bool:
       evidence *sources against each other* and carry no baseline of their
       own (ADR-068 D3).
     * ``candidate_side_enrichment`` -- a check meaningful only on the
-      candidate, today the ``--abi3`` limited-API audit
+      candidate, today the ``--abi3-floor`` limited-API audit
       (``workflows.abi3_audit``), which ADR-068 D3 requires to ride the
       same result document "marked as such".
 
     Checked as a disjunction rather than on ``cross_source_evolution``
     alone so a candidate-side check that grows a second marker, or an
-    ``--abi3`` audit reached through this path, is reported rather than
+    ``--abi3-floor`` audit reached through this path, is reported rather than
     tripping the comparison-half invariant below. This is deliberately *not* a
     ``ChangeKind`` allowlist: a kind-keyed filter is a second place every
     new candidate-side ``ChangeKind`` would have to be taught about

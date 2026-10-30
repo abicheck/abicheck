@@ -50,7 +50,7 @@ scenarios:
       An integrator compares a binary's entire resolved dependency stack across
       two sysroots to confirm it still loads and binds before shipping an image.
     flow:
-      - abicheck deps compare usr/bin/myapp --old-root old-root/ --new-root new-root/
+      - abicheck deps compare usr/bin/myapp --root old=old-root/ --root new=new-root/
     expected:
       exit_code: 4
     surfaces:

@@ -112,7 +112,7 @@ inputs:
     required: false
     default: '.abicheck-baseline'
   project-ref:
-    description: 'Release/version label recorded in the manifest and passed as each dump''s --version (e.g. github.ref_name).'
+    description: 'Release/version label recorded in the manifest and passed as each dump''s --label (e.g. github.ref_name).'
     required: false
     default: ''
   profile:

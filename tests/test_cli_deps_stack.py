@@ -199,7 +199,7 @@ class TestDepsCommand:
                 "deps",
                 "tree",
                 str(binary),
-                "--sysroot",
+                "--root",
                 str(sysroot),
                 "--search-path",
                 str(search_dir),
@@ -257,10 +257,10 @@ class TestStackCheckCommand:
                 "deps",
                 "compare",
                 binary_rel,
-                "--old-root",
-                str(baseline),
-                "--new-root",
-                str(candidate),
+                "--root",
+                f"old={str(baseline)}",
+                "--root",
+                f"new={str(candidate)}",
                 "-o",
                 "json=-",
             ],
@@ -295,10 +295,10 @@ class TestStackCheckCommand:
                 "deps",
                 "compare",
                 binary_rel,
-                "--old-root",
-                str(baseline),
-                "--new-root",
-                str(candidate),
+                "--root",
+                f"old={str(baseline)}",
+                "--root",
+                f"new={str(candidate)}",
                 "-o",
                 "markdown=-",
             ],
@@ -329,10 +329,10 @@ class TestStackCheckCommand:
                 "deps",
                 "compare",
                 binary_rel,
-                "--old-root",
-                str(baseline),
-                "--new-root",
-                str(candidate),
+                "--root",
+                f"old={str(baseline)}",
+                "--root",
+                f"new={str(candidate)}",
                 "-o",
                 f"json={outfile}",
             ],
@@ -366,10 +366,10 @@ class TestStackCheckCommand:
                 "deps",
                 "compare",
                 binary_rel,
-                "--old-root",
-                str(baseline),
-                "--new-root",
-                str(candidate),
+                "--root",
+                f"old={str(baseline)}",
+                "--root",
+                f"new={str(candidate)}",
                 "-o",
                 "json=-",
             ],
@@ -400,10 +400,10 @@ class TestStackCheckCommand:
                 "deps",
                 "compare",
                 binary_rel,
-                "--old-root",
-                str(baseline),
-                "--new-root",
-                str(candidate),
+                "--root",
+                f"old={str(baseline)}",
+                "--root",
+                f"new={str(candidate)}",
                 "-o",
                 "json=-",
             ],
@@ -446,10 +446,10 @@ class TestStackCheckCommand:
                 "deps",
                 "compare",
                 binary_rel,
-                "--old-root",
-                str(baseline),
-                "--new-root",
-                str(candidate),
+                "--root",
+                f"old={str(baseline)}",
+                "--root",
+                f"new={str(candidate)}",
                 "-o",
                 "json=-",
             ],
@@ -480,10 +480,10 @@ class TestStackCheckCommand:
                 "deps",
                 "compare",
                 binary_rel,
-                "--old-root",
-                str(baseline),
-                "--new-root",
-                str(candidate),
+                "--root",
+                f"old={str(baseline)}",
+                "--root",
+                f"new={str(candidate)}",
                 "-o",
                 "json=-",
             ],
@@ -514,10 +514,10 @@ class TestStackCheckCommand:
                 "deps",
                 "compare",
                 binary_rel,
-                "--old-root",
-                str(baseline),
-                "--new-root",
-                str(candidate),
+                "--root",
+                f"old={str(baseline)}",
+                "--root",
+                f"new={str(candidate)}",
                 "-o",
                 "json=-",
             ],
@@ -535,10 +535,10 @@ class TestStackCheckCommand:
                 "deps",
                 "compare",
                 "usr/bin/myapp",
-                "--old-root",
-                str(same),
-                "--new-root",
-                str(same),
+                "--root",
+                f"old={str(same)}",
+                "--root",
+                f"new={str(same)}",
             ],
         )
         assert result.exit_code != 0
@@ -551,7 +551,7 @@ class TestStackCheckCommand:
 
 
 class TestDefaultedEnvironmentRoot:
-    """An unspecified `--sysroot`/`--old-root`/`--new-root` is this host's
+    """An unspecified `--root` (or `--root old=`/`--root new=`) is this host's
     own filesystem, and every projection has to say so rather than print a
     bare `/` that reads like a chosen deployment environment.
 
@@ -648,7 +648,7 @@ class TestDefaultedEnvironmentRoot:
         assert "sysroot: /" in defaulted.output
 
         chosen = runner.invoke(
-            main, ["deps", "tree", str(binary), "--sysroot", str(tmp_path), "--dry-run"]
+            main, ["deps", "tree", str(binary), "--root", str(tmp_path), "--dry-run"]
         )
         assert DEFAULTED_ROOT_NOTE not in chosen.output
 
@@ -657,19 +657,19 @@ class TestDefaultedEnvironmentRoot:
         self, tmp_path, explicit_side: str
     ) -> None:
         """Including the case the value alone cannot answer: an explicit
-        `--old-root /` is a choice, and must not be labelled a fallback."""
+        `--root old=/` is a choice, and must not be labelled a fallback."""
         from abicheck.report.stack import DEFAULTED_ROOT_NOTE
 
         other = tmp_path / "img"
         other.mkdir()
         args = ["deps", "compare", "usr/bin/x"]
         if explicit_side in ("old", "both"):
-            args += ["--old-root", "/"]
+            args += ["--root", "old=/"]
         if explicit_side in ("new", "both"):
-            args += ["--new-root", str(other)]
+            args += ["--root", f"new={other}"]
         if explicit_side == "old":
-            # --new-root must differ from --old-root, so name it too.
-            args += ["--new-root", str(other)]
+            # --root new= must differ from --root old=, so name it too.
+            args += ["--root", f"new={other}"]
         if explicit_side in ("neither", "new"):
             pass
         args.append("--dry-run")

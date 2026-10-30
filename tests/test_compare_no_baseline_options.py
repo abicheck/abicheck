@@ -74,7 +74,7 @@ _RULINGS_MODULE = _MODULES[1]
 #: renamed*, while the dispatch read none of the results. A bare
 #: ``--dump-manifest`` was accepted and silently dropped -- even an invalid
 #: manifest exited 0, auditing a different surface than the user asked for
-#: -- and ``--version new=`` likewise. The generated destinations are now
+#: -- and ``--label new=`` likewise. The generated destinations are now
 #: expanded into the accounted-for set, so each one is separately either
 #: read or declared unsupported.
 #: Only the families ``compare`` actually declares -- it composes neither
@@ -130,7 +130,10 @@ _CONTEXT_STASHED = frozenset({"variant"})
 
 
 def _compare_params() -> set[str]:
-    return {p.name for p in main.commands["compare"].params if p.name}
+    # Hidden legacy aliases (ADR-091 D7) never reach the callback.
+    return {
+        p.name for p in main.commands["compare"].params if p.name and p.expose_value
+    }
 
 
 def _dests_read_by_module() -> set[str]:
@@ -314,7 +317,7 @@ def test_every_generated_destination_is_wired_or_declared() -> None:
     ``normalize_sided_options`` renames several of them before the dispatch
     ever runs, so a raw name being "consumed upstream" says nothing about
     whether its *result* is read. Allowlisting the raw names alone let a bare
-    ``--dump-manifest`` and ``--version new=`` through as silent no-ops --
+    ``--dump-manifest`` and ``--label new=`` through as silent no-ops --
     the very defect this module exists to make impossible.
 
     So every generated destination is checked separately, against the same

@@ -29,13 +29,14 @@ import sys
 from pathlib import Path
 
 import click
-from click.core import ParameterSource
 
 from .cli import main
 from .cli_options import export_options, verbose_option
 from .cli_resolve import _detect_binary_format
 from .errors import SnapshotError
 from .frontends.cli.options.export import ExportSet, reject_dry_run_with_exports
+from .frontends.cli.options.params import SidedPathParam
+from .frontends.cli.options.renamed import Legacy, renamed_option
 from .frontends.cli.runtime import _setup_verbosity, emit_export_set
 from .report.stack import DEFAULTED_ROOT_NOTE, environment_root_label
 from .stack_checker import under_sysroot
@@ -61,8 +62,10 @@ def deps_group() -> None:
     type=click.Path(exists=True, path_type=Path),
     help="Additional directory to search for shared libraries.",
 )
-@click.option(
-    "--sysroot",
+@renamed_option(
+    "--root",
+    "sysroot",
+    legacy=(Legacy("--sysroot", "--root PATH"),),
     type=click.Path(exists=True, path_type=Path),
     default=None,
     help="Sysroot prefix for cross/container analysis.",
@@ -108,7 +111,7 @@ def deps_tree_cmd(
     Examples:
       abicheck deps tree ./build/libfoo.so
       abicheck deps tree /usr/bin/myapp -o json=deps.json
-      abicheck deps tree ./app --sysroot /path/to/container/rootfs
+      abicheck deps tree ./app --root /path/to/container/rootfs
     """
     from .dry_run import DryRunResult, emit_dry_run, tool_status
 
@@ -184,19 +187,18 @@ def deps_tree_cmd(
 
 @deps_group.command("compare")
 @click.argument("binary", type=click.Path(path_type=Path))
-@click.option(
-    "--old-root",
-    type=click.Path(exists=True, path_type=Path),
-    default=Path("/"),
-    show_default=True,
-    help="Sysroot for the old (baseline) environment.",
-)
-@click.option(
-    "--new-root",
-    type=click.Path(exists=True, path_type=Path),
-    default=Path("/"),
-    show_default=True,
-    help="Sysroot for the new (candidate) environment.",
+@renamed_option(
+    "--root",
+    "root",
+    legacy=(
+        Legacy("--old-root", "--root old=PATH", translate=lambda v: f"old={v}"),
+        Legacy("--new-root", "--root new=PATH", translate=lambda v: f"new={v}"),
+    ),
+    type=SidedPathParam(exists=True),
+    multiple=True,
+    metavar="[old=|new=]PATH",
+    help="Sysroot for one environment: 'old=PATH' (the baseline) or 'new=PATH' "
+    "(the candidate). A bare PATH sets both. Each side defaults to '/'.",
 )
 @click.option(
     "--search-path",
@@ -222,12 +224,9 @@ def deps_tree_cmd(
     "incompatible with any -o export to a file.",
 )
 @verbose_option
-@click.pass_context
 def deps_compare_cmd(
-    ctx: click.Context,
     binary: Path,
-    old_root: Path,
-    new_root: Path,
+    root: tuple[tuple[str, Path], ...],
     search_paths: tuple[Path, ...],
     ld_library_path: str,
     exports: ExportSet,
@@ -253,9 +252,9 @@ def deps_compare_cmd(
 
     \b
     Examples:
-      abicheck deps compare usr/bin/myapp --old-root /old-root --new-root /new-root
+      abicheck deps compare usr/bin/myapp --root old=/old-root --root new=/new-root
       abicheck deps compare usr/lib/libfoo.so.1 \\
-        --old-root ./image-v1 --new-root ./image-v2 -o json=-
+        --root old=./image-v1 --root new=./image-v2 -o json=-
     """
     from .dry_run import DryRunResult, emit_dry_run
 
@@ -263,17 +262,22 @@ def deps_compare_cmd(
     _setup_verbosity(verbose)
 
     # `/` is the default for both roots, and in a report it reads exactly
-    # like an image root someone picked. Click knows which it was; ask it,
-    # rather than comparing the value against `/` (an explicit
-    # `--old-root /` is a deliberate choice and must not be labelled a
+    # like an image root someone picked. Track which sides were actually
+    # given, rather than comparing the value against `/` (an explicit
+    # `--root old=/` is a deliberate choice and must not be labelled a
     # fallback).
-    old_root_defaulted = ctx.get_parameter_source("old_root") == ParameterSource.DEFAULT
-    new_root_defaulted = ctx.get_parameter_source("new_root") == ParameterSource.DEFAULT
+    old_root, new_root = Path("/"), Path("/")
+    old_root_defaulted = new_root_defaulted = True
+    for side, path in root:
+        if side in ("old", "both"):
+            old_root, old_root_defaulted = path, False
+        if side in ("new", "both"):
+            new_root, new_root_defaulted = path, False
 
     # Guard against accidental no-op comparisons.
     if old_root.resolve() == new_root.resolve():
         raise click.UsageError(
-            "--old-root and --new-root resolve to the same sysroot; "
+            "--root old= and --root new= resolve to the same sysroot; "
             "provide two different roots for stack comparison."
         )
 
@@ -282,8 +286,8 @@ def deps_compare_cmd(
     # -- a stat/magic-byte check is itself cheap, read-only resolution, so a
     # dry run must agree with the real run instead of reporting "ok" for a
     # non-ELF binary the real run immediately rejects (Codex review).
-    for _label, root in [("old", old_root), ("new", new_root)]:
-        resolved = under_sysroot(root, binary)
+    for _label, side_root in [("old", old_root), ("new", new_root)]:
+        resolved = under_sysroot(side_root, binary)
         if resolved.exists():
             fmt_detected = _detect_binary_format(resolved)
             if fmt_detected != "elf":

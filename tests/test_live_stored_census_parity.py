@@ -16,7 +16,7 @@ that the two paths report the same verdict, findings, confidence and census.
 Oracle: the fixture's own sources and header text, and the compiler-built
 export table -- never the scanner's helpers. Excluded from the comparison, each
 for a stated reason: timings; file identity and version labels (a live input is
-labelled ``old``/``new``, a stored snapshot without ``--version`` carries none);
+labelled ``old``/``new``, a stored snapshot without ``--label`` carries none);
 ``pattern_preprocessor_scan`` (a stored snapshot is never granted the source-read
 licence, by design -- ``buildsource/source_inputs.py``).
 """

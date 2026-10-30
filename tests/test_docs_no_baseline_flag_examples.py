@@ -22,7 +22,7 @@ whether it is *specifically supported under `--no-baseline`*'s narrower
 rejection surface -- so a copy-pasted example looked plausible (the flag is
 real, `compare` documents it) while actually exiting 64 before auditing
 anything. Three real instances shipped this way in one PR (`docs/use/python-
-extensions.md`/`docs/learn/packages-and-consumers.md`'s `--abi3`, `docs/
+extensions.md`/`docs/learn/packages-and-consumers.md`'s `--abi3-floor`, `docs/
 learn/where-in-the-pipeline.md`'s `--budget`, `docs/learn/template-heavy-
 libraries.md`'s `--since`), each found only by a human/Codex re-reading the
 rendered page, not by running anything -- exactly the kind of escape this

@@ -101,7 +101,7 @@ abidw --out-file libfoo.abi libfoo.so
 abidiff libfoo.abi build/libfoo.so
 
 # After (abicheck):
-abicheck dump libfoo.so -H include/ --version 1.0 -o libfoo.abi.json
+abicheck dump libfoo.so -H include/ --label 1.0 -o libfoo.abi.json
 abicheck compare libfoo.abi.json build/libfoo.so --header new=include/
 ```
 

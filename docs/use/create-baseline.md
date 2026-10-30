@@ -21,13 +21,13 @@ once you've created it, see [Storing Baselines](baseline-storage.md).
 
 ```bash
 # Basic: write to stdout
-abicheck dump libfoo.so -H include/foo.h --version 2.0.0
+abicheck dump libfoo.so -H include/foo.h --label 2.0.0
 
 # Write to a specific file
-abicheck dump libfoo.so -H include/foo.h --version 2.0.0 -o baseline.json
+abicheck dump libfoo.so -H include/foo.h --label 2.0.0 -o baseline.json
 
 # Conventionally named (see naming convention below)
-abicheck dump libfoo.so -H include/foo.h --version 2.0.0 -o libfoo-2.0.0.abicheck.json
+abicheck dump libfoo.so -H include/foo.h --label 2.0.0 -o libfoo-2.0.0.abicheck.json
 ```
 
 ### Provenance Metadata
@@ -36,7 +36,7 @@ Snapshots include provenance metadata that tracks where and when they were creat
 
 ```bash
 abicheck dump libfoo.so -H include/foo.h \
-  --version 2.0.0 \
+  --label 2.0.0 \
   --provenance git-tag=v2.0.0 \
   --provenance build-id="$CI_RUN_ID" \
   -o libfoo-2.0.0.abicheck.json

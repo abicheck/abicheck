@@ -71,7 +71,7 @@ genuinely unimplemented; several of the ecosystem gaps below are narrower.)
   extension modules produced by Cython, pybind11, nanobind, or hand-written
   C uniformly as CPython extensions (`abicheck/python_ext.py`): it inspects
   their imported CPython C-API symbols and can audit an explicit
-  `--abi3`/Limited-API floor (`abicheck/stable_abi.py`,
+  `--abi3-floor`/Limited-API floor (`abicheck/stable_abi.py`,
   G14). That matters because an extension
   module normally exports little beyond `PyInit_<module>` — an
   exported-symbol diff alone would see almost nothing.

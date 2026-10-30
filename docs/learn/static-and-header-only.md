@@ -172,8 +172,8 @@ subset of the header a given consumer's own code actually reaches:
   questions and are not mutually exclusive.
 
   ```bash
-  abicheck dump -H old/api.h --version 1.0 -o old.json
-  abicheck dump -H new/api.h --version 2.0 -o new.json
+  abicheck dump -H old/api.h --label 1.0 -o old.json
+  abicheck dump -H new/api.h --label 2.0 -o new.json
   abicheck compare old.json new.json
   ```
 

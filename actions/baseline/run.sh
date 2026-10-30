@@ -179,7 +179,7 @@ while IFS=$'\x1f' read -r name artifact header include stage_binary; do
   [[ -n "$BUILD_INFO" ]] && CMD+=(--build-info "$BUILD_INFO")
   [[ -n "$DEPTH" ]] && CMD+=(--depth "$DEPTH")
   [[ -n "$BUILD_CONFIG" ]] && CMD+=(--config "$BUILD_CONFIG")
-  [[ -n "$PROJECT_REF" ]] && CMD+=(--version "$PROJECT_REF")
+  [[ -n "$PROJECT_REF" ]] && CMD+=(--label "$PROJECT_REF")
   [[ "$SNAPSHOT_COMPRESSION" != "none" ]] && CMD+=(--compression "$SNAPSHOT_COMPRESSION")
   CMD+=(-o "$OUTPUT_DIR/$name$SNAPSHOT_SUFFIX")
   if ! "${CMD[@]}"; then

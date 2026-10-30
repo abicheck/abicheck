@@ -53,10 +53,10 @@ class TestCliStackBasics:
                 "deps",
                 "compare",
                 "usr/bin/myapp",
-                "--old-root",
-                str(tmp_path),
-                "--new-root",
-                str(tmp_path),
+                "--root",
+                f"old={str(tmp_path)}",
+                "--root",
+                f"new={str(tmp_path)}",
             ],
         )
         assert result.exit_code != 0
@@ -82,10 +82,10 @@ class TestCliStackBasics:
                 "deps",
                 "compare",
                 "fake",
-                "--old-root",
-                str(baseline),
-                "--new-root",
-                str(candidate),
+                "--root",
+                f"old={str(baseline)}",
+                "--root",
+                f"new={str(candidate)}",
             ],
         )
         assert result.exit_code != 0
