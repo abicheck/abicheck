@@ -253,8 +253,14 @@ merge into `--config`, and the compile-only sources-root helpers are deleted;
 overlay-internal test modules are removed). **Still open:** the typed API
 (`CompareRequest.config_overrides`, `DumpRequest.config_overrides`) refuses
 `compile.*`, because a typed request does not fold `.abicheck.yml`'s `compile:`
-block today, so there is no compile resolver for the override to reach. Phase 2's
-remaining gap is that typed-API cut, not the Action. One behavior to verify: a
+block today, so there is no compile resolver for the override to reach. Checked
+in code: the typed compare path (`workflows/compare/execute.py`, `resolve.py`)
+calls no compile resolver; its `CompileContext` values are supplied by the
+caller. **Explicit open item:** applying `compile.*` overrides on the typed API
+needs a new fold of `.abicheck.yml`'s `compile:` block into typed requests first,
+then the same per-key equivalence test extended to the typed API. That is a
+separate change, not part of this phase's CLI and Action work. Phase 2's remaining
+gap is that typed-API fold, not the Action. One behavior to verify: a
 `--sources` tree's own `compile:` block used to be excluded by the Action on a
 pairwise compare with an old side; the CLI's own discovery now decides that case.
 
