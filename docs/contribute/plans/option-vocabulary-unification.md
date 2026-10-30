@@ -1,6 +1,6 @@
 # Option vocabulary unification: implementation plan
 
-**Status:** Phase 0 done (2026-10-30); Phase 1 done; Phase 2 CLI and typed-API half done for `compare`, `dump` and `project capture-variants` (the compile-path keys on `dump`, and the Action `set:` input, are open); Phases 3–7 not started. Implements
+**Status:** Phase 0 done (2026-10-30); Phase 1 done; Phase 2 CLI and typed-API half done for `compare`, `dump` and `project capture-variants` (the compile-path keys on `dump`, and the Action `set:` input, are open); Phase 4 CLI part done (#1852), its Action and Python parts not started; Phases 3, 5–7 not started. Implements
 [ADR-091](../adr/091-one-option-vocabulary.md). Each phase is one PR, ordered
 so that the parity gate lands before any rename and every rename lands with
 its alias.
