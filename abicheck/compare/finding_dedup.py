@@ -338,16 +338,22 @@ def _dedup_cross_kind(
     """
     names = record_names or {}
     known_ambiguous = ambiguous or {}
+    # One spelling per (symbol, hint, field) for this pass: many findings name
+    # the same record, and ``names`` is fixed for the call.
+    canonical: dict[tuple[str, str | None, str | None], str] = {}
+
+    # Looked up inline rather than through a helper, so the repeat audit sees
+    # one canonicalize_record_symbol call per distinct key.
+
     _Transition = tuple[object, object] | None
     ast_findings: dict[tuple[str, str], set[_Transition]] = {}
     ast_field_findings: dict[tuple[str, str, str], set[_Transition]] = {}
     _relevant_ast = {ak for aks in _DWARF_TO_AST_EQUIV.values() for ak in aks}
     for c in (c for c in changes if c.kind in _relevant_ast):
-        canon = canonicalize_record_symbol(
-            c.symbol,
-            names,
-            _ast_qualified_hint(c, known_ambiguous),
-            c.field_name,
+        hint = _ast_qualified_hint(c, known_ambiguous)
+        key = (c.symbol, hint, c.field_name)
+        canon = canonical.get(key) or canonical.setdefault(
+            key, canonicalize_record_symbol(c.symbol, names, hint, c.field_name)
         )
         transition = cross_tier_transition(c)
         ast_findings.setdefault((c.kind.value, canon), set()).add(transition)
@@ -356,8 +362,9 @@ def _dedup_cross_kind(
             # below derives from its own field symbol. ``canon`` already carries
             # ``::field``, so keying by it never matched and let a nested record
             # ``P::x``'s field ``x`` absorb field ``x`` of its enclosing ``P``.
-            parent = canonicalize_record_symbol(
-                c.symbol, names, _ast_qualified_hint(c, known_ambiguous)
+            parent_key = (c.symbol, hint, None)
+            parent = canonical.get(parent_key) or canonical.setdefault(
+                parent_key, canonicalize_record_symbol(c.symbol, names, hint)
             )
             ast_field_findings.setdefault(
                 (c.kind.value, parent, c.field_name), set()
@@ -382,8 +389,10 @@ def _dedup_cross_kind(
     for c in changes:
         equiv_ast_kinds = _DWARF_TO_AST_EQUIV.get(c.kind)
         if equiv_ast_kinds:
-            canon_symbol = canonicalize_record_symbol(
-                c.symbol, names, None, c.field_name
+            dwarf_key = (c.symbol, None, c.field_name)
+            canon_symbol = canonical.get(dwarf_key) or canonical.setdefault(
+                dwarf_key,
+                canonicalize_record_symbol(c.symbol, names, None, c.field_name),
             )
             dwarf_transition = cross_tier_transition(c)
 

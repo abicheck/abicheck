@@ -119,7 +119,6 @@
     "abicheck/diff_helpers.py(_malformed_unit_typed_transition)": 159,
     "abicheck/diff_helpers.py(_normalize_type_spelling)": 318,
     "abicheck/diff_helpers.py(build_type_map)": 94,
-    "abicheck/diff_helpers.py(canonicalize_record_symbol)": 156,
     "abicheck/diff_helpers.py(typedef_diff_maps)": 28,
     "abicheck/diff_helpers.py(typedef_side_trusts_qualified)": 84,
     "abicheck/diff_integer_model.py(_int_width_bucket)": 1649,
@@ -307,5 +306,5 @@
   },
   "mode": "default",
   "n": 40,
-  "total": 240081
+  "total": 239925
 }
