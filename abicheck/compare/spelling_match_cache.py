@@ -209,7 +209,7 @@ class SpellingMatch:
         object.__setattr__(self, "_start", start)
         object.__setattr__(self, "_end", end)
 
-    def __setattr__(self, name: str, value: object) -> None:
+    def __setattr__(self, name: str, value: object) -> None:  # noqa: ARG002 -- object.__setattr__ override signature
         raise AttributeError(
             f"SpellingMatch is immutable; cannot set {name!r}. "
             "Results are shared between every reader of a cached key."

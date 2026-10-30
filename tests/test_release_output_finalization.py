@@ -76,15 +76,15 @@ class TestValidateSuppressionEarly:
         # A path that does not exist would raise if it were opened: the early
         # check is a no-op unless strict or justification validation was asked.
         missing = tmp_path / "does-not-exist.yaml"
-        _validate_suppression_early(missing, "warn", None, False, False)
-        _validate_suppression_early(None, "warn", None, True, True)
+        _validate_suppression_early(missing, None, False, False)
+        _validate_suppression_early(None, None, True, True)
 
     def test_strict_mode_rejects_an_expired_rule_before_any_comparison(
         self, tmp_path: Path
     ) -> None:
         sup = _expired_suppression(tmp_path)
         with pytest.raises(Exception, match="expired"):
-            _validate_suppression_early(sup, "warn", None, True, False)
+            _validate_suppression_early(sup, None, True, False)
 
 
 class TestReleaseOutputFinalization:

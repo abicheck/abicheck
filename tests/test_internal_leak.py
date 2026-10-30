@@ -1711,7 +1711,6 @@ class TestBuildLeakChangePreferredPath:
                 )
             ],
             [indirect_short, value_longer],
-            _snap(),
             embedded_by_value=True,
         )
         assert change.reachability_proof_path == _format_path(value_longer)
@@ -1735,7 +1734,6 @@ class TestBuildLeakChangePreferredPath:
                 )
             ],
             paths,
-            _snap(),
             embedded_by_value=True,
         )
         assert "+1 more paths" in (change.description or "")
@@ -1758,7 +1756,6 @@ class TestBuildChangeAttachesImpactAssessment:
                 )
             ],
             [["Public", "field:x", "Internal"]],
-            _snap(),
             embedded_by_value=True,
         )
         cache_impact_assessments([change])
@@ -1815,7 +1812,6 @@ class TestBuildChangeAttachesImpactAssessment:
                 )
             ],
             [["Public", "field:x", "Internal"]],
-            _snap(),
             embedded_by_value=True,
         )
         # Simulate a later ApplySuppression call site stamping these fields.

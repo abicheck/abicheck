@@ -522,14 +522,14 @@ class TestSmallHelpers:
 class TestLoadSuppressionAndPolicy:
     def test_missing_suppress_file_bad_param(self, tmp_path: Path) -> None:
         with pytest.raises(click.BadParameter):
-            _load_suppression_and_policy(tmp_path / "nope.yaml", "strict_abi", None)
+            _load_suppression_and_policy(tmp_path / "nope.yaml", None)
 
     def test_valid_suppress_file(self, tmp_path: Path) -> None:
         sup = tmp_path / "sup.yaml"
         sup.write_text(
             "version: 1\nsuppressions:\n  - symbol: foo\n    reason: legacy\n",
         )
-        suppression, pf = _load_suppression_and_policy(sup, "strict_abi", None)
+        suppression, pf = _load_suppression_and_policy(sup, None)
         assert suppression is not None
         assert pf is None
 
@@ -544,7 +544,7 @@ class TestLoadSuppressionAndPolicy:
         """
         pol = tmp_path / "policy.yaml"
         pol.write_text("base_policy: strict_abi\n")
-        _, pf = _load_suppression_and_policy(None, "sdk_vendor", pol)
+        _, pf = _load_suppression_and_policy(None, pol)
         assert pf is not None
         assert "ignored" not in capsys.readouterr().err
 
@@ -556,7 +556,7 @@ class TestLoadSuppressionAndPolicy:
         warnings never reached a user."""
         pol = tmp_path / "policy.yaml"
         pol.write_text("base_policy: strict_abi\noverrides:\n  func_removed: ignore\n")
-        _, pf = _load_suppression_and_policy(None, "strict_abi", pol)
+        _, pf = _load_suppression_and_policy(None, pol)
         assert pf is not None
         err = capsys.readouterr().err
         assert "HIGH RISK" in err
@@ -569,7 +569,7 @@ class TestLoadSuppressionAndPolicy:
         pol.write_text(
             "base_policy: strict_abi\noverrides:\n  enum_member_renamed: ignore\n"
         )
-        _, pf = _load_suppression_and_policy(None, "strict_abi", pol)
+        _, pf = _load_suppression_and_policy(None, pol)
         assert pf is not None
         assert capsys.readouterr().err == ""
 

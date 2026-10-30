@@ -253,7 +253,7 @@ def test_header_only_executor_stamps_what_it_parsed(
         requested_depth=None,
         resolved_execution_context=None,
     )
-    out = mod.execute_header_only_dump_request(resolved, SimpleNamespace())  # type: ignore[arg-type]
+    out = mod.execute_header_only_dump_request(resolved)
     assert out.snapshot is built
     assert stamped == [(built, [Path("inc/api.h")], [Path("inc")])]
 

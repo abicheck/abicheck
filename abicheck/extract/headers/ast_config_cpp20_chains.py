@@ -550,7 +550,7 @@ def _arm_is_unconditionally_true(line: bytes, policy: _ChainPolicy) -> bool:
     )
 
 
-def _arm_is_plain_alternative(line: bytes, policy: _ChainPolicy) -> bool:
+def _arm_is_plain_alternative(line: bytes, policy: _ChainPolicy) -> bool:  # noqa: ARG001 -- _ChainMatcher signature in _OPEN_ARM_RULES
     """Any other ``#elif``/``#else`` — a condition this heuristic can't read."""
     return bool(_PP_ELIF_PATTERN.match(line) or _PP_ELSE_PATTERN.match(line))
 

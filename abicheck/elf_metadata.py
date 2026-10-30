@@ -187,7 +187,7 @@ def _parse(f: IO[bytes], so_path: Path) -> ElfMetadata:
         ver_sym_section, dynsym_section, meta, ver_index_map, so_path
     )
 
-    _postprocess_metadata(meta, ver_index_map, ver_sym_section, dynsym_section, so_path)
+    _postprocess_metadata(meta)
     # DF_STATIC_TLS is a linker summary that AArch64 GNU ld omits; the
     # relocation is the requirement itself (extract/elf_static_tls.py).
     meta.has_static_tls = meta.has_static_tls or has_static_tls_relocation(elf)
@@ -295,7 +295,7 @@ def _parse_segments(
     has_relro_segment = False
     try:
         for seg in elf.iter_segments():
-            _process_segment(seg, meta, so_path)
+            _process_segment(seg, meta)
             if seg.header.p_type == "PT_GNU_RELRO":
                 has_relro_segment = True
             elif seg.header.p_type == "PT_TLS":
@@ -326,7 +326,7 @@ def _parse_segments(
     return has_relro_segment, is_et_dyn
 
 
-def _process_segment(seg: object, meta: ElfMetadata, so_path: Path) -> None:
+def _process_segment(seg: object, meta: ElfMetadata) -> None:
     """Apply a single ELF program-header segment to *meta*."""
     p_type = seg.header.p_type
     if p_type == "PT_INTERP":
@@ -582,10 +582,6 @@ def _finalize_hardening(
 
 def _postprocess_metadata(
     meta: ElfMetadata,
-    ver_index_map: dict[int, tuple[str, str, bool]],
-    ver_sym_section: GNUVerSymSection | None,
-    dynsym_section: SymbolTableSection | None,
-    so_path: Path,
 ) -> None:
     """Post-loop processing: filter version-def aux symbols and fix origin hints."""
     # Filter out version-definition auxiliary symbols.

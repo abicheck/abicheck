@@ -117,10 +117,8 @@ def more_line(hidden: int, json_field: str, *, prefix: str = "- ") -> str | None
     )
 
 
-def example_names(
-    names: Iterable[object], *, total: int | None = None, limit: int = EXAMPLE_LIMIT
-) -> str:
-    """Up to *limit* clipped names in code spans, then ``… and K more``.
+def example_names(names: Iterable[object], *, total: int | None = None) -> str:
+    """Up to :data:`EXAMPLE_LIMIT` clipped names in code spans, then ``… and K more``.
 
     *total* is the size of the population the names are drawn from when it
     is larger than *names* itself (a family whose examples were already
@@ -128,8 +126,10 @@ def example_names(
     """
     shown = [str(name) for name in names]
     count = len(shown) if total is None else total
-    text = ", ".join(md_text(clip_name(name), code=True) for name in shown[:limit])
-    more = count - min(len(shown), limit)
+    text = ", ".join(
+        md_text(clip_name(name), code=True) for name in shown[:EXAMPLE_LIMIT]
+    )
+    more = count - min(len(shown), EXAMPLE_LIMIT)
     if more > 0:
         text += f" … and {more} more"
     return text

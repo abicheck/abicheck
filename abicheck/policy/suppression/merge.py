@@ -37,7 +37,6 @@ from __future__ import annotations
 
 import hashlib
 from collections.abc import Iterable, Sequence
-from datetime import date
 from pathlib import Path
 from typing import Any, TypeAlias, cast
 
@@ -136,11 +135,11 @@ def rule_origin(suppression: object, index: int) -> tuple[str | None, int]:
 
 
 def expired_by_file(
-    suppression: SuppressionList, today: date | None = None
+    suppression: SuppressionList,
 ) -> list[tuple[str | None, list[tuple[int, Suppression]]]]:
     """Expired rules grouped by their file, with in-file indexes, file order kept."""
     grouped: dict[str | None, list[tuple[int, Suppression]]] = {}
-    for index, rule in suppression.check_expired_strict(today):
+    for index, rule in suppression.check_expired_strict():
         source, local = rule_origin(suppression, index)
         grouped.setdefault(source, []).append((local, rule))
     return list(grouped.items())

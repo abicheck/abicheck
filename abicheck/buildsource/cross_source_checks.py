@@ -294,7 +294,7 @@ def run_crosschecks(
 # ---------------------------------------------------------------------------
 
 
-def _check_exported_not_public(
+def _check_exported_not_public(  # noqa: ARG001 -- runner-table signature (snapshot, cfg)
     snapshot: AbiSnapshot, cfg: CrosscheckConfig
 ) -> _CheckOutput:
     """Exported symbols with no *public* declaration, RISK.
@@ -507,7 +507,7 @@ def _check_public_not_exported(
 # ---------------------------------------------------------------------------
 
 
-def _check_header_build_context_mismatch(
+def _check_header_build_context_mismatch(  # noqa: ARG001 -- runner-table signature (snapshot, cfg)
     snapshot: AbiSnapshot, cfg: CrosscheckConfig
 ) -> _CheckOutput:
     """L2 header AST captured without the L3 build's ABI-relevant context, API_BREAK.
@@ -568,7 +568,7 @@ def _check_header_build_context_mismatch(
 # ---------------------------------------------------------------------------
 
 
-def _check_private_header_leak(
+def _check_private_header_leak(  # noqa: ARG001 -- runner-table signature (snapshot, cfg)
     snapshot: AbiSnapshot, cfg: CrosscheckConfig
 ) -> _CheckOutput:
     """Public API surface that references a private-header type, RISK.
@@ -714,7 +714,7 @@ def _surface_boundary_counters(surface: Any) -> tuple[int, dict[str, int]]:
     return facts, counters
 
 
-def _check_odr_type_variant(
+def _check_odr_type_variant(  # noqa: ARG001 -- runner-table signature (snapshot, cfg)
     snapshot: AbiSnapshot, cfg: CrosscheckConfig
 ) -> _CheckOutput:
     """A type with divergent per-TU definitions in the L4 source surface, API_BREAK.
@@ -860,14 +860,10 @@ def _path_matches(candidate: str, changed: frozenset[str]) -> bool:
     return False
 
 
-def _decl_declaring_files(
-    graph: SourceGraphSummary, node_by_id: dict[str, GraphNode]
-) -> dict[str, str]:
+def _decl_declaring_files(graph: SourceGraphSummary) -> dict[str, str]:
     """Map each decl/type id to its declaring file via ``SOURCE_DECLARES`` edges.
 
-    Delegates to ``source_graph.decl_declaring_files`` (ADR-041 P0 slice 2);
-    *node_by_id* is accepted for call-site compatibility but no longer needed —
-    the shared implementation derives it from *graph*.
+    Delegates to ``source_graph.decl_declaring_files`` (ADR-041 P0 slice 2).
     """
     return decl_declaring_files(graph)
 
@@ -982,7 +978,7 @@ def _check_public_to_internal_dependency(
     exported_decls = {
         e.src for e in graph.edges if e.kind == "SOURCE_DECL_MAPS_TO_SYMBOL"
     }
-    decl_to_file = _decl_declaring_files(graph, node_by_id)
+    decl_to_file = _decl_declaring_files(graph)
 
     findings: list[Change] = []
     seen: set[tuple[str, str]] = set()
@@ -1019,7 +1015,7 @@ def _check_public_to_internal_dependency(
 # ---------------------------------------------------------------------------
 
 
-def _check_unversioned_exported_symbol(
+def _check_unversioned_exported_symbol(  # noqa: ARG001 -- runner-table signature (snapshot, cfg)
     snapshot: AbiSnapshot, cfg: CrosscheckConfig
 ) -> _CheckOutput:
     """Exported symbols with no version node though the library is versioned, RISK.
@@ -1161,7 +1157,7 @@ def _typeinfo_type_tokens(symbol: str) -> tuple[str, ...]:
     return (qualified,) if qualified == leaf else (qualified, leaf)
 
 
-def _check_rtti_for_internal_type(
+def _check_rtti_for_internal_type(  # noqa: ARG001 -- runner-table signature (snapshot, cfg)
     snapshot: AbiSnapshot, cfg: CrosscheckConfig
 ) -> _CheckOutput:
     """Exported RTTI (typeinfo/vtable) for a private-header type, RISK.
@@ -1236,7 +1232,7 @@ def _check_rtti_for_internal_type(
 # ---------------------------------------------------------------------------
 
 
-def _check_identity_collision(
+def _check_identity_collision(  # noqa: ARG001 -- runner-table signature (snapshot, cfg)
     snapshot: AbiSnapshot, cfg: CrosscheckConfig
 ) -> _CheckOutput:
     """Two distinct declarations linked onto the same L4 identity() key, RISK.

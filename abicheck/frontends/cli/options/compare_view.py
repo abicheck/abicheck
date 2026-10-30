@@ -168,7 +168,7 @@ def parse_view_tokens(tokens: tuple[str, ...]) -> dict[str, object]:
     return {"report_mode": report_mode, "show_only": show_only}
 
 
-def validate_view(
+def validate_view(  # noqa: ARG001 -- click callback(ctx, param, value) signature
     ctx: click.Context,
     param: click.Parameter,
     value: tuple[str, ...],

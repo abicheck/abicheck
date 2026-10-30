@@ -14,7 +14,7 @@ carried; it moved here so the parser module stays under its size baseline.
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping
+from collections.abc import Callable
 
 from ..model.cc_attributes import function_type_text
 
@@ -73,8 +73,3 @@ def procedure_spelling(
         pointer=pointer,
         convention=_CV_CALL_CONVENTION_ATTRIBUTES.get(calltype),
     )
-
-
-def calling_convention_text(cc: int, table: Mapping[int, str] = _CC_NAMES) -> str:
-    """The CV_call_e name for *cc*, or ``cc_<hex>`` when unnamed."""
-    return table.get(cc, f"cc_{cc:#x}")

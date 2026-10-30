@@ -783,7 +783,6 @@ def _same_leaf_and_signature_under_root(
 def _promotion_candidates(
     removed: _IndexItem,
     root: str,
-    old_items: list[_IndexItem],
     new_items: list[_IndexItem],
     experimental_namespaces: tuple[str, ...],
     old_decls: set[tuple[tuple[str, ...], tuple[str, ...]]],
@@ -805,7 +804,6 @@ def _promotion_claimants(
     removed: _IndexItem,
     root: str,
     old_items: list[_IndexItem],
-    new_items: list[_IndexItem],
     experimental_namespaces: tuple[str, ...],
     new_decls: set[tuple[tuple[str, ...], tuple[str, ...]]],
 ) -> set[tuple[str, ...]]:
@@ -878,14 +876,14 @@ def _unique_promotion_target(
     if old_decls is None:
         old_decls = _signature_decls(old_items)
     candidates = _promotion_candidates(
-        removed, root, old_items, new_items, experimental_namespaces, old_decls
+        removed, root, new_items, experimental_namespaces, old_decls
     )
     if len(candidates) != 1:
         return None
     if new_decls is None:
         new_decls = _signature_decls(new_items)
     claimants = _promotion_claimants(
-        removed, root, old_items, new_items, experimental_namespaces, new_decls
+        removed, root, old_items, experimental_namespaces, new_decls
     )
     if claimants != {removed_path}:
         return None

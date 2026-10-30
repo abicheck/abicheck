@@ -546,7 +546,7 @@ def build_report_document_with_side_facts(
     from .run_outcome import run_outcome_dict_for_diff_result
     from .scoped_gate import apply_scoped_gate
 
-    d["run_outcome"] = run_outcome_dict_for_diff_result(result, severity_config, gate)
+    d["run_outcome"] = run_outcome_dict_for_diff_result(result, gate)
     add_suppression_audit(d, result)
     add_evidence_depth(d, result)
     # ADR-068 D3 / plan P2 (schema 3.3) -- one shared fold point, so every

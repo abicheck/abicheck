@@ -435,7 +435,6 @@ def _detect_gap(from_version: str, to_version: str) -> CoverageGap | None:
 
 
 def _events_from_pair(
-    from_entry: HistoryEntry,
     to_entry: HistoryEntry,
     result: DiffResult,
     *,
@@ -600,7 +599,6 @@ def build_longitudinal_history(
     events.extend(
         _events_from_pair(
             entries[0],
-            entries[0],
             initial_result,
             ever_seen=ever_seen,
             removed=removed,
@@ -635,7 +633,6 @@ def build_longitudinal_history(
         previous_result = result
         events.extend(
             _events_from_pair(
-                prev,
                 curr,
                 result,
                 ever_seen=ever_seen,

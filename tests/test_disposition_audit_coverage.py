@@ -393,7 +393,7 @@ class TestReleaseSummarySidecarCarriesDispositionAudit:
         ]
         import json
 
-        _write_release_summary_file(tmp_path, "NO_CHANGE", entries, [], [], {}, {})
+        _write_release_summary_file(tmp_path, "NO_CHANGE", entries, [])
         data = json.loads((tmp_path / "summary.json").read_text())
         assert data["disposition_audit"]["detected_total"] == 1
 
@@ -423,7 +423,7 @@ class TestReleaseSummarySidecarCarriesDispositionAudit:
             ],
         )
         _write_release_summary_file(
-            tmp_path, "BREAKING", [], [], [], {}, {}, bundle_result=bundle_result
+            tmp_path, "BREAKING", [], [], bundle_result=bundle_result
         )
         data = json.loads((tmp_path / "summary.json").read_text())
         assert data["disposition_audit"]["detected_total"] == 1

@@ -481,18 +481,6 @@ def _not_collected_reason(row: LayerCoverage | None) -> str:
                 continue  # "no errors", "no missing headers"
             return label
     return "not requested"
-    detail = (row.detail or "").lower()
-    negated = "|".join(_NEGATIONS)
-    for pattern, label in _NOT_COLLECTED_REASONS:
-        # Word-boundary match, skipping an occurrence a negation precedes.
-        if re.search(rf"(?<!\w)(?<!\b(?:{negated}) )(?:{pattern})\b", detail):
-            return label
-    return "not requested"
-    detail = (row.detail or "").lower()
-    for pattern, label in _NOT_COLLECTED_REASONS:
-        if re.search(pattern, detail):
-            return label
-    return "not requested"
 
 
 def diff_embedded_build_source(
