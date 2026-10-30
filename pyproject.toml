@@ -497,6 +497,15 @@ only_mutate = [
 # own changed tests are appended for its run, and a changed conftest/helper
 # widens it back to tests/ -- see that script).
 pytest_add_cli_args_test_selection = ["@tests/mutation_test_selection.txt"]
+# A mutant gets `(its tests' estimated seconds + timeout_constant) *
+# timeout_multiplier * 2` CPU seconds before mutmut kills it as a timeout
+# (mutmut 3.8 `__main__.py`). The default multiplier, 15, gives 30x the
+# tests' own runtime, and a mutant that loops forever burns all of it: run
+# 40821720665 had 13-59 timeouts per shard, clustered in small hot helpers
+# (`SurfaceMetrics.to_dict`: 41 in one shard), and all 16 shards hit the
+# 5h45m cap at 300-630 of ~700 mutants. 3 still allows 6x the measured
+# runtime, ample for a mutant that terminates.
+timeout_multiplier = 3.0
 pytest_add_cli_args = [
     # mutmut runs every pytest session in one process and selects tests by
     # the node ids its stats pass recorded. pytest re-escapes an explicit

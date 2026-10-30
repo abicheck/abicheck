@@ -271,7 +271,7 @@ class _RemovedDeclarationField:
         self._kind = STORE_ATTRIBUTE[kind]
         self._name = kind
 
-    def __get__(self, obj: Any, objtype: type | None = None) -> Any:
+    def __get__(self, obj: Any, objtype: type | None = None) -> Any:  # noqa: ARG002 -- descriptor protocol
         if obj is None:
             return None
         caller = inspect.currentframe()

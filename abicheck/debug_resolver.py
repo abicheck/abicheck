@@ -100,7 +100,7 @@ class DebugResolverBackend(Protocol):
 class EmbeddedDwarfResolver:
     """Check if the binary itself contains DWARF debug sections."""
 
-    def resolve(
+    def resolve(  # noqa: ARG002 -- DebugResolverBackend protocol signature
         self,
         binary_path: Path,
         build_id: str | None = None,
@@ -229,7 +229,7 @@ class SplitDwarfResolver:
             )
         return None
 
-    def resolve(
+    def resolve(  # noqa: ARG002 -- DebugResolverBackend protocol signature
         self,
         binary_path: Path,
         build_id: str | None = None,
@@ -253,7 +253,7 @@ class SplitDwarfResolver:
 class BuildIdTreeResolver:
     """Search build-id tree directories for separate debug files."""
 
-    def resolve(
+    def resolve(  # noqa: ARG002 -- DebugResolverBackend protocol signature
         self,
         binary_path: Path,
         build_id: str | None = None,
@@ -284,7 +284,7 @@ class PathMirrorResolver:
     Example: /usr/lib/debug/usr/lib64/libfoo.so.1.debug
     """
 
-    def resolve(
+    def resolve(  # noqa: ARG002 -- DebugResolverBackend protocol signature
         self,
         binary_path: Path,
         build_id: str | None = None,
@@ -319,7 +319,7 @@ class PathMirrorResolver:
 class DSYMResolver:
     """Locate dSYM bundles for macOS binaries (ADR-021a)."""
 
-    def resolve(
+    def resolve(  # noqa: ARG002 -- DebugResolverBackend protocol signature
         self,
         binary_path: Path,
         build_id: str | None = None,
@@ -385,7 +385,7 @@ class DSYMResolver:
 class PDBResolver:
     """Locate PDB files for Windows PE binaries."""
 
-    def resolve(
+    def resolve(  # noqa: ARG002 -- DebugResolverBackend protocol signature
         self,
         binary_path: Path,
         build_id: str | None = None,
@@ -564,7 +564,7 @@ class DebuginfodResolver:
             _logger.debug("debuginfod fetch failed from %s: %s", url, exc)
             return None
 
-    def resolve(
+    def resolve(  # noqa: ARG002 -- DebugResolverBackend protocol signature
         self,
         binary_path: Path,
         build_id: str | None = None,

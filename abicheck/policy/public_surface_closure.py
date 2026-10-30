@@ -770,14 +770,9 @@ def _resolve_public_surface_from_snapshot(snap: AbiSnapshot) -> PublicSurface:
     return surface
 
 
-def resolve_public_surface(
-    snapshot: AbiSnapshot, explicit_roots: object = None
-) -> PublicSurface:
+def resolve_public_surface(snapshot: AbiSnapshot) -> PublicSurface:
     """The one place every Phase 3 consumer resolves a snapshot's public
-    surface from. *explicit_roots* is accepted for this function's own
-    future graph-native signature (a caller that already knows its roots,
-    e.g. ``--used-by``/``--required-symbol`` scoping) but is not yet
-    consulted -- the resolution today is entirely snapshot-derived, with no
+    surface from. The resolution is entirely snapshot-derived, with no
     external root injection.
     """
     return _resolve_public_surface_from_snapshot(snapshot)

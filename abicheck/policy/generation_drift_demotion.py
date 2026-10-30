@@ -368,7 +368,6 @@ GENERATION_EXTENT_SHIFT_DRIFT = register_name_heuristic(
 def demote_generation_spelling_drift(
     changes: list[Change],
     old: AbiSnapshot,
-    new: AbiSnapshot,
     old_generation: int,
     new_generation: int,
     *,

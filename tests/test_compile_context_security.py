@@ -50,7 +50,9 @@ from abicheck.dry_run_estimate import CompileContext
 def _merge_compile_config_autodiscover(
     cli: CompileContext, src: Path
 ) -> tuple[CompileContext, tuple[Path, ...]]:
-    from abicheck.cli_options import merge_compile_config as _merge_compile_config
+    from abicheck.workflows.compile_config import (
+        merge_compile_config as _merge_compile_config,
+    )
 
     return _merge_compile_config(cli, (), None, sources=src)
 
@@ -59,7 +61,9 @@ def test_merge_compile_config_compiler_honored_from_explicit_config(
     tmp_path,
 ) -> None:
     """An *explicit* ``--config`` may select the compiler executable."""
-    from abicheck.cli_options import merge_compile_config as _merge_compile_config
+    from abicheck.workflows.compile_config import (
+        merge_compile_config as _merge_compile_config,
+    )
 
     cfg = tmp_path / "trusted.yml"
     cfg.write_text(
@@ -123,7 +127,9 @@ def test_merge_compile_config_explicit_override_distrusts_a_resolved_path(
     resolved ``cfg_path`` straight through as ``build_config``, letting an
     auto-discovered, attacker-controlled ``.abicheck.yml`` select the
     executable used for header extraction)."""
-    from abicheck.cli_options import merge_compile_config as _merge_compile_config
+    from abicheck.workflows.compile_config import (
+        merge_compile_config as _merge_compile_config,
+    )
 
     cfg = tmp_path / "auto-discovered.yml"
     cfg.write_text("compile:\n  compiler: /tmp/evil-compiler\n", encoding="utf-8")
@@ -150,7 +156,9 @@ def test_merge_compile_config_explicit_override_does_not_break_cfg_selection(
     (not silently re-discovered from ``sources``, which could differ or
     resolve to nothing), so every other ``compile:`` setting the caller's
     own discovery found still applies."""
-    from abicheck.cli_options import merge_compile_config as _merge_compile_config
+    from abicheck.workflows.compile_config import (
+        merge_compile_config as _merge_compile_config,
+    )
 
     cfg = tmp_path / "auto-discovered.yml"
     cfg.write_text("compile:\n  std: c++20\n", encoding="utf-8")
@@ -249,14 +257,17 @@ def test_compile_options_rejects_plugin_loading_even_from_explicit_config(
     """The plugin-loading rejection fires even for an *explicit* --config --
     it isn't a trust-tier question at all (finding #2's own scope note): no
     legitimate use case is lost by refusing it outright."""
-    from abicheck.cli_options import merge_compile_config as _merge_compile_config
+    from abicheck.workflows.compile_config import (
+        CompileConfigError,
+        merge_compile_config as _merge_compile_config,
+    )
 
     cfg = tmp_path / "trusted.yml"
     cfg.write_text(
         "compile:\n  options:\n    - -Xclang\n    - -load\n    - ./evil.so\n",
         encoding="utf-8",
     )
-    with pytest.raises(click.UsageError, match="plugin-loading flag"):
+    with pytest.raises(CompileConfigError, match="plugin-loading flag"):
         _merge_compile_config(CompileContext(), (), cfg)
 
 

@@ -60,6 +60,7 @@ from ..policy_file import (
     dedup_validate_overrides_warnings as _dedup_validate_overrides_warnings,
     pending_validate_overrides_warnings as _pending_validate_overrides_warnings,
 )
+from .run_input_errors import InputRefusal, RunInputError
 
 if TYPE_CHECKING:
     from ..environment_matrix import EnvironmentMatrix
@@ -83,6 +84,86 @@ _logger = logging.getLogger(__name__)
 dedup_policy_override_warnings = _dedup_validate_overrides_warnings
 
 
+class PolicyInputError(RunInputError):
+    """A suppression or policy file that cannot be loaded.
+
+    *typed_prefix* is the label the typed API prefixes its own
+    ``ValidationError`` message with (``None``: the message stands alone).
+    """
+
+    def __init__(
+        self,
+        message: str,
+        refusal: InputRefusal,
+        param_hint: str | None = None,
+        typed_prefix: str | None = None,
+    ) -> None:
+        super().__init__(message, refusal, param_hint=param_hint)
+        self.typed_prefix = typed_prefix
+
+
+def load_policy_inputs(
+    suppress: SuppressPaths | None,
+    policy_file_path: Path | None,
+    *,
+    strict_suppressions: bool = False,
+    require_justification: bool = False,
+) -> tuple[SuppressionList | None, PolicyFile | None]:
+    """Load the suppression files and the policy document, stating each refusal.
+
+    The one loader both front ends share. Every refusal is a
+    :class:`~abicheck.workflows.run_input_errors.RunInputError` carrying the
+    loader's own message and how the CLI reports it (a
+    :class:`PolicyInputError`) -- an unreadable or
+    malformed file is a bad ``--suppress``/``--policy`` value (exit 64); a
+    rule without the ``reason`` *require_justification* demands, an expired
+    rule under *strict_suppressions*, and a policy document needing an
+    uninstalled extra are operational (exit 1). The typed API words them
+    its own way (:func:`load_suppression_and_policy`). Emits no warnings:
+    each caller reports the policy's pending ``validate_overrides()``
+    warnings through its own channel.
+    """
+    from ..policy.suppression.merge import load_suppression_files
+    from ..policy_file import PolicyFile as _PolicyFile
+    from .run_input_errors import InputRefusal
+
+    bad_suppression = "Invalid suppression file"
+    suppression: SuppressionList | None = None
+    if suppress is not None:
+        try:
+            suppression = load_suppression_files(
+                suppress, require_justification=require_justification
+            )
+        except OSError as e:
+            raise PolicyInputError(
+                str(e), InputRefusal.PARAMETER, "--suppress", bad_suppression
+            ) from e
+        except ValueError as e:
+            msg = str(e)
+            if "no 'reason' field" in msg:
+                raise PolicyInputError(
+                    msg, InputRefusal.OPERATIONAL, None, bad_suppression
+                ) from e
+            raise PolicyInputError(
+                msg, InputRefusal.PARAMETER, "--suppress", bad_suppression
+            ) from e
+        expired_message = strict_expiry_message(suppression, strict_suppressions)
+        if expired_message:
+            raise PolicyInputError(expired_message, InputRefusal.OPERATIONAL)
+
+    pf: PolicyFile | None = None
+    if policy_file_path is not None:
+        try:
+            pf = _PolicyFile.load(policy_file_path)
+        except ImportError as e:
+            raise PolicyInputError(str(e), InputRefusal.OPERATIONAL) from e
+        except (ValueError, OSError) as e:
+            raise PolicyInputError(
+                str(e), InputRefusal.PARAMETER, "--policy", "Invalid policy file"
+            ) from e
+    return suppression, pf
+
+
 def load_suppression_and_policy(
     suppress: SuppressPaths | None,
     policy: str = "strict_abi",
@@ -91,7 +172,7 @@ def load_suppression_and_policy(
     strict_suppressions: bool = False,
     require_justification: bool = False,
 ) -> tuple[SuppressionList | None, PolicyFile | None]:
-    """Load suppression list and policy file from paths.
+    """Load suppression list and policy file from paths (the typed API's wording).
 
     *require_justification* rejects a rule with no ``reason``;
     *strict_suppressions* rejects a file holding any expired rule
@@ -100,30 +181,18 @@ def load_suppression_and_policy(
     Raises:
         ValidationError: If the suppression or policy file is invalid.
     """
-    from ..policy.suppression.merge import load_suppression_files
-    from ..policy.suppression.rules import SuppressionList as _SuppressionList
-    from ..policy_file import PolicyFile as _PolicyFile
+    try:
+        suppression, pf = load_policy_inputs(
+            suppress,
+            policy_file_path,
+            strict_suppressions=strict_suppressions,
+            require_justification=require_justification,
+        )
+    except PolicyInputError as e:
+        message = f"{e.typed_prefix}: {e}" if e.typed_prefix else str(e)
+        raise ValidationError(message) from e
 
-    suppression: _SuppressionList | None = None
-    if suppress is not None:
-        try:
-            suppression = load_suppression_files(
-                suppress, require_justification=require_justification
-            )
-        except (ValueError, OSError) as e:
-            raise ValidationError(f"Invalid suppression file: {e}") from e
-        expired_message = strict_expiry_message(suppression, strict_suppressions)
-        if expired_message:
-            raise ValidationError(expired_message)
-
-    pf: _PolicyFile | None = None
-    if policy_file_path is not None:
-        try:
-            pf = _PolicyFile.load(policy_file_path)
-        except ImportError as e:
-            raise ValidationError(str(e)) from e
-        except (ValueError, OSError) as e:
-            raise ValidationError(f"Invalid policy file: {e}") from e
+    if pf is not None:
         if policy != "strict_abi":
             # Named as Tier-2 *parameters*, not CLI flags: the CLI merged
             # --policy/--policy-file into one --policy that routes an operand
@@ -136,10 +205,10 @@ def load_suppression_and_policy(
                 policy,
             )
         # The Tier-2 chokepoint every non-CLI-validation consumer loads its
-        # policy through, none of which reach `cli_params._load_suppression_
-        # and_policy`'s own `click.echo` warning (Codex review). Routed
-        # through `pending_validate_overrides_warnings` so a shared
-        # `dedup_policy_override_warnings()` scope collapses repeats to one.
+        # policy through, none of which reach the CLI's own stderr warning
+        # (Codex review). Routed through `pending_validate_overrides_warnings`
+        # so a shared `dedup_policy_override_warnings()` scope collapses
+        # repeats to one.
         for warning in _pending_validate_overrides_warnings(pf):
             _logger.warning("%s", warning)
     return suppression, pf
@@ -353,8 +422,10 @@ def compare_snapshots(
 
 
 __all__ = [
+    "PolicyInputError",
     "compare_snapshots",
     "dedup_policy_override_warnings",
+    "load_policy_inputs",
     "load_suppression_and_policy",
 ]
 

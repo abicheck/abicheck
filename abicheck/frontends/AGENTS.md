@@ -44,7 +44,7 @@ lazy compatibility shim. Everything else lives in this package:
 | Module | What it owns |
 |---|---|
 | `cli/commands/dump.py` | `dump`'s ~30 Click parameters → one `DumpRequest`, resolved once and consumed by both the dry run and the real run |
-| `cli/commands/compare.py`, `compare_routing.py` | `compare`'s Click parameters and dispatch to `cli_compare_helpers.run_compare`; `compare_routing` holds the release fan-out dispatch and inline build-source embedding both call, so the engine never imports the command back |
+| `cli/commands/compare.py`, `compare_routing.py` | `compare`'s Click parameters and dispatch to `cli_compare_helpers.run_compare` (preflight, then a `workflows/compare/session.py` request for a single pair); `compare_routing` holds the release fan-out dispatch and inline build-source embedding both call, so the engine never imports the command back |
 | `cli/runtime.py` | Verbosity, output writing/echo, and the process-exit decision; snapshot provenance is `workflows/provenance.py`'s, operand metadata and the same-binary note are `workflows/compare_classify.py`'s |
 
 **`abicheck.cli` re-exports nothing. Import from the owner above, and patch

@@ -212,7 +212,6 @@ def reject_bundle_facts_out_dir_collision(
 
 def _validate_suppression_early(
     suppress: Path | tuple[Path, ...] | None,
-    policy: str,
     policy_file_path: Path | None,
     strict_suppressions: bool,
     require_justification: bool,
@@ -226,7 +225,6 @@ def _validate_suppression_early(
     if suppress is not None and (strict_suppressions or require_justification):
         _load_suppression_and_policy(
             suppress,
-            policy,
             policy_file_path,
             strict_suppressions=strict_suppressions,
             require_justification=require_justification,

@@ -248,9 +248,7 @@ def test_demotion_skips_disposed_and_non_spelling_findings(
     )
     change.effective_verdict = prior_verdict
     snap = _snapshot("Placeholder&")
-    out = demote_generation_spelling_drift(
-        [change], snap, snap, 5, EXTRACTOR_GENERATION
-    )
+    out = demote_generation_spelling_drift([change], snap, 5, EXTRACTOR_GENERATION)
     assert out == [change]
     assert change.effective_verdict is expected_verdict
     assert (change.modulation_rule == GENERATION_DRIFT_RULE) is (
@@ -319,7 +317,6 @@ def test_castxml_extent_respelling_demotes_only_across_generation_15(
     snap = _snapshot("Placeholder&")
     demote_generation_spelling_drift(
         [change],
-        snap,
         snap,
         old_generation,
         16,

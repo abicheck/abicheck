@@ -487,7 +487,6 @@ def _detect_intra_dep_signature_changed(
 
 
 def _detect_intra_type_changed(
-    old: BundleSnapshot,
     new: BundleSnapshot,
     diff_by_library: dict[str, DiffResult],
 ) -> list[BundleFinding]:

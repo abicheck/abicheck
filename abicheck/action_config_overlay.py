@@ -116,7 +116,7 @@ sources-root ``.abicheck.yml``'s own ``build:``/``sources:`` settings
 moment ``build-config`` was omitted. ``compile:`` (for a genuinely
 single-sided caller) is promoted too, but -- PR #1222 fourth round, Codex
 review -- as a real per-field MERGE, not a wholesale block replace:
-``cli_options.merge_compile_config`` folds a sources-root document's
+``workflows.compile_config.merge_compile_config`` folds a sources-root document's
 ``compile:`` on top of an ALREADY-resolved checkout-config-derived context,
 field by field, so replacing the whole block silently drops any
 checkout-only ``compile:`` setting the sources-root document doesn't happen
@@ -169,7 +169,7 @@ own document, unlike ``compile:``'s genuine two-stage merge. So for a
 caller whose single-sided resolution is `dump`/`scan`'s shape
 (``merge_compile=False``) is different again: there, ``source:``/
 ``debug:`` genuinely ARE a single-document selection off the ``--sources``
-tree's own config (``frontends/cli/dump_debug_config.
+tree's own config (``workflows/dump/project_config.
 resolve_dump_debug_config``'s own ``build_config or
 discover_build_config(sources)``), so *blocks* may include them there,
 exactly as the four-block claim above originally stated. Each caller must
@@ -227,7 +227,7 @@ def strip_untrusted_execution_keys(base: dict[str, object]) -> dict[str, object]
     gate and ADR-032 D5's ``build.query`` gate exist specifically to
     withhold that from anything but an operator's own explicit
     ``--config``), strips ``contract.overlays.post_manifest`` (it narrows
-    what gates; ``frontends/cli/contract_overlays.py`` applies it only from
+    what gates; ``workflows/compare/project_inputs.py`` applies it only from
     an explicit ``--config``, and this overlay is always explicit), and
     caps (never strips -- a lower value is never a
     decode-bomb risk) ``resource_limits.max_bundle_facts_decode_nodes`` via
@@ -291,7 +291,7 @@ def strip_untrusted_execution_keys(base: dict[str, object]) -> dict[str, object]
 
     # ADR-067 D5/G5: the acknowledgment records file and the `breaks` policy
     # are trusted only from an operator's explicit --config, exactly as the
-    # CLI's own `acknowledgment_config.py` trust rule states. This overlay is
+    # CLI's own `workflows/compare/project_inputs.py` trust rule states. This overlay is
     # always handed to the CLI as an explicit --config, so leaving either key
     # here would launder a pull-request-planted records file (which can accept
     # its own additions, and under `breaks: accept` its own breaks) into that
@@ -415,7 +415,7 @@ def rebase_relative_config_paths(
             base["contract"] = {**contract, "overlays": overlays}
 
     # ADR-067 D5: `acknowledgment.file` resolves against the config's project
-    # root (`frontends/cli/acknowledgment_config.py`'s `_records_path`), so a
+    # root (`workflows/compare/project_inputs.py`'s `_records_path`), so a
     # relocated overlay must carry the absolute path, not a scratch-relative one.
     acknowledgment = base.get("acknowledgment")
     if isinstance(acknowledgment, dict) and isinstance(acknowledgment.get("file"), str):
@@ -545,7 +545,7 @@ def apply_sources_root_config_blocks(
     *merge_compile* selects which of the two real ``compile:`` resolution
     shapes a ``"compile"`` entry in *blocks* should reproduce for the
     *particular command* the caller is building an overlay for --
-    ``cli_options.merge_compile_config`` is NOT one shape for every caller
+    ``workflows.compile_config.merge_compile_config`` is NOT one shape for every caller
     (Codex review, fresh evidence, PR #1222 fourth round, second finding on
     this same fix): a bare ``dump``/``scan --against`` invocation resolves
     ``compile:`` with exactly ONE ``merge_compile_config`` call, where
@@ -614,7 +614,7 @@ def apply_sources_root_config_blocks(
     selection off the sources-root document -- but ONLY for a caller whose
     single-sided resolution is `dump`/`scan`'s shape (``merge_compile=
     False``): ``resolved_cfg``/``project_cfg``'s single load in
-    ``cli_compare_helpers.py``/``frontends/cli/dump_debug_config.py``
+    ``cli_compare_helpers.py``/``workflows/dump/project_config.py``
     resolves them from `dump`/`scan`'s OWN ``build_config or
     discover_build_config(sources)`` selection, the identical shape
     ``build:``/``sources:`` use. For a ``merge_compile=True`` caller

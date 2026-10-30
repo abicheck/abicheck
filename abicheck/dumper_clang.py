@@ -770,9 +770,7 @@ class _ClangAstParser:
             )
         return file
 
-    def _skips_dependency_decl(
-        self, node: dict[str, Any], kind: str | None, name: str, file: str
-    ) -> bool:
+    def _skips_dependency_decl(self, kind: str | None, name: str, file: str) -> bool:
         """Whether a function/variable is one dependency scoping will drop.
 
         Only when a caller declared scoping will run, only for a declaration
@@ -831,7 +829,7 @@ class _ClangAstParser:
             bucket = self._typedefs
         else:
             return
-        if self._skips_dependency_decl(node, kind, name, file):
+        if self._skips_dependency_decl(kind, name, file):
             return
         bucket.append(
             _Decl(

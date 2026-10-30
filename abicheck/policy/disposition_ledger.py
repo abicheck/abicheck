@@ -581,7 +581,7 @@ class DispositionLedger:
                 scope_decided=True,
             )
 
-    def apply_scope(self, result: DiffResult, in_scope: Iterable[object]) -> None:
+    def apply_scope(self, in_scope: Iterable[object]) -> None:
         """Narrow the gating set to the findings the *scoped* gate scores.
 
         ``compare --used-by``/``--required-symbol`` gates on a consumer's own

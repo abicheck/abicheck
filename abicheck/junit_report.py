@@ -159,7 +159,6 @@ def _is_failure(
     kind_sets: KindSets,
     severity_config: SeverityConfig | None = None,
     *,
-    relevant_ids: frozenset[str] | None = None,
     findings_by_id: dict[int, ReportFinding] | None = None,
 ) -> bool:
     """Return True if the change should be a JUnit ``<failure>``.
@@ -185,13 +184,12 @@ def _is_failure(
     per-kind severity is ``"error"`` (currently all RISK_KINDS default to
     ``"warning"``, so they pass).
 
-    *relevant_ids*, when not ``None``, means a ``--used-by``/``--required-symbol``
-    consumer was supplied. Workstream D-S1 reverted the earlier design where
-    a change outside that consumer's relevant set could never fail here
-    regardless of its own severity -- a supplied consumer enriches this
-    report (see ``_add_scoped_properties`` below), it never narrows which
-    findings count as failures. *relevant_ids* stays a parameter only so
-    existing callers keep working; it no longer affects the answer.
+    A supplied ``--used-by``/``--required-symbol`` consumer never narrows
+    which findings count as failures: Workstream D-S1 reverted the earlier
+    design where a change outside that consumer's relevant set could never
+    fail here regardless of its own severity -- a supplied consumer enriches
+    this report (see ``_add_scoped_properties`` below) instead, so this
+    function takes no relevant-id set at all.
 
     A finding compatibility policy never scored (ADR-049 D1's
     ``NOT_EVALUATED``, only reachable under ``--contract``) can
@@ -394,7 +392,6 @@ def _count_failures(
     kind_sets: KindSets,
     severity_config: SeverityConfig | None,
     *,
-    relevant_ids: frozenset[str] | None = None,
     findings_by_id: dict[int, ReportFinding] | None = None,
 ) -> int:
     """Count distinct symbols that have at least one failing change."""
@@ -405,7 +402,6 @@ def _count_failures(
             result,
             kind_sets,
             severity_config,
-            relevant_ids=relevant_ids,
             findings_by_id=findings_by_id,
         ):
             symbols_with_failure.add(c.symbol)
@@ -420,7 +416,6 @@ def _emit_testcases(
     kind_sets: KindSets,
     severity_config: SeverityConfig | None,
     *,
-    relevant_ids: frozenset[str] | None = None,
     root_cause_lookup: dict[str, tuple[str, str]] | None = None,
     findings_by_id: dict[int, ReportFinding] | None = None,
     today: date | None = None,
@@ -443,7 +438,6 @@ def _emit_testcases(
                     result,
                     kind_sets,
                     severity_config,
-                    relevant_ids=relevant_ids,
                     root_cause_lookup=root_cause_lookup,
                     findings_by_id=findings_by_id,
                     today=today,
@@ -461,7 +455,6 @@ def _emit_testcases(
                 result,
                 kind_sets,
                 severity_config,
-                relevant_ids=relevant_ids,
                 root_cause_lookup=root_cause_lookup,
                 findings_by_id=findings_by_id,
                 today=today,
@@ -475,7 +468,6 @@ def _append_extra_failures(
     kind_sets: KindSets,
     severity_config: SeverityConfig | None,
     *,
-    relevant_ids: frozenset[str] | None = None,
     root_cause_lookup: dict[str, tuple[str, str]] | None = None,
     findings_by_id: dict[int, ReportFinding] | None = None,
 ) -> None:
@@ -512,7 +504,6 @@ def _append_extra_failures(
             result,
             kind_sets,
             severity_config,
-            relevant_ids=relevant_ids,
             findings_by_id=findings_by_id,
         ):
             for tc in ts:
@@ -573,8 +564,8 @@ def _build_testsuite(
     # Scoped-only changes: scope_diff_to_app/scope_diff_to_required_symbols
     # can synthesize a Change (e.g. PE_ORDINAL_RETARGETED) that is relevant
     # to the gate but was never added to result.changes -- fold them into the
-    # same testcase pipeline (symbol grouping, failure decision via
-    # relevant_ids below) rather than a bespoke path, so a --used-by run
+    # same testcase pipeline (symbol grouping, the shared failure
+    # decision) rather than a bespoke path, so a --used-by run
     # that fails solely because of one of these still has a testcase/failure
     # to explain it (Codex review).
     changes += list(getattr(result, "scoped_only_changes", ()) or ())
@@ -612,17 +603,14 @@ def _build_testsuite(
         )
     )
 
-    # Workstream D-S1: relevant_ids is passed through for stamping only --
-    # _count_failures/_is_failure no longer use it to narrow which changes can
-    # fail. Every genuine severity-based failure counts, whether or not this
-    # run also supplied a --used-by/--required-symbol consumer.
-    relevant_ids = getattr(result, "scoped_relevant_finding_ids", None)
+    # Workstream D-S1: a --used-by/--required-symbol consumer never narrows
+    # which changes can fail. Every genuine severity-based failure counts,
+    # whether or not this run also supplied one.
     failure_count = _count_failures(
         changes,
         result,
         kind_sets,
         severity_config,
-        relevant_ids=relevant_ids,
         findings_by_id=findings_by_id,
     )
     missing_labels = getattr(result, "scoped_missing_labels", ()) or ()
@@ -697,7 +685,6 @@ def _build_testsuite(
         result,
         kind_sets,
         severity_config,
-        relevant_ids=relevant_ids,
         root_cause_lookup=root_cause_lookup,
         findings_by_id=findings_by_id,
         today=resolved_today,
@@ -708,7 +695,6 @@ def _build_testsuite(
         result,
         kind_sets,
         severity_config,
-        relevant_ids=relevant_ids,
         root_cause_lookup=root_cause_lookup,
         findings_by_id=findings_by_id,
     )
@@ -789,7 +775,6 @@ def _maybe_add_failure(
     kind_sets: KindSets,
     severity_config: SeverityConfig | None = None,
     *,
-    relevant_ids: frozenset[str] | None = None,
     root_cause_lookup: dict[str, tuple[str, str]] | None = None,
     findings_by_id: dict[int, ReportFinding] | None = None,
     today: date | None = None,
@@ -806,7 +791,6 @@ def _maybe_add_failure(
         result,
         kind_sets,
         severity_config,
-        relevant_ids=relevant_ids,
         findings_by_id=findings_by_id,
     ):
         _add_failure(

@@ -16,7 +16,7 @@
 """Primitive-level tests for ``workflows.artifact.compile_context_gate``,
 split out of ``execute.py`` (ADR-063 Track 3, Codex review, PR #1047).
 ``test_dump_resolved_execution_context.py`` and
-``test_service_compare_pipeline.py`` already cover this gate end-to-end
+``test_compare_resolve_sides_sequentially.py`` already cover this gate end-to-end
 through the real dump/compare pipelines; these test the primitive directly,
 per this repo's own "give a new reusable primitive its own property-style
 tests" convention (root ``AGENTS.md``).

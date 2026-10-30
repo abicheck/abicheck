@@ -347,12 +347,13 @@ def resolve_no_baseline_invocation(
         config=kwargs.get("config"),
         severity_preset=None,
     )
-    from ..contract_overlays import note_unapplied_post_manifest
+    from ....workflows.compare.project_inputs import note_unapplied_post_manifest
 
     note_unapplied_post_manifest(
         _project_cfg,
         route="a --no-baseline audit",
         reason="an overlay scopes a contract across two sides",
+        notify=lambda message: click.echo(message, err=True),
     )
     # The config-only settings, read by the one function two-sided `compare`
     # reads them through, so the two shapes cannot differ. `--lang`, the
@@ -501,7 +502,6 @@ def load_policy_documents(
     rejects."""
     return _load_suppression_and_policy(
         kwargs.get("suppress"),
-        kwargs.get("policy") or "strict_abi",
         kwargs.get("policy_file_path"),
         strict_suppressions=inv.suppression.strict_suppressions,
         require_justification=inv.suppression.require_justification,

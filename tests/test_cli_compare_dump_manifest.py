@@ -384,12 +384,12 @@ def test_compare_dump_manifest_and_release_manifest_coexist(
     captured: dict[str, object] = {}
     snap = AbiSnapshot(library="old.so", version="1.0")
 
-    def _fake_resolve(*_a, **kw):
-        captured["old_dump_manifest"] = kw.get("old_dump_manifest")
-        return fake_resolved_pair(snap, operands=(_a[0], _a[1]))
+    def _fake_resolve(request, _prepare, _notify):
+        captured["old_dump_manifest"] = request.old.dump_manifest
+        return fake_resolved_pair(snap, operands=(request.old.path, request.new.path))
 
     monkeypatch.setattr(
-        "abicheck.cli_compare_helpers._resolve_compare_pair", _fake_resolve
+        "abicheck.workflows.compare.session.resolve_pair", _fake_resolve
     )
     monkeypatch.setattr(
         "abicheck.workflows.compare_policy.compare_snapshots",

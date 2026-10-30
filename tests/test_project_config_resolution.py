@@ -138,9 +138,7 @@ def test_no_search_root_never_depends_on_cwd(
 def test_dump_reads_every_config_field_from_a_config_above_cwd(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    import click
-
-    from abicheck.frontends.cli.dump_debug_config import resolve_dump_project_config
+    from abicheck.workflows.dump.project_config import resolve_dump_project_config
 
     cfg = _write_cfg(
         tmp_path,
@@ -153,18 +151,18 @@ def test_dump_reads_every_config_field_from_a_config_above_cwd(
     work.mkdir()
     monkeypatch.chdir(work)
 
-    with click.Context(click.Command("dump")) as ctx:
-        got = resolve_dump_project_config(
-            ctx,
-            build_config=None,
-            sources=None,
-            lang=None,
-            lang_default="c++",
-            apply_env_toggles=lambda _c, _p: None,
-            exclude_headers=(),
-            resolved_debug=None,
-            debug_roots=(),
-        )
+    closers: list[object] = []
+    got = resolve_dump_project_config(
+        closers.append,
+        build_config=None,
+        sources=None,
+        lang=None,
+        lang_default="c++",
+        exclude_headers=(),
+        resolved_debug=None,
+        debug_roots=(),
+    )
+    assert closers == []  # no compile env toggle in this config
     assert got.path == cfg
     assert got.explicit is False
     assert got.lang == "c"

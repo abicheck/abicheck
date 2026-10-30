@@ -96,7 +96,7 @@ def _option_file_contents(args: tuple[str, ...]) -> tuple[tuple[str, str], ...]:
     return tuple(sorted(out))
 
 
-def _probe_witness(cc: str, args: tuple[str, ...], cxx: bool) -> Hashable:
+def _probe_witness(cc: str, args: tuple[str, ...], cxx: bool) -> Hashable:  # noqa: ARG001 -- memoized witness mirrors the probe's signature
     return (path_witness(cc), _option_file_contents(args))
 
 

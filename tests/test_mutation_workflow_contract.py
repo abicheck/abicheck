@@ -234,8 +234,22 @@ def test_the_selection_check_covers_every_run_that_could_stale_it() -> None:
     cond = wf["resolve"]["outputs"]["check_selection"]
     assert "github.event_name != 'pull_request'" in cond
     assert "steps.changed.outputs.selection == 'true'" in cond
-    job = wf["selection-check"]
-    assert "gen_mutation_test_selection.py --check" in job["steps"][-1]["run"]
+    steps = wf["selection-check"]["steps"]
+    by_cmd = {
+        flag: next(
+            s
+            for s in steps
+            if f"gen_mutation_test_selection.py {flag}" in str(s.get("run", ""))
+        )
+        for flag in ("--check", "--union")
+    }
+    # A PR checks the committed list; a full run measures with its own trace.
+    assert by_cmd["--check"]["if"] == "github.event_name == 'pull_request'"
+    assert by_cmd["--union"]["if"] == "github.event_name != 'pull_request'"
+    upload = next(s for s in steps if "upload-artifact" in str(s.get("uses", "")))
+    assert upload["with"]["name"] == "mutation-test-selection"
+    assert upload["with"]["path"] == "tests/mutation_test_selection.txt"
+    assert upload["if"] == "github.event_name != 'pull_request'"
     assert "selection-check" in wf["gate"]["needs"]
     gate_run = wf["gate"]["steps"][0]["run"]
     assert '[ "$SELECTION" = "success" ] || [ "$SELECTION" = "skipped" ]' in gate_run
@@ -405,8 +419,29 @@ def test_the_require_baseline_signal_is_published_by_resolve() -> None:
 
 def test_the_mutmut_job_is_gated_on_that_decision() -> None:
     job = _workflow()["jobs"]["mutmut"]
-    assert job["needs"] == "resolve"
+    assert job["needs"] == ["resolve", "selection-check"]
     assert "needs.resolve.outputs.run == 'true'" in job["if"]
+    # A full run waits for its traced selection; a PR run does not.
+    assert (
+        "github.event_name == 'pull_request' || needs.selection-check.result == 'success'"
+        in job["if"]
+    )
+
+
+def test_a_full_run_measures_with_the_selection_it_traced() -> None:
+    """The shards overwrite the committed list with the selection-check job's
+    artifact before mutmut copies the tree; a PR run keeps the committed one."""
+    steps = _workflow()["jobs"]["mutmut"]["steps"]
+    names = [s.get("name") for s in steps]
+    use = steps[names.index("Use the selection this run traced")]
+    assert use["if"] == "github.event_name != 'pull_request'"
+    assert use["with"] == {"name": "mutation-test-selection", "path": "tests"}
+    first_run = min(
+        i
+        for i, s in enumerate(steps)
+        if "check_mutation_score.py --run" in str(s.get("run", ""))
+    )
+    assert names.index("Use the selection this run traced") < first_run
 
 
 def test_the_scheduled_lane_requires_a_baseline() -> None:
@@ -669,6 +704,9 @@ _ACCEPTED_KILL_LOSS = {
             "abicheck.policy.classification",
             "abicheck.policy.selectors",
             "abicheck.policy.selectors_namespace_glob",
+            # The single-pair compare session's import set reaches the
+            # snapshot loader too (workflows/compare/session.py).
+            "abicheck.snapshot_io",
             "abicheck.storage.snapshot_encode",
             "abicheck.storage.snapshot_schema_versions",
             "abicheck.policy.suppression.rules",

@@ -35,7 +35,7 @@ import click
 
 
 def _reject_application_operand(
-    old_input: Path, new_input: Path, old_kind: str, new_kind: str
+    old_input: Path, new_input: Path, old_kind: str
 ) -> None:
     """Error when a `compare` operand is an application/executable, not a library."""
     which = old_input if old_kind == "app" else new_input

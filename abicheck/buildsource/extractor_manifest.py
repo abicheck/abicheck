@@ -593,7 +593,7 @@ class ExternalCliExtractor:
             raw_artifacts=artifacts, status="ok", diagnostics=diagnostics
         )
 
-    def normalize(
+    def normalize(  # noqa: ARG002 -- DataExtractor protocol signature
         self, raw_artifacts: list[RawArtifact], output_dir: Path
     ) -> NormalizationResult:
         """Run the manifest ``normalize`` command (if any) and map outputs (D2/D8)."""
@@ -661,7 +661,7 @@ class ExternalCliExtractor:
 
     # -- ledger -------------------------------------------------------------
 
-    def resolve_version(self, context: CollectionContext, pack_root: Path) -> str:
+    def resolve_version(self) -> str:
         """Run the manifest ``version_command`` to record the real tool version (D10).
 
         ADR-032 D10 wants the *actual* tool version in the ledger, not just what
@@ -773,14 +773,13 @@ def run_external_extractor(
         return _finish(
             NormalizationResult(status="skipped", diagnostics=[discovery.reason]),
             record,
-            started,
             "skipped",
             [discovery.reason],
         )
 
     # The run permits this extractor's actions, so probing its version (D10) is
     # within the already-granted permission to invoke the tool.
-    version = extractor.resolve_version(context, pack_root)
+    version = extractor.resolve_version()
     record = ExtractorRecord(
         name=manifest.name,
         version=version,
@@ -818,7 +817,6 @@ def run_external_extractor(
             return _finish(
                 NormalizationResult(status="failed", diagnostics=diagnostics),
                 record,
-                started,
                 "failed",
                 diagnostics,
             )
@@ -830,28 +828,26 @@ def run_external_extractor(
         return _finish(
             NormalizationResult(status="failed", diagnostics=diagnostics),
             record,
-            started,
             "failed",
             diagnostics,
         )
     if normalized.status == "failed":
-        return _finish(normalized, record, started, "failed", diagnostics)
+        return _finish(normalized, record, "failed", diagnostics)
 
     validation = extractor.validate(normalized.normalized_paths)
     if not validation.ok:
         diagnostics.extend(validation.errors)
-        return _finish(normalized, record, started, "failed", diagnostics)
+        return _finish(normalized, record, "failed", diagnostics)
 
     record.artifacts = [
         str(p.relative_to(pack_root)) for p in normalized.normalized_paths
     ]
-    return _finish(normalized, record, started, "ok", diagnostics)
+    return _finish(normalized, record, "ok", diagnostics)
 
 
 def _finish(
     normalized: NormalizationResult,
     record: ExtractorRecord,
-    started: _dt.datetime,
     status: str,
     diagnostics: list[str],
 ) -> tuple[NormalizationResult, ExtractorRecord]:

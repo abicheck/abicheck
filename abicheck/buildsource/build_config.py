@@ -132,7 +132,7 @@ def _safe_compile_atom(path: str, value: str) -> str:
 _SEVERITY_LEVEL = _enum(_SEVERITY_LEVELS)
 
 
-def _system(value: str, path: str) -> str:
+def _system(value: str, path: str) -> str:  # noqa: ARG001 -- KeySpec normalize(value, path) signature
     return value or "auto"
 
 
@@ -154,14 +154,14 @@ def _compile_options(values: list[str], path: str) -> list[str]:
     return atoms
 
 
-def _stripped(values: list[str], path: str) -> list[str]:
+def _stripped(values: list[str], path: str) -> list[str]:  # noqa: ARG001 -- KeySpec normalize(value, path) signature
     """Entries stripped once at the one choke point every consumer reads through,
     with whitespace-only entries dropped (Codex review: a quoted entry with stray
     whitespace matched one consumer's SONAME comparison and missed another's)."""
     return [s.strip() for s in values if s.strip()]
 
 
-def _performance_profile(value: str, path: str) -> str:
+def _performance_profile(value: str, path: str) -> str:  # noqa: ARG001 -- KeySpec normalize(value, path) signature
     """``performance.profile`` as its canonical spelling (an unknown value is a
     ``ValueError`` naming the valid ones)."""
     try:
@@ -556,7 +556,7 @@ class BuildConfig:
     #: --abi3`` acting as the per-run override on top of it. ``None`` = unset
     #: (no audit unless the flag asks for one). Kept as the raw spelling the
     #: flag accepts, validated at the same place the flag is
-    #: (``cli_options.parse_abi3_floor``), so config and CLI cannot accept
+    #: (``workflows.compare.enrichment.parse_abi3_floor``), so config and CLI cannot accept
     #: different version syntaxes.
     python_abi3_floor: str | None = None
     #: ``gate:`` — Phase 7d (one-comparison-product.md §4.1): CI gate policy

@@ -46,9 +46,11 @@ if TYPE_CHECKING:
 
 __all__ = [
     "classify_extracted",
+    "dump_ownership_request",
     "operand_anchor",
     "ownership_request_from_config",
     "project_ownership_key",
+    "project_ownership_request",
     "project_ownership_scope",
     "with_target_roots",
 ]
@@ -86,8 +88,8 @@ def ownership_request_from_config(
     *cfg* is a ``BuildConfig`` (read by attribute, so ``frontends`` callers
     need not import ``buildsource``). Relative roots are the project's, so
     they resolve against the project root the config belongs to
-    (``config_paths.project_root_for_config``, applied by the caller), not
-    the working directory.
+    (``config_paths.project_root_for_config``, applied by the caller --
+    :func:`project_ownership_request`), not the working directory.
     """
     if cfg is None or project_root is None:
         return None
@@ -225,3 +227,42 @@ def project_ownership_key() -> str:
     import hashlib
 
     return hashlib.sha256(repr(request).encode("utf-8")).hexdigest()
+
+
+def dump_ownership_request(cfg_path: Path | None) -> OwnershipRequest | None:
+    """Load *cfg_path* and return its request; ``None`` with no config.
+
+    A config that fails to load is the command's own config resolution's
+    to report, and ``dump`` deliberately only *warns* about a malformed
+    auto-discovered one (an explicit ``--config`` is rejected there, before
+    this runs). Re-raising here turned that warning into exit 64, so the run
+    classifies under no project rules instead -- the same rules it would
+    have with no config at all -- and says so in the recorded scope.
+    """
+    if cfg_path is None:
+        return None
+    from .extraction import load_build_config
+
+    try:
+        cfg = load_build_config(cfg_path)
+    except ValueError:
+        return None
+    return project_ownership_request(cfg, cfg_path)
+
+
+def project_ownership_request(
+    project_cfg: object, cfg_path: Path | None
+) -> OwnershipRequest | None:
+    """The request of an already-loaded project config (``compare``'s case).
+
+    ``None`` with no config. Relative roots resolve against the project root
+    the config belongs to, which for ``.github/.abicheck.yml`` is not the
+    config file's own directory (``config_paths.project_root_for_config``).
+    """
+    if project_cfg is None or cfg_path is None:
+        return None
+    from ..config_paths import project_root_for_config
+
+    return ownership_request_from_config(
+        project_cfg, project_root_for_config(cfg_path.resolve())
+    )

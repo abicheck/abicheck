@@ -270,7 +270,6 @@ def compare_release_against_bundle_facts(
     from .workflows.input_resolution import resolve_input
     from .workflows.release_inputs import discover_live_member_libraries
     from .workflows.release_public_surface import member_pass_scope
-    from .workflows.release_scope import mismatch_kind
 
     old_facts = load_bundle_facts(
         old_facts_path, max_json_object_nodes=max_json_object_nodes
@@ -442,7 +441,7 @@ def compare_release_against_bundle_facts(
                     # gone rather than re-stated.
                 )
             except (ProfileMismatchError, ScopeMismatchError) as exc:
-                not_comparable[key] = (mismatch_kind(exc), str(exc))
+                not_comparable[key] = (exc.not_comparable_kind, str(exc))
                 continue
             compared.append(key)
             per_library_results.append(diff)

@@ -128,7 +128,7 @@ def _entry(sym: str) -> dict[str, object]:
     [(0, 1, 0, 12), (30, 1, 5, 12), (12, 13, 0, 12), (3, 3, 3, 0), (40, 0, 2, 5)],
 )
 def test_each_group_is_capped_independently_with_disclosed_counts(
-    n_add: int, n_rem: int, n_mod: int, limit: int
+    n_add: int, n_rem: int, n_mod: int, limit: int, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     section = {
         "total": n_add + n_rem + n_mod,
@@ -136,7 +136,10 @@ def test_each_group_is_capped_independently_with_disclosed_counts(
         "removals": [_entry(f"r{i}") for i in range(n_rem)],
         "modifications": [_entry(f"m{i}") for i in range(n_mod)],
     }
-    page = render_surface_changes_html(section, limit=limit)
+    import abicheck.report.surface_changes as surface_changes
+
+    monkeypatch.setattr(surface_changes, "MAX_COMPACT_SURFACE_ITEMS", limit)
+    page = render_surface_changes_html(section)
     groups = _section_rows(page)
     for label, n, prefix in (
         ("Additions", n_add, "a"),

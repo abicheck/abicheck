@@ -334,19 +334,19 @@ def replay_twin_pairs(
 
 def drop_replay_twins(
     changes: Iterable[Change],
-    twins: tuple[ReplayTwin, ...] = REPLAY_TWINS,
     *,
     pairs_out: list[tuple[Change, Change]] | None = None,
 ) -> list[Change]:
     """Drop each source-replay copy that a header/binary finding already reports.
 
-    Applies every duplicate pair in *twins* in turn. A non-replay finding is
-    never dropped, and a replay finding with no twin is kept. When *pairs_out* is
-    given, the ``(dropped, survivor)`` pairs (see :func:`replay_twin_pairs`) are
-    appended to it, so the caller records the same pairing this pass acted on.
+    Applies every duplicate pair in :data:`REPLAY_TWINS` in turn. A non-replay
+    finding is never dropped, and a replay finding with no twin is kept. When
+    *pairs_out* is given, the ``(dropped, survivor)`` pairs (see
+    :func:`replay_twin_pairs`) are appended to it, so the caller records the
+    same pairing this pass acted on.
     """
     items = list(changes)
-    pairs = replay_twin_pairs(items, twins)
+    pairs = replay_twin_pairs(items)
     if pairs_out is not None:
         pairs_out.extend(pairs)
     dropped = {id(d) for d, _ in pairs}

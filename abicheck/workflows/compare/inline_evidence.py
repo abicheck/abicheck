@@ -31,7 +31,7 @@ side's ``InputSpec``:
 * **that config's passive settings** -- ``scope.exclude_headers`` and
   ``build.compile_db_filter`` when the run states none;
 * **the tree's ``compile:`` block**, merged over the run's compile context
-  with the CLI winning (``cli_options.merge_compile_config``);
+  with the CLI winning (``workflows.compile_config.merge_compile_config``);
 * **``dump``'s execution plan** -- the ``-p`` compile-database match, the L2
   seed run at the collect mode, the L4 replay on the folded compiler, and
   the changed-path seed;
@@ -53,13 +53,13 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-import click
-
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from ...dry_run_estimate import CompileContext
-    from ...workflows.request_inputs import InputSpec
-    from ...workflows.service_requests import CompareRequest
-    from .dump_debug_config import DumpDebugConfig
+    from ..dump.project_config import DumpDebugConfig
+    from ..request_inputs import InputSpec
+    from ..service_requests import CompareRequest
 
 __all__ = ["InlineEvidence", "InlineEvidenceRun", "OutOfBandPacks"]
 
@@ -68,7 +68,14 @@ __all__ = ["InlineEvidence", "InlineEvidenceRun", "OutOfBandPacks"]
 class InlineEvidenceRun:
     """The run-wide values each raw side's collection is resolved against."""
 
-    ctx: click.Context
+    #: Registers a restoration to run when the invocation closes (the CLI
+    #: passes ``ctx.call_on_close``): the tree config's compile env toggles.
+    on_close: Callable[[Callable[[], None]], object]
+    #: A user-facing note (the session host's ``notify``): the tree config's
+    #: compile warnings go here rather than to the process stderr.
+    notify: Callable[[str], None]
+    #: Whether ``nostdinc`` was stated on the command line.
+    nostdinc_explicit: bool
     #: The run's compile context *with* its frontend (the side's own
     #: ``--ast-frontend old=/new=`` override replaces it per side).
     compile_context: CompileContext
@@ -187,7 +194,7 @@ class OutOfBandPacks:
 
 
 def _raw(path: Path | None) -> Path | None:
-    from ...workflows.extraction import is_raw_evidence_input
+    from ..extraction import is_raw_evidence_input
 
     return path if is_raw_evidence_input(path) else None
 
@@ -221,34 +228,27 @@ def _side(
         return dataclasses.replace(
             side, sources=_raw(sources), build_info=_raw(build_info)
         )
-    from ...cli_options import (
-        LANG_DEFAULT,
-        apply_compile_config_env_toggles,
-        merge_compile_config,
-    )
     from ...service_compare_evidence import SideEvidence, dump_cli_compile_db_path
-    from ...workflows.artifact.dump_execution_options import DumpExecutionOptions
-    from ...workflows.artifact.resolve import reject_hybrid_source_frontend
-    from .dump_debug_config import resolve_dump_project_config
+    from ..artifact.dump_execution_options import DumpExecutionOptions
+    from ..artifact.resolve import reject_hybrid_source_frontend
+    from ..compile_config import merge_compile_config
+    from ..dump.project_config import resolve_dump_project_config
 
+    # `run.lang` is always resolved already, so `lang_default` is never read.
     project = resolve_dump_project_config(
-        run.ctx,
+        run.on_close,
         build_config=run.config,
         sources=dump_sources,
         lang=run.lang,
-        lang_default=LANG_DEFAULT,
-        apply_env_toggles=apply_compile_config_env_toggles,
+        lang_default=run.lang,
         exclude_headers=side.exclude_headers,
         resolved_debug=run.debug,
         debug_roots=debug_roots,
     )
     # The tree's own `compile:` block, merged over the run's context with the
-    # CLI winning -- explicitness read off compare's real Click context.
+    # CLI winning -- explicitness as compare's command line stated it.
     backend = header_backend_override or run.compile_context.frontend
-    nostdinc_explicit = (
-        run.ctx.get_parameter_source("nostdinc")
-        == click.core.ParameterSource.COMMANDLINE
-    )
+    nostdinc_explicit = run.nostdinc_explicit
     compile_context, includes = merge_compile_config(
         dataclasses.replace(run.compile_context, frontend=backend),
         tuple(side.includes),
@@ -256,6 +256,7 @@ def _side(
         sources=dump_sources,
         frontend_explicit=header_backend_override is not None,
         nostdinc_explicit=nostdinc_explicit or run.compile_context.nostdinc,
+        notify=run.notify,
     )
     collected = dataclasses.replace(side, sources=dump_sources)
     reject_hybrid_source_frontend(

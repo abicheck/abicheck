@@ -39,6 +39,12 @@ mutants read as survivors rather than as killed. Two guards keep it fresh:
 
     python scripts/gen_mutation_test_selection.py            # rewrite the list
     python scripts/gen_mutation_test_selection.py --check    # fail on a missing file
+    python scripts/gen_mutation_test_selection.py --union    # add missing files, drop none
+
+``--union`` is what a full mutation run uses: the committed list drifts as
+``main`` gains tests (30 files in six days, observed), and the trace does not
+always agree with itself on a file, so the run measures with the committed
+list plus whatever this commit's own trace finds, never fewer files.
 """
 
 from __future__ import annotations
@@ -172,6 +178,11 @@ def main(argv: list[str] | None = None) -> int:
         "--check", action="store_true", help="Fail if a reaching file is missing."
     )
     parser.add_argument(
+        "--union",
+        action="store_true",
+        help="Rewrite the list as committed + reaching files (never drops one).",
+    )
+    parser.add_argument(
         "-n", "--workers", default="auto", help="xdist workers (default: auto)."
     )
     args = parser.parse_args(argv)
@@ -179,13 +190,23 @@ def main(argv: list[str] | None = None) -> int:
     method = method_description(args.workers)
     print(method)
     reaching = files_of(trace(args.workers))
+    if args.union:
+        committed = set(read_selection(SELECTION_FILE))
+        added = sorted(set(reaching) - committed)
+        merged = sorted(committed | set(reaching))
+        SELECTION_FILE.write_text("\n".join(merged) + "\n", encoding="utf-8")
+        print(
+            f"wrote {len(merged)} test files to "
+            f"{SELECTION_FILE.relative_to(REPO_ROOT)} ({len(added)} added: {added})"
+        )
+        return 0
     if not args.check:
         SELECTION_FILE.write_text("\n".join(reaching) + "\n", encoding="utf-8")
         print(
             f"wrote {len(reaching)} test files to {SELECTION_FILE.relative_to(REPO_ROOT)}"
         )
         return 0
-    committed = set(read_selection())
+    committed = set(read_selection(SELECTION_FILE))
     missing = sorted(set(reaching) - committed)
     stale = sorted(committed - set(reaching))
     if stale:

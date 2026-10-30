@@ -43,15 +43,11 @@ from .workflows.extraction import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
     from pathlib import Path
 
     from .dry_run_estimate import CompileContext
     from .model import AbiSnapshot
-    from .model.ownership_rules import OwnershipRequest
-    from .workflows.compare_classify import ResolvedComparePair
     from .workflows.extraction import DumpManifest
-    from .workflows.service_requests import CompareRequest
 
 
 def _click_notify(message: str) -> None:
@@ -146,53 +142,6 @@ def _detect_binary_format(path: Path) -> str | None:
     from .workflows.extraction import detect_binary_format
 
     return detect_binary_format(path)
-
-
-def _resolve_linker_script(path: Path) -> tuple[Path | None, bool]:
-    """Resolve a GNU ld linker script to the shared library it points at.
-
-    Returns ``(resolved_path, is_linker_script)``. ``is_linker_script`` is True
-    when *path* looks like a GNU ld script (so callers can emit a targeted hint
-    even when no target file could be located); ``resolved_path`` is the first
-    ``INPUT()``/``GROUP()`` member that exists next to the script, or *None*.
-    """
-    from .workflows.extraction import resolve_linker_script
-
-    return resolve_linker_script(path)
-
-
-def _maybe_follow_linker_script(path: Path) -> Path:
-    """Return the linker-script target if *path* is a resolvable GNU ld script.
-
-    Emits a one-line note when it follows a script; otherwise returns *path*
-    unchanged. Used by entry points that dispatch on binary format directly
-    (e.g. ``dump``) rather than through :func:`_resolve_input`.
-    """
-    target, is_ld = _resolve_linker_script(path)
-    if is_ld and target is not None and target.resolve() != path.resolve():
-        click.echo(
-            f"Note: '{path}' is a GNU ld linker script; following its "
-            f"INPUT()/GROUP() directive to '{target}'.",
-            err=True,
-        )
-        return target
-    return path
-
-
-def _normalize_binary_input(path: Path) -> tuple[Path, str | None]:
-    """Detect a binary input's format, following GNU ld linker scripts.
-
-    Returns ``(resolved_path, format)``. When *path* is a linker script that
-    resolves to a real shared library, the resolved path and *its* format are
-    returned so downstream metadata collection and dependency analysis operate
-    on the actual DSO rather than the text script.
-    """
-    fmt = _detect_binary_format(path)
-    if fmt is None:
-        resolved = _maybe_follow_linker_script(path)
-        if resolved != path:
-            return resolved, _detect_binary_format(resolved)
-    return path, fmt
 
 
 def _apply_native_provenance(
@@ -391,226 +340,12 @@ def classify_compare_operand(path: Path) -> str:
         return "directory" if not _is_pkg(path) or _multi(path) else "file"
     if is_package(path):
         return "package"
-    norm, fmt = _normalize_binary_input(path)
+    from .workflows.extraction import follow_linker_script
+
+    norm, fmt = follow_linker_script(path, _click_notify)
     if fmt == "elf" and _looks_like_application(norm):
         return "app"
     return "file"
-
-
-def _resolve_compare_pair(
-    old_input: Path,
-    new_input: Path,
-    old_fmt: str | None,
-    new_fmt: str | None,
-    old_h: list[Path],
-    new_h: list[Path],
-    old_inc: list[Path],
-    new_inc: list[Path],
-    old_version: str,
-    new_version: str,
-    lang: str,
-    pdb_path: Path | None,
-    old_pdb_path: Path | None,
-    new_pdb_path: Path | None,
-    dwarf_only: bool,
-    debug_format: str | None,
-    follow_deps: bool,
-    search_paths: tuple[Path, ...],
-    ld_library_path: str,
-    header_backend: str = "auto",
-    old_header_backend: str | None = None,
-    new_header_backend: str | None = None,
-    compile_context: CompileContext | None = None,
-    old_debug_roots: list[Path] | None = None,
-    new_debug_roots: list[Path] | None = None,
-    enable_debuginfod: bool = False,
-    debuginfod_url: str | None = None,
-    include_labels: dict[Path, str] | None = None,
-    old_dump_manifest: DumpManifest | None = None,
-    new_dump_manifest: DumpManifest | None = None,
-    include_dependencies: bool = False,
-    lang_explicit: bool = False,
-    changed_paths: tuple[str, ...] = (),  # ADR-068 Phase 2c: ADR-043 D7 POI scoping
-    config_public_header_dirs: list[Path] | None = None,
-    # Appended, never inserted: this signature is long and has positional
-    # callers (`api.positional_slot_rebinding`, tests/regressions/manifest.py).
-    exclude_headers: tuple[str, ...] = (),
-    ownership: OwnershipRequest | None = None,  # ADR-075: both sides share it
-    prepare: Callable[[CompareRequest], CompareRequest] | None = None,
-) -> tuple[CompareRequest, ResolvedComparePair]:
-    """Load both ABI snapshots and (optionally) populate ELF dependency info.
-
-    ``include_dependencies`` (default ``False``, mirroring ``dump``'s own
-    default): both sides are filtered via
-    ``dumper_scoping.resolve_dependency_scope`` the same way ``dump``
-    filters by default -- this is what makes ``dump old.so -o base.json``
-    then ``compare base.json new.so`` compare consistently by default,
-    instead of the historical asymmetry (a filtered ``dump`` baseline vs.
-    compare's always-unfiltered live-binary dumping).
-
-    ``lang_explicit`` (G31 Phase C follow-up): whether ``lang`` reflects a
-    genuinely explicit ``--lang`` on the command line rather than Click's
-    own default (which is the identical, indistinguishable string) — see
-    ``cli.compare_cmd``'s own detection and
-    :attr:`abicheck.workflows.service_requests.CompareRequest.lang_explicit`. ``False`` (the
-    default) preserves this function's pre-existing behavior for both sides.
-
-    ``header_backend`` is the both-sides default; ``old_header_backend`` /
-    ``new_header_backend`` override it for one side only (``None`` = inherit).
-    A per-side override lets a release whose new headers need the host
-    toolchain parse on ``clang`` while the old release keeps the ``castxml``
-    schema reference — the backend mirror of ``--old-header``/``--new-header``.
-
-    ``compile_context`` carries the both-sides L2 cross-toolchain knobs
-    (``--gcc-*``/``--sysroot``/``--nostdinc``, ADR-037 D3) merged with the project
-    ``compile:`` block; it applies to both sides. Its ``frontend`` field is unused
-    here — the frontend is driven by the explicit ``header_backend`` so the per-side
-    override above still wins.
-
-    ``old_dump_manifest`` / ``new_dump_manifest`` (ADR-050 D3): a parsed
-    ``--dump-manifest`` document for that side only, in place of a single
-    header list — side-scoped since old/new commonly live under different
-    roots.
-
-    ``old_debug_roots`` / ``new_debug_roots`` / ``enable_debuginfod`` /
-    ``debuginfod_url`` (P1.1, ADR-021a): per-side detached-debug-artifact
-    resolution (``--debug-root old=/new=``, ``--debuginfod``,
-    ``--debuginfod-url``), forwarded to each side's ``_resolve_input`` so a
-    resolved ``.debug`` file actually feeds that side's DWARF parse — a custom
-    debuginfod server must reach the actual fetch, not just the (log-only)
-    resolution probe elsewhere.
-
-    Both sides always attempt the L2 header-only semantic graph (G29 Phase A:
-    no longer flag-gated) — the existing build-source-pack graph diff already
-    handles a ``SourceGraphSummary`` from any evidence tier uniformly, so
-    populating it here from headers alone (no build system required) makes it
-    reachable from plain ``compare``.
-
-    **ADR-055 D1: this no longer resolves anything itself.** It assembles a
-    :class:`~abicheck.workflows.service_requests.CompareRequest` from ``compare``'s loose
-    arguments and hands it to the shared
-    :func:`abicheck.service.resolve_compare_request`, which is the same
-    resolution the typed Python API and the MCP ``abi_compare`` tool run. It
-    kept a parallel implementation until now only because
-    ``run_compare_request`` was one function with no seam for ``compare``'s
-    ADR-049 configuration step (``compare_configuration``) to sit in; splitting
-    that function into its two phases removed the reason for the copy. What
-    stays CLI-specific is exactly what is genuinely CLI-specific: the
-    ``click.echo`` notifier, translating the framework-free errors into
-    ``click`` exceptions (the contract ``_resolve_input`` documented), and
-    ``allow_parallel=False``: no two *threads*. Two live binaries still
-    resolve in two concurrent child processes (the ``balanced`` profile;
-    measured, a cold compare of two 60-module C++ libraries went from 64 s
-    to 41 s at ~1.5x peak tree memory), so their progress notes may
-    interleave on stderr; ``ABICHECK_PARALLEL_EXTRACTION=0``,
-    ``ABICHECK_SIDE_PROCESSES=0`` and the ``low-memory`` profile keep one
-    side at a time.
-
-    ``config_public_header_dirs`` (ADR-068 plan §5 P4, ``workflows.
-    public_header_boundary.project_config_public_header_dirs``): a
-    project's ``.abicheck.yml`` ``scope.public_header_dirs``, folded into
-    *both* sides' ``InputSpec.public_header_dirs`` unchanged -- a single,
-    both-sides-shared config statement, unlike ``-H`` (already per-side by
-    the time it reaches ``old_h``/``new_h``). ``None``/empty is a no-op.
-    """
-    from .errors import PlanningError, SnapshotError, ValidationError
-    from .workflows import (
-        request_inputs as _request_inputs,
-        service_requests as _contracts,
-    )
-
-    def _side_compile(backend_override: str | None) -> CompileContext | None:
-        # The per-side --ast-frontend old=/new= rides on that side's own
-        # CompileContext.frontend, which `_run_dump_uncached` documents as
-        # outranking the bare both-sides `header_backend`. The caller has
-        # already neutralised `compile_context.frontend` to "auto" for exactly
-        # this reason, so there is nothing to lose by replacing it.
-        if backend_override is None:
-            return compile_context
-        import dataclasses
-
-        from .compile_context import CompileContext as _CompileContext
-
-        base = compile_context if compile_context is not None else _CompileContext()
-        return dataclasses.replace(base, frontend=backend_override)
-
-    # A dump_manifest side rejects `public_header_dirs` outright (it declares
-    # its own `public_header_dirs` field instead -- api_types._side_errors);
-    # folding the config value in for that side would turn an unrelated
-    # config key into a usage error for a `--dump-manifest` compare that
-    # never asked for it. Only a manifest-less side gets it.
-    _config_header_dirs = tuple(config_public_header_dirs or ())
-    request = _contracts.CompareRequest(
-        old=_request_inputs.InputSpec(
-            path=old_input,
-            headers=tuple(old_h),
-            exclude_headers=tuple(exclude_headers or ()),
-            includes=tuple(old_inc),
-            version=old_version,
-            pdb=old_pdb_path if old_pdb_path else pdb_path,
-            debug_roots=tuple(old_debug_roots or ()),
-            include_dependencies=include_dependencies,
-            dump_manifest=old_dump_manifest,
-            compile=_side_compile(old_header_backend),
-            public_header_dirs=(
-                () if old_dump_manifest is not None else _config_header_dirs
-            ),
-            ownership=ownership,
-        ),
-        new=_request_inputs.InputSpec(
-            path=new_input,
-            headers=tuple(new_h),
-            exclude_headers=tuple(exclude_headers or ()),
-            includes=tuple(new_inc),
-            version=new_version,
-            pdb=new_pdb_path if new_pdb_path else pdb_path,
-            debug_roots=tuple(new_debug_roots or ()),
-            include_dependencies=include_dependencies,
-            dump_manifest=new_dump_manifest,
-            compile=_side_compile(new_header_backend),
-            public_header_dirs=(
-                () if new_dump_manifest is not None else _config_header_dirs
-            ),
-            ownership=ownership,
-        ),
-        lang=lang,
-        lang_explicit=lang_explicit,
-        frontend=header_backend,
-        dwarf_only=dwarf_only,
-        debug_format=debug_format,
-        include_labels=tuple((include_labels or {}).items()),
-        follow_dependencies=follow_deps,
-        dependency_search_paths=tuple(search_paths),
-        ld_library_path=ld_library_path,
-        enable_debuginfod=enable_debuginfod,
-        debuginfod_url=debuginfod_url,
-        changed_paths=changed_paths,
-    )
-    from . import service
-
-    try:
-        if prepare is not None:
-            # The caller's own per-side additions (`compare`'s raw `--sources`
-            # sides: `frontends.cli.compare_inline_evidence`), folded onto the
-            # request this function built before anything resolves it.
-            request = prepare(request)
-        pair = service.resolve_compare_request(
-            request, notify=_click_notify, allow_parallel=False
-        )
-    except (ValidationError, PlanningError) as exc:  # PlanningError: ADR-063 Phase 4
-        raise click.UsageError(str(exc)) from exc
-    except SnapshotError as exc:
-        raise click.ClickException(str(exc)) from exc
-    return request, pair
-
-
-def _resolve_compare_snapshots(
-    *args: Any, **kwargs: Any
-) -> tuple[AbiSnapshot, AbiSnapshot]:
-    """:func:`_resolve_compare_pair`'s two snapshots, for a caller that needs
-    neither the request nor the resolved pair's evidence."""
-    _, pair = _resolve_compare_pair(*args, **kwargs)
-    return pair.old, pair.new
 
 
 # ── Set-input (directory/package) compare guards (ADR-037 D3/D12) ─────────────

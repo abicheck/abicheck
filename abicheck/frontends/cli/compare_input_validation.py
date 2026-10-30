@@ -23,8 +23,6 @@ prints, and enters the ``--budget`` deadline for the Click invocation.
 
 from __future__ import annotations
 
-from collections.abc import Iterator
-from contextlib import contextmanager
 from pathlib import Path
 
 import click
@@ -35,7 +33,6 @@ from ...workflows.compare.budget import (
     budget_deadline,
     parse_budget_seconds,
 )
-from ...workflows.operand_rules import DebugFormatNotElfError, ManifestOperandError
 from .operand_diagnostics import _reject_application_operand
 
 
@@ -75,24 +72,5 @@ def classify_and_reject_operands(old_input: Path, new_input: Path) -> tuple[str,
     old_kind = classify_compare_operand(old_input)
     new_kind = classify_compare_operand(new_input)
     if old_kind == "app" or new_kind == "app":
-        _reject_application_operand(old_input, new_input, old_kind, new_kind)
+        _reject_application_operand(old_input, new_input, old_kind)
     return old_kind, new_kind
-
-
-@contextmanager
-def operand_rule_errors() -> Iterator[None]:
-    """Word a refused operand combination the way ``compare`` words its flags.
-
-    The rules are decided in :mod:`abicheck.workflows.operand_rules`; this only
-    renders the typed refusal as the usage error (or ``.abicheck.yml`` key
-    message) this command has always printed.
-    """
-    try:
-        yield
-    except DebugFormatNotElfError as exc:
-        raise click.BadParameter(
-            f"debug.format: {exc.debug_format} (.abicheck.yml) is only supported "
-            f"for ELF binaries, but the {exc.side} input is {exc.binary_fmt.upper()}."
-        ) from exc
-    except ManifestOperandError as exc:
-        raise click.UsageError(str(exc)) from exc

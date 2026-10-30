@@ -42,14 +42,13 @@ from ..policy.outcome import (
 
 if TYPE_CHECKING:
     from ..checker_types import DiffResult
-    from ..policy.severity import GateDecision, SeverityConfig
+    from ..policy.severity import GateDecision
 
 __all__ = ["run_outcome_dict_for_diff_result"]
 
 
 def run_outcome_dict_for_diff_result(
     result: DiffResult,
-    severity_config: SeverityConfig | None,
     gate: GateDecision | None,
 ) -> dict[str, Any]:
     """The ``run_outcome`` block (ADR-063 Phase 7 / D6) for *result*.
@@ -60,7 +59,7 @@ def run_outcome_dict_for_diff_result(
 
     *gate* is the caller's own already-computed
     :func:`~abicheck.policy.gate_decision.gate_decision_for_result` value
-    (``None`` exactly when *severity_config* is ``None``) -- a report-level
+    (``None`` exactly when the caller has no ``SeverityConfig``) -- a report-level
     projection may not calculate a new gate decision of its own
     (`report/AGENTS.md`'s "Prohibited responsibilities"), so this reads the
     fact rather than recomputing it a second, independent time (Codex

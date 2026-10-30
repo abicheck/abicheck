@@ -30,7 +30,7 @@ retired ``cli_compare_release_pairwise._run_compare_pair`` ->
 release fan-out's own "stranded library" fallback (``compare_release_cmd``'s
 ``_resolve_stranded_library`` closure, which builds a ``DumpRequest``/
 ``InputSpec`` directly rather than going through
-``cli_resolve._resolve_compare_snapshots``) both silently dropped a
+the compare session's pair resolution) both silently dropped a
 project's declared ``scope.public_header_dirs`` even though the identical
 library compared alone (a two-file ``compare``) already honoured it.
 """
@@ -94,16 +94,16 @@ class TestConfigPublicHeaderDirsReachesTheResolvedRequest:
     def _run_with_spy(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, config_yaml: str | None
     ) -> list[CompareRequest]:
-        import abicheck.service as service_mod
+        import abicheck.workflows.compare.resolve as resolve_mod
 
         seen_requests: list[CompareRequest] = []
-        real = service_mod.resolve_compare_request
+        real = resolve_mod.resolve_compare_request
 
         def _spy(request: CompareRequest, **kwargs: object) -> object:
             seen_requests.append(request)
             return real(request, **kwargs)
 
-        monkeypatch.setattr(service_mod, "resolve_compare_request", _spy)
+        monkeypatch.setattr(resolve_mod, "resolve_compare_request", _spy)
 
         if config_yaml is not None:
             (tmp_path / ".abicheck.yml").write_text(config_yaml, encoding="utf-8")
@@ -167,75 +167,61 @@ class TestConfigPublicHeaderDirsReachesTheResolvedRequest:
 class TestDumpManifestSideNeverGetsConfigDirs:
     """A ``--dump-manifest`` side rejects ``public_header_dirs`` outright
     (it declares its own directory set in the manifest instead --
-    ``api_types._side_errors``). ``cli_resolve._resolve_compare_snapshots``
-    must never fold the config value into that side, or an unrelated
-    ``scope.public_header_dirs`` entry would turn a working
-    ``--dump-manifest`` compare into a usage error. Exercised directly
-    against the resolution function (not the full CLI): a real
-    ``--dump-manifest`` compare needs real header roots on disk to resolve
-    without erroring, which is orthogonal to what this test checks --
-    ``service.resolve_compare_request`` itself is stubbed out so only the
-    assembled :class:`~abicheck.api_types.CompareRequest` is inspected."""
+    ``api_types._side_errors``). The compare session must never fold the
+    config value into that side, or an unrelated ``scope.public_header_dirs``
+    entry would turn a working ``--dump-manifest`` compare into a usage
+    error. Exercised through the session (a real ``--dump-manifest`` CLI
+    compare needs real header roots on disk, orthogonal to this check); the
+    shared resolution is stubbed so only the assembled
+    :class:`~abicheck.api_types.CompareRequest` is inspected."""
 
+    @pytest.mark.parametrize("manifest_side", ["old", "new"])
     def test_manifest_side_public_header_dirs_stays_empty(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, manifest_side: str
     ) -> None:
-        import abicheck.cli_resolve as cli_resolve_mod
+        import abicheck.workflows.compare.resolve as resolve_mod
         from abicheck.workflows.extraction import DumpManifest
+        from tests._pair_session import pair_session_request, run_session
 
-        old = _write_snapshot(tmp_path / "old.abi.json")
-        new = _write_snapshot(tmp_path / "new.abi.json")
+        # ELF operands: a --dump-manifest side must be a native binary.
+        old, new = tmp_path / "old.so", tmp_path / "new.so"
+        for path in (old, new):
+            path.write_bytes(b"\x7fELF\x02\x01\x01" + b"\0" * 57)
+        cfg = tmp_path / "abicheck.yml"
+        cfg.write_text(
+            yaml.safe_dump({"scope": {"public_header_dirs": ["include"]}}),
+            encoding="utf-8",
+        )
         manifest = DumpManifest(base_dir=tmp_path, roots=(old,))
+
+        class _Stop(Exception):
+            pass
 
         seen: list[CompareRequest] = []
 
         def _fake_resolve(request: CompareRequest, **kwargs: object) -> object:
             seen.append(request)
+            raise _Stop
 
-            class _Pair:
-                pass
+        monkeypatch.setattr(resolve_mod, "resolve_compare_request", _fake_resolve)
+        with pytest.raises(_Stop):
+            run_session(
+                pair_session_request(
+                    old,
+                    new,
+                    config=cfg,
+                    headers={f"{manifest_side}_dump_manifest": manifest},
+                )
+            )
 
-            pair = _Pair()
-            pair.old = AbiSnapshot(library="libfoo.so", version="1.0")
-            pair.new = AbiSnapshot(library="libfoo.so", version="1.1")
-            return pair
-
-        import abicheck.service as service_mod
-
-        monkeypatch.setattr(service_mod, "resolve_compare_request", _fake_resolve)
-
-        cli_resolve_mod._resolve_compare_snapshots(
-            old,
-            new,
-            None,
-            None,
-            [],
-            [],
-            [],
-            [],
-            "1.0",
-            "1.1",
-            "C++",
-            None,
-            None,
-            None,
-            False,
-            None,
-            False,
-            (),
-            "",
-            old_dump_manifest=manifest,
-            new_dump_manifest=None,
-            config_public_header_dirs=[Path("include")],
-        )
-
-        assert len(seen) == 1
-        request = seen[0]
+        (request,) = seen
+        manifest_spec = getattr(request, manifest_side)
+        other_spec = request.new if manifest_side == "old" else request.old
         # The manifest side never sees the config dirs...
-        assert request.old.public_header_dirs == ()
+        assert manifest_spec.public_header_dirs == ()
         # ...but the manifest-less sibling side still does (additive, not
         # an all-or-nothing suppression of the whole config value).
-        assert request.new.public_header_dirs == (Path("include"),)
+        assert other_spec.public_header_dirs == (Path("include"),)
 
 
 class TestDirectoryReleaseCompareReachesConfigDirs:
