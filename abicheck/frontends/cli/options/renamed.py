@@ -33,13 +33,13 @@ from __future__ import annotations
 
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, TypeVar
 
 import click
 from click.core import ParameterSource
 
-#: A click option decorator applied to a command function.
-Decorator = Callable[[Any], Any]
+#: A command function (or click command) that an option decorator returns unchanged in type.
+F = TypeVar("F", bound=Callable[..., Any])
 
 
 @dataclass(frozen=True)
@@ -113,7 +113,7 @@ def renamed_option(
     *,
     legacy: Sequence[Legacy],
     **attrs: Any,
-) -> Decorator:
+) -> Callable[[F], F]:
     """Declare ``new_flag`` (parameter ``dest``) with ``legacy`` as hidden aliases.
 
     ``attrs`` are click's option attributes for the new spelling. Each alias is
@@ -121,7 +121,7 @@ def renamed_option(
     callback; the new option receives its value.
     """
 
-    def decorate(func: Any) -> Any:
+    def decorate(func: F) -> F:
         for spec in legacy:
             func = click.option(
                 spec.flag,

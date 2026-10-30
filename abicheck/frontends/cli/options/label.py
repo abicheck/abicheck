@@ -25,10 +25,10 @@ not this option.
 from __future__ import annotations
 
 from .params import SIDED_STR_PARAM
-from .renamed import Decorator, Legacy, renamed_option
+from .renamed import F, Legacy, renamed_option
 
 
-def compare_label_option(func: Decorator) -> Decorator:
+def compare_label_option(func: F) -> F:
     """``compare``'s side-aware label: ``--label [old=|new=]LABEL``, repeatable."""
     return renamed_option(
         "--label",
@@ -43,7 +43,7 @@ def compare_label_option(func: Decorator) -> Decorator:
     )(func)
 
 
-def dump_label_option(func: Decorator) -> Decorator:
+def dump_label_option(func: F) -> F:
     """``dump``'s single label, embedded in the snapshot."""
     return renamed_option(
         "--label",
@@ -55,7 +55,7 @@ def dump_label_option(func: Decorator) -> Decorator:
     )(func)
 
 
-def history_label_option(func: Decorator) -> Decorator:
+def history_label_option(func: F) -> F:
     """``project history``'s per-snapshot label, one per SNAPSHOT, in order."""
     return renamed_option(
         "--label",
