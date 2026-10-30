@@ -668,22 +668,33 @@ requirements to it:
    `FactAvailability` statuses. A missing section means `not_collected`. A
    present but empty section means `present`. An extractor failure is stored
    as `failed`, with diagnostics. A missing section never reads as `present`.
+   The carrier is the section-header table in the document or manifest, not
+   the payload. Every section kind the producer attempted has a header entry
+   with its `FactAvailability`, even when no payload object exists. So `failed`
+   is a header entry with no payload, and `not_collected` is a header entry
+   with that status, or no entry at all for producers that predate this rule.
+   The field inventory covers the header entry.
 
 ### D16 — One digest per question, none silently redefined
 
 | Role | Covers | Today |
 |---|---|---|
-| `transport` | the exact stored or compressed bytes | object-store digest (`raw_digest`) |
+| `transport` | the exact stored file bytes, after compression | not implemented: no current path hashes the compressed bytes |
 | `publication` | the exact published snapshot, including capture metadata such as `created_at` | `snapshot_content_digest`, unchanged |
 | `evidence` | D5-normalized facts, excluding volatile metadata and the order of unordered collections | basis: `storage.canonical.semantic_digest`; not persisted yet |
 | `comparison_input` | the `evidence` digests plus the contract and policy inputs one comparison read | not implemented |
 
 Each role answers one question:
 
-- `transport`: is this file or object intact?
+- `transport`: is this stored file intact, before decompression?
 - `publication`: is this the exact artifact that a release recorded?
 - `evidence`: is this the same evidence? Used for dedup and caches.
 - `comparison_input`: is a cached comparison result still valid?
+
+The object store's address is a separate thing and keeps its meaning. JSON
+objects are addressed by `semantic_digest`, and raw payloads by `raw_digest`
+over the uncompressed payload (`project_snapshot_store.py`). That is payload
+integrity, not `transport`.
 
 `snapshot_content_digest` keeps its meaning. The `created_at` probe is that
 digest working as designed, not a defect. The reorder probe is a defect only
@@ -700,7 +711,15 @@ refs/variants/<variant-id>/<ref-digest>.json
 refs/artifacts/<artifact-id>/<ref-digest>.json
 ```
 
-`manifest.json` records `{id, ref_digest}` per ref, not bare ids. It stays the
+`manifest.json` records `{id, ref_digest}` per ref, not bare ids.
+
+`ref_digest` is `storage.canonical.semantic_digest` (sha256, `sha256:<hex>`)
+over the complete canonical ref document. The document includes its `id`, its
+schema version, and every object digest it names. A ref carries no volatile
+capture metadata; any it gains belongs in the manifest. A reader recomputes
+`ref_digest` from the file it loads. A mismatch with either the path or the
+manifest entry fails closed, as a corrupted package, the same way an object
+digest mismatch does today. It stays the
 root and the only commit point.
 
 1. Objects and refs are written and verified.
@@ -727,8 +746,10 @@ D8's size-bounded chunking target, 1-8 MB decoded, is **withdrawn**.
 
 - Sections are not pre-chunked. The 63% measurement argues against it.
 - A section is split only when a measured access pattern needs part of it.
-- The performance lever is D8's lazy, per-section loading. A comparison opens
-  only the sections its requested analyses read.
+- The performance lever is D8's lazy, per-section loading. D8's preload of
+  the small L0 `binary` sections stays, because pairing needs them before any
+  analysis is chosen. Every other section is opened only when a requested
+  analysis reads it.
 - Multi-library runs share an immutable, digest-keyed (`evidence`)
   decoded-section cache (D11).
 
