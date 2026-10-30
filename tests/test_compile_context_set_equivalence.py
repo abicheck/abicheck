@@ -276,3 +276,14 @@ def test_the_applied_compile_keys_are_the_documented_config_tier() -> None:
     } <= COMPILE_CONTEXT_OVERRIDE_PATHS
     assert "compile.include_dirs" not in COMPILE_CONTEXT_OVERRIDE_PATHS
     assert "compile.defines" not in COMPILE_CONTEXT_OVERRIDE_PATHS
+
+
+def test_an_invalid_override_with_no_file_is_a_compile_config_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """With no file, a rejected override is a usage error, not a silent empty context."""
+    monkeypatch.chdir(tmp_path)
+    with pytest.raises(CompileConfigError, match="unknown config key"):
+        merge_compile_config(
+            CompileContext(), (), None, config_overrides={"compile.no_such_key": 1}
+        )
