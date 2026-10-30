@@ -541,3 +541,27 @@ def test_deployment_and_require_justification_reach_the_request_and_the_cli() ->
     assert typed.env_matrix is not None
     assert typed.env_matrix.runtime_floors["GLIBC"] == "2.17"
     assert typed.env_matrix == cli_resolved.deployment
+
+
+def test_a_release_compare_refuses_a_key_its_members_do_not_receive(
+    tmp_path: Path,
+) -> None:
+    """A directory operand fans out to members that take no public-symbol overlay."""
+    old_dir = tmp_path / "old"
+    new_dir = tmp_path / "new"
+    old_dir.mkdir()
+    new_dir.mkdir()
+    result = CliRunner().invoke(
+        main,
+        [
+            "compare",
+            str(old_dir),
+            str(new_dir),
+            "--dry-run",
+            "--set",
+            "scope.public_symbols=[foo]",
+        ],
+    )
+    assert result.exit_code == 64
+    assert "scope.public_symbols" in result.output
+    assert "directory/package comparison does not apply" in result.output

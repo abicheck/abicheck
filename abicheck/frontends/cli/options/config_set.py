@@ -44,7 +44,41 @@ _COMPARE_APPLIED_PATHS: frozenset[str] = frozenset(
     {path for path, _field, _attr in TYPED_OVERRIDE_CHANNELS} | CLI_ONLY_OVERRIDE_PATHS
 )
 
-__all__ = ["config_set_option", "parse_set_assignments"]
+#: The keys a directory/package (release) compare forwards to its members. The
+#: release request carries no public-symbol, suppression, assurance or debug
+#: field, so every other ``--set`` key is refused on that route rather than
+#: accepted and not applied.
+_RELEASE_APPLIED_PATHS: frozenset[str] = frozenset(
+    {
+        "scope.public",
+        "scope.collapse_versioned_symbols",
+        "severity.abi_breaking",
+        "severity.potential_breaking",
+        "severity.quality_issues",
+        "severity.addition",
+        "deployment",
+    }
+)
+
+__all__ = [
+    "config_set_option",
+    "parse_set_assignments",
+    "reject_unforwarded_release_overrides",
+]
+
+
+def reject_unforwarded_release_overrides(overrides: dict[str, object]) -> None:
+    """Refuse a ``--set`` key a directory/package comparison does not forward.
+
+    Called only for a release route (an operand that is a directory or package).
+    """
+    unforwarded = sorted(set(overrides) - _RELEASE_APPLIED_PATHS)
+    if unforwarded:
+        raise click.UsageError(
+            f"--set: a directory/package comparison does not apply "
+            f"{', '.join(unforwarded)} yet; set it in .abicheck.yml or compare "
+            "the libraries one at a time"
+        )
 
 
 def parse_set_assignments(values: tuple[str, ...]) -> dict[str, object]:

@@ -552,4 +552,13 @@ def _compare_cmd(ctx: click.Context, /, **kwargs: Any) -> None:
         )
         return
     reject_bundle_facts_manifest_without_old_bundle_facts(kwargs)
+    if kwargs.get("config_overrides"):
+        from ..compare_input_validation import classify_and_reject_operands
+        from ..options.config_set import reject_unforwarded_release_overrides
+
+        old_kind, new_kind = classify_and_reject_operands(
+            kwargs["old_input"], kwargs["new_input"]
+        )
+        if {old_kind, new_kind} & {"directory", "package"}:
+            reject_unforwarded_release_overrides(kwargs["config_overrides"])
     run_compare(ctx, **kwargs)

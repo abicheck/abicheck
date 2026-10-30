@@ -261,7 +261,7 @@ own flag (`compile.defines` is `--define`, `severity.preset` is
 name of that flag, so each option keeps one spelling. `--set` does not yet
 reach `dump`, `project plan` or `project capture-variants`, and `compare` refuses
 the keys it does not yet apply (such as `compile.*`, `build.*` and `sources.*`)
-with exit 64 rather than dropping them; the full key list is
+with exit 64 rather than dropping them, and a directory or package comparison refuses every key its members do not receive; the full key list is
 in [`config-keys-reference.md`](../reference/config-keys-reference.md).
 
 ## Dependency-stack commands
