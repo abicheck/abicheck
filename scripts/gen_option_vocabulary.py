@@ -19,9 +19,12 @@ from __future__ import annotations
 
 import argparse
 import dataclasses
+import enum
 import inspect
 import json
 import sys
+import types
+import typing
 from pathlib import Path
 from typing import Any
 
@@ -34,11 +37,114 @@ OUT_PATH = REPO_DIR / "architecture" / "option-vocabulary-inventory.json"
 _CLI_SKIP = frozenset({"--help", "--help-all"})
 
 
+def _default_text(value: Any) -> str:
+    """A deterministic, address-free rendering of a default value.
+
+    ``repr`` of an arbitrary object can carry a memory address, which would make
+    the committed inventory differ between runs and between Python versions.
+    Primitives and containers of them render literally; anything else renders as
+    its type name, and a callable as ``<callable>``.
+    """
+    if value is inspect.Parameter.empty or value is dataclasses.MISSING:
+        return "<required>"
+    if type(value).__name__ == "Sentinel":
+        # Click's "not given" marker: its class and repr moved between Click
+        # releases, so the inventory must not depend on the installed version.
+        return "<unset>"
+    if isinstance(value, enum.Enum):
+        return f"{type(value).__qualname__}.{value.name}"
+    if value is None or isinstance(value, (bool, int, float, str)):
+        return repr(value)
+    if isinstance(value, (list, tuple)):
+        return "[" + ", ".join(_default_text(v) for v in value) + "]"
+    if isinstance(value, dict):
+        items = sorted(value.items(), key=lambda kv: str(kv[0]))
+        return "{" + ", ".join(f"{k!r}: {_default_text(v)}" for k, v in items) + "}"
+    if callable(value):
+        return "<callable>"
+    return f"<{type(value).__qualname__}>"
+
+
+def _click_default_text(p: Any) -> str:
+    """A CLI option's default, the same on every Click release.
+
+    An option given no default has ``None`` on Click 8.2 and the unset sentinel
+    on 8.3+; both mean "no default", so both render as ``<unset>``, or ``False``
+    for a boolean flag, whose omitted value is ``False`` on every release. An
+    explicit default keeps its own spelling.
+    """
+    default = p.default
+    if default is None or type(default).__name__ == "Sentinel":
+        return "False" if p.is_flag else "<unset>"
+    return _default_text(default)
+
+
+def _choices(hint: Any) -> list[Any] | None:
+    """The closed value set a type annotation admits, or None when it is open.
+
+    ``Literal[...]`` and ``enum.Enum`` subclasses are closed; ``Optional``/``|``
+    unions contribute the closed members among their arms.
+    """
+    if typing.get_origin(hint) is typing.Literal:
+        return list(typing.get_args(hint))
+    if isinstance(hint, type) and issubclass(hint, enum.Enum):
+        return [m.value for m in hint]
+    if typing.get_origin(hint) in (typing.Union, types.UnionType):
+        found: list[Any] = []
+        for arm in typing.get_args(hint):
+            sub = _choices(arm)
+            if sub:
+                found.extend(sub)
+        return found or None
+    return None
+
+
+def _annotation_text(hint: Any) -> str:
+    """A type annotation as stable text, built from class names rather than ``str``.
+
+    ``str()`` of a type spells its module, and the module moved (Python 3.14 shows
+    ``pathlib.Path`` as ``pathlib._local.Path``), so ``str()`` would make the
+    committed inventory depend on the interpreter that wrote it.
+    """
+    if hint is inspect.Parameter.empty:
+        return "<none>"
+    if isinstance(hint, str):
+        return hint
+    if hint is None or hint is type(None):
+        return "None"
+    origin = typing.get_origin(hint)
+    args = typing.get_args(hint)
+    if origin is typing.Literal:
+        return "Literal[" + ", ".join(repr(a) for a in args) + "]"
+    if origin in (typing.Union, types.UnionType):
+        return " | ".join(_annotation_text(a) for a in args)
+    if origin is not None:
+        name = getattr(origin, "__qualname__", None) or str(origin)
+        if not args:
+            return name
+        return (
+            name
+            + "["
+            + ", ".join("..." if a is Ellipsis else _annotation_text(a) for a in args)
+            + "]"
+        )
+    if isinstance(hint, type):
+        return hint.__qualname__
+    return repr(hint)
+
+
 def _cli_rows() -> list[dict[str, Any]]:
     import click
 
     from abicheck.cli import main
+    from abicheck.frontends.cli.help import (
+        COMPARE_COMMON_OPTION_NAMES,
+        DUMP_COMMON_OPTION_NAMES,
+    )
 
+    # The options each command's plain ``--help`` shows (ADR-091 D4's "visible"
+    # set). A command without a curated pair shows every non-hidden option.
+    common = {"compare": COMPARE_COMMON_OPTION_NAMES, "dump": DUMP_COMMON_OPTION_NAMES}
     rows: list[dict[str, Any]] = []
 
     def walk(cmd: click.Command, path: list[str]) -> None:
@@ -59,8 +165,20 @@ def _cli_rows() -> list[dict[str, Any]]:
                     "option": longs[0],
                     "aliases": sorted(set(p.opts + p.secondary_opts) - {longs[0]}),
                     "hidden": bool(p.hidden),
+                    "help_common": (
+                        p.name in common[path[0]]
+                        if len(path) == 1 and path[0] in common
+                        else not p.hidden
+                    ),
                     "multiple": bool(p.multiple),
                     "is_flag": bool(p.is_flag),
+                    "type": p.type.name,
+                    "choices": (
+                        list(p.type.choices)
+                        if isinstance(p.type, click.Choice)
+                        else None
+                    ),
+                    "default": _click_default_text(p),
                 }
             )
 
@@ -72,7 +190,11 @@ def _config_rows() -> list[dict[str, Any]]:
     from abicheck.buildsource.build_config import KEY_TABLE
 
     return [
-        {"id": spec.path, "kind": str(getattr(spec.kind, "name", spec.kind)).lower()}
+        {
+            "id": spec.path,
+            "kind": str(getattr(spec.kind, "name", spec.kind)).lower(),
+            "default": _default_text(spec.default),
+        }
         for spec in KEY_TABLE.specs
     ]
 
@@ -106,15 +228,27 @@ def _action_rows() -> list[dict[str, Any]]:
         owner = "action" if f.parent == REPO_DIR else f"actions/{f.parent.name}"
         for name, spec in (doc.get("inputs") or {}).items():
             desc = str((spec or {}).get("description", ""))
+            default = (spec or {}).get("default")
             rows.append(
                 {
                     "id": f"{owner}:{name}",
                     "action": owner,
                     "input": name,
                     "status": _input_status(desc),
+                    "required": bool((spec or {}).get("required", False)),
+                    "default": default
+                    if default is None or isinstance(default, (bool, int, str))
+                    else str(default),
                 }
             )
     return rows
+
+
+def _hints(owner: Any) -> dict[str, Any]:
+    try:
+        return typing.get_type_hints(owner)
+    except Exception:  # an unresolvable forward reference keeps the raw text
+        return {}
 
 
 def _python_rows() -> list[dict[str, Any]]:
@@ -123,22 +257,47 @@ def _python_rows() -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     for cls_name in ("CompareRequest", "DumpRequest", "InputSpec"):
         cls = getattr(service, cls_name)
+        hints = _hints(cls)
         for field in dataclasses.fields(cls):
             if field.name.startswith("_"):
                 continue
+            hint = hints.get(field.name, field.type)
+            if field.default is not dataclasses.MISSING:
+                default: Any = field.default
+            elif field.default_factory is not dataclasses.MISSING:
+                try:
+                    default = field.default_factory()
+                except Exception:  # a factory that needs context keeps its type name
+                    default = inspect.Parameter.empty
+            else:
+                default = inspect.Parameter.empty
             rows.append(
                 {
                     "id": f"{cls_name}.{field.name}",
                     "owner": cls_name,
                     "name": field.name,
+                    "annotation": _annotation_text(hint),
+                    "choices": _choices(hint),
+                    "default": _default_text(default),
                 }
             )
     for fn_name in ("run_compare", "run_dump"):
-        sig = inspect.signature(getattr(service, fn_name))
-        for name, param in sig.parameters.items():
+        fn = getattr(service, fn_name)
+        hints = _hints(fn)
+        for name, param in inspect.signature(fn).parameters.items():
             if param.kind in (param.VAR_POSITIONAL, param.VAR_KEYWORD):
                 continue
-            rows.append({"id": f"{fn_name}({name})", "owner": fn_name, "name": name})
+            hint = hints.get(name, param.annotation)
+            rows.append(
+                {
+                    "id": f"{fn_name}({name})",
+                    "owner": fn_name,
+                    "name": name,
+                    "annotation": _annotation_text(hint),
+                    "choices": _choices(hint),
+                    "default": _default_text(param.default),
+                }
+            )
     return rows
 
 
