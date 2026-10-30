@@ -391,7 +391,7 @@ class TestMergeConfigOverlayClearsSourcesRootBlocksWhenNoSourcesConfigExists:
             "build:\n  system: bazel\n"
             "sources:\n  graph: summary\n"
             "compile:\n  std: c++20\n"
-            "source:\n  method: headers\n"
+            "sources:\n  method: headers\n"
             "debug:\n  format: btf\n"
             "severity:\n  abi_breaking: error\n",
             encoding="utf-8",

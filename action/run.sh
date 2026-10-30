@@ -986,7 +986,7 @@ else:
     _sources_root_blocks = (
         ("build", "sources")
         if sources_pairwise or sources_merge_compile
-        else ("build", "sources", "compile", "source", "debug")
+        else ("build", "sources", "compile", "debug")
     )
     sources_root_env = os.environ.get("ABICHECK_SOURCES_ROOT", "")
     if sources_root_env:

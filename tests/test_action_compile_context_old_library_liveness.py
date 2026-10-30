@@ -323,7 +323,7 @@ class TestCompileContextPairwiseOldLibraryClassification:
         src_dir.mkdir()
         (src_dir / ".abicheck.yml").write_text(
             "compile:\n  sysroot: /opt/new-side-only-sysroot\n"
-            "source:\n  method: s6\n"
+            "sources:\n  method: s6\n"
             "debug:\n  format: dwarf\n",
             encoding="utf-8",
         )
@@ -490,7 +490,7 @@ class TestCompileContextPairwiseOldLibraryClassification:
         src_dir.mkdir()
         (src_dir / ".abicheck.yml").write_text(
             "compile:\n  sysroot: /opt/sources-root-sysroot\n"
-            "source:\n  method: s6\n"
+            "sources:\n  method: s6\n"
             "debug:\n  format: dwarf\n",
             encoding="utf-8",
         )
@@ -533,13 +533,13 @@ class TestCompileContextPairwiseOldLibraryClassification:
         sets conflicting values of its own, which the real pipeline never
         reads and this overlay must therefore ignore too."""
         (tmp_path / ".abicheck.yml").write_text(
-            "source:\n  method: headers\ndebug:\n  format: btf\n",
+            "sources:\n  method: headers\ndebug:\n  format: btf\n",
             encoding="utf-8",
         )
         src_dir = tmp_path / "src"
         src_dir.mkdir()
         (src_dir / ".abicheck.yml").write_text(
-            "source:\n  method: s6\ndebug:\n  format: dwarf\n",
+            "sources:\n  method: s6\ndebug:\n  format: dwarf\n",
             encoding="utf-8",
         )
         (tmp_path / "old.abicheck.json").write_bytes(b'{"schema_version": 1}')
@@ -556,7 +556,7 @@ class TestCompileContextPairwiseOldLibraryClassification:
         doc = json.loads(
             Path(cmd[cmd.index("--config") + 1]).read_text(encoding="utf-8")
         )
-        assert doc["source"] == {"method": "headers"}
+        assert doc["sources"] == {"method": "headers"}
         assert doc["debug"] == {"format": "btf"}
 
     def test_compile_disjoint_keys_do_not_merge_under_compare_with_stored_old_snapshot(
@@ -617,7 +617,7 @@ class TestCompileContextPairwiseOldLibraryClassification:
         src_dir.mkdir()
         (src_dir / ".abicheck.yml").write_text(
             "compile:\n  sysroot: /opt/new-side-only-sysroot\n"
-            "source:\n  method: s6\n"
+            "sources:\n  method: s6\n"
             "debug:\n  format: dwarf\n",
             encoding="utf-8",
         )
@@ -655,7 +655,7 @@ class TestCompileContextPairwiseOldLibraryClassification:
         src_dir.mkdir()
         (src_dir / ".abicheck.yml").write_text(
             "compile:\n  sysroot: /opt/new-side-only-sysroot\n"
-            "source:\n  method: s6\n"
+            "sources:\n  method: s6\n"
             "debug:\n  format: dwarf\n",
             encoding="utf-8",
         )
@@ -691,7 +691,7 @@ class TestCompileContextPairwiseOldLibraryClassification:
         src_dir.mkdir()
         (src_dir / ".abicheck.yml").write_text(
             "compile:\n  sysroot: /opt/new-side-only-sysroot\n"
-            "source:\n  method: s6\n"
+            "sources:\n  method: s6\n"
             "debug:\n  format: dwarf\n",
             encoding="utf-8",
         )
@@ -735,7 +735,7 @@ class TestAuditOnlyCompareStaysSingleSidedUnconditionally:
         src_dir.mkdir()
         (src_dir / ".abicheck.yml").write_text(
             "compile:\n  sysroot: /opt/sources-root-sysroot\n"
-            "source:\n  method: s6\n"
+            "sources:\n  method: s6\n"
             "debug:\n  format: dwarf\n",
             encoding="utf-8",
         )
@@ -755,5 +755,5 @@ class TestAuditOnlyCompareStaysSingleSidedUnconditionally:
         # sources-root's own compile:/source:/debug: are the intended,
         # only source for the one audited artifact.
         assert doc["compile"]["sysroot"] == "/opt/sources-root-sysroot"
-        assert doc["source"] == {"method": "s6"}
+        assert doc["sources"] == {"method": "s6"}
         assert doc["debug"] == {"format": "dwarf"}

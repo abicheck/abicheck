@@ -127,7 +127,7 @@ class TestAssuranceOverlayPromotesSourcesRootCompileSourceDebugBlocks:
         src_dir.mkdir()
         (src_dir / ".abicheck.yml").write_text(
             "compile:\n  std: c++20\n"
-            "source:\n  method: replay\n"
+            "sources:\n  method: replay\n"
             "debug:\n  format: dwarf\n"
             "build:\n  system: cmake\n",
             encoding="utf-8",
@@ -166,13 +166,13 @@ class TestAssuranceOverlayPromotesSourcesRootCompileSourceDebugBlocks:
         entirely for the CLI's own single, unconditional fold."""
         workspace = make_workspace(tmp_path)
         (workspace / ".abicheck.yml").write_text(
-            "source:\n  method: headers\ndebug:\n  format: btf\n",
+            "sources:\n  method: headers\ndebug:\n  format: btf\n",
             encoding="utf-8",
         )
         src_dir = workspace / "src"
         src_dir.mkdir()
         (src_dir / ".abicheck.yml").write_text(
-            "source:\n  method: replay\n"
+            "sources:\n  method: replay\n"
             "debug:\n  format: dwarf\n"
             "compile:\n  std: c++20\n",
             encoding="utf-8",
@@ -188,7 +188,7 @@ class TestAssuranceOverlayPromotesSourcesRootCompileSourceDebugBlocks:
         )
         assert result.returncode == 0, result.stderr
         written = _written_overlay(result)
-        assert written["source"] == {"method": "headers"}
+        assert written["sources"] == {"method": "headers"}
         assert written["debug"] == {"format": "btf"}
         assert "compile" not in written
 
@@ -238,7 +238,7 @@ class TestAssuranceOverlayPromotesSourcesRootCompileSourceDebugBlocks:
         src_dir.mkdir()
         (src_dir / ".abicheck.yml").write_text(
             "compile:\n  std: c++20\n"
-            "source:\n  method: replay\n"
+            "sources:\n  method: replay\n"
             "debug:\n  format: dwarf\n"
             "build:\n  system: cmake\n",
             encoding="utf-8",
@@ -544,7 +544,7 @@ class TestAssuranceOverlayClearsSourcesRootBlocksWhenNoSourcesConfigExists:
             "build:\n  system: bazel\n"
             "sources:\n  graph: summary\n"
             "compile:\n  std: c++20\n"
-            "source:\n  method: headers\n"
+            "sources:\n  method: headers\n"
             "debug:\n  format: btf\n",
             encoding="utf-8",
         )
@@ -581,7 +581,7 @@ class TestAssuranceOverlayClearsSourcesRootBlocksWhenNoSourcesConfigExists:
             "build:\n  system: bazel\n"
             "sources:\n  graph: summary\n"
             "compile:\n  std: c++20\n"
-            "source:\n  method: headers\n"
+            "sources:\n  method: headers\n"
             "debug:\n  format: btf\n",
             encoding="utf-8",
         )
@@ -602,7 +602,7 @@ class TestAssuranceOverlayClearsSourcesRootBlocksWhenNoSourcesConfigExists:
         assert "build" not in written
         assert "sources" not in written
         assert written["compile"] == {"std": "c++20"}
-        assert written["source"] == {"method": "headers"}
+        assert written["sources"] == {"method": "headers"}
         assert written["debug"] == {"format": "btf"}
 
 

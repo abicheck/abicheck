@@ -1559,7 +1559,7 @@ class TestCompileContextDiscoversSourcesRootOwnConfig:
         src_dir.mkdir()
         (src_dir / ".abicheck.yml").write_text(
             "compile:\n  sysroot: /opt/sources-root-sysroot\n"
-            "source:\n  method: s6\n"
+            "sources:\n  method: s6\n"
             "debug:\n  format: dwarf\n",
             encoding="utf-8",
         )
@@ -1576,7 +1576,7 @@ class TestCompileContextDiscoversSourcesRootOwnConfig:
         # operand dump has, so it's exactly what the native CLI's own
         # merge_compile_config()/discover_build_config(sources) would use.
         assert doc["compile"]["sysroot"] == "/opt/sources-root-sysroot"
-        assert doc["source"] == {"method": "s6"}
+        assert doc["sources"] == {"method": "s6"}
         assert doc["debug"] == {"format": "dwarf"}
 
 
