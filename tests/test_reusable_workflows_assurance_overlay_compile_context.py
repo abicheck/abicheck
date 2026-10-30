@@ -542,9 +542,8 @@ class TestAssuranceOverlayClearsSourcesRootBlocksWhenNoSourcesConfigExists:
         (workspace / ".abicheck.yml").write_text(
             "severity:\n  preset: strict\n"
             "build:\n  system: bazel\n"
-            "sources:\n  graph: summary\n"
+            "sources:\n  graph: summary\n  method: headers\n"
             "compile:\n  std: c++20\n"
-            "sources:\n  method: headers\n"
             "debug:\n  format: btf\n",
             encoding="utf-8",
         )
@@ -579,9 +578,8 @@ class TestAssuranceOverlayClearsSourcesRootBlocksWhenNoSourcesConfigExists:
         workspace = make_workspace(tmp_path)
         (workspace / ".abicheck.yml").write_text(
             "build:\n  system: bazel\n"
-            "sources:\n  graph: summary\n"
+            "sources:\n  graph: summary\n  method: headers\n"
             "compile:\n  std: c++20\n"
-            "sources:\n  method: headers\n"
             "debug:\n  format: btf\n",
             encoding="utf-8",
         )
@@ -600,9 +598,10 @@ class TestAssuranceOverlayClearsSourcesRootBlocksWhenNoSourcesConfigExists:
         assert result.returncode == 0, result.stderr
         written = _written_overlay(result)
         assert "build" not in written
-        assert "sources" not in written
-        assert written["compile"] == {"std": "c++20"}
+        # `sources.graph` clears with the rest of the block; the checkout's
+        # `sources.method` survives, as the retired singular `source:` block did.
         assert written["sources"] == {"method": "headers"}
+        assert written["compile"] == {"std": "c++20"}
         assert written["debug"] == {"format": "btf"}
 
 

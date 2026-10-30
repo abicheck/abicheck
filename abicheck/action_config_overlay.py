@@ -538,6 +538,7 @@ def apply_sources_root_config_blocks(
     *,
     blocks: tuple[str, ...],
     merge_compile: bool = False,
+    sources_method_from_sources_root: bool = True,
 ) -> dict[str, object]:
     """Return a COPY of *base* with each key in *blocks* updated from
     whatever *sources_doc* defines for that same top-level key.
@@ -691,6 +692,7 @@ def apply_sources_root_config_blocks(
     :func:`rebase_relative_config_paths`'s own copy-on-write convention.
     """
     base = dict(base)
+    checkout_sources = base.get("sources")
     doc = sources_doc if isinstance(sources_doc, dict) else {}
     for key in blocks:
         if key == "compile" and merge_compile:
@@ -709,4 +711,23 @@ def apply_sources_root_config_blocks(
             base[key] = doc[key]
         else:
             base.pop(key, None)
+    if "sources" in blocks and not sources_method_from_sources_root:
+        # ADR-091 R13: `sources.method` was the singular `source:` block, which
+        # a compare-shaped caller never promotes from the sources root. Keep the
+        # checkout's method and drop the sources root's, so the rename changes
+        # no result.
+        kept = (
+            checkout_sources.get("method")
+            if isinstance(checkout_sources, dict)
+            else None
+        )
+        promoted = base.get("sources")
+        promoted = dict(promoted) if isinstance(promoted, dict) else {}
+        promoted.pop("method", None)
+        if kept is not None:
+            promoted["method"] = kept
+        if promoted:
+            base["sources"] = promoted
+        else:
+            base.pop("sources", None)
     return base
