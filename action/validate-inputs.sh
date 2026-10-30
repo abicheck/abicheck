@@ -668,7 +668,7 @@ _renamed_inputs=(
 for _entry in "${_renamed_inputs[@]}"; do
   IFS=: read -r _old_name _old_var _new_name <<<"$_entry"
   if [[ -n "${!_old_var:-}" ]]; then
-    _fail "${_old_name} is RETIRED and no longer accepted: it was renamed to ${_new_name} (ADR-091). Replace ${_old_name} with ${_new_name} in your workflow, then remove ${_old_name}."
+    _fail "${_old_name} is RETIRED and no longer accepted: it was renamed to ${_new_name}. Replace ${_old_name} with ${_new_name} in your workflow, then remove ${_old_name}."
   fi
 done
 # require-complete-analysis: RETIRED (rulings.py deferred-option followup --
