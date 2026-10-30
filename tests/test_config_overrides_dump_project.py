@@ -420,3 +420,10 @@ def test_commands_without_a_config_key_take_no_set(argv: list[str]) -> None:
     assert "--set" not in help_text
     result = CliRunner().invoke(main, [*argv, "--set", "debug.dwarf_only=true"])
     assert result.exit_code == 64, result.output
+
+
+def test_resolve_dump_project_config_wraps_a_refused_override(tmp_path: Path) -> None:
+    """A typed or programmatic caller that skips the CLI's parse-time check gets
+    the same refusal as exit 64 (DumpConfigError), naming the core flag."""
+    with pytest.raises(DumpConfigError, match="--exclude-header"):
+        _resolve(None, overrides={"scope.exclude_headers": ["x.h"]})
