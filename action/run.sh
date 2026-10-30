@@ -418,6 +418,20 @@ add_single_flag() {
   fi
 }
 
+# `set:` (ADR-091 D4): one `PATH=VALUE` per line, forwarded verbatim as its
+# own `--set`. The Action does not validate the keys -- the CLI owns the
+# config schema and answers with exit 64 (the `_is_cli_error` arm). Only
+# blank and `#`-comment lines are skipped, since they name no override.
+add_set_flags() {
+  local item
+  [[ -n "${INPUT_SET:-}" ]] || return 0
+  while IFS= read -r item; do
+    item="${item%$'\r'}"
+    [[ "$item" =~ ^[[:space:]]*(#|$) ]] && continue
+    CMD+=(--set "$item")
+  done <<< "$INPUT_SET"
+}
+
 # The public evidence ladder, exactly as the CLI's own `DepthParam` accepts
 # it. `depth` is a raw, unvalidated workflow input and one of the few that
 # reach `CMD` as a *value* rather than a path, so it is validated here
@@ -4160,6 +4174,7 @@ elif [[ "$MODE" == "compare" ]]; then
   # (the dedicated input, `extra-args --severity-preset ...`, or neither),
   # and change nothing else.
   add_single_flag "--severity-preset" "${INPUT_SEVERITY_PRESET:-}"
+  add_set_flags
   # --budget: time guard (e.g. 15m, 900s, 1h); the step FAILS on overflow
   # (exit 5) -- a budget never silently shrinks scope. Baseline shape only --
   # rejected upstream for the audit-only shape (compare --no-baseline's

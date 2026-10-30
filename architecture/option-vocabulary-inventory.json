@@ -2340,6 +2340,14 @@
    "default": null
   },
   {
+   "id": "action:set",
+   "action": "action",
+   "input": "set",
+   "status": "live",
+   "required": false,
+   "default": null
+  },
+  {
    "id": "action:require-complete-analysis",
    "action": "action",
    "input": "require-complete-analysis",
@@ -3098,6 +3106,14 @@
    "status": "live",
    "required": false,
    "default": null
+  },
+  {
+   "id": "actions/check-target:set",
+   "action": "actions/check-target",
+   "input": "set",
+   "status": "live",
+   "required": false,
+   "default": ""
   },
   {
    "id": "actions/check-target:extra-args",
