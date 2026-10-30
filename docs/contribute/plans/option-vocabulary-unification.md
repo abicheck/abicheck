@@ -1,6 +1,6 @@
 # Option vocabulary unification: implementation plan
 
-**Status:** Phase 0 done (2026-10-30); Phase 2 CLI and typed-API half for `compare` done, the Action `set:` input done, the `compile:` overlay replacement and the rest of Phase 2 open; Phases 1 and 3–7 not started. Implements
+**Status:** Phases 0 and 1 done (Phase 0 2026-10-30; Phase 1 is #1850). Phase 2 is partly done: the CLI and typed-API half for `compare` (#1851), and the Action `set:` input (this PR); the `compile:` overlay replacement and the rest of Phase 2 are open. Phases 3–7 not started. Implements
 [ADR-091](../adr/091-one-option-vocabulary.md). Each phase is one PR, ordered
 so that the parity gate lands before any rename and every rename lands with
 its alias.
