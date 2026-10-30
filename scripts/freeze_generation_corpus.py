@@ -109,20 +109,33 @@ def freeze(ref: str) -> int:
             check=True,
         )
         out = tmp / "snapshot.json"
+        archived_cli = [
+            sys.executable,
+            "-I",
+            "-c",
+            "import sys; sys.path.insert(0, sys.argv[1]); "
+            "from abicheck.cli import main; sys.argv = ['abicheck'] + sys.argv[2:]; "
+            "main()",
+            str(tree),
+        ]
+        # The archived revision may predate --label (it then only has --version),
+        # so ask that revision's own CLI which spelling it accepts.
+        help_text = subprocess.run(
+            [*archived_cli, "dump", "--help"],
+            cwd=tmp,
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout
+        label_flag = "--label" if "--label" in help_text else "--version"
         subprocess.run(
             [
-                sys.executable,
-                "-I",
-                "-c",
-                "import sys; sys.path.insert(0, sys.argv[1]); "
-                "from abicheck.cli import main; sys.argv = ['abicheck'] + sys.argv[2:]; "
-                "main()",
-                str(tree),
+                *archived_cli,
                 "dump",
                 str(lib),
                 "-H",
                 str(SOURCES / "corpus.h"),
-                "--label",
+                label_flag,
                 "1",
                 "-o",
                 str(out),

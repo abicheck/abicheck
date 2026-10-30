@@ -183,25 +183,27 @@ One PR per surface keeps review small:
 - **CLI:** R1 `--version` → `--label` (`compare`, `dump`, `project history`);
   R12 `--abi3` → `--abi3-floor`; R16 `deps compare --root [old=|new=]` and
   `deps tree --root`.
-  Old spellings hidden, warn on stderr.
+  Old spellings removed outright (done, see the CLI result below).
 - **Config:** R3 `acknowledgment:` → `acknowledgments:`; R13 `source.method` →
-  `sources.method`. The loader accepts the old key with a
-  warning; `config-keys-reference.md` regenerated.
+  `sources.method`. The old keys are removed outright: the strict schema
+  rejects them as unknown keys. `config-keys-reference.md` regenerated.
 - **Action:** R4 `frontend`, R5 `compiler`/`compile-options`, R6
   `require-complete`, R7 `public-header-dirs`, R1 `old-label`/`new-label`,
   R17 `old-debug-info`/`new-debug-info` (and `devel-pkg*` into
   `old-header`/`new-header`), R18 `check-target` `depth`/`contract`.
-  Old inputs emit `::warning::` and forward. `github-action-inputs.md`
-  regenerated.
+  Each old input becomes a RETIRED tombstone that fails the run before
+  analysis and names its replacement (not a forwarder, not a warning).
+  `github-action-inputs.md` regenerated.
 - **Python:** R1 `old_label`/`new_label`, R3 `acknowledgments`, R8
   `follow_deps` and `include_system_declarations`, R9 `debuginfod`, R7
-  `public_symbols`, R18 `run_dump(frontend=)`. Old keyword arguments
-  raise `DeprecationWarning`; `python-api-reference.md` regenerated.
+  `public_symbols`, R18 `run_dump(frontend=)`. Old keyword arguments are
+  removed outright (an unexpected-keyword `TypeError`);
+  `python-api-reference.md` regenerated.
 
 Each PR: registry exceptions removed, changelog fragment (Changed /
-Deprecated), `docs/start/upgrading-*.md` migration table updated, and
-`scripts/check_docs_contract.py`'s `_RETIRED_SURFACES` gains the old
-spellings once deleted in Phase 6. Size: M each.
+Removed), `docs/start/upgrading-*.md` migration table updated, and the
+retired-surface registry (`scripts/retired_surfaces.py`) gains the old
+spellings in the same PR. Size: M each.
 
 **Result (CLI part, ADR-091 D5 R1/R12/R16).** Done: `compare`, `dump` and
 `project history` take `--label` (dest unchanged, so the command bodies and
