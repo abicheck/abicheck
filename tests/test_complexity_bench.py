@@ -85,11 +85,18 @@ def test_the_bench_sees_an_injected_quadratic(monkeypatch: pytest.MonkeyPatch) -
 
     # Sizes large enough that per-size CPU time dwarfs scheduler/timer
     # noise on fast runners: at (500, 1000, 2000) macOS arm64 measured
-    # k = 1.50 under xdist contention (main run 37645089922).
-    case = cb.Case("quad", "injected", (1000, 2000, 4000), 1.5)
+    # k = 1.50 under xdist contention (main run 37645089922). Doubling again
+    # to (2000, 4000, 8000) keeps the fitted slope above the ceiling under
+    # CPU contention (a 4-core runner with four busy-loop processes measured
+    # k in 1.68..1.95; the same sizes at 1000..4000 measured 1.63..2.34).
+    # Seven samples per size (fastest kept) drop the occasional contended
+    # outlier: a 1.46 reading was seen with three.
+    case = cb.Case("quad", "injected", (2000, 4000, 8000), 1.5, samples=7)
     monkeypatch.setitem(cb.PREPARERS, "quad", quadratic)
     k = cb.fit_exponent(cb.measure_in_process(case))
-    assert k > 1.6
+    # The docstring's contract: the body fails its ceiling, so the oracle is
+    # the case's own ceiling rather than a stricter ad-hoc number.
+    assert k > case.max_exponent
 
 
 _USECASE_REGISTRY = (
