@@ -10,9 +10,8 @@ generated: false
 
 # Upgrading from 0.6 to 0.7
 
-This page is the migration for the 0.7 option-vocabulary renames
-([ADR-091](../contribute/adr/091-one-option-vocabulary.md)). The same concept
-had two spellings on the command line; 0.7 keeps one. Each old spelling still
+This page is the migration for the 0.7 option-vocabulary renames.
+The same concept had two spellings on the command line; 0.7 keeps one. Each old spelling still
 works for one release, so existing scripts keep running while you change them.
 
 **Do this first:** run your existing command lines once against 0.7. A
