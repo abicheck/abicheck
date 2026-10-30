@@ -17,6 +17,7 @@ tests/test_acknowledgment_cli_surfaces.py
 tests/test_acknowledgment_config_cli.py
 tests/test_acknowledgment_matching.py
 tests/test_acknowledgment_release_and_api.py
+tests/test_acknowledgment_twin_identity.py
 tests/test_action_accepted_breaks_notice.py
 tests/test_action_additions_verdict.py
 tests/test_action_compare_operand_format.py
@@ -456,6 +457,8 @@ tests/test_family_f5_optimization_reference.py
 tests/test_family_f8_symbol_rule_parity.py
 tests/test_field_added_unknown_polymorphism.py
 tests/test_field_qualifier_fact_status.py
+tests/test_finding_dedup_namesakes.py
+tests/test_finding_dedup_properties.py
 tests/test_finding_disposition_pipeline.py
 tests/test_finding_disposition_suppression.py
 tests/test_finding_evolution.py
@@ -697,6 +700,7 @@ tests/test_release_scope_selection.py
 tests/test_release_selection.py
 tests/test_release_suppression_audit.py
 tests/test_render_output_unit.py
+tests/test_replay_twin_acknowledgment.py
 tests/test_report_change_view_entity_id.py
 tests/test_report_filtering.py
 tests/test_report_format_bucket_parity.py
@@ -818,12 +822,14 @@ tests/test_surface_graph_reader_migration.py
 tests/test_surface_graph_sharing.py
 tests/test_surface_metrics_drift.py
 tests/test_surface_reconciliation_properties.py
+tests/test_surface_rollup_disposition.py
 tests/test_symbol_binding_field.py
 tests/test_symbol_identity_index.py
 tests/test_symbol_origin.py
 tests/test_symbol_origin_ownership_properties.py
 tests/test_symbol_renamed_batch_evidence.py
 tests/test_symbol_versioning_coexistence.py
+tests/test_symbols_only_reresolve_cached.py
 tests/test_template_default_header_scan.py
 tests/test_template_export_loss_declaration_presence_unit.py
 tests/test_template_finding_binding.py
