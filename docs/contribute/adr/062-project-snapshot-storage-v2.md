@@ -587,3 +587,109 @@ The extractor axis's own scope and generation do not change, so this amendment
 moves no existing stored package's generation. The residual limit is the same
 as for every axis: a fingerprint cannot tell a refactor from a semantic change,
 so `--no-semantic-change --reason` is a reviewed claim.
+
+## Amendment (2026-10-30): data-evolution rules, digest roles, and immutable publication
+
+**Context.** An external review of `main` (storage history plus local
+experiments on a 3 000-function library, zlib and a two-version sample)
+confirmed D1: JSON + zstd stays. A 25.4 MB dump compresses to 107 KB, and
+splitting declarations into fixed blocks *grew* their compressed size by 63%.
+The cost that remains is evolution and loading. A full load still takes about
+108 MiB RSS, and the format kept changing because one `schema_version` still
+couples layout, meaning and fact trust. The review measured these behaviors on
+the current code:
+
+| Probe | Observed | Rule below |
+|---|---|---|
+| unknown section in a document | reader rejects the whole document | D14 |
+| unknown field inside a function record | accepted, then dropped on re-save | D14 |
+| only `created_at` differs | snapshot digest changes | D16 |
+| functions reordered | digest changes although comparison is `NO_CHANGE` | D16 |
+| `write_project_manifest` republish whose object check fails | `manifest.json` unchanged, previous package **unreadable** (refs already overwritten) | D17 |
+
+Six live/stored/package comparison combinations gave the same three changes,
+`BREAKING`, exit 4. Round-trips through JSON, gzip and zstd kept every fact.
+
+### D14 — Must-understand versus optional extensions
+
+Every section kind and every field added after this amendment is declared
+either **optional** or **must-understand**.
+
+- A reader preserves an unknown **optional** section or field as opaque bytes
+  and writes it back unchanged on re-save. Dropping it is a defect.
+- An unknown **must-understand** section or field blocks only the analyses that
+  depend on it. Those analyses resolve to `NOT_COMPARABLE`, with a diagnostic
+  that names the extension. It does not reject unrelated sections.
+- D2's two fail-closed axes are unchanged. A newer `package_format_version` or
+  `comparison_contract_version` still refuses the whole package.
+
+A new optional display or provenance field therefore needs no version bump,
+and a new comparison-relevant field cannot be silently ignored.
+
+### D15 — The wire contract is independent of runtime classes
+
+Section wire shapes are defined by the `SectionDTO` encoders (ADR-063 D8) and
+a checked-in per-section field inventory. They are never derived from a model
+dataclass. Renaming, reordering or splitting a runtime dataclass must not
+change serialized bytes. A test pins that: it serializes a fixed corpus
+before and after a runtime-only refactor and requires identical bytes. A wire
+change goes through `section_schema_version` and a migration adapter (D13).
+
+D3 also applies at section level. These three states stay distinct and are
+stored distinctly:
+
+- **absent**: the producer did not collect the section, or predates it;
+- **present and empty**: collected, and nothing exists;
+- **failed**: the extractor ran and failed.
+
+An absent section never reads as an empty one.
+
+### D16 — One digest per question, none silently redefined
+
+| Digest | Covers | Answers |
+|---|---|---|
+| `transport` | the exact stored bytes, compressed | integrity of a file or object |
+| `evidence` | D5-normalized facts; volatile metadata and unordered-collection order excluded | "is this the same evidence?" (dedup, caches) |
+| `publication` | the exact published snapshot, including capture metadata | "is this the exact artifact a release recorded?" |
+| `comparison_input` | the evidence plus the contract and policy inputs one comparison read | "is a cached comparison result still valid?" |
+
+The digest written today keeps its current meaning under an explicit name. A
+new role is a new field, never a reinterpretation of the old one. The two
+probes in the table above are `evidence`-digest defects under D5. They are
+fixed there, and the `publication` digest is expected to change on
+`created_at`.
+
+### D17 — Refs are immutable; publication is atomic
+
+This closes the republish gap that `write_project_manifest`'s docstring defers.
+
+- A ref document is content-addressed and written once. Its path is derived
+  from its content digest, so republishing never overwrites a file that the
+  live `manifest.json` names.
+- The commit point is a single atomic replace of the root manifest pointer,
+  after every new object and ref is durable and verified.
+- A publish that fails or is interrupted leaves the previous package fully
+  readable. A regression test asserts this for a failed object check, an
+  interruption between the ref and manifest writes, and a second publish with
+  changed content under the same ids.
+- Release history (ADR-066) refers to a `publication` digest, never to a
+  mutable path.
+
+Concurrent writers to one root are not supported by this decision. They are
+refused or serialized, never interleaved.
+
+### D18 — Selective load before more compression
+
+D8's lazy sections are the performance lever. A comparison opens only the
+sections its requested analyses need. Multi-library comparisons share an
+immutable, digest-keyed decoded-section cache (D11). Sections are not
+pre-chunked by size, which the 63% result argues against. A section is split
+only when a measured access pattern needs part of it.
+
+### Exit criteria and non-goals
+
+The rules above are accepted. Their implementation is tracked in the
+[storage format v2 plan](../plans/storage-format-v2.md). The phase is not
+complete until it is validated on the oneDAL/MKL corpus, on Windows and macOS,
+and with concurrent-publisher refusal. No binary codec and no user-facing
+compression knob are introduced (D1, D12).
