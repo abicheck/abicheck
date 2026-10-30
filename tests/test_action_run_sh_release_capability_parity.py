@@ -405,7 +405,8 @@ class TestReleaseOperandHostileInputHasNoSideEffect:
     """
 
     @pytest.mark.parametrize(
-        "var", ["INPUT_DEPTH", "INPUT_SYSROOT", "INPUT_COMPILE_OPTIONS", "INPUT_COMPILER"]
+        "var",
+        ["INPUT_DEPTH", "INPUT_SYSROOT", "INPUT_COMPILE_OPTIONS", "INPUT_COMPILER"],
     )
     @pytest.mark.parametrize("shape", _RELEASE_OPERAND_SHAPES)
     @pytest.mark.parametrize(

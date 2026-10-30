@@ -200,8 +200,14 @@ def test_endswith_guard_passes_only_prefix_form(compiler: str, expected: str) ->
 
 
 def test_startswith_and_endswith_are_case_insensitive() -> None:
-    assert eval_gha_expression("${{ startsWith(inputs.a, 'LIB') }}", inputs={"a": "libx"}) is True
-    assert eval_gha_expression("${{ endsWith(inputs.a, 'X') }}", inputs={"a": "libx"}) is True
+    assert (
+        eval_gha_expression("${{ startsWith(inputs.a, 'LIB') }}", inputs={"a": "libx"})
+        is True
+    )
+    assert (
+        eval_gha_expression("${{ endsWith(inputs.a, 'X') }}", inputs={"a": "libx"})
+        is True
+    )
 
 
 def test_unsupported_function_still_fails_loudly() -> None:

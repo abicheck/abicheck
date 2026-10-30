@@ -60,7 +60,10 @@ def test_consumer_compile_context_uses_a_separate_extraction() -> None:
     # standard/stdlib ultimately has to cross to reach the actual dump
     # invocation (bug-class-regression-testing.md Phase 6), left untested
     # even though ast-frontend's identically-shaped sibling line was.
-    assert consumer["with"]["compiler"] == "${{ inputs.consumer-gcc-path || (endsWith(inputs.compiler, '-') && inputs.compiler || '') }}"
+    assert (
+        consumer["with"]["compiler"]
+        == "${{ inputs.consumer-gcc-path || (endsWith(inputs.compiler, '-') && inputs.compiler || '') }}"
+    )
     assert consumer["with"]["compile-options"] == "${{ inputs.consumer-gcc-options }}"
     analysis = next(step for step in steps if step.get("name") == "Run analysis")
     assert "check-target-consumer.abi.json" in analysis["with"]["new-library"]
@@ -818,7 +821,11 @@ class TestConsumerCompilePropagationChainMutationCheck:
 
     def test_passes_against_the_real_wiring(self) -> None:
         step = self._consumer_context_step()
-        _assert_step_input_forwards(step, "compiler", "${{ inputs.consumer-gcc-path || (endsWith(inputs.compiler, '-') && inputs.compiler || '') }}")
+        _assert_step_input_forwards(
+            step,
+            "compiler",
+            "${{ inputs.consumer-gcc-path || (endsWith(inputs.compiler, '-') && inputs.compiler || '') }}",
+        )
         _assert_step_input_forwards(
             step, "compile-options", "${{ inputs.consumer-gcc-options }}"
         )
@@ -836,7 +843,9 @@ class TestConsumerCompilePropagationChainMutationCheck:
 
         with pytest.raises(AssertionError) as excinfo:
             _assert_step_input_forwards(
-                mutated, "compiler", "${{ inputs.consumer-gcc-path || (endsWith(inputs.compiler, '-') && inputs.compiler || '') }}"
+                mutated,
+                "compiler",
+                "${{ inputs.consumer-gcc-path || (endsWith(inputs.compiler, '-') && inputs.compiler || '') }}",
             )
 
         message = str(excinfo.value)
@@ -849,7 +858,9 @@ class TestConsumerCompilePropagationChainMutationCheck:
         from `with:` altogether rather than being repointed."""
         step = self._consumer_context_step()
         mutated = dict(step)
-        mutated["with"] = {k: v for k, v in step["with"].items() if k != "compile-options"}
+        mutated["with"] = {
+            k: v for k, v in step["with"].items() if k != "compile-options"
+        }
 
         with pytest.raises(AssertionError, match="compile-options"):
             _assert_step_input_forwards(

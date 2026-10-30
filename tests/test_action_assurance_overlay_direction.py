@@ -213,9 +213,7 @@ class TestRootValidatesTheTriState:
             },
         )
         assert result.returncode != 0
-        assert f"require-complete '{value}' is not recognized" in _combined(
-            result
-        )
+        assert f"require-complete '{value}' is not recognized" in _combined(result)
 
     def test_non_compare_mode_warns_and_does_not_fail(self) -> None:
         result = _run_script(
@@ -227,9 +225,7 @@ class TestRootValidatesTheTriState:
             },
         )
         assert result.returncode == 0, _combined(result)
-        assert "require-complete is set but has no effect" in _combined(
-            result
-        )
+        assert "require-complete is set but has no effect" in _combined(result)
 
 
 def _argv_recording_stub(tmp_path: Path) -> tuple[Path, Path]:
@@ -304,9 +300,7 @@ class TestRootOverrideReachesTheCli:
         )
         bindir, config_seen = _argv_recording_stub(tmp_path)
 
-        _run_action(
-            tmp_path, {**env, "INPUT_REQUIRE_COMPLETE": "false"}, bindir
-        )
+        _run_action(tmp_path, {**env, "INPUT_REQUIRE_COMPLETE": "false"}, bindir)
 
         argv = (tmp_path / "argv.txt").read_text(encoding="utf-8").splitlines()
         assert "--config" in argv, argv

@@ -943,9 +943,7 @@ class TestBaselineRequiredAndCandidateBuildOutputForwarded:
             "${{ matrix.kind != 'bundle' && matrix.compile_gcc_options "
             "|| inputs.gcc-options }}"
         )
-        # gcc-prefix is folded into compiler (ADR-091 R5); it no longer
-        # has its own key on the check-target call.
-        assert "gcc-prefix" not in run_step["with"]
+        assert "gcc-prefix" not in run_step["with"]  # folded into compiler (R5)
 
     @pytest.mark.parametrize(
         ("key", "global_input"),
@@ -992,10 +990,8 @@ class TestBaselineRequiredAndCandidateBuildOutputForwarded:
         )
         # GitHub's `a && b || c`: when `a` is false the result is `c`, so a
         # bundle cell lands on the workflow-global input, not ''.
-        # `compiler` folds gcc-prefix in as its last fallback (ADR-091 R5).
         last = "inputs.gcc-prefix" if key == "compiler" else global_input
-        assert global_input in expr
-        assert expr.endswith(f"|| {last} }}}}")
+        assert global_input in expr and expr.endswith(f"|| {last} }}}}")
 
     def test_sysroot_stays_unconditional_for_bundle_cells(self) -> None:
         """`sysroot` has no per-cell overlay field, so it stays unconditional

@@ -54,7 +54,7 @@ def _logging_abicheck(tmp_path: Path) -> tuple[Path, Path]:
     stub.write_text(
         "#!/usr/bin/env bash\n"
         'for arg in "$@"; do printf \'%s\\n\' "$arg"; done >> "' + str(log) + '"\n'
-        "printf -- '---\\n' >> \"" + str(log) + "\"\n"
+        "printf -- '---\\n' >> \"" + str(log) + '"\n'
         "exit 0\n",
         encoding="utf-8",
     )
@@ -159,7 +159,11 @@ RENAMED: list[tuple[str, str, str]] = [
     ("gcc-path", "INPUT_GCC_PATH", "compiler"),
     ("gcc-prefix", "INPUT_GCC_PREFIX", "compiler"),
     ("gcc-options", "INPUT_GCC_OPTIONS", "compile-options"),
-    ("analysis-assurance-complete", "INPUT_ANALYSIS_ASSURANCE_COMPLETE", "require-complete"),
+    (
+        "analysis-assurance-complete",
+        "INPUT_ANALYSIS_ASSURANCE_COMPLETE",
+        "require-complete",
+    ),
     ("public-header-dir", "INPUT_PUBLIC_HEADER_DIR", "public-header-dirs"),
     ("debug-info1", "INPUT_DEBUG_INFO1", "old-debug-info"),
     ("debug-info2", "INPUT_DEBUG_INFO2", "new-debug-info"),
