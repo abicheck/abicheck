@@ -381,7 +381,7 @@ _extra_args_names_label() {
   local _tok
   # shellcheck disable=SC2086  # word-split exactly as `CMD+=($INPUT_EXTRA_ARGS)` does.
   for _tok in ${INPUT_EXTRA_ARGS:-}; do
-    case "$_tok" in --label|--label=*|--version|--version=*) return 0 ;; esac
+    case "$_tok" in --label|--label=*) return 0 ;; esac
   done
   return 1
 }
@@ -2151,8 +2151,8 @@ for param in node.params:
 # as safe).
 #
 # **Why an opaque fallback is not safe, concretely.** Treating every token as
-# opaque is not merely "under-recognition". `extra-args: --version --dry-run`
-# is argv Click accepts by consuming `--dry-run` as `--version`'s own value,
+# opaque is not merely "under-recognition". `extra-args: --label --dry-run`
+# is argv Click accepts by consuming `--dry-run` as `--label`'s own value,
 # leaving `dry_run=False` and running a perfectly normal comparison (verified
 # directly against the installed CLI). An opaque tokenizer instead reports a
 # real `--dry-run` flag -- so `_extra_args_has_dry_run_flag` answers true,
@@ -2173,7 +2173,7 @@ for param in node.params:
 _require_cli_value_options_or_fail() {
   [[ "${_CLI_VALUE_OPTIONS_DERIVED:-false}" == "true" ]] && return 0
   [[ -z "${INPUT_EXTRA_ARGS:-}" ]] && return 0
-  _error_annotation "extra-args is set, but this step cannot determine which abicheck CLI options take a value, so it cannot tell a real flag in extra-args from another option's literal value (resolved interpreter: '${_PY_BIN:-<none found on PATH>}'; it must be able to import abicheck). Guessing is not safe: treating every token as opaque would misread 'extra-args: --version --dry-run' -- which the CLI accepts as --version's own value -- as a real --dry-run, then skip this step's output/sidecar injection while a full comparison ran, silently producing no report. Install abicheck into the interpreter that 'command -v python3' resolves on this runner, or remove extra-args." >&2
+  _error_annotation "extra-args is set, but this step cannot determine which abicheck CLI options take a value, so it cannot tell a real flag in extra-args from another option's literal value (resolved interpreter: '${_PY_BIN:-<none found on PATH>}'; it must be able to import abicheck). Guessing is not safe: treating every token as opaque would misread 'extra-args: --label --dry-run' -- which the CLI accepts as --label's own value -- as a real --dry-run, then skip this step's output/sidecar injection while a full comparison ran, silently producing no report. Install abicheck into the interpreter that 'command -v python3' resolves on this runner, or remove extra-args." >&2
   exit 1
 }
 

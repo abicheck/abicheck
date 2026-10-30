@@ -296,8 +296,8 @@ class TestUndeterminedOptionTableFailsClosed:
     The first implementation treated an undeterminable table as "nothing is
     value-taking", reasoning that under-recognition is the safe direction. A
     reviewer's counterexample (Codex, PR #1234, P2) disproved it:
-    ``extra-args: --version --dry-run`` is argv the CLI accepts by consuming
-    ``--dry-run`` as ``--version``'s own value, leaving ``dry_run=False``. An
+    ``extra-args: --label --dry-run`` is argv the CLI accepts by consuming
+    ``--dry-run`` as ``--label``'s own value, leaving ``dry_run=False``. An
     opaque tokenizer invents a ``--dry-run`` that is not there, so the Action
     skips its ``--write json=``/``-o`` injection as it must for a real dry
     run -- and a full comparison then runs while the requested output is never
@@ -339,7 +339,7 @@ class TestUndeterminedOptionTableFailsClosed:
 
     def test_extra_args_with_an_undetermined_table_is_fatal(self) -> None:
         result = self._run(
-            'INPUT_EXTRA_ARGS="--version --dry-run"\n'
+            'INPUT_EXTRA_ARGS="--label --dry-run"\n'
             "_cli_value_options_init\n"
             "_require_cli_value_options_or_fail\n"
             "echo UNREACHABLE"
@@ -355,7 +355,7 @@ class TestUndeterminedOptionTableFailsClosed:
             'INPUT_EXTRA_ARGS="--policy x"\n'
             "_cli_value_options_init\n_require_cli_value_options_or_fail"
         )
-        assert "--version --dry-run" in result.stderr
+        assert "--label --dry-run" in result.stderr
         assert (
             "cannot determine which abicheck CLI options take a value" in result.stderr
         )
@@ -387,7 +387,7 @@ class TestUndeterminedOptionTableFailsClosed:
         """The positive half: with the table derived, the tokenizer's answer for
         the disproving input matches Click's own parse."""
         out = _run_shell(
-            'INPUT_EXTRA_ARGS="--version --dry-run" _extra_args_has_dry_run_flag '
+            'INPUT_EXTRA_ARGS="--label --dry-run" _extra_args_has_dry_run_flag '
             "&& echo DRYRUN || echo NOT_DRYRUN",
             prelude=_real_prelude("compare"),
         )
@@ -622,7 +622,7 @@ class TestCheckTargetDerivesTheSameWay:
         ``INPUT_EXTRA_ARGS`` deliberately absent, which is the real shape of
         that step's environment -- a test that set both would have passed
         against the bug."""
-        result = self._run_guard('EXTRA_ARGS="--version --config"\n')
+        result = self._run_guard('EXTRA_ARGS="--label --config"\n')
         assert result.returncode == 1, (
             "check-target's guard did not fail closed with EXTRA_ARGS set; "
             f"stdout={result.stdout!r} stderr={result.stderr!r}"

@@ -1055,8 +1055,8 @@ runs:
 
         # Same rule as run.sh's `_require_cli_value_options_or_fail`, and for
         # the same reason (Codex review, PR #1234, P2): an opaque-token
-        # fallback is NOT safe. `extra-args: --version --dry-run` is argv the
-        # CLI accepts as --version's own value, so an opaque tokenizer invents
+        # fallback is NOT safe. `extra-args: --label --dry-run` is argv the
+        # CLI accepts as --label's own value, so an opaque tokenizer invents
         # a --dry-run that is not there -- and this step's own trailing/real
         # --config recognition would misread the same shape. Undetermined is
         # therefore fatal, but only when `extra-args` is non-empty: with

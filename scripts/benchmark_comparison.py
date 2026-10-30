@@ -966,7 +966,7 @@ def run_abicheck_full(
                 str(real_so),
                 "-o",
                 str(base),
-                "--version",
+                "--label",
                 version,
             ]
             if case == "case115_bit_int_width_changed":
@@ -1123,7 +1123,7 @@ def _run_abicheck_dump_compare(
             str(so),
             "-o",
             str(snap),
-            "--version",
+            "--label",
             version,
         ]
         if header and header.exists():
@@ -3288,7 +3288,7 @@ def _abicheck_tier_result(
             str(so),
             "-o",
             str(snap),
-            "--version",
+            "--label",
             ver,
         ]
         if h and h.exists():

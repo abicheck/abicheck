@@ -66,16 +66,13 @@ OPTION_SET_SNAPSHOT: dict[str, tuple[str, ...]] = {
         # Phase 7j collapsed the last two-sided input still spelled as two
         # flags: --old-variant/--new-variant -> one side-scoped --variant
         # ([old=|new=]VARIANT_ID), the same ADR-040 Lever 1 shape --header/
-        # --version already use. No alias: the old pair exits 64.
+        # --version already use. No alias: the retired spelling exits 64.
         # Phase 9b deleted --scope-public-headers/--no-scope-public-headers:
         # --contract all is the measured replacement for the opt-out, and
         # header-origin scoping stays on for a run with no --contract
         # (.abicheck.yml's scope.public is its config spelling).
         # Phase 9d deleted --post-manifest: .abicheck.yml's
         # contract.overlays.post_manifest (Phase 9c) is its only spelling.
-        # `--abi3` is the retired spelling, still accepted with a rename
-        # warning (abicheck/frontends/cli/options/renamed.py).
-        "--abi3",
         "--abi3-floor",
         # ADR-067 D5: this run's acknowledgment records; overrides
         # .abicheck.yml's acknowledgment.file (the config key stays the
@@ -119,14 +116,13 @@ OPTION_SET_SNAPSHOT: dict[str, tuple[str, ...]] = {
         "--sources",
         "--suppress",
         "--use-cases",
-        # ADR-091: the per-side version label; `--version` is its retired spelling.
+        # ADR-091: the per-side version label.
         "--label",
         "--used-by",
         "--used-by-manifest",
         "--variant",
         "--verbose",
         "--view",
-        "--version",
         "-D",
         "-H",
         "-I",

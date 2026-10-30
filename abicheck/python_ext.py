@@ -265,7 +265,7 @@ def abi3_precondition_message(abi3_floor: tuple[int, int], binary_name: str) -> 
     independently-drifting copies of the same sentence.
     """
     return (
-        f"--abi3 {abi3_floor[0]}.{abi3_floor[1]} was given but "
+        f"--abi3-floor {abi3_floor[0]}.{abi3_floor[1]} was given but "
         f"'{binary_name}' is not a recognisable CPython extension module "
         "(no PyInit_* export and no CPython C-API imports). The stable-ABI "
         "audit applies only to extension modules (Cython/pybind11/"

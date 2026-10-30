@@ -421,23 +421,23 @@ jobs:
       # cannot see anything only a real runner produces -- `INPUT_*` quoting, and
       # the `CMD+=($INPUT_EXTRA_ARGS)` word-split under a live IFS.
       #
-      # `--version --dry-run` is the discriminating input, and it is the exact
+      # `--label --dry-run` is the discriminating input, and it is the exact
       # counterexample that disproved this ADR's first design (Codex review, PR
-      # #1234): Click accepts it by consuming `--dry-run` as `--version`'s own
+      # #1234): Click accepts it by consuming `--dry-run` as `--label`'s own
       # value, leaving `dry_run=False` and running a full comparison. A correct
       # derivation therefore sees NO dry-run flag, injects its report sidecar,
       # and publishes a real verdict. A tokenizer that mis-reads it -- the old
       # hand-maintained list, or an opaque-token fallback -- reports a dry run,
       # skips the sidecar, and publishes DRY_RUN while a real comparison ran.
       # So the assertion below fails loudly on precisely that regression.
-      - name: '[extra-args-flag-shaped-value] Run compare with a flag-shaped --version value in extra-args'
+      - name: '[extra-args-flag-shaped-value] Run compare with a flag-shaped --label value in extra-args'
         id: extra-args
         if: ${{ !cancelled() }}
         uses: ./
         with:
           old-library: tests/fixtures/action/action_test_v1.json
           new-library: tests/fixtures/action/action_test_v1_compat.json
-          extra-args: --version --dry-run
+          extra-args: --label --dry-run
           install-deps: false
 
       - name: '[extra-args-flag-shaped-value] Verify the run was not mistaken for a dry run'
@@ -447,7 +447,7 @@ jobs:
           echo "Verdict: ${{ steps.extra-args.outputs.verdict }}"
           echo "Exit code: ${{ steps.extra-args.outputs.exit-code }}"
           if [[ "${{ steps.extra-args.outputs.verdict }}" == "DRY_RUN" ]]; then
-            echo "::error::extra-args '--version --dry-run' was read as a real --dry-run flag. The CLI consumes --dry-run as --version's value and runs a full comparison, so the value-taking-option derivation in run.sh (_cli_value_options_init) is wrong or fell back to treating every token as opaque. See ADR-070 D3."
+            echo "::error::extra-args '--label --dry-run' was read as a real --dry-run flag. The CLI consumes --dry-run as --label's value and runs a full comparison, so the value-taking-option derivation in run.sh (_cli_value_options_init) is wrong or fell back to treating every token as opaque. See ADR-070 D3."
             exit 1
           fi
           # A real comparison of these two fixtures is compatible, so the

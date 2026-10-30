@@ -271,7 +271,7 @@ class _Lab:
                     "dump",
                     str(lib),
                     *[x for h in headers for x in ("-H", str(h))],
-                    "--version",
+                    "--label",
                     side,
                     "-o",
                     str(out),
