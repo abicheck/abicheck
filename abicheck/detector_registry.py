@@ -54,6 +54,7 @@ from typing import TYPE_CHECKING
 from .compare.abi_equivalent_retype import refine_abi_equivalent_retypes
 from .compare.declined_comparisons import declined_scope
 from .compare.detector_inputs import depth_gap_reason, unavailable_required_facts
+from .compare.section_readers import not_comparable_reason, unreadable_sections_read
 from .detectors import DetectorResult
 
 if TYPE_CHECKING:
@@ -371,6 +372,22 @@ class DetectorRegistry:
             # (`compare/detector_inputs.py`): not evaluated, never run on the
             # emptied input (bug class depth_projection_drops_lower_layer_
             # detector_input).
+            # ADR-062 D14/D15: a stored section this detector reads could not
+            # be used (unknown must-understand extension, newer section
+            # version, failed extraction) -- not comparable, never run on the
+            # defaults standing in for it.
+            blocked = unreadable_sections_read(entry.name, old, new)
+            if blocked:
+                detector_results.append(
+                    DetectorResult(
+                        name=entry.name,
+                        changes_count=0,
+                        enabled=False,
+                        coverage_gap=not_comparable_reason(blocked),
+                        not_evaluated=True,
+                    )
+                )
+                continue
             depth_gap = unavailable_required_facts(entry.name, old, new)
             if depth_gap is not None:
                 detector_results.append(

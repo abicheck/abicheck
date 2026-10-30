@@ -50,6 +50,8 @@ from .snapshot_runtime_only import RUNTIME_ONLY_SNAPSHOT_FIELDS
 from .snapshot_schema_versions import SCHEMA_VERSION
 from .surface_graph_codec import encode_surface_graph
 from .versioning import this_build_generations
+from .wire_extensions import extensions_of
+from .wire_field_names import wire_field_names
 
 # Leaf types that are immutable, so the "detached container" contract
 # :func:`snapshot_to_dict` promises its callers is satisfied by sharing the
@@ -99,18 +101,6 @@ _IMMUTABLE_LEAF_TYPES: frozenset[type] = frozenset(
 _FIELD_NAMES: dict[type, tuple[str, ...] | None] = {}
 
 
-def _wire_field_names(cls: type) -> tuple[str, ...]:
-    """*cls*'s persisted fields in declaration order: its stored fields plus
-    any retired bridge views it inherits (ADR-063 Phase 10), computed per
-    concrete class so a subclass's own fields are never dropped."""
-    stored = {f.name for f in dataclass_fields(cls)}
-    retired: frozenset[str] = getattr(cls, "__retired_bridge_fields__", frozenset())
-    if not retired:
-        return tuple(f.name for f in dataclass_fields(cls))
-    declared = cls.__dataclass_fields__  # type: ignore[attr-defined]
-    return tuple(n for n in declared if n in stored or n in retired)
-
-
 def _dataclass_field_names(cls: type) -> tuple[str, ...] | None:
     try:
         return _FIELD_NAMES[cls]
@@ -118,7 +108,7 @@ def _dataclass_field_names(cls: type) -> tuple[str, ...] | None:
         names = (
             # ADR-063 Phase 10: a class with retired bridge fields persists
             # them from their read-only views, in their historical position.
-            _wire_field_names(cls) if is_dataclass(cls) else None
+            wire_field_names(cls) if is_dataclass(cls) else None
         )
         _FIELD_NAMES[cls] = names
         return names
@@ -664,6 +654,7 @@ def sectioned_document_for_write(snap: AbiSnapshot) -> dict[str, Any]:
         _snapshot_to_dict(snap, _encode_value_sorted),
         max_known_schema_version=SCHEMA_VERSION,
         document_encoded_here=True,
+        extensions=extensions_of(snap),  # ADR-062 D14
     )
 
 

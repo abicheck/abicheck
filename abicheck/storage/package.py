@@ -538,9 +538,17 @@ class PackageManifest:
     #: byte-identical shared evidence collapses to one stored object across
     #: every artifact that references it (digest addressing, no extra dedup).
     project_sections: Mapping[str, ObjectRef] = field(default_factory=dict)
+    #: ADR-062 D14: names a reader must understand before using this package
+    #: for comparison. Written only when non-empty; an unknown name refuses
+    #: the package (`wire_extensions.check_must_understand`).
+    must_understand: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         _instance_of(self.versions, StorageVersions, "versions")
+        names = tuple(self.must_understand)
+        if not all(isinstance(n, str) and n for n in names):
+            raise ValueError("PackageManifest.must_understand must hold names")
+        object.__setattr__(self, "must_understand", tuple(sorted(set(names))))
 
         variants = _row_sequence(self.variant_refs, "variant_refs")
         for index, variant in enumerate(variants):
@@ -631,6 +639,8 @@ class PackageManifest:
             out["project_sections"] = {
                 key: ref.to_dict() for key, ref in self.project_sections.items()
             }
+        if self.must_understand:
+            out["must_understand"] = list(self.must_understand)
         return out
 
     @classmethod
@@ -648,6 +658,9 @@ class PackageManifest:
                 key: ObjectRef.from_dict(value)
                 for key, value in raw_project_sections.items()
             },
+            must_understand=tuple(
+                _row_sequence(data.get("must_understand", ()), "must_understand")
+            ),
         )
 
 

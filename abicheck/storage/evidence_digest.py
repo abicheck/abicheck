@@ -113,9 +113,15 @@ def _stably_sorted(value: Any, key: Callable[[Any], tuple[str, ...]]) -> Any:
     return sorted(value, key=key)  # `sorted` is stable
 
 
-def evidence_digest_of_document(document: Mapping[str, Any]) -> str:
+def evidence_digest_of_document(
+    document: Mapping[str, Any], *, extensions: Mapping[str, Any] | None = None
+) -> str:
     """The `evidence` digest (`sha256:<hex>`) of a `snapshot_to_dict()`-
-    shaped *document*. Shallow copies only: *document* is left untouched."""
+    shaped *document*. Shallow copies only: *document* is left untouched.
+
+    *extensions*: the ADR-062 D14 carriers the snapshot was loaded with
+    (`WireExtensions.evidence_form`), hashed in when non-empty -- D14 puts
+    them inside the evidence digest. Absent, the digest is unchanged."""
     form: dict[str, Any] = {
         key: value
         for key, value in document.items()
@@ -133,6 +139,10 @@ def evidence_digest_of_document(document: Mapping[str, Any]) -> str:
         form[container] = copy
         if name in copy:
             copy[name] = _stably_sorted(copy[name], key)
-    return semantic_digest(
-        {"evidence_form_version": EVIDENCE_FORM_VERSION, "document": form}
-    )
+    envelope: dict[str, Any] = {
+        "evidence_form_version": EVIDENCE_FORM_VERSION,
+        "document": form,
+    }
+    if extensions:
+        envelope["wire_extensions"] = extensions
+    return semantic_digest(envelope)

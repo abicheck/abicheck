@@ -802,17 +802,15 @@ listing/report, even where no resolution graph can place it.
     publish, with the `package_format_version` bump to 2 and a D13 adapter
     for the v1 id-path layout. Writers are serialized. This closes the
     "third, deliberately deferred gap" below and its failed-check variant.
-  - D14, not implemented: `must_understand` and `extensions` carriers.
-  - D15, partially implemented: a pinned per-section field inventory and a
-    byte-identity test. The inventory is not yet generated from the
-    `SectionDTO` encoders, and there are no section-header availability
-    entries yet.
+  - D14, implemented: `must_understand` and `extensions` carriers; detail
+    below.
+  - D15, implemented: a generated, CI-diffed field inventory, the
+    byte-identity test, and the `section_availability` header table.
   - D16, partially implemented: the `evidence` digest, persisted on
     `ArtifactRef` and consumed by the same-snapshot coverage note.
     `comparison_input` and `transport` are not implemented.
   - D18, not implemented beyond the `graph` section's deferred decode.
-  - Exit: one regression test per amendment probe (D17's exist; D14's are
-    strict `xfail` probes), the oneDAL/MKL corpus, Windows and macOS, and
+  - Exit: one regression test per amendment probe (D14's and D17's exist), the oneDAL/MKL corpus, Windows and macOS, and
     concurrent-publisher serialization (tested on Linux).
 
 ### Phase 2
@@ -918,7 +916,45 @@ A1.9), item by item. Open items are also listed in
     `tests/test_snapshot_digest_recomputation.py`.
   - Open: `comparison_input` has no consumer (no comparison-result cache
     exists), and no path hashes compressed bytes for `transport`.
-- **D15, wire contract: partially implemented.**
+- **D14, optional and must-understand extensions: implemented.**
+  `storage/wire_extensions.py` splits every carrier off a sectioned
+  document before decode and merges it back on write
+  (`sectioned_document.to_sectioned_document(extensions=...)`): unknown
+  section kinds and blocked sections verbatim, header `must_understand`/
+  `extensions`, the document-level `must_understand`, and
+  (`wire_record_extensions.py`) unknown fields of function, variable,
+  record-type and enum records, keyed by identity and ordinal. The decoded
+  snapshot holds them in a side table, not a domain field (ADR-063 D8); the
+  evidence and publication digests include them. A section with an
+  unknown must-understand name, a newer `section_schema_version`, or a
+  `failed` availability entry is not decoded:
+  `AbiSnapshot.unreadable_sections` (runtime-only) names it,
+  `compare/section_readers.py` (checked against an AST scan of each
+  detector) resolves exactly its readers to `not_evaluated` with a
+  `not comparable:` coverage gap, the surface-metric roll-up is skipped,
+  and `analysis_assurance` reads `partial`. `provenance` and a document- or
+  manifest-level unknown name refuse instead. `SectionDTO` and
+  `PackageManifest` carry the fields; a directory package refuses an unknown
+  section-level name. No version bump (each carrier is written only when
+  non-empty; ADR-062's D14 implementation decisions). Tests:
+  `tests/unit/storage/test_extension_preservation.py` (the former strict
+  `xfail` probes), `tests/test_section_readers_contract.py`,
+  `tests/test_cli_compare_must_understand.py` (CLI, JSON and Markdown
+  report, exit codes), and the updated section-version gate tests.
+  Residuals: see known gaps.
+- **D15, wire contract: implemented.** `storage/wire_inventory.py`
+  generates the per-section inventory (header keys including the D14
+  carriers, every payload key path, the document keys and availability
+  entry keys) from the document the encoders write for the fixed corpus;
+  `test_wire_contract.py` diffs it against
+  `tests/fixtures/wire_contract/field_inventory.json` and accepts a moved
+  section only with a version bump and a registered migration. Section
+  availability: `section_availability` maps each written section to
+  `present`; a `failed` entry has diagnostics, no payload, and stays in
+  `section_schema_versions` so a pre-D15 reader refuses rather than reading
+  it empty; this build blocks its readers. Producer API:
+  `wire_extensions.record_section_failure`. Earlier state, kept for the
+  record: **partially implemented.**
   `tests/unit/storage/test_wire_contract.py` pins each section's field
   inventory and canonical sha256 for a fixed corpus
   (`tests/fixtures/wire_contract/sections.json`), so a byte change under an
@@ -1046,6 +1082,10 @@ satisfies for the one domain type it actually sections today
 | `abicheck/storage/atomic_file.py` | `atomic_write` — write a cache file through a same-directory temp file and `os.replace`, so a concurrent reader sees either no file or a complete one, never a torn one. Moved unchanged from `dumper_cache.py`; its stream-copy sibling was removed in dead-code-and-single-owner Stage G. Internal, not re-exported by the package |
 | `abicheck/storage/project_package_archive.py` | `pack_project_package`, `unpack_project_package`, `is_project_package_archive`, `MIMETYPE` — A1.1's one-file zip transport of a package directory; unpacking refuses any non-layout, symlinked, compressed, duplicate or over-budget member before writing. Internal, reached through `workflows.storage` |
 | `abicheck/storage/evidence_digest.py` | `EVIDENCE_FORM_VERSION`, `UNORDERED_LISTS`, `VOLATILE_CAPTURE_FIELDS`, `evidence_digest_of_document` — ADR-062 D16's evidence digest over a snapshot document: volatile capture metadata dropped, identity-matched record lists stably sorted by identity, semantically ordered lists untouched, the form version hashed in. Internal, not re-exported by the package |
+| `abicheck/storage/wire_extensions.py` | `AVAILABILITY_KEY`, `DOCUMENT_MUST_UNDERSTAND_KEY`, `EXTENSIONS_KEY`, `IDENTITY_SECTION_KIND`, `MUST_UNDERSTAND_KEY`, `UNDERSTOOD_EXTENSIONS`, `WIRE_EXTENSIONS_KEY`, `WireExtensions`, `attach`, `check_must_understand`, `extensions_of`, `merge_wire_extensions`, `record_section_failure`, `split_wire_extensions` — ADR-062 D14/D15 carriers of the sectioned document: unknown sections, header must-understand names and extension maps, the section availability table, and the sections a load must block, split off on read and merged back on write. Internal, not re-exported by the package |
+| `abicheck/storage/wire_record_extensions.py` | `RECORD_EXTENSIONS_KEY`, `RECORD_LISTS`, `RecordExtras`, `collect_record_extras`, `restore_record_extras` — ADR-062 D14 at record level: unknown fields of identity-matched records, kept by identity and ordinal and written back on re-save. Internal, not re-exported by the package |
+| `abicheck/storage/wire_inventory.py` | `OPTIONAL_HEADER_KEYS`, `field_inventory` — ADR-062 D15's per-section field inventory, generated from a sectioned document the encoders just wrote (header keys, payload key paths, the availability entry keys); the checked-in copy is diffed in CI. Internal, not re-exported by the package |
+| `abicheck/storage/wire_field_names.py` | `wire_field_names` — the keys the snapshot encoder writes for a dataclass record, shared by the encoder and the ADR-062 D14 record reader. Internal, not re-exported by the package |
 | `abicheck/storage/package_publish.py` | `REF_DIRS`, `REF_ENTRY_FIELDS`, `REF_SCHEMA_VERSION`, `REF_SCHEMA_VERSION_KEY`, `publish_lock_name`, `ref_digest_entries`, `ref_digest_of`, `ref_document`, `ref_record`, `versioned_ref_relpath` — ADR-062 D17's ref layout (amends D6): the immutable refs/&lt;kind&gt;/&lt;id&gt;/&lt;ref-digest&gt;.json path, the ref document with its own layout version, its ref digest (the semantic digest of the whole document), the package-format-v2 manifest entries naming each ref by id and ref digest, and the cross-process lock name serializing writers. Internal, not re-exported by the package |
 | `abicheck/storage/zip_member.py` | `deterministic_zipinfo` — the pinned zip member header shared by G40's bundle archive and the package transport. Internal, not re-exported by the package |
 | `abicheck/storage/snapshot_runtime_only.py` | `RUNTIME_ONLY_SNAPSHOT_FIELDS` — the one declaration of the AbiSnapshot fields a single run sets and the document never carries, each with its reason. The snapshot encoder drops exactly these keys and the field round-trip test reads this mapping instead of keeping a copy. Internal, not re-exported by the package |

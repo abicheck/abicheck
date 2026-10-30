@@ -283,4 +283,49 @@ SERIALIZATION_BUG_CLASSES: tuple[BugClass, ...] = (
             "digest_source": ("computed", "persisted"),
         },
     ),
+    BugClass(
+        id="storage.wire_extension_dropped_or_refused",
+        invariant=(
+            "A stored snapshot's data a reader does not understand is never "
+            "silently dropped and never refuses data it could still compare: "
+            "an unknown optional section, header extension or record field "
+            "is written back unchanged on re-save and is inside the evidence "
+            "and publication digests; a section carrying an unknown "
+            "must-understand name, a newer section_schema_version, or a "
+            "failed availability entry resolves exactly the analyses that "
+            "read it to not comparable (never to an empty section, a removal "
+            "or a clean pass) while every other analysis still runs."
+        ),
+        # ADR-062's 2026-10-30 amendment (#1858) records the probes (D14/D15).
+        fixed_by=(1858,),
+        seed_tests=(
+            "tests/unit/storage/test_extension_preservation.py",
+            "tests/test_section_readers_contract.py",
+            "tests/test_cli_compare_must_understand.py",
+            "tests/unit/storage/test_wire_contract.py",
+        ),
+        public_surfaces=("cli",),
+        axes={
+            "carrier": (
+                "unknown-section",
+                "header-extensions",
+                "record-field",
+                "must-understand",
+                "newer-section-version",
+                "failed-section",
+            ),
+            "level": ("record", "section", "document", "manifest"),
+        },
+        known_gaps=(
+            KnownGap(
+                description=(
+                    "Unknown keys nested below a record's top level are still "
+                    "dropped on re-save, and a directory package refuses an "
+                    "unknown section-level must-understand name instead of "
+                    "narrowing it."
+                ),
+                reference="docs/contribute/known-gaps.md",
+            ),
+        ),
+    ),
 )

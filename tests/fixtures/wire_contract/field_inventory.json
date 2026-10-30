@@ -1,0 +1,643 @@
+{
+  "availability_entry": [
+    "diagnostics",
+    "status"
+  ],
+  "document": [
+    "must_understand",
+    "schema_version",
+    "section_availability",
+    "section_schema_versions",
+    "sections"
+  ],
+  "sections": {
+    "binary": {
+      "fields": {
+        "": [
+          "build_id",
+          "build_mode",
+          "elf",
+          "elf_only_mode",
+          "kabi",
+          "macho",
+          "pe",
+          "platform",
+          "source_mtime",
+          "source_mtime_epoch",
+          "source_path",
+          "source_size"
+        ],
+        "elf": [
+          "abi_flags",
+          "bind_now",
+          "dynamic_flags",
+          "dynamic_flags_fact",
+          "e_flags",
+          "ei_data",
+          "elf_class",
+          "gnu_properties",
+          "has_dt_relr",
+          "has_executable_stack",
+          "has_fini",
+          "has_fini_fact",
+          "has_fortify_source",
+          "has_init",
+          "has_init_fact",
+          "has_stack_canary",
+          "has_static_tls",
+          "has_textrel",
+          "has_tls_symbols",
+          "has_writable_executable_segment",
+          "hash_styles",
+          "imports",
+          "interpreter",
+          "is_pie",
+          "is_symbolic",
+          "machine",
+          "min_kernel_version",
+          "needed",
+          "osabi",
+          "pointer_size",
+          "relro",
+          "rpath",
+          "runpath",
+          "soname",
+          "symbols",
+          "versions_defined",
+          "versions_required"
+        ],
+        "elf.dynamic_flags_fact": [
+          "diagnostics",
+          "status",
+          "value"
+        ],
+        "elf.has_fini_fact": [
+          "diagnostics",
+          "status",
+          "value"
+        ],
+        "elf.has_init_fact": [
+          "diagnostics",
+          "status",
+          "value"
+        ],
+        "elf.imports[]": [
+          "binding",
+          "is_default",
+          "name",
+          "sym_type",
+          "version",
+          "version_soname"
+        ],
+        "elf.symbols[]": [
+          "binding",
+          "is_default",
+          "name",
+          "origin_lib",
+          "size",
+          "sym_type",
+          "value_alignment",
+          "version",
+          "visibility"
+        ],
+        "elf.versions_required": []
+      },
+      "header": [
+        "extensions",
+        "must_understand",
+        "payload",
+        "section_kind",
+        "section_schema_version"
+      ],
+      "section_schema_version": 1
+    },
+    "build": {
+      "fields": {
+        "": [
+          "build_source_pack"
+        ]
+      },
+      "header": [
+        "extensions",
+        "must_understand",
+        "payload",
+        "section_kind",
+        "section_schema_version"
+      ],
+      "section_schema_version": 1
+    },
+    "debug": {
+      "fields": {
+        "": [
+          "ast_compile_args",
+          "ast_cplusplus_macro",
+          "ast_fallback_reason",
+          "ast_producer",
+          "ast_resolved_standard",
+          "ast_resolved_standard_fact",
+          "ast_sysroot",
+          "ast_toolchain",
+          "ast_toolchain_supported",
+          "ast_toolchain_unsupported_reasons",
+          "build_context_defines",
+          "castxml_var_access_facts_reliable",
+          "clang_deprecation_facts_reliable",
+          "clang_field_initializer_facts_reliable",
+          "clang_restrict_facts_reliable",
+          "clang_va_list_facts_reliable",
+          "clang_vtable_facts_reliable",
+          "dwarf",
+          "dwarf_advanced",
+          "fact_provenance",
+          "from_headers",
+          "frontend_context_kind",
+          "header_cv_facts_reliable",
+          "inline_facts_reliable",
+          "param_kind_facts_reliable",
+          "parsed_with_build_context",
+          "template_default_header_scan"
+        ],
+        "ast_resolved_standard_fact": [
+          "diagnostics",
+          "status",
+          "value"
+        ],
+        "ast_toolchain": [],
+        "fact_provenance": []
+      },
+      "header": [
+        "extensions",
+        "must_understand",
+        "payload",
+        "section_kind",
+        "section_schema_version"
+      ],
+      "section_schema_version": 1
+    },
+    "declarations": {
+      "fields": {
+        "": [
+          "constant_entity_ids",
+          "constants",
+          "enums",
+          "functions",
+          "numpy_capi",
+          "python_api",
+          "python_ext",
+          "sycl",
+          "typedef_entity_ids",
+          "typedefs",
+          "typedefs_qualified",
+          "variables"
+        ],
+        "constant_entity_ids": [],
+        "constants": [],
+        "enums[]": [
+          "deprecated",
+          "deprecated_fact",
+          "is_scoped",
+          "is_scoped_fact",
+          "members",
+          "name",
+          "origin",
+          "qualified_name",
+          "qualified_name_fact",
+          "source_header",
+          "source_header_fact",
+          "source_location",
+          "underlying_type"
+        ],
+        "enums[].deprecated_fact": [
+          "diagnostics",
+          "status",
+          "value"
+        ],
+        "enums[].is_scoped_fact": [
+          "diagnostics",
+          "status",
+          "value"
+        ],
+        "enums[].members[]": [
+          "name",
+          "value"
+        ],
+        "enums[].qualified_name_fact": [
+          "diagnostics",
+          "status",
+          "value"
+        ],
+        "enums[].source_header_fact": [
+          "diagnostics",
+          "status",
+          "value"
+        ],
+        "functions[]": [
+          "access",
+          "binary_exported_fact",
+          "contract_attributes",
+          "contract_attributes_fact",
+          "declared_in_headers_fact",
+          "deleted_from_dwarf",
+          "deprecated",
+          "deprecated_fact",
+          "elf_binding",
+          "elf_binding_fact",
+          "elf_visibility",
+          "exception_spec",
+          "exception_spec_fact",
+          "hidden_friend_owner",
+          "hidden_friend_owner_fact",
+          "in_public_contract_fact",
+          "is_compiler_generated",
+          "is_compiler_generated_fact",
+          "is_const",
+          "is_deleted",
+          "is_explicit",
+          "is_explicit_fact",
+          "is_extern_c",
+          "is_hidden_friend",
+          "is_hidden_friend_fact",
+          "is_inline",
+          "is_inline_fact",
+          "is_noexcept",
+          "is_override",
+          "is_override_fact",
+          "is_pure_virtual",
+          "is_static",
+          "is_variadic",
+          "is_variadic_fact",
+          "is_virtual",
+          "is_volatile",
+          "mangled",
+          "name",
+          "origin",
+          "params",
+          "ref_qualifier",
+          "return_pointer_depth",
+          "return_type",
+          "source_header",
+          "source_header_fact",
+          "source_location",
+          "visibility",
+          "vtable_index"
+        ],
+        "functions[].contract_attributes_fact": [
+          "diagnostics",
+          "status",
+          "value"
+        ],
+        "functions[].deprecated_fact": [
+          "diagnostics",
+          "status",
+          "value"
+        ],
+        "functions[].elf_binding_fact": [
+          "diagnostics",
+          "status",
+          "value"
+        ],
+        "functions[].exception_spec_fact": [
+          "diagnostics",
+          "status",
+          "value"
+        ],
+        "functions[].hidden_friend_owner_fact": [
+          "diagnostics",
+          "status",
+          "value"
+        ],
+        "functions[].is_compiler_generated_fact": [
+          "diagnostics",
+          "status",
+          "value"
+        ],
+        "functions[].is_explicit_fact": [
+          "diagnostics",
+          "status",
+          "value"
+        ],
+        "functions[].is_hidden_friend_fact": [
+          "diagnostics",
+          "status",
+          "value"
+        ],
+        "functions[].is_inline_fact": [
+          "diagnostics",
+          "status",
+          "value"
+        ],
+        "functions[].is_override_fact": [
+          "diagnostics",
+          "status",
+          "value"
+        ],
+        "functions[].is_variadic_fact": [
+          "diagnostics",
+          "status",
+          "value"
+        ],
+        "functions[].params[]": [
+          "default",
+          "is_restrict",
+          "is_restrict_fact",
+          "is_va_list",
+          "is_va_list_fact",
+          "kind",
+          "kind_fact",
+          "name",
+          "pointer_depth",
+          "type"
+        ],
+        "functions[].params[].is_restrict_fact": [
+          "diagnostics",
+          "status",
+          "value"
+        ],
+        "functions[].params[].is_va_list_fact": [
+          "diagnostics",
+          "status",
+          "value"
+        ],
+        "functions[].params[].kind_fact": [
+          "diagnostics",
+          "status",
+          "value"
+        ],
+        "functions[].source_header_fact": [
+          "diagnostics",
+          "status",
+          "value"
+        ],
+        "typedef_entity_ids": [],
+        "typedefs": [],
+        "typedefs_qualified": [],
+        "variables[]": [
+          "access",
+          "access_fact",
+          "alignment_bits",
+          "alignment_bits_fact",
+          "binary_exported_fact",
+          "declared_in_headers_fact",
+          "deprecated",
+          "deprecated_fact",
+          "elf_binding",
+          "elf_binding_fact",
+          "elf_visibility",
+          "in_public_contract_fact",
+          "is_const",
+          "is_static",
+          "mangled",
+          "name",
+          "origin",
+          "source_header",
+          "source_header_fact",
+          "source_location",
+          "type",
+          "value",
+          "visibility"
+        ],
+        "variables[].access_fact": [
+          "diagnostics",
+          "status",
+          "value"
+        ],
+        "variables[].alignment_bits_fact": [
+          "diagnostics",
+          "status",
+          "value"
+        ],
+        "variables[].deprecated_fact": [
+          "diagnostics",
+          "status",
+          "value"
+        ],
+        "variables[].elf_binding_fact": [
+          "diagnostics",
+          "status",
+          "value"
+        ],
+        "variables[].source_header_fact": [
+          "diagnostics",
+          "status",
+          "value"
+        ]
+      },
+      "header": [
+        "extensions",
+        "must_understand",
+        "payload",
+        "section_kind",
+        "section_schema_version"
+      ],
+      "section_schema_version": 1
+    },
+    "layout": {
+      "fields": {
+        "": [
+          "conditional_fields",
+          "contract",
+          "dependency_scope",
+          "dwarf_layout_coherence",
+          "dwarf_layout_coherence_mismatches",
+          "excluded_header_matching",
+          "excluded_header_patterns",
+          "header_only",
+          "scope_fallback"
+        ],
+        "conditional_fields": []
+      },
+      "header": [
+        "extensions",
+        "must_understand",
+        "payload",
+        "section_kind",
+        "section_schema_version"
+      ],
+      "section_schema_version": 1
+    },
+    "provenance": {
+      "fields": {
+        "": [
+          "created_at",
+          "dependency_info",
+          "fact_generations",
+          "git_commit",
+          "git_tag",
+          "language_profile",
+          "library",
+          "version"
+        ],
+        "fact_generations": [
+          "extractor",
+          "resolver",
+          "source"
+        ]
+      },
+      "header": [
+        "extensions",
+        "must_understand",
+        "payload",
+        "section_kind",
+        "section_schema_version"
+      ],
+      "section_schema_version": 1
+    },
+    "types": {
+      "fields": {
+        "": [
+          "types"
+        ],
+        "types[]": [
+          "alignment_bits",
+          "base_offsets",
+          "bases",
+          "bases_fact",
+          "data_size_bits",
+          "data_size_bits_fact",
+          "deprecated",
+          "deprecated_fact",
+          "fields",
+          "has_anonymous_aggregate_fields",
+          "is_abstract",
+          "is_abstract_fact",
+          "is_final",
+          "is_final_fact",
+          "is_opaque",
+          "is_standard_layout",
+          "is_standard_layout_fact",
+          "is_template_pattern",
+          "is_trivially_copyable",
+          "is_trivially_copyable_fact",
+          "is_union",
+          "kind",
+          "name",
+          "origin",
+          "qualified_name",
+          "qualified_name_fact",
+          "size_bits",
+          "source_header",
+          "source_header_fact",
+          "source_location",
+          "virtual_bases",
+          "virtual_bases_fact",
+          "vptr_offset_bits",
+          "vptr_offset_bits_fact",
+          "vtable",
+          "vtable_fact"
+        ],
+        "types[].base_offsets": [],
+        "types[].bases_fact": [
+          "diagnostics",
+          "status",
+          "value"
+        ],
+        "types[].data_size_bits_fact": [
+          "diagnostics",
+          "status",
+          "value"
+        ],
+        "types[].deprecated_fact": [
+          "diagnostics",
+          "status",
+          "value"
+        ],
+        "types[].fields[]": [
+          "access",
+          "bitfield_bits",
+          "default",
+          "default_fact",
+          "deprecated",
+          "deprecated_fact",
+          "is_bitfield",
+          "is_const",
+          "is_const_fact",
+          "is_mutable",
+          "is_mutable_fact",
+          "is_volatile",
+          "is_volatile_fact",
+          "name",
+          "offset_bits",
+          "type"
+        ],
+        "types[].fields[].default_fact": [
+          "diagnostics",
+          "status",
+          "value"
+        ],
+        "types[].fields[].deprecated_fact": [
+          "diagnostics",
+          "status",
+          "value"
+        ],
+        "types[].fields[].is_const_fact": [
+          "diagnostics",
+          "status",
+          "value"
+        ],
+        "types[].fields[].is_mutable_fact": [
+          "diagnostics",
+          "status",
+          "value"
+        ],
+        "types[].fields[].is_volatile_fact": [
+          "diagnostics",
+          "status",
+          "value"
+        ],
+        "types[].is_abstract_fact": [
+          "diagnostics",
+          "status",
+          "value"
+        ],
+        "types[].is_final_fact": [
+          "diagnostics",
+          "status",
+          "value"
+        ],
+        "types[].is_standard_layout_fact": [
+          "diagnostics",
+          "status",
+          "value"
+        ],
+        "types[].is_trivially_copyable_fact": [
+          "diagnostics",
+          "status",
+          "value"
+        ],
+        "types[].qualified_name_fact": [
+          "diagnostics",
+          "status",
+          "value"
+        ],
+        "types[].source_header_fact": [
+          "diagnostics",
+          "status",
+          "value"
+        ],
+        "types[].virtual_bases_fact": [
+          "diagnostics",
+          "status",
+          "value"
+        ],
+        "types[].vptr_offset_bits_fact": [
+          "diagnostics",
+          "status",
+          "value"
+        ],
+        "types[].vtable_fact": [
+          "diagnostics",
+          "status",
+          "value"
+        ]
+      },
+      "header": [
+        "extensions",
+        "must_understand",
+        "payload",
+        "section_kind",
+        "section_schema_version"
+      ],
+      "section_schema_version": 1
+    }
+  }
+}

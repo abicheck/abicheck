@@ -601,6 +601,14 @@ class AbiSnapshot:
     projection_evidence_gaps: tuple[str, ...] = field(
         default=(), repr=False, compare=False, kw_only=True
     )
+    # Runtime-only: ``(section kind, diagnostic)`` for each stored section
+    # this build could not use (ADR-062 D14/D15: an unknown must-understand
+    # extension, a newer section version, a ``failed`` extraction). Its
+    # fields hold defaults, not evidence; `compare/section_readers.py`
+    # resolves every analysis reading it to not comparable. Never serialized.
+    unreadable_sections: tuple[tuple[str, str], ...] = field(
+        default=(), repr=False, compare=False, kw_only=True
+    )
     # {guard macro: function names} the castxml parse could not see because
     # they sit in a preprocessor branch its configuration excluded -- decided by
     # that run's own `-E -dD` output (`extract/headers/preprocessor_branches.py`).

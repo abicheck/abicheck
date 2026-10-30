@@ -110,6 +110,7 @@ from .storage.versioning import (
     StorageVersions,
     reader_generation_compatibility,
 )
+from .storage.wire_extensions import check_must_understand
 
 __all__ = [
     "DirectoryObjectStore",
@@ -394,8 +395,9 @@ def write_project_manifest(root: str | Path, manifest: PackageManifest) -> None:
                 }
                 for ref_id, record in refs
             ]
-        # Omitted when empty: absent means no cross-artifact evidence.
-        if manifest.project_sections:
+        if manifest.must_understand:  # ADR-062 D14; omitted when empty
+            summary["must_understand"] = list(manifest.must_understand)
+        if manifest.project_sections:  # omitted when empty
             summary["project_sections"] = {
                 key: ref.to_dict() for key, ref in manifest.project_sections.items()
             }
@@ -593,12 +595,9 @@ def read_manifest_summary(root: str | Path) -> ManifestSummary:
     enough to load unconditionally.
 
     Refuses a package this build cannot safely read *before* returning
-    anything a caller might go on to load `refs/*.json` from: D2's two
-    fail-closed version axes (`package_format_version`/
-    `comparison_contract_version`) exist precisely so an unrecognized
-    container layout or comparison contract is refused rather than silently
-    parsed as if it were this build's own (Codex review — no other
-    production call site performed this check yet).
+    anything a caller might load `refs/*.json` from: D2's fail-closed axes
+    (`package_format_version`/`comparison_contract_version`) and an unknown
+    D14 manifest `must_understand` name are refused, never silently parsed.
     """
     root_path = Path(root)
     data = json.loads(read_snapshot_bytes(root_path / MANIFEST_RELPATH))
@@ -612,6 +611,7 @@ def read_manifest_summary(root: str | Path) -> ManifestSummary:
             f"{compatibility.reason}"
         )
     record = str(root_path / MANIFEST_RELPATH)
+    check_must_understand(data.get("must_understand"), record)  # ADR-062 D14
     ref_digests: Mapping[str, Mapping[str, str]] = MappingProxyType({})
     id_lists: Mapping[str, Any] = data
     if versions.package_format_version >= 2:

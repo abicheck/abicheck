@@ -253,30 +253,20 @@ current emitter, which is unchanged.
 
 #### ADR-062 D14-D18 data-evolution rules are partly implemented (2026-10-30)
 
-**Status (2026-10-30): PARTIAL.** D17 (immutable digest-named refs, atomic
-publication, serialized writers) is implemented, and D15 is guarded by a
-pinned wire contract, and D16's `evidence` digest is implemented and
-consumed; the rest of plan item A1.9 is open. Owner:
+**Status (2026-10-30): PARTIAL.** D14, D15 and D17 are implemented (with
+the residuals below), and D16's `evidence` digest is implemented and
+consumed; D16's other roles and D18 are open. Owner:
 `storage/`; per-item status in the
 [storage format v2 plan](plans/storage-format-v2.md).
 
-- **D14 (open, false-clean risk).** A reader drops an unknown field inside a
-  record (a function record, for example) when it re-saves, and rejects a
-  whole sectioned document that carries an unknown section. The amendment
-  specifies the carriers: a `must_understand` list on each `SectionDTO`
-  header and on the manifest, and an `extensions` map of canonical JSON
-  values on each record and header, included in the digests. Building them
-  needs three things together, which is why it was not half-landed:
-  - the DTO codecs read and write `extensions`;
-  - `sectioned_document.py` keeps an unknown section instead of refusing
-    the document;
-  - the compare layer resolves an analysis that depends on an unknown
-    must-understand extension, or on a newer `section_schema_version`, to
-    `NOT_COMPARABLE` with a diagnostic naming it.
-
-  Strict `xfail` probes in
-  `tests/unit/storage/test_extension_preservation_gap.py` pin today's
-  behavior, and will fail once either behavior is fixed.
+- **D14 (implemented; residuals).** Unknown sections, header and record
+  `extensions` and unknown record fields are preserved; an unknown
+  must-understand name or a newer section version blocks only that
+  section's readers (not comparable). Residuals: only top-level fields of
+  function/variable/record-type/enum records are preserved (an unknown key
+  nested deeper, inside a parameter or an ELF symbol, is still dropped on
+  re-save), and a directory package refuses, rather than narrows, an
+  unknown must-understand name on a section object.
 - **D16 (partial).** The `evidence` digest is implemented
   (`storage/evidence_digest.py`), persisted as the optional
   `ArtifactRef.evidence_digest`, and read by the same-snapshot coverage
@@ -287,12 +277,12 @@ consumed; the rest of plan item A1.9 is open. Owner:
   snapshot decoded from the stored document can differ from it after
   load-time backfill, so mixing the two would read as "different" (the safe
   direction).
-- **D15 (partial).** Section keys still come from model field names. The
-  pinned-bytes test catches a field rename, but the codec does not prevent
-  one. The section-header `FactAvailability` table (`not_collected`/
-  `present`/`failed`, with a `failed` entry carrying no payload) does not
-  exist yet. Today only fact families inside a payload keep those three
-  states apart.
+- **D15 (implemented; residual).** The field inventory is generated and
+  diffed, and section availability is a header table. Residual: no current
+  extractor reports a whole-section failure (each section aggregates
+  several extractors whose failures are fact-family `FactAvailability`), so
+  `record_section_failure` has no production caller yet; the inventory
+  expands only what the fixed corpus populates.
 - **D18 (open).** Only the `graph` section decodes lazily.
 - **D17 residuals.** Superseded refs and section objects are never
   garbage-collected. Without `fcntl` (Windows) or in reference mode,

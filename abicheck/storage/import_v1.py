@@ -175,6 +175,7 @@ from .sparse_section_codec import (
 from .surface_graph_codec import DeferredGraphPayload
 from .types_section_codec import TypesSection
 from .versioning import FactGenerations, StorageVersions
+from .wire_extensions import check_must_understand
 
 #: ADR-063 Track 4 (8B), third slice: one entry per `LEGACY_SECTION_KINDS`
 #: member that has its own dedicated DTO -- every one of them, as of this
@@ -704,6 +705,7 @@ def export_legacy_sections(
             continue
         dto = SectionDTO.from_dict(raw)
         _check_section_kind(dto, section_kind, artifact_id, locator)
+        check_must_understand(list(dto.must_understand), locator)  # ADR-062 D14
         if section_kind == SEMANTIC_IR_SECTION_KIND:
             ir, conflicts = semantic_ir_from_dto(dto)
             document.update(semantic_ir_to_document(ir, conflicts))

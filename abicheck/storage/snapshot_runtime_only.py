@@ -65,6 +65,10 @@ RUNTIME_ONLY_SNAPSHOT_FIELDS: Final[Mapping[str, str]] = MappingProxyType(
         "projection_unavailable": (
             "the detectors a depth projection disabled for this run"
         ),
+        "unreadable_sections": (
+            "the stored sections this run's load could not use; the stored "
+            "document keeps them verbatim"
+        ),
         "projection_evidence_gaps": (
             "the evidence a depth projection could not reproduce for this run"
         ),

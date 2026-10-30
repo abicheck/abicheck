@@ -121,6 +121,13 @@ legacy-import provenance axes (D2) — none of them the single overloaded
 unstated or unrecognized value refuses to load rather than being treated as
 "this build's own version". The rest are informational.
 
+`manifest.json` may also carry an optional `must_understand` list, written
+only when non-empty: an unknown name refuses the package. A
+section object's own header may carry `must_understand` and `extensions`; in
+a directory package an unknown must-understand name on a section is refused
+(fail closed). The single-file `.abi.json` reader blocks only that section's
+analyses instead (see [snapshot format](snapshot-format.md#extensions-and-must-understand-sections)).
+
 ## Sections
 
 An artifact's content is split into independently-addressable *sections*

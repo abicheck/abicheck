@@ -198,6 +198,13 @@ class TestDirectPackagingMatchesTheObjectStorePath:
         except Exception:
             pytest.skip("not a loadable snapshot")
         direct = to_sectioned_document(doc, max_known_schema_version=SCHEMA_VERSION)
+        # ADR-062 D15: the section-header availability table is stamped on
+        # top of the sections; every written section reads `present`.
+        availability = direct.pop("section_availability")
+        assert availability == {
+            kind: {"diagnostics": [], "status": "present"}
+            for kind in direct["sections"]
+        }
         assert json.dumps(direct, indent=2) == json.dumps(
             _via_object_store(doc), indent=2
         )
