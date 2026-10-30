@@ -1,6 +1,6 @@
 # Option vocabulary unification: implementation plan
 
-**Status:** Proposed (2026-10-30), not started. Implements
+**Status:** Phase 0 done (2026-10-30); Phases 1–7 not started. Implements
 [ADR-091](../adr/091-one-option-vocabulary.md). Each phase is one PR, ordered
 so that the parity gate lands before any rename and every rename lands with
 its alias.
@@ -17,7 +17,7 @@ passes with an empty exceptions list; `compare --help` lists at most 15
 options and `action.yml` at most 25 analysis inputs; the four reference
 pages are generated from or checked against the registry.
 
-## Phase 0 — Inventory and the open semantic questions (no behavior change)
+## Phase 0 — Inventory and the open semantic questions (done)
 
 - Write `scripts/gen_option_vocabulary.py --inventory`: dump every option from
   click introspection (all commands), `action.yml` inputs, the config schema
@@ -54,6 +54,31 @@ exceptions: []                     # no-growth; each names an R-id
 ```
 
 Owner: `architecture/`, `scripts/`. Size: S.
+
+**Result (2026-10-30).** Landed as `scripts/gen_option_vocabulary.py`,
+`architecture/option-vocabulary-inventory.json`,
+`architecture/option-vocabulary.yaml` and `tests/test_option_vocabulary.py`
+(inventory fresh; every row claimed exactly once; ids exist; tiers valid).
+The registry carries `concept`, `tier`, `renames` and the member ids per
+surface. The richer per-concept fields of the schema above (type,
+cardinality, default, sidedness, derived names) are Phase 1's job, because
+Phase 1 is what checks them. Answers, recorded in ADR-091:
+
+- Q4: `scope.public_symbols` = `force_public_symbols` (a widening overlay);
+  `public_surface_allowlist` is a separate, narrowing, typed-API-only concept
+  (`committed_surface` in the registry).
+- R13: `source:` holds only `method`; no collision with `sources:`.
+- R8: `follow_dependencies` is `--follow-deps` on both requests;
+  `InputSpec.include_dependencies` is actually `--include-system-declarations`,
+  so the rename targets that name instead.
+- Q3: `gcc-prefix` is only a fallback for the compiler path, so it folds into
+  `compiler`.
+- New findings, added to ADR-091 as R17/R18: the Action's numeric sides
+  (`debug-info1/2`, `devel-pkg1/2`), `check-target` `requested-depth` and
+  `contract-file`, `run_dump(header_backend)`, and `deps tree --sysroot`.
+- Sub-actions other than `check-target` (baseline transport, report
+  publication, run verification) are `out_of_scope` patterns for now;
+  `actions/aggregate` and `actions/collect-facts` are mapped in Phase 1.
 
 ## Phase 1 — Parity gate
 
@@ -104,17 +129,21 @@ Each keeps the old spelling as a deprecated alias (D7). Size: M.
 One PR per surface keeps review small:
 
 - **CLI:** R1 `--version` → `--label` (`compare`, `dump`, `project history`);
-  R12 `--abi3` → `--abi3-floor`; R16 `deps compare --root [old=|new=]`.
+  R12 `--abi3` → `--abi3-floor`; R16 `deps compare --root [old=|new=]` and
+  `deps tree --root`.
   Old spellings hidden, warn on stderr.
-- **Config:** R3 `acknowledgment:` → `acknowledgments:`; R13 `source:` into
-  `sources:` (if Phase 0 allows). The loader accepts the old key with a
+- **Config:** R3 `acknowledgment:` → `acknowledgments:`; R13 `source.method` →
+  `sources.method`. The loader accepts the old key with a
   warning; `config-keys-reference.md` regenerated.
 - **Action:** R4 `frontend`, R5 `compiler`/`compile-options`, R6
-  `require-complete`, R7 `public-header-dirs`, R1 `old-label`/`new-label`.
+  `require-complete`, R7 `public-header-dirs`, R1 `old-label`/`new-label`,
+  R17 `old-debug-info`/`new-debug-info` (and `devel-pkg*` into
+  `old-header`/`new-header`), R18 `check-target` `depth`/`contract`.
   Old inputs emit `::warning::` and forward. `github-action-inputs.md`
   regenerated.
 - **Python:** R1 `old_label`/`new_label`, R3 `acknowledgments`, R8
-  `follow_deps`, R9 `debuginfod`, R7 per Phase 0. Old keyword arguments
+  `follow_deps` and `include_system_declarations`, R9 `debuginfod`, R7
+  `public_symbols`, R18 `run_dump(frontend=)`. Old keyword arguments
   raise `DeprecationWarning`; `python-api-reference.md` regenerated.
 
 Each PR: registry exceptions removed, changelog fragment (Changed /

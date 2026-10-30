@@ -1,9 +1,10 @@
 # ADR-091: One Option Vocabulary Across CLI, Config, Action and Typed API
 
 **Date:** 2026-10-30
-**Status:** Proposed — not implemented. No code has changed. This ADR proposes
-renames and behavior unifications on four public surfaces; each lands through
-the migration in D7. Implementation plan:
+**Status:** Proposed — Phase 0 done (inventory and registry, no behavior
+change). This ADR proposes renames and behavior unifications on four public
+surfaces; each lands through the migration in D7. Open questions Q1–Q4 are
+resolved below. Implementation plan:
 [`plans/option-vocabulary-unification.md`](../plans/option-vocabulary-unification.md).
 
 Governed by: [ADR-037](037-cli-interface-contract.md) (CLI interface
@@ -32,14 +33,15 @@ A 2026-10-30 audit of the live surfaces (click tree, `action.yml`,
 | Version label | `compare --version [old=\|new=]L`; `dump --version L`; root `--version` = tool version | — | `old-version`/`new-version` | `old_version`/`new_version` |
 | Header frontend | — | `compile.frontend` | `ast-frontend` | `frontend` |
 | Compiler | — | `compile.compiler`, `compile.options` | `gcc-path`, `gcc-prefix`, `gcc-options` | `compile_context` |
-| Dependencies | `--follow-deps`, `--search-path` | — | `follow-deps` | `DumpRequest.follow_dependencies`, `InputSpec.include_dependencies`, `dependency_search_paths` |
+| Dependencies | `--follow-deps`, `--search-path` | — | `follow-deps` | `follow_dependencies`, `dependency_search_paths` |
+| System declarations | `--include-system-declarations` | — | — | `InputSpec.include_dependencies` (a different word for the same switch) |
 | Debuginfod | `dump` only | `debug.debuginfod` | — | `enable_debuginfod` |
 | Contract | `--contract {public,exports,all,auto}` | `contract:` | — | `contract_evaluation` + `contract_mode` (no `auto`) |
 | Completeness floor | — | `assurance.require_complete` | `analysis-assurance-complete` | `require_complete` (ADR-088) |
 | Public surface | default on | `scope.public`, `scope.public_header_dirs`, `scope.public_symbols` | `public-header-dir` | `scope_to_public_surface`, `public_header_dirs`, `public_surface_allowlist`, `force_public_symbols` |
 | Python floor | `--abi3` | `python.abi3_floor` | — | — |
 | Output | `-o FMT=PATH` (repeatable) | — | `format` + `output-file` (one) | — |
-| Per-side value | `old=`/`new=` value qualifier; `deps compare --old-root/--new-root` | — | `old-*`/`new-*` inputs | `InputSpec` per side |
+| Per-side value | `old=`/`new=` value qualifier; `deps compare --old-root/--new-root` | — | `old-*`/`new-*` inputs, and `debug-info1/2`, `devel-pkg1/2` | `InputSpec` per side |
 | Gate | exit codes + `--severity-preset` | `severity.*`, `gate.*` | `fail-on-breaking`, `fail-on-api-break`, `severity-preset` | `severity_preset` + overrides |
 
 Three things make this more than cosmetic:
@@ -132,18 +134,20 @@ argument. `--help-all` keeps listing everything.
 | R2 | policy | Action `policy` + `policy-file` → one `policy`; Python `policy: str \| Path`, `policy_file_path` removed. |
 | R3 | acknowledgments | config block `acknowledgment:` → `acknowledgments:`; Python `acknowledgments_path` → `acknowledgments`. |
 | R4 | header frontend | Action `ast-frontend` → `frontend` (config tier; `--set compile.frontend=…` on CLI). |
-| R5 | compiler | Action `gcc-path`/`gcc-options` → `compiler`/`compile-options` (config tier); `gcc-prefix` gets a `compile.*` home or is retired (Q3). |
+| R5 | compiler | Action `gcc-path`/`gcc-prefix`/`gcc-options` → `compiler`/`compile-options` (config tier). `gcc-prefix` is only a fallback spelling of the compiler (`compiler = gcc_path or gcc_prefix` in `action/run.sh`), so it folds into `compiler` (Q3). |
 | R6 | completeness floor | Action `analysis-assurance-complete` → `require-complete`. |
-| R7 | public surface | Action `public-header-dir` → `public-header-dirs`; Python `public_surface_allowlist`/`force_public_symbols`/`scope.public_symbols` collapse to one concept after Phase 0 confirms they are the same (Q4). |
-| R8 | dependencies | `--follow-deps` ↔ config `deps.follow` ↔ Python `follow_deps` (both `DumpRequest.follow_dependencies` and `InputSpec.include_dependencies` renamed); `--search-path` ↔ `deps.search_paths`. |
+| R7 | public surface | Action `public-header-dir` → `public-header-dirs`; Python `force_public_symbols` → `public_symbols`, the same widening overlay as `scope.public_symbols`. `public_surface_allowlist` is a different concept (a manifest-committed surface that *narrows* scoping) and stays, typed-API only (Q4). |
+| R8 | dependencies, system declarations | `--follow-deps` ↔ config `deps.follow` ↔ Python `follow_deps` (`CompareRequest`/`DumpRequest.follow_dependencies`); `--search-path` ↔ `deps.search_paths`. Separately, `InputSpec.include_dependencies` and the `include_dependencies` shim arguments are `--include-system-declarations` under another name, and become `include_system_declarations`. |
 | R9 | debuginfod | Python `enable_debuginfod` → `debug.debuginfod` / shim `debuginfod`. |
 | R10 | contract | Python `contract_evaluation` + `contract_mode` → one `contract` with the CLI's value set including `auto`. |
 | R11 | output | Action `format` + `output-file` → `output` (list of `FMT=PATH`, same grammar as `-o`); a bare `FMT` keeps today's default path. |
 | R12 | python floor | CLI `--abi3` → `--abi3-floor`. |
-| R13 | source evidence | config `source:` and `sources:` merge into one `sources:` block if Phase 0 confirms no conflicting key. |
+| R13 | source evidence | config `source.method` → `sources.method`. Phase 0 found no key collision: `source:` holds only `method`, `sources:` holds `public_headers`, `exclude`, `graph`. |
 | R14 | Action retired inputs | the 11 retired inputs are deleted; GitHub reports an unknown input as a warning, and the release notes name each replacement. |
 | R15 | gate | Action `fail-on-breaking`/`fail-on-api-break` stay as the two Action-only conveniences but are defined as sugar over `severity.*` overrides (ADR-088) and forwarded as `--set severity.…`, not evaluated in shell (Q2). |
-| R16 | deps compare roots | `--old-root`/`--new-root` → `--root [old=\|new=]PATH`. |
+| R16 | deps roots | `deps compare --old-root`/`--new-root` → `--root [old=\|new=]PATH`; `deps tree --sysroot` → `--root PATH`, the same concept. |
+| R17 | numeric sides | Action `debug-info1`/`debug-info2` → `old-debug-info`/`new-debug-info`; `devel-pkg1`/`devel-pkg2` already forward as `--header old=`/`new=`, so they fold into `old-header`/`new-header`. |
+| R18 | stray spellings | `actions/check-target` `requested-depth` → `depth`, `contract-file` → `contract`; `run_dump(header_backend)` → `frontend`; `run_dump(public_headers)` is reviewed against `headers` in Phase 4. |
 
 ### D6 — One registry and a parity gate
 
@@ -184,15 +188,30 @@ Exit codes, verdicts and report schemas (owned by ADR-009/064/088 and the
 report schemas); the ABICC translation layer; `aggregate` and `project *`
 option names beyond `--version` → `--label` and `-o`.
 
-## Open questions
+## Resolved questions
 
-- **Q1.** `--label` vs keeping `--version` with a warning when it collides.
-  Proposed: `--label`, because the collision already produced a defect.
-- **Q2.** Should `fail-on-*` be removed from the Action outright in favor of
-  `severity-preset`/`set:`? Proposed: keep as sugar (R15); revisit with usage.
-- **Q3.** `gcc-prefix`: add `compile.compiler_prefix` or retire.
-- **Q4.** Are `public_surface_allowlist`, `force_public_symbols` and
-  `scope.public_symbols` one concept? Phase 0 answers from code.
+Accepted with the recommendations on 2026-10-30; Q3 and Q4 were answered from
+code in Phase 0.
+
+- **Q1.** `--version` becomes `--label` (R1): the collision already produced a
+  defect.
+- **Q2.** `fail-on-*` stays in the Action as sugar over `severity.*` (R15).
+- **Q3.** `gcc-prefix` folds into `compiler` (R5).
+- **Q4.** `scope.public_symbols` and `force_public_symbols` are one concept,
+  and `public_surface_allowlist` is another (R7).
+
+## Phase 0 result
+
+`architecture/option-vocabulary-inventory.json` (generated by
+`scripts/gen_option_vocabulary.py`) holds 101 CLI options, 61 config keys,
+274 Action inputs (92 root, 59 `check-target`, the rest in transport and
+reporting sub-actions) and 153 typed-API fields and parameters.
+`architecture/option-vocabulary.yaml` groups every analysis row into 104
+concepts: 29 core, 65 config, 5 Action-only, 3 typed-API-only, 1 internal
+group and 1 retired group. 21 concepts carry a rename id. The 29 core
+concepts are over D4's budget of 15, which is Phase 5's work.
+`tests/test_option_vocabulary.py` fails when a live option is not claimed by
+exactly one concept, so no new option can join any surface unregistered.
 
 ## Alternatives considered
 
