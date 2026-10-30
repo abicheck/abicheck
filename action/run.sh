@@ -2727,6 +2727,14 @@ CMD=(abicheck)
 
 MODE="${INPUT_MODE:-compare}"
 
+# `set:` is forwarded only by mode: compare. validate-inputs.sh refuses the
+# same combination in the workflow; this guard covers a direct run.sh call,
+# so an override can never be dropped silently.
+if [[ "$MODE" != "compare" ]] && [[ "${INPUT_SET:-}" =~ (^|$'\n')[[:space:]]*[^#[:space:]] ]]; then
+  _error_annotation "set: applies to mode: compare only, and mode: ${MODE} would ignore it. Remove set: from this step, or move the override into .abicheck.yml."
+  exit 1
+fi
+
 # Resolved once, up front, so every code path below (including the
 # baseline-set fallback further down, which needs it before this script's
 # own later _report_query definition would otherwise provide it) can use

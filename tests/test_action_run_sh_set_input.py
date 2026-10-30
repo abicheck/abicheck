@@ -184,3 +184,29 @@ class TestSetOnAModeWithoutSetFailsTheStep:
         result = self._validate(tmp_path, "dump", "# nothing to apply\n\n")
         assert result.returncode == 0, result.stdout + result.stderr
         assert "set: applies to mode" not in result.stdout
+
+
+@pytest.mark.skipif(not RUN_SH.is_file(), reason="action/run.sh not found")
+class TestRunShRefusesSetOnAnotherMode:
+    def test_direct_run_sh_dump_with_effective_set_fails_before_forwarding(
+        self, tmp_path: Path
+    ) -> None:
+        require_bash()
+        fake_bin, captured = _stub(tmp_path)
+        env = _env(
+            tmp_path,
+            fake_bin,
+            INPUT_MODE="dump",
+            INPUT_SET="scope.show_redundant=true\n",
+        )
+        result = subprocess.run(
+            [bash_executable(), str(RUN_SH)],
+            capture_output=True,
+            text=True,
+            env=env,
+            cwd=tmp_path,
+            check=False,
+        )
+        assert result.returncode != 0
+        assert "set: applies to mode: compare only" in result.stdout
+        assert not captured.exists(), "the CLI must not run when set: is refused"
