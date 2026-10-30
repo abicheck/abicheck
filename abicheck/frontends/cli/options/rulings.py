@@ -475,6 +475,14 @@ COMPARE_OPTION_RULINGS: dict[str, OptionRuling] = {
         "against (guard 2: not one-for-one).",
         blocker="ADR-049 contract-document config home",
     ),
+    "--set": _deferred(
+        "ADR-091 D4 adds one generic per-run override spelling, `--set "
+        "PATH=VALUE`, in place of a flag per config key. That is a deliberate "
+        "exception to guard 2 (not one-for-one): it duplicates the spelling of "
+        "every .abicheck.yml key rather than naming one concept. It stays "
+        "deferred until ADR-091 is accepted, which is a maintainer decision.",
+        blocker="ADR-091 acceptance (the guard-2 exception for the generic --set spelling)",
+    ),
     "--use-cases": _deferred(
         "The same document-operand class as --policy/--suppress, which is "
         "why Phase 7i kept it -- but unlike those two it has a real "

@@ -129,6 +129,11 @@ EXCLUDED: dict[str, tuple[str, str]] = {
         "abicheck.workflows.compare.resolve",
         "extraction depth, resolved into the plan rather than the gate",
     ),
+    "config_overrides": (
+        "abicheck.workflows.compare.execute",
+        "ADR-091 D4 config overrides (compare --set); resolved into the request's own"
+        " fields by _with_config_overrides before classification",
+    ),
     "budget_s": (
         "abicheck.workflows.compare.execute",
         "execution time budget",

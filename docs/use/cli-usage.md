@@ -241,6 +241,29 @@ matrix comparing abicheck, `abidiff`, and ABICC detection coverage across the
 example catalog is the
 [Tool Comparison & Benchmarks](../reference/tool-comparison.md) reference.
 
+## Overriding one config key for one run: `--set`
+
+`compare` accepts `--set PATH=VALUE`, repeatable, to set one `.abicheck.yml`
+key for that run without editing the file:
+
+```bash
+abicheck compare libfoo.so.1 libfoo.so.2 -H include/foo.h \
+  --set scope.show_redundant=true --set scope.public_symbols=[foo_init]
+```
+
+`PATH` is the dotted config key and `VALUE` is read as YAML, so `true`, `3`
+and `[a, b]` have the same types they would have in the file. The value goes
+through the same schema as the file: an unknown key, a wrong type or a
+malformed assignment exits 64 and names the key. Precedence is explicit flag
+over `--set` over `.abicheck.yml` over the built-in default. A key that has its
+own flag (`compile.defines` is `--define`, `severity.preset` is
+`--severity-preset`, `contract` is `--contract`, and so on) is refused with the
+name of that flag, so each option keeps one spelling. `--set` does not yet
+reach `dump`, `project plan` or `project capture-variants`, and `compare` refuses
+the keys it does not yet apply (such as `compile.*`, `build.*` and `sources.*`)
+with exit 64 rather than dropping them, and a directory or package comparison refuses every key its members do not receive; the full key list is
+in [`config-keys-reference.md`](../reference/config-keys-reference.md).
+
 ## Dependency-stack commands
 
 `deps tree`/`deps compare` (full dependency-closure resolution and

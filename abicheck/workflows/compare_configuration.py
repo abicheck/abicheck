@@ -128,6 +128,55 @@ class CompareSettingsError(CompareConfigurationError):
     """
 
 
+#: ``config_overrides`` keys a typed comparison applies (ADR-091 D4): each row
+#: is (config path, ``CompareRequest`` field, ``ResolvedCompareConfig`` attribute).
+#: A validated key outside this table is refused by the typed API rather than
+#: dropped, so an override never silently changes nothing.
+TYPED_OVERRIDE_CHANNELS: tuple[tuple[str, str, str], ...] = (
+    ("scope.public", "scope_public", "scope_public"),
+    (
+        "scope.collapse_versioned_symbols",
+        "collapse_versioned_symbols",
+        "collapse_versioned_symbols",
+    ),
+    ("scope.public_symbols", "force_public_symbols", "public_symbols"),
+    ("severity.abi_breaking", "severity_abi_breaking", "merged_severity_abi_breaking"),
+    (
+        "severity.potential_breaking",
+        "severity_potential_breaking",
+        "merged_severity_potential_breaking",
+    ),
+    (
+        "severity.quality_issues",
+        "severity_quality_issues",
+        "merged_severity_quality_issues",
+    ),
+    ("severity.addition", "severity_addition", "merged_severity_addition"),
+    ("suppression.strict", "strict_suppressions", "strict_suppressions"),
+    (
+        "suppression.require_justification",
+        "require_justification",
+        "require_justification",
+    ),
+    (
+        "assurance.require_complete",
+        "require_complete_analysis",
+        "require_complete_analysis",
+    ),
+    ("debug.format", "debug_format", "debug_format"),
+    ("debug.dwarf_only", "dwarf_only", "dwarf_only"),
+    ("debug.debuginfod", "enable_debuginfod", "debuginfod"),
+    ("debug.debuginfod_url", "debuginfod_url", "debuginfod_url"),
+    ("deployment", "env_matrix", "deployment"),
+)
+
+#: Further ``--set`` keys the CLI's ``compare`` applies from the resolved config
+#: or the run's own settings, which a typed comparison has no field for.
+CLI_ONLY_OVERRIDE_PATHS: frozenset[str] = frozenset(
+    {"scope.show_redundant", "source.method", "performance.profile"}
+)
+
+
 @dataclass(frozen=True)
 class CompareConfiguration:
     """What :func:`resolve_compare_configuration` decided.
@@ -536,14 +585,15 @@ def load_and_resolve_compare_config(
     cfg_path: Path | None,
     *,
     severity_preset: str | None,
+    config_overrides: Mapping[str, object] | None = None,
 ) -> tuple[BuildConfig | None, ResolvedCompareConfig, str | None]:
     """Load the project config at *cfg_path* and resolve the run's settings.
 
     Returns ``(project_cfg, resolved, sha256)``. ``sha256`` is the digest of
     the bytes the config was parsed from, captured by the same read, so an
     ADR-049 receipt can prove *which revision* of the file supplied a value
-    rather than only naming its path. ``project_cfg`` and ``sha256`` are
-    ``None`` when *cfg_path* is ``None``.
+    rather than only naming its path. Both are ``None`` when there is neither
+    a file (*cfg_path*) nor a *config_overrides* mapping to build a config from.
 
     Raises :class:`CompareSettingsError` when the file cannot be parsed.
     """
@@ -551,9 +601,11 @@ def load_and_resolve_compare_config(
 
     project_cfg: BuildConfig | None = None
     cfg_sha: str | None = None
-    if cfg_path is not None:
+    if cfg_path is not None or config_overrides:
         try:
-            project_cfg, cfg_sha = load_build_config_with_digest(cfg_path)
+            project_cfg, cfg_sha = load_build_config_with_digest(
+                cfg_path, config_overrides=config_overrides
+            )
         except ValueError as exc:
             raise CompareSettingsError(str(exc)) from exc
     resolved = resolve_compare_config(project_cfg, cli_severity_preset=severity_preset)

@@ -771,6 +771,23 @@
         "api: abicheck.workflows.service_requests.CompareRequest"
       ],
       "use_cases": []
+    },
+    "ADR-089": {
+      "disposition": "internal",
+      "surfaces": [],
+      "use_cases": []
+    },
+    "ADR-090": {
+      "disposition": "gap",
+      "surfaces": [],
+      "use_cases": []
+    },
+    "ADR-091": {
+      "disposition": "surfaced",
+      "surfaces": [
+        "cli: compare --set"
+      ],
+      "use_cases": []
     }
   },
   "multichannel_without_family": [
@@ -900,6 +917,7 @@
     "ADR-078 report: compare_report.severity",
     "ADR-078 report: compare_report.summary",
     "ADR-084 report: compare_report.disposition_audit",
-    "ADR-086 cli: compare --no-baseline"
+    "ADR-086 cli: compare --no-baseline",
+    "ADR-091 cli: compare --set"
   ]
 }

@@ -354,6 +354,19 @@
    "default": "<unset>"
   },
   {
+   "id": "compare --set",
+   "command": "compare",
+   "option": "--set",
+   "aliases": [],
+   "hidden": false,
+   "help_common": false,
+   "multiple": true,
+   "is_flag": false,
+   "type": "text",
+   "choices": null,
+   "default": "<unset>"
+  },
+  {
    "id": "compare --acknowledgments",
    "command": "compare",
    "option": "--acknowledgments",
@@ -4071,6 +4084,14 @@
    "default": "None"
   },
   {
+   "id": "CompareRequest.config_overrides",
+   "owner": "CompareRequest",
+   "name": "config_overrides",
+   "annotation": "Mapping[str, object]",
+   "choices": null,
+   "default": "<mappingproxy>"
+  },
+  {
    "id": "CompareRequest.env_matrix",
    "owner": "CompareRequest",
    "name": "env_matrix",
@@ -4990,6 +5011,14 @@
    "owner": "run_compare",
    "name": "acknowledgment_breaks",
    "annotation": "str | None",
+   "choices": null,
+   "default": "None"
+  },
+  {
+   "id": "run_compare(config_overrides)",
+   "owner": "run_compare",
+   "name": "config_overrides",
+   "annotation": "Mapping[str, object] | None",
    "choices": null,
    "default": "None"
   },

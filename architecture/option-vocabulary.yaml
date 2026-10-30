@@ -793,6 +793,18 @@ concepts:
       - CompareRequest.budget_s
     exceptions:
       - {id: CompareRequest.budget_s, rule: name, rename: R19, note: python spelling breaks D1; the leaf is `budget`}
+  - concept: config.override
+    tier: config
+    renames: []
+    cli:
+      - "compare --set"
+    python:
+      - CompareRequest.config_overrides
+      - "run_compare(config_overrides)"
+    exceptions:
+      - {id: "compare --set", rule: name, rename: R23, note: "generic PATH=VALUE override (ADR-091 D4); one spelling for every config path, so the leaf derivation from config.override does not apply"}
+      - {id: CompareRequest.config_overrides, rule: name, rename: R23, note: "generic override field (ADR-091 D4); carries any config path, not one derived leaf"}
+      - {id: "run_compare(config_overrides)", rule: name, rename: R23, note: "generic override shim argument (ADR-091 D4); carries any config path, not one derived leaf"}
   - concept: dry_run
     tier: core
     renames: []

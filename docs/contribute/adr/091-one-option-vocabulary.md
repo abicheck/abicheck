@@ -2,7 +2,7 @@
 
 **Date:** 2026-10-30
 **Status:** Proposed — Phase 0 done (inventory and registry, no behavior
-change). This ADR proposes renames and behavior unifications on four public
+change); Phase 2 partly done (`compare --set`, `CompareRequest.config_overrides`). This ADR proposes renames and behavior unifications on four public
 surfaces; each lands through the migration in D7. Open questions Q1–Q4 are
 resolved below. Implementation plan:
 [`plans/option-vocabulary-unification.md`](../plans/option-vocabulary-unification.md).
@@ -153,6 +153,7 @@ argument. `--help-all` keeps listing everything.
 | R20 | Action names (Phase 1 finding) | Action inputs that break D1's kebab-leaf rule and no row above renames: `include` → `include-dirs`, `build-config`/`build-system`, `changed-path` → `changed-paths`, `used-by-manifest`, `search-path` → `search-paths`, `snapshot-compression`, and `operands`' `old-library`/`new-library` (D3 qualifiers on `library`). Phase 4 (Action). |
 | R21 | CLI names (Phase 1 finding) | Visible CLI options that break D1 and no row above renames: `compare --include` → `--include-dir`; `--used-by-manifest`, a second file-valued spelling beside `--used-by` that Phase 0 grouped under `used_by`, which Phase 4 either folds into `--used-by` or gives its own concept; `--instantiation-manifest` and the `--bundle-facts-*` family, which Phase 0 grouped under `bundle`. Phase 4 (CLI). |
 | R22 | surface budget (Phase 1 finding, D4) | `compare --help` shows 20 core options (D4 budget 15) and the root `action.yml` has 53 analysis inputs (budget 25). The recorded counts may only fall; Phase 5 moves options to the config tier until both are within budget. |
+| R23 | generic override (Phase 2, D4) | The one generic per-run override, `compare --set PATH=VALUE` and the typed `config_overrides` / `run_compare(config_overrides)`. It is not one path: it carries any config key, so D1's derivation from a concept name (`config.override`) does not apply and the spelling is the one D4 names. Phase 2 (CLI and Python). |
 
 ### D6 — One registry and a parity gate
 
