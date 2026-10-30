@@ -108,7 +108,7 @@ class AstPass:
     parse_errors: tuple[type[Exception], ...] = (ValueError, RecursionError)
 
 
-def _unparsed(ast: dict[str, Any], cu: CompileUnit, parse: Callable[..., Any]) -> Any:
+def _unparsed(ast: dict[str, Any], cu: CompileUnit, parse: Callable[..., Any]) -> Any:  # noqa: ARG001 -- AstPass.parse(ast, cu) signature
     return parse(ast)
 
 

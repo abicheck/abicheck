@@ -690,7 +690,7 @@ def test_a_partial_returncode_becomes_a_skip(monkeypatch: pytest.MonkeyPatch) ->
         stdout = ""
         stderr = ""
 
-    monkeypatch.setattr(verify.subprocess, "run", lambda *a, **k: _Proc())
+    monkeypatch.setattr(verify, "run_streaming", lambda *a, **k: _Proc())
     step = next(s for s in verify.STEPS if s.name == "bugfix-test-contract")
     result = verify.run_step(step)
     assert result["status"] == "skipped"
@@ -708,7 +708,7 @@ def test_each_partial_code_reports_its_own_reason(
         stdout = ""
         stderr = ""
 
-    monkeypatch.setattr(verify.subprocess, "run", lambda *a, **k: _Proc())
+    monkeypatch.setattr(verify, "run_streaming", lambda *a, **k: _Proc())
     step = next(s for s in verify.STEPS if s.name == "bugfix-test-contract")
     result = verify.run_step(step)
     assert result["status"] == "skipped"
@@ -717,28 +717,27 @@ def test_each_partial_code_reports_its_own_reason(
 
 
 def test_partial_result_still_prints_captured_output(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """Finding 6 (CodeRabbit review, fresh evidence): a step that returns a
-    PARTIAL result must still have its own captured stdout/stderr printed --
-    `run_step` used to capture the child's output at `subprocess.run(...)`
-    but only print it AFTER the `step.partial` early return, so a partial
-    step never got its own diagnostic output printed at all, defeating half
-    the purpose of the round-20 diagnostic-visibility fix for exactly the
-    steps most likely to need it."""
-
-    class _Proc:
-        returncode = 2
-        stdout = "some structural-check stdout\n"
-        stderr = "some structural-check stderr\n"
-
-    monkeypatch.setattr(verify.subprocess, "run", lambda *a, **k: _Proc())
-    step = next(s for s in verify.STEPS if s.name == "bugfix-test-contract")
+    """Finding 6 (CodeRabbit review): a step that returns a PARTIAL result
+    must still have its own stdout/stderr printed, and the step's real child
+    output reaches this process's streams on that path too."""
+    step = verify.Step(
+        "probe",
+        (
+            sys.executable,
+            "-c",
+            "import sys; print('partial stdout'); "
+            "print('partial stderr', file=sys.stderr); sys.exit(2)",
+        ),
+        frozenset({verify.FULL}),
+        partial={2: "probe partial"},
+    )
     result = verify.run_step(step)
-    assert result["status"] == "skipped"
+    assert (result["status"], result["returncode"]) == ("skipped", 2)
     captured = capsys.readouterr()
-    assert "some structural-check stdout" in captured.out
-    assert "some structural-check stderr" in captured.err
+    assert "partial stdout" in captured.out
+    assert "partial stderr" in captured.err
 
 
 def test_an_ordinary_failure_is_still_a_failure(
@@ -759,7 +758,7 @@ def test_an_ordinary_failure_is_still_a_failure(
         stdout = ""
         stderr = ""
 
-    monkeypatch.setattr(verify.subprocess, "run", lambda *a, **k: _Proc())
+    monkeypatch.setattr(verify, "run_streaming", lambda *a, **k: _Proc())
     step = next(s for s in verify.STEPS if s.name == "bugfix-test-contract")
     assert verify.run_step(step)["status"] == "failed"
 
@@ -1110,11 +1109,11 @@ def test_env_defaults_yield_to_the_caller_but_env_does_not(
     environment; a step's fixed `env` must still win over the caller."""
     seen: dict[str, str] = {}
 
-    def fake_run(cmd, cwd, env, capture_output, text):  # noqa: ANN001
+    def fake_run(cmd, *, cwd, env):  # noqa: ANN001
         seen.update(env)
         return subprocess.CompletedProcess(cmd, 0, "", "")
 
-    monkeypatch.setattr(verify.subprocess, "run", fake_run)
+    monkeypatch.setattr(verify, "run_streaming", fake_run)
     step = verify.Step(
         "probe",
         ("true",),
@@ -1145,26 +1144,3 @@ def test_integration_step_leaves_tool_lane_tests_to_their_lanes() -> None:
         assert f"not {marker}" in expr, marker
         lane_cmd = _step(lane).cmd
         assert lane_cmd[lane_cmd.index("-m") + 1] == marker, lane
-
-
-def test_a_streamed_step_inherits_the_terminal_and_runs_unbuffered(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """A streamed step's child writes straight through, so a lane killed at
-    its job timeout still shows its progress; a captured one shows nothing."""
-    seen: dict[str, object] = {}
-
-    def fake_run(cmd, **kwargs):  # noqa: ANN001, ANN003
-        seen.update(kwargs, cmd=cmd)
-        return subprocess.CompletedProcess(cmd, 0)
-
-    monkeypatch.setattr(verify.subprocess, "run", fake_run)
-    step = verify.Step(
-        "probe", ("py", "-I", "m"), frozenset({verify.FULL}), stream=True
-    )
-    assert verify.run_step(step)["status"] == "passed"
-    assert "capture_output" not in seen
-    # `-I` ignores PYTHONUNBUFFERED, so unbuffering must be the `-u` flag.
-    assert seen["cmd"] == ("py", "-u", "-I", "m")
-    assert _step("integration").stream
-    assert any(a.startswith("--durations=") for a in _step("integration").cmd)

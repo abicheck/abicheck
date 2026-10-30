@@ -516,20 +516,20 @@ def test_development_packages_are_named_once_per_package(
 
 
 def test_a_linker_script_operand_is_followed_to_its_library(tmp_path: Path) -> None:
-    from abicheck.workflows.compare.session_inputs import normalize_operand
+    from abicheck.workflows.extraction import follow_linker_script
 
     lib = tmp_path / "libfoo.so.1"
     lib.write_bytes(b"\x7fELF\x02\x01\x01" + b"\0" * 57)
     script = tmp_path / "libfoo.so"
     script.write_text("/* GNU ld script */\nINPUT(libfoo.so.1)\n", encoding="utf-8")
     notes: list[str] = []
-    assert normalize_operand(script, notes.append) == (lib, "elf")
+    assert follow_linker_script(script, notes.append) == (lib, "elf")
     assert notes == [
         f"Note: '{script}' is a GNU ld linker script; following its "
         f"INPUT()/GROUP() directive to '{lib}'."
     ]
     notes.clear()
-    assert normalize_operand(lib, notes.append) == (lib, "elf")
+    assert follow_linker_script(lib, notes.append) == (lib, "elf")
     assert notes == []
 
 

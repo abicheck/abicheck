@@ -684,11 +684,7 @@ def _report_not_comparable(
     must describe the same outcome -- a refusal included -- not only a
     completed comparison.
     """
-    kind = (
-        "profile_mismatch"
-        if isinstance(exc, ProfileMismatchError)
-        else "scope_mismatch"
-    )
+    kind = exc.not_comparable_kind
     message = str(exc)
     click.echo(
         f"Error: '{old.library}' old={old.version!r} new={new.version!r} are not "

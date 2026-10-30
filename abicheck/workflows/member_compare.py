@@ -198,16 +198,24 @@ def member_exit_decision(
     severity_config: SeverityConfig | None,
     require_complete_analysis: bool,
 ) -> ExitDecision:
-    """A release member's exit decision, from the resolver a single-pair
-    ``compare`` of the same pair uses, so a release folds what that compare
-    would decide instead of re-deriving each axis (ADR-064)."""
-    from ..policy.effective_gate import EffectiveGate
+    """A release member's exit decision, from the gate derivation and the
+    resolver a single-pair ``compare`` of the same pair uses, so a release
+    folds what that compare would decide instead of re-deriving each axis
+    (ADR-064).
+
+    The plain resolver, not the abort-axes one: the release folds the
+    evidence-contract axis separately (``evidence_contract_error_contribution``,
+    :func:`stamp_member_exit_contributions`).
+    """
     from ..policy.exit_decision import resolve_compare_exit_decision
+    from .gate import effective_gate_for_compare
 
     return resolve_compare_exit_decision(
         result,
-        EffectiveGate.from_severity(
-            severity_config, require_complete_analysis=require_complete_analysis
+        effective_gate_for_compare(
+            severity_config,
+            require_complete_analysis=require_complete_analysis,
+            result=result,
         ),
     )
 

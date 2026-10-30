@@ -66,7 +66,7 @@ class StrictMappingError(Exception):
     """
 
 
-def _construct_strict_mapping(
+def _construct_strict_mapping(  # noqa: ARG001 -- PyYAML construct_mapping signature
     loader: yaml.SafeLoader, node: yaml.MappingNode, deep: bool = False
 ) -> dict[Any, Any]:
     """``SafeConstructor.construct_mapping`` plus two rejections.

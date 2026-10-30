@@ -42,12 +42,6 @@ from typing import Any
 import click
 
 
-def _param_from_cli(name: str) -> bool:
-    """True when parameter *name*'s value came from the command line (not default)."""
-    src = click.get_current_context().get_parameter_source(name)
-    return bool(src == click.core.ParameterSource.COMMANDLINE)
-
-
 def stated_options(ctx: click.Context) -> frozenset[str]:
     """The parameter names *ctx*'s invocation stated on the command line.
 
@@ -68,7 +62,6 @@ def _reject_set_input_flags(
     required_symbols: tuple[str, ...] = (),
     use_cases_manifest: Path | None = None,
     diagnostic_comparison: bool = False,
-    suppress: Path | tuple[Path, ...] | None = None,
     include_labels: dict[Path, str] | None = None,
     budget: str | None = None,
     pdb_path: Path | None = None,

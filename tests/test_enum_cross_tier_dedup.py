@@ -27,7 +27,7 @@ per CLAUDE.md's "Primitive-level property tests" guidance) and together
   bridge the bare-vs-qualified spelling mismatch so
   ``finding_identity.resolve_change_identity`` resolves the same identity
   for both tiers' findings.
-* ``finding_dedup.deduplicate_cross_detector``'s own ``_DEDUP_CATEGORIES``
+* ``finding_dedup.deduplicate_cross_detector``'s own ``DEDUP_CATEGORY_BY_KIND``
   gate must actually include the four enum kinds -- reaching a matching
   identity is not enough if the dedup step never even attempts to resolve
   one for these kinds at all, which was the deeper, previously-missing
@@ -344,7 +344,7 @@ class TestEndToEndOnlyOneFindingSurvives:
         There is therefore no genuine two-tier duplicate to collapse for this
         one kind -- this test instead pins that the sole DWARF-tier finding
         still survives unharmed (not silently dropped) now that the kind is
-        wired into `_DEDUP_CATEGORIES` and its bare/qualified identity is
+        wired into `DEDUP_CATEGORY_BY_KIND` and its bare/qualified identity is
         resolvable, since a change that is wired for dedup but never actually
         collides must remain exactly as reported."""
         old = _snap("1", [("SUM", 0)], underlying_byte_size=4)
@@ -389,7 +389,7 @@ class TestEndToEndOnlyOneFindingSurvives:
 class TestEnumQualificationDoesNotLeakIntoUnrelatedKinds:
     """Codex review, fresh evidence: the bare/qualified enum bridge, applied
     at the top of ``deduplicate_cross_detector``, was gated on
-    ``c.kind in _DEDUP_CATEGORIES`` -- a much broader set covering
+    ``c.kind in DEDUP_CATEGORY_BY_KIND`` -- a much broader set covering
     function/variable/version dedup categories too, not just the four enum
     kinds. An unrelated finding whose bare `symbol` happened to coincide
     with a registered enum alias had its `Change.qualified_name` silently

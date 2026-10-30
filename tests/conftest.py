@@ -569,16 +569,25 @@ def pytest_addoption(parser: pytest.Parser) -> None:
         metavar="K/N",
         help="Run only shard K of N (whole test files, balanced by recorded duration; see tests/pytest_shards.py).",
     )
+    from tests.pytest_collect_partition import add_option as add_partition_option
     from tests.pytest_marker_prefilter import add_option
 
     add_option(parser)
+    add_partition_option(parser)
 
 
 def pytest_ignore_collect(collection_path: Path, config: pytest.Config) -> bool | None:
+    from tests import pytest_collect_partition as partition
     from tests.pytest_marker_prefilter import OPTION, should_ignore
 
+    if should_ignore(collection_path, config.getoption(OPTION)) or (
+        partition.should_ignore(
+            collection_path, config.rootpath, config.getoption(partition.OPTION)
+        )
+    ):
+        return True
     # None, not False: leave every other plugin's ignore decision intact.
-    return True if should_ignore(collection_path, config.getoption(OPTION)) else None
+    return None
 
 
 def _materialize_generated_skill_trees() -> None:

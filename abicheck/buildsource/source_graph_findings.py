@@ -1534,7 +1534,6 @@ def _symbol_owner_findings(
     new: SourceGraphSummary,
     old_labels: dict[str, str],
     new_labels: dict[str, str],
-    boundary: str,  # unused here; kept for signature parity with sibling _*_findings helpers
 ) -> list[Change]:
     """An exported symbol whose *declaring* file moved between versions.
 
@@ -1656,7 +1655,7 @@ def diff_source_graph_findings(
     )
     findings += dependency_findings
     findings += _target_dependency_findings(old, new, new_labels, boundary)
-    findings += _symbol_owner_findings(old, new, old_labels, new_labels, boundary)
+    findings += _symbol_owner_findings(old, new, old_labels, new_labels)
     findings += dependency_renames.reconciliation_findings(
         reconciliation, old, new, renamed_new_ids
     )

@@ -63,7 +63,6 @@ from ...errors import (
 )
 from ..run_input_errors import RunInputError
 from .session_inputs import (
-    normalize_operand,
     note_debug_resolution,
     operand_rule_refusals,
     pair_request,
@@ -217,8 +216,10 @@ def run_pair_session(
     # 3. Operands: follow a GNU ld linker script up front so the resolved DSO
     # (not the text script) drives format detection, metadata and dependency
     # analysis.
-    old_input, old_fmt = normalize_operand(request.operands.old, notify)
-    new_input, new_fmt = normalize_operand(request.operands.new, notify)
+    from ..extraction import follow_linker_script
+
+    old_input, old_fmt = follow_linker_script(request.operands.old, notify)
+    new_input, new_fmt = follow_linker_script(request.operands.new, notify)
     with operand_rule_refusals():
         reject_manifest_non_elf(
             hdr.old_dump_manifest, hdr.new_dump_manifest, old_fmt, new_fmt

@@ -88,7 +88,6 @@ __all__ = [
     "StrandedLibraryResolution",
     "build_release_scope_record",
     "build_stored_baseline_scope_record",
-    "mismatch_kind",
     "bundle_analysis_members",
     "out_of_scope_provider_names",
     "release_global_ran",
@@ -483,18 +482,6 @@ def build_release_scope_record(
         new_inventory=evidence.new,
         selection=selection,
         selection_reason=selection_reason,
-    )
-
-
-def mismatch_kind(exc: Exception) -> str:
-    """ADR-050 D2's two refusal kinds, spelled as the fan-out spells them:
-    ``profile_mismatch`` for a ``ProfileMismatchError``, else ``scope_mismatch``."""
-    from ..errors import ProfileMismatchError
-
-    return (
-        "profile_mismatch"
-        if isinstance(exc, ProfileMismatchError)
-        else "scope_mismatch"
     )
 
 

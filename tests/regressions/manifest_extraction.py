@@ -599,12 +599,23 @@ EXTRACTION_BUG_CLASSES: tuple[BugClass, ...] = (
             "or C++23 image parses at gnu++20, and its recorded -m flags reach "
             "the frontend. The image's dialect refines a parse that is already "
             "C++ and never turns a C parse into C++, and a standard the caller "
-            "gave always wins."
+            "gave always wins. Likewise a Windows image's C++ ABI: the clang "
+            "frontend parses for the ABI the exports are mangled for (MinGW "
+            "Itanium vs MSVC), not clang's own Windows default, unless the "
+            "caller named a target."
         ),
-        fixed_by=(1778,),
-        seed_tests=("tests/test_binary_dialect_integration.py",),
+        # #1842: a Windows-default clang parsed a MinGW DLL for MSVC; every
+        # declaration mangled '?...' matched no export.
+        fixed_by=(1778, 1842),
+        seed_tests=(
+            "tests/test_binary_dialect_integration.py",
+            "tests/test_clang_binary_abi_target.py",
+        ),
         public_surfaces=("cli",),
-        axes={"dialect": ("c++17", "c++20", "c++23")},
+        axes={
+            "dialect": ("c++17", "c++20", "c++23"),
+            "windows_cxx_abi": ("itanium", "msvc", "c-only", "mixed"),
+        },
     ),
     BugClass(
         id="symbol_rule.single_object_format",

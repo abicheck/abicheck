@@ -529,7 +529,6 @@ def compare_release_cmd(
     with dedup_validate_overrides_warnings():
         _validate_suppression_early(
             suppress,
-            policy,
             policy_file_path,
             strict_suppressions,
             require_justification,

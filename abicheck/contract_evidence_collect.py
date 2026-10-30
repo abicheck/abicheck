@@ -648,7 +648,7 @@ def _domain_identity(snap: AbiSnapshot) -> str:
 
 
 def _public_header_declarations(
-    snap: AbiSnapshot, surf: PublicSurface, ids: SnapshotIdentities | None = None
+    snap: AbiSnapshot, ids: SnapshotIdentities | None = None
 ) -> list[str]:
     """Canonical node ids of the header provider's observed roots.
 
@@ -801,7 +801,7 @@ def public_header_evidence(
     the graph is policy-independent.
     """
     ids = snapshot_identities(snap)
-    declarations = _public_header_declarations(snap, surf, ids)
+    declarations = _public_header_declarations(snap, ids)
     status, completeness, reason = _public_header_status(surf)
     graph = build_type_graph(snap, ids)
     record = EvidenceSearchRecord(

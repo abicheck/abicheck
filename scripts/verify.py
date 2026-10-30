@@ -76,8 +76,7 @@ _MODULE_RUNNER = Path(__file__).resolve().with_name("run_isolated_module.py")
 # default stdout buffering is fully-buffered (not line-buffered) for a
 # pipe, so an unflushed buffer at process exit can genuinely lose real
 # output. Reconfiguring this script's own stdout to line-buffer, on top of
-# always echoing an already-captured subprocess's stdout/stderr in
-# run_step() below (rather than relying on inherited-fd passthrough alone),
+# streaming each step's output from run_step() below (verify_stream.py),
 # closes that whole class of "silently lost diagnostic output" regardless
 # of whether it was this specific mystery's root cause -- never silently
 # losing a failing check's own error text is a durable improvement on its
@@ -97,20 +96,6 @@ def _enable_line_buffered_output() -> None:
     this repo's own script import-side-effect rule. See the comment this
     function's body carries forward for why line-buffering matters at all.
     """
-    # A round-20 diagnostic-visibility fix: a real CI incident's failure
-    # mode showed `lint-and-types`' `ruff check`/`mypy` steps reporting
-    # "failed" with ZERO diagnostic output in the CI log -- no error lines
-    # at all, just an instant nonzero exit. GitHub Actions runners capture
-    # step output through a redirected, non-tty pipe rather than a pty;
-    # Python's default stdout buffering is fully-buffered (not
-    # line-buffered) for a pipe, so an unflushed buffer at process exit can
-    # genuinely lose real output. Reconfiguring this script's own stdout to
-    # line-buffer, on top of always echoing an already-captured
-    # subprocess's stdout/stderr in run_step() below (rather than relying
-    # on inherited-fd passthrough alone), closes that whole class of
-    # "silently lost diagnostic output" regardless of whether it was this
-    # specific mystery's root cause -- never silently losing a failing
-    # check's own error text is a durable improvement on its own.
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(line_buffering=True)
     if hasattr(sys.stderr, "reconfigure"):
@@ -137,6 +122,7 @@ from verify_preconditions import (  # noqa: E402 -- sibling leaf, see that modul
     _need_platform_and_bins,
     _origin_main_available,
 )
+from verify_stream import run_streaming  # noqa: E402 -- sibling leaf, see that module
 
 
 def _py(*mod_args: str) -> tuple[str, ...]:
@@ -239,9 +225,6 @@ class Step:
     #: receipt has to name the right one. Distinct from `precondition`, which
     #: decides *before* running and therefore runs nothing at all.
     partial: dict[int, str] | None = None
-    #: Stream the child's output live instead of capturing it: a killed step's
-    #: captured output is lost (Integration run 40954494083, 36 silent min).
-    stream: bool = False
     description: str = ""
 
 
@@ -606,13 +589,12 @@ STEPS: tuple[Step, ...] = (
             # is present (tests/test_surface_scope_parity.py on Linux).
             "integration and not libabigail and not abicc and not msvc",
             "--tb=short",
+            "--durations=30",
             "--ignore=tests/test_abi_examples.py",
             "--ignore=tests/test_cross_platform_integration.py",
-            "--durations=30",  # names what grew when a lane nears its timeout
         ),
         frozenset({FULL}),
         env_defaults={"ABICHECK_MIN_EXECUTED": "1"},
-        stream=True,
         precondition=_need_bins("castxml"),
         description="DWARF/header parsing against real castxml + a C/C++ compiler",
     ),
@@ -933,32 +915,11 @@ def run_step(step: Step, junit_dir: str | None = None) -> dict[str, object]:
     print(f"\n=== {step.name} === {' '.join(cmd)}", flush=True)
     start = time.time()
     env = {**step.env_defaults, **os.environ, **step.env}
-    # A non-streamed step's output is captured and always re-printed below,
-    # so no buffering layer between child and CI log can swallow it. A streamed
-    # one gets `-u`: the `-I` from `_py` makes Python ignore PYTHONUNBUFFERED.
-    if step.stream:
-        proc = subprocess.run((cmd[0], "-u", *cmd[1:]), cwd=ROOT, env=env)
-    else:
-        proc = subprocess.run(cmd, cwd=ROOT, env=env, capture_output=True, text=True)
+    # Streamed, not captured-then-printed: a step that never exits (a hung
+    # test, a CI job limit) must still leave its output in the log
+    # (verify_stream.py), whichever of the result paths below it then takes.
+    proc = run_streaming(cmd, cwd=ROOT, env=env)
     duration = time.time() - start
-    # Echo the child's captured stdout/stderr BEFORE the partial-result
-    # early return below (CodeRabbit review, fresh evidence): this used to
-    # run only after the `step.partial` check, so a step that returns a
-    # PARTIAL result (see `_BUGFIX_CONTRACT_PARTIAL`) never got its own
-    # diagnostic output printed at all -- defeating half the point of the
-    # round-20 diagnostic-visibility fix (this function's own top comment)
-    # for exactly the steps most likely to need it (a step whose exit code
-    # is ambiguous enough to be classified PARTIAL is also the step whose
-    # own stdout/stderr is most useful for a human to actually see).
-    if proc.stdout:
-        print(proc.stdout, end="" if proc.stdout.endswith("\n") else "\n", flush=True)
-    if proc.stderr:
-        print(
-            proc.stderr,
-            end="" if proc.stderr.endswith("\n") else "\n",
-            file=sys.stderr,
-            flush=True,
-        )
     if step.partial is not None and proc.returncode in step.partial:
         reason = step.partial[proc.returncode]
         print(f"=== {step.name}: PARTIAL ({duration:.1f}s) — {reason} ===")

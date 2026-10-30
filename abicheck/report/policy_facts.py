@@ -98,13 +98,11 @@ def kind_sets_for(result: DiffResult) -> KindSets:
 def policy_facts_for(
     result: DiffResult,
     severity_config: SeverityConfig | None,
-    *,
-    today: date | None = None,
 ) -> PolicyFacts:
     """Kind sets plus the severity gate (``None`` when no severity config is given)."""
     return PolicyFacts(
         kind_sets=effective_kind_sets(result),
-        gate=gate_decision_for_result(result, severity_config, today=today),
+        gate=gate_decision_for_result(result, severity_config),
     )
 
 

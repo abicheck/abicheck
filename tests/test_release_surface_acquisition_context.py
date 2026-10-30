@@ -531,8 +531,8 @@ class TestTheLedgerRecord:
         ledger = SurfaceAcquisitionLedger()
         identity = SurfaceAcquisitionIdentity(header_dirs=("/inc",))
         made = ReleasePublicSurface(acquisition_key=identity.key(), side="old")
-        ledger.acquire(identity, "old", lambda: made)
-        ledger.acquire(identity, "new", lambda: made)
+        ledger.acquire(identity, lambda: made)
+        ledger.acquire(identity, lambda: made)
         record = ledger.to_dict()
         assert record["acquisitions"] == 1
         assert record["reuses"] == 1

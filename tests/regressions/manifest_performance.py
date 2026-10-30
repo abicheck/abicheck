@@ -516,9 +516,13 @@ PERFORMANCE_BUG_CLASSES: tuple[BugClass, ...] = (
         # `dumper_elf_symbols._pyelftools_exported_symbols` -- which builds
         # its own `ELFFile` and walks BOTH `.dynsym` and `.symtab` -- kept
         # resolving every `Symbol.name` with one seek-and-read per name.
-        fixed_by=(1331,),
-        seed_tests=("tests/test_dumper_elf_symbols_buffering.py",),
-        public_surfaces=(),
+        fixed_by=(1331, 1842),
+        seed_tests=(
+            "tests/test_dumper_elf_symbols_buffering.py",
+            "tests/test_symbols_only_reresolve_cached.py",
+            "tests/test_pe_read_forces_no_collection.py",
+        ),
+        public_surfaces=("cli",),
         axes={
             "symbol_table": (".dynsym", ".symtab"),
             "symbol_shape": (
@@ -533,12 +537,10 @@ PERFORMANCE_BUG_CLASSES: tuple[BugClass, ...] = (
         known_gaps=(
             KnownGap(
                 description=(
-                    "There is no gate enumerating the callers of a "
-                    "just-optimized primitive, so the next instance of "
-                    "this class is still found by reading, not by CI. "
-                    "The seed test observes engagement for the two "
-                    "sections THIS path walks; a third ELF-reading path "
-                    "added later would not be noticed by it."
+                    "Only `pefile.PE` has a caller-enumerating gate; for "
+                    "other optimized primitives the next instance is found "
+                    "by reading, not by CI (a third ELF-reading path would "
+                    "not be noticed by the string-table seed test)."
                 ),
                 reference="docs/contribute/known-gaps.md",
             ),

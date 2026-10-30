@@ -66,6 +66,9 @@ class Row:
     std: str = "c++17"
 
 
+#: Retypes widen to ``long long``, not ``long``: ``long`` is 4 bytes on an LLP64
+#: host (Windows), where ``int -> long`` is ABI-identical and rightly reports no
+#: break, so a ``long`` row would assert an LP64 fact on every host.
 ROWS: tuple[Row, ...] = (
     Row(
         "free_function_removed",
@@ -80,24 +83,24 @@ ROWS: tuple[Row, ...] = (
         "f_prm",
         _KEEP + "int f_prm(int x);\n",
         _KEEP_IMPL + "int f_prm(int x) { return x; }\n",
-        _KEEP + "int f_prm(long x);\n",
-        _KEEP_IMPL + "int f_prm(long x) { return (int)x; }\n",
+        _KEEP + "int f_prm(long long x);\n",
+        _KEEP_IMPL + "int f_prm(long long x) { return (int)x; }\n",
     ),
     Row(
         "free_function_return_retyped",
         "f_ret",
         _KEEP + "int f_ret();\n",
         _KEEP_IMPL + "int f_ret() { return 1; }\n",
-        _KEEP + "long f_ret();\n",
-        _KEEP_IMPL + "long f_ret() { return 1; }\n",
+        _KEEP + "long long f_ret();\n",
+        _KEEP_IMPL + "long long f_ret() { return 1; }\n",
     ),
     Row(
         "global_variable_retyped",
         "g_var",
         _KEEP + "extern int g_var;\n",
         _KEEP_IMPL + "int g_var = 1;\n",
-        _KEEP + "extern long g_var;\n",
-        _KEEP_IMPL + "long g_var = 1;\n",
+        _KEEP + "extern long long g_var;\n",
+        _KEEP_IMPL + "long long g_var = 1;\n",
     ),
     Row(
         "enum_member_value_changed",
@@ -136,7 +139,7 @@ ROWS: tuple[Row, ...] = (
         "fld_rt",
         _KEEP + "struct S_rt { int a; int fld_rt; };\n",
         _KEEP_IMPL,
-        _KEEP + "struct S_rt { int a; long fld_rt; };\n",
+        _KEEP + "struct S_rt { int a; long long fld_rt; };\n",
         _KEEP_IMPL,
     ),
     Row(

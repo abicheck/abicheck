@@ -292,27 +292,19 @@ def _apply_surface_metrics(
     *old_public_entity_ids*/*new_public_entity_ids* pass through unchanged
     to :func:`diff_surface_metrics` (ADR-063 Phase 3 D5).
     """
-    from .diff_surface_metrics import diff_surface_metrics
-    from .policy.public_surface_query import PublicSurfaceQuery
+    from .policy.finding_disposition.rollup import dispose_surface_metric_rollups
 
-    visible = _filter_suppressed_changes(
-        list(
-            diff_surface_metrics(
-                old,
-                new,
-                old_public_entity_ids=old_public_entity_ids,
-                new_public_entity_ids=new_public_entity_ids,
-                old_public_type_names=None
-                if old_public_entity_ids is not None
-                else PublicSurfaceQuery.public_type_names(old, public_surfaces),
-                new_public_type_names=None
-                if new_public_entity_ids is not None
-                else PublicSurfaceQuery.public_type_names(new, public_surfaces),
-            )
-        ),
+    visible = dispose_surface_metric_rollups(
+        old,
+        new,
         suppression,
-        suppressed,
-        ledger,
+        kept=kept,
+        verdict_redundant=verdict_redundant,
+        suppressed=suppressed,
+        ledger=ledger,
+        old_public_entity_ids=old_public_entity_ids,
+        new_public_entity_ids=new_public_entity_ids,
+        public_surfaces=public_surfaces,
     )
     if not visible:
         return kept, current_verdict

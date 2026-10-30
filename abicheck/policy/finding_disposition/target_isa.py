@@ -38,6 +38,6 @@ class AttributeTargetIsaConsequences:
 
     name = "attribute_target_isa_consequences"
 
-    def run(self, changes: list[Change], ctx: PipelineContext) -> list[Change]:
+    def run(self, changes: list[Change], ctx: PipelineContext) -> list[Change]:  # noqa: ARG002 -- pipeline step run(changes, ctx) signature
         annotate_target_isa_consequences(changes)
         return changes

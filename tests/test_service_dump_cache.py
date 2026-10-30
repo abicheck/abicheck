@@ -69,9 +69,11 @@ class TestDumpIsCacheable:
         kwargs = dict(debug_format="dwarf")
         assert dump_is_cacheable(**kwargs) is False
 
-    def test_symbols_only_not_cacheable(self):
+    def test_symbols_only_is_cacheable(self):
+        # Keyed rather than gated: the dump reads only the binary, and the
+        # key folds the flag in (tests/test_symbols_only_reresolve_cached.py).
         kwargs = dict(symbols_only=True)
-        assert dump_is_cacheable(**kwargs) is False
+        assert dump_is_cacheable(**kwargs) is True
 
     def test_debug_presence_only_not_cacheable(self):
         kwargs = dict(debug_presence_only=True)

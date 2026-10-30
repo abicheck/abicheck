@@ -1160,7 +1160,7 @@ class DirExtractor:
     def detect(self, pkg_path: Path) -> bool:
         return pkg_path.is_dir()
 
-    def extract(self, pkg_path: Path, target_dir: Path) -> ExtractResult:
+    def extract(self, pkg_path: Path, target_dir: Path) -> ExtractResult:  # noqa: ARG002 -- PackageExtractor protocol
         return ExtractResult(lib_dir=pkg_path)
 
 

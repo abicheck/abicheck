@@ -26,6 +26,8 @@ from pathlib import Path, PureWindowsPath
 
 import pefile  # type: ignore[import-untyped]
 
+from .extract.pe_image import open_pe
+
 log = logging.getLogger(__name__)
 
 # CodeView signature bytes
@@ -241,44 +243,42 @@ def _extract_pdb_path_from_pe(dll_path: Path) -> str | None:
     then reads the RSDS or NB10 CodeView header to get the PDB filename.
     """
     try:
-        pe = pefile.PE(str(dll_path), fast_load=True)
-    except Exception:  # noqa: BLE001
-        return None
+        with open_pe(dll_path) as pe:
+            pe.parse_data_directories(
+                directories=[
+                    pefile.DIRECTORY_ENTRY["IMAGE_DIRECTORY_ENTRY_DEBUG"],
+                ]
+            )
 
-    try:
-        pe.parse_data_directories(
-            directories=[
-                pefile.DIRECTORY_ENTRY["IMAGE_DIRECTORY_ENTRY_DEBUG"],
-            ]
-        )
+            if not hasattr(pe, "DIRECTORY_ENTRY_DEBUG"):
+                return None
 
-        if not hasattr(pe, "DIRECTORY_ENTRY_DEBUG"):
+            for dbg in pe.DIRECTORY_ENTRY_DEBUG:
+                if dbg.struct.Type != _DEBUG_TYPE_CODEVIEW:
+                    continue
+
+                data = dbg.entry
+                if data is None:
+                    # Fall back to raw data via AddressOfRawData (RVA).
+                    size = dbg.struct.SizeOfData
+                    if (
+                        size
+                        and size <= _MAX_CODEVIEW_SIZE
+                        and dbg.struct.AddressOfRawData
+                    ):
+                        raw: bytes = pe.get_data(dbg.struct.AddressOfRawData, size)
+                        result = _parse_codeview_raw(raw)
+                        if result is not None:
+                            return result
+                    continue
+
+                # pefile parses the CodeView data into a named structure
+                result = _parse_codeview_entry(data)
+                if result is not None:
+                    return result
+
             return None
-
-        for dbg in pe.DIRECTORY_ENTRY_DEBUG:
-            if dbg.struct.Type != _DEBUG_TYPE_CODEVIEW:
-                continue
-
-            data = dbg.entry
-            if data is None:
-                # Fall back to raw data via AddressOfRawData (RVA).
-                size = dbg.struct.SizeOfData
-                if size and size <= _MAX_CODEVIEW_SIZE and dbg.struct.AddressOfRawData:
-                    raw: bytes = pe.get_data(dbg.struct.AddressOfRawData, size)
-                    result = _parse_codeview_raw(raw)
-                    if result is not None:
-                        return result
-                continue
-
-            # pefile parses the CodeView data into a named structure
-            result = _parse_codeview_entry(data)
-            if result is not None:
-                return result
-
-        return None
 
     except Exception as exc:  # noqa: BLE001
         log.debug("_extract_pdb_path_from_pe: %s: %s", dll_path, exc)
         return None
-    finally:
-        pe.close()

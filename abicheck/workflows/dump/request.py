@@ -437,7 +437,7 @@ def execute_dump_request(
         # former from either (see either sibling module's own docstring for
         # why -- avoiding a real import cycle).
         if is_header_only_evidence(resolved):
-            header_outcome = execute_header_only_dump_request(resolved, options)
+            header_outcome = execute_header_only_dump_request(resolved)
             return DumpResult(
                 resolved=resolved,
                 snapshot=header_outcome.snapshot,

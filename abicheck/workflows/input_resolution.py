@@ -647,11 +647,9 @@ def _resolve_input_impl(
         target, is_ld_script = resolve_linker_script(path)
         if is_ld_script:
             if target is not None and target.resolve() != path.resolve():
-                emit_notice(
-                    notify,
-                    f"Note: '{path}' is a GNU ld linker script; following its "
-                    f"INPUT()/GROUP() directive to '{target}'.",
-                )
+                from ..binary_utils import linker_script_note
+
+                emit_notice(notify, linker_script_note(path, target))
                 return resolve_input(
                     target,
                     _headers,

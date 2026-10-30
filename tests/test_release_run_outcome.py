@@ -213,9 +213,6 @@ class TestReleaseJsonRunOutcome:
             "BREAKING",
             [{"library": "libfoo.so", "verdict": "BREAKING"}],
             [],
-            [],
-            {},
-            {},
         )
         data = json.loads((tmp_path / "summary.json").read_text())
         assert data["run_outcome"]["gate"] == "abi_breaking"

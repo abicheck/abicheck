@@ -164,7 +164,7 @@ class TestRunOutcomeDictForDiffResultReusesGate:
             blocking=True,
             blocking_categories=("abi_breaking",),
         )
-        out = run_outcome_dict_for_diff_result(result, None, fake_gate)
+        out = run_outcome_dict_for_diff_result(result, fake_gate)
         assert out["gate"] == "abi_breaking"
 
     def test_none_gate_falls_back_to_the_legacy_verdict_mapping(self):
@@ -178,7 +178,7 @@ class TestRunOutcomeDictForDiffResultReusesGate:
             new_version="1.1",
             verdict=Verdict.BREAKING,
         )
-        out = run_outcome_dict_for_diff_result(result, None, None)
+        out = run_outcome_dict_for_diff_result(result, None)
         assert out["gate"] == "abi_breaking"
 
 

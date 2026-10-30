@@ -269,12 +269,15 @@ def _severity(kind: ChangeKind) -> int:
     return 1
 
 
-def _drop_one_twin(changes: list[Change], twin: ReplayTwin) -> list[Change]:
-    """Collapse each matched pair to one copy, one for one.
+def _pair_one_twin(
+    changes: list[Change], twin: ReplayTwin
+) -> list[tuple[Change, Change]]:
+    """Pair each replay copy of *twin* with its header copy, one for one.
 
-    The header copy survives, unless the replay copy states a strictly more
-    severe default verdict: a twin never weakens the verdict, so the stronger
-    copy is the one kept. Equal severity keeps the header copy.
+    Returns ``(dropped, survivor)`` pairs. The header copy survives, unless the
+    replay copy states a strictly more severe default verdict: a twin never
+    weakens the verdict, so the stronger copy is the one kept. Equal severity
+    keeps the header copy.
     """
     header_by_key: dict[str, list[int]] = {}
     for i, c in enumerate(changes):
@@ -282,7 +285,7 @@ def _drop_one_twin(changes: list[Change], twin: ReplayTwin) -> list[Change]:
             key = twin.header_key(c)
             if key is not None:
                 header_by_key.setdefault(key, []).append(i)
-    dropped: set[int] = set()
+    pairs: list[tuple[Change, Change]] = []
     for i, c in enumerate(changes):
         if c.kind is not twin.replay or c.evidence_category != SOURCE_REPLAY_EVIDENCE:
             continue
@@ -294,19 +297,57 @@ def _drop_one_twin(changes: list[Change], twin: ReplayTwin) -> list[Change]:
         replay_wins = twin.owner == "replay" or (
             _severity(c.kind) > _severity(changes[j].kind)
         )
-        dropped.add(j if replay_wins else i)
-    return [c for i, c in enumerate(changes) if i not in dropped]
+        if replay_wins:
+            pairs.append((changes[j], c))
+        else:
+            pairs.append((c, changes[j]))
+    return pairs
+
+
+def replay_twin_pairs(
+    changes: Iterable[Change], twins: tuple[ReplayTwin, ...] = REPLAY_TWINS
+) -> list[tuple[Change, Change]]:
+    """Every ``(dropped, survivor)`` pair :func:`drop_replay_twins` produces.
+
+    The survivor is the copy that is kept: when a survivor is itself dropped by a
+    later twin row (a header copy chained into a replay copy that owns it), the
+    pair names the final survivor, so every dropped copy maps to a kept finding.
+    Pairs are by object identity. This is the record the disposition pipeline
+    keeps, so an acknowledgment over a dropped copy is taken through the finding
+    that survived (ADR-067 D5).
+    """
+    current = list(changes)
+    pairs: list[tuple[Change, Change]] = []
+    for twin in twins:
+        matched = _pair_one_twin(current, twin)
+        dropped_ids = {id(d) for d, _ in matched}
+        pairs.extend(matched)
+        current = [c for c in current if id(c) not in dropped_ids]
+    survivor_of = {id(d): s for d, s in pairs}
+    final: list[tuple[Change, Change]] = []
+    for dropped, survivor in pairs:
+        while id(survivor) in survivor_of:
+            survivor = survivor_of[id(survivor)]
+        final.append((dropped, survivor))
+    return final
 
 
 def drop_replay_twins(
-    changes: Iterable[Change], twins: tuple[ReplayTwin, ...] = REPLAY_TWINS
+    changes: Iterable[Change],
+    *,
+    pairs_out: list[tuple[Change, Change]] | None = None,
 ) -> list[Change]:
     """Drop each source-replay copy that a header/binary finding already reports.
 
-    Applies every duplicate pair in *twins* in turn. A non-replay finding is
-    never dropped, and a replay finding with no twin is kept.
+    Applies every duplicate pair in :data:`REPLAY_TWINS` in turn. A non-replay
+    finding is never dropped, and a replay finding with no twin is kept. When
+    *pairs_out* is given, the ``(dropped, survivor)`` pairs (see
+    :func:`replay_twin_pairs`) are appended to it, so the caller records the
+    same pairing this pass acted on.
     """
-    result = list(changes)
-    for twin in twins:
-        result = _drop_one_twin(result, twin)
-    return result
+    items = list(changes)
+    pairs = replay_twin_pairs(items)
+    if pairs_out is not None:
+        pairs_out.extend(pairs)
+    dropped = {id(d) for d, _ in pairs}
+    return [c for c in items if id(c) not in dropped]

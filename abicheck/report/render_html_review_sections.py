@@ -122,7 +122,7 @@ def _surface_declaration_html(entry: Mapping[str, Any]) -> str:
 
 
 def render_surface_changes_html(
-    section: Mapping[str, Any] | None, *, limit: int | None = None
+    section: Mapping[str, Any] | None,
 ) -> str:
     """Additions, removals and modifications, each with its declarations.
 
@@ -135,7 +135,7 @@ def render_surface_changes_html(
     if not section or not section.get("total"):
         return ""
     h = html.escape
-    cap = max(0, MAX_COMPACT_SURFACE_ITEMS if limit is None else limit)
+    cap = max(0, MAX_COMPACT_SURFACE_ITEMS)
     parts: list[str] = []
     for label, key in (
         ("Additions", "additions"),

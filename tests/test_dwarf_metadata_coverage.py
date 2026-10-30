@@ -429,13 +429,13 @@ class TestProcessEnum:
     def test_anonymous_enum_skipped(self):
         die = _Die("DW_TAG_enumeration_type", {"DW_AT_byte_size": 4})
         meta = DwarfMetadata(has_dwarf=True)
-        _process_enum(die, meta, _CU())
+        _process_enum(die, meta)
         assert len(meta.enums) == 0
 
     def test_declaration_only_skipped(self):
         die = _Die("DW_TAG_enumeration_type", {"DW_AT_name": "E", "DW_AT_byte_size": 0})
         meta = DwarfMetadata(has_dwarf=True)
-        _process_enum(die, meta, _CU())
+        _process_enum(die, meta)
         assert "E" not in meta.enums
 
     def test_scoped_enum(self):
@@ -451,7 +451,7 @@ class TestProcessEnum:
             children=[enumerator],
         )
         meta = DwarfMetadata(has_dwarf=True)
-        _process_enum(die, meta, _CU(), scope_prefix="NS")
+        _process_enum(die, meta, scope_prefix="NS")
         assert "NS::E" in meta.enums
 
     def test_odr_keeps_first_enum(self):
@@ -462,8 +462,8 @@ class TestProcessEnum:
             "DW_TAG_enumeration_type", {"DW_AT_name": "E", "DW_AT_byte_size": 8}
         )
         meta = DwarfMetadata(has_dwarf=True)
-        _process_enum(die1, meta, _CU())
-        _process_enum(die2, meta, _CU())
+        _process_enum(die1, meta)
+        _process_enum(die2, meta)
         assert meta.enums["E"].underlying_byte_size == 4
 
 

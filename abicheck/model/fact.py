@@ -254,12 +254,12 @@ class RetiredBridgeField:
         self._fact_attr = f"{name}_fact"
         self._default = default
 
-    def __get__(self, obj: object, objtype: type | None = None) -> Any:
+    def __get__(self, obj: object, objtype: type | None = None) -> Any:  # noqa: ARG002 -- descriptor protocol
         if obj is None:
             return self
         return legacy_view(getattr(obj, self._fact_attr), self._default)
 
-    def __set__(self, obj: object, value: object) -> None:
+    def __set__(self, obj: object, value: object) -> None:  # noqa: ARG002 -- descriptor protocol
         raise AttributeError(
             f"{type(obj).__name__}.{self._name} is a read-only view of "
             f"{self._fact_attr}; build a new instance or use "

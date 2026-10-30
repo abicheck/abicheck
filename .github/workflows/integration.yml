@@ -182,11 +182,13 @@ jobs:
         env:
           # The Mach-O/PE subset counts are not pinned, so the step default
           # "> 0" floor catches a missing toolchain without platform guesswork.
+          # `-v` names each test as it finishes: verify.py streams it, so a
+          # stalled or cancelled leg still shows which tests were running.
           #
           # Windows: 8 workers on the 4-vCPU runner. Its tests mostly wait on
-          # castxml/compiler subprocesses (Windows process start is the cost,
-          # ~6.5 s/test at -n auto vs ~1.3 s on macOS), not on the CPU.
-          PYTEST_ADDOPTS: -n ${{ runner.os == 'Windows' && '8' || 'auto' }} --dist worksteal
+          # castxml/compiler subprocesses (Windows process start is the cost),
+          # not on the CPU.
+          PYTEST_ADDOPTS: -n ${{ runner.os == 'Windows' && '8' || 'auto' }} --dist worksteal -v
         run: python scripts/verify.py --profile full --only integration --require-complete
       - name: Native PE/Mach-O compare workflows
         # Formerly the `cross-platform-e2e` job. Apple clang -> .dylib,

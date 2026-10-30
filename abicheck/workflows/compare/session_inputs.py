@@ -38,7 +38,6 @@ if TYPE_CHECKING:
     from .session_request import PairSessionRequest
 
 __all__ = [
-    "normalize_operand",
     "note_debug_resolution",
     "operand_rule_refusals",
     "pair_request",
@@ -107,27 +106,6 @@ def operand_rule_refusals() -> Iterator[None]:
         ) from exc
     except ManifestOperandError as exc:
         raise RunInputError.usage(str(exc)) from exc
-
-
-def normalize_operand(path: Path, notify: Notify) -> tuple[Path, str | None]:
-    """*path*'s binary format, following a resolvable GNU ld linker script.
-
-    When *path* is a script naming a real shared library, that library and
-    *its* format are returned, with a one-line note.
-    """
-    from ..extraction import detect_binary_format, resolve_linker_script
-
-    fmt = detect_binary_format(path)
-    if fmt is not None:
-        return path, fmt
-    target, is_ld = resolve_linker_script(path)
-    if is_ld and target is not None and target.resolve() != path.resolve():
-        notify(
-            f"Note: '{path}' is a GNU ld linker script; following its "
-            f"INPUT()/GROUP() directive to '{target}'."
-        )
-        return target, detect_binary_format(target)
-    return path, fmt
 
 
 def warn_ignored_header_inputs(

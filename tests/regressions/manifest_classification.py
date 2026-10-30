@@ -532,7 +532,11 @@ CLASSIFICATION_BUG_CLASSES: tuple[BugClass, ...] = (
             "for `change_kind:` and `overrides:`: a base kind names its "
             "`*_elf_only` variant too, since the variant is chosen by whether "
             "headers were supplied, so a rule's or verdict's outcome never "
-            "depends on that evidence."
+            "depends on that evidence. An aggregate roll-up computed from "
+            "declaration counts (`public_surface_shrank`) has no symbol of its "
+            "own, so it follows the removals it summarises: it is disposed of "
+            "exactly when every covered removal is, and never outlives an "
+            "accepted removal."
         ),
         fixed_by=(1630,),
         seed_tests=(
@@ -542,6 +546,8 @@ CLASSIFICATION_BUG_CLASSES: tuple[BugClass, ...] = (
             "tests/test_suppression_elf_only_variant.py",
             "tests/test_suppression_elf_only_variant_e2e.py",
             "tests/test_override_elf_only_variant.py",
+            "tests/test_surface_rollup_disposition.py",
+            "tests/test_surface_rollup_disposition_e2e.py",
         ),
         public_surfaces=("reclassify", "json_report"),
         axes={"evidence": ("header", "elf")},

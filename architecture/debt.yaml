@@ -80,7 +80,7 @@
     },
     {
       "path": "abicheck/buildsource/cross_source_checks.py",
-      "baseline_lines": 1697,
+      "baseline_lines": 1693,
       "target": "extract/build-or-source",
       "rule": "no_growth",
       "disposition": "migrate",
@@ -91,7 +91,7 @@
     },
     {
       "path": "abicheck/buildsource/extractor_manifest.py",
-      "baseline_lines": 902,
+      "baseline_lines": 898,
       "target": "extract/build-or-source",
       "rule": "no_growth",
       "disposition": "migrate",
@@ -212,7 +212,7 @@
     },
     {
       "path": "abicheck/buildsource/source_graph_findings.py",
-      "baseline_lines": 1666,
+      "baseline_lines": 1665,
       "target": "extract/build-or-source",
       "rule": "no_growth",
       "disposition": "migrate",
@@ -223,7 +223,7 @@
     },
     {
       "path": "abicheck/buildsource/source_link.py",
-      "baseline_lines": 1669,
+      "baseline_lines": 1662,
       "target": "extract/build-or-source",
       "rule": "no_growth",
       "disposition": "migrate",
@@ -278,7 +278,7 @@
     },
     {
       "path": "abicheck/checker.py",
-      "baseline_lines": 1396,
+      "baseline_lines": 1388,
       "target": "compare",
       "rule": "no_growth",
       "disposition": "migrate",
@@ -289,7 +289,7 @@
     },
     {
       "path": "abicheck/cli_compare_fold.py",
-      "baseline_lines": 926,
+      "baseline_lines": 922,
       "target": "workflows-or-frontends",
       "rule": "no_growth",
       "disposition": "migrate",
@@ -575,7 +575,7 @@
     },
     {
       "path": "abicheck/dumper_clang.py",
-      "baseline_lines": 1389,
+      "baseline_lines": 1387,
       "target": "see ADR-061 ownership map",
       "rule": "no_growth",
       "disposition": "migrate",
@@ -619,7 +619,7 @@
     },
     {
       "path": "abicheck/export_surface.py",
-      "baseline_lines": 1242,
+      "baseline_lines": 1240,
       "target": "see ADR-061 ownership map",
       "rule": "no_growth",
       "disposition": "migrate",
@@ -630,7 +630,7 @@
     },
     {
       "path": "abicheck/frontends/cli/commands/dump.py",
-      "baseline_lines": 899,
+      "baseline_lines": 897,
       "target": "frontends (already home; the header-only branch's own body already delegates to frontends/cli/dump_execute.py -- only the dispatch/is_header_only_evidence check stays here)",
       "rule": "no_growth",
       "disposition": "migrate",
@@ -663,7 +663,7 @@
     },
     {
       "path": "abicheck/junit_report.py",
-      "baseline_lines": 1183,
+      "baseline_lines": 1167,
       "target": "report",
       "rule": "no_growth",
       "disposition": "migrate",
@@ -1521,7 +1521,7 @@
     },
     {
       "path": "tests/test_internal_leak.py",
-      "baseline_lines": 1933,
+      "baseline_lines": 1929,
       "target": "tests/unit-or-contract ownership matching production migration",
       "rule": "no_growth",
       "disposition": "migrate",

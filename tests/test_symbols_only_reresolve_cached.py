@@ -1,0 +1,199 @@
+# Copyright 2026 Nikolay Petrov
+# SPDX-License-Identifier: Apache-2.0
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+"""A symbols-only re-resolve of an unchanged binary is extracted once.
+
+Bug class ``perf.optimization_wired_to_one_of_several_equivalent_paths``.
+``l0_export_delta.fold_l0_hard_removals`` needs a symbols-only view of each
+compared side. For ELF it builds that view from the table the snapshot
+already carries (``symbols_only_view``); for PE and Mach-O it re-resolves the
+binary with ``symbols_only=True`` -- a shape the whole-snapshot cache refused,
+so every compare re-extracted both sides from disk a second time. On the
+Windows integration lane that doubled-plus the cost of every live compare
+and pushed the job past its 40-minute limit.
+
+The invariant, stated over every binary format, with and without headers,
+and over every order of full and symbols-only requests: each distinct
+request shape is extracted exactly once, and every request is answered with
+the snapshot *its own* shape produced (a symbols-only entry never serves a
+full dump, nor the reverse). The oracle is the set of distinct shapes in the
+sequence, counted independently of the cache.
+"""
+
+from __future__ import annotations
+
+import itertools
+from pathlib import Path
+from typing import Any
+
+import pytest
+from _pe_build import build_pe_dll
+from click.testing import CliRunner
+
+from abicheck.model import AbiSnapshot
+from abicheck.workflows.dump.cache.api import cached_run_dump
+
+_FORMATS = ("elf", "pe", "macho")
+_MAGIC = {"elf": b"\x7fELF", "pe": b"MZ", "macho": b"\xcf\xfa\xed\xfe"}
+#: Every length-3 order of full (False) and symbols-only (True) requests.
+_SEQUENCES = list(itertools.product((False, True), repeat=3))
+
+
+def _fake_dump(calls: list[bool]) -> Any:
+    def run_dump(*_a: Any, symbols_only: bool = False, **_k: Any) -> AbiSnapshot:
+        calls.append(symbols_only)
+        # The produced snapshot names the shape that produced it, so a hit
+        # served from the other shape's entry is visible in the result.
+        return AbiSnapshot(
+            library="lib", version="symbols-only" if symbols_only else "full"
+        )
+
+    return run_dump
+
+
+@pytest.mark.parametrize("with_headers", [False, True], ids=["no-headers", "headers"])
+@pytest.mark.parametrize("fmt", _FORMATS)
+@pytest.mark.parametrize(
+    "sequence", _SEQUENCES, ids=lambda s: "".join("SF"[not x] for x in s)
+)
+def test_each_request_shape_is_extracted_once(
+    fmt: str, with_headers: bool, sequence: tuple[bool, ...], tmp_path: Path
+) -> None:
+    binary = tmp_path / "lib.bin"
+    binary.write_bytes(_MAGIC[fmt] + b" payload")
+    header = tmp_path / "api.h"
+    header.write_text("int api(void);\n", encoding="utf-8")
+    headers = [header] if with_headers else []
+    calls: list[bool] = []
+    for symbols_only in sequence:
+        snap = cached_run_dump(
+            _fake_dump(calls),
+            binary,
+            fmt,
+            headers,
+            [],
+            symbols_only=symbols_only,
+            header_backend="castxml",
+        )
+        assert snap.version == ("symbols-only" if symbols_only else "full")
+    assert sorted(calls) == sorted(set(sequence))
+
+
+@pytest.mark.parametrize("fmt", _FORMATS)
+def test_a_changed_binary_is_re_extracted_symbols_only(
+    fmt: str, tmp_path: Path
+) -> None:
+    """The entry is content-keyed: new bytes at the same path miss."""
+    binary = tmp_path / "lib.bin"
+    binary.write_bytes(_MAGIC[fmt] + b" one")
+    calls: list[bool] = []
+    for payload in (b" one", b" one", b" two", b" two"):
+        binary.write_bytes(_MAGIC[fmt] + payload)
+        cached_run_dump(_fake_dump(calls), binary, fmt, [], [], symbols_only=True)
+    assert calls == [True, True]
+
+
+@pytest.mark.parametrize("symbols_only", [False, True], ids=["full", "symbols-only"])
+def test_a_pe_dump_misses_when_its_pdb_changes(
+    symbols_only: bool, tmp_path: Path
+) -> None:
+    """A PE dump reads the PDB beside the image on its own, so that PDB is a
+    key input: an edited PDB re-extracts, an unchanged one hits."""
+    binary = tmp_path / "lib.dll"
+    binary.write_bytes(_MAGIC["pe"] + b" payload")
+    pdb = tmp_path / "lib.pdb"
+    calls: list[bool] = []
+    written: bytes | None = None
+    # None: no PDB beside the image. It appears, changes, and is removed again.
+    for content in (None, None, b"pdb one", b"pdb one", b"pdb two", None, None):
+        # Written only when it changes: the key also treats a touched file as
+        # changed (its mtime is hashed with its content).
+        if content != written:
+            if content is None:
+                pdb.unlink()
+            else:
+                pdb.write_bytes(content)
+            written = content
+        cached_run_dump(
+            _fake_dump(calls), binary, "pe", [], [], symbols_only=symbols_only
+        )
+    # No PDB, each distinct PDB, then no PDB again -- whose entry is the first
+    # one, so removal returns to it instead of extracting a fourth time.
+    assert len(calls) == 3
+
+
+def test_an_elf_dump_ignores_a_same_named_pdb(tmp_path: Path) -> None:
+    """Negative control: only a PE dump reads a PDB sidecar."""
+    binary = tmp_path / "lib.so"
+    binary.write_bytes(_MAGIC["elf"] + b" payload")
+    calls: list[bool] = []
+    for content in (b"pdb one", b"pdb two"):
+        (tmp_path / "lib.pdb").write_bytes(content)
+        cached_run_dump(_fake_dump(calls), binary, "elf", [], [])
+    assert len(calls) == 1
+
+
+# ── public workflow: two `compare` runs of one PE pair ─────────────────────
+
+
+@pytest.mark.integration
+def test_repeat_pe_compare_extracts_nothing_new(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The user-facing shape: a second identical ``compare`` of a PE pair is
+    served wholly from the cache. Before the fix its L0 export probe
+    re-extracted both DLLs symbols-only on every run."""
+    import abicheck.workflows.dump.pe as pe_mod
+    from abicheck.cli import main
+
+    sides = {}
+    for side, body in (
+        ("old", "int foo(void){return 1;}\nint bar(int x){return x;}\n"),
+        ("new", "int foo(void){return 1;}\n"),
+    ):
+        d = tmp_path / side
+        d.mkdir()
+        (d / "foo.h").write_text("int foo(void);\nint bar(int);\n", encoding="utf-8")
+        (d / "foo.c").write_text(body, encoding="utf-8")
+        dll = d / "foo.dll"
+        if not build_pe_dll(dll, d / "foo.c"):
+            pytest.skip("no PE toolchain (MinGW gcc, or clang + ld.lld)")
+        sides[side] = (dll, d / "foo.h")
+
+    extracted: list[str] = []
+    real = pe_mod.extract_pe
+
+    def counting(path: Path, *a: Any, **k: Any) -> AbiSnapshot:
+        extracted.append(Path(path).parent.name)
+        return real(path, *a, **k)
+
+    monkeypatch.setattr(pe_mod, "extract_pe", counting)
+    args = [
+        "compare",
+        str(sides["old"][0]),
+        str(sides["new"][0]),
+        "-H",
+        f"old={sides['old'][1]}",
+        "-H",
+        f"new={sides['new'][1]}",
+        "-o",
+        "json=-",
+    ]
+    first = CliRunner().invoke(main, args, catch_exceptions=False)
+    after_first = len(extracted)
+    second = CliRunner().invoke(main, args, catch_exceptions=False)
+    assert first.exit_code == second.exit_code, (first.output, second.output)
+    assert after_first > 0, "the first compare must extract each side"
+    assert extracted[after_first:] == [], extracted
