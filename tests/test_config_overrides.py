@@ -31,7 +31,10 @@ from abicheck.buildsource.build_config_overrides import (
     validated_config_overrides,
 )
 from abicheck.cli import main
-from abicheck.frontends.cli.options.config_set import parse_set_assignments
+from abicheck.frontends.cli.options.config_set import (
+    parse_set_assignments,
+    reject_unforwarded_release_overrides,
+)
 from abicheck.frontends.cli.project_config import (
     config_exclude_headers,
     resolve_project_compare_config,
@@ -565,3 +568,18 @@ def test_a_release_compare_refuses_a_key_its_members_do_not_receive(
     assert result.exit_code == 64
     assert "scope.public_symbols" in result.output
     assert "directory/package comparison does not apply" in result.output
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [{"severity.addition": "error"}, {"scope.public": False}, {"deployment": {}}],
+)
+def test_the_release_gate_accepts_keys_its_members_receive(
+    overrides: dict[str, object],
+) -> None:
+    reject_unforwarded_release_overrides(overrides)  # no UsageError
+
+
+def test_the_release_gate_refuses_a_key_its_members_do_not_receive() -> None:
+    with pytest.raises(click.UsageError, match="scope.public_symbols"):
+        reject_unforwarded_release_overrides({"scope.public_symbols": ["foo"]})
