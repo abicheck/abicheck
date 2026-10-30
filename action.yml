@@ -220,15 +220,16 @@ inputs:
   frontend:
     description: >
       L2 header-AST frontend for native-binary inputs: "auto" (resolves to
-      castxml and never changes producer unless the CLI's
-      --allow-ast-frontend-fallback flag is also passed via extra-args (or
-      ABICHECK_ALLOW_AST_FALLBACK=1 is set) — with that opt-in, a recognized
+      castxml and never changes producer unless
+      `compile.ast_frontend_fallback: true` is set in the `.abicheck.yml`
+      build-config (or ABICHECK_ALLOW_AST_FALLBACK=1 is set) — with that opt-in, a recognized
       castxml toolchain-version mismatch, an unsupported castxml release, or
       a direct-include-guard failure falls back to clang, G16; without it,
       and on any host with no castxml at all, auto does not silently switch
       to clang — the command fails asking you to install castxml or pass
       frontend: clang explicitly. One exception: a non-host
-      --frontend-context (SYCL/DPC++, passed via extra-args) routes an auto
+      `compile.frontend_context` (SYCL/DPC++, set in the `.abicheck.yml`
+      build-config) routes an auto
       that resolves to plain castxml (no pin) straight to clang with no
       opt-in needed, since castxml can't satisfy it at all — but any way of
       pinning the resolved backend away from plain castxml-or-clang still
@@ -1425,21 +1426,21 @@ runs:
         INPUT_DRY_RUN: ${{ inputs.dry-run }}
         INPUT_OLD_HEADER: ${{ inputs.old-header }}
         INPUT_OLD_INCLUDE: ${{ inputs.old-include }}
-        INPUT_OLD_VERSION: ${{ inputs.old-label }}
+        INPUT_OLD_VERSION: ${{ inputs.old-version }}
         INPUT_OLD_LABEL: ${{ inputs.old-label }}
         INPUT_OLD_LIBRARY: ${{ inputs.old-library }}
         INPUT_FORMAT: ${{ inputs.format }}
         INPUT_UPLOAD_SARIF: ${{ inputs.upload-sarif }}
-        INPUT_DEBUG_INFO1: ${{ inputs.old-debug-info }}
+        INPUT_DEBUG_INFO1: ${{ inputs.debug-info1 }}
         INPUT_OLD_DEBUG_INFO: ${{ inputs.old-debug-info }}
-        INPUT_DEBUG_INFO2: ${{ inputs.new-debug-info }}
+        INPUT_DEBUG_INFO2: ${{ inputs.debug-info2 }}
         INPUT_NEW_DEBUG_INFO: ${{ inputs.new-debug-info }}
         INPUT_DEVEL_PKG1: ${{ inputs.devel-pkg1 }}
         INPUT_DEVEL_PKG2: ${{ inputs.devel-pkg2 }}
         INPUT_DSO_ONLY: ${{ inputs.dso-only }}
         INPUT_INCLUDE_PRIVATE_DSO: ${{ inputs.include-private-dso }}
         INPUT_FAIL_ON_REMOVED_LIBRARY: ${{ inputs.fail-on-removed-library }}
-        INPUT_ANALYSIS_ASSURANCE_COMPLETE: ${{ inputs.require-complete }}
+        INPUT_ANALYSIS_ASSURANCE_COMPLETE: ${{ inputs.analysis-assurance-complete }}
         INPUT_REQUIRE_COMPLETE: ${{ inputs.require-complete }}
         INPUT_ACKNOWLEDGMENTS: ${{ inputs.acknowledgments }}
         INPUT_ABI_BASELINE: ${{ inputs.abi-baseline }}
@@ -1468,7 +1469,7 @@ runs:
         INPUT_REQUIRED_SYMBOL: ${{ inputs.required-symbol }}
         INPUT_REQUIRED_SYMBOLS: ${{ inputs.required-symbols }}
         INPUT_SNAPSHOT_COMPRESSION: ${{ inputs.snapshot-compression }}
-        INPUT_PUBLIC_HEADER_DIR: ${{ inputs.public-header-dirs }}
+        INPUT_PUBLIC_HEADER_DIR: ${{ inputs.public-header-dir }}
         INPUT_PUBLIC_HEADER_DIRS: ${{ inputs.public-header-dirs }}
         INPUT_BUILD_TARGET: ${{ inputs.build-target }}
         # validate-inputs.sh's own compile-context guard (frontend/
@@ -1480,13 +1481,13 @@ runs:
         # check re-run inside run.sh (which *is* wired) ever actually fired
         # (Codex review; found while wiring require-complete-analysis
         # through this same step).
-        INPUT_AST_FRONTEND: ${{ inputs.frontend }}
+        INPUT_AST_FRONTEND: ${{ inputs.ast-frontend }}
         INPUT_FRONTEND: ${{ inputs.frontend }}
         INPUT_LANG: ${{ inputs.lang }}
-        INPUT_GCC_PATH: ${{ inputs.compiler }}
+        INPUT_GCC_PATH: ${{ inputs.gcc-path }}
         INPUT_COMPILER: ${{ inputs.compiler }}
         INPUT_GCC_PREFIX: ${{ inputs.gcc-prefix }}
-        INPUT_GCC_OPTIONS: ${{ inputs.compile-options }}
+        INPUT_GCC_OPTIONS: ${{ inputs.gcc-options }}
         INPUT_COMPILE_OPTIONS: ${{ inputs.compile-options }}
         INPUT_SYSROOT: ${{ inputs.sysroot }}
         INPUT_NOSTDINC: ${{ inputs.nostdinc }}

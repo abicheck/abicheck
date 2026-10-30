@@ -32,6 +32,7 @@ import os
 import subprocess
 from pathlib import Path
 
+import _yaml_fast
 import pytest
 from _action_run_sh_harness import REQUIRES_POSIX_SHELL, _compare_env, _run_action
 from _workflow_exec import bash_executable, require_bash
@@ -225,3 +226,46 @@ def test_require_complete_analysis_points_at_require_complete(tmp_path: Path) ->
     assert result.returncode != 0, combined
     assert "require-complete-analysis" in combined, combined
     assert "require-complete" in combined, combined
+
+
+# The validate step's tombstone wires must read the RETIRED input, not its
+# replacement. A wire reading the replacement makes a plain, valid run fail
+# (old-label defaults to 'old', so every run was rejected) or misses the
+# retired spelling altogether. Asserted on the parsed workflow, because the
+# shell-level tests above set INPUT_* directly and never see these expressions.
+_TOMBSTONE_WIRES = {
+    "INPUT_POLICY_FILE": "policy-file",
+    "INPUT_AST_FRONTEND": "ast-frontend",
+    "INPUT_GCC_PATH": "gcc-path",
+    "INPUT_GCC_PREFIX": "gcc-prefix",
+    "INPUT_GCC_OPTIONS": "gcc-options",
+    "INPUT_ANALYSIS_ASSURANCE_COMPLETE": "analysis-assurance-complete",
+    "INPUT_PUBLIC_HEADER_DIR": "public-header-dir",
+    "INPUT_DEBUG_INFO1": "debug-info1",
+    "INPUT_DEBUG_INFO2": "debug-info2",
+    "INPUT_DEVEL_PKG1": "devel-pkg1",
+    "INPUT_DEVEL_PKG2": "devel-pkg2",
+    "INPUT_OLD_VERSION": "old-version",
+    "INPUT_NEW_VERSION": "new-version",
+}
+
+
+def _step(action: dict, name: str) -> dict:
+    return next(s for s in action["runs"]["steps"] if s.get("name") == name)
+
+
+def test_validate_step_tombstone_wires_read_the_retired_inputs() -> None:
+    action = _yaml_fast.safe_load(
+        (REPO_ROOT / "action.yml").read_text(encoding="utf-8")
+    )
+    env = _step(action, "Validate mode/input combination")["env"]
+    for var, retired in _TOMBSTONE_WIRES.items():
+        assert env[var] == f"${{{{ inputs.{retired} }}}}", (var, env[var])
+
+
+def test_run_step_never_forwards_a_tombstone() -> None:
+    action = _yaml_fast.safe_load(
+        (REPO_ROOT / "action.yml").read_text(encoding="utf-8")
+    )
+    env = _step(action, "Run abicheck")["env"]
+    assert not set(_TOMBSTONE_WIRES) & set(env)

@@ -49,6 +49,25 @@ CONTRACT_FILE="${INPUT_CONTRACT:-}"
 ALLOW_NEW_TARGET="${INPUT_ALLOW_NEW_TARGET:-false}"
 ANALYSIS_ASSURANCE_COMPLETE="${INPUT_REQUIRE_COMPLETE:-}"
 
+# Retired names are rejected before any required-input check, so a caller
+# who still sets `requested-depth` gets the replacement hint, not 'depth is required'.
+_renamed_inputs=(
+  "requested-depth:INPUT_REQUESTED_DEPTH:depth"
+  "contract-file:INPUT_CONTRACT_FILE:contract"
+  "ast-frontend:INPUT_AST_FRONTEND:frontend"
+  "gcc-path:INPUT_GCC_PATH:compiler"
+  "gcc-prefix:INPUT_GCC_PREFIX:compiler"
+  "gcc-options:INPUT_GCC_OPTIONS:compile-options"
+  "policy-file:INPUT_POLICY_FILE:policy"
+  "analysis-assurance-complete:INPUT_ANALYSIS_ASSURANCE_COMPLETE:require-complete"
+)
+for _entry in "${_renamed_inputs[@]}"; do
+  IFS=: read -r _old_name _old_var _new_name <<<"$_entry"
+  if [[ -n "${!_old_var:-}" ]]; then
+    _fail "${_old_name} is RETIRED and no longer accepted: it was renamed to ${_new_name} (ADR-091). Replace ${_old_name} with ${_new_name} in your workflow, then remove ${_old_name}."
+  fi
+done
+
 # ── Required-input checks run before the enum/case validations below, so an
 # empty required input (name, profile, baseline-channel, depth)
 # gets the clearer "input is required" message instead of being caught by
@@ -222,22 +241,6 @@ fi
 # retirement). Leaving it set would silently drop the requested orthogonal
 # exit-1 assurance floor rather than actually enforcing it, so this is a
 # hard error, same severity reasoning as the root Action's own check.
-_renamed_inputs=(
-  "requested-depth:INPUT_REQUESTED_DEPTH:depth"
-  "contract-file:INPUT_CONTRACT_FILE:contract"
-  "ast-frontend:INPUT_AST_FRONTEND:frontend"
-  "gcc-path:INPUT_GCC_PATH:compiler"
-  "gcc-prefix:INPUT_GCC_PREFIX:compiler"
-  "gcc-options:INPUT_GCC_OPTIONS:compile-options"
-  "policy-file:INPUT_POLICY_FILE:policy"
-  "analysis-assurance-complete:INPUT_ANALYSIS_ASSURANCE_COMPLETE:require-complete"
-)
-for _entry in "${_renamed_inputs[@]}"; do
-  IFS=: read -r _old_name _old_var _new_name <<<"$_entry"
-  if [[ -n "${!_old_var:-}" ]]; then
-    _fail "${_old_name} is RETIRED and no longer accepted: it was renamed to ${_new_name} (ADR-091). Replace ${_old_name} with ${_new_name} in your workflow, then remove ${_old_name}."
-  fi
-done
 if [[ "${INPUT_REQUIRE_COMPLETE_ANALYSIS:-false}" != "false" ]]; then
   _fail "require-complete-analysis ('${INPUT_REQUIRE_COMPLETE_ANALYSIS}') was removed. Its replacement is require-complete, the per-job override of assurance.require_complete. Set assurance.require_complete: true in your .abicheck.yml and pass that file as build-config instead, or use require-complete, then remove this input."
 fi
