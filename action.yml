@@ -874,6 +874,15 @@ inputs:
       BREAKING/API_BREAK-classified finding. Does not apply to dump,
       deps-tree, or deps-compare.
     required: false
+  set:
+    description: >
+      Config overrides for this run, one `PATH=VALUE` per line,
+      for example `scope.show_redundant=true`. Each non-blank line that is not
+      a `#` comment is forwarded verbatim as its own `--set PATH=VALUE` to the
+      abicheck command, so the CLI validates the keys and values: an unknown
+      key or a core option is a usage error (exit 64). Applies to mode:
+      compare only; set on any other mode fails the step.
+    required: false
   require-complete-analysis:
     description: >
       RETIRED (rulings.py deferred-option followup -- hard removal, no
@@ -1399,6 +1408,7 @@ runs:
         # existed, rather than found by review a second time.
         INPUT_BUILD_INFO: ${{ inputs.build-info }}
         INPUT_COMPILE_DB: ${{ inputs.compile-db }}
+        INPUT_SET: ${{ inputs.set }}
       run: bash "${{ github.action_path }}/action/validate-inputs.sh"
 
     # ── 1. Python ─────────────────────────────────────────────────────────────
@@ -1560,6 +1570,7 @@ runs:
         INPUT_FAIL_ON_BREAKING: ${{ inputs.fail-on-breaking }}
         INPUT_FAIL_ON_API_BREAK: ${{ inputs.fail-on-api-break }}
         INPUT_SEVERITY_PRESET: ${{ inputs.severity-preset }}
+        INPUT_SET: ${{ inputs.set }}
         INPUT_REQUIRE_COMPLETE_ANALYSIS: ${{ inputs.require-complete-analysis }}
         INPUT_ANNOTATE: ${{ inputs.annotate }}
         INPUT_ANNOTATE_ADDITIONS: ${{ inputs.annotate-additions }}

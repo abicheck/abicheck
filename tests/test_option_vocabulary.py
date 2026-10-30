@@ -203,6 +203,11 @@ def _claims(registry: dict) -> dict[tuple[str, str], str]:
     }
 
 
+#: ADR-091 D4: `--set`/`set:` is the one generic spelling of the config tier,
+#: not a concept's own option, so it counts toward neither surface's budget.
+GENERIC_OVERRIDE = "config.override"
+
+
 def _visible_budget(registry: dict, inventory: dict) -> tuple[list[str], list[str]]:
     """Core ``compare`` options that plain ``--help`` shows, and root Action analysis inputs."""
     tier = {c["concept"]: c["tier"] for c in registry["concepts"]}
@@ -220,6 +225,7 @@ def _visible_budget(registry: dict, inventory: dict) -> tuple[list[str], list[st
         if r["action"] == "action"
         and tier.get(claims.get(("action", r["id"]), ""), "")
         not in {"action", "retired"}
+        and claims.get(("action", r["id"])) != GENERIC_OVERRIDE
     ]
     return core, analysis
 
@@ -265,7 +271,6 @@ def test_every_live_option_is_claimed_exactly_once(
         (s, i) for c in registry["concepts"] for s in SURFACES for i in c.get(s, [])
     )
     patterns = [o["pattern"] for o in registry.get("out_of_scope", [])]
-    aliases = {a["id"] for a in registry.get("deprecated_aliases", [])}
     twice = sorted(k for k, n in claims.items() if n > 1)
     unclaimed = sorted(
         (s, r["id"])
@@ -273,29 +278,10 @@ def test_every_live_option_is_claimed_exactly_once(
         for r in inventory[s]
         if (s, r["id"]) not in claims
         and not any(fnmatch.fnmatchcase(r["id"], p) for p in patterns)
-        and not (s == "cli" and r["id"] in aliases)
     )
     assert not twice, f"options claimed by more than one concept: {twice}"
     assert not unclaimed, (
         f"options not in any concept of architecture/option-vocabulary.yaml (ADR-091 D6): {unclaimed}"
-    )
-
-
-def test_deprecated_aliases_are_hidden_and_replaced(
-    registry: dict, inventory: dict
-) -> None:
-    """ADR-091 D7: each retired spelling is a hidden CLI option whose replacement is a visible, claimed one."""
-    cli = {r["id"]: r for r in inventory["cli"]}
-    claimed = {i for c in registry["concepts"] for i in c.get("cli", [])}
-    bad = [
-        a
-        for a in registry.get("deprecated_aliases", [])
-        if not cli.get(a["id"], {}).get("hidden")
-        or a["replaces"] not in claimed
-        or cli[a["replaces"]]["hidden"]
-    ]
-    assert not bad, (
-        f"deprecated_aliases must be hidden and replace a visible claimed option: {bad}"
     )
 
 
@@ -434,6 +420,23 @@ def test_surface_budget_holds_or_is_recorded(registry: dict, inventory: dict) ->
             f"{surface} surface grew to {live} (recorded {exc['recorded']}); the budget is no-growth"
         )
         assert exc["rename"] in RENAMES_FOR_BUDGET, exc
+
+
+def test_budget_excludes_only_the_generic_override() -> None:
+    """The override input is not counted; any other analysis input still is."""
+    registry = {
+        "concepts": [
+            {"concept": GENERIC_OVERRIDE, "tier": "config", "action": ["action:set"]},
+            {"concept": "compile.lang", "tier": "config", "action": ["action:lang"]},
+            {"concept": "action.runtime", "tier": "action", "action": ["action:mode"]},
+        ]
+    }
+    rows = [
+        {"id": f"action:{n}", "action": "action", "input": n}
+        for n in ("set", "lang", "mode")
+    ]
+    _, analysis = _visible_budget(registry, {"cli": [], "action": rows})
+    assert analysis == ["action:lang"]
 
 
 def test_every_exception_is_well_formed(registry: dict, inventory: dict) -> None:

@@ -27,7 +27,7 @@ def test_dump_cmd_writes_output_file(tmp_path, monkeypatch):
             str(so_path),
             "-H",
             str(header),
-            "--version",
+            "--label",
             "2.0",
             "-o",
             str(out),

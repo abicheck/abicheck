@@ -347,6 +347,13 @@ inputs:
       short floors the whole bundle. It used to be rejected outright for a
       bundle (`validate-inputs.sh`), a guard that has since been retired.
     required: false
+  set:
+    description: >
+      Config overrides for the internal compare step, one `PATH=VALUE` per
+      line. Each non-blank, non-comment line is forwarded verbatim
+      as its own `--set`; the CLI validates the keys.
+    required: false
+    default: ''
   extra-args:
     description: 'Additional CLI arguments passed directly to the internal abicheck invocation.'
     required: false
@@ -988,8 +995,8 @@ runs:
 
         # Same rule as run.sh's `_require_cli_value_options_or_fail`, and for
         # the same reason (Codex review, PR #1234, P2): an opaque-token
-        # fallback is NOT safe. `extra-args: --version --dry-run` is argv the
-        # CLI accepts as --version's own value, so an opaque tokenizer invents
+        # fallback is NOT safe. `extra-args: --label --dry-run` is argv the
+        # CLI accepts as --label's own value, so an opaque tokenizer invents
         # a --dry-run that is not there -- and this step's own trailing/real
         # --config recognition would misread the same shape. Undetermined is
         # therefore fatal, but only when `extra-args` is non-empty: with
@@ -1870,6 +1877,7 @@ runs:
         policy-file: ${{ inputs.policy-file }}
         suppress: ${{ inputs.suppress }}
         severity-preset: ${{ inputs.severity-preset }}
+        set: ${{ inputs.set }}
         # require-complete-analysis: RETIRED -- this Action's own input (see
         # its docstring above) is validated to 'false' before this step can
         # ever run, and the root Action's own input it used to forward to is

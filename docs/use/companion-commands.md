@@ -210,7 +210,7 @@ Notes:
   common case where the same header/include applies to both versions.
 - **`both=`** is an escape hatch for a path that literally begins `old=` /
   `new=` (rare): `--header both=old=weird.h`.
-- The **version** flag defaults per side stay `old` / `new` — pass `--version`
+- The **version** flag defaults per side stay `old` / `new` — pass `--label`
   only when your `.so` files need explicit labels.
 - The `--ast-frontend` per-side overrides (`--ast-frontend old=` /
   `--ast-frontend new=`) are **gone** (Phase 7, CONFIG class, no CLI
