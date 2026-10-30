@@ -186,7 +186,7 @@ See "Landed in Phase 1" below.
 
 ### Phase 2 — scale and performance
 
-- **A2.1** Section/chunk lazy loading; a comparison loads two manifests, all
+- **A2.1** Section lazy loading (size-bounded chunking withdrawn by ADR-062's 2026-10-30 amendment, D18); a comparison loads two manifests, all
   L0 binary sections, then one library pair at a time.
 - **A2.2** Streaming object encoding replaces whole-document `asdict()` +
   one JSON string.
@@ -792,6 +792,16 @@ not appearing).
 excluded" half specifically — a PE/Mach-O/Python/header-only library
 survives a round trip through the package format and appears in a package
 listing/report, even where no resolution graph can place it.
+
+- **A1.9** ADR-062 2026-10-30 amendment (D14-D18). Not implemented.
+  - Versioned immutable refs and an atomic manifest publish, with a
+    `package_format_version` bump and a D13 adapter (D17). This closes the
+    "third, deliberately deferred gap" below and its failed-check variant.
+  - `must_understand` and `extensions` carriers (D14).
+  - A field inventory and a byte-identity test (D15).
+  - Persisted `evidence` and `comparison_input` digests (D16).
+  - Exit: one regression test per amendment probe, the oneDAL/MKL corpus,
+    Windows and macOS, and concurrent-publisher serialization.
 
 ### Phase 2
 
