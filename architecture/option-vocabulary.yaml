@@ -7,6 +7,13 @@
 # inventory row is claimed by exactly one concept (or an out_of_scope entry)
 # and that every id named here exists.
 #
+# exceptions:        today's deviations from ADR-091 D1/D2 (Phase 1). Each names
+#                    an inventory row, the rule it breaks (name|values) and the
+#                    R-id that removes it; the test fails once one stops being
+#                    a deviation.
+# budget_exceptions: D4 surface counts recorded above their limit (no-growth).
+# naming:            out_of_scope -- the concept is outside ADR-091's name rule
+#                    (its "Out of scope" section); naming_reason says which.
 # concept:  the canonical name -- the .abicheck.yml path where one exists,
 #           the proposed path otherwise (ADR-091 D1).
 # tier:     core     -- visible CLI flag + Action input + shim argument (D4)
@@ -25,163 +32,219 @@
 #           action "<action>:<input>", python "<Class>.<field>" or
 #           "<function>(<param>)").
 schema_version: 1
-
-# Sub-actions not mapped yet. `until: phase-1` entries mirror CLI commands
-# (actions/aggregate -> `abicheck aggregate`, actions/collect-facts -> `dump`)
-# and must be mapped into concepts by Phase 1; `until: permanent` entries are
-# baseline transport, report publication and run verification, which have no
-# CLI counterpart.
 out_of_scope:
-  - pattern: "actions/aggregate:*"
-    reason: Mirrors `abicheck aggregate`; mapped in Phase 1.
-    until: phase-1
-  - pattern: "actions/collect-facts:*"
-    reason: Mirrors `dump` evidence inputs; mapped in Phase 1.
-    until: phase-1
-  - pattern: "actions/baseline:*"
+  - pattern: actions/baseline:*
     reason: Baseline transport, no CLI counterpart.
     until: permanent
-  - pattern: "actions/stage-baseline:*"
+  - pattern: actions/stage-baseline:*
     reason: Baseline transport, no CLI counterpart.
     until: permanent
-  - pattern: "actions/resolve-baseline:*"
+  - pattern: actions/resolve-baseline:*
     reason: Baseline transport, no CLI counterpart.
     until: permanent
-  - pattern: "actions/verify-baseline-source:*"
+  - pattern: actions/verify-baseline-source:*
     reason: Baseline provenance verification, no CLI counterpart.
     until: permanent
-  - pattern: "actions/report:*"
+  - pattern: actions/report:*
     reason: Report publication (ADR-073), no CLI counterpart.
     until: permanent
-  - pattern: "actions/verify-source-run:*"
+  - pattern: actions/verify-source-run:*
     reason: Producer-run verification (ADR-073), no CLI counterpart.
     until: permanent
-
 concepts:
   - concept: operands
     tier: core
     renames: []
     action:
-      - "action:old-library"
-      - "action:new-library"
-      - "actions/check-target:new-library"
+      - action:old-library
+      - action:new-library
+      - actions/check-target:new-library
     python:
       - InputSpec.path
       - CompareRequest.old
       - CompareRequest.new
       - DumpRequest.input
-      - "run_compare(old_input)"
-      - "run_compare(new_input)"
-      - "run_dump(path)"
-      - "run_dump(binary_fmt)"
+      - run_compare(old_input)
+      - run_compare(new_input)
+      - run_dump(path)
+      - run_dump(binary_fmt)
+    exceptions:
+      - {id: 'action:old-library', rule: name, rename: R20, note: action spelling breaks D1; the leaf is `operands`}
+      - {id: 'action:new-library', rule: name, rename: R20, note: action spelling breaks D1; the leaf is `operands`}
+      - {id: 'actions/check-target:new-library', rule: name, rename: R20, note: action spelling breaks D1; the leaf
+          is `operands`}
+      - {id: InputSpec.path, rule: name, rename: R19, note: python spelling breaks D1; the leaf is `operands`}
+      - {id: CompareRequest.old, rule: name, rename: R19, note: python spelling breaks D1; the leaf is `operands`}
+      - {id: CompareRequest.new, rule: name, rename: R19, note: python spelling breaks D1; the leaf is `operands`}
+      - {id: DumpRequest.input, rule: name, rename: R19, note: python spelling breaks D1; the leaf is `operands`}
+      - {id: run_compare(old_input), rule: name, rename: R19, note: python spelling breaks D1; the leaf is `operands`}
+      - {id: run_compare(new_input), rule: name, rename: R19, note: python spelling breaks D1; the leaf is `operands`}
+      - {id: run_dump(path), rule: name, rename: R19, note: python spelling breaks D1; the leaf is `operands`}
+      - {id: run_dump(binary_fmt), rule: name, rename: R19, note: python spelling breaks D1; the leaf is `operands`}
   - concept: no_baseline
     tier: core
     renames: []
     cli:
-      - "compare --no-baseline"
+      - compare --no-baseline
   - concept: label
     tier: core
-    renames: [R1]
+    renames:
+      - R1
     cli:
-      - "compare --version"
-      - "dump --version"
-      - "project history --version"
+      - compare --version
+      - dump --version
+      - project history --version
     action:
-      - "action:old-version"
-      - "action:new-version"
+      - action:old-version
+      - action:new-version
     python:
       - InputSpec.version
-      - "run_compare(old_version)"
-      - "run_compare(new_version)"
-      - "run_dump(version)"
+      - run_compare(old_version)
+      - run_compare(new_version)
+      - run_dump(version)
+    exceptions:
+      - {id: compare --version, rule: name, rename: R1, note: cli spelling breaks D1; the leaf is `label`}
+      - {id: dump --version, rule: name, rename: R1, note: cli spelling breaks D1; the leaf is `label`}
+      - {id: project history --version, rule: name, rename: R1, note: cli spelling breaks D1; the leaf is `label`}
+      - {id: 'action:old-version', rule: name, rename: R1, note: action spelling breaks D1; the leaf is `label`}
+      - {id: 'action:new-version', rule: name, rename: R1, note: action spelling breaks D1; the leaf is `label`}
+      - {id: InputSpec.version, rule: name, rename: R1, note: python spelling breaks D1; the leaf is `label`}
+      - {id: run_compare(old_version), rule: name, rename: R1, note: python spelling breaks D1; the leaf is `label`}
+      - {id: run_compare(new_version), rule: name, rename: R1, note: python spelling breaks D1; the leaf is `label`}
+      - {id: run_dump(version), rule: name, rename: R1, note: python spelling breaks D1; the leaf is `label`}
   - concept: select
     tier: core
     renames: []
     cli:
-      - "compare --select"
+      - compare --select
   - concept: select_required
     tier: config
     renames: []
     cli:
-      - "compare --select-required"
+      - compare --select-required
   - concept: variant
     tier: core
     renames: []
     cli:
-      - "compare --variant"
-      - "project capture-variants --variant"
+      - compare --variant
+      - project capture-variants --variant
   - concept: pack
     tier: config
     renames: []
     cli:
-      - "compare --pack"
+      - compare --pack
     python:
       - CompareRequest.pack_paths
       - CompareRequest.pack_policy_overrides
       - CompareRequest.pack_internal_namespaces
-      - "run_compare(pack_policy_overrides)"
-      - "run_compare(pack_internal_namespaces)"
+      - run_compare(pack_policy_overrides)
+      - run_compare(pack_internal_namespaces)
+    exceptions:
+      - {id: CompareRequest.pack_paths, rule: name, rename: R19, note: python spelling breaks D1; the leaf is `pack`}
+      - {id: CompareRequest.pack_policy_overrides, rule: name, rename: R19, note: python spelling breaks D1; the
+          leaf is `pack`}
+      - {id: CompareRequest.pack_internal_namespaces, rule: name, rename: R19, note: python spelling breaks D1;
+          the leaf is `pack`}
+      - {id: run_compare(pack_policy_overrides), rule: name, rename: R19, note: python spelling breaks D1; the leaf
+          is `pack`}
+      - {id: run_compare(pack_internal_namespaces), rule: name, rename: R19, note: python spelling breaks D1; the
+          leaf is `pack`}
   - concept: depth
     tier: core
     renames: []
     cli:
-      - "compare --depth"
-      - "dump --depth"
+      - compare --depth
+      - dump --depth
     action:
-      - "action:depth"
-      - "actions/check-target:requested-depth"
+      - action:depth
+      - actions/check-target:requested-depth
     python:
       - CompareRequest.depth
       - DumpRequest.depth
-      - "run_compare(depth)"
+      - run_compare(depth)
+    exceptions:
+      - {id: 'actions/check-target:requested-depth', rule: name, rename: R18, note: action spelling breaks D1; the
+          leaf is `depth`}
   - concept: headers
     tier: core
-    renames: [R17]
+    renames:
+      - R17
     cli:
-      - "compare --header"
-      - "dump --header"
+      - compare --header
+      - dump --header
     action:
-      - "action:header"
-      - "action:old-header"
-      - "action:new-header"
-      - "action:devel-pkg1"
-      - "action:devel-pkg2"
-      - "actions/check-target:header"
-      - "actions/check-target:old-header"
-      - "actions/check-target:new-header"
+      - action:header
+      - action:old-header
+      - action:new-header
+      - action:devel-pkg1
+      - action:devel-pkg2
+      - actions/check-target:header
+      - actions/check-target:old-header
+      - actions/check-target:new-header
     python:
       - InputSpec.headers
-      - "run_compare(old_headers)"
-      - "run_compare(new_headers)"
-      - "run_dump(headers)"
-      - "run_dump(public_headers)"
+      - run_compare(old_headers)
+      - run_compare(new_headers)
+      - run_dump(headers)
+      - run_dump(public_headers)
+    exceptions:
+      - {id: 'action:header', rule: name, rename: R17, note: action spelling breaks D1; the leaf is `headers`}
+      - {id: 'action:old-header', rule: name, rename: R17, note: action spelling breaks D1; the leaf is `headers`}
+      - {id: 'action:new-header', rule: name, rename: R17, note: action spelling breaks D1; the leaf is `headers`}
+      - {id: 'action:devel-pkg1', rule: name, rename: R17, note: action spelling breaks D1; the leaf is `headers`}
+      - {id: 'action:devel-pkg2', rule: name, rename: R17, note: action spelling breaks D1; the leaf is `headers`}
+      - {id: 'actions/check-target:header', rule: name, rename: R17, note: action spelling breaks D1; the leaf is
+          `headers`}
+      - {id: 'actions/check-target:old-header', rule: name, rename: R17, note: action spelling breaks D1; the leaf
+          is `headers`}
+      - {id: 'actions/check-target:new-header', rule: name, rename: R17, note: action spelling breaks D1; the leaf
+          is `headers`}
+      - {id: run_dump(public_headers), rule: name, rename: R18, note: python spelling breaks D1; the leaf is `headers`}
   - concept: compile.include_dirs
     tier: core
     renames: []
     cli:
-      - "compare --include"
-      - "dump --include"
+      - compare --include
+      - dump --include
     config:
       - compile.include_dirs
     action:
-      - "action:include"
-      - "action:old-include"
-      - "action:new-include"
-      - "actions/check-target:include"
-      - "actions/check-target:old-include"
-      - "actions/check-target:new-include"
+      - action:include
+      - action:old-include
+      - action:new-include
+      - actions/check-target:include
+      - actions/check-target:old-include
+      - actions/check-target:new-include
     python:
       - InputSpec.includes
-      - "run_compare(old_includes)"
-      - "run_compare(new_includes)"
-      - "run_dump(includes)"
-      - "run_dump(public_include_search_dirs)"
+      - run_compare(old_includes)
+      - run_compare(new_includes)
+      - run_dump(includes)
+      - run_dump(public_include_search_dirs)
+    exceptions:
+      - {id: compare --include, rule: name, rename: R21, note: cli spelling breaks D1; the leaf is `include_dirs`}
+      - {id: dump --include, rule: name, rename: R21, note: cli spelling breaks D1; the leaf is `include_dirs`}
+      - {id: 'action:include', rule: name, rename: R20, note: action spelling breaks D1; the leaf is `include_dirs`}
+      - {id: 'action:old-include', rule: name, rename: R20, note: action spelling breaks D1; the leaf is `include_dirs`}
+      - {id: 'action:new-include', rule: name, rename: R20, note: action spelling breaks D1; the leaf is `include_dirs`}
+      - {id: 'actions/check-target:include', rule: name, rename: R20, note: action spelling breaks D1; the leaf
+          is `include_dirs`}
+      - {id: 'actions/check-target:old-include', rule: name, rename: R20, note: action spelling breaks D1; the leaf
+          is `include_dirs`}
+      - {id: 'actions/check-target:new-include', rule: name, rename: R20, note: action spelling breaks D1; the leaf
+          is `include_dirs`}
+      - {id: InputSpec.includes, rule: name, rename: R19, note: python spelling breaks D1; the leaf is `include_dirs`}
+      - {id: run_compare(old_includes), rule: name, rename: R19, note: python spelling breaks D1; the leaf is `include_dirs`}
+      - {id: run_compare(new_includes), rule: name, rename: R19, note: python spelling breaks D1; the leaf is `include_dirs`}
+      - {id: run_dump(includes), rule: name, rename: R19, note: python spelling breaks D1; the leaf is `include_dirs`}
+      - {id: run_dump(public_include_search_dirs), rule: name, rename: R19, note: python spelling breaks D1; the
+          leaf is `include_dirs`}
   - concept: compile.defines
     tier: core
     renames: []
     cli:
-      - "compare --define"
-      - "dump --define"
+      - compare --define
+      - dump --define
     config:
       - compile.defines
   - concept: compile.lang
@@ -190,30 +253,42 @@ concepts:
     config:
       - compile.lang
     action:
-      - "action:lang"
-      - "actions/check-target:lang"
+      - action:lang
+      - actions/check-target:lang
     python:
       - CompareRequest.lang
       - CompareRequest.lang_explicit
       - DumpRequest.lang
       - DumpRequest.lang_explicit
-      - "run_compare(lang)"
-      - "run_compare(lang_explicit)"
-      - "run_dump(lang)"
-      - "run_dump(lang_explicit)"
+      - run_compare(lang)
+      - run_compare(lang_explicit)
+      - run_dump(lang)
+      - run_dump(lang_explicit)
+    exceptions:
+      - {id: CompareRequest.lang_explicit, rule: name, rename: R19, note: python spelling breaks D1; the leaf is
+          `lang`}
+      - {id: DumpRequest.lang_explicit, rule: name, rename: R19, note: python spelling breaks D1; the leaf is `lang`}
+      - {id: run_compare(lang_explicit), rule: name, rename: R19, note: python spelling breaks D1; the leaf is `lang`}
+      - {id: run_dump(lang_explicit), rule: name, rename: R19, note: python spelling breaks D1; the leaf is `lang`}
   - concept: compile.frontend
     tier: config
-    renames: [R4]
+    renames:
+      - R4
     config:
       - compile.frontend
     action:
-      - "action:ast-frontend"
-      - "actions/check-target:ast-frontend"
+      - action:ast-frontend
+      - actions/check-target:ast-frontend
     python:
       - CompareRequest.frontend
       - DumpRequest.frontend
-      - "run_compare(frontend)"
-      - "run_dump(header_backend)"
+      - run_compare(frontend)
+      - run_dump(header_backend)
+    exceptions:
+      - {id: 'action:ast-frontend', rule: name, rename: R4, note: action spelling breaks D1; the leaf is `frontend`}
+      - {id: 'actions/check-target:ast-frontend', rule: name, rename: R4, note: action spelling breaks D1; the leaf
+          is `frontend`}
+      - {id: run_dump(header_backend), rule: name, rename: R18, note: python spelling breaks D1; the leaf is `frontend`}
   - concept: compile.frontend_context
     tier: config
     renames: []
@@ -224,37 +299,51 @@ concepts:
       - DumpRequest.frontend_context
   - concept: compile.compiler
     tier: config
-    renames: [R5]
+    renames:
+      - R5
     config:
       - compile.compiler
     action:
-      - "action:gcc-path"
-      - "action:gcc-prefix"
-      - "actions/check-target:gcc-path"
-      - "actions/check-target:gcc-prefix"
+      - action:gcc-path
+      - action:gcc-prefix
+      - actions/check-target:gcc-path
+      - actions/check-target:gcc-prefix
+      - actions/collect-facts:compiler
+    exceptions:
+      - {id: 'action:gcc-path', rule: name, rename: R5, note: action spelling breaks D1; the leaf is `compiler`}
+      - {id: 'action:gcc-prefix', rule: name, rename: R5, note: action spelling breaks D1; the leaf is `compiler`}
+      - {id: 'actions/check-target:gcc-path', rule: name, rename: R5, note: action spelling breaks D1; the leaf
+          is `compiler`}
+      - {id: 'actions/check-target:gcc-prefix', rule: name, rename: R5, note: action spelling breaks D1; the leaf
+          is `compiler`}
   - concept: compile.options
     tier: config
-    renames: [R5]
+    renames:
+      - R5
     config:
       - compile.options
     action:
-      - "action:gcc-options"
-      - "actions/check-target:gcc-options"
+      - action:gcc-options
+      - actions/check-target:gcc-options
+    exceptions:
+      - {id: 'action:gcc-options', rule: name, rename: R5, note: action spelling breaks D1; the leaf is `options`}
+      - {id: 'actions/check-target:gcc-options', rule: name, rename: R5, note: action spelling breaks D1; the leaf
+          is `options`}
   - concept: compile.sysroot
     tier: config
     renames: []
     config:
       - compile.sysroot
     action:
-      - "action:sysroot"
-      - "actions/check-target:sysroot"
+      - action:sysroot
+      - actions/check-target:sysroot
   - concept: compile.nostdinc
     tier: config
     renames: []
     config:
       - compile.nostdinc
     action:
-      - "action:nostdinc"
+      - action:nostdinc
   - concept: compile.std
     tier: config
     renames: []
@@ -275,37 +364,54 @@ concepts:
     renames: []
     python:
       - InputSpec.compile
-      - "run_compare(compile_context)"
-      - "run_dump(compile)"
+      - run_compare(compile_context)
+      - run_dump(compile)
+    exceptions:
+      - {id: run_compare(compile_context), rule: name, rename: R19, note: python spelling breaks D1; the leaf is
+          `compile`}
   - concept: consumer
     tier: action
     renames: []
     action:
-      - "actions/check-target:consumer-ast-frontend"
-      - "actions/check-target:consumer-gcc-path"
-      - "actions/check-target:consumer-gcc-options"
-      - "actions/check-target:consumer-compile-active"
-      - "actions/check-target:consumer-binary"
+      - actions/check-target:consumer-ast-frontend
+      - actions/check-target:consumer-gcc-path
+      - actions/check-target:consumer-gcc-options
+      - actions/check-target:consumer-compile-active
+      - actions/check-target:consumer-binary
   - concept: debug_info
     tier: core
-    renames: [R17]
+    renames:
+      - R17
     cli:
-      - "compare --debug-info"
-      - "dump --debug-info"
+      - compare --debug-info
+      - dump --debug-info
     config:
       - debug.pdb_path
     action:
-      - "action:debug-info1"
-      - "action:debug-info2"
+      - action:debug-info1
+      - action:debug-info2
     python:
       - InputSpec.pdb
       - InputSpec.debug_roots
-      - "run_compare(old_pdb_path)"
-      - "run_compare(new_pdb_path)"
-      - "run_compare(old_debug_roots)"
-      - "run_compare(new_debug_roots)"
-      - "run_dump(pdb_path)"
-      - "run_dump(debug_roots)"
+      - run_compare(old_pdb_path)
+      - run_compare(new_pdb_path)
+      - run_compare(old_debug_roots)
+      - run_compare(new_debug_roots)
+      - run_dump(pdb_path)
+      - run_dump(debug_roots)
+    exceptions:
+      - {id: 'action:debug-info1', rule: name, rename: R17, note: action spelling breaks D1; the leaf is `debug_info`}
+      - {id: 'action:debug-info2', rule: name, rename: R17, note: action spelling breaks D1; the leaf is `debug_info`}
+      - {id: InputSpec.pdb, rule: name, rename: R19, note: python spelling breaks D1; the leaf is `debug_info`}
+      - {id: InputSpec.debug_roots, rule: name, rename: R19, note: python spelling breaks D1; the leaf is `debug_info`}
+      - {id: run_compare(old_pdb_path), rule: name, rename: R19, note: python spelling breaks D1; the leaf is `debug_info`}
+      - {id: run_compare(new_pdb_path), rule: name, rename: R19, note: python spelling breaks D1; the leaf is `debug_info`}
+      - {id: run_compare(old_debug_roots), rule: name, rename: R19, note: python spelling breaks D1; the leaf is
+          `debug_info`}
+      - {id: run_compare(new_debug_roots), rule: name, rename: R19, note: python spelling breaks D1; the leaf is
+          `debug_info`}
+      - {id: run_dump(pdb_path), rule: name, rename: R19, note: python spelling breaks D1; the leaf is `debug_info`}
+      - {id: run_dump(debug_roots), rule: name, rename: R19, note: python spelling breaks D1; the leaf is `debug_info`}
   - concept: debug.format
     tier: config
     renames: []
@@ -314,7 +420,12 @@ concepts:
     python:
       - CompareRequest.debug_format
       - DumpRequest.debug_format
-      - "run_dump(debug_format)"
+      - run_dump(debug_format)
+    exceptions:
+      - {id: run_dump(debug_format), rule: name, rename: R19, note: python spelling breaks D1; the leaf is `format`}
+      - {id: CompareRequest.debug_format, rule: name, rename: R19, note: python spelling breaks D1; the leaf is
+          `format`}
+      - {id: DumpRequest.debug_format, rule: name, rename: R19, note: python spelling breaks D1; the leaf is `format`}
   - concept: debug.dwarf_only
     tier: config
     renames: []
@@ -323,17 +434,26 @@ concepts:
     python:
       - CompareRequest.dwarf_only
       - DumpRequest.dwarf_only
-      - "run_dump(dwarf_only)"
+      - run_dump(dwarf_only)
   - concept: debug.debuginfod
     tier: config
-    renames: [R9]
+    renames:
+      - R9
     config:
       - debug.debuginfod
     python:
       - CompareRequest.enable_debuginfod
       - DumpRequest.enable_debuginfod
-      - "run_compare(enable_debuginfod)"
-      - "run_dump(enable_debuginfod)"
+      - run_compare(enable_debuginfod)
+      - run_dump(enable_debuginfod)
+    exceptions:
+      - {id: CompareRequest.enable_debuginfod, rule: name, rename: R9, note: python spelling breaks D1; the leaf
+          is `debuginfod`}
+      - {id: DumpRequest.enable_debuginfod, rule: name, rename: R9, note: python spelling breaks D1; the leaf is
+          `debuginfod`}
+      - {id: run_compare(enable_debuginfod), rule: name, rename: R9, note: python spelling breaks D1; the leaf is
+          `debuginfod`}
+      - {id: run_dump(enable_debuginfod), rule: name, rename: R9, note: python spelling breaks D1; the leaf is `debuginfod`}
   - concept: debug.debuginfod_url
     tier: config
     renames: []
@@ -342,25 +462,33 @@ concepts:
     python:
       - CompareRequest.debuginfod_url
       - DumpRequest.debuginfod_url
-      - "run_compare(debuginfod_url)"
-      - "run_dump(debuginfod_url)"
+      - run_compare(debuginfod_url)
+      - run_dump(debuginfod_url)
   - concept: build_info
     tier: core
     renames: []
     cli:
-      - "compare --build-info"
-      - "dump --build-info"
+      - compare --build-info
+      - dump --build-info
     config:
       - build.compile_db
     action:
-      - "action:build-info"
-      - "action:compile-db"
-      - "actions/check-target:build-info"
-      - "actions/check-target:compile-db"
+      - action:build-info
+      - action:compile-db
+      - actions/check-target:build-info
+      - actions/check-target:compile-db
     python:
       - InputSpec.build_info
       - CompareRequest.old_probe_matrix
       - CompareRequest.new_probe_matrix
+    exceptions:
+      - {id: 'action:compile-db', rule: name, rename: R20, note: action spelling breaks D1; the leaf is `build_info`}
+      - {id: 'actions/check-target:compile-db', rule: name, rename: R20, note: action spelling breaks D1; the leaf
+          is `build_info`}
+      - {id: CompareRequest.old_probe_matrix, rule: name, rename: R19, note: python spelling breaks D1; the leaf
+          is `build_info`}
+      - {id: CompareRequest.new_probe_matrix, rule: name, rename: R19, note: python spelling breaks D1; the leaf
+          is `build_info`}
   - concept: build.compile_db_filter
     tier: config
     renames: []
@@ -375,14 +503,22 @@ concepts:
       - build.query
     python:
       - CompareRequest.allow_build_query
+    exceptions:
+      - {id: CompareRequest.allow_build_query, rule: name, rename: R19, note: python spelling breaks D1; the leaf
+          is `query`}
   - concept: build.system
     tier: config
     renames: []
     config:
       - build.system
     action:
-      - "actions/check-target:build-system"
-      - "actions/check-target:build-generator"
+      - actions/check-target:build-system
+      - actions/check-target:build-generator
+    exceptions:
+      - {id: 'actions/check-target:build-generator', rule: name, rename: R20, note: action spelling breaks D1; the
+          leaf is `system`}
+      - {id: 'actions/check-target:build-system', rule: name, rename: R20, note: action spelling breaks D1; the
+          leaf is `system`}
   - concept: build.targets
     tier: config
     renames: []
@@ -390,22 +526,29 @@ concepts:
       - build.targets
     python:
       - InputSpec.build_targets
+    exceptions:
+      - {id: InputSpec.build_targets, rule: name, rename: R19, note: python spelling breaks D1; the leaf is `targets`}
   - concept: sources
     tier: core
     renames: []
     cli:
-      - "compare --sources"
-      - "dump --sources"
+      - compare --sources
+      - dump --sources
     action:
-      - "action:sources"
-      - "actions/check-target:sources"
+      - action:sources
+      - actions/check-target:sources
+      - actions/collect-facts:sources
     python:
       - InputSpec.sources
       - CompareRequest.has_sources
       - DumpRequest.has_sources
+    exceptions:
+      - {id: CompareRequest.has_sources, rule: name, rename: R19, note: python spelling breaks D1; the leaf is `sources`}
+      - {id: DumpRequest.has_sources, rule: name, rename: R19, note: python spelling breaks D1; the leaf is `sources`}
   - concept: sources.method
     tier: config
-    renames: [R13]
+    renames:
+      - R13
     config:
       - source.method
   - concept: sources.public_headers
@@ -427,14 +570,19 @@ concepts:
     tier: core
     renames: []
     cli:
-      - "compare --config"
-      - "dump --config"
-      - "project capture-variants --config"
+      - compare --config
+      - dump --config
+      - project capture-variants --config
     action:
-      - "action:build-config"
-      - "actions/check-target:build-config"
+      - action:build-config
+      - actions/check-target:build-config
     python:
       - InputSpec.build_config
+    exceptions:
+      - {id: 'action:build-config', rule: name, rename: R20, note: action spelling breaks D1; the leaf is `config`}
+      - {id: 'actions/check-target:build-config', rule: name, rename: R20, note: action spelling breaks D1; the
+          leaf is `config`}
+      - {id: InputSpec.build_config, rule: name, rename: R19, note: python spelling breaks D1; the leaf is `config`}
   - concept: config.version
     tier: config
     renames: []
@@ -444,16 +592,16 @@ concepts:
     tier: config
     renames: []
     cli:
-      - "compare --dump-manifest"
-      - "dump --dump-manifest"
+      - compare --dump-manifest
+      - dump --dump-manifest
     python:
       - InputSpec.dump_manifest
-      - "run_dump(dump_manifest)"
+      - run_dump(dump_manifest)
   - concept: provenance
     tier: config
     renames: []
     cli:
-      - "dump --provenance"
+      - dump --provenance
   - concept: follow_linker_scripts
     tier: python
     renames: []
@@ -461,83 +609,120 @@ concepts:
       - InputSpec.follow_linker_scripts
   - concept: include_system_declarations
     tier: config
-    renames: [R8]
+    renames:
+      - R8
     cli:
-      - "compare --include-system-declarations"
-      - "dump --include-system-declarations"
+      - compare --include-system-declarations
+      - dump --include-system-declarations
     python:
       - InputSpec.include_dependencies
-      - "run_compare(include_dependencies)"
-      - "run_dump(include_dependencies)"
+      - run_compare(include_dependencies)
+      - run_dump(include_dependencies)
+    exceptions:
+      - {id: InputSpec.include_dependencies, rule: name, rename: R8, note: python spelling breaks D1; the leaf is
+          `include_system_declarations`}
+      - {id: run_compare(include_dependencies), rule: name, rename: R8, note: python spelling breaks D1; the leaf
+          is `include_system_declarations`}
+      - {id: run_dump(include_dependencies), rule: name, rename: R8, note: python spelling breaks D1; the leaf is
+          `include_system_declarations`}
   - concept: deps.follow
     tier: core
-    renames: [R8]
+    renames:
+      - R8
     cli:
-      - "compare --follow-deps"
-      - "dump --follow-deps"
+      - compare --follow-deps
+      - dump --follow-deps
     action:
-      - "action:follow-deps"
+      - action:follow-deps
     python:
       - CompareRequest.follow_dependencies
       - DumpRequest.follow_dependencies
+    exceptions:
+      - {id: compare --follow-deps, rule: name, rename: R8, note: cli spelling breaks D1; the leaf is `follow`}
+      - {id: dump --follow-deps, rule: name, rename: R8, note: cli spelling breaks D1; the leaf is `follow`}
+      - {id: 'action:follow-deps', rule: name, rename: R8, note: action spelling breaks D1; the leaf is `follow`}
+      - {id: CompareRequest.follow_dependencies, rule: name, rename: R8, note: python spelling breaks D1; the leaf
+          is `follow`}
+      - {id: DumpRequest.follow_dependencies, rule: name, rename: R8, note: python spelling breaks D1; the leaf
+          is `follow`}
   - concept: deps.search_paths
     tier: config
     renames: []
     cli:
-      - "compare --search-path"
-      - "dump --search-path"
-      - "deps compare --search-path"
-      - "deps tree --search-path"
+      - compare --search-path
+      - dump --search-path
+      - deps compare --search-path
+      - deps tree --search-path
     action:
-      - "action:search-path"
+      - action:search-path
     python:
       - CompareRequest.dependency_search_paths
       - DumpRequest.dependency_search_paths
+    exceptions:
+      - {id: 'action:search-path', rule: name, rename: R20, note: action spelling breaks D1; the leaf is `search_paths`}
+      - {id: CompareRequest.dependency_search_paths, rule: name, rename: R19, note: python spelling breaks D1; the
+          leaf is `search_paths`}
+      - {id: DumpRequest.dependency_search_paths, rule: name, rename: R19, note: python spelling breaks D1; the
+          leaf is `search_paths`}
   - concept: deps.ld_library_path
     tier: config
     renames: []
     cli:
-      - "compare --ld-library-path"
-      - "dump --ld-library-path"
-      - "deps compare --ld-library-path"
-      - "deps tree --ld-library-path"
+      - compare --ld-library-path
+      - dump --ld-library-path
+      - deps compare --ld-library-path
+      - deps tree --ld-library-path
     action:
-      - "action:ld-library-path"
+      - action:ld-library-path
     python:
       - CompareRequest.ld_library_path
       - DumpRequest.ld_library_path
   - concept: deps.root
     tier: core
-    renames: [R16]
+    renames:
+      - R16
     cli:
-      - "deps compare --old-root"
-      - "deps compare --new-root"
-      - "deps tree --sysroot"
+      - deps compare --old-root
+      - deps compare --new-root
+      - deps tree --sysroot
     action:
-      - "action:old-root"
-      - "action:new-root"
+      - action:old-root
+      - action:new-root
+    exceptions:
+      - {id: deps tree --sysroot, rule: name, rename: R16, note: cli spelling breaks D1; the leaf is `root`}
   - concept: bundle
     tier: config
     renames: []
     cli:
-      - "compare --instantiation-manifest"
-      - "compare --bundle-facts-out"
-      - "compare --bundle-facts-library-manifest"
+      - compare --instantiation-manifest
+      - compare --bundle-facts-out
+      - compare --bundle-facts-library-manifest
     config:
       - bundle.system_providers
       - bundle.cohorts
       - bundle_variants
     action:
-      - "actions/check-target:bundle-members"
+      - actions/check-target:bundle-members
+    exceptions:
+      - {id: compare --instantiation-manifest, rule: name, rename: R21, note: cli spelling breaks D1; the leaf is
+          `bundle`}
+      - {id: compare --bundle-facts-out, rule: name, rename: R21, note: cli spelling breaks D1; the leaf is `bundle`}
+      - {id: compare --bundle-facts-library-manifest, rule: name, rename: R21, note: cli spelling breaks D1; the
+          leaf is `bundle`}
+      - {id: 'actions/check-target:bundle-members', rule: name, rename: R20, note: action spelling breaks D1; the
+          leaf is `bundle`}
   - concept: python.abi3_floor
     tier: config
-    renames: [R12]
+    renames:
+      - R12
     cli:
-      - "compare --abi3"
+      - compare --abi3
     config:
       - python.abi3_floor
     python:
       - CompareRequest.abi3_floor
+    exceptions:
+      - {id: compare --abi3, rule: name, rename: R12, note: cli spelling breaks D1; the leaf is `abi3_floor`}
   - concept: deployment
     tier: config
     renames: []
@@ -545,21 +730,24 @@ concepts:
       - deployment
     python:
       - CompareRequest.env_matrix
-      - "run_compare(env_matrix)"
+      - run_compare(env_matrix)
+    exceptions:
+      - {id: CompareRequest.env_matrix, rule: name, rename: R19, note: python spelling breaks D1; the leaf is `deployment`}
+      - {id: run_compare(env_matrix), rule: name, rename: R19, note: python spelling breaks D1; the leaf is `deployment`}
   - concept: release.dso_only
     tier: config
     renames: []
     config:
       - release.dso_only
     action:
-      - "action:dso-only"
+      - action:dso-only
   - concept: release.include_private_dso
     tier: config
     renames: []
     config:
       - release.include_private_dso
     action:
-      - "action:include-private-dso"
+      - action:include-private-dso
   - concept: release.support_promise
     tier: config
     renames: []
@@ -569,47 +757,55 @@ concepts:
     tier: config
     renames: []
     cli:
-      - "compare --since"
+      - compare --since
     action:
-      - "action:since"
+      - action:since
   - concept: changed_paths
     tier: config
     renames: []
     cli:
-      - "compare --changed-path"
+      - compare --changed-path
     action:
-      - "action:changed-path"
+      - action:changed-path
     python:
       - CompareRequest.changed_paths
+    exceptions:
+      - {id: 'action:changed-path', rule: name, rename: R20, note: action spelling breaks D1; the leaf is `changed_paths`}
   - concept: budget
     tier: config
     renames: []
     cli:
-      - "compare --budget"
+      - compare --budget
     action:
-      - "action:budget"
+      - action:budget
     python:
       - CompareRequest.budget_s
+    exceptions:
+      - {id: CompareRequest.budget_s, rule: name, rename: R19, note: python spelling breaks D1; the leaf is `budget`}
   - concept: dry_run
     tier: core
     renames: []
     cli:
-      - "compare --dry-run"
-      - "dump --dry-run"
-      - "deps compare --dry-run"
-      - "deps tree --dry-run"
-      - "project capture-variants --dry-run"
+      - compare --dry-run
+      - dump --dry-run
+      - deps compare --dry-run
+      - deps tree --dry-run
+      - project capture-variants --dry-run
     action:
-      - "action:dry-run"
+      - action:dry-run
   - concept: performance.profile
     tier: config
     renames: []
     cli:
-      - "compare --performance-profile"
+      - compare --performance-profile
     config:
       - performance.profile
     python:
       - CompareRequest.performance_profile
+    exceptions:
+      - {id: CompareRequest.performance_profile, rule: name, rename: R19, note: python spelling breaks D1; the leaf
+          is `profile`}
+      - {id: compare --performance-profile, rule: name, rename: R21, note: cli spelling breaks D1; the leaf is `profile`}
   - concept: resource_limits.max_bundle_facts_decode_nodes
     tier: config
     renames: []
@@ -622,43 +818,57 @@ concepts:
       - scope.public
     python:
       - CompareRequest.scope_public
-      - "run_compare(scope_to_public_surface)"
+      - run_compare(scope_to_public_surface)
+    exceptions:
+      - {id: run_compare(scope_to_public_surface), rule: name, rename: R19, note: python spelling breaks D1; the
+          leaf is `public`}
+      - {id: CompareRequest.scope_public, rule: name, rename: R19, note: python spelling breaks D1; the leaf is
+          `public`}
   - concept: scope.public_header_dirs
     tier: config
-    renames: [R7]
+    renames:
+      - R7
     config:
       - scope.public_header_dirs
     action:
-      - "action:public-header-dir"
+      - action:public-header-dir
     python:
       - InputSpec.public_header_dirs
-      - "run_compare(public_header_dirs)"
-      - "run_dump(public_header_dirs)"
+      - run_compare(public_header_dirs)
+      - run_dump(public_header_dirs)
+    exceptions:
+      - {id: 'action:public-header-dir', rule: name, rename: R7, note: action spelling breaks D1; the leaf is `public_header_dirs`}
   - concept: scope.public_symbols
     tier: config
-    renames: [R7]
+    renames:
+      - R7
     config:
       - scope.public_symbols
     python:
       - CompareRequest.force_public_symbols
-      - "run_compare(force_public_symbols)"
+      - run_compare(force_public_symbols)
+    exceptions:
+      - {id: CompareRequest.force_public_symbols, rule: name, rename: R7, note: python spelling breaks D1; the leaf
+          is `public_symbols`}
+      - {id: run_compare(force_public_symbols), rule: name, rename: R7, note: python spelling breaks D1; the leaf
+          is `public_symbols`}
   - concept: committed_surface
     tier: python
     renames: []
     python:
       - CompareRequest.public_surface_allowlist
-      - "run_compare(public_surface_allowlist)"
+      - run_compare(public_surface_allowlist)
   - concept: scope.exclude_headers
     tier: core
     renames: []
     cli:
-      - "compare --exclude-header"
-      - "dump --exclude-header"
+      - compare --exclude-header
+      - dump --exclude-header
     config:
       - scope.exclude_headers
     python:
       - InputSpec.exclude_headers
-      - "run_compare(exclude_headers)"
+      - run_compare(exclude_headers)
   - concept: scope.collapse_versioned_symbols
     tier: config
     renames: []
@@ -666,7 +876,7 @@ concepts:
       - scope.collapse_versioned_symbols
     python:
       - CompareRequest.collapse_versioned_symbols
-      - "run_compare(collapse_versioned_symbols)"
+      - run_compare(collapse_versioned_symbols)
   - concept: scope.show_redundant
     tier: config
     renames: []
@@ -700,53 +910,67 @@ concepts:
       - scope
   - concept: contract
     tier: core
-    renames: [R10]
+    renames:
+      - R10
     cli:
-      - "compare --contract"
+      - compare --contract
     config:
       - contract
     action:
-      - "actions/check-target:contract-file"
+      - actions/check-target:contract-file
     python:
       - CompareRequest.contract_evaluation
       - CompareRequest.contract_mode
-      - "run_compare(contract_evaluation)"
-      - "run_compare(contract_mode)"
+      - run_compare(contract_evaluation)
+      - run_compare(contract_mode)
+    exceptions:
+      - {id: 'actions/check-target:contract-file', rule: name, rename: R18, note: action spelling breaks D1; the
+          leaf is `contract`}
+      - {id: CompareRequest.contract_evaluation, rule: name, rename: R10, note: python spelling breaks D1; the leaf
+          is `contract`}
+      - {id: CompareRequest.contract_mode, rule: name, rename: R10, note: python spelling breaks D1; the leaf is
+          `contract`}
+      - {id: run_compare(contract_evaluation), rule: name, rename: R10, note: python spelling breaks D1; the leaf
+          is `contract`}
+      - {id: run_compare(contract_mode), rule: name, rename: R10, note: python spelling breaks D1; the leaf is `contract`}
   - concept: used_by
     tier: core
     renames: []
     cli:
-      - "compare --used-by"
-      - "compare --used-by-manifest"
+      - compare --used-by
+      - compare --used-by-manifest
     action:
-      - "action:used-by"
-      - "action:used-by-manifest"
+      - action:used-by
+      - action:used-by-manifest
+    exceptions:
+      - {id: compare --used-by-manifest, rule: name, rename: R21, note: cli spelling breaks D1; the leaf is `used_by`}
+      - {id: 'action:used-by-manifest', rule: name, rename: R20, note: action spelling breaks D1; the leaf is `used_by`}
   - concept: required_symbol
     tier: core
     renames: []
     cli:
-      - "compare --required-symbol"
+      - compare --required-symbol
     action:
-      - "action:required-symbol"
-      - "action:required-symbols"
+      - action:required-symbol
+      - action:required-symbols
   - concept: use_cases
     tier: config
     renames: []
     cli:
-      - "compare --use-cases"
+      - compare --use-cases
   - concept: diagnostic_comparison
     tier: config
     renames: []
     cli:
-      - "compare --diagnostic-comparison"
+      - compare --diagnostic-comparison
     python:
       - CompareRequest.diagnostic_comparison
-      - "run_compare(diagnostic_comparison)"
+      - run_compare(diagnostic_comparison)
   - concept: require_same_generation
     tier: config
     renames: []
     cli:
-      - "compare --require-same-generation"
+      - compare --require-same-generation
     python:
       - CompareRequest.require_same_generation
   - concept: pattern_verdicts
@@ -754,23 +978,32 @@ concepts:
     renames: []
     python:
       - CompareRequest.pattern_verdicts
-      - "run_compare(pattern_verdicts)"
+      - run_compare(pattern_verdicts)
   - concept: policy
     tier: core
-    renames: [R2]
+    renames:
+      - R2
     cli:
-      - "compare --policy"
-      - "project history --policy"
+      - compare --policy
+      - project history --policy
     action:
-      - "action:policy"
-      - "action:policy-file"
-      - "actions/check-target:policy"
-      - "actions/check-target:policy-file"
+      - action:policy
+      - action:policy-file
+      - actions/check-target:policy
+      - actions/check-target:policy-file
     python:
       - CompareRequest.policy
       - CompareRequest.policy_file_path
-      - "run_compare(policy)"
-      - "run_compare(policy_file_path)"
+      - run_compare(policy)
+      - run_compare(policy_file_path)
+    exceptions:
+      - {id: 'action:policy-file', rule: name, rename: R2, note: action spelling breaks D1; the leaf is `policy`}
+      - {id: 'actions/check-target:policy-file', rule: name, rename: R2, note: action spelling breaks D1; the leaf
+          is `policy`}
+      - {id: CompareRequest.policy_file_path, rule: name, rename: R2, note: python spelling breaks D1; the leaf
+          is `policy`}
+      - {id: run_compare(policy_file_path), rule: name, rename: R2, note: python spelling breaks D1; the leaf is
+          `policy`}
   - concept: policy.overrides
     tier: config
     renames: []
@@ -778,18 +1011,23 @@ concepts:
       - policy.overrides
     python:
       - CompareRequest.project_policy_overrides
-      - "run_compare(project_policy_overrides)"
+      - run_compare(project_policy_overrides)
+    exceptions:
+      - {id: CompareRequest.project_policy_overrides, rule: name, rename: R19, note: python spelling breaks D1;
+          the leaf is `overrides`}
+      - {id: run_compare(project_policy_overrides), rule: name, rename: R19, note: python spelling breaks D1; the
+          leaf is `overrides`}
   - concept: suppress
     tier: core
     renames: []
     cli:
-      - "compare --suppress"
+      - compare --suppress
     action:
-      - "action:suppress"
-      - "actions/check-target:suppress"
+      - action:suppress
+      - actions/check-target:suppress
     python:
       - CompareRequest.suppress
-      - "run_compare(suppress)"
+      - run_compare(suppress)
   - concept: suppression.strict
     tier: config
     renames: []
@@ -797,6 +1035,9 @@ concepts:
       - suppression.strict
     python:
       - CompareRequest.strict_suppressions
+    exceptions:
+      - {id: CompareRequest.strict_suppressions, rule: name, rename: R19, note: python spelling breaks D1; the leaf
+          is `strict`}
   - concept: suppression.require_justification
     tier: config
     renames: []
@@ -806,33 +1047,56 @@ concepts:
       - CompareRequest.require_justification
   - concept: acknowledgments
     tier: core
-    renames: [R3]
+    renames:
+      - R3
     cli:
-      - "compare --acknowledgments"
+      - compare --acknowledgments
     config:
       - acknowledgment
     action:
-      - "action:acknowledgments"
+      - action:acknowledgments
     python:
       - CompareRequest.acknowledgments_path
       - CompareRequest.acknowledgment_unacknowledged_additions
       - CompareRequest.acknowledgment_breaks
-      - "run_compare(acknowledgments_path)"
-      - "run_compare(acknowledgment_unacknowledged_additions)"
-      - "run_compare(acknowledgment_breaks)"
+      - run_compare(acknowledgments_path)
+      - run_compare(acknowledgment_unacknowledged_additions)
+      - run_compare(acknowledgment_breaks)
+    exceptions:
+      - {id: CompareRequest.acknowledgments_path, rule: name, rename: R3, note: python spelling breaks D1; the leaf
+          is `acknowledgments`}
+      - {id: CompareRequest.acknowledgment_unacknowledged_additions, rule: name, rename: R3, note: python spelling
+          breaks D1; the leaf is `acknowledgments`}
+      - {id: CompareRequest.acknowledgment_breaks, rule: name, rename: R3, note: python spelling breaks D1; the
+          leaf is `acknowledgments`}
+      - {id: run_compare(acknowledgments_path), rule: name, rename: R3, note: python spelling breaks D1; the leaf
+          is `acknowledgments`}
+      - {id: run_compare(acknowledgment_unacknowledged_additions), rule: name, rename: R3, note: python spelling
+          breaks D1; the leaf is `acknowledgments`}
+      - {id: run_compare(acknowledgment_breaks), rule: name, rename: R3, note: python spelling breaks D1; the leaf
+          is `acknowledgments`}
   - concept: severity.preset
     tier: core
     renames: []
     cli:
-      - "compare --severity-preset"
+      - compare --severity-preset
     config:
       - severity.preset
     action:
-      - "action:severity-preset"
-      - "actions/check-target:severity-preset"
+      - action:severity-preset
+      - actions/check-target:severity-preset
     python:
       - CompareRequest.severity_preset
-      - "run_compare(severity_preset)"
+      - run_compare(severity_preset)
+    exceptions:
+      - {id: run_compare(severity_preset), rule: name, rename: R19, note: python spelling breaks D1; the leaf is
+          `preset`}
+      - {id: CompareRequest.severity_preset, rule: name, rename: R19, note: python spelling breaks D1; the leaf
+          is `preset`}
+      - {id: 'action:severity-preset', rule: name, rename: R20, note: action spelling breaks D1; the leaf is `preset`}
+      - {id: 'actions/check-target:severity-preset', rule: name, rename: R20, note: action spelling breaks D1; the
+          leaf is `preset`}
+      - {id: compare --severity-preset, rule: name, rename: R21, note: cli spelling breaks D1; the leaf is `preset`}
   - concept: severity.abi_breaking
     tier: config
     renames: []
@@ -840,6 +1104,9 @@ concepts:
       - severity.abi_breaking
     python:
       - CompareRequest.severity_abi_breaking
+    exceptions:
+      - {id: CompareRequest.severity_abi_breaking, rule: name, rename: R19, note: python spelling breaks D1; the
+          leaf is `abi_breaking`}
   - concept: severity.potential_breaking
     tier: config
     renames: []
@@ -847,6 +1114,9 @@ concepts:
       - severity.potential_breaking
     python:
       - CompareRequest.severity_potential_breaking
+    exceptions:
+      - {id: CompareRequest.severity_potential_breaking, rule: name, rename: R19, note: python spelling breaks D1;
+          the leaf is `potential_breaking`}
   - concept: severity.quality_issues
     tier: config
     renames: []
@@ -854,6 +1124,9 @@ concepts:
       - severity.quality_issues
     python:
       - CompareRequest.severity_quality_issues
+    exceptions:
+      - {id: CompareRequest.severity_quality_issues, rule: name, rename: R19, note: python spelling breaks D1; the
+          leaf is `quality_issues`}
   - concept: severity.addition
     tier: config
     renames: []
@@ -861,171 +1134,230 @@ concepts:
       - severity.addition
     python:
       - CompareRequest.severity_addition
+    exceptions:
+      - {id: CompareRequest.severity_addition, rule: name, rename: R19, note: python spelling breaks D1; the leaf
+          is `addition`}
   - concept: gate.fail_on_removed_library
     tier: config
     renames: []
     config:
       - gate.fail_on_removed_library
     action:
-      - "action:fail-on-removed-library"
+      - action:fail-on-removed-library
   - concept: assurance.require_complete
     tier: config
-    renames: [R6]
+    renames:
+      - R6
     config:
       - assurance.require_complete
     action:
-      - "action:analysis-assurance-complete"
-      - "actions/check-target:analysis-assurance-complete"
+      - action:analysis-assurance-complete
+      - actions/check-target:analysis-assurance-complete
     python:
       - CompareRequest.require_complete_analysis
+    exceptions:
+      - {id: 'action:analysis-assurance-complete', rule: name, rename: R6, note: action spelling breaks D1; the
+          leaf is `require_complete`}
+      - {id: 'actions/check-target:analysis-assurance-complete', rule: name, rename: R6, note: action spelling breaks
+          D1; the leaf is `require_complete`}
+      - {id: CompareRequest.require_complete_analysis, rule: name, rename: R19, note: python spelling breaks D1;
+          the leaf is `require_complete`}
   - concept: action.gate
     tier: action
-    renames: [R15]
+    renames:
+      - R15
     action:
-      - "action:fail-on-breaking"
-      - "action:fail-on-api-break"
-      - "actions/check-target:gate-mode"
+      - action:fail-on-breaking
+      - action:fail-on-api-break
+      - actions/check-target:gate-mode
   - concept: output
     tier: core
-    renames: [R11]
+    renames:
+      - R11
     cli:
-      - "compare --output"
-      - "dump --output"
-      - "deps compare --output"
-      - "deps tree --output"
-      - "aggregate --output"
-      - "project capture-variants --output"
-      - "project history --output"
-      - "project plan --output"
-      - "project validate --output"
+      - compare --output
+      - dump --output
+      - deps compare --output
+      - deps tree --output
+      - aggregate --output
+      - project capture-variants --output
+      - project history --output
+      - project plan --output
+      - project validate --output
     action:
-      - "action:format"
-      - "action:output-file"
+      - action:format
+      - action:output-file
+      - actions/aggregate:outputs
+    exceptions:
+      - {id: 'action:format', rule: name, rename: R11, note: action spelling breaks D1; the leaf is `output`}
+      - {id: 'action:output-file', rule: name, rename: R11, note: action spelling breaks D1; the leaf is `output`}
   - concept: view
     tier: core
     renames: []
     cli:
-      - "compare --view"
+      - compare --view
   - concept: compression
     tier: config
     renames: []
     cli:
-      - "dump --compression"
+      - dump --compression
     action:
-      - "action:snapshot-compression"
+      - action:snapshot-compression
+    exceptions:
+      - {id: 'action:snapshot-compression', rule: name, rename: R20, note: action spelling breaks D1; the leaf is
+          `compression`}
   - concept: verbose
     tier: core
     renames: []
     cli:
-      - "compare --verbose"
-      - "dump --verbose"
-      - "deps compare --verbose"
-      - "deps tree --verbose"
-      - "aggregate --verbose"
-      - "project history --verbose"
-      - "project plan --verbose"
-      - "project validate --verbose"
+      - compare --verbose
+      - dump --verbose
+      - deps compare --verbose
+      - deps tree --verbose
+      - aggregate --verbose
+      - project history --verbose
+      - project plan --verbose
+      - project validate --verbose
     action:
-      - "action:verbose"
+      - action:verbose
   - concept: action.reporting
     tier: action
     renames: []
     action:
-      - "action:upload-sarif"
-      - "action:annotate"
-      - "action:annotate-additions"
-      - "action:add-job-summary"
-      - "action:pr-comment"
-      - "action:pr-comment-mode"
-      - "action:pr-comment-key"
-      - "action:pr-comment-on"
-      - "action:pr-comment-report-artifact-url"
-      - "action:pr-comment-detail"
-      - "action:github-token"
+      - action:upload-sarif
+      - action:annotate
+      - action:annotate-additions
+      - action:add-job-summary
+      - action:pr-comment
+      - action:pr-comment-mode
+      - action:pr-comment-key
+      - action:pr-comment-on
+      - action:pr-comment-report-artifact-url
+      - action:pr-comment-detail
+      - action:github-token
   - concept: aggregate
     tier: core
     renames: []
     cli:
-      - "aggregate --manifest"
-      - "aggregate --discovered-only"
-      - "aggregate --analysis-context"
+      - aggregate --manifest
+      - aggregate --discovered-only
+      - aggregate --analysis-context
+    naming: out_of_scope
+    naming_reason: 'ADR-091 Out of scope: aggregate option names beyond --version and -o'
+    action:
+      - actions/aggregate:manifest-path
+      - actions/aggregate:checks
+      - actions/aggregate:reports-dir
+      - actions/aggregate:gate
   - concept: project
     tier: core
     renames: []
     cli:
-      - "project plan --build-output"
-      - "project plan --project"
-      - "project plan --head-sha"
-      - "project plan --toolchain-bindings"
-      - "project validate --toolchain-bindings"
-      - "project capture-variants --package"
-      - "project capture-variants --variant-header"
-      - "project capture-variants --variant-include"
+      - project plan --build-output
+      - project plan --project
+      - project plan --head-sha
+      - project plan --toolchain-bindings
+      - project validate --toolchain-bindings
+      - project capture-variants --package
+      - project capture-variants --variant-header
+      - project capture-variants --variant-include
     action:
-      - "actions/check-target:kind"
-      - "actions/check-target:target-kind"
-      - "actions/check-target:name"
-      - "actions/check-target:profile"
-      - "actions/check-target:candidate-build-output"
-      - "actions/check-target:explicit-id"
-      - "actions/check-target:project"
-      - "actions/check-target:head-sha"
-      - "actions/check-target:base-ref"
-      - "actions/check-target:evidence-producer"
-      - "actions/check-target:evidence-pack-path"
+      - actions/check-target:kind
+      - actions/check-target:target-kind
+      - actions/check-target:name
+      - actions/check-target:profile
+      - actions/check-target:candidate-build-output
+      - actions/check-target:explicit-id
+      - actions/check-target:project
+      - actions/check-target:head-sha
+      - actions/check-target:base-ref
+      - actions/check-target:evidence-producer
+      - actions/check-target:evidence-pack-path
+      - actions/aggregate:tested-sha
+      - actions/aggregate:profile
+    naming: out_of_scope
+    naming_reason: 'ADR-091 Out of scope: project option names beyond --version and -o'
   - concept: action.baseline
     tier: action
     renames: []
     action:
-      - "action:abi-baseline"
-      - "action:baseline-profile"
-      - "action:baseline-target"
-      - "action:baseline-asset-name-template"
-      - "action:baseline-generation"
-      - "action:baseline-project-ref"
-      - "action:expected-archive-digest"
-      - "action:verify-baseline-attestation"
-      - "action:baseline-attestation-repo"
-      - "action:baseline-attestation-signer-workflow"
-      - "actions/check-target:baseline-target"
-      - "actions/check-target:baseline-channel"
-      - "actions/check-target:baseline-path"
-      - "actions/check-target:baseline-required"
-      - "actions/check-target:expected-baseline-generation"
-      - "actions/check-target:expected-project-ref"
-      - "actions/check-target:allow-new-target"
+      - action:abi-baseline
+      - action:baseline-profile
+      - action:baseline-target
+      - action:baseline-asset-name-template
+      - action:baseline-generation
+      - action:baseline-project-ref
+      - action:expected-archive-digest
+      - action:verify-baseline-attestation
+      - action:baseline-attestation-repo
+      - action:baseline-attestation-signer-workflow
+      - actions/check-target:baseline-target
+      - actions/check-target:baseline-channel
+      - actions/check-target:baseline-path
+      - actions/check-target:baseline-required
+      - actions/check-target:expected-baseline-generation
+      - actions/check-target:expected-project-ref
+      - actions/check-target:allow-new-target
   - concept: action.runtime
     tier: action
     renames: []
     action:
-      - "action:mode"
-      - "action:python-version"
-      - "action:install-deps"
-      - "action:dependency-source"
-      - "action:extra-args"
-      - "actions/check-target:extra-args"
-      - "actions/check-target:python-version"
-      - "actions/check-target:install-deps"
-      - "actions/check-target:dependency-source"
-      - "actions/check-target:action-version"
-      - "actions/check-target:abicheck-repository"
-      - "actions/check-target:abicheck-ref"
+      - action:mode
+      - action:python-version
+      - action:install-deps
+      - action:dependency-source
+      - action:extra-args
+      - actions/check-target:extra-args
+      - actions/check-target:python-version
+      - actions/check-target:install-deps
+      - actions/check-target:dependency-source
+      - actions/check-target:action-version
+      - actions/check-target:abicheck-repository
+      - actions/check-target:abicheck-ref
+      - actions/aggregate:install
+      - actions/aggregate:python-version
+      - actions/aggregate:orchestration-ref
+      - actions/collect-facts:install-deps
+      - actions/collect-facts:python-version
+  - concept: aggregate.record_analysis_context
+    tier: action
+    renames: []
+    action:
+      - actions/aggregate:record-analysis-context
+  - concept: collect_facts.producer
+    tier: action
+    renames: []
+    action:
+      - actions/collect-facts:phase
+      - actions/collect-facts:producer
+      - actions/collect-facts:extractor
+      - actions/collect-facts:llvm-cmake-prefix
+      - actions/collect-facts:plugin-artifact
+      - actions/collect-facts:plugin-artifact-sha256
+  - concept: collect_facts.pack
+    tier: action
+    renames: []
+    action:
+      - actions/collect-facts:output
+      - actions/collect-facts:public-roots
+      - actions/collect-facts:library
   - concept: retired
     tier: retired
-    renames: [R14]
+    renames:
+      - R14
     action:
-      - "action:new-library-set"
-      - "action:against"
-      - "action:jobs"
-      - "action:crosscheck"
-      - "action:risk-rules"
-      - "action:audit"
-      - "action:estimate"
-      - "action:build-target"
-      - "action:bundle-system-providers"
-      - "action:require-complete-analysis"
-      - "actions/check-target:require-complete-analysis"
-      - "action:allow-build-query"
+      - action:new-library-set
+      - action:against
+      - action:jobs
+      - action:crosscheck
+      - action:risk-rules
+      - action:audit
+      - action:estimate
+      - action:build-target
+      - action:bundle-system-providers
+      - action:require-complete-analysis
+      - actions/check-target:require-complete-analysis
+      - action:allow-build-query
   - concept: python.internal
     tier: internal
     renames: []
@@ -1035,9 +1367,18 @@ concepts:
       - DumpRequest.resolved_collect_mode
       - CompareRequest.include_labels
       - DumpRequest.include_labels
-      - "run_dump(include_labels)"
+      - run_dump(include_labels)
       - InputSpec.ownership
       - InputSpec.execution
-      - "run_dump(symbols_only)"
-      - "run_dump(debug_presence_only)"
-      - "run_dump(notify)"
+      - run_dump(symbols_only)
+      - run_dump(debug_presence_only)
+      - run_dump(notify)
+budget_exceptions:
+  - surface: compare
+    recorded: 20
+    rename: R22
+    note: visible core options on compare --help (D4 budget 15); Phase 5 moves options to the config tier
+  - surface: action
+    recorded: 53
+    rename: R22
+    note: root action.yml analysis inputs (D4 budget 25); Phase 5 review shrinks this

@@ -7,8 +7,12 @@
    "option": "--manifest",
    "aliases": [],
    "hidden": false,
+   "help_common": true,
    "multiple": false,
-   "is_flag": false
+   "is_flag": false,
+   "type": "file",
+   "choices": null,
+   "default": "<unset>"
   },
   {
    "id": "aggregate --discovered-only",
@@ -16,8 +20,12 @@
    "option": "--discovered-only",
    "aliases": [],
    "hidden": false,
+   "help_common": true,
    "multiple": false,
-   "is_flag": true
+   "is_flag": true,
+   "type": "boolean",
+   "choices": null,
+   "default": "False"
   },
   {
    "id": "aggregate --analysis-context",
@@ -25,8 +33,12 @@
    "option": "--analysis-context",
    "aliases": [],
    "hidden": false,
+   "help_common": true,
    "multiple": false,
-   "is_flag": false
+   "is_flag": false,
+   "type": "file",
+   "choices": null,
+   "default": "<unset>"
   },
   {
    "id": "aggregate --output",
@@ -36,8 +48,12 @@
     "-o"
    ],
    "hidden": false,
+   "help_common": true,
    "multiple": true,
-   "is_flag": false
+   "is_flag": false,
+   "type": "text",
+   "choices": null,
+   "default": "<unset>"
   },
   {
    "id": "aggregate --verbose",
@@ -47,8 +63,12 @@
     "-v"
    ],
    "hidden": false,
+   "help_common": true,
    "multiple": false,
-   "is_flag": true
+   "is_flag": true,
+   "type": "boolean",
+   "choices": null,
+   "default": "False"
   },
   {
    "id": "compare --no-baseline",
@@ -56,8 +76,12 @@
    "option": "--no-baseline",
    "aliases": [],
    "hidden": false,
+   "help_common": false,
    "multiple": false,
-   "is_flag": true
+   "is_flag": true,
+   "type": "boolean",
+   "choices": null,
+   "default": "False"
   },
   {
    "id": "compare --select",
@@ -65,8 +89,12 @@
    "option": "--select",
    "aliases": [],
    "hidden": false,
+   "help_common": false,
    "multiple": true,
-   "is_flag": false
+   "is_flag": false,
+   "type": "text",
+   "choices": null,
+   "default": "<unset>"
   },
   {
    "id": "compare --select-required",
@@ -74,8 +102,12 @@
    "option": "--select-required",
    "aliases": [],
    "hidden": false,
+   "help_common": false,
    "multiple": true,
-   "is_flag": false
+   "is_flag": false,
+   "type": "text",
+   "choices": null,
+   "default": "<unset>"
   },
   {
    "id": "compare --bundle-facts-out",
@@ -83,8 +115,12 @@
    "option": "--bundle-facts-out",
    "aliases": [],
    "hidden": false,
+   "help_common": false,
    "multiple": false,
-   "is_flag": false
+   "is_flag": false,
+   "type": "path",
+   "choices": null,
+   "default": "<unset>"
   },
   {
    "id": "compare --instantiation-manifest",
@@ -92,8 +128,12 @@
    "option": "--instantiation-manifest",
    "aliases": [],
    "hidden": false,
+   "help_common": false,
    "multiple": false,
-   "is_flag": false
+   "is_flag": false,
+   "type": "path",
+   "choices": null,
+   "default": "<unset>"
   },
   {
    "id": "compare --bundle-facts-library-manifest",
@@ -101,8 +141,12 @@
    "option": "--bundle-facts-library-manifest",
    "aliases": [],
    "hidden": false,
+   "help_common": false,
    "multiple": false,
-   "is_flag": false
+   "is_flag": false,
+   "type": "file",
+   "choices": null,
+   "default": "<unset>"
   },
   {
    "id": "compare --exclude-header",
@@ -110,8 +154,12 @@
    "option": "--exclude-header",
    "aliases": [],
    "hidden": false,
+   "help_common": false,
    "multiple": true,
-   "is_flag": false
+   "is_flag": false,
+   "type": "text",
+   "choices": null,
+   "default": "<unset>"
   },
   {
    "id": "compare --header",
@@ -121,8 +169,12 @@
     "-H"
    ],
    "hidden": false,
+   "help_common": true,
    "multiple": true,
-   "is_flag": false
+   "is_flag": false,
+   "type": "sided-path",
+   "choices": null,
+   "default": "<unset>"
   },
   {
    "id": "compare --include",
@@ -132,8 +184,12 @@
     "-I"
    ],
    "hidden": false,
+   "help_common": true,
    "multiple": true,
-   "is_flag": false
+   "is_flag": false,
+   "type": "sided-include-path",
+   "choices": null,
+   "default": "<unset>"
   },
   {
    "id": "compare --version",
@@ -141,8 +197,12 @@
    "option": "--version",
    "aliases": [],
    "hidden": false,
+   "help_common": true,
    "multiple": true,
-   "is_flag": false
+   "is_flag": false,
+   "type": "sided-str",
+   "choices": null,
+   "default": "<unset>"
   },
   {
    "id": "compare --dump-manifest",
@@ -150,8 +210,12 @@
    "option": "--dump-manifest",
    "aliases": [],
    "hidden": false,
+   "help_common": false,
    "multiple": true,
-   "is_flag": false
+   "is_flag": false,
+   "type": "sided-path",
+   "choices": null,
+   "default": "<unset>"
   },
   {
    "id": "compare --output",
@@ -161,8 +225,12 @@
     "-o"
    ],
    "hidden": false,
+   "help_common": true,
    "multiple": true,
-   "is_flag": false
+   "is_flag": false,
+   "type": "text",
+   "choices": null,
+   "default": "<unset>"
   },
   {
    "id": "compare --view",
@@ -170,8 +238,12 @@
    "option": "--view",
    "aliases": [],
    "hidden": false,
+   "help_common": true,
    "multiple": true,
-   "is_flag": false
+   "is_flag": false,
+   "type": "text",
+   "choices": null,
+   "default": "<unset>"
   },
   {
    "id": "compare --policy",
@@ -179,8 +251,12 @@
    "option": "--policy",
    "aliases": [],
    "hidden": false,
+   "help_common": true,
    "multiple": false,
-   "is_flag": false
+   "is_flag": false,
+   "type": "text",
+   "choices": null,
+   "default": "'strict_abi'"
   },
   {
    "id": "compare --suppress",
@@ -188,8 +264,12 @@
    "option": "--suppress",
    "aliases": [],
    "hidden": false,
+   "help_common": true,
    "multiple": true,
-   "is_flag": false
+   "is_flag": false,
+   "type": "path",
+   "choices": null,
+   "default": "<unset>"
   },
   {
    "id": "compare --used-by",
@@ -197,8 +277,12 @@
    "option": "--used-by",
    "aliases": [],
    "hidden": false,
+   "help_common": true,
    "multiple": true,
-   "is_flag": false
+   "is_flag": false,
+   "type": "file",
+   "choices": null,
+   "default": "<unset>"
   },
   {
    "id": "compare --required-symbol",
@@ -206,8 +290,12 @@
    "option": "--required-symbol",
    "aliases": [],
    "hidden": false,
+   "help_common": true,
    "multiple": true,
-   "is_flag": false
+   "is_flag": false,
+   "type": "text",
+   "choices": null,
+   "default": "<unset>"
   },
   {
    "id": "compare --used-by-manifest",
@@ -215,8 +303,12 @@
    "option": "--used-by-manifest",
    "aliases": [],
    "hidden": false,
+   "help_common": true,
    "multiple": true,
-   "is_flag": false
+   "is_flag": false,
+   "type": "file",
+   "choices": null,
+   "default": "<unset>"
   },
   {
    "id": "compare --severity-preset",
@@ -224,8 +316,16 @@
    "option": "--severity-preset",
    "aliases": [],
    "hidden": false,
+   "help_common": true,
    "multiple": false,
-   "is_flag": false
+   "is_flag": false,
+   "type": "choice",
+   "choices": [
+    "default",
+    "strict",
+    "info-only"
+   ],
+   "default": "<unset>"
   },
   {
    "id": "compare --config",
@@ -233,8 +333,12 @@
    "option": "--config",
    "aliases": [],
    "hidden": false,
+   "help_common": true,
    "multiple": false,
-   "is_flag": false
+   "is_flag": false,
+   "type": "file",
+   "choices": null,
+   "default": "<unset>"
   },
   {
    "id": "compare --acknowledgments",
@@ -242,8 +346,12 @@
    "option": "--acknowledgments",
    "aliases": [],
    "hidden": false,
+   "help_common": false,
    "multiple": false,
-   "is_flag": false
+   "is_flag": false,
+   "type": "file",
+   "choices": null,
+   "default": "<unset>"
   },
   {
    "id": "compare --follow-deps",
@@ -251,8 +359,12 @@
    "option": "--follow-deps",
    "aliases": [],
    "hidden": false,
+   "help_common": false,
    "multiple": false,
-   "is_flag": true
+   "is_flag": true,
+   "type": "boolean",
+   "choices": null,
+   "default": "False"
   },
   {
    "id": "compare --include-system-declarations",
@@ -260,8 +372,12 @@
    "option": "--include-system-declarations",
    "aliases": [],
    "hidden": false,
+   "help_common": false,
    "multiple": false,
-   "is_flag": true
+   "is_flag": true,
+   "type": "boolean",
+   "choices": null,
+   "default": "False"
   },
   {
    "id": "compare --define",
@@ -271,8 +387,12 @@
     "-D"
    ],
    "hidden": false,
+   "help_common": true,
    "multiple": true,
-   "is_flag": false
+   "is_flag": false,
+   "type": "text",
+   "choices": null,
+   "default": "<unset>"
   },
   {
    "id": "compare --search-path",
@@ -280,8 +400,12 @@
    "option": "--search-path",
    "aliases": [],
    "hidden": false,
+   "help_common": false,
    "multiple": true,
-   "is_flag": false
+   "is_flag": false,
+   "type": "path",
+   "choices": null,
+   "default": "<unset>"
   },
   {
    "id": "compare --ld-library-path",
@@ -289,8 +413,12 @@
    "option": "--ld-library-path",
    "aliases": [],
    "hidden": false,
+   "help_common": false,
    "multiple": false,
-   "is_flag": false
+   "is_flag": false,
+   "type": "text",
+   "choices": null,
+   "default": "''"
   },
   {
    "id": "compare --debug-info",
@@ -298,8 +426,12 @@
    "option": "--debug-info",
    "aliases": [],
    "hidden": false,
+   "help_common": true,
    "multiple": true,
-   "is_flag": false
+   "is_flag": false,
+   "type": "sided-path",
+   "choices": null,
+   "default": "<unset>"
   },
   {
    "id": "compare --build-info",
@@ -307,8 +439,12 @@
    "option": "--build-info",
    "aliases": [],
    "hidden": false,
+   "help_common": true,
    "multiple": true,
-   "is_flag": false
+   "is_flag": false,
+   "type": "sided-path",
+   "choices": null,
+   "default": "<unset>"
   },
   {
    "id": "compare --sources",
@@ -316,8 +452,12 @@
    "option": "--sources",
    "aliases": [],
    "hidden": false,
+   "help_common": true,
    "multiple": true,
-   "is_flag": false
+   "is_flag": false,
+   "type": "sided-path",
+   "choices": null,
+   "default": "<unset>"
   },
   {
    "id": "compare --depth",
@@ -325,8 +465,12 @@
    "option": "--depth",
    "aliases": [],
    "hidden": false,
+   "help_common": true,
    "multiple": false,
-   "is_flag": false
+   "is_flag": false,
+   "type": "depth",
+   "choices": null,
+   "default": "<unset>"
   },
   {
    "id": "compare --since",
@@ -334,8 +478,12 @@
    "option": "--since",
    "aliases": [],
    "hidden": false,
+   "help_common": false,
    "multiple": false,
-   "is_flag": false
+   "is_flag": false,
+   "type": "text",
+   "choices": null,
+   "default": "<unset>"
   },
   {
    "id": "compare --changed-path",
@@ -343,8 +491,12 @@
    "option": "--changed-path",
    "aliases": [],
    "hidden": false,
+   "help_common": false,
    "multiple": true,
-   "is_flag": false
+   "is_flag": false,
+   "type": "text",
+   "choices": null,
+   "default": "<unset>"
   },
   {
    "id": "compare --abi3",
@@ -352,8 +504,12 @@
    "option": "--abi3",
    "aliases": [],
    "hidden": false,
+   "help_common": false,
    "multiple": false,
-   "is_flag": false
+   "is_flag": false,
+   "type": "text",
+   "choices": null,
+   "default": "<unset>"
   },
   {
    "id": "compare --budget",
@@ -361,8 +517,12 @@
    "option": "--budget",
    "aliases": [],
    "hidden": false,
+   "help_common": false,
    "multiple": false,
-   "is_flag": false
+   "is_flag": false,
+   "type": "text",
+   "choices": null,
+   "default": "<unset>"
   },
   {
    "id": "compare --dry-run",
@@ -370,8 +530,12 @@
    "option": "--dry-run",
    "aliases": [],
    "hidden": false,
+   "help_common": true,
    "multiple": false,
-   "is_flag": true
+   "is_flag": true,
+   "type": "boolean",
+   "choices": null,
+   "default": "False"
   },
   {
    "id": "compare --diagnostic-comparison",
@@ -379,8 +543,12 @@
    "option": "--diagnostic-comparison",
    "aliases": [],
    "hidden": false,
+   "help_common": false,
    "multiple": false,
-   "is_flag": true
+   "is_flag": true,
+   "type": "boolean",
+   "choices": null,
+   "default": "False"
   },
   {
    "id": "compare --require-same-generation",
@@ -388,8 +556,12 @@
    "option": "--require-same-generation",
    "aliases": [],
    "hidden": false,
+   "help_common": false,
    "multiple": false,
-   "is_flag": true
+   "is_flag": true,
+   "type": "boolean",
+   "choices": null,
+   "default": "False"
   },
   {
    "id": "compare --contract",
@@ -397,8 +569,17 @@
    "option": "--contract",
    "aliases": [],
    "hidden": false,
+   "help_common": true,
    "multiple": false,
-   "is_flag": false
+   "is_flag": false,
+   "type": "choice",
+   "choices": [
+    "public",
+    "exports",
+    "all",
+    "auto"
+   ],
+   "default": "<unset>"
   },
   {
    "id": "compare --pack",
@@ -406,8 +587,12 @@
    "option": "--pack",
    "aliases": [],
    "hidden": false,
+   "help_common": false,
    "multiple": true,
-   "is_flag": false
+   "is_flag": false,
+   "type": "file",
+   "choices": null,
+   "default": "<unset>"
   },
   {
    "id": "compare --use-cases",
@@ -415,8 +600,12 @@
    "option": "--use-cases",
    "aliases": [],
    "hidden": false,
+   "help_common": false,
    "multiple": false,
-   "is_flag": false
+   "is_flag": false,
+   "type": "file",
+   "choices": null,
+   "default": "<unset>"
   },
   {
    "id": "compare --performance-profile",
@@ -424,8 +613,15 @@
    "option": "--performance-profile",
    "aliases": [],
    "hidden": false,
+   "help_common": false,
    "multiple": false,
-   "is_flag": false
+   "is_flag": false,
+   "type": "choice",
+   "choices": [
+    "balanced",
+    "low-memory"
+   ],
+   "default": "<unset>"
   },
   {
    "id": "compare --verbose",
@@ -435,8 +631,12 @@
     "-v"
    ],
    "hidden": false,
+   "help_common": true,
    "multiple": false,
-   "is_flag": true
+   "is_flag": true,
+   "type": "boolean",
+   "choices": null,
+   "default": "False"
   },
   {
    "id": "compare --variant",
@@ -444,8 +644,12 @@
    "option": "--variant",
    "aliases": [],
    "hidden": false,
+   "help_common": false,
    "multiple": true,
-   "is_flag": false
+   "is_flag": false,
+   "type": "sided-str",
+   "choices": null,
+   "default": "<unset>"
   },
   {
    "id": "deps compare --old-root",
@@ -453,8 +657,12 @@
    "option": "--old-root",
    "aliases": [],
    "hidden": false,
+   "help_common": true,
    "multiple": false,
-   "is_flag": false
+   "is_flag": false,
+   "type": "path",
+   "choices": null,
+   "default": "<PosixPath>"
   },
   {
    "id": "deps compare --new-root",
@@ -462,8 +670,12 @@
    "option": "--new-root",
    "aliases": [],
    "hidden": false,
+   "help_common": true,
    "multiple": false,
-   "is_flag": false
+   "is_flag": false,
+   "type": "path",
+   "choices": null,
+   "default": "<PosixPath>"
   },
   {
    "id": "deps compare --search-path",
@@ -471,8 +683,12 @@
    "option": "--search-path",
    "aliases": [],
    "hidden": false,
+   "help_common": true,
    "multiple": true,
-   "is_flag": false
+   "is_flag": false,
+   "type": "path",
+   "choices": null,
+   "default": "<unset>"
   },
   {
    "id": "deps compare --ld-library-path",
@@ -480,8 +696,12 @@
    "option": "--ld-library-path",
    "aliases": [],
    "hidden": false,
+   "help_common": true,
    "multiple": false,
-   "is_flag": false
+   "is_flag": false,
+   "type": "text",
+   "choices": null,
+   "default": "''"
   },
   {
    "id": "deps compare --output",
@@ -491,8 +711,12 @@
     "-o"
    ],
    "hidden": false,
+   "help_common": true,
    "multiple": true,
-   "is_flag": false
+   "is_flag": false,
+   "type": "text",
+   "choices": null,
+   "default": "<unset>"
   },
   {
    "id": "deps compare --dry-run",
@@ -500,8 +724,12 @@
    "option": "--dry-run",
    "aliases": [],
    "hidden": false,
+   "help_common": true,
    "multiple": false,
-   "is_flag": true
+   "is_flag": true,
+   "type": "boolean",
+   "choices": null,
+   "default": "False"
   },
   {
    "id": "deps compare --verbose",
@@ -511,8 +739,12 @@
     "-v"
    ],
    "hidden": false,
+   "help_common": true,
    "multiple": false,
-   "is_flag": true
+   "is_flag": true,
+   "type": "boolean",
+   "choices": null,
+   "default": "False"
   },
   {
    "id": "deps tree --search-path",
@@ -520,8 +752,12 @@
    "option": "--search-path",
    "aliases": [],
    "hidden": false,
+   "help_common": true,
    "multiple": true,
-   "is_flag": false
+   "is_flag": false,
+   "type": "path",
+   "choices": null,
+   "default": "<unset>"
   },
   {
    "id": "deps tree --sysroot",
@@ -529,8 +765,12 @@
    "option": "--sysroot",
    "aliases": [],
    "hidden": false,
+   "help_common": true,
    "multiple": false,
-   "is_flag": false
+   "is_flag": false,
+   "type": "path",
+   "choices": null,
+   "default": "<unset>"
   },
   {
    "id": "deps tree --ld-library-path",
@@ -538,8 +778,12 @@
    "option": "--ld-library-path",
    "aliases": [],
    "hidden": false,
+   "help_common": true,
    "multiple": false,
-   "is_flag": false
+   "is_flag": false,
+   "type": "text",
+   "choices": null,
+   "default": "''"
   },
   {
    "id": "deps tree --output",
@@ -549,8 +793,12 @@
     "-o"
    ],
    "hidden": false,
+   "help_common": true,
    "multiple": true,
-   "is_flag": false
+   "is_flag": false,
+   "type": "text",
+   "choices": null,
+   "default": "<unset>"
   },
   {
    "id": "deps tree --dry-run",
@@ -558,8 +806,12 @@
    "option": "--dry-run",
    "aliases": [],
    "hidden": false,
+   "help_common": true,
    "multiple": false,
-   "is_flag": true
+   "is_flag": true,
+   "type": "boolean",
+   "choices": null,
+   "default": "False"
   },
   {
    "id": "deps tree --verbose",
@@ -569,8 +821,12 @@
     "-v"
    ],
    "hidden": false,
+   "help_common": true,
    "multiple": false,
-   "is_flag": true
+   "is_flag": true,
+   "type": "boolean",
+   "choices": null,
+   "default": "False"
   },
   {
    "id": "dump --header",
@@ -580,8 +836,12 @@
     "-H"
    ],
    "hidden": false,
+   "help_common": true,
    "multiple": true,
-   "is_flag": false
+   "is_flag": false,
+   "type": "path",
+   "choices": null,
+   "default": "<unset>"
   },
   {
    "id": "dump --include",
@@ -591,8 +851,12 @@
     "-I"
    ],
    "hidden": false,
+   "help_common": true,
    "multiple": true,
-   "is_flag": false
+   "is_flag": false,
+   "type": "path",
+   "choices": null,
+   "default": "<unset>"
   },
   {
    "id": "dump --exclude-header",
@@ -600,8 +864,12 @@
    "option": "--exclude-header",
    "aliases": [],
    "hidden": false,
+   "help_common": false,
    "multiple": true,
-   "is_flag": false
+   "is_flag": false,
+   "type": "text",
+   "choices": null,
+   "default": "<unset>"
   },
   {
    "id": "dump --include-system-declarations",
@@ -609,8 +877,12 @@
    "option": "--include-system-declarations",
    "aliases": [],
    "hidden": false,
+   "help_common": false,
    "multiple": false,
-   "is_flag": true
+   "is_flag": true,
+   "type": "boolean",
+   "choices": null,
+   "default": "False"
   },
   {
    "id": "dump --define",
@@ -620,8 +892,12 @@
     "-D"
    ],
    "hidden": false,
+   "help_common": true,
    "multiple": true,
-   "is_flag": false
+   "is_flag": false,
+   "type": "text",
+   "choices": null,
+   "default": "<unset>"
   },
   {
    "id": "dump --version",
@@ -629,8 +905,12 @@
    "option": "--version",
    "aliases": [],
    "hidden": false,
+   "help_common": true,
    "multiple": false,
-   "is_flag": false
+   "is_flag": false,
+   "type": "text",
+   "choices": null,
+   "default": "'unknown'"
   },
   {
    "id": "dump --output",
@@ -640,8 +920,12 @@
     "-o"
    ],
    "hidden": false,
+   "help_common": true,
    "multiple": false,
-   "is_flag": false
+   "is_flag": false,
+   "type": "path",
+   "choices": null,
+   "default": "<unset>"
   },
   {
    "id": "dump --compression",
@@ -649,8 +933,17 @@
    "option": "--compression",
    "aliases": [],
    "hidden": false,
+   "help_common": true,
    "multiple": false,
-   "is_flag": false
+   "is_flag": false,
+   "type": "choice",
+   "choices": [
+    "auto",
+    "none",
+    "gzip",
+    "zstd"
+   ],
+   "default": "'auto'"
   },
   {
    "id": "dump --follow-deps",
@@ -658,8 +951,12 @@
    "option": "--follow-deps",
    "aliases": [],
    "hidden": false,
+   "help_common": false,
    "multiple": false,
-   "is_flag": true
+   "is_flag": true,
+   "type": "boolean",
+   "choices": null,
+   "default": "False"
   },
   {
    "id": "dump --search-path",
@@ -667,8 +964,12 @@
    "option": "--search-path",
    "aliases": [],
    "hidden": false,
+   "help_common": false,
    "multiple": true,
-   "is_flag": false
+   "is_flag": false,
+   "type": "path",
+   "choices": null,
+   "default": "<unset>"
   },
   {
    "id": "dump --ld-library-path",
@@ -676,8 +977,12 @@
    "option": "--ld-library-path",
    "aliases": [],
    "hidden": false,
+   "help_common": false,
    "multiple": false,
-   "is_flag": false
+   "is_flag": false,
+   "type": "text",
+   "choices": null,
+   "default": "''"
   },
   {
    "id": "dump --dry-run",
@@ -685,8 +990,12 @@
    "option": "--dry-run",
    "aliases": [],
    "hidden": false,
+   "help_common": true,
    "multiple": false,
-   "is_flag": true
+   "is_flag": true,
+   "type": "boolean",
+   "choices": null,
+   "default": "False"
   },
   {
    "id": "dump --debug-info",
@@ -694,8 +1003,12 @@
    "option": "--debug-info",
    "aliases": [],
    "hidden": false,
+   "help_common": true,
    "multiple": true,
-   "is_flag": false
+   "is_flag": false,
+   "type": "path",
+   "choices": null,
+   "default": "<unset>"
   },
   {
    "id": "dump --dump-manifest",
@@ -703,8 +1016,12 @@
    "option": "--dump-manifest",
    "aliases": [],
    "hidden": false,
+   "help_common": true,
    "multiple": false,
-   "is_flag": false
+   "is_flag": false,
+   "type": "file",
+   "choices": null,
+   "default": "<unset>"
   },
   {
    "id": "dump --verbose",
@@ -714,8 +1031,12 @@
     "-v"
    ],
    "hidden": false,
+   "help_common": true,
    "multiple": false,
-   "is_flag": true
+   "is_flag": true,
+   "type": "boolean",
+   "choices": null,
+   "default": "False"
   },
   {
    "id": "dump --provenance",
@@ -723,8 +1044,12 @@
    "option": "--provenance",
    "aliases": [],
    "hidden": false,
+   "help_common": false,
    "multiple": true,
-   "is_flag": false
+   "is_flag": false,
+   "type": "text",
+   "choices": null,
+   "default": "<unset>"
   },
   {
    "id": "dump --build-info",
@@ -732,8 +1057,12 @@
    "option": "--build-info",
    "aliases": [],
    "hidden": false,
+   "help_common": true,
    "multiple": false,
-   "is_flag": false
+   "is_flag": false,
+   "type": "path",
+   "choices": null,
+   "default": "<unset>"
   },
   {
    "id": "dump --sources",
@@ -741,8 +1070,12 @@
    "option": "--sources",
    "aliases": [],
    "hidden": false,
+   "help_common": true,
    "multiple": false,
-   "is_flag": false
+   "is_flag": false,
+   "type": "path",
+   "choices": null,
+   "default": "<unset>"
   },
   {
    "id": "dump --config",
@@ -750,8 +1083,12 @@
    "option": "--config",
    "aliases": [],
    "hidden": false,
+   "help_common": true,
    "multiple": false,
-   "is_flag": false
+   "is_flag": false,
+   "type": "file",
+   "choices": null,
+   "default": "<unset>"
   },
   {
    "id": "dump --depth",
@@ -759,8 +1096,12 @@
    "option": "--depth",
    "aliases": [],
    "hidden": false,
+   "help_common": true,
    "multiple": false,
-   "is_flag": false
+   "is_flag": false,
+   "type": "depth",
+   "choices": null,
+   "default": "<unset>"
   },
   {
    "id": "project capture-variants --variant",
@@ -768,8 +1109,12 @@
    "option": "--variant",
    "aliases": [],
    "hidden": false,
+   "help_common": true,
    "multiple": true,
-   "is_flag": false
+   "is_flag": false,
+   "type": "text",
+   "choices": null,
+   "default": "<unset>"
   },
   {
    "id": "project capture-variants --package",
@@ -777,8 +1122,12 @@
    "option": "--package",
    "aliases": [],
    "hidden": false,
+   "help_common": true,
    "multiple": false,
-   "is_flag": false
+   "is_flag": false,
+   "type": "directory",
+   "choices": null,
+   "default": "<unset>"
   },
   {
    "id": "project capture-variants --config",
@@ -786,8 +1135,12 @@
    "option": "--config",
    "aliases": [],
    "hidden": false,
+   "help_common": true,
    "multiple": false,
-   "is_flag": false
+   "is_flag": false,
+   "type": "file",
+   "choices": null,
+   "default": "<unset>"
   },
   {
    "id": "project capture-variants --variant-header",
@@ -795,8 +1148,12 @@
    "option": "--variant-header",
    "aliases": [],
    "hidden": false,
+   "help_common": true,
    "multiple": true,
-   "is_flag": false
+   "is_flag": false,
+   "type": "text",
+   "choices": null,
+   "default": "<unset>"
   },
   {
    "id": "project capture-variants --variant-include",
@@ -804,8 +1161,12 @@
    "option": "--variant-include",
    "aliases": [],
    "hidden": false,
+   "help_common": true,
    "multiple": true,
-   "is_flag": false
+   "is_flag": false,
+   "type": "text",
+   "choices": null,
+   "default": "<unset>"
   },
   {
    "id": "project capture-variants --dry-run",
@@ -813,8 +1174,12 @@
    "option": "--dry-run",
    "aliases": [],
    "hidden": false,
+   "help_common": true,
    "multiple": false,
-   "is_flag": true
+   "is_flag": true,
+   "type": "boolean",
+   "choices": null,
+   "default": "False"
   },
   {
    "id": "project capture-variants --output",
@@ -824,8 +1189,12 @@
     "-o"
    ],
    "hidden": false,
+   "help_common": true,
    "multiple": true,
-   "is_flag": false
+   "is_flag": false,
+   "type": "text",
+   "choices": null,
+   "default": "<unset>"
   },
   {
    "id": "project history --version",
@@ -833,8 +1202,12 @@
    "option": "--version",
    "aliases": [],
    "hidden": false,
+   "help_common": true,
    "multiple": true,
-   "is_flag": false
+   "is_flag": false,
+   "type": "text",
+   "choices": null,
+   "default": "<unset>"
   },
   {
    "id": "project history --policy",
@@ -842,8 +1215,12 @@
    "option": "--policy",
    "aliases": [],
    "hidden": false,
+   "help_common": true,
    "multiple": false,
-   "is_flag": false
+   "is_flag": false,
+   "type": "text",
+   "choices": null,
+   "default": "'strict_abi'"
   },
   {
    "id": "project history --output",
@@ -853,8 +1230,12 @@
     "-o"
    ],
    "hidden": false,
+   "help_common": true,
    "multiple": true,
-   "is_flag": false
+   "is_flag": false,
+   "type": "text",
+   "choices": null,
+   "default": "<unset>"
   },
   {
    "id": "project history --verbose",
@@ -864,8 +1245,12 @@
     "-v"
    ],
    "hidden": false,
+   "help_common": true,
    "multiple": false,
-   "is_flag": true
+   "is_flag": true,
+   "type": "boolean",
+   "choices": null,
+   "default": "False"
   },
   {
    "id": "project plan --build-output",
@@ -873,8 +1258,12 @@
    "option": "--build-output",
    "aliases": [],
    "hidden": false,
+   "help_common": true,
    "multiple": true,
-   "is_flag": false
+   "is_flag": false,
+   "type": "text",
+   "choices": null,
+   "default": "<unset>"
   },
   {
    "id": "project plan --project",
@@ -882,8 +1271,12 @@
    "option": "--project",
    "aliases": [],
    "hidden": false,
+   "help_common": true,
    "multiple": false,
-   "is_flag": false
+   "is_flag": false,
+   "type": "text",
+   "choices": null,
+   "default": "''"
   },
   {
    "id": "project plan --head-sha",
@@ -891,8 +1284,12 @@
    "option": "--head-sha",
    "aliases": [],
    "hidden": false,
+   "help_common": true,
    "multiple": false,
-   "is_flag": false
+   "is_flag": false,
+   "type": "text",
+   "choices": null,
+   "default": "''"
   },
   {
    "id": "project plan --toolchain-bindings",
@@ -900,8 +1297,12 @@
    "option": "--toolchain-bindings",
    "aliases": [],
    "hidden": false,
+   "help_common": true,
    "multiple": false,
-   "is_flag": false
+   "is_flag": false,
+   "type": "file",
+   "choices": null,
+   "default": "<unset>"
   },
   {
    "id": "project plan --output",
@@ -911,8 +1312,12 @@
     "-o"
    ],
    "hidden": false,
+   "help_common": true,
    "multiple": true,
-   "is_flag": false
+   "is_flag": false,
+   "type": "text",
+   "choices": null,
+   "default": "<unset>"
   },
   {
    "id": "project plan --verbose",
@@ -922,8 +1327,12 @@
     "-v"
    ],
    "hidden": false,
+   "help_common": true,
    "multiple": false,
-   "is_flag": true
+   "is_flag": true,
+   "type": "boolean",
+   "choices": null,
+   "default": "False"
   },
   {
    "id": "project validate --output",
@@ -933,8 +1342,12 @@
     "-o"
    ],
    "hidden": false,
+   "help_common": true,
    "multiple": true,
-   "is_flag": false
+   "is_flag": false,
+   "type": "text",
+   "choices": null,
+   "default": "<unset>"
   },
   {
    "id": "project validate --toolchain-bindings",
@@ -942,8 +1355,12 @@
    "option": "--toolchain-bindings",
    "aliases": [],
    "hidden": false,
+   "help_common": true,
    "multiple": false,
-   "is_flag": false
+   "is_flag": false,
+   "type": "file",
+   "choices": null,
+   "default": "<unset>"
   },
   {
    "id": "project validate --verbose",
@@ -953,254 +1370,319 @@
     "-v"
    ],
    "hidden": false,
+   "help_common": true,
    "multiple": false,
-   "is_flag": true
+   "is_flag": true,
+   "type": "boolean",
+   "choices": null,
+   "default": "False"
   }
  ],
  "config": [
   {
    "id": "build.system",
-   "kind": "str"
+   "kind": "str",
+   "default": "'auto'"
   },
   {
    "id": "build.query",
-   "kind": "str"
+   "kind": "str",
+   "default": "''"
   },
   {
    "id": "build.compile_db",
-   "kind": "str"
+   "kind": "str",
+   "default": "''"
   },
   {
    "id": "build.compile_db_filter",
-   "kind": "str"
+   "kind": "str",
+   "default": "''"
   },
   {
    "id": "build.targets",
-   "kind": "list"
+   "kind": "list",
+   "default": "[]"
   },
   {
    "id": "sources.public_headers",
-   "kind": "list"
+   "kind": "list",
+   "default": "[]"
   },
   {
    "id": "sources.exclude",
-   "kind": "list"
+   "kind": "list",
+   "default": "[]"
   },
   {
    "id": "sources.graph",
-   "kind": "str"
+   "kind": "str",
+   "default": "'summary'"
   },
   {
    "id": "severity.preset",
-   "kind": "str"
+   "kind": "str",
+   "default": "None"
   },
   {
    "id": "severity.abi_breaking",
-   "kind": "str"
+   "kind": "str",
+   "default": "None"
   },
   {
    "id": "severity.potential_breaking",
-   "kind": "str"
+   "kind": "str",
+   "default": "None"
   },
   {
    "id": "severity.quality_issues",
-   "kind": "str"
+   "kind": "str",
+   "default": "None"
   },
   {
    "id": "severity.addition",
-   "kind": "str"
+   "kind": "str",
+   "default": "None"
   },
   {
    "id": "scope.public",
-   "kind": "bool"
+   "kind": "bool",
+   "default": "None"
   },
   {
    "id": "scope.collapse_versioned_symbols",
-   "kind": "bool"
+   "kind": "bool",
+   "default": "None"
   },
   {
    "id": "scope.public_symbols",
-   "kind": "list"
+   "kind": "list",
+   "default": "[]"
   },
   {
    "id": "scope.show_redundant",
-   "kind": "bool"
+   "kind": "bool",
+   "default": "None"
   },
   {
    "id": "scope.public_header_dirs",
-   "kind": "list"
+   "kind": "list",
+   "default": "[]"
   },
   {
    "id": "scope.exclude_headers",
-   "kind": "list"
+   "kind": "list",
+   "default": "[]"
   },
   {
    "id": "scope.on_incomplete",
-   "kind": "str"
+   "kind": "str",
+   "default": "None"
   },
   {
    "id": "scope.dependencies",
-   "kind": "custom"
+   "kind": "custom",
+   "default": "None"
   },
   {
    "id": "scope.dependency_evidence",
-   "kind": "custom"
+   "kind": "custom",
+   "default": "None"
   },
   {
    "id": "scope.private_headers",
-   "kind": "list"
+   "kind": "list",
+   "default": "None"
   },
   {
    "id": "scope.private_namespaces",
-   "kind": "list"
+   "kind": "list",
+   "default": "None"
   },
   {
    "id": "scope",
-   "kind": "group"
+   "kind": "group",
+   "default": "None"
   },
   {
    "id": "contract",
-   "kind": "whole"
+   "kind": "whole",
+   "default": "None"
   },
   {
    "id": "acknowledgment",
-   "kind": "whole"
+   "kind": "whole",
+   "default": "None"
   },
   {
    "id": "suppression.strict",
-   "kind": "bool"
+   "kind": "bool",
+   "default": "None"
   },
   {
    "id": "suppression.require_justification",
-   "kind": "bool"
+   "kind": "bool",
+   "default": "None"
   },
   {
    "id": "source.method",
-   "kind": "str"
+   "kind": "str",
+   "default": "None"
   },
   {
    "id": "compile.frontend",
-   "kind": "str"
+   "kind": "str",
+   "default": "None"
   },
   {
    "id": "compile.std",
-   "kind": "str"
+   "kind": "str",
+   "default": "None"
   },
   {
    "id": "compile.include_dirs",
-   "kind": "list"
+   "kind": "list",
+   "default": "[]"
   },
   {
    "id": "compile.defines",
-   "kind": "list"
+   "kind": "list",
+   "default": "[]"
   },
   {
    "id": "compile.sysroot",
-   "kind": "str"
+   "kind": "str",
+   "default": "None"
   },
   {
    "id": "compile.nostdinc",
-   "kind": "bool"
+   "kind": "bool",
+   "default": "None"
   },
   {
    "id": "compile.compiler",
-   "kind": "str"
+   "kind": "str",
+   "default": "None"
   },
   {
    "id": "compile.options",
-   "kind": "list"
+   "kind": "list",
+   "default": "[]"
   },
   {
    "id": "compile.ast_frontend_fallback",
-   "kind": "bool"
+   "kind": "bool",
+   "default": "None"
   },
   {
    "id": "compile.allow_unsupported_castxml",
-   "kind": "bool"
+   "kind": "bool",
+   "default": "None"
   },
   {
    "id": "compile.frontend_context",
-   "kind": "str"
+   "kind": "str",
+   "default": "None"
   },
   {
    "id": "compile.lang",
-   "kind": "str"
+   "kind": "str",
+   "default": "None"
   },
   {
    "id": "debug.format",
-   "kind": "str"
+   "kind": "str",
+   "default": "None"
   },
   {
    "id": "debug.dwarf_only",
-   "kind": "bool"
+   "kind": "bool",
+   "default": "None"
   },
   {
    "id": "debug.debuginfod",
-   "kind": "bool"
+   "kind": "bool",
+   "default": "None"
   },
   {
    "id": "debug.debuginfod_url",
-   "kind": "str"
+   "kind": "str",
+   "default": "None"
   },
   {
    "id": "debug.pdb_path",
-   "kind": "str"
+   "kind": "str",
+   "default": "None"
   },
   {
    "id": "bundle.system_providers",
-   "kind": "list"
+   "kind": "list",
+   "default": "[]"
   },
   {
    "id": "bundle.cohorts",
-   "kind": "list"
+   "kind": "list",
+   "default": "[]"
   },
   {
    "id": "python.abi3_floor",
-   "kind": "str"
+   "kind": "str",
+   "default": "None"
   },
   {
    "id": "gate.fail_on_removed_library",
-   "kind": "bool"
+   "kind": "bool",
+   "default": "None"
   },
   {
    "id": "release.dso_only",
-   "kind": "bool"
+   "kind": "bool",
+   "default": "None"
   },
   {
    "id": "release.include_private_dso",
-   "kind": "bool"
+   "kind": "bool",
+   "default": "None"
   },
   {
    "id": "release.support_promise",
-   "kind": "str"
+   "kind": "str",
+   "default": "None"
   },
   {
    "id": "resource_limits.max_bundle_facts_decode_nodes",
-   "kind": "int"
+   "kind": "int",
+   "default": "None"
   },
   {
    "id": "policy.overrides",
-   "kind": "dict_str"
+   "kind": "dict_str",
+   "default": "{}"
   },
   {
    "id": "assurance.require_complete",
-   "kind": "bool"
+   "kind": "bool",
+   "default": "None"
   },
   {
    "id": "performance.profile",
-   "kind": "str"
+   "kind": "str",
+   "default": "None"
   },
   {
    "id": "deployment",
-   "kind": "whole"
+   "kind": "whole",
+   "default": "None"
   },
   {
    "id": "bundle_variants",
-   "kind": "whole"
+   "kind": "whole",
+   "default": "None"
   },
   {
    "id": "version",
-   "kind": "int"
+   "kind": "int",
+   "default": "0"
   }
  ],
  "action": [
@@ -1208,2412 +1690,3422 @@
    "id": "action:mode",
    "action": "action",
    "input": "mode",
-   "status": "live"
+   "status": "live",
+   "required": false,
+   "default": "compare"
   },
   {
    "id": "action:old-library",
    "action": "action",
    "input": "old-library",
-   "status": "live"
+   "status": "live",
+   "required": false,
+   "default": null
   },
   {
    "id": "action:new-library",
    "action": "action",
    "input": "new-library",
-   "status": "live"
+   "status": "live",
+   "required": false,
+   "default": null
   },
   {
    "id": "action:new-library-set",
    "action": "action",
    "input": "new-library-set",
-   "status": "retired"
+   "status": "retired",
+   "required": false,
+   "default": null
   },
   {
    "id": "action:debug-info1",
    "action": "action",
    "input": "debug-info1",
-   "status": "live"
+   "status": "live",
+   "required": false,
+   "default": null
   },
   {
    "id": "action:debug-info2",
    "action": "action",
    "input": "debug-info2",
-   "status": "live"
+   "status": "live",
+   "required": false,
+   "default": null
   },
   {
    "id": "action:devel-pkg1",
    "action": "action",
    "input": "devel-pkg1",
-   "status": "live"
+   "status": "live",
+   "required": false,
+   "default": null
   },
   {
    "id": "action:devel-pkg2",
    "action": "action",
    "input": "devel-pkg2",
-   "status": "live"
+   "status": "live",
+   "required": false,
+   "default": null
   },
   {
    "id": "action:dso-only",
    "action": "action",
    "input": "dso-only",
-   "status": "live"
+   "status": "live",
+   "required": false,
+   "default": null
   },
   {
    "id": "action:include-private-dso",
    "action": "action",
    "input": "include-private-dso",
-   "status": "live"
+   "status": "live",
+   "required": false,
+   "default": null
   },
   {
    "id": "action:fail-on-removed-library",
    "action": "action",
    "input": "fail-on-removed-library",
-   "status": "live"
+   "status": "live",
+   "required": false,
+   "default": null
   },
   {
    "id": "action:analysis-assurance-complete",
    "action": "action",
    "input": "analysis-assurance-complete",
-   "status": "live"
+   "status": "live",
+   "required": false,
+   "default": null
   },
   {
    "id": "action:header",
    "action": "action",
    "input": "header",
-   "status": "live"
+   "status": "live",
+   "required": false,
+   "default": null
   },
   {
    "id": "action:old-header",
    "action": "action",
    "input": "old-header",
-   "status": "live"
+   "status": "live",
+   "required": false,
+   "default": null
   },
   {
    "id": "action:new-header",
    "action": "action",
    "input": "new-header",
-   "status": "live"
+   "status": "live",
+   "required": false,
+   "default": null
   },
   {
    "id": "action:public-header-dir",
    "action": "action",
    "input": "public-header-dir",
-   "status": "live"
+   "status": "live",
+   "required": false,
+   "default": null
   },
   {
    "id": "action:build-target",
    "action": "action",
    "input": "build-target",
-   "status": "retired"
+   "status": "retired",
+   "required": false,
+   "default": null
   },
   {
    "id": "action:include",
    "action": "action",
    "input": "include",
-   "status": "live"
+   "status": "live",
+   "required": false,
+   "default": null
   },
   {
    "id": "action:old-include",
    "action": "action",
    "input": "old-include",
-   "status": "live"
+   "status": "live",
+   "required": false,
+   "default": null
   },
   {
    "id": "action:new-include",
    "action": "action",
    "input": "new-include",
-   "status": "live"
+   "status": "live",
+   "required": false,
+   "default": null
   },
   {
    "id": "action:old-version",
    "action": "action",
    "input": "old-version",
-   "status": "live"
+   "status": "live",
+   "required": false,
+   "default": "old"
   },
   {
    "id": "action:new-version",
    "action": "action",
    "input": "new-version",
-   "status": "live"
+   "status": "live",
+   "required": false,
+   "default": "new"
   },
   {
    "id": "action:lang",
    "action": "action",
    "input": "lang",
-   "status": "live"
+   "status": "live",
+   "required": false,
+   "default": "c++"
   },
   {
    "id": "action:ast-frontend",
    "action": "action",
    "input": "ast-frontend",
-   "status": "live"
+   "status": "live",
+   "required": false,
+   "default": null
   },
   {
    "id": "action:gcc-path",
    "action": "action",
    "input": "gcc-path",
-   "status": "live"
+   "status": "live",
+   "required": false,
+   "default": null
   },
   {
    "id": "action:gcc-prefix",
    "action": "action",
    "input": "gcc-prefix",
-   "status": "live"
+   "status": "live",
+   "required": false,
+   "default": null
   },
   {
    "id": "action:gcc-options",
    "action": "action",
    "input": "gcc-options",
-   "status": "live"
+   "status": "live",
+   "required": false,
+   "default": null
   },
   {
    "id": "action:sysroot",
    "action": "action",
    "input": "sysroot",
-   "status": "live"
+   "status": "live",
+   "required": false,
+   "default": null
   },
   {
    "id": "action:nostdinc",
    "action": "action",
    "input": "nostdinc",
-   "status": "live"
+   "status": "live",
+   "required": false,
+   "default": "false"
   },
   {
    "id": "action:follow-deps",
    "action": "action",
    "input": "follow-deps",
-   "status": "live"
+   "status": "live",
+   "required": false,
+   "default": "false"
   },
   {
    "id": "action:old-root",
    "action": "action",
    "input": "old-root",
-   "status": "live"
+   "status": "live",
+   "required": false,
+   "default": null
   },
   {
    "id": "action:new-root",
    "action": "action",
    "input": "new-root",
-   "status": "live"
+   "status": "live",
+   "required": false,
+   "default": null
   },
   {
    "id": "action:search-path",
    "action": "action",
    "input": "search-path",
-   "status": "live"
+   "status": "live",
+   "required": false,
+   "default": null
   },
   {
    "id": "action:ld-library-path",
    "action": "action",
    "input": "ld-library-path",
-   "status": "live"
+   "status": "live",
+   "required": false,
+   "default": null
   },
   {
    "id": "action:used-by",
    "action": "action",
    "input": "used-by",
-   "status": "live"
+   "status": "live",
+   "required": false,
+   "default": null
   },
   {
    "id": "action:used-by-manifest",
    "action": "action",
    "input": "used-by-manifest",
-   "status": "live"
+   "status": "live",
+   "required": false,
+   "default": null
   },
   {
    "id": "action:required-symbol",
    "action": "action",
    "input": "required-symbol",
-   "status": "live"
+   "status": "live",
+   "required": false,
+   "default": null
   },
   {
    "id": "action:required-symbols",
    "action": "action",
    "input": "required-symbols",
-   "status": "live"
+   "status": "live",
+   "required": false,
+   "default": null
   },
   {
    "id": "action:against",
    "action": "action",
    "input": "against",
-   "status": "retired"
+   "status": "retired",
+   "required": false,
+   "default": null
   },
   {
    "id": "action:sources",
    "action": "action",
    "input": "sources",
-   "status": "live"
+   "status": "live",
+   "required": false,
+   "default": null
   },
   {
    "id": "action:build-info",
    "action": "action",
    "input": "build-info",
-   "status": "live"
+   "status": "live",
+   "required": false,
+   "default": null
   },
   {
    "id": "action:compile-db",
    "action": "action",
    "input": "compile-db",
-   "status": "live"
+   "status": "live",
+   "required": false,
+   "default": null
   },
   {
    "id": "action:build-config",
    "action": "action",
    "input": "build-config",
-   "status": "live"
+   "status": "live",
+   "required": false,
+   "default": null
   },
   {
    "id": "action:jobs",
    "action": "action",
    "input": "jobs",
-   "status": "ignored"
+   "status": "ignored",
+   "required": false,
+   "default": null
   },
   {
    "id": "action:bundle-system-providers",
    "action": "action",
    "input": "bundle-system-providers",
-   "status": "retired"
+   "status": "retired",
+   "required": false,
+   "default": null
   },
   {
    "id": "action:allow-build-query",
    "action": "action",
    "input": "allow-build-query",
-   "status": "ignored"
+   "status": "ignored",
+   "required": false,
+   "default": "false"
   },
   {
    "id": "action:depth",
    "action": "action",
    "input": "depth",
-   "status": "live"
+   "status": "live",
+   "required": false,
+   "default": null
   },
   {
    "id": "action:since",
    "action": "action",
    "input": "since",
-   "status": "live"
+   "status": "live",
+   "required": false,
+   "default": null
   },
   {
    "id": "action:changed-path",
    "action": "action",
    "input": "changed-path",
-   "status": "live"
+   "status": "live",
+   "required": false,
+   "default": null
   },
   {
    "id": "action:budget",
    "action": "action",
    "input": "budget",
-   "status": "live"
+   "status": "live",
+   "required": false,
+   "default": null
   },
   {
    "id": "action:dry-run",
    "action": "action",
    "input": "dry-run",
-   "status": "live"
+   "status": "live",
+   "required": false,
+   "default": "false"
   },
   {
    "id": "action:estimate",
    "action": "action",
    "input": "estimate",
-   "status": "retired"
+   "status": "retired",
+   "required": false,
+   "default": "false"
   },
   {
    "id": "action:audit",
    "action": "action",
    "input": "audit",
-   "status": "retired"
+   "status": "retired",
+   "required": false,
+   "default": "false"
   },
   {
    "id": "action:crosscheck",
    "action": "action",
    "input": "crosscheck",
-   "status": "retired"
+   "status": "retired",
+   "required": false,
+   "default": null
   },
   {
    "id": "action:risk-rules",
    "action": "action",
    "input": "risk-rules",
-   "status": "retired"
+   "status": "retired",
+   "required": false,
+   "default": null
   },
   {
    "id": "action:abi-baseline",
    "action": "action",
    "input": "abi-baseline",
-   "status": "live"
+   "status": "live",
+   "required": false,
+   "default": null
   },
   {
    "id": "action:baseline-profile",
    "action": "action",
    "input": "baseline-profile",
-   "status": "live"
+   "status": "live",
+   "required": false,
+   "default": null
   },
   {
    "id": "action:baseline-target",
    "action": "action",
    "input": "baseline-target",
-   "status": "live"
+   "status": "live",
+   "required": false,
+   "default": null
   },
   {
    "id": "action:baseline-asset-name-template",
    "action": "action",
    "input": "baseline-asset-name-template",
-   "status": "live"
+   "status": "live",
+   "required": false,
+   "default": "abicheck-baseline-{profile}.tar.zst"
   },
   {
    "id": "action:baseline-generation",
    "action": "action",
    "input": "baseline-generation",
-   "status": "live"
+   "status": "live",
+   "required": false,
+   "default": null
   },
   {
    "id": "action:baseline-project-ref",
    "action": "action",
    "input": "baseline-project-ref",
-   "status": "live"
+   "status": "live",
+   "required": false,
+   "default": "tag"
   },
   {
    "id": "action:expected-archive-digest",
    "action": "action",
    "input": "expected-archive-digest",
-   "status": "live"
+   "status": "live",
+   "required": false,
+   "default": ""
   },
   {
    "id": "action:verify-baseline-attestation",
    "action": "action",
    "input": "verify-baseline-attestation",
-   "status": "live"
+   "status": "live",
+   "required": false,
+   "default": "false"
   },
   {
    "id": "action:baseline-attestation-repo",
    "action": "action",
    "input": "baseline-attestation-repo",
-   "status": "live"
+   "status": "live",
+   "required": false,
+   "default": ""
   },
   {
    "id": "action:baseline-attestation-signer-workflow",
    "action": "action",
    "input": "baseline-attestation-signer-workflow",
-   "status": "live"
+   "status": "live",
+   "required": false,
+   "default": ""
   },
   {
    "id": "action:format",
    "action": "action",
    "input": "format",
-   "status": "live"
+   "status": "live",
+   "required": false,
+   "default": null
   },
   {
    "id": "action:output-file",
    "action": "action",
    "input": "output-file",
-   "status": "live"
+   "status": "live",
+   "required": false,
+   "default": null
   },
   {
    "id": "action:snapshot-compression",
    "action": "action",
    "input": "snapshot-compression",
-   "status": "live"
+   "status": "live",
+   "required": false,
+   "default": null
   },
   {
    "id": "action:policy",
    "action": "action",
    "input": "policy",
-   "status": "live"
+   "status": "live",
+   "required": false,
+   "default": "strict_abi"
   },
   {
    "id": "action:policy-file",
    "action": "action",
    "input": "policy-file",
-   "status": "live"
+   "status": "live",
+   "required": false,
+   "default": null
   },
   {
    "id": "action:suppress",
    "action": "action",
    "input": "suppress",
-   "status": "live"
+   "status": "live",
+   "required": false,
+   "default": null
   },
   {
    "id": "action:acknowledgments",
    "action": "action",
    "input": "acknowledgments",
-   "status": "live"
+   "status": "live",
+   "required": false,
+   "default": null
   },
   {
    "id": "action:verbose",
    "action": "action",
    "input": "verbose",
-   "status": "live"
+   "status": "live",
+   "required": false,
+   "default": "false"
   },
   {
    "id": "action:python-version",
    "action": "action",
    "input": "python-version",
-   "status": "live"
+   "status": "live",
+   "required": false,
+   "default": "3.13"
   },
   {
    "id": "action:install-deps",
    "action": "action",
    "input": "install-deps",
-   "status": "deprecated"
+   "status": "deprecated",
+   "required": false,
+   "default": "true"
   },
   {
    "id": "action:dependency-source",
    "action": "action",
    "input": "dependency-source",
-   "status": "live"
+   "status": "live",
+   "required": false,
+   "default": ""
   },
   {
    "id": "action:upload-sarif",
    "action": "action",
    "input": "upload-sarif",
-   "status": "live"
+   "status": "live",
+   "required": false,
+   "default": "false"
   },
   {
    "id": "action:fail-on-breaking",
    "action": "action",
    "input": "fail-on-breaking",
-   "status": "live"
+   "status": "live",
+   "required": false,
+   "default": "true"
   },
   {
    "id": "action:fail-on-api-break",
    "action": "action",
    "input": "fail-on-api-break",
-   "status": "live"
+   "status": "live",
+   "required": false,
+   "default": "false"
   },
   {
    "id": "action:severity-preset",
    "action": "action",
    "input": "severity-preset",
-   "status": "live"
+   "status": "live",
+   "required": false,
+   "default": null
   },
   {
    "id": "action:require-complete-analysis",
    "action": "action",
    "input": "require-complete-analysis",
-   "status": "retired"
+   "status": "retired",
+   "required": false,
+   "default": "false"
   },
   {
    "id": "action:annotate",
    "action": "action",
    "input": "annotate",
-   "status": "live"
+   "status": "live",
+   "required": false,
+   "default": "false"
   },
   {
    "id": "action:annotate-additions",
    "action": "action",
    "input": "annotate-additions",
-   "status": "live"
+   "status": "live",
+   "required": false,
+   "default": "false"
   },
   {
    "id": "action:extra-args",
    "action": "action",
    "input": "extra-args",
-   "status": "live"
+   "status": "live",
+   "required": false,
+   "default": ""
   },
   {
    "id": "action:add-job-summary",
    "action": "action",
    "input": "add-job-summary",
-   "status": "live"
+   "status": "live",
+   "required": false,
+   "default": "true"
   },
   {
    "id": "action:pr-comment",
    "action": "action",
    "input": "pr-comment",
-   "status": "live"
+   "status": "live",
+   "required": false,
+   "default": "true"
   },
   {
    "id": "action:pr-comment-mode",
    "action": "action",
    "input": "pr-comment-mode",
-   "status": "live"
+   "status": "live",
+   "required": false,
+   "default": "update"
   },
   {
    "id": "action:pr-comment-key",
    "action": "action",
    "input": "pr-comment-key",
-   "status": "live"
+   "status": "live",
+   "required": false,
+   "default": ""
   },
   {
    "id": "action:pr-comment-on",
    "action": "action",
    "input": "pr-comment-on",
-   "status": "live"
+   "status": "live",
+   "required": false,
+   "default": "changes"
   },
   {
    "id": "action:pr-comment-report-artifact-url",
    "action": "action",
    "input": "pr-comment-report-artifact-url",
-   "status": "live"
+   "status": "live",
+   "required": false,
+   "default": ""
   },
   {
    "id": "action:pr-comment-detail",
    "action": "action",
    "input": "pr-comment-detail",
-   "status": "live"
+   "status": "live",
+   "required": false,
+   "default": "standard"
   },
   {
    "id": "action:github-token",
    "action": "action",
    "input": "github-token",
-   "status": "live"
+   "status": "live",
+   "required": false,
+   "default": "${{ github.token }}"
   },
   {
    "id": "actions/aggregate:checks",
    "action": "actions/aggregate",
    "input": "checks",
-   "status": "live"
+   "status": "live",
+   "required": true,
+   "default": null
   },
   {
    "id": "actions/aggregate:reports-dir",
    "action": "actions/aggregate",
    "input": "reports-dir",
-   "status": "live"
+   "status": "live",
+   "required": false,
+   "default": ".abicheck-reports"
   },
   {
    "id": "actions/aggregate:manifest-path",
    "action": "actions/aggregate",
    "input": "manifest-path",
-   "status": "live"
+   "status": "live",
+   "required": false,
+   "default": ".abicheck-expected-checks.json"
   },
   {
    "id": "actions/aggregate:gate",
    "action": "actions/aggregate",
    "input": "gate",
-   "status": "live"
+   "status": "live",
+   "required": false,
+   "default": ""
   },
   {
    "id": "actions/aggregate:outputs",
    "action": "actions/aggregate",
    "input": "outputs",
-   "status": "live"
+   "status": "live",
+   "required": false,
+   "default": "json=aggregate.json text=aggregate.txt"
   },
   {
    "id": "actions/aggregate:record-analysis-context",
    "action": "actions/aggregate",
    "input": "record-analysis-context",
-   "status": "live"
+   "status": "live",
+   "required": false,
+   "default": "false"
   },
   {
    "id": "actions/aggregate:tested-sha",
    "action": "actions/aggregate",
    "input": "tested-sha",
-   "status": "live"
+   "status": "live",
+   "required": false,
+   "default": "${{ github.sha }}"
   },
   {
    "id": "actions/aggregate:profile",
    "action": "actions/aggregate",
    "input": "profile",
-   "status": "live"
+   "status": "live",
+   "required": false,
+   "default": ""
   },
   {
    "id": "actions/aggregate:orchestration-ref",
    "action": "actions/aggregate",
    "input": "orchestration-ref",
-   "status": "live"
+   "status": "live",
+   "required": false,
+   "default": ""
   },
   {
    "id": "actions/aggregate:install",
    "action": "actions/aggregate",
    "input": "install",
-   "status": "live"
+   "status": "live",
+   "required": false,
+   "default": "true"
   },
   {
    "id": "actions/aggregate:python-version",
    "action": "actions/aggregate",
    "input": "python-version",
-   "status": "live"
+   "status": "live",
+   "required": false,
+   "default": "3.13"
   },
   {
    "id": "actions/baseline:libraries",
    "action": "actions/baseline",
    "input": "libraries",
-   "status": "live"
+   "status": "live",
+   "required": false,
+   "default": ""
   },
   {
    "id": "actions/baseline:library-spec",
    "action": "actions/baseline",
    "input": "library-spec",
-   "status": "live"
+   "status": "live",
+   "required": false,
+   "default": ""
   },
   {
    "id": "actions/baseline:library-root",
    "action": "actions/baseline",
    "input": "library-root",
-   "status": "live"
+   "status": "live",
+   "required": false,
+   "default": "."
   },
   {
    "id": "actions/baseline:library-spec-bindings",
    "action": "actions/baseline",
    "input": "library-spec-bindings",
-   "status": "live"
+   "status": "live",
+   "required": false,
+   "default": ""
   },
   {
    "id": "actions/baseline:library-spec-require-elf",
    "action": "actions/baseline",
    "input": "library-spec-require-elf",
-   "status": "live"
+   "status": "live",
+   "required": false,
+   "default": "true"
   },
   {
    "id": "actions/baseline:output-dir",
    "action": "actions/baseline",
    "input": "output-dir",
-   "status": "live"
+   "status": "live",
+   "required": false,
+   "default": ".abicheck-baseline"
   },
   {
    "id": "actions/baseline:project-ref",
    "action": "actions/baseline",
    "input": "project-ref",
-   "status": "live"
+   "status": "live",
+   "required": false,
+   "default": ""
   },
   {
    "id": "actions/baseline:profile",
    "action": "actions/baseline",
    "input": "profile",
-   "status": "live"
+   "status": "live",
+   "required": false,
+   "default": ""
   },
   {
    "id": "actions/baseline:build-info",
    "action": "actions/baseline",
    "input": "build-info",
-   "status": "live"
+   "status": "live",
+   "required": false,
+   "default": null
   },
   {
    "id": "actions/baseline:depth",
    "action": "actions/baseline",
    "input": "depth",
-   "status": "live"
+   "status": "live",
+   "required": false,
+   "default": null
   },
   {
    "id": "actions/baseline:build-config",
    "action": "actions/baseline",
    "input": "build-config",
-   "status": "live"
+   "status": "live",
+   "required": false,
+   "default": ""
   },
   {
    "id": "actions/baseline:baseline-generation",
    "action": "actions/baseline",
    "input": "baseline-generation",
-   "status": "live"
+   "status": "live",
+   "required": false,
+   "default": ""
   },
   {
    "id": "actions/baseline:generator-git-sha",
    "action": "actions/baseline",
    "input": "generator-git-sha",
-   "status": "live"
+   "status": "live",
+   "required": false,
+   "default": ""
   },
   {
    "id": "actions/baseline:generator-action-ref",
    "action": "actions/baseline",
    "input": "generator-action-ref",
-   "status": "live"
+   "status": "live",
+   "required": false,
+   "default": ""
   },
   {
    "id": "actions/baseline:extraction-context",
    "action": "actions/baseline",
    "input": "extraction-context",
-   "status": "live"
+   "status": "live",
+   "required": false,
+   "default": ""
   },
   {
    "id": "actions/baseline:previous-manifest",
    "action": "actions/baseline",
    "input": "previous-manifest",
-   "status": "live"
+   "status": "live",
+   "required": false,
+   "default": null
   },
   {
    "id": "actions/baseline:validation",
    "action": "actions/baseline",
    "input": "validation",
-   "status": "live"
+   "status": "live",
+   "required": false,
+   "default": "strict"
   },
   {
    "id": "actions/baseline:snapshot-compression",
    "action": "actions/baseline",
    "input": "snapshot-compression",
-   "status": "live"
+   "status": "live",
+   "required": false,
+   "default": "none"
   },
   {
    "id": "actions/baseline:python-version",
    "action": "actions/baseline",
    "input": "python-version",
-   "status": "live"
+   "status": "live",
+   "required": false,
+   "default": "3.13"
   },
   {
    "id": "actions/baseline:install-deps",
    "action": "actions/baseline",
    "input": "install-deps",
-   "status": "live"
+   "status": "live",
+   "required": false,
+   "default": "true"
   },
   {
    "id": "actions/check-target:kind",
    "action": "actions/check-target",
    "input": "kind",
-   "status": "live"
+   "status": "live",
+   "required": false,
+   "default": "target"
   },
   {
    "id": "actions/check-target:target-kind",
    "action": "actions/check-target",
    "input": "target-kind",
-   "status": "live"
+   "status": "live",
+   "required": false,
+   "default": "library"
   },
   {
    "id": "actions/check-target:name",
    "action": "actions/check-target",
    "input": "name",
-   "status": "live"
+   "status": "live",
+   "required": true,
+   "default": null
   },
   {
    "id": "actions/check-target:baseline-target",
    "action": "actions/check-target",
    "input": "baseline-target",
-   "status": "live"
+   "status": "live",
+   "required": false,
+   "default": ""
   },
   {
    "id": "actions/check-target:bundle-members",
    "action": "actions/check-target",
    "input": "bundle-members",
-   "status": "live"
+   "status": "live",
+   "required": false,
+   "default": "[]"
   },
   {
    "id": "actions/check-target:profile",
    "action": "actions/check-target",
    "input": "profile",
-   "status": "live"
+   "status": "live",
+   "required": true,
+   "default": null
   },
   {
    "id": "actions/check-target:baseline-channel",
    "action": "actions/check-target",
    "input": "baseline-channel",
-   "status": "live"
+   "status": "live",
+   "required": true,
+   "default": null
   },
   {
    "id": "actions/check-target:baseline-path",
    "action": "actions/check-target",
    "input": "baseline-path",
-   "status": "live"
+   "status": "live",
+   "required": false,
+   "default": ""
   },
   {
    "id": "actions/check-target:baseline-required",
    "action": "actions/check-target",
    "input": "baseline-required",
-   "status": "live"
+   "status": "live",
+   "required": false,
+   "default": "true"
   },
   {
    "id": "actions/check-target:candidate-build-output",
    "action": "actions/check-target",
    "input": "candidate-build-output",
-   "status": "live"
+   "status": "live",
+   "required": false,
+   "default": ""
   },
   {
    "id": "actions/check-target:expected-project-ref",
    "action": "actions/check-target",
    "input": "expected-project-ref",
-   "status": "live"
+   "status": "live",
+   "required": false,
+   "default": ""
   },
   {
    "id": "actions/check-target:expected-baseline-generation",
    "action": "actions/check-target",
    "input": "expected-baseline-generation",
-   "status": "live"
+   "status": "live",
+   "required": false,
+   "default": ""
   },
   {
    "id": "actions/check-target:allow-new-target",
    "action": "actions/check-target",
    "input": "allow-new-target",
-   "status": "live"
+   "status": "live",
+   "required": false,
+   "default": "false"
   },
   {
    "id": "actions/check-target:requested-depth",
    "action": "actions/check-target",
    "input": "requested-depth",
-   "status": "live"
+   "status": "live",
+   "required": true,
+   "default": null
   },
   {
    "id": "actions/check-target:explicit-id",
    "action": "actions/check-target",
    "input": "explicit-id",
-   "status": "live"
+   "status": "live",
+   "required": false,
+   "default": ""
   },
   {
    "id": "actions/check-target:build-system",
    "action": "actions/check-target",
    "input": "build-system",
-   "status": "live"
+   "status": "live",
+   "required": false,
+   "default": ""
   },
   {
    "id": "actions/check-target:build-generator",
    "action": "actions/check-target",
    "input": "build-generator",
-   "status": "live"
+   "status": "live",
+   "required": false,
+   "default": ""
   },
   {
    "id": "actions/check-target:gate-mode",
    "action": "actions/check-target",
    "input": "gate-mode",
-   "status": "live"
+   "status": "live",
+   "required": false,
+   "default": "local"
   },
   {
    "id": "actions/check-target:project",
    "action": "actions/check-target",
    "input": "project",
-   "status": "live"
+   "status": "live",
+   "required": false,
+   "default": "${{ github.repository }}"
   },
   {
    "id": "actions/check-target:head-sha",
    "action": "actions/check-target",
    "input": "head-sha",
-   "status": "live"
+   "status": "live",
+   "required": false,
+   "default": "${{ github.sha }}"
   },
   {
    "id": "actions/check-target:base-ref",
    "action": "actions/check-target",
    "input": "base-ref",
-   "status": "live"
+   "status": "live",
+   "required": false,
+   "default": ""
   },
   {
    "id": "actions/check-target:evidence-producer",
    "action": "actions/check-target",
    "input": "evidence-producer",
-   "status": "live"
+   "status": "live",
+   "required": false,
+   "default": ""
   },
   {
    "id": "actions/check-target:evidence-pack-path",
    "action": "actions/check-target",
    "input": "evidence-pack-path",
-   "status": "live"
+   "status": "live",
+   "required": false,
+   "default": "abicheck_inputs"
   },
   {
    "id": "actions/check-target:new-library",
    "action": "actions/check-target",
    "input": "new-library",
-   "status": "live"
+   "status": "live",
+   "required": true,
+   "default": null
   },
   {
    "id": "actions/check-target:header",
    "action": "actions/check-target",
    "input": "header",
-   "status": "live"
+   "status": "live",
+   "required": false,
+   "default": null
   },
   {
    "id": "actions/check-target:old-header",
    "action": "actions/check-target",
    "input": "old-header",
-   "status": "live"
+   "status": "live",
+   "required": false,
+   "default": null
   },
   {
    "id": "actions/check-target:new-header",
    "action": "actions/check-target",
    "input": "new-header",
-   "status": "live"
+   "status": "live",
+   "required": false,
+   "default": null
   },
   {
    "id": "actions/check-target:include",
    "action": "actions/check-target",
    "input": "include",
-   "status": "live"
+   "status": "live",
+   "required": false,
+   "default": null
   },
   {
    "id": "actions/check-target:old-include",
    "action": "actions/check-target",
    "input": "old-include",
-   "status": "live"
+   "status": "live",
+   "required": false,
+   "default": null
   },
   {
    "id": "actions/check-target:new-include",
    "action": "actions/check-target",
    "input": "new-include",
-   "status": "live"
+   "status": "live",
+   "required": false,
+   "default": null
   },
   {
    "id": "actions/check-target:lang",
    "action": "actions/check-target",
    "input": "lang",
-   "status": "live"
+   "status": "live",
+   "required": false,
+   "default": "c++"
   },
   {
    "id": "actions/check-target:ast-frontend",
    "action": "actions/check-target",
    "input": "ast-frontend",
-   "status": "live"
+   "status": "live",
+   "required": false,
+   "default": null
   },
   {
    "id": "actions/check-target:gcc-path",
    "action": "actions/check-target",
    "input": "gcc-path",
-   "status": "live"
+   "status": "live",
+   "required": false,
+   "default": null
   },
   {
    "id": "actions/check-target:gcc-prefix",
    "action": "actions/check-target",
    "input": "gcc-prefix",
-   "status": "live"
+   "status": "live",
+   "required": false,
+   "default": null
   },
   {
    "id": "actions/check-target:gcc-options",
    "action": "actions/check-target",
    "input": "gcc-options",
-   "status": "live"
+   "status": "live",
+   "required": false,
+   "default": null
   },
   {
    "id": "actions/check-target:consumer-ast-frontend",
    "action": "actions/check-target",
    "input": "consumer-ast-frontend",
-   "status": "live"
+   "status": "live",
+   "required": false,
+   "default": null
   },
   {
    "id": "actions/check-target:consumer-gcc-path",
    "action": "actions/check-target",
    "input": "consumer-gcc-path",
-   "status": "live"
+   "status": "live",
+   "required": false,
+   "default": null
   },
   {
    "id": "actions/check-target:consumer-gcc-options",
    "action": "actions/check-target",
    "input": "consumer-gcc-options",
-   "status": "live"
+   "status": "live",
+   "required": false,
+   "default": null
   },
   {
    "id": "actions/check-target:consumer-compile-active",
    "action": "actions/check-target",
    "input": "consumer-compile-active",
-   "status": "live"
+   "status": "live",
+   "required": false,
+   "default": "false"
   },
   {
    "id": "actions/check-target:sysroot",
    "action": "actions/check-target",
    "input": "sysroot",
-   "status": "live"
+   "status": "live",
+   "required": false,
+   "default": null
   },
   {
    "id": "actions/check-target:sources",
    "action": "actions/check-target",
    "input": "sources",
-   "status": "live"
+   "status": "live",
+   "required": false,
+   "default": null
   },
   {
    "id": "actions/check-target:build-info",
    "action": "actions/check-target",
    "input": "build-info",
-   "status": "live"
+   "status": "live",
+   "required": false,
+   "default": null
   },
   {
    "id": "actions/check-target:compile-db",
    "action": "actions/check-target",
    "input": "compile-db",
-   "status": "live"
+   "status": "live",
+   "required": false,
+   "default": null
   },
   {
    "id": "actions/check-target:build-config",
    "action": "actions/check-target",
    "input": "build-config",
-   "status": "live"
+   "status": "live",
+   "required": false,
+   "default": null
   },
   {
    "id": "actions/check-target:consumer-binary",
    "action": "actions/check-target",
    "input": "consumer-binary",
-   "status": "live"
+   "status": "live",
+   "required": false,
+   "default": null
   },
   {
    "id": "actions/check-target:contract-file",
    "action": "actions/check-target",
    "input": "contract-file",
-   "status": "live"
+   "status": "live",
+   "required": false,
+   "default": null
   },
   {
    "id": "actions/check-target:policy",
    "action": "actions/check-target",
    "input": "policy",
-   "status": "live"
+   "status": "live",
+   "required": false,
+   "default": "strict_abi"
   },
   {
    "id": "actions/check-target:policy-file",
    "action": "actions/check-target",
    "input": "policy-file",
-   "status": "live"
+   "status": "live",
+   "required": false,
+   "default": null
   },
   {
    "id": "actions/check-target:suppress",
    "action": "actions/check-target",
    "input": "suppress",
-   "status": "live"
+   "status": "live",
+   "required": false,
+   "default": null
   },
   {
    "id": "actions/check-target:severity-preset",
    "action": "actions/check-target",
    "input": "severity-preset",
-   "status": "live"
+   "status": "live",
+   "required": false,
+   "default": "default"
   },
   {
    "id": "actions/check-target:require-complete-analysis",
    "action": "actions/check-target",
    "input": "require-complete-analysis",
-   "status": "retired"
+   "status": "retired",
+   "required": false,
+   "default": "false"
   },
   {
    "id": "actions/check-target:analysis-assurance-complete",
    "action": "actions/check-target",
    "input": "analysis-assurance-complete",
-   "status": "live"
+   "status": "live",
+   "required": false,
+   "default": null
   },
   {
    "id": "actions/check-target:extra-args",
    "action": "actions/check-target",
    "input": "extra-args",
-   "status": "live"
+   "status": "live",
+   "required": false,
+   "default": ""
   },
   {
    "id": "actions/check-target:python-version",
    "action": "actions/check-target",
    "input": "python-version",
-   "status": "live"
+   "status": "live",
+   "required": false,
+   "default": "3.13"
   },
   {
    "id": "actions/check-target:install-deps",
    "action": "actions/check-target",
    "input": "install-deps",
-   "status": "live"
+   "status": "live",
+   "required": false,
+   "default": "true"
   },
   {
    "id": "actions/check-target:dependency-source",
    "action": "actions/check-target",
    "input": "dependency-source",
-   "status": "live"
+   "status": "live",
+   "required": false,
+   "default": ""
   },
   {
    "id": "actions/check-target:action-version",
    "action": "actions/check-target",
    "input": "action-version",
-   "status": "live"
+   "status": "live",
+   "required": false,
+   "default": "${{ format('{0}@{1}', github.action_repository || github.repository, github.action_ref || github.sha) }}"
   },
   {
    "id": "actions/check-target:abicheck-repository",
    "action": "actions/check-target",
    "input": "abicheck-repository",
-   "status": "live"
+   "status": "live",
+   "required": false,
+   "default": ""
   },
   {
    "id": "actions/check-target:abicheck-ref",
    "action": "actions/check-target",
    "input": "abicheck-ref",
-   "status": "live"
+   "status": "live",
+   "required": false,
+   "default": ""
   },
   {
    "id": "actions/collect-facts:phase",
    "action": "actions/collect-facts",
    "input": "phase",
-   "status": "live"
+   "status": "live",
+   "required": false,
+   "default": "auto"
   },
   {
    "id": "actions/collect-facts:producer",
    "action": "actions/collect-facts",
    "input": "producer",
-   "status": "live"
+   "status": "live",
+   "required": false,
+   "default": "auto"
   },
   {
    "id": "actions/collect-facts:sources",
    "action": "actions/collect-facts",
    "input": "sources",
-   "status": "live"
+   "status": "live",
+   "required": false,
+   "default": "."
   },
   {
    "id": "actions/collect-facts:output",
    "action": "actions/collect-facts",
    "input": "output",
-   "status": "live"
+   "status": "live",
+   "required": false,
+   "default": "abicheck_inputs"
   },
   {
    "id": "actions/collect-facts:public-roots",
    "action": "actions/collect-facts",
    "input": "public-roots",
-   "status": "live"
+   "status": "live",
+   "required": false,
+   "default": null
   },
   {
    "id": "actions/collect-facts:library",
    "action": "actions/collect-facts",
    "input": "library",
-   "status": "live"
+   "status": "live",
+   "required": false,
+   "default": null
   },
   {
    "id": "actions/collect-facts:extractor",
    "action": "actions/collect-facts",
    "input": "extractor",
-   "status": "live"
+   "status": "live",
+   "required": false,
+   "default": "auto"
   },
   {
    "id": "actions/collect-facts:compiler",
    "action": "actions/collect-facts",
    "input": "compiler",
-   "status": "live"
+   "status": "live",
+   "required": false,
+   "default": "clang++"
   },
   {
    "id": "actions/collect-facts:plugin-artifact",
    "action": "actions/collect-facts",
    "input": "plugin-artifact",
-   "status": "live"
+   "status": "live",
+   "required": false,
+   "default": ""
   },
   {
    "id": "actions/collect-facts:plugin-artifact-sha256",
    "action": "actions/collect-facts",
    "input": "plugin-artifact-sha256",
-   "status": "live"
+   "status": "live",
+   "required": false,
+   "default": ""
   },
   {
    "id": "actions/collect-facts:install-deps",
    "action": "actions/collect-facts",
    "input": "install-deps",
-   "status": "live"
+   "status": "live",
+   "required": false,
+   "default": "true"
   },
   {
    "id": "actions/collect-facts:llvm-cmake-prefix",
    "action": "actions/collect-facts",
    "input": "llvm-cmake-prefix",
-   "status": "live"
+   "status": "live",
+   "required": false,
+   "default": ""
   },
   {
    "id": "actions/collect-facts:python-version",
    "action": "actions/collect-facts",
    "input": "python-version",
-   "status": "live"
+   "status": "live",
+   "required": false,
+   "default": "3.13"
   },
   {
    "id": "actions/report:report",
    "action": "actions/report",
    "input": "report",
-   "status": "live"
+   "status": "live",
+   "required": true,
+   "default": null
   },
   {
    "id": "actions/report:detail",
    "action": "actions/report",
    "input": "detail",
-   "status": "live"
+   "status": "live",
+   "required": false,
+   "default": "standard"
   },
   {
    "id": "actions/report:on",
    "action": "actions/report",
    "input": "on",
-   "status": "live"
+   "status": "live",
+   "required": false,
+   "default": "changes"
   },
   {
    "id": "actions/report:post-on",
    "action": "actions/report",
    "input": "post-on",
-   "status": "live"
+   "status": "live",
+   "required": false,
+   "default": ""
   },
   {
    "id": "actions/report:sha",
    "action": "actions/report",
    "input": "sha",
-   "status": "live"
+   "status": "live",
+   "required": false,
+   "default": ""
   },
   {
    "id": "actions/report:run-label",
    "action": "actions/report",
    "input": "run-label",
-   "status": "live"
+   "status": "live",
+   "required": false,
+   "default": ""
   },
   {
    "id": "actions/report:report-url",
    "action": "actions/report",
    "input": "report-url",
-   "status": "live"
+   "status": "live",
+   "required": false,
+   "default": ""
   },
   {
    "id": "actions/report:report-artifact-url",
    "action": "actions/report",
    "input": "report-artifact-url",
-   "status": "live"
+   "status": "live",
+   "required": false,
+   "default": ""
   },
   {
    "id": "actions/report:path-prefix",
    "action": "actions/report",
    "input": "path-prefix",
-   "status": "live"
+   "status": "live",
+   "required": false,
+   "default": ""
   },
   {
    "id": "actions/report:gate-api-break",
    "action": "actions/report",
    "input": "gate-api-break",
-   "status": "live"
+   "status": "live",
+   "required": false,
+   "default": "false"
   },
   {
    "id": "actions/report:gate-breaking",
    "action": "actions/report",
    "input": "gate-breaking",
-   "status": "live"
+   "status": "live",
+   "required": false,
+   "default": "true"
   },
   {
    "id": "actions/report:profile",
    "action": "actions/report",
    "input": "profile",
-   "status": "live"
+   "status": "live",
+   "required": false,
+   "default": "default"
   },
   {
    "id": "actions/report:comment-identity",
    "action": "actions/report",
    "input": "comment-identity",
-   "status": "live"
+   "status": "live",
+   "required": false,
+   "default": ""
   },
   {
    "id": "actions/report:repository",
    "action": "actions/report",
    "input": "repository",
-   "status": "live"
+   "status": "live",
+   "required": false,
+   "default": ""
   },
   {
    "id": "actions/report:pr-number",
    "action": "actions/report",
    "input": "pr-number",
-   "status": "live"
+   "status": "live",
+   "required": false,
+   "default": ""
   },
   {
    "id": "actions/report:github-token",
    "action": "actions/report",
    "input": "github-token",
-   "status": "live"
+   "status": "live",
+   "required": false,
+   "default": ""
   },
   {
    "id": "actions/report:source-run-id",
    "action": "actions/report",
    "input": "source-run-id",
-   "status": "live"
+   "status": "live",
+   "required": false,
+   "default": ""
   },
   {
    "id": "actions/report:source-run-attempt",
    "action": "actions/report",
    "input": "source-run-attempt",
-   "status": "live"
+   "status": "live",
+   "required": false,
+   "default": ""
   },
   {
    "id": "actions/report:job-summary",
    "action": "actions/report",
    "input": "job-summary",
-   "status": "live"
+   "status": "live",
+   "required": false,
+   "default": "true"
   },
   {
    "id": "actions/report:max-comment-bytes",
    "action": "actions/report",
    "input": "max-comment-bytes",
-   "status": "live"
+   "status": "live",
+   "required": false,
+   "default": "60000"
   },
   {
    "id": "actions/report:max-summary-bytes",
    "action": "actions/report",
    "input": "max-summary-bytes",
-   "status": "live"
+   "status": "live",
+   "required": false,
+   "default": "900000"
   },
   {
    "id": "actions/report:dry-run",
    "action": "actions/report",
    "input": "dry-run",
-   "status": "live"
+   "status": "live",
+   "required": false,
+   "default": "false"
   },
   {
    "id": "actions/report:python-version",
    "action": "actions/report",
    "input": "python-version",
-   "status": "live"
+   "status": "live",
+   "required": false,
+   "default": "3.13"
   },
   {
    "id": "actions/report:abicheck-version",
    "action": "actions/report",
    "input": "abicheck-version",
-   "status": "live"
+   "status": "live",
+   "required": false,
+   "default": ""
   },
   {
    "id": "actions/resolve-baseline:baseline-path",
    "action": "actions/resolve-baseline",
    "input": "baseline-path",
-   "status": "live"
+   "status": "live",
+   "required": true,
+   "default": null
   },
   {
    "id": "actions/resolve-baseline:channel",
    "action": "actions/resolve-baseline",
    "input": "channel",
-   "status": "live"
+   "status": "live",
+   "required": true,
+   "default": null
   },
   {
    "id": "actions/resolve-baseline:kind",
    "action": "actions/resolve-baseline",
    "input": "kind",
-   "status": "live"
+   "status": "live",
+   "required": false,
+   "default": "target"
   },
   {
    "id": "actions/resolve-baseline:target",
    "action": "actions/resolve-baseline",
    "input": "target",
-   "status": "live"
+   "status": "live",
+   "required": false,
+   "default": ""
   },
   {
    "id": "actions/resolve-baseline:bundle",
    "action": "actions/resolve-baseline",
    "input": "bundle",
-   "status": "live"
+   "status": "live",
+   "required": false,
+   "default": ""
   },
   {
    "id": "actions/resolve-baseline:bundle-members",
    "action": "actions/resolve-baseline",
    "input": "bundle-members",
-   "status": "live"
+   "status": "live",
+   "required": false,
+   "default": "[]"
   },
   {
    "id": "actions/resolve-baseline:profile",
    "action": "actions/resolve-baseline",
    "input": "profile",
-   "status": "live"
+   "status": "live",
+   "required": true,
+   "default": null
   },
   {
    "id": "actions/resolve-baseline:required",
    "action": "actions/resolve-baseline",
    "input": "required",
-   "status": "live"
+   "status": "live",
+   "required": false,
+   "default": "true"
   },
   {
    "id": "actions/resolve-baseline:candidate-build-output",
    "action": "actions/resolve-baseline",
    "input": "candidate-build-output",
-   "status": "live"
+   "status": "live",
+   "required": false,
+   "default": ""
   },
   {
    "id": "actions/resolve-baseline:expected-project-ref",
    "action": "actions/resolve-baseline",
    "input": "expected-project-ref",
-   "status": "live"
+   "status": "live",
+   "required": false,
+   "default": ""
   },
   {
    "id": "actions/resolve-baseline:expected-baseline-generation",
    "action": "actions/resolve-baseline",
    "input": "expected-baseline-generation",
-   "status": "live"
+   "status": "live",
+   "required": false,
+   "default": ""
   },
   {
    "id": "actions/resolve-baseline:expected-archive-digest",
    "action": "actions/resolve-baseline",
    "input": "expected-archive-digest",
-   "status": "live"
+   "status": "live",
+   "required": false,
+   "default": ""
   },
   {
    "id": "actions/resolve-baseline:allow-new-target",
    "action": "actions/resolve-baseline",
    "input": "allow-new-target",
-   "status": "live"
+   "status": "live",
+   "required": false,
+   "default": "false"
   },
   {
    "id": "actions/resolve-baseline:verify-baseline-attestation",
    "action": "actions/resolve-baseline",
    "input": "verify-baseline-attestation",
-   "status": "live"
+   "status": "live",
+   "required": false,
+   "default": "false"
   },
   {
    "id": "actions/resolve-baseline:baseline-attestation-repo",
    "action": "actions/resolve-baseline",
    "input": "baseline-attestation-repo",
-   "status": "live"
+   "status": "live",
+   "required": false,
+   "default": ""
   },
   {
    "id": "actions/resolve-baseline:baseline-attestation-signer-workflow",
    "action": "actions/resolve-baseline",
    "input": "baseline-attestation-signer-workflow",
-   "status": "live"
+   "status": "live",
+   "required": false,
+   "default": ""
   },
   {
    "id": "actions/resolve-baseline:stage-member-snapshots",
    "action": "actions/resolve-baseline",
    "input": "stage-member-snapshots",
-   "status": "live"
+   "status": "live",
+   "required": false,
+   "default": "false"
   },
   {
    "id": "actions/resolve-baseline:python-version",
    "action": "actions/resolve-baseline",
    "input": "python-version",
-   "status": "live"
+   "status": "live",
+   "required": false,
+   "default": "3.13"
   },
   {
    "id": "actions/stage-baseline:baseline-path",
    "action": "actions/stage-baseline",
    "input": "baseline-path",
-   "status": "live"
+   "status": "live",
+   "required": true,
+   "default": null
   },
   {
    "id": "actions/stage-baseline:asset-name-template",
    "action": "actions/stage-baseline",
    "input": "asset-name-template",
-   "status": "live"
+   "status": "live",
+   "required": false,
+   "default": "abicheck-baseline-{profile}.tar.zst"
   },
   {
    "id": "actions/stage-baseline:profile",
    "action": "actions/stage-baseline",
    "input": "profile",
-   "status": "live"
+   "status": "live",
+   "required": false,
+   "default": ""
   },
   {
    "id": "actions/stage-baseline:generation",
    "action": "actions/stage-baseline",
    "input": "generation",
-   "status": "live"
+   "status": "live",
+   "required": false,
+   "default": ""
   },
   {
    "id": "actions/stage-baseline:attest",
    "action": "actions/stage-baseline",
    "input": "attest",
-   "status": "live"
+   "status": "live",
+   "required": false,
+   "default": "false"
   },
   {
    "id": "actions/verify-baseline-source:mode",
    "action": "actions/verify-baseline-source",
    "input": "mode",
-   "status": "live"
+   "status": "live",
+   "required": false,
+   "default": "producer-run"
   },
   {
    "id": "actions/verify-baseline-source:tag",
    "action": "actions/verify-baseline-source",
    "input": "tag",
-   "status": "live"
+   "status": "live",
+   "required": false,
+   "default": ""
   },
   {
    "id": "actions/verify-baseline-source:built-sha",
    "action": "actions/verify-baseline-source",
    "input": "built-sha",
-   "status": "live"
+   "status": "live",
+   "required": false,
+   "default": ""
   },
   {
    "id": "actions/verify-baseline-source:workflow",
    "action": "actions/verify-baseline-source",
    "input": "workflow",
-   "status": "live"
+   "status": "live",
+   "required": false,
+   "default": ""
   },
   {
    "id": "actions/verify-baseline-source:expect-repository",
    "action": "actions/verify-baseline-source",
    "input": "expect-repository",
-   "status": "live"
+   "status": "live",
+   "required": false,
+   "default": ""
   },
   {
    "id": "actions/verify-baseline-source:expect-event",
    "action": "actions/verify-baseline-source",
    "input": "expect-event",
-   "status": "live"
+   "status": "live",
+   "required": false,
+   "default": ""
   },
   {
    "id": "actions/verify-baseline-source:expect-head-sha",
    "action": "actions/verify-baseline-source",
    "input": "expect-head-sha",
-   "status": "live"
+   "status": "live",
+   "required": false,
+   "default": ""
   },
   {
    "id": "actions/verify-baseline-source:expect-head-branch",
    "action": "actions/verify-baseline-source",
    "input": "expect-head-branch",
-   "status": "live"
+   "status": "live",
+   "required": false,
+   "default": ""
   },
   {
    "id": "actions/verify-baseline-source:allowed-conclusions",
    "action": "actions/verify-baseline-source",
    "input": "allowed-conclusions",
-   "status": "live"
+   "status": "live",
+   "required": false,
+   "default": "success"
   },
   {
    "id": "actions/verify-baseline-source:required-jobs",
    "action": "actions/verify-baseline-source",
    "input": "required-jobs",
-   "status": "live"
+   "status": "live",
+   "required": false,
+   "default": ""
   },
   {
    "id": "actions/verify-baseline-source:allow-unrelated-job-failures",
    "action": "actions/verify-baseline-source",
    "input": "allow-unrelated-job-failures",
-   "status": "live"
+   "status": "live",
+   "required": false,
+   "default": "false"
   },
   {
    "id": "actions/verify-baseline-source:github-token",
    "action": "actions/verify-baseline-source",
    "input": "github-token",
-   "status": "live"
+   "status": "live",
+   "required": false,
+   "default": "${{ github.token }}"
   },
   {
    "id": "actions/verify-source-run:source-run-id",
    "action": "actions/verify-source-run",
    "input": "source-run-id",
-   "status": "live"
+   "status": "live",
+   "required": true,
+   "default": null
   },
   {
    "id": "actions/verify-source-run:expect-repository",
    "action": "actions/verify-source-run",
    "input": "expect-repository",
-   "status": "live"
+   "status": "live",
+   "required": false,
+   "default": ""
   },
   {
    "id": "actions/verify-source-run:expect-workflow",
    "action": "actions/verify-source-run",
    "input": "expect-workflow",
-   "status": "live"
+   "status": "live",
+   "required": false,
+   "default": ""
   },
   {
    "id": "actions/verify-source-run:expect-event",
    "action": "actions/verify-source-run",
    "input": "expect-event",
-   "status": "live"
+   "status": "live",
+   "required": false,
+   "default": "pull_request"
   },
   {
    "id": "actions/verify-source-run:expect-run-attempt",
    "action": "actions/verify-source-run",
    "input": "expect-run-attempt",
-   "status": "live"
+   "status": "live",
+   "required": false,
+   "default": ""
   },
   {
    "id": "actions/verify-source-run:allowed-conclusions",
    "action": "actions/verify-source-run",
    "input": "allowed-conclusions",
-   "status": "live"
+   "status": "live",
+   "required": false,
+   "default": "success"
   },
   {
    "id": "actions/verify-source-run:artifact-name",
    "action": "actions/verify-source-run",
    "input": "artifact-name",
-   "status": "live"
+   "status": "live",
+   "required": true,
+   "default": null
   },
   {
    "id": "actions/verify-source-run:tested-sha",
    "action": "actions/verify-source-run",
    "input": "tested-sha",
-   "status": "live"
+   "status": "live",
+   "required": false,
+   "default": ""
   },
   {
    "id": "actions/verify-source-run:provenance-from",
    "action": "actions/verify-source-run",
    "input": "provenance-from",
-   "status": "live"
+   "status": "live",
+   "required": false,
+   "default": ""
   },
   {
    "id": "actions/verify-source-run:require-provenance",
    "action": "actions/verify-source-run",
    "input": "require-provenance",
-   "status": "live"
+   "status": "live",
+   "required": false,
+   "default": "true"
   },
   {
    "id": "actions/verify-source-run:report-from",
    "action": "actions/verify-source-run",
    "input": "report-from",
-   "status": "live"
+   "status": "live",
+   "required": false,
+   "default": ""
   },
   {
    "id": "actions/verify-source-run:claimed-pr-number",
    "action": "actions/verify-source-run",
    "input": "claimed-pr-number",
-   "status": "live"
+   "status": "live",
+   "required": false,
+   "default": ""
   },
   {
    "id": "actions/verify-source-run:destination",
    "action": "actions/verify-source-run",
    "input": "destination",
-   "status": "live"
+   "status": "live",
+   "required": false,
+   "default": "abicheck-source-artifact"
   },
   {
    "id": "actions/verify-source-run:max-total-bytes",
    "action": "actions/verify-source-run",
    "input": "max-total-bytes",
-   "status": "live"
+   "status": "live",
+   "required": false,
+   "default": "67108864"
   },
   {
    "id": "actions/verify-source-run:max-entry-bytes",
    "action": "actions/verify-source-run",
    "input": "max-entry-bytes",
-   "status": "live"
+   "status": "live",
+   "required": false,
+   "default": "33554432"
   },
   {
    "id": "actions/verify-source-run:max-entries",
    "action": "actions/verify-source-run",
    "input": "max-entries",
-   "status": "live"
+   "status": "live",
+   "required": false,
+   "default": "2000"
   },
   {
    "id": "actions/verify-source-run:max-ratio",
    "action": "actions/verify-source-run",
    "input": "max-ratio",
-   "status": "live"
+   "status": "live",
+   "required": false,
+   "default": "200"
   },
   {
    "id": "actions/verify-source-run:github-token",
    "action": "actions/verify-source-run",
    "input": "github-token",
-   "status": "live"
+   "status": "live",
+   "required": true,
+   "default": null
   },
   {
    "id": "actions/verify-source-run:python-version",
    "action": "actions/verify-source-run",
    "input": "python-version",
-   "status": "live"
+   "status": "live",
+   "required": false,
+   "default": "3.13"
   },
   {
    "id": "actions/verify-source-run:abicheck-version",
    "action": "actions/verify-source-run",
    "input": "abicheck-version",
-   "status": "live"
+   "status": "live",
+   "required": false,
+   "default": ""
   }
  ],
  "python": [
   {
    "id": "CompareRequest.old",
    "owner": "CompareRequest",
-   "name": "old"
+   "name": "old",
+   "annotation": "InputSpec",
+   "choices": null,
+   "default": "<required>"
   },
   {
    "id": "CompareRequest.new",
    "owner": "CompareRequest",
-   "name": "new"
+   "name": "new",
+   "annotation": "InputSpec",
+   "choices": null,
+   "default": "<required>"
   },
   {
    "id": "CompareRequest.lang",
    "owner": "CompareRequest",
-   "name": "lang"
+   "name": "lang",
+   "annotation": "str",
+   "choices": null,
+   "default": "'c++'"
   },
   {
    "id": "CompareRequest.frontend",
    "owner": "CompareRequest",
-   "name": "frontend"
+   "name": "frontend",
+   "annotation": "str",
+   "choices": null,
+   "default": "'auto'"
   },
   {
    "id": "CompareRequest.has_sources",
    "owner": "CompareRequest",
-   "name": "has_sources"
+   "name": "has_sources",
+   "annotation": "bool",
+   "choices": null,
+   "default": "False"
   },
   {
    "id": "CompareRequest.policy",
    "owner": "CompareRequest",
-   "name": "policy"
+   "name": "policy",
+   "annotation": "str",
+   "choices": null,
+   "default": "'strict_abi'"
   },
   {
    "id": "CompareRequest.policy_file_path",
    "owner": "CompareRequest",
-   "name": "policy_file_path"
+   "name": "policy_file_path",
+   "annotation": "Path | None",
+   "choices": null,
+   "default": "None"
   },
   {
    "id": "CompareRequest.suppress",
    "owner": "CompareRequest",
-   "name": "suppress"
+   "name": "suppress",
+   "annotation": "Path | tuple[Path, ...] | None",
+   "choices": null,
+   "default": "None"
   },
   {
    "id": "CompareRequest.scope_public",
    "owner": "CompareRequest",
-   "name": "scope_public"
+   "name": "scope_public",
+   "annotation": "bool",
+   "choices": null,
+   "default": "True"
   },
   {
    "id": "CompareRequest.force_public_symbols",
    "owner": "CompareRequest",
-   "name": "force_public_symbols"
+   "name": "force_public_symbols",
+   "annotation": "frozenset[str] | None",
+   "choices": null,
+   "default": "None"
   },
   {
    "id": "CompareRequest.public_surface_allowlist",
    "owner": "CompareRequest",
-   "name": "public_surface_allowlist"
+   "name": "public_surface_allowlist",
+   "annotation": "frozenset[str] | None",
+   "choices": null,
+   "default": "None"
   },
   {
    "id": "CompareRequest.pattern_verdicts",
    "owner": "CompareRequest",
-   "name": "pattern_verdicts"
+   "name": "pattern_verdicts",
+   "annotation": "bool",
+   "choices": null,
+   "default": "True"
   },
   {
    "id": "CompareRequest.enable_debuginfod",
    "owner": "CompareRequest",
-   "name": "enable_debuginfod"
+   "name": "enable_debuginfod",
+   "annotation": "bool",
+   "choices": null,
+   "default": "False"
   },
   {
    "id": "CompareRequest.debuginfod_url",
    "owner": "CompareRequest",
-   "name": "debuginfod_url"
+   "name": "debuginfod_url",
+   "annotation": "str | None",
+   "choices": null,
+   "default": "None"
   },
   {
    "id": "CompareRequest.env_matrix",
    "owner": "CompareRequest",
-   "name": "env_matrix"
+   "name": "env_matrix",
+   "annotation": "EnvironmentMatrix | None",
+   "choices": null,
+   "default": "None"
   },
   {
    "id": "CompareRequest.diagnostic_comparison",
    "owner": "CompareRequest",
-   "name": "diagnostic_comparison"
+   "name": "diagnostic_comparison",
+   "annotation": "bool",
+   "choices": null,
+   "default": "False"
   },
   {
    "id": "CompareRequest.require_same_generation",
    "owner": "CompareRequest",
-   "name": "require_same_generation"
+   "name": "require_same_generation",
+   "annotation": "bool",
+   "choices": null,
+   "default": "False"
   },
   {
    "id": "CompareRequest.contract_evaluation",
    "owner": "CompareRequest",
-   "name": "contract_evaluation"
+   "name": "contract_evaluation",
+   "annotation": "bool",
+   "choices": null,
+   "default": "True"
   },
   {
    "id": "CompareRequest.contract_mode",
    "owner": "CompareRequest",
-   "name": "contract_mode"
+   "name": "contract_mode",
+   "annotation": "str | None",
+   "choices": null,
+   "default": "None"
   },
   {
    "id": "CompareRequest.depth",
    "owner": "CompareRequest",
-   "name": "depth"
+   "name": "depth",
+   "annotation": "str | None",
+   "choices": null,
+   "default": "None"
   },
   {
    "id": "CompareRequest.budget_s",
    "owner": "CompareRequest",
-   "name": "budget_s"
+   "name": "budget_s",
+   "annotation": "float | None",
+   "choices": null,
+   "default": "None"
   },
   {
    "id": "CompareRequest.dwarf_only",
    "owner": "CompareRequest",
-   "name": "dwarf_only"
+   "name": "dwarf_only",
+   "annotation": "bool",
+   "choices": null,
+   "default": "False"
   },
   {
    "id": "CompareRequest.debug_format",
    "owner": "CompareRequest",
-   "name": "debug_format"
+   "name": "debug_format",
+   "annotation": "str | None",
+   "choices": null,
+   "default": "None"
   },
   {
    "id": "CompareRequest.include_labels",
    "owner": "CompareRequest",
-   "name": "include_labels"
+   "name": "include_labels",
+   "annotation": "tuple[tuple[Path, str], ...]",
+   "choices": null,
+   "default": "[]"
   },
   {
    "id": "CompareRequest.follow_dependencies",
    "owner": "CompareRequest",
-   "name": "follow_dependencies"
+   "name": "follow_dependencies",
+   "annotation": "bool",
+   "choices": null,
+   "default": "False"
   },
   {
    "id": "CompareRequest.dependency_search_paths",
    "owner": "CompareRequest",
-   "name": "dependency_search_paths"
+   "name": "dependency_search_paths",
+   "annotation": "tuple[Path, ...]",
+   "choices": null,
+   "default": "[]"
   },
   {
    "id": "CompareRequest.ld_library_path",
    "owner": "CompareRequest",
-   "name": "ld_library_path"
+   "name": "ld_library_path",
+   "annotation": "str",
+   "choices": null,
+   "default": "''"
   },
   {
    "id": "CompareRequest.frontend_context",
    "owner": "CompareRequest",
-   "name": "frontend_context"
+   "name": "frontend_context",
+   "annotation": "str",
+   "choices": null,
+   "default": "'host'"
   },
   {
    "id": "CompareRequest.lang_explicit",
    "owner": "CompareRequest",
-   "name": "lang_explicit"
+   "name": "lang_explicit",
+   "annotation": "bool",
+   "choices": null,
+   "default": "False"
   },
   {
    "id": "CompareRequest.pack_policy_overrides",
    "owner": "CompareRequest",
-   "name": "pack_policy_overrides"
+   "name": "pack_policy_overrides",
+   "annotation": "tuple[tuple[ChangeKind, Verdict], ...] | None",
+   "choices": null,
+   "default": "None"
   },
   {
    "id": "CompareRequest.project_policy_overrides",
    "owner": "CompareRequest",
-   "name": "project_policy_overrides"
+   "name": "project_policy_overrides",
+   "annotation": "tuple[tuple[ChangeKind, Verdict], ...] | None",
+   "choices": null,
+   "default": "None"
   },
   {
    "id": "CompareRequest.acknowledgments_path",
    "owner": "CompareRequest",
-   "name": "acknowledgments_path"
+   "name": "acknowledgments_path",
+   "annotation": "Path | None",
+   "choices": null,
+   "default": "None"
   },
   {
    "id": "CompareRequest.acknowledgment_unacknowledged_additions",
    "owner": "CompareRequest",
-   "name": "acknowledgment_unacknowledged_additions"
+   "name": "acknowledgment_unacknowledged_additions",
+   "annotation": "str | None",
+   "choices": null,
+   "default": "None"
   },
   {
    "id": "CompareRequest.acknowledgment_breaks",
    "owner": "CompareRequest",
-   "name": "acknowledgment_breaks"
+   "name": "acknowledgment_breaks",
+   "annotation": "str | None",
+   "choices": null,
+   "default": "None"
   },
   {
    "id": "CompareRequest.strict_suppressions",
    "owner": "CompareRequest",
-   "name": "strict_suppressions"
+   "name": "strict_suppressions",
+   "annotation": "bool",
+   "choices": null,
+   "default": "False"
   },
   {
    "id": "CompareRequest.require_justification",
    "owner": "CompareRequest",
-   "name": "require_justification"
+   "name": "require_justification",
+   "annotation": "bool",
+   "choices": null,
+   "default": "False"
   },
   {
    "id": "CompareRequest.old_probe_matrix",
    "owner": "CompareRequest",
-   "name": "old_probe_matrix"
+   "name": "old_probe_matrix",
+   "annotation": "Path | None",
+   "choices": null,
+   "default": "None"
   },
   {
    "id": "CompareRequest.new_probe_matrix",
    "owner": "CompareRequest",
-   "name": "new_probe_matrix"
+   "name": "new_probe_matrix",
+   "annotation": "Path | None",
+   "choices": null,
+   "default": "None"
   },
   {
    "id": "CompareRequest.pack_internal_namespaces",
    "owner": "CompareRequest",
-   "name": "pack_internal_namespaces"
+   "name": "pack_internal_namespaces",
+   "annotation": "tuple[str, ...] | None",
+   "choices": null,
+   "default": "None"
   },
   {
    "id": "CompareRequest.pack_paths",
    "owner": "CompareRequest",
-   "name": "pack_paths"
+   "name": "pack_paths",
+   "annotation": "tuple[Path, ...]",
+   "choices": null,
+   "default": "[]"
   },
   {
    "id": "CompareRequest.stated_settings",
    "owner": "CompareRequest",
-   "name": "stated_settings"
+   "name": "stated_settings",
+   "annotation": "frozenset[str] | None",
+   "choices": null,
+   "default": "None"
   },
   {
    "id": "CompareRequest.severity_preset",
    "owner": "CompareRequest",
-   "name": "severity_preset"
+   "name": "severity_preset",
+   "annotation": "str | None",
+   "choices": null,
+   "default": "None"
   },
   {
    "id": "CompareRequest.severity_abi_breaking",
    "owner": "CompareRequest",
-   "name": "severity_abi_breaking"
+   "name": "severity_abi_breaking",
+   "annotation": "str | None",
+   "choices": null,
+   "default": "None"
   },
   {
    "id": "CompareRequest.severity_potential_breaking",
    "owner": "CompareRequest",
-   "name": "severity_potential_breaking"
+   "name": "severity_potential_breaking",
+   "annotation": "str | None",
+   "choices": null,
+   "default": "None"
   },
   {
    "id": "CompareRequest.severity_quality_issues",
    "owner": "CompareRequest",
-   "name": "severity_quality_issues"
+   "name": "severity_quality_issues",
+   "annotation": "str | None",
+   "choices": null,
+   "default": "None"
   },
   {
    "id": "CompareRequest.severity_addition",
    "owner": "CompareRequest",
-   "name": "severity_addition"
+   "name": "severity_addition",
+   "annotation": "str | None",
+   "choices": null,
+   "default": "None"
   },
   {
    "id": "CompareRequest.require_complete_analysis",
    "owner": "CompareRequest",
-   "name": "require_complete_analysis"
+   "name": "require_complete_analysis",
+   "annotation": "bool",
+   "choices": null,
+   "default": "False"
   },
   {
    "id": "CompareRequest.changed_paths",
    "owner": "CompareRequest",
-   "name": "changed_paths"
+   "name": "changed_paths",
+   "annotation": "tuple[str, ...]",
+   "choices": null,
+   "default": "[]"
   },
   {
    "id": "CompareRequest.abi3_floor",
    "owner": "CompareRequest",
-   "name": "abi3_floor"
+   "name": "abi3_floor",
+   "annotation": "tuple[int, int] | None",
+   "choices": null,
+   "default": "None"
   },
   {
    "id": "CompareRequest.collapse_versioned_symbols",
    "owner": "CompareRequest",
-   "name": "collapse_versioned_symbols"
+   "name": "collapse_versioned_symbols",
+   "annotation": "bool",
+   "choices": null,
+   "default": "False"
   },
   {
    "id": "CompareRequest.resolved_collect_mode",
    "owner": "CompareRequest",
-   "name": "resolved_collect_mode"
+   "name": "resolved_collect_mode",
+   "annotation": "str | None",
+   "choices": null,
+   "default": "None"
   },
   {
    "id": "CompareRequest.allow_build_query",
    "owner": "CompareRequest",
-   "name": "allow_build_query"
+   "name": "allow_build_query",
+   "annotation": "bool",
+   "choices": null,
+   "default": "False"
   },
   {
    "id": "CompareRequest.performance_profile",
    "owner": "CompareRequest",
-   "name": "performance_profile"
+   "name": "performance_profile",
+   "annotation": "PerformanceProfile | None",
+   "choices": [
+    "balanced",
+    "low-memory"
+   ],
+   "default": "None"
   },
   {
    "id": "DumpRequest.input",
    "owner": "DumpRequest",
-   "name": "input"
+   "name": "input",
+   "annotation": "InputSpec",
+   "choices": null,
+   "default": "<required>"
   },
   {
    "id": "DumpRequest.lang",
    "owner": "DumpRequest",
-   "name": "lang"
+   "name": "lang",
+   "annotation": "str",
+   "choices": null,
+   "default": "'c++'"
   },
   {
    "id": "DumpRequest.frontend",
    "owner": "DumpRequest",
-   "name": "frontend"
+   "name": "frontend",
+   "annotation": "str",
+   "choices": null,
+   "default": "'auto'"
   },
   {
    "id": "DumpRequest.has_sources",
    "owner": "DumpRequest",
-   "name": "has_sources"
+   "name": "has_sources",
+   "annotation": "bool",
+   "choices": null,
+   "default": "False"
   },
   {
    "id": "DumpRequest.depth",
    "owner": "DumpRequest",
-   "name": "depth"
+   "name": "depth",
+   "annotation": "str | None",
+   "choices": null,
+   "default": "None"
   },
   {
    "id": "DumpRequest.dwarf_only",
    "owner": "DumpRequest",
-   "name": "dwarf_only"
+   "name": "dwarf_only",
+   "annotation": "bool",
+   "choices": null,
+   "default": "False"
   },
   {
    "id": "DumpRequest.debug_format",
    "owner": "DumpRequest",
-   "name": "debug_format"
+   "name": "debug_format",
+   "annotation": "str | None",
+   "choices": null,
+   "default": "None"
   },
   {
    "id": "DumpRequest.enable_debuginfod",
    "owner": "DumpRequest",
-   "name": "enable_debuginfod"
+   "name": "enable_debuginfod",
+   "annotation": "bool",
+   "choices": null,
+   "default": "False"
   },
   {
    "id": "DumpRequest.debuginfod_url",
    "owner": "DumpRequest",
-   "name": "debuginfod_url"
+   "name": "debuginfod_url",
+   "annotation": "str | None",
+   "choices": null,
+   "default": "None"
   },
   {
    "id": "DumpRequest.include_labels",
    "owner": "DumpRequest",
-   "name": "include_labels"
+   "name": "include_labels",
+   "annotation": "tuple[tuple[Path, str], ...]",
+   "choices": null,
+   "default": "[]"
   },
   {
    "id": "DumpRequest.follow_dependencies",
    "owner": "DumpRequest",
-   "name": "follow_dependencies"
+   "name": "follow_dependencies",
+   "annotation": "bool",
+   "choices": null,
+   "default": "False"
   },
   {
    "id": "DumpRequest.dependency_search_paths",
    "owner": "DumpRequest",
-   "name": "dependency_search_paths"
+   "name": "dependency_search_paths",
+   "annotation": "tuple[Path, ...]",
+   "choices": null,
+   "default": "[]"
   },
   {
    "id": "DumpRequest.ld_library_path",
    "owner": "DumpRequest",
-   "name": "ld_library_path"
+   "name": "ld_library_path",
+   "annotation": "str",
+   "choices": null,
+   "default": "''"
   },
   {
    "id": "DumpRequest.frontend_context",
    "owner": "DumpRequest",
-   "name": "frontend_context"
+   "name": "frontend_context",
+   "annotation": "str",
+   "choices": null,
+   "default": "'host'"
   },
   {
    "id": "DumpRequest.lang_explicit",
    "owner": "DumpRequest",
-   "name": "lang_explicit"
+   "name": "lang_explicit",
+   "annotation": "bool",
+   "choices": null,
+   "default": "False"
   },
   {
    "id": "DumpRequest.resolved_collect_mode",
    "owner": "DumpRequest",
-   "name": "resolved_collect_mode"
+   "name": "resolved_collect_mode",
+   "annotation": "str | None",
+   "choices": null,
+   "default": "None"
   },
   {
    "id": "InputSpec.path",
    "owner": "InputSpec",
-   "name": "path"
+   "name": "path",
+   "annotation": "Path | None",
+   "choices": null,
+   "default": "<required>"
   },
   {
    "id": "InputSpec.headers",
    "owner": "InputSpec",
-   "name": "headers"
+   "name": "headers",
+   "annotation": "tuple[Path, ...]",
+   "choices": null,
+   "default": "[]"
   },
   {
    "id": "InputSpec.exclude_headers",
    "owner": "InputSpec",
-   "name": "exclude_headers"
+   "name": "exclude_headers",
+   "annotation": "tuple[str, ...]",
+   "choices": null,
+   "default": "[]"
   },
   {
    "id": "InputSpec.includes",
    "owner": "InputSpec",
-   "name": "includes"
+   "name": "includes",
+   "annotation": "tuple[Path, ...]",
+   "choices": null,
+   "default": "[]"
   },
   {
    "id": "InputSpec.version",
    "owner": "InputSpec",
-   "name": "version"
+   "name": "version",
+   "annotation": "str",
+   "choices": null,
+   "default": "''"
   },
   {
    "id": "InputSpec.pdb",
    "owner": "InputSpec",
-   "name": "pdb"
+   "name": "pdb",
+   "annotation": "Path | None",
+   "choices": null,
+   "default": "None"
   },
   {
    "id": "InputSpec.debug_roots",
    "owner": "InputSpec",
-   "name": "debug_roots"
+   "name": "debug_roots",
+   "annotation": "tuple[Path, ...]",
+   "choices": null,
+   "default": "[]"
   },
   {
    "id": "InputSpec.include_dependencies",
    "owner": "InputSpec",
-   "name": "include_dependencies"
+   "name": "include_dependencies",
+   "annotation": "bool",
+   "choices": null,
+   "default": "False"
   },
   {
    "id": "InputSpec.sources",
    "owner": "InputSpec",
-   "name": "sources"
+   "name": "sources",
+   "annotation": "Path | None",
+   "choices": null,
+   "default": "None"
   },
   {
    "id": "InputSpec.build_info",
    "owner": "InputSpec",
-   "name": "build_info"
+   "name": "build_info",
+   "annotation": "Path | None",
+   "choices": null,
+   "default": "None"
   },
   {
    "id": "InputSpec.build_targets",
    "owner": "InputSpec",
-   "name": "build_targets"
+   "name": "build_targets",
+   "annotation": "tuple[str, ...]",
+   "choices": null,
+   "default": "[]"
   },
   {
    "id": "InputSpec.dump_manifest",
    "owner": "InputSpec",
-   "name": "dump_manifest"
+   "name": "dump_manifest",
+   "annotation": "DumpManifest | None",
+   "choices": null,
+   "default": "None"
   },
   {
    "id": "InputSpec.compile",
    "owner": "InputSpec",
-   "name": "compile"
+   "name": "compile",
+   "annotation": "CompileContext | None",
+   "choices": null,
+   "default": "None"
   },
   {
    "id": "InputSpec.public_header_dirs",
    "owner": "InputSpec",
-   "name": "public_header_dirs"
+   "name": "public_header_dirs",
+   "annotation": "tuple[Path, ...]",
+   "choices": null,
+   "default": "[]"
   },
   {
    "id": "InputSpec.follow_linker_scripts",
    "owner": "InputSpec",
-   "name": "follow_linker_scripts"
+   "name": "follow_linker_scripts",
+   "annotation": "bool",
+   "choices": null,
+   "default": "True"
   },
   {
    "id": "InputSpec.compile_db_filter",
    "owner": "InputSpec",
-   "name": "compile_db_filter"
+   "name": "compile_db_filter",
+   "annotation": "str | None",
+   "choices": null,
+   "default": "None"
   },
   {
    "id": "InputSpec.build_config",
    "owner": "InputSpec",
-   "name": "build_config"
+   "name": "build_config",
+   "annotation": "Path | None",
+   "choices": null,
+   "default": "None"
   },
   {
    "id": "InputSpec.ownership",
    "owner": "InputSpec",
-   "name": "ownership"
+   "name": "ownership",
+   "annotation": "OwnershipRequest | None",
+   "choices": null,
+   "default": "None"
   },
   {
    "id": "InputSpec.execution",
    "owner": "InputSpec",
-   "name": "execution"
+   "name": "execution",
+   "annotation": "DumpExecutionOptions | None",
+   "choices": null,
+   "default": "None"
   },
   {
    "id": "run_compare(old_input)",
    "owner": "run_compare",
-   "name": "old_input"
+   "name": "old_input",
+   "annotation": "Path",
+   "choices": null,
+   "default": "<required>"
   },
   {
    "id": "run_compare(new_input)",
    "owner": "run_compare",
-   "name": "new_input"
+   "name": "new_input",
+   "annotation": "Path",
+   "choices": null,
+   "default": "<required>"
   },
   {
    "id": "run_compare(old_headers)",
    "owner": "run_compare",
-   "name": "old_headers"
+   "name": "old_headers",
+   "annotation": "list[Path] | None",
+   "choices": null,
+   "default": "None"
   },
   {
    "id": "run_compare(new_headers)",
    "owner": "run_compare",
-   "name": "new_headers"
+   "name": "new_headers",
+   "annotation": "list[Path] | None",
+   "choices": null,
+   "default": "None"
   },
   {
    "id": "run_compare(old_includes)",
    "owner": "run_compare",
-   "name": "old_includes"
+   "name": "old_includes",
+   "annotation": "list[Path] | None",
+   "choices": null,
+   "default": "None"
   },
   {
    "id": "run_compare(new_includes)",
    "owner": "run_compare",
-   "name": "new_includes"
+   "name": "new_includes",
+   "annotation": "list[Path] | None",
+   "choices": null,
+   "default": "None"
   },
   {
    "id": "run_compare(old_version)",
    "owner": "run_compare",
-   "name": "old_version"
+   "name": "old_version",
+   "annotation": "str",
+   "choices": null,
+   "default": "''"
   },
   {
    "id": "run_compare(new_version)",
    "owner": "run_compare",
-   "name": "new_version"
+   "name": "new_version",
+   "annotation": "str",
+   "choices": null,
+   "default": "''"
   },
   {
    "id": "run_compare(lang)",
    "owner": "run_compare",
-   "name": "lang"
+   "name": "lang",
+   "annotation": "str",
+   "choices": null,
+   "default": "'c++'"
   },
   {
    "id": "run_compare(lang_explicit)",
    "owner": "run_compare",
-   "name": "lang_explicit"
+   "name": "lang_explicit",
+   "annotation": "bool",
+   "choices": null,
+   "default": "False"
   },
   {
    "id": "run_compare(frontend)",
    "owner": "run_compare",
-   "name": "frontend"
+   "name": "frontend",
+   "annotation": "str",
+   "choices": null,
+   "default": "'auto'"
   },
   {
    "id": "run_compare(suppress)",
    "owner": "run_compare",
-   "name": "suppress"
+   "name": "suppress",
+   "annotation": "Path | tuple[Path, ...] | None",
+   "choices": null,
+   "default": "None"
   },
   {
    "id": "run_compare(policy)",
    "owner": "run_compare",
-   "name": "policy"
+   "name": "policy",
+   "annotation": "str",
+   "choices": null,
+   "default": "'strict_abi'"
   },
   {
    "id": "run_compare(policy_file_path)",
    "owner": "run_compare",
-   "name": "policy_file_path"
+   "name": "policy_file_path",
+   "annotation": "Path | None",
+   "choices": null,
+   "default": "None"
   },
   {
    "id": "run_compare(old_pdb_path)",
    "owner": "run_compare",
-   "name": "old_pdb_path"
+   "name": "old_pdb_path",
+   "annotation": "Path | None",
+   "choices": null,
+   "default": "None"
   },
   {
    "id": "run_compare(new_pdb_path)",
    "owner": "run_compare",
-   "name": "new_pdb_path"
+   "name": "new_pdb_path",
+   "annotation": "Path | None",
+   "choices": null,
+   "default": "None"
   },
   {
    "id": "run_compare(old_debug_roots)",
    "owner": "run_compare",
-   "name": "old_debug_roots"
+   "name": "old_debug_roots",
+   "annotation": "list[Path] | None",
+   "choices": null,
+   "default": "None"
   },
   {
    "id": "run_compare(new_debug_roots)",
    "owner": "run_compare",
-   "name": "new_debug_roots"
+   "name": "new_debug_roots",
+   "annotation": "list[Path] | None",
+   "choices": null,
+   "default": "None"
   },
   {
    "id": "run_compare(enable_debuginfod)",
    "owner": "run_compare",
-   "name": "enable_debuginfod"
+   "name": "enable_debuginfod",
+   "annotation": "bool",
+   "choices": null,
+   "default": "False"
   },
   {
    "id": "run_compare(scope_to_public_surface)",
    "owner": "run_compare",
-   "name": "scope_to_public_surface"
+   "name": "scope_to_public_surface",
+   "annotation": "bool",
+   "choices": null,
+   "default": "True"
   },
   {
    "id": "run_compare(force_public_symbols)",
    "owner": "run_compare",
-   "name": "force_public_symbols"
+   "name": "force_public_symbols",
+   "annotation": "set[str] | None",
+   "choices": null,
+   "default": "None"
   },
   {
    "id": "run_compare(pattern_verdicts)",
    "owner": "run_compare",
-   "name": "pattern_verdicts"
+   "name": "pattern_verdicts",
+   "annotation": "bool",
+   "choices": null,
+   "default": "True"
   },
   {
    "id": "run_compare(public_surface_allowlist)",
    "owner": "run_compare",
-   "name": "public_surface_allowlist"
+   "name": "public_surface_allowlist",
+   "annotation": "set[str] | None",
+   "choices": null,
+   "default": "None"
   },
   {
    "id": "run_compare(debuginfod_url)",
    "owner": "run_compare",
-   "name": "debuginfod_url"
+   "name": "debuginfod_url",
+   "annotation": "str | None",
+   "choices": null,
+   "default": "None"
   },
   {
    "id": "run_compare(diagnostic_comparison)",
    "owner": "run_compare",
-   "name": "diagnostic_comparison"
+   "name": "diagnostic_comparison",
+   "annotation": "bool",
+   "choices": null,
+   "default": "False"
   },
   {
    "id": "run_compare(contract_evaluation)",
    "owner": "run_compare",
-   "name": "contract_evaluation"
+   "name": "contract_evaluation",
+   "annotation": "bool",
+   "choices": null,
+   "default": "True"
   },
   {
    "id": "run_compare(include_dependencies)",
    "owner": "run_compare",
-   "name": "include_dependencies"
+   "name": "include_dependencies",
+   "annotation": "bool",
+   "choices": null,
+   "default": "False"
   },
   {
    "id": "run_compare(contract_mode)",
    "owner": "run_compare",
-   "name": "contract_mode"
+   "name": "contract_mode",
+   "annotation": "str | None",
+   "choices": null,
+   "default": "None"
   },
   {
    "id": "run_compare(pack_policy_overrides)",
    "owner": "run_compare",
-   "name": "pack_policy_overrides"
+   "name": "pack_policy_overrides",
+   "annotation": "dict[Any, Any] | None",
+   "choices": null,
+   "default": "None"
   },
   {
    "id": "run_compare(pack_internal_namespaces)",
    "owner": "run_compare",
-   "name": "pack_internal_namespaces"
+   "name": "pack_internal_namespaces",
+   "annotation": "tuple[str, ...] | None",
+   "choices": null,
+   "default": "None"
   },
   {
    "id": "run_compare(compile_context)",
    "owner": "run_compare",
-   "name": "compile_context"
+   "name": "compile_context",
+   "annotation": "CompileContext | None",
+   "choices": null,
+   "default": "None"
   },
   {
    "id": "run_compare(depth)",
    "owner": "run_compare",
-   "name": "depth"
+   "name": "depth",
+   "annotation": "str | None",
+   "choices": null,
+   "default": "None"
   },
   {
    "id": "run_compare(severity_preset)",
    "owner": "run_compare",
-   "name": "severity_preset"
+   "name": "severity_preset",
+   "annotation": "str | None",
+   "choices": null,
+   "default": "None"
   },
   {
    "id": "run_compare(public_header_dirs)",
    "owner": "run_compare",
-   "name": "public_header_dirs"
+   "name": "public_header_dirs",
+   "annotation": "list[Path] | None",
+   "choices": null,
+   "default": "None"
   },
   {
    "id": "run_compare(collapse_versioned_symbols)",
    "owner": "run_compare",
-   "name": "collapse_versioned_symbols"
+   "name": "collapse_versioned_symbols",
+   "annotation": "bool",
+   "choices": null,
+   "default": "False"
   },
   {
    "id": "run_compare(project_policy_overrides)",
    "owner": "run_compare",
-   "name": "project_policy_overrides"
+   "name": "project_policy_overrides",
+   "annotation": "dict[Any, Any] | None",
+   "choices": null,
+   "default": "None"
   },
   {
    "id": "run_compare(env_matrix)",
    "owner": "run_compare",
-   "name": "env_matrix"
+   "name": "env_matrix",
+   "annotation": "EnvironmentMatrix | None",
+   "choices": null,
+   "default": "None"
   },
   {
    "id": "run_compare(exclude_headers)",
    "owner": "run_compare",
-   "name": "exclude_headers"
+   "name": "exclude_headers",
+   "annotation": "tuple[str, ...]",
+   "choices": null,
+   "default": "[]"
   },
   {
    "id": "run_compare(acknowledgments_path)",
    "owner": "run_compare",
-   "name": "acknowledgments_path"
+   "name": "acknowledgments_path",
+   "annotation": "Path | None",
+   "choices": null,
+   "default": "None"
   },
   {
    "id": "run_compare(acknowledgment_unacknowledged_additions)",
    "owner": "run_compare",
-   "name": "acknowledgment_unacknowledged_additions"
+   "name": "acknowledgment_unacknowledged_additions",
+   "annotation": "str | None",
+   "choices": null,
+   "default": "None"
   },
   {
    "id": "run_compare(acknowledgment_breaks)",
    "owner": "run_compare",
-   "name": "acknowledgment_breaks"
+   "name": "acknowledgment_breaks",
+   "annotation": "str | None",
+   "choices": null,
+   "default": "None"
   },
   {
    "id": "run_dump(path)",
    "owner": "run_dump",
-   "name": "path"
+   "name": "path",
+   "annotation": "Path",
+   "choices": null,
+   "default": "<required>"
   },
   {
    "id": "run_dump(binary_fmt)",
    "owner": "run_dump",
-   "name": "binary_fmt"
+   "name": "binary_fmt",
+   "annotation": "str",
+   "choices": null,
+   "default": "<required>"
   },
   {
    "id": "run_dump(headers)",
    "owner": "run_dump",
-   "name": "headers"
+   "name": "headers",
+   "annotation": "list[Path] | None",
+   "choices": null,
+   "default": "None"
   },
   {
    "id": "run_dump(includes)",
    "owner": "run_dump",
-   "name": "includes"
+   "name": "includes",
+   "annotation": "list[Path] | None",
+   "choices": null,
+   "default": "None"
   },
   {
    "id": "run_dump(version)",
    "owner": "run_dump",
-   "name": "version"
+   "name": "version",
+   "annotation": "str",
+   "choices": null,
+   "default": "''"
   },
   {
    "id": "run_dump(lang)",
    "owner": "run_dump",
-   "name": "lang"
+   "name": "lang",
+   "annotation": "str",
+   "choices": null,
+   "default": "'c++'"
   },
   {
    "id": "run_dump(lang_explicit)",
    "owner": "run_dump",
-   "name": "lang_explicit"
+   "name": "lang_explicit",
+   "annotation": "bool",
+   "choices": null,
+   "default": "False"
   },
   {
    "id": "run_dump(pdb_path)",
    "owner": "run_dump",
-   "name": "pdb_path"
+   "name": "pdb_path",
+   "annotation": "Path | None",
+   "choices": null,
+   "default": "None"
   },
   {
    "id": "run_dump(dwarf_only)",
    "owner": "run_dump",
-   "name": "dwarf_only"
+   "name": "dwarf_only",
+   "annotation": "bool",
+   "choices": null,
+   "default": "False"
   },
   {
    "id": "run_dump(debug_roots)",
    "owner": "run_dump",
-   "name": "debug_roots"
+   "name": "debug_roots",
+   "annotation": "list[Path] | None",
+   "choices": null,
+   "default": "None"
   },
   {
    "id": "run_dump(enable_debuginfod)",
    "owner": "run_dump",
-   "name": "enable_debuginfod"
+   "name": "enable_debuginfod",
+   "annotation": "bool",
+   "choices": null,
+   "default": "False"
   },
   {
    "id": "run_dump(debuginfod_url)",
    "owner": "run_dump",
-   "name": "debuginfod_url"
+   "name": "debuginfod_url",
+   "annotation": "str | None",
+   "choices": null,
+   "default": "None"
   },
   {
    "id": "run_dump(debug_format)",
    "owner": "run_dump",
-   "name": "debug_format"
+   "name": "debug_format",
+   "annotation": "str | None",
+   "choices": null,
+   "default": "None"
   },
   {
    "id": "run_dump(symbols_only)",
    "owner": "run_dump",
-   "name": "symbols_only"
+   "name": "symbols_only",
+   "annotation": "bool",
+   "choices": null,
+   "default": "False"
   },
   {
    "id": "run_dump(debug_presence_only)",
    "owner": "run_dump",
-   "name": "debug_presence_only"
+   "name": "debug_presence_only",
+   "annotation": "bool",
+   "choices": null,
+   "default": "False"
   },
   {
    "id": "run_dump(public_headers)",
    "owner": "run_dump",
-   "name": "public_headers"
+   "name": "public_headers",
+   "annotation": "list[Path] | None",
+   "choices": null,
+   "default": "None"
   },
   {
    "id": "run_dump(public_header_dirs)",
    "owner": "run_dump",
-   "name": "public_header_dirs"
+   "name": "public_header_dirs",
+   "annotation": "list[Path] | None",
+   "choices": null,
+   "default": "None"
   },
   {
    "id": "run_dump(header_backend)",
    "owner": "run_dump",
-   "name": "header_backend"
+   "name": "header_backend",
+   "annotation": "str",
+   "choices": null,
+   "default": "'auto'"
   },
   {
    "id": "run_dump(compile)",
    "owner": "run_dump",
-   "name": "compile"
+   "name": "compile",
+   "annotation": "CompileContext | None",
+   "choices": null,
+   "default": "None"
   },
   {
    "id": "run_dump(notify)",
    "owner": "run_dump",
-   "name": "notify"
+   "name": "notify",
+   "annotation": "Callable[[str], None] | None",
+   "choices": null,
+   "default": "None"
   },
   {
    "id": "run_dump(include_labels)",
    "owner": "run_dump",
-   "name": "include_labels"
+   "name": "include_labels",
+   "annotation": "dict[Path, str] | None",
+   "choices": null,
+   "default": "None"
   },
   {
    "id": "run_dump(dump_manifest)",
    "owner": "run_dump",
-   "name": "dump_manifest"
+   "name": "dump_manifest",
+   "annotation": "DumpManifest | None",
+   "choices": null,
+   "default": "None"
   },
   {
    "id": "run_dump(public_include_search_dirs)",
    "owner": "run_dump",
-   "name": "public_include_search_dirs"
+   "name": "public_include_search_dirs",
+   "annotation": "list[Path] | None",
+   "choices": null,
+   "default": "None"
   },
   {
    "id": "run_dump(include_dependencies)",
    "owner": "run_dump",
-   "name": "include_dependencies"
+   "name": "include_dependencies",
+   "annotation": "bool",
+   "choices": null,
+   "default": "False"
   }
  ]
 }

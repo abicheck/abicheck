@@ -100,6 +100,35 @@ Phase 1 is what checks them. Answers, recorded in ADR-091:
 
 Owner: `tests/`, `scripts/verify.py`. Size: S.
 
+**Result (2026-10-30).** The gate is `tests/test_option_vocabulary.py`. It
+checks the D1 name rule, the D2 closed-value-set rule, the D4 budget (no-growth
+against recorded counts) and the exceptions both ways (each names a real row,
+a rule and an ADR-091 R-id; a deviation that no longer exists fails as stale).
+The derivation is written out in the test, not imported from the generator. The
+inventory now carries `type`, `choices`, `default`, `required`, annotations and
+`help_common` (the rows plain `--help` shows). Every `until: phase-1` entry is
+mapped: `actions/aggregate` and `actions/collect-facts` are claimed by existing
+concepts where they mirror a CLI option (`sources`, `compile.compiler`, `output`,
+`action.runtime`, `project`) and by three new tier-`action` concepts otherwise.
+`aggregate` and `project` opt out of the name rule, as ADR-091's "Out of scope"
+section requires; the test enforces that only those two may. A full
+block-prefixed spelling (`debug-format`) counts as D1 only when another concept
+shares the leaf, as ADR-091 D1 says. The registry records 155 name deviations
+(59 Python, 22 Action, 8 CLI, 66 under R1–R18) and
+two budget counts: `compare --help` shows 20 core options (ADR-091's 22 counts
+the two help flags, which the inventory skips) and the root `action.yml` has 53
+analysis inputs. The D1 name rule and the D4 budget can't be satisfied yet, so
+the gate shows the gap and fails on any growth. Four rename ids (R19–R22) are
+new in ADR-091 D5 for deviations no existing row covers.
+
+Gaps left for later phases: the value-set rule only sees closed sets on both
+surfaces, so `contract_mode`'s missing `auto` (R10) is typed `str` in Python and
+stays invisible until Phase 4 types it. Defaults and types are extracted but not
+compared yet; the plan's default and type checks need their own phase. The gate
+rides the existing `repo-scan-tests` step (`-m repo_scan`, `pr` profile and the
+CI `ai-readiness` job); the unit lanes exclude that marker, so Phase 0's tests
+move with it. No `verify.py` change was needed.
+
 ## Phase 2 — `--set` and the Action `set:` input (D4)
 
 - `compare`, `dump`, `deps *`, `project *`: add repeatable
