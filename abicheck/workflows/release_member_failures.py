@@ -75,14 +75,9 @@ def classify_member_failure(exc: BaseException, *, library: str) -> MemberFailur
         # comparable profile/scope contract -- a distinct, expected outcome
         # (not an abicheck bug), ranked above ERROR by
         # `policy.release_outcome.RELEASE_VERDICT_ORDER`.
-        kind = (
-            "profile_mismatch"
-            if isinstance(exc, ProfileMismatchError)
-            else "scope_mismatch"
-        )
         return MemberFailure(
             {"library": library, "verdict": "not_comparable", "reason": str(exc)},
-            not_comparable_kind=kind,
+            not_comparable_kind=exc.not_comparable_kind,
         )
     if isinstance(exc, IncompatibleSnapshotSchemaError | UnsupportedArtifactError):
         # ADR-065 D6: an artifact this build cannot analyze at all is

@@ -101,18 +101,18 @@ class TestDumpNativeBinary:
             platform="pe",
         )
 
-        # ADR-061 Phase 4: `dump_cmd` calls `_normalize_binary_input`, which
-        # resolves `_detect_binary_format` through `cli_resolve`'s own module
-        # global -- so that is the only place patching it has ever had an
-        # effect. The previous `abicheck.cli.` target was already inert; the
-        # facade split surfaced it by making the attribute stop existing.
+        # `dump_cmd` detects the operand's format through
+        # `binary_utils.follow_linker_script`, which reads `binary_utils`'
+        # own `detect_binary_format` global -- so that is where patching it
+        # takes effect (the earlier `cli_resolve._detect_binary_format`
+        # target went inert when that copy of the follow was deleted).
         # ADR-063 Phase 1: the real PE dump now executes through
         # `execute_dump_request` (the PE format adapter, faked via `fake_format_adapter("pe")`),
         # not `commands.dump._dump_native_binary` -- see
         # `test_compile_context_parity.py`'s `_capture_dump_pe` for the same
         # patch target, established by that migration.
         with (
-            patch("abicheck.cli_resolve._detect_binary_format", return_value="pe"),
+            patch("abicheck.binary_utils.detect_binary_format", return_value="pe"),
             fake_format_adapter("pe", result=mock_snap),
         ):
             runner = CliRunner()
@@ -162,7 +162,7 @@ class TestDumpNativeBinary:
             return mock_snap
 
         with (
-            patch("abicheck.cli_resolve._detect_binary_format", return_value="pe"),
+            patch("abicheck.binary_utils.detect_binary_format", return_value="pe"),
             fake_format_adapter("pe", side_effect=_fake_dump_native),
         ):
             runner = CliRunner()
@@ -227,7 +227,7 @@ class TestDumpNativeBinary:
         )
 
         with (
-            patch("abicheck.cli_resolve._detect_binary_format", return_value="pe"),
+            patch("abicheck.binary_utils.detect_binary_format", return_value="pe"),
             fake_format_adapter("pe", result=mock_snap),
         ):
             runner = CliRunner()

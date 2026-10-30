@@ -908,7 +908,7 @@ class TestNoteIfSameBinaryCompared:
     def test_native_compare_cli_hashes_through_a_multi_hop_linker_script_chain(
         self, tmp_path, monkeypatch
     ):
-        """Follow-up (Codex review): `_normalize_binary_input` (called ahead
+        """Follow-up (Codex review): the linker-script follow (called ahead
         of `_finalize_compare_result` in `cli_compare_helpers.py`) only ever
         resolves one linker-script hop, while `resolve_input()` follows the
         whole chain recursively -- so a script pointing at another script

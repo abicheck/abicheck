@@ -11,12 +11,12 @@ generated: false
 belongs in `workflows/`), [ADR-063](../adr/063-one-semantic-pipeline.md)
 ("one model, any cardinality"), [ADR-065](../adr/065-comparison-scope-selection-and-completeness.md)
 (membership, scope selection and completeness).
-**Depends on:** the `ExitDecision` owner refactor (PR #1838, merged; it left every
-release site cited below unchanged) and the compare-session refactor (PR #1840, branch
-`refactor/compare-session`, continuing
-[Compare orchestration out of the CLI](compare-orchestration-workflow-seam.md), whose slice S4
-also covers release dispatch and dry-run). Phase 2 starts only after #1840 merges.
-**Status:** Phase 1 done: this mapping and the cardinality property test. Phase 2 not started.
+**Depends on:** the `ExitDecision` owner refactor (PR #1838) and the compare-session refactor
+(PR #1840, continuing [Compare orchestration out of the CLI](compare-orchestration-workflow-seam.md),
+whose slice S4 also covers release dispatch and dry-run). Both have merged.
+**Status:** Phase 1 done (PR #1837). Phase 2 in progress: P3, P9's items 10 and 12, and P2's
+gate derivation are done (see the Phase 2 table). P1 is re-scoped below. Line references in the
+duplication list are as of Phase 1; re-check them before each slice.
 **Effort:** L · **Risk:** high. `compare DIR DIR` gates releases. Every slice must leave
 outputs and exit codes byte-identical.
 
@@ -122,9 +122,13 @@ starting a slice.
    stamps `_compatibility_contribution`. The first decision is discarded. The two calls also
    differ: finalize uses `resolve_compare_exit_decision_with_abort_axes` and
    `effective_gate_for_compare(result=…)`, while the member uses plain
-   `resolve_compare_exit_decision` with `EffectiveGate.from_severity`. So abort axes (the `--abi3`
-   evidence-contract abort) are folded by different code for a member than for a scalar pair.
-   This is a parity risk with no test today. Phase 2 slice P2 closes it.
+   `resolve_compare_exit_decision` with `EffectiveGate.from_severity`. *Phase 2 correction:* the
+   different resolver is not a parity risk. The release folds the evidence-contract axis on its
+   own (`evidence_contract_error_contribution`, `policy/release_exit_decision`), so the plain
+   resolver is the right one for the compatibility contribution. And a release member never
+   carries a scoped gate (`_apply_scoped_gating` runs only in the scalar CLI's render step), so
+   the two gate derivations agree. P2 now derives the member's gate with
+   `effective_gate_for_compare` anyway, so there is one derivation.
 4. **Base exit and legacy mapping restated.** `release_exit_fold.release_compatibility_base_exit`
    (`not_comparable → 16`, the `ERROR → 4` floor, `legacy_exit_code`) restates precedence that
    `policy/release_exit_decision` and `policy/exit_decision` own. It exists only to word a stderr
@@ -207,22 +211,40 @@ is `null`, while the scalar report carries the full analysis-assurance block. Th
 does carry it. The release summary has no aggregated assurance owner yet
 ([G47](g47-analysis-assurance.md)), so the property does not compare `run_outcome`.
 
-## Phase 2 (after the exit-decision and compare-session refactors merge)
+## Phase 2
 
-Merge both branches in first, then re-check every line reference above. Slices, in order. Each
-one is behavior-preserving and lands separately:
+Slices, in order. Each one is behavior-preserving and lands separately:
 
-| Slice | Change | Removes duplication | Guard |
-|---|---|---|---|
-| P1 | `compare_member` constructs the pair session for the member (`MemberDelta` applied to the session request) instead of `member_compare_request` → `run_compare_request` | 2, 7 | `test_release_compare_workflow.py`, the property test |
-| P2 | The member's exit decision is the session's `ExitDecision` under the release gate (one call, abort-axes-aware). Delete `member_exit_decision` | 3, and closes the abort-axes parity risk | New test: a one-member `--abi3` release equals the scalar compare; `test_exit_precedence_matrix.py` |
-| P3 | Linker-script following happens once, in the session's operand resolution. Delete `normalize_member_operand`'s copy, and `cli_resolve`'s once the scalar CLI is on the session | 1 | `test_release_evaluation_config.py`, `test_compare_input_modes.py` (the note is printed exactly once) |
-| P4 | Policy and suppression are loaded once per release and handed to each session. One loader with one error type, translated by the frontend | 6 | `test_family_f2_route_parity.py` suppress and policy-file axes; error-code characterization first |
-| P5 | Severity and gate resolution: the release gate *is* the session gate | 2 (severity), 4 | `test_release_gate_pack_fold_parity.py`, `test_typed_api_gate_options.py` |
-| P6 | A member's complete report is the session's rendered report. First characterize which scalar post-processing steps change a member's output (duplication 8). Each one is either adopted, with a changelog entry for the visible change, or recorded as release-intentional | 8 | Golden tests, `test_cli_compare_release_single_pair_parity.py` |
-| P7 | Dry run: the preview renders `resolve_release_compare_plan`'s membership instead of `build_release_plan_from_directories` | 11 | New test: preview pairing equals the run's pairing over package, stored and `dso_only` operands |
-| P8 | One export writer for scalar and release documents | 9 | `test_release_output_finalization.py` |
-| P9 | Clean-up: the wording ladder (5), the not-comparable mapping (10), `resolve_release_headers` (12), the include split (13) | 5, 10, 12, 13 | Existing unit tests |
+| Slice | Change | Removes duplication | Guard | Status |
+|---|---|---|---|---|
+| P1 | Split `workflows/compare/session.py` into a run-level part and a pair-level part (see "P1, re-scoped" below). The release runs the run-level part once and the pair-level part per member, instead of `member_compare_request` → `run_compare_request` | 2, 7 | `test_release_compare_workflow.py`, the property test, `test_compare_session.py` | Next |
+| P2 | One gate derivation: `member_exit_decision` derives the member's gate with `workflows.gate.effective_gate_for_compare`, the single-pair derivation. The second per-member decision stays until P5: the member request deliberately carries no severity, and forwarding it would move the gate receipt `finalize_classified_pair` installs | 3 (derivation) | `test_release_compare_workflow.py` (`_compatibility_contribution` equals the scalar decision's under every severity axis) | Done (derivation) |
+| P3 | One linker-script follower: `binary_utils.follow_linker_script` (re-exported by `workflows.extraction`) serves the single-pair session, each release member and `dump`, and `linker_script_note` is the one wording `resolve_input` also uses. `release_members.normalize_member_operand`, `session_inputs.normalize_operand`, `cli_resolve._maybe_follow_linker_script` and `_normalize_binary_input` are deleted | 1 | `test_compare_session.py`, `test_compare_input_modes.py`, `test_release_evaluation_config.py` | Done |
+| P4 | Policy and suppression are loaded once per release and handed to each session. One loader with one error type, translated by the frontend | 6 | `test_family_f2_route_parity.py` suppress and policy-file axes; error-code characterization first | Open |
+| P5 | Severity and gate resolution: the release gate *is* the session gate | 2 (severity), 4 | `test_release_gate_pack_fold_parity.py`, `test_typed_api_gate_options.py` | Open |
+| P6 | A member's complete report is the session's rendered report. First characterize which scalar post-processing steps change a member's output (duplication 8). Each one is either adopted, with a changelog entry for the visible change, or recorded as release-intentional | 8 | Golden tests, `test_cli_compare_release_single_pair_parity.py` | Open |
+| P7 | Dry run: the preview renders `resolve_release_compare_plan`'s membership instead of `build_release_plan_from_directories` | 11 | New test: preview pairing equals the run's pairing over package, stored and `dso_only` operands | Open |
+| P8 | One export writer for scalar and release documents | 9 | `test_release_output_finalization.py` | Open |
+| P9 | Clean-up: the wording ladder (5), the not-comparable mapping (10), `resolve_release_headers` (12), the include split (13) | 5, 10, 12, 13 | Existing unit tests | 10 done (`ProfileMismatchError`/`ScopeMismatchError.not_comparable_kind`; `release_scope.mismatch_kind` deleted). 12 done (`release_inputs.release_side_headers`, one per-side rule the release path and its test share). 5 and 13 open |
+
+### P1, re-scoped
+
+Members and the scalar session already share classification: both reach
+`compare_classify.classify_resolved_pair`. What differs is the fold *before* classification. The
+scalar CLI runs `run_pair_session`, and a member runs the typed `resolve_compare_request`.
+Calling `run_pair_session` once per member as it stands would change output. The session also
+does run-level work: it reads the project config, folds `compile:`, and warns about ignored
+inputs, policy-override downgrades and `scope.public_symbols`. Per member, each of those notes
+would print N times. So P1 first splits the session into:
+
+- **run-level steps**, which the release runs once: the collect-mode fold, the compile context,
+  the policy documents, the evaluation configuration, `policy.overrides`, acknowledgments and
+  the run's notes;
+- **pair-level steps**, which run per member: operand following, resolution, out-of-band packs
+  and classification.
+
+A one-member release must still print exactly the scalar run's notes. Extend the property test
+to compare stderr before landing P1.
 
 P6 is the only slice that can *intentionally* change output. If characterization shows a scalar
 post-processing step would change a member report, that slice needs its own ADR note and

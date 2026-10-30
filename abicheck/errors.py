@@ -112,6 +112,9 @@ class ProfileMismatchError(AbicheckError):
     must report ``not_comparable`` instead of producing any verdict.
     """
 
+    #: The refusal's kind as every report spells it (ADR-050 D2).
+    not_comparable_kind = "profile_mismatch"
+
 
 class ScopeMismatchError(AbicheckError):
     """Raised by :func:`abicheck.comparability.check_contracts_comparable`
@@ -126,6 +129,9 @@ class ScopeMismatchError(AbicheckError):
       side excludes toolchain/system-header declarations
       (``dumper_scoping.py``, ``dump``'s default) and the other does not.
     """
+
+    #: The refusal's kind as every report spells it (ADR-050 D2).
+    not_comparable_kind = "scope_mismatch"
 
 
 class ManifestValidationError(AbicheckError, ValueError):

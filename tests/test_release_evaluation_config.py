@@ -133,8 +133,8 @@ class TestReleaseFanOutStampsResolvedConfig:
                 return_value=fake_result,
             ),
             patch(
-                "abicheck.workflows.release_members.normalize_member_operand",
-                side_effect=lambda p, _notice: p,
+                "abicheck.workflows.extraction.follow_linker_script",
+                side_effect=lambda p, _notice: (p, None),
             ),
         ):
             from abicheck.workflows.release_members import (

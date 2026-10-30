@@ -31,12 +31,12 @@ import click
 import pytest
 from click.testing import CliRunner
 
+from abicheck.binary_utils import resolve_linker_script as _resolve_linker_script
 from abicheck.checker import Change, DiffResult
 from abicheck.checker_policy import ChangeKind, Verdict
 from abicheck.cli import main
 from abicheck.cli_resolve import (
     _expand_header_inputs,
-    _resolve_linker_script,
     _sniff_text_format,
 )
 from abicheck.elf_metadata import ElfMetadata, ElfSymbol

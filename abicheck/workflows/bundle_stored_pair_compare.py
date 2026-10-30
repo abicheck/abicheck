@@ -52,7 +52,6 @@ if TYPE_CHECKING:
 from ..errors import ProfileMismatchError, ScopeMismatchError
 from .release_scope import (
     build_stored_baseline_scope_record,
-    mismatch_kind,
     out_of_scope_provider_names,
     restrict_bundle_facts,
     scope_manifest_to_members,
@@ -377,7 +376,7 @@ def compare_stored_bundle_facts_pair(
                 # gone rather than re-stated.
             )
         except (ProfileMismatchError, ScopeMismatchError) as exc:
-            not_comparable[key] = (mismatch_kind(exc), str(exc))
+            not_comparable[key] = (exc.not_comparable_kind, str(exc))
             continue
         if depth is not None:
             # Codex review, PR #1060, round 10: workflows.compare.
