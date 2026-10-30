@@ -79,7 +79,7 @@ class TestRunDumpHybridNormalization:
             "elf",
             side_effect=self._fake_dump_elf(castxml_snap, clang_snap),
         ):
-            result = run_dump(p, "elf", header_backend="HYBRID")
+            result = run_dump(p, "elf", frontend="HYBRID")
         assert result.ast_producer == "hybrid"
 
     def test_env_var_pin_with_auto_triggers_hybrid(self, tmp_path, monkeypatch):
@@ -146,7 +146,7 @@ class TestRunDumpHybridHeaderGraphAttachedOnce:
                 side_effect=_fake_attach,
             ),
         ):
-            result = run_dump(p, "elf", header_backend="hybrid")
+            result = run_dump(p, "elf", frontend="hybrid")
 
         # _attach_header_graph is invoked on each recursive sub-dump's OWN
         # elf path too, but with the graph disabled (header_graph=False, via
@@ -206,7 +206,7 @@ class TestRunDumpHybridDoesNotDoubleEnrichLayout:
                 side_effect=_fake_attach,
             ),
         ):
-            result = run_dump(p, "elf", header_backend="hybrid")
+            result = run_dump(p, "elf", frontend="hybrid")
 
         # attach_clang_layout is called once per recursive sub-dump's OWN
         # elf-branch tail (castxml_snap's and clang_snap's) -- never a third
@@ -273,7 +273,7 @@ class TestRunDumpDependencyScope:
         with patch(
             "abicheck.workflows.dump.native._run_dump_uncached", return_value=fake_snap
         ):
-            result = run_dump(elf_path, "elf", include_dependencies=True)
+            result = run_dump(elf_path, "elf", include_system_declarations=True)
         assert result.dependency_scope == "full"
 
     def test_run_dump_include_dependencies_false_filters(self, tmp_path):
@@ -283,7 +283,7 @@ class TestRunDumpDependencyScope:
         with patch(
             "abicheck.workflows.dump.native._run_dump_uncached", return_value=fake_snap
         ):
-            result = run_dump(elf_path, "elf", include_dependencies=False)
+            result = run_dump(elf_path, "elf", include_system_declarations=False)
         assert result.dependency_scope == "filtered"
 
     def test_run_dump_preserves_own_name_and_signature(self):
@@ -298,5 +298,5 @@ class TestRunDumpDependencyScope:
         assert run_dump.__name__ == "run_dump"
         assert run_dump.__qualname__ == "run_dump"
         sig = inspect.signature(run_dump)
-        assert "include_dependencies" in sig.parameters
-        assert sig.parameters["include_dependencies"].default is False
+        assert "include_system_declarations" in sig.parameters
+        assert sig.parameters["include_system_declarations"].default is False

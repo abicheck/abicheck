@@ -220,7 +220,6 @@ class TestCompareRequestContractContextGateReceipt:
             CompareRequest(
                 old=InputSpec(path=old),
                 new=InputSpec(path=new),
-                contract_evaluation=True,
                 **kwargs,
             )
         )
@@ -382,8 +381,7 @@ class TestCompareRequestContractContextGateReceipt:
         result = self._run(
             old,
             new,
-            policy="not_a_real_policy",
-            policy_file_path=policy_file_path,
+            policy=policy_file_path,
         )
         cfg = result.diff.contract_context.evaluation_context.resolved_config
         assert cfg.policy.base.id == "sdk_vendor"
@@ -414,10 +412,10 @@ class TestCompareRequestContractContextGateReceipt:
         with_pack = self._run(
             old,
             new,
-            policy_file_path=policy_file_path,
+            policy=policy_file_path,
             pack_policy_overrides=((ChangeKind.VAR_REMOVED, Verdict.COMPATIBLE),),
         )
-        without_pack = self._run(old, new, policy_file_path=policy_file_path)
+        without_pack = self._run(old, new, policy=policy_file_path)
         cfg = with_pack.diff.contract_context.evaluation_context.resolved_config
         # The file's own override is real receipt content...
         assert cfg.policy.overrides.get("func_removed") == Verdict.COMPATIBLE
@@ -467,7 +465,7 @@ class TestCompareRequestContractContextGateReceipt:
         result = self._run(
             old,
             new,
-            policy_file_path=policy_file_path,
+            policy=policy_file_path,
             pack_policy_overrides=((ChangeKind.VAR_REMOVED, Verdict.COMPATIBLE),),
         )
         cfg = result.diff.contract_context.evaluation_context.resolved_config
@@ -496,7 +494,7 @@ class TestCompareRequestContractContextGateReceipt:
         result = self._run(
             old,
             new,
-            policy_file_path=policy_file_path,
+            policy=policy_file_path,
             pack_internal_namespaces=("impl",),
         )
         cfg = result.diff.contract_context.evaluation_context.resolved_config
@@ -575,7 +573,7 @@ class TestCompareRequestContractContextGateReceipt:
         result = self._run(
             old,
             new,
-            policy_file_path=policy_file_path,
+            policy=policy_file_path,
             project_policy_overrides=((ChangeKind.FUNC_REMOVED, Verdict.COMPATIBLE),),
         )
         cfg = result.diff.contract_context.evaluation_context.resolved_config

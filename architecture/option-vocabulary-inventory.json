@@ -3966,17 +3966,9 @@
    "id": "CompareRequest.policy",
    "owner": "CompareRequest",
    "name": "policy",
-   "annotation": "str",
+   "annotation": "str | Path",
    "choices": null,
    "default": "'strict_abi'"
-  },
-  {
-   "id": "CompareRequest.policy_file_path",
-   "owner": "CompareRequest",
-   "name": "policy_file_path",
-   "annotation": "Path | None",
-   "choices": null,
-   "default": "None"
   },
   {
    "id": "CompareRequest.suppress",
@@ -3995,9 +3987,9 @@
    "default": "True"
   },
   {
-   "id": "CompareRequest.force_public_symbols",
+   "id": "CompareRequest.public_symbols",
    "owner": "CompareRequest",
-   "name": "force_public_symbols",
+   "name": "public_symbols",
    "annotation": "frozenset[str] | None",
    "choices": null,
    "default": "None"
@@ -4019,9 +4011,9 @@
    "default": "True"
   },
   {
-   "id": "CompareRequest.enable_debuginfod",
+   "id": "CompareRequest.debuginfod",
    "owner": "CompareRequest",
-   "name": "enable_debuginfod",
+   "name": "debuginfod",
    "annotation": "bool",
    "choices": null,
    "default": "False"
@@ -4067,19 +4059,16 @@
    "default": "False"
   },
   {
-   "id": "CompareRequest.contract_evaluation",
+   "id": "CompareRequest.contract",
    "owner": "CompareRequest",
-   "name": "contract_evaluation",
-   "annotation": "bool",
-   "choices": null,
-   "default": "True"
-  },
-  {
-   "id": "CompareRequest.contract_mode",
-   "owner": "CompareRequest",
-   "name": "contract_mode",
-   "annotation": "str | None",
-   "choices": null,
+   "name": "contract",
+   "annotation": "Literal['public', 'exports', 'all', 'auto'] | None",
+   "choices": [
+    "public",
+    "exports",
+    "all",
+    "auto"
+   ],
    "default": "None"
   },
   {
@@ -4123,9 +4112,9 @@
    "default": "[]"
   },
   {
-   "id": "CompareRequest.follow_dependencies",
+   "id": "CompareRequest.follow_deps",
    "owner": "CompareRequest",
-   "name": "follow_dependencies",
+   "name": "follow_deps",
    "annotation": "bool",
    "choices": null,
    "default": "False"
@@ -4179,9 +4168,9 @@
    "default": "None"
   },
   {
-   "id": "CompareRequest.acknowledgments_path",
+   "id": "CompareRequest.acknowledgments",
    "owner": "CompareRequest",
-   "name": "acknowledgments_path",
+   "name": "acknowledgments",
    "annotation": "Path | None",
    "choices": null,
    "default": "None"
@@ -4414,9 +4403,9 @@
    "default": "None"
   },
   {
-   "id": "DumpRequest.enable_debuginfod",
+   "id": "DumpRequest.debuginfod",
    "owner": "DumpRequest",
-   "name": "enable_debuginfod",
+   "name": "debuginfod",
    "annotation": "bool",
    "choices": null,
    "default": "False"
@@ -4438,9 +4427,9 @@
    "default": "[]"
   },
   {
-   "id": "DumpRequest.follow_dependencies",
+   "id": "DumpRequest.follow_deps",
    "owner": "DumpRequest",
-   "name": "follow_dependencies",
+   "name": "follow_deps",
    "annotation": "bool",
    "choices": null,
    "default": "False"
@@ -4550,9 +4539,9 @@
    "default": "[]"
   },
   {
-   "id": "InputSpec.include_dependencies",
+   "id": "InputSpec.include_system_declarations",
    "owner": "InputSpec",
-   "name": "include_dependencies",
+   "name": "include_system_declarations",
    "annotation": "bool",
    "choices": null,
    "default": "False"
@@ -4694,17 +4683,17 @@
    "default": "None"
   },
   {
-   "id": "run_compare(old_version)",
+   "id": "run_compare(old_label)",
    "owner": "run_compare",
-   "name": "old_version",
+   "name": "old_label",
    "annotation": "str",
    "choices": null,
    "default": "''"
   },
   {
-   "id": "run_compare(new_version)",
+   "id": "run_compare(new_label)",
    "owner": "run_compare",
-   "name": "new_version",
+   "name": "new_label",
    "annotation": "str",
    "choices": null,
    "default": "''"
@@ -4745,17 +4734,9 @@
    "id": "run_compare(policy)",
    "owner": "run_compare",
    "name": "policy",
-   "annotation": "str",
+   "annotation": "str | Path",
    "choices": null,
    "default": "'strict_abi'"
-  },
-  {
-   "id": "run_compare(policy_file_path)",
-   "owner": "run_compare",
-   "name": "policy_file_path",
-   "annotation": "Path | None",
-   "choices": null,
-   "default": "None"
   },
   {
    "id": "run_compare(old_pdb_path)",
@@ -4790,9 +4771,9 @@
    "default": "None"
   },
   {
-   "id": "run_compare(enable_debuginfod)",
+   "id": "run_compare(debuginfod)",
    "owner": "run_compare",
-   "name": "enable_debuginfod",
+   "name": "debuginfod",
    "annotation": "bool",
    "choices": null,
    "default": "False"
@@ -4806,9 +4787,9 @@
    "default": "True"
   },
   {
-   "id": "run_compare(force_public_symbols)",
+   "id": "run_compare(public_symbols)",
    "owner": "run_compare",
-   "name": "force_public_symbols",
+   "name": "public_symbols",
    "annotation": "set[str] | None",
    "choices": null,
    "default": "None"
@@ -4846,27 +4827,24 @@
    "default": "False"
   },
   {
-   "id": "run_compare(contract_evaluation)",
+   "id": "run_compare(include_system_declarations)",
    "owner": "run_compare",
-   "name": "contract_evaluation",
-   "annotation": "bool",
-   "choices": null,
-   "default": "True"
-  },
-  {
-   "id": "run_compare(include_dependencies)",
-   "owner": "run_compare",
-   "name": "include_dependencies",
+   "name": "include_system_declarations",
    "annotation": "bool",
    "choices": null,
    "default": "False"
   },
   {
-   "id": "run_compare(contract_mode)",
+   "id": "run_compare(contract)",
    "owner": "run_compare",
-   "name": "contract_mode",
-   "annotation": "str | None",
-   "choices": null,
+   "name": "contract",
+   "annotation": "Literal['public', 'exports', 'all', 'auto'] | None",
+   "choices": [
+    "public",
+    "exports",
+    "all",
+    "auto"
+   ],
    "default": "None"
   },
   {
@@ -4950,9 +4928,9 @@
    "default": "[]"
   },
   {
-   "id": "run_compare(acknowledgments_path)",
+   "id": "run_compare(acknowledgments)",
    "owner": "run_compare",
-   "name": "acknowledgments_path",
+   "name": "acknowledgments",
    "annotation": "Path | None",
    "choices": null,
    "default": "None"
@@ -5062,9 +5040,9 @@
    "default": "None"
   },
   {
-   "id": "run_dump(enable_debuginfod)",
+   "id": "run_dump(debuginfod)",
    "owner": "run_dump",
-   "name": "enable_debuginfod",
+   "name": "debuginfod",
    "annotation": "bool",
    "choices": null,
    "default": "False"
@@ -5118,9 +5096,9 @@
    "default": "None"
   },
   {
-   "id": "run_dump(header_backend)",
+   "id": "run_dump(frontend)",
    "owner": "run_dump",
-   "name": "header_backend",
+   "name": "frontend",
    "annotation": "str",
    "choices": null,
    "default": "'auto'"
@@ -5166,9 +5144,9 @@
    "default": "None"
   },
   {
-   "id": "run_dump(include_dependencies)",
+   "id": "run_dump(include_system_declarations)",
    "owner": "run_dump",
-   "name": "include_dependencies",
+   "name": "include_system_declarations",
    "annotation": "bool",
    "choices": null,
    "default": "False"

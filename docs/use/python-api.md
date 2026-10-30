@@ -82,16 +82,15 @@ will reach for most often:
 | `old_input` / `new_input` | `Path` | — | Binary (`.so`/`.dll`/`.dylib`) or a `.abi.json` snapshot |
 | `old_headers` / `new_headers` | `list[Path]` | `None` | Public headers for `L2` API analysis (`-H` on the CLI) |
 | `old_includes` / `new_includes` | `list[Path]` | `None` | Extra include dirs passed to the header parser (`-I`) |
-| `old_version` / `new_version` | `str` | `""` | Version labels recorded in the snapshots |
+| `old_label` / `new_label` | `str` | `""` | Version labels recorded in the snapshots (each side's `InputSpec.version`) |
 | `lang` | `str` | `"c++"` | Header language mode (`"c++"` or `"c"`) |
 | `frontend` | `str` | `"auto"` | Header-AST frontend: `"auto"`, `"castxml"`, `"clang"`, or `"hybrid"` (runs castxml and clang together and merges them). (A fifth value, `"android"`, is source-ABI-only — it needs source inputs and is rejected by `run_compare`, which has no source-input path.) |
-| `policy` | `str` | `"strict_abi"` | Built-in policy profile (`strict_abi`, `sdk_vendor`, `plugin_abi`) |
-| `policy_file_path` | `Path` | `None` | Custom YAML policy file |
+| `policy` | `str` or `Path` | `"strict_abi"` | A built-in profile (`strict_abi`, `sdk_vendor`, `plugin_abi`), or a policy document: a YAML path, or a packaged built-in such as `security`. Resolved exactly as the CLI's `--policy NAME\|PATH`. |
 | `suppress` | `Path` | `None` | Suppression file (YAML or ABICC format) |
 | `scope_to_public_surface` | `bool` | `True` | Restrict findings to the public ABI surface |
-| `enable_debuginfod` | `bool` | `False` | Resolve debug info via debuginfod |
+| `debuginfod` | `bool` | `False` | Resolve debug info via debuginfod |
 | `pattern_verdicts` | `bool` | `True` | Score findings with pattern verdicts (the CLI default). `False` returns raw detector output. |
-| `contract_evaluation` | `bool` | `True` | Judge each finding's contract relevance (the CLI default). `False` skips it. |
+| `contract` | `str` or `None` | `None` | The evidence domain each finding is judged against: `public`, `exports`, `all`, or `auto` (no domain stated, the same as `None`). Contract relevance is always evaluated, as the CLI does. |
 
 Both defaults are the same on `run_compare` and on `CompareRequest`, and
 `run_compare_request` and the history workflow use them too. The Tier-1
@@ -145,13 +144,13 @@ from abicheck.service import load_suppression_and_policy, compare_snapshots
 
 suppression, policy_file = load_suppression_and_policy(
     suppress=Path("suppressions.yaml"),
-    policy_file_path=Path("policy.yaml"),
+    policy=Path("policy.yaml"),
 )
 result = compare_snapshots(old, new, suppression, policy_file=policy_file)
 ```
 
 If you only have file paths and don't want to pre-load them, call `run_compare`
-(or `run_compare_request`) instead — it accepts `suppress=`/`policy_file_path=`
+(or `run_compare_request`) instead — it accepts `suppress=`/`policy=`
 as paths and does the loading for you. Snapshots are serialised as `.abi.json`;
 see [Snapshot Format](../reference/snapshot-format.md) for the on-disk contract
 and current `schema_version`, [Output Formats](output-formats.md) for the
@@ -231,15 +230,15 @@ snapshot = run_dump_request(request)
 
 Key `DumpRequest` fields, beyond the `InputSpec` it wraps (`path`,
 `headers`, `includes`, `version`, `pdb`, `debug_roots`,
-`include_dependencies`, `sources`, `build_info`, `dump_manifest`,
+`include_system_declarations`, `sources`, `build_info`, `dump_manifest`,
 `compile`, `public_header_dirs`):
 
 | Field | Meaning |
 |---|---|
 | `depth` | `binary`/`headers`/`build`/`source` — an explicit value is an **enforced floor**: `run_dump_request` raises `ValidationError` if the resolved snapshot's evidence doesn't actually reach it, the same guarantee the CLI's `dump --depth` gives via `DumpDepthNotSatisfiedError` (a different exception type, since Tier-2 has no `ClickException` concept — same guarantee, different vocabulary). |
 | `frontend` | Header-AST frontend: `auto`/`castxml`/`clang`/`hybrid`, plus a fifth, source-ABI-only value `android` — rejected unless the request also carries source evidence (`has_sources=True` or `sources`/`build_info` set), since `android` has no header-AST extraction path of its own. |
-| `dwarf_only` / `debug_format` / `enable_debuginfod` / `debuginfod_url` | Debug-info resolution knobs. |
-| `follow_dependencies` / `dependency_search_paths` | Dependency-closure walk. |
+| `dwarf_only` / `debug_format` / `debuginfod` / `debuginfod_url` | Debug-info resolution knobs. |
+| `follow_deps` / `dependency_search_paths` | Dependency-closure walk. |
 | `has_sources` | Legacy flag consulted by the `android` frontend's source-evidence rule. |
 
 The exhaustive, generated field/type/default table for `DumpRequest` (and
@@ -269,8 +268,7 @@ from abicheck.service import (
 request = CompareRequest(
     old=InputSpec(path=Path("libfoo.so.1")),
     new=InputSpec(path=Path("libfoo.so.2")),
-    contract_evaluation=True,
-    contract_mode="public",
+    contract="public",
 )
 
 # One call, the normal case:
@@ -307,8 +305,7 @@ result = run_compare_request(CompareRequest(
     old=InputSpec.of(Path("baseline.json")),
     new=InputSpec.of(Path("build/libfoo.so"), headers=[Path("include/")]),
     depth="headers",
-    contract_evaluation=True,
-    contract_mode="exports",
+    contract="exports",
 ))
 ```
 
@@ -351,7 +348,7 @@ table as "where the capability is reachable today":
 |---|---|---|
 | Depth floor | `dump --depth` → `DumpDepthNotSatisfiedError` | `DumpRequest.depth`/`CompareRequest.depth` → `ValidationError` |
 | Not comparable | exit code `16` | raises `ProfileMismatchError`/`ScopeMismatchError` |
-| Contract evaluation | `--contract {public,exports,all,auto}` | `CompareRequest.contract_evaluation`/`.contract_mode` (the typed API still needs both, and has no `auto`) |
+| Contract evaluation | `--contract {public,exports,all,auto}` | `CompareRequest.contract` (the same value set, `auto` included) |
 | Consumer scoping | `compare --used-by` | `abicheck.workflows.consumer_scope.scope_diff_to_app(...)` — no `CompareRequest` field, a post-classification step |
 
 One asymmetry worth knowing about, not a bug to work around:

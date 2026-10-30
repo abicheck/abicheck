@@ -111,11 +111,11 @@ class TestCompareRequestDefaults:
         assert req.frontend == "auto"
         assert req.has_sources is False
         assert req.policy == "strict_abi"
-        assert req.policy_file_path is None
+        assert req.policy_document is None
         assert req.suppress is None
-        assert req.force_public_symbols is None
+        assert req.public_symbols is None
         assert req.pattern_verdicts is True
-        assert req.enable_debuginfod is False
+        assert req.debuginfod is False
         # ADR-055 D1
         assert req.depth is None
         assert req.frontend_context == "host"
@@ -127,7 +127,7 @@ class TestCompareRequestDefaults:
         assert req.dwarf_only is False
         assert req.debug_format is None
         assert req.include_labels == ()
-        assert req.follow_dependencies is False
+        assert req.follow_deps is False
         assert req.dependency_search_paths == ()
         assert req.ld_library_path == ""
 
@@ -290,16 +290,16 @@ class TestCompareRequestValidate:
         # from CLI and MCP (one Tier-2 rule).
         missing = tmp_path / "nope.yml"
         req = CompareRequest(
-            old=InputSpec.of("a"), new=InputSpec.of("b"), policy_file_path=missing
+            old=InputSpec.of("a"), new=InputSpec.of("b"), policy=missing
         )
         errors = req.validation_errors()
-        assert any("policy file not found" in e for e in errors)
+        assert any("no such file" in e for e in errors)
 
     def test_existing_policy_file_accepted(self, tmp_path):
         present = tmp_path / "policy.yml"
         present.write_text("base_policy: strict_abi\n")
         req = CompareRequest(
-            old=InputSpec.of("a"), new=InputSpec.of("b"), policy_file_path=present
+            old=InputSpec.of("a"), new=InputSpec.of("b"), policy=present
         )
         assert req.validation_errors() == []
 

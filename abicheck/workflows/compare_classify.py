@@ -218,13 +218,13 @@ def classify_resolved_pair(
         old,
         new,
         suppression=policy.suppression,
-        policy=request.policy,
+        policy=request.policy_profile,
         policy_file=policy.policy_file,
         acknowledgments=policy.acknowledgments.records,
         acknowledgment_policy=policy.acknowledgments.policy,
         scope_to_public_surface=scope_public,
         force_public_symbols=(
-            set(request.force_public_symbols) if request.force_public_symbols else None
+            set(request.public_symbols) if request.public_symbols else None
         ),
         extra_changes=extra_changes,
         public_surface_allowlist=(
@@ -241,8 +241,10 @@ def classify_resolved_pair(
         collapse_versioned_symbols=request.collapse_versioned_symbols,
         env_matrix=request.env_matrix,
         diagnostic_comparison=request.diagnostic_comparison,
-        contract_evaluation=request.contract_evaluation,
-        contract_mode=request.contract_mode,
+        # ADR-091 R10: contract relevance is always evaluated, as the CLI does;
+        # the typed request no longer carries an opt-out to forward.
+        contract_evaluation=True,
+        contract_mode=request.contract,
     )
     if folded.layer_coverage_rows:
         result.layer_coverage = folded.layer_coverage_rows

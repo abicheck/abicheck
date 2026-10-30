@@ -963,7 +963,7 @@ class TestWrapRunDumpWithDependencyScope:
     def test_explicit_include_dependencies_true_tags_full(self):
         snap = AbiSnapshot(library="lib.so", version="1.0", from_headers=True)
         run_dump = wrap_run_dump_with_dependency_scope(self._uncached(snap))
-        result = run_dump(Path("/lib.so"), "elf", include_dependencies=True)
+        result = run_dump(Path("/lib.so"), "elf", include_system_declarations=True)
         assert result.dependency_scope == "full"
 
     def test_include_dependencies_false_filters(self):
@@ -977,7 +977,7 @@ class TestWrapRunDumpWithDependencyScope:
             ],
         )
         run_dump = wrap_run_dump_with_dependency_scope(self._uncached(snap))
-        result = run_dump(Path("/lib.so"), "elf", include_dependencies=False)
+        result = run_dump(Path("/lib.so"), "elf", include_system_declarations=False)
         assert result.dependency_scope == "filtered"
         assert [f.name for f in result.declarations.functions] == ["run"]
 
@@ -1017,7 +1017,7 @@ class TestWrapRunDumpWithDependencyScope:
 
         run_dump = wrap_run_dump_with_dependency_scope(_fn)
         assert not streaming_prune_suppressed()  # not leaked before the call
-        run_dump(Path("/lib.so"), "elf", include_dependencies=True)
+        run_dump(Path("/lib.so"), "elf", include_system_declarations=True)
         assert observed == [True]
         assert not streaming_prune_suppressed()  # not leaked after the call
 
@@ -1046,7 +1046,7 @@ class TestWrapRunDumpWithDependencyScope:
             return AbiSnapshot(library="lib.so", version="1.0", from_headers=True)
 
         run_dump = wrap_run_dump_with_dependency_scope(_fn)
-        run_dump(Path("/lib.so"), "elf", include_dependencies=False)
+        run_dump(Path("/lib.so"), "elf", include_system_declarations=False)
         assert observed == [False]
 
     def test_headers_recovered_regardless_of_positional_or_keyword(self):
@@ -1063,10 +1063,10 @@ class TestWrapRunDumpWithDependencyScope:
         run_dump = wrap_run_dump_with_dependency_scope(self._uncached(snap))
 
         by_positional = run_dump(
-            Path("/lib.so"), "elf", [root], [], include_dependencies=False
+            Path("/lib.so"), "elf", [root], [], include_system_declarations=False
         )
         by_keyword = run_dump(
-            Path("/lib.so"), "elf", headers=[root], include_dependencies=False
+            Path("/lib.so"), "elf", headers=[root], include_system_declarations=False
         )
         assert [f.name for f in by_positional.declarations.functions] == ["mylib_run"]
         assert [f.name for f in by_keyword.declarations.functions] == ["mylib_run"]
@@ -1095,7 +1095,10 @@ class TestWrapRunDumpWithDependencyScope:
         )
 
         result = run_dump(
-            Path("/lib.so"), "elf", include_dependencies=False, dump_manifest=manifest
+            Path("/lib.so"),
+            "elf",
+            include_system_declarations=False,
+            dump_manifest=manifest,
         )
         assert [f.name for f in result.declarations.functions] == ["mylib_run"]
 
@@ -1127,7 +1130,7 @@ class TestWrapRunDumpWithDependencyScope:
         result = run_dump(
             Path("/lib.so"),
             "elf",
-            include_dependencies=False,
+            include_system_declarations=False,
             public_header_dirs=[root],
         )
         assert [f.name for f in result.declarations.functions] == ["mylib_run"]
@@ -1150,7 +1153,7 @@ class TestWrapRunDumpWithDependencyScope:
         result = run_dump(
             Path("/lib.so"),
             "elf",
-            include_dependencies=False,
+            include_system_declarations=False,
             public_headers=[header],
         )
         assert [f.name for f in result.declarations.functions] == ["mylib_run"]

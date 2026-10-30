@@ -82,9 +82,17 @@ def test_run_compare_builds_the_default_request(
 def test_chokepoint_defaults_like_compare_request() -> None:
     # The chokepoint still restates these two defaults as literals; this keeps
     # them equal to the request's until it derives them the same way.
-    for name in ("pattern_verdicts", "contract_evaluation"):
-        expected = _request_default(name)
-        assert inspect.signature(compare_snapshots).parameters[name].default == expected
+    expected = _request_default("pattern_verdicts")
+    assert (
+        inspect.signature(compare_snapshots).parameters["pattern_verdicts"].default
+        == expected
+    )
+    # ADR-091 R10: the request no longer carries contract_evaluation; contract
+    # relevance is always evaluated, so the chokepoint's own default is True.
+    assert (
+        inspect.signature(compare_snapshots).parameters["contract_evaluation"].default
+        is True
+    )
 
 
 def test_core_compare_keeps_its_raw_defaults() -> None:

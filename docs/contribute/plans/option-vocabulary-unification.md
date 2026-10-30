@@ -240,6 +240,18 @@ Update (#1857): `dump` and `project capture-variants` now take `--set` (see the 
 
 Each lands with its old spelling removed (D7 amendment: no alias). Size: M.
 
+**Result (2026-10-30, Python part of R2 and R10).** The typed `policy` takes a
+built-in profile name or a policy document and resolves them exactly as the
+CLI's `--policy NAME|PATH` (`abicheck/workflows/policy_operand.py`,
+`resolve_policy_operand`, the same rule as `PolicyFileParam`). `policy_file_path`
+is gone from `CompareRequest` and `run_compare`. `contract` replaces
+`contract_evaluation`/`contract_mode` with the CLI's value set, `auto` included
+(folded to `None`, as `resolve_contract_domain` does). Contract relevance is
+always evaluated, so the opt-out is removed; the release layer refuses
+`contract_evaluation=False` with a `ValidationError`. The equivalence and rename
+tests are `tests/test_adr091_python_renames.py`. The Action half of R2
+(`policy` + `policy-file`) is still open.
+
 ## Phase 4 — Renames (D5; no aliases, see the D7 amendment)
 
 One PR per surface keeps review small:
@@ -263,6 +275,23 @@ One PR per surface keeps review small:
   `public_symbols`, R18 `run_dump(frontend=)`. Old keyword arguments are
   removed outright (an unexpected-keyword `TypeError`);
   `python-api-reference.md` regenerated.
+
+**Result (2026-10-30, Python part).** Renamed outright, with no alias: R1
+`run_compare(old_label, new_label)` (`InputSpec.version` and `run_dump(version)`
+stay, per the ADR text); R3 `acknowledgments`; R7 `public_symbols`; R8
+`follow_deps` (`CompareRequest`/`DumpRequest`) and `include_system_declarations`
+(`InputSpec`, `run_compare`, `run_dump`); R9 `debuginfod`; R10 `contract`; R18
+`run_dump(frontend=)`. Each old spelling is in `scripts/retired_surfaces_0_7.py`
+and the typed-API table of `docs/start/upgrading-to-0.7.md`. The gate's exceptions
+for these ids are removed. Not done here, each recorded in the gate: R19 (the
+flattened and sided Python names, whose leaf-versus-full-path mapping needs a
+decision per name), `run_dump(public_headers)` (R18 review: `run_dump` already has
+a `headers` parameter, so `headers` would collide), `ReleaseCompareRequest` and
+`ReleaseMemberCompareRequest` (they keep their own spellings and translate at the
+boundary), and the `resolve_input`/`compare_snapshots`/`load_suppression_and_policy`
+keyword spellings (public functions outside the typed-request surface). The
+follow_deps name is recorded as a named R8 exception: the leaf `follow` alone is
+ambiguous across the deps block.
 
 Each PR: registry exceptions removed, changelog fragment (Changed /
 Removed), `docs/start/upgrading-*.md` migration table updated, and the

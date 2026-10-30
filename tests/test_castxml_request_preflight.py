@@ -67,7 +67,7 @@ def test_missing_castxml_fails_before_extraction(
     monkeypatch, spy, tmp_path, backend, via
 ):
     _hide_castxml(monkeypatch)
-    kwargs: dict = {"header_backend": backend}
+    kwargs: dict = {"frontend": backend}
     if via == "headers":
         kwargs["headers"] = [_header(tmp_path)]
     else:
@@ -85,7 +85,7 @@ def test_missing_castxml_fails_before_extraction(
         {},
         {"headers": "H", "dwarf_only": True},
         {"headers": "H", "symbols_only": True},
-        {"headers": "H", "header_backend": "clang"},
+        {"headers": "H", "frontend": "clang"},
     ],
     ids=["no-headers", "dwarf-only", "symbols-only", "clang-backend"],
 )
@@ -234,7 +234,7 @@ def test_unsupported_castxml_fails_before_extraction(
             tmp_path / "lib.so",
             "elf",
             headers=[_header(tmp_path)],
-            header_backend=backend,
+            frontend=backend,
         )
     assert ">=0.6.11" in str(exc.value)
     assert "PyPI" in str(exc.value)
@@ -303,7 +303,7 @@ def test_fallback_not_opted_in_names_the_opt_ins(monkeypatch, spy, tmp_path):
     [
         {"dwarf_only": True},
         {"symbols_only": True},
-        {"header_backend": "clang"},
+        {"frontend": "clang"},
     ],
     ids=["dwarf-only", "symbols-only", "clang-backend"],
 )

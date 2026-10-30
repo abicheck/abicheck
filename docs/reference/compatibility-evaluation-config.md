@@ -142,18 +142,18 @@ the shadowed input is retained in the receipt
 | Pair | Winner | Why |
 |---|---|---|
 | `--policy` + `--policy` | the file's `base_policy` | D7, verbatim: `--policy` "keeps winning as documented and tested today". `--policy`'s own help text already says it is ignored then. |
-| `contract_mode` + `scope_public` (typed API) | the explicit `contract_mode` | The Phase 6 flag documents that "an explicit value outranks those". The CLI half of this pair (the public-header scoping flags) was deleted in one-comparison-product Phase 9b; a CLI run states the legacy alias only through `.abicheck.yml`'s `scope.public`, which `--contract` outranks by ordinary tier order. |
+| `contract` + `scope_public` (typed API) | the explicit `contract` | The Phase 6 flag documents that "an explicit value outranks those". The CLI half of this pair (the public-header scoping flags) was deleted in one-comparison-product Phase 9b; a CLI run states the legacy alias only through `.abicheck.yml`'s `scope.public`, which `--contract` outranks by ordinary tier order. |
 
 ## Where each field comes from
 
 | Field | CLI | API (`CompareRequest`) | `.abicheck.yml` | Pack |
 |---|---|---|---|---|
-| `contract.mode` | `--contract` | `contract_mode`; `scope_public` | `scope.public` | — |
+| `contract.mode` | `--contract` | `contract`; `scope_public` | `scope.public` | — |
 | `contract.unresolved` | — | — | — | `contract` |
 | `contract.overlays` | — | — | — | `contract` |
 | `contract.packs` | *(pack paths)* | — | — | — |
 | `surface.internal_namespaces` | `--policy` | — | — | `contract` |
-| `surface.explicit_scope` | `scope.public_symbols`, `scope.public_symbols` | `force_public_symbols` | `scope.public_symbols` | — |
+| `surface.explicit_scope` | `scope.public_symbols`, `scope.public_symbols` | `public_symbols` | `scope.public_symbols` | — |
 | `assurance.require_evidence` | — | — | — | `contract` |
 | `policy.base` | `--policy` `base_policy`; legacy `--policy` | `policy` | — | — |
 | `policy.overrides` | `--policy` `overrides:` | — | — | `policy` |

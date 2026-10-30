@@ -39,8 +39,22 @@ def _delta(i: int = 0) -> MemberDelta:
 def test_every_request_field_is_a_run_compare_keyword() -> None:
     # The public keyword API must still accept every release field, so a
     # release member never carries a setting a single-pair caller cannot pass.
+    # ADR-091: a release field may be spelled differently on the keyword API;
+    # `contract_evaluation` has no keyword because the release layer refuses it.
+    renamed = {
+        "old_version": "old_label",
+        "new_version": "new_label",
+        "policy_file_path": "policy",
+        "include_dependencies": "include_system_declarations",
+        "acknowledgments_path": "acknowledgments",
+        "contract_mode": "contract",
+    }
     params = set(inspect.signature(compare_execute.run_compare).parameters)
-    fields = {f.name for f in dataclasses.fields(ReleaseMemberCompareRequest)}
+    fields = {
+        renamed.get(f.name, f.name)
+        for f in dataclasses.fields(ReleaseMemberCompareRequest)
+        if f.name != "contract_evaluation"
+    }
     assert fields <= params, fields - params
 
 

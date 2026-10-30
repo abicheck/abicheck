@@ -88,13 +88,15 @@ def test_inner_extraction_sees_only_its_own_scope(
     dump = _make_dump(seen)
 
     def _inner() -> AbiSnapshot:
-        return dump(headers=[Path(_PROJECT_HEADER)], include_dependencies=inner)
+        return dump(headers=[Path(_PROJECT_HEADER)], include_system_declarations=inner)
 
     if outer is None:
         snap = _inner()
     else:
         outer_dump = wrap_run_dump_with_dependency_scope(lambda headers=None: _inner())
-        snap = outer_dump(headers=[Path(_PROJECT_ROOT)], include_dependencies=outer)
+        snap = outer_dump(
+            headers=[Path(_PROJECT_ROOT)], include_system_declarations=outer
+        )
         seen = seen[:1]
 
     prune_off, project_skip, system_skip = seen[0]
@@ -142,8 +144,8 @@ class TestCliHybridLegsKeepTheFullSurface:
                 so,
                 "elf",
                 headers=[header],
-                header_backend="hybrid",
-                include_dependencies=include_dependencies,
+                frontend="hybrid",
+                include_system_declarations=include_dependencies,
             )
 
         assert sorted(frontend for frontend, _ in legs) == ["castxml", "clang"]

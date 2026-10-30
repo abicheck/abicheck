@@ -60,6 +60,28 @@ _COMPARABLE = sorted(c for c in CORPUS if c != "scope_mismatch")
 _AXES = ("default", "policy_sdk_vendor", "policy_file", "suppress", "severity_strict")
 _REQUEST_FIELDS = {"severity_preset"}
 
+#: ADR-091: the release run keeps its own option spellings, so the shared axes,
+#: which arrive under CompareRequest's names, are translated here.
+_RELEASE_OPTION_NAME = {
+    "contract": "contract_mode",
+    "acknowledgments": "acknowledgments_path",
+    "debuginfod": "enable_debuginfod",
+    "follow_deps": "follow_dependencies",
+    "include_system_declarations": "include_dependencies",
+    "public_symbols": "force_public_symbols",
+}
+
+
+def _release_option_fields(axis_fields: dict[str, Any]) -> dict[str, Any]:
+    out: dict[str, Any] = {}
+    for name, value in axis_fields.items():
+        if name == "policy" and isinstance(value, Path):
+            out["policy_file_path"] = value
+        else:
+            out[_RELEASE_OPTION_NAME.get(name, name)] = value
+    return out
+
+
 #: Every cardinality 1..3, each a rotation of the corpus so every case
 #: appears at every position.
 _ASSIGNMENTS = [
@@ -89,6 +111,7 @@ def _write_release(root: Path, assignment: tuple[str, ...]) -> list[tuple[Path, 
 
 
 def _run_release(root: Path, axis_fields: dict[str, Any]) -> ReleaseCompareOutcome:
+    axis_fields = _release_option_fields(axis_fields)
     request_fields = {k: v for k, v in axis_fields.items() if k in _REQUEST_FIELDS}
     option_fields = {k: v for k, v in axis_fields.items() if k not in _REQUEST_FIELDS}
     plan = resolve_release_compare_plan(

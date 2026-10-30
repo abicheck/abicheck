@@ -206,12 +206,12 @@
       "abicheck/type_reachability.py": "1fe18d38eef5ebed444a3aac59247f72bbef677755652be333cb631dceaeb0c2",
       "abicheck/type_reachability_spelling.py": "1bd700f854cf9021fc30b577f4ddf3d22095c07b0c7a9bd90c497f8a8eb018a7",
       "abicheck/type_reachability_stdlib_spellings.py": "e20c1ffc6055602a97021b50fc496bd9892231bf6b437fb2a8e319cc3535f470",
-      "abicheck/workflows/compare/resolve.py": "dc0381227c9e8dacaa39858d3f534ff45cbb3177f9b8645a8728c3f25c460793",
+      "abicheck/workflows/compare/resolve.py": "1b33ff59c379c2fc7cc48a5b5908b701be4b878c68c46f28bba8c7bd5f0ff97d",
       "abicheck/workflows/elf_dependency_resolver.py": "69cdd9d8129410f824768fdc67ab14b2836761552fe300b63ebb0e290ee3a0b5"
     },
-    "fingerprint": "fa1123975a74c317556782ccbe9be9b01429e88841979d9a345919cf83b75217",
+    "fingerprint": "5cf77eb62d8a367b298d011e68b395e5d26936bfe4175cce5a3078a37f0ef738",
     "generation": 3,
-    "reason": "dead-code cleanup: removed unread parameters, dead functions and unreachable code; no extracted fact changes"
+    "reason": "ADR-091 Phase 4 Python renames: keyword and field renames only, no change to what is resolved"
   },
   "source": {
     "files": {

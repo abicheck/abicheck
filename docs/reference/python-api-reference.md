@@ -17,34 +17,32 @@ A fully-specified comparison request — the single input to ``run_compare``.
 | `lang` | `str` | `'c++'` |
 | `frontend` | `str` | `'auto'` |
 | `has_sources` | `bool` | `False` |
-| `policy` | `str` | `'strict_abi'` |
-| `policy_file_path` | `Path \| None` | `None` |
+| `policy` | `str \| Path` | `'strict_abi'` |
 | `suppress` | `Path \| tuple[Path, ...] \| None` | `None` |
 | `scope_public` | `bool` | `True` |
-| `force_public_symbols` | `frozenset[str] \| None` | `None` |
+| `public_symbols` | `frozenset[str] \| None` | `None` |
 | `public_surface_allowlist` | `frozenset[str] \| None` | `None` |
 | `pattern_verdicts` | `bool` | `True` |
-| `enable_debuginfod` | `bool` | `False` |
+| `debuginfod` | `bool` | `False` |
 | `debuginfod_url` | `str \| None` | `None` |
 | `config_overrides` | `Mapping[str, object]` | `mappingproxy({})` |
 | `env_matrix` | `EnvironmentMatrix \| None` | `None` |
 | `diagnostic_comparison` | `bool` | `False` |
 | `require_same_generation` | `bool` | `False` |
-| `contract_evaluation` | `bool` | `True` |
-| `contract_mode` | `str \| None` | `None` |
+| `contract` | `ContractDomain \| None` | `None` |
 | `depth` | `str \| None` | `None` |
 | `budget_s` | `float \| None` | `None` |
 | `dwarf_only` | `bool` | `False` |
 | `debug_format` | `str \| None` | `None` |
 | `include_labels` | `tuple[tuple[Path, str], ...]` | `()` |
-| `follow_dependencies` | `bool` | `False` |
+| `follow_deps` | `bool` | `False` |
 | `dependency_search_paths` | `tuple[Path, ...]` | `()` |
 | `ld_library_path` | `str` | `''` |
 | `frontend_context` | `str` | `'host'` |
 | `lang_explicit` | `bool` | `False` |
 | `pack_policy_overrides` | `tuple[tuple[ChangeKind, Verdict], ...] \| None` | `None` |
 | `project_policy_overrides` | `tuple[tuple[ChangeKind, Verdict], ...] \| None` | `None` |
-| `acknowledgments_path` | `Path \| None` | `None` |
+| `acknowledgments` | `Path \| None` | `None` |
 | `acknowledgment_unacknowledged_additions` | `str \| None` | `None` |
 | `acknowledgment_breaks` | `str \| None` | `None` |
 | `strict_suppressions` | `bool` | `False` |
@@ -131,10 +129,10 @@ A fully-specified snapshot-extraction request — the input to ``run_dump_reques
 | `depth` | `str \| None` | `None` |
 | `dwarf_only` | `bool` | `False` |
 | `debug_format` | `str \| None` | `None` |
-| `enable_debuginfod` | `bool` | `False` |
+| `debuginfod` | `bool` | `False` |
 | `debuginfod_url` | `str \| None` | `None` |
 | `include_labels` | `tuple[tuple[Path, str], ...]` | `()` |
-| `follow_dependencies` | `bool` | `False` |
+| `follow_deps` | `bool` | `False` |
 | `dependency_search_paths` | `tuple[Path, ...]` | `()` |
 | `ld_library_path` | `str` | `''` |
 | `frontend_context` | `str` | `'host'` |
@@ -157,7 +155,7 @@ One side of a comparison: a binary/snapshot path plus its build context.
 | `version` | `str` | `''` |
 | `pdb` | `Path \| None` | `None` |
 | `debug_roots` | `tuple[Path, ...]` | `()` |
-| `include_dependencies` | `bool` | `False` |
+| `include_system_declarations` | `bool` | `False` |
 | `sources` | `Path \| None` | `None` |
 | `build_info` | `Path \| None` | `None` |
 | `build_targets` | `tuple[str, ...]` | `()` |
@@ -438,28 +436,26 @@ Compare two ABI inputs and return the classified diff result.
 | `new_headers` | `list[Path] \| None` | `None` |
 | `old_includes` | `list[Path] \| None` | `None` |
 | `new_includes` | `list[Path] \| None` | `None` |
-| `old_version` | `str` | `''` |
-| `new_version` | `str` | `''` |
+| `old_label` | `str` | `''` |
+| `new_label` | `str` | `''` |
 | `lang` | `str` | `'c++'` |
 | `lang_explicit` | `bool` | `False` |
 | `frontend` | `str` | `'auto'` |
 | `suppress` | `Path \| tuple[Path, ...] \| None` | `None` |
-| `policy` | `str` | `'strict_abi'` |
-| `policy_file_path` | `Path \| None` | `None` |
+| `policy` | `str \| Path` | `'strict_abi'` |
 | `old_pdb_path` | `Path \| None` | `None` |
 | `new_pdb_path` | `Path \| None` | `None` |
 | `old_debug_roots` | `list[Path] \| None` | `None` |
 | `new_debug_roots` | `list[Path] \| None` | `None` |
-| `enable_debuginfod` | `bool` | `False` |
+| `debuginfod` | `bool` | `False` |
 | `scope_to_public_surface` | `bool` | `True` |
-| `force_public_symbols` | `set[str] \| None` | `None` |
+| `public_symbols` | `set[str] \| None` | `None` |
 | `pattern_verdicts` | `bool` | `True` |
 | `public_surface_allowlist` | `set[str] \| None` | `None` |
 | `debuginfod_url` | `str \| None` | `None` |
 | `diagnostic_comparison` | `bool` | `False` |
-| `contract_evaluation` | `bool` | `True` |
-| `include_dependencies` | `bool` | `False` |
-| `contract_mode` | `str \| None` | `None` |
+| `include_system_declarations` | `bool` | `False` |
+| `contract` | `ContractDomain \| None` | `None` |
 | `pack_policy_overrides` | `dict[Any, Any] \| None` | `None` |
 | `pack_internal_namespaces` | `tuple[str, ...] \| None` | `None` |
 | `compile_context` | `CompileContext \| None` | `None` |
@@ -471,7 +467,7 @@ Compare two ABI inputs and return the classified diff result.
 | `project_policy_overrides` | `dict[Any, Any] \| None` | `None` |
 | `env_matrix` | `EnvironmentMatrix \| None` | `None` |
 | `exclude_headers` | `tuple[str, ...]` | `()` |
-| `acknowledgments_path` | `Path \| None` | `None` |
+| `acknowledgments` | `Path \| None` | `None` |
 | `acknowledgment_unacknowledged_additions` | `str \| None` | `None` |
 | `acknowledgment_breaks` | `str \| None` | `None` |
 | `config_overrides` | `Mapping[str, object] \| None` | `None` |
@@ -505,20 +501,20 @@ Extract an ABI snapshot from a native binary (ELF, PE, or Mach-O).
 | `pdb_path` | `Path \| None` | `None` |
 | `dwarf_only` | `bool` | `False` |
 | `debug_roots` | `list[Path] \| None` | `None` |
-| `enable_debuginfod` | `bool` | `False` |
+| `debuginfod` | `bool` | `False` |
 | `debuginfod_url` | `str \| None` | `None` |
 | `debug_format` | `str \| None` | `None` |
 | `symbols_only` | `bool` | `False` |
 | `debug_presence_only` | `bool` | `False` |
 | `public_headers` | `list[Path] \| None` | `None` |
 | `public_header_dirs` | `list[Path] \| None` | `None` |
-| `header_backend` | `str` | `'auto'` |
+| `frontend` | `str` | `'auto'` |
 | `compile` | `CompileContext \| None` | `None` |
 | `notify` | `Callable[[str], None] \| None` | `None` |
 | `include_labels` | `dict[Path, str] \| None` | `None` |
 | `dump_manifest` | `DumpManifest \| None` | `None` |
 | `public_include_search_dirs` | `list[Path] \| None` | `None` |
-| `include_dependencies` | `bool` | `False` |
+| `include_system_declarations` | `bool` | `False` |
 | `config_overrides` | `Mapping[str, object] \| None` | `None` |
 
 **Returns:** `AbiSnapshot`

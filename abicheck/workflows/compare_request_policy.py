@@ -87,7 +87,7 @@ def resolve_request_policy_inputs(
                 policy_overrides=dict(request.pack_policy_overrides or {}),
                 internal_namespaces=request.pack_internal_namespaces,
             ),
-            base_policy=request.policy,
+            base_policy=request.policy_profile,
         )
     application = None
     if request.pack_paths:
@@ -100,13 +100,15 @@ def resolve_request_policy_inputs(
         evaluation_config = resolve_request_evaluation_config(request, pf, suppression)
     # ADR-068 §3 #23 / ADR-049 D7: project-config overrides at the weakest tier.
     project_fold = fold_project_policy_overrides(
-        pf, dict(request.project_policy_overrides or ()), base_policy=request.policy
+        pf,
+        dict(request.project_policy_overrides or ()),
+        base_policy=request.policy_profile,
     )
     pf = project_fold.policy_file
     for warning in project_fold.warnings:
         _logger.warning("%s", warning)
     acknowledgments = resolve_compare_acknowledgments(
-        request.acknowledgments_path,
+        request.acknowledgments,
         policy_file=pf,
         configured_action=request.acknowledgment_unacknowledged_additions,
         configured_breaks=request.acknowledgment_breaks,

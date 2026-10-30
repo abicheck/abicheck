@@ -346,7 +346,7 @@ def _resolve_side_snapshot_impl(
                 compile=compile_ctx,
                 public_headers=public_headers,
                 public_header_dirs=public_header_dirs,
-                include_dependencies=side.include_dependencies,
+                include_dependencies=side.include_system_declarations,
                 dump_manifest=evidence.dump_manifest,
                 follow_linker_scripts=side.follow_linker_scripts,
                 dwarf_only=dwarf_only,

@@ -36,8 +36,7 @@ def _build(base: CompareRequest, **overrides: object) -> CompareRequest:
         env_matrix=None,
         diagnostic_comparison=False,
         require_same_generation=False,
-        contract_evaluation=True,
-        contract_mode=None,
+        contract=None,
         depth=None,
         probe_matrix_old=None,
         probe_matrix_new=None,
@@ -57,7 +56,7 @@ def _build(base: CompareRequest, **overrides: object) -> CompareRequest:
     ],
 )
 def test_force_public_symbols(forced: object, expected: frozenset[str] | None) -> None:
-    assert _build(_base(), force_public=forced).force_public_symbols == expected
+    assert _build(_base(), force_public=forced).public_symbols == expected
 
 
 @pytest.mark.parametrize(
@@ -92,13 +91,12 @@ def test_passthrough_fields_are_copied_unchanged() -> None:
         env_matrix=env,
         diagnostic_comparison=True,
         require_same_generation=True,
-        contract_evaluation=False,
-        contract_mode="exports",
+        contract="exports",
         depth="source",
         abi3_floor=(3, 11),
     )
-    assert built.policy == "sdk_vendor"
-    assert built.policy_file_path == Path("policy.yaml")
+    # ADR-091 R2: a document given as policy_file_path is the request's policy.
+    assert built.policy == Path("policy.yaml")
     assert built.strict_suppressions is True
     assert built.require_justification is True
     assert built.scope_public is False
@@ -106,8 +104,7 @@ def test_passthrough_fields_are_copied_unchanged() -> None:
     assert built.env_matrix is env
     assert built.diagnostic_comparison is True
     assert built.require_same_generation is True
-    assert built.contract_evaluation is False
-    assert built.contract_mode == "exports"
+    assert built.contract == "exports"
     assert built.depth == "source"
     assert built.abi3_floor == (3, 11)
 
