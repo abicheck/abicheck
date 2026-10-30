@@ -106,7 +106,7 @@
       "abicheck/extract/headers/castxml/vector_join.py": "e46414e04addf1031399c30f0901d3eb6ab9c48a271a55724aa445f0d12ff879",
       "abicheck/extract/headers/castxml/vector_spellings.py": "1048c21245235f6857beacf4668fc888bea7117c88c18300aae666a90aac763d",
       "abicheck/extract/headers/clang/__init__.py": "538add12f3ff39e1c1b39e6f5def93b50a584b78b30c4e7e59058207222757d0",
-      "abicheck/extract/headers/clang/abi_target.py": "6748bde7fe2e6bd79d20ae9208dcbd7b41e5e33f1f8cd7a5972127973b07d5d0",
+      "abicheck/extract/headers/clang/abi_target.py": "f888712b14c622674fd8ecf036d97a812e27a2e932e94e6843d94ecf64115d17",
       "abicheck/extract/headers/clang/ast_inner.py": "f695f5bb01048fa924a1b67acbbcc29630c871607f1a3b4329ec781133f296f8",
       "abicheck/extract/headers/clang/attributes.py": "4f35afe72ef319265695d3e199e10c9ef0076db4a5238161b33a076fd3a599fe",
       "abicheck/extract/headers/clang/backend.py": "8fb4911e07454a99940ff990e489afc6a3f08f3e83c3d682eccd96579a4a7299",
@@ -186,9 +186,9 @@
       "abicheck/symvers_metadata.py": "372737765cd132e6e87ed891dd465d2958e04debbef774e45212ceb3036871cb",
       "abicheck/type_metadata.py": "9997189de8dac522fd1db8be5ae491d811139503f83abaaded89038eb4aa9cdf"
     },
-    "fingerprint": "9f004a657e216e3a66eb2c2ea81fa38d673d1f65722c5f7a4f113194533b135c",
+    "fingerprint": "c3439eae5fcac3f5ed21290041e9997042aee34eb32f2ffc0ca347eee45f6bdd",
     "generation": 33,
-    "reason": "bumped to 33 for a semantic change"
+    "reason": "PR #1842: refines the generation-33 clang ABI-target rule introduced in this same unmerged PR (no target token when an @response-file or --config= file may name one); no generation-33 snapshot exists outside this branch"
   },
   "resolver": {
     "files": {

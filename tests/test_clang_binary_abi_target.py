@@ -65,7 +65,13 @@ _EXPORTS = {
     "mixed": ("_Z4keepi", "?keep@@YAHH@Z"),
 }
 _PROBES = (None, "x86_64-w64-mingw32", "x86_64-pc-linux-gnu", "i686-w64-mingw32")
-_EXPLICIT = ((), ("--target=riscv64-unknown-linux-gnu",))
+#: A named target, and the two forms that may hide one in a file.
+_EXPLICIT = (
+    (),
+    ("--target=riscv64-unknown-linux-gnu",),
+    ("@flags.rsp",),
+    ("--config=cross.cfg",),
+)
 
 
 def _oracle(
@@ -73,7 +79,8 @@ def _oracle(
 ) -> str | None:
     """The rule, stated from the problem: change only a Windows default whose
     ABI disagrees with what the exports are mangled for, and only when the
-    caller named no target. Keep the default's architecture."""
+    caller named no target and passed no file that could name one. Keep the
+    default's architecture."""
     arch, env = _DEFAULTS[default]
     stated = {"itanium": "gnu", "itanium32": "gnu", "msvc": "msvc"}.get(exports)
     if explicit or env is None or stated is None or stated == env:

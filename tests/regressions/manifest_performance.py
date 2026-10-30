@@ -522,7 +522,7 @@ PERFORMANCE_BUG_CLASSES: tuple[BugClass, ...] = (
             "tests/test_symbols_only_reresolve_cached.py",
             "tests/test_pe_read_forces_no_collection.py",
         ),
-        public_surfaces=(),
+        public_surfaces=("cli",),
         axes={
             "symbol_table": (".dynsym", ".symtab"),
             "symbol_shape": (

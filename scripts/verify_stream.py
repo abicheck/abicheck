@@ -29,6 +29,21 @@ from typing import IO
 _PIPE_ENCODING = locale.getpreferredencoding(False)
 
 
+def _emit(text: str, sink: IO[str], kept: list[str]) -> None:
+    """Keep *text* and forward it. A sink that cannot encode it (a cp1252
+    console given the U+FFFD that replaced an undecodable byte) gets an
+    escaped rendering instead: an exception here would end the pump, the
+    pipe would stop draining, and a child with more to write would block
+    forever."""
+    kept.append(text)
+    try:
+        sink.write(text)
+    except UnicodeEncodeError:
+        enc = getattr(sink, "encoding", None) or "ascii"
+        sink.write(text.encode(enc, "backslashreplace").decode(enc))
+    sink.flush()
+
+
 def _pump(src: IO[bytes], sink: IO[str], kept: list[str]) -> None:
     """Forward *src* to *sink* as it arrives, newline or not: an unbuffered
     pipe's ``read`` returns whatever the child has flushed, so a fragment
@@ -40,13 +55,9 @@ def _pump(src: IO[bytes], sink: IO[str], kept: list[str]) -> None:
     )
     while chunk := src.read(65536):
         if text := decoder.decode(chunk):
-            kept.append(text)
-            sink.write(text)
-            sink.flush()
+            _emit(text, sink, kept)
     if text := decoder.decode(b"", final=True):
-        kept.append(text)
-        sink.write(text)
-        sink.flush()
+        _emit(text, sink, kept)
     src.close()
 
 

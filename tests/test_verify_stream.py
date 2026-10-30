@@ -166,6 +166,61 @@ def test_output_reaches_the_log_before_the_child_exits(
     assert (out_log.text(), err_log.text()) == (want.stdout, want.stderr)
 
 
+class _AsciiConsole(_Recorder):
+    """A sink with strict error handling, like a redirected cp1252
+    ``sys.stdout`` on Windows: text it cannot encode raises."""
+
+    encoding = "ascii"
+
+    def write(self, s: str) -> int:
+        s.encode(self.encoding)
+        return super().write(s)
+
+
+#: Unencodable text first, then more than a pipe buffer holds: a pump that
+#: stopped at the first rejected write would leave the child blocked.
+_FLOOD = (
+    "import sys\n"
+    "w = sys.stdout.buffer\n"
+    "w.write(b'bad \\xff and caf\\xc3\\xa9\\n'); w.flush()\n"
+    "for _ in range(4000): w.write(b'y' * 99 + b'\\n')\n"
+    "w.flush()\n"
+)
+
+
+def test_a_sink_that_rejects_text_never_stops_the_drain(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    cmd = [sys.executable, "-c", _FLOOD]
+    want = subprocess.run(
+        cmd,
+        cwd=tmp_path,
+        env=_ENV,
+        capture_output=True,
+        text=True,
+        errors="replace",
+        timeout=60,
+    )
+    console = _AsciiConsole()
+    monkeypatch.setattr(sys, "stdout", console)
+    monkeypatch.setattr(sys, "stderr", _Recorder())
+    result: list[subprocess.CompletedProcess[str]] = []
+    runner = threading.Thread(
+        target=lambda: result.append(run_streaming(cmd, cwd=tmp_path, env=_ENV)),
+        daemon=True,
+    )
+    runner.start()
+    runner.join(60)
+
+    assert not runner.is_alive(), "the child blocked on an undrained pipe"
+    (proc,) = result
+    # The returned text is untouched; only the console copy is escaped.
+    assert (proc.returncode, proc.stdout) == (want.returncode, want.stdout)
+    assert console.text() == want.stdout.encode("ascii", "backslashreplace").decode(
+        "ascii"
+    )
+
+
 def test_verify_run_step_streams_through_run_streaming() -> None:
     """``verify.run_step`` is the caller the invariant protects: it must not
     regain a capture-then-print path of its own."""

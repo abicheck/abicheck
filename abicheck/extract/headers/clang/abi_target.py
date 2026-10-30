@@ -27,7 +27,9 @@ MinGW-built DLL lost its whole declared surface under ``--ast-frontend clang``.
 returns the ``--target`` that matches it, or ``None`` to leave the parse
 untouched: no Windows default, an explicit target already given, no mangled
 C++ export (a C-only DLL), exports of both ABIs, or a default that already
-matches. Only the environment (``-gnu``/``-msvc``) changes; the architecture
+matches. An ``@response-file`` or ``--config=`` may name a target this module
+cannot see, and a token appended after it would override it, so either also
+leaves the parse untouched. Only the environment (``-gnu``/``-msvc``) changes; the architecture
 stays the default's.
 """
 
@@ -35,7 +37,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 
-from ...._compiler_options import explicit_target_triple
+from ...._compiler_options import explicit_target_triple, forwards_response_file
 from ....model.execution_cache import memoized
 from ..toolchain import _configured_target_triple, _resolved_tool, _tool_target_triple
 
@@ -98,7 +100,9 @@ def binary_abi_target_token(
     when that GNU driver targets the same architecture's MinGW (its system
     headers are then the right ones), else ``<arch>-w64-windows-gnu``.
     """
-    if explicit_target_triple(gcc_options, gcc_option_tokens):
+    if explicit_target_triple(gcc_options, gcc_option_tokens) or forwards_response_file(
+        gcc_options, gcc_option_tokens
+    ):
         return None
     abi = exported_cxx_abi(exported)
     if abi is None:
