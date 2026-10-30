@@ -27,16 +27,15 @@ its checkout (ADR-067 G5).
 from __future__ import annotations
 
 import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
 
 import pytest
-import yaml
+from _abicheck_subprocess import abicheck_command
 from _action_run_sh_harness import (
     REQUIRES_POSIX_SHELL,
-    _compare_env,
-    _run_action,
     _stub_abicheck,
 )
 
@@ -130,18 +129,26 @@ def _capture_stub(tmp_path: Path, capture: Path) -> Path:
 @pytest.mark.skipif(
     os.name == "nt", reason="the overlay synthesis path is POSIX shell only"
 )
+def _lib(path: Path, source: str) -> Path:
+    src = path.with_suffix(".c")
+    src.write_text(source, encoding="utf-8")
+    subprocess.run(
+        ["gcc", "-shared", "-fPIC", "-g", str(src), "-o", str(path)], check=True
+    )
+    return path
+
+
 def test_action_discovered_config_cannot_load_records_into_overlay(
     tmp_path: Path,
 ) -> None:
-    """A PR-planted ``acknowledgment.file`` in the checkout's own
-    ``.abicheck.yml`` must not reach the overlay the CLI reads as explicit.
+    """A discovered ``acknowledgment.file`` is dropped, with a note naming it.
 
-    ``ast-frontend: castxml`` makes the Action synthesize a compile-context
-    overlay from the discovered config, the path G5 names. The
-    ``unacknowledged_additions`` setting alongside it must survive so the
-    merge is shown to have actually run (a positive control: an empty overlay
-    would also lack the records and prove nothing).
+    ``--set compile.frontend="castxml"`` is the compile-context input the Action
+    forwards for ``ast-frontend: castxml``. It is what makes the run read the
+    discovered config for its compile context, the path the old overlay took.
     """
+    if shutil.which("gcc") is None:
+        pytest.skip("needs gcc to build the shared objects")
     records = tmp_path / "accept-everything.yml"
     records.write_text(
         "version: 1\nacknowledgments:\n"
@@ -152,27 +159,20 @@ def test_action_discovered_config_cannot_load_records_into_overlay(
         f"acknowledgment:\n  file: {records}\n  unacknowledged_additions: block\n",
         encoding="utf-8",
     )
-    capture = tmp_path / "captured-overlay.yml"
-    bindir = _capture_stub(tmp_path, capture)
-    env = {**_compare_env(tmp_path), "INPUT_AST_FRONTEND": "castxml"}
-
-    _run_action(tmp_path, env, bindir)
-
-    assert capture.is_file(), "the Action never handed the CLI a --config overlay"
-    # The overlay merge must have run against this checkout's code, or the
-    # assertions below would be checking the installed package instead.
-    probe = subprocess.run(
-        [sys.executable, "-c", "import abicheck; print(abicheck.__file__)"],
+    old = _lib(tmp_path / "old.so", "int f(int x){return x+1;}\n")
+    new = _lib(tmp_path / "new.so", "int f(int x){return x+1;}\n")
+    result = subprocess.run(
+        abicheck_command(
+            "compare", str(old), str(new), "--set", 'compile.frontend="castxml"'
+        ),
         cwd=tmp_path,
-        env={**os.environ, "PYTHONPATH": str(_REPO_ROOT)},
         capture_output=True,
         text=True,
-        check=True,
+        check=False,
     )
-    assert Path(probe.stdout.strip()).is_relative_to(_REPO_ROOT)
-    overlay = yaml.safe_load(capture.read_text(encoding="utf-8"))
-    assert overlay["acknowledgment"]["unacknowledged_additions"] == "block"
-    assert "file" not in overlay["acknowledgment"], (
-        "a discovered .abicheck.yml's acknowledgment.file reached the explicit "
-        "--config overlay, so the CLI would load PR-planted records"
-    )
+    output = result.stdout + result.stderr
+    # The gate's own outcome: the discovered key is not loaded, and it says so.
+    assert "acknowledgment.file is not" in output, output
+    assert "a discovered config is not trusted" in output, output
+    # A refused key is not a failed run: the comparison itself completes.
+    assert "Traceback" not in output, output

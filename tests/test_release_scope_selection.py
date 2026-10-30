@@ -1043,7 +1043,6 @@ class TestGhostMarkerInAStoredPackageIsRefused:
         """*vouch*: also list every marker key in the composition's own
         ``library_filenames``, the way a hand-edited package would try to
         make its ghost look stored."""
-        import json as _json
 
         from abicheck.project_snapshot_store import (
             DirectoryObjectStore,
@@ -1051,7 +1050,7 @@ class TestGhostMarkerInAStoredPackageIsRefused:
             read_variant_ref,
         )
         from abicheck.storage.dto import BUNDLE_COMPOSITION_SECTION_KIND
-        from abicheck.storage.package import variant_ref_relpath
+        from tests._project_manifest_reader import ref_document, rewrite_ref
 
         (variant_id,) = read_manifest_summary(pkg).variant_ids
         variant = read_variant_ref(pkg, variant_id)
@@ -1067,10 +1066,9 @@ class TestGhostMarkerInAStoredPackageIsRefused:
             }
         raw["payload"] = payload
         new_digest = store.put(raw)
-        ref_path = pkg / variant_ref_relpath(variant_id)
-        doc = _json.loads(ref_path.read_text(encoding="utf-8"))
+        doc = ref_document(pkg, "variant", variant_id)
         doc["sections"][BUNDLE_COMPOSITION_SECTION_KIND]["digest"] = new_digest
-        ref_path.write_text(_json.dumps(doc, indent=2), encoding="utf-8")
+        rewrite_ref(pkg, "variant", variant_id, doc)
 
     def test_reader_refuses_a_ghost_key(self, tmp_path: Path) -> None:
         from abicheck.errors import SnapshotError

@@ -31,6 +31,7 @@ caller is a CLI entry point — the parallel, framework-free contract lives in
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from typing import TYPE_CHECKING, Any
 
 import click
@@ -434,6 +435,7 @@ def resolve_directory_compile_context(
     compiler_option_tokens: tuple[str, ...],
     defines: tuple[str, ...] = (),
     config_explicit: bool | None = None,
+    config_overrides: Mapping[str, object] | None = None,
 ) -> Any:
     """Resolve the both-sides L2 compile context for a directory/package
     compare's release fan-out -- the identical ``resolve_compile_context``
@@ -461,4 +463,5 @@ def resolve_directory_compile_context(
         compiler_option_tokens=compiler_option_tokens,
         defines=defines,
         config_explicit=config_explicit,
+        config_overrides=config_overrides,
     )

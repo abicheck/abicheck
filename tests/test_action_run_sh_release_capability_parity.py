@@ -66,7 +66,7 @@ from typing import Any
 import pytest
 from _package_fixtures import _make_wheel
 from _workflow_exec import bash_executable, require_bash
-from test_action_run_sh_compare_build_source import _run_compare_raw
+from test_action_run_sh_compare_build_source import _compile_block, _run_compare_raw
 
 RUN_SH = Path(__file__).resolve().parents[1] / "action" / "run.sh"
 VALIDATE_SH = Path(__file__).resolve().parents[1] / "action" / "validate-inputs.sh"
@@ -202,23 +202,24 @@ class TestReleaseOperandGetsTheSinglePairCompileContext:
 
     @pytest.mark.parametrize("var,value", _COMPILE_CONTEXT_INPUTS)
     @pytest.mark.parametrize("shape", _RELEASE_OPERAND_SHAPES)
-    def test_matches_the_single_pair_overlay(
+    def test_matches_the_single_pair_compile_sets(
         self, tmp_path: Path, shape: str, var: str, value: str
     ) -> None:
+        """The release fan-out forwards the same `--set compile.*` arguments the
+        single-pair run does (ADR-091 D4: one resolution, the CLI's own)."""
         single_dir = tmp_path / "single"
         single_dir.mkdir()
-        _, single_doc = _compare_result({var: value}, single_dir)
-        assert single_doc.get("compile"), (
-            f"{var}={value} must reach the single-pair compile: overlay for "
-            "this case to mean anything"
+        _compare_result({var: value}, single_dir)
+        single_block = _compile_block(single_dir)
+        assert single_block, (
+            f"{var}={value} must reach the single-pair run as --set compile.* "
+            "for this case to mean anything"
         )
 
         release_dir = tmp_path / "release"
         release_dir.mkdir()
-        _, release_doc = _compare_result(
-            {var: value, **_operand_env(shape, release_dir)}, release_dir
-        )
-        assert release_doc.get("compile") == single_doc.get("compile")
+        _compare_result({var: value, **_operand_env(shape, release_dir)}, release_dir)
+        assert _compile_block(release_dir) == single_block
 
     @pytest.mark.parametrize("var,value", _COMPILE_CONTEXT_INPUTS)
     def test_validate_inputs_agrees_with_run_sh(
@@ -304,42 +305,6 @@ class TestReleaseOperandConfigOverlayStaysSingular:
     documents may be lost to the merge."""
 
     @pytest.mark.parametrize("shape", _RELEASE_OPERAND_SHAPES)
-    def test_compile_context_and_build_config_yield_one_config(
-        self, tmp_path: Path, shape: str
-    ) -> None:
-        build_config = tmp_path / "project.yml"
-        build_config.write_text(
-            json.dumps({"severity": {"abi_breaking": "error"}}), encoding="utf-8"
-        )
-        cmd, doc = _compare_result(
-            {
-                "INPUT_BUILD_CONFIG": str(build_config),
-                "INPUT_SYSROOT": "/opt/sysroot",
-                **_operand_env(shape, tmp_path),
-            },
-            tmp_path,
-        )
-        assert cmd.split().count("--config") == 1
-        assert doc["compile"]["sysroot"] == "/opt/sysroot"
-        assert doc["severity"] == {"abi_breaking": "error"}
-
-    @pytest.mark.parametrize("shape", _RELEASE_OPERAND_SHAPES)
-    def test_compile_context_and_release_topology_yield_one_config(
-        self, tmp_path: Path, shape: str
-    ) -> None:
-        cmd, doc = _compare_result(
-            {
-                "INPUT_SYSROOT": "/opt/sysroot",
-                "INPUT_DSO_ONLY": "true",
-                **_operand_env(shape, tmp_path),
-            },
-            tmp_path,
-        )
-        assert cmd.split().count("--config") == 1
-        assert doc["compile"]["sysroot"] == "/opt/sysroot"
-        assert doc["release"]["dso_only"] is True
-
-    @pytest.mark.parametrize("shape", _RELEASE_OPERAND_SHAPES)
     def test_all_three_config_sources_survive_the_merge(
         self, tmp_path: Path, shape: str
     ) -> None:
@@ -359,9 +324,45 @@ class TestReleaseOperandConfigOverlayStaysSingular:
             tmp_path,
         )
         assert cmd.split().count("--config") == 1
-        assert doc["compile"]["options"] == ["-DFOO=1"]
+        assert _compile_block(tmp_path)["options"] == ["-DFOO=1"]
         assert doc["severity"] == {"abi_breaking": "error"}
         assert doc["gate"]["fail_on_removed_library"] is True
+
+    @pytest.mark.parametrize("shape", _RELEASE_OPERAND_SHAPES)
+    def test_compile_context_and_build_config_yield_one_config(
+        self, tmp_path: Path, shape: str
+    ) -> None:
+        build_config = tmp_path / "project.yml"
+        build_config.write_text(
+            json.dumps({"severity": {"abi_breaking": "error"}}), encoding="utf-8"
+        )
+        cmd, doc = _compare_result(
+            {
+                "INPUT_BUILD_CONFIG": str(build_config),
+                "INPUT_SYSROOT": "/opt/sysroot",
+                **_operand_env(shape, tmp_path),
+            },
+            tmp_path,
+        )
+        assert cmd.split().count("--config") == 1
+        assert _compile_block(tmp_path)["sysroot"] == "/opt/sysroot"
+        assert doc["severity"] == {"abi_breaking": "error"}
+
+    @pytest.mark.parametrize("shape", _RELEASE_OPERAND_SHAPES)
+    def test_compile_context_and_release_topology_yield_one_config(
+        self, tmp_path: Path, shape: str
+    ) -> None:
+        cmd, doc = _compare_result(
+            {
+                "INPUT_SYSROOT": "/opt/sysroot",
+                "INPUT_DSO_ONLY": "true",
+                **_operand_env(shape, tmp_path),
+            },
+            tmp_path,
+        )
+        assert cmd.split().count("--config") == 1
+        assert _compile_block(tmp_path)["sysroot"] == "/opt/sysroot"
+        assert doc["release"]["dso_only"] is True
 
 
 #: Hostile values for the inputs this change newly lets reach a release
@@ -505,7 +506,7 @@ class TestReleaseOperandHostileInputHasNoSideEffect:
         _, doc = _compare_result(
             {"INPUT_SYSROOT": payload, **_operand_env(shape, tmp_path)}, tmp_path
         )
-        assert doc["compile"]["sysroot"] == payload
+        assert _compile_block(tmp_path)["sysroot"] == payload
         assert not canary.exists()
 
 
@@ -567,4 +568,4 @@ class TestNoOpInputsSynthesizeNoOverlay:
         _, doc = _compare_result(
             {"INPUT_AST_FRONTEND": "clang", **_operand_env(shape, tmp_path)}, tmp_path
         )
-        assert doc["compile"]["frontend"] == "clang"
+        assert _compile_block(tmp_path)["frontend"] == "clang"

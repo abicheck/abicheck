@@ -477,14 +477,13 @@ def run_compare(
     )
     if _exclusion_warning is not None:
         click.echo(_exclusion_warning, err=True)
-    # What the one L2 compile-context resolution (`workflows.compile_config.
-    # resolve_compile_context`, ADR-037 D3; ADR-074's by-macro-name defines
-    # fold) resolves from, for the --dry-run receipt and the release fan-out;
-    # the single-pair session states the same values on its request and calls
-    # the same function (pinned by tests/test_compare_session.py). `cfg_path`
-    # is `config` or the cwd-upward auto-discovered .abicheck.yml (PR #1154).
+    # The L2 compile-context inputs for the --dry-run receipt and the release
+    # fan-out, the same ones the single-pair session states on its request
+    # (tests/test_compare_session.py); `cfg_path` is `config` or the
+    # auto-discovered .abicheck.yml (PR #1154).
     _compile_context_kwargs: dict[str, Any] = dict(
         ctx=ctx,
+        config_overrides=config_overrides,
         gcc_options=gcc_options,
         sysroot=sysroot,
         nostdinc=nostdinc,
@@ -733,6 +732,7 @@ def run_compare(
             compiler_option_tokens=compiler_option_tokens,
             defines=defines,
             frontend_context=frontend_context,
+            config_overrides=config_overrides or {},
         ),
         evidence=PairEvidenceInputs(
             debug=DumpDebugConfig(

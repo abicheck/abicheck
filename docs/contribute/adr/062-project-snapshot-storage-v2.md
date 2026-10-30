@@ -32,6 +32,12 @@ section, not a further per-field typed decode. A1.4 is implemented too
 `actions/baseline` set respectively onto this same sectioned representation,
 calling `import_legacy_snapshot` once per library and attaching each
 container's own composition facts to a new `VariantRef.sections` field.
+Of the 2026-10-30 amendment's data-evolution rules (plan item A1.9), D17
+is implemented (package format v2: immutable `refs/<kind>/<id>/<ref-digest>.json`
+documents named by `{id, ref_digest}` in `manifest.json`, an atomic manifest
+commit, serialized writers — `abicheck/storage/package_publish.py`), D15
+partially (a pinned per-section wire contract), and D14, D16 and D18 are
+not implemented; see the plan's per-item status.
 
 **This is now wired into `dump`/`compare`/`scan` as the default, single-file
 shape (Phase 8 redesign).** The directory-backed package this ADR

@@ -21,7 +21,6 @@ into a package could promote an unmatched member to a proven removal
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 import pytest
@@ -126,10 +125,10 @@ class TestAssertionRoundTrips:
             read_variant_ref,
         )
         from abicheck.storage.dto import BUNDLE_COMPOSITION_SECTION_KIND
-        from abicheck.storage.package import variant_ref_relpath
         from abicheck.workflows.release_stored_inventory import (
             stored_side_inventory_complete,
         )
+        from tests._project_manifest_reader import ref_document, rewrite_ref
 
         pkg = tmp_path / "pkg"
         _write_stored_package(pkg, _LIBS)
@@ -141,10 +140,9 @@ class TestAssertionRoundTrips:
         raw = dict(store.get(ref.digest))
         raw["payload"] = {**dict(raw["payload"]), "inventory_complete": "true"}
         digest = store.put(raw)
-        ref_path = pkg / variant_ref_relpath(variant_id)
-        doc = json.loads(ref_path.read_text(encoding="utf-8"))
+        doc = ref_document(pkg, "variant", variant_id)
         doc["sections"][BUNDLE_COMPOSITION_SECTION_KIND]["digest"] = digest
-        ref_path.write_text(json.dumps(doc, indent=2), encoding="utf-8")
+        rewrite_ref(pkg, "variant", variant_id, doc)
         with pytest.raises(SnapshotError, match="inventory assertion"):
             stored_side_inventory_complete(pkg, variant_id=None)
 

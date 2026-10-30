@@ -73,6 +73,7 @@ def resolve_compile_context(
             includes=tuple(request.headers.includes),
             build_config=request.project.path,
             frontend_context=c.frontend_context,
+            config_overrides=c.config_overrides,
             compiler_path=c.compiler_path,
             compiler_prefix=c.compiler_prefix,
             compiler_option_tokens=c.compiler_option_tokens,

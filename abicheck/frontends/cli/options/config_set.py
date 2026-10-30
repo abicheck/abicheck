@@ -35,13 +35,17 @@ from ....workflows.compare_configuration import (
     CLI_ONLY_OVERRIDE_PATHS,
     TYPED_OVERRIDE_CHANNELS,
 )
+from ....workflows.compile_config import COMPILE_CONTEXT_OVERRIDE_PATHS
 from ....workflows.extraction import ConfigOverrideError, validate_config_overrides
 
-#: The keys `compare --set` applies: the typed channels plus the CLI-only ones.
-#: Every other key (compile.*, build.*, sources.*, ...) is refused with a usage
-#: error, because its loader does not yet receive the override.
-_COMPARE_APPLIED_PATHS: frozenset[str] = frozenset(
-    {path for path, _field, _attr in TYPED_OVERRIDE_CHANNELS} | CLI_ONLY_OVERRIDE_PATHS
+#: The keys `compare --set` applies: the typed channels, the CLI-only ones and
+#: the compile-context keys (ADR-091 D4). Every other key (build.*, sources.*,
+#: ...) is refused with a usage error, because its loader does not yet take the
+#: override.
+_COMPARE_APPLIED_PATHS: frozenset[str] = (
+    frozenset({path for path, _field, _attr in TYPED_OVERRIDE_CHANNELS})
+    | CLI_ONLY_OVERRIDE_PATHS
+    | COMPILE_CONTEXT_OVERRIDE_PATHS
 )
 
 #: The keys a directory/package (release) compare forwards to its members. The
@@ -58,6 +62,7 @@ _RELEASE_APPLIED_PATHS: frozenset[str] = frozenset(
         "severity.addition",
         "deployment",
     }
+    | COMPILE_CONTEXT_OVERRIDE_PATHS
 )
 
 __all__ = [

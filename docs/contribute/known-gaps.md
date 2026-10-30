@@ -251,6 +251,65 @@ current emitter, which is unchanged.
 
 **Status (2026-10-16): OPEN.** The root Action now says which baseline it compared against, in its `baseline-source`, `baseline-asset-name`, `baseline-project-ref`, `baseline-generation` and `baseline-profile` outputs and in a "Baseline source" step-summary block. The JSON report, which a downstream consumer reads on its own, does not carry that provenance, so it cannot tell a legacy asset from a baseline-set, or which `project_ref` was checked. The nearest existing owner is ADR-065's acquisition record (`abicheck/model/scope_acquisition.py`). It records a per-member *state* (`available`, `failed`, `expected_not_produced`, and so on), not the artifact or revision a member was read from, so it does not already carry this. Adding the fields there is a report-schema change with its own decision and golden updates, so it is not made here.
 
+#### ADR-062 D14-D18 data-evolution rules are partly implemented (2026-10-30)
+
+**Status (2026-10-30): PARTIAL.** D17 (immutable digest-named refs, atomic
+publication, serialized writers) is implemented, and D15 is guarded by a
+pinned wire contract; the rest of plan item A1.9 is open. Owner:
+`storage/`; per-item status in the
+[storage format v2 plan](plans/storage-format-v2.md).
+
+- **D14 (open, false-clean risk).** A reader drops an unknown field inside a
+  record (a function record, for example) when it re-saves, and rejects a
+  whole sectioned document that carries an unknown section. The amendment
+  specifies the carriers: a `must_understand` list on each `SectionDTO`
+  header and on the manifest, and an `extensions` map of canonical JSON
+  values on each record and header, included in the digests. Building them
+  needs three things together, which is why it was not half-landed:
+  - the DTO codecs read and write `extensions`;
+  - `sectioned_document.py` keeps an unknown section instead of refusing
+    the document;
+  - the compare layer resolves an analysis that depends on an unknown
+    must-understand extension, or on a newer `section_schema_version`, to
+    `NOT_COMPARABLE` with a diagnostic naming it.
+
+  Strict `xfail` probes in
+  `tests/unit/storage/test_extension_preservation_gap.py` pin today's
+  behavior, and will fail once either behavior is fixed.
+- **D16 (open).** `snapshot_content_digest` changes when only
+  `created_at` differs or only the function order differs, although
+  `compare` reports no change. That digest is correct for the
+  `publication` role and keeps its meaning. The fix is a separate
+  `evidence` digest over the D5 form: drop `created_at`/`source_mtime`
+  and sort the identity-matched record lists (top-level
+  functions/variables/types/enums, ELF symbols/imports). Do not sort
+  parameters, fields, bases or `DT_NEEDED`, whose order is semantic. It
+  was prototyped and verified (every permutation of each list against
+  `compare(...).changes == []`), then withdrawn because nothing could
+  consume it cheaply. Its consumer is the same-snapshot coverage note
+  (`workflows/gate.snapshot_identity_digest`). That note shares
+  `storage/snapshot_digest_cache`'s memo, which is keyed by snapshot only
+  and would need a role key. It also shares the `created_at` prefilter
+  (`persisted_content_provably_differs`). Computing a second digest there
+  doubles serialization on the path the
+  `perf.pure_content_digest_recomputed_per_consumer` bound protects. The
+  alternative is to let `same_persisted_content` answer from the evidence
+  digest, which changes what that function decides. Either is a design
+  decision, not a mechanical fix.
+- **D15 (partial).** Section keys still come from model field names. The
+  pinned-bytes test catches a field rename, but the codec does not prevent
+  one. The section-header `FactAvailability` table (`not_collected`/
+  `present`/`failed`, with a `failed` entry carrying no payload) does not
+  exist yet. Today only fact families inside a payload keep those three
+  states apart.
+- **D18 (open).** Only the `graph` section decodes lazily.
+- **D17 residuals.** Superseded refs and section objects are never
+  garbage-collected. Without `fcntl` (Windows) or in reference mode,
+  `cross_process_lock` does not lock. Writers are then not serialized, but
+  they still cannot mix packages, because each commits by one atomic rename
+  over immutable refs. The amendment's exit criteria (oneDAL/MKL corpus,
+  Windows and macOS runs) have not been run.
+
 ### False-positive risk
 
 #### A typedef retargeted inside a template argument still reads as a removal plus an addition under headers (2026-10-25)

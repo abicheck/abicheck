@@ -34,7 +34,7 @@ from __future__ import annotations
 import dataclasses
 import os
 import sys
-from collections.abc import Callable, Iterable, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -128,6 +128,27 @@ def compile_config_argv_tokens(
     tokens += [f"-D{d}" for d in defines]
     tokens += list(options)
     return tokens
+
+
+#: The ``compile:`` keys the L2 compile context reads that have no visible flag
+#: of their own (ADR-091 D4 config tier). ``--set`` applies them on the CLI
+#: ``compare``, ``dump`` and the directory/package fan-out, which all resolve
+#: the context through :func:`merge_compile_config`. The typed API has no
+#: ``compile:`` fold, so it refuses them rather than dropping them.
+#: ``compile.include_dirs`` and ``compile.defines`` are core (``-I``/``--define``)
+#: and are not listed.
+COMPILE_CONTEXT_OVERRIDE_PATHS: frozenset[str] = frozenset(
+    {
+        "compile.compiler",
+        "compile.frontend",
+        "compile.frontend_context",
+        "compile.lang",
+        "compile.nostdinc",
+        "compile.options",
+        "compile.std",
+        "compile.sysroot",
+    }
+)
 
 
 def _as_compile_field_list(value: object) -> list[str]:
@@ -279,6 +300,7 @@ def merge_compile_config(
     nostdinc_explicit: bool = False,
     frontend_context_explicit: bool = False,
     config_explicit: bool | None = None,
+    config_overrides: Mapping[str, object] | None = None,
     notify: Callable[[str], None] | None = None,
 ) -> tuple[CompileContext, tuple[Path, ...]]:
     """Fold a ``.abicheck.yml`` ``compile:`` block into the CLI compile context.
@@ -337,6 +359,15 @@ def merge_compile_config(
     ``build_config`` is still the raw, unresolved CLI value (the common
     case, and what every pre-existing caller passes) — the historical
     ``build_config is not None`` inference is exactly right there.
+
+    *config_overrides* (ADR-091 D4, ``--set``) are laid over the file before
+    the ``compile:`` block is read, through the same
+    :func:`~abicheck.buildsource.build_config_overrides.apply_config_overrides`
+    loader every other ``.abicheck.yml`` consumer uses, so ``--set
+    compile.K=V`` and ``compile: {K: V}`` in the file resolve identically. With
+    no file, the overrides alone supply the block. A ``compile.compiler`` set
+    by an override is an explicit operator statement, so it passes the trust
+    gate even when the file was auto-discovered.
     """
     from ..config_paths import project_root_for_config
     from ..dry_run_estimate import CompileContext
@@ -346,7 +377,7 @@ def merge_compile_config(
 
     explicit_config = build_config is not None
     cfg = build_config if explicit_config else discover_build_config(sources)
-    if cfg is None:
+    if cfg is None and not config_overrides:
         # ADR-074: the CLI's own -D/--define definitions still have to reach the
         # frontend when there is no config at all -- fold against an empty
         # config-defines list rather than returning the raw context, which would
@@ -357,11 +388,14 @@ def merge_compile_config(
     trust_compiler_selection = (
         explicit_config if config_explicit is None else config_explicit
     )
+    # ADR-091 D4: a `--set compile.compiler=...` is the operator's own
+    # statement, trusted whatever file (if any) it is laid over.
+    compiler_stated = bool(config_overrides and "compile.compiler" in config_overrides)
 
     try:
-        bc = load_build_config(cfg)
+        bc = load_build_config(cfg, config_overrides=config_overrides)
     except ValueError as exc:
-        if trust_compiler_selection:
+        if trust_compiler_selection or cfg is None:
             # An *explicit* --config the user pointed at must fail loudly: for an
             # L2-only dump/scan (no --sources/--build-info) nothing reloads it
             # downstream, so a warn-and-fallback would silently drop the intended
@@ -385,7 +419,7 @@ def merge_compile_config(
     # (config_paths.py's own docstring has the full reasoning; Codex review,
     # fresh evidence from the .github/ discovery feature landing this base
     # was wrong for).
-    base = project_root_for_config(cfg)
+    base = project_root_for_config(cfg) if cfg is not None else Path.cwd()
 
     # CLI > config: an explicit --ast-frontend wins even when it is "auto" (the
     # documented escape hatch to bypass a pinned config frontend); only a *default*
@@ -465,7 +499,7 @@ def merge_compile_config(
     gcc_path = cli_ctx.gcc_path
     gcc_prefix = cli_ctx.gcc_prefix
     if gcc_path is None and gcc_prefix is None and bc.compile_compiler:
-        if not trust_compiler_selection:
+        if not (trust_compiler_selection or compiler_stated):
             warn(
                 "warning: compile.compiler ignored from auto-discovered "
                 f"{cfg}; pass a trusted config with --config to permit "
@@ -528,6 +562,7 @@ def resolve_compile_context(
     config_explicit: bool | None = None,
     nostdinc_explicit: bool = False,
     frontend_context_explicit: bool = False,
+    config_overrides: Mapping[str, object] | None = None,
     notify: Callable[[str], None] | None = None,
 ) -> tuple[CompileContext, tuple[Path, ...]]:
     """The run's L2 compile context from its compile knobs, ``compile:`` folded in.
@@ -563,5 +598,6 @@ def resolve_compile_context(
         nostdinc_explicit=nostdinc_explicit,
         frontend_context_explicit=frontend_context_explicit,
         config_explicit=config_explicit,
+        config_overrides=config_overrides,
         notify=notify,
     )
