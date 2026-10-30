@@ -39,7 +39,7 @@ def _stub(tmp_path: Path) -> tuple[Path, Path]:
     stub.write_text(
         "#!/usr/bin/env bash\n"
         f'for _a in "$@"; do printf \'%s\\n\' "$_a" >> "{captured}"; done\n'
-        f'printf \'%s\\n\' --- >> "{captured}"\n'
+        f"printf '%s\\n' --- >> \"{captured}\"\n"
         'for _a in "$@"; do\n'
         '  case "$_a" in\n'
         "    json=-) : ;;\n"
@@ -146,7 +146,9 @@ class TestBlankAndCommentOnlySetForwardsNothing:
 
 @pytest.mark.skipif(not VALIDATE_SH.is_file(), reason="validate-inputs.sh not found")
 class TestSetOnAModeWithoutSetFailsTheStep:
-    def _validate(self, tmp_path: Path, mode: str, set_value: str) -> subprocess.CompletedProcess[str]:
+    def _validate(
+        self, tmp_path: Path, mode: str, set_value: str
+    ) -> subprocess.CompletedProcess[str]:
         require_bash()
         lib = tmp_path / "lib.so"
         lib.write_bytes(b"\x7fELF")
