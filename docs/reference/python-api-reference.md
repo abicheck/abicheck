@@ -26,6 +26,7 @@ A fully-specified comparison request — the single input to ``run_compare``.
 | `pattern_verdicts` | `bool` | `True` |
 | `enable_debuginfod` | `bool` | `False` |
 | `debuginfod_url` | `str \| None` | `None` |
+| `config_overrides` | `Mapping[str, object]` | `mappingproxy({})` |
 | `env_matrix` | `EnvironmentMatrix \| None` | `None` |
 | `diagnostic_comparison` | `bool` | `False` |
 | `require_same_generation` | `bool` | `False` |
@@ -472,6 +473,7 @@ Compare two ABI inputs and return the classified diff result.
 | `acknowledgments_path` | `Path \| None` | `None` |
 | `acknowledgment_unacknowledged_additions` | `str \| None` | `None` |
 | `acknowledgment_breaks` | `str \| None` | `None` |
+| `config_overrides` | `Mapping[str, object] \| None` | `None` |
 
 **Returns:** `CompareResult`
 

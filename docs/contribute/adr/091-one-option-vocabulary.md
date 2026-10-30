@@ -2,7 +2,7 @@
 
 **Date:** 2026-10-30
 **Status:** Proposed — Phase 0 done (inventory and registry, no behavior
-change). This ADR proposes renames and behavior unifications on four public
+change); Phase 2 partly done (`compare --set`, `CompareRequest.config_overrides`). This ADR proposes renames and behavior unifications on four public
 surfaces; each lands through the migration in D7. Open questions Q1–Q4 are
 resolved below. Implementation plan:
 [`plans/option-vocabulary-unification.md`](../plans/option-vocabulary-unification.md).

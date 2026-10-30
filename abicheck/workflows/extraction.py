@@ -52,7 +52,11 @@ from ..binary_utils import (
     resolve_linker_script_chain,
     strip_vendor_hash,
 )
-from ..buildsource.build_config_io import load_build_config_with_digest
+from ..buildsource.build_config_io import (
+    load_build_config_with_digest,
+    validate_config_overrides,
+)
+from ..buildsource.build_config_overrides import ConfigOverrideError
 from ..buildsource.build_query import (
     PRUNED_HEADER_DIR_SEGMENTS,
     drain_build_dir_cleanups,
@@ -241,8 +245,10 @@ __all__ = [
     "iter_directory_headers",
     "non_text_header_message",
     "load_bindings_file",
+    "ConfigOverrideError",
     "load_build_config",
     "load_build_config_with_digest",
+    "validate_config_overrides",
     "load_extractor_manifest",
     "load_inputs_manifest",
     "load_inputs_pack_or_raise",

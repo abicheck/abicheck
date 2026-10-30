@@ -62,6 +62,7 @@ if TYPE_CHECKING:
 
 from ....cli import main
 from ..options.compare_view import validate_view
+from ..options.config_set import config_set_option
 
 #: `oneline` and `html` render the aggregate release document alone
 #: (`report/release_oneline.py`, `report/render_release_html.py`); the two still
@@ -185,6 +186,8 @@ from .compare_routing import _RELEASE_FORMATS
     "Supplies stable project settings (severity map, scope/FP "
     "tuning, suppression policy); CLI flags override it.",
 )
+# ADR-091 D4: one repeatable config key override, validated by the config schema.
+@config_set_option
 @click.option(
     "--acknowledgments",
     "acknowledgments",
@@ -512,6 +515,16 @@ def _compare_cmd(ctx: click.Context, /, **kwargs: Any) -> None:
     _bundle_operands = resolve_bundle_compare_dispatch(
         kwargs["old_input"], kwargs["new_input"]
     )
+    # The stored-BundleFacts route reads its own config copy (resource limits,
+    # bundle providers/cohorts, compile env toggles) and does not take --set
+    # yet. Refuse it loudly rather than let it read a different config.
+    if (
+        _bundle_operands.old_is_stored or _bundle_operands.new_is_stored
+    ) and kwargs.get("config_overrides"):
+        raise click.UsageError(
+            "--set is not supported on a comparison of a stored BundleFacts "
+            "document yet; set the key in .abicheck.yml for this run"
+        )
     if _bundle_operands.old_is_stored:
         from .compare_bundle_facts import (
             dispatch as dispatch_bundle_facts,

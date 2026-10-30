@@ -33,12 +33,17 @@ cycle forms and callers that only need the values keep using
 from __future__ import annotations
 
 import hashlib
+from collections.abc import Mapping
 from pathlib import Path
+from typing import Any
 
-from .build_config import BuildConfig
+from .build_config import KEY_TABLE, BuildConfig
+from .build_config_overrides import apply_config_overrides, validated_config_overrides
 
 
-def load_build_config_with_digest(path: Path) -> tuple[BuildConfig, str | None]:
+def load_build_config_with_digest(
+    path: Path | None, *, config_overrides: Mapping[str, object] | None = None
+) -> tuple[BuildConfig, str | None]:
     """Load a ``.abicheck.yml``, and digest the bytes that were parsed.
 
     One read produces both, so the digest always describes the content the
@@ -59,8 +64,11 @@ def load_build_config_with_digest(path: Path) -> tuple[BuildConfig, str | None]:
     the same message shape ``load_build_config`` raises, so a caller can
     handle either identically.
     """
-    if not path.is_file():
-        return BuildConfig(), None
+    if path is None or not path.is_file():
+        cfg = BuildConfig.from_dict(
+            apply_config_overrides(None, config_overrides, KEY_TABLE)
+        )
+        return cfg, None
     import yaml  # hard dep; imported out of the try so the except can name it
 
     try:
@@ -70,5 +78,16 @@ def load_build_config_with_digest(path: Path) -> tuple[BuildConfig, str | None]:
         raise ValueError(f"cannot read build config {path}: {exc}") from exc
     digest = hashlib.sha256(data).hexdigest()
     if not isinstance(raw, dict):
+        raw = None
+    if raw is None and not config_overrides:
         return BuildConfig(), digest
-    return BuildConfig.from_dict(raw), digest
+    # The digest covers the file's bytes only: an override is not file content,
+    # so a receipt that needs it must record the override set separately.
+    return BuildConfig.from_dict(
+        apply_config_overrides(raw, config_overrides, KEY_TABLE)
+    ), digest
+
+
+def validate_config_overrides(overrides: Mapping[str, object]) -> dict[str, Any]:
+    """*overrides* checked against :data:`KEY_TABLE` (ADR-091 D4), as a nested mapping."""
+    return validated_config_overrides(overrides, KEY_TABLE)

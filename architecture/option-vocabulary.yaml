@@ -590,6 +590,14 @@ concepts:
       - "action:budget"
     python:
       - CompareRequest.budget_s
+  - concept: config.override
+    tier: core
+    renames: []
+    cli:
+      - "compare --set"
+    python:
+      - CompareRequest.config_overrides
+      - "run_compare(config_overrides)"
   - concept: dry_run
     tier: core
     renames: []

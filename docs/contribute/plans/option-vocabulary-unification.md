@@ -1,6 +1,6 @@
 # Option vocabulary unification: implementation plan
 
-**Status:** Phase 0 done (2026-10-30); Phases 1–7 not started. Implements
+**Status:** Phase 0 done (2026-10-30); Phase 2 CLI and typed-API half for `compare` done, the rest of Phase 2 open; Phases 1 and 3–7 not started. Implements
 [ADR-091](../adr/091-one-option-vocabulary.md). Each phase is one PR, ordered
 so that the parity gate lands before any rename and every rename lands with
 its alias.
@@ -118,6 +118,22 @@ Owner: `tests/`, `scripts/verify.py`. Size: S.
 
 Owner: `frontends/`, `workflows/compare/configuration.py`, `action/`.
 Size: M. Changelog fragment: Added.
+
+**Result (2026-10-30, partial).** The CLI and typed-API half for `compare`
+is in: `compare --set PATH=VALUE` (repeatable) and
+`CompareRequest.config_overrides` (typed; `run_compare(config_overrides=)`)
+share one validator (`abicheck/buildsource/build_config_overrides.py`, the
+file's own `KEY_TABLE`) and one loader (`load_build_config`,
+`load_build_config_with_digest`, `load_and_resolve_compare_config`). Precedence
+is explicit flag > override > file > default; core keys are refused with exit 64
+naming the flag (`CORE_CONFIG_FLAGS`, checked against the registry by
+`tests/test_config_overrides.py`). The typed override fills only the request fields the caller
+left at their default. The stored BundleFacts route refuses `--set` with exit 64.
+Still open in this phase: `--set` on `dump` (CLI and `DumpRequest.config_overrides`),
+`project plan` and `project capture-variants`, which read the file through about a dozen
+loaders that do not yet take an override; `project validate`, `project history`,
+`deps tree`, `deps compare` and `aggregate` read no `KEY_TABLE` key and take no `--set`.
+The Action half (`set:` input, `action/run.sh` `compile:` overlay) is not started.
 
 ## Phase 3 — Behavior unifications (D2)
 

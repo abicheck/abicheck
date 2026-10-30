@@ -237,6 +237,15 @@
    "is_flag": false
   },
   {
+   "id": "compare --set",
+   "command": "compare",
+   "option": "--set",
+   "aliases": [],
+   "hidden": false,
+   "multiple": true,
+   "is_flag": false
+  },
+  {
    "id": "compare --acknowledgments",
    "command": "compare",
    "option": "--acknowledgments",
@@ -2921,6 +2930,11 @@
    "name": "debuginfod_url"
   },
   {
+   "id": "CompareRequest.config_overrides",
+   "owner": "CompareRequest",
+   "name": "config_overrides"
+  },
+  {
    "id": "CompareRequest.env_matrix",
    "owner": "CompareRequest",
    "name": "env_matrix"
@@ -3494,6 +3508,11 @@
    "id": "run_compare(acknowledgment_breaks)",
    "owner": "run_compare",
    "name": "acknowledgment_breaks"
+  },
+  {
+   "id": "run_compare(config_overrides)",
+   "owner": "run_compare",
+   "name": "config_overrides"
   },
   {
    "id": "run_dump(path)",

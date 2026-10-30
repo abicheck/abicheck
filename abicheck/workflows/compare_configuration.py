@@ -536,14 +536,15 @@ def load_and_resolve_compare_config(
     cfg_path: Path | None,
     *,
     severity_preset: str | None,
+    config_overrides: Mapping[str, object] | None = None,
 ) -> tuple[BuildConfig | None, ResolvedCompareConfig, str | None]:
     """Load the project config at *cfg_path* and resolve the run's settings.
 
     Returns ``(project_cfg, resolved, sha256)``. ``sha256`` is the digest of
     the bytes the config was parsed from, captured by the same read, so an
     ADR-049 receipt can prove *which revision* of the file supplied a value
-    rather than only naming its path. ``project_cfg`` and ``sha256`` are
-    ``None`` when *cfg_path* is ``None``.
+    rather than only naming its path. Both are ``None`` when there is neither
+    a file (*cfg_path*) nor a *config_overrides* mapping to build a config from.
 
     Raises :class:`CompareSettingsError` when the file cannot be parsed.
     """
@@ -551,9 +552,11 @@ def load_and_resolve_compare_config(
 
     project_cfg: BuildConfig | None = None
     cfg_sha: str | None = None
-    if cfg_path is not None:
+    if cfg_path is not None or config_overrides:
         try:
-            project_cfg, cfg_sha = load_build_config_with_digest(cfg_path)
+            project_cfg, cfg_sha = load_build_config_with_digest(
+                cfg_path, config_overrides=config_overrides
+            )
         except ValueError as exc:
             raise CompareSettingsError(str(exc)) from exc
     resolved = resolve_compare_config(project_cfg, cli_severity_preset=severity_preset)

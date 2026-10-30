@@ -246,6 +246,13 @@ class KeyTable:
             block: frozenset(subs) for block, subs in self.blocks.items()
         }
 
+    def has_path(self, path: str) -> bool:
+        """Whether *path* (``block.sub``, a top-level scalar, or a whole block) is a row."""
+        if "." in path:
+            block, sub = path.split(".", 1)
+            return sub in self.blocks.get(block, {})
+        return path in self.top_scalars or path in self.whole
+
     def findings(self, data: dict[str, Any]) -> list[str]:
         """Every structural problem in *data*, collected (not just the first)."""
         out: list[str] = []

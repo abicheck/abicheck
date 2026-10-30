@@ -32,6 +32,7 @@ Moved from ``abicheck/service_compare_pipeline.py`` alongside
 from __future__ import annotations
 
 import dataclasses
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
@@ -136,12 +137,57 @@ def run_compare_request(request: CompareRequest) -> CompareResult:
     """
     import abicheck.deadline as deadline
 
+    request = _with_config_overrides(request)
     with deadline.deadline_scope(request.budget_s):
         # deadline_scope never raises on entry -- check() before the work
         # `resolve_compare_request` performs at its own top.
         deadline.check()
         pair = resolve_compare_request(request)
         return classify_compare_pair(request, pair)
+
+
+#: ``CompareRequest`` severity fields and the resolved-config attribute each
+#: one reads from (``ResolvedCompareConfig.merged_severity_*``).
+_SEVERITY_OVERRIDE_FIELDS: tuple[tuple[str, str], ...] = (
+    ("severity_preset", "merged_severity_preset"),
+    ("severity_abi_breaking", "merged_severity_abi_breaking"),
+    ("severity_potential_breaking", "merged_severity_potential_breaking"),
+    ("severity_quality_issues", "merged_severity_quality_issues"),
+    ("severity_addition", "merged_severity_addition"),
+)
+
+
+def _with_config_overrides(request: CompareRequest) -> CompareRequest:
+    """*request* with its ``config_overrides`` resolved into the fields they set.
+
+    Resolved by :func:`~abicheck.workflows.compare_configuration.load_and_resolve_compare_config`,
+    the function the CLI's ``compare --set`` calls, so the two read the same
+    values. A field the caller already set away from its default is kept:
+    the typed argument beats an override, as the CLI flag does.
+    """
+    if not request.config_overrides:
+        return request
+    from ..compare_configuration import load_and_resolve_compare_config
+
+    _, resolved, _ = load_and_resolve_compare_config(
+        None,
+        severity_preset=None,
+        config_overrides=request.config_overrides,
+    )
+    defaults = {f.name: f.default for f in dataclasses.fields(CompareRequest)}
+    updates: dict[str, Any] = {}
+
+    def take(name: str, value: Any) -> None:
+        if getattr(request, name) == defaults[name] and value is not None:
+            updates[name] = value
+
+    take("scope_public", resolved.scope_public)
+    take("collapse_versioned_symbols", resolved.collapse_versioned_symbols)
+    if request.force_public_symbols is None and resolved.public_symbols:
+        updates["force_public_symbols"] = frozenset(resolved.public_symbols)
+    for field_name, resolved_attr in _SEVERITY_OVERRIDE_FIELDS:
+        take(field_name, getattr(resolved, resolved_attr))
+    return dataclasses.replace(request, **updates) if updates else request
 
 
 def _declared_default(owner: type, name: str) -> Any:
@@ -206,6 +252,8 @@ def run_compare(
     acknowledgments_path: Path | None = None,
     acknowledgment_unacknowledged_additions: str | None = None,
     acknowledgment_breaks: str | None = None,
+    # ADR-091 D4: appended last, same rule as every parameter above.
+    config_overrides: Mapping[str, object] | None = None,
 ) -> CompareResult:
     """Compare two ABI inputs and return the classified diff result.
 
@@ -365,6 +413,7 @@ def run_compare(
         ),
         depth=depth,
         severity_preset=severity_preset,
+        config_overrides=dict(config_overrides or {}),
         collapse_versioned_symbols=collapse_versioned_symbols,
         env_matrix=env_matrix,
         acknowledgments_path=acknowledgments_path,

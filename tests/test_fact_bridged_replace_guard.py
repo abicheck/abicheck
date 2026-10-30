@@ -110,6 +110,11 @@ _NAMED_CALL_ALLOWLIST: dict[tuple[str, str, str], str] = {
 #: ``IMPORT_CYCLE_ALLOWLIST``/``KNOWN_UNMIGRATED_READERS`` use: an entry
 #: here is a claim someone checked, not a way to silence the scan.
 _STARRED_CALL_ALLOWLIST: dict[tuple[str, str], str] = {
+    ("abicheck/workflows/compare/execute.py", "_with_config_overrides"): (
+        "CompareRequest: a typed request with no Fact[T]-bridged field. The "
+        "keys are only the fixed names the function's own take() calls and the "
+        "force_public_symbols assignment write, each a plain field."
+    ),
     ("abicheck/workflows/release_member_request.py", "member_request"): (
         "ReleaseMemberCompareRequest: a typed request, no Fact-bridged fields."
     ),

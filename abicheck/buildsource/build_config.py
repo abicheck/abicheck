@@ -31,6 +31,7 @@ enumeration in :mod:`abicheck.policy.support_promise`.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, ClassVar
@@ -53,6 +54,7 @@ from .build_config_contract import (
     contract_findings,
     parse_contract_post_manifest,
 )
+from .build_config_overrides import apply_config_overrides
 from .build_config_schema import (
     KeySpec,
     KeyTable,
@@ -663,22 +665,34 @@ TOP_LEVEL_INT_KEYS: frozenset[str] = frozenset(
 KNOWN_TOP_LEVEL_KEYS: frozenset[str] = BuildConfig._KNOWN_TOP_KEYS
 
 
-def load_build_config(path: Path) -> BuildConfig:
-    """Load a ``.abicheck.yml`` build config; tolerant of a missing/empty file."""
-    if not path.is_file():
-        return BuildConfig()
-    import yaml  # hard dep; imported out of the try so the except can name it
+def load_build_config(
+    path: Path | None, *, config_overrides: Mapping[str, object] | None = None
+) -> BuildConfig:
+    """Load a ``.abicheck.yml`` build config; tolerant of a missing/empty file.
 
-    try:
-        raw = yaml.safe_load(path.read_text(encoding="utf-8"))
-    except (OSError, ValueError, yaml.YAMLError) as exc:
-        # yaml.YAMLError (e.g. ParserError) is not a ValueError; catch it so a
-        # malformed .abicheck.yml surfaces as a wrapped error (→ ClickException in
-        # embed_build_source) instead of a raw traceback (Codex review).
-        raise ValueError(f"cannot read build config {path}: {exc}") from exc
+    *config_overrides* (ADR-091 D4, ``--set``) are laid over the file through
+    :func:`abicheck.buildsource.build_config_overrides.apply_config_overrides`
+    and validated by the same schema. With *path* ``None`` (no file) the
+    overrides alone build the config.
+    """
+    raw: Any = None
+    if path is not None and path.is_file():
+        import yaml  # hard dep; imported out of the try so the except can name it
+
+        try:
+            raw = yaml.safe_load(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError, yaml.YAMLError) as exc:
+            # yaml.YAMLError (e.g. ParserError) is not a ValueError; catch it so a
+            # malformed .abicheck.yml surfaces as a wrapped error (→ ClickException in
+            # embed_build_source) instead of a raw traceback (Codex review).
+            raise ValueError(f"cannot read build config {path}: {exc}") from exc
     if not isinstance(raw, dict):
+        raw = None
+    if raw is None and not config_overrides:
         return BuildConfig()
-    return BuildConfig.from_dict(raw)
+    return BuildConfig.from_dict(
+        apply_config_overrides(raw, config_overrides, KEY_TABLE)
+    )
 
 
 #: Re-exported for back-compat — the implementation now lives in

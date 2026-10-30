@@ -32,6 +32,7 @@ their reports. Classification goes through the shared
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -60,6 +61,7 @@ from .frontends.cli.compare_result import _report_compare_result
 from .frontends.cli.compare_use_cases import reject_use_cases_without_carrying_output
 from .frontends.cli.project_config import (
     compare_settings_usage_errors,
+    config_exclude_headers,
     resolve_project_compare_config,
 )
 from .frontends.cli.run_input_errors import click_input_errors
@@ -105,6 +107,7 @@ def run_compare(
     ctx: click.Context,
     *,
     exclude_headers: tuple[str, ...] = (),
+    config_overrides: Mapping[str, object] | None = None,
     old_input: Path,
     new_input: Path,
     output_dir: Path | None,
@@ -286,19 +289,9 @@ def run_compare(
     cfg_path, project_cfg, resolved_cfg, cfg_sha = resolve_project_compare_config(
         config=config,
         severity_preset=severity_preset,
+        config_overrides=config_overrides,
     )
-    # `scope.exclude_headers` -- the config equivalent of `--exclude-header`
-    # (see `BuildConfig.exclude_headers` for why it is its own key and not
-    # `sources.exclude`). Weaker than the flag and never unioned with it: a
-    # run stating `--exclude-header` at all uses exactly the rules it
-    # stated, because the rule *set* is the run's scope identity and
-    # silently widening it would make the run narrower than the command
-    # line says. From here on `exclude_headers` is the run's one canonical
-    # rule set, and every path -- scalar, directory/package fan-out,
-    # stranded capture, dry-run receipt, configuration digest -- reads this
-    # value.
-    if not exclude_headers:
-        exclude_headers = tuple(getattr(project_cfg, "exclude_headers", ()) or ())
+    exclude_headers = config_exclude_headers(exclude_headers, project_cfg)
     # One-comparison-product Phase 9b: no CLI flag any more -- scope.public
     # (or its built-in True) is the whole answer for a run with no --contract.
     scope_public_headers = resolved_cfg.scope_public

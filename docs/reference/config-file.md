@@ -130,6 +130,10 @@ an unknown-key error.
 
 ---
 
+Any key below can also be set for one `compare` run with
+`--set PATH=VALUE`, validated by this same schema; see
+[CLI usage](../use/cli-usage.md#overriding-one-config-key-for-one-run-set).
+
 ## Top-level keys
 
 `build:`, `sources:`, `severity:`, `scope:`, `suppression:`, `source:`,
