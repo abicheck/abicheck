@@ -21,9 +21,7 @@ out purely to keep that file under the AI-readiness `file-size` gate's own
 callers. Every constant/function here is unchanged from its original home;
 `check_docs_contract.py` keeps its own `_RETIRED_SURFACES`/
 `_retired_surface_scan_targets`/`_check_retired_surfaces` names as thin
-wrappers so its existing tests and call sites (including
-`_check_config_keys_as_cli_operands`, which reuses the same scan targets) are
-unaffected.
+wrappers so its existing tests and call sites (including `_check_config_keys_as_cli_operands`, which reuses the same scan targets) are unaffected.
 
 Uses a `Findings` `Protocol` (mirroring `pipeline_status_ledger.py`'s own
 decoupling) instead of importing the caller's concrete `Findings` class, and
@@ -38,6 +36,8 @@ from __future__ import annotations
 from collections.abc import Callable
 from pathlib import Path
 from typing import Protocol
+
+from retired_surfaces_0_7 import REMOVED_IN_0_7
 
 
 class Findings(Protocol):
@@ -1173,36 +1173,7 @@ RETIRED_SURFACES: tuple[tuple[str, tuple[str, ...], frozenset[str]], ...] = (
         ),
         frozenset({"contribute/known-gaps.md"}),
     ),
-    (
-        "compare/dump/project history --version (the per-side version label,"
-        " renamed --label by ADR-091 D5 R1 and removed outright by its D7"
-        " amendment; the root `abicheck --version` is the tool version and"
-        " is unaffected)",
-        (
-            "compare --version",
-            "dump --version",
-            "project history --version",
-        ),
-        frozenset({"start/upgrading-to-0.7.md"}),
-    ),
-    (
-        "compare --abi3 (the stable-ABI floor, renamed --abi3-floor by"
-        " ADR-091 D5 R12 and removed outright by its D7 amendment)",
-        ("compare --abi3 ",),
-        frozenset({"start/upgrading-to-0.7.md"}),
-    ),
-    (
-        "deps compare --old-root/--new-root and deps tree --sysroot (renamed"
-        " to --root by ADR-091 D5 R16 and removed outright by its D7"
-        " amendment)",
-        (
-            "deps compare --old-root",
-            "deps compare --new-root",
-            "deps tree --sysroot",
-        ),
-        frozenset({"start/upgrading-to-0.7.md"}),
-    ),
-)
+) + REMOVED_IN_0_7
 
 
 def retired_surface_scan_targets(
