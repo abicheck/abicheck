@@ -173,7 +173,7 @@ TYPED_OVERRIDE_CHANNELS: tuple[tuple[str, str, str], ...] = (
 #: Further ``--set`` keys the CLI's ``compare`` applies from the resolved config
 #: or the run's own settings, which a typed comparison has no field for.
 CLI_ONLY_OVERRIDE_PATHS: frozenset[str] = frozenset(
-    {"scope.show_redundant", "source.method", "performance.profile"}
+    {"scope.show_redundant", "sources.method", "performance.profile"}
 )
 
 

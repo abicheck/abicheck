@@ -566,7 +566,7 @@ concepts:
     renames:
       - R13
     config:
-      - source.method
+      - sources.method
   - concept: sources.public_headers
     tier: config
     renames: []
@@ -1075,7 +1075,7 @@ concepts:
     cli:
       - compare --acknowledgments
     config:
-      - acknowledgment
+      - acknowledgments
     action:
       - action:acknowledgments
     python:

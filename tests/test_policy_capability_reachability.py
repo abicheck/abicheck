@@ -59,19 +59,19 @@ _REPO_ROOT = Path(__file__).resolve().parents[1]
 CAPABILITIES: dict[str, dict[str, str]] = {
     "acknowledgment.records": {
         "cli": "--acknowledgments",
-        "config": "acknowledgment.file",
+        "config": "acknowledgments.file",
         "api": "acknowledgments_path",
         "action": "acknowledgments",
         "report": "disposition_audit.acknowledgments",
     },
     "acknowledgment.breaks": {
-        "config": "acknowledgment.breaks",
+        "config": "acknowledgments.breaks",
         "policy_file": "acknowledgment.breaks",
         "api": "acknowledgment_breaks",
         "report": "disposition_audit.acknowledgments",
     },
     "acknowledgment.unacknowledged_additions": {
-        "config": "acknowledgment.unacknowledged_additions",
+        "config": "acknowledgments.unacknowledged_additions",
         "policy_file": "acknowledgment.unacknowledged_additions",
         "api": "acknowledgment_unacknowledged_additions",
         "report": "disposition_audit.unacknowledged_additions_review",
@@ -225,7 +225,7 @@ def _cli_exit(tmp: Path, removals: dict[str, Path], symbols, breaks: str) -> int
     records = _records(tmp, symbols)
     cfg = tmp / "cfg.abicheck.yml"
     cfg.write_text(
-        f"acknowledgment:\n  file: {records}\n  breaks: {breaks}\n", encoding="utf-8"
+        f"acknowledgments:\n  file: {records}\n  breaks: {breaks}\n", encoding="utf-8"
     )
     out = tmp / "report.json"
     res = CliRunner().invoke(
@@ -248,7 +248,7 @@ def _cli_flag_exit(tmp: Path, removals: dict[str, Path], symbols, breaks: str) -
     """The same decision through the ``--acknowledgments`` flag, not the config key."""
     records = _records(tmp, symbols)
     cfg = tmp / "cfg.abicheck.yml"
-    cfg.write_text(f"acknowledgment:\n  breaks: {breaks}\n", encoding="utf-8")
+    cfg.write_text(f"acknowledgments:\n  breaks: {breaks}\n", encoding="utf-8")
     out = tmp / "report.json"
     res = CliRunner().invoke(
         main,

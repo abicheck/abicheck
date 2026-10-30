@@ -52,7 +52,7 @@ def test_findings_and_parse_agree(path, action, extra) -> None:
         + extra
     )
     assert len(findings) == expected, findings
-    parsed = parse_acknowledgment_config({"acknowledgment": block})
+    parsed = parse_acknowledgment_config({"acknowledgments": block})
     kept_file = path if _valid_file(path) else None
     kept_action = action if _valid_action(action) else None
     if kept_file is None and kept_action is None:
@@ -71,7 +71,7 @@ def test_findings_and_parse_agree(path, action, extra) -> None:
 @pytest.mark.parametrize("value", ["block", 3, ["file"]])
 def test_non_mapping_block(value) -> None:
     assert len(acknowledgment_findings(value)) == 1
-    assert parse_acknowledgment_config({"acknowledgment": value}) is None
+    assert parse_acknowledgment_config({"acknowledgments": value}) is None
 
 
 def test_absent_block() -> None:

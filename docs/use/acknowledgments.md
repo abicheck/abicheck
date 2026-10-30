@@ -21,26 +21,26 @@ Records come from one of two places:
 
 - `--acknowledgments FILE` on the command line, or the Action's
   `acknowledgments` input. This names the records for one run.
-- `.abicheck.yml`'s `acknowledgment.file`, which names the records a project
+- `.abicheck.yml`'s `acknowledgments.file`, which names the records a project
   commits.
 
 ```yaml
 # .abicheck.yml
-acknowledgment:
+acknowledgments:
   file: abi/acknowledgments.yml      # the records (format below)
   unacknowledged_additions: block    # allow (default) | warn | block
   breaks: gate                       # gate (default) | accept
 ```
 
 A relative `file` resolves against the project root. `--acknowledgments`
-overrides `acknowledgment.file` when both are given.
+overrides `acknowledgments.file` when both are given.
 
 **Trust boundary.** A record can accept a finding, and `breaks: accept` can
 lower a gating exit, so both are trusted only from input an operator named:
 
 - the `--acknowledgments` flag and the Action's `acknowledgments` input are
   operator input, so they supply records even with no config at all;
-- `acknowledgment.file` and `acknowledgment.breaks` apply only from an
+- `acknowledgments.file` and `acknowledgments.breaks` apply only from an
   explicitly named `--config` (or the Action's `build-config`). An
   auto-discovered `.abicheck.yml` is one the pull request under review can edit,
   so its `file` and `breaks` are noted on stderr and not applied;
@@ -147,7 +147,7 @@ after an `--ast-frontend` switch.
 ## Breaks: `breaks: gate | accept`
 
 An acknowledged **break** — a change classified `BREAKING` or `API_BREAK` — is
-handled by `acknowledgment.breaks`:
+handled by `acknowledgments.breaks`:
 
 - `gate` (the default) keeps the break's gate contribution. Acknowledging it
   changes the record, not the exit code: the run still exits `4` (or `2`).
@@ -170,7 +170,7 @@ it applies from an explicit `--config`, from a `--policy` document's own
 ## The additions review gate
 
 A project configures whether an **unacknowledged public addition** is
-flagged with `acknowledgment.unacknowledged_additions` in `.abicheck.yml`
+flagged with `acknowledgments.unacknowledged_additions` in `.abicheck.yml`
 (above). A `--policy` document may state the same setting in its own
 `acknowledgment:` block; when it does, it wins over `.abicheck.yml`. With a
 gate set and no `file`, nothing is acknowledged, so every public addition

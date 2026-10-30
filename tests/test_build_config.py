@@ -123,13 +123,11 @@ class TestBuildConfigFromDictRejects:
         with pytest.raises(ValueError, match="severity.abi_breaking"):
             BuildConfig.from_dict({"severity": {"abi_breaking": "nope"}})
 
-    def test_source_block_rejects_graph_subkey(self) -> None:
-        """`graph` belongs to the `sources:` (plural) block -- `from_dict`
-        never reads it from `source:` (singular), so a config that used the
-        wrong block name used to be silently accepted and silently ignored
-        rather than erroring. It must now be flagged as an unknown subkey
-        like any other typo, not accepted as a no-op."""
-        with pytest.raises(ValueError, match=r"source\.'graph'"):
+    def test_retired_source_block_is_an_unknown_key(self) -> None:
+        """ADR-091 R13: the singular `source:` block was renamed into
+        `sources:` (`sources.method`) with no transition period, so a config
+        that still uses it is an unknown key, not a silently ignored no-op."""
+        with pytest.raises(ValueError, match=r"unknown \.abicheck\.yml key 'source'"):
             BuildConfig.from_dict({"source": {"method": "s4", "graph": "full"}})
 
     def test_multiple_findings_all_reported(self) -> None:
@@ -152,6 +150,7 @@ class TestBuildConfigFromDictRejects:
                     "compile_db": "x.json",
                 },
                 "sources": {
+                    "method": "s4",
                     "public_headers": ["a.h"],
                     "exclude": "internal/**",
                     "graph": "full",
@@ -171,7 +170,6 @@ class TestBuildConfigFromDictRejects:
                     "public_header_dirs": ["include/public"],
                 },
                 "suppression": {"strict": True, "require_justification": False},
-                "source": {"method": "s4"},
                 "compile": {
                     "frontend": "clang",
                     "std": "c++20",

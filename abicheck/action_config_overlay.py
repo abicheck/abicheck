@@ -296,12 +296,12 @@ def strip_untrusted_execution_keys(base: dict[str, object]) -> dict[str, object]
     # here would launder a pull-request-planted records file (which can accept
     # its own additions, and under `breaks: accept` its own breaks) into that
     # trusted status. `unacknowledged_additions` only tightens, so it stays.
-    acknowledgment = base.get("acknowledgment")
+    acknowledgment = base.get("acknowledgments")
     if isinstance(acknowledgment, dict) and (
         "file" in acknowledgment or "breaks" in acknowledgment
     ):
         dropped = sorted(k for k in ("file", "breaks") if k in acknowledgment)
-        base["acknowledgment"] = {
+        base["acknowledgments"] = {
             k: v for k, v in acknowledgment.items() if k not in ("file", "breaks")
         }
         print(
@@ -417,9 +417,9 @@ def rebase_relative_config_paths(
     # ADR-067 D5: `acknowledgment.file` resolves against the config's project
     # root (`workflows/compare/project_inputs.py`'s `_records_path`), so a
     # relocated overlay must carry the absolute path, not a scratch-relative one.
-    acknowledgment = base.get("acknowledgment")
+    acknowledgment = base.get("acknowledgments")
     if isinstance(acknowledgment, dict) and isinstance(acknowledgment.get("file"), str):
-        base["acknowledgment"] = {
+        base["acknowledgments"] = {
             **acknowledgment,
             "file": _abs(acknowledgment["file"]),
         }

@@ -120,18 +120,13 @@ Every `.abicheck.yml` top-level key and block sub-key that `abicheck.buildsource
 | `preset` | str |
 | `quality_issues` | str |
 
-### `source:`
-
-| Sub-key | Type |
-|---|---|
-| `method` | str |
-
 ### `sources:`
 
 | Sub-key | Type |
 |---|---|
 | `exclude` | list[str] (or a single str) |
 | `graph` | str |
+| `method` | str |
 | `public_headers` | list[str] (or a single str) |
 
 ### `suppression:`
@@ -159,7 +154,7 @@ Embeds `abicheck.environment_matrix.EnvironmentMatrix`'s own YAML shape wholesal
 
 Recognized (so they don't trigger the unknown-key warning) but parsed by a sibling module rather than `BuildConfig` itself — see `abicheck/buildsource/CLAUDE.md`'s module map for which one:
 
-- `acknowledgment`
+- `acknowledgments`
 - `aggregate`
 - `baseline`
 - `bundle_variants`

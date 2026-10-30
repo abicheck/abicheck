@@ -89,7 +89,7 @@ here only for anyone migrating an old command line, not as a live alias list.
 The internal `s0`…`s6` vocabulary still exists inside the engine
 (`model/evidence_depth_levels.py`; the `--mode` presets themselves went with
 `scan`), but it has no public entry point beyond `.abicheck.yml`'s
-`source.method` — the typed `ScanRequest` that used to accept it was removed in 0.6 — and it must never leak into the public CLI, `--help`,
+`sources.method` — the typed `ScanRequest` that used to accept it was removed in 0.6 — and it must never leak into the public CLI, `--help`,
 reports, the config schema, or GitHub Action inputs. Prefer `--depth`.
 
 **`--source-method s0…s6`** (the old "how it gathers evidence" axis):
