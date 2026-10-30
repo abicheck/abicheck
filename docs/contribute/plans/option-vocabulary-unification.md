@@ -1,6 +1,6 @@
 # Option vocabulary unification: implementation plan
 
-**Status:** Phase 0 done (2026-10-30); Phase 1 done; Phase 2 CLI and typed-API half done for `compare`, `dump` and `project capture-variants` (the compile-path keys on `dump`, and the Action `set:` input, are open); Phase 4 CLI part done (#1852), its Action and Python parts not started; Phases 3, 5–7 not started. Implements
+**Status:** Phases 0 and 1 done (Phase 0 2026-10-30; Phase 1 is #1850). Phase 2 is partly done: the CLI and typed-API half for `compare` (#1851), for `dump` and `project capture-variants` (#1857), and the Action `set:` input (#1854). The compile-path keys on `dump`, the `compile:` overlay replacement, and the rest of Phase 2 are open. Phase 4 CLI part done (#1852), its Action and Python parts not started. Phases 3, 5–7 not started. Implements
 [ADR-091](../adr/091-one-option-vocabulary.md). Each phase is one PR, ordered
 so that the parity gate lands before any rename and every rename lands with
 its alias.
@@ -196,6 +196,37 @@ checks precedence, refusals and CLI-vs-typed equivalence at the resolved config.
   parameter.
 - **Still open in this phase:** the Action `set:` input and the `action/run.sh`
   `compile:` overlay replacement (not started), and the compile-path loaders above.
+
+**Result (2026-10-30, Action `set:` input, #1854).** The CLI and typed-API half for `compare`
+is in: `compare --set PATH=VALUE` (repeatable) and
+`CompareRequest.config_overrides` (typed; `run_compare(config_overrides=)`)
+share one validator (`abicheck/buildsource/build_config_overrides.py`, the
+file's own `KEY_TABLE`) and one loader (`load_build_config`,
+`load_build_config_with_digest`, `load_and_resolve_compare_config`). Precedence
+is explicit flag > override > file > default; core keys are refused with exit 64
+naming the flag (`CORE_CONFIG_FLAGS`, checked against the registry by
+`tests/test_config_overrides.py`). The typed override fills only the request fields the caller
+left at their default. The stored BundleFacts route refuses `--set` with exit 64.
+Still open in this phase: `--set` on `dump` (CLI and `DumpRequest.config_overrides`),
+`project plan` and `project capture-variants`, which read the file through about a dozen
+loaders that do not yet take an override; `project validate`, `project history`,
+`deps tree`, `deps compare` and `aggregate` read no `KEY_TABLE` key and take no `--set`.
+The Action `set:` input is in (root `action.yml` and `actions/check-target`):
+each non-blank, non-comment line forwards verbatim as `--set` on `mode: compare`
+only, and the CLI validates it. An effective `set:` on any other mode fails the
+step in `validate-inputs.sh`, because dump has no `--set` yet and an override
+must not drop silently. Both spellings are claimed under the generic-override
+concept with R23 exceptions. **The `compile:` overlay is not replaced.**
+`compare --set` still refuses every `compile.*` key (`compare does not apply
+compile.compiler yet`: the typed and CLI-only channels in
+`workflows/compare_configuration.py` carry no compile context), so forwarding
+them would fail every cross-compiler run. Until the CLI applies them, the
+Action still synthesizes the overlay in `add_compile_context_flags` for every
+mode (compare and dump), and `actions/check-target` keeps its assurance-overlay
+step. The `set:` input is applied after those overlays, so an explicit `set:`
+line wins over the overlay's keys once the CLI accepts them.
+
+Update (#1857): `dump` and `project capture-variants` now take `--set` (see the result above). The Action still refuses an effective `set:` outside `mode: compare`; that refusal is unchanged here.
 
 ## Phase 3 — Behavior unifications (D2)
 

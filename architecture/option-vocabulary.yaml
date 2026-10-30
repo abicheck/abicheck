@@ -800,6 +800,9 @@ concepts:
       - "compare --set"
       - "dump --set"
       - "project capture-variants --set"
+    action:
+      - action:set
+      - actions/check-target:set
     python:
       - CompareRequest.config_overrides
       - DumpRequest.config_overrides
@@ -813,6 +816,8 @@ concepts:
       - {id: DumpRequest.config_overrides, rule: name, rename: R23, note: "generic override field (ADR-091 D4); carries any config path, not one derived leaf"}
       - {id: "run_compare(config_overrides)", rule: name, rename: R23, note: "generic override shim argument (ADR-091 D4); carries any config path, not one derived leaf"}
       - {id: "run_dump(config_overrides)", rule: name, rename: R23, note: "generic override shim argument (ADR-091 D4); carries any config path, not one derived leaf"}
+      - {id: action:set, rule: name, rename: R23, note: "generic override input (ADR-091 D4); one PATH=VALUE per line, carries any config path, not one derived leaf"}
+      - {id: "actions/check-target:set", rule: name, rename: R23, note: "generic override input (ADR-091 D4), forwarded to the internal compare step; not one derived leaf"}
   - concept: dry_run
     tier: core
     renames: []

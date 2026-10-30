@@ -5,6 +5,15 @@ ADR-070 accepted (D3 implemented, D1/D2/D4 partly). Phase 2 blocked on the
 separate task owning the two drifted guards; Phase 5 assessed and deferred
 (see its section for why, and what would change that).
 
+**ADR-070 D2 progress (ADR-091 Phase 2, Action half).** The Action's new
+`set:` input forwards each override as `--set` and leaves key validation to the
+CLI; its one Action-side rule is the input's own mode scope (compare only,
+because dump has no `--set` yet), which fails the step rather than dropping an override. The `compile:` overlay synthesis in
+`action/run.sh` (`add_compile_context_flags`) is still the Action's own
+semantics, not yet the CLI's: `compare --set` refuses `compile.*` keys, so the
+overlay remains in use for every mode until the CLI applies them. Replacing it
+is the open D2 item.
+
 **Problem.** The composite GitHub Action (`action/`, `actions/check-target/`)
 is a hand-maintained adapter over the abicheck CLI. It encodes, in shell, a
 large number of assumptions about what the CLI accepts. Nothing compares the
