@@ -26,7 +26,9 @@ import enum
 import fnmatch
 import importlib.util
 import json
+import pathlib
 import re
+import typing
 from collections import Counter
 from pathlib import Path
 
@@ -612,3 +614,17 @@ def test_default_render_is_click_version_independent() -> None:
     assert gen._click_default_text(Option(Sentinel.UNSET, is_flag=True)) == "False"
     assert gen._click_default_text(Option("auto")) == "'auto'"
     assert gen._default_text(None) == "None"
+
+
+def test_annotation_text_is_interpreter_independent() -> None:
+    """Annotations are rendered from class names, not str(): Python 3.14 spells
+    pathlib.Path as pathlib._local.Path, and the inventory must read the same on
+    every interpreter in the CI matrix."""
+    gen = _generator()
+    assert gen._annotation_text(pathlib.Path | None) == "Path | None"
+    assert (
+        gen._annotation_text(tuple[pathlib.Path, ...] | None)
+        == "tuple[Path, ...] | None"
+    )
+    assert gen._annotation_text(typing.Literal["a", "b"]) == "Literal['a', 'b']"
+    assert gen._annotation_text(bool) == "bool"

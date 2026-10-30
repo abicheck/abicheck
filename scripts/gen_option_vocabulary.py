@@ -100,13 +100,37 @@ def _choices(hint: Any) -> list[Any] | None:
 
 
 def _annotation_text(hint: Any) -> str:
+    """A type annotation as stable text, built from class names rather than ``str``.
+
+    ``str()`` of a type spells its module, and the module moved (Python 3.14 shows
+    ``pathlib.Path`` as ``pathlib._local.Path``), so ``str()`` would make the
+    committed inventory depend on the interpreter that wrote it.
+    """
     if hint is inspect.Parameter.empty:
         return "<none>"
     if isinstance(hint, str):
         return hint
+    if hint is None or hint is type(None):
+        return "None"
+    origin = typing.get_origin(hint)
+    args = typing.get_args(hint)
+    if origin is typing.Literal:
+        return "Literal[" + ", ".join(repr(a) for a in args) + "]"
+    if origin in (typing.Union, types.UnionType):
+        return " | ".join(_annotation_text(a) for a in args)
+    if origin is not None:
+        name = getattr(origin, "__qualname__", None) or str(origin)
+        if not args:
+            return name
+        return (
+            name
+            + "["
+            + ", ".join("..." if a is Ellipsis else _annotation_text(a) for a in args)
+            + "]"
+        )
     if isinstance(hint, type):
         return hint.__qualname__
-    return str(hint).replace("typing.", "")
+    return repr(hint)
 
 
 def _cli_rows() -> list[dict[str, Any]]:

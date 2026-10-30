@@ -3932,7 +3932,7 @@
    "id": "CompareRequest.policy_file_path",
    "owner": "CompareRequest",
    "name": "policy_file_path",
-   "annotation": "pathlib._local.Path | None",
+   "annotation": "Path | None",
    "choices": null,
    "default": "None"
   },
@@ -3940,7 +3940,7 @@
    "id": "CompareRequest.suppress",
    "owner": "CompareRequest",
    "name": "suppress",
-   "annotation": "pathlib._local.Path | tuple[pathlib._local.Path, ...] | None",
+   "annotation": "Path | tuple[Path, ...] | None",
    "choices": null,
    "default": "None"
   },
@@ -3996,7 +3996,7 @@
    "id": "CompareRequest.env_matrix",
    "owner": "CompareRequest",
    "name": "env_matrix",
-   "annotation": "abicheck.environment_matrix.EnvironmentMatrix | None",
+   "annotation": "EnvironmentMatrix | None",
    "choices": null,
    "default": "None"
   },
@@ -4068,7 +4068,7 @@
    "id": "CompareRequest.include_labels",
    "owner": "CompareRequest",
    "name": "include_labels",
-   "annotation": "tuple[tuple[pathlib._local.Path, str], ...]",
+   "annotation": "tuple[tuple[Path, str], ...]",
    "choices": null,
    "default": "[]"
   },
@@ -4084,7 +4084,7 @@
    "id": "CompareRequest.dependency_search_paths",
    "owner": "CompareRequest",
    "name": "dependency_search_paths",
-   "annotation": "tuple[pathlib._local.Path, ...]",
+   "annotation": "tuple[Path, ...]",
    "choices": null,
    "default": "[]"
   },
@@ -4116,7 +4116,7 @@
    "id": "CompareRequest.pack_policy_overrides",
    "owner": "CompareRequest",
    "name": "pack_policy_overrides",
-   "annotation": "tuple[tuple[abicheck.model.change_catalog.kinds.ChangeKind, abicheck.model.change_catalog.registry.Verdict], ...] | None",
+   "annotation": "tuple[tuple[ChangeKind, Verdict], ...] | None",
    "choices": null,
    "default": "None"
   },
@@ -4124,7 +4124,7 @@
    "id": "CompareRequest.project_policy_overrides",
    "owner": "CompareRequest",
    "name": "project_policy_overrides",
-   "annotation": "tuple[tuple[abicheck.model.change_catalog.kinds.ChangeKind, abicheck.model.change_catalog.registry.Verdict], ...] | None",
+   "annotation": "tuple[tuple[ChangeKind, Verdict], ...] | None",
    "choices": null,
    "default": "None"
   },
@@ -4132,7 +4132,7 @@
    "id": "CompareRequest.acknowledgments_path",
    "owner": "CompareRequest",
    "name": "acknowledgments_path",
-   "annotation": "pathlib._local.Path | None",
+   "annotation": "Path | None",
    "choices": null,
    "default": "None"
   },
@@ -4172,7 +4172,7 @@
    "id": "CompareRequest.old_probe_matrix",
    "owner": "CompareRequest",
    "name": "old_probe_matrix",
-   "annotation": "pathlib._local.Path | None",
+   "annotation": "Path | None",
    "choices": null,
    "default": "None"
   },
@@ -4180,7 +4180,7 @@
    "id": "CompareRequest.new_probe_matrix",
    "owner": "CompareRequest",
    "name": "new_probe_matrix",
-   "annotation": "pathlib._local.Path | None",
+   "annotation": "Path | None",
    "choices": null,
    "default": "None"
   },
@@ -4196,7 +4196,7 @@
    "id": "CompareRequest.pack_paths",
    "owner": "CompareRequest",
    "name": "pack_paths",
-   "annotation": "tuple[pathlib._local.Path, ...]",
+   "annotation": "tuple[Path, ...]",
    "choices": null,
    "default": "[]"
   },
@@ -4300,7 +4300,7 @@
    "id": "CompareRequest.performance_profile",
    "owner": "CompareRequest",
    "name": "performance_profile",
-   "annotation": "abicheck.model.performance.PerformanceProfile | None",
+   "annotation": "PerformanceProfile | None",
    "choices": [
     "balanced",
     "low-memory"
@@ -4383,7 +4383,7 @@
    "id": "DumpRequest.include_labels",
    "owner": "DumpRequest",
    "name": "include_labels",
-   "annotation": "tuple[tuple[pathlib._local.Path, str], ...]",
+   "annotation": "tuple[tuple[Path, str], ...]",
    "choices": null,
    "default": "[]"
   },
@@ -4399,7 +4399,7 @@
    "id": "DumpRequest.dependency_search_paths",
    "owner": "DumpRequest",
    "name": "dependency_search_paths",
-   "annotation": "tuple[pathlib._local.Path, ...]",
+   "annotation": "tuple[Path, ...]",
    "choices": null,
    "default": "[]"
   },
@@ -4607,7 +4607,7 @@
    "id": "run_compare(old_headers)",
    "owner": "run_compare",
    "name": "old_headers",
-   "annotation": "list[pathlib._local.Path] | None",
+   "annotation": "list[Path] | None",
    "choices": null,
    "default": "None"
   },
@@ -4615,7 +4615,7 @@
    "id": "run_compare(new_headers)",
    "owner": "run_compare",
    "name": "new_headers",
-   "annotation": "list[pathlib._local.Path] | None",
+   "annotation": "list[Path] | None",
    "choices": null,
    "default": "None"
   },
@@ -4623,7 +4623,7 @@
    "id": "run_compare(old_includes)",
    "owner": "run_compare",
    "name": "old_includes",
-   "annotation": "list[pathlib._local.Path] | None",
+   "annotation": "list[Path] | None",
    "choices": null,
    "default": "None"
   },
@@ -4631,7 +4631,7 @@
    "id": "run_compare(new_includes)",
    "owner": "run_compare",
    "name": "new_includes",
-   "annotation": "list[pathlib._local.Path] | None",
+   "annotation": "list[Path] | None",
    "choices": null,
    "default": "None"
   },
@@ -4679,7 +4679,7 @@
    "id": "run_compare(suppress)",
    "owner": "run_compare",
    "name": "suppress",
-   "annotation": "pathlib._local.Path | tuple[pathlib._local.Path, ...] | None",
+   "annotation": "Path | tuple[Path, ...] | None",
    "choices": null,
    "default": "None"
   },
@@ -4695,7 +4695,7 @@
    "id": "run_compare(policy_file_path)",
    "owner": "run_compare",
    "name": "policy_file_path",
-   "annotation": "pathlib._local.Path | None",
+   "annotation": "Path | None",
    "choices": null,
    "default": "None"
   },
@@ -4703,7 +4703,7 @@
    "id": "run_compare(old_pdb_path)",
    "owner": "run_compare",
    "name": "old_pdb_path",
-   "annotation": "pathlib._local.Path | None",
+   "annotation": "Path | None",
    "choices": null,
    "default": "None"
   },
@@ -4711,7 +4711,7 @@
    "id": "run_compare(new_pdb_path)",
    "owner": "run_compare",
    "name": "new_pdb_path",
-   "annotation": "pathlib._local.Path | None",
+   "annotation": "Path | None",
    "choices": null,
    "default": "None"
   },
@@ -4719,7 +4719,7 @@
    "id": "run_compare(old_debug_roots)",
    "owner": "run_compare",
    "name": "old_debug_roots",
-   "annotation": "list[pathlib._local.Path] | None",
+   "annotation": "list[Path] | None",
    "choices": null,
    "default": "None"
   },
@@ -4727,7 +4727,7 @@
    "id": "run_compare(new_debug_roots)",
    "owner": "run_compare",
    "name": "new_debug_roots",
-   "annotation": "list[pathlib._local.Path] | None",
+   "annotation": "list[Path] | None",
    "choices": null,
    "default": "None"
   },
@@ -4831,7 +4831,7 @@
    "id": "run_compare(compile_context)",
    "owner": "run_compare",
    "name": "compile_context",
-   "annotation": "abicheck.compile_context.CompileContext | None",
+   "annotation": "CompileContext | None",
    "choices": null,
    "default": "None"
   },
@@ -4855,7 +4855,7 @@
    "id": "run_compare(public_header_dirs)",
    "owner": "run_compare",
    "name": "public_header_dirs",
-   "annotation": "list[pathlib._local.Path] | None",
+   "annotation": "list[Path] | None",
    "choices": null,
    "default": "None"
   },
@@ -4879,7 +4879,7 @@
    "id": "run_compare(env_matrix)",
    "owner": "run_compare",
    "name": "env_matrix",
-   "annotation": "abicheck.environment_matrix.EnvironmentMatrix | None",
+   "annotation": "EnvironmentMatrix | None",
    "choices": null,
    "default": "None"
   },
@@ -4895,7 +4895,7 @@
    "id": "run_compare(acknowledgments_path)",
    "owner": "run_compare",
    "name": "acknowledgments_path",
-   "annotation": "pathlib._local.Path | None",
+   "annotation": "Path | None",
    "choices": null,
    "default": "None"
   },
