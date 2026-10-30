@@ -1,0 +1,1043 @@
+# Option vocabulary registry (ADR-091 D6; plan option-vocabulary-unification.md Phase 0).
+#
+# Every user-settable option on the four surfaces, grouped into concepts.
+# The rows themselves are generated into option-vocabulary-inventory.json by
+# scripts/gen_option_vocabulary.py; this file is hand-curated and says which
+# rows are the same concept. tests/test_option_vocabulary.py checks that every
+# inventory row is claimed by exactly one concept (or an out_of_scope entry)
+# and that every id named here exists.
+#
+# concept:  the canonical name -- the .abicheck.yml path where one exists,
+#           the proposed path otherwise (ADR-091 D1).
+# tier:     core     -- visible CLI flag + Action input + shim argument (D4)
+#           config   -- .abicheck.yml / typed request / --set only (D4)
+#           action   -- Action machinery with no CLI counterpart
+#           python   -- typed-API-only capability
+#           internal -- typed-API plumbing, not a user option
+#           retired  -- every Action input the inventory marks `retired`
+#                       (a fail-closed tombstone, kept declared per
+#                       tests/test_action_retired_inputs_contract.py) or
+#                       `ignored`; nothing else (R14)
+# renames:  the ADR-091 D5 change ids that will move members of this
+#           concept onto the canonical spelling; empty means already aligned
+#           or no change planned.
+# cli/config/action/python: inventory ids (cli "<command> <--option>",
+#           action "<action>:<input>", python "<Class>.<field>" or
+#           "<function>(<param>)").
+schema_version: 1
+
+# Sub-actions not mapped yet. `until: phase-1` entries mirror CLI commands
+# (actions/aggregate -> `abicheck aggregate`, actions/collect-facts -> `dump`)
+# and must be mapped into concepts by Phase 1; `until: permanent` entries are
+# baseline transport, report publication and run verification, which have no
+# CLI counterpart.
+out_of_scope:
+  - pattern: "actions/aggregate:*"
+    reason: Mirrors `abicheck aggregate`; mapped in Phase 1.
+    until: phase-1
+  - pattern: "actions/collect-facts:*"
+    reason: Mirrors `dump` evidence inputs; mapped in Phase 1.
+    until: phase-1
+  - pattern: "actions/baseline:*"
+    reason: Baseline transport, no CLI counterpart.
+    until: permanent
+  - pattern: "actions/stage-baseline:*"
+    reason: Baseline transport, no CLI counterpart.
+    until: permanent
+  - pattern: "actions/resolve-baseline:*"
+    reason: Baseline transport, no CLI counterpart.
+    until: permanent
+  - pattern: "actions/verify-baseline-source:*"
+    reason: Baseline provenance verification, no CLI counterpart.
+    until: permanent
+  - pattern: "actions/report:*"
+    reason: Report publication (ADR-073), no CLI counterpart.
+    until: permanent
+  - pattern: "actions/verify-source-run:*"
+    reason: Producer-run verification (ADR-073), no CLI counterpart.
+    until: permanent
+
+concepts:
+  - concept: operands
+    tier: core
+    renames: []
+    action:
+      - "action:old-library"
+      - "action:new-library"
+      - "actions/check-target:new-library"
+    python:
+      - InputSpec.path
+      - CompareRequest.old
+      - CompareRequest.new
+      - DumpRequest.input
+      - "run_compare(old_input)"
+      - "run_compare(new_input)"
+      - "run_dump(path)"
+      - "run_dump(binary_fmt)"
+  - concept: no_baseline
+    tier: core
+    renames: []
+    cli:
+      - "compare --no-baseline"
+  - concept: label
+    tier: core
+    renames: [R1]
+    cli:
+      - "compare --version"
+      - "dump --version"
+      - "project history --version"
+    action:
+      - "action:old-version"
+      - "action:new-version"
+    python:
+      - InputSpec.version
+      - "run_compare(old_version)"
+      - "run_compare(new_version)"
+      - "run_dump(version)"
+  - concept: select
+    tier: core
+    renames: []
+    cli:
+      - "compare --select"
+  - concept: select_required
+    tier: config
+    renames: []
+    cli:
+      - "compare --select-required"
+  - concept: variant
+    tier: core
+    renames: []
+    cli:
+      - "compare --variant"
+      - "project capture-variants --variant"
+  - concept: pack
+    tier: config
+    renames: []
+    cli:
+      - "compare --pack"
+    python:
+      - CompareRequest.pack_paths
+      - CompareRequest.pack_policy_overrides
+      - CompareRequest.pack_internal_namespaces
+      - "run_compare(pack_policy_overrides)"
+      - "run_compare(pack_internal_namespaces)"
+  - concept: depth
+    tier: core
+    renames: []
+    cli:
+      - "compare --depth"
+      - "dump --depth"
+    action:
+      - "action:depth"
+      - "actions/check-target:requested-depth"
+    python:
+      - CompareRequest.depth
+      - DumpRequest.depth
+      - "run_compare(depth)"
+  - concept: headers
+    tier: core
+    renames: [R17]
+    cli:
+      - "compare --header"
+      - "dump --header"
+    action:
+      - "action:header"
+      - "action:old-header"
+      - "action:new-header"
+      - "action:devel-pkg1"
+      - "action:devel-pkg2"
+      - "actions/check-target:header"
+      - "actions/check-target:old-header"
+      - "actions/check-target:new-header"
+    python:
+      - InputSpec.headers
+      - "run_compare(old_headers)"
+      - "run_compare(new_headers)"
+      - "run_dump(headers)"
+      - "run_dump(public_headers)"
+  - concept: compile.include_dirs
+    tier: core
+    renames: []
+    cli:
+      - "compare --include"
+      - "dump --include"
+    config:
+      - compile.include_dirs
+    action:
+      - "action:include"
+      - "action:old-include"
+      - "action:new-include"
+      - "actions/check-target:include"
+      - "actions/check-target:old-include"
+      - "actions/check-target:new-include"
+    python:
+      - InputSpec.includes
+      - "run_compare(old_includes)"
+      - "run_compare(new_includes)"
+      - "run_dump(includes)"
+      - "run_dump(public_include_search_dirs)"
+  - concept: compile.defines
+    tier: core
+    renames: []
+    cli:
+      - "compare --define"
+      - "dump --define"
+    config:
+      - compile.defines
+  - concept: compile.lang
+    tier: config
+    renames: []
+    config:
+      - compile.lang
+    action:
+      - "action:lang"
+      - "actions/check-target:lang"
+    python:
+      - CompareRequest.lang
+      - CompareRequest.lang_explicit
+      - DumpRequest.lang
+      - DumpRequest.lang_explicit
+      - "run_compare(lang)"
+      - "run_compare(lang_explicit)"
+      - "run_dump(lang)"
+      - "run_dump(lang_explicit)"
+  - concept: compile.frontend
+    tier: config
+    renames: [R4]
+    config:
+      - compile.frontend
+    action:
+      - "action:ast-frontend"
+      - "actions/check-target:ast-frontend"
+    python:
+      - CompareRequest.frontend
+      - DumpRequest.frontend
+      - "run_compare(frontend)"
+      - "run_dump(header_backend)"
+  - concept: compile.frontend_context
+    tier: config
+    renames: []
+    config:
+      - compile.frontend_context
+    python:
+      - CompareRequest.frontend_context
+      - DumpRequest.frontend_context
+  - concept: compile.compiler
+    tier: config
+    renames: [R5]
+    config:
+      - compile.compiler
+    action:
+      - "action:gcc-path"
+      - "action:gcc-prefix"
+      - "actions/check-target:gcc-path"
+      - "actions/check-target:gcc-prefix"
+  - concept: compile.options
+    tier: config
+    renames: [R5]
+    config:
+      - compile.options
+    action:
+      - "action:gcc-options"
+      - "actions/check-target:gcc-options"
+  - concept: compile.sysroot
+    tier: config
+    renames: []
+    config:
+      - compile.sysroot
+    action:
+      - "action:sysroot"
+      - "actions/check-target:sysroot"
+  - concept: compile.nostdinc
+    tier: config
+    renames: []
+    config:
+      - compile.nostdinc
+    action:
+      - "action:nostdinc"
+  - concept: compile.std
+    tier: config
+    renames: []
+    config:
+      - compile.std
+  - concept: compile.ast_frontend_fallback
+    tier: config
+    renames: []
+    config:
+      - compile.ast_frontend_fallback
+  - concept: compile.allow_unsupported_castxml
+    tier: config
+    renames: []
+    config:
+      - compile.allow_unsupported_castxml
+  - concept: compile
+    tier: config
+    renames: []
+    python:
+      - InputSpec.compile
+      - "run_compare(compile_context)"
+      - "run_dump(compile)"
+  - concept: consumer
+    tier: action
+    renames: []
+    action:
+      - "actions/check-target:consumer-ast-frontend"
+      - "actions/check-target:consumer-gcc-path"
+      - "actions/check-target:consumer-gcc-options"
+      - "actions/check-target:consumer-compile-active"
+      - "actions/check-target:consumer-binary"
+  - concept: debug_info
+    tier: core
+    renames: [R17]
+    cli:
+      - "compare --debug-info"
+      - "dump --debug-info"
+    config:
+      - debug.pdb_path
+    action:
+      - "action:debug-info1"
+      - "action:debug-info2"
+    python:
+      - InputSpec.pdb
+      - InputSpec.debug_roots
+      - "run_compare(old_pdb_path)"
+      - "run_compare(new_pdb_path)"
+      - "run_compare(old_debug_roots)"
+      - "run_compare(new_debug_roots)"
+      - "run_dump(pdb_path)"
+      - "run_dump(debug_roots)"
+  - concept: debug.format
+    tier: config
+    renames: []
+    config:
+      - debug.format
+    python:
+      - CompareRequest.debug_format
+      - DumpRequest.debug_format
+      - "run_dump(debug_format)"
+  - concept: debug.dwarf_only
+    tier: config
+    renames: []
+    config:
+      - debug.dwarf_only
+    python:
+      - CompareRequest.dwarf_only
+      - DumpRequest.dwarf_only
+      - "run_dump(dwarf_only)"
+  - concept: debug.debuginfod
+    tier: config
+    renames: [R9]
+    config:
+      - debug.debuginfod
+    python:
+      - CompareRequest.enable_debuginfod
+      - DumpRequest.enable_debuginfod
+      - "run_compare(enable_debuginfod)"
+      - "run_dump(enable_debuginfod)"
+  - concept: debug.debuginfod_url
+    tier: config
+    renames: []
+    config:
+      - debug.debuginfod_url
+    python:
+      - CompareRequest.debuginfod_url
+      - DumpRequest.debuginfod_url
+      - "run_compare(debuginfod_url)"
+      - "run_dump(debuginfod_url)"
+  - concept: build_info
+    tier: core
+    renames: []
+    cli:
+      - "compare --build-info"
+      - "dump --build-info"
+    config:
+      - build.compile_db
+    action:
+      - "action:build-info"
+      - "action:compile-db"
+      - "actions/check-target:build-info"
+      - "actions/check-target:compile-db"
+    python:
+      - InputSpec.build_info
+      - CompareRequest.old_probe_matrix
+      - CompareRequest.new_probe_matrix
+  - concept: build.compile_db_filter
+    tier: config
+    renames: []
+    config:
+      - build.compile_db_filter
+    python:
+      - InputSpec.compile_db_filter
+  - concept: build.query
+    tier: config
+    renames: []
+    config:
+      - build.query
+    python:
+      - CompareRequest.allow_build_query
+  - concept: build.system
+    tier: config
+    renames: []
+    config:
+      - build.system
+    action:
+      - "actions/check-target:build-system"
+      - "actions/check-target:build-generator"
+  - concept: build.targets
+    tier: config
+    renames: []
+    config:
+      - build.targets
+    python:
+      - InputSpec.build_targets
+  - concept: sources
+    tier: core
+    renames: []
+    cli:
+      - "compare --sources"
+      - "dump --sources"
+    action:
+      - "action:sources"
+      - "actions/check-target:sources"
+    python:
+      - InputSpec.sources
+      - CompareRequest.has_sources
+      - DumpRequest.has_sources
+  - concept: sources.method
+    tier: config
+    renames: [R13]
+    config:
+      - source.method
+  - concept: sources.public_headers
+    tier: config
+    renames: []
+    config:
+      - sources.public_headers
+  - concept: sources.exclude
+    tier: config
+    renames: []
+    config:
+      - sources.exclude
+  - concept: sources.graph
+    tier: config
+    renames: []
+    config:
+      - sources.graph
+  - concept: config
+    tier: core
+    renames: []
+    cli:
+      - "compare --config"
+      - "dump --config"
+      - "project capture-variants --config"
+    action:
+      - "action:build-config"
+      - "actions/check-target:build-config"
+    python:
+      - InputSpec.build_config
+  - concept: config.version
+    tier: config
+    renames: []
+    config:
+      - version
+  - concept: dump_manifest
+    tier: config
+    renames: []
+    cli:
+      - "compare --dump-manifest"
+      - "dump --dump-manifest"
+    python:
+      - InputSpec.dump_manifest
+      - "run_dump(dump_manifest)"
+  - concept: provenance
+    tier: config
+    renames: []
+    cli:
+      - "dump --provenance"
+  - concept: follow_linker_scripts
+    tier: python
+    renames: []
+    python:
+      - InputSpec.follow_linker_scripts
+  - concept: include_system_declarations
+    tier: config
+    renames: [R8]
+    cli:
+      - "compare --include-system-declarations"
+      - "dump --include-system-declarations"
+    python:
+      - InputSpec.include_dependencies
+      - "run_compare(include_dependencies)"
+      - "run_dump(include_dependencies)"
+  - concept: deps.follow
+    tier: core
+    renames: [R8]
+    cli:
+      - "compare --follow-deps"
+      - "dump --follow-deps"
+    action:
+      - "action:follow-deps"
+    python:
+      - CompareRequest.follow_dependencies
+      - DumpRequest.follow_dependencies
+  - concept: deps.search_paths
+    tier: config
+    renames: []
+    cli:
+      - "compare --search-path"
+      - "dump --search-path"
+      - "deps compare --search-path"
+      - "deps tree --search-path"
+    action:
+      - "action:search-path"
+    python:
+      - CompareRequest.dependency_search_paths
+      - DumpRequest.dependency_search_paths
+  - concept: deps.ld_library_path
+    tier: config
+    renames: []
+    cli:
+      - "compare --ld-library-path"
+      - "dump --ld-library-path"
+      - "deps compare --ld-library-path"
+      - "deps tree --ld-library-path"
+    action:
+      - "action:ld-library-path"
+    python:
+      - CompareRequest.ld_library_path
+      - DumpRequest.ld_library_path
+  - concept: deps.root
+    tier: core
+    renames: [R16]
+    cli:
+      - "deps compare --old-root"
+      - "deps compare --new-root"
+      - "deps tree --sysroot"
+    action:
+      - "action:old-root"
+      - "action:new-root"
+  - concept: bundle
+    tier: config
+    renames: []
+    cli:
+      - "compare --instantiation-manifest"
+      - "compare --bundle-facts-out"
+      - "compare --bundle-facts-library-manifest"
+    config:
+      - bundle.system_providers
+      - bundle.cohorts
+      - bundle_variants
+    action:
+      - "actions/check-target:bundle-members"
+  - concept: python.abi3_floor
+    tier: config
+    renames: [R12]
+    cli:
+      - "compare --abi3"
+    config:
+      - python.abi3_floor
+    python:
+      - CompareRequest.abi3_floor
+  - concept: deployment
+    tier: config
+    renames: []
+    config:
+      - deployment
+    python:
+      - CompareRequest.env_matrix
+      - "run_compare(env_matrix)"
+  - concept: release.dso_only
+    tier: config
+    renames: []
+    config:
+      - release.dso_only
+    action:
+      - "action:dso-only"
+  - concept: release.include_private_dso
+    tier: config
+    renames: []
+    config:
+      - release.include_private_dso
+    action:
+      - "action:include-private-dso"
+  - concept: release.support_promise
+    tier: config
+    renames: []
+    config:
+      - release.support_promise
+  - concept: since
+    tier: config
+    renames: []
+    cli:
+      - "compare --since"
+    action:
+      - "action:since"
+  - concept: changed_paths
+    tier: config
+    renames: []
+    cli:
+      - "compare --changed-path"
+    action:
+      - "action:changed-path"
+    python:
+      - CompareRequest.changed_paths
+  - concept: budget
+    tier: config
+    renames: []
+    cli:
+      - "compare --budget"
+    action:
+      - "action:budget"
+    python:
+      - CompareRequest.budget_s
+  - concept: dry_run
+    tier: core
+    renames: []
+    cli:
+      - "compare --dry-run"
+      - "dump --dry-run"
+      - "deps compare --dry-run"
+      - "deps tree --dry-run"
+      - "project capture-variants --dry-run"
+    action:
+      - "action:dry-run"
+  - concept: performance.profile
+    tier: config
+    renames: []
+    cli:
+      - "compare --performance-profile"
+    config:
+      - performance.profile
+    python:
+      - CompareRequest.performance_profile
+  - concept: resource_limits.max_bundle_facts_decode_nodes
+    tier: config
+    renames: []
+    config:
+      - resource_limits.max_bundle_facts_decode_nodes
+  - concept: scope.public
+    tier: config
+    renames: []
+    config:
+      - scope.public
+    python:
+      - CompareRequest.scope_public
+      - "run_compare(scope_to_public_surface)"
+  - concept: scope.public_header_dirs
+    tier: config
+    renames: [R7]
+    config:
+      - scope.public_header_dirs
+    action:
+      - "action:public-header-dir"
+    python:
+      - InputSpec.public_header_dirs
+      - "run_compare(public_header_dirs)"
+      - "run_dump(public_header_dirs)"
+  - concept: scope.public_symbols
+    tier: config
+    renames: [R7]
+    config:
+      - scope.public_symbols
+    python:
+      - CompareRequest.force_public_symbols
+      - "run_compare(force_public_symbols)"
+  - concept: committed_surface
+    tier: python
+    renames: []
+    python:
+      - CompareRequest.public_surface_allowlist
+      - "run_compare(public_surface_allowlist)"
+  - concept: scope.exclude_headers
+    tier: core
+    renames: []
+    cli:
+      - "compare --exclude-header"
+      - "dump --exclude-header"
+    config:
+      - scope.exclude_headers
+    python:
+      - InputSpec.exclude_headers
+      - "run_compare(exclude_headers)"
+  - concept: scope.collapse_versioned_symbols
+    tier: config
+    renames: []
+    config:
+      - scope.collapse_versioned_symbols
+    python:
+      - CompareRequest.collapse_versioned_symbols
+      - "run_compare(collapse_versioned_symbols)"
+  - concept: scope.show_redundant
+    tier: config
+    renames: []
+    config:
+      - scope.show_redundant
+  - concept: scope.on_incomplete
+    tier: config
+    renames: []
+    config:
+      - scope.on_incomplete
+  - concept: scope.dependencies
+    tier: config
+    renames: []
+    config:
+      - scope.dependencies
+      - scope.dependency_evidence
+  - concept: scope.private_headers
+    tier: config
+    renames: []
+    config:
+      - scope.private_headers
+  - concept: scope.private_namespaces
+    tier: config
+    renames: []
+    config:
+      - scope.private_namespaces
+  - concept: scope
+    tier: config
+    renames: []
+    config:
+      - scope
+  - concept: contract
+    tier: core
+    renames: [R10]
+    cli:
+      - "compare --contract"
+    config:
+      - contract
+    action:
+      - "actions/check-target:contract-file"
+    python:
+      - CompareRequest.contract_evaluation
+      - CompareRequest.contract_mode
+      - "run_compare(contract_evaluation)"
+      - "run_compare(contract_mode)"
+  - concept: used_by
+    tier: core
+    renames: []
+    cli:
+      - "compare --used-by"
+      - "compare --used-by-manifest"
+    action:
+      - "action:used-by"
+      - "action:used-by-manifest"
+  - concept: required_symbol
+    tier: core
+    renames: []
+    cli:
+      - "compare --required-symbol"
+    action:
+      - "action:required-symbol"
+      - "action:required-symbols"
+  - concept: use_cases
+    tier: config
+    renames: []
+    cli:
+      - "compare --use-cases"
+  - concept: diagnostic_comparison
+    tier: config
+    renames: []
+    cli:
+      - "compare --diagnostic-comparison"
+    python:
+      - CompareRequest.diagnostic_comparison
+      - "run_compare(diagnostic_comparison)"
+  - concept: require_same_generation
+    tier: config
+    renames: []
+    cli:
+      - "compare --require-same-generation"
+    python:
+      - CompareRequest.require_same_generation
+  - concept: pattern_verdicts
+    tier: python
+    renames: []
+    python:
+      - CompareRequest.pattern_verdicts
+      - "run_compare(pattern_verdicts)"
+  - concept: policy
+    tier: core
+    renames: [R2]
+    cli:
+      - "compare --policy"
+      - "project history --policy"
+    action:
+      - "action:policy"
+      - "action:policy-file"
+      - "actions/check-target:policy"
+      - "actions/check-target:policy-file"
+    python:
+      - CompareRequest.policy
+      - CompareRequest.policy_file_path
+      - "run_compare(policy)"
+      - "run_compare(policy_file_path)"
+  - concept: policy.overrides
+    tier: config
+    renames: []
+    config:
+      - policy.overrides
+    python:
+      - CompareRequest.project_policy_overrides
+      - "run_compare(project_policy_overrides)"
+  - concept: suppress
+    tier: core
+    renames: []
+    cli:
+      - "compare --suppress"
+    action:
+      - "action:suppress"
+      - "actions/check-target:suppress"
+    python:
+      - CompareRequest.suppress
+      - "run_compare(suppress)"
+  - concept: suppression.strict
+    tier: config
+    renames: []
+    config:
+      - suppression.strict
+    python:
+      - CompareRequest.strict_suppressions
+  - concept: suppression.require_justification
+    tier: config
+    renames: []
+    config:
+      - suppression.require_justification
+    python:
+      - CompareRequest.require_justification
+  - concept: acknowledgments
+    tier: core
+    renames: [R3]
+    cli:
+      - "compare --acknowledgments"
+    config:
+      - acknowledgment
+    action:
+      - "action:acknowledgments"
+    python:
+      - CompareRequest.acknowledgments_path
+      - CompareRequest.acknowledgment_unacknowledged_additions
+      - CompareRequest.acknowledgment_breaks
+      - "run_compare(acknowledgments_path)"
+      - "run_compare(acknowledgment_unacknowledged_additions)"
+      - "run_compare(acknowledgment_breaks)"
+  - concept: severity.preset
+    tier: core
+    renames: []
+    cli:
+      - "compare --severity-preset"
+    config:
+      - severity.preset
+    action:
+      - "action:severity-preset"
+      - "actions/check-target:severity-preset"
+    python:
+      - CompareRequest.severity_preset
+      - "run_compare(severity_preset)"
+  - concept: severity.abi_breaking
+    tier: config
+    renames: []
+    config:
+      - severity.abi_breaking
+    python:
+      - CompareRequest.severity_abi_breaking
+  - concept: severity.potential_breaking
+    tier: config
+    renames: []
+    config:
+      - severity.potential_breaking
+    python:
+      - CompareRequest.severity_potential_breaking
+  - concept: severity.quality_issues
+    tier: config
+    renames: []
+    config:
+      - severity.quality_issues
+    python:
+      - CompareRequest.severity_quality_issues
+  - concept: severity.addition
+    tier: config
+    renames: []
+    config:
+      - severity.addition
+    python:
+      - CompareRequest.severity_addition
+  - concept: gate.fail_on_removed_library
+    tier: config
+    renames: []
+    config:
+      - gate.fail_on_removed_library
+    action:
+      - "action:fail-on-removed-library"
+  - concept: assurance.require_complete
+    tier: config
+    renames: [R6]
+    config:
+      - assurance.require_complete
+    action:
+      - "action:analysis-assurance-complete"
+      - "actions/check-target:analysis-assurance-complete"
+    python:
+      - CompareRequest.require_complete_analysis
+  - concept: action.gate
+    tier: action
+    renames: [R15]
+    action:
+      - "action:fail-on-breaking"
+      - "action:fail-on-api-break"
+      - "actions/check-target:gate-mode"
+  - concept: output
+    tier: core
+    renames: [R11]
+    cli:
+      - "compare --output"
+      - "dump --output"
+      - "deps compare --output"
+      - "deps tree --output"
+      - "aggregate --output"
+      - "project capture-variants --output"
+      - "project history --output"
+      - "project plan --output"
+      - "project validate --output"
+    action:
+      - "action:format"
+      - "action:output-file"
+  - concept: view
+    tier: core
+    renames: []
+    cli:
+      - "compare --view"
+  - concept: compression
+    tier: config
+    renames: []
+    cli:
+      - "dump --compression"
+    action:
+      - "action:snapshot-compression"
+  - concept: verbose
+    tier: core
+    renames: []
+    cli:
+      - "compare --verbose"
+      - "dump --verbose"
+      - "deps compare --verbose"
+      - "deps tree --verbose"
+      - "aggregate --verbose"
+      - "project history --verbose"
+      - "project plan --verbose"
+      - "project validate --verbose"
+    action:
+      - "action:verbose"
+  - concept: action.reporting
+    tier: action
+    renames: []
+    action:
+      - "action:upload-sarif"
+      - "action:annotate"
+      - "action:annotate-additions"
+      - "action:add-job-summary"
+      - "action:pr-comment"
+      - "action:pr-comment-mode"
+      - "action:pr-comment-key"
+      - "action:pr-comment-on"
+      - "action:pr-comment-report-artifact-url"
+      - "action:pr-comment-detail"
+      - "action:github-token"
+  - concept: aggregate
+    tier: core
+    renames: []
+    cli:
+      - "aggregate --manifest"
+      - "aggregate --discovered-only"
+      - "aggregate --analysis-context"
+  - concept: project
+    tier: core
+    renames: []
+    cli:
+      - "project plan --build-output"
+      - "project plan --project"
+      - "project plan --head-sha"
+      - "project plan --toolchain-bindings"
+      - "project validate --toolchain-bindings"
+      - "project capture-variants --package"
+      - "project capture-variants --variant-header"
+      - "project capture-variants --variant-include"
+    action:
+      - "actions/check-target:kind"
+      - "actions/check-target:target-kind"
+      - "actions/check-target:name"
+      - "actions/check-target:profile"
+      - "actions/check-target:candidate-build-output"
+      - "actions/check-target:explicit-id"
+      - "actions/check-target:project"
+      - "actions/check-target:head-sha"
+      - "actions/check-target:base-ref"
+      - "actions/check-target:evidence-producer"
+      - "actions/check-target:evidence-pack-path"
+  - concept: action.baseline
+    tier: action
+    renames: []
+    action:
+      - "action:abi-baseline"
+      - "action:baseline-profile"
+      - "action:baseline-target"
+      - "action:baseline-asset-name-template"
+      - "action:baseline-generation"
+      - "action:baseline-project-ref"
+      - "action:expected-archive-digest"
+      - "action:verify-baseline-attestation"
+      - "action:baseline-attestation-repo"
+      - "action:baseline-attestation-signer-workflow"
+      - "actions/check-target:baseline-target"
+      - "actions/check-target:baseline-channel"
+      - "actions/check-target:baseline-path"
+      - "actions/check-target:baseline-required"
+      - "actions/check-target:expected-baseline-generation"
+      - "actions/check-target:expected-project-ref"
+      - "actions/check-target:allow-new-target"
+  - concept: action.runtime
+    tier: action
+    renames: []
+    action:
+      - "action:mode"
+      - "action:python-version"
+      - "action:install-deps"
+      - "action:dependency-source"
+      - "action:extra-args"
+      - "actions/check-target:extra-args"
+      - "actions/check-target:python-version"
+      - "actions/check-target:install-deps"
+      - "actions/check-target:dependency-source"
+      - "actions/check-target:action-version"
+      - "actions/check-target:abicheck-repository"
+      - "actions/check-target:abicheck-ref"
+  - concept: retired
+    tier: retired
+    renames: [R14]
+    action:
+      - "action:new-library-set"
+      - "action:against"
+      - "action:jobs"
+      - "action:crosscheck"
+      - "action:risk-rules"
+      - "action:audit"
+      - "action:estimate"
+      - "action:build-target"
+      - "action:bundle-system-providers"
+      - "action:require-complete-analysis"
+      - "actions/check-target:require-complete-analysis"
+      - "action:allow-build-query"
+  - concept: python.internal
+    tier: internal
+    renames: []
+    python:
+      - CompareRequest.stated_settings
+      - CompareRequest.resolved_collect_mode
+      - DumpRequest.resolved_collect_mode
+      - CompareRequest.include_labels
+      - DumpRequest.include_labels
+      - "run_dump(include_labels)"
+      - InputSpec.ownership
+      - InputSpec.execution
+      - "run_dump(symbols_only)"
+      - "run_dump(debug_presence_only)"
+      - "run_dump(notify)"

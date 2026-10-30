@@ -716,6 +716,13 @@ adrs:
     reason: The DWARF declaration-file fix is extractor-internal, and the contract rule adds a reason value to the existing contract_reason_code field and scope_reasons, with no new flag, report field or exit code. The 2026-10-25 amendment extends the same rule to header-derived snapshots, again with no new flag, field or exit code.
     use_cases: []
 
+  - id: ADR-091
+    file: 091-one-option-vocabulary.md
+    disposition: gap
+    use_cases: []
+    surfaces: []
+    missing: Proposed, not yet implemented; would rename options on the CLI, config, Action and typed API to one vocabulary, add --set/Action set:, and add an option-vocabulary registry with a parity test, pending acceptance.
+
   - id: ADR-090
     file: 090-unresolved-surface-is-not-a-clean-verdict.md
     disposition: gap

@@ -1,0 +1,3619 @@
+{
+ "generated_by": "scripts/gen_option_vocabulary.py -- do not hand-edit",
+ "cli": [
+  {
+   "id": "aggregate --manifest",
+   "command": "aggregate",
+   "option": "--manifest",
+   "aliases": [],
+   "hidden": false,
+   "multiple": false,
+   "is_flag": false
+  },
+  {
+   "id": "aggregate --discovered-only",
+   "command": "aggregate",
+   "option": "--discovered-only",
+   "aliases": [],
+   "hidden": false,
+   "multiple": false,
+   "is_flag": true
+  },
+  {
+   "id": "aggregate --analysis-context",
+   "command": "aggregate",
+   "option": "--analysis-context",
+   "aliases": [],
+   "hidden": false,
+   "multiple": false,
+   "is_flag": false
+  },
+  {
+   "id": "aggregate --output",
+   "command": "aggregate",
+   "option": "--output",
+   "aliases": [
+    "-o"
+   ],
+   "hidden": false,
+   "multiple": true,
+   "is_flag": false
+  },
+  {
+   "id": "aggregate --verbose",
+   "command": "aggregate",
+   "option": "--verbose",
+   "aliases": [
+    "-v"
+   ],
+   "hidden": false,
+   "multiple": false,
+   "is_flag": true
+  },
+  {
+   "id": "compare --no-baseline",
+   "command": "compare",
+   "option": "--no-baseline",
+   "aliases": [],
+   "hidden": false,
+   "multiple": false,
+   "is_flag": true
+  },
+  {
+   "id": "compare --select",
+   "command": "compare",
+   "option": "--select",
+   "aliases": [],
+   "hidden": false,
+   "multiple": true,
+   "is_flag": false
+  },
+  {
+   "id": "compare --select-required",
+   "command": "compare",
+   "option": "--select-required",
+   "aliases": [],
+   "hidden": false,
+   "multiple": true,
+   "is_flag": false
+  },
+  {
+   "id": "compare --bundle-facts-out",
+   "command": "compare",
+   "option": "--bundle-facts-out",
+   "aliases": [],
+   "hidden": false,
+   "multiple": false,
+   "is_flag": false
+  },
+  {
+   "id": "compare --instantiation-manifest",
+   "command": "compare",
+   "option": "--instantiation-manifest",
+   "aliases": [],
+   "hidden": false,
+   "multiple": false,
+   "is_flag": false
+  },
+  {
+   "id": "compare --bundle-facts-library-manifest",
+   "command": "compare",
+   "option": "--bundle-facts-library-manifest",
+   "aliases": [],
+   "hidden": false,
+   "multiple": false,
+   "is_flag": false
+  },
+  {
+   "id": "compare --exclude-header",
+   "command": "compare",
+   "option": "--exclude-header",
+   "aliases": [],
+   "hidden": false,
+   "multiple": true,
+   "is_flag": false
+  },
+  {
+   "id": "compare --header",
+   "command": "compare",
+   "option": "--header",
+   "aliases": [
+    "-H"
+   ],
+   "hidden": false,
+   "multiple": true,
+   "is_flag": false
+  },
+  {
+   "id": "compare --include",
+   "command": "compare",
+   "option": "--include",
+   "aliases": [
+    "-I"
+   ],
+   "hidden": false,
+   "multiple": true,
+   "is_flag": false
+  },
+  {
+   "id": "compare --version",
+   "command": "compare",
+   "option": "--version",
+   "aliases": [],
+   "hidden": false,
+   "multiple": true,
+   "is_flag": false
+  },
+  {
+   "id": "compare --dump-manifest",
+   "command": "compare",
+   "option": "--dump-manifest",
+   "aliases": [],
+   "hidden": false,
+   "multiple": true,
+   "is_flag": false
+  },
+  {
+   "id": "compare --output",
+   "command": "compare",
+   "option": "--output",
+   "aliases": [
+    "-o"
+   ],
+   "hidden": false,
+   "multiple": true,
+   "is_flag": false
+  },
+  {
+   "id": "compare --view",
+   "command": "compare",
+   "option": "--view",
+   "aliases": [],
+   "hidden": false,
+   "multiple": true,
+   "is_flag": false
+  },
+  {
+   "id": "compare --policy",
+   "command": "compare",
+   "option": "--policy",
+   "aliases": [],
+   "hidden": false,
+   "multiple": false,
+   "is_flag": false
+  },
+  {
+   "id": "compare --suppress",
+   "command": "compare",
+   "option": "--suppress",
+   "aliases": [],
+   "hidden": false,
+   "multiple": true,
+   "is_flag": false
+  },
+  {
+   "id": "compare --used-by",
+   "command": "compare",
+   "option": "--used-by",
+   "aliases": [],
+   "hidden": false,
+   "multiple": true,
+   "is_flag": false
+  },
+  {
+   "id": "compare --required-symbol",
+   "command": "compare",
+   "option": "--required-symbol",
+   "aliases": [],
+   "hidden": false,
+   "multiple": true,
+   "is_flag": false
+  },
+  {
+   "id": "compare --used-by-manifest",
+   "command": "compare",
+   "option": "--used-by-manifest",
+   "aliases": [],
+   "hidden": false,
+   "multiple": true,
+   "is_flag": false
+  },
+  {
+   "id": "compare --severity-preset",
+   "command": "compare",
+   "option": "--severity-preset",
+   "aliases": [],
+   "hidden": false,
+   "multiple": false,
+   "is_flag": false
+  },
+  {
+   "id": "compare --config",
+   "command": "compare",
+   "option": "--config",
+   "aliases": [],
+   "hidden": false,
+   "multiple": false,
+   "is_flag": false
+  },
+  {
+   "id": "compare --acknowledgments",
+   "command": "compare",
+   "option": "--acknowledgments",
+   "aliases": [],
+   "hidden": false,
+   "multiple": false,
+   "is_flag": false
+  },
+  {
+   "id": "compare --follow-deps",
+   "command": "compare",
+   "option": "--follow-deps",
+   "aliases": [],
+   "hidden": false,
+   "multiple": false,
+   "is_flag": true
+  },
+  {
+   "id": "compare --include-system-declarations",
+   "command": "compare",
+   "option": "--include-system-declarations",
+   "aliases": [],
+   "hidden": false,
+   "multiple": false,
+   "is_flag": true
+  },
+  {
+   "id": "compare --define",
+   "command": "compare",
+   "option": "--define",
+   "aliases": [
+    "-D"
+   ],
+   "hidden": false,
+   "multiple": true,
+   "is_flag": false
+  },
+  {
+   "id": "compare --search-path",
+   "command": "compare",
+   "option": "--search-path",
+   "aliases": [],
+   "hidden": false,
+   "multiple": true,
+   "is_flag": false
+  },
+  {
+   "id": "compare --ld-library-path",
+   "command": "compare",
+   "option": "--ld-library-path",
+   "aliases": [],
+   "hidden": false,
+   "multiple": false,
+   "is_flag": false
+  },
+  {
+   "id": "compare --debug-info",
+   "command": "compare",
+   "option": "--debug-info",
+   "aliases": [],
+   "hidden": false,
+   "multiple": true,
+   "is_flag": false
+  },
+  {
+   "id": "compare --build-info",
+   "command": "compare",
+   "option": "--build-info",
+   "aliases": [],
+   "hidden": false,
+   "multiple": true,
+   "is_flag": false
+  },
+  {
+   "id": "compare --sources",
+   "command": "compare",
+   "option": "--sources",
+   "aliases": [],
+   "hidden": false,
+   "multiple": true,
+   "is_flag": false
+  },
+  {
+   "id": "compare --depth",
+   "command": "compare",
+   "option": "--depth",
+   "aliases": [],
+   "hidden": false,
+   "multiple": false,
+   "is_flag": false
+  },
+  {
+   "id": "compare --since",
+   "command": "compare",
+   "option": "--since",
+   "aliases": [],
+   "hidden": false,
+   "multiple": false,
+   "is_flag": false
+  },
+  {
+   "id": "compare --changed-path",
+   "command": "compare",
+   "option": "--changed-path",
+   "aliases": [],
+   "hidden": false,
+   "multiple": true,
+   "is_flag": false
+  },
+  {
+   "id": "compare --abi3",
+   "command": "compare",
+   "option": "--abi3",
+   "aliases": [],
+   "hidden": false,
+   "multiple": false,
+   "is_flag": false
+  },
+  {
+   "id": "compare --budget",
+   "command": "compare",
+   "option": "--budget",
+   "aliases": [],
+   "hidden": false,
+   "multiple": false,
+   "is_flag": false
+  },
+  {
+   "id": "compare --dry-run",
+   "command": "compare",
+   "option": "--dry-run",
+   "aliases": [],
+   "hidden": false,
+   "multiple": false,
+   "is_flag": true
+  },
+  {
+   "id": "compare --diagnostic-comparison",
+   "command": "compare",
+   "option": "--diagnostic-comparison",
+   "aliases": [],
+   "hidden": false,
+   "multiple": false,
+   "is_flag": true
+  },
+  {
+   "id": "compare --require-same-generation",
+   "command": "compare",
+   "option": "--require-same-generation",
+   "aliases": [],
+   "hidden": false,
+   "multiple": false,
+   "is_flag": true
+  },
+  {
+   "id": "compare --contract",
+   "command": "compare",
+   "option": "--contract",
+   "aliases": [],
+   "hidden": false,
+   "multiple": false,
+   "is_flag": false
+  },
+  {
+   "id": "compare --pack",
+   "command": "compare",
+   "option": "--pack",
+   "aliases": [],
+   "hidden": false,
+   "multiple": true,
+   "is_flag": false
+  },
+  {
+   "id": "compare --use-cases",
+   "command": "compare",
+   "option": "--use-cases",
+   "aliases": [],
+   "hidden": false,
+   "multiple": false,
+   "is_flag": false
+  },
+  {
+   "id": "compare --performance-profile",
+   "command": "compare",
+   "option": "--performance-profile",
+   "aliases": [],
+   "hidden": false,
+   "multiple": false,
+   "is_flag": false
+  },
+  {
+   "id": "compare --verbose",
+   "command": "compare",
+   "option": "--verbose",
+   "aliases": [
+    "-v"
+   ],
+   "hidden": false,
+   "multiple": false,
+   "is_flag": true
+  },
+  {
+   "id": "compare --variant",
+   "command": "compare",
+   "option": "--variant",
+   "aliases": [],
+   "hidden": false,
+   "multiple": true,
+   "is_flag": false
+  },
+  {
+   "id": "deps compare --old-root",
+   "command": "deps compare",
+   "option": "--old-root",
+   "aliases": [],
+   "hidden": false,
+   "multiple": false,
+   "is_flag": false
+  },
+  {
+   "id": "deps compare --new-root",
+   "command": "deps compare",
+   "option": "--new-root",
+   "aliases": [],
+   "hidden": false,
+   "multiple": false,
+   "is_flag": false
+  },
+  {
+   "id": "deps compare --search-path",
+   "command": "deps compare",
+   "option": "--search-path",
+   "aliases": [],
+   "hidden": false,
+   "multiple": true,
+   "is_flag": false
+  },
+  {
+   "id": "deps compare --ld-library-path",
+   "command": "deps compare",
+   "option": "--ld-library-path",
+   "aliases": [],
+   "hidden": false,
+   "multiple": false,
+   "is_flag": false
+  },
+  {
+   "id": "deps compare --output",
+   "command": "deps compare",
+   "option": "--output",
+   "aliases": [
+    "-o"
+   ],
+   "hidden": false,
+   "multiple": true,
+   "is_flag": false
+  },
+  {
+   "id": "deps compare --dry-run",
+   "command": "deps compare",
+   "option": "--dry-run",
+   "aliases": [],
+   "hidden": false,
+   "multiple": false,
+   "is_flag": true
+  },
+  {
+   "id": "deps compare --verbose",
+   "command": "deps compare",
+   "option": "--verbose",
+   "aliases": [
+    "-v"
+   ],
+   "hidden": false,
+   "multiple": false,
+   "is_flag": true
+  },
+  {
+   "id": "deps tree --search-path",
+   "command": "deps tree",
+   "option": "--search-path",
+   "aliases": [],
+   "hidden": false,
+   "multiple": true,
+   "is_flag": false
+  },
+  {
+   "id": "deps tree --sysroot",
+   "command": "deps tree",
+   "option": "--sysroot",
+   "aliases": [],
+   "hidden": false,
+   "multiple": false,
+   "is_flag": false
+  },
+  {
+   "id": "deps tree --ld-library-path",
+   "command": "deps tree",
+   "option": "--ld-library-path",
+   "aliases": [],
+   "hidden": false,
+   "multiple": false,
+   "is_flag": false
+  },
+  {
+   "id": "deps tree --output",
+   "command": "deps tree",
+   "option": "--output",
+   "aliases": [
+    "-o"
+   ],
+   "hidden": false,
+   "multiple": true,
+   "is_flag": false
+  },
+  {
+   "id": "deps tree --dry-run",
+   "command": "deps tree",
+   "option": "--dry-run",
+   "aliases": [],
+   "hidden": false,
+   "multiple": false,
+   "is_flag": true
+  },
+  {
+   "id": "deps tree --verbose",
+   "command": "deps tree",
+   "option": "--verbose",
+   "aliases": [
+    "-v"
+   ],
+   "hidden": false,
+   "multiple": false,
+   "is_flag": true
+  },
+  {
+   "id": "dump --header",
+   "command": "dump",
+   "option": "--header",
+   "aliases": [
+    "-H"
+   ],
+   "hidden": false,
+   "multiple": true,
+   "is_flag": false
+  },
+  {
+   "id": "dump --include",
+   "command": "dump",
+   "option": "--include",
+   "aliases": [
+    "-I"
+   ],
+   "hidden": false,
+   "multiple": true,
+   "is_flag": false
+  },
+  {
+   "id": "dump --exclude-header",
+   "command": "dump",
+   "option": "--exclude-header",
+   "aliases": [],
+   "hidden": false,
+   "multiple": true,
+   "is_flag": false
+  },
+  {
+   "id": "dump --include-system-declarations",
+   "command": "dump",
+   "option": "--include-system-declarations",
+   "aliases": [],
+   "hidden": false,
+   "multiple": false,
+   "is_flag": true
+  },
+  {
+   "id": "dump --define",
+   "command": "dump",
+   "option": "--define",
+   "aliases": [
+    "-D"
+   ],
+   "hidden": false,
+   "multiple": true,
+   "is_flag": false
+  },
+  {
+   "id": "dump --version",
+   "command": "dump",
+   "option": "--version",
+   "aliases": [],
+   "hidden": false,
+   "multiple": false,
+   "is_flag": false
+  },
+  {
+   "id": "dump --output",
+   "command": "dump",
+   "option": "--output",
+   "aliases": [
+    "-o"
+   ],
+   "hidden": false,
+   "multiple": false,
+   "is_flag": false
+  },
+  {
+   "id": "dump --compression",
+   "command": "dump",
+   "option": "--compression",
+   "aliases": [],
+   "hidden": false,
+   "multiple": false,
+   "is_flag": false
+  },
+  {
+   "id": "dump --follow-deps",
+   "command": "dump",
+   "option": "--follow-deps",
+   "aliases": [],
+   "hidden": false,
+   "multiple": false,
+   "is_flag": true
+  },
+  {
+   "id": "dump --search-path",
+   "command": "dump",
+   "option": "--search-path",
+   "aliases": [],
+   "hidden": false,
+   "multiple": true,
+   "is_flag": false
+  },
+  {
+   "id": "dump --ld-library-path",
+   "command": "dump",
+   "option": "--ld-library-path",
+   "aliases": [],
+   "hidden": false,
+   "multiple": false,
+   "is_flag": false
+  },
+  {
+   "id": "dump --dry-run",
+   "command": "dump",
+   "option": "--dry-run",
+   "aliases": [],
+   "hidden": false,
+   "multiple": false,
+   "is_flag": true
+  },
+  {
+   "id": "dump --debug-info",
+   "command": "dump",
+   "option": "--debug-info",
+   "aliases": [],
+   "hidden": false,
+   "multiple": true,
+   "is_flag": false
+  },
+  {
+   "id": "dump --dump-manifest",
+   "command": "dump",
+   "option": "--dump-manifest",
+   "aliases": [],
+   "hidden": false,
+   "multiple": false,
+   "is_flag": false
+  },
+  {
+   "id": "dump --verbose",
+   "command": "dump",
+   "option": "--verbose",
+   "aliases": [
+    "-v"
+   ],
+   "hidden": false,
+   "multiple": false,
+   "is_flag": true
+  },
+  {
+   "id": "dump --provenance",
+   "command": "dump",
+   "option": "--provenance",
+   "aliases": [],
+   "hidden": false,
+   "multiple": true,
+   "is_flag": false
+  },
+  {
+   "id": "dump --build-info",
+   "command": "dump",
+   "option": "--build-info",
+   "aliases": [],
+   "hidden": false,
+   "multiple": false,
+   "is_flag": false
+  },
+  {
+   "id": "dump --sources",
+   "command": "dump",
+   "option": "--sources",
+   "aliases": [],
+   "hidden": false,
+   "multiple": false,
+   "is_flag": false
+  },
+  {
+   "id": "dump --config",
+   "command": "dump",
+   "option": "--config",
+   "aliases": [],
+   "hidden": false,
+   "multiple": false,
+   "is_flag": false
+  },
+  {
+   "id": "dump --depth",
+   "command": "dump",
+   "option": "--depth",
+   "aliases": [],
+   "hidden": false,
+   "multiple": false,
+   "is_flag": false
+  },
+  {
+   "id": "project capture-variants --variant",
+   "command": "project capture-variants",
+   "option": "--variant",
+   "aliases": [],
+   "hidden": false,
+   "multiple": true,
+   "is_flag": false
+  },
+  {
+   "id": "project capture-variants --package",
+   "command": "project capture-variants",
+   "option": "--package",
+   "aliases": [],
+   "hidden": false,
+   "multiple": false,
+   "is_flag": false
+  },
+  {
+   "id": "project capture-variants --config",
+   "command": "project capture-variants",
+   "option": "--config",
+   "aliases": [],
+   "hidden": false,
+   "multiple": false,
+   "is_flag": false
+  },
+  {
+   "id": "project capture-variants --variant-header",
+   "command": "project capture-variants",
+   "option": "--variant-header",
+   "aliases": [],
+   "hidden": false,
+   "multiple": true,
+   "is_flag": false
+  },
+  {
+   "id": "project capture-variants --variant-include",
+   "command": "project capture-variants",
+   "option": "--variant-include",
+   "aliases": [],
+   "hidden": false,
+   "multiple": true,
+   "is_flag": false
+  },
+  {
+   "id": "project capture-variants --dry-run",
+   "command": "project capture-variants",
+   "option": "--dry-run",
+   "aliases": [],
+   "hidden": false,
+   "multiple": false,
+   "is_flag": true
+  },
+  {
+   "id": "project capture-variants --output",
+   "command": "project capture-variants",
+   "option": "--output",
+   "aliases": [
+    "-o"
+   ],
+   "hidden": false,
+   "multiple": true,
+   "is_flag": false
+  },
+  {
+   "id": "project history --version",
+   "command": "project history",
+   "option": "--version",
+   "aliases": [],
+   "hidden": false,
+   "multiple": true,
+   "is_flag": false
+  },
+  {
+   "id": "project history --policy",
+   "command": "project history",
+   "option": "--policy",
+   "aliases": [],
+   "hidden": false,
+   "multiple": false,
+   "is_flag": false
+  },
+  {
+   "id": "project history --output",
+   "command": "project history",
+   "option": "--output",
+   "aliases": [
+    "-o"
+   ],
+   "hidden": false,
+   "multiple": true,
+   "is_flag": false
+  },
+  {
+   "id": "project history --verbose",
+   "command": "project history",
+   "option": "--verbose",
+   "aliases": [
+    "-v"
+   ],
+   "hidden": false,
+   "multiple": false,
+   "is_flag": true
+  },
+  {
+   "id": "project plan --build-output",
+   "command": "project plan",
+   "option": "--build-output",
+   "aliases": [],
+   "hidden": false,
+   "multiple": true,
+   "is_flag": false
+  },
+  {
+   "id": "project plan --project",
+   "command": "project plan",
+   "option": "--project",
+   "aliases": [],
+   "hidden": false,
+   "multiple": false,
+   "is_flag": false
+  },
+  {
+   "id": "project plan --head-sha",
+   "command": "project plan",
+   "option": "--head-sha",
+   "aliases": [],
+   "hidden": false,
+   "multiple": false,
+   "is_flag": false
+  },
+  {
+   "id": "project plan --toolchain-bindings",
+   "command": "project plan",
+   "option": "--toolchain-bindings",
+   "aliases": [],
+   "hidden": false,
+   "multiple": false,
+   "is_flag": false
+  },
+  {
+   "id": "project plan --output",
+   "command": "project plan",
+   "option": "--output",
+   "aliases": [
+    "-o"
+   ],
+   "hidden": false,
+   "multiple": true,
+   "is_flag": false
+  },
+  {
+   "id": "project plan --verbose",
+   "command": "project plan",
+   "option": "--verbose",
+   "aliases": [
+    "-v"
+   ],
+   "hidden": false,
+   "multiple": false,
+   "is_flag": true
+  },
+  {
+   "id": "project validate --output",
+   "command": "project validate",
+   "option": "--output",
+   "aliases": [
+    "-o"
+   ],
+   "hidden": false,
+   "multiple": true,
+   "is_flag": false
+  },
+  {
+   "id": "project validate --toolchain-bindings",
+   "command": "project validate",
+   "option": "--toolchain-bindings",
+   "aliases": [],
+   "hidden": false,
+   "multiple": false,
+   "is_flag": false
+  },
+  {
+   "id": "project validate --verbose",
+   "command": "project validate",
+   "option": "--verbose",
+   "aliases": [
+    "-v"
+   ],
+   "hidden": false,
+   "multiple": false,
+   "is_flag": true
+  }
+ ],
+ "config": [
+  {
+   "id": "build.system",
+   "kind": "str"
+  },
+  {
+   "id": "build.query",
+   "kind": "str"
+  },
+  {
+   "id": "build.compile_db",
+   "kind": "str"
+  },
+  {
+   "id": "build.compile_db_filter",
+   "kind": "str"
+  },
+  {
+   "id": "build.targets",
+   "kind": "list"
+  },
+  {
+   "id": "sources.public_headers",
+   "kind": "list"
+  },
+  {
+   "id": "sources.exclude",
+   "kind": "list"
+  },
+  {
+   "id": "sources.graph",
+   "kind": "str"
+  },
+  {
+   "id": "severity.preset",
+   "kind": "str"
+  },
+  {
+   "id": "severity.abi_breaking",
+   "kind": "str"
+  },
+  {
+   "id": "severity.potential_breaking",
+   "kind": "str"
+  },
+  {
+   "id": "severity.quality_issues",
+   "kind": "str"
+  },
+  {
+   "id": "severity.addition",
+   "kind": "str"
+  },
+  {
+   "id": "scope.public",
+   "kind": "bool"
+  },
+  {
+   "id": "scope.collapse_versioned_symbols",
+   "kind": "bool"
+  },
+  {
+   "id": "scope.public_symbols",
+   "kind": "list"
+  },
+  {
+   "id": "scope.show_redundant",
+   "kind": "bool"
+  },
+  {
+   "id": "scope.public_header_dirs",
+   "kind": "list"
+  },
+  {
+   "id": "scope.exclude_headers",
+   "kind": "list"
+  },
+  {
+   "id": "scope.on_incomplete",
+   "kind": "str"
+  },
+  {
+   "id": "scope.dependencies",
+   "kind": "custom"
+  },
+  {
+   "id": "scope.dependency_evidence",
+   "kind": "custom"
+  },
+  {
+   "id": "scope.private_headers",
+   "kind": "list"
+  },
+  {
+   "id": "scope.private_namespaces",
+   "kind": "list"
+  },
+  {
+   "id": "scope",
+   "kind": "group"
+  },
+  {
+   "id": "contract",
+   "kind": "whole"
+  },
+  {
+   "id": "acknowledgment",
+   "kind": "whole"
+  },
+  {
+   "id": "suppression.strict",
+   "kind": "bool"
+  },
+  {
+   "id": "suppression.require_justification",
+   "kind": "bool"
+  },
+  {
+   "id": "source.method",
+   "kind": "str"
+  },
+  {
+   "id": "compile.frontend",
+   "kind": "str"
+  },
+  {
+   "id": "compile.std",
+   "kind": "str"
+  },
+  {
+   "id": "compile.include_dirs",
+   "kind": "list"
+  },
+  {
+   "id": "compile.defines",
+   "kind": "list"
+  },
+  {
+   "id": "compile.sysroot",
+   "kind": "str"
+  },
+  {
+   "id": "compile.nostdinc",
+   "kind": "bool"
+  },
+  {
+   "id": "compile.compiler",
+   "kind": "str"
+  },
+  {
+   "id": "compile.options",
+   "kind": "list"
+  },
+  {
+   "id": "compile.ast_frontend_fallback",
+   "kind": "bool"
+  },
+  {
+   "id": "compile.allow_unsupported_castxml",
+   "kind": "bool"
+  },
+  {
+   "id": "compile.frontend_context",
+   "kind": "str"
+  },
+  {
+   "id": "compile.lang",
+   "kind": "str"
+  },
+  {
+   "id": "debug.format",
+   "kind": "str"
+  },
+  {
+   "id": "debug.dwarf_only",
+   "kind": "bool"
+  },
+  {
+   "id": "debug.debuginfod",
+   "kind": "bool"
+  },
+  {
+   "id": "debug.debuginfod_url",
+   "kind": "str"
+  },
+  {
+   "id": "debug.pdb_path",
+   "kind": "str"
+  },
+  {
+   "id": "bundle.system_providers",
+   "kind": "list"
+  },
+  {
+   "id": "bundle.cohorts",
+   "kind": "list"
+  },
+  {
+   "id": "python.abi3_floor",
+   "kind": "str"
+  },
+  {
+   "id": "gate.fail_on_removed_library",
+   "kind": "bool"
+  },
+  {
+   "id": "release.dso_only",
+   "kind": "bool"
+  },
+  {
+   "id": "release.include_private_dso",
+   "kind": "bool"
+  },
+  {
+   "id": "release.support_promise",
+   "kind": "str"
+  },
+  {
+   "id": "resource_limits.max_bundle_facts_decode_nodes",
+   "kind": "int"
+  },
+  {
+   "id": "policy.overrides",
+   "kind": "dict_str"
+  },
+  {
+   "id": "assurance.require_complete",
+   "kind": "bool"
+  },
+  {
+   "id": "performance.profile",
+   "kind": "str"
+  },
+  {
+   "id": "deployment",
+   "kind": "whole"
+  },
+  {
+   "id": "bundle_variants",
+   "kind": "whole"
+  },
+  {
+   "id": "version",
+   "kind": "int"
+  }
+ ],
+ "action": [
+  {
+   "id": "action:mode",
+   "action": "action",
+   "input": "mode",
+   "status": "live"
+  },
+  {
+   "id": "action:old-library",
+   "action": "action",
+   "input": "old-library",
+   "status": "live"
+  },
+  {
+   "id": "action:new-library",
+   "action": "action",
+   "input": "new-library",
+   "status": "live"
+  },
+  {
+   "id": "action:new-library-set",
+   "action": "action",
+   "input": "new-library-set",
+   "status": "retired"
+  },
+  {
+   "id": "action:debug-info1",
+   "action": "action",
+   "input": "debug-info1",
+   "status": "live"
+  },
+  {
+   "id": "action:debug-info2",
+   "action": "action",
+   "input": "debug-info2",
+   "status": "live"
+  },
+  {
+   "id": "action:devel-pkg1",
+   "action": "action",
+   "input": "devel-pkg1",
+   "status": "live"
+  },
+  {
+   "id": "action:devel-pkg2",
+   "action": "action",
+   "input": "devel-pkg2",
+   "status": "live"
+  },
+  {
+   "id": "action:dso-only",
+   "action": "action",
+   "input": "dso-only",
+   "status": "live"
+  },
+  {
+   "id": "action:include-private-dso",
+   "action": "action",
+   "input": "include-private-dso",
+   "status": "live"
+  },
+  {
+   "id": "action:fail-on-removed-library",
+   "action": "action",
+   "input": "fail-on-removed-library",
+   "status": "live"
+  },
+  {
+   "id": "action:analysis-assurance-complete",
+   "action": "action",
+   "input": "analysis-assurance-complete",
+   "status": "live"
+  },
+  {
+   "id": "action:header",
+   "action": "action",
+   "input": "header",
+   "status": "live"
+  },
+  {
+   "id": "action:old-header",
+   "action": "action",
+   "input": "old-header",
+   "status": "live"
+  },
+  {
+   "id": "action:new-header",
+   "action": "action",
+   "input": "new-header",
+   "status": "live"
+  },
+  {
+   "id": "action:public-header-dir",
+   "action": "action",
+   "input": "public-header-dir",
+   "status": "live"
+  },
+  {
+   "id": "action:build-target",
+   "action": "action",
+   "input": "build-target",
+   "status": "retired"
+  },
+  {
+   "id": "action:include",
+   "action": "action",
+   "input": "include",
+   "status": "live"
+  },
+  {
+   "id": "action:old-include",
+   "action": "action",
+   "input": "old-include",
+   "status": "live"
+  },
+  {
+   "id": "action:new-include",
+   "action": "action",
+   "input": "new-include",
+   "status": "live"
+  },
+  {
+   "id": "action:old-version",
+   "action": "action",
+   "input": "old-version",
+   "status": "live"
+  },
+  {
+   "id": "action:new-version",
+   "action": "action",
+   "input": "new-version",
+   "status": "live"
+  },
+  {
+   "id": "action:lang",
+   "action": "action",
+   "input": "lang",
+   "status": "live"
+  },
+  {
+   "id": "action:ast-frontend",
+   "action": "action",
+   "input": "ast-frontend",
+   "status": "live"
+  },
+  {
+   "id": "action:gcc-path",
+   "action": "action",
+   "input": "gcc-path",
+   "status": "live"
+  },
+  {
+   "id": "action:gcc-prefix",
+   "action": "action",
+   "input": "gcc-prefix",
+   "status": "live"
+  },
+  {
+   "id": "action:gcc-options",
+   "action": "action",
+   "input": "gcc-options",
+   "status": "live"
+  },
+  {
+   "id": "action:sysroot",
+   "action": "action",
+   "input": "sysroot",
+   "status": "live"
+  },
+  {
+   "id": "action:nostdinc",
+   "action": "action",
+   "input": "nostdinc",
+   "status": "live"
+  },
+  {
+   "id": "action:follow-deps",
+   "action": "action",
+   "input": "follow-deps",
+   "status": "live"
+  },
+  {
+   "id": "action:old-root",
+   "action": "action",
+   "input": "old-root",
+   "status": "live"
+  },
+  {
+   "id": "action:new-root",
+   "action": "action",
+   "input": "new-root",
+   "status": "live"
+  },
+  {
+   "id": "action:search-path",
+   "action": "action",
+   "input": "search-path",
+   "status": "live"
+  },
+  {
+   "id": "action:ld-library-path",
+   "action": "action",
+   "input": "ld-library-path",
+   "status": "live"
+  },
+  {
+   "id": "action:used-by",
+   "action": "action",
+   "input": "used-by",
+   "status": "live"
+  },
+  {
+   "id": "action:used-by-manifest",
+   "action": "action",
+   "input": "used-by-manifest",
+   "status": "live"
+  },
+  {
+   "id": "action:required-symbol",
+   "action": "action",
+   "input": "required-symbol",
+   "status": "live"
+  },
+  {
+   "id": "action:required-symbols",
+   "action": "action",
+   "input": "required-symbols",
+   "status": "live"
+  },
+  {
+   "id": "action:against",
+   "action": "action",
+   "input": "against",
+   "status": "retired"
+  },
+  {
+   "id": "action:sources",
+   "action": "action",
+   "input": "sources",
+   "status": "live"
+  },
+  {
+   "id": "action:build-info",
+   "action": "action",
+   "input": "build-info",
+   "status": "live"
+  },
+  {
+   "id": "action:compile-db",
+   "action": "action",
+   "input": "compile-db",
+   "status": "live"
+  },
+  {
+   "id": "action:build-config",
+   "action": "action",
+   "input": "build-config",
+   "status": "live"
+  },
+  {
+   "id": "action:jobs",
+   "action": "action",
+   "input": "jobs",
+   "status": "ignored"
+  },
+  {
+   "id": "action:bundle-system-providers",
+   "action": "action",
+   "input": "bundle-system-providers",
+   "status": "retired"
+  },
+  {
+   "id": "action:allow-build-query",
+   "action": "action",
+   "input": "allow-build-query",
+   "status": "ignored"
+  },
+  {
+   "id": "action:depth",
+   "action": "action",
+   "input": "depth",
+   "status": "live"
+  },
+  {
+   "id": "action:since",
+   "action": "action",
+   "input": "since",
+   "status": "live"
+  },
+  {
+   "id": "action:changed-path",
+   "action": "action",
+   "input": "changed-path",
+   "status": "live"
+  },
+  {
+   "id": "action:budget",
+   "action": "action",
+   "input": "budget",
+   "status": "live"
+  },
+  {
+   "id": "action:dry-run",
+   "action": "action",
+   "input": "dry-run",
+   "status": "live"
+  },
+  {
+   "id": "action:estimate",
+   "action": "action",
+   "input": "estimate",
+   "status": "retired"
+  },
+  {
+   "id": "action:audit",
+   "action": "action",
+   "input": "audit",
+   "status": "retired"
+  },
+  {
+   "id": "action:crosscheck",
+   "action": "action",
+   "input": "crosscheck",
+   "status": "retired"
+  },
+  {
+   "id": "action:risk-rules",
+   "action": "action",
+   "input": "risk-rules",
+   "status": "retired"
+  },
+  {
+   "id": "action:abi-baseline",
+   "action": "action",
+   "input": "abi-baseline",
+   "status": "live"
+  },
+  {
+   "id": "action:baseline-profile",
+   "action": "action",
+   "input": "baseline-profile",
+   "status": "live"
+  },
+  {
+   "id": "action:baseline-target",
+   "action": "action",
+   "input": "baseline-target",
+   "status": "live"
+  },
+  {
+   "id": "action:baseline-asset-name-template",
+   "action": "action",
+   "input": "baseline-asset-name-template",
+   "status": "live"
+  },
+  {
+   "id": "action:baseline-generation",
+   "action": "action",
+   "input": "baseline-generation",
+   "status": "live"
+  },
+  {
+   "id": "action:baseline-project-ref",
+   "action": "action",
+   "input": "baseline-project-ref",
+   "status": "live"
+  },
+  {
+   "id": "action:expected-archive-digest",
+   "action": "action",
+   "input": "expected-archive-digest",
+   "status": "live"
+  },
+  {
+   "id": "action:verify-baseline-attestation",
+   "action": "action",
+   "input": "verify-baseline-attestation",
+   "status": "live"
+  },
+  {
+   "id": "action:baseline-attestation-repo",
+   "action": "action",
+   "input": "baseline-attestation-repo",
+   "status": "live"
+  },
+  {
+   "id": "action:baseline-attestation-signer-workflow",
+   "action": "action",
+   "input": "baseline-attestation-signer-workflow",
+   "status": "live"
+  },
+  {
+   "id": "action:format",
+   "action": "action",
+   "input": "format",
+   "status": "live"
+  },
+  {
+   "id": "action:output-file",
+   "action": "action",
+   "input": "output-file",
+   "status": "live"
+  },
+  {
+   "id": "action:snapshot-compression",
+   "action": "action",
+   "input": "snapshot-compression",
+   "status": "live"
+  },
+  {
+   "id": "action:policy",
+   "action": "action",
+   "input": "policy",
+   "status": "live"
+  },
+  {
+   "id": "action:policy-file",
+   "action": "action",
+   "input": "policy-file",
+   "status": "live"
+  },
+  {
+   "id": "action:suppress",
+   "action": "action",
+   "input": "suppress",
+   "status": "live"
+  },
+  {
+   "id": "action:acknowledgments",
+   "action": "action",
+   "input": "acknowledgments",
+   "status": "live"
+  },
+  {
+   "id": "action:verbose",
+   "action": "action",
+   "input": "verbose",
+   "status": "live"
+  },
+  {
+   "id": "action:python-version",
+   "action": "action",
+   "input": "python-version",
+   "status": "live"
+  },
+  {
+   "id": "action:install-deps",
+   "action": "action",
+   "input": "install-deps",
+   "status": "deprecated"
+  },
+  {
+   "id": "action:dependency-source",
+   "action": "action",
+   "input": "dependency-source",
+   "status": "live"
+  },
+  {
+   "id": "action:upload-sarif",
+   "action": "action",
+   "input": "upload-sarif",
+   "status": "live"
+  },
+  {
+   "id": "action:fail-on-breaking",
+   "action": "action",
+   "input": "fail-on-breaking",
+   "status": "live"
+  },
+  {
+   "id": "action:fail-on-api-break",
+   "action": "action",
+   "input": "fail-on-api-break",
+   "status": "live"
+  },
+  {
+   "id": "action:severity-preset",
+   "action": "action",
+   "input": "severity-preset",
+   "status": "live"
+  },
+  {
+   "id": "action:require-complete-analysis",
+   "action": "action",
+   "input": "require-complete-analysis",
+   "status": "retired"
+  },
+  {
+   "id": "action:annotate",
+   "action": "action",
+   "input": "annotate",
+   "status": "live"
+  },
+  {
+   "id": "action:annotate-additions",
+   "action": "action",
+   "input": "annotate-additions",
+   "status": "live"
+  },
+  {
+   "id": "action:extra-args",
+   "action": "action",
+   "input": "extra-args",
+   "status": "live"
+  },
+  {
+   "id": "action:add-job-summary",
+   "action": "action",
+   "input": "add-job-summary",
+   "status": "live"
+  },
+  {
+   "id": "action:pr-comment",
+   "action": "action",
+   "input": "pr-comment",
+   "status": "live"
+  },
+  {
+   "id": "action:pr-comment-mode",
+   "action": "action",
+   "input": "pr-comment-mode",
+   "status": "live"
+  },
+  {
+   "id": "action:pr-comment-key",
+   "action": "action",
+   "input": "pr-comment-key",
+   "status": "live"
+  },
+  {
+   "id": "action:pr-comment-on",
+   "action": "action",
+   "input": "pr-comment-on",
+   "status": "live"
+  },
+  {
+   "id": "action:pr-comment-report-artifact-url",
+   "action": "action",
+   "input": "pr-comment-report-artifact-url",
+   "status": "live"
+  },
+  {
+   "id": "action:pr-comment-detail",
+   "action": "action",
+   "input": "pr-comment-detail",
+   "status": "live"
+  },
+  {
+   "id": "action:github-token",
+   "action": "action",
+   "input": "github-token",
+   "status": "live"
+  },
+  {
+   "id": "actions/aggregate:checks",
+   "action": "actions/aggregate",
+   "input": "checks",
+   "status": "live"
+  },
+  {
+   "id": "actions/aggregate:reports-dir",
+   "action": "actions/aggregate",
+   "input": "reports-dir",
+   "status": "live"
+  },
+  {
+   "id": "actions/aggregate:manifest-path",
+   "action": "actions/aggregate",
+   "input": "manifest-path",
+   "status": "live"
+  },
+  {
+   "id": "actions/aggregate:gate",
+   "action": "actions/aggregate",
+   "input": "gate",
+   "status": "live"
+  },
+  {
+   "id": "actions/aggregate:outputs",
+   "action": "actions/aggregate",
+   "input": "outputs",
+   "status": "live"
+  },
+  {
+   "id": "actions/aggregate:record-analysis-context",
+   "action": "actions/aggregate",
+   "input": "record-analysis-context",
+   "status": "live"
+  },
+  {
+   "id": "actions/aggregate:tested-sha",
+   "action": "actions/aggregate",
+   "input": "tested-sha",
+   "status": "live"
+  },
+  {
+   "id": "actions/aggregate:profile",
+   "action": "actions/aggregate",
+   "input": "profile",
+   "status": "live"
+  },
+  {
+   "id": "actions/aggregate:orchestration-ref",
+   "action": "actions/aggregate",
+   "input": "orchestration-ref",
+   "status": "live"
+  },
+  {
+   "id": "actions/aggregate:install",
+   "action": "actions/aggregate",
+   "input": "install",
+   "status": "live"
+  },
+  {
+   "id": "actions/aggregate:python-version",
+   "action": "actions/aggregate",
+   "input": "python-version",
+   "status": "live"
+  },
+  {
+   "id": "actions/baseline:libraries",
+   "action": "actions/baseline",
+   "input": "libraries",
+   "status": "live"
+  },
+  {
+   "id": "actions/baseline:library-spec",
+   "action": "actions/baseline",
+   "input": "library-spec",
+   "status": "live"
+  },
+  {
+   "id": "actions/baseline:library-root",
+   "action": "actions/baseline",
+   "input": "library-root",
+   "status": "live"
+  },
+  {
+   "id": "actions/baseline:library-spec-bindings",
+   "action": "actions/baseline",
+   "input": "library-spec-bindings",
+   "status": "live"
+  },
+  {
+   "id": "actions/baseline:library-spec-require-elf",
+   "action": "actions/baseline",
+   "input": "library-spec-require-elf",
+   "status": "live"
+  },
+  {
+   "id": "actions/baseline:output-dir",
+   "action": "actions/baseline",
+   "input": "output-dir",
+   "status": "live"
+  },
+  {
+   "id": "actions/baseline:project-ref",
+   "action": "actions/baseline",
+   "input": "project-ref",
+   "status": "live"
+  },
+  {
+   "id": "actions/baseline:profile",
+   "action": "actions/baseline",
+   "input": "profile",
+   "status": "live"
+  },
+  {
+   "id": "actions/baseline:build-info",
+   "action": "actions/baseline",
+   "input": "build-info",
+   "status": "live"
+  },
+  {
+   "id": "actions/baseline:depth",
+   "action": "actions/baseline",
+   "input": "depth",
+   "status": "live"
+  },
+  {
+   "id": "actions/baseline:build-config",
+   "action": "actions/baseline",
+   "input": "build-config",
+   "status": "live"
+  },
+  {
+   "id": "actions/baseline:baseline-generation",
+   "action": "actions/baseline",
+   "input": "baseline-generation",
+   "status": "live"
+  },
+  {
+   "id": "actions/baseline:generator-git-sha",
+   "action": "actions/baseline",
+   "input": "generator-git-sha",
+   "status": "live"
+  },
+  {
+   "id": "actions/baseline:generator-action-ref",
+   "action": "actions/baseline",
+   "input": "generator-action-ref",
+   "status": "live"
+  },
+  {
+   "id": "actions/baseline:extraction-context",
+   "action": "actions/baseline",
+   "input": "extraction-context",
+   "status": "live"
+  },
+  {
+   "id": "actions/baseline:previous-manifest",
+   "action": "actions/baseline",
+   "input": "previous-manifest",
+   "status": "live"
+  },
+  {
+   "id": "actions/baseline:validation",
+   "action": "actions/baseline",
+   "input": "validation",
+   "status": "live"
+  },
+  {
+   "id": "actions/baseline:snapshot-compression",
+   "action": "actions/baseline",
+   "input": "snapshot-compression",
+   "status": "live"
+  },
+  {
+   "id": "actions/baseline:python-version",
+   "action": "actions/baseline",
+   "input": "python-version",
+   "status": "live"
+  },
+  {
+   "id": "actions/baseline:install-deps",
+   "action": "actions/baseline",
+   "input": "install-deps",
+   "status": "live"
+  },
+  {
+   "id": "actions/check-target:kind",
+   "action": "actions/check-target",
+   "input": "kind",
+   "status": "live"
+  },
+  {
+   "id": "actions/check-target:target-kind",
+   "action": "actions/check-target",
+   "input": "target-kind",
+   "status": "live"
+  },
+  {
+   "id": "actions/check-target:name",
+   "action": "actions/check-target",
+   "input": "name",
+   "status": "live"
+  },
+  {
+   "id": "actions/check-target:baseline-target",
+   "action": "actions/check-target",
+   "input": "baseline-target",
+   "status": "live"
+  },
+  {
+   "id": "actions/check-target:bundle-members",
+   "action": "actions/check-target",
+   "input": "bundle-members",
+   "status": "live"
+  },
+  {
+   "id": "actions/check-target:profile",
+   "action": "actions/check-target",
+   "input": "profile",
+   "status": "live"
+  },
+  {
+   "id": "actions/check-target:baseline-channel",
+   "action": "actions/check-target",
+   "input": "baseline-channel",
+   "status": "live"
+  },
+  {
+   "id": "actions/check-target:baseline-path",
+   "action": "actions/check-target",
+   "input": "baseline-path",
+   "status": "live"
+  },
+  {
+   "id": "actions/check-target:baseline-required",
+   "action": "actions/check-target",
+   "input": "baseline-required",
+   "status": "live"
+  },
+  {
+   "id": "actions/check-target:candidate-build-output",
+   "action": "actions/check-target",
+   "input": "candidate-build-output",
+   "status": "live"
+  },
+  {
+   "id": "actions/check-target:expected-project-ref",
+   "action": "actions/check-target",
+   "input": "expected-project-ref",
+   "status": "live"
+  },
+  {
+   "id": "actions/check-target:expected-baseline-generation",
+   "action": "actions/check-target",
+   "input": "expected-baseline-generation",
+   "status": "live"
+  },
+  {
+   "id": "actions/check-target:allow-new-target",
+   "action": "actions/check-target",
+   "input": "allow-new-target",
+   "status": "live"
+  },
+  {
+   "id": "actions/check-target:requested-depth",
+   "action": "actions/check-target",
+   "input": "requested-depth",
+   "status": "live"
+  },
+  {
+   "id": "actions/check-target:explicit-id",
+   "action": "actions/check-target",
+   "input": "explicit-id",
+   "status": "live"
+  },
+  {
+   "id": "actions/check-target:build-system",
+   "action": "actions/check-target",
+   "input": "build-system",
+   "status": "live"
+  },
+  {
+   "id": "actions/check-target:build-generator",
+   "action": "actions/check-target",
+   "input": "build-generator",
+   "status": "live"
+  },
+  {
+   "id": "actions/check-target:gate-mode",
+   "action": "actions/check-target",
+   "input": "gate-mode",
+   "status": "live"
+  },
+  {
+   "id": "actions/check-target:project",
+   "action": "actions/check-target",
+   "input": "project",
+   "status": "live"
+  },
+  {
+   "id": "actions/check-target:head-sha",
+   "action": "actions/check-target",
+   "input": "head-sha",
+   "status": "live"
+  },
+  {
+   "id": "actions/check-target:base-ref",
+   "action": "actions/check-target",
+   "input": "base-ref",
+   "status": "live"
+  },
+  {
+   "id": "actions/check-target:evidence-producer",
+   "action": "actions/check-target",
+   "input": "evidence-producer",
+   "status": "live"
+  },
+  {
+   "id": "actions/check-target:evidence-pack-path",
+   "action": "actions/check-target",
+   "input": "evidence-pack-path",
+   "status": "live"
+  },
+  {
+   "id": "actions/check-target:new-library",
+   "action": "actions/check-target",
+   "input": "new-library",
+   "status": "live"
+  },
+  {
+   "id": "actions/check-target:header",
+   "action": "actions/check-target",
+   "input": "header",
+   "status": "live"
+  },
+  {
+   "id": "actions/check-target:old-header",
+   "action": "actions/check-target",
+   "input": "old-header",
+   "status": "live"
+  },
+  {
+   "id": "actions/check-target:new-header",
+   "action": "actions/check-target",
+   "input": "new-header",
+   "status": "live"
+  },
+  {
+   "id": "actions/check-target:include",
+   "action": "actions/check-target",
+   "input": "include",
+   "status": "live"
+  },
+  {
+   "id": "actions/check-target:old-include",
+   "action": "actions/check-target",
+   "input": "old-include",
+   "status": "live"
+  },
+  {
+   "id": "actions/check-target:new-include",
+   "action": "actions/check-target",
+   "input": "new-include",
+   "status": "live"
+  },
+  {
+   "id": "actions/check-target:lang",
+   "action": "actions/check-target",
+   "input": "lang",
+   "status": "live"
+  },
+  {
+   "id": "actions/check-target:ast-frontend",
+   "action": "actions/check-target",
+   "input": "ast-frontend",
+   "status": "live"
+  },
+  {
+   "id": "actions/check-target:gcc-path",
+   "action": "actions/check-target",
+   "input": "gcc-path",
+   "status": "live"
+  },
+  {
+   "id": "actions/check-target:gcc-prefix",
+   "action": "actions/check-target",
+   "input": "gcc-prefix",
+   "status": "live"
+  },
+  {
+   "id": "actions/check-target:gcc-options",
+   "action": "actions/check-target",
+   "input": "gcc-options",
+   "status": "live"
+  },
+  {
+   "id": "actions/check-target:consumer-ast-frontend",
+   "action": "actions/check-target",
+   "input": "consumer-ast-frontend",
+   "status": "live"
+  },
+  {
+   "id": "actions/check-target:consumer-gcc-path",
+   "action": "actions/check-target",
+   "input": "consumer-gcc-path",
+   "status": "live"
+  },
+  {
+   "id": "actions/check-target:consumer-gcc-options",
+   "action": "actions/check-target",
+   "input": "consumer-gcc-options",
+   "status": "live"
+  },
+  {
+   "id": "actions/check-target:consumer-compile-active",
+   "action": "actions/check-target",
+   "input": "consumer-compile-active",
+   "status": "live"
+  },
+  {
+   "id": "actions/check-target:sysroot",
+   "action": "actions/check-target",
+   "input": "sysroot",
+   "status": "live"
+  },
+  {
+   "id": "actions/check-target:sources",
+   "action": "actions/check-target",
+   "input": "sources",
+   "status": "live"
+  },
+  {
+   "id": "actions/check-target:build-info",
+   "action": "actions/check-target",
+   "input": "build-info",
+   "status": "live"
+  },
+  {
+   "id": "actions/check-target:compile-db",
+   "action": "actions/check-target",
+   "input": "compile-db",
+   "status": "live"
+  },
+  {
+   "id": "actions/check-target:build-config",
+   "action": "actions/check-target",
+   "input": "build-config",
+   "status": "live"
+  },
+  {
+   "id": "actions/check-target:consumer-binary",
+   "action": "actions/check-target",
+   "input": "consumer-binary",
+   "status": "live"
+  },
+  {
+   "id": "actions/check-target:contract-file",
+   "action": "actions/check-target",
+   "input": "contract-file",
+   "status": "live"
+  },
+  {
+   "id": "actions/check-target:policy",
+   "action": "actions/check-target",
+   "input": "policy",
+   "status": "live"
+  },
+  {
+   "id": "actions/check-target:policy-file",
+   "action": "actions/check-target",
+   "input": "policy-file",
+   "status": "live"
+  },
+  {
+   "id": "actions/check-target:suppress",
+   "action": "actions/check-target",
+   "input": "suppress",
+   "status": "live"
+  },
+  {
+   "id": "actions/check-target:severity-preset",
+   "action": "actions/check-target",
+   "input": "severity-preset",
+   "status": "live"
+  },
+  {
+   "id": "actions/check-target:require-complete-analysis",
+   "action": "actions/check-target",
+   "input": "require-complete-analysis",
+   "status": "retired"
+  },
+  {
+   "id": "actions/check-target:analysis-assurance-complete",
+   "action": "actions/check-target",
+   "input": "analysis-assurance-complete",
+   "status": "live"
+  },
+  {
+   "id": "actions/check-target:extra-args",
+   "action": "actions/check-target",
+   "input": "extra-args",
+   "status": "live"
+  },
+  {
+   "id": "actions/check-target:python-version",
+   "action": "actions/check-target",
+   "input": "python-version",
+   "status": "live"
+  },
+  {
+   "id": "actions/check-target:install-deps",
+   "action": "actions/check-target",
+   "input": "install-deps",
+   "status": "live"
+  },
+  {
+   "id": "actions/check-target:dependency-source",
+   "action": "actions/check-target",
+   "input": "dependency-source",
+   "status": "live"
+  },
+  {
+   "id": "actions/check-target:action-version",
+   "action": "actions/check-target",
+   "input": "action-version",
+   "status": "live"
+  },
+  {
+   "id": "actions/check-target:abicheck-repository",
+   "action": "actions/check-target",
+   "input": "abicheck-repository",
+   "status": "live"
+  },
+  {
+   "id": "actions/check-target:abicheck-ref",
+   "action": "actions/check-target",
+   "input": "abicheck-ref",
+   "status": "live"
+  },
+  {
+   "id": "actions/collect-facts:phase",
+   "action": "actions/collect-facts",
+   "input": "phase",
+   "status": "live"
+  },
+  {
+   "id": "actions/collect-facts:producer",
+   "action": "actions/collect-facts",
+   "input": "producer",
+   "status": "live"
+  },
+  {
+   "id": "actions/collect-facts:sources",
+   "action": "actions/collect-facts",
+   "input": "sources",
+   "status": "live"
+  },
+  {
+   "id": "actions/collect-facts:output",
+   "action": "actions/collect-facts",
+   "input": "output",
+   "status": "live"
+  },
+  {
+   "id": "actions/collect-facts:public-roots",
+   "action": "actions/collect-facts",
+   "input": "public-roots",
+   "status": "live"
+  },
+  {
+   "id": "actions/collect-facts:library",
+   "action": "actions/collect-facts",
+   "input": "library",
+   "status": "live"
+  },
+  {
+   "id": "actions/collect-facts:extractor",
+   "action": "actions/collect-facts",
+   "input": "extractor",
+   "status": "live"
+  },
+  {
+   "id": "actions/collect-facts:compiler",
+   "action": "actions/collect-facts",
+   "input": "compiler",
+   "status": "live"
+  },
+  {
+   "id": "actions/collect-facts:plugin-artifact",
+   "action": "actions/collect-facts",
+   "input": "plugin-artifact",
+   "status": "live"
+  },
+  {
+   "id": "actions/collect-facts:plugin-artifact-sha256",
+   "action": "actions/collect-facts",
+   "input": "plugin-artifact-sha256",
+   "status": "live"
+  },
+  {
+   "id": "actions/collect-facts:install-deps",
+   "action": "actions/collect-facts",
+   "input": "install-deps",
+   "status": "live"
+  },
+  {
+   "id": "actions/collect-facts:llvm-cmake-prefix",
+   "action": "actions/collect-facts",
+   "input": "llvm-cmake-prefix",
+   "status": "live"
+  },
+  {
+   "id": "actions/collect-facts:python-version",
+   "action": "actions/collect-facts",
+   "input": "python-version",
+   "status": "live"
+  },
+  {
+   "id": "actions/report:report",
+   "action": "actions/report",
+   "input": "report",
+   "status": "live"
+  },
+  {
+   "id": "actions/report:detail",
+   "action": "actions/report",
+   "input": "detail",
+   "status": "live"
+  },
+  {
+   "id": "actions/report:on",
+   "action": "actions/report",
+   "input": "on",
+   "status": "live"
+  },
+  {
+   "id": "actions/report:post-on",
+   "action": "actions/report",
+   "input": "post-on",
+   "status": "live"
+  },
+  {
+   "id": "actions/report:sha",
+   "action": "actions/report",
+   "input": "sha",
+   "status": "live"
+  },
+  {
+   "id": "actions/report:run-label",
+   "action": "actions/report",
+   "input": "run-label",
+   "status": "live"
+  },
+  {
+   "id": "actions/report:report-url",
+   "action": "actions/report",
+   "input": "report-url",
+   "status": "live"
+  },
+  {
+   "id": "actions/report:report-artifact-url",
+   "action": "actions/report",
+   "input": "report-artifact-url",
+   "status": "live"
+  },
+  {
+   "id": "actions/report:path-prefix",
+   "action": "actions/report",
+   "input": "path-prefix",
+   "status": "live"
+  },
+  {
+   "id": "actions/report:gate-api-break",
+   "action": "actions/report",
+   "input": "gate-api-break",
+   "status": "live"
+  },
+  {
+   "id": "actions/report:gate-breaking",
+   "action": "actions/report",
+   "input": "gate-breaking",
+   "status": "live"
+  },
+  {
+   "id": "actions/report:profile",
+   "action": "actions/report",
+   "input": "profile",
+   "status": "live"
+  },
+  {
+   "id": "actions/report:comment-identity",
+   "action": "actions/report",
+   "input": "comment-identity",
+   "status": "live"
+  },
+  {
+   "id": "actions/report:repository",
+   "action": "actions/report",
+   "input": "repository",
+   "status": "live"
+  },
+  {
+   "id": "actions/report:pr-number",
+   "action": "actions/report",
+   "input": "pr-number",
+   "status": "live"
+  },
+  {
+   "id": "actions/report:github-token",
+   "action": "actions/report",
+   "input": "github-token",
+   "status": "live"
+  },
+  {
+   "id": "actions/report:source-run-id",
+   "action": "actions/report",
+   "input": "source-run-id",
+   "status": "live"
+  },
+  {
+   "id": "actions/report:source-run-attempt",
+   "action": "actions/report",
+   "input": "source-run-attempt",
+   "status": "live"
+  },
+  {
+   "id": "actions/report:job-summary",
+   "action": "actions/report",
+   "input": "job-summary",
+   "status": "live"
+  },
+  {
+   "id": "actions/report:max-comment-bytes",
+   "action": "actions/report",
+   "input": "max-comment-bytes",
+   "status": "live"
+  },
+  {
+   "id": "actions/report:max-summary-bytes",
+   "action": "actions/report",
+   "input": "max-summary-bytes",
+   "status": "live"
+  },
+  {
+   "id": "actions/report:dry-run",
+   "action": "actions/report",
+   "input": "dry-run",
+   "status": "live"
+  },
+  {
+   "id": "actions/report:python-version",
+   "action": "actions/report",
+   "input": "python-version",
+   "status": "live"
+  },
+  {
+   "id": "actions/report:abicheck-version",
+   "action": "actions/report",
+   "input": "abicheck-version",
+   "status": "live"
+  },
+  {
+   "id": "actions/resolve-baseline:baseline-path",
+   "action": "actions/resolve-baseline",
+   "input": "baseline-path",
+   "status": "live"
+  },
+  {
+   "id": "actions/resolve-baseline:channel",
+   "action": "actions/resolve-baseline",
+   "input": "channel",
+   "status": "live"
+  },
+  {
+   "id": "actions/resolve-baseline:kind",
+   "action": "actions/resolve-baseline",
+   "input": "kind",
+   "status": "live"
+  },
+  {
+   "id": "actions/resolve-baseline:target",
+   "action": "actions/resolve-baseline",
+   "input": "target",
+   "status": "live"
+  },
+  {
+   "id": "actions/resolve-baseline:bundle",
+   "action": "actions/resolve-baseline",
+   "input": "bundle",
+   "status": "live"
+  },
+  {
+   "id": "actions/resolve-baseline:bundle-members",
+   "action": "actions/resolve-baseline",
+   "input": "bundle-members",
+   "status": "live"
+  },
+  {
+   "id": "actions/resolve-baseline:profile",
+   "action": "actions/resolve-baseline",
+   "input": "profile",
+   "status": "live"
+  },
+  {
+   "id": "actions/resolve-baseline:required",
+   "action": "actions/resolve-baseline",
+   "input": "required",
+   "status": "live"
+  },
+  {
+   "id": "actions/resolve-baseline:candidate-build-output",
+   "action": "actions/resolve-baseline",
+   "input": "candidate-build-output",
+   "status": "live"
+  },
+  {
+   "id": "actions/resolve-baseline:expected-project-ref",
+   "action": "actions/resolve-baseline",
+   "input": "expected-project-ref",
+   "status": "live"
+  },
+  {
+   "id": "actions/resolve-baseline:expected-baseline-generation",
+   "action": "actions/resolve-baseline",
+   "input": "expected-baseline-generation",
+   "status": "live"
+  },
+  {
+   "id": "actions/resolve-baseline:expected-archive-digest",
+   "action": "actions/resolve-baseline",
+   "input": "expected-archive-digest",
+   "status": "live"
+  },
+  {
+   "id": "actions/resolve-baseline:allow-new-target",
+   "action": "actions/resolve-baseline",
+   "input": "allow-new-target",
+   "status": "live"
+  },
+  {
+   "id": "actions/resolve-baseline:verify-baseline-attestation",
+   "action": "actions/resolve-baseline",
+   "input": "verify-baseline-attestation",
+   "status": "live"
+  },
+  {
+   "id": "actions/resolve-baseline:baseline-attestation-repo",
+   "action": "actions/resolve-baseline",
+   "input": "baseline-attestation-repo",
+   "status": "live"
+  },
+  {
+   "id": "actions/resolve-baseline:baseline-attestation-signer-workflow",
+   "action": "actions/resolve-baseline",
+   "input": "baseline-attestation-signer-workflow",
+   "status": "live"
+  },
+  {
+   "id": "actions/resolve-baseline:stage-member-snapshots",
+   "action": "actions/resolve-baseline",
+   "input": "stage-member-snapshots",
+   "status": "live"
+  },
+  {
+   "id": "actions/resolve-baseline:python-version",
+   "action": "actions/resolve-baseline",
+   "input": "python-version",
+   "status": "live"
+  },
+  {
+   "id": "actions/stage-baseline:baseline-path",
+   "action": "actions/stage-baseline",
+   "input": "baseline-path",
+   "status": "live"
+  },
+  {
+   "id": "actions/stage-baseline:asset-name-template",
+   "action": "actions/stage-baseline",
+   "input": "asset-name-template",
+   "status": "live"
+  },
+  {
+   "id": "actions/stage-baseline:profile",
+   "action": "actions/stage-baseline",
+   "input": "profile",
+   "status": "live"
+  },
+  {
+   "id": "actions/stage-baseline:generation",
+   "action": "actions/stage-baseline",
+   "input": "generation",
+   "status": "live"
+  },
+  {
+   "id": "actions/stage-baseline:attest",
+   "action": "actions/stage-baseline",
+   "input": "attest",
+   "status": "live"
+  },
+  {
+   "id": "actions/verify-baseline-source:mode",
+   "action": "actions/verify-baseline-source",
+   "input": "mode",
+   "status": "live"
+  },
+  {
+   "id": "actions/verify-baseline-source:tag",
+   "action": "actions/verify-baseline-source",
+   "input": "tag",
+   "status": "live"
+  },
+  {
+   "id": "actions/verify-baseline-source:built-sha",
+   "action": "actions/verify-baseline-source",
+   "input": "built-sha",
+   "status": "live"
+  },
+  {
+   "id": "actions/verify-baseline-source:workflow",
+   "action": "actions/verify-baseline-source",
+   "input": "workflow",
+   "status": "live"
+  },
+  {
+   "id": "actions/verify-baseline-source:expect-repository",
+   "action": "actions/verify-baseline-source",
+   "input": "expect-repository",
+   "status": "live"
+  },
+  {
+   "id": "actions/verify-baseline-source:expect-event",
+   "action": "actions/verify-baseline-source",
+   "input": "expect-event",
+   "status": "live"
+  },
+  {
+   "id": "actions/verify-baseline-source:expect-head-sha",
+   "action": "actions/verify-baseline-source",
+   "input": "expect-head-sha",
+   "status": "live"
+  },
+  {
+   "id": "actions/verify-baseline-source:expect-head-branch",
+   "action": "actions/verify-baseline-source",
+   "input": "expect-head-branch",
+   "status": "live"
+  },
+  {
+   "id": "actions/verify-baseline-source:allowed-conclusions",
+   "action": "actions/verify-baseline-source",
+   "input": "allowed-conclusions",
+   "status": "live"
+  },
+  {
+   "id": "actions/verify-baseline-source:required-jobs",
+   "action": "actions/verify-baseline-source",
+   "input": "required-jobs",
+   "status": "live"
+  },
+  {
+   "id": "actions/verify-baseline-source:allow-unrelated-job-failures",
+   "action": "actions/verify-baseline-source",
+   "input": "allow-unrelated-job-failures",
+   "status": "live"
+  },
+  {
+   "id": "actions/verify-baseline-source:github-token",
+   "action": "actions/verify-baseline-source",
+   "input": "github-token",
+   "status": "live"
+  },
+  {
+   "id": "actions/verify-source-run:source-run-id",
+   "action": "actions/verify-source-run",
+   "input": "source-run-id",
+   "status": "live"
+  },
+  {
+   "id": "actions/verify-source-run:expect-repository",
+   "action": "actions/verify-source-run",
+   "input": "expect-repository",
+   "status": "live"
+  },
+  {
+   "id": "actions/verify-source-run:expect-workflow",
+   "action": "actions/verify-source-run",
+   "input": "expect-workflow",
+   "status": "live"
+  },
+  {
+   "id": "actions/verify-source-run:expect-event",
+   "action": "actions/verify-source-run",
+   "input": "expect-event",
+   "status": "live"
+  },
+  {
+   "id": "actions/verify-source-run:expect-run-attempt",
+   "action": "actions/verify-source-run",
+   "input": "expect-run-attempt",
+   "status": "live"
+  },
+  {
+   "id": "actions/verify-source-run:allowed-conclusions",
+   "action": "actions/verify-source-run",
+   "input": "allowed-conclusions",
+   "status": "live"
+  },
+  {
+   "id": "actions/verify-source-run:artifact-name",
+   "action": "actions/verify-source-run",
+   "input": "artifact-name",
+   "status": "live"
+  },
+  {
+   "id": "actions/verify-source-run:tested-sha",
+   "action": "actions/verify-source-run",
+   "input": "tested-sha",
+   "status": "live"
+  },
+  {
+   "id": "actions/verify-source-run:provenance-from",
+   "action": "actions/verify-source-run",
+   "input": "provenance-from",
+   "status": "live"
+  },
+  {
+   "id": "actions/verify-source-run:require-provenance",
+   "action": "actions/verify-source-run",
+   "input": "require-provenance",
+   "status": "live"
+  },
+  {
+   "id": "actions/verify-source-run:report-from",
+   "action": "actions/verify-source-run",
+   "input": "report-from",
+   "status": "live"
+  },
+  {
+   "id": "actions/verify-source-run:claimed-pr-number",
+   "action": "actions/verify-source-run",
+   "input": "claimed-pr-number",
+   "status": "live"
+  },
+  {
+   "id": "actions/verify-source-run:destination",
+   "action": "actions/verify-source-run",
+   "input": "destination",
+   "status": "live"
+  },
+  {
+   "id": "actions/verify-source-run:max-total-bytes",
+   "action": "actions/verify-source-run",
+   "input": "max-total-bytes",
+   "status": "live"
+  },
+  {
+   "id": "actions/verify-source-run:max-entry-bytes",
+   "action": "actions/verify-source-run",
+   "input": "max-entry-bytes",
+   "status": "live"
+  },
+  {
+   "id": "actions/verify-source-run:max-entries",
+   "action": "actions/verify-source-run",
+   "input": "max-entries",
+   "status": "live"
+  },
+  {
+   "id": "actions/verify-source-run:max-ratio",
+   "action": "actions/verify-source-run",
+   "input": "max-ratio",
+   "status": "live"
+  },
+  {
+   "id": "actions/verify-source-run:github-token",
+   "action": "actions/verify-source-run",
+   "input": "github-token",
+   "status": "live"
+  },
+  {
+   "id": "actions/verify-source-run:python-version",
+   "action": "actions/verify-source-run",
+   "input": "python-version",
+   "status": "live"
+  },
+  {
+   "id": "actions/verify-source-run:abicheck-version",
+   "action": "actions/verify-source-run",
+   "input": "abicheck-version",
+   "status": "live"
+  }
+ ],
+ "python": [
+  {
+   "id": "CompareRequest.old",
+   "owner": "CompareRequest",
+   "name": "old"
+  },
+  {
+   "id": "CompareRequest.new",
+   "owner": "CompareRequest",
+   "name": "new"
+  },
+  {
+   "id": "CompareRequest.lang",
+   "owner": "CompareRequest",
+   "name": "lang"
+  },
+  {
+   "id": "CompareRequest.frontend",
+   "owner": "CompareRequest",
+   "name": "frontend"
+  },
+  {
+   "id": "CompareRequest.has_sources",
+   "owner": "CompareRequest",
+   "name": "has_sources"
+  },
+  {
+   "id": "CompareRequest.policy",
+   "owner": "CompareRequest",
+   "name": "policy"
+  },
+  {
+   "id": "CompareRequest.policy_file_path",
+   "owner": "CompareRequest",
+   "name": "policy_file_path"
+  },
+  {
+   "id": "CompareRequest.suppress",
+   "owner": "CompareRequest",
+   "name": "suppress"
+  },
+  {
+   "id": "CompareRequest.scope_public",
+   "owner": "CompareRequest",
+   "name": "scope_public"
+  },
+  {
+   "id": "CompareRequest.force_public_symbols",
+   "owner": "CompareRequest",
+   "name": "force_public_symbols"
+  },
+  {
+   "id": "CompareRequest.public_surface_allowlist",
+   "owner": "CompareRequest",
+   "name": "public_surface_allowlist"
+  },
+  {
+   "id": "CompareRequest.pattern_verdicts",
+   "owner": "CompareRequest",
+   "name": "pattern_verdicts"
+  },
+  {
+   "id": "CompareRequest.enable_debuginfod",
+   "owner": "CompareRequest",
+   "name": "enable_debuginfod"
+  },
+  {
+   "id": "CompareRequest.debuginfod_url",
+   "owner": "CompareRequest",
+   "name": "debuginfod_url"
+  },
+  {
+   "id": "CompareRequest.env_matrix",
+   "owner": "CompareRequest",
+   "name": "env_matrix"
+  },
+  {
+   "id": "CompareRequest.diagnostic_comparison",
+   "owner": "CompareRequest",
+   "name": "diagnostic_comparison"
+  },
+  {
+   "id": "CompareRequest.require_same_generation",
+   "owner": "CompareRequest",
+   "name": "require_same_generation"
+  },
+  {
+   "id": "CompareRequest.contract_evaluation",
+   "owner": "CompareRequest",
+   "name": "contract_evaluation"
+  },
+  {
+   "id": "CompareRequest.contract_mode",
+   "owner": "CompareRequest",
+   "name": "contract_mode"
+  },
+  {
+   "id": "CompareRequest.depth",
+   "owner": "CompareRequest",
+   "name": "depth"
+  },
+  {
+   "id": "CompareRequest.budget_s",
+   "owner": "CompareRequest",
+   "name": "budget_s"
+  },
+  {
+   "id": "CompareRequest.dwarf_only",
+   "owner": "CompareRequest",
+   "name": "dwarf_only"
+  },
+  {
+   "id": "CompareRequest.debug_format",
+   "owner": "CompareRequest",
+   "name": "debug_format"
+  },
+  {
+   "id": "CompareRequest.include_labels",
+   "owner": "CompareRequest",
+   "name": "include_labels"
+  },
+  {
+   "id": "CompareRequest.follow_dependencies",
+   "owner": "CompareRequest",
+   "name": "follow_dependencies"
+  },
+  {
+   "id": "CompareRequest.dependency_search_paths",
+   "owner": "CompareRequest",
+   "name": "dependency_search_paths"
+  },
+  {
+   "id": "CompareRequest.ld_library_path",
+   "owner": "CompareRequest",
+   "name": "ld_library_path"
+  },
+  {
+   "id": "CompareRequest.frontend_context",
+   "owner": "CompareRequest",
+   "name": "frontend_context"
+  },
+  {
+   "id": "CompareRequest.lang_explicit",
+   "owner": "CompareRequest",
+   "name": "lang_explicit"
+  },
+  {
+   "id": "CompareRequest.pack_policy_overrides",
+   "owner": "CompareRequest",
+   "name": "pack_policy_overrides"
+  },
+  {
+   "id": "CompareRequest.project_policy_overrides",
+   "owner": "CompareRequest",
+   "name": "project_policy_overrides"
+  },
+  {
+   "id": "CompareRequest.acknowledgments_path",
+   "owner": "CompareRequest",
+   "name": "acknowledgments_path"
+  },
+  {
+   "id": "CompareRequest.acknowledgment_unacknowledged_additions",
+   "owner": "CompareRequest",
+   "name": "acknowledgment_unacknowledged_additions"
+  },
+  {
+   "id": "CompareRequest.acknowledgment_breaks",
+   "owner": "CompareRequest",
+   "name": "acknowledgment_breaks"
+  },
+  {
+   "id": "CompareRequest.strict_suppressions",
+   "owner": "CompareRequest",
+   "name": "strict_suppressions"
+  },
+  {
+   "id": "CompareRequest.require_justification",
+   "owner": "CompareRequest",
+   "name": "require_justification"
+  },
+  {
+   "id": "CompareRequest.old_probe_matrix",
+   "owner": "CompareRequest",
+   "name": "old_probe_matrix"
+  },
+  {
+   "id": "CompareRequest.new_probe_matrix",
+   "owner": "CompareRequest",
+   "name": "new_probe_matrix"
+  },
+  {
+   "id": "CompareRequest.pack_internal_namespaces",
+   "owner": "CompareRequest",
+   "name": "pack_internal_namespaces"
+  },
+  {
+   "id": "CompareRequest.pack_paths",
+   "owner": "CompareRequest",
+   "name": "pack_paths"
+  },
+  {
+   "id": "CompareRequest.stated_settings",
+   "owner": "CompareRequest",
+   "name": "stated_settings"
+  },
+  {
+   "id": "CompareRequest.severity_preset",
+   "owner": "CompareRequest",
+   "name": "severity_preset"
+  },
+  {
+   "id": "CompareRequest.severity_abi_breaking",
+   "owner": "CompareRequest",
+   "name": "severity_abi_breaking"
+  },
+  {
+   "id": "CompareRequest.severity_potential_breaking",
+   "owner": "CompareRequest",
+   "name": "severity_potential_breaking"
+  },
+  {
+   "id": "CompareRequest.severity_quality_issues",
+   "owner": "CompareRequest",
+   "name": "severity_quality_issues"
+  },
+  {
+   "id": "CompareRequest.severity_addition",
+   "owner": "CompareRequest",
+   "name": "severity_addition"
+  },
+  {
+   "id": "CompareRequest.require_complete_analysis",
+   "owner": "CompareRequest",
+   "name": "require_complete_analysis"
+  },
+  {
+   "id": "CompareRequest.changed_paths",
+   "owner": "CompareRequest",
+   "name": "changed_paths"
+  },
+  {
+   "id": "CompareRequest.abi3_floor",
+   "owner": "CompareRequest",
+   "name": "abi3_floor"
+  },
+  {
+   "id": "CompareRequest.collapse_versioned_symbols",
+   "owner": "CompareRequest",
+   "name": "collapse_versioned_symbols"
+  },
+  {
+   "id": "CompareRequest.resolved_collect_mode",
+   "owner": "CompareRequest",
+   "name": "resolved_collect_mode"
+  },
+  {
+   "id": "CompareRequest.allow_build_query",
+   "owner": "CompareRequest",
+   "name": "allow_build_query"
+  },
+  {
+   "id": "CompareRequest.performance_profile",
+   "owner": "CompareRequest",
+   "name": "performance_profile"
+  },
+  {
+   "id": "DumpRequest.input",
+   "owner": "DumpRequest",
+   "name": "input"
+  },
+  {
+   "id": "DumpRequest.lang",
+   "owner": "DumpRequest",
+   "name": "lang"
+  },
+  {
+   "id": "DumpRequest.frontend",
+   "owner": "DumpRequest",
+   "name": "frontend"
+  },
+  {
+   "id": "DumpRequest.has_sources",
+   "owner": "DumpRequest",
+   "name": "has_sources"
+  },
+  {
+   "id": "DumpRequest.depth",
+   "owner": "DumpRequest",
+   "name": "depth"
+  },
+  {
+   "id": "DumpRequest.dwarf_only",
+   "owner": "DumpRequest",
+   "name": "dwarf_only"
+  },
+  {
+   "id": "DumpRequest.debug_format",
+   "owner": "DumpRequest",
+   "name": "debug_format"
+  },
+  {
+   "id": "DumpRequest.enable_debuginfod",
+   "owner": "DumpRequest",
+   "name": "enable_debuginfod"
+  },
+  {
+   "id": "DumpRequest.debuginfod_url",
+   "owner": "DumpRequest",
+   "name": "debuginfod_url"
+  },
+  {
+   "id": "DumpRequest.include_labels",
+   "owner": "DumpRequest",
+   "name": "include_labels"
+  },
+  {
+   "id": "DumpRequest.follow_dependencies",
+   "owner": "DumpRequest",
+   "name": "follow_dependencies"
+  },
+  {
+   "id": "DumpRequest.dependency_search_paths",
+   "owner": "DumpRequest",
+   "name": "dependency_search_paths"
+  },
+  {
+   "id": "DumpRequest.ld_library_path",
+   "owner": "DumpRequest",
+   "name": "ld_library_path"
+  },
+  {
+   "id": "DumpRequest.frontend_context",
+   "owner": "DumpRequest",
+   "name": "frontend_context"
+  },
+  {
+   "id": "DumpRequest.lang_explicit",
+   "owner": "DumpRequest",
+   "name": "lang_explicit"
+  },
+  {
+   "id": "DumpRequest.resolved_collect_mode",
+   "owner": "DumpRequest",
+   "name": "resolved_collect_mode"
+  },
+  {
+   "id": "InputSpec.path",
+   "owner": "InputSpec",
+   "name": "path"
+  },
+  {
+   "id": "InputSpec.headers",
+   "owner": "InputSpec",
+   "name": "headers"
+  },
+  {
+   "id": "InputSpec.exclude_headers",
+   "owner": "InputSpec",
+   "name": "exclude_headers"
+  },
+  {
+   "id": "InputSpec.includes",
+   "owner": "InputSpec",
+   "name": "includes"
+  },
+  {
+   "id": "InputSpec.version",
+   "owner": "InputSpec",
+   "name": "version"
+  },
+  {
+   "id": "InputSpec.pdb",
+   "owner": "InputSpec",
+   "name": "pdb"
+  },
+  {
+   "id": "InputSpec.debug_roots",
+   "owner": "InputSpec",
+   "name": "debug_roots"
+  },
+  {
+   "id": "InputSpec.include_dependencies",
+   "owner": "InputSpec",
+   "name": "include_dependencies"
+  },
+  {
+   "id": "InputSpec.sources",
+   "owner": "InputSpec",
+   "name": "sources"
+  },
+  {
+   "id": "InputSpec.build_info",
+   "owner": "InputSpec",
+   "name": "build_info"
+  },
+  {
+   "id": "InputSpec.build_targets",
+   "owner": "InputSpec",
+   "name": "build_targets"
+  },
+  {
+   "id": "InputSpec.dump_manifest",
+   "owner": "InputSpec",
+   "name": "dump_manifest"
+  },
+  {
+   "id": "InputSpec.compile",
+   "owner": "InputSpec",
+   "name": "compile"
+  },
+  {
+   "id": "InputSpec.public_header_dirs",
+   "owner": "InputSpec",
+   "name": "public_header_dirs"
+  },
+  {
+   "id": "InputSpec.follow_linker_scripts",
+   "owner": "InputSpec",
+   "name": "follow_linker_scripts"
+  },
+  {
+   "id": "InputSpec.compile_db_filter",
+   "owner": "InputSpec",
+   "name": "compile_db_filter"
+  },
+  {
+   "id": "InputSpec.build_config",
+   "owner": "InputSpec",
+   "name": "build_config"
+  },
+  {
+   "id": "InputSpec.ownership",
+   "owner": "InputSpec",
+   "name": "ownership"
+  },
+  {
+   "id": "InputSpec.execution",
+   "owner": "InputSpec",
+   "name": "execution"
+  },
+  {
+   "id": "run_compare(old_input)",
+   "owner": "run_compare",
+   "name": "old_input"
+  },
+  {
+   "id": "run_compare(new_input)",
+   "owner": "run_compare",
+   "name": "new_input"
+  },
+  {
+   "id": "run_compare(old_headers)",
+   "owner": "run_compare",
+   "name": "old_headers"
+  },
+  {
+   "id": "run_compare(new_headers)",
+   "owner": "run_compare",
+   "name": "new_headers"
+  },
+  {
+   "id": "run_compare(old_includes)",
+   "owner": "run_compare",
+   "name": "old_includes"
+  },
+  {
+   "id": "run_compare(new_includes)",
+   "owner": "run_compare",
+   "name": "new_includes"
+  },
+  {
+   "id": "run_compare(old_version)",
+   "owner": "run_compare",
+   "name": "old_version"
+  },
+  {
+   "id": "run_compare(new_version)",
+   "owner": "run_compare",
+   "name": "new_version"
+  },
+  {
+   "id": "run_compare(lang)",
+   "owner": "run_compare",
+   "name": "lang"
+  },
+  {
+   "id": "run_compare(lang_explicit)",
+   "owner": "run_compare",
+   "name": "lang_explicit"
+  },
+  {
+   "id": "run_compare(frontend)",
+   "owner": "run_compare",
+   "name": "frontend"
+  },
+  {
+   "id": "run_compare(suppress)",
+   "owner": "run_compare",
+   "name": "suppress"
+  },
+  {
+   "id": "run_compare(policy)",
+   "owner": "run_compare",
+   "name": "policy"
+  },
+  {
+   "id": "run_compare(policy_file_path)",
+   "owner": "run_compare",
+   "name": "policy_file_path"
+  },
+  {
+   "id": "run_compare(old_pdb_path)",
+   "owner": "run_compare",
+   "name": "old_pdb_path"
+  },
+  {
+   "id": "run_compare(new_pdb_path)",
+   "owner": "run_compare",
+   "name": "new_pdb_path"
+  },
+  {
+   "id": "run_compare(old_debug_roots)",
+   "owner": "run_compare",
+   "name": "old_debug_roots"
+  },
+  {
+   "id": "run_compare(new_debug_roots)",
+   "owner": "run_compare",
+   "name": "new_debug_roots"
+  },
+  {
+   "id": "run_compare(enable_debuginfod)",
+   "owner": "run_compare",
+   "name": "enable_debuginfod"
+  },
+  {
+   "id": "run_compare(scope_to_public_surface)",
+   "owner": "run_compare",
+   "name": "scope_to_public_surface"
+  },
+  {
+   "id": "run_compare(force_public_symbols)",
+   "owner": "run_compare",
+   "name": "force_public_symbols"
+  },
+  {
+   "id": "run_compare(pattern_verdicts)",
+   "owner": "run_compare",
+   "name": "pattern_verdicts"
+  },
+  {
+   "id": "run_compare(public_surface_allowlist)",
+   "owner": "run_compare",
+   "name": "public_surface_allowlist"
+  },
+  {
+   "id": "run_compare(debuginfod_url)",
+   "owner": "run_compare",
+   "name": "debuginfod_url"
+  },
+  {
+   "id": "run_compare(diagnostic_comparison)",
+   "owner": "run_compare",
+   "name": "diagnostic_comparison"
+  },
+  {
+   "id": "run_compare(contract_evaluation)",
+   "owner": "run_compare",
+   "name": "contract_evaluation"
+  },
+  {
+   "id": "run_compare(include_dependencies)",
+   "owner": "run_compare",
+   "name": "include_dependencies"
+  },
+  {
+   "id": "run_compare(contract_mode)",
+   "owner": "run_compare",
+   "name": "contract_mode"
+  },
+  {
+   "id": "run_compare(pack_policy_overrides)",
+   "owner": "run_compare",
+   "name": "pack_policy_overrides"
+  },
+  {
+   "id": "run_compare(pack_internal_namespaces)",
+   "owner": "run_compare",
+   "name": "pack_internal_namespaces"
+  },
+  {
+   "id": "run_compare(compile_context)",
+   "owner": "run_compare",
+   "name": "compile_context"
+  },
+  {
+   "id": "run_compare(depth)",
+   "owner": "run_compare",
+   "name": "depth"
+  },
+  {
+   "id": "run_compare(severity_preset)",
+   "owner": "run_compare",
+   "name": "severity_preset"
+  },
+  {
+   "id": "run_compare(public_header_dirs)",
+   "owner": "run_compare",
+   "name": "public_header_dirs"
+  },
+  {
+   "id": "run_compare(collapse_versioned_symbols)",
+   "owner": "run_compare",
+   "name": "collapse_versioned_symbols"
+  },
+  {
+   "id": "run_compare(project_policy_overrides)",
+   "owner": "run_compare",
+   "name": "project_policy_overrides"
+  },
+  {
+   "id": "run_compare(env_matrix)",
+   "owner": "run_compare",
+   "name": "env_matrix"
+  },
+  {
+   "id": "run_compare(exclude_headers)",
+   "owner": "run_compare",
+   "name": "exclude_headers"
+  },
+  {
+   "id": "run_compare(acknowledgments_path)",
+   "owner": "run_compare",
+   "name": "acknowledgments_path"
+  },
+  {
+   "id": "run_compare(acknowledgment_unacknowledged_additions)",
+   "owner": "run_compare",
+   "name": "acknowledgment_unacknowledged_additions"
+  },
+  {
+   "id": "run_compare(acknowledgment_breaks)",
+   "owner": "run_compare",
+   "name": "acknowledgment_breaks"
+  },
+  {
+   "id": "run_dump(path)",
+   "owner": "run_dump",
+   "name": "path"
+  },
+  {
+   "id": "run_dump(binary_fmt)",
+   "owner": "run_dump",
+   "name": "binary_fmt"
+  },
+  {
+   "id": "run_dump(headers)",
+   "owner": "run_dump",
+   "name": "headers"
+  },
+  {
+   "id": "run_dump(includes)",
+   "owner": "run_dump",
+   "name": "includes"
+  },
+  {
+   "id": "run_dump(version)",
+   "owner": "run_dump",
+   "name": "version"
+  },
+  {
+   "id": "run_dump(lang)",
+   "owner": "run_dump",
+   "name": "lang"
+  },
+  {
+   "id": "run_dump(lang_explicit)",
+   "owner": "run_dump",
+   "name": "lang_explicit"
+  },
+  {
+   "id": "run_dump(pdb_path)",
+   "owner": "run_dump",
+   "name": "pdb_path"
+  },
+  {
+   "id": "run_dump(dwarf_only)",
+   "owner": "run_dump",
+   "name": "dwarf_only"
+  },
+  {
+   "id": "run_dump(debug_roots)",
+   "owner": "run_dump",
+   "name": "debug_roots"
+  },
+  {
+   "id": "run_dump(enable_debuginfod)",
+   "owner": "run_dump",
+   "name": "enable_debuginfod"
+  },
+  {
+   "id": "run_dump(debuginfod_url)",
+   "owner": "run_dump",
+   "name": "debuginfod_url"
+  },
+  {
+   "id": "run_dump(debug_format)",
+   "owner": "run_dump",
+   "name": "debug_format"
+  },
+  {
+   "id": "run_dump(symbols_only)",
+   "owner": "run_dump",
+   "name": "symbols_only"
+  },
+  {
+   "id": "run_dump(debug_presence_only)",
+   "owner": "run_dump",
+   "name": "debug_presence_only"
+  },
+  {
+   "id": "run_dump(public_headers)",
+   "owner": "run_dump",
+   "name": "public_headers"
+  },
+  {
+   "id": "run_dump(public_header_dirs)",
+   "owner": "run_dump",
+   "name": "public_header_dirs"
+  },
+  {
+   "id": "run_dump(header_backend)",
+   "owner": "run_dump",
+   "name": "header_backend"
+  },
+  {
+   "id": "run_dump(compile)",
+   "owner": "run_dump",
+   "name": "compile"
+  },
+  {
+   "id": "run_dump(notify)",
+   "owner": "run_dump",
+   "name": "notify"
+  },
+  {
+   "id": "run_dump(include_labels)",
+   "owner": "run_dump",
+   "name": "include_labels"
+  },
+  {
+   "id": "run_dump(dump_manifest)",
+   "owner": "run_dump",
+   "name": "dump_manifest"
+  },
+  {
+   "id": "run_dump(public_include_search_dirs)",
+   "owner": "run_dump",
+   "name": "public_include_search_dirs"
+  },
+  {
+   "id": "run_dump(include_dependencies)",
+   "owner": "run_dump",
+   "name": "include_dependencies"
+  }
+ ]
+}

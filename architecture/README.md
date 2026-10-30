@@ -21,6 +21,12 @@ It separates the desired dependency graph from temporary migration debt.
   allowlist, and should shrink toward empty or convert entries to `accept`
   as work lands; it should never become a permanent allowlist of untouched
   migration work.
+- `option-vocabulary.yaml` groups every user-settable option on the CLI,
+  `.abicheck.yml`, the Actions and the typed API into one concept each
+  ([ADR-091](../docs/contribute/adr/091-one-option-vocabulary.md)).
+  `option-vocabulary-inventory.json` is its generated input
+  (`scripts/gen_option_vocabulary.py`); `tests/test_option_vocabulary.py`
+  fails when a live option is not claimed by exactly one concept.
 - `dispositions.yaml` records, for every first-party root module with no
   owning responsibility layer, one of ADR-061 gap F's three dispositions:
   `migrate` (a named target layer and responsibility slice), `retain` (a
