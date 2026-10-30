@@ -273,7 +273,9 @@ def resolve_dump_request(request: DumpRequest) -> ResolvedDumpRequest:
     from ...model.header_ast_frontends import HEADER_AST_FRONTENDS
     from ..input_resolution import detect_binary_format
     from ..plan import AnalysisPlanner
+    from .project_config import with_dump_config_overrides
 
+    request = with_dump_config_overrides(request)
     request.validate()
     # ADR-063 Phase 4: reject a request no resolved collector/backend
     # combination can satisfy before any extraction runs (PlanningError),

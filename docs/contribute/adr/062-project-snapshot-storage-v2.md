@@ -1,7 +1,7 @@
 # ADR-062: Project Snapshot Storage v2 — Content-Addressed Sections, Explicit Fact Availability, and Occurrence-Preserving Identity
 
 **Date:** 2026-08-26
-**Status:** Proposed — partially implemented. Phase 0 primitives implemented (`abicheck/storage/`:
+**Status:** Proposed — partially implemented; amended 2026-10-30 (D14-D18, rules accepted, implementation pending). Phase 0 primitives implemented (`abicheck/storage/`:
 fact availability, entity/occurrence identity with conflict preservation,
 canonical encoding and semantic digest, and the separated version axes).
 Phase 1's A1.1-A1.3 are implemented: `abicheck/storage/package.py` carries
@@ -593,3 +593,179 @@ The extractor axis's own scope and generation do not change, so this amendment
 moves no existing stored package's generation. The residual limit is the same
 as for every axis: a fingerprint cannot tell a refactor from a semantic change,
 so `--no-semantic-change --reason` is a reviewed claim.
+
+## Amendment (2026-10-30): data-evolution rules, digest roles, and immutable publication
+
+**Status of this amendment:** the rules D14-D18 are accepted; their
+implementation is tracked as plan item A1.9 in the
+[storage format v2 plan](../plans/storage-format-v2.md). The rest of this ADR
+stays Proposed.
+
+**Context.** An external review of `main` reported the following. Its figures
+were measured outside this repository and are recorded as *reported*, not
+reproduced. A1.9 turns each probe into a named regression test.
+
+- JSON + zstd stays (D1). A 3000-function library dump compresses from 25.4 MB
+  to 107 KB. Splitting declarations into fixed blocks *grew* their compressed
+  size by 63%.
+- A full load takes about 108 MiB RSS. The cost now lies in evolution and
+  loading, not in encoding.
+
+| Probe | Reported | Where | Rule |
+|---|---|---|---|
+| unknown section kind | the whole document is refused | `storage/sectioned_document.py` (single-file sectioned document) | D14 |
+| unknown field in a function record | accepted, then dropped on re-save | DTO decode/encode | D14 |
+| only `created_at` differs | digest changes | `snapshot_content_digest` (`storage/snapshot_encode.py`) | D16: by design |
+| functions reordered, comparison `NO_CHANGE` | digest changes | `snapshot_content_digest` | D16 |
+| republish whose object check fails | `manifest.json` unchanged, previous package unreadable | `write_project_manifest` | D17 |
+
+The last row is a failure mode *beyond* the deferred gap that
+`write_project_manifest`'s docstring records. That gap covers concurrent
+readers and interruption. This one is a plain refused publish. Refs are
+written before the object check raises, so the old manifest ends up naming
+overwritten refs.
+
+### D14 — Optional and must-understand extensions
+
+**Carrier.** Each section header (`SectionDTO`) and each package manifest gains
+a `must_understand` list. It names the extensions, sections or fields, that a
+reader must recognize before using that section for comparison. Anything not
+listed is optional.
+
+**Optional data is preserved.** Each DTO record and each section header gains
+an `extensions` map from names to canonical JSON values (D5). It is never raw
+bytes and never a domain-object field (ADR-063 D8). A reader keeps an unknown
+optional field or section there and writes it back unchanged on re-save.
+Dropping it is a defect. `extensions` is inside the `evidence` and
+`publication` digests (D16).
+
+**Unknown must-understand data blocks only its dependents.** An unknown name
+in `must_understand` blocks only the analyses that read that section. Those
+analyses resolve to `NOT_COMPARABLE`, with a diagnostic that names the
+extension. Unrelated sections are still compared. An unknown section kind not
+listed in `must_understand` is kept in `extensions` instead of refusing the
+document. This replaces the current blanket refusal in
+`sectioned_document.py`.
+
+**A newer `section_schema_version` of a known kind.** The reader treats the
+section as must-understand and blocks its dependents. It does not refuse the
+whole document. This brings the code into line with D2, which calls the axis
+informational at the package level.
+
+**Which mechanism to use:**
+
+- `comparison_contract_version` (D2, fail-closed for the whole package) is
+  bumped only when a change can alter the verdict of analyses that do not read
+  the new data. Examples are a change to matching or identity rules.
+- Any other semantic addition uses `must_understand`.
+- Display or provenance additions use neither.
+
+### D15 — The wire contract is independent of runtime classes
+
+ADR-063 D8 owns the Domain → DTO vN → wire layering. This amendment adds three
+requirements to it:
+
+1. **A field inventory.** A checked-in per-section field inventory, generated
+   from the `SectionDTO` encoders, is diffed in CI. A wire change without a
+   `section_schema_version` bump and a D13 adapter fails.
+2. **Byte identity.** A fixed corpus serializes to identical bytes before and
+   after a runtime-only dataclass refactor.
+3. **Section availability.** At section level, the states use D3's
+   `FactAvailability` statuses. A missing section means `not_collected`. A
+   present but empty section means `present`. An extractor failure is stored
+   as `failed`, with diagnostics. A missing section never reads as `present`.
+   The carrier is the section-header table in the document or manifest, not
+   the payload. Every section kind the producer attempted has a header entry
+   with its `FactAvailability`, even when no payload object exists. So `failed`
+   is a header entry with no payload, and `not_collected` is a header entry
+   with that status, or no entry at all for producers that predate this rule.
+   The field inventory covers the header entry.
+
+### D16 — One digest per question, none silently redefined
+
+| Role | Covers | Today |
+|---|---|---|
+| `transport` | the exact stored file bytes, after compression | not implemented: no current path hashes the compressed bytes |
+| `publication` | the exact published snapshot, including capture metadata such as `created_at` | `snapshot_content_digest`, unchanged |
+| `evidence` | D5-normalized facts, excluding volatile metadata and the order of unordered collections | basis: `storage.canonical.semantic_digest`; not persisted yet |
+| `comparison_input` | the `evidence` digests plus the contract and policy inputs one comparison read | not implemented |
+
+Each role answers one question:
+
+- `transport`: is this stored file intact, before decompression?
+- `publication`: is this the exact artifact that a release recorded?
+- `evidence`: is this the same evidence? Used for dedup and caches.
+- `comparison_input`: is a cached comparison result still valid?
+
+The object store's address is a separate thing and keeps its meaning. JSON
+objects are addressed by `semantic_digest`, and raw payloads by `raw_digest`
+over the uncompressed payload (`project_snapshot_store.py`). That is payload
+integrity, not `transport`.
+
+`snapshot_content_digest` keeps its meaning. The `created_at` probe is that
+digest working as designed, not a defect. The reorder probe is a defect only
+if it reproduces on the `evidence` digest. D5 already requires stable sort
+keys there, and A1.9 adds the test. `evidence` and `comparison_input` are
+added as new fields. No stored digest is reinterpreted.
+
+### D17 — Immutable refs and atomic publication (amends D6)
+
+D6's ref layout changes to versioned, never-overwritten paths:
+
+```text
+refs/variants/<variant-id>/<ref-digest>.json
+refs/artifacts/<artifact-id>/<ref-digest>.json
+```
+
+`manifest.json` records `{id, ref_digest}` per ref, not bare ids.
+
+`ref_digest` is `storage.canonical.semantic_digest` (sha256, `sha256:<hex>`)
+over the complete canonical ref document. The document includes its `id`, its
+schema version, and every object digest it names. A ref carries no volatile
+capture metadata; any it gains belongs in the manifest. A reader recomputes
+`ref_digest` from the file it loads. A mismatch with either the path or the
+manifest entry fails closed, as a corrupted package, the same way an object
+digest mismatch does today. It stays the
+root and the only commit point.
+
+1. Objects and refs are written and verified.
+2. `manifest.json` is replaced by write-to-temp plus atomic rename.
+3. A failed or interrupted publish leaves the previous manifest and every ref
+   it names intact.
+
+**Version and migration.** This is a layout change. It bumps
+`package_format_version`, so older readers refuse new packages, as D2
+requires. A D13 adapter reads the id-path layout. Regression tests cover:
+
+- a failed object check;
+- an interruption between the ref writes and the manifest write;
+- a changed-content republish under the same ids.
+
+**Concurrent writers to one root are serialized.** They take
+`storage/cross_process_lock.py`'s lock for the whole publish. This narrows
+ADR-066 D1's "content digest" for release history to the `publication`
+digest.
+
+### D18 — Selective load before more compression (amends D8)
+
+D8's size-bounded chunking target, 1-8 MB decoded, is **withdrawn**.
+
+- Sections are not pre-chunked. The 63% measurement argues against it.
+- A section is split only when a measured access pattern needs part of it.
+- The performance lever is D8's lazy, per-section loading. D8's preload of
+  the small L0 `binary` sections stays, because pairing needs them before any
+  analysis is chosen. Every other section is opened only when a requested
+  analysis reads it.
+- Multi-library runs share an immutable, digest-keyed (`evidence`)
+  decoded-section cache (D11).
+
+### Exit criteria and non-goals
+
+A1.9 is complete when these hold:
+
+- each probe has a passing regression test;
+- validation passes on the oneDAL/MKL corpus and on Windows and macOS;
+- a test shows a second concurrent publisher blocked or refused.
+
+This amendment introduces no binary codec and no user-facing compression knob
+(D1, D12).

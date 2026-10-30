@@ -722,6 +722,8 @@ adrs:
     use_cases: []
     surfaces:
       - cli: compare --set
+      - cli: dump --set
+      - cli: project capture-variants --set
 
   - id: ADR-090
     file: 090-unresolved-surface-is-not-a-clean-verdict.md
