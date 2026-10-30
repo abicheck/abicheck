@@ -8,8 +8,10 @@ and the resolved request, not a mock of either path.
 
 from __future__ import annotations
 
+import hashlib
 from dataclasses import FrozenInstanceError
 from pathlib import Path
+from types import SimpleNamespace
 
 import click
 import pytest
@@ -21,18 +23,24 @@ from abicheck.buildsource.build_config import (
     BuildConfig,
     load_build_config,
 )
+from abicheck.buildsource.build_config_io import load_build_config_with_digest
 from abicheck.buildsource.build_config_overrides import (
     CORE_CONFIG_FLAGS,
     apply_config_overrides,
+    validated_config_overrides,
 )
 from abicheck.cli import main
 from abicheck.frontends.cli.options.config_set import parse_set_assignments
 from abicheck.frontends.cli.project_config import resolve_project_compare_config
-from abicheck.workflows.compare.execute import _with_config_overrides
+from abicheck.workflows.compare.execute import (
+    _with_config_overrides,
+    run_compare_request,
+)
 from abicheck.workflows.compare_configuration import (
     CompareSettingsError,
     load_and_resolve_compare_config,
 )
+from abicheck.workflows.request_acknowledgment_checks import acknowledgment_errors
 from abicheck.workflows.service_requests import CompareRequest, InputSpec
 
 
@@ -268,3 +276,159 @@ def test_config_overrides_default_is_an_immutable_empty_mapping() -> None:
         request.config_overrides["scope.show_redundant"] = True  # type: ignore[index]
     with pytest.raises(FrozenInstanceError):
         request.config_overrides = {}  # type: ignore[misc]
+
+
+# ── branches the first pass left unexercised (Codecov patch) ───────────────
+
+
+def test_a_malformed_file_is_a_wrapped_error_even_with_overrides(
+    tmp_path: Path,
+) -> None:
+    path = _write_config(tmp_path, "scope: [unclosed\n")
+    with pytest.raises(ValueError, match="cannot read build config"):
+        load_build_config(path, config_overrides={"scope.show_redundant": True})
+
+
+@pytest.mark.parametrize("overrides", [None, {"scope.show_redundant": True}])
+def test_a_non_mapping_file_is_treated_as_empty(
+    tmp_path: Path, overrides: dict[str, object] | None
+) -> None:
+    path = _write_config(tmp_path, "- just\n- a list\n")
+    cfg = load_build_config(path, config_overrides=overrides)
+    assert cfg.scope_show_redundant == (True if overrides else None)
+
+
+def test_overrides_merge_leaf_by_leaf_inside_a_block(tmp_path: Path) -> None:
+    path = _write_config(
+        tmp_path, "scope:\n  show_redundant: false\n  public_symbols: [x]\n"
+    )
+    cfg = load_build_config(path, config_overrides={"scope.show_redundant": True})
+    assert cfg.scope_show_redundant is True
+    assert cfg.public_symbols == ["x"]
+
+
+def test_a_top_level_scalar_key_can_be_overridden() -> None:
+    assert validated_config_overrides({"version": 2}, KEY_TABLE) == {"version": 2}
+
+
+def test_digest_of_a_missing_file_still_applies_overrides() -> None:
+    cfg, digest = load_build_config_with_digest(
+        None, config_overrides={"scope.show_redundant": True}
+    )
+    assert cfg.scope_show_redundant is True
+    assert digest is None
+
+
+def test_digest_covers_file_bytes_not_the_overrides(tmp_path: Path) -> None:
+    path = _write_config(tmp_path, "scope:\n  show_redundant: false\n")
+    cfg, digest = load_build_config_with_digest(
+        path, config_overrides={"scope.show_redundant": True}
+    )
+    assert cfg.scope_show_redundant is True
+    assert digest == hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+@pytest.mark.parametrize("overrides", [None, {"scope.show_redundant": True}])
+def test_digest_of_a_non_mapping_file(
+    tmp_path: Path, overrides: dict[str, object] | None
+) -> None:
+    path = _write_config(tmp_path, "- x\n")
+    cfg, digest = load_build_config_with_digest(path, config_overrides=overrides)
+    assert cfg.scope_show_redundant == (True if overrides else None)
+    assert digest == hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def test_an_empty_set_is_no_overrides() -> None:
+    assert parse_set_assignments(()) == {}
+
+
+def test_an_override_mapping_names_no_key_twice_in_the_result() -> None:
+    merged = apply_config_overrides(
+        {"scope": {"show_redundant": False}},
+        {"scope.show_redundant": True, "scope.public_symbols": ["a"]},
+        KEY_TABLE,
+    )
+    assert merged == {"scope": {"show_redundant": True, "public_symbols": ["a"]}}
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("acknowledgment_unacknowledged_additions", "not-an-action"),
+        ("acknowledgment_breaks", "not-an-action"),
+    ],
+)
+def test_an_unknown_acknowledgment_action_is_reported(field: str, value: str) -> None:
+    fields = {
+        "acknowledgment_unacknowledged_additions": None,
+        "acknowledgment_breaks": None,
+        "acknowledgments_path": None,
+        field: value,
+    }
+    errors = acknowledgment_errors(SimpleNamespace(**fields))
+    assert len(errors) == 1
+    assert field in errors[0]
+
+
+def test_a_missing_acknowledgments_file_is_reported(tmp_path: Path) -> None:
+    missing = tmp_path / "absent.yml"
+    errors = acknowledgment_errors(
+        SimpleNamespace(
+            acknowledgment_unacknowledged_additions=None,
+            acknowledgment_breaks=None,
+            acknowledgments_path=missing,
+        )
+    )
+    assert errors == [f"acknowledgments file not found: {missing}"]
+
+
+def test_unset_acknowledgment_fields_have_no_errors() -> None:
+    fields = SimpleNamespace(
+        acknowledgment_unacknowledged_additions=None,
+        acknowledgment_breaks=None,
+        acknowledgments_path=None,
+    )
+    assert acknowledgment_errors(fields) == []
+
+
+def test_a_request_without_overrides_is_returned_unchanged() -> None:
+    request = _request()
+    assert _with_config_overrides(request) is request
+
+
+def test_overrides_fill_the_request_fields_they_map_to() -> None:
+    resolved = _with_config_overrides(
+        _request(
+            config_overrides={
+                "scope.collapse_versioned_symbols": True,
+                "scope.public_symbols": ["foo"],
+                "severity.addition": "error",
+            }
+        )
+    )
+    assert resolved.collapse_versioned_symbols is True
+    assert resolved.force_public_symbols == frozenset({"foo"})
+    assert resolved.severity_addition == "error"
+
+
+def test_an_explicit_force_public_symbols_is_kept() -> None:
+    resolved = _with_config_overrides(
+        _request(
+            force_public_symbols=frozenset({"bar"}),
+            config_overrides={"scope.public_symbols": ["foo"]},
+        )
+    )
+    assert resolved.force_public_symbols == frozenset({"bar"})
+
+
+def test_the_typed_run_rejects_a_bad_override_before_resolving() -> None:
+    with pytest.raises(CompareSettingsError, match="severity.addition"):
+        run_compare_request(_request(config_overrides={"severity.addition": ["a"]}))
+
+
+def test_a_malformed_file_is_a_wrapped_error_for_the_digest_loader(
+    tmp_path: Path,
+) -> None:
+    path = _write_config(tmp_path, "scope: [unclosed\n")
+    with pytest.raises(ValueError, match="cannot read build config"):
+        load_build_config_with_digest(path)
