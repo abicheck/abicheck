@@ -217,4 +217,37 @@ SERIALIZATION_BUG_CLASSES: tuple[BugClass, ...] = (
             "tests/test_generation_corpus_gate.py",
         ),
     ),
+    BugClass(
+        id="storage.republish_overwrites_live_ref",
+        invariant=(
+            "Publishing a ProjectSnapshot package never rewrites a file the "
+            "live manifest.json names: ref records are content-addressed "
+            "objects, manifest.json is replaced atomically after every "
+            "section and ref object is durable and verified, and a second "
+            "writer to the same root is refused. So for every failure point "
+            "(a failed object check of any section owner, an interruption at "
+            "any ref write or at the manifest write) and for a successful "
+            "republish of changed content under the same ids, the previously "
+            "published package reads back exactly and every pre-existing "
+            "file other than manifest.json is byte-identical."
+        ),
+        # #1858 records the defect (ADR-062's 2026-10-30 amendment, D17).
+        fixed_by=(1858,),
+        seed_tests=("tests/test_package_immutable_publication.py",),
+        axes={
+            "failure_point": ("object-check", "ref-write", "manifest-write"),
+            "section_owner": ("artifact", "variant", "project"),
+            "writers": ("one", "concurrent"),
+        },
+        known_gaps=(
+            KnownGap(
+                description=(
+                    "Superseded ref/section objects are never collected, and "
+                    "without fcntl (Windows) the writer lock is an O_EXCL file "
+                    "a crashed writer leaves behind."
+                ),
+                reference="docs/contribute/known-gaps.md",
+            ),
+        ),
+    ),
 )
