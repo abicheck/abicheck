@@ -200,7 +200,7 @@ class TestRootValidatesTheTriState:
             },
         )
         assert result.returncode == 0, _combined(result)
-        assert "analysis-assurance-complete" not in _combined(result)
+        assert "require-complete" not in _combined(result)
 
     @pytest.mark.parametrize("value", ["True", "yes", "1"])
     def test_other_values_are_refused_not_read_as_inherit(self, value: str) -> None:
