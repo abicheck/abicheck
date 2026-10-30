@@ -489,7 +489,7 @@ def _resolve_sided_variant(
     return old, new
 
 
-def _stash_variant_in_context(
+def _stash_variant_in_context(  # noqa: ARG001 -- click callback(ctx, param, value) signature
     ctx: click.Context, param: click.Parameter, value: Sequence[tuple[str, str]]
 ) -> None:
     """``--variant``'s click ``callback=``: resolves *value*'s side-scoped

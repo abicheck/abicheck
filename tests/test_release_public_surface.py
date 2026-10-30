@@ -392,7 +392,7 @@ class TestAcquisitionLedger:
             return _surface("api_a")
 
         for side in ("old", "new", "new", "old"):
-            ledger.acquire(identity, side, _produce)
+            ledger.acquire(identity, _produce)
         assert len(calls) == 1
         assert ledger.total_acquisitions == 1
         assert ledger.total_reuses == 3
@@ -401,8 +401,8 @@ class TestAcquisitionLedger:
         ledger = SurfaceAcquisitionLedger()
         a = SurfaceAcquisitionIdentity(header_dirs=("/old/inc",))
         b = SurfaceAcquisitionIdentity(header_dirs=("/new/inc",))
-        ledger.acquire(a, "old", lambda: _surface("x", side="old"))
-        ledger.acquire(b, "new", lambda: _surface("x"))
+        ledger.acquire(a, lambda: _surface("x", side="old"))
+        ledger.acquire(b, lambda: _surface("x"))
         assert ledger.total_acquisitions == 2
         assert ledger.to_dict()["acquisitions"] == 2
         assert len(ledger.acquisitions_by_key()) == 2
@@ -421,16 +421,14 @@ class TestAcquisitionLedger:
             return _surface("api_a")
 
         with ThreadPoolExecutor(max_workers=8) as pool:
-            list(
-                pool.map(lambda _: ledger.acquire(identity, "new", _produce), range(32))
-            )
+            list(pool.map(lambda _: ledger.acquire(identity, _produce), range(32)))
         assert len(calls) == 1
 
     def test_a_reused_surface_is_relabelled_for_the_asking_side(self) -> None:
         ledger = SurfaceAcquisitionLedger()
         identity = SurfaceAcquisitionIdentity(header_dirs=("/inc",))
-        first = ledger.acquire(identity, "old", lambda: _surface("x", side="old"))
-        reused = ledger.acquire(identity, "new", lambda: _surface("x")).for_side("new")
+        first = ledger.acquire(identity, lambda: _surface("x", side="old"))
+        reused = ledger.acquire(identity, lambda: _surface("x")).for_side("new")
         assert first.side == "old"
         assert reused.side == "new"
         assert reused.acquisition_key == first.acquisition_key

@@ -6,6 +6,7 @@ tests/parity/test_no_baseline_parity.py
 tests/parity/test_pattern_facts_behavior.py
 tests/parity/test_preprocessor_facts_behavior.py
 tests/parity/test_source_depth_parity.py
+tests/test_abi_fact_storage.py
 tests/test_abi_surface_direction.py
 tests/test_abicc_full_parity.py
 tests/test_abicc_scenario_parity.py
@@ -590,6 +591,7 @@ tests/test_one_comparison_product_parity.py
 tests/test_opaque_identity_tiers.py
 tests/test_orphan_struct.py
 tests/test_overload_ambiguity.py
+tests/test_override_elf_only_variant.py
 tests/test_override_graph.py
 tests/test_ownership_entry_points.py
 tests/test_ownership_relations.py
@@ -707,6 +709,7 @@ tests/test_report_sections.py
 tests/test_report_summary.py
 tests/test_reporter.py
 tests/test_reporter_side_facts.py
+tests/test_restrict_depth_generation_drift.py
 tests/test_return_pointee_qualifier_direction.py
 tests/test_review_fixes.py
 tests/test_root_cause_scoped_only_evidence.py
@@ -798,6 +801,7 @@ tests/test_suppress_repeatable.py
 tests/test_suppression.py
 tests/test_suppression_audit_dates_and_boundaries.py
 tests/test_suppression_edge_cases.py
+tests/test_suppression_elf_only_variant.py
 tests/test_suppression_lifecycle.py
 tests/test_suppression_matrix.py
 tests/test_surface.py
@@ -898,6 +902,7 @@ tests/unit/report/test_markdown_cross_source_evolution.py
 tests/unit/report/test_markdown_report_budget.py
 tests/unit/report/test_no_baseline_size_budget.py
 tests/unit/report/test_oneline_breakdown_sums.py
+tests/unit/report/test_outcome_summary.py
 tests/unit/report/test_policy_facts.py
 tests/unit/report/test_policy_facts_boundary.py
 tests/unit/report/test_release_document.py
@@ -921,6 +926,7 @@ tests/unit/report/test_section_notes.py
 tests/unit/storage/test_bundle_facts_generation_drift.py
 tests/unit/storage/test_decode_fast_path.py
 tests/unit/storage/test_dump_provenance_carried.py
+tests/unit/storage/test_dwarf_layout_abi_fact.py
 tests/unit/storage/test_entity_id_domain_bridge.py
 tests/unit/storage/test_generation_drift_notice.py
 tests/unit/storage/test_import_baseline_set.py

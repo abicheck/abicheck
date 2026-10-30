@@ -194,7 +194,6 @@ class SurfaceAcquisitionLedger:
     def acquire(
         self,
         identity: SurfaceAcquisitionIdentity,
-        side: str,
         producer: Callable[[], ReleasePublicSurface],
     ) -> ReleasePublicSurface:
         """The surface for *identity*, acquiring it only on a first miss."""
@@ -400,7 +399,7 @@ def acquire_release_surface(
     # of whichever side acquired it first, and both sides of an ordinary
     # directory comparison pass the identical header request -- see
     # `ReleasePublicSurface.for_side`.
-    return ledger.acquire(identity, side, _produce).for_side(side)
+    return ledger.acquire(identity, _produce).for_side(side)
 
 
 def surface_from_snapshots(

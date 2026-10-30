@@ -45,11 +45,7 @@ from ....cli_options import (
     snapshot_compression_option,
     verbose_option,
 )
-from ....cli_resolve import (
-    _click_notify,
-    _expand_header_inputs,
-    _normalize_binary_input,
-)
+from ....cli_resolve import _click_notify, _expand_header_inputs
 from ....service_compare_evidence import (
     dump_cli_compile_db_filter_scope_error,
     dump_cli_compile_db_path,
@@ -522,9 +518,9 @@ def dump_cmd(
     # input. Raising directly here keeps dry-run and the real run on the
     # exact same code path for this check, not just the same message. Uses
     # the pure, side-effect-free binary_utils.normalize_binary_input (no
-    # linker-script "Note:" echo) rather than _normalize_binary_input,
+    # linker-script "Note:" echo) rather than follow_linker_script,
     # matching dry-run's own "cheap, read-only resolution only" contract;
-    # the real path below still calls _normalize_binary_input itself for
+    # the real path below still calls follow_linker_script itself for
     # that echo and the so_path reassignment (a no-op re-validation once
     # this has already passed).
     effective_debug_format = _resolve_and_check_dump_debug_format(
@@ -770,7 +766,9 @@ def dump_cmd(
     # Auto-detect binary format — PE/Mach-O skip the ELF/castxml path. The
     # conventional ``libfoo.so`` dev symlink is often a GNU ld linker script;
     # follow it to the real shared library before dispatching.
-    so_path, binary_fmt = _normalize_binary_input(so_path)
+    from ....workflows.extraction import follow_linker_script
+
+    so_path, binary_fmt = follow_linker_script(so_path, _click_notify)
     debug_format_error = check_dump_debug_format_error(
         effective_debug_format, binary_fmt
     )

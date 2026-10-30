@@ -724,7 +724,7 @@ def project_history_cmd(
 
     from .frontends.cli.options.params import _load_suppression_and_policy
 
-    _, policy_file = _load_suppression_and_policy(None, policy, policy_file_path)
+    _, policy_file = _load_suppression_and_policy(None, policy_file_path)
     try:
         result = run_history_request(
             [str(p) for p in snapshots],

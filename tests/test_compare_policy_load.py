@@ -132,7 +132,7 @@ class TestLoadSuppressionAndPolicy:
         pf.write_text("base_policy: strict_abi\noverrides:\n  func_removed: ignore\n")
         with caplog.at_level(logging.WARNING, logger="abicheck.service"):
             with dedup_policy_override_warnings():
-                _load_suppression_and_policy(None, "strict_abi", pf)  # click.echo
+                _load_suppression_and_policy(None, pf)  # click.echo
                 load_suppression_and_policy(None, policy_file_path=pf)  # logger
                 load_suppression_and_policy(None, policy_file_path=pf)  # logger
         # The CLI-level loader's warning is the first one seen in the shared

@@ -88,7 +88,7 @@ class FilterReservedFieldRenames:
     # surviving finding.
     dropped_finding_disposition = Disposition.NON_GATING
 
-    def run(self, changes: list[Change], ctx: PipelineContext) -> list[Change]:
+    def run(self, changes: list[Change], ctx: PipelineContext) -> list[Change]:  # noqa: ARG002 -- post-processing pipeline step run(changes, ctx) signature
         from .diff_filtering import _filter_reserved_field_renames
 
         return _filter_reserved_field_renames(changes)
@@ -259,7 +259,7 @@ class AnnotateLayoutUnverifiableCoveredByVtableChanged:
 
     name = "annotate_layout_unverifiable_covered_by_vtable_changed"
 
-    def run(self, changes: list[Change], ctx: PipelineContext) -> list[Change]:
+    def run(self, changes: list[Change], ctx: PipelineContext) -> list[Change]:  # noqa: ARG002 -- post-processing pipeline step run(changes, ctx) signature
         from .model.change_catalog.kinds import ChangeKind
 
         covered_types = {
@@ -705,7 +705,7 @@ class ClearOrphanedVtableGapCorrelation:
 
     name = "clear_orphaned_vtable_gap_correlation"
 
-    def run(self, changes: list[Change], ctx: PipelineContext) -> list[Change]:
+    def run(self, changes: list[Change], ctx: PipelineContext) -> list[Change]:  # noqa: ARG002 -- post-processing pipeline step run(changes, ctx) signature
         import dataclasses
 
         from .model.change_catalog.kinds import ChangeKind

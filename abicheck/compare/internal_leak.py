@@ -164,7 +164,6 @@ def _build_leak_change(
     tname: str,
     triggers: list[Change],
     paths: list[list[str]],
-    sample_snap: AbiSnapshot,
     embedded_by_value: bool,
 ) -> Change:
     """Build a single ``INTERNAL_TYPE_LEAKS_VIA_PUBLIC_API`` Change entry."""
@@ -302,11 +301,7 @@ def detect_internal_leaks(
             )
         ):
             continue
-        out.append(
-            _build_leak_change(
-                tname, triggers, paths, old if old_pl else new, value_prop
-            )
-        )
+        out.append(_build_leak_change(tname, triggers, paths, value_prop))
 
     return out
 

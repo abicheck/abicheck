@@ -381,7 +381,6 @@ def run_compare(
             diagnostic_comparison=diagnostic_comparison,
             include_labels=include_labels,
             use_cases_manifest=use_cases_manifest,
-            suppress=suppress,
             budget=budget,
             pdb_path=pdb_path,
         )
@@ -817,12 +816,9 @@ def run_compare(
         # classification already recorded ADR-064's exit-7 axis.
         click.echo(f"error: {outcome.abi3_failure}", err=True)
     _report_compare_result(
-        ctx,
         outcome.result,
         outcome.old,
         outcome.new,
-        old_input=outcome.old_input,
-        new_input=outcome.new_input,
         resolved_cfg=outcome.resolved_config,
         evaluation_config=outcome.evaluation_config,
         report_severity=outcome.report_severity,

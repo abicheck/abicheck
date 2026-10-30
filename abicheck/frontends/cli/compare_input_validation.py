@@ -72,5 +72,5 @@ def classify_and_reject_operands(old_input: Path, new_input: Path) -> tuple[str,
     old_kind = classify_compare_operand(old_input)
     new_kind = classify_compare_operand(new_input)
     if old_kind == "app" or new_kind == "app":
-        _reject_application_operand(old_input, new_input, old_kind, new_kind)
+        _reject_application_operand(old_input, new_input, old_kind)
     return old_kind, new_kind

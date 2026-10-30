@@ -115,7 +115,7 @@ if TYPE_CHECKING:
 __all__ = ["function_identity_index"]
 
 
-def function_identity_index(
+def function_identity_index(  # noqa: ARG001 -- same (selected, snapshot) call shape as the compare.typedefs/constants per-side selectors
     functions: Mapping[str, Function], snapshot: AbiSnapshot
 ) -> SymbolIdentityIndex[Function]:
     """``diff_symbols._diff_functions``'s entry point for the function-family

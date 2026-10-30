@@ -75,7 +75,6 @@ def demote_cross_generation_drift(
     changes = demote_generation_spelling_drift(
         changes,
         old,
-        new,
         old_generation,
         new_generation,
         extent_shift=pending_extent_shift(

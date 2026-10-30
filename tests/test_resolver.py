@@ -205,7 +205,6 @@ class TestRpathRunpathSemantics:
         )
 
         search = _build_search_order(
-            soname="libbar.so",
             requester_node=node,
             requester_dir=Path("/app/lib"),
             propagated_rpaths=[],
@@ -236,7 +235,6 @@ class TestRpathRunpathSemantics:
         )
 
         search = _build_search_order(
-            soname="libbar.so",
             requester_node=node,
             requester_dir=Path("/app/lib"),
             propagated_rpaths=[],

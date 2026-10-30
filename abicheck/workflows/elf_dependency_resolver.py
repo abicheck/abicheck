@@ -195,7 +195,6 @@ def resolve_dependencies(
         )
 
         search = _build_search_order(
-            soname=soname,
             requester_node=requester_node,
             requester_dir=requester_dir,
             propagated_rpaths=propagated_rpaths.get(requester_path or "", []),
@@ -229,7 +228,6 @@ def resolve_dependencies(
             requester_path,
             graph,
             queue,
-            visited_sonames,
             propagated_rpaths,
             prefix,
             platform_token,
@@ -248,7 +246,6 @@ def _register_resolved_dso(
     requester_path: str | None,
     graph: DependencyGraph,
     queue: deque[tuple[str, str | None, int]],
-    visited_sonames: set[str],
     propagated_rpaths: dict[str, list[str]],
     prefix: str,
     platform_token: str,
@@ -353,7 +350,6 @@ def _seed_root(
 
 
 def _build_search_order(
-    soname: str,
     requester_node: ResolvedDSO | None,
     requester_dir: Path,
     propagated_rpaths: list[str],

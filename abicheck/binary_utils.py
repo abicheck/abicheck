@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import re
 import struct
+from collections.abc import Callable
 from functools import partial
 from pathlib import Path
 
@@ -155,6 +156,47 @@ def resolve_linker_script_chain(path: Path) -> Path:
             return current
         current = target
     return current
+
+
+def linker_script_target(path: Path) -> Path | None:
+    """The other file a resolvable GNU ld linker script at *path* names.
+
+    ``None`` when *path* is not a linker script, names nothing that exists,
+    or names *path* itself.
+    """
+    target, is_ld = resolve_linker_script(path)
+    if is_ld and target is not None and target.resolve() != path.resolve():
+        return target
+    return None
+
+
+def linker_script_note(path: Path, target: Path) -> str:
+    """The one-line note every front end prints when it follows a script."""
+    return (
+        f"Note: '{path}' is a GNU ld linker script; following its "
+        f"INPUT()/GROUP() directive to '{target}'."
+    )
+
+
+def follow_linker_script(
+    path: Path, notify: Callable[[str], None]
+) -> tuple[Path, str | None]:
+    """*path* and its binary format, following a resolvable GNU ld linker script.
+
+    When *path* is a script naming a real shared library, that library and
+    *its* format are returned and *notify* receives
+    :func:`linker_script_note`, so format detection, metadata and dependency
+    analysis read the DSO rather than the text script. The one owner of this
+    step for the single-pair session, each release member and ``dump``.
+    """
+    fmt = detect_binary_format(path)
+    if fmt is not None:
+        return path, fmt
+    target = linker_script_target(path)
+    if target is None:
+        return path, fmt
+    notify(linker_script_note(path, target))
+    return target, detect_binary_format(target)
 
 
 def normalize_binary_input(path: Path) -> tuple[Path, str | None]:

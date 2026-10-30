@@ -253,7 +253,6 @@ def _request_from_kwargs(
         policy=kwargs["policy"],
         load_suppression_and_policy=lambda: _load_suppression_and_policy(
             kwargs.get("suppress"),
-            kwargs["policy"],
             kwargs.get("policy_file_path"),
         ),
         warn=_warn,

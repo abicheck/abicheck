@@ -296,7 +296,7 @@ def build_raw_export_indexes(snap: AbiSnapshot) -> tuple[RawExportIndex, ...]:
 
 
 def default_versioned_names(
-    index: RawExportIndex, *, normalize_macho: bool = True
+    index: RawExportIndex,
 ) -> frozenset[str]:
     """The "is this symbol a real, unversioned export" projection.
 
@@ -312,12 +312,8 @@ def default_versioned_names(
     trie/symtab (see :func:`build_raw_export_index_from_macho`'s own
     docstring), so a real Itanium C++ export already arrives as the pure
     ``"_Z3fooi"`` spelling matching ``Function.mangled``, and a plain-C one
-    as the bare ``"foo"``. ``normalize_macho`` is now a **no-op**, kept only
-    for source compatibility with existing callers -- it used to strip a
-    SECOND time, to compensate for `Function.mangled` itself once being
-    *doubly*-stripped by a since-fixed bug (PR #1140 follow-up); re-adding
-    that second strip today would corrupt every Mach-O C++ export by eating
-    its own ``"_Z"`` prefix's leading underscore.
+    as the bare ``"foo"``. No second strip is applied: that would corrupt
+    every Mach-O C++ export by eating its ``"_Z"`` prefix's leading underscore.
 
     Formerly ``policy.depth_projection._exported_symbol_names`` /
     ``buildsource.cross_source_checks_base._exported_symbol_names``.
@@ -338,7 +334,7 @@ def linked_export_names(index: RawExportIndex) -> frozenset[str]:
     ``buildsource.cross_source_checks_base._linked_export_symbols``'s own historical
     name and call sites unchanged.
     """
-    return default_versioned_names(index, normalize_macho=False)
+    return default_versioned_names(index)
 
 
 def named_pe_exports(index: RawExportIndex) -> frozenset[str]:
