@@ -272,6 +272,37 @@ def test_generate_and_check_share_one_trace(
     assert "pytest -n 3" in gen.method_description("3")
 
 
+@pytest.mark.parametrize(
+    ("committed", "reaching"),
+    [
+        ([], ["tests/test_a.py"]),
+        (["tests/test_a.py"], []),
+        (
+            ["tests/test_b.py", "tests/test_c.py"],
+            ["tests/test_a.py", "tests/test_c.py"],
+        ),
+        (["tests/test_z.py"], ["tests/unit/test_y.py", "tests/test_x.py"]),
+    ],
+)
+def test_union_keeps_every_committed_file_and_adds_every_reaching_one(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    committed: list[str],
+    reaching: list[str],
+) -> None:
+    """``--union`` (what a full mutation run measures with) never drops a
+    committed file and never misses a reaching one, whatever the overlap."""
+    sel = tmp_path / "sel.txt"
+    sel.write_text("".join(f"{c}\n" for c in committed))
+    monkeypatch.setattr(gen, "trace", lambda workers: [f"{r}::t" for r in reaching])
+    monkeypatch.setattr(gen, "SELECTION_FILE", sel)
+    monkeypatch.setattr(gen, "REPO_ROOT", tmp_path)
+    assert gen.main(["--union"]) == 0
+    written = sel.read_text().splitlines()
+    assert written == sorted(set(committed) | set(reaching))
+    assert gen.main(["--check"]) == 0
+
+
 # --------------------------------------------------------------------------
 # Generator
 # --------------------------------------------------------------------------
