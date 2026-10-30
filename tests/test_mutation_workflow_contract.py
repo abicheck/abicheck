@@ -692,42 +692,11 @@ _ACCEPTED_KILL_LOSS = {
             "abicheck.diff_symbols",
             "abicheck.diff_types",
             "abicheck.diff_vtable_layout",
-            "abicheck.compare.finding_identity.change_identity",
-            "abicheck.compare.finding_identity.change_kinds",
-            "abicheck.compare.finding_identity.mangled",
-            "abicheck.compare.finding_identity.report_ids",
-            "abicheck.compare.finding_identity.declaration_identity",
-            "abicheck.idioms",
             "abicheck.model.evidence_status",
-            "abicheck.name_classification",
-            "abicheck.pattern_verdicts",
             "abicheck.policy.classification",
-            "abicheck.policy.selectors",
-            "abicheck.policy.selectors_namespace_glob",
             # The single-pair compare session's import set reaches the
             # snapshot loader too (workflows/compare/session.py).
-            "abicheck.snapshot_io",
-            "abicheck.storage.snapshot_encode",
-            "abicheck.storage.snapshot_schema_versions",
-            "abicheck.policy.suppression.rules",
-            "abicheck.surface_graph",
         }
-    ),
-    # tracemalloc peak assertions: under mutmut the trampoline's own
-    # bookkeeping is traced too (a 1.1 GB first-call peak aborted the stats
-    # run), so it measures the instrumentation, not snapshot_io. The
-    # behavioural snapshot_io tests stay in the run. Surfaced by PR #1356.
-    # It also reaches name_classification: importing any abicheck module now
-    # initializes `abicheck.model` first (abicheck/__init__.py, the
-    # first-import-order fix), and `model` imports name_classification.
-    "tests/test_snapshot_read_allocation.py": frozenset(
-        {"abicheck.name_classification", "abicheck.snapshot_io"}
-    ),
-    # Re-entrant `abicheck` subprocess from a scratch cwd (see its pyproject
-    # --ignore comment); reaches name_classification only through the
-    # package root's `model` initialization (abicheck/__init__.py).
-    "tests/test_publish_baseline_upload_step.py": frozenset(
-        {"abicheck.name_classification"}
     ),
     # Its producer/consumer (subprocess-spawning) tests run `python -m abicheck.frontends.action.cli`
     # as a real subprocess, which re-enters the mutated tree with no mutmut
@@ -741,27 +710,8 @@ _ACCEPTED_KILL_LOSS = {
             "abicheck.diff_symbols",
             "abicheck.diff_types",
             "abicheck.diff_vtable_layout",
-            "abicheck.compare.finding_identity.change_identity",
-            "abicheck.compare.finding_identity.change_kinds",
-            "abicheck.compare.finding_identity.mangled",
-            "abicheck.compare.finding_identity.report_ids",
-            "abicheck.compare.finding_identity.declaration_identity",
-            "abicheck.idioms",
-            "abicheck.name_classification",
-            "abicheck.pattern_verdicts",
             "abicheck.policy.classification",
             "abicheck.model.evidence_status",
-            "abicheck.policy.selectors",
-            "abicheck.policy.selectors_namespace_glob",
-            "abicheck.serialization",
-            "abicheck.snapshot_io",
-            "abicheck.storage.snapshot_codec",
-            "abicheck.storage.snapshot_decode_declarations",
-            "abicheck.storage.snapshot_encode",
-            "abicheck.storage.snapshot_reliability_flags",
-            "abicheck.storage.snapshot_schema_versions",
-            "abicheck.policy.suppression.rules",
-            "abicheck.surface_graph",
         }
     ),
     # Drives `actions/check-target/run.sh`, which re-enters the mutated tree
@@ -776,69 +726,12 @@ _ACCEPTED_KILL_LOSS = {
     "tests/test_action_collect_facts.py": frozenset(
         {
             "abicheck.model.evidence_status",
-            "abicheck.name_classification",
         }
     ),
     "tests/test_action_check_target.py": frozenset(
         {
             "abicheck.policy.classification",
             "abicheck.model.evidence_status",
-            "abicheck.compare.finding_identity.change_identity",
-            "abicheck.compare.finding_identity.change_kinds",
-            "abicheck.compare.finding_identity.mangled",
-            "abicheck.compare.finding_identity.report_ids",
-            "abicheck.compare.finding_identity.declaration_identity",
-            "abicheck.name_classification",
-            "abicheck.policy.selectors",
-            "abicheck.policy.selectors_namespace_glob",
-        }
-    ),
-    # Drives `action/run.sh`, which execs the real `abicheck` console script
-    # from a scratch `cwd` -- the same subprocess re-entry as the two entries
-    # above, just discovered later (G38 bundle-facts PR, the first to trigger
-    # this lane against a serialization.py change with this test present).
-    # Narrowed (ADR-061 gap E, BundleFacts value/persistence/orchestration
-    # split): `serialization.py`'s own `BundleFacts` reference is now a
-    # TYPE_CHECKING-only import of the lean `model.bundle_facts` module
-    # (whose own imports are just `bundle_manifest`/`model.snapshot`), not
-    # the old flat `bundle_facts.py`, whose function-scoped imports of
-    # `bundle_analysis.py`/`bundle.py`/etc. used to drag in the
-    # checker_policy/diff_symbols/compare.finding_identity/policy.selectors chain
-    # transitively. `name_classification`/`serialization`/`snapshot_io`
-    # were already reached independently of that chain and still are.
-    # Widened (ADR-061 gap E closure package 6): `serialization.py`'s real
-    # codec moved into `storage/snapshot_codec.py` and four siblings, all
-    # newly `only_mutate`-scoped, and `serialization.py` itself still
-    # imports every one of them at module scope -- so this file's existing
-    # `abicheck.serialization` reachability now transitively reaches all
-    # five too.
-    "tests/test_action_run_sh_annotate_renderer.py": frozenset(
-        {
-            "abicheck.name_classification",
-            "abicheck.serialization",
-            "abicheck.snapshot_io",
-            "abicheck.storage.snapshot_codec",
-            "abicheck.storage.snapshot_decode_declarations",
-            "abicheck.storage.snapshot_encode",
-            "abicheck.storage.snapshot_reliability_flags",
-            "abicheck.storage.snapshot_schema_versions",
-        }
-    ),
-    # Same subprocess re-entry as the entry immediately above, tripped by
-    # this same G38 bundle-facts PR once it touched a second mutation-scoped
-    # module (bundle_signature_evidence.py). Narrowed the same way and for
-    # the same reason as that entry (ADR-061 gap E); widened the same way as
-    # the entry immediately above for gap E closure package 6.
-    "tests/test_action_run_sh_compare_pr_json_write.py": frozenset(
-        {
-            "abicheck.name_classification",
-            "abicheck.serialization",
-            "abicheck.snapshot_io",
-            "abicheck.storage.snapshot_codec",
-            "abicheck.storage.snapshot_decode_declarations",
-            "abicheck.storage.snapshot_encode",
-            "abicheck.storage.snapshot_reliability_flags",
-            "abicheck.storage.snapshot_schema_versions",
         }
     ),
     # The same subprocess re-entry once more, and the first instance reached
@@ -865,24 +758,8 @@ _ACCEPTED_KILL_LOSS = {
     "tests/test_reusable_workflows_project_evidence.py": frozenset(
         {
             "abicheck.compare.finding_dedup",
-            "abicheck.policy.suppression.rules",
             "abicheck.policy.classification",
             "abicheck.model.evidence_status",
-            "abicheck.compare.finding_identity.change_identity",
-            "abicheck.compare.finding_identity.change_kinds",
-            "abicheck.compare.finding_identity.mangled",
-            "abicheck.compare.finding_identity.report_ids",
-            "abicheck.compare.finding_identity.declaration_identity",
-            "abicheck.name_classification",
-            "abicheck.policy.selectors",
-            "abicheck.policy.selectors_namespace_glob",
-            "abicheck.serialization",
-            "abicheck.snapshot_io",
-            "abicheck.storage.snapshot_codec",
-            "abicheck.storage.snapshot_decode_declarations",
-            "abicheck.storage.snapshot_encode",
-            "abicheck.storage.snapshot_reliability_flags",
-            "abicheck.storage.snapshot_schema_versions",
         }
     ),
 }
