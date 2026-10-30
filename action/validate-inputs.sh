@@ -306,7 +306,7 @@ case "$MODE" in
       # comment previously rejected every audit-only invocation, since
       # INPUT_OLD_VERSION is never actually empty).
       if [[ -n "${INPUT_OLD_VERSION:-}" && "${INPUT_OLD_VERSION}" != "old" ]]; then
-        _fail "mode: compare without a baseline (old-library/abi-baseline both omitted) does not support old-version -- there is no OLD side to label, and the CLI rejects an explicitly OLD-scoped --version outright rather than silently dropping it (abicheck/frontends/cli/commands/no_baseline_rulings.py's _reject_old_sided_inputs). Set old-library (or abi-baseline) to run a real two-sided comparison, which supports old-version, or drop old-version for this audit-only run."
+        _fail "mode: compare without a baseline (old-library/abi-baseline both omitted) does not support old-version -- there is no OLD side to label, and the CLI rejects an explicitly OLD-scoped --label outright rather than silently dropping it (abicheck/frontends/cli/commands/no_baseline_rulings.py's _reject_old_sided_inputs). Set old-library (or abi-baseline) to run a real two-sided comparison, which supports old-version, or drop old-version for this audit-only run."
       fi
     fi
     # compare's full renderable-format set (behind `-o FORMAT=DESTINATION`)

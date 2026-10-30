@@ -290,7 +290,7 @@ def fresh_dump(tmp_path_factory: pytest.TempPathFactory) -> Path:
             str(lib),
             "-H",
             str(SOURCES / "corpus.h"),
-            "--version",
+            "--label",
             "1",
             "-o",
             str(out),

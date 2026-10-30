@@ -374,14 +374,13 @@ add_sided_flag() {
 # whitespace-separated word when routed through add_sided_flag's word-split.
 # Whether `extra-args` already names a version label. The Action's own
 # `old-version`/`new-version` defaults ('old'/'new') would otherwise be forwarded
-# as `--label` next to it, and the CLI refuses the retired `--version` beside
-# `--label` for the same option (exit 64). A label the user passed through
-# extra-args wins instead, as the last value does on the CLI.
+# as `--label` next to it and override the user's own label. A label the user
+# passed through extra-args wins instead, as the last value does on the CLI.
 _extra_args_names_label() {
   local _tok
   # shellcheck disable=SC2086  # word-split exactly as `CMD+=($INPUT_EXTRA_ARGS)` does.
   for _tok in ${INPUT_EXTRA_ARGS:-}; do
-    case "$_tok" in --label|--label=*|--version|--version=*) return 0 ;; esac
+    case "$_tok" in --label|--label=*) return 0 ;; esac
   done
   return 1
 }
@@ -2141,8 +2140,8 @@ for param in node.params:
 # as safe).
 #
 # **Why an opaque fallback is not safe, concretely.** Treating every token as
-# opaque is not merely "under-recognition". `extra-args: --version --dry-run`
-# is argv Click accepts by consuming `--dry-run` as `--version`'s own value,
+# opaque is not merely "under-recognition". `extra-args: --label --dry-run`
+# is argv Click accepts by consuming `--dry-run` as `--label`'s own value,
 # leaving `dry_run=False` and running a perfectly normal comparison (verified
 # directly against the installed CLI). An opaque tokenizer instead reports a
 # real `--dry-run` flag -- so `_extra_args_has_dry_run_flag` answers true,
@@ -2163,7 +2162,7 @@ for param in node.params:
 _require_cli_value_options_or_fail() {
   [[ "${_CLI_VALUE_OPTIONS_DERIVED:-false}" == "true" ]] && return 0
   [[ -z "${INPUT_EXTRA_ARGS:-}" ]] && return 0
-  _error_annotation "extra-args is set, but this step cannot determine which abicheck CLI options take a value, so it cannot tell a real flag in extra-args from another option's literal value (resolved interpreter: '${_PY_BIN:-<none found on PATH>}'; it must be able to import abicheck). Guessing is not safe: treating every token as opaque would misread 'extra-args: --version --dry-run' -- which the CLI accepts as --version's own value -- as a real --dry-run, then skip this step's output/sidecar injection while a full comparison ran, silently producing no report. Install abicheck into the interpreter that 'command -v python3' resolves on this runner, or remove extra-args." >&2
+  _error_annotation "extra-args is set, but this step cannot determine which abicheck CLI options take a value, so it cannot tell a real flag in extra-args from another option's literal value (resolved interpreter: '${_PY_BIN:-<none found on PATH>}'; it must be able to import abicheck). Guessing is not safe: treating every token as opaque would misread 'extra-args: --label --dry-run' -- which the CLI accepts as --label's own value -- as a real --dry-run, then skip this step's output/sidecar injection while a full comparison ran, silently producing no report. Install abicheck into the interpreter that 'command -v python3' resolves on this runner, or remove extra-args." >&2
   exit 1
 }
 
@@ -3857,7 +3856,7 @@ elif [[ "$MODE" == "compare" ]]; then
     # inert here, not a usage error, same as validate-inputs.sh's mirror
     # check (Codex review, PR #1223, round 11).
     if [[ -n "${INPUT_OLD_VERSION:-}" && "${INPUT_OLD_VERSION}" != "old" ]]; then
-      echo "::error::mode: compare without a baseline (old-library/abi-baseline both omitted) does not support old-version -- there is no OLD side to label, and the CLI rejects an explicitly OLD-scoped --version outright rather than silently dropping it (abicheck/frontends/cli/commands/no_baseline_rulings.py's _reject_old_sided_inputs). Set old-library (or abi-baseline) to run a real two-sided comparison, which supports old-version, or drop old-version for this audit-only run."
+      echo "::error::mode: compare without a baseline (old-library/abi-baseline both omitted) does not support old-version -- there is no OLD side to label, and the CLI rejects an explicitly OLD-scoped --label outright rather than silently dropping it (abicheck/frontends/cli/commands/no_baseline_rulings.py's _reject_old_sided_inputs). Set old-library (or abi-baseline) to run a real two-sided comparison, which supports old-version, or drop old-version for this audit-only run."
       exit 1
     fi
   fi

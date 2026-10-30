@@ -2,8 +2,9 @@
 
 **Status:** Phase 0 done (2026-10-30); Phase 2 CLI and typed-API half for `compare` done, the rest of Phase 2 open; Phases 1 and 3–7 not started. Implements
 [ADR-091](../adr/091-one-option-vocabulary.md). Each phase is one PR, ordered
-so that the parity gate lands before any rename and every rename lands with
-its alias.
+so that the parity gate lands before any rename. Every rename lands with its
+migration row and no alias: the 2026-10-30 policy (ADR-091 D7 amendment)
+removes the old spelling in the same change (Action inputs become tombstones).
 
 **Problem.** The same option is spelled and behaves differently on the CLI,
 in `.abicheck.yml`, in `action.yml` and in the typed Python API (ADR-091's
@@ -173,9 +174,9 @@ The Action half (`set:` input, `action/run.sh` `compile:` overlay) is not starte
 | R11 | Action `output` list of `FMT=PATH` | `action.yml`, `action/run.sh`, `action/validate-inputs.sh` |
 | R15 | Action `fail-on-*` forwarded as `--set severity.*`, shell gate code removed | `action/run.sh` (~`5268`, `5542`, `5593`) |
 
-Each keeps the old spelling as a deprecated alias (D7). Size: M.
+Each lands with its old spelling removed (D7 amendment: no alias). Size: M.
 
-## Phase 4 — Renames with aliases (D5)
+## Phase 4 — Renames (D5; no aliases, see the D7 amendment)
 
 One PR per surface keeps review small:
 
@@ -205,19 +206,11 @@ spellings once deleted in Phase 6. Size: M each.
 **Result (CLI part, ADR-091 D5 R1/R12/R16).** Done: `compare`, `dump` and
 `project history` take `--label` (dest unchanged, so the command bodies and
 rulings keep their parameter names); `compare --abi3-floor`; `deps compare
---root [old=|new=]PATH` (the two old flags became two hidden aliases that
-translate per side and may be combined with each other); `deps tree --root`.
-The old spellings are hidden click options, each printing click's own
-`DeprecationWarning` naming its replacement, and passing an old and a new
-spelling for the same option is a usage error (exit 64). The mechanism is
-`abicheck/frontends/cli/options/renamed.py`; the aliases are listed under
-`deprecated_aliases:` in `architecture/option-vocabulary.yaml`, and the parity
-gate checks that each is hidden and replaced by a visible claimed option. The
-in-repo users (Action shell and metadata, rulings, help panels, docs, examples,
-skills, tests) moved to the new spellings; the Action's own inputs are
-unchanged until its part of Phase 4. R21 (`--include`, `--used-by-manifest`,
-the `--bundle-facts-*` family) is not in this change; R19 is Python-only. Migration: `docs/start/upgrading-to-0.7.md`. Removal of the aliases is
-Phase 6.
+--root [old=|new=]PATH`; `deps tree --root`. The retired spellings were
+removed in the same change (see Phase 6): `--version`, `--abi3`, `--old-root`,
+`--new-root` and `--sysroot` now fail as unknown options (exit 64). R21 (`--include`,
+`--used-by-manifest`, the `--bundle-facts-*` family) is not in this change; R19
+is Python-only. Migration: `docs/start/upgrading-to-0.7.md`.
 
 ## Phase 5 — Surface budget (D4)
 
@@ -234,13 +227,30 @@ Phase 6.
 
 Size: M. Changelog: Changed.
 
-## Phase 6 — Remove aliases (next minor release)
+## Phase 6 — Remove aliases (collapsed into each rename, 2026-10-30)
 
-Retire every deprecated spelling from Phases 3–4 per ADR-091 D7: delete
-CLI/Python/config spellings, and turn each old Action input into a RETIRED
-tombstone (it joins the registry's `retired` tier and the tombstone contract
-test). Add them to `_RETIRED_SURFACES`, empty the registry's `exceptions:` list, and mark
-ADR-091 implemented in `adr/index.md` and `adr-surface-registry.yaml`.
+The 2026-10-30 policy (ADR-091 D7 amendment) withdraws the one-release
+window, so there is no later release that deletes the aliases. Each rename
+deletes its old spelling in the same change: CLI and Python outright (exit 64
+as an unknown option, or an unexpected-keyword `TypeError`), config as an
+unknown key under the strict schema, and each Action input as a RETIRED
+tombstone that fails the run and names its replacement (it joins the
+registry's `retired` tier and `tests/test_action_retired_inputs_contract.py`).
+Each removed spelling is added to `scripts/retired_surfaces.py` and to the
+newest `docs/start/upgrading-*.md` table.
+
+**Result (2026-10-30, CLI part).** `abicheck/frontends/cli/options/renamed.py`
+is deleted, with every CLI alias registration (`label.py`, `cli_options.py`'s
+`--abi3`, `cli_stack.py`'s `--sysroot`/`--old-root`/`--new-root`). The
+`deprecated_aliases:` section of `architecture/option-vocabulary.yaml` and the
+gate test that checked it are removed; the gate's inventory is regenerated
+without the hidden rows. `scripts/retired_surfaces.py` names the four retired
+CLI spellings, and `docs/start/upgrading-to-0.7.md` now says "removed" in
+place of "deprecated". In-repo callers (tests, benchmark and corpus scripts,
+skills-src validation harnesses, the Action shell's extra-args checks and
+messages, the test-action workflow's flag-shaped extra-args case) moved to
+`--label` or `--root`. Still open: the Python keyword and config key halves of
+Phase 4, and the Action tombstones, each land with their own renames.
 
 ## Phase 7 — Generate the references from the registry (optional)
 
@@ -251,12 +261,13 @@ Python".
 
 ## Risks
 
-- **Downstream workflows** using renamed Action inputs: mitigated by the
-  one-release alias and `::warning::`, then a tombstone that fails loudly
-  rather than a silent drop; pinned tags are unaffected.
+- **Downstream workflows** using renamed Action inputs: there is no alias
+  window (D7 amendment); the old input becomes a tombstone that fails the run
+  and names its replacement, rather than a silent drop. Pinned tags are
+  unaffected.
 - **R1 is CLI-breaking** for `compare/dump/project history --version`: the
-  alias window, the `docs/start/upgrading-*.md` row and the exit-64 failure
-  after removal are the migration; `abicheck --version` is untouched.
+  `docs/start/upgrading-*.md` row and the exit-64 failure are the migration
+  (no alias window); `abicheck --version` is untouched.
 - **R11 changes report paths:** a bare `format: sarif` must keep writing the
   file it writes today. Phase 3 pins the current default path per format with
   a test before folding `output-file` into `output`.

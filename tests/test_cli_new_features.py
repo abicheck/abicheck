@@ -90,7 +90,7 @@ class TestDumpVerbose:
                 str(so_path),
                 "-H",
                 str(header),
-                "--version",
+                "--label",
                 "1.0",
                 "-o",
                 str(out),

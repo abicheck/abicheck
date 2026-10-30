@@ -10,13 +10,14 @@ generated: false
 
 # Upgrading from 0.6 to 0.7
 
-This page is the migration for the 0.7 option-vocabulary renames.
-The same concept had two spellings on the command line; 0.7 keeps one. Each old spelling still
-works for one release, so existing scripts keep running while you change them.
+This page is the migration for the 0.7 option-vocabulary renames. The same
+concept had two spellings on the command line; 0.7 keeps one, and the old
+spelling is removed. A script that still uses a retired spelling stops with
+exit 64 and a `No such option` error naming the flag, so it fails loudly
+rather than running with a different meaning.
 
-**Do this first:** run your existing command lines once against 0.7. A
-retired spelling still runs, but prints a `DeprecationWarning` on stderr that
-names its replacement. That warning is the list of what to change.
+**Do this first:** run your existing command lines against 0.7. Each failure
+names the retired flag; the table below gives its replacement.
 
 ## CLI renames
 
@@ -36,18 +37,13 @@ names its replacement. That warning is the list of what to change.
 `--header`. The two old flags map one-to-one onto it, and you may combine
 `--root old=` with `--root new=`.
 
-## What the old spellings do
+## What a retired spelling does
 
-- **They still work** for the 0.7 release, with the same meaning.
-- **They warn once** per invocation, on stderr, naming the new spelling, for
-  example: `DeprecationWarning: The option '--version' is deprecated. Use --label instead.`
-- **They are hidden** from `--help`. `--help-all` does not list them either.
-- **Passing both spellings for the same thing is a usage error (exit 64)**,
-  for example `--label 1.0 --version 2.0`. Pick one.
-
-The old spellings are removed in the next minor release. After that they fail
-as unknown options (exit 64), so a script that still uses one stops loudly
-rather than running with a different meaning.
+- **It is an unknown option.** The command exits 64 before it analyses
+  anything, and the error names the flag, for example
+  `Error: No such option '--version'`.
+- **Nothing runs with a different meaning.** The retired spelling is not
+  kept as a hidden alias, so there is no warning period to watch for.
 
 ## Action and typed API
 

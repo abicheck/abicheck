@@ -1173,6 +1173,35 @@ RETIRED_SURFACES: tuple[tuple[str, tuple[str, ...], frozenset[str]], ...] = (
         ),
         frozenset({"contribute/known-gaps.md"}),
     ),
+    (
+        "compare/dump/project history --version (the per-side version label,"
+        " renamed --label by ADR-091 D5 R1 and removed outright by its D7"
+        " amendment; the root `abicheck --version` is the tool version and"
+        " is unaffected)",
+        (
+            "compare --version",
+            "dump --version",
+            "project history --version",
+        ),
+        frozenset({"start/upgrading-to-0.7.md"}),
+    ),
+    (
+        "compare --abi3 (the stable-ABI floor, renamed --abi3-floor by"
+        " ADR-091 D5 R12 and removed outright by its D7 amendment)",
+        ("compare --abi3 ",),
+        frozenset({"start/upgrading-to-0.7.md"}),
+    ),
+    (
+        "deps compare --old-root/--new-root and deps tree --sysroot (renamed"
+        " to --root by ADR-091 D5 R16 and removed outright by its D7"
+        " amendment)",
+        (
+            "deps compare --old-root",
+            "deps compare --new-root",
+            "deps tree --sysroot",
+        ),
+        frozenset({"start/upgrading-to-0.7.md"}),
+    ),
 )
 
 

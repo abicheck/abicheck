@@ -122,7 +122,7 @@ def freeze(ref: str) -> int:
                 str(lib),
                 "-H",
                 str(SOURCES / "corpus.h"),
-                "--version",
+                "--label",
                 "1",
                 "-o",
                 str(out),

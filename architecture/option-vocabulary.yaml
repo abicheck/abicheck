@@ -51,25 +51,6 @@ out_of_scope:
   - pattern: actions/verify-source-run:*
     reason: Producer-run verification (ADR-073), no CLI counterpart.
     until: permanent
-deprecated_aliases:
-  # ADR-091 D7: a renamed option's old spelling, hidden and accepted for one
-  # minor release with click's own DeprecationWarning naming `replaces`. Each
-  # is claimed here instead of in a concept, so it is never a second spelling
-  # of a core concept; Phase 6 deletes the entry with the option.
-  - id: compare --version
-    replaces: compare --label
-  - id: dump --version
-    replaces: dump --label
-  - id: project history --version
-    replaces: project history --label
-  - id: compare --abi3
-    replaces: compare --abi3-floor
-  - id: deps compare --old-root
-    replaces: deps compare --root
-  - id: deps compare --new-root
-    replaces: deps compare --root
-  - id: deps tree --sysroot
-    replaces: deps tree --root
 concepts:
   - concept: operands
     tier: core
