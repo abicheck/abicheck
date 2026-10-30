@@ -25,6 +25,7 @@ context: the compile-context adapter and the stored-bundle ``lang`` rule
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -98,11 +99,13 @@ def resolve_dump_compile_context(
     compiler_option_tokens: tuple[str, ...] = (),
     defines: tuple[str, ...] = (),
     config_explicit: bool | None = None,
+    config_overrides: Mapping[str, object] | None = None,
 ) -> tuple[CompileContext, tuple[Path, ...]]:
     """Resolve the L2 compile context for a dump, folding the config compile: block.
 
     Returns ``(compile_context, includes)``. *defines* is ADR-074's
-    ``-D/--define``, folded with ``compile.defines`` by macro name downstream."""
+    ``-D/--define``, folded with ``compile.defines`` by macro name downstream.
+    *config_overrides* is ``dump --set`` (ADR-091 D4)."""
     from ...cli_options import resolve_compile_context
 
     return resolve_compile_context(
@@ -120,6 +123,7 @@ def resolve_dump_compile_context(
         compiler_option_tokens=compiler_option_tokens,
         defines=defines,
         config_explicit=config_explicit,
+        config_overrides=config_overrides,
     )
 
 

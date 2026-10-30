@@ -173,12 +173,12 @@ class TestSetOnAModeWithoutSetFailsTheStep:
             check=False,
         )
 
-    def test_dump_with_an_effective_set_line_fails_and_names_the_input(
+    def test_deps_tree_with_an_effective_set_line_fails_and_names_the_input(
         self, tmp_path: Path
     ) -> None:
-        result = self._validate(tmp_path, "dump", "scope.show_redundant=true\n")
+        result = self._validate(tmp_path, "deps-tree", "scope.show_redundant=true\n")
         assert result.returncode != 0
-        assert "set: applies to mode: compare only" in result.stdout
+        assert "set: applies to mode: compare and dump only" in result.stdout
 
     def test_dump_with_comment_only_set_is_accepted(self, tmp_path: Path) -> None:
         result = self._validate(tmp_path, "dump", "# nothing to apply\n\n")
@@ -188,7 +188,7 @@ class TestSetOnAModeWithoutSetFailsTheStep:
 
 @pytest.mark.skipif(not RUN_SH.is_file(), reason="action/run.sh not found")
 class TestRunShRefusesSetOnAnotherMode:
-    def test_direct_run_sh_dump_with_effective_set_fails_before_forwarding(
+    def test_direct_run_sh_deps_tree_with_effective_set_fails_before_forwarding(
         self, tmp_path: Path
     ) -> None:
         require_bash()
@@ -196,7 +196,7 @@ class TestRunShRefusesSetOnAnotherMode:
         env = _env(
             tmp_path,
             fake_bin,
-            INPUT_MODE="dump",
+            INPUT_MODE="deps-tree",
             INPUT_SET="scope.show_redundant=true\n",
         )
         result = subprocess.run(
@@ -208,5 +208,5 @@ class TestRunShRefusesSetOnAnotherMode:
             check=False,
         )
         assert result.returncode != 0
-        assert "set: applies to mode: compare only" in result.stdout
+        assert "set: applies to mode: compare and dump only" in result.stdout
         assert not captured.exists(), "the CLI must not run when set: is refused"

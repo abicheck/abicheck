@@ -39,7 +39,10 @@ from typing import TYPE_CHECKING, Any
 
 from ...buildsource.build_config_overrides import ConfigOverrideError
 from ...errors import ValidationError
-from ..compile_config import scope_compile_config_env_toggles
+from ..compile_config import (
+    COMPILE_CONTEXT_OVERRIDE_PATHS,
+    scope_compile_config_env_toggles,
+)
 from ..evidence_transport import (
     unsided_debug_packages,
     unsupported_detached_debug_message,
@@ -102,9 +105,10 @@ _DUMP_CLI_ONLY_PATHS: frozenset[str] = frozenset(
 )
 
 #: Every key ``dump --set`` applies.
-DUMP_APPLIED_PATHS: frozenset[str] = frozenset(
-    {path for path, _owner, _field, _attr in DUMP_TYPED_OVERRIDE_CHANNELS}
+DUMP_APPLIED_PATHS: frozenset[str] = (
+    frozenset({path for path, _owner, _field, _attr in DUMP_TYPED_OVERRIDE_CHANNELS})
     | _DUMP_CLI_ONLY_PATHS
+    | COMPILE_CONTEXT_OVERRIDE_PATHS
 )
 
 
