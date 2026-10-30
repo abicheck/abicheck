@@ -47,7 +47,12 @@ names the retired flag; the table below gives its replacement.
 
 ## Action and typed API
 
-The composite GitHub Action forwards these flags itself, so workflows that use
-the Action need no change for this page. The Action's own inputs
-(`old-version`, `new-version`, `sysroot`, `old-root`, `new-root`) are renamed
-in a later step of the same ADR; this page will list them when they are.
+The composite GitHub Action's own inputs (`old-version`, `new-version`,
+`sysroot`, `old-root`, `new-root`) are unchanged in 0.7, so a workflow that sets
+them needs no change for this page.
+
+The `extra-args` input is different: it is passed to the CLI as raw arguments.
+A workflow that passes a retired spelling there, for example
+`extra-args: --version 2.0`, now fails with exit 64. Change it to the new
+spelling (`--label 2.0`). The Action's own inputs are renamed in a later step of
+the same ADR; this page will list them when they are.
