@@ -78,10 +78,20 @@ def _invocations(log: Path) -> list[list[str]]:
     return calls
 
 
-def _compare_argv(log: Path) -> list[str]:
-    """The argv of the one ``compare`` invocation this run made."""
-    matches = [c for c in _invocations(log) if c and c[0] == "compare"]
-    assert len(matches) == 1, f"expected one compare call, got {_invocations(log)}"
+def _compare_argv(log: Path, report: Path) -> list[str]:
+    """The argv of the user's own ``compare`` call, identified by its report.
+
+    On a CI runner, run.sh also injects a second JSON report for the PR
+    comment (``runner_temp/abicheck-pr-json.*``), so counting ``compare`` calls
+    depends on the runner's environment. The user's report path is fixed by
+    ``_compare_env``, so select on it instead.
+    """
+    matches = [
+        c
+        for c in _invocations(log)
+        if c and c[0] == "compare" and f"json={report}" in c
+    ]
+    assert len(matches) == 1, f"expected one user compare call, got {_invocations(log)}"
     return matches[0]
 
 
@@ -103,7 +113,7 @@ def _run_compare(tmp_path: Path, extra: dict[str, str]) -> tuple[dict, Path]:
 def test_policy_name_forwards_as_one_policy_flag(tmp_path: Path) -> None:
     """`policy` takes a built-in profile name: one `--policy NAME`."""
     _, log = _run_compare(tmp_path, {"INPUT_POLICY": "security"})
-    argv = _compare_argv(log)
+    argv = _compare_argv(log, tmp_path / "report.json")
     assert _values_after(argv, "--policy") == ["security"]
 
 
@@ -111,7 +121,7 @@ def test_policy_file_path_forwards_through_the_same_input(tmp_path: Path) -> Non
     """`policy` also takes a policy document path: the same single flag,
     with the path as its value (the retired `policy-file` carried this)."""
     _, log = _run_compare(tmp_path, {"INPUT_POLICY": "policies/strict.yml"})
-    argv = _compare_argv(log)
+    argv = _compare_argv(log, tmp_path / "report.json")
     assert _values_after(argv, "--policy") == ["policies/strict.yml"]
 
 
@@ -121,7 +131,7 @@ def test_old_and_new_labels_forward_as_label_flags(tmp_path: Path) -> None:
     _, log = _run_compare(
         tmp_path, {"INPUT_OLD_LABEL": "1.0", "INPUT_NEW_LABEL": "2.0"}
     )
-    labels = _values_after(_compare_argv(log), "--label")
+    labels = _values_after(_compare_argv(log, tmp_path / "report.json"), "--label")
     assert "old=1.0" in labels
     assert "new=2.0" in labels
 
@@ -130,7 +140,7 @@ def test_old_header_forwards_as_sided_header_flag(tmp_path: Path) -> None:
     """`old-header` is the sided header input the retired `devel-pkg1` now
     folds into; the CLI receives it as `--header old=`."""
     _, log = _run_compare(tmp_path, {"INPUT_OLD_HEADER": "v1.h"})
-    headers = _values_after(_compare_argv(log), "--header")
+    headers = _values_after(_compare_argv(log, tmp_path / "report.json"), "--header")
     assert "old=v1.h" in headers
 
 
