@@ -350,7 +350,7 @@ inputs:
   set:
     description: >
       Config overrides for the internal compare step, one `PATH=VALUE` per
-      line (ADR-091 D4). Each non-blank, non-comment line is forwarded verbatim
+      line. Each non-blank, non-comment line is forwarded verbatim
       as its own `--set`; the CLI validates the keys.
     required: false
     default: ''

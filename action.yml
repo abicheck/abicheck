@@ -876,7 +876,7 @@ inputs:
     required: false
   set:
     description: >
-      Config overrides for this run, one `PATH=VALUE` per line (ADR-091 D4),
+      Config overrides for this run, one `PATH=VALUE` per line,
       for example `scope.show_redundant=true`. Each non-blank line that is not
       a `#` comment is forwarded verbatim as its own `--set PATH=VALUE` to the
       abicheck command, so the CLI validates the keys and values: an unknown
