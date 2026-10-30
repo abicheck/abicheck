@@ -31,7 +31,18 @@ from typing import Any
 import click
 import yaml
 
+from ....workflows.compare_configuration import (
+    CLI_ONLY_OVERRIDE_PATHS,
+    TYPED_OVERRIDE_CHANNELS,
+)
 from ....workflows.extraction import ConfigOverrideError, validate_config_overrides
+
+#: The keys `compare --set` applies: the typed channels plus the CLI-only ones.
+#: Every other key (compile.*, build.*, sources.*, ...) is refused with a usage
+#: error, because its loader does not yet receive the override.
+_COMPARE_APPLIED_PATHS: frozenset[str] = frozenset(
+    {path for path, _field, _attr in TYPED_OVERRIDE_CHANNELS} | CLI_ONLY_OVERRIDE_PATHS
+)
 
 __all__ = ["config_set_option", "parse_set_assignments"]
 
@@ -59,6 +70,12 @@ def parse_set_assignments(values: tuple[str, ...]) -> dict[str, object]:
             validate_config_overrides(overrides)
         except ConfigOverrideError as exc:
             raise click.UsageError(f"--set: {exc}") from None
+        unapplied = sorted(set(overrides) - _COMPARE_APPLIED_PATHS)
+        if unapplied:
+            raise click.UsageError(
+                f"--set: compare does not apply {', '.join(unapplied)} yet "
+                "(a key outside its resolved config); set it in .abicheck.yml"
+            )
     return overrides
 
 

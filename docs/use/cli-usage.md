@@ -259,7 +259,9 @@ over `--set` over `.abicheck.yml` over the built-in default. A key that has its
 own flag (`compile.defines` is `--define`, `severity.preset` is
 `--severity-preset`, `contract` is `--contract`, and so on) is refused with the
 name of that flag, so each option keeps one spelling. `--set` does not yet
-reach `dump`, `project plan` or `project capture-variants`; the full key list is
+reach `dump`, `project plan` or `project capture-variants`, and `compare` refuses
+the keys it does not yet apply (such as `compile.*`, `build.*` and `sources.*`)
+with exit 64 rather than dropping them; the full key list is
 in [`config-keys-reference.md`](../reference/config-keys-reference.md).
 
 ## Dependency-stack commands

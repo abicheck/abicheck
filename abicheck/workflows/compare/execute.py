@@ -36,6 +36,7 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
+from ...buildsource.build_config_overrides import ConfigOverrideError
 from ...compile_context import CompileContext
 from ...environment_matrix import EnvironmentMatrix
 from ...serialization import run_scoped_digest_cache
@@ -146,47 +147,49 @@ def run_compare_request(request: CompareRequest) -> CompareResult:
         return classify_compare_pair(request, pair)
 
 
-#: ``CompareRequest`` severity fields and the resolved-config attribute each
-#: one reads from (``ResolvedCompareConfig.merged_severity_*``).
-_SEVERITY_OVERRIDE_FIELDS: tuple[tuple[str, str], ...] = (
-    ("severity_preset", "merged_severity_preset"),
-    ("severity_abi_breaking", "merged_severity_abi_breaking"),
-    ("severity_potential_breaking", "merged_severity_potential_breaking"),
-    ("severity_quality_issues", "merged_severity_quality_issues"),
-    ("severity_addition", "merged_severity_addition"),
-)
-
-
 def _with_config_overrides(request: CompareRequest) -> CompareRequest:
     """*request* with its ``config_overrides`` resolved into the fields they set.
 
     Resolved by :func:`~abicheck.workflows.compare_configuration.load_and_resolve_compare_config`,
     the function the CLI's ``compare --set`` calls, so the two read the same
-    values. A field the caller already set away from its default is kept:
+    values. A key with no typed channel is refused with
+    :class:`~abicheck.buildsource.build_config_overrides.ConfigOverrideError`,
+    never dropped. A field the caller already set away from its default is kept:
     the typed argument beats an override, as the CLI flag does.
     """
     if not request.config_overrides:
         return request
-    from ..compare_configuration import load_and_resolve_compare_config
+    from ..compare_configuration import (
+        TYPED_OVERRIDE_CHANNELS,
+        load_and_resolve_compare_config,
+    )
 
+    # Resolving first also validates the keys (a core option is refused there,
+    # naming its flag) before the channel check below.
     _, resolved, _ = load_and_resolve_compare_config(
         None,
         severity_preset=None,
         config_overrides=request.config_overrides,
     )
+    channel_paths = {path for path, _field, _attr in TYPED_OVERRIDE_CHANNELS}
+    unsupported = sorted(set(request.config_overrides) - channel_paths)
+    if unsupported:
+        raise ConfigOverrideError(
+            f"{', '.join(unsupported)}: no typed CompareRequest field applies "
+            "this key; set it in .abicheck.yml or use the CLI"
+        )
     defaults = {f.name: f.default for f in dataclasses.fields(CompareRequest)}
     updates: dict[str, Any] = {}
-
-    def take(name: str, value: Any) -> None:
-        if getattr(request, name) == defaults[name] and value is not None:
-            updates[name] = value
-
-    take("scope_public", resolved.scope_public)
-    take("collapse_versioned_symbols", resolved.collapse_versioned_symbols)
-    if request.force_public_symbols is None and resolved.public_symbols:
-        updates["force_public_symbols"] = frozenset(resolved.public_symbols)
-    for field_name, resolved_attr in _SEVERITY_OVERRIDE_FIELDS:
-        take(field_name, getattr(resolved, resolved_attr))
+    for path, field_name, attr in TYPED_OVERRIDE_CHANNELS:
+        if path not in request.config_overrides:
+            continue
+        value = getattr(resolved, attr)
+        if field_name == "force_public_symbols":
+            if request.force_public_symbols is None and value:
+                updates[field_name] = frozenset(value)
+            continue
+        if getattr(request, field_name) == defaults[field_name] and value is not None:
+            updates[field_name] = value
     return dataclasses.replace(request, **updates) if updates else request
 
 

@@ -26,6 +26,7 @@ from abicheck.buildsource.build_config import (
 from abicheck.buildsource.build_config_io import load_build_config_with_digest
 from abicheck.buildsource.build_config_overrides import (
     CORE_CONFIG_FLAGS,
+    ConfigOverrideError,
     apply_config_overrides,
     validated_config_overrides,
 )
@@ -70,13 +71,13 @@ def test_set_values_are_yaml_typed() -> None:
     overrides = parse_set_assignments(
         (
             "scope.show_redundant=true",
-            "compile.std=c++17",
+            "severity.addition=error",
             "scope.public_symbols=[foo, bar]",
         )
     )
     assert overrides == {
         "scope.show_redundant": True,
-        "compile.std": "c++17",
+        "severity.addition": "error",
         "scope.public_symbols": ["foo", "bar"],
     }
 
@@ -239,6 +240,41 @@ def test_an_explicit_flag_beats_the_file_and_an_override_beats_the_file(
     assert resolved.collapse_versioned_symbols is False  # --set > file
 
 
+def test_a_key_compare_does_not_apply_is_refused_on_the_cli() -> None:
+    """compile.*/build.*/sources.* loaders do not yet take an override: refuse, not drop."""
+    with pytest.raises(click.UsageError, match="compare does not apply compile.std"):
+        parse_set_assignments(("compile.std=c++17",))
+
+
+def test_a_key_with_no_typed_channel_is_refused_by_the_typed_api() -> None:
+    with pytest.raises(ConfigOverrideError, match="scope.show_redundant"):
+        _with_config_overrides(
+            _request(config_overrides={"scope.show_redundant": True})
+        )
+
+
+def test_every_typed_channel_is_applied_to_the_request() -> None:
+    """A key with a typed channel must change the request, not be dropped."""
+    resolved = _with_config_overrides(
+        _request(
+            config_overrides={
+                "suppression.strict": True,
+                "assurance.require_complete": True,
+                "debug.dwarf_only": True,
+                "debug.debuginfod": True,
+                "debug.debuginfod_url": "https://example.test",
+                "debug.format": "dwarf",
+            }
+        )
+    )
+    assert resolved.strict_suppressions is True
+    assert resolved.require_complete_analysis is True
+    assert resolved.dwarf_only is True
+    assert resolved.enable_debuginfod is True
+    assert resolved.debuginfod_url == "https://example.test"
+    assert resolved.debug_format == "dwarf"
+
+
 def test_cli_and_typed_api_resolve_the_same_config(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -258,6 +294,25 @@ def test_cli_and_typed_api_resolve_the_same_config(
     assert typed.collapse_versioned_symbols is True
     assert typed.severity_addition == cli_resolved.merged_severity_addition == "error"
     assert typed.scope_public == cli_resolved.scope_public
+    # The same equivalence for the keys added with the typed channel table.
+    keys = parse_set_assignments(
+        (
+            "suppression.strict=true",
+            "assurance.require_complete=true",
+            "debug.dwarf_only=true",
+        )
+    )
+    _, _, cli_more, _ = resolve_project_compare_config(
+        config=None, severity_preset=None, config_overrides=keys
+    )
+    typed_more = _with_config_overrides(_request(config_overrides=keys))
+    assert typed_more.strict_suppressions is cli_more.strict_suppressions is True
+    assert (
+        typed_more.require_complete_analysis
+        is cli_more.require_complete_analysis
+        is True
+    )
+    assert typed_more.dwarf_only is cli_more.dwarf_only is True
 
 
 def test_a_typed_field_set_away_from_its_default_is_kept() -> None:
