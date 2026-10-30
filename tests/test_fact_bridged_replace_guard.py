@@ -115,6 +115,12 @@ _STARRED_CALL_ALLOWLIST: dict[tuple[str, str], str] = {
         "keys are only the fixed names the function's own take() calls and the "
         "force_public_symbols assignment write, each a plain field."
     ),
+    ("abicheck/workflows/dump/project_config.py", "with_dump_config_overrides"): (
+        "DumpRequest and InputSpec: typed requests with no Fact[T]-bridged "
+        "field. The keyword names are the fixed fields DUMP_TYPED_OVERRIDE_CHANNELS "
+        "names (lang, debug_format, dwarf_only, enable_debuginfod, "
+        "debuginfod_url, lang_explicit, compile_db_filter), each a plain field."
+    ),
     ("abicheck/workflows/release_member_request.py", "member_request"): (
         "ReleaseMemberCompareRequest: a typed request, no Fact-bridged fields."
     ),

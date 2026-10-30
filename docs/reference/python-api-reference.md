@@ -140,6 +140,7 @@ A fully-specified snapshot-extraction request — the input to ``run_dump_reques
 | `frontend_context` | `str` | `'host'` |
 | `lang_explicit` | `bool` | `False` |
 | `resolved_collect_mode` | `str \| None` | `None` |
+| `config_overrides` | `Mapping[str, object]` | `mappingproxy({})` |
 
 ## `InputSpec`
 
@@ -518,6 +519,7 @@ Extract an ABI snapshot from a native binary (ELF, PE, or Mach-O).
 | `dump_manifest` | `DumpManifest \| None` | `None` |
 | `public_include_search_dirs` | `list[Path] \| None` | `None` |
 | `include_dependencies` | `bool` | `False` |
+| `config_overrides` | `Mapping[str, object] \| None` | `None` |
 
 **Returns:** `AbiSnapshot`
 

@@ -33,7 +33,6 @@ from ....cli_dump_helpers import (
     check_dump_debug_format_error,
     reject_snapshot_compression_conflict,
     resolve_dump_collect_context,
-    resolve_dump_debug_format,
 )
 from ....cli_options import (
     LANG_DEFAULT,
@@ -51,7 +50,10 @@ from ....service_compare_evidence import (
     dump_cli_compile_db_path,
 )
 from .. import help as cli_help
-from ..dump_debug_config import resolve_dump_compile_context
+from ..dump_debug_config import (
+    resolve_and_check_dump_debug_format,
+    resolve_dump_compile_context,
+)
 from ..options.params import (
     _load_suppression_and_policy as _load_suppression_and_policy,  # noqa: F401  — re-exported to keep cli import sites (test suite) stable
 )
@@ -64,7 +66,9 @@ if TYPE_CHECKING:
 # importing this module from `cli.py`'s registration block is the same
 # side-effect pattern every sibling `cli_*` command module already uses.
 from ....cli import main
+from ....workflows.dump.project_config import DUMP_APPLIED_PATHS
 from ....workflows.provenance import stamp_provenance
+from ..options.config_set import config_set_option_for
 from ..options.dump_provenance import dump_provenance_option, parse_provenance_tokens
 from ..options.label import dump_label_option
 from ..runtime import _setup_verbosity
@@ -98,33 +102,6 @@ def _load_dump_manifest_or_reject(
     return parsed_dump_manifest
 
 
-def _resolve_and_check_dump_debug_format(
-    so_path: Path | None,
-    debug_format_opt: str | None,
-) -> str | None:
-    """Resolve the effective debug format and reject the usage error it implies.
-
-    A genuine usage error in the real run (exit 64), raised here -- before the
-    ``--dry-run`` branch -- so the dry run and the real run agree on it rather
-    than the dry run downgrading it into an evidence blocker. Returns ``None``
-    for a source-only dump, which has no binary to resolve a debug format
-    against.
-    """
-    if so_path is None:
-        return None
-    from ....cli_dump_helpers import check_dump_debug_format_error
-    from ....workflows.extraction import normalize_binary_input as _peek_binary_format
-
-    effective_debug_format = resolve_dump_debug_format(debug_format_opt)
-    _, dry_run_binary_fmt = _peek_binary_format(so_path)
-    debug_format_error = check_dump_debug_format_error(
-        effective_debug_format, dry_run_binary_fmt
-    )
-    if debug_format_error is not None:
-        raise click.BadParameter(debug_format_error)
-    return effective_debug_format
-
-
 @main.command("dump")
 @cli_help.dump_help_options  # curated --help + full --help-all (G21.8 collapse M2)
 @click.argument("so_path", type=click.Path(exists=True, path_type=Path), required=False)
@@ -137,6 +114,7 @@ def _resolve_and_check_dump_debug_format(
 # same thing a second way.
 @include_dependencies_option
 @define_option
+@config_set_option_for(DUMP_APPLIED_PATHS, "dump")
 @dump_label_option
 @click.option(
     "-o",
@@ -244,6 +222,7 @@ def dump_cmd(
     # and is never populated from the CLI. ADR-074's -D/--define is NOT this: it
     # is a typed macro list (`defines` above), folded by name in the resolver.
     gcc_options: str | None = None,
+    config_overrides: dict[str, object] | None = None,
 ) -> None:
     """Dump ABI snapshot of a shared library to JSON.
 
@@ -293,8 +272,11 @@ def dump_cmd(
             exclude_headers=tuple(exclude_headers),
             resolved_debug=None,
             debug_roots=debug_roots,
+            config_overrides=config_overrides,
         )
     except _dump_project.DebugOperandError as exc:
+        raise click.UsageError(str(exc)) from exc
+    except _dump_project.DumpConfigError as exc:
         raise click.UsageError(str(exc)) from exc
     config_path, lang, _config_lang_explicit = (
         _project.path,
@@ -518,7 +500,7 @@ def dump_cmd(
     # the real path below still calls follow_linker_script itself for
     # that echo and the so_path reassignment (a no-op re-validation once
     # this has already passed).
-    effective_debug_format = _resolve_and_check_dump_debug_format(
+    effective_debug_format = resolve_and_check_dump_debug_format(
         so_path,
         debug_format_opt,
     )

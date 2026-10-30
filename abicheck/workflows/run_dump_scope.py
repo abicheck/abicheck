@@ -26,7 +26,7 @@ from __future__ import annotations
 
 import functools
 import inspect
-from collections.abc import Callable, Iterator, Sequence
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
@@ -158,16 +158,25 @@ def wrap_run_dump_with_dependency_scope(
     below to the real, extended signature so introspection sees it.
     """
     sig = inspect.signature(uncached_fn)
-    new_param = inspect.Parameter(
-        "include_dependencies",
-        kind=inspect.Parameter.KEYWORD_ONLY,
-        default=False,  # must track the wrapper's own default below
-        # A bare string, matching every other parameter's annotation here:
-        # this module (like the rest of the codebase) has `from __future__
-        # import annotations`, so `inspect.signature` on a real function
-        # already returns string annotations, not type objects.
-        annotation="bool",
-    )
+    new_params = [
+        inspect.Parameter(
+            "include_dependencies",
+            kind=inspect.Parameter.KEYWORD_ONLY,
+            default=False,  # must track the wrapper's own default below
+            # A bare string, matching every other parameter's annotation here:
+            # this module (like the rest of the codebase) has `from __future__
+            # import annotations`, so `inspect.signature` on a real function
+            # already returns string annotations, not type objects.
+            annotation="bool",
+        ),
+        # ADR-091 D4: the typed spelling of `dump --set`; see the body below.
+        inspect.Parameter(
+            "config_overrides",
+            kind=inspect.Parameter.KEYWORD_ONLY,
+            default=None,
+            annotation="Mapping[str, object] | None",
+        ),
+    ]
     old_params = list(sig.parameters.values())
     # A KEYWORD_ONLY parameter must sort before any VAR_KEYWORD (**kwargs) one
     # -- insert just ahead of it rather than always appending, so this stays
@@ -182,17 +191,36 @@ def wrap_run_dump_with_dependency_scope(
         len(old_params),
     )
     extended_sig = sig.replace(
-        parameters=[*old_params[:insert_at], new_param, *old_params[insert_at:]]
+        parameters=[*old_params[:insert_at], *new_params, *old_params[insert_at:]]
     )
 
     @functools.wraps(uncached_fn)
     def run_dump(
-        *args: object, include_dependencies: bool = False, **kwargs: object
+        *args: object,
+        include_dependencies: bool = False,
+        config_overrides: Mapping[str, object] | None = None,
+        **kwargs: object,
     ) -> AbiSnapshot:
         # Default matches the CLI flag and `InputSpec`; see that field's note.
         # The parse-time skip rules come from `extraction_scope`, the one
         # place that maps this request's scope onto what the parse may drop.
         bound = sig.bind_partial(*args, **kwargs)
+        if config_overrides:
+            # ADR-091 D4: the overrides fill the parameters the caller left at
+            # their defaults, before the live extraction reads them. The
+            # cache sits above this function, so the resolved values are what
+            # the run is keyed and read by.
+            from .dump.project_config import run_dump_override_arguments
+
+            defaults = {
+                name: p.default
+                for name, p in sig.parameters.items()
+                if p.default is not inspect.Parameter.empty
+            }
+            bound.arguments.update(
+                run_dump_override_arguments(config_overrides, bound.arguments, defaults)
+            )
+            args, kwargs = bound.args, bound.kwargs
         with extraction_scope(include_dependencies, _run_dump_header_roots(bound)):
             snap = uncached_fn(*args, **kwargs)
         return apply_dependency_scope_to_run_dump_result(
