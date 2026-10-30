@@ -592,15 +592,23 @@ def test_value_set_derivation_compares_closed_sets() -> None:
 
 
 def test_default_render_is_click_version_independent() -> None:
-    """Click's "not given" marker is an enum on some releases and a plain value on
-    others; the inventory must render it the same way, and explicit defaults must
-    keep their own spelling."""
+    """A CLI option's "no default" renders the same on every Click release: ``None``
+    on 8.2 and the unset sentinel on 8.3+ are both ``<unset>`` (``False`` for a
+    boolean flag), and an explicit default keeps its own spelling. The 8.2.1 vs
+    8.5 comparison this pins was run against the committed inventory."""
     gen = _generator()
 
     class Sentinel(enum.Enum):  # Click 8.3+ shape of the unset marker
         UNSET = "UNSET"
 
-    assert gen._default_text(Sentinel.UNSET) == "<unset>"
+    class Option:
+        def __init__(self, default: object, is_flag: bool = False) -> None:
+            self.default = default
+            self.is_flag = is_flag
+
+    assert gen._click_default_text(Option(None)) == "<unset>"
+    assert gen._click_default_text(Option(Sentinel.UNSET)) == "<unset>"
+    assert gen._click_default_text(Option(None, is_flag=True)) == "False"
+    assert gen._click_default_text(Option(Sentinel.UNSET, is_flag=True)) == "False"
+    assert gen._click_default_text(Option("auto")) == "'auto'"
     assert gen._default_text(None) == "None"
-    assert gen._default_text(False) == "False"
-    assert gen._default_text("auto") == "'auto'"

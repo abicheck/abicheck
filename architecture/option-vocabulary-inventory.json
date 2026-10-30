@@ -12,7 +12,7 @@
    "is_flag": false,
    "type": "file",
    "choices": null,
-   "default": "None"
+   "default": "<unset>"
   },
   {
    "id": "aggregate --discovered-only",
@@ -38,7 +38,7 @@
    "is_flag": false,
    "type": "file",
    "choices": null,
-   "default": "None"
+   "default": "<unset>"
   },
   {
    "id": "aggregate --output",
@@ -120,7 +120,7 @@
    "is_flag": false,
    "type": "path",
    "choices": null,
-   "default": "None"
+   "default": "<unset>"
   },
   {
    "id": "compare --instantiation-manifest",
@@ -133,7 +133,7 @@
    "is_flag": false,
    "type": "path",
    "choices": null,
-   "default": "None"
+   "default": "<unset>"
   },
   {
    "id": "compare --bundle-facts-library-manifest",
@@ -146,7 +146,7 @@
    "is_flag": false,
    "type": "file",
    "choices": null,
-   "default": "None"
+   "default": "<unset>"
   },
   {
    "id": "compare --exclude-header",
@@ -325,7 +325,7 @@
     "strict",
     "info-only"
    ],
-   "default": "None"
+   "default": "<unset>"
   },
   {
    "id": "compare --config",
@@ -338,7 +338,7 @@
    "is_flag": false,
    "type": "file",
    "choices": null,
-   "default": "None"
+   "default": "<unset>"
   },
   {
    "id": "compare --acknowledgments",
@@ -351,7 +351,7 @@
    "is_flag": false,
    "type": "file",
    "choices": null,
-   "default": "None"
+   "default": "<unset>"
   },
   {
    "id": "compare --follow-deps",
@@ -470,7 +470,7 @@
    "is_flag": false,
    "type": "depth",
    "choices": null,
-   "default": "None"
+   "default": "<unset>"
   },
   {
    "id": "compare --since",
@@ -483,7 +483,7 @@
    "is_flag": false,
    "type": "text",
    "choices": null,
-   "default": "None"
+   "default": "<unset>"
   },
   {
    "id": "compare --changed-path",
@@ -509,7 +509,7 @@
    "is_flag": false,
    "type": "text",
    "choices": null,
-   "default": "None"
+   "default": "<unset>"
   },
   {
    "id": "compare --budget",
@@ -522,7 +522,7 @@
    "is_flag": false,
    "type": "text",
    "choices": null,
-   "default": "None"
+   "default": "<unset>"
   },
   {
    "id": "compare --dry-run",
@@ -579,7 +579,7 @@
     "all",
     "auto"
    ],
-   "default": "None"
+   "default": "<unset>"
   },
   {
    "id": "compare --pack",
@@ -605,7 +605,7 @@
    "is_flag": false,
    "type": "file",
    "choices": null,
-   "default": "None"
+   "default": "<unset>"
   },
   {
    "id": "compare --performance-profile",
@@ -621,7 +621,7 @@
     "balanced",
     "low-memory"
    ],
-   "default": "None"
+   "default": "<unset>"
   },
   {
    "id": "compare --verbose",
@@ -770,7 +770,7 @@
    "is_flag": false,
    "type": "path",
    "choices": null,
-   "default": "None"
+   "default": "<unset>"
   },
   {
    "id": "deps tree --ld-library-path",
@@ -925,7 +925,7 @@
    "is_flag": false,
    "type": "path",
    "choices": null,
-   "default": "None"
+   "default": "<unset>"
   },
   {
    "id": "dump --compression",
@@ -1021,7 +1021,7 @@
    "is_flag": false,
    "type": "file",
    "choices": null,
-   "default": "None"
+   "default": "<unset>"
   },
   {
    "id": "dump --verbose",
@@ -1062,7 +1062,7 @@
    "is_flag": false,
    "type": "path",
    "choices": null,
-   "default": "None"
+   "default": "<unset>"
   },
   {
    "id": "dump --sources",
@@ -1075,7 +1075,7 @@
    "is_flag": false,
    "type": "path",
    "choices": null,
-   "default": "None"
+   "default": "<unset>"
   },
   {
    "id": "dump --config",
@@ -1088,7 +1088,7 @@
    "is_flag": false,
    "type": "file",
    "choices": null,
-   "default": "None"
+   "default": "<unset>"
   },
   {
    "id": "dump --depth",
@@ -1101,7 +1101,7 @@
    "is_flag": false,
    "type": "depth",
    "choices": null,
-   "default": "None"
+   "default": "<unset>"
   },
   {
    "id": "project capture-variants --variant",
@@ -1140,7 +1140,7 @@
    "is_flag": false,
    "type": "file",
    "choices": null,
-   "default": "None"
+   "default": "<unset>"
   },
   {
    "id": "project capture-variants --variant-header",
@@ -1179,7 +1179,7 @@
    "is_flag": true,
    "type": "boolean",
    "choices": null,
-   "default": "<unset>"
+   "default": "False"
   },
   {
    "id": "project capture-variants --output",
@@ -1302,7 +1302,7 @@
    "is_flag": false,
    "type": "file",
    "choices": null,
-   "default": "None"
+   "default": "<unset>"
   },
   {
    "id": "project plan --output",
@@ -1360,7 +1360,7 @@
    "is_flag": false,
    "type": "file",
    "choices": null,
-   "default": "None"
+   "default": "<unset>"
   },
   {
    "id": "project validate --verbose",

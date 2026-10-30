@@ -65,6 +65,20 @@ def _default_text(value: Any) -> str:
     return f"<{type(value).__qualname__}>"
 
 
+def _click_default_text(p: Any) -> str:
+    """A CLI option's default, the same on every Click release.
+
+    An option given no default has ``None`` on Click 8.2 and the unset sentinel
+    on 8.3+; both mean "no default", so both render as ``<unset>``, or ``False``
+    for a boolean flag, whose omitted value is ``False`` on every release. An
+    explicit default keeps its own spelling.
+    """
+    default = p.default
+    if default is None or type(default).__name__ == "Sentinel":
+        return "False" if p.is_flag else "<unset>"
+    return _default_text(default)
+
+
 def _choices(hint: Any) -> list[Any] | None:
     """The closed value set a type annotation admits, or None when it is open.
 
@@ -140,7 +154,7 @@ def _cli_rows() -> list[dict[str, Any]]:
                         if isinstance(p.type, click.Choice)
                         else None
                     ),
-                    "default": _default_text(p.default),
+                    "default": _click_default_text(p),
                 }
             )
 
