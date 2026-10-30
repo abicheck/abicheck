@@ -485,6 +485,7 @@ tests/test_golden_root_cause.py
 tests/test_graph_coverage_suppression.py
 tests/test_graph_dependency_renames.py
 tests/test_graph_entity_identity.py
+tests/test_graph_identity_invariants.py
 tests/test_graph_observed_persistence.py
 tests/test_graph_reconcile.py
 tests/test_graph_reconcile_candidate_index.py
@@ -676,6 +677,7 @@ tests/test_release_member_processes.py
 tests/test_release_member_summary_parity.py
 tests/test_release_member_type_attribution.py
 tests/test_release_obligation_standing.py
+tests/test_release_one_member_property.py
 tests/test_release_outcome.py
 tests/test_release_output_finalization.py
 tests/test_release_package_inventory_cli.py
