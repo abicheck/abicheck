@@ -1,0 +1,117 @@
+{
+  "schema_version": 69,
+  "sections": {
+    "binary": {
+      "fields": [
+        "build_id",
+        "build_mode",
+        "elf",
+        "elf_only_mode",
+        "kabi",
+        "macho",
+        "pe",
+        "platform",
+        "source_mtime",
+        "source_mtime_epoch",
+        "source_path",
+        "source_size"
+      ],
+      "section_schema_version": 1,
+      "sha256": "42f6702a1baea99ac08218e51e59815fc352928df80ff6dc80fc26201d6129eb"
+    },
+    "build": {
+      "fields": [
+        "build_source_pack"
+      ],
+      "section_schema_version": 1,
+      "sha256": "c86895a3d4c262c8ab27ce1cf398473f65d9b6a70434f608b7878259ad6fd037"
+    },
+    "debug": {
+      "fields": [
+        "ast_compile_args",
+        "ast_cplusplus_macro",
+        "ast_fallback_reason",
+        "ast_producer",
+        "ast_resolved_standard",
+        "ast_resolved_standard_fact",
+        "ast_sysroot",
+        "ast_toolchain",
+        "ast_toolchain_supported",
+        "ast_toolchain_unsupported_reasons",
+        "build_context_defines",
+        "castxml_var_access_facts_reliable",
+        "clang_deprecation_facts_reliable",
+        "clang_field_initializer_facts_reliable",
+        "clang_restrict_facts_reliable",
+        "clang_va_list_facts_reliable",
+        "clang_vtable_facts_reliable",
+        "dwarf",
+        "dwarf_advanced",
+        "fact_provenance",
+        "from_headers",
+        "frontend_context_kind",
+        "header_cv_facts_reliable",
+        "inline_facts_reliable",
+        "param_kind_facts_reliable",
+        "parsed_with_build_context",
+        "template_default_header_scan"
+      ],
+      "section_schema_version": 1,
+      "sha256": "5a08e288608072d3419b0568a23532699eec7876b4f01465a2f5ebe6522afccf"
+    },
+    "declarations": {
+      "fields": [
+        "constant_entity_ids",
+        "constants",
+        "enums",
+        "functions",
+        "numpy_capi",
+        "python_api",
+        "python_ext",
+        "sycl",
+        "typedef_entity_ids",
+        "typedefs",
+        "typedefs_qualified",
+        "variables"
+      ],
+      "section_schema_version": 1,
+      "sha256": "2999f2151f7ba13f366d605e8dd33e39e4c51473fe56267af6e89ec0b618b830"
+    },
+    "layout": {
+      "fields": [
+        "conditional_fields",
+        "contract",
+        "dependency_scope",
+        "dwarf_layout_coherence",
+        "dwarf_layout_coherence_mismatches",
+        "excluded_header_matching",
+        "excluded_header_patterns",
+        "header_only",
+        "scope_fallback"
+      ],
+      "section_schema_version": 1,
+      "sha256": "6268f7bddc18de983ca8517d45e093ee86f47425bdc1517468ad30ec76d8c1b5"
+    },
+    "provenance": {
+      "fields": [
+        "created_at",
+        "dependency_info",
+        "fact_generations",
+        "git_commit",
+        "git_tag",
+        "language_profile",
+        "library",
+        "version"
+      ],
+      "section_schema_version": 1,
+      "sha256": "b8547dffaeb319cd8052722c335e8bdcef9ba5fd1208cf240b60a7b903a6aaeb"
+    },
+    "types": {
+      "fields": [
+        "types"
+      ],
+      "section_schema_version": 1,
+      "sha256": "1cb34ca45c3a41353ddfeaa0248f4718288721eeb700bf0c13ddc716947e90f3"
+    }
+  }
+}

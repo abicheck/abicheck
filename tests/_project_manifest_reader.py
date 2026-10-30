@@ -9,14 +9,20 @@ read path.
 
 from __future__ import annotations
 
+import json
+from collections.abc import Mapping
 from pathlib import Path
+from typing import Any
 
 from abicheck.project_snapshot_store import (
+    DirectoryObjectStore,
     PackageManifest,
     read_artifact_ref,
     read_manifest_summary,
     read_variant_ref,
 )
+from abicheck.storage.package import MANIFEST_RELPATH
+from abicheck.storage.package_publish import REF_DIGEST_FIELDS
 
 
 def read_project_manifest(root: str | Path) -> PackageManifest:
@@ -43,3 +49,28 @@ def read_project_manifest(root: str | Path) -> PackageManifest:
         artifact_refs=artifacts,
         project_sections=summary.project_sections,
     )
+
+
+def ref_document(root: str | Path, kind: str, ref_id: str) -> dict[str, Any]:
+    """The raw JSON record of one published `kind` ("variant"/"artifact")
+    ref, for a test that corrupts it via `rewrite_ref`."""
+    root_path = Path(root)
+    digest = read_manifest_summary(root_path).ref_digests[kind][ref_id]
+    document = DirectoryObjectStore(root_path).get(digest)
+    assert isinstance(document, dict)
+    return document
+
+
+def rewrite_ref(
+    root: str | Path, kind: str, ref_id: str, document: Mapping[str, Any]
+) -> None:
+    """Simulate a stale, hand-edited or corrupted ref in a package-format-v2
+    package: store *document* as a new object and repoint `manifest.json`
+    at it, bypassing `write_project_manifest`'s own validation exactly the
+    way an on-disk corruption would."""
+    root_path = Path(root)
+    manifest_path = root_path / MANIFEST_RELPATH
+    data = json.loads(manifest_path.read_text(encoding="utf-8"))
+    field = REF_DIGEST_FIELDS[kind]
+    data[field][ref_id] = DirectoryObjectStore(root_path).put(dict(document))
+    manifest_path.write_text(json.dumps(data), encoding="utf-8")

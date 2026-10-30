@@ -462,8 +462,16 @@ class TestManifestRoundTrip:
         write_project_manifest(tmp_path, manifest)
 
         assert (tmp_path / "manifest.json").is_file()
-        assert (tmp_path / "refs" / "variants" / "default.json").is_file()
-        assert (tmp_path / "refs" / "artifacts" / "libfoo.json").is_file()
+        # Package format v2 (ADR-062 D17): ref records are content-addressed
+        # objects named by digest, never mutable `refs/<kind>/<id>.json` files.
+        assert not (tmp_path / "refs").exists()
+        summary = read_manifest_summary(tmp_path)
+        assert set(summary.ref_digests["variant"]) == {"default"}
+        assert set(summary.ref_digests["artifact"]) == {"libfoo"}
+        store = DirectoryObjectStore(tmp_path)
+        assert store.get(summary.ref_digests["variant"]["default"]) == (
+            manifest.variant_refs[0].to_dict()
+        )
         assert any((tmp_path / "objects").rglob("*.json.zst"))
 
 
@@ -707,11 +715,13 @@ class TestReadVariantArtifactPair:
     def _write_manifest_json(
         self, root: Path, variant_ids: list[str], artifact_ids: list[str]
     ) -> None:
+        # Hand-written refs at `refs/<kind>/<id>.json` are the package
+        # format v1 layout, which the lazy readers still read (D17).
         root.mkdir(parents=True, exist_ok=True)
         (root / "manifest.json").write_text(
             json.dumps(
                 {
-                    "versions": _VALID_VERSIONS,
+                    "versions": {**_VALID_VERSIONS, "package_format_version": 1},
                     "variant_ids": variant_ids,
                     "artifact_ids": artifact_ids,
                 }

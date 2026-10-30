@@ -53,6 +53,7 @@ from .package import (
     object_relpath,
     variant_ref_relpath,
 )
+from .package_publish import PUBLISH_LOCK_NAME
 from .zip_member import deterministic_zipinfo
 
 __all__ = [
@@ -124,7 +125,7 @@ def pack_project_package(package_dir: str | Path, out_path: str | Path) -> None:
         rel = path.relative_to(root).as_posix()
         if path.is_symlink():
             raise SnapshotError(f"{root}: refusing to pack symlink {rel!r}")
-        if path.is_dir():
+        if path.is_dir() or rel == PUBLISH_LOCK_NAME:
             continue
         if not _is_package_member(rel):
             raise SnapshotError(

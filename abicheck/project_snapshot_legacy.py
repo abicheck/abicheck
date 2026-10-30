@@ -124,22 +124,12 @@ def write_legacy_snapshot_package(
     `manifest.json` (see its own docstring), so the manifest cannot be built
     and validated against a store that was never actually persisted.
 
-    Refuses to write into an already-nonempty *root* -- `write_project_
-    manifest`'s own docstring names this exact gap as "a known, deliberately
-    deferred gap": its ref-then-manifest publish order makes *first*
-    publication of a set of ids safe, but not *republishing* changed content
-    under ids that are already live (a concurrent reader, or an interruption
-    partway through, can observe a manifest still naming the old artifact
-    while a `refs/*.json` document already names the new one). That gap was
-    left open because nothing called `write_project_manifest` a second time
-    against a live path; this function called twice against the same
-    *root* for two different libraries is exactly that caller now. Rather
-    than reactively building the atomic staged-directory-
-    then-swap publish protocol that gap's own docstring names as the real
-    fix (a separately-scoped design decision, not something to improvise
-    under review pressure), this refuses the unsafe case outright: every
-    call here is a *first* publication into a fresh or empty directory
-    (Codex review).
+    Refuses to write into an already-nonempty *root*: this function
+    publishes exactly one library, so writing it into an existing package
+    would replace that package's whole membership with this one artifact.
+    The publish itself is safe to repeat (ADR-062 D17 -- refs are
+    content-addressed, `manifest.json` is replaced atomically); the refusal
+    is about intent, not about a torn write.
     """
     root_path = Path(root)
     if root_path.exists() and any(root_path.iterdir()):
@@ -147,8 +137,8 @@ def write_legacy_snapshot_package(
             f"{root_path} already exists and is not empty -- "
             "write_legacy_snapshot_package only supports a first publication "
             "into a fresh or empty directory, not republishing into an "
-            "existing ProjectSnapshot package (see write_project_manifest's "
-            "own docstring for why an in-place republish is not yet safe). "
+            "existing ProjectSnapshot package, whose other members it would "
+            "drop. "
             "Pass a different, empty, or nonexistent directory."
         )
     staging = InMemoryObjectStore()

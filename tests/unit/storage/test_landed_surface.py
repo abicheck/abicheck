@@ -82,6 +82,8 @@ _INTERNAL_MODULES = (
     "abicheck.storage.castxml_xml",
     "abicheck.storage.atomic_file",
     "abicheck.storage.project_package_archive",
+    "abicheck.storage.package_publish",
+    "abicheck.storage.snapshot_digests",
     "abicheck.storage.zip_member",
     "abicheck.storage.snapshot_runtime_only",
     "abicheck.storage.dwarf_layout_facts",

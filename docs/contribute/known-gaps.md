@@ -251,6 +251,45 @@ current emitter, which is unchanged.
 
 **Status (2026-10-16): OPEN.** The root Action now says which baseline it compared against, in its `baseline-source`, `baseline-asset-name`, `baseline-project-ref`, `baseline-generation` and `baseline-profile` outputs and in a "Baseline source" step-summary block. The JSON report, which a downstream consumer reads on its own, does not carry that provenance, so it cannot tell a legacy asset from a baseline-set, or which `project_ref` was checked. The nearest existing owner is ADR-065's acquisition record (`abicheck/model/scope_acquisition.py`). It records a per-member *state* (`available`, `failed`, `expected_not_produced`, and so on), not the artifact or revision a member was read from, so it does not already carry this. Adding the fields there is a report-schema change with its own decision and golden updates, so it is not made here.
 
+#### ADR-062 D14-D18 data-evolution rules are partly implemented (2026-10-30)
+
+**Status (2026-10-30): PARTIAL.** D17 (immutable refs, atomic publication,
+refused concurrent writers) is implemented; the rest is open. Owner:
+`storage/`; per-item status in the
+[storage format v2 plan](plans/storage-format-v2.md).
+
+- **D14 (open, false-clean risk).** A reader drops an unknown field inside a
+  record (a function record, for example) when it re-saves, and rejects a
+  whole sectioned document that carries an unknown section. Doing this
+  correctly needs three changes together, which is why it was not
+  half-landed. First, every section DTO and record codec needs a declared
+  `optional`/`must-understand` marker for new fields and sections. Second,
+  the model needs an opaque carrier for unknown optional content, per
+  record and per document, that the encoder writes back unchanged. Third,
+  the compare layer needs to resolve an analysis that depends on an
+  unknown must-understand extension to `NOT_COMPARABLE` with a diagnostic
+  naming it, using the availability statuses `model/availability.py`
+  already defines. Strict `xfail` probes in
+  `tests/unit/storage/test_extension_preservation_gap.py` pin both
+  behaviors and will start failing once one is fixed.
+- **D16 (partial).** The `evidence` digest exists
+  (`storage/snapshot_digests.py`), but nothing reads it yet. Wiring it into
+  the same-snapshot coverage note
+  (`workflows/gate.snapshot_identity_digest`) changes a user-visible
+  warning, and `persisted_content_provably_differs`' prefilter must then
+  ignore volatile fields too. Nested unordered collections are not yet
+  declared, so a nested reorder still changes the evidence digest. That
+  is the safe direction: a missed equality, never a false one.
+- **D15 (partial).** Section keys still come from model field names. The
+  pinned-bytes test catches a field rename, but the codec does not prevent
+  one.
+- **D18 (open).** Only the `graph` section decodes lazily.
+- **D17 residuals.** Superseded ref and section objects are never
+  garbage-collected. On Windows (no `fcntl`) a crashed writer leaves the
+  `O_EXCL` lock file behind, and it must be removed by hand. The amendment's
+  exit criteria (oneDAL/MKL corpus, Windows and macOS runs) have not been
+  run.
+
 ### False-positive risk
 
 #### A typedef retargeted inside a template argument still reads as a removal plus an addition under headers (2026-10-25)
