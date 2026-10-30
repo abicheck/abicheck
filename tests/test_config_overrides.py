@@ -31,7 +31,12 @@ from abicheck.buildsource.build_config_overrides import (
 )
 from abicheck.cli import main
 from abicheck.frontends.cli.options.config_set import parse_set_assignments
-from abicheck.frontends.cli.project_config import resolve_project_compare_config
+from abicheck.frontends.cli.project_config import (
+    config_exclude_headers,
+    resolve_project_compare_config,
+)
+from abicheck.serialization import save_bundle_facts
+from abicheck.workflows.bundle_facts_capture import capture_bundle_facts
 from abicheck.workflows.compare.execute import (
     _with_config_overrides,
     run_compare_request,
@@ -432,3 +437,33 @@ def test_a_malformed_file_is_a_wrapped_error_for_the_digest_loader(
     path = _write_config(tmp_path, "scope: [unclosed\n")
     with pytest.raises(ValueError, match="cannot read build config"):
         load_build_config_with_digest(path)
+
+
+def test_set_is_refused_on_a_stored_bundle_facts_comparison(tmp_path: Path) -> None:
+    """A stored BundleFacts operand takes its own config copy; --set must refuse."""
+    stored = tmp_path / "stored.bundlefacts.json"
+    save_bundle_facts(capture_bundle_facts({}), stored)
+    live = tmp_path / "new.so"
+    live.write_bytes(b"x")
+    result = CliRunner().invoke(
+        main,
+        ["compare", str(stored), str(live), "--set", "scope.show_redundant=true"],
+    )
+    assert result.exit_code == 64
+    assert "--set is not supported on a comparison of a stored BundleFacts" in (
+        result.output
+    )
+
+
+def test_the_exclude_flag_wins_over_the_config_key() -> None:
+    cfg = BuildConfig(exclude_headers=["internal/*.h"])
+    assert config_exclude_headers(("a.h",), cfg) == ("a.h",)
+
+
+def test_the_config_key_is_used_when_the_flag_is_unset() -> None:
+    cfg = BuildConfig(exclude_headers=["internal/*.h"])
+    assert config_exclude_headers((), cfg) == ("internal/*.h",)
+
+
+def test_no_exclusion_when_neither_flag_nor_config_is_set() -> None:
+    assert config_exclude_headers((), None) == ()
