@@ -239,6 +239,14 @@ class Step:
     #: receipt has to name the right one. Distinct from `precondition`, which
     #: decides *before* running and therefore runs nothing at all.
     partial: dict[int, str] | None = None
+    #: Let the child write straight to this process's stdout/stderr instead of
+    #: capturing it. For long CI lanes: a captured step that the runner kills
+    #: at its job timeout prints nothing at all (Integration run 40954494083's
+    #: Windows leg: 36 minutes, zero lines), while a streamed one shows every
+    #: test finished so far. ``PYTHONUNBUFFERED`` keeps a piped child's output
+    #: live. A streamed step's output reaches only the terminal, not a
+    #: caller's ``--json`` receipt.
+    stream: bool = False
     description: str = ""
 
 
@@ -605,9 +613,13 @@ STEPS: tuple[Step, ...] = (
             "--tb=short",
             "--ignore=tests/test_abi_examples.py",
             "--ignore=tests/test_cross_platform_integration.py",
+            # The slowest tests, so a lane drifting toward its job timeout
+            # names what grew (the Windows leg went 25 -> 36+ minutes in a day).
+            "--durations=30",
         ),
         frozenset({FULL}),
         env_defaults={"ABICHECK_MIN_EXECUTED": "1"},
+        stream=True,
         precondition=_need_bins("castxml"),
         description="DWARF/header parsing against real castxml + a C/C++ compiler",
     ),
@@ -939,7 +951,11 @@ def run_step(step: Step, junit_dir: str | None = None) -> dict[str, object]:
     # see this module's own top-of-file comment for the full reasoning. This
     # also means a caller with `--json` gets the raw text available even when
     # the terminal itself scrolled it out of view.
-    proc = subprocess.run(cmd, cwd=ROOT, env=env, capture_output=True, text=True)
+    if step.stream:
+        sys.stdout.flush()
+        proc = subprocess.run(cmd, cwd=ROOT, env={**env, "PYTHONUNBUFFERED": "1"})
+    else:
+        proc = subprocess.run(cmd, cwd=ROOT, env=env, capture_output=True, text=True)
     duration = time.time() - start
     # Echo the child's captured stdout/stderr BEFORE the partial-result
     # early return below (CodeRabbit review, fresh evidence): this used to

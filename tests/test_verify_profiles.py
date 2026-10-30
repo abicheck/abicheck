@@ -1145,3 +1145,23 @@ def test_integration_step_leaves_tool_lane_tests_to_their_lanes() -> None:
         assert f"not {marker}" in expr, marker
         lane_cmd = _step(lane).cmd
         assert lane_cmd[lane_cmd.index("-m") + 1] == marker, lane
+
+
+def test_a_streamed_step_inherits_the_terminal_and_stays_unbuffered(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A streamed step's child writes straight through, so a lane killed at
+    its job timeout still shows its progress; a captured one shows nothing."""
+    seen: dict[str, object] = {}
+
+    def fake_run(cmd, **kwargs):  # noqa: ANN001, ANN003
+        seen.update(kwargs)
+        return subprocess.CompletedProcess(cmd, 0)
+
+    monkeypatch.setattr(verify.subprocess, "run", fake_run)
+    step = verify.Step("probe", ("true",), frozenset({verify.FULL}), stream=True)
+    assert verify.run_step(step)["status"] == "passed"
+    assert "capture_output" not in seen
+    assert seen["env"]["PYTHONUNBUFFERED"] == "1"  # type: ignore[index]
+    assert _step("integration").stream
+    assert any(a.startswith("--durations=") for a in _step("integration").cmd)
