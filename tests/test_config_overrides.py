@@ -522,3 +522,22 @@ def test_the_config_key_is_used_when_the_flag_is_unset() -> None:
 
 def test_no_exclusion_when_neither_flag_nor_config_is_set() -> None:
     assert config_exclude_headers((), None) == ()
+
+
+def test_deployment_and_require_justification_reach_the_request_and_the_cli() -> None:
+    """The two channels a typed run used to drop: both must match the CLI's resolution."""
+    overrides = parse_set_assignments(
+        (
+            "deployment={runtime_floors: {GLIBC: '2.17'}}",
+            "suppression.require_justification=true",
+        )
+    )
+    _, _, cli_resolved, _ = resolve_project_compare_config(
+        config=None, severity_preset=None, config_overrides=overrides
+    )
+    typed = _with_config_overrides(_request(config_overrides=overrides))
+    assert typed.require_justification is True
+    assert cli_resolved.require_justification is True
+    assert typed.env_matrix is not None
+    assert typed.env_matrix.runtime_floors["GLIBC"] == "2.17"
+    assert typed.env_matrix == cli_resolved.deployment
