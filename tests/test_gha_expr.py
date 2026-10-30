@@ -176,3 +176,34 @@ def test_real_consumer_gcc_path_expression_from_check_project_yml(
     propagation.py`, which extracts it from the real file rather than
     retyping it here)."""
     assert eval_gha_expression(expr, matrix=matrix, inputs=inputs) == expected
+
+
+@pytest.mark.parametrize(
+    ("compiler", "expected"),
+    [
+        # Prefix form (ends with '-') is what the old gcc-prefix carried.
+        ("aarch64-linux-gnu-", "aarch64-linux-gnu-"),
+        # A full compiler path never reaches the consumer context dump.
+        ("/opt/gcc-14/bin/g++", ""),
+        ("clang", ""),
+    ],
+)
+def test_endswith_guard_passes_only_prefix_form(compiler: str, expected: str) -> None:
+    expr = (
+        "${{ inputs.consumer-gcc-path || (endsWith(inputs.compiler, '-') "
+        "&& inputs.compiler || '') }}"
+    )
+    result = eval_gha_expression(
+        expr, inputs={"consumer-gcc-path": "", "compiler": compiler}
+    )
+    assert result == expected
+
+
+def test_startswith_and_endswith_are_case_insensitive() -> None:
+    assert eval_gha_expression("${{ startsWith(inputs.a, 'LIB') }}", inputs={"a": "libx"}) is True
+    assert eval_gha_expression("${{ endsWith(inputs.a, 'X') }}", inputs={"a": "libx"}) is True
+
+
+def test_unsupported_function_still_fails_loudly() -> None:
+    with pytest.raises(GhaExpressionError):
+        eval_gha_expression("${{ contains(inputs.a, 'x') }}", inputs={"a": "x"})
