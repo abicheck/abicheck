@@ -70,7 +70,10 @@ __all__ = [
 ]
 
 #: Container/manifest layout. Bumped when the package *shape* changes.
-PACKAGE_FORMAT_VERSION = 1
+#: v2 (ADR-062 D17): ref records are content-addressed objects named by
+#: `manifest.json`'s `variant_refs`/`artifact_refs` digest maps; a v1
+#: package's mutable `refs/<kind>/<id>.json` layout is still read.
+PACKAGE_FORMAT_VERSION = 2
 
 #: What a reader must understand to compare safely. Bumped only when reading a
 #: package without understanding the change could produce a *wrong verdict* —

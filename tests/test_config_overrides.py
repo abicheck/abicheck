@@ -244,9 +244,15 @@ def test_an_explicit_flag_beats_the_file_and_an_override_beats_the_file(
 
 
 def test_a_key_compare_does_not_apply_is_refused_on_the_cli() -> None:
-    """compile.*/build.*/sources.* loaders do not yet take an override: refuse, not drop."""
-    with pytest.raises(click.UsageError, match="compare does not apply compile.std"):
-        parse_set_assignments(("compile.std=c++17",))
+    """A key no loader of compare reads is refused, not dropped."""
+    with pytest.raises(click.UsageError, match="compare does not apply build.query"):
+        parse_set_assignments(("build.query=make",))
+
+
+def test_a_compile_context_key_is_applied_by_compare_not_refused() -> None:
+    """compile.* keys reach the one compile resolver, so compare applies them."""
+    overrides = parse_set_assignments(("compile.std=c++17", "compile.compiler=g++"))
+    assert overrides == {"compile.std": "c++17", "compile.compiler": "g++"}
 
 
 def test_a_key_with_no_typed_channel_is_refused_by_the_typed_api() -> None:

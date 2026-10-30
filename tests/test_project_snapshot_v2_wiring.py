@@ -18,6 +18,7 @@ from abicheck.errors import SnapshotError
 from abicheck.model.snapshot import AbiSnapshot
 from abicheck.serialization import SCHEMA_VERSION, snapshot_to_dict
 from abicheck.storage.canonical import canonical_form
+from tests._project_manifest_reader import ref_document, rewrite_ref
 
 
 def _write_package(tmp_path: Path, snap: AbiSnapshot, name: str = "pkg") -> Path:
@@ -80,17 +81,13 @@ class TestProjectSnapshotLegacyRoundTrip:
         documented `SnapshotError`, the same way every other malformed-
         package case already is, rather than leaking a raw `TypeError` to a
         typed-API caller (Codex review)."""
-        import json
-
-        from abicheck.storage.package import artifact_ref_relpath
         from abicheck.workflows.input_resolution import resolve_input
 
         snap = AbiSnapshot(library="libfoo.so.1", version="1.0.0")
         root = _write_package(tmp_path, snap)
-        art_path = root / artifact_ref_relpath("libfoo.so.1")
-        art = json.loads(art_path.read_text(encoding="utf-8"))
+        art = ref_document(root, "artifact", "libfoo.so.1")
         art["sections"] = []
-        art_path.write_text(json.dumps(art), encoding="utf-8")
+        rewrite_ref(root, "artifact", "libfoo.so.1", art)
         with pytest.raises(SnapshotError):
             resolve_input(root)
 
@@ -104,15 +101,13 @@ class TestProjectSnapshotLegacyRoundTrip:
         `read_legacy_snapshot_document` silently exporting the artifact
         anyway (Codex review)."""
         from abicheck.project_snapshot_legacy import read_legacy_snapshot_document
-        from abicheck.storage.package import variant_ref_relpath
 
         snap = AbiSnapshot(library="libfoo.so.1", version="1.0.0")
         root = _write_package(tmp_path, snap)
-        variant_path = root / variant_ref_relpath("default")
-        corrupted = json.loads(variant_path.read_text(encoding="utf-8"))
+        corrupted = ref_document(root, "variant", "default")
         assert corrupted["artifact_ids"] == ["libfoo.so.1"]
         corrupted["artifact_ids"] = []
-        variant_path.write_text(json.dumps(corrupted), encoding="utf-8")
+        rewrite_ref(root, "variant", "default", corrupted)
         with pytest.raises(ValueError):
             read_legacy_snapshot_document(root)
 
@@ -127,16 +122,14 @@ class TestProjectSnapshotLegacyRoundTrip:
         section's declarations/types with empty defaults, turning lost
         evidence into confirmed absence (Codex review)."""
         from abicheck.project_snapshot_legacy import read_legacy_snapshot_document
-        from abicheck.storage.package import artifact_ref_relpath
 
         snap = AbiSnapshot(library="libfoo.so.1", version="1.0.0")
         root = _write_package(tmp_path, snap)
-        art_path = root / artifact_ref_relpath("libfoo.so.1")
-        art = json.loads(art_path.read_text(encoding="utf-8"))
+        art = ref_document(root, "artifact", "libfoo.so.1")
         assert art["sections"], "fixture snapshot must publish at least one section"
         dropped_kind = next(iter(art["sections"]))
         del art["sections"][dropped_kind]
-        art_path.write_text(json.dumps(art), encoding="utf-8")
+        rewrite_ref(root, "artifact", "libfoo.so.1", art)
         with pytest.raises(SnapshotError, match=dropped_kind):
             read_legacy_snapshot_document(root)
 
@@ -159,12 +152,10 @@ class TestProjectSnapshotLegacyRoundTrip:
         from abicheck.project_snapshot_legacy import read_legacy_snapshot_document
         from abicheck.project_snapshot_store import DirectoryObjectStore
         from abicheck.storage.dto import SEMANTIC_IR_SECTION_KIND, SectionDTO
-        from abicheck.storage.package import artifact_ref_relpath
 
         snap = AbiSnapshot(library="libfoo.so.1", version="1.0.0")
         root = _write_package(tmp_path, snap)
-        art_path = root / artifact_ref_relpath("libfoo.so.1")
-        art = json.loads(art_path.read_text(encoding="utf-8"))
+        art = ref_document(root, "artifact", "libfoo.so.1")
         assert SEMANTIC_IR_SECTION_KIND not in art["sections"], (
             "a header-less snapshot must not already publish a semantic_ir "
             "section, or this test no longer exercises an injected one"
@@ -179,7 +170,7 @@ class TestProjectSnapshotLegacyRoundTrip:
             "kind": SEMANTIC_IR_SECTION_KIND,
             "digest": digest,
         }
-        art_path.write_text(json.dumps(art), encoding="utf-8")
+        rewrite_ref(root, "artifact", "libfoo.so.1", art)
         with pytest.raises(SnapshotError, match=SEMANTIC_IR_SECTION_KIND):
             read_legacy_snapshot_document(root)
 

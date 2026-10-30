@@ -54,17 +54,30 @@ A package is a directory (D6):
 ```text
 project.abicheck/
   manifest.json            # small; loads immediately
-  refs/variants/<variant-id>.json
-  refs/artifacts/<artifact-id>.json
+  refs/variants/<variant-id>/<ref-digest>.json
+  refs/artifacts/<artifact-id>/<ref-digest>.json
   objects/sha256/<aa>/<digest>.json.zst
 ```
 
-`manifest.json` carries only the package's version axes (see below) and the
-list of variant/artifact ids — never a full record. Each variant's or
-artifact's own record lives at its own `refs/variants/<id>.json`/
-`refs/artifacts/<id>.json`, loaded lazily. Section content (declarations,
-types, layout, ...) is never embedded in a ref — it is a separate,
-content-addressed object under `objects/`, referenced by digest.
+`manifest.json` carries only the package's version axes (see below) and one
+`{id, ref_digest}` entry per variant and per artifact (`variant_refs`/
+`artifact_refs`) — never a full record. Each record lives in its own ref
+document, loaded lazily. The document carries a `ref_schema_version`, and
+its `ref_digest` is the semantic digest of the whole document; a reader
+recomputes it and refuses a document that does not match. Section content
+(declarations, types, layout, ...) is never embedded in a ref — it is a
+separate, content-addressed object under `objects/`, referenced by digest.
+A package format v1 package kept each ref at a mutable
+`refs/variants/<id>.json`/`refs/artifacts/<id>.json` path and listed bare
+ids; it is still read.
+
+**Publication is atomic.** A writer verifies every section object, writes
+each ref document once to its digest-named path, and only then replaces
+`manifest.json` by temp file plus atomic rename — the commit point. A ref
+document is never overwritten, so a publish that fails or is interrupted,
+including a republish of changed content under the same ids, leaves the
+previous package fully readable. Writers to one package are serialized by a
+cross-process lock.
 
 A deterministic `.tar.zst` transport form is part of the design but **not
 yet implemented** — only the plain directory form exists today.

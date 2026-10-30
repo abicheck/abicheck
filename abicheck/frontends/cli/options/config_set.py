@@ -35,13 +35,17 @@ from ....workflows.compare_configuration import (
     CLI_ONLY_OVERRIDE_PATHS,
     TYPED_OVERRIDE_CHANNELS,
 )
+from ....workflows.compile_config import COMPILE_CONTEXT_OVERRIDE_PATHS
 from ....workflows.extraction import ConfigOverrideError, validate_config_overrides
 
-#: The keys `compare --set` applies: the typed channels plus the CLI-only ones.
-#: Every other key (compile.*, build.*, sources.*, ...) is refused with a usage
-#: error, because its loader does not yet receive the override.
-_COMPARE_APPLIED_PATHS: frozenset[str] = frozenset(
-    {path for path, _field, _attr in TYPED_OVERRIDE_CHANNELS} | CLI_ONLY_OVERRIDE_PATHS
+#: The keys `compare --set` applies: the typed channels, the CLI-only ones and
+#: the compile-context keys (ADR-091 D4). Every other key (build.*, sources.*,
+#: ...) is refused with a usage error, because its loader does not yet take the
+#: override.
+_COMPARE_APPLIED_PATHS: frozenset[str] = (
+    frozenset({path for path, _field, _attr in TYPED_OVERRIDE_CHANNELS})
+    | CLI_ONLY_OVERRIDE_PATHS
+    | COMPILE_CONTEXT_OVERRIDE_PATHS
 )
 
 #: The keys a directory/package (release) compare forwards to its members. The
@@ -58,10 +62,12 @@ _RELEASE_APPLIED_PATHS: frozenset[str] = frozenset(
         "severity.addition",
         "deployment",
     }
+    | COMPILE_CONTEXT_OVERRIDE_PATHS
 )
 
 __all__ = [
     "config_set_option",
+    "config_set_option_for",
     "parse_set_assignments",
     "reject_unforwarded_release_overrides",
 ]
@@ -81,11 +87,20 @@ def reject_unforwarded_release_overrides(overrides: dict[str, object]) -> None:
         )
 
 
-def parse_set_assignments(values: tuple[str, ...]) -> dict[str, object]:
+def parse_set_assignments(
+    values: tuple[str, ...],
+    applied_paths: frozenset[str] = _COMPARE_APPLIED_PATHS,
+    *,
+    command: str = "compare",
+) -> dict[str, object]:
     """``("PATH=VALUE", ...)`` as ``{PATH: value}``; a later repeat wins.
 
+    *applied_paths* are the keys *command* reads through its loader; any other
+    valid key is refused rather than dropped (ADR-091 D4).
+
     Raises :class:`click.UsageError` (exit 64) for a malformed assignment, a
-    value that is not YAML, an unknown path, a core option, or a wrong type.
+    value that is not YAML, an unknown path, a core option, a wrong type, or a
+    key *command* does not apply.
     """
     overrides: dict[str, object] = {}
     for item in values:
@@ -104,31 +119,46 @@ def parse_set_assignments(values: tuple[str, ...]) -> dict[str, object]:
             validate_config_overrides(overrides)
         except ConfigOverrideError as exc:
             raise click.UsageError(f"--set: {exc}") from None
-        unapplied = sorted(set(overrides) - _COMPARE_APPLIED_PATHS)
+        unapplied = sorted(set(overrides) - applied_paths)
         if unapplied:
             raise click.UsageError(
-                f"--set: compare does not apply {', '.join(unapplied)} yet "
+                f"--set: {command} does not apply {', '.join(unapplied)} yet "
                 "(a key outside its resolved config); set it in .abicheck.yml"
             )
     return overrides
 
 
-def _parse_set_callback(
-    _ctx: click.Context, _param: click.Parameter, value: tuple[str, ...]
-) -> dict[str, Any]:
-    return parse_set_assignments(value)
+_SET_HELP: str = (
+    "Set one .abicheck.yml key for this run, as PATH=VALUE, e.g. "
+    "--set debug.dwarf_only=true. Repeatable. PATH is the config path; VALUE "
+    "is read as YAML, so a list is [a, b]. Overrides the "
+    ".abicheck.yml file; an explicit flag still wins over both. A key this "
+    "command does not apply, or a core option with its own flag, is refused "
+    "with exit 64 and the refusal names the flag or the command."
+)
 
 
-config_set_option: Callable[[Any], Any] = click.option(
-    "--set",
-    "config_overrides",
-    multiple=True,
-    callback=_parse_set_callback,
-    metavar="PATH=VALUE",
-    help="Set one .abicheck.yml key for this run, e.g. "
-    "--set compile.std=c++17 or --set scope.show_redundant=true. "
-    "Repeatable. PATH is the config path; VALUE is read as YAML, so "
-    "--set compile.include_dirs=[include] is a list. Overrides the "
-    ".abicheck.yml file; an explicit flag still wins over both. A core "
-    "option with its own flag is refused and names that flag.",
+def config_set_option_for(
+    applied_paths: frozenset[str], command: str
+) -> Callable[[Any], Any]:
+    """The ``--set PATH=VALUE`` option for *command*, which applies *applied_paths*."""
+
+    def _parse_set_callback(
+        _ctx: click.Context, _param: click.Parameter, value: tuple[str, ...]
+    ) -> dict[str, Any]:
+        return parse_set_assignments(value, applied_paths, command=command)
+
+    return click.option(
+        "--set",
+        "config_overrides",
+        multiple=True,
+        callback=_parse_set_callback,
+        metavar="PATH=VALUE",
+        help=_SET_HELP,
+    )
+
+
+#: ``compare --set``: the keys ``compare`` applies (see ``_COMPARE_APPLIED_PATHS``).
+config_set_option: Callable[[Any], Any] = config_set_option_for(
+    _COMPARE_APPLIED_PATHS, "compare"
 )

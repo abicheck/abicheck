@@ -266,10 +266,14 @@ topics:
       # `cli-surface` topic).
       - abicheck/deadline.py
       - abicheck/policy/depth_evidence_contract.py
-      # ADR-091 Phase 2: `compare --set PATH=VALUE` (one config key per run,
-      # validated by the file's own schema); its section is in cli-usage.md.
+      # ADR-091 Phase 2: `--set PATH=VALUE` on compare, dump and project
+      # capture-variants (one config key per run, validated by the file's own
+      # schema, each command applying only the keys it reads); its section is
+      # in cli-usage.md.
       - abicheck/frontends/cli/options/config_set.py
       - abicheck/buildsource/build_config_overrides.py
+      - abicheck/workflows/dump/project_config.py
+      - abicheck/workflows/bundle_variants_capture.py
     reference_page: reference/cli-reference.md
     task_pages:
       - use/dump-compare-flags.md

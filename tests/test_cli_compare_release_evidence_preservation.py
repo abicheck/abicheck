@@ -761,10 +761,11 @@ class TestMismatchedManifestRefKindRaises:
         pkg_manifest = write_bundle_facts_package(facts, store=store, variant_id="v1")
         write_project_manifest(pkg, pkg_manifest)
 
-        variant_ref_json = pkg / "refs" / "variants" / "v1.json"
-        doc = json.loads(variant_ref_json.read_text())
+        from tests._project_manifest_reader import ref_document, rewrite_ref
+
+        doc = ref_document(pkg, "variant", "v1")
         doc["sections"]["bundle_composition"]["kind"] = "something_else"
-        variant_ref_json.write_text(json.dumps(doc))
+        rewrite_ref(pkg, "variant", "v1", doc)
 
         with pytest.raises(ValueError, match="kind"):
             read_embedded_manifest(pkg, "v1")

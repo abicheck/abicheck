@@ -5,14 +5,19 @@ ADR-070 accepted (D3 implemented, D1/D2/D4 partly). Phase 2 blocked on the
 separate task owning the two drifted guards; Phase 5 assessed and deferred
 (see its section for why, and what would change that).
 
-**ADR-070 D2 progress (ADR-091 Phase 2, Action half).** The Action's new
-`set:` input forwards each override as `--set` and leaves key validation to the
-CLI; its one Action-side rule is the input's own mode scope (compare only,
-because dump has no `--set` yet), which fails the step rather than dropping an override. The `compile:` overlay synthesis in
-`action/run.sh` (`add_compile_context_flags`) is still the Action's own
-semantics, not yet the CLI's: `compare --set` refuses `compile.*` keys, so the
-overlay remains in use for every mode until the CLI applies them. Replacing it
-is the open D2 item.
+**ADR-070 D2 progress (ADR-091 Phase 2d, compile overlay).** The Action's
+`compile:` overlay is gone. `action/run.sh`'s `add_compile_context_flags` now
+forwards `ast-frontend`, `gcc-path`/`gcc-prefix`, `gcc-options`, `sysroot`,
+`nostdinc` and `lang` as `--set compile.*` for `compare` (single pair and
+directory/package) and `dump`; the CLI resolves them through the same compile
+loader as the file. The Python helper heredoc, its temp-file `--config` merge and
+the compile-only sources-root helpers are deleted, and so is the restriction
+mirror that refused `set:` on dump. The Action's remaining rule on `set:` is the
+input's own mode scope (compare and dump), which fails the step rather than
+dropping an override. The one Action-side computation left is splitting
+`gcc-options` into the `compile.options` list (input grammar, not CLI
+semantics). Open under D2: the typed API still refuses `compile.*` (its requests
+do not fold `.abicheck.yml`'s `compile:` block).
 
 **Problem.** The composite GitHub Action (`action/`, `actions/check-target/`)
 is a hand-maintained adapter over the abicheck CLI. It encodes, in shell, a

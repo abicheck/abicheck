@@ -900,6 +900,19 @@
    "default": "<unset>"
   },
   {
+   "id": "dump --set",
+   "command": "dump",
+   "option": "--set",
+   "aliases": [],
+   "hidden": false,
+   "help_common": false,
+   "multiple": true,
+   "is_flag": false,
+   "type": "text",
+   "choices": null,
+   "default": "<unset>"
+  },
+  {
    "id": "dump --label",
    "command": "dump",
    "option": "--label",
@@ -1180,6 +1193,19 @@
    "type": "boolean",
    "choices": null,
    "default": "False"
+  },
+  {
+   "id": "project capture-variants --set",
+   "command": "project capture-variants",
+   "option": "--set",
+   "aliases": [],
+   "hidden": false,
+   "help_common": true,
+   "multiple": true,
+   "is_flag": false,
+   "type": "text",
+   "choices": null,
+   "default": "<unset>"
   },
   {
    "id": "project capture-variants --output",
@@ -4580,6 +4606,14 @@
    "default": "None"
   },
   {
+   "id": "DumpRequest.config_overrides",
+   "owner": "DumpRequest",
+   "name": "config_overrides",
+   "annotation": "Mapping[str, object]",
+   "choices": null,
+   "default": "<mappingproxy>"
+  },
+  {
    "id": "InputSpec.path",
    "owner": "InputSpec",
    "name": "path",
@@ -5258,6 +5292,14 @@
    "annotation": "bool",
    "choices": null,
    "default": "False"
+  },
+  {
+   "id": "run_dump(config_overrides)",
+   "owner": "run_dump",
+   "name": "config_overrides",
+   "annotation": "Mapping[str, object] | None",
+   "choices": null,
+   "default": "None"
   }
  ]
 }

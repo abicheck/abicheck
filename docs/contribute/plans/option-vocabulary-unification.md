@@ -1,6 +1,6 @@
 # Option vocabulary unification: implementation plan
 
-**Status:** Phases 0 and 1 done (Phase 0 2026-10-30; Phase 1 is #1850). Phase 2 is partly done: the CLI and typed-API half for `compare` (#1851), and the Action `set:` input (this PR); the `compile:` overlay replacement and the rest of Phase 2 are open. Phases 3–7 not started. Implements
+**Status:** Phases 0 and 1 done (Phase 0 2026-10-30; Phase 1 is #1850). Phase 2 done: the CLI `--set` half for `compare`, `dump` and `project capture-variants` (#1851, #1857), the Action `set:` input (#1854), and the compile-context keys with the Action's `compile:` overlay replacement (this change). The typed API still refuses `compile.*` (see the Result below). Phase 4 CLI part done (#1852), its Action and Python parts not started. Phases 3, 5–7 not started. Implements
 [ADR-091](../adr/091-one-option-vocabulary.md). Each phase is one PR, ordered
 so that the parity gate lands before any rename. Every rename lands with its
 migration row and no alias: the 2026-10-30 policy (ADR-091 D7 amendment)
@@ -130,7 +130,7 @@ rides the existing `repo-scan-tests` step (`-m repo_scan`, `pr` profile and the
 CI `ai-readiness` job); the unit lanes exclude that marker, so Phase 0's tests
 move with it. No `verify.py` change was needed.
 
-## Phase 2 — `--set` and the Action `set:` input (D4)
+## Phase 2 — `--set` and the Action `set:` input (D4) — done (typed-API compile keys excepted, see Result)
 
 - `compare`, `dump`, `deps *`, `project *`: add repeatable
   `--set PATH=VALUE`, parsed through the same config loader and schema as
@@ -149,7 +149,56 @@ move with it. No `verify.py` change was needed.
 Owner: `frontends/`, `workflows/compare/configuration.py`, `action/`.
 Size: M. Changelog fragment: Added.
 
-**Result (2026-10-30, partial).** The CLI and typed-API half for `compare`
+**Result (2026-10-30, partial; dump and capture-variants added).** The CLI and
+typed-API half is in for three commands. `compare --set PATH=VALUE` and
+`CompareRequest.config_overrides` (typed; `run_compare(config_overrides=)`) were
+the first slice. This slice adds `dump --set` (CLI), `DumpRequest.config_overrides`
+(typed; `with_dump_config_overrides`, run first in `resolve_dump_request`),
+`run_dump(config_overrides=)` and `project capture-variants --set`. All of them
+share one validator (`abicheck/buildsource/build_config_overrides.py`, the file's
+own `KEY_TABLE`), and each command passes its applied-key set to the one `--set`
+parser (`frontends/cli/options/config_set.py`, `config_set_option_for`).
+Precedence is explicit flag > override > file > default. Core keys are refused with
+exit 64 naming their flag (`CORE_CONFIG_FLAGS`; this includes `scope.exclude_headers`
+and `debug.pdb_path`, so no `dump` channel can reach them). Every key a command does
+not apply is refused with exit 64, not dropped. The registry claims the four new
+spellings under `config.override`; `tests/test_config_overrides_dump_project.py`
+checks precedence, refusals and CLI-vs-typed equivalence at the resolved config.
+
+- **dump** applies `compile.lang`, `build.compile_db_filter`, `debug.format`,
+  `debug.dwarf_only`, `debug.debuginfod`, `debug.debuginfod_url`, and the CLI-only
+  `compile.ast_frontend_fallback`/`compile.allow_unsupported_castxml` toggles
+  (the typed API refuses the toggles: they are process-wide env settings). Every
+  dump config resolver reads through one loader, `_dump_build_config`. With
+  overrides, a named file is read strictly, since a stated value must not be lost
+  to the lenient fallback (`DumpConfigError`, exit 64).
+- **Not yet applied on dump:** every other `compile.*` key (`compile.std`,
+  `compile.include_dirs`, `compile.frontend`, ...), `build.query`, `build.*`,
+  `sources.*`. `compile.*` is read by `workflows/compile_config.merge_compile_config`,
+  and `--sources`/`--build-info` re-read the file in `buildsource/embed.py` and
+  `l2_seed_args.py`; those loaders do not take an override yet. Until they do,
+  `--set` on these keys exits 64. This is the largest remaining gap in Phase 2.
+- **capture-variants** applies `bundle_variants` (the whole block). Its only config
+  read is that block; each variant's dump runs with no project config.
+- **project plan takes no `--set`.** The plan's premise was that it reads the config
+  through about a dozen loaders. It does not: `project plan` reads only
+  `ProjectTargetsConfig` (`targets:`/`profiles:`/`checks:`/`aggregate:`), which no
+  `KEY_TABLE` key reaches, so `--set` would refuse every key. The dozen loaders are
+  dump's and compare's. Adding a flag that always refuses would be noise, so the
+  flag is not added; `tests/test_config_overrides_dump_project.py` pins that
+  `project plan` has no `--set`.
+- **No `--set`:** `project validate`, `project history`, `deps tree`, `deps compare`
+  and `aggregate` read no `KEY_TABLE` key a `--set` can set, and the test pins that
+  as well.
+- **Typed `run_dump(config_overrides=)`** fills the `run_dump` keyword parameters
+  for `compile.lang` and the `debug.*` keys, through the dependency-scope wrapper
+  before the live extraction; the cache sits above that wrapper, so it keys on the
+  resolved values. It refuses `build.compile_db_filter`, which has no `run_dump`
+  parameter.
+- **Still open in this phase:** the Action `set:` input and the `action/run.sh`
+  `compile:` overlay replacement (not started), and the compile-path loaders above.
+
+**Result (2026-10-30, Action `set:` input, #1854).** The CLI and typed-API half for `compare`
 is in: `compare --set PATH=VALUE` (repeatable) and
 `CompareRequest.config_overrides` (typed; `run_compare(config_overrides=)`)
 share one validator (`abicheck/buildsource/build_config_overrides.py`, the
@@ -177,6 +226,43 @@ Action still synthesizes the overlay in `add_compile_context_flags` for every
 mode (compare and dump), and `actions/check-target` keeps its assurance-overlay
 step. The `set:` input is applied after those overlays, so an explicit `set:`
 line wins over the overlay's keys once the CLI accepts them.
+
+Update (#1857): `dump` and `project capture-variants` now take `--set` (see the result above). The Action still refuses an effective `set:` outside `mode: compare`; that refusal is unchanged here.
+
+**Result (2026-10-30, compile keys and the Action overlay: Phase 2 done).** The
+CLI applies the compile-context keys: `compile.frontend`, `compile.frontend_context`,
+`compile.compiler`, `compile.options`, `compile.sysroot`, `compile.nostdinc`,
+`compile.std` and `compile.lang`, through `COMPILE_CONTEXT_OVERRIDE_PATHS`
+(`workflows/compile_config.py`). `compare --set` (single pair, `--dry-run`, and the
+directory/package fan-out), `dump --set` and `merge_compile_config` /
+`resolve_compile_context` take `config_overrides` and load the file with the
+overrides laid over it (`load_build_config(cfg, config_overrides=...)`), so a key
+set by `--set` and the same key in `compile:` resolve to the same
+`CompileContext` (`tests/test_compile_context_set_equivalence.py`, per key and
+for a user file block). Precedence is unchanged: flag > `--set` > file > default.
+A `compile.compiler` set by `--set` is trusted even when the file was
+auto-discovered; a discovered file's own `compile.compiler` is still ignored.
+`compile.include_dirs` and `compile.defines` stay on their core flags.
+The composite Action's `add_compile_context_flags` (`action/run.sh`) forwards
+`ast-frontend`, `gcc-path`/`gcc-prefix`, `gcc-options`, `sysroot`, `nostdinc` and
+`lang` as `--set compile.*`, after which an explicit `set:` line is appended so it
+still wins. The synthesized `compile:` config, its Python helper, the temp-file
+merge into `--config`, and the compile-only sources-root helpers are deleted;
+`set:` is accepted on `mode: dump`
+(`tests/test_action_compile_set_forwarding.py`, argv per input; the retired
+overlay-internal test modules are removed). **Still open:** the typed API
+(`CompareRequest.config_overrides`, `DumpRequest.config_overrides`) refuses
+`compile.*`, because a typed request does not fold `.abicheck.yml`'s `compile:`
+block today, so there is no compile resolver for the override to reach. Checked
+in code: the typed compare path (`workflows/compare/execute.py`, `resolve.py`)
+calls no compile resolver; its `CompileContext` values are supplied by the
+caller. **Explicit open item:** applying `compile.*` overrides on the typed API
+needs a new fold of `.abicheck.yml`'s `compile:` block into typed requests first,
+then the same per-key equivalence test extended to the typed API. That is a
+separate change, not part of this phase's CLI and Action work. Phase 2's remaining
+gap is that typed-API fold, not the Action. One behavior to verify: a
+`--sources` tree's own `compile:` block used to be excluded by the Action on a
+pairwise compare with an old side; the CLI's own discovery now decides that case.
 
 ## Phase 3 — Behavior unifications (D2)
 

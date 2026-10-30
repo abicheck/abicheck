@@ -373,10 +373,9 @@ add_sided_flag() {
 # label like "1.0 (release build)" previously lost everything but its last
 # whitespace-separated word when routed through add_sided_flag's word-split.
 # Whether `extra-args` already names a version label. The Action's own
-# `old-label`/`new-label` defaults ('old'/'new') would otherwise be forwarded
-# as `--label` next to it, and the CLI refuses the retired `--version` beside
-# `--label` for the same option (exit 64). A label the user passed through
-# extra-args wins instead, as the last value does on the CLI.
+# `old-version`/`new-version` defaults ('old'/'new') would otherwise be forwarded
+# as `--label` next to it and override the user's own label. A label the user
+# passed through extra-args wins instead, as the last value does on the CLI.
 _extra_args_names_label() {
   local _tok
   # shellcheck disable=SC2086  # word-split exactly as `CMD+=($INPUT_EXTRA_ARGS)` does.
@@ -492,33 +491,13 @@ _resolve_depth_lc() {
   esac
 }
 
-# Phase 7 (one-comparison-product.md §4.1/§4.2, ADR-037 D8.1): --ast-frontend/
-# --compiler/--compiler-prefix/--compiler-option/--sysroot/--nostdinc/--lang
-# are gone from `compare`/`dump` entirely (CONFIG class, no CLI override --
-# `.abicheck.yml`'s `compile:` block is their only source now). This
-# Action's own cross-compilation inputs (ast-frontend/gcc-path/gcc-prefix/
-# gcc-options/sysroot/nostdinc/lang) still exist, so forwarding them now
-# means synthesizing a `compile:` block into a project config the run reads
-# via --config, instead of passing per-run flags. `dump`, single-pair
-# `compare`, and `compare --no-baseline`'s single audited artifact all call
-# this same `add_compile_context_flags` helper (ADR-068's Action-
-# input-lifecycle amendment removed `mode: scan`, which used to be this
-# helper's other caller, entirely). One real, accepted narrowing this
-# brings: `compile.options` (below) rejects any entry containing whitespace,
-# where the CLI's own now-removed --compiler-option flag once forwarded such
-# a flag verbatim (see `gcc-options`'s own action.yml description for the
-# full account).
-#
-# When the caller ALSO names their own build-config, this Action merges the
-# two: the synthesized compile: overlay is folded into a COPY of the named
-# build-config file (Action input wins on a key conflict), read and merged
-# through the same `_merge_config_overlay_with_discovered_project_config`
-# helper's "explicit" mode -- see that function's own docstring for why an
-# explicit build-config is fully trusted (no key stripping), unlike the
-# auto-discovered case below. An earlier revision rejected this combination
-# outright as "mutually exclusive"; that was itself a real regression, since
-# a workflow could legitimately combine both before Phase 7 demoted these
-# flags to config (Codex review, PR #1159, second round).
+# The compile-context inputs (ast-frontend/gcc-path/gcc-prefix/gcc-options/
+# sysroot/nostdinc/lang) are forwarded as `--set compile.*=…` (ADR-091 D4,
+# ADR-070 D2), not as a synthesized `compile:` config document: the CLI owns
+# the `compile:` schema, the trust gate on compile.compiler and the precedence
+# over `.abicheck.yml`. `add_compile_context_flags` below only translates input
+# grammar. The config overlay that remains in this file belongs to the
+# release-topology keys, which still need `--config` (see the paragraphs below).
 #
 # When build-config is NOT given, this Action's own synthesized overlay is
 # not the whole config picture: `_resolve_compare_config` only ever reads
@@ -1219,9 +1198,7 @@ PYEOF
   fi
 }
 
-_COMPILE_CONTEXT_CONFIG_OVERLAY=""
-# Same script-global-for-cleanup shape as _COMPILE_CONTEXT_CONFIG_OVERLAY
-# above -- add_release_topology_config_flags's own synthesized overlay
+# Script-global, so the EXIT trap can clean it up: add_release_topology_config_flags's own synthesized overlay
 # (Codex review, fresh evidence): a function-local `overlay` was created
 # under $RUNNER_TEMP but never reached the main EXIT trap further down,
 # leaking one file per run on a persistent self-hosted runner.
@@ -1300,124 +1277,27 @@ _old_library_is_stored_snapshot() {
   return 0
 }
 
-# Whether the caller's own $MODE resolves a --sources tree's compile:/
-# source:(singular)/debug: blocks PAIR-WIDE (echoes "pairwise") or
-# SINGLE-SIDED (echoes ""), for
-# _merge_config_overlay_with_discovered_project_config's own $6 -- see that
-# function's docstring. Only single-pair `compare OLD NEW` with a genuinely
-# *live* OLD operand is pairwise: both operands are then independently-
-# parsed live headers under the SAME resolved compile context. `dump` has
-# one operand, period, live or not; the audit-only shape (`compare
-# --no-baseline`, old-library empty) has no OLD side at all; and a
-# two-sided `compare` whose OLD operand is a stored snapshot or resolved
-# ABI baseline (_old_library_is_stored_snapshot) does no header/debug
-# extraction on that side either (Codex review, fresh evidence, PR #1171,
-# fifth round: the earlier `$MODE == "compare"` check alone was too coarse
-# and silently discarded a live NEW-with-`--sources` operand's own
-# compile:/source:/debug: settings whenever OLD was a stored/baseline
-# snapshot) -- none of these three shapes has an "other side" a --sources
-# tree's own compile:/debug: could leak into, so all three stay
-# single-sided.
+# The Action's compile-context inputs reach the CLI as `--set compile.*=…`
+# (ADR-091 D4, ADR-070 D2). The CLI owns the `compile:` schema, the trust gate
+# on `compile.compiler` and the precedence over `.abicheck.yml`, so this
+# function only translates input grammar: a string is written as a JSON
+# string (a YAML flow scalar, so `123` stays text and a backslash survives),
+# and `gcc-options` -- a shell-quoted line, or one token per line -- becomes
+# the list `compile.options` takes.
 #
-# The release-style directory/package `compare` fan-out never calls
-# add_compile_context_flags at all (it rejects every compile-context input
-# outright), so it never reaches this helper either.
-_compile_context_sources_pairwise() {
-  if [[ "$MODE" == "compare" && -n "${INPUT_OLD_LIBRARY:-}" ]] \
-     && ! _old_library_is_stored_snapshot "${INPUT_OLD_LIBRARY:-}"; then
-    echo "pairwise"
-  fi
-}
-
-# Whether the caller's own single-sided `compile:` resolution (see
-# _compile_context_sources_pairwise's own docstring for what "single-sided"
-# covers) is a genuine two-stage MERGE (echoes "true") or a single-document
-# EXCLUSIVE selection/REPLACE (echoes "", the default) -- Codex review,
-# fresh evidence, PR #1222 fourth round, second finding: within the
-# single-sided bucket, `compile:` does NOT always resolve the same way.
-# `dump`/`scan --against` (`$MODE != "compare"`) call `merge_compile_config`
-# exactly ONCE, where `build_config`/`sources` are mutually exclusive
-# alternatives (`cli_options.merge_compile_config`'s own `cfg = build_config
-# if explicit_config else discover_build_config(sources)`) -- the
-# `--sources` tree's own document supplies `compile:` EXCLUSIVELY when no
-# explicit `--build-config` is given, the identical single-document shape
-# `build:`/`sources:`/`source:`/`debug:` already use, so this echoes ""
-# (REPLACE) for them. `compare`'s TWO-SIDED shape (`$MODE == "compare"` with
-# old-library or abi-baseline actually set -- which, per
-# _compile_context_sources_pairwise's own docstring, reaches this
-# single-sided bucket at all only via a stored-snapshot old operand) is
-# different: `cli_compare_helpers.py`'s own `resolve_compile_context(...,
-# build_config=cfg_path, ...)` ALWAYS independently resolves the
-# checkout-root document's `compile:` block FIRST, unconditionally, and the
-# live side's own `--sources` tree only folds ON TOP of that via a SECOND
-# `merge_compile_config` call (`compare.py`'s `_maybe_dump_side`) -- a
-# genuine two-stage MERGE, so this echoes "true" for it.
-#
-# P1 fix, PR #1222 eleventh round (Codex review, fresh evidence): this
-# flag's OWN "true" value no longer causes `_sources_root_blocks` to
-# promote/merge `compile:` from the sources root at the overlay-generation
-# layer any more -- `compare_inline_evidence._side` (the
-# `_maybe_dump_side` reference above predates two renames) performs that
-# second merge stage unconditionally, regardless of whether `--config` was
-# explicit, so this overlay ALSO folding the sources root's `compile:` in
-# duplicated it. This function keeps echoing "true" for the identical
-# `mode: compare` condition purely because `source:`(singular)/`debug:`
-# promotion still depends on it (see the caller's own comment) -- it is no
-# longer read for any `compile:`-specific decision.
-#
-# The audit-only shape (old-library/abi-baseline BOTH omitted, `compare
-# --no-baseline`) also reaches the single-sided bucket, but is NOT the
-# stored-snapshot-old case above and does NOT go through
-# `resolve_compile_context` at all: `compare_no_baseline.py`'s own
-# `_resolve_no_baseline_invocation` resolves the checkout-root config only
-# for scope/severity/assurance, and the candidate's own compile: comes from
-# `workflows.no_baseline_compare.resolve_no_baseline_candidate` ->
-# `resolve_side_snapshot` -- the exact same per-side primitive `dump`
-# resolves through, with no second, checkout-root-first merge stage at all
-# (verified by reading that call chain -- no `compile=` override is ever
-# threaded through, so a checkout-root `compile:` block plays no part here).
-# So this must NOT echo "true" for the audit-only shape (a real regression
-# found via `test_action_compile_context_old_library_liveness.py`'s own
-# `TestAuditOnlyCompareStaysSingleSidedUnconditionally`, which this
-# unconditional `$MODE == "compare"` check failed): it echoes "true" only
-# when compare actually has an old side to two-stage-merge against. See
-# `apply_sources_root_config_blocks`'s own `merge_compile` parameter
-# docstring for the full account.
-_compile_context_sources_merge_compile() {
-  if [[ "$MODE" == "compare" \
-        && ( -n "${INPUT_OLD_LIBRARY:-}" || -n "${INPUT_ABI_BASELINE:-}" ) ]]; then
-    echo "true"
-  fi
+# $1: "true" to also forward `lang` (dump and compare).
+_compile_set_string() {
+  local value="$2"
+  value=${value//\\/\\\\}
+  value=${value//\"/\\\"}
+  printf '%s="%s"' "$1" "$value"
 }
 
 add_compile_context_flags() {
-  # $1: "true" to also fold the `lang` input into the synthesized overlay
-  # (dump and single-pair compare, including the audit-only shape -- the
-  # CLI itself has no literal --lang flag at all any more, Phase 7 -- see
-  # _compile_context_sources_pairwise's own docstring above -- all take
-  # --lang here now).
   local include_lang="${1:-true}"
-  # action.yml maps an omitted `lang` input to INPUT_LANG=c++ -- that is the
-  # *default*, not a user override, so it must not by itself count as "lang
-  # was explicitly requested" (CodeRabbit review, PR #1146, finding #6): a
-  # non-empty INPUT_LANG only counts when it differs from that default.
-  # `auto` is the documented no-op spelling of ast-frontend -- it resolves
-  # to exactly what leaving the input unset resolves to -- so it is
-  # excluded here for the same reason the `c++` lang default is: a run that
-  # configures nothing must synthesize nothing. Without this, `ast-frontend:
-  # auto` alone produced an empty `{"compile": {}}` overlay and put a
-  # `--config` on the command line that was not there before, routing a
-  # discovered project `.abicheck.yml` through this function's own
-  # merge-and-strip path instead of letting the CLI discover it directly.
-  # Harmless-looking and not: `discover` mode strips `compile.compiler`
-  # (see `_merge_config_overlay_with_discovered_project_config`'s trust
-  # distinction), so a project that set one could silently lose it. The
-  # release path made this reachable where it previously was not, but the
-  # fix belongs here rather than at that call site -- the single-pair path
-  # has the same behavior and `auto` means the same thing on both (Codex
-  # review, PR #1233; its own stated mechanism, a `compile.lang: c++` in
-  # the overlay, is not what this produced -- the empty overlay and the
-  # `--config` it carries are).
+  # `auto` is the documented no-op spelling of ast-frontend, and the `c++`
+  # lang default is not a user override: a run that configures nothing
+  # forwards nothing, so it keeps the CLI's own `.abicheck.yml` discovery.
   local _ast_frontend_requested="${INPUT_FRONTEND:-}"
   if [[ "$_ast_frontend_requested" == "auto" ]]; then
     _ast_frontend_requested=""
@@ -1427,185 +1307,46 @@ add_compile_context_flags() {
         && ( "$include_lang" != "true" || -z "${INPUT_LANG:-}" || "${INPUT_LANG:-}" == "c++" ) ]]; then
     return 0
   fi
-  # Codex review, fresh evidence, PR #1154 follow-up ("Reject configs
-  # supplied through extra-args"): a project config can also arrive via the
-  # documented, supported `extra-args: --config PATH` passthrough. This used
-  # to be rejected right here, specific to this function's own inputs -- now
-  # superseded by the general `_cmd_has_config_flag && _extra_args_has_
-  # config_flag` check just before `extra-args` is appended (see that call
-  # site's own docstring near the bottom of this script), which catches the
-  # identical collision for every `--config`-synthesizing path (dso-only/
-  # fail-on-removed-library/compile-context) in one place instead of one
-  # narrower copy per function.
-  if [[ -z "$_COMPILE_CONTEXT_CONFIG_OVERLAY" ]]; then
-    if [[ -z "$_PY_BIN" ]]; then
-      # Same "fail loud rather than silently produce a wrong compile
-      # context" precedent as add_flag_shlex_split's and
-      # _merge_config_overlay_with_discovered_project_config's own
-      # missing-interpreter guards -- and the same isolation requirement as
-      # every other inline-Python invocation in this file (Codex review, PR
-      # #1159, fourth round: this generator was launching a bare `python3`
-      # from the checked-out repository instead of the resolved, isolated
-      # `$_PY_BIN`/`$_PY_SAFE_DIR` interpreter every other invocation here
-      # uses -- a missing interpreter on Windows runners exposing only
-      # `python`, and, more seriously, a code-execution risk on a
-      # `pull_request` workflow where a fork-controlled `sitecustomize.py`
-      # committed into the checkout could execute during a bare
-      # same-directory `python3`'s own interpreter startup, before this
-      # script's body runs).
-      _error_annotation "mode: ${MODE} needs a working Python interpreter on PATH to synthesize the compile: config overlay from this Action's cross-compilation inputs (resolved interpreter: '${_PY_BIN:-<none found on PATH>}')."
-      exit 1
-    fi
-    # The eight raw input values are passed on stdin, NUL-separated, not as
-    # env vars (Codex review, fresh evidence, PR #1162: windows-latest CI
-    # failure, this function only). A value shaped like a POSIX absolute
-    # path (e.g. `gcc-path: /opt/gcc-14/bin/g++`, a real, common
-    # cross-compilation input) triggered Git Bash/MSYS's automatic path
-    # conversion when forwarded as an env var to the resolved `$_PY_BIN` --
-    # silently rewriting it into a Windows path (inserting "Program Files"
-    # and its embedded space) before this script ever saw it, e.g.
-    # `/opt/gcc-14/bin/g++` -> `C:/Program Files/Git/opt/gcc-14/bin/g++`.
-    # Only actual argv/envp entries are subject to that conversion -- stdin
-    # content never is (the same fix already applied to
-    # add_flag_shlex_split()'s single-value case above) -- so this
-    # sidesteps the whole class regardless of which of the eight fields
-    # triggers it.
-    #
-    # The script itself is written to its own $RUNNER_TEMP-anchored file
-    # rather than fed to `"$_PY_BIN" -` via a heredoc: a heredoc redirects
-    # stdin to the program text for that invocation, which would collide
-    # with (and silently discard) the piped NUL-separated data above -- a
-    # heredoc attached to a command always wins that command's own stdin
-    # redirection, so the data pipe would never reach the program at all
-    # (PR #1162's own finding). A real script file, passed as an argv
-    # argument instead, leaves stdin free for the data; $RUNNER_TEMP (not a
-    # bare `mktemp`) keeps the file itself in a form every native
-    # interpreter can open directly, including this one, matching the
-    # convention every other mktemp call in this file already follows (see
-    # PR_JSON/PR_BODY).
-    local _compile_context_helper_py
-    _compile_context_helper_py=$(mktemp "${RUNNER_TEMP:-/tmp}/abicheck-compile-context-helper.XXXXXX")
-    cat > "$_compile_context_helper_py" <<'PYEOF'
-# Synthesizes a minimal .abicheck.yml `compile:` block (as JSON, a valid
-# YAML subset abicheck's own yaml.safe_load parses identically) from this
-# Action's cross-compilation inputs -- the config-only replacement for the
-# per-run flags Phase 7 removed from compare/dump. Printed to stdout (not
-# written directly to the overlay path) so the caller can merge it with the
-# repository's own auto-discovered .abicheck.yml before writing the final
-# file -- see _merge_config_overlay_with_discovered_project_config's own
-# docstring for why an unmerged overlay would silently drop that config.
-import json
-import shlex
-import sys
-
-(
-    include_lang,
-    lang,
-    frontend,
-    gcc_path,
-    gcc_options,
-    sysroot,
-    nostdinc,
-) = sys.stdin.buffer.read().split(b"\0")[:7]
-include_lang = include_lang.decode("utf-8")
-lang = lang.decode("utf-8")
-frontend = frontend.decode("utf-8")
-gcc_path = gcc_path.decode("utf-8")
-gcc_options = gcc_options.decode("utf-8")
-sysroot = sysroot.decode("utf-8")
-nostdinc = nostdinc.decode("utf-8")
-
-compile_blk: dict[str, object] = {}
-if include_lang == "true":
-    if lang:
-        compile_blk["lang"] = lang
-if frontend and frontend != "auto":
-    compile_blk["frontend"] = frontend
-# compile.compiler is the Action's `compiler` input (ADR-091 R5). It replaced
-# the gcc-path/gcc-prefix pair; gcc-prefix is a retired tombstone.
-compiler = gcc_path
-if compiler:
-    compile_blk["compiler"] = compiler
-if gcc_options:
-    # CodeRabbit review, PR #1146, finding #7: BuildConfig.from_dict()
-    # (abicheck/buildsource/build_config.py) rejects any compile.options
-    # list item containing whitespace -- each entry must already be one
-    # complete argv atom, the same contract add_flag_shlex_split (above)
-    # already honors for a multi-line (YAML block scalar) value: one line is
-    # one complete, space-safe token, never shlex-split further. Unconditional
-    # `shlex.split()` here previously ignored that line-per-token
-    # convention and instead re-tokenized the whole multi-line value on
-    # every whitespace character regardless of line breaks -- for an
-    # ordinary multi-line value that diverged from those token
-    # boundaries, and for a deliberately-spaced line (e.g. one meant as a
-    # single, later-rejected whitespace-bearing atom) it silently
-    # *accepted* the split instead of surfacing BuildConfig's own
-    # whitespace-rejection error, which is the outcome the unsplit-multiline
-    # handling above produces for the identical input shape.
-    # A single-line value keeps `shlex.split()`: that spelling is the
-    # direct config-key replacement for the old scalar `--gcc-options`
-    # flag, which was always shell-quoting-aware.
-    compile_blk["options"] = (
-        [line for line in gcc_options.splitlines() if line]
-        if "\n" in gcc_options
-        else shlex.split(gcc_options)
-    )
-if sysroot:
-    compile_blk["sysroot"] = sysroot
-if nostdinc == "true":
-    compile_blk["nostdinc"] = True
-json.dump({"compile": compile_blk}, sys.stdout)
-PYEOF
-    local _compile_overlay_json
-    _compile_overlay_json=$(printf '%s\0%s\0%s\0%s\0%s\0%s\0%s\0' \
-      "$include_lang" "${INPUT_LANG:-}" "${INPUT_FRONTEND:-}" "${INPUT_COMPILER:-}" \
-      "${INPUT_COMPILE_OPTIONS:-}" "${INPUT_SYSROOT:-}" "${INPUT_NOSTDINC:-false}" |
-    (cd "$_PY_SAFE_DIR" && PYTHONPATH= "$_PY_BIN" "$_compile_context_helper_py"))
-    # $? (not PIPESTATUS -- this script's own `set -uo pipefail`, already in
-    # effect for the whole file, already makes the pipeline's exit status
-    # the interpreter's own, so a second mechanism would be redundant) is
-    # the helper's exit status, not the printf's (main-branch parallel fix,
-    # reconciled here: a failed interpreter invocation would otherwise fall
-    # through to the unconditional CMD+=(--config ...) below with an empty
-    # $_compile_overlay_json, which the merge step's own `json.loads` would
-    # then raise an uncaught JSONDecodeError on rather than failing with a
-    # clean ::error:: -- the same "explicit input deserves a loud rejection,
-    # not a silent wrong result" precedent this function's own module
-    # docstring already sets for the release-operand guard).
-    local _compile_context_overlay_rc=$?
-    rm -f "$_compile_context_helper_py"
-    if [[ "$_compile_context_overlay_rc" -ne 0 || -z "$_compile_overlay_json" ]]; then
-      _error_annotation "mode: ${MODE} could not synthesize the compile: config block from the ast-frontend/gcc-*/sysroot/nostdinc${include_lang:+/lang} inputs (interpreter exit ${_compile_context_overlay_rc}). Running without it would parse headers under the wrong compile context, so the step fails instead of continuing silently."
-      exit 1
-    fi
-    _COMPILE_CONTEXT_CONFIG_OVERLAY=$(mktemp "${RUNNER_TEMP:-/tmp}/abicheck-compile-context.XXXXXX")
-    if ! _COMPILE_CONTEXT_CONFIG_OVERLAY=$(_mktemp_canonical "$_COMPILE_CONTEXT_CONFIG_OVERLAY"); then
-      _rm_overlay_on_early_exit "$_COMPILE_CONTEXT_CONFIG_OVERLAY"
-      exit 1
-    fi
-    if [[ -n "${INPUT_BUILD_CONFIG:-}" ]]; then
-      # An explicit build-config input is a deliberate operator action --
-      # merge this Action's synthesized compile: overlay into a COPY of
-      # that file (Action input wins on a key conflict), fully trusted (no
-      # stripping of compile.compiler -- see
-      # _merge_config_overlay_with_discovered_project_config's own
-      # docstring for the trust distinction), instead of the previous hard
-      # rejection of this combination (Codex review, PR #1159, second
-      # round: a real regression for any workflow that combined both
-      # before Phase 7 demoted these flags to config).
-      _merge_config_overlay_with_discovered_project_config \
-        "$_compile_overlay_json" "$_COMPILE_CONTEXT_CONFIG_OVERLAY" \
-        "${INPUT_BUILD_CONFIG}" "explicit" "${INPUT_SOURCES:-}" \
-        "$(_compile_context_sources_pairwise)" \
-        "$(_compile_context_sources_merge_compile)"
-    else
-      _merge_config_overlay_with_discovered_project_config \
-        "$_compile_overlay_json" "$_COMPILE_CONTEXT_CONFIG_OVERLAY" "$PWD" \
-        "discover" "${INPUT_SOURCES:-}" "$(_compile_context_sources_pairwise)" \
-        "$(_compile_context_sources_merge_compile)"
-    fi
+  if [[ "$include_lang" == "true" && -n "${INPUT_LANG:-}" ]]; then
+    CMD+=(--set "$(_compile_set_string compile.lang "$INPUT_LANG")")
   fi
-  CMD+=(--config "$_COMPILE_CONTEXT_CONFIG_OVERLAY")
+  if [[ -n "$_ast_frontend_requested" ]]; then
+    CMD+=(--set "$(_compile_set_string compile.frontend "$_ast_frontend_requested")")
+  fi
+  # compile.compiler takes a full compiler path or, ending in `-`, a
+  # cross-toolchain prefix (ADR-091 R5: the `compiler` input carries either).
+  local _compiler="${INPUT_COMPILER:-}"
+  if [[ -n "$_compiler" ]]; then
+    CMD+=(--set "$(_compile_set_string compile.compiler "$_compiler")")
+  fi
+  if [[ -n "${INPUT_COMPILE_OPTIONS:-}" ]]; then
+    if [[ -z "$_PY_BIN" ]]; then
+      _error_annotation "mode: ${MODE} needs a working Python interpreter on PATH to split gcc-options into compile.options (resolved interpreter: '${_PY_BIN:-<none found on PATH>}')."
+      exit 1
+    fi
+    # The raw value goes on stdin, not argv: a POSIX-looking value would be
+    # path-rewritten by Git Bash before it reached the interpreter. Run from
+    # the isolated $_PY_SAFE_DIR like every other inline-Python call here.
+    local _options_json _options_rc=0
+    _options_json=$(printf '%s' "$INPUT_COMPILE_OPTIONS" | (cd "$_PY_SAFE_DIR" && PYTHONPATH= "$_PY_BIN" -c 'import json, shlex, sys
+text = sys.stdin.read()
+print(json.dumps([line for line in text.splitlines() if line] if "\n" in text else shlex.split(text)))')) || _options_rc=$?
+    # A Windows interpreter's print() ends its line with CRLF, and $(...)
+    # strips only the trailing LF, so a bare \r would otherwise reach
+    # `--set compile.options=` and corrupt the last JSON token.
+    _options_json=${_options_json//$'\r'/}
+    if [[ "$_options_rc" -ne 0 || -z "$_options_json" ]]; then
+      _error_annotation "mode: ${MODE} could not split gcc-options into compile.options (interpreter exit ${_options_rc}). Running without it would parse headers under the wrong compile context, so the step fails instead of continuing silently."
+      exit 1
+    fi
+    CMD+=(--set "compile.options=${_options_json}")
+  fi
+  if [[ -n "${INPUT_SYSROOT:-}" ]]; then
+    CMD+=(--set "$(_compile_set_string compile.sysroot "$INPUT_SYSROOT")")
+  fi
+  if [[ "${INPUT_NOSTDINC:-false}" == "true" ]]; then
+    CMD+=(--set compile.nostdinc=true)
+  fi
 }
 
 # Phase 7d (one-comparison-product.md §4.1, ADR-068 D5): `compare`'s
@@ -1641,7 +1382,7 @@ PYEOF
 add_release_topology_config_flags() {
   # $1 (optional): "scalar" for the single-pair and audit-only compare shapes.
   # Those have no directory/package fan-out, so the only key that applies to
-  # them is assurance.require_complete (require-complete); the
+  # them is assurance.require_complete (analysis-assurance-complete); the
   # release-only inputs are neither read nor written for them. Omitted (or any
   # other value) is the directory/package release shape, which writes every
   # key this function knows about. Both shapes overlay the same --config file,
@@ -1711,11 +1452,7 @@ add_release_topology_config_flags() {
     # `tests/test_action_release_topology_config.py`'s harness, under `set
     # -u` (Codex-review precedent: every other extracted-region reference
     # in this file is written the same defensive way).
-    if [[ -n "${_COMPILE_CONTEXT_CONFIG_OVERLAY:-}" \
-          && "$_existing_config" == "${_COMPILE_CONTEXT_CONFIG_OVERLAY:-}" ]]; then
-      _release_base="$_COMPILE_CONTEXT_CONFIG_OVERLAY"
-      _release_base_mode="explicit"
-    elif [[ -n "${INPUT_BUILD_CONFIG:-}" && "$_existing_config" == "${INPUT_BUILD_CONFIG}" ]]; then
+    if [[ -n "${INPUT_BUILD_CONFIG:-}" && "$_existing_config" == "${INPUT_BUILD_CONFIG}" ]]; then
       :
     else
       echo "::error::internal: add_release_topology_config_flags called after --config was already added to the command line for a reason other than build-config or this Action's own compile-context overlay -- this is a bug in run.sh, not a user input problem."
@@ -1783,7 +1520,7 @@ if release_blk:
 _fail_on_removed = os.environ.get("ABICHECK_GATE_FAIL_ON_REMOVED_LIBRARY", "")
 if _fail_on_removed:
     doc["gate"] = {"fail_on_removed_library": _fail_on_removed == "true"}
-# require-complete: the tri-state per-job override of
+# analysis-assurance-complete: the tri-state per-job override of
 # assurance.require_complete. Same rule as every key above: written only when
 # given, so "omitted" leaves the base config's own value standing, and an
 # explicit "false" overrides a discovered "true" (the one direction the old
@@ -2737,11 +2474,11 @@ CMD=(abicheck)
 
 MODE="${INPUT_MODE:-compare}"
 
-# `set:` is forwarded only by mode: compare. validate-inputs.sh refuses the
-# same combination in the workflow; this guard covers a direct run.sh call,
-# so an override can never be dropped silently.
-if [[ "$MODE" != "compare" ]] && [[ "${INPUT_SET:-}" =~ (^|$'\n')[[:space:]]*[^#[:space:]] ]]; then
-  _error_annotation "set: applies to mode: compare only, and mode: ${MODE} would ignore it. Remove set: from this step, or move the override into .abicheck.yml."
+# `set:` is forwarded by mode: compare and mode: dump. validate-inputs.sh
+# refuses the same combination in the workflow; this guard covers a direct
+# run.sh call, so an override can never be dropped silently.
+if [[ "$MODE" != "compare" && "$MODE" != "dump" ]] && [[ "${INPUT_SET:-}" =~ (^|$'\n')[[:space:]]*[^#[:space:]] ]]; then
+  _error_annotation "set: applies to mode: compare and dump only, and mode: ${MODE} would ignore it. Remove set: from this step, or move the override into .abicheck.yml."
   exit 1
 fi
 
@@ -3791,10 +3528,8 @@ if [[ "$MODE" == "dump" ]]; then
   # compile_commands.json. (See action input `build-info`.)
   add_single_flag "--sources" "${INPUT_SOURCES:-}"
   add_single_flag "--build-info" "${INPUT_BUILD_INFO:-${INPUT_COMPILE_DB:-}}"
-  # Skipped when add_compile_context_flags above already merged build-config
-  # into a synthesized compile: overlay and added --config itself (the
-  # explicit-build-config-plus-compile-context case) -- adding it again here
-  # would emit a conflicting second --config for the CLI to reject.
+  # Skipped only when a --config is already on the command line (the
+  # release-topology overlay added one): a second --config would be rejected.
   if ! _cmd_has_config_flag; then
     add_single_flag "--config" "${INPUT_BUILD_CONFIG:-}"
   fi
@@ -3812,6 +3547,8 @@ if [[ "$MODE" == "dump" ]]; then
   # dry-run performs no analysis and writes nothing, so it is mutually
   # exclusive with -o/--output on the CLI -- skip the output file entirely
   # when set, rather than passing both and letting the CLI reject it.
+  add_set_flags
+
   if [[ "${INPUT_DRY_RUN:-false}" == "true" ]]; then
     CMD+=(--dry-run)
   else
@@ -3870,12 +3607,12 @@ elif [[ "$MODE" == "compare" ]]; then
       echo "::error::mode: compare without a baseline (old-library/abi-baseline both omitted) does not support old-header/old-include -- there is no OLD side for this evidence to describe, and the CLI rejects an explicitly OLD-scoped --header/--include outright rather than silently dropping it (abicheck/frontends/cli/commands/no_baseline_rulings.py's _reject_old_sided_inputs). Set old-library (or abi-baseline) to run a real two-sided comparison, which supports old-header/old-include, or drop these inputs for this audit-only run."
       exit 1
     fi
-    # old-label's Action-level default is the literal placeholder 'old'
+    # old-version's Action-level default is the literal placeholder 'old'
     # (action.yml), always present even when the caller never set it --
     # inert here, not a usage error, same as validate-inputs.sh's mirror
     # check (Codex review, PR #1223, round 11).
     if [[ -n "${INPUT_OLD_LABEL:-}" && "${INPUT_OLD_LABEL}" != "old" ]]; then
-      echo "::error::mode: compare without a baseline (old-library/abi-baseline both omitted) does not support old-label -- there is no OLD side to label, and the CLI rejects an explicitly OLD-scoped --version outright rather than silently dropping it (abicheck/frontends/cli/commands/no_baseline_rulings.py's _reject_old_sided_inputs). Set old-library (or abi-baseline) to run a real two-sided comparison, which supports old-label, or drop old-label for this audit-only run."
+      echo "::error::mode: compare without a baseline (old-library/abi-baseline both omitted) does not support old-version -- there is no OLD side to label, and the CLI rejects an explicitly OLD-scoped --label outright rather than silently dropping it (abicheck/frontends/cli/commands/no_baseline_rulings.py's _reject_old_sided_inputs). Set old-library (or abi-baseline) to run a real two-sided comparison, which supports old-version, or drop old-version for this audit-only run."
       exit 1
     fi
   fi
@@ -3898,8 +3635,8 @@ elif [[ "$MODE" == "compare" ]]; then
   # silently dropped here. public-header-dir has no dedicated `compare`
   # flag (unlike legacy `scan`) -- it folds into -H, the same directory
   # provenance-and-extraction-scope role a bare -H root already plays.
-  # old-label is rejected upfront above too, same as old-header/
-  # old-include -- only new-label is forwarded on this shape.
+  # old-version is rejected upfront above too, same as old-header/
+  # old-include -- only new-version is forwarded on this shape.
   if [[ "$_NO_BASELINE" == "true" ]]; then
     add_flag "-H" "${INPUT_HEADER:-}"
     add_flag "-H" "${INPUT_NEW_HEADER:-}"
@@ -3964,17 +3701,8 @@ elif [[ "$MODE" == "compare" ]]; then
   # (_resolve_compare_config runs before the directory/package dispatch), so
   # it stays unconditional; an earlier fix lumped it in with the three
   # rejected flags and silently dropped a bundle caller's build-config
-  # (Codex review, second round). Skipped only when add_compile_context_flags
-  # above already merged build-config into a synthesized compile: overlay and
-  # added --config itself (the explicit-build-config-plus-compile-context
-  # case) -- which, now that the compile-context inputs are forwarded for a
-  # directory/package operand too, is reachable on *both* operand shapes,
-  # not just the single-pair one. `_cmd_has_config_flag` is what keeps that
-  # from double-adding --config, and the caller's build-config is not lost
-  # to the skip: the overlay add_compile_context_flags wrote is a merge of
-  # this Action's compile: block into a COPY of that very file (Action
-  # input wins on a key conflict). The release-topology overlay below folds
-  # onto whichever of the two this leaves on the command line -- see
+  # (Codex review, second round). `_cmd_has_config_flag` keeps a --config
+  # already added (by the release-topology overlay) from being doubled; see
   # add_release_topology_config_flags.
   if ! _cmd_has_config_flag; then
     add_single_flag "--config" "${INPUT_BUILD_CONFIG:-}"
@@ -4167,9 +3895,10 @@ elif [[ "$MODE" == "compare" ]]; then
     fi
   fi
 
-  # `--policy` takes both operands: a built-in profile name, or a policy
-  # document (a path, or a packaged built-in like `security`). The `policy`
-  # input carries either one (ADR-091 R2; the policy-file input is retired).
+  # `--policy` takes both operands now: a built-in profile name, or a policy
+  # document (a path, or a packaged built-in like `security`). A policy-file
+  # input therefore *is* the policy for this run and outranks the profile,
+  # exactly as the removed `--policy-file` flag did.
   add_single_flag "--policy" "${INPUT_POLICY:-}"
   add_line_flags "--suppress" "${INPUT_SUPPRESS:-}"
   # ADR-067 D5: this run's acknowledgment records. Operator-named, like
@@ -4347,7 +4076,7 @@ if [[ -n "${INPUT_EXTRA_ARGS:-}" ]]; then
   # account. Caught here, once, right before the append that would create
   # the collision.
   if _cmd_has_config_flag && _extra_args_has_config_flag; then
-    echo "::error::extra-args passes its own --config, which conflicts with the --config this Action already synthesized from a dso-only/fail-on-removed-library/include-private-dso/require-complete/compile-context input (both cannot be honored -- Click keeps only the last one, silently dropping the other). Use the 'build-config' input instead of 'extra-args: --config ...' when combining a synthesized setting with a project config file; it merges with, rather than replaces, the synthesized overlay."
+    echo "::error::extra-args passes its own --config, which conflicts with the --config this Action already synthesized from a dso-only/fail-on-removed-library/include-private-dso/analysis-assurance-complete/compile-context input (both cannot be honored -- Click keeps only the last one, silently dropping the other). Use the 'build-config' input instead of 'extra-args: --config ...' when combining a synthesized setting with a project config file; it merges with, rather than replaces, the synthesized overlay."
     exit 1
   fi
   # A flag `compare` genuinely lacks -- `--pattern-verdicts` included --
@@ -4398,14 +4127,13 @@ STDERR_FILE=$(mktemp)
 #: a non-PR-comment run or `pr-comment-on: never` where the temp file was
 #: still created but never posted. Without this, a persistent self-hosted
 #: runner accumulates one JSON report per scan run indefinitely.
-#: _COMPILE_CONTEXT_CONFIG_OVERLAY/_RELEASE_TOPOLOGY_CONFIG_OVERLAY (Codex
-#: review, fresh evidence): both are created well before this trap is
-#: installed too (add_compile_context_flags/add_release_topology_config_
-#: flags run while CMD is still being assembled), same "referencing a
+#: _RELEASE_TOPOLOGY_CONFIG_OVERLAY (Codex review, fresh evidence): it is
+#: created before this trap is installed (add_release_topology_config_flags
+#: runs while CMD is still being assembled), same "referencing a
 #: not-yet-existing empty-string global is a no-op, not an error" property
 #: as PR_JSON above -- a run that never enables either input just cleans
 #: up an empty path.
-trap 'rm -f "$STDERR_FILE" "${_STDOUT_JSON_FILE:-}" "${PR_JSON:-}" "${_COMPILE_CONTEXT_CONFIG_OVERLAY:-}" "${_RELEASE_TOPOLOGY_CONFIG_OVERLAY:-}"; rm -rf "${_BASELINE_CLEANUP:-}" "${_PY_SAFE_DIR:-}"' EXIT
+trap 'rm -f "$STDERR_FILE" "${_STDOUT_JSON_FILE:-}" "${PR_JSON:-}" "${_RELEASE_TOPOLOGY_CONFIG_OVERLAY:-}"; rm -rf "${_BASELINE_CLEANUP:-}" "${_PY_SAFE_DIR:-}"' EXIT
 
 # `_json_report_src`/`_extra_args_write_json_path` below trust `OUTPUT_
 # FILE`/a user-supplied `-o json=PATH` purely on "the file exists and

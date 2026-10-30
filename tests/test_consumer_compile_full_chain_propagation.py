@@ -100,16 +100,13 @@ step's real `uses:` value before returning it.
 
 from __future__ import annotations
 
+import json
 from copy import deepcopy
+from pathlib import Path
 from typing import Any
 
 from _gha_expr import eval_gha_expression
-from test_action_compile_context_parity import (
-    _DUMP_COMPILE_CONTEXT_START,
-    _DUMP_MODE_MARKER,
-    _read_compile_config_overlay,
-    _run_region,
-)
+from test_action_compile_set_forwarding import _compile_sets, _run as _run_dump_argv
 from test_action_run_contract import ACTION_YML, _step_env_mapping
 from test_reusable_workflows_project_evidence import (
     CHECK_PROJECT,
@@ -248,7 +245,9 @@ def _hop3_inputs_from(
     }
 
 
-def test_sentinel_consumer_gcc_path_survives_config_to_check_target_input() -> None:
+def test_sentinel_consumer_gcc_path_survives_config_to_check_target_input(
+    tmp_path: Path,
+) -> None:
     """Hops 1-3: config -> generate_run_plan() -> check-project.yml ->
     check-target/action.yml's scheduling guard AND its `with:`, evaluated
     for real at each of the latter two."""
@@ -355,7 +354,7 @@ def test_sentinel_consumer_gcc_path_survives_config_to_check_target_input() -> N
     assert final_ast_frontend == _SENTINEL_CONSUMER_AST_FRONTEND
 
     _assert_reaches_real_dump_cli_invocation(
-        final_gcc_path, final_gcc_options, final_ast_frontend
+        tmp_path, final_gcc_path, final_gcc_options, final_ast_frontend
     )
 
 
@@ -448,7 +447,9 @@ def test_marker_only_overlay_activates_the_consumer_step_without_any_field() -> 
     )
 
 
-def test_partial_overlay_falls_back_to_workflow_global_per_field() -> None:
+def test_partial_overlay_falls_back_to_workflow_global_per_field(
+    tmp_path: Path,
+) -> None:
     """Codex review (PR #906): a real third state neither prior test
     exercises. The main test's overlay resolves every field itself; the
     marker-only test's overlay resolves NO field and pairs it with empty
@@ -552,13 +553,13 @@ def test_partial_overlay_falls_back_to_workflow_global_per_field() -> None:
     assert final_ast_frontend == _SENTINEL_CONSUMER_AST_FRONTEND
 
     _assert_reaches_real_dump_cli_invocation(
-        final_gcc_path, final_gcc_options, final_ast_frontend
+        tmp_path, final_gcc_path, final_gcc_options, final_ast_frontend
     )
 
 
-def test_partial_overlay_without_frontend_falls_back_to_workflow_global_frontend() -> (
-    None
-):
+def test_partial_overlay_without_frontend_falls_back_to_workflow_global_frontend(
+    tmp_path: Path,
+) -> None:
     """Codex review (PR #906): the sibling test above only omits `frontend:`
     from the overlay, so its own `matrix.consumer_compile_ast_frontend ||
     inputs.ast-frontend` fallback is never reached -- every scenario in
@@ -661,7 +662,7 @@ def test_partial_overlay_without_frontend_falls_back_to_workflow_global_frontend
     assert final_ast_frontend == _WORKFLOW_GLOBAL_AST_FRONTEND
 
     _assert_reaches_real_dump_cli_invocation(
-        final_gcc_path, final_gcc_options, final_ast_frontend
+        tmp_path, final_gcc_path, final_gcc_options, final_ast_frontend
     )
 
 
@@ -809,7 +810,7 @@ def _assert_run_abicheck_step_invokes_run_sh() -> None:
 
 
 def _assert_reaches_real_dump_cli_invocation(
-    gcc_path: str, gcc_options: str, ast_frontend: str
+    tmp_path: Path, gcc_path: str, gcc_options: str, ast_frontend: str
 ) -> None:
     """Hop 4: the values resolved at the end of hops 1-3, mapped to their REAL
     INPUT_* env var names via root action.yml's own "Run abicheck" step's
@@ -850,11 +851,14 @@ def _assert_reaches_real_dump_cli_invocation(
         env_by_input["sysroot"]: "",
         "INPUT_NOSTDINC": "false",
     }
-    cmd, _ = _run_region(_DUMP_MODE_MARKER, env, _DUMP_COMPILE_CONTEXT_START)
-    compile_blk = _read_compile_config_overlay(cmd)
-    assert compile_blk["frontend"] == ast_frontend
-    assert compile_blk["compiler"] == gcc_path
-    assert compile_blk["options"] == gcc_options.split()
+    argv = _run_dump_argv(tmp_path, "dump", **env)
+    compile_sets = {
+        value.partition("=")[0]: json.loads(value.partition("=")[2])
+        for value in _compile_sets(argv)
+    }
+    assert compile_sets["compile.frontend"] == ast_frontend
+    assert compile_sets["compile.compiler"] == gcc_path
+    assert compile_sets["compile.options"] == gcc_options.split()
 
 
 def test_bundle_kind_and_no_overlay_never_leak_the_workflow_global_path() -> None:

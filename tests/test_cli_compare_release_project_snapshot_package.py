@@ -497,7 +497,6 @@ class TestReverseMembershipValidation:
     def test_omitted_artifact_with_matching_variant_id_is_rejected(
         self, tmp_path: Path
     ) -> None:
-        import json
 
         from abicheck.model import Function, Visibility
         from abicheck.project_snapshot_legacy import (
@@ -508,7 +507,6 @@ class TestReverseMembershipValidation:
             write_project_manifest,
         )
         from abicheck.serialization import SCHEMA_VERSION
-        from abicheck.storage.canonical import canonical_json
         from abicheck.storage.import_v1 import import_legacy_snapshot
         from abicheck.storage.package import PackageManifest, VariantRef
 
@@ -556,12 +554,13 @@ class TestReverseMembershipValidation:
             ),
         )
         # Then hand-corrupt the published variant ref to omit "a2" -- which
-        # still names "v1" as its own variant_id (its refs/artifacts/a2.json
-        # is untouched) -- simulating a stale/partial write.
-        variant_ref_path = root / "refs" / "variants" / "v1.json"
-        data = json.loads(variant_ref_path.read_text())
+        # still names "v1" as its own variant_id (the a2 artifact ref is
+        # untouched) -- simulating a stale/partial write.
+        from tests._project_manifest_reader import ref_document, rewrite_ref
+
+        data = ref_document(root, "variant", "v1")
         data["artifact_ids"] = ["a1"]
-        variant_ref_path.write_text(canonical_json(data, indent=2))
+        rewrite_ref(root, "variant", "v1", data)
 
         try:
             materialize_release_variant_artifacts(

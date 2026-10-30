@@ -369,11 +369,11 @@ case "$MODE" in
     ;;
 esac
 
-# `set:` is forwarded only by mode: compare (run.sh's compare branch). Any
+# `set:` is forwarded by mode: compare and mode: dump (run.sh's branches). Any
 # other mode would drop an override silently, so an effective line (not blank,
 # not a `#` comment) on those modes fails the step instead of warning.
-if [[ "$MODE" != "compare" ]] && [[ "${INPUT_SET:-}" =~ (^|$'\n')[[:space:]]*[^#[:space:]] ]]; then
-  _fail "set: applies to mode: compare only, and mode: $MODE would ignore it. Remove set: from this step, or move the override into .abicheck.yml."
+if [[ "$MODE" != "compare" && "$MODE" != "dump" ]] && [[ "${INPUT_SET:-}" =~ (^|$'\n')[[:space:]]*[^#[:space:]] ]]; then
+  _fail "set: applies to mode: compare and dump only, and mode: $MODE would ignore it. Remove set: from this step, or move the override into .abicheck.yml."
 fi
 
 # Mode-scoped inputs: each of these is only forwarded/consumed in a subset

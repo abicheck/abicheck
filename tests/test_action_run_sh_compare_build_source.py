@@ -36,37 +36,10 @@ import subprocess
 from pathlib import Path
 from typing import Any
 
+import yaml
 from _workflow_exec import bash_executable, require_bash
 
 RUN_SH = Path(__file__).resolve().parents[1] / "action" / "run.sh"
-
-
-def _compile_overlay_from_cmd(cmd: str, tmp_path: Path) -> dict[str, Any]:
-    """Read back the synthesized ``compile:`` block a ``--config <path>``
-    token in *cmd* points at (Phase 7: dump/single-pair compare forward the
-    cross-compiler inputs via a synthesized config overlay now, not
-    individually-forwarded ``--compiler``/``--sysroot``/... flags -- see
-    ``add_compile_context_flags`` in ``action/run.sh``).
-
-    Reads the fake ``abicheck`` stub's own COPY of that file
-    (``captured_config.json``, made by ``_run_compare_raw`` while the real
-    ``run.sh`` process was still running), not the original path itself:
-    the overlay is created under ``$RUNNER_TEMP`` and cleaned up by
-    ``run.sh``'s own main ``EXIT`` trap once the script finishes, so by the
-    time this test process inspects the *original* path (well after
-    ``subprocess.run`` returns) it has already been removed -- the same
-    "the leak this session fixed is now correctly closed, so a post-exit
-    read of the original file no longer works" class this session's other
-    harness-based tests hit."""
-    tokens = cmd.split()
-    assert "--config" in tokens, cmd
-    captured_config = tmp_path / "captured_config.json"
-    assert captured_config.is_file(), (
-        "the fake abicheck stub never captured a --config file's content"
-    )
-    with open(captured_config, encoding="utf-8") as f:
-        doc = json.load(f)
-    return doc.get("compile", {})
 
 
 def _run_compare_raw(
@@ -80,6 +53,9 @@ def _run_compare_raw(
     fake_bin = tmp_path / "fakebin"
     fake_bin.mkdir()
     captured = tmp_path / "captured_argv.txt"
+    # NUL-delimited argv: a `--set compile.options=[...]` value can carry a
+    # space, which the space-joined capture above cannot separate.
+    captured_argv0 = tmp_path / "captured_argv.nul"
     # Snapshots any --config <path> file's content while it still exists --
     # the real run.sh's own main EXIT trap removes it once the whole
     # process finishes, well before this test process ever gets to inspect
@@ -89,6 +65,7 @@ def _run_compare_raw(
     abicheck_stub.write_text(
         "#!/usr/bin/env bash\n"
         f'printf \'%s\\n\' "$*" >> "{captured}"\n'
+        f'printf \'%s\\0\' "$@" >> "{captured_argv0}"\n'
         'args=("$@")\n'
         "for ((_i = 0; _i < ${#args[@]}; _i++)); do\n"
         '  if [[ "${args[_i]}" == "--config" ]]; then\n'
@@ -555,10 +532,12 @@ def _run_baseline_compare_raw(
     fake_bin.mkdir()
     captured = tmp_path / "captured_argv.txt"
     captured_config = tmp_path / "captured_config.json"
+    captured_argv0 = tmp_path / "captured_argv.nul"
     abicheck_stub = fake_bin / "abicheck"
     abicheck_stub.write_text(
         "#!/usr/bin/env bash\n"
         f'printf \'%s\\n\' "$*" >> "{captured}"\n'
+        f'printf \'%s\\0\' "$@" >> "{captured_argv0}"\n'
         'args=("$@")\n'
         "for ((_i = 0; _i < ${#args[@]}; _i++)); do\n"
         '  if [[ "${args[_i]}" == "--config" ]]; then\n'
@@ -699,3 +678,155 @@ class TestBaselineCompareTranslationPreservesMergedConfig:
         cmd = captured.read_text(encoding="utf-8").strip()
         assert f"--config {build_config}" in cmd
         assert cmd.count("--config") == 1, cmd
+
+
+def _compile_block(tmp_path: Path) -> dict[str, Any]:
+    """The ``compile:`` block the captured argv's ``--set compile.K=V`` tokens
+    describe (ADR-091 D4). The stub records argv NUL-delimited, so a value with
+    a space (``compile.options=["-DMSG=hello world"]``) stays one token; the
+    ``compile.`` prefix is stripped and each value parsed as JSON, the same
+    shape the old overlay's ``compile`` mapping had."""
+    captured_argv0 = tmp_path / "captured_argv.nul"
+    assert captured_argv0.is_file(), "the abicheck stub never captured argv"
+    argv = [
+        tok for tok in captured_argv0.read_bytes().decode("utf-8").split("\0") if tok
+    ]
+    block: dict[str, Any] = {}
+    for index, token in enumerate(argv):
+        if token == "--set" and argv[index + 1].startswith("compile."):
+            key, _, raw = argv[index + 1].partition("=")
+            block[key.removeprefix("compile.")] = json.loads(raw)
+    return block
+
+
+class TestAuditOnlyCompareForwardsCrossCompilerFlags:
+    """The audit-only shape (old-library and abi-baseline both omitted) forwards
+    the cross-compiler inputs as ``--set compile.*`` like the two-sided shape."""
+
+    def test_all_four_reach_the_cli(self, tmp_path: Path) -> None:
+        result, captured, _captured_config = _run_baseline_compare_raw(
+            {
+                "INPUT_OLD_LIBRARY": "",
+                "INPUT_COMPILER": "/opt/cross/bin/aarch64-linux-gnu-g++",
+                "INPUT_GCC_PREFIX": "aarch64-linux-gnu-",
+                "INPUT_COMPILE_OPTIONS": "-D__ARM_NEON",
+                "INPUT_SYSROOT": "/opt/sysroots/aarch64",
+            },
+            tmp_path,
+        )
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert captured.is_file(), "abicheck stub was never invoked"
+        cmd = captured.read_text(encoding="utf-8").strip()
+        assert "compare" in cmd.split()
+        assert "--no-baseline" in cmd.split()
+        assert "--config" not in cmd.split()
+        block = _compile_block(tmp_path)
+        # gcc_path wins over gcc_prefix when both are given (the merged
+        # compile.compiler field can only hold one).
+        assert block["compiler"] == "/opt/cross/bin/aarch64-linux-gnu-g++"
+        assert block["options"] == ["-D__ARM_NEON"]
+        assert block["sysroot"] == "/opt/sysroots/aarch64"
+
+    def test_quoted_whitespace_atom_matches_compare_mode_synthesis(
+        self, tmp_path: Path
+    ) -> None:
+        """A whitespace-containing option atom reaches the CLI as one list entry,
+        the same as the two-sided shape."""
+        result, _captured, _captured_config = _run_baseline_compare_raw(
+            {"INPUT_OLD_LIBRARY": "", "INPUT_COMPILE_OPTIONS": '-DMSG="hello world"'},
+            tmp_path,
+        )
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert _compile_block(tmp_path)["options"] == ["-DMSG=hello world"]
+
+
+class TestCompareModeForwardsCrossCompilerFlags:
+    """Two-sided compare forwards the cross-compiler inputs as ``--set compile.*``."""
+
+    def test_all_four_reach_the_cli(self, tmp_path: Path) -> None:
+        result, captured, _captured_config = _run_baseline_compare_raw(
+            {
+                "INPUT_COMPILER": "/opt/cross/bin/aarch64-linux-gnu-g++",
+                "INPUT_GCC_PREFIX": "aarch64-linux-gnu-",
+                "INPUT_COMPILE_OPTIONS": "-D__ARM_NEON",
+                "INPUT_SYSROOT": "/opt/sysroots/aarch64",
+            },
+            tmp_path,
+        )
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert captured.is_file(), "abicheck stub was never invoked"
+        assert "--config" not in captured.read_text(encoding="utf-8").split()
+        block = _compile_block(tmp_path)
+        assert block["compiler"] == "/opt/cross/bin/aarch64-linux-gnu-g++"
+        assert block["options"] == ["-D__ARM_NEON"]
+        assert block["sysroot"] == "/opt/sysroots/aarch64"
+
+    def test_none_set_adds_no_flags(self, tmp_path: Path) -> None:
+        cmd = _run_compare({}, tmp_path).split()
+        assert "--set" not in cmd
+        assert "--config" not in cmd
+        assert "--compiler" not in cmd
+        assert "--compiler-prefix" not in cmd
+        assert "--compiler-option" not in cmd
+        assert "--sysroot" not in cmd
+
+    def test_quoted_whitespace_atom_stays_one_atom(self, tmp_path: Path) -> None:
+        """A single-line ``gcc-options`` value is shell-quoting-aware split, so a
+        quoted segment stays one list entry (not re-split on its internal space)."""
+        _run_compare({"INPUT_COMPILE_OPTIONS": '-DMSG="hello world"'}, tmp_path)
+        assert _compile_block(tmp_path)["options"] == ["-DMSG=hello world"]
+
+
+class TestBaselineCompareTranslationForwardsCompileSets:
+    """Codex review, PR #1172, round 21: a two-sided compare that supplies both
+    ``build-config`` and a compile-context input must carry exactly one
+    ``--config`` (the user's file). A second, duplicate ``--config`` made Click
+    keep only the last one, so the compile context was dropped. Under ADR-091 D4
+    the compile context travels as ``--set``, so the same guard keeps one
+    ``--config`` and the sets alongside it."""
+
+    def test_compile_context_overlay_survives_the_translated_command_line(
+        self, tmp_path: Path
+    ) -> None:
+        build_config = tmp_path / "cfg.yml"
+        build_config.write_text("release:\n  dso_only: true\n", encoding="utf-8")
+        result, captured, captured_config = _run_baseline_compare_raw(
+            {
+                "INPUT_BUILD_CONFIG": str(build_config),
+                "INPUT_COMPILER": "/opt/cross/bin/aarch64-linux-gnu-g++",
+            },
+            tmp_path,
+        )
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert captured.is_file(), "abicheck stub was never invoked"
+        tokens = captured.read_text(encoding="utf-8").split()
+        assert "compare" in tokens
+        assert tokens.count("--config") == 1, tokens
+        assert tokens[tokens.index("--config") + 1] == str(build_config)
+        assert (
+            _compile_block(tmp_path)["compiler"]
+            == "/opt/cross/bin/aarch64-linux-gnu-g++"
+        )
+        # The build-config's own release setting still reaches the CLI in that file.
+        assert captured_config.is_file()
+        assert (
+            yaml.safe_load(captured_config.read_text(encoding="utf-8"))["release"][
+                "dso_only"
+            ]
+            is True
+        )
+
+    def test_compile_context_alone_still_forwards_compile_sets(
+        self, tmp_path: Path
+    ) -> None:
+        """Negative control: a compile-context input with no build-config still
+        reaches the command as a set, and no ``--config`` is synthesized."""
+        result, captured, _captured_config = _run_baseline_compare_raw(
+            {"INPUT_COMPILER": "/opt/cross/bin/aarch64-linux-gnu-g++"}, tmp_path
+        )
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert "--config" not in captured.read_text(encoding="utf-8").split()
+        assert (
+            _compile_block(tmp_path)["compiler"]
+            == "/opt/cross/bin/aarch64-linux-gnu-g++"
+        )

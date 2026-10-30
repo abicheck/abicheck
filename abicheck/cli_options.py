@@ -22,7 +22,7 @@ Stacked-decorator helpers that bundle related ``compare`` options so the large
 
 from __future__ import annotations
 
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING, TypeVar, overload
 
@@ -800,6 +800,7 @@ def resolve_compile_context(
     # gate isn't fooled into treating a discovered config as explicitly
     # chosen (Codex review, fresh evidence — real finding on PR #1154).
     config_explicit: bool | None = None,
+    config_overrides: Mapping[str, object] | None = None,
 ) -> tuple[CompileContext, tuple[Path, ...]]:
     """The Click adapter over ``workflows.compile_config.resolve_compile_context``.
 
@@ -850,11 +851,10 @@ def resolve_compile_context(
             gcc_options=gcc_options,
             config_explicit=config_explicit,
             nostdinc_explicit=_explicit("nostdinc"),
-            # `_explicit` reads `ctx.get_parameter_source`, which safely answers
-            # "not COMMANDLINE" for a parameter name a command no longer
-            # declares at all (compare/dump, Phase 7) rather than raising, so
-            # this always resolves False there and the config value applies.
+            # `_explicit` answers False for a parameter a command no longer
+            # declares (compare/dump, Phase 7), so the config value applies.
             frontend_context_explicit=_explicit("frontend_context"),
+            config_overrides=config_overrides,
         )
     except CompileConfigError as exc:
         raise click.UsageError(str(exc)) from exc

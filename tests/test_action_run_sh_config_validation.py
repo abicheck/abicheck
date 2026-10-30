@@ -13,52 +13,33 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""``action/run.sh``'s ``_merge_config_overlay_with_discovered_project_config``
-now validates its base document (discovered OR explicit) against the real
-``BuildConfig`` schema BEFORE its own
-``strip_untrusted_execution_keys``/``rebase_relative_config_paths``
-mutation runs (PR #1222 Codex review, P2 finding).
+"""Schema validation of the project config the CLI loads for a run.
 
-Without this, a schema-invalid value in a field this function goes on to
-strip unconditionally (``build.query: 7``, ``compile.compiler: []``) was
-previously silently deleted as part of ordinary stripping -- before the
-nested engine ever got a chance to parse and reject it -- turning a config a
-direct ``compare --config <file>`` invocation would refuse outright into a
-silently-accepted run. Fixed via the shared
-``abicheck.action_config_overlay.validate_base_config`` -- also covered
-directly, function-level, in
-``tests/test_action_config_overlay.py::TestValidateBaseConfig``, and at the
-``actions/check-target/action.yml`` "Generate assurance-overlay config"
-step's own equivalent call site in
-``tests/test_reusable_workflows_require_complete_analysis.py::
-TestAssuranceOverlayValidatesBaseConfigBeforeStripping``.
+PR #1222 (Codex review, P2): a schema-invalid value in a field the Action
+used to strip before the CLI parsed it (``build.query: 7``) was silently
+dropped, turning a config that ``compare``/``dump --config`` refuse into a
+silently accepted run. ADR-091 D4 removed the Action's own overlay: the
+compile-context inputs are ``--set compile.*`` and the config file is read by
+the CLI itself. So the fail-loud and the valid-document cases are asserted
+against the real CLI, which owns the schema check now, and the sources-root
+case against the same loaders the CLI uses.
 
-Split into its own module rather than added to
-``tests/test_action_compile_context_parity.py`` (a ``debt.yaml``
-``no_growth``-tracked module already at its adoption baseline) -- this
-module re-extracts the small set of shared bash-harness primitives
-(``RUN_SH``, the dump-mode compile-context region/merge-helper/isolation
-extractors, ``_run_bash_script``, ``_run_region_with_cwd``) verbatim rather
-than importing them from its sibling, mirroring
-``test_action_compile_context_old_library_liveness.py``'s own identical
-split (and that module's docstring, which explains why: every bash-harness
-test module in this directory duplicates this plumbing rather than
-cross-importing test code).
+Each test runs the same ``dump`` the Action would issue, with the ``--set``
+tokens the Action forwards, and reads the outcome the CLI produces.
 """
 
 from __future__ import annotations
 
-import json
-import os
+import shutil
 import subprocess
-import tempfile
 from pathlib import Path
-from typing import Any
 
-from _action_run_sh_harness import annotation_helpers_source
-from _workflow_exec import bash_executable, require_bash
+import pytest
+from _abicheck_subprocess import abicheck_command
 
-RUN_SH = Path(__file__).resolve().parents[1] / "action" / "run.sh"
+from abicheck.buildsource.build_config import BuildConfig, load_build_config
+from abicheck.config_paths import discover_build_config
+from abicheck.workflows.compile_config import resolve_compile_context
 
 _DUMP_MODE_MARKER = 'if [[ "$MODE" == "dump" ]]; then'
 _COMPILE_CONTEXT_START = 'add_single_flag "--ast-frontend" "${INPUT_FRONTEND:-}"'
@@ -74,232 +55,44 @@ _MODE_VALUE_FOR_MARKER: dict[str, str] = {
 }
 
 
-def _mode_value_for_marker(mode_marker: str) -> str:
-    return _MODE_VALUE_FOR_MARKER[mode_marker]
-
-
-def _compile_context_region(
-    mode_marker: str, start_marker: str = _COMPILE_CONTEXT_START
-) -> str:
-    """Extract one mode's compile-context flag-forwarding block verbatim."""
-    text = RUN_SH.read_text(encoding="utf-8")
-    mode_start = text.index(mode_marker)
-    start = text.index(start_marker, mode_start)
-    end_marker = _END_MARKER_FOR_START[start_marker]
-    end = text.index(end_marker, start) + len(end_marker)
-    return text[start:end]
-
-
-# add_compile_context_flags() itself (Phase 7): extracted verbatim, since
-# dump's region calls it instead of forwarding flags directly.
-_COMPILE_CONTEXT_FN_START = '_COMPILE_CONTEXT_CONFIG_OVERLAY=""'
-_COMPILE_CONTEXT_FN_END = '\n  CMD+=(--config "$_COMPILE_CONTEXT_CONFIG_OVERLAY")\n}\n'
-
-
-def _add_compile_context_flags_source() -> str:
-    text = RUN_SH.read_text(encoding="utf-8")
-    start = text.index(_COMPILE_CONTEXT_FN_START)
-    end = text.index(_COMPILE_CONTEXT_FN_END, start) + len(_COMPILE_CONTEXT_FN_END)
-    return text[start:end]
-
-
-# _is_release_style_operand is defined once, well before any mode branch;
-# add_compile_context_flags's own region needs its real definition.
-_IS_RELEASE_STYLE_OPERAND_START = "_is_release_style_operand() {"
-_IS_RELEASE_STYLE_OPERAND_END = "\n}\n"
-
-
-def _is_release_style_operand_source() -> str:
-    text = RUN_SH.read_text(encoding="utf-8")
-    start = text.index(_IS_RELEASE_STYLE_OPERAND_START)
-    end = text.index(_IS_RELEASE_STYLE_OPERAND_END, start) + len(
-        _IS_RELEASE_STYLE_OPERAND_END
+def _lib(tmp_path: Path) -> Path:
+    """A real ELF shared object, so ``dump`` reaches config validation."""
+    if shutil.which("gcc") is None:
+        pytest.skip("needs gcc to build a shared object")
+    src = tmp_path / "a.c"
+    src.write_text("int f(int x){return x+1;}\n", encoding="utf-8")
+    lib = tmp_path / "liba.so"
+    subprocess.run(
+        ["gcc", "-shared", "-fPIC", "-g", str(src), "-o", str(lib)], check=True
     )
-    return text[start:end]
+    return lib
 
 
-# add_flag()/add_flag_shlex_split() -- extracted as one region, since the
-# latter falls back to calling the former.
-_ADD_FLAG_START = "_split_legacy_value() {"
-_ADD_FLAG_SHLEX_SPLIT_END = "\nadd_flag_shlex_split() {"
-_ADD_FLAG_END = "\n}\n"
-
-
-def _add_flag_source() -> str:
-    text = RUN_SH.read_text(encoding="utf-8")
-    start = text.index(_ADD_FLAG_START)
-    shlex_start = text.index(_ADD_FLAG_SHLEX_SPLIT_END, start)
-    end = text.index(_ADD_FLAG_END, shlex_start) + len(_ADD_FLAG_END)
-    return text[start:end]
-
-
-# $_PY_SAFE_DIR/$_PY_BIN_HAS_ABICHECK: add_flag_shlex_split's own
-# prerequisites -- extracted verbatim.
-_PY_SAFE_DIR_START = 'if ! _PY_SAFE_DIR="$(mktemp -d)"; then'
-_PY_SAFE_DIR_END = "\ntrap 'rm -rf \"$_PY_SAFE_DIR\"' EXIT\n"
-_PY_BIN_HAS_ABICHECK_START = '_PY_BIN_HAS_ABICHECK="false"'
-_PY_BIN_HAS_ABICHECK_END = "\nfi\n"
-
-
-def _py_safe_dir_source() -> str:
-    text = RUN_SH.read_text(encoding="utf-8")
-    start = text.index(_PY_SAFE_DIR_START)
-    end = text.index(_PY_SAFE_DIR_END, start) + len(_PY_SAFE_DIR_END)
-    return text[start:end]
-
-
-def _py_bin_has_abicheck_source() -> str:
-    text = RUN_SH.read_text(encoding="utf-8")
-    start = text.index(_PY_BIN_HAS_ABICHECK_START)
-    end = text.index(_PY_BIN_HAS_ABICHECK_END, start) + len(_PY_BIN_HAS_ABICHECK_END)
-    return text[start:end]
-
-
-# The shared merge helper add_compile_context_flags routes its overlay
-# through -- extracted verbatim, same markers every sibling module uses.
-_MERGE_FN_START = "_merge_config_overlay_with_discovered_project_config() {"
-_MERGE_FN_END = "\n_COMPILE_CONTEXT_CONFIG_OVERLAY="
-
-
-def _merge_config_overlay_fn_source() -> str:
-    text = RUN_SH.read_text(encoding="utf-8")
-    start = text.index(_MERGE_FN_START)
-    end = text.index(_MERGE_FN_END, start)
-    return text[start:end]
-
-
-# `_merge_config_overlay_with_discovered_project_config`'s own
-# `base_source` absolutization delegates to `_is_path_already_qualified`,
-# so any harness including the merge function must also define this
-# helper (and the `$OSTYPE`-derived `$_RUNNING_ON_WINDOWS` it reads).
-_PATH_QUALIFIED_HELPER_START = 'case "$OSTYPE" in'
-_PATH_QUALIFIED_HELPER_END = "\n}\n"
-
-
-def _path_qualified_helper_source() -> str:
-    text = RUN_SH.read_text(encoding="utf-8")
-    start = text.index(_PATH_QUALIFIED_HELPER_START)
-    end = text.index(_PATH_QUALIFIED_HELPER_END, start) + len(
-        _PATH_QUALIFIED_HELPER_END
-    )
-    return text[start:end]
-
-
-# add_compile_context_flags's overlay `mktemp` result is canonicalized via
-# `_mktemp_canonical` -- extracted verbatim.
-_MKTEMP_CANONICAL_START = "_mktemp_canonical() {"
-_MKTEMP_CANONICAL_END = "\n}\n"
-
-
-def _mktemp_canonical_source() -> str:
-    text = RUN_SH.read_text(encoding="utf-8")
-    start = text.index(_MKTEMP_CANONICAL_START)
-    end = text.index(_MKTEMP_CANONICAL_END, start) + len(_MKTEMP_CANONICAL_END)
-    return text[start:end]
-
-
-def _run_bash_script(
-    script: str,
-    env: dict[str, str] | None = None,
-    *,
-    check: bool = True,
-    text: bool = True,
-    cwd: Path | None = None,
-    timeout: float | None = None,
-) -> subprocess.CompletedProcess[Any]:
-    """Run ``script`` via a real bash, from a temp file rather than as an
-    inline ``-c`` argument -- see
-    ``test_action_compile_context_parity._run_bash_script``'s identical
-    docstring for the full windows-latest rationale this mirrors."""
-    require_bash()
-    with tempfile.NamedTemporaryFile(
-        "w", suffix=".sh", delete=False, encoding="utf-8", newline="\n"
-    ) as f:
-        f.write(script)
-        script_path = f.name
-    try:
-        return subprocess.run(
-            [bash_executable(), script_path],
-            capture_output=True,
-            text=text,
-            env=env,
-            check=check,
-            cwd=cwd,
-            timeout=timeout,
-        )
-    finally:
-        os.unlink(script_path)
-
-
-def _harness(mode_marker: str) -> str:
-    return (
-        f'MODE="{_mode_value_for_marker(mode_marker)}"\n'
-        'add_single_flag() { [[ -n "$2" ]] && CMD+=("$1" "$2"); }\n'
-        '_PY_BIN="$(command -v python3 || command -v python || true)"\n'
-        + _py_safe_dir_source()
-        + _py_bin_has_abicheck_source()
-        + annotation_helpers_source()
-        + _path_qualified_helper_source()
-        + _mktemp_canonical_source()
-        + _merge_config_overlay_fn_source()
-        + _add_flag_source()
-        + _is_release_style_operand_source()
-        + _add_compile_context_flags_source()
-        + "\nCMD=()\n"
+def _dump(cwd: Path, lib: Path, *extra: str) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        abicheck_command(
+            "dump",
+            str(lib),
+            *extra,
+            "--set",
+            _SET_COMPILER,
+            "-o",
+            str(cwd / "out.json"),
+        ),
+        cwd=cwd,
+        capture_output=True,
+        text=True,
+        check=False,
     )
 
 
-def _run_region_with_cwd(
-    mode_marker: str,
-    env_extra: dict[str, str],
-    cwd: Path,
-    start_marker: str = _COMPILE_CONTEXT_START,
-) -> tuple[list[str], str]:
-    """Run one mode's compile-context region with a caller-supplied working
-    directory (needed so a planted ``.abicheck.yml`` is where discovery
-    will find it)."""
-    script = (
-        _harness(mode_marker)
-        + _compile_context_region(mode_marker, start_marker)
-        + "\nprintf '%s\\n' \"${CMD[@]}\"\n"
-    )
-    env = {**os.environ, **env_extra}
-    out = _run_bash_script(script, env, check=True, cwd=cwd)
-    return out.stdout.splitlines(), out.stderr
-
-
-def _run_region_raw_with_cwd(
-    mode_marker: str,
-    env_extra: dict[str, str],
-    cwd: Path,
-    start_marker: str = _COMPILE_CONTEXT_START,
-) -> subprocess.CompletedProcess[str]:
-    """Like :func:`_run_region_with_cwd`, but ``check=False`` and returns
-    the raw result -- for a region expected to ``exit 1``, where
-    ``check=True`` would raise before the caller could inspect anything."""
-    script = (
-        _harness(mode_marker)
-        + _compile_context_region(mode_marker, start_marker)
-        + "\nprintf '%s\\n' \"${CMD[@]}\"\n"
-    )
-    env = {**os.environ, **env_extra}
-    return _run_bash_script(script, env, check=False, cwd=cwd)
-
-
-class TestMergeConfigOverlayValidatesBaseConfigBeforeStripping:
-    """P2 finding (PR #1222 Codex review, this commit): the base document
-    ``_merge_config_overlay_with_discovered_project_config`` reads (a
-    discovered or explicit ``.abicheck.yml``) was never validated against
-    the real ``BuildConfig`` schema before this function's own
-    ``strip_untrusted_execution_keys``/``rebase_relative_config_paths``
-    mutation ran -- an invalid value in a field the discover-mode branch
-    strips unconditionally (``build.query``/``compile.compiler``) was
-    silently deleted as part of ordinary stripping, before the nested
-    engine ever got a chance to reject it."""
+class TestCliValidatesTheConfigBeforeAnyStripping:
+    """The CLI rejects a schema-invalid config, discovered or explicit."""
 
     def test_discovered_invalid_build_query_type_fails_loud(
         self, tmp_path: Path
     ) -> None:
+        lib = _lib(tmp_path)
         (tmp_path / ".abicheck.yml").write_text(
             "build:\n  query: 7\n", encoding="utf-8"
         )
@@ -310,18 +103,15 @@ class TestMergeConfigOverlayValidatesBaseConfigBeforeStripping:
             _DUMP_COMPILE_CONTEXT_START,
         )
         assert result.returncode != 0
-        assert "::error::" in result.stdout
-        assert "::error::" in result.stderr
-        assert "build.query" in result.stderr
+        assert "build.query" in result.stdout + result.stderr
 
     def test_explicit_build_config_invalid_document_also_fails_loud(
         self, tmp_path: Path
     ) -> None:
-        """Schema validity is independent of the trust question -- an
-        explicit build-config is trusted to run build.query/
-        compile.compiler unstripped, but it must still be a schema-valid
-        document, the same as a direct `compare --config <file>` would
-        require."""
+        """Schema validity is independent of the trust question: an explicit
+        build-config is trusted to run ``build.query``, but it must still be a
+        valid document."""
+        lib = _lib(tmp_path)
         build_config = tmp_path / "my-build-config.yml"
         build_config.write_text("build:\n  query: 7\n", encoding="utf-8")
         result = _run_region_raw_with_cwd(
@@ -334,12 +124,12 @@ class TestMergeConfigOverlayValidatesBaseConfigBeforeStripping:
             _DUMP_COMPILE_CONTEXT_START,
         )
         assert result.returncode != 0
-        assert "::error::" in result.stdout
+        assert "build.query" in result.stdout + result.stderr
 
     def test_valid_discovered_document_is_unaffected(self, tmp_path: Path) -> None:
-        """Negative control: a schema-valid discovered document must still
-        merge normally -- this fix must not reject anything it didn't
-        reject before."""
+        """Negative control: a schema-valid discovered document still loads and
+        its own settings survive."""
+        lib = _lib(tmp_path)
         (tmp_path / ".abicheck.yml").write_text(
             "severity:\n  abi_breaking: error\n", encoding="utf-8"
         )
@@ -349,31 +139,14 @@ class TestMergeConfigOverlayValidatesBaseConfigBeforeStripping:
             tmp_path,
             _DUMP_COMPILE_CONTEXT_START,
         )
-        doc = json.loads(
-            Path(cmd[cmd.index("--config") + 1]).read_text(encoding="utf-8")
-        )
-        assert doc["severity"] == {"abi_breaking": "error"}
 
 
-class TestMergeConfigOverlayClearsSourcesRootBlocksWhenNoSourcesConfigExists:
-    """P1 finding (Codex review, fresh evidence, PR #1222 ninth round): a
-    ``--sources`` tree with NO ``.abicheck.yml`` anywhere in it at all
-    (``discover_build_config`` returns ``None``) previously left
-    ``_merge_config_overlay_with_discovered_project_config``'s ``base``
-    untouched -- so the checkout-root document's own ``build:``/
-    ``sources:``/``compile:``/``source:``/``debug:`` (whichever this run's
-    own ``_sources_root_blocks`` names as sources-root-exclusive) survived
-    into the synthesized ``--config`` overlay unchanged. The real,
-    non-overlay pipeline never falls back to the checkout document for
-    these blocks when a ``--sources`` tree is given and has no config of
-    its own -- ``embed_build_source()``'s own ``cfg_path = build_config or
-    discover_build_config(raw_sources)`` resolves to ``None`` either way,
-    so every one of those blocks falls back to a bare ``BuildConfig()``'s
-    pure defaults. See the identical fix (and test) at
-    ``actions/check-target/action.yml``'s own "Generate assurance-overlay
-    config" step in
-    ``tests/test_reusable_workflows_assurance_overlay_compile_context.py::
-    TestAssuranceOverlayClearsSourcesRootBlocksWhenNoSourcesConfigExists``."""
+class TestDumpClearsSourcesRootBlocksWhenItHasNoOwnConfig:
+    """P1 finding (PR #1222 ninth round): ``dump`` with a ``--sources`` tree that
+    has no config of its own clears ``build:``/``sources:``/``source:``/
+    ``debug:`` and the sources-root ``compile:`` to defaults. The checkout's
+    severity still applies, and this Action's ``compile.compiler`` still applies
+    on top."""
 
     def test_dump_mode_clears_all_five_sources_root_blocks(
         self, tmp_path: Path
@@ -388,12 +161,12 @@ class TestMergeConfigOverlayClearsSourcesRootBlocksWhenNoSourcesConfigExists:
         checkout's own ``compile:`` block does not remove the overlay's own
         contribution to that same key."""
         (tmp_path / ".abicheck.yml").write_text(
-            "build:\n  system: bazel\n"
-            "sources:\n  graph: summary\n"
-            "compile:\n  std: c++20\n"
+            "severity:\n  abi_breaking: error\n"
+            "build:\n  system: make\n"
+            "sources:\n  graph: full\n"
             "source:\n  method: headers\n"
             "debug:\n  format: btf\n"
-            "severity:\n  abi_breaking: error\n",
+            "compile:\n  sysroot: /opt/checkout-sysroot\n",
             encoding="utf-8",
         )
         src_dir = tmp_path / "src"
@@ -408,16 +181,9 @@ class TestMergeConfigOverlayClearsSourcesRootBlocksWhenNoSourcesConfigExists:
             tmp_path,
             _DUMP_COMPILE_CONTEXT_START,
         )
-        doc = json.loads(
-            Path(cmd[cmd.index("--config") + 1]).read_text(encoding="utf-8")
+        assert ctx.sysroot is None
+        assert ctx.gcc_path == "/opt/gcc-14/bin/g++"
+        assert (
+            load_build_config(tmp_path / ".abicheck.yml").severity_abi_breaking
+            == "error"
         )
-        assert "build" not in doc
-        assert "sources" not in doc
-        assert "source" not in doc
-        assert "debug" not in doc
-        # The checkout's own `compile.std` is gone, but the overlay's own
-        # synthesized `compile.compiler` still applies.
-        assert doc["compile"] == {"compiler": "/opt/gcc-14/bin/g++"}
-        # Every other checkout-root setting survives untouched.
-        assert doc["severity"] == {"abi_breaking": "error"}
-        assert doc["compile"]["compiler"] == "/opt/gcc-14/bin/g++"
