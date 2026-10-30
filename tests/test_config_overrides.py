@@ -577,7 +577,7 @@ def test_a_release_compare_refuses_a_key_its_members_do_not_receive(
 def test_the_release_gate_accepts_keys_its_members_receive(
     overrides: dict[str, object],
 ) -> None:
-    reject_unforwarded_release_overrides(overrides)  # no UsageError
+    assert reject_unforwarded_release_overrides(overrides) is None  # never raises
 
 
 def test_the_release_gate_refuses_a_key_its_members_do_not_receive() -> None:
