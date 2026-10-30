@@ -37,6 +37,9 @@ KEYED: dict[str, Any] = {
     "compile": CompileContext(gcc_options="-DX"),
     "include_dependencies": False,
     "public_include_search_dirs": "<alt-dir>",
+    # Reads only the binary, so it is keyed rather than gated; a PE/Mach-O
+    # compare re-resolves each side symbols-only (l0_export_delta).
+    "symbols_only": True,
 }
 # Excludes the call from the cache entirely: varying the value must bypass it.
 GATED: dict[str, Any] = {
@@ -45,7 +48,6 @@ GATED: dict[str, Any] = {
     "debug_roots": [Path("/dbg")],
     "enable_debuginfod": True,
     "debug_format": "dwarf",
-    "symbols_only": True,
     "debug_presence_only": True,
     "include_labels": "<label>",
 }

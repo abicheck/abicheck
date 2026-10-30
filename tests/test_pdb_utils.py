@@ -17,9 +17,13 @@
 from __future__ import annotations
 
 import struct
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
+
+import pytest
 
 from abicheck.pdb_utils import (
     _extract_pdb_path_from_pe,
@@ -142,6 +146,18 @@ class TestLocatePdb:
 
 
 class TestExtractPdbPath:
+    @pytest.fixture(autouse=True)
+    def _open_pe_through_module_pefile(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """These tests stand a mock in for the module's ``pefile``; route
+        ``open_pe`` through it so the mock is the image the code parses."""
+        import abicheck.pdb_utils as mod
+
+        @contextmanager
+        def fake_open_pe(path: object, *, fast_load: bool = True) -> Iterator[object]:
+            yield mod.pefile.PE(str(path), fast_load=fast_load)
+
+        monkeypatch.setattr(mod, "open_pe", fake_open_pe)
+
     def test_invalid_pe(self, tmp_path: Path) -> None:
         """Non-PE file should return None."""
         f = tmp_path / "bad.exe"

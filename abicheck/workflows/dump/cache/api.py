@@ -53,11 +53,18 @@ def _dump_is_cacheable(req: DumpCacheRequest) -> bool:
     — the dominant release-baseline/CI comparison case a repeated pipeline
     re-extracts identically on every run — is cached. A PDB path, a DWARF
     debug-info root, debuginfod resolution (network-dependent), a forced
-    debug format, a symbols-only/debug-presence-only dump, or a
+    debug format, a debug-presence-only dump, or a
     ``CompileContext`` naming an untrackable header input all change what ``run_dump`` produces in ways not
     folded into the cache key below, so those combinations always fall
     through to a live dump rather than risk serving a stale/mismatched
     snapshot.
+
+    A symbols-only dump *is* cached: it reads the binary and, for PE, the PDB
+    found beside it -- both content-hashed (:func:`_pe_debug_sidecar`) -- and
+    ``symbols_only`` is folded into the key (:func:`_cache_key_for`), so it
+    never shares an entry with a full dump of the same file. Gating it re-extracted every PE/Mach-O side twice per
+    compare: ``l0_export_delta.fold_l0_hard_removals`` re-resolves a side
+    symbols-only whenever it has no captured ELF table to build the view from.
 
     G29 Phase A: the L2 header-only semantic graph (and its include-file
     extension) used to disable caching outright (an opt-in flag meant a cache
@@ -126,7 +133,6 @@ def _dump_is_cacheable(req: DumpCacheRequest) -> bool:
         and not req.debug_roots
         and not req.enable_debuginfod
         and req.debug_format is None
-        and not req.symbols_only
         and not req.debug_presence_only
         and _compile_context_is_keyable(req.compile)
         and not req.include_labels
@@ -255,7 +261,7 @@ def _cache_key_for(req: DumpCacheRequest) -> str:
     cc_inputs = compile_context_header_inputs(req.compile)
     if cc_inputs is None:  # guarded by _dump_is_cacheable; defensive
         return ""
-    cache_headers = [*cache_headers, *cc_inputs[0]]
+    cache_headers = [*cache_headers, *cc_inputs[0], *_pe_debug_sidecar(req)]
     cache_includes = [*cache_includes, *cc_inputs[1]]
 
     base = _dump_cache_extra_key(
@@ -276,9 +282,30 @@ def _cache_key_for(req: DumpCacheRequest) -> str:
     # an up-front "will this dump have headers" check isn't worth its cost here.
     scope_extra = "filtered" if not req.include_dependencies else "full"
     extra = f"{base}\x00{manifest_extra}\x00{scope_extra}"
+    if req.symbols_only:
+        # Appended only when set, so every key a full dump already had stays
+        # valid; a symbols-only entry's extra is a strict extension of it.
+        extra += "\x00symbols-only"
     return _cache_key(
         req.path, cache_headers, cache_includes, req.version, req.lang, extra=extra
     )
+
+
+def _pe_debug_sidecar(req: DumpCacheRequest) -> list[Path]:
+    """The PDB a PE dump will read on its own, as a content-hashed key input.
+
+    ``extract_pe`` auto-discovers a PDB (the CodeView path in the image, then
+    ``<name>.pdb`` beside it) and attaches its debug info, full dump and
+    symbols-only alike; an explicit ``pdb_path`` is gated out of the cache
+    (:func:`_dump_is_cacheable`). Hashing it like a header means an edited or
+    replaced PDB misses; a DLL with no PDB keeps the key it had.
+    """
+    if req.binary_fmt != "pe":
+        return []
+    from ....pdb_utils import locate_pdb
+
+    found = locate_pdb(req.path, allow_network=False)
+    return [found] if found is not None else []
 
 
 def cached_run_dump(

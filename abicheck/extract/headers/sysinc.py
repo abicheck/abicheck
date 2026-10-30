@@ -345,14 +345,36 @@ _PROBE_SUPPRESSING_FLAGS = (
 
 
 def _pass_through_suppresses_probe(
-    gcc_options: str | None, gcc_option_tokens: tuple[str, ...]
+    gcc_options: str | None,
+    gcc_option_tokens: tuple[str, ...],
+    own_target: str | None = None,
 ) -> bool:
-    """True if pass-through flags already isolate the parse (skip the probe)."""
+    """True if pass-through flags already isolate the parse (skip the probe).
+
+    A ``--target=`` token naming *own_target* -- the probe compiler's own
+    ``-dumpmachine`` triple -- does not: that driver *is* the target
+    toolchain, so its system include dirs are the right ones (the clang
+    frontend's binary-ABI target, :mod:`.clang.abi_target`, is spelled so).
+    """
     if gcc_options and any(f in gcc_options for f in _PROBE_SUPPRESSING_FLAGS):
         return True
+    own = f"--target={own_target}" if own_target else None
     return any(
-        tok.startswith(f) for tok in gcc_option_tokens for f in _PROBE_SUPPRESSING_FLAGS
+        tok != own and tok.startswith(f)
+        for tok in gcc_option_tokens
+        for f in _PROBE_SUPPRESSING_FLAGS
     )
+
+
+def _probe_compiler_triple(probe_cc: str) -> str | None:
+    """*probe_cc*'s ``-dumpmachine`` triple (memoized per executable)."""
+    from .toolchain import _resolved_tool, _tool_target_triple
+
+    try:
+        selected, _real, _stat, digest = _resolved_tool(probe_cc)
+    except OSError:
+        return None
+    return _tool_target_triple(selected, digest)
 
 
 def _resolve_clang_system_includes(
@@ -376,14 +398,17 @@ def _resolve_clang_system_includes(
     available to probe. Otherwise the host GNU driver's system include dirs
     (castxml↔clang parity, see :func:`_probe_gnu_system_includes`).
     """
-    if (
-        nostdinc
-        or sysroot is not None
-        or not _auto_system_includes_enabled()
-        or _pass_through_suppresses_probe(gcc_options, gcc_option_tokens)
-    ):
+    if nostdinc or sysroot is not None or not _auto_system_includes_enabled():
         return ()
-    probe_cc = _resolve_probe_compiler(compiler, gcc_path, gcc_prefix)
+    if _pass_through_suppresses_probe(gcc_options, gcc_option_tokens):
+        probe_cc = _resolve_probe_compiler(compiler, gcc_path, gcc_prefix)
+        own = _probe_compiler_triple(probe_cc) if probe_cc is not None else None
+        if own is None or _pass_through_suppresses_probe(
+            gcc_options, gcc_option_tokens, own
+        ):
+            return ()
+    else:
+        probe_cc = _resolve_probe_compiler(compiler, gcc_path, gcc_prefix)
     if probe_cc is None:
         return ()
     return tuple(_probe_gnu_system_includes(probe_cc, cpp=force_cpp))

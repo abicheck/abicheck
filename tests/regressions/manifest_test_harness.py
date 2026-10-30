@@ -340,6 +340,58 @@ TEST_HARNESS_BUG_CLASSES: tuple[BugClass, ...] = (
         ),
     ),
     BugClass(
+        id="test_harness.step_output_released_only_on_exit",
+        invariant=(
+            "A CI step's diagnostic output reaches the log while the step "
+            "runs, not only after its child process exits. `verify.py` ran "
+            "each step with `capture_output=True` and printed the text after "
+            "the exit, so a step that never exited on its own -- a hung test, "
+            "a lane cancelled at its job limit -- left an empty log: the "
+            "Windows integration lane ran 37 minutes with no output, and the "
+            "pytest-timeout traceback that would have named the stuck test "
+            "sat in the never-printed buffer. Capturing is fine; holding "
+            "until exit is the defect, because the exit is exactly what a "
+            "stuck step never reaches."
+        ),
+        fixed_by=(1842,),
+        seed_tests=("tests/test_verify_stream.py",),
+        # The seed test drives `verify_stream.run_streaming` and reads
+        # `verify.run_step`'s source; it runs no workflow step.
+        public_surfaces=(),
+        axes={
+            "stream": ("stdout", "stderr", "both-interleaved"),
+            "line_shape": (
+                "newline-terminated",
+                "no-trailing-newline",
+                "undecodable-bytes",
+            ),
+            "exit": ("zero", "nonzero"),
+        },
+    ),
+    BugClass(
+        id="test_harness.suite_wide_measurement_under_a_fixed_budget",
+        invariant=(
+            "A gate that measures the whole suite stays inside its budget as "
+            "the suite grows, and reads the measurement it asked for. "
+            "`gen_repo_facts.py` counted the fast lane with one full `pytest "
+            "--collect-only` under a fixed 120 s timeout: 107 s on main's "
+            "GitHub runner, so a runner 10% slower failed it with no change to "
+            "any test. It now collects disjoint `--collect-partition` slices "
+            "at once and sums them, and the sum must equal one unpartitioned "
+            "collection. It also took the first 'N tests collected' in the "
+            "output, which a parametrized node id listed by `-q` can quote, "
+            "instead of pytest's closing summary."
+        ),
+        fixed_by=(1842,),
+        seed_tests=("tests/test_collect_partition.py",),
+        # The seed test runs pytest and the script's counter, not the CLI.
+        public_surfaces=(),
+        axes={
+            "slices": ("1", "2", "3", "4", "5", "6", "7", "8"),
+            "summary_shape": ("selected/total", "total", "none", "quoted-in-id"),
+        },
+    ),
+    BugClass(
         id="test_harness.git_inherits_developer_signing_config",
         invariant=(
             "A git commit a test makes succeeds whatever the developer's "

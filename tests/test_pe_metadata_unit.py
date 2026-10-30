@@ -17,8 +17,12 @@
 from __future__ import annotations
 
 import struct
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 from unittest.mock import MagicMock, patch
+
+import pytest
 
 from abicheck.binary_utils import detect_binary_format
 from abicheck.pe_metadata import (
@@ -353,6 +357,18 @@ class TestDiffPe:
 
 
 class TestParsePeMetadata:
+    @pytest.fixture(autouse=True)
+    def _open_pe_through_module_pefile(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """These tests stand a mock in for the module's ``pefile``; route
+        ``open_pe`` through it so the mock is the image the code parses."""
+        import abicheck.pe_metadata as mod
+
+        @contextmanager
+        def fake_open_pe(path: object, *, fast_load: bool = True) -> Iterator[object]:
+            yield mod.pefile.PE(str(path), fast_load=fast_load)
+
+        monkeypatch.setattr(mod, "open_pe", fake_open_pe)
+
     def test_nonexistent_file_returns_empty(self):
         meta = parse_pe_metadata(Path("/nonexistent/fake.dll"))
         assert isinstance(meta, PeMetadata)
@@ -426,7 +442,9 @@ class TestParsePeMetadata:
         assert meta.exports[1].sym_type == PeSymbolType.FORWARDED
         assert meta.exports[1].forwarder == "OTHER.init"
         assert meta.imports == {"KERNEL32.dll": ["LoadLibraryA", "ordinal:7"]}
-        mock_pe.close.assert_called_once()
+        # Released by open_pe's own mapping: pefile's close() ends in a full
+        # gc.collect() of the whole process (abicheck.extract.pe_image).
+        mock_pe.close.assert_not_called()
 
     def test_parse_with_version_resource(self, tmp_path):
         """Exercise VS_FIXEDFILEINFO parsing."""

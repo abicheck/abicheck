@@ -37,6 +37,7 @@ from ..model.consumer_requirements import (
     AppRequirements,
     ConsumerImportFacts,
 )
+from .pe_image import open_pe
 
 log = logging.getLogger(__name__)
 
@@ -238,8 +239,7 @@ def _parse_pe_app_requirements(
     library_name_lower = library_name.lower() if library_name else ""
 
     try:
-        pe = pefile.PE(str(app_path), fast_load=True)
-        try:
+        with open_pe(app_path) as pe:
             pe.parse_data_directories(
                 directories=[
                     pefile.DIRECTORY_ENTRY["IMAGE_DIRECTORY_ENTRY_IMPORT"],
@@ -266,8 +266,6 @@ def _parse_pe_app_requirements(
                             reqs.undefined_symbols.add(
                                 f"{PE_ORDINAL_IMPORT_PREFIX}{imp.ordinal}"
                             )
-        finally:
-            pe.close()
 
     except Exception as exc:  # noqa: BLE001
         log.warning("Failed to parse PE app requirements from %s: %s", app_path, exc)

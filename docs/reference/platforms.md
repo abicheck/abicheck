@@ -302,6 +302,7 @@ Recipe dependencies pull required analysis tooling automatically.
 - **#50 (calling conventions):** `__stdcall`/`__cdecl` deltas are represented as mangled-name churn (`func_removed + func_added`) instead of a dedicated calling-convention change kind.
 - **#56 (PE visibility semantics):** `__declspec(dllexport/dllimport)` transitions are currently reflected at symbol-level only; no dedicated PE export-visibility change kind.
 - **#121 (MinGW-specific behavior):** MinGW export/import edge-cases (import libs, ordinals, toolchain flags) are only partially covered by current smoke/integration tests.
+- **`--ast-frontend clang` and the C++ ABI:** clang parses a DLL's headers for the C++ ABI the DLL's exports are mangled for: Itanium (`_Z…`, MinGW) as `*-windows-gnu`, MSVC (`?…`) as `*-windows-msvc`, whatever clang's own default target is. A C-only DLL states no ABI and keeps clang's default; an explicit `--target` in `--compiler-option` always wins.
 
 ## macOS ARM64 — Known ABI Differences
 
