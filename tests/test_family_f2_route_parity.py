@@ -96,6 +96,10 @@ _RS = "route_specific"
 _UC = "uncovered"
 
 CLICK_ROUTING: dict[str, tuple[str, Any]] = {
+    "config_overrides": (
+        _UC,
+        "--set PATH=VALUE: parity is test_config_overrides.py (CLI vs typed API at the resolved config)",
+    ),
     "policy": ("covered", ("policy_sdk_vendor", "policy_file")),
     "suppress": ("covered", ("suppress", "suppress_strict")),
     "acknowledgments": (
@@ -196,6 +200,10 @@ _SEVERITY_OVERRIDE = (
 )
 
 REQUEST_ROUTING: dict[str, tuple[str, Any]] = {
+    "config_overrides": (
+        _UC,
+        "config_overrides: parity is test_config_overrides.py (typed vs CLI at the resolved config)",
+    ),
     "old": ("covered", ("default",)),
     "new": ("covered", ("default",)),
     "policy": ("covered", ("policy_sdk_vendor",)),
@@ -344,6 +352,7 @@ DEFAULT_MAP: dict[str, tuple[str, str]] = {
 #: Click dests with no request/input counterpart whose default could be
 #: compared, each with the reason.
 DEFAULT_UNMAPPED: dict[str, str] = {
+    "config_overrides": "a PATH=VALUE mapping with no request default; empty means none",
     "help": "Click help flag",
     "help_all": "Click help flag",
     "old_input": "required operand, no default",

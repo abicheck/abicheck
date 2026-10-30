@@ -346,6 +346,7 @@ def resolve_no_baseline_invocation(
     _cfg_path, _project_cfg, resolved_cfg, _cfg_sha = resolve_project_compare_config(
         config=kwargs.get("config"),
         severity_preset=None,
+        config_overrides=kwargs.get("config_overrides"),
     )
     from ....workflows.compare.project_inputs import note_unapplied_post_manifest
 

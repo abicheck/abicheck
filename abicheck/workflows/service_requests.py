@@ -46,8 +46,10 @@ D4 adds ``InputSpec.follow_linker_scripts`` — see each one's own docstring.
 from __future__ import annotations
 
 import math
+from collections.abc import Mapping
 from dataclasses import KW_ONLY, dataclass, field, replace
 from pathlib import Path
+from types import MappingProxyType
 from typing import Any
 
 from ..change_registry_types import Verdict
@@ -61,6 +63,7 @@ from ..model.performance import PerformanceProfile, parse_performance_profile
 from ..policy.exit_decision import ExitDecision
 from ..policy.severity import SeverityConfig
 from ..policy.suppression.rules import SuppressionList
+from .request_acknowledgment_checks import acknowledgment_errors
 from .request_inputs import (
     _ANDROID_NEEDS_SOURCES,
     FRONTEND_CONTEXTS as FRONTEND_CONTEXTS,
@@ -99,6 +102,16 @@ class OutputSpec:
 
     fmt: str = "text"
     path: Path | None = None
+
+
+#: The immutable default of ``config_overrides`` (no overrides).
+def _no_overrides() -> Mapping[str, object]:
+    """The immutable default of ``config_overrides`` (no overrides).
+
+    A ``default_factory`` rather than a mapping-proxy default: Python 3.11's
+    dataclass check rejects an unhashable instance as a field default.
+    """
+    return MappingProxyType({})
 
 
 @dataclass(frozen=True)
@@ -153,6 +166,16 @@ class CompareRequest:
     # "c++", "clang", ...)`` shape (this file's own example, well short of
     # this boundary) is unaffected.
     _: KW_ONLY
+    # ADR-091 D4: `config_overrides` -- the typed spelling of `compare --set
+    # PATH=VALUE`. Each entry is one `.abicheck.yml` key (dotted path) with a
+    # YAML-typed value, validated by the same schema as the file. It fills
+    # only the request fields a caller left at their default (scope_public,
+    # collapse_versioned_symbols, force_public_symbols, severity_*), which is
+    # where the CLI's resolved config reaches a comparison; an explicit field
+    # value here is indistinguishable from the default and so is not overridden.
+    config_overrides: Mapping[str, object] = field(
+        default_factory=_no_overrides, hash=False
+    )
     # ADR-020b: declared deployment constraints (EnvironmentMatrix YAML).
     # When its ``runtime_floors`` are set, new symbol-version requirements
     # classify against the declared floors (≤ floor → COMPATIBLE, > floor →
@@ -535,7 +558,7 @@ class CompareRequest:
                     errors.append(
                         f"{field_name} kind {kind.value!r} may not target Verdict.NO_CHANGE"
                     )
-        errors += _acknowledgment_errors(self)
+        errors += acknowledgment_errors(self)
         errors += _resolved_collect_mode_errors(self.resolved_collect_mode)
         for label, side in (("old", self.old), ("new", self.new)):
             errors += _path_required_errors(label, side, source_only_allowed=False)
@@ -772,29 +795,3 @@ __all__ = [
     "frontend_value_errors",
     "required_path",
 ]
-
-
-def _acknowledgment_errors(request: CompareRequest) -> list[str]:
-    """``CompareRequest``'s ADR-067 D5/D6 fields, checked up front."""
-    from ..model.acknowledgment_policy import (
-        VALID_ACKNOWLEDGMENT_BREAKS_ACTIONS,
-        VALID_UNACKNOWLEDGED_ADDITIONS_ACTIONS,
-    )
-
-    errors: list[str] = []
-    action = request.acknowledgment_unacknowledged_additions
-    if action is not None and action not in VALID_UNACKNOWLEDGED_ADDITIONS_ACTIONS:
-        errors.append(
-            "acknowledgment_unacknowledged_additions must be one of "
-            f"{sorted(VALID_UNACKNOWLEDGED_ADDITIONS_ACTIONS)}; got {action!r}"
-        )
-    breaks = request.acknowledgment_breaks
-    if breaks is not None and breaks not in VALID_ACKNOWLEDGMENT_BREAKS_ACTIONS:
-        errors.append(
-            "acknowledgment_breaks must be one of "
-            f"{sorted(VALID_ACKNOWLEDGMENT_BREAKS_ACTIONS)}; got {breaks!r}"
-        )
-    path = request.acknowledgments_path
-    if path is not None and not Path(path).is_file():
-        errors.append(f"acknowledgments file not found: {path}")
-    return errors

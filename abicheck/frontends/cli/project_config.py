@@ -31,7 +31,7 @@ directory's ``compare`` (Codex review, P1).
 
 from __future__ import annotations
 
-from collections.abc import Iterator
+from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -45,6 +45,7 @@ if TYPE_CHECKING:
 
 __all__ = [
     "compare_settings_usage_errors",
+    "config_exclude_headers",
     "enter_performance_profile",
     "resolve_project_compare_config",
 ]
@@ -69,6 +70,7 @@ def resolve_project_compare_config(
     *,
     config: Path | None,
     severity_preset: str | None,
+    config_overrides: Mapping[str, object] | None = None,
 ) -> tuple[Path | None, object, ResolvedCompareConfig, str | None]:
     """Load the project config and merge CLI flags over it (CLI > config > default).
 
@@ -102,9 +104,30 @@ def resolve_project_compare_config(
     cfg_path = resolve_project_config(config, search_from=Path.cwd()).path
     with compare_settings_usage_errors():
         project_cfg, resolved_cfg, cfg_sha = load_and_resolve_compare_config(
-            cfg_path, severity_preset=severity_preset
+            cfg_path,
+            severity_preset=severity_preset,
+            config_overrides=config_overrides,
         )
     return cfg_path, project_cfg, resolved_cfg, cfg_sha
+
+
+def config_exclude_headers(
+    exclude_headers: tuple[str, ...], project_cfg: object
+) -> tuple[str, ...]:
+    """The run's ``exclude_headers``: ``--exclude-header``, else ``scope.exclude_headers``.
+
+    ``scope.exclude_headers`` is the config equivalent of ``--exclude-header``
+    (see ``BuildConfig.exclude_headers`` for why it is its own key and not
+    ``sources.exclude``). Weaker than the flag and never unioned with it: a run
+    stating ``--exclude-header`` at all uses exactly the rules it stated, because
+    the rule *set* is the run's scope identity and silently widening it would
+    make the run narrower than the command line says. The result is the one
+    canonical rule set every path -- scalar, directory/package fan-out, stranded
+    capture, dry-run receipt, configuration digest -- reads.
+    """
+    if exclude_headers:
+        return exclude_headers
+    return tuple(getattr(project_cfg, "exclude_headers", ()) or ())
 
 
 def enter_performance_profile(ctx: click.Context, explicit: str | None) -> None:
@@ -130,9 +153,12 @@ def enter_performance_profile(ctx: click.Context, explicit: str | None) -> None:
         cfg_path = resolve_project_config(
             ctx.params.get("config"), search_from=Path.cwd()
         ).path
-        if cfg_path is not None:
+        overrides = ctx.params.get("config_overrides")
+        if cfg_path is not None or overrides:
             try:
-                value = load_build_config_with_digest(cfg_path)[0].performance_profile
+                value = load_build_config_with_digest(
+                    cfg_path, config_overrides=overrides
+                )[0].performance_profile
             except (OSError, ValueError):
                 value = None
     profile = None if value is None else parse_performance_profile(value)

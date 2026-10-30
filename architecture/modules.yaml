@@ -69,6 +69,7 @@
         "abicheck/buildsource/adapters/ninja.py",
         "abicheck/buildsource/archive_graph.py",
         "abicheck/buildsource/build_config_io.py",
+        "abicheck/buildsource/build_config_overrides.py",
         "abicheck/buildsource/build_config_schema.py",
         "abicheck/buildsource/build_config_scope.py",
         "abicheck/buildsource/build_query.py",

@@ -718,10 +718,10 @@ adrs:
 
   - id: ADR-091
     file: 091-one-option-vocabulary.md
-    disposition: gap
+    disposition: surfaced
     use_cases: []
-    surfaces: []
-    missing: Proposed, not yet implemented; would rename options on the CLI, config, Action and typed API to one vocabulary, add --set/Action set:, and add an option-vocabulary registry with a parity test, pending acceptance.
+    surfaces:
+      - cli: compare --set
 
   - id: ADR-090
     file: 090-unresolved-surface-is-not-a-clean-verdict.md
