@@ -77,6 +77,24 @@ def _config_rows() -> list[dict[str, Any]]:
     ]
 
 
+def _input_status(description: str) -> str:
+    """Classify an Action input by its own description.
+
+    ``retired`` uses the rule ``tests/test_action_retired_inputs_contract.py``
+    owns ("RETIRED" anywhere in the description): a fail-closed tombstone that
+    stays declared. ``ignored`` is an input that still parses but does nothing
+    ("... and ignored."); ``deprecated`` still works under an old name.
+    """
+    lead = " ".join(description.split()[:4]).lower()
+    if "RETIRED" in description:
+        return "retired"
+    if "and ignored" in lead:
+        return "ignored"
+    if lead.startswith("deprecated"):
+        return "deprecated"
+    return "live"
+
+
 def _action_rows() -> list[dict[str, Any]]:
     files = [
         REPO_DIR / "action.yml",
@@ -93,7 +111,7 @@ def _action_rows() -> list[dict[str, Any]]:
                     "id": f"{owner}:{name}",
                     "action": owner,
                     "input": name,
-                    "retired": desc.lstrip().upper().startswith(("RETIRED", "REMOVED")),
+                    "status": _input_status(desc),
                 }
             )
     return rows

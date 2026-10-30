@@ -1208,1645 +1208,1645 @@
    "id": "action:mode",
    "action": "action",
    "input": "mode",
-   "retired": false
+   "status": "live"
   },
   {
    "id": "action:old-library",
    "action": "action",
    "input": "old-library",
-   "retired": false
+   "status": "live"
   },
   {
    "id": "action:new-library",
    "action": "action",
    "input": "new-library",
-   "retired": false
+   "status": "live"
   },
   {
    "id": "action:new-library-set",
    "action": "action",
    "input": "new-library-set",
-   "retired": true
+   "status": "retired"
   },
   {
    "id": "action:debug-info1",
    "action": "action",
    "input": "debug-info1",
-   "retired": false
+   "status": "live"
   },
   {
    "id": "action:debug-info2",
    "action": "action",
    "input": "debug-info2",
-   "retired": false
+   "status": "live"
   },
   {
    "id": "action:devel-pkg1",
    "action": "action",
    "input": "devel-pkg1",
-   "retired": false
+   "status": "live"
   },
   {
    "id": "action:devel-pkg2",
    "action": "action",
    "input": "devel-pkg2",
-   "retired": false
+   "status": "live"
   },
   {
    "id": "action:dso-only",
    "action": "action",
    "input": "dso-only",
-   "retired": false
+   "status": "live"
   },
   {
    "id": "action:include-private-dso",
    "action": "action",
    "input": "include-private-dso",
-   "retired": false
+   "status": "live"
   },
   {
    "id": "action:fail-on-removed-library",
    "action": "action",
    "input": "fail-on-removed-library",
-   "retired": false
+   "status": "live"
   },
   {
    "id": "action:analysis-assurance-complete",
    "action": "action",
    "input": "analysis-assurance-complete",
-   "retired": false
+   "status": "live"
   },
   {
    "id": "action:header",
    "action": "action",
    "input": "header",
-   "retired": false
+   "status": "live"
   },
   {
    "id": "action:old-header",
    "action": "action",
    "input": "old-header",
-   "retired": false
+   "status": "live"
   },
   {
    "id": "action:new-header",
    "action": "action",
    "input": "new-header",
-   "retired": false
+   "status": "live"
   },
   {
    "id": "action:public-header-dir",
    "action": "action",
    "input": "public-header-dir",
-   "retired": false
+   "status": "live"
   },
   {
    "id": "action:build-target",
    "action": "action",
    "input": "build-target",
-   "retired": true
+   "status": "retired"
   },
   {
    "id": "action:include",
    "action": "action",
    "input": "include",
-   "retired": false
+   "status": "live"
   },
   {
    "id": "action:old-include",
    "action": "action",
    "input": "old-include",
-   "retired": false
+   "status": "live"
   },
   {
    "id": "action:new-include",
    "action": "action",
    "input": "new-include",
-   "retired": false
+   "status": "live"
   },
   {
    "id": "action:old-version",
    "action": "action",
    "input": "old-version",
-   "retired": false
+   "status": "live"
   },
   {
    "id": "action:new-version",
    "action": "action",
    "input": "new-version",
-   "retired": false
+   "status": "live"
   },
   {
    "id": "action:lang",
    "action": "action",
    "input": "lang",
-   "retired": false
+   "status": "live"
   },
   {
    "id": "action:ast-frontend",
    "action": "action",
    "input": "ast-frontend",
-   "retired": false
+   "status": "live"
   },
   {
    "id": "action:gcc-path",
    "action": "action",
    "input": "gcc-path",
-   "retired": false
+   "status": "live"
   },
   {
    "id": "action:gcc-prefix",
    "action": "action",
    "input": "gcc-prefix",
-   "retired": false
+   "status": "live"
   },
   {
    "id": "action:gcc-options",
    "action": "action",
    "input": "gcc-options",
-   "retired": false
+   "status": "live"
   },
   {
    "id": "action:sysroot",
    "action": "action",
    "input": "sysroot",
-   "retired": false
+   "status": "live"
   },
   {
    "id": "action:nostdinc",
    "action": "action",
    "input": "nostdinc",
-   "retired": false
+   "status": "live"
   },
   {
    "id": "action:follow-deps",
    "action": "action",
    "input": "follow-deps",
-   "retired": false
+   "status": "live"
   },
   {
    "id": "action:old-root",
    "action": "action",
    "input": "old-root",
-   "retired": false
+   "status": "live"
   },
   {
    "id": "action:new-root",
    "action": "action",
    "input": "new-root",
-   "retired": false
+   "status": "live"
   },
   {
    "id": "action:search-path",
    "action": "action",
    "input": "search-path",
-   "retired": false
+   "status": "live"
   },
   {
    "id": "action:ld-library-path",
    "action": "action",
    "input": "ld-library-path",
-   "retired": false
+   "status": "live"
   },
   {
    "id": "action:used-by",
    "action": "action",
    "input": "used-by",
-   "retired": false
+   "status": "live"
   },
   {
    "id": "action:used-by-manifest",
    "action": "action",
    "input": "used-by-manifest",
-   "retired": false
+   "status": "live"
   },
   {
    "id": "action:required-symbol",
    "action": "action",
    "input": "required-symbol",
-   "retired": false
+   "status": "live"
   },
   {
    "id": "action:required-symbols",
    "action": "action",
    "input": "required-symbols",
-   "retired": false
+   "status": "live"
   },
   {
    "id": "action:against",
    "action": "action",
    "input": "against",
-   "retired": true
+   "status": "retired"
   },
   {
    "id": "action:sources",
    "action": "action",
    "input": "sources",
-   "retired": false
+   "status": "live"
   },
   {
    "id": "action:build-info",
    "action": "action",
    "input": "build-info",
-   "retired": false
+   "status": "live"
   },
   {
    "id": "action:compile-db",
    "action": "action",
    "input": "compile-db",
-   "retired": false
+   "status": "live"
   },
   {
    "id": "action:build-config",
    "action": "action",
    "input": "build-config",
-   "retired": false
+   "status": "live"
   },
   {
    "id": "action:jobs",
    "action": "action",
    "input": "jobs",
-   "retired": true
+   "status": "ignored"
   },
   {
    "id": "action:bundle-system-providers",
    "action": "action",
    "input": "bundle-system-providers",
-   "retired": true
+   "status": "retired"
   },
   {
    "id": "action:allow-build-query",
    "action": "action",
    "input": "allow-build-query",
-   "retired": false
+   "status": "ignored"
   },
   {
    "id": "action:depth",
    "action": "action",
    "input": "depth",
-   "retired": false
+   "status": "live"
   },
   {
    "id": "action:since",
    "action": "action",
    "input": "since",
-   "retired": false
+   "status": "live"
   },
   {
    "id": "action:changed-path",
    "action": "action",
    "input": "changed-path",
-   "retired": false
+   "status": "live"
   },
   {
    "id": "action:budget",
    "action": "action",
    "input": "budget",
-   "retired": false
+   "status": "live"
   },
   {
    "id": "action:dry-run",
    "action": "action",
    "input": "dry-run",
-   "retired": false
+   "status": "live"
   },
   {
    "id": "action:estimate",
    "action": "action",
    "input": "estimate",
-   "retired": true
+   "status": "retired"
   },
   {
    "id": "action:audit",
    "action": "action",
    "input": "audit",
-   "retired": true
+   "status": "retired"
   },
   {
    "id": "action:crosscheck",
    "action": "action",
    "input": "crosscheck",
-   "retired": true
+   "status": "retired"
   },
   {
    "id": "action:risk-rules",
    "action": "action",
    "input": "risk-rules",
-   "retired": true
+   "status": "retired"
   },
   {
    "id": "action:abi-baseline",
    "action": "action",
    "input": "abi-baseline",
-   "retired": false
+   "status": "live"
   },
   {
    "id": "action:baseline-profile",
    "action": "action",
    "input": "baseline-profile",
-   "retired": false
+   "status": "live"
   },
   {
    "id": "action:baseline-target",
    "action": "action",
    "input": "baseline-target",
-   "retired": false
+   "status": "live"
   },
   {
    "id": "action:baseline-asset-name-template",
    "action": "action",
    "input": "baseline-asset-name-template",
-   "retired": false
+   "status": "live"
   },
   {
    "id": "action:baseline-generation",
    "action": "action",
    "input": "baseline-generation",
-   "retired": false
+   "status": "live"
   },
   {
    "id": "action:baseline-project-ref",
    "action": "action",
    "input": "baseline-project-ref",
-   "retired": false
+   "status": "live"
   },
   {
    "id": "action:expected-archive-digest",
    "action": "action",
    "input": "expected-archive-digest",
-   "retired": false
+   "status": "live"
   },
   {
    "id": "action:verify-baseline-attestation",
    "action": "action",
    "input": "verify-baseline-attestation",
-   "retired": false
+   "status": "live"
   },
   {
    "id": "action:baseline-attestation-repo",
    "action": "action",
    "input": "baseline-attestation-repo",
-   "retired": false
+   "status": "live"
   },
   {
    "id": "action:baseline-attestation-signer-workflow",
    "action": "action",
    "input": "baseline-attestation-signer-workflow",
-   "retired": false
+   "status": "live"
   },
   {
    "id": "action:format",
    "action": "action",
    "input": "format",
-   "retired": false
+   "status": "live"
   },
   {
    "id": "action:output-file",
    "action": "action",
    "input": "output-file",
-   "retired": false
+   "status": "live"
   },
   {
    "id": "action:snapshot-compression",
    "action": "action",
    "input": "snapshot-compression",
-   "retired": false
+   "status": "live"
   },
   {
    "id": "action:policy",
    "action": "action",
    "input": "policy",
-   "retired": false
+   "status": "live"
   },
   {
    "id": "action:policy-file",
    "action": "action",
    "input": "policy-file",
-   "retired": false
+   "status": "live"
   },
   {
    "id": "action:suppress",
    "action": "action",
    "input": "suppress",
-   "retired": false
+   "status": "live"
   },
   {
    "id": "action:acknowledgments",
    "action": "action",
    "input": "acknowledgments",
-   "retired": false
+   "status": "live"
   },
   {
    "id": "action:verbose",
    "action": "action",
    "input": "verbose",
-   "retired": false
+   "status": "live"
   },
   {
    "id": "action:python-version",
    "action": "action",
    "input": "python-version",
-   "retired": false
+   "status": "live"
   },
   {
    "id": "action:install-deps",
    "action": "action",
    "input": "install-deps",
-   "retired": false
+   "status": "deprecated"
   },
   {
    "id": "action:dependency-source",
    "action": "action",
    "input": "dependency-source",
-   "retired": false
+   "status": "live"
   },
   {
    "id": "action:upload-sarif",
    "action": "action",
    "input": "upload-sarif",
-   "retired": false
+   "status": "live"
   },
   {
    "id": "action:fail-on-breaking",
    "action": "action",
    "input": "fail-on-breaking",
-   "retired": false
+   "status": "live"
   },
   {
    "id": "action:fail-on-api-break",
    "action": "action",
    "input": "fail-on-api-break",
-   "retired": false
+   "status": "live"
   },
   {
    "id": "action:severity-preset",
    "action": "action",
    "input": "severity-preset",
-   "retired": false
+   "status": "live"
   },
   {
    "id": "action:require-complete-analysis",
    "action": "action",
    "input": "require-complete-analysis",
-   "retired": true
+   "status": "retired"
   },
   {
    "id": "action:annotate",
    "action": "action",
    "input": "annotate",
-   "retired": false
+   "status": "live"
   },
   {
    "id": "action:annotate-additions",
    "action": "action",
    "input": "annotate-additions",
-   "retired": false
+   "status": "live"
   },
   {
    "id": "action:extra-args",
    "action": "action",
    "input": "extra-args",
-   "retired": false
+   "status": "live"
   },
   {
    "id": "action:add-job-summary",
    "action": "action",
    "input": "add-job-summary",
-   "retired": false
+   "status": "live"
   },
   {
    "id": "action:pr-comment",
    "action": "action",
    "input": "pr-comment",
-   "retired": false
+   "status": "live"
   },
   {
    "id": "action:pr-comment-mode",
    "action": "action",
    "input": "pr-comment-mode",
-   "retired": false
+   "status": "live"
   },
   {
    "id": "action:pr-comment-key",
    "action": "action",
    "input": "pr-comment-key",
-   "retired": false
+   "status": "live"
   },
   {
    "id": "action:pr-comment-on",
    "action": "action",
    "input": "pr-comment-on",
-   "retired": false
+   "status": "live"
   },
   {
    "id": "action:pr-comment-report-artifact-url",
    "action": "action",
    "input": "pr-comment-report-artifact-url",
-   "retired": false
+   "status": "live"
   },
   {
    "id": "action:pr-comment-detail",
    "action": "action",
    "input": "pr-comment-detail",
-   "retired": false
+   "status": "live"
   },
   {
    "id": "action:github-token",
    "action": "action",
    "input": "github-token",
-   "retired": false
+   "status": "live"
   },
   {
    "id": "actions/aggregate:checks",
    "action": "actions/aggregate",
    "input": "checks",
-   "retired": false
+   "status": "live"
   },
   {
    "id": "actions/aggregate:reports-dir",
    "action": "actions/aggregate",
    "input": "reports-dir",
-   "retired": false
+   "status": "live"
   },
   {
    "id": "actions/aggregate:manifest-path",
    "action": "actions/aggregate",
    "input": "manifest-path",
-   "retired": false
+   "status": "live"
   },
   {
    "id": "actions/aggregate:gate",
    "action": "actions/aggregate",
    "input": "gate",
-   "retired": false
+   "status": "live"
   },
   {
    "id": "actions/aggregate:outputs",
    "action": "actions/aggregate",
    "input": "outputs",
-   "retired": false
+   "status": "live"
   },
   {
    "id": "actions/aggregate:record-analysis-context",
    "action": "actions/aggregate",
    "input": "record-analysis-context",
-   "retired": false
+   "status": "live"
   },
   {
    "id": "actions/aggregate:tested-sha",
    "action": "actions/aggregate",
    "input": "tested-sha",
-   "retired": false
+   "status": "live"
   },
   {
    "id": "actions/aggregate:profile",
    "action": "actions/aggregate",
    "input": "profile",
-   "retired": false
+   "status": "live"
   },
   {
    "id": "actions/aggregate:orchestration-ref",
    "action": "actions/aggregate",
    "input": "orchestration-ref",
-   "retired": false
+   "status": "live"
   },
   {
    "id": "actions/aggregate:install",
    "action": "actions/aggregate",
    "input": "install",
-   "retired": false
+   "status": "live"
   },
   {
    "id": "actions/aggregate:python-version",
    "action": "actions/aggregate",
    "input": "python-version",
-   "retired": false
+   "status": "live"
   },
   {
    "id": "actions/baseline:libraries",
    "action": "actions/baseline",
    "input": "libraries",
-   "retired": false
+   "status": "live"
   },
   {
    "id": "actions/baseline:library-spec",
    "action": "actions/baseline",
    "input": "library-spec",
-   "retired": false
+   "status": "live"
   },
   {
    "id": "actions/baseline:library-root",
    "action": "actions/baseline",
    "input": "library-root",
-   "retired": false
+   "status": "live"
   },
   {
    "id": "actions/baseline:library-spec-bindings",
    "action": "actions/baseline",
    "input": "library-spec-bindings",
-   "retired": false
+   "status": "live"
   },
   {
    "id": "actions/baseline:library-spec-require-elf",
    "action": "actions/baseline",
    "input": "library-spec-require-elf",
-   "retired": false
+   "status": "live"
   },
   {
    "id": "actions/baseline:output-dir",
    "action": "actions/baseline",
    "input": "output-dir",
-   "retired": false
+   "status": "live"
   },
   {
    "id": "actions/baseline:project-ref",
    "action": "actions/baseline",
    "input": "project-ref",
-   "retired": false
+   "status": "live"
   },
   {
    "id": "actions/baseline:profile",
    "action": "actions/baseline",
    "input": "profile",
-   "retired": false
+   "status": "live"
   },
   {
    "id": "actions/baseline:build-info",
    "action": "actions/baseline",
    "input": "build-info",
-   "retired": false
+   "status": "live"
   },
   {
    "id": "actions/baseline:depth",
    "action": "actions/baseline",
    "input": "depth",
-   "retired": false
+   "status": "live"
   },
   {
    "id": "actions/baseline:build-config",
    "action": "actions/baseline",
    "input": "build-config",
-   "retired": false
+   "status": "live"
   },
   {
    "id": "actions/baseline:baseline-generation",
    "action": "actions/baseline",
    "input": "baseline-generation",
-   "retired": false
+   "status": "live"
   },
   {
    "id": "actions/baseline:generator-git-sha",
    "action": "actions/baseline",
    "input": "generator-git-sha",
-   "retired": false
+   "status": "live"
   },
   {
    "id": "actions/baseline:generator-action-ref",
    "action": "actions/baseline",
    "input": "generator-action-ref",
-   "retired": false
+   "status": "live"
   },
   {
    "id": "actions/baseline:extraction-context",
    "action": "actions/baseline",
    "input": "extraction-context",
-   "retired": false
+   "status": "live"
   },
   {
    "id": "actions/baseline:previous-manifest",
    "action": "actions/baseline",
    "input": "previous-manifest",
-   "retired": false
+   "status": "live"
   },
   {
    "id": "actions/baseline:validation",
    "action": "actions/baseline",
    "input": "validation",
-   "retired": false
+   "status": "live"
   },
   {
    "id": "actions/baseline:snapshot-compression",
    "action": "actions/baseline",
    "input": "snapshot-compression",
-   "retired": false
+   "status": "live"
   },
   {
    "id": "actions/baseline:python-version",
    "action": "actions/baseline",
    "input": "python-version",
-   "retired": false
+   "status": "live"
   },
   {
    "id": "actions/baseline:install-deps",
    "action": "actions/baseline",
    "input": "install-deps",
-   "retired": false
+   "status": "live"
   },
   {
    "id": "actions/check-target:kind",
    "action": "actions/check-target",
    "input": "kind",
-   "retired": false
+   "status": "live"
   },
   {
    "id": "actions/check-target:target-kind",
    "action": "actions/check-target",
    "input": "target-kind",
-   "retired": false
+   "status": "live"
   },
   {
    "id": "actions/check-target:name",
    "action": "actions/check-target",
    "input": "name",
-   "retired": false
+   "status": "live"
   },
   {
    "id": "actions/check-target:baseline-target",
    "action": "actions/check-target",
    "input": "baseline-target",
-   "retired": false
+   "status": "live"
   },
   {
    "id": "actions/check-target:bundle-members",
    "action": "actions/check-target",
    "input": "bundle-members",
-   "retired": false
+   "status": "live"
   },
   {
    "id": "actions/check-target:profile",
    "action": "actions/check-target",
    "input": "profile",
-   "retired": false
+   "status": "live"
   },
   {
    "id": "actions/check-target:baseline-channel",
    "action": "actions/check-target",
    "input": "baseline-channel",
-   "retired": false
+   "status": "live"
   },
   {
    "id": "actions/check-target:baseline-path",
    "action": "actions/check-target",
    "input": "baseline-path",
-   "retired": false
+   "status": "live"
   },
   {
    "id": "actions/check-target:baseline-required",
    "action": "actions/check-target",
    "input": "baseline-required",
-   "retired": false
+   "status": "live"
   },
   {
    "id": "actions/check-target:candidate-build-output",
    "action": "actions/check-target",
    "input": "candidate-build-output",
-   "retired": false
+   "status": "live"
   },
   {
    "id": "actions/check-target:expected-project-ref",
    "action": "actions/check-target",
    "input": "expected-project-ref",
-   "retired": false
+   "status": "live"
   },
   {
    "id": "actions/check-target:expected-baseline-generation",
    "action": "actions/check-target",
    "input": "expected-baseline-generation",
-   "retired": false
+   "status": "live"
   },
   {
    "id": "actions/check-target:allow-new-target",
    "action": "actions/check-target",
    "input": "allow-new-target",
-   "retired": false
+   "status": "live"
   },
   {
    "id": "actions/check-target:requested-depth",
    "action": "actions/check-target",
    "input": "requested-depth",
-   "retired": false
+   "status": "live"
   },
   {
    "id": "actions/check-target:explicit-id",
    "action": "actions/check-target",
    "input": "explicit-id",
-   "retired": false
+   "status": "live"
   },
   {
    "id": "actions/check-target:build-system",
    "action": "actions/check-target",
    "input": "build-system",
-   "retired": false
+   "status": "live"
   },
   {
    "id": "actions/check-target:build-generator",
    "action": "actions/check-target",
    "input": "build-generator",
-   "retired": false
+   "status": "live"
   },
   {
    "id": "actions/check-target:gate-mode",
    "action": "actions/check-target",
    "input": "gate-mode",
-   "retired": false
+   "status": "live"
   },
   {
    "id": "actions/check-target:project",
    "action": "actions/check-target",
    "input": "project",
-   "retired": false
+   "status": "live"
   },
   {
    "id": "actions/check-target:head-sha",
    "action": "actions/check-target",
    "input": "head-sha",
-   "retired": false
+   "status": "live"
   },
   {
    "id": "actions/check-target:base-ref",
    "action": "actions/check-target",
    "input": "base-ref",
-   "retired": false
+   "status": "live"
   },
   {
    "id": "actions/check-target:evidence-producer",
    "action": "actions/check-target",
    "input": "evidence-producer",
-   "retired": false
+   "status": "live"
   },
   {
    "id": "actions/check-target:evidence-pack-path",
    "action": "actions/check-target",
    "input": "evidence-pack-path",
-   "retired": false
+   "status": "live"
   },
   {
    "id": "actions/check-target:new-library",
    "action": "actions/check-target",
    "input": "new-library",
-   "retired": false
+   "status": "live"
   },
   {
    "id": "actions/check-target:header",
    "action": "actions/check-target",
    "input": "header",
-   "retired": false
+   "status": "live"
   },
   {
    "id": "actions/check-target:old-header",
    "action": "actions/check-target",
    "input": "old-header",
-   "retired": false
+   "status": "live"
   },
   {
    "id": "actions/check-target:new-header",
    "action": "actions/check-target",
    "input": "new-header",
-   "retired": false
+   "status": "live"
   },
   {
    "id": "actions/check-target:include",
    "action": "actions/check-target",
    "input": "include",
-   "retired": false
+   "status": "live"
   },
   {
    "id": "actions/check-target:old-include",
    "action": "actions/check-target",
    "input": "old-include",
-   "retired": false
+   "status": "live"
   },
   {
    "id": "actions/check-target:new-include",
    "action": "actions/check-target",
    "input": "new-include",
-   "retired": false
+   "status": "live"
   },
   {
    "id": "actions/check-target:lang",
    "action": "actions/check-target",
    "input": "lang",
-   "retired": false
+   "status": "live"
   },
   {
    "id": "actions/check-target:ast-frontend",
    "action": "actions/check-target",
    "input": "ast-frontend",
-   "retired": false
+   "status": "live"
   },
   {
    "id": "actions/check-target:gcc-path",
    "action": "actions/check-target",
    "input": "gcc-path",
-   "retired": false
+   "status": "live"
   },
   {
    "id": "actions/check-target:gcc-prefix",
    "action": "actions/check-target",
    "input": "gcc-prefix",
-   "retired": false
+   "status": "live"
   },
   {
    "id": "actions/check-target:gcc-options",
    "action": "actions/check-target",
    "input": "gcc-options",
-   "retired": false
+   "status": "live"
   },
   {
    "id": "actions/check-target:consumer-ast-frontend",
    "action": "actions/check-target",
    "input": "consumer-ast-frontend",
-   "retired": false
+   "status": "live"
   },
   {
    "id": "actions/check-target:consumer-gcc-path",
    "action": "actions/check-target",
    "input": "consumer-gcc-path",
-   "retired": false
+   "status": "live"
   },
   {
    "id": "actions/check-target:consumer-gcc-options",
    "action": "actions/check-target",
    "input": "consumer-gcc-options",
-   "retired": false
+   "status": "live"
   },
   {
    "id": "actions/check-target:consumer-compile-active",
    "action": "actions/check-target",
    "input": "consumer-compile-active",
-   "retired": false
+   "status": "live"
   },
   {
    "id": "actions/check-target:sysroot",
    "action": "actions/check-target",
    "input": "sysroot",
-   "retired": false
+   "status": "live"
   },
   {
    "id": "actions/check-target:sources",
    "action": "actions/check-target",
    "input": "sources",
-   "retired": false
+   "status": "live"
   },
   {
    "id": "actions/check-target:build-info",
    "action": "actions/check-target",
    "input": "build-info",
-   "retired": false
+   "status": "live"
   },
   {
    "id": "actions/check-target:compile-db",
    "action": "actions/check-target",
    "input": "compile-db",
-   "retired": false
+   "status": "live"
   },
   {
    "id": "actions/check-target:build-config",
    "action": "actions/check-target",
    "input": "build-config",
-   "retired": false
+   "status": "live"
   },
   {
    "id": "actions/check-target:consumer-binary",
    "action": "actions/check-target",
    "input": "consumer-binary",
-   "retired": false
+   "status": "live"
   },
   {
    "id": "actions/check-target:contract-file",
    "action": "actions/check-target",
    "input": "contract-file",
-   "retired": false
+   "status": "live"
   },
   {
    "id": "actions/check-target:policy",
    "action": "actions/check-target",
    "input": "policy",
-   "retired": false
+   "status": "live"
   },
   {
    "id": "actions/check-target:policy-file",
    "action": "actions/check-target",
    "input": "policy-file",
-   "retired": false
+   "status": "live"
   },
   {
    "id": "actions/check-target:suppress",
    "action": "actions/check-target",
    "input": "suppress",
-   "retired": false
+   "status": "live"
   },
   {
    "id": "actions/check-target:severity-preset",
    "action": "actions/check-target",
    "input": "severity-preset",
-   "retired": false
+   "status": "live"
   },
   {
    "id": "actions/check-target:require-complete-analysis",
    "action": "actions/check-target",
    "input": "require-complete-analysis",
-   "retired": true
+   "status": "retired"
   },
   {
    "id": "actions/check-target:analysis-assurance-complete",
    "action": "actions/check-target",
    "input": "analysis-assurance-complete",
-   "retired": false
+   "status": "live"
   },
   {
    "id": "actions/check-target:extra-args",
    "action": "actions/check-target",
    "input": "extra-args",
-   "retired": false
+   "status": "live"
   },
   {
    "id": "actions/check-target:python-version",
    "action": "actions/check-target",
    "input": "python-version",
-   "retired": false
+   "status": "live"
   },
   {
    "id": "actions/check-target:install-deps",
    "action": "actions/check-target",
    "input": "install-deps",
-   "retired": false
+   "status": "live"
   },
   {
    "id": "actions/check-target:dependency-source",
    "action": "actions/check-target",
    "input": "dependency-source",
-   "retired": false
+   "status": "live"
   },
   {
    "id": "actions/check-target:action-version",
    "action": "actions/check-target",
    "input": "action-version",
-   "retired": false
+   "status": "live"
   },
   {
    "id": "actions/check-target:abicheck-repository",
    "action": "actions/check-target",
    "input": "abicheck-repository",
-   "retired": false
+   "status": "live"
   },
   {
    "id": "actions/check-target:abicheck-ref",
    "action": "actions/check-target",
    "input": "abicheck-ref",
-   "retired": false
+   "status": "live"
   },
   {
    "id": "actions/collect-facts:phase",
    "action": "actions/collect-facts",
    "input": "phase",
-   "retired": false
+   "status": "live"
   },
   {
    "id": "actions/collect-facts:producer",
    "action": "actions/collect-facts",
    "input": "producer",
-   "retired": false
+   "status": "live"
   },
   {
    "id": "actions/collect-facts:sources",
    "action": "actions/collect-facts",
    "input": "sources",
-   "retired": false
+   "status": "live"
   },
   {
    "id": "actions/collect-facts:output",
    "action": "actions/collect-facts",
    "input": "output",
-   "retired": false
+   "status": "live"
   },
   {
    "id": "actions/collect-facts:public-roots",
    "action": "actions/collect-facts",
    "input": "public-roots",
-   "retired": false
+   "status": "live"
   },
   {
    "id": "actions/collect-facts:library",
    "action": "actions/collect-facts",
    "input": "library",
-   "retired": false
+   "status": "live"
   },
   {
    "id": "actions/collect-facts:extractor",
    "action": "actions/collect-facts",
    "input": "extractor",
-   "retired": false
+   "status": "live"
   },
   {
    "id": "actions/collect-facts:compiler",
    "action": "actions/collect-facts",
    "input": "compiler",
-   "retired": false
+   "status": "live"
   },
   {
    "id": "actions/collect-facts:plugin-artifact",
    "action": "actions/collect-facts",
    "input": "plugin-artifact",
-   "retired": false
+   "status": "live"
   },
   {
    "id": "actions/collect-facts:plugin-artifact-sha256",
    "action": "actions/collect-facts",
    "input": "plugin-artifact-sha256",
-   "retired": false
+   "status": "live"
   },
   {
    "id": "actions/collect-facts:install-deps",
    "action": "actions/collect-facts",
    "input": "install-deps",
-   "retired": false
+   "status": "live"
   },
   {
    "id": "actions/collect-facts:llvm-cmake-prefix",
    "action": "actions/collect-facts",
    "input": "llvm-cmake-prefix",
-   "retired": false
+   "status": "live"
   },
   {
    "id": "actions/collect-facts:python-version",
    "action": "actions/collect-facts",
    "input": "python-version",
-   "retired": false
+   "status": "live"
   },
   {
    "id": "actions/report:report",
    "action": "actions/report",
    "input": "report",
-   "retired": false
+   "status": "live"
   },
   {
    "id": "actions/report:detail",
    "action": "actions/report",
    "input": "detail",
-   "retired": false
+   "status": "live"
   },
   {
    "id": "actions/report:on",
    "action": "actions/report",
    "input": "on",
-   "retired": false
+   "status": "live"
   },
   {
    "id": "actions/report:post-on",
    "action": "actions/report",
    "input": "post-on",
-   "retired": false
+   "status": "live"
   },
   {
    "id": "actions/report:sha",
    "action": "actions/report",
    "input": "sha",
-   "retired": false
+   "status": "live"
   },
   {
    "id": "actions/report:run-label",
    "action": "actions/report",
    "input": "run-label",
-   "retired": false
+   "status": "live"
   },
   {
    "id": "actions/report:report-url",
    "action": "actions/report",
    "input": "report-url",
-   "retired": false
+   "status": "live"
   },
   {
    "id": "actions/report:report-artifact-url",
    "action": "actions/report",
    "input": "report-artifact-url",
-   "retired": false
+   "status": "live"
   },
   {
    "id": "actions/report:path-prefix",
    "action": "actions/report",
    "input": "path-prefix",
-   "retired": false
+   "status": "live"
   },
   {
    "id": "actions/report:gate-api-break",
    "action": "actions/report",
    "input": "gate-api-break",
-   "retired": false
+   "status": "live"
   },
   {
    "id": "actions/report:gate-breaking",
    "action": "actions/report",
    "input": "gate-breaking",
-   "retired": false
+   "status": "live"
   },
   {
    "id": "actions/report:profile",
    "action": "actions/report",
    "input": "profile",
-   "retired": false
+   "status": "live"
   },
   {
    "id": "actions/report:comment-identity",
    "action": "actions/report",
    "input": "comment-identity",
-   "retired": false
+   "status": "live"
   },
   {
    "id": "actions/report:repository",
    "action": "actions/report",
    "input": "repository",
-   "retired": false
+   "status": "live"
   },
   {
    "id": "actions/report:pr-number",
    "action": "actions/report",
    "input": "pr-number",
-   "retired": false
+   "status": "live"
   },
   {
    "id": "actions/report:github-token",
    "action": "actions/report",
    "input": "github-token",
-   "retired": false
+   "status": "live"
   },
   {
    "id": "actions/report:source-run-id",
    "action": "actions/report",
    "input": "source-run-id",
-   "retired": false
+   "status": "live"
   },
   {
    "id": "actions/report:source-run-attempt",
    "action": "actions/report",
    "input": "source-run-attempt",
-   "retired": false
+   "status": "live"
   },
   {
    "id": "actions/report:job-summary",
    "action": "actions/report",
    "input": "job-summary",
-   "retired": false
+   "status": "live"
   },
   {
    "id": "actions/report:max-comment-bytes",
    "action": "actions/report",
    "input": "max-comment-bytes",
-   "retired": false
+   "status": "live"
   },
   {
    "id": "actions/report:max-summary-bytes",
    "action": "actions/report",
    "input": "max-summary-bytes",
-   "retired": false
+   "status": "live"
   },
   {
    "id": "actions/report:dry-run",
    "action": "actions/report",
    "input": "dry-run",
-   "retired": false
+   "status": "live"
   },
   {
    "id": "actions/report:python-version",
    "action": "actions/report",
    "input": "python-version",
-   "retired": false
+   "status": "live"
   },
   {
    "id": "actions/report:abicheck-version",
    "action": "actions/report",
    "input": "abicheck-version",
-   "retired": false
+   "status": "live"
   },
   {
    "id": "actions/resolve-baseline:baseline-path",
    "action": "actions/resolve-baseline",
    "input": "baseline-path",
-   "retired": false
+   "status": "live"
   },
   {
    "id": "actions/resolve-baseline:channel",
    "action": "actions/resolve-baseline",
    "input": "channel",
-   "retired": false
+   "status": "live"
   },
   {
    "id": "actions/resolve-baseline:kind",
    "action": "actions/resolve-baseline",
    "input": "kind",
-   "retired": false
+   "status": "live"
   },
   {
    "id": "actions/resolve-baseline:target",
    "action": "actions/resolve-baseline",
    "input": "target",
-   "retired": false
+   "status": "live"
   },
   {
    "id": "actions/resolve-baseline:bundle",
    "action": "actions/resolve-baseline",
    "input": "bundle",
-   "retired": false
+   "status": "live"
   },
   {
    "id": "actions/resolve-baseline:bundle-members",
    "action": "actions/resolve-baseline",
    "input": "bundle-members",
-   "retired": false
+   "status": "live"
   },
   {
    "id": "actions/resolve-baseline:profile",
    "action": "actions/resolve-baseline",
    "input": "profile",
-   "retired": false
+   "status": "live"
   },
   {
    "id": "actions/resolve-baseline:required",
    "action": "actions/resolve-baseline",
    "input": "required",
-   "retired": false
+   "status": "live"
   },
   {
    "id": "actions/resolve-baseline:candidate-build-output",
    "action": "actions/resolve-baseline",
    "input": "candidate-build-output",
-   "retired": false
+   "status": "live"
   },
   {
    "id": "actions/resolve-baseline:expected-project-ref",
    "action": "actions/resolve-baseline",
    "input": "expected-project-ref",
-   "retired": false
+   "status": "live"
   },
   {
    "id": "actions/resolve-baseline:expected-baseline-generation",
    "action": "actions/resolve-baseline",
    "input": "expected-baseline-generation",
-   "retired": false
+   "status": "live"
   },
   {
    "id": "actions/resolve-baseline:expected-archive-digest",
    "action": "actions/resolve-baseline",
    "input": "expected-archive-digest",
-   "retired": false
+   "status": "live"
   },
   {
    "id": "actions/resolve-baseline:allow-new-target",
    "action": "actions/resolve-baseline",
    "input": "allow-new-target",
-   "retired": false
+   "status": "live"
   },
   {
    "id": "actions/resolve-baseline:verify-baseline-attestation",
    "action": "actions/resolve-baseline",
    "input": "verify-baseline-attestation",
-   "retired": false
+   "status": "live"
   },
   {
    "id": "actions/resolve-baseline:baseline-attestation-repo",
    "action": "actions/resolve-baseline",
    "input": "baseline-attestation-repo",
-   "retired": false
+   "status": "live"
   },
   {
    "id": "actions/resolve-baseline:baseline-attestation-signer-workflow",
    "action": "actions/resolve-baseline",
    "input": "baseline-attestation-signer-workflow",
-   "retired": false
+   "status": "live"
   },
   {
    "id": "actions/resolve-baseline:stage-member-snapshots",
    "action": "actions/resolve-baseline",
    "input": "stage-member-snapshots",
-   "retired": false
+   "status": "live"
   },
   {
    "id": "actions/resolve-baseline:python-version",
    "action": "actions/resolve-baseline",
    "input": "python-version",
-   "retired": false
+   "status": "live"
   },
   {
    "id": "actions/stage-baseline:baseline-path",
    "action": "actions/stage-baseline",
    "input": "baseline-path",
-   "retired": false
+   "status": "live"
   },
   {
    "id": "actions/stage-baseline:asset-name-template",
    "action": "actions/stage-baseline",
    "input": "asset-name-template",
-   "retired": false
+   "status": "live"
   },
   {
    "id": "actions/stage-baseline:profile",
    "action": "actions/stage-baseline",
    "input": "profile",
-   "retired": false
+   "status": "live"
   },
   {
    "id": "actions/stage-baseline:generation",
    "action": "actions/stage-baseline",
    "input": "generation",
-   "retired": false
+   "status": "live"
   },
   {
    "id": "actions/stage-baseline:attest",
    "action": "actions/stage-baseline",
    "input": "attest",
-   "retired": false
+   "status": "live"
   },
   {
    "id": "actions/verify-baseline-source:mode",
    "action": "actions/verify-baseline-source",
    "input": "mode",
-   "retired": false
+   "status": "live"
   },
   {
    "id": "actions/verify-baseline-source:tag",
    "action": "actions/verify-baseline-source",
    "input": "tag",
-   "retired": false
+   "status": "live"
   },
   {
    "id": "actions/verify-baseline-source:built-sha",
    "action": "actions/verify-baseline-source",
    "input": "built-sha",
-   "retired": false
+   "status": "live"
   },
   {
    "id": "actions/verify-baseline-source:workflow",
    "action": "actions/verify-baseline-source",
    "input": "workflow",
-   "retired": false
+   "status": "live"
   },
   {
    "id": "actions/verify-baseline-source:expect-repository",
    "action": "actions/verify-baseline-source",
    "input": "expect-repository",
-   "retired": false
+   "status": "live"
   },
   {
    "id": "actions/verify-baseline-source:expect-event",
    "action": "actions/verify-baseline-source",
    "input": "expect-event",
-   "retired": false
+   "status": "live"
   },
   {
    "id": "actions/verify-baseline-source:expect-head-sha",
    "action": "actions/verify-baseline-source",
    "input": "expect-head-sha",
-   "retired": false
+   "status": "live"
   },
   {
    "id": "actions/verify-baseline-source:expect-head-branch",
    "action": "actions/verify-baseline-source",
    "input": "expect-head-branch",
-   "retired": false
+   "status": "live"
   },
   {
    "id": "actions/verify-baseline-source:allowed-conclusions",
    "action": "actions/verify-baseline-source",
    "input": "allowed-conclusions",
-   "retired": false
+   "status": "live"
   },
   {
    "id": "actions/verify-baseline-source:required-jobs",
    "action": "actions/verify-baseline-source",
    "input": "required-jobs",
-   "retired": false
+   "status": "live"
   },
   {
    "id": "actions/verify-baseline-source:allow-unrelated-job-failures",
    "action": "actions/verify-baseline-source",
    "input": "allow-unrelated-job-failures",
-   "retired": false
+   "status": "live"
   },
   {
    "id": "actions/verify-baseline-source:github-token",
    "action": "actions/verify-baseline-source",
    "input": "github-token",
-   "retired": false
+   "status": "live"
   },
   {
    "id": "actions/verify-source-run:source-run-id",
    "action": "actions/verify-source-run",
    "input": "source-run-id",
-   "retired": false
+   "status": "live"
   },
   {
    "id": "actions/verify-source-run:expect-repository",
    "action": "actions/verify-source-run",
    "input": "expect-repository",
-   "retired": false
+   "status": "live"
   },
   {
    "id": "actions/verify-source-run:expect-workflow",
    "action": "actions/verify-source-run",
    "input": "expect-workflow",
-   "retired": false
+   "status": "live"
   },
   {
    "id": "actions/verify-source-run:expect-event",
    "action": "actions/verify-source-run",
    "input": "expect-event",
-   "retired": false
+   "status": "live"
   },
   {
    "id": "actions/verify-source-run:expect-run-attempt",
    "action": "actions/verify-source-run",
    "input": "expect-run-attempt",
-   "retired": false
+   "status": "live"
   },
   {
    "id": "actions/verify-source-run:allowed-conclusions",
    "action": "actions/verify-source-run",
    "input": "allowed-conclusions",
-   "retired": false
+   "status": "live"
   },
   {
    "id": "actions/verify-source-run:artifact-name",
    "action": "actions/verify-source-run",
    "input": "artifact-name",
-   "retired": false
+   "status": "live"
   },
   {
    "id": "actions/verify-source-run:tested-sha",
    "action": "actions/verify-source-run",
    "input": "tested-sha",
-   "retired": false
+   "status": "live"
   },
   {
    "id": "actions/verify-source-run:provenance-from",
    "action": "actions/verify-source-run",
    "input": "provenance-from",
-   "retired": false
+   "status": "live"
   },
   {
    "id": "actions/verify-source-run:require-provenance",
    "action": "actions/verify-source-run",
    "input": "require-provenance",
-   "retired": false
+   "status": "live"
   },
   {
    "id": "actions/verify-source-run:report-from",
    "action": "actions/verify-source-run",
    "input": "report-from",
-   "retired": false
+   "status": "live"
   },
   {
    "id": "actions/verify-source-run:claimed-pr-number",
    "action": "actions/verify-source-run",
    "input": "claimed-pr-number",
-   "retired": false
+   "status": "live"
   },
   {
    "id": "actions/verify-source-run:destination",
    "action": "actions/verify-source-run",
    "input": "destination",
-   "retired": false
+   "status": "live"
   },
   {
    "id": "actions/verify-source-run:max-total-bytes",
    "action": "actions/verify-source-run",
    "input": "max-total-bytes",
-   "retired": false
+   "status": "live"
   },
   {
    "id": "actions/verify-source-run:max-entry-bytes",
    "action": "actions/verify-source-run",
    "input": "max-entry-bytes",
-   "retired": false
+   "status": "live"
   },
   {
    "id": "actions/verify-source-run:max-entries",
    "action": "actions/verify-source-run",
    "input": "max-entries",
-   "retired": false
+   "status": "live"
   },
   {
    "id": "actions/verify-source-run:max-ratio",
    "action": "actions/verify-source-run",
    "input": "max-ratio",
-   "retired": false
+   "status": "live"
   },
   {
    "id": "actions/verify-source-run:github-token",
    "action": "actions/verify-source-run",
    "input": "github-token",
-   "retired": false
+   "status": "live"
   },
   {
    "id": "actions/verify-source-run:python-version",
    "action": "actions/verify-source-run",
    "input": "python-version",
-   "retired": false
+   "status": "live"
   },
   {
    "id": "actions/verify-source-run:abicheck-version",
    "action": "actions/verify-source-run",
    "input": "abicheck-version",
-   "retired": false
+   "status": "live"
   }
  ],
  "python": [

@@ -76,9 +76,15 @@ Phase 1 is what checks them. Answers, recorded in ADR-091:
 - New findings, added to ADR-091 as R17/R18: the Action's numeric sides
   (`debug-info1/2`, `devel-pkg1/2`), `check-target` `requested-depth` and
   `contract-file`, `run_dump(header_backend)`, and `deps tree --sysroot`.
-- Sub-actions other than `check-target` (baseline transport, report
-  publication, run verification) are `out_of_scope` patterns for now;
-  `actions/aggregate` and `actions/collect-facts` are mapped in Phase 1.
+- Sub-actions other than `check-target` are `out_of_scope` patterns, each
+  with an expiry: `actions/aggregate` and `actions/collect-facts` carry
+  `until: phase-1` (they mirror CLI commands and must be mapped then); baseline
+  transport, report publication and run verification are `until: permanent`.
+  Phase 0's coverage is therefore the CLI, config, typed API, root Action and
+  `check-target`, not every sub-action yet.
+- Retired tombstones and ignored inputs sit only in the `retired` tier; the
+  test checks both directions and reuses the tombstone contract's own
+  "RETIRED in description" rule.
 
 ## Phase 1 — Parity gate
 
@@ -153,7 +159,7 @@ spellings once deleted in Phase 6. Size: M each.
 
 ## Phase 5 — Surface budget (D4)
 
-- R14: delete the 11 retired Action inputs and their error stubs.
+- R14: retired inputs stay declared as tombstones (`tests/test_action_retired_inputs_contract.py`); they do not count toward the budget. Convert the two ignored inputs (`jobs`, `allow-build-query`) into tombstones that fail the run, and add them to that test's `_TOMBSTONES_THAT_MUST_STAY_DECLARED`.
 - Move `compare` options to the config tier until `--help` shows ≤ 15 (the
   six groups of the ADR: operands, evidence, scope, policy, gate, output).
   Candidates: `--instantiation-manifest`, `--bundle-facts-*`,
@@ -168,8 +174,10 @@ Size: M. Changelog: Changed.
 
 ## Phase 6 — Remove aliases (next minor release)
 
-Delete every deprecated spelling from Phases 3–4, add them to
-`_RETIRED_SURFACES`, empty the registry's `exceptions:` list, and mark
+Retire every deprecated spelling from Phases 3–4 per ADR-091 D7: delete
+CLI/Python/config spellings, and turn each old Action input into a RETIRED
+tombstone (it joins the registry's `retired` tier and the tombstone contract
+test). Add them to `_RETIRED_SURFACES`, empty the registry's `exceptions:` list, and mark
 ADR-091 implemented in `adr/index.md` and `adr-surface-registry.yaml`.
 
 ## Phase 7 — Generate the references from the registry (optional)
@@ -182,7 +190,18 @@ Python".
 ## Risks
 
 - **Downstream workflows** using renamed Action inputs: mitigated by the
-  one-release alias and `::warning::`; pinned tags are unaffected.
+  one-release alias and `::warning::`, then a tombstone that fails loudly
+  rather than a silent drop; pinned tags are unaffected.
+- **R1 is CLI-breaking** for `compare/dump/project history --version`: the
+  alias window, the `docs/start/upgrading-*.md` row and the exit-64 failure
+  after removal are the migration; `abicheck --version` is untouched.
+- **R11 changes report paths:** a bare `format: sarif` must keep writing the
+  file it writes today. Phase 3 pins the current default path per format with
+  a test before folding `output-file` into `output`.
+- **R15 changes gating mechanics:** Phase 3 adds a differential test over the
+  `fail-on-breaking` × `fail-on-api-break` × verdict matrix proving the
+  forwarded `--set severity.*` yields the same step outcome and exit code as
+  today's shell gate before the shell code is removed.
 - **`--set` as a second spelling:** the registry rejects `--set` for core
   concepts, so each tier keeps one spelling.
 - **Hidden behavior differences found in Phase 0** (e.g. `source:` vs

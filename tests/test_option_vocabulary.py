@@ -94,10 +94,43 @@ def test_concepts_are_well_formed(registry: dict) -> None:
         assert any(c.get(s) for s in SURFACES), f"{c['concept']} has no members"
 
 
-def test_retired_tier_holds_only_retired_inputs(
+def test_retired_tier_is_exactly_the_dead_inputs(
     registry: dict, inventory: dict
 ) -> None:
-    retired = {r["id"] for r in inventory["action"] if r["retired"]}
-    for c in registry["concepts"]:
-        if c["tier"] == "retired":
-            assert set(c.get("action", [])) <= retired, c["concept"]
+    """A fail-closed tombstone or an ignored input behaves nothing like the live
+    option it once was, so it may not share a concept with it (ADR-091 D2)."""
+    dead = {
+        r["id"] for r in inventory["action"] if r["status"] in {"retired", "ignored"}
+    }
+    in_tier = {
+        i
+        for c in registry["concepts"]
+        if c["tier"] == "retired"
+        for i in c.get("action", [])
+    }
+    assert in_tier - dead == set(), "live inputs filed under the retired tier"
+    assert dead - in_tier == set(), "retired/ignored inputs filed under a live concept"
+
+
+def test_retired_status_matches_the_tombstone_contract(inventory: dict) -> None:
+    """The inventory's `retired` must be the set the tombstone contract test
+    guards, read independently from the manifest."""
+    contract = {
+        f"action:{name}"
+        for name, spec in (
+            yaml.safe_load((REPO / "action.yml").read_text(encoding="utf-8"))["inputs"]
+        ).items()
+        if "RETIRED" in str((spec or {}).get("description", ""))
+    }
+    ours = {
+        r["id"]
+        for r in inventory["action"]
+        if r["status"] == "retired" and r["action"] == "action"
+    }
+    assert ours == contract
+
+
+def test_out_of_scope_entries_name_an_expiry(registry: dict) -> None:
+    for entry in registry.get("out_of_scope", []):
+        assert entry.get("until") in {"phase-1", "permanent"}, entry
+        assert entry.get("reason"), entry

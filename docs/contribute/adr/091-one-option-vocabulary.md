@@ -53,11 +53,12 @@ Three things make this more than cosmetic:
    Action has a boolean `fail-on-*` gate model beside the CLI's severity model.
 2. **The Action carries semantics.** `action/run.sh` (6944 lines) synthesizes
    a `compile:` config overlay from `ast-frontend`/`gcc-*`/`sysroot`/`nostdinc`
-   because the CLI has no spelling for those keys, and `action.yml` still
-   declares 11 retired inputs (`against`, `audit`, `build-target`,
-   `bundle-system-providers`, `crosscheck`, `estimate`, `jobs`,
-   `new-library-set`, `require-complete-analysis`, `risk-rules`, plus their
-   error stubs).
+   because the CLI has no spelling for those keys. (`action.yml` also
+   declares 10 retired inputs and 2 ignored ones. Those are not drift: a
+   retired input stays declared on purpose as a fail-closed tombstone, because
+   GitHub silently drops an undeclared input and the run would then report a
+   narrower analysis as a clean pass. `tests/test_action_retired_inputs_contract.py`
+   owns that rule.)
 3. **No size budget.** `compare --help` shows 22 options and `--help-all` 45;
    `run_compare` takes about 43 flat keyword arguments; `action.yml` declares
    about 85 inputs. Nothing stops each from growing independently.
@@ -132,10 +133,10 @@ argument. `--help-all` keeps listing everything.
 |---|---|---|
 | R1 | version label | CLI `--version` (on `compare`, `dump`, `project history`) → `--label`; Action `old-version`/`new-version` → `old-label`/`new-label`; Python `InputSpec.version` stays as the snapshot field but the shim arguments become `old_label`/`new_label`. Root `--version` keeps its meaning (tool version). |
 | R2 | policy | Action `policy` + `policy-file` → one `policy`; Python `policy: str \| Path`, `policy_file_path` removed. |
-| R3 | acknowledgments | config block `acknowledgment:` → `acknowledgments:`; Python `acknowledgments_path` → `acknowledgments`. |
+| R3 | acknowledgments | config key `acknowledgment:` (one whole-value key, `Kind.WHOLE`) → `acknowledgments:`, touching its parser and writer (`parse_acknowledgment_config`, `acknowledgment_block`); Python `acknowledgments_path` → `acknowledgments`. |
 | R4 | header frontend | Action `ast-frontend` → `frontend` (config tier; `--set compile.frontend=…` on CLI). |
 | R5 | compiler | Action `gcc-path`/`gcc-prefix`/`gcc-options` → `compiler`/`compile-options` (config tier). `gcc-prefix` is only a fallback spelling of the compiler (`compiler = gcc_path or gcc_prefix` in `action/run.sh`), so it folds into `compiler` (Q3). |
-| R6 | completeness floor | Action `analysis-assurance-complete` → `require-complete`. |
+| R6 | completeness floor | Action `analysis-assurance-complete` → `require-complete`. Note the near-collision with the retired tombstone `require-complete-analysis`, which keeps failing the run; the two must stay distinct names and the tombstone's error message should point at `require-complete`. |
 | R7 | public surface | Action `public-header-dir` → `public-header-dirs`; Python `force_public_symbols` → `public_symbols`, the same widening overlay as `scope.public_symbols`. `public_surface_allowlist` is a different concept (a manifest-committed surface that *narrows* scoping) and stays, typed-API only (Q4). |
 | R8 | dependencies, system declarations | `--follow-deps` ↔ config `deps.follow` ↔ Python `follow_deps` (`CompareRequest`/`DumpRequest.follow_dependencies`); `--search-path` ↔ `deps.search_paths`. Separately, `InputSpec.include_dependencies` and the `include_dependencies` shim arguments are `--include-system-declarations` under another name, and become `include_system_declarations`. |
 | R9 | debuginfod | Python `enable_debuginfod` → `debug.debuginfod` / shim `debuginfod`. |
@@ -143,7 +144,7 @@ argument. `--help-all` keeps listing everything.
 | R11 | output | Action `format` + `output-file` → `output` (list of `FMT=PATH`, same grammar as `-o`); a bare `FMT` keeps today's default path. |
 | R12 | python floor | CLI `--abi3` → `--abi3-floor`. |
 | R13 | source evidence | config `source.method` → `sources.method`. Phase 0 found no key collision: `source:` holds only `method`, `sources:` holds `public_headers`, `exclude`, `graph`. |
-| R14 | Action retired inputs | the 11 retired inputs are deleted; GitHub reports an unknown input as a warning, and the release notes name each replacement. |
+| R14 | Action retired inputs | Retired inputs **stay declared** as fail-closed tombstones, per `tests/test_action_retired_inputs_contract.py`; they are excluded from D4's input budget and form the registry's `retired` tier. Removing one remains that contract's product decision (no supported workflow can still set it) and is out of this ADR's scope. The two *ignored* inputs (`jobs`, `allow-build-query`) silently do nothing today; they become tombstones that fail the run, so that no input is accepted and ignored. |
 | R15 | gate | Action `fail-on-breaking`/`fail-on-api-break` stay as the two Action-only conveniences but are defined as sugar over `severity.*` overrides (ADR-088) and forwarded as `--set severity.…`, not evaluated in shell (Q2). |
 | R16 | deps roots | `deps compare --old-root`/`--new-root` → `--root [old=\|new=]PATH`; `deps tree --sysroot` → `--root PATH`, the same concept. |
 | R17 | numeric sides | Action `debug-info1`/`debug-info2` → `old-debug-info`/`new-debug-info`; `devel-pkg1`/`devel-pkg2` already forward as `--header old=`/`new=`, so they fold into `old-header`/`new-header`. |
@@ -167,8 +168,18 @@ Pre-1.0 policy (ADR-061's amendment): no permanent facades. Each rename ships
 with the old spelling accepted for **one minor release**, printing a
 deprecation warning naming the new one (CLI stderr, Action `::warning::`,
 Python `DeprecationWarning`), plus a changelog fragment. The next minor
-release deletes the old spelling. Behavior unifications (D2) that change a
-result rather than a name — none are known today — need their own ADR.
+release retires the old spelling, which differs by surface:
+
+- CLI and Python: the old spelling is deleted; it then fails as an unknown
+  option (exit 64) or an unexpected keyword argument, which is already loud.
+- Config: the old key becomes unknown and is reported by the strict schema.
+- Action: the old input becomes a fail-closed **tombstone**, not a deletion,
+  because GitHub drops an undeclared input silently (R14,
+  `tests/test_action_retired_inputs_contract.py`).
+
+Behavior unifications (D2) that change a result rather than a name need their
+own ADR; R11 and R15 are checked for this with a differential test before they
+land (plan Phase 3).
 
 ## Consequences
 
@@ -211,7 +222,11 @@ concepts: 29 core, 65 config, 5 Action-only, 3 typed-API-only, 1 internal
 group and 1 retired group. 21 concepts carry a rename id. The 29 core
 concepts are over D4's budget of 15, which is Phase 5's work.
 `tests/test_option_vocabulary.py` fails when a live option is not claimed by
-exactly one concept, so no new option can join any surface unregistered.
+exactly one concept, so no new option can join a mapped surface unregistered.
+Mapped today: the CLI, config, typed API, root `action.yml` and
+`actions/check-target`. The other sub-actions are listed `out_of_scope` with an
+expiry (`actions/aggregate` and `actions/collect-facts` until Phase 1; baseline
+transport, report publication and run verification permanently).
 
 ## Alternatives considered
 

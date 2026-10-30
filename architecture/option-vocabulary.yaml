@@ -14,7 +14,10 @@
 #           action   -- Action machinery with no CLI counterpart
 #           python   -- typed-API-only capability
 #           internal -- typed-API plumbing, not a user option
-#           retired  -- declared only to reject a removed spelling (R14)
+#           retired  -- every Action input the inventory marks `retired`
+#                       (a fail-closed tombstone, kept declared per
+#                       tests/test_action_retired_inputs_contract.py) or
+#                       `ignored`; nothing else (R14)
 # renames:  the ADR-091 D5 change ids that will move members of this
 #           concept onto the canonical spelling; empty means already aligned
 #           or no change planned.
@@ -23,27 +26,36 @@
 #           "<function>(<param>)").
 schema_version: 1
 
-# Sub-actions outside the analysis vocabulary: baseline transport, report
-# publication and run verification. Phase 1 decides whether any of their
-# inputs join a concept (actions/aggregate mirrors `abicheck aggregate`,
-# actions/collect-facts mirrors `dump`).
+# Sub-actions not mapped yet. `until: phase-1` entries mirror CLI commands
+# (actions/aggregate -> `abicheck aggregate`, actions/collect-facts -> `dump`)
+# and must be mapped into concepts by Phase 1; `until: permanent` entries are
+# baseline transport, report publication and run verification, which have no
+# CLI counterpart.
 out_of_scope:
   - pattern: "actions/aggregate:*"
     reason: Mirrors `abicheck aggregate`; mapped in Phase 1.
+    until: phase-1
   - pattern: "actions/collect-facts:*"
     reason: Mirrors `dump` evidence inputs; mapped in Phase 1.
+    until: phase-1
   - pattern: "actions/baseline:*"
     reason: Baseline transport, no CLI counterpart.
+    until: permanent
   - pattern: "actions/stage-baseline:*"
     reason: Baseline transport, no CLI counterpart.
+    until: permanent
   - pattern: "actions/resolve-baseline:*"
     reason: Baseline transport, no CLI counterpart.
+    until: permanent
   - pattern: "actions/verify-baseline-source:*"
     reason: Baseline provenance verification, no CLI counterpart.
+    until: permanent
   - pattern: "actions/report:*"
     reason: Report publication (ADR-073), no CLI counterpart.
+    until: permanent
   - pattern: "actions/verify-source-run:*"
     reason: Producer-run verification (ADR-073), no CLI counterpart.
+    until: permanent
 
 concepts:
   - concept: operands
@@ -361,8 +373,6 @@ concepts:
     renames: []
     config:
       - build.query
-    action:
-      - "action:allow-build-query"
     python:
       - CompareRequest.allow_build_query
   - concept: build.system
@@ -378,8 +388,6 @@ concepts:
     renames: []
     config:
       - build.targets
-    action:
-      - "action:build-target"
     python:
       - InputSpec.build_targets
   - concept: sources
@@ -520,7 +528,6 @@ concepts:
       - bundle.cohorts
       - bundle_variants
     action:
-      - "action:bundle-system-providers"
       - "actions/check-target:bundle-members"
   - concept: python.abi3_floor
     tier: config
@@ -594,7 +601,6 @@ concepts:
       - "project capture-variants --dry-run"
     action:
       - "action:dry-run"
-      - "action:estimate"
   - concept: performance.profile
     tier: config
     renames: []
@@ -869,9 +875,7 @@ concepts:
       - assurance.require_complete
     action:
       - "action:analysis-assurance-complete"
-      - "action:require-complete-analysis"
       - "actions/check-target:analysis-assurance-complete"
-      - "actions/check-target:require-complete-analysis"
     python:
       - CompareRequest.require_complete_analysis
   - concept: action.gate
@@ -1016,6 +1020,12 @@ concepts:
       - "action:crosscheck"
       - "action:risk-rules"
       - "action:audit"
+      - "action:estimate"
+      - "action:build-target"
+      - "action:bundle-system-providers"
+      - "action:require-complete-analysis"
+      - "actions/check-target:require-complete-analysis"
+      - "action:allow-build-query"
   - concept: python.internal
     tier: internal
     renames: []
