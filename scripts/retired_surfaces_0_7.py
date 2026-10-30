@@ -41,12 +41,15 @@ REMOVED_IN_0_7: tuple[tuple[str, tuple[str, ...], frozenset[str]], ...] = (
             "old_version=",
             "new_version=",
         ),
-        # The explicit-inputs example below names the internal ExplicitCompatibilityInputs,
-        # whose contract_mode field is not a typed-request spelling.
+        # The explicit-inputs example in compatibility-evaluation-config.md names the
+        # internal ExplicitCompatibilityInputs, whose contract_mode field is not a
+        # typed-request spelling. python-api.md's load_suppression_and_policy example
+        # keeps its own policy_file_path keyword.
         frozenset(
             {
                 "start/upgrading-to-0.7.md",
                 "reference/compatibility-evaluation-config.md",
+                "use/python-api.md",
             }
         ),
     ),

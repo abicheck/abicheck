@@ -144,7 +144,7 @@ from abicheck.service import load_suppression_and_policy, compare_snapshots
 
 suppression, policy_file = load_suppression_and_policy(
     suppress=Path("suppressions.yaml"),
-    policy=Path("policy.yaml"),
+    policy_file_path=Path("policy.yaml"),
 )
 result = compare_snapshots(old, new, suppression, policy_file=policy_file)
 ```
