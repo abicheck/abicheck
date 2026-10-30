@@ -117,7 +117,7 @@ class TestAnalysisAssuranceCompleteConfigOverlay:
         data = _load(CHECK_TARGET_ACTION)
         steps = data["runs"]["steps"]
         overlay_step = next(s for s in steps if s.get("id") == "assurance_overlay")
-        assert overlay_step["if"] == "inputs.analysis-assurance-complete != ''"
+        assert overlay_step["if"] == "inputs.require-complete != ''"
         # Never allowed to silently swallow a real failure (e.g. a
         # build-config that doesn't parse to a YAML mapping) -- it must run
         # with continue-on-error so the always-run finalize step still

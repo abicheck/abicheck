@@ -935,22 +935,23 @@ class TestBaselineRequiredAndCandidateBuildOutputForwarded:
         data = _load(CHECK_PROJECT)
         steps = _steps(data["jobs"]["check"])
         run_step = next(s for s in steps if s.get("name") == "Run check-target")
-        assert run_step["with"]["gcc-path"] == (
+        assert run_step["with"]["compiler"] == (
             "${{ matrix.kind != 'bundle' && matrix.compile_gcc_path "
-            "|| inputs.gcc-path }}"
+            "|| inputs.gcc-path || inputs.gcc-prefix }}"
         )
-        assert run_step["with"]["gcc-options"] == (
+        assert run_step["with"]["compile-options"] == (
             "${{ matrix.kind != 'bundle' && matrix.compile_gcc_options "
             "|| inputs.gcc-options }}"
         )
-        # gcc-prefix has no RunPlanCheck counterpart -- stays global-only.
-        assert run_step["with"]["gcc-prefix"] == "${{ inputs.gcc-prefix }}"
+        # gcc-prefix is folded into compiler (ADR-091 R5); it no longer
+        # has its own key on the check-target call.
+        assert "gcc-prefix" not in run_step["with"]
 
     @pytest.mark.parametrize(
         ("key", "global_input"),
         [
-            ("gcc-path", "inputs.gcc-path"),
-            ("gcc-options", "inputs.gcc-options"),
+            ("compiler", "inputs.gcc-path"),
+            ("compile-options", "inputs.gcc-options"),
         ],
     )
     def test_per_cell_gcc_path_and_options_are_not_forwarded_to_bundle_cells(
@@ -991,7 +992,10 @@ class TestBaselineRequiredAndCandidateBuildOutputForwarded:
         )
         # GitHub's `a && b || c`: when `a` is false the result is `c`, so a
         # bundle cell lands on the workflow-global input, not ''.
-        assert expr.endswith(f"|| {global_input} }}}}")
+        # `compiler` folds gcc-prefix in as its last fallback (ADR-091 R5).
+        last = "inputs.gcc-prefix" if key == "compiler" else global_input
+        assert global_input in expr
+        assert expr.endswith(f"|| {last} }}}}")
 
     def test_sysroot_stays_unconditional_for_bundle_cells(self) -> None:
         """`sysroot` has no per-cell overlay field, so it stays unconditional
@@ -1017,7 +1021,7 @@ class TestBaselineRequiredAndCandidateBuildOutputForwarded:
         data = _load(CHECK_PROJECT)
         steps = _steps(data["jobs"]["check"])
         run_step = next(s for s in steps if s.get("name") == "Run check-target")
-        assert run_step["with"]["ast-frontend"] == (
+        assert run_step["with"]["frontend"] == (
             "${{ matrix.kind != 'bundle' && matrix.compile_ast_frontend "
             "|| inputs.ast-frontend }}"
         )
@@ -1042,7 +1046,7 @@ class TestBaselineRequiredAndCandidateBuildOutputForwarded:
         data = _load(CHECK_PROJECT)
         steps = _steps(data["jobs"]["check"])
         run_step = next(s for s in steps if s.get("name") == "Run check-target")
-        expr = run_step["with"]["ast-frontend"]
+        expr = run_step["with"]["frontend"]
         assert "matrix.kind != 'bundle'" in expr, (
             "a bundle cell compares a directory, where the root Action "
             "rejects any non-auto ast-frontend outright"

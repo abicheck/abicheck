@@ -213,7 +213,7 @@ class TestRootValidatesTheTriState:
             },
         )
         assert result.returncode != 0
-        assert f"analysis-assurance-complete '{value}' is not recognized" in _combined(
+        assert f"require-complete '{value}' is not recognized" in _combined(
             result
         )
 
@@ -227,7 +227,7 @@ class TestRootValidatesTheTriState:
             },
         )
         assert result.returncode == 0, _combined(result)
-        assert "analysis-assurance-complete is set but has no effect" in _combined(
+        assert "require-complete is set but has no effect" in _combined(
             result
         )
 

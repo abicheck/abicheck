@@ -82,7 +82,7 @@ _COMPILE_CONTEXT_INPUTS: tuple[tuple[str, str], ...] = (
     ("INPUT_LANG", "c"),
     ("INPUT_FRONTEND", "clang"),
     ("INPUT_COMPILER", "/opt/gcc-14/bin/g++"),
-    ("INPUT_GCC_PREFIX", "aarch64-linux-gnu-"),
+    ("INPUT_COMPILER", "aarch64-linux-gnu-"),
     ("INPUT_COMPILE_OPTIONS", "-DFOO=1"),
     ("INPUT_SYSROOT", "/opt/sysroot"),
     ("INPUT_NOSTDINC", "true"),

@@ -342,13 +342,13 @@ def test_sentinel_consumer_gcc_path_survives_config_to_check_target_input() -> N
     )
 
     final_gcc_path = eval_gha_expression(
-        consumer_step["with"]["gcc-path"], inputs=hop3_inputs
+        consumer_step["with"]["compiler"], inputs=hop3_inputs
     )
     final_gcc_options = eval_gha_expression(
-        consumer_step["with"]["gcc-options"], inputs=hop3_inputs
+        consumer_step["with"]["compile-options"], inputs=hop3_inputs
     )
     final_ast_frontend = eval_gha_expression(
-        consumer_step["with"]["ast-frontend"], inputs=hop3_inputs
+        consumer_step["with"]["frontend"], inputs=hop3_inputs
     )
     assert final_gcc_path == _SENTINEL_CONSUMER_GCC_PATH
     assert final_gcc_options == "-std=gnu++20 -stdlib=libc++"
@@ -539,13 +539,13 @@ def test_partial_overlay_falls_back_to_workflow_global_per_field() -> None:
     assert guard is True
 
     final_gcc_path = eval_gha_expression(
-        consumer_step["with"]["gcc-path"], inputs=hop3_inputs
+        consumer_step["with"]["compiler"], inputs=hop3_inputs
     )
     final_gcc_options = eval_gha_expression(
-        consumer_step["with"]["gcc-options"], inputs=hop3_inputs
+        consumer_step["with"]["compile-options"], inputs=hop3_inputs
     )
     final_ast_frontend = eval_gha_expression(
-        consumer_step["with"]["ast-frontend"], inputs=hop3_inputs
+        consumer_step["with"]["frontend"], inputs=hop3_inputs
     )
     assert final_gcc_path == _FALLBACK_GCC_PATH
     assert final_gcc_options == _FALLBACK_GCC_OPTIONS
@@ -648,13 +648,13 @@ def test_partial_overlay_without_frontend_falls_back_to_workflow_global_frontend
     assert guard is True
 
     final_gcc_path = eval_gha_expression(
-        consumer_step["with"]["gcc-path"], inputs=hop3_inputs
+        consumer_step["with"]["compiler"], inputs=hop3_inputs
     )
     final_gcc_options = eval_gha_expression(
-        consumer_step["with"]["gcc-options"], inputs=hop3_inputs
+        consumer_step["with"]["compile-options"], inputs=hop3_inputs
     )
     final_ast_frontend = eval_gha_expression(
-        consumer_step["with"]["ast-frontend"], inputs=hop3_inputs
+        consumer_step["with"]["frontend"], inputs=hop3_inputs
     )
     assert final_gcc_path == _SENTINEL_CONSUMER_GCC_PATH
     assert final_gcc_options == "-std=gnu++20"
@@ -760,13 +760,13 @@ def test_no_baseline_channel_activates_the_consumer_step_via_its_own_arm() -> No
     )
 
     final_gcc_path = eval_gha_expression(
-        consumer_step["with"]["gcc-path"], inputs=hop3_inputs
+        consumer_step["with"]["compiler"], inputs=hop3_inputs
     )
     final_gcc_options = eval_gha_expression(
-        consumer_step["with"]["gcc-options"], inputs=hop3_inputs
+        consumer_step["with"]["compile-options"], inputs=hop3_inputs
     )
     final_ast_frontend = eval_gha_expression(
-        consumer_step["with"]["ast-frontend"], inputs=hop3_inputs
+        consumer_step["with"]["frontend"], inputs=hop3_inputs
     )
     # Not carried through hop 4 (`_assert_reaches_real_dump_cli_invocation`
     # unconditionally asserts `--compiler`/`--compiler-option` are present,
@@ -837,17 +837,16 @@ def _assert_reaches_real_dump_cli_invocation(
     deleted that branch, which is what surfaced the mismatch)."""
     _assert_run_abicheck_step_invokes_run_sh()
     env_by_input = {inp: var for var, inp in _step_env_mapping("Run abicheck").items()}
-    for name in ("gcc-path", "gcc-options", "ast-frontend", "gcc-prefix", "sysroot"):
+    for name in ("compiler", "compile-options", "frontend", "sysroot"):
         assert name in env_by_input, (
             f"root action.yml's env block no longer maps input {name!r} to "
             f"an INPUT_* var -- test_action_run_contract.py's own contract "
             f"tests should already have failed"
         )
     env = {
-        env_by_input["ast-frontend"]: ast_frontend,
-        env_by_input["gcc-path"]: gcc_path,
-        env_by_input["gcc-prefix"]: "",
-        env_by_input["gcc-options"]: gcc_options,
+        env_by_input["frontend"]: ast_frontend,
+        env_by_input["compiler"]: gcc_path,
+        env_by_input["compile-options"]: gcc_options,
         env_by_input["sysroot"]: "",
         "INPUT_NOSTDINC": "false",
     }

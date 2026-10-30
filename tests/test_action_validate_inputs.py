@@ -706,7 +706,7 @@ class TestCompareAcceptsCompileContextForDirectoryOrPackage:
             ("INPUT_LANG", "c"),
             ("INPUT_FRONTEND", "clang"),
             ("INPUT_COMPILER", "/opt/gcc-14/bin/g++"),
-            ("INPUT_GCC_PREFIX", "aarch64-linux-gnu-"),
+            ("INPUT_COMPILER", "aarch64-linux-gnu-"),
             ("INPUT_COMPILE_OPTIONS", "-DFOO=1"),
             ("INPUT_SYSROOT", "/opt/sysroot"),
             ("INPUT_NOSTDINC", "true"),
@@ -911,8 +911,6 @@ class TestModeScopedInputWarnings:
         [
             "INPUT_OLD_DEBUG_INFO",
             "INPUT_NEW_DEBUG_INFO",
-            "INPUT_DEVEL_PKG1",
-            "INPUT_DEVEL_PKG2",
         ],
     )
     def test_package_input_warns_on_non_compare_mode(self, env_name: str) -> None:

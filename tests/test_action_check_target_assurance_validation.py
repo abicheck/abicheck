@@ -70,7 +70,7 @@ class TestValidateInputsAssuranceBundleInteraction:
             tmp_path,
         )
         assert result.returncode == 0, result.stdout + result.stderr
-        assert "analysis-assurance-complete is not supported" not in (
+        assert "require-complete is not supported" not in (
             result.stdout + result.stderr
         )
 
@@ -134,7 +134,7 @@ class TestValidateInputsAnalysisAssuranceCompleteEnumValidation:
             tmp_path,
         )
         assert result.returncode == 64
-        assert f"analysis-assurance-complete '{bad_value}' is not recognized" in (
+        assert f"require-complete '{bad_value}' is not recognized" in (
             result.stdout + result.stderr
         )
 

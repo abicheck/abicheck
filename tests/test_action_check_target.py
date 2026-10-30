@@ -152,7 +152,7 @@ class TestValidateInputs:
         del env["INPUT_DEPTH"]
         result = _run(VALIDATE_SH, env, tmp_path)
         assert result.returncode == 64
-        assert "::error::requested-depth input is required." in result.stdout
+        assert "::error::depth input is required." in result.stdout
         assert "not recognized" not in result.stdout
 
     def test_unknown_kind_fails(self, tmp_path: Path) -> None:
