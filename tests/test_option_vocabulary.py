@@ -22,6 +22,7 @@ gate must not share its code.
 
 from __future__ import annotations
 
+import enum
 import fnmatch
 import importlib.util
 import json
@@ -107,13 +108,24 @@ def _leaf(concept: str) -> str:
     return concept.split(".")[-1]
 
 
-def _accepted_kebab(concept: str) -> set[str]:
-    """The kebab spellings D1 allows: the leaf, or the full path where the leaf
-    is ambiguous across blocks (``debug.format`` -> ``debug-format``)."""
-    return {_kebab(_leaf(concept)), _kebab(concept.replace(".", "_"))}
+def _accepted_kebab(concept: str, ambiguous: bool) -> set[str]:
+    """The kebab spellings D1 allows: the leaf, and the full path only where the
+    leaf is ambiguous across blocks (``debug.format`` -> ``debug-format``)."""
+    spellings = {_kebab(_leaf(concept))}
+    if ambiguous:
+        spellings.add(_kebab(concept.replace(".", "_")))
+    return spellings
 
 
-def _name_deviations(concept: dict, rows: dict[str, dict]) -> list[str]:
+def _ambiguous_leaf(registry: dict, concept: str) -> bool:
+    """True when another concept in the registry shares this concept's leaf."""
+    leaf = _leaf(concept)
+    return sum(1 for c in registry["concepts"] if _leaf(c["concept"]) == leaf) > 1
+
+
+def _name_deviations(
+    concept: dict, rows: dict[str, dict], ambiguous: bool = False
+) -> list[str]:
     """Inventory ids of ``concept``'s members whose spelling breaks D1.
 
     ``rows`` maps each surface name to ``{inventory id: row}``. A CLI option is
@@ -125,7 +137,7 @@ def _name_deviations(concept: dict, rows: dict[str, dict]) -> list[str]:
     """
     path = concept["concept"]
     name_leaf = _leaf(path)
-    kebabs = _accepted_kebab(path)
+    kebabs = _accepted_kebab(path, ambiguous)
     snake_full = path.replace(".", "_")
     repeatable = any(
         rows["cli"][i]["multiple"] for i in concept.get("cli", []) if i in rows["cli"]
@@ -153,7 +165,7 @@ def _name_deviations(concept: dict, rows: dict[str, dict]) -> list[str]:
         if row["owner"] in SHIM_OWNERS:
             ok = name == name_leaf
         else:
-            ok = name in {name_leaf, snake_full}
+            ok = name in ({name_leaf, snake_full} if ambiguous else {name_leaf})
         if not ok:
             bad.append(i)
     return bad
@@ -347,7 +359,7 @@ def test_name_rule_holds_or_is_recorded(registry: dict, inventory: dict) -> None
     rows = _rows(inventory)
     problems: list[str] = []
     for c in _named_concepts(registry):
-        found = set(_name_deviations(c, rows))
+        found = set(_name_deviations(c, rows, _ambiguous_leaf(registry, c["concept"])))
         recorded = {e["id"] for e in c.get("exceptions", []) if e["rule"] == "name"}
         problems += [
             f"unrecorded {c['concept']}: {i}" for i in sorted(found - recorded)
@@ -544,7 +556,13 @@ def test_name_derivation_accepts_a_side_prefix_and_full_path() -> None:
     concept["cli"] = ["compare --old-debug-format"]
     concept["action"] = ["action:old-debug-format"]
     concept["python"] = ["CompareRequest.debug_format"]
-    assert _name_deviations(concept, rows) == []
+    assert _name_deviations(concept, rows, ambiguous=True) == []
+    # Without a leaf collision the full path is not a D1 spelling, on any surface.
+    assert _name_deviations(concept, rows, ambiguous=False) == [
+        "compare --old-debug-format",
+        "action:old-debug-format",
+        "CompareRequest.debug_format",
+    ]
 
 
 def test_value_set_derivation_compares_closed_sets() -> None:
@@ -571,3 +589,18 @@ def test_value_set_derivation_compares_closed_sets() -> None:
     assert _value_set_deviation(concept, rows) == "compare --contract"
     rows["python"]["CompareRequest.contract_mode"]["choices"].append("auto")
     assert _value_set_deviation(concept, rows) is None
+
+
+def test_default_render_is_click_version_independent() -> None:
+    """Click's "not given" marker is an enum on some releases and a plain value on
+    others; the inventory must render it the same way, and explicit defaults must
+    keep their own spelling."""
+    gen = _generator()
+
+    class Sentinel(enum.Enum):  # Click 8.3+ shape of the unset marker
+        UNSET = "UNSET"
+
+    assert gen._default_text(Sentinel.UNSET) == "<unset>"
+    assert gen._default_text(None) == "None"
+    assert gen._default_text(False) == "False"
+    assert gen._default_text("auto") == "'auto'"

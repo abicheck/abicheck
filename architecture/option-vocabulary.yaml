@@ -32,9 +32,6 @@
 #           action "<action>:<input>", python "<Class>.<field>" or
 #           "<function>(<param>)").
 schema_version: 1
-
-# Sub-actions with no CLI counterpart. `until: permanent` entries are baseline
-# transport, report publication and run verification (ADR-091 Phase 0).
 out_of_scope:
   - pattern: actions/baseline:*
     reason: Baseline transport, no CLI counterpart.
@@ -426,6 +423,9 @@ concepts:
       - run_dump(debug_format)
     exceptions:
       - {id: run_dump(debug_format), rule: name, rename: R19, note: python spelling breaks D1; the leaf is `format`}
+      - {id: CompareRequest.debug_format, rule: name, rename: R19, note: python spelling breaks D1; the leaf is
+          `format`}
+      - {id: DumpRequest.debug_format, rule: name, rename: R19, note: python spelling breaks D1; the leaf is `format`}
   - concept: debug.dwarf_only
     tier: config
     renames: []
@@ -517,6 +517,8 @@ concepts:
     exceptions:
       - {id: 'actions/check-target:build-generator', rule: name, rename: R20, note: action spelling breaks D1; the
           leaf is `system`}
+      - {id: 'actions/check-target:build-system', rule: name, rename: R20, note: action spelling breaks D1; the
+          leaf is `system`}
   - concept: build.targets
     tier: config
     renames: []
@@ -524,6 +526,8 @@ concepts:
       - build.targets
     python:
       - InputSpec.build_targets
+    exceptions:
+      - {id: InputSpec.build_targets, rule: name, rename: R19, note: python spelling breaks D1; the leaf is `targets`}
   - concept: sources
     tier: core
     renames: []
@@ -798,6 +802,10 @@ concepts:
       - performance.profile
     python:
       - CompareRequest.performance_profile
+    exceptions:
+      - {id: CompareRequest.performance_profile, rule: name, rename: R19, note: python spelling breaks D1; the leaf
+          is `profile`}
+      - {id: compare --performance-profile, rule: name, rename: R21, note: cli spelling breaks D1; the leaf is `profile`}
   - concept: resource_limits.max_bundle_facts_decode_nodes
     tier: config
     renames: []
@@ -814,6 +822,8 @@ concepts:
     exceptions:
       - {id: run_compare(scope_to_public_surface), rule: name, rename: R19, note: python spelling breaks D1; the
           leaf is `public`}
+      - {id: CompareRequest.scope_public, rule: name, rename: R19, note: python spelling breaks D1; the leaf is
+          `public`}
   - concept: scope.public_header_dirs
     tier: config
     renames:
@@ -1081,6 +1091,12 @@ concepts:
     exceptions:
       - {id: run_compare(severity_preset), rule: name, rename: R19, note: python spelling breaks D1; the leaf is
           `preset`}
+      - {id: CompareRequest.severity_preset, rule: name, rename: R19, note: python spelling breaks D1; the leaf
+          is `preset`}
+      - {id: 'action:severity-preset', rule: name, rename: R20, note: action spelling breaks D1; the leaf is `preset`}
+      - {id: 'actions/check-target:severity-preset', rule: name, rename: R20, note: action spelling breaks D1; the
+          leaf is `preset`}
+      - {id: compare --severity-preset, rule: name, rename: R21, note: cli spelling breaks D1; the leaf is `preset`}
   - concept: severity.abi_breaking
     tier: config
     renames: []
@@ -1088,6 +1104,9 @@ concepts:
       - severity.abi_breaking
     python:
       - CompareRequest.severity_abi_breaking
+    exceptions:
+      - {id: CompareRequest.severity_abi_breaking, rule: name, rename: R19, note: python spelling breaks D1; the
+          leaf is `abi_breaking`}
   - concept: severity.potential_breaking
     tier: config
     renames: []
@@ -1095,6 +1114,9 @@ concepts:
       - severity.potential_breaking
     python:
       - CompareRequest.severity_potential_breaking
+    exceptions:
+      - {id: CompareRequest.severity_potential_breaking, rule: name, rename: R19, note: python spelling breaks D1;
+          the leaf is `potential_breaking`}
   - concept: severity.quality_issues
     tier: config
     renames: []
@@ -1102,6 +1124,9 @@ concepts:
       - severity.quality_issues
     python:
       - CompareRequest.severity_quality_issues
+    exceptions:
+      - {id: CompareRequest.severity_quality_issues, rule: name, rename: R19, note: python spelling breaks D1; the
+          leaf is `quality_issues`}
   - concept: severity.addition
     tier: config
     renames: []
@@ -1109,6 +1134,9 @@ concepts:
       - severity.addition
     python:
       - CompareRequest.severity_addition
+    exceptions:
+      - {id: CompareRequest.severity_addition, rule: name, rename: R19, note: python spelling breaks D1; the leaf
+          is `addition`}
   - concept: gate.fail_on_removed_library
     tier: config
     renames: []

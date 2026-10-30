@@ -111,8 +111,10 @@ mapped: `actions/aggregate` and `actions/collect-facts` are claimed by existing
 concepts where they mirror a CLI option (`sources`, `compile.compiler`, `output`,
 `action.runtime`, `project`) and by three new tier-`action` concepts otherwise.
 `aggregate` and `project` opt out of the name rule, as ADR-091's "Out of scope"
-section requires; the test enforces that only those two may. The registry
-records 140 name deviations (49 Python, 19 Action, 6 CLI, 66 under R1–R18) and
+section requires; the test enforces that only those two may. A full
+block-prefixed spelling (`debug-format`) counts as D1 only when another concept
+shares the leaf, as ADR-091 D1 says. The registry records 155 name deviations
+(59 Python, 22 Action, 8 CLI, 66 under R1–R18) and
 two budget counts: `compare --help` shows 20 core options (ADR-091's 22 counts
 the two help flags, which the inventory skips) and the root `action.yml` has 53
 analysis inputs. The D1 name rule and the D4 budget can't be satisfied yet, so
