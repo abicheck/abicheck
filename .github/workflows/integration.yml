@@ -139,8 +139,10 @@ jobs:
         # steps never see -- the gcc those tests used was the runner image's
         # own MinGW all along. The native-compare step's floor of 5 fails the
         # leg if that ever stops being true.
+        #
+        # No `choco install cmake` either: the image ships CMake
+        # (C:\Program Files\CMake\bin is on PATH), so it only re-installed it.
         run: |
-          choco install cmake --no-progress --yes
           & "$env:CONDA\condabin\conda.bat" install --yes -c conda-forge castxml
           Add-Content -Path $env:GITHUB_PATH -Value "$env:CONDA\Library\bin"
           Add-Content -Path $env:GITHUB_PATH -Value "$env:CONDA\Scripts"
@@ -182,7 +184,11 @@ jobs:
           # "> 0" floor catches a missing toolchain without platform guesswork.
           # `-v` names each test as it finishes: verify.py streams it, so a
           # stalled or cancelled leg still shows which tests were running.
-          PYTEST_ADDOPTS: -n auto --dist worksteal -v
+          #
+          # Windows: 8 workers on the 4-vCPU runner. Its tests mostly wait on
+          # castxml/compiler subprocesses (Windows process start is the cost),
+          # not on the CPU.
+          PYTEST_ADDOPTS: -n ${{ runner.os == 'Windows' && '8' || 'auto' }} --dist worksteal -v
         run: python scripts/verify.py --profile full --only integration --require-complete
       - name: Native PE/Mach-O compare workflows
         # Formerly the `cross-platform-e2e` job. Apple clang -> .dylib,
