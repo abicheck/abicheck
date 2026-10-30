@@ -245,7 +245,7 @@ def _compare(
     ):
         dumped = CliRunner().invoke(
             main,
-            ["dump", str(so), "-H", str(header), "--version", version, "-o", str(out)],
+            ["dump", str(so), "-H", str(header), "--label", version, "-o", str(out)],
         )
         assert dumped.exit_code == 0, dumped.output
     result = CliRunner().invoke(

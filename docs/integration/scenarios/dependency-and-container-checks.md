@@ -11,7 +11,7 @@ the rest of this integration model.
 ## `deps tree` — does this environment resolve?
 
 ```bash
-abicheck deps tree ./app --sysroot /path/to/container/rootfs
+abicheck deps tree ./app --root /path/to/container/rootfs
 ```
 
 Walks the binary's full transitive dependency closure and symbol bindings
@@ -21,7 +21,7 @@ resolve here."
 ## `deps compare` — two environments, one binary
 
 ```bash
-abicheck deps compare usr/bin/myapp --old-root /old-root --new-root /new-root
+abicheck deps compare usr/bin/myapp --root old=/old-root --root new=/new-root
 ```
 
 Diffs a binary's whole dependency stack — every library it transitively

@@ -103,7 +103,7 @@ def _build_and_dump(tmp_path: Path, name: str) -> Path:
         text=True,
     )
     dumped = tmp_path / f"{name}.abicheck.json"
-    cmd = abicheck_command("dump", str(so), "--version", "1.0")
+    cmd = abicheck_command("dump", str(so), "--label", "1.0")
     if header is not None:
         header_file = tmp_path / f"{name}.h"
         header_file.write_text(header, encoding="utf-8")

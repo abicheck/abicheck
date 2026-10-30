@@ -687,7 +687,7 @@ def run_history_request(
         raise HistoryError("a longitudinal history needs at least one snapshot")
     if versions is not None and len(versions) != len(snapshot_paths):
         raise HistoryError(
-            f"--version was given {len(versions)} time(s) but "
+            f"--label was given {len(versions)} time(s) but "
             f"{len(snapshot_paths)} snapshot(s) were supplied -- pass one "
             "per snapshot, in the same order, or omit it entirely to use "
             "each snapshot's own recorded version"

@@ -29,8 +29,8 @@ you're unsure, start with `abicheck compare` — it's the default workflow.
 | **Does my application still work** with the new library version? | `abicheck compare --used-by` | [Application Compatibility](../use/appcompat.md) |
 | **Did my whole package / release break?** | `abicheck compare` | [Multi-Binary Releases](../use/multi-binary.md) |
 | **Gate a pull request** against a real baseline, with the deepest evidence available (headers + build + sources)? | `abicheck compare OLD NEW --depth source --since origin/main` | [Evidence Depth](../use/evidence-depth.md) |
-| Will this binary load and resolve correctly in this sysroot — and does its dependency tree have unresolved symbols? | `abicheck deps tree` (`--sysroot /rootfs` for a specific root) | [CLI Usage](../use/cli-usage.md) |
-| Did anything in the dependency stack change between two sysroots / images? | `abicheck deps compare --old-root … --new-root …` | [CLI Usage](../use/cli-usage.md) |
+| Will this binary load and resolve correctly in this sysroot — and does its dependency tree have unresolved symbols? | `abicheck deps tree` (`--root /rootfs` for a specific root) | [CLI Usage](../use/cli-usage.md) |
+| Did anything in the dependency stack change between two sysroots / images? | `abicheck deps compare --root old=… --root new=…` | [CLI Usage](../use/cli-usage.md) |
 | Save a reusable ABI baseline for CI. | `abicheck dump` | [Creating and Comparing a Baseline](../use/create-baseline.md) |
 
 For the full decision matrix — every artifact layout, accuracy tier, and CI

@@ -299,21 +299,21 @@ class TestStoredPairEarlyRejections:
         old_path, new_path = self._both_stored(tmp_path)
 
         code, out = _invoke(
-            "compare", str(old_path), str(new_path), "--version", "new=2.0"
+            "compare", str(old_path), str(new_path), "--label", "new=2.0"
         )
 
         assert code == 64
-        assert "--version" in out
+        assert "--label" in out
 
     def test_explicit_old_version_is_rejected(self, tmp_path: Path) -> None:
         old_path, new_path = self._both_stored(tmp_path)
 
         code, out = _invoke(
-            "compare", str(old_path), str(new_path), "--version", "old=1.0"
+            "compare", str(old_path), str(new_path), "--label", "old=1.0"
         )
 
         assert code == 64
-        assert "--version" in out
+        assert "--label" in out
 
     def test_include_system_declarations_is_rejected(self, tmp_path: Path) -> None:
         old_path, new_path = self._both_stored(tmp_path)

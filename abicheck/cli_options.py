@@ -34,6 +34,7 @@ from .frontends.cli.options.evidence_roles import (
     split_debug_evidence,
     split_header_evidence,
 )
+from .frontends.cli.options.label import compare_label_option
 from .frontends.cli.options.params import (
     BUILTIN_POLICY_PROFILES,
     DEFAULT_POLICY_PROFILE,
@@ -41,9 +42,9 @@ from .frontends.cli.options.params import (
     SIDED_DUMP_MANIFEST_PARAM,
     SIDED_INCLUDE_PATH_PARAM,
     SIDED_PATH_PARAM,
-    SIDED_STR_PARAM,
     normalize_suppress_callback,
 )
+from .frontends.cli.options.renamed import Legacy, renamed_option
 from .workflows.compile_config import (
     CompileConfigError,
     scope_compile_config_env_toggles,
@@ -273,16 +274,7 @@ def two_sided_input_options(func: F) -> F:
         "public surface in the manifest's own base profile instead). ELF "
         "only so far.",
     )(func)
-    func = click.option(
-        "--version",
-        "version",
-        multiple=True,
-        type=SIDED_STR_PARAM,
-        help="Version label used when an input is a bare .so file. Scope to one "
-        "side with an 'old='/'new=' prefix, repeating the flag per side (e.g. "
-        "--version old=1.0 --version new=2.0); a bare value applies to both. "
-        "Defaults: old side 'old', new side 'new'.",
-    )(func)
+    func = compare_label_option(func)
     func = click.option(
         "-I",
         "--include",
@@ -955,9 +947,10 @@ def abi3_option(func: F) -> F:
     ``python.abi3_floor`` supplies a default this flag overrides per run
     (ADR-068 D5).
     """
-    func = click.option(
-        "--abi3",
+    func = renamed_option(
+        "--abi3-floor",
         "abi3",
+        legacy=(Legacy("--abi3", "--abi3-floor"),),
         default=None,
         metavar="VERSION",
         help="Audit the candidate (NEW) against a Py_LIMITED_API floor, e.g. "

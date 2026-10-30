@@ -212,7 +212,7 @@ class Operands:
             if header is not None:
                 args += ["-H", f"{label}={header}"]
             if version:
-                args += ["--version", f"{label}={version}"]
+                args += ["--label", f"{label}={version}"]
         return args
 
 

@@ -214,7 +214,7 @@ class TestScenarioFlowVerification:
             ),
             ("abicheck compare a b", "compare --suppress", False),
             ("abicheck dump lib.so --suppress x", "compare --suppress", False),
-            ("abicheck deps compare a --old-root o --new-root n", "deps compare", True),
+            ("abicheck deps compare a --root old=o --root new=n", "deps compare", True),
             ("abicheck deps tree ./app", "deps compare", False),
         ],
     )

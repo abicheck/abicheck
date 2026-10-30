@@ -459,12 +459,12 @@ def _resolve_sided_variant(
     """Resolve ``--variant``'s ``(side, variant_id)`` pairs to ``(old, new)``.
 
     The same "base + per-side override" model every other side-aware option
-    on ``compare`` uses (``--header``, ``--include``, ``--version``,
+    on ``compare`` uses (``--header``, ``--include``, ``--label``,
     ``--sources``, ``--build-info``, ``--debug-info``, ``--devel-pkg``,
     ``--debug-root``, ``--probe-matrix``, ``--dump-manifest``): a bare or
     ``both=`` value applies to *both* sides, ``old=``/``new=`` override that
     one side, and the last value wins per bucket. Unset stays ``None`` --
-    unlike ``--version``, a variant id has no per-side default to fall back
+    unlike ``--label``, a variant id has no per-side default to fall back
     on (the package's sole declared variant is the default, resolved much
     later by the release fan-out, and "no variant stated" is what selects
     it).

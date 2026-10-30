@@ -303,7 +303,7 @@ inputs:
       scope as ast-frontend above).
     required: false
   sysroot:
-    description: 'Alternative system root directory for cross-compilation. On dump and single-pair compare (including the audit-only shape) this folds into the same synthesized compile: block gcc-path describes above (deps-tree keeps its own direct --sysroot CLI forwarding, unaffected -- it is not part of this compile-context group at all). Applies to dump, deps-tree, and compare mode, the latter on single-pair and directory/package (release) operands alike (same scope as ast-frontend above).'
+    description: 'Alternative system root directory for cross-compilation. On dump and single-pair compare (including the audit-only shape) this folds into the same synthesized compile: block gcc-path describes above (deps-tree keeps its own direct --root CLI forwarding, unaffected -- it is not part of this compile-context group at all). Applies to dump, deps-tree, and compare mode, the latter on single-pair and directory/package (release) operands alike (same scope as ast-frontend above).'
     required: false
   nostdinc:
     description: >
@@ -1156,8 +1156,8 @@ outputs:
       (this run's evidence contract could not be satisfied
       -- so no comparison could run at all: a pinned --depth/--source-method
       whose required source evidence was never collected. Two-sided shape
-      only for the --abi3-targeting-an-unrecognisable-binary cause --
-      no_baseline_rulings.py explicitly rejects --abi3 on the audit-only
+      only for the --abi3-floor-targeting-an-unrecognisable-binary cause --
+      no_baseline_rulings.py explicitly rejects --abi3-floor on the audit-only
       shape as an unsupported option (a usage error, exit 64) rather than
       reaching this verdict, since stable-ABI auditing is candidate-side
       and not yet wired to the no-baseline path -- see the command's own
@@ -1249,9 +1249,9 @@ outputs:
       was never collected; reachable on the audit-only shape too, since
       the underlying precondition checks run regardless of whether a
       baseline comparison follows. The other two-sided-shape cause,
-      --abi3 targeting a binary that isn't a recognisable CPython
+      --abi3-floor targeting a binary that isn't a recognisable CPython
       extension module, does NOT reach exit 7 on the audit-only shape --
-      --abi3 is rejected there upstream as an unsupported option (exit 64
+      --abi3-floor is rejected there upstream as an unsupported option (exit 64
       usage error), since stable-ABI auditing isn't wired to the
       no-baseline path yet -- see the verdict output's own description
       above). budget/exit-5 does not apply to the audit-only shape

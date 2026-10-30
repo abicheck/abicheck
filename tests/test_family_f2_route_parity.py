@@ -382,7 +382,12 @@ DEFAULT_UNMAPPED: dict[str, str] = {
 
 
 def _click_params() -> dict[str, click.Parameter]:
-    return {p.name: p for p in COMPARE.params if p.name}
+    # Hidden legacy aliases (ADR-091 D7) never reach the callback, so they have no route.
+    return {
+        p.name: p
+        for p in COMPARE.params
+        if p.name and not p.name.startswith("_legacy_")
+    }
 
 
 def _request_fields() -> set[str]:
@@ -848,7 +853,7 @@ def test_stored_snapshot_vs_live_binary(tmp_path: Path) -> None:
         (new_so, new_h, "2.0", tmp_path / "new.json"),
     ):
         r = runner.invoke(
-            main, ["dump", str(so), "-H", str(h), "--version", v, "-o", str(out)]
+            main, ["dump", str(so), "-H", str(h), "--label", v, "-o", str(out)]
         )
         assert r.exit_code == 0, r.output
     live = runner.invoke(

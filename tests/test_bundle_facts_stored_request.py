@@ -98,7 +98,7 @@ def test_a_plain_request_validates_with_no_config(tmp_path: Path) -> None:
             {"old_headers_only": (Path("h"),)},
             "--header old=.../--include old=...",
         ),
-        ({"old_version": "v2"}, "--version old=... is not supported"),
+        ({"old_version": "v2"}, "--label old=... is not supported"),
     ],
 )
 def test_each_unsupported_option_is_a_usage_error(
@@ -126,7 +126,7 @@ def test_each_unsupported_option_is_a_usage_error(
         ),
         (
             {"new_is_stored": True, "new_version": "v9"},
-            "--version new=... is not supported",
+            "--label new=... is not supported",
         ),
         (
             {"new_is_stored": True, "include_dependencies": True},

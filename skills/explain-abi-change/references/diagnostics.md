@@ -51,7 +51,7 @@ binding, `ldd path/to/program` shows the chosen copies, and `readelf -d`
 shows `NEEDED`, `RPATH` and `RUNPATH`. `readelf -V` shows the version nodes
 a library defines and a program requires.
 
-`abicheck deps compare path/to/program --old-root OLD_SYSROOT --new-root NEW_SYSROOT`
+`abicheck deps compare path/to/program --root old=OLD_SYSROOT --root new=NEW_SYSROOT`
 compares the whole dependency stack between two environments, for "it
 works in the old container and not in the new one".
 

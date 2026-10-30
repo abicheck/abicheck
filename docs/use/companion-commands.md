@@ -140,13 +140,13 @@ most recently.
 ```bash
 abicheck deps tree ./build/libfoo.so
 abicheck deps tree /usr/bin/myapp -o json=deps.json
-abicheck deps tree ./app --sysroot /path/to/container/rootfs
+abicheck deps tree ./app --root /path/to/container/rootfs
 ```
 
-With no `--sysroot`, the analysis runs against the current host filesystem
+With no `--root`, the analysis runs against the current host filesystem
 (`/`). That is a fallback, not a deployment environment anyone selected, so
 the resolved plan (`--dry-run`) and the report both label the root
-`defaulted` — an explicitly given `--sysroot /` is a choice and is never
+`defaulted` — an explicitly given `--root /` is a choice and is never
 labelled that way.
 
 Exit codes: `0` all dependencies resolved, `1` missing dependencies/symbols.
@@ -154,12 +154,12 @@ Exit codes: `0` all dependencies resolved, `1` missing dependencies/symbols.
 ### `deps compare`
 
 ```bash
-abicheck deps compare usr/bin/myapp --old-root /old-root --new-root /new-root
+abicheck deps compare usr/bin/myapp --root old=/old-root --root new=/new-root
 abicheck deps compare usr/lib/libfoo.so.1 \
-  --old-root ./image-v1 --new-root ./image-v2 -o json=-
+  --root old=./image-v1 --root new=./image-v2 -o json=-
 ```
 
-`--old-root`/`--new-root` (each default `/`) point at the two sysroots to
+`--root old=`/`--root new=` (each default `/`) point at the two sysroots to
 compare `BINARY` across. A root left at its default is reported as
 `defaulted` — in the resolved plan, and in the JSON
 (`baseline_env_defaulted`/`candidate_env_defaulted`), Markdown and HTML
@@ -184,7 +184,7 @@ update scripts before upgrading.
 |-----------------|---------------------|
 | `--old-header v1/f.h --new-header v2/f.h` | `--header old=v1/f.h --header new=v2/f.h` |
 | `--old-include i1 --new-include i2` | `--include old=i1 --include new=i2` |
-| `--old-version 1.0 --new-version 2.0` | `--version old=1.0 --version new=2.0` |
+| `--old-version 1.0 --new-version 2.0` | `--label old=1.0 --label new=2.0` |
 | `--old-sources src1 --new-sources src2` | `--sources old=src1 --sources new=src2` |
 | `--old-build-info b1 --new-build-info b2` | `--build-info old=b1 --build-info new=b2` |
 | `--old-pdb-path a.pdb --new-pdb-path b.pdb` | `--pdb-path old=a.pdb --pdb-path new=b.pdb` |

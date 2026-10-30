@@ -500,7 +500,7 @@ CPython extension-module properties. One key today: `abi3_floor:` — the
 rather than coerced.
 
 Which floor a project targets is a stable, reviewed-in-a-PR property, not a
-per-run decision, so it lives here — and `compare --abi3
+per-run decision, so it lives here — and `compare --abi3-floor
 VERSION` is the per-run override on top of it. With either in effect,
 `compare` audits the **candidate** (NEW) side's imported CPython C-API
 against that floor and reports `python_stable_abi_violation` findings, marked

@@ -1494,12 +1494,12 @@ class TestEagerGlobalOptions:
         assert not ev.ran_to_a_verdict(call)
 
     def test_the_commands_own_version_option_is_untouched(self):
-        """`compare` declares a value-taking `--version` ("Version label used
+        """`compare` declares a value-taking `--label` ("Version label used
         when an input is a bare .so file"), so matching the token anywhere
         would have failed a correct run to catch the empty one."""
         call = {
             "seq": 0,
-            "argv": ["compare", "old.so", "new.so", "--version", "1.2"],
+            "argv": ["compare", "old.so", "new.so", "--label", "1.2"],
             "exit_code": 0,
         }
         assert ev.ran_to_a_verdict(call)

@@ -139,7 +139,7 @@ deleted.
       the top-level `verdict` left at whatever the (unaffected)
       compatibility comparison produced. Check `exit`, not `verdict`, to
       detect this on `compare` — see [Exit
-      Codes](../reference/exit-codes.md) for the same caveat on `--abi3`'s
+      Codes](../reference/exit-codes.md) for the same caveat on `--abi3-floor`'s
 
     **This floor applies to `compare` only when at least one side is a live
     extraction** (a binary/package operand, not a pre-existing
@@ -608,7 +608,7 @@ facts so the later PR compare carries them:
 # Produce the reusable baseline snapshot once per release
 # (dump uses -H/--header, same as compare):
 abicheck dump build/libfoo.so -H include/ \
-  --sources . --version 1.0 -o artifacts/libfoo-1.0.abi.json
+  --sources . --label 1.0 -o artifacts/libfoo-1.0.abi.json
 
 # PR compares then run against it:
 abicheck compare artifacts/libfoo-1.0.abi.json build/libfoo.so -H include/ \

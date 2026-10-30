@@ -128,7 +128,7 @@ To pin to a specific release:
 
 ```bash
 abicheck dump libfoo.so -H include/foo.h \
-  --version 2.0.0 --provenance git-tag=v2.0.0 \
+  --label 2.0.0 --provenance git-tag=v2.0.0 \
   -o libfoo-2.0.0.abicheck.json
 gh release upload v2.0.0 libfoo-2.0.0.abicheck.json
 ```
@@ -214,7 +214,7 @@ Best for: small libraries where you want baselines auditable in PR diffs.
 ```bash
 # Developer or release CI creates/updates the baseline
 abicheck dump libfoo.so -H include/foo.h \
-  --version 2.0.0 -o abi/libfoo.abicheck.json
+  --label 2.0.0 -o abi/libfoo.abicheck.json
 git add abi/libfoo.abicheck.json
 git commit -m "Update ABI baseline for v2.0.0"
 git push

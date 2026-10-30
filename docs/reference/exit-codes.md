@@ -462,7 +462,7 @@ identical precedence rule `scan` used
 (`exit_decision_precedence.resolve_scan_exit_decision`), reused rather than
 re-derived, so the two commands can never disagree on which axis wins when
 both apply. Phase 2d gave the evidence-contract axis its first
-CLI-reachable trigger on `compare`: **`compare --abi3 VERSION` against a
+CLI-reachable trigger on `compare`: **`compare --abi3-floor VERSION` against a
 candidate that is not a recognisable CPython extension module exits `7`**,
 exactly as `scan --abi3` does, since the stable-ABI audit the flag asks for
 cannot be performed at all (the comparison's own findings are left as they
@@ -496,7 +496,7 @@ below.
 | `2` | `API_BREAK` — source-level API break — recompilation required |
 | `4` | `BREAKING` — binary ABI break |
 | `5` | Budget overflow — the run's wall-clock `--budget` guard was exceeded. `compare` has its own `--budget` flag now (`frontends/cli/commands/compare.py`); exit `5` applies to both `compare` and `scan` on overflow. |
-| `7` | Evidence-contract error — the analysis a pinned input asked for could not be performed at all, so it was not silently downgraded. Reachable through **`--abi3 VERSION` against a candidate that is not a recognisable CPython extension module**, and through **a pinned `--depth build`/`--depth source` whose evidence doesn't reach it** (`compare` shares this floor with `scan`/`dump` now, verified live). The depth trigger applies only when **at least one operand is a live extraction**; comparing two already-serialized snapshots is exempted from it even when neither embeds L3/L4 evidence (verified live — see [Evidence Depth](../use/evidence-depth.md)'s "pinned depth is a contract" warning), so a clean both-snapshot `compare` is not proof the pinned depth was reached. **On `compare`, the top-level `verdict` field is *not* `"EVIDENCE_CONTRACT_ERROR"`** for either trigger — verified live: it stays whatever the (otherwise-unaffected) compatibility comparison produced (e.g. `"NO_CHANGE"`). The error is carried in the `exit` block instead: `exit.code: 7` and `exit.reasons: ["evidence_contract_error"]`. A JSON consumer must check `exit`, not `verdict`, to detect this. (`scan`'s own dedicated exit path does set `verdict: "EVIDENCE_CONTRACT_ERROR"` — see its row below — so the two commands differ here despite sharing the same exit code.) `compare` folds this through the same `ExitDecision` precedence rule `scan` uses (`exit_decision_precedence.resolve_scan_exit_decision`), so the two commands can never disagree on which axis wins, only on how the JSON surfaces it. `dump`'s own, separately implemented floor for the depth trigger raises `DumpDepthNotSatisfiedError` and exits `1` instead — no snapshot is written — since `dump` has no verdict to fall back to. |
+| `7` | Evidence-contract error — the analysis a pinned input asked for could not be performed at all, so it was not silently downgraded. Reachable through **`--abi3-floor VERSION` against a candidate that is not a recognisable CPython extension module**, and through **a pinned `--depth build`/`--depth source` whose evidence doesn't reach it** (`compare` shares this floor with `scan`/`dump` now, verified live). The depth trigger applies only when **at least one operand is a live extraction**; comparing two already-serialized snapshots is exempted from it even when neither embeds L3/L4 evidence (verified live — see [Evidence Depth](../use/evidence-depth.md)'s "pinned depth is a contract" warning), so a clean both-snapshot `compare` is not proof the pinned depth was reached. **On `compare`, the top-level `verdict` field is *not* `"EVIDENCE_CONTRACT_ERROR"`** for either trigger — verified live: it stays whatever the (otherwise-unaffected) compatibility comparison produced (e.g. `"NO_CHANGE"`). The error is carried in the `exit` block instead: `exit.code: 7` and `exit.reasons: ["evidence_contract_error"]`. A JSON consumer must check `exit`, not `verdict`, to detect this. (`scan`'s own dedicated exit path does set `verdict: "EVIDENCE_CONTRACT_ERROR"` — see its row below — so the two commands differ here despite sharing the same exit code.) `compare` folds this through the same `ExitDecision` precedence rule `scan` uses (`exit_decision_precedence.resolve_scan_exit_decision`), so the two commands can never disagree on which axis wins, only on how the JSON surfaces it. `dump`'s own, separately implemented floor for the depth trigger raises `DumpDepthNotSatisfiedError` and exits `1` instead — no snapshot is written — since `dump` has no verdict to fall back to. |
 | `16` | `not_comparable` — OLD and NEW were not extracted under a comparable profile/scope contract, so no verdict was produced (`verdict: null` in `-o json=-`, with a `reason` object). Pass `--diagnostic-comparison` to force a tentative diff instead. |
 | `64` | Invalid invocation — bad arguments/options or an unreadable/unrecognised input, deliberately outside the `0/2/4` verdict space |
 
@@ -667,7 +667,7 @@ ran a one-build audit/hygiene/source-consistency scan only; pass it and
 | `4` | ABI break (from the `--against` comparison) |
 | `5` | `--budget` overflow — the time guard tripped (scope is never silently shrunk) |
 | `6` | `NOT_COMPARABLE` — `ARTIFACT` and `--against` were not extracted under a comparable profile/scope contract, so the comparison never ran (`diff.reason` in `-o json=-`). Distinct from `compat check`'s `9` and native `compare`'s `16` — every command maintains an independent exit-code scheme. |
-| `7` | Evidence-contract error — a pinned `--depth`/`--source-method` whose required source evidence was never collected, or `--abi3` targeting a binary that isn't a recognisable CPython extension module. No comparison ever ran (`verdict: "EVIDENCE_CONTRACT_ERROR"` in `-o json=-`); this process's own dedicated exit code (`cli_scan.py`'s `_EXIT_EVIDENCE_CONTRACT_ERROR`), unambiguous regardless of format or whether a JSON report was written. |
+| `7` | Evidence-contract error — a pinned `--depth`/`--source-method` whose required source evidence was never collected, or `--abi3-floor` targeting a binary that isn't a recognisable CPython extension module. No comparison ever ran (`verdict: "EVIDENCE_CONTRACT_ERROR"` in `-o json=-`); this process's own dedicated exit code (`cli_scan.py`'s `_EXIT_EVIDENCE_CONTRACT_ERROR`), unambiguous regardless of format or whether a JSON report was written. |
 | `64` | Invalid invocation (bad arguments/options) |
 
 > Exit `5` is `scan`-only in practice: `--budget 15m` **fails** the run
@@ -948,7 +948,7 @@ resolving the dependency tree — see
 
 ## `abicheck deps compare`
 
-Sysroot flags are **`--old-root`/`--new-root`** (default `/` for each —
+Sysroot flags are **`--root old=`/`--root new=`** (default `/` for each —
 renamed from the old `--baseline`/`--candidate`).
 
 | Exit code | Verdict | Meaning |
@@ -967,7 +967,7 @@ without running per-library ABI diffs — see
 
 ```bash
 # Full-stack check: fail on FAIL, warn on WARN
-abicheck deps compare usr/bin/myapp --old-root /old-root --new-root /new-root
+abicheck deps compare usr/bin/myapp --root old=/old-root --root new=/new-root
 ret=$?
 [ $ret -eq 4 ] && echo "FAIL — load failure or ABI break" && exit 1
 [ $ret -eq 1 ] && echo "WARN — ABI risk detected" && exit 1
@@ -975,7 +975,7 @@ ret=$?
 echo "PASS"
 
 # Permissive: only fail on load failure / ABI break
-abicheck deps compare usr/bin/myapp --old-root /old-root --new-root /new-root
+abicheck deps compare usr/bin/myapp --root old=/old-root --root new=/new-root
 ret=$?
 [ $ret -eq 4 ] && exit 1   # FAIL only; WARN (exit 1) treated as OK
 [ $ret -ne 0 ] && [ $ret -ne 1 ] && exit 1   # fail closed on non-verdict errors
