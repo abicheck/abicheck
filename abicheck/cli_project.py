@@ -71,6 +71,7 @@ from .buildsource.validation_input import (
 from .cli import main
 from .cli_options import export_options, policy_option, verbose_option
 from .frontends.cli.options.export import ExportSet
+from .frontends.cli.options.label import history_label_option
 from .frontends.cli.project_capture_variants import capture_variants_cmd
 from .frontends.cli.runtime import _setup_verbosity, emit_export_set
 from .workflows.extraction import (
@@ -644,18 +645,7 @@ def project_plan_cmd(
     required=True,
     type=click.Path(exists=True, dir_okay=False, path_type=Path),
 )
-@click.option(
-    "--version",
-    "versions",
-    multiple=True,
-    metavar="LABEL",
-    help=(
-        "Explicit release label for one SNAPSHOT, in the same order as the "
-        "SNAPSHOTS arguments (repeatable — pass one per snapshot, or omit "
-        "entirely). Without this, each snapshot's own recorded "
-        "AbiSnapshot.version is used as its release label."
-    ),
-)
+@history_label_option
 @policy_option
 @export_options(["json", "text", "html"], default_format="json")
 @verbose_option
@@ -718,7 +708,7 @@ def project_history_cmd(
           facts, not a pass/fail gate — this command never
           decides acceptance, only observes).
       64  Usage error (fewer than one snapshot, a snapshot fails to load, or
-          --version was given a different number of times than SNAPSHOTS).
+          --label was given a different number of times than SNAPSHOTS).
     """
     _setup_verbosity(verbose)
 

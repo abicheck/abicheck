@@ -142,11 +142,11 @@ _SIDED_DEFAULTS: dict[str, str] = {"old_version": "old"}
 #: both. ``old_version`` was recorded as *inert* until Codex pointed out that
 #: only its default is indistinguishable, not an explicit value.
 #:
-#: One residual, inherent to where this runs: ``--version old=1.2 --version
+#: One residual, inherent to where this runs: ``--label old=1.2 --label
 #: new=1.2`` arrives identical to the bare form, so it is accepted and the
 #: redundant OLD label dropped.
 _SIDED_LABEL_DESTS: dict[str, tuple[str, str]] = {
-    "old_version": ("new_version", "--version old="),
+    "old_version": ("new_version", "--label old="),
 }
 
 
@@ -279,7 +279,7 @@ _UNSUPPORTED_OPTIONS: dict[str, tuple[str, str]] = {
     ),
     # -- applicable, simply not wired yet ---------------------------------
     "abi3": (
-        "--abi3",
+        "--abi3-floor",
         "the stable-ABI audit is candidate-side and belongs here, but is not "
         "wired to this path yet",
     ),

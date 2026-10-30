@@ -84,7 +84,7 @@ class TestJsonOutput:
         p1 = _snapshot(tmp_path, "snap-a", ["add"])
         p2 = _snapshot(tmp_path, "snap-b", ["add", "multiply"])
 
-        res = _run([p1, p2, "--version", "1.0.0", "--version", "1.1.0", "-o", "json=-"])
+        res = _run([p1, p2, "--label", "1.0.0", "--label", "1.1.0", "-o", "json=-"])
         assert res.exit_code == 0, res.output
         doc = json.loads(res.output)
         assert [e["version"] for e in doc["entries"]] == ["1.0.0", "1.1.0"]
@@ -145,9 +145,9 @@ class TestUsageErrors:
     def test_mismatched_version_count_is_a_usage_error(self, tmp_path: Path) -> None:
         p1 = _snapshot(tmp_path, "1.0.0", ["add"])
         p2 = _snapshot(tmp_path, "2.0.0", ["add"])
-        res = _run([p1, p2, "--version", "only-one"])
+        res = _run([p1, p2, "--label", "only-one"])
         assert res.exit_code == 64
-        assert "--version" in res.output
+        assert "--label" in res.output
 
     def test_malformed_snapshot_file_is_a_usage_error(self, tmp_path: Path) -> None:
         bad = tmp_path / "bad.json"

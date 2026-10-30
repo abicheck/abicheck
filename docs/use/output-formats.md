@@ -1256,12 +1256,12 @@ jobs:
       - name: Dump ABI (baseline)
         run: |
           abicheck dump lib/libfoo.so.1 -H include/foo.h \
-            --version ${{ github.base_ref }} -o old.json
+            --label ${{ github.base_ref }} -o old.json
 
       - name: Dump ABI (PR)
         run: |
           abicheck dump lib/libfoo.so.2 -H include/foo.h \
-            --version ${{ github.head_ref }} -o new.json
+            --label ${{ github.head_ref }} -o new.json
 
       - name: Compare ABI
         run: |

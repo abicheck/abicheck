@@ -54,7 +54,7 @@ FAMILY_FLAGS: dict[str, frozenset[str]] = {
         {
             "--header",
             "--include",
-            "--version",
+            "--label",
         }
     ),
     "policy": frozenset({"--policy", "--suppress"}),

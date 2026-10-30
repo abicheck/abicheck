@@ -6,7 +6,7 @@ changed-path localization (``--since``/``--changed-path``).
 Neither is a cross-source check, so neither goes through
 ``run_crosschecks`` -- but both were, just as concretely, capabilities a
 ``compare`` user could not reach at all. Phase 2c/2d moved them: ``compare``
-now accepts ``--since``, ``--changed-path`` and ``--abi3``. The tests below used to
+now accepts ``--since``, ``--changed-path`` and ``--abi3-floor``. The tests below used to
 also prove parity against a live ``scan`` invocation directly
 (``test_abi3_audit_fires_under_scan``, ``test_scan_supports_changed_path_
 localization``, and half of ``test_abi3_audit_fires_under_compare_as_
@@ -58,7 +58,7 @@ def test_abi3_audit_fires_under_compare_as_candidate_side_enrichment(
     3.9 floor) -- marked as candidate-side (ADR-068 D3), not split off into
     a second result."""
     path = write_snapshot(_abi3_snapshot(), tmp_path / "foo.abi3.so.abi.json")
-    report = compare_json(path, path, "--abi3", "3.9")
+    report = compare_json(path, path, "--abi3-floor", "3.9")
     findings = [
         c for c in report["changes"] if c["kind"] == "python_stable_abi_violation"
     ]
@@ -71,7 +71,7 @@ def test_compare_abi3_stays_advisory(tmp_path: Path) -> None:
     effect the run still exits 0, and the finding stays a RISK kind."""
     path = write_snapshot(_abi3_snapshot(), tmp_path / "foo.abi3.so.abi.json")
     result = invoke_cli(
-        "compare", str(path), str(path), "--abi3", "3.9", "-o", "json=-"
+        "compare", str(path), str(path), "--abi3-floor", "3.9", "-o", "json=-"
     )
     assert result.exit_code == 0, result.output
     report = json.loads(result.stdout)
@@ -91,7 +91,7 @@ def test_compare_abi3_on_a_non_extension_is_an_evidence_contract_error(
     axis `compare` already has (ADR-064): exit 7, not a fabricated finding."""
     path = write_snapshot(_plain_snapshot(), tmp_path / "libfoo.abi.json")
     result = invoke_cli(
-        "compare", str(path), str(path), "--abi3", "3.9", "-o", "json=-"
+        "compare", str(path), str(path), "--abi3-floor", "3.9", "-o", "json=-"
     )
     assert result.exit_code == 7, result.output
     report = json.loads(result.stdout)

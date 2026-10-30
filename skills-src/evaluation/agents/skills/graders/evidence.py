@@ -83,8 +83,8 @@ NON_EXECUTING_FLAGS = ("--help", "-h", "--help-all", "--dry-run")
 
 #: Eager *global* options that print and exit before the verb runs at all.
 #: Position is the whole distinction and cannot be skipped: `compare` declares
-#: its own value-taking `--version` ("Version label used when an input is a
-#: bare .so file"), so `compare a.so b.so --version 1.2` is an ordinary
+#: its own value-taking `--label` ("Version label used when an input is a
+#: bare .so file"), so `compare a.so b.so --label 1.2` is an ordinary
 #: comparison, while `abicheck --version compare a.so b.so` prints the version
 #: and exits 0 having compared nothing. Matching the token anywhere would have
 #: failed the correct run to catch the empty one.

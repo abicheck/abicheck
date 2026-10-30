@@ -145,7 +145,7 @@ class TestResolveSidedVariantProperties:
             assert self._resolve(interleaved) == ("o2", "n2"), interleaved
 
     def test_unset_stays_none_rather_than_a_synthesized_default(self) -> None:
-        """Unlike ``--version`` (per-side defaults ``old``/``new``), an unset
+        """Unlike ``--label`` (per-side defaults ``old``/``new``), an unset
         variant must stay ``None`` -- that is what selects a package's sole
         declared variant downstream, and a synthesized label would instead
         request a variant no package declares."""

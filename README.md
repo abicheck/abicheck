@@ -242,7 +242,7 @@ abicheck compare libfoo.so.1 libfoo.so.2 \
 Save a baseline at release time, then check every build against it:
 
 ```bash
-abicheck dump libfoo.so -H include/foo.h --version 1.0 -o baseline.json
+abicheck dump libfoo.so -H include/foo.h --label 1.0 -o baseline.json
 abicheck compare baseline.json ./build/libfoo.so --header new=include/foo.h
 ```
 

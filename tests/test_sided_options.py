@@ -247,7 +247,7 @@ class TestSidedStrParam:
 
 class TestSplitSidedVersion:
     def test_defaults_when_empty(self) -> None:
-        # no --version given → the historical per-side defaults
+        # no --label given → the historical per-side defaults
         assert _split_sided_version(()) == ("old", "new")
 
     def test_both_fans_out_to_each_side(self) -> None:

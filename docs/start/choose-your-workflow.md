@@ -49,8 +49,8 @@ command** when you need more confidence or a CI gate.
 | RPM / Deb / tar / conda / wheel packages | `abicheck compare old.rpm new.rpm` | Add `--debug-info old=old-debuginfo.rpm --debug-info new=new-debuginfo.rpm` (debuginfo packages) and `-H old=old-devel.rpm -H new=new-devel.rpm` (header/devel packages -- `-H` takes a package as well as a header directory) where available |
 | An application + a library upgrade | `abicheck compare libfoo.so.1 libfoo.so.2 --used-by ./myapp` | Add `-H include/`; repeatable for several application binaries; OLD/NEW may be real library binaries or JSON snapshots carrying binary evidence |
 | A host that `dlopen`s plugins | `abicheck compare plugin.v1.so plugin.v2.so --required-symbol plugin_init` | Use `--required-symbol @host.syms --policy plugin_abi` for a whole host-contract file |
-| Will this binary load in this sysroot / rootfs? | `abicheck deps tree ./app --sysroot /rootfs` | `abicheck deps tree ./app` alone checks the dependency tree resolves |
-| Two sysroots / container images to compare | `abicheck deps compare usr/bin/app --old-root /old-root --new-root /new-root` | Per-library ABI diff across the whole transitive dependency stack |
+| Will this binary load in this sysroot / rootfs? | `abicheck deps tree ./app --root /rootfs` | `abicheck deps tree ./app` alone checks the dependency tree resolves |
+| Two sysroots / container images to compare | `abicheck deps compare usr/bin/app --root old=/old-root --root new=/new-root` | Per-library ABI diff across the whole transitive dependency stack |
 | Only a static `.a` / `.lib` archive | *(unsupported directly)* | Extract members (`ar x libfoo.a`) and compare the `.o` objects, or compare a shared library built from the same sources — see [Limitations](../learn/limitations.md#static-import-library-archives-a-lib) |
 
 `compare` auto-detects each input: `.so` files are dumped on the fly, `.json`

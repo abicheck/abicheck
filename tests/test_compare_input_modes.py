@@ -534,7 +534,7 @@ class TestCompareSoSo:
         assert "symbols-only mode" in out or "weaker" in out
 
     def test_so_vs_so_with_version_labels(self, tmp_path, monkeypatch):
-        """--version old=/new= are passed through to dump."""
+        """--label old=/new= are passed through to dump."""
         old_elf = _write_fake_elf(tmp_path / "libv1.so")
         new_elf = _write_fake_elf(tmp_path / "libv2.so")
         hdr = tmp_path / "foo.h"
@@ -560,9 +560,9 @@ class TestCompareSoSo:
                 str(new_elf),
                 "-H",
                 str(hdr),
-                "--version",
+                "--label",
                 "old=1.0",
-                "--version",
+                "--label",
                 "new=2.0",
             ],
         )
@@ -833,7 +833,7 @@ class TestCompareHelp:
             "--include",
             "--sources",
             "--build-info",
-            "--version",
+            "--label",
         ]:
             assert flag in result.output, f"{flag} not in help output"
         assert "--lang" not in result.output

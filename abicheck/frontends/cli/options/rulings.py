@@ -185,7 +185,7 @@ COMPARE_OPTION_RULINGS: dict[str, OptionRuling] = {
         "invocation needs varies per run (matching whatever a baseline was "
         "dumped with), not a stable project setting."
     ),
-    "--version": _keep(
+    "--label": _keep(
         "The version label to attach when an input is a bare .so with no "
         "package metadata. It labels *these two operands*, so it is per-run "
         "by definition; side-scoped since the two sides differ."
@@ -271,7 +271,7 @@ COMPARE_OPTION_RULINGS: dict[str, OptionRuling] = {
         "scoping-only effect; one of the two is redundant only if abicheck "
         "assumes every consumer has a git working tree, which it does not."
     ),
-    "--abi3": _keep(
+    "--abi3-floor": _keep(
         "ADR-068 Phase 2d: activates the candidate-side stable-ABI audit "
         "for this run and, when given, overrides the project's own declared "
         "floor. The *floor* is the stable half and lives in .abicheck.yml's "
@@ -576,7 +576,10 @@ DUMP_OPTION_RULINGS: dict[str, OptionRuling] = {
         "one artifact of one kind, and there is no 'which projection' "
         "question here to answer."
     ),
-    "--version": _keep("Same ruling as `compare --version`: labels *these* operands."),
+    "--label": _keep(
+        "Same ruling as `compare --label` (ADR-091 D5 R1): it labels *these* "
+        "operands, so it is per-run, not a stable project setting."
+    ),
     "--dry-run": _keep(
         "Same ruling as `compare --dry-run` (ADR-043 D9): resolve and "
         "validate the invocation without writing a snapshot."

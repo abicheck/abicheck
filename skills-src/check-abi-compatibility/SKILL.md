@@ -72,7 +72,7 @@ so it cannot confirm the rest of runtime compatibility: whether the binary's
 full dependency graph actually resolves in a specific sysroot or container
 image. When the contract is runtime, report the symbol-floor half from this
 workflow's own evidence, and report the "does it actually load there" half as
-`NOT_VERIFIED` unless the user separately ran `deps tree --sysroot` or `deps
+`NOT_VERIFIED` unless the user separately ran `deps tree --root` or `deps
 compare` — do not let a clean `compare` verdict read as a full runtime
 `VERIFIED_COMPATIBLE`.
 

@@ -70,6 +70,7 @@ from ....workflows.dump.project_config import DUMP_APPLIED_PATHS
 from ....workflows.provenance import stamp_provenance
 from ..options.config_set import config_set_option_for
 from ..options.dump_provenance import dump_provenance_option, parse_provenance_tokens
+from ..options.label import dump_label_option
 from ..runtime import _setup_verbosity
 
 
@@ -114,13 +115,7 @@ def _load_dump_manifest_or_reject(
 @include_dependencies_option
 @define_option
 @config_set_option_for(DUMP_APPLIED_PATHS, "dump")
-@click.option(
-    "--version",
-    "version",
-    default="unknown",
-    show_default=True,
-    help="Library version string to embed in snapshot.",
-)
+@dump_label_option
 @click.option(
     "-o",
     "--output",
@@ -233,7 +228,7 @@ def dump_cmd(
 
     \b
     Example:
-      abicheck dump libfoo.so.1 -H include/foo.h --version 1.2.3 -o snap.json
+      abicheck dump libfoo.so.1 -H include/foo.h --label 1.2.3 -o snap.json
       abicheck dump --sources ./libfoo-src/ -o libfoo.src.json  # source-only (no binary)
     """
     # Imported here, not at module level: the snapshot write path lives in

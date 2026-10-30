@@ -192,15 +192,28 @@
    "default": "<unset>"
   },
   {
-   "id": "compare --version",
+   "id": "compare --label",
    "command": "compare",
-   "option": "--version",
+   "option": "--label",
    "aliases": [],
    "hidden": false,
    "help_common": true,
    "multiple": true,
    "is_flag": false,
    "type": "sided-str",
+   "choices": null,
+   "default": "<unset>"
+  },
+  {
+   "id": "compare --version",
+   "command": "compare",
+   "option": "--version",
+   "aliases": [],
+   "hidden": true,
+   "help_common": false,
+   "multiple": true,
+   "is_flag": false,
+   "type": "text",
    "choices": null,
    "default": "<unset>"
   },
@@ -512,11 +525,24 @@
    "default": "<unset>"
   },
   {
+   "id": "compare --abi3-floor",
+   "command": "compare",
+   "option": "--abi3-floor",
+   "aliases": [],
+   "hidden": false,
+   "help_common": false,
+   "multiple": false,
+   "is_flag": false,
+   "type": "text",
+   "choices": null,
+   "default": "<unset>"
+  },
+  {
    "id": "compare --abi3",
    "command": "compare",
    "option": "--abi3",
    "aliases": [],
-   "hidden": false,
+   "hidden": true,
    "help_common": false,
    "multiple": false,
    "is_flag": false,
@@ -665,30 +691,43 @@
    "default": "<unset>"
   },
   {
-   "id": "deps compare --old-root",
+   "id": "deps compare --root",
    "command": "deps compare",
-   "option": "--old-root",
+   "option": "--root",
    "aliases": [],
    "hidden": false,
    "help_common": true,
-   "multiple": false,
+   "multiple": true,
    "is_flag": false,
-   "type": "path",
+   "type": "sided-path",
    "choices": null,
-   "default": "<PosixPath>"
+   "default": "<unset>"
   },
   {
    "id": "deps compare --new-root",
    "command": "deps compare",
    "option": "--new-root",
    "aliases": [],
-   "hidden": false,
-   "help_common": true,
+   "hidden": true,
+   "help_common": false,
    "multiple": false,
    "is_flag": false,
-   "type": "path",
+   "type": "text",
    "choices": null,
-   "default": "<PosixPath>"
+   "default": "<unset>"
+  },
+  {
+   "id": "deps compare --old-root",
+   "command": "deps compare",
+   "option": "--old-root",
+   "aliases": [],
+   "hidden": true,
+   "help_common": false,
+   "multiple": false,
+   "is_flag": false,
+   "type": "text",
+   "choices": null,
+   "default": "<unset>"
   },
   {
    "id": "deps compare --search-path",
@@ -773,15 +812,28 @@
    "default": "<unset>"
   },
   {
-   "id": "deps tree --sysroot",
+   "id": "deps tree --root",
    "command": "deps tree",
-   "option": "--sysroot",
+   "option": "--root",
    "aliases": [],
    "hidden": false,
    "help_common": true,
    "multiple": false,
    "is_flag": false,
    "type": "path",
+   "choices": null,
+   "default": "<unset>"
+  },
+  {
+   "id": "deps tree --sysroot",
+   "command": "deps tree",
+   "option": "--sysroot",
+   "aliases": [],
+   "hidden": true,
+   "help_common": false,
+   "multiple": false,
+   "is_flag": false,
+   "type": "text",
    "choices": null,
    "default": "<unset>"
   },
@@ -926,9 +978,9 @@
    "default": "<unset>"
   },
   {
-   "id": "dump --version",
+   "id": "dump --label",
    "command": "dump",
-   "option": "--version",
+   "option": "--label",
    "aliases": [],
    "hidden": false,
    "help_common": true,
@@ -937,6 +989,19 @@
    "type": "text",
    "choices": null,
    "default": "'unknown'"
+  },
+  {
+   "id": "dump --version",
+   "command": "dump",
+   "option": "--version",
+   "aliases": [],
+   "hidden": true,
+   "help_common": false,
+   "multiple": false,
+   "is_flag": false,
+   "type": "text",
+   "choices": null,
+   "default": "<unset>"
   },
   {
    "id": "dump --output",
@@ -1236,12 +1301,25 @@
    "default": "<unset>"
   },
   {
+   "id": "project history --label",
+   "command": "project history",
+   "option": "--label",
+   "aliases": [],
+   "hidden": false,
+   "help_common": true,
+   "multiple": true,
+   "is_flag": false,
+   "type": "text",
+   "choices": null,
+   "default": "<unset>"
+  },
+  {
    "id": "project history --version",
    "command": "project history",
    "option": "--version",
    "aliases": [],
-   "hidden": false,
-   "help_common": true,
+   "hidden": true,
+   "help_common": false,
    "multiple": true,
    "is_flag": false,
    "type": "text",

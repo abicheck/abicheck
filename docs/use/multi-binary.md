@@ -855,7 +855,7 @@ silently ignored — see `abicheck compare --help-all` for the full, current
 list. When `NEW_INPUT` is also stored, every flag that would only ever
 apply to a *live* `NEW_INPUT` (`--header`/`--include`, `--ast-frontend`,
 `--compiler`/`--sysroot`, a `-H new=` development package,
-`--bundle-facts-library-manifest`, an explicit `--version new=`, ...) is
+`--bundle-facts-library-manifest`, an explicit `--label new=`, ...) is
 rejected too, alongside a mismatched build variant between the two
 documents (`BundleFacts.variant_fingerprint`, a stable build-identity
 fingerprint each captured document carries): two documents captured from

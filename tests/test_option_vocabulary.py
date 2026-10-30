@@ -265,6 +265,7 @@ def test_every_live_option_is_claimed_exactly_once(
         (s, i) for c in registry["concepts"] for s in SURFACES for i in c.get(s, [])
     )
     patterns = [o["pattern"] for o in registry.get("out_of_scope", [])]
+    aliases = {a["id"] for a in registry.get("deprecated_aliases", [])}
     twice = sorted(k for k, n in claims.items() if n > 1)
     unclaimed = sorted(
         (s, r["id"])
@@ -272,10 +273,29 @@ def test_every_live_option_is_claimed_exactly_once(
         for r in inventory[s]
         if (s, r["id"]) not in claims
         and not any(fnmatch.fnmatchcase(r["id"], p) for p in patterns)
+        and not (s == "cli" and r["id"] in aliases)
     )
     assert not twice, f"options claimed by more than one concept: {twice}"
     assert not unclaimed, (
         f"options not in any concept of architecture/option-vocabulary.yaml (ADR-091 D6): {unclaimed}"
+    )
+
+
+def test_deprecated_aliases_are_hidden_and_replaced(
+    registry: dict, inventory: dict
+) -> None:
+    """ADR-091 D7: each retired spelling is a hidden CLI option whose replacement is a visible, claimed one."""
+    cli = {r["id"]: r for r in inventory["cli"]}
+    claimed = {i for c in registry["concepts"] for i in c.get("cli", [])}
+    bad = [
+        a
+        for a in registry.get("deprecated_aliases", [])
+        if not cli.get(a["id"], {}).get("hidden")
+        or a["replaces"] not in claimed
+        or cli[a["replaces"]]["hidden"]
+    ]
+    assert not bad, (
+        f"deprecated_aliases must be hidden and replace a visible claimed option: {bad}"
     )
 
 

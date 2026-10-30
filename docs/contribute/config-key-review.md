@@ -234,11 +234,11 @@ it's a flag that exists only to qualify another flag.
 
 ### 3.6 Version-label default drift
 
-`compare --version old=`/`--version new=` default to the literal strings
-`"old"`/`"new"`; `dump --version` defaults to `"unknown"`. Harmless but
+`compare --label old=`/`--label new=` default to the literal strings
+`"old"`/`"new"`; `dump --label` defaults to `"unknown"`. Harmless but
 inconsistent.
 
-**Recommendation:** `dump --version` already defaults to `"unknown"`; make the
+**Recommendation:** `dump --label` already defaults to `"unknown"`; make the
 compare-side default the input filename stem when resolvable, rather than the
 opaque `"old"`/`"new"` — more useful in reports for zero extra typing.
 

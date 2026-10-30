@@ -372,6 +372,20 @@ add_sided_flag() {
 # any embedded whitespace -- never split into multiple flags. A version
 # label like "1.0 (release build)" previously lost everything but its last
 # whitespace-separated word when routed through add_sided_flag's word-split.
+# Whether `extra-args` already names a version label. The Action's own
+# `old-version`/`new-version` defaults ('old'/'new') would otherwise be forwarded
+# as `--label` next to it, and the CLI refuses the retired `--version` beside
+# `--label` for the same option (exit 64). A label the user passed through
+# extra-args wins instead, as the last value does on the CLI.
+_extra_args_names_label() {
+  local _tok
+  # shellcheck disable=SC2086  # word-split exactly as `CMD+=($INPUT_EXTRA_ARGS)` does.
+  for _tok in ${INPUT_EXTRA_ARGS:-}; do
+    case "$_tok" in --label|--label=*|--version|--version=*) return 0 ;; esac
+  done
+  return 1
+}
+
 add_sided_scalar_flag() {
   local flag="$1"
   local side="$2"
@@ -3743,7 +3757,7 @@ if [[ "$MODE" == "dump" ]]; then
   add_flag "-H" "${INPUT_PUBLIC_HEADER_DIR:-}"
   add_flag "-I" "${INPUT_INCLUDE:-}"
   add_flag "-I" "${INPUT_NEW_INCLUDE:-}"
-  add_single_flag "--version" "${INPUT_NEW_VERSION:-}"
+  _extra_args_names_label || add_single_flag "--label" "${INPUT_NEW_VERSION:-}"
   add_compile_context_flags true
 
   if [[ "${INPUT_FOLLOW_DEPS:-false}" == "true" ]]; then
@@ -3874,7 +3888,7 @@ elif [[ "$MODE" == "compare" ]]; then
     add_flag "-H" "${INPUT_PUBLIC_HEADER_DIR:-}"
     add_flag "-I" "${INPUT_INCLUDE:-}"
     add_flag "-I" "${INPUT_NEW_INCLUDE:-}"
-    add_sided_scalar_flag "--version" "new" "${INPUT_NEW_VERSION:-}"
+    _extra_args_names_label || add_sided_scalar_flag "--label" "new" "${INPUT_NEW_VERSION:-}"
   else
     add_flag "-H" "${INPUT_HEADER:-}"
     add_sided_flag "--header" "old" "${INPUT_OLD_HEADER:-}"
@@ -3882,8 +3896,8 @@ elif [[ "$MODE" == "compare" ]]; then
     add_flag "-I" "${INPUT_INCLUDE:-}"
     add_sided_flag "--include" "old" "${INPUT_OLD_INCLUDE:-}"
     add_sided_flag "--include" "new" "${INPUT_NEW_INCLUDE:-}"
-    add_sided_scalar_flag "--version" "old" "${INPUT_OLD_VERSION:-}"
-    add_sided_scalar_flag "--version" "new" "${INPUT_NEW_VERSION:-}"
+    _extra_args_names_label || add_sided_scalar_flag "--label" "old" "${INPUT_OLD_VERSION:-}"
+    _extra_args_names_label || add_sided_scalar_flag "--label" "new" "${INPUT_NEW_VERSION:-}"
   fi
   # The L2 compile-context inputs (lang/ast-frontend/gcc-*/sysroot/nostdinc)
   # reach the CLI as a synthesized `--config` `compile:` overlay (Phase 7
@@ -4227,7 +4241,7 @@ elif [[ "$MODE" == "deps-tree" ]]; then
   CMD+=(deps tree)
   CMD+=("${INPUT_NEW_LIBRARY:?new-library is required for deps-tree mode}")
 
-  add_single_flag "--sysroot" "${INPUT_SYSROOT:-}"
+  add_single_flag "--root" "${INPUT_SYSROOT:-}"
   add_flag "--search-path" "${INPUT_SEARCH_PATH:-}"
   add_single_flag "--ld-library-path" "${INPUT_LD_LIBRARY_PATH:-}"
 
@@ -4266,8 +4280,8 @@ elif [[ "$MODE" == "deps-compare" ]]; then
   # ── deps-compare mode (Linux ELF) → `deps compare` ──────────────────────
   CMD+=(deps compare)
   CMD+=("${INPUT_NEW_LIBRARY:?new-library (binary path) is required for deps-compare mode}")
-  CMD+=(--old-root "${INPUT_OLD_ROOT:?old-root is required for deps-compare mode}")
-  CMD+=(--new-root "${INPUT_NEW_ROOT:?new-root is required for deps-compare mode}")
+  CMD+=(--root "old=${INPUT_OLD_ROOT:?old-root is required for deps-compare mode}")
+  CMD+=(--root "new=${INPUT_NEW_ROOT:?new-root is required for deps-compare mode}")
 
   add_flag "--search-path" "${INPUT_SEARCH_PATH:-}"
   add_single_flag "--ld-library-path" "${INPUT_LD_LIBRARY_PATH:-}"

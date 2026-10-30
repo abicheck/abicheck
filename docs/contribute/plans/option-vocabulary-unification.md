@@ -235,6 +235,23 @@ Deprecated), `docs/start/upgrading-*.md` migration table updated, and
 `scripts/check_docs_contract.py`'s `_RETIRED_SURFACES` gains the old
 spellings once deleted in Phase 6. Size: M each.
 
+**Result (CLI part, ADR-091 D5 R1/R12/R16).** Done: `compare`, `dump` and
+`project history` take `--label` (dest unchanged, so the command bodies and
+rulings keep their parameter names); `compare --abi3-floor`; `deps compare
+--root [old=|new=]PATH` (the two old flags became two hidden aliases that
+translate per side and may be combined with each other); `deps tree --root`.
+The old spellings are hidden click options, each printing click's own
+`DeprecationWarning` naming its replacement, and passing an old and a new
+spelling for the same option is a usage error (exit 64). The mechanism is
+`abicheck/frontends/cli/options/renamed.py`; the aliases are listed under
+`deprecated_aliases:` in `architecture/option-vocabulary.yaml`, and the parity
+gate checks that each is hidden and replaced by a visible claimed option. The
+in-repo users (Action shell and metadata, rulings, help panels, docs, examples,
+skills, tests) moved to the new spellings; the Action's own inputs are
+unchanged until its part of Phase 4. R21 (`--include`, `--used-by-manifest`,
+the `--bundle-facts-*` family) is not in this change; R19 is Python-only. Migration: `docs/start/upgrading-to-0.7.md`. Removal of the aliases is
+Phase 6.
+
 ## Phase 5 — Surface budget (D4)
 
 - R14: retired inputs stay declared as tombstones (`tests/test_action_retired_inputs_contract.py`); they do not count toward the budget. Convert the two ignored inputs (`jobs`, `allow-build-query`) into tombstones that fail the run, and add them to that test's `_TOMBSTONES_THAT_MUST_STAY_DECLARED`.

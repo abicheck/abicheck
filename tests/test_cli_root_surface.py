@@ -190,7 +190,7 @@ def test_python_dash_m_abicheck_shows_public_commands() -> None:
 
 def test_deps_compare_rejects_old_flag_names(tmp_path) -> None:  # type: ignore[no-untyped-def]
     """``deps compare``'s pre-reset ``--baseline``/``--candidate`` spellings
-    (renamed to ``--old-root``/``--new-root``) are gone, not kept as aliases."""
+    (renamed to ``--root old=PATH``/``--root new=PATH``) are gone, not kept as aliases."""
     old_root = tmp_path / "old-root"
     new_root = tmp_path / "new-root"
     old_root.mkdir()
@@ -204,10 +204,10 @@ def test_deps_compare_rejects_old_flag_names(tmp_path) -> None:  # type: ignore[
                 "usr/bin/myapp",
                 flag,
                 str(old_root),
-                "--old-root",
-                str(old_root),
-                "--new-root",
-                str(new_root),
+                "--root",
+                f"old={str(old_root)}",
+                "--root",
+                f"new={str(new_root)}",
             ],
         )
         assert result.exit_code == 64, f"{flag} was unexpectedly accepted"

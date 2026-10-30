@@ -113,8 +113,8 @@ PROJECT_PLAN_OPTION_RULINGS: dict[str, OptionRuling] = {
 }
 
 PROJECT_HISTORY_OPTION_RULINGS: dict[str, OptionRuling] = {
-    "--version": _keep(
-        "Same ruling as `dump --version`: labels *these* operands. Repeatable "
+    "--label": _keep(
+        "Same ruling as `dump --label`: labels *these* operands. Repeatable "
         "one-per-SNAPSHOT, because a history chain's release labels are a "
         "property of the snapshots this invocation was handed, not of the "
         "project; omitting it falls back to each snapshot's own recorded "
@@ -188,7 +188,7 @@ DEPS_TREE_OPTION_RULINGS: dict[str, OptionRuling] = {
         _ENVIRONMENT_OPERAND + "Distinct from --ld-library-path for the "
         "loader-step reason 7k measured on `compare --search-path`."
     ),
-    "--sysroot": _keep(
+    "--root": _keep(
         _ENVIRONMENT_OPERAND + "The root the walk resolves every path "
         "against; unlike the retired `compile.sysroot` CLI twin (7b) it "
         "selects the analysed environment rather than a header-parse setting."
@@ -206,13 +206,9 @@ DEPS_TREE_OPTION_RULINGS: dict[str, OptionRuling] = {
 }
 
 DEPS_COMPARE_OPTION_RULINGS: dict[str, OptionRuling] = {
-    "--old-root": _keep(
-        _ENVIRONMENT_OPERAND + "The baseline environment of the two this "
-        "invocation compares."
-    ),
-    "--new-root": _keep(
-        _ENVIRONMENT_OPERAND + "The candidate environment of the two this "
-        "invocation compares."
+    "--root": _keep(
+        _ENVIRONMENT_OPERAND + "The baseline (old=) and candidate (new=) "
+        "environments of the two this invocation compares."
     ),
     "--search-path": DEPS_TREE_OPTION_RULINGS["--search-path"],
     "--ld-library-path": DEPS_TREE_OPTION_RULINGS["--ld-library-path"],

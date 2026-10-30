@@ -159,7 +159,7 @@ force, and exactly one `-D` per macro reaches the frontend. `--dry-run` prints
 the resulting effective set.
 
 **Both sides, never one.** There is deliberately no `-D old=`/`new=` form,
-unlike `-H`/`-I`/`--version`: two sides parsed under different macro contexts
+unlike `-H`/`-I`/`--label`: two sides parsed under different macro contexts
 are two different public surfaces, so every finding between them would be an
 artifact of the flags. (`-Dold=FOO` therefore defines a macro literally named
 `old` — it is not a side selector.)

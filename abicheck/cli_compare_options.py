@@ -289,7 +289,7 @@ def _resolve_depth_for_set_inputs(ctx: click.Context) -> str | None:
 _SINGLE_PAIR_ONLY_SET_INPUT_FLAGS: dict[str, str] = {
     "since": "--since",
     "changed_paths_opt": "--changed-path",
-    "abi3": "--abi3",
+    "abi3": "--abi3-floor",
 }
 
 

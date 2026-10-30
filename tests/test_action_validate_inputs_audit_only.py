@@ -124,7 +124,7 @@ class TestOldSidedInputsRejectedOnAuditOnly:
     old-header/old-include/old-version outright -- there is no OLD side for
     this evidence to describe, and the CLI's own _reject_old_sided_inputs
     (abicheck/frontends/cli/commands/no_baseline_rulings.py) rejects an
-    explicitly OLD-scoped --header/--include/--version rather than silently
+    explicitly OLD-scoped --header/--include/--label rather than silently
     dropping it. Codex review, PR #1223, round 8: action/run.sh's audit-only
     branch previously just never forwarded these three, which reads as
     "honored" when it was silently dropped."""

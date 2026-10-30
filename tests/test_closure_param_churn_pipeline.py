@@ -108,7 +108,7 @@ def _build_and_dump(root: Path, name: str, header: str, impl: str, out: Path) ->
     )
     result = CliRunner().invoke(
         main,
-        ["dump", str(so), "-H", str(case / "lib.h"), "--version", name, "-o", str(out)],
+        ["dump", str(so), "-H", str(case / "lib.h"), "--label", name, "-o", str(out)],
     )
     assert result.exit_code == 0, result.output
     return out

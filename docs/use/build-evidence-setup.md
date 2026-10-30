@@ -326,7 +326,7 @@ cmake --build build-old
 #    build-old lives outside the libfoo-1.0 --sources tree.
 abicheck dump build-old/libfoo.so -H libfoo-1.0/include \
     --sources libfoo-1.0 --build-info build-old/compile_commands.json \
-    --depth source --version 1.0 -o libfoo-1.0.abi.json
+    --depth source --label 1.0 -o libfoo-1.0.abi.json
 
 # (repeat steps 1-2 for the new release → libfoo-2.0.abi.json)
 

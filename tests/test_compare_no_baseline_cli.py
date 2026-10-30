@@ -533,7 +533,7 @@ def _a_live_binary_this_host_can_audit(tmp_path: Path) -> Path:
 
 
 def test_a_candidate_version_label_is_honoured(candidate: Path, tmp_path: Path) -> None:
-    """``--version new=`` was another silently-dropped generated destination.
+    """``--label new=`` was another silently-dropped generated destination.
 
     Checked against a *live* artifact, since a stored snapshot keeps its own
     recorded version on both the one- and two-sided paths -- asserting on the
@@ -544,7 +544,7 @@ def test_a_candidate_version_label_is_honoured(candidate: Path, tmp_path: Path) 
         "compare",
         "--no-baseline",
         str(binary),
-        "--version",
+        "--label",
         "new=9.9",
         "-o",
         "json=-",
