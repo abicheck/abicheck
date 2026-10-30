@@ -239,13 +239,8 @@ class Step:
     #: receipt has to name the right one. Distinct from `precondition`, which
     #: decides *before* running and therefore runs nothing at all.
     partial: dict[int, str] | None = None
-    #: Let the child write straight to this process's stdout/stderr instead of
-    #: capturing it. For long CI lanes: a captured step that the runner kills
-    #: at its job timeout prints nothing at all (Integration run 40954494083's
-    #: Windows leg: 36 minutes, zero lines), while a streamed one shows every
-    #: test finished so far. ``PYTHONUNBUFFERED`` keeps a piped child's output
-    #: live. A streamed step's output reaches only the terminal, not a
-    #: caller's ``--json`` receipt.
+    #: Stream the child's output live instead of capturing it: a killed step's
+    #: captured output is lost (Integration run 40954494083, 36 silent min).
     stream: bool = False
     description: str = ""
 
@@ -613,9 +608,7 @@ STEPS: tuple[Step, ...] = (
             "--tb=short",
             "--ignore=tests/test_abi_examples.py",
             "--ignore=tests/test_cross_platform_integration.py",
-            # The slowest tests, so a lane drifting toward its job timeout
-            # names what grew (the Windows leg went 25 -> 36+ minutes in a day).
-            "--durations=30",
+            "--durations=30",  # names what grew when a lane nears its timeout
         ),
         frozenset({FULL}),
         env_defaults={"ABICHECK_MIN_EXECUTED": "1"},
@@ -940,20 +933,11 @@ def run_step(step: Step, junit_dir: str | None = None) -> dict[str, object]:
     print(f"\n=== {step.name} === {' '.join(cmd)}", flush=True)
     start = time.time()
     env = {**step.env_defaults, **os.environ, **step.env}
-    # Diagnostic instrumentation (round 20, Part B) -- capture_output=True
-    # instead of the previous bare subprocess.run(...) (which relied on the
-    # child inheriting this process's stdout/stderr fds directly). Explicitly
-    # capturing and then unconditionally re-printing the child's own
-    # stdout/stderr here, regardless of exit status, means a failing step's
-    # diagnostic output can never be silently lost to an intermediate
-    # buffering/redirection layer between the child and whatever ultimately
-    # renders this script's output (e.g. a CI runner's non-tty log pipe) --
-    # see this module's own top-of-file comment for the full reasoning. This
-    # also means a caller with `--json` gets the raw text available even when
-    # the terminal itself scrolled it out of view.
+    # A non-streamed step's output is captured and always re-printed below,
+    # so no buffering layer between child and CI log can swallow it. A streamed
+    # one gets `-u`: the `-I` from `_py` makes Python ignore PYTHONUNBUFFERED.
     if step.stream:
-        sys.stdout.flush()
-        proc = subprocess.run(cmd, cwd=ROOT, env={**env, "PYTHONUNBUFFERED": "1"})
+        proc = subprocess.run((cmd[0], "-u", *cmd[1:]), cwd=ROOT, env=env)
     else:
         proc = subprocess.run(cmd, cwd=ROOT, env=env, capture_output=True, text=True)
     duration = time.time() - start
