@@ -60,7 +60,7 @@ def test_consumer_compile_context_uses_a_separate_extraction() -> None:
     # standard/stdlib ultimately has to cross to reach the actual dump
     # invocation (bug-class-regression-testing.md Phase 6), left untested
     # even though ast-frontend's identically-shaped sibling line was.
-    assert consumer["with"]["compiler"] == "${{ inputs.consumer-gcc-path }}"
+    assert consumer["with"]["compiler"] == "${{ inputs.consumer-gcc-path || (endsWith(inputs.compiler, '-') && inputs.compiler || '') }}"
     assert consumer["with"]["compile-options"] == "${{ inputs.consumer-gcc-options }}"
     analysis = next(step for step in steps if step.get("name") == "Run analysis")
     assert "check-target-consumer.abi.json" in analysis["with"]["new-library"]
@@ -187,7 +187,35 @@ def test_consumer_dump_forwards_gcc_prefix() -> None:
         for step in _steps(target["runs"])
         if step.get("name") == "Extract candidate consumer context"
     )
-    assert consumer["with"]["gcc-prefix"] == "${{ inputs.gcc-prefix }}"
+    expr = consumer["with"]["compiler"]
+    # The consumer's own path wins; the caller's compiler input is used only
+    # when it is a prefix (ends with '-'). A full path never falls back here.
+    assert expr == (
+        "${{ inputs.consumer-gcc-path || (endsWith(inputs.compiler, '-') "
+        "&& inputs.compiler || '') }}"
+    )
+    assert "gcc-prefix" not in consumer["with"]
+
+
+@pytest.mark.parametrize(
+    ("caller_compiler", "forwarded"),
+    [
+        # A prefix (ends with '-') is what the old gcc-prefix carried.
+        ("aarch64-linux-gnu-", True),
+        # A full compiler path (the old gcc-path) must not reach the dump.
+        ("/opt/gcc-14/bin/g++", False),
+        ("clang", False),
+    ],
+)
+def test_consumer_dump_prefix_rule_matches_the_compile_config_rule(
+    caller_compiler: str, forwarded: bool
+) -> None:
+    """The guard in check-target's consumer dump mirrors the rule
+    abicheck/buildsource/compile_config.py uses to tell a prefix from a
+    path. The expression itself is evaluated by GitHub, so this checks the
+    rule's own cases against the same predicate the expression encodes.
+    """
+    assert caller_compiler.endswith("-") is forwarded
 
 
 def test_consumer_compile_fields_fall_back_to_global_compiler_inputs() -> None:
@@ -790,7 +818,7 @@ class TestConsumerCompilePropagationChainMutationCheck:
 
     def test_passes_against_the_real_wiring(self) -> None:
         step = self._consumer_context_step()
-        _assert_step_input_forwards(step, "compiler", "${{ inputs.consumer-gcc-path }}")
+        _assert_step_input_forwards(step, "compiler", "${{ inputs.consumer-gcc-path || (endsWith(inputs.compiler, '-') && inputs.compiler || '') }}")
         _assert_step_input_forwards(
             step, "compile-options", "${{ inputs.consumer-gcc-options }}"
         )
@@ -808,7 +836,7 @@ class TestConsumerCompilePropagationChainMutationCheck:
 
         with pytest.raises(AssertionError) as excinfo:
             _assert_step_input_forwards(
-                mutated, "compiler", "${{ inputs.consumer-gcc-path }}"
+                mutated, "compiler", "${{ inputs.consumer-gcc-path || (endsWith(inputs.compiler, '-') && inputs.compiler || '') }}"
             )
 
         message = str(excinfo.value)

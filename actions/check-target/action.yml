@@ -684,7 +684,11 @@ runs:
         include: ${{ inputs.new-include != '' && inputs.new-include || inputs.include }}
         lang: ${{ inputs.lang }}
         frontend: ${{ inputs.consumer-ast-frontend }}
-        compiler: ${{ inputs.consumer-gcc-path }}
+        # The caller's gcc-prefix reached this dump before ADR-091 R5 folded it
+        # into `compiler`. Only a prefix (ends with '-', the same rule
+        # abicheck/buildsource/compile_config.py uses) falls back here, so a
+        # full compiler path never reaches the consumer context dump.
+        compiler: ${{ inputs.consumer-gcc-path || (endsWith(inputs.compiler, '-') && inputs.compiler || '') }}
         compile-options: ${{ inputs.consumer-gcc-options }}
         sysroot: ${{ inputs.sysroot }}
         sources: ${{ inputs.sources != '' && inputs.sources || (inputs.evidence-producer == 'replay' && '.' || '') }}
