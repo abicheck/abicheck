@@ -405,8 +405,7 @@ def dump_cmd(
     # config-resolved frontend too: it drives the L4 source-ABI extractor (the
     # same --ast-frontend knob as the L2 header AST, ADR-037 D8), so a
     # .abicheck.yml `compile.frontend` must reach the source-only path too.
-    # Phase 7: every argument below is now a fixed "nothing explicit" input
-    # (compile: config only, no escape hatch, ADR-068 D5 guard #2).
+    # Phase 7: only .abicheck.yml compile: and --set compile.* reach here (ADR-068 D5 #2).
     _cc, includes = resolve_dump_compile_context(
         gcc_options=gcc_options,
         sysroot=None,
@@ -421,6 +420,7 @@ def dump_cmd(
         compiler_prefix=None,
         compiler_option_tokens=(),
         defines=defines,
+        config_overrides=config_overrides,
     )
     gcc_path, gcc_prefix, gcc_options = _cc.gcc_path, _cc.gcc_prefix, _cc.gcc_options
     _gcc_option_tokens = _cc.gcc_option_tokens  # sysroot/nostdinc read off `_cc` itself

@@ -127,7 +127,6 @@ def test_a_malformed_file_is_lenient_without_set_and_fatal_with_set(
 @pytest.mark.parametrize(
     "item",
     [
-        "compile.std=c++17",  # a compile.* key dump's header path does not read yet
         "build.query=make",  # executable: never reached by dump's resolver
         "severity.addition=error",  # a gate key dump does not evaluate
         "source.method=auto",  # compare-only CLI key
@@ -205,7 +204,8 @@ def test_dump_set_is_the_applied_set_the_cli_validates() -> None:
         "debug.format",
         "build.compile_db_filter",
     } <= DUMP_APPLIED_PATHS
-    assert "compile.std" not in DUMP_APPLIED_PATHS
+    assert "compile.std" in DUMP_APPLIED_PATHS
+    assert "compile.include_dirs" not in DUMP_APPLIED_PATHS  # core: --include
     assert "scope.exclude_headers" not in DUMP_APPLIED_PATHS  # core: refused first
 
 

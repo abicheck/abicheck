@@ -1,6 +1,6 @@
 # Option vocabulary unification: implementation plan
 
-**Status:** Phases 0 and 1 done (Phase 0 2026-10-30; Phase 1 is #1850). Phase 2 is partly done: the CLI and typed-API half for `compare` (#1851), for `dump` and `project capture-variants` (#1857), and the Action `set:` input (#1854). The compile-path keys on `dump`, the `compile:` overlay replacement, and the rest of Phase 2 are open. Phase 4 CLI part done (#1852), its Action and Python parts not started. Phases 3, 5–7 not started. Implements
+**Status:** Phases 0 and 1 done (Phase 0 2026-10-30; Phase 1 is #1850). Phase 2 done: the CLI `--set` half for `compare`, `dump` and `project capture-variants` (#1851, #1857), the Action `set:` input (#1854), and the compile-context keys with the Action's `compile:` overlay replacement (this change). The typed API still refuses `compile.*` (see the Result below). Phase 4 CLI part done (#1852), its Action and Python parts not started. Phases 3, 5–7 not started. Implements
 [ADR-091](../adr/091-one-option-vocabulary.md). Each phase is one PR, ordered
 so that the parity gate lands before any rename. Every rename lands with its
 migration row and no alias: the 2026-10-30 policy (ADR-091 D7 amendment)
@@ -130,7 +130,7 @@ rides the existing `repo-scan-tests` step (`-m repo_scan`, `pr` profile and the
 CI `ai-readiness` job); the unit lanes exclude that marker, so Phase 0's tests
 move with it. No `verify.py` change was needed.
 
-## Phase 2 — `--set` and the Action `set:` input (D4)
+## Phase 2 — `--set` and the Action `set:` input (D4) — done (typed-API compile keys excepted, see Result)
 
 - `compare`, `dump`, `deps *`, `project *`: add repeatable
   `--set PATH=VALUE`, parsed through the same config loader and schema as
@@ -228,6 +228,35 @@ step. The `set:` input is applied after those overlays, so an explicit `set:`
 line wins over the overlay's keys once the CLI accepts them.
 
 Update (#1857): `dump` and `project capture-variants` now take `--set` (see the result above). The Action still refuses an effective `set:` outside `mode: compare`; that refusal is unchanged here.
+
+**Result (2026-10-30, compile keys and the Action overlay: Phase 2 done).** The
+CLI applies the compile-context keys: `compile.frontend`, `compile.frontend_context`,
+`compile.compiler`, `compile.options`, `compile.sysroot`, `compile.nostdinc`,
+`compile.std` and `compile.lang`, through `COMPILE_CONTEXT_OVERRIDE_PATHS`
+(`workflows/compile_config.py`). `compare --set` (single pair, `--dry-run`, and the
+directory/package fan-out), `dump --set` and `merge_compile_config` /
+`resolve_compile_context` take `config_overrides` and load the file with the
+overrides laid over it (`load_build_config(cfg, config_overrides=...)`), so a key
+set by `--set` and the same key in `compile:` resolve to the same
+`CompileContext` (`tests/test_compile_context_set_equivalence.py`, per key and
+for a user file block). Precedence is unchanged: flag > `--set` > file > default.
+A `compile.compiler` set by `--set` is trusted even when the file was
+auto-discovered; a discovered file's own `compile.compiler` is still ignored.
+`compile.include_dirs` and `compile.defines` stay on their core flags.
+The composite Action's `add_compile_context_flags` (`action/run.sh`) forwards
+`ast-frontend`, `gcc-path`/`gcc-prefix`, `gcc-options`, `sysroot`, `nostdinc` and
+`lang` as `--set compile.*`, after which an explicit `set:` line is appended so it
+still wins. The synthesized `compile:` config, its Python helper, the temp-file
+merge into `--config`, and the compile-only sources-root helpers are deleted;
+`set:` is accepted on `mode: dump`
+(`tests/test_action_compile_set_forwarding.py`, argv per input; the retired
+overlay-internal test modules are removed). **Still open:** the typed API
+(`CompareRequest.config_overrides`, `DumpRequest.config_overrides`) refuses
+`compile.*`, because a typed request does not fold `.abicheck.yml`'s `compile:`
+block today, so there is no compile resolver for the override to reach. Phase 2's
+remaining gap is that typed-API cut, not the Action. One behavior to verify: a
+`--sources` tree's own `compile:` block used to be excluded by the Action on a
+pairwise compare with an old side; the CLI's own discovery now decides that case.
 
 ## Phase 3 — Behavior unifications (D2)
 

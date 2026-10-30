@@ -26,17 +26,11 @@ its checkout (ADR-067 G5).
 
 from __future__ import annotations
 
-import os
-import subprocess
 import sys
 from pathlib import Path
 
-import pytest
-import yaml
 from _action_run_sh_harness import (
     REQUIRES_POSIX_SHELL,
-    _compare_env,
-    _run_action,
     _stub_abicheck,
 )
 
@@ -125,54 +119,3 @@ def _capture_stub(tmp_path: Path, capture: Path) -> Path:
     )
     stub.chmod(0o755)
     return bindir
-
-
-@pytest.mark.skipif(
-    os.name == "nt", reason="the overlay synthesis path is POSIX shell only"
-)
-def test_action_discovered_config_cannot_load_records_into_overlay(
-    tmp_path: Path,
-) -> None:
-    """A PR-planted ``acknowledgment.file`` in the checkout's own
-    ``.abicheck.yml`` must not reach the overlay the CLI reads as explicit.
-
-    ``ast-frontend: castxml`` makes the Action synthesize a compile-context
-    overlay from the discovered config, the path G5 names. The
-    ``unacknowledged_additions`` setting alongside it must survive so the
-    merge is shown to have actually run (a positive control: an empty overlay
-    would also lack the records and prove nothing).
-    """
-    records = tmp_path / "accept-everything.yml"
-    records.write_text(
-        "version: 1\nacknowledgments:\n"
-        "  - finding_id: 'deadbeefdeadbeef'\n    reason: 'planted by PR'\n",
-        encoding="utf-8",
-    )
-    (tmp_path / ".abicheck.yml").write_text(
-        f"acknowledgment:\n  file: {records}\n  unacknowledged_additions: block\n",
-        encoding="utf-8",
-    )
-    capture = tmp_path / "captured-overlay.yml"
-    bindir = _capture_stub(tmp_path, capture)
-    env = {**_compare_env(tmp_path), "INPUT_AST_FRONTEND": "castxml"}
-
-    _run_action(tmp_path, env, bindir)
-
-    assert capture.is_file(), "the Action never handed the CLI a --config overlay"
-    # The overlay merge must have run against this checkout's code, or the
-    # assertions below would be checking the installed package instead.
-    probe = subprocess.run(
-        [sys.executable, "-c", "import abicheck; print(abicheck.__file__)"],
-        cwd=tmp_path,
-        env={**os.environ, "PYTHONPATH": str(_REPO_ROOT)},
-        capture_output=True,
-        text=True,
-        check=True,
-    )
-    assert Path(probe.stdout.strip()).is_relative_to(_REPO_ROOT)
-    overlay = yaml.safe_load(capture.read_text(encoding="utf-8"))
-    assert overlay["acknowledgment"]["unacknowledged_additions"] == "block"
-    assert "file" not in overlay["acknowledgment"], (
-        "a discovered .abicheck.yml's acknowledgment.file reached the explicit "
-        "--config overlay, so the CLI would load PR-planted records"
-    )

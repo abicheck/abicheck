@@ -30,43 +30,13 @@ scripted intent looks right on paper.
 
 from __future__ import annotations
 
-import json
 import os
 import subprocess
 from pathlib import Path
-from typing import Any
 
 from _workflow_exec import bash_executable, require_bash
 
 RUN_SH = Path(__file__).resolve().parents[1] / "action" / "run.sh"
-
-
-def _compile_overlay_from_cmd(cmd: str, tmp_path: Path) -> dict[str, Any]:
-    """Read back the synthesized ``compile:`` block a ``--config <path>``
-    token in *cmd* points at (Phase 7: dump/single-pair compare forward the
-    cross-compiler inputs via a synthesized config overlay now, not
-    individually-forwarded ``--compiler``/``--sysroot``/... flags -- see
-    ``add_compile_context_flags`` in ``action/run.sh``).
-
-    Reads the fake ``abicheck`` stub's own COPY of that file
-    (``captured_config.json``, made by ``_run_compare_raw`` while the real
-    ``run.sh`` process was still running), not the original path itself:
-    the overlay is created under ``$RUNNER_TEMP`` and cleaned up by
-    ``run.sh``'s own main ``EXIT`` trap once the script finishes, so by the
-    time this test process inspects the *original* path (well after
-    ``subprocess.run`` returns) it has already been removed -- the same
-    "the leak this session fixed is now correctly closed, so a post-exit
-    read of the original file no longer works" class this session's other
-    harness-based tests hit."""
-    tokens = cmd.split()
-    assert "--config" in tokens, cmd
-    captured_config = tmp_path / "captured_config.json"
-    assert captured_config.is_file(), (
-        "the fake abicheck stub never captured a --config file's content"
-    )
-    with open(captured_config, encoding="utf-8") as f:
-        doc = json.load(f)
-    return doc.get("compile", {})
 
 
 def _run_compare_raw(
@@ -205,129 +175,6 @@ class TestCompareModeForwardsChangeFocusInputs:
         cmd = _run_compare({}, tmp_path)
         assert "--since" not in cmd
         assert "--changed-path" not in cmd
-
-
-class TestAuditOnlyCompareForwardsCrossCompilerFlags:
-    """Same gap as compare mode above, in the audit-only (old-library and
-    abi-baseline both omitted) shape.
-
-    `compare`/`compare --no-baseline` has no raw `--compiler`/
-    `--compiler-prefix`/`--compiler-option`/`--sysroot` flags at all --
-    they are merged into a synthesized `compile:` overlay and forwarded as
-    one `--config` (`add_compile_context_flags`), same as the two-sided
-    and native-compare shapes below. Uses `_run_baseline_compare_raw`
-    (defined below) with old-library cleared, since it already captures
-    that overlay file's content while `run.sh` is still running.
-    """
-
-    def test_all_four_reach_the_cli(self, tmp_path: Path) -> None:
-        result, captured, captured_config = _run_baseline_compare_raw(
-            {
-                "INPUT_OLD_LIBRARY": "",
-                "INPUT_GCC_PATH": "/opt/cross/bin/aarch64-linux-gnu-g++",
-                "INPUT_GCC_PREFIX": "aarch64-linux-gnu-",
-                "INPUT_GCC_OPTIONS": "-D__ARM_NEON",
-                "INPUT_SYSROOT": "/opt/sysroots/aarch64",
-            },
-            tmp_path,
-        )
-        assert result.returncode == 0, result.stdout + result.stderr
-        assert captured.is_file(), "abicheck stub was never invoked"
-        cmd = captured.read_text(encoding="utf-8").strip()
-        assert "compare" in cmd.split()
-        assert "--no-baseline" in cmd.split()
-        assert captured_config.is_file(), (
-            "the fake abicheck stub never captured a --config file's content"
-        )
-        with open(captured_config, encoding="utf-8") as f:
-            overlay = json.load(f)
-        # gcc_path wins over gcc_prefix when both are given (the merged
-        # compile.compiler field can only hold one) -- same rule
-        # TestCompareModeForwardsCrossCompilerFlags asserts below.
-        assert overlay["compile"]["compiler"] == "/opt/cross/bin/aarch64-linux-gnu-g++"
-        assert overlay["compile"]["options"] == ["-D__ARM_NEON"]
-        assert overlay["compile"]["sysroot"] == "/opt/sysroots/aarch64"
-
-    def test_quoted_whitespace_atom_matches_compare_mode_synthesis(
-        self, tmp_path: Path
-    ) -> None:
-        """Codex review, PR #1210: legacy `scan`'s own removed
-        `--compiler-option` CLI flag forwarded a whitespace-containing atom
-        (e.g. `-DMSG="hello world"`) verbatim as one real CLI arg, never
-        subject to `compile.options`' own one-atom-per-entry, whitespace-
-        free contract (that check only ever applied to a config *file*
-        value). Since `scan` has no CLI of its own left to take advantage
-        of that any more (ADR-068), it now synthesizes the identical
-        single-item, whitespace-containing `compile.options` entry
-        `TestCompareModeForwardsCrossCompilerFlags.
-        test_quoted_whitespace_atom_stays_one_atom` below proves compare
-        mode already produces -- same synthesis helper, same accepted
-        outcome (`BuildConfig._safe_compile_atom` rejects it at parse time
-        with a clear error; this test only proves what reaches that
-        parser, not the parser's own behavior, which is exercised
-        elsewhere against `abicheck/buildsource/build_config.py` directly).
-        """
-        result, _captured, captured_config = _run_baseline_compare_raw(
-            {
-                "INPUT_OLD_LIBRARY": "",
-                "INPUT_GCC_OPTIONS": '-DMSG="hello world"',
-            },
-            tmp_path,
-        )
-        assert result.returncode == 0, result.stdout + result.stderr
-        with open(captured_config, encoding="utf-8") as f:
-            overlay = json.load(f)
-        assert overlay["compile"]["options"] == ["-DMSG=hello world"]
-
-
-class TestCompareModeForwardsCrossCompilerFlags:
-    """The gcc-path/gcc-prefix/gcc-options/sysroot inputs are documented root-
-    Action inputs and both dump AND compare/scan support them at the CLI
-    level, but were previously only wired into dump mode's branch --
-    a cross-target compare/scan silently fell back to the host toolchain
-    for header parsing and could produce false ABI results (Codex review,
-    PR #625)."""
-
-    def test_all_four_reach_the_cli(self, tmp_path: Path) -> None:
-        cmd = _run_compare(
-            {
-                "INPUT_GCC_PATH": "/opt/cross/bin/aarch64-linux-gnu-g++",
-                "INPUT_GCC_PREFIX": "aarch64-linux-gnu-",
-                "INPUT_GCC_OPTIONS": "-D__ARM_NEON",
-                "INPUT_SYSROOT": "/opt/sysroots/aarch64",
-            },
-            tmp_path,
-        )
-        compile_blk = _compile_overlay_from_cmd(cmd, tmp_path)
-        # gcc_path wins over gcc_prefix when both are given (the merged
-        # compile.compiler field can only hold one).
-        assert compile_blk["compiler"] == "/opt/cross/bin/aarch64-linux-gnu-g++"
-        assert compile_blk["options"] == ["-D__ARM_NEON"]
-        assert compile_blk["sysroot"] == "/opt/sysroots/aarch64"
-
-    def test_none_set_adds_no_flags(self, tmp_path: Path) -> None:
-        cmd = _run_compare({}, tmp_path)
-        assert "--config" not in cmd
-        assert "--compiler" not in cmd
-        assert "--compiler-prefix" not in cmd
-        assert "--compiler-option" not in cmd
-        assert "--sysroot" not in cmd
-
-    def test_quoted_whitespace_atom_stays_one_atom(self, tmp_path: Path) -> None:
-        """A single-line `gcc-options` value is shell-quoting-aware split
-        (`shlex.split`), so a quoted segment stays one flag -- but that one
-        flag can still contain an embedded space once its quotes are
-        stripped (`-DMSG="hello world"` -> one atom, `-DMSG=hello world`,
-        with a literal space inside it). `add_compile_context_flags` never
-        re-splits on that internal space -- it is `BuildConfig.
-        _safe_compile_atom` (a separate module, exercised directly
-        elsewhere) that then rejects a `compile.options` entry containing
-        one at parse time. `TestScanModeForwardsCrossCompilerFlags.
-        test_quoted_whitespace_atom_matches_compare_mode_synthesis` above
-        proves `scan` now produces the identical overlay."""
-        cmd = _run_compare({"INPUT_GCC_OPTIONS": '-DMSG="hello world"'}, tmp_path)
-        compile_blk = _compile_overlay_from_cmd(cmd, tmp_path)
-        assert compile_blk["options"] == ["-DMSG=hello world"]
 
 
 class TestCompareModeSkipsEvidenceFlagsForDirectoryOperands:
@@ -627,60 +474,6 @@ class TestBaselineCompareTranslationPreservesMergedConfig:
     unmerged file. Same guard (``_cmd_has_config_flag``) the native
     ``dump``/``compare`` branches already carry around their own identical
     ``add_single_flag "--config"`` call."""
-
-    def test_compile_context_overlay_survives_the_translated_command_line(
-        self, tmp_path: Path
-    ) -> None:
-        build_config = tmp_path / "cfg.yml"
-        build_config.write_text("release:\n  dso_only: true\n", encoding="utf-8")
-        result, captured, captured_config = _run_baseline_compare_raw(
-            {
-                "INPUT_BUILD_CONFIG": str(build_config),
-                "INPUT_GCC_PATH": "/opt/cross/bin/aarch64-linux-gnu-g++",
-            },
-            tmp_path,
-        )
-        assert result.returncode == 0, result.stdout + result.stderr
-        assert captured.is_file(), "abicheck stub was never invoked"
-        cmd = captured.read_text(encoding="utf-8").strip()
-        assert "compare" in cmd.split()
-        # Exactly one --config token reaches the translated command line --
-        # a second, conflicting one is exactly the bug this test guards.
-        assert cmd.count("--config") == 1, cmd
-        assert str(build_config) not in cmd, (
-            "the raw, unmerged build-config path must not reach the CLI "
-            "directly once a compile-context input also applies -- only "
-            f"the synthesized overlay that already merged it should: {cmd}"
-        )
-        assert captured_config.is_file(), (
-            "the fake abicheck stub never captured a --config file's content"
-        )
-        with open(captured_config, encoding="utf-8") as f:
-            overlay = json.load(f)
-        # The synthesized compile: block reached the CLI (proves
-        # add_compile_context_flags's own --config, not a second one that
-        # clobbered it, is what survived)...
-        assert overlay["compile"]["compiler"] == "/opt/cross/bin/aarch64-linux-gnu-g++"
-        # ...merged with (not replacing) the operator's own build-config
-        # content, per add_compile_context_flags's explicit-build-config
-        # merge branch.
-        assert overlay.get("release", {}).get("dso_only") is True
-
-    def test_compile_context_alone_still_forwards_config(self, tmp_path: Path) -> None:
-        """Negative control: no build-config given, only a compile-context
-        input -- still exactly one --config (the synthesized overlay),
-        confirming the guard doesn't newly suppress the no-collision case.
-        """
-        result, captured, captured_config = _run_baseline_compare_raw(
-            {"INPUT_GCC_PATH": "/opt/cross/bin/aarch64-linux-gnu-g++"}, tmp_path
-        )
-        assert result.returncode == 0, result.stdout + result.stderr
-        cmd = captured.read_text(encoding="utf-8").strip()
-        assert cmd.count("--config") == 1, cmd
-        assert captured_config.is_file()
-        with open(captured_config, encoding="utf-8") as f:
-            overlay = json.load(f)
-        assert overlay["compile"]["compiler"] == "/opt/cross/bin/aarch64-linux-gnu-g++"
 
     def test_build_config_alone_still_forwards_it_unmerged(
         self, tmp_path: Path

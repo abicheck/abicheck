@@ -3,7 +3,10 @@
 **Date:** 2026-09-12
 **Status:** Accepted — D3 implemented for both `extra-args` tokenizers
 (`action/run.sh`, `actions/check-target/action.yml`, which no longer carry a
-hand-maintained option list); D1, D2 and D4 not yet implemented. Records the
+hand-maintained option list); D1, D2 and D4 not yet implemented. D2 progress
+(ADR-091 Phase 2d): the compile-overlay restriction mirror is gone. The
+Action forwards the compile-context inputs as `--set compile.*` and no longer
+synthesizes a `compile:` config, so the CLI answers for those keys. Records the
 boundary rule and the migration it forces. Extends
 [037](037-cli-interface-contract.md)'s D10.1 front-end/engine boundary one
 layer outward (from `cli*.py`-vs-Tier-1 to the composite Action-vs-CLI) and

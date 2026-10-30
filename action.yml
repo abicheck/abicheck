@@ -881,7 +881,7 @@ inputs:
       a `#` comment is forwarded verbatim as its own `--set PATH=VALUE` to the
       abicheck command, so the CLI validates the keys and values: an unknown
       key or a core option is a usage error (exit 64). Applies to mode:
-      compare only; set on any other mode fails the step.
+      compare and dump; set on any other mode fails the step.
     required: false
   require-complete-analysis:
     description: >
