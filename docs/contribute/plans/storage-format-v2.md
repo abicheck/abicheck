@@ -186,8 +186,10 @@ See "Landed in Phase 1" below.
 
 ### Phase 2 — scale and performance
 
-- **A2.1** Section/chunk lazy loading; a comparison loads two manifests, all
-  L0 binary sections, then one library pair at a time.
+- **A2.1** Section lazy loading (size-bounded chunking withdrawn by ADR-062's 2026-10-30 amendment, D18); a comparison loads two manifests and
+  all L0 binary sections. It then opens only the sections the requested
+  analyses read, one matched library pair at a time, through a digest-keyed
+  (`evidence`) decoded-section cache.
 - **A2.2** Streaming object encoding replaces whole-document `asdict()` +
   one JSON string.
 - **A2.3** The snapshot cache moves onto the content-addressed store, keyed
@@ -793,10 +795,21 @@ excluded" half specifically — a PE/Mach-O/Python/header-only library
 survives a round trip through the package format and appears in a package
 listing/report, even where no resolution graph can place it.
 
+- **A1.9** ADR-062 2026-10-30 amendment (D14-D18). Not implemented.
+  - Versioned immutable refs and an atomic manifest publish, with a
+    `package_format_version` bump and a D13 adapter (D17). This closes the
+    "third, deliberately deferred gap" below and its failed-check variant.
+  - `must_understand` and `extensions` carriers (D14).
+  - A field inventory and a byte-identity test (D15).
+  - Persisted `evidence` and `comparison_input` digests (D16).
+  - Exit: one regression test per amendment probe, the oneDAL/MKL corpus,
+    Windows and macOS, and concurrent-publisher serialization.
+
 ### Phase 2
 
 Lazy loading, streaming encode, cache migration, indexes, transport, and
-the measurement work that sets D8's chunk size and D12's level table.
+the measurement work that sets D12's level table (D8's chunk size was
+withdrawn by ADR-062 D18).
 
 **Status: A2.1 partially implemented — the `graph` section only**
 (evidence-entity-model Phase 5a, with 5b/5c's compact encoding of the same
@@ -819,8 +832,7 @@ mechanism:
   (`storage/graph_table_codec.py`, schema v49), holding observed evidence
   only: on real oneDAL `libonedal_core` it is ~10 MB instead of 79 MB.
 
-**Not implemented:** lazy loading of any other section, chunking (D8's
-bounded section size), per-library-pair release of sections in a project
+**Not implemented:** lazy loading of any other section, per-library-pair release of sections in a project
 comparison, A2.2 streaming object encoding, A2.3/A2.4, and the A2.5
 measurement for a *project* comparison. A default stored-vs-stored
 `compare` still reads both graphs (the L5 source-graph diff, cross-source
