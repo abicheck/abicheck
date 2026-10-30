@@ -23,6 +23,7 @@ from abicheck.cli_options import _resolve_policy_operand
 from abicheck.errors import ValidationError
 from abicheck.frontends.cli.options.contract import resolve_contract_domain
 from abicheck.frontends.cli.options.params import BUILTIN_POLICY_PROFILES
+from abicheck.workflows.policy_operand import resolve_policy_operand
 from abicheck.workflows.request_inputs import InputSpec
 from abicheck.workflows.service_requests import (
     CompareRequest,
@@ -197,3 +198,33 @@ def test_a_contract_outside_the_value_set_is_refused() -> None:
         contract="bogus",  # type: ignore[arg-type]
     )
     assert any("unsupported contract 'bogus'" in e for e in request.validation_errors())
+
+
+def test_an_empty_policy_is_refused() -> None:
+    # ADR-091 R2: an empty value is not a profile and not a document.
+    with pytest.raises(ValidationError, match="must not be empty"):
+        resolve_policy_operand("")
+    request = CompareRequest(
+        old=InputSpec(path=Path("a.so")),
+        new=InputSpec(path=Path("b.so")),
+        policy="",
+    )
+    assert any("must not be empty" in e for e in request.validation_errors())
+
+
+def test_a_policy_document_is_loaded_when_no_policy_file_is_given(
+    tmp_path: Path,
+) -> None:
+    # The adapter loads the request's document; a typed `policy=<path>` is that document.
+    from abicheck.workflows.compare_input_adapters import compare_request_inputs
+
+    document = tmp_path / "policy.yaml"
+    document.write_text("base_policy: sdk_vendor\n", encoding="utf-8")
+    request = CompareRequest(
+        old=InputSpec(path=Path("a.so")),
+        new=InputSpec(path=Path("b.so")),
+        policy=document,
+    )
+    inputs = compare_request_inputs(request)
+    assert inputs.policy_file is not None
+    assert inputs.policy_file.base_policy == "sdk_vendor"
