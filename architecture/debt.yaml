@@ -750,17 +750,6 @@
       "review_by": "2026-11-30"
     },
     {
-      "path": "abicheck/project_snapshot_store.py",
-      "baseline_lines": 812,
-      "target": "storage (already home; ADR-061 D1 layering keeps this filesystem-facing writer outside storage/ itself)",
-      "rule": "no_growth",
-      "disposition": "migrate",
-      "category": "adr062_new_capability_growth",
-      "owner": "storage",
-      "rationale": "Not legacy debt: two independent ADR-063 8B tracks each needed write_project_manifest/read_project_manifest to validate one more cross-artifact evidence slot before publishing a manifest -- Track B's PackageManifest.project_sections (abicheck/bundle_facts_store.py's first real multi-artifact PackageManifest writer) and Track C's VariantRef.sections (abicheck/storage/import_bundle_facts.py/import_baseline_set.py) -- and landed in parallel, so this baseline now covers both additions' combined growth past the 800-line adoption baseline rather than being split across a second module for a cohesive, single-document read/write contract.",
-      "review_by": "2026-11-30"
-    },
-    {
       "path": "abicheck/sarif.py",
       "baseline_lines": 1249,
       "target": "report",

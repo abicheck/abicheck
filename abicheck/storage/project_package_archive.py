@@ -53,6 +53,7 @@ from .package import (
     object_relpath,
     variant_ref_relpath,
 )
+from .package_publish import REF_DIRS, versioned_ref_relpath
 from .zip_member import deterministic_zipinfo
 
 __all__ = [
@@ -79,9 +80,24 @@ _OBJECT_SUFFIXES = (".json", ".json.zst", ".bin.zst")
 
 
 def _is_package_member(name: str) -> bool:
-    """Whether *name* is exactly a path the D6 layout can contain."""
+    """Whether *name* is exactly a path the D6 layout (as amended by D17)
+    can contain."""
     if name == MANIFEST_RELPATH:
         return True
+    parts = name.split("/")
+    # D17's immutable ref documents: refs/<kind>/<id>/<hex>.json.
+    for kind, ref_dir in REF_DIRS.items():
+        if (
+            len(parts) == 4
+            and "/".join(parts[:2]) == ref_dir
+            and parts[3].endswith(".json")
+        ):
+            try:
+                digest = f"sha256:{parts[3][: -len('.json')]}"
+                return versioned_ref_relpath(kind, parts[2], digest) == name
+            except (TypeError, ValueError):
+                return False
+    # Package format v1's id-path refs: refs/<kind>/<id>.json.
     for prefix, relpath in (
         ("refs/variants/", variant_ref_relpath),
         ("refs/artifacts/", artifact_ref_relpath),
@@ -92,7 +108,6 @@ def _is_package_member(name: str) -> bool:
                 return relpath(ref_id) == name
             except (TypeError, ValueError):
                 return False
-    parts = name.split("/")
     if len(parts) == 4 and parts[0] == "objects":
         algorithm, _fanout, filename = parts[1], parts[2], parts[3]
         for suffix in _OBJECT_SUFFIXES:
