@@ -55,6 +55,29 @@ Next, unranked (the `--no-baseline` one-sided-detector gap, the target-platform 
 
 ## Open and partially open gaps
 
+### Option vocabulary (ADR-091 follow-ups, closed 2026-10-31)
+
+The option-vocabulary migration is complete (ADR-091, Accepted and
+implemented). These three candidates were deliberately left out of the
+surface budget and are not ADR-091 rules; each needs its own decision.
+
+#### Per-side `--debug-info` transports are not in the config tier (2026-10-31)
+
+`--debug-info` is still a per-side CLI transport. ADR-091 D4's soft budget
+kept it as a flag, so it is not a config key today. Moving it needs a
+per-side config home first.
+
+#### Some `deps.*` keys have no config home yet (2026-10-31)
+
+Dependency settings reachable only from the CLI have no `.abicheck.yml`
+spelling. Each needs a config key before it can join the option registry as
+a config row.
+
+#### `--sources` needs a config discovery rule before it can move (2026-10-31)
+
+`--sources` cannot move to `.abicheck.yml` until the config discovery rule
+for the sources tree is defined. Until then it stays a CLI option.
+
 Each entry's status line says what is still open. A PARTIAL entry's write-up also describes the half that is already fixed; the status line is authoritative where they disagree.
 
 ### Report and detector coverage

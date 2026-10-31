@@ -658,7 +658,7 @@ def test_additions_review_exit_contribution_reads_the_persisted_review() -> None
 def test_policy_file_parses_acknowledgment_block(tmp_path: Path) -> None:
     p = tmp_path / "policy.yml"
     p.write_text(
-        "base_policy: strict_abi\nacknowledgment:\n  unacknowledged_additions: warn\n"
+        "base_policy: strict_abi\nacknowledgments:\n  unacknowledged_additions: warn\n"
     )
     pf = PolicyFile.load(p)
     assert pf.acknowledgment_policy_stated is True
@@ -676,7 +676,7 @@ def test_policy_file_default_acknowledgment_policy_is_allow(tmp_path: Path) -> N
 def test_policy_file_rejects_invalid_acknowledgment_action(tmp_path: Path) -> None:
     p = tmp_path / "policy.yml"
     p.write_text(
-        "base_policy: strict_abi\nacknowledgment:\n  unacknowledged_additions: nope\n"
+        "base_policy: strict_abi\nacknowledgments:\n  unacknowledged_additions: nope\n"
     )
     with pytest.raises(PolicyError, match="invalid value"):
         PolicyFile.load(p)
@@ -692,7 +692,7 @@ def test_policy_file_rejects_non_string_acknowledgment_action(
     PR #1137)."""
     p = tmp_path / "policy.yml"
     p.write_text(
-        f"base_policy: strict_abi\nacknowledgment:\n  unacknowledged_additions: {bad_yaml}\n"
+        f"base_policy: strict_abi\nacknowledgments:\n  unacknowledged_additions: {bad_yaml}\n"
     )
     with pytest.raises(PolicyError, match="invalid value"):
         PolicyFile.load(p)
@@ -700,14 +700,14 @@ def test_policy_file_rejects_non_string_acknowledgment_action(
 
 def test_policy_file_rejects_non_mapping_acknowledgment_block(tmp_path: Path) -> None:
     p = tmp_path / "policy.yml"
-    p.write_text("base_policy: strict_abi\nacknowledgment: 'not a mapping'\n")
+    p.write_text("base_policy: strict_abi\nacknowledgments: 'not a mapping'\n")
     with pytest.raises(PolicyError, match="must be a YAML mapping"):
         PolicyFile.load(p)
 
 
 def test_policy_file_rejects_unknown_acknowledgment_key(tmp_path: Path) -> None:
     p = tmp_path / "policy.yml"
-    p.write_text("base_policy: strict_abi\nacknowledgment:\n  bogus: 1\n")
+    p.write_text("base_policy: strict_abi\nacknowledgments:\n  bogus: 1\n")
     with pytest.raises(PolicyError, match="unknown key"):
         PolicyFile.load(p)
 
@@ -739,7 +739,7 @@ def test_compare_wires_acknowledgment_overlay_and_additions_gate(
 
     policy_path = tmp_path / "policy.yml"
     policy_path.write_text(
-        "base_policy: strict_abi\nacknowledgment:\n  unacknowledged_additions: block\n"
+        "base_policy: strict_abi\nacknowledgments:\n  unacknowledged_additions: block\n"
     )
     pf = PolicyFile.load(policy_path)
 
@@ -763,7 +763,7 @@ def test_compare_blocks_on_a_real_unacknowledged_addition(tmp_path: Path) -> Non
 
     policy_path = tmp_path / "policy.yml"
     policy_path.write_text(
-        "base_policy: strict_abi\nacknowledgment:\n  unacknowledged_additions: block\n"
+        "base_policy: strict_abi\nacknowledgments:\n  unacknowledged_additions: block\n"
     )
     pf = PolicyFile.load(policy_path)
 

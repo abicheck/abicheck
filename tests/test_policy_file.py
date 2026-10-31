@@ -57,6 +57,21 @@ overrides:
     )
 
 
+def test_policy_file_old_acknowledgment_key_is_rejected_naming_replacement(
+    tmp_path: Path,
+) -> None:
+    """ADR-091 R3: the singular ``acknowledgment:`` block is renamed outright
+    with no alias. The old key must fail loudly, naming ``acknowledgments:``,
+    and must not be silently ignored (which would drop the gate)."""
+    from abicheck.errors import PolicyError
+
+    p = tmp_path / "policy.yaml"
+    p.write_text("acknowledgment:\n  unacknowledged_additions: block\n", encoding="utf-8")
+
+    with pytest.raises(PolicyError, match="acknowledgments:"):
+        PolicyFile.load(p)
+
+
 def test_policy_file_unknown_base_policy_rejected(tmp_path: Path) -> None:
     p = tmp_path / "bad.yaml"
     p.write_text("base_policy: custom", encoding="utf-8")
@@ -338,7 +353,7 @@ versioning:
             ),
         ),
         (
-            "acknowledgment",
+            "acknowledgments",
             {},
             lambda pf: pf.acknowledgment_policy_stated is True,
         ),

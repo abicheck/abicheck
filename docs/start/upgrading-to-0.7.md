@@ -53,7 +53,7 @@ unknown-key error, and the run stops instead of changing meaning.
 
 | 0.6 key | 0.7 key | Notes |
 |---|---|---|
-| `acknowledgment:` (the `.abicheck.yml` block) | `acknowledgments:` | Same keys inside (`file`, `unacknowledged_additions`, `breaks`). A `--policy` file's own `acknowledgment:` block is a different document and is unchanged. |
+| `acknowledgment:` (the `.abicheck.yml` block, and the top-level block of a `--policy` document) | `acknowledgments:` | Same keys inside (`file`, `unacknowledged_additions`, `breaks`). A `--policy` document still carrying `acknowledgment:` fails with an error naming `acknowledgments:`; the old key is not accepted. |
 | `source: {method: ...}` | `sources: {method: ...}` | Joins the existing `sources:` block (`public_headers`, `exclude`, `graph`). |
 
 ## Action and typed API

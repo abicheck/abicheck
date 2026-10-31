@@ -66,7 +66,7 @@ KNOWN_POLICY_FILE_KEYS = frozenset(
         "experimental_namespaces",
         "evidence_policy",
         "versioning",
-        "acknowledgment",
+        "acknowledgments",
         "unused_rules",
     }
 )

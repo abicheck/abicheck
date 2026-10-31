@@ -558,6 +558,14 @@ class PolicyFile:
             raise PolicyError(
                 f"Policy file must be a YAML mapping, got {type(raw).__name__}"
             )
+        if "acknowledgment" in raw:
+            # ADR-091 R3: renamed outright, no alias (D7). Name the replacement
+            # instead of the generic unknown-key error.
+            raise PolicyError(
+                f"policy file {path}: the top-level 'acknowledgment:' key was "
+                "renamed to 'acknowledgments:' (ADR-091 R3). Rename it in the "
+                "policy document; the old spelling is no longer accepted."
+            )
         reject_unknown_top_level_keys(raw)
 
         base_policy = _parse_base_policy(raw)
@@ -581,9 +589,9 @@ class PolicyFile:
             if versioning_stated
             else built_in_default_versioning_policy()
         )
-        acknowledgment_policy_stated = "acknowledgment" in raw
+        acknowledgment_policy_stated = "acknowledgments" in raw
         acknowledgment_policy = (
-            parse_acknowledgment_policy(raw["acknowledgment"], path)
+            parse_acknowledgment_policy(raw["acknowledgments"], path)
             if acknowledgment_policy_stated
             else built_in_default_acknowledgment_policy()
         )

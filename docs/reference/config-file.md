@@ -403,7 +403,7 @@ acknowledgments:
 
 `file` and `breaks` apply only from a config named with `--config`; a discovered
 value is noted and not applied. `unacknowledged_additions` applies from any
-config. A `--policy` document stating its own `acknowledgment:` block wins over
+config. A `--policy` document stating its own `acknowledgments:` block wins over
 this one, as one whole block. See [Change acknowledgment](../use/acknowledgments.md).
 
 ### `suppression:`

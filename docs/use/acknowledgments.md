@@ -53,7 +53,7 @@ where every library is reviewed against the same records and the release exits
 
 From the typed Python API, set `CompareRequest(acknowledgments=...,
 acknowledgment_unacknowledged_additions="block", acknowledgment_breaks="accept")`.
-A `policy` document's own `acknowledgment:` block outranks the
+A `policy` document's own `acknowledgments:` block outranks the
 configured settings as one whole block, on the CLI and in the API alike.
 
 > Acknowledgment is **not** suppression. A suppressed finding disappears
@@ -164,7 +164,7 @@ Accepting a break changes what gates the run, never what the comparison found.
 
 `breaks` is a gate setting, so it has the same trust boundary as the records:
 it applies from an explicit `--config`, from a `--policy` document's own
-`acknowledgment:` block, or from a typed `CompareRequest`. An auto-discovered
+`acknowledgments:` block, or from a typed `CompareRequest`. An auto-discovered
 `.abicheck.yml` cannot set `accept`.
 
 ## The additions review gate
@@ -172,7 +172,7 @@ it applies from an explicit `--config`, from a `--policy` document's own
 A project configures whether an **unacknowledged public addition** is
 flagged with `acknowledgments.unacknowledged_additions` in `.abicheck.yml`
 (above). A `--policy` document may state the same setting in its own
-`acknowledgment:` block; when it does, it wins over `.abicheck.yml`. With a
+`acknowledgments:` block; when it does, it wins over `.abicheck.yml`. With a
 gate set and no `file`, nothing is acknowledged, so every public addition
 counts.
 
