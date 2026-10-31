@@ -32,8 +32,10 @@ if TYPE_CHECKING:
 
 _logger = logging.getLogger("abicheck.cache")
 
-#: Maximum number of cached snapshots (LRU eviction by mtime).
-MAX_ENTRIES: int = 100
+#: Byte quota per cache tier (ADR-062 D11: byte-quota LRU, not an entry
+#: count). Recency is the entry's mtime, refreshed on every hit. Internal
+#: policy like D12's compression levels, not a user knob.
+MAX_BYTES: int = 4 * 1024**3
 
 
 def _get_cache_dir() -> Path:
@@ -176,7 +178,7 @@ def _write_entry(
             except OSError:
                 pass
         _logger.debug("Cache store: %s → %s", binary_path.name, key[:12])
-        _evict_if_needed(base)
+        _evict_if_needed(base, protect=cache_file.name)
     except Exception as exc:
         # Caching is a pure optimization layered on top of a real dump that
         # already succeeded — any failure here (disk full, an unserializable
@@ -187,34 +189,19 @@ def _write_entry(
         _logger.debug("Cache write failed: %s", exc, exc_info=True)
 
 
-def _safe_mtime(p: Path) -> float:
-    """Return file mtime, or 0.0 if stat fails (e.g. concurrent deletion)."""
-    try:
-        return p.stat().st_mtime
-    except OSError:
-        return 0.0
+def _evict_if_needed(base: Path | None = None, *, protect: str = "") -> None:
+    """Evict least-recently-used entries until the tier fits :data:`MAX_BYTES`
+    (``storage.byte_quota_lru``), never the entry just written (*protect*),
+    and sweep temp files a crashed write left behind.
 
+    Counts both the current ``*.json.zst`` suffix and the legacy plain
+    ``*.json`` suffix (ADR-059) so a directory with pre-upgrade entries is
+    bounded too."""
+    from ....storage.byte_quota_lru import evict_directory_to_quota
 
-def _evict_if_needed(base: Path | None = None) -> None:
-    """Remove oldest entries if cache exceeds MAX_ENTRIES.
-
-    Globs both the current ``*.json.zst`` suffix and the legacy plain
-    ``*.json`` suffix (ADR-059) so LRU eviction accounts for a cache
-    directory that still has pre-upgrade entries mixed in with new ones."""
-    base = _CACHE_DIR if base is None else base
-    try:
-        entries = sorted(
-            (*base.glob("*.json.zst"), *base.glob("*.json")),
-            key=_safe_mtime,
-        )
-    except OSError:
-        return
-    excess = len(entries) - MAX_ENTRIES
-    if excess <= 0:
-        return
-    for p in entries[:excess]:
-        try:
-            p.unlink()
-            _logger.debug("Cache evict: %s", p.name[:12])
-        except OSError:
-            pass
+    evict_directory_to_quota(
+        _CACHE_DIR if base is None else base,
+        suffixes=(".json.zst", ".json"),
+        quota_bytes=MAX_BYTES,
+        protected=(protect,) if protect else (),
+    )

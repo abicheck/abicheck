@@ -10,7 +10,7 @@ import pytest
 
 from abicheck.model import AbiSnapshot, Function, Visibility
 from abicheck.workflows.dump.cache.key import _cache_key
-from abicheck.workflows.dump.cache.store import _get_cache_dir, _safe_mtime
+from abicheck.workflows.dump.cache.store import _get_cache_dir
 
 
 def lookup(
@@ -371,7 +371,7 @@ class TestEviction:
         from abicheck.workflows.dump.cache import store as sc
 
         monkeypatch.setattr(sc, "_CACHE_DIR", cache_dir)
-        monkeypatch.setattr(sc, "MAX_ENTRIES", 3)
+        monkeypatch.setattr(sc, "MAX_BYTES", 0)
 
         snap = _sample_snap()
         # Create 5 cache entries
@@ -380,11 +380,10 @@ class TestEviction:
             binary.write_bytes(f"content {i}".encode())
             store(snap, binary, [], [], "1.0", "c++")
 
-        # Should have at most MAX_ENTRIES files (ADR-059: new entries are
-        # *.json.zst, not plain *.json).
+        # A zero byte quota keeps only the protected, just-written entry
+        # (ADR-062 D11 byte-quota LRU; ADR-059: entries are *.json.zst).
         entries = list(cache_dir.glob("*.json.zst"))
-        assert entries, "eviction test produced zero entries -- glob is stale"
-        assert len(entries) <= 3
+        assert len(entries) == 1, entries
 
 
 class TestGetCacheDir:
@@ -402,18 +401,6 @@ class TestGetCacheDir:
         monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "xdg"))
         result = _get_cache_dir()
         assert str(result).startswith(str(tmp_path / "xdg"))
-
-
-class TestSafeMtime:
-    def test_returns_mtime_for_existing_file(self, tmp_path):
-        f = tmp_path / "test.json"
-        f.write_text("{}")
-        mtime = _safe_mtime(f)
-        assert mtime > 0
-
-    def test_returns_zero_for_missing_file(self, tmp_path):
-        mtime = _safe_mtime(tmp_path / "nonexistent.json")
-        assert mtime == 0.0
 
 
 class TestStoreErrorPaths:
