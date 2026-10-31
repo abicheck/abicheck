@@ -59,6 +59,7 @@ ROOT_SINGLE_TOMBSTONES = [
     ("jobs", "INPUT_JOBS"),
     ("allow-build-query", "INPUT_ALLOW_BUILD_QUERY"),
     ("public-header-dirs", "INPUT_PUBLIC_HEADER_DIRS"),
+    ("public-header-dir", "INPUT_PUBLIC_HEADER_DIR"),
 ]
 
 _ROW = re.compile(r'^\s*"([a-z0-9-]+)[:|](INPUT_[A-Z0-9_]+)[:|]', re.MULTILINE)
@@ -126,4 +127,6 @@ def test_the_table_parser_reads_every_row() -> None:
         "frontend",
         "compile-options",
         "nostdinc",
+        "ast-frontend",
+        "gcc-options",
     ]

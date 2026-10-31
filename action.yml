@@ -945,10 +945,9 @@ inputs:
   # ── Retired inputs (ADR-091 renames) ────────────────────────────────────
   ast-frontend:
     description: >
-      RETIRED (no transition period): renamed to `frontend`.
-      Setting this input fails the run before any analysis with an
-      `::error::` naming `frontend`. Replace `ast-frontend` with `frontend`, then
-      remove `ast-frontend`.
+      RETIRED (no transition period). Setting this input fails the run before
+      any analysis. Replace it in your workflow with `set: compile.frontend=<value>`, then remove
+      `ast-frontend`.
     required: false
   gcc-path:
     description: >
@@ -959,10 +958,9 @@ inputs:
     required: false
   gcc-options:
     description: >
-      RETIRED (no transition period): renamed to `compile-options`.
-      Setting this input fails the run before any analysis with an
-      `::error::` naming `compile-options`. Replace `gcc-options` with `compile-options`, then
-      remove `gcc-options`.
+      RETIRED (no transition period). Setting this input fails the run before
+      any analysis. Replace it in your workflow with `set: compile.options=[<flag>, ...]`, then remove
+      `gcc-options`.
     required: false
   analysis-assurance-complete:
     description: >
@@ -973,10 +971,9 @@ inputs:
     required: false
   public-header-dir:
     description: >
-      RETIRED (no transition period): renamed to `public-header-dirs`.
-      Setting this input fails the run before any analysis with an
-      `::error::` naming `public-header-dirs`. Replace `public-header-dir` with `public-header-dirs`, then
-      remove `public-header-dir`.
+      RETIRED (no transition period). Setting this input fails the run before
+      any analysis. Replace it in your workflow with `header: <dir> ...` (it was forwarded as -H, which is what header does), then remove
+      `public-header-dir`.
     required: false
   debug-info1:
     description: >

@@ -642,7 +642,7 @@ fi
 # no per-mode "inert" state left to warn about (build-config is
 # unconditionally forwarded for every mode that can reach it).
 if [[ -n "${INPUT_JOBS:-}" ]]; then
-  _fail "jobs ('${INPUT_JOBS}') is RETIRED and no longer accepted: abicheck no longer takes a worker count from the workflow. Its release fan-out auto-detects the CPU count and clamps it to available memory, so concurrency is controlled by the runner or workflow itself. Remove jobs from your workflow."
+  _fail "jobs ('${INPUT_JOBS}') is RETIRED and no longer accepted. There is no replacement: abicheck no longer takes a worker count from the workflow. Its release fan-out auto-detects the CPU count and clamps it to available memory, so concurrency is controlled by the runner or workflow itself. Remove jobs from your workflow."
 fi
 if [[ -n "${INPUT_BUNDLE_SYSTEM_PROVIDERS:-}" ]]; then
   _fail "bundle-system-providers ('${INPUT_BUNDLE_SYSTEM_PROVIDERS}') was removed and is no longer forwarded — leaving it set would silently analyse with a different system-provider allow-list than you asked for. Move the list to your .abicheck.yml's \`bundle.system_providers:\` block and pass that file as build-config, then remove this input."
@@ -657,6 +657,10 @@ _retired_to_set=(
   "frontend|INPUT_FRONTEND|any|set: compile.frontend=<value>"
   "compile-options|INPUT_COMPILE_OPTIONS|any|set: compile.options=[<flag>, ...]"
   "nostdinc|INPUT_NOSTDINC|bool|set: compile.nostdinc=true"
+  # Renamed by ADR-091 Phase 4 to an input Phase 5 then retired: the hint names
+  # the final replacement, never another tombstone.
+  "ast-frontend|INPUT_AST_FRONTEND|any|set: compile.frontend=<value>"
+  "gcc-options|INPUT_GCC_OPTIONS|any|set: compile.options=[<flag>, ...]"
 )
 for _entry in "${_retired_to_set[@]}"; do
   IFS='|' read -r _old_name _old_var _kind _repl <<<"$_entry"
@@ -671,9 +675,13 @@ done
 # public-header-dirs was forwarded as -H, exactly what `header:` does, so its
 # replacement is that input (`scope.public_header_dirs` is an ownership rule,
 # not a header root, and `--set` does not apply it).
-if [[ -n "${INPUT_PUBLIC_HEADER_DIRS:-}" ]]; then
-  _fail "public-header-dirs is RETIRED and no longer accepted. Replace it in your workflow with \`header: <dir> ...\` (it was forwarded as -H, which is what header does; use old-header/new-header for one side), then remove public-header-dirs."
-fi
+# public-header-dir is its pre-Phase-4 spelling; both name `header` directly.
+for _entry in "public-header-dirs:INPUT_PUBLIC_HEADER_DIRS" "public-header-dir:INPUT_PUBLIC_HEADER_DIR"; do
+  IFS=: read -r _old_name _old_var <<<"$_entry"
+  if [[ -n "${!_old_var:-}" ]]; then
+    _fail "${_old_name} is RETIRED and no longer accepted. Replace it in your workflow with \`header: <dir> ...\` (it was forwarded as -H, which is what header does; use old-header/new-header for one side), then remove ${_old_name}."
+  fi
+done
 if [[ -n "${INPUT_ALLOW_BUILD_QUERY:-}" && "${INPUT_ALLOW_BUILD_QUERY}" != "false" ]]; then
   _fail "allow-build-query is RETIRED and no longer accepted. There is no replacement: abicheck always runs its own inferred compile-database query when a sources input needs build context, and a trusted build query is set through build-config (build.query). Remove allow-build-query from your workflow."
 fi
@@ -682,12 +690,9 @@ fi
 # replacement. Consumed only here (action.yml never forwards them to run.sh).
 _renamed_inputs=(
   "policy-file:INPUT_POLICY_FILE:policy"
-  "ast-frontend:INPUT_AST_FRONTEND:frontend"
   "gcc-path:INPUT_GCC_PATH:compiler"
   "gcc-prefix:INPUT_GCC_PREFIX:compiler"
-  "gcc-options:INPUT_GCC_OPTIONS:compile-options"
   "analysis-assurance-complete:INPUT_ANALYSIS_ASSURANCE_COMPLETE:require-complete"
-  "public-header-dir:INPUT_PUBLIC_HEADER_DIR:public-header-dirs"
   "debug-info1:INPUT_DEBUG_INFO1:old-debug-info"
   "debug-info2:INPUT_DEBUG_INFO2:new-debug-info"
   "devel-pkg1:INPUT_DEVEL_PKG1:old-header"

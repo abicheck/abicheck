@@ -166,18 +166,19 @@ def test_public_header_dirs_is_retired_and_not_forwarded_as_a_header_root(
 # --- tombstones: each retired name fails before analysis and names its replacement ---
 
 RENAMED: list[tuple[str, str, str]] = [
-    # (retired input, its env var, replacement input named in the error)
+    # (retired input, its env var, the replacement the error names). A rename
+    # whose new name Phase 5 retired in turn names the final replacement.
     ("policy-file", "INPUT_POLICY_FILE", "policy"),
-    ("ast-frontend", "INPUT_AST_FRONTEND", "frontend"),
+    ("ast-frontend", "INPUT_AST_FRONTEND", "`set: compile.frontend="),
     ("gcc-path", "INPUT_GCC_PATH", "compiler"),
     ("gcc-prefix", "INPUT_GCC_PREFIX", "compiler"),
-    ("gcc-options", "INPUT_GCC_OPTIONS", "compile-options"),
+    ("gcc-options", "INPUT_GCC_OPTIONS", "`set: compile.options="),
     (
         "analysis-assurance-complete",
         "INPUT_ANALYSIS_ASSURANCE_COMPLETE",
         "require-complete",
     ),
-    ("public-header-dir", "INPUT_PUBLIC_HEADER_DIR", "public-header-dirs"),
+    ("public-header-dir", "INPUT_PUBLIC_HEADER_DIR", "`header: <dir>"),
     ("debug-info1", "INPUT_DEBUG_INFO1", "old-debug-info"),
     ("debug-info2", "INPUT_DEBUG_INFO2", "new-debug-info"),
     ("devel-pkg1", "INPUT_DEVEL_PKG1", "old-header"),
@@ -212,7 +213,10 @@ def test_retired_input_fails_preflight_and_names_its_replacement(
     assert result.returncode != 0, combined
     assert "::error::" in combined, combined
     assert f"{retired} is RETIRED" in combined, combined
-    assert f"renamed to {replacement}" in combined, combined
+    expected = (
+        replacement if replacement.startswith("`") else f"renamed to {replacement}"
+    )
+    assert expected in combined, combined
 
 
 def test_require_complete_analysis_points_at_require_complete(tmp_path: Path) -> None:

@@ -92,12 +92,12 @@ that moves to this release.
 
 | 0.6 input | 0.7 input | Notes |
 |---|---|---|
-| `ast-frontend` | `frontend` | |
+| `ast-frontend` | `set: compile.frontend=<value>` | Renamed to `frontend`, which 0.7 also retires (see below). |
 | `gcc-path` | `compiler` | Takes a compiler path or a cross-toolchain prefix. |
 | `gcc-prefix` | `compiler` | Removed. `compiler` takes the same value. |
-| `gcc-options` | `compile-options` | |
+| `gcc-options` | `set: compile.options=[<flag>, ...]` | Renamed to `compile-options`, which 0.7 also retires (see below). |
 | `analysis-assurance-complete` | `require-complete` | Same `true`/`false` override of `assurance.require_complete`. |
-| `public-header-dir` | `public-header-dirs` | |
+| `public-header-dir` | `header: <dir> ...` | Renamed to `public-header-dirs`, which 0.7 also retires (see below). |
 | `debug-info1`, `debug-info2` | `old-debug-info`, `new-debug-info` | |
 | `devel-pkg1`, `devel-pkg2` | `old-header`, `new-header` | These now also accept a development package. |
 | `old-version`, `new-version` | `old-label`, `new-label` | Report labels; the defaults stay `old` and `new`. |
