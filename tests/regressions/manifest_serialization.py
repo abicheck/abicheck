@@ -385,6 +385,7 @@ SERIALIZATION_BUG_CLASSES: tuple[BugClass, ...] = (
         ),
         fixed_by=(1858,),
         seed_tests=(
+            "tests/test_family_f1_evidence_ablation.py",
             "tests/test_blocked_section_compare_matrix.py",
             "tests/test_cli_compare_must_understand.py",
             "tests/test_pe_pdb_section_failure.py",

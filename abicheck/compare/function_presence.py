@@ -41,7 +41,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from ..detector_registry import registry
-from .section_readers import unreadable_sections_read
+from .section_readers import DETECTOR_SECTIONS
 
 if TYPE_CHECKING:
     from ..model import AbiSnapshot
@@ -55,7 +55,12 @@ FUNCTIONS_DETECTOR = "functions"
 
 @registry.detector("function_presence")
 def _diff_function_presence(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
-    if not unreadable_sections_read(FUNCTIONS_DETECTOR, old, new):
+    reads = DETECTOR_SECTIONS[FUNCTIONS_DETECTOR]
+    if not any(
+        section in reads
+        for snap in (old, new)
+        for section, _diagnostic in snap.unreadable_sections
+    ):
         return []  # `functions` ran and reported removals itself
     from ..compare.public_surface import public_functions
     from ..diff_symbols import _check_removed_function

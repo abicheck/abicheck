@@ -38,13 +38,13 @@ model.
 from __future__ import annotations
 
 import dataclasses
-import functools
 import types
 import typing
 from collections.abc import Mapping
 from typing import Any
 
 from ..model import EnumType, Function, RecordType, Variable
+from ..model.execution_cache import memoized
 from .canonical import canonical_form
 from .wire_field_names import wire_field_names
 
@@ -93,12 +93,12 @@ _FIELDS = "fields"
 _ITEMS = "items"
 
 
-@functools.cache
+@memoized
 def _known_fields(cls: type) -> frozenset[str]:
     return frozenset(wire_field_names(cls))
 
 
-@functools.cache
+@memoized
 def nested_record_classes(cls: type) -> Mapping[str, type]:
     """*cls*'s list-of-records fields: ``field -> element dataclass``."""
     out: dict[str, type] = {}
