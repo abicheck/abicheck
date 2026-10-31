@@ -483,6 +483,7 @@ INTEGRATION_BUG_CLASSES: tuple[BugClass, ...] = (
             "tests/test_release_member_identity.py",
             "tests/test_release_member_identity_integration.py",
             "tests/test_family_f2_live_route_matrix.py",
+            "tests/test_stored_operand_release_differential.py",
         ),
         public_surfaces=("cli",),
         axes={

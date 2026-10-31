@@ -80,6 +80,8 @@ FAMILIES: dict[str, Family] = {
                 # Stored-vs-live release member pairing against the live/live
                 # CLI run, over member naming x capture route.
                 "tests/test_cli_compare_stored_versioned_member_pairing.py",
+                # Operand form x corpus pair differential against live/live.
+                "tests/test_stored_operand_release_differential.py",
             ),
         ),
         Family(
