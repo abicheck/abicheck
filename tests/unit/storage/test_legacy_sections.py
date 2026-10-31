@@ -45,7 +45,8 @@ from abicheck.storage.package import SECTION_KINDS
 #: static archive's symbol index; never serialized. And
 #: `header_declaration_ids`: the L2 declaration ids a depth projection kept;
 #: `projection_unavailable`: the facts it cleared; `projection_evidence_gaps`:
-#: the debug-info evidence it could not rebuild. `spellings_generation` is
+#: the debug-info evidence it could not rebuild. `unreadable_sections`: the
+#: stored sections this run's load could not use (ADR-062 D14), and `wire_extensions` their carriers. `spellings_generation` is
 #: persisted only inside the `fact_generations` stamp, never as its own key.
 _NEVER_IN_A_DOCUMENT = (
     "semantic_ir",
@@ -58,6 +59,8 @@ _NEVER_IN_A_DOCUMENT = (
     "header_declaration_ids",
     "projection_unavailable",
     "projection_evidence_gaps",
+    "unreadable_sections",
+    "wire_extensions",
     "spellings_generation",
     "_func_by_mangled",
     "_var_by_mangled",

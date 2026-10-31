@@ -253,56 +253,72 @@ current emitter, which is unchanged.
 
 #### ADR-062 D14-D18 data-evolution rules are partly implemented (2026-10-30)
 
-**Status (2026-10-30): PARTIAL.** D17 (immutable digest-named refs, atomic
-publication, serialized writers) is implemented, and D15 is guarded by a
-pinned wire contract; the rest of plan item A1.9 is open. Owner:
+**Status (2026-10-30): PARTIAL.** D14, D15 and D17 are implemented (with
+the residuals below), and D16's `evidence` digest is implemented and
+consumed; D16's other roles and D18 are open. Owner:
 `storage/`; per-item status in the
 [storage format v2 plan](plans/storage-format-v2.md).
 
-- **D14 (open, false-clean risk).** A reader drops an unknown field inside a
-  record (a function record, for example) when it re-saves, and rejects a
-  whole sectioned document that carries an unknown section. The amendment
-  specifies the carriers: a `must_understand` list on each `SectionDTO`
-  header and on the manifest, and an `extensions` map of canonical JSON
-  values on each record and header, included in the digests. Building them
-  needs three things together, which is why it was not half-landed:
-  - the DTO codecs read and write `extensions`;
-  - `sectioned_document.py` keeps an unknown section instead of refusing
-    the document;
-  - the compare layer resolves an analysis that depends on an unknown
-    must-understand extension, or on a newer `section_schema_version`, to
-    `NOT_COMPARABLE` with a diagnostic naming it.
-
-  Strict `xfail` probes in
-  `tests/unit/storage/test_extension_preservation_gap.py` pin today's
-  behavior, and will fail once either behavior is fixed.
-- **D16 (open).** `snapshot_content_digest` changes when only
-  `created_at` differs or only the function order differs, although
-  `compare` reports no change. That digest is correct for the
-  `publication` role and keeps its meaning. The fix is a separate
-  `evidence` digest over the D5 form: drop `created_at`/`source_mtime`
-  and sort the identity-matched record lists (top-level
-  functions/variables/types/enums, ELF symbols/imports). Do not sort
-  parameters, fields, bases or `DT_NEEDED`, whose order is semantic. It
-  was prototyped and verified (every permutation of each list against
-  `compare(...).changes == []`), then withdrawn because nothing could
-  consume it cheaply. Its consumer is the same-snapshot coverage note
-  (`workflows/gate.snapshot_identity_digest`). That note shares
-  `storage/snapshot_digest_cache`'s memo, which is keyed by snapshot only
-  and would need a role key. It also shares the `created_at` prefilter
-  (`persisted_content_provably_differs`). Computing a second digest there
-  doubles serialization on the path the
-  `perf.pure_content_digest_recomputed_per_consumer` bound protects. The
-  alternative is to let `same_persisted_content` answer from the evidence
-  digest, which changes what that function decides. Either is a design
-  decision, not a mechanical fix.
-- **D15 (partial).** Section keys still come from model field names. The
-  pinned-bytes test catches a field rename, but the codec does not prevent
-  one. The section-header `FactAvailability` table (`not_collected`/
-  `present`/`failed`, with a `failed` entry carrying no payload) does not
-  exist yet. Today only fact families inside a payload keep those three
-  states apart.
-- **D18 (open).** Only the `graph` section decodes lazily.
+- **D14 (implemented; residuals).** Unknown sections, header and record
+  `extensions` and unknown record fields are preserved; an unknown
+  must-understand name or a newer section version blocks only that
+  section's readers (not comparable). Residuals: only top-level fields of
+  function/variable/record-type/enum records are preserved (an unknown key
+  nested deeper, inside a parameter or an ELF symbol, is still dropped on
+  re-save), and a directory package refuses, rather than narrows, an
+  unknown must-understand name on a section object.
+- **D14/D15 residual: packages cannot carry the carriers (2026-10-31).** A
+  ProjectSnapshot package or bundle (document, archive, package) is built
+  from the flat `snapshot_to_dict` document, which has no place for a
+  failed/blocked section, an unknown section, header extensions or unknown
+  record fields. Writing a snapshot carrying any of them is refused
+  (`wire_extensions.refuse_package_flattening`) rather than stored as a
+  false clean; save it as a single-file snapshot. A caller that flattens
+  with `snapshot_to_dict` itself and passes the dict to
+  `write_legacy_snapshot_package` bypasses the check (the dict cannot say
+  what it lost); pass the `AbiSnapshot`. Closing it means carrying
+  availability/`must_understand`/`extensions` per section object or
+  `ArtifactRef` and folding them into the stored `evidence` digest.
+- **D16 (partial).** The `evidence` digest is implemented
+  (`storage/evidence_digest.py`), persisted as the optional
+  `ArtifactRef.evidence_digest`, and read by the same-snapshot coverage
+  note, without a second serialization on the bounded compare path (see
+  the plan's A1.9 status). Still open: `comparison_input`, which has no
+  consumer because no comparison-result cache exists, and `transport`. A
+  persisted evidence digest is used only against another persisted one: a
+  snapshot decoded from the stored document can differ from it after
+  load-time backfill, so mixing the two would read as "different" (the safe
+  direction).
+- **D15 (implemented; residual).** The field inventory is generated and
+  diffed, and section availability is a header table. Residual: no current
+  extractor reports a whole-section failure (each section aggregates
+  several extractors whose failures are fact-family `FactAvailability`), so
+  `record_section_failure` has no production caller yet; the inventory
+  expands only what the fixed corpus populates. A `not_collected` section
+  gives no assurance note when a detector reads it (decided in ADR-062 D15's
+  implementation decisions: it would fire on every pre-D15 document; the
+  fact-family availability already reports the missing evidence).
+- **D18 (open, evaluated 2026-10-31).** Only the `graph` section decodes
+  lazily. Generalizing it is not a descriptor swap: `snapshot_codec.decode_snapshot`
+  derives fields across sections (`from_headers` inferred from
+  `declarations`, the legacy fact backfill over `declarations`/`types`/`debug`,
+  closure-identity renumbering), and `AbiSnapshot.__post_init__` funnels the
+  `declarations`, `types` and `debug` builder inputs into the one
+  `semantic_ir` store, so those sections cannot decode independently without
+  splitting that decode per section first. Measured on a 106 MiB synthetic
+  sectioned snapshot (20k functions, 2k records): `json.loads` 0.65 s, section
+  export 4.3 s, full load 16 s / 323 MiB peak; `declarations` is 44.8 MB of
+  the payload, `types` 13.0 MB, `binary` 3.5 MB, every other section under
+  1 KB -- and nearly every detector reads `binary`+`declarations`+`types`
+  (`compare/section_readers.DETECTOR_SECTIONS`), so a full compare would
+  decode them anyway. The win is limited to pairing-only paths (release/
+  package member pairing reading `binary`); no shared decoded-section cache
+  is built until such a path exists. Whole-document `json.loads` remains.
+- **D14 residual: a blocked `types` section also hides `func_removed`.** The
+  `functions` detector reads `types` (parameter/return type comparison in the
+  same pass), so it is wholly not comparable; splitting symbol-level presence
+  into its own detector needs its own registry entry, dedupe against
+  `functions` and a section-readers contract row, and was not done.
 - **D17 residuals.** Superseded refs and section objects are never
   garbage-collected. Without `fcntl` (Windows) or in reference mode,
   `cross_process_lock` does not lock. Writers are then not serialized, but

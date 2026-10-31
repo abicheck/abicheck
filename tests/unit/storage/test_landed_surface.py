@@ -83,6 +83,7 @@ _INTERNAL_MODULES = (
     "abicheck.storage.atomic_file",
     "abicheck.storage.project_package_archive",
     "abicheck.storage.package_publish",
+    "abicheck.storage.evidence_digest",
     "abicheck.storage.zip_member",
     "abicheck.storage.snapshot_runtime_only",
     "abicheck.storage.dwarf_layout_facts",
@@ -92,6 +93,9 @@ _INTERNAL_MODULES = (
     "abicheck.storage.decode_memo",
     "abicheck.storage.cross_process_lock",
     "abicheck.storage.tu_parse_store",
+    "abicheck.storage.wire_extensions",
+    "abicheck.storage.wire_field_names",
+    "abicheck.storage.wire_record_extensions",
 )
 
 

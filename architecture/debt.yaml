@@ -1928,7 +1928,7 @@
     },
     {
       "path": "abicheck/storage/import_bundle_facts.py",
-      "baseline_lines": 808,
+      "baseline_lines": 803,
       "target": "see ADR-061 ownership map",
       "rule": "no_growth",
       "disposition": "migrate",

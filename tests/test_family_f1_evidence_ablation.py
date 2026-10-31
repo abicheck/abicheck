@@ -95,6 +95,7 @@ NO_CHANGE with no coverage warning, no confidence drop and no assurance note.
 from __future__ import annotations
 
 import itertools
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -149,6 +150,12 @@ _ABI_FACT_UNCOVERED = (
 )
 
 UNCOVERED: dict[str, str] = {
+    "AbiSnapshot.wire_extensions": (
+        "storage-only carrier of a stored document's D14/D15 extras, read by "
+        "the writers and the evidence digest, never by a detector; covered by "
+        "tests/unit/storage/test_extension_carriers_lifecycle.py and "
+        "test_extension_preservation.py"
+    ),
     "MachoMetadata.weak_dependent_libs_fact": (
         "read only by the release dependency graph's Mach-O facts "
         "(workflows/release_dependency_facts.py), whose unit and CLI tests "
@@ -1048,3 +1055,89 @@ def test_ablating_debug_info_keeps_a_header_visible_enum_widening(
     kinds = {c.kind.value for c in result.changes}
     assert "enum_underlying_size_changed" in kinds
     assert result.verdict.value == "BREAKING"
+
+
+# ``storage.wire_extension_dropped_or_refused`` (ADR-062 D14/D15): a stored
+# section this build cannot use -- an unknown must-understand name, a newer
+# section version, or a ``failed`` availability entry -- is section-level
+# evidence ablation. Oracles (a)-(c) above, read from the public CLI's JSON
+# report: a blocked section never adds a break, never makes a breaking run
+# clean without a stated gap, and never breaks the identical pair.
+_WIRE_SECTIONS = ("types", "declarations", "debug")
+
+
+def _wire_block(document: dict, section: str, cause: str) -> None:
+    if cause == "must_understand":
+        document["sections"][section]["must_understand"] = ["x_future_ext"]
+    elif cause == "newer_version":
+        document["sections"][section]["section_schema_version"] += 1
+        document["section_schema_versions"][section] += 1
+    else:
+        document["sections"].pop(section, None)
+        document["section_availability"][section] = {
+            "diagnostics": ["extractor crashed"],
+            "status": "failed",
+        }
+
+
+def _wire_compare(tmp_path: Path, old: str, new: str, block=None) -> dict:
+    import json as _json
+
+    from click.testing import CliRunner
+
+    from abicheck.cli import main
+
+    old_p, new_p, out = tmp_path / "o.json", tmp_path / "n.json", tmp_path / "r.json"
+    old_p.write_text(old, encoding="utf-8")
+    document = _json.loads(new)
+    if block is not None:
+        _wire_block(document, *block)
+    new_p.write_text(_json.dumps(document), encoding="utf-8")
+    CliRunner().invoke(main, ["compare", str(old_p), str(new_p), "-o", f"json={out}"])
+    return _json.loads(out.read_text())
+
+
+@pytest.mark.parametrize("cause", ["must_understand", "newer_version", "failed"])
+@pytest.mark.parametrize("section", _WIRE_SECTIONS)
+def test_wire_section_ablation_oracles(
+    tmp_path: Path, section: str, cause: str
+) -> None:
+    from abicheck.checker_policy import BREAKING_KINDS
+    from abicheck.elf_metadata import ElfMetadata, ElfSymbol
+    from abicheck.model import Function, RecordType, TypeField
+    from abicheck.serialization import snapshot_to_json
+
+    def snap(version: str, names: list[str], bits: int) -> str:
+        return snapshot_to_json(
+            AbiSnapshot(
+                library="libx.so.1",
+                version=version,
+                functions=[
+                    Function(name=n, mangled=n, return_type="int") for n in names
+                ],
+                types=[
+                    RecordType(
+                        name="T",
+                        kind="struct",
+                        size_bits=bits,
+                        fields=[TypeField(name="a", type="int", offset_bits=0)],
+                    )
+                ],
+                elf=ElfMetadata(
+                    soname="libx.so.1", symbols=[ElfSymbol(name=n) for n in names]
+                ),
+            )
+        )
+
+    old, new = snap("1", ["f", "g"], 32), snap("2", ["f"], 64)
+    breaking = {k.value for k in BREAKING_KINDS}
+    full = _wire_compare(tmp_path, old, new)
+    ablated = _wire_compare(tmp_path, old, new, (section, cause))
+    full_breaks = {c["kind"] for c in full["changes"]} & breaking
+    ablated_breaks = {c["kind"] for c in ablated["changes"]} & breaking
+    assert full_breaks, "corpus pair must carry a real break"
+    assert ablated_breaks <= full_breaks  # (b)
+    if not ablated_breaks:  # (a): cleaner only with a stated gap
+        assert ablated["analysis_assurance"]["status"] != "complete"
+    identical = _wire_compare(tmp_path, old, old, (section, cause))
+    assert not {c["kind"] for c in identical["changes"]} & breaking  # (c)

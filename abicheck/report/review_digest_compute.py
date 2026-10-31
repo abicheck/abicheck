@@ -89,9 +89,12 @@ def compute_review_digest(
     # byte-identical-inputs warning -- and this digest is exactly the
     # GitHub-facing summary a reviewer approves a merge from, so it must not
     # read as unconditionally clean when one of these is present.
-    coverage_warnings = _review_compute.compact_coverage_warnings(
-        result.coverage_warnings or ()
-    )
+    # ADR-062 D14: an analysis blocked as not comparable leaves the verdict
+    # reading NO_CHANGE/COMPATIBLE; its assurance note leads the warnings so
+    # the one-line summary never reads as a clean comparison.
+    coverage_warnings = _review_compute.not_comparable_warnings(
+        result
+    ) + _review_compute.compact_coverage_warnings(result.coverage_warnings or ())
 
     scoped = result.scope_to_public_surface
     additions_label = "Public additions" if scoped else "Additions"

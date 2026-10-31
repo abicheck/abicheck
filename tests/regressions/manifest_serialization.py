@@ -250,4 +250,83 @@ SERIALIZATION_BUG_CLASSES: tuple[BugClass, ...] = (
             ),
         ),
     ),
+    BugClass(
+        id="storage.digest_answers_the_wrong_question",
+        invariant=(
+            "Each stored-content digest answers exactly one ADR-062 D16 "
+            "question. The `evidence` digest is equal for every pair "
+            "`compare` reports no change for because only capture metadata "
+            "(created_at, source path/mtime, CI build id) or the producer "
+            "order of an identity-matched record list differs, and differs "
+            "for a real change, including a reordering of a semantically "
+            "ordered list (parameters, fields, enum members, DT_NEEDED) or of "
+            "records sharing one identity. The `publication` digest keeps "
+            "its exact meaning, and a consumer asking the evidence question "
+            "never answers it from the publication digest's inequality."
+        ),
+        # ADR-062's 2026-10-30 amendment (#1858) records the probes (D16).
+        fixed_by=(1858,),
+        seed_tests=(
+            "tests/unit/storage/test_evidence_digest.py",
+            "tests/test_snapshot_digest_prefilter.py",
+            "tests/test_family_f3_identity.py",
+        ),
+        public_surfaces=("cli",),
+        axes={
+            "difference": (
+                "volatile-capture",
+                "unordered-permutation",
+                "ordered-reorder",
+                "duplicate-identity-order",
+                "real-change",
+            ),
+            "digest_source": ("computed", "persisted"),
+        },
+    ),
+    BugClass(
+        id="storage.wire_extension_dropped_or_refused",
+        invariant=(
+            "A stored snapshot's data a reader does not understand is never "
+            "silently dropped and never refuses data it could still compare: "
+            "an unknown optional section, header extension or record field "
+            "is written back unchanged on re-save and is inside the evidence "
+            "and publication digests; a section carrying an unknown "
+            "must-understand name, a newer section_schema_version, or a "
+            "failed availability entry resolves exactly the analyses that "
+            "read it to not comparable (never to an empty section, a removal "
+            "or a clean pass) while every other analysis still runs."
+        ),
+        # ADR-062's 2026-10-30 amendment (#1858) records the probes (D14/D15).
+        fixed_by=(1858,),
+        seed_tests=(
+            "tests/unit/storage/test_extension_preservation.py",
+            "tests/test_section_readers_contract.py",
+            "tests/test_cli_compare_must_understand.py",
+            "tests/unit/storage/test_wire_contract.py",
+            "tests/test_family_f1_evidence_ablation.py",
+        ),
+        public_surfaces=("cli",),
+        axes={
+            "carrier": (
+                "unknown-section",
+                "header-extensions",
+                "record-field",
+                "must-understand",
+                "newer-section-version",
+                "failed-section",
+            ),
+            "level": ("record", "section", "document", "manifest"),
+        },
+        known_gaps=(
+            KnownGap(
+                description=(
+                    "Unknown keys nested below a record's top level are still "
+                    "dropped on re-save, and a directory package refuses an "
+                    "unknown section-level must-understand name instead of "
+                    "narrowing it."
+                ),
+                reference="docs/contribute/known-gaps.md",
+            ),
+        ),
+    ),
 )

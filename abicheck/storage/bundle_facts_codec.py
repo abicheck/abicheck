@@ -91,9 +91,11 @@ def bundle_facts_to_dict(
     from ..bundle_manifest import manifest_to_dict
     from ..model.bundle_facts import BUNDLE_FACTS_ARTIFACT_TYPE, document_schema_version
     from ..serialization import snapshot_to_dict
+    from .wire_extensions import refuse_package_flattening
 
     per_library_snapshots: dict[str, Any] = {}
     for name, snap in facts.per_library_snapshots.items():
+        refuse_package_flattening(snap)
         document = snapshot_to_dict(snap)
         if on_snapshot is not None:
             on_snapshot(name, document)
@@ -151,6 +153,10 @@ def bundle_facts_document_stream(facts: BundleFacts) -> dict[str, Any]:
     """
     from ..serialization import snapshot_to_dict
     from .json_stream import LazyItems
+    from .wire_extensions import refuse_package_flattening
+
+    for snap in facts.per_library_snapshots.values():
+        refuse_package_flattening(snap)
 
     document = bundle_facts_to_dict(cast("BundleFacts", _FactsWithoutMembers(facts)))
     document["per_library_snapshots"] = LazyItems(
