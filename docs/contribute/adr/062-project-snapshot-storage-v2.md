@@ -685,7 +685,24 @@ informational at the package level.
   the analyses that did compare.
 - *Directory packages.* A section object read from a directory package with
   an unknown must-understand name is refused (fail closed); only the
-  single-file document narrows the block to that section's readers.
+  single-file document narrows the block to that section's readers. The two
+  paths deliberately differ until the package path carries the carriers
+  (next item); a known gap.
+- *Package and bundle writes fail closed (2026-10-31).* A ProjectSnapshot
+  package, a bundle document/archive and a bundle package are built from the
+  flat `snapshot_to_dict` document, which cannot express a failed or blocked
+  section, an unknown section, header `extensions`/`must_understand` or an
+  unknown record field. Writing such a snapshot there would store a blocked
+  section as `present` and empty (a false clean) and an `evidence` digest
+  without its extensions, so `wire_extensions.refuse_package_flattening`
+  refuses it (`SnapshotError`) at `write_legacy_snapshot_package` (given the
+  `AbiSnapshot`), `bundle_facts_to_dict` and the bundle archive writer.
+  Carrying the carriers per `ArtifactRef`/section object is open.
+- *Runtime carrier.* The decoded snapshot holds the carriers on the
+  runtime-only, `compare=False` field `AbiSnapshot.wire_extensions`, beside
+  `unreadable_sections`, so `dataclasses.replace`, copy and pickle keep them
+  together; a sectioned write of a snapshot naming unreadable sections but
+  holding no carriers is refused.
 - *No version bump.* Every carrier is written only when non-empty, so
   existing documents keep their bytes. A pre-D14 reader still never misreads
   the new states: it refuses an unknown section kind and a newer section
@@ -726,9 +743,17 @@ bump. A `failed` entry stays listed in `section_schema_versions` without a
 payload, so such a reader refuses the document rather than read the section
 as empty; this build reads it as unusable and blocks its readers like an
 unknown must-understand name. Producers record a failure with
-`storage.wire_extensions.record_section_failure`. No current extractor fails
-a whole section: each section aggregates several extractors, and their
-failures are fact-family `FactAvailability` inside the payload.
+`storage.wire_extensions.record_section_failure`, which has **no production
+caller**: no current extractor fails a whole section, because each section
+aggregates several extractors whose failures are fact-family
+`FactAvailability` inside the payload. Only an imported document carries a
+`failed` entry today (known gap). A `not_collected` section adds no
+assurance note when a detector reads it, by decision: every pre-D15 document
+and every optional section a run did not request (build, source) is
+`not_collected`, so a note would fire on nearly every comparison, and the
+missing evidence is already reported where the detector reads it, through
+the fact-family `FactAvailability` defaults the decoder fills. Only `failed`
+and blocked sections take the `unreadable_section_gap` path.
 
 ### D16 — One digest per question, none silently redefined
 

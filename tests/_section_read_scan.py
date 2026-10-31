@@ -37,6 +37,7 @@ DERIVED_ATTRS: dict[str, str | None] = {
     "projection_unavailable": None,
     "projection_evidence_gaps": None,
     "unreadable_sections": None,
+    "wire_extensions": None,
     "load_notices": None,
     "live_source_evidence": None,
     "live_preprocessor_clang_bin": None,

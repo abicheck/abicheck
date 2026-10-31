@@ -14,5 +14,8 @@
   `analysis_assurance: partial` — exit codes are unchanged. Every written
   section is listed in a new `section_availability` table
   (`present`/`failed`/`not_collected`), and the package manifest accepts a
-  `must_understand` list. The per-section wire field inventory is now
+  `must_understand` list. Writing such a snapshot into a ProjectSnapshot
+  package or a bundle (JSON, archive or package) is refused with an error
+  rather than storing the blocked section as present and empty; save it as
+  a single-file snapshot. The per-section wire field inventory is now
   generated from the encoders and diffed in CI.

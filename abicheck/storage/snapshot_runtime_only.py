@@ -69,6 +69,10 @@ RUNTIME_ONLY_SNAPSHOT_FIELDS: Final[Mapping[str, str]] = MappingProxyType(
             "the stored sections this run's load could not use; the stored "
             "document keeps them verbatim"
         ),
+        "wire_extensions": (
+            "the stored document's D14/D15 carriers this run's load kept; the "
+            "sectioned writer merges them back into the document it writes"
+        ),
         "projection_evidence_gaps": (
             "the evidence a depth projection could not reproduce for this run"
         ),

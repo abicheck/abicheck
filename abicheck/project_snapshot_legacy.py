@@ -35,6 +35,7 @@ from pathlib import Path
 from typing import Any
 
 from .errors import AmbiguousVariantSelectionError, SnapshotError
+from .model import AbiSnapshot
 from .project_snapshot_store import (
     DirectoryObjectStore,
     read_artifact_ref,
@@ -53,7 +54,9 @@ from .storage.package import (
     VariantRef,
 )
 from .storage.sectioned_document import check_stated_section_version
+from .storage.snapshot_encode import snapshot_to_dict
 from .storage.versioning import FactGenerations
+from .storage.wire_extensions import refuse_package_flattening
 
 __all__ = [
     "is_project_snapshot_package_dir",
@@ -94,7 +97,7 @@ def is_project_snapshot_package_dir(path: str | Path) -> bool:
 
 
 def write_legacy_snapshot_package(
-    document: Mapping[str, Any],
+    document: Mapping[str, Any] | AbiSnapshot,
     root: str | Path,
     *,
     artifact_id: str,
@@ -107,6 +110,12 @@ def write_legacy_snapshot_package(
     same document a real `dump` invocation already produces) written as a
     real, directory-backed `ProjectSnapshot` package at *root*, alongside
     whatever legacy `.abi.json` output the caller also writes.
+
+    Pass the `AbiSnapshot` itself rather than flattening it: a snapshot
+    loaded with a failed/blocked section, an unknown section or D14
+    extensions is then refused (`wire_extensions.refuse_package_flattening`)
+    instead of being stored as present and empty. A document the caller
+    flattened itself has already lost that state (known gap).
 
     A thin composition of three already-independently-tested primitives —
     `storage.import_v1.import_legacy_snapshot` (build the manifest, populate
@@ -141,6 +150,9 @@ def write_legacy_snapshot_package(
             "drop. "
             "Pass a different, empty, or nonexistent directory."
         )
+    if isinstance(document, AbiSnapshot):
+        refuse_package_flattening(document)
+        document = snapshot_to_dict(document)
     staging = InMemoryObjectStore()
     manifest = import_legacy_snapshot(
         document,

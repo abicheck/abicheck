@@ -609,6 +609,15 @@ class AbiSnapshot:
     unreadable_sections: tuple[tuple[str, str], ...] = field(
         default=(), repr=False, compare=False, kw_only=True
     )
+    # Runtime-only companion of `unreadable_sections`: the stored document's
+    # ADR-062 D14/D15 carriers (a `storage.wire_extensions.WireExtensions`:
+    # blocked/failed/unknown sections, header and record extensions) this
+    # snapshot was decoded from, written back by the next save. A field, not a
+    # side table, so `dataclasses.replace`, `copy` and pickle keep it together
+    # with `unreadable_sections`. Never serialized as itself.
+    wire_extensions: object | None = field(
+        default=None, repr=False, compare=False, kw_only=True
+    )
     # {guard macro: function names} the castxml parse could not see because
     # they sit in a preprocessor branch its configuration excluded -- decided by
     # that run's own `-E -dD` output (`extract/headers/preprocessor_branches.py`).

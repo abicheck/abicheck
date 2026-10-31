@@ -267,6 +267,18 @@ consumed; D16's other roles and D18 are open. Owner:
   nested deeper, inside a parameter or an ELF symbol, is still dropped on
   re-save), and a directory package refuses, rather than narrows, an
   unknown must-understand name on a section object.
+- **D14/D15 residual: packages cannot carry the carriers (2026-10-31).** A
+  ProjectSnapshot package or bundle (document, archive, package) is built
+  from the flat `snapshot_to_dict` document, which has no place for a
+  failed/blocked section, an unknown section, header extensions or unknown
+  record fields. Writing a snapshot carrying any of them is refused
+  (`wire_extensions.refuse_package_flattening`) rather than stored as a
+  false clean; save it as a single-file snapshot. A caller that flattens
+  with `snapshot_to_dict` itself and passes the dict to
+  `write_legacy_snapshot_package` bypasses the check (the dict cannot say
+  what it lost); pass the `AbiSnapshot`. Closing it means carrying
+  availability/`must_understand`/`extensions` per section object or
+  `ArtifactRef` and folding them into the stored `evidence` digest.
 - **D16 (partial).** The `evidence` digest is implemented
   (`storage/evidence_digest.py`), persisted as the optional
   `ArtifactRef.evidence_digest`, and read by the same-snapshot coverage
@@ -282,7 +294,10 @@ consumed; D16's other roles and D18 are open. Owner:
   extractor reports a whole-section failure (each section aggregates
   several extractors whose failures are fact-family `FactAvailability`), so
   `record_section_failure` has no production caller yet; the inventory
-  expands only what the fixed corpus populates.
+  expands only what the fixed corpus populates. A `not_collected` section
+  gives no assurance note when a detector reads it (decided in ADR-062 D15's
+  implementation decisions: it would fire on every pre-D15 document; the
+  fact-family availability already reports the missing evidence).
 - **D18 (open, evaluated 2026-10-31).** Only the `graph` section decodes
   lazily. Generalizing it is not a descriptor swap: `snapshot_codec.decode_snapshot`
   derives fields across sections (`from_headers` inferred from

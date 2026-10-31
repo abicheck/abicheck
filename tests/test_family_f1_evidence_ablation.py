@@ -150,6 +150,12 @@ _ABI_FACT_UNCOVERED = (
 )
 
 UNCOVERED: dict[str, str] = {
+    "AbiSnapshot.wire_extensions": (
+        "storage-only carrier of a stored document's D14/D15 extras, read by "
+        "the writers and the evidence digest, never by a detector; covered by "
+        "tests/unit/storage/test_extension_carriers_lifecycle.py and "
+        "test_extension_preservation.py"
+    ),
     "MachoMetadata.weak_dependent_libs_fact": (
         "read only by the release dependency graph's Mach-O facts "
         "(workflows/release_dependency_facts.py), whose unit and CLI tests "

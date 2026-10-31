@@ -50,7 +50,7 @@ from .snapshot_runtime_only import RUNTIME_ONLY_SNAPSHOT_FIELDS
 from .snapshot_schema_versions import SCHEMA_VERSION
 from .surface_graph_codec import encode_surface_graph
 from .versioning import this_build_generations
-from .wire_extensions import extensions_of
+from .wire_extensions import extensions_of, refuse_unwritable_extensions
 from .wire_field_names import wire_field_names
 
 # Leaf types that are immutable, so the "detached container" contract
@@ -650,6 +650,7 @@ def sectioned_document_for_write(snap: AbiSnapshot) -> dict[str, Any]:
     structure, so the result must be serialized and dropped, never mutated
     or kept; run it under `acyclic_json.gc_paused` for the same reason
     `snapshot_to_json` does."""
+    refuse_unwritable_extensions(snap)
     return to_sectioned_document(
         _snapshot_to_dict(snap, _encode_value_sorted),
         max_known_schema_version=SCHEMA_VERSION,

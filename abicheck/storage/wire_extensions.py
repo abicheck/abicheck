@@ -29,9 +29,15 @@ decodes:
 
 All of it is collected into one :class:`WireExtensions` on read and merged
 back on write, so a load -> save keeps it byte-equivalent. It is never a
-domain-model field (ADR-063 D8): the decoded snapshot only holds a reference
-to it in this module's side table (:func:`attach`/:func:`extensions_of`),
-keyed by object identity like `snapshot_evidence.py`'s stored digests.
+domain-model fact (ADR-063 D8): the decoded snapshot holds it on its
+runtime-only, ``compare=False`` ``wire_extensions`` field
+(:func:`attach`/:func:`extensions_of`), never serialized as itself, so a
+``dataclasses.replace``/copy/pickle keeps it beside ``unreadable_sections``.
+
+**Package path.** A ProjectSnapshot package or bundle archive is built from
+the flat `snapshot_to_dict` document, which cannot carry any of this, so
+:func:`refuse_package_flattening` refuses such a snapshot there (a recorded
+gap) rather than storing a blocked section as present and empty.
 
 **What blocks.** A section of a known kind whose header names a
 ``must_understand`` entry this build does not understand, or which is
@@ -66,12 +72,11 @@ writer that adds one must also bump that section's ``section_schema_version``
 
 from __future__ import annotations
 
-import weakref
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import Any
 
-from ..errors import IncompatibleSnapshotSchemaError
+from ..errors import IncompatibleSnapshotSchemaError, SnapshotError
 from .canonical import canonical_form
 from .dto import SECTION_SCHEMA_VERSIONS
 from .wire_record_extensions import (
@@ -94,6 +99,8 @@ __all__ = [
     "extensions_of",
     "merge_wire_extensions",
     "record_section_failure",
+    "refuse_package_flattening",
+    "refuse_unwritable_extensions",
     "split_wire_extensions",
 ]
 
@@ -166,22 +173,67 @@ class WireExtensions:
         return form
 
 
-_ATTACHED: dict[int, tuple[weakref.ref[Any], WireExtensions]] = {}
-
-
 def attach(snap: Any, extensions: WireExtensions) -> None:
-    """Associate *extensions* with the decoded snapshot *snap*."""
-    key = id(snap)
-    _ATTACHED[key] = (
-        weakref.ref(snap, lambda _r: _ATTACHED.pop(key, None)),
-        extensions,
-    )
+    """Associate *extensions* with the decoded snapshot *snap*: stored on its
+    runtime-only ``wire_extensions`` field, so `dataclasses.replace`, `copy`
+    and pickle carry it with ``unreadable_sections``."""
+    snap.wire_extensions = extensions
 
 
 def extensions_of(snap: Any) -> WireExtensions | None:
     """The carriers *snap* was loaded with, if any."""
-    entry = _ATTACHED.get(id(snap))
-    return entry[1] if entry is not None and entry[0]() is snap else None
+    value = getattr(snap, "wire_extensions", None)
+    return value if isinstance(value, WireExtensions) else None
+
+
+def refuse_unwritable_extensions(snap: Any) -> None:
+    """Refuse to write *snap* when it names an unreadable section but no
+    longer holds the carriers that section's stored state lives in: the
+    writer would otherwise emit the blocked section as ``present`` with this
+    build's empty defaults."""
+    if getattr(snap, "unreadable_sections", ()) and extensions_of(snap) is None:
+        raise SnapshotError(
+            "Snapshot has unreadable section(s) "
+            f"{', '.join(repr(kind) for kind, _ in snap.unreadable_sections)} but "
+            "no stored D14/D15 carriers to write them back from; refusing to "
+            "write it as if those sections were present."
+        )
+
+
+def refuse_package_flattening(snap: Any) -> None:
+    """Refuse to flatten *snap* into a `snapshot_to_dict` document bound for
+    a ProjectSnapshot package or a G40 bundle archive.
+
+    Those paths are built from the flat document, which cannot express a
+    ``failed``/blocked section, an unknown section, a header ``extensions``
+    or ``must_understand`` entry, or an unknown record field. Writing it
+    anyway would store a blocked section as present-and-empty -- a false
+    clean -- and drop the extensions from the stored evidence digest. Until
+    the package path carries them (`docs/contribute/known-gaps.md`), it
+    fails closed. Save such a snapshot as a single-file snapshot instead."""
+    refuse_unwritable_extensions(snap)
+    carried = extensions_of(snap)
+    if carried is None:
+        return
+    # A ``not_collected`` section is simply absent from a package too.
+    lost = sorted(
+        {kind for kind, _ in carried.unreadable}
+        | set(carried.passthrough_sections)
+        | set(carried.passthrough_versions)
+        | set(carried.header_extras)
+        | {kind for kind, _ in carried.record_extras}
+        | {k for k, v in carried.availability.items() if v["status"] == "failed"}
+    )
+    if not lost and not carried.document_must_understand:
+        return
+    detail = f" (section(s) {', '.join(repr(k) for k in lost)})" if lost else ""
+    raise SnapshotError(
+        "Snapshot carries stored state a ProjectSnapshot package or bundle "
+        "archive cannot represent yet -- a failed or blocked section, an "
+        "unknown section, section/record extensions or a must-understand "
+        f"list{detail}. Writing it would lose that state; save it as a "
+        "single-file snapshot instead (ADR-062 D14/D15)."
+    )
 
 
 def record_section_failure(
