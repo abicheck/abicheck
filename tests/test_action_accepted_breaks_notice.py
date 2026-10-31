@@ -67,7 +67,7 @@ def _real_report(tmp_path: Path, removed: int, breaks: str) -> tuple[int, dict]:
     (tmp_path / "acks.yml").write_text("version: 1\n" + body)
     cfg = tmp_path / "cfg.abicheck.yml"
     cfg.write_text(
-        f"acknowledgment:\n  file: {tmp_path / 'acks.yml'}\n  breaks: {breaks}\n"
+        f"acknowledgments:\n  file: {tmp_path / 'acks.yml'}\n  breaks: {breaks}\n"
     )
     out = tmp_path / "real.json"
     res = CliRunner().invoke(

@@ -13,9 +13,16 @@ Two invariants:
 2. **Runtime-only refactors.** Re-declaring a model record with its fields
    in another order, under another class name, produces the same bytes.
 
+Plus the generated field inventory (D15 (1), `tests/_wire_inventory.py`):
+`tests/fixtures/wire_contract/field_inventory.json` is regenerated from the
+encoders and diffed; a moved section needs a version bump and a D13
+migration.
+
 Plus D3 at section level: *absent*, *present and empty*, and *failed* are
 stored distinctly and read back distinctly -- an absent section never
-reads as an empty one, and a failed one never reads as either.
+reads as an empty one, and a failed one never reads as either (the
+section-header `section_availability` table: see
+`test_extension_preservation.py` for `failed` entries).
 """
 
 from __future__ import annotations
@@ -44,12 +51,15 @@ from abicheck.model.fact import Fact
 from abicheck.model.snapshot import AbiSnapshot
 from abicheck.serialization import snapshot_from_dict, snapshot_to_json
 from abicheck.storage.canonical import canonical_json
-from abicheck.storage.dto import SECTION_SCHEMA_VERSIONS
+from abicheck.storage.dto import SECTION_SCHEMA_VERSIONS, migration_source_versions
 from abicheck.storage.sectioned_document import SECTIONS_KEY
+from tests._wire_inventory import field_inventory
 
 _PIN = (
     Path(__file__).resolve().parents[2] / "fixtures" / "wire_contract" / "sections.json"
 )
+#: The generated per-section field inventory (`tests/_wire_inventory.py`, D15).
+_INVENTORY = _PIN.with_name("field_inventory.json")
 
 
 def _corpus(function_cls: type = Function) -> AbiSnapshot:
@@ -125,6 +135,67 @@ def _record() -> None:
         + "\n",
         encoding="utf-8",
     )
+    _INVENTORY.write_text(_inventory_text(), encoding="utf-8")
+
+
+def _inventory_text() -> str:
+    return (
+        json.dumps(field_inventory(_document(_corpus())), indent=2, sort_keys=True)
+        + "\n"
+    )
+
+
+def _migrates(kind: str, pinned: int, current: int) -> bool:
+    """A registered D13 migration chain reaches *current* from *pinned*."""
+    steps = migration_source_versions(kind)
+    return pinned < current and all(v in steps for v in range(pinned, current))
+
+
+def test_generated_field_inventory_matches_the_checked_in_one() -> None:
+    """D15 (1): the inventory is generated from the encoders over the fixed
+    corpus and diffed against the checked-in copy. A section whose
+    inventory moved must have bumped its `section_schema_version` with a
+    D13 migration from the pinned version; only then may the copy be
+    re-recorded (`python -m tests.unit.storage.test_wire_contract --record`)."""
+    pinned = json.loads(_INVENTORY.read_text(encoding="utf-8"))
+    current = json.loads(_inventory_text())
+    for key in ("document", "availability_entry"):
+        assert current[key] == pinned[key], (
+            f"the document-level {key} moved without a schema change"
+        )
+    assert set(current["sections"]) == set(pinned["sections"])
+    for kind, pin in pinned["sections"].items():
+        now = current["sections"][kind]
+        if now["header"] == pin["header"] and now["fields"] == pin["fields"]:
+            continue
+        assert _migrates(
+            kind, pin["section_schema_version"], now["section_schema_version"]
+        ), (
+            f"section {kind!r} changed its wire fields without a "
+            "section_schema_version bump and a D13 migration from "
+            f"{pin['section_schema_version']}"
+        )
+        pytest.fail(f"section {kind!r} was bumped; re-record the inventory")
+
+
+def test_inventory_covers_the_header_carriers() -> None:
+    inventory = json.loads(_INVENTORY.read_text(encoding="utf-8"))
+    assert inventory["availability_entry"] == ["diagnostics", "status"]
+    assert "section_availability" in inventory["document"]
+    for section in inventory["sections"].values():
+        assert {"extensions", "must_understand", "payload"} <= set(section["header"])
+
+
+def test_the_inventory_detects_a_renamed_record_field() -> None:
+    """The generator is not vacuous: a key renamed inside a record moves
+    the inventory of exactly that section."""
+    document = _document(_corpus())
+    record = document[SECTIONS_KEY]["declarations"]["payload"]["functions"][0]
+    record["return_type_renamed"] = record.pop("return_type")
+    before = field_inventory(_document(_corpus()))["sections"]
+    after = field_inventory(document)["sections"]
+    assert {k for k in before if before[k] != after[k]} == {"declarations"}
+    assert not _migrates("declarations", 1, SECTION_SCHEMA_VERSIONS["declarations"])
 
 
 def test_section_bytes_are_pinned_while_their_versions_hold() -> None:

@@ -1514,7 +1514,7 @@ class TestCompileContextDiscoversSourcesRootOwnConfig:
         src_dir.mkdir()
         (src_dir / ".abicheck.yml").write_text(
             "compile:\n  sysroot: /opt/sources-root-sysroot\n"
-            "source:\n  method: s6\n"
+            "sources:\n  method: s6\n"
             "debug:\n  format: dwarf\n",
             encoding="utf-8",
         )

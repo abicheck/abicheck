@@ -1625,7 +1625,7 @@ runs:
             _sources_root_blocks = (
                 ("build", "sources")
                 if _sources_pairwise or _sources_merge_compile
-                else ("build", "sources", "compile", "source", "debug")
+                else ("build", "sources", "compile", "debug")
             )
             _sources_root_env = os.environ.get("ABICHECK_SOURCES_ROOT", "")
             if _sources_root_env:
@@ -1683,6 +1683,9 @@ runs:
                         _sources_loaded,
                         blocks=_sources_root_blocks,
                         merge_compile=_sources_merge_compile,
+                        sources_method_from_sources_root=not (
+                            _sources_pairwise or _sources_merge_compile
+                        ),
                     )
                     # found_path anchors compile.include_dirs's own rebase
                     # below -- reassign it to the sources-root document ONLY
@@ -1742,6 +1745,9 @@ runs:
                         None,
                         blocks=_sources_root_blocks,
                         merge_compile=_sources_merge_compile,
+                        sources_method_from_sources_root=not (
+                            _sources_pairwise or _sources_merge_compile
+                        ),
                     )
             # Security (Codex review, third round): this discovered document
             # is PR-controlled, untrusted content -- exactly what

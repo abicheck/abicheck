@@ -238,7 +238,7 @@ def test_cli_explicit_config_applies_breaks_accept(
         "    change_kind: func_removed\n    reason: planned\n"
     )
     cfg = tmp_path / "cfg.abicheck.yml"
-    cfg.write_text("acknowledgment:\n  file: acks.yml\n  breaks: accept\n")
+    cfg.write_text("acknowledgments:\n  file: acks.yml\n  breaks: accept\n")
     code, report = _cli_exit(
         ["compare", str(old), str(new), "--config", str(cfg)], tmp_path
     )
@@ -257,7 +257,7 @@ def test_cli_discovered_config_cannot_loosen_the_gate(
         "    change_kind: func_removed\n    reason: planned\n"
     )
     (tmp_path / ".abicheck.yml").write_text(
-        "acknowledgment:\n  file: acks.yml\n  breaks: accept\n"
+        "acknowledgments:\n  file: acks.yml\n  breaks: accept\n"
     )
     code, report = _cli_exit(["compare", str(old), str(new)], tmp_path)
     assert code == 4

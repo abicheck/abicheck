@@ -61,6 +61,7 @@ closed) rather than one version being picked arbitrarily.
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping
+from dataclasses import replace
 from typing import Any
 
 from ..errors import IncompatibleSnapshotSchemaError
@@ -76,7 +77,7 @@ from .dto import (
 )
 from .guards import mapping as _mapping
 from .import_v1 import export_legacy_snapshot, import_legacy_snapshot
-from .package import ArtifactRef, ObjectRef, ObjectStore, PackageManifest, VariantRef
+from .package import ObjectRef, ObjectStore, PackageManifest, VariantRef
 from .ref_ids import resolve_ref_ids
 from .versioning import FactGenerations, StorageVersions
 
@@ -514,13 +515,7 @@ def import_bundle_facts(
             max_known_schema_version=max_known_schema_version,
         )
         (artifact,) = member_manifest.artifact_refs
-        artifact = ArtifactRef(
-            artifact_id=artifact.artifact_id,
-            variant_id=artifact.variant_id,
-            kind=artifact.kind,
-            native_identity={_LIBRARY_NAME_KEY: library_name},
-            sections=artifact.sections,
-        )
+        artifact = replace(artifact, native_identity={_LIBRARY_NAME_KEY: library_name})
         artifact_refs.append(artifact)
         section_schema_versions.update(member_manifest.versions.section_schema_versions)
         member_schema_version = member_manifest.versions.source_schema_version

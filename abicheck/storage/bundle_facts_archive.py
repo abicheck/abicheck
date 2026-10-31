@@ -62,6 +62,7 @@ from .bundle_facts_validation import (
     validated_inventory_complete,
     validated_variant_fingerprint,
 )
+from .wire_extensions import refuse_package_flattening
 
 if TYPE_CHECKING:
     from ..snapshot_io import SnapshotWriteResult
@@ -241,6 +242,7 @@ def write_bundle_facts_archive(
             if cached is not None:
                 h, payload_len = cached
             else:
+                refuse_package_flattening(snap)  # ADR-062 D14/D15
                 # Streamed against the *remaining* allowance -- json.dumps()+
                 # .encode() would fully materialize an oversized copy first.
                 remaining = max(

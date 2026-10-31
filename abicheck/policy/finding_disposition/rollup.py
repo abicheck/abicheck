@@ -80,9 +80,17 @@ def dispose_surface_metric_rollups(
     """
     # Function-local: the metric module reads the surface graph, which the
     # disposition package must not import at load time.
+    from ...compare.section_readers import (
+        SURFACE_METRICS_RULE,
+        unreadable_sections_read,
+    )
     from ...diff_surface_metrics import diff_surface_metrics
     from ..public_surface_query import PublicSurfaceQuery
 
+    # ADR-062 D14: a count over a section this load could not use is not
+    # comparable; its defaults would read as a shrinking surface.
+    if unreadable_sections_read(SURFACE_METRICS_RULE, old, new):
+        return []
     rollups = diff_surface_metrics(
         old,
         new,

@@ -1536,7 +1536,7 @@
    "default": "None"
   },
   {
-   "id": "acknowledgment",
+   "id": "acknowledgments",
    "kind": "whole",
    "default": "None"
   },
@@ -1551,7 +1551,7 @@
    "default": "None"
   },
   {
-   "id": "source.method",
+   "id": "sources.method",
    "kind": "str",
    "default": "None"
   },

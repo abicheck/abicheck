@@ -310,6 +310,7 @@ FAMILIES: dict[str, Family] = {
 
 
 _F1 = (
+    "storage.wire_extension_dropped_or_refused",
     "scoping.dependency_internals_in_contract",
     "classification.non_entity_finding_feeds_contract_coverage",
     "detector.selector_axis_unstamped",
@@ -386,6 +387,7 @@ _F2 = (
     "evidence.per_side_operand_divergence",
 )
 _F3 = (
+    "storage.digest_answers_the_wrong_question",
     "config.location_dependent_fingerprint",
     "extract.aggregate_layout_header_attribution",
     "identity.edge_matched_on_coarse_key",

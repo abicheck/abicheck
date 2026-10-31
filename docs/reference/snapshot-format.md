@@ -30,7 +30,7 @@ compatibility rules, and its top-level structure.
 
 ## What `dump` writes today
 
-A snapshot is a single JSON document with a **sectioned envelope**: three
+A snapshot is a single JSON document with a **sectioned envelope**: a few
 top-level keys, and every field this page describes lives inside one of the
 named sections.
 
@@ -51,13 +51,16 @@ named sections.
   "section_schema_versions": {
     "binary": 1, "build": 1, "debug": 1, "declarations": 1, "graph": 1,
     "layout": 1, "provenance": 1, "semantic_ir": 2, "types": 1
+  },
+  "section_availability": {
+    "binary": {"diagnostics": [], "status": "present"}, "...": "..."
   }
 }
 ```
 
 *(Excerpt reduced from a real `abicheck dump libfoo.so.1 -H foo.h -o snap.json`
 on this repository's own test fixture — the section list and both version
-maps are verbatim; each `payload` is elided.)*
+maps are verbatim; each `payload` and most availability entries are elided.)*
 
 | Key | Meaning |
 |---|---|
@@ -65,6 +68,29 @@ maps are verbatim; each `payload` is elided.)*
 | `sections` | The nine named sections. Each carries its own `section_kind`, `section_schema_version` and `payload`. |
 | `section_schema_versions` | A flat map of the same per-section versions, so a reader can check them without walking `sections`. |
 | `fact_generations` | The extractor/resolver (and, with build-source facts, source) generations that produced the facts. A loader compares them with its own generations and reports drift; absent in snapshots written before it existed, which read as unstated, never as current. |
+| `section_availability` | Per section kind, its `{"status", "diagnostics"}` availability — `present` for every written section, `failed` (diagnostics, no payload; still listed in `section_schema_versions`, so an older reader refuses rather than reading the section as empty) or `not_collected`. A section in neither table is `not_collected`, never `present`. |
+| `must_understand` | Optional: names a reader must understand to use the document at all. An unknown name refuses the document. |
+
+### Extensions and must-understand sections
+
+A reader keeps what it does not understand and writes it back unchanged on
+re-save: an unknown section kind, a section header's `extensions` map
+(canonical JSON values), and unknown fields — including an `extensions`
+map — inside a function, variable, record-type or enum record. They are
+inside the evidence and publication digests.
+
+A section header may also carry `must_understand`: names (extensions or
+section kinds) a reader must understand before it compares that section.
+If it does not, or if the section is written at a `section_schema_version`
+newer than the reader, the section is kept verbatim but not decoded, and
+every analysis that reads it reports *not comparable* (a detector
+`coverage_gap` naming the section and the extension) while every other
+analysis still runs; `analysis_assurance` reads `partial`. The `provenance`
+section holds the snapshot's identity, so blocking it refuses the document.
+A writer that adds a `must_understand` name to a known section also bumps
+that section's `section_schema_version`, because a reader predating D14
+ignores the key. Exit codes are unchanged; see
+[analysis assurance](exit-codes.md#analysis-assurance-contribution-p04).
 
 Every `dump` invocation produces this, with no flag. Compression
 (`--compression`, see [Storage encoding](#storage-encoding)) wraps it

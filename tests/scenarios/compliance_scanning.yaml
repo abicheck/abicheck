@@ -73,7 +73,7 @@ scenarios:
     persona: Library maintainer
     narrative: >
       A maintainer reviewed one removed symbol and recorded it as an
-      acknowledgment with its change kind. With `acknowledgment.breaks: accept`
+      acknowledgment with its change kind. With `acknowledgments.breaks: accept`
       in the explicit config, the gate passes (exit 0) for that break. The
       verdict and the report still show it as a break, and an unreviewed sibling
       break on the same run would still gate.

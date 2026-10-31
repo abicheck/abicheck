@@ -37,6 +37,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Protocol
 
+from retired_config_surfaces import RETIRED_CONFIG_SURFACES
 from retired_surfaces_0_7 import REMOVED_IN_0_7
 
 
@@ -1174,16 +1175,15 @@ RETIRED_SURFACES: tuple[tuple[str, tuple[str, ...], frozenset[str]], ...] = (
         frozenset({"contribute/known-gaps.md"}),
     ),
 ) + REMOVED_IN_0_7
+RETIRED_SURFACES += RETIRED_CONFIG_SURFACES
 
 
 def retired_surface_scan_targets(
     docs: Path, cases: Path, scenarios: Path, catalog: Path, root: Path
 ) -> list[tuple[Path, str]]:
     """Every page the retired-surface sweep reads, with its allowlist key.
-
     `docs/**/*.md` is the hand-authored narrative tree, keyed docs-relative
     (what `RETIRED_SURFACES`'s allowlists already spell).
-
     `catalog/cases/case*/README.md` is here because it is the *generator
     source* for the published `docs/reference/examples/case*.md` pages: those
     carry the generated marker and are skipped below, so scanning only the
@@ -1193,7 +1193,6 @@ def retired_surface_scan_targets(
     recommendation (Codex review). Checking the source rather than the
     artifact is the same direction every other generated-file gate in this
     repo takes.
-
     `tests/scenarios/*.yaml` is here for the same reason one step further out:
     it is the repository's user-flow catalogue, and each entry's `flow:` is a
     command a reader is meant to be able to run. Its structural tests check

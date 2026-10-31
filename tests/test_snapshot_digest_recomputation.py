@@ -48,6 +48,7 @@ import pytest
 from click.testing import CliRunner
 
 import abicheck.storage.snapshot_encode as snapshot_encode
+import abicheck.storage.snapshot_evidence as snapshot_evidence
 from abicheck.cli import main
 
 _FIXTURES = Path(__file__).parent / "fixtures" / "schema"
@@ -64,6 +65,9 @@ class _DigestSpy:
     def __init__(self) -> None:
         self.serializations: list[int] = []
         self.consultations: list[int] = []
+        #: ADR-062 D16 `evidence`-role serializations, counted separately so
+        #: the bound holds per role and the two roles never add up silently.
+        self.evidence_serializations: list[int] = []
 
     def install(self, monkeypatch: pytest.MonkeyPatch) -> None:
         real_compute = snapshot_encode._uncached_snapshot_content_digest
@@ -81,6 +85,16 @@ class _DigestSpy:
             snapshot_encode, "_uncached_snapshot_content_digest", compute
         )
         monkeypatch.setattr(snapshot_encode, "snapshot_content_digest", digest)
+
+        real_evidence = snapshot_evidence._uncached_snapshot_evidence_digest
+
+        def evidence(snap: Any) -> str:
+            self.evidence_serializations.append(id(snap))
+            return real_evidence(snap)
+
+        monkeypatch.setattr(
+            snapshot_evidence, "_uncached_snapshot_evidence_digest", evidence
+        )
 
     @property
     def distinct_snapshots(self) -> int:
@@ -168,6 +182,15 @@ def test_digest_serializations_are_bounded_by_snapshot_count(
     )
     assert len(set(spy.serializations)) == len(spy.serializations), (
         "the same snapshot was serialized twice"
+    )
+    # D16: the evidence role is bounded the same way, and a run never pays
+    # both roles for one snapshot -- the same-snapshot note reuses an equal
+    # publication pair and otherwise computes only the evidence role.
+    ev = spy.evidence_serializations
+    assert len(set(ev)) == len(ev), "a snapshot's evidence digest was computed twice"
+    assert len(spy.serializations) + len(ev) <= spy.distinct_snapshots, (
+        f"{len(spy.serializations)} publication + {len(ev)} evidence "
+        "serializations: the same-snapshot note doubled the bounded path"
     )
 
 

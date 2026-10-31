@@ -114,6 +114,7 @@ from .snapshot_schema_versions import (
     SCHEMA_VERSION as SCHEMA_VERSION,
 )
 from .surface_graph_codec import decode_surface_graph
+from .wire_extensions import WIRE_EXTENSIONS_KEY, attach as attach_wire_extensions
 
 _T = TypeVar("_T")
 
@@ -150,7 +151,8 @@ def decode_snapshot(
     # checks for a `"sections"` key, never a real `AbiSnapshot` field, so a
     # flat document from any schema version cannot collide with it.
     if is_sectioned_document(d):
-        d = from_sectioned_document(d, defer_graph=True)
+        d = from_sectioned_document(d, defer_graph=True, carry_extensions=True)
+    carried = d.pop(WIRE_EXTENSIONS_KEY, None)  # ADR-062 D14/D15
     # ADR-062 D2: read the generation stamp, report drift through the shared
     # reader-compatibility owner, and migrate spellings an older extractor
     # generation wrote (storage/generation_migrations.py).
@@ -580,6 +582,9 @@ def decode_snapshot(
     snap.live_preprocessor_hidden = _decode_preprocessor_hidden(d)
     snap.typedef_abi_facts = _decode_typedef_abi_facts(d, _schema_version)
     snap.load_notices = (*snap.load_notices, *_generation_notices)
+    if carried is not None:
+        attach_wire_extensions(snap, carried)
+        snap.unreadable_sections = tuple(carried.unreadable)
     return snap, _schema_version
 
 

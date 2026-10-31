@@ -246,6 +246,7 @@ _FIELD_OVERRIDES: dict[tuple[str, str], st.SearchStrategy[Any]] = {
     # `object_relpath` accepts only "<algorithm>:<hex>"; `kind`/`digest` non-empty.
     (f"{_PKG}.ObjectRef", "kind"): _NONEMPTY_TEXT,
     (f"{_PKG}.ObjectRef", "digest"): _SHA256_DIGEST,
+    (f"{_PKG}.ArtifactRef", "evidence_digest"): st.none() | _SHA256_DIGEST,
     # Ids become literal filenames (`safe_ref_id`): non-empty, path-safe.
     (f"{_PKG}.ArtifactRef", "artifact_id"): _REF_ID,
     (f"{_PKG}.ArtifactRef", "variant_id"): _REF_ID,

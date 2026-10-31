@@ -217,6 +217,22 @@ def test_snapshot_transform_is_no_change(base_pair: tuple, transform_name: str) 
     assert len(set(cat.snapshot_identity_keys(b))) == cat.entity_count(b)
 
 
+def test_evidence_digest_is_invariant_under_collection_order(base_pair: tuple) -> None:
+    """``storage.digest_answers_the_wrong_question`` (ADR-062 D16): input
+    order is an environment transform, so the `evidence` digest of a
+    reordered snapshot equals the original's -- and a real change differs."""
+    from abicheck.storage.snapshot_evidence import snapshot_evidence_digest
+
+    base, changed = base_pair
+    a = cat.load(cat.snapshot_transform(base, "identity"))
+    b = cat.load(cat.snapshot_transform(base, "reverse_collection_order"))
+    assert cat.compare(a, b).changes == []
+    assert snapshot_evidence_digest(a) == snapshot_evidence_digest(b)
+    assert snapshot_evidence_digest(a) != snapshot_evidence_digest(
+        cat.load(cat.snapshot_transform(changed, "identity"))
+    )
+
+
 @pytest.mark.parametrize("transform_name", cat.SNAPSHOT_TRANSFORMS)
 def test_report_finding_ids_are_invariant(
     base_pair: tuple, transform_name: str

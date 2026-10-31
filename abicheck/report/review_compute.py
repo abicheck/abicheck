@@ -71,6 +71,19 @@ def compact_coverage_warnings(warnings: Sequence[str]) -> tuple[str, ...]:
     return tuple(material[:6])
 
 
+def not_comparable_warnings(result: DiffResult) -> tuple[str, ...]:
+    """``analysis_assurance``'s not-comparable notes (ADR-062 D14), each
+    prefixed with the partial status, for the bounded digest."""
+    from ..policy.analysis_assurance import analysis_assurance_report_dict
+
+    block = analysis_assurance_report_dict(result) or {}
+    return tuple(
+        f"Analysis assurance {str(block.get('status', 'partial')).upper()}: {note}"
+        for note in block.get("notes", ()) or ()
+        if isinstance(note, str) and note.startswith("not comparable")
+    )
+
+
 def compact_evidence_summary(result: DiffResult) -> str:
     rows = getattr(result, "layer_coverage", ()) or ()
     present = {

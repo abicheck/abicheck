@@ -220,7 +220,10 @@ class AbiJsonClassifier(FileClassifier):
             # false negative this fix exists to close.
             "abicheck/sectioned-v1",
             re.compile(
-                r'(?=[\s\S]*"schema_version"\s*:\s*\d+)(?=[\s\S]*"sections"\s*:\s*\{)'
+                r'(?=[\s\S]*"schema_version"\s*:\s*\d+)'
+                # ADR-062 D15's availability table sorts before "sections"
+                # under `sort_keys` and is as specific to this envelope.
+                r'(?=[\s\S]*"(?:sections|section_availability)"\s*:\s*\{)'
             ),
         ),
         # Future formats — uncomment or add new entries here:

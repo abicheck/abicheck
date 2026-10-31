@@ -172,7 +172,7 @@ HEURISTICS: dict[str, str] = {
     "abicheck.diff_bit_int::<module>::re:'\\\\b_BitInt\\\\s*(?:\\\\(\\\\s*(\\\\d+)\\\\s*\\\\)|\\\\[\\\\s*(\\\\d+)-bit storage\\\\s*\\...": "spelling",
     "abicheck.checker::compare::affix.startswith:'rename:'": "own_format",
     "abicheck.model.change::<module>::re:'^[A-Za-z0-9][A-Za-z0-9._-]*@[A-Za-z0-9][A-Za-z0-9._-]*#[A-Za-z0-9][A...": "own_format",
-    'abicheck.classify::AbiJsonClassifier::re:\'(?=[\\\\s\\\\S]*"schema_version"\\\\s*:\\\\s*\\\\d+)(?=[\\\\s\\\\S]*"sections"\\\\s*...': "sniff",
+    'abicheck.classify::AbiJsonClassifier::re:\'(?=[\\\\s\\\\S]*"schema_version"\\\\s*:\\\\s*\\\\d+)(?=[\\\\s\\\\S]*"(?:sections|s...': "sniff",
     "abicheck.classify::AbiJsonClassifier::re:'(^|[,{])\\\\s*\"library\"\\\\s*:'": "sniff",
     "abicheck.classify::BinaryExtensionClassifier::re:'\\\\.(?:so(?:\\\\.\\\\d+)*|dll|dylib|pyd)$'": "sniff",
     "abicheck.classify::DebugCompanionClassifier::re:'\\\\.(?:debug|dsym)$'": "sniff",
