@@ -3,15 +3,15 @@ doc_type: contributor
 audience:
   - contributor
 level: advanced
-lifecycle: active
+lifecycle: historical
 generated: false
 ---
 
 # A stored-`BundleFacts` baseline's narrower format set is not pre-checked by the Action
 
-Index: [Known gaps](../known-gaps.md)
+Index: [Known gaps](../known-gaps.md) (closed; see the [archive](../archive/known-gaps-closed.md))
 
-**Status (2026-10-23): PARTIAL.** The release allowlist that `action/validate-inputs.sh` checks is now the generated `release-compare` set (`action/cli-surface.txt`, from `RELEASE_FORMATS`), and the generator also emits the stored set (`stored-bundle-facts`, from `STORED_RELEASE_FORMATS`) so both have one source. The stored narrowing is still not applied before install, for the reason in the Classify-in-shell discussion below. No --probe-formats capability exists.
+**Status (2026-10-31): CLOSED.** `action/validate-inputs.sh` now refuses, before the dependency install, a `format` outside the generated `stored-bundle-facts` set (`STORED_RELEASE_FORMATS`) when the OLD side (`old-library`, or a local-file `abi-baseline`) is a stored BundleFacts document. The classification is not re-implemented: `action/stored_bundle_facts_probe.py` imports the CLI's own `workflows/bundle_compare_operand.looks_like_stored_bundle_facts` from the Action's source tree (the tree `install-abicheck.sh` installs and `cli-surface.txt` is generated from). Its import closure is the standard library, so it runs before the install, under `python -I` so the untrusted checkout is never on `sys.path`; it reads a bounded prefix only, never fully decoding the operand. When the runner's pre-installed Python is older than 3.11, the tree is not importable, or the import resolves outside the Action's tree, the probe answers "unknown" and the CLI still enforces the narrowing after install. Tests: `tests/test_action_stored_bundle_facts_preflight.py` (for eight operand shapes x seven formats x both OLD inputs, the preflight refuses exactly when `abicheck compare` exits 64 with the stored-format error; a planted `sitecustomize.py`/`abicheck/` in the working directory is never imported; the probe runs with no site-packages).
 
 
 `actions/`' preflight (`action/validate-inputs.sh`) mirrors every one of

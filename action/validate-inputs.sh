@@ -172,6 +172,38 @@ _fail() {
 # fixture directory.
 _CLI_SURFACE_FILE="$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)/cli-surface.txt"
 
+# Whether *path* is a stored BundleFacts document (a prior
+# `--bundle-facts-out`). Answered by the CLI's own classifier,
+# `workflows/bundle_compare_operand.looks_like_stored_bundle_facts`, imported
+# from this Action's source tree by `stored_bundle_facts_probe.py`: its import
+# closure is the standard library, so it runs before the install, and there
+# is no second (shell) transcription of it (ADR-070). The probe reads only a
+# bounded prefix and never fully decodes the operand. `-I` keeps the
+# untrusted checkout (this step's working directory) off `sys.path` and
+# skips `sitecustomize`, as above. Exit 2 from the probe -- no interpreter
+# new enough to import the package, or an unimportable tree -- returns
+# "unknown" (2): the caller skips the check and the CLI still enforces it.
+_ACTION_SOURCE_ROOT="$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
+_is_stored_bundle_facts_operand() {
+  local path="$1"
+  [[ -n "$path" && -f "$path" ]] || return 1
+  local python_bin=""
+  if command -v python3 >/dev/null 2>&1; then
+    python_bin=python3
+  elif command -v python >/dev/null 2>&1; then
+    python_bin=python
+  else
+    return 2
+  fi
+  "$python_bin" -I "$_ACTION_SOURCE_ROOT/action/stored_bundle_facts_probe.py" \
+    "$_ACTION_SOURCE_ROOT" "$path" </dev/null >/dev/null 2>&1
+  case $? in
+    0) return 0 ;;
+    1) return 1 ;;
+    *) return 2 ;;
+  esac
+}
+
 # Whether *value* ($3) is an accepted choice for option *spelling* ($2) on
 # Action mode *label* ($1).
 #
@@ -318,6 +350,22 @@ case "$MODE" in
     # not downstream in the CLI.
     # tests/test_action_validate_inputs.py cross-checks these sets against the
     # live CLI to catch drift.
+    # A stored BundleFacts OLD side renders the narrower generated
+    # `stored-bundle-facts` set (STORED_RELEASE_FORMATS), checked first since
+    # it is a subset of the release set below. The OLD side is old-library,
+    # or a local-file abi-baseline (run.sh passes that file as OLD); a
+    # baseline fetched from a release does not exist yet and is left to the
+    # CLI.
+    if [[ -n "$FORMAT" ]]; then
+      _stored_old="$OLD_LIBRARY"
+      if [[ -z "$_stored_old" && -f "${INPUT_ABI_BASELINE:-}" ]]; then
+        _stored_old="$INPUT_ABI_BASELINE"
+      fi
+      if _is_stored_bundle_facts_operand "$_stored_old" \
+         && ! _cli_choice_allows stored-bundle-facts -o "$FORMAT"; then
+        _fail "mode: compare does not support format: $FORMAT with a stored BundleFacts old side ('$_stored_old', from a prior --bundle-facts-out) — only $(_cli_choice_list stored-bundle-facts -o) are available for a stored-bundle-facts comparison."
+      fi
+    fi
     if [[ -n "$FORMAT" ]]; then
       if { [[ -n "$NEW_LIBRARY" ]] && _is_compare_release_operand "$NEW_LIBRARY"; } \
          || { [[ -n "$OLD_LIBRARY" ]] && _is_compare_release_operand "$OLD_LIBRARY"; }; then
