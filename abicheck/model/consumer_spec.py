@@ -27,7 +27,7 @@ of those two the caller meant. This module adds the shape:
   distinction (:class:`ConsumerRequirement`), on top of the one field every
   consumer must still carry: its binary ``path``.
 - :func:`parse_consumer_manifest` -- reads a small JSON document describing
-  one or more consumers (the ``--used-by-manifest`` CLI input) into a list
+  one or more consumers (the ``consumers.manifests`` config input) into a list
   of :class:`ConsumerSpec`.
 - :exc:`ConsumerUnreadableError` / :exc:`ConsumerDigestMismatchError` --
   typed failures a caller can catch to apply the advisory/required split,

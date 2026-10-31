@@ -621,8 +621,8 @@ class TestJsonReport:
                 str(suppress),
                 "-o",
                 "json=-",
-                "--view",
-                report_mode,
+                "--set",
+                f"output.view=[{report_mode}]",
             ],
         )
         assert result.exit_code == 4, result.output

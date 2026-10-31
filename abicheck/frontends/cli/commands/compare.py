@@ -61,7 +61,6 @@ if TYPE_CHECKING:
 
 
 from ....cli import main
-from ..options.compare_view import validate_view
 from ..options.config_set import config_set_option
 
 #: `oneline` and `html` render the aggregate release document alone
@@ -136,27 +135,6 @@ from .compare_routing import _RELEASE_FORMATS
     "artifacts never re-runs the analysis and never changes the "
     "verdict or the exit code.",
 )
-@click.option(
-    "--view",
-    "view",
-    multiple=True,
-    callback=validate_view,
-    expose_value=True,
-    metavar="TOKEN",
-    help="Repeatable rendering selector: never changes the "
-    "verdict, findings, or exit code. TOKEN: "
-    "'full' (default)/'impact'/'root-cause' (report mode); "
-    "'show=<tokens>' (display filter over severity "
-    "[breaking/api-break/risk/compatible], element "
-    "[functions/variables/types/enums/elf/build/source/analysis] and "
-    "action [added/removed/changed/unchanged] -- AND across dimensions, OR within "
-    "one, repeatable to OR whole groups together). Example: --view root-cause "
-    "--view show=breaking,functions. Disclosure is not a token: the "
-    "pattern-modulation ledger, the scope/reconciliation ledger and the "
-    "--suppress audit are always reported, and C++ symbols are "
-    "always demangled in human output with the exact mangled name kept "
-    "beside them.",
-)
 # Policy + suppression family (ADR-037 D3). The strict/justification pair
 # lives only in .abicheck.yml's suppression: block now (ADR-037 D4).
 @policy_options
@@ -166,8 +144,8 @@ from .compare_routing import _RELEASE_FORMATS
 # with `--debug-root old=`/`new=`, which the resolver already searches.
 # ── Scoped comparison (ADR-043): app-usage and required-symbol contracts ─────
 @app_usage_scope_options
-# Severity preset + per-category overrides (ADR-037 D3 / D4).
 @severity_options
+# Severity preset + per-category overrides (ADR-037 D3 / D4).
 # ── Project config (ADR-037 D4) ────────────────────────────────────────────
 # No manual --exit-code-scheme selector any more (CLI cleanup phase two PR
 # G2, ADR-064): the one automatic gate algorithm is fully determined by
@@ -416,6 +394,18 @@ def compare_cmd(ctx: click.Context, /, **kwargs: Any) -> None:
     _compare_cmd(ctx, **kwargs)
 
 
+def _config_view_tokens(kwargs: dict[str, Any]) -> tuple[str, ...]:
+    """The ``output.view`` tokens of the project config this run resolves."""
+    from ..project_config import resolve_project_compare_config
+
+    _, project_cfg, _, _ = resolve_project_compare_config(
+        config=kwargs.get("config"),
+        severity_preset=None,
+        config_overrides=kwargs.get("config_overrides"),
+    )
+    return () if project_cfg is None else tuple(project_cfg.output_view)
+
+
 def _compare_cmd(ctx: click.Context, /, **kwargs: Any) -> None:
     # Options are parsed by the click wrapper above; the two-operand flow is
     # cli_compare_helpers.run_compare (preflight, then the single-pair session
@@ -450,6 +440,9 @@ def _compare_cmd(ctx: click.Context, /, **kwargs: Any) -> None:
     from ....report.release_formats import STORED_RELEASE_FORMATS
     from .compare_default_format import renderable_formats, resolve_export_set
 
+    # `output.view` (the config key that replaced --view) decides the same
+    # thing a --view token did, so it is read here too.
+    view_tokens = _config_view_tokens(kwargs)
     kwargs["exports"] = resolve_export_set(
         exports,
         renderable=renderable_formats(
@@ -459,7 +452,7 @@ def _compare_cmd(ctx: click.Context, /, **kwargs: Any) -> None:
             stored_formats=STORED_RELEASE_FORMATS,
         ),
         rewrite_all=(
-            any(token != "full" for token in kwargs.get("view", ()))
+            any(token != "full" for token in view_tokens)
             or bool(kwargs.get("no_baseline"))
         ),
     )
@@ -483,9 +476,8 @@ def _compare_cmd(ctx: click.Context, /, **kwargs: Any) -> None:
     # ADR-068 D4/Phase 5, rewritten by plan slice 7o: resolve --view
     # (frontends.cli.options.compare_view) into the two dest names it still carries,
     # report_mode/show_only. No profile injects those dests.
-    from ..options.compare_view import parse_view_tokens
-
-    kwargs.update(parse_view_tokens(kwargs.pop("view", ())))
+    # run_compare replaces these with output.view when the project sets one.
+    kwargs.update(report_mode="full", show_only=None)
 
     # ADR-068 D2 / plan §6 Phase 2e: `--no-baseline` is an explicit
     # declaration, never inferred from arity -- branch before the two-sided
@@ -525,6 +517,25 @@ def _compare_cmd(ctx: click.Context, /, **kwargs: Any) -> None:
             "--set is not supported on a comparison of a stored BundleFacts "
             "document yet; set the key in .abicheck.yml for this run"
         )
+    if _bundle_operands.old_is_stored or _bundle_operands.new_is_stored:
+        # The consumer and view keys are read by the consumer-scoping and
+        # rendering paths this route does not run; refuse them rather than drop them.
+        from ..project_config import resolve_project_compare_config
+
+        _, bundle_cfg, _, _ = resolve_project_compare_config(
+            config=kwargs.get("config"),
+            severity_preset=None,
+            config_overrides=kwargs.get("config_overrides"),
+        )
+        if bundle_cfg is not None and (
+            bundle_cfg.used_by_manifests
+            or bundle_cfg.required_symbols
+            or bundle_cfg.output_view
+        ):
+            raise click.UsageError(
+                "consumers.* and output.view are not supported on a comparison of "
+                "a stored BundleFacts document yet; remove them for this run"
+            )
     if _bundle_operands.old_is_stored:
         from .compare_bundle_facts import (
             dispatch as dispatch_bundle_facts,

@@ -87,7 +87,7 @@ compile:
 
     That gap is closed — the audit now reproduces the candidate-side
     findings the retired `scan` reported. Note it is **advisory by
-    default**: add `--severity-preset default` to gate on a breaking
+    default**: add `--set severity.preset=default` to gate on a breaking
     finding. See [Understand your first
     report](first-report.md#audit-runs-no-baseline).
 

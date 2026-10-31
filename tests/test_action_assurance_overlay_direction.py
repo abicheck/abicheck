@@ -110,20 +110,16 @@ class TestRootAssuranceOverlayBothDirections:
     def test_omitted_release_keeps_a_discovered_assurance_true(
         self, tmp_path: Path
     ) -> None:
-        """A sibling release input forces the overlay to be written, and the
-        omitted assurance input must leave the discovered value alone."""
+        """With the assurance input omitted, the release shape writes no
+        overlay at all, so the discovered assurance true is left untouched.
+        (The retired dso-only/fail-on-removed-library siblings used to force
+        an overlay here; they now reach the CLI only through ``set:``.)"""
         (tmp_path / ".abicheck.yml").write_text(
             "assurance:\n  require_complete: true\n", encoding="utf-8"
         )
-        result = _run_bash_script(
-            _script("release"),
-            {"INPUT_FAIL_ON_REMOVED_LIBRARY": "true"},
-            cwd=tmp_path,
-        )
+        result = _run_bash_script(_script("release"), {}, cwd=tmp_path)
         assert result.returncode == 0, result.stderr
-        doc = _read_config_overlay(result.stdout.splitlines())
-        assert doc["assurance"]["require_complete"] is True
-        assert doc["gate"]["fail_on_removed_library"] is True
+        assert "--config" not in result.stdout.splitlines()
 
     def test_scalar_scope_never_writes_the_directory_package_keys(
         self, tmp_path: Path

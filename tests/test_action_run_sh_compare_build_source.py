@@ -38,6 +38,8 @@ from typing import Any
 
 import yaml
 from _workflow_exec import bash_executable, require_bash
+from test_action_compile_set_forwarding import _run, _validate
+from test_action_run_sh_set_input import _set_pairs
 
 RUN_SH = Path(__file__).resolve().parents[1] / "action" / "run.sh"
 
@@ -523,81 +525,55 @@ def _compile_block(tmp_path: Path) -> dict[str, Any]:
 
 
 class TestAuditOnlyCompareForwardsCrossCompilerFlags:
-    """The audit-only shape (old-library and abi-baseline both omitted) forwards
-    the cross-compiler inputs as ``--set compile.*`` like the two-sided shape."""
+    """The live compile-context inputs reach the audit-only shape as ``--set``
+    pairs (ADR-091 D4). ``compile-options`` is RETIRED (ADR-091 D7) and is
+    refused by the validator instead."""
 
-    def test_all_four_reach_the_cli(self, tmp_path: Path) -> None:
-        result, captured, _captured_config = _run_baseline_compare_raw(
-            {
-                "INPUT_OLD_LIBRARY": "",
-                "INPUT_COMPILER": "/opt/cross/bin/aarch64-linux-gnu-g++",
-                "INPUT_GCC_PREFIX": "aarch64-linux-gnu-",
-                "INPUT_COMPILE_OPTIONS": "-D__ARM_NEON",
-                "INPUT_SYSROOT": "/opt/sysroots/aarch64",
-            },
+    def test_live_inputs_reach_the_cli_as_set_pairs(self, tmp_path: Path) -> None:
+        argv = _run(
             tmp_path,
+            "compare",
+            INPUT_OLD_LIBRARY="",
+            INPUT_COMPILER="/opt/cross/bin/aarch64-linux-gnu-g++",
+            INPUT_SYSROOT="/opt/sysroots/aarch64",
         )
-        assert result.returncode == 0, result.stdout + result.stderr
-        assert captured.is_file(), "abicheck stub was never invoked"
-        cmd = captured.read_text(encoding="utf-8").strip()
-        assert "compare" in cmd.split()
-        assert "--no-baseline" in cmd.split()
-        assert "--config" not in cmd.split()
-        block = _compile_block(tmp_path)
-        # gcc_path wins over gcc_prefix when both are given (the merged
-        # compile.compiler field can only hold one).
-        assert block["compiler"] == "/opt/cross/bin/aarch64-linux-gnu-g++"
-        assert block["options"] == ["-D__ARM_NEON"]
-        assert block["sysroot"] == "/opt/sysroots/aarch64"
+        assert "--no-baseline" in argv
+        pairs = _set_pairs(argv)
+        assert 'compile.compiler="/opt/cross/bin/aarch64-linux-gnu-g++"' in pairs
+        assert 'compile.sysroot="/opt/sysroots/aarch64"' in pairs
+        assert "--config" not in argv
 
-    def test_quoted_whitespace_atom_matches_compare_mode_synthesis(
-        self, tmp_path: Path
-    ) -> None:
-        """A whitespace-containing option atom reaches the CLI as one list entry,
-        the same as the two-sided shape."""
-        result, _captured, _captured_config = _run_baseline_compare_raw(
-            {"INPUT_OLD_LIBRARY": "", "INPUT_COMPILE_OPTIONS": '-DMSG="hello world"'},
-            tmp_path,
-        )
-        assert result.returncode == 0, result.stdout + result.stderr
-        assert _compile_block(tmp_path)["options"] == ["-DMSG=hello world"]
+    def test_retired_compile_options_is_refused_on_the_audit_shape(self) -> None:
+        result = _validate(INPUT_COMPILE_OPTIONS="-D__ARM_NEON")
+        assert result.returncode != 0, result.stdout + result.stderr
+        assert "compile-options" in result.stdout
+        assert "set: compile.options=" in result.stdout
 
 
 class TestCompareModeForwardsCrossCompilerFlags:
-    """Two-sided compare forwards the cross-compiler inputs as ``--set compile.*``."""
+    """Two-sided compare forwards the live cross-compiler inputs as ``--set``."""
 
-    def test_all_four_reach_the_cli(self, tmp_path: Path) -> None:
-        result, captured, _captured_config = _run_baseline_compare_raw(
-            {
-                "INPUT_COMPILER": "/opt/cross/bin/aarch64-linux-gnu-g++",
-                "INPUT_GCC_PREFIX": "aarch64-linux-gnu-",
-                "INPUT_COMPILE_OPTIONS": "-D__ARM_NEON",
-                "INPUT_SYSROOT": "/opt/sysroots/aarch64",
-            },
+    def test_live_inputs_reach_the_cli_as_set_pairs(self, tmp_path: Path) -> None:
+        argv = _run(
             tmp_path,
+            "compare",
+            INPUT_COMPILER="/opt/cross/bin/aarch64-linux-gnu-g++",
+            INPUT_SYSROOT="/opt/sysroots/aarch64",
         )
-        assert result.returncode == 0, result.stdout + result.stderr
-        assert captured.is_file(), "abicheck stub was never invoked"
-        assert "--config" not in captured.read_text(encoding="utf-8").split()
-        block = _compile_block(tmp_path)
-        assert block["compiler"] == "/opt/cross/bin/aarch64-linux-gnu-g++"
-        assert block["options"] == ["-D__ARM_NEON"]
-        assert block["sysroot"] == "/opt/sysroots/aarch64"
+        pairs = _set_pairs(argv)
+        assert 'compile.compiler="/opt/cross/bin/aarch64-linux-gnu-g++"' in pairs
+        assert 'compile.sysroot="/opt/sysroots/aarch64"' in pairs
+        assert "--config" not in argv
 
     def test_none_set_adds_no_flags(self, tmp_path: Path) -> None:
-        cmd = _run_compare({}, tmp_path).split()
-        assert "--set" not in cmd
-        assert "--config" not in cmd
-        assert "--compiler" not in cmd
-        assert "--compiler-prefix" not in cmd
-        assert "--compiler-option" not in cmd
-        assert "--sysroot" not in cmd
+        argv = _run(tmp_path, "compare")
+        assert [p for p in _set_pairs(argv) if p.startswith("compile.")] == []
+        assert "--config" not in argv
 
-    def test_quoted_whitespace_atom_stays_one_atom(self, tmp_path: Path) -> None:
-        """A single-line ``gcc-options`` value is shell-quoting-aware split, so a
-        quoted segment stays one list entry (not re-split on its internal space)."""
-        _run_compare({"INPUT_COMPILE_OPTIONS": '-DMSG="hello world"'}, tmp_path)
-        assert _compile_block(tmp_path)["options"] == ["-DMSG=hello world"]
+    def test_retired_compile_options_is_refused(self) -> None:
+        result = _validate(INPUT_COMPILE_OPTIONS='-DMSG="hello world"')
+        assert result.returncode != 0, result.stdout + result.stderr
+        assert "set: compile.options=" in result.stdout
 
 
 class TestBaselineCompareTranslationForwardsCompileSets:

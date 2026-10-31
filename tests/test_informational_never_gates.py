@@ -147,7 +147,7 @@ def test_informational_kind_never_gates_through_the_cli(
     tmp_path: Path, inject: list[ChangeKind], kind: str, preset: str | None
 ) -> None:
     inject.append(ChangeKind(kind))
-    args = ["--severity-preset", preset] if preset else []
+    args = ["--severity-preset", str(preset)] if preset else []
     code, doc = _compare(tmp_path, *args)
     assert code == 0
     # Recorded, not disposed of (ADR-067): the finding is still reported.

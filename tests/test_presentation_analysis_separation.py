@@ -53,6 +53,7 @@ post-Phase-5 invariant this file states.
 
 from __future__ import annotations
 
+import html
 import itertools
 import json
 import os
@@ -201,11 +202,9 @@ class TestF19OutputFormatInvariance:
                 f"{fmt}=-",
                 "--suppress",
                 str(suppress),
-                "--view",
-                view_mode,
+                "--set",
+                "output.view=" + json.dumps([view_mode, *([show] if show else [])]),
             ]
-            if show is not None:
-                args += ["--view", show]
             result = CliRunner().invoke(main, args)
             seen.append((tuple(args[3:]), result.exit_code))
 
@@ -303,7 +302,15 @@ class TestF19OutputFormatInvariance:
         # And the retired token is a usage error with no hidden alias.
         retired = CliRunner().invoke(
             main,
-            ["compare", str(old_p), str(new_p), "-o", "json=-", "--view", "filtered"],
+            [
+                "compare",
+                str(old_p),
+                str(new_p),
+                "-o",
+                "json=-",
+                "--set",
+                'output.view=["filtered"]',
+            ],
         )
         assert retired.exit_code == 64, retired.output
 
@@ -356,7 +363,15 @@ class TestF20ExplainPatternsNeverChangesAnalysis:
 
         retired = CliRunner().invoke(
             main,
-            ["compare", str(old_p), str(new_p), "-o", "json=-", "--view", "patterns"],
+            [
+                "compare",
+                str(old_p),
+                str(new_p),
+                "-o",
+                "json=-",
+                "--set",
+                'output.view=["patterns"]',
+            ],
         )
         assert retired.exit_code == 64, retired.output
 
@@ -421,8 +436,8 @@ class TestViewGrammar:
                 str(new_p),
                 "-o",
                 "markdown=-",
-                "--view",
-                "show=removed",
+                "--set",
+                'output.view=["show=removed"]',
             ],
         )
         assert result.exit_code == 4, result.output
@@ -447,10 +462,8 @@ class TestViewGrammar:
                 str(new_p),
                 "-o",
                 "markdown=-",
-                "--view",
-                "show=removed",
-                "--view",
-                "show=added",
+                "--set",
+                'output.view=["show=removed", "show=added"]',
             ],
         )
         assert result.exit_code == 4, result.output
@@ -485,10 +498,8 @@ class TestViewGrammar:
                 str(new_p),
                 "-o",
                 "markdown=-",
-                "--view",
-                "show=breaking",
-                "--view",
-                "show=added",
+                "--set",
+                'output.view=["show=breaking", "show=added"]',
             ],
         )
         assert result.exit_code == 4, result.output
@@ -498,19 +509,26 @@ class TestViewGrammar:
     def test_unknown_view_token_is_a_usage_error(self, tmp_path: Path) -> None:
         old_p, new_p = _write_pair(tmp_path)
         result = CliRunner().invoke(
-            main, ["compare", str(old_p), str(new_p), "--view", "nonsense"]
+            main,
+            ["compare", str(old_p), str(new_p), "--set", 'output.view=["nonsense"]'],
         )
         assert result.exit_code == 64, result.output
-        assert "Unknown --view token" in result.output
+        assert "Unknown output.view token" in result.output
 
     def test_bad_show_filter_is_a_usage_error(self, tmp_path: Path) -> None:
         old_p, new_p = _write_pair(tmp_path)
         result = CliRunner().invoke(
             main,
-            ["compare", str(old_p), str(new_p), "--view", "show=not_a_real_token"],
+            [
+                "compare",
+                str(old_p),
+                str(new_p),
+                "--set",
+                'output.view=["show=not_a_real_token"]',
+            ],
         )
         assert result.exit_code == 64, result.output
-        assert "Unknown --view show= token" in result.output
+        assert "Unknown output.view show= token" in result.output
 
     def test_combined_view_tokens_do_not_change_canonical_result(
         self, tmp_path: Path
@@ -535,12 +553,8 @@ class TestViewGrammar:
                 str(new_p),
                 "-o",
                 "json=-",
-                "--view",
-                "root-cause",
-                "--view",
-                "impact",
-                "--view",
-                "full",
+                "--set",
+                'output.view=["full", "root-cause", "impact"]',
             ],
         )
         assert baseline.exit_code == combined.exit_code == 4
@@ -567,8 +581,8 @@ class TestViewGrammar:
                 str(new_p),
                 "-o",
                 "json=-",
-                "--view",
-                "show=breaking",
+                "--set",
+                'output.view=["show=breaking"]',
             ],
         )
         assert baseline.exit_code == narrowed.exit_code == 4
@@ -610,10 +624,8 @@ class TestShowOnlyCliHintIsReRunnable:
                 str(new_p),
                 "-o",
                 "markdown=-",
-                "--view",
-                "show=breaking",
-                "--view",
-                "show=added",
+                "--set",
+                'output.view=["show=breaking", "show=added"]',
             ],
         )
         assert result.exit_code == 4, result.output
@@ -624,7 +636,11 @@ class TestShowOnlyCliHintIsReRunnable:
         )
         # No internal transport separator ever reaches rendered text.
         assert ";" not in hint_line
-        tokens = tuple(re.findall(r"--view (\S+?)(?=[`\s]|$)", hint_line))
+        # The hint is a literal `--set 'output.view=[...]'` whose YAML list
+        # carries one `show=` item per OR'd group.
+        listed = re.search(r"output\.view=(\[[^\]]*\])", hint_line)
+        assert listed, hint_line
+        tokens = tuple(json.loads(listed.group(1)))
         assert tokens.count("show=breaking") == 1
         assert tokens.count("show=added") == 1
         parsed = parse_view_tokens(tokens)
@@ -638,7 +654,8 @@ class TestShowOnlyCliHintIsReRunnable:
                 str(new_p),
                 "-o",
                 "markdown=-",
-                *[f"--view={t}" for t in tokens],
+                "--set",
+                "output.view=" + json.dumps(tokens),
             ],
         )
         assert rerun.exit_code == result.exit_code
@@ -656,18 +673,19 @@ class TestShowOnlyCliHintIsReRunnable:
                 str(new_p),
                 "-o",
                 "html=-",
-                "--view",
-                "show=breaking",
-                "--view",
-                "show=added",
+                "--set",
+                'output.view=["show=breaking", "show=added"]',
             ],
         )
         assert result.exit_code == 4, result.output
         assert "Filtered by" in result.output
         filter_section = result.output[result.output.index("Filtered by") :]
         filter_section = filter_section[: filter_section.index("</div>")]
-        assert ";" not in filter_section
-        assert filter_section.count("--view show=") == 2
+        # HTML escaping adds ';' entities, so judge the unescaped text: a
+        # joined `show=a;b` / `show=x;show=y` transport form is still refused.
+        unescaped = html.unescape(filter_section)
+        assert ";" not in unescaped
+        assert unescaped.count('"show=') == 2
 
     def test_html_empty_filter_state_hint_has_no_internal_separator(
         self, tmp_path: Path
@@ -686,10 +704,8 @@ class TestShowOnlyCliHintIsReRunnable:
                 str(new_p),
                 "-o",
                 "html=-",
-                "--view",
-                "show=breaking,variables",
-                "--view",
-                "show=compatible,variables",
+                "--set",
+                'output.view=["show=breaking,variables", "show=compatible,variables"]',
             ],
         )
         assert result.exit_code == 4, result.output
@@ -698,8 +714,9 @@ class TestShowOnlyCliHintIsReRunnable:
             result.output.index("No changes match the current filter") :
         ]
         note_section = note_section[: note_section.index("</p>")]
-        assert ";" not in note_section
-        assert note_section.count("--view show=") == 2
+        unescaped = html.unescape(note_section)
+        assert ";" not in unescaped
+        assert unescaped.count('"show=') == 2
 
 
 class TestSurfaceMetricsAreUnconditional:
@@ -938,11 +955,9 @@ def _run_permutation(
         f"json={extractor}",
         "--suppress",
         str(suppress),
-        "--view",
-        mode,
+        "--set",
+        "output.view=" + json.dumps([mode, *([show] if show else [])]),
     ]
-    if show is not None:
-        args += ["--view", show]
     for i, extra_fmt in enumerate(extra):
         args += ["-o", f"{extra_fmt}={out_dir / f'extra{i}.out'}"]
     result = CliRunner().invoke(main, args)

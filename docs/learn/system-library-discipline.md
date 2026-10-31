@@ -31,7 +31,7 @@ This page is that strategy, placed on a ladder with the others.
 | C++ runtime | libstdc++ | same SONAME since 2004; `GLIBCXX_3.4.x` nodes; the dual ABI as a *parallel* namespace, not a break | [case104](../reference/examples/case104_glibcxx_dual_abi_flip.md); [Modern C/C++ and Toolchain Hazards](modern-cpp-toolchain-hazards.md) |
 | system tooling | binutils / `ld` | linker defaults drift between releases and move a library's contract without a source change | [Environment & Toolchain Drift § binutils](environment-drift.md#the-binutils-side-linker-default-drift); [Security Hardening](../use/security-hardening.md) |
 | vendor SDK / product | oneDAL, TBB, OpenSSL | SONAME bump per major; inline-namespace generations; explicit-instantiation matrix; experimental namespaces | [Part 7](abi-series/07-designing-for-stability.md); [case99](../reference/examples/case99_experimental_graduated.md)–[case101](../reference/examples/case101_inline_namespace_version_bumped.md); [Template- and Header-Heavy Libraries](template-heavy-libraries.md) |
-| application plugin | host ↔ `dlopen` | required-symbol contract, direction reversed | `--policy plugin_abi`, `--required-symbol`; [Consumer Models](consumer-models.md) |
+| application plugin | host ↔ `dlopen` | required-symbol contract, direction reversed | `--policy plugin_abi`, `consumers.required_symbols`; [Consumer Models](consumer-models.md) |
 
 Find your own library's row. Most libraries are the fifth; the discipline
 of the second and third rows is what the rest of this page explains,

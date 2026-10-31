@@ -255,6 +255,59 @@ def test_a_compile_context_key_is_applied_by_compare_not_refused() -> None:
     assert overrides == {"compile.std": "c++17", "compile.compiler": "g++"}
 
 
+#: The set: replacements of the retired Action inputs dso-only,
+#: include-private-dso and fail-on-removed-library (ADR-091 Phase 5): the
+#: config path, its YAML spelling, and the resolved field it must drive.
+_RELEASE_TOPOLOGY_KEYS = [
+    ("release.dso_only", "release:\n  dso_only: true\n", "release_dso_only"),
+    (
+        "release.include_private_dso",
+        "release:\n  include_private_dso: true\n",
+        "release_include_private_dso",
+    ),
+    (
+        "gate.fail_on_removed_library",
+        "gate:\n  fail_on_removed_library: true\n",
+        "fail_on_removed_library",
+    ),
+]
+
+
+@pytest.mark.parametrize(("path", "_yaml", "_field"), _RELEASE_TOPOLOGY_KEYS)
+def test_a_retired_action_input_replacement_is_applied_on_both_compare_routes(
+    path: str, _yaml: str, _field: str
+) -> None:
+    """The tombstone of each retired input names this --set line; neither the
+    single-pair nor the directory/package route may refuse it (exit 64)."""
+    assert parse_set_assignments((f"{path}=true",)) == {path: True}
+    reject_unforwarded_release_overrides({path: True})
+
+
+@pytest.mark.parametrize(("path", "yaml_text", "field"), _RELEASE_TOPOLOGY_KEYS)
+@pytest.mark.parametrize("file_value", [None, True])
+@pytest.mark.parametrize("set_value", [None, True, False])
+def test_a_release_topology_override_decides_like_the_file_would(
+    tmp_path: Path,
+    path: str,
+    yaml_text: str,
+    field: str,
+    file_value: bool | None,
+    set_value: bool | None,
+) -> None:
+    """--set wins over the file in both directions (an explicit false beats a
+    file's true), and with no --set the file's value stands. The oracle is the
+    precedence rule itself, not the resolver."""
+    cfg_path = None
+    if file_value is not None:
+        cfg_path = _write_config(tmp_path, yaml_text)
+    overrides = None if set_value is None else {path: set_value}
+    _cfg, resolved, _sha = load_and_resolve_compare_config(
+        cfg_path, severity_preset=None, config_overrides=overrides
+    )
+    expected = set_value if set_value is not None else bool(file_value)
+    assert getattr(resolved, field) is expected
+
+
 def test_a_key_with_no_typed_channel_is_refused_by_the_typed_api() -> None:
     with pytest.raises(ConfigOverrideError, match="scope.show_redundant"):
         _with_config_overrides(

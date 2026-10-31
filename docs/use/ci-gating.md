@@ -31,11 +31,11 @@ flowchart LR
     CR --> P["2 · Policy classifies<br/>EVALUATED findings"]
     P --> S["3 · Suppressions<br/>waive findings"]
     S --> V["4 · Verdict + severity<br/>categories"]
-    V --> PR["5 · Explicit-scope promotion<br/>(--used-by/--required-symbol only)"]
+    V --> PR["5 · Explicit-scope promotion<br/>(--used-by / consumers.required_symbols only)"]
     PR --> V2["Verdict/gate recomputed<br/>if promotion changed anything"]
     V2 --> E["6 · Exit code<br/>(legacy or severity scheme)"]
     CC["Contract coverage<br/>(evidence completeness)"] -.->|max, orthogonal| E
-    V2 -.-> R["Report rendering<br/>(--view, -o)"]
+    V2 -.-> R["Report rendering<br/>(output.view, -o)"]
 ```
 
 ## The order of operations
@@ -80,9 +80,9 @@ unscoped path:
    and, when [severity](severity.md) is configured, per-category
    (`abi_breaking` / `potential_breaking` / `quality_issues` / `addition`)
    severity levels. `compare()` returns here for a plain, unscoped run.
-5. **Explicit-scope promotion — `compare --used-by`/`--required-symbol(s)`
+5. **Explicit-scope promotion — `compare --used-by`/`consumers.required_symbols`
    only, and only after step 4 returned.** This is evidence *precedence*,
-   not a step earlier in the pipeline: a `--used-by`/`--required-symbol`
+   not a step earlier in the pipeline: a `--used-by` or `consumers.required_symbols`
    run has been *told* what the contract is (a concrete consumer's imports,
    or an explicit entrypoint list), and that outranks
    whatever the snapshot-derived relevance in step 1 concluded on its own.
@@ -95,7 +95,7 @@ unscoped path:
 6. **Exit.** The exit code comes from one of the two schemes below, folded
    with the orthogonal contract-coverage contribution (next section) —
    always computed over the full library's own result, promotion from step 5
-   included where it applies. A `--used-by`/`--required-symbol` run's own
+   included where it applies. A `--used-by` or `consumers.required_symbols` run's own
    confirmed/potential/unresolved impact assessment is reported beside this
    result (`used_by`/`required_symbol_contract`/`consumer_scope` in the JSON
    report); it never substitutes for it or changes this exit code.
@@ -118,14 +118,14 @@ CI, and they should not be collapsed into one mental "ignored" bucket —
 each is visible in the report under a different field
 (`contract_relevance`, `suppressed_count`, `contract_coverage_failures`).
 
-**Display filtering is outside the pipeline.** `--view` (its `show=...`
+**Display filtering is outside the pipeline.** `output.view` (its `show=...`
 token, and its report-mode tokens), `-o oneline=...`'s one-line summary,
 and the export format change what the report *renders*, never the verdict or the
 exit code.
 
 !!! tip "No `--profile ci-gate` shortcut any more"
     A `--profile ci-gate` used to bundle the common gating knobs
-    (`--depth headers -o review=... --severity-preset default`); it was
+    (`--depth headers -o review=... --set severity.preset=default`); it was
     removed in 0.6 because it bundled evidence depth,
     report rendering, and gate policy behind one word. State the three flags
     directly, or put them in `.abicheck.yml` so every run picks them up
@@ -153,7 +153,7 @@ is a tool/runtime error, never a verdict (usage errors exit `64`). Since
 there is no pin, the way to guarantee a given scheme is to control whether a
 severity setting is present at all — see the recipes below.
 Full matrix, including app/plugin-scoped comparisons (`compare --used-by`/
-`--required-symbol`), `deps`, and multi-library codes:
+`consumers.required_symbols`), `deps`, and multi-library codes:
 [Exit Codes](../reference/exit-codes.md).
 
 ## How the knobs interact
@@ -167,8 +167,8 @@ Full matrix, including app/plugin-scoped comparisons (`compare --used-by`/
 - **Policy → severity.** Severity categorizes changes *after* the policy has
   classified them. If `sdk_vendor` downgrades a kind from `potential_breaking`
   to `quality_issues`, the default preset then treats it as `warning`, not
-  `error` — so `--policy sdk_vendor --severity-preset default` will not fail
-  on it, while `--severity-preset strict` (everything `error`) still will.
+  `error` — so `--policy sdk_vendor --set severity.preset=default` will not fail
+  on it, while `--set severity.preset=strict` (everything `error`) still will.
   See [Severity → Policy interaction](severity.md#policy-interaction).
 - **Policy → suppressions.** Independent: suppressions match on
   symbol/type/kind/location, regardless of how the policy classified the

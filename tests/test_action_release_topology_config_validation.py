@@ -51,11 +51,14 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+from test_action_compile_set_forwarding import _validate
 from test_action_release_topology_config import (
     _harness,
     _read_config_overlay,
     _run_bash_script,
 )
+from test_action_run_sh_set_input import _run_compare, _set_pairs
 
 
 class TestReleaseTopologyOverlayCleansUpOnMergeSubprocessFailure:
@@ -74,7 +77,7 @@ class TestReleaseTopologyOverlayCleansUpOnMergeSubprocessFailure:
         )
         result = _run_bash_script(
             _harness(),
-            {"INPUT_DSO_ONLY": "true", "RUNNER_TEMP": str(tmp_path)},
+            {"INPUT_REQUIRE_COMPLETE": "true", "RUNNER_TEMP": str(tmp_path)},
             cwd=tmp_path,
         )
         assert result.returncode != 0
@@ -89,7 +92,9 @@ class TestReleaseTopologyOverlayValidatesTheBaseConfigBeforeMerging:
         self, tmp_path: Path
     ) -> None:
         (tmp_path / ".abicheck.yml").write_text("release: []\n", encoding="utf-8")
-        result = _run_bash_script(_harness(), {"INPUT_DSO_ONLY": "true"}, cwd=tmp_path)
+        result = _run_bash_script(
+            _harness(), {"INPUT_REQUIRE_COMPLETE": "true"}, cwd=tmp_path
+        )
         assert result.returncode != 0
         assert "release must be a mapping" in result.stderr
         assert "failed to merge" in result.stdout
@@ -101,68 +106,73 @@ class TestReleaseTopologyOverlayValidatesTheBaseConfigBeforeMerging:
         (tmp_path / ".abicheck.yml").write_text(
             "release:\n  dso_only: false\nnot_a_real_key: 1\n", encoding="utf-8"
         )
-        result = _run_bash_script(_harness(), {"INPUT_DSO_ONLY": "true"}, cwd=tmp_path)
+        result = _run_bash_script(
+            _harness(), {"INPUT_REQUIRE_COMPLETE": "true"}, cwd=tmp_path
+        )
         assert result.returncode != 0
         assert "unknown .abicheck.yml key 'not_a_real_key'" in result.stderr
         assert "--config" not in result.stdout
 
 
-class TestReleaseTopologyOverlayHonorsExplicitFalseInputs:
-    """Codex review, PR #1159 (P1, fresh evidence): ``dso-only``/
-    ``include-private-dso``/``fail-on-removed-library`` used to collapse
-    "omitted" and "explicit false" onto the identical value
-    (``${INPUT_DSO_ONLY:-false}``, plus a matching declared ``default:
-    'false'`` in ``action.yml``), so a workflow that explicitly wrote
-    ``dso-only: false`` to override a discovered/explicit ``.abicheck.yml``'s
-    own ``release.dso_only: true`` had that override silently ignored --
-    the early-return guard fired (every input read as the literal string
-    "false") and the discovered ``true`` value remained in effect
-    untouched. ``action.yml`` now declares no default for any of the three
-    inputs, so an omitted one resolves to an empty string, distinguishable
-    from an explicit ``"true"``/``"false"``; the guard and the overlay
-    generator key off that emptiness, not truthiness."""
+class TestRetiredReleaseTopologyInputsAndSetCarriesExplicitFalse:
+    """ADR-091 D7: ``dso-only``, ``include-private-dso`` and
+    ``fail-on-removed-library`` are RETIRED tombstones. The overlay no longer
+    synthesizes ``release:``/``gate:`` keys from them; the replacement is a
+    ``set:`` line, which the CLI applies over the discovered config. The
+    explicit-false guarantee (an explicit ``false`` overrides a discovered
+    ``true``, an omitted key leaves it alone) is therefore pinned on the
+    ``set:`` path and on the validator."""
 
-    def test_explicit_false_overrides_a_discovered_true(self, tmp_path: Path) -> None:
+    @pytest.mark.parametrize(
+        ("name", "env_name", "replacement"),
+        [
+            ("dso-only", "INPUT_DSO_ONLY", "set: release.dso_only=true"),
+            (
+                "include-private-dso",
+                "INPUT_INCLUDE_PRIVATE_DSO",
+                "set: release.include_private_dso=true",
+            ),
+            (
+                "fail-on-removed-library",
+                "INPUT_FAIL_ON_REMOVED_LIBRARY",
+                "set: gate.fail_on_removed_library=true",
+            ),
+        ],
+    )
+    def test_retired_input_is_refused_with_its_set_replacement(
+        self, name: str, env_name: str, replacement: str
+    ) -> None:
+        result = _validate(**{env_name: "false"})
+        combined = result.stdout + result.stderr
+        assert result.returncode != 0, combined
+        assert name in combined, combined
+        assert replacement in combined, combined
+
+    def test_set_carries_explicit_false_release_keys_to_the_cli(
+        self, tmp_path: Path
+    ) -> None:
+        argv = _run_compare(
+            tmp_path,
+            "release.dso_only=false\ngate.fail_on_removed_library=false\n",
+        )
+        assert "release.dso_only=false" in _set_pairs(argv)
+        assert "gate.fail_on_removed_library=false" in _set_pairs(argv)
+
+    def test_omitted_key_leaves_a_discovered_true_untouched(
+        self, tmp_path: Path
+    ) -> None:
+        """With no ``release.dso_only`` set anywhere, the discovered true
+        survives the overlay merge: the overlay writes only what was given."""
         (tmp_path / ".abicheck.yml").write_text(
             "release:\n  dso_only: true\n", encoding="utf-8"
         )
-        result = _run_bash_script(_harness(), {"INPUT_DSO_ONLY": "false"}, cwd=tmp_path)
-        assert result.returncode == 0, result.stderr
-        doc = _read_config_overlay(result.stdout.splitlines())
-        assert doc["release"]["dso_only"] is False
-
-    def test_explicit_false_fail_on_removed_library_overrides_discovered_true(
-        self, tmp_path: Path
-    ) -> None:
-        (tmp_path / ".abicheck.yml").write_text(
-            "gate:\n  fail_on_removed_library: true\n", encoding="utf-8"
-        )
         result = _run_bash_script(
-            _harness(), {"INPUT_FAIL_ON_REMOVED_LIBRARY": "false"}, cwd=tmp_path
-        )
-        assert result.returncode == 0, result.stderr
-        doc = _read_config_overlay(result.stdout.splitlines())
-        assert doc["gate"]["fail_on_removed_library"] is False
-
-    def test_omitted_input_leaves_a_discovered_true_untouched(
-        self, tmp_path: Path
-    ) -> None:
-        """The companion case: when dso-only is never mentioned at all (as
-        opposed to explicitly set to false), the discovered config's own
-        true value must survive -- proving the fix distinguishes the two
-        rather than always forcing a value through. Triggers
-        add_release_topology_config_flags via a different, explicitly-set
-        input (fail-on-removed-library) so the function still runs."""
-        (tmp_path / ".abicheck.yml").write_text(
-            "release:\n  dso_only: true\n", encoding="utf-8"
-        )
-        result = _run_bash_script(
-            _harness(), {"INPUT_FAIL_ON_REMOVED_LIBRARY": "true"}, cwd=tmp_path
+            _harness(), {"INPUT_REQUIRE_COMPLETE": "true"}, cwd=tmp_path
         )
         assert result.returncode == 0, result.stderr
         doc = _read_config_overlay(result.stdout.splitlines())
         assert doc["release"]["dso_only"] is True
-        assert doc["gate"]["fail_on_removed_library"] is True
+        assert doc["assurance"]["require_complete"] is True
 
     def test_all_inputs_omitted_is_still_a_no_op(self, tmp_path: Path) -> None:
         """Every input empty (never given) must still take the early-return

@@ -90,8 +90,8 @@ OPTION_GROUPS: dict[str, list[dict[str, object]]] = {
             "name": "Output & reporting",
             "options": [
                 "--output",
-                "--view",
                 "--config",
+                "--set",
                 "--verbose",
             ],
         },
@@ -316,16 +316,15 @@ COMPARE_COMMON_OPTION_NAMES: frozenset[str] = frozenset(
         # request since plan slice 7m; the retired "fmt" was the other half
         # of the pair it replaced.
         "exports",
-        "view",
         # Policy & severity
         "config",
+        # --set PATH=VALUE: the config-key spelling of the moved options.
+        "config_overrides",
         "policy",
         "suppress",
         "severity_preset",
         # Scoped comparison (ADR-043) — headline feature, not a long-tail knob
         "used_by_apps",
-        "used_by_manifests",
-        "required_symbols_opt",
         # Build & source evidence
         "depth",
         "sources",

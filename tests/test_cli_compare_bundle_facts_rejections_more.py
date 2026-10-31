@@ -157,8 +157,8 @@ class TestCompareOldBundleFactsEarlyRejections:
             "compare",
             str(facts_path),
             str(new_dir),
-            "--view",
-            "demangle",
+            "--set",
+            'output.view=["demangle"]',
             "-o",
             "markdown=-",
         )
@@ -170,7 +170,7 @@ class TestCompareOldBundleFactsEarlyRejections:
         # than refused, and no information is lost: every machine
         # projection carries both the mangled and demangled names.
         assert code == 64
-        assert "retired" in out
+        assert "--set is not supported on a comparison of a stored BundleFacts" in out
 
     def test_default_demangle_is_not_rejected_by_itself(self, tmp_path: Path) -> None:
         # The silent default (None, "demangle ON") is left un-rejected,
@@ -211,14 +211,14 @@ class TestCompareOldBundleFactsEarlyRejections:
             "compare",
             str(facts_path),
             str(new_dir),
-            "--view",
-            "patterns",
+            "--set",
+            'output.view=["patterns"]',
             "-o",
             "markdown=-",
         )
 
         assert code == 64
-        assert "--view patterns" in out
+        assert "--set is not supported on a comparison of a stored BundleFacts" in out
 
     def test_default_explain_patterns_is_not_rejected_by_itself(
         self, tmp_path: Path
@@ -256,14 +256,14 @@ class TestCompareOldBundleFactsEarlyRejections:
             "compare",
             str(facts_path),
             str(new_dir),
-            "--view",
-            "root-cause",
+            "--set",
+            'output.view=["root-cause"]',
             "-o",
             "json=-",
         )
 
         assert code == 64
-        assert "--view <mode>" in out
+        assert "--set is not supported on a comparison of a stored BundleFacts" in out
 
     def test_show_filtered_is_rejected(self, tmp_path: Path) -> None:
         facts_path = tmp_path / "old.bundlefacts.json"

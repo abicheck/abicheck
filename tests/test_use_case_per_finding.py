@@ -195,8 +195,8 @@ def test_show_only_projects_the_field_with_the_block(tmp_path: Path) -> None:
         str(new),
         "--use-cases",
         str(manifest),
-        "--view",
-        "show=removed",
+        "--set",
+        'output.view=["show=removed"]',
     )
     assert {e["symbol"] for e in full["changes"]} >= {"b", "d"}
     assert [e["symbol"] for e in scoped["changes"]] == ["b"]
@@ -330,8 +330,8 @@ def test_root_cause_view_findings_carry_the_field(tmp_path: Path) -> None:
         str(new),
         "--use-cases",
         str(manifest),
-        "--view",
-        "root-cause",
+        "--set",
+        'output.view=["root-cause"]',
     )
     _assert_exact_inverse(report)
     nested = {

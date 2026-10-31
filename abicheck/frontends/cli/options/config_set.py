@@ -31,12 +31,23 @@ from typing import Any
 import click
 import yaml
 
-from ....workflows.compare_configuration import (
-    CLI_ONLY_OVERRIDE_PATHS,
-    TYPED_OVERRIDE_CHANNELS,
-)
+from ....workflows.compare.override_channels import TYPED_OVERRIDE_CHANNELS
+from ....workflows.compare_configuration import CLI_ONLY_OVERRIDE_PATHS
 from ....workflows.compile_config import COMPILE_CONTEXT_OVERRIDE_PATHS
 from ....workflows.extraction import ConfigOverrideError, validate_config_overrides
+
+#: The release-topology and removed-library gate keys. ``resolve_compare_config``
+#: reads them off the override-applied config, so the directory/package and
+#: ``--no-baseline`` routes honour them the same way they honour the file. They
+#: are the ``set:`` replacements of the retired Action inputs ``dso-only``,
+#: ``include-private-dso`` and ``fail-on-removed-library`` (ADR-091 Phase 5).
+RELEASE_TOPOLOGY_OVERRIDE_PATHS: frozenset[str] = frozenset(
+    {
+        "release.dso_only",
+        "release.include_private_dso",
+        "gate.fail_on_removed_library",
+    }
+)
 
 #: The keys `compare --set` applies: the typed channels, the CLI-only ones and
 #: the compile-context keys (ADR-091 D4). Every other key (build.*, sources.*,
@@ -46,6 +57,7 @@ _COMPARE_APPLIED_PATHS: frozenset[str] = (
     frozenset({path for path, _field, _attr in TYPED_OVERRIDE_CHANNELS})
     | CLI_ONLY_OVERRIDE_PATHS
     | COMPILE_CONTEXT_OVERRIDE_PATHS
+    | RELEASE_TOPOLOGY_OVERRIDE_PATHS
 )
 
 #: The keys a directory/package (release) compare forwards to its members. The
@@ -63,6 +75,7 @@ _RELEASE_APPLIED_PATHS: frozenset[str] = frozenset(
         "deployment",
     }
     | COMPILE_CONTEXT_OVERRIDE_PATHS
+    | RELEASE_TOPOLOGY_OVERRIDE_PATHS
 )
 
 __all__ = [
@@ -130,7 +143,8 @@ def parse_set_assignments(
 
 _SET_HELP: str = (
     "Set one .abicheck.yml key for this run, as PATH=VALUE, e.g. "
-    "--set debug.dwarf_only=true. Repeatable. PATH is the config path; VALUE "
+    "--set debug.dwarf_only=true, or --set 'output.view=[\"show=breaking\"]' "
+    "for a list. Repeatable. PATH is the config path; VALUE "
     "is read as YAML, so a list is [a, b]. Overrides the "
     ".abicheck.yml file; an explicit flag still wins over both. A key this "
     "command does not apply, or a core option with its own flag, is refused "

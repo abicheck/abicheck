@@ -42,13 +42,13 @@ command** when you need more confidence or a CI gate.
 | Stripped production binaries | `abicheck compare old.so new.so --debug-info old=old-debug --debug-info new=new-debug` (or a `.abicheck.yml` `debug.debuginfod: true` to fetch by build-id) | Also pass public headers (`-H`) for highest confidence |
 | A CI baseline vs a fresh build | `abicheck dump libfoo.so -H include/ -o baseline.json`, then `abicheck compare baseline.json build/libfoo.so --header new=include/` | Store baselines in GitHub Releases, the repo, the Actions cache, or artifact storage — see [Storing Baselines](../use/baseline-storage.md) |
 | A PR with source/build context (catch source-only & build-flag breaks) | `abicheck compare baseline.json build/libfoo.so -H include/ --sources new=. --since origin/main --depth source` | `compare` already runs the always-on pattern + cross-source checks and the pinned L3/L4/L5 level on every invocation (no separate orchestrator command needed) — see [Source & Build Data](../learn/build-source-data.md) and the [GitHub Action: Source Scans](../use/github-action-source-scans.md) |
-| No baseline yet — single-build hygiene audit (accidental exports, private-header leaks, unversioned symbols) | `abicheck compare --no-baseline build/libfoo.so -H include/` | The findings land under `findings[]`; `changes[]` and `verdict` stay empty, because an audit reports no comparison, and by default a hygiene finding never gates CI. Migrating a legacy `scan`-based **gating** job (0.6 retired `scan` itself): add `--severity-preset default` (or `strict`) to keep gating on a breaking hygiene finding — a non-gating job needs no change; the audit is pinned to report at least as many findings of every kind `scan` used to ([Scenario S5](../integration/scenarios/single-build-audit.md)) |
+| No baseline yet — single-build hygiene audit (accidental exports, private-header leaks, unversioned symbols) | `abicheck compare --no-baseline build/libfoo.so -H include/` | The findings land under `findings[]`; `changes[]` and `verdict` stay empty, because an audit reports no comparison, and by default a hygiene finding never gates CI. Migrating a legacy `scan`-based **gating** job (0.6 retired `scan` itself): add `--set severity.preset=default` (or `strict`) to keep gating on a breaking hygiene finding — a non-gating job needs no change; the audit is pinned to report at least as many findings of every kind `scan` used to ([Scenario S5](../integration/scenarios/single-build-audit.md)) |
 | Build emits source facts in parallel (combine into one baseline) | `abicheck compare old.so new.so --build-info old=abicheck_inputs/v1 --build-info new=abicheck_inputs/v2` (also auto-detects an `abicheck_inputs/` pack alongside each input with no flag at all) | No standalone merge step — `dump`/`compare` auto-ingest each side's embedded or out-of-band build/source pack directly |
 | Two snapshots (offline / air-gapped) | `abicheck compare old.json new.json` | No headers/castxml/network needed — everything is baked into the snapshots |
 | Several DSOs shipped together | `abicheck compare release-1.0/ release-2.0/ -H include/` (per-library results on all platforms; the cross-library bundle/dependency-skew analysis is **Linux/ELF only**) | Add `--instantiation-manifest` only for template instantiations, dlsym/plugin contracts, internal stable exports, or symbol-version promises |
 | RPM / Deb / tar / conda / wheel packages | `abicheck compare old.rpm new.rpm` | Add `--debug-info old=old-debuginfo.rpm --debug-info new=new-debuginfo.rpm` (debuginfo packages) and `-H old=old-devel.rpm -H new=new-devel.rpm` (header/devel packages -- `-H` takes a package as well as a header directory) where available |
 | An application + a library upgrade | `abicheck compare libfoo.so.1 libfoo.so.2 --used-by ./myapp` | Add `-H include/`; repeatable for several application binaries; OLD/NEW may be real library binaries or JSON snapshots carrying binary evidence |
-| A host that `dlopen`s plugins | `abicheck compare plugin.v1.so plugin.v2.so --required-symbol plugin_init` | Use `--required-symbol @host.syms --policy plugin_abi` for a whole host-contract file |
+| A host that `dlopen`s plugins | `abicheck compare plugin.v1.so plugin.v2.so --set 'consumers.required_symbols=[plugin_init]'` | Use `--set 'consumers.required_symbols=["@host.syms"]' --policy plugin_abi` for a whole host-contract file (or set `consumers.required_symbols` in `.abicheck.yml`) |
 | Will this binary load in this sysroot / rootfs? | `abicheck deps tree ./app --root /rootfs` | `abicheck deps tree ./app` alone checks the dependency tree resolves |
 | Two sysroots / container images to compare | `abicheck deps compare usr/bin/app --root old=/old-root --root new=/new-root` | Per-library ABI diff across the whole transitive dependency stack |
 | Only a static `.a` / `.lib` archive | *(unsupported directly)* | Extract members (`ar x libfoo.a`) and compare the `.o` objects, or compare a shared library built from the same sources — see [Limitations](../learn/limitations.md#static-import-library-archives-a-lib) |
@@ -105,11 +105,11 @@ when the default doesn't reach the layer you need.
 ## 3) How should CI behave?
 
 abicheck separates two independent questions: **what fails the build**
-(verdict/severity/exit code — `--severity-*` flags or GitHub Action
+(verdict/severity/exit code — `severity.*` settings or GitHub Action
 `fail-on-*`/`severity-*` inputs) and **what appears in the report**
-(display-only `--view show=...`, which never changes the verdict or exit code).
+(display-only `output.view: [show=...]`, which never changes the verdict or exit code).
 See [Severity Configuration](../use/severity.md) for the full failure-policy
-recipe table and [Output Formats → `--view show=...` filter](../use/output-formats.md#-view-show-filter)
+recipe table and [Output Formats → `output.view` display filter](../use/output-formats.md#outputview-display-filter-show)
 for display filtering.
 
 Beyond severity, two more mechanisms can each independently decide what

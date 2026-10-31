@@ -584,8 +584,20 @@ class TestEvidenceReading:
         "argv",
         [
             ["compare", "old.so", "new.so", "--used-by", "app"],
-            ["compare", "old.so", "new.so", "--required-symbol", "sym"],
-            ["compare", "old.so", "new.so", "--required-symbol", "@syms.txt"],
+            [
+                "compare",
+                "old.so",
+                "new.so",
+                "--set",
+                'consumers.required_symbols=["sym"]',
+            ],
+            [
+                "compare",
+                "old.so",
+                "new.so",
+                "--set",
+                'consumers.required_symbols=["@syms.txt"]',
+            ],
         ],
     )
     def test_is_consumer_scoped_recognizes_every_dial(self, argv):
@@ -678,8 +690,8 @@ class TestEvidenceReading:
                 "compare",
                 "old.so",
                 "new.so",
-                "--required-symbol",
-                "@syms.txt",
+                "--set",
+                'consumers.required_symbols=["@syms.txt"]',
             ],
             "cwd": str(workspace),
         }
@@ -742,8 +754,8 @@ class TestEvidenceReading:
                     "b",
                     "--used-by",
                     "renderer",
-                    "--required-symbol",
-                    "analytics-daemon",
+                    "--set",
+                    'consumers.required_symbols=["analytics-daemon"]',
                 ]
             }
         )
@@ -761,8 +773,8 @@ class TestEvidenceReading:
                     "b",
                     "--used-by",
                     "renderer",
-                    "--required-symbol",
-                    "analytics-daemon",
+                    "--set",
+                    'consumers.required_symbols=["analytics-daemon"]',
                 ]
             }
         )
@@ -775,13 +787,27 @@ class TestEvidenceReading:
         no recorded cwd at all, must not raise and must not fabricate a
         match."""
         no_cwd = ev.consumer_scope_targets(
-            {"argv": ["compare", "a", "b", "--required-symbol", "@syms.txt"]}
+            {
+                "argv": [
+                    "compare",
+                    "a",
+                    "b",
+                    "--set",
+                    'consumers.required_symbols=["@syms.txt"]',
+                ]
+            }
         )
         assert no_cwd == frozenset()
 
         missing_file = ev.consumer_scope_targets(
             {
-                "argv": ["compare", "a", "b", "--required-symbol", "@syms.txt"],
+                "argv": [
+                    "compare",
+                    "a",
+                    "b",
+                    "--set",
+                    'consumers.required_symbols=["@syms.txt"]',
+                ],
                 "cwd": str(tmp_path / "gone"),
             }
         )
@@ -1410,37 +1436,6 @@ class TestSelfComparisonDetection:
         falls back to the raw string comparison -- degrading, not crashing."""
         call = {"argv": ["compare", "/abs/old/lib.so", "./old/lib.so"]}
         assert not ev.compares_one_side_against_itself(call)
-
-
-class TestShortOptionClusters:
-    """Click packs short options, and both readers of an argv must agree.
-
-    Verified against the real CLI: `compare x.so -vv x.so` runs the comparison,
-    and `compare ... -voreport.json` writes `report.json`.
-    """
-
-    @pytest.mark.parametrize(
-        "argv",
-        [
-            ["compare", "x.so", "-vv", "x.so"],
-            ["compare", "x.so", "-vvv", "x.so"],
-            ["compare", "-oreport.json", "a.so", "a.so"],
-            ["compare", "x.so", "x.so", "-voreport.json"],
-        ],
-    )
-    def test_a_cluster_does_not_hide_the_second_side(self, argv):
-        assert ev.compares_one_side_against_itself({"argv": argv})
-
-    @pytest.mark.parametrize(
-        "argv",
-        [
-            ["compare", "a.so", "b.so", "-vo", "report.json"],
-            ["compare", "a.so", "b.so", "-j4"],
-            ["compare", "a.so", "b.so", "-oreport.json"],
-        ],
-    )
-    def test_an_ordinary_invocation_survives_expansion(self, argv):
-        assert not ev.compares_one_side_against_itself({"argv": argv})
 
 
 class TestVerdictRanking:

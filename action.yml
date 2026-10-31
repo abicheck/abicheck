@@ -94,15 +94,23 @@ inputs:
     description: 'Debug info package for new side (RPM/Deb/tar). compare mode, directory/package operands only.'
     required: false
   dso-only:
-    description: 'Only compare shared objects, skip executables. compare mode, directory/package operands only. Deliberately no declared default (Codex review, fresh evidence): the synthesized release:/gate: config overlay needs to tell "omitted" apart from an explicit "false" (which must override a discovered/explicit .abicheck.yml''s own release.dso_only: true) -- a declared default would make every omitted invocation indistinguishable from an explicit false, silently losing that override.'
+    description: >
+      RETIRED (no transition period). Setting this input fails the
+      run before any analysis. Replace it in your workflow with
+      `set: release.dso_only=true` (the `set:` input takes one PATH=VALUE per line), then remove dso-only.
     required: false
   include-private-dso:
-    description: 'Include private (non-public) shared objects from non-standard paths. compare mode, directory/package operands only. Deliberately no declared default -- see dso-only''s own description for why.'
+    description: >
+      RETIRED (no transition period). Setting this input fails the
+      run before any analysis. Replace it in your workflow with
+      `set: release.include_private_dso=true` (the `set:` input takes one PATH=VALUE per line), then remove include-private-dso.
     required: false
   fail-on-removed-library:
-    description: 'Exit 8 when a library present in old is proven removed in new -- NEW must have a proven-complete declared inventory: either a stored ProjectSnapshot package whose capture asserted inventory_complete, or a package archive (e.g. .rpm/.deb) whose own readable member table this run extracted and could enumerate in full; a live directory, or an archive whose member table could not be read in full, is an unproven inventory and an unmatched library there is an incomplete scope instead, governed by the scope.on_incomplete key in .abicheck.yml. compare mode, directory/package operands only. Deliberately no declared default -- see dso-only''s own description for why.'
+    description: >
+      RETIRED (no transition period). Setting this input fails the
+      run before any analysis. Replace it in your workflow with
+      `set: gate.fail_on_removed_library=true` (the `set:` input takes one PATH=VALUE per line), then remove fail-on-removed-library.
     required: false
-
   require-complete:
     description: >
       Per-job override of `.abicheck.yml`'s `assurance.require_complete` for
@@ -136,16 +144,9 @@ inputs:
     required: false
   public-header-dirs:
     description: >
-      Directory whose headers are treated as public for provenance
-      classification (repeatable, space-separated) — establishes the
-      public/internal boundary so leakage/RTTI/exported-vs-public
-      cross-checks run instead of skipping. dump mode forwards it as one
-      more `-H/--header` root, which is where `dump` reads declaration
-      provenance from AND extracts headers from (a directory entry tags
-      everything under it public and expands to every header inside).
-      compare's audit-only shape (old-library/abi-baseline both omitted)
-      forwards it the same way, as a bare `-H` root applying to the one
-      audited artifact — a two-sided compare has no equivalent flag.
+      RETIRED (no transition period). Setting this input fails the
+      run before any analysis. Replace it in your workflow with
+      `header: <dir> ...` (it was forwarded as -H, which is what header does; use old-header/new-header for one side), then remove public-header-dirs.
     required: false
   build-target:
     description: >
@@ -219,37 +220,9 @@ inputs:
     default: 'c++'
   frontend:
     description: >
-      L2 header-AST frontend for native-binary inputs: "auto" (resolves to
-      castxml and never changes producer unless
-      `compile.ast_frontend_fallback: true` is set in the `.abicheck.yml`
-      build-config (or ABICHECK_ALLOW_AST_FALLBACK=1 is set) — with that opt-in, a recognized
-      castxml toolchain-version mismatch, an unsupported castxml release, or
-      a direct-include-guard failure falls back to clang, G16; without it,
-      and on any host with no castxml at all, auto does not silently switch
-      to clang — the command fails asking you to install castxml or pass
-      frontend: clang explicitly. One exception: a non-host
-      `compile.frontend_context` (SYCL/DPC++, set in the `.abicheck.yml`
-      build-config) routes an auto
-      that resolves to plain castxml (no pin) straight to clang with no
-      opt-in needed, since castxml can't satisfy it at all — but any way of
-      pinning the resolved backend away from plain castxml-or-clang still
-      rejects it: an explicit frontend: castxml, auto pinned to castxml
-      via ABICHECK_AST_FRONTEND=castxml, and hybrid (explicit or auto
-      pinned via ABICHECK_AST_FRONTEND=hybrid — hybrid has no device
-      concept either) all reject a non-host context. Explicit
-      frontend: clang satisfies it directly, and so does auto pinned to
-      clang via ABICHECK_AST_FRONTEND=clang),
-      "castxml" (default), "clang" (clang -ast-dump=json; explicit opt-in
-      for clang-only hosts), or "hybrid" (runs both and merges them; needs
-      both tools installed on the runner, never auto-selected). Applies to
-      dump and compare mode, on single-pair and directory/package
-      (release) operands alike — the per-library release fan-out threads
-      this both-sides L2 context to every pair's header dump
-      (`cli_resolve.resolve_directory_compile_context`), so it is
-      forwarded, not rejected, for a directory/package operand. (Only a
-      *sided* old=/new= frontend override has no per-library-pair meaning
-      across a release; this input has no sided spelling.) Same as the
-      ABICHECK_AST_FRONTEND env var.
+      RETIRED (no transition period). Setting this input fails the
+      run before any analysis. Replace it in your workflow with
+      `set: compile.frontend=<value>` (the `set:` input takes one PATH=VALUE per line), then remove frontend.
     required: false
   compiler:
     description: >
@@ -266,39 +239,19 @@ inputs:
     required: false
   compile-options:
     description: >
-      Extra compiler flags passed through to the header frontend. Forwarded
-      as a --set compile.options=… list alongside compiler (see that input's
-      description), on every mode that accepts it. A single-line
-      value is shell-quoting-aware split on whitespace into separate flags
-      (a quoted segment such as -DMSG="hello world" stays one flag, but
-      that one flag still contains a space internally); a multi-line
-      (YAML block scalar) value treats each line as one already-complete
-      flag, not split further. Either way, each resulting compile.options
-      entry must be a single whitespace-free flag -- a flag containing a
-      space (whether from a quoted single-line segment or a spaced
-      multi-line entry) is rejected with a clear error rather than
-      silently accepted or silently split further; put each word needing
-      its own flag on its own line instead. This is a real, accepted
-      narrowing from an earlier Action version, where the CLI's own
-      now-removed --compiler-option flag once forwarded such a flag
-      verbatim (a raw CLI arg is not subject to compile.options' own
-      whitespace-free-atom contract). Applies to dump and compare mode, on
-      single-pair and directory/package (release) operands alike (same
-      scope as frontend above).
+      RETIRED (no transition period). Setting this input fails the
+      run before any analysis. Replace it in your workflow with
+      `set: compile.options=[<flag>, ...]` (the `set:` input takes one PATH=VALUE per line), then remove compile-options.
     required: false
   sysroot:
     description: 'Alternative system root directory for cross-compilation. On dump and single-pair compare (including the audit-only shape) this is forwarded as a --set compile.sysroot argument (see compiler above) (deps-tree keeps its own direct --root CLI forwarding, unaffected -- it is not part of this compile-context group at all). Applies to dump, deps-tree, and compare mode, the latter on single-pair and directory/package (release) operands alike (same scope as frontend above).'
     required: false
   nostdinc:
     description: >
-      Do not search standard system include paths. On dump and compare
-      this is forwarded as a --set compile.nostdinc argument (see compiler
-      above). Applies to dump and compare mode, on single-pair and
-      directory/package (release) operands alike (same scope as
-      frontend above).
+      RETIRED (no transition period). Setting this input fails the
+      run before any analysis. Replace it in your workflow with
+      `set: compile.nostdinc=true` (the `set:` input takes one PATH=VALUE per line), then remove nostdinc.
     required: false
-    default: 'false'
-
   # ── Full-stack dependency validation (Linux ELF) ─────────────────────────────
   follow-deps:
     description: >
@@ -348,7 +301,7 @@ inputs:
   used-by-manifest:
     description: >
       Path(s) to a JSON document naming one or more consumer binaries
-      (space-separated; maps to repeated compare --used-by-manifest), each
+      (space-separated; forwarded as --set consumers.manifests=[...]), each
       with optional digest/platform/profile/provider_baseline provenance and
       a requirement ("required", the default -- an unreadable consumer
       aborts the run, same as used-by -- or "advisory" -- an unreadable
@@ -363,8 +316,8 @@ inputs:
   required-symbol:
     description: >
       An exported linker symbol a plugin host resolves via dlopen/dlsym
-      and requires (space-separated; maps to repeated compare
-      --required-symbol). The full library comparison always determines
+      and requires (space-separated; forwarded as --set
+      consumers.required_symbols=[...]). The full library comparison always determines
       this run's own verdict/exit code; this contract's own confirmed/
       potential/unresolved impact is reported alongside it (informational),
       never in place of it. Mutually exclusive with used-by. compare mode
@@ -434,16 +387,11 @@ inputs:
     required: false
   jobs:
     description: >
-      Removed and ignored. This input used to forward
-      `-j/--jobs` to `compare`, capping the directory/package release
-      fan-out's worker count. Both the flag and the input are gone: the
-      release engine auto-detects the CPU count and clamps it to available
-      memory, and there is no manual override any more. Kept registered as
-      a tombstone — deleting the input outright made GitHub drop it before
-      the Action ever ran, so a pinned workflow that still sets it got no
-      error and no annotation, and its worker cap silently stopped
-      applying. Setting it now emits an explicit warning telling you it has
-      no effect. Remove it from your workflow.
+      RETIRED (no transition period). Setting this input fails the run
+      before any analysis. There is no replacement: the worker count is no longer a
+      workflow setting. abicheck's release fan-out auto-detects the CPU count and
+      clamps it to available memory, so concurrency is controlled by the runner or
+      workflow itself. Remove jobs from your workflow.
     required: false
   bundle-system-providers:
     description: >
@@ -457,22 +405,16 @@ inputs:
       error: move the list into `.abicheck.yml` and point `build-config` at
       it. (Marked RETIRED, like every other hard-error tombstone here, so
       `tests/test_action_retired_inputs_contract.py` holds it to the same
-      executable fail-closed guarantee; `jobs` above is the softer
-      warn-only class and deliberately keeps its own wording.)
+      executable fail-closed guarantee, the same one `jobs` above has.)
     required: false
   allow-build-query:
     description: >
-      Deprecated and ignored. The `--allow-build-query` dump flag it used to
-      forward was already a no-op and has since been removed outright (CLI
-      cleanup H1); this input is kept registered only so an existing
-      workflow that still sets it doesn't get an unknown-input warning.
-      abicheck always runs its own inferred, abicheck-authored
-      cmake/bazel/make compile-DB query whenever a sources input needs build
-      context: pointing abicheck at a source tree is itself the request to
-      analyse it. A trusted, operator-supplied build.query (`build-config`)
-      needs no opt-in either — see `build-config` above.
+      RETIRED (no transition period). Setting this input fails the run
+      before any analysis. There is no replacement: abicheck always runs its own
+      inferred compile-database query when a sources input needs build context, and
+      a trusted build query is set through build-config (build.query). Remove
+      allow-build-query from your workflow.
     required: false
-    default: 'false'
   depth:
     description: >
       Evidence-depth selector: binary, headers, build, or source. Used by
@@ -1000,10 +942,9 @@ inputs:
   # ── Retired inputs (ADR-091 renames) ────────────────────────────────────
   ast-frontend:
     description: >
-      RETIRED (no transition period): renamed to `frontend`.
-      Setting this input fails the run before any analysis with an
-      `::error::` naming `frontend`. Replace `ast-frontend` with `frontend`, then
-      remove `ast-frontend`.
+      RETIRED (no transition period). Setting this input fails the run before
+      any analysis. Replace it in your workflow with `set: compile.frontend=<value>`, then remove
+      `ast-frontend`.
     required: false
   gcc-path:
     description: >
@@ -1014,10 +955,9 @@ inputs:
     required: false
   gcc-options:
     description: >
-      RETIRED (no transition period): renamed to `compile-options`.
-      Setting this input fails the run before any analysis with an
-      `::error::` naming `compile-options`. Replace `gcc-options` with `compile-options`, then
-      remove `gcc-options`.
+      RETIRED (no transition period). Setting this input fails the run before
+      any analysis. Replace it in your workflow with `set: compile.options=[<flag>, ...]`, then remove
+      `gcc-options`.
     required: false
   analysis-assurance-complete:
     description: >
@@ -1028,10 +968,9 @@ inputs:
     required: false
   public-header-dir:
     description: >
-      RETIRED (no transition period): renamed to `public-header-dirs`.
-      Setting this input fails the run before any analysis with an
-      `::error::` naming `public-header-dirs`. Replace `public-header-dir` with `public-header-dirs`, then
-      remove `public-header-dir`.
+      RETIRED (no transition period). Setting this input fails the run before
+      any analysis. Replace it in your workflow with `header: <dir> ...` (it was forwarded as -H, which is what header does), then remove
+      `public-header-dir`.
     required: false
   debug-info1:
     description: >
@@ -1412,6 +1351,7 @@ runs:
         # forwards either, which is why both are in
         # tests/test_action_run_contract.py's _NON_RUN_SH_INPUTS.
         INPUT_JOBS: ${{ inputs.jobs }}
+        INPUT_ALLOW_BUILD_QUERY: ${{ inputs.allow-build-query }}
         INPUT_BUNDLE_SYSTEM_PROVIDERS: ${{ inputs.bundle-system-providers }}
         INPUT_NEW_LIBRARY: ${{ inputs.new-library }}
         INPUT_NEW_LIBRARY_SET: ${{ inputs.new-library-set }}
@@ -1624,19 +1564,12 @@ runs:
         INPUT_HEADER: ${{ inputs.header }}
         INPUT_OLD_HEADER: ${{ inputs.old-header }}
         INPUT_NEW_HEADER: ${{ inputs.new-header }}
-        INPUT_PUBLIC_HEADER_DIRS: ${{ inputs.public-header-dirs }}
         INPUT_BUILD_TARGET: ${{ inputs.build-target }}
         INPUT_INCLUDE: ${{ inputs.include }}
         INPUT_OLD_INCLUDE: ${{ inputs.old-include }}
         INPUT_NEW_INCLUDE: ${{ inputs.new-include }}
         INPUT_OLD_LABEL: ${{ inputs.old-label }}
         INPUT_NEW_LABEL: ${{ inputs.new-label }}
-        INPUT_LANG: ${{ inputs.lang }}
-        INPUT_FRONTEND: ${{ inputs.frontend }}
-        INPUT_COMPILER: ${{ inputs.compiler }}
-        INPUT_COMPILE_OPTIONS: ${{ inputs.compile-options }}
-        INPUT_SYSROOT: ${{ inputs.sysroot }}
-        INPUT_NOSTDINC: ${{ inputs.nostdinc }}
         INPUT_FORMAT: ${{ inputs.format }}
         INPUT_OUTPUT_FILE: ${{ inputs.output-file }}
         INPUT_SNAPSHOT_COMPRESSION: ${{ inputs.snapshot-compression }}
@@ -1655,7 +1588,6 @@ runs:
         INPUT_LD_LIBRARY_PATH: ${{ inputs.ld-library-path }}
         INPUT_FAIL_ON_BREAKING: ${{ inputs.fail-on-breaking }}
         INPUT_FAIL_ON_API_BREAK: ${{ inputs.fail-on-api-break }}
-        INPUT_SEVERITY_PRESET: ${{ inputs.severity-preset }}
         INPUT_SET: ${{ inputs.set }}
         INPUT_REQUIRE_COMPLETE_ANALYSIS: ${{ inputs.require-complete-analysis }}
         INPUT_ANNOTATE: ${{ inputs.annotate }}
@@ -1674,9 +1606,6 @@ runs:
         INPUT_ADD_JOB_SUMMARY: ${{ inputs.add-job-summary }}
         INPUT_OLD_DEBUG_INFO: ${{ inputs.old-debug-info }}
         INPUT_NEW_DEBUG_INFO: ${{ inputs.new-debug-info }}
-        INPUT_DSO_ONLY: ${{ inputs.dso-only }}
-        INPUT_INCLUDE_PRIVATE_DSO: ${{ inputs.include-private-dso }}
-        INPUT_FAIL_ON_REMOVED_LIBRARY: ${{ inputs.fail-on-removed-library }}
         INPUT_REQUIRE_COMPLETE: ${{ inputs.require-complete }}
         INPUT_ACKNOWLEDGMENTS: ${{ inputs.acknowledgments }}
         INPUT_PR_COMMENT: ${{ inputs.pr-comment }}
@@ -1700,6 +1629,10 @@ runs:
         INPUT_CROSSCHECK: ${{ inputs.crosscheck }}
         INPUT_RISK_RULES: ${{ inputs.risk-rules }}
         GH_TOKEN: ${{ inputs.github-token }}
+        INPUT_LANG: ${{ inputs.lang }}
+        INPUT_COMPILER: ${{ inputs.compiler }}
+        INPUT_SYSROOT: ${{ inputs.sysroot }}
+        INPUT_SEVERITY_PRESET: ${{ inputs.severity-preset }}
       run: bash "${{ github.action_path }}/action/run.sh"
 
     # ── 5. Upload SARIF ──────────────────────────────────────────────────────

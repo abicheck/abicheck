@@ -290,25 +290,6 @@ COMPARE_OPTION_RULINGS: dict[str, OptionRuling] = {
         "never verdict-suppressing: the full library comparison still "
         "determines the run's own exit code."
     ),
-    "--used-by-manifest": _keep(
-        "Workstream D-S1: a JSON document naming one or more consumer "
-        "binaries with optional digest/platform/profile/provider-baseline "
-        "provenance and an advisory/required distinction, merged into the "
-        "same --used-by pipeline. Audited against --used-by for a "
-        "`@FILE` merge on the Phase 7h --required-symbols precedent and "
-        "ruled *not* the same case: --required-symbols FILE fed the "
-        "identical contract as an inline symbol, whereas a manifest carries "
-        "provenance and an advisory/required requirement a bare consumer "
-        "path cannot express. Collapsing them would either drop that "
-        "content or overload one flag with two value grammars."
-    ),
-    "--required-symbol": _keep(
-        "ADR-043: folds the removed `plugin-check` command into compare -- "
-        "an explicit required-entrypoint contract for a plugin-host "
-        "pairing. Varies per run (which symbols a given host resolves), not "
-        "a project setting. Already absorbed Phase 7h's --required-symbols "
-        "as its `@FILE` value form."
-    ),
     # ── Document operands: a flag naming a document is still per-run ─────
     "--config": _keep(
         "Which .abicheck.yml this run reads. The one option that cannot be "
@@ -426,30 +407,6 @@ COMPARE_OPTION_RULINGS: dict[str, OptionRuling] = {
         "what '-' dissolves. Guard 2 in particular is now *satisfied* "
         "rather than argued: there is exactly one spelling for 'produce "
         "this artifact there', so no two of them can drift."
-    ),
-    "--view": _keep(
-        "ADR-068 D4 / Phase 5, rewritten by plan slice 7o around what this "
-        "option now carries. Phase 5 absorbed --report-mode, --show-only, "
-        "--explain-patterns and --demangle/--no-demangle into one selector; "
-        "7i/7k then ruled it a keep without looking inside, where it still "
-        "held six independent decisions. Three are gone and none by "
-        "deletion: 'patterns'/'filtered'/'suppressions' gated *disclosure* "
-        "of three ledgers, which ADR-067's record-before-disposing rule "
-        "says is part of the result and not a display preference, so all "
-        "three are unconditional; 'demangle'/'no-demangle' gated whether "
-        "human output demangled, which stopped being a choice once a "
-        "demangled name carries its exact mangled spelling beside it and "
-        "every machine projection carries both; and 'leaf' retired against "
-        "'root-cause' on a measurement (129 real library pairs, identical "
-        "finding sets in all 93 with findings). What remains is the one "
-        "thing the option is for -- which parts of the already-computed "
-        "canonical result to render, and in what shape (report mode + the "
-        "severity/element/action display filter, whose three dimensions "
-        "now resolve through the change catalog's own declared "
-        "ChangeEntity/ChangeOperation rather than a second reading of a "
-        "ChangeKind's name). Per-run presentation, and deliberately "
-        "presentation *only*: it changes no verdict, finding, gate, exit "
-        "code, coverage contribution or assurance value."
     ),
     "--dry-run": _keep(
         "ADR-043: resolve and validate the invocation without running the "

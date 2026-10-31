@@ -186,7 +186,7 @@ def test_cli_markdown_and_digest_gating_follow_the_preset(
             str(_ACTION / "action_test_v1.json"),
             str(_ACTION / "action_test_v2.json"),
             "--severity-preset",
-            preset,
+            str(preset),
             "-o",
             f"markdown={md}",
             "-o",

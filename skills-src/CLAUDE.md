@@ -81,7 +81,7 @@ Keep both in sync when a skill is added, renamed, or retired.
    `importlib.metadata` reports the *last published* version, so calibrating
    the range to it would approve an installation lacking the surface: that is
    how the range first came to say `>=0.5.0` while every workflow depended on
-   `aggregate`, `project plan`, `--view root-cause`,
+   `aggregate`, `project plan`, `output.view: [root-cause]`,
    `--diagnostic-comparison`, and `--contract`, none of which
    0.5.0 shipped. `tests/test_agent_skills_structural.py` enforces the
    minimum against its own `SURFACE_FLOOR` constant — a stated fact about
@@ -126,8 +126,7 @@ place:**
 - A **real, integrated named-consumer branch** (`SKILL.md`'s own step on
   narrowing to one consumer), not just the single linking citation to
   `shared/consumer-scoping.md` the reset amendment left behind. States
-  inline when to reach for `--used-by` versus `--required-symbol`/
-  `--required-symbols`, and the `verdict`-is-always-global /
+  inline when to reach for `--used-by` versus `consumers.required_symbols`, and the `verdict`-is-always-global /
   `consumer_scope`-is-the-supplied-consumer's-own-informational-answer
   reading rule (workstream D-S1 reverted the earlier `verdict`-is-scoped /
   `full_verdict`-is-global design this bullet used to describe).

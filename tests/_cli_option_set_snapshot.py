@@ -106,7 +106,6 @@ OPTION_SET_SNAPSHOT: dict[str, tuple[str, ...]] = {
         "--performance-profile",
         "--policy",
         "--require-same-generation",
-        "--required-symbol",
         "--search-path",
         "--select",
         "--select-required",
@@ -119,10 +118,8 @@ OPTION_SET_SNAPSHOT: dict[str, tuple[str, ...]] = {
         # ADR-091: the per-side version label.
         "--label",
         "--used-by",
-        "--used-by-manifest",
         "--variant",
         "--verbose",
-        "--view",
         "-D",
         "-H",
         "-I",

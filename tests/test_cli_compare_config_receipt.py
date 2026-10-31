@@ -224,10 +224,10 @@ class TestCanonicalResolverIsWhatRuns:
         (Codex review, fresh evidence). The receipt names the flag that really
         selected it.
         """
-        ctx = _context(tmp_path, "--required-symbol", "api_b")
+        ctx = _context(tmp_path, "--set", 'consumers.required_symbols=["api_b"]')
         assert ctx["resolved_config"]["policy"]["base"]["id"] == "plugin_abi"
         prov = ctx["field_provenance"]["policy.base"]
-        assert prov["selected_by"][0]["option"] == "--required-symbol"
+        assert prov["selected_by"][0]["option"] == "consumers.required_symbols"
 
     def test_a_symbols_file_contract_names_the_file_and_the_option(self, tmp_path):
         """A `--required-symbol @FILE` run's receipt names the file and its
@@ -235,13 +235,13 @@ class TestCanonicalResolverIsWhatRuns:
         merged into this `@FILE` spelling)."""
         listed = tmp_path / "required.txt"
         listed.write_text("# contract\napi_b\n", encoding="utf-8")
-        ctx = _context(tmp_path, "--required-symbol", f"@{listed}")
+        ctx = _context(tmp_path, "--set", f'consumers.required_symbols=["@{listed}"]')
 
         assert ctx["resolved_config"]["policy"]["base"]["id"] == "plugin_abi"
         prov = ctx["field_provenance"]["policy.base"]
         assert prov["path"] == str(listed)
         hop = prov["selected_by"][0]
-        assert hop["option"] == "--required-symbol"
+        assert hop["option"] == "consumers.required_symbols"
         assert hop["path"] == str(listed)
         # The digest is over the file's raw bytes, from the same read that
         # parsed the symbols.
@@ -263,12 +263,12 @@ class TestCanonicalResolverIsWhatRuns:
         empty = tmp_path / "required.txt"
         empty.write_text("# nothing but a comment\n", encoding="utf-8")
         ctx = _context(
-            tmp_path, "--required-symbol", "api_b", "--required-symbol", f"@{empty}"
+            tmp_path, "--set", f'consumers.required_symbols=["api_b", "@{empty}"]'
         )
 
         assert ctx["resolved_config"]["policy"]["base"]["id"] == "plugin_abi"
         prov = ctx["field_provenance"]["policy.base"]
-        assert prov["selected_by"][0]["option"] == "--required-symbol"
+        assert prov["selected_by"][0]["option"] == "consumers.required_symbols"
         assert prov.get("path") is None
 
     def test_project_config_provenance_carries_its_digest(self, tmp_path):
@@ -286,7 +286,13 @@ class TestCanonicalResolverIsWhatRuns:
     def test_typed_policy_still_wins_over_the_required_symbol_default(self, tmp_path):
         """The derivation is gated on the flag being untouched, so a typed
         ``--policy`` must be reported as the selector, not overwritten."""
-        ctx = _context(tmp_path, "--required-symbol", "api_b", "--policy", "sdk_vendor")
+        ctx = _context(
+            tmp_path,
+            "--set",
+            'consumers.required_symbols=["api_b"]',
+            "--policy",
+            "sdk_vendor",
+        )
         assert ctx["resolved_config"]["policy"]["base"]["id"] == "sdk_vendor"
         assert (
             ctx["field_provenance"]["policy.base"]["selected_by"][0]["option"]

@@ -1150,14 +1150,14 @@ class TestCompareOldBundleFactsEarlyRejections:
             "compare",
             str(facts_path),
             str(new_dir),
-            "--view",
-            "show=breaking",
+            "--set",
+            'output.view=["show=breaking"]',
             "-o",
             "json=-",
         )
 
         assert code == 64
-        assert "--show-only" in out
+        assert "--set is not supported on a comparison of a stored BundleFacts" in out
 
     def test_config_scope_show_redundant_is_rejected(self, tmp_path: Path) -> None:
         # Codex review: BuildConfig's scope: block parses show_redundant as

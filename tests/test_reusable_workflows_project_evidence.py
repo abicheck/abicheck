@@ -51,7 +51,24 @@ def test_consumer_compile_context_uses_a_separate_extraction() -> None:
     )
     assert consumer["with"]["mode"] == "dump"
     assert consumer["with"]["new-library"] == "${{ inputs.new-library }}"
-    assert consumer["with"]["frontend"] == "${{ inputs.consumer-frontend }}"
+    # ADR-091 Phase 5: the root Action's frontend/compile-options inputs are
+    # retired, so the consumer values reach the dump as `set:` lines composed
+    # by their own step, whose output the consumer step forwards.
+    composer = next(
+        step
+        for step in steps
+        if step.get("name") == "Compose root set overrides (consumer dump)"
+    )
+    assert composer["env"]["ROOT_FRONTEND"] == "${{ inputs.consumer-frontend }}"
+    assert (
+        composer["env"]["ROOT_COMPILE_OPTIONS"]
+        == "${{ inputs.consumer-compile-options }}"
+    )
+    assert consumer["with"]["set"] == (
+        "${{ steps." + composer["id"] + ".outputs.set }}"
+    )
+    assert "frontend" not in consumer["with"]
+    assert "compile-options" not in consumer["with"]
     # gcc-path/gcc-options were the two fields this hop's own `if:` guard
     # already gated activation on (see test_consumer_dump_activates_from_
     # the_overlay_marker_alone) but never itself asserted forwarding for --
@@ -62,9 +79,6 @@ def test_consumer_compile_context_uses_a_separate_extraction() -> None:
     assert (
         consumer["with"]["compiler"]
         == "${{ inputs.consumer-compiler || (endsWith(inputs.compiler, '-') && inputs.compiler || '') }}"
-    )
-    assert (
-        consumer["with"]["compile-options"] == "${{ inputs.consumer-compile-options }}"
     )
     analysis = next(step for step in steps if step.get("name") == "Run analysis")
     assert "check-target-consumer.abi.json" in analysis["with"]["new-library"]
@@ -827,8 +841,10 @@ class TestConsumerCompilePropagationChainMutationCheck:
             "compiler",
             "${{ inputs.consumer-compiler || (endsWith(inputs.compiler, '-') && inputs.compiler || '') }}",
         )
+        # ADR-091 Phase 5: consumer frontend/compile-options now cross this
+        # hop as the composed `set:` lines (the root inputs are retired).
         _assert_step_input_forwards(
-            step, "compile-options", "${{ inputs.consumer-compile-options }}"
+            step, "set", "${{ steps.root_set_consumer.outputs.set }}"
         )
 
     def test_fails_and_names_the_field_when_the_edge_is_dropped(self) -> None:
@@ -859,11 +875,9 @@ class TestConsumerCompilePropagationChainMutationCheck:
         from `with:` altogether rather than being repointed."""
         step = self._consumer_context_step()
         mutated = dict(step)
-        mutated["with"] = {
-            k: v for k, v in step["with"].items() if k != "compile-options"
-        }
+        mutated["with"] = {k: v for k, v in step["with"].items() if k != "set"}
 
-        with pytest.raises(AssertionError, match="compile-options"):
+        with pytest.raises(AssertionError, match="'set'"):
             _assert_step_input_forwards(
-                mutated, "compile-options", "${{ inputs.consumer-compile-options }}"
+                mutated, "set", "${{ steps.root_set_consumer.outputs.set }}"
             )

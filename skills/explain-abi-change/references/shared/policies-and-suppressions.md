@@ -18,7 +18,7 @@ Owned by [the policy profiles page](https://abicheck.github.io/abicheck/use/poli
 
 ## Severity and the gate — how a report becomes an exit code
 
-`--severity-preset default|strict|info-only` sets the coarse severity
+`--set severity.preset=default|strict|info-only` sets the coarse severity
 grading; a `.abicheck.yml` `severity:` map sets an individual category
 (abi_breaking, potential_breaking, addition, quality_issues), which has no
 CLI flag of its own. Which of the two exit-code contracts applies (the
@@ -29,7 +29,7 @@ grading whenever any of the sources below actually configure one.
 In the report, `severity.exit_code`, `severity.blocking`, and
 `severity.blocking_categories` express the gate decision. The block is present
 whenever severity-aware grading was **resolved from any source** —
-`--severity-preset`, a `.abicheck.yml` `severity:` map,
+`--set severity.preset=...`, a `.abicheck.yml` `severity:` map,
 a run profile, or a gate pack — not only from a
 flag you passed. Absent means no gate was resolved anywhere and the exit code
 follows the legacy verdict mapping. (`policy_gate_decision` is an Action `check-target` field, not

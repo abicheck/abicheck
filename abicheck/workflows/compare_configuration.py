@@ -132,48 +132,18 @@ class CompareSettingsError(CompareConfigurationError):
 #: is (config path, ``CompareRequest`` field, ``ResolvedCompareConfig`` attribute).
 #: A validated key outside this table is refused by the typed API rather than
 #: dropped, so an override never silently changes nothing.
-TYPED_OVERRIDE_CHANNELS: tuple[tuple[str, str, str], ...] = (
-    ("scope.public", "scope_public", "scope_public"),
-    (
-        "scope.collapse_versioned_symbols",
-        "collapse_versioned_symbols",
-        "collapse_versioned_symbols",
-    ),
-    ("scope.public_symbols", "public_symbols", "public_symbols"),
-    ("severity.abi_breaking", "severity_abi_breaking", "merged_severity_abi_breaking"),
-    (
-        "severity.potential_breaking",
-        "severity_potential_breaking",
-        "merged_severity_potential_breaking",
-    ),
-    (
-        "severity.quality_issues",
-        "severity_quality_issues",
-        "merged_severity_quality_issues",
-    ),
-    ("severity.addition", "severity_addition", "merged_severity_addition"),
-    ("suppression.strict", "strict_suppressions", "strict_suppressions"),
-    (
-        "suppression.require_justification",
-        "require_justification",
-        "require_justification",
-    ),
-    (
-        "assurance.require_complete",
-        "require_complete_analysis",
-        "require_complete_analysis",
-    ),
-    ("debug.format", "debug_format", "debug_format"),
-    ("debug.dwarf_only", "dwarf_only", "dwarf_only"),
-    ("debug.debuginfod", "debuginfod", "debuginfod"),
-    ("debug.debuginfod_url", "debuginfod_url", "debuginfod_url"),
-    ("deployment", "env_matrix", "deployment"),
-)
 
 #: Further ``--set`` keys the CLI's ``compare`` applies from the resolved config
 #: or the run's own settings, which a typed comparison has no field for.
 CLI_ONLY_OVERRIDE_PATHS: frozenset[str] = frozenset(
-    {"scope.show_redundant", "sources.method", "performance.profile"}
+    {
+        "scope.show_redundant",
+        "sources.method",
+        "performance.profile",
+        "output.view",
+        "consumers.manifests",
+        "consumers.required_symbols",
+    }
 )
 
 
@@ -630,7 +600,7 @@ def load_required_symbols(
     files = [v[1:] for v in symbols if v.startswith("@")]
     if len(files) > 1:
         raise CompareSettingsError(
-            f"--required-symbol accepts at most one '@FILE' value; got {files}. "
+            f"consumers.required_symbols accepts at most one '@FILE' value; got {files}. "
             "Combine both files, or pass the extras as plain values."
         )
     from_file: list[str] = []
@@ -639,10 +609,12 @@ def load_required_symbols(
         candidate = Path(files[0])
         if candidate.is_dir():
             raise CompareSettingsError(
-                f"--required-symbol @{candidate}: is a directory, not a file."
+                f"consumers.required_symbols @{candidate}: is a directory, not a file."
             )
         if not candidate.is_file():
-            raise CompareSettingsError(f"--required-symbol @{candidate}: no such file.")
+            raise CompareSettingsError(
+                f"consumers.required_symbols @{candidate}: no such file."
+            )
         try:
             data = candidate.read_bytes()
         except OSError as exc:
@@ -650,7 +622,7 @@ def load_required_symbols(
             # error like a missing one, not an operational failure: it must reach
             # the CLI as the typed refusal (exit 64), never as a traceback.
             raise CompareSettingsError(
-                f"--required-symbol @{candidate}: cannot read file "
+                f"consumers.required_symbols @{candidate}: cannot read file "
                 f"({exc.strerror or exc})."
             ) from None
         digest, path = hashlib.sha256(data).hexdigest(), str(candidate)
@@ -658,7 +630,7 @@ def load_required_symbols(
             text = data.decode("utf-8")
         except UnicodeDecodeError as exc:
             raise CompareSettingsError(
-                f"--required-symbol @{candidate}: not UTF-8 text ({exc.reason} "
+                f"consumers.required_symbols @{candidate}: not UTF-8 text ({exc.reason} "
                 f"at byte {exc.start})."
             ) from None
         from_file = [

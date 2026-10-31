@@ -96,7 +96,9 @@ def _run_cmd(env_extra: dict[str, str]) -> list[str]:
 
 @pytest.mark.skipif(not RUN_SH.is_file(), reason="action/run.sh not found")
 class TestAuditOnlyComparePublicHeaderDirForwardedAsDashH:
-    def test_forwarded_as_bare_dash_h(self) -> None:
+    def test_retired_public_header_dirs_is_not_forwarded_as_dash_h(self) -> None:
+        """RETIRED (its replacement is the header input): run.sh no
+        longer forwards it as a bare -H root; the validator refuses it."""
         # Audit-only shape (old-library/abi-baseline both omitted): no
         # `--public-header-dir` flag exists on `compare --no-baseline`
         # either (same as a two-sided compare), so this folds into a bare
@@ -113,7 +115,7 @@ class TestAuditOnlyComparePublicHeaderDirForwardedAsDashH:
         assert "--no-baseline" in cmd
         assert "--public-header-dir" not in cmd
         h_pairs = [cmd[j + 1] for j, v in enumerate(cmd) if v == "-H"]
-        assert "include" in h_pairs, cmd
+        assert "include" not in h_pairs, cmd
 
     def test_absent_forwards_neither(self) -> None:
         cmd = _run_cmd(
@@ -197,7 +199,7 @@ class TestDumpPublicHeaderDirUnaffected:
     """Sanity check: dump mode's own (pre-existing, unchanged) -H-only
     forwarding for public-header-dir keeps working."""
 
-    def test_dump_forwards_public_header_dir_as_dash_h_only(self) -> None:
+    def test_dump_does_not_forward_retired_public_header_dirs(self) -> None:
         cmd = _run_cmd(
             {
                 "INPUT_MODE": "dump",
@@ -208,4 +210,4 @@ class TestDumpPublicHeaderDirUnaffected:
         assert "dump" in cmd
         assert "--public-header-dir" not in cmd
         h_indices = [j for j, v in enumerate(cmd) if v == "-H"]
-        assert any(cmd[j + 1] == "include" for j in h_indices), cmd
+        assert not any(cmd[j + 1] == "include" for j in h_indices), cmd

@@ -50,6 +50,10 @@ from .cli_options import (
     resolve_contract_evaluation,
 )
 from .cli_resolve import resolve_directory_compile_context
+from .frontends.cli.compare_config_scope import (
+    config_scope_inputs,
+    consumer_manifest_specs,
+)
 from .frontends.cli.compare_input_validation import (
     classify_and_reject_operands,
     enter_budget_scope,
@@ -241,21 +245,22 @@ def run_compare(
     # once `resolved_cfg` exists (Codex review: computing this before that
     # resolution silently discarded every config-set `compile.lang`).
 
-    # Workstream D-S1: merge --used-by-manifest-named consumers into the same
-    # --used-by pipeline before anything else looks at used_by_apps -- every
-    # downstream consumer (the mutual-exclusivity check just below, the
-    # release-fan-out rejection, the dry-run preview, and the real scoped
-    # gate) then sees one combined tuple and needs no manifest-specific
-    # branch of its own.
-    if used_by_manifests:
-        from .model.consumer_spec import parse_consumer_manifest
-
-        manifest_specs: tuple[ConsumerAppInput, ...] = tuple(
-            spec
-            for manifest_path_ in used_by_manifests
-            for spec in parse_consumer_manifest(manifest_path_)
-        )
-        used_by_apps = (*used_by_apps, *manifest_specs)
+    # ADR-037 D4: load the project config and merge CLI flags over it
+    # (precedence CLI > config > built-in default) *before* dispatch, so both the
+    # single-file and the directory/package fan-out paths share one resolution.
+    # It comes first now: the consumer manifests, the required-symbol contract
+    # and the rendering view are config keys, read from it below.
+    cfg_path, project_cfg, resolved_cfg, cfg_sha = resolve_project_compare_config(
+        config=config,
+        severity_preset=severity_preset,
+        config_overrides=config_overrides,
+    )
+    # Consumer scope and view come from .abicheck.yml (ADR-091 Phase 5).
+    used_by_manifests, required_symbols_opt, config_view = config_scope_inputs(
+        project_cfg, cfg_path, used_by_manifests, required_symbols_opt
+    )
+    report_mode, show_only = config_view or (report_mode, show_only)
+    used_by_apps = (*used_by_apps, *consumer_manifest_specs(used_by_manifests))
 
     with compare_settings_usage_errors():
         (
@@ -266,7 +271,7 @@ def run_compare(
         ) = load_required_symbols(required_symbols_opt)
     if used_by_apps and required_symbols:
         raise click.UsageError(
-            "--used-by and --required-symbol are mutually "
+            "--used-by and consumers.required_symbols are mutually "
             "exclusive: scope the comparison to either application imports or "
             "an explicit required-symbol contract, not both."
         )
@@ -286,11 +291,6 @@ def run_compare(
     # ADR-037 D4: load the project config and merge CLI flags over it
     # (precedence CLI > config > built-in default) *before* dispatch, so both the
     # single-file and the directory/package fan-out paths share one resolution.
-    cfg_path, project_cfg, resolved_cfg, cfg_sha = resolve_project_compare_config(
-        config=config,
-        severity_preset=severity_preset,
-        config_overrides=config_overrides,
-    )
     exclude_headers = config_exclude_headers(exclude_headers, project_cfg)
     # One-comparison-product Phase 9b: no CLI flag any more -- scope.public
     # (or its built-in True) is the whole answer for a run with no --contract.

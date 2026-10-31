@@ -59,7 +59,6 @@ adrs:
     use_cases: [UC-WF-appcompat]
     surfaces:
       - cli: compare --used-by
-      - cli: compare --required-symbol
       - api: abicheck.workflows.consumer_scope_standalone.check_appcompat
       - action: used-by
       - report: compare_report.used_by
@@ -455,7 +454,6 @@ adrs:
     disposition: surfaced
     use_cases: [UC-WF-appcompat]
     surfaces:
-      - cli: compare --used-by-manifest
       - report: compare_report.consumer_impact_summary
 
   - id: ADR-053

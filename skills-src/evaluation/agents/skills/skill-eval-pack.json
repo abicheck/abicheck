@@ -816,7 +816,7 @@
         "explain-abi-change",
         "set-up-abi-compatibility-ci"
       ],
-      "digest": "sha256:c6c39c6890b3eca607cffeada726f9c7e8a8d9a96e246ea14c78b76d5b1ded15",
+      "digest": "sha256:76e3d026d78cc76a683d803e7b1e4dd35bf89d65258b99f7a41b3e6e35b0131f",
       "roots": [
         "skills-src/evaluation/agents/skills/grade_bundle.py",
         "skills-src/evaluation/agents/skills/graders",
@@ -863,7 +863,7 @@
       "roots": [
         ".agents/skills/check-abi-compatibility"
       ],
-      "tree": "sha256:546af477355032d20c9ffd439b35cac53d30bfeccec58d24af78198bc4082fe1"
+      "tree": "sha256:f21490fcd064d26e61ed78236455d7aa247fe40f1c5ea1e628912a002a08d182"
     },
     "explain-abi-change": {
       "affects": [
@@ -872,7 +872,7 @@
       "roots": [
         ".agents/skills/explain-abi-change"
       ],
-      "tree": "sha256:10cc99251b7b675aa9269c6e07394c3a6819835fa561bd286e6b6710c78c813f"
+      "tree": "sha256:a718ea4ee06f9178a1cd8c3a2b6ef039626fbe6d36a6f34a3485af228a835991"
     },
     "set-up-abi-compatibility-ci": {
       "affects": [
@@ -881,7 +881,7 @@
       "roots": [
         ".agents/skills/set-up-abi-compatibility-ci"
       ],
-      "tree": "sha256:9dec4d424af5dd2976a64a8f8f97706b3ffdbed3e07db3eda474854288ad35c7"
+      "tree": "sha256:37ea27cc1b8d13cf9ca9b9f864c92783f6296eef5a796fc23b6f7e8455d67cd0"
     }
   }
 }

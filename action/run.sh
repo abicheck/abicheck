@@ -1283,6 +1283,22 @@ _old_library_is_stored_snapshot() {
   return 0
 }
 
+# Whitespace-separated tokens -> a YAML flow list of double-quoted strings,
+# for a --set value (e.g. consumers.manifests=["a.json", "b.json"]). read -a
+# does not glob, so a token containing '*' stays literal.
+_yaml_flow_list() {
+  local -a _toks=()
+  read -r -a _toks <<<"$1"
+  local out="" sep="" tok
+  for tok in "${_toks[@]+"${_toks[@]}"}"; do
+    tok=${tok//\\/\\\\}
+    tok=${tok//\"/\\\"}
+    out+="${sep}\"${tok}\""
+    sep=", "
+  done
+  printf '[%s]' "$out"
+}
+
 # The Action's compile-context inputs reach the CLI as `--set compile.*=…`
 # (ADR-091 D4, ADR-070 D2). The CLI owns the `compile:` schema, the trust gate
 # on `compile.compiler` and the precedence over `.abicheck.yml`, so this
@@ -1301,57 +1317,23 @@ _compile_set_string() {
 
 add_compile_context_flags() {
   local include_lang="${1:-true}"
-  # `auto` is the documented no-op spelling of ast-frontend, and the `c++`
-  # lang default is not a user override: a run that configures nothing
-  # forwards nothing, so it keeps the CLI's own `.abicheck.yml` discovery.
-  local _ast_frontend_requested="${INPUT_FRONTEND:-}"
-  if [[ "$_ast_frontend_requested" == "auto" ]]; then
-    _ast_frontend_requested=""
-  fi
-  if [[ -z "${_ast_frontend_requested}${INPUT_COMPILER:-}${INPUT_COMPILE_OPTIONS:-}${INPUT_SYSROOT:-}" \
-        && "${INPUT_NOSTDINC:-false}" != "true" \
+  # A run that configures no compile-context input forwards nothing, so it
+  # keeps the CLI's own `.abicheck.yml` discovery. `c++` is the lang default
+  # and is not a user override.
+  if [[ -z "${INPUT_COMPILER:-}${INPUT_SYSROOT:-}" \
         && ( "$include_lang" != "true" || -z "${INPUT_LANG:-}" || "${INPUT_LANG:-}" == "c++" ) ]]; then
     return 0
   fi
   if [[ "$include_lang" == "true" && -n "${INPUT_LANG:-}" ]]; then
     CMD+=(--set "$(_compile_set_string compile.lang "$INPUT_LANG")")
   fi
-  if [[ -n "$_ast_frontend_requested" ]]; then
-    CMD+=(--set "$(_compile_set_string compile.frontend "$_ast_frontend_requested")")
-  fi
   # compile.compiler takes a full compiler path or, ending in `-`, a
   # cross-toolchain prefix (ADR-091 R5: the `compiler` input carries either).
-  local _compiler="${INPUT_COMPILER:-}"
-  if [[ -n "$_compiler" ]]; then
-    CMD+=(--set "$(_compile_set_string compile.compiler "$_compiler")")
-  fi
-  if [[ -n "${INPUT_COMPILE_OPTIONS:-}" ]]; then
-    if [[ -z "$_PY_BIN" ]]; then
-      _error_annotation "mode: ${MODE} needs a working Python interpreter on PATH to split gcc-options into compile.options (resolved interpreter: '${_PY_BIN:-<none found on PATH>}')."
-      exit 1
-    fi
-    # The raw value goes on stdin, not argv: a POSIX-looking value would be
-    # path-rewritten by Git Bash before it reached the interpreter. Run from
-    # the isolated $_PY_SAFE_DIR like every other inline-Python call here.
-    local _options_json _options_rc=0
-    _options_json=$(printf '%s' "$INPUT_COMPILE_OPTIONS" | (cd "$_PY_SAFE_DIR" && PYTHONPATH= "$_PY_BIN" -c 'import json, shlex, sys
-text = sys.stdin.read()
-print(json.dumps([line for line in text.splitlines() if line] if "\n" in text else shlex.split(text)))')) || _options_rc=$?
-    # A Windows interpreter's print() ends its line with CRLF, and $(...)
-    # strips only the trailing LF, so a bare \r would otherwise reach
-    # `--set compile.options=` and corrupt the last JSON token.
-    _options_json=${_options_json//$'\r'/}
-    if [[ "$_options_rc" -ne 0 || -z "$_options_json" ]]; then
-      _error_annotation "mode: ${MODE} could not split gcc-options into compile.options (interpreter exit ${_options_rc}). Running without it would parse headers under the wrong compile context, so the step fails instead of continuing silently."
-      exit 1
-    fi
-    CMD+=(--set "compile.options=${_options_json}")
+  if [[ -n "${INPUT_COMPILER:-}" ]]; then
+    CMD+=(--set "$(_compile_set_string compile.compiler "$INPUT_COMPILER")")
   fi
   if [[ -n "${INPUT_SYSROOT:-}" ]]; then
     CMD+=(--set "$(_compile_set_string compile.sysroot "$INPUT_SYSROOT")")
-  fi
-  if [[ "${INPUT_NOSTDINC:-false}" == "true" ]]; then
-    CMD+=(--set compile.nostdinc=true)
   fi
 }
 
@@ -1359,9 +1341,10 @@ print(json.dumps([line for line in text.splitlines() if line] if "\n" in text el
 # `--dso-only`/`--include-private-dso`/`--fail-on-removed-library` are gone
 # entirely (CONFIG class, no CLI override -- `.abicheck.yml`'s `release:`/
 # `gate:` blocks are their only source now). This Action's own
-# dso-only/include-private-dso/fail-on-removed-library inputs still exist,
-# so forwarding them now means synthesizing a small config overlay the run
-# reads via --config, the same "--config is NOT one of the flags the
+# dso-only/include-private-dso/fail-on-removed-library inputs are RETIRED
+# tombstones since ADR-091 Phase 5 (validate-inputs.sh refuses them; their
+# replacement is a `set:` line), so the overlay synthesized here carries only
+# the remaining assurance key, read via --config, the same "--config is NOT one of the flags the
 # release fan-out rejects" precedent add_compile_context_flags already
 # established for the compile: block above. Called from the
 # release-style-operand branch in `mode: compare`, AFTER both
@@ -1394,28 +1377,8 @@ add_release_topology_config_flags() {
   # key this function knows about. Both shapes overlay the same --config file,
   # so the assurance override reaches the CLI whichever branch the operand took.
   local _scope="${1:-release}"
-  local _dso_only="" _include_private_dso="" _fail_on_removed_library=""
-  if [[ "$_scope" != "scalar" ]]; then
-    _dso_only="${INPUT_DSO_ONLY:-}"
-    _include_private_dso="${INPUT_INCLUDE_PRIVATE_DSO:-}"
-    _fail_on_removed_library="${INPUT_FAIL_ON_REMOVED_LIBRARY:-}"
-  fi
   local _analysis_assurance_complete="${INPUT_REQUIRE_COMPLETE:-}"
-  # dso-only/include-private-dso/fail-on-removed-library deliberately carry
-  # no declared default in action.yml (Codex review, fresh evidence): an
-  # explicit `false` from the workflow must be able to override a
-  # discovered/explicit .abicheck.yml's own release.dso_only/
-  # release.include_private_dso/gate.fail_on_removed_library: true --
-  # collapsing "omitted" and "explicit false" onto the same value (the old
-  # `${INPUT_DSO_ONLY:-false}` shape, which also made this early return fire
-  # whenever all three read as "false") would make that override silently
-  # unreachable. So this guard -- and the overlay-generation below -- keys
-  # off whether each input was actually GIVEN (non-empty string) at all,
-  # never off its truthiness.
-  if [[ -z "$_dso_only" \
-        && -z "$_include_private_dso" \
-        && -z "$_fail_on_removed_library" \
-        && -z "$_analysis_assurance_complete" ]]; then
+  if [[ -z "$_analysis_assurance_complete" ]]; then
     return 0
   fi
   local _config_idx=-1 _i
@@ -1487,10 +1450,7 @@ add_release_topology_config_flags() {
   fi
   local _release_overlay_json
   _release_overlay_json=$(cd "$_PY_SAFE_DIR" \
-  && ABICHECK_RELEASE_DSO_ONLY="$_dso_only" \
-  ABICHECK_RELEASE_INCLUDE_PRIVATE_DSO="$_include_private_dso" \
-  ABICHECK_GATE_FAIL_ON_REMOVED_LIBRARY="$_fail_on_removed_library" \
-  ABICHECK_ASSURANCE_REQUIRE_COMPLETE="$_analysis_assurance_complete" \
+  &&   ABICHECK_ASSURANCE_REQUIRE_COMPLETE="$_analysis_assurance_complete" \
   PYTHONPATH= "$_PY_BIN" - <<'PYEOF'
 # Synthesizes a minimal .abicheck.yml `release:`/`gate:` block (as JSON, a
 # valid YAML subset abicheck's own yaml.safe_load parses identically) from
@@ -1505,27 +1465,7 @@ import json
 import os
 import sys
 
-# Each of these three env vars is "" (not "false") when the corresponding
-# Action input was never given at all -- action.yml deliberately declares
-# no default for any of them (Codex review, fresh evidence) so that an
-# explicit `false` from the workflow can still override a discovered/
-# explicit .abicheck.yml's own true value, instead of being silently
-# indistinguishable from "not set". Only an explicitly-given value (either
-# spelling) is written into the overlay; omitted means "let whatever the
-# base config already says stand", not "force false".
 doc: dict[str, object] = {}
-release_blk: dict[str, object] = {}
-_dso_only = os.environ.get("ABICHECK_RELEASE_DSO_ONLY", "")
-if _dso_only:
-    release_blk["dso_only"] = _dso_only == "true"
-_include_private_dso = os.environ.get("ABICHECK_RELEASE_INCLUDE_PRIVATE_DSO", "")
-if _include_private_dso:
-    release_blk["include_private_dso"] = _include_private_dso == "true"
-if release_blk:
-    doc["release"] = release_blk
-_fail_on_removed = os.environ.get("ABICHECK_GATE_FAIL_ON_REMOVED_LIBRARY", "")
-if _fail_on_removed:
-    doc["gate"] = {"fail_on_removed_library": _fail_on_removed == "true"}
 # analysis-assurance-complete: the tri-state per-job override of
 # assurance.require_complete. Same rule as every key above: written only when
 # given, so "omitted" leaves the base config's own value standing, and an
@@ -3512,10 +3452,6 @@ if [[ "$MODE" == "dump" ]]; then
 
   add_flag "-H" "${INPUT_HEADER:-}"
   add_flag "-H" "${INPUT_NEW_HEADER:-}"
-  # `public-header-dir` has no dedicated dump flag any more -- `dump` derives
-  # declaration provenance from -H/--header itself (a directory entry tags
-  # everything under it public), so forward it as one more -H root.
-  add_flag "-H" "${INPUT_PUBLIC_HEADER_DIRS:-}"
   add_flag "-I" "${INPUT_INCLUDE:-}"
   add_flag "-I" "${INPUT_NEW_INCLUDE:-}"
   _extra_args_names_label || add_single_flag "--label" "${INPUT_NEW_LABEL:-}"
@@ -3646,7 +3582,6 @@ elif [[ "$MODE" == "compare" ]]; then
   if [[ "$_NO_BASELINE" == "true" ]]; then
     add_flag "-H" "${INPUT_HEADER:-}"
     add_flag "-H" "${INPUT_NEW_HEADER:-}"
-    add_flag "-H" "${INPUT_PUBLIC_HEADER_DIRS:-}"
     add_flag "-I" "${INPUT_INCLUDE:-}"
     add_flag "-I" "${INPUT_NEW_INCLUDE:-}"
     _extra_args_names_label || add_sided_scalar_flag "--label" "new" "${INPUT_NEW_LABEL:-}"
@@ -3912,19 +3847,7 @@ elif [[ "$MODE" == "compare" ]]; then
   # .abicheck.yml is not; see add_compile_context_flags' overlay strip).
   add_single_flag "--acknowledgments" "${INPUT_ACKNOWLEDGMENTS:-}"
 
-  # Severity configuration. Audit-only: --severity-preset is ALSO the
-  # ADR-068 2026-09-10 amendment's audit-gate opt-in (`compare --no-baseline`
-  # only gates on a candidate-side finding when a preset other than
-  # `info-only` is in effect). Unlike an earlier draft of this migration,
-  # this step never injects a preset on the caller's behalf: the ADR-068
-  # 2026-09-11 amendment states the audit-gate opt-in is the *caller's*
-  # migration step, not something `run.sh` does implicitly (a job that
-  # relied on legacy `mode: scan`'s own default gating must itself pass
-  # `severity-preset: default` when migrating -- see the amendment's
-  # "audit-gate trap" section). So this is the exact same pass-through as
-  # the baseline shape below: forward whatever preset the caller asked for
-  # (the dedicated input, `extra-args --severity-preset ...`, or neither),
-  # and change nothing else.
+  # severity-preset is a core flag (--severity-preset, ADR-068): forwarded as-is.
   add_single_flag "--severity-preset" "${INPUT_SEVERITY_PRESET:-}"
   add_set_flags
   # --budget: time guard (e.g. 15m, 900s, 1h); the step FAILS on overflow
@@ -3946,14 +3869,24 @@ elif [[ "$MODE" == "compare" ]]; then
   # exclusivity (a UsageError, surfaced as VERDICT=ERROR below via the
   # generic CLI-error detection) -- not re-validated here.
   add_flag "--used-by" "${INPUT_USED_BY:-}"
-  add_flag "--used-by-manifest" "${INPUT_USED_BY_MANIFEST:-}"
-  add_flag "--required-symbol" "${INPUT_REQUIRED_SYMBOL:-}"
-  # ADR-068 D5 / plan Phase 7h: the CLI's own --required-symbols FILE flag
-  # is gone -- --required-symbol now accepts '@FILE' as one of its
-  # repeatable values. The Action's required-symbols input is unchanged;
-  # only its translation to the CLI moves.
-  if [[ -n "${INPUT_REQUIRED_SYMBOLS:-}" ]]; then
-    CMD+=(--required-symbol "@${INPUT_REQUIRED_SYMBOLS}")
+  # The CLI's --used-by-manifest and --required-symbol flags are gone; their
+  # content is the consumers: config block, reached through --set (ADR-091 D4).
+  # Both spellings keep their input and behaviour: only the carrier changes.
+  if [[ -n "${INPUT_USED_BY_MANIFEST:-}" ]]; then
+    CMD+=(--set "consumers.manifests=$(_yaml_flow_list "${INPUT_USED_BY_MANIFEST}")")
+  fi
+  # required-symbol (one symbol) and required-symbols (a .syms file, sent as
+  # '@FILE') share one consumers.required_symbols list, so they are merged
+  # into a single --set rather than setting the same path twice.
+  if [[ -n "${INPUT_REQUIRED_SYMBOL:-}" || -n "${INPUT_REQUIRED_SYMBOLS:-}" ]]; then
+    _required_items=""
+    if [[ -n "${INPUT_REQUIRED_SYMBOL:-}" ]]; then
+      _required_items="${INPUT_REQUIRED_SYMBOL}"
+    fi
+    if [[ -n "${INPUT_REQUIRED_SYMBOLS:-}" ]]; then
+      _required_items="${_required_items:+${_required_items} }@${INPUT_REQUIRED_SYMBOLS}"
+    fi
+    CMD+=(--set "consumers.required_symbols=$(_yaml_flow_list "$_required_items")")
   fi
 
   # Package-specific options — only meaningful (and only forwarded) when
@@ -6133,26 +6066,36 @@ _can_reuse_primary_json() {
   # whole scan/compare a second time just to get JSON that had already been
   # produced, for scan doubling potentially expensive --depth build/source
   # work and describing a separate, budget-metered run.
-  # ADR-068 D4/Phase 5: --show-only is gone -- its equivalent is one of
-  # --view's repeatable tokens (`--view show=...`), so only *that* token
-  # (never `--view root-cause`/`--view impact`, which change no content)
-  # disqualifies reuse. Indexed, not a plain `for arg in` loop, since the
-  # token-form `--view show=...` needs the *next* array element to see the
-  # value; the inline `--view=show=...` form carries it in the same element.
-  [[ -n "$(_json_report_src)" ]] || return 1
-  local i
-  for ((i = 0; i < ${#CMD[@]}; i++)); do
-    case "${CMD[$i]}" in
-      --view) [[ "${CMD[$((i + 1))]:-}" == show=* ]] && return 1 ;;
-      --view=show=*) return 1 ;;
-    esac
-  done
+  # ADR-091 Phase 5: the display filter (`show=...`) is an `output.view`
+  # config token now, reachable from `set:`/extra-args `--set` and from a
+  # discovered `.abicheck.yml` alike -- the last one is invisible in CMD.
+  # So the report itself decides: a filtered JSON export carries a
+  # `show_only_filter` key (report/json_sections.add_show_only_filter), and
+  # such a report hides gated changes from the comment, so it is not reused.
+  local _src
+  _src="$(_json_report_src)"
+  [[ -n "$_src" ]] || return 1
+  if grep -qE '"show_only_filter"[[:space:]]*:' "$_src" 2>/dev/null; then
+    return 1
+  fi
   return 0
+}
+
+# True when one CMD element (with its successor) is a `--set output.view=...`
+# override, in the two-token form `add_set_flags` emits or the inline
+# `--set=output.view=...` form extra-args may carry. Echoes how many
+# elements it spans (2 or 1).
+_output_view_override_span() {
+  case "$1" in
+    --set) [[ "${2:-}" == output.view=* ]] && { echo 2; return 0; } ;;
+    --set=output.view=*) echo 1; return 0 ;;
+  esac
+  return 1
 }
 
 _build_json_cmd() {
   PR_CMD_JSON=()
-  local i _tok _spelling
+  local i _tok _spelling _span
   for ((i = 0; i < ${#CMD[@]}; i++)); do
     _tok="${CMD[$i]}"
     # Plan slice 7m: one export flag, so one matcher. Every export from the
@@ -6181,26 +6124,16 @@ _build_json_cmd() {
       fi
       continue
     fi
-    case "$_tok" in
-      --view)
-        # ADR-068 D4/Phase 5: --show-only's replacement token. A
-        # `--view show=...` occurrence is a display filter ("limit
-        # displayed changes", does NOT affect exit codes) -- keeping it
-        # would hide gated breaks from the comment while the check still
-        # fails red, so drop it (and its value) so the comment sees the
-        # full change set the gate acted on. Every other --view token
-        # (impact/root-cause -- plan slice 7o retired the rest) changes
-        # no content, only how it's grouped, so it is kept.
-        if [[ "${CMD[$((i + 1))]:-}" == show=* ]]; then
-          i=$((i + 1))  # drop the token and its value
-          continue
-        fi
-        ;;
-      --view=show=*)
-        # same display filter, inline value form — drop it for the re-run.
-        continue
-        ;;
-    esac
+    # ADR-091 Phase 5: `output.view`'s `show=...` token is a display
+    # filter ("limit displayed changes", does NOT affect exit codes) --
+    # keeping it would hide gated breaks from the comment while the check
+    # still fails red. Every explicit `--set output.view=...` is dropped
+    # here, and the rerun pins `output.view=[]` below so a discovered or
+    # `--config` file's view cannot filter it either.
+    if _span="$(_output_view_override_span "$_tok" "${CMD[$((i + 1))]:-}")"; then
+      i=$((i + _span - 1))
+      continue
+    fi
     PR_CMD_JSON+=("$_tok")
     # A value-taking option keeps its own value verbatim, even when that
     # value is spelled like an export: `--suppress -o` names `-o` as
@@ -6211,6 +6144,10 @@ _build_json_cmd() {
       PR_CMD_JSON+=("${CMD[$i]}")
     fi
   done
+  # `output.view` is a `compare` config key; the deps commands take no --set.
+  if [[ "${MODE:-}" == compare ]]; then
+    PR_CMD_JSON+=(--set "output.view=[]")
+  fi
   PR_CMD_JSON+=(-o "json=$PR_JSON")
 }
 

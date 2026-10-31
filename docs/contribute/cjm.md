@@ -122,7 +122,7 @@ UC-TC-bazel-build-evidence, UC-WF-abicc-compat.
 **Goal:** a reviewer understands, from the PR comment, what broke and why.
 **User question:** "Is this finding real, and what do I tell the author?"
 **Touchpoints:** the PR comment, SARIF annotations, Markdown/HTML report,
-`--view root-cause|impact`, `--depth source`, the
+`output.view: [root-cause]|impact`, `--depth source`, the
 `check-abi-compatibility` agent skill.
 **Use cases:** UC-CHANGE-taxonomy, UC-WF-compare, UC-REP-sarif,
 UC-REP-markdown-html, UC-TC-dual-abi, UC-TC-flag-drift,
@@ -214,7 +214,7 @@ UC-CHANGE-inline-ns-version, UC-TC-wheel-deployment-claims.
 **Goal:** know which consumers a change affects and whether a given
 application or plugin still works.
 **User question:** "Which of my users break, and do they need to rebuild?"
-**Touchpoints:** `--used-by`, `--used-by-manifest`, `--required-symbol`,
+**Touchpoints:** `--used-by`, `consumers.manifests`, `consumers.required_symbols`,
 `--use-cases`, `deps tree`/`compare`.
 **Use cases:** UC-ARCH-plugin, UC-WF-appcompat, UC-WF-stack-deps,
 UC-TC-cxx-standard-floor, UC-TC-numpy-capi-envelope,

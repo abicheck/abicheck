@@ -26,7 +26,7 @@ stop rather than proceed on an unvalidated surface.
 ```bash
 abicheck compare OLD NEW \
   --depth headers \
-  --view root-cause \
+  --set 'output.view=[root-cause]' \
   -o json=compare.json
 ```
 
@@ -40,7 +40,7 @@ binaries, JSON snapshots, or a mix.
 | `--policy plugin_abi` / `--policy sdk_vendor` / `--policy DOCUMENT` | the project has its own view of what a given change kind means — [policies and suppressions](shared/policies-and-suppressions.md) |
 | `--contract exports` / `--contract public` / `--contract all` | the question names which surface the promise covers (the parent skill's step 1 table: "what we export" → `exports`, "our public API/headers" → `public`). Turns on per-finding contract relevance and that domain's coverage ledger (`contract_coverage_failures`); a non-empty ledger exits `1` even when the verdict is clean. See [public surface and scoping](shared/public-surface-and-scoping.md) |
 | `--suppress FILE` | the project already has a suppression file. Never author one here. |
-| `--used-by CONSUMER` / `--required-symbol SYM` / `--required-symbol @FILE` | the question is about one named consumer rather than the library globally — see the parent skill's named-consumer step and [consumer scoping](shared/consumer-scoping.md) |
+| `--used-by CONSUMER` / `--set consumers.required_symbols=[...]` | the question is about one named consumer rather than the library globally — see the parent skill's named-consumer step and [consumer scoping](shared/consumer-scoping.md) |
 | `--depth build` / `--depth source`, with `--sources`/`--build-info` | flags, macros, or reachability are in question — [evidence and depth](shared/evidence-and-depth.md) |
 
 ## Named-consumer invocations
@@ -56,7 +56,7 @@ abicheck compare OLD NEW \
   --used-by path/to/consumer-binary \
   --header old=../old-side/include/foo.h --header new=include/foo.h \
   --include old=../old-side/include/ --include new=include/ \
-  --depth headers --view root-cause -o json=consumer.json
+  --depth headers --set 'output.view=[root-cause]' -o json=consumer.json
 ```
 
 One run per consumer when several must each be named against the findings
@@ -65,23 +65,23 @@ answer every consumer, but only the *per-app summary* is per app — the
 findings themselves are one deduplicated union across every named app, with
 no app-to-finding association.
 
-### Plugin / host boundary — `--required-symbol`
+### Plugin / host boundary — `--set consumers.required_symbols=[...]`
 
 ```bash
 abicheck compare OLD NEW \
-  --required-symbol plugin_init --required-symbol plugin_shutdown \
+  --set 'consumers.required_symbols=[plugin_init, plugin_shutdown]' \
   --header old=../old-side/include/plugin_api.h \
   --header new=include/plugin_api.h \
-  --depth headers --view root-cause -o json=-
+  --depth headers --set 'output.view=[root-cause]' -o json=-
 ```
 
 or, from a maintained list:
 
 ```bash
-abicheck compare OLD NEW --required-symbol @host-contract.txt \
+abicheck compare OLD NEW --set 'consumers.required_symbols=["@host-contract.txt"]' \
   --header old=../old-side/include/plugin_api.h \
   --header new=include/plugin_api.h \
-  --depth headers --view root-cause -o json=-
+  --depth headers --set 'output.view=[root-cause]' -o json=-
 ```
 
 Supply the entrypoint's headers on both branches, and require

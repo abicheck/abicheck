@@ -174,8 +174,8 @@ class TestCompareSarif:
                 str(new_p),
                 "-o",
                 f"sarif={out}",
-                "--view",
-                "root-cause",
+                "--set",
+                'output.view=["root-cause"]',
             ],
         )
         assert result.exit_code == 4
@@ -400,8 +400,8 @@ class TestCompareWrite:
                 "markdown=-",
                 "-o",
                 f"json={secondary_out}",
-                "--view",
-                "show=added",
+                "--set",
+                'output.view=["show=added"]',
             ],
         )
         assert result.exit_code == 4
@@ -426,8 +426,8 @@ class TestCompareWrite:
                 "markdown=-",
                 "-o",
                 f"json={secondary_out}",
-                "--view",
-                "root-cause",
+                "--set",
+                'output.view=["root-cause"]',
             ],
         )
         assert result.exit_code == 4

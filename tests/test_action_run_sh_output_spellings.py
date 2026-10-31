@@ -69,6 +69,10 @@ _BUILD_JSON_CMD_END = "\n}\n"
 
 #: The rerun's destination. `_build_json_cmd` appends `-o json=$PR_JSON`.
 _PR_JSON = "pr-sentinel.json"
+#: What the compare rerun pins after the kept tokens: an empty `output.view`,
+#: so a config file's `show=` display filter cannot hide gated changes from
+#: the PR comment (ADR-091 Phase 5). The deps commands take no `--set`.
+_VIEW_PIN = {"compare": ("--set", "output.view=[]")}
 #: The primary run's own argv before its export flags.
 _PRIMARY = ("abicheck", "compare", "old.json", "new.json")
 #: A value-taking option's probe value: spelled like an export, so it would be
@@ -225,7 +229,12 @@ def _cases(mode: str) -> tuple[_Case, ...]:
                     kind="spelling",
                     label=label,
                     tokens=tokens,
-                    expected_strip=(*_PRIMARY, "-o", f"json={_PR_JSON}"),
+                    expected_strip=(
+                        *_PRIMARY,
+                        *_VIEW_PIN.get(mode, ()),
+                        "-o",
+                        f"json={_PR_JSON}",
+                    ),
                     expected_exports=((fmt, dest),),
                     fmt=fmt,
                     dest=dest,
@@ -249,7 +258,13 @@ def _cases(mode: str) -> tuple[_Case, ...]:
                     kind="value-option",
                     label=label,
                     tokens=tokens,
-                    expected_strip=(*_PRIMARY, *tokens, "-o", f"json={_PR_JSON}"),
+                    expected_strip=(
+                        *_PRIMARY,
+                        *tokens,
+                        *_VIEW_PIN.get(mode, ()),
+                        "-o",
+                        f"json={_PR_JSON}",
+                    ),
                     expected_exports=(),
                 )
             )

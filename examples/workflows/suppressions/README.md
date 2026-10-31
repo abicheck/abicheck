@@ -94,7 +94,7 @@ for the full rule syntax (regex/glob selectors, `namespace`, `expires`,
 - Suppressions are step 2 of a four-step CI gating pipeline (classify →
   suppress → severity → exit code) — see [CI Gating](../../../docs/use/ci-gating.md)
   for how they combine with `--policy` reclassification and
-  `--severity-preset`.
+  `severity.preset`.
 - Want machine-readable output for CI? Add `-o json=-` — every
   suppressed finding is listed under `suppression.suppressed_changes`, so a
   dashboard can still show what was silenced even though it didn't gate.

@@ -1075,8 +1075,8 @@ class TestUsedByScopingStampsExplicitEvidence:
                 str(app),
                 "--contract",
                 "public",
-                "--view",
-                "root-cause",
+                "--set",
+                'output.view=["root-cause"]',
             ],
         )
         assert result.exit_code == 1, result.output
@@ -1109,8 +1109,8 @@ class TestUsedByScopingStampsExplicitEvidence:
                 str(new),
                 "--used-by",
                 str(app),
-                "--view",
-                "root-cause",
+                "--set",
+                'output.view=["root-cause"]',
             ],
         )
         assert result.exit_code == 0, result.output

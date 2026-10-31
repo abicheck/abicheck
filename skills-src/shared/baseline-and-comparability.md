@@ -43,7 +43,7 @@ Ways to obtain a baseline side:
   findings under its own `findings` array, with `changes[]`/`verdict`
   staying empty, and by default a hygiene finding never gates CI (exit
   `0`). To reproduce a
-  `scan`-based gating job, add `--severity-preset default` (or `strict`) —
+  `scan`-based gating job, add `--set severity.preset=default` (or `strict`) —
   that opts into the orthogonal audit-gate axis and exits `3` (never `2`/`4`)
   on a `BREAKING`/`API_BREAK`-classified finding; a non-gating job needs no
   change. `scan` itself is retired by ADR-068 D8 with no deprecation window

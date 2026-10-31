@@ -263,7 +263,7 @@ The whole CLI is five root commands. Most single-library projects only ever need
 | Check whether a library upgrade breaks existing consumers | [`abicheck compare`](https://abicheck.github.io/abicheck/use/cli-usage/) |
 | Compare a co-versioned **multi-library release** as one bundle (bundle-level analysis is [ELF/Linux-only](https://abicheck.github.io/abicheck/use/multi-binary/#platform-support)) | [`abicheck compare old-release/ new-release/`](https://abicheck.github.io/abicheck/use/multi-binary/) |
 | Check whether **my application** survives a library upgrade | [`abicheck compare --used-by ./myapp`](https://abicheck.github.io/abicheck/use/appcompat/) |
-| Check whether a **plugin** still satisfies its host's entrypoints | [`abicheck compare --required-symbol SYM`](https://abicheck.github.io/abicheck/use/plugin-systems/) |
+| Check whether a **plugin** still satisfies its host's entrypoints | [`abicheck compare --set consumers.required_symbols=[SYM]`](https://abicheck.github.io/abicheck/use/plugin-systems/) |
 | Check a PR with source and build context, against a baseline | [`abicheck compare baseline.json build/libfoo.so --depth source --sources new=.`](https://abicheck.github.io/abicheck/use/evidence-depth/) (the stored baseline must already embed matching L3/L4 evidence from its own `dump --sources`/`--build-info`, or the mismatched extraction profiles between sides can exit `16` `NOT_COMPARABLE`) |
 | Validate a binary's whole dependency stack across two sysroots | [`abicheck deps compare`](https://abicheck.github.io/abicheck/use/cli-usage/) |
 | Save a reusable ABI snapshot | [`abicheck dump`](https://abicheck.github.io/abicheck/use/create-baseline/) |
@@ -298,7 +298,7 @@ The action installs Python, castxml, and abicheck, runs the comparison, sets the
 | `8` | any | A library was **proven** removed from a multi-library release (NEW's inventory proven complete) and `.abicheck.yml`'s `gate.fail_on_removed_library` is set; under the default scheme, only when no `2`/`4` already applies. An unmatched library under an unproven inventory is an incomplete scope instead (exit `0`, or `1` with `scope.on_incomplete: block`; a run that completed no comparison exits `1`) |
 | `64` | usage error | Bad flags or inputs |
 
-`--severity-preset` (or a `severity:` block in `.abicheck.yml`) switches `compare` to a severity-based scheme where `1` means an error-level finding in the addition/quality categories. Opt-in `--contract` adds an orthogonal axis that raises a clean `0` to `1` when the declared contract's evidence is incomplete. `deps compare` adds per-command codes. Full matrix: [Exit Codes](https://abicheck.github.io/abicheck/reference/exit-codes/); how snapshots, policies, suppressions, and severity combine: [CI Gating](https://abicheck.github.io/abicheck/use/ci-gating/).
+`severity.preset` (or a `severity:` block) in `.abicheck.yml` switches `compare` to a severity-based scheme where `1` means an error-level finding in the addition/quality categories. Opt-in `--contract` adds an orthogonal axis that raises a clean `0` to `1` when the declared contract's evidence is incomplete. `deps compare` adds per-command codes. Full matrix: [Exit Codes](https://abicheck.github.io/abicheck/reference/exit-codes/); how snapshots, policies, suppressions, and severity combine: [CI Gating](https://abicheck.github.io/abicheck/use/ci-gating/).
 
 ### Policies and suppressions
 

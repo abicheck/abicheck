@@ -361,7 +361,7 @@ class TestReportModeImpact:
         old_p, new_p = _write_removed_cpp_symbol(tmp_path)
         result = CliRunner().invoke(
             main,
-            ["compare", str(old_p), str(new_p), "--view", "impact"],
+            ["compare", str(old_p), str(new_p), "--set", 'output.view=["impact"]'],
         )
         # Exit code unchanged: a removed symbol is still a 4 (BREAKING).
         assert result.exit_code == 4
@@ -395,7 +395,8 @@ class TestCompareReleaseDefaults:
         # since removed) are unknown options, a usage error (exit 64).
         old_p, new_p = _write_identical(tmp_path)
         accepted = CliRunner().invoke(
-            main, ["compare", str(old_p), str(new_p), "--severity-preset", "default"]
+            main,
+            ["compare", str(old_p), str(new_p), "--severity-preset", "default"],
         )
         assert accepted.exit_code == 0
         retired = CliRunner().invoke(
@@ -436,7 +437,13 @@ class TestCompareReleaseSeverityExit:
         old_dir, new_dir = self._make_release(tmp_path)
         result = CliRunner().invoke(
             main,
-            ["compare", str(old_dir), str(new_dir), "--severity-preset", "info-only"],
+            [
+                "compare",
+                str(old_dir),
+                str(new_dir),
+                "--severity-preset",
+                "info-only",
+            ],
         )
         # info-only downgrades everything below error -> exit 0 despite the break.
         assert result.exit_code == 0
@@ -497,7 +504,13 @@ class TestScopedExitRespectsSeverity:
         old_p, new_p = _write_removed_cpp_symbol(tmp_path)
         result = CliRunner().invoke(
             main,
-            ["compare", str(old_p), str(new_p), "--required-symbol", "_Z3foov"],
+            [
+                "compare",
+                str(old_p),
+                str(new_p),
+                "--set",
+                'consumers.required_symbols=["_Z3foov"]',
+            ],
         )
         assert result.exit_code == 4
 
@@ -511,8 +524,8 @@ class TestScopedExitRespectsSeverity:
                 "compare",
                 str(old_p),
                 str(new_p),
-                "--required-symbol",
-                "_Z3foov",
+                "--set",
+                'consumers.required_symbols=["_Z3foov"]',
                 "--severity-preset",
                 "info-only",
             ],
@@ -532,8 +545,8 @@ class TestScopedExitRespectsSeverity:
                 "compare",
                 str(old_p),
                 str(new_p),
-                "--required-symbol",
-                "_Z3foov",
+                "--set",
+                'consumers.required_symbols=["_Z3foov"]',
                 "--severity-preset",
                 "default",
             ],
@@ -561,8 +574,8 @@ class TestScopedExitRespectsSeverity:
                 "compare",
                 str(old_p),
                 str(new_p),
-                "--required-symbol",
-                "never_existed",
+                "--set",
+                'consumers.required_symbols=["never_existed"]',
                 "--severity-preset",
                 "default",
             ],
@@ -576,8 +589,8 @@ class TestScopedExitRespectsSeverity:
                     "compare",
                     str(old_p),
                     str(new_p),
-                    "--required-symbol",
-                    "never_existed",
+                    "--set",
+                    'consumers.required_symbols=["never_existed"]',
                     "--severity-preset",
                     "default",
                     "-o",
@@ -600,8 +613,8 @@ class TestScopedExitRespectsSeverity:
                 "compare",
                 str(old_p),
                 str(new_p),
-                "--required-symbol",
-                "never_existed",
+                "--set",
+                'consumers.required_symbols=["never_existed"]',
                 "--severity-preset",
                 "info-only",
             ],
@@ -662,8 +675,8 @@ class TestScopedExitRespectsSeverity:
                 "compare",
                 str(old_p),
                 str(new_p),
-                "--required-symbol",
-                "_Z10kept_entryv",
+                "--set",
+                'consumers.required_symbols=["_Z10kept_entryv"]',
                 "-o",
                 "json=-",
                 "--severity-preset",
@@ -822,7 +835,13 @@ class TestReleaseSeverityPolicyAndGlobal:
         )
         policy = tmp_path / "policy.yaml"
         policy.write_text("overrides:\n  func_removed: ignore\n", encoding="utf-8")
-        base = ["compare", str(old_dir), str(new_dir), "--severity-preset", "default"]
+        base = [
+            "compare",
+            str(old_dir),
+            str(new_dir),
+            "--severity-preset",
+            "default",
+        ]
         assert CliRunner().invoke(main, base).exit_code == 4
         overridden = CliRunner().invoke(main, [*base, "--policy", str(policy)])
         assert overridden.exit_code == 0

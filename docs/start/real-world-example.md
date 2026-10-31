@@ -75,7 +75,7 @@ abicheck compare old/lib/libfoo.so.2.3.0 new/lib/libfoo.so.2.4.0 \
   set `compile.std: c++20` in that same `.abicheck.yml`. Of the compile
   context, only the two operand-shaped inputs have a CLI spelling:
   `-I/--include` and **preprocessor macros**,
-  `-D/--define NAME[=VALUE]` on both `compare` and `dump`, for a
+  `-D NAME[=VALUE]` on both `compare` and `dump`, for a
   one-off run. `compile.defines: [FOO=1]` stays the right answer for CI; a CLI
   `-D` overrides it for that macro name only.
 
@@ -130,7 +130,7 @@ only from the `--sources` tree root — so give a header-only `dump`/`scan` (no
 `--sources`) an explicit `--config`, or its `compile:` settings are silently
 skipped. `dump` and `compare` have no general compiler-flag CLI options at all
 (Phase 7 CLI cleanup) — `.abicheck.yml` is their only source for the compile
-context, except for `-I/--include` and `-D/--define`, which override the
+context, except for `-I/--include` and `-D`, which override the
 config's `include_dirs`/`defines` per run.
 
 ```yaml

@@ -233,7 +233,7 @@ if [[ "$BASELINE_CHANNEL" == "none" && "$TARGET_KIND" != "library" ]]; then
   # with no baseline would silently run as a plain unscoped scan under the
   # contract target's name and could pass without ever checking the
   # consumer/plugin contract it claims to (Codex review).
-  _fail "target-kind '$TARGET_KIND' is not supported with baseline-channel: none -- a single-build audit (scan) has no --used-by/--required-symbol equivalent to scope the contract check against. Use target-kind: library for a baseline-channel: none audit, or set a real baseline-channel to run the scoped compare."
+  _fail "target-kind '$TARGET_KIND' is not supported with baseline-channel: none -- a single-build audit (scan) has no --used-by/consumers.required_symbols equivalent to scope the contract check against. Use target-kind: library for a baseline-channel: none audit, or set a real baseline-channel to run the scoped compare."
 fi
 if [[ "$BASELINE_CHANNEL" != "none" && -z "$BASELINE_PATH" ]]; then
   _fail "baseline-path is required when baseline-channel is not 'none'."

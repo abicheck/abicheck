@@ -664,7 +664,7 @@ def _emitted_top_level_fields(tmp_path) -> set[str]:
         [],
         ["--severity-preset", "default"],
         ["--contract", "public"],
-        ["--view", "root-cause"],
+        ["--set", 'output.view=["root-cause"]'],
     )
     runner = CliRunner()
     emitted: set[str] = set()

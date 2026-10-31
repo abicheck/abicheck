@@ -159,10 +159,8 @@ def _with_config_overrides(request: CompareRequest) -> CompareRequest:
     """
     if not request.config_overrides:
         return request
-    from ..compare_configuration import (
-        TYPED_OVERRIDE_CHANNELS,
-        load_and_resolve_compare_config,
-    )
+    from ..compare_configuration import load_and_resolve_compare_config
+    from .override_channels import TYPED_OVERRIDE_CHANNELS
 
     # Resolving first also validates the keys (a core option is refused there,
     # naming its flag) before the channel check below.

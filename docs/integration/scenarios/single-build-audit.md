@@ -67,7 +67,7 @@ Gating on a hygiene finding is opt-in, via the audit-gate axis
 :
 a `scan`-based gating job migrating to `compare --no-baseline` needs exactly
 one addition to keep gating on a `BREAKING`/`API_BREAK`-classified finding —
-add `--severity-preset default` (or `strict`) — which then exits `3`, never
+add `--set severity.preset=default` (or `strict`) — which then exits `3`, never
 `2`, so the hygiene gate can never be mistaken for a real compatibility
 break; a non-gating job needs no change. The other orthogonal axes still
 apply — see
@@ -101,7 +101,7 @@ suppressions:
 ```bash
 abicheck compare --no-baseline build/libfoo.so \
     -H include/foo.h -H include/foo_types.h -I include/ \
-    --policy declared-exported-policy.yml --severity-preset default \
+    --policy declared-exported-policy.yml --set severity.preset=default \
     --suppress declared-exported-exceptions.yml
 ```
 
@@ -126,7 +126,7 @@ abicheck compare --no-baseline lib/libmkl_rt.so.3 \
     --exclude-header 'fftw/*' --exclude-header '*mkl_cdft*' \
     --exclude-header '*blacs*' --exclude-header '*scalapack*' \
     --exclude-header 'hwloc/*' --exclude-header 'unicode/*' \
-    --policy declared-exported-policy.yml --severity-preset default \
+    --policy declared-exported-policy.yml --set severity.preset=default \
     --suppress declared-exported-exceptions.yml
 ```
 
@@ -159,7 +159,7 @@ steps:
   - run: >
       abicheck compare --no-baseline ${{ matrix.lib }}
       -H include/foo.h -I include/ ${{ matrix.defines }}
-      --policy declared-exported-policy.yml --severity-preset default
+      --policy declared-exported-policy.yml --set severity.preset=default
       --suppress exceptions/common.yml
       --suppress exceptions/${{ matrix.variant }}.yml
 ```
@@ -219,7 +219,7 @@ targets:
   with:
     name: libfoo
     target-kind: library   # required -- app-consumer/plugin-contract have
-                            # no scan-mode equivalent to --used-by/--required-symbol
+                            # no scan-mode equivalent to --used-by / consumers.required_symbols
     baseline-channel: none
     depth: source
 ```
@@ -247,7 +247,7 @@ for the equivalent one-step `mode: compare` (no baseline) wiring.
   track `main`.
 - **`target-kind: app-consumer`/`plugin-contract`** — not supported with
   `baseline-channel: none`: `compare --no-baseline` has no `--used-by`/
-  `--required-symbol` equivalent, so an app-consumer/plugin-contract audit
+  `consumers.required_symbols` equivalent, so an app-consumer/plugin-contract audit
   with no baseline has no scope to check against. Use `kind: library` for a
   no-baseline audit.
 

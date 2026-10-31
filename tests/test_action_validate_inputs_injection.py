@@ -123,7 +123,9 @@ class TestAnnotationInjection:
         annotation still has to tell the caller *what* they set, or the
         tombstone stops being actionable."""
         result = _run_validate({"INPUT_MODE": "compare", "INPUT_JOBS": "1\n2"})
-        assert result.returncode == 0, result.stdout + result.stderr
+        assert result.returncode == 1, (
+            result.stdout + result.stderr
+        )  # jobs is a fail-closed tombstone
         assert "jobs ('1 2')" in result.stdout
 
     @pytest.mark.parametrize("payload", _ESCAPE_PAYLOADS)
@@ -147,17 +149,20 @@ class TestAnnotationInjection:
             bash_options=["-O", "xpg_echo"] if xpg_echo else [],
         )
 
-        assert result.returncode == 0, result.stdout + result.stderr
+        assert result.returncode == 1, (
+            result.stdout + result.stderr
+        )  # jobs is a fail-closed tombstone
         emitted = [ln for ln in result.stdout.splitlines() if ln.startswith("::")]
         assert len(emitted) == 1, (
             f"payload {payload!r} produced {len(emitted)} annotation lines "
             f"under xpg_echo={xpg_echo}:\n{result.stdout}"
         )
-        for line in result.stdout.splitlines():
-            assert not line.startswith(("::error::", "::set-output")), (
-                f"payload {payload!r} forged a workflow command under "
-                f"xpg_echo={xpg_echo}:\n{result.stdout}"
-            )
+        # The single annotation is the script's own jobs tombstone; the payload
+        # must sit inside it as inert text, never start a line of its own.
+        assert emitted[0].startswith("::error::jobs ("), (
+            f"payload {payload!r} forged a workflow command under "
+            f"xpg_echo={xpg_echo}:\n{result.stdout}"
+        )
 
     @pytest.mark.parametrize("payload", _PERCENT_PAYLOADS)
     def test_a_percent_encoded_line_break_cannot_become_a_new_line(
@@ -174,7 +179,9 @@ class TestAnnotationInjection:
         """
         result = _run_validate({"INPUT_MODE": "compare", "INPUT_JOBS": payload})
 
-        assert result.returncode == 0, result.stdout + result.stderr
+        assert result.returncode == 1, (
+            result.stdout + result.stderr
+        )  # jobs is a fail-closed tombstone
         emitted = [ln for ln in result.stdout.splitlines() if ln.startswith("::")]
         assert len(emitted) == 1, result.stdout
         # No raw `%0A`/`%0D` may reach the runner: every `%` is escaped, so
@@ -191,7 +198,9 @@ class TestAnnotationInjection:
         a `%` the escape has already passed over."""
         result = _run_validate({"INPUT_MODE": "compare", "INPUT_JOBS": "a%b\nc"})
 
-        assert result.returncode == 0, result.stdout + result.stderr
+        assert result.returncode == 1, (
+            result.stdout + result.stderr
+        )  # jobs is a fail-closed tombstone
         emitted = [ln for ln in result.stdout.splitlines() if ln.startswith("::")]
         assert len(emitted) == 1, result.stdout
         assert "a%25b" in emitted[0], emitted[0]

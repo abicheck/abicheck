@@ -230,13 +230,13 @@ def validate_bundle_facts_request(request: BundleFactsCompareRequest) -> Any:
         )
     if request.show_only:
         raise BundleFactsCompareError(
-            "--view show=... is not supported together with a "
+            "output.view show=... is not supported together with a "
             "stored-bundle-facts OLD_INPUT (was --show-only).",
             usage=True,
         )
     if request.report_mode not in (None, "full"):
         raise BundleFactsCompareError(
-            "--view <mode> is not supported together "
+            "output.view <mode> is not supported together "
             "with a stored-bundle-facts OLD_INPUT (was --report-mode).",
             usage=True,
         )
@@ -346,18 +346,18 @@ def _reject_release_only_set_inputs(request: BundleFactsCompareRequest) -> None:
     """
     if request.used_by_apps:
         raise BundleFactsCompareError(
-            "--used-by/--used-by-manifest is not supported for "
+            "--used-by/consumers.manifests is not supported for "
             "directory/package (release) comparisons: the per-library "
             "fan-out has no per-app scoping. Compare the specific library "
-            "individually with --used-by/--used-by-manifest.",
+            "individually with --used-by / consumers.manifests.",
             usage=True,
         )
     if request.required_symbols:
         raise BundleFactsCompareError(
-            "--required-symbol is not supported for "
+            "consumers.required_symbols is not supported for "
             "directory/package (release) comparisons: the per-library "
             "fan-out has no plugin-host-contract scoping. Compare the "
-            "specific library individually with --required-symbol.",
+            "specific library individually with consumers.required_symbols.",
             usage=True,
         )
     if request.use_cases_manifest is not None:

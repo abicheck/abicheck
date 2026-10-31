@@ -125,7 +125,7 @@ interpreter that loads it imports none of them. State those names as the
 contract instead ([Consumer Models](consumer-models.md)):
 
 ```bash
-abicheck compare old.so new.so --required-symbol foo_open --required-symbol foo_read
+abicheck compare old.so new.so --set 'consumers.required_symbols=[foo_open, foo_read]'
 ```
 
 ## Kernel and accelerator ABIs

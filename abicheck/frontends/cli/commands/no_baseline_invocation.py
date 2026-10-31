@@ -57,6 +57,7 @@ from ....workflows.no_baseline_compare import (
 from ..options.contract import resolve_contract_domain, resolve_contract_evaluation
 from ..options.params import _load_suppression_and_policy
 from .no_baseline_rulings import (
+    _reject_config_scoping_for_no_baseline,
     _reject_old_sided_inputs,
     _reject_unsupported_options,
 )
@@ -343,15 +344,16 @@ def resolve_no_baseline_invocation(
     # code of its own here.
     from ..project_config import resolve_project_compare_config
 
-    _cfg_path, _project_cfg, resolved_cfg, _cfg_sha = resolve_project_compare_config(
+    _cfg_path, project_cfg, resolved_cfg, _cfg_sha = resolve_project_compare_config(
         config=kwargs.get("config"),
         severity_preset=None,
         config_overrides=kwargs.get("config_overrides"),
     )
+    _reject_config_scoping_for_no_baseline(project_cfg)
     from ....workflows.compare.project_inputs import note_unapplied_post_manifest
 
     note_unapplied_post_manifest(
-        _project_cfg,
+        project_cfg,
         route="a --no-baseline audit",
         reason="an overlay scopes a contract across two sides",
         notify=lambda message: click.echo(message, err=True),

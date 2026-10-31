@@ -779,8 +779,8 @@ class TestCompareCommand:
             "compare",
             str(old_f),
             str(new_f),
-            "--view",
-            "impact",
+            "--set",
+            'output.view=["impact"]',
         )
         # Breaking pair still exits 4; the report renders without error.
         assert result.exit_code == 4
@@ -2047,8 +2047,8 @@ class TestUsedByScoping:
             str(app),
             "-o",
             "oneline=-",
-            "--view",
-            "show=compatible",
+            "--set",
+            'output.view=["show=compatible"]',
         )
         assert result.exit_code == 0
         assert result.stdout.strip().startswith("NO_CHANGE: no changes (0 total)")
@@ -2344,8 +2344,8 @@ class TestUsedByScoping:
             str(app),
             "-o",
             "json=-",
-            "--view",
-            "root-cause",
+            "--set",
+            'output.view=["root-cause"]',
         )
         assert result.exit_code == 0
         data = json.loads(result.stdout)
@@ -2370,8 +2370,8 @@ class TestUsedByScoping:
             str(app),
             "-o",
             "json=-",
-            "--view",
-            "root-cause",
+            "--set",
+            'output.view=["root-cause"]',
         )
         data = json.loads(result.stdout)
         assert data["root_cause_count"] == 1
@@ -2415,8 +2415,8 @@ class TestUsedByScoping:
             str(app_path),
             "-o",
             "json=-",
-            "--view",
-            "root-cause",
+            "--set",
+            'output.view=["root-cause"]',
         )
         assert result.exit_code == 4
         data = json.loads(result.stdout)
@@ -2518,8 +2518,8 @@ class TestUsedByScoping:
             str(app_path),
             "-o",
             "json=-",
-            "--view",
-            "root-cause",
+            "--set",
+            'output.view=["root-cause"]',
         )
         assert result.exit_code == 4
         data = json.loads(result.stdout)
@@ -2568,8 +2568,8 @@ class TestUsedByScoping:
             str(new_p),
             "--used-by",
             str(app_path),
-            "--view",
-            "root-cause",
+            "--set",
+            'output.view=["root-cause"]',
         )
         assert result.exit_code == 4
         assert "## Root Causes (2)" in result.output
@@ -2605,8 +2605,8 @@ class TestUsedByScoping:
             str(new),
             "--used-by",
             str(app),
-            "--view",
-            "root-cause",
+            "--set",
+            'output.view=["root-cause"]',
         )
         assert result.exit_code == 0
         assert "### `ordinal:5` (1 finding)" in result.output
@@ -2651,8 +2651,8 @@ class TestUsedByScoping:
             str(new),
             "--used-by",
             str(app),
-            "--view",
-            "root-cause",
+            "--set",
+            'output.view=["root-cause"]',
             "--config",
             str(_severity_config(tmp_path, abi_breaking="error")),
         )
@@ -2719,8 +2719,8 @@ class TestUsedByScoping:
             str(app),
             "-o",
             "json=-",
-            "--view",
-            "show=compatible",
+            "--set",
+            'output.view=["show=compatible"]',
         )
         data = json.loads(result.stdout)
         kinds = [c["kind"] for c in data["changes"]]
@@ -2819,8 +2819,8 @@ class TestUsedByScoping:
             str(app),
             "-o",
             "json=-",
-            "--view",
-            "show=compatible",
+            "--set",
+            'output.view=["show=compatible"]',
         )
         data = json.loads(result.stdout)
         kinds = [c["kind"] for c in data["changes"]]
@@ -2840,8 +2840,8 @@ class TestUsedByScoping:
             str(app),
             "-o",
             "json=-",
-            "--view",
-            "show=breaking",
+            "--set",
+            'output.view=["show=breaking"]',
         )
         data = json.loads(result.stdout)
         kinds = [c["kind"] for c in data["changes"]]

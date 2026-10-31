@@ -314,7 +314,7 @@ with no `--against`) has **no** Python entry point yet. As of the fixes
 recorded in `docs/contribute/known-gaps.md`'s
 "`compare --no-baseline` does not yet reproduce `scan`'s audit-mode
 findings" entry) it now reproduces `scan`'s own candidate-side findings and,
-opt-in via `--severity-preset`, its exit-code gating too. Concretely: all
+opt-in via `severity.preset`, its exit-code gating too. Concretely: all
 eleven cross-source hygiene checks and the pattern/preprocessor pre-scan run
 on the self-compared candidate, and everything they find lands in the
 report's `findings[]` — `changes` stays empty, since an audit reports no

@@ -538,12 +538,16 @@ class TestCompareDispatch:
         _write_snap(old_dir / "libfoo.json", _snap())
         _write_snap(new_dir / "libfoo.json", _snap())
         code, out, err = _invoke(
-            "compare", str(old_dir), str(new_dir), "--required-symbol", "_Z3foov"
+            "compare",
+            str(old_dir),
+            str(new_dir),
+            "--set",
+            'consumers.required_symbols=["_Z3foov"]',
         )
         assert code != 0
         msg = out + err
-        assert "not supported for directory/package" in msg
-        assert "--required-symbol" in msg
+        assert "does not apply consumers.required_symbols" in msg
+        assert "consumers.required_symbols" in msg
 
     def test_diagnostic_comparison_rejected_on_set_inputs(self, tmp_path: Path) -> None:
         # ADR-050 D2: the per-library release fan-out doesn't wire the

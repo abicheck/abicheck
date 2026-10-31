@@ -19,7 +19,7 @@ Which public surface reaches each ADR, which use cases it serves, and whether a 
 | [ADR-002](../adr/002-multi-binary-release-compare.md) | surfaced | UC-WF-compare | `cli: compare --select`<br>`report: compare_report.comparison_scope` | — |
 | [ADR-003](../adr/003-data-source-architecture.md) | internal | — | — | Extractor/data-source layering inside extract/; users reach it only through dump/compare. |
 | [ADR-004](../adr/004-report-filtering-and-deduplication.md) | surfaced | UC-REP-json | `report: compare_report.root_causes`<br>`report: compare_report.redundant_count`<br>`report: compare_report.filtered_summary` | — |
-| [ADR-005](../adr/005-application-compat-check.md) | surfaced | UC-WF-appcompat | `cli: compare --used-by`<br>`cli: compare --required-symbol`<br>`api: abicheck.workflows.consumer_scope_standalone.check_appcompat`<br>`action: used-by`<br>`report: compare_report.used_by` | — |
+| [ADR-005](../adr/005-application-compat-check.md) | surfaced | UC-WF-appcompat | `cli: compare --used-by`<br>`api: abicheck.workflows.consumer_scope_standalone.check_appcompat`<br>`action: used-by`<br>`report: compare_report.used_by` | — |
 | [ADR-006](../adr/006-package-level-comparison.md) | surfaced | UC-WF-compare | `cli: compare`<br>`action: devel-pkg1` | — |
 | [ADR-007](../adr/007-btf-ctf-debug-formats.md) | surfaced | UC-ARCH-kernel-btf | `cli: dump --debug-info`<br>`api: abicheck.btf_metadata` | — |
 | [ADR-008](../adr/008-full-stack-dependency-validation.md) | surfaced | UC-WF-stack-deps | `cli: deps tree`<br>`cli: deps compare`<br>`cli: compare --follow-deps`<br>`action: follow-deps` | — |
@@ -68,7 +68,7 @@ Which public surface reaches each ADR, which use cases it serves, and whether a 
 | [ADR-049](../adr/049-contract-relevance-and-compatibility-configuration.md) | surfaced | UC-WF-compare, UC-WF-contract-config | `cli: compare --contract`<br>`api: abicheck.workflows.service_requests.CompareRequest.pack_paths`<br>`api: abicheck.workflows.service_requests.CompareRequest.stated_settings`<br>`report: compare_report.contract_coverage`<br>`report: compare_report.contract_context` | — |
 | [ADR-050](../adr/050-comparability-contract-and-multi-tu-manifest.md) | surfaced | — | `cli: compare --dump-manifest`<br>`report: compare_report.comparability_assurance` | — |
 | [ADR-051](../adr/051-documentation-operational-model.md) | internal | — | — | Repository documentation governance; not a product surface. |
-| [ADR-052](../adr/052-unified-impact-assessment-model.md) | surfaced | UC-WF-appcompat | `cli: compare --used-by-manifest`<br>`report: compare_report.consumer_impact_summary` | — |
+| [ADR-052](../adr/052-unified-impact-assessment-model.md) | surfaced | UC-WF-appcompat | `report: compare_report.consumer_impact_summary` | — |
 | [ADR-053](../adr/053-tu-link-unit-dso-attribution.md) | partial | — | — | Core algorithm and validator only; CLI/Action pipeline wiring is deferred (D5). |
 | [ADR-054](../adr/054-cli-project-integration-surface-consolidation.md) | surfaced | UC-WF-cli-contract | `cli: project plan`<br>`cli: project validate` | — |
 | [ADR-055](../adr/055-typed-request-result-completeness-and-schema-registry.md) | surfaced | UC-WF-compare | `api: abicheck.workflows.service_requests.CompareRequest`<br>`api: abicheck.workflows.service_requests.DumpRequest`<br>`report: compare_report.report_schema_version` | — |
@@ -126,7 +126,6 @@ Which public surface reaches each ADR, which use cases it serves, and whether a 
 - ADR-004 report: compare_report.root_causes
 - ADR-005 action: used-by
 - ADR-005 api: abicheck.workflows.consumer_scope_standalone.check_appcompat
-- ADR-005 cli: compare --required-symbol
 - ADR-005 report: compare_report.used_by
 - ADR-006 action: devel-pkg1
 - ADR-007 api: abicheck.btf_metadata
@@ -208,7 +207,6 @@ Which public surface reaches each ADR, which use cases it serves, and whether a 
 - ADR-049 report: compare_report.contract_coverage
 - ADR-050 cli: compare --dump-manifest
 - ADR-050 report: compare_report.comparability_assurance
-- ADR-052 cli: compare --used-by-manifest
 - ADR-052 report: compare_report.consumer_impact_summary
 - ADR-054 cli: project plan
 - ADR-054 cli: project validate

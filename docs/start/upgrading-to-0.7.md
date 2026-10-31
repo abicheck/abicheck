@@ -92,18 +92,27 @@ that moves to this release.
 
 | 0.6 input | 0.7 input | Notes |
 |---|---|---|
-| `ast-frontend` | `frontend` | |
+| `ast-frontend` | `set: compile.frontend=<value>` | Renamed to `frontend`, which 0.7 also retires (see below). |
 | `gcc-path` | `compiler` | Takes a compiler path or a cross-toolchain prefix. |
 | `gcc-prefix` | `compiler` | Removed. `compiler` takes the same value. |
-| `gcc-options` | `compile-options` | |
+| `gcc-options` | `set: compile.options=[<flag>, ...]` | Renamed to `compile-options`, which 0.7 also retires (see below). |
 | `analysis-assurance-complete` | `require-complete` | Same `true`/`false` override of `assurance.require_complete`. |
-| `public-header-dir` | `public-header-dirs` | |
+| `public-header-dir` | `header: <dir> ...` | Renamed to `public-header-dirs`, which 0.7 also retires (see below). |
 | `debug-info1`, `debug-info2` | `old-debug-info`, `new-debug-info` | |
 | `devel-pkg1`, `devel-pkg2` | `old-header`, `new-header` | These now also accept a development package. |
 | `old-version`, `new-version` | `old-label`, `new-label` | Report labels; the defaults stay `old` and `new`. |
 | `policy-file` | `policy` | `policy` takes either a built-in profile name or a policy file path. |
 | `requested-depth` (`check-target`) | `depth` | |
 | `contract-file` (`check-target`) | `contract` | |
+| `dso-only` | `set: release.dso_only=true` | Config key `release.dso_only`. |
+| `include-private-dso` | `set: release.include_private_dso=true` | Config key `release.include_private_dso`. |
+| `fail-on-removed-library` | `set: gate.fail_on_removed_library=true` | Config key `gate.fail_on_removed_library`. |
+| `public-header-dirs` | `header: <dir> ...` | It was forwarded as `-H`, which is what `header` does. Use `old-header`/`new-header` for one side. |
+| `frontend` | `set: compile.frontend=<value>` | |
+| `compile-options` | `set: compile.options=[<flag>, ...]` | A YAML list, one flag per element. |
+| `nostdinc` | `set: compile.nostdinc=true` | |
+| `jobs` | none | Removed with no replacement. The worker count is controlled by the runner or workflow. |
+| `allow-build-query` | none | Removed with no replacement. abicheck runs its inferred compile-database query whenever a sources input needs build context. A trusted query is set through `build-config`'s `build.query`. |
 | `consumer-ast-frontend` (`check-target`) | `consumer-frontend` | |
 | `consumer-gcc-path` (`check-target`) | `consumer-compiler` | |
 | `consumer-gcc-options` (`check-target`) | `consumer-compile-options` | |
@@ -131,3 +140,18 @@ tombstone, and a non-empty value fails the run before any analysis with an
 The `extra-args` input is passed to the CLI as raw arguments. A workflow
 that passes a retired spelling there, for example `extra-args: --version 2.0`,
 now fails with exit 64. Change it to the new spelling (`--label 2.0`).
+
+## Compare options moved to `.abicheck.yml`
+
+Three project-stable `compare` options are removed from the command line. Each
+now fails as an unknown option (exit 64). Set the same value in `.abicheck.yml`,
+or pass it once with `--set PATH=VALUE`, whose value is YAML.
+
+| 0.6 spelling | 0.7 spelling | Notes |
+|---|---|---|
+| `compare --view TOKEN` | `output.view` (`--set 'output.view=["show=breaking"]'`) | A YAML list of the same tokens. |
+| `compare --used-by-manifest FILE` | `consumers.manifests` (`--set 'consumers.manifests=[FILE]'`) | Relative paths resolve against the config file. |
+| `compare --required-symbol NAME` | `consumers.required_symbols` (`--set 'consumers.required_symbols=[NAME]'`) | Entries may be `@FILE`. Still mutually exclusive with `--used-by`. |
+
+`--used-by`, `--define` and `--severity-preset` stay on the command line. `consumers.*` and `output.view` are
+refused, not ignored, under `--no-baseline` and on a stored BundleFacts operand.

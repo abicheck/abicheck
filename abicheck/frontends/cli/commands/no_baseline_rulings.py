@@ -75,10 +75,10 @@ def _reject_view_tokens_for_no_baseline(kwargs: dict[str, Any]) -> None:
         value = kwargs.get(name, default)
         if value != default:
             raise click.UsageError(
-                "--view is not available together with --no-baseline: a "
+                "output.view is not available together with --no-baseline: a "
                 "no-baseline audit has no root-cause graph, findings list, "
-                "or pattern-modulation ledger for --view to act on (it "
-                "reports an empty change set by construction). Drop --view "
+                "or pattern-modulation ledger for output.view to act on (it "
+                "reports an empty change set by construction). Drop output.view "
                 "for this operand."
             )
 
@@ -224,16 +224,6 @@ _UNSUPPORTED_OPTIONS: dict[str, tuple[str, str]] = {
         "--used-by",
         "consumer scoping answers 'does this change break a consumer', which "
         "needs two versions to compare",
-    ),
-    "required_symbols_opt": (
-        "--required-symbol",
-        "an entrypoint contract is checked against what a comparison removed; "
-        "with no baseline nothing can have been removed",
-    ),
-    "used_by_manifests": (
-        "--used-by-manifest",
-        "a consumer manifest merges into the --used-by pipeline, which needs "
-        "two versions to compare",
     ),
     "use_cases_manifest": (
         "--use-cases",
@@ -384,6 +374,44 @@ def _was_given(value: object) -> bool:
     if type(value).__name__ == "Sentinel" or repr(value).startswith("Sentinel."):
         return False
     return value not in _UNSET_SENTINELS
+
+
+def _reject_config_scoping_for_no_baseline(project_cfg: Any) -> None:
+    """Refuse the config keys that scope or shape a comparison.
+
+    ``consumers.manifests``/``consumers.required_symbols`` and ``output.view``
+    took the place of the command-line flags :data:`_UNSUPPORTED_OPTIONS`
+    refuses, so a config that sets them is refused the same way: an audit
+    cannot honour them, and a silent drop would read as taken.
+    """
+    if project_cfg is None:
+        return
+    for key, value, reason in (
+        (
+            "consumers.manifests",
+            project_cfg.used_by_manifests,
+            "a consumer manifest merges into the consumer-scoping pipeline, "
+            "which needs two versions to compare",
+        ),
+        (
+            "consumers.required_symbols",
+            project_cfg.required_symbols,
+            "an entrypoint contract is checked against what a comparison "
+            "removed; with no baseline nothing can have been removed",
+        ),
+        (
+            "output.view",
+            project_cfg.output_view,
+            "rendering selectors apply to a comparison's report, which an audit "
+            "does not produce",
+        ),
+    ):
+        if value:
+            raise click.UsageError(
+                f"{key} is not available with --no-baseline: {reason}. It is "
+                "rejected rather than silently ignored so a CI job never "
+                "believes it took effect."
+            )
 
 
 def _reject_unsupported_options(

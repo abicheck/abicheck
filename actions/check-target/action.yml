@@ -681,6 +681,38 @@ runs:
     # documents stays exactly as simple to audit as before this step
     # existed (Codex review / test_action_check_target.py's
     # TestStaleAnalysisOutputIsCleanedBeforeEachRun).
+    - name: Compose root set overrides (consumer dump)
+      id: root_set_consumer
+      shell: bash
+      # The root action retired its frontend/compile-options inputs
+      # (ADR-091 Phase 5). They reach it as compile.frontend/compile.options
+      # set: PATH=VALUE lines, composed here with this action's own set:.
+      env:
+        ROOT_SET_BASE: ${{ inputs.set }}
+        ROOT_FRONTEND: ${{ inputs.consumer-frontend }}
+        ROOT_COMPILE_OPTIONS: ${{ inputs.consumer-compile-options }}
+      run: |
+        python3 -I - >> "$GITHUB_OUTPUT" <<'PY'
+        import json, os, shlex, uuid
+        def env(name):
+            return os.environ.get(name, "")
+        lines = []
+        base = env("ROOT_SET_BASE")
+        if base.strip():
+            lines.append(base.rstrip("\n"))
+        frontend = env("ROOT_FRONTEND")
+        if frontend and frontend != "auto":
+            lines.append("compile.frontend=" + json.dumps(frontend))
+        opts = env("ROOT_COMPILE_OPTIONS")
+        if opts:
+            flags = [l for l in opts.splitlines() if l] if "\n" in opts else shlex.split(opts)
+            lines.append("compile.options=" + json.dumps(flags))
+        delim = "ABICHECK_ROOT_SET_" + uuid.uuid4().hex
+        print("set<<" + delim)
+        print("\n".join(lines))
+        print(delim)
+        PY
+
     - name: Extract candidate consumer context
       id: consumer_context
       if: |
@@ -707,14 +739,13 @@ runs:
         header: ${{ inputs.new-header != '' && inputs.new-header || inputs.header }}
         include: ${{ inputs.new-include != '' && inputs.new-include || inputs.include }}
         lang: ${{ inputs.lang }}
-        frontend: ${{ inputs.consumer-frontend }}
         # The caller's gcc-prefix reached this dump before ADR-091 R5 folded it
         # into `compiler`. Only a prefix (ends with '-', the same rule
         # abicheck/buildsource/compile_config.py uses) falls back here, so a
         # full compiler path never reaches the consumer context dump.
         compiler: ${{ inputs.consumer-compiler || (endsWith(inputs.compiler, '-') && inputs.compiler || '') }}
-        compile-options: ${{ inputs.consumer-compile-options }}
         sysroot: ${{ inputs.sysroot }}
+        set: ${{ steps.root_set_consumer.outputs.set }}
         sources: ${{ inputs.sources != '' && inputs.sources || (inputs.evidence-producer == 'replay' && '.' || '') }}
         build-info: ${{ (inputs.evidence-producer == 'wrapper' || inputs.evidence-producer == 'clang-plugin') && inputs.evidence-pack-path || inputs.build-info }}
         compile-db: ${{ inputs.compile-db }}
@@ -1907,6 +1938,38 @@ runs:
           echo "$_extra_args_output_delim"
         } >> "$GITHUB_OUTPUT"
 
+    - name: Compose root set overrides (analysis)
+      id: root_set_main
+      shell: bash
+      # The root action retired its frontend/compile-options inputs
+      # (ADR-091 Phase 5). They reach it as compile.frontend/compile.options
+      # set: PATH=VALUE lines, composed here with this action's own set:.
+      env:
+        ROOT_SET_BASE: ${{ inputs.set }}
+        ROOT_FRONTEND: ${{ steps.consumer_context.outcome == 'success' && '' || inputs.frontend }}
+        ROOT_COMPILE_OPTIONS: ${{ steps.consumer_context.outcome == 'success' && '' || inputs.compile-options }}
+      run: |
+        python3 -I - >> "$GITHUB_OUTPUT" <<'PY'
+        import json, os, shlex, uuid
+        def env(name):
+            return os.environ.get(name, "")
+        lines = []
+        base = env("ROOT_SET_BASE")
+        if base.strip():
+            lines.append(base.rstrip("\n"))
+        frontend = env("ROOT_FRONTEND")
+        if frontend and frontend != "auto":
+            lines.append("compile.frontend=" + json.dumps(frontend))
+        opts = env("ROOT_COMPILE_OPTIONS")
+        if opts:
+            flags = [l for l in opts.splitlines() if l] if "\n" in opts else shlex.split(opts)
+            lines.append("compile.options=" + json.dumps(flags))
+        delim = "ABICHECK_ROOT_SET_" + uuid.uuid4().hex
+        print("set<<" + delim)
+        print("\n".join(lines))
+        print(delim)
+        PY
+
     - name: Clean stale analysis output
       shell: bash
       run: rm -f check-target-analysis.json
@@ -1938,11 +2001,6 @@ runs:
         include: ${{ inputs.include }}
         old-include: ${{ inputs.old-include }}
         new-include: ${{ steps.consumer_context.outcome == 'success' && '' || inputs.new-include }}
-        lang: ${{ inputs.lang }}
-        frontend: ${{ steps.consumer_context.outcome == 'success' && '' || inputs.frontend }}
-        compiler: ${{ steps.consumer_context.outcome == 'success' && '' || inputs.compiler }}
-        compile-options: ${{ steps.consumer_context.outcome == 'success' && '' || inputs.compile-options }}
-        sysroot: ${{ inputs.sysroot }}
         # collect-facts' own replay phase defaults an empty `sources` to '.'
         # internally (run.sh: `SOURCES="${INPUT_SOURCES:-.}"`) but never
         # surfaces that resolved value as an output -- it only prints a
@@ -1968,8 +2026,11 @@ runs:
         required-symbols: ${{ inputs.target-kind == 'plugin-contract' && inputs.contract || '' }}
         policy: ${{ inputs.policy }}
         suppress: ${{ inputs.suppress }}
+        lang: ${{ inputs.lang }}
+        compiler: ${{ steps.consumer_context.outcome == 'success' && '' || inputs.compiler }}
+        sysroot: ${{ inputs.sysroot }}
         severity-preset: ${{ inputs.severity-preset }}
-        set: ${{ inputs.set }}
+        set: ${{ steps.root_set_main.outputs.set }}
         # require-complete-analysis: RETIRED -- this Action's own input (see
         # its docstring above) is validated to 'false' before this step can
         # ever run, and the root Action's own input it used to forward to is

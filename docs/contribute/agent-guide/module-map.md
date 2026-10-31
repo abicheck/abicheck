@@ -398,7 +398,7 @@ Core pipeline (in order of data flow):
    - `contract_scoped_promotion.py` — ADR-049 §4.3 item 1's evidence tier and
      everything it implies. The evaluator above answers relevance from
      *snapshot* evidence; this module answers the one question that evidence
-     cannot — a run given `--used-by` or `--required-symbol` has been *told*
+     cannot — a run given `--used-by` or `consumers.required_symbols` has been *told*
      what the contract is, and §4.3 ranks a caller's explicit consumer or
      entrypoint above anything two snapshots can show. So it runs after
      `compare()` returned, over the collections a scoping pass built, and

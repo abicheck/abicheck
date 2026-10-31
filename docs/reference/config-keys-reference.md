@@ -46,6 +46,13 @@ Every `.abicheck.yml` top-level key and block sub-key that `abicheck.buildsource
 | `std` | str |
 | `sysroot` | str |
 
+### `consumers:`
+
+| Sub-key | Type |
+|---|---|
+| `manifests` | list[str] (or a single str) |
+| `required_symbols` | list[str] (or a single str) |
+
 ### `debug:`
 
 | Sub-key | Type |
@@ -61,6 +68,12 @@ Every `.abicheck.yml` top-level key and block sub-key that `abicheck.buildsource
 | Sub-key | Type |
 |---|---|
 | `fail_on_removed_library` | bool |
+
+### `output:`
+
+| Sub-key | Type |
+|---|---|
+| `view` | list[str] (or a single str) |
 
 ### `performance:`
 

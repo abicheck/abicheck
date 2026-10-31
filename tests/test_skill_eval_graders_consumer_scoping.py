@@ -232,8 +232,8 @@ class TestDimensionSix:
                     "compare",
                     "old.so",
                     "new.so",
-                    "--required-symbol",
-                    "analytics-daemon",
+                    "--set",
+                    'consumers.required_symbols=["analytics-daemon"]',
                 ],
             )
         ]
@@ -269,8 +269,8 @@ class TestDimensionSix:
                     "compare",
                     "old.so",
                     "new.so",
-                    "--required-symbol",
-                    "plugin_teardown",
+                    "--set",
+                    'consumers.required_symbols=["plugin_teardown"]',
                 ],
             )
         ]
@@ -356,8 +356,8 @@ class TestDimensionSix:
                     "compare",
                     "old.so",
                     "new.so",
-                    "--required-symbol",
-                    "plugin_register",
+                    "--set",
+                    'consumers.required_symbols=["plugin_register"]',
                 ],
             )
         ]
@@ -391,8 +391,8 @@ class TestDimensionSix:
                     "compare",
                     "old.so",
                     "new.so",
-                    "--required-symbol",
-                    "plugin_register",
+                    "--set",
+                    'consumers.required_symbols=["plugin_register"]',
                 ],
             ),
             a_breaking_call(
@@ -401,8 +401,8 @@ class TestDimensionSix:
                     "compare",
                     "old.so",
                     "new.so",
-                    "--required-symbol",
-                    "plugin_teardown",
+                    "--set",
+                    'consumers.required_symbols=["plugin_teardown"]',
                 ],
             ),
         ]

@@ -102,7 +102,7 @@ error naming the field and the reason.
 
 ## Consumer/entrypoint evidence outranks header/export inference
 
-`compare --used-by APP` or `--required-symbol(s)` layered on top of
+`compare --used-by APP` or `consumers.required_symbols` layered on top of
 `--contract` promotes a finding to `IN_CONTRACT` whenever it
 matches the app's actual imports or the plugin host's required entrypoints
 — stronger evidence than anything a header/export scan alone can infer:
@@ -128,7 +128,7 @@ for the deeper "why", not just "whether."
       -H include/ \
       --contract public \
       --pack packs/accept-unresolved.yml \
-      --severity-preset default \
+      --set severity.preset=default \
       -o json=report.json
 ```
 

@@ -101,6 +101,9 @@ step's real `uses:` value before returning it.
 from __future__ import annotations
 
 import json
+import os
+import subprocess
+import sys
 from copy import deepcopy
 from pathlib import Path
 from typing import Any
@@ -214,6 +217,50 @@ def _consumer_context_step() -> dict[str, Any]:
         f"action.yml directly"
     )
     return step
+
+
+def _consumer_root_set(hop3_inputs: dict[str, Any]) -> dict[str, Any]:
+    """Hop 3's compile-context half, executed for real (ADR-091 Phase 5).
+
+    The root Action retired its ``frontend``/``compile-options`` inputs, so
+    the consumer dump no longer receives them through ``with:``. The
+    "Compose root set overrides (consumer dump)" step turns the consumer
+    values into ``set:`` lines, and the consumer step forwards that step's
+    ``set`` output. This evaluates the composer's own ``env:`` expressions
+    against *hop3_inputs*, runs its own embedded Python, checks the consumer
+    step forwards exactly that output, and returns the composed ``set:``
+    text plus its parsed ``compile.*`` values."""
+    target = _load(CHECK_TARGET)
+    step = next(
+        step
+        for step in _steps(target["runs"])
+        if step.get("name") == "Compose root set overrides (consumer dump)"
+    )
+    assert _consumer_context_step()["with"]["set"] == (
+        "${{ steps." + step["id"] + ".outputs.set }}"
+    )
+    env = {
+        name: str(eval_gha_expression(expr, inputs=hop3_inputs) or "")
+        for name, expr in step["env"].items()
+    }
+    run = step["run"]
+    script = run[run.index("<<'PY'\n") + len("<<'PY'\n") : run.rindex("\nPY")]
+    result = subprocess.run(
+        [sys.executable, "-I", "-c", script],
+        capture_output=True,
+        text=True,
+        env={**os.environ, **env},
+        check=True,
+    )
+    lines = result.stdout.splitlines()
+    assert lines[0].startswith("set<<") and lines[-1] == lines[0][len("set<<") :]
+    body = [line for line in lines[1:-1] if line]
+    sets = {
+        line.partition("=")[0]: json.loads(line.partition("=")[2])
+        for line in body
+        if line.startswith("compile.")
+    }
+    return {"text": "\n".join(body), "sets": sets}
 
 
 def _hop3_inputs_from(
@@ -345,18 +392,19 @@ def test_sentinel_consumer_gcc_path_survives_config_to_check_target_input(
     final_gcc_path = eval_gha_expression(
         consumer_step["with"]["compiler"], inputs=hop3_inputs
     )
-    final_gcc_options = eval_gha_expression(
-        consumer_step["with"]["compile-options"], inputs=hop3_inputs
-    )
-    final_ast_frontend = eval_gha_expression(
-        consumer_step["with"]["frontend"], inputs=hop3_inputs
-    )
+    root_set = _consumer_root_set(hop3_inputs)
+    final_gcc_options = " ".join(root_set["sets"].get("compile.options", []))
+    final_ast_frontend = root_set["sets"].get("compile.frontend", "")
     assert final_gcc_path == _SENTINEL_CONSUMER_GCC_PATH
     assert final_gcc_options == "-std=gnu++20 -stdlib=libc++"
     assert final_ast_frontend == _SENTINEL_CONSUMER_AST_FRONTEND
 
     _assert_reaches_real_dump_cli_invocation(
-        tmp_path, final_gcc_path, final_gcc_options, final_ast_frontend
+        tmp_path,
+        final_gcc_path,
+        final_gcc_options,
+        final_ast_frontend,
+        root_set["text"],
     )
 
 
@@ -548,18 +596,19 @@ def test_partial_overlay_falls_back_to_workflow_global_per_field(
     final_gcc_path = eval_gha_expression(
         consumer_step["with"]["compiler"], inputs=hop3_inputs
     )
-    final_gcc_options = eval_gha_expression(
-        consumer_step["with"]["compile-options"], inputs=hop3_inputs
-    )
-    final_ast_frontend = eval_gha_expression(
-        consumer_step["with"]["frontend"], inputs=hop3_inputs
-    )
+    root_set = _consumer_root_set(hop3_inputs)
+    final_gcc_options = " ".join(root_set["sets"].get("compile.options", []))
+    final_ast_frontend = root_set["sets"].get("compile.frontend", "")
     assert final_gcc_path == _FALLBACK_GCC_PATH
     assert final_gcc_options == _FALLBACK_GCC_OPTIONS
     assert final_ast_frontend == _SENTINEL_CONSUMER_AST_FRONTEND
 
     _assert_reaches_real_dump_cli_invocation(
-        tmp_path, final_gcc_path, final_gcc_options, final_ast_frontend
+        tmp_path,
+        final_gcc_path,
+        final_gcc_options,
+        final_ast_frontend,
+        root_set["text"],
     )
 
 
@@ -659,18 +708,19 @@ def test_partial_overlay_without_frontend_falls_back_to_workflow_global_frontend
     final_gcc_path = eval_gha_expression(
         consumer_step["with"]["compiler"], inputs=hop3_inputs
     )
-    final_gcc_options = eval_gha_expression(
-        consumer_step["with"]["compile-options"], inputs=hop3_inputs
-    )
-    final_ast_frontend = eval_gha_expression(
-        consumer_step["with"]["frontend"], inputs=hop3_inputs
-    )
+    root_set = _consumer_root_set(hop3_inputs)
+    final_gcc_options = " ".join(root_set["sets"].get("compile.options", []))
+    final_ast_frontend = root_set["sets"].get("compile.frontend", "")
     assert final_gcc_path == _SENTINEL_CONSUMER_GCC_PATH
     assert final_gcc_options == "-std=gnu++20"
     assert final_ast_frontend == _WORKFLOW_GLOBAL_AST_FRONTEND
 
     _assert_reaches_real_dump_cli_invocation(
-        tmp_path, final_gcc_path, final_gcc_options, final_ast_frontend
+        tmp_path,
+        final_gcc_path,
+        final_gcc_options,
+        final_ast_frontend,
+        root_set["text"],
     )
 
 
@@ -773,12 +823,9 @@ def test_no_baseline_channel_activates_the_consumer_step_via_its_own_arm() -> No
     final_gcc_path = eval_gha_expression(
         consumer_step["with"]["compiler"], inputs=hop3_inputs
     )
-    final_gcc_options = eval_gha_expression(
-        consumer_step["with"]["compile-options"], inputs=hop3_inputs
-    )
-    final_ast_frontend = eval_gha_expression(
-        consumer_step["with"]["frontend"], inputs=hop3_inputs
-    )
+    root_set = _consumer_root_set(hop3_inputs)
+    final_gcc_options = " ".join(root_set["sets"].get("compile.options", []))
+    final_ast_frontend = root_set["sets"].get("compile.frontend", "")
     # Not carried through hop 4 (`_assert_reaches_real_dump_cli_invocation`
     # unconditionally asserts `--compiler`/`--compiler-option` are present,
     # which `add_single_flag`/`add_flag_shlex_split` in run.sh correctly
@@ -820,7 +867,7 @@ def _assert_run_abicheck_step_invokes_run_sh() -> None:
 
 
 def _assert_reaches_real_dump_cli_invocation(
-    tmp_path: Path, gcc_path: str, gcc_options: str, ast_frontend: str
+    tmp_path: Path, gcc_path: str, gcc_options: str, ast_frontend: str, set_text: str
 ) -> None:
     """Hop 4: the values resolved at the end of hops 1-3, mapped to their REAL
     INPUT_* env var names via root action.yml's own "Run abicheck" step's
@@ -848,18 +895,18 @@ def _assert_reaches_real_dump_cli_invocation(
     deleted that branch, which is what surfaced the mismatch)."""
     _assert_run_abicheck_step_invokes_run_sh()
     env_by_input = {inp: var for var, inp in _step_env_mapping("Run abicheck").items()}
-    for name in ("compiler", "compile-options", "frontend", "sysroot"):
+    for name in ("compiler", "sysroot", "set"):
         assert name in env_by_input, (
             f"root action.yml's env block no longer maps input {name!r} to "
             f"an INPUT_* var -- test_action_run_contract.py's own contract "
             f"tests should already have failed"
         )
+    # ADR-091 Phase 5: frontend/compile-options reach the root Action only
+    # as the composed `set:` lines (their own inputs are RETIRED tombstones).
     env = {
-        env_by_input["frontend"]: ast_frontend,
         env_by_input["compiler"]: gcc_path,
-        env_by_input["compile-options"]: gcc_options,
+        env_by_input["set"]: set_text,
         env_by_input["sysroot"]: "",
-        "INPUT_NOSTDINC": "false",
     }
     argv = _run_dump_argv(tmp_path, "dump", **env)
     compile_sets = {

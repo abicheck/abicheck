@@ -27,6 +27,14 @@ from test_cli_compare_release_view import (  # noqa: E402
 )
 
 
+def _view_config(tmp_path: Path, view: str) -> str:
+    """A ``.abicheck.yml`` selecting ``output.view`` (a directory compare
+    refuses ``--set output.view``, so the rendering selector travels by config)."""
+    cfg = tmp_path / f"view-{abs(hash(view))}.abicheck.yml"
+    cfg.write_text(f"output:\n  view: {view}\n", encoding="utf-8")
+    return str(cfg)
+
+
 class TestReleaseViewShowOnlyAppliesToEveryExport:
     """A display filter means the same thing for every export.
 
@@ -53,8 +61,8 @@ class TestReleaseViewShowOnlyAppliesToEveryExport:
             "compare",
             str(old_dir),
             str(new_dir),
-            "--view",
-            "show=variables",
+            "--config",
+            _view_config(tmp_path, '["show=variables"]'),
             "-o",
             f"json={first}",
             "-o",

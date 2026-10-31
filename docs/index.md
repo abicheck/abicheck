@@ -103,7 +103,7 @@ needs:
 **Checking real applications and plugins?**
 
 - [Application Compatibility](use/appcompat.md) — `compare --used-by`, including *why* a consumer depends on a changed declaration.
-- [Plugin Systems](use/plugin-systems.md) — `compare --required-symbol`.
+- [Plugin Systems](use/plugin-systems.md) — `consumers.required_symbols`.
 
 **Automating through Python or an agent?**
 
