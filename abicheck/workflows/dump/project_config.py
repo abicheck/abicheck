@@ -64,8 +64,8 @@ if TYPE_CHECKING:
 
 __all__ = [
     "DUMP_APPLIED_PATHS",
-    "DepsSettings",
     "DUMP_TYPED_OVERRIDE_CHANNELS",
+    "DepsSettings",
     "DebugOperandError",
     "DumpConfigError",
     "DumpDebugConfig",
@@ -405,6 +405,7 @@ def _dump_run_inputs(
         follow=deps.follow,
         search_paths=deps.search_paths,
         ld_library_path=deps.ld_library_path,
+        overridden=config_overrides or (),
     )
     missing = [str(p) for p in settings.search_paths if not p.exists()]
     if missing:

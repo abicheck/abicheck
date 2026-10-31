@@ -33,10 +33,9 @@ Precedence is the one ADR-091 D2 rule: an explicit flag or typed argument, then
 ``--set``/``config_overrides`` (non-core keys), then the file, then the
 built-in default. The flag replaces the configured value; the two are never
 merged, because the value names the run's evidence and a merged set would
-differ from what the command line says. A relative path in the config resolves
-against the directory of the config file that names it (the
-``consumers.manifests`` rule); with no file (a bare ``--set``, or the typed
-API) it is used as given.
+differ from what the command line says. A relative path written in the config
+file resolves against that file's directory; one given by ``--set`` or the
+typed ``config_overrides`` is used as given, relative to the current directory.
 """
 
 from __future__ import annotations
@@ -54,9 +53,9 @@ __all__ = [
     "config_debug_info",
     "config_relative_path",
     "configured_run_input_keys",
-    "resolve_debug_info",
     "dump_debug_roots",
     "fold_deps_overrides",
+    "resolve_debug_info",
     "resolve_deps_settings",
 ]
 
@@ -112,8 +111,13 @@ def resolve_deps_settings(
     follow: bool,
     search_paths: Iterable[Path],
     ld_library_path: str,
+    overridden: Iterable[str] = (),
 ) -> DepsSettings:
     """The dependency walk's inputs: each stated value, else its config key.
+
+    A ``deps.search_paths`` value written in the file resolves against
+    *cfg_path*'s directory; one set by ``--set``/``config_overrides`` (named in
+    *overridden*) is used as given, relative to the current directory.
 
     ``--follow-deps`` is an on-only flag, so a configured ``deps.follow: true``
     cannot be turned off for one run; point ``--config`` at a config without it.
@@ -122,8 +126,9 @@ def resolve_deps_settings(
     if cfg is None:
         return DepsSettings(bool(follow), stated_paths, ld_library_path or "")
     cfg_follow = getattr(cfg, "deps_follow", None)
+    base = None if "deps.search_paths" in set(overridden) else cfg_path
     cfg_paths = tuple(
-        config_relative_path(str(item), cfg_path)
+        config_relative_path(str(item), base)
         for item in (getattr(cfg, "deps_search_paths", None) or ())
     )
     cfg_ld = getattr(cfg, "deps_ld_library_path", None) or ""

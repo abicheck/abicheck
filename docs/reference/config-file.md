@@ -550,10 +550,9 @@ refused, naming `--follow-deps`.
 | `search_paths` | `--search-path` | list of directories (default empty); each must exist, like the flag's operand |
 | `ld_library_path` | `--ld-library-path` | string, a simulated `LD_LIBRARY_PATH` (default empty) |
 
-A relative `search_paths` entry resolves against the directory of the config
-file, and so does one given with `--set`, which is laid over the file before it
-is read (the `consumers.manifests` rule); with no config file it resolves
-against the current directory. `--follow-deps` can only turn the walk on, so a configured
+A relative `search_paths` entry written in the file resolves against the
+directory of the config file; one given with `--set` (or the typed
+`config_overrides`) is used as given, relative to the current directory. `--follow-deps` can only turn the walk on, so a configured
 `follow: true` is turned off by running with a `--config` that does not set
 it. `compare` and `dump` read
 these keys; the `deps tree`/`deps compare` commands read no `.abicheck.yml`,

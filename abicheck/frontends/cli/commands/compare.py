@@ -394,16 +394,16 @@ def compare_cmd(ctx: click.Context, /, **kwargs: Any) -> None:
     _compare_cmd(ctx, **kwargs)
 
 
-def _config_view_tokens(kwargs: dict[str, Any]) -> tuple[str, ...]:
-    """The ``output.view`` tokens of the project config this run resolves."""
+def _resolved_project_config(kwargs: dict[str, Any]) -> tuple[Any, Any]:
+    """``(config path, project config)`` this run resolves, ``--set`` applied."""
     from ..project_config import resolve_project_compare_config
 
-    _, project_cfg, _, _ = resolve_project_compare_config(
+    cfg_path, project_cfg, _, _ = resolve_project_compare_config(
         config=kwargs.get("config"),
         severity_preset=None,
         config_overrides=kwargs.get("config_overrides"),
     )
-    return () if project_cfg is None else tuple(project_cfg.output_view)
+    return cfg_path, project_cfg
 
 
 def _compare_cmd(ctx: click.Context, /, **kwargs: Any) -> None:
@@ -442,7 +442,8 @@ def _compare_cmd(ctx: click.Context, /, **kwargs: Any) -> None:
 
     # `output.view` (the config key that replaced --view) decides the same
     # thing a --view token did, so it is read here too.
-    view_tokens = _config_view_tokens(kwargs)
+    cfg_path, project_cfg = _resolved_project_config(kwargs)
+    view_tokens = () if project_cfg is None else tuple(project_cfg.output_view)
     kwargs["exports"] = resolve_export_set(
         exports,
         renderable=renderable_formats(
@@ -575,5 +576,5 @@ def _compare_cmd(ctx: click.Context, /, **kwargs: Any) -> None:
     # ADR-091 D4 (2026-10-31): debug.info/deps.* back their flags; flag wins.
     from ..compare_config_run_inputs import fold_config_run_inputs
 
-    fold_config_run_inputs(kwargs)
+    fold_config_run_inputs(kwargs, cfg_path, project_cfg)
     run_compare(ctx, **kwargs)

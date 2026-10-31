@@ -287,6 +287,65 @@ def test_relative_config_paths_resolve_against_the_config_file(
         assert view["new_debug"] == (cfg.parent / "../other/dbg2",)
 
 
+@pytest.mark.usefixtures("capture_compare")
+@pytest.mark.parametrize("with_file", [False, True])
+def test_a_relative_set_path_resolves_against_the_working_directory(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, with_file: bool
+) -> None:
+    """Only a path written in the file is relative to the file; a ``--set`` or
+    typed value is used as given, with or without a config file, and the CLI
+    and the typed request agree."""
+    import abicheck.workflows.compare.execute as execute
+
+    old = _snapshot(tmp_path / "old.json", "1")
+    new = _snapshot(tmp_path / "new.json", "2")
+    (tmp_path / "libs").mkdir()
+    cfg = _config(tmp_path, "deps:\n  ld_library_path: /x\n", "project")
+    (cfg.parent / "libs").mkdir()  # a same-named dir beside the file is not used
+    config_args = ["--config", str(cfg)] if with_file else []
+    cli = _compare_view(
+        _run(
+            ["compare", str(old), str(new), *config_args,
+             "--set", "deps.search_paths=[libs]"],
+            tmp_path,
+        )
+    )  # fmt: skip
+    assert cli["search_paths"] == (Path("libs"),)
+    assert cli["search_paths"][0].resolve() == (tmp_path / "libs").resolve()
+
+    def capture(req: Any) -> Any:
+        raise _Captured(req)
+
+    monkeypatch.setattr(execute, "resolve_compare_request", capture)
+    with pytest.raises(_Captured) as excinfo:
+        execute.run_compare_request(
+            CompareRequest(
+                old=InputSpec(path=old),
+                new=InputSpec(path=new),
+                config_overrides={"deps.search_paths": ["libs"]},
+            )
+        )
+    assert tuple(excinfo.value.value.dependency_search_paths) == cli["search_paths"]
+
+
+@pytest.mark.usefixtures("capture_compare")
+def test_a_side_scoped_flag_replaces_the_whole_configured_list(
+    tmp_path: Path, dirs: dict[str, Path]
+) -> None:
+    """``--debug-info old=X`` with ``debug.info: [new=Y]`` configured: the flag
+    replaces the list, so NEW gets no debug info rather than Y."""
+    old = _snapshot(tmp_path / "old.json", "1")
+    new = _snapshot(tmp_path / "new.json", "2")
+    cfg = _config(tmp_path, f"debug:\n  info: ['new={dirs['dbg_new']}']\n")
+    base = ["compare", str(old), str(new), "--config", str(cfg)]
+    assert _compare_view(_run(base, tmp_path))["new_debug"] == (dirs["dbg_new"],)
+    view = _compare_view(
+        _run([*base, "--debug-info", f"old={dirs['dbg_old']}"], tmp_path)
+    )
+    assert view["old_debug"] == (dirs["dbg_old"],)
+    assert view["new_debug"] == ()
+
+
 def test_compare_refuses_a_configured_search_path_that_does_not_exist(
     tmp_path: Path,
 ) -> None:

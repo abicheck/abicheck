@@ -27,6 +27,7 @@ too.
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 import click
@@ -49,19 +50,16 @@ _DEBUG_DESTS: tuple[str, ...] = (
 )
 
 
-def fold_config_run_inputs(kwargs: dict[str, Any]) -> None:
+def fold_config_run_inputs(
+    kwargs: dict[str, Any], cfg_path: Path | None, project_cfg: Any
+) -> None:
     """Fill the dependency-walk and debug-info kwargs from the project config.
 
-    Each stated flag wins and is never merged with the configured value; an
-    unstated one takes ``--set``, else the file. Updates *kwargs* in place.
+    *cfg_path*/*project_cfg* are the config this run already resolved, with
+    ``--set`` applied. Each stated flag wins and is never merged with the
+    configured value; an unstated one takes ``--set``, else the file. Updates
+    *kwargs* in place.
     """
-    from .project_config import resolve_project_compare_config
-
-    cfg_path, project_cfg, _, _ = resolve_project_compare_config(
-        config=kwargs.get("config"),
-        severity_preset=None,
-        config_overrides=kwargs.get("config_overrides"),
-    )
     if project_cfg is None:
         return
     deps = resolve_deps_settings(
@@ -70,6 +68,7 @@ def fold_config_run_inputs(kwargs: dict[str, Any]) -> None:
         follow=bool(kwargs.get("follow_deps")),
         search_paths=kwargs.get("search_paths") or (),
         ld_library_path=kwargs.get("ld_library_path") or "",
+        overridden=kwargs.get("config_overrides") or (),
     )
     missing = [str(p) for p in deps.search_paths if not p.exists()]
     if missing:
