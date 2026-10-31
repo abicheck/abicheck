@@ -43,8 +43,9 @@ _PR_JSON_MARKER = "abicheck-pr-json"
 
 
 def _recording_stub(tmp_path: Path) -> tuple[Path, Path]:
-    """An ``abicheck`` that records each call's argv and writes a placeholder
-    file at every ``-o FORMAT=PATH`` destination (never to stdout)."""
+    """An ``abicheck`` that records each call's argv and writes a minimal
+    compatible JSON report at every ``-o FORMAT=PATH`` destination, and to
+    stdout for ``-o json=-``, so ``run.sh`` reads a valid report."""
     bindir = tmp_path / "bin"
     bindir.mkdir(exist_ok=True)
     log = tmp_path / "argv.log"
@@ -53,11 +54,13 @@ def _recording_stub(tmp_path: Path) -> tuple[Path, Path]:
         "#!/usr/bin/env bash\n"
         f'for arg in "$@"; do printf \'%s\\n\' "$arg"; done >> "{log}"\n'
         f"printf -- '---\\n' >> \"{log}\"\n"
+        "report='{\"verdict\": \"COMPATIBLE\", \"changes\": []}'\n"
         "prev=''\n"
         'for arg in "$@"; do\n'
         '  if [[ "$prev" == "-o" ]]; then\n'
         '    dest="$arg"; [[ "$arg" == *=* ]] && dest="${arg#*=}"\n'
-        '    if [[ "$dest" != "-" ]]; then mkdir -p "$(dirname "$dest")"; printf \'{}\' > "$dest"; fi\n'
+        '    if [[ "$dest" != "-" ]]; then mkdir -p "$(dirname "$dest")"; printf \'%s\' "$report" > "$dest";\n'
+        '    elif [[ "$arg" == json=- ]]; then printf \'%s\' "$report"; fi\n'
         "  fi\n"
         '  prev="$arg"\n'
         "done\n"
@@ -88,6 +91,7 @@ def _caller_outputs(argv: list[str], tmp_path: Path) -> list[str]:
 def _run(tmp_path: Path, env: dict[str, str]) -> tuple[dict, list[str]]:
     bindir, log = _recording_stub(tmp_path)
     outputs = _run_action(tmp_path, env, bindir)
+    assert outputs["_exit"] == 0, outputs["_stdout"][-400:]
     return outputs, _first_call(log)
 
 
