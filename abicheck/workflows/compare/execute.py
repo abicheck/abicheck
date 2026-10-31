@@ -42,7 +42,7 @@ from ...environment_matrix import EnvironmentMatrix
 from ...serialization import run_scoped_digest_cache
 from ..compare_classify import ResolvedComparePair
 from ..request_inputs import InputSpec
-from ..service_requests import CompareRequest, CompareResult
+from ..service_requests import CompareRequest, CompareResult, ContractDomain
 from .resolve import resolve_compare_request
 
 __all__ = [
@@ -79,8 +79,8 @@ def classify_compare_pair(
 
     suppression, pf = load_suppression_and_policy(
         request.suppress,
-        request.policy,
-        request.policy_file_path,
+        request.policy_profile,
+        request.policy_document,
         strict_suppressions=request.strict_suppressions,
         require_justification=request.require_justification,
     )
@@ -184,8 +184,8 @@ def _with_config_overrides(request: CompareRequest) -> CompareRequest:
         if path not in request.config_overrides:
             continue
         value = getattr(resolved, attr)
-        if field_name == "force_public_symbols":
-            if request.force_public_symbols is None and value:
+        if field_name == "public_symbols":
+            if request.public_symbols is None and value:
                 updates[field_name] = frozenset(value)
             continue
         if getattr(request, field_name) == defaults[field_name] and value is not None:
@@ -210,35 +210,33 @@ def run_compare(
     new_headers: list[Path] | None = None,
     old_includes: list[Path] | None = None,
     new_includes: list[Path] | None = None,
-    old_version: str = _declared_default(InputSpec, "version"),
-    new_version: str = _declared_default(InputSpec, "version"),
+    old_label: str = _declared_default(InputSpec, "version"),
+    new_label: str = _declared_default(InputSpec, "version"),
     lang: str = _declared_default(CompareRequest, "lang"),
     lang_explicit: bool = _declared_default(CompareRequest, "lang_explicit"),
     frontend: str = _declared_default(CompareRequest, "frontend"),
     suppress: Path | tuple[Path, ...] | None = None,
-    policy: str = _declared_default(CompareRequest, "policy"),
-    policy_file_path: Path | None = None,
+    policy: str | Path = _declared_default(CompareRequest, "policy"),
     old_pdb_path: Path | None = None,
     new_pdb_path: Path | None = None,
     old_debug_roots: list[Path] | None = None,
     new_debug_roots: list[Path] | None = None,
-    enable_debuginfod: bool = _declared_default(CompareRequest, "enable_debuginfod"),
+    debuginfod: bool = _declared_default(CompareRequest, "debuginfod"),
     scope_to_public_surface: bool = _declared_default(CompareRequest, "scope_public"),
-    force_public_symbols: set[str] | None = None,
+    public_symbols: set[str] | None = None,
     pattern_verdicts: bool = _declared_default(CompareRequest, "pattern_verdicts"),
     public_surface_allowlist: set[str] | None = None,
     debuginfod_url: str | None = None,
     diagnostic_comparison: bool = _declared_default(
         CompareRequest, "diagnostic_comparison"
     ),
-    contract_evaluation: bool = _declared_default(
-        CompareRequest, "contract_evaluation"
-    ),
     # `False` matches the CLI flag and every other typed surface; this one
     # matters most, since it is written into *both* `InputSpec`s below and so
     # overrides their own field default (Codex review, PR #1258).
-    include_dependencies: bool = _declared_default(InputSpec, "include_dependencies"),
-    contract_mode: str | None = None,
+    include_system_declarations: bool = _declared_default(
+        InputSpec, "include_system_declarations"
+    ),
+    contract: ContractDomain | None = None,
     pack_policy_overrides: dict[Any, Any] | None = None,
     pack_internal_namespaces: tuple[str, ...] | None = None,
     compile_context: CompileContext | None = None,
@@ -252,7 +250,7 @@ def run_compare(
     project_policy_overrides: dict[Any, Any] | None = None,
     env_matrix: EnvironmentMatrix | None = None,
     exclude_headers: tuple[str, ...] = _declared_default(InputSpec, "exclude_headers"),
-    acknowledgments_path: Path | None = None,
+    acknowledgments: Path | None = None,
     acknowledgment_unacknowledged_additions: str | None = None,
     acknowledgment_breaks: str | None = None,
     # ADR-091 D4: appended last, same rule as every parameter above.
@@ -365,10 +363,10 @@ def run_compare(
             headers=tuple(old_headers or ()),
             exclude_headers=_exclude_headers,
             includes=tuple(old_includes or ()),
-            version=old_version,
+            version=old_label,
             pdb=old_pdb_path,
             debug_roots=tuple(old_debug_roots or ()),
-            include_dependencies=include_dependencies,
+            include_system_declarations=include_system_declarations,
             compile=compile_context,
             public_header_dirs=_public_header_dirs,
         ),
@@ -377,10 +375,10 @@ def run_compare(
             headers=tuple(new_headers or ()),
             exclude_headers=_exclude_headers,
             includes=tuple(new_includes or ()),
-            version=new_version,
+            version=new_label,
             pdb=new_pdb_path,
             debug_roots=tuple(new_debug_roots or ()),
-            include_dependencies=include_dependencies,
+            include_system_declarations=include_system_declarations,
             compile=compile_context,
             public_header_dirs=_public_header_dirs,
         ),
@@ -388,23 +386,19 @@ def run_compare(
         lang_explicit=lang_explicit,
         frontend=frontend,
         policy=policy,
-        policy_file_path=policy_file_path,
         suppress=suppress,
         scope_public=scope_to_public_surface,
-        force_public_symbols=(
-            frozenset(force_public_symbols) if force_public_symbols else None
-        ),
+        public_symbols=(frozenset(public_symbols) if public_symbols else None),
         public_surface_allowlist=(
             frozenset(public_surface_allowlist)
             if public_surface_allowlist is not None
             else None
         ),
         pattern_verdicts=pattern_verdicts,
-        enable_debuginfod=enable_debuginfod,
+        debuginfod=debuginfod,
         debuginfod_url=debuginfod_url,
         diagnostic_comparison=diagnostic_comparison,
-        contract_evaluation=contract_evaluation,
-        contract_mode=contract_mode,
+        contract=contract,
         pack_policy_overrides=(
             tuple(pack_policy_overrides.items()) if pack_policy_overrides else None
         ),
@@ -419,7 +413,7 @@ def run_compare(
         config_overrides=dict(config_overrides or {}),
         collapse_versioned_symbols=collapse_versioned_symbols,
         env_matrix=env_matrix,
-        acknowledgments_path=acknowledgments_path,
+        acknowledgments=acknowledgments,
         acknowledgment_unacknowledged_additions=acknowledgment_unacknowledged_additions,
         acknowledgment_breaks=acknowledgment_breaks,
     )

@@ -106,14 +106,14 @@ def _run_dump_uncached(
     pdb_path: Path | None = None,
     dwarf_only: bool = False,
     debug_roots: list[Path] | None = None,
-    enable_debuginfod: bool = False,
+    debuginfod: bool = False,
     debuginfod_url: str | None = None,
     debug_format: str | None = None,
     symbols_only: bool = False,
     debug_presence_only: bool = False,
     public_headers: list[Path] | None = None,
     public_header_dirs: list[Path] | None = None,
-    header_backend: str = "auto",
+    frontend: str = "auto",
     compile: CompileContext | None = None,
     notify: Callable[[str], None] | None = None,
     include_labels: dict[Path, str] | None = None,
@@ -203,16 +203,16 @@ def _run_dump_uncached(
         else (lang if (lang_explicit or lang.lower() == "c") else None)
     )
     # An explicit --ast-frontend on the compile context wins over the bare
-    # header_backend arg (the latter is the compare-path default carrier).
+    # `frontend` arg (the latter is the compare-path default carrier).
     # .lower() (Codex review): compile.frontend="AUTO" is an accepted,
     # case-insensitive spelling that must mean "no override" -- else a
-    # pinned, already-resolved header_backend (service_dump_pipeline.
+    # pinned, already-resolved frontend (service_dump_pipeline.
     # ResolvedDumpRequest.effective_header_backend) is silently discarded
     # in favor of re-resolving "AUTO" against a live env read below.
     eff_backend = (
         compile.frontend
         if (compile is not None and compile.frontend.lower() != "auto")
-        else header_backend
+        else frontend
     )
 
     from ...extract.header_ast_backend import _resolve_header_backend
@@ -263,7 +263,7 @@ def _run_dump_uncached(
         pdb_path=pdb_path,
         dwarf_only=dwarf_only,
         debug_roots=debug_roots,
-        enable_debuginfod=enable_debuginfod,
+        enable_debuginfod=debuginfod,
         debuginfod_url=debuginfod_url,
         debug_format=debug_format,
         symbols_only=symbols_only,

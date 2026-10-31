@@ -1,11 +1,11 @@
 --- a/abicheck/workflows/service_requests.py
 +++ b/abicheck/workflows/service_requests.py
-@@ -118,7 +118,7 @@ class CompareRequest:
-     policy: str = "strict_abi"
-     policy_file_path: Path | None = None
+@@ -135,7 +135,7 @@
+     # ``--policy NAME|PATH`` (:func:`resolve_policy_operand`); no second field.
+     policy: str | Path = "strict_abi"
      suppress: Path | tuple[Path, ...] | None = None
 -    scope_public: bool = True
 +    scope_public: bool = False
-     force_public_symbols: frozenset[str] | None = None
-     # `compare --post-manifest`: the committed `pp_*`/ufunc-loop surface of a POST
-     # manifest. When set, the comparison is scoped to this set — export findings
+     # ADR-091 R7: the widening overlay (``scope.public_symbols``); the same
+     # concept as the former ``force_public_symbols``.
+     public_symbols: frozenset[str] | None = None

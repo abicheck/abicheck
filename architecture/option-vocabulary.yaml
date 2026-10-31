@@ -99,13 +99,11 @@ concepts:
       - action:new-label
     python:
       - InputSpec.version
-      - run_compare(old_version)
-      - run_compare(new_version)
+      - run_compare(old_label)
+      - run_compare(new_label)
       - run_dump(version)
     exceptions:
       - {id: InputSpec.version, rule: name, rename: R1, note: python spelling breaks D1; the leaf is `label`}
-      - {id: run_compare(old_version), rule: name, rename: R1, note: python spelling breaks D1; the leaf is `label`}
-      - {id: run_compare(new_version), rule: name, rename: R1, note: python spelling breaks D1; the leaf is `label`}
       - {id: run_dump(version), rule: name, rename: R1, note: python spelling breaks D1; the leaf is `label`}
   - concept: select
     tier: core
@@ -271,9 +269,8 @@ concepts:
       - CompareRequest.frontend
       - DumpRequest.frontend
       - run_compare(frontend)
-      - run_dump(header_backend)
-    exceptions:
-      - {id: run_dump(header_backend), rule: name, rename: R18, note: python spelling breaks D1; the leaf is `frontend`}
+      - run_dump(frontend)
+    exceptions: []
   - concept: compile.frontend_context
     tier: config
     renames: []
@@ -415,18 +412,11 @@ concepts:
     config:
       - debug.debuginfod
     python:
-      - CompareRequest.enable_debuginfod
-      - DumpRequest.enable_debuginfod
-      - run_compare(enable_debuginfod)
-      - run_dump(enable_debuginfod)
-    exceptions:
-      - {id: CompareRequest.enable_debuginfod, rule: name, rename: R9, note: python spelling breaks D1; the leaf
-          is `debuginfod`}
-      - {id: DumpRequest.enable_debuginfod, rule: name, rename: R9, note: python spelling breaks D1; the leaf is
-          `debuginfod`}
-      - {id: run_compare(enable_debuginfod), rule: name, rename: R9, note: python spelling breaks D1; the leaf is
-          `debuginfod`}
-      - {id: run_dump(enable_debuginfod), rule: name, rename: R9, note: python spelling breaks D1; the leaf is `debuginfod`}
+      - CompareRequest.debuginfod
+      - DumpRequest.debuginfod
+      - run_compare(debuginfod)
+      - run_dump(debuginfod)
+    exceptions: []
   - concept: debug.debuginfod_url
     tier: config
     renames: []
@@ -588,16 +578,10 @@ concepts:
       - compare --include-system-declarations
       - dump --include-system-declarations
     python:
-      - InputSpec.include_dependencies
-      - run_compare(include_dependencies)
-      - run_dump(include_dependencies)
-    exceptions:
-      - {id: InputSpec.include_dependencies, rule: name, rename: R8, note: python spelling breaks D1; the leaf is
-          `include_system_declarations`}
-      - {id: run_compare(include_dependencies), rule: name, rename: R8, note: python spelling breaks D1; the leaf
-          is `include_system_declarations`}
-      - {id: run_dump(include_dependencies), rule: name, rename: R8, note: python spelling breaks D1; the leaf is
-          `include_system_declarations`}
+      - InputSpec.include_system_declarations
+      - run_compare(include_system_declarations)
+      - run_dump(include_system_declarations)
+    exceptions: []
   - concept: deps.follow
     tier: core
     renames:
@@ -608,16 +592,14 @@ concepts:
     action:
       - action:follow-deps
     python:
-      - CompareRequest.follow_dependencies
-      - DumpRequest.follow_dependencies
+      - CompareRequest.follow_deps
+      - DumpRequest.follow_deps
     exceptions:
       - {id: compare --follow-deps, rule: name, rename: R8, note: cli spelling breaks D1; the leaf is `follow`}
       - {id: dump --follow-deps, rule: name, rename: R8, note: cli spelling breaks D1; the leaf is `follow`}
       - {id: 'action:follow-deps', rule: name, rename: R8, note: action spelling breaks D1; the leaf is `follow`}
-      - {id: CompareRequest.follow_dependencies, rule: name, rename: R8, note: python spelling breaks D1; the leaf
-          is `follow`}
-      - {id: DumpRequest.follow_dependencies, rule: name, rename: R8, note: python spelling breaks D1; the leaf
-          is `follow`}
+      - {id: CompareRequest.follow_deps, rule: name, rename: R8, note: R8 names follow_deps; the leaf `follow` alone is ambiguous across the deps block, so the block-prefixed python spelling stands}
+      - {id: DumpRequest.follow_deps, rule: name, rename: R8, note: R8 names follow_deps; the leaf `follow` alone is ambiguous across the deps block, so the block-prefixed python spelling stands}
   - concept: deps.search_paths
     tier: config
     renames: []
@@ -836,13 +818,9 @@ concepts:
     config:
       - scope.public_symbols
     python:
-      - CompareRequest.force_public_symbols
-      - run_compare(force_public_symbols)
-    exceptions:
-      - {id: CompareRequest.force_public_symbols, rule: name, rename: R7, note: python spelling breaks D1; the leaf
-          is `public_symbols`}
-      - {id: run_compare(force_public_symbols), rule: name, rename: R7, note: python spelling breaks D1; the leaf
-          is `public_symbols`}
+      - CompareRequest.public_symbols
+      - run_compare(public_symbols)
+    exceptions: []
   - concept: committed_surface
     tier: python
     renames: []
@@ -910,18 +888,9 @@ concepts:
     action:
       - actions/check-target:contract
     python:
-      - CompareRequest.contract_evaluation
-      - CompareRequest.contract_mode
-      - run_compare(contract_evaluation)
-      - run_compare(contract_mode)
-    exceptions:
-      - {id: CompareRequest.contract_evaluation, rule: name, rename: R10, note: python spelling breaks D1; the leaf
-          is `contract`}
-      - {id: CompareRequest.contract_mode, rule: name, rename: R10, note: python spelling breaks D1; the leaf is
-          `contract`}
-      - {id: run_compare(contract_evaluation), rule: name, rename: R10, note: python spelling breaks D1; the leaf
-          is `contract`}
-      - {id: run_compare(contract_mode), rule: name, rename: R10, note: python spelling breaks D1; the leaf is `contract`}
+      - CompareRequest.contract
+      - run_compare(contract)
+    exceptions: []
   - concept: used_by
     tier: core
     renames: []
@@ -980,14 +949,8 @@ concepts:
       - actions/check-target:policy
     python:
       - CompareRequest.policy
-      - CompareRequest.policy_file_path
       - run_compare(policy)
-      - run_compare(policy_file_path)
-    exceptions:
-      - {id: CompareRequest.policy_file_path, rule: name, rename: R2, note: python spelling breaks D1; the leaf
-          is `policy`}
-      - {id: run_compare(policy_file_path), rule: name, rename: R2, note: python spelling breaks D1; the leaf is
-          `policy`}
+    exceptions: []
   - concept: policy.overrides
     tier: config
     renames: []
@@ -1040,21 +1003,17 @@ concepts:
     action:
       - action:acknowledgments
     python:
-      - CompareRequest.acknowledgments_path
+      - CompareRequest.acknowledgments
       - CompareRequest.acknowledgment_unacknowledged_additions
       - CompareRequest.acknowledgment_breaks
-      - run_compare(acknowledgments_path)
+      - run_compare(acknowledgments)
       - run_compare(acknowledgment_unacknowledged_additions)
       - run_compare(acknowledgment_breaks)
     exceptions:
-      - {id: CompareRequest.acknowledgments_path, rule: name, rename: R3, note: python spelling breaks D1; the leaf
-          is `acknowledgments`}
       - {id: CompareRequest.acknowledgment_unacknowledged_additions, rule: name, rename: R3, note: python spelling
           breaks D1; the leaf is `acknowledgments`}
       - {id: CompareRequest.acknowledgment_breaks, rule: name, rename: R3, note: python spelling breaks D1; the
           leaf is `acknowledgments`}
-      - {id: run_compare(acknowledgments_path), rule: name, rename: R3, note: python spelling breaks D1; the leaf
-          is `acknowledgments`}
       - {id: run_compare(acknowledgment_unacknowledged_additions), rule: name, rename: R3, note: python spelling
           breaks D1; the leaf is `acknowledgments`}
       - {id: run_compare(acknowledgment_breaks), rule: name, rename: R3, note: python spelling breaks D1; the leaf

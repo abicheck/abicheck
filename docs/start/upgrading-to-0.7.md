@@ -58,6 +58,26 @@ unknown-key error, and the run stops instead of changing meaning.
 
 ## Action and typed API
 
+The typed Python API (`run_compare`, `run_dump`, `CompareRequest`, `DumpRequest`,
+`InputSpec`) renames these keyword arguments and fields. Each old spelling is
+removed outright, so passing it raises `TypeError` naming the unexpected keyword.
+
+| 0.6 spelling | 0.7 spelling | Where |
+|---|---|---|
+| `old_version` / `new_version` | `old_label` / `new_label` | `run_compare` |
+| `policy_file_path` | `policy` (a document path; `policy` takes a profile name or a document) | `run_compare`, `CompareRequest` |
+| `acknowledgments_path` | `acknowledgments` | `run_compare`, `CompareRequest` |
+| `force_public_symbols` | `public_symbols` | `run_compare`, `CompareRequest` |
+| `enable_debuginfod` | `debuginfod` | `run_compare`, `run_dump`, `CompareRequest`, `DumpRequest` |
+| `follow_dependencies` | `follow_deps` | `CompareRequest`, `DumpRequest` |
+| `include_dependencies` | `include_system_declarations` | `run_compare`, `run_dump`, `InputSpec` |
+| `contract_evaluation` and `contract_mode` | `contract` (`public`, `exports`, `all`, `auto`) | `run_compare`, `CompareRequest` |
+| `header_backend` | `frontend` | `run_dump` |
+
+`contract_evaluation=False` has no replacement: contract relevance is always
+evaluated, as the CLI does. `InputSpec.version` and `run_dump(version=)` keep
+their names.
+
 The composite GitHub Action forwards these flags itself, so the CLI renames
 above need no change in a workflow that uses only the Action. The Action's own
 inputs are renamed too; see the table below.

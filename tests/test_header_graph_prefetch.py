@@ -74,7 +74,7 @@ def library(tmp_path: Path) -> tuple[Path, Path]:
 
 def _dump(lib: Path, header: Path) -> dict:
     snap = native._run_dump_uncached(
-        lib, "elf", headers=[header], includes=[header.parent], header_backend="castxml"
+        lib, "elf", headers=[header], includes=[header.parent], frontend="castxml"
     )
     doc = snapshot_to_dict(snap)
     doc.pop("created_at", None)

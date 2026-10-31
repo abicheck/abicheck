@@ -62,6 +62,13 @@ ADAPTER_READS: frozenset[str] = frozenset(
         frozenset({"request"}),
     )
 )
+# ADR-091 R2: `policy` reaches the adapter through its two derived properties,
+# the built-in profile and the policy document, so those reads count as its own.
+_DERIVED_FIELD_READS: dict[str, str] = {
+    "policy_profile": "policy",
+    "policy_document": "policy",
+}
+ADAPTER_READS = frozenset(_DERIVED_FIELD_READS.get(a, a) for a in ADAPTER_READS)
 
 #: Request fields the adapter does not read, each with the module that does
 #: read it and why the compatibility-evaluation configuration is not the place
@@ -101,7 +108,7 @@ EXCLUDED: dict[str, tuple[str, str]] = {
         "abicheck.workflows.compare_classify",
         "pattern verdicts applied to observed changes during classification",
     ),
-    "enable_debuginfod": (
+    "debuginfod": (
         "abicheck.workflows.compare.resolve",
         "debug-info fetch switch for extraction",
     ),
@@ -120,10 +127,6 @@ EXCLUDED: dict[str, tuple[str, str]] = {
     "require_same_generation": (
         "abicheck.workflows.compare_classify",
         "generation check applied to the pair during classification",
-    ),
-    "contract_evaluation": (
-        "abicheck.workflows.compare_classify",
-        "switches contract evaluation on; the mode itself is contract_mode",
     ),
     "depth": (
         "abicheck.workflows.compare.resolve",
@@ -150,7 +153,7 @@ EXCLUDED: dict[str, tuple[str, str]] = {
         "abicheck.workflows.compare.resolve",
         "extraction label selector",
     ),
-    "follow_dependencies": (
+    "follow_deps": (
         "abicheck.dependency_info",
         "dependency-resolution input for evidence collection",
     ),
@@ -176,7 +179,7 @@ EXCLUDED: dict[str, tuple[str, str]] = {
         "abicheck.workflows.compare_request_policy",
         "folded into the policy file via policy_file_with_packs before resolution",
     ),
-    "acknowledgments_path": (
+    "acknowledgments": (
         "abicheck.workflows.compare_request_policy",
         "acknowledgment records, resolved by resolve_compare_acknowledgments",
     ),
@@ -387,8 +390,7 @@ def _typed_run(old: Path, new: Path, category: str, level: str) -> tuple[int, tu
     request = CompareRequest(
         old=InputSpec(path=old),
         new=InputSpec(path=new),
-        contract_evaluation=True,
-        contract_mode="all",
+        contract="all",
         **{f"severity_{category}": level},
     )
     result = run_compare_request(request)

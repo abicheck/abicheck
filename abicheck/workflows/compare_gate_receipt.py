@@ -188,8 +188,8 @@ def resolve_request_pack_configuration(
         front_end=FrontEnd.API,
         project=_project_inputs_for_request(request),
         policy_file=policy_file,
-        base_policy=request.policy,
-        contract_evaluation=request.contract_evaluation,
+        base_policy=request.policy_profile,
+        contract_evaluation=True,
         always_resolve=True,
     )
     return replace(

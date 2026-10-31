@@ -34,6 +34,7 @@ from abicheck.change_registry_types import Verdict
 from abicheck.checker_policy import ChangeKind
 from abicheck.compile_context import CompileContext
 from abicheck.environment_matrix import EnvironmentMatrix
+from abicheck.errors import ValidationError
 from abicheck.report.diff_report import to_json
 from abicheck.serialization import snapshot_to_json
 from abicheck.workflows.compare import (
@@ -77,7 +78,6 @@ def _rich_request(root: Path) -> ReleaseMemberCompareRequest:
         scope_to_public_surface=False,
         pattern_verdicts=False,
         include_dependencies=True,
-        contract_evaluation=False,
         contract_mode="exports",
         pack_policy_overrides={ChangeKind.FUNC_REMOVED: Verdict.COMPATIBLE},
         pack_internal_namespaces=("internal",),
@@ -94,10 +94,31 @@ def _rich_request(root: Path) -> ReleaseMemberCompareRequest:
     return member_request(parent, _delta(root))
 
 
+#: ADR-091: the run_compare keyword a release request field is spelled as.
+_RUN_COMPARE_KEYWORD = {
+    "old_version": "old_label",
+    "new_version": "new_label",
+    "include_dependencies": "include_system_declarations",
+    "acknowledgments_path": "acknowledgments",
+    "contract_mode": "contract",
+}
+
+
 def _keyword_api_kwargs(request: ReleaseMemberCompareRequest) -> dict[str, Any]:
-    """The pre-change keyword translation: each request field under its own
-    name. Pinned here as the oracle (see the module docstring)."""
-    return {f.name: getattr(request, f.name) for f in dataclasses.fields(request)}
+    """The keyword translation of a release request, pinned here as the oracle
+    (see the module docstring). A document given as ``policy_file_path`` is the
+    run's ``policy``, as the CLI's ``--policy NAME|PATH`` does."""
+    kwargs: dict[str, Any] = {}
+    for f in dataclasses.fields(request):
+        value = getattr(request, f.name)
+        if f.name == "policy_file_path":
+            if value is not None:
+                kwargs["policy"] = value
+        elif f.name == "contract_evaluation":
+            continue  # no keyword: contract relevance is always evaluated
+        else:
+            kwargs[_RUN_COMPARE_KEYWORD.get(f.name, f.name)] = value
+    return kwargs
 
 
 def test_member_request_equals_the_keyword_api_request(
@@ -165,6 +186,11 @@ def test_each_request_field_reaches_the_member_request(
 ) -> None:
     base = member_request(ReleaseMemberCompareRequest(), _delta(tmp_path))
     changed = dataclasses.replace(base, **{name: _SAMPLES[name]})
+    if name == "contract_evaluation":
+        # ADR-091 R10: the opt-out is refused rather than dropped on the way.
+        with pytest.raises(ValidationError, match="no longer supported"):
+            member_compare_request(changed)
+        return
     assert member_compare_request(changed) != member_compare_request(base), name
 
 

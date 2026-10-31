@@ -760,7 +760,7 @@ def _resolve_stranded_library(
                 version=options.old_version,
                 pdb=old_dbg,
                 compile=options.compile_context,
-                include_dependencies=options.include_dependencies,
+                include_system_declarations=options.include_dependencies,
                 public_header_dirs=options.public_header_dirs,
                 exclude_headers=options.exclude_headers,
             ),
