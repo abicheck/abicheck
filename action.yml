@@ -259,9 +259,12 @@ inputs:
       compare output. ELF only. Applies to dump and compare modes. For
       compare, requires a baseline (old-library or abi-baseline) -- rejected
       outright for the audit-only shape (compare --no-baseline's own
-      DT_NEEDED dependency walk is not wired to that path yet).
+      DT_NEEDED dependency walk is not wired to that path yet). Empty (the
+      default) defers to `.abicheck.yml`'s `deps.follow`; `true` forwards
+      `--follow-deps` and `false` forwards `--no-follow-deps`, which turns a
+      configured `deps.follow: true` off for this run.
     required: false
-    default: 'false'
+    default: ''
   old-root:
     description: >
       Sysroot for the old (baseline) environment. Required for

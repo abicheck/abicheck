@@ -376,7 +376,9 @@ def _was_given(value: object) -> bool:
     return value not in _UNSET_SENTINELS
 
 
-def _reject_config_scoping_for_no_baseline(project_cfg: Any) -> None:
+def _reject_config_scoping_for_no_baseline(
+    project_cfg: Any, *, follow_deps: bool | None = None
+) -> None:
     """Refuse the config keys that scope or shape a comparison.
 
     ``consumers.manifests``/``consumers.required_symbols`` and ``output.view``
@@ -413,10 +415,11 @@ def _reject_config_scoping_for_no_baseline(project_cfg: Any) -> None:
                 "believes it took effect."
             )
     # The config homes of --debug-info/--follow-deps/--search-path/
-    # --ld-library-path, refused for the reasons _UNSUPPORTED_OPTIONS gives.
+    # --ld-library-path, refused for the reasons _UNSUPPORTED_OPTIONS gives;
+    # --no-follow-deps turns the configured walk off, so deps.* is not refused.
     from ....workflows.config_run_inputs import configured_run_input_keys
 
-    keys = configured_run_input_keys(project_cfg)
+    keys = configured_run_input_keys(project_cfg, follow=follow_deps)
     if keys:
         raise click.UsageError(
             f"{', '.join(keys)} is not available with --no-baseline: separate "

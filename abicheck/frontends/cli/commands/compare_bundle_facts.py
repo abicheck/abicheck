@@ -316,6 +316,7 @@ def _request_from_kwargs(
             or kwargs.get("search_paths")
             or kwargs.get("ld_library_path")
         ),
+        follow_deps=kwargs.get("follow_deps"),
     )
 
 

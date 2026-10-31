@@ -132,6 +132,9 @@ class BundleFactsCompareRequest:
     debug_info_given: bool = False
     debug_roots_given: bool = False
     dependency_flags_given: bool = False
+    #: ``--follow-deps``/``--no-follow-deps`` as stated (``None``: neither);
+    #: ``False`` turns a configured ``deps:`` walk off, so it is not refused.
+    follow_deps: bool | None = None
 
 
 def resolve_max_json_object_nodes_cfg(
@@ -475,7 +478,10 @@ def _reject_unsupported_config_blocks(
         )
     ) or "debug.info" in configured_run_input_keys(cfg):
         unsupported.append("debug:")
-    if any(key.startswith("deps.") for key in configured_run_input_keys(cfg)):
+    if any(
+        key.startswith("deps.")
+        for key in configured_run_input_keys(cfg, follow=request.follow_deps)
+    ):
         unsupported.append("deps:")
     if cfg.source_method is not None:
         unsupported.append("source:")

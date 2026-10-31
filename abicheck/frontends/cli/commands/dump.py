@@ -128,12 +128,12 @@ def _load_dump_manifest_or_reject(
 # Phase 7: --lang + L2 compile-context family gone from `dump`'s CLI
 # (compile: config only); `scan` keeps them.
 @click.option(
-    "--follow-deps",
-    is_flag=True,
-    default=False,
-    help="Resolve transitive DT_NEEDED dependencies and include the full "
-    "dependency graph and symbol binding status in the snapshot. "
-    "ELF only.",
+    "--follow-deps/--no-follow-deps",
+    "follow_deps",
+    default=None,
+    help="Resolve transitive DT_NEEDED dependencies and include the full dependency "
+    "graph and symbol binding status in the snapshot. ELF only. Overrides "
+    ".abicheck.yml's deps.follow; --no-follow-deps turns it off.",
 )
 @click.option(
     "--search-path",
@@ -205,7 +205,7 @@ def dump_cmd(
     version: str,
     output: Path | None,
     snapshot_compression: str,
-    follow_deps: bool,
+    follow_deps: bool | None,
     search_paths: tuple[Path, ...],
     ld_library_path: str,
     dry_run: bool,
@@ -557,7 +557,7 @@ def dump_cmd(
         sources=sources,
         build_info=build_info,
         include_dependencies=include_dependencies,
-        follow_deps=deps.follow,
+        follow_deps=bool(deps.follow),
         search_paths=deps.search_paths,
         ld_library_path=deps.ld_library_path,
         compile_db_filter=compile_db_filter,

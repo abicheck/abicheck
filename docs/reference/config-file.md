@@ -546,15 +546,15 @@ refused, naming `--follow-deps`.
 
 | Key | Flag | Type |
 |---|---|---|
-| `follow` | `--follow-deps` | bool (default `false`) |
+| `follow` | `--follow-deps` / `--no-follow-deps` | bool (default `false`) |
 | `search_paths` | `--search-path` | list of directories (default empty); each must exist, like the flag's operand |
 | `ld_library_path` | `--ld-library-path` | string, a simulated `LD_LIBRARY_PATH` (default empty) |
 
 A relative `search_paths` entry written in the file resolves against the
 directory of the config file; one given with `--set` (or the typed
-`config_overrides`) is used as given, relative to the current directory. `--follow-deps` can only turn the walk on, so a configured
-`follow: true` is turned off by running with a `--config` that does not set
-it. `compare` and `dump` read
+`config_overrides`) is used as given, relative to the current directory. `--no-follow-deps` turns a configured `follow: true`
+off for one run, as `--follow-deps` turns it on; with neither flag the key
+decides. `compare` and `dump` read
 these keys; the `deps tree`/`deps compare` commands read no `.abicheck.yml`,
 since the environment they inspect is their operand. As with the flags, the
 walk is not wired to `--no-baseline` or a stored BundleFacts operand, which

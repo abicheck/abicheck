@@ -2998,10 +2998,14 @@ if [[ "$MODE" == "dump" ]]; then
   _extra_args_names_label || add_single_flag "--label" "${INPUT_NEW_LABEL:-}"
   add_compile_context_flags true
 
-  if [[ "${INPUT_FOLLOW_DEPS:-false}" == "true" ]]; then
+  if [[ "${INPUT_FOLLOW_DEPS:-}" == "true" ]]; then
     CMD+=(--follow-deps)
     add_flag "--search-path" "${INPUT_SEARCH_PATH:-}"
     add_single_flag "--ld-library-path" "${INPUT_LD_LIBRARY_PATH:-}"
+  elif [[ "${INPUT_FOLLOW_DEPS:-}" == "false" ]]; then
+    # Explicit off: turns a configured deps.follow: true off for this run.
+    # Empty (the input's default) adds neither flag and defers to the config.
+    CMD+=(--no-follow-deps)
   fi
 
   # Build-source evidence (L3/L4/L5) embedded inline in the snapshot. A snapshot
@@ -3399,10 +3403,14 @@ elif [[ "$MODE" == "compare" ]]; then
     add_single_flag "--budget" "${INPUT_BUDGET:-}"
   fi
 
-  if [[ "${INPUT_FOLLOW_DEPS:-false}" == "true" ]]; then
+  if [[ "${INPUT_FOLLOW_DEPS:-}" == "true" ]]; then
     CMD+=(--follow-deps)
     add_flag "--search-path" "${INPUT_SEARCH_PATH:-}"
     add_single_flag "--ld-library-path" "${INPUT_LD_LIBRARY_PATH:-}"
+  elif [[ "${INPUT_FOLLOW_DEPS:-}" == "false" ]]; then
+    # Explicit off: turns a configured deps.follow: true off for this run.
+    # Empty (the input's default) adds neither flag and defers to the config.
+    CMD+=(--no-follow-deps)
   fi
 
   # Scoped comparison (ADR-043): --used-by/consumers.required_symbols contracts.
