@@ -512,8 +512,8 @@ path to a Windows PE PDB file, overriding automatic PDB discovery (was
 any command, and it is a single value — not side-aware, so a two-sided PE
 comparison cannot point old and new at different PDBs.
 
-`info:` (a list, default empty) is the config home of `--debug-info`
-(ADR-091 D4, 2026-10-31 amendment): each entry is one `--debug-info` value,
+`info:` (a list, default empty) is the config home of `--debug-info`:
+each entry is one `--debug-info` value,
 with the flag's own grammar — a bare path applies to both sides, an `old=` or
 `new=` prefix scopes it to one side, and `both=` escapes a path that itself
 starts with `old=`/`new=`. A side's own entries replace the shared ones for
@@ -537,8 +537,7 @@ debug:
 
 ### `deps:`
 
-The config homes of the dependency walk's three flags (ADR-091 D4, 2026-10-31
-amendment), for a project whose walk does not change between runs. Each flag
+The config homes of the dependency walk's three flags, for a project whose walk does not change between runs. Each flag
 stays and wins: a stated flag replaces the configured value for that run, and
 `--set deps.<key>=...` overrides the file.
 
