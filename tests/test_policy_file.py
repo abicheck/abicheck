@@ -66,7 +66,9 @@ def test_policy_file_old_acknowledgment_key_is_rejected_naming_replacement(
     from abicheck.errors import PolicyError
 
     p = tmp_path / "policy.yaml"
-    p.write_text("acknowledgment:\n  unacknowledged_additions: block\n", encoding="utf-8")
+    p.write_text(
+        "acknowledgment:\n  unacknowledged_additions: block\n", encoding="utf-8"
+    )
 
     with pytest.raises(PolicyError, match="acknowledgments:"):
         PolicyFile.load(p)
