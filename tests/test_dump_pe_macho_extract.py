@@ -39,7 +39,9 @@ def _pe_meta(
 
 @pytest.fixture
 def no_pdb(monkeypatch):
-    monkeypatch.setattr(pe_mod, "extract_pdb_debug", lambda path, pdb: (None, None))
+    monkeypatch.setattr(
+        pe_mod, "extract_pdb_debug_outcome", lambda path, pdb: (None, None, None)
+    )
 
 
 def _use_pe(monkeypatch, meta_or_exc):
@@ -123,7 +125,9 @@ def test_pe_without_exports_is_a_validation_error(monkeypatch, tmp_path):
 def test_pe_header_scoped_result_wins_and_keeps_pdb_debug(monkeypatch, tmp_path):
     _use_pe(monkeypatch, _pe_meta(PeExport(name="f")))
     dwarf, adv = object(), object()
-    monkeypatch.setattr(pe_mod, "extract_pdb_debug", lambda path, pdb: (dwarf, adv))
+    monkeypatch.setattr(
+        pe_mod, "extract_pdb_debug_outcome", lambda path, pdb: (dwarf, adv, None)
+    )
     seen = {}
 
     class _Decls:
@@ -176,7 +180,9 @@ def test_pe_scoping_fallback_recovers_pdb_types(monkeypatch, tmp_path):
 
     _use_pe(monkeypatch, _pe_meta(PeExport(name="f")))
     dwarf = object()
-    monkeypatch.setattr(pe_mod, "extract_pdb_debug", lambda path, pdb: (dwarf, None))
+    monkeypatch.setattr(
+        pe_mod, "extract_pdb_debug_outcome", lambda path, pdb: (dwarf, None, None)
+    )
     monkeypatch.setattr(
         pe_mod, "try_header_scoped_dump", lambda *a, **k: (None, "fallback")
     )
