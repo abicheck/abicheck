@@ -54,6 +54,7 @@ __all__ = [
     "CompileConfigError",
     "apply_cli_defines",
     "compile_config_argv_tokens",
+    "fold_typed_compile_overrides",
     "merge_compile_config",
     "merge_compile_std_fields",
     "resolve_compile_context",
@@ -133,8 +134,8 @@ def compile_config_argv_tokens(
 #: The ``compile:`` keys the L2 compile context reads that have no visible flag
 #: of their own (ADR-091 D4 config tier). ``--set`` applies them on the CLI
 #: ``compare``, ``dump`` and the directory/package fan-out, which all resolve
-#: the context through :func:`merge_compile_config`. The typed API has no
-#: ``compile:`` fold, so it refuses them rather than dropping them.
+#: the context through :func:`merge_compile_config`. The typed API applies them
+#: through :func:`fold_typed_compile_overrides`, which calls the same resolver.
 #: ``compile.include_dirs`` and ``compile.defines`` are core (``-I``/``--define``)
 #: and are not listed.
 COMPILE_CONTEXT_OVERRIDE_PATHS: frozenset[str] = frozenset(
@@ -601,3 +602,68 @@ def resolve_compile_context(
         config_overrides=config_overrides,
         notify=notify,
     )
+
+
+#: The override keys that fold into a :class:`CompileContext`; ``compile.lang``
+#: is a request field of its own (``lang``/``lang_explicit``), not a context field.
+_CONTEXT_FOLD_PATHS: frozenset[str] = COMPILE_CONTEXT_OVERRIDE_PATHS - {"compile.lang"}
+
+
+def fold_typed_compile_overrides(
+    frontend: str,
+    sides: Sequence[CompileContext | None],
+    config_overrides: Mapping[str, object],
+    *,
+    notify: Callable[[str], None] | None = None,
+) -> tuple[str, tuple[CompileContext | None, ...]]:
+    """A typed request's ``frontend`` and per-side contexts with ``compile.*`` folded in.
+
+    The typed spelling of ``--set compile.K=V`` (ADR-091 D4). Each value goes
+    through :func:`resolve_compile_context`, the resolver the CLI's ``compare``
+    and ``dump`` call, with no file and the overrides alone as the ``compile:``
+    block, so a typed override and ``--set`` resolve the same context. The
+    caller's own values are the CLI layer: a field set away from its default
+    (a ``frontend`` other than ``auto``, a compiler, a sysroot, ``nostdinc``,
+    a ``frontend_context`` other than ``host``) beats the override, and the
+    caller's option tokens come after the override's, so the caller wins a
+    repeated flag. The request-level *frontend* takes ``compile.frontend``; a
+    side keeps its own ``frontend`` (which outranks the request-level one, as a
+    per-side backend does on the CLI) and its ``defines``. A side the caller left
+    ``None`` stays ``None`` when the fold changes nothing on it.
+
+    Returns *frontend* and *sides* unchanged when no override is a context key.
+    """
+    from ..compile_context import CompileContext as _CompileContext
+
+    overrides = {k: v for k, v in config_overrides.items() if k in _CONTEXT_FOLD_PATHS}
+    if not overrides:
+        return frontend, tuple(sides)
+
+    def _fold(base: CompileContext) -> CompileContext:
+        merged, _includes = resolve_compile_context(
+            sysroot=base.sysroot,
+            nostdinc=base.nostdinc,
+            header_backend=base.frontend,
+            includes=(),
+            build_config=None,
+            frontend_context=base.frontend_context,
+            compiler_path=base.gcc_path,
+            compiler_prefix=base.gcc_prefix,
+            compiler_option_tokens=base.gcc_option_tokens,
+            gcc_options=base.gcc_options,
+            nostdinc_explicit=base.nostdinc,
+            frontend_context_explicit=base.frontend_context != "host",
+            config_overrides=overrides,
+            notify=notify,
+        )
+        return merged
+
+    folded_frontend = _fold(_CompileContext(frontend=frontend)).frontend
+    folded: list[CompileContext | None] = []
+    for side in sides:
+        base = side or _CompileContext()
+        merged = dataclasses.replace(
+            _fold(base), frontend=base.frontend, defines=base.defines
+        )
+        folded.append(None if side is None and merged.is_default else merged)
+    return folded_frontend, tuple(folded)

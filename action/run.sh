@@ -168,11 +168,8 @@ _mktemp_canonical() {
 # expansion (globbing) disabled for the split.
 #
 # Plain `for item in $value` (unquoted) performs BOTH word-splitting AND
-# pathname expansion on the result -- add_flag_shlex_split()'s own fallback
-# path already documents this exact risk for itself ("this naive fallback
-# ... letting untrusted checkout content influence the compile context") and
-# refuses to fall back rather than risk it, but add_flag()/add_sided_flag()
-# had the identical unquoted pattern with no such guard: a caller-controlled
+# pathname expansion on the result, and add_flag()/add_sided_flag() had
+# that unquoted pattern with no guard: a caller-controlled
 # single-line value of exactly "*" (or any string that happens to match a
 # real path in the runner's own working directory) silently expanded to
 # every file the glob matched instead of being passed through as the
@@ -214,125 +211,6 @@ add_flag() {
       CMD+=("$flag" "$item")
     done
   fi
-}
-
-# ---------------------------------------------------------------------------
-# Helper: like add_flag(), but a single-line value is split the way
-# abicheck's own compiler-flags string splitting works server-side
-# (quote-aware -- a value like -DMSG="hello world" stays one token, and an
-# unquoted Windows path's backslashes survive intact), not add_flag()'s
-# plain bash word-splitting (Codex review, PR #757: routing gcc-options
-# through add_flag()'s unquoted `for item in $value` broke a quoted value
-# into malformed tokens, since bash word-splitting treats `"` as a literal
-# character once the string is already sitting in a variable, unlike a
-# real shell command line). Used only for the gcc-options -> --compiler-
-# -option conversion, where the CLI flag it now maps to used to be one
-# scalar --gcc-options string abicheck itself shlex-split.
-#
-# Delegates to the real `abicheck._compiler_options.split_gcc_options`
-# (imported, not reimplemented) via `python3`/`python` (`_PY_BIN`, resolved
-# once above) rather than `eval`: xargs-style or eval-based quote parsing
-# would either use its own, different quoting dialect or -- for eval --
-# actually execute a `$(...)`/backtick command substitution embedded in
-# untrusted Action input, which this must not do. Importing the real
-# function (rather than an inline reimplementation) is deliberate: three
-# earlier revisions of an inline copy each independently regressed a real
-# case a review round caught (real POSIX escape sequences, `#`-as-comment
-# truncation, unquoted Windows-path corruption -- see that function's own
-# docstring for the full history) precisely because there were two copies
-# of the same non-trivial tokenizer to keep in sync. `abicheck` is always
-# importable here in the common case: action.yml's "Install abicheck" step
-# runs `pip install` before "Run abicheck" invokes this script, so `_PY_BIN`
-# (found via the same `command -v python3`/`python` PATH lookup pip itself
-# resolved against) already has it on its import path -- verified once, up
-# front, via `$_PY_BIN_HAS_ABICHECK` (see its own definition above), for the
-# self-hosted-runner case where that assumption doesn't hold.
-#
-# Falls back to add_flag()'s plain whitespace split ONLY when doing so is
-# provably equivalent to real quote-aware parsing -- the value contains
-# none of `"`/`'`/`\`, so there is nothing for real parsing to interpret
-# differently from bash's own unquoted word-splitting in the first place.
-# When the real parser is unavailable AND the value actually needs one
-# (Codex review, fresh evidence: an earlier revision fell back
-# unconditionally, silently corrupting a quoted value like
-# `-DMSG="hello world"` into malformed tokens under a different, wrong
-# compile context instead of failing), this fails the Action loud rather
-# than guess.
-# ---------------------------------------------------------------------------
-add_flag_shlex_split() {
-  local flag="$1"
-  local value="$2"
-  local item split py_exit
-  if [[ -z "$value" ]]; then
-    return
-  fi
-  if [[ "$value" == *$'\n'* ]]; then
-    # Multi-line (YAML block scalar): one line is already one full,
-    # space-safe token -- add_flag()'s own multi-line handling, no shlex
-    # parsing needed.
-    add_flag "$flag" "$value"
-    return
-  fi
-  if [[ -z "$_PY_BIN" || "$_PY_BIN_HAS_ABICHECK" != "true" ]]; then
-    # add_flag()'s own `for item in $value` is unquoted, so beyond just
-    # whitespace-splitting it also performs pathname (glob) EXPANSION --
-    # `*`/`?`/`[` are not provably safe to fall back on the same way
-    # quote/backslash characters aren't (Codex review, fresh evidence): a
-    # configured value like `-DPATTERN=*` would silently rewrite to
-    # whatever filenames exist in the current directory at the time this
-    # runs (the analyzed, potentially PR-controlled checkout -- unlike the
-    # real parser's own invocation, this naive fallback never `cd`s
-    # anywhere), letting untrusted checkout content influence the compile
-    # context.
-    if [[ "$value" == *'"'* || "$value" == *"'"* || "$value" == *'\'* \
-          || "$value" == *'*'* || "$value" == *'?'* || "$value" == *'['* ]]; then
-      _error_annotation "$flag value '$value' contains quoting/escaping or glob metacharacters that require abicheck's own parser to interpret correctly, but no working Python interpreter with abicheck importable is available on this runner (resolved interpreter: '${_PY_BIN:-<none found on PATH>}'). Refusing to fall back to plain whitespace splitting, which would silently produce a different, wrong compile context (and, for glob metacharacters, could expand based on files present in the analyzed checkout)."
-      exit 1
-    fi
-    add_flag "$flag" "$value"
-    return
-  fi
-  # $value is passed on stdin, not as a positional argv element (Codex
-  # review, fresh evidence: a value containing a POSIX-style path segment,
-  # e.g. -I/build/generated, triggered Git Bash/MSYS's automatic argv
-  # path-conversion on the windows-latest CI runner when forwarded as a
-  # positional arg to this native, non-MSYS python.exe -- silently
-  # rewriting it into a Windows path, e.g. inserting "Program Files" and
-  # its embedded space, before this script ever saw it. stdin content is
-  # never subject to that conversion (only actual argv strings are), so
-  # this sidesteps the whole class of corruption regardless of the exact
-  # value shape that triggers it -- not just the one case that surfaced it.
-  split="$(printf '%s' "$value" | (cd "$_PY_SAFE_DIR" && PYTHONPATH= "$_PY_BIN" -c '
-import sys
-
-from abicheck._compiler_options import split_gcc_options
-
-for tok in split_gcc_options(sys.stdin.read()):
-    print(tok)
-'))"
-  py_exit=$?
-  # This script deliberately has no `set -e` (Codex review, fresh evidence):
-  # split_gcc_options() raises ValueError on malformed quoting (e.g. an
-  # unbalanced quote), which without this check would silently leave $split
-  # empty and every requested compiler option dropped instead of failing --
-  # an invalid configuration must not produce an apparently-successful
-  # comparison under the wrong macros/include paths.
-  if [[ $py_exit -ne 0 ]]; then
-    _error_annotation "$flag value '$value' could not be parsed (malformed quoting/escaping, e.g. an unbalanced quote) -- refusing to silently drop or corrupt the requested compiler options."
-    exit 1
-  fi
-  while IFS= read -r item; do
-    # Codex review, fresh evidence: on windows-latest, $_PY_BIN resolves to
-    # native python.exe, whose print() writes CRLF line endings by default
-    # (Python's text-mode stdout translates "\n" to os.linesep on write,
-    # regardless of whether stdout is a console or -- as here -- a pipe).
-    # bash's `read` only splits on LF, so it would otherwise leave a
-    # trailing \r glued onto every token, corrupting each forwarded flag
-    # (e.g. -DFOO=1 arrives as -DFOO=1\r). Harmless no-op on POSIX, where
-    # this never appears in the first place.
-    item="${item%$'\r'}"
-    [[ -n "$item" ]] && CMD+=("$flag" "$item")
-  done <<< "$split"
 }
 
 # ADR-040 L1: the per-side header/include inputs map to the side-aware --header/
@@ -549,78 +427,10 @@ _merge_config_overlay_with_discovered_project_config() {
   #     the base document directly, no discovery/walk.
   # $4: optional; "explicit" selects explicit-build-config mode described
   #     above. Omitted (or any other value) is the default discovery mode.
-  # $5: optional; the --sources root, used two ways: (a) the root a
-  #     discovered build.compile_db glob resolves against (inline.py:
-  #     `sorted(sources.glob(cfg.compile_db))`), and (b) in "discover" mode,
-  #     the root this function ALSO checks -- non-recursively, no walk-up --
-  #     for its own separate .abicheck.yml, mirroring embed_build_source()'s
-  #     own `build_config or discover_build_config(raw_sources)` selection
-  #     (Codex review, fresh evidence): when --sources names a directory
-  #     with its own config, the native CLI would use THAT file exclusively
-  #     for build:/sources: (dump) or build:/sources:/compile:/source:/
-  #     debug: (dump only -- see $6) whenever no explicit --config is
-  #     given -- but this Action always ends up passing an explicit --config
-  #     once any compile-context input is set, which permanently short-
-  #     circuits that discovery (`build_config is not None`), silently
-  #     dropping the sources root's own build settings. Passed by
-  #     add_compile_context_flags (which knows $INPUT_SOURCES), omitted by
-  #     add_release_topology_config_flags (compare's release fan-out never
-  #     reads build.compile_db and never resolves a --sources tree at all, so
-  #     there is no root to check against and the field is always stripped
-  #     there, same as before).
-  # $6: optional; "pairwise" when the caller's own MODE resolves compile:/
-  #     source:(singular)/debug: PAIR-WIDE, applying the single shared
-  #     --config to two independently-parsed operands (single-pair `compare
-  #     OLD NEW` only -- resolve_compile_context() applies compile: "to
-  #     both sides", cli_helpers_compare.py's resolved_cfg.source_method/
-  #     debug_format are each resolved once for the whole comparison).
-  #     Omitted (or any other value) means the caller's MODE resolves them
-  #     SINGLE-SIDED (dump, compare --no-baseline's single audited artifact --
-  #     neither has an "other side" these could leak into: dump has one
-  #     operand, and the audit-only shape's own -H/-I apply only to the
-  #     audited artifact, never to a baseline side it doesn't have). Only
-  #     "pairwise" excludes compile:/source:/debug: from
-  #     the sources-root block-replacement below -- everywhere else, a
-  #     --sources tree's own config is the ONLY document those three blocks
-  #     can meaningfully come from for that one operand, exactly matching
-  #     embed_build_source()'s/merge_compile_config()'s own single-sided
-  #     `build_config or discover_build_config(sources)` selection (Codex
-  #     review, fresh evidence, PR #1171: the prior fix excluded all three
-  #     unconditionally, which was correct for pairwise compare but silently
-  #     regressed dump's own single-sided use of a --sources tree's
-  #     compile:/debug: settings the moment any compile-context input was
-  #     also set).
-  # $7: optional; "true" selects a genuine per-field MERGE for `compile:`
-  #     specifically (`abicheck.action_config_overlay.apply_sources_root_
-  #     config_blocks`'s own `merge_compile` parameter) instead of the
-  #     wholesale REPLACE every other promoted block still uses -- Codex
-  #     review, fresh evidence, PR #1222 fourth round, second finding on
-  #     this fix: within the single-sided ($6 omitted) bucket, `compile:`
-  #     does NOT always resolve the same way. `dump`/`scan --against`
-  #     genuinely select `compile:` from exactly ONE document (the
-  #     `--sources` tree's own, when no explicit `--build-config` is given
-  #     -- `cli_options.merge_compile_config`'s own `build_config if
-  #     explicit_config else discover_build_config(sources)`, mutually
-  #     exclusive alternatives), the same single-document shape as
-  #     build:/sources:/source:/debug: -- pass "" (the default) there.
-  #     `compare`'s own single-sided shape (a stored-snapshot old operand,
-  #     `_compile_context_sources_pairwise`'s own docstring) is different:
-  #     the checkout-root document's `compile:` is ALREADY independently
-  #     resolved first, unconditionally
-  #     (`cli_compare_helpers.resolve_compile_context(..., build_config=
-  #     cfg_path, ...)`), and the live side's own `--sources` tree only
-  #     folds ON TOP of that via a SECOND `merge_compile_config` call
-  #     (`compare.py`'s `_maybe_dump_side`) -- a genuine two-stage MERGE,
-  #     so pass "true" there. Meaningless (never read) when $6 is
-  #     "pairwise", since `compile:` is excluded from `_sources_root_blocks`
-  #     entirely in that case.
   local overlay_json="$1"
   local out_path="$2"
   local base_source="$3"
   local merge_mode="${4:-discover}"
-  local sources_root="${5:-}"
-  local sources_pairwise="${6:-}"
-  local sources_merge_compile="${7:-}"
   # Codex review, PR #1159, third round: in "explicit" mode base_source is
   # the caller-supplied build-config input, which is very often a
   # checkout-relative path (e.g. `build-config: .abicheck.yml`) -- exactly
@@ -641,16 +451,9 @@ _merge_config_overlay_with_discovered_project_config() {
   if ! _is_path_already_qualified "$base_source"; then
     base_source="$PWD/$base_source"
   fi
-  # Same relative-path-vs-$_PY_SAFE_DIR bug class as base_source above:
-  # $INPUT_SOURCES (add_compile_context_flags's own sources_root) is very
-  # often a checkout-relative path (e.g. `sources: src`) too.
-  if [[ -n "$sources_root" ]] && ! _is_path_already_qualified "$sources_root"; then
-    sources_root="$PWD/$sources_root"
-  fi
   if [[ -z "$_PY_BIN" || "$_PY_BIN_HAS_ABICHECK" != "true" ]]; then
-    # Same "fail loud rather than silently produce a wrong compile/release
-    # context" precedent as add_flag_shlex_split's own missing-interpreter
-    # guard above: silently falling back to "just the overlay" here would
+    # Fail loud rather than silently produce a wrong release context:
+    # silently falling back to "just the overlay" here would
     # reintroduce the exact config-dropping bug this function exists to fix,
     # on precisely the runners least able to detect it.
     _error_annotation "mode: ${MODE} needs a working Python interpreter with abicheck importable to merge this Action's synthesized config overlay with the repository's own auto-discovered .abicheck.yml (resolved interpreter: '${_PY_BIN:-<none found on PATH>}'). Refusing to silently drop the project's own config."
@@ -669,9 +472,6 @@ _merge_config_overlay_with_discovered_project_config() {
    && ABICHECK_MERGE_MODE="$merge_mode" \
       ABICHECK_BASE_CONFIG_SOURCE="$base_source" \
       ABICHECK_OVERLAY_JSON="$overlay_json" \
-      ABICHECK_SOURCES_ROOT="$sources_root" \
-      ABICHECK_SOURCES_PAIRWISE="$sources_pairwise" \
-      ABICHECK_SOURCES_MERGE_COMPILE="$sources_merge_compile" \
       PYTHONPATH= "$_PY_BIN" - "$out_path" <<'PYEOF'
 # Discovers the real project .abicheck.yml (if any) the same way
 # discover_project_config() does -- config_paths.find_config_in_dir(),
@@ -726,16 +526,11 @@ from pathlib import Path
 import yaml
 
 from abicheck.action_config_overlay import (
-    apply_sources_root_config_blocks,
-    discovered_compile_db_resolves,
     rebase_relative_config_paths,
     strip_untrusted_execution_keys,
     validate_base_config,
 )
-from abicheck.config_paths import (
-    discover_build_config,
-    find_config_in_dir,
-)
+from abicheck.config_paths import find_config_in_dir
 
 
 def _gha_escape(text: object) -> str:
@@ -868,237 +663,6 @@ else:
             base = loaded
         break
 
-    # Codex review, fresh evidence: mirror embed_build_source()'s own
-    # `build_config or discover_build_config(raw_sources)` selection
-    # (abicheck/buildsource/embed.py). That function is what actually reads
-    # build:/sources: for L3-L5 embedding, and it is a SEPARATE, narrower
-    # lookup than the checkout-root walk just above -- non-recursive,
-    # anchored at the --sources tree itself, never walking up to parents.
-    # When no explicit --config is given, a --sources directory carrying its
-    # own .abicheck.yml is used EXCLUSIVELY for those two blocks; the
-    # checkout-root config found above (if any) is never even consulted for
-    # them. Since this Action always ends up passing an explicit --config
-    # once any compile-context input is set, that discovery would otherwise
-    # never run at all (`build_config is not None`), silently dropping the
-    # sources root's own build settings. Replicate the same outcome here:
-    # when --sources names a directory with its own config file (distinct
-    # from whatever was found above), its own build:/sources: blocks REPLACE
-    # (not merge into) the checkout-root document's own such blocks --
-    # exactly as if no explicit --config had been in the way.
-    #
-    # compile: is conditionally included too -- gated on
-    # ABICHECK_SOURCES_PAIRWISE (see this shell function's own $6
-    # docstring). A second Codex review (fresh evidence, PR #1159) caught
-    # that it is pair-wide for single-pair `compare`, not per-side: compile:
-    # flows through resolve_compile_context ("It applies to both sides",
-    # cli_compare_helpers.py) -- promoting it from a NEW-only sources-root
-    # config there would silently apply NEW-only settings to OLD's own
-    # parsing too. But a THIRD review round (fresh evidence, PR #1171) found
-    # that blanket exclusion regressed `dump`, which has no "other side"
-    # for these to leak into (one operand, period) -- for that, and for the
-    # audit-only `compare --no-baseline` shape (also no other side, its own
-    # -H/-I applying only to the one audited artifact), `merge_compile_
-    # config()`'s own docstring states the --sources tree's config IS the
-    # intended, ONLY source of compile: for that one operand, exactly like
-    # embed_build_source()'s build_config or discover_build_config(sources)
-    # selection already is for build:/sources:. So only "pairwise" callers
-    # (a genuinely two-sided `compare`) exclude the three; every other
-    # caller (dump, the audit-only shape) keeps promoting them, matching
-    # the ORIGINAL five-block version of this fix before the second review
-    # round overcorrected it for every mode at once.
-    sources_pairwise = os.environ.get("ABICHECK_SOURCES_PAIRWISE", "") == "pairwise"
-    # Codex review, fresh evidence, PR #1222 fourth round, second finding:
-    # within the single-sided bucket, `compile:` does NOT always resolve
-    # the same way -- see this shell function's own $7 docstring and
-    # `apply_sources_root_config_blocks`'s own `merge_compile` parameter
-    # docstring for the exact distinction (dump/scan single-document
-    # REPLACE vs. compare's checkout-then-sources two-stage MERGE).
-    # P1 fix (Codex review, fresh evidence, PR #1222 eleventh round --
-    # reverses the fourth round's own conclusion documented just below,
-    # unchanged for historical context): `compile:` is no longer promoted
-    # from the sources root for `mode: compare`'s single-sided shape at
-    # all (see `_sources_root_blocks` below) -- `sources_merge_compile`
-    # now only decides whether `source:`(singular)/`debug:` may be
-    # promoted, unrelated to `compile:`'s own (unchanged) exclusion. See
-    # `actions/check-target/action.yml`'s own identical fix and its
-    # `_sources_merge_compile` comment for the full account of the P1
-    # finding this closes -- `frontends/cli/compare_inline_evidence.py`'s
-    # `_side` always independently folds the live
-    # side's own `--sources` tree's `compile:` block on top of the CLI's
-    # already-resolved compile context, unconditionally, regardless of
-    # whether `--config`/`build-config` was explicit -- so this overlay
-    # promoting/merging `compile:` too folds the sources-root document in
-    # TWICE, applying a repeat-sensitive flag (`-include`, ...) twice in
-    # the final compiler invocation.
-    sources_merge_compile = (
-        os.environ.get("ABICHECK_SOURCES_MERGE_COMPILE", "") == "true"
-    )
-    # `source:`(singular)/`debug:` are excluded from sources-root promotion
-    # whenever `sources_merge_compile` is set (Codex review, P1, fresh
-    # evidence, PR #1222 eighth round) -- that flag is true exactly for
-    # `mode: compare`'s own single-sided shape (a stored-snapshot old
-    # operand; see `_compile_context_sources_merge_compile`'s own
-    # docstring), and unlike `compile:`, `compare`'s real pipeline never
-    # resolves `source:`/`debug:` from a per-side `--sources` tree's own
-    # document at all: `frontends/cli/compare_inline_evidence.py`'s
-    # `_side` receives both already frozen (`InlineEvidenceRun.collect_mode`/
-    # `.debug`), computed once from the checkout-side `resolved_cfg` before
-    # any per-side tree is even considered -- `frontends/cli/
-    # dump_debug_config.resolve_dump_debug_fields` only falls back to
-    # resolving a tree's own document when `resolved_debug` is `None`,
-    # which never happens on `compare`'s own call path. Promoting these two
-    # blocks here for `mode: compare` would therefore let a sources-root
-    # document control this run's collection depth (`source:`) or
-    # debug-info extraction (`debug:`) in a way the real, non-overlay
-    # `compare` invocation never permits. `dump`/`scan`
-    # (`sources_merge_compile` unset) are unaffected: their own
-    # single-document selection genuinely takes `source:`/`debug:` from the
-    # `--sources` tree's own document exclusively
-    # (`resolve_dump_debug_config`'s `build_config or
-    # discover_build_config(sources)`), the identical shape `build:`/
-    # `sources:` already use.
-    # `compile:` is EXCLUDED here whenever `sources_merge_compile` is set
-    # too now (Codex review, P1, fresh evidence, PR #1222 eleventh round):
-    # this bucket now collapses to the SAME two-block set the pairwise
-    # bucket already uses -- see `sources_merge_compile`'s own comment
-    # above and `actions/check-target/action.yml`'s identical fix for the
-    # full account.
-    _sources_root_blocks = (
-        ("build", "sources")
-        if sources_pairwise or sources_merge_compile
-        else ("build", "sources", "compile", "debug")
-    )
-    sources_root_env = os.environ.get("ABICHECK_SOURCES_ROOT", "")
-    if sources_root_env:
-        sources_found = discover_build_config(Path(sources_root_env))
-        if sources_found is not None and sources_found != found_path:
-            try:
-                sources_loaded = yaml.safe_load(
-                    sources_found.read_text(encoding="utf-8")
-                )
-            except Exception as exc:
-                print(
-                    f"::error::failed to parse the discovered sources-root "
-                    f"config {_gha_escape(sources_found)}: "
-                    f"{_gha_escape(exc)}. Refusing to silently proceed as "
-                    "if it were unconfigured.",
-                    file=sys.stderr,
-                )
-                sys.exit(1)
-            # Codex review, fresh evidence: an empty (or non-mapping,
-            # e.g. a bare YAML list) --sources-root .abicheck.yml is not
-            # "no config found" -- yaml.safe_load returns None/a non-dict
-            # for one, but the file still EXISTS, so discover_build_config()
-            # still selects it, and load_build_config()'s own `if not
-            # isinstance(raw, dict): return BuildConfig()` treats that as an
-            # empty (all-default) BuildConfig, not a fallback to whatever
-            # else might otherwise apply. Gating this whole replacement on
-            # `isinstance(sources_loaded, dict)` skipped it entirely for
-            # that case, silently leaving the checkout-root document's own
-            # build:/sources: (if any) in place -- exactly the settings the
-            # native path would NOT have applied, since
-            # discover_build_config()'s selection is exclusive.
-            # `sources_loaded if isinstance(..., dict) else {}` makes an
-            # empty/non-mapping file clear both blocks instead, matching
-            # `load_build_config`'s own empty-BuildConfig outcome exactly.
-            if isinstance(sources_loaded, dict):
-                _validate_or_exit(sources_loaded, sources_found)
-            # Rebase EACH document's own compile.include_dirs against ITS
-            # OWN project root BEFORE merging (Codex review, fresh
-            # evidence, PR #1222 fourth round): `compile:` is now a real
-            # per-field MERGE inside apply_sources_root_config_blocks (see
-            # that function's own docstring), not a wholesale block
-            # replace -- so a merged include_dirs can hold entries from
-            # BOTH documents. The single later rebase_relative_config_paths()
-            # call (below, at module scope) anchors against only ONE root,
-            # which would silently mis-resolve the OTHER document's own
-            # relative entries now that compile: is no longer a
-            # whole-document selection. Pre-resolving each document's own
-            # entries to absolute paths here, before the merge, makes that
-            # later single-anchor call a safe no-op for both (an
-            # already-absolute path is left untouched).
-            if found_path is not None:
-                base = rebase_relative_config_paths(base, found_path=found_path)
-            if isinstance(sources_loaded, dict):
-                sources_loaded = rebase_relative_config_paths(
-                    sources_loaded, found_path=sources_found
-                )
-            # "sources" (plural -- public_headers/exclude/graph) is a
-            # DISTINCT top-level block from "source" (singular). Which
-            # blocks get replaced depends on sources_pairwise, computed
-            # above. Shared with actions/check-target/action.yml's own
-            # "Generate assurance-overlay config" step via
-            # abicheck.action_config_overlay.apply_sources_root_config_blocks
-            # (Codex review, fresh evidence, PR #1222 third round) so the two
-            # call sites' block-selection/empty-document semantics can't
-            # independently drift the way the assurance-overlay step's own
-            # entirely-missing promotion once did.
-            base = apply_sources_root_config_blocks(
-                base,
-                sources_loaded,
-                blocks=_sources_root_blocks,
-                merge_compile=sources_merge_compile,
-                sources_method_from_sources_root=not (
-                    sources_pairwise or sources_merge_compile
-                ),
-            )
-            # found_path is reassigned to sources_found ONLY when compile:
-            # was actually sourced from it (the `dump`/`scan` single-
-            # document shape) -- it anchors compile.include_dirs resolution
-            # below, and neither a pairwise NOR a `mode: compare`
-            # single-sided caller's compile: block is ever sourced from the
-            # sources root any more (per `_sources_root_blocks` above -- P1
-            # fix, PR #1222 eleventh round: `mode: compare` used to
-            # reassign `found_path` here too, back when it still merged
-            # `compile:` from the sources root), so both must keep
-            # resolving against whichever document actually supplied
-            # base["compile"] (the checkout-root config, if any). Now that
-            # both documents' own include_dirs entries are already
-            # absolute (above), this reassignment only matters for the
-            # `dump`/`scan` bucket -- the rebase call below is otherwise a
-            # no-op regardless of which root it names.
-            if not (sources_pairwise or sources_merge_compile):
-                found_path = sources_found
-        elif sources_found is None:
-            # Codex review, P1, fresh evidence, PR #1222 ninth round: no
-            # `.abicheck.yml` exists ANYWHERE in the `--sources` tree at
-            # all -- distinct from the "a sources-root document exists
-            # but is empty/non-mapping" case just above, which already
-            # clears these same blocks via apply_sources_root_config_
-            # blocks' own empty-document handling. The real pipeline
-            # treats "no document" identically to "an empty document" for
-            # this purpose: embed_build_source()'s own `cfg_path =
-            # build_config or discover_build_config(raw_sources)` resolves
-            # to `None` either way, so `cfg` stays `None` and every one of
-            # build:/sources:(plural)/compile:/source:(singular)/debug: --
-            # whichever this function's own `_sources_root_blocks` says
-            # are sources-root-exclusive for this particular command/mode
-            # -- falls back to a bare `BuildConfig()`'s pure defaults,
-            # NEVER the checkout-root document's own values for those same
-            # keys. Leaving `base` untouched here (as a previous round
-            # did) let the checkout document's own build:/sources: survive
-            # into the generated overlay, which `embed.py` then applies as
-            # an explicit --config -- settings the real, non-overlay
-            # `--sources <dir>` invocation would never have picked up.
-            # Reuse the identical apply_sources_root_config_blocks
-            # clearing with `sources_doc=None` (its own docstring: a
-            # non-dict `sources_doc` clears every block in `blocks` except
-            # a `merge_compile=True` empty-fold, which is a correct no-op
-            # onto the checkout's own compile: -- see that function's
-            # docstring for why `compile:` is the one exception even
-            # here). Mirrors actions/check-target/action.yml's own
-            # identical `elif _sources_found is None:` branch so the two
-            # shared call sites cannot independently drift on this again.
-            base = apply_sources_root_config_blocks(
-                base,
-                None,
-                blocks=_sources_root_blocks,
-                merge_compile=sources_merge_compile,
-                sources_method_from_sources_root=not (
-                    sources_pairwise or sources_merge_compile
-                ),
-            )
-
 # Discover mode's own base document is untrusted, repository-controlled
 # content: strip (or, for the decode-node budget below, cap) each key that
 # gates execution or a resource ceiling before merging (see this
@@ -1114,10 +678,7 @@ if merge_mode != "explicit":
     # document into a synthesized, always-explicit overlay, and both must
     # withhold the same executable-authorized status from it. Shared via
     # abicheck.action_config_overlay (see its own module docstring) so the
-    # two can't silently drift; build.compile_db stays each caller's own
-    # responsibility to resolve (via the shared
-    # discovered_compile_db_resolves() -- see its own docstring) since only
-    # the caller knows its own effective --sources root.
+    # two can't silently drift; build.compile_db is stripped below.
     base = strip_untrusted_execution_keys(base)
     if isinstance(base.get("build"), dict) and "compile_db" in base["build"]:
         # A different concern from build.query above (that one is a trust/
@@ -1128,42 +689,23 @@ if merge_mode != "explicit":
         # --config would silently promote a stale/inapplicable discovered
         # build.compile_db to "explicit" status (its miss must surface, no
         # falling through to inference/autodiscovery) purely because an
-        # unrelated Action input (dso-only, gcc-path, ...) also happened to
-        # trigger this overlay synthesis. This Action has no per-field
-        # provenance channel to tell the CLI "this one came from an
-        # auto-discovered document, not an operator's own --config", so the
-        # only way to avoid the incorrect-hard-failure risk is to strip the
-        # field -- UNLESS it demonstrably already resolves to a real file
-        # (Codex review, fresh evidence, second round): stripping a
-        # perfectly *usable* discovered compile_db is its own real cost
-        # (buildsource/inline.py's own fallback chain -- auto-discovered
-        # compile_commands.json, then inferred build-system query -- may
-        # collect different or no L3-L5 evidence than the config's own
-        # setting would have). `build.compile_db` is documented as a glob
-        # *relative to the --sources root* (`inline.py`: `sorted(sources.
-        # glob(cfg.compile_db))`), so it can only be validated when that
-        # root is known -- `add_compile_context_flags`'s own call passes it
-        # via ABICHECK_SOURCES_ROOT; add_release_topology_config_flags's
-        # call (compare's release fan-out, which never reads build.
-        # compile_db at all) leaves it empty, always stripping, matching
-        # this field's own irrelevance there.
-        _sources_root = os.environ.get("ABICHECK_SOURCES_ROOT", "")
-        _compile_db_resolves = discovered_compile_db_resolves(
-            base["build"]["compile_db"], _sources_root
+        # unrelated release-topology input also triggered this overlay.
+        # `build.compile_db` is a glob relative to the --sources root, and
+        # this overlay's only caller (compare's release fan-out, which never
+        # reads build.compile_db) has no such root to validate it against,
+        # so the field is always stripped here.
+        stripped_build = dict(base["build"])
+        del stripped_build["compile_db"]
+        base["build"] = stripped_build
+        print(
+            "::warning::the discovered .abicheck.yml's build.compile_db was "
+            "dropped from this Action's synthesized --config overlay -- "
+            "forwarding it here would silently promote it to an explicit, "
+            "must-not-be-missing compile-DB path (the field would otherwise "
+            "fall back to inference); set build-config explicitly (naming a "
+            "config you reviewed) to opt in.",
+            file=sys.stderr,
         )
-        if not _compile_db_resolves:
-            stripped_build = dict(base["build"])
-            del stripped_build["compile_db"]
-            base["build"] = stripped_build
-            print(
-                "::warning::the discovered .abicheck.yml's build.compile_db was "
-                "dropped from this Action's synthesized --config overlay -- "
-                "forwarding it here would silently promote it to an explicit, "
-                "must-not-be-missing compile-DB path (the field would otherwise "
-                "fall back to inference); set build-config explicitly (naming a "
-                "config you reviewed) to opt in.",
-                file=sys.stderr,
-            )
     # compile.compiler stripping and the resource_limits cap are handled by
     # strip_untrusted_execution_keys() above, alongside build.query -- see
     # that call's own comment.
@@ -1184,8 +726,7 @@ with open(out_path, "w", encoding="utf-8") as f:
 PYEOF
   )
   local _merge_status=$?
-  # No `set -e` in this script (established precedent, e.g.
-  # add_flag_shlex_split above): a nonzero exit here must not be silently
+  # No `set -e` in this script: a nonzero exit here must not be silently
   # swallowed, since that would leave the caller writing a possibly-partial
   # or missing overlay file and proceeding as if the merge had succeeded.
   if [[ $_merge_status -ne 0 ]]; then
@@ -2553,9 +2094,9 @@ trap 'rm -rf "$_PY_SAFE_DIR"' EXIT
 # `pip`/`abicheck` from one Python environment while `command -v python3`
 # above resolves a *different* one (e.g. a system Python ahead of a pyenv
 # shim on PATH, Codex review, fresh evidence). Checked once, up front,
-# rather than assumed: `add_flag_shlex_split` (below) fails loud instead of
+# rather than assumed: the config-overlay merge (below) fails loud instead of
 # silently invoking a `$_PY_BIN` that can't import `abicheck` and dropping
-# or corrupting every requested `--gcc-options` token. Run through the same
+# the project's own config. Run through the same
 # `$_PY_SAFE_DIR`/cleared-`PYTHONPATH` isolation as every other `abicheck`-
 # importing invocation in this file (Codex review, fresh evidence, second
 # round): this preflight itself imports `abicheck`, so running it from the

@@ -828,7 +828,7 @@ def test_no_baseline_channel_activates_the_consumer_step_via_its_own_arm() -> No
     final_ast_frontend = root_set["sets"].get("compile.frontend", "")
     # Not carried through hop 4 (`_assert_reaches_real_dump_cli_invocation`
     # unconditionally asserts `--compiler`/`--compiler-option` are present,
-    # which `add_single_flag`/`add_flag_shlex_split` in run.sh correctly
+    # which `add_single_flag` in run.sh correctly
     # omit for an empty value -- the marker-only test above has the
     # identical shape and is likewise not carried through hop 4). This
     # test's own subject -- the guard's `baseline-channel == 'none'` arm --

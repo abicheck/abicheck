@@ -213,7 +213,7 @@ concepts:
           is `headers`}
       - {id: 'actions/check-target:new-header', rule: name, rename: R17, note: action spelling breaks D1; the leaf
           is `headers`}
-      - {id: run_dump(public_headers), rule: name, rename: R18, note: python spelling breaks D1; the leaf is `headers`}
+      - {id: run_dump(public_headers), rule: name, accepted: true, rename: R18, note: python spelling breaks D1; the leaf is `headers`}
   - concept: compile.include_dirs
     tier: core
     workflow:

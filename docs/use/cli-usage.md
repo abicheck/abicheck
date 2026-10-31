@@ -269,8 +269,8 @@ rather than dropping them:
 
 | Command | `--set` applies | Refused, exit 64 |
 |---|---|---|
-| `compare` | the keys its resolved config reaches (`compile.*`, `build.*` and `sources.*` are not yet applied) | every other key, naming the command |
-| `dump` | `compile.lang`, `build.compile_db_filter`, `debug.format`, `debug.dwarf_only`, `debug.debuginfod`, `debug.debuginfod_url`, and the two `compile.*` toggles `ast_frontend_fallback` and `allow_unsupported_castxml` (CLI only: the typed API refuses them, since each is a process-wide environment setting) | every other key, including `compile.std`, `compile.include_dirs` and the other `compile.*` keys its header path does not read yet |
+| `compare` | the keys its resolved config reaches, and the compile-context keys `compile.compiler`, `compile.frontend`, `compile.frontend_context`, `compile.lang`, `compile.nostdinc`, `compile.options`, `compile.std` and `compile.sysroot` (`build.*` and `sources.*` are not yet applied) | every other key, naming the command |
+| `dump` | the same compile-context keys, `build.compile_db_filter`, `debug.format`, `debug.dwarf_only`, `debug.debuginfod`, `debug.debuginfod_url`, and the two `compile.*` toggles `ast_frontend_fallback` and `allow_unsupported_castxml` (CLI only: the typed API refuses them, since each is a process-wide environment setting) | every other key, including `compile.include_dirs` and `compile.defines` (their flags are `--include` and `--define`) |
 | `project capture-variants` | `bundle_variants` (the whole block) | every other key |
 
 `project plan` takes no `--set`: its config is the project-integration
@@ -282,7 +282,10 @@ rather than dropping them:
 
 In the typed API the same override is `config_overrides` on `CompareRequest`
 and `DumpRequest`, and on the `run_compare` and `run_dump` functions. An
-argument you set away from its default is kept, as an explicit flag is.
+argument you set away from its default is kept, as an explicit flag is. The
+compile-context keys resolve through the resolver `--set` uses, so a typed
+override and `--set` give the same compiler, options, sysroot, frontend and
+language.
 
 ## Dependency-stack commands
 

@@ -19,7 +19,7 @@ Actions Python glue.
 
 Two call sites build one of these overlays today: ``action/run.sh``'s
 ``_merge_config_overlay_with_discovered_project_config`` (used for the
-compile-context and release-topology overlays) and
+release-topology overlay) and
 ``actions/check-target/action.yml``'s "Generate assurance-overlay config"
 step. Both read a project's ``.abicheck.yml`` (either auto-discovered by
 walking up from a directory, or an operator-named explicit file), fold in a
@@ -48,12 +48,11 @@ also handle ``build.compile_db``: a discovered ``build.compile_db`` is kept
 when it demonstrably resolves against a known ``--sources`` root (stripping
 a perfectly usable path is its own real cost -- see
 :func:`discovered_compile_db_resolves`'s own docstring) and stripped
-otherwise; each caller decides what its own effective ``--sources`` root is
-(if any) and calls that function with it, so the resolution check itself
-can't independently drift between the two call sites the way it briefly did
-(one call site used to strip unconditionally because it believed it had no
-``--sources`` context, when in fact its own ``sources`` Action input already
-supplies one).
+otherwise. The assurance-overlay step passes its own ``sources`` input as
+that root (it once stripped unconditionally, believing it had no
+``--sources`` context, when that input already supplies one).
+``action/run.sh``'s release-topology overlay has no ``--sources`` root at
+all, so it strips the field unconditionally.
 
 Must be called for a base document that is NOT itself an operator-supplied,
 explicit ``--config`` (an auto-discovered ``.abicheck.yml``, in both call
@@ -488,14 +487,12 @@ def discovered_compile_db_resolves(compile_db: str, sources_root: str) -> bool:
     is empty, or not applicable to this call site at all -- e.g. the
     release-topology overlay, which never reads ``build.compile_db``)
     always returns ``False``: with no root to validate the glob against,
-    the field cannot be trusted to resolve, so both callers strip it
-    (see each caller's own comment on which of those two cases applies).
+    the field cannot be trusted to resolve, so its caller strips it.
 
-    Both call sites (``action/run.sh``'s compile-context overlay and
-    ``actions/check-target/action.yml``'s assurance overlay) call this
-    identical function rather than each re-implementing the resolution
-    check, so they cannot independently drift on what counts as
-    "resolves" -- exactly the shared-implementation discipline
+    Its one caller, ``actions/check-target/action.yml``'s assurance overlay,
+    calls this shared function rather than re-implementing the resolution
+    check (``action/run.sh``'s release-topology overlay has no ``--sources``
+    root and strips ``build.compile_db`` unconditionally) -- exactly the shared-implementation discipline
     :func:`strip_untrusted_execution_keys` already gives the trust-driven
     fields above. Swallows ``OSError``/``ValueError`` from a malformed glob
     pattern, an unreadable directory, or an unresolvable path the same way
@@ -580,23 +577,22 @@ def apply_sources_root_config_blocks(
     ``compare_inline_evidence._side`` is about to fold in a second time anyway.
     ``merge_compile=True`` still names this shape (for callers that reach
     this function with ``"compile"`` in *blocks* for some other reason —
-    the parameter combination is not itself forbidden), but neither current
-    caller (``action/run.sh``, ``actions/check-target/action.yml``) ever
-    passes both together any more: each computes its own
-    ``sources_merge_compile``/``_sources_merge_compile`` flag to EXCLUDE
+    the parameter combination is not itself forbidden), but the one current
+    caller (``actions/check-target/action.yml``) never passes both together
+    any more: it computes its own ``_sources_merge_compile`` flag to EXCLUDE
     ``"compile"`` from *blocks* in exactly the case that used to set
     ``merge_compile=True`` alongside it, leaving ``compile:`` at the
     checkout-only value and letting the CLI's own second stage run
-    unaided. The caller still decides ``dump``/``scan`` vs. ``compare``
-    shape the same way as before (``run.sh``'s ``$MODE`` shell variable /
-    ``actions/check-target/action.yml``'s own ``mode:`` computation).
+    unaided. The caller decides ``dump``/``scan`` vs. ``compare`` shape
+    through ``actions/check-target/action.yml``'s own ``mode:`` computation.
 
-    This is the block-selection half of ``action/run.sh``'s own
-    ``_merge_config_overlay_with_discovered_project_config`` (its
-    "sources-root promotion" section, added to mirror
+    This is the block-selection half of ``actions/check-target/action.yml``'s
+    "Generate assurance-overlay config" step (``action/run.sh``'s
+    ``_merge_config_overlay_with_discovered_project_config`` once had a
+    sources-root promotion section too; its only caller never passed a
+    sources root, and it was deleted as unreachable), added to mirror
     ``embed_build_source()``'s own ``build_config or
-    discover_build_config(raw_sources)`` selection -- see that shell
-    function's own extensive docstring for the full reasoning). When no
+    discover_build_config(raw_sources)`` selection. When no
     explicit ``--config`` is given, a ``--sources`` directory carrying its
     own ``.abicheck.yml`` (found via :func:`abicheck.config_paths.
     discover_build_config` -- non-recursive, anchored at the sources root
@@ -642,19 +638,19 @@ def apply_sources_root_config_blocks(
     compile context FIRST via ``resolve_compile_context``'s own
     ``build_config=cfg_path`` call, then a second ``merge_compile_config``
     call layering the sources-root document's own ``compile:`` block ON
-    TOP, per field). But (P1 fix, PR #1222 eleventh round) **neither
-    current caller reaches this function with ``"compile"`` in *blocks*
+    TOP, per field). But (P1 fix, PR #1222 eleventh round) **the current
+    caller never reaches this function with ``"compile"`` in *blocks*
     while ALSO passing ``merge_compile=True`` any more** -- ``compare``'s
     own single-sided shape already gets that second stage for free,
     unconditionally, from ``compare_inline_evidence._side`` itself, so
     reproducing it here too would fold the sources-root document in twice;
-    both callers now compute their own ``sources_merge_compile``/
-    ``_sources_merge_compile`` flag to EXCLUDE ``"compile"`` from *blocks*
+    the caller computes its own ``_sources_merge_compile`` flag to EXCLUDE
+    ``"compile"`` from *blocks*
     in exactly that case (mirroring how ``source:``/``debug:`` are already
     excluded). This ``key == "compile" and merge_compile`` branch is
-    consequently unreached by either caller today; it is kept, rather than
+    consequently unreached by the caller today; it is kept, rather than
     deleted, as the one documented, tested primitive a *future* caller with
-    a genuine two-stage ``compile:`` merge need (unlike either current
+    a genuine two-stage ``compile:`` merge need (unlike the current
     caller) could still reach correctly. ``dump``/``scan`` (``merge_compile
     =False``) still promotes ``"compile"`` as a plain REPLACE, same as
     ``build:``/``sources:`` -- REPLACING the whole block wholesale (what

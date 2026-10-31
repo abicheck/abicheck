@@ -42,9 +42,7 @@ interpreter with ``abicheck`` importable (``$_PY_BIN``/
 ``$_PY_BIN_HAS_ABICHECK``) and a private, PYTHONPATH-cleared working
 directory to run it from (``$_PY_SAFE_DIR``) -- the same isolation every
 other ``abicheck``-importing inline script in ``run.sh`` uses -- so this
-harness now extracts and wires those prerequisites too, the same way
-``test_action_compile_context_parity.py`` already does for
-``add_flag_shlex_split``. ``$_PY_BIN`` is pinned to ``sys.executable``
+harness now extracts and wires those prerequisites too. ``$_PY_BIN`` is pinned to ``sys.executable``
 (this test process's own interpreter, guaranteed to have ``abicheck``
 importable) rather than resolved via ``command -v python3`` -- a real
 runner's PATH lookup is exercised by the compile-context parity module's
@@ -70,6 +68,7 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
+import pytest
 from _action_run_sh_harness import annotation_helpers_source
 from _workflow_exec import bash_executable, require_bash
 
@@ -810,6 +809,37 @@ class TestReleaseTopologyOverlayKeepsDiscoveredConfigUntrusted:
         assert result.returncode == 0, result.stderr
         doc = _read_config_overlay(result.stdout.splitlines())
         assert "compile_db" not in doc.get("build", {})
+        assert doc["build"] == {"system": "cmake"}
+        assert "build.compile_db" in result.stderr
+
+    @pytest.mark.parametrize(
+        "compile_db",
+        [
+            "compile_commands.json",
+            "build/compile_commands.json",
+            "*/compile_commands.json",
+        ],
+    )
+    def test_a_discovered_compile_db_is_stripped_even_when_it_resolves(
+        self, tmp_path: Path, compile_db: str
+    ) -> None:
+        """The release-topology overlay has no ``--sources`` root to validate a
+        ``build.compile_db`` glob against, so even one that names a real file
+        under the checkout is stripped. (The sources-root parameters that once
+        could keep such a value were never passed by this overlay's only
+        caller, and were deleted as unreachable.)"""
+        (tmp_path / "build").mkdir()
+        for rel in ("compile_commands.json", "build/compile_commands.json"):
+            (tmp_path / rel).write_text("[]", encoding="utf-8")
+        (tmp_path / ".abicheck.yml").write_text(
+            f"build:\n  compile_db: '{compile_db}'\n  system: cmake\n",
+            encoding="utf-8",
+        )
+        result = _run_bash_script(
+            _harness(), {"INPUT_REQUIRE_COMPLETE": "true"}, cwd=tmp_path
+        )
+        assert result.returncode == 0, result.stderr
+        doc = _read_config_overlay(result.stdout.splitlines())
         assert doc["build"] == {"system": "cmake"}
         assert "build.compile_db" in result.stderr
 

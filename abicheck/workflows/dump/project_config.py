@@ -38,9 +38,11 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from ...buildsource.build_config_overrides import ConfigOverrideError
+from ...compile_context import CompileContext
 from ...errors import ValidationError
 from ..compile_config import (
     COMPILE_CONTEXT_OVERRIDE_PATHS,
+    fold_typed_compile_overrides,
     scope_compile_config_env_toggles,
 )
 from ..evidence_transport import (
@@ -463,7 +465,11 @@ def run_dump_override_arguments(
     cfg = _dump_build_config(None, config_overrides)
     if cfg is None:  # pragma: no cover -- overrides are non-empty here
         return {}
-    unsupported = sorted(set(config_overrides) - set(RUN_DUMP_OVERRIDE_PARAMS))
+    unsupported = sorted(
+        set(config_overrides)
+        - set(RUN_DUMP_OVERRIDE_PARAMS)
+        - COMPILE_CONTEXT_OVERRIDE_PATHS
+    )
     if unsupported:
         raise ConfigOverrideError(
             f"{', '.join(unsupported)}: no run_dump parameter applies this key; "
@@ -480,6 +486,36 @@ def run_dump_override_arguments(
         out[name] = value
         if name == "lang":
             out["lang_explicit"] = True
+    out.update(_folded_compile_arguments(config_overrides, arguments, defaults))
+    return out
+
+
+def _folded_compile_arguments(
+    config_overrides: Mapping[str, object],
+    arguments: Mapping[str, object],
+    defaults: Mapping[str, object],
+) -> dict[str, object]:
+    """``run_dump``'s ``frontend``/``compile`` with the ``compile.*`` overrides folded in.
+
+    Through :func:`~abicheck.workflows.compile_config.fold_typed_compile_overrides`,
+    the resolver ``dump --set compile.*`` reaches, so the two cannot disagree.
+    Only the arguments the fold changes are returned.
+    """
+    frontend = arguments.get("frontend", defaults.get("frontend", "auto"))
+    compile_ctx = arguments.get("compile", defaults.get("compile"))
+    if compile_ctx is not None and not isinstance(compile_ctx, CompileContext):
+        raise TypeError(
+            f"run_dump(compile=) must be a CompileContext or None, got "
+            f"{type(compile_ctx).__name__}"
+        )
+    folded_frontend, (folded_compile,) = fold_typed_compile_overrides(
+        str(frontend), (compile_ctx,), config_overrides
+    )
+    out: dict[str, object] = {}
+    if folded_frontend != frontend:
+        out["frontend"] = folded_frontend
+    if folded_compile != compile_ctx:
+        out["compile"] = folded_compile
     return out
 
 
@@ -501,7 +537,7 @@ def with_dump_config_overrides(request: DumpRequest) -> DumpRequest:
         return request
     channel_paths = {
         path for path, _owner, _field, _attr in DUMP_TYPED_OVERRIDE_CHANNELS
-    }
+    } | COMPILE_CONTEXT_OVERRIDE_PATHS
     unsupported = sorted(set(request.config_overrides) - channel_paths)
     if unsupported:
         raise ConfigOverrideError(
@@ -533,6 +569,13 @@ def with_dump_config_overrides(request: DumpRequest) -> DumpRequest:
             and value is not None
         ):
             request_updates[field_name] = value
+    frontend, (compile_ctx,) = fold_typed_compile_overrides(
+        request.frontend, (request.input.compile,), request.config_overrides
+    )
+    if frontend != request.frontend:
+        request_updates["frontend"] = frontend
+    if compile_ctx != request.input.compile:
+        input_updates["compile"] = compile_ctx
     if not request_updates and not input_updates:
         return request
     return dataclasses.replace(

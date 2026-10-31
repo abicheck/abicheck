@@ -176,8 +176,8 @@ class CompareRequest:
     # ADR-091 D4: `config_overrides` -- the typed spelling of `compare --set
     # PATH=VALUE`. Each entry is one `.abicheck.yml` key (dotted path) with a
     # YAML-typed value, validated by the same schema as the file. It fills
-    # only the request fields a caller left at their default (scope_public,
-    # collapse_versioned_symbols, force_public_symbols, severity_*), which is
+    # only the request fields a caller left at their default (scope_*, severity_*,
+    # debug_*, and `compile.*` folded into frontend/lang/each side's compile),
     # where the CLI's resolved config reaches a comparison; an explicit field
     # value here is indistinguishable from the default and so is not overridden.
     config_overrides: Mapping[str, object] = field(
