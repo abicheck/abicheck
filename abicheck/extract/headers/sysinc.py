@@ -40,6 +40,7 @@ from pathlib import Path
 
 import abicheck.deadline as deadline
 
+from ..cache_input_digest import parse_include_search_dirs
 from ..compiler_driver import is_clang_family_binary
 from ..env_flags import env_flag
 
@@ -54,31 +55,9 @@ def _auto_system_includes_enabled() -> bool:
     return env_flag(_AUTO_SYSINC_ENV)
 
 
-def _parse_gnu_include_search_dirs(stderr: str) -> list[str]:
-    """Parse a GCC/Clang ``-E -v`` stderr into its system include search dirs.
-
-    The driver prints the resolved search path between the
-    ``#include <...> search starts here:`` and ``End of search list.`` markers,
-    one directory per indented line (Clang/GCC both use this format; Darwin may
-    append `` (framework directory)``). Only the angle-bracket (``<...>``) system
-    block is captured — the preceding quote-include (``"..."``) block lists
-    ``-iquote`` dirs, which are not system paths and must not become ``-isystem``.
-    Pure/string-only so it is unit-testable without a compiler installed. Returns
-    the directories in search order.
-    """
-    dirs: list[str] = []
-    in_block = False
-    for line in stderr.splitlines():
-        stripped = line.strip()
-        if "<...> search starts here:" in stripped:
-            in_block = True
-            continue
-        if stripped.startswith("End of search list."):
-            break
-        if in_block and stripped:
-            # GCC/Clang on Darwin tag framework dirs with a trailing note.
-            dirs.append(stripped.split(" (", 1)[0].strip())
-    return dirs
+#: The ``-E -v`` search-list parser; one owner, shared with the cache keys'
+#: system-directory digest (:mod:`abicheck.extract.cache_input_digest`).
+_parse_gnu_include_search_dirs = parse_include_search_dirs
 
 
 #: Path segments that mark a directory as GCC's *own* compiler resource/builtins

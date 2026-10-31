@@ -16,8 +16,9 @@ import pytest
 from abicheck.compare import manifest_tu_scope
 from abicheck.compile_context import CompileContext
 from abicheck.dump_manifest import parse_manifest
+from abicheck.extract import cache_input_digest
 from abicheck.model import AbiSnapshot, Function, Visibility
-from abicheck.workflows.dump.cache import api, key, store
+from abicheck.workflows.dump.cache import api, store
 from tests._dump_cache_request import dump_request
 
 
@@ -65,14 +66,14 @@ def test_an_unreadable_header_directory_is_marked_not_skipped(
         path=binary, headers=[tmp_path / "inc"], includes=[tmp_path / "inc"]
     )
     base_key = api._cache_key_for(request)
-    real_walk = key.iter_cache_header_files
+    real_walk = cache_input_digest.iter_cache_input_files
 
     def failing_walk(path: Path):  # type: ignore[no-untyped-def]
         raise OSError("permission denied")
 
-    monkeypatch.setattr(key, "iter_cache_header_files", failing_walk)
+    monkeypatch.setattr(cache_input_digest, "iter_cache_input_files", failing_walk)
     unreadable = api._cache_key_for(request)
-    monkeypatch.setattr(key, "iter_cache_header_files", real_walk)
+    monkeypatch.setattr(cache_input_digest, "iter_cache_input_files", real_walk)
     assert unreadable
     assert unreadable != base_key
 
@@ -83,14 +84,14 @@ def test_an_unreadable_include_directory_is_marked_not_skipped(
     binary = _base(tmp_path)
     request = dump_request(path=binary, headers=None, includes=[tmp_path / "inc"])
     base_key = api._cache_key_for(request)
-    real_walk = key.iter_cache_header_files
+    real_walk = cache_input_digest.iter_cache_input_files
 
     def failing_walk(path: Path):  # type: ignore[no-untyped-def]
         raise OSError("permission denied")
 
-    monkeypatch.setattr(key, "iter_cache_header_files", failing_walk)
+    monkeypatch.setattr(cache_input_digest, "iter_cache_input_files", failing_walk)
     unreadable = api._cache_key_for(request)
-    monkeypatch.setattr(key, "iter_cache_header_files", real_walk)
+    monkeypatch.setattr(cache_input_digest, "iter_cache_input_files", real_walk)
     assert unreadable != base_key
 
 

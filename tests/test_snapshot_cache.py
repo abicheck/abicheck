@@ -173,7 +173,6 @@ class TestCacheKey:
         on PR #612: before G31 Phase A this was moot because a header-graph
         dump was always uncacheable; it is not moot now that it's cacheable
         by default)."""
-        import time
 
         binary = tmp_path / "lib.so"
         binary.write_bytes(b"ELF content")
@@ -184,7 +183,7 @@ class TestCacheKey:
 
         key1 = _cache_key(binary, [], [inc], "1.0", "c++")
 
-        os.utime(transitive_hdr, (time.time() + 10, time.time() + 10))
+        transitive_hdr.write_text(transitive_hdr.read_text() + "// edited\n")
         key2 = _cache_key(binary, [], [inc], "1.0", "c++")
 
         assert key1 != key2
@@ -219,9 +218,7 @@ class TestCacheKey:
 
         key1 = _cache_key(binary, [], [inc], "1.0", "c++")
 
-        import time
-
-        os.utime(impl, (time.time() + 10, time.time() + 10))
+        impl.write_text(impl.read_text() + "// edited\n")
         key2 = _cache_key(binary, [], [inc], "1.0", "c++")
 
         assert key1 != key2
@@ -242,9 +239,7 @@ class TestCacheKey:
 
         key1 = _cache_key(binary, [hdr_dir], [], "1.0", "c++")
 
-        import time
-
-        os.utime(nested, (time.time() + 10, time.time() + 10))
+        nested.write_text(nested.read_text() + "// edited\n")
         key2 = _cache_key(binary, [hdr_dir], [], "1.0", "c++")
 
         assert key1 != key2
@@ -259,7 +254,7 @@ class TestCacheKey:
         key2 = _cache_key(binary, [hdr], [], "1.0", "c++")
         assert key1 != key2
 
-    def test_header_mtime_change_different_key(self, tmp_path):
+    def test_header_mtime_only_touch_keeps_key(self, tmp_path):
         import time
 
         binary = tmp_path / "lib.so"
@@ -267,10 +262,10 @@ class TestCacheKey:
         hdr = tmp_path / "foo.h"
         hdr.write_text("#pragma once\n")
         key1 = _cache_key(binary, [hdr], [], "1.0", "c++")
-        # Change header mtime
+        # ADR-062 D11: a touch alone is not a change -- content is identity.
         os.utime(hdr, (time.time() + 10, time.time() + 10))
         key2 = _cache_key(binary, [hdr], [], "1.0", "c++")
-        assert key1 != key2
+        assert key1 == key2
 
     @pytest.mark.skipif(not hasattr(os, "mkfifo"), reason="FIFO requires POSIX")
     def test_special_header_file_does_not_block(self, tmp_path):

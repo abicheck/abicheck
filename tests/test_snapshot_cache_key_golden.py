@@ -64,8 +64,10 @@ def pinned_inputs(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 GOLDEN_BINARY_ONLY = "2162de29a1e921fa36b75e1a6d087a8d6e9c7339456e475886523bb4c0e0009f"
 
 #: Every named input at once, so a change to any one of them shows here.
-#: Re-pinned with the same ``_SNAPSHOT_CACHE_VERSION`` 36 -> 37 bump.
-GOLDEN_FULL = "b7bc3e826dc20b6c2dbb983a65be97a53f9cbb6187bcc07a2ef4c05968fa8ad5"
+#: Re-pinned when the derivation became content-only (ADR-062 D11: no mtime,
+#: every file under an include root whatever its suffix, a file include hashed
+#: as itself) -- a deliberate re-key of every header-bearing entry.
+GOLDEN_FULL = "bf4085b025d1d2ba05d592f93630696a8a02e837c1305fb39c7f7ff6fa763fd9"
 
 
 def test_binary_only_key_is_pinned(pinned_inputs: Path) -> None:

@@ -51,6 +51,7 @@ from ....storage.header_ast_cache import (
     run_ast_acquisition,
 )
 from ....storage.tu_parse_store import TuParseStore
+from ...cache_input_digest import search_dirs_material
 from ...castxml_header_compat import write_castxml_aggregate
 from ...path_aliases import absolutize_include_roots
 from ..ast_config import (
@@ -247,7 +248,12 @@ def castxml_dump(
     cc_bin, cc_id = _resolve_compiler_binary(resolved_compiler, gcc_path, gcc_prefix)
     cc_bin = shutil.which(cc_bin) or cc_bin
     frontend_identity = _tool_identity(castxml_bin)
+    # The emulated compiler's built-in search dirs reach castxml's parse
+    # without being named anywhere: hash their content too (ADR-062 D11).
     compiler_identity = _tool_identity(cc_bin)
+    compiler_key_identity = (
+        compiler_identity + "\x00" + search_dirs_material(cc_bin, cpp=force_cpp)
+    )
 
     def _make_key() -> str:
         return _cache_key(
@@ -263,7 +269,7 @@ def castxml_dump(
             lang=lang,
             extra_hash_dirs=extra_hash_dirs,
             frontend_identity=frontend_identity,
-            compiler_identity=compiler_identity,
+            compiler_identity=compiler_key_identity,
             force_cpp=force_cpp,
             force_cpp20=force_cpp20,
             invocation_tool=(cc_bin, cc_id, castxml_bin),

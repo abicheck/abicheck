@@ -639,10 +639,7 @@ class TestCachedRunDump:
 
         cached_run_dump(fake_run_dump, binary, "elf", [api_h], [], "1.0", "c++")
 
-        import os
-        import time
-
-        os.utime(detail_h, (time.time() + 10, time.time() + 10))
+        detail_h.write_text(detail_h.read_text() + "// edited\n")
         cached_run_dump(fake_run_dump, binary, "elf", [api_h], [], "1.0", "c++")
 
         assert len(calls) == 2

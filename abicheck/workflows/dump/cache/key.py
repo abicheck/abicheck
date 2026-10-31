@@ -21,12 +21,14 @@ from __future__ import annotations
 import hashlib
 import json
 import os
-import stat
 from pathlib import Path
 from typing import Any
 
-from ....extract.cache_header_scan import iter_cache_header_files
-from ....extract.compiler_driver import ENV_INCLUDE_VARS
+from ....extract.cache_input_digest import (
+    compiler_search_dirs,
+    env_include_material,
+    tree_digest,
+)
 from ....storage.code_identity import abicheck_code_fingerprint
 from . import salt
 
@@ -378,10 +380,12 @@ def _dump_cache_extra_key(
         except Exception as exc:  # missing optional backend remains key material
             frontend_tools.append(f"clang-unavailable:{type(exc).__name__}:{exc}")
     compiler_identity = ""
+    compiler_bin_for_sysinc = ""
     if resolved_backend in ("castxml", "hybrid"):
         try:
             compiler_bin, _ = _resolve_compiler_binary(compiler, gcc_path, gcc_prefix)
             compiler_identity = _tool_identity(compiler_bin)
+            compiler_bin_for_sysinc = compiler_bin
         except Exception as exc:
             compiler_identity = f"compiler-unavailable:{type(exc).__name__}:{exc}"
 
@@ -400,9 +404,11 @@ def _dump_cache_extra_key(
     from ....errors import SnapshotError
 
     header_graph_clang = ""
+    clang_bin_for_sysinc = ""
     try:
         clang_driver = _clang_driver(compiler, gcc_path, gcc_prefix)
         resolved_path = shutil.which(clang_driver) or clang_driver
+        clang_bin_for_sysinc = resolved_path
         # The resolved PATH string alone survives an in-place binary swap at
         # the same path (an apt/package upgrade, or a symlink retargeted to a
         # different clang install) -- fold in an mtime+size fingerprint too
@@ -434,21 +440,33 @@ def _dump_cache_extra_key(
             _public_include_search_dirs_key_field(public_include_search_dirs, sep),
             compile_field,
             env_include_cache_field(),
+            system_include_cache_field(
+                [b for b in (compiler_bin_for_sysinc, clang_bin_for_sysinc) if b],
+                cpp=lang != "c",
+            ),
         ]
     )
 
 
-def env_include_cache_field() -> str:
-    """Key material for the environment include variables (``ENV_INCLUDE_VARS``).
-
-    The castxml run inherits the process environment (its ``run_castxml`` passes
-    no ``env=``), so ``CPATH``/``C_INCLUDE_PATH``/``CPLUS_INCLUDE_PATH`` add
-    search directories to the parse without appearing in any argument the key
-    hashes. An unset variable and an empty one add nothing, so both key as "".
-    """
-    return "env:" + "\x00".join(
-        f"{var}={os.environ.get(var, '')}" for var in ENV_INCLUDE_VARS
+def system_include_cache_field(compiler_bins: list[str], *, cpp: bool) -> str:
+    """Content digest of every built-in ``#include <...>`` directory the
+    resolved compilers search (closed gap "the cache keys do not hash system
+    include directories"). Those directories reach the parse without being
+    named in any input, so an updated system header under an unchanged path
+    must still move the key."""
+    dirs = list(
+        dict.fromkeys(
+            d for cc in compiler_bins for d in compiler_search_dirs(cc, cpp=cpp)
+        )
     )
+    return "sysinc:" + "\x00".join(f"{d}={tree_digest(d)}" for d in dirs)
+
+
+def env_include_cache_field() -> str:
+    """Key material for the environment include variables: their values and
+    the content of the directories they list
+    (:func:`~abicheck.extract.cache_input_digest.env_include_material`)."""
+    return env_include_material()
 
 
 def _clang_driver(compiler: str, gcc_path: str | None, gcc_prefix: str | None) -> str:
@@ -484,54 +502,16 @@ def _cache_key(
                 h.update(chunk)
     except OSError:
         return ""  # uncacheable
-    # Hash contents, not only mtimes: restored timestamps must not resurrect a
-    # stale snapshot. Directory-valued ``-H`` inputs and explicit include roots
-    # contribute every header-like descendant reachable by the parser.
-    hash_files: set[Path] = set()
-    # ADR-050 D1/D2: *not* sorted — headers/includes order is real,
-    # load-bearing search-precedence/preprocessing order (the same "order is
-    # a real compile difference" rule comparability.py's profile_fingerprint
-    # already enforces), not cosmetic. Two dumps requesting the same
-    # headers/includes in a different order can legitimately resolve to a
-    # different snapshot (e.g. -I a -I b vs -I b -I a with a same-named
-    # header in both, or a macro one header defines before another is
-    # included) — sorting here would let a warm cache silently serve the
-    # wrong order's snapshot. `hash_files` (the transitively-discovered
-    # descendants of a directory input) stays a sorted set below: those are
-    # an unordered content aggregate, not a caller-ordered sequence.
-    for hdr in headers:
-        h.update(str(hdr).encode())
-        try:
-            if hdr.is_dir():
-                hash_files.update(iter_cache_header_files(hdr))
-            else:
-                hash_files.add(hdr)
-        except OSError:
-            h.update(b"UNREADABLE_HEADER_INPUT")
-    for inc in includes:
-        h.update(str(inc).encode())
-        try:
-            hash_files.update(iter_cache_header_files(inc))
-        except OSError:
-            h.update(b"UNREADABLE_INCLUDE_DIR")
-    for hdr in sorted(hash_files):
-        h.update(str(hdr).encode())
-        try:
-            fd = os.open(hdr, os.O_RDONLY | getattr(os, "O_NONBLOCK", 0))
-            file_stat = os.fstat(fd)
-            if not stat.S_ISREG(file_stat.st_mode):
-                os.close(fd)
-                h.update(b"NONREGULAR")
-                continue
-            # Preserve the existing mtime invalidation contract as well as
-            # hashing contents. The latter catches restored/coarse timestamps;
-            # the former also treats a touched header as a changed input.
-            h.update(str(file_stat.st_mtime_ns).encode())
-            with os.fdopen(fd, "rb") as f:
-                for chunk in iter(lambda: f.read(65536), b""):
-                    h.update(chunk)
-        except OSError:
-            h.update(b"MISSING")
+    # ADR-062 D11: identity is content only. Each header/include input folds
+    # its own spelling (order is real search precedence, ADR-050 D1/D2, so the
+    # inputs are *not* sorted) and the content digest of what the parser can
+    # read through it: a file as itself (an ``includes=[file]`` entry too),
+    # a directory as every file under it whatever its suffix. mtime never
+    # reaches the key -- it only lets ``file_digest`` skip re-reading a file.
+    for label, inputs in ((b"H", headers), (b"I", includes)):
+        for inp in inputs:
+            h.update(label + str(inp).encode() + b"\x00")
+            h.update(tree_digest(inp).encode() + b"\x00")
     # Compiler params
     h.update(version.encode())
     h.update(lang.encode())
