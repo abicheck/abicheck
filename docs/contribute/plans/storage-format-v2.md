@@ -218,10 +218,24 @@ See "Landed in Phase 1" below.
   that a crashed write leaves behind once that residue is over an hour old.
   The key was already content-based per D11 (`workflows/dump/cache/key.py`:
   binary/input digests, contract, generations, profile).
+  **Key made content-only (2026-10-31).** The mtime fold is gone from the
+  whole-snapshot and clang AST keys; both keys, and the castxml one, now hash
+  every file under an include root (any suffix), file-valued includes, the
+  compiler's built-in search directories and `CPATH`-style directories, via
+  `extract/cache_input_digest.py`. Raw entries carry a declaring-header
+  sidecar so a reloaded entry scopes like a fresh one.
   **Still open:** moving the entries from whole-snapshot files onto the
   package `ObjectStore`. That move gives per-section reuse. It depends on
   A2.1's lazy section loading, which another workstream owns, because a
   per-section cache entry is only cheaper if a hit can load fewer sections.
+  Re-checked 2026-10-31 on top of D18 step 2: still not built. A dump-cache
+  hit's consumers (compare, scoping, the finished tier) read declarations,
+  types and debug layout, which are the sections D18 defers, so a
+  per-section entry would decode the same bytes; and extraction is
+  monolithic, so no section can be reused across a binary change. Per D11
+  ("caching is per section so an unchanged binary ... can be reused") the
+  move pays only once an extractor can reuse a section, which no producer
+  does yet.
   Tests: `tests/test_byte_quota_lru.py` runs random access sequences against
   an independent `OrderedDict` LRU model. It also enumerates an unlink
   failure at each victim and checks stale and live temp residue.

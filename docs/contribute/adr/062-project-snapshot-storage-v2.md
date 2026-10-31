@@ -505,6 +505,15 @@ header does not discard an expensive extraction. Eviction uses a byte quota
 with LRU rather than an entry count, and caching is per section so an
 unchanged binary, a shared graph, or an unchanged variant can be reused.
 
+*Implementation note (2026-10-31).* The identity half is implemented for the
+whole-snapshot and header-AST caches: content digests only
+(`extract/cache_input_digest.py`), over every file under an include root,
+file-valued includes, the compiler's built-in search directories and
+`CPATH`-style directories; a stat signature only lets a process skip
+re-reading an unchanged file. Byte-quota LRU is implemented
+(`storage/byte_quota_lru.py`). Per-section caching is not (storage plan
+A2.3). D11 itself is still Proposed: accepting it is a maintainer decision.
+
 ### D12 — Compression level is internal policy, not a new user knob
 
 Local/extraction cache uses zstd level 3, ordinary CI baselines 10-15,

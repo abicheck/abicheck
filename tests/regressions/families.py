@@ -462,6 +462,8 @@ _F5 = tuple(
         "serialization.pure_projection_mutates_its_own_input",
         "serialization.whole_document_materialised_to_write_it",
         "cache.hit_identity_follows_the_requested_path",
+        "cache.key_identity_must_equal_parse_input_content",
+        "cache.roundtrip_must_preserve_what_downstream_scoping_reads",
         "storage.lazy_decode_diverges_from_eager",
     ]
 )

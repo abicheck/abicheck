@@ -227,4 +227,64 @@ CACHING_BUG_CLASSES: tuple[BugClass, ...] = (
         public_surfaces=("python-api", "cli"),
         axes={"rename": ("same-dir-new-basename", "other-dir", "symlink")},
     ),
+    BugClass(
+        id="cache.key_identity_must_equal_parse_input_content",
+        invariant=(
+            "A header-parse cache key changes exactly when the bytes a parse "
+            "could read change -- an explicit header, any file under an "
+            "include root whatever its suffix, a file passed as an include, "
+            "the compiler's built-in system directories, the directories "
+            "CPATH-style variables add -- or when an input's path spelling "
+            "changes, and never for a metadata-only touch (ADR-062 D11). "
+            "Every key (whole-snapshot, clang AST, castxml AST) is checked "
+            "against an oracle built from the inputs with os.walk, not from "
+            "the key code."
+        ),
+        # The suffix filter dates from #454; mtime-in-identity and the
+        # unhashed system directories were recorded known gaps.
+        fixed_by=(454,),
+        seed_tests=(
+            "tests/test_cache_identity_mutations.py",
+            # its header_disk_cache_warm_after_touch cell (integration)
+            "tests/test_family_f5_optimization_reference.py",
+        ),
+        axes={
+            "mutation": (
+                "content",
+                "mtime-only",
+                "identical-rewrite",
+                "non-header-suffix",
+                "suffix-less",
+                "file-include",
+                "system-dir",
+                "env-include",
+                "path-move",
+                "vcs-metadata",
+            ),
+            "key": ("whole-snapshot", "clang-ast", "castxml-ast"),
+        },
+    ),
+    BugClass(
+        id="cache.roundtrip_must_preserve_what_downstream_scoping_reads",
+        invariant=(
+            "A cache that serves a snapshot in place of an extraction "
+            "preserves every piece of state a downstream step reads, "
+            "including runtime-only carriers the public codec drops on "
+            "purpose: scope(store-then-reload(s)) == scope(s) for every "
+            "fresh snapshot s, and an entry that cannot restore that state "
+            "is a miss, never an unattributed hit."
+        ),
+        # #1726 worked around the asymmetry (finished tier re-extracts);
+        # the declaring-header sidecar fixes its cause.
+        fixed_by=(1726,),
+        seed_tests=(
+            "tests/test_dump_cache_rescope_roundtrip.py",
+            "tests/test_family_f5_optimization_reference.py",
+        ),
+        axes={
+            "attribution": ("mixed", "only-system", "unknown-origin", "multi"),
+            "sidecar": ("present", "missing"),
+            "source": ("generated", "gcc-fixture", "libssl"),
+        },
+    ),
 )
