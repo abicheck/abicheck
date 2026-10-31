@@ -76,8 +76,11 @@ maps are verbatim; each `payload` and most availability entries are elided.)*
 A reader keeps what it does not understand and writes it back unchanged on
 re-save: an unknown section kind, a section header's `extensions` map
 (canonical JSON values), and unknown fields — including an `extensions`
-map — inside a function, variable, record-type or enum record. They are
-inside the evidence and publication digests.
+map — inside a function, variable, record-type or enum record, at any depth
+(a parameter, record field or enum member), and on the binary section's
+ELF, PE or Mach-O metadata (including ELF symbols and imports and PE/Mach-O
+exports). They are inside the evidence and publication digests, and a
+[ProjectSnapshot package](project-snapshot-format.md) stores them too.
 
 A section header may also carry `must_understand`: names (extensions or
 section kinds) a reader must understand before it compares that section.
