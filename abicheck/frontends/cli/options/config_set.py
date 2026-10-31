@@ -128,7 +128,8 @@ def parse_set_assignments(
 
 _SET_HELP: str = (
     "Set one .abicheck.yml key for this run, as PATH=VALUE, e.g. "
-    "--set debug.dwarf_only=true. Repeatable. PATH is the config path; VALUE "
+    "--set debug.dwarf_only=true, or --set 'output.view=[\"show=breaking\"]' "
+    "for a list. Repeatable. PATH is the config path; VALUE "
     "is read as YAML, so a list is [a, b]. Overrides the "
     ".abicheck.yml file; an explicit flag still wins over both. A key this "
     "command does not apply, or a core option with its own flag, is refused "

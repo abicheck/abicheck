@@ -91,6 +91,7 @@ OPTION_GROUPS: dict[str, list[dict[str, object]]] = {
             "options": [
                 "--output",
                 "--config",
+                "--set",
                 "--verbose",
             ],
         },
@@ -317,6 +318,8 @@ COMPARE_COMMON_OPTION_NAMES: frozenset[str] = frozenset(
         "exports",
         # Policy & severity
         "config",
+        # --set PATH=VALUE: the config-key spelling of the moved options.
+        "config_overrides",
         "policy",
         "suppress",
         "severity_preset",

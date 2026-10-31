@@ -27,14 +27,22 @@ from __future__ import annotations
 
 import pytest
 from test_action_compile_set_forwarding import RETIRED_COMPILE_INPUTS, _validate
-from test_action_run_sh_set_input import _run_compare, _set_pairs
+from test_action_compile_set_forwarding import _run
+from test_action_run_sh_set_input import _set_pairs
 
 _COMPILE_SET = 'compile.lang="c"\ncompile.compiler=/usr/bin/g++\n'
 
 
+def _fresh(base, name):
+    """A new, existing subdirectory of *base* for one run."""
+    path = base / name
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
 def _release_operand(tmp_path):
     """A real directory: a package-style operand, not a file."""
-    release = tmp_path / "release-operand"
+    release = _fresh(tmp_path, "release-operand")
     release.mkdir(exist_ok=True)
     return release
 
@@ -43,12 +51,13 @@ class TestCompareReleaseStyleOperandCompileContext:
     def test_set_lines_reach_a_release_operand_like_a_single_pair(
         self, tmp_path
     ) -> None:
-        single = _set_pairs(_run_compare(tmp_path / "single", _COMPILE_SET))
-        release_dir = _release_operand(tmp_path / "release")
+        single = _set_pairs(_run(_fresh(tmp_path, "single"), "compare", INPUT_SET=_COMPILE_SET))
+        release_dir = _release_operand(_fresh(tmp_path, "release"))
         release = _set_pairs(
-            _run_compare(
-                tmp_path / "release-run",
-                _COMPILE_SET,
+            _run(
+                _fresh(tmp_path, "release-run"),
+                "compare",
+                INPUT_SET=_COMPILE_SET,
                 INPUT_OLD_LIBRARY=str(release_dir),
                 INPUT_NEW_LIBRARY=str(release_dir),
             )
@@ -61,9 +70,10 @@ class TestCompareReleaseStyleOperandCompileContext:
     ) -> None:
         release_dir = _release_operand(tmp_path)
         pairs = _set_pairs(
-            _run_compare(
-                tmp_path / "run",
-                "",
+            _run(
+                _fresh(tmp_path, "run"),
+                "compare",
+                INPUT_SET="",
                 INPUT_OLD_LIBRARY=str(release_dir),
                 INPUT_NEW_LIBRARY=str(release_dir),
             )
