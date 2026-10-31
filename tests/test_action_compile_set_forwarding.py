@@ -1,11 +1,11 @@
-"""The compile-context inputs are retired; their replacement is ``set:`` (ADR-091 D7).
+"""Project-stable compile-context inputs are retired to ``set:`` (ADR-091 Phase 5).
 
-The Action used to translate ``lang``/``frontend``/``compiler``/``compile-options``
-/``sysroot``/``nostdinc`` into ``--set compile.*`` arguments. Those inputs are now
-RETIRED tombstones: ``action/validate-inputs.sh`` fails the run before analysis
-and names the ``set:`` line that replaces each one, and ``run.sh`` forwards only
-the ``set:`` input. These tests pin both halves: each retired input is refused
-with its replacement named, and a ``set:`` line reaches the CLI verbatim.
+``frontend``, ``compile-options`` and ``nostdinc`` are RETIRED tombstones:
+``action/validate-inputs.sh`` fails the run before analysis and names the
+``set:`` line that replaces each one. ``compiler``, ``lang`` and ``sysroot``
+stay inputs and are forwarded as ``--set compile.*``. These tests pin the
+refusal with its replacement named, and that a ``set:`` line reaches the CLI
+verbatim.
 """
 
 from __future__ import annotations

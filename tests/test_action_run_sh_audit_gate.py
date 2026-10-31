@@ -303,7 +303,9 @@ class TestAuditOnlyScanExplicitNonDefaultPresetIsHonored:
         assert outputs["_returncode"] == 0, outputs
         combined = f"{outputs['_stdout']}\n{outputs['_stderr']}"
         # The Command: line is the argv echo; the flag must appear once there.
-        command_lines = [ln for ln in combined.splitlines() if ln.startswith("Command:")]
+        command_lines = [
+            ln for ln in combined.splitlines() if ln.startswith("Command:")
+        ]
         assert command_lines, outputs
         assert command_lines[0].count("--severity-preset") == 1, outputs
         assert "strict" in combined, outputs

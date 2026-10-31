@@ -38,6 +38,7 @@ import subprocess
 import tempfile
 from pathlib import Path
 
+import pytest
 from _workflow_exec import bash_executable, require_bash
 
 RUN_SH = Path(__file__).resolve().parents[1] / "action" / "run.sh"
@@ -263,12 +264,104 @@ CMD=("$TEST_BASH" "$TEST_STUB" compare old.json new.json -o markdown=-)
 PR_JSON="$TEST_PR_JSON"
 FORMAT=markdown
 OUTPUT_FILE=
-CMD=("$TEST_BASH" "$TEST_STUB" compare old.json new.json --view show=added -o markdown=-)
+CMD=("$TEST_BASH" "$TEST_STUB" compare old.json new.json --set "output.view=[show=added]" -o markdown=-)
 """
         _run(
             harness,
             {
                 "TEST_PR_JSON": str(pr_json),
+                "TEST_STUB": str(stub),
+                "TEST_BASH": bash_executable(),
+            },
+        )
+        assert pr_json.read_text(encoding="utf-8").strip() == "rerun-sentinel"
+
+    @pytest.mark.parametrize(
+        "view_tokens",
+        [
+            ("--set", "output.view=[show=added]"),
+            ("--set=output.view=[show=removed]",),
+            ("--set", "output.view=[show=functions, root-cause]"),
+        ],
+    )
+    def test_rerun_drops_view_overrides_and_pins_an_empty_view(
+        self, tmp_path, view_tokens
+    ):
+        """ADR-091 Phase 5: ``--view`` is gone; its ``show=...`` display
+        filter arrives as an ``output.view`` override (or from a config
+        file). The comment rerun must see the full change set the gate acted
+        on, so every ``--set output.view=...`` is dropped -- in both the
+        two-token and the inline spelling -- and ``output.view=[]`` is
+        pinned, which also neutralises a view a config file supplies. Other
+        ``--set`` overrides are kept verbatim."""
+        require_bash()
+        pr_json = tmp_path / "pr.json"
+        pr_json.write_text("", encoding="utf-8")
+        args_file = tmp_path / "args.txt"
+        stub = tmp_path / "stub.sh"
+        stub.write_text(
+            'printf "%s\\n" "$@" > "$TEST_ARGS"\n'
+            '_last="${@: -1}"\necho rerun-sentinel > "${_last#json=}"\n',
+            encoding="utf-8",
+        )
+        quoted = " ".join(f"'{t}'" for t in view_tokens)
+        harness = f"""
+MODE=compare
+PR_JSON="$TEST_PR_JSON"
+FORMAT=markdown
+OUTPUT_FILE=
+CMD=("$TEST_BASH" "$TEST_STUB" compare old.json new.json {quoted} --set severity.preset=strict -o markdown=-)
+"""
+        _run(
+            harness,
+            {
+                "TEST_PR_JSON": str(pr_json),
+                "TEST_STUB": str(stub),
+                "TEST_BASH": bash_executable(),
+                "TEST_ARGS": str(args_file),
+            },
+        )
+        args = args_file.read_text(encoding="utf-8").splitlines()
+        assert args == [
+            "compare",
+            "old.json",
+            "new.json",
+            "--set",
+            "severity.preset=strict",
+            "--set",
+            "output.view=[]",
+            "-o",
+            f"json={pr_json}",
+        ]
+
+    def test_a_view_filtered_json_report_is_not_reused(self, tmp_path):
+        """A JSON report rendered under an ``output.view`` ``show=`` filter
+        carries ``show_only_filter`` (``report/json_sections``). The filter
+        may come from a config file the Action never sees in CMD, so the
+        report itself decides: it is not reused, the comment reruns."""
+        require_bash()
+        pr_json = tmp_path / "pr.json"
+        pr_json.write_text("", encoding="utf-8")
+        output_file = tmp_path / "primary.json"
+        output_file.write_text(
+            '{"show_only_filter": "added", "changes": []}', encoding="utf-8"
+        )
+        stub = tmp_path / "stub.sh"
+        stub.write_text(
+            '_last="${@: -1}"\necho rerun-sentinel > "${_last#json=}"\n',
+            encoding="utf-8",
+        )
+        harness = """
+PR_JSON="$TEST_PR_JSON"
+FORMAT=json
+OUTPUT_FILE="$TEST_OUTPUT_FILE"
+CMD=("$TEST_BASH" "$TEST_STUB" compare old.json new.json -o "json=${TEST_OUTPUT_FILE}")
+"""
+        _run(
+            harness,
+            {
+                "TEST_PR_JSON": str(pr_json),
+                "TEST_OUTPUT_FILE": str(output_file),
                 "TEST_STUB": str(stub),
                 "TEST_BASH": bash_executable(),
             },

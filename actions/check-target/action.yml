@@ -684,13 +684,13 @@ runs:
     - name: Compose root set overrides (consumer dump)
       id: root_set_consumer
       shell: bash
-      # The root action retired lang/frontend/compiler/compile-options/
-      # sysroot/severity-preset as inputs (ADR-091 D7). They reach it as
+      # The root action retired its frontend/compile-options inputs
+      # (ADR-091 Phase 5). They reach it as compile.frontend/compile.options
       # set: PATH=VALUE lines, composed here with this action's own set:.
       env:
         ROOT_SET_BASE: ${{ inputs.set }}
-        ROOT_FRONTEND: ${{ inputs.consumer-ast-frontend }}
-        ROOT_COMPILE_OPTIONS: ${{ inputs.consumer-gcc-options }}
+        ROOT_FRONTEND: ${{ inputs.consumer-frontend }}
+        ROOT_COMPILE_OPTIONS: ${{ inputs.consumer-compile-options }}
       run: |
         python3 -I - >> "$GITHUB_OUTPUT" <<'PY'
         import json, os, shlex, uuid
@@ -1941,8 +1941,8 @@ runs:
     - name: Compose root set overrides (analysis)
       id: root_set_main
       shell: bash
-      # The root action retired lang/frontend/compiler/compile-options/
-      # sysroot/severity-preset as inputs (ADR-091 D7). They reach it as
+      # The root action retired its frontend/compile-options inputs
+      # (ADR-091 Phase 5). They reach it as compile.frontend/compile.options
       # set: PATH=VALUE lines, composed here with this action's own set:.
       env:
         ROOT_SET_BASE: ${{ inputs.set }}

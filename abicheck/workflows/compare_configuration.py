@@ -612,7 +612,9 @@ def load_required_symbols(
                 f"consumers.required_symbols @{candidate}: is a directory, not a file."
             )
         if not candidate.is_file():
-            raise CompareSettingsError(f"consumers.required_symbols @{candidate}: no such file.")
+            raise CompareSettingsError(
+                f"consumers.required_symbols @{candidate}: no such file."
+            )
         try:
             data = candidate.read_bytes()
         except OSError as exc:

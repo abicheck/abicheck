@@ -1467,4 +1467,4 @@ budget_exceptions:
   - surface: action
     recorded: 42
     rename: R22
-    note: root action.yml analysis inputs (D4 budget 25); Phase 5 review shrinks this
+    note: root action.yml analysis inputs (soft D4 target 25; usability wins, ADR-091 amendment 2026-10-31); Phase 5 retired the seven project-stable inputs to set-override tombstones

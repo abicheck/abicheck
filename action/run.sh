@@ -6065,26 +6065,36 @@ _can_reuse_primary_json() {
   # whole scan/compare a second time just to get JSON that had already been
   # produced, for scan doubling potentially expensive --depth build/source
   # work and describing a separate, budget-metered run.
-  # ADR-068 D4/Phase 5: --show-only is gone -- its equivalent is one of
-  # --view's repeatable tokens (`--view show=...`), so only *that* token
-  # (never `--view root-cause`/`--view impact`, which change no content)
-  # disqualifies reuse. Indexed, not a plain `for arg in` loop, since the
-  # token-form `--view show=...` needs the *next* array element to see the
-  # value; the inline `--view=show=...` form carries it in the same element.
-  [[ -n "$(_json_report_src)" ]] || return 1
-  local i
-  for ((i = 0; i < ${#CMD[@]}; i++)); do
-    case "${CMD[$i]}" in
-      --view) [[ "${CMD[$((i + 1))]:-}" == show=* ]] && return 1 ;;
-      --view=show=*) return 1 ;;
-    esac
-  done
+  # ADR-091 Phase 5: the display filter (`show=...`) is an `output.view`
+  # config token now, reachable from `set:`/extra-args `--set` and from a
+  # discovered `.abicheck.yml` alike -- the last one is invisible in CMD.
+  # So the report itself decides: a filtered JSON export carries a
+  # `show_only_filter` key (report/json_sections.add_show_only_filter), and
+  # such a report hides gated changes from the comment, so it is not reused.
+  local _src
+  _src="$(_json_report_src)"
+  [[ -n "$_src" ]] || return 1
+  if grep -qE '"show_only_filter"[[:space:]]*:' "$_src" 2>/dev/null; then
+    return 1
+  fi
   return 0
+}
+
+# True when one CMD element (with its successor) is a `--set output.view=...`
+# override, in the two-token form `add_set_flags` emits or the inline
+# `--set=output.view=...` form extra-args may carry. Echoes how many
+# elements it spans (2 or 1).
+_output_view_override_span() {
+  case "$1" in
+    --set) [[ "${2:-}" == output.view=* ]] && { echo 2; return 0; } ;;
+    --set=output.view=*) echo 1; return 0 ;;
+  esac
+  return 1
 }
 
 _build_json_cmd() {
   PR_CMD_JSON=()
-  local i _tok _spelling
+  local i _tok _spelling _span
   for ((i = 0; i < ${#CMD[@]}; i++)); do
     _tok="${CMD[$i]}"
     # Plan slice 7m: one export flag, so one matcher. Every export from the
@@ -6113,26 +6123,16 @@ _build_json_cmd() {
       fi
       continue
     fi
-    case "$_tok" in
-      --view)
-        # ADR-068 D4/Phase 5: --show-only's replacement token. A
-        # `--view show=...` occurrence is a display filter ("limit
-        # displayed changes", does NOT affect exit codes) -- keeping it
-        # would hide gated breaks from the comment while the check still
-        # fails red, so drop it (and its value) so the comment sees the
-        # full change set the gate acted on. Every other --view token
-        # (impact/root-cause -- plan slice 7o retired the rest) changes
-        # no content, only how it's grouped, so it is kept.
-        if [[ "${CMD[$((i + 1))]:-}" == show=* ]]; then
-          i=$((i + 1))  # drop the token and its value
-          continue
-        fi
-        ;;
-      --view=show=*)
-        # same display filter, inline value form — drop it for the re-run.
-        continue
-        ;;
-    esac
+    # ADR-091 Phase 5: `output.view`'s `show=...` token is a display
+    # filter ("limit displayed changes", does NOT affect exit codes) --
+    # keeping it would hide gated breaks from the comment while the check
+    # still fails red. Every explicit `--set output.view=...` is dropped
+    # here, and the rerun pins `output.view=[]` below so a discovered or
+    # `--config` file's view cannot filter it either.
+    if _span="$(_output_view_override_span "$_tok" "${CMD[$((i + 1))]:-}")"; then
+      i=$((i + _span - 1))
+      continue
+    fi
     PR_CMD_JSON+=("$_tok")
     # A value-taking option keeps its own value verbatim, even when that
     # value is spelled like an export: `--suppress -o` names `-o` as
@@ -6143,6 +6143,10 @@ _build_json_cmd() {
       PR_CMD_JSON+=("${CMD[$i]}")
     fi
   done
+  # `output.view` is a `compare` config key; the deps commands take no --set.
+  if [[ "${MODE:-}" == compare ]]; then
+    PR_CMD_JSON+=(--set "output.view=[]")
+  fi
   PR_CMD_JSON+=(-o "json=$PR_JSON")
 }
 

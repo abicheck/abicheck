@@ -288,7 +288,12 @@ class TestAssuranceOverlayRecognizesUsedByManifestAsValueOption:
     systematic, generative invariant test (introspects the real ``compare``
     Click command itself and diffs it against both hand-maintained lists)
     that now catches a *future* missing option mechanically, rather than
-    needing another Codex round per omission."""
+    needing another Codex round per omission.
+
+    ADR-091 Phase 5 removed ``--used-by-manifest`` from the CLI (it is the
+    ``consumers.manifests`` config key now), so the tokenizer's derived table
+    no longer lists it. The same shape is pinned through ``--used-by``, the
+    value-taking consumer option that stays on the command line."""
 
     def test_used_by_manifest_before_config_shaped_value_is_not_misread(
         self, tmp_path: Path
@@ -303,12 +308,12 @@ class TestAssuranceOverlayRecognizesUsedByManifestAsValueOption:
         workspace = make_workspace(tmp_path)
         result = _run_overlay(
             workspace,
-            {"BASE_CONFIG": "", "EXTRA_ARGS": "--used-by-manifest --config"},
+            {"BASE_CONFIG": "", "EXTRA_ARGS": "--used-by --config"},
         )
         assert result.returncode == 0, result.stderr
         written = _written_overlay(result)
         assert written == {"assurance": {"require_complete": True}}
-        assert result.outputs["effective-extra-args"] == "--used-by-manifest --config"
+        assert result.outputs["effective-extra-args"] == "--used-by --config"
 
     def test_real_config_flag_survives_alongside_used_by_manifest(
         self, tmp_path: Path
@@ -324,16 +329,13 @@ class TestAssuranceOverlayRecognizesUsedByManifestAsValueOption:
             workspace,
             {
                 "BASE_CONFIG": "",
-                "EXTRA_ARGS": "--used-by-manifest consumers.json --config real.yml",
+                "EXTRA_ARGS": "--used-by consumer.so --config real.yml",
             },
         )
         assert result.returncode == 0, result.stderr
         written = _written_overlay(result)
         assert written["targets"] == {}
-        assert (
-            result.outputs["effective-extra-args"]
-            == "--used-by-manifest consumers.json"
-        )
+        assert result.outputs["effective-extra-args"] == "--used-by consumer.so"
 
 
 class TestAssuranceOverlayValueOptionValuesResistInjection:
@@ -390,9 +392,7 @@ class TestAssuranceOverlayValueOptionValuesResistInjection:
         if not any(c.isspace() for c in p.values[0]) and p.values[0] != ""
     ]
 
-    @pytest.mark.parametrize(
-        "option", ["--used-by-manifest", "--select", "--select-required"]
-    )
+    @pytest.mark.parametrize("option", ["--used-by", "--select", "--select-required"])
     @pytest.mark.parametrize("hostile_value", _SINGLE_TOKEN_HOSTILE_VALUES)
     def test_hostile_value_is_consumed_literally_with_no_side_effect(
         self, tmp_path: Path, option: str, hostile_value: str

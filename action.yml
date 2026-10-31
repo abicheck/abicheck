@@ -302,7 +302,7 @@ inputs:
   used-by-manifest:
     description: >
       Path(s) to a JSON document naming one or more consumer binaries
-      (space-separated; maps to repeated compare --used-by-manifest), each
+      (space-separated; forwarded as --set consumers.manifests=[...]), each
       with optional digest/platform/profile/provider_baseline provenance and
       a requirement ("required", the default -- an unreadable consumer
       aborts the run, same as used-by -- or "advisory" -- an unreadable
@@ -317,8 +317,8 @@ inputs:
   required-symbol:
     description: >
       An exported linker symbol a plugin host resolves via dlopen/dlsym
-      and requires (space-separated; maps to repeated compare
-      --required-symbol). The full library comparison always determines
+      and requires (space-separated; forwarded as --set
+      consumers.required_symbols=[...]). The full library comparison always determines
       this run's own verdict/exit code; this contract's own confirmed/
       potential/unresolved impact is reported alongside it (informational),
       never in place of it. Mutually exclusive with used-by. compare mode
