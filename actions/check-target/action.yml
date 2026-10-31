@@ -514,7 +514,7 @@ runs:
         INPUT_GCC_OPTIONS: ${{ inputs.gcc-options }}
         INPUT_POLICY_FILE: ${{ inputs.policy-file }}
         INPUT_CONSUMER_AST_FRONTEND: ${{ inputs.consumer-ast-frontend }}
-        INPUT_CONSUMER_GCC_PATH: ${{ inputs.consumer-compiler }}
+        INPUT_CONSUMER_GCC_PATH: ${{ inputs.consumer-gcc-path }}
         INPUT_CONSUMER_GCC_OPTIONS: ${{ inputs.consumer-gcc-options }}
         INPUT_ANALYSIS_ASSURANCE_COMPLETE: ${{ inputs.analysis-assurance-complete }}
         INPUT_KIND: ${{ inputs.kind }}
