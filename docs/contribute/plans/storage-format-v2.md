@@ -1010,10 +1010,11 @@ A1.9), item by item. Open items are also listed in
   Timing: the split costs nothing measurable (161 MiB synthetic flat
   document, 20k functions/4k records/2k variables, `snapshot_from_dict`
   best of 3: 7.27 s before, 7.13 s after).
-  Evaluated 2026-10-31: the cross-section decode in `decode_snapshot` and
-  the `semantic_ir` funnel in `AbiSnapshot.__post_init__` must be split per
-  section first; measurements and the blocker are in known-gaps "ADR-062
-  D14-D18". D14 follow-up landed the same day: the console summary of
+  Evaluated 2026-10-31: the cross-section decode in `decode_snapshot` is
+  now split per section (step 1, above), but the `semantic_ir` funnel in
+  `AbiSnapshot.__post_init__` remains a prerequisite for deferred
+  semantic-IR assembly; measurements and the blocker are in known-gaps
+  "ADR-062 D14-D18". D14 follow-up landed the same day: the console summary of
   `compare` states partial assurance and names each not-comparable section.
 
 ---
