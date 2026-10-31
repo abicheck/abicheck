@@ -31,6 +31,7 @@ from __future__ import annotations
 
 import itertools
 import os
+import re
 from pathlib import Path
 from typing import Any
 
@@ -255,16 +256,45 @@ def test_action_a_hostile_follow_deps_value_forwards_nothing_and_runs_nothing(
     tmp_path: Path, hostile: str
 ) -> None:
     """Only the exact strings ``true``/``false`` forward a flag; anything else
-    is neither executed nor passed through as argv."""
+    is neither executed nor passed through as argv.
+
+    Oracle: every ``abicheck`` invocation of the same run with ``follow-deps``
+    unset. ``run.sh`` may call the CLI twice (the PR-comment JSON re-run on a
+    ``pull_request`` event), so the stub records each call; ``mktemp`` names
+    under ``$RUNNER_TEMP`` are normalized, since they differ run to run."""
     sentinel = tmp_path / "pwned"
-    capture = tmp_path / "argv.txt"
-    bindir = _argv_capture_stub(tmp_path, capture)
-    env = {
-        **_compare_env(tmp_path),
-        "INPUT_FOLLOW_DEPS": hostile.format(sentinel=sentinel),
-    }
+    log = tmp_path / "calls.txt"
+    bindir = _stub_abicheck(tmp_path, exit_code=0, payload=None)
+    stub = bindir / "abicheck"
+    stub.write_text(
+        f'#!/usr/bin/env bash\nprintf "%s\\n" "$@" --END-- >> "{log}"\nexit 0\n',
+        encoding="utf-8",
+    )
+    stub.chmod(0o755)
+    runner_temp = re.escape(str(tmp_path / "runner_temp"))
+    temp_name = re.compile(rf"{runner_temp}/([\w-]+)\.\w{{6}}")
+
+    def calls() -> list[list[str]]:
+        text = temp_name.sub(r"<tmp:\1>", log.read_text(encoding="utf-8"))
+        log.unlink()
+        out: list[list[str]] = [[]]
+        for line in text.splitlines():
+            if line == "--END--":
+                out.append([])
+            else:
+                out[-1].append(line)
+        return out[:-1]
+
+    env = _compare_env(tmp_path)
     _run_action(tmp_path, env, bindir)
-    argv = capture.read_text(encoding="utf-8").splitlines()
-    assert argv[0] == "compare"
-    assert not {a for a in argv if "follow-deps" in a or a.startswith("--set")}
+    baseline = calls()
+    _run_action(
+        tmp_path,
+        {**env, "INPUT_FOLLOW_DEPS": hostile.format(sentinel=sentinel)},
+        bindir,
+    )
+    hostile_calls = calls()
+    assert baseline and baseline[0][0] == "compare"
+    assert hostile_calls == baseline
+    assert not [a for call in hostile_calls for a in call if "follow-deps" in a]
     assert not sentinel.exists()
