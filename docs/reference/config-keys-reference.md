@@ -63,7 +63,16 @@ The last column gives the same option on the other surfaces, read from `architec
 | `debuginfod_url` | str | --set: `--set debug.debuginfod_url=VALUE` |
 | `dwarf_only` | bool | --set: `--set debug.dwarf_only=VALUE` |
 | `format` | str | --set: `--set debug.format=VALUE` |
+| `info` | list[str] (or a single str) | CLI: `compare --debug-info`, `dump --debug-info`; Action: `old-debug-info`, `new-debug-info` |
 | `pdb_path` | str | CLI: `compare --debug-info`, `dump --debug-info`; Action: `old-debug-info`, `new-debug-info` |
+
+### `deps:`
+
+| Sub-key | Type | Same option on other surfaces |
+|---|---|---|
+| `follow` | bool | CLI: `compare --follow-deps`, `dump --follow-deps`; Action: `follow-deps` |
+| `ld_library_path` | str | CLI: `compare --ld-library-path`, `dump --ld-library-path`, `deps compare --ld-library-path`, `deps tree --ld-library-path`; Action: `ld-library-path`; --set: `--set deps.ld_library_path=VALUE` |
+| `search_paths` | list[str] (or a single str) | CLI: `compare --search-path`, `dump --search-path`, `deps compare --search-path`, `deps tree --search-path`; Action: `search-path`; --set: `--set deps.search_paths=VALUE` |
 
 ### `gate:`
 

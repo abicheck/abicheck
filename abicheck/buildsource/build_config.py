@@ -61,6 +61,7 @@ from .build_config_schema import (
     Kind,
     bundle_variants_block_findings,
     deployment_findings,
+    parse_debug_info_entry,
 )
 from .build_config_scope import (
     dependencies_findings,
@@ -161,6 +162,13 @@ def _stripped(values: list[str], path: str) -> list[str]:  # noqa: ARG001 -- Key
     with whitespace-only entries dropped (Codex review: a quoted entry with stray
     whitespace matched one consumer's SONAME comparison and missed another's)."""
     return [s.strip() for s in values if s.strip()]
+
+
+def _debug_info(values: list[str], path: str) -> list[str]:  # noqa: ARG001 -- KeySpec normalize(value, path) signature
+    """``debug.info`` entries, each checked against the ``--debug-info`` grammar."""
+    for value in values:
+        parse_debug_info_entry(value)
+    return [str(value).strip() for value in values]
 
 
 def _performance_profile(value: str, path: str) -> str:  # noqa: ARG001 -- KeySpec normalize(value, path) signature
@@ -341,6 +349,12 @@ KEY_TABLE = KeyTable(
         KeySpec("debug.debuginfod", Kind.BOOL, "debug_debuginfod"),
         KeySpec("debug.debuginfod_url", Kind.STR, "debug_debuginfod_url"),
         KeySpec("debug.pdb_path", Kind.STR, "debug_pdb_path"),
+        KeySpec("debug.info", Kind.LIST, "debug_info", [], normalize=_debug_info),
+        KeySpec("deps.follow", Kind.BOOL, "deps_follow"),
+        KeySpec(
+            "deps.search_paths", Kind.LIST, "deps_search_paths", [], normalize=_stripped
+        ),
+        KeySpec("deps.ld_library_path", Kind.STR, "deps_ld_library_path"),
         KeySpec(
             "bundle.system_providers",
             Kind.LIST,
@@ -551,6 +565,15 @@ class BuildConfig:
     #: ``debug.pdb_path`` — Phase 7 7c: the former ``dump --pdb-path``
     #: (explicit PE/PDB path override, superseding automatic discovery).
     debug_pdb_path: str | None = None
+    #: ``debug.info``/``deps.*`` -- the config homes of ``--debug-info``,
+    #: ``--follow-deps``, ``--search-path`` and ``--ld-library-path`` (ADR-091
+    #: D4, 2026-10-31 amendment); the flags stay and win. Resolved by
+    #: ``workflows/config_run_inputs.py``. ``debug_info`` entries use the
+    #: flag's ``[old=|new=]PATH`` grammar.
+    debug_info: list[str] = field(default_factory=list)
+    deps_follow: bool | None = None
+    deps_search_paths: list[str] = field(default_factory=list)
+    deps_ld_library_path: str | None = None
     #: ``bundle:`` — release/scan bundle topology (CLI cleanup phase two,
     #: PR J), demoted off the CLI from ``--bundle-system-providers``/
     #: ``--bundle-cohort``: a project's system-provider allow-list extension

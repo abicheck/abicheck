@@ -56,6 +56,8 @@ CORE_CONFIG_FLAGS: dict[str, str] = {
     "compile.include_dirs": "--include",
     "compile.defines": "--define",
     "debug.pdb_path": "--debug-info",
+    "debug.info": "--debug-info",
+    "deps.follow": "--follow-deps",
     "build.compile_db": "--build-info",
     "scope.exclude_headers": "--exclude-header",
     "contract": "--contract",

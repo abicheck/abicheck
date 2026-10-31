@@ -273,11 +273,11 @@ def dump_cmd(
             resolved_debug=None,
             debug_roots=debug_roots,
             config_overrides=config_overrides,
+            deps=_dump_project.DepsSettings(follow_deps, search_paths, ld_library_path),
         )
-    except _dump_project.DebugOperandError as exc:
+    except (_dump_project.DebugOperandError, _dump_project.DumpConfigError) as exc:
         raise click.UsageError(str(exc)) from exc
-    except _dump_project.DumpConfigError as exc:
-        raise click.UsageError(str(exc)) from exc
+    deps, debug_roots = _project.deps, _project.debug_roots  # flag, else config
     config_path, lang, _config_lang_explicit = (
         _project.path,
         _project.lang,
@@ -557,9 +557,9 @@ def dump_cmd(
         sources=sources,
         build_info=build_info,
         include_dependencies=include_dependencies,
-        follow_deps=follow_deps,
-        search_paths=search_paths,
-        ld_library_path=ld_library_path,
+        follow_deps=deps.follow,
+        search_paths=deps.search_paths,
+        ld_library_path=deps.ld_library_path,
         compile_db_filter=compile_db_filter,
         build_config=build_config,
         ownership=dump_ownership_request(config_path),
@@ -773,7 +773,7 @@ def dump_cmd(
                 f"--dump-manifest is not yet supported for {binary_fmt.upper()} "
                 "binaries; use a single-header dump for this format."
             )
-        if follow_deps:
+        if deps.follow:
             click.echo(
                 "Warning: --follow-deps is only supported for ELF binaries.",
                 err=True,

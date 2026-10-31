@@ -437,6 +437,8 @@ def _reject_unsupported_config_blocks(
     can declare the setting in ``.abicheck.yml`` with no flag at all."""
     if request.config_path is None or cfg is None:
         return
+    from .config_run_inputs import configured_run_input_keys
+
     unsupported: list[str] = []
     if cfg.severity_preset is not None or any(
         getattr(cfg, field) is not None
@@ -471,8 +473,10 @@ def _reject_unsupported_config_blocks(
             "debug_debuginfod_url",
             "debug_pdb_path",
         )
-    ):
+    ) or "debug.info" in configured_run_input_keys(cfg):
         unsupported.append("debug:")
+    if any(key.startswith("deps.") for key in configured_run_input_keys(cfg)):
+        unsupported.append("deps:")
     if cfg.source_method is not None:
         unsupported.append("source:")
     if unsupported:

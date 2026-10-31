@@ -1,7 +1,7 @@
 # ADR-091: One Option Vocabulary Across CLI, Config, Action and Typed API
 
 **Date:** 2026-10-30
-**Status:** Accepted — implemented (2026-10-31). Every D5 row is implemented or recorded as an accepted exception: R10 (Tier-1 `checker.compare()` keywords), R11 (Action `format`/`output-file` kept), R18 (`run_dump(public_headers)`), R19–R21 (accepted names), and the R22 soft budget (17 visible `compare` options, 42 Action analysis inputs). R3 covers the `--policy` document's block as well as the `.abicheck.yml` block (2026-10-31 amendment). The implementation plan is closed and removed; its remaining non-ADR follow-ups are in [known gaps](../known-gaps.md) ("Option vocabulary"). Phases 3 and 5 landed in #1867 and #1869; Phase 7 in #1871; the open items in #1872.
+**Status:** Accepted — implemented (2026-10-31). Every D5 row is implemented or recorded as an accepted exception: R10 (Tier-1 `checker.compare()` keywords), R11 (Action `format`/`output-file` kept), R18 (`run_dump(public_headers)`), R19–R21 (accepted names), and the R22 soft budget (17 visible `compare` options, 42 Action analysis inputs). R3 covers the `--policy` document's block as well as the `.abicheck.yml` block (2026-10-31 amendment). The implementation plan is closed and removed; its remaining non-ADR follow-ups are in [known gaps](../known-gaps.md) ("Option vocabulary"). Phases 3 and 5 landed in #1867 and #1869; Phase 7 in #1871; the open items in #1872. D4 amended 2026-10-31: `debug.info` and `deps.*` config homes for kept flags; `--sources` stays a flag only, by design.
 
 Governed by: [ADR-037](037-cli-interface-contract.md) (CLI interface
 contract), [ADR-040](040-compare-surface-reduction.md) (compare surface
@@ -141,6 +141,43 @@ public-header-dirs, frontend, compile-options and nostdinc moved to `set:`).
 Remaining candidates, not yet moved and not part of this record: the
 `--debug-info` per-side transports, the `deps.*` keys that have no config
 home yet, and `--sources`, which needs a config discovery rule first.
+
+**Amendment (2026-10-31, maintainer decision: config homes for kept flags).**
+Balance over minimalism: a per-side, per-run, first-run or commonly used
+option stays a flag (and Action input). A project whose value does not change
+between runs can now also state it in `.abicheck.yml`. Adding the config home
+does not move the option to the config tier, and the flag is not removed.
+Precedence is D2's rule: explicit flag or typed argument > `--set`/
+`config_overrides` (non-core keys only) > file > default. A stated flag
+replaces the configured value and is never merged with it. A relative path
+written in the file resolves against the config file's directory; one given by
+`--set` or the typed `config_overrides` is used as given, relative to the
+current directory. Homes added:
+
+- `debug.info` for `--debug-info`. A list of entries in the flag's own
+  `[old=|new=|both=]PATH` grammar, so the per-side home is D3's side qualifier
+  and not separate `old`/`new` keys. `dump` refuses a side-scoped entry.
+- `deps.follow`, `deps.search_paths` and `deps.ld_library_path` for
+  `--follow-deps`, `--search-path` and `--ld-library-path`, on `compare`
+  and `dump`. `deps.root` gets no key: it is the operand of the `deps`
+  commands, which read no `.abicheck.yml`.
+
+D4/D6's rule stands unchanged: `--set` and the typed `config_overrides`
+refuse every core key. `debug.info` and `deps.follow` back core flags, so they
+are added to `CORE_CONFIG_FLAGS` and refused there, naming the flag; the
+non-core `deps.search_paths` and `deps.ld_library_path` are reached by both.
+One resolver serves every surface: `workflows/config_run_inputs.py`. The
+`--no-baseline` and stored-BundleFacts routes refuse the keys by name, as
+they refuse the flags.
+
+**Amendment (2026-10-31, maintainer decision: `--sources` stays a flag only).**
+`--sources` gets no config home, by design. The source tree is a per-side,
+per-run operand (D4 amendment (a)/(b); `frontends/cli/options/rulings.py`),
+not a project setting. The one stable case, `dump` run in its own checkout,
+is already served: the config discovery rule (`config_paths.resolve_project_config`)
+finds the `.abicheck.yml` at the `--sources` tree root or above the current
+directory. A config-named tree would also make discovery circular. No
+`sources.root` key is added.
 
 ### D5 — The specific changes
 

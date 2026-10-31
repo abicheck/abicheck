@@ -126,11 +126,18 @@ def _owner_surface(
     return None
 
 
-def _expected_substrings(concept: dict[str, Any], own: str) -> list[str]:
+#: CLI commands that read no ``.abicheck.yml`` and take no ``--set``.
+_NO_CONFIG_COMMANDS = ("deps compare ", "deps tree ")
+
+
+def _expected_substrings(
+    concept: dict[str, Any], own: str, member: str = ""
+) -> list[str]:
     """What a row of surface ``own`` must name for its concept's counterparts."""
     wanted: list[str] = []
+    no_config = own == "cli" and member.startswith(_NO_CONFIG_COMMANDS)
     for surface in CELL_SURFACES:
-        if surface == own:
+        if surface == own or (no_config and surface == "config"):
             continue
         for member in concept.get(surface, []):
             if member.startswith("actions/"):
@@ -144,6 +151,8 @@ def _expected_substrings(concept: dict[str, Any], own: str) -> list[str]:
                 wanted.append(f"`{member}`")
     if concept.get("cross_refs") == "none" or concept.get("tier") == "core":
         return wanted  # a broad concept has no cell; a core key refuses --set
+    if no_config:
+        return wanted
     if own == "action":
         wanted += [f"`{key}=VALUE`" for key in concept.get("config", [])]
     else:
@@ -192,7 +201,7 @@ def test_every_generated_row_names_its_counterparts(registry: dict[str, Any]) ->
                 )
                 checked += 1
                 continue
-            for needle in _expected_substrings(concept, own):
+            for needle in _expected_substrings(concept, own, member):
                 assert needle in cell, f"{member}: cell lacks {needle}: {cell}"
             checked += 1
     assert checked > 100, f"only {checked} rows checked; the references lost rows"
@@ -466,3 +475,18 @@ def test_no_generated_cell_offers_set_for_a_core_key(registry: dict[str, Any]) -
                 assert "--set" not in cell and "set:" not in cell, (
                     f"{kind} row {member} is core but its cell offers an override: {cell}"
                 )
+
+
+def test_rows_of_commands_without_a_project_config_offer_no_config_spelling() -> None:
+    """``deps compare``/``deps tree`` read no ``.abicheck.yml`` and take no
+    ``--set``, so their rows never offer either, even though they share a
+    concept (``deps.search_paths``, ``deps.ld_library_path``) with ``compare``."""
+    refs = _load("option_cross_refs").CrossRefs.load()
+    for command in ("deps compare", "deps tree"):
+        for flag in ("--search-path", "--ld-library-path"):
+            cell = refs.cell(f"{command} {flag}", "cli")
+            assert ".abicheck.yml" not in cell and "--set" not in cell, cell
+            assert "Action:" in cell
+    shared = refs.cell("compare --search-path", "cli")
+    assert ".abicheck.yml: `deps.search_paths`" in shared
+    assert "--set deps.search_paths=VALUE" in shared

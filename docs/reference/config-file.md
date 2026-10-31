@@ -138,7 +138,7 @@ schema. Each command applies only the keys it reads and refuses the others; see
 ## Top-level keys
 
 `build:`, `sources:`, `severity:`, `scope:`, `suppression:`,
-`compile:`, `debug:`, `bundle:`, `python:`, `gate:`, `release:`,
+`compile:`, `debug:`, `deps:`, `bundle:`, `python:`, `gate:`, `release:`,
 `assurance:`, `deployment:`, `resource_limits:`, `performance:`, `policy:`, `version:`,
 `output:`, `consumers:`,
 `risk_rules:`, `crosschecks:`, `targets:`, `bundles:`, `profiles:`,
@@ -511,6 +511,61 @@ path to a Windows PE PDB file, overriding automatic PDB discovery (was
 `dump --pdb-path`). **This key is the only PDB input that survives**, on
 any command, and it is a single value — not side-aware, so a two-sided PE
 comparison cannot point old and new at different PDBs.
+
+`info:` (a list, default empty) is the config home of `--debug-info`:
+each entry is one `--debug-info` value,
+with the flag's own grammar — a bare path applies to both sides, an `old=` or
+`new=` prefix scopes it to one side, and `both=` escapes a path that itself
+starts with `old=`/`new=`. A side's own entries replace the shared ones for
+that side, exactly as on the command line. A relative path resolves against
+the directory of the config file that names it. `--debug-info` on the command
+line replaces the whole list for that run (the two are never merged). Like
+every key backing a core flag, it has no `--set` form: `--set debug.info=...`
+is refused, naming `--debug-info`. `dump` has one operand, so it
+reads only unscoped entries and refuses an `old=`/`new=` entry by name rather
+than applying it to the wrong side. Not available with `--no-baseline` or a
+stored BundleFacts operand, which refuse the key by name, as they refuse the
+flag.
+
+```yaml
+debug:
+  info:
+    - old=debug/v1     # the baseline's debug files
+    - new=debug/v2     # the candidate's
+```
+
+---
+
+### `deps:`
+
+The config homes of the dependency walk's three flags, for a project whose walk does not change between runs. Each flag
+stays and wins: a stated flag replaces the configured value for that run.
+`--set deps.search_paths=...` and `--set deps.ld_library_path=...` override
+the file; `deps.follow` backs a core flag, so `--set deps.follow=...` is
+refused, naming `--follow-deps`.
+
+| Key | Flag | Type |
+|---|---|---|
+| `follow` | `--follow-deps` | bool (default `false`) |
+| `search_paths` | `--search-path` | list of directories (default empty); each must exist, like the flag's operand |
+| `ld_library_path` | `--ld-library-path` | string, a simulated `LD_LIBRARY_PATH` (default empty) |
+
+A relative `search_paths` entry written in the file resolves against the
+directory of the config file; one given with `--set` (or the typed
+`config_overrides`) is used as given, relative to the current directory. `--follow-deps` can only turn the walk on, so a configured
+`follow: true` is turned off by running with a `--config` that does not set
+it. `compare` and `dump` read
+these keys; the `deps tree`/`deps compare` commands read no `.abicheck.yml`,
+since the environment they inspect is their operand. As with the flags, the
+walk is not wired to `--no-baseline` or a stored BundleFacts operand, which
+refuse the keys by name.
+
+```yaml
+deps:
+  follow: true
+  search_paths: [sysroot/usr/lib]
+  ld_library_path: /opt/vendor/lib
+```
 
 ---
 
@@ -933,11 +988,17 @@ compile:
     - MYLIB_STATIC=0
   nostdinc: false
 
-# Separate-debug-file resolution (coarse --debug-info stays a CLI flag)
+# Separate-debug-file resolution (--debug-info stays a flag and wins)
 debug:
   format: auto
   dwarf_only: false
   debuginfod: false
+  info: [old=debug/v1, new=debug/v2]
+
+# Dependency walk (--follow-deps/--search-path/--ld-library-path win)
+deps:
+  follow: true
+  search_paths: [sysroot/usr/lib]
 
 # Severity policy consumed by `compare`
 severity:

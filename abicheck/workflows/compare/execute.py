@@ -161,7 +161,9 @@ def _with_config_overrides(request: CompareRequest) -> CompareRequest:
     fold into ``frontend`` and each side's ``InputSpec.compile`` through
     :func:`~abicheck.workflows.compile_config.fold_typed_compile_overrides`,
     the resolver ``compare --set compile.*`` reaches; ``compile.lang`` fills
-    ``lang``/``lang_explicit`` as the CLI's ``compile.lang`` does.
+    ``lang``/``lang_explicit`` as the CLI's ``compile.lang`` does. The
+    non-core ``deps.*`` keys fill the dependency-walk fields
+    (:mod:`~abicheck.workflows.config_run_inputs`).
     """
     if not request.config_overrides:
         return request
@@ -170,17 +172,18 @@ def _with_config_overrides(request: CompareRequest) -> CompareRequest:
         COMPILE_CONTEXT_OVERRIDE_PATHS,
         fold_typed_compile_overrides,
     )
+    from ..config_run_inputs import CONFIG_RUN_INPUT_SET_PATHS, fold_deps_overrides
     from .override_channels import TYPED_OVERRIDE_CHANNELS
 
     # Resolving first also validates the keys (a core option is refused there,
     # naming its flag) before the channel check below.
-    _, resolved, _ = load_and_resolve_compare_config(
+    project_cfg, resolved, _ = load_and_resolve_compare_config(
         None,
         severity_preset=None,
         config_overrides=request.config_overrides,
     )
     channel_paths = {path for path, _field, _attr in TYPED_OVERRIDE_CHANNELS}
-    channel_paths |= COMPILE_CONTEXT_OVERRIDE_PATHS
+    channel_paths |= COMPILE_CONTEXT_OVERRIDE_PATHS | CONFIG_RUN_INPUT_SET_PATHS
     unsupported = sorted(set(request.config_overrides) - channel_paths)
     if unsupported:
         raise ConfigOverrideError(
@@ -206,6 +209,8 @@ def _with_config_overrides(request: CompareRequest) -> CompareRequest:
     ):
         updates["lang"] = resolved.compile_lang
         updates["lang_explicit"] = True
+    # deps.search_paths/ld_library_path (ADR-091 D4, 2026-10-31 amendment).
+    updates.update(fold_deps_overrides(request, project_cfg))
     frontend, (old_compile, new_compile) = fold_typed_compile_overrides(
         request.frontend,
         (request.old.compile, request.new.compile),
@@ -214,9 +219,13 @@ def _with_config_overrides(request: CompareRequest) -> CompareRequest:
     if frontend != request.frontend:
         updates["frontend"] = frontend
     if old_compile != request.old.compile:
-        updates["old"] = dataclasses.replace(request.old, compile=old_compile)
+        updates["old"] = dataclasses.replace(
+            updates.get("old", request.old), compile=old_compile
+        )
     if new_compile != request.new.compile:
-        updates["new"] = dataclasses.replace(request.new, compile=new_compile)
+        updates["new"] = dataclasses.replace(
+            updates.get("new", request.new), compile=new_compile
+        )
     return dataclasses.replace(request, **updates) if updates else request
 
 

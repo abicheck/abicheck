@@ -263,6 +263,10 @@ def _fake_config(**overrides: object) -> SimpleNamespace:
         ({"suppression_strict": True}, "suppression:"),
         ({"severity_preset": "default"}, "severity:"),
         ({"debug_pdb_path": "x.pdb"}, "debug:"),
+        ({"debug_info": ["dbg"]}, "debug:"),
+        ({"deps_follow": True}, "deps:"),
+        ({"deps_search_paths": ["libs"]}, "deps:"),
+        ({"deps_ld_library_path": "/x"}, "deps:"),
         ({"source_method": "s1"}, "source:"),
     ],
 )
