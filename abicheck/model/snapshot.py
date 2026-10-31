@@ -754,6 +754,7 @@ class AbiSnapshot:
 
 
 install_lazy_graph_field(AbiSnapshot, "surface_graph")  # decoded on first read
+install_lazy_graph_field(AbiSnapshot, "semantic_ir")  # ADR-062 D18 (model/lazy_declarations.py)
 
 
 install_removed_declaration_fields(AbiSnapshot)

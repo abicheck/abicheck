@@ -61,6 +61,8 @@ __all__ = [
     "PendingGraph",
     "install_lazy_graph_field",
     "is_graph_decoded",
+    "pending_decoder",
+    "resolve_pending",
     "set_pending_graph",
 ]
 
@@ -184,3 +186,19 @@ def is_graph_decoded(obj: Any, name: str) -> bool:
     """Whether reading *obj.name* would run no decoder (never decodes)."""
     value = obj.__dict__.get(name)
     return not (type(value) is PendingGraph and not value.decoded)
+
+
+def pending_decoder(obj: Any, name: str) -> Any:
+    """The decoder *obj.name*'s still-pending cell will run, or ``None`` when
+    the attribute holds no pending cell (never decodes)."""
+    value = obj.__dict__.get(name)
+    if type(value) is PendingGraph and not value.decoded:
+        return value._decoder
+    return None
+
+
+def resolve_pending(value: Any) -> Any:
+    """*value* itself, or the decoded value when it is a pending cell -- for
+    code that reads an instance ``__dict__`` directly, bypassing the
+    :class:`LazyGraphField` descriptor."""
+    return value.resolve() if type(value) is PendingGraph else value

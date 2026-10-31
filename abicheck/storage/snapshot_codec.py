@@ -72,6 +72,7 @@ if TYPE_CHECKING:
     from ..snapshot_io import SnapshotWriteResult
 from ..errors import IncompatibleSnapshotSchemaError
 from ..model import AbiSnapshot
+from ..model.lazy_declarations import defer_declaration_step
 from ..model.semantic_ir_legacy_adapter import finalize_snapshot_semantic_ir
 from ..model.snapshot_reliability import FACT_FAMILIES, flag_name
 from .extraction_scope_codec import decode_extraction_scope
@@ -87,6 +88,7 @@ from .snapshot_encode import (
     snapshot_to_dict as snapshot_to_dict,
     snapshot_to_json as snapshot_to_json,
 )
+from .snapshot_lazy_decode import decode_lazily, lazy_ir_eligible
 from .snapshot_load_normalization import (
     backfill_missing_elf_binding,
     normalize_and_renumber_closure_identities_on_load,
@@ -187,9 +189,31 @@ def decode_snapshot(
 
     # ADR-062 D18: each section decodes from a view holding only its own
     # keys, and every cross-section derivation is a declared join
-    # (storage/snapshot_section_decode.DECODE_STEPS). Same steps, same
-    # order of checks, same snapshot as the former single-function decode.
-    sv = _schema_version
+    # (storage/snapshot_section_decode.DECODE_STEPS). A document on which
+    # every join touching `declarations`/`types`/debug layout is a no-op
+    # leaves them pending until first read (storage/snapshot_lazy_decode.py).
+    if lazy_ir_eligible(d, _schema_version):
+        snap = decode_lazily(d, _schema_version)
+    else:
+        snap = _decode_eagerly(d, _schema_version)
+    decode_surface_graph(view_for(d, "graph"), snap)  # surface_graph_codec (v29)
+    snap.fact_generations = _fact_generations
+    snap.spellings_generation = _spellings_generation
+    snap.dump_provenance = decode_dump_provenance(view_for(d, "provenance"))
+    snap.live_preprocessor_hidden = decode_preprocessor_hidden(view_for(d, "layout"))
+    snap.typedef_abi_facts = decode_typedef_abi_facts(
+        view_for(d, "declarations"), _schema_version
+    )
+    snap.load_notices = (*snap.load_notices, *_generation_notices)
+    if carried is not None:
+        attach_wire_extensions(snap, carried)
+        snap.unreadable_sections = tuple(carried.unreadable)
+    return snap, _schema_version
+
+
+def _decode_eagerly(d: dict[str, Any], sv: int) -> AbiSnapshot:
+    """Every section decoded now. Same steps, same order of checks, same
+    snapshot as the former single-function decode."""
     decls = decode_declarations_section(view_for(d, "declarations"), sv)
     types = decode_types_section(view_for(d, "types"), sv)
     binary = decode_binary_section(view_for(d, "binary"), sv)
@@ -237,7 +261,6 @@ def decode_snapshot(
             if not reliability_flags[flag_name(family)]
         ),
     )
-    decode_surface_graph(view_for(d, "graph"), snap)  # surface_graph_codec (v29)
     decode_semantic_ir(view_for(d, "semantic_ir"), snap)  # semantic_ir_codec (v38)
     # storage/extraction_scope_codec.py (v52)
     decode_extraction_scope(view_for(d, "extraction_scope"), snap)
@@ -248,16 +271,7 @@ def decode_snapshot(
     # ADR-063 6B: the same call also fills record layout a pre-v53 IR never
     # recorded, from the snapshot's own records.
     finalize_snapshot_semantic_ir(snap)
-    snap.fact_generations = _fact_generations
-    snap.spellings_generation = _spellings_generation
-    snap.dump_provenance = decode_dump_provenance(view_for(d, "provenance"))
-    snap.live_preprocessor_hidden = decode_preprocessor_hidden(view_for(d, "layout"))
-    snap.typedef_abi_facts = decode_typedef_abi_facts(view_for(d, "declarations"), sv)
-    snap.load_notices = (*snap.load_notices, *_generation_notices)
-    if carried is not None:
-        attach_wire_extensions(snap, carried)
-        snap.unreadable_sections = tuple(carried.unreadable)
-    return snap, _schema_version
+    return snap
 
 
 def _apply_legacy_fact_backfill(
@@ -317,7 +331,9 @@ def finalize_snapshot(snap: AbiSnapshot) -> AbiSnapshot:
     already run against the :func:`decode_snapshot` result -- see this
     module's own docstring for why those two steps cannot live here.
     """
-    backfill_missing_elf_binding(snap)
+    # Rewrites declarations only: queued into a still-pending declaration
+    # store (ADR-062 D18) rather than decoding it here.
+    defer_declaration_step(snap, backfill_missing_elf_binding)
     return normalize_and_renumber_closure_identities_on_load(snap)
 
 
