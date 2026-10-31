@@ -81,6 +81,14 @@ def reject_unknown_top_level_keys(raw: dict[str, Any]) -> None:
     ``deprecation_window:`` sub-blocks already apply, rather than a second,
     differently-worded implementation of the identical check.
     """
+    if "acknowledgment" in raw:
+        # ADR-091 R3: renamed outright, no alias (D7). Name the replacement
+        # instead of the generic unknown-key error.
+        raise PolicyError(
+            "policy file: the top-level 'acknowledgment:' key was renamed to "
+            "'acknowledgments:' (ADR-091 R3). Rename it in the policy document; "
+            "the old spelling is no longer accepted."
+        )
     _reject_unknown_keys(raw, KNOWN_POLICY_FILE_KEYS, "policy file")
 
 
