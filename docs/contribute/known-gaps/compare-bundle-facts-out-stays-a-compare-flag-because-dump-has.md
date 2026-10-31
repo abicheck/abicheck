@@ -3,15 +3,15 @@ doc_type: contributor
 audience:
   - contributor
 level: advanced
-lifecycle: active
+lifecycle: historical
 generated: false
 ---
 
 # `compare --bundle-facts-out` stays a `compare` flag because `dump` has no release fan-out
 
-Index: [Known gaps](../known-gaps.md)
+Index: [Known gaps](../known-gaps.md) (closed; see the [archive](../archive/known-gaps-closed.md))
 
-**Status (re-verified 2026-10-09 at `456989f`): OPEN.** --bundle-facts-out is still a compare option (frontends/cli/options/bundle_facts_library_manifest.py, commands/compare.py), and no dump command offers a bundle-facts format/fan-out. The blocker is removed, but the dump fan-out is unwritten.
+**Status (2026-10-31): CLOSED.** `abicheck dump RELEASE --bundle-facts-out PATH` captures a directory, package archive or stored `ProjectSnapshot` package as a `BundleFacts` document with no comparison (`workflows/release_bundle_facts_dump.py`, CLI adapter `frontends/cli/commands/dump_bundle_facts.py`). It composes the comparison's own owners rather than a second producer: the one-sided release resolver (`no_baseline_set.resolve_no_baseline_set_plan`, now taking the side's headers/includes), the member-dump resolver `workflows/release_member_dump.dump_release_member` (moved out of `release_compare._resolve_stranded_library`, which now delegates to it), the release public-surface acquisition, and `write_bundle_facts_out` given no member pairs. It applies `-H`/`--include`/`--exclude-header`/`--label` and the config's compile settings, replaces `-o`, and refuses the dump inputs it does not apply (`--dry-run`, `--dump-manifest`, `--sources`, `--build-info`, `--debug-info`, `--provenance`, `--follow-deps`). Ruling (2026-10-31): `compare --bundle-facts-out` stays, not deprecated -- it captures the OLD side a comparison already extracted, at no second extraction; both spellings write through one producer (`frontends/cli/options/rulings.py`). The parity test found and fixed a producer bug: `compare --bundle-facts-out` on a directory of JSON snapshots persisted each paired member twice (under its file name and its snapshot's `library`); every persisted key is now a member key. Tests: `tests/test_dump_bundle_facts.py` (dump's document == compare's for five release shapes; refusals) and `tests/test_dump_bundle_facts_integration.py` (gcc-built libraries with and without headers: equal evidence, and `compare DUMPED NEW` reaches `compare OLD NEW`'s verdicts). Not supported yet: `--variant` for a multi-variant stored package (resolution reports the ambiguity), and debug/devel packages (`compare`'s `--debug-info old=PKG`).
 
 
 `one-comparison-product.md`'s own framing, recorded rather than fixed here:

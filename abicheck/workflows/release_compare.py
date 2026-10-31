@@ -77,7 +77,6 @@ if TYPE_CHECKING:
     from ..checker_types import DiffResult
     from ..compile_context import CompileContext
     from ..environment_matrix import EnvironmentMatrix
-    from ..model import AbiSnapshot
     from ..pack_application import PackApplication
     from ..policy.release_assurance import ReleaseAssuranceDecision
     from .gate import ScopeDecision, SeverityConfig
@@ -734,67 +733,25 @@ def _resolve_stranded_library(
     reporter: ReleaseCompareReporter,
 ) -> StrandedLibraryResolution:
     """Dump one OLD library no successful member pair captured, for the
-    ``--bundle-facts-out`` baseline.
+    ``--bundle-facts-out`` baseline, under the extraction context every
+    member was compared under (:mod:`.release_member_dump`, the one owner
+    ``dump --bundle-facts-out`` dumps its members through too)."""
+    from .release_member_dump import ReleaseMemberDumpContext, dump_release_member
 
-    The same ``DumpRequest -> resolve_dump_request -> execute_dump_request``
-    pipeline ``dump`` uses (ADR-063 D1), with the extraction context every
-    member was compared under -- including the canonical
-    ``--exclude-header`` rules, so it never re-parses a header tree the run
-    was told how to narrow. A failure degrades to an ELF-only snapshot that
-    *carries* its failure (ADR-065 D8: persisted as a degraded member), with
-    a notice -- never an abort and never a silently impoverished OLD side.
-    """
-    from . import extraction
-    from .dump.request import execute_dump_request, resolve_dump_request
-    from .request_inputs import InputSpec
-    from .service_requests import DumpRequest
-    from .snapshot_factory import new_snapshot
-
-    old_dbg = (
-        extraction.resolve_package_debug_info(old_path, plan.old_debug_dir)
-        if plan.old_debug_dir
-        else None
-    )
-    try:
-        dump_request = DumpRequest(
-            input=InputSpec.of(
-                old_path,
-                headers=list(plan.old_headers),
-                includes=list(plan.old_includes),
-                version=options.old_version,
-                pdb=old_dbg,
-                compile=options.compile_context,
-                include_system_declarations=options.include_dependencies,
-                public_header_dirs=options.public_header_dirs,
-                exclude_headers=options.exclude_headers,
-            ),
+    return dump_release_member(
+        old_path,
+        ReleaseMemberDumpContext(
+            headers=plan.old_headers,
+            includes=plan.old_includes,
+            version=options.old_version,
             lang=options.lang,
             lang_explicit=options.lang_explicit,
             depth=options.depth,
-        )
-        resolved = resolve_dump_request(dump_request)
-        return StrandedLibraryResolution(execute_dump_request(resolved).snapshot)
-    except Exception as exc:
-        from ..elf_metadata import ElfMetadata
-        from ..extract.parse_failures import recording_export_read_failures
-
-        reporter.notice(f"{old_path.name}: ELF-only ({exc})")
-        with recording_export_read_failures() as export_failures:
-            elf = extraction.parse_elf_metadata(old_path)
-        failure = f"ELF-only degraded capture: {exc}"
-        if export_failures:
-            # The same rule the dump applies: a table that was not read is
-            # not persisted as a partial one. The member keeps an unread
-            # export table, which every reader already treats as FAILED.
-            elf = ElfMetadata()
-            reasons = "; ".join(dict.fromkeys(export_failures))
-            failure += f"; export table not read: {reasons}"
-        snapshot: AbiSnapshot = new_snapshot(
-            library=old_path.name,
-            version="",
-            elf=elf,
-            # ADR-065 D8: no header/DWARF evidence at all -- every detector
-            # that special-cases elf_only_mode must see the reduced tier.
-            elf_only_mode=True,
-        )
-        return StrandedLibraryResolution(snapshot, failure=failure)
+            compile_context=options.compile_context,
+            include_dependencies=options.include_dependencies,
+            public_header_dirs=options.public_header_dirs,
+            exclude_headers=options.exclude_headers,
+            debug_dir=plan.old_debug_dir,
+        ),
+        notice=reporter.notice,
+    )

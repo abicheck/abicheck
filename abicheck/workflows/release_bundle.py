@@ -321,12 +321,18 @@ def write_bundle_facts_out(
         # Canonicalize DiffResult.library the way old_map's keys were derived;
         # a stored operand's value is a materialized sub-package dirname a
         # basename match would miss (capturing that pair twice).
+        # Every persisted key is an *old_map* member key: a pair whose
+        # library name matches none (a JSON-snapshot member, keyed by its
+        # file name while its DiffResult carries the snapshot's own
+        # `library`) is captured by the member resolver below under its real
+        # key, never under an invented second one beside it.
         per_library_snapshots: dict[str, AbiSnapshot] = {}
         for diff, old_snapshot in diff_pairs:
             key = _canonical_library_key(Path(diff.library))
             if key not in old_map:
                 key = Path(diff.library).name
-            per_library_snapshots[key] = old_snapshot
+            if key in old_map:
+                per_library_snapshots[key] = old_snapshot
         # ADR-065 D8: a failed stranded dump is persisted *with* its failure.
         degraded_members: dict[str, str] = {
             k: v for k, v in (inherited_degraded or {}).items() if k in old_map

@@ -24,7 +24,7 @@ from __future__ import annotations
 
 import dataclasses
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 import click
 
@@ -68,38 +68,12 @@ if TYPE_CHECKING:
 from ....cli import main
 from ....workflows.dump.project_config import DUMP_APPLIED_PATHS
 from ....workflows.provenance import stamp_provenance
+from ..dump_manifest_input import load_dump_manifest_or_reject
 from ..options.config_set import config_set_option_for
 from ..options.dump_provenance import dump_provenance_option, parse_provenance_tokens
 from ..options.label import dump_label_option
 from ..runtime import _setup_verbosity
-
-
-def _load_dump_manifest_or_reject(
-    dump_manifest_path: Path | None,
-    headers: tuple[Path, ...],
-) -> Any:
-    """Parse ``--dump-manifest``, rejecting the flag it is exclusive with.
-
-    A manifest's own ``roots`` field and base profile declare the public
-    surface, so ``-H``/``--header`` would be a second, conflicting
-    declaration. Returns the parsed manifest, or ``None`` when no
-    ``--dump-manifest`` was given.
-    """
-    if dump_manifest_path is None:
-        return None
-    if headers:
-        raise click.UsageError(
-            "--dump-manifest and -H/--header are mutually exclusive -- the "
-            "manifest's own 'roots' field declares the public surface instead."
-        )
-    from ....errors import ManifestValidationError
-    from ....workflows.extraction import load_manifest
-
-    try:
-        parsed_dump_manifest = load_manifest(dump_manifest_path)
-    except ManifestValidationError as exc:
-        raise click.UsageError(str(exc)) from exc
-    return parsed_dump_manifest
+from .dump_bundle_facts import dump_bundle_facts_out_option, run_dump_bundle_facts
 
 
 @main.command("dump")
@@ -195,6 +169,7 @@ def _load_dump_manifest_or_reject(
 # §4.2 / Phase 7f: --git-tag/--build-id/--no-git -> one KEY=VALUE selector.
 @dump_provenance_option
 @build_source_dump_options  # --build-info / --sources (embed inline)
+@dump_bundle_facts_out_option
 def dump_cmd(
     so_path: Path | None,
     headers: tuple[Path, ...],
@@ -223,6 +198,7 @@ def dump_cmd(
     # is a typed macro list (`defines` above), folded by name in the resolver.
     gcc_options: str | None = None,
     config_overrides: dict[str, object] | None = None,
+    bundle_facts_out: Path | None = None,
 ) -> None:
     """Dump ABI snapshot of a shared library to JSON.
 
@@ -230,6 +206,7 @@ def dump_cmd(
     Example:
       abicheck dump libfoo.so.1 -H include/foo.h --label 1.2.3 -o snap.json
       abicheck dump --sources ./libfoo-src/ -o libfoo.src.json  # source-only (no binary)
+      abicheck dump release-1.0/ -H include/ --bundle-facts-out base.json
     """
     # Imported here, not at module level: the snapshot write path lives in
     # `cli_buildsource`, which reaches back into this module, so a static
@@ -316,7 +293,7 @@ def dump_cmd(
     # a bad manifest fails fast, and validated against the *raw* CLI values
     # (headers hasn't been reassigned yet).
     parsed_dump_manifest = None
-    parsed_dump_manifest = _load_dump_manifest_or_reject(dump_manifest_path, headers)
+    parsed_dump_manifest = load_dump_manifest_or_reject(dump_manifest_path, headers)
 
     # Declaration provenance (ADR-015) is derived from -H/--header itself:
     # file entries tag those headers public, directory entries tag everything
@@ -500,6 +477,25 @@ def dump_cmd(
     # the real path below still calls follow_linker_script itself for
     # that echo and the so_path reassignment (a no-op re-validation once
     # this has already passed).
+    if bundle_facts_out is not None:  # a release capture (dump_bundle_facts.py)
+        return run_dump_bundle_facts(
+            so_path,
+            bundle_facts_out,
+            unapplied={"output": output, "dry_run": dry_run, "sources": sources}
+            | {"dump_manifest_path": dump_manifest_path, "build_info": build_info}
+            | {"debug_roots": debug_roots, "provenance": provenance}
+            | {"follow_deps": deps.follow},
+            headers=tuple(headers),
+            includes=tuple(includes),
+            exclude_headers=tuple(exclude_headers),
+            version=version,
+            lang=lang,
+            lang_explicit=lang_explicit,
+            depth=depth,
+            compile_context=_cc,
+            include_dependencies=include_dependencies,
+            config_path=config_path,
+        )
     effective_debug_format = resolve_and_check_dump_debug_format(
         so_path,
         debug_format_opt,

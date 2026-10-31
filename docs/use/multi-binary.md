@@ -446,7 +446,8 @@ per-invocation flag (CLI cleanup phase two, PR J; formerly
 
 Persist the OLD side's bundle facts (per-library snapshots plus the
 instantiation manifest, if any) to `PATH` for a later stored-baseline bundle
-comparison (G38 Phase 2). See
+comparison (G38 Phase 2). `dump RELEASE --bundle-facts-out PATH` writes the
+same document without a comparison. See
 [Comparing against a stored bundle baseline](#comparing-against-a-stored-bundle-baseline-g38-phase-2)
 above. Additive output — it does not change this invocation's own findings
 or exit code.
@@ -839,6 +840,22 @@ abicheck compare release-1.0/ release-2.0/ -H include/ \
 # ever reopening release-1.0's binaries.
 abicheck compare release-1.0.bundlefacts.json release-3.0/
 ```
+
+To capture a release on its own, with no comparison (say, when 1.0 ships),
+`dump` writes the same document:
+
+```bash
+abicheck dump release-1.0/ -H include/ --label 1.0 \
+    --bundle-facts-out release-1.0.bundlefacts.json
+```
+
+It takes a directory, a package archive or a stored `ProjectSnapshot`
+package, applies `-H`/`--include`/`--exclude-header`/`--label` and the
+project config's compile settings to every library, and replaces
+`-o/--output`. Both commands write through one producer, so the documents
+are the same apart from capture metadata (file mtimes) and the label
+(`compare` labels its OLD side `old` unless told otherwise). A library that
+fails to dump is kept as a degraded member, as with `compare`.
 
 `OLD_INPUT` being a stored `BundleFacts` document (from a prior
 `--bundle-facts-out` run) is detected automatically, the same way `compare`

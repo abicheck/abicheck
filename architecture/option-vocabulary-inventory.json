@@ -1082,6 +1082,19 @@
    "default": "<unset>"
   },
   {
+   "id": "dump --bundle-facts-out",
+   "command": "dump",
+   "option": "--bundle-facts-out",
+   "aliases": [],
+   "hidden": false,
+   "help_common": false,
+   "multiple": false,
+   "is_flag": false,
+   "type": "path",
+   "choices": null,
+   "default": "<unset>"
+  },
+  {
    "id": "project capture-variants --variant",
    "command": "project capture-variants",
    "option": "--variant",
