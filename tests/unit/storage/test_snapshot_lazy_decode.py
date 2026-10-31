@@ -473,3 +473,28 @@ def test_concurrent_first_access_decodes_once(monkeypatch: pytest.MonkeyPatch) -
     assert len(calls) == 1
     assert len({id(store) for store in seen}) == 1
     assert _observed(lazy) == _observed(_quiet_load(path, eager=True))
+
+
+def test_cli_compare_reports_a_corrupt_deferred_section_as_a_load_error(
+    tmp_path: Path,
+) -> None:
+    """The CLI loader decodes inside its own SnapshotError boundary, so a
+    malformed deferred section is a clean load failure, not a traceback at
+    its first read mid-comparison -- on either side."""
+    from click.testing import CliRunner
+
+    from abicheck.cli import main
+
+    good = _FIXTURES / "contract_context_v1" / "old.json"
+    source = _quiet_load(good, eager=True)
+    doc = sectioned_document_for_write(source)
+    doc["sections"]["declarations"]["payload"]["functions"] = [{"name": 7}]
+    bad = tmp_path / "bad.json"
+    bad.write_text(json.dumps(doc))
+    for old, new in ((bad, good), (good, bad)):
+        result = CliRunner().invoke(main, ["compare", str(old), str(new)])
+        assert not isinstance(
+            result.exception, (TypeError, KeyError, AttributeError)
+        ), result.exception
+        assert "Failed to load JSON snapshot" in result.output, result.output
+        assert result.exit_code != 0
