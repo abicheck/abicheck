@@ -37,7 +37,7 @@ _RELEASE_FORMATS = RELEASE_FORMATS
 
 
 def reject_release_incompatible_view_mode(report_mode: str) -> None:
-    """Reject a ``--view`` mode/token a directory/package release fan-out
+    """Reject an ``output.view`` mode/token a directory/package release fan-out
     can't honor: ``leaf``/``root-cause`` restructure a single comparison's
     own root-cause graph, and the release summary is an aggregate report
     across every library with no single such graph to restructure. ``full``
@@ -98,7 +98,7 @@ def _dispatch_release_compare(ctx: click.Context, **kwargs: Any) -> None:
     identically to before.
     """
     fmt = kwargs.get("fmt", "markdown")
-    # --view's derived values: show_only is threaded through the release
+    # output.view's derived values: show_only is threaded through the release
     # engine below (cli_compare_release.py). report_mode's "leaf"/
     # "root-cause" restructure a single DiffResult's own root-cause graph --
     # the release report has no such graph to restructure (the same mismatch

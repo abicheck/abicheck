@@ -3,7 +3,7 @@
 
 `consumers.manifests` and `consumers.required_symbols` take the place of
 `--used-by-manifest` and `--required-symbol`; `output.view` takes the place of
-`--view`. `run_compare` reads them through :func:`config_scope_inputs` after the
+`output.view`. `run_compare` reads them through :func:`config_scope_inputs` after the
 project config has been resolved, so a `--set` override reaches them the same
 way it reaches every other key.
 """

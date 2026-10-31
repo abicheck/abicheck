@@ -13,7 +13,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""The ``--abi3`` stable-ABI audit as a *candidate-side enrichment stage* of a
+"""The ``--abi3-floor`` stable-ABI audit as a *candidate-side enrichment stage* of a
 comparison (ADR-068 D3, plan §3 #15 / §6 Phase 2d).
 
 The audit is meaningful only on the candidate: it asks whether *this* build's
@@ -50,7 +50,7 @@ __all__ = [
     "record_abi3_evidence_contract_error",
 ]
 
-# Parsing the ``--abi3 VERSION`` spelling itself is the compare session's
+# Parsing the ``--abi3-floor VERSION`` spelling itself is the compare session's
 # input resolution (``workflows.compare.enrichment.parse_abi3_floor``, one
 # spelling for the flag and ``python.abi3_floor``). This module takes an
 # already-parsed ``(major, minor)`` floor.

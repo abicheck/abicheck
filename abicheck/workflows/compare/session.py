@@ -20,7 +20,7 @@ a dump) runs here, in one place and in this order:
 
 1. **collect inputs** -- ``--depth`` folded into the collect mode and the
    header roots (``fold_compare_collect_inputs``), narrowed by the
-   changed-path seed; the ``--abi3`` floor (``enrichment``);
+   changed-path seed; the ``--abi3-floor`` floor (``enrichment``);
 2. **compile context** -- the ``compile:`` block folded over the CLI's L2
    knobs (``workflows.compile_config``), split per side, the pair-wide
    C++20 dialect applied;
@@ -140,7 +140,7 @@ def run_pair_session(
     notify = host.notify
     hdr, ev, cfg = request.headers, request.evidence, request.project
     # 1. Collect inputs. --depth when given, else inferred from
-    # --sources/--build-info (or config source.method), ADR-037 D5.
+    # --sources/--build-info (or config sources.method), ADR-037 D5.
     try:
         collect_mode, headers, old_headers, new_headers = fold_compare_collect_inputs(
             depth=ev.depth,

@@ -34,7 +34,7 @@ Grammar (each ``--provenance TOKEN`` occurrence contributes one of):
   ``git=off`` is ``--no-git``'s old spelling; ``auto`` is the default and is
   accepted so a caller assembling the flag programmatically can state it.
 
-A repeated key is last-one-wins, matching ``--view``'s own report-mode and
+A repeated key is last-one-wins, matching ``output.view``'s own report-mode and
 demangle tokens rather than inventing a second collision rule.
 
 Pure parsing over already-typed strings, like every other module under

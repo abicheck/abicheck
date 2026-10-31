@@ -60,7 +60,7 @@ def compute_sarif_invocation_exit(
     Workstream D-S1: *scoped_gate* never contributes to the exit code any
     more (see ``sarif._scoped_gate_properties``'s docstring) -- the base exit
     code always comes from the full-library severity/verdict, and a supplied
-    ``--used-by``/``--required-symbol`` consumer's own assessment is appended
+    ``--used-by``/``consumers.required_symbols`` consumer's own assessment is appended
     to the description as informational text only.
     """
     from ..policy.contract_coverage_exit import coverage_exit_floor

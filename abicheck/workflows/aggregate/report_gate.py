@@ -263,7 +263,7 @@ def _fold_top_level_run_outcome(
     disagreement by construction. Since that swap was reverted,
     ``severity``/``run_outcome`` always describe the full-library result on
     every report, scoped or not, so the exemption's premise no longer
-    holds; a disagreement on a `--used-by`/`--required-symbol` report is
+    holds; a disagreement on a `--used-by`/`consumers.required_symbols` report is
     corruption exactly like any other, and this function no longer accepts
     a *scoped_exempt* parameter to request one.
     """
@@ -376,7 +376,7 @@ class GateInfo:
         # severity-derived result -- see `_fold_top_level_run_outcome`'s own
         # docstring for the full design. No scoped-report exemption any more
         # (workstream D-S1): `severity`/`run_outcome` always describe the
-        # full-library result now, `--used-by`/`--required-symbol` supplied
+        # full-library result now, `--used-by`/`consumers.required_symbols` supplied
         # or not.
         return _fold_top_level_run_outcome(result, run_outcome)
 

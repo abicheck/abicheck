@@ -40,7 +40,7 @@ def add_disposition_audit_properties(
     so a dashboard can chart one without parsing a blob.
 
     Unconditional, unlike the sibling scoped block, which is emitted only
-    under ``--used-by``/``--required-symbol(s)``: a raw-versus-effective
+    under ``--used-by``/``consumers.required_symbols``: a raw-versus-effective
     count a view can drop is not the invariant D3 states.
 
     *report_document* (ADR-061 gap C), when given, is reused via

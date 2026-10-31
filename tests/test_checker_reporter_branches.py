@@ -898,7 +898,7 @@ class TestToMarkdownBranches:
         )
         out = to_markdown(result)
         assert "2 finding(s) filtered as non-public ABI surface" in out
-        assert "--view filtered" in out
+        assert "out_of_surface_changes" in out
 
     def test_to_markdown_no_out_of_surface_note_when_nothing_filtered(self):
         result = _make_diff(

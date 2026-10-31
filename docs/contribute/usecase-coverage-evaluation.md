@@ -110,7 +110,7 @@ A real invocation is a point in this space:
 | **G11** | planned | Single-binary ABI audit/lint mode. |
 | **G12** | ✅ closed | Security-hardening drift captures and diffs RELRO, BIND_NOW, PIE, canaries, FORTIFY, and W^X metadata; the security policy is shipped. |
 | **G13** | ✅ closed | ELF snapshot captures `e_machine`/`EI_CLASS`/endianness; a mismatch is a hard guard (`ELF_MACHINE_CHANGED`/`ELF_CLASS_CHANGED`, `BREAKING_KINDS`) rather than a false-green `COMPATIBLE_WITH_RISK` verdict. |
-| **G14** | ✅ closed | CPython Limited-API / `abi3` import-contract conformance — extension recognition, `abi3`/Limited-API import-contract check, `scan --abi3` audit. |
+| **G14** | ✅ closed | CPython Limited-API / `abi3` import-contract conformance — extension recognition, `abi3`/Limited-API import-contract check, `compare --abi3-floor` audit. |
 | **G15** | partial | Inline-namespace version-stamp normalization for ICU/Abseil/libstdc++-style churn. Detector landed (advisory `versioned_symbol_scheme_detected`); normalize-and-collapse preset still planned. |
 | **G17** | partial | Real-world upstream-library validation corpus (`skills-src/evaluation/field/manifest.yaml` + `runner.py`, conda-forge fetch + `dump`/`compare`) — reproducible but not continuously run in CI; complements the synthetic `examples/case*` fixtures. |
 | **G18** | modeled | Bazel L3 build-evidence adapter (`buildsource/adapters/bazel.py`, `cquery`/`aquery` jsonproto → `BuildEvidence`) exists but has never been validated end-to-end on a real Bazel C++ project (blocked on oneDAL's Bazel + legacy-makefile, no-CMake toolchain). |

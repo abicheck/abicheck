@@ -111,7 +111,7 @@ def _classname_for(change: Change) -> str:
     (``constant_added`` is a variable, ``calling_convention_changed`` a
     function), and it cannot classify a *polymorphic* kind at all, since the
     entity is a property of the finding rather than of its name. JUnit
-    therefore disagreed with JSON and with ``--view show=`` about the same
+    therefore disagreed with JSON and with ``output.view show=`` about the same
     finding (Codex review, PR #1284).
 
     Resolved through :func:`~abicheck.report.change_operation.entity_for_change`,
@@ -184,7 +184,7 @@ def _is_failure(
     per-kind severity is ``"error"`` (currently all RISK_KINDS default to
     ``"warning"``, so they pass).
 
-    A supplied ``--used-by``/``--required-symbol`` consumer never narrows
+    A supplied ``--used-by``/``consumers.required_symbols`` consumer never narrows
     which findings count as failures: Workstream D-S1 reverted the earlier
     design where a change outside that consumer's relevant set could never
     fail here regardless of its own severity -- a supplied consumer enriches
@@ -603,7 +603,7 @@ def _build_testsuite(
         )
     )
 
-    # Workstream D-S1: a --used-by/--required-symbol consumer never narrows
+    # Workstream D-S1: a --used-by/consumers.required_symbols consumer never narrows
     # which changes can fail. Every genuine severity-based failure counts,
     # whether or not this run also supplied one.
     failure_count = _count_failures(
@@ -720,7 +720,7 @@ def _emit_missing_contract_testcases(
     """Emit a ``<testcase>`` per missing required symbol/version/entrypoint.
 
     A required contract member absent from the new library (--used-by's
-    ``missing_symbols``/``missing_versions``, or --required-symbol's
+    ``missing_symbols``/``missing_versions``, or consumers.required_symbols's
     ``missing_entrypoints``) has no backing diff ``Change`` -- without a
     synthetic testcase the gate's own ``failures`` count could be nonzero
     while nothing in the XML explains why (CLI-audit P1, mirrors

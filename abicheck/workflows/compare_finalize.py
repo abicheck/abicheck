@@ -62,7 +62,7 @@ def finalize_classified_pair(
     # The same derivation the native CLI uses (`effective_gate_for_compare`),
     # so a typed caller with the same severity and assurance inputs gets the
     # same exit code. Abort-axes-aware (plan P3): a typed caller's own
-    # `exit_decision` reports an `--abi3` evidence-contract abort too.
+    # `exit_decision` reports an `--abi3-floor` evidence-contract abort too.
     exit_decision = gate_workflow.resolve_compare_exit_decision_with_abort_axes(
         result,
         gate_workflow.effective_gate_for_compare(

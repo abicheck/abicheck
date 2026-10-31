@@ -658,7 +658,7 @@ def run_compare(
                 public_header_dirs=project_config_public_header_dirs(project_cfg),
                 collapse_versioned_symbols=collapse_versioned_symbols,
                 env_matrix=resolved_cfg.deployment,  # ADR-020b: config-only, no CLI kwarg
-                # Codex review (PR #1154 follow-up): --view's derived values were
+                # Codex review (PR #1154 follow-up): output.view's derived values were
                 # silently dropped from this dispatch -- forwarded raw
                 # (unnormalized against `fmt`/`report_mode`'s "impact" sugar);
                 # _dispatch_release_compare resolves and validates them.

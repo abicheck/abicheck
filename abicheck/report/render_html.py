@@ -575,7 +575,7 @@ class GateCardData:
     """The CI-gate card's facts, all of them already decided.
 
     ``scoped`` selects which of the two cards this is: the scoped
-    ``--used-by``/``--required-symbol`` gate the CLI process actually exits
+    ``--used-by``/``consumers.required_symbols`` gate the CLI process actually exits
     on, or the full-library one. The gate decision itself is never made here
     or in ``compute_gate_card`` -- it is projected from
     :func:`abicheck.policy.gate_decision.gate_decision_for_result` (ADR-061
@@ -602,7 +602,7 @@ def render_gate_card(data: GateCardData | None) -> str:
         # still renders something honest.
         gate_title = "CI Gate (consumer-scoped, informational)"
         gate_note = (
-            "Reflects a supplied --used-by/--required-symbol consumer's own "
+            "Reflects a supplied --used-by/consumers.required_symbols consumer's own "
             f"assessment only (full-library gate: {h(data.full_gate_label)}); "
             "the CLI process's own exit code always comes from the "
             "full-library gate."
@@ -644,7 +644,7 @@ def render_gate_card(data: GateCardData | None) -> str:
 
 @dataclass(frozen=True)
 class ScopedVerdictData:
-    """The ``--used-by``/``--required-symbol`` scoped-verdict box (ADR-043).
+    """The ``--used-by``/``consumers.required_symbols`` scoped-verdict box (ADR-043).
 
     ``exit_code``/``exit_code_scheme`` are stated rather than derived from
     ``verdict_value``: under a severity scheme the scoped exit code is *not*

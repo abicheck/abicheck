@@ -819,7 +819,7 @@ _VALID_GATE_SCOPE_KINDS = frozenset({"used_by", "required_symbol"})
 
 @dataclass(frozen=True)
 class ScopedGateSelection:
-    """ADR-043's scoped-gate selection (``--used-by``/``--required-symbol``),
+    """ADR-043's scoped-gate selection (``--used-by``/``consumers.required_symbols``),
     typed to match the encoding :func:`~abicheck.effective_config_digest.
     _gate_scope_str` already established informally (duplication-and-
     convergence plan, Phase 2 item 1's scoping finding -- this is the

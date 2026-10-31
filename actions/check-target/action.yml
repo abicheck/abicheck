@@ -24,8 +24,8 @@ inputs:
       'library' (default), 'app-consumer', or 'plugin-contract' (the
       targets: kind discriminator) -- only meaningful when kind:
       target. Selects which compare flags this check builds: a plain
-      compare for library, --used-by for app-consumer, --required-symbols
-      for plugin-contract. Never used for kind: bundle.
+      compare for library, --used-by for app-consumer,
+      consumers.required_symbols for plugin-contract. Never used for kind: bundle.
     required: false
     default: 'library'
   name:
@@ -297,7 +297,7 @@ inputs:
     description: 'target-kind: app-consumer only. Consumer binary/binaries whose imports scope the comparison (forwarded as --used-by).'
     required: false
   contract:
-    description: 'target-kind: plugin-contract only. A .syms file (one required linker symbol per line, # comments allowed), forwarded as --required-symbols.'
+    description: 'target-kind: plugin-contract only. A .syms file (one required linker symbol per line, # comments allowed), forwarded as the root Action''s required-symbols input (consumers.required_symbols=[@FILE]).'
     required: false
   policy:
     description: 'Built-in policy profile: strict_abi (default), sdk_vendor, plugin_abi. Forwarded to the internal analysis step.'

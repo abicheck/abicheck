@@ -13,7 +13,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""ADR-043 scoped gate: ``--used-by`` / ``--required-symbol(s)`` computation.
+"""ADR-043 scoped gate: ``--used-by`` / ``consumers.required_symbols`` computation.
 
 Owns the worst-wins scoping passes and the choice of which pass applies
 (:func:`apply_scoped_gating`); the scoped exit code each pass reports is
@@ -139,7 +139,7 @@ _CONDITIONAL_SCOPED_FIELDS = frozenset(
 class ScopedGateFields:
     """The scoped-gate attributes a worst-wins pass stamps onto a compare result.
 
-    ADR-043's ``--used-by`` / ``--required-symbol(s)`` passes write these onto
+    ADR-043's ``--used-by`` / ``consumers.required_symbols`` passes write these onto
     the ``DiffResult`` they scope. Readers -- ``policy.effective_gate``, the
     renderers and the SARIF/JUnit writers -- still look them up by attribute
     name, so :meth:`stamp` is the only place the set is written and the
@@ -157,7 +157,7 @@ class ScopedGateFields:
     used_by: list[dict[str, Any]] | None = None
     #: ``--used-by`` only: "N of M consumers affected".
     consumer_impact_summary: dict[str, Any] | None = None
-    #: ``--required-symbol(s)`` only: the plugin-host contract summary.
+    #: ``consumers.required_symbols`` only: the plugin-host contract summary.
     required_symbols: dict[str, Any] | None = None
     #: Severity-scheme runs only.
     scoped_blocking_categories: tuple[str, ...] | None = None
@@ -179,7 +179,7 @@ def _app_compat_summary(result: AppCompatResult) -> dict[str, Any]:
     ``digest``/``requirement``/``unreadable`` are only present when the
     supplied consumer actually carried that provenance (a
     :class:`~abicheck.model.consumer_spec.ConsumerSpec`, e.g. via
-    ``--used-by-manifest``) -- a bare ``--used-by <path>`` consumer's summary
+    ``consumers.manifests``) -- a bare ``--used-by <path>`` consumer's summary
     is byte-for-byte the same shape it has always been.
     """
     summary: dict[str, Any] = {
@@ -513,7 +513,7 @@ def _apply_required_symbol_scoping(
     severity: Any = None,
     suppression: Any = None,
 ) -> int:
-    """Scope *result* to an explicit ``--required-symbol(s)`` contract (ADR-043).
+    """Scope *result* to an explicit ``consumers.required_symbols`` contract (ADR-043).
 
     *suppression* (ADR-067 C-S2, mirrors :func:`_apply_used_by_scoping`'s
     identical parameter -- ADR-044 P2) is forwarded to
@@ -555,7 +555,7 @@ def _apply_required_symbol_scoping(
         c for c in scoped.breaking_for_host if report_finding_id(c) not in _existing_ids
     )
     # ADR-067: same single close as the `--used-by` orchestrator above --
-    # `--required-symbol` resolves one scope, but it is still the scope this
+    # `consumers.required_symbols` resolves one scope, but it is still the scope this
     # run's exit code comes from, so the audit's gating set has to follow it.
     close_consumer_scope(
         ledger_for(result),
@@ -621,7 +621,7 @@ def apply_scoped_gating(
 ) -> int | None:
     """Apply whichever ADR-043 scoped gate this run selected, if any.
 
-    ``--used-by`` and ``--required-symbol`` are mutually exclusive (rejected
+    ``--used-by`` and ``consumers.required_symbols`` are mutually exclusive (rejected
     earlier), so at most one applies; ``--used-by`` wins if both arrive. *severity*
     is the run's ``EffectiveGate.severity`` (``None`` under the legacy scheme).
     Returns the scoped exit code, or ``None`` when the run is unscoped and the
@@ -629,7 +629,7 @@ def apply_scoped_gating(
 
     Raises :class:`ScopedGateError` subclasses for refused ``--used-by`` inputs.
     Only ``--used-by`` maps consumer-read failures to those types: a
-    ``--required-symbol`` read error propagates unwrapped, as it always has.
+    ``consumers.required_symbols`` read error propagates unwrapped, as it always has.
     """
     if used_by_apps:
         try:

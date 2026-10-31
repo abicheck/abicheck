@@ -85,7 +85,7 @@ def add_demangled_symbol_property(tc: ET.Element, change: Change) -> None:
 def add_scoped_properties(
     props: ET.Element, result: DiffResult, envelope: ReportEnvelope | None = None
 ) -> None:
-    """Append the ``--used-by``/``--required-symbol(s)`` scoping properties
+    """Append the ``--used-by``/``consumers.required_symbols`` scoping properties
     into the testsuite's ``<properties>`` element (ADR-043 + CLI-audit P1).
 
     The facts come from the envelope's :class:`~abicheck.report.scoped_gate_facts.

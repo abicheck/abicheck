@@ -649,7 +649,7 @@ def _from_compare(
     if contract_coverage_blocking:
         incomplete_blocking = True
     # Workstream D-S1 (vision-api-abi-evolution.md "D. Optional
-    # prebuilt-consumer lifecycle"): `compare --used-by`/`--required-symbol(s)`
+    # prebuilt-consumer lifecycle"): `compare --used-by`/`consumers.required_symbols`
     # no longer overwrites `verdict` -- it always carries the full-library
     # result, and a supplied consumer's own informational assessment is
     # reported under the `consumer_scope` block instead

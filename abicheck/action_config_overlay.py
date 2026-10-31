@@ -368,7 +368,7 @@ def rebase_relative_config_paths(
 
     Three such fields today: ``compile.include_dirs``,
     ``contract.overlays.post_manifest`` (one-comparison-product Phase 9c) and
-    ``acknowledgment.file`` (ADR-067 D5, resolved against the project root
+    ``acknowledgments.file`` (ADR-067 D5, resolved against the project root
     the same way ``compare`` resolves it), found by grepping every
     ``buildsource/build_config.py`` field for a
     ``project_root_for_config`` consumer -- ``build.compile_db`` is a glob
@@ -413,7 +413,7 @@ def rebase_relative_config_paths(
             overlays = {**overlays, "post_manifest": _abs(overlays["post_manifest"])}
             base["contract"] = {**contract, "overlays": overlays}
 
-    # ADR-067 D5: `acknowledgment.file` resolves against the config's project
+    # ADR-067 D5: `acknowledgments.file` resolves against the config's project
     # root (`workflows/compare/project_inputs.py`'s `_records_path`), so a
     # relocated overlay must carry the absolute path, not a scratch-relative one.
     acknowledgment = base.get("acknowledgments")

@@ -289,7 +289,7 @@ def _format_annotation(
     """Format a single GitHub workflow command annotation line.
 
     Accepts a ``MissingContractFinding`` too (a missing ``--used-by``/
-    ``--required-symbol`` label has no backing ``Change``) -- only
+    ``consumers.required_symbols`` label has no backing ``Change``) -- only
     ``source_location`` is read, which both share.
     """
     file, line = _parse_source_location(change.source_location)
@@ -336,7 +336,7 @@ def _collect_annotations_detailed(
     per-finding override is never misreported.
 
     Also walks ``diff_result.scoped_only_changes`` (Codex review on PR E),
-    the dynamically-attached findings ``--used-by``/``--required-symbol``
+    the dynamically-attached findings ``--used-by``/``consumers.required_symbols``
     scoping synthesizes (e.g. ``PE_ORDINAL_RETARGETED``) that never make it
     into ``diff_result.changes`` itself — the same
     ``list(result.changes) + list(getattr(result, "scoped_only_changes",
@@ -349,7 +349,7 @@ def _collect_annotations_detailed(
     the persisted ``annotations`` array.
 
     ``diff_result.scoped_missing_labels`` — the sibling synthesized-finding
-    list for a label ``--used-by``/``--required-symbol`` required but the
+    list for a label ``--used-by``/``consumers.required_symbols`` required but the
     new library lacks entirely — is folded in too (Codex review follow-up,
     fresh evidence), through a separate branch after the main loop rather
     than as an extension of the fold above: a missing-label entry has no
@@ -441,7 +441,7 @@ def _collect_annotations_detailed(
         # opted it in.
         annotations.append((sort_key, line, level != "notice"))
 
-    # A missing --used-by/--required-symbol contract member (a label the new
+    # A missing --used-by/consumers.required_symbols contract member (a label the new
     # library lacks *entirely* -- not a Change, since there is nothing to
     # diff against) has no backing ChangeKind at all, so it cannot go
     # through the ordinary per-change loop above -- it needs the same

@@ -114,7 +114,7 @@ class _EvidenceInputs:
     build_config: Path | None
     depth: str | None
     #: The collect mode the same rule two-sided ``compare`` uses resolves to:
-    #: ``--depth`` > ``source.method`` > inferred from the inputs > off.
+    #: ``--depth`` > ``sources.method`` > inferred from the inputs > off.
     collect_mode: str
 
 

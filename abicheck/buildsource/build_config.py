@@ -450,7 +450,7 @@ class BuildConfig:
     #: grammar as the removed ``--view``), applied when the run has one.
     output_view: list[str] = field(default_factory=list)
     #: ``consumers.manifests``/``consumers.required_symbols``: the ADR-043
-    #: scoped-gate inputs that ``--used-by-manifest``/``--required-symbol``
+    #: scoped-gate inputs that ``consumers.manifests``/``consumers.required_symbols``
     #: used to carry on the command line. Paths resolve against the config.
     used_by_manifests: list[str] = field(default_factory=list)
     required_symbols: list[str] = field(default_factory=list)
@@ -566,7 +566,7 @@ class BuildConfig:
     #: ``"3.9"`` (ADR-068 D5, plan §3 #15): which ``Py_LIMITED_API`` version
     #: this project promises is a stable property of the project, reviewed in
     #: a PR, not a per-run decision — so it lives here, with ``compare
-    #: --abi3`` acting as the per-run override on top of it. ``None`` = unset
+    #: --abi3-floor`` acting as the per-run override on top of it. ``None`` = unset
     #: (no audit unless the flag asks for one). Kept as the raw spelling the
     #: flag accepts, validated at the same place the flag is
     #: (``workflows.compare.enrichment.parse_abi3_floor``), so config and CLI cannot accept

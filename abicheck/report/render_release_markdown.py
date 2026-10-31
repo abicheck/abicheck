@@ -307,7 +307,7 @@ def _release_md_bundle_findings(
 
     *findings* (Codex review, fresh evidence, PR #1154 follow-up: "Move
     release filtering out of the Markdown renderer") is *bundle_result*'s
-    ``--view show=``-filtered finding list, already computed by the caller
+    ``output.view show=``-filtered finding list, already computed by the caller
     (``reporter_markdown.release_bundle_findings_for_view``) --
     this renderer only ever formats it. `report/AGENTS.md`'s renderer
     contract forbids a renderer from filtering findings itself (an earlier
@@ -339,7 +339,7 @@ def _release_md_matrix_findings(
 
     *changes* (Codex review, fresh evidence, PR #1154 follow-up: "Move
     release filtering out of the Markdown renderer") is *matrix_result*'s
-    ``--view show=``-filtered change list, already computed by the caller
+    ``output.view show=``-filtered change list, already computed by the caller
     (``reporter_markdown.release_matrix_changes_for_view``) --
     see :func:`_release_md_bundle_findings`'s own docstring for the full
     rationale; this renderer no longer calls that filter itself.
@@ -527,7 +527,7 @@ def release_md_library_findings(
                     "`-o json=...` carries the complete list._"
                 )
         if has_impact:
-            # `--view impact`'s aggregate counterpart (Codex review, PR
+            # `output.view impact`'s aggregate counterpart (Codex review, PR
             # #1154 follow-up: "Reject unsupported impact views instead of
             # silently dropping them") -- same shape
             # `reporter_markdown.compute_impact_table` produces for a

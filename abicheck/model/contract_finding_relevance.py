@@ -108,7 +108,7 @@ def is_evaluated(change: object) -> bool:
 #: Workstream D-S1 (vision-api-abi-evolution.md "D. Optional prebuilt-consumer
 #: lifecycle") removed ``zero_scoped_out_gate_contributions``, which used to
 #: reset ``gate_contribution`` to ``0`` on every full-diff finding a supplied
-#: ``--used-by``/``--required-symbol`` consumer did not happen to use -- that
+#: ``--used-by``/``consumers.required_symbols`` consumer did not happen to use -- that
 #: was this module's own instance of the scoped gate *narrowing* the global
 #: one; a finding's `gate_contribution` (ADR-049 D1) now always reflects the
 #: full-library compatibility axis, exactly as it would without a consumer

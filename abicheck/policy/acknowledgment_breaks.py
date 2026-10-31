@@ -13,7 +13,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""ADR-067 D5 (``acknowledgment.breaks: accept``): which acknowledged breaks
+"""ADR-067 D5 (``acknowledgments.breaks: accept``): which acknowledged breaks
 stop contributing to the exit code.
 
 The rule is stated once here so the ledger that records the acceptance

@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""``compare --view`` -- the rendering *selection* option, rewritten by
+"""``output.view`` (formerly ``compare --view``) -- the rendering *selection*, rewritten by
 one-comparison-product.md plan slice 7o around what it still carries.
 
 Phase 5 collapsed four flags into this one option; 7i/7k then ruled ``--view``
@@ -34,7 +34,7 @@ decisions. Three of them are gone, and none of them by deletion:
   machine projection carries both names (``symbol`` +
   ``demangled_symbol``).
 
-What is left is the one thing ``--view`` is *for* -- which parts of the
+What is left is the one thing ``output.view`` is *for* -- which parts of the
 already-computed canonical result to render, and in what shape:
 
 * ``full`` / ``impact`` / ``root-cause`` -- report mode (last one given
@@ -110,7 +110,7 @@ RETIRED_TOKENS: dict[str, str] = {
 
 
 def parse_view_tokens(tokens: tuple[str, ...]) -> dict[str, object]:
-    """Parse ``--view`` tokens into the two values they still carry.
+    """Parse ``output.view`` tokens into the two values they still carry.
 
     Returns a dict with keys ``report_mode`` (str) and ``show_only``
     (``str | None``) -- exactly the dest names
@@ -150,7 +150,7 @@ def parse_view_tokens(tokens: tuple[str, ...]) -> dict[str, object]:
                 f"{', '.join(REPORT_MODES)} or 'show=<tokens>'."
             )
 
-    # Each `--view show=...` occurrence is joined with the reporter's own
+    # Each `output.view show=...` occurrence is joined with the reporter's own
     # OR-of-groups separator (";"), not ",": a comma instead would AND two
     # different-dimension groups (or widen the OR within one dimension for
     # two same-dimension groups) rather than OR the groups themselves
@@ -173,7 +173,7 @@ def validate_view(  # noqa: ARG001 -- click callback(ctx, param, value) signatur
     param: click.Parameter,
     value: tuple[str, ...],
 ) -> tuple[str, ...]:
-    """Eagerly validate ``--view`` tokens (ADR-068 D4/Phase 5) so an
+    """Eagerly validate ``output.view`` tokens (ADR-068 D4/Phase 5) so an
     unrecognized token or a malformed ``show=...`` filter surfaces before
     any work runs, the same eagerness ``--show-only`` already had.
 

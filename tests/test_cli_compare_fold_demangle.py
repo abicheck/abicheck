@@ -72,7 +72,7 @@ class TestScopedCompatFoldDemangle:
             "--set",
             f'consumers.required_symbols=["{_MANGLED}"]',
         )
-        assert "## Scoped to --required-symbol(s) contract" in result.output
+        assert "## Scoped to consumers.required_symbols contract" in result.output
         # Plan slice 7o: demangled *and* carrying the exact symbol, which
         # is what makes the missing entrypoint greppable in the binary.
         assert f"missing entrypoint: `{_DEMANGLED} [{_MANGLED}]`" in result.output

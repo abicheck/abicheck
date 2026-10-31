@@ -176,7 +176,7 @@ def resolve_no_baseline_candidate(
     (``compile.frontend``/``compile.frontend_context``), which outranks the
     bare defaults this passes, exactly as on two operands. *collect_mode*,
     when given, is the caller's already-resolved one (the CLI's rule adds
-    ``source.method``); ``None`` infers it from *depth* and the inputs. The
+    ``sources.method``); ``None`` infers it from *depth* and the inputs. The
     debug settings and *pdb* are the ``debug:`` block's, which two-sided
     ``compare`` applies to each side it extracts.
     """
@@ -447,7 +447,7 @@ def run_no_baseline_compare(
     -- the same ``.abicheck.yml`` ``deployment:``-resolved
     :class:`~abicheck.environment_matrix.EnvironmentMatrix` the two-sided
     ``compare`` path threads through as ``resolved_cfg.deployment``. Folded
-    into *extra_changes* (mirroring the ``--abi3`` audit's own
+    into *extra_changes* (mirroring the ``--abi3-floor`` audit's own
     ``candidate_side_enrichment`` pattern) rather than passed as this
     function's own ``_diff_pair(..., env_matrix=...)`` argument: the latter
     would also invoke ``checker._env_matrix_contract_changes``'s

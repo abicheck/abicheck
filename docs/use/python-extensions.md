@@ -199,7 +199,7 @@ breaks depends on the *target interpreter*, not on the module's own consumers.
     `compare <module> <module> --abi3-floor <floor>` — where you supply the target
     floor — to catch stable symbols newer than it (see
     [Audit a single module](#1-audit-a-single-module-compare-abi3-floor) above; the
-    retired `scan --abi3 <floor>` was this workflow's spelling before `scan`
+    retired `scan` command's floor flag was this workflow's spelling before `scan`
     was deleted outright in 0.6).
 
 !!! note "Version-specific modules are not checked"

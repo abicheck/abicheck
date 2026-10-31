@@ -13,7 +13,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""ADR-067 D5 ``acknowledgment.breaks: accept`` surfaced by the Action.
+"""ADR-067 D5 ``acknowledgments.breaks: accept`` surfaced by the Action.
 
 Accepted breaks leave the exit code (exit 0) while the verdict stays
 BREAKING, so ``action/run.sh`` emits one ``::notice::`` naming them. The

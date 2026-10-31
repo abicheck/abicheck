@@ -417,7 +417,7 @@ def compare_collect_mode(request: CompareRequest) -> str:
     """The build-source collect mode *request*'s pair runs under.
 
     A front end's own already-resolved mode (``resolved_collect_mode``: the
-    CLI's ``.abicheck.yml`` ``source.method`` and ``--since``) wins, as
+    CLI's ``.abicheck.yml`` ``sources.method`` and ``--since``) wins, as
     ``DumpRequest.resolved_collect_mode`` does. Otherwise ADR-043 D7 (plan
     §3 #12): a changed-path seed narrows the L4/L5 replay to the changed TUs;
     with no seed the resolved mode stands unchanged, so a source-depth run

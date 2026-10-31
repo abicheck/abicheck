@@ -211,14 +211,14 @@ class ExplicitCompatibilityInputs:
     policy_base: str | None = None
     #: Which option selected *policy_base*, when it was not ``--policy``
     #: itself. ``compare`` switches an untouched ``--policy`` to
-    #: ``plugin_abi`` for a ``--required-symbol`` contract (ADR-043), so the
+    #: ``plugin_abi`` for a ``consumers.required_symbols`` contract (ADR-043), so the
     #: value really was selected -- by a different typed flag. Recording it
     #: as ``--policy`` would name an option the user never passed, and
     #: leaving it unstated made the receipt claim ``strict_abi`` for a run
     #: that used ``plugin_abi`` (Codex review, fresh evidence).
     policy_base_option: str | None = None
     #: The file that option named, when it has one
-    #: (``--required-symbol @FILE``), and the digest of the bytes read from
+    #: (``consumers.required_symbols @FILE``), and the digest of the bytes read from
     #: it. Without them the receipt can say a symbol list selected the policy
     #: but not *which* list, which is the same gap the policy-file and
     #: suppression sources carry digests to close (Codex review).
@@ -974,7 +974,7 @@ def resolve_compatibility_evaluation_config(
                 SelectorLayer.LEGACY_ALIAS,
                 builtin_policy_identity(explicit.policy_base),
                 # Same slot whichever option supplied it: an explicit
-                # `--policy-file` outranks a `--required-symbol`-derived base
+                # `--policy-file` outranks a `consumers.required_symbols`-derived base
                 # exactly as it outranks a typed `--policy`, which is what the
                 # live run does too (`effective_policy`).
                 option=explicit.policy_base_option or spell("--policy", "policy"),

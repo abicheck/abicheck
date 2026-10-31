@@ -117,7 +117,7 @@ def root_cause_evidence_lookup_for_changes(
 
     Scoped to *changes* only: unlike ``root_cause_lookup_for_changes``, this
     has no ``extra_causes`` parameter, so a correlated sibling that exists
-    only as a scoped-only (``--used-by``/``--required-symbol``) finding
+    only as a scoped-only (``--used-by``/``consumers.required_symbols``) finding
     appended to a report after this runs is not seen — deliberately left for
     a follow-up, mirroring this module's own "Deliberately not implemented
     this slice" precedent rather than growing this helper's contract

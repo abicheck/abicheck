@@ -116,7 +116,7 @@ class OutcomeSummary:
     """One comparison's outcome as every format states it.
 
     ``gate`` is ``None`` when no severity scheme is in effect; ``scoped_gate``
-    is ``None`` for a run with no ``--used-by``/``--required-symbol`` consumer.
+    is ``None`` for a run with no ``--used-by``/``consumers.required_symbols`` consumer.
     """
 
     verdict: Verdict
@@ -221,7 +221,7 @@ def compute_severity_summary(
 
     *scoped_counts*/*scoped_blocking_categories* (Codex review), when given
     (from ``result.scoped_severity_counts``/``scoped_blocking_categories``
-    on a ``--used-by``/``--required-symbol`` run), override both columns
+    on a ``--used-by``/``consumers.required_symbols`` run), override both columns
     with the scoped gate's own numbers -- otherwise this table always
     reflects the full-library changes, so a scoped run whose only gating
     issue is a scoped-only change or missing-contract label (neither of which
@@ -336,7 +336,7 @@ def severity_summary_mapping(
     """The severity table as a JSON-safe mapping, or ``None`` with no severity config.
 
     *scoped_gate* is the root-cause view's opt-in to the ``--used-by`` /
-    ``--required-symbol`` gate numbers; the full view never reads them.
+    ``consumers.required_symbols`` gate numbers; the full view never reads them.
     """
     if severity_config is None:
         return None

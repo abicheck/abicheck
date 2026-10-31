@@ -23,7 +23,7 @@ public names this module re-exports lazily below):
   (the ordinary gate/coverage/assurance fold plus ADR-064's abort axes) and
   :func:`compare_assurance_notice_base_exit`, the number the pair's
   assurance notice is worded against;
-- a supplied ``--used-by``/``--required-symbol(s)`` consumer's own scoped
+- a supplied ``--used-by``/``consumers.required_symbols`` consumer's own scoped
   code: :func:`resolve_scoped_exit_code` (ADR-043, informational since
   workstream D-S1 -- it never replaces the full-library decision);
 - the directory/package release: :func:`resolve_release_exit_decision` and
@@ -181,7 +181,7 @@ def _dominant_decision(
 
 #: ADR-064's exit code for a failed evidence contract, and ADR-037 D5's
 #: before it: a run that pinned evidence (`--depth build`/`--depth source`,
-#: `--abi3`) it never actually reached. Named here, next to the resolver
+#: `--abi3-floor`) it never actually reached. Named here, next to the resolver
 #: that owns the axis, because a second consumer now folds the same axis
 #: outside this resolver -- `report.no_baseline.no_baseline_exit_code`, the
 #: single-build audit's own `max` fold (ADR-068 D2 gives that run no
@@ -721,7 +721,7 @@ def resolve_scoped_exit_code(
     *,
     has_missing_contract: bool = False,
 ) -> int:
-    """One ``--used-by``/``--required-symbol(s)`` consumer's own exit code.
+    """One ``--used-by``/``consumers.required_symbols`` consumer's own exit code.
 
     ADR-043's scoped code, informational since workstream D-S1: it is
     reported beside the full-library decision and never replaces it. It

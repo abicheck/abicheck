@@ -202,7 +202,7 @@ def build_review_groups(
     ``gate_contribution`` is nonzero under the run's own gate scheme --
     *severity_config*, ``None`` for the legacy verdict scheme -- so it agrees
     with the JSON per-finding field and with the exit code. *accepted* is the
-    ``id()`` of every break an ``acknowledgment.breaks: accept`` run accepted
+    ``id()`` of every break an ``acknowledgments.breaks: accept`` run accepted
     (:func:`~abicheck.policy.acknowledgment_breaks.accepted_break_ids`): an
     accepted member is not on the gate, so it never counts as gating.
     """

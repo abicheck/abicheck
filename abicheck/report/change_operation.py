@@ -16,7 +16,7 @@
 """Which display dimensions does a finding belong to?
 
 One classifier for both canonical dimensions, shared by ``ShowOnlyFilter``'s
-``--view show=`` tokens and the JSON report's per-finding ``entity`` and
+``output.view show=`` tokens and the JSON report's per-finding ``entity`` and
 ``operation`` fields, so the two cannot drift apart.
 
 This module is main's `report/change_operation.py` kept as the *home* with
@@ -44,7 +44,7 @@ from __future__ import annotations
 from ..model.change_catalog.assembled import REGISTRY
 from ..model.change_catalog.registry import ChangeEntity, ChangeOperation
 
-#: CLI ``--view show=`` element tokens -> the canonical
+#: CLI ``output.view show=`` element tokens -> the canonical
 #: :class:`~abicheck.model.change_catalog.registry.ChangeEntity` each names.
 #: The plural CLI spellings and the ``elf`` alias for ``BINARY`` are kept
 #: exactly as the vocabulary has always spelled them (plan slice 7o's
@@ -69,7 +69,7 @@ ELEMENT_TOKEN_ENTITIES: dict[str, ChangeEntity] = {
 #: its kind, so it never enters the catalog's ``ChangeOperation``.
 UNCHANGED_OPERATION = "unchanged"
 
-#: CLI ``--view show=`` action tokens -> the per-finding ``operation`` value
+#: CLI ``output.view show=`` action tokens -> the per-finding ``operation`` value
 #: they select (:func:`operation_for_change`, the same value the JSON report
 #: serializes). The CLI has always spelled ``ChangeOperation.MODIFIED``
 #: "changed"; that stays. ``unchanged`` selects a cross-source finding present
@@ -91,7 +91,7 @@ def entity_for_kind(kind_val: str) -> str | None:
     exact-match escape list for the kinds whose names those prefixes miss,
     maintained beside the catalog rather than in it -- which is why 238 of
     the 407 kinds matched no element at all and were invisible to every
-    ``--view show=`` element token. ``None`` means the kind is not in the
+    ``output.view show=`` element token. ``None`` means the kind is not in the
     registry (a hand-built ``Change`` in a test), never "unclassified": a
     registered entry without a declared entity fails at import time.
     """
@@ -110,7 +110,7 @@ def entity_for_change(change: object, kind_val: str) -> str | None:
     ``experimental_graduated`` and
     ``experimental_removed_without_replacement`` are emitted for functions
     and types alike, so declaring either statically excluded a graduated
-    *function* from ``--view show=functions`` and serialized a wrong
+    *function* from ``output.view show=functions`` and serialized a wrong
     ``entity`` (Codex review, PR #1284).
 
     Falls back to the declared entity whenever the named field is absent or
