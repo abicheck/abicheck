@@ -307,7 +307,7 @@
    "option": "--set",
    "aliases": [],
    "hidden": false,
-   "help_common": false,
+   "help_common": true,
    "multiple": true,
    "is_flag": false,
    "type": "text",

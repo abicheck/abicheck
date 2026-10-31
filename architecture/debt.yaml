@@ -1719,7 +1719,7 @@
     },
     {
       "path": "tests/test_skill_eval_graders.py",
-      "baseline_lines": 1509,
+      "baseline_lines": 1504,
       "target": "tests/unit-or-contract ownership matching production migration",
       "rule": "no_growth",
       "disposition": "migrate",

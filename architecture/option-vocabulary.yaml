@@ -263,7 +263,6 @@ concepts:
     config:
       - compile.frontend
     action:
-      - action:frontend
       - actions/check-target:frontend
     python:
       - CompareRequest.frontend
@@ -296,10 +295,8 @@ concepts:
     config:
       - compile.options
     action:
-      - action:compile-options
       - actions/check-target:compile-options
     exceptions:
-      - {id: 'action:compile-options', rule: name, rename: R5, note: ADR-091 R5 names this spelling; the bare leaf `options` is not ambiguous, so the block prefix is a recorded deviation}
       - {id: 'actions/check-target:compile-options', rule: name, rename: R5, note: ADR-091 R5 names this spelling; the bare leaf `options` is not ambiguous, so the block prefix is a recorded deviation}
   - concept: compile.sysroot
     tier: config
@@ -314,8 +311,6 @@ concepts:
     renames: []
     config:
       - compile.nostdinc
-    action:
-      - action:nostdinc
   - concept: compile.std
     tier: config
     renames: []
@@ -689,15 +684,11 @@ concepts:
     renames: []
     config:
       - release.dso_only
-    action:
-      - action:dso-only
   - concept: release.include_private_dso
     tier: config
     renames: []
     config:
       - release.include_private_dso
-    action:
-      - action:include-private-dso
   - concept: release.support_promise
     tier: config
     renames: []
@@ -805,8 +796,6 @@ concepts:
       - R7
     config:
       - scope.public_header_dirs
-    action:
-      - action:public-header-dirs
     python:
       - InputSpec.public_header_dirs
       - run_compare(public_header_dirs)
@@ -916,6 +905,8 @@ concepts:
     action:
       - action:required-symbol
       - action:required-symbols
+    exceptions:
+      - {id: 'action:required-symbol', rule: name, rename: R20, note: the singular Action input is kept beside the plural one; both forward --set consumers.required_symbols=}
   - concept: use_cases
     tier: config
     renames: []
@@ -1090,8 +1081,6 @@ concepts:
     renames: []
     config:
       - gate.fail_on_removed_library
-    action:
-      - action:fail-on-removed-library
   - concept: assurance.require_complete
     tier: config
     renames:
@@ -1290,6 +1279,15 @@ concepts:
     renames:
       - R14
     action:
+      - action:dso-only
+      - action:include-private-dso
+      - action:fail-on-removed-library
+      - action:public-header-dirs
+      - action:frontend
+      - action:compile-options
+      - action:nostdinc
+      - action:jobs
+      - action:allow-build-query
       - action:analysis-assurance-complete
       - action:ast-frontend
       - action:debug-info1
@@ -1313,7 +1311,6 @@ concepts:
       - actions/check-target:requested-depth
       - action:new-library-set
       - action:against
-      - action:jobs
       - action:crosscheck
       - action:risk-rules
       - action:audit
@@ -1322,7 +1319,6 @@ concepts:
       - action:bundle-system-providers
       - action:require-complete-analysis
       - actions/check-target:require-complete-analysis
-      - action:allow-build-query
   - concept: python.internal
     tier: internal
     renames: []
@@ -1344,6 +1340,6 @@ budget_exceptions:
     rename: R22
     note: visible core options on compare --help (soft D4 target 15; usability wins, ADR-091 amendment 2026-10-31); Phase 5 moved the three project-stable options to the config tier
   - surface: action
-    recorded: 49
+    recorded: 42
     rename: R22
     note: root action.yml analysis inputs (D4 budget 25); Phase 5 review shrinks this
