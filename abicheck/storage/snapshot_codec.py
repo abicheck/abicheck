@@ -34,10 +34,13 @@ redesign -- every comment and Codex-review citation moved verbatim):
   typedefs decode (the largest single contiguous slice).
 * ``snapshot_reliability_flags`` -- the seven ``*_facts_reliable`` flag
   computations.
+* ``snapshot_section_decode`` -- one decoder per section kind and the
+  declared joins between them (ADR-062 D18); each reads the flat document
+  only through a view of its declared sections.
 
 This module itself owns: the sectioned-document unwrap and schema-version
-gate, platform-block/provenance decode, the final ``AbiSnapshot(...)``
-assembly, and the two functions :mod:`abicheck.serialization` calls
+gate, the composition of the D18 decode steps into the final
+``AbiSnapshot(...)`` assembly, and the two functions :mod:`abicheck.serialization` calls
 directly. Two of the historical ``snapshot_from_dict`` pipeline's steps are
 genuinely NOT storage's to own and stay in that facade instead of living
 here:
@@ -62,40 +65,23 @@ all of it back into the original, unchanged five-step pipeline.
 
 from __future__ import annotations
 
-from collections.abc import Callable
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, TypeVar
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from ..snapshot_io import SnapshotWriteResult
-from ..errors import IncompatibleSnapshotSchemaError, SnapshotError
-from ..model import AbiSnapshot, DependencyInfo
-from ..model.header_exclusion_record import normalize_matching
+from ..errors import IncompatibleSnapshotSchemaError
+from ..model import AbiSnapshot
 from ..model.semantic_ir_legacy_adapter import finalize_snapshot_semantic_ir
 from ..model.snapshot_reliability import FACT_FAMILIES, flag_name
-from ..snapshot_platform_blocks import (
-    dwarf_advanced_from_dict as _dwarf_advanced_from_dict,
-    dwarf_from_dict as _dwarf_from_dict,
-    elf_from_dict as _elf_from_dict,
-    kabi_from_dict as _kabi_from_dict,
-    macho_from_dict as _macho_from_dict,
-    numpy_capi_from_dict as _numpy_capi_from_dict,
-    pe_from_dict as _pe_from_dict,
-    python_api_from_dict as _python_api_from_dict,
-    python_ext_from_dict as _python_ext_from_dict,
-    sycl_from_dict as _sycl_from_dict,
-)
 from .extraction_scope_codec import decode_extraction_scope
 from .fact_codec import (
     apply_legacy_fact_backfill,
-    decode_snapshot_facts,
     evidenced_producers,
 )
-from .fact_decode import decode_abi_slot_fact
 from .generation_migrations import migrate_and_describe
 from .sectioned_document import from_sectioned_document, is_sectioned_document
 from .semantic_ir_codec import decode_semantic_ir
-from .snapshot_decode_declarations import decode_declarations
 from .snapshot_encode import (
     snapshot_content_digest as snapshot_content_digest,
     snapshot_to_dict as snapshot_to_dict,
@@ -103,8 +89,6 @@ from .snapshot_encode import (
 )
 from .snapshot_load_normalization import (
     backfill_missing_elf_binding,
-    build_mode_from_dict,
-    extraction_contract_from_dict,
     normalize_and_renumber_closure_identities_on_load,
 )
 from .snapshot_reliability_flags import decode_reliability_flags
@@ -113,21 +97,22 @@ from .snapshot_schema_versions import (
     _RETIRED_SCHEMA_VERSIONS,
     SCHEMA_VERSION as SCHEMA_VERSION,
 )
+from .snapshot_section_decode import (
+    decode_binary_section,
+    decode_build_section,
+    decode_debug_section,
+    decode_declarations_section,
+    decode_dump_provenance,
+    decode_layout_section,
+    decode_preprocessor_hidden,
+    decode_provenance_section,
+    decode_typedef_abi_facts,
+    decode_types_section,
+    infer_from_headers,
+    view_for,
+)
 from .surface_graph_codec import decode_surface_graph
 from .wire_extensions import WIRE_EXTENSIONS_KEY, attach as attach_wire_extensions
-
-_T = TypeVar("_T")
-
-
-def _sub_block(parser: Callable[[dict[str, Any]], _T], raw: Any) -> _T | None:
-    """Parse one optional sub-block of a serialized snapshot, or ``None``.
-
-    Every ``elf``/``pe``/``macho``/``dwarf``/... section of a snapshot document
-    is optional and, per this module's forward-compatibility convention, is
-    ignored rather than fatal when it is present but not an object. Sharing the
-    one guard keeps a dozen call sites from each spelling it out.
-    """
-    return parser(raw) if isinstance(raw, dict) else None
 
 
 def decode_snapshot(
@@ -200,375 +185,62 @@ def decode_snapshot(
             stacklevel=2,
         )
 
-    declarations = decode_declarations(d, _schema_version)
-    funcs = declarations.functions
-    variables = declarations.variables
-    types = declarations.types
-    enums = declarations.enums
-    typedefs = declarations.typedefs
-    typedefs_qualified = declarations.typedefs_qualified
-    sidecar_entity_ids = declarations.sidecar_entity_ids
-
-    elf_data = d.get("elf")
-    pe_data = d.get("pe")
-    macho_data = d.get("macho")
-    dwarf_data = d.get("dwarf")
-    dwarf_adv_data = d.get("dwarf_advanced")
-
-    elf = _sub_block(lambda e: _elf_from_dict(e, _schema_version), elf_data)
-    pe = _sub_block(lambda e: _pe_from_dict(e, _schema_version), pe_data)
-    macho = _sub_block(lambda e: _macho_from_dict(e, _schema_version), macho_data)
-    dwarf = _sub_block(_dwarf_from_dict, dwarf_data)
-    dwarf_advanced = _sub_block(_dwarf_advanced_from_dict, dwarf_adv_data)
-
-    sycl_data = d.get("sycl")
-    sycl = _sub_block(_sycl_from_dict, sycl_data)
-
-    kabi_data = d.get("kabi")
-    kabi = _sub_block(_kabi_from_dict, kabi_data)
-    numpy_capi_data = d.get("numpy_capi")
-    numpy_capi = _sub_block(_numpy_capi_from_dict, numpy_capi_data)
-    python_ext_data = d.get("python_ext")
-    python_ext = _sub_block(_python_ext_from_dict, python_ext_data)
-
-    python_api_data = d.get("python_api")
-    python_api = _sub_block(_python_api_from_dict, python_api_data)
-
-    dep_data = d.get("dependency_info")
-    dep_info = (
-        DependencyInfo(
-            nodes=dep_data.get("nodes", []),
-            edges=dep_data.get("edges", []),
-            unresolved=dep_data.get("unresolved", []),
-            bindings_summary=dep_data.get("bindings_summary", {}),
-            missing_symbols=dep_data.get("missing_symbols", []),
-        )
-        if isinstance(dep_data, dict)
-        else None
+    # ADR-062 D18: each section decodes from a view holding only its own
+    # keys, and every cross-section derivation is a declared join
+    # (storage/snapshot_section_decode.DECODE_STEPS). Same steps, same
+    # order of checks, same snapshot as the former single-function decode.
+    sv = _schema_version
+    decls = decode_declarations_section(view_for(d, "declarations"), sv)
+    types = decode_types_section(view_for(d, "types"), sv)
+    binary = decode_binary_section(view_for(d, "binary"), sv)
+    debug = decode_debug_section(view_for(d, "debug"), sv)
+    build = decode_build_section(view_for(d, "build"), sv)
+    from_headers, from_headers_inferred = infer_from_headers(
+        view_for(d, "from_headers"),
+        elf_only_mode=binary["elf_only_mode"],
+        declarations=decls,
+        types=types,
     )
-
-    # Rehydrate BuildMode (schema v5). Missing key = older snapshot →
-    # leave as None so build-mode-aware detectors fall back to "unknown".
-    build_mode = build_mode_from_dict(d.get("build_mode"))
-
-    # Build/source pack reference (schema v7, ADR-028). Optional: a missing key
-    # on an older snapshot loads as None; a malformed (non-dict) value is ignored
-    # rather than aborting the load. Back-compat: snapshots written before the
-    # evidence→buildsource rename store the (unchanged) ref shape under the
-    # legacy ``evidence_pack`` key, which this falls back to when present.
-    ep_raw = d.get("build_source_pack")
-    if ep_raw is None:
-        ep_raw = d.get("evidence_pack")
-    build_source_pack = None
-    if isinstance(ep_raw, dict):
-        from ..buildsource.model import BuildSourceRef
-
-        build_source_pack = BuildSourceRef.from_dict(ep_raw)
-
-    # Inline embedded build-info/source facts (single-artifact UX). Optional and
-    # additive: a missing or malformed value loads as None and the compare falls
-    # back to out-of-band --old/--new flags (or skips evidence entirely).
-    bs_raw = d.get("build_source")
-    build_source = None
-    if isinstance(bs_raw, dict):
-        from ..buildsource.pack import BuildSourcePack
-
-        build_source = BuildSourcePack.from_embedded_dict(bs_raw)
-
-    # from_headers provenance (added alongside the HEADER_AWARE tier-honesty
-    # fix). An absent key means a legacy snapshot dumped before the field
-    # existed: preserve the prior evidence-tier behavior by inferring header
-    # provenance from a populated, non-elf-only surface, so saved baselines
-    # (e.g. `abicheck compare libfoo-1.0.json libfoo-2.0.json`) do not silently
-    # downgrade from HEADER_AWARE. A present key — including a legitimate False
-    # for DWARF-only/symbols-only dumps — is honored verbatim.
-    elf_only_mode = bool(d.get("elf_only_mode", False))
-    if "from_headers" in d:
-        from_headers = bool(d["from_headers"])
-        from_headers_inferred = False
-    else:
-        from_headers = (not elf_only_mode) and bool(
-            funcs or variables or types or enums or typedefs
-        )
-        # This provenance was guessed, not recorded. A legacy DWARF-only dump
-        # populates the same surface lists, so the inference cannot tell it
-        # apart from a header dump. Mark it inferred so source-level detectors
-        # that demand genuine header evidence (parameter renames) stay quiet.
-        from_headers_inferred = from_headers
-
-    ast_producer_value = d.get("ast_producer")
-    raw_ast_toolchain = d.get("ast_toolchain")
-    ast_toolchain = (
-        {
-            str(key): str(value)
-            for key, value in raw_ast_toolchain.items()
-            if isinstance(key, str) and isinstance(value, str)
-        }
-        if isinstance(raw_ast_toolchain, dict)
-        else {}
-    )
-    raw_fallback_reason = d.get("ast_fallback_reason")
-    ast_fallback_reason = (
-        raw_fallback_reason if isinstance(raw_fallback_reason, str) else None
-    )
-    raw_ast_supported = d.get("ast_toolchain_supported")
-    ast_toolchain_supported = (
-        raw_ast_supported if isinstance(raw_ast_supported, bool) else None
-    )
-    raw_header_scan = d.get("template_default_header_scan")
-    template_default_header_scan = (
-        raw_header_scan if isinstance(raw_header_scan, bool) else None
-    )
-    raw_ast_unsupported_reasons = d.get("ast_toolchain_unsupported_reasons")
-    ast_toolchain_unsupported_reasons = (
-        [str(r) for r in raw_ast_unsupported_reasons]
-        if isinstance(raw_ast_unsupported_reasons, list)
-        else []
-    )
-    raw_resolved_standard = d.get("ast_resolved_standard")
-    ast_resolved_standard = (
-        raw_resolved_standard if isinstance(raw_resolved_standard, str) else None
-    )
-    raw_cplusplus_macro = d.get("ast_cplusplus_macro")
-    ast_cplusplus_macro = (
-        raw_cplusplus_macro if isinstance(raw_cplusplus_macro, str) else None
-    )
-    raw_compile_args = d.get("ast_compile_args")
-    ast_compile_args = (
-        tuple(str(a) for a in raw_compile_args)
-        if isinstance(raw_compile_args, (list, tuple))
-        else ()
-    )
-    raw_ast_sysroot = d.get("ast_sysroot")
-    ast_sysroot = raw_ast_sysroot if isinstance(raw_ast_sysroot, str) else None
-    raw_layout_coherence = d.get("dwarf_layout_coherence")
-    dwarf_layout_coherence = (
-        raw_layout_coherence if isinstance(raw_layout_coherence, str) else None
-    )
-    raw_layout_coherence_mismatches = d.get("dwarf_layout_coherence_mismatches")
-    dwarf_layout_coherence_mismatches = (
-        tuple(str(m) for m in raw_layout_coherence_mismatches)
-        if isinstance(raw_layout_coherence_mismatches, (list, tuple))
-        else ()
-    )
-
     reliability_flags = decode_reliability_flags(
-        d,
+        view_for(d, "reliability_flags"),
         from_headers=from_headers,
-        ast_producer_value=ast_producer_value,
-        schema_version=_schema_version,
+        ast_producer_value=debug["ast_producer"],
+        schema_version=sv,
     )
-    header_cv_facts_reliable_value = reliability_flags["header_cv_facts_reliable"]
-    clang_deprecation_facts_reliable_value = reliability_flags[
-        "clang_deprecation_facts_reliable"
-    ]
-    clang_field_initializer_facts_reliable_value = reliability_flags[
-        "clang_field_initializer_facts_reliable"
-    ]
-    clang_vtable_facts_reliable_value = reliability_flags["clang_vtable_facts_reliable"]
-    clang_restrict_facts_reliable_value = reliability_flags[
-        "clang_restrict_facts_reliable"
-    ]
-    clang_va_list_facts_reliable_value = reliability_flags[
-        "clang_va_list_facts_reliable"
-    ]
-    castxml_var_access_facts_reliable_value = reliability_flags[
-        "castxml_var_access_facts_reliable"
-    ]
-    param_kind_facts_reliable_value = reliability_flags["param_kind_facts_reliable"]
-
-    # ADR-063 Phase 0 (schema v26) and Phase 5's own case-(a) batches: see
-    # storage/fact_codec.py. One call, not one per converted field -- every
-    # rule it applies is "a document predating this field's own Fact[T]
-    # conversion carries a value its snapshot-level reliability flag says
-    # cannot be trusted", and every such flag is resolved by the time we get
-    # here -- which is why this call sits below every one of those flag
-    # computations rather than in the middle of them.
-    apply_legacy_fact_backfill(
-        d,
-        types,
-        funcs,
-        _schema_version,
-        clang_vtable_facts_reliable_value,
-        clang_va_list_facts_reliable_value,
-        ast_producer_value,
-        # Which producers this document actually evidences -- recorded (never
-        # inferred) header provenance, plus its own platform. A debug block
-        # names no producer (BTF/CTF/PDB all write into the DWARF blocks), so
-        # none is credited from one. See
-        # storage/fact_backfill.evidenced_producers for why "which backend
-        # could produce this fact" is the wrong question here.
-        evidenced=evidenced_producers(
-            header_provenance_confirmed=from_headers and not from_headers_inferred,
-            ast_producer=ast_producer_value,
-            platform=d.get("platform"),
-        ),
-        variables=variables,
-        enums=enums,
-        header_cv_facts_reliable_value=header_cv_facts_reliable_value,
-        clang_field_initializer_facts_reliable_value=clang_field_initializer_facts_reliable_value,
-        clang_deprecation_facts_reliable_value=clang_deprecation_facts_reliable_value,
-        clang_restrict_facts_reliable_value=clang_restrict_facts_reliable_value,
-        castxml_var_access_facts_reliable_value=castxml_var_access_facts_reliable_value,
-        param_kind_facts_reliable_value=param_kind_facts_reliable_value,
-        # T9 / ADR-063 Phase 6 item 4 (legacy-hybrid backfill blocker): the
-        # raw per-declaration provenance map, same source as the
-        # `AbiSnapshot.fact_provenance` field constructed further below --
-        # read here too since this call happens before that field exists.
-        fact_provenance=dict(d.get("fact_provenance", {})),
+    _apply_legacy_fact_backfill(
+        view_for(d, "legacy_fact_backfill"),
+        sv,
+        decls=decls,
+        types=types,
+        ast_producer=debug["ast_producer"],
+        header_provenance_confirmed=from_headers and not from_headers_inferred,
+        reliability_flags=reliability_flags,
     )
-
-    # ADR-050 D1 (schema v12) — profile/scope fingerprints. Missing key (every
-    # snapshot predating this field) loads as None, same as every other
-    # additive optional field.
-    contract = extraction_contract_from_dict(d.get("contract"))
-    # ADR-050 D5 (G32 Phase D) — resolved SYCL/DPC++ "host"/"device" kind.
-    # Missing key (every pre-Phase-D snapshot) loads as None (Codex review:
-    # snapshot_to_dict already writes this field, but snapshot_from_dict
-    # never read it back, so a persisted/cached host-vs-device snapshot
-    # silently lost the tag on every round-trip).
-    raw_frontend_context_kind = d.get("frontend_context_kind")
-    frontend_context_kind = (
-        raw_frontend_context_kind
-        if isinstance(raw_frontend_context_kind, str)
-        else None
-    )
-    # Schema v18 — dependency-scoping mode. Missing key (every pre-v18
-    # snapshot) or an explicit ``null`` (a current-schema snapshot that never
-    # went through the tagging wrapper) both load as None, same as every
-    # other additive optional field; see AbiSnapshot.dependency_scope's own
-    # docstring for why the comparability gate does NOT treat None as either
-    # mode. A *present, non-null* value that isn't one of the two values a
-    # producer can actually write is a different case (Codex review,
-    # second round): the comparability gate deliberately lets a None side
-    # through unchecked (an untagged legacy snapshot has no way to recover
-    # its real mode), so silently downgrading a corrupt/hand-edited value
-    # (e.g. a "filterd" typo) to None would let it exploit that same
-    # leniency and bypass a real filtered-vs-full mismatch instead of
-    # failing loudly.
-    raw_dependency_scope = d.get("dependency_scope")
-    if raw_dependency_scope is not None and raw_dependency_scope not in (
-        "filtered",
-        "full",
-    ):
-        raise SnapshotError(
-            f"invalid dependency_scope {raw_dependency_scope!r} in snapshot "
-            "-- expected 'filtered', 'full', or the key to be absent/null; "
-            "this snapshot is corrupt or was hand-edited."
-        )
-    dependency_scope = raw_dependency_scope
+    layout = decode_layout_section(view_for(d, "layout"), sv)
+    provenance = decode_provenance_section(view_for(d, "provenance"), sv)
 
     snap = AbiSnapshot(
-        library=d["library"],
-        version=d["version"],
-        source_path=d.get("source_path"),
-        source_mtime=d.get("source_mtime"),
-        source_mtime_epoch=d.get("source_mtime_epoch", False),
-        source_size=d.get("source_size"),
-        functions=funcs,
-        variables=variables,
-        types=types,
-        enums=enums,
-        typedefs=typedefs,
-        typedefs_qualified=typedefs_qualified,
-        typedef_entity_ids=sidecar_entity_ids["typedef_entity_ids"],
-        constant_entity_ids=sidecar_entity_ids["constant_entity_ids"],
-        elf=elf,
-        pe=pe,
-        macho=macho,
-        dwarf=dwarf,
-        dwarf_advanced=dwarf_advanced,
-        sycl=sycl,
-        kabi=kabi,
-        numpy_capi=numpy_capi,
-        python_ext=python_ext,
-        python_api=python_api,
-        elf_only_mode=elf_only_mode,
+        **provenance,
+        **binary,
+        **decls,
+        **types,
+        **debug,
+        **build,
+        **layout,
         from_headers=from_headers,
         from_headers_inferred=from_headers_inferred,
-        # Which L2 header-AST backend produced this snapshot ("castxml" |
-        # "clang"); missing on older snapshots loads as None, which
-        # correctly fails _both_castxml_backed (Codex review, PR #582 —
-        # this was omitted entirely, so every persisted-then-reloaded
-        # castxml snapshot silently lost the tag and permanently disabled
-        # all 8 detectors gated on it).
-        ast_producer=ast_producer_value,
-        ast_toolchain=ast_toolchain,
-        ast_fallback_reason=ast_fallback_reason,
-        ast_toolchain_supported=ast_toolchain_supported,
-        template_default_header_scan=template_default_header_scan,
-        ast_toolchain_unsupported_reasons=ast_toolchain_unsupported_reasons,
-        frontend_context_kind=frontend_context_kind,
-        dependency_scope=dependency_scope,
-        ast_resolved_standard=ast_resolved_standard,
-        **decode_snapshot_facts(d, _schema_version),
-        ast_cplusplus_macro=ast_cplusplus_macro,
-        ast_compile_args=ast_compile_args,
-        ast_sysroot=ast_sysroot,
-        dwarf_layout_coherence=dwarf_layout_coherence,
-        dwarf_layout_coherence_mismatches=dwarf_layout_coherence_mismatches,
         # ADR-063 Phase 10: the eight former `*_facts_reliable` booleans,
-        # each preferring an explicit dict key (round-trip stability) and
-        # otherwise derived from schema_version + producer
-        # (storage/snapshot_reliability_flags.py), recorded as one set.
+        # recorded as one set (storage/snapshot_reliability_flags.py).
         stale_fact_families=frozenset(
             family
             for family in FACT_FAMILIES
             if not reliability_flags[flag_name(family)]
         ),
-        # G28 Phase 3 — per-fact provenance map for a hybrid (castxml+clang
-        # merged) snapshot. Absent on every non-hybrid / pre-Phase-3 snapshot,
-        # loads as the empty dict (same "unknown" default as a fresh snapshot).
-        fact_provenance=dict(d.get("fact_provenance", {})),
-        constants=d.get("constants", {}),
-        platform=d.get("platform"),
-        # Schema v44 -- see AbiSnapshot.header_only's own docstring. Missing
-        # key (every pre-v44 snapshot) loads as False, same as every other
-        # additive boolean field.
-        header_only=bool(d.get("header_only", False)),
-        # Schema v47 -- see AbiSnapshot.excluded_header_patterns. Absent on
-        # every pre-v47 snapshot, which loads as "no exclusions", matching
-        # what every such snapshot actually was: the flag did not exist.
-        excluded_header_patterns=tuple(d.get("excluded_header_patterns") or ()),
-        # Schema v48. Absent on a v47 snapshot, which loads as "unknown"
-        # rather than "glob": v47 already recorded a *descriptor's*
-        # exact-matched skips too, so assuming fnmatch for them would let a
-        # baseline holding `include/foo.h` compare clean against a native
-        # glob snapshot that excluded a different set of headers. A snapshot
-        # carrying no patterns is unaffected -- there is nothing for a rule
-        # to have matched (Codex review).
-        excluded_header_matching=normalize_matching(d.get("excluded_header_matching")),
-        language_profile=d.get("language_profile"),
-        scope_fallback=d.get("scope_fallback"),
-        dependency_info=dep_info,
-        # Provenance metadata (v4)
-        git_commit=d.get("git_commit"),
-        git_tag=d.get("git_tag"),
-        created_at=d.get("created_at"),
-        build_id=d.get("build_id"),
-        # Build-mode capture (v5)
-        build_mode=build_mode,
-        # Evidence-pack reference (v7)
-        build_source_pack=build_source_pack,
-        # Inline embedded build-info/source facts (single-artifact UX)
-        build_source=build_source,
-        # Build-context parse provenance (v7, ADR-029) — absent on older
-        # snapshots loads as False.
-        parsed_with_build_context=bool(d.get("parsed_with_build_context", False)),
-        # ADR-039 — active build-time define set (context-free dumps: empty).
-        build_context_defines=set(d.get("build_context_defines", [])),
-        # ADR-039 — {type: {field: {guard, type, is_bitfield, bitfield_bits}}}
-        # registry of conditional record fields (full declaration, not just guard).
-        conditional_fields={
-            str(t): {str(fn): dict(decl) for fn, decl in fields.items()}
-            for t, fields in dict(d.get("conditional_fields", {})).items()
-        },
-        # ADR-050 D1 — extraction-contract fingerprints (v12).
-        contract=contract,
     )
-    decode_surface_graph(d, snap)  # storage/surface_graph_codec.py (v29)
-    decode_semantic_ir(d, snap)  # storage/semantic_ir_codec.py (v38)
-    decode_extraction_scope(d, snap)  # storage/extraction_scope_codec.py (v52)
+    decode_surface_graph(view_for(d, "graph"), snap)  # surface_graph_codec (v29)
+    decode_semantic_ir(view_for(d, "semantic_ir"), snap)  # semantic_ir_codec (v38)
+    # storage/extraction_scope_codec.py (v52)
+    decode_extraction_scope(view_for(d, "extraction_scope"), snap)
     # ADR-063 Track T3: decode_semantic_ir() mutates snap.semantic_ir directly,
     # after AbiSnapshot.__post_init__ already ran (with semantic_ir still None
     # at that point) -- so a loaded snapshot's own Track T3 consistency check
@@ -578,9 +250,9 @@ def decode_snapshot(
     finalize_snapshot_semantic_ir(snap)
     snap.fact_generations = _fact_generations
     snap.spellings_generation = _spellings_generation
-    snap.dump_provenance = _decode_dump_provenance(d)
-    snap.live_preprocessor_hidden = _decode_preprocessor_hidden(d)
-    snap.typedef_abi_facts = _decode_typedef_abi_facts(d, _schema_version)
+    snap.dump_provenance = decode_dump_provenance(view_for(d, "provenance"))
+    snap.live_preprocessor_hidden = decode_preprocessor_hidden(view_for(d, "layout"))
+    snap.typedef_abi_facts = decode_typedef_abi_facts(view_for(d, "declarations"), sv)
     snap.load_notices = (*snap.load_notices, *_generation_notices)
     if carried is not None:
         attach_wire_extensions(snap, carried)
@@ -588,57 +260,54 @@ def decode_snapshot(
     return snap, _schema_version
 
 
-def _decode_typedef_abi_facts(
-    d: dict[str, Any], schema_version: int
-) -> dict[str, Any] | None:
-    """The document's ``typedef_abi_facts`` (schema v69), or ``None`` when the
-    producer captured none -- what every pre-v69 document reads as."""
-    raw = d.get("typedef_abi_facts")
-    if raw is None:
-        return None
-    if not isinstance(raw, dict):
-        raise SnapshotError("snapshot document's typedef_abi_facts must be a mapping")
-    facts = {str(k): decode_abi_slot_fact(v, schema_version) for k, v in raw.items()}
-    return {k: f for k, f in facts.items() if f is not None}
-
-
-def _decode_preprocessor_hidden(d: dict[str, Any]) -> dict[str, tuple[str, ...]] | None:
-    """The document's ``live_preprocessor_hidden`` scan (schema v67), or ``None``
-    when absent -- no scan ran, which is what every pre-v67 document reads as.
-
-    Refused, not coerced, when present but malformed: a scan a census reads
-    as "these names sit under this guard" must not reach the model garbled.
-    """
-    value = d.get("live_preprocessor_hidden")
-    if value is None:
-        return None
-    if not isinstance(value, dict) or not all(
-        isinstance(names, list) and all(isinstance(n, str) for n in names)
-        for names in value.values()
-    ):
-        raise SnapshotError(
-            "snapshot document's live_preprocessor_hidden must map guard macros "
-            "to lists of function names"
-        )
-    return {str(macro): tuple(names) for macro, names in value.items()}
-
-
-def _decode_dump_provenance(d: dict[str, Any]) -> dict[str, object] | None:
-    """The document's ``dump_provenance`` block, or ``None`` when absent.
-
-    Refused, not coerced, when present but not an object: a block a decision
-    could read as "no depth stamp" must not reach the model as a silent
-    ``None``.
-    """
-    value = d.get("dump_provenance")
-    if value is None:
-        return None
-    if not isinstance(value, dict):
-        raise SnapshotError(
-            "snapshot document's dump_provenance must be a JSON object, got "
-            f"{type(value).__name__}"
-        )
-    return value
+def _apply_legacy_fact_backfill(
+    d: dict[str, Any],
+    schema_version: int,
+    *,
+    decls: dict[str, Any],
+    types: dict[str, Any],
+    ast_producer: Any,
+    header_provenance_confirmed: bool,
+    reliability_flags: dict[str, bool],
+) -> None:
+    """The ``legacy_fact_backfill`` join (ADR-063 Phase 0 and Phase 5's
+    case-(a) batches; storage/fact_codec.py): one call, below every
+    reliability flag it is judged by. ``evidenced`` names the producers the
+    document actually evidences -- recorded (never inferred) header
+    provenance, plus its own platform; a debug block names no producer."""
+    apply_legacy_fact_backfill(
+        d,
+        types["types"],
+        decls["functions"],
+        schema_version,
+        reliability_flags["clang_vtable_facts_reliable"],
+        reliability_flags["clang_va_list_facts_reliable"],
+        ast_producer,
+        evidenced=evidenced_producers(
+            header_provenance_confirmed=header_provenance_confirmed,
+            ast_producer=ast_producer,
+            platform=d.get("platform"),
+        ),
+        variables=decls["variables"],
+        enums=decls["enums"],
+        header_cv_facts_reliable_value=reliability_flags["header_cv_facts_reliable"],
+        clang_field_initializer_facts_reliable_value=reliability_flags[
+            "clang_field_initializer_facts_reliable"
+        ],
+        clang_deprecation_facts_reliable_value=reliability_flags[
+            "clang_deprecation_facts_reliable"
+        ],
+        clang_restrict_facts_reliable_value=reliability_flags[
+            "clang_restrict_facts_reliable"
+        ],
+        castxml_var_access_facts_reliable_value=reliability_flags[
+            "castxml_var_access_facts_reliable"
+        ],
+        param_kind_facts_reliable_value=reliability_flags["param_kind_facts_reliable"],
+        # T9 / ADR-063 Phase 6 item 4: the raw per-declaration provenance
+        # map, read independently of the snapshot field's own copy.
+        fact_provenance=dict(d.get("fact_provenance", {})),
+    )
 
 
 def finalize_snapshot(snap: AbiSnapshot) -> AbiSnapshot:

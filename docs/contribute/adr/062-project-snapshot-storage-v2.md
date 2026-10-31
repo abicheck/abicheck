@@ -1,7 +1,7 @@
 # ADR-062: Project Snapshot Storage v2 — Content-Addressed Sections, Explicit Fact Availability, and Occurrence-Preserving Identity
 
 **Date:** 2026-08-26
-**Status:** Proposed — partially implemented; amended 2026-10-30 (D14-D18, rules accepted; D14, D15 and D17 implemented, D16 partially, D18 pending; evaluated 2026-10-31, blocked on a per-section decode split -- see known-gaps). Phase 0 primitives implemented (`abicheck/storage/`:
+**Status:** Proposed — partially implemented; amended 2026-10-30 (D14-D18, rules accepted; D14, D15 and D17 implemented, D16 partially, D18 step 1 (per-section decode split) implemented 2026-10-31, lazy loading pending -- see known-gaps). Phase 0 primitives implemented (`abicheck/storage/`:
 fact availability, entity/occurrence identity with conflict preservation,
 canonical encoding and semantic digest, and the separated version axes).
 Phase 1's A1.1-A1.3 are implemented: `abicheck/storage/package.py` carries
@@ -604,7 +604,7 @@ so `--no-semantic-change --reason` is a reviewed claim.
 ## Amendment (2026-10-30): data-evolution rules, digest roles, and immutable publication
 
 **Status of this amendment:** the rules D14-D18 are accepted; D14, D15 and
-D17 are implemented, D16 partially, D18 not. Their implementation is tracked
+D17 are implemented, D16 partially, D18 only its decode split. Their implementation is tracked
 as plan item A1.9 in the
 [storage format v2 plan](../plans/storage-format-v2.md). The rest of this ADR
 stays Proposed.
@@ -832,6 +832,28 @@ D8's size-bounded chunking target, 1-8 MB decoded, is **withdrawn**.
   analysis reads it.
 - Multi-library runs share an immutable, digest-keyed (`evidence`)
   decoded-section cache (D11).
+
+**Implementation decisions (2026-10-31).** Step 1, the per-section decode
+split, is implemented; lazy loading of any further section is not.
+
+- Each section kind has its own decoder
+  (`storage/snapshot_section_decode.py`); every derivation spanning sections
+  is a named join with declared `reads` (raw sections) and `after` (decoded
+  steps), listed in `DECODE_STEPS`. A step sees the document only through a
+  view of its declared sections, which raises on an undeclared read, so the
+  declarations are enforced, not documented.
+- The eager path composes the steps and must stay byte-identical (saved
+  bytes, `publication` and `evidence` digests); a test pins this against the
+  same steps fed the whole document, and each section decoder against its
+  section alone.
+- The joins that block laziness are kept as joins rather than redesigned:
+  `from_headers` inference, the reliability flags and the ADR-063 legacy
+  fact backfill (which rewrites decoded `declarations`/`types`), the
+  generation spelling migration, `semantic_ir` assembly and closure-identity
+  renumbering. A section becomes lazy only for a document on which every
+  join touching it is a no-op; `semantic_ir` assembly is deferred into a
+  cell that forces its input sections. The plan's A1.9 D18 entry holds the
+  dependency table and the next step.
 
 ### Exit criteria and non-goals
 

@@ -260,6 +260,14 @@ def decode_entity_ids(
     _decode_one_list(d, "enums", enums)
 
 
+def decode_entity_id_list(
+    d: dict[str, Any], list_key: str, decls: Sequence[_HasEntityIdCarrier]
+) -> None:
+    """:func:`decode_entity_ids` for one declaration list -- so each section
+    decoder (ADR-062 D18) reads only its own list."""
+    _decode_one_list(d, list_key, decls)
+
+
 def _decode_one_list(
     d: dict[str, Any], list_key: str, decls: Sequence[_HasEntityIdCarrier]
 ) -> None:

@@ -17,7 +17,7 @@
 ``acknowledgments`` input, both over the one resolver.
 
 The CLI flag is an operator's own explicit input, so it may supply records even
-with no config at all, and it overrides ``.abicheck.yml``'s ``acknowledgment.file``.
+with no config at all, and it overrides ``.abicheck.yml``'s ``acknowledgments.file``.
 The Action forwards its input as ``--acknowledgments`` and validates the path
 before the Python install, so a misspelled path fails at the top of the step.
 """
@@ -81,7 +81,7 @@ def test_flag_supplies_records_with_no_config_at_all(
     old, new = _pair(tmp_path)
     (tmp_path / "acks.yml").write_text(_ACK_ADDED)
     (tmp_path / ".abicheck.yml").write_text(
-        "acknowledgment:\n  unacknowledged_additions: block\n"
+        "acknowledgments:\n  unacknowledged_additions: block\n"
     )
     res = CliRunner().invoke(
         main,
@@ -106,7 +106,7 @@ def test_flag_overrides_the_config_key(
     (tmp_path / "flag-acks.yml").write_text(_ACK_ADDED)
     cfg = tmp_path / "cfg.abicheck.yml"
     cfg.write_text(
-        "acknowledgment:\n  file: config-acks.yml\n  unacknowledged_additions: block\n"
+        "acknowledgments:\n  file: config-acks.yml\n  unacknowledged_additions: block\n"
     )
     res = CliRunner().invoke(
         main,
@@ -132,7 +132,7 @@ def test_config_key_alone_still_gates_when_the_flag_is_absent(
     (tmp_path / "config-acks.yml").write_text(_ACK_NOTHING)
     cfg = tmp_path / "cfg.abicheck.yml"
     cfg.write_text(
-        "acknowledgment:\n  file: config-acks.yml\n  unacknowledged_additions: block\n"
+        "acknowledgments:\n  file: config-acks.yml\n  unacknowledged_additions: block\n"
     )
     res = CliRunner().invoke(
         main, ["compare", str(old), str(new), "--config", str(cfg)]

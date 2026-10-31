@@ -81,7 +81,8 @@ import pathlib
 #: (its marker-pruned walk) and `closure_marking` (the load path's marker
 #: proof and reusable marking pass) were split off it and are the same class.
 #: `snapshot_codec`/`snapshot_schema_versions`/`snapshot_encode`/
-#: `snapshot_decode_declarations`/`snapshot_reliability_flags` are a ninth:
+#: `snapshot_decode_declarations`/`snapshot_section_decode`/
+#: `snapshot_reliability_flags` are a ninth:
 #: ADR-061 gap E closure package 6's real owner behind the flat
 #: `serialization.py` facade -- `AbiSnapshot` <-> dict/JSON encode/decode,
 #: the schema-version history/thresholds, and the reliability-flag
@@ -137,6 +138,7 @@ NON_ADR062_MODULES = frozenset(
         "snapshot_schema_versions",
         "snapshot_encode",
         "snapshot_decode_declarations",
+        "snapshot_section_decode",
         "snapshot_reliability_flags",
         "snapshot_digest_cache",
         # ADR-062 D16's evidence role for an `AbiSnapshot` (memo, persisted

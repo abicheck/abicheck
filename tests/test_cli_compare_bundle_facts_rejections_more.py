@@ -323,7 +323,7 @@ class TestCompareOldBundleFactsEarlyRejections:
         new_dir = tmp_path / "new"
         new_dir.mkdir()
         config_path = tmp_path / ".abicheck.yml"
-        config_path.write_text("source:\n  method: s3\n")
+        config_path.write_text("sources:\n  method: s3\n")
 
         code, out = _invoke(
             "compare",

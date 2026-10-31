@@ -70,7 +70,7 @@ def _real_report(
     policy = tmp_path / "policy.yml"
     policy.write_text(f"unused_rules: {unused}\n" + _STALE_RULE)
     cfg = tmp_path / "cfg.abicheck.yml"
-    cfg.write_text(f"acknowledgment:\n  unacknowledged_additions: {additions}\n")
+    cfg.write_text(f"acknowledgments:\n  unacknowledged_additions: {additions}\n")
     out = tmp_path / "real.json"
     operands = ["--no-baseline", str(new)] if no_baseline else [str(old), str(new)]
     res = CliRunner().invoke(

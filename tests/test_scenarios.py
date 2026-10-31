@@ -358,7 +358,7 @@ def test_sc_accept_known_break(tmp_path: Path) -> None:
 
 def test_sc_accept_known_break_via_acknowledgments(tmp_path: Path) -> None:
     """A reviewed acknowledgment record accepts one known break. With
-    `acknowledgment.breaks: accept` the run passes; the record names the change
+    `acknowledgments.breaks: accept` the run passes; the record names the change
     kind, so only that removal is accepted."""
     acks = tmp_path / "acks.yml"
     acks.write_text(
@@ -369,7 +369,7 @@ def test_sc_accept_known_break_via_acknowledgments(tmp_path: Path) -> None:
         encoding="utf-8",
     )
     cfg = tmp_path / "breaks.abicheck.yml"
-    cfg.write_text("acknowledgment:\n  breaks: accept\n", encoding="utf-8")
+    cfg.write_text("acknowledgments:\n  breaks: accept\n", encoding="utf-8")
     res = _compare(
         tmp_path,
         _lib("1", [_fn("a"), _fn("deprecated_fn")]),
