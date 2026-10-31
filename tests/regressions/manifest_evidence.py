@@ -1181,13 +1181,10 @@ EVIDENCE_BUG_CLASSES: tuple[BugClass, ...] = (
     BugClass(
         id="evidence.stored_live_route_member_divergence",
         invariant=(
-            "A release comparison whose OLD side is stored (`BundleFacts`) "
-            "pairs exactly the members, keys and names the live/live "
-            "comparison of the same trees pairs: one member discovery rule "
-            "and one match key for both routes, whatever member file names "
-            "(versioned, unversioned, mixed) or capture route (CLI "
-            "`--bundle-facts-out`, typed-API file-name keys) produced the "
-            "stored document."
+            "A release compare with a stored (`BundleFacts`) OLD side pairs "
+            "exactly the members, keys and names the live/live compare of "
+            "the same trees pairs -- one discovery rule and one match key, "
+            "whatever the member file names or the capture route."
         ),
         fixed_by=(1878,),
         seed_tests=(
