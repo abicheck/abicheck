@@ -475,6 +475,7 @@ _F5 = tuple(
         "cache.key_identity_must_equal_parse_input_content",
         "cache.roundtrip_must_preserve_what_downstream_scoping_reads",
         "storage.lazy_decode_diverges_from_eager",
+        "storage.graph_closure_identity_not_renumbered",
     ]
 )
 _F8 = (

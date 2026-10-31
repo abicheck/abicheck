@@ -389,6 +389,7 @@ SERIALIZATION_BUG_CLASSES: tuple[BugClass, ...] = (
         seed_tests=(
             "tests/unit/storage/test_graph_closure_renumbering.py",
             "tests/test_lambda_identity_ordinal.py",
+            "tests/test_family_f5_optimization_reference.py",
         ),
         public_surfaces=("python-api",),
         axes={
