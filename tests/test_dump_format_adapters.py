@@ -113,7 +113,7 @@ def test_request_header_backend_is_the_effective_backend(
         run_dump(
             _binary(tmp_path, "x.dll"),
             "pe",
-            header_backend=header_backend,
+            frontend=header_backend,
             compile=compile_ctx,
         )
     assert fake.last.header_backend == expected

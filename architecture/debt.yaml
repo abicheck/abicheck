@@ -1158,7 +1158,7 @@
     },
     {
       "path": "tests/test_compatibility_evaluation_frontend.py",
-      "baseline_lines": 1427,
+      "baseline_lines": 1426,
       "target": "tests/unit-or-contract ownership matching production migration",
       "rule": "no_growth",
       "disposition": "migrate",

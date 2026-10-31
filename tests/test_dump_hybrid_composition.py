@@ -49,9 +49,7 @@ def _hybrid_dump(
     snap = AbiSnapshot(library="libx", version="1")
     with ExitStack() as stack:
         fake = stack.enter_context(fake_format_adapter(fmt, snap))
-        run_dump(
-            _binary(tmp_path), fmt, headers=[header], header_backend="hybrid", **kwargs
-        )
+        run_dump(_binary(tmp_path), fmt, headers=[header], frontend="hybrid", **kwargs)
     return fake.requests
 
 
@@ -92,7 +90,7 @@ def test_hybrid_never_re_enters_the_orchestrator(
     real = native._run_dump_uncached
 
     def counting(*args: object, **kwargs: object) -> AbiSnapshot:
-        calls.append(str(kwargs.get("header_backend")))
+        calls.append(str(kwargs.get("frontend")))
         return real(*args, **kwargs)  # type: ignore[arg-type]
 
     monkeypatch.setattr(native, "_run_dump_uncached", counting)

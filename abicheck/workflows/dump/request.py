@@ -480,7 +480,7 @@ def execute_dump_request(
         fmt=resolved.fmt,
         public_headers=list(resolved.public_headers),
         public_header_dirs=list(resolved.public_header_dirs),
-        enable_debuginfod=request.enable_debuginfod,
+        enable_debuginfod=request.debuginfod,
         debuginfod_url=request.debuginfod_url,
         dwarf_only=request.dwarf_only,
         debug_format=resolved.debug_format,
@@ -499,7 +499,7 @@ def execute_dump_request(
     )
     snap = resolution.snapshot
 
-    if request.follow_dependencies:
+    if request.follow_deps:
         populate_side_dependency_info(
             snap,
             side,

@@ -206,8 +206,7 @@ REQUEST_ROUTING: dict[str, tuple[str, Any]] = {
     ),
     "old": ("covered", ("default",)),
     "new": ("covered", ("default",)),
-    "policy": ("covered", ("policy_sdk_vendor",)),
-    "policy_file_path": ("covered", ("policy_file",)),
+    "policy": ("covered", ("policy_sdk_vendor", "policy_file")),
     "suppress": ("covered", ("suppress", "suppress_strict")),
     "strict_suppressions": ("covered", ("suppress_strict",)),
     "old_probe_matrix": ("covered", ("probe_matrix",)),
@@ -224,8 +223,7 @@ REQUEST_ROUTING: dict[str, tuple[str, Any]] = {
         "the assurance.require_complete exit needs an incomplete-analysis fixture; gate-level parity is test_compare_exit_gate_unified.py",
     ),
     "diagnostic_comparison": ("covered", ("diagnostic_comparison",)),
-    "contract_evaluation": ("covered", ("contract_exports",)),
-    "contract_mode": ("covered", ("contract_exports",)),
+    "contract": ("covered", ("contract_exports",)),
     "pattern_verdicts": (
         "covered",
         ("default",),
@@ -238,7 +236,7 @@ REQUEST_ROUTING: dict[str, tuple[str, Any]] = {
     "frontend": (_UC, "only reaches a live header parse"),
     "frontend_context": (_RS, "records which front end built the request"),
     "has_sources": (_UC, "L4 source evidence"),
-    "force_public_symbols": (
+    "public_symbols": (
         _UC,
         "no CLI spelling any more; config-only scope.public_symbols",
     ),
@@ -246,12 +244,12 @@ REQUEST_ROUTING: dict[str, tuple[str, Any]] = {
         _UC,
         "CLI reaches it through .abicheck.yml contract.overlays.post_manifest; not yet a cell",
     ),
-    "enable_debuginfod": (_UC, "network"),
+    "debuginfod": (_UC, "network"),
     "debuginfod_url": (_UC, "network"),
     "env_matrix": (_UC, ".abicheck.yml deployment: block only"),
-    "acknowledgments_path": (
+    "acknowledgments": (
         _UC,
-        ".abicheck.yml acknowledgment.file (explicit --config only); CLI/release/API parity is test_acknowledgment_release_and_api.py",
+        ".abicheck.yml acknowledgments file (explicit --config only); CLI/release/API parity is test_acknowledgment_release_and_api.py",
     ),
     "acknowledgment_breaks": (
         _UC,
@@ -266,7 +264,7 @@ REQUEST_ROUTING: dict[str, tuple[str, Any]] = {
     "dwarf_only": (_UC, "needs a live binary"),
     "debug_format": (_UC, "needs a live binary"),
     "include_labels": (_UC, "needs live header parsing"),
-    "follow_dependencies": (_UC, "needs real DT_NEEDED binaries"),
+    "follow_deps": (_UC, "dependency walk needs real DT_NEEDED binaries"),
     "dependency_search_paths": (_UC, "needs real binaries"),
     "ld_library_path": (_UC, "needs real binaries"),
     "pack_policy_overrides": (_UC, "pack projection; CLI spelling is --pack"),
@@ -324,11 +322,11 @@ CONFIG_DEFAULT_MAP: dict[str, tuple[tuple[str, str], Callable[[], Any]]] = {
 DEFAULT_MAP: dict[str, tuple[str, str]] = {
     "policy": ("CompareRequest", "policy"),
     "suppress": ("CompareRequest", "suppress"),
-    "acknowledgments": ("CompareRequest", "acknowledgments_path"),
+    "acknowledgments": ("CompareRequest", "acknowledgments"),
     "severity_preset": ("CompareRequest", "severity_preset"),
     "diagnostic_comparison": ("CompareRequest", "diagnostic_comparison"),
-    "contract_mode": ("CompareRequest", "contract_mode"),
-    "follow_deps": ("CompareRequest", "follow_dependencies"),
+    "contract_mode": ("CompareRequest", "contract"),
+    "follow_deps": ("CompareRequest", "follow_deps"),
     "search_paths": ("CompareRequest", "dependency_search_paths"),
     "ld_library_path": ("CompareRequest", "ld_library_path"),
     "depth": ("CompareRequest", "depth"),
@@ -338,7 +336,7 @@ DEFAULT_MAP: dict[str, tuple[str, str]] = {
     "performance_profile": ("CompareRequest", "performance_profile"),
     "require_same_generation": ("CompareRequest", "require_same_generation"),
     "pack_paths": ("CompareRequest", "pack_paths"),
-    "include_dependencies": ("InputSpec", "include_dependencies"),
+    "include_dependencies": ("InputSpec", "include_system_declarations"),
     "header": ("InputSpec", "headers"),
     "include": ("InputSpec", "includes"),
     "exclude_headers": ("InputSpec", "exclude_headers"),
@@ -781,7 +779,7 @@ def test_mutant_typed_api_default_flipped(
     both declaratively (default agreement) and behaviorally (matrix)."""
     for owner, name, flipped in (
         (CompareRequest, "scope_public", False),
-        (InputSpec, "include_dependencies", True),
+        (InputSpec, "include_system_declarations", True),
     ):
         with monkeypatch.context() as m:
             m.setattr(owner.__dataclass_fields__[name], "default", flipped)  # type: ignore[attr-defined]
@@ -995,7 +993,7 @@ def test_hybrid_dump_routes_parse_their_legs_alike(tmp_path: Path) -> None:
         ),
     ):
         service_mod.run_dump(
-            so, "elf", headers=[header], header_backend="hybrid"
+            so, "elf", headers=[header], frontend="hybrid"
         )  # the default, scoped request
 
     dumper_legs: dict[str, tuple[bool, bool]] = {}

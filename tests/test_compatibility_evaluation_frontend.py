@@ -949,9 +949,8 @@ class TestPhase1Gate:
             request_kwargs={
                 "policy": "sdk_vendor",
                 "scope_public": True,
-                "contract_mode": "exports",
-                "contract_evaluation": True,
-                "force_public_symbols": frozenset({"sym_b", "sym_a"}),
+                "contract": "exports",
+                "public_symbols": frozenset({"sym_b", "sym_a"}),
             },
             policy_file=pf,
             suppression=source,
@@ -1365,7 +1364,7 @@ class TestUnstatableSelectorsAgainstARequestType:
                 new=InputSpec(path=Path("new.json")),
                 policy="sdk_vendor",
                 scope_public=False,
-                force_public_symbols=frozenset({"kept"}),
+                public_symbols=frozenset({"kept"}),
             )
         )
         assert unstatable_selectors(config, request_type=CompareRequest) == []

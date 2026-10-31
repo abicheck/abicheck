@@ -139,7 +139,7 @@ TYPED_OVERRIDE_CHANNELS: tuple[tuple[str, str, str], ...] = (
         "collapse_versioned_symbols",
         "collapse_versioned_symbols",
     ),
-    ("scope.public_symbols", "force_public_symbols", "public_symbols"),
+    ("scope.public_symbols", "public_symbols", "public_symbols"),
     ("severity.abi_breaking", "severity_abi_breaking", "merged_severity_abi_breaking"),
     (
         "severity.potential_breaking",
@@ -165,7 +165,7 @@ TYPED_OVERRIDE_CHANNELS: tuple[tuple[str, str, str], ...] = (
     ),
     ("debug.format", "debug_format", "debug_format"),
     ("debug.dwarf_only", "dwarf_only", "dwarf_only"),
-    ("debug.debuginfod", "enable_debuginfod", "debuginfod"),
+    ("debug.debuginfod", "debuginfod", "debuginfod"),
     ("debug.debuginfod_url", "debuginfod_url", "debuginfod_url"),
     ("deployment", "env_matrix", "deployment"),
 )

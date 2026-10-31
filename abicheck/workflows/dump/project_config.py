@@ -93,7 +93,7 @@ DUMP_TYPED_OVERRIDE_CHANNELS: tuple[tuple[str, str, str, str], ...] = (
     ("compile.lang", "request", "lang", "compile_lang"),
     ("debug.format", "request", "debug_format", "debug_format"),
     ("debug.dwarf_only", "request", "dwarf_only", "debug_dwarf_only"),
-    ("debug.debuginfod", "request", "enable_debuginfod", "debug_debuginfod"),
+    ("debug.debuginfod", "request", "debuginfod", "debug_debuginfod"),
     ("debug.debuginfod_url", "request", "debuginfod_url", "debug_debuginfod_url"),
 )
 
@@ -441,7 +441,7 @@ RUN_DUMP_OVERRIDE_PARAMS: dict[str, str] = {
     "compile.lang": "lang",
     "debug.format": "debug_format",
     "debug.dwarf_only": "dwarf_only",
-    "debug.debuginfod": "enable_debuginfod",
+    "debug.debuginfod": "debuginfod",
     "debug.debuginfod_url": "debuginfod_url",
 }
 

@@ -279,7 +279,7 @@ def test_every_typed_channel_is_applied_to_the_request() -> None:
     assert resolved.strict_suppressions is True
     assert resolved.require_complete_analysis is True
     assert resolved.dwarf_only is True
-    assert resolved.enable_debuginfod is True
+    assert resolved.debuginfod is True
     assert resolved.debuginfod_url == "https://example.test"
     assert resolved.debug_format == "dwarf"
 
@@ -431,7 +431,7 @@ def test_an_unknown_acknowledgment_action_is_reported(field: str, value: str) ->
     fields = {
         "acknowledgment_unacknowledged_additions": None,
         "acknowledgment_breaks": None,
-        "acknowledgments_path": None,
+        "acknowledgments": None,
         field: value,
     }
     errors = acknowledgment_errors(SimpleNamespace(**fields))
@@ -445,7 +445,7 @@ def test_a_missing_acknowledgments_file_is_reported(tmp_path: Path) -> None:
         SimpleNamespace(
             acknowledgment_unacknowledged_additions=None,
             acknowledgment_breaks=None,
-            acknowledgments_path=missing,
+            acknowledgments=missing,
         )
     )
     assert errors == [f"acknowledgments file not found: {missing}"]
@@ -455,7 +455,7 @@ def test_unset_acknowledgment_fields_have_no_errors() -> None:
     fields = SimpleNamespace(
         acknowledgment_unacknowledged_additions=None,
         acknowledgment_breaks=None,
-        acknowledgments_path=None,
+        acknowledgments=None,
     )
     assert acknowledgment_errors(fields) == []
 
@@ -476,18 +476,18 @@ def test_overrides_fill_the_request_fields_they_map_to() -> None:
         )
     )
     assert resolved.collapse_versioned_symbols is True
-    assert resolved.force_public_symbols == frozenset({"foo"})
+    assert resolved.public_symbols == frozenset({"foo"})
     assert resolved.severity_addition == "error"
 
 
 def test_an_explicit_force_public_symbols_is_kept() -> None:
     resolved = _with_config_overrides(
         _request(
-            force_public_symbols=frozenset({"bar"}),
+            public_symbols=frozenset({"bar"}),
             config_overrides={"scope.public_symbols": ["foo"]},
         )
     )
-    assert resolved.force_public_symbols == frozenset({"bar"})
+    assert resolved.public_symbols == frozenset({"bar"})
 
 
 def test_the_typed_run_rejects_a_bad_override_before_resolving() -> None:

@@ -60,7 +60,7 @@ CAPABILITIES: dict[str, dict[str, str]] = {
     "acknowledgment.records": {
         "cli": "--acknowledgments",
         "config": "acknowledgment.file",
-        "api": "acknowledgments_path",
+        "api": "acknowledgments",
         "action": "acknowledgments",
         "report": "disposition_audit.acknowledgments",
     },
@@ -273,7 +273,7 @@ def _typed_exit(tmp: Path, removals: dict[str, Path], symbols, breaks: str) -> i
     request = CompareRequest(
         old=InputSpec(path=removals["old"]),
         new=InputSpec(path=removals["new"]),
-        acknowledgments_path=records,
+        acknowledgments=records,
         acknowledgment_breaks=breaks,
     )
     result = run_compare_request(request)

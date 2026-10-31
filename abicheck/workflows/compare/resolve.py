@@ -359,7 +359,7 @@ def resolve_compare_request(
             fmt=fmt,
             public_headers=public_headers,
             public_header_dirs=public_header_dirs,
-            enable_debuginfod=request.enable_debuginfod,
+            enable_debuginfod=request.debuginfod,
             debuginfod_url=request.debuginfod_url,
             dwarf_only=request.dwarf_only,
             debug_format=debug_format,

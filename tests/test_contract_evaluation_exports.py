@@ -789,28 +789,37 @@ class TestCompareRequestContractModeValidation:
             old=InputSpec(path="old.so"), new=InputSpec(path="new.so"), **kw
         )
 
-    def test_a_mode_without_evaluation_is_a_validation_error(self) -> None:
-        errors = self._request(
-            contract_mode="exports", contract_evaluation=False
-        ).validation_errors()
-        assert any("contract_mode requires contract_evaluation" in e for e in errors)
+    def test_the_evaluation_opt_out_is_gone(self) -> None:
+        # ADR-091 R10: contract relevance is always evaluated, as the CLI does,
+        # so there is no `contract_evaluation` field left to switch it off.
+        import dataclasses
+
+        from abicheck.service import CompareRequest
+
+        names = {f.name for f in dataclasses.fields(CompareRequest)}
+        assert "contract_evaluation" not in names
+        assert "contract_mode" not in names
 
     def test_an_unsupported_mode_is_a_validation_error(self) -> None:
-        errors = self._request(
-            contract_mode="bogus", contract_evaluation=True
-        ).validation_errors()
-        assert any("unsupported contract mode 'bogus'" in e for e in errors)
-        assert any("all, exports, public" in e for e in errors)
+        errors = self._request(contract="bogus").validation_errors()
+        assert any("unsupported contract 'bogus'" in e for e in errors)
+        assert any("all, auto, exports, public" in e for e in errors)
 
     def test_a_valid_pair_raises_no_contract_error(self) -> None:
-        errors = self._request(
-            contract_mode="exports", contract_evaluation=True
-        ).validation_errors()
+        errors = self._request(contract="exports").validation_errors()
         assert not [e for e in errors if "contract" in e]
 
     def test_omitting_the_mode_is_always_fine(self) -> None:
-        errors = self._request(contract_evaluation=True).validation_errors()
-        assert not [e for e in errors if "contract_mode" in e]
+        errors = self._request().validation_errors()
+        assert not [e for e in errors if "contract" in e]
+
+    def test_auto_is_the_no_domain_spelling(self) -> None:
+        # `--contract auto` maps to no stated domain on the CLI, so the typed
+        # "auto" resolves to the same request as omitting the field.
+        from abicheck.service import CompareRequest
+
+        assert self._request(contract="auto").contract is None
+        assert CompareRequest.__dataclass_fields__["contract"].default is None
 
 
 class TestTrustedByConstructionUnderExports:

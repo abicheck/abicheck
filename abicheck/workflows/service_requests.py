@@ -50,7 +50,7 @@ from collections.abc import Mapping
 from dataclasses import KW_ONLY, dataclass, field, replace
 from pathlib import Path
 from types import MappingProxyType
-from typing import Any
+from typing import Any, Literal
 
 from ..change_registry_types import Verdict
 from ..checker_types import DiffResult
@@ -58,11 +58,11 @@ from ..environment_matrix import EnvironmentMatrix
 from ..errors import ValidationError
 from ..model import AbiSnapshot
 from ..model.change_catalog.kinds import ChangeKind
-from ..model.change_catalog.registry import VALID_BASE_POLICIES
 from ..model.performance import PerformanceProfile, parse_performance_profile
 from ..policy.exit_decision import ExitDecision
 from ..policy.severity import SeverityConfig
 from ..policy.suppression.rules import SuppressionList
+from .policy_operand import resolve_policy_operand
 from .request_acknowledgment_checks import acknowledgment_errors
 from .request_inputs import (
     _ANDROID_NEEDS_SOURCES,
@@ -83,6 +83,9 @@ from .request_inputs import (
     frontend_value_errors,
     required_path as required_path,
 )
+
+#: ADR-091 R10: the `--contract` value set (`auto` is the no-domain spelling).
+ContractDomain = Literal["public", "exports", "all", "auto"]
 
 #: One wording for a one-sided build-configuration matrix, on every route.
 PROBE_MATRIX_ONE_SIDED = (
@@ -128,11 +131,14 @@ class CompareRequest:
     lang: str = "c++"
     frontend: str = "auto"
     has_sources: bool = False
-    policy: str = "strict_abi"
-    policy_file_path: Path | None = None
+    # ADR-091 R2: a built-in profile or a policy document, resolved as the CLI's
+    # ``--policy NAME|PATH`` (:func:`resolve_policy_operand`); no second field.
+    policy: str | Path = "strict_abi"
     suppress: Path | tuple[Path, ...] | None = None
     scope_public: bool = True
-    force_public_symbols: frozenset[str] | None = None
+    # ADR-091 R7: the widening overlay (``scope.public_symbols``); the same
+    # concept as the former ``force_public_symbols``.
+    public_symbols: frozenset[str] | None = None
     # `compare --post-manifest`: the committed `pp_*`/ufunc-loop surface of a POST
     # manifest. When set, the comparison is scoped to this set — export findings
     # outside it (e.g. private `__pp_*` kernel churn) are demoted. None = not
@@ -141,8 +147,9 @@ class CompareRequest:
     # On by default, matching the CLI (ADR-068 D4 made pattern verdicts
     # unconditional there); pass False to score raw detector output.
     pattern_verdicts: bool = True
-    enable_debuginfod: bool = False
-    # Override debuginfod server URL (only meaningful with enable_debuginfod);
+    # ADR-091 R9: `debug.debuginfod` (was `enable_debuginfod`).
+    debuginfod: bool = False
+    # Override debuginfod server URL (only meaningful with debuginfod);
     # None uses the resolver's default server list / DEBUGINFOD_URLS env var.
     debuginfod_url: str | None = None
     # No ``reconcile_build_context`` field: one-comparison-product.md §4.1's
@@ -205,22 +212,15 @@ class CompareRequest:
     diagnostic_comparison: bool = False
     # ADR-062 D2: refuse a cross-generation pair (workflows/generation_drift).
     require_same_generation: bool = False
-    # ADR-049: classify each finding's contract relevance before
-    # compatibility policy, which then scores only IN_CONTRACT/NOT_APPLICABLE
-    # findings. On by default since Phase 7, matching the CLI: an
-    # unstated `contract_mode` resolves to `public` with public-header
-    # evidence on every side and `exports` otherwise
-    # (`compatibility_evaluation_wiring.evidence_adaptive_contract_mode`).
-    # `False` restores the pre-Phase-7 behavior for an API caller that needs
-    # it; `contract_mode="all"` is the CLI's own rollback.
-    contract_evaluation: bool = True
-    # ADR-049 Phase 6: which evidence domain `contract_evaluation` judges
+    # ADR-049 / ADR-091 R10: which evidence domain each finding is judged
     # against -- "public" (header-derived declared surface), "exports" (the
-    # binary's own export table plus the raw type closure from it), or "all"
-    # (no root/closure evidence required). `None` lets `scope_public`
-    # (`False` -> `all`) and then the evidence-adaptive built-in default
-    # decide; an explicit value outranks both per ADR-049 D7.
-    contract_mode: str | None = None
+    # binary's own export table plus the raw type closure from it), "all" (no
+    # root/closure evidence required), or "auto" (the CLI's `--contract auto`:
+    # the same as `None`). Contract relevance is always classified, as the CLI
+    # does; `None` lets `scope_public` (`False` -> `all`) and then the
+    # evidence-adaptive built-in default decide (ADR-049 D7). `__post_init__`
+    # folds "auto" to `None`, so a typed request and the CLI resolve equally.
+    contract: ContractDomain | None = None
     # ADR-055 D1: the friendly evidence-depth dial (`--depth`, same vocabulary
     # as `dump`/`scan`: binary/headers/build/source). `None` (the default)
     # infers the collect mode from whether either side sets `sources`/
@@ -260,7 +260,8 @@ class CompareRequest:
     # Off by default, matching the CLI flag: it costs a full dependency-graph
     # resolution per side, so it stays opt-in rather than becoming a silent
     # cost for every typed caller.
-    follow_dependencies: bool = False
+    # ADR-091 R8: `deps.follow` (was `follow_dependencies`).
+    follow_deps: bool = False
     dependency_search_paths: tuple[Path, ...] = ()
     ld_library_path: str = ""
     # ADR-055 D1 / ADR-050: request-level default for `CompileContext.
@@ -332,12 +333,13 @@ class CompareRequest:
     project_policy_overrides: tuple[tuple[ChangeKind, Verdict], ...] | None = field(
         default=None, kw_only=True
     )
-    #: ``.abicheck.yml``'s ``acknowledgment:`` block (ADR-067 D5/D6), at the
-    #: same project-config tier: a ``policy_file_path`` document that states
-    #: its own ``acknowledgment:`` block outranks the gate setting. Whether a
-    #: project config is trusted to supply the records is the caller's call
-    #: (the CLI loads them only from an explicit ``--config``).
-    acknowledgments_path: Path | None = field(default=None, kw_only=True)
+    #: ``.abicheck.yml``'s ``acknowledgments:`` block (ADR-067 D5/D6, ADR-091
+    #: R3; was ``acknowledgments_path``), at the same project-config tier: a
+    #: ``policy`` document that states its own ``acknowledgments:`` block
+    #: outranks the gate setting. Whether a project config is trusted to supply
+    #: the records is the caller's call (the CLI loads them only from an
+    #: explicit ``--config``).
+    acknowledgments: Path | None = field(default=None, kw_only=True)
     acknowledgment_unacknowledged_additions: str | None = field(
         default=None, kw_only=True
     )
@@ -411,6 +413,23 @@ class CompareRequest:
     #: the sides are resolved, never what either observes.
     performance_profile: PerformanceProfile | None = field(default=None, kw_only=True)
 
+    def __post_init__(self) -> None:
+        # ADR-091 R10: `--contract auto` maps to "no domain stated" on the CLI
+        # (`contract_options.resolve_contract_domain`), so a typed "auto" is
+        # folded to `None` here and both front ends reach the same request.
+        if self.contract == "auto":
+            object.__setattr__(self, "contract", None)
+
+    @property
+    def policy_profile(self) -> str:
+        """The built-in profile this run classifies under (ADR-091 R2)."""
+        return resolve_policy_operand(self.policy)[0]
+
+    @property
+    def policy_document(self) -> Path | None:
+        """The policy document this run loads, or ``None`` for a bare profile."""
+        return resolve_policy_operand(self.policy)[1]
+
     def validation_errors(self) -> list[str]:
         """Return a list of human-readable validation problems (empty == valid).
 
@@ -466,46 +485,26 @@ class CompareRequest:
         # leaf module deliberately stays out of, so it's checked at runtime
         # in service.run_compare_request instead of here.
         errors += _debug_format_errors(self.debug_format)
-        if not self.policy:
-            errors.append("policy profile name must not be empty")
-        elif self.policy_file_path is None and self.policy not in VALID_BASE_POLICIES:
-            # Only checked with no policy_file_path (Codex review, Round 11):
-            # a file overrides the base name -- stated_policy_base's own
-            # logic, applied here too -- so an unknown name paired with a
-            # valid file is a legitimate request the file already resolves
-            # for; only a name with nothing to override it is a real error,
-            # and needs to fail here before any extraction runs.
-            errors.append(
-                f"unknown policy {self.policy!r}: choose from "
-                f"{sorted(VALID_BASE_POLICIES)}"
-            )
-        # D9 pre-flight: a --policy-file path that doesn't exist is a hard error
-        # here (Tier 2), so CLI and MCP surface the same message before any work.
-        if (
-            self.policy_file_path is not None
-            and not Path(self.policy_file_path).exists()
-        ):
-            errors.append(f"policy file not found: {self.policy_file_path}")
-        # ADR-049 Phase 6 (Codex review): the same two rules the CLI applies
-        # to --contract, so a typed caller fails fast and with identical text
-        # instead of having the mode silently ignored (contract_evaluation
-        # off) or raising a raw ValueError deep in the pipeline after input
-        # resolution (bad value).
-        if self.contract_mode is not None:
+        # ADR-091 R2: the policy operand is resolved here, once, with the CLI's
+        # own rule (`resolve_policy_operand`), so an unknown profile name or a
+        # missing document fails before any extraction runs. An unknown name
+        # with nothing to resolve it is the error; there is no separate file
+        # check to keep in step.
+        try:
+            resolve_policy_operand(self.policy)
+        except ValidationError as exc:
+            errors.append(str(exc))
+        # ADR-049 Phase 6 / ADR-091 R10: the CLI's `--contract` value set. A
+        # bad value fails here with the CLI's text instead of raising deep in
+        # the pipeline after input resolution.
+        if self.contract is not None:
             from ..contract_relevance_types import ContractMode
 
-            allowed_modes = {mode.value for mode in ContractMode}
-            if self.contract_mode not in allowed_modes:
+            allowed_contracts = {mode.value for mode in ContractMode} | {"auto"}
+            if self.contract not in allowed_contracts:
                 errors.append(
-                    f"unsupported contract mode {self.contract_mode!r}: "
-                    f"choose from {', '.join(sorted(allowed_modes))}"
-                )
-            if not self.contract_evaluation:
-                errors.append(
-                    "contract_mode requires contract_evaluation: it selects "
-                    "which evidence domain the shadow contract evaluator "
-                    "judges against, and without that flag no contract "
-                    "decision is computed at all"
+                    f"unsupported contract {self.contract!r}: "
+                    f"choose from {', '.join(sorted(allowed_contracts))}"
                 )
         errors += _depth_errors(self.depth)
         errors += frontend_context_errors(self.frontend_context)
@@ -631,14 +630,14 @@ class DumpRequest:
     depth: str | None = None
     dwarf_only: bool = False
     debug_format: str | None = None
-    enable_debuginfod: bool = False
+    debuginfod: bool = False
     debuginfod_url: str | None = None
     include_labels: tuple[tuple[Path, str], ...] = ()
     # `--follow-deps` / `--search-path` / `--ld-library-path`: populate the
     # snapshot's transitive `DependencyInfo`. Off by default, matching the CLI
-    # flag and `CompareRequest.follow_dependencies` — it costs a full
+    # flag and `CompareRequest.follow_deps` — it costs a full
     # dependency-graph resolution, so it stays opt-in.
-    follow_dependencies: bool = False
+    follow_deps: bool = False
     dependency_search_paths: tuple[Path, ...] = ()
     ld_library_path: str = ""
     # Request-level default for `CompileContext.frontend_context`

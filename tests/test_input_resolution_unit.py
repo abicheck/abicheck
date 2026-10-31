@@ -188,7 +188,7 @@ class TestResolveInput:
             "abicheck.workflows.input_resolution.run_dump", return_value=snap
         ) as mock:
             resolve_input(p, is_elf=True, include_dependencies=False)
-        assert mock.call_args.kwargs["include_dependencies"] is False
+        assert mock.call_args.kwargs["include_system_declarations"] is False
 
     def test_include_dependencies_defaults_to_the_filtered_surface(self, tmp_path):
         # PR #1258: every typed entry point agrees with the CLI's own
@@ -204,7 +204,7 @@ class TestResolveInput:
             "abicheck.workflows.input_resolution.run_dump", return_value=snap
         ) as mock:
             resolve_input(p, is_elf=True)
-        assert mock.call_args.kwargs["include_dependencies"] is False
+        assert mock.call_args.kwargs["include_system_declarations"] is False
 
     def test_resolve_input_no_longer_accepts_header_graph_kwargs(self, tmp_path):
         # G29 Phase A: header_graph/header_graph_includes are no longer
@@ -286,7 +286,7 @@ class TestResolveInput:
             resolve_input(script, include_dependencies=False)
         assert mock.call_count == 1
         _, kwargs = mock.call_args
-        assert kwargs["include_dependencies"] is False
+        assert kwargs["include_system_declarations"] is False
 
     def test_header_graph_lang_matches_elf_main_pass_normalization(self, tmp_path):
         """Codex review: ``_dump_elf`` normalizes ``lang`` to only ever force

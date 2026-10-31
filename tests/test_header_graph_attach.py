@@ -435,7 +435,7 @@ class TestRunDumpHeaderGraphSkippedForDwarfOnly:
                 side_effect=_fake_attach,
             ),
         ):
-            run_dump(p, "elf", header_backend="hybrid", dwarf_only=True)
+            run_dump(p, "elf", frontend="hybrid", dwarf_only=True)
 
         # Both recursive sub-dumps attach with the graph forced off
         # (_skip_header_graph_attach) regardless of dwarf_only, plus the

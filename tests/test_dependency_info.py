@@ -273,7 +273,7 @@ class TestPopulatePairDependencyInfo:
             lambda snap, path, *a: seen.append(path),
         )
         populate_pair_dependency_info(
-            self._request(script, elf, follow_dependencies=True),
+            self._request(script, elf, follow_deps=True),
             AbiSnapshot(library="a", version="1"),
             AbiSnapshot(library="b", version="2"),
             old_fmt=None,  # what detect_binary_format answers for the script

@@ -237,7 +237,7 @@ class TestSharedResolution:
         assert request.old.exclude_headers == ("private/*",)
         assert request.include_labels == tuple(labels.items())
         assert request.dwarf_only is True and request.debug_format == "dwarf"
-        assert request.follow_dependencies is True
+        assert request.follow_deps is True
         assert request.dependency_search_paths == (tmp_path / "libs",)
         assert request.ld_library_path == "/opt/lib"
 

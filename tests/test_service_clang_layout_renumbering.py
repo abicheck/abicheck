@@ -87,7 +87,7 @@ class TestRunDumpRenumbersAfterClangLayoutAttach:
                 side_effect=_fake_attach_clang_layout,
             ),
         ):
-            result = run_dump(p, "elf", header_backend="clang")
+            result = run_dump(p, "elf", frontend="clang")
 
         rec = result.declarations.types[0]
         assert list(rec.base_offsets) == rec.bases
@@ -110,7 +110,7 @@ class TestRunDumpRenumbersAfterClangLayoutAttach:
                 side_effect=_fake_attach_clang_layout,
             ),
         ):
-            result = run_dump(p, "pe", header_backend="clang")
+            result = run_dump(p, "pe", frontend="clang")
 
         rec = result.declarations.types[0]
         assert list(rec.base_offsets) == rec.bases
@@ -133,7 +133,7 @@ class TestRunDumpRenumbersAfterClangLayoutAttach:
                 side_effect=_fake_attach_clang_layout,
             ),
         ):
-            result = run_dump(p, "macho", header_backend="clang")
+            result = run_dump(p, "macho", frontend="clang")
 
         rec = result.declarations.types[0]
         assert list(rec.base_offsets) == rec.bases

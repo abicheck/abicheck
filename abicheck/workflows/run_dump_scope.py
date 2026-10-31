@@ -50,7 +50,7 @@ __all__ = [
 
 @contextmanager
 def extraction_scope(
-    include_dependencies: bool, header_roots: Sequence[Path | str]
+    include_system_declarations: bool, header_roots: Sequence[Path | str]
 ) -> Iterator[None]:
     """Decide, once, what a dump's extraction may skip given its scope.
 
@@ -60,14 +60,14 @@ def extraction_scope(
     dependency skip); both are driven from here so neither can disagree with
     the scope the result is stamped with.
 
-    ``include_dependencies=True`` (a full surface): nothing may be skipped,
+    ``include_system_declarations=True`` (a full surface): nothing may be skipped,
     even when an enclosing dump declared a scope -- a ``hybrid`` leg, or any
     nested ``run_dump``. Without this, the enclosing scope's skip predicate
     reached the inner parse, and a filtered surface was stamped ``"full"``.
     ``False``: the parse may skip exactly what scoping with *header_roots*
     drops afterwards.
     """
-    if include_dependencies:
+    if include_system_declarations:
         with suppress_streaming_prune(), suppress_dependency_exclusion():
             yield
     else:
@@ -77,10 +77,10 @@ def extraction_scope(
 
 def apply_dependency_scope_to_run_dump_result(
     snap: AbiSnapshot,
-    include_dependencies: bool,
+    include_system_declarations: bool,
     bound_args: inspect.BoundArguments,
 ) -> AbiSnapshot:
-    """``service.run_dump``'s own choke point: *include_dependencies*
+    """``service.run_dump``'s own choke point: *include_system_declarations*
     defaults to ``True`` there (preserving every existing caller — scan,
     ``dump``'s own inline calls — that doesn't pass it explicitly);
     only ``compare`` opts into ``False`` to filter its live-binary dumping
@@ -107,7 +107,7 @@ def apply_dependency_scope_to_run_dump_result(
         snap,
         SnapshotFinish(
             dependency_scope=DependencyScopeInputs(
-                include_dependencies, _run_dump_header_roots(bound_args)
+                include_system_declarations, _run_dump_header_roots(bound_args)
             )
         ),
     )
@@ -144,14 +144,14 @@ def wrap_run_dump_with_dependency_scope(
     uncached_fn: Callable[..., AbiSnapshot],
 ) -> Callable[..., AbiSnapshot]:
     """Build ``service.run_dump`` from ``service._run_dump_uncached``: a
-    thin wrapper adding an *include_dependencies* keyword (default ``False``,
-    matching the CLI flag and ``InputSpec.include_dependencies``) and applying
+    thin wrapper adding an *include_system_declarations* keyword (default ``False``,
+    matching the CLI flag and ``InputSpec.include_system_declarations``) and applying
     :func:`apply_dependency_scope_to_run_dump_result` to the result — see that
     function's own docstring.
 
     ``functools.wraps`` copies ``__wrapped__`` from *uncached_fn*, which
     ``inspect.signature`` follows by default — silently hiding the new
-    ``include_dependencies`` keyword from anything that introspects the
+    ``include_system_declarations`` keyword from anything that introspects the
     wrapper's signature (the generated Python API reference, or a
     signature-driven caller/validation framework), even though it's a real,
     accepted parameter (Codex review). ``__signature__`` is set explicitly
@@ -160,7 +160,7 @@ def wrap_run_dump_with_dependency_scope(
     sig = inspect.signature(uncached_fn)
     new_params = [
         inspect.Parameter(
-            "include_dependencies",
+            "include_system_declarations",
             kind=inspect.Parameter.KEYWORD_ONLY,
             default=False,  # must track the wrapper's own default below
             # A bare string, matching every other parameter's annotation here:
@@ -197,7 +197,7 @@ def wrap_run_dump_with_dependency_scope(
     @functools.wraps(uncached_fn)
     def run_dump(
         *args: object,
-        include_dependencies: bool = False,
+        include_system_declarations: bool = False,
         config_overrides: Mapping[str, object] | None = None,
         **kwargs: object,
     ) -> AbiSnapshot:
@@ -221,10 +221,12 @@ def wrap_run_dump_with_dependency_scope(
                 run_dump_override_arguments(config_overrides, bound.arguments, defaults)
             )
             args, kwargs = bound.args, bound.kwargs
-        with extraction_scope(include_dependencies, _run_dump_header_roots(bound)):
+        with extraction_scope(
+            include_system_declarations, _run_dump_header_roots(bound)
+        ):
             snap = uncached_fn(*args, **kwargs)
         return apply_dependency_scope_to_run_dump_result(
-            snap, include_dependencies, bound
+            snap, include_system_declarations, bound
         )
 
     run_dump.__signature__ = extended_sig  # type: ignore[attr-defined]

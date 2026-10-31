@@ -1,11 +1,11 @@
 --- a/abicheck/workflows/release_member_request.py
 +++ b/abicheck/workflows/release_member_request.py
-@@ -240,7 +240,7 @@
-         lang_explicit=request.lang_explicit,
-         policy=request.policy,
-         policy_file_path=request.policy_file_path,
+@@ -246,7 +246,7 @@
+             if request.policy_file_path is not None
+             else request.policy
+         ),
 -        suppress=request.suppress,
 +        suppress=None,
          scope_public=request.scope_to_public_surface,
          pattern_verdicts=request.pattern_verdicts,
-         contract_evaluation=request.contract_evaluation,
+         contract=release_contract_domain(
