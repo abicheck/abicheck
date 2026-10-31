@@ -4,156 +4,158 @@
 
 Every `.abicheck.yml` top-level key and block sub-key that `abicheck.buildsource.build_config.BuildConfig` itself validates, with its exact required YAML type — generated directly from `BuildConfig`'s strict-schema registries (an unknown key or a wrong-typed value is a hard error). "Other recognized top-level keys" below are also accepted but parsed by a sibling module instead, so no type is claimed for them here. See [Config File Reference](../reference/config-file.md) for effective defaults, CLI-override precedence, and a worked example; this page is the exhaustive key/type list for `BuildConfig`'s own schema only.
 
+The last column gives the same option on the other surfaces, read from `architecture/option-vocabulary.yaml`. `--set PATH=VALUE` is the escape hatch for a `.abicheck.yml` key, not the primary spelling; a core option has no `--set` form. A `RETIRED` input is a fail-closed tombstone: it fails the run and names its replacement.
+
 ## Blocks
 
 ### `assurance:`
 
-| Sub-key | Type |
-|---|---|
-| `require_complete` | bool |
+| Sub-key | Type | Same option on other surfaces |
+|---|---|---|
+| `require_complete` | bool | Action: `require-complete`; --set: `--set assurance.require_complete=VALUE` |
 
 ### `build:`
 
-| Sub-key | Type |
-|---|---|
-| `compile_db` | str |
-| `compile_db_filter` | str |
-| `query` | str |
-| `system` | str |
-| `targets` | list[str] (or a single str) |
+| Sub-key | Type | Same option on other surfaces |
+|---|---|---|
+| `compile_db` | str | CLI: `compare --build-info`, `dump --build-info`; Action: `build-info`, `compile-db`; Reusable workflow: `build-info` (check-single.yml, check-project.yml), `compile-db` (check-single.yml, check-project.yml); --set: `--set build.compile_db=VALUE` |
+| `compile_db_filter` | str | --set: `--set build.compile_db_filter=VALUE` |
+| `query` | str | --set: `--set build.query=VALUE` |
+| `system` | str | --set: `--set build.system=VALUE` |
+| `targets` | list[str] (or a single str) | --set: `--set build.targets=VALUE` |
 
 ### `bundle:`
 
-| Sub-key | Type |
-|---|---|
-| `cohorts` | list[str] (or a single str) |
-| `system_providers` | list[str] (or a single str) |
+| Sub-key | Type | Same option on other surfaces |
+|---|---|---|
+| `cohorts` | list[str] (or a single str) | CLI: `compare --instantiation-manifest`, `compare --bundle-facts-out`, `compare --bundle-facts-library-manifest`; Reusable workflow: `bundle-members` (check-single.yml); --set: `--set bundle.system_providers=VALUE`, `--set bundle.cohorts=VALUE`, `--set bundle_variants=VALUE` |
+| `system_providers` | list[str] (or a single str) | CLI: `compare --instantiation-manifest`, `compare --bundle-facts-out`, `compare --bundle-facts-library-manifest`; Reusable workflow: `bundle-members` (check-single.yml); --set: `--set bundle.system_providers=VALUE`, `--set bundle.cohorts=VALUE`, `--set bundle_variants=VALUE` |
 
 ### `compile:`
 
-| Sub-key | Type |
-|---|---|
-| `allow_unsupported_castxml` | bool |
-| `ast_frontend_fallback` | bool |
-| `compiler` | str |
-| `defines` | list[str] (or a single str) |
-| `frontend` | str |
-| `frontend_context` | str |
-| `include_dirs` | list[str] (or a single str) |
-| `lang` | str |
-| `nostdinc` | bool |
-| `options` | list[str] (or a single str) |
-| `std` | str |
-| `sysroot` | str |
+| Sub-key | Type | Same option on other surfaces |
+|---|---|---|
+| `allow_unsupported_castxml` | bool | --set: `--set compile.allow_unsupported_castxml=VALUE` |
+| `ast_frontend_fallback` | bool | --set: `--set compile.ast_frontend_fallback=VALUE` |
+| `compiler` | str | Action: `compiler`; Reusable workflow: `compiler` (check-single.yml, check-project.yml); --set: `--set compile.compiler=VALUE` |
+| `defines` | list[str] (or a single str) | CLI: `compare --define`, `dump --define`; --set: `--set compile.defines=VALUE` |
+| `frontend` | str | Reusable workflow: `frontend` (check-single.yml, check-project.yml); --set: `--set compile.frontend=VALUE` |
+| `frontend_context` | str | --set: `--set compile.frontend_context=VALUE` |
+| `include_dirs` | list[str] (or a single str) | CLI: `compare --include`, `dump --include`; Action: `include`, `old-include`, `new-include`; Reusable workflow: `include` (check-single.yml, check-project.yml), `old-include` (check-single.yml, check-project.yml), `new-include` (check-single.yml, check-project.yml); --set: `--set compile.include_dirs=VALUE` |
+| `lang` | str | Action: `lang`; Reusable workflow: `lang` (check-single.yml, check-project.yml); --set: `--set compile.lang=VALUE` |
+| `nostdinc` | bool | --set: `--set compile.nostdinc=VALUE` |
+| `options` | list[str] (or a single str) | Reusable workflow: `compile-options` (check-single.yml, check-project.yml); --set: `--set compile.options=VALUE` |
+| `std` | str | --set: `--set compile.std=VALUE` |
+| `sysroot` | str | Action: `sysroot`; Reusable workflow: `sysroot` (check-single.yml, check-project.yml); --set: `--set compile.sysroot=VALUE` |
 
 ### `consumers:`
 
-| Sub-key | Type |
-|---|---|
-| `manifests` | list[str] (or a single str) |
-| `required_symbols` | list[str] (or a single str) |
+| Sub-key | Type | Same option on other surfaces |
+|---|---|---|
+| `manifests` | list[str] (or a single str) | Action: `used-by-manifest`; --set: `--set consumers.manifests=VALUE` |
+| `required_symbols` | list[str] (or a single str) | Action: `required-symbol`, `required-symbols`; --set: `--set consumers.required_symbols=VALUE` |
 
 ### `debug:`
 
-| Sub-key | Type |
-|---|---|
-| `debuginfod` | bool |
-| `debuginfod_url` | str |
-| `dwarf_only` | bool |
-| `format` | str |
-| `pdb_path` | str |
+| Sub-key | Type | Same option on other surfaces |
+|---|---|---|
+| `debuginfod` | bool | --set: `--set debug.debuginfod=VALUE` |
+| `debuginfod_url` | str | --set: `--set debug.debuginfod_url=VALUE` |
+| `dwarf_only` | bool | --set: `--set debug.dwarf_only=VALUE` |
+| `format` | str | --set: `--set debug.format=VALUE` |
+| `pdb_path` | str | CLI: `compare --debug-info`, `dump --debug-info`; Action: `old-debug-info`, `new-debug-info`; --set: `--set debug.pdb_path=VALUE` |
 
 ### `gate:`
 
-| Sub-key | Type |
-|---|---|
-| `fail_on_removed_library` | bool |
+| Sub-key | Type | Same option on other surfaces |
+|---|---|---|
+| `fail_on_removed_library` | bool | --set: `--set gate.fail_on_removed_library=VALUE` |
 
 ### `output:`
 
-| Sub-key | Type |
-|---|---|
-| `view` | list[str] (or a single str) |
+| Sub-key | Type | Same option on other surfaces |
+|---|---|---|
+| `view` | list[str] (or a single str) | --set: `--set output.view=VALUE` |
 
 ### `performance:`
 
-| Sub-key | Type |
-|---|---|
-| `profile` | str |
+| Sub-key | Type | Same option on other surfaces |
+|---|---|---|
+| `profile` | str | CLI: `compare --performance-profile`; --set: `--set performance.profile=VALUE` |
 
 ### `policy:`
 
-| Sub-key | Type |
-|---|---|
-| `overrides` | mapping[str, str] |
+| Sub-key | Type | Same option on other surfaces |
+|---|---|---|
+| `overrides` | mapping[str, str] | --set: `--set policy.overrides=VALUE` |
 
 ### `python:`
 
-| Sub-key | Type |
-|---|---|
-| `abi3_floor` | str |
+| Sub-key | Type | Same option on other surfaces |
+|---|---|---|
+| `abi3_floor` | str | CLI: `compare --abi3-floor`; --set: `--set python.abi3_floor=VALUE` |
 
 ### `release:`
 
-| Sub-key | Type |
-|---|---|
-| `dso_only` | bool |
-| `include_private_dso` | bool |
-| `support_promise` | str |
+| Sub-key | Type | Same option on other surfaces |
+|---|---|---|
+| `dso_only` | bool | --set: `--set release.dso_only=VALUE` |
+| `include_private_dso` | bool | --set: `--set release.include_private_dso=VALUE` |
+| `support_promise` | str | --set: `--set release.support_promise=VALUE` |
 
 ### `resource_limits:`
 
-| Sub-key | Type |
-|---|---|
-| `max_bundle_facts_decode_nodes` | int |
+| Sub-key | Type | Same option on other surfaces |
+|---|---|---|
+| `max_bundle_facts_decode_nodes` | int | --set: `--set resource_limits.max_bundle_facts_decode_nodes=VALUE` |
 
 ### `scope:`
 
-| Sub-key | Type |
-|---|---|
-| `collapse_versioned_symbols` | bool |
-| `dependencies` | list[{name: str, header_roots: list[str]}] |
-| `dependency_evidence` | str ('full') |
-| `exclude_headers` | list[str] (or a single str) |
-| `on_incomplete` | str |
-| `private_headers` | list[str] (or a single str) |
-| `private_namespaces` | list[str] (or a single str) |
-| `public` | bool |
-| `public_header_dirs` | list[str] (or a single str) |
-| `public_symbols` | list[str] (or a single str) |
-| `show_redundant` | bool |
+| Sub-key | Type | Same option on other surfaces |
+|---|---|---|
+| `collapse_versioned_symbols` | bool | --set: `--set scope.collapse_versioned_symbols=VALUE` |
+| `dependencies` | list[{name: str, header_roots: list[str]}] | --set: `--set scope.dependencies=VALUE`, `--set scope.dependency_evidence=VALUE` |
+| `dependency_evidence` | str ('full') | --set: `--set scope.dependencies=VALUE`, `--set scope.dependency_evidence=VALUE` |
+| `exclude_headers` | list[str] (or a single str) | CLI: `compare --exclude-header`, `dump --exclude-header`; --set: `--set scope.exclude_headers=VALUE` |
+| `on_incomplete` | str | --set: `--set scope.on_incomplete=VALUE` |
+| `private_headers` | list[str] (or a single str) | --set: `--set scope.private_headers=VALUE` |
+| `private_namespaces` | list[str] (or a single str) | --set: `--set scope.private_namespaces=VALUE` |
+| `public` | bool | --set: `--set scope.public=VALUE` |
+| `public_header_dirs` | list[str] (or a single str) | --set: `--set scope.public_header_dirs=VALUE` |
+| `public_symbols` | list[str] (or a single str) | --set: `--set scope.public_symbols=VALUE` |
+| `show_redundant` | bool | --set: `--set scope.show_redundant=VALUE` |
 
 ### `severity:`
 
-| Sub-key | Type |
-|---|---|
-| `abi_breaking` | str |
-| `addition` | str |
-| `potential_breaking` | str |
-| `preset` | str |
-| `quality_issues` | str |
+| Sub-key | Type | Same option on other surfaces |
+|---|---|---|
+| `abi_breaking` | str | --set: `--set severity.abi_breaking=VALUE` |
+| `addition` | str | --set: `--set severity.addition=VALUE` |
+| `potential_breaking` | str | --set: `--set severity.potential_breaking=VALUE` |
+| `preset` | str | CLI: `compare --severity-preset`; Action: `severity-preset`; Reusable workflow: `severity-preset` (check-single.yml, check-project.yml); --set: `--set severity.preset=VALUE` |
+| `quality_issues` | str | --set: `--set severity.quality_issues=VALUE` |
 
 ### `sources:`
 
-| Sub-key | Type |
-|---|---|
-| `exclude` | list[str] (or a single str) |
-| `graph` | str |
-| `method` | str |
-| `public_headers` | list[str] (or a single str) |
+| Sub-key | Type | Same option on other surfaces |
+|---|---|---|
+| `exclude` | list[str] (or a single str) | --set: `--set sources.exclude=VALUE` |
+| `graph` | str | --set: `--set sources.graph=VALUE` |
+| `method` | str | --set: `--set sources.method=VALUE` |
+| `public_headers` | list[str] (or a single str) | --set: `--set sources.public_headers=VALUE` |
 
 ### `suppression:`
 
-| Sub-key | Type |
-|---|---|
-| `require_justification` | bool |
-| `strict` | bool |
+| Sub-key | Type | Same option on other surfaces |
+|---|---|---|
+| `require_justification` | bool | --set: `--set suppression.require_justification=VALUE` |
+| `strict` | bool | --set: `--set suppression.strict=VALUE` |
 
 ## Top-level scalar keys
 
-| Key | Type |
-|---|---|
-| `version` | int |
+| Key | Type | Same option on other surfaces |
+|---|---|---|
+| `version` | int | --set: `--set version=VALUE` |
 
 ## Nested config blocks (parsed via a shared value type)
 

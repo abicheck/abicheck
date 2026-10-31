@@ -39,6 +39,9 @@ from pathlib import Path
 
 import yaml
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from option_cross_refs import EMPTY, LEGEND, CrossRefs  # noqa: E402
+
 REPO_DIR = Path(__file__).resolve().parent.parent
 ACTION_YML = REPO_DIR / "action.yml"
 OUT_PATH = REPO_DIR / "docs" / "reference" / "github-action-inputs.md"
@@ -58,15 +61,20 @@ def _clean(text: object) -> str:
     return " ".join(str(text).split()).replace("|", "\\|")
 
 
-def build_rows(action: dict) -> tuple[list[dict[str, str]], list[dict[str, str]]]:
+def build_rows(
+    action: dict, refs: CrossRefs | None = None
+) -> tuple[list[dict[str, str]], list[dict[str, str]]]:
     inputs = action.get("inputs") or {}
     outputs = action.get("outputs") or {}
+    refs = refs or CrossRefs.load()
     input_rows = [
         {
             "name": name,
             "required": "yes" if spec.get("required") else "no",
             "default": _clean(spec.get("default")) or "—",
             "description": _clean(spec.get("description")),
+            # The other surfaces of this input, or where a tombstone now lives.
+            "same_option": _clean(refs.cell(f"action:{name}", own="action")) or EMPTY,
         }
         for name, spec in inputs.items()
     ]
@@ -92,13 +100,15 @@ def render(action: dict) -> str:
         "",
         f"## Inputs ({len(input_rows)})",
         "",
-        "| Input | Required | Default | Description |",
-        "|---|:--:|---|---|",
+        LEGEND,
+        "",
+        "| Input | Required | Default | Description | Same option on other surfaces |",
+        "|---|:--:|---|---|---|",
     ]
     for row in input_rows:
         lines.append(
             f"| `{row['name']}` | {row['required']} | {row['default']} | "
-            f"{row['description']} |"
+            f"{row['description']} | {row['same_option']} |"
         )
     lines += [
         "",

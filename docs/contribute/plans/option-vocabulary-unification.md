@@ -1,6 +1,6 @@
 # Option vocabulary unification: implementation plan
 
-**Status:** Phases 0, 1, 2 done (Phase 0 2026-10-30; Phase 1 is #1850; Phase 2: the CLI `--set` half for `compare`, `dump` and `project capture-variants` (#1851, #1857), the Action `set:` input (#1854), and the compile-context keys replacing the Action's `compile:` overlay (#1861); the typed API still refuses `compile.*`, see the Result below). Phase 4 done for the CLI (#1852), the Action (#1860), the typed request and `run_compare` shim, and the reusable workflows (this change). Phase 4 is done for the typed API. The Tier-1 `checker.compare()` keywords (`contract_evaluation`, `contract_mode`) are an accepted exception (ADR-091 R10). Open review item, not a blocker: `run_dump(public_headers)`. Phase 3 (R11, R15) and Phase 5 (budget) in progress. Phase 6 is collapsed into each rename (D7 amendment). Phase 7 not started. Implements
+**Status:** Phases 0, 1, 2 done (Phase 0 2026-10-30; Phase 1 is #1850; Phase 2: the CLI `--set` half for `compare`, `dump` and `project capture-variants` (#1851, #1857), the Action `set:` input (#1854), and the compile-context keys replacing the Action's `compile:` overlay (#1861); the typed API still refuses `compile.*`, see the Result below). Phase 4 done for the CLI (#1852), the Action (#1860), the typed request and `run_compare` shim, and the reusable workflows (this change). Phase 4 is done for the typed API. The Tier-1 `checker.compare()` keywords (`contract_evaluation`, `contract_mode`) are an accepted exception (ADR-091 R10). Open review item, not a blocker: `run_dump(public_headers)`. Phase 3 (R11, R15) and Phase 5 (budget) in progress. Phase 6 is collapsed into each rename (D7 amendment). Phase 7 done (the three generated references carry the cross-surface column). Implements
 [ADR-091](../adr/091-one-option-vocabulary.md). Each phase is one PR, ordered
 so that the parity gate lands before any rename. Every rename lands with its
 migration row and no alias: the 2026-10-30 policy (ADR-091 D7 amendment)
@@ -449,6 +449,17 @@ Make `gen_cli_reference.py`, `gen_action_reference.py`,
 `gen_config_reference.py` emit a "same option on other surfaces" column from
 the registry, so one table answers "how do I say this in the Action / in
 Python".
+
+**Result (2026-10-31).** The three references carry a "Same option on other
+surfaces" column computed by `scripts/option_cross_refs.py` from the registry:
+CLI flag, Action input, reusable-workflow input, `.abicheck.yml` key and the
+`--set` path. Python is not in the column; its spellings stay in the registry.
+The registry's `replacements:` block names the live row of each of the 56
+retired or deprecated Action and workflow inputs, so a tombstone reads
+`RETIRED` (or `DEPRECATED`) with its replacement, never as live.
+`tests/test_option_cross_refs.py` checks every generated row against the
+registry, that each reference is in sync with its generator, and that each
+replacement is a live row its tombstone's own description names.
 
 ## Risks
 

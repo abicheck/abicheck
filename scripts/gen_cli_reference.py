@@ -42,6 +42,9 @@ import sys
 from pathlib import Path, PurePath
 from typing import Any
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from option_cross_refs import LEGEND, CrossRefs  # noqa: E402
+
 REPO_DIR = Path(__file__).resolve().parent.parent
 OUT_PATH = REPO_DIR / "docs" / "reference" / "cli-reference.md"
 
@@ -117,7 +120,17 @@ def _default_str(default: Any) -> str:
     return str(default)
 
 
-def _option_row(param: Any) -> str:
+def _option_id(command: str, param: Any) -> str:
+    """The registry id of an option: ``<command path> <first long flag>``.
+
+    Same spelling as ``scripts/gen_option_vocabulary.py``'s inventory rows, so
+    the cross-surface cell looks up the row that inventory claims.
+    """
+    longs = [o for o in param.opts + param.secondary_opts if o.startswith("--")]
+    return f"{command} {longs[0]}"
+
+
+def _option_row(param: Any, cross: str | None = None) -> str:
     # A boolean flag pair (e.g. --demangle/--no-demangle) is one Click Option
     # with opts=["--demangle"] and secondary_opts=["--no-demangle"] -- listing
     # only opts drops the disable flag from the reference even though --help
@@ -165,10 +178,14 @@ def _option_row(param: Any) -> str:
     if not is_unset and default is not None and default != ():
         default_str = f"`{_default_str(default)}`"
     required = "yes" if param.required else "no"
-    return f"| {opts} | {required} | {default_str} | {_help_with_choices(param)} |"
+    row = f"| {opts} | {required} | {default_str} | {_help_with_choices(param)}"
+    # Root options are not inventoried (no concept), so they keep four columns.
+    return row + " |" if cross is None else f"{row} | {cross} |"
 
 
-def _render_command(name: str, cmd: Any, heading_level: int) -> list[str]:
+def _render_command(
+    name: str, cmd: Any, heading_level: int, refs: CrossRefs
+) -> list[str]:
     import click
 
     lines = [f"{'#' * heading_level} `{name}`", ""]
@@ -205,15 +222,23 @@ def _render_command(name: str, cmd: Any, heading_level: int) -> list[str]:
         lines += [
             "**Options**",
             "",
-            "| Option | Required | Default | Description |",
-            "|---|:--:|---|---|",
+            "| Option | Required | Default | Description | Same option on other surfaces |",
+            "|---|:--:|---|---|---|",
         ]
-        lines += [_option_row(p) for p in options]
+        lines += [
+            _option_row(
+                p,
+                refs.cell(_option_id(name, p), own="cli"),
+            )
+            for p in options
+        ]
         lines.append("")
 
     if isinstance(cmd, click.Group):
         for sub_name, sub_cmd in sorted(cmd.commands.items()):
-            lines += _render_command(f"{name} {sub_name}", sub_cmd, heading_level + 1)
+            lines += _render_command(
+                f"{name} {sub_name}", sub_cmd, heading_level + 1, refs
+            )
     return lines
 
 
@@ -227,6 +252,7 @@ def render() -> str:
 
     from abicheck.cli import main
 
+    refs = CrossRefs.load()
     lines = [
         GENERATED_NOTE,
         "",
@@ -238,6 +264,8 @@ def render() -> str:
         "[Dump & Compare Flags](../use/dump-compare-flags.md) for the "
         "narrative walkthroughs of the primary workflows; this page is the "
         "exhaustive field list only.",
+        "",
+        LEGEND,
         "",
     ]
     root_options = [
@@ -258,7 +286,7 @@ def render() -> str:
         lines += [_option_row(p) for p in root_options]
         lines.append("")
     for name, cmd in sorted(main.commands.items()):
-        lines += _render_command(name, cmd, heading_level=2)
+        lines += _render_command(name, cmd, heading_level=2, refs=refs)
     while lines and lines[-1] == "":
         lines.pop()
     lines.append("")
