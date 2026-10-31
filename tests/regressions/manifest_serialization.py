@@ -303,6 +303,7 @@ SERIALIZATION_BUG_CLASSES: tuple[BugClass, ...] = (
             "tests/test_section_readers_contract.py",
             "tests/test_cli_compare_must_understand.py",
             "tests/unit/storage/test_wire_contract.py",
+            "tests/test_family_f1_evidence_ablation.py",
         ),
         public_surfaces=("cli",),
         axes={

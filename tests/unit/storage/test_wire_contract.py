@@ -13,7 +13,7 @@ Two invariants:
 2. **Runtime-only refactors.** Re-declaring a model record with its fields
    in another order, under another class name, produces the same bytes.
 
-Plus the generated field inventory (D15 (1), `storage.wire_inventory`):
+Plus the generated field inventory (D15 (1), `tests/_wire_inventory.py`):
 `tests/fixtures/wire_contract/field_inventory.json` is regenerated from the
 encoders and diffed; a moved section needs a version bump and a D13
 migration.
@@ -53,12 +53,12 @@ from abicheck.serialization import snapshot_from_dict, snapshot_to_json
 from abicheck.storage.canonical import canonical_json
 from abicheck.storage.dto import SECTION_SCHEMA_VERSIONS, migration_source_versions
 from abicheck.storage.sectioned_document import SECTIONS_KEY
-from abicheck.storage.wire_inventory import field_inventory
+from tests._wire_inventory import field_inventory
 
 _PIN = (
     Path(__file__).resolve().parents[2] / "fixtures" / "wire_contract" / "sections.json"
 )
-#: The generated per-section field inventory (`storage.wire_inventory`, D15).
+#: The generated per-section field inventory (`tests/_wire_inventory.py`, D15).
 _INVENTORY = _PIN.with_name("field_inventory.json")
 
 

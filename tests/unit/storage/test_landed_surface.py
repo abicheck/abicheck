@@ -95,7 +95,6 @@ _INTERNAL_MODULES = (
     "abicheck.storage.tu_parse_store",
     "abicheck.storage.wire_extensions",
     "abicheck.storage.wire_field_names",
-    "abicheck.storage.wire_inventory",
     "abicheck.storage.wire_record_extensions",
 )
 

@@ -310,6 +310,7 @@ FAMILIES: dict[str, Family] = {
 
 
 _F1 = (
+    "storage.wire_extension_dropped_or_refused",
     "scoping.dependency_internals_in_contract",
     "classification.non_entity_finding_feeds_contract_coverage",
     "detector.selector_axis_unstamped",
