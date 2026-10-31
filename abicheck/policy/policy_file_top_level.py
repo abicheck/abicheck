@@ -86,7 +86,7 @@ def reject_unknown_top_level_keys(raw: dict[str, Any]) -> None:
         # instead of the generic unknown-key error.
         raise PolicyError(
             "policy file: the top-level 'acknowledgment:' key was renamed to "
-            "'acknowledgments:' (ADR-091 R3). Rename it in the policy document; "
+            "'acknowledgments:'. Rename it in the policy document; "
             "the old spelling is no longer accepted."
         )
     _reject_unknown_keys(raw, KNOWN_POLICY_FILE_KEYS, "policy file")
