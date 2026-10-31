@@ -1363,14 +1363,9 @@ class TestSuppressionsArray:
         )
         doc = to_sarif(self._make_result_with_suppressed([suppressed]))
         result = doc["runs"][0]["results"][0]
-        # A hand-built result has no recorded rule, so only the collapsed
-        # display label is knowable -- and no structured record is invented.
-        assert result["suppressions"] == [
-            {
-                "kind": "external",
-                "justification": "suppressed by an abicheck --suppress rule: intentional",
-            }
-        ]
+        # No recorded rule: only the display label is knowable; no record.
+        why = "suppressed by an abicheck --suppress rule: intentional"
+        assert result["suppressions"] == [{"kind": "external", "justification": why}]
 
     def test_unsuppressed_result_carries_no_suppressions_key(self) -> None:
         doc = to_sarif(_make_result([_breaking_change()]))
