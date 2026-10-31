@@ -459,7 +459,7 @@ jobs:
           header: ${{ matrix.lib.header }}
           build-info: abicheck_inputs/       # the one shared pack, every row
           depth: source
-          new-version: ${{ github.ref_name }}
+          new-label: ${{ github.ref_name }}
           output-file: ${{ matrix.lib.name }}.abicheck.json
       - uses: actions/upload-artifact@v4
         with:

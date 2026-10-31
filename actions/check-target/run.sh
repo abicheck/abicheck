@@ -15,7 +15,7 @@ _fail() {
 NAME="${INPUT_NAME:?}"
 PROFILE="${INPUT_PROFILE:?}"
 BASELINE_CHANNEL="${INPUT_BASELINE_CHANNEL:?}"
-REQUESTED_DEPTH="${INPUT_REQUESTED_DEPTH:?}"
+REQUESTED_DEPTH="${INPUT_DEPTH:?}"
 # G42 "Explicit check identifiers": this check's checks[].id, if the
 # project declared one -- folded into check_id's "~<explicit_id>" tail.
 # Empty (the default) is the pre-G42, unqualified check_id shape.

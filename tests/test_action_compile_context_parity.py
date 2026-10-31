@@ -70,7 +70,7 @@ RUN_SH = Path(__file__).resolve().parents[1] / "action" / "run.sh"
 _DUMP_MODE_MARKER = 'if [[ "$MODE" == "dump" ]]; then'
 _COMPARE_MODE_MARKER = 'elif [[ "$MODE" == "compare" ]]; then'
 
-_COMPILE_CONTEXT_START = 'add_single_flag "--ast-frontend" "${INPUT_AST_FRONTEND:-}"'
+_COMPILE_CONTEXT_START = 'add_single_flag "--ast-frontend" "${INPUT_FRONTEND:-}"'
 # No longer used for `mode: scan` itself; kept for `_run_add_flag_shlex_split`.
 _COMPILE_CONTEXT_END = (
     'if [[ "${INPUT_NOSTDINC:-false}" == "true" ]]; then\n    CMD+=(--nostdinc)\n  fi'
@@ -288,10 +288,10 @@ def _compile_context_region(
 
 
 _FULL_ENV = {
-    "INPUT_AST_FRONTEND": "clang",
-    "INPUT_GCC_PATH": "/opt/gcc-14/bin/g++",
+    "INPUT_FRONTEND": "clang",
+    "INPUT_COMPILER": "/opt/gcc-14/bin/g++",
     "INPUT_GCC_PREFIX": "aarch64-linux-gnu-",
-    "INPUT_GCC_OPTIONS": "-DFOO=1",
+    "INPUT_COMPILE_OPTIONS": "-DFOO=1",
     "INPUT_SYSROOT": "/opt/sysroot",
     "INPUT_NOSTDINC": "true",
 }
@@ -476,10 +476,10 @@ def _run_add_flag_shlex_split(
     )
     script = (
         harness
-        + 'add_flag_shlex_split "--compiler-option" "$INPUT_GCC_OPTIONS"\n'
+        + 'add_flag_shlex_split "--compiler-option" "$INPUT_COMPILE_OPTIONS"\n'
         + "printf '%s\\n' \"${CMD[@]}\"\n"
     )
-    env = {**os.environ, **(env_extra or {}), "INPUT_GCC_OPTIONS": value}
+    env = {**os.environ, **(env_extra or {}), "INPUT_COMPILE_OPTIONS": value}
     return _run_bash_script(script, env, check=check)
 
 
@@ -606,7 +606,7 @@ class TestCompileContextForwardingParity:
         already one complete, space-safe token, never shlex-split further.
         Unconditional ``shlex.split()`` previously re-tokenized on every
         whitespace character regardless of line breaks."""
-        env = {**_FULL_ENV, "INPUT_GCC_OPTIONS": "-march=armv8-a\n-DFOO=1\n"}
+        env = {**_FULL_ENV, "INPUT_COMPILE_OPTIONS": "-march=armv8-a\n-DFOO=1\n"}
         cmd, _ = _run_region(_DUMP_MODE_MARKER, env, _DUMP_COMPILE_CONTEXT_START)
         compile_blk = _read_compile_config_overlay(cmd)
         assert compile_blk["options"] == ["-march=armv8-a", "-DFOO=1"]
@@ -623,7 +623,7 @@ class TestCompileContextForwardingParity:
         by a `shlex.split()` that would have torn it into multiple tokens
         and diverged from scan's own token boundaries for the identical
         input."""
-        env = {**_FULL_ENV, "INPUT_GCC_OPTIONS": "-Xclang -load\n./evil.so\n"}
+        env = {**_FULL_ENV, "INPUT_COMPILE_OPTIONS": "-Xclang -load\n./evil.so\n"}
         cmd, _ = _run_region(_DUMP_MODE_MARKER, env, _DUMP_COMPILE_CONTEXT_START)
         compile_blk = _read_compile_config_overlay(cmd)
         assert compile_blk["options"] == ["-Xclang -load", "./evil.so"]
@@ -634,7 +634,7 @@ class TestCompileContextForwardingParity:
             **_FULL_ENV,
             "INPUT_OLD_LIBRARY": "old.so",
             "INPUT_NEW_LIBRARY": "new.so",
-            "INPUT_GCC_OPTIONS": "-march=armv8-a\n-DFOO=1\n",
+            "INPUT_COMPILE_OPTIONS": "-march=armv8-a\n-DFOO=1\n",
         }
         cmd, _ = _run_region(_COMPARE_MODE_MARKER, env, _COMPARE_COMPILE_CONTEXT_START)
         compile_blk = _read_compile_config_overlay(cmd)
@@ -644,7 +644,7 @@ class TestCompileContextForwardingParity:
         """Single-line gcc-options keeps its existing shell-quoting-aware
         splitting (the direct config-key replacement for the old scalar
         --gcc-options flag) -- only the multi-line handling changed."""
-        env = {**_FULL_ENV, "INPUT_GCC_OPTIONS": '-DMSG="hello world" -DOK=1'}
+        env = {**_FULL_ENV, "INPUT_COMPILE_OPTIONS": '-DMSG="hello world" -DOK=1'}
         cmd, _ = _run_region(_DUMP_MODE_MARKER, env, _DUMP_COMPILE_CONTEXT_START)
         compile_blk = _read_compile_config_overlay(cmd)
         assert compile_blk["options"] == ["-DMSG=hello world", "-DOK=1"]
@@ -906,12 +906,12 @@ class TestCompileContextForwardingParity:
         )
         script = (
             harness
-            + 'add_flag_shlex_split "--compiler-option" "$INPUT_GCC_OPTIONS"\n'
+            + 'add_flag_shlex_split "--compiler-option" "$INPUT_COMPILE_OPTIONS"\n'
             + "printf '%s\\0' \"${CMD[@]}\"\n"
         )
         env = {
             **os.environ,
-            "INPUT_GCC_OPTIONS": "-DFOO=1 -DBAR=2",
+            "INPUT_COMPILE_OPTIONS": "-DFOO=1 -DBAR=2",
             "PATH": f"{tmp_path}{os.pathsep}{os.environ.get('PATH', '')}",
         }
         result = _run_bash_script(script, env, check=True, text=False)
@@ -951,7 +951,7 @@ class TestCompileContextForwardingParity:
         fake_python3.chmod(0o755)
         env = {
             **_FULL_ENV,
-            "INPUT_GCC_OPTIONS": "-DFOO=1 -DBAR=2",
+            "INPUT_COMPILE_OPTIONS": "-DFOO=1 -DBAR=2",
             "PATH": f"{tmp_path}{os.pathsep}{os.environ.get('PATH', '')}",
         }
         tokens, _ = _run_region(
@@ -1078,7 +1078,7 @@ class TestCompileContextMergesWithExplicitBuildConfig:
         cmd, _ = _run_region(
             _DUMP_MODE_MARKER,
             {
-                "INPUT_GCC_PATH": "/opt/gcc-14/bin/g++",
+                "INPUT_COMPILER": "/opt/gcc-14/bin/g++",
                 "INPUT_BUILD_CONFIG": str(build_config),
             },
             _DUMP_COMPILE_CONTEXT_START,
@@ -1187,7 +1187,7 @@ class TestCompileContextMergesWithRelativeBuildConfig:
         cmd, stderr = _run_region_with_cwd(
             _DUMP_MODE_MARKER,
             {
-                "INPUT_GCC_PATH": "/opt/gcc-14/bin/g++",
+                "INPUT_COMPILER": "/opt/gcc-14/bin/g++",
                 "INPUT_BUILD_CONFIG": ".abicheck.yml",
             },
             tmp_path,
@@ -1237,7 +1237,7 @@ class TestCompileContextPreservesUsableDiscoveredCompileDb:
         cmd, _ = _run_region_with_cwd(
             _DUMP_MODE_MARKER,
             {
-                "INPUT_GCC_PATH": "/opt/gcc-14/bin/g++",
+                "INPUT_COMPILER": "/opt/gcc-14/bin/g++",
                 "INPUT_SOURCES": str(tmp_path),
             },
             tmp_path,
@@ -1258,7 +1258,7 @@ class TestCompileContextPreservesUsableDiscoveredCompileDb:
         cmd, _ = _run_region_with_cwd(
             _DUMP_MODE_MARKER,
             {
-                "INPUT_GCC_PATH": "/opt/gcc-14/bin/g++",
+                "INPUT_COMPILER": "/opt/gcc-14/bin/g++",
                 "INPUT_SOURCES": str(tmp_path),
             },
             tmp_path,
@@ -1335,7 +1335,7 @@ class TestCompileContextPreservesUsableDiscoveredCompileDb:
         (src_dir / "compile_commands.json").write_text("[]", encoding="utf-8")
         cmd, _ = _run_region_with_cwd(
             _DUMP_MODE_MARKER,
-            {"INPUT_GCC_PATH": "/opt/gcc-14/bin/g++", "INPUT_SOURCES": "src"},
+            {"INPUT_COMPILER": "/opt/gcc-14/bin/g++", "INPUT_SOURCES": "src"},
             tmp_path,
             _DUMP_COMPILE_CONTEXT_START,
         )
@@ -1374,7 +1374,7 @@ class TestCompileContextDiscoversSourcesRootOwnConfig:
         (src_dir / "compile_commands.json").write_text("[]", encoding="utf-8")
         cmd, stderr = _run_region_with_cwd(
             _DUMP_MODE_MARKER,
-            {"INPUT_GCC_PATH": "/opt/gcc-14/bin/g++", "INPUT_SOURCES": "src"},
+            {"INPUT_COMPILER": "/opt/gcc-14/bin/g++", "INPUT_SOURCES": "src"},
             tmp_path,
             _DUMP_COMPILE_CONTEXT_START,
         )
@@ -1407,7 +1407,7 @@ class TestCompileContextDiscoversSourcesRootOwnConfig:
         (src_dir / "compile_commands.json").write_text("[]", encoding="utf-8")
         _cmd, _ = _run_region_with_cwd(
             _DUMP_MODE_MARKER,
-            {"INPUT_GCC_PATH": "/opt/gcc-14/bin/g++", "INPUT_SOURCES": "src"},
+            {"INPUT_COMPILER": "/opt/gcc-14/bin/g++", "INPUT_SOURCES": "src"},
             tmp_path,
             _DUMP_COMPILE_CONTEXT_START,
         )
@@ -1427,7 +1427,7 @@ class TestCompileContextDiscoversSourcesRootOwnConfig:
         # Deliberately no `.abicheck.yml` at all under src_dir.
         cmd, _ = _run_region_with_cwd(
             _DUMP_MODE_MARKER,
-            {"INPUT_GCC_PATH": "/opt/gcc-14/bin/g++", "INPUT_SOURCES": "src"},
+            {"INPUT_COMPILER": "/opt/gcc-14/bin/g++", "INPUT_SOURCES": "src"},
             tmp_path,
             _DUMP_COMPILE_CONTEXT_START,
         )
@@ -1451,7 +1451,7 @@ class TestCompileContextDiscoversSourcesRootOwnConfig:
         )
         cmd, _ = _run_region_with_cwd(
             _DUMP_MODE_MARKER,
-            {"INPUT_GCC_PATH": "/opt/gcc-14/bin/g++", "INPUT_SOURCES": "src"},
+            {"INPUT_COMPILER": "/opt/gcc-14/bin/g++", "INPUT_SOURCES": "src"},
             tmp_path,
             _DUMP_COMPILE_CONTEXT_START,
         )
@@ -1485,7 +1485,7 @@ class TestCompileContextDiscoversSourcesRootOwnConfig:
         (src_dir / ".abicheck.yml").write_text("", encoding="utf-8")
         cmd, _ = _run_region_with_cwd(
             _DUMP_MODE_MARKER,
-            {"INPUT_GCC_PATH": "/opt/gcc-14/bin/g++", "INPUT_SOURCES": "src"},
+            {"INPUT_COMPILER": "/opt/gcc-14/bin/g++", "INPUT_SOURCES": "src"},
             tmp_path,
             _DUMP_COMPILE_CONTEXT_START,
         )
@@ -1520,7 +1520,7 @@ class TestCompileContextDiscoversSourcesRootOwnConfig:
         )
         cmd, _ = _run_region_with_cwd(
             _DUMP_MODE_MARKER,
-            {"INPUT_GCC_PATH": "/opt/gcc-14/bin/g++", "INPUT_SOURCES": "src"},
+            {"INPUT_COMPILER": "/opt/gcc-14/bin/g++", "INPUT_SOURCES": "src"},
             tmp_path,
             _DUMP_COMPILE_CONTEXT_START,
         )

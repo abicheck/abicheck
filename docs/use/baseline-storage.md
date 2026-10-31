@@ -71,7 +71,7 @@ jobs:
           mode: dump
           new-library: build/libfoo.so
           new-header: include/foo.h
-          new-version: ${{ github.ref_name }}
+          new-label: ${{ github.ref_name }}
           output-file: libfoo-${{ github.ref_name }}.abicheck.json
 
       - name: Upload baseline to release

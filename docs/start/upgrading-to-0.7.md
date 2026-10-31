@@ -58,12 +58,37 @@ unknown-key error, and the run stops instead of changing meaning.
 
 ## Action and typed API
 
-The composite GitHub Action's own inputs (`old-version`, `new-version`,
-`sysroot`, `old-root`, `new-root`) are unchanged in 0.7, so a workflow that sets
-them needs no change for this page.
+The composite GitHub Action forwards these flags itself, so the CLI renames
+above need no change in a workflow that uses only the Action. The Action's own
+inputs are renamed too; see the table below.
 
-The `extra-args` input is different: it is passed to the CLI as raw arguments.
-A workflow that passes a retired spelling there, for example
-`extra-args: --version 2.0`, now fails with exit 64. Change it to the new
-spelling (`--label 2.0`). The Action's own inputs are renamed in a later step of
-the same ADR; this page will list them when they are.
+## Action input renames
+
+Unlike the CLI, the Action has **no transition period**: each renamed input
+below is retired as of this release. The new name replaces the old one at once,
+and setting the old name fails the run before any analysis, with an
+`::error::` that names the new input. Change the workflow in the same edit
+that moves to this release.
+
+| 0.6 input | 0.7 input | Notes |
+|---|---|---|
+| `ast-frontend` | `frontend` | |
+| `gcc-path` | `compiler` | Takes a compiler path or a cross-toolchain prefix. |
+| `gcc-prefix` | `compiler` | Removed. `compiler` takes the same value. |
+| `gcc-options` | `compile-options` | |
+| `analysis-assurance-complete` | `require-complete` | Same `true`/`false` override of `assurance.require_complete`. |
+| `public-header-dir` | `public-header-dirs` | |
+| `debug-info1`, `debug-info2` | `old-debug-info`, `new-debug-info` | |
+| `devel-pkg1`, `devel-pkg2` | `old-header`, `new-header` | These now also accept a development package. |
+| `old-version`, `new-version` | `old-label`, `new-label` | Report labels; the defaults stay `old` and `new`. |
+| `policy-file` | `policy` | `policy` takes either a built-in profile name or a policy file path. |
+| `requested-depth` (`check-target`) | `depth` | |
+| `contract-file` (`check-target`) | `contract` | |
+
+`check-target`'s `analysis-assurance-complete`, `ast-frontend`, `gcc-path`,
+`gcc-options`, `gcc-prefix` and `policy-file` map to the same new names as the
+root Action. Its `consumer-*` inputs are unchanged.
+
+The `extra-args` input is passed to the CLI as raw arguments. A workflow
+that passes a retired spelling there, for example `extra-args: --version 2.0`,
+now fails with exit 64. Change it to the new spelling (`--label 2.0`).

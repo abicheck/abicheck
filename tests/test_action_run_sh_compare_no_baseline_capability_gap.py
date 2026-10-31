@@ -220,7 +220,7 @@ class TestAuditOnlyCompareRejectsSinceChangedPathBudgetUpfront:
         [
             ("INPUT_OLD_HEADER", "old_include/foo.h"),
             ("INPUT_OLD_INCLUDE", "old_include/"),
-            ("INPUT_OLD_VERSION", "1.0.0"),
+            ("INPUT_OLD_LABEL", "1.0.0"),
         ],
     )
     def test_old_sided_inputs_are_rejected(
@@ -249,7 +249,7 @@ class TestAuditOnlyCompareRejectsSinceChangedPathBudgetUpfront:
     ) -> None:
         # Codex review, PR #1223, round 11 (P1): old-version's Action-level
         # default is the literal placeholder 'old' (action.yml), so GitHub
-        # Actions always populates INPUT_OLD_VERSION with at least 'old' --
+        # Actions always populates INPUT_OLD_LABEL with at least 'old' --
         # never actually empty on a real invocation. A bare truthiness
         # check therefore rejected *every* audit-only invocation, not just
         # ones that explicitly set old-version to something else.
@@ -257,7 +257,7 @@ class TestAuditOnlyCompareRejectsSinceChangedPathBudgetUpfront:
             tmp_path,
             {
                 "INPUT_NEW_LIBRARY": str(_snapshot_path(_NON_GATING_CASE)),
-                "INPUT_OLD_VERSION": "old",
+                "INPUT_OLD_LABEL": "old",
             },
         )
         assert outputs["_returncode"] == 0, outputs

@@ -65,7 +65,7 @@ in `v0.6.0`, so pin that release tag for a reproducible workflow:
 - uses: abicheck/abicheck/actions/check-target@v0.7.0
   with:
     name: libfoo
-    requested-depth: source
+    depth: source
     evidence-producer: replay
     sources: .   # replay's own default when omitted -- a bare pointer, no build step needed
     # ... baseline/candidate inputs per your baseline channel ...

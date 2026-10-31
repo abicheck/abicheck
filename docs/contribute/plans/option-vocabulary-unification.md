@@ -313,6 +313,31 @@ removed in the same change (see Phase 6): `--version`, `--abi3`, `--old-root`,
 `--used-by-manifest`, the `--bundle-facts-*` family) is not in this change; R19
 is Python-only. Migration: `docs/start/upgrading-to-0.7.md`.
 
+**Result (Action part, ADR-091 D5 R1/R2/R4–R7/R17/R18).** Done under the
+2026-10-30 no-transition policy, so there is no one-release alias for the
+Action: each new input replaces the old one in the same change, and the old
+name becomes a RETIRED tombstone. Root `action.yml`: `policy` takes a built-in
+name or a file (`policy-file` folds into it); `frontend` (was `ast-frontend`);
+`compiler` (`gcc-path`, with `gcc-prefix` removed as a fallback spelling);
+`compile-options` (`gcc-options`); `require-complete` (`analysis-assurance-complete`;
+the `require-complete-analysis` tombstone now names it); `public-header-dirs`;
+`old-debug-info`/`new-debug-info`; `old-header`/`new-header` (absorb
+`devel-pkg1`/`devel-pkg2`); `old-label`/`new-label` (defaults `old`/`new` kept, so
+the forwarded `--label` argv is unchanged). `actions/check-target`: `depth`
+(`requested-depth`), `contract` (`contract-file`), and the same compile and
+policy names; its `consumer-*` inputs are unchanged. The old names are listed in
+`tests/test_action_retired_inputs_contract.py`'s frozen tombstone set and in the
+run step's `_NON_RUN_SH_INPUTS`, since only `validate-inputs.sh` consumes them,
+and in the registry's `retired` tier. The registry drops the Action exceptions
+for these renames; one stays, `compile-options` (R5 names it, but its bare leaf
+`options` is not ambiguous, so the block prefix is recorded as a deviation).
+The Action budget fell from 53 to 49 analysis inputs and is recorded at 49. The
+reusable workflows keep their own `workflow_call` input names, which this
+change does not rename; they forward to the new Action names. The in-repo
+workflows, the Action test suites and the docs use the new names;
+`docs/start/upgrading-to-0.7.md` has the rename table. Python (R2, R3, R7–R10,
+R18 `run_dump`) and check-target's own sub-action docs are the rest of Phase 4.
+
 ## Phase 5 — Surface budget (D4)
 
 - R14: retired inputs stay declared as tombstones (`tests/test_action_retired_inputs_contract.py`); they do not count toward the budget. Convert the two ignored inputs (`jobs`, `allow-build-query`) into tombstones that fail the run, and add them to that test's `_TOMBSTONES_THAT_MUST_STAY_DECLARED`.

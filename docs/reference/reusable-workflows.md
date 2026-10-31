@@ -23,9 +23,15 @@ built on top of [`actions/check-target`](check-target.md):
 
 ## `check-single.yml`
 
-Every input mirrors [`actions/check-target/action.yml`](check-target.md)'s
-own input surface 1:1 (same names, same defaults) — see that page for the
-full rationale behind each one. Outputs are `check-target`'s own six
+Most inputs mirror [`actions/check-target/action.yml`](check-target.md)'s
+input surface (same defaults), but not all names match. The workflow keeps its
+own input names, and it forwards them to the Action under the new names:
+`requested-depth` → `depth`, `contract-file` → `contract`, `ast-frontend` →
+`frontend`, `gcc-path` and `gcc-prefix` → `compiler`, `gcc-options` →
+`compile-options`, `analysis-assurance-complete` → `require-complete`, and
+`policy-file` → `policy`. The workflow inputs keep their names. See
+the [check-target page](check-target.md) for the full rationale behind each
+one. Outputs are `check-target`'s own six
 outputs, forwarded unchanged, plus `report-artifact-name`.
 
 `report-path` is a path inside this job's own ephemeral runner workspace —
@@ -261,7 +267,7 @@ profile that sets no `frontend:` falls back to the global input unchanged.
 
 **`kind: bundle` cells are excluded from this override.** A bundle cell's
 operand is the `bundle-staging` *directory* it stages its members into, and
-the root Action rejects every non-`auto` `ast-frontend` for a
+the root Action rejects every non-`auto` `frontend` for a
 directory/package operand outright — the per-library fan-out never threads an
 L2 compile context to each pair's header dump, so the requested frontend
 could not be applied and silently dropping it would parse headers under the

@@ -44,7 +44,7 @@ switched off by hand:
     name: libfoo
     profile: linux-gcc              # a profiles: id from .abicheck.yml
     baseline-channel: accepted-main
-    requested-depth: headers
+    depth: headers
     new-library: build/libfoo.so
     gate-mode: advisory
 

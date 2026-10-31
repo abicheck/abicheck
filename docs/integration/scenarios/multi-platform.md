@@ -119,7 +119,8 @@ abicheck project plan --toolchain-bindings bindings.yml \
   provisions dependencies via that profile's own `dependency_source`, and
   forwards the profile's own `compile_ast_frontend`/`compile_gcc_path`/
   `compile_gcc_options` as that cell's `ast-frontend`/`gcc-path`/
-  `gcc-options` Action inputs.
+  `gcc-options` inputs (the reusable workflow's own input names; they reach
+  the root Action as `frontend`, `compiler` and `compile-options`).
 - Each cell uploads its own report; [`aggregate`](../../use/aggregate-reports.md)
   folds them back into one gate — and, since report ids are
   `target@profile#channel@depth`-shaped, reconciles the same finding across

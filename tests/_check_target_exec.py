@@ -47,7 +47,7 @@ _BASE_IDENTITY = {
     "INPUT_NAME": "libpvxs",
     "INPUT_PROFILE": PROFILE,
     "INPUT_BASELINE_CHANNEL": "accepted-main",
-    "INPUT_REQUESTED_DEPTH": "headers",
+    "INPUT_DEPTH": "headers",
     "INPUT_GATE_MODE": "local",
     "INPUT_PROJECT": "epics-base/pvxs",
     "INPUT_HEAD_SHA": "deadbeef",

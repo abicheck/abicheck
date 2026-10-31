@@ -87,17 +87,11 @@ inputs:
     required: false
 
   # ── Package inputs (compare mode, directory/package operands only) ──────────
-  debug-info1:
+  old-debug-info:
     description: 'Debug info package for old side (RPM/Deb/tar). compare mode, directory/package operands only.'
     required: false
-  debug-info2:
+  new-debug-info:
     description: 'Debug info package for new side (RPM/Deb/tar). compare mode, directory/package operands only.'
-    required: false
-  devel-pkg1:
-    description: 'Development package with headers for old side. compare mode, directory/package operands only.'
-    required: false
-  devel-pkg2:
-    description: 'Development package with headers for new side. compare mode, directory/package operands only.'
     required: false
   dso-only:
     description: 'Only compare shared objects, skip executables. compare mode, directory/package operands only. Deliberately no declared default (Codex review, fresh evidence): the synthesized release:/gate: config overlay needs to tell "omitted" apart from an explicit "false" (which must override a discovered/explicit .abicheck.yml''s own release.dso_only: true) -- a declared default would make every omitted invocation indistinguishable from an explicit false, silently losing that override.'
@@ -109,7 +103,7 @@ inputs:
     description: 'Exit 8 when a library present in old is proven removed in new -- NEW must have a proven-complete declared inventory: either a stored ProjectSnapshot package whose capture asserted inventory_complete, or a package archive (e.g. .rpm/.deb) whose own readable member table this run extracted and could enumerate in full; a live directory, or an archive whose member table could not be read in full, is an unproven inventory and an unmatched library there is an incomplete scope instead, governed by the scope.on_incomplete key in .abicheck.yml. compare mode, directory/package operands only. Deliberately no declared default -- see dso-only''s own description for why.'
     required: false
 
-  analysis-assurance-complete:
+  require-complete:
     description: >
       Per-job override of `.abicheck.yml`'s `assurance.require_complete` for
       this invocation. Unset (the default) inherits the config unchanged.
@@ -135,12 +129,12 @@ inputs:
       silently hides the removed/added declarations you're trying to check.
     required: false
   old-header:
-    description: 'Public header(s) for the old side only (overrides header for old). Space-separated.'
+    description: 'Public header(s) for the old side only (overrides header for old). Space-separated. A development package (RPM/Deb/tar) with headers is accepted here too, replacing the retired devel-pkg1.'
     required: false
   new-header:
-    description: 'Public header(s) for the new side only (overrides header for new). Space-separated.'
+    description: 'Public header(s) for the new side only (overrides header for new). Space-separated. A development package (RPM/Deb/tar) with headers is accepted here too, replacing the retired devel-pkg2.'
     required: false
-  public-header-dir:
+  public-header-dirs:
     description: >
       Directory whose headers are treated as public for provenance
       classification (repeatable, space-separated) — establishes the
@@ -177,7 +171,7 @@ inputs:
       `#include`s a *dependency's* header from a separate include root
       (e.g. PVXS's own `version.h` pulling in EPICS Base's
       `epicsVersion.h`, found in a real PVXS Action acceptance run) --
-      `header`/`public-header-dir` alone never cover a dependency's own
+      `header`/`public-header-dirs` alone never cover a dependency's own
       headers. On ELF the parse then aborts on the first such include with
       a "file not found" error; on Mach-O/PE it can instead warn and fall
       back to export-table scoping (`--header`/`--include` are silently
@@ -209,11 +203,11 @@ inputs:
     required: false
 
   # ── Version labels ──────────────────────────────────────────────────────────
-  old-version:
+  old-label:
     description: 'Version label for the old library (embedded in reports).'
     required: false
     default: 'old'
-  new-version:
+  new-label:
     description: 'Version label for the new library (embedded in reports).'
     required: false
     default: 'new'
@@ -223,26 +217,27 @@ inputs:
     description: 'Language mode for header AST parsing: "c++" or "c".'
     required: false
     default: 'c++'
-  ast-frontend:
+  frontend:
     description: >
       L2 header-AST frontend for native-binary inputs: "auto" (resolves to
-      castxml and never changes producer unless the CLI's
-      --allow-ast-frontend-fallback flag is also passed via extra-args (or
-      ABICHECK_ALLOW_AST_FALLBACK=1 is set) — with that opt-in, a recognized
+      castxml and never changes producer unless
+      `compile.ast_frontend_fallback: true` is set in the `.abicheck.yml`
+      build-config (or ABICHECK_ALLOW_AST_FALLBACK=1 is set) — with that opt-in, a recognized
       castxml toolchain-version mismatch, an unsupported castxml release, or
       a direct-include-guard failure falls back to clang, G16; without it,
       and on any host with no castxml at all, auto does not silently switch
       to clang — the command fails asking you to install castxml or pass
-      ast-frontend: clang explicitly. One exception: a non-host
-      --frontend-context (SYCL/DPC++, passed via extra-args) routes an auto
+      frontend: clang explicitly. One exception: a non-host
+      `compile.frontend_context` (SYCL/DPC++, set in the `.abicheck.yml`
+      build-config) routes an auto
       that resolves to plain castxml (no pin) straight to clang with no
       opt-in needed, since castxml can't satisfy it at all — but any way of
       pinning the resolved backend away from plain castxml-or-clang still
-      rejects it: an explicit ast-frontend: castxml, auto pinned to castxml
+      rejects it: an explicit frontend: castxml, auto pinned to castxml
       via ABICHECK_AST_FRONTEND=castxml, and hybrid (explicit or auto
       pinned via ABICHECK_AST_FRONTEND=hybrid — hybrid has no device
       concept either) all reject a non-host context. Explicit
-      ast-frontend: clang satisfies it directly, and so does auto pinned to
+      frontend: clang satisfies it directly, and so does auto pinned to
       clang via ABICHECK_AST_FRONTEND=clang),
       "castxml" (default), "clang" (clang -ast-dump=json; explicit opt-in
       for clang-only hosts), or "hybrid" (runs both and merges them; needs
@@ -256,35 +251,24 @@ inputs:
       across a release; this input has no sided spelling.) Same as the
       ABICHECK_AST_FRONTEND env var.
     required: false
-  gcc-path:
+  compiler:
     description: >
-      Path to GCC/G++ (or clang) cross-compiler binary. Like dump and
-      single-pair compare (including the audit-only shape), it folds into
-      a synthesized .abicheck.yml compile: block forwarded via --config
-      (together with gcc-prefix, gcc-options, sysroot, and nostdinc, when
-      any of those are also set). Applies to dump and compare mode, on
-      single-pair and directory/package (release) operands alike (same
-      scope as ast-frontend above). Combining any of this group with
-      build-config
-      is supported: the synthesized compile: block is merged into a copy
-      of the named build-config, and this Action's input wins on a key
-      conflict.
+      Path to GCC/G++ (or clang) cross-compiler binary, or a cross-toolchain
+      prefix such as aarch64-linux-gnu- (a trailing - is read as a prefix,
+      anything else as a path). The Action passes each compile-context input
+      to the CLI as a --set compile.* argument (compile.compiler here), not
+      through a synthesized .abicheck.yml document or --config. The CLI owns
+      the compile: schema and its precedence over .abicheck.yml, so
+      build-config combines with these inputs without any merge step on the
+      Action's side. Applies to dump and compare mode, on single-pair and
+      directory/package (release) operands alike (same scope as frontend
+      above).
     required: false
-  gcc-prefix:
+  compile-options:
     description: >
-      Cross-toolchain prefix, e.g. aarch64-linux-gnu-. Folds into the same
-      synthesized compile: block gcc-path describes above, on every mode
-      that accepts it (a full gcc-path wins if both are set, since the
-      merged compile.compiler config key can only hold one). Applies to
-      dump and compare mode, on single-pair and directory/package
-      (release) operands alike (same scope as ast-frontend above).
-    required: false
-  gcc-options:
-    description: >
-      Extra compiler flags passed through to the header frontend. Folds
-      into a synthesized compile.options list in the same synthesized
-      compile: block gcc-path describes above, on every mode that accepts
-      it. A single-line
+      Extra compiler flags passed through to the header frontend. Forwarded
+      as a --set compile.options=… list alongside compiler (see that input's
+      description), on every mode that accepts it. A single-line
       value is shell-quoting-aware split on whitespace into separate flags
       (a quoted segment such as -DMSG="hello world" stays one flag, but
       that one flag still contains a space internally); a multi-line
@@ -300,18 +284,18 @@ inputs:
       verbatim (a raw CLI arg is not subject to compile.options' own
       whitespace-free-atom contract). Applies to dump and compare mode, on
       single-pair and directory/package (release) operands alike (same
-      scope as ast-frontend above).
+      scope as frontend above).
     required: false
   sysroot:
-    description: 'Alternative system root directory for cross-compilation. On dump and single-pair compare (including the audit-only shape) this folds into the same synthesized compile: block gcc-path describes above (deps-tree keeps its own direct --root CLI forwarding, unaffected -- it is not part of this compile-context group at all). Applies to dump, deps-tree, and compare mode, the latter on single-pair and directory/package (release) operands alike (same scope as ast-frontend above).'
+    description: 'Alternative system root directory for cross-compilation. On dump and single-pair compare (including the audit-only shape) this is forwarded as a --set compile.sysroot argument (see compiler above) (deps-tree keeps its own direct --root CLI forwarding, unaffected -- it is not part of this compile-context group at all). Applies to dump, deps-tree, and compare mode, the latter on single-pair and directory/package (release) operands alike (same scope as frontend above).'
     required: false
   nostdinc:
     description: >
-      Do not search standard system include paths. On dump and single-pair
-      compare this folds into the same synthesized compile: block gcc-path
-      describes above. Applies to dump and compare mode, on single-pair and
+      Do not search standard system include paths. On dump and compare
+      this is forwarded as a --set compile.nostdinc argument (see compiler
+      above). Applies to dump and compare mode, on single-pair and
       directory/package (release) operands alike (same scope as
-      ast-frontend above).
+      frontend above).
     required: false
     default: 'false'
 
@@ -775,17 +759,15 @@ inputs:
       input.
     required: false
   policy:
-    description: 'Built-in policy profile: strict_abi (default), sdk_vendor, plugin_abi.'
+    description: >
+      Policy for the run: a built-in profile name (strict_abi (default),
+      sdk_vendor, plugin_abi, or a packaged one such as `security`), or the
+      path to a YAML policy document with per-kind (overrides:) or
+      selector-scoped (reclassify:) verdict re-classification. Forwarded as
+      `--policy`, which takes either one. Replaces the retired policy-file
+      input.
     required: false
     default: 'strict_abi'
-  policy-file:
-    description: >
-      Path to a YAML policy document with per-kind (overrides:) or
-      selector-scoped (reclassify:) verdict re-classification, or the name of
-      a packaged built-in one (e.g. `security`). Forwarded as `--policy`,
-      which takes a profile name or a document; setting this outranks
-      `policy` for the run, exactly as the removed `--policy-file` flag did.
-    required: false
   suppress:
     description: >
       Path to a YAML suppression file to filter known/intentional changes.
@@ -896,11 +878,12 @@ inputs:
       release fan-out until that operand was given real semantics:
       the fan-out folds every compared member's own `analysis_assurance` with
       `max` into the same exit axis, so `assurance.require_complete: true` is
-      no longer single-pair-only. Still
-      declared here so a workflow that sets it gets an explicit `::error::`
-      naming that replacement instead of a silently-ignored input; set
+      no longer single-pair-only. Its replacement is `require-complete`, the
+      per-job override of `assurance.require_complete`. Still declared here so
+      a workflow that sets it gets an explicit `::error::` naming that
+      replacement instead of a silently-ignored input; set
       `assurance.require_complete: true` in your `.abicheck.yml` and pass
-      that file as build-config instead, then remove this input.
+      that file as build-config, or set `require-complete`, then remove this input.
     required: false
     default: 'false'
   annotate:
@@ -1013,6 +996,99 @@ inputs:
       comment.
     required: false
     default: ${{ github.token }}
+
+  # ── Retired inputs (ADR-091 renames) ────────────────────────────────────
+  ast-frontend:
+    description: >
+      RETIRED (no transition period): renamed to `frontend`.
+      Setting this input fails the run before any analysis with an
+      `::error::` naming `frontend`. Replace `ast-frontend` with `frontend`, then
+      remove `ast-frontend`.
+    required: false
+  gcc-path:
+    description: >
+      RETIRED (no transition period): renamed to `compiler`.
+      Setting this input fails the run before any analysis with an
+      `::error::` naming `compiler`. Replace `gcc-path` with `compiler`, then
+      remove `gcc-path`.
+    required: false
+  gcc-options:
+    description: >
+      RETIRED (no transition period): renamed to `compile-options`.
+      Setting this input fails the run before any analysis with an
+      `::error::` naming `compile-options`. Replace `gcc-options` with `compile-options`, then
+      remove `gcc-options`.
+    required: false
+  analysis-assurance-complete:
+    description: >
+      RETIRED (no transition period): renamed to `require-complete`.
+      Setting this input fails the run before any analysis with an
+      `::error::` naming `require-complete`. Replace `analysis-assurance-complete` with `require-complete`, then
+      remove `analysis-assurance-complete`.
+    required: false
+  public-header-dir:
+    description: >
+      RETIRED (no transition period): renamed to `public-header-dirs`.
+      Setting this input fails the run before any analysis with an
+      `::error::` naming `public-header-dirs`. Replace `public-header-dir` with `public-header-dirs`, then
+      remove `public-header-dir`.
+    required: false
+  debug-info1:
+    description: >
+      RETIRED (no transition period): renamed to `old-debug-info`.
+      Setting this input fails the run before any analysis with an
+      `::error::` naming `old-debug-info`. Replace `debug-info1` with `old-debug-info`, then
+      remove `debug-info1`.
+    required: false
+  debug-info2:
+    description: >
+      RETIRED (no transition period): renamed to `new-debug-info`.
+      Setting this input fails the run before any analysis with an
+      `::error::` naming `new-debug-info`. Replace `debug-info2` with `new-debug-info`, then
+      remove `debug-info2`.
+    required: false
+  old-version:
+    description: >
+      RETIRED (no transition period): renamed to `old-label`.
+      Setting this input fails the run before any analysis with an
+      `::error::` naming `old-label`. Replace `old-version` with `old-label`, then
+      remove `old-version`.
+    required: false
+  new-version:
+    description: >
+      RETIRED (no transition period): renamed to `new-label`.
+      Setting this input fails the run before any analysis with an
+      `::error::` naming `new-label`. Replace `new-version` with `new-label`, then
+      remove `new-version`.
+    required: false
+  policy-file:
+    description: >
+      RETIRED (no transition period): renamed to `policy`.
+      Setting this input fails the run before any analysis with an
+      `::error::` naming `policy`. Replace `policy-file` with `policy`, then
+      remove `policy-file`.
+    required: false
+  gcc-prefix:
+    description: >
+      RETIRED (no transition period): renamed to `compiler`.
+      Setting this input fails the run before any analysis with an
+      `::error::` naming `compiler`. Replace `gcc-prefix` with `compiler`, then
+      remove `gcc-prefix`.
+    required: false
+  devel-pkg1:
+    description: >
+      RETIRED (no transition period): renamed to `old-header`.
+      Setting this input fails the run before any analysis with an
+      `::error::` naming `old-header`. Replace `devel-pkg1` with `old-header`, then
+      remove `devel-pkg1`.
+    required: false
+  devel-pkg2:
+    description: >
+      RETIRED (no transition period): renamed to `new-header`.
+      Setting this input fails the run before any analysis with an
+      `::error::` naming `new-header`. Replace `devel-pkg2` with `new-header`, then
+      remove `devel-pkg2`.
+    required: false
 
 outputs:
   verdict:
@@ -1325,6 +1401,10 @@ runs:
       shell: bash
       env:
         INPUT_MODE: ${{ inputs.mode }}
+        # Retired by the ADR-091 renames: tombstones, rejected here (see the
+        # Retired inputs block above). Each one's replacement is validated below.
+        INPUT_POLICY_FILE: ${{ inputs.policy-file }}
+        INPUT_NEW_VERSION: ${{ inputs.new-version }}
         # Removed inputs, kept declared as tombstones so a pinned
         # workflow that still sets one is told rather than silently
         # ignored (see their own descriptions above). Consumed *only*
@@ -1345,17 +1425,21 @@ runs:
         INPUT_OLD_HEADER: ${{ inputs.old-header }}
         INPUT_OLD_INCLUDE: ${{ inputs.old-include }}
         INPUT_OLD_VERSION: ${{ inputs.old-version }}
+        INPUT_OLD_LABEL: ${{ inputs.old-label }}
         INPUT_OLD_LIBRARY: ${{ inputs.old-library }}
         INPUT_FORMAT: ${{ inputs.format }}
         INPUT_UPLOAD_SARIF: ${{ inputs.upload-sarif }}
         INPUT_DEBUG_INFO1: ${{ inputs.debug-info1 }}
+        INPUT_OLD_DEBUG_INFO: ${{ inputs.old-debug-info }}
         INPUT_DEBUG_INFO2: ${{ inputs.debug-info2 }}
+        INPUT_NEW_DEBUG_INFO: ${{ inputs.new-debug-info }}
         INPUT_DEVEL_PKG1: ${{ inputs.devel-pkg1 }}
         INPUT_DEVEL_PKG2: ${{ inputs.devel-pkg2 }}
         INPUT_DSO_ONLY: ${{ inputs.dso-only }}
         INPUT_INCLUDE_PRIVATE_DSO: ${{ inputs.include-private-dso }}
         INPUT_FAIL_ON_REMOVED_LIBRARY: ${{ inputs.fail-on-removed-library }}
         INPUT_ANALYSIS_ASSURANCE_COMPLETE: ${{ inputs.analysis-assurance-complete }}
+        INPUT_REQUIRE_COMPLETE: ${{ inputs.require-complete }}
         INPUT_ACKNOWLEDGMENTS: ${{ inputs.acknowledgments }}
         INPUT_ABI_BASELINE: ${{ inputs.abi-baseline }}
         INPUT_BASELINE_PROFILE: ${{ inputs.baseline-profile }}
@@ -1384,8 +1468,9 @@ runs:
         INPUT_REQUIRED_SYMBOLS: ${{ inputs.required-symbols }}
         INPUT_SNAPSHOT_COMPRESSION: ${{ inputs.snapshot-compression }}
         INPUT_PUBLIC_HEADER_DIR: ${{ inputs.public-header-dir }}
+        INPUT_PUBLIC_HEADER_DIRS: ${{ inputs.public-header-dirs }}
         INPUT_BUILD_TARGET: ${{ inputs.build-target }}
-        # validate-inputs.sh's own compile-context guard (ast-frontend/
+        # validate-inputs.sh's own compile-context guard (frontend/
         # gcc-*/sysroot/nostdinc for a directory/package compare operand)
         # and its new require-complete-analysis release-operand guard both
         # read these -- previously missing from this step's env block
@@ -1395,10 +1480,13 @@ runs:
         # (Codex review; found while wiring require-complete-analysis
         # through this same step).
         INPUT_AST_FRONTEND: ${{ inputs.ast-frontend }}
+        INPUT_FRONTEND: ${{ inputs.frontend }}
         INPUT_LANG: ${{ inputs.lang }}
         INPUT_GCC_PATH: ${{ inputs.gcc-path }}
+        INPUT_COMPILER: ${{ inputs.compiler }}
         INPUT_GCC_PREFIX: ${{ inputs.gcc-prefix }}
         INPUT_GCC_OPTIONS: ${{ inputs.gcc-options }}
+        INPUT_COMPILE_OPTIONS: ${{ inputs.compile-options }}
         INPUT_SYSROOT: ${{ inputs.sysroot }}
         INPUT_NOSTDINC: ${{ inputs.nostdinc }}
         INPUT_REQUIRE_COMPLETE_ANALYSIS: ${{ inputs.require-complete-analysis }}
@@ -1536,25 +1624,23 @@ runs:
         INPUT_HEADER: ${{ inputs.header }}
         INPUT_OLD_HEADER: ${{ inputs.old-header }}
         INPUT_NEW_HEADER: ${{ inputs.new-header }}
-        INPUT_PUBLIC_HEADER_DIR: ${{ inputs.public-header-dir }}
+        INPUT_PUBLIC_HEADER_DIRS: ${{ inputs.public-header-dirs }}
         INPUT_BUILD_TARGET: ${{ inputs.build-target }}
         INPUT_INCLUDE: ${{ inputs.include }}
         INPUT_OLD_INCLUDE: ${{ inputs.old-include }}
         INPUT_NEW_INCLUDE: ${{ inputs.new-include }}
-        INPUT_OLD_VERSION: ${{ inputs.old-version }}
-        INPUT_NEW_VERSION: ${{ inputs.new-version }}
+        INPUT_OLD_LABEL: ${{ inputs.old-label }}
+        INPUT_NEW_LABEL: ${{ inputs.new-label }}
         INPUT_LANG: ${{ inputs.lang }}
-        INPUT_AST_FRONTEND: ${{ inputs.ast-frontend }}
-        INPUT_GCC_PATH: ${{ inputs.gcc-path }}
-        INPUT_GCC_PREFIX: ${{ inputs.gcc-prefix }}
-        INPUT_GCC_OPTIONS: ${{ inputs.gcc-options }}
+        INPUT_FRONTEND: ${{ inputs.frontend }}
+        INPUT_COMPILER: ${{ inputs.compiler }}
+        INPUT_COMPILE_OPTIONS: ${{ inputs.compile-options }}
         INPUT_SYSROOT: ${{ inputs.sysroot }}
         INPUT_NOSTDINC: ${{ inputs.nostdinc }}
         INPUT_FORMAT: ${{ inputs.format }}
         INPUT_OUTPUT_FILE: ${{ inputs.output-file }}
         INPUT_SNAPSHOT_COMPRESSION: ${{ inputs.snapshot-compression }}
         INPUT_POLICY: ${{ inputs.policy }}
-        INPUT_POLICY_FILE: ${{ inputs.policy-file }}
         INPUT_SUPPRESS: ${{ inputs.suppress }}
         INPUT_VERBOSE: ${{ inputs.verbose }}
         INPUT_FOLLOW_DEPS: ${{ inputs.follow-deps }}
@@ -1586,14 +1672,12 @@ runs:
         INPUT_BASELINE_ATTESTATION_REPO: ${{ inputs.baseline-attestation-repo }}
         INPUT_BASELINE_ATTESTATION_SIGNER_WORKFLOW: ${{ inputs.baseline-attestation-signer-workflow }}
         INPUT_ADD_JOB_SUMMARY: ${{ inputs.add-job-summary }}
-        INPUT_DEBUG_INFO1: ${{ inputs.debug-info1 }}
-        INPUT_DEBUG_INFO2: ${{ inputs.debug-info2 }}
-        INPUT_DEVEL_PKG1: ${{ inputs.devel-pkg1 }}
-        INPUT_DEVEL_PKG2: ${{ inputs.devel-pkg2 }}
+        INPUT_OLD_DEBUG_INFO: ${{ inputs.old-debug-info }}
+        INPUT_NEW_DEBUG_INFO: ${{ inputs.new-debug-info }}
         INPUT_DSO_ONLY: ${{ inputs.dso-only }}
         INPUT_INCLUDE_PRIVATE_DSO: ${{ inputs.include-private-dso }}
         INPUT_FAIL_ON_REMOVED_LIBRARY: ${{ inputs.fail-on-removed-library }}
-        INPUT_ANALYSIS_ASSURANCE_COMPLETE: ${{ inputs.analysis-assurance-complete }}
+        INPUT_REQUIRE_COMPLETE: ${{ inputs.require-complete }}
         INPUT_ACKNOWLEDGMENTS: ${{ inputs.acknowledgments }}
         INPUT_PR_COMMENT: ${{ inputs.pr-comment }}
         INPUT_PR_COMMENT_MODE: ${{ inputs.pr-comment-mode }}

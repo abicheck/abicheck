@@ -285,10 +285,13 @@ independently. `quick`'s one-line summary survives as the first-class
 
 ### GitHub Action
 
-The Action's per-side inputs (`old-header`, `new-header`, `old-version`,
-`new-version`, `debug-info1`, `devel-pkg1`, …) were **unaffected** by the
+The Action's per-side inputs (`old-header`, `new-header`, `old-label`,
+`new-label`, `old-debug-info`, `new-debug-info`, …) were **unaffected** by the
 side-aware-flags change above — the wrapper maps them to the new side-aware
 flags internally. No workflow edits were needed for Action users at the time.
+(Those Action inputs were renamed later; the old spellings
+`old-version`, `new-version`, `debug-info1`, `debug-info2`, `devel-pkg1` and
+`devel-pkg2` are retired. See [GitHub Action](github-action.md).)
 
 ## Related pages
 

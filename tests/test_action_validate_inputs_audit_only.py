@@ -134,7 +134,7 @@ class TestOldSidedInputsRejectedOnAuditOnly:
         [
             ("INPUT_OLD_HEADER", "old_include/"),
             ("INPUT_OLD_INCLUDE", "old_include/"),
-            ("INPUT_OLD_VERSION", "1.0.0"),
+            ("INPUT_OLD_LABEL", "1.0.0"),
         ],
     )
     def test_each_input_alone_is_rejected_without_a_baseline(
@@ -159,10 +159,10 @@ class TestOldSidedInputsRejectedOnAuditOnly:
     ) -> None:
         # Codex review, PR #1223, round 11 (P1): old-version's Action-level
         # default is the literal placeholder 'old' (action.yml), so GitHub
-        # Actions always populates INPUT_OLD_VERSION with at least 'old' --
+        # Actions always populates INPUT_OLD_LABEL with at least 'old' --
         # never actually empty. A bare truthiness check therefore rejected
         # *every* audit-only invocation, not just ones that explicitly set
         # old-version to something else. This is the regression test: the
         # real Action-populated default must not trip the rejection.
-        result = _run_validate({"INPUT_MODE": "compare", "INPUT_OLD_VERSION": "old"})
+        result = _run_validate({"INPUT_MODE": "compare", "INPUT_OLD_LABEL": "old"})
         assert result.returncode == 0, result.stdout + result.stderr
