@@ -164,7 +164,12 @@ def collect_package_garbage(
             rel = path.relative_to(root_path).as_posix()
             if rel in live:
                 continue
-            info = path.lstat()
+            try:
+                info = path.lstat()
+            except FileNotFoundError:
+                # Gone since the listing: a writer staging objects takes no
+                # lock and renames its `.tmp` file into place at any time.
+                continue
             # An in-flight atomic write (`.<name>.<unique>.tmp`) belongs to a
             # writer that takes no lock while it stages objects: never cut
             # under it, whatever *min_age_seconds* says.
@@ -175,7 +180,7 @@ def collect_package_garbage(
             removed.append(rel)
             freed += info.st_size
             if not dry_run:
-                path.unlink()
+                path.unlink(missing_ok=True)
     return PackageGcResult(
         removed=tuple(removed),
         kept_recent=tuple(kept),

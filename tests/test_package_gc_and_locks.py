@@ -432,3 +432,29 @@ def test_transport_extra_parser_refuses_malformed_fields() -> None:
     # A repeated tag is ambiguous.
     with pytest.raises(ValueError):
         stored_transport_digest(good + good)
+
+
+@pytest.mark.parametrize("dry_run", [False, True])
+def test_gc_skips_a_file_that_vanishes_after_listing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, dry_run: bool
+) -> None:
+    """A writer stages objects without the lock and renames its `.tmp` file
+    into place at any moment, so a file listed by GC may be gone by the time
+    GC stats it. GC must skip it, not crash (bug found by the concurrent
+    writer test above, which failed about half its runs)."""
+    import abicheck.workflows.package_gc as gc_module
+
+    root = tmp_path / "pkg"
+    _publish(root, "1.0")
+    real = gc_module._candidates
+    ghost = root / "objects" / "sha256" / "ff" / ".ff.json.zst.0123.tmp"
+
+    def with_ghost(path: Path):
+        yield ghost  # listed, never on disk
+        yield from real(path)
+
+    monkeypatch.setattr(gc_module, "_candidates", with_ghost)
+    result = collect_package_garbage(root, min_age_seconds=0, dry_run=dry_run)
+    rel = ghost.relative_to(root).as_posix()
+    assert rel not in result.removed and rel not in result.kept_recent
+    assert snapshot_from_dict(read_stored_snapshot_document(root)[0]).version == "1.0"
