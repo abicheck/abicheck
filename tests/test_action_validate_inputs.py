@@ -411,19 +411,18 @@ class TestRemovedInputTombstones:
             assert result.returncode == 0, result.stdout + result.stderr
             assert "require-complete-analysis" not in result.stdout
 
-    def test_jobs_warns_on_every_mode(self) -> None:
-        """``jobs`` was a tuning knob (worker count), so its removal warns
-        rather than breaking a version bump -- but it must not be silent.
-        Reported by a real downstream integration whose ``jobs: 1`` cap went
-        inert with nothing failing (~2.8x wall time, ~3.2x peak RSS)."""
+    def test_jobs_is_refused_on_every_mode(self) -> None:
+        """``jobs`` is a RETIRED fail-closed tombstone (ADR-091 D7): the worker
+        count is no longer a workflow setting, so setting it fails the run
+        before analysis rather than running with an inert cap."""
         for mode_env in (
             {"INPUT_MODE": "compare"},
             {"INPUT_MODE": "deps-tree", "INPUT_NEW_LIBRARY": "new.so"},
             {"INPUT_MODE": "dump"},
         ):
             result = _run_validate({**mode_env, "INPUT_JOBS": "1"})
-            assert result.returncode == 0, result.stdout + result.stderr
-            assert "::warning::" in result.stdout
+            assert result.returncode == 1, result.stdout + result.stderr
+            assert "::error::" in result.stdout
             assert "jobs" in result.stdout
 
     def test_removed_inputs_are_silent_when_unset(self) -> None:
@@ -704,12 +703,9 @@ class TestCompareAcceptsCompileContextForDirectoryOrPackage:
         "var,value",
         [
             ("INPUT_LANG", "c"),
-            ("INPUT_FRONTEND", "clang"),
             ("INPUT_COMPILER", "/opt/gcc-14/bin/g++"),
             ("INPUT_COMPILER", "aarch64-linux-gnu-"),
-            ("INPUT_COMPILE_OPTIONS", "-DFOO=1"),
             ("INPUT_SYSROOT", "/opt/sysroot"),
-            ("INPUT_NOSTDINC", "true"),
         ],
     )
     def test_each_compile_context_input_is_accepted(
@@ -947,33 +943,25 @@ class TestModeScopedInputWarnings:
         assert result.returncode == 0, result.stdout + result.stderr
         assert "::warning::" not in result.stdout
 
+    @pytest.mark.parametrize("mode", ["dump", "compare"])
     @pytest.mark.parametrize(
-        "env_name",
+        ("env_name", "replacement"),
         [
-            "INPUT_DSO_ONLY",
-            "INPUT_INCLUDE_PRIVATE_DSO",
-            "INPUT_FAIL_ON_REMOVED_LIBRARY",
+            ("INPUT_DSO_ONLY", "set: release.dso_only="),
+            ("INPUT_INCLUDE_PRIVATE_DSO", "set: release.include_private_dso="),
+            ("INPUT_FAIL_ON_REMOVED_LIBRARY", "set: gate.fail_on_removed_library="),
         ],
     )
-    def test_bool_input_warns_when_true_on_non_compare_mode(
-        self, env_name: str
+    @pytest.mark.parametrize("value", ["true", "false"])
+    def test_retired_release_input_is_refused_on_every_mode(
+        self, mode: str, env_name: str, replacement: str, value: str
     ) -> None:
-        result = _run_validate({"INPUT_MODE": "dump", env_name: "true"})
-        assert result.returncode == 0, result.stdout + result.stderr
-        assert "::warning::" in result.stdout
-
-    @pytest.mark.parametrize(
-        "env_name",
-        [
-            "INPUT_DSO_ONLY",
-            "INPUT_INCLUDE_PRIVATE_DSO",
-            "INPUT_FAIL_ON_REMOVED_LIBRARY",
-        ],
-    )
-    def test_bool_input_silent_when_false_default(self, env_name: str) -> None:
-        result = _run_validate({"INPUT_MODE": "dump", env_name: "false"})
-        assert result.returncode == 0, result.stdout + result.stderr
-        assert "::warning::" not in result.stdout
+        """RETIRED to ``set:`` (ADR-091 D7): any set value fails the run and
+        names the replacement, including an explicit ``false``."""
+        result = _run_validate({"INPUT_MODE": mode, env_name: value})
+        assert result.returncode == 1, result.stdout + result.stderr
+        assert "::error::" in result.stdout
+        assert replacement in result.stdout
 
     @pytest.mark.parametrize("mode", ["dump", "deps-tree", "deps-compare"])
     def test_abi_baseline_warns_outside_compare(self, mode: str) -> None:
@@ -991,46 +979,27 @@ class TestModeScopedInputWarnings:
         assert result.returncode == 0, result.stdout + result.stderr
         assert "::warning::" not in result.stdout
 
-    @pytest.mark.parametrize("mode", ["deps-tree", "deps-compare"])
-    def test_public_header_dir_warns_outside_dump_and_compare(self, mode: str) -> None:
+    @pytest.mark.parametrize("mode", ["deps-tree", "deps-compare", "dump"])
+    def test_public_header_dirs_is_refused_outside_compare(self, mode: str) -> None:
+        """RETIRED to ``set: scope.public_header_dirs=[...]`` (ADR-091 D7)."""
         result = _run_validate(
             {"INPUT_MODE": mode, "INPUT_PUBLIC_HEADER_DIRS": "include/"}
         )
-        assert result.returncode == 0, result.stdout + result.stderr
-        assert "::warning::" in result.stdout
-        assert "public-header-dir" in result.stdout
+        assert result.returncode == 1, result.stdout + result.stderr
+        assert "::error::" in result.stdout
+        assert "public-header-dirs" in result.stdout
+        assert "set: scope.public_header_dirs=" in result.stdout
 
-    def test_public_header_dir_warns_on_two_sided_compare(self) -> None:
-        # A two-sided compare has no --public-header-dir equivalent -- only
-        # compare's own audit-only shape (below) folds it into -H.
-        result = _run_validate(
-            {
-                "INPUT_MODE": "compare",
-                "INPUT_OLD_LIBRARY": "old.so",
-                "INPUT_NEW_LIBRARY": "new.so",
-                "INPUT_PUBLIC_HEADER_DIRS": "include/",
-            }
-        )
-        assert result.returncode == 0, result.stdout + result.stderr
-        assert "::warning::" in result.stdout
-
-    def test_public_header_dir_silent_on_dump(self) -> None:
-        result = _run_validate(
-            {"INPUT_MODE": "dump", "INPUT_PUBLIC_HEADER_DIRS": "include/"}
-        )
-        assert result.returncode == 0, result.stdout + result.stderr
-        assert "::warning::" not in result.stdout
-
-    def test_public_header_dir_silent_on_audit_only_compare(self) -> None:
-        result = _run_validate(
-            {
-                "INPUT_MODE": "compare",
-                "INPUT_NEW_LIBRARY": "new.so",
-                "INPUT_PUBLIC_HEADER_DIRS": "include/",
-            }
-        )
-        assert result.returncode == 0, result.stdout + result.stderr
-        assert "::warning::" not in result.stdout
+    def test_public_header_dirs_is_refused_on_two_sided_and_audit_compare(self) -> None:
+        for env in (
+            {"INPUT_OLD_LIBRARY": "old.so", "INPUT_NEW_LIBRARY": "new.so"},
+            {"INPUT_NEW_LIBRARY": "new.so"},
+        ):
+            result = _run_validate(
+                {"INPUT_MODE": "compare", "INPUT_PUBLIC_HEADER_DIRS": "include/", **env}
+            )
+            assert result.returncode == 1, result.stdout + result.stderr
+            assert "public-header-dirs" in result.stdout
 
     @pytest.mark.parametrize("mode", ["compare", "dump", "deps-tree", "deps-compare"])
     def test_build_target_fails_on_every_mode(self, mode: str) -> None:

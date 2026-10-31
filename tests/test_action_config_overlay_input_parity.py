@@ -66,9 +66,8 @@ BOOL_CONFIG_KEYS = frozenset(
 #: The single registry the parity checks read.
 OVERLAY_INPUTS: dict[str, dict[str, str]] = {
     "action.yml": {
-        "dso-only": "release.dso_only",
-        "include-private-dso": "release.include_private_dso",
-        "fail-on-removed-library": "gate.fail_on_removed_library",
+        # dso-only, include-private-dso and fail-on-removed-library are RETIRED
+        # to `set:` (ADR-091 D7): they no longer reach an overlay writer.
         "require-complete": "assurance.require_complete",
     },
     "actions/check-target/action.yml": {

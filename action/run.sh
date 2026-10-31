@@ -3838,8 +3838,6 @@ elif [[ "$MODE" == "compare" ]]; then
   # ADR-067 D5: this run's acknowledgment records. Operator-named, like
   # `suppress`, so the CLI trusts it to supply records (a discovered
   # .abicheck.yml is not; see add_compile_context_flags' overlay strip).
-  # severity-preset is a core flag (--severity-preset, ADR-068): forwarded as-is.
-  add_single_flag "--severity-preset" "${INPUT_SEVERITY_PRESET:-}"
   add_single_flag "--acknowledgments" "${INPUT_ACKNOWLEDGMENTS:-}"
 
   # severity-preset is a core flag (--severity-preset, ADR-068): forwarded as-is.

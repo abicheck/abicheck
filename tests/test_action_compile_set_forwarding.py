@@ -201,6 +201,9 @@ def test_live_compile_input_still_forwards_as_a_set_pair(
     assert argv_value in _set_pairs(argv)
 
 
-def test_live_severity_preset_forwards_as_a_set_pair(tmp_path: Path) -> None:
+def test_live_severity_preset_forwards_as_the_core_flag(tmp_path: Path) -> None:
+    """--severity-preset is a core CLI flag (not a config key), so it is
+    forwarded as the flag itself, never as a --set pair."""
     argv = _run(tmp_path, INPUT_SEVERITY_PRESET="strict")
-    assert 'severity.preset="strict"' in _set_pairs(argv)
+    assert argv[argv.index("--severity-preset") + 1] == "strict"
+    assert not any(v.startswith("severity.preset") for v in _set_pairs(argv))

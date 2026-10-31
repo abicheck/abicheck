@@ -80,12 +80,9 @@ VALIDATE_SH = Path(__file__).resolve().parents[1] / "action" / "validate-inputs.
 #: closes named this exact family, so the family is what gets enumerated.
 _COMPILE_CONTEXT_INPUTS: tuple[tuple[str, str], ...] = (
     ("INPUT_LANG", "c"),
-    ("INPUT_FRONTEND", "clang"),
     ("INPUT_COMPILER", "/opt/gcc-14/bin/g++"),
     ("INPUT_COMPILER", "aarch64-linux-gnu-"),
-    ("INPUT_COMPILE_OPTIONS", "-DFOO=1"),
     ("INPUT_SYSROOT", "/opt/sysroot"),
-    ("INPUT_NOSTDINC", "true"),
 )
 
 #: Independently-chosen release-style operand spellings, on both sides:
@@ -305,11 +302,11 @@ class TestReleaseOperandConfigOverlayStaysSingular:
     documents may be lost to the merge."""
 
     @pytest.mark.parametrize("shape", _RELEASE_OPERAND_SHAPES)
-    def test_all_three_config_sources_survive_the_merge(
+    def test_build_config_and_compile_sets_survive_together(
         self, tmp_path: Path, shape: str
     ) -> None:
-        """build-config + compile context + release topology at once: the
-        combination that reaches both merge steps in sequence."""
+        """build-config + the live compile context at once: exactly one
+        ``--config`` (the user's file), the compile context as ``--set``."""
         build_config = tmp_path / "project.yml"
         build_config.write_text(
             json.dumps({"severity": {"abi_breaking": "error"}}), encoding="utf-8"
@@ -317,16 +314,16 @@ class TestReleaseOperandConfigOverlayStaysSingular:
         cmd, doc = _compare_result(
             {
                 "INPUT_BUILD_CONFIG": str(build_config),
-                "INPUT_COMPILE_OPTIONS": "-DFOO=1",
-                "INPUT_FAIL_ON_REMOVED_LIBRARY": "true",
+                "INPUT_COMPILER": "/opt/gcc-14/bin/g++",
+                "INPUT_SYSROOT": "/opt/sysroot",
                 **_operand_env(shape, tmp_path),
             },
             tmp_path,
         )
         assert cmd.split().count("--config") == 1
-        assert _compile_block(tmp_path)["options"] == ["-DFOO=1"]
+        assert 'compile.compiler="/opt/gcc-14/bin/g++"' in cmd
+        assert 'compile.sysroot="/opt/sysroot"' in cmd
         assert doc["severity"] == {"abi_breaking": "error"}
-        assert doc["gate"]["fail_on_removed_library"] is True
 
     @pytest.mark.parametrize("shape", _RELEASE_OPERAND_SHAPES)
     def test_compile_context_and_build_config_yield_one_config(
@@ -345,24 +342,26 @@ class TestReleaseOperandConfigOverlayStaysSingular:
             tmp_path,
         )
         assert cmd.split().count("--config") == 1
-        assert _compile_block(tmp_path)["sysroot"] == "/opt/sysroot"
+        assert 'compile.sysroot="/opt/sysroot"' in cmd
         assert doc["severity"] == {"abi_breaking": "error"}
 
     @pytest.mark.parametrize("shape", _RELEASE_OPERAND_SHAPES)
-    def test_compile_context_and_release_topology_yield_one_config(
+    def test_compile_context_and_require_complete_yield_one_config(
         self, tmp_path: Path, shape: str
     ) -> None:
+        """The overlay that remains (assurance) and the compile context share
+        one ``--config`` document."""
         cmd, doc = _compare_result(
             {
                 "INPUT_SYSROOT": "/opt/sysroot",
-                "INPUT_DSO_ONLY": "true",
+                "INPUT_REQUIRE_COMPLETE": "true",
                 **_operand_env(shape, tmp_path),
             },
             tmp_path,
         )
         assert cmd.split().count("--config") == 1
-        assert _compile_block(tmp_path)["sysroot"] == "/opt/sysroot"
-        assert doc["release"]["dso_only"] is True
+        assert 'compile.sysroot="/opt/sysroot"' in cmd
+        assert doc["assurance"]["require_complete"] is True
 
 
 #: Hostile values for the inputs this change newly lets reach a release
@@ -534,7 +533,6 @@ class TestNoOpInputsSynthesizeNoOverlay:
     #: `lang: c++` is action.yml's own declared default, so an omitted
     #: `lang` arrives as this and must not count as a request either.
     _NO_OP_INPUTS: tuple[tuple[str, str], ...] = (
-        ("INPUT_FRONTEND", "auto"),
         ("INPUT_LANG", "c++"),
     )
 
@@ -562,11 +560,12 @@ class TestNoOpInputsSynthesizeNoOverlay:
         assert _flag_names(configured_cmd) == _flag_names(baseline_cmd)
 
     @pytest.mark.parametrize("shape", ("single", *_RELEASE_OPERAND_SHAPES))
-    def test_a_real_frontend_choice_still_reaches_the_overlay(
+    def test_a_real_compiler_choice_still_reaches_the_cli(
         self, tmp_path: Path, shape: str
     ) -> None:
-        """The companion: only the documented no-op spelling is exempt."""
-        _, doc = _compare_result(
-            {"INPUT_FRONTEND": "clang", **_operand_env(shape, tmp_path)}, tmp_path
+        """The companion: a real compiler choice is forwarded as a --set pair."""
+        cmd, _ = _compare_result(
+            {"INPUT_COMPILER": "/opt/gcc-14/bin/g++", **_operand_env(shape, tmp_path)},
+            tmp_path,
         )
-        assert _compile_block(tmp_path)["frontend"] == "clang"
+        assert 'compile.compiler="/opt/gcc-14/bin/g++"' in cmd

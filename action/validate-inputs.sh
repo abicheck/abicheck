@@ -642,7 +642,7 @@ fi
 # no per-mode "inert" state left to warn about (build-config is
 # unconditionally forwarded for every mode that can reach it).
 if [[ -n "${INPUT_JOBS:-}" ]]; then
-  _fail "jobs is RETIRED and no longer accepted: abicheck no longer takes a worker count from the workflow. Its release fan-out auto-detects the CPU count and clamps it to available memory, so concurrency is controlled by the runner or workflow itself. Remove jobs from your workflow."
+  _fail "jobs ('${INPUT_JOBS}') is RETIRED and no longer accepted: abicheck no longer takes a worker count from the workflow. Its release fan-out auto-detects the CPU count and clamps it to available memory, so concurrency is controlled by the runner or workflow itself. Remove jobs from your workflow."
 fi
 if [[ -n "${INPUT_BUNDLE_SYSTEM_PROVIDERS:-}" ]]; then
   _fail "bundle-system-providers ('${INPUT_BUNDLE_SYSTEM_PROVIDERS}') was removed and is no longer forwarded — leaving it set would silently analyse with a different system-provider allow-list than you asked for. Move the list to your .abicheck.yml's \`bundle.system_providers:\` block and pass that file as build-config, then remove this input."

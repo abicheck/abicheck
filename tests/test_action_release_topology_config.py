@@ -322,52 +322,13 @@ class TestReleaseTopologyOverlay:
     def test_dso_only_synthesizes_release_block_and_config_flag(
         self, tmp_path: Path
     ) -> None:
-        result = _run_bash_script(_harness(), {"INPUT_DSO_ONLY": "true"}, cwd=tmp_path)
+        result = _run_bash_script(_harness(), {"INPUT_REQUIRE_COMPLETE": "true"}, cwd=tmp_path)
         assert result.returncode == 0, result.stderr
         lines = result.stdout.splitlines()
         assert lines[0] == "compare"
         assert lines[1] == "--config"
         doc = _read_config_overlay(lines)
-        assert doc == {"release": {"dso_only": True}}
-
-    def test_include_private_dso_synthesizes_release_block(
-        self, tmp_path: Path
-    ) -> None:
-        result = _run_bash_script(
-            _harness(), {"INPUT_INCLUDE_PRIVATE_DSO": "true"}, cwd=tmp_path
-        )
-        assert result.returncode == 0, result.stderr
-        doc = _read_config_overlay(result.stdout.splitlines())
-        assert doc == {"release": {"include_private_dso": True}}
-
-    def test_fail_on_removed_library_synthesizes_gate_block(
-        self, tmp_path: Path
-    ) -> None:
-        result = _run_bash_script(
-            _harness(), {"INPUT_FAIL_ON_REMOVED_LIBRARY": "true"}, cwd=tmp_path
-        )
-        assert result.returncode == 0, result.stderr
-        doc = _read_config_overlay(result.stdout.splitlines())
-        assert doc == {"gate": {"fail_on_removed_library": True}}
-
-    def test_all_three_synthesize_one_combined_overlay(self, tmp_path: Path) -> None:
-        result = _run_bash_script(
-            _harness(),
-            {
-                "INPUT_DSO_ONLY": "true",
-                "INPUT_INCLUDE_PRIVATE_DSO": "true",
-                "INPUT_FAIL_ON_REMOVED_LIBRARY": "true",
-            },
-            cwd=tmp_path,
-        )
-        assert result.returncode == 0, result.stderr
-        doc = _read_config_overlay(result.stdout.splitlines())
-        assert doc == {
-            "release": {"dso_only": True, "include_private_dso": True},
-            "gate": {"fail_on_removed_library": True},
-        }
-        # Exactly one --config flag -- not one per synthesized block.
-        assert result.stdout.count("--config") == 1
+        assert doc == {"assurance": {"require_complete": True}}
 
     def test_build_config_alone_is_fine(self, tmp_path: Path) -> None:
         """The mutual-exclusivity guard only fires when a release-topology
@@ -403,7 +364,7 @@ _PY_BIN="{sys.executable}"
 add_release_topology_config_flags
 printf '%s\\n' "${{CMD[@]}}"
 """
-        result = _run_bash_script(script, {"INPUT_DSO_ONLY": "true"}, cwd=tmp_path)
+        result = _run_bash_script(script, {"INPUT_REQUIRE_COMPLETE": "true"}, cwd=tmp_path)
         assert result.returncode == 1
         assert "already added to the command line" in result.stdout
 
@@ -488,7 +449,7 @@ STDERR_FILE=$(mktemp)
 {_main_exit_trap_source()}
 printf '%s\\n' "$_overlay_path"
 """
-        result = _run_bash_script(script, {"INPUT_DSO_ONLY": "true"}, cwd=tmp_path)
+        result = _run_bash_script(script, {"INPUT_REQUIRE_COMPLETE": "true"}, cwd=tmp_path)
         assert result.returncode == 0, result.stderr
         overlay_path = result.stdout.strip().splitlines()[-1]
         assert not Path(overlay_path).exists(), (
@@ -545,7 +506,7 @@ printf '%s\\n' "${{CMD[@]}}"
         # _read_config_overlay pattern of reading the file back afterward).
         result = _run_bash_script(
             script,
-            {"INPUT_DSO_ONLY": "true", "RUNNER_TEMP": str(tmp_path)},
+            {"INPUT_REQUIRE_COMPLETE": "true", "RUNNER_TEMP": str(tmp_path)},
             cwd=tmp_path,
         )
         assert result.returncode == 1
@@ -587,7 +548,7 @@ class TestReleaseTopologyOverlayMergesWithExplicitBuildConfig:
         )
         result = _run_bash_script(
             script,
-            {"INPUT_DSO_ONLY": "true", "INPUT_BUILD_CONFIG": str(build_config)},
+            {"INPUT_REQUIRE_COMPLETE": "true", "INPUT_BUILD_CONFIG": str(build_config)},
             cwd=tmp_path,
         )
         assert result.returncode == 0, result.stderr
@@ -601,12 +562,12 @@ class TestReleaseTopologyOverlayMergesWithExplicitBuildConfig:
         assert doc["severity"] == {"abi_breaking": "error"}
         assert doc["scope"] == {"on_incomplete": "block"}
         # ...alongside the synthesized topology key, not instead of it.
-        assert doc["release"] == {"dso_only": True}
+        assert doc["assurance"] == {"require_complete": True}
 
     def test_topology_input_wins_on_a_genuine_conflict(self, tmp_path: Path) -> None:
         build_config = tmp_path / "my-build-config.yml"
         build_config.write_text(
-            "release:\n  dso_only: false\n  include_private_dso: true\n",
+            "assurance:\n  require_complete: false\nscope:\n  on_incomplete: block\n",
             encoding="utf-8",
         )
         script = _release_topology_script_with_preexisting_config_flag(
@@ -614,15 +575,15 @@ class TestReleaseTopologyOverlayMergesWithExplicitBuildConfig:
         )
         result = _run_bash_script(
             script,
-            {"INPUT_DSO_ONLY": "true", "INPUT_BUILD_CONFIG": str(build_config)},
+            {"INPUT_REQUIRE_COMPLETE": "true", "INPUT_BUILD_CONFIG": str(build_config)},
             cwd=tmp_path,
         )
         assert result.returncode == 0, result.stderr
         doc = _read_config_overlay(result.stdout.splitlines())
-        # dso_only: the Action input (true) wins over the explicit false.
-        # include_private_dso: not named by any input, so the user's own
-        # explicit value passes through untouched.
-        assert doc["release"] == {"dso_only": True, "include_private_dso": True}
+        # require_complete: the Action input (true) wins over the explicit false.
+        # scope: not named by any input, so the user's own value passes through.
+        assert doc["assurance"] == {"require_complete": True}
+        assert doc["scope"] == {"on_incomplete": "block"}
 
     def test_explicit_build_config_query_and_compiler_are_not_stripped(
         self, tmp_path: Path
@@ -644,7 +605,7 @@ class TestReleaseTopologyOverlayMergesWithExplicitBuildConfig:
         result = _run_bash_script(
             script,
             {
-                "INPUT_FAIL_ON_REMOVED_LIBRARY": "true",
+                "INPUT_REQUIRE_COMPLETE": "true",
                 "INPUT_BUILD_CONFIG": str(build_config),
             },
             cwd=tmp_path,
@@ -653,7 +614,7 @@ class TestReleaseTopologyOverlayMergesWithExplicitBuildConfig:
         doc = _read_config_overlay(result.stdout.splitlines())
         assert doc["build"] == {"query": "cmake --build .", "system": "cmake"}
         assert doc["compile"] == {"compiler": "/opt/toolchain/bin/g++", "std": "c++20"}
-        assert doc["gate"] == {"fail_on_removed_library": True}
+        assert doc["assurance"] == {"require_complete": True}
         # Deliberate operator action -- not capped here either (only the
         # discovered-config merge caps it, PR #1174 third round).
         assert doc["resource_limits"]["max_bundle_facts_decode_nodes"] == 50_000_000
@@ -689,7 +650,7 @@ class TestReleaseTopologyOverlayMergesWithExplicitBuildConfig:
         )
         result = _run_bash_script(
             script,
-            {"INPUT_DSO_ONLY": "true", "INPUT_BUILD_CONFIG": str(symlink_config)},
+            {"INPUT_REQUIRE_COMPLETE": "true", "INPUT_BUILD_CONFIG": str(symlink_config)},
             cwd=tmp_path,
         )
         assert result.returncode == 0, result.stderr
@@ -714,14 +675,14 @@ class TestReleaseTopologyOverlayMergesWithDiscoveredProjectConfig:
             "scope:\n  on_incomplete: block\nseverity:\n  abi_breaking: error\n",
             encoding="utf-8",
         )
-        result = _run_bash_script(_harness(), {"INPUT_DSO_ONLY": "true"}, cwd=tmp_path)
+        result = _run_bash_script(_harness(), {"INPUT_REQUIRE_COMPLETE": "true"}, cwd=tmp_path)
         assert result.returncode == 0, result.stderr
         doc = _read_config_overlay(result.stdout.splitlines())
         # The discovered project's own settings must still be present...
         assert doc["scope"] == {"on_incomplete": "block"}
         assert doc["severity"] == {"abi_breaking": "error"}
         # ...alongside the synthesized topology key, not instead of it.
-        assert doc["release"] == {"dso_only": True}
+        assert doc["assurance"] == {"require_complete": True}
 
     def test_discovered_release_key_a_conflicting_input_wins_over(
         self, tmp_path: Path
@@ -730,20 +691,17 @@ class TestReleaseTopologyOverlayMergesWithDiscoveredProjectConfig:
         decided by the Action input -- the same precedence an explicit
         build-config input already takes over auto-discovery."""
         (tmp_path / ".abicheck.yml").write_text(
-            "release:\n"
-            "  dso_only: false\n"
-            "  include_private_dso: true\n"
+            "assurance:\n"
+            "  require_complete: false\n"
             "scope:\n"
             "  on_incomplete: block\n",
             encoding="utf-8",
         )
-        result = _run_bash_script(_harness(), {"INPUT_DSO_ONLY": "true"}, cwd=tmp_path)
+        result = _run_bash_script(_harness(), {"INPUT_REQUIRE_COMPLETE": "true"}, cwd=tmp_path)
         assert result.returncode == 0, result.stderr
         doc = _read_config_overlay(result.stdout.splitlines())
-        # dso_only: the Action input (true) wins over the discovered false.
-        # include_private_dso: not named by any input, so the discovered
-        # value passes through untouched.
-        assert doc["release"] == {"dso_only": True, "include_private_dso": True}
+        # require_complete: the Action input (true) wins over the discovered false.
+        assert doc["assurance"] == {"require_complete": True}
         assert doc["scope"] == {"on_incomplete": "block"}
 
     def test_no_discovered_config_is_the_pre_existing_base_case(
@@ -753,10 +711,10 @@ class TestReleaseTopologyOverlayMergesWithDiscoveredProjectConfig:
         pytest tmp dir, never itself inside a real checkout) -- the merged
         document degrades to exactly the overlay alone, unchanged from
         this Action's pre-merge behavior."""
-        result = _run_bash_script(_harness(), {"INPUT_DSO_ONLY": "true"}, cwd=tmp_path)
+        result = _run_bash_script(_harness(), {"INPUT_REQUIRE_COMPLETE": "true"}, cwd=tmp_path)
         assert result.returncode == 0, result.stderr
         doc = _read_config_overlay(result.stdout.splitlines())
-        assert doc == {"release": {"dso_only": True}}
+        assert doc == {"assurance": {"require_complete": True}}
 
 
 class TestReleaseTopologyOverlayKeepsDiscoveredConfigUntrusted:
@@ -778,7 +736,7 @@ class TestReleaseTopologyOverlayKeepsDiscoveredConfigUntrusted:
             "  system: cmake\n",
             encoding="utf-8",
         )
-        result = _run_bash_script(_harness(), {"INPUT_DSO_ONLY": "true"}, cwd=tmp_path)
+        result = _run_bash_script(_harness(), {"INPUT_REQUIRE_COMPLETE": "true"}, cwd=tmp_path)
         assert result.returncode == 0, result.stderr
         doc = _read_config_overlay(result.stdout.splitlines())
         # The dangerous key is gone entirely; an unrelated sibling key in
@@ -792,7 +750,7 @@ class TestReleaseTopologyOverlayKeepsDiscoveredConfigUntrusted:
             "compile:\n  compiler: /tmp/attacker-planted-cc\n  std: c++20\n",
             encoding="utf-8",
         )
-        result = _run_bash_script(_harness(), {"INPUT_DSO_ONLY": "true"}, cwd=tmp_path)
+        result = _run_bash_script(_harness(), {"INPUT_REQUIRE_COMPLETE": "true"}, cwd=tmp_path)
         assert result.returncode == 0, result.stderr
         doc = _read_config_overlay(result.stdout.splitlines())
         assert "compiler" not in doc.get("compile", {})
@@ -804,7 +762,7 @@ class TestReleaseTopologyOverlayKeepsDiscoveredConfigUntrusted:
             "build:\n  query: 'rm -rf /'\ncompile:\n  compiler: /malicious/cc\n",
             encoding="utf-8",
         )
-        result = _run_bash_script(_harness(), {"INPUT_DSO_ONLY": "true"}, cwd=tmp_path)
+        result = _run_bash_script(_harness(), {"INPUT_REQUIRE_COMPLETE": "true"}, cwd=tmp_path)
         assert result.returncode == 0, result.stderr
         doc = _read_config_overlay(result.stdout.splitlines())
         assert "query" not in doc.get("build", {})
@@ -828,7 +786,7 @@ class TestReleaseTopologyOverlayKeepsDiscoveredConfigUntrusted:
             "build:\n  compile_db: /stale/compile_commands.json\n  system: cmake\n",
             encoding="utf-8",
         )
-        result = _run_bash_script(_harness(), {"INPUT_DSO_ONLY": "true"}, cwd=tmp_path)
+        result = _run_bash_script(_harness(), {"INPUT_REQUIRE_COMPLETE": "true"}, cwd=tmp_path)
         assert result.returncode == 0, result.stderr
         doc = _read_config_overlay(result.stdout.splitlines())
         assert "compile_db" not in doc.get("build", {})
@@ -844,7 +802,7 @@ class TestReleaseTopologyOverlayKeepsDiscoveredConfigUntrusted:
             "resource_limits:\n  max_bundle_facts_decode_nodes: 50000000\n",
             encoding="utf-8",
         )
-        result = _run_bash_script(_harness(), {"INPUT_DSO_ONLY": "true"}, cwd=tmp_path)
+        result = _run_bash_script(_harness(), {"INPUT_REQUIRE_COMPLETE": "true"}, cwd=tmp_path)
         assert result.returncode == 0, result.stderr
         doc = _read_config_overlay(result.stdout.splitlines())
         assert doc["resource_limits"]["max_bundle_facts_decode_nodes"] == 1_000_000
@@ -860,7 +818,7 @@ class TestReleaseTopologyOverlayKeepsDiscoveredConfigUntrusted:
             "resource_limits:\n  max_bundle_facts_decode_nodes: 1\n",
             encoding="utf-8",
         )
-        result = _run_bash_script(_harness(), {"INPUT_DSO_ONLY": "true"}, cwd=tmp_path)
+        result = _run_bash_script(_harness(), {"INPUT_REQUIRE_COMPLETE": "true"}, cwd=tmp_path)
         assert result.returncode == 0, result.stderr
         doc = _read_config_overlay(result.stdout.splitlines())
         assert doc["resource_limits"]["max_bundle_facts_decode_nodes"] == 1
@@ -882,7 +840,7 @@ class TestReleaseTopologyOverlayResolvesRelativePathsAgainstRealProjectRoot:
             "compile:\n  include_dirs: [include]\n",
             encoding="utf-8",
         )
-        result = _run_bash_script(_harness(), {"INPUT_DSO_ONLY": "true"}, cwd=tmp_path)
+        result = _run_bash_script(_harness(), {"INPUT_REQUIRE_COMPLETE": "true"}, cwd=tmp_path)
         assert result.returncode == 0, result.stderr
         doc = _read_config_overlay(result.stdout.splitlines())
         resolved = doc["compile"]["include_dirs"]
@@ -899,7 +857,7 @@ class TestReleaseTopologyOverlayResolvesRelativePathsAgainstRealProjectRoot:
             "compile:\n  include_dirs: [a, b]\n",
             encoding="utf-8",
         )
-        result = _run_bash_script(_harness(), {"INPUT_DSO_ONLY": "true"}, cwd=tmp_path)
+        result = _run_bash_script(_harness(), {"INPUT_REQUIRE_COMPLETE": "true"}, cwd=tmp_path)
         assert result.returncode == 0, result.stderr
         doc = _read_config_overlay(result.stdout.splitlines())
         assert doc["compile"]["include_dirs"] == [
@@ -913,7 +871,7 @@ class TestReleaseTopologyOverlayResolvesRelativePathsAgainstRealProjectRoot:
             f"compile:\n  include_dirs: [{abs_dir}]\n",
             encoding="utf-8",
         )
-        result = _run_bash_script(_harness(), {"INPUT_DSO_ONLY": "true"}, cwd=tmp_path)
+        result = _run_bash_script(_harness(), {"INPUT_REQUIRE_COMPLETE": "true"}, cwd=tmp_path)
         assert result.returncode == 0, result.stderr
         doc = _read_config_overlay(result.stdout.splitlines())
         assert doc["compile"]["include_dirs"] == [abs_dir]
@@ -929,7 +887,7 @@ class TestReleaseTopologyOverlayFailsLoudOnMalformedDiscoveredConfig:
         (tmp_path / ".abicheck.yml").write_text(
             "release: [unterminated\n", encoding="utf-8"
         )
-        result = _run_bash_script(_harness(), {"INPUT_DSO_ONLY": "true"}, cwd=tmp_path)
+        result = _run_bash_script(_harness(), {"INPUT_REQUIRE_COMPLETE": "true"}, cwd=tmp_path)
         assert result.returncode != 0
         assert "failed to parse the discovered project config" in result.stderr
         assert "failed to merge" in result.stdout
@@ -973,7 +931,7 @@ class TestReleaseTopologyOverlayResolvesRelativeBuildConfigAgainstRealCwd:
         script = _release_topology_script_with_preexisting_config_flag(".abicheck.yml")
         result = _run_bash_script(
             script,
-            {"INPUT_DSO_ONLY": "true", "INPUT_BUILD_CONFIG": ".abicheck.yml"},
+            {"INPUT_REQUIRE_COMPLETE": "true", "INPUT_BUILD_CONFIG": ".abicheck.yml"},
             cwd=tmp_path,
         )
         assert result.returncode == 0, result.stderr
@@ -982,7 +940,7 @@ class TestReleaseTopologyOverlayResolvesRelativeBuildConfigAgainstRealCwd:
         assert lines.count("--config") == 1
         doc = _read_config_overlay(lines)
         assert doc["severity"] == {"abi_breaking": "error"}
-        assert doc["release"] == {"dso_only": True}
+        assert doc["assurance"] == {"require_complete": True}
 
     def test_nested_relative_build_config_resolves_against_action_cwd(
         self, tmp_path: Path
@@ -996,7 +954,7 @@ class TestReleaseTopologyOverlayResolvesRelativeBuildConfigAgainstRealCwd:
         result = _run_bash_script(
             script,
             {
-                "INPUT_FAIL_ON_REMOVED_LIBRARY": "true",
+                "INPUT_REQUIRE_COMPLETE": "true",
                 "INPUT_BUILD_CONFIG": "config/ci.yml",
             },
             cwd=tmp_path,
@@ -1005,7 +963,7 @@ class TestReleaseTopologyOverlayResolvesRelativeBuildConfigAgainstRealCwd:
         assert "does not exist" not in result.stderr
         doc = _read_config_overlay(result.stdout.splitlines())
         assert doc["scope"] == {"on_incomplete": "block"}
-        assert doc["gate"] == {"fail_on_removed_library": True}
+        assert doc["assurance"] == {"require_complete": True}
 
 
 class TestReleaseTopologyOverlayGenerationIsIsolated:
@@ -1058,14 +1016,14 @@ class TestReleaseTopologyOverlayGenerationIsIsolated:
         )
         result = _run_bash_script(
             _harness(),
-            {"INPUT_DSO_ONLY": "true", "PYTHONPATH": str(poison_dir)},
+            {"INPUT_REQUIRE_COMPLETE": "true", "PYTHONPATH": str(poison_dir)},
             cwd=tmp_path,
         )
         assert result.returncode == 0, result.stderr
         assert "POISONED" not in result.stderr
         lines = result.stdout.splitlines()
         doc = _read_config_overlay(lines)
-        assert doc == {"release": {"dso_only": True}}
+        assert doc == {"assurance": {"require_complete": True}}
 
 
 class TestReleaseTopologyOverlayCanonicalizesRelativeTmpdir:
@@ -1089,14 +1047,14 @@ class TestReleaseTopologyOverlayCanonicalizesRelativeTmpdir:
         (tmp_path / relative_tmpdir).mkdir()
         result = _run_bash_script(
             _harness(),
-            {"INPUT_DSO_ONLY": "true", "TMPDIR": relative_tmpdir},
+            {"INPUT_REQUIRE_COMPLETE": "true", "TMPDIR": relative_tmpdir},
             cwd=tmp_path,
         )
         assert result.returncode == 0, result.stderr
         assert "does not exist" not in result.stderr
         lines = result.stdout.splitlines()
         doc = _read_config_overlay(lines)
-        assert doc == {"release": {"dso_only": True}}
+        assert doc == {"assurance": {"require_complete": True}}
         # The --config entry itself must be an absolute path -- a relative
         # one here is exactly the bug: it would have resolved correctly
         # from the CLI's own real invocation directory, but not from
