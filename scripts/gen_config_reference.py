@@ -39,6 +39,9 @@ import argparse
 import sys
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from option_cross_refs import LEGEND, CrossRefs  # noqa: E402
+
 REPO_DIR = Path(__file__).resolve().parent.parent
 OUT_PATH = REPO_DIR / "docs" / "reference" / "config-keys-reference.md"
 
@@ -119,6 +122,7 @@ def render() -> str:
     nested_keys = set(NESTED_VALUE_TYPE_KEYS)
     other_keys = sorted(known_top - set(known_blocks) - scalar_keys - nested_keys)
 
+    refs = CrossRefs.load()
     lines = [
         GENERATED_NOTE,
         "",
@@ -136,11 +140,18 @@ def render() -> str:
         "page is the exhaustive key/type list for `BuildConfig`'s own "
         "schema only.",
         "",
+        LEGEND,
+        "",
         "## Blocks",
         "",
     ]
     for block in sorted(known_blocks):
-        lines += [f"### `{block}:`", "", "| Sub-key | Type |", "|---|---|"]
+        lines += [
+            f"### `{block}:`",
+            "",
+            "| Sub-key | Type | Same option on other surfaces |",
+            "|---|---|---|",
+        ]
         for subkey in sorted(known_blocks[block]):
             type_str = _subkey_type(
                 block,
@@ -151,13 +162,20 @@ def render() -> str:
                 _INT_SUBKEYS,
                 _DICT_STR_STR_SUBKEYS,
             )
-            lines.append(f"| `{subkey}` | {type_str} |")
+            cross = refs.cell(f"{block}.{subkey}", own="config")
+            lines.append(f"| `{subkey}` | {type_str} | {cross} |")
         lines.append("")
 
-    lines += ["## Top-level scalar keys", "", "| Key | Type |", "|---|---|"]
+    lines += [
+        "## Top-level scalar keys",
+        "",
+        "| Key | Type | Same option on other surfaces |",
+        "|---|---|---|",
+    ]
     for key in sorted(scalar_keys):
         type_str = "int" if key in TOP_LEVEL_INT_KEYS else "str"
-        lines.append(f"| `{key}` | {type_str} |")
+        cross = refs.cell(key, own="config")
+        lines.append(f"| `{key}` | {type_str} | {cross} |")
     lines.append("")
 
     if nested_keys:

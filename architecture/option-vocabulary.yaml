@@ -31,6 +31,11 @@
 # cli/config/action/python: inventory ids (cli "<command> <--option>",
 #           action "<action>:<input>", python "<Class>.<field>" or
 #           "<function>(<param>)").
+# cross_refs:  none on a BROAD concept whose members are not one option (ADR-091
+#              D2): `bundle` groups facts output, cohorts and provider lists;
+#              `project` groups unrelated project-plan inputs. The generated
+#              references show no counterpart for those members rather than a
+#              wrong one, until the concept is split.
 schema_version: 1
 out_of_scope:
   - pattern: workflow:*:*-artifact-name
@@ -697,6 +702,7 @@ concepts:
       - action:new-root
   - concept: bundle
     tier: config
+    cross_refs: none
     workflow:
       - workflow:check-single.yml:bundle-members
     renames: []
@@ -1257,6 +1263,7 @@ concepts:
       - actions/aggregate:gate
   - concept: project
     tier: core
+    cross_refs: none
     workflow:
       - workflow:check-single.yml:kind
       - workflow:check-single.yml:target-kind
@@ -1468,3 +1475,67 @@ budget_exceptions:
     recorded: 42
     rename: R22
     note: root action.yml analysis inputs (soft D4 target 25; usability wins, ADR-091 amendment 2026-10-31); Phase 5 retired the seven project-stable inputs to set-override tombstones
+# replacements: ADR-091 Phase 7. Every Action or reusable-workflow input the
+# inventory marks `retired` or `deprecated` (a tombstone or a still-working
+# alias), and the live row that replaces it. `replaced_by` is an inventory id
+# of a live row (any surface, including a config key), or null with a reason.
+# The generated references render these as "RETIRED, use ..." rather than
+# listing the tombstone as live; tests/test_option_cross_refs.py checks that
+# each replacement's name appears in the tombstone's own description.
+replacements:
+  - {id: action:new-library-set, status: retired, replaced_by: null, reason: "the mode: scan artifact-set input is gone and nothing takes its place"}
+  - {id: action:dso-only, status: retired, replaced_by: release.dso_only}
+  - {id: action:include-private-dso, status: retired, replaced_by: release.include_private_dso}
+  - {id: action:fail-on-removed-library, status: retired, replaced_by: gate.fail_on_removed_library}
+  - {id: action:public-header-dirs, status: retired, replaced_by: action:header}
+  - {id: action:public-header-dir, status: retired, replaced_by: action:header}
+  - {id: action:build-target, status: retired, replaced_by: build.targets}
+  - {id: action:frontend, status: retired, replaced_by: compile.frontend}
+  - {id: action:ast-frontend, status: retired, replaced_by: compile.frontend}
+  - {id: action:compile-options, status: retired, replaced_by: compile.options}
+  - {id: action:gcc-options, status: retired, replaced_by: compile.options}
+  - {id: action:nostdinc, status: retired, replaced_by: compile.nostdinc}
+  - {id: action:against, status: retired, replaced_by: action:old-library}
+  - {id: action:jobs, status: retired, replaced_by: null, reason: "the worker count is no longer a workflow setting; the release fan-out detects the CPU count itself"}
+  - {id: action:bundle-system-providers, status: retired, replaced_by: bundle.system_providers}
+  - {id: action:allow-build-query, status: retired, replaced_by: null, reason: "abicheck always runs its own inferred compile-database query when a build context is needed"}
+  - {id: action:estimate, status: retired, replaced_by: action:dry-run}
+  - {id: action:audit, status: retired, replaced_by: null, reason: "under mode: compare, omit old-library and abi-baseline to get an audit-only run"}
+  - {id: action:crosscheck, status: retired, replaced_by: null, reason: "the KEY=LEVEL promotion syntax is gone; cross-source policy is set in .abicheck.yml policy.overrides"}
+  - {id: action:risk-rules, status: retired, replaced_by: null, reason: "mode: scan and the risk-driven depth escalation are gone; an omitted depth resolves to headers"}
+  - {id: action:install-deps, status: deprecated, replaced_by: action:dependency-source}
+  - {id: action:require-complete-analysis, status: retired, replaced_by: assurance.require_complete}
+  - {id: action:gcc-path, status: retired, replaced_by: action:compiler}
+  - {id: action:gcc-prefix, status: retired, replaced_by: action:compiler}
+  - {id: action:analysis-assurance-complete, status: retired, replaced_by: action:require-complete}
+  - {id: action:debug-info1, status: retired, replaced_by: action:old-debug-info}
+  - {id: action:debug-info2, status: retired, replaced_by: action:new-debug-info}
+  - {id: action:old-version, status: retired, replaced_by: action:old-label}
+  - {id: action:new-version, status: retired, replaced_by: action:new-label}
+  - {id: action:policy-file, status: retired, replaced_by: action:policy}
+  - {id: action:devel-pkg1, status: retired, replaced_by: action:old-header}
+  - {id: action:devel-pkg2, status: retired, replaced_by: action:new-header}
+  - {id: actions/check-target:consumer-ast-frontend, status: retired, replaced_by: actions/check-target:consumer-frontend}
+  - {id: actions/check-target:consumer-gcc-path, status: retired, replaced_by: actions/check-target:consumer-compiler}
+  - {id: actions/check-target:consumer-gcc-options, status: retired, replaced_by: actions/check-target:consumer-compile-options}
+  - {id: actions/check-target:require-complete-analysis, status: retired, replaced_by: assurance.require_complete}
+  - {id: actions/check-target:requested-depth, status: retired, replaced_by: actions/check-target:depth}
+  - {id: actions/check-target:contract-file, status: retired, replaced_by: actions/check-target:contract}
+  - {id: actions/check-target:ast-frontend, status: retired, replaced_by: actions/check-target:frontend}
+  - {id: actions/check-target:gcc-path, status: retired, replaced_by: actions/check-target:compiler}
+  - {id: actions/check-target:gcc-options, status: retired, replaced_by: actions/check-target:compile-options}
+  - {id: actions/check-target:gcc-prefix, status: retired, replaced_by: actions/check-target:compiler}
+  - {id: actions/check-target:analysis-assurance-complete, status: retired, replaced_by: actions/check-target:require-complete}
+  - {id: actions/check-target:policy-file, status: retired, replaced_by: actions/check-target:policy}
+  - {id: workflow:check-single.yml:requested-depth, status: retired, replaced_by: workflow:check-single.yml:depth}
+  - {id: workflow:check-single.yml:ast-frontend, status: retired, replaced_by: workflow:check-single.yml:frontend}
+  - {id: workflow:check-single.yml:gcc-path, status: retired, replaced_by: workflow:check-single.yml:compiler}
+  - {id: workflow:check-single.yml:gcc-prefix, status: retired, replaced_by: workflow:check-single.yml:compiler}
+  - {id: workflow:check-single.yml:gcc-options, status: retired, replaced_by: workflow:check-single.yml:compile-options}
+  - {id: workflow:check-single.yml:contract-file, status: retired, replaced_by: workflow:check-single.yml:contract}
+  - {id: workflow:check-single.yml:policy-file, status: retired, replaced_by: workflow:check-single.yml:policy}
+  - {id: workflow:check-project.yml:ast-frontend, status: retired, replaced_by: workflow:check-project.yml:frontend}
+  - {id: workflow:check-project.yml:gcc-path, status: retired, replaced_by: workflow:check-project.yml:compiler}
+  - {id: workflow:check-project.yml:gcc-prefix, status: retired, replaced_by: workflow:check-project.yml:compiler}
+  - {id: workflow:check-project.yml:gcc-options, status: retired, replaced_by: workflow:check-project.yml:compile-options}
+  - {id: workflow:check-project.yml:policy-file, status: retired, replaced_by: workflow:check-project.yml:policy}
