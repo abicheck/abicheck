@@ -374,6 +374,40 @@ SERIALIZATION_BUG_CLASSES: tuple[BugClass, ...] = (
         ),
     ),
     BugClass(
+        id="storage.graph_closure_identity_not_renumbered",
+        invariant=(
+            "A closure marker names one closure in every place a snapshot "
+            "spells it: the surface/source graph's node ids, labels, edge "
+            "endpoints and attributes carry the same #N ordinal as the flat "
+            "fields, on the dump path and on a stored graph's first decode "
+            "(identical to an eager decode then renumber); a closure only "
+            "the graph names is numbered after its group's flat ordinals, so "
+            "the graph never moves a flat ordinal."
+        ),
+        # Traces to the Codex review on PR #868 that recorded the gap.
+        fixed_by=(868,),
+        seed_tests=(
+            "tests/unit/storage/test_graph_closure_renumbering.py",
+            "tests/test_lambda_identity_ordinal.py",
+        ),
+        public_surfaces=("python-api",),
+        axes={
+            "closure": ("flat-visible", "graph-only"),
+            "spelling": ("raw-path", "stripped"),
+            "path": ("dump-live-graph", "load-lazy-graph"),
+        },
+        known_gaps=(
+            KnownGap(
+                description=(
+                    "A baseline written before the fix with flat #N spellings "
+                    "and a :line:col graph cannot be reconciled; its graph "
+                    "closures are numbered as graph-only."
+                ),
+                reference="docs/contribute/known-gaps.md",
+            ),
+        ),
+    ),
+    BugClass(
         id="compare.blocked_section_hides_presence",
         invariant=(
             "A stored section that cannot be used blocks only the analyses "
