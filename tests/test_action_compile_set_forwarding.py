@@ -58,6 +58,10 @@ def _validate(**inputs: str) -> subprocess.CompletedProcess:
     )
 
 
+def _compile_sets(argv: list[str]) -> list[str]:
+    return [value for value in _set_pairs(argv) if value.startswith("compile.")]
+
+
 def _no_config_flag(argv: list[str]) -> None:
     """The retired inputs no longer synthesize a ``--config`` document."""
     assert "--config" not in argv
