@@ -13,12 +13,12 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Differential pin of the Action's fail-on gate (ADR-091 R15 prerequisite).
+"""Differential pin of the Action's fail-on gate (ADR-091 R15).
 
-ADR-091 R15 moves ``fail-on-breaking`` and ``fail-on-api-break`` from shell
-gate code in ``action/run.sh`` onto ``--set severity.*`` forwarded to the CLI.
-Before the shell code is removed, the plan requires the step outcome, exit
-code and gate annotations to be identical across the matrix
+ADR-091 R15 (as amended) makes ``fail-on-breaking`` and ``fail-on-api-break``
+a pure mapping of the CLI exit code in ``action/run.sh``: exit 4 fails the
+step when fail-on-breaking is true, exit 2 when fail-on-api-break is true.
+The step outcome, exit code and gate annotations are pinned across
 
     fail-on-breaking x fail-on-api-break x CLI result x severity-preset
 
@@ -26,8 +26,8 @@ Each cell runs the real ``run.sh`` against a stub ``abicheck`` that exits
 with the CLI result of that cell and writes the matching JSON report. The
 stub stands in for the CLI's exit computation, so this module pins the
 Action's side of the contract: what the step does with a given CLI result.
-Under R15 the expectations must not change; only the argv that carries the
-gate (asserted in the ``argv`` test) is allowed to.
+``test_the_gate_follows_the_exit_code_not_the_report`` pins that a report
+verdict disagreeing with the exit code does not move the gate.
 """
 
 from __future__ import annotations
@@ -174,3 +174,28 @@ def test_the_preset_is_forwarded_and_does_not_change_the_gate(
     )
     passed = outputs["_exit"] == 0
     assert passed == EXPECTED_PASS[(cli, fob, foa)]
+
+
+#: (CLI exit code, report verdict) pairs where the report disagrees with the
+#: exit code; the gate must follow the exit code alone (R15).
+MISMATCHED = {
+    "exit2_report_breaking": (2, "BREAKING"),
+    "exit0_report_breaking": (0, "BREAKING"),
+}
+
+
+@pytest.mark.parametrize("case", sorted(MISMATCHED))
+@pytest.mark.parametrize("fob", [True, False])
+@pytest.mark.parametrize("foa", [True, False])
+def test_the_gate_follows_the_exit_code_not_the_report(
+    tmp_path: Path, case: str, fob: bool, foa: bool
+) -> None:
+    exit_code, verdict = MISMATCHED[case]
+    bindir = _stub(tmp_path, exit_code=exit_code, verdict=verdict)
+    env = _compare_env(tmp_path)
+    env["INPUT_FAIL_ON_BREAKING"] = str(fob).lower()
+    env["INPUT_FAIL_ON_API_BREAK"] = str(foa).lower()
+    outputs = _run_action(tmp_path, env, bindir)
+    expected_pass = not (exit_code == 2 and foa)
+    assert (outputs["_exit"] == 0) == expected_pass, outputs["_stdout"][-400:]
+    assert "::error::ABI break detected" not in outputs["_stdout"]

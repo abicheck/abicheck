@@ -13,18 +13,15 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Pins where the Action writes each report today (ADR-091 R11 prerequisite).
+"""Pins where the Action writes each report (ADR-091 R11, kept as-is).
 
-ADR-091 R11 folds the Action's ``format`` + ``output-file`` pair into one
-``output`` list. The plan requires the current destination of every
-``format`` value, with and without ``output-file``, to be pinned *before* the
-spelling changes, so a bare ``format: sarif`` keeps writing the file it writes
-today. Each cell below is observed from the real ``run.sh`` with a recording
+ADR-091 R11 originally proposed folding the Action's ``format`` +
+``output-file`` pair into one ``output`` list; the dated amendment keeps both
+inputs. This module pins the destination of every ``format`` value, with and
+without ``output-file``, so a bare ``format: sarif`` keeps writing the file it
+writes today. Each cell is observed from the real ``run.sh`` with a recording
 ``abicheck`` stub: the exact ``-o`` values of the caller's own CLI call, the
 ``report-path`` output, and the files that exist afterwards.
-
-Only the spelling of the inputs may change when R11 lands; these expectations
-must keep passing unchanged.
 """
 
 from __future__ import annotations
