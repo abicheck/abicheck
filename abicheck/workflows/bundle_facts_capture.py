@@ -35,7 +35,7 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, TypeVar
 
 from ..bundle_manifest import InstantiationManifest
 from ..model import AbiSnapshot
@@ -197,4 +197,56 @@ def artifact_kind_of_snapshot(snap: AbiSnapshot) -> str:
         header_only=bool(snap.header_only),
         platform=snap.platform,
         python_visible=snap.python_ext is not None or snap.python_api is not None,
+    )
+
+
+_V = TypeVar("_V")
+
+
+def facts_keyed_by_match_key(facts: BundleFacts) -> BundleFacts:
+    """*facts* with every member keyed by the live side's match key.
+
+    A live operand's members key by ``binary_utils.build_match_map``'s
+    canonical name (``libcore.so.1`` -> ``libcore.so``). The CLI's own
+    capture (``--bundle-facts-out``) already keys that way, but a document
+    captured through the typed API may key a member by its file name, and
+    then ``compare OLD.bundle-facts.json NEW_DIR`` paired nothing where
+    ``compare OLD_DIR NEW_DIR`` paired every library. Re-keying here, on
+    the one key function both routes use, makes the pairing independent of
+    how the document was written. The member's real file name
+    (``library_filenames``) is preferred over its key as the name to
+    canonicalize, and kept: SONAME-skew still sees the versioned spelling.
+
+    Returns *facts* unchanged when it already keys canonically, or when two
+    members would collapse onto one key -- a document that really holds two
+    versions of one library keeps the names it was written with rather
+    than silently losing one of them.
+    """
+    from dataclasses import replace
+
+    from ..binary_utils import _canonical_library_key
+
+    rekey = {
+        name: _canonical_library_key(Path(facts.library_filenames.get(name) or name))
+        for name in facts.per_library_snapshots
+    }
+    if all(k == v for k, v in rekey.items()) or len(set(rekey.values())) != len(rekey):
+        return facts
+
+    def _moved(mapping: dict[str, _V]) -> dict[str, _V]:
+        return {rekey.get(k, k): v for k, v in mapping.items()}
+
+    return replace(
+        facts,
+        per_library_snapshots=_moved(facts.per_library_snapshots),
+        filesystem_aliases=_moved(facts.filesystem_aliases),
+        library_filenames={
+            rekey.get(k, k): v for k, v in facts.library_filenames.items()
+        }
+        | {
+            rekey[k]: k
+            for k in facts.per_library_snapshots
+            if rekey[k] != k and k not in facts.library_filenames
+        },
+        degraded_members=_moved(facts.degraded_members),
     )

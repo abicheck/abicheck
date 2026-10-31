@@ -10,9 +10,16 @@ reconciliation was lost (the Windows CI failure of
 ``test_stored_baseline_new_side_header_surface``).
 
 Invariant, over every subset of a small domain of directory entries: the
-discovered member set is exactly the entries whose *magic bytes* make them
-PE or Mach-O binaries -- whatever their file name -- and never a
-non-binary. The oracle is the fixture table below, not abicheck's
+discovered member set is exactly the live release fan-out's member set for
+the same directory -- every PE and Mach-O binary by its *magic bytes*,
+whatever its file name, plus a file *named* like a shared library
+(``notes.so``), which the live route accepts on its name alone so a text
+linker-script stub stays discoverable (``classify.BinaryExtensionClassifier``)
+and which then fails as a member rather than vanishing. A stored-baseline
+compare once ran its own native-only walk and disagreed with the live route
+(the stored-``BundleFacts`` versioned-member gap); it now discovers by the
+live rule. Never an entry with neither a library name nor library bytes
+(``README.txt``). The oracle is the fixture table below, not abicheck's
 classifier.
 """
 
@@ -32,14 +39,15 @@ _PE = b"MZ" + b"\0" * 254
 _MACHO_64 = bytes.fromhex("cffaedfe") + b"\0" * 252
 _MACHO_32 = bytes.fromhex("cefaedfe") + b"\0" * 252
 
-#: name -> (content, is a native library member)
+#: name -> (content, is a live release member)
 _DOMAIN: dict[str, tuple[bytes, bool]] = {
     "foo.dll": (_PE, True),
     "libpe_named_like_elf.so": (_PE, True),
     "libbar.dylib": (_MACHO_64, True),
     "libbaz32.dylib": (_MACHO_32, True),
     "README.txt": (b"not a library\n", False),
-    "notes.so": (b"plain text with a .so name\n", False),
+    # Named like a library: a member on the live route (name-only accept).
+    "notes.so": (b"plain text with a .so name\n", True),
 }
 
 _SUBSETS = [
