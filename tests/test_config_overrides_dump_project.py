@@ -129,7 +129,7 @@ def test_a_malformed_file_is_lenient_without_set_and_fatal_with_set(
     [
         "build.query=make",  # executable: never reached by dump's resolver
         "severity.addition=error",  # a gate key dump does not evaluate
-        "source.method=auto",  # compare-only CLI key
+        "sources.method=auto",  # compare-only CLI key
         "bundle_variants={x86: {target_triple: x86_64-linux-gnu, compiler_family: gcc}}",
     ],
 )
