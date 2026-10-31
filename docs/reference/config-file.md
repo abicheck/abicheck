@@ -882,6 +882,8 @@ sources:
   exclude:
     - include/**/detail/**
   graph: summary
+  # Precise evidence method (optional; a concrete s0..s6, never `auto`)
+  method: s6
 
 # Stable L2 header compile context
 compile:
@@ -919,8 +921,4 @@ scope:
 suppression:
   strict: true
   require_justification: true
-
-# Precise evidence method (optional; a concrete s0..s6, never `auto`)
-sources:
-  method: s6
 ```

@@ -70,23 +70,23 @@ def acknowledgment_findings(value: object) -> list[str]:
         return []
     if not isinstance(value, dict):
         return [
-            f"acknowledgment must be a mapping, got {type(value).__name__}: {value!r}"
+            f"acknowledgments must be a mapping, got {type(value).__name__}: {value!r}"
         ]
     findings = [
-        f"unknown .abicheck.yml key acknowledgment.{k!r}"
+        f"unknown .abicheck.yml key acknowledgments.{k!r}"
         for k in value
         if k not in _KEYS
     ]
     path = value.get("file")
     if path is not None and (not isinstance(path, str) or not path.strip()):
-        findings.append("acknowledgment.file must be a non-empty path string")
+        findings.append("acknowledgments.file must be a non-empty path string")
     action = value.get("unacknowledged_additions")
     if action is not None and (
         not isinstance(action, str)
         or action not in VALID_UNACKNOWLEDGED_ADDITIONS_ACTIONS
     ):
         findings.append(
-            f"acknowledgment.unacknowledged_additions must be one of "
+            f"acknowledgments.unacknowledged_additions must be one of "
             f"{sorted(VALID_UNACKNOWLEDGED_ADDITIONS_ACTIONS)}, got {action!r}"
         )
     breaks = value.get("breaks")
@@ -94,7 +94,7 @@ def acknowledgment_findings(value: object) -> list[str]:
         not isinstance(breaks, str) or breaks not in VALID_ACKNOWLEDGMENT_BREAKS_ACTIONS
     ):
         findings.append(
-            f"acknowledgment.breaks must be one of "
+            f"acknowledgments.breaks must be one of "
             f"{sorted(VALID_ACKNOWLEDGMENT_BREAKS_ACTIONS)}, got {breaks!r}"
         )
     return findings

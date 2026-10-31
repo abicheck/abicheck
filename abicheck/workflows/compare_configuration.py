@@ -48,7 +48,7 @@ resolved here too, so no front end needs a CLI module to read them:
   ``--config`` file, so it needs no rung of its own.
   :func:`load_and_resolve_compare_config` reads the file first.
 * :func:`resolve_compare_collect_mode` -- the source/build collect mode:
-  ``--depth`` over ``source.method`` over the evidence inputs given.
+  ``--depth`` over ``sources.method`` over the evidence inputs given.
 * :func:`load_required_symbols` / :func:`resolve_force_public_scope` -- the
   ``--required-symbol`` contract and the forced-public symbol set, each read
   once so a receipt names the content that scored the run.
@@ -122,7 +122,7 @@ class ProjectPolicyOverridesError(CompareConfigurationError):
 class CompareSettingsError(CompareConfigurationError):
     """A compare setting from a flag or the project file is unusable.
 
-    An unreadable or invalid ``.abicheck.yml``, an invalid ``source.method``,
+    An unreadable or invalid ``.abicheck.yml``, an invalid ``sources.method``,
     or a ``--required-symbol @FILE`` that is missing or given twice. The CLI
     reports it as a usage error (exit 64) with this message.
     """
@@ -707,12 +707,12 @@ def resolve_compare_collect_mode(
     """Resolve compare's source/build collect mode, plus a human label for it.
 
     Precedence (ADR-037 D4/D5, extended by the P1 CLI-contract fix below):
-    explicit ``--depth`` > ``.abicheck.yml`` ``source.method`` > inferred from
+    explicit ``--depth`` > ``.abicheck.yml`` ``sources.method`` > inferred from
     raw ``--old/new-sources``/``--old/new-build-info`` given with neither of
     the above > off.
 
     The inferred rung closes a gap where passing ``--sources``/``--build-info``
-    with no ``--depth`` (and no ``source.method`` in config) silently resolved
+    with no ``--depth`` (and no ``sources.method`` in config) silently resolved
     to "off" and the inputs were ignored with a warning: an explicit
     source/build-info input is itself a request to use it, so omitted depth
     should not default to discarding it. This mirrors ``scan``'s own
@@ -732,10 +732,10 @@ def resolve_compare_collect_mode(
             mode = method_to_collect_mode(SourceMethod(source_method))
         except ValueError:
             raise CompareSettingsError(
-                f"source.method in .abicheck.yml is invalid: "
+                f"sources.method in .abicheck.yml is invalid: "
                 f"{source_method!r} (expected s0..s6 or auto)."
             ) from None
-        return mode, f"source.method={source_method} (.abicheck.yml)"
+        return mode, f"sources.method={source_method} (.abicheck.yml)"
     if old_sources is not None or new_sources is not None:
         return (
             collect_mode_for_depth("source"),

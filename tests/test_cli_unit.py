@@ -342,7 +342,7 @@ class TestResolveCompareCollectMode:
         # if raw --sources are also present (config > bare inference).
         mode, label = self._call(source_method="s1", old_sources=tmp_path / "src")
         assert mode == "build"
-        assert "source.method=s1" in label
+        assert "sources.method=s1" in label
 
     def test_explicit_depth_wins_over_config_source_method(self, tmp_path):
         mode, label = self._call(depth="source", source_method="s1")
@@ -352,7 +352,7 @@ class TestResolveCompareCollectMode:
     def test_invalid_source_method_raises_settings_error(self):
         from abicheck.workflows.compare_configuration import CompareSettingsError
 
-        with pytest.raises(CompareSettingsError, match="source.method"):
+        with pytest.raises(CompareSettingsError, match="sources.method"):
             self._call(source_method="not-a-method")
 
 
