@@ -448,6 +448,13 @@ implemented; D18 is partial. Owner: `storage/`; per-item status in the
 - [Snapshot write still builds the whole document tree](known-gaps/snapshot-write-still-builds-the-whole-document-tree.md)  
   **Status (2026-10-31): OPEN.** The text stage streams. The tree build is the whole remaining write peak (39.8 of 39.9 MiB on a 23.9 MB libstdc++ dump).
 
+#### Snapshot write peak
+
+`perf` — Writing a snapshot builds the largest section's encoded tree whole (A2.2's record-level remainder).
+
+- [Snapshot write still builds the largest section's tree whole](known-gaps/snapshot-write-still-builds-the-whole-document-tree.md)  
+  **Status (2026-10-31): NARROWED.** Sections are encoded and written one at a time (550 -> 286 MiB on a two-section synthetic); a binary-only dump is one section, so its peak barely moves (39.8 -> 37.1 MiB).
+
 #### Bundle and multi-library memory
 
 `perf` — Three retention costs on the multi-library path: `read_bundle_facts_package` holds raw JSON and decoded snapshots together, every member snapshot stores its own copy of the shared header evidence, and `--bundle-facts-out` pins OLD snapshots per member.
