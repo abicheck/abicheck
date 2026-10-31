@@ -221,7 +221,7 @@ targets:
     target-kind: library   # required -- app-consumer/plugin-contract have
                             # no scan-mode equivalent to --used-by/--required-symbol
     baseline-channel: none
-    requested-depth: source
+    depth: source
 ```
 
 Set `baseline-channel: none`. `check-target` detects this and skips

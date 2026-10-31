@@ -62,7 +62,7 @@ RUN_SH = Path(__file__).resolve().parents[1] / "action" / "run.sh"
 
 _COMPARE_MODE_MARKER = 'elif [[ "$MODE" == "compare" ]]; then'
 
-_COMPILE_CONTEXT_START = 'add_single_flag "--ast-frontend" "${INPUT_AST_FRONTEND:-}"'
+_COMPILE_CONTEXT_START = 'add_single_flag "--ast-frontend" "${INPUT_FRONTEND:-}"'
 
 # compare's region (Phase 7) starts at the gating comment (these inputs are
 # no longer gated by operand shape: the release fan-out threads the
@@ -297,7 +297,7 @@ class TestCompileContextPairwiseOldLibraryClassification:
     @staticmethod
     def _pairwise_env(old_library: str, sources: str = "src") -> dict[str, str]:
         return {
-            "INPUT_GCC_PATH": "/opt/gcc-14/bin/g++",
+            "INPUT_COMPILER": "/opt/gcc-14/bin/g++",
             "INPUT_SOURCES": sources,
             "INPUT_OLD_LIBRARY": old_library,
         }
@@ -514,7 +514,7 @@ class TestAuditOnlyCompareStaysSingleSidedUnconditionally:
         )
         cmd, _ = _run_region_with_cwd(
             _COMPARE_MODE_MARKER,
-            {"INPUT_GCC_PATH": "/opt/gcc-14/bin/g++", "INPUT_SOURCES": "src"},
+            {"INPUT_COMPILER": "/opt/gcc-14/bin/g++", "INPUT_SOURCES": "src"},
             tmp_path,
             _COMPARE_COMPILE_CONTEXT_START,
         )

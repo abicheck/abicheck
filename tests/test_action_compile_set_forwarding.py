@@ -60,30 +60,31 @@ def test_no_compile_inputs_forward_no_compile_set(tmp_path: Path, mode: str) -> 
 
 def test_auto_frontend_and_default_lang_forward_nothing(tmp_path: Path) -> None:
     """``auto`` and the ``c++`` default are no-ops, as they were in the overlay."""
-    argv = _run(tmp_path, INPUT_AST_FRONTEND="auto", INPUT_LANG="c++")
+    argv = _run(tmp_path, INPUT_FRONTEND="auto", INPUT_LANG="c++")
     assert _compile_sets(argv) == []
 
 
 def test_gcc_path_forwards_compile_compiler(tmp_path: Path) -> None:
-    argv = _run(tmp_path, INPUT_GCC_PATH="/opt/gcc-14/bin/g++")
+    argv = _run(tmp_path, INPUT_COMPILER="/opt/gcc-14/bin/g++")
     assert _compile_sets(argv) == ['compile.compiler="/opt/gcc-14/bin/g++"']
     _no_config_flag(argv)
 
 
-def test_gcc_prefix_alone_forwards_compile_compiler(tmp_path: Path) -> None:
-    argv = _run(tmp_path, INPUT_GCC_PREFIX="aarch64-linux-gnu-")
+def test_prefix_form_compiler_forwards_compile_compiler(tmp_path: Path) -> None:
+    """ADR-091 R5: `compiler` takes a cross-toolchain prefix (ends with `-`)
+    as well as a path; the retired gcc-prefix input folded into it."""
+    argv = _run(tmp_path, INPUT_COMPILER="aarch64-linux-gnu-")
     assert _compile_sets(argv) == ['compile.compiler="aarch64-linux-gnu-"']
 
 
-def test_gcc_path_wins_over_gcc_prefix(tmp_path: Path) -> None:
-    argv = _run(
-        tmp_path, INPUT_GCC_PATH="/usr/bin/g++", INPUT_GCC_PREFIX="aarch64-linux-gnu-"
-    )
+def test_path_form_compiler_forwards_unchanged(tmp_path: Path) -> None:
+    """A full compiler path is forwarded verbatim, not treated as a prefix."""
+    argv = _run(tmp_path, INPUT_COMPILER="/usr/bin/g++")
     assert _compile_sets(argv) == ['compile.compiler="/usr/bin/g++"']
 
 
 def test_single_line_options_are_shell_split_into_a_list(tmp_path: Path) -> None:
-    argv = _run(tmp_path, INPUT_GCC_OPTIONS='-DNAME="x" -fno-exceptions')
+    argv = _run(tmp_path, INPUT_COMPILE_OPTIONS='-DNAME="x" -fno-exceptions')
     (value,) = [v for v in _compile_sets(argv) if v.startswith("compile.options=")]
     assert json.loads(value.removeprefix("compile.options=")) == shlex.split(
         '-DNAME="x" -fno-exceptions'
@@ -91,7 +92,7 @@ def test_single_line_options_are_shell_split_into_a_list(tmp_path: Path) -> None
 
 
 def test_multi_line_options_are_one_token_per_line(tmp_path: Path) -> None:
-    argv = _run(tmp_path, INPUT_GCC_OPTIONS="-DA\n-DB=2\n")
+    argv = _run(tmp_path, INPUT_COMPILE_OPTIONS="-DA\n-DB=2\n")
     (value,) = [v for v in _compile_sets(argv) if v.startswith("compile.options=")]
     assert json.loads(value.removeprefix("compile.options=")) == ["-DA", "-DB=2"]
 
@@ -111,7 +112,7 @@ def test_a_windows_sysroot_survives_as_a_yaml_string(tmp_path: Path) -> None:
 
 
 def test_frontend_and_lang_forward(tmp_path: Path) -> None:
-    argv = _run(tmp_path, INPUT_AST_FRONTEND="clang", INPUT_LANG="c")
+    argv = _run(tmp_path, INPUT_FRONTEND="clang", INPUT_LANG="c")
     sets = _compile_sets(argv)
     assert 'compile.frontend="clang"' in sets
     assert 'compile.lang="c"' in sets
@@ -119,7 +120,7 @@ def test_frontend_and_lang_forward(tmp_path: Path) -> None:
 
 def test_dump_forwards_lang_and_frontend(tmp_path: Path) -> None:
     """Dump forwards lang too (``add_compile_context_flags true``)."""
-    argv = _run(tmp_path, "dump", INPUT_AST_FRONTEND="clang", INPUT_LANG="c")
+    argv = _run(tmp_path, "dump", INPUT_FRONTEND="clang", INPUT_LANG="c")
     assert 'compile.lang="c"' in _compile_sets(argv)
     assert 'compile.frontend="clang"' in _compile_sets(argv)
 
@@ -128,7 +129,7 @@ def test_derived_compile_sets_come_before_an_explicit_set_line(tmp_path: Path) -
     """``set:`` is appended after the derived overrides, so it wins (CLI last-wins)."""
     argv = _run(
         tmp_path,
-        INPUT_GCC_PATH="/usr/bin/g++",
+        INPUT_COMPILER="/usr/bin/g++",
         INPUT_SET="compile.compiler=/usr/bin/clang++\n",
     )
     sets = _set_pairs(argv)
@@ -182,7 +183,7 @@ def test_no_overlay_temp_file_is_written_for_compile_inputs(tmp_path: Path) -> N
     runner_temp.mkdir()
     argv = _run(
         tmp_path,
-        INPUT_GCC_PATH="/usr/bin/g++",
+        INPUT_COMPILER="/usr/bin/g++",
         INPUT_SYSROOT="/opt/sysroot",
         RUNNER_TEMP=str(runner_temp),
     )

@@ -69,10 +69,10 @@ OVERLAY_INPUTS: dict[str, dict[str, str]] = {
         "dso-only": "release.dso_only",
         "include-private-dso": "release.include_private_dso",
         "fail-on-removed-library": "gate.fail_on_removed_library",
-        "analysis-assurance-complete": "assurance.require_complete",
+        "require-complete": "assurance.require_complete",
     },
     "actions/check-target/action.yml": {
-        "analysis-assurance-complete": "assurance.require_complete",
+        "require-complete": "assurance.require_complete",
     },
 }
 
@@ -269,7 +269,7 @@ class TestCheckProjectForwardsInheritNotFalse:
     def test_forwarded_expression_yields_inherit_for_undeclared_cells(self) -> None:
         steps = _load(CHECK_PROJECT)["jobs"]["check"]["steps"]
         run_step = next(s for s in steps if s.get("name") == "Run check-target")
-        expression = run_step["with"]["analysis-assurance-complete"]
+        expression = run_step["with"]["require-complete"]
         match = _FORWARD_EXPR.match(expression.strip())
         assert match, f"unexpected forwarding expression: {expression!r}"
         declared, if_declared, if_undeclared = match.groups()

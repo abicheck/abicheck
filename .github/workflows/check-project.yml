@@ -989,7 +989,7 @@ jobs:
           expected-project-ref: ${{ matrix.baseline_channel == 'accepted-main' && inputs.expected-project-ref || '' }}
           expected-baseline-generation: ${{ inputs.expected-baseline-generation }}
           allow-new-target: ${{ matrix.allow_new_target || 'false' }}
-          requested-depth: ${{ matrix.requested_depth }}
+          depth: ${{ matrix.requested_depth }}
           explicit-id: ${{ matrix.explicit_id || '' }}
           build-system: ${{ matrix.build_system || '' }}
           build-generator: ${{ matrix.build_generator || '' }}
@@ -1010,7 +1010,7 @@ jobs:
           # 'false': 'false' is now an explicit override that lifts a config
           # assurance.require_complete: true, so forwarding it for a cell that
           # declared nothing would silently drop the project's own floor.
-          analysis-assurance-complete: ${{ matrix.analysis_assurance == 'complete' && 'true' || '' }}
+          require-complete: ${{ matrix.analysis_assurance == 'complete' && 'true' || '' }}
           project: ${{ inputs.project != '' && inputs.project || github.repository }}
           head-sha: ${{ inputs.head-sha != '' && inputs.head-sha || github.sha }}
           base-ref: ${{ inputs.base-ref }}
@@ -1024,7 +1024,7 @@ jobs:
           evidence-pack-path: ${{ steps.candidate.outputs.evidence-pack }}
           new-library: ${{ steps.candidate.outputs.new-library }}
           consumer-binary: ${{ matrix.target_kind == 'app-consumer' && steps.candidate.outputs.consumer-binary || '' }}
-          contract-file: ${{ matrix.target_kind == 'plugin-contract' && matrix.contract_file || '' }}
+          contract: ${{ matrix.target_kind == 'plugin-contract' && matrix.contract_file || '' }}
           # RunPlanCheck.header (run_plan.py's own field docstring): a
           # target's `public_headers:` (ADR-047's own worked example),
           # space-joined -- the same per-cell-first precedence as
@@ -1066,7 +1066,7 @@ jobs:
           # including that guard still firing loudly on a workflow-global
           # non-`auto` value -- declining to add a new source of the error
           # is this line's job, not silencing the existing one.
-          ast-frontend: ${{ matrix.kind != 'bundle' && matrix.compile_ast_frontend || inputs.ast-frontend }}
+          frontend: ${{ matrix.kind != 'bundle' && matrix.compile_ast_frontend || inputs.ast-frontend }}
           # An omitted consumer_compile FIELD defers to the caller's
           # workflow-global input, the same as an omitted producer compile
           # field does two lines up -- not to the empty string, which would
@@ -1144,9 +1144,8 @@ jobs:
           # "не молча удалять параметры" applies here as much as it does
           # to the per-cell fields above, so this fix does not invent a
           # third option beyond what was already reviewed.
-          gcc-path: ${{ matrix.kind != 'bundle' && matrix.compile_gcc_path || inputs.gcc-path }}
-          gcc-prefix: ${{ inputs.gcc-prefix }}
-          gcc-options: ${{ matrix.kind != 'bundle' && matrix.compile_gcc_options || inputs.gcc-options }}
+          compiler: ${{ matrix.kind != 'bundle' && matrix.compile_gcc_path || inputs.gcc-path || inputs.gcc-prefix }}
+          compile-options: ${{ matrix.kind != 'bundle' && matrix.compile_gcc_options || inputs.gcc-options }}
           sysroot: ${{ inputs.sysroot }}
           sources: ${{ inputs.sources }}
           # check-target's own build-info gate only converts evidence-pack-path
@@ -1170,8 +1169,7 @@ jobs:
           build-info: ${{ ((steps.candidate.outputs.evidence-producer || inputs.evidence-producer) != 'wrapper' && (steps.candidate.outputs.evidence-producer || inputs.evidence-producer) != 'clang-plugin' && steps.candidate.outputs.evidence-pack != '') && steps.candidate.outputs.evidence-pack || inputs.build-info }}
           compile-db: ${{ inputs.compile-db }}
           build-config: ${{ inputs.build-config }}
-          policy: ${{ inputs.policy }}
-          policy-file: ${{ inputs.policy-file }}
+          policy: ${{ inputs.policy-file || inputs.policy }}
           suppress: ${{ inputs.suppress }}
           severity-preset: ${{ inputs.severity-preset }}
           extra-args: ${{ inputs.extra-args }}

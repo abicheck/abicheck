@@ -530,9 +530,9 @@ class TestAuditOnlyCompareForwardsCrossCompilerFlags:
         result, captured, _captured_config = _run_baseline_compare_raw(
             {
                 "INPUT_OLD_LIBRARY": "",
-                "INPUT_GCC_PATH": "/opt/cross/bin/aarch64-linux-gnu-g++",
+                "INPUT_COMPILER": "/opt/cross/bin/aarch64-linux-gnu-g++",
                 "INPUT_GCC_PREFIX": "aarch64-linux-gnu-",
-                "INPUT_GCC_OPTIONS": "-D__ARM_NEON",
+                "INPUT_COMPILE_OPTIONS": "-D__ARM_NEON",
                 "INPUT_SYSROOT": "/opt/sysroots/aarch64",
             },
             tmp_path,
@@ -556,7 +556,7 @@ class TestAuditOnlyCompareForwardsCrossCompilerFlags:
         """A whitespace-containing option atom reaches the CLI as one list entry,
         the same as the two-sided shape."""
         result, _captured, _captured_config = _run_baseline_compare_raw(
-            {"INPUT_OLD_LIBRARY": "", "INPUT_GCC_OPTIONS": '-DMSG="hello world"'},
+            {"INPUT_OLD_LIBRARY": "", "INPUT_COMPILE_OPTIONS": '-DMSG="hello world"'},
             tmp_path,
         )
         assert result.returncode == 0, result.stdout + result.stderr
@@ -569,9 +569,9 @@ class TestCompareModeForwardsCrossCompilerFlags:
     def test_all_four_reach_the_cli(self, tmp_path: Path) -> None:
         result, captured, _captured_config = _run_baseline_compare_raw(
             {
-                "INPUT_GCC_PATH": "/opt/cross/bin/aarch64-linux-gnu-g++",
+                "INPUT_COMPILER": "/opt/cross/bin/aarch64-linux-gnu-g++",
                 "INPUT_GCC_PREFIX": "aarch64-linux-gnu-",
-                "INPUT_GCC_OPTIONS": "-D__ARM_NEON",
+                "INPUT_COMPILE_OPTIONS": "-D__ARM_NEON",
                 "INPUT_SYSROOT": "/opt/sysroots/aarch64",
             },
             tmp_path,
@@ -596,7 +596,7 @@ class TestCompareModeForwardsCrossCompilerFlags:
     def test_quoted_whitespace_atom_stays_one_atom(self, tmp_path: Path) -> None:
         """A single-line ``gcc-options`` value is shell-quoting-aware split, so a
         quoted segment stays one list entry (not re-split on its internal space)."""
-        _run_compare({"INPUT_GCC_OPTIONS": '-DMSG="hello world"'}, tmp_path)
+        _run_compare({"INPUT_COMPILE_OPTIONS": '-DMSG="hello world"'}, tmp_path)
         assert _compile_block(tmp_path)["options"] == ["-DMSG=hello world"]
 
 
@@ -616,7 +616,7 @@ class TestBaselineCompareTranslationForwardsCompileSets:
         result, captured, captured_config = _run_baseline_compare_raw(
             {
                 "INPUT_BUILD_CONFIG": str(build_config),
-                "INPUT_GCC_PATH": "/opt/cross/bin/aarch64-linux-gnu-g++",
+                "INPUT_COMPILER": "/opt/cross/bin/aarch64-linux-gnu-g++",
             },
             tmp_path,
         )
@@ -645,7 +645,7 @@ class TestBaselineCompareTranslationForwardsCompileSets:
         """Negative control: a compile-context input with no build-config still
         reaches the command as a set, and no ``--config`` is synthesized."""
         result, captured, _captured_config = _run_baseline_compare_raw(
-            {"INPUT_GCC_PATH": "/opt/cross/bin/aarch64-linux-gnu-g++"}, tmp_path
+            {"INPUT_COMPILER": "/opt/cross/bin/aarch64-linux-gnu-g++"}, tmp_path
         )
         assert result.returncode == 0, result.stdout + result.stderr
         assert "--config" not in captured.read_text(encoding="utf-8").split()

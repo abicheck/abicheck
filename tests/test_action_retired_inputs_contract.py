@@ -121,6 +121,21 @@ _TOMBSTONES_THAT_MUST_STAY_DECLARED = frozenset(
         "new-library-set",
         "require-complete-analysis",
         "risk-rules",
+        # ADR-091 renames (2026-10-30, no transition period): each old name
+        # is a tombstone that fails the run and names its replacement.
+        "analysis-assurance-complete",
+        "ast-frontend",
+        "debug-info1",
+        "debug-info2",
+        "devel-pkg1",
+        "devel-pkg2",
+        "gcc-options",
+        "gcc-path",
+        "gcc-prefix",
+        "new-version",
+        "old-version",
+        "policy-file",
+        "public-header-dir",
     }
 )
 

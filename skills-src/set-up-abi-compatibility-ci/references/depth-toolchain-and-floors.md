@@ -93,9 +93,9 @@ line only if you saw it.
 
 ## 3. Header AST backends
 
-- **Default `castxml`** (Action `ast-frontend: auto`), policy range
+- **Default `castxml`** (Action `frontend: auto`), policy range
   `>=0.6.11,<0.8.0`. Fails closed: no CastXML, no silent switch.
-- **`ast-frontend: clang`** — for a project that genuinely cannot use
+- **`frontend: clang`** — for a project that genuinely cannot use
   CastXML (clang-only toolchain, SYCL/DPC++ device code). It does **not**
   compute record layout (size, alignment, field offsets); layout breaks then
   come only from debug info, so keep `-g` in the check build. Needs clang
@@ -124,7 +124,7 @@ the check:
 **Cross-compiled libraries** (toolchain file, `aarch64-linux-gnu-gcc`, a
 sysroot): abicheck reads the target binary statically on an x86_64 runner,
 but the header frontend must parse headers **as the target compiler would**:
-set `gcc-prefix: aarch64-linux-gnu-` (or `gcc-path:`) and `sysroot:` on every
+set `compiler: aarch64-linux-gnu-` (or `compiler:` with the full compiler path) and `sysroot:` on every
 analysis step, and install the cross toolchain in that job. Alternatively
 build and check natively on an arm64 runner (`runs-on: ubuntu-24.04-arm`).
 

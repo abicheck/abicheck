@@ -95,16 +95,14 @@ concepts:
       - dump --label
       - project history --label
     action:
-      - action:old-version
-      - action:new-version
+      - action:old-label
+      - action:new-label
     python:
       - InputSpec.version
       - run_compare(old_label)
       - run_compare(new_label)
       - run_dump(version)
     exceptions:
-      - {id: 'action:old-version', rule: name, rename: R1, note: action spelling breaks D1; the leaf is `label`}
-      - {id: 'action:new-version', rule: name, rename: R1, note: action spelling breaks D1; the leaf is `label`}
       - {id: InputSpec.version, rule: name, rename: R1, note: python spelling breaks D1; the leaf is `label`}
       - {id: run_dump(version), rule: name, rename: R1, note: python spelling breaks D1; the leaf is `label`}
   - concept: select
@@ -152,14 +150,11 @@ concepts:
       - dump --depth
     action:
       - action:depth
-      - actions/check-target:requested-depth
+      - actions/check-target:depth
     python:
       - CompareRequest.depth
       - DumpRequest.depth
       - run_compare(depth)
-    exceptions:
-      - {id: 'actions/check-target:requested-depth', rule: name, rename: R18, note: action spelling breaks D1; the
-          leaf is `depth`}
   - concept: headers
     tier: core
     renames:
@@ -171,8 +166,6 @@ concepts:
       - action:header
       - action:old-header
       - action:new-header
-      - action:devel-pkg1
-      - action:devel-pkg2
       - actions/check-target:header
       - actions/check-target:old-header
       - actions/check-target:new-header
@@ -186,8 +179,6 @@ concepts:
       - {id: 'action:header', rule: name, rename: R17, note: action spelling breaks D1; the leaf is `headers`}
       - {id: 'action:old-header', rule: name, rename: R17, note: action spelling breaks D1; the leaf is `headers`}
       - {id: 'action:new-header', rule: name, rename: R17, note: action spelling breaks D1; the leaf is `headers`}
-      - {id: 'action:devel-pkg1', rule: name, rename: R17, note: action spelling breaks D1; the leaf is `headers`}
-      - {id: 'action:devel-pkg2', rule: name, rename: R17, note: action spelling breaks D1; the leaf is `headers`}
       - {id: 'actions/check-target:header', rule: name, rename: R17, note: action spelling breaks D1; the leaf is
           `headers`}
       - {id: 'actions/check-target:old-header', rule: name, rename: R17, note: action spelling breaks D1; the leaf
@@ -272,17 +263,14 @@ concepts:
     config:
       - compile.frontend
     action:
-      - action:ast-frontend
-      - actions/check-target:ast-frontend
+      - action:frontend
+      - actions/check-target:frontend
     python:
       - CompareRequest.frontend
       - DumpRequest.frontend
       - run_compare(frontend)
       - run_dump(frontend)
-    exceptions:
-      - {id: 'action:ast-frontend', rule: name, rename: R4, note: action spelling breaks D1; the leaf is `frontend`}
-      - {id: 'actions/check-target:ast-frontend', rule: name, rename: R4, note: action spelling breaks D1; the leaf
-          is `frontend`}
+    exceptions: []
   - concept: compile.frontend_context
     tier: config
     renames: []
@@ -298,18 +286,9 @@ concepts:
     config:
       - compile.compiler
     action:
-      - action:gcc-path
-      - action:gcc-prefix
-      - actions/check-target:gcc-path
-      - actions/check-target:gcc-prefix
+      - action:compiler
+      - actions/check-target:compiler
       - actions/collect-facts:compiler
-    exceptions:
-      - {id: 'action:gcc-path', rule: name, rename: R5, note: action spelling breaks D1; the leaf is `compiler`}
-      - {id: 'action:gcc-prefix', rule: name, rename: R5, note: action spelling breaks D1; the leaf is `compiler`}
-      - {id: 'actions/check-target:gcc-path', rule: name, rename: R5, note: action spelling breaks D1; the leaf
-          is `compiler`}
-      - {id: 'actions/check-target:gcc-prefix', rule: name, rename: R5, note: action spelling breaks D1; the leaf
-          is `compiler`}
   - concept: compile.options
     tier: config
     renames:
@@ -317,12 +296,11 @@ concepts:
     config:
       - compile.options
     action:
-      - action:gcc-options
-      - actions/check-target:gcc-options
+      - action:compile-options
+      - actions/check-target:compile-options
     exceptions:
-      - {id: 'action:gcc-options', rule: name, rename: R5, note: action spelling breaks D1; the leaf is `options`}
-      - {id: 'actions/check-target:gcc-options', rule: name, rename: R5, note: action spelling breaks D1; the leaf
-          is `options`}
+      - {id: 'action:compile-options', rule: name, rename: R5, note: ADR-091 R5 names this spelling; the bare leaf `options` is not ambiguous, so the block prefix is a recorded deviation}
+      - {id: 'actions/check-target:compile-options', rule: name, rename: R5, note: ADR-091 R5 names this spelling; the bare leaf `options` is not ambiguous, so the block prefix is a recorded deviation}
   - concept: compile.sysroot
     tier: config
     renames: []
@@ -382,8 +360,8 @@ concepts:
     config:
       - debug.pdb_path
     action:
-      - action:debug-info1
-      - action:debug-info2
+      - action:old-debug-info
+      - action:new-debug-info
     python:
       - InputSpec.pdb
       - InputSpec.debug_roots
@@ -394,8 +372,6 @@ concepts:
       - run_dump(pdb_path)
       - run_dump(debug_roots)
     exceptions:
-      - {id: 'action:debug-info1', rule: name, rename: R17, note: action spelling breaks D1; the leaf is `debug_info`}
-      - {id: 'action:debug-info2', rule: name, rename: R17, note: action spelling breaks D1; the leaf is `debug_info`}
       - {id: InputSpec.pdb, rule: name, rename: R19, note: python spelling breaks D1; the leaf is `debug_info`}
       - {id: InputSpec.debug_roots, rule: name, rename: R19, note: python spelling breaks D1; the leaf is `debug_info`}
       - {id: run_compare(old_pdb_path), rule: name, rename: R19, note: python spelling breaks D1; the leaf is `debug_info`}
@@ -830,13 +806,11 @@ concepts:
     config:
       - scope.public_header_dirs
     action:
-      - action:public-header-dir
+      - action:public-header-dirs
     python:
       - InputSpec.public_header_dirs
       - run_compare(public_header_dirs)
       - run_dump(public_header_dirs)
-    exceptions:
-      - {id: 'action:public-header-dir', rule: name, rename: R7, note: action spelling breaks D1; the leaf is `public_header_dirs`}
   - concept: scope.public_symbols
     tier: config
     renames:
@@ -912,13 +886,11 @@ concepts:
     config:
       - contract
     action:
-      - actions/check-target:contract-file
+      - actions/check-target:contract
     python:
       - CompareRequest.contract
       - run_compare(contract)
-    exceptions:
-      - {id: 'actions/check-target:contract-file', rule: name, rename: R18, note: action spelling breaks D1; the
-          leaf is `contract`}
+    exceptions: []
   - concept: used_by
     tier: core
     renames: []
@@ -974,16 +946,11 @@ concepts:
       - project history --policy
     action:
       - action:policy
-      - action:policy-file
       - actions/check-target:policy
-      - actions/check-target:policy-file
     python:
       - CompareRequest.policy
       - run_compare(policy)
-    exceptions:
-      - {id: 'action:policy-file', rule: name, rename: R2, note: action spelling breaks D1; the leaf is `policy`}
-      - {id: 'actions/check-target:policy-file', rule: name, rename: R2, note: action spelling breaks D1; the leaf
-          is `policy`}
+    exceptions: []
   - concept: policy.overrides
     tier: config
     renames: []
@@ -1127,15 +1094,11 @@ concepts:
     config:
       - assurance.require_complete
     action:
-      - action:analysis-assurance-complete
-      - actions/check-target:analysis-assurance-complete
+      - action:require-complete
+      - actions/check-target:require-complete
     python:
       - CompareRequest.require_complete_analysis
     exceptions:
-      - {id: 'action:analysis-assurance-complete', rule: name, rename: R6, note: action spelling breaks D1; the
-          leaf is `require_complete`}
-      - {id: 'actions/check-target:analysis-assurance-complete', rule: name, rename: R6, note: action spelling breaks
-          D1; the leaf is `require_complete`}
       - {id: CompareRequest.require_complete_analysis, rule: name, rename: R19, note: python spelling breaks D1;
           the leaf is `require_complete`}
   - concept: action.gate
@@ -1322,6 +1285,27 @@ concepts:
     renames:
       - R14
     action:
+      - action:analysis-assurance-complete
+      - action:ast-frontend
+      - action:debug-info1
+      - action:debug-info2
+      - action:devel-pkg1
+      - action:devel-pkg2
+      - action:gcc-options
+      - action:gcc-path
+      - action:gcc-prefix
+      - action:new-version
+      - action:old-version
+      - action:policy-file
+      - action:public-header-dir
+      - actions/check-target:analysis-assurance-complete
+      - actions/check-target:ast-frontend
+      - actions/check-target:contract-file
+      - actions/check-target:gcc-options
+      - actions/check-target:gcc-path
+      - actions/check-target:gcc-prefix
+      - actions/check-target:policy-file
+      - actions/check-target:requested-depth
       - action:new-library-set
       - action:against
       - action:jobs
@@ -1355,6 +1339,6 @@ budget_exceptions:
     rename: R22
     note: visible core options on compare --help (D4 budget 15); Phase 5 moves options to the config tier
   - surface: action
-    recorded: 53
+    recorded: 49
     rename: R22
     note: root action.yml analysis inputs (D4 budget 25); Phase 5 review shrinks this

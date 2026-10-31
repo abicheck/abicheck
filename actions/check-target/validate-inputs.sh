@@ -7,7 +7,7 @@ set -euo pipefail
 # Workflow-command injection defense (bug class
 # `trust_boundary.shell_workflow_injection`; #705 -> #758 -> #1222). Every
 # _fail message below interpolates at least one INPUT_* value -- including
-# the newly-public analysis-assurance-complete -- and every one of those is
+# the newly-public require-complete -- and every one of those is
 # workflow-controlled per action/AGENTS.md's "treat every INPUT_*/GITHUB_*
 # as untrusted" rule. A GitHub annotation is line-delimited, so a value
 # carrying a raw or escaped newline lets the remainder start a *new*
@@ -42,15 +42,34 @@ BUNDLE_MEMBERS="${INPUT_BUNDLE_MEMBERS:-[]}"
 BASELINE_CHANNEL="${INPUT_BASELINE_CHANNEL:-}"
 BASELINE_PATH="${INPUT_BASELINE_PATH:-}"
 GATE_MODE="${INPUT_GATE_MODE:-local}"
-REQUESTED_DEPTH="${INPUT_REQUESTED_DEPTH:-}"
+REQUESTED_DEPTH="${INPUT_DEPTH:-}"
 EVIDENCE_PRODUCER="${INPUT_EVIDENCE_PRODUCER:-}"
 CONSUMER_BINARY="${INPUT_CONSUMER_BINARY:-}"
-CONTRACT_FILE="${INPUT_CONTRACT_FILE:-}"
+CONTRACT_FILE="${INPUT_CONTRACT:-}"
 ALLOW_NEW_TARGET="${INPUT_ALLOW_NEW_TARGET:-false}"
-ANALYSIS_ASSURANCE_COMPLETE="${INPUT_ANALYSIS_ASSURANCE_COMPLETE:-}"
+ANALYSIS_ASSURANCE_COMPLETE="${INPUT_REQUIRE_COMPLETE:-}"
+
+# Retired names are rejected before any required-input check, so a caller
+# who still sets `requested-depth` gets the replacement hint, not 'depth is required'.
+_renamed_inputs=(
+  "requested-depth:INPUT_REQUESTED_DEPTH:depth"
+  "contract-file:INPUT_CONTRACT_FILE:contract"
+  "ast-frontend:INPUT_AST_FRONTEND:frontend"
+  "gcc-path:INPUT_GCC_PATH:compiler"
+  "gcc-prefix:INPUT_GCC_PREFIX:compiler"
+  "gcc-options:INPUT_GCC_OPTIONS:compile-options"
+  "policy-file:INPUT_POLICY_FILE:policy"
+  "analysis-assurance-complete:INPUT_ANALYSIS_ASSURANCE_COMPLETE:require-complete"
+)
+for _entry in "${_renamed_inputs[@]}"; do
+  IFS=: read -r _old_name _old_var _new_name <<<"$_entry"
+  if [[ -n "${!_old_var:-}" ]]; then
+    _fail "${_old_name} is RETIRED and no longer accepted: it was renamed to ${_new_name}. Replace ${_old_name} with ${_new_name} in your workflow, then remove ${_old_name}."
+  fi
+done
 
 # ── Required-input checks run before the enum/case validations below, so an
-# empty required input (name, profile, baseline-channel, requested-depth)
+# empty required input (name, profile, baseline-channel, depth)
 # gets the clearer "input is required" message instead of being caught by
 # a case statement's generic "not recognized" branch first (an empty string
 # never matches any case pattern, so it would otherwise fall through to
@@ -83,7 +102,7 @@ if [[ -z "$REQUESTED_DEPTH" ]]; then
   # Same rationale as baseline-channel above. Must run before the
   # REQUESTED_DEPTH case statement below, or an empty value would instead
   # get caught there with the less precise "not recognized" message.
-  _fail "requested-depth input is required."
+  _fail "depth input is required."
 fi
 
 case "$KIND" in
@@ -100,7 +119,7 @@ case "$GATE_MODE" in
 esac
 case "$REQUESTED_DEPTH" in
   binary | headers | build | source) ;;
-  *) _fail "requested-depth '$REQUESTED_DEPTH' is not recognized. Use 'binary', 'headers', 'build', or 'source'." ;;
+  *) _fail "depth '$REQUESTED_DEPTH' is not recognized. Use 'binary', 'headers', 'build', or 'source'." ;;
 esac
 case "$EVIDENCE_PRODUCER" in
   "" | wrapper | clang-plugin | replay) ;;
@@ -138,7 +157,7 @@ if [[ "$KIND" == "bundle" ]]; then
     # directory operand (Codex review). Failing here, before resolve-
     # baseline/collect-facts even run, gives a clearer and cheaper error
     # than letting the nested analysis step fail later.
-    _fail "requested-depth '$REQUESTED_DEPTH' is not supported when kind is 'bundle' -- a bundle compares directories, which the CLI's per-library release fan-out never collects inline build/source evidence for. Use requested-depth: binary for a bundle check, or kind: target to compare one library at build/source/headers depth."
+    _fail "depth '$REQUESTED_DEPTH' is not supported when kind is 'bundle' -- a bundle compares directories, which the CLI's per-library release fan-out never collects inline build/source evidence for. Use depth: binary for a bundle check, or kind: target to compare one library at build/source/headers depth."
   fi
   if [[ "$REQUESTED_DEPTH" == "headers" ]]; then
     # A bundle's old-library operand is always a directory of raw binaries
@@ -154,7 +173,7 @@ if [[ "$KIND" == "bundle" ]]; then
     # side has per-member header selection. The baseline half exists
     # (resolve-baseline's stage-member-snapshots), but check-target does not
     # route it yet, so a bundle's old side is still binaries-dir.
-    _fail "requested-depth 'headers' is not supported when kind is 'bundle' -- the candidate side has no per-member header selection yet (one project-wide header input would parse every member's new side against the union of all members' headers, which can invent or hide header-level changes), and the bundle's old side is not yet routed to the per-member baseline snapshots. Use requested-depth: binary for a bundle check, or kind: target to compare one library at headers depth."
+    _fail "depth 'headers' is not supported when kind is 'bundle' -- the candidate side has no per-member header selection yet (one project-wide header input would parse every member's new side against the union of all members' headers, which can invent or hide header-level changes), and the bundle's old side is not yet routed to the per-member baseline snapshots. Use depth: binary for a bundle check, or kind: target to compare one library at headers depth."
   fi
   if [[ "$ALLOW_NEW_TARGET" == "true" ]]; then
     # abicheck.buildsource.baseline_set.resolve_bundle never returns
@@ -168,7 +187,7 @@ if [[ "$KIND" == "bundle" ]]; then
     # baseline-channel: none guard above.
     _fail "allow-new-target: true is not supported when kind is 'bundle' -- a bundle comparison needs one coherent release where every member already coexisted, so there is no well-defined old side for a member that's new. Scope the new member individually with a kind: target check instead."
   fi
-  # ADR-071: analysis-assurance-complete IS supported for kind: bundle now.
+  # ADR-071: require-complete IS supported for kind: bundle now.
   # It generates an assurance overlay (assurance: {require_complete: true})
   # and routes the internal analysis step's own `compare` invocation into a
   # directory/package release fan-out; that fan-out used to reject the
@@ -195,13 +214,13 @@ case "$ANALYSIS_ASSURANCE_COMPLETE" in
   # reaching the step, where it would silently read as false (Codex review).
   # Same "not recognized" enum-validation pattern as allow-new-target
   # immediately above.
-  *) _fail "analysis-assurance-complete '$ANALYSIS_ASSURANCE_COMPLETE' is not recognized. Use 'true' or 'false', or leave it unset to inherit .abicheck.yml." ;;
+  *) _fail "require-complete '$ANALYSIS_ASSURANCE_COMPLETE' is not recognized. Use 'true' or 'false', or leave it unset to inherit .abicheck.yml." ;;
 esac
 if [[ "$TARGET_KIND" == "app-consumer" && -z "$CONSUMER_BINARY" ]]; then
   _fail "consumer-binary is required when target-kind is 'app-consumer'."
 fi
 if [[ "$TARGET_KIND" == "plugin-contract" && -z "$CONTRACT_FILE" ]]; then
-  _fail "contract-file is required when target-kind is 'plugin-contract'."
+  _fail "contract is required when target-kind is 'plugin-contract'."
 fi
 if [[ "$BASELINE_CHANNEL" == "none" && "$TARGET_KIND" != "library" ]]; then
   # baseline-channel: none routes the analysis step to `scan` (a one-build
@@ -223,7 +242,7 @@ fi
 # exit-1 assurance floor rather than actually enforcing it, so this is a
 # hard error, same severity reasoning as the root Action's own check.
 if [[ "${INPUT_REQUIRE_COMPLETE_ANALYSIS:-false}" != "false" ]]; then
-  _fail "require-complete-analysis ('${INPUT_REQUIRE_COMPLETE_ANALYSIS}') was removed and is no longer forwarded — set assurance.require_complete: true in your .abicheck.yml and pass that file as build-config instead, then remove this input."
+  _fail "require-complete-analysis ('${INPUT_REQUIRE_COMPLETE_ANALYSIS}') was removed. Its replacement is require-complete, the per-job override of assurance.require_complete. Set assurance.require_complete: true in your .abicheck.yml and pass that file as build-config instead, or use require-complete, then remove this input."
 fi
 
 exit 0

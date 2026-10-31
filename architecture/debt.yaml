@@ -894,7 +894,7 @@
     },
     {
       "path": "tests/test_action_validate_inputs.py",
-      "baseline_lines": 1320,
+      "baseline_lines": 1318,
       "target": "tests/unit-or-contract ownership matching production migration",
       "rule": "no_growth",
       "disposition": "migrate",
