@@ -298,22 +298,31 @@ consumed; D16's other roles and D18 are open. Owner:
   gives no assurance note when a detector reads it (decided in ADR-062 D15's
   implementation decisions: it would fire on every pre-D15 document; the
   fact-family availability already reports the missing evidence).
-- **D18 (open, evaluated 2026-10-31).** Only the `graph` section decodes
-  lazily. Generalizing it is not a descriptor swap: `snapshot_codec.decode_snapshot`
-  derives fields across sections (`from_headers` inferred from
-  `declarations`, the legacy fact backfill over `declarations`/`types`/`debug`,
-  closure-identity renumbering), and `AbiSnapshot.__post_init__` funnels the
-  `declarations`, `types` and `debug` builder inputs into the one
-  `semantic_ir` store, so those sections cannot decode independently without
-  splitting that decode per section first. Measured on a 106 MiB synthetic
-  sectioned snapshot (20k functions, 2k records): `json.loads` 0.65 s, section
-  export 4.3 s, full load 16 s / 323 MiB peak; `declarations` is 44.8 MB of
-  the payload, `types` 13.0 MB, `binary` 3.5 MB, every other section under
-  1 KB -- and nearly every detector reads `binary`+`declarations`+`types`
-  (`compare/section_readers.DETECTOR_SECTIONS`), so a full compare would
-  decode them anyway. The win is limited to pairing-only paths (release/
-  package member pairing reading `binary`); no shared decoded-section cache
-  is built until such a path exists. Whole-document `json.loads` remains.
+- **D18 (open; decode split landed 2026-10-31).** Only the `graph` section
+  decodes lazily. The decode is now split per section
+  (`storage/snapshot_section_decode.DECODE_STEPS`: one decoder per section,
+  each reading the document only through a `SectionView` that raises on an
+  undeclared key, plus declared joins), byte-identical on the fixture corpus.
+  What still blocks lazy `declarations`/`types`/`debug`: the joins.
+  `from_headers` inference (legacy documents) reads the decoded
+  `declarations`/`types`; the reliability flags and the ADR-063 legacy fact
+  backfill read `debug` and rewrite decoded `declarations`/`types` in place;
+  `migrate_and_describe` rewrites spellings across the whole document for an
+  older extractor generation; `AbiSnapshot.__post_init__` and
+  `finalize_snapshot_semantic_ir` fold `declarations`/`types`/`debug` into
+  `semantic_ir`; closure-identity renumbering (`finalize_snapshot`) walks the
+  whole snapshot. A lazy section is only correct where every join touching it
+  is a no-op (current-generation, current-schema document with a recorded
+  `from_headers`) -- that gate, and a deferred `semantic_ir` assembly, are
+  the next step. Measured on a 106 MiB synthetic sectioned snapshot (20k
+  functions, 2k records): `json.loads` 0.65 s, section export 4.3 s, full
+  load 16 s / 323 MiB peak; `declarations` is 44.8 MB, `types` 13.0 MB,
+  `binary` 3.5 MB, every other section under 1 KB -- and nearly every
+  detector reads `binary`+`declarations`+`types`
+  (`compare/section_readers.DETECTOR_SECTIONS`), so a full compare decodes
+  them anyway. The win is limited to pairing-only paths (release/package
+  member pairing reading `binary`); no shared decoded-section cache is built
+  until such a path exists. Whole-document `json.loads` remains.
 - **D14 residual: a blocked `types` section also hides `func_removed`.** The
   `functions` detector reads `types` (parameter/return type comparison in the
   same pass), so it is wholly not comparable; splitting symbol-level presence

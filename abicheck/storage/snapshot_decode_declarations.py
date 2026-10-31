@@ -42,7 +42,7 @@ from ..model import (
     Visibility,
 )
 from .decode_memo import enum_decoder
-from .entity_id_codec import decode_entity_ids, decode_sidecar_entity_ids
+from .entity_id_codec import decode_entity_id_list, decode_sidecar_entity_ids
 from .fact_codec import (
     decode_enum_facts,
     decode_field_facts,
@@ -111,11 +111,77 @@ class DecodedDeclarations:
 
 
 def decode_declarations(d: dict[str, Any], schema_version: int) -> DecodedDeclarations:
-    """Decode ``d``'s ``functions``/``variables``/``types``/``enums``
-    collections plus ``typedefs``/``typedefs_qualified`` and the entity-id
-    sidecars ADR-063 Phase 2 added for the latter two -- everything
-    :func:`~abicheck.storage.snapshot_codec.decode_snapshot` needs before it
-    can even look at platform blocks, provenance, or reliability flags.
+    """Both halves below over one flat document: the ``declarations`` and
+    ``types`` sections' decoders composed (ADR-062 D18 decode split)."""
+    decoded = decode_declaration_lists(d, schema_version)
+    decoded.types = decode_record_types(d, schema_version)
+    return decoded
+
+
+def decode_record_types(d: dict[str, Any], schema_version: int) -> list[RecordType]:
+    """The ``types`` section's decoder: ``d["types"]`` and each record's own
+    entity id. Reads no other section (ADR-062 D18)."""
+    types = [
+        RecordType(
+            name=t["name"],
+            kind=t["kind"],
+            size_bits=t.get("size_bits"),
+            alignment_bits=t.get("alignment_bits"),
+            fields=[
+                TypeField(
+                    name=f["name"],
+                    type=f["type"],
+                    offset_bits=f.get("offset_bits"),
+                    is_bitfield=f.get("is_bitfield", False),
+                    bitfield_bits=f.get("bitfield_bits"),
+                    is_const=f.get("is_const", False),
+                    is_volatile=f.get("is_volatile", False),
+                    is_mutable=f.get("is_mutable", False),
+                    access=_AccessLevel(f.get("access", "public")),
+                    default=f.get("default"),
+                    deprecated=f.get("deprecated"),
+                    **decode_field_facts(f, schema_version),
+                )
+                for f in t.get("fields", [])
+            ],
+            bases=t.get("bases", []),
+            virtual_bases=t.get("virtual_bases", []),
+            vtable=t.get("vtable", []),
+            source_location=t.get("source_location"),
+            is_union=t.get("is_union", t.get("kind") == "union"),
+            is_opaque=t.get("is_opaque", False),
+            is_final=t.get("is_final"),  # tri-state; absent on pre-v? snapshots → None
+            is_template_pattern=t.get("is_template_pattern", False),
+            has_anonymous_aggregate_fields=t.get(
+                "has_anonymous_aggregate_fields", False
+            ),
+            source_header=_interned(t.get("source_header")),
+            origin=_scope_origin_or_unknown(t.get("origin")),
+            # Fine-grained layout descriptor (layout-closure work); all
+            # optional/tri-state, absent on snapshots predating these fields.
+            data_size_bits=t.get("data_size_bits"),
+            is_standard_layout=t.get("is_standard_layout"),
+            is_trivially_copyable=t.get("is_trivially_copyable"),
+            vptr_offset_bits=t.get("vptr_offset_bits"),
+            base_offsets=t.get("base_offsets", {}),
+            qualified_name=t.get("qualified_name"),
+            is_abstract=t.get("is_abstract"),
+            deprecated=t.get("deprecated"),
+            **decode_record_facts(t, schema_version),
+        )
+        for t in d.get("types", [])
+    ]
+    decode_entity_id_list(d, "types", types)
+    return types
+
+
+def decode_declaration_lists(
+    d: dict[str, Any], schema_version: int
+) -> DecodedDeclarations:
+    """The ``declarations`` section's list decoder: ``d``'s ``functions``/
+    ``variables``/``enums`` plus ``typedefs``/``typedefs_qualified`` and the
+    entity-id sidecars ADR-063 Phase 2 added for the latter two. ``types`` is
+    left empty -- it is a separate section (:func:`decode_record_types`).
     """
     funcs = [
         Function(
@@ -222,58 +288,10 @@ def decode_declarations(d: dict[str, Any], schema_version: int) -> DecodedDeclar
         )
         for v in d.get("variables", [])
     ]
-    types = [
-        RecordType(
-            name=t["name"],
-            kind=t["kind"],
-            size_bits=t.get("size_bits"),
-            alignment_bits=t.get("alignment_bits"),
-            fields=[
-                TypeField(
-                    name=f["name"],
-                    type=f["type"],
-                    offset_bits=f.get("offset_bits"),
-                    is_bitfield=f.get("is_bitfield", False),
-                    bitfield_bits=f.get("bitfield_bits"),
-                    is_const=f.get("is_const", False),
-                    is_volatile=f.get("is_volatile", False),
-                    is_mutable=f.get("is_mutable", False),
-                    access=_AccessLevel(f.get("access", "public")),
-                    default=f.get("default"),
-                    deprecated=f.get("deprecated"),
-                    **decode_field_facts(f, schema_version),
-                )
-                for f in t.get("fields", [])
-            ],
-            bases=t.get("bases", []),
-            virtual_bases=t.get("virtual_bases", []),
-            vtable=t.get("vtable", []),
-            source_location=t.get("source_location"),
-            is_union=t.get("is_union", t.get("kind") == "union"),
-            is_opaque=t.get("is_opaque", False),
-            is_final=t.get("is_final"),  # tri-state; absent on pre-v? snapshots → None
-            is_template_pattern=t.get("is_template_pattern", False),
-            has_anonymous_aggregate_fields=t.get(
-                "has_anonymous_aggregate_fields", False
-            ),
-            source_header=_interned(t.get("source_header")),
-            origin=_scope_origin_or_unknown(t.get("origin")),
-            # Fine-grained layout descriptor (layout-closure work); all
-            # optional/tri-state, absent on snapshots predating these fields.
-            data_size_bits=t.get("data_size_bits"),
-            is_standard_layout=t.get("is_standard_layout"),
-            is_trivially_copyable=t.get("is_trivially_copyable"),
-            vptr_offset_bits=t.get("vptr_offset_bits"),
-            base_offsets=t.get("base_offsets", {}),
-            qualified_name=t.get("qualified_name"),
-            is_abstract=t.get("is_abstract"),
-            deprecated=t.get("deprecated"),
-            **decode_record_facts(t, schema_version),
-        )
-        for t in d.get("types", [])
-    ]
     enums = [_enum_type_from_dict(e, schema_version) for e in d.get("enums", [])]
-    decode_entity_ids(d, functions=funcs, variables=variables, types=types, enums=enums)
+    decode_entity_id_list(d, "functions", funcs)
+    decode_entity_id_list(d, "variables", variables)
+    decode_entity_id_list(d, "enums", enums)
     sidecar_entity_ids = decode_sidecar_entity_ids(d)
     typedefs: dict[str, str] = d.get("typedefs", {})
     typedefs_qualified: dict[str, str] = d.get("typedefs_qualified", {})
@@ -281,7 +299,7 @@ def decode_declarations(d: dict[str, Any], schema_version: int) -> DecodedDeclar
     return DecodedDeclarations(
         functions=funcs,
         variables=variables,
-        types=types,
+        types=[],
         enums=enums,
         typedefs=typedefs,
         typedefs_qualified=typedefs_qualified,

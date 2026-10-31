@@ -236,6 +236,21 @@ for _section_kind, _fields in _SECTION_FIELDS.items():
         _FIELD_TO_SECTION[_field] = _section_kind
 del _section_kind, _fields, _field
 
+#: Keys a flat document carries outside `_SECTION_FIELDS`, by the section
+#: kind that owns them: the two promoted `semantic_ir` keys.
+_PROMOTED_KEY_SECTIONS: Mapping[str, str] = {
+    "semantic_ir": "semantic_ir",
+    "semantic_ir_conflicts": "semantic_ir",
+}
+
+
+def section_of_field(key: str) -> str | None:
+    """The section kind owning flat-document *key*, or ``None`` for a key no
+    section owns (``schema_version``, an unknown future field). The one
+    lookup ADR-062 D18's per-section decoders are checked against."""
+    return _FIELD_TO_SECTION.get(key) or _PROMOTED_KEY_SECTIONS.get(key)
+
+
 #: The *empirically minimal* subset of `_SECTION_FIELDS` a section's payload
 #: must carry once the section is present at all -- deliberately NOT "every
 #: field `_SECTION_FIELDS` lists for this section" (a first attempt at this
