@@ -521,12 +521,7 @@ class TestAssuranceOverlayClearsSourcesRootBlocksWhenNoSourcesConfigExists:
     ``tests/test_reusable_workflows_require_complete_analysis.py``, a
     ``debt.yaml`` test-file ``no_growth``-tracked module already at its
     line-count cap) for the same reason this module itself was split out --
-    see this module's own top docstring. See the identical fix (and test)
-    at ``action/run.sh``'s own equivalent
-    ``_merge_config_overlay_with_discovered_project_config`` call site in
-    ``tests/test_action_compile_context_parity.py::
-    TestCompileContextDiscoversSourcesRootOwnConfig::
-    test_no_sources_root_config_clears_to_defaults``."""
+    see this module's own top docstring."""
 
     def test_default_single_sided_mode_clears_build_and_sources_blocks(
         self, tmp_path: Path

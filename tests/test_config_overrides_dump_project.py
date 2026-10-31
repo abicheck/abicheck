@@ -247,8 +247,21 @@ def test_cli_and_typed_dump_resolve_the_same_config(
 
 
 def test_typed_set_refuses_a_key_with_no_typed_channel() -> None:
-    with pytest.raises(ConfigOverrideError, match="compile.std"):
-        with_dump_config_overrides(_request(config_overrides={"compile.std": "c++17"}))
+    # compile.std is applied since the typed compile fold (ADR-091 D4); a key
+    # dump reads through no typed field is still refused, never dropped.
+    with pytest.raises(ConfigOverrideError, match="sources.method"):
+        with_dump_config_overrides(
+            _request(config_overrides={"sources.method": "dump"})
+        )
+
+
+def test_typed_set_applies_a_compile_context_key() -> None:
+    """``compile.std`` reaches the input's compile context, as ``dump --set`` does."""
+    out = with_dump_config_overrides(
+        _request(config_overrides={"compile.std": "c++17"})
+    )
+    assert out.input.compile is not None
+    assert out.input.compile.gcc_option_tokens == ("-std=c++17",)
 
 
 @pytest.mark.parametrize(
@@ -306,11 +319,11 @@ def test_run_dump_refuses_a_key_with_no_run_dump_parameter() -> None:
 
 
 def test_run_dump_rejects_a_bad_override_before_extracting() -> None:
-    with pytest.raises(ConfigOverrideError, match="compile.std"):
+    with pytest.raises(ConfigOverrideError, match="sources.method"):
         run_dump(
             Path("missing-libfoo.so"),
             "elf",
-            config_overrides={"compile.std": "c++17"},
+            config_overrides={"sources.method": "dump"},
         )
 
 

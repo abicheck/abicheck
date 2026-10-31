@@ -19,7 +19,7 @@ Actions Python glue.
 
 Two call sites build one of these overlays today: ``action/run.sh``'s
 ``_merge_config_overlay_with_discovered_project_config`` (used for the
-compile-context and release-topology overlays) and
+release-topology overlay) and
 ``actions/check-target/action.yml``'s "Generate assurance-overlay config"
 step. Both read a project's ``.abicheck.yml`` (either auto-discovered by
 walking up from a directory, or an operator-named explicit file), fold in a
@@ -591,12 +591,13 @@ def apply_sources_root_config_blocks(
     shape the same way as before (``run.sh``'s ``$MODE`` shell variable /
     ``actions/check-target/action.yml``'s own ``mode:`` computation).
 
-    This is the block-selection half of ``action/run.sh``'s own
-    ``_merge_config_overlay_with_discovered_project_config`` (its
-    "sources-root promotion" section, added to mirror
+    This is the block-selection half of ``actions/check-target/action.yml``'s
+    "Generate assurance-overlay config" step (``action/run.sh``'s
+    ``_merge_config_overlay_with_discovered_project_config`` once had a
+    sources-root promotion section too; its only caller never passed a
+    sources root, and it was deleted as unreachable), added to mirror
     ``embed_build_source()``'s own ``build_config or
-    discover_build_config(raw_sources)`` selection -- see that shell
-    function's own extensive docstring for the full reasoning). When no
+    discover_build_config(raw_sources)`` selection. When no
     explicit ``--config`` is given, a ``--sources`` directory carrying its
     own ``.abicheck.yml`` (found via :func:`abicheck.config_paths.
     discover_build_config` -- non-recursive, anchored at the sources root

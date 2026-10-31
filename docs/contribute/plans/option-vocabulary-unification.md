@@ -1,6 +1,6 @@
 # Option vocabulary unification: implementation plan
 
-**Status:** Phases 0, 1, 2 done (Phase 0 2026-10-30; Phase 1 is #1850; Phase 2: the CLI `--set` half for `compare`, `dump` and `project capture-variants` (#1851, #1857), the Action `set:` input (#1854), and the compile-context keys replacing the Action's `compile:` overlay (#1861); the typed API still refuses `compile.*`, see the Result below). Phase 4 done for the CLI (#1852), the Action (#1860), the typed request and `run_compare` shim, and the reusable workflows (this change). Phase 4 is done for the typed API. The Tier-1 `checker.compare()` keywords (`contract_evaluation`, `contract_mode`) are an accepted exception (ADR-091 R10). Open review item, not a blocker: `run_dump(public_headers)`. Phase 3 (R11, R15) and Phase 5 (budget) in progress. Phase 6 is collapsed into each rename (D7 amendment). Phase 7 not started. Implements
+**Status:** Phases 0, 1, 2 done (Phase 0 2026-10-30; Phase 1 is #1850; Phase 2: the CLI `--set` half for `compare`, `dump` and `project capture-variants` (#1851, #1857), the Action `set:` input (#1854), and the compile-context keys replacing the Action's `compile:` overlay (#1861), and the typed API's `compile.*` fold (see the Result below)). Phase 4 done for the CLI (#1852), the Action (#1860), the typed request and `run_compare` shim, and the reusable workflows (this change). Phase 4 is done for the typed API. The Tier-1 `checker.compare()` keywords (`contract_evaluation`, `contract_mode`) are an accepted exception (ADR-091 R10). `run_dump(public_headers)` is reviewed and ACCEPTED (R18 amendment). Phase 3 (R11, R15) and Phase 5 (budget) in progress. Phase 6 is collapsed into each rename (D7 amendment). Phase 7 not started. Implements
 [ADR-091](../adr/091-one-option-vocabulary.md). Each phase is one PR, ordered
 so that the parity gate lands before any rename. Every rename lands with its
 migration row and no alias: the 2026-10-30 policy (ADR-091 D7 amendment)
@@ -264,6 +264,26 @@ gap is that typed-API fold, not the Action. One behavior to verify: a
 `--sources` tree's own `compile:` block used to be excluded by the Action on a
 pairwise compare with an old side; the CLI's own discovery now decides that case.
 
+**Result (2026-10-31, typed `compile.*` fold: Phase 2 closed).** The typed API
+applies every `compile.*` key `--set` applies (`COMPILE_CONTEXT_OVERRIDE_PATHS`):
+`CompareRequest.config_overrides`, `DumpRequest.config_overrides` and
+`run_dump(config_overrides=)` fold them through
+`workflows/compile_config.fold_typed_compile_overrides`, which calls
+`resolve_compile_context`, the resolver `compare --set` and `dump --set` reach,
+with no file and the overrides alone as the `compile:` block. `compile.frontend`
+fills the request-level `frontend`, the other context keys fill each side's
+`InputSpec.compile` (a side's own `frontend` and `defines` are kept), and
+`compile.lang` fills `lang`/`lang_explicit`. A typed value set away from its
+default beats the override, as a flag beats `--set`. A typed request still reads
+no `.abicheck.yml`, so there is no file to fold. Pinned by
+`tests/test_typed_compile_overrides_parity.py`: the real `compare --set` and
+`dump --set` CLI requests and the typed `CompareRequest`, `DumpRequest` and
+`run_dump` results agree per key on the effective frontend, frontend context,
+language and the rest of each side's compile context. The pairwise `--sources`
+case above is pinned by `tests/test_compare_sources_config_isolation.py`: a
+tree's config (an empty file included, read as all defaults) is that side's
+config only, and the other side keeps the run's pair-wide context.
+
 ## Phase 3 — Behavior unifications (D2)
 
 | R | Change | Files |
@@ -327,8 +347,14 @@ for these ids are removed. R19 (the flattened and sided Python names) is
 resolved as ACCEPTED on 2026-10-31 under the maintainer rule: the registry
 records each as an `accepted: true` exception against the R19 row, and no
 Python name in it remains a planned rename. Phase 4 is done for the typed API. `checker.compare()`'s `contract_evaluation` and
-`contract_mode` stay as the documented Tier-1 raw building block (docs/use/python-api.md), not the typed request surface, and are an accepted exception (ADR-091 R10). Open review item, not a blocker: `run_dump(public_headers)` (R18 review: `run_dump` already has
-a `headers` parameter, so `headers` would collide), `ReleaseCompareRequest` and
+`contract_mode` stay as the documented Tier-1 raw building block (docs/use/python-api.md), not the typed request surface, and are an accepted exception (ADR-091 R10). `run_dump(public_headers)` is reviewed
+and ACCEPTED (R18 amendment, 2026-10-31): every user-facing surface spells the
+concept `headers` (`-H`, Action `header`, `InputSpec.headers`, `DumpRequest`, which
+splits files from directories as `-H` does); only the low-level `run_dump` shim
+takes the two halves separately, `headers` (parsed) and `public_headers` (tagged
+public, the file sibling of `public_header_dirs`), and `headers` would collide.
+The registry marks the exception `accepted: true`. Out of the typed-request
+surface and not renamed: `ReleaseCompareRequest` and
 `ReleaseMemberCompareRequest` (they keep their own spellings and translate at the
 boundary), and the `resolve_input`/`compare_snapshots`/`load_suppression_and_policy`
 keyword spellings (public functions outside the typed-request surface). The
@@ -417,6 +443,24 @@ no-growth budgets are 17 visible `compare` options and 42 Action analysis
 inputs. Still open, not in this phase: the `--debug-info` per-side transports,
 `deps.*` keys without a config home, and a `--sources` discovery rule.
 
+**Result (2026-10-31, Phase 5 follow-ups).** The follow-ups #1869 recorded are
+closed. `action/run.sh`'s `add_flag_shlex_split` had no caller and is deleted.
+`_merge_config_overlay_with_discovered_project_config` took three sources-root
+parameters (`$5`–`$7`) that its only callers, the two release-topology calls,
+never passed; with an empty root, `discovered_compile_db_resolves` returns
+`False` by its own contract, so a discovered `build.compile_db` was always
+stripped and the sources-root promotion never ran. The parameters, their
+environment variables and the unreachable Python branch are deleted, and the
+`compile_db` strip is now unconditional. Proof: `tests/test_action_release_topology_config.py`
+(with a new case where the discovered `compile_db` names a real file) passes
+unchanged against the old and the new `run.sh`. The two unpinned behaviours
+are pinned: `tests/test_dump_set_compiler_nonresolving_compile_db.py`
+(integration: `dump --set compile.compiler` with a discovered `build.compile_db`
+that resolves nothing warns, writes the snapshot from the headers and exits 0,
+as the same run without `--set` does) and
+`tests/test_compare_sources_config_isolation.py` (pairwise sources-config
+isolation, both sides, with and without a checkout-root config).
+
 ## Phase 6 — Remove aliases (collapsed into each rename, 2026-10-30)
 
 The 2026-10-30 policy (ADR-091 D7 amendment) withdraws the one-release
@@ -440,8 +484,8 @@ place of "deprecated". In-repo callers (tests, benchmark and corpus scripts,
 skills-src validation harnesses, the Action shell's extra-args checks and
 messages, the test-action workflow's flag-shaped extra-args case) moved to
 `--label` or `--root`. The Action tombstones (#1860) and the reusable-workflow tombstones
-(this change) have landed. Still open: the Tier-1 `checker.compare()` keywords
-of Phase 4.
+(this change) have landed. The Tier-1 `checker.compare()` keywords of Phase 4
+were later accepted as an exception (ADR-091 R10), so nothing here is open.
 
 ## Phase 7 — Generate the references from the registry (optional)
 

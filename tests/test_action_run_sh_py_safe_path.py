@@ -455,11 +455,10 @@ class TestPyBinHasAbicheckFallback:
     """Codex review, fresh evidence: a self-hosted runner can expose
     ``pip``/``abicheck`` from one Python environment while ``command -v
     python3`` resolves a *different* one (e.g. a system Python ahead of a
-    pyenv shim on PATH) -- without this check, ``add_flag_shlex_split``
-    would invoke a ``$_PY_BIN`` that can't import ``abicheck`` and silently
-    drop every requested ``--gcc-options`` token (no ``set -e`` in this
-    script), rather than falling back to plain whitespace splitting the
-    way it already does when no Python interpreter is on PATH at all.
+    pyenv shim on PATH) -- without this check, an ``abicheck``-importing
+    step would invoke a ``$_PY_BIN`` that can't import ``abicheck`` and
+    silently drop its result (no ``set -e`` in this script) rather than
+    fail loud.
     """
 
     @staticmethod

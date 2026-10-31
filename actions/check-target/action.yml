@@ -1558,10 +1558,9 @@ runs:
             # finds a config DISTINCT from the checkout-root one just above,
             # that document's own build:/sources: blocks REPLACE (not merge
             # into) the checkout-root document's own such blocks, via the
-            # identical shared primitive (abicheck.action_config_overlay.
-            # apply_sources_root_config_blocks) action/run.sh's own
-            # equivalent compile-context overlay merge uses, so the two
-            # callers cannot independently drift on this selection.
+            # shared primitive abicheck.action_config_overlay.
+            # apply_sources_root_config_blocks, which owns the block
+            # selection and its empty-document rule.
             #
             # Whether compile:/source:(singular)/debug: are ALSO safe to
             # promote from this sources-root document (in addition to
