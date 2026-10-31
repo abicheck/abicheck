@@ -1,7 +1,7 @@
 # ADR-091: One Option Vocabulary Across CLI, Config, Action and Typed API
 
 **Date:** 2026-10-30
-**Status:** Proposed — Phases 0, 1 and 2 done. Phase 4 done for the CLI, the Action, the reusable workflows, and the typed request and `run_compare` shim. The Tier-1 `checker.compare()` keywords are an accepted exception (R10). Phases 3 and 5 are in progress; Phase 6 is collapsed into each rename (D7 amendment). The R19–R21 findings are classified as accepted or handled by Phase 5 in their rows (2026-10-31). This ADR proposes renames and behavior unifications on four public surfaces; each lands through the migration in D7. Open questions Q1–Q4 are resolved below. Implementation plan: [`plans/option-vocabulary-unification.md`](../plans/option-vocabulary-unification.md).
+**Status:** Proposed — Phases 0, 1 and 2 done. Phase 4 done for the CLI, the Action, the reusable workflows, and the typed request and `run_compare` shim. The Tier-1 `checker.compare()` keywords are an accepted exception (R10). Phases 3 and 5 are in progress; Phase 6 is collapsed into each rename (D7 amendment). The R19–R21 findings are classified as accepted or handled by Phase 5 in their rows (2026-10-31). R18's `run_dump(public_headers)` review is done: ACCEPTED as-is (2026-10-31, R18 row). This ADR proposes renames and behavior unifications on four public surfaces; each lands through the migration in D7. Open questions Q1–Q4 are resolved below. Implementation plan: [`plans/option-vocabulary-unification.md`](../plans/option-vocabulary-unification.md).
 
 Governed by: [ADR-037](037-cli-interface-contract.md) (CLI interface
 contract), [ADR-040](040-compare-surface-reduction.md) (compare surface

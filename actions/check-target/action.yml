@@ -845,10 +845,8 @@ runs:
         SOURCES_ROOT: ${{ steps.consumer_context.outcome == 'success' && '' || (inputs.sources != '' && inputs.sources || (inputs.evidence-producer == 'replay' && '.' || '')) }}
         # Whether THIS step's own nested "Run analysis" invocation resolves
         # a --sources tree's compile:/source:(singular)/debug: blocks
-        # PAIR-WIDE ("pairwise") or SINGLE-SIDED (empty) -- the same
-        # distinction action/run.sh's own _compile_context_sources_pairwise
-        # makes for its sibling overlay, computed here directly from THIS
-        # step's own already-known inputs rather than guessed at (Codex
+        # PAIR-WIDE ("pairwise") or SINGLE-SIDED (empty), computed here
+        # directly from THIS step's own already-known inputs rather than guessed at (Codex
         # review, fresh evidence, PR #1222 fourth round: a previous round
         # excluded these three blocks unconditionally, believing this step
         # had "no reliable way to determine" single-sidedness -- it does).
@@ -856,12 +854,11 @@ runs:
         # == 'none' && 'scan' || 'compare' }} with old-library: ${{
         # inputs.kind == 'bundle' && steps.resolve.outputs.binaries-dir ||
         # steps.resolve.outputs.snapshot-path }} (see that step's own
-        # inputs) -- mirroring run.sh's own two independent rules:
+        # inputs), by two independent rules:
         #   * mode: scan (baseline-channel: none, the "audit" path) is
         #     ALWAYS single-sided, regardless of kind -- native scan
         #     resolves ONE shared compile_context for the whole invocation
-        #     and applies it to both the baseline and the candidate
-        #     (run.sh's own _compile_context_sources_pairwise docstring).
+        #     and applies it to both the baseline and the candidate.
         #   * mode: compare (baseline-channel set, the "baseline" path) is
         #     single-sided only when old-library is a STORED snapshot, not
         #     a live binary (_old_library_is_stored_snapshot). kind: target
@@ -874,8 +871,7 @@ runs:
         #     live ELF member binaries ("bundle analysis reads real ELF
         #     binaries, never JSON snapshots" -- that same action's own
         #     bundle-members docstring) -- genuinely pair-wide live
-        #     extraction on both sides, exactly the ambiguous case
-        #     run.sh's own rule excludes.
+        #     extraction on both sides, the ambiguous case.
         # So the only ambiguous combination left is kind: bundle with
         # mode: compare; every other combination is unambiguously
         # single-sided.
@@ -884,8 +880,7 @@ runs:
         # does NOT always resolve the same way (Codex review, fresh
         # evidence, PR #1222 fourth round, second finding on this fix --
         # see `abicheck.action_config_overlay.apply_sources_root_config_
-        # blocks`'s own `merge_compile` parameter docstring and `run.sh`'s
-        # own `_compile_context_sources_merge_compile` for the full
+        # blocks`'s own `merge_compile` parameter docstring for the full
         # account): `mode: scan` (baseline-channel: none) genuinely selects
         # `compile:` from exactly ONE document -- the `--sources` tree's
         # own, the identical single-document shape `build:`/`sources:`/
@@ -1571,9 +1566,8 @@ runs:
             # own `env:` block (see SOURCES_PAIRWISE's docstring there for
             # the exact kind/mode reasoning) rather than guessed at here, a
             # fix for a previous round's belief that "this step has no
-            # reliable way to determine" that distinction. Mirrors
-            # run.sh's own ABICHECK_SOURCES_PAIRWISE-gated block selection
-            # exactly (Codex review, fresh evidence, PR #1222 fourth round).
+            # reliable way to determine" that distinction (Codex review,
+            # fresh evidence, PR #1222 fourth round).
             #
             # `compile:` itself is NOT promoted here for a `mode: compare`
             # caller any more (Codex review, P1, fresh evidence, PR #1222
@@ -1743,10 +1737,7 @@ runs:
                     )
                     # found_path anchors compile.include_dirs's own rebase
                     # below -- reassign it to the sources-root document ONLY
-                    # when compile: was actually sourced from it (mirrors
-                    # run.sh's own identical
-                    # `if not (sources_pairwise or sources_merge_compile):
-                    # found_path = sources_found`): NEITHER a pairwise NOR a
+                    # when compile: was actually sourced from it: NEITHER a pairwise NOR a
                     # `mode: compare` single-sided caller's own `compile:`
                     # block is ever promoted from the sources root any more
                     # (per `_sources_root_blocks` above -- P1 fix, PR #1222
@@ -1790,10 +1781,7 @@ runs:
                     # except a `merge_compile=True` empty-fold, which is a
                     # correct no-op onto the checkout's own compile: -- see
                     # that function's docstring for why `compile:` is the
-                    # one exception even here). Mirrors action/run.sh's own
-                    # identical `elif sources_found is None:` branch so the
-                    # two shared call sites cannot independently drift on
-                    # this again.
+                    # one exception even here).
                     data = apply_sources_root_config_blocks(
                         data,
                         None,
@@ -1833,11 +1821,8 @@ runs:
                 # below will itself resolve --sources) IS that root. Keep a
                 # demonstrably-resolving discovered build.compile_db instead
                 # of unconditionally discarding valid L3-L5 compiler-flag
-                # evidence, via the identical shared resolution
-                # action/run.sh's own compile-context overlay uses
-                # (discovered_compile_db_resolves -- see its own docstring)
-                # so the two callers can't independently drift on what
-                # counts as "resolves".
+                # evidence, via the shared resolution
+                # (discovered_compile_db_resolves -- see its own docstring).
                 _sources_root = os.environ.get("ABICHECK_SOURCES_ROOT", "")
                 if not discovered_compile_db_resolves(
                     build_blk["compile_db"], _sources_root
