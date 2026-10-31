@@ -323,14 +323,10 @@ def test_workflow_inputs_share_the_concept_of_the_action_input_they_mirror(
     names, so a workflow input that spells a check-target input must sit in that
     input's concept (ADR-091 D2: one concept, one behavior, on every surface)."""
     concept_of = {
-        i: c["concept"]
-        for c in registry["concepts"]
-        for i in c.get("action", [])
+        i: c["concept"] for c in registry["concepts"] for i in c.get("action", [])
     }
     claimed = {
-        i: c["concept"]
-        for c in registry["concepts"]
-        for i in c.get("workflow", [])
+        i: c["concept"] for c in registry["concepts"] for i in c.get("workflow", [])
     }
     problems = []
     for row in inventory["workflow"]:

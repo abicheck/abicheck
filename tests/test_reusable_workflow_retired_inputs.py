@@ -70,25 +70,28 @@ def test_guard_passes_when_no_retired_input_is_set(
     tmp_path, workflow: str, job: str
 ) -> None:
     step = find_run_step(workflow, job, GUARD)
-    result = run_step(step, workspace=make_workspace(tmp_path), env={
-        "RETIRED_" + n.upper().replace("-", "_"): "" for n in _retired_inputs(workflow)
-    })
+    result = run_step(
+        step,
+        workspace=make_workspace(tmp_path),
+        env={
+            "RETIRED_" + n.upper().replace("-", "_"): ""
+            for n in _retired_inputs(workflow)
+        },
+    )
     assert result.returncode == 0, result.stderr
 
 
 @pytest.mark.parametrize(
     ("workflow", "job", "name", "replacement"),
-    [
-        (w, j, n, r)
-        for w, j in WORKFLOWS
-        for n, r in _retired_inputs(w).items()
-    ],
+    [(w, j, n, r) for w, j in WORKFLOWS for n, r in _retired_inputs(w).items()],
 )
 def test_setting_a_retired_input_fails_and_names_its_replacement(
     tmp_path, workflow: str, job: str, name: str, replacement: str
 ) -> None:
     step = find_run_step(workflow, job, GUARD)
-    env = {"RETIRED_" + n.upper().replace("-", "_"): "" for n in _retired_inputs(workflow)}
+    env = {
+        "RETIRED_" + n.upper().replace("-", "_"): "" for n in _retired_inputs(workflow)
+    }
     env["RETIRED_" + name.upper().replace("-", "_")] = "some-value"
     result = run_step(step, workspace=make_workspace(tmp_path), env=env)
     assert result.returncode != 0

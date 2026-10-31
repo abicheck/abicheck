@@ -305,7 +305,10 @@ def _python_rows() -> list[dict[str, Any]]:
 
 
 #: The public reusable workflows whose ``workflow_call`` inputs are inventoried.
-WORKFLOW_FILES = (".github/workflows/check-single.yml", ".github/workflows/check-project.yml")
+WORKFLOW_FILES = (
+    ".github/workflows/check-single.yml",
+    ".github/workflows/check-project.yml",
+)
 
 
 def _workflow_rows() -> list[dict[str, Any]]:

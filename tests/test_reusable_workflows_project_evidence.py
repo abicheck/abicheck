@@ -34,8 +34,7 @@ def test_consumer_compile_context_uses_a_separate_extraction() -> None:
         if step.get("name") == "Run check-target"
     )
     assert (
-        "matrix.consumer_compile_ast_frontend"
-        in run_step["with"]["consumer-frontend"]
+        "matrix.consumer_compile_ast_frontend" in run_step["with"]["consumer-frontend"]
     )
     assert "matrix.consumer_compile_gcc_path" in run_step["with"]["consumer-compiler"]
     assert (
@@ -64,7 +63,9 @@ def test_consumer_compile_context_uses_a_separate_extraction() -> None:
         consumer["with"]["compiler"]
         == "${{ inputs.consumer-compiler || (endsWith(inputs.compiler, '-') && inputs.compiler || '') }}"
     )
-    assert consumer["with"]["compile-options"] == "${{ inputs.consumer-compile-options }}"
+    assert (
+        consumer["with"]["compile-options"] == "${{ inputs.consumer-compile-options }}"
+    )
     analysis = next(step for step in steps if step.get("name") == "Run analysis")
     assert "check-target-consumer.abi.json" in analysis["with"]["new-library"]
     assert "consumer_context.outcome == 'success'" in analysis["with"]["header"]

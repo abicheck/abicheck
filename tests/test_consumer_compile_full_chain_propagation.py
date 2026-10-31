@@ -295,7 +295,9 @@ def test_sentinel_consumer_gcc_path_survives_config_to_check_target_input(
         run_step["with"]["consumer-compiler"], matrix=matrix, inputs=workflow_inputs
     )
     consumer_gcc_options = eval_gha_expression(
-        run_step["with"]["consumer-compile-options"], matrix=matrix, inputs=workflow_inputs
+        run_step["with"]["consumer-compile-options"],
+        matrix=matrix,
+        inputs=workflow_inputs,
     )
     consumer_ast_frontend = eval_gha_expression(
         run_step["with"]["consumer-frontend"], matrix=matrix, inputs=workflow_inputs
@@ -402,7 +404,9 @@ def test_marker_only_overlay_activates_the_consumer_step_without_any_field() -> 
         run_step["with"]["consumer-compiler"], matrix=matrix, inputs=workflow_inputs
     )
     consumer_gcc_options = eval_gha_expression(
-        run_step["with"]["consumer-compile-options"], matrix=matrix, inputs=workflow_inputs
+        run_step["with"]["consumer-compile-options"],
+        matrix=matrix,
+        inputs=workflow_inputs,
     )
     consumer_ast_frontend = eval_gha_expression(
         run_step["with"]["consumer-frontend"], matrix=matrix, inputs=workflow_inputs
@@ -501,7 +505,9 @@ def test_partial_overlay_falls_back_to_workflow_global_per_field(
         run_step["with"]["consumer-compiler"], matrix=matrix, inputs=workflow_inputs
     )
     consumer_gcc_options = eval_gha_expression(
-        run_step["with"]["consumer-compile-options"], matrix=matrix, inputs=workflow_inputs
+        run_step["with"]["consumer-compile-options"],
+        matrix=matrix,
+        inputs=workflow_inputs,
     )
     consumer_ast_frontend = eval_gha_expression(
         run_step["with"]["consumer-frontend"], matrix=matrix, inputs=workflow_inputs
@@ -609,7 +615,9 @@ def test_partial_overlay_without_frontend_falls_back_to_workflow_global_frontend
         run_step["with"]["consumer-compiler"], matrix=matrix, inputs=workflow_inputs
     )
     consumer_gcc_options = eval_gha_expression(
-        run_step["with"]["consumer-compile-options"], matrix=matrix, inputs=workflow_inputs
+        run_step["with"]["consumer-compile-options"],
+        matrix=matrix,
+        inputs=workflow_inputs,
     )
     consumer_ast_frontend = eval_gha_expression(
         run_step["with"]["consumer-frontend"], matrix=matrix, inputs=workflow_inputs
@@ -719,7 +727,9 @@ def test_no_baseline_channel_activates_the_consumer_step_via_its_own_arm() -> No
         run_step["with"]["consumer-compiler"], matrix=matrix, inputs=workflow_inputs
     )
     consumer_gcc_options = eval_gha_expression(
-        run_step["with"]["consumer-compile-options"], matrix=matrix, inputs=workflow_inputs
+        run_step["with"]["consumer-compile-options"],
+        matrix=matrix,
+        inputs=workflow_inputs,
     )
     consumer_ast_frontend = eval_gha_expression(
         run_step["with"]["consumer-frontend"], matrix=matrix, inputs=workflow_inputs

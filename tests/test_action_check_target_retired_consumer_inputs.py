@@ -35,8 +35,18 @@ pytestmark = pytest.mark.skipif(not have_bash(), reason="needs a real bash")
 BASE = {**_BASE_IDENTITY, "INPUT_BASELINE_PATH": "./baseline"}
 
 RENAMED = [
-    ("consumer-ast-frontend", "INPUT_CONSUMER_AST_FRONTEND", "consumer-frontend", "clang"),
-    ("consumer-gcc-path", "INPUT_CONSUMER_GCC_PATH", "consumer-compiler", "/usr/bin/g++"),
+    (
+        "consumer-ast-frontend",
+        "INPUT_CONSUMER_AST_FRONTEND",
+        "consumer-frontend",
+        "clang",
+    ),
+    (
+        "consumer-gcc-path",
+        "INPUT_CONSUMER_GCC_PATH",
+        "consumer-compiler",
+        "/usr/bin/g++",
+    ),
     (
         "consumer-gcc-options",
         "INPUT_CONSUMER_GCC_OPTIONS",
