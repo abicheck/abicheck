@@ -1,23 +1,25 @@
-"""``action/run.sh`` forwards the compile-context inputs as ``--set compile.*`` (ADR-091 D4).
+"""The compile-context inputs are retired; their replacement is ``set:`` (ADR-091 D7).
 
-The Action used to synthesize a ``compile:`` block into a temporary
-``--config`` file. It now translates each input into one ``--set`` argument and
-lets the CLI resolve it (ADR-070 D2). These tests drive the real script against
-the same fake ``abicheck`` the ``set:`` tests use, so the assertions are about
-the argv that actually runs. The value-level equivalence between ``--set`` and
-the file form is pinned in ``tests/test_compile_context_set_equivalence.py``.
+The Action used to translate ``lang``/``frontend``/``compiler``/``compile-options``
+/``sysroot``/``nostdinc`` into ``--set compile.*`` arguments. Those inputs are now
+RETIRED tombstones: ``action/validate-inputs.sh`` fails the run before analysis
+and names the ``set:`` line that replaces each one, and ``run.sh`` forwards only
+the ``set:`` input. These tests pin both halves: each retired input is refused
+with its replacement named, and a ``set:`` line reaches the CLI verbatim.
 """
 
 from __future__ import annotations
 
 import json
-import shlex
+import os
 import subprocess
 from pathlib import Path
 
 import pytest
 from _workflow_exec import bash_executable, require_bash
 from test_action_run_sh_set_input import RUN_SH, _env, _set_pairs, _stub
+
+VALIDATE_SH = RUN_SH.parent / "validate-inputs.sh"
 
 
 def _run(tmp_path: Path, mode: str = "compare", **inputs: str) -> list[str]:
@@ -26,7 +28,6 @@ def _run(tmp_path: Path, mode: str = "compare", **inputs: str) -> list[str]:
     fake_bin, captured = _stub(tmp_path)
     env = _env(tmp_path, fake_bin, INPUT_MODE=mode, **inputs)
     if mode == "dump":
-        # dump takes one library and writes a snapshot; no old side.
         env.pop("INPUT_OLD_LIBRARY", None)
         env["INPUT_OUTPUT_FILE"] = str(tmp_path / "out.json")
     result = subprocess.run(
@@ -42,112 +43,107 @@ def _run(tmp_path: Path, mode: str = "compare", **inputs: str) -> list[str]:
     return captured.read_text(encoding="utf-8").splitlines()
 
 
-def _compile_sets(argv: list[str]) -> list[str]:
-    return [value for value in _set_pairs(argv) if value.startswith("compile.")]
+def _validate(**inputs: str) -> subprocess.CompletedProcess:
+    """Run the pre-install validator, the first gate a real run hits."""
+    require_bash()
+    env = {k: v for k, v in os.environ.items() if not k.startswith("INPUT_")}
+    env.update(
+        {"INPUT_MODE": "compare", "INPUT_NEW_LIBRARY": "libfoo.so", **inputs}
+    )
+    return subprocess.run(
+        [bash_executable(), str(VALIDATE_SH)],
+        capture_output=True,
+        text=True,
+        env=env,
+        cwd=RUN_SH.parent.parent,
+        check=False,
+    )
 
 
 def _no_config_flag(argv: list[str]) -> None:
-    """The compile inputs must not synthesize a ``--config`` any more."""
+    """The retired inputs no longer synthesize a ``--config`` document."""
     assert "--config" not in argv
+
+
+# (input name, value a workflow would set, the set: line that replaces it)
+RETIRED_COMPILE_INPUTS = [
+    ("compiler", "/opt/gcc-14/bin/g++", "compile.compiler"),
+    ("frontend", "clang", "compile.frontend"),
+    ("lang", "c", "compile.lang"),
+    ("compile-options", "-DA=1", "compile.options"),
+    ("sysroot", "/opt/sysroot", "compile.sysroot"),
+    ("nostdinc", "true", "compile.nostdinc"),
+    ("severity-preset", "default", "severity.preset"),
+]
+
+
+@pytest.mark.parametrize(("name", "value", "replacement"), RETIRED_COMPILE_INPUTS)
+def test_retired_compile_input_is_refused_with_its_set_replacement(
+    name: str, value: str, replacement: str
+) -> None:
+    env_name = "INPUT_" + name.upper().replace("-", "_")
+    result = _validate(**{env_name: value})
+    combined = result.stdout + result.stderr
+    assert result.returncode != 0, combined
+    assert "::error::" in combined, combined
+    assert name in combined, combined
+    assert f"set: {replacement}=" in combined, combined
 
 
 @pytest.mark.parametrize("mode", ["compare", "dump"])
 def test_no_compile_inputs_forward_no_compile_set(tmp_path: Path, mode: str) -> None:
     argv = _run(tmp_path, mode)
-    assert _compile_sets(argv) == []
+    assert [v for v in _set_pairs(argv) if v.startswith("compile.")] == []
     _no_config_flag(argv)
 
 
-def test_auto_frontend_and_default_lang_forward_nothing(tmp_path: Path) -> None:
-    """``auto`` and the ``c++`` default are no-ops, as they were in the overlay."""
-    argv = _run(tmp_path, INPUT_FRONTEND="auto", INPUT_LANG="c++")
-    assert _compile_sets(argv) == []
-
-
-def test_gcc_path_forwards_compile_compiler(tmp_path: Path) -> None:
-    argv = _run(tmp_path, INPUT_COMPILER="/opt/gcc-14/bin/g++")
-    assert _compile_sets(argv) == ['compile.compiler="/opt/gcc-14/bin/g++"']
+def test_compiler_set_line_is_forwarded_verbatim(tmp_path: Path) -> None:
+    argv = _run(tmp_path, INPUT_SET="compile.compiler=/opt/gcc-14/bin/g++\n")
+    assert _set_pairs(argv) == ["compile.compiler=/opt/gcc-14/bin/g++"]
     _no_config_flag(argv)
 
 
-def test_prefix_form_compiler_forwards_compile_compiler(tmp_path: Path) -> None:
-    """ADR-091 R5: `compiler` takes a cross-toolchain prefix (ends with `-`)
-    as well as a path; the retired gcc-prefix input folded into it."""
-    argv = _run(tmp_path, INPUT_COMPILER="aarch64-linux-gnu-")
-    assert _compile_sets(argv) == ['compile.compiler="aarch64-linux-gnu-"']
+def test_prefix_form_compiler_set_line_is_forwarded(tmp_path: Path) -> None:
+    """ADR-091 R5: ``compile.compiler`` takes a cross-toolchain prefix too."""
+    argv = _run(tmp_path, INPUT_SET="compile.compiler=aarch64-linux-gnu-\n")
+    assert _set_pairs(argv) == ["compile.compiler=aarch64-linux-gnu-"]
 
 
-def test_path_form_compiler_forwards_unchanged(tmp_path: Path) -> None:
-    """A full compiler path is forwarded verbatim, not treated as a prefix."""
-    argv = _run(tmp_path, INPUT_COMPILER="/usr/bin/g++")
-    assert _compile_sets(argv) == ['compile.compiler="/usr/bin/g++"']
-
-
-def test_single_line_options_are_shell_split_into_a_list(tmp_path: Path) -> None:
-    argv = _run(tmp_path, INPUT_COMPILE_OPTIONS='-DNAME="x" -fno-exceptions')
-    (value,) = [v for v in _compile_sets(argv) if v.startswith("compile.options=")]
-    assert json.loads(value.removeprefix("compile.options=")) == shlex.split(
-        '-DNAME="x" -fno-exceptions'
-    )
-
-
-def test_multi_line_options_are_one_token_per_line(tmp_path: Path) -> None:
-    argv = _run(tmp_path, INPUT_COMPILE_OPTIONS="-DA\n-DB=2\n")
-    (value,) = [v for v in _compile_sets(argv) if v.startswith("compile.options=")]
-    assert json.loads(value.removeprefix("compile.options=")) == ["-DA", "-DB=2"]
-
-
-def test_sysroot_and_nostdinc_forward_as_typed_values(tmp_path: Path) -> None:
-    argv = _run(tmp_path, INPUT_SYSROOT="/opt/sysroot", INPUT_NOSTDINC="true")
-    sets = _compile_sets(argv)
-    assert 'compile.sysroot="/opt/sysroot"' in sets
-    assert "compile.nostdinc=true" in sets
-
-
-def test_a_windows_sysroot_survives_as_a_yaml_string(tmp_path: Path) -> None:
-    """A backslash and a bare number stay text: the value is a JSON string."""
-    argv = _run(tmp_path, INPUT_SYSROOT="C:\\sdk\\123")
-    (value,) = [v for v in _compile_sets(argv) if v.startswith("compile.sysroot=")]
-    assert json.loads(value.removeprefix("compile.sysroot=")) == "C:\\sdk\\123"
-
-
-def test_frontend_and_lang_forward(tmp_path: Path) -> None:
-    argv = _run(tmp_path, INPUT_FRONTEND="clang", INPUT_LANG="c")
-    sets = _compile_sets(argv)
-    assert 'compile.frontend="clang"' in sets
-    assert 'compile.lang="c"' in sets
-
-
-def test_dump_forwards_lang_and_frontend(tmp_path: Path) -> None:
-    """Dump forwards lang too (``add_compile_context_flags true``)."""
-    argv = _run(tmp_path, "dump", INPUT_FRONTEND="clang", INPUT_LANG="c")
-    assert 'compile.lang="c"' in _compile_sets(argv)
-    assert 'compile.frontend="clang"' in _compile_sets(argv)
-
-
-def test_derived_compile_sets_come_before_an_explicit_set_line(tmp_path: Path) -> None:
-    """``set:`` is appended after the derived overrides, so it wins (CLI last-wins)."""
-    argv = _run(
-        tmp_path,
-        INPUT_COMPILER="/usr/bin/g++",
-        INPUT_SET="compile.compiler=/usr/bin/clang++\n",
-    )
-    sets = _set_pairs(argv)
-    assert sets == [
-        'compile.compiler="/usr/bin/g++"',
-        "compile.compiler=/usr/bin/clang++",
+def test_options_list_set_line_is_forwarded_verbatim(tmp_path: Path) -> None:
+    argv = _run(tmp_path, INPUT_SET='compile.options=["-DNAME=\\"x\\"", "-fno-exceptions"]\n')
+    (value,) = [v for v in _set_pairs(argv) if v.startswith("compile.options=")]
+    assert json.loads(value.removeprefix("compile.options=")) == [
+        '-DNAME="x"',
+        "-fno-exceptions",
     ]
 
 
-def test_dump_applies_set_lines_after_its_compile_inputs(tmp_path: Path) -> None:
+def test_sysroot_and_nostdinc_set_lines_are_forwarded(tmp_path: Path) -> None:
+    argv = _run(
+        tmp_path,
+        INPUT_SET='compile.sysroot="/opt/sysroot"\ncompile.nostdinc=true\n',
+    )
+    assert _set_pairs(argv) == [
+        'compile.sysroot="/opt/sysroot"',
+        "compile.nostdinc=true",
+    ]
+
+
+def test_lang_and_frontend_set_lines_are_forwarded(tmp_path: Path) -> None:
+    argv = _run(
+        tmp_path,
+        INPUT_SET='compile.frontend="clang"\ncompile.lang="c"\n',
+    )
+    assert _set_pairs(argv) == ['compile.frontend="clang"', 'compile.lang="c"']
+
+
+def test_dump_forwards_set_lines(tmp_path: Path) -> None:
     argv = _run(
         tmp_path,
         "dump",
-        INPUT_SYSROOT="/opt/sysroot",
-        INPUT_SET="debug.dwarf_only=true\n",
+        INPUT_SET='compile.frontend="clang"\ncompile.lang="c"\n',
     )
-    sets = _set_pairs(argv)
-    assert sets == ['compile.sysroot="/opt/sysroot"', "debug.dwarf_only=true"]
+    assert _set_pairs(argv) == ['compile.frontend="clang"', 'compile.lang="c"']
 
 
 def test_set_on_dump_is_no_longer_refused(tmp_path: Path) -> None:
@@ -177,14 +173,13 @@ def test_set_on_deps_tree_is_still_refused(tmp_path: Path) -> None:
     )
 
 
-def test_no_overlay_temp_file_is_written_for_compile_inputs(tmp_path: Path) -> None:
+def test_no_overlay_temp_file_is_written_for_set_compile_lines(tmp_path: Path) -> None:
     """The deleted overlay wrote ``abicheck-compile-context.*`` under RUNNER_TEMP."""
     runner_temp = tmp_path / "runner_temp"
     runner_temp.mkdir()
     argv = _run(
         tmp_path,
-        INPUT_COMPILER="/usr/bin/g++",
-        INPUT_SYSROOT="/opt/sysroot",
+        INPUT_SET="compile.compiler=/usr/bin/g++\ncompile.sysroot=\"/opt/sysroot\"\n",
         RUNNER_TEMP=str(runner_temp),
     )
     assert not any(
