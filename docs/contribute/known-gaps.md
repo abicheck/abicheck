@@ -442,6 +442,13 @@ implemented; D18 is partial. Owner: `storage/`; per-item status in the
 - [Re-scoping a cache-reloaded snapshot keeps typedefs that scoping the fresh extraction drops](known-gaps/rescoping-a-cache-reloaded-snapshot-keeps-typedefs-a-fresh-scope-drops.md)  
   **Status (2026-10-22): OPEN.** Warm `resolve_input` runs now reproduce cold output (finished-tier misses re-extract); the round-trip asymmetry itself is unfixed.
 
+#### Snapshot write memory
+
+`perf` — Writing a snapshot still builds the whole encoded document tree (A2.2's remaining half).
+
+- [Snapshot write still builds the whole document tree](known-gaps/snapshot-write-still-builds-the-whole-document-tree.md)  
+  **Status (2026-10-31): OPEN.** The text stage streams. The tree build is the whole remaining write peak (39.8 of 39.9 MiB on a 23.9 MB libstdc++ dump).
+
 #### Bundle and multi-library memory
 
 `perf` — Three retention costs on the multi-library path: `read_bundle_facts_package` holds raw JSON and decoded snapshots together, every member snapshot stores its own copy of the shared header evidence, and `--bundle-facts-out` pins OLD snapshots per member.

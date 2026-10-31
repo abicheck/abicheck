@@ -191,10 +191,48 @@ See "Landed in Phase 1" below.
   analyses read, one matched library pair at a time, through a digest-keyed
   (`evidence`) decoded-section cache.
 - **A2.2** Streaming object encoding replaces whole-document `asdict()` +
-  one JSON string.
+  one JSON string. **Half implemented (status 2026-10-31).** The *string*
+  half is done: `write_snapshot`/`write_snapshot_compact`/bundle writes
+  stream `json_stream.iter_json_*` fragments through
+  `snapshot_stream_write.write_snapshot_text_stream`, so no whole JSON string
+  or its bytes is held (zstd one-shot only when the frame must declare its
+  size). The `asdict()` half has been replaced by `snapshot_encode`'s fused
+  per-class encoder, but it still builds the **whole document tree** before
+  serializing. Measured 2026-10-31 on a `libstdc++.so.6` dump (23.9 MB JSON,
+  `tracemalloc` peak): building the sectioned tree peaks at 39.8 MiB in
+  1.62 s, and the full uncompressed write peaks at 39.9 MiB in 3.53 s. The
+  streamed text stage adds about 0.1 MiB, and its output is byte-identical
+  to the stored file. All of the remaining write peak is the tree. Emitting
+  it per field would mean reordering about 12 whole-document post-passes
+  (`encode_entity_ids`, `encode_fact_fields`, `_compact_elf_symbols`,
+  `encode_surface_graph`, `to_sectioned_document`, ...), which read and
+  rewrite sibling keys, while keeping the output byte-identical. That is not
+  attempted here; see `known-gaps.md` "Snapshot write still builds the whole
+  document tree".
 - **A2.3** The snapshot cache moves onto the content-addressed store, keyed
-  per ADR-062 D11, with a byte-quota LRU.
+  per ADR-062 D11, with a byte-quota LRU. **Eviction implemented
+  (2026-10-31).** `storage/byte_quota_lru.py` replaces the dump cache's
+  100-entry count with a per-tier byte quota (`store.MAX_BYTES`, 4 GiB,
+  internal policy like D12). It evicts LRU-by-mtime, breaks ties by name, and
+  never evicts the entry just written. It also sweeps `.<name>.*.tmp` residue
+  that a crashed write leaves behind once that residue is over an hour old.
+  The key was already content-based per D11 (`workflows/dump/cache/key.py`:
+  binary/input digests, contract, generations, profile).
+  **Still open:** moving the entries from whole-snapshot files onto the
+  package `ObjectStore`. That move gives per-section reuse. It depends on
+  A2.1's lazy section loading, which another workstream owns, because a
+  per-section cache entry is only cheaper if a hit can load fewer sections.
+  Tests: `tests/test_byte_quota_lru.py` runs random access sequences against
+  an independent `OrderedDict` LRU model. It also enumerates an unlink
+  failure at each victim and checks stale and live temp residue.
 - **A2.4** Optional, rebuildable SQLite indexes; never canonical truth.
+  **Deferred (2026-10-31): no query consumer.** Every current reader opens a
+  package by manifest and digest (`read_project_manifest`,
+  `ObjectStore.get`), and no code path searches across snapshots or
+  packages by entity. An index without a reader would be a second, unused
+  copy to keep consistent. Revisit when a cross-package query appears, such
+  as "which stored baselines export symbol X". `package.py`'s
+  `indexes/index.sqlite` layout slot stays reserved.
 - **A2.5** **Measured**: peak RSS for a project comparison no longer scales
   with the total decoded size of the package.
 
