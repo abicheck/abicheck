@@ -159,17 +159,12 @@ def test_action_discovered_config_cannot_load_records_into_overlay(
         f"acknowledgment:\n  file: {records}\n  unacknowledged_additions: block\n",
         encoding="utf-8",
     )
-    capture = tmp_path / "captured-overlay.yml"
-    bindir = _capture_stub(tmp_path, capture)
-    env = {**_compare_env(tmp_path), "INPUT_FRONTEND": "castxml"}
-
-    _run_action(tmp_path, env, bindir)
-
-    assert capture.is_file(), "the Action never handed the CLI a --config overlay"
-    # The overlay merge must have run against this checkout's code, or the
-    # assertions below would be checking the installed package instead.
-    probe = subprocess.run(
-        [sys.executable, "-c", "import abicheck; print(abicheck.__file__)"],
+    old = _lib(tmp_path / "old.so", "int f(int x){return x+1;}\n")
+    new = _lib(tmp_path / "new.so", "int f(int x){return x+1;}\n")
+    result = subprocess.run(
+        abicheck_command(
+            "compare", str(old), str(new), "--set", 'compile.frontend="castxml"'
+        ),
         cwd=tmp_path,
         capture_output=True,
         text=True,

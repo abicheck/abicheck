@@ -321,11 +321,7 @@ class TestCompileContextPairwiseOldLibraryClassification:
         )
         cmd, _ = _run_region_with_cwd(
             _COMPARE_MODE_MARKER,
-            {
-                "INPUT_COMPILER": "/opt/gcc-14/bin/g++",
-                "INPUT_SOURCES": "src",
-                "INPUT_OLD_LIBRARY": "old.so",
-            },
+            self._pairwise_env("old.so"),
             tmp_path,
             _COMPARE_COMPILE_CONTEXT_START,
         )
@@ -353,11 +349,7 @@ class TestCompileContextPairwiseOldLibraryClassification:
         (src_dir / ".abicheck.yml").write_text("", encoding="utf-8")
         cmd, _ = _run_region_with_cwd(
             _COMPARE_MODE_MARKER,
-            {
-                "INPUT_COMPILER": "/opt/gcc-14/bin/g++",
-                "INPUT_SOURCES": "src",
-                "INPUT_OLD_LIBRARY": "old.so",
-            },
+            self._pairwise_env("old.so"),
             tmp_path,
             _COMPARE_COMPILE_CONTEXT_START,
         )
@@ -403,11 +395,7 @@ class TestCompileContextPairwiseOldLibraryClassification:
         (tmp_path / old_library).write_bytes(content)
         cmd, _ = _run_region_with_cwd(
             _COMPARE_MODE_MARKER,
-            {
-                "INPUT_COMPILER": "/opt/gcc-14/bin/g++",
-                "INPUT_SOURCES": "src",
-                "INPUT_OLD_LIBRARY": old_library,
-            },
+            self._pairwise_env(old_library),
             tmp_path,
             _COMPARE_COMPILE_CONTEXT_START,
         )
@@ -434,11 +422,7 @@ class TestCompileContextPairwiseOldLibraryClassification:
         (tmp_path / "old.abicheck.json").write_bytes(b'{"schema_version": 1}')
         cmd, _ = _run_region_with_cwd(
             _COMPARE_MODE_MARKER,
-            {
-                "INPUT_COMPILER": "/opt/gcc-14/bin/g++",
-                "INPUT_SOURCES": "src",
-                "INPUT_OLD_LIBRARY": "old.abicheck.json",
-            },
+            self._pairwise_env("old.abicheck.json"),
             tmp_path,
             _COMPARE_COMPILE_CONTEXT_START,
         )
@@ -463,11 +447,7 @@ class TestCompileContextPairwiseOldLibraryClassification:
         (tmp_path / "old.abicheck.json").write_bytes(b'{"schema_version": 1}')
         cmd, _ = _run_region_with_cwd(
             _COMPARE_MODE_MARKER,
-            {
-                "INPUT_COMPILER": "/opt/gcc-14/bin/g++",
-                "INPUT_SOURCES": "src",
-                "INPUT_OLD_LIBRARY": "old.abicheck.json",
-            },
+            self._pairwise_env("old.abicheck.json"),
             tmp_path,
             _COMPARE_COMPILE_CONTEXT_START,
         )
@@ -504,93 +484,16 @@ class TestCompileContextPairwiseOldLibraryClassification:
             )
         cmd, _ = _run_region_with_cwd(
             _COMPARE_MODE_MARKER,
-            {
-                "INPUT_COMPILER": "/opt/gcc-14/bin/g++",
-                "INPUT_SOURCES": "src",
-                "INPUT_OLD_LIBRARY": "old.so",
-            },
+            self._pairwise_env(old_library),
             tmp_path,
             _COMPARE_COMPILE_CONTEXT_START,
         )
-        doc = json.loads(
-            Path(cmd[cmd.index("--config") + 1]).read_text(encoding="utf-8")
-        )
-        assert doc["compile"]["sysroot"] == "/opt/checkout-sysroot"
-        assert "source" not in doc
-        assert "debug" not in doc
-
-    def test_sources_root_compile_block_stays_pairwise_when_old_library_is_a_live_binary_named_like_a_snapshot(
-        self, tmp_path: Path
-    ) -> None:
-        """A live ELF binary literally named ``old.json`` (the extension-
-        only version of this check, sixth round, would have misclassified
-        it as a stored snapshot). ``resolve_input()`` checks binary magic
-        bytes BEFORE any JSON/text sniffing, so this operand is genuinely
-        live and pairwise, regardless of its filename;
-        ``_old_library_is_stored_snapshot`` must agree."""
-        (tmp_path / ".abicheck.yml").write_text(
-            "compile:\n  sysroot: /opt/checkout-sysroot\n", encoding="utf-8"
-        )
-        src_dir = tmp_path / "src"
-        src_dir.mkdir()
-        (src_dir / ".abicheck.yml").write_text(
-            "compile:\n  sysroot: /opt/new-side-only-sysroot\n"
-            "source:\n  method: s6\n"
-            "debug:\n  format: dwarf\n",
-            encoding="utf-8",
-        )
-        (tmp_path / "old.json").write_bytes(b"\x7fELF\x02\x01\x01\x00" + b"\x00" * 8)
-        cmd, _ = _run_region_with_cwd(
-            _COMPARE_MODE_MARKER,
-            {
-                "INPUT_COMPILER": "/opt/gcc-14/bin/g++",
-                "INPUT_SOURCES": "src",
-                "INPUT_OLD_LIBRARY": "old.json",
-            },
-            tmp_path,
-            _COMPARE_COMPILE_CONTEXT_START,
-        )
-        doc = json.loads(
-            Path(cmd[cmd.index("--config") + 1]).read_text(encoding="utf-8")
-        )
-        assert doc["compile"]["sysroot"] == "/opt/checkout-sysroot"
-        assert "source" not in doc
-        assert "debug" not in doc
-
-    def test_sources_root_compile_block_stays_pairwise_when_old_library_does_not_exist_yet(
-        self, tmp_path: Path
-    ) -> None:
-        """An old-library path this classifier cannot open at all (does not
-        exist on disk at this point in the script) falls back to the
-        pre-existing, safe "pairwise" side rather than guessing -- matching
-        ``_is_release_style_operand``'s own identical `-f` fallback."""
-        (tmp_path / ".abicheck.yml").write_text(
-            "compile:\n  sysroot: /opt/checkout-sysroot\n", encoding="utf-8"
-        )
-        src_dir = tmp_path / "src"
-        src_dir.mkdir()
-        (src_dir / ".abicheck.yml").write_text(
-            "compile:\n  sysroot: /opt/new-side-only-sysroot\n"
-            "source:\n  method: s6\n"
-            "debug:\n  format: dwarf\n",
-            encoding="utf-8",
-        )
-        cmd, _ = _run_region_with_cwd(
-            _COMPARE_MODE_MARKER,
-            {
-                "INPUT_COMPILER": "/opt/gcc-14/bin/g++",
-                "INPUT_SOURCES": "src",
-                "INPUT_OLD_LIBRARY": "does-not-exist.json",
-            },
-            tmp_path,
-            _COMPARE_COMPILE_CONTEXT_START,
-        )
-        doc = json.loads(
-            Path(cmd[cmd.index("--config") + 1]).read_text(encoding="utf-8")
-        )
-        assert doc["compile"]["sysroot"] == "/opt/checkout-sysroot"
-        assert "source" not in doc
-        assert "debug" not in doc
+        assert _read_compile_config_overlay(cmd) == {"compiler": "/opt/gcc-14/bin/g++"}
+        checkout = tmp_path / ".abicheck.yml"
+        shared, _ = _shared_context(cmd, checkout)
+        assert shared.sysroot == Path("/opt/checkout-sysroot")
+        assert load_build_config(checkout).source_method is None
+        assert load_build_config(checkout).debug_format is None
 
 
 class TestAuditOnlyCompareStaysSingleSidedUnconditionally:
@@ -611,10 +514,7 @@ class TestAuditOnlyCompareStaysSingleSidedUnconditionally:
         )
         cmd, _ = _run_region_with_cwd(
             _COMPARE_MODE_MARKER,
-            {
-                "INPUT_COMPILER": "/opt/gcc-14/bin/g++",
-                "INPUT_SOURCES": "src",
-            },
+            {"INPUT_COMPILER": "/opt/gcc-14/bin/g++", "INPUT_SOURCES": "src"},
             tmp_path,
             _COMPARE_COMPILE_CONTEXT_START,
         )

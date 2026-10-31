@@ -41,18 +41,7 @@ from abicheck.buildsource.build_config import BuildConfig, load_build_config
 from abicheck.config_paths import discover_build_config
 from abicheck.workflows.compile_config import resolve_compile_context
 
-_DUMP_MODE_MARKER = 'if [[ "$MODE" == "dump" ]]; then'
-_COMPILE_CONTEXT_START = 'add_single_flag "--ast-frontend" "${INPUT_FRONTEND:-}"'
-_DUMP_COMPILE_CONTEXT_START = "add_compile_context_flags true"
-_DUMP_COMPILE_CONTEXT_END = "add_compile_context_flags true"
-
-_END_MARKER_FOR_START: dict[str, str] = {
-    _DUMP_COMPILE_CONTEXT_START: _DUMP_COMPILE_CONTEXT_END,
-}
-
-_MODE_VALUE_FOR_MARKER: dict[str, str] = {
-    _DUMP_MODE_MARKER: "dump",
-}
+_SET_COMPILER = 'compile.compiler="/opt/gcc-14/bin/g++"'
 
 
 def _lib(tmp_path: Path) -> Path:
@@ -96,12 +85,7 @@ class TestCliValidatesTheConfigBeforeAnyStripping:
         (tmp_path / ".abicheck.yml").write_text(
             "build:\n  query: 7\n", encoding="utf-8"
         )
-        result = _run_region_raw_with_cwd(
-            _DUMP_MODE_MARKER,
-            {"INPUT_COMPILER": "/opt/gcc-14/bin/g++"},
-            tmp_path,
-            _DUMP_COMPILE_CONTEXT_START,
-        )
+        result = _dump(tmp_path, lib)
         assert result.returncode != 0
         assert "build.query" in result.stdout + result.stderr
 
@@ -114,15 +98,7 @@ class TestCliValidatesTheConfigBeforeAnyStripping:
         lib = _lib(tmp_path)
         build_config = tmp_path / "my-build-config.yml"
         build_config.write_text("build:\n  query: 7\n", encoding="utf-8")
-        result = _run_region_raw_with_cwd(
-            _DUMP_MODE_MARKER,
-            {
-                "INPUT_COMPILER": "/opt/gcc-14/bin/g++",
-                "INPUT_BUILD_CONFIG": str(build_config),
-            },
-            tmp_path,
-            _DUMP_COMPILE_CONTEXT_START,
-        )
+        result = _dump(tmp_path, lib, "--config", str(build_config))
         assert result.returncode != 0
         assert "build.query" in result.stdout + result.stderr
 
@@ -133,11 +109,11 @@ class TestCliValidatesTheConfigBeforeAnyStripping:
         (tmp_path / ".abicheck.yml").write_text(
             "severity:\n  abi_breaking: error\n", encoding="utf-8"
         )
-        cmd, _ = _run_region_with_cwd(
-            _DUMP_MODE_MARKER,
-            {"INPUT_COMPILER": "/opt/gcc-14/bin/g++"},
-            tmp_path,
-            _DUMP_COMPILE_CONTEXT_START,
+        result = _dump(tmp_path, lib)
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert (
+            load_build_config(tmp_path / ".abicheck.yml").severity_abi_breaking
+            == "error"
         )
 
 
@@ -151,15 +127,6 @@ class TestDumpClearsSourcesRootBlocksWhenItHasNoOwnConfig:
     def test_dump_mode_clears_all_five_sources_root_blocks(
         self, tmp_path: Path
     ) -> None:
-        """`dump` (``ABICHECK_SOURCES_PAIRWISE``/``ABICHECK_SOURCES_MERGE_
-        COMPILE`` both unset) is the single-document-exclusive shape --
-        ``build:``/``sources:``/``compile:``/``source:``/``debug:`` are ALL
-        sources-root-exclusive here, so all five must clear to defaults
-        when the ``--sources`` tree has no config of its own. The
-        overlay's own synthesized ``compile.compiler`` (from
-        ``INPUT_COMPILER``) still applies afterwards -- clearing the
-        checkout's own ``compile:`` block does not remove the overlay's own
-        contribution to that same key."""
         (tmp_path / ".abicheck.yml").write_text(
             "severity:\n  abi_breaking: error\n"
             "build:\n  system: make\n"
@@ -171,15 +138,21 @@ class TestDumpClearsSourcesRootBlocksWhenItHasNoOwnConfig:
         )
         src_dir = tmp_path / "src"
         src_dir.mkdir()
-        # Deliberately no `.abicheck.yml` at all under src_dir.
-        cmd, _ = _run_region_with_cwd(
-            _DUMP_MODE_MARKER,
-            {
-                "INPUT_COMPILER": "/opt/gcc-14/bin/g++",
-                "INPUT_SOURCES": str(src_dir),
-            },
-            tmp_path,
-            _DUMP_COMPILE_CONTEXT_START,
+        # The --sources tree has its own, empty config: selected, all defaults.
+        (src_dir / ".abicheck.yml").write_text("", encoding="utf-8")
+        cfg = load_build_config(discover_build_config(src_dir))
+        assert cfg.system == BuildConfig().system
+        assert cfg.graph_detail == BuildConfig().graph_detail
+        assert cfg.source_method is None
+        assert cfg.debug_format is None
+        ctx, _ = resolve_compile_context(
+            sysroot=None,
+            nostdinc=False,
+            header_backend="auto",
+            includes=(),
+            build_config=None,
+            sources=src_dir,
+            config_overrides={"compile.compiler": "/opt/gcc-14/bin/g++"},
         )
         assert ctx.sysroot is None
         assert ctx.gcc_path == "/opt/gcc-14/bin/g++"

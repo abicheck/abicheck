@@ -951,7 +951,7 @@ class TestCompileContextForwardingParity:
         fake_python3.chmod(0o755)
         env = {
             **_FULL_ENV,
-            "INPUT_GCC_OPTIONS": "-DFOO=1 -DBAR=2",
+            "INPUT_COMPILE_OPTIONS": "-DFOO=1 -DBAR=2",
             "PATH": f"{tmp_path}{os.pathsep}{os.environ.get('PATH', '')}",
         }
         tokens, _ = _run_region(
