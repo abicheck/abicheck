@@ -15,10 +15,10 @@ from __future__ import annotations
 
 import shutil
 import subprocess
-import sys
 from pathlib import Path
 
 import pytest
+from _abicheck_subprocess import abicheck_command, abicheck_env
 
 pytestmark = pytest.mark.integration
 
@@ -66,10 +66,7 @@ def _dump(
 ) -> tuple[subprocess.CompletedProcess[str], Path]:
     output = tmp_path / out
     result = subprocess.run(
-        [
-            sys.executable,
-            "-m",
-            "abicheck",
+        abicheck_command(
             "dump",
             str(lib),
             "-H",
@@ -79,11 +76,12 @@ def _dump(
             *extra,
             "-o",
             str(output),
-        ],
+        ),
         capture_output=True,
         text=True,
         check=False,
         cwd=tmp_path,
+        env=abicheck_env(),
     )
     return result, output
 
