@@ -1063,6 +1063,12 @@ the "live and stored operands render different documents" known gap closes.
 It is a breaking change to a published JSON shape, taken pre-1.0 under this
 ADR's one-product rule rather than kept as a second shape.
 
+**Follow-up (2026-10-31): release schema `2.6`.** Additive: each
+`libraries[]` entry carries `old_dependency_info`/`new_dependency_info`, the
+member's `--follow-deps` walk under the single-pair report's keys and shape,
+present only when the walk was requested. The same release document serves
+both operands; a stored operand records no walk, so it carries neither key.
+
 ## Relationship to existing ADRs
 
 | ADR | Effect |
